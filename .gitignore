@@ -1,0 +1,82 @@
+# =============================================================================
+# TrussC .gitignore
+# =============================================================================
+
+# ビルド関連（共通）
+build/
+out/
+cmake-build-*/
+*.a
+*.o
+*.d
+*.lib
+*.obj
+*.exe
+*.dll
+*.dylib
+*.so
+*.pdb
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# =============================================================================
+# IDE / Editor
+# =============================================================================
+
+# Visual Studio Code
+.vscode/
+
+# Visual Studio
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcuserstate
+
+# JetBrains (CLion)
+.idea/
+*.iml
+
+# =============================================================================
+# CMake
+# =============================================================================
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# =============================================================================
+# Examples
+# =============================================================================
+
+# examples 内のビルド成果物を除外
+examples/*/build/
+examples/*/bin/
+examples/*/out/
+examples/*/*.xcodeproj/
+examples/*/*.sln
+examples/*/*.vcxproj
+
+# ただし src/ と data/ は保持
+!examples/*/src/
+!examples/*/data/
