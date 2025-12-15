@@ -23,6 +23,9 @@
 // TrussC 数学ライブラリ
 #include "tcMath.h"
 
+// TrussC ノイズ関数
+#include "tc/math/tcNoise.h"
+
 // TrussC カラーライブラリ
 #include "tcColor.h"
 
