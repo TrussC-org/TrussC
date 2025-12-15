@@ -1521,6 +1521,9 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 // TrussC メッシュ
 #include "tc/graphics/tcMesh.h"
 
+// TrussC 画像
+#include "tc/graphics/tcImage.h"
+
 // TrussC 3Dプリミティブ
 #include <map>
 #include "tc/3d/tcPrimitives.h"

@@ -1,0 +1,1 @@
+Place .icns file here for custom app icon
