@@ -114,10 +114,15 @@ examples/                             # oFと同じフォルダ構造
 ## ビルド
 
 ```bash
-cd examples/04_color/build
+cd examples/graphics/colorExample/build
 cmake ..
 cmake --build .
 ```
+
+## 関連ドキュメント
+
+- [DESIGN.md](DESIGN.md) - 設計ドキュメント（Loop Architecture, 3D Projection等）
+- [ROADMAP.md](ROADMAP.md) - サンプル実装ロードマップ
 
 ## 参考
 
