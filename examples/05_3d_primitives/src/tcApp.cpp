@@ -62,18 +62,10 @@ void tcApp::update() {
 void tcApp::draw() {
     tc::clear(0.1f, 0.1f, 0.12f);
 
-    // 3D描画モードを有効化（深度テスト ON）
-    tc::enable3D();
+    // 3D描画モードを有効化（パースペクティブ + 深度テスト）
+    tc::enable3DPerspective(tc::radians(45.0f), 0.1f, 100.0f);
 
     float t = tc::getElapsedTime();
-
-    // 6つのプリミティブを3x2グリッドに配置
-    float screenW = tc::getWindowWidth();
-    float screenH = tc::getWindowHeight();
-
-    // マウスYでZ位置を調整（画面中央が-500、カメラの前）
-    float mouseY = tc::getGlobalMouseY();
-    float zOffset = -500.0f + (screenH / 2 - mouseY) * 2.0f;
 
     // oFと同じ回転計算（マウス押下時は停止）
     float spinX = 0, spinY = 0;
@@ -85,16 +77,17 @@ void tcApp::draw() {
     struct PrimitiveInfo {
         tc::Mesh* mesh;
         const char* name;
-        float x, y;
+        float x, y;  // 3D空間での位置（-1〜1 範囲）
     };
 
+    // 3x2 グリッドに配置（パースペクティブ空間）
     PrimitiveInfo primitives[] = {
-        { &plane,     "Plane",      screenW * 1/6.f, screenH * 1/3.f },
-        { &box,       "Box",        screenW * 3/6.f, screenH * 1/3.f },
-        { &sphere,    "Sphere",     screenW * 5/6.f, screenH * 1/3.f },
-        { &icoSphere, "IcoSphere",  screenW * 1/6.f, screenH * 2/3.f },
-        { &cylinder,  "Cylinder",   screenW * 3/6.f, screenH * 2/3.f },
-        { &cone,      "Cone",       screenW * 5/6.f, screenH * 2/3.f },
+        { &plane,     "Plane",      -3.0f, 1.5f },
+        { &box,       "Box",         0.0f, 1.5f },
+        { &sphere,    "Sphere",      3.0f, 1.5f },
+        { &icoSphere, "IcoSphere",  -3.0f, -1.5f },
+        { &cylinder,  "Cylinder",    0.0f, -1.5f },
+        { &cone,      "Cone",        3.0f, -1.5f },
     };
 
     // 各プリミティブを描画
@@ -102,11 +95,14 @@ void tcApp::draw() {
         auto& p = primitives[i];
 
         tc::pushMatrix();
-        tc::translate(p.x, p.y, zOffset);
+        tc::translate(p.x, p.y, -8.0f);
 
         // 3D回転（oFと同じようにX軸とY軸で回転）
         tc::rotateY(spinX);
         tc::rotateX(spinY);
+
+        // スケールを小さく（パースペクティブ用）
+        tc::scale(0.01f, 0.01f, 0.01f);
 
         // 塗りつぶし
         if (bFill) {
@@ -127,10 +123,6 @@ void tcApp::draw() {
         }
 
         tc::popMatrix();
-
-        // ラベル
-        tc::setColor(1.0f, 1.0f, 1.0f);
-        tc::drawBitmapString(p.name, p.x - 30, p.y + 100);
     }
 
     // 2D描画に戻す
@@ -143,9 +135,6 @@ void tcApp::draw() {
     tc::drawBitmapString("1-4: Resolution (" + tc::toString(resolution) + ")", 10, y); y += 16;
     tc::drawBitmapString("s: Fill " + string(bFill ? "[ON]" : "[OFF]"), 10, y); y += 16;
     tc::drawBitmapString("w: Wireframe " + string(bWireframe ? "[ON]" : "[OFF]"), 10, y); y += 16;
-    tc::drawBitmapString("Mouse Y: Z offset", 10, y); y += 16;
-    y += 8;
-    tc::drawBitmapString("Z: " + tc::toString(zOffset, 0), 10, y); y += 16;
     tc::drawBitmapString("FPS: " + tc::toString(tc::getFrameRate(), 1), 10, y);
 }
 

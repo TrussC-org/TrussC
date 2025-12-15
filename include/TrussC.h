@@ -439,10 +439,16 @@ inline void scale(float s) {
     sgl_scale(s, s, 1.0f);
 }
 
-// スケール（非均一）
+// スケール（非均一 2D）
 inline void scale(float sx, float sy) {
     internal::currentMatrix = internal::currentMatrix * Mat4::scale(sx, sy, 1.0f);
     sgl_scale(sx, sy, 1.0f);
+}
+
+// スケール（非均一 3D）
+inline void scale(float sx, float sy, float sz) {
+    internal::currentMatrix = internal::currentMatrix * Mat4::scale(sx, sy, sz);
+    sgl_scale(sx, sy, sz);
 }
 
 // 現在の変換行列を取得
@@ -473,9 +479,29 @@ inline void enable3D() {
     }
 }
 
+// 3D描画モード（パースペクティブ）を有効化
+// fov: 視野角（ラジアン）, near/far: クリップ面
+inline void enable3DPerspective(float fovY = 0.785f, float nearZ = 0.1f, float farZ = 1000.0f) {
+    if (internal::pipeline3dInitialized) {
+        sgl_load_pipeline(internal::pipeline3d);
+    }
+    // パースペクティブ投影を設定
+    sgl_matrix_mode_projection();
+    sgl_load_identity();
+    float dpiScale = sapp_dpi_scale();
+    float w = (float)sapp_width() / dpiScale;
+    float h = (float)sapp_height() / dpiScale;
+    float aspect = w / h;
+    sgl_perspective(fovY, aspect, nearZ, farZ);
+    sgl_matrix_mode_modelview();
+    sgl_load_identity();
+}
+
 // 3D描画モードを無効化（デフォルトの2D描画に戻る）
 inline void disable3D() {
     sgl_load_default_pipeline();
+    // 2D用の正射影に戻す
+    beginFrame();
 }
 
 // ---------------------------------------------------------------------------
