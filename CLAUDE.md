@@ -81,13 +81,17 @@ src/
 ├── sokol_impl.cpp                # sokol実装（他プラットフォーム）
 └── tcPlatform_mac.mm             # macOS固有実装
 
-examples/
-├── 00_base/                      # 最小構成
-├── 01_shapes/                    # 図形描画
-├── 02_nodes/                     # シーングラフ
-├── 03_math/                      # 数学ライブラリ
-├── 04_color/                     # 色空間・補間
-└── ...
+examples/                             # oFと同じフォルダ構造
+├── templates/
+│   └── emptyExample/             # 最小構成テンプレート
+├── graphics/
+│   ├── graphicsExample/          # 図形描画
+│   └── colorExample/             # 色空間・補間
+├── 3d/
+│   ├── ofNodeExample/            # シーングラフ
+│   └── 3DPrimitivesExample/      # 3Dプリミティブ
+└── math/
+    └── vectorMathExample/        # 数学ライブラリ
 ```
 
 ## 命名規則

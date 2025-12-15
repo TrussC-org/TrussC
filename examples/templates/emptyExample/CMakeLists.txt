@@ -3,7 +3,7 @@
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.20)
-project(00_base LANGUAGES C CXX OBJC OBJCXX)
+project(emptyExample LANGUAGES C CXX OBJC OBJCXX)
 
 # C++20 を使用
 set(CMAKE_CXX_STANDARD 20)

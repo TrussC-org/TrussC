@@ -1,9 +1,9 @@
 # =============================================================================
-# 01_shapes - 基本図形描画サンプル
+# 04_color - カラーライブラリサンプル
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.20)
-project(01_shapes LANGUAGES C CXX OBJC OBJCXX)
+project(colorExample LANGUAGES C CXX OBJC OBJCXX)
 
 # C++20 を使用
 set(CMAKE_CXX_STANDARD 20)
@@ -13,7 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # TrussC を探す（examples/ 内から親ディレクトリを参照）
 # =============================================================================
 set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../..")
-message(STATUS "[01_shapes] TrussC: ${TRUSSC_DIR}")
+message(STATUS "[04_color] TrussC: ${TRUSSC_DIR}")
 
 # TrussC を追加
 add_subdirectory(${TRUSSC_DIR} ${CMAKE_BINARY_DIR}/TrussC)
@@ -48,14 +48,12 @@ if(APPLE)
     # アイコン設定（icns/にあれば使用、なければデフォルト）
     trussc_setup_icon(${PROJECT_NAME})
 
-    # .app の出力先
     set_target_properties(${PROJECT_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/bin"
     )
 else()
-    # Windows / Linux
     set_target_properties(${PROJECT_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/bin"

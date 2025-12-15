@@ -1,9 +1,9 @@
 # =============================================================================
-# 04_color - カラーライブラリサンプル
+# 05_3d_primitives - 3Dプリミティブサンプル
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.20)
-project(04_color LANGUAGES C CXX OBJC OBJCXX)
+project(3DPrimitivesExample LANGUAGES C CXX OBJC OBJCXX)
 
 # C++20 を使用
 set(CMAKE_CXX_STANDARD 20)
@@ -13,7 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # TrussC を探す（examples/ 内から親ディレクトリを参照）
 # =============================================================================
 set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../..")
-message(STATUS "[04_color] TrussC: ${TRUSSC_DIR}")
+message(STATUS "[05_3d_primitives] TrussC: ${TRUSSC_DIR}")
 
 # TrussC を追加
 add_subdirectory(${TRUSSC_DIR} ${CMAKE_BINARY_DIR}/TrussC)
