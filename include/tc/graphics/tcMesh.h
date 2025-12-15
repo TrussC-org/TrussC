@@ -197,6 +197,67 @@ public:
         sgl_end();
     }
 
+    // ワイヤーフレーム描画（三角形のエッジをラインで描画）
+    void drawWireframe() const {
+        if (vertices_.empty()) return;
+
+        // 現在のモードが三角形系でない場合は通常のdrawを使う
+        if (mode_ != PrimitiveMode::Triangles &&
+            mode_ != PrimitiveMode::TriangleStrip &&
+            mode_ != PrimitiveMode::TriangleFan) {
+            draw();
+            return;
+        }
+
+        sgl_begin_lines();
+
+        if (hasIndices()) {
+            // インデックスを使う場合、三角形ごとにエッジを描画
+            for (size_t i = 0; i + 2 < indices_.size(); i += 3) {
+                unsigned int i0 = indices_[i];
+                unsigned int i1 = indices_[i + 1];
+                unsigned int i2 = indices_[i + 2];
+
+                if (i0 < vertices_.size() && i1 < vertices_.size() && i2 < vertices_.size()) {
+                    sgl_c4f(internal::currentR, internal::currentG,
+                            internal::currentB, internal::currentA);
+
+                    // エッジ 0-1
+                    sgl_v3f(vertices_[i0].x, vertices_[i0].y, vertices_[i0].z);
+                    sgl_v3f(vertices_[i1].x, vertices_[i1].y, vertices_[i1].z);
+
+                    // エッジ 1-2
+                    sgl_v3f(vertices_[i1].x, vertices_[i1].y, vertices_[i1].z);
+                    sgl_v3f(vertices_[i2].x, vertices_[i2].y, vertices_[i2].z);
+
+                    // エッジ 2-0
+                    sgl_v3f(vertices_[i2].x, vertices_[i2].y, vertices_[i2].z);
+                    sgl_v3f(vertices_[i0].x, vertices_[i0].y, vertices_[i0].z);
+                }
+            }
+        } else {
+            // インデックスなしの場合、3頂点ずつ三角形として処理
+            for (size_t i = 0; i + 2 < vertices_.size(); i += 3) {
+                sgl_c4f(internal::currentR, internal::currentG,
+                        internal::currentB, internal::currentA);
+
+                // エッジ 0-1
+                sgl_v3f(vertices_[i].x, vertices_[i].y, vertices_[i].z);
+                sgl_v3f(vertices_[i+1].x, vertices_[i+1].y, vertices_[i+1].z);
+
+                // エッジ 1-2
+                sgl_v3f(vertices_[i+1].x, vertices_[i+1].y, vertices_[i+1].z);
+                sgl_v3f(vertices_[i+2].x, vertices_[i+2].y, vertices_[i+2].z);
+
+                // エッジ 2-0
+                sgl_v3f(vertices_[i+2].x, vertices_[i+2].y, vertices_[i+2].z);
+                sgl_v3f(vertices_[i].x, vertices_[i].y, vertices_[i].z);
+            }
+        }
+
+        sgl_end();
+    }
+
 private:
     // Triangle Fan を triangles として描画
     void drawTriangleFan(bool useColors, bool useIndices) const {

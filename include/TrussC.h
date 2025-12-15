@@ -102,6 +102,10 @@ namespace internal {
     // ピクセルパーフェクトモード（座標系=フレームバッファサイズ）
     inline bool pixelPerfectMode = false;
 
+    // 3D描画用パイプライン（深度テスト + 背面カリング）
+    inline sgl_pipeline pipeline3d = {};
+    inline bool pipeline3dInitialized = false;
+
     // フレームレート計測用（10フレーム移動平均）
     inline double frameTimeBuffer[10] = {};
     inline int frameTimeIndex = 0;
@@ -170,10 +174,26 @@ inline void setup() {
         delete[] pixels;
         internal::fontInitialized = true;
     }
+
+    // 3D描画用パイプラインを作成（sokol-samples の sgl-sapp.c を参考）
+    if (!internal::pipeline3dInitialized) {
+        sg_pipeline_desc pip_desc = {};
+        pip_desc.cull_mode = SG_CULLMODE_NONE;  // カリングなし
+        pip_desc.depth.write_enabled = true;
+        pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+        pip_desc.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+        internal::pipeline3d = sgl_make_pipeline(&pip_desc);
+        internal::pipeline3dInitialized = true;
+    }
 }
 
 // sokol_gfx + sokol_gl を終了（cleanup コールバック内で呼ぶ）
 inline void cleanup() {
+    // 3Dパイプラインを解放
+    if (internal::pipeline3dInitialized) {
+        sgl_destroy_pipeline(internal::pipeline3d);
+        internal::pipeline3dInitialized = false;
+    }
     // フォントリソースを解放
     if (internal::fontInitialized) {
         sgl_destroy_pipeline(internal::fontPipeline);
@@ -212,15 +232,16 @@ inline void beginFrame() {
 
     if (internal::pixelPerfectMode) {
         // ピクセルパーフェクト: 座標系 = フレームバッファサイズ
-        // Retinaで 2560x1440 座標系になる
-        sgl_ortho(0.0f, (float)sapp_width(), (float)sapp_height(), 0.0f, -1.0f, 1.0f);
+        // near/far: 正の値で指定（OpenGL慣例）
+        // Z=0を含む範囲: near=-10000, far=10000 ではなく
+        // 対称な範囲を指定
+        sgl_ortho(0.0f, (float)sapp_width(), (float)sapp_height(), 0.0f, -10000.0f, 10000.0f);
     } else {
         // 論理座標系: DPIスケールを考慮
-        // Retinaでも 1280x720 座標系のまま
         float dpiScale = sapp_dpi_scale();
         float logicalWidth = (float)sapp_width() / dpiScale;
         float logicalHeight = (float)sapp_height() / dpiScale;
-        sgl_ortho(0.0f, logicalWidth, logicalHeight, 0.0f, -1.0f, 1.0f);
+        sgl_ortho(0.0f, logicalWidth, logicalHeight, 0.0f, -10000.0f, 10000.0f);
     }
 
     sgl_matrix_mode_modelview();
@@ -232,6 +253,9 @@ inline void clear(float r, float g, float b, float a = 1.0f) {
     sg_pass pass = {};
     pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
     pass.action.colors[0].clear_value = { r, g, b, a };
+    // 深度バッファもクリア（3D描画用）
+    pass.action.depth.load_action = SG_LOADACTION_CLEAR;
+    pass.action.depth.clear_value = 1.0f;
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
 }
@@ -362,8 +386,32 @@ inline void translate(float x, float y) {
     sgl_translate(x, y, 0.0f);
 }
 
-// 回転（ラジアン）
+// 3D移動
+inline void translate(float x, float y, float z) {
+    internal::currentMatrix = internal::currentMatrix * Mat4::translate(x, y, z);
+    sgl_translate(x, y, z);
+}
+
+// Z軸回転（ラジアン）
 inline void rotate(float radians) {
+    internal::currentMatrix = internal::currentMatrix * Mat4::rotateZ(radians);
+    sgl_rotate(radians, 0.0f, 0.0f, 1.0f);
+}
+
+// X軸回転（ラジアン）
+inline void rotateX(float radians) {
+    internal::currentMatrix = internal::currentMatrix * Mat4::rotateX(radians);
+    sgl_rotate(radians, 1.0f, 0.0f, 0.0f);
+}
+
+// Y軸回転（ラジアン）
+inline void rotateY(float radians) {
+    internal::currentMatrix = internal::currentMatrix * Mat4::rotateY(radians);
+    sgl_rotate(radians, 0.0f, 1.0f, 0.0f);
+}
+
+// Z軸回転（ラジアン）- 明示的
+inline void rotateZ(float radians) {
     internal::currentMatrix = internal::currentMatrix * Mat4::rotateZ(radians);
     sgl_rotate(radians, 0.0f, 0.0f, 1.0f);
 }
@@ -371,6 +419,18 @@ inline void rotate(float radians) {
 // 度数法でも回転できる
 inline void rotateDeg(float degrees) {
     rotate(degrees * PI / 180.0f);
+}
+
+inline void rotateXDeg(float degrees) {
+    rotateX(degrees * PI / 180.0f);
+}
+
+inline void rotateYDeg(float degrees) {
+    rotateY(degrees * PI / 180.0f);
+}
+
+inline void rotateZDeg(float degrees) {
+    rotateZ(degrees * PI / 180.0f);
 }
 
 // スケール（均一）
@@ -400,6 +460,22 @@ inline void resetMatrix() {
 inline void setMatrix(const Mat4& mat) {
     internal::currentMatrix = mat;
     syncMatrixToSokol();
+}
+
+// ---------------------------------------------------------------------------
+// 3D描画モード
+// ---------------------------------------------------------------------------
+
+// 3D描画モードを有効化（深度テスト + 背面カリング）
+inline void enable3D() {
+    if (internal::pipeline3dInitialized) {
+        sgl_load_pipeline(internal::pipeline3d);
+    }
+}
+
+// 3D描画モードを無効化（デフォルトの2D描画に戻る）
+inline void disable3D() {
+    sgl_load_default_pipeline();
 }
 
 // ---------------------------------------------------------------------------
@@ -1281,6 +1357,10 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 
 // TrussC メッシュ
 #include "tc/graphics/tcMesh.h"
+
+// TrussC 3Dプリミティブ
+#include <map>
+#include "tc/3d/tcPrimitives.h"
 
 // 短縮エイリアス
 namespace tc = trussc;
