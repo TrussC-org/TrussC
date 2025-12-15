@@ -7,3 +7,6 @@
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
+
+#define STB_PERLIN_IMPLEMENTATION
+#include "stb/stb_perlin.h"
