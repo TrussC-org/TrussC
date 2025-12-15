@@ -125,6 +125,9 @@ namespace internal {
     // 経過時間計測用
     inline std::chrono::high_resolution_clock::time_point startTime;
     inline bool startTimeInitialized = false;
+
+    // パス状態（FBO のためにスワップチェーンパスを一時中断するため）
+    inline bool inSwapchainPass = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +272,7 @@ inline void clear(float r, float g, float b, float a = 1.0f) {
     pass.action.depth.clear_value = 1.0f;
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
+    internal::inSwapchainPass = true;
 }
 
 // 画面クリア (グレースケール)
@@ -290,7 +294,39 @@ inline void clear(const Color& c) {
 inline void present() {
     sgl_draw();
     sg_end_pass();
+    internal::inSwapchainPass = false;
     sg_commit();
+}
+
+// スワップチェーンパス状態を取得（FBO 用）
+inline bool isInSwapchainPass() {
+    return internal::inSwapchainPass;
+}
+
+// スワップチェーンパスを一時中断（FBO 用）
+// FBO 描画前に呼んで、デフォルトコンテキストの内容を flush してからパスを終了する
+inline void suspendSwapchainPass() {
+    if (internal::inSwapchainPass) {
+        sgl_draw();  // デフォルトコンテキストの描画コマンドを flush
+        sg_end_pass();
+        internal::inSwapchainPass = false;
+    }
+}
+
+// スワップチェーンパスを再開（FBO 用）
+// FBO 描画後に呼んで、スワップチェーンへの描画を継続する
+inline void resumeSwapchainPass() {
+    if (!internal::inSwapchainPass) {
+        sg_pass pass = {};
+        pass.action.colors[0].load_action = SG_LOADACTION_LOAD;  // 既存の内容を保持
+        pass.action.depth.load_action = SG_LOADACTION_LOAD;
+        pass.swapchain = sglue_swapchain();
+        sg_begin_pass(&pass);
+        internal::inSwapchainPass = true;
+        // sokol_gl の状態をリセット
+        sgl_defaults();
+        beginFrame();  // 投影行列を再設定
+    }
 }
 
 // ---------------------------------------------------------------------------

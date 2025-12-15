@@ -126,6 +126,12 @@ public:
     void begin() {
         if (!allocated_) return;
 
+        // スワップチェーンパス中なら一時中断
+        wasInSwapchainPass_ = isInSwapchainPass();
+        if (wasInSwapchainPass_) {
+            suspendSwapchainPass();
+        }
+
         // オフスクリーンパスを開始
         sg_pass pass = {};
         pass.attachments.colors[0] = colorAttView_;
@@ -152,6 +158,12 @@ public:
     // 背景色を指定して描画開始
     void begin(float r, float g, float b, float a = 1.0f) {
         if (!allocated_) return;
+
+        // スワップチェーンパス中なら一時中断
+        wasInSwapchainPass_ = isInSwapchainPass();
+        if (wasInSwapchainPass_) {
+            suspendSwapchainPass();
+        }
 
         sg_pass pass = {};
         pass.attachments.colors[0] = colorAttView_;
@@ -186,6 +198,11 @@ public:
         // デフォルトコンテキストに戻す
         sgl_set_context(sgl_default_context());
         active_ = false;
+
+        // スワップチェーンパスを再開（元々パス中だった場合）
+        if (wasInSwapchainPass_) {
+            resumeSwapchainPass();
+        }
     }
 
     // FBO の内容を描画（左上座標）
@@ -234,6 +251,7 @@ private:
     int height_ = 0;
     bool allocated_ = false;
     bool active_ = false;
+    bool wasInSwapchainPass_ = false;  // begin() 時にスワップチェーンパス中だったか
 
     sg_image colorImage_ = {};
     sg_image depthImage_ = {};
@@ -270,6 +288,7 @@ private:
         height_ = other.height_;
         allocated_ = other.allocated_;
         active_ = other.active_;
+        wasInSwapchainPass_ = other.wasInSwapchainPass_;
         colorImage_ = other.colorImage_;
         depthImage_ = other.depthImage_;
         colorAttView_ = other.colorAttView_;
@@ -281,6 +300,7 @@ private:
 
         other.allocated_ = false;
         other.active_ = false;
+        other.wasInSwapchainPass_ = false;
         other.width_ = 0;
         other.height_ = 0;
     }

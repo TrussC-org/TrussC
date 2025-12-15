@@ -59,6 +59,9 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
+    // 画面をクリア（これでスワップチェーンパスが開始される）
+    tc::clear(30);
+
     // FBO に描画
     fbo.begin(0.2f, 0.2f, 0.3f, 1.0f);  // 暗い青紫背景
 
