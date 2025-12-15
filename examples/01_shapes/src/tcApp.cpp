@@ -83,13 +83,50 @@ void tcApp::draw() {
     tc::popMatrix();
 
     // ----------------------
+    // カスタムシェイプ（beginShape/endShape）
+    // ----------------------
+    // 五角形（fill）
+    tc::setColor(0.8f, 0.4f, 0.8f);
+    tc::beginShape();
+    for (int i = 0; i < 5; i++) {
+        float angle = tc::TAU * i / 5.0f - tc::HALF_TAU / 2.0f;
+        tc::vertex(150 + cos(angle) * 50, 450 + sin(angle) * 50);
+    }
+    tc::endShape(true);
+
+    // 星型（stroke）
+    tc::noFill();
+    tc::stroke();
+    tc::setColor(1.0f, 0.9f, 0.2f);
+    tc::beginShape();
+    for (int i = 0; i < 10; i++) {
+        float angle = tc::TAU * i / 10.0f - tc::HALF_TAU / 2.0f;
+        float r = (i % 2 == 0) ? 60.0f : 30.0f;
+        tc::vertex(350 + cos(angle) * r, 450 + sin(angle) * r);
+    }
+    tc::endShape(true);
+    tc::fill();
+    tc::noStroke();
+
+    // アニメーションするカスタムシェイプ
+    tc::setColor(0.3f, 0.8f, 0.9f, 0.8f);
+    tc::beginShape();
+    int numPoints = 6;
+    for (int i = 0; i < numPoints; i++) {
+        float angle = tc::TAU * i / numPoints + (float)t;
+        float r = 40 + sin(t * 2 + i) * 20;
+        tc::vertex(550 + cos(angle) * r, 450 + sin(angle) * r);
+    }
+    tc::endShape(true);
+
+    // ----------------------
     // グリッド描画
     // ----------------------
     tc::setColor(0.6f, 0.6f, 0.6f, 0.5f);
-    for (int x = 0; x < 10; x++) {
-        for (int y = 0; y < 4; y++) {
+    for (int x = 0; x < 5; x++) {
+        for (int y = 0; y < 2; y++) {
             float px = 100.0f + x * 80.0f;
-            float py = 400.0f + y * 80.0f;
+            float py = 550.0f + y * 80.0f;
             float size = 20.0f + (float)sin(t * 2.0 + x * 0.5 + y * 0.3) * 10.0f;
             tc::drawCircle(px, py, size);
         }
