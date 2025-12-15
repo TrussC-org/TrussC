@@ -1,0 +1,33 @@
+#pragma once
+
+#include "tcBaseApp.h"
+
+using namespace trussc;
+
+// easyCamExample - EasyCamによる3Dカメラ操作のデモ
+// oFのeasyCamExampleを参考に実装
+
+class tcApp : public tc::App {
+public:
+    void setup() override;
+    void update() override;
+    void draw() override;
+
+    void keyPressed(int key) override;
+    void mousePressed(int x, int y, int button) override;
+    void mouseReleased(int x, int y, int button) override;
+    void mouseDragged(int x, int y, int button) override;
+    void mouseScrolled(float dx, float dy) override;
+
+private:
+    EasyCam cam;
+    bool showHelp = true;
+
+    // 3Dプリミティブ用メッシュ
+    Mesh boxMesh;
+    Mesh sphereMesh;
+    Mesh coneMesh;
+    Mesh cylinderMesh;
+
+    void drawGrid(float size, int divisions);
+};
