@@ -1531,5 +1531,8 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #include <map>
 #include "tc/3d/tcPrimitives.h"
 
+// TrussC EasyCam（3Dカメラ）
+#include "tc/3d/tcEasyCam.h"
+
 // 短縮エイリアス
 namespace tc = trussc;
