@@ -1,6 +1,6 @@
 // =============================================================================
-// tcMicInput 実装
-// miniaudio を使用したマイク入力
+// tcAudio 実装
+// miniaudio を使用したサウンド再生・マイク入力
 // =============================================================================
 
 #define MA_NO_DECODING
@@ -14,7 +14,76 @@
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// miniaudio コールバック
+// AudioEngine miniaudio コールバック
+// ---------------------------------------------------------------------------
+static void playbackDataCallback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
+    (void)pInput;  // 再生専用なので入力は使わない
+
+    AudioEngine* engine = static_cast<AudioEngine*>(pDevice->pUserData);
+    if (engine && pOutput) {
+        engine->mixAudio(static_cast<float*>(pOutput), frameCount, pDevice->playback.channels);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AudioEngine 実装
+// ---------------------------------------------------------------------------
+
+bool AudioEngine::init() {
+    if (initialized_) return true;
+
+    ma_device* device = new ma_device();
+
+    ma_device_config config = ma_device_config_init(ma_device_type_playback);
+    config.playback.format = ma_format_f32;
+    config.playback.channels = NUM_CHANNELS;
+    config.sampleRate = SAMPLE_RATE;
+    config.dataCallback = playbackDataCallback;
+    config.pUserData = this;
+
+    ma_result result = ma_device_init(nullptr, &config, device);
+    if (result != MA_SUCCESS) {
+        printf("AudioEngine: failed to initialize device (error=%d)\n", result);
+        delete device;
+        return false;
+    }
+
+    result = ma_device_start(device);
+    if (result != MA_SUCCESS) {
+        printf("AudioEngine: failed to start device (error=%d)\n", result);
+        ma_device_uninit(device);
+        delete device;
+        return false;
+    }
+
+    device_ = device;
+    initialized_ = true;
+
+    printf("AudioEngine: initialized (%d Hz, %d ch) [miniaudio]\n", SAMPLE_RATE, NUM_CHANNELS);
+    return true;
+}
+
+void AudioEngine::shutdown() {
+    if (!initialized_) return;
+
+    if (device_) {
+        ma_device* device = static_cast<ma_device*>(device_);
+        ma_device_stop(device);
+        ma_device_uninit(device);
+        delete device;
+        device_ = nullptr;
+    }
+
+    initialized_ = false;
+    printf("AudioEngine: shutdown\n");
+}
+
+void AudioEngine::mixAudio(float* buffer, int num_frames, int num_channels) {
+    mixAudioInternal(buffer, num_frames, num_channels);
+}
+
+// ---------------------------------------------------------------------------
+// MicInput miniaudio コールバック
 // ---------------------------------------------------------------------------
 static void micDataCallback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
     (void)pOutput;  // キャプチャなので出力は使わない
