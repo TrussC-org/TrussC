@@ -14,6 +14,13 @@ public:
     using Ptr = std::shared_ptr<RectNode>;
     using WeakPtr = std::weak_ptr<RectNode>;
 
+    // -------------------------------------------------------------------------
+    // イベント（外部からリスナー登録可能）
+    // -------------------------------------------------------------------------
+    Event<MouseEventArgs> mousePressed;
+    Event<MouseEventArgs> mouseReleased;
+    Event<MouseDragEventArgs> mouseDragged;
+
     // サイズ（ローカル座標系での幅・高さ）
     float width = 100.0f;
     float height = 100.0f;
@@ -95,6 +102,43 @@ public:
     }
 
 protected:
+    // -------------------------------------------------------------------------
+    // マウスイベント（イベントを発火）
+    // -------------------------------------------------------------------------
+
+    bool onMousePress(float localX, float localY, int button) override {
+        MouseEventArgs args;
+        args.x = localX;
+        args.y = localY;
+        args.button = button;
+        mousePressed.notify(args);
+        return true;  // イベントを消費
+    }
+
+    bool onMouseRelease(float localX, float localY, int button) override {
+        MouseEventArgs args;
+        args.x = localX;
+        args.y = localY;
+        args.button = button;
+        mouseReleased.notify(args);
+        return true;
+    }
+
+    bool onMouseDrag(float localX, float localY, int button) override {
+        MouseDragEventArgs args;
+        args.x = localX;
+        args.y = localY;
+        args.button = button;
+        args.deltaX = localX - getMouseX();  // 簡易的な delta
+        args.deltaY = localY - getMouseY();
+        mouseDragged.notify(args);
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // 描画ヘルパー
+    // -------------------------------------------------------------------------
+
     // 矩形を塗りつぶしで描画するヘルパー
     void drawRectFill() {
         fill();
@@ -165,15 +209,13 @@ public:
 
 protected:
     bool onMousePress(float localX, float localY, int button) override {
-        (void)localX; (void)localY; (void)button;
         isPressed = true;
-        return true;  // イベントを消費
+        return RectNode::onMousePress(localX, localY, button);  // 親のイベントも発火
     }
 
     bool onMouseRelease(float localX, float localY, int button) override {
-        (void)localX; (void)localY; (void)button;
         isPressed = false;
-        return true;
+        return RectNode::onMouseRelease(localX, localY, button);
     }
 };
 
