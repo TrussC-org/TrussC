@@ -35,6 +35,8 @@ void tcApp::setup() {
     printf("P: Pause/Resume music\n");
     printf("S: Play sound effect\n");
     printf("UP/DOWN: Volume control\n");
+    printf("LEFT/RIGHT: Pan control\n");
+    printf("+/-: Speed control\n");
     printf("================\n\n");
 }
 
@@ -59,6 +61,10 @@ void tcApp::draw() {
     tc::drawBitmapString("  S - Play sound effect", 50, y);
     y += 20;
     tc::drawBitmapString("  UP/DOWN - Volume control", 50, y);
+    y += 20;
+    tc::drawBitmapString("  LEFT/RIGHT - Pan control", 50, y);
+    y += 20;
+    tc::drawBitmapString("  +/- - Speed control", 50, y);
     y += 40;
 
     // 音楽の状態
@@ -81,6 +87,15 @@ void tcApp::draw() {
         y += 20;
 
         snprintf(buf, sizeof(buf), "Volume: %.0f%%", music.getVolume() * 100);
+        tc::drawBitmapString(buf, 50, y);
+        y += 20;
+
+        snprintf(buf, sizeof(buf), "Pan: %.1f (%s)", music.getPan(),
+                music.getPan() < -0.1f ? "Left" : music.getPan() > 0.1f ? "Right" : "Center");
+        tc::drawBitmapString(buf, 50, y);
+        y += 20;
+
+        snprintf(buf, sizeof(buf), "Speed: %.1fx", music.getSpeed());
         tc::drawBitmapString(buf, 50, y);
         y += 20;
 
@@ -165,5 +180,29 @@ void tcApp::keyPressed(int key) {
         if (vol < 0.0f) vol = 0.0f;
         music.setVolume(vol);
         printf("Volume: %.0f%%\n", vol * 100);
+    }
+    else if (key == SAPP_KEYCODE_LEFT) {
+        // パン左へ
+        float pan = music.getPan() - 0.1f;
+        music.setPan(pan);
+        printf("Pan: %.1f\n", music.getPan());
+    }
+    else if (key == SAPP_KEYCODE_RIGHT) {
+        // パン右へ
+        float pan = music.getPan() + 0.1f;
+        music.setPan(pan);
+        printf("Pan: %.1f\n", music.getPan());
+    }
+    else if (key == '+' || key == '=' || key == SAPP_KEYCODE_KP_ADD) {
+        // 速度上げる
+        float speed = music.getSpeed() + 0.1f;
+        music.setSpeed(speed);
+        printf("Speed: %.1fx\n", music.getSpeed());
+    }
+    else if (key == '-' || key == SAPP_KEYCODE_KP_SUBTRACT) {
+        // 速度下げる
+        float speed = music.getSpeed() - 0.1f;
+        music.setSpeed(speed);
+        printf("Speed: %.1fx\n", music.getSpeed());
     }
 }
