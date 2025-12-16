@@ -46,6 +46,7 @@
 
 // TrussC ユーティリティ
 #include "tc/utils/tcUtils.h"
+#include "tc/utils/tcLog.h"
 
 // =============================================================================
 // trussc 名前空間
