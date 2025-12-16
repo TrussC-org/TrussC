@@ -26,9 +26,14 @@ private:
     // 描画モード
     bool bFill = true;
     bool bWireframe = true;
+    bool bLighting = true;
 
     // 解像度モード (1-4)
     int resolution = 2;
+
+    // ライティング
+    tc::Light light_;
+    tc::Material materials_[6];  // 各プリミティブ用マテリアル
 
     // プリミティブを再生成
     void rebuildPrimitives();

@@ -1561,6 +1561,11 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 // TrussC ポリライン
 #include "tc/graphics/tcPolyline.h"
 
+// TrussC ライティング（tcMesh.h より前にインクルードが必要）
+#include "tc/3d/tcLightingState.h"
+#include "tc/3d/tcMaterial.h"
+#include "tc/3d/tcLight.h"
+
 // TrussC メッシュ
 #include "tc/graphics/tcMesh.h"
 
@@ -1588,6 +1593,9 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 // TrussC 3Dプリミティブ
 #include <map>
 #include "tc/3d/tcPrimitives.h"
+
+// TrussC ライティング API
+#include "tc/3d/tc3DGraphics.h"
 
 // TrussC EasyCam（3Dカメラ）
 #include "tc/3d/tcEasyCam.h"

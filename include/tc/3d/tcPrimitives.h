@@ -15,13 +15,13 @@ inline Mesh createPlane(float width, float height, int cols = 2, int rows = 2) {
     float halfW = width * 0.5f;
     float halfH = height * 0.5f;
 
-    // 頂点を生成
+    // 頂点と法線を生成
     for (int y = 0; y <= rows; y++) {
         for (int x = 0; x <= cols; x++) {
             float px = -halfW + (width * x / cols);
             float py = -halfH + (height * y / rows);
             mesh.addVertex(px, py, 0);
-            // テクスチャ座標
+            mesh.addNormal(0, 0, 1);  // 全頂点がZ+方向
             mesh.addTexCoord((float)x / cols, (float)y / rows);
         }
     }
@@ -42,7 +42,7 @@ inline Mesh createPlane(float width, float height, int cols = 2, int rows = 2) {
 }
 
 // ---------------------------------------------------------------------------
-// Box（立方体）
+// Box（立方体）- フラットシェーディング用（24頂点）
 // ---------------------------------------------------------------------------
 inline Mesh createBox(float width, float height, float depth) {
     Mesh mesh;
@@ -52,37 +52,49 @@ inline Mesh createBox(float width, float height, float depth) {
     float h = height * 0.5f;
     float d = depth * 0.5f;
 
-    // 8頂点
-    // 前面 (z = d)
-    mesh.addVertex(-w, -h,  d);  // 0
-    mesh.addVertex( w, -h,  d);  // 1
-    mesh.addVertex( w,  h,  d);  // 2
-    mesh.addVertex(-w,  h,  d);  // 3
-    // 後面 (z = -d)
-    mesh.addVertex(-w, -h, -d);  // 4
-    mesh.addVertex( w, -h, -d);  // 5
-    mesh.addVertex( w,  h, -d);  // 6
-    mesh.addVertex(-w,  h, -d);  // 7
+    // 各面に4頂点（フラットシェーディング用）
+    // 前面 (Z+) - 頂点 0-3
+    mesh.addVertex(-w, -h,  d); mesh.addNormal(0, 0, 1);
+    mesh.addVertex( w, -h,  d); mesh.addNormal(0, 0, 1);
+    mesh.addVertex( w,  h,  d); mesh.addNormal(0, 0, 1);
+    mesh.addVertex(-w,  h,  d); mesh.addNormal(0, 0, 1);
 
-    // 6面 × 2三角形
-    // 前面
-    mesh.addTriangle(0, 1, 2);
-    mesh.addTriangle(0, 2, 3);
-    // 後面
-    mesh.addTriangle(5, 4, 7);
-    mesh.addTriangle(5, 7, 6);
-    // 上面
-    mesh.addTriangle(3, 2, 6);
-    mesh.addTriangle(3, 6, 7);
-    // 下面
-    mesh.addTriangle(4, 5, 1);
-    mesh.addTriangle(4, 1, 0);
-    // 右面
-    mesh.addTriangle(1, 5, 6);
-    mesh.addTriangle(1, 6, 2);
-    // 左面
-    mesh.addTriangle(4, 0, 3);
-    mesh.addTriangle(4, 3, 7);
+    // 後面 (Z-) - 頂点 4-7
+    mesh.addVertex( w, -h, -d); mesh.addNormal(0, 0, -1);
+    mesh.addVertex(-w, -h, -d); mesh.addNormal(0, 0, -1);
+    mesh.addVertex(-w,  h, -d); mesh.addNormal(0, 0, -1);
+    mesh.addVertex( w,  h, -d); mesh.addNormal(0, 0, -1);
+
+    // 上面 (Y+) - 頂点 8-11
+    mesh.addVertex(-w,  h,  d); mesh.addNormal(0, 1, 0);
+    mesh.addVertex( w,  h,  d); mesh.addNormal(0, 1, 0);
+    mesh.addVertex( w,  h, -d); mesh.addNormal(0, 1, 0);
+    mesh.addVertex(-w,  h, -d); mesh.addNormal(0, 1, 0);
+
+    // 下面 (Y-) - 頂点 12-15
+    mesh.addVertex(-w, -h, -d); mesh.addNormal(0, -1, 0);
+    mesh.addVertex( w, -h, -d); mesh.addNormal(0, -1, 0);
+    mesh.addVertex( w, -h,  d); mesh.addNormal(0, -1, 0);
+    mesh.addVertex(-w, -h,  d); mesh.addNormal(0, -1, 0);
+
+    // 右面 (X+) - 頂点 16-19
+    mesh.addVertex( w, -h,  d); mesh.addNormal(1, 0, 0);
+    mesh.addVertex( w, -h, -d); mesh.addNormal(1, 0, 0);
+    mesh.addVertex( w,  h, -d); mesh.addNormal(1, 0, 0);
+    mesh.addVertex( w,  h,  d); mesh.addNormal(1, 0, 0);
+
+    // 左面 (X-) - 頂点 20-23
+    mesh.addVertex(-w, -h, -d); mesh.addNormal(-1, 0, 0);
+    mesh.addVertex(-w, -h,  d); mesh.addNormal(-1, 0, 0);
+    mesh.addVertex(-w,  h,  d); mesh.addNormal(-1, 0, 0);
+    mesh.addVertex(-w,  h, -d); mesh.addNormal(-1, 0, 0);
+
+    // インデックス（各面2三角形）
+    for (int face = 0; face < 6; face++) {
+        int base = face * 4;
+        mesh.addTriangle(base, base + 1, base + 2);
+        mesh.addTriangle(base, base + 2, base + 3);
+    }
 
     return mesh;
 }
@@ -101,7 +113,7 @@ inline Mesh createSphere(float radius, int resolution = 16) {
     int rings = resolution;
     int sectors = resolution;
 
-    // 頂点を生成
+    // 頂点と法線を生成
     for (int r = 0; r <= rings; r++) {
         float v = (float)r / rings;
         float phi = v * PI;
@@ -110,11 +122,13 @@ inline Mesh createSphere(float radius, int resolution = 16) {
             float u = (float)s / sectors;
             float theta = u * TAU;
 
+            // 単位球上の点（これがそのまま法線になる）
             float x = cos(theta) * sin(phi);
             float y = cos(phi);
             float z = sin(theta) * sin(phi);
 
             mesh.addVertex(x * radius, y * radius, z * radius);
+            mesh.addNormal(x, y, z);  // 正規化済み
             mesh.addTexCoord(u, v);
         }
     }
@@ -148,15 +162,19 @@ inline Mesh createCylinder(float radius, float height, int resolution = 16) {
 
     float halfH = height * 0.5f;
 
-    // 側面の頂点
+    // 側面の頂点（放射方向の法線）
     int baseIndex = 0;
     for (int i = 0; i <= resolution; i++) {
         float angle = TAU * i / resolution;
-        float x = cos(angle) * radius;
-        float z = sin(angle) * radius;
+        float nx = cos(angle);  // 法線（正規化済み）
+        float nz = sin(angle);
+        float x = nx * radius;
+        float z = nz * radius;
 
         mesh.addVertex(x, -halfH, z);  // 下
+        mesh.addNormal(nx, 0, nz);
         mesh.addVertex(x,  halfH, z);  // 上
+        mesh.addNormal(nx, 0, nz);
     }
 
     // 側面のインデックス
@@ -169,9 +187,10 @@ inline Mesh createCylinder(float radius, float height, int resolution = 16) {
         mesh.addTriangle(i1, i2, i3);
     }
 
-    // 上面の中心
+    // 上面の中心（Y+方向の法線）
     int topCenter = mesh.getNumVertices();
     mesh.addVertex(0, halfH, 0);
+    mesh.addNormal(0, 1, 0);
 
     // 上面の頂点
     int topBase = mesh.getNumVertices();
@@ -180,6 +199,7 @@ inline Mesh createCylinder(float radius, float height, int resolution = 16) {
         float x = cos(angle) * radius;
         float z = sin(angle) * radius;
         mesh.addVertex(x, halfH, z);
+        mesh.addNormal(0, 1, 0);
     }
 
     // 上面のインデックス
@@ -187,9 +207,10 @@ inline Mesh createCylinder(float radius, float height, int resolution = 16) {
         mesh.addTriangle(topCenter, topBase + i, topBase + i + 1);
     }
 
-    // 下面の中心
+    // 下面の中心（Y-方向の法線）
     int bottomCenter = mesh.getNumVertices();
     mesh.addVertex(0, -halfH, 0);
+    mesh.addNormal(0, -1, 0);
 
     // 下面の頂点
     int bottomBase = mesh.getNumVertices();
@@ -198,6 +219,7 @@ inline Mesh createCylinder(float radius, float height, int resolution = 16) {
         float x = cos(angle) * radius;
         float z = sin(angle) * radius;
         mesh.addVertex(x, -halfH, z);
+        mesh.addNormal(0, -1, 0);
     }
 
     // 下面のインデックス（逆回り）
@@ -217,31 +239,54 @@ inline Mesh createCone(float radius, float height, int resolution = 16) {
 
     float halfH = height * 0.5f;
 
-    // 頂点（先端）
-    int apex = 0;
-    mesh.addVertex(0, halfH, 0);
+    // 側面の法線計算用
+    // 円錐の傾斜角に基づく法線の Y 成分と水平成分
+    float slopeLen = sqrt(radius * radius + height * height);
+    float ny = radius / slopeLen;      // 上向き成分
+    float nHoriz = height / slopeLen;  // 水平方向成分
+
+    // 側面の頂点を三角形ごとに独立して作成（フラットシェーディング用）
+    for (int i = 0; i < resolution; i++) {
+        float angle0 = TAU * i / resolution;
+        float angle1 = TAU * (i + 1) / resolution;
+        float angleMid = (angle0 + angle1) * 0.5f;
+
+        // この三角形の法線（中間角度での法線）
+        float nx = cos(angleMid) * nHoriz;
+        float nz = sin(angleMid) * nHoriz;
+
+        // 頂点（先端）
+        mesh.addVertex(0, halfH, 0);
+        mesh.addNormal(nx, ny, nz);
+
+        // 底面の2頂点
+        mesh.addVertex(cos(angle0) * radius, -halfH, sin(angle0) * radius);
+        mesh.addNormal(nx, ny, nz);
+        mesh.addVertex(cos(angle1) * radius, -halfH, sin(angle1) * radius);
+        mesh.addNormal(nx, ny, nz);
+
+        int base = i * 3;
+        mesh.addTriangle(base, base + 1, base + 2);
+    }
+
+    // 底面の中心（Y-方向の法線）
+    int bottomCenter = mesh.getNumVertices();
+    mesh.addVertex(0, -halfH, 0);
+    mesh.addNormal(0, -1, 0);
 
     // 底面の円周上の頂点
-    int baseStart = mesh.getNumVertices();
+    int bottomBase = mesh.getNumVertices();
     for (int i = 0; i <= resolution; i++) {
         float angle = TAU * i / resolution;
         float x = cos(angle) * radius;
         float z = sin(angle) * radius;
         mesh.addVertex(x, -halfH, z);
+        mesh.addNormal(0, -1, 0);
     }
-
-    // 側面のインデックス
-    for (int i = 0; i < resolution; i++) {
-        mesh.addTriangle(apex, baseStart + i, baseStart + i + 1);
-    }
-
-    // 底面の中心
-    int bottomCenter = mesh.getNumVertices();
-    mesh.addVertex(0, -halfH, 0);
 
     // 底面のインデックス（逆回り）
     for (int i = 0; i < resolution; i++) {
-        mesh.addTriangle(bottomCenter, baseStart + i + 1, baseStart + i);
+        mesh.addTriangle(bottomCenter, bottomBase + i + 1, bottomBase + i);
     }
 
     return mesh;
@@ -262,19 +307,24 @@ inline Mesh createIcoSphere(float radius, int subdivisions = 2) {
     float a = 1.0f / len;
     float b = t / len;
 
-    // 12頂点
-    mesh.addVertex(-a,  b,  0);
-    mesh.addVertex( a,  b,  0);
-    mesh.addVertex(-a, -b,  0);
-    mesh.addVertex( a, -b,  0);
-    mesh.addVertex( 0, -a,  b);
-    mesh.addVertex( 0,  a,  b);
-    mesh.addVertex( 0, -a, -b);
-    mesh.addVertex( 0,  a, -b);
-    mesh.addVertex( b,  0, -a);
-    mesh.addVertex( b,  0,  a);
-    mesh.addVertex(-b,  0, -a);
-    mesh.addVertex(-b,  0,  a);
+    // 12頂点（単位球上）- 法線は頂点位置と同じ
+    auto addVertexWithNormal = [&](float x, float y, float z) {
+        mesh.addVertex(x, y, z);
+        mesh.addNormal(x, y, z);  // 単位球上なので位置=法線
+    };
+
+    addVertexWithNormal(-a,  b,  0);
+    addVertexWithNormal( a,  b,  0);
+    addVertexWithNormal(-a, -b,  0);
+    addVertexWithNormal( a, -b,  0);
+    addVertexWithNormal( 0, -a,  b);
+    addVertexWithNormal( 0,  a,  b);
+    addVertexWithNormal( 0, -a, -b);
+    addVertexWithNormal( 0,  a, -b);
+    addVertexWithNormal( b,  0, -a);
+    addVertexWithNormal( b,  0,  a);
+    addVertexWithNormal(-b,  0, -a);
+    addVertexWithNormal(-b,  0,  a);
 
     // 20面
     std::vector<unsigned int> indices = {
@@ -299,7 +349,7 @@ inline Mesh createIcoSphere(float radius, int subdivisions = 2) {
             auto& v1 = mesh.getVertices()[i1];
             auto& v2 = mesh.getVertices()[i2];
             Vec3 mid = {(v1.x + v2.x) * 0.5f, (v1.y + v2.y) * 0.5f, (v1.z + v2.z) * 0.5f};
-            // 正規化
+            // 正規化（単位球上に投影）
             float l = sqrt(mid.x * mid.x + mid.y * mid.y + mid.z * mid.z);
             mid.x /= l;
             mid.y /= l;
@@ -307,6 +357,7 @@ inline Mesh createIcoSphere(float radius, int subdivisions = 2) {
 
             unsigned int idx = mesh.getNumVertices();
             mesh.addVertex(mid);
+            mesh.addNormal(mid.x, mid.y, mid.z);  // 正規化済みの位置が法線
             midpointCache[key] = idx;
             return idx;
         };
@@ -316,20 +367,20 @@ inline Mesh createIcoSphere(float radius, int subdivisions = 2) {
             unsigned int v1 = indices[i + 1];
             unsigned int v2 = indices[i + 2];
 
-            unsigned int a = getMidpoint(v0, v1);
-            unsigned int b = getMidpoint(v1, v2);
-            unsigned int c = getMidpoint(v2, v0);
+            unsigned int ma = getMidpoint(v0, v1);
+            unsigned int mb = getMidpoint(v1, v2);
+            unsigned int mc = getMidpoint(v2, v0);
 
-            newIndices.push_back(v0); newIndices.push_back(a); newIndices.push_back(c);
-            newIndices.push_back(v1); newIndices.push_back(b); newIndices.push_back(a);
-            newIndices.push_back(v2); newIndices.push_back(c); newIndices.push_back(b);
-            newIndices.push_back(a);  newIndices.push_back(b); newIndices.push_back(c);
+            newIndices.push_back(v0); newIndices.push_back(ma); newIndices.push_back(mc);
+            newIndices.push_back(v1); newIndices.push_back(mb); newIndices.push_back(ma);
+            newIndices.push_back(v2); newIndices.push_back(mc); newIndices.push_back(mb);
+            newIndices.push_back(ma); newIndices.push_back(mb); newIndices.push_back(mc);
         }
 
         indices = newIndices;
     }
 
-    // 頂点にスケールを適用
+    // 頂点にスケールを適用（法線はそのまま）
     for (auto& v : mesh.getVertices()) {
         v.x *= radius;
         v.y *= radius;

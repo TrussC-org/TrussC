@@ -1,5 +1,7 @@
 #include "tcApp.h"
 
+using namespace std;
+
 // ---------------------------------------------------------------------------
 // setup
 // ---------------------------------------------------------------------------
@@ -8,7 +10,22 @@ void tcApp::setup() {
     tc::tcLogNotice() << "  - 1/2/3/4: 解像度変更";
     tc::tcLogNotice() << "  - s: 塗りつぶし ON/OFF";
     tc::tcLogNotice() << "  - w: ワイヤーフレーム ON/OFF";
+    tc::tcLogNotice() << "  - l: ライティング ON/OFF";
     tc::tcLogNotice() << "  - ESC: 終了";
+
+    // ライト設定（斜め上から照らす平行光源）
+    light_.setDirectional(tc::Vec3(-1, -1, -1));
+    light_.setAmbient(0.2f, 0.2f, 0.25f);
+    light_.setDiffuse(1.0f, 1.0f, 0.95f);
+    light_.setSpecular(1.0f, 1.0f, 1.0f);
+
+    // 各プリミティブ用のマテリアル
+    materials_[0] = tc::Material::plastic(tc::Color(0.8f, 0.2f, 0.2f));  // Plane: 赤
+    materials_[1] = tc::Material::gold();                                  // Box: ゴールド
+    materials_[2] = tc::Material::plastic(tc::Color(0.2f, 0.6f, 0.9f));  // Sphere: 青
+    materials_[3] = tc::Material::emerald();                              // IcoSphere: エメラルド
+    materials_[4] = tc::Material::silver();                               // Cylinder: シルバー
+    materials_[5] = tc::Material::copper();                               // Cone: 銅
 
     rebuildPrimitives();
 }
@@ -87,6 +104,14 @@ void tcApp::draw() {
         { &cone,      "Cone",        3.0f, -1.5f },
     };
 
+    // ライティング設定
+    if (bLighting) {
+        tc::enableLighting();
+        tc::addLight(light_);
+        // カメラ位置を設定（スペキュラー計算用）
+        tc::setCameraPosition(0, 0, 0);
+    }
+
     // 各プリミティブを描画
     for (int i = 0; i < 6; i++) {
         auto& p = primitives[i];
@@ -103,24 +128,39 @@ void tcApp::draw() {
 
         // 塗りつぶし
         if (bFill) {
-            // プリミティブごとに異なる色
-            float hue = (float)i / 6.0f * tc::TAU;
-            tc::setColor(
-                0.5f + 0.4f * cos(hue),
-                0.5f + 0.4f * cos(hue + tc::TAU / 3),
-                0.5f + 0.4f * cos(hue + tc::TAU * 2 / 3)
-            );
+            if (bLighting) {
+                // ライティング使用時はマテリアルを設定
+                tc::setMaterial(materials_[i]);
+                tc::setColor(1.0f, 1.0f, 1.0f);  // 白で描画（マテリアルが色を決定）
+            } else {
+                // ライティングなし時は従来の色
+                float hue = (float)i / 6.0f * tc::TAU;
+                tc::setColor(
+                    0.5f + 0.4f * cos(hue),
+                    0.5f + 0.4f * cos(hue + tc::TAU / 3),
+                    0.5f + 0.4f * cos(hue + tc::TAU * 2 / 3)
+                );
+            }
             p.mesh->draw();
         }
 
-        // ワイヤーフレーム
+        // ワイヤーフレーム（ライティングなしで描画）
         if (bWireframe) {
+            tc::disableLighting();
             tc::setColor(0.0f, 0.0f, 0.0f);
             p.mesh->drawWireframe();
+            if (bLighting) {
+                tc::enableLighting();
+                tc::addLight(light_);
+            }
         }
 
         tc::popMatrix();
     }
+
+    // ライティング終了
+    tc::disableLighting();
+    tc::clearLights();
 
     // 2D描画に戻す
     tc::disable3D();
@@ -132,6 +172,7 @@ void tcApp::draw() {
     tc::drawBitmapString("1-4: Resolution (" + tc::toString(resolution) + ")", 10, y); y += 16;
     tc::drawBitmapString("s: Fill " + string(bFill ? "[ON]" : "[OFF]"), 10, y); y += 16;
     tc::drawBitmapString("w: Wireframe " + string(bWireframe ? "[ON]" : "[OFF]"), 10, y); y += 16;
+    tc::drawBitmapString("l: Lighting " + string(bLighting ? "[ON]" : "[OFF]"), 10, y); y += 16;
     tc::drawBitmapString("FPS: " + tc::toString(tc::getFrameRate(), 1), 10, y);
 }
 
@@ -165,5 +206,9 @@ void tcApp::keyPressed(int key) {
     else if (key == 'w' || key == 'W') {
         bWireframe = !bWireframe;
         tc::tcLogNotice() << "Wireframe: " << (bWireframe ? "ON" : "OFF");
+    }
+    else if (key == 'l' || key == 'L') {
+        bLighting = !bLighting;
+        tc::tcLogNotice() << "Lighting: " << (bLighting ? "ON" : "OFF");
     }
 }

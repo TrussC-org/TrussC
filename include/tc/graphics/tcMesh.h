@@ -104,6 +104,41 @@ public:
     bool hasIndices() const { return !indices_.empty(); }
 
     // ---------------------------------------------------------------------------
+    // 法線（ライティング用）
+    // ---------------------------------------------------------------------------
+    void addNormal(float nx, float ny, float nz) {
+        normals_.push_back(Vec3{nx, ny, nz});
+    }
+
+    void addNormal(const Vec3& n) {
+        normals_.push_back(n);
+    }
+
+    void addNormals(const std::vector<Vec3>& norms) {
+        for (const auto& n : norms) {
+            normals_.push_back(n);
+        }
+    }
+
+    void setNormal(size_t index, const Vec3& n) {
+        if (index < normals_.size()) {
+            normals_[index] = n;
+        }
+    }
+
+    Vec3 getNormal(size_t index) const {
+        if (index < normals_.size()) {
+            return normals_[index];
+        }
+        return Vec3{0, 0, 1};  // デフォルト: Z方向
+    }
+
+    std::vector<Vec3>& getNormals() { return normals_; }
+    const std::vector<Vec3>& getNormals() const { return normals_; }
+    size_t getNumNormals() const { return normals_.size(); }
+    bool hasNormals() const { return !normals_.empty(); }
+
+    // ---------------------------------------------------------------------------
     // テクスチャ座標
     // ---------------------------------------------------------------------------
     void addTexCoord(float u, float v) {
@@ -123,12 +158,14 @@ public:
     // ---------------------------------------------------------------------------
     void clear() {
         vertices_.clear();
+        normals_.clear();
         colors_.clear();
         indices_.clear();
         texCoords_.clear();
     }
 
     void clearVertices() { vertices_.clear(); }
+    void clearNormals() { normals_.clear(); }
     void clearColors() { colors_.clear(); }
     void clearIndices() { indices_.clear(); }
     void clearTexCoords() { texCoords_.clear(); }
@@ -137,6 +174,21 @@ public:
     // 描画
     // ---------------------------------------------------------------------------
     void draw() const {
+        if (vertices_.empty()) return;
+
+        // ライティングが有効で法線がある場合はライティング付き描画
+        if (internal::lightingEnabled && hasNormals() &&
+            normals_.size() >= vertices_.size() && internal::currentMaterial) {
+            drawWithLighting();
+            return;
+        }
+
+        // 通常描画
+        drawNoLighting();
+    }
+
+    // ライティングなしの通常描画
+    void drawNoLighting() const {
         if (vertices_.empty()) return;
 
         bool useColors = hasColors() && colors_.size() >= vertices_.size();
@@ -190,6 +242,106 @@ public:
                     sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
                 }
                 sgl_v3f(vertices_[i].x, vertices_[i].y, vertices_[i].z);
+            }
+        }
+
+        sgl_end();
+    }
+
+    // ライティング付き描画（CPU側でライティング計算）
+    void drawWithLighting() const {
+        if (mode_ != PrimitiveMode::Triangles) {
+            // 現在は三角形モードのみサポート
+            drawNoLighting();
+            return;
+        }
+
+        // 現在の変換行列を取得
+        Mat4 modelMatrix = getDefaultContext().getCurrentMatrix();
+
+        // 法線変換用行列（逆転置行列）
+        // 簡易実装: スケールが均一なら modelMatrix をそのまま使える
+        // TODO: 不均一スケールに対応する場合は逆転置行列を計算
+
+        const Material& material = *internal::currentMaterial;
+
+        sgl_begin_triangles();
+
+        if (hasIndices()) {
+            for (auto idx : indices_) {
+                if (idx < vertices_.size() && idx < normals_.size()) {
+                    const Vec3& localPos = vertices_[idx];
+                    const Vec3& localNormal = normals_[idx];
+
+                    // ワールド座標に変換
+                    Vec3 worldPos = modelMatrix * localPos;
+
+                    // 法線を変換（回転のみ適用、平行移動は無視）
+                    Vec3 worldNormal;
+                    worldNormal.x = modelMatrix.m[0] * localNormal.x +
+                                    modelMatrix.m[1] * localNormal.y +
+                                    modelMatrix.m[2] * localNormal.z;
+                    worldNormal.y = modelMatrix.m[4] * localNormal.x +
+                                    modelMatrix.m[5] * localNormal.y +
+                                    modelMatrix.m[6] * localNormal.z;
+                    worldNormal.z = modelMatrix.m[8] * localNormal.x +
+                                    modelMatrix.m[9] * localNormal.y +
+                                    modelMatrix.m[10] * localNormal.z;
+
+                    // 法線を正規化
+                    float len = std::sqrt(worldNormal.x * worldNormal.x +
+                                          worldNormal.y * worldNormal.y +
+                                          worldNormal.z * worldNormal.z);
+                    if (len > 0.0001f) {
+                        worldNormal.x /= len;
+                        worldNormal.y /= len;
+                        worldNormal.z /= len;
+                    }
+
+                    // ライティング計算
+                    Color litColor = calculateLighting(worldPos, worldNormal, material);
+
+                    sgl_c4f(litColor.r, litColor.g, litColor.b, litColor.a);
+                    sgl_v3f(localPos.x, localPos.y, localPos.z);
+                }
+            }
+        } else {
+            for (size_t i = 0; i < vertices_.size(); i++) {
+                if (i < normals_.size()) {
+                    const Vec3& localPos = vertices_[i];
+                    const Vec3& localNormal = normals_[i];
+
+                    // ワールド座標に変換
+                    Vec3 worldPos = modelMatrix * localPos;
+
+                    // 法線を変換
+                    Vec3 worldNormal;
+                    worldNormal.x = modelMatrix.m[0] * localNormal.x +
+                                    modelMatrix.m[1] * localNormal.y +
+                                    modelMatrix.m[2] * localNormal.z;
+                    worldNormal.y = modelMatrix.m[4] * localNormal.x +
+                                    modelMatrix.m[5] * localNormal.y +
+                                    modelMatrix.m[6] * localNormal.z;
+                    worldNormal.z = modelMatrix.m[8] * localNormal.x +
+                                    modelMatrix.m[9] * localNormal.y +
+                                    modelMatrix.m[10] * localNormal.z;
+
+                    // 法線を正規化
+                    float len = std::sqrt(worldNormal.x * worldNormal.x +
+                                          worldNormal.y * worldNormal.y +
+                                          worldNormal.z * worldNormal.z);
+                    if (len > 0.0001f) {
+                        worldNormal.x /= len;
+                        worldNormal.y /= len;
+                        worldNormal.z /= len;
+                    }
+
+                    // ライティング計算
+                    Color litColor = calculateLighting(worldPos, worldNormal, material);
+
+                    sgl_c4f(litColor.r, litColor.g, litColor.b, litColor.a);
+                    sgl_v3f(localPos.x, localPos.y, localPos.z);
+                }
             }
         }
 
@@ -350,6 +502,7 @@ private:
 
     PrimitiveMode mode_;
     std::vector<Vec3> vertices_;
+    std::vector<Vec3> normals_;
     std::vector<Color> colors_;
     std::vector<unsigned int> indices_;
     std::vector<Vec2> texCoords_;
