@@ -2,12 +2,13 @@
 
 // =============================================================================
 // TrussC Sound
-// sokol_audio + stb_vorbis ベースのサウンド再生
+// miniaudio ベースのサウンド再生・マイク入力
 //
 // 設計:
-// - AudioEngine: シングルトン、sokol_audio の初期化、ミキサー管理
+// - AudioEngine: シングルトン、miniaudio の初期化、ミキサー管理
 // - SoundBuffer: デコード済みサウンドデータ（共有可能）
 // - Sound: ユーザー向けクラス、再生制御
+// - MicInput: マイク入力
 //
 // 使用例:
 //   tc::Sound sound;
@@ -26,26 +27,6 @@
 #include <mutex>
 #include <atomic>
 #include <cstring>
-
-// sokol_audio 前方宣言（ヘッダーは sokol_impl.mm でインクルード済み）
-extern "C" {
-    typedef struct saudio_desc {
-        int sample_rate;
-        int num_channels;
-        int buffer_frames;
-        int packet_frames;
-        int num_packets;
-        void (*stream_cb)(float* buffer, int num_frames, int num_channels);
-        void (*stream_userdata_cb)(float* buffer, int num_frames, int num_channels, void* user_data);
-        void* user_data;
-        // logger は省略
-        char _padding[64];
-    } saudio_desc;
-
-    void saudio_setup(const saudio_desc* desc);
-    void saudio_shutdown(void);
-    bool saudio_isvalid(void);
-}
 
 // stb_vorbis 前方宣言
 extern "C" {
@@ -220,7 +201,7 @@ struct PlayingSound {
 };
 
 // ---------------------------------------------------------------------------
-// オーディオエンジン（シングルトン）
+// オーディオエンジン（シングルトン、miniaudio ベース）
 // ---------------------------------------------------------------------------
 class AudioEngine {
 public:
@@ -234,33 +215,9 @@ public:
         return instance;
     }
 
-    bool init() {
-        if (initialized_) return true;
-
-        saudio_desc desc = {};
-        desc.sample_rate = SAMPLE_RATE;
-        desc.num_channels = NUM_CHANNELS;
-        desc.stream_userdata_cb = audioCallback;
-        desc.user_data = this;
-
-        saudio_setup(&desc);
-
-        if (!saudio_isvalid()) {
-            printf("AudioEngine: failed to initialize\n");
-            return false;
-        }
-
-        initialized_ = true;
-        printf("AudioEngine: initialized (%d Hz, %d ch)\n", SAMPLE_RATE, NUM_CHANNELS);
-        return true;
-    }
-
-    void shutdown() {
-        if (initialized_) {
-            saudio_shutdown();
-            initialized_ = false;
-        }
-    }
+    // 初期化・終了（実装は tcAudio_impl.cpp）
+    bool init();
+    void shutdown();
 
     // FFT解析用: 最新のオーディオサンプルを取得（モノラル、左右平均）
     // numSamples: 取得するサンプル数（最大 ANALYSIS_BUFFER_SIZE）
@@ -308,6 +265,9 @@ public:
         return nullptr;
     }
 
+    // オーディオコールバックから呼ばれる（内部使用）
+    void mixAudio(float* buffer, int num_frames, int num_channels);
+
 private:
     AudioEngine() {
         playingSounds_.resize(MAX_PLAYING_SOUNDS);
@@ -318,12 +278,7 @@ private:
         shutdown();
     }
 
-    static void audioCallback(float* buffer, int num_frames, int num_channels, void* user_data) {
-        auto* engine = static_cast<AudioEngine*>(user_data);
-        engine->mixAudio(buffer, num_frames, num_channels);
-    }
-
-    void mixAudio(float* buffer, int num_frames, int num_channels) {
+    void mixAudioInternal(float* buffer, int num_frames, int num_channels) {
         // バッファをクリア
         std::memset(buffer, 0, num_frames * num_channels * sizeof(float));
 
@@ -424,6 +379,7 @@ private:
         }
     }
 
+    void* device_ = nullptr;  // ma_device*
     bool initialized_ = false;
     std::vector<std::shared_ptr<PlayingSound>> playingSounds_;
     std::mutex mutex_;
