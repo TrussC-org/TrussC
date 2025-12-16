@@ -41,6 +41,19 @@ if(TC_PLATFORM_MACOS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcPlatform_mac.mm
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFbo_mac.mm
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcVideoGrabber_mac.mm
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFileDialog_mac.mm
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_impl.cpp
+    )
+elseif(TC_PLATFORM_WINDOWS)
+    add_library(TrussC STATIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/sokol_impl.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFileDialog_win.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_impl.cpp
+    )
+elseif(TC_PLATFORM_LINUX)
+    add_library(TrussC STATIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/sokol_impl.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFileDialog_linux.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_impl.cpp
     )
 else()
@@ -85,17 +98,24 @@ elseif(TC_PLATFORM_WINDOWS)
         d3d11
         dxgi
         dxguid
+        comdlg32
+        shell32
+        ole32
     )
 
 elseif(TC_PLATFORM_LINUX)
     target_compile_definitions(TrussC PUBLIC SOKOL_GLCORE)
     find_package(X11 REQUIRED)
     find_package(OpenGL REQUIRED)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+    target_include_directories(TrussC PUBLIC ${GTK3_INCLUDE_DIRS})
     target_link_libraries(TrussC PUBLIC
         ${X11_LIBRARIES}
         ${X11_Xi_LIB}
         ${X11_Xcursor_LIB}
         ${OPENGL_LIBRARIES}
+        ${GTK3_LIBRARIES}
         pthread
         dl
     )
