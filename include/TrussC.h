@@ -29,6 +29,9 @@
 // TrussC レイ（Hit Test 用）
 #include "tc/math/tcRay.h"
 
+// TrussC FFT（高速フーリエ変換）
+#include "tc/math/tcFFT.h"
+
 // TrussC カラーライブラリ
 #include "tcColor.h"
 

@@ -227,6 +227,7 @@ public:
     static constexpr int MAX_PLAYING_SOUNDS = 32;
     static constexpr int SAMPLE_RATE = 44100;
     static constexpr int NUM_CHANNELS = 2;  // ステレオ出力
+    static constexpr int ANALYSIS_BUFFER_SIZE = 4096;  // FFT解析用バッファサイズ
 
     static AudioEngine& getInstance() {
         static AudioEngine instance;
@@ -261,6 +262,26 @@ public:
         }
     }
 
+    // FFT解析用: 最新のオーディオサンプルを取得（モノラル、左右平均）
+    // numSamples: 取得するサンプル数（最大 ANALYSIS_BUFFER_SIZE）
+    // 戻り値: 取得したサンプル数
+    size_t getAnalysisBuffer(float* outBuffer, size_t numSamples) {
+        if (!initialized_ || numSamples == 0) return 0;
+
+        numSamples = std::min(numSamples, (size_t)ANALYSIS_BUFFER_SIZE);
+
+        std::lock_guard<std::mutex> lock(analysisMutex_);
+
+        // リングバッファから最新のサンプルをコピー
+        size_t readPos = (analysisWritePos_ + ANALYSIS_BUFFER_SIZE - numSamples) % ANALYSIS_BUFFER_SIZE;
+
+        for (size_t i = 0; i < numSamples; i++) {
+            outBuffer[i] = analysisBuffer_[(readPos + i) % ANALYSIS_BUFFER_SIZE];
+        }
+
+        return numSamples;
+    }
+
     // 新しい再生インスタンスを追加
     std::shared_ptr<PlayingSound> play(std::shared_ptr<SoundBuffer> buffer) {
         if (!initialized_ || !buffer) return nullptr;
@@ -290,6 +311,7 @@ public:
 private:
     AudioEngine() {
         playingSounds_.resize(MAX_PLAYING_SOUNDS);
+        analysisBuffer_.resize(ANALYSIS_BUFFER_SIZE, 0.0f);
     }
 
     ~AudioEngine() {
@@ -385,11 +407,31 @@ private:
             if (buffer[i] > 1.0f) buffer[i] = 1.0f;
             if (buffer[i] < -1.0f) buffer[i] = -1.0f;
         }
+
+        // FFT解析用リングバッファにコピー（モノラル化: 左右平均）
+        {
+            std::lock_guard<std::mutex> lock(analysisMutex_);
+            for (int frame = 0; frame < num_frames; frame++) {
+                float mono;
+                if (num_channels > 1) {
+                    mono = (buffer[frame * num_channels] + buffer[frame * num_channels + 1]) * 0.5f;
+                } else {
+                    mono = buffer[frame * num_channels];
+                }
+                analysisBuffer_[analysisWritePos_] = mono;
+                analysisWritePos_ = (analysisWritePos_ + 1) % ANALYSIS_BUFFER_SIZE;
+            }
+        }
     }
 
     bool initialized_ = false;
     std::vector<std::shared_ptr<PlayingSound>> playingSounds_;
     std::mutex mutex_;
+
+    // FFT解析用リングバッファ
+    std::vector<float> analysisBuffer_;
+    size_t analysisWritePos_ = 0;
+    std::mutex analysisMutex_;
 };
 
 // ---------------------------------------------------------------------------
@@ -564,6 +606,11 @@ inline void initAudio() {
 // オーディオエンジンをシャットダウン
 inline void shutdownAudio() {
     AudioEngine::getInstance().shutdown();
+}
+
+// FFT解析用: 最新のオーディオサンプルを取得
+inline size_t getAudioAnalysisBuffer(float* outBuffer, size_t numSamples) {
+    return AudioEngine::getInstance().getAnalysisBuffer(outBuffer, numSamples);
 }
 
 } // namespace trussc
