@@ -14,6 +14,8 @@
 //   sound.load("music.ogg");
 //   sound.play();
 //   sound.setVolume(0.8f);
+//   sound.setPan(-0.5f);   // 左寄り
+//   sound.setSpeed(1.5f);  // 1.5倍速
 //   sound.setLoop(true);
 // =============================================================================
 
@@ -206,11 +208,15 @@ public:
 // ---------------------------------------------------------------------------
 struct PlayingSound {
     std::shared_ptr<SoundBuffer> buffer;
-    std::atomic<size_t> position{0};     // 現在の再生位置（サンプル単位）
     std::atomic<float> volume{1.0f};
+    std::atomic<float> pan{0.0f};        // -1.0 (左) ~ 0.0 (中央) ~ 1.0 (右)
+    std::atomic<float> speed{1.0f};      // 0.5 (半速) ~ 1.0 (通常) ~ 2.0 (倍速)
     std::atomic<bool> loop{false};
     std::atomic<bool> playing{false};
     std::atomic<bool> paused{false};
+
+    // 再生位置（浮動小数点で管理、speed 対応用）
+    double positionF{0.0};
 };
 
 // ---------------------------------------------------------------------------
@@ -266,8 +272,10 @@ public:
             if (!slot || !slot->playing) {
                 slot = std::make_shared<PlayingSound>();
                 slot->buffer = buffer;
-                slot->position = 0;
+                slot->positionF = 0.0;
                 slot->volume = 1.0f;
+                slot->pan = 0.0f;
+                slot->speed = 1.0f;
                 slot->loop = false;
                 slot->playing = true;
                 slot->paused = false;
@@ -303,29 +311,62 @@ private:
             if (!sound || !sound->playing || sound->paused) continue;
 
             auto& src = sound->buffer;
-            size_t pos = sound->position;
+            double posF = sound->positionF;
             float vol = sound->volume;
+            float pan = sound->pan;
+            float speed = sound->speed;
+
+            // pan から左右の音量係数を計算
+            // pan = -1.0: 左100%, 右0%
+            // pan =  0.0: 左100%, 右100%
+            // pan =  1.0: 左0%,   右100%
+            float panL = (pan <= 0.0f) ? 1.0f : (1.0f - pan);
+            float panR = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
 
             for (int frame = 0; frame < num_frames; frame++) {
-                if (pos >= src->numSamples) {
+                size_t pos0 = (size_t)posF;
+                size_t pos1 = pos0 + 1;
+                float frac = (float)(posF - pos0);
+
+                // ループ処理
+                if (pos0 >= src->numSamples) {
                     if (sound->loop) {
-                        pos = 0;
+                        posF = 0.0;
+                        pos0 = 0;
+                        pos1 = 1;
+                        frac = 0.0f;
                     } else {
                         sound->playing = false;
                         break;
                     }
                 }
 
-                // ソースサンプルを取得
-                float left = 0, right = 0;
+                // 境界チェック (pos1 が範囲外の場合)
+                if (pos1 >= src->numSamples) {
+                    pos1 = sound->loop ? 0 : pos0;
+                }
+
+                // サンプル取得 (線形補間)
+                float left0, right0, left1, right1;
                 if (src->channels == 1) {
-                    // モノラル → ステレオ
-                    left = right = src->samples[pos] * vol;
+                    // モノラル
+                    left0 = right0 = src->samples[pos0];
+                    left1 = right1 = src->samples[pos1];
                 } else {
                     // ステレオ
-                    left = src->samples[pos * 2] * vol;
-                    right = src->samples[pos * 2 + 1] * vol;
+                    left0 = src->samples[pos0 * 2];
+                    right0 = src->samples[pos0 * 2 + 1];
+                    left1 = src->samples[pos1 * 2];
+                    right1 = src->samples[pos1 * 2 + 1];
                 }
+
+                // 線形補間
+                float left = left0 + (left1 - left0) * frac;
+                float right = right0 + (right1 - right0) * frac;
+
+                // 音量とパンを適用
+                left *= vol * panL;
+                right *= vol * panR;
 
                 // ミックス
                 buffer[frame * num_channels] += left;
@@ -333,10 +374,10 @@ private:
                     buffer[frame * num_channels + 1] += right;
                 }
 
-                pos++;
+                posF += speed;
             }
 
-            sound->position = pos;
+            sound->positionF = posF;
         }
 
         // クリッピング
@@ -416,6 +457,8 @@ public:
         playing_ = AudioEngine::getInstance().play(buffer_);
         if (playing_) {
             playing_->volume = volume_;
+            playing_->pan = pan_;
+            playing_->speed = speed_;
             playing_->loop = loop_;
         }
     }
@@ -460,6 +503,26 @@ public:
 
     bool isLoop() const { return loop_; }
 
+    void setPan(float pan) {
+        // -1.0 (左) ~ 0.0 (中央) ~ 1.0 (右)
+        pan_ = (pan < -1.0f) ? -1.0f : (pan > 1.0f) ? 1.0f : pan;
+        if (playing_) {
+            playing_->pan = pan_;
+        }
+    }
+
+    float getPan() const { return pan_; }
+
+    void setSpeed(float speed) {
+        // 0.1 ~ 4.0 の範囲に制限（極端な値を防ぐ）
+        speed_ = (speed < 0.1f) ? 0.1f : (speed > 4.0f) ? 4.0f : speed;
+        if (playing_) {
+            playing_->speed = speed_;
+        }
+    }
+
+    float getSpeed() const { return speed_; }
+
     // -------------------------------------------------------------------------
     // 状態
     // -------------------------------------------------------------------------
@@ -473,7 +536,7 @@ public:
 
     float getPosition() const {
         if (!playing_ || !buffer_) return 0;
-        return (float)playing_->position / buffer_->sampleRate;
+        return (float)playing_->positionF / buffer_->sampleRate;
     }
 
     float getDuration() const {
@@ -484,6 +547,8 @@ private:
     std::shared_ptr<SoundBuffer> buffer_;
     std::shared_ptr<PlayingSound> playing_;
     float volume_ = 1.0f;
+    float pan_ = 0.0f;
+    float speed_ = 1.0f;
     bool loop_ = false;
 };
 
