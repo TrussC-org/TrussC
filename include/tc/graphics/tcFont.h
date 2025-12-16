@@ -603,8 +603,8 @@ public:
             sgl_texture(atlas.view, sampler_);
 
             // 現在の描画色を取得して設定
-            sgl_c4f(internal::currentR, internal::currentG,
-                    internal::currentB, internal::currentA);
+            Color col = getDefaultContext().getColor();
+            sgl_c4f(col.r, col.g, col.b, col.a);
 
             sgl_begin_quads();
 

@@ -261,11 +261,13 @@ public:
         if (vertices_.empty()) return;
 
         size_t n = vertices_.size();
+        auto& ctx = getDefaultContext();
+        Color col = ctx.getColor();
 
         // fill モード: 三角形ファン（凸形状のみ正しく描画）
-        if (internal::fillEnabled && n >= 3) {
+        if (ctx.isFillEnabled() && n >= 3) {
             sgl_begin_triangles();
-            sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
+            sgl_c4f(col.r, col.g, col.b, col.a);
             for (size_t i = 1; i < n - 1; i++) {
                 sgl_v3f(vertices_[0].x, vertices_[0].y, vertices_[0].z);
                 sgl_v3f(vertices_[i].x, vertices_[i].y, vertices_[i].z);
@@ -275,8 +277,8 @@ public:
         }
 
         // stroke モード: ラインストリップ
-        if (internal::strokeEnabled && n >= 2) {
-            sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
+        if (ctx.isStrokeEnabled() && n >= 2) {
+            sgl_c4f(col.r, col.g, col.b, col.a);
             sgl_begin_line_strip();
             for (size_t i = 0; i < n; i++) {
                 sgl_v3f(vertices_[i].x, vertices_[i].y, vertices_[i].z);

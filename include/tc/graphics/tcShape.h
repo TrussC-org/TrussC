@@ -54,11 +54,13 @@ inline void endShape(bool close = false) {
 
     auto& verts = internal::shapeVertices;
     size_t n = verts.size();
+    auto& ctx = getDefaultContext();
+    Color col = ctx.getColor();
 
     // fill モード: 三角形ファン（凸形状のみ正しく描画）
-    if (internal::fillEnabled && n >= 3) {
+    if (ctx.isFillEnabled() && n >= 3) {
         sgl_begin_triangles();
-        sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
+        sgl_c4f(col.r, col.g, col.b, col.a);
         // 三角形ファン: 0番目の頂点を中心に
         for (size_t i = 1; i < n - 1; i++) {
             sgl_v3f(verts[0].x, verts[0].y, verts[0].z);
@@ -69,8 +71,8 @@ inline void endShape(bool close = false) {
     }
 
     // stroke モード: ラインストリップ
-    if (internal::strokeEnabled && n >= 2) {
-        sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
+    if (ctx.isStrokeEnabled() && n >= 2) {
+        sgl_c4f(col.r, col.g, col.b, col.a);
         sgl_begin_line_strip();
         for (size_t i = 0; i < n; i++) {
             sgl_v3f(verts[i].x, verts[i].y, verts[i].z);

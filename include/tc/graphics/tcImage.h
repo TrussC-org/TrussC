@@ -311,8 +311,9 @@ private:
         sgl_texture(view_, sampler_);
 
         // 現在の色で描画（setColor の色がかかる）
+        Color col = getDefaultContext().getColor();
         sgl_begin_quads();
-        sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
+        sgl_c4f(col.r, col.g, col.b, col.a);
 
         // テクスチャ座標: 左上(0,0) 右下(1,1)
         sgl_v2f_t2f(x, y, 0.0f, 0.0f);

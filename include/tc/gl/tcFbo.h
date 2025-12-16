@@ -268,8 +268,9 @@ private:
         sgl_enable_texture();
         sgl_texture(textureView_, sampler_);
 
+        Color col = getDefaultContext().getColor();
         sgl_begin_quads();
-        sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
+        sgl_c4f(col.r, col.g, col.b, col.a);
 
         // FBO は Y が反転している場合があるので確認が必要
         // sokol/Metal では反転しないはず

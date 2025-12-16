@@ -49,6 +49,26 @@
 // =============================================================================
 namespace trussc {
 
+// 前方宣言（RenderContext 用）
+namespace internal {
+    inline sg_image fontTexture = {};
+    inline sg_view fontView = {};
+    inline sg_sampler fontSampler = {};
+    inline sgl_pipeline fontPipeline = {};
+    inline bool fontInitialized = false;
+    inline sgl_pipeline pipeline3d = {};
+    inline bool pipeline3dInitialized = false;
+    inline bool pixelPerfectMode = false;
+}
+
+} // namespace trussc (一時的に閉じる)
+
+// RenderContext クラス（描画状態を保持）
+#include "tc/graphics/tcRenderContext.h"
+
+// 名前空間を再開
+namespace trussc {
+
 // バージョン情報
 constexpr int VERSION_MAJOR = 0;
 constexpr int VERSION_MINOR = 0;
@@ -57,23 +77,10 @@ constexpr int VERSION_PATCH = 1;
 // 数学定数は tcMath.h で定義: TAU, HALF_TAU, QUARTER_TAU, PI
 
 // ---------------------------------------------------------------------------
-// 内部状態
+// 内部状態（アプリケーション・ウィンドウ関連）
+// 描画状態は RenderContext に移動済み
 // ---------------------------------------------------------------------------
 namespace internal {
-    // 現在の描画色
-    inline float currentR = 1.0f;
-    inline float currentG = 1.0f;
-    inline float currentB = 1.0f;
-    inline float currentA = 1.0f;
-
-    // 塗りつぶし / ストローク
-    inline bool fillEnabled = true;
-    inline bool strokeEnabled = false;
-    inline float strokeWeight = 1.0f;
-
-    // 円の分割数（oFと同じデフォルト値）
-    inline int circleResolution = 20;
-
     // ---------------------------------------------------------------------------
     // Loop Architecture (Decoupled Update/Draw)
     // ---------------------------------------------------------------------------
@@ -104,24 +111,6 @@ namespace internal {
     inline float pmouseY = 0.0f;
     inline int mouseButton = -1;  // 現在押されているボタン (-1 = なし)
     inline bool mousePressed = false;
-
-    // 行列スタック（自前管理）
-    inline Mat4 currentMatrix = Mat4::identity();
-    inline std::vector<Mat4> matrixStack;
-
-    // ビットマップフォント用テクスチャ
-    inline sg_image fontTexture = {};
-    inline sg_view fontView = {};
-    inline sg_sampler fontSampler = {};
-    inline sgl_pipeline fontPipeline = {};
-    inline bool fontInitialized = false;
-
-    // ピクセルパーフェクトモード（座標系=フレームバッファサイズ）
-    inline bool pixelPerfectMode = false;
-
-    // 3D描画用パイプライン（深度テスト + 背面カリング）
-    inline sgl_pipeline pipeline3d = {};
-    inline bool pipeline3dInitialized = false;
 
     // フレームレート計測用（10フレーム移動平均）
     inline double frameTimeBuffer[10] = {};
@@ -336,189 +325,162 @@ inline void resumeSwapchainPass() {
 }
 
 // ---------------------------------------------------------------------------
-// 色設定
+// 色設定（RenderContext への委譲）
 // ---------------------------------------------------------------------------
 
 // 描画色設定 (float: 0.0 ~ 1.0)
 inline void setColor(float r, float g, float b, float a = 1.0f) {
-    internal::currentR = r;
-    internal::currentG = g;
-    internal::currentB = b;
-    internal::currentA = a;
+    getDefaultContext().setColor(r, g, b, a);
 }
 
 // 描画色設定 (int: 0 ~ 255)
 inline void setColor(int r, int g, int b, int a = 255) {
-    setColor(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
+    getDefaultContext().setColor(r, g, b, a);
 }
 
 // グレースケール
 inline void setColor(float gray, float a = 1.0f) {
-    setColor(gray, gray, gray, a);
+    getDefaultContext().setColor(gray, a);
 }
 
 inline void setColor(int gray, int a = 255) {
-    setColor(gray, gray, gray, a);
+    getDefaultContext().setColor(gray, a);
 }
 
 // Color 構造体で設定
 inline void setColor(const Color& c) {
-    setColor(c.r, c.g, c.b, c.a);
+    getDefaultContext().setColor(c);
 }
 
 // HSB で設定 (H: 0-TAU, S: 0-1, B: 0-1)
 inline void setColorHSB(float h, float s, float b, float a = 1.0f) {
-    Color c = ColorHSB(h, s, b, a).toRGB();
-    setColor(c.r, c.g, c.b, c.a);
+    getDefaultContext().setColorHSB(h, s, b, a);
 }
 
 // OKLab で設定 (L: 0-1, a: ~-0.4-0.4, b: ~-0.4-0.4)
 inline void setColorOKLab(float L, float a_lab, float b_lab, float alpha = 1.0f) {
-    Color c = ColorOKLab(L, a_lab, b_lab, alpha).toRGB();
-    setColor(c.r, c.g, c.b, c.a);
+    getDefaultContext().setColorOKLab(L, a_lab, b_lab, alpha);
 }
 
 // OKLCH で設定 (L: 0-1, C: 0-0.4, H: 0-TAU) - 最も知覚的に自然
 inline void setColorOKLCH(float L, float C, float H, float alpha = 1.0f) {
-    Color c = ColorOKLCH(L, C, H, alpha).toRGB();
-    setColor(c.r, c.g, c.b, c.a);
+    getDefaultContext().setColorOKLCH(L, C, H, alpha);
 }
 
 // 塗りつぶしを有効化
 inline void fill() {
-    internal::fillEnabled = true;
+    getDefaultContext().fill();
 }
 
 // 塗りつぶしを無効化
 inline void noFill() {
-    internal::fillEnabled = false;
+    getDefaultContext().noFill();
 }
 
 // ストロークを有効化
 inline void stroke() {
-    internal::strokeEnabled = true;
+    getDefaultContext().stroke();
 }
 
 // ストロークを無効化
 inline void noStroke() {
-    internal::strokeEnabled = false;
+    getDefaultContext().noStroke();
 }
 
 // ストロークの太さ
 inline void setStrokeWeight(float weight) {
-    internal::strokeWeight = weight;
+    getDefaultContext().setStrokeWeight(weight);
 }
 
 // ---------------------------------------------------------------------------
-// 変形（自前の行列スタック管理）
+// 変形（RenderContext への委譲）
 // ---------------------------------------------------------------------------
-
-// 内部: 自前の行列を sokol_gl に同期
-inline void syncMatrixToSokol() {
-    sgl_load_matrix(internal::currentMatrix.m);
-}
 
 // 行列をスタックに保存
 inline void pushMatrix() {
-    internal::matrixStack.push_back(internal::currentMatrix);
-    sgl_push_matrix();
+    getDefaultContext().pushMatrix();
 }
 
 // 行列をスタックから復元
 inline void popMatrix() {
-    if (!internal::matrixStack.empty()) {
-        internal::currentMatrix = internal::matrixStack.back();
-        internal::matrixStack.pop_back();
-    }
-    sgl_pop_matrix();
+    getDefaultContext().popMatrix();
 }
 
 // 平行移動
 inline void translate(float x, float y) {
-    internal::currentMatrix = internal::currentMatrix * Mat4::translate(x, y, 0.0f);
-    sgl_translate(x, y, 0.0f);
+    getDefaultContext().translate(x, y);
 }
 
 // 3D移動
 inline void translate(float x, float y, float z) {
-    internal::currentMatrix = internal::currentMatrix * Mat4::translate(x, y, z);
-    sgl_translate(x, y, z);
+    getDefaultContext().translate(x, y, z);
 }
 
 // Z軸回転（ラジアン）
 inline void rotate(float radians) {
-    internal::currentMatrix = internal::currentMatrix * Mat4::rotateZ(radians);
-    sgl_rotate(radians, 0.0f, 0.0f, 1.0f);
+    getDefaultContext().rotate(radians);
 }
 
 // X軸回転（ラジアン）
 inline void rotateX(float radians) {
-    internal::currentMatrix = internal::currentMatrix * Mat4::rotateX(radians);
-    sgl_rotate(radians, 1.0f, 0.0f, 0.0f);
+    getDefaultContext().rotateX(radians);
 }
 
 // Y軸回転（ラジアン）
 inline void rotateY(float radians) {
-    internal::currentMatrix = internal::currentMatrix * Mat4::rotateY(radians);
-    sgl_rotate(radians, 0.0f, 1.0f, 0.0f);
+    getDefaultContext().rotateY(radians);
 }
 
 // Z軸回転（ラジアン）- 明示的
 inline void rotateZ(float radians) {
-    internal::currentMatrix = internal::currentMatrix * Mat4::rotateZ(radians);
-    sgl_rotate(radians, 0.0f, 0.0f, 1.0f);
+    getDefaultContext().rotateZ(radians);
 }
 
 // 度数法でも回転できる
 inline void rotateDeg(float degrees) {
-    rotate(degrees * PI / 180.0f);
+    getDefaultContext().rotateDeg(degrees);
 }
 
 inline void rotateXDeg(float degrees) {
-    rotateX(degrees * PI / 180.0f);
+    getDefaultContext().rotateXDeg(degrees);
 }
 
 inline void rotateYDeg(float degrees) {
-    rotateY(degrees * PI / 180.0f);
+    getDefaultContext().rotateYDeg(degrees);
 }
 
 inline void rotateZDeg(float degrees) {
-    rotateZ(degrees * PI / 180.0f);
+    getDefaultContext().rotateZDeg(degrees);
 }
 
 // スケール（均一）
 inline void scale(float s) {
-    internal::currentMatrix = internal::currentMatrix * Mat4::scale(s, s, 1.0f);
-    sgl_scale(s, s, 1.0f);
+    getDefaultContext().scale(s);
 }
 
 // スケール（非均一 2D）
 inline void scale(float sx, float sy) {
-    internal::currentMatrix = internal::currentMatrix * Mat4::scale(sx, sy, 1.0f);
-    sgl_scale(sx, sy, 1.0f);
+    getDefaultContext().scale(sx, sy);
 }
 
 // スケール（非均一 3D）
 inline void scale(float sx, float sy, float sz) {
-    internal::currentMatrix = internal::currentMatrix * Mat4::scale(sx, sy, sz);
-    sgl_scale(sx, sy, sz);
+    getDefaultContext().scale(sx, sy, sz);
 }
 
 // 現在の変換行列を取得
 inline Mat4 getCurrentMatrix() {
-    return internal::currentMatrix;
+    return getDefaultContext().getCurrentMatrix();
 }
 
 // 変換行列をリセット
 inline void resetMatrix() {
-    internal::currentMatrix = Mat4::identity();
-    sgl_load_identity();
+    getDefaultContext().resetMatrix();
 }
 
 // 変換行列を直接設定
 inline void setMatrix(const Mat4& mat) {
-    internal::currentMatrix = mat;
-    syncMatrixToSokol();
+    getDefaultContext().setMatrix(mat);
 }
 
 // ---------------------------------------------------------------------------
@@ -558,135 +520,46 @@ inline void disable3D() {
 }
 
 // ---------------------------------------------------------------------------
-// 基本図形描画
+// 基本図形描画（RenderContext への委譲）
 // ---------------------------------------------------------------------------
 
 // 四角形 (左上座標 + サイズ)
 inline void drawRect(float x, float y, float w, float h) {
-    if (internal::fillEnabled) {
-        sgl_begin_quads();
-        sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
-        sgl_v2f(x, y);
-        sgl_v2f(x + w, y);
-        sgl_v2f(x + w, y + h);
-        sgl_v2f(x, y + h);
-        sgl_end();
-    }
-    if (internal::strokeEnabled) {
-        sgl_begin_line_strip();
-        sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
-        sgl_v2f(x, y);
-        sgl_v2f(x + w, y);
-        sgl_v2f(x + w, y + h);
-        sgl_v2f(x, y + h);
-        sgl_v2f(x, y);
-        sgl_end();
-    }
+    getDefaultContext().drawRect(x, y, w, h);
 }
 
 // 円
 inline void drawCircle(float cx, float cy, float radius) {
-    int segments = internal::circleResolution;
-
-    if (internal::fillEnabled) {
-        sgl_begin_triangle_strip();
-        sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
-        for (int i = 0; i <= segments; i++) {
-            float angle = (float)i / segments * TAU;
-            float px = cx + cos(angle) * radius;
-            float py = cy + sin(angle) * radius;
-            sgl_v2f(cx, cy);
-            sgl_v2f(px, py);
-        }
-        sgl_end();
-    }
-    if (internal::strokeEnabled) {
-        sgl_begin_line_strip();
-        sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
-        for (int i = 0; i <= segments; i++) {
-            float angle = (float)i / segments * TAU;
-            float px = cx + cos(angle) * radius;
-            float py = cy + sin(angle) * radius;
-            sgl_v2f(px, py);
-        }
-        sgl_end();
-    }
+    getDefaultContext().drawCircle(cx, cy, radius);
 }
 
 // 楕円
 inline void drawEllipse(float cx, float cy, float rx, float ry) {
-    int segments = internal::circleResolution;
-
-    if (internal::fillEnabled) {
-        sgl_begin_triangle_strip();
-        sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
-        for (int i = 0; i <= segments; i++) {
-            float angle = (float)i / segments * TAU;
-            float px = cx + cos(angle) * rx;
-            float py = cy + sin(angle) * ry;
-            sgl_v2f(cx, cy);
-            sgl_v2f(px, py);
-        }
-        sgl_end();
-    }
-    if (internal::strokeEnabled) {
-        sgl_begin_line_strip();
-        sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
-        for (int i = 0; i <= segments; i++) {
-            float angle = (float)i / segments * TAU;
-            float px = cx + cos(angle) * rx;
-            float py = cy + sin(angle) * ry;
-            sgl_v2f(px, py);
-        }
-        sgl_end();
-    }
+    getDefaultContext().drawEllipse(cx, cy, rx, ry);
 }
 
 // 線
 inline void drawLine(float x1, float y1, float x2, float y2) {
-    sgl_begin_lines();
-    sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
-    sgl_v2f(x1, y1);
-    sgl_v2f(x2, y2);
-    sgl_end();
+    getDefaultContext().drawLine(x1, y1, x2, y2);
 }
 
 // 三角形
 inline void drawTriangle(float x1, float y1, float x2, float y2, float x3, float y3) {
-    if (internal::fillEnabled) {
-        sgl_begin_triangles();
-        sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
-        sgl_v2f(x1, y1);
-        sgl_v2f(x2, y2);
-        sgl_v2f(x3, y3);
-        sgl_end();
-    }
-    if (internal::strokeEnabled) {
-        sgl_begin_line_strip();
-        sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
-        sgl_v2f(x1, y1);
-        sgl_v2f(x2, y2);
-        sgl_v2f(x3, y3);
-        sgl_v2f(x1, y1);
-        sgl_end();
-    }
+    getDefaultContext().drawTriangle(x1, y1, x2, y2, x3, y3);
 }
 
 // 点
 inline void drawPoint(float x, float y) {
-    sgl_begin_points();
-    sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
-    sgl_v2f(x, y);
-    sgl_end();
+    getDefaultContext().drawPoint(x, y);
 }
 
 // 円の分割数を設定
 inline void setCircleResolution(int res) {
-    internal::circleResolution = res;
+    getDefaultContext().setCircleResolution(res);
 }
 
 // ---------------------------------------------------------------------------
-// ビットマップ文字列描画（テクスチャアトラス方式）
+// ビットマップ文字列描画（RenderContext への委譲）
 // ---------------------------------------------------------------------------
 
 // テキストのバウンディングボックスを計算
@@ -716,149 +589,12 @@ inline void getBitmapStringBounds(const std::string& text, float& width, float& 
 // screenFixed = true (デフォルト): スクリーン固定（回転・スケールをキャンセル）
 // screenFixed = false: 現在の行列変換に追従（回転・スケールも適用）
 inline void drawBitmapString(const std::string& text, float x, float y, bool screenFixed = true) {
-    if (text.empty() || !internal::fontInitialized) return;
-
-    pushMatrix();
-
-    if (screenFixed) {
-        // スクリーン固定: ローカル座標をワールド座標に変換し、行列をリセット
-        Mat4 currentMat = getCurrentMatrix();
-        float worldX = currentMat.m[0]*x + currentMat.m[1]*y + currentMat.m[3];
-        float worldY = currentMat.m[4]*x + currentMat.m[5]*y + currentMat.m[7];
-        resetMatrix();
-        translate(worldX, worldY);
-    } else {
-        // 変換に追従: 現在の行列のまま、指定位置に移動
-        translate(x, y);
-    }
-
-    // アルファブレンドパイプラインとテクスチャを有効化
-    sgl_load_pipeline(internal::fontPipeline);
-    sgl_enable_texture();
-    sgl_texture(internal::fontView, internal::fontSampler);
-
-    // 全文字をバッチで描画
-    sgl_begin_quads();
-    sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
-
-    const float charW = bitmapfont::CHAR_TEX_WIDTH;
-    const float charH = bitmapfont::CHAR_TEX_HEIGHT;
-    float cursorX = 0;
-    float cursorY = -charH;  // baseline 基準: 指定した y が文字の下端になる
-
-    for (char c : text) {
-        // 改行処理
-        if (c == '\n') {
-            cursorX = 0;
-            cursorY += charH;
-            continue;
-        }
-
-        // タブ処理（8文字分のスペース、oFと同じ）
-        if (c == '\t') {
-            cursorX += charW * 8;
-            continue;
-        }
-
-        // 制御文字はスキップ
-        if (c < 32) continue;
-
-        // テクスチャ座標を取得
-        float u, v;
-        bitmapfont::getCharTexCoord(c, u, v);
-        float u2 = u + bitmapfont::TEX_CHAR_WIDTH;
-        float v2 = v + bitmapfont::TEX_CHAR_HEIGHT;
-
-        // 四角形を描画（テクスチャ座標付き）
-        float px = cursorX;
-        float py = cursorY;
-
-        sgl_v2f_t2f(px, py, u, v);
-        sgl_v2f_t2f(px + charW, py, u2, v);
-        sgl_v2f_t2f(px + charW, py + charH, u2, v2);
-        sgl_v2f_t2f(px, py + charH, u, v2);
-
-        cursorX += charW;
-    }
-
-    sgl_end();
-    sgl_disable_texture();
-    sgl_load_default_pipeline();
-
-    // 行列を復元
-    popMatrix();
+    getDefaultContext().drawBitmapString(text, x, y, screenFixed);
 }
 
 // ビットマップ文字列を描画（スケール付き）
 inline void drawBitmapString(const std::string& text, float x, float y, float scale) {
-    if (text.empty() || !internal::fontInitialized) return;
-
-    // ローカル座標をワールド座標に変換（行列全体を適用）
-    // Mat4は行優先: m[0],m[1]が1行目、m[3]=tx, m[7]=ty
-    Mat4 currentMat = getCurrentMatrix();
-    float worldX = currentMat.m[0]*x + currentMat.m[1]*y + currentMat.m[3];
-    float worldY = currentMat.m[4]*x + currentMat.m[5]*y + currentMat.m[7];
-
-    // 行列を保存して、translate のみの行列に切り替え
-    pushMatrix();
-    resetMatrix();
-    translate(worldX, worldY);
-
-    // アルファブレンドパイプラインとテクスチャを有効化
-    sgl_load_pipeline(internal::fontPipeline);
-    sgl_enable_texture();
-    sgl_texture(internal::fontView, internal::fontSampler);
-
-    // 全文字をバッチで描画
-    sgl_begin_quads();
-    sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
-
-    const float charW = bitmapfont::CHAR_TEX_WIDTH * scale;
-    const float charH = bitmapfont::CHAR_TEX_HEIGHT * scale;
-    float cursorX = 0;
-    float cursorY = -charH;  // baseline 基準
-
-    for (char c : text) {
-        // 改行処理
-        if (c == '\n') {
-            cursorX = 0;
-            cursorY += charH;
-            continue;
-        }
-
-        // タブ処理（8文字分のスペース）
-        if (c == '\t') {
-            cursorX += charW * 8;
-            continue;
-        }
-
-        // 制御文字はスキップ
-        if (c < 32) continue;
-
-        // テクスチャ座標を取得
-        float u, v;
-        bitmapfont::getCharTexCoord(c, u, v);
-        float u2 = u + bitmapfont::TEX_CHAR_WIDTH;
-        float v2 = v + bitmapfont::TEX_CHAR_HEIGHT;
-
-        // 四角形を描画（テクスチャ座標付き）
-        float px = cursorX;
-        float py = cursorY;
-
-        sgl_v2f_t2f(px, py, u, v);
-        sgl_v2f_t2f(px + charW, py, u2, v);
-        sgl_v2f_t2f(px + charW, py + charH, u2, v2);
-        sgl_v2f_t2f(px, py + charH, u, v2);
-
-        cursorX += charW;
-    }
-
-    sgl_end();
-    sgl_disable_texture();
-    sgl_load_default_pipeline();
-
-    // 行列を復元
-    popMatrix();
+    getDefaultContext().drawBitmapString(text, x, y, scale);
 }
 
 // ビットマップ文字列を背景付きで描画
@@ -874,8 +610,7 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     // パディング
     const float padding = 4.0f;
 
-    // ローカル座標をワールド座標に変換（行列全体を適用）
-    // Mat4は行優先: m[0],m[1]が1行目、m[3]=tx, m[7]=ty
+    // ローカル座標をワールド座標に変換
     Mat4 currentMat = getCurrentMatrix();
     float worldX = currentMat.m[0]*x + currentMat.m[1]*y + currentMat.m[3];
     float worldY = currentMat.m[4]*x + currentMat.m[5]*y + currentMat.m[7];

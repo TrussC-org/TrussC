@@ -141,6 +141,7 @@ public:
 
         bool useColors = hasColors() && colors_.size() >= vertices_.size();
         bool useIndices = hasIndices();
+        Color defColor = getDefaultContext().getColor();
 
         // sokol_gl の描画モード開始
         switch (mode_) {
@@ -176,8 +177,7 @@ public:
                     if (useColors) {
                         sgl_c4f(colors_[idx].r, colors_[idx].g, colors_[idx].b, colors_[idx].a);
                     } else {
-                        sgl_c4f(internal::currentR, internal::currentG,
-                                internal::currentB, internal::currentA);
+                        sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
                     }
                     sgl_v3f(vertices_[idx].x, vertices_[idx].y, vertices_[idx].z);
                 }
@@ -187,8 +187,7 @@ public:
                 if (useColors) {
                     sgl_c4f(colors_[i].r, colors_[i].g, colors_[i].b, colors_[i].a);
                 } else {
-                    sgl_c4f(internal::currentR, internal::currentG,
-                            internal::currentB, internal::currentA);
+                    sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
                 }
                 sgl_v3f(vertices_[i].x, vertices_[i].y, vertices_[i].z);
             }
@@ -209,6 +208,7 @@ public:
             return;
         }
 
+        Color defColor = getDefaultContext().getColor();
         sgl_begin_lines();
 
         if (hasIndices()) {
@@ -219,8 +219,7 @@ public:
                 unsigned int i2 = indices_[i + 2];
 
                 if (i0 < vertices_.size() && i1 < vertices_.size() && i2 < vertices_.size()) {
-                    sgl_c4f(internal::currentR, internal::currentG,
-                            internal::currentB, internal::currentA);
+                    sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
 
                     // エッジ 0-1
                     sgl_v3f(vertices_[i0].x, vertices_[i0].y, vertices_[i0].z);
@@ -238,8 +237,7 @@ public:
         } else {
             // インデックスなしの場合、3頂点ずつ三角形として処理
             for (size_t i = 0; i + 2 < vertices_.size(); i += 3) {
-                sgl_c4f(internal::currentR, internal::currentG,
-                        internal::currentB, internal::currentA);
+                sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
 
                 // エッジ 0-1
                 sgl_v3f(vertices_[i].x, vertices_[i].y, vertices_[i].z);
@@ -263,6 +261,7 @@ private:
     void drawTriangleFan(bool useColors, bool useIndices) const {
         if (vertices_.size() < 3) return;
 
+        Color defColor = getDefaultContext().getColor();
         sgl_begin_triangles();
 
         if (useIndices && indices_.size() >= 3) {
@@ -277,8 +276,7 @@ private:
                         if (useColors && idx < colors_.size()) {
                             sgl_c4f(colors_[idx].r, colors_[idx].g, colors_[idx].b, colors_[idx].a);
                         } else {
-                            sgl_c4f(internal::currentR, internal::currentG,
-                                    internal::currentB, internal::currentA);
+                            sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
                         }
                         sgl_v3f(vertices_[idx].x, vertices_[idx].y, vertices_[idx].z);
                     }
@@ -291,8 +289,7 @@ private:
                     if (useColors) {
                         sgl_c4f(colors_[j].r, colors_[j].g, colors_[j].b, colors_[j].a);
                     } else {
-                        sgl_c4f(internal::currentR, internal::currentG,
-                                internal::currentB, internal::currentA);
+                        sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
                     }
                     sgl_v3f(vertices_[j].x, vertices_[j].y, vertices_[j].z);
                 }
@@ -306,6 +303,7 @@ private:
     void drawLineLoop(bool useColors, bool useIndices) const {
         if (vertices_.size() < 2) return;
 
+        Color defColor = getDefaultContext().getColor();
         sgl_begin_line_strip();
 
         if (useIndices && !indices_.empty()) {
@@ -314,8 +312,7 @@ private:
                     if (useColors && idx < colors_.size()) {
                         sgl_c4f(colors_[idx].r, colors_[idx].g, colors_[idx].b, colors_[idx].a);
                     } else {
-                        sgl_c4f(internal::currentR, internal::currentG,
-                                internal::currentB, internal::currentA);
+                        sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
                     }
                     sgl_v3f(vertices_[idx].x, vertices_[idx].y, vertices_[idx].z);
                 }
@@ -326,8 +323,7 @@ private:
                 if (useColors && idx < colors_.size()) {
                     sgl_c4f(colors_[idx].r, colors_[idx].g, colors_[idx].b, colors_[idx].a);
                 } else {
-                    sgl_c4f(internal::currentR, internal::currentG,
-                            internal::currentB, internal::currentA);
+                    sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
                 }
                 sgl_v3f(vertices_[idx].x, vertices_[idx].y, vertices_[idx].z);
             }
@@ -336,8 +332,7 @@ private:
                 if (useColors) {
                     sgl_c4f(colors_[i].r, colors_[i].g, colors_[i].b, colors_[i].a);
                 } else {
-                    sgl_c4f(internal::currentR, internal::currentG,
-                            internal::currentB, internal::currentA);
+                    sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
                 }
                 sgl_v3f(vertices_[i].x, vertices_[i].y, vertices_[i].z);
             }
@@ -345,8 +340,7 @@ private:
             if (useColors) {
                 sgl_c4f(colors_[0].r, colors_[0].g, colors_[0].b, colors_[0].a);
             } else {
-                sgl_c4f(internal::currentR, internal::currentG,
-                        internal::currentB, internal::currentA);
+                sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
             }
             sgl_v3f(vertices_[0].x, vertices_[0].y, vertices_[0].z);
         }
