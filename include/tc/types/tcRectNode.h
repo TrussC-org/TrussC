@@ -135,20 +135,21 @@ public:
             draw();
         }
 
-        // クリッピングが有効なら scissor を設定
+        // クリッピングが有効なら scissor を設定（スタックにプッシュ）
         if (clipping_) {
             // ローカル座標 (0,0) と (width, height) をグローバル座標に変換
             float gx1, gy1, gx2, gy2;
             localToGlobal(0, 0, gx1, gy1);
             localToGlobal(width, height, gx2, gy2);
 
-            // スクリーン座標での矩形を計算
-            float sx = std::min(gx1, gx2);
-            float sy = std::min(gy1, gy2);
-            float sw = std::abs(gx2 - gx1);
-            float sh = std::abs(gy2 - gy1);
+            // スクリーン座標での矩形を計算（DPIスケール考慮）
+            float dpi = sapp_dpi_scale();
+            float sx = std::min(gx1, gx2) * dpi;
+            float sy = std::min(gy1, gy2) * dpi;
+            float sw = std::abs(gx2 - gx1) * dpi;
+            float sh = std::abs(gy2 - gy1) * dpi;
 
-            setScissor(sx, sy, sw, sh);
+            pushScissor(sx, sy, sw, sh);
         }
 
         // 子ノードを描画
@@ -156,9 +157,9 @@ public:
             child->drawTree();
         }
 
-        // クリッピングをリセット
+        // クリッピングを復元（スタックからポップ）
         if (clipping_) {
-            resetScissor();
+            popScissor();
         }
 
         popMatrix();

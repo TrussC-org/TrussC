@@ -229,7 +229,7 @@ public:
         float gx, gy;
         localToGlobal(0, 0, gx, gy);
         float dpi = sapp_dpi_scale();
-        tc::setScissor(gx * dpi, gy * dpi, width * dpi, height * dpi);
+        tc::pushScissor(gx * dpi, gy * dpi, width * dpi, height * dpi);
 
         // スクロール可能なコンテンツ
         tc::pushMatrix();
@@ -250,8 +250,8 @@ public:
 
         tc::popMatrix();
 
-        // クリッピングをリセット
-        tc::resetScissor();
+        // クリッピングを復元
+        tc::popScissor();
 
         // 枠線
         tc::noFill();

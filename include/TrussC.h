@@ -75,6 +75,16 @@ namespace internal {
     inline int circleResolution = 20;
 
     // ---------------------------------------------------------------------------
+    // Scissor Clipping スタック
+    // ---------------------------------------------------------------------------
+    struct ScissorRect {
+        float x, y, w, h;
+        bool active;  // スタックに有効な範囲があるか
+    };
+    inline std::vector<ScissorRect> scissorStack;
+    inline ScissorRect currentScissor = {0, 0, 0, 0, false};
+
+    // ---------------------------------------------------------------------------
     // Loop Architecture (Decoupled Update/Draw)
     // ---------------------------------------------------------------------------
 
@@ -413,19 +423,71 @@ inline void setStrokeWeight(float weight) {
 // Scissor Clipping（描画領域の制限）
 // ---------------------------------------------------------------------------
 
+// 2つの矩形の交差を計算（内部ヘルパー）
+inline void intersectRect(float x1, float y1, float w1, float h1,
+                          float x2, float y2, float w2, float h2,
+                          float& ox, float& oy, float& ow, float& oh) {
+    float left = std::max(x1, x2);
+    float top = std::max(y1, y2);
+    float right = std::min(x1 + w1, x2 + w2);
+    float bottom = std::min(y1 + h1, y2 + h2);
+    ox = left;
+    oy = top;
+    ow = std::max(0.0f, right - left);
+    oh = std::max(0.0f, bottom - top);
+}
+
 // Scissor矩形を設定（スクリーン座標）
 inline void setScissor(float x, float y, float w, float h) {
+    internal::currentScissor = {x, y, w, h, true};
     sgl_scissor_rectf(x, y, w, h, true);  // origin_top_left = true
 }
 
 // Scissor矩形を設定（int版）
 inline void setScissor(int x, int y, int w, int h) {
-    sgl_scissor_rect(x, y, w, h, true);
+    setScissor((float)x, (float)y, (float)w, (float)h);
 }
 
 // Scissorをウィンドウ全体にリセット
 inline void resetScissor() {
+    internal::currentScissor.active = false;
     sgl_scissor_rect(0, 0, sapp_width(), sapp_height(), true);
+}
+
+// Scissorをスタックに保存し、新しい範囲を設定（現在の範囲との交差）
+inline void pushScissor(float x, float y, float w, float h) {
+    // 現在の状態をスタックに保存
+    internal::scissorStack.push_back(internal::currentScissor);
+
+    // 新しい範囲を計算（現在の範囲との交差）
+    if (internal::currentScissor.active) {
+        float nx, ny, nw, nh;
+        intersectRect(internal::currentScissor.x, internal::currentScissor.y,
+                      internal::currentScissor.w, internal::currentScissor.h,
+                      x, y, w, h,
+                      nx, ny, nw, nh);
+        setScissor(nx, ny, nw, nh);
+    } else {
+        setScissor(x, y, w, h);
+    }
+}
+
+// Scissorをスタックから復元
+inline void popScissor() {
+    if (internal::scissorStack.empty()) {
+        resetScissor();
+        return;
+    }
+
+    internal::currentScissor = internal::scissorStack.back();
+    internal::scissorStack.pop_back();
+
+    if (internal::currentScissor.active) {
+        sgl_scissor_rectf(internal::currentScissor.x, internal::currentScissor.y,
+                          internal::currentScissor.w, internal::currentScissor.h, true);
+    } else {
+        sgl_scissor_rect(0, 0, sapp_width(), sapp_height(), true);
+    }
 }
 
 // ---------------------------------------------------------------------------
