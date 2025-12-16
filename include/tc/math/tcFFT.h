@@ -24,6 +24,8 @@
 #include <cmath>
 #include <algorithm>
 
+#include "../utils/tcLog.h"
+
 namespace trussc {
 
 // ---------------------------------------------------------------------------
@@ -122,7 +124,7 @@ inline void fft(std::vector<std::complex<float>>& data) {
 
     // 2のべき乗でなければエラー
     if (!isPowerOfTwo(n)) {
-        printf("FFT: size must be power of 2 (got %d)\n", n);
+        tcLogError() << "FFT: size must be power of 2 (got " << n << ")";
         return;
     }
 

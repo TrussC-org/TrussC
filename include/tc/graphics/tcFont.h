@@ -31,6 +31,8 @@
 // stb_truetype
 #include "stb/stb_truetype.h"
 
+#include "../utils/tcLog.h"
+
 namespace trussc {
 
 // ---------------------------------------------------------------------------
@@ -108,7 +110,7 @@ public:
         // フォントファイルを読み込み
         std::ifstream file(fontPath, std::ios::binary | std::ios::ate);
         if (!file) {
-            printf("FontAtlasManager: failed to open %s\n", fontPath.c_str());
+            tcLogError() << "FontAtlasManager: failed to open " << fontPath;
             return false;
         }
 
@@ -116,13 +118,13 @@ public:
         file.seekg(0, std::ios::beg);
         fontData_.resize(fileSize);
         if (!file.read(reinterpret_cast<char*>(fontData_.data()), fileSize)) {
-            printf("FontAtlasManager: failed to read %s\n", fontPath.c_str());
+            tcLogError() << "FontAtlasManager: failed to read " << fontPath;
             return false;
         }
 
         // stb_truetype で初期化
         if (!stbtt_InitFont(&fontInfo_, fontData_.data(), 0)) {
-            printf("FontAtlasManager: failed to init font %s\n", fontPath.c_str());
+            tcLogError() << "FontAtlasManager: failed to init font " << fontPath;
             fontData_.clear();
             return false;
         }
@@ -147,7 +149,6 @@ public:
         createNewAtlas();
 
         loaded_ = true;
-        printf("FontAtlasManager: loaded %s (size=%d)\n", fontPath.c_str(), fontSize);
         return true;
     }
 
@@ -278,8 +279,9 @@ private:
             return false;
         }
 
-        printf("FontAtlasManager: expanding atlas %zu from %dx%d to %dx%d\n",
-               atlasIndex, atlas.width, atlas.height, newWidth, newHeight);
+        tcLogVerbose() << "FontAtlasManager: expanding atlas " << atlasIndex
+                       << " from " << atlas.width << "x" << atlas.height
+                       << " to " << newWidth << "x" << newHeight;
 
         // 新しいバッファを作成
         std::vector<uint8_t> newPixels(newWidth * newHeight * 4, 0);
@@ -371,7 +373,7 @@ private:
             // それでも入らなければ拡張を繰り返す
             while (!tryFitGlyph(targetAtlas, paddedWidth, paddedHeight)) {
                 if (!expandAtlas(targetAtlas)) {
-                    printf("FontAtlasManager: cannot fit glyph for U+%04X\n", codepoint);
+                    tcLogWarning() << "FontAtlasManager: cannot fit glyph for U+" << std::hex << codepoint << std::dec;
                     outInfo.valid = false;
                     return false;
                 }

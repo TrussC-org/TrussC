@@ -25,6 +25,8 @@
 #include <sstream>
 #include <filesystem>
 
+#include "../utils/tcLog.h"
+
 namespace trussc {
 
 namespace fs = std::filesystem;
@@ -62,7 +64,7 @@ public:
     bool load(const fs::path& path) {
         std::ifstream file(path);
         if (!file) {
-            printf("Shader: failed to open %s\n", path.string().c_str());
+            tcLogError() << "Shader: failed to open " << path.string();
             return false;
         }
 
@@ -120,7 +122,7 @@ public:
 
         shader_ = sg_make_shader(&shd_desc);
         if (sg_query_shader_state(shader_) != SG_RESOURCESTATE_VALID) {
-            printf("Shader: failed to create shader\n");
+            tcLogError() << "Shader: failed to create shader";
             return false;
         }
 
@@ -137,7 +139,7 @@ public:
 
         pipeline_ = sg_make_pipeline(&pip_desc);
         if (sg_query_pipeline_state(pipeline_) != SG_RESOURCESTATE_VALID) {
-            printf("Shader: failed to create pipeline\n");
+            tcLogError() << "Shader: failed to create pipeline";
             sg_destroy_shader(shader_);
             shader_ = {};
             return false;

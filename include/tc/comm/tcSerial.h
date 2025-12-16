@@ -17,6 +17,8 @@
 #include <dirent.h>
 #include <cstring>
 
+#include "../utils/tcLog.h"
+
 namespace trussc {
 
 // ---------------------------------------------------------------------------
@@ -75,9 +77,9 @@ public:
     // 利用可能なシリアルデバイスをコンソールに表示
     void listDevices() {
         auto devices = getDeviceList();
-        printf("Serial devices:\n");
+        tcLogNotice() << "Serial devices:";
         for (const auto& dev : devices) {
-            printf("  [%d] %s\n", dev.deviceId, dev.devicePath.c_str());
+            tcLogNotice() << "  [" << dev.deviceId << "] " << dev.devicePath;
         }
     }
 
@@ -142,13 +144,13 @@ public:
         // デバイスを開く（非ブロッキング）
         fd_ = open(portName.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
         if (fd_ == -1) {
-            printf("Serial: failed to open %s\n", portName.c_str());
+            tcLogError() << "Serial: failed to open " << portName;
             return false;
         }
 
         // 排他ロックを取得
         if (ioctl(fd_, TIOCEXCL) == -1) {
-            printf("Serial: failed to get exclusive access\n");
+            tcLogError() << "Serial: failed to get exclusive access";
             ::close(fd_);
             fd_ = -1;
             return false;
@@ -157,7 +159,7 @@ public:
         // 端末設定を取得
         struct termios options;
         if (tcgetattr(fd_, &options) == -1) {
-            printf("Serial: failed to get terminal attributes\n");
+            tcLogError() << "Serial: failed to get terminal attributes";
             ::close(fd_);
             fd_ = -1;
             return false;
@@ -192,7 +194,7 @@ public:
 
         // 設定を適用
         if (tcsetattr(fd_, TCSANOW, &options) == -1) {
-            printf("Serial: failed to set terminal attributes\n");
+            tcLogError() << "Serial: failed to set terminal attributes";
             ::close(fd_);
             fd_ = -1;
             return false;
@@ -203,7 +205,7 @@ public:
 
         devicePath_ = portName;
         initialized_ = true;
-        printf("Serial: connected to %s at %d baud\n", portName.c_str(), baudRate);
+        tcLogNotice() << "Serial: connected to " << portName << " at " << baudRate << " baud";
         return true;
     }
 
@@ -211,8 +213,7 @@ public:
     bool setup(int deviceIndex, int baudRate) {
         auto devices = getDeviceList();
         if (deviceIndex < 0 || deviceIndex >= (int)devices.size()) {
-            printf("Serial: device index %d out of range (0-%d)\n",
-                   deviceIndex, (int)devices.size() - 1);
+            tcLogError() << "Serial: device index " << deviceIndex << " out of range (0-" << (int)devices.size() - 1 << ")";
             return false;
         }
         return setup(devices[deviceIndex].devicePath, baudRate);
@@ -223,7 +224,7 @@ public:
         if (fd_ != -1) {
             ::close(fd_);
             fd_ = -1;
-            printf("Serial: disconnected from %s\n", devicePath_.c_str());
+            tcLogVerbose() << "Serial: disconnected from " << devicePath_;
         }
         initialized_ = false;
     }
@@ -384,7 +385,7 @@ private:
             case 921600: return B921600;
 #endif
             default:
-                printf("Serial: unsupported baud rate %d, using 9600\n", baudRate);
+                tcLogWarning() << "Serial: unsupported baud rate " << baudRate << ", using 9600";
                 return B9600;
         }
     }

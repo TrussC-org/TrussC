@@ -17,14 +17,14 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
     id<MTLDevice> device = (__bridge id<MTLDevice>)sg_mtl_device();
 
     if (!device) {
-        printf("[FBO] Failed to get Metal device\n");
+        tcLogError() << "[FBO] Failed to get Metal device";
         return false;
     }
 
     // コマンドキューを作成
     id<MTLCommandQueue> cmdQueue = [device newCommandQueue];
     if (!cmdQueue) {
-        printf("[FBO] Failed to create command queue\n");
+        tcLogError() << "[FBO] Failed to create command queue";
         return false;
     }
 
@@ -33,7 +33,7 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
     id<MTLTexture> srcTexture = (__bridge id<MTLTexture>)info.tex[info.active_slot];
 
     if (!srcTexture) {
-        printf("[FBO] Failed to get source MTLTexture\n");
+        tcLogError() << "[FBO] Failed to get source MTLTexture";
         return false;
     }
 
@@ -47,7 +47,7 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
 
     id<MTLTexture> dstTexture = [device newTextureWithDescriptor:desc];
     if (!dstTexture) {
-        printf("[FBO] Failed to create destination texture\n");
+        tcLogError() << "[FBO] Failed to create destination texture";
         return false;
     }
 

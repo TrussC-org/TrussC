@@ -4,15 +4,16 @@
 // tcLog.h - ロギングシステム
 // =============================================================================
 
-// このファイルは TrussC.h からインクルードされる
-// Event, EventListener が先にインクルードされている必要がある
-
 #include <sstream>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <chrono>
 #include <ctime>
+
+// Event システムを使用
+#include "../events/tcEvent.h"
+#include "../events/tcEventListener.h"
 
 namespace trussc {
 
