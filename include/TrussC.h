@@ -1560,6 +1560,9 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 // TrussC メッシュ
 #include "tc/graphics/tcMesh.h"
 
+// TrussC ストロークメッシュ（太線描画）
+#include "tc/graphics/tcStrokeMesh.h"
+
 // TrussC 画像
 #include "tc/graphics/tcImage.h"
 
