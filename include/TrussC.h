@@ -1522,6 +1522,15 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 // TrussC ストロークメッシュ（太線描画）
 #include "tc/graphics/tcStrokeMesh.h"
 
+// TrussC ピクセルバッファ
+#include "tc/graphics/tcPixels.h"
+
+// TrussC テクスチャ
+#include "tc/gl/tcTexture.h"
+
+// TrussC HasTexture インターフェース
+#include "tc/gl/tcHasTexture.h"
+
 // TrussC 画像
 #include "tc/graphics/tcImage.h"
 

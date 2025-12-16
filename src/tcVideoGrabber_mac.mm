@@ -198,27 +198,82 @@ bool VideoGrabber::setupPlatform() {
 
         data->device = devices[deviceId_];
 
+        // =========================================================
+        // デバイスのフォーマットから最適な解像度を選択（oF方式）
+        // =========================================================
+        NSError* configError = nil;
+        [data->device lockForConfiguration:&configError];
+
+        if (!configError) {
+            float smallestDist = 99999999.0f;
+            int bestW = 0, bestH = 0;
+            AVCaptureDeviceFormat* bestFormat = nil;
+
+            NSLog(@"VideoGrabber: Searching for %dx%d in device formats...", requestedWidth_, requestedHeight_);
+
+            for (AVCaptureDeviceFormat* format in [data->device formats]) {
+                CMFormatDescriptionRef desc = format.formatDescription;
+
+                // ビデオフォーマットかチェック
+                CMMediaType mediaType = CMFormatDescriptionGetMediaType(desc);
+                if (mediaType != kCMMediaType_Video) continue;
+
+                CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(desc);
+                int tw = dimensions.width;
+                int th = dimensions.height;
+
+                // 完全一致なら即採用
+                if (tw == requestedWidth_ && th == requestedHeight_) {
+                    bestW = tw;
+                    bestH = th;
+                    bestFormat = format;
+                    NSLog(@"VideoGrabber: Found exact match: %dx%d", tw, th);
+                    break;
+                }
+
+                // ユークリッド距離で最も近いフォーマットを探す
+                float dx = (float)(tw - requestedWidth_);
+                float dy = (float)(th - requestedHeight_);
+                float dist = sqrtf(dx * dx + dy * dy);
+
+                if (dist < smallestDist) {
+                    smallestDist = dist;
+                    bestW = tw;
+                    bestH = th;
+                    bestFormat = format;
+                }
+            }
+
+            // 最適なフォーマットを設定
+            if (bestFormat != nil && bestW > 0 && bestH > 0) {
+                if (bestW != requestedWidth_ || bestH != requestedHeight_) {
+                    NSLog(@"VideoGrabber: Requested %dx%d not available. Using closest: %dx%d",
+                          requestedWidth_, requestedHeight_, bestW, bestH);
+                }
+                [data->device setActiveFormat:bestFormat];
+                width_ = bestW;
+                height_ = bestH;
+            } else {
+                // フォールバック: 現在のフォーマットを使用
+                CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(
+                    data->device.activeFormat.formatDescription);
+                width_ = dimensions.width;
+                height_ = dimensions.height;
+                NSLog(@"VideoGrabber: No suitable format found. Using device default: %dx%d", width_, height_);
+            }
+
+            [data->device unlockForConfiguration];
+        } else {
+            NSLog(@"VideoGrabber: Failed to lock device: %@", configError.localizedDescription);
+            // フォールバック: 現在のフォーマットを使用
+            CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(
+                data->device.activeFormat.formatDescription);
+            width_ = dimensions.width;
+            height_ = dimensions.height;
+        }
+
         // セッションを作成
         data->session = [[AVCaptureSession alloc] init];
-
-        // 解像度を設定（要求サイズに近いプリセットを選択）
-        if (requestedWidth_ >= 1920 && requestedHeight_ >= 1080) {
-            if ([data->session canSetSessionPreset:AVCaptureSessionPreset1920x1080]) {
-                data->session.sessionPreset = AVCaptureSessionPreset1920x1080;
-            }
-        } else if (requestedWidth_ >= 1280 && requestedHeight_ >= 720) {
-            if ([data->session canSetSessionPreset:AVCaptureSessionPreset1280x720]) {
-                data->session.sessionPreset = AVCaptureSessionPreset1280x720;
-            }
-        } else if (requestedWidth_ >= 640 && requestedHeight_ >= 480) {
-            if ([data->session canSetSessionPreset:AVCaptureSessionPreset640x480]) {
-                data->session.sessionPreset = AVCaptureSessionPreset640x480;
-            }
-        } else {
-            if ([data->session canSetSessionPreset:AVCaptureSessionPreset352x288]) {
-                data->session.sessionPreset = AVCaptureSessionPreset352x288;
-            }
-        }
 
         // 入力を設定
         NSError* error = nil;
@@ -238,10 +293,12 @@ bool VideoGrabber::setupPlatform() {
         }
         [data->session addInput:data->input];
 
-        // 出力を設定
+        // 出力を設定（oF方式: 出力サイズも指定）
         data->output = [[AVCaptureVideoDataOutput alloc] init];
         data->output.videoSettings = @{
-            (NSString*)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)
+            (NSString*)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
+            (NSString*)kCVPixelBufferWidthKey: @(width_),
+            (NSString*)kCVPixelBufferHeightKey: @(height_)
         };
         data->output.alwaysDiscardsLateVideoFrames = YES;
 
@@ -266,25 +323,7 @@ bool VideoGrabber::setupPlatform() {
         }
         [data->session addOutput:data->output];
 
-        // 実際の解像度を取得（セッション開始後に確定するので、まずプリセットから推定）
-        // 後で最初のフレームで実際のサイズを確認する
-        NSString* preset = data->session.sessionPreset;
-        if ([preset isEqualToString:AVCaptureSessionPreset1920x1080]) {
-            width_ = 1920; height_ = 1080;
-        } else if ([preset isEqualToString:AVCaptureSessionPreset1280x720]) {
-            width_ = 1280; height_ = 720;
-        } else if ([preset isEqualToString:AVCaptureSessionPreset640x480]) {
-            width_ = 640; height_ = 480;
-        } else if ([preset isEqualToString:AVCaptureSessionPreset352x288]) {
-            width_ = 352; height_ = 288;
-        } else {
-            // プリセットが不明な場合はデバイスのフォーマットから取得
-            CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(data->device.activeFormat.formatDescription);
-            width_ = dimensions.width;
-            height_ = dimensions.height;
-        }
-
-        NSLog(@"VideoGrabber: Preset=%@, estimated size=%dx%d", preset, width_, height_);
+        NSLog(@"VideoGrabber: Configured format: %dx%d", width_, height_);
 
         // バックバッファを確保
         data->bufferWidth = width_;
