@@ -41,6 +41,7 @@ if(TC_PLATFORM_MACOS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcPlatform_mac.mm
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFbo_mac.mm
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcVideoGrabber_mac.mm
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFileDialog_mac.mm
         ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_impl.cpp
     )
 else()
