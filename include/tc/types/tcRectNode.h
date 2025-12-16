@@ -20,6 +20,7 @@ public:
     Event<MouseEventArgs> mousePressed;
     Event<MouseEventArgs> mouseReleased;
     Event<MouseDragEventArgs> mouseDragged;
+    Event<ScrollEventArgs> mouseScrolled;
 
     // サイズ（ローカル座標系での幅・高さ）
     float width = 100.0f;
@@ -132,6 +133,16 @@ protected:
         args.deltaX = localX - getMouseX();  // 簡易的な delta
         args.deltaY = localY - getMouseY();
         mouseDragged.notify(args);
+        return true;
+    }
+
+    bool onMouseScroll(float localX, float localY, float scrollX, float scrollY) override {
+        (void)localX;
+        (void)localY;
+        ScrollEventArgs args;
+        args.scrollX = scrollX;
+        args.scrollY = scrollY;
+        mouseScrolled.notify(args);
         return true;
     }
 

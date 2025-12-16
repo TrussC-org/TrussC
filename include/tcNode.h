@@ -444,6 +444,14 @@ protected:
         return false;
     }
 
+    virtual bool onMouseScroll(float localX, float localY, float scrollX, float scrollY) {
+        (void)localX;
+        (void)localY;
+        (void)scrollX;
+        (void)scrollY;
+        return false;
+    }
+
     // キーイベント
     virtual bool onKeyPress(int key) {
         (void)key;
