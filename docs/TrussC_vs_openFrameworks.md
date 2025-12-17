@@ -83,6 +83,40 @@ TrussCは、現代のアプリケーション開発における「複雑さ」�
     * **軽量:** コンパイルが爆速で、実行ファイルも軽量です。  
     * **Addon命名:** tc (TrussC) プレフィックスで統一し、拡張機能も「標準パーツ」として扱います。
 
+### **F. アドオンシステム**
+
+* **openFrameworks:**
+  * **命名:** `ofx` プレフィックス（例: `ofxGui`, `ofxOsc`）
+  * **導入方法:** projectGenerator でチェックボックスを選択、または `addons.make` ファイルに記述。
+  * **ビルド:** IDE のプロジェクト設定に手動でパスを追加する場合も多い。
+  * **名前空間:** 標準的な規約がなく、グローバル名前空間に直接定義されることが多い。
+  * **課題:** アドオン同士の依存関係解決が手動。「ofxA が ofxB に依存」という場合、両方を addons.make に書く必要がある。
+
+* **TrussC:**
+  * **命名:** `tcx` プレフィックス（例: `tcxBox2d`, `tcxOsc`）
+  * **導入方法:** CMakeLists.txt に1行追加するだけ。
+    ```cmake
+    use_addon(${PROJECT_NAME} tcxBox2d)
+    ```
+  * **ビルド:** CMake が自動的にインクルードパス・ライブラリリンクを設定。
+  * **名前空間:** `tcx::アドオン名` で統一（例: `tcx::box2d::World`）。
+  * **メリット:**
+    * **依存関係の自動解決:** tcxA が tcxB に依存していれば、`use_addon(app tcxA)` だけで tcxB も自動的にリンクされる。
+    * **FetchContent 対応:** 外部ライブラリは CMake の FetchContent で自動ダウンロード可能。
+    * **名前の衝突回避:** 名前空間が整理されているため、複数のアドオンで同名クラスがあっても安全。
+
+**フォルダ構造の比較:**
+
+| 項目 | openFrameworks | TrussC |
+|:-----|:---------------|:-------|
+| 配置場所 | `of/addons/ofxName/` | `trussc/addons/tcxName/` |
+| ソースコード | `src/` | `src/` |
+| ヘッダー | `src/` (混在) | `include/tcxName/` (分離) |
+| サンプル | `example/` | `examples/` |
+| ビルド設定 | `addon_config.mk` | `CMakeLists.txt` |
+
+詳細は [ADDONS.md](ADDONS.md) を参照。
+
 ## **3\. どちらを選ぶべきか？**
 
 ### **openFrameworks を選ぶべき場合**
@@ -456,3 +490,14 @@ oF ユーザーが TrussC で同等の機能を探す際のリファレンスで
 | `ofLogVerbose()` | `tc::tcLogVerbose()` | |
 | `ofLogWarning()` | `tc::tcLogWarning()` | |
 | `ofLogError()` | `tc::tcLogError()` | |
+
+### **アドオン**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofxAddon` | `tcxAddon` | プレフィックス |
+| `addons.make` に記述 | `use_addon()` | CMake 関数 |
+| `ofxGui` | `tcxGui` | GUI |
+| `ofxOsc` | `tcxOsc` | OSC 通信 |
+| `ofxBox2d` | `tcxBox2d` | 2D 物理エンジン |
+| - | `tcx::addonname::Class` | 名前空間規約 |
