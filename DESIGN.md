@@ -97,3 +97,79 @@ tc::disable3D();  // 2D描画に戻す
 ```
 
 2D 描画は従来通り `sgl_ortho` を使用（深度テスト不要）。
+
+---
+
+## Module / Addon アーキテクチャ
+
+TrussC では機能を「コアモジュール」と「アドオン」の2種類に分けて管理する。
+
+### コアモジュール (tc:: 名前空間)
+
+**特徴:**
+- `#include <TrussC.h>` だけで使える
+- 実装は `libTrussC` にコンパイル済み
+- ユーザーは追加のビルド設定不要
+
+**含まれる機能:**
+- グラフィックス（描画、Image、FBO、Mesh 等）
+- 数学ライブラリ（Vec、Mat、ノイズ、FFT 等）
+- イベントシステム
+- JSON / XML（nlohmann/json, pugixml）
+- ImGui（Dear ImGui + sokol_imgui）
+- Sound（sokol_audio + dr_libs）
+- VideoGrabber（カメラ入力）
+- FileDialog
+
+**単一ヘッダーライブラリの扱い:**
+
+stb、dr_libs、nlohmann/json など「単一ヘッダーライブラリ」は、`#define XXX_IMPLEMENTATION` が必要なものがある。これらは TrussC の実装ファイル（`src/*.cpp` / `src/*.mm`）で一度だけ展開し、`libTrussC` にコンパイルする。ユーザーはヘッダーをインクルードするだけで使える。
+
+```
+例: stb_image.h の場合
+
+include/stb_image.h        ← ヘッダー（宣言のみ）
+src/stb_impl.cpp           ← #define STB_IMAGE_IMPLEMENTATION + #include "stb_image.h"
+```
+
+**利点:**
+- コンパイル時間の短縮（実装は1回だけコンパイル）
+- リンクエラーの防止（多重定義を避ける）
+- ユーザーは何も考えずに `#include` するだけでOK
+
+### アドオン (tcx:: 名前空間)
+
+**特徴:**
+- 追加の CMake 設定が必要
+- 外部依存ライブラリを使用する場合がある
+- オプション機能や実験的機能
+
+**将来の候補:**
+- tcxOsc（Open Sound Control）
+- tcxMidi（MIDI 入出力）
+- tcxOpenCV（画像処理）
+- tcxBox2D（物理演算）
+
+**使い方:**
+
+```cmake
+# CMakeLists.txt
+add_subdirectory(path/to/tcxOsc)
+target_link_libraries(myApp PRIVATE tcx::Osc)
+```
+
+```cpp
+// main.cpp
+#include <TrussC.h>
+#include <tcx/Osc.h>
+```
+
+### 判断基準
+
+| 条件 | 分類 |
+|------|------|
+| 多くのプロジェクトで使う | コアモジュール |
+| 外部依存なし or MIT互換 | コアモジュール |
+| 特定用途向け | アドオン |
+| 重い外部依存（OpenCV等） | アドオン |
+| 実験的・不安定 | アドオン |

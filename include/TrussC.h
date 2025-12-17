@@ -1603,5 +1603,8 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 // TrussC ImGui 統合
 #include "tc/gui/tcImGui.h"
 
+// TrussC サウンド
+#include "tc/sound/tcSound.h"
+
 // 短縮エイリアス
 namespace tc = trussc;

@@ -17,11 +17,6 @@ message(STATUS "[soundPlayerFFTExample] TrussC: ${TRUSSC_DIR}")
 add_subdirectory(${TRUSSC_DIR} ${CMAKE_BINARY_DIR}/TrussC)
 
 # =============================================================================
-# tcSound モジュール
-# =============================================================================
-add_subdirectory(${TRUSSC_DIR}/modules/tcSound ${CMAKE_BINARY_DIR}/tcSound)
-
-# =============================================================================
 # 実行ファイル
 # =============================================================================
 add_executable(${PROJECT_NAME})
@@ -31,7 +26,7 @@ target_sources(${PROJECT_NAME} PRIVATE
     src/tcApp.cpp
 )
 
-target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC tc::Sound)
+target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC)
 
 # =============================================================================
 # macOS 固有設定
