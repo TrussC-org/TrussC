@@ -91,7 +91,9 @@ endif()
 
 message(STATUS "[${PROJECT_NAME}] TrussC v${TC_VERSION}: ${TC_ROOT}")
 
-# アドオンの examples はビルドしない（ターゲットをシンプルに保つ）
+# TrussC 自体のアドオンはビルドしない（ユーザーが addons.make で指定したものだけ）
+set(TC_BUILD_ADDONS OFF CACHE BOOL "" FORCE)
+# アドオンの examples もビルドしない（ターゲットをシンプルに保つ）
 set(TCX_BOX2D_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
 # TrussC を追加
