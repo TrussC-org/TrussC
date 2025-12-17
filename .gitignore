@@ -77,3 +77,15 @@ examples/**/out/
 examples/**/*.xcodeproj/
 examples/**/*.sln
 examples/**/*.vcxproj
+
+# =============================================================================
+# Addons
+# =============================================================================
+
+# addons 内のビルド成果物を除外
+addons/**/build/
+addons/**/bin/*
+!addons/**/bin/data/
+addons/**/*.xcodeproj/
+addons/**/*.sln
+addons/**/*.vcxproj
