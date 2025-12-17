@@ -54,6 +54,15 @@ inline std::string getDataPath(const std::string& filename) {
     }
 }
 
+// macOS バンドル配布用: Resources フォルダを data パスに設定
+// xxx.app/Contents/Resources/data/ を参照するようになる
+// macOS 以外では何もしない
+inline void setDataPathToResources() {
+    #ifdef __APPLE__
+    setDataPathRoot("../Resources/data/");
+    #endif
+}
+
 // ---------------------------------------------------------------------------
 // toString - 値を文字列に変換
 // ---------------------------------------------------------------------------
