@@ -13,14 +13,6 @@ openFrameworks に近い API を目指しつつ、モダンな C++ でシンプ�
 
 ## クイックスタート
 
-### 必要環境
-
-- CMake 3.20 以上
-- C++20 対応コンパイラ（Clang 13+, GCC 11+, MSVC 2019+）
-- macOS: Xcode Command Line Tools
-
-### ビルド
-
 ```bash
 # サンプルをビルド
 cd examples/graphics/graphicsExample
@@ -31,6 +23,8 @@ cmake --build .
 # 実行（macOS）
 ./bin/graphicsExample.app/Contents/MacOS/graphicsExample
 ```
+
+詳細なビルド手順は [docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) を参照。
 
 ### 最小限のコード
 
@@ -164,6 +158,14 @@ include/
 examples/             # サンプル集
 src/                  # プラットフォーム固有実装
 ```
+
+## ドキュメント
+
+- [HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) - ビルド方法
+- [DESIGN.md](docs/DESIGN.md) - 設計詳細（Loop Architecture, 3D Projection）
+- [PHILOSOPHY.md](docs/PHILOSOPHY.md) - コンセプト・哲学・技術スタック
+- [ROADMAP.md](docs/ROADMAP.md) - 実装ロードマップ
+- [TrussC_vs_openFrameworks.md](docs/TrussC_vs_openFrameworks.md) - oF ユーザー向けガイド・API対応表
 
 ## ライセンス
 

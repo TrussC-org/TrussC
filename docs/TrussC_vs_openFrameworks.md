@@ -1,0 +1,458 @@
+# **TrussC vs openFrameworks: Evolution & Philosophy**
+
+TrussC は、openFrameworks (oF) が築き上げた「クリエイティブコーディングの楽しさ」と「直感的なプログラミング体験」を深くリスペクトし、その精神を継承しています。
+
+しかし、oFが設計された2000年代初頭と現在とでは、ハードウェアの性能、C++の言語仕様、そして求められるアプリケーションの複雑さが大きく異なります。
+
+このドキュメントでは、TrussCがoFから**何を受け継ぎ**、**何を変えたのか**、そして**その変更がどのようなメリットをもたらすのか**を解説します。
+
+## **1\. 共通点：変わらない「楽しさ」 (Shared DNA)**
+
+oFユーザーがTrussCに触れたとき、違和感なく書き始められるように、以下のコア・コンセプトは意図的に維持しています。
+
+| 項目 | openFrameworks | TrussC | 解説 |
+| :---- | :---- | :---- | :---- |
+| **ライフサイクル** | setup, update, draw | setup, update, draw | クリエイティブコーディングの基本リズムです。この構造は不変です。 |
+| **即時描画** | ofDrawCircle(x, y, r) | tc::drawCircle(x, y, r) | 「1行書けば絵が出る」という魔法のような手軽さは、絶対に失ってはいけない要素です。 |
+| **ステートマシン** | ofSetColor, ofPushMatrix | tc::setColor, tc::pushMatrix | ステート（状態）を変更して描画するスタイルを踏襲しています。 |
+| **学習曲線** | 初心者フレンドリー | 初心者フレンドリー | 複雑なGPUの概念（コマンドバッファ、ディスクリプタヒープ等）は隠蔽し、誰でもコードで表現できるようにします。 |
+
+## **2\. 相違点：現代への適応 (Evolution & Merits)**
+
+TrussCは、現代のアプリケーション開発における「複雑さ」と「パフォーマンス」の課題を解決するために、大胆な構造改革を行いました。
+
+### **A. 構造と座標系：Scene Graphの導入**
+
+* **openFrameworks:**  
+  * **構造:** 基本的にフラット。親子関係を作るには ofNode を手動で管理するか、自前で translate を計算する必要がありました。  
+  * **座標:** マウスイベントは常に「画面左上からの絶対座標」で届きます。回転したオブジェクトの中でのクリック判定は困難な計算が必要でした。  
+  * **課題:** UIや複雑な階層構造を持つ作品を作ると、座標変換のコードで溢れかえります。  
+* **TrussC:**  
+  * **構造:** **シーングラフ (tc::Node)** を標準装備。UnityのGameObjectのように、親子関係を前提とします。  
+  * **座標:** マウスイベントは自動的に変換され、**「そのオブジェクトにとってのローカル座標」** として届きます。  
+  * **メリット:**  
+    * 「回転している親の中にあるボタン」も、rect.contains(pos) だけで判定できます。  
+    * グループごとの移動・回転・表示切り替えが極めて容易になります。
+
+### **B. 描画バックエンド：OpenGLからの脱却**
+
+* **openFrameworks:**  
+  * **技術:** OpenGL (Legacy & Modern)。  
+  * **課題:** Apple (macOS/iOS) がOpenGLを非推奨にし、Metalへ移行したことで、将来的な動作保証やパフォーマンス最適化が困難になっています。  
+* **TrussC:**  
+  * **技術:** **Sokol (Metal / DirectX 11/12 / Vulkan / WebGPU)**。  
+  * **メリット:**  
+    * OSが推奨する最新のネイティブAPI上で動作するため、**高速かつ省電力**です。  
+    * バイナリサイズが圧倒的に小さくなります。  
+    * Webブラウザ (WebAssembly \+ WebGPU) への移植性も高まります。
+
+### **C. メモリ管理：Modern C++ Safety**
+
+* **openFrameworks:**  
+  * **方針:** 生ポインタ (\*) や、独自のスマートポインタ (ofPtr) が混在。  
+  * **課題:** 初心者が delete を忘れてメモリリークしたり、無効なポインタにアクセスしてクラッシュする事故が多発します。  
+* **TrussC:**  
+  * **方針:** **std::shared\_ptr / std::weak\_ptr (C++11以降)** の完全採用。  
+  * **メリット:**  
+    * 親ノードが消えれば、子ノードも自動的に消滅します。  
+    * ユーザーがメモリ解放を意識する必要がほぼなくなります。  
+    * AI (LLM) が生成するモダンなC++コードと相性が抜群です。
+
+### **D. 時間と非同期：安全なタイマー**
+
+* **openFrameworks:**  
+  * **手法:** ofThread を使うか、自前で update 内で時間を計測して if 文を書く。  
+  * **課題:** マルチスレッドはデータの競合（Data Race）を起こしやすく、デバッグが地獄です。update 内の分岐はコードを汚くします。  
+* **TrussC:**  
+  * **手法:** **同期タイマー (callAfter, callEvery)**。  
+  * **メリット:**  
+    * 「3秒後にこの関数を実行」といった処理を、**メインスレッド内で安全に** 記述できます。  
+    * 排他制御（Mutex）が不要で、変数の競合を気にする必要がありません。
+
+### **E. 依存関係とビルド：Minimalism & CMake**
+
+* **openFrameworks:**  
+  * **構成:** "Battery Included"（全部入り）。  
+  * **課題:**  
+    * 「四角形を一つ描くだけ」のアプリでも数百MBのサイズになり、ビルド時間が長いです。  
+    * アドオンを追加する際、ヘッダーパスやリンク設定を手動で管理する必要があり、**「ライブラリはあるのにリンクエラー」** に悩まされがちです。  
+* **TrussC:**  
+  * **構成:** **"Thin Wrapper" \+ CMake**。  
+  * **メリット:**  
+    * **依存関係の自動解決:** target\_link\_libraries を使ってアドオンを1行指定するだけで、必要なヘッダーパスやリンク設定がすべて自動的に伝播します。  
+    * **軽量:** コンパイルが爆速で、実行ファイルも軽量です。  
+    * **Addon命名:** tc (TrussC) プレフィックスで統一し、拡張機能も「標準パーツ」として扱います。
+
+## **3\. どちらを選ぶべきか？**
+
+### **openFrameworks を選ぶべき場合**
+
+* 過去の膨大なアドオン資産（ofxAddon）をそのまま使いたい。  
+* インターネット上に存在する10年分のチュートリアルやサンプルコードを参考にしたい。  
+* Kinect v1/v2 や古い周辺機器との安定した接続が必要。
+
+### **TrussC を選ぶべき場合**
+
+* **「商用案件」** で、ライセンス問題やクラッシュリスクを最小限に抑えたい。  
+* **「モダンなUI」** やインタラクションを含む、複雑な構造のアプリケーションを作りたい。  
+* **「AI (ChatGPT/Claude)」** とペアプログラミングをして、最新のC++でコードを書きたい。  
+* とにかくビルドを速くし、軽快に試行錯誤したい。
+
+TrussCは、oFへのリスペクトを込めて作られた、**「次の10年を戦うための新しい足場（Truss）」** です。
+
+---
+
+## **4. oF で困っていたことへの解決策**
+
+oF ユーザーが長年悩まされてきた問題に対する、TrussC での解決策を紹介します。
+
+### **太線の描画（StrokeMesh）**
+
+**oF の問題:**
+- `ofSetLineWidth()` は OpenGL の制限で太さ 1px 以上が保証されない
+- macOS / Metal 環境では完全に無視される
+- 太い線を描くには自前でメッシュを生成する必要があった
+
+**TrussC の解決:**
+```cpp
+// StrokeMesh で任意の太さの線が描ける
+tc::StrokeMesh stroke;
+stroke.setStrokeWidth(5.0f);  // 5px の太線
+stroke.moveTo(0, 0);
+stroke.lineTo(100, 100);
+stroke.draw();
+
+// Polyline からも生成可能
+tc::Polyline line;
+line.addVertex(0, 0);
+line.addVertex(100, 50);
+line.addVertex(200, 0);
+tc::StrokeMesh stroke2(line, 3.0f);  // 3px
+stroke2.draw();
+```
+
+### **Update と Draw のサイクル制御**
+
+**oF の問題:**
+- `ofSetFrameRate()` は Draw と Update が常に連動
+- 物理シミュレーションを固定タイムステップで回したいときに困る
+- イベント駆動型アプリ（ボタンを押したときだけ再描画）が作りにくい
+
+**TrussC の解決:**
+```cpp
+// Draw と Update を独立制御
+tc::setDrawVsync(true);    // 描画は VSync (60Hz)
+tc::setUpdateFps(120);     // 物理更新は 120Hz
+
+// イベント駆動型（省電力モード）
+tc::setDrawFps(0);         // 自動描画を停止
+// mousePressed 等で tc::redraw() を呼ぶと描画される
+```
+
+### **シーングラフと親子関係（Node）**
+
+**oF の問題:**
+- `ofNode` はあるが、親子関係の管理が手動
+- 子ノードの追加・削除でメモリ管理が複雑
+- 親が消えても子が残ってしまう問題
+
+**TrussC の解決:**
+```cpp
+// shared_ptr ベースで自動管理
+auto parent = tc::Node::create();
+auto child = tc::Node::create();
+parent->addChild(child);
+
+// 親を破棄すれば子も自動的に解放される
+// 循環参照も weak_ptr で安全に回避
+```
+
+### **ローカル座標でのマウスイベント**
+
+**oF の問題:**
+- マウス座標は常にスクリーン座標（左上原点）
+- 回転・スケールしたオブジェクト上のクリック判定が地獄
+- `ofNode` を使っても座標変換は自分で計算
+
+**TrussC の解決:**
+```cpp
+// RectNode は自動的にローカル座標に変換
+class MyButton : public tc::RectNode {
+    void onMousePressed(const tc::Vec2& localPos, int button) override {
+        // localPos は「このノードにとっての」座標
+        // 親が回転していても、自分のローカル座標で届く
+        if (localPos.x < width/2) {
+            // 左半分をクリック
+        }
+    }
+};
+```
+
+### **ヒットテスト（当たり判定）**
+
+**oF の問題:**
+- 複数のオブジェクトが重なっているときの判定が面倒
+- Z オーダー（描画順）を考慮した判定は自前実装
+
+**TrussC の解決:**
+```cpp
+// RectNode は自動的に Z オーダーを考慮
+// 手前のノードが優先的にイベントを受け取る
+// イベントを「消費」すれば後ろには伝播しない
+
+void onMousePressed(const tc::Vec2& pos, int button) override {
+    // このノードで処理したら、後ろのノードには届かない
+    consumeEvent();
+}
+```
+
+### **スレッドセーフなタイマー**
+
+**oF の問題:**
+- `ofThread` はデータ競合を起こしやすい
+- 「3秒後に実行」を安全にやる標準的な方法がない
+
+**TrussC の解決:**
+```cpp
+// メインスレッドで安全に遅延実行
+node->addTimerFunction(3.0f, []() {
+    // 3秒後にメインスレッドで実行
+    // Mutex 不要、データ競合の心配なし
+});
+```
+
+---
+
+## **5. API 対応表（oF → TrussC）**
+
+oF ユーザーが TrussC で同等の機能を探す際のリファレンスです。
+
+### **アプリ構造**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofApp : public ofBaseApp` | `tcApp : public tc::App` | |
+| `ofRunApp(new ofApp())` | `tc::runApp<tcApp>()` | テンプレート形式 |
+| `setup()` | `setup()` | 同じ |
+| `update()` | `update()` | 同じ |
+| `draw()` | `draw()` | 同じ |
+| `keyPressed(int key)` | `keyPressed(int key)` | 同じ |
+| `mousePressed(x, y, button)` | `mousePressed(x, y, button)` | 同じ |
+| `ofSetFrameRate(60)` | `tc::setFps(60)` | |
+| `ofSetVerticalSync(true)` | `tc::setVsync(true)` | |
+| `ofGetElapsedTimef()` | `tc::getElapsedTime()` | |
+| `ofGetFrameRate()` | `tc::getFrameRate()` | |
+| `ofGetWidth()` | `tc::getWindowWidth()` | |
+| `ofGetHeight()` | `tc::getWindowHeight()` | |
+
+### **描画（Graphics）**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofBackground(r, g, b)` | `tc::clear(r, g, b)` | 0-255 ではなく 0.0-1.0 |
+| `ofSetColor(r, g, b, a)` | `tc::setColor(r, g, b, a)` | 0.0-1.0 |
+| `ofSetColor(ofColor::red)` | `tc::setColor(tc::colors::red)` | |
+| `ofDrawRectangle(x, y, w, h)` | `tc::drawRect(x, y, w, h)` | |
+| `ofDrawCircle(x, y, r)` | `tc::drawCircle(x, y, r)` | |
+| `ofDrawEllipse(x, y, w, h)` | `tc::drawEllipse(x, y, w, h)` | |
+| `ofDrawLine(x1, y1, x2, y2)` | `tc::drawLine(x1, y1, x2, y2)` | |
+| `ofDrawTriangle(...)` | `tc::drawTriangle(...)` | |
+| `ofNoFill()` | `tc::noFill()` | |
+| `ofFill()` | `tc::fill()` | |
+| `ofSetLineWidth(w)` | `tc::setLineWidth(w)` | |
+| `ofDrawBitmapString(s, x, y)` | `tc::drawBitmapString(s, x, y)` | |
+
+### **変換（Transform）**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofPushMatrix()` | `tc::pushMatrix()` | |
+| `ofPopMatrix()` | `tc::popMatrix()` | |
+| `ofTranslate(x, y, z)` | `tc::translate(x, y, z)` | |
+| `ofRotateDeg(deg)` | `tc::rotateDeg(deg)` | |
+| `ofRotateRad(rad)` | `tc::rotateRad(rad)` | |
+| `ofScale(x, y, z)` | `tc::scale(x, y, z)` | |
+
+### **数学（Math）**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `glm::vec2` / `ofVec2f` | `tc::Vec2` | |
+| `glm::vec3` / `ofVec3f` | `tc::Vec3` | |
+| `glm::vec4` / `ofVec4f` | `tc::Vec4` | |
+| `glm::mat4` / `ofMatrix4x4` | `tc::Mat4` | |
+| `ofMap(v, a, b, c, d)` | `tc::map(v, a, b, c, d)` | |
+| `ofClamp(v, min, max)` | `tc::clamp(v, min, max)` | std::clamp も可 |
+| `ofLerp(a, b, t)` | `tc::lerp(a, b, t)` | |
+| `ofNoise(x)` | `tc::noise(x)` | Perlin noise |
+| `ofSignedNoise(x)` | `tc::signedNoise(x)` | |
+| `ofRandom(min, max)` | `tc::random(min, max)` | |
+| `ofDegToRad(deg)` | `tc::radians(deg)` | |
+| `ofRadToDeg(rad)` | `tc::degrees(rad)` | |
+| `PI` | `tc::PI` | |
+| `TWO_PI` | `tc::TAU` | τ = 2π |
+
+### **色（Color）**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofColor(r, g, b, a)` | `tc::Color(r, g, b, a)` | 0.0-1.0 |
+| `ofColor::fromHsb(h, s, b)` | `tc::Color::fromHSB(h, s, b)` | 0.0-1.0 |
+| - | `tc::Color::fromOKLab(L, a, b)` | OKLab 色空間 |
+| - | `tc::Color::fromOKLCH(L, C, h)` | OKLCH 色空間 |
+
+### **画像（Image）**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofImage` | `tc::Image` | |
+| `img.load("path")` | `img.load("path")` | 同じ |
+| `img.draw(x, y)` | `img.draw(x, y)` | 同じ |
+| `img.draw(x, y, w, h)` | `img.draw(x, y, w, h)` | 同じ |
+| `img.save("path")` | `img.save("path")` | 同じ |
+| `img.getWidth()` | `img.getWidth()` | 同じ |
+| `img.getHeight()` | `img.getHeight()` | 同じ |
+| `img.setColor(x, y, c)` | `img.setColor(x, y, c)` | 同じ |
+| `img.getColor(x, y)` | `img.getColor(x, y)` | 同じ |
+| - | `img.setFilter(Nearest/Linear)` | テクスチャフィルター |
+| - | `img.setWrap(Repeat/Clamp/...)` | テクスチャラップ |
+
+### **フォント（Font）**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofTrueTypeFont` | `tc::TrueTypeFont` | |
+| `font.load("font.ttf", size)` | `font.load("font.ttf", size)` | |
+| `font.drawString(s, x, y)` | `font.drawString(s, x, y)` | |
+| - | `tc::drawBitmapString(s, x, y)` | 組み込みフォント |
+
+### **3D プリミティブ**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofPlanePrimitive` | `tc::createPlane(w, h)` | Mesh を返す |
+| `ofBoxPrimitive` | `tc::createBox(size)` | |
+| `ofSpherePrimitive` | `tc::createSphere(r, res)` | |
+| `ofIcoSpherePrimitive` | `tc::createIcoSphere(r, res)` | |
+| `ofCylinderPrimitive` | `tc::createCylinder(r, h, res)` | |
+| `ofConePrimitive` | `tc::createCone(r, h, res)` | |
+
+### **3D カメラ**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofEasyCam` | `tc::EasyCam` | |
+| `cam.begin()` | `cam.begin()` | |
+| `cam.end()` | `cam.end()` | |
+
+### **ライティング・マテリアル**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofEnableLighting()` | `tc::enableLighting()` | |
+| `ofDisableLighting()` | `tc::disableLighting()` | |
+| `ofLight` | `tc::Light` | |
+| `light.setDirectional(dir)` | `light.setDirectional(dir)` | |
+| `light.setPointLight()` | `light.setPoint(pos)` | |
+| `light.setAmbientColor(c)` | `light.setAmbient(c)` | |
+| `light.setDiffuseColor(c)` | `light.setDiffuse(c)` | |
+| `light.setSpecularColor(c)` | `light.setSpecular(c)` | |
+| `ofMaterial` | `tc::Material` | |
+| - | `tc::Material::gold()` | プリセット |
+| - | `tc::Material::silver()` | プリセット |
+| - | `tc::Material::plastic(color)` | プリセット |
+
+### **メッシュ**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofMesh` | `tc::Mesh` | |
+| `mesh.addVertex(v)` | `mesh.addVertex(v)` | |
+| `mesh.addColor(c)` | `mesh.addColor(c)` | |
+| `mesh.addNormal(n)` | `mesh.addNormal(n)` | |
+| `mesh.addIndex(i)` | `mesh.addIndex(i)` | |
+| `mesh.draw()` | `mesh.draw()` | |
+| `mesh.drawWireframe()` | `mesh.drawWireframe()` | |
+
+### **FBO**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofFbo` | `tc::Fbo` | |
+| `fbo.allocate(w, h)` | `fbo.allocate(w, h)` | |
+| `fbo.begin()` | `fbo.begin()` | |
+| `fbo.end()` | `fbo.end()` | |
+| `fbo.draw(x, y)` | `fbo.draw(x, y)` | |
+
+### **サウンド**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofSoundPlayer` | `tc::Sound` | |
+| `sound.load("file.wav")` | `sound.load("file.wav")` | |
+| `sound.play()` | `sound.play()` | |
+| `sound.stop()` | `sound.stop()` | |
+| `sound.setVolume(v)` | `sound.setVolume(v)` | |
+| `sound.setLoop(true)` | `sound.setLoop(true)` | |
+| `ofSoundStream` | `tc::SoundStream` | マイク入力 |
+
+### **ビデオ**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofVideoGrabber` | `tc::VideoGrabber` | |
+| `grabber.setup(w, h)` | `grabber.setup(w, h)` | |
+| `grabber.update()` | `grabber.update()` | |
+| `grabber.draw(x, y)` | `grabber.draw(x, y)` | |
+| `grabber.isFrameNew()` | `grabber.isFrameNew()` | |
+
+### **入出力**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofSystemLoadDialog()` | `tc::systemLoadDialog()` | |
+| `ofSystemSaveDialog()` | `tc::systemSaveDialog()` | |
+| `ofToDataPath("file")` | `tc::getDataPath() + "file"` | |
+| `ofLoadJson(path)` | `tc::loadJson(path)` | nlohmann/json |
+| `ofSaveJson(path, json)` | `tc::saveJson(path, json)` | |
+| - | `tc::loadXml(path)` | pugixml |
+| - | `tc::saveXml(path, xml)` | |
+
+### **ネットワーク**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofxTCPClient` | `tc::TcpClient` | |
+| `ofxTCPServer` | `tc::TcpServer` | |
+| `ofxUDPManager` | `tc::UdpSocket` | |
+
+### **GUI**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofxGui` / `ofxImGui` | Dear ImGui（組み込み） | `tc::imgui::Begin()` 等 |
+
+### **イベント**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofEvent<T>` | `tc::Event<T>` | |
+| `ofAddListener(event, obj, &method)` | `tc::EventListener` | RAII 形式 |
+
+### **シーングラフ**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofNode` | `tc::Node` | shared_ptr ベース |
+| `node.setPosition(x, y, z)` | `node->setPosition(x, y, z)` | |
+| `node.setParent(parent)` | `parent->addChild(child)` | |
+| - | `tc::RectNode` | 2D UI 用、ヒットテスト対応 |
+
+### **ログ**
+
+| openFrameworks | TrussC | 備考 |
+|:---|:---|:---|
+| `ofLog()` | `tc::tcLogNotice()` | |
+| `ofLogVerbose()` | `tc::tcLogVerbose()` | |
+| `ofLogWarning()` | `tc::tcLogWarning()` | |
+| `ofLogError()` | `tc::tcLogError()` | |

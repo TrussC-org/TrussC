@@ -121,8 +121,11 @@ cmake --build .
 
 ## 関連ドキュメント
 
-- [DESIGN.md](DESIGN.md) - 設計ドキュメント（Loop Architecture, 3D Projection等）
-- [ROADMAP.md](ROADMAP.md) - サンプル実装ロードマップ
+- [docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) - ビルド方法
+- [docs/DESIGN.md](docs/DESIGN.md) - 設計詳細（Loop Architecture, 3D Projection等）
+- [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) - コンセプト・哲学・技術スタック
+- [docs/ROADMAP.md](docs/ROADMAP.md) - 実装ロードマップ
+- [docs/TrussC_vs_openFrameworks.md](docs/TrussC_vs_openFrameworks.md) - oF ユーザー向けガイド
 
 ## 参考
 
