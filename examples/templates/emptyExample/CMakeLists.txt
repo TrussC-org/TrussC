@@ -25,6 +25,11 @@ project(${PROJECT_DIR_NAME} LANGUAGES C CXX OBJC OBJCXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Xcode 用: 不要なターゲットを抑制
+set(CMAKE_SUPPRESS_REGENERATION true)
+# 自動スキーム生成を無効化（後でプロジェクトターゲットだけ有効にする）
+set(CMAKE_XCODE_GENERATE_SCHEME OFF)
+
 # =============================================================================
 # TrussC パス設定
 # =============================================================================
@@ -86,6 +91,9 @@ endif()
 
 message(STATUS "[${PROJECT_NAME}] TrussC v${TC_VERSION}: ${TC_ROOT}")
 
+# アドオンの examples はビルドしない（ターゲットをシンプルに保つ）
+set(TCX_BOX2D_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
 # TrussC を追加
 add_subdirectory(${TC_ROOT} ${CMAKE_BINARY_DIR}/TrussC)
 
@@ -131,6 +139,8 @@ if(APPLE)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/bin"
+        # Xcode: このターゲットだけスキームを生成
+        XCODE_GENERATE_SCHEME TRUE
     )
     # アイコン設定（icns/にあれば使用、なければデフォルト）
     trussc_setup_icon(${PROJECT_NAME})
