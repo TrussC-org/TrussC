@@ -1,22 +1,72 @@
 # =============================================================================
-# 00_base - TrussC 最小サンプル
+# TrussC プロジェクトテンプレート
+# =============================================================================
+# 使い方:
+#   1. このフォルダを好きな場所にコピー
+#   2. 環境変数 TRUSSC_ROOT を TrussC のパスに設定
+#   3. mkdir build && cd build && cmake .. && cmake --build .
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.20)
-project(emptyExample LANGUAGES C CXX OBJC OBJCXX)
+
+# プロジェクト名（フォルダ名から自動取得）
+get_filename_component(PROJECT_DIR_NAME ${CMAKE_CURRENT_SOURCE_DIR} NAME)
+project(${PROJECT_DIR_NAME} LANGUAGES C CXX OBJC OBJCXX)
 
 # C++20 を使用
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # =============================================================================
-# TrussC を探す（examples/ 内から親ディレクトリを参照）
+# TrussC を探す
 # =============================================================================
-set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
-message(STATUS "[00_base] TrussC: ${TRUSSC_DIR}")
+# 環境変数 TRUSSC_ROOT から取得
+if(DEFINED ENV{TRUSSC_ROOT})
+    set(TRUSSC_ROOT "$ENV{TRUSSC_ROOT}")
+else()
+    message("")
+    message("╔══════════════════════════════════════════════════════════════════╗")
+    message("║                                                                  ║")
+    message("║   ERROR: TRUSSC_ROOT environment variable is not set!           ║")
+    message("║                                                                  ║")
+    message("╠══════════════════════════════════════════════════════════════════╣")
+    message("║                                                                  ║")
+    message("║   Please set it to your TrussC installation path:               ║")
+    message("║                                                                  ║")
+    message("║     export TRUSSC_ROOT=/path/to/trussc                          ║")
+    message("║                                                                  ║")
+    message("║   Add to ~/.zshrc or ~/.bashrc for permanent setup.             ║")
+    message("║                                                                  ║")
+    message("╚══════════════════════════════════════════════════════════════════╝")
+    message("")
+    message(FATAL_ERROR "Configuration failed - TRUSSC_ROOT not set")
+endif()
+
+# パスが存在するか確認
+if(NOT EXISTS "${TRUSSC_ROOT}/CMakeLists.txt")
+    message("")
+    message("╔══════════════════════════════════════════════════════════════════╗")
+    message("║                                                                  ║")
+    message("║   ERROR: TrussC not found!                                       ║")
+    message("║                                                                  ║")
+    message("╠══════════════════════════════════════════════════════════════════╣")
+    message("║                                                                  ║")
+    message("║   TRUSSC_ROOT = ${TRUSSC_ROOT}")
+    message("║                                                                  ║")
+    message("║   Please check your TRUSSC_ROOT environment variable.           ║")
+    message("║                                                                  ║")
+    message("╚══════════════════════════════════════════════════════════════════╝")
+    message("")
+    message(FATAL_ERROR "Configuration failed - TrussC not found")
+endif()
+
+message(STATUS "[${PROJECT_NAME}] TrussC: ${TRUSSC_ROOT}")
 
 # TrussC を追加
-add_subdirectory(${TRUSSC_DIR} ${CMAKE_BINARY_DIR}/TrussC)
+add_subdirectory(${TRUSSC_ROOT} ${CMAKE_BINARY_DIR}/TrussC)
+
+# use_addon マクロを読み込み（アドオン用）
+include(${TRUSSC_ROOT}/cmake/use_addon.cmake)
 
 # =============================================================================
 # 実行ファイル
@@ -32,8 +82,11 @@ target_sources(${PROJECT_NAME} PRIVATE
 # TrussC をリンク
 target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC)
 
+# アドオンを使う場合はここに追加
+# use_addon(${PROJECT_NAME} tcxBox2d)
+
 # =============================================================================
-# macOS 固有設定 (.app バンドル)
+# 出力設定
 # =============================================================================
 if(APPLE)
     set_target_properties(${PROJECT_NAME} PROPERTIES
@@ -42,19 +95,13 @@ if(APPLE)
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.trussc.${PROJECT_NAME}"
         MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
-    )
-
-    # アイコン設定（icns/にあれば使用、なければデフォルト）
-    trussc_setup_icon(${PROJECT_NAME})
-
-    # .app の出力先
-    set_target_properties(${PROJECT_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/bin"
     )
+    # アイコン設定（icns/にあれば使用、なければデフォルト）
+    trussc_setup_icon(${PROJECT_NAME})
 else()
-    # Windows / Linux
     set_target_properties(${PROJECT_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/bin"

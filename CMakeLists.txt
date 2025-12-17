@@ -213,3 +213,15 @@ function(trussc_setup_icon TARGET_NAME)
         COMMENT "Removing quarantine attribute from ${TARGET_NAME}.app"
     )
 endfunction()
+
+# =============================================================================
+# アドオン
+# =============================================================================
+option(TC_BUILD_ADDONS "Build TrussC addons" ON)
+
+if(TC_BUILD_ADDONS)
+    # addons/ ディレクトリ内の各アドオンを追加
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/addons/tcxBox2d/CMakeLists.txt")
+        add_subdirectory(addons/tcxBox2d)
+    endif()
+endif()
