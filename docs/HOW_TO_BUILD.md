@@ -6,63 +6,127 @@
 - C++20 対応コンパイラ
 - macOS: Xcode Command Line Tools (`xcode-select --install`)
 - Windows: Visual Studio 2022 または MinGW
+- Linux: GCC 10+ または Clang 10+
 
 ---
 
-## 環境変数の設定
+## Project Generator を使う（推奨）
 
-TrussC を使うには `TC_PATH` 環境変数を設定する。
+TrussC には GUI ベースのプロジェクト生成ツールが付属している。
 
-### フォルダ構造
+### 1. Project Generator のビルド
 
-```
-/path/to/TrussC/           ← TC_PATH はここを指す
-├── tc_v0.0.1/             ← バージョンごとのフォルダ
-├── tc_v0.1.0/
-└── ...
-```
+初回のみ、Project Generator 自体をビルドする必要がある。
 
-### macOS / Linux
-
+**macOS:**
 ```bash
-# ~/.zshrc または ~/.bashrc に追加
-export TC_PATH="/path/to/TrussC"
+# tools/buildProjectGenerator_mac.command をダブルクリック
+# または
+cd /path/to/tc_v0.0.1/tools/projectGenerator
+mkdir build && cd build
+cmake ..
+cmake --build .
 ```
 
-設定を反映：
+**Windows:**
 ```bash
-source ~/.zshrc
+# tools/buildProjectGenerator_win.bat をダブルクリック
+# または
+cd /path/to/tc_v0.0.1/tools/projectGenerator
+mkdir build && cd build
+cmake ..
+cmake --build . --config Release
 ```
 
-### Windows
+### 2. 新規プロジェクトの作成
 
-```powershell
-# システム環境変数に追加
-setx TC_PATH "C:\path\to\TrussC"
-```
+Project Generator を起動する。
 
-または「システムのプロパティ」→「環境変数」から GUI で設定。
+![Project Generator - 新規作成](images/projectGenerator_generate.png)
+
+1. **Project Name**: プロジェクト名を入力
+2. **Location**: 保存先フォルダを選択
+3. **Addons**: 使用するアドオンにチェック
+4. **IDE**: 使用する IDE を選択
+   - CMake only: CMakeLists.txt のみ生成
+   - VSCode: .vscode/launch.json と settings.json も生成
+   - Cursor: VSCode と同様
+   - Xcode (macOS): cmake -G Xcode で .xcodeproj を生成
+   - Visual Studio (Windows): cmake -G "Visual Studio 17 2022" で .sln を生成
+5. **Generate Project** をクリック
+
+### 3. 既存プロジェクトの更新
+
+**Import** ボタンで既存プロジェクトを読み込むと、Update モードになる。
+
+![Project Generator - 更新](images/projectGenerator_update.png)
+
+- アドオンの追加/削除
+- IDE 設定の変更
+- TrussC バージョンの切り替え（Settings から TrussC フォルダを変更）
+
+**Update Project** で CMakeLists.txt と addons.make を更新。
+**Open in IDE** で選択した IDE でプロジェクトを開く。
+
+### 4. ビルドと実行
+
+**VSCode / Cursor:**
+1. Open in IDE でプロジェクトを開く
+2. `F7` または `Cmd+Shift+P` → `CMake: Build`
+3. `F5` でデバッグ実行
+
+**Xcode:**
+1. Open in IDE で .xcodeproj を開く
+2. `Cmd+R` で実行
+
+**Visual Studio:**
+1. Open in IDE で .sln を開く
+2. `F5` で実行
 
 ---
 
-## 新規プロジェクトの作成
+## アドオンの追加
+
+アドオンは2つの方法で追加できる。
+
+### 方法1: Project Generator で追加（推奨）
+
+1. Project Generator でプロジェクトを Import
+2. 使用するアドオンにチェック
+3. Update Project
+
+### 方法2: addons.make を編集
+
+プロジェクトフォルダの `addons.make` を編集：
+
+```
+# TrussC addons - one addon per line
+tcxBox2d
+tcxSomeAddon
+```
+
+詳しくは [ADDONS.md](ADDONS.md) を参照。
+
+---
+
+## CMake を直接使う（上級者向け）
+
+Project Generator を使わずに、コマンドラインで直接ビルドすることもできる。
 
 ### 1. テンプレートをコピー
 
 ```bash
-cp -r /path/to/TrussC/tc_v0.0.1/examples/templates/emptyExample ~/myProject
+cp -r /path/to/tc_v0.0.1/examples/templates/emptyExample ~/myProject
 cd ~/myProject
 ```
 
-### 2. バージョンを確認・変更（任意）
+### 2. TC_ROOT を設定
 
-`CMakeLists.txt` の先頭付近：
+`CMakeLists.txt` の先頭付近を編集：
 
 ```cmake
-set(TC_VERSION "0.0.1" CACHE STRING "TrussC version to use")
+set(TC_ROOT "/path/to/tc_v0.0.1" CACHE PATH "Path to TrussC")
 ```
-
-使いたいバージョンに変更可能。
 
 ### 3. ビルド
 
@@ -85,7 +149,15 @@ open bin/myProject.app
 ./bin/myProject
 ```
 
-**注意:** 出力先は `bin/` フォルダ（openFrameworks と同じスタイル）。
+### IDE 用のプロジェクト生成
+
+```bash
+# Xcode
+cmake -G Xcode ..
+
+# Visual Studio
+cmake -G "Visual Studio 17 2022" ..
+```
 
 ---
 
@@ -106,118 +178,50 @@ cmake ..
 cmake --build .
 ```
 
-### バージョンを cmake コマンドで指定
-
-```bash
-cmake .. -DTC_VERSION=0.1.0
-```
-
 ---
 
-## アドオンの追加
+## 配布
 
-`CMakeLists.txt` に1行追加するだけ：
+TrussC で作成したアプリは静的リンクされるため、外部 DLL は不要。
 
-```cmake
-# TrussC をリンク
-target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC)
+### 配布構成
 
-# アドオンを追加
-use_addon(${PROJECT_NAME} tcxBox2d)
+```
+MyApp/
+├── bin/
+│   ├── MyApp.exe      (Windows)
+│   ├── MyApp          (Linux)
+│   └── MyApp.app/     (macOS)
+└── data/              (アセットがあれば)
 ```
 
-詳しくは [ADDONS.md](ADDONS.md) を参照。
-
----
-
-## IDE での開発
-
-### VSCode
-
-1. 拡張機能をインストール：
-   ```bash
-   code --install-extension ms-vscode.cmake-tools
-   code --install-extension ms-vscode.cpptools
-   ```
-
-2. プロジェクトフォルダを開く：
-   ```bash
-   code ~/myProject
-   ```
-
-3. CMake Tools が自動で検出
-
-4. ビルド: `F7` または `Cmd+Shift+P` → `CMake: Build`
-
-5. 実行: `Cmd+Shift+P` → `CMake: Run Without Debugging`
-
-### Xcode（macOS）
-
-```bash
-cd ~/myProject
-mkdir build && cd build
-cmake -G Xcode ..
-open *.xcodeproj
-```
-
-Xcode 内で `Cmd+R` で実行。
-
-### Visual Studio（Windows）
-
-```bash
-cd myProject
-mkdir build && cd build
-cmake -G "Visual Studio 17 2022" ..
-start *.sln
-```
-
-Visual Studio 内で `F5` で実行。
-
-### CLion
-
-1. CLion でプロジェクトフォルダを開く
-2. 自動で CMake を認識
-3. 右上の再生ボタンでビルド & 実行
-
----
-
-## TrussC 同梱サンプルのビルド
-
-TrussC に同梱されているサンプルをビルドする場合（開発者向け）：
-
-```bash
-cd /path/to/TrussC/tc_v0.0.1/examples/graphics/graphicsExample
-mkdir build && cd build
-cmake ..
-cmake --build .
-open bin/graphicsExample.app
-```
+フォルダごと Zip 圧縮して配布できる。
 
 ---
 
 ## トラブルシューティング
 
-### TC_PATH が設定されていない
+### TC_ROOT が設定されていない
 
 ```
 ╔══════════════════════════════════════════════════════════════════╗
-║   ERROR: TC_PATH environment variable is not set!               ║
+║   ERROR: TC_ROOT is not set!                                    ║
+║   Use projectGenerator to create or update this project.        ║
 ╚══════════════════════════════════════════════════════════════════╝
 ```
 
-→ 環境変数を設定して、ターミナルを再起動。
+→ Project Generator でプロジェクトを作成/更新するか、CMakeLists.txt の TC_ROOT を手動で設定。
 
-### 指定したバージョンが見つからない
+### TrussC が見つからない
 
 ```
 ╔══════════════════════════════════════════════════════════════════╗
-║   ERROR: TrussC v0.0.1 not found!                               ║
-║   Available versions in /path/to/TrussC:                        ║
-║     - tc_v0.0.1                                                 ║
+║   ERROR: TrussC not found!                                      ║
+║   Looked in: /path/to/tc_v0.0.1                                 ║
 ╚══════════════════════════════════════════════════════════════════╝
 ```
 
-→ CMakeLists.txt の `TC_VERSION` を利用可能なバージョンに変更。
+→ TC_ROOT のパスが正しいか確認。Project Generator の Settings で TrussC フォルダを再設定。
 
 ### CMake が見つからない
 
@@ -227,6 +231,9 @@ brew install cmake
 
 # Windows (winget)
 winget install Kitware.CMake
+
+# Linux
+sudo apt install cmake
 ```
 
 ### コンパイラが見つからない（macOS）
