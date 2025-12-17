@@ -1,18 +1,9 @@
 # =============================================================================
-# TrussC プロジェクトテンプレート
+# TrussC プロジェクト
 # =============================================================================
 # 使い方:
-#   1. このフォルダを好きな場所にコピー
-#   2. 環境変数 TC_PATH を TrussC の親ディレクトリに設定
-#   3. mkdir build && cd build && cmake .. && cmake --build .
-#
-# バージョン管理:
-#   TC_PATH=/path/to/TrussC
-#          ├── tc_v0.0.1/
-#          ├── tc_v0.1.0/
-#          └── tc_v1.0.0/
-#
-#   下の TC_VERSION を変更してバージョンを切り替え
+#   1. projectGenerator でプロジェクトを作成/更新
+#   2. mkdir build && cd build && cmake .. && cmake --build .
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.20)
@@ -33,32 +24,20 @@ set(CMAKE_XCODE_GENERATE_SCHEME OFF)
 # =============================================================================
 # TrussC パス設定
 # =============================================================================
-# projectGenerator が生成時に TC_ROOT を直接設定する
-# 手動でテンプレートをコピーした場合は環境変数 TC_PATH を使用
+# projectGenerator が TC_ROOT を直接設定する
 set(TC_ROOT "" CACHE PATH "Path to TrussC (e.g. /path/to/tc_v0.0.1)")
 
 if(NOT TC_ROOT)
-    # 環境変数からフォールバック
-    set(TC_VERSION "0.0.1")
-    if(DEFINED ENV{TC_PATH})
-        set(TC_ROOT "$ENV{TC_PATH}/tc_v${TC_VERSION}")
-    else()
-        message("")
-        message("╔══════════════════════════════════════════════════════════════════╗")
-        message("║                                                                  ║")
-        message("║   ERROR: TC_ROOT is not set!                                    ║")
-        message("║                                                                  ║")
-        message("╠══════════════════════════════════════════════════════════════════╣")
-        message("║                                                                  ║")
-        message("║   Option 1: Use projectGenerator to create/update project       ║")
-        message("║                                                                  ║")
-        message("║   Option 2: Set TC_PATH environment variable:                   ║")
-        message("║     export TC_PATH=/path/to/TrussC                              ║")
-        message("║                                                                  ║")
-        message("╚══════════════════════════════════════════════════════════════════╝")
-        message("")
-        message(FATAL_ERROR "Configuration failed - TC_ROOT not set")
-    endif()
+    message("")
+    message("╔══════════════════════════════════════════════════════════════════╗")
+    message("║                                                                  ║")
+    message("║   ERROR: TC_ROOT is not set!                                    ║")
+    message("║                                                                  ║")
+    message("║   Use projectGenerator to create or update this project.        ║")
+    message("║                                                                  ║")
+    message("╚══════════════════════════════════════════════════════════════════╝")
+    message("")
+    message(FATAL_ERROR "Configuration failed - TC_ROOT not set")
 endif()
 
 # パスが存在するか確認
@@ -66,30 +45,18 @@ if(NOT EXISTS "${TC_ROOT}/CMakeLists.txt")
     message("")
     message("╔══════════════════════════════════════════════════════════════════╗")
     message("║                                                                  ║")
-    message("║   ERROR: TrussC v${TC_VERSION} not found!")
-    message("║                                                                  ║")
-    message("╠══════════════════════════════════════════════════════════════════╣")
+    message("║   ERROR: TrussC not found!                                      ║")
     message("║                                                                  ║")
     message("║   Looked in: ${TC_ROOT}")
     message("║                                                                  ║")
-    message("║   Available versions in ${TC_PATH}:")
-    file(GLOB _TC_VERSIONS LIST_DIRECTORIES true "${TC_PATH}/tc_v*")
-    foreach(_V ${_TC_VERSIONS})
-        get_filename_component(_VNAME ${_V} NAME)
-        message("║     - ${_VNAME}")
-    endforeach()
-    if(NOT _TC_VERSIONS)
-        message("║     (none found)")
-    endif()
-    message("║                                                                  ║")
-    message("║   Check TC_VERSION in CMakeLists.txt                            ║")
+    message("║   Use projectGenerator to update this project.                  ║")
     message("║                                                                  ║")
     message("╚══════════════════════════════════════════════════════════════════╝")
     message("")
-    message(FATAL_ERROR "Configuration failed - TrussC v${TC_VERSION} not found")
+    message(FATAL_ERROR "Configuration failed - TrussC not found at ${TC_ROOT}")
 endif()
 
-message(STATUS "[${PROJECT_NAME}] TrussC v${TC_VERSION}: ${TC_ROOT}")
+message(STATUS "[${PROJECT_NAME}] TrussC: ${TC_ROOT}")
 
 # TrussC 自体のアドオンはビルドしない（ユーザーが addons.make で指定したものだけ）
 set(TC_BUILD_ADDONS OFF CACHE BOOL "" FORCE)
