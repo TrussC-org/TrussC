@@ -3,8 +3,16 @@
 # =============================================================================
 # 使い方:
 #   1. このフォルダを好きな場所にコピー
-#   2. 環境変数 TRUSSC_ROOT を TrussC のパスに設定
+#   2. 環境変数 TRUSSC_PATH を TrussC の親ディレクトリに設定
 #   3. mkdir build && cd build && cmake .. && cmake --build .
+#
+# バージョン管理:
+#   TRUSSC_PATH=/path/to/TrussC
+#          ├── trussc_v0.0.1/
+#          ├── trussc_v0.1.0/
+#          └── trussc_v1.0.0/
+#
+#   下の TRUSSC_VERSION を変更してバージョンを切り替え
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.20)
@@ -18,28 +26,40 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # =============================================================================
+# TrussC バージョン指定
+# =============================================================================
+set(TRUSSC_VERSION "0.0.1" CACHE STRING "TrussC version to use")
+
+# =============================================================================
 # TrussC を探す
 # =============================================================================
-# 環境変数 TRUSSC_ROOT から取得
-if(DEFINED ENV{TRUSSC_ROOT})
-    set(TRUSSC_ROOT "$ENV{TRUSSC_ROOT}")
+# 環境変数 TRUSSC_PATH から取得
+if(DEFINED ENV{TRUSSC_PATH})
+    set(TRUSSC_PATH "$ENV{TRUSSC_PATH}")
+    set(TRUSSC_ROOT "${TRUSSC_PATH}/trussc_v${TRUSSC_VERSION}")
 else()
     message("")
     message("╔══════════════════════════════════════════════════════════════════╗")
     message("║                                                                  ║")
-    message("║   ERROR: TRUSSC_ROOT environment variable is not set!           ║")
+    message("║   ERROR: TRUSSC_PATH environment variable is not set!           ║")
     message("║                                                                  ║")
     message("╠══════════════════════════════════════════════════════════════════╣")
     message("║                                                                  ║")
-    message("║   Please set it to your TrussC installation path:               ║")
+    message("║   Please set it to your TrussC parent directory:                ║")
     message("║                                                                  ║")
-    message("║     export TRUSSC_ROOT=/path/to/trussc                          ║")
+    message("║     export TRUSSC_PATH=/path/to/TrussC                          ║")
+    message("║                                                                  ║")
+    message("║   Expected structure:                                           ║")
+    message("║     TRUSSC_PATH/                                                ║")
+    message("║       ├── trussc_v0.0.1/                                        ║")
+    message("║       ├── trussc_v0.1.0/                                        ║")
+    message("║       └── ...                                                   ║")
     message("║                                                                  ║")
     message("║   Add to ~/.zshrc or ~/.bashrc for permanent setup.             ║")
     message("║                                                                  ║")
     message("╚══════════════════════════════════════════════════════════════════╝")
     message("")
-    message(FATAL_ERROR "Configuration failed - TRUSSC_ROOT not set")
+    message(FATAL_ERROR "Configuration failed - TRUSSC_PATH not set")
 endif()
 
 # パスが存在するか確認
@@ -47,20 +67,30 @@ if(NOT EXISTS "${TRUSSC_ROOT}/CMakeLists.txt")
     message("")
     message("╔══════════════════════════════════════════════════════════════════╗")
     message("║                                                                  ║")
-    message("║   ERROR: TrussC not found!                                       ║")
+    message("║   ERROR: TrussC v${TRUSSC_VERSION} not found!")
     message("║                                                                  ║")
     message("╠══════════════════════════════════════════════════════════════════╣")
     message("║                                                                  ║")
-    message("║   TRUSSC_ROOT = ${TRUSSC_ROOT}")
+    message("║   Looked in: ${TRUSSC_ROOT}")
     message("║                                                                  ║")
-    message("║   Please check your TRUSSC_ROOT environment variable.           ║")
+    message("║   Available versions in ${TRUSSC_PATH}:")
+    file(GLOB _TRUSSC_VERSIONS LIST_DIRECTORIES true "${TRUSSC_PATH}/trussc_v*")
+    foreach(_V ${_TRUSSC_VERSIONS})
+        get_filename_component(_VNAME ${_V} NAME)
+        message("║     - ${_VNAME}")
+    endforeach()
+    if(NOT _TRUSSC_VERSIONS)
+        message("║     (none found)")
+    endif()
+    message("║                                                                  ║")
+    message("║   Check TRUSSC_VERSION in CMakeLists.txt                        ║")
     message("║                                                                  ║")
     message("╚══════════════════════════════════════════════════════════════════╝")
     message("")
-    message(FATAL_ERROR "Configuration failed - TrussC not found")
+    message(FATAL_ERROR "Configuration failed - TrussC v${TRUSSC_VERSION} not found")
 endif()
 
-message(STATUS "[${PROJECT_NAME}] TrussC: ${TRUSSC_ROOT}")
+message(STATUS "[${PROJECT_NAME}] TrussC v${TRUSSC_VERSION}: ${TRUSSC_ROOT}")
 
 # TrussC を追加
 add_subdirectory(${TRUSSC_ROOT} ${CMAKE_BINARY_DIR}/TrussC)
