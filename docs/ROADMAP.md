@@ -96,6 +96,56 @@ openFrameworksとの機能比較に基づいた開発ロードマップ。
 
 ---
 
+## Windows / Linux 対応状況
+
+現在 macOS (Metal) で開発中。Windows / Linux への移植作業の状況。
+
+### ✅ 対応済み（クロスプラットフォーム）
+
+| 機能 | 実装 | 備考 |
+|:-----|:-----|:-----|
+| **Core (sokol)** | sokol_app / sokol_gfx | Metal / D3D11 / OpenGL / Vulkan / WebGPU |
+| **FileDialog** | mac.mm / win.cpp / linux.cpp | OS標準ダイアログ |
+| **UDP Socket** | `#ifdef` 分岐 | Winsock / POSIX 両対応 |
+| **TCP Client/Server** | `#ifdef` 分岐 | Winsock / POSIX 両対応 |
+| **Sound** | miniaudio | クロスプラットフォーム |
+| **ImGui** | - | クロスプラットフォーム |
+
+### ⚠️ POSIX のみ（macOS + Linux）→ Windows 実装が必要
+
+| 機能 | ファイル | Windows で必要な実装 |
+|:-----|:---------|:---------------------|
+| **Serial** | `tcSerial.h` | Win32 API (`CreateFile`, `ReadFile`, `WriteFile`, `SetCommState`) |
+
+### ❌ macOS のみ → Windows / Linux 両方の実装が必要
+
+| 機能 | ファイル | Windows | Linux |
+|:-----|:---------|:--------|:------|
+| **Platform** | `tcPlatform_mac.mm` | | |
+| ├ getDisplayScaleFactor | | `GetDpiForWindow()` | X11: `XRRGetScreenResources` |
+| ├ setWindowSize | | `SetWindowPos()` | X11: `XResizeWindow` |
+| ├ getExecutablePath | | `GetModuleFileName()` | `/proc/self/exe` |
+| ├ captureWindow | | D3D11 テクスチャ読み取り | OpenGL `glReadPixels` |
+| └ saveScreenshot | | stb_image_write で代用可 | 同左 |
+| **FBO** | `tcFbo_mac.mm` | | |
+| └ readPixelsPlatform | | D3D11 `Map/Unmap` | OpenGL `glReadPixels` |
+| **VideoGrabber** | `tcVideoGrabber_mac.mm` | Media Foundation | V4L2 |
+
+### 移植の優先度
+
+**高（基本機能）:**
+1. `tcPlatform_win.cpp` - getExecutablePath, setWindowSize, getDisplayScaleFactor
+2. `tcSerial_win.cpp` - シリアル通信
+
+**中（使う人は使う）:**
+3. `tcFbo_win.cpp` / `tcFbo_linux.cpp` - FBO ピクセル読み取り
+4. `tcVideoGrabber_win.cpp` / `tcVideoGrabber_linux.cpp` - カメラ入力
+
+**低（スクリーンショットは stb で代用可）:**
+5. captureWindow / saveScreenshot のネイティブ実装
+
+---
+
 ## サンプル一覧
 
 ### 実装済み

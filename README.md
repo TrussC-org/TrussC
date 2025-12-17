@@ -13,6 +13,15 @@ openFrameworks に近い API を目指しつつ、モダンな C++ でシンプ�
 
 ## クイックスタート
 
+### Project Generator を使う（推奨）
+
+`tools/projectGenerator` で GUI からプロジェクトを作成できる。
+VSCode, Cursor, Xcode, Visual Studio に対応。
+
+詳細は [docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) を参照。
+
+### コマンドラインでビルド
+
 ```bash
 # サンプルをビルド
 cd examples/graphics/graphicsExample
@@ -23,8 +32,6 @@ cmake --build .
 # 実行（macOS）
 ./bin/graphicsExample.app/Contents/MacOS/graphicsExample
 ```
-
-詳細なビルド手順は [docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) を参照。
 
 ### 最小限のコード
 
