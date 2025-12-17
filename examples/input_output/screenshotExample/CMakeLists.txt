@@ -26,7 +26,6 @@ if(APPLE)
         MACOSX_BUNDLE_BUNDLE_NAME "screenshotExample"
         MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
-        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in
     )
 
     # アイコン設定

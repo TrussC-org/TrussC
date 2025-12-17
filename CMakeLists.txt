@@ -186,4 +186,10 @@ function(trussc_setup_icon TARGET_NAME)
         MACOSX_PACKAGE_LOCATION "Resources"
     )
     target_sources(${TARGET_NAME} PRIVATE "${APP_ICNS}")
+
+    # ビルド後に quarantine 属性を削除（Finder からダブルクリックで開けるように）
+    add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+        COMMAND xattr -cr "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>"
+        COMMENT "Removing quarantine attribute from ${TARGET_NAME}.app"
+    )
 endfunction()

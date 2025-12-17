@@ -29,7 +29,6 @@ if(APPLE)
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.trussc.${PROJECT_NAME}"
         MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
-        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
     )
     trussc_setup_icon(${PROJECT_NAME})
     set_target_properties(${PROJECT_NAME} PROPERTIES
