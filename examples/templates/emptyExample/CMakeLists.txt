@@ -25,41 +25,40 @@ project(${PROJECT_DIR_NAME} LANGUAGES C CXX OBJC OBJCXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# =============================================================================
-# TrussC バージョン指定
-# =============================================================================
-set(TC_VERSION "0.0.1" CACHE STRING "TrussC version to use")
+# Xcode 用: 不要なターゲットを抑制
+set(CMAKE_SUPPRESS_REGENERATION true)
+# 自動スキーム生成を無効化（後でプロジェクトターゲットだけ有効にする）
+set(CMAKE_XCODE_GENERATE_SCHEME OFF)
 
 # =============================================================================
-# TrussC を探す
+# TrussC パス設定
 # =============================================================================
-# 環境変数 TC_PATH から取得
-if(DEFINED ENV{TC_PATH})
-    set(TC_PATH "$ENV{TC_PATH}")
-    set(TC_ROOT "${TC_PATH}/tc_v${TC_VERSION}")
-else()
-    message("")
-    message("╔══════════════════════════════════════════════════════════════════╗")
-    message("║                                                                  ║")
-    message("║   ERROR: TC_PATH environment variable is not set!               ║")
-    message("║                                                                  ║")
-    message("╠══════════════════════════════════════════════════════════════════╣")
-    message("║                                                                  ║")
-    message("║   Please set it to your TrussC parent directory:                ║")
-    message("║                                                                  ║")
-    message("║     export TC_PATH=/path/to/TrussC                              ║")
-    message("║                                                                  ║")
-    message("║   Expected structure:                                           ║")
-    message("║     TC_PATH/                                                    ║")
-    message("║       ├── tc_v0.0.1/                                            ║")
-    message("║       ├── tc_v0.1.0/                                            ║")
-    message("║       └── ...                                                   ║")
-    message("║                                                                  ║")
-    message("║   Add to ~/.zshrc or ~/.bashrc for permanent setup.             ║")
-    message("║                                                                  ║")
-    message("╚══════════════════════════════════════════════════════════════════╝")
-    message("")
-    message(FATAL_ERROR "Configuration failed - TC_PATH not set")
+# projectGenerator が生成時に TC_ROOT を直接設定する
+# 手動でテンプレートをコピーした場合は環境変数 TC_PATH を使用
+set(TC_ROOT "" CACHE PATH "Path to TrussC (e.g. /path/to/tc_v0.0.1)")
+
+if(NOT TC_ROOT)
+    # 環境変数からフォールバック
+    set(TC_VERSION "0.0.1")
+    if(DEFINED ENV{TC_PATH})
+        set(TC_ROOT "$ENV{TC_PATH}/tc_v${TC_VERSION}")
+    else()
+        message("")
+        message("╔══════════════════════════════════════════════════════════════════╗")
+        message("║                                                                  ║")
+        message("║   ERROR: TC_ROOT is not set!                                    ║")
+        message("║                                                                  ║")
+        message("╠══════════════════════════════════════════════════════════════════╣")
+        message("║                                                                  ║")
+        message("║   Option 1: Use projectGenerator to create/update project       ║")
+        message("║                                                                  ║")
+        message("║   Option 2: Set TC_PATH environment variable:                   ║")
+        message("║     export TC_PATH=/path/to/TrussC                              ║")
+        message("║                                                                  ║")
+        message("╚══════════════════════════════════════════════════════════════════╝")
+        message("")
+        message(FATAL_ERROR "Configuration failed - TC_ROOT not set")
+    endif()
 endif()
 
 # パスが存在するか確認
@@ -92,6 +91,9 @@ endif()
 
 message(STATUS "[${PROJECT_NAME}] TrussC v${TC_VERSION}: ${TC_ROOT}")
 
+# アドオンの examples はビルドしない（ターゲットをシンプルに保つ）
+set(TCX_BOX2D_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
 # TrussC を追加
 add_subdirectory(${TC_ROOT} ${CMAKE_BINARY_DIR}/TrussC)
 
@@ -112,8 +114,17 @@ target_sources(${PROJECT_NAME} PRIVATE
 # TrussC をリンク
 target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC)
 
-# アドオンを使う場合はここに追加
-# use_addon(${PROJECT_NAME} tcxBox2d)
+# addons.make からアドオンを読み込み
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/addons.make")
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/addons.make" _ADDON_LIST)
+    foreach(_ADDON ${_ADDON_LIST})
+        # 空行とコメント行をスキップ
+        string(STRIP "${_ADDON}" _ADDON)
+        if(_ADDON AND NOT _ADDON MATCHES "^#")
+            use_addon(${PROJECT_NAME} ${_ADDON})
+        endif()
+    endforeach()
+endif()
 
 # =============================================================================
 # 出力設定
@@ -128,6 +139,8 @@ if(APPLE)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/bin"
+        # Xcode: このターゲットだけスキームを生成
+        XCODE_GENERATE_SCHEME TRUE
     )
     # アイコン設定（icns/にあれば使用、なければデフォルト）
     trussc_setup_icon(${PROJECT_NAME})
