@@ -127,8 +127,24 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
     std::vector<VideoDeviceInfo> devices;
 
     @autoreleasepool {
-        // macOS 10.15+ では AVCaptureDeviceDiscoverySession を使用
-        if (@available(macOS 10.15, *)) {
+        NSArray<AVCaptureDevice*>* avDevices = nil;
+
+        // macOS 14.0+ では AVCaptureDeviceTypeExternal を使用
+        if (@available(macOS 14.0, *)) {
+            NSArray<AVCaptureDeviceType>* deviceTypes = @[
+                AVCaptureDeviceTypeBuiltInWideAngleCamera,
+                AVCaptureDeviceTypeExternal
+            ];
+            AVCaptureDeviceDiscoverySession* discoverySession =
+                [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:deviceTypes
+                                                                       mediaType:AVMediaTypeVideo
+                                                                        position:AVCaptureDevicePositionUnspecified];
+            avDevices = discoverySession.devices;
+        }
+        // macOS 10.15〜13.x では AVCaptureDeviceTypeExternalUnknown を使用
+        else if (@available(macOS 10.15, *)) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
             NSArray<AVCaptureDeviceType>* deviceTypes = @[
                 AVCaptureDeviceTypeBuiltInWideAngleCamera,
                 AVCaptureDeviceTypeExternalUnknown
@@ -137,27 +153,24 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
                 [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:deviceTypes
                                                                        mediaType:AVMediaTypeVideo
                                                                         position:AVCaptureDevicePositionUnspecified];
-            NSArray<AVCaptureDevice*>* avDevices = discoverySession.devices;
+            avDevices = discoverySession.devices;
+#pragma clang diagnostic pop
+        }
+        // macOS 10.14 以前（フォールバック）
+        else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            avDevices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
+#pragma clang diagnostic pop
+        }
 
-            for (NSUInteger i = 0; i < avDevices.count; i++) {
-                AVCaptureDevice* device = avDevices[i];
-                VideoDeviceInfo info;
-                info.deviceId = (int)i;
-                info.deviceName = device.localizedName.UTF8String;
-                info.uniqueId = device.uniqueID.UTF8String;
-                devices.push_back(info);
-            }
-        } else {
-            // 古い API（フォールバック）
-            NSArray<AVCaptureDevice*>* avDevices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
-            for (NSUInteger i = 0; i < avDevices.count; i++) {
-                AVCaptureDevice* device = avDevices[i];
-                VideoDeviceInfo info;
-                info.deviceId = (int)i;
-                info.deviceName = device.localizedName.UTF8String;
-                info.uniqueId = device.uniqueID.UTF8String;
-                devices.push_back(info);
-            }
+        for (NSUInteger i = 0; i < avDevices.count; i++) {
+            AVCaptureDevice* device = avDevices[i];
+            VideoDeviceInfo info;
+            info.deviceId = (int)i;
+            info.deviceName = device.localizedName.UTF8String;
+            info.uniqueId = device.uniqueID.UTF8String;
+            devices.push_back(info);
         }
     }
 
@@ -174,7 +187,22 @@ bool VideoGrabber::setupPlatform() {
 
         // デバイスを取得
         NSArray<AVCaptureDevice*>* devices = nil;
-        if (@available(macOS 10.15, *)) {
+        // macOS 14.0+ では AVCaptureDeviceTypeExternal を使用
+        if (@available(macOS 14.0, *)) {
+            NSArray<AVCaptureDeviceType>* deviceTypes = @[
+                AVCaptureDeviceTypeBuiltInWideAngleCamera,
+                AVCaptureDeviceTypeExternal
+            ];
+            AVCaptureDeviceDiscoverySession* discoverySession =
+                [AVCaptureDeviceDiscoverySession discoverySessionWithDeviceTypes:deviceTypes
+                                                                       mediaType:AVMediaTypeVideo
+                                                                        position:AVCaptureDevicePositionUnspecified];
+            devices = discoverySession.devices;
+        }
+        // macOS 10.15〜13.x では AVCaptureDeviceTypeExternalUnknown を使用
+        else if (@available(macOS 10.15, *)) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
             NSArray<AVCaptureDeviceType>* deviceTypes = @[
                 AVCaptureDeviceTypeBuiltInWideAngleCamera,
                 AVCaptureDeviceTypeExternalUnknown
@@ -184,8 +212,14 @@ bool VideoGrabber::setupPlatform() {
                                                                        mediaType:AVMediaTypeVideo
                                                                         position:AVCaptureDevicePositionUnspecified];
             devices = discoverySession.devices;
-        } else {
+#pragma clang diagnostic pop
+        }
+        // macOS 10.14 以前（フォールバック）
+        else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
             devices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
+#pragma clang diagnostic pop
         }
 
         if (deviceId_ >= (int)devices.count) {
