@@ -27,6 +27,7 @@
 #include <mutex>
 #include <atomic>
 #include <cstring>
+#include <cmath>
 
 // stb_vorbis 前方宣言
 extern "C" {

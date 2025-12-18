@@ -2,20 +2,34 @@
 
 // =============================================================================
 // TrussC Serial Communication
-// POSIX API ベースのシリアル通信クラス
+// クロスプラットフォーム対応のシリアル通信クラス
+// - Windows: Win32 API (CreateFile, SetCommState, etc.)
+// - macOS/Linux: POSIX API (termios)
 // =============================================================================
 
 #include <string>
 #include <vector>
 #include <cstdint>
-
-// POSIX ヘッダー
-#include <fcntl.h>
-#include <unistd.h>
-#include <termios.h>
-#include <sys/ioctl.h>
-#include <dirent.h>
 #include <cstring>
+
+// プラットフォーム固有ヘッダー
+#if defined(_WIN32)
+    #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+    #endif
+    #ifndef NOMINMAX
+    #define NOMINMAX
+    #endif
+    #include <windows.h>
+#else
+    // POSIX (macOS, Linux)
+    #include <fcntl.h>
+    #include <unistd.h>
+    #include <termios.h>
+    #include <sys/ioctl.h>
+    #include <dirent.h>
+    #include <cerrno>
+#endif
 
 #include "../utils/tcLog.h"
 
@@ -27,7 +41,7 @@ namespace trussc {
 
 struct SerialDeviceInfo {
     int deviceId;           // デバイスインデックス
-    std::string devicePath; // デバイスパス（例: /dev/tty.usbserial-A10172HG）
+    std::string devicePath; // デバイスパス（例: COM3, /dev/tty.usbserial-A10172HG）
     std::string deviceName; // デバイス名
 
     int getDeviceID() const { return deviceId; }
@@ -41,7 +55,11 @@ struct SerialDeviceInfo {
 
 class Serial {
 public:
+#if defined(_WIN32)
+    Serial() : handle_(INVALID_HANDLE_VALUE), initialized_(false) {}
+#else
     Serial() : fd_(-1), initialized_(false) {}
+#endif
 
     ~Serial() {
         close();
@@ -53,18 +71,28 @@ public:
 
     // ムーブ可能
     Serial(Serial&& other) noexcept
+#if defined(_WIN32)
+        : handle_(other.handle_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)) {
+        other.handle_ = INVALID_HANDLE_VALUE;
+#else
         : fd_(other.fd_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)) {
         other.fd_ = -1;
+#endif
         other.initialized_ = false;
     }
 
     Serial& operator=(Serial&& other) noexcept {
         if (this != &other) {
             close();
+#if defined(_WIN32)
+            handle_ = other.handle_;
+            other.handle_ = INVALID_HANDLE_VALUE;
+#else
             fd_ = other.fd_;
+            other.fd_ = -1;
+#endif
             initialized_ = other.initialized_;
             devicePath_ = std::move(other.devicePath_);
-            other.fd_ = -1;
             other.initialized_ = false;
         }
         return *this;
@@ -87,7 +115,25 @@ public:
     std::vector<SerialDeviceInfo> getDeviceList() {
         std::vector<SerialDeviceInfo> devices;
 
-#if defined(__APPLE__)
+#if defined(_WIN32)
+        // Windows: COM1〜COM256 を試す
+        int id = 0;
+        for (int i = 1; i <= 256; i++) {
+            std::string portName = "COM" + std::to_string(i);
+            std::string fullPath = "\\\\.\\" + portName;
+
+            HANDLE hPort = CreateFileA(fullPath.c_str(), GENERIC_READ | GENERIC_WRITE,
+                                       0, nullptr, OPEN_EXISTING, 0, nullptr);
+            if (hPort != INVALID_HANDLE_VALUE) {
+                CloseHandle(hPort);
+                SerialDeviceInfo info;
+                info.deviceId = id++;
+                info.devicePath = portName;
+                info.deviceName = portName;
+                devices.push_back(info);
+            }
+        }
+#elif defined(__APPLE__)
         // macOS: /dev/tty.* と /dev/cu.* を列挙
         DIR* dir = opendir("/dev");
         if (dir) {
@@ -141,6 +187,82 @@ public:
     bool setup(const std::string& portName, int baudRate) {
         close();
 
+#if defined(_WIN32)
+        // Windows: COM ポートを開く
+        std::string fullPath = portName;
+        // COM10以上の場合は \\.\COMxx 形式にする
+        if (portName.find("\\\\.\\") != 0) {
+            fullPath = "\\\\.\\" + portName;
+        }
+
+        handle_ = CreateFileA(fullPath.c_str(),
+                              GENERIC_READ | GENERIC_WRITE,
+                              0,                     // 排他アクセス
+                              nullptr,               // セキュリティ属性なし
+                              OPEN_EXISTING,
+                              0,                     // 非オーバーラップモード
+                              nullptr);
+
+        if (handle_ == INVALID_HANDLE_VALUE) {
+            tcLogError() << "Serial: failed to open " << portName << " (error: " << GetLastError() << ")";
+            return false;
+        }
+
+        // タイムアウト設定（非ブロッキングに近い動作）
+        COMMTIMEOUTS timeouts = {};
+        timeouts.ReadIntervalTimeout = MAXDWORD;
+        timeouts.ReadTotalTimeoutMultiplier = 0;
+        timeouts.ReadTotalTimeoutConstant = 0;
+        timeouts.WriteTotalTimeoutMultiplier = 0;
+        timeouts.WriteTotalTimeoutConstant = 0;
+        SetCommTimeouts(handle_, &timeouts);
+
+        // DCB 設定を取得
+        DCB dcb = {};
+        dcb.DCBlength = sizeof(DCB);
+        if (!GetCommState(handle_, &dcb)) {
+            tcLogError() << "Serial: failed to get comm state";
+            CloseHandle(handle_);
+            handle_ = INVALID_HANDLE_VALUE;
+            return false;
+        }
+
+        // ボーレートを設定
+        dcb.BaudRate = baudRate;
+        dcb.ByteSize = 8;               // 8データビット
+        dcb.Parity = NOPARITY;          // パリティなし
+        dcb.StopBits = ONESTOPBIT;      // 1ストップビット
+        dcb.fBinary = TRUE;
+        dcb.fParity = FALSE;
+        dcb.fOutxCtsFlow = FALSE;       // CTSフロー制御無効
+        dcb.fOutxDsrFlow = FALSE;       // DSRフロー制御無効
+        dcb.fDtrControl = DTR_CONTROL_ENABLE;
+        dcb.fDsrSensitivity = FALSE;
+        dcb.fTXContinueOnXoff = TRUE;
+        dcb.fOutX = FALSE;              // XON/XOFF 出力無効
+        dcb.fInX = FALSE;               // XON/XOFF 入力無効
+        dcb.fErrorChar = FALSE;
+        dcb.fNull = FALSE;
+        dcb.fRtsControl = RTS_CONTROL_ENABLE;
+        dcb.fAbortOnError = FALSE;
+
+        if (!SetCommState(handle_, &dcb)) {
+            tcLogError() << "Serial: failed to set comm state";
+            CloseHandle(handle_);
+            handle_ = INVALID_HANDLE_VALUE;
+            return false;
+        }
+
+        // バッファをクリア
+        PurgeComm(handle_, PURGE_RXCLEAR | PURGE_TXCLEAR);
+
+        devicePath_ = portName;
+        initialized_ = true;
+        tcLogNotice() << "Serial: connected to " << portName << " at " << baudRate << " baud";
+        return true;
+
+#else
+        // POSIX (macOS, Linux)
         // デバイスを開く（非ブロッキング）
         fd_ = open(portName.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
         if (fd_ == -1) {
@@ -207,6 +329,7 @@ public:
         initialized_ = true;
         tcLogNotice() << "Serial: connected to " << portName << " at " << baudRate << " baud";
         return true;
+#endif
     }
 
     // デバイスインデックスを指定して接続
@@ -221,11 +344,19 @@ public:
 
     // 切断
     void close() {
+#if defined(_WIN32)
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            CloseHandle(handle_);
+            handle_ = INVALID_HANDLE_VALUE;
+            tcLogVerbose() << "Serial: disconnected from " << devicePath_;
+        }
+#else
         if (fd_ != -1) {
             ::close(fd_);
             fd_ = -1;
             tcLogVerbose() << "Serial: disconnected from " << devicePath_;
         }
+#endif
         initialized_ = false;
     }
 
@@ -235,7 +366,11 @@ public:
 
     // 接続中かどうか
     bool isInitialized() const {
+#if defined(_WIN32)
+        return initialized_ && handle_ != INVALID_HANDLE_VALUE;
+#else
         return initialized_ && fd_ != -1;
+#endif
     }
 
     // 接続中のデバイスパスを取得
@@ -247,11 +382,20 @@ public:
     int available() const {
         if (!isInitialized()) return 0;
 
+#if defined(_WIN32)
+        COMSTAT comStat;
+        DWORD errors;
+        if (ClearCommError(handle_, &errors, &comStat)) {
+            return (int)comStat.cbInQue;
+        }
+        return 0;
+#else
         int bytesAvailable = 0;
         if (ioctl(fd_, FIONREAD, &bytesAvailable) == -1) {
             return 0;
         }
         return bytesAvailable;
+#endif
     }
 
     // ---------------------------------------------------------------------------
@@ -264,6 +408,13 @@ public:
         if (!isInitialized()) return -1;
         if (length <= 0) return 0;
 
+#if defined(_WIN32)
+        DWORD bytesRead = 0;
+        if (!ReadFile(handle_, buffer, length, &bytesRead, nullptr)) {
+            return -1;
+        }
+        return (int)bytesRead;
+#else
         ssize_t result = read(fd_, buffer, length);
         if (result == -1) {
             // EAGAIN/EWOULDBLOCK は「データがない」状態なので0を返す
@@ -273,6 +424,7 @@ public:
             return -1;
         }
         return static_cast<int>(result);
+#endif
     }
 
     // std::string に読み取り（便利メソッド）
@@ -291,6 +443,16 @@ public:
         if (!isInitialized()) return -2;
 
         unsigned char byte;
+#if defined(_WIN32)
+        DWORD bytesRead = 0;
+        if (!ReadFile(handle_, &byte, 1, &bytesRead, nullptr)) {
+            return -2;  // エラー
+        }
+        if (bytesRead == 1) {
+            return byte;
+        }
+        return -1;  // データがない
+#else
         ssize_t result = read(fd_, &byte, 1);
         if (result == 1) {
             return byte;
@@ -298,6 +460,7 @@ public:
             return -1;  // データがない
         }
         return -2;  // エラー
+#endif
     }
 
     // ---------------------------------------------------------------------------
@@ -310,11 +473,19 @@ public:
         if (!isInitialized()) return -1;
         if (length <= 0) return 0;
 
+#if defined(_WIN32)
+        DWORD bytesWritten = 0;
+        if (!WriteFile(handle_, buffer, length, &bytesWritten, nullptr)) {
+            return -1;
+        }
+        return (int)bytesWritten;
+#else
         ssize_t result = write(fd_, buffer, length);
         if (result == -1) {
             return -1;
         }
         return static_cast<int>(result);
+#endif
     }
 
     // std::string を書き込み
@@ -333,38 +504,55 @@ public:
 
     // 入力バッファをフラッシュ
     void flushInput() {
-        if (isInitialized()) {
-            tcflush(fd_, TCIFLUSH);
-        }
+        if (!isInitialized()) return;
+#if defined(_WIN32)
+        PurgeComm(handle_, PURGE_RXCLEAR);
+#else
+        tcflush(fd_, TCIFLUSH);
+#endif
     }
 
     // 出力バッファをフラッシュ
     void flushOutput() {
-        if (isInitialized()) {
-            tcflush(fd_, TCOFLUSH);
-        }
+        if (!isInitialized()) return;
+#if defined(_WIN32)
+        PurgeComm(handle_, PURGE_TXCLEAR);
+#else
+        tcflush(fd_, TCOFLUSH);
+#endif
     }
 
     // 入出力バッファをフラッシュ
     void flush() {
-        if (isInitialized()) {
-            tcflush(fd_, TCIOFLUSH);
-        }
+        if (!isInitialized()) return;
+#if defined(_WIN32)
+        PurgeComm(handle_, PURGE_RXCLEAR | PURGE_TXCLEAR);
+#else
+        tcflush(fd_, TCIOFLUSH);
+#endif
     }
 
     // 出力が完了するまで待機
     void drain() {
-        if (isInitialized()) {
-            tcdrain(fd_);
-        }
+        if (!isInitialized()) return;
+#if defined(_WIN32)
+        FlushFileBuffers(handle_);
+#else
+        tcdrain(fd_);
+#endif
     }
 
 private:
-    int fd_;               // ファイルディスクリプタ
+#if defined(_WIN32)
+    HANDLE handle_;        // Windows ハンドル
+#else
+    int fd_;               // ファイルディスクリプタ (POSIX)
+#endif
     bool initialized_;     // 接続状態
     std::string devicePath_; // 接続中のデバイスパス
 
-    // ボーレートを speed_t に変換
+#if !defined(_WIN32)
+    // ボーレートを speed_t に変換 (POSIX only)
     speed_t baudRateToSpeed(int baudRate) {
         switch (baudRate) {
             case 300:    return B300;
@@ -389,6 +577,7 @@ private:
                 return B9600;
         }
     }
+#endif
 };
 
 } // namespace trussc

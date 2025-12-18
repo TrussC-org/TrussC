@@ -31,7 +31,7 @@ public:
 
         initialized_ = true;
         internal::imguiEnabled = true;
-        tcLogVerbose() << "ImGui 初期化完了";
+        tcLogVerbose() << "ImGui initialized";
     }
 
     // 終了処理（自動で呼ばれる）
@@ -40,7 +40,7 @@ public:
         simgui_shutdown();
         initialized_ = false;
         internal::imguiEnabled = false;
-        tcLogVerbose() << "ImGui 終了";
+        tcLogVerbose() << "ImGui shutdown";
     }
 
     // フレーム開始（draw の最初に呼ぶ）

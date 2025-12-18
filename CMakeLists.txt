@@ -2,7 +2,13 @@
 # クロスプラットフォーム対応のクリエイティブコーディングフレームワーク
 
 cmake_minimum_required(VERSION 3.20)
-project(TrussC VERSION 0.0.1 LANGUAGES C CXX OBJC OBJCXX)
+
+# プラットフォームに応じて言語を設定（OBJC/OBJCXX は macOS のみ）
+if(APPLE)
+    project(TrussC VERSION 0.0.1 LANGUAGES C CXX OBJC OBJCXX)
+else()
+    project(TrussC VERSION 0.0.1 LANGUAGES C CXX)
+endif()
 
 # C++20 を使用
 set(CMAKE_CXX_STANDARD 20)
@@ -54,6 +60,9 @@ if(TC_PLATFORM_MACOS)
 elseif(TC_PLATFORM_WINDOWS)
     add_library(TrussC STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/sokol_impl.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcPlatform_win.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFbo_win.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcVideoGrabber_win.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFileDialog_win.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcUdpSocket.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpClient.cpp
