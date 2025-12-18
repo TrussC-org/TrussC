@@ -642,22 +642,22 @@ struct Mat4 {
     }
 
     // 正射影
-    static Mat4 ortho(float left, float right, float bottom, float top, float near, float far) {
+    static Mat4 ortho(float left, float right, float bottom, float top, float nearPlane, float farPlane) {
         return Mat4(
             2.0f / (right - left), 0, 0, -(right + left) / (right - left),
             0, 2.0f / (top - bottom), 0, -(top + bottom) / (top - bottom),
-            0, 0, -2.0f / (far - near), -(far + near) / (far - near),
+            0, 0, -2.0f / (farPlane - nearPlane), -(farPlane + nearPlane) / (farPlane - nearPlane),
             0, 0, 0, 1
         );
     }
 
     // 透視投影
-    static Mat4 perspective(float fovY, float aspect, float near, float far) {
+    static Mat4 perspective(float fovY, float aspect, float nearPlane, float farPlane) {
         float tanHalfFov = std::tan(fovY / 2.0f);
         return Mat4(
             1.0f / (aspect * tanHalfFov), 0, 0, 0,
             0, 1.0f / tanHalfFov, 0, 0,
-            0, 0, -(far + near) / (far - near), -2.0f * far * near / (far - near),
+            0, 0, -(farPlane + nearPlane) / (farPlane - nearPlane), -2.0f * farPlane * nearPlane / (farPlane - nearPlane),
             0, 0, -1, 0
         );
     }

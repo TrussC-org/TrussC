@@ -130,6 +130,7 @@ elseif(TC_PLATFORM_WINDOWS)
         SOKOL_D3D11
         WIN32_LEAN_AND_MEAN
         NOMINMAX
+        _USE_MATH_DEFINES
     )
     target_link_libraries(TrussC PUBLIC
         d3d11
@@ -139,6 +140,8 @@ elseif(TC_PLATFORM_WINDOWS)
         shell32
         ole32
     )
+    # MSVC: ソースファイルをUTF-8として扱う
+    target_compile_options(TrussC PUBLIC /utf-8)
 
 elseif(TC_PLATFORM_LINUX)
     target_compile_definitions(TrussC PUBLIC SOKOL_GLCORE)
