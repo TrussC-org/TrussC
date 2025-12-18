@@ -85,6 +85,9 @@ file(GLOB_RECURSE PROJECT_SOURCES
 )
 target_sources(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCES})
 
+# Xcode でソースファイルをグループ化して表示
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "Source Files" FILES ${PROJECT_SOURCES})
+
 # TrussC をリンク
 target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC)
 
