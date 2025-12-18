@@ -453,6 +453,124 @@ public:
         popMatrix();
     }
 
+    // -----------------------------------------------------------------------
+    // ビットマップ文字列アラインメント
+    // -----------------------------------------------------------------------
+
+    void setBitmapTextAlign(Direction h, Direction v) {
+        bitmapAlignH_ = h;
+        bitmapAlignV_ = v;
+    }
+
+    Direction getBitmapAlignH() const { return bitmapAlignH_; }
+    Direction getBitmapAlignV() const { return bitmapAlignV_; }
+
+    // アラインメント指定付き描画
+    void drawBitmapString(const std::string& text, float x, float y,
+                          Direction h, Direction v, bool screenFixed = true) {
+        if (text.empty() || !internal::fontInitialized) return;
+
+        // オフセット計算
+        Vec2 offset = calcBitmapAlignOffset(text, h, v);
+
+        pushMatrix();
+
+        if (screenFixed) {
+            Mat4 currentMat = getCurrentMatrix();
+            float worldX = currentMat.m[0]*(x + offset.x) + currentMat.m[1]*(y + offset.y) + currentMat.m[3];
+            float worldY = currentMat.m[4]*(x + offset.x) + currentMat.m[5]*(y + offset.y) + currentMat.m[7];
+            resetMatrix();
+            translate(worldX, worldY);
+        } else {
+            translate(x + offset.x, y + offset.y);
+        }
+
+        sgl_load_pipeline(internal::fontPipeline);
+        sgl_enable_texture();
+        sgl_texture(internal::fontView, internal::fontSampler);
+
+        sgl_begin_quads();
+        sgl_c4f(currentR_, currentG_, currentB_, currentA_);
+
+        const float charW = bitmapfont::CHAR_TEX_WIDTH;
+        const float charH = bitmapfont::CHAR_TEX_HEIGHT;
+        float cursorX = 0;
+        float cursorY = -charH;
+
+        for (char c : text) {
+            if (c == '\n') {
+                cursorX = 0;
+                cursorY += charH;
+                continue;
+            }
+            if (c == '\t') {
+                cursorX += charW * 8;
+                continue;
+            }
+            if (c < 32) continue;
+
+            float u, v_;
+            bitmapfont::getCharTexCoord(c, u, v_);
+            float u2 = u + bitmapfont::TEX_CHAR_WIDTH;
+            float v2 = v_ + bitmapfont::TEX_CHAR_HEIGHT;
+
+            float px = cursorX;
+            float py = cursorY;
+
+            sgl_v2f_t2f(px, py, u, v_);
+            sgl_v2f_t2f(px + charW, py, u2, v_);
+            sgl_v2f_t2f(px + charW, py + charH, u2, v2);
+            sgl_v2f_t2f(px, py + charH, u, v2);
+
+            cursorX += charW;
+        }
+
+        sgl_end();
+        sgl_disable_texture();
+        sgl_load_default_pipeline();
+
+        popMatrix();
+    }
+
+    // -----------------------------------------------------------------------
+    // ビットマップ文字列メトリクス
+    // -----------------------------------------------------------------------
+
+    float getBitmapStringWidth(const std::string& text) const {
+        float width = 0;
+        float maxWidth = 0;
+        const float charW = bitmapfont::CHAR_TEX_WIDTH;
+
+        for (char c : text) {
+            if (c == '\n') {
+                if (width > maxWidth) maxWidth = width;
+                width = 0;
+                continue;
+            }
+            if (c == '\t') {
+                width += charW * 8;
+                continue;
+            }
+            if (c >= 32) {
+                width += charW;
+            }
+        }
+
+        return (width > maxWidth) ? width : maxWidth;
+    }
+
+    float getBitmapStringHeight(const std::string& text) const {
+        int lines = 1;
+        for (char c : text) {
+            if (c == '\n') lines++;
+        }
+        return bitmapfont::CHAR_TEX_HEIGHT * lines;
+    }
+
+    Rectangle getBitmapStringBBox(const std::string& text) const {
+        return Rectangle(0, 0, getBitmapStringWidth(text), getBitmapStringHeight(text));
+    }
+
 private:
     // 描画色
     float currentR_ = 1.0f;
@@ -471,6 +589,39 @@ private:
     // 行列スタック
     Mat4 currentMatrix_ = Mat4::identity();
     std::vector<Mat4> matrixStack_;
+
+    // ビットマップ文字列アラインメント
+    Direction bitmapAlignH_ = Direction::Left;
+    Direction bitmapAlignV_ = Direction::Top;
+
+    // ビットマップ文字列アラインメントオフセット計算
+    Vec2 calcBitmapAlignOffset(const std::string& text, Direction h, Direction v) const {
+        float offsetX = 0;
+        float offsetY = 0;
+
+        // 水平オフセット
+        float w = getBitmapStringWidth(text);
+        switch (h) {
+            case Direction::Left:   offsetX = 0; break;
+            case Direction::Center: offsetX = -w / 2; break;
+            case Direction::Right:  offsetX = -w; break;
+            default: break;
+        }
+
+        // 垂直オフセット
+        const float charH = bitmapfont::CHAR_HEIGHT;  // 文字の実際の高さ
+        const float totalH = bitmapfont::CHAR_TEX_HEIGHT;  // テクスチャの高さ
+
+        switch (v) {
+            case Direction::Top:      offsetY = 0; break;
+            case Direction::Baseline: offsetY = -charH; break;
+            case Direction::Center:   offsetY = -totalH / 2; break;
+            case Direction::Bottom:   offsetY = -totalH; break;
+            default: break;
+        }
+
+        return Vec2(offsetX, offsetY);
+    }
 };
 
 // ---------------------------------------------------------------------------
