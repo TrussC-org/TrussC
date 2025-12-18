@@ -4,7 +4,7 @@
 // =============================================================================
 #pragma once
 
-#include "tcTcpClient.h"
+#include "tc/network/tcTcpClient.h"
 #include <string>
 
 // 前方宣言（mbedtls ヘッダーを公開しない）

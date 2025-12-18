@@ -15,20 +15,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # =============================================================================
-# mbedTLS 設定（テストやプログラムをビルドしない）
-# =============================================================================
-set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
-set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
-set(DISABLE_PACKAGE_CONFIG_AND_INSTALL ON CACHE BOOL "" FORCE)
-
-# mbedTLS を静的ライブラリとしてビルド
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/mbedtls/CMakeLists.txt")
-    add_subdirectory(libs/mbedtls)
-    message(STATUS "[TrussC] mbedTLS enabled for TLS support")
-endif()
-
-# =============================================================================
 # プラットフォーム検出
 # =============================================================================
 if(APPLE)
@@ -54,69 +40,28 @@ endif()
 # =============================================================================
 # ライブラリ定義 (STATIC)
 # =============================================================================
-# sokol 実装を含む静的ライブラリ
+# 共通ソースファイル（プラットフォーム非依存）
+file(GLOB TC_IMPL_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/impl/*.cpp)
+file(GLOB TC_NETWORK_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/network/*.cpp)
+file(GLOB TC_SOUND_SOURCES   ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/sound/*.cpp)
+
+# プラットフォーム固有ソースファイル
 if(TC_PLATFORM_MACOS)
-    add_library(TrussC STATIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/sokol_impl.mm
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcPlatform_mac.mm
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFbo_mac.mm
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcVideoGrabber_mac.mm
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFileDialog_mac.mm
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcUdpSocket.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpClient.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpServer.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTlsClient.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/pugixml_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/imgui_impl.mm
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcSound_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcAudio_impl.cpp
-    )
+    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/mac/*.mm)
 elseif(TC_PLATFORM_WINDOWS)
-    add_library(TrussC STATIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/sokol_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcPlatform_win.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFbo_win.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcVideoGrabber_win.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFileDialog_win.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcUdpSocket.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpClient.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpServer.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTlsClient.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/pugixml_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/imgui_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcSound_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcAudio_impl.cpp
-    )
+    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/win/*.cpp)
 elseif(TC_PLATFORM_LINUX)
-    add_library(TrussC STATIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/sokol_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcFileDialog_linux.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcUdpSocket.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpClient.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpServer.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTlsClient.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/pugixml_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/imgui_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcSound_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcAudio_impl.cpp
-    )
+    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
 else()
-    add_library(TrussC STATIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/sokol_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcUdpSocket.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpClient.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpServer.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTlsClient.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/pugixml_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/imgui_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcSound_impl.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcAudio_impl.cpp
-    )
+    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
 endif()
+
+add_library(TrussC STATIC
+    ${TC_IMPL_SOURCES}
+    ${TC_NETWORK_SOURCES}
+    ${TC_SOUND_SOURCES}
+    ${TC_PLATFORM_SOURCES}
+)
 
 add_library(tc::TrussC ALIAS TrussC)
 
@@ -125,18 +70,6 @@ target_include_directories(TrussC PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include/sokol
 )
-
-# mbedTLS インクルードパス（PRIVATE: ユーザーのヘッダ探索パスを汚染しない）
-if(TARGET mbedtls)
-    target_include_directories(TrussC PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/libs/mbedtls/include
-    )
-    target_link_libraries(TrussC PRIVATE
-        mbedtls
-        mbedx509
-        mbedcrypto
-    )
-endif()
 
 # =============================================================================
 # プラットフォーム固有の設定

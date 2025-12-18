@@ -2,7 +2,7 @@
 // tcTlsClient.cpp - TLS クライアントソケット実装
 // =============================================================================
 
-#include "tc/network/tcTlsClient.h"
+#include "tcTlsClient.h"
 #include "tc/utils/tcLog.h"
 
 #include <mbedtls/ssl.h>

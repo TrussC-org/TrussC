@@ -91,13 +91,10 @@ addons/**/*.sln
 addons/**/*.vcxproj
 
 # =============================================================================
-# Tools
+# Project Generator
 # =============================================================================
 
-# tools 内のビルド成果物を除外
-tools/**/build/
-tools/**/bin/*
-!tools/**/bin/data/
-tools/**/*.xcodeproj/
-tools/**/*.sln
-tools/**/*.vcxproj
+# projectGenerator のバイナリを除外（ビルドスクリプトのみ管理）
+projectGenerator/projectGenerator.app
+projectGenerator/projectGenerator.exe
+projectGenerator/projectGenerator

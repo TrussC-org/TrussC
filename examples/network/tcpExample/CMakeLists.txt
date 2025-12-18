@@ -19,7 +19,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # TrussC パス（相対パス）
-set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")
 message(STATUS "[${PROJECT_DIR_NAME}] TrussC: ${TRUSSC_DIR}")
 
 # TrussC を追加
