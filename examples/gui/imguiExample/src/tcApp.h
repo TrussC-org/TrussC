@@ -1,12 +1,13 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 
 using namespace trussc;
 
 // imguiExample - Dear ImGui のデモ
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void draw() override;

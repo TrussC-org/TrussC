@@ -158,23 +158,23 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    tc::clear(0);
+    clear(0);
 
     // シェーダーを適用してフルスクリーン描画
     shader.begin();
-    shader.setUniformTime(tc::getElapsedTime());
-    shader.setUniformResolution(tc::getWindowWidth(), tc::getWindowHeight());
-    shader.setUniformMouse(tc::getGlobalMouseX(), tc::getGlobalMouseY());
+    shader.setUniformTime(getElapsedTime());
+    shader.setUniformResolution(getWindowWidth(), getWindowHeight());
+    shader.setUniformMouse(getGlobalMouseX(), getGlobalMouseY());
     shader.draw();
     shader.end();
 
     // エフェクト名を表示
     string effectNames[] = {"Gradient", "Ripple", "Plasma", "Mouse Follow"};
     string info = "Effect " + to_string(currentEffect + 1) + ": " + effectNames[currentEffect];
-    tc::drawBitmapStringHighlight(info, 10, 20,
-        tc::Color(0, 0, 0, 0.7f), tc::Color(1, 1, 1));
-    tc::drawBitmapStringHighlight("Press 1-4 or SPACE to change", 10, 40,
-        tc::Color(0, 0, 0, 0.7f), tc::Color(0.7f, 0.7f, 0.7f));
+    drawBitmapStringHighlight(info, 10, 20,
+        Color(0, 0, 0, 0.7f), Color(1, 1, 1));
+    drawBitmapStringHighlight("Press 1-4 or SPACE to change", 10, 40,
+        Color(0, 0, 0, 0.7f), Color(0.7f, 0.7f, 0.7f));
 }
 
 void tcApp::keyPressed(int key) {

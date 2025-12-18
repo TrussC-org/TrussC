@@ -5,7 +5,7 @@
 // setup - 初期化
 // =============================================================================
 void tcApp::setup() {
-    tc::setVsync(true);
+    setVsync(true);
 
     // デバイス一覧を取得
     serial.listDevices();
@@ -23,7 +23,7 @@ void tcApp::setup() {
         serial.setup(0, baud);
     }
 
-    timeLastTryConnect = tc::getElapsedTime();
+    timeLastTryConnect = getElapsedTime();
     readTime = 0;
 }
 
@@ -67,11 +67,11 @@ void tcApp::update() {
                 serialReadBuffer.clear();
             }
 
-            readTime = tc::getElapsedTime();
+            readTime = getElapsedTime();
         }
     } else {
         // 未接続の場合、10秒ごとに再接続を試行
-        float now = tc::getElapsedTime();
+        float now = getElapsedTime();
         if (now - timeLastTryConnect > 10.0f) {
             deviceList = serial.getDeviceList();
             timeLastTryConnect = now;
@@ -97,8 +97,8 @@ void tcApp::update() {
 // draw - 描画
 // =============================================================================
 void tcApp::draw() {
-    tc::clear(255);
-    tc::setColor(40);
+    clear(255);
+    setColor(40);
 
     // 接続状態
     std::string connStr = "Serial connected: ";
@@ -106,35 +106,35 @@ void tcApp::draw() {
     if (serial.isInitialized()) {
         connStr += " (" + serial.getDevicePath() + ")";
     }
-    tc::drawBitmapString(connStr, 50, 40);
+    drawBitmapString(connStr, 50, 40);
 
     // デバイス一覧
     std::string deviceStr = "Devices:\n";
     for (const auto& dev : deviceList) {
         deviceStr += std::to_string(dev.getDeviceID()) + ": " + dev.getDevicePath() + "\n";
     }
-    tc::drawBitmapString(deviceStr, 50, 60);
+    drawBitmapString(deviceStr, 50, 60);
 
     // 送信メッセージ
     std::string msgStr = "Type to send message\n";
     if (!messageToSend.empty()) {
         msgStr += messageToSend;
     }
-    tc::drawBitmapString(msgStr, 50, 400, 2.0f);
+    drawBitmapString(msgStr, 50, 400, 2.0f);
 
     // 受信メッセージ
     float posY = 60;
-    tc::drawBitmapString("Received messages", 550, posY, 2.0f);
+    drawBitmapString("Received messages", 550, posY, 2.0f);
     posY += 42;
 
     for (int i = (int)receivedMessages.size() - 1; i >= 0; i--) {
         // 最新のメッセージをハイライト
-        if (i == (int)receivedMessages.size() - 1 && (tc::getElapsedTime() - readTime) < 0.5f) {
-            tc::setColor(40);
+        if (i == (int)receivedMessages.size() - 1 && (getElapsedTime() - readTime) < 0.5f) {
+            setColor(40);
         } else {
-            tc::setColor(120);
+            setColor(120);
         }
-        tc::drawBitmapString(receivedMessages[i], 550, posY, 2.0f);
+        drawBitmapString(receivedMessages[i], 550, posY, 2.0f);
         posY += 42;
     }
 }
@@ -144,19 +144,19 @@ void tcApp::draw() {
 // =============================================================================
 void tcApp::keyPressed(int key) {
     // Enter: メッセージ送信
-    if (key == tc::KEY_ENTER) {
+    if (key == KEY_ENTER) {
         if (!messageToSend.empty()) {
             bSendSerialMessage = true;
         }
     }
     // Backspace/Delete: 1文字削除
-    else if (key == tc::KEY_BACKSPACE || key == tc::KEY_DELETE || key == 27) {
+    else if (key == KEY_BACKSPACE || key == KEY_DELETE || key == 27) {
         if (!messageToSend.empty()) {
             messageToSend.pop_back();
         }
     }
     // Escape: メッセージクリア
-    else if (key == tc::KEY_ESCAPE) {
+    else if (key == KEY_ESCAPE) {
         messageToSend.clear();
     }
     // 通常の文字（sokol_appのキーコードは大文字ASCIIと同じなので小文字に変換）

@@ -2,10 +2,10 @@
 #include "tcApp.h"
 
 int main() {
-    tc::WindowSettings settings;
+    WindowSettings settings;
     settings.title = "TrussC Project Generator";
     settings.width = 500;
     settings.height = 520;
     settings.highDpi = false;
-    return tc::runApp<tcApp>(settings);
+    return runApp<tcApp>(settings);
 }

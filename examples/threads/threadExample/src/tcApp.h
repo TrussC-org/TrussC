@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include "threadedObject.h"
 
 // =============================================================================
@@ -16,7 +17,7 @@
 //   l: ロックあり更新に切り替え
 //   n: ロックなし更新に切り替え（ティアリング発生）
 //
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;

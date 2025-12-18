@@ -28,7 +28,7 @@ void tcApp::update() {
 // draw
 // ---------------------------------------------------------------------------
 void tcApp::draw() {
-    tc::clear(0.15f, 0.15f, 0.18f);
+    clear(0.15f, 0.15f, 0.18f);
 
     switch (mode_) {
         case 0: drawLerpComparison(); break;
@@ -43,8 +43,8 @@ void tcApp::draw() {
 // ---------------------------------------------------------------------------
 void tcApp::drawLerpComparison() {
     // 2色を選ぶ（赤 → シアン は違いが分かりやすい）
-    tc::Color c1 = tc::colors::red;
-    tc::Color c2 = tc::colors::cyan;
+    Color c1 = colors::red;
+    Color c2 = colors::cyan;
 
     float startX = 100;
     float endX = 1180;
@@ -67,7 +67,7 @@ void tcApp::drawLerpComparison() {
 
         for (int i = 0; i < steps; i++) {
             float t = (float)i / (steps - 1);
-            tc::Color c;
+            Color c;
 
             switch (mode) {
                 case 0: c = c1.lerpRGB(c2, t); break;
@@ -77,22 +77,22 @@ void tcApp::drawLerpComparison() {
                 case 4: c = c1.lerpOKLCH(c2, t); break;
             }
 
-            tc::setColor(c);
-            tc::drawRect(startX + i * stepWidth, y, stepWidth + 1, barHeight);
+            setColor(c);
+            drawRect(startX + i * stepWidth, y, stepWidth + 1, barHeight);
         }
 
         // ラベル
-        tc::setColor(1.0f, 1.0f, 1.0f);
-        tc::drawBitmapString(labels[mode], startX, y + barHeight + 8);
+        setColor(1.0f, 1.0f, 1.0f);
+        drawBitmapString(labels[mode], startX, y + barHeight + 8);
 
         y += gap;
     }
 
     // 開始・終了色を表示
-    tc::setColor(c1);
-    tc::drawRect(30, 80, 50, 50);
-    tc::setColor(c2);
-    tc::drawRect(30, 140, 50, 50);
+    setColor(c1);
+    drawRect(30, 80, 50, 50);
+    setColor(c2);
+    drawRect(30, 140, 50, 50);
 }
 
 // ---------------------------------------------------------------------------
@@ -107,42 +107,42 @@ void tcApp::drawHueWheel() {
 
     // HSB 色相環
     for (int i = 0; i < segments; i++) {
-        float angle1 = (float)i / segments * tc::TAU;
-        float angle2 = (float)(i + 1) / segments * tc::TAU;
+        float angle1 = (float)i / segments * TAU;
+        float angle2 = (float)(i + 1) / segments * TAU;
 
         // HSB: 色相を直接使用
-        tc::Color c = tc::ColorHSB(angle1, 1.0f, 1.0f).toRGB();
-        tc::setColor(c);
+        Color c = ColorHSB(angle1, 1.0f, 1.0f).toRGB();
+        setColor(c);
 
         // 扇形を描画
         float x1 = centerX1 + cos(angle1) * radius;
         float y1 = centerY + sin(angle1) * radius;
         float x2 = centerX1 + cos(angle2) * radius;
         float y2 = centerY + sin(angle2) * radius;
-        tc::drawTriangle(centerX1, centerY, x1, y1, x2, y2);
+        drawTriangle(centerX1, centerY, x1, y1, x2, y2);
     }
 
     // OKLCH 色相環
     for (int i = 0; i < segments; i++) {
-        float angle1 = (float)i / segments * tc::TAU;
-        float angle2 = (float)(i + 1) / segments * tc::TAU;
+        float angle1 = (float)i / segments * TAU;
+        float angle2 = (float)(i + 1) / segments * TAU;
 
         // OKLCH: L=0.7, C=0.15 で彩度を揃える
-        tc::Color c = tc::ColorOKLCH(0.7f, 0.15f, angle1).toRGB().clamped();
-        tc::setColor(c);
+        Color c = ColorOKLCH(0.7f, 0.15f, angle1).toRGB().clamped();
+        setColor(c);
 
         float x1 = centerX2 + cos(angle1) * radius;
         float y1 = centerY + sin(angle1) * radius;
         float x2 = centerX2 + cos(angle2) * radius;
         float y2 = centerY + sin(angle2) * radius;
-        tc::drawTriangle(centerX2, centerY, x1, y1, x2, y2);
+        drawTriangle(centerX2, centerY, x1, y1, x2, y2);
     }
 
     // ラベル（黒半透明背景）
-    tc::drawBitmapStringHighlight("HSB", centerX1 - 12, centerY - 6,
-        tc::Color(0, 0, 0, 0.5f), tc::Color(1, 1, 1));
-    tc::drawBitmapStringHighlight("OKLCH", centerX2 - 20, centerY - 6,
-        tc::Color(0, 0, 0, 0.5f), tc::Color(1, 1, 1));
+    drawBitmapStringHighlight("HSB", centerX1 - 12, centerY - 6,
+        Color(0, 0, 0, 0.5f), Color(1, 1, 1));
+    drawBitmapStringHighlight("OKLCH", centerX2 - 20, centerY - 6,
+        Color(0, 0, 0, 0.5f), Color(1, 1, 1));
 }
 
 // ---------------------------------------------------------------------------
@@ -158,48 +158,48 @@ void tcApp::drawLightnessDemo() {
     // HSB: 同じ明度(B=1)でも知覚的な明るさが異なる
     float y1 = 150;
     for (int i = 0; i < segments; i++) {
-        float hue = (float)i / segments * tc::TAU;
-        tc::Color c = tc::ColorHSB(hue, 1.0f, 1.0f).toRGB();
-        tc::setColor(c);
-        tc::drawRect(startX + i * segmentWidth, y1, segmentWidth + 1, barHeight);
+        float hue = (float)i / segments * TAU;
+        Color c = ColorHSB(hue, 1.0f, 1.0f).toRGB();
+        setColor(c);
+        drawRect(startX + i * segmentWidth, y1, segmentWidth + 1, barHeight);
     }
 
     // HSB をグレースケールに変換して明度を確認
     float y2 = 250;
     for (int i = 0; i < segments; i++) {
-        float hue = (float)i / segments * tc::TAU;
-        tc::Color c = tc::ColorHSB(hue, 1.0f, 1.0f).toRGB();
+        float hue = (float)i / segments * TAU;
+        Color c = ColorHSB(hue, 1.0f, 1.0f).toRGB();
         // 輝度計算 (sRGB)
         float luma = 0.299f * c.r + 0.587f * c.g + 0.114f * c.b;
-        tc::setColor(luma, luma, luma);
-        tc::drawRect(startX + i * segmentWidth, y2, segmentWidth + 1, barHeight);
+        setColor(luma, luma, luma);
+        drawRect(startX + i * segmentWidth, y2, segmentWidth + 1, barHeight);
     }
 
     // OKLCH: 同じ L で知覚的に均一な明るさ
     float y3 = 400;
     for (int i = 0; i < segments; i++) {
-        float hue = (float)i / segments * tc::TAU;
-        tc::Color c = tc::ColorOKLCH(0.7f, 0.15f, hue).toRGB().clamped();
-        tc::setColor(c);
-        tc::drawRect(startX + i * segmentWidth, y3, segmentWidth + 1, barHeight);
+        float hue = (float)i / segments * TAU;
+        Color c = ColorOKLCH(0.7f, 0.15f, hue).toRGB().clamped();
+        setColor(c);
+        drawRect(startX + i * segmentWidth, y3, segmentWidth + 1, barHeight);
     }
 
     // OKLCH をグレースケールに変換
     float y4 = 500;
     for (int i = 0; i < segments; i++) {
-        float hue = (float)i / segments * tc::TAU;
-        tc::Color c = tc::ColorOKLCH(0.7f, 0.15f, hue).toRGB().clamped();
+        float hue = (float)i / segments * TAU;
+        Color c = ColorOKLCH(0.7f, 0.15f, hue).toRGB().clamped();
         float luma = 0.299f * c.r + 0.587f * c.g + 0.114f * c.b;
-        tc::setColor(luma, luma, luma);
-        tc::drawRect(startX + i * segmentWidth, y4, segmentWidth + 1, barHeight);
+        setColor(luma, luma, luma);
+        drawRect(startX + i * segmentWidth, y4, segmentWidth + 1, barHeight);
     }
 
     // ラベル
-    tc::setColor(1.0f, 1.0f, 1.0f);
-    tc::drawBitmapString("HSB (B=1.0, S=1.0)", startX, y1 - 20);
-    tc::drawBitmapString("HSB -> Grayscale", startX, y2 - 20);
-    tc::drawBitmapString("OKLCH (L=0.7, C=0.15)", startX, y3 - 20);
-    tc::drawBitmapString("OKLCH -> Grayscale", startX, y4 - 20);
+    setColor(1.0f, 1.0f, 1.0f);
+    drawBitmapString("HSB (B=1.0, S=1.0)", startX, y1 - 20);
+    drawBitmapString("HSB -> Grayscale", startX, y2 - 20);
+    drawBitmapString("OKLCH (L=0.7, C=0.15)", startX, y3 - 20);
+    drawBitmapString("OKLCH -> Grayscale", startX, y4 - 20);
 }
 
 // ---------------------------------------------------------------------------
@@ -208,15 +208,15 @@ void tcApp::drawLightnessDemo() {
 void tcApp::drawGradientDemo() {
     // 複数のカラーペアで比較
     struct ColorPair {
-        tc::Color c1, c2;
+        Color c1, c2;
         const char* name;
     };
 
     ColorPair pairs[] = {
-        { tc::colors::red, tc::colors::blue, "Red -> Blue" },
-        { tc::colors::yellow, tc::colors::magenta, "Yellow -> Magenta" },
-        { tc::Color(0.2f, 0.8f, 0.2f), tc::Color(0.8f, 0.2f, 0.8f), "Green -> Purple" },
-        { tc::colors::white, tc::colors::black, "White -> Black" },
+        { colors::red, colors::blue, "Red -> Blue" },
+        { colors::yellow, colors::magenta, "Yellow -> Magenta" },
+        { Color(0.2f, 0.8f, 0.2f), Color(0.8f, 0.2f, 0.8f), "Green -> Purple" },
+        { colors::white, colors::black, "White -> Black" },
     };
 
     float startX = 150;
@@ -234,17 +234,17 @@ void tcApp::drawGradientDemo() {
         // 左列: OKLab (デフォルト)
         for (int i = 0; i < steps; i++) {
             float t = (float)i / (steps - 1);
-            tc::Color c = pair.c1.lerpOKLab(pair.c2, t);
-            tc::setColor(c);
-            tc::drawRect(startX + i * stepWidth, y, stepWidth + 1, barHeight);
+            Color c = pair.c1.lerpOKLab(pair.c2, t);
+            setColor(c);
+            drawRect(startX + i * stepWidth, y, stepWidth + 1, barHeight);
         }
 
         // 右列: RGB比較
         for (int i = 0; i < steps; i++) {
             float t = (float)i / (steps - 1);
-            tc::Color c = pair.c1.lerpRGB(pair.c2, t);
-            tc::setColor(c);
-            tc::drawRect(startX + colGap + i * stepWidth, y, stepWidth + 1, barHeight);
+            Color c = pair.c1.lerpRGB(pair.c2, t);
+            setColor(c);
+            drawRect(startX + colGap + i * stepWidth, y, stepWidth + 1, barHeight);
         }
 
         y += 50;
@@ -252,36 +252,36 @@ void tcApp::drawGradientDemo() {
         // HSB
         for (int i = 0; i < steps; i++) {
             float t = (float)i / (steps - 1);
-            tc::Color c = pair.c1.lerpHSB(pair.c2, t);
-            tc::setColor(c);
-            tc::drawRect(startX + i * stepWidth, y, stepWidth + 1, barHeight);
+            Color c = pair.c1.lerpHSB(pair.c2, t);
+            setColor(c);
+            drawRect(startX + i * stepWidth, y, stepWidth + 1, barHeight);
         }
 
         // OKLCH
         for (int i = 0; i < steps; i++) {
             float t = (float)i / (steps - 1);
-            tc::Color c = pair.c1.lerpOKLCH(pair.c2, t);
-            tc::setColor(c);
-            tc::drawRect(startX + colGap + i * stepWidth, y, stepWidth + 1, barHeight);
+            Color c = pair.c1.lerpOKLCH(pair.c2, t);
+            setColor(c);
+            drawRect(startX + colGap + i * stepWidth, y, stepWidth + 1, barHeight);
         }
 
         y += 100;
     }
 
     // 凡例
-    tc::setColor(1.0f, 1.0f, 1.0f);
-    tc::drawBitmapString("OKLab / HSB", startX, 25);
-    tc::drawBitmapString("RGB / OKLCH", startX + colGap, 25);
+    setColor(1.0f, 1.0f, 1.0f);
+    drawBitmapString("OKLab / HSB", startX, 25);
+    drawBitmapString("RGB / OKLCH", startX + colGap, 25);
 }
 
 // ---------------------------------------------------------------------------
 // 入力
 // ---------------------------------------------------------------------------
 void tcApp::keyPressed(int key) {
-    if (key == tc::KEY_ESCAPE) {
+    if (key == KEY_ESCAPE) {
         sapp_request_quit();
     }
-    else if (key == tc::KEY_SPACE) {
+    else if (key == KEY_SPACE) {
         mode_ = (mode_ + 1) % NUM_MODES;
         cout << "Mode: " << mode_ << endl;
     }

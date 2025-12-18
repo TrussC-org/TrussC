@@ -1,21 +1,49 @@
 #include "tcApp.h"
 
-// ---------------------------------------------------------------------------
-// setup - 初期化
-// ---------------------------------------------------------------------------
 void tcApp::setup() {
-    // 初期化処理があればここに
+
 }
 
-// ---------------------------------------------------------------------------
-// draw - 描画
-// ---------------------------------------------------------------------------
-void tcApp::draw() {
-    // 時間に応じて色を変化させる
-    double t = tc::getElapsedTime();
-    float r = (float)(sin(t * 0.5) * 0.5 + 0.5);
-    float g = (float)(sin(t * 0.7) * 0.5 + 0.5);
-    float b = (float)(sin(t * 1.1) * 0.5 + 0.5);
+void tcApp::update() {
 
-    tc::clear(r, g, b);
+}
+
+void tcApp::draw() {
+    clear(30);
+}
+
+void tcApp::keyPressed(int key) {
+
+}
+
+void tcApp::keyReleased(int key) {
+
+}
+
+void tcApp::mousePressed(int x, int y, int button) {
+
+}
+
+void tcApp::mouseReleased(int x, int y, int button) {
+
+}
+
+void tcApp::mouseMoved(int x, int y) {
+
+}
+
+void tcApp::mouseDragged(int x, int y, int button) {
+
+}
+
+void tcApp::mouseScrolled(float deltaX, float deltaY) {
+
+}
+
+void tcApp::windowResized(int width, int height) {
+
+}
+
+void tcApp::filesDropped(const vector<string>& files) {
+
 }

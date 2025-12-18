@@ -2,7 +2,7 @@
 #include "TrussC.h"
 
 void tcApp::setup() {
-    tc::setVsync(true);
+    setVsync(true);
 
     // システムフォントを使用（.ttf ファイル）
     // .ttc (TrueType Collection) は stb_truetype で追加処理が必要なので .ttf を使用
@@ -20,8 +20,8 @@ void tcApp::setup() {
 }
 
 void tcApp::draw() {
-    tc::clear(tc::colors::white);
-    tc::setColor(40);
+    clear(colors::white);
+    setColor(40);
 
     float y = 50;
 
@@ -52,9 +52,9 @@ void tcApp::draw() {
     }
 
     // メモリ使用量を表示
-    tc::setColor(100);
+    setColor(100);
     std::string info = "Glyphs: " + std::to_string(font.getLoadedGlyphCount());
-    info += " | Memory: " + std::to_string(tc::Font::getTotalCacheMemoryUsage() / 1024) + " KB";
-    info += " | FPS: " + std::to_string((int)tc::getFrameRate());
-    tc::drawBitmapString(info, 50, 730);
+    info += " | Memory: " + std::to_string(Font::getTotalCacheMemoryUsage() / 1024) + " KB";
+    info += " | FPS: " + std::to_string((int)getFrameRate());
+    drawBitmapString(info, 50, 730);
 }

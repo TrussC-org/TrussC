@@ -7,58 +7,58 @@
 using namespace std;
 
 void tcApp::setup() {
-    tc::tcLogNotice() << "=== File Dialog Example ===";
-    tc::tcLogNotice() << "O: Open file dialog";
-    tc::tcLogNotice() << "F: Open folder dialog";
-    tc::tcLogNotice() << "S: Save dialog";
-    tc::tcLogNotice() << "A: Alert dialog";
-    tc::tcLogNotice() << "===========================";
+    tcLogNotice() << "=== File Dialog Example ===";
+    tcLogNotice() << "O: Open file dialog";
+    tcLogNotice() << "F: Open folder dialog";
+    tcLogNotice() << "S: Save dialog";
+    tcLogNotice() << "A: Alert dialog";
+    tcLogNotice() << "===========================";
 }
 
 void tcApp::update() {
 }
 
 void tcApp::draw() {
-    tc::clear(40);
+    clear(40);
 
     float y = 40;
 
     // タイトル
-    tc::setColor(255);
-    tc::drawBitmapString("File Dialog Example", 40, y);
+    setColor(255);
+    drawBitmapString("File Dialog Example", 40, y);
     y += 30;
 
     // 操作説明
-    tc::setColor(180);
-    tc::drawBitmapString("O: Open file   F: Open folder   S: Save   A: Alert", 40, y);
+    setColor(180);
+    drawBitmapString("O: Open file   F: Open folder   S: Save   A: Alert", 40, y);
     y += 40;
 
     // ステータス
-    tc::setColor(100, 200, 255);
-    tc::drawBitmapString("Status: " + statusMessage, 40, y);
+    setColor(100, 200, 255);
+    drawBitmapString("Status: " + statusMessage, 40, y);
     y += 40;
 
     // 結果表示
     if (lastResult.success) {
-        tc::setColor(100, 255, 100);
-        tc::drawBitmapString("Success!", 40, y);
+        setColor(100, 255, 100);
+        drawBitmapString("Success!", 40, y);
         y += 25;
 
-        tc::setColor(220);
-        tc::drawBitmapString("File: " + lastResult.fileName, 40, y);
+        setColor(220);
+        drawBitmapString("File: " + lastResult.fileName, 40, y);
         y += 20;
-        tc::drawBitmapString("Path: " + lastResult.filePath, 40, y);
+        drawBitmapString("Path: " + lastResult.filePath, 40, y);
         y += 40;
 
         // 画像が読み込まれていれば表示
         if (hasImage && loadedImage.isAllocated()) {
-            tc::setColor(255);
-            tc::drawBitmapString("Loaded Image:", 40, y);
+            setColor(255);
+            drawBitmapString("Loaded Image:", 40, y);
             y += 25;
 
             // 画像を適切なサイズで表示
-            float maxW = tc::getWindowWidth() - 80;
-            float maxH = tc::getWindowHeight() - y - 40;
+            float maxW = getWindowWidth() - 80;
+            float maxH = getWindowHeight() - y - 40;
             float imgW = loadedImage.getWidth();
             float imgH = loadedImage.getHeight();
             float scale = min(maxW / imgW, maxH / imgH);
@@ -67,8 +67,8 @@ void tcApp::draw() {
             loadedImage.draw(40, y, imgW * scale, imgH * scale);
         }
     } else if (!lastResult.filePath.empty()) {
-        tc::setColor(255, 100, 100);
-        tc::drawBitmapString("Cancelled", 40, y);
+        setColor(255, 100, 100);
+        drawBitmapString("Cancelled", 40, y);
     }
 }
 
@@ -78,12 +78,12 @@ void tcApp::keyPressed(int key) {
         case 'o': {
             // ファイル選択ダイアログ
             statusMessage = "Opening file dialog...";
-            lastResult = tc::loadDialog("Select a file");
+            lastResult = loadDialog("Select a file");
             hasImage = false;
 
             if (lastResult.success) {
                 statusMessage = "File selected";
-                tc::tcLogNotice() << "Selected: " << lastResult.filePath;
+                tcLogNotice() << "Selected: " << lastResult.filePath;
 
                 // 画像ファイルなら読み込みを試行
                 string path = lastResult.filePath;
@@ -95,7 +95,7 @@ void tcApp::keyPressed(int key) {
                     path.find(".JPEG") != string::npos) {
                     if (loadedImage.load(path)) {
                         hasImage = true;
-                        tc::tcLogNotice() << "Image loaded: " << loadedImage.getWidth() << "x" << loadedImage.getHeight();
+                        tcLogNotice() << "Image loaded: " << loadedImage.getWidth() << "x" << loadedImage.getHeight();
                     }
                 }
             } else {
@@ -108,12 +108,12 @@ void tcApp::keyPressed(int key) {
         case 'f': {
             // フォルダ選択ダイアログ
             statusMessage = "Opening folder dialog...";
-            lastResult = tc::loadDialog("Select a folder", true);
+            lastResult = loadDialog("Select a folder", true);
             hasImage = false;
 
             if (lastResult.success) {
                 statusMessage = "Folder selected";
-                tc::tcLogNotice() << "Selected folder: " << lastResult.filePath;
+                tcLogNotice() << "Selected folder: " << lastResult.filePath;
             } else {
                 statusMessage = "Folder dialog cancelled";
             }
@@ -124,12 +124,12 @@ void tcApp::keyPressed(int key) {
         case 's': {
             // 保存ダイアログ
             statusMessage = "Opening save dialog...";
-            lastResult = tc::saveDialog("untitled.txt", "Save your file");
+            lastResult = saveDialog("untitled.txt", "Save your file");
             hasImage = false;
 
             if (lastResult.success) {
                 statusMessage = "Save location selected";
-                tc::tcLogNotice() << "Save to: " << lastResult.filePath;
+                tcLogNotice() << "Save to: " << lastResult.filePath;
             } else {
                 statusMessage = "Save dialog cancelled";
             }
@@ -140,7 +140,7 @@ void tcApp::keyPressed(int key) {
         case 'a': {
             // アラートダイアログ
             statusMessage = "Showing alert...";
-            tc::alertDialog("This is a test alert from TrussC!");
+            alertDialog("This is a test alert from TrussC!");
             statusMessage = "Alert closed";
             break;
         }

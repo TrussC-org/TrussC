@@ -1,11 +1,11 @@
 #include "tcApp.h"
 
 int main() {
-    tc::WindowSettings settings;
+    WindowSettings settings;
     settings.width = 800;
     settings.height = 600;
     settings.title = "screenshotExample";
 
-    tc::runApp<tcApp>(settings);
+    runApp<tcApp>(settings);
     return 0;
 }

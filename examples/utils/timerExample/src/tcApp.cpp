@@ -6,7 +6,7 @@
 
 TimerBall::TimerBall(float x, float y, float radius)
     : radius_(radius)
-    , color_(tc::colors::white)
+    , color_(colors::white)
 {
     this->x = x;
     this->y = y;
@@ -15,19 +15,19 @@ TimerBall::TimerBall(float x, float y, float radius)
 void TimerBall::setup() {
     // 0.5秒ごとに色をランダムに変更
     callEvery(0.5, [this]() {
-        color_ = tc::colorFromHSB(tc::random(tc::TAU), 0.8f, 1.0f);
+        color_ = colorFromHSB(random(TAU), 0.8f, 1.0f);
         colorChangeCount_++;
     });
 }
 
 void TimerBall::draw() {
-    tc::setColor(color_);
-    tc::drawCircle(0, 0, radius_);
+    setColor(color_);
+    drawCircle(0, 0, radius_);
 
     // 変更回数を表示
-    tc::setColor(0);
+    setColor(0);
     string countStr = to_string(colorChangeCount_);
-    tc::drawBitmapString(countStr, -4, 4);
+    drawBitmapString(countStr, -4, 4);
 }
 
 // =============================================================================
@@ -49,10 +49,10 @@ void CountdownNode::setup() {
 }
 
 void CountdownNode::draw() {
-    tc::Color bgColor = triggered_ ? tc::Color(0.2f, 0.6f, 0.2f) : tc::Color(0.3f, 0.3f, 0.3f);
-    tc::Color textColor = tc::colors::white;
+    Color bgColor = triggered_ ? Color(0.2f, 0.6f, 0.2f) : Color(0.3f, 0.3f, 0.3f);
+    Color textColor = colors::white;
 
-    tc::drawBitmapStringHighlight(message_, 0, 0, bgColor, textColor);
+    drawBitmapStringHighlight(message_, 0, 0, bgColor, textColor);
 }
 
 // =============================================================================
@@ -80,21 +80,21 @@ void PulseNode::setup() {
 
 void PulseNode::draw() {
     // パルスをゆっくり戻す
-    pulseScale_ = tc::lerp(pulseScale_, 1.0f, 0.1f);
+    pulseScale_ = lerp(pulseScale_, 1.0f, 0.1f);
 
     // パルスする四角形
     float size = 60.0f * pulseScale_;
-    tc::Color c = (pulseCount_ >= 10) ? tc::colors::gray : tc::colors::coral;
-    tc::setColor(c);
-    tc::drawRect(-size / 2, -size / 2, size, size);
+    Color c = (pulseCount_ >= 10) ? colors::gray : colors::coral;
+    setColor(c);
+    drawRect(-size / 2, -size / 2, size, size);
 
     // パルス回数を表示
-    tc::setColor(255);
+    setColor(255);
     string info = "Pulse: " + to_string(pulseCount_) + "/10";
-    tc::drawBitmapString(info, -40, size / 2 + 15);
+    drawBitmapString(info, -40, size / 2 + 15);
 
     if (pulseCount_ >= 10) {
-        tc::drawBitmapString("(Timer cancelled)", -55, size / 2 + 30);
+        drawBitmapString("(Timer cancelled)", -55, size / 2 + 30);
     }
 }
 
@@ -107,7 +107,7 @@ void tcApp::setup() {
     cout << "  - Press R to reset all timers" << endl;
 
     // ルートノードを作成
-    rootNode_ = make_shared<tc::Node>();
+    rootNode_ = make_shared<Node>();
 
     // カウントダウンノード
     countdownNode_ = make_shared<CountdownNode>();
@@ -136,29 +136,29 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    tc::clear(30, 30, 40);
+    clear(30, 30, 40);
 
     // タイトル
-    tc::setColor(255);
-    tc::drawBitmapStringHighlight("timerExample - callAfter / callEvery Demo",
-        10, 20, tc::Color(0, 0, 0, 0.7f), tc::colors::white);
+    setColor(255);
+    drawBitmapStringHighlight("timerExample - callAfter / callEvery Demo",
+        10, 20, Color(0, 0, 0, 0.7f), colors::white);
 
     // 説明
-    tc::drawBitmapStringHighlight("callAfter: 3秒後に1回だけ実行",
-        50, 80, tc::Color(0, 0, 0, 0.5f), tc::colors::lightGray);
+    drawBitmapStringHighlight("callAfter: 3秒後に1回だけ実行",
+        50, 80, Color(0, 0, 0, 0.5f), colors::lightGray);
 
-    tc::drawBitmapStringHighlight("callEvery: 0.5秒ごとに色が変わる",
-        100, 140, tc::Color(0, 0, 0, 0.5f), tc::colors::lightGray);
+    drawBitmapStringHighlight("callEvery: 0.5秒ごとに色が変わる",
+        100, 140, Color(0, 0, 0, 0.5f), colors::lightGray);
 
-    tc::drawBitmapStringHighlight("callEvery + cancelTimer: 10回でタイマー停止",
-        200, 380, tc::Color(0, 0, 0, 0.5f), tc::colors::lightGray);
+    drawBitmapStringHighlight("callEvery + cancelTimer: 10回でタイマー停止",
+        200, 380, Color(0, 0, 0, 0.5f), colors::lightGray);
 
     // ノードツリーを描画
     rootNode_->drawTree();
 
     // 操作説明
-    tc::drawBitmapStringHighlight("Press R to reset",
-        10, tc::getWindowHeight() - 20, tc::Color(0, 0, 0, 0.7f), tc::colors::white);
+    drawBitmapStringHighlight("Press R to reset",
+        10, getWindowHeight() - 20, Color(0, 0, 0, 0.7f), colors::white);
 }
 
 void tcApp::keyPressed(int key) {

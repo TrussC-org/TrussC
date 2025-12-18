@@ -8,12 +8,12 @@ int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
 
-    tc::WindowSettings settings;
+    WindowSettings settings;
     settings.title = "hitTestExample";
     settings.width = 1280;
     settings.height = 720;
 
-    tc::runApp<tcApp>(settings);
+    runApp<tcApp>(settings);
 
     return 0;
 }

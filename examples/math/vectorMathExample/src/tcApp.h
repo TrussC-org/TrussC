@@ -1,10 +1,11 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include <vector>
 #include <cstdio>   // snprintf
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;
@@ -16,9 +17,9 @@ public:
 private:
     // パーティクル
     struct Particle {
-        tc::Vec2 pos;
-        tc::Vec2 vel;
-        tc::Vec2 acc;
+        Vec2 pos;
+        Vec2 vel;
+        Vec2 acc;
         float radius;
         float hue;
         float life;

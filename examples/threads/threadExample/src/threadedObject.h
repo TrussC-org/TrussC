@@ -8,7 +8,7 @@
 
 // =============================================================================
 // ThreadedObject - スレッドで計算を行うオブジェクト
-// tc::Thread を継承して使用する例
+// Thread を継承して使用する例
 // =============================================================================
 //
 // oF の threadExample を参考にした実装。
@@ -18,7 +18,7 @@
 // Mutex を使ったデータ保護の重要性をデモするため、
 // update() と updateNoLock() の両方を提供。
 //
-class ThreadedObject : public tc::Thread {
+class ThreadedObject : public Thread {
 public:
     static constexpr int WIDTH = 64;
     static constexpr int HEIGHT = 48;
@@ -117,8 +117,8 @@ public:
             for (int px = 0; px < WIDTH; px++) {
                 int i = py * WIDTH + px;
                 float value = displayData[i];
-                tc::setColor(value, value, value);
-                tc::drawRect(x + px * scale, y + py * scale, scale, scale);
+                setColor(value, value, value);
+                drawRect(x + px * scale, y + py * scale, scale, scale);
             }
         }
     }

@@ -1,13 +1,14 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 
 using namespace trussc;
 
 // polylinesExample - Polylineの曲線機能デモ
 // lineTo, bezierTo, quadBezierTo, curveTo, arc の使用例
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;

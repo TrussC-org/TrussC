@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include <iostream>
 
 using namespace std;
@@ -11,7 +12,7 @@ using namespace std;
 // 上段: Filter 比較（Nearest / Linear / Cubic）- スライム
 // 下段: Wrap 比較（Repeat / ClampToEdge / MirroredRepeat）- レンガ
 // =============================================================================
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;
@@ -20,22 +21,22 @@ public:
 
 private:
     // --- Filter 比較用（スライム）---
-    tc::Image imgOriginal_;
-    tc::Image imgNearest_;
-    tc::Image imgLinear_;
-    tc::Image imgCubic_;  // CPU でバイキュービック補間済み
+    Image imgOriginal_;
+    Image imgNearest_;
+    Image imgLinear_;
+    Image imgCubic_;  // CPU でバイキュービック補間済み
 
     // --- Wrap 比較用（レンガ）---
-    tc::Image imgBrickRepeat_;
-    tc::Image imgBrickClamp_;
-    tc::Image imgBrickMirrored_;
+    Image imgBrickRepeat_;
+    Image imgBrickClamp_;
+    Image imgBrickMirrored_;
 
     // パターン生成
-    void generatePixelArt(tc::Image& img);   // スライム
-    void generateBrickPattern(tc::Image& img);  // レンガ
+    void generatePixelArt(Image& img);   // スライム
+    void generateBrickPattern(Image& img);  // レンガ
 
     // バイキュービック補間でアップスケール
-    void upscaleBicubic(const tc::Image& src, tc::Image& dst, int newWidth, int newHeight);
+    void upscaleBicubic(const Image& src, Image& dst, int newWidth, int newHeight);
     float cubicWeight(float t);
 
     // 現在の表示スケール

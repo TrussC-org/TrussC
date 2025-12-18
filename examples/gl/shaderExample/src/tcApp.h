@@ -2,9 +2,10 @@
 
 #include "TrussC.h"
 #include "tcBaseApp.h"
+using namespace tc;
 #include "tc/gl/tcShader.h"
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;
@@ -12,7 +13,7 @@ public:
     void keyPressed(int key) override;
 
 private:
-    tc::Shader shader;
+    Shader shader;
     int currentEffect = 0;
     static constexpr int NUM_EFFECTS = 4;
 

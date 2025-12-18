@@ -263,241 +263,279 @@ oF ユーザーが TrussC で同等の機能を探す際のリファレンスで
 
 ### **アプリ構造**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofApp : public ofBaseApp` | `tcApp : public tc::App` | |
-| `ofRunApp(new ofApp())` | `tc::runApp<tcApp>()` | テンプレート形式 |
-| `setup()` | `setup()` | 同じ |
-| `update()` | `update()` | 同じ |
-| `draw()` | `draw()` | 同じ |
-| `keyPressed(int key)` | `keyPressed(int key)` | 同じ |
-| `mousePressed(x, y, button)` | `mousePressed(x, y, button)` | 同じ |
-| `ofSetFrameRate(60)` | `tc::setFps(60)` | |
-| `ofSetVerticalSync(true)` | `tc::setVsync(true)` | |
-| `ofGetElapsedTimef()` | `tc::getElapsedTime()` | |
-| `ofGetFrameRate()` | `tc::getFrameRate()` | |
-| `ofGetWidth()` | `tc::getWindowWidth()` | |
-| `ofGetHeight()` | `tc::getWindowHeight()` | |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofApp : public ofBaseApp` | `tcApp : public tc::App` | emptyExample | |
+| `ofRunApp(new ofApp())` | `tc::runApp<tcApp>()` | emptyExample | テンプレート形式 |
+| `setup()` | `setup()` | emptyExample | 同じ |
+| `update()` | `update()` | emptyExample | 同じ |
+| `draw()` | `draw()` | emptyExample | 同じ |
+| `keyPressed(int key)` | `keyPressed(int key)` | keyboardExample | 同じ |
+| `mousePressed(x, y, button)` | `mousePressed(x, y, button)` | mouseExample | 同じ |
+| `windowResized(w, h)` | `windowResized(w, h)` | emptyExample | 同じ |
+| `dragEvent(ofDragInfo)` | `filesDropped(paths)` | dragDropExample | |
+| `ofSetFrameRate(60)` | `tc::setFps(60)` | loopModeExample | |
+| `ofSetVerticalSync(true)` | `tc::setVsync(true)` | loopModeExample | |
+| - | `tc::setDrawFps(fps)` | loopModeExample | 描画レート個別設定 |
+| - | `tc::setUpdateFps(fps)` | loopModeExample | 更新レート個別設定 |
+| `ofGetElapsedTimef()` | `tc::getElapsedTime()` | graphicsExample | |
+| `ofGetFrameRate()` | `tc::getFrameRate()` | loopModeExample | |
+| `ofGetWidth()` | `tc::getWindowWidth()` | vectorMathExample | |
+| `ofGetHeight()` | `tc::getWindowHeight()` | vectorMathExample | |
 
 ### **描画（Graphics）**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofBackground(r, g, b)` | `tc::clear(r, g, b)` | 0-255 ではなく 0.0-1.0 |
-| `ofSetColor(r, g, b, a)` | `tc::setColor(r, g, b, a)` | 0.0-1.0 |
-| `ofSetColor(ofColor::red)` | `tc::setColor(tc::colors::red)` | |
-| `ofDrawRectangle(x, y, w, h)` | `tc::drawRect(x, y, w, h)` | |
-| `ofDrawCircle(x, y, r)` | `tc::drawCircle(x, y, r)` | |
-| `ofDrawEllipse(x, y, w, h)` | `tc::drawEllipse(x, y, w, h)` | |
-| `ofDrawLine(x1, y1, x2, y2)` | `tc::drawLine(x1, y1, x2, y2)` | |
-| `ofDrawTriangle(...)` | `tc::drawTriangle(...)` | |
-| `ofNoFill()` | `tc::noFill()` | |
-| `ofFill()` | `tc::fill()` | |
-| `ofSetLineWidth(w)` | `tc::setLineWidth(w)` | |
-| `ofDrawBitmapString(s, x, y)` | `tc::drawBitmapString(s, x, y)` | |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofBackground(r, g, b)` | `tc::clear(r, g, b)` | graphicsExample | 0-255 ではなく 0.0-1.0 |
+| `ofSetColor(r, g, b, a)` | `tc::setColor(r, g, b, a)` | graphicsExample | 0.0-1.0 |
+| `ofSetColor(ofColor::red)` | `tc::setColor(tc::colors::red)` | colorExample | |
+| `ofDrawRectangle(x, y, w, h)` | `tc::drawRect(x, y, w, h)` | graphicsExample | |
+| `ofDrawCircle(x, y, r)` | `tc::drawCircle(x, y, r)` | graphicsExample | |
+| `ofDrawEllipse(x, y, w, h)` | `tc::drawEllipse(x, y, w, h)` | graphicsExample | |
+| `ofDrawLine(x1, y1, x2, y2)` | `tc::drawLine(x1, y1, x2, y2)` | graphicsExample | |
+| `ofDrawTriangle(...)` | `tc::drawTriangle(...)` | graphicsExample | |
+| `ofNoFill()` | `tc::noFill()` | graphicsExample | |
+| `ofFill()` | `tc::fill()` | graphicsExample | |
+| `ofSetLineWidth(w)` | `tc::setLineWidth(w)` | graphicsExample | |
+| `ofDrawBitmapString(s, x, y)` | `tc::drawBitmapString(s, x, y)` | graphicsExample | |
+| `ofPolyline` | `tc::Polyline` | polylinesExample | |
+| - | `tc::StrokeMesh` | strokeMeshExample | 太線描画 |
+| `ofEnableBlendMode()` | `tc::setBlendMode()` | blendingExample | |
+| `ofScissor()` | `tc::setScissor()` | clippingExample | |
 
 ### **変換（Transform）**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofPushMatrix()` | `tc::pushMatrix()` | |
-| `ofPopMatrix()` | `tc::popMatrix()` | |
-| `ofTranslate(x, y, z)` | `tc::translate(x, y, z)` | |
-| `ofRotateDeg(deg)` | `tc::rotateDeg(deg)` | |
-| `ofRotateRad(rad)` | `tc::rotateRad(rad)` | |
-| `ofScale(x, y, z)` | `tc::scale(x, y, z)` | |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofPushMatrix()` | `tc::pushMatrix()` | graphicsExample | |
+| `ofPopMatrix()` | `tc::popMatrix()` | graphicsExample | |
+| `ofTranslate(x, y, z)` | `tc::translate(x, y, z)` | graphicsExample | |
+| `ofRotateDeg(deg)` | `tc::rotateDeg(deg)` | graphicsExample | |
+| `ofRotateRad(rad)` | `tc::rotateRad(rad)` | graphicsExample | |
+| `ofScale(x, y, z)` | `tc::scale(x, y, z)` | 3DPrimitivesExample | |
 
 ### **数学（Math）**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `glm::vec2` / `ofVec2f` | `tc::Vec2` | |
-| `glm::vec3` / `ofVec3f` | `tc::Vec3` | |
-| `glm::vec4` / `ofVec4f` | `tc::Vec4` | |
-| `glm::mat4` / `ofMatrix4x4` | `tc::Mat4` | |
-| `ofMap(v, a, b, c, d)` | `tc::map(v, a, b, c, d)` | |
-| `ofClamp(v, min, max)` | `tc::clamp(v, min, max)` | std::clamp も可 |
-| `ofLerp(a, b, t)` | `tc::lerp(a, b, t)` | |
-| `ofNoise(x)` | `tc::noise(x)` | Perlin noise |
-| `ofSignedNoise(x)` | `tc::signedNoise(x)` | |
-| `ofRandom(min, max)` | `tc::random(min, max)` | |
-| `ofDegToRad(deg)` | `tc::radians(deg)` | |
-| `ofRadToDeg(rad)` | `tc::degrees(rad)` | |
-| `PI` | `tc::PI` | |
-| `TWO_PI` | `tc::TAU` | τ = 2π |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `glm::vec2` / `ofVec2f` | `tc::Vec2` | vectorMathExample | |
+| `glm::vec3` / `ofVec3f` | `tc::Vec3` | vectorMathExample | |
+| `glm::vec4` / `ofVec4f` | `tc::Vec4` | vectorMathExample | |
+| `glm::mat4` / `ofMatrix4x4` | `tc::Mat4` | vectorMathExample | |
+| `ofMap(v, a, b, c, d)` | `tc::map(v, a, b, c, d)` | vectorMathExample | |
+| `ofClamp(v, min, max)` | `tc::clamp(v, min, max)` | vectorMathExample | std::clamp も可 |
+| `ofLerp(a, b, t)` | `tc::lerp(a, b, t)` | vectorMathExample | |
+| `ofNoise(x)` | `tc::noise(x)` | noiseField2dExample | Perlin noise |
+| `ofSignedNoise(x)` | `tc::signedNoise(x)` | noiseField2dExample | |
+| `ofRandom(min, max)` | `tc::random(min, max)` | vectorMathExample | |
+| `ofDegToRad(deg)` | `tc::radians(deg)` | vectorMathExample | |
+| `ofRadToDeg(rad)` | `tc::degrees(rad)` | vectorMathExample | |
+| `PI` | `tc::PI` | vectorMathExample | |
+| `TWO_PI` | `tc::TAU` | vectorMathExample | τ = 2π |
 
 ### **色（Color）**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofColor(r, g, b, a)` | `tc::Color(r, g, b, a)` | 0.0-1.0 |
-| `ofColor::fromHsb(h, s, b)` | `tc::Color::fromHSB(h, s, b)` | 0.0-1.0 |
-| - | `tc::Color::fromOKLab(L, a, b)` | OKLab 色空間 |
-| - | `tc::Color::fromOKLCH(L, C, h)` | OKLCH 色空間 |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofColor(r, g, b, a)` | `tc::Color(r, g, b, a)` | colorExample | 0.0-1.0 |
+| `ofColor::fromHsb(h, s, b)` | `tc::Color::fromHSB(h, s, b)` | colorExample | 0.0-1.0 |
+| - | `tc::Color::fromOKLab(L, a, b)` | colorExample | OKLab 色空間 |
+| - | `tc::Color::fromOKLCH(L, C, h)` | colorExample | OKLCH 色空間 |
 
 ### **画像（Image）**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofImage` | `tc::Image` | |
-| `img.load("path")` | `img.load("path")` | 同じ |
-| `img.draw(x, y)` | `img.draw(x, y)` | 同じ |
-| `img.draw(x, y, w, h)` | `img.draw(x, y, w, h)` | 同じ |
-| `img.save("path")` | `img.save("path")` | 同じ |
-| `img.getWidth()` | `img.getWidth()` | 同じ |
-| `img.getHeight()` | `img.getHeight()` | 同じ |
-| `img.setColor(x, y, c)` | `img.setColor(x, y, c)` | 同じ |
-| `img.getColor(x, y)` | `img.getColor(x, y)` | 同じ |
-| - | `img.setFilter(Nearest/Linear)` | テクスチャフィルター |
-| - | `img.setWrap(Repeat/Clamp/...)` | テクスチャラップ |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofImage` | `tc::Image` | imageLoaderExample | |
+| `img.load("path")` | `img.load("path")` | imageLoaderExample | 同じ |
+| `img.draw(x, y)` | `img.draw(x, y)` | imageLoaderExample | 同じ |
+| `img.draw(x, y, w, h)` | `img.draw(x, y, w, h)` | imageLoaderExample | 同じ |
+| `img.save("path")` | `img.save("path")` | screenshotExample | 同じ |
+| `img.getWidth()` | `img.getWidth()` | imageLoaderExample | 同じ |
+| `img.getHeight()` | `img.getHeight()` | imageLoaderExample | 同じ |
+| `img.setColor(x, y, c)` | `img.setColor(x, y, c)` | - | 同じ |
+| `img.getColor(x, y)` | `img.getColor(x, y)` | - | 同じ |
+| - | `img.setFilter(Nearest/Linear)` | textureExample | テクスチャフィルター |
+| - | `img.setWrap(Repeat/Clamp/...)` | textureExample | テクスチャラップ |
 
 ### **フォント（Font）**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofTrueTypeFont` | `tc::TrueTypeFont` | |
-| `font.load("font.ttf", size)` | `font.load("font.ttf", size)` | |
-| `font.drawString(s, x, y)` | `font.drawString(s, x, y)` | |
-| - | `tc::drawBitmapString(s, x, y)` | 組み込みフォント |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofTrueTypeFont` | `tc::TrueTypeFont` | fontExample | |
+| `font.load("font.ttf", size)` | `font.load("font.ttf", size)` | fontExample | |
+| `font.drawString(s, x, y)` | `font.drawString(s, x, y)` | fontExample | |
+| - | `tc::drawBitmapString(s, x, y)` | graphicsExample | 組み込みフォント |
 
 ### **3D プリミティブ**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofPlanePrimitive` | `tc::createPlane(w, h)` | Mesh を返す |
-| `ofBoxPrimitive` | `tc::createBox(size)` | |
-| `ofSpherePrimitive` | `tc::createSphere(r, res)` | |
-| `ofIcoSpherePrimitive` | `tc::createIcoSphere(r, res)` | |
-| `ofCylinderPrimitive` | `tc::createCylinder(r, h, res)` | |
-| `ofConePrimitive` | `tc::createCone(r, h, res)` | |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofPlanePrimitive` | `tc::createPlane(w, h)` | 3DPrimitivesExample | Mesh を返す |
+| `ofBoxPrimitive` | `tc::createBox(size)` | 3DPrimitivesExample | |
+| `ofSpherePrimitive` | `tc::createSphere(r, res)` | 3DPrimitivesExample | |
+| `ofIcoSpherePrimitive` | `tc::createIcoSphere(r, res)` | 3DPrimitivesExample | |
+| `ofCylinderPrimitive` | `tc::createCylinder(r, h, res)` | 3DPrimitivesExample | |
+| `ofConePrimitive` | `tc::createCone(r, h, res)` | 3DPrimitivesExample | |
 
 ### **3D カメラ**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofEasyCam` | `tc::EasyCam` | |
-| `cam.begin()` | `cam.begin()` | |
-| `cam.end()` | `cam.end()` | |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofEasyCam` | `tc::EasyCam` | easyCamExample | |
+| `cam.begin()` | `cam.begin()` | easyCamExample | |
+| `cam.end()` | `cam.end()` | easyCamExample | |
 
 ### **ライティング・マテリアル**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofEnableLighting()` | `tc::enableLighting()` | |
-| `ofDisableLighting()` | `tc::disableLighting()` | |
-| `ofLight` | `tc::Light` | |
-| `light.setDirectional(dir)` | `light.setDirectional(dir)` | |
-| `light.setPointLight()` | `light.setPoint(pos)` | |
-| `light.setAmbientColor(c)` | `light.setAmbient(c)` | |
-| `light.setDiffuseColor(c)` | `light.setDiffuse(c)` | |
-| `light.setSpecularColor(c)` | `light.setSpecular(c)` | |
-| `ofMaterial` | `tc::Material` | |
-| - | `tc::Material::gold()` | プリセット |
-| - | `tc::Material::silver()` | プリセット |
-| - | `tc::Material::plastic(color)` | プリセット |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofEnableLighting()` | `tc::enableLighting()` | 3DPrimitivesExample | |
+| `ofDisableLighting()` | `tc::disableLighting()` | 3DPrimitivesExample | |
+| `ofLight` | `tc::Light` | 3DPrimitivesExample | |
+| `light.setDirectional(dir)` | `light.setDirectional(dir)` | 3DPrimitivesExample | |
+| `light.setPointLight()` | `light.setPoint(pos)` | 3DPrimitivesExample | |
+| `light.setAmbientColor(c)` | `light.setAmbient(c)` | 3DPrimitivesExample | |
+| `light.setDiffuseColor(c)` | `light.setDiffuse(c)` | 3DPrimitivesExample | |
+| `light.setSpecularColor(c)` | `light.setSpecular(c)` | 3DPrimitivesExample | |
+| `ofMaterial` | `tc::Material` | 3DPrimitivesExample | |
+| - | `tc::Material::gold()` | 3DPrimitivesExample | プリセット |
+| - | `tc::Material::silver()` | 3DPrimitivesExample | プリセット |
+| - | `tc::Material::plastic(color)` | 3DPrimitivesExample | プリセット |
 
 ### **メッシュ**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofMesh` | `tc::Mesh` | |
-| `mesh.addVertex(v)` | `mesh.addVertex(v)` | |
-| `mesh.addColor(c)` | `mesh.addColor(c)` | |
-| `mesh.addNormal(n)` | `mesh.addNormal(n)` | |
-| `mesh.addIndex(i)` | `mesh.addIndex(i)` | |
-| `mesh.draw()` | `mesh.draw()` | |
-| `mesh.drawWireframe()` | `mesh.drawWireframe()` | |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofMesh` | `tc::Mesh` | 3DPrimitivesExample | |
+| `mesh.addVertex(v)` | `mesh.addVertex(v)` | 3DPrimitivesExample | |
+| `mesh.addColor(c)` | `mesh.addColor(c)` | 3DPrimitivesExample | |
+| `mesh.addNormal(n)` | `mesh.addNormal(n)` | 3DPrimitivesExample | |
+| `mesh.addIndex(i)` | `mesh.addIndex(i)` | 3DPrimitivesExample | |
+| `mesh.draw()` | `mesh.draw()` | 3DPrimitivesExample | |
+| `mesh.drawWireframe()` | `mesh.drawWireframe()` | 3DPrimitivesExample | |
 
 ### **FBO**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofFbo` | `tc::Fbo` | |
-| `fbo.allocate(w, h)` | `fbo.allocate(w, h)` | |
-| `fbo.begin()` | `fbo.begin()` | |
-| `fbo.end()` | `fbo.end()` | |
-| `fbo.draw(x, y)` | `fbo.draw(x, y)` | |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofFbo` | `tc::Fbo` | fboExample | |
+| `fbo.allocate(w, h)` | `fbo.allocate(w, h)` | fboExample | |
+| `fbo.begin()` | `fbo.begin()` | fboExample | |
+| `fbo.end()` | `fbo.end()` | fboExample | |
+| `fbo.draw(x, y)` | `fbo.draw(x, y)` | fboExample | |
+
+### **シェーダー**
+
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofShader` | `tc::Shader` | shaderExample | |
+| `shader.load(vert, frag)` | `shader.load(vert, frag)` | shaderExample | |
+| `shader.begin()` | `shader.begin()` | shaderExample | |
+| `shader.end()` | `shader.end()` | shaderExample | |
+| `shader.setUniform*()` | `shader.setUniform*()` | shaderExample | |
 
 ### **サウンド**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofSoundPlayer` | `tc::Sound` | |
-| `sound.load("file.wav")` | `sound.load("file.wav")` | |
-| `sound.play()` | `sound.play()` | |
-| `sound.stop()` | `sound.stop()` | |
-| `sound.setVolume(v)` | `sound.setVolume(v)` | |
-| `sound.setLoop(true)` | `sound.setLoop(true)` | |
-| `ofSoundStream` | `tc::SoundStream` | マイク入力 |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofSoundPlayer` | `tc::Sound` | soundPlayerExample | |
+| `sound.load("file.wav")` | `sound.load("file.wav")` | soundPlayerExample | |
+| `sound.play()` | `sound.play()` | soundPlayerExample | |
+| `sound.stop()` | `sound.stop()` | soundPlayerExample | |
+| `sound.setVolume(v)` | `sound.setVolume(v)` | soundPlayerExample | |
+| `sound.setLoop(true)` | `sound.setLoop(true)` | soundPlayerExample | |
+| `ofSoundStream` | `tc::SoundStream` | micInputExample | マイク入力 |
 
 ### **ビデオ**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofVideoGrabber` | `tc::VideoGrabber` | |
-| `grabber.setup(w, h)` | `grabber.setup(w, h)` | |
-| `grabber.update()` | `grabber.update()` | |
-| `grabber.draw(x, y)` | `grabber.draw(x, y)` | |
-| `grabber.isFrameNew()` | `grabber.isFrameNew()` | |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofVideoGrabber` | `tc::VideoGrabber` | videoGrabberExample | |
+| `grabber.setup(w, h)` | `grabber.setup(w, h)` | videoGrabberExample | |
+| `grabber.update()` | `grabber.update()` | videoGrabberExample | |
+| `grabber.draw(x, y)` | `grabber.draw(x, y)` | videoGrabberExample | |
+| `grabber.isFrameNew()` | `grabber.isFrameNew()` | videoGrabberExample | |
 
 ### **入出力**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofSystemLoadDialog()` | `tc::systemLoadDialog()` | |
-| `ofSystemSaveDialog()` | `tc::systemSaveDialog()` | |
-| `ofToDataPath("file")` | `tc::getDataPath() + "file"` | |
-| `ofLoadJson(path)` | `tc::loadJson(path)` | nlohmann/json |
-| `ofSaveJson(path, json)` | `tc::saveJson(path, json)` | |
-| - | `tc::loadXml(path)` | pugixml |
-| - | `tc::saveXml(path, xml)` | |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofSystemLoadDialog()` | `tc::systemLoadDialog()` | fileDialogExample | |
+| `ofSystemSaveDialog()` | `tc::systemSaveDialog()` | fileDialogExample | |
+| `ofToDataPath("file")` | `tc::getDataPath() + "file"` | imageLoaderExample | |
+| `ofLoadJson(path)` | `tc::loadJson(path)` | jsonXmlExample | nlohmann/json |
+| `ofSaveJson(path, json)` | `tc::saveJson(path, json)` | jsonXmlExample | |
+| - | `tc::loadXml(path)` | jsonXmlExample | pugixml |
+| - | `tc::saveXml(path, xml)` | jsonXmlExample | |
 
 ### **ネットワーク**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofxTCPClient` | `tc::TcpClient` | |
-| `ofxTCPServer` | `tc::TcpServer` | |
-| `ofxUDPManager` | `tc::UdpSocket` | |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofxTCPClient` | `tc::TcpClient` | tcpExample | |
+| `ofxTCPServer` | `tc::TcpServer` | tcpExample | |
+| `ofxUDPManager` | `tc::UdpSocket` | udpExample | |
 
 ### **GUI**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofxGui` / `ofxImGui` | Dear ImGui（組み込み） | `tc::imgui::Begin()` 等 |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofxGui` / `ofxImGui` | Dear ImGui（組み込み） | imguiExample | `tc::imgui::Begin()` 等 |
 
 ### **イベント**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofEvent<T>` | `tc::Event<T>` | |
-| `ofAddListener(event, obj, &method)` | `tc::EventListener` | RAII 形式 |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofEvent<T>` | `tc::Event<T>` | eventsExample | |
+| `ofAddListener(event, obj, &method)` | `tc::EventListener` | eventsExample | RAII 形式 |
 
 ### **シーングラフ**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofNode` | `tc::Node` | shared_ptr ベース |
-| `node.setPosition(x, y, z)` | `node->setPosition(x, y, z)` | |
-| `node.setParent(parent)` | `parent->addChild(child)` | |
-| - | `tc::RectNode` | 2D UI 用、ヒットテスト対応 |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofNode` | `tc::Node` | ofNodeExample | shared_ptr ベース |
+| `node.setPosition(x, y, z)` | `node->setPosition(x, y, z)` | ofNodeExample | |
+| `node.setParent(parent)` | `parent->addChild(child)` | ofNodeExample | |
+| - | `tc::RectNode` | hitTestExample | 2D UI 用、ヒットテスト対応 |
 
 ### **ログ**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofLog()` | `tc::tcLogNotice()` | |
-| `ofLogVerbose()` | `tc::tcLogVerbose()` | |
-| `ofLogWarning()` | `tc::tcLogWarning()` | |
-| `ofLogError()` | `tc::tcLogError()` | |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofLog()` | `tc::tcLogNotice()` | fileDialogExample | |
+| `ofLogVerbose()` | `tc::tcLogVerbose()` | - | |
+| `ofLogWarning()` | `tc::tcLogWarning()` | tcpExample | |
+| `ofLogError()` | `tc::tcLogError()` | tcpExample | |
+
+### **スレッド**
+
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofThread` | `tc::Thread` | threadExample | |
+| - | `tc::ThreadChannel` | threadChannelExample | スレッドセーフなキュー |
+
+### **シリアル通信**
+
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofSerial` | `tc::Serial` | serialExample | |
+
+### **タイマー**
+
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| - | `node->callAfter(sec, func)` | timerExample | 遅延実行 |
+| - | `node->callEvery(sec, func)` | timerExample | 繰り返し実行 |
 
 ### **アドオン**
 
-| openFrameworks | TrussC | 備考 |
-|:---|:---|:---|
-| `ofxAddon` | `tcxAddon` | プレフィックス |
-| `addons.make` に記述 | `use_addon()` | CMake 関数 |
-| `ofxGui` | `tcxGui` | GUI |
-| `ofxOsc` | `tcxOsc` | OSC 通信 |
-| `ofxBox2d` | `tcxBox2d` | 2D 物理エンジン |
-| - | `tcx::addonname::Class` | 名前空間規約 |
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofxAddon` | `tcxAddon` | - | プレフィックス |
+| `addons.make` に記述 | `use_addon()` | - | CMake 関数 |
+| `ofxGui` | `tcxGui` | - | GUI |
+| `ofxOsc` | `tcxOsc` | - | OSC 通信 |
+| `ofxBox2d` | `tcxBox2d` | - | 2D 物理エンジン |
+| - | `tcx::addonname::Class` | - | 名前空間規約 |

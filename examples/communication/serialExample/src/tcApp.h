@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include "tc/comm/tcSerial.h"
 
 // =============================================================================
@@ -8,7 +9,7 @@
 // openFrameworks の serialExample と同等の機能を持つ
 // =============================================================================
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;
@@ -17,10 +18,10 @@ public:
 
 private:
     // シリアル通信
-    tc::Serial serial;
+    Serial serial;
 
     // デバイスリスト
-    std::vector<tc::SerialDeviceInfo> deviceList;
+    std::vector<SerialDeviceInfo> deviceList;
 
     // メッセージ送受信
     bool bSendSerialMessage = false;

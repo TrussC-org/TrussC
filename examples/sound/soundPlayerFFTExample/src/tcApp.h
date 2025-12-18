@@ -1,12 +1,13 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include "tc/sound/tcSound.h"
 #include "tc/math/tcFFT.h"
 #include <vector>
 #include <complex>
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;
@@ -14,7 +15,7 @@ public:
     void keyPressed(int key) override;
 
 private:
-    tc::Sound music;
+    Sound music;
     bool musicLoaded = false;
 
     // FFT 関連

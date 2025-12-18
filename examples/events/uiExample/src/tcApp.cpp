@@ -30,11 +30,11 @@ void tcApp::setup() {
     button2_->y = 110;
     button2_->width = 140;
     button2_->height = 45;
-    button2_->normalColor = tc::Color(0.3f, 0.25f, 0.25f);
-    button2_->hoverColor = tc::Color(0.45f, 0.35f, 0.35f);
-    button2_->pressColor = tc::Color(0.2f, 0.15f, 0.15f);
+    button2_->normalColor = Color(0.3f, 0.25f, 0.25f);
+    button2_->hoverColor = Color(0.45f, 0.35f, 0.35f);
+    button2_->pressColor = Color(0.2f, 0.15f, 0.15f);
     button2_->onClick = [this]() {
-        bgColor_ = tc::Color(0.1f, 0.1f, 0.12f);
+        bgColor_ = Color(0.1f, 0.1f, 0.12f);
         slider1_->setValue(0.1f);
         slider2_->setValue(0.1f);
         cout << "Background reset!" << endl;
@@ -98,25 +98,25 @@ void tcApp::update() {
 
 void tcApp::draw() {
     // 背景色
-    tc::clear(bgColor_);
+    clear(bgColor_);
 
     // 説明テキスト
-    tc::setColor(0.7f, 0.7f, 0.75f);
-    tc::drawBitmapString("Buttons: Click to trigger events", 50, 170);
-    tc::drawBitmapString("Sliders: Drag or scroll wheel to change value", 50, 310);
-    tc::drawBitmapString("ScrollBox: Mouse wheel to scroll content", 350, 270);
+    setColor(0.7f, 0.7f, 0.75f);
+    drawBitmapString("Buttons: Click to trigger events", 50, 170);
+    drawBitmapString("Sliders: Drag or scroll wheel to change value", 50, 310);
+    drawBitmapString("ScrollBox: Mouse wheel to scroll content", 350, 270);
 
     // 現在の背景色を表示
     char buf[128];
     snprintf(buf, sizeof(buf), "Background: R=%.2f G=%.2f B=%.2f",
              bgColor_.r, bgColor_.g, bgColor_.b);
-    tc::setColor(1.0f, 1.0f, 1.0f);
-    tc::drawBitmapString(buf, 50, 350);
+    setColor(1.0f, 1.0f, 1.0f);
+    drawBitmapString(buf, 50, 350);
 
     // フレームレート
-    tc::setColor(0.5f, 0.5f, 0.5f);
-    snprintf(buf, sizeof(buf), "FPS: %.1f", tc::getFrameRate());
-    tc::drawBitmapString(buf, tc::getWindowWidth() - 100, 30);
+    setColor(0.5f, 0.5f, 0.5f);
+    snprintf(buf, sizeof(buf), "FPS: %.1f", getFrameRate());
+    drawBitmapString(buf, getWindowWidth() - 100, 30);
 
     // 子ノード（UIコンポーネント）は自動描画される（drawTree で呼ばれる）
 }
@@ -124,7 +124,7 @@ void tcApp::draw() {
 void tcApp::keyPressed(int key) {
     if (key == 'r' || key == 'R') {
         // Rキーでリセット
-        bgColor_ = tc::Color(0.1f, 0.1f, 0.12f);
+        bgColor_ = Color(0.1f, 0.1f, 0.12f);
         slider1_->setValue(0.1f);
         slider2_->setValue(0.1f);
         clickCount_ = 0;
@@ -149,14 +149,14 @@ void tcApp::mouseDragged(int x, int y, int button) {
 
 void tcApp::mouseScrolled(float dx, float dy) {
     // スクロールイベントを手動で配信
-    float mx = tc::getGlobalMouseX();
-    float my = tc::getGlobalMouseY();
+    float mx = getGlobalMouseX();
+    float my = getGlobalMouseY();
 
-    tc::Ray globalRay = tc::Ray::fromScreenPoint2D(mx, my);
+    Ray globalRay = Ray::fromScreenPoint2D(mx, my);
 
     // スクロールボックス
-    tc::Mat4 globalInv = scrollBox_->getGlobalMatrixInverse();
-    tc::Ray localRay = globalRay.transformed(globalInv);
+    Mat4 globalInv = scrollBox_->getGlobalMatrixInverse();
+    Ray localRay = globalRay.transformed(globalInv);
     float dist;
     if (scrollBox_->hitTest(localRay, dist)) {
         scrollBox_->handleScroll(dx, dy);

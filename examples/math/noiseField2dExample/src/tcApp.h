@@ -1,13 +1,14 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 
 using namespace trussc;
 
 // noiseField2dExample - パーリンノイズのデモ
 // フローフィールドとノイズテクスチャの可視化
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;

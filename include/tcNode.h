@@ -17,6 +17,12 @@ class Node;
 using NodePtr = std::shared_ptr<Node>;
 using NodeWeakPtr = std::weak_ptr<Node>;
 
+// ホバー状態のキャッシュ（毎フレーム1回だけ更新）
+namespace internal {
+    inline Node* hoveredNode = nullptr;      // 現在ホバー中のノード
+    inline Node* prevHoveredNode = nullptr;  // 前フレームのホバーノード
+}
+
 // =============================================================================
 // Node - シーングラフの基底クラス
 // すべてのノードはこのクラスを継承する
@@ -115,6 +121,9 @@ public:
     void enableEvents() { eventsEnabled_ = true; }
     void disableEvents() { eventsEnabled_ = false; }
     bool isEventsEnabled() const { return eventsEnabled_; }
+
+    // マウスがこのノードの上にあるか（毎フレーム自動更新、O(1)）
+    bool isMouseOver() const { return internal::hoveredNode == this; }
 
     // -------------------------------------------------------------------------
     // 変換（トランスフォーム）
@@ -365,7 +374,81 @@ public:
         return nullptr;
     }
 
+    // -------------------------------------------------------------------------
+    // キーイベントのディスパッチ（全アクティブノードに broadcast）
+    // -------------------------------------------------------------------------
+
+    // キー押下を全ノードに配信
+    bool dispatchKeyPress(int key) {
+        return dispatchKeyPressRecursive(key);
+    }
+
+    // キー離しを全ノードに配信
+    bool dispatchKeyRelease(int key) {
+        return dispatchKeyReleaseRecursive(key);
+    }
+
+    // -------------------------------------------------------------------------
+    // ホバー状態の更新（毎フレーム1回呼ぶ）
+    // -------------------------------------------------------------------------
+
+    void updateHoverState(float screenX, float screenY) {
+        // 前フレームのホバーノードを保存
+        internal::prevHoveredNode = internal::hoveredNode;
+
+        // 新しいホバーノードを検索
+        Ray globalRay = Ray::fromScreenPoint2D(screenX, screenY);
+        HitResult result = findHitNode(globalRay);
+        internal::hoveredNode = result.hit() ? result.node.get() : nullptr;
+
+        // Enter/Leave イベントを発火
+        if (internal::prevHoveredNode != internal::hoveredNode) {
+            if (internal::prevHoveredNode) {
+                internal::prevHoveredNode->onMouseLeave();
+            }
+            if (internal::hoveredNode) {
+                internal::hoveredNode->onMouseEnter();
+            }
+        }
+    }
+
 private:
+    // キーイベントの再帰的な配信
+    bool dispatchKeyPressRecursive(int key) {
+        if (!isActive) return false;
+
+        // 自分が処理
+        if (onKeyPress(key)) {
+            return true;  // 消費された
+        }
+
+        // 子ノードに配信
+        for (auto& child : children_) {
+            if (child->dispatchKeyPressRecursive(key)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool dispatchKeyReleaseRecursive(int key) {
+        if (!isActive) return false;
+
+        if (onKeyRelease(key)) {
+            return true;
+        }
+
+        for (auto& child : children_) {
+            if (child->dispatchKeyReleaseRecursive(key)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+
     // 再帰的なヒットテスト（描画順の逆で走査）
     HitResult findHitNodeRecursive(const Ray& globalRay, const Mat4& parentInverseMatrix) {
         if (!isActive) return HitResult{};
@@ -467,7 +550,7 @@ protected:
         return false;
     }
 
-    // キーイベント
+    // キーイベント（全ノードに broadcast される）
     virtual bool onKeyPress(int key) {
         (void)key;
         return false;
@@ -477,6 +560,10 @@ protected:
         (void)key;
         return false;
     }
+
+    // マウス Enter/Leave（ホバー状態が変わった時に呼ばれる）
+    virtual void onMouseEnter() {}
+    virtual void onMouseLeave() {}
 
     // -------------------------------------------------------------------------
     // タイマー
