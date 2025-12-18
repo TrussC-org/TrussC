@@ -93,6 +93,29 @@ openFrameworksとの機能比較に基づいた開発ロードマップ。
 | パーティクルシステム | アドオン化も検討 | 中 |
 | タッチ入力 | iOS/Android向け | 高 |
 | Spot ライト | スポットライト対応 | 中 |
+| TLS/SSL 対応 | TCP通信の暗号化（OpenSSL or mbedTLS） | 高 |
+
+---
+
+## 外部ライブラリの更新
+
+TrussC はいくつかの外部ライブラリに依存している。
+特に画像処理系は脆弱性が発見されやすいため、**リリースごとに最新版を確認する**。
+
+| ライブラリ | 用途 | 更新優先度 | 備考 |
+|:-----------|:-----|:-----------|:-----|
+| **stb_image** | 画像読み込み | **高** | CVE多数、必ず最新版を使用 |
+| **stb_image_write** | 画像書き出し | **高** | 同上 |
+| **stb_truetype** | フォント描画 | 中 | |
+| pugixml | XML パース | 中 | |
+| nlohmann/json | JSON パース | 中 | |
+| sokol | 描画バックエンド | 中 | API変更に注意 |
+| miniaudio | オーディオ | 中 | |
+| Dear ImGui | GUI | 低 | 安定版を使用 |
+
+**更新時の確認事項:**
+- GitHub の Release Notes / Security Advisories を確認
+- stb は https://github.com/nothings/stb のコミット履歴を直接確認（タグがないため）
 
 ---
 
