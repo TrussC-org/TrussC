@@ -42,26 +42,62 @@ void tcApp::draw() {
     font.drawString("Center", centerX, y + 30, Center, Top);
     font.drawString("Right", centerX, y + 60, Right, Top);
 
-    // 垂直アラインメント（画面左側）
-    float x = 150;
-    y = 250;
+    // 垂直アラインメント
+    float x = 120;
+    y = 220;
 
-    // 基準線を描画
+    // 基準線を描画（長くした）
     setColor(200);
-    drawLine(50, y, 250, y);
-    drawLine(x, y - 50, x, y + 50);
+    drawLine(50, y, w - 50, y);
+    drawLine(x, y - 30, x, y + 30);
 
     setColor(40);
     font.drawString("Top", x, y, Left, Top);
-    font.drawString("Center", x + 100, y, Left, Center);
-    font.drawString("Bottom", x + 200, y, Left, Bottom);
-    font.drawString("Baseline", x + 330, y, Left, Baseline);
+    font.drawString("Center", x + 80, y, Left, Center);
+    font.drawString("Bottom", x + 180, y, Left, Bottom);
+    font.drawString("Baseline", x + 290, y, Left, Baseline);
 
     // =========================================================================
-    // 中心点マーカー + 全組み合わせ
+    // setLineHeight デモ（改行テキスト）
+    // =========================================================================
+    y = 310;
+    std::string multiLine = "Line 1\nLine 2\nLine 3";
+
+    // デフォルト行高さ
+    setColor(100);
+    drawBitmapString("Default (1.0em):", 50, y - 20);
+    setColor(40);
+    font.resetLineHeight();
+    font.drawString(multiLine, 50, y);
+
+    // em単位（狭め）
+    setColor(100);
+    drawBitmapString("0.8em:", 220, y - 20);
+    setColor(40);
+    font.setLineHeightEm(0.8);
+    font.drawString(multiLine, 220, y);
+
+    // em単位（広め）
+    setColor(100);
+    drawBitmapString("1.5em:", 350, y - 20);
+    setColor(40);
+    font.setLineHeightEm(1.5);
+    font.drawString(multiLine, 350, y);
+
+    // ピクセル指定
+    setColor(100);
+    drawBitmapString("50px:", 500, y - 20);
+    setColor(40);
+    font.setLineHeight(50);
+    font.drawString(multiLine, 500, y);
+
+    font.resetLineHeight();
+
+    // =========================================================================
+    // 中心点マーカー + Center,Center
     // =========================================================================
     float cx = w / 2;
-    float cy = 400;
+    float cy = 520;
 
     // 十字マーカー
     setColor(colors::red);
@@ -76,18 +112,18 @@ void tcApp::draw() {
     // =========================================================================
     // BitmapFont アラインメントデモ
     // =========================================================================
-    y = 550;
+    y = 620;
 
     setColor(200);
-    drawLine(centerX, y - 10, centerX, y + 80);
+    drawLine(centerX, y - 10, centerX, y + 60);
 
     setColor(80);
     drawBitmapString("BitmapFont Left", centerX, y, Left, Top);
-    drawBitmapString("BitmapFont Center", centerX, y + 20, Center, Top);
-    drawBitmapString("BitmapFont Right", centerX, y + 40, Right, Top);
+    drawBitmapString("BitmapFont Center", centerX, y + 18, Center, Top);
+    drawBitmapString("BitmapFont Right", centerX, y + 36, Right, Top);
 
     // getBBox デモ
-    y = 680;
+    y = 710;
     std::string boxText = "BoundingBox";
     Rectangle bbox = font.getBBox(boxText);
 

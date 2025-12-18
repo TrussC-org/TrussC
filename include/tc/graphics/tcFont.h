@@ -597,6 +597,22 @@ public:
     Direction getAlignV() const { return alignV_; }
 
     // -------------------------------------------------------------------------
+    // 行高さ設定（改行時の間隔）
+    // -------------------------------------------------------------------------
+    void setLineHeight(float pixels) {
+        lineHeight_ = pixels;
+    }
+
+    // em単位で設定（1.0 = フォント本来の行高さ、1.5 = 1.5倍）
+    void setLineHeightEm(float multiplier) {
+        lineHeight_ = getDefaultLineHeight() * multiplier;
+    }
+
+    void resetLineHeight() {
+        lineHeight_ = 0;  // 0 = フォント本来の行高さを使用
+    }
+
+    // -------------------------------------------------------------------------
     // 文字列描画（virtual - 継承先でカスタム可能）
     // -------------------------------------------------------------------------
     virtual void drawString(const std::string& text, float x, float y) const {
@@ -654,7 +670,7 @@ protected:
 
                 if (codepoint == '\n') {
                     cursorX = x;
-                    cursorY += atlasManager_->getLineHeight();
+                    cursorY += getLineHeight();
                     continue;
                 }
                 if (codepoint == '\t') {
@@ -729,7 +745,7 @@ public:
         for (char c : text) {
             if (c == '\n') lines++;
         }
-        return atlasManager_->getLineHeight() * lines;
+        return getLineHeight() * lines;
     }
 
     // テキストの境界ボックスを取得（左上基準）
@@ -738,6 +754,12 @@ public:
     }
 
     virtual float getLineHeight() const {
+        if (lineHeight_ > 0) return lineHeight_;
+        return atlasManager_ ? atlasManager_->getLineHeight() : 0;
+    }
+
+    // フォント本来の行高さを取得（setLineHeight の影響を受けない）
+    float getDefaultLineHeight() const {
         return atlasManager_ ? atlasManager_->getLineHeight() : 0;
     }
 
@@ -786,9 +808,10 @@ protected:
         return Vec2(offsetX, offsetY);
     }
 
-    // アラインメント設定（protected - 継承先でアクセス可能）
+    // 設定（protected - 継承先でアクセス可能）
     Direction alignH_ = Direction::Left;
     Direction alignV_ = Direction::Top;
+    float lineHeight_ = 0;  // 0 = フォント本来の行高さを使用
 
 public:
     // -------------------------------------------------------------------------
