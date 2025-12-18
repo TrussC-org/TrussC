@@ -887,6 +887,32 @@ inline void drawBitmapString(const std::string& text, float x, float y, float sc
     getDefaultContext().drawBitmapString(text, x, y, scale);
 }
 
+// ビットマップ文字列を描画（アラインメント指定）
+inline void drawBitmapString(const std::string& text, float x, float y,
+                              Direction h, Direction v) {
+    getDefaultContext().drawBitmapString(text, x, y, h, v);
+}
+
+// ビットマップ文字列のデフォルトアラインメントを設定
+inline void setBitmapTextAlign(Direction h, Direction v) {
+    getDefaultContext().setBitmapTextAlign(h, v);
+}
+
+// ビットマップ文字列の幅を取得
+inline float getBitmapStringWidth(const std::string& text) {
+    return getDefaultContext().getBitmapStringWidth(text);
+}
+
+// ビットマップ文字列の高さを取得
+inline float getBitmapStringHeight(const std::string& text) {
+    return getDefaultContext().getBitmapStringHeight(text);
+}
+
+// ビットマップ文字列のバウンディングボックスを取得
+inline Rectangle getBitmapStringBBox(const std::string& text) {
+    return getDefaultContext().getBitmapStringBBox(text);
+}
+
 // ビットマップ文字列を背景付きで描画
 inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
                                        const Color& background = Color(0, 0, 0),

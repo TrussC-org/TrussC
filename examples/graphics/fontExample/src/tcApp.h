@@ -5,7 +5,7 @@ using namespace tc;
 #include "tc/graphics/tcFont.h"
 
 // =============================================================================
-// tcApp - TrueType フォントサンプル
+// tcApp - TrueType フォント＆アラインメントサンプル
 // =============================================================================
 
 class tcApp : public App {
@@ -18,7 +18,5 @@ private:
     Font fontSmall;
     Font fontLarge;
 
-    // 日本語テスト用（フォントが対応していれば）
-    std::string testTextJp = "こんにちは世界！";
-    std::string testTextEn = "Hello, TrussC!";
+    std::string testText = "Hello, TrussC!";
 };
