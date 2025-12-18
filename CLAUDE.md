@@ -32,17 +32,24 @@ trussc/                           # TrussC コアライブラリ
 │   ├── mac/                      # macOS (.mm)
 │   ├── win/                      # Windows (.cpp)
 │   └── linux/                    # Linux (.cpp)
-└── resources/                    # リソース（アイコン等）
+├── cmake/                        # CMake ヘルパー
+│   ├── trussc_app.cmake          # アプリ設定マクロ
+│   └── use_addon.cmake           # アドオン読み込みマクロ
+└── resources/                    # リソース（デフォルトアイコン等）
 
 addons/                           # オプショナルアドオン（trusscと同階層）
-├── tcxTls/                       # TLS/SSL サポート（mbedTLS）
+├── tcxTls/                       # TLS/SSL サポート（mbedTLS、FetchContent）
 │   ├── CMakeLists.txt
-│   ├── include/
+│   ├── src/                      # ヘッダー + ソース
+│   └── example-tls/              # サンプル
+├── tcxBox2d/                     # Box2D 物理エンジン（FetchContent）
+│   ├── CMakeLists.txt
 │   ├── src/
-│   ├── libs/mbedtls/             # git submodule
-│   └── examples/
-├── tcxBox2d/                     # Box2D 物理エンジン
+│   ├── example-basic/
+│   └── example-node/
 └── tcxOsc/                       # OSC プロトコル
+    ├── src/
+    └── example-osc/
 
 examples/                         # サンプルプロジェクト
 ├── templates/                    # テンプレート
