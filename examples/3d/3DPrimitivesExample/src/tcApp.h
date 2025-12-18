@@ -1,13 +1,14 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 
 // =============================================================================
 // tcApp - 3Dプリミティブデモ
 // oFの3DPrimitivesExampleを参考にしたシンプル版
 // =============================================================================
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;
@@ -16,12 +17,12 @@ public:
 
 private:
     // プリミティブのメッシュ
-    tc::Mesh plane;
-    tc::Mesh box;
-    tc::Mesh sphere;
-    tc::Mesh icoSphere;
-    tc::Mesh cylinder;
-    tc::Mesh cone;
+    Mesh plane;
+    Mesh box;
+    Mesh sphere;
+    Mesh icoSphere;
+    Mesh cylinder;
+    Mesh cone;
 
     // 描画モード
     bool bFill = true;
@@ -32,8 +33,8 @@ private:
     int resolution = 2;
 
     // ライティング
-    tc::Light light_;
-    tc::Material materials_[6];  // 各プリミティブ用マテリアル
+    Light light_;
+    Material materials_[6];  // 各プリミティブ用マテリアル
 
     // プリミティブを再生成
     void rebuildPrimitives();

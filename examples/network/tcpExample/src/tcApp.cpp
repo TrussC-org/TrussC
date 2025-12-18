@@ -20,19 +20,19 @@ void tcApp::setup() {
     addLog("Press S for Server, C for Client");
 
     // サーバーイベント設定
-    clientConnectListener = server.onClientConnect.listen([this](tc::TcpClientConnectEventArgs& e) {
+    clientConnectListener = server.onClientConnect.listen([this](TcpClientConnectEventArgs& e) {
         ostringstream oss;
         oss << "[Server] Client " << e.clientId << " connected from " << e.host << ":" << e.port;
         addLog(oss.str());
     });
 
-    clientDisconnectListener = server.onClientDisconnect.listen([this](tc::TcpClientDisconnectEventArgs& e) {
+    clientDisconnectListener = server.onClientDisconnect.listen([this](TcpClientDisconnectEventArgs& e) {
         ostringstream oss;
         oss << "[Server] Client " << e.clientId << " disconnected: " << e.reason;
         addLog(oss.str());
     });
 
-    serverReceiveListener = server.onReceive.listen([this](tc::TcpServerReceiveEventArgs& e) {
+    serverReceiveListener = server.onReceive.listen([this](TcpServerReceiveEventArgs& e) {
         string msg(e.data.begin(), e.data.end());
         ostringstream oss;
         oss << "[Server] Received from client " << e.clientId << ": " << msg;
@@ -43,14 +43,14 @@ void tcApp::setup() {
         server.send(e.clientId, reply);
     });
 
-    serverErrorListener = server.onError.listen([this](tc::TcpServerErrorEventArgs& e) {
+    serverErrorListener = server.onError.listen([this](TcpServerErrorEventArgs& e) {
         ostringstream oss;
         oss << "[Server] Error: " << e.message;
         addLog(oss.str());
     });
 
     // クライアントイベント設定
-    clientConnectedListener = client.onConnect.listen([this](tc::TcpConnectEventArgs& e) {
+    clientConnectedListener = client.onConnect.listen([this](TcpConnectEventArgs& e) {
         ostringstream oss;
         if (e.success) {
             oss << "[Client] Connected to server";
@@ -60,16 +60,16 @@ void tcApp::setup() {
         addLog(oss.str());
     });
 
-    clientReceiveListener = client.onReceive.listen([this](tc::TcpReceiveEventArgs& e) {
+    clientReceiveListener = client.onReceive.listen([this](TcpReceiveEventArgs& e) {
         string msg(e.data.begin(), e.data.end());
         addLog("[Client] Received: " + msg);
     });
 
-    clientDisconnectListener2 = client.onDisconnect.listen([this](tc::TcpDisconnectEventArgs& e) {
+    clientDisconnectListener2 = client.onDisconnect.listen([this](TcpDisconnectEventArgs& e) {
         addLog("[Client] Disconnected: " + e.reason);
     });
 
-    clientErrorListener = client.onError.listen([this](tc::TcpErrorEventArgs& e) {
+    clientErrorListener = client.onError.listen([this](TcpErrorEventArgs& e) {
         addLog("[Client] Error: " + e.message);
     });
 }
@@ -78,17 +78,17 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    tc::clear(30);
+    clear(30);
 
     float y = 40;
 
     // タイトル
-    tc::setColor(255);
-    tc::drawBitmapString("TCP Socket Example", 40, y);
+    setColor(255);
+    drawBitmapString("TCP Socket Example", 40, y);
     y += 30;
 
     // 状態表示
-    tc::setColor(100, 200, 255);
+    setColor(100, 200, 255);
     ostringstream status;
     if (server.isRunning()) {
         status << "Server running on port " << server.getPort();
@@ -96,31 +96,31 @@ void tcApp::draw() {
     } else {
         status << "Server not running";
     }
-    tc::drawBitmapString(status.str(), 40, y);
+    drawBitmapString(status.str(), 40, y);
     y += 20;
 
-    tc::setColor(100, 255, 100);
+    setColor(100, 255, 100);
     if (client.isConnected()) {
-        tc::drawBitmapString("Client connected to " + client.getRemoteHost(), 40, y);
+        drawBitmapString("Client connected to " + client.getRemoteHost(), 40, y);
     } else {
-        tc::drawBitmapString("Client not connected", 40, y);
+        drawBitmapString("Client not connected", 40, y);
     }
     y += 30;
 
     // 操作説明
-    tc::setColor(180);
-    tc::drawBitmapString("S: Start Server  C: Connect Client  SPACE: Send  D: Disconnect  X: Clear", 40, y);
+    setColor(180);
+    drawBitmapString("S: Start Server  C: Connect Client  SPACE: Send  D: Disconnect  X: Clear", 40, y);
     y += 30;
 
     // ログ表示
-    tc::setColor(100, 255, 100);
-    tc::drawBitmapString("Log:", 40, y);
+    setColor(100, 255, 100);
+    drawBitmapString("Log:", 40, y);
     y += 25;
 
-    tc::setColor(220);
+    setColor(220);
     lock_guard<mutex> lock(logMutex);
     for (const auto& msg : logMessages) {
-        tc::drawBitmapString(msg, 50, y);
+        drawBitmapString(msg, 50, y);
         y += 18;
     }
 }
@@ -147,7 +147,7 @@ void tcApp::keyPressed(int key) {
         } else {
             addLog("[Client] Already connected");
         }
-    } else if (key == tc::KEY_SPACE || key == ' ') {
+    } else if (key == KEY_SPACE || key == ' ') {
         messageCount++;
 
         // サーバーからブロードキャスト

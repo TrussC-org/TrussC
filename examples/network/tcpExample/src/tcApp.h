@@ -1,8 +1,9 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;
@@ -12,21 +13,21 @@ public:
 
 private:
     // サーバーモードで起動
-    tc::TcpServer server;
+    TcpServer server;
 
     // クライアントモード用
-    tc::TcpClient client;
+    TcpClient client;
 
     // イベントリスナー
-    tc::EventListener clientConnectListener;
-    tc::EventListener clientDisconnectListener;
-    tc::EventListener serverReceiveListener;
-    tc::EventListener serverErrorListener;
+    EventListener clientConnectListener;
+    EventListener clientDisconnectListener;
+    EventListener serverReceiveListener;
+    EventListener serverErrorListener;
 
-    tc::EventListener clientConnectedListener;
-    tc::EventListener clientReceiveListener;
-    tc::EventListener clientDisconnectListener2;
-    tc::EventListener clientErrorListener;
+    EventListener clientConnectedListener;
+    EventListener clientReceiveListener;
+    EventListener clientDisconnectListener2;
+    EventListener clientErrorListener;
 
     // ログメッセージ
     std::vector<std::string> logMessages;

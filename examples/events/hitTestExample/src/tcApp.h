@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include <iostream>
 
 using namespace std;
@@ -8,15 +9,15 @@ using namespace std;
 // =============================================================================
 // カスタムボタン（クリックでカウントアップ）
 // =============================================================================
-class CounterButton : public tc::RectNode {
+class CounterButton : public RectNode {
 public:
     using Ptr = shared_ptr<CounterButton>;
 
     int count = 0;
     string label = "Button";
-    tc::Color baseColor = tc::Color(0.3f, 0.3f, 0.4f);
-    tc::Color hoverColor = tc::Color(0.4f, 0.4f, 0.6f);
-    tc::Color pressColor = tc::Color(0.2f, 0.2f, 0.3f);
+    Color baseColor = Color(0.3f, 0.3f, 0.4f);
+    Color hoverColor = Color(0.4f, 0.4f, 0.6f);
+    Color pressColor = Color(0.2f, 0.2f, 0.3f);
 
     bool isHovered = false;
     bool isPressed = false;
@@ -30,31 +31,31 @@ public:
     void draw() override {
         // 状態に応じた色
         if (isPressed) {
-            tc::setColor(pressColor);
+            setColor(pressColor);
         } else if (isHovered) {
-            tc::setColor(hoverColor);
+            setColor(hoverColor);
         } else {
-            tc::setColor(baseColor);
+            setColor(baseColor);
         }
 
         // 背景
-        tc::fill();
-        tc::noStroke();
-        tc::drawRect(0, 0, width, height);
+        fill();
+        noStroke();
+        drawRect(0, 0, width, height);
 
         // 枠線
-        tc::noFill();
-        tc::stroke();
-        tc::setColor(0.6f, 0.6f, 0.7f);
-        tc::drawRect(0, 0, width, height);
+        noFill();
+        stroke();
+        setColor(0.6f, 0.6f, 0.7f);
+        drawRect(0, 0, width, height);
 
         // ラベルとカウント（左上に配置、回転に追従）
-        tc::fill();
-        tc::noStroke();
-        tc::setColor(1.0f, 1.0f, 1.0f);
+        fill();
+        noStroke();
+        setColor(1.0f, 1.0f, 1.0f);
         char buf[64];
         snprintf(buf, sizeof(buf), "%s: %d", label.c_str(), count);
-        tc::drawBitmapString(buf, 4, 18, false);  // screenFixed = false で回転に追従（baseline基準）
+        drawBitmapString(buf, 4, 18, false);  // screenFixed = false で回転に追従（baseline基準）
     }
 
 protected:
@@ -76,12 +77,12 @@ protected:
 // =============================================================================
 // 回転するコンテナ（RectNode を継承して当たり判定も持つ）
 // =============================================================================
-class RotatingPanel : public tc::RectNode {
+class RotatingPanel : public RectNode {
 public:
     using Ptr = shared_ptr<RotatingPanel>;
 
     float rotationSpeed = 0.3f;
-    tc::Color panelColor = tc::Color(0.2f, 0.25f, 0.3f);
+    Color panelColor = Color(0.2f, 0.25f, 0.3f);
 
     RotatingPanel() {
         enableEvents();
@@ -90,33 +91,33 @@ public:
     }
 
     void update() override {
-        rotation += (float)tc::getDeltaTime() * rotationSpeed;
+        rotation += (float)getDeltaTime() * rotationSpeed;
     }
 
     void draw() override {
         // パネル背景
-        tc::setColor(panelColor);
-        tc::fill();
-        tc::noStroke();
-        tc::drawRect(0, 0, width, height);
+        setColor(panelColor);
+        fill();
+        noStroke();
+        drawRect(0, 0, width, height);
 
         // 枠線
-        tc::noFill();
-        tc::stroke();
-        tc::setColor(0.5f, 0.5f, 0.6f);
-        tc::drawRect(0, 0, width, height);
+        noFill();
+        stroke();
+        setColor(0.5f, 0.5f, 0.6f);
+        drawRect(0, 0, width, height);
 
         // 中心マーク
-        tc::fill();
-        tc::setColor(1.0f, 1.0f, 0.0f, 0.5f);
-        tc::drawCircle(width / 2, height / 2, 5);
+        fill();
+        setColor(1.0f, 1.0f, 0.0f, 0.5f);
+        drawCircle(width / 2, height / 2, 5);
     }
 };
 
 // =============================================================================
 // メインアプリ
 // =============================================================================
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;

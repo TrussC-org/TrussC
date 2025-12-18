@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include <set>
 #include <deque>
 #include <string>
@@ -10,7 +11,7 @@ using namespace trussc;
 // keyboardExample - キーボード入力のデモ
 // キーの押下状態、修飾キー、キーコードの可視化
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void draw() override;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include <deque>
 #include <string>
 
@@ -9,7 +10,7 @@ using namespace trussc;
 // eventsExample - イベントシステムのデモ
 // EventListenerのRAII動作とイベント購読を示す
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void draw() override;

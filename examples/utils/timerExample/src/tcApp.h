@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include "tcNode.h"
 #include <iostream>
 #include <vector>
@@ -18,7 +19,7 @@ using namespace std;
 // ---------------------------------------------------------------------------
 // TimerBall - タイマーで色が変わるボール（Node を継承）
 // ---------------------------------------------------------------------------
-class TimerBall : public tc::Node {
+class TimerBall : public Node {
 public:
     TimerBall(float x, float y, float radius);
 
@@ -27,14 +28,14 @@ public:
 
 private:
     float radius_;
-    tc::Color color_;
+    Color color_;
     int colorChangeCount_ = 0;
 };
 
 // ---------------------------------------------------------------------------
 // CountdownNode - callAfter で一度だけ実行するデモ
 // ---------------------------------------------------------------------------
-class CountdownNode : public tc::Node {
+class CountdownNode : public Node {
 public:
     CountdownNode();
 
@@ -49,7 +50,7 @@ private:
 // ---------------------------------------------------------------------------
 // PulseNode - callEvery で繰り返し実行するデモ
 // ---------------------------------------------------------------------------
-class PulseNode : public tc::Node {
+class PulseNode : public Node {
 public:
     PulseNode();
 
@@ -65,7 +66,7 @@ private:
 // ---------------------------------------------------------------------------
 // tcApp - メインアプリケーション
 // ---------------------------------------------------------------------------
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;
@@ -73,7 +74,7 @@ public:
     void keyPressed(int key) override;
 
 private:
-    tc::Node::Ptr rootNode_;
+    Node::Ptr rootNode_;
     vector<shared_ptr<TimerBall>> balls_;
     shared_ptr<CountdownNode> countdownNode_;
     shared_ptr<PulseNode> pulseNode_;

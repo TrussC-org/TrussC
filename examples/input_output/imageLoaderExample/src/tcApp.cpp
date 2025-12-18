@@ -10,23 +10,23 @@ void tcApp::setup() {
     cout << "  - Reading pixel colors" << endl;
 
     // 画像を読み込む
-    if (!bikers.load(tc::getDataPath("images/bikers.jpg"))) {
+    if (!bikers.load(getDataPath("images/bikers.jpg"))) {
         cout << "Failed to load bikers.jpg" << endl;
     }
 
-    if (!gears.load(tc::getDataPath("images/gears.gif"))) {
+    if (!gears.load(getDataPath("images/gears.gif"))) {
         cout << "Failed to load gears.gif" << endl;
     }
 
-    if (!poster.load(tc::getDataPath("images/poster.jpg"))) {
+    if (!poster.load(getDataPath("images/poster.jpg"))) {
         cout << "Failed to load poster.jpg" << endl;
     }
 
-    if (!transparency.load(tc::getDataPath("images/transparency.png"))) {
+    if (!transparency.load(getDataPath("images/transparency.png"))) {
         cout << "Failed to load transparency.png" << endl;
     }
 
-    if (!icon.load(tc::getDataPath("images/icon.png"))) {
+    if (!icon.load(getDataPath("images/icon.png"))) {
         cout << "Failed to load icon.png" << endl;
     }
 }
@@ -36,9 +36,9 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    tc::clear(255);  // 白背景
+    clear(255);  // 白背景
 
-    tc::setColor(255);  // 白（画像の色をそのまま表示）
+    setColor(255);  // 白（画像の色をそのまま表示）
 
     // bikers を左上に描画
     if (bikers.isAllocated()) {
@@ -57,7 +57,7 @@ void tcApp::draw() {
 
     // transparency を動かしながら描画
     if (transparency.isAllocated()) {
-        float wave = sin(tc::getElapsedTime());
+        float wave = sin(getElapsedTime());
         transparency.draw(500 + wave * 50, 20);
     }
 
@@ -71,26 +71,26 @@ void tcApp::draw() {
 
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                tc::Color c = icon.getColor(x, y);
+                Color c = icon.getColor(x, y);
                 // 明るさに基づいてサイズを決定
                 float brightness = 0.299f * c.r + 0.587f * c.g + 0.114f * c.b;
                 float size = (1.0f - brightness) * diameter / 2;
 
-                tc::setColor(c);
-                tc::drawCircle(offsetX + x * diameter, offsetY + y * diameter, size + 1);
+                setColor(c);
+                drawCircle(offsetX + x * diameter, offsetY + y * diameter, size + 1);
             }
         }
 
         // 元のアイコンも表示
-        tc::setColor(255);
+        setColor(255);
         icon.draw(offsetX + w * diameter + 20, offsetY);
     }
 
     // 情報を表示（半透明背景付き）
-    tc::drawBitmapStringHighlight("imageLoaderExample", 10, 20,
-        tc::Color(0, 0, 0, 0.7f), tc::Color(1, 1, 1));
-    tc::drawBitmapStringHighlight("Loaded images: bikers.jpg, gears.gif, poster.jpg, transparency.png, icon.png", 10, 40,
-        tc::Color(0, 0, 0, 0.7f), tc::Color(1, 1, 1));
-    tc::drawBitmapStringHighlight("Bottom: pixel colors from icon.png visualized as circles", 10, 60,
-        tc::Color(0, 0, 0, 0.7f), tc::Color(1, 1, 1));
+    drawBitmapStringHighlight("imageLoaderExample", 10, 20,
+        Color(0, 0, 0, 0.7f), Color(1, 1, 1));
+    drawBitmapStringHighlight("Loaded images: bikers.jpg, gears.gif, poster.jpg, transparency.png, icon.png", 10, 40,
+        Color(0, 0, 0, 0.7f), Color(1, 1, 1));
+    drawBitmapStringHighlight("Bottom: pixel colors from icon.png visualized as circles", 10, 60,
+        Color(0, 0, 0, 0.7f), Color(1, 1, 1));
 }

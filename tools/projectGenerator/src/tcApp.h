@@ -6,7 +6,7 @@
 #include <string>
 #include <atomic>
 
-using namespace trussc;
+using namespace tc;
 using namespace std;
 
 // IDE 選択
@@ -18,7 +18,7 @@ enum class IdeType {
     VisualStudio
 };
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;

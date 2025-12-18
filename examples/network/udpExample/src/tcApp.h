@@ -1,8 +1,9 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;
@@ -11,11 +12,11 @@ public:
     void cleanup() override;
 
 private:
-    tc::UdpSocket receiver;
-    tc::UdpSocket sender;
+    UdpSocket receiver;
+    UdpSocket sender;
 
-    tc::EventListener receiveListener;
-    tc::EventListener errorListener;
+    EventListener receiveListener;
+    EventListener errorListener;
 
     std::vector<std::string> receivedMessages;
     std::mutex messagesMutex;

@@ -6,14 +6,14 @@
 #include "TrussC.h"
 
 void tcApp::setup() {
-    tc::setVsync(true);
+    setVsync(true);
 
     fftInput.resize(FFT_SIZE, 0.0f);
     spectrum.resize(FFT_SIZE / 2, 0.0f);
     spectrumSmooth.resize(FFT_SIZE / 2, 0.0f);
 
     // マイク入力を開始
-    if (tc::getMicInput().start()) {
+    if (getMicInput().start()) {
         micStarted = true;
         printf("Microphone started!\n");
     } else {
@@ -29,13 +29,13 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
-    if (!micStarted || !tc::getMicInput().isRunning()) return;
+    if (!micStarted || !getMicInput().isRunning()) return;
 
     // マイクから最新のオーディオサンプルを取得
-    tc::getMicAnalysisBuffer(fftInput.data(), FFT_SIZE);
+    getMicAnalysisBuffer(fftInput.data(), FFT_SIZE);
 
     // 窓関数を適用してFFT実行
-    auto fftResult = tc::fftReal(fftInput, tc::WindowType::Hanning);
+    auto fftResult = fftReal(fftInput, WindowType::Hanning);
 
     // マグニチュードを計算（対数スケール対応）
     for (size_t i = 0; i < spectrum.size(); i++) {
@@ -54,40 +54,40 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    tc::clear(20);
+    clear(20);
 
-    float windowW = tc::getWindowWidth();
-    float windowH = tc::getWindowHeight();
+    float windowW = getWindowWidth();
+    float windowH = getWindowHeight();
 
     // タイトル
-    tc::setColor(tc::colors::white);
-    tc::drawBitmapString("TrussC Microphone FFT Analyzer", 20, 30);
+    setColor(colors::white);
+    drawBitmapString("TrussC Microphone FFT Analyzer", 20, 30);
 
     // コントロール説明
-    tc::setColor(150);
-    tc::drawBitmapString("SPACE:Start/Stop  W:Waveform  L:LogScale  UP/DOWN:Smoothing", 20, 50);
+    setColor(150);
+    drawBitmapString("SPACE:Start/Stop  W:Waveform  L:LogScale  UP/DOWN:Smoothing", 20, 50);
 
     // ステータス
     char buf[128];
     snprintf(buf, sizeof(buf), "Status: %s | Smoothing: %.0f%% | Scale: %s",
-            tc::getMicInput().isRunning() ? "Recording" : "Stopped",
+            getMicInput().isRunning() ? "Recording" : "Stopped",
             smoothing * 100,
             useLogScale ? "Log" : "Linear");
-    tc::drawBitmapString(buf, 20, 70);
+    drawBitmapString(buf, 20, 70);
 
     // 波形表示エリア
     if (showWaveform) {
         float waveY = 120;
         float waveH = 100;
 
-        tc::setColor(40);
-        tc::drawRect(20, waveY, windowW - 40, waveH);
+        setColor(40);
+        drawRect(20, waveY, windowW - 40, waveH);
 
-        tc::setColor(tc::colors::lime);
-        tc::drawBitmapString("Waveform (Mic Input)", 25, waveY + 15);
+        setColor(colors::lime);
+        drawBitmapString("Waveform (Mic Input)", 25, waveY + 15);
 
         // 波形を描画（実際のオーディオデータ）
-        tc::setColor(tc::colors::cyan);
+        setColor(colors::cyan);
         int waveWidth = (int)(windowW - 40);
         float prevX = 20, prevY = waveY + waveH / 2;
 
@@ -99,7 +99,7 @@ void tcApp::draw() {
             float x = 20 + i;
             float y = waveY + waveH / 2 - sample * waveH / 2;
             if (i > 0) {
-                tc::drawLine(prevX, prevY, x, y);
+                drawLine(prevX, prevY, x, y);
             }
             prevX = x;
             prevY = y;
@@ -110,11 +110,11 @@ void tcApp::draw() {
     float specY = showWaveform ? 240 : 120;
     float specH = windowH - specY - 40;
 
-    tc::setColor(40);
-    tc::drawRect(20, specY, windowW - 40, specH);
+    setColor(40);
+    drawRect(20, specY, windowW - 40, specH);
 
-    tc::setColor(tc::colors::lime);
-    tc::drawBitmapString("Spectrum", 25, specY + 15);
+    setColor(colors::lime);
+    drawBitmapString("Spectrum", 25, specY + 15);
 
     // スペクトラムバーを描画
     int numBars = 64;
@@ -148,24 +148,24 @@ void tcApp::draw() {
 
         // グラデーションカラー（HSB: 青→緑→黄）
         float hue = 0.6f - spectrumSmooth[i] * 0.4f;
-        tc::setColorHSB(hue, 0.8f, 0.9f);
+        setColorHSB(hue, 0.8f, 0.9f);
 
-        tc::drawRect(barX, barY, barWidth - barGap, barH);
+        drawRect(barX, barY, barWidth - barGap, barH);
     }
 
     // 周波数ラベル
-    tc::setColor(100);
-    tc::drawBitmapString("0 Hz", 30, specY + specH + 5);
-    tc::drawBitmapString("22050 Hz", windowW - 80, specY + specH + 5);
+    setColor(100);
+    drawBitmapString("0 Hz", 30, specY + specH + 5);
+    drawBitmapString("22050 Hz", windowW - 80, specY + specH + 5);
 }
 
 void tcApp::keyPressed(int key) {
     if (key == ' ') {
-        if (tc::getMicInput().isRunning()) {
-            tc::getMicInput().stop();
+        if (getMicInput().isRunning()) {
+            getMicInput().stop();
             printf("Microphone stopped\n");
         } else {
-            tc::getMicInput().start();
+            getMicInput().start();
             printf("Microphone started\n");
         }
     }

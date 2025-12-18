@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include <vector>
 #include <string>
 
@@ -11,7 +12,7 @@ using namespace std;
 // ファイルをウィンドウにドロップすると、ファイル情報を表示
 // 画像ファイルの場合はプレビューも表示
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void draw() override;

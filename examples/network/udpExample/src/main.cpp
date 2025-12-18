@@ -5,9 +5,9 @@
 #include "tcApp.h"
 
 int main() {
-    tc::WindowSettings settings;
+    WindowSettings settings;
     settings.setSize(800, 600);
     settings.setTitle("udpExample - UDP Socket Demo");
 
-    return tc::runApp<tcApp>(settings);
+    return runApp<tcApp>(settings);
 }

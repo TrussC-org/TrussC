@@ -1,13 +1,14 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 
 // =============================================================================
 // tcApp - アプリケーションクラス
-// tc::App を継承して、必要なメソッドをオーバーライドする
+// App を継承して、必要なメソッドをオーバーライドする
 // =============================================================================
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     // ライフサイクル
     void setup() override;
@@ -20,5 +21,5 @@ public:
     void mouseDragged(int x, int y, int button) override;
 
 private:
-    tc::Polyline wave;  // テスト用
+    Polyline wave;  // テスト用
 };

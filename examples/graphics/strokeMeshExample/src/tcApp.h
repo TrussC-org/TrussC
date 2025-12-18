@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 
 using namespace trussc;
 
@@ -9,7 +10,7 @@ using namespace trussc;
 // Join Types: MITER, ROUND, BEVEL
 // 可変幅ストローク対応
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;

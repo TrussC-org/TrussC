@@ -1554,7 +1554,11 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
         app->setup();
     };
     internal::appUpdateFunc = []() {
-        if (app) app->updateTree();  // シーングラフ全体を更新
+        if (app) {
+            app->updateTree();  // シーングラフ全体を更新
+            // ホバー状態を更新（毎フレーム1回だけ raycast）
+            app->updateHoverState((float)internal::mouseX, (float)internal::mouseY);
+        }
     };
     internal::appDrawFunc = []() {
         if (app) app->drawTree();  // シーングラフ全体を描画
@@ -1567,10 +1571,16 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
         }
     };
     internal::appKeyPressedFunc = [](int key) {
-        if (app) app->keyPressed(key);
+        if (app) {
+            app->keyPressed(key);
+            app->dispatchKeyPress(key);  // 子ノードにも配信
+        }
     };
     internal::appKeyReleasedFunc = [](int key) {
-        if (app) app->keyReleased(key);
+        if (app) {
+            app->keyReleased(key);
+            app->dispatchKeyRelease(key);  // 子ノードにも配信
+        }
     };
     internal::appMousePressedFunc = [](int x, int y, int button) {
         if (app) app->mousePressed(x, y, button);

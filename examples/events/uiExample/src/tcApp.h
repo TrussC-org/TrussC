@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include <iostream>
 #include <functional>
 
@@ -9,14 +10,14 @@ using namespace std;
 // =============================================================================
 // UIButton - クリックでイベント発火するボタン
 // =============================================================================
-class UIButton : public tc::RectNode {
+class UIButton : public RectNode {
 public:
     using Ptr = shared_ptr<UIButton>;
 
     string label = "Button";
-    tc::Color normalColor = tc::Color(0.25f, 0.25f, 0.3f);
-    tc::Color hoverColor = tc::Color(0.35f, 0.35f, 0.45f);
-    tc::Color pressColor = tc::Color(0.15f, 0.15f, 0.2f);
+    Color normalColor = Color(0.25f, 0.25f, 0.3f);
+    Color hoverColor = Color(0.35f, 0.35f, 0.45f);
+    Color pressColor = Color(0.15f, 0.15f, 0.2f);
 
     // クリックイベント（外部からコールバック登録）
     function<void()> onClick;
@@ -37,28 +38,28 @@ public:
     void draw() override {
         // 状態に応じた色
         if (isPressed_) {
-            tc::setColor(pressColor);
+            setColor(pressColor);
         } else if (isHovered_) {
-            tc::setColor(hoverColor);
+            setColor(hoverColor);
         } else {
-            tc::setColor(normalColor);
+            setColor(normalColor);
         }
 
-        tc::fill();
-        tc::noStroke();
-        tc::drawRect(0, 0, width, height);
+        fill();
+        noStroke();
+        drawRect(0, 0, width, height);
 
         // 枠線
-        tc::noFill();
-        tc::stroke();
-        tc::setColor(0.5f, 0.5f, 0.6f);
-        tc::drawRect(0, 0, width, height);
+        noFill();
+        stroke();
+        setColor(0.5f, 0.5f, 0.6f);
+        drawRect(0, 0, width, height);
 
         // ラベル
-        tc::fill();
-        tc::setColor(1.0f, 1.0f, 1.0f);
+        fill();
+        setColor(1.0f, 1.0f, 1.0f);
         float textX = width / 2 - label.length() * 4;
-        tc::drawBitmapString(label, textX, height / 2 + 5, false);
+        drawBitmapString(label, textX, height / 2 + 5, false);
     }
 
 protected:
@@ -67,7 +68,7 @@ protected:
 
     bool onMousePress(float lx, float ly, int btn) override {
         isPressed_ = true;
-        return tc::RectNode::onMousePress(lx, ly, btn);
+        return RectNode::onMousePress(lx, ly, btn);
     }
 
     bool onMouseRelease(float lx, float ly, int btn) override {
@@ -75,14 +76,14 @@ protected:
             onClick();  // クリックイベント発火
         }
         isPressed_ = false;
-        return tc::RectNode::onMouseRelease(lx, ly, btn);
+        return RectNode::onMouseRelease(lx, ly, btn);
     }
 };
 
 // =============================================================================
 // UISlider - ドラッグ＆スクロールで値を変更するスライダー
 // =============================================================================
-class UISlider : public tc::RectNode {
+class UISlider : public RectNode {
 public:
     using Ptr = shared_ptr<UISlider>;
 
@@ -122,28 +123,28 @@ public:
 
     void draw() override {
         // 背景
-        tc::setColor(0.2f, 0.2f, 0.25f);
-        tc::fill();
-        tc::drawRect(0, 0, width, height);
+        setColor(0.2f, 0.2f, 0.25f);
+        fill();
+        drawRect(0, 0, width, height);
 
         // トラック
         float trackY = height / 2;
         float trackH = 4;
-        tc::setColor(0.4f, 0.4f, 0.45f);
-        tc::drawRect(0, trackY - trackH / 2, width, trackH);
+        setColor(0.4f, 0.4f, 0.45f);
+        drawRect(0, trackY - trackH / 2, width, trackH);
 
         // ノブ
         float knobX = value * width;
         float knobW = 12;
         float knobH = height - 4;
-        tc::setColor(isDragging_ ? tc::Color(0.6f, 0.7f, 0.9f) : tc::Color(0.5f, 0.6f, 0.8f));
-        tc::drawRect(knobX - knobW / 2, 2, knobW, knobH);
+        setColor(isDragging_ ? Color(0.6f, 0.7f, 0.9f) : Color(0.5f, 0.6f, 0.8f));
+        drawRect(knobX - knobW / 2, 2, knobW, knobH);
 
         // ラベルと値
-        tc::setColor(1.0f, 1.0f, 1.0f);
+        setColor(1.0f, 1.0f, 1.0f);
         char buf[64];
         snprintf(buf, sizeof(buf), "%s: %.2f", label.c_str(), getValue());
-        tc::drawBitmapString(buf, 4, -4, false);
+        drawBitmapString(buf, 4, -4, false);
     }
 
 protected:
@@ -152,19 +153,19 @@ protected:
     bool onMousePress(float lx, float ly, int btn) override {
         isDragging_ = true;
         updateValue(lx);
-        return tc::RectNode::onMousePress(lx, ly, btn);
+        return RectNode::onMousePress(lx, ly, btn);
     }
 
     bool onMouseRelease(float lx, float ly, int btn) override {
         isDragging_ = false;
-        return tc::RectNode::onMouseRelease(lx, ly, btn);
+        return RectNode::onMouseRelease(lx, ly, btn);
     }
 
     bool onMouseDrag(float lx, float ly, int btn) override {
         if (isDragging_) {
             updateValue(lx);
         }
-        return tc::RectNode::onMouseDrag(lx, ly, btn);
+        return RectNode::onMouseDrag(lx, ly, btn);
     }
 
     bool onMouseMove(float lx, float ly) override {
@@ -172,7 +173,7 @@ protected:
         if (isDragging_) {
             updateValue(lx);
         }
-        return tc::RectNode::onMouseMove(lx, ly);
+        return RectNode::onMouseMove(lx, ly);
     }
 
     bool onMouseScroll(float lx, float ly, float sx, float sy) override {
@@ -183,7 +184,7 @@ protected:
         if (value != oldValue && onValueChanged) {
             onValueChanged(getValue());
         }
-        return tc::RectNode::onMouseScroll(lx, ly, sx, sy);
+        return RectNode::onMouseScroll(lx, ly, sx, sy);
     }
 
 private:
@@ -199,7 +200,7 @@ private:
 // =============================================================================
 // UIScrollBox - スクロールで内容を移動するボックス
 // =============================================================================
-class UIScrollBox : public tc::RectNode {
+class UIScrollBox : public RectNode {
 public:
     using Ptr = shared_ptr<UIScrollBox>;
 
@@ -221,52 +222,52 @@ public:
 
     void draw() override {
         // 背景
-        tc::setColor(0.15f, 0.15f, 0.18f);
-        tc::fill();
-        tc::drawRect(0, 0, width, height);
+        setColor(0.15f, 0.15f, 0.18f);
+        fill();
+        drawRect(0, 0, width, height);
 
         // クリッピングを設定（グローバル座標で、DPIスケール考慮）
         float gx, gy;
         localToGlobal(0, 0, gx, gy);
         float dpi = sapp_dpi_scale();
-        tc::pushScissor(gx * dpi, gy * dpi, width * dpi, height * dpi);
+        pushScissor(gx * dpi, gy * dpi, width * dpi, height * dpi);
 
         // スクロール可能なコンテンツ
-        tc::pushMatrix();
-        tc::translate(0, -scrollY);
+        pushMatrix();
+        translate(0, -scrollY);
 
         // コンテンツ（複数のアイテム）- クリッピングにより範囲外は自動的に非表示
         for (int i = 0; i < 10; i++) {
             float itemY = i * 30;
-            tc::setColor(0.3f + i * 0.05f, 0.3f, 0.35f);
-            tc::fill();
-            tc::drawRect(5, itemY + 2, width - 10, 26);
+            setColor(0.3f + i * 0.05f, 0.3f, 0.35f);
+            fill();
+            drawRect(5, itemY + 2, width - 10, 26);
 
-            tc::setColor(1.0f, 1.0f, 1.0f);
+            setColor(1.0f, 1.0f, 1.0f);
             char buf[32];
             snprintf(buf, sizeof(buf), "Item %d", i + 1);
-            tc::drawBitmapString(buf, 10, itemY + 18, false);
+            drawBitmapString(buf, 10, itemY + 18, false);
         }
 
-        tc::popMatrix();
+        popMatrix();
 
         // クリッピングを復元
-        tc::popScissor();
+        popScissor();
 
         // 枠線
-        tc::noFill();
-        tc::stroke();
-        tc::setColor(0.4f, 0.4f, 0.5f);
-        tc::drawRect(0, 0, width, height);
+        noFill();
+        stroke();
+        setColor(0.4f, 0.4f, 0.5f);
+        drawRect(0, 0, width, height);
 
         // スクロールバー
         float maxScroll = max(0.0f, contentHeight - height);
         if (maxScroll > 0) {
             float barHeight = height * (height / contentHeight);
             float barY = (scrollY / maxScroll) * (height - barHeight);
-            tc::fill();
-            tc::setColor(0.5f, 0.5f, 0.6f);
-            tc::drawRect(width - 8, barY, 6, barHeight);
+            fill();
+            setColor(0.5f, 0.5f, 0.6f);
+            drawRect(width - 8, barY, 6, barHeight);
         }
     }
 
@@ -274,14 +275,14 @@ protected:
     bool onMouseScroll(float lx, float ly, float sx, float sy) override {
         float maxScroll = max(0.0f, contentHeight - height);
         scrollY = max(0.0f, min(maxScroll, scrollY - sy * 20));
-        return tc::RectNode::onMouseScroll(lx, ly, sx, sy);
+        return RectNode::onMouseScroll(lx, ly, sx, sy);
     }
 };
 
 // =============================================================================
 // メインアプリ
 // =============================================================================
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;
@@ -301,5 +302,5 @@ private:
     UIScrollBox::Ptr scrollBox_;
 
     int clickCount_ = 0;
-    tc::Color bgColor_ = tc::Color(0.1f, 0.1f, 0.12f);
+    Color bgColor_ = Color(0.1f, 0.1f, 0.12f);
 };

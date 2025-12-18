@@ -6,9 +6,9 @@ using namespace std;
 // setup - 初期化
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    tc::tcLogNotice() << "02_nodes: Node System Demo";
-    tc::tcLogNotice() << "  - Space: 回転を停止/再開";
-    tc::tcLogNotice() << "  - ESC: 終了";
+    tcLogNotice() << "02_nodes: Node System Demo";
+    tcLogNotice() << "  - Space: 回転を停止/再開";
+    tcLogNotice() << "  - ESC: 終了";
 
     // コンテナ1（左側、時計回り）
     container1_ = make_shared<RotatingContainer>();
@@ -50,7 +50,7 @@ void tcApp::setup() {
         auto child = make_shared<FixedChild>();
         child->x = positions[i].first;
         child->y = positions[i].second;
-        child->hue = i * tc::QUARTER_TAU;
+        child->hue = i * QUARTER_TAU;
         container1_->addChild(child);
     }
 
@@ -58,7 +58,7 @@ void tcApp::setup() {
         auto child = make_shared<FixedChild>();
         child->x = positions[i].first;
         child->y = positions[i].second;
-        child->hue = i * tc::QUARTER_TAU + tc::HALF_TAU;
+        child->hue = i * QUARTER_TAU + HALF_TAU;
         child->size = 20;
         container2_->addChild(child);
     }
@@ -81,30 +81,30 @@ void tcApp::update() {
 // ---------------------------------------------------------------------------
 void tcApp::draw() {
     // 背景クリア
-    tc::clear(0.1f, 0.1f, 0.15f);
+    clear(0.1f, 0.1f, 0.15f);
 
     // グローバル座標でのマウス位置を表示
-    float gx = tc::getGlobalMouseX();
-    float gy = tc::getGlobalMouseY();
-    tc::setColor(1.0f, 1.0f, 1.0f, 0.5f);
-    tc::drawCircle(gx, gy, 5);
+    float gx = getGlobalMouseX();
+    float gy = getGlobalMouseY();
+    setColor(1.0f, 1.0f, 1.0f, 0.5f);
+    drawCircle(gx, gy, 5);
 
     // 画面左上に説明を表示
-    tc::setColor(1.0f, 1.0f, 1.0f);
-    tc::drawBitmapString("Node System Demo - Local Coordinate Transformation", 20, 25);
-    tc::setColor(0.7f, 0.7f, 0.7f);
-    tc::drawBitmapString("Each box has its own local coordinate system.", 20, 45);
-    tc::drawBitmapString("Mouse position is transformed to local coords.", 20, 60);
+    setColor(1.0f, 1.0f, 1.0f);
+    drawBitmapString("Node System Demo - Local Coordinate Transformation", 20, 25);
+    setColor(0.7f, 0.7f, 0.7f);
+    drawBitmapString("Each box has its own local coordinate system.", 20, 45);
+    drawBitmapString("Mouse position is transformed to local coords.", 20, 60);
 
     // グローバルマウス座標
     char buf[64];
     snprintf(buf, sizeof(buf), "global: %.0f, %.0f", gx, gy);
-    tc::setColor(1.0f, 1.0f, 0.5f);
-    tc::drawBitmapString(buf, 20, 90);
+    setColor(1.0f, 1.0f, 0.5f);
+    drawBitmapString(buf, 20, 90);
 
     // 操作説明
-    tc::setColor(0.5f, 0.5f, 0.5f);
-    tc::drawBitmapString("[SPACE] pause/resume rotation  [ESC] quit", 20, tc::getWindowHeight() - 20);
+    setColor(0.5f, 0.5f, 0.5f);
+    drawBitmapString("[SPACE] pause/resume rotation  [ESC] quit", 20, getWindowHeight() - 20);
 
     // 子ノードはフレームワークが自動で描画する（この draw() の後に）
 }
@@ -114,10 +114,10 @@ void tcApp::draw() {
 // ---------------------------------------------------------------------------
 
 void tcApp::keyPressed(int key) {
-    if (key == tc::KEY_ESCAPE) {
+    if (key == KEY_ESCAPE) {
         sapp_request_quit();
     }
-    else if (key == tc::KEY_SPACE) {
+    else if (key == KEY_SPACE) {
         // 回転を停止/再開
         static bool paused = false;
         paused = !paused;
@@ -125,17 +125,17 @@ void tcApp::keyPressed(int key) {
         container1_->rotationSpeed = paused ? 0.0f : 0.5f;
         container2_->rotationSpeed = paused ? 0.0f : -0.3f;
 
-        tc::tcLogNotice() << "Rotation " << (paused ? "paused" : "resumed");
+        tcLogNotice() << "Rotation " << (paused ? "paused" : "resumed");
     }
 }
 
 void tcApp::mousePressed(int x, int y, int button) {
-    tc::tcLogVerbose() << "Global mouse: " << x << ", " << y;
+    tcLogVerbose() << "Global mouse: " << x << ", " << y;
 
     // 各フォロワーのローカル座標を表示
-    tc::tcLogVerbose() << "  Follower1 local: " << follower1_->getMouseX()
+    tcLogVerbose() << "  Follower1 local: " << follower1_->getMouseX()
                        << ", " << follower1_->getMouseY();
-    tc::tcLogVerbose() << "  Follower2 local: " << follower2_->getMouseX()
+    tcLogVerbose() << "  Follower2 local: " << follower2_->getMouseX()
                        << ", " << follower2_->getMouseY();
 }
 

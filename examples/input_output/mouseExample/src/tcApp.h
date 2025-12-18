@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include <vector>
 
 using namespace trussc;
@@ -8,7 +9,7 @@ using namespace trussc;
 // mouseExample - マウス入力のデモ
 // マウス位置、ボタン、ドラッグ、スクロールの可視化
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void draw() override;

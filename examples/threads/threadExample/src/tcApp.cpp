@@ -7,7 +7,7 @@ void tcApp::setup() {
     threadedObject.setup();
     doLock = false;
 
-    printf("main thread id: %llu\n", (unsigned long long)std::hash<std::thread::id>{}(tc::getMainThreadId()));
+    printf("main thread id: %llu\n", (unsigned long long)std::hash<std::thread::id>{}(getMainThreadId()));
 }
 
 // ---------------------------------------------------------------------------
@@ -27,37 +27,37 @@ void tcApp::update() {
 // draw - 描画
 // ---------------------------------------------------------------------------
 void tcApp::draw() {
-    tc::clear(0.1f, 0.1f, 0.1f);
+    clear(0.1f, 0.1f, 0.1f);
 
     // スレッドで生成したデータを描画
-    tc::setColor(255);
+    setColor(255);
     threadedObject.draw(20, 100);
 
     // フレーム情報を表示
-    auto appFrame = tc::getFrameCount();
+    auto appFrame = getFrameCount();
     auto threadFrame = threadedObject.getThreadFrameNum();
 
-    tc::setColor(255, 100, 100);
-    tc::drawBitmapString("app frame: " + tc::toString(appFrame), 20, 20);
-    tc::drawBitmapString("thread frame: " + tc::toString(threadFrame), 20, 35);
-    tc::drawBitmapString("diff: " + tc::toString((int64_t)appFrame - threadFrame), 20, 50);
+    setColor(255, 100, 100);
+    drawBitmapString("app frame: " + toString(appFrame), 20, 20);
+    drawBitmapString("thread frame: " + toString(threadFrame), 20, 35);
+    drawBitmapString("diff: " + toString((int64_t)appFrame - threadFrame), 20, 50);
 
-    tc::setColor(200, 200, 200);
-    tc::drawBitmapString("a: starts the thread", 20, 320);
-    tc::drawBitmapString("s: stops the thread", 20, 335);
-    tc::drawBitmapString("l: turns lock on", 20, 350);
-    tc::drawBitmapString("n: turns lock off (tearing)", 20, 365);
+    setColor(200, 200, 200);
+    drawBitmapString("a: starts the thread", 20, 320);
+    drawBitmapString("s: stops the thread", 20, 335);
+    drawBitmapString("l: turns lock on", 20, 350);
+    drawBitmapString("n: turns lock off (tearing)", 20, 365);
 
     // ロック状態を表示
-    tc::setColor(100, 255, 100);
-    tc::drawBitmapString(doLock ? "Mode: LOCKED (safe)" : "Mode: NO LOCK (may tear)", 20, 395);
+    setColor(100, 255, 100);
+    drawBitmapString(doLock ? "Mode: LOCKED (safe)" : "Mode: NO LOCK (may tear)", 20, 395);
 }
 
 // ---------------------------------------------------------------------------
 // keyPressed - キー入力
 // ---------------------------------------------------------------------------
 void tcApp::keyPressed(int key) {
-    if (tc::isMainThread()) {
+    if (isMainThread()) {
         printf("[keyPressed] processed in main thread\n");
     } else {
         printf("[keyPressed] processed in other thread\n");

@@ -1,8 +1,9 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;
@@ -10,8 +11,8 @@ public:
     void keyPressed(int key) override;
 
 private:
-    tc::VideoGrabber grabber_;
-    std::vector<tc::VideoDeviceInfo> devices_;
+    VideoGrabber grabber_;
+    std::vector<VideoDeviceInfo> devices_;
     int currentDevice_ = 0;
     bool permissionGranted_ = false;
     bool permissionRequested_ = false;

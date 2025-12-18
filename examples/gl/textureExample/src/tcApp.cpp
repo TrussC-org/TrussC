@@ -22,12 +22,12 @@ void tcApp::setup() {
 
     imgNearest_.allocate(SRC_SIZE, SRC_SIZE, 4);
     generatePixelArt(imgNearest_);
-    imgNearest_.setFilter(tc::TextureFilter::Nearest);
+    imgNearest_.setFilter(TextureFilter::Nearest);
     imgNearest_.update();
 
     imgLinear_.allocate(SRC_SIZE, SRC_SIZE, 4);
     generatePixelArt(imgLinear_);
-    imgLinear_.setFilter(tc::TextureFilter::Linear);
+    imgLinear_.setFilter(TextureFilter::Linear);
     imgLinear_.update();
 
     // Cubic 用は update() で生成
@@ -35,20 +35,20 @@ void tcApp::setup() {
     // --- Wrap 比較用（レンガ）---
     imgBrickRepeat_.allocate(BRICK_SIZE, BRICK_SIZE, 4);
     generateBrickPattern(imgBrickRepeat_);
-    imgBrickRepeat_.setFilter(tc::TextureFilter::Nearest);
-    imgBrickRepeat_.setWrap(tc::TextureWrap::Repeat);
+    imgBrickRepeat_.setFilter(TextureFilter::Nearest);
+    imgBrickRepeat_.setWrap(TextureWrap::Repeat);
     imgBrickRepeat_.update();
 
     imgBrickClamp_.allocate(BRICK_SIZE, BRICK_SIZE, 4);
     generateBrickPattern(imgBrickClamp_);
-    imgBrickClamp_.setFilter(tc::TextureFilter::Nearest);
-    imgBrickClamp_.setWrap(tc::TextureWrap::ClampToEdge);
+    imgBrickClamp_.setFilter(TextureFilter::Nearest);
+    imgBrickClamp_.setWrap(TextureWrap::ClampToEdge);
     imgBrickClamp_.update();
 
     imgBrickMirrored_.allocate(BRICK_SIZE, BRICK_SIZE, 4);
     generateBrickPattern(imgBrickMirrored_);
-    imgBrickMirrored_.setFilter(tc::TextureFilter::Nearest);
-    imgBrickMirrored_.setWrap(tc::TextureWrap::MirroredRepeat);
+    imgBrickMirrored_.setFilter(TextureFilter::Nearest);
+    imgBrickMirrored_.setWrap(TextureWrap::MirroredRepeat);
     imgBrickMirrored_.update();
 }
 
@@ -57,23 +57,23 @@ void tcApp::update() {
     if (scale_ != lastScale_) {
         int newSize = (int)(SRC_SIZE * scale_);
         upscaleBicubic(imgOriginal_, imgCubic_, newSize, newSize);
-        imgCubic_.setFilter(tc::TextureFilter::Nearest);
+        imgCubic_.setFilter(TextureFilter::Nearest);
         imgCubic_.update();
         lastScale_ = scale_;
     }
 }
 
 void tcApp::draw() {
-    tc::clear(0.15f, 0.15f, 0.18f);
+    clear(0.15f, 0.15f, 0.18f);
 
-    float w = tc::getWindowWidth();
-    float h = tc::getWindowHeight();
+    float w = getWindowWidth();
+    float h = getWindowHeight();
 
     // タイトル
-    tc::setColor(1.0f, 1.0f, 1.0f);
-    tc::drawBitmapString("Texture Filter & Wrap Mode Demo", 20, 25);
-    tc::setColor(0.6f, 0.6f, 0.6f);
-    tc::drawBitmapString("Scale: " + to_string((int)scale_) + "x  [UP/DOWN or 1-4]", 20, 42);
+    setColor(1.0f, 1.0f, 1.0f);
+    drawBitmapString("Texture Filter & Wrap Mode Demo", 20, 25);
+    setColor(0.6f, 0.6f, 0.6f);
+    drawBitmapString("Scale: " + to_string((int)scale_) + "x  [UP/DOWN or 1-4]", 20, 42);
 
     // レイアウト計算
     float margin = 15;
@@ -90,30 +90,30 @@ void tcApp::draw() {
     float row1Y = headerHeight + (rowHeight - imgSize) / 2;
 
     // 行ラベル
-    tc::setColor(0.8f, 0.8f, 0.8f);
-    tc::drawBitmapString("Filter:", margin, row1Y - 5);
+    setColor(0.8f, 0.8f, 0.8f);
+    drawBitmapString("Filter:", margin, row1Y - 5);
 
     for (int i = 0; i < 3; i++) {
         float x = margin + i * (colWidth + margin) + (colWidth - imgSize) / 2;
 
         // 背景
-        tc::setColor(0.25f, 0.25f, 0.28f);
-        tc::drawRect(x - 3, row1Y - 3, imgSize + 6, imgSize + 6);
+        setColor(0.25f, 0.25f, 0.28f);
+        drawRect(x - 3, row1Y - 3, imgSize + 6, imgSize + 6);
 
         // 画像
-        tc::setColor(1.0f, 1.0f, 1.0f);
+        setColor(1.0f, 1.0f, 1.0f);
         if (i == 0) {
             imgNearest_.draw(x, row1Y, imgSize, imgSize);
-            tc::setColor(0.4f, 0.8f, 1.0f);
-            tc::drawBitmapString("NEAREST", x + imgSize / 2 - 28, row1Y + imgSize + 15);
+            setColor(0.4f, 0.8f, 1.0f);
+            drawBitmapString("NEAREST", x + imgSize / 2 - 28, row1Y + imgSize + 15);
         } else if (i == 1) {
             imgLinear_.draw(x, row1Y, imgSize, imgSize);
-            tc::setColor(1.0f, 0.8f, 0.4f);
-            tc::drawBitmapString("LINEAR", x + imgSize / 2 - 24, row1Y + imgSize + 15);
+            setColor(1.0f, 0.8f, 0.4f);
+            drawBitmapString("LINEAR", x + imgSize / 2 - 24, row1Y + imgSize + 15);
         } else {
             imgCubic_.draw(x, row1Y, imgSize, imgSize);
-            tc::setColor(0.8f, 1.0f, 0.4f);
-            tc::drawBitmapString("CUBIC", x + imgSize / 2 - 20, row1Y + imgSize + 15);
+            setColor(0.8f, 1.0f, 0.4f);
+            drawBitmapString("CUBIC", x + imgSize / 2 - 20, row1Y + imgSize + 15);
         }
     }
 
@@ -121,8 +121,8 @@ void tcApp::draw() {
     float row2Y = headerHeight + rowHeight + margin + (rowHeight - imgSize) / 2;
 
     // 行ラベル
-    tc::setColor(0.8f, 0.8f, 0.8f);
-    tc::drawBitmapString("Wrap:", margin, row2Y - 5);
+    setColor(0.8f, 0.8f, 0.8f);
+    drawBitmapString("Wrap:", margin, row2Y - 5);
 
     // Wrap モードでは UV を 0-1 範囲外に設定して繰り返しを見せる
     // drawSubsection を使って UV 範囲を拡張
@@ -132,33 +132,33 @@ void tcApp::draw() {
         float x = margin + i * (colWidth + margin) + (colWidth - imgSize) / 2;
 
         // 背景
-        tc::setColor(0.25f, 0.25f, 0.28f);
-        tc::drawRect(x - 3, row2Y - 3, imgSize + 6, imgSize + 6);
+        setColor(0.25f, 0.25f, 0.28f);
+        drawRect(x - 3, row2Y - 3, imgSize + 6, imgSize + 6);
 
         // 画像（UV 範囲を拡張して描画）
-        tc::setColor(1.0f, 1.0f, 1.0f);
+        setColor(1.0f, 1.0f, 1.0f);
         if (i == 0) {
             imgBrickRepeat_.getTexture().drawSubsection(x, row2Y, imgSize, imgSize,
                                            0, 0, BRICK_SIZE * uvScale, BRICK_SIZE * uvScale);
-            tc::setColor(1.0f, 0.6f, 0.6f);
-            tc::drawBitmapString("REPEAT", x + imgSize / 2 - 24, row2Y + imgSize + 15);
+            setColor(1.0f, 0.6f, 0.6f);
+            drawBitmapString("REPEAT", x + imgSize / 2 - 24, row2Y + imgSize + 15);
         } else if (i == 1) {
             imgBrickClamp_.getTexture().drawSubsection(x, row2Y, imgSize, imgSize,
                                           0, 0, BRICK_SIZE * uvScale, BRICK_SIZE * uvScale);
-            tc::setColor(0.6f, 1.0f, 0.6f);
-            tc::drawBitmapString("CLAMP", x + imgSize / 2 - 20, row2Y + imgSize + 15);
+            setColor(0.6f, 1.0f, 0.6f);
+            drawBitmapString("CLAMP", x + imgSize / 2 - 20, row2Y + imgSize + 15);
         } else {
             imgBrickMirrored_.getTexture().drawSubsection(x, row2Y, imgSize, imgSize,
                                              0, 0, BRICK_SIZE * uvScale, BRICK_SIZE * uvScale);
-            tc::setColor(0.6f, 0.6f, 1.0f);
-            tc::drawBitmapString("MIRRORED", x + imgSize / 2 - 32, row2Y + imgSize + 15);
+            setColor(0.6f, 0.6f, 1.0f);
+            drawBitmapString("MIRRORED", x + imgSize / 2 - 32, row2Y + imgSize + 15);
         }
     }
 
     // 原寸表示
-    tc::setColor(0.5f, 0.5f, 0.5f);
-    tc::drawBitmapString("Original:", w - 100, h - 45);
-    tc::setColor(1.0f, 1.0f, 1.0f);
+    setColor(0.5f, 0.5f, 0.5f);
+    drawBitmapString("Original:", w - 100, h - 45);
+    setColor(1.0f, 1.0f, 1.0f);
     imgOriginal_.draw(w - 100, h - 30, SRC_SIZE, SRC_SIZE);
     imgBrickRepeat_.draw(w - 50, h - 30, BRICK_SIZE * 2, BRICK_SIZE * 2);
 }
@@ -197,7 +197,7 @@ float tcApp::cubicWeight(float t) {
 // ---------------------------------------------------------------------------
 // バイキュービック補間でアップスケール
 // ---------------------------------------------------------------------------
-void tcApp::upscaleBicubic(const tc::Image& src, tc::Image& dst, int newWidth, int newHeight) {
+void tcApp::upscaleBicubic(const Image& src, Image& dst, int newWidth, int newHeight) {
     int srcW = src.getWidth();
     int srcH = src.getHeight();
 
@@ -225,7 +225,7 @@ void tcApp::upscaleBicubic(const tc::Image& src, tc::Image& dst, int newWidth, i
                     int sx = clamp(ix + dx, 0, srcW - 1);
 
                     float w = wx * wy;
-                    tc::Color c = src.getColor(sx, sy);
+                    Color c = src.getColor(sx, sy);
 
                     r += c.r * w;
                     g += c.g * w;
@@ -242,7 +242,7 @@ void tcApp::upscaleBicubic(const tc::Image& src, tc::Image& dst, int newWidth, i
                 a /= weightSum;
             }
 
-            dst.setColor(x, y, tc::Color(
+            dst.setColor(x, y, Color(
                 clamp(r, 0.0f, 1.0f),
                 clamp(g, 0.0f, 1.0f),
                 clamp(b, 0.0f, 1.0f),
@@ -255,20 +255,20 @@ void tcApp::upscaleBicubic(const tc::Image& src, tc::Image& dst, int newWidth, i
 // ---------------------------------------------------------------------------
 // ピクセルアート生成（スライム）
 // ---------------------------------------------------------------------------
-void tcApp::generatePixelArt(tc::Image& img) {
+void tcApp::generatePixelArt(Image& img) {
     // 背景を透明に
     for (int y = 0; y < SRC_SIZE; y++) {
         for (int x = 0; x < SRC_SIZE; x++) {
-            img.setColor(x, y, tc::Color(0, 0, 0, 0));
+            img.setColor(x, y, Color(0, 0, 0, 0));
         }
     }
 
-    tc::Color body(0.3f, 0.8f, 0.4f, 1.0f);
-    tc::Color bodyLight(0.5f, 0.9f, 0.6f, 1.0f);
-    tc::Color bodyDark(0.2f, 0.6f, 0.3f, 1.0f);
-    tc::Color eye(0.1f, 0.1f, 0.1f, 1.0f);
-    tc::Color eyeHighlight(1.0f, 1.0f, 1.0f, 1.0f);
-    tc::Color mouth(0.15f, 0.15f, 0.15f, 1.0f);
+    Color body(0.3f, 0.8f, 0.4f, 1.0f);
+    Color bodyLight(0.5f, 0.9f, 0.6f, 1.0f);
+    Color bodyDark(0.2f, 0.6f, 0.3f, 1.0f);
+    Color eye(0.1f, 0.1f, 0.1f, 1.0f);
+    Color eyeHighlight(1.0f, 1.0f, 1.0f, 1.0f);
+    Color mouth(0.15f, 0.15f, 0.15f, 1.0f);
 
     for (int x = 5; x <= 10; x++) { img.setColor(x, 4, bodyLight); }
     for (int x = 4; x <= 11; x++) { img.setColor(x, 5, body); }
@@ -303,10 +303,10 @@ void tcApp::generatePixelArt(tc::Image& img) {
 // ---------------------------------------------------------------------------
 // レンガパターン生成（8x8）
 // ---------------------------------------------------------------------------
-void tcApp::generateBrickPattern(tc::Image& img) {
-    tc::Color brick(0.8f, 0.4f, 0.3f, 1.0f);      // レンガ色
-    tc::Color brickDark(0.6f, 0.3f, 0.2f, 1.0f);  // レンガ暗め
-    tc::Color mortar(0.5f, 0.5f, 0.45f, 1.0f);    // 目地
+void tcApp::generateBrickPattern(Image& img) {
+    Color brick(0.8f, 0.4f, 0.3f, 1.0f);      // レンガ色
+    Color brickDark(0.6f, 0.3f, 0.2f, 1.0f);  // レンガ暗め
+    Color mortar(0.5f, 0.5f, 0.45f, 1.0f);    // 目地
 
     // 全体を目地色で塗る
     for (int y = 0; y < BRICK_SIZE; y++) {

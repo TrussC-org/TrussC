@@ -12,10 +12,10 @@
 #include "TrussC.h"
 
 void tcApp::setup() {
-    tc::setVsync(true);
+    setVsync(true);
 
     // 音声ファイルパス（data フォルダ内の CC0 サンプル音源）
-    musicPath = tc::getDataPath("beat_loop.wav");
+    musicPath = getDataPath("beat_loop.wav");
     printf("Trying to load: %s\n", musicPath.c_str());
 
     // 音楽をロード
@@ -45,93 +45,93 @@ void tcApp::setup() {
 }
 
 void tcApp::draw() {
-    tc::clear(30);
+    clear(30);
 
     float y = 50;
 
     // タイトル
-    tc::setColor(tc::colors::white);
-    tc::drawBitmapString("TrussC Sound Player Example", 50, y);
+    setColor(colors::white);
+    drawBitmapString("TrussC Sound Player Example", 50, y);
     y += 40;
 
     // コントロール説明
-    tc::setColor(180);
-    tc::drawBitmapString("Controls:", 50, y);
+    setColor(180);
+    drawBitmapString("Controls:", 50, y);
     y += 25;
-    tc::drawBitmapString("  SPACE - Play/Stop music", 50, y);
+    drawBitmapString("  SPACE - Play/Stop music", 50, y);
     y += 20;
-    tc::drawBitmapString("  P - Pause/Resume music", 50, y);
+    drawBitmapString("  P - Pause/Resume music", 50, y);
     y += 20;
-    tc::drawBitmapString("  S - Play sound effect", 50, y);
+    drawBitmapString("  S - Play sound effect", 50, y);
     y += 20;
-    tc::drawBitmapString("  UP/DOWN - Volume control", 50, y);
+    drawBitmapString("  UP/DOWN - Volume control", 50, y);
     y += 20;
-    tc::drawBitmapString("  LEFT/RIGHT - Pan control", 50, y);
+    drawBitmapString("  LEFT/RIGHT - Pan control", 50, y);
     y += 20;
-    tc::drawBitmapString("  +/- - Speed control", 50, y);
+    drawBitmapString("  +/- - Speed control", 50, y);
     y += 40;
 
     // 音楽の状態
-    tc::setColor(tc::colors::white);
-    tc::drawBitmapString("=== Music ===", 50, y);
+    setColor(colors::white);
+    drawBitmapString("=== Music ===", 50, y);
     y += 25;
 
     if (musicLoaded) {
         std::string status = music.isPlaying() ? "Playing" :
                             (music.isPaused() ? "Paused" : "Stopped");
-        tc::setColor(music.isPlaying() ? tc::colors::lime : tc::colors::gray);
-        tc::drawBitmapString("Status: " + status, 50, y);
+        setColor(music.isPlaying() ? colors::lime : colors::gray);
+        drawBitmapString("Status: " + status, 50, y);
         y += 20;
 
-        tc::setColor(180);
+        setColor(180);
         char buf[128];
         snprintf(buf, sizeof(buf), "Position: %.1f / %.1f sec",
                 music.getPosition(), music.getDuration());
-        tc::drawBitmapString(buf, 50, y);
+        drawBitmapString(buf, 50, y);
         y += 20;
 
         snprintf(buf, sizeof(buf), "Volume: %.0f%%", music.getVolume() * 100);
-        tc::drawBitmapString(buf, 50, y);
+        drawBitmapString(buf, 50, y);
         y += 20;
 
         snprintf(buf, sizeof(buf), "Pan: %.1f (%s)", music.getPan(),
                 music.getPan() < -0.1f ? "Left" : music.getPan() > 0.1f ? "Right" : "Center");
-        tc::drawBitmapString(buf, 50, y);
+        drawBitmapString(buf, 50, y);
         y += 20;
 
         snprintf(buf, sizeof(buf), "Speed: %.1fx", music.getSpeed());
-        tc::drawBitmapString(buf, 50, y);
+        drawBitmapString(buf, 50, y);
         y += 20;
 
-        tc::drawBitmapString(std::string("Loop: ") + (music.isLoop() ? "ON" : "OFF"), 50, y);
+        drawBitmapString(std::string("Loop: ") + (music.isLoop() ? "ON" : "OFF"), 50, y);
         y += 30;
 
         // プログレスバー
         float progress = music.getDuration() > 0 ?
                         music.getPosition() / music.getDuration() : 0;
-        tc::setColor(60);
-        tc::drawRect(50, y, 300, 20);
-        tc::setColor(tc::colors::dodgerBlue);
-        tc::drawRect(50, y, 300 * progress, 20);
+        setColor(60);
+        drawRect(50, y, 300, 20);
+        setColor(colors::dodgerBlue);
+        drawRect(50, y, 300 * progress, 20);
         y += 40;
     } else {
-        tc::setColor(tc::colors::red);
-        tc::drawBitmapString("Music file not found: " + musicPath, 50, y);
+        setColor(colors::red);
+        drawBitmapString("Music file not found: " + musicPath, 50, y);
         y += 40;
     }
 
     // 効果音の状態
-    tc::setColor(tc::colors::white);
-    tc::drawBitmapString("=== Sound Effect ===", 50, y);
+    setColor(colors::white);
+    drawBitmapString("=== Sound Effect ===", 50, y);
     y += 25;
 
     std::string status = sfx.isPlaying() ? "Playing" : "Ready";
-    tc::setColor(sfx.isPlaying() ? tc::colors::lime : tc::colors::gray);
-    tc::drawBitmapString("Status: " + status, 50, y);
+    setColor(sfx.isPlaying() ? colors::lime : colors::gray);
+    drawBitmapString("Status: " + status, 50, y);
 
     // FPS
-    tc::setColor(100);
-    tc::drawBitmapString("FPS: " + std::to_string((int)tc::getFrameRate()), 50, 560);
+    setColor(100);
+    drawBitmapString("FPS: " + std::to_string((int)getFrameRate()), 50, 560);
 }
 
 void tcApp::keyPressed(int key) {

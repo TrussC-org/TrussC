@@ -13,8 +13,8 @@ void tcApp::setup() {
     imguiSetup();
 
     // 省電力モード: update は 30fps、draw はイベント駆動
-    tc::setUpdateFps(30);
-    tc::setDrawFps(0);  // 自動描画停止
+    setUpdateFps(30);
+    setDrawFps(0);  // 自動描画停止
 
     // 設定ファイルパス (~/.trussc/config.json)
     string home = getenv("HOME") ? getenv("HOME") : "";
@@ -46,31 +46,31 @@ void tcApp::setup() {
     }
 
     // 初回描画
-    tc::redraw();
+    redraw();
 }
 
 void tcApp::update() {
     // 生成中は毎フレーム再描画（明滅アニメーション用）
     if (isGenerating) {
-        tc::redraw();
+        redraw();
     }
 }
 
 // マウスイベントで再描画
 void tcApp::mousePressed(int x, int y, int button) {
-    tc::redraw();
+    redraw();
 }
 
 void tcApp::mouseReleased(int x, int y, int button) {
-    tc::redraw();
+    redraw();
 }
 
 void tcApp::mouseMoved(int x, int y) {
-    tc::redraw();
+    redraw();
 }
 
 void tcApp::mouseDragged(int x, int y, int button) {
-    tc::redraw();
+    redraw();
 }
 
 void tcApp::draw() {
@@ -223,7 +223,7 @@ void tcApp::draw() {
     // 生成/更新ボタン
     if (isGenerating) {
         // 生成中: 明滅するボタン
-        float t = tc::getElapsedTime();
+        float t = getElapsedTime();
         float pulse = 0.5f + 0.3f * sinf(t * 4.0f);  // 明滅
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.8f, pulse));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.4f, 0.8f, pulse));
@@ -836,7 +836,7 @@ void tcApp::doGenerateProject() {
     auto log = [this](const string& msg) {
         lock_guard<mutex> lock(logMutex);
         generatingLog += msg + "\n";
-        tc::redraw();
+        redraw();
     };
 
     // バリデーション
@@ -951,12 +951,12 @@ void tcApp::doGenerateProject() {
         importedProjectPath = destPath;
 
         setStatus("Project created successfully!");
-        tc::redraw();  // 完了時に再描画
+        redraw();  // 完了時に再描画
 
     } catch (const exception& e) {
         log(string("Error: ") + e.what());
         setStatus(string("Error: ") + e.what(), true);
-        tc::redraw();  // エラー時も再描画
+        redraw();  // エラー時も再描画
     }
 }
 
@@ -964,7 +964,7 @@ void tcApp::doUpdateProject() {
     auto log = [this](const string& msg) {
         lock_guard<mutex> lock(logMutex);
         generatingLog += msg + "\n";
-        tc::redraw();
+        redraw();
     };
 
     if (!isImportedProject || importedProjectPath.empty()) {
@@ -1033,11 +1033,11 @@ void tcApp::doUpdateProject() {
 
         log("Done!");
         setStatus("Project updated successfully!");
-        tc::redraw();  // 完了時に再描画
+        redraw();  // 完了時に再描画
 
     } catch (const exception& e) {
         log(string("Error: ") + e.what());
         setStatus(string("Error: ") + e.what(), true);
-        tc::redraw();  // エラー時も再描画
+        redraw();  // エラー時も再描画
     }
 }

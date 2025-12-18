@@ -16,14 +16,14 @@
 #include "TrussC.h"
 
 void tcApp::setup() {
-    tc::setVsync(true);
+    setVsync(true);
 
     fftInput.resize(FFT_SIZE, 0.0f);
     spectrum.resize(FFT_SIZE / 2, 0.0f);
     spectrumSmooth.resize(FFT_SIZE / 2, 0.0f);
 
     // 音楽をロード
-    std::string musicPath = tc::getDataPath("beat_loop.wav");
+    std::string musicPath = getDataPath("beat_loop.wav");
     if (music.load(musicPath)) {
         musicLoaded = true;
         music.setLoop(true);
@@ -49,10 +49,10 @@ void tcApp::update() {
     if (!musicLoaded || !music.isPlaying()) return;
 
     // AudioEngineから最新のオーディオサンプルを取得
-    tc::getAudioAnalysisBuffer(fftInput.data(), FFT_SIZE);
+    getAudioAnalysisBuffer(fftInput.data(), FFT_SIZE);
 
     // 窓関数を適用してFFT実行
-    auto fftResult = tc::fftReal(fftInput, tc::WindowType::Hanning);
+    auto fftResult = fftReal(fftInput, WindowType::Hanning);
 
     // マグニチュードを計算（対数スケール対応）
     for (size_t i = 0; i < spectrum.size(); i++) {
@@ -71,18 +71,18 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    tc::clear(20);
+    clear(20);
 
-    float windowW = tc::getWindowWidth();
-    float windowH = tc::getWindowHeight();
+    float windowW = getWindowWidth();
+    float windowH = getWindowHeight();
 
     // タイトル
-    tc::setColor(tc::colors::white);
-    tc::drawBitmapString("TrussC FFT Spectrum Analyzer", 20, 30);
+    setColor(colors::white);
+    drawBitmapString("TrussC FFT Spectrum Analyzer", 20, 30);
 
     // コントロール説明
-    tc::setColor(150);
-    tc::drawBitmapString("SPACE:Play/Stop  W:Waveform  L:LogScale  UP/DOWN:Smoothing", 20, 50);
+    setColor(150);
+    drawBitmapString("SPACE:Play/Stop  W:Waveform  L:LogScale  UP/DOWN:Smoothing", 20, 50);
 
     // ステータス
     char buf[128];
@@ -90,21 +90,21 @@ void tcApp::draw() {
             music.isPlaying() ? "Playing" : "Stopped",
             smoothing * 100,
             useLogScale ? "Log" : "Linear");
-    tc::drawBitmapString(buf, 20, 70);
+    drawBitmapString(buf, 20, 70);
 
     // 波形表示エリア
     if (showWaveform) {
         float waveY = 120;
         float waveH = 100;
 
-        tc::setColor(40);
-        tc::drawRect(20, waveY, windowW - 40, waveH);
+        setColor(40);
+        drawRect(20, waveY, windowW - 40, waveH);
 
-        tc::setColor(tc::colors::lime);
-        tc::drawBitmapString("Waveform", 25, waveY + 15);
+        setColor(colors::lime);
+        drawBitmapString("Waveform", 25, waveY + 15);
 
         // 波形を描画（実際のオーディオデータ）
-        tc::setColor(tc::colors::cyan);
+        setColor(colors::cyan);
         int waveWidth = (int)(windowW - 40);
         float prevX = 20, prevY = waveY + waveH / 2;
 
@@ -116,7 +116,7 @@ void tcApp::draw() {
             float x = 20 + i;
             float y = waveY + waveH / 2 - sample * waveH / 2;
             if (i > 0) {
-                tc::drawLine(prevX, prevY, x, y);
+                drawLine(prevX, prevY, x, y);
             }
             prevX = x;
             prevY = y;
@@ -127,11 +127,11 @@ void tcApp::draw() {
     float specY = showWaveform ? 240 : 120;
     float specH = windowH - specY - 80;
 
-    tc::setColor(40);
-    tc::drawRect(20, specY, windowW - 40, specH);
+    setColor(40);
+    drawRect(20, specY, windowW - 40, specH);
 
-    tc::setColor(tc::colors::lime);
-    tc::drawBitmapString("Spectrum", 25, specY + 15);
+    setColor(colors::lime);
+    drawBitmapString("Spectrum", 25, specY + 15);
 
     // スペクトラムバーを描画
     int numBars = 64;
@@ -165,19 +165,19 @@ void tcApp::draw() {
 
         // グラデーションカラー（HSB: 青→緑→黄）
         float hue = 0.6f - spectrumSmooth[i] * 0.4f;
-        tc::setColorHSB(hue, 0.8f, 0.9f);
+        setColorHSB(hue, 0.8f, 0.9f);
 
-        tc::drawRect(barX, barY, barWidth - barGap, barH);
+        drawRect(barX, barY, barWidth - barGap, barH);
     }
 
     // 周波数ラベル
-    tc::setColor(100);
-    tc::drawBitmapString("0 Hz", 30, specY + specH + 5);
-    tc::drawBitmapString("22050 Hz", windowW - 80, specY + specH + 5);
+    setColor(100);
+    drawBitmapString("0 Hz", 30, specY + specH + 5);
+    drawBitmapString("22050 Hz", windowW - 80, specY + specH + 5);
 
     // クレジット
-    tc::setColor(80);
-    tc::drawBitmapString("Audio: \"113 2b loose-pants 4.2 mono\" by astro_denticle (CC0)", 20, windowH - 25);
+    setColor(80);
+    drawBitmapString("Audio: \"113 2b loose-pants 4.2 mono\" by astro_denticle (CC0)", 20, windowH - 25);
 }
 
 void tcApp::keyPressed(int key) {

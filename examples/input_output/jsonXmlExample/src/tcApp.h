@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include <vector>
 #include <string>
 
@@ -9,7 +10,7 @@ using namespace std;
 
 // jsonXmlExample - JSON/XML 読み書きのデモ
 
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void draw() override;

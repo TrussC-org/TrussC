@@ -16,7 +16,7 @@
 //
 // パターン生成データをワーカースレッドで処理し、結果をメインスレッドで描画。
 //
-class AnalysisThread : public tc::Thread {
+class AnalysisThread : public Thread {
 public:
     static constexpr int WIDTH = 64;
     static constexpr int HEIGHT = 48;
@@ -58,8 +58,8 @@ public:
     // 解析結果を描画
     void draw(float x, float y, float scale = 4.0f) {
         if (pixels_.empty()) {
-            tc::setColor(255);
-            tc::drawBitmapString("No frames analyzed yet", x + 20, y + 20);
+            setColor(255);
+            drawBitmapString("No frames analyzed yet", x + 20, y + 20);
             return;
         }
 
@@ -67,8 +67,8 @@ public:
             for (int px = 0; px < WIDTH; px++) {
                 int i = py * WIDTH + px;
                 float value = pixels_[i];
-                tc::setColor(value, value, value);
-                tc::drawRect(x + px * scale, y + py * scale, scale, scale);
+                setColor(value, value, value);
+                drawRect(x + px * scale, y + py * scale, scale, scale);
             }
         }
     }
@@ -101,8 +101,8 @@ protected:
     }
 
 private:
-    tc::ThreadChannel<std::vector<float>> toAnalyze_;  // メイン → ワーカー
-    tc::ThreadChannel<std::vector<float>> analyzed_;   // ワーカー → メイン
+    ThreadChannel<std::vector<float>> toAnalyze_;  // メイン → ワーカー
+    ThreadChannel<std::vector<float>> analyzed_;   // ワーカー → メイン
     std::vector<float> pixels_;
     bool newFrame_;
     int analyzedCount_ = 0;

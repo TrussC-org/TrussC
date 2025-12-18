@@ -15,7 +15,7 @@ void tcApp::setup() {
     tcLogNotice() << "==========================";
 
     // 受信イベントをリッスン
-    receiveListener = receiver.onReceive.listen([this](tc::UdpReceiveEventArgs& e) {
+    receiveListener = receiver.onReceive.listen([this](UdpReceiveEventArgs& e) {
         string msg(e.data.begin(), e.data.end());
         tcLogNotice() << "Received from " << e.remoteHost << ":" << e.remotePort << " -> " << msg;
 
@@ -27,7 +27,7 @@ void tcApp::setup() {
     });
 
     // エラーイベントをリッスン
-    errorListener = receiver.onError.listen([](tc::UdpErrorEventArgs& e) {
+    errorListener = receiver.onError.listen([](UdpErrorEventArgs& e) {
         tcLogError() << "UDP Error: " << e.message;
     });
 
@@ -44,40 +44,40 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    tc::clear(30);
+    clear(30);
 
     float y = 40;
 
     // タイトル
-    tc::setColor(255);
-    tc::drawBitmapString("UDP Socket Example", 40, y);
+    setColor(255);
+    drawBitmapString("UDP Socket Example", 40, y);
     y += 30;
 
     // 操作説明
-    tc::setColor(180);
-    tc::drawBitmapString("SPACE: Send message   C: Clear", 40, y);
+    setColor(180);
+    drawBitmapString("SPACE: Send message   C: Clear", 40, y);
     y += 40;
 
     // 送信カウント
-    tc::setColor(100, 200, 255);
-    tc::drawBitmapString("Sent: " + to_string(sendCount) + " messages", 40, y);
+    setColor(100, 200, 255);
+    drawBitmapString("Sent: " + to_string(sendCount) + " messages", 40, y);
     y += 30;
 
     // 受信メッセージ
-    tc::setColor(100, 255, 100);
-    tc::drawBitmapString("Received Messages:", 40, y);
+    setColor(100, 255, 100);
+    drawBitmapString("Received Messages:", 40, y);
     y += 25;
 
-    tc::setColor(220);
+    setColor(220);
     lock_guard<mutex> lock(messagesMutex);
     for (const auto& msg : receivedMessages) {
-        tc::drawBitmapString(msg, 50, y);
+        drawBitmapString(msg, 50, y);
         y += 18;
     }
 }
 
 void tcApp::keyPressed(int key) {
-    if (key == tc::KEY_SPACE || key == ' ') {
+    if (key == KEY_SPACE || key == ' ') {
         // メッセージを送信
         sendCount++;
         ostringstream oss;

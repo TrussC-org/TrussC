@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
+using namespace tc;
 #include <iostream>
 
 using namespace std;
@@ -11,7 +12,7 @@ using namespace std;
 // - FBO にオフスクリーン描画して画面に表示
 // - FBO 内での clear() の動作テスト
 // =============================================================================
-class tcApp : public tc::App {
+class tcApp : public App {
 public:
     void setup() override;
     void update() override;
@@ -19,7 +20,7 @@ public:
     void keyPressed(int key) override;
 
 private:
-    tc::Fbo fbo_;
+    Fbo fbo_;
     float time_ = 0;
     bool useClearInFbo_ = false;  // FBO 内で clear() を呼ぶかどうか
     bool test1Done_ = false;
