@@ -84,6 +84,10 @@ macro(trussc_app)
             RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/bin"
             RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         )
+        # Visual Studio: スタートアッププロジェクトを設定
+        set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
+        # Windows: アイコン設定
+        trussc_setup_icon(${PROJECT_NAME})
     endif()
 
     message(STATUS "[${PROJECT_NAME}] TrussC app configured")
