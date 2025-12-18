@@ -10,7 +10,13 @@ cmake_minimum_required(VERSION 3.20)
 
 # プロジェクト名（フォルダ名から自動取得）
 get_filename_component(PROJECT_DIR_NAME ${CMAKE_CURRENT_SOURCE_DIR} NAME)
-project(${PROJECT_DIR_NAME} LANGUAGES C CXX OBJC OBJCXX)
+
+# プラットフォームに応じて言語を設定（OBJC/OBJCXX は macOS のみ）
+if(APPLE)
+    project(${PROJECT_DIR_NAME} LANGUAGES C CXX OBJC OBJCXX)
+else()
+    project(${PROJECT_DIR_NAME} LANGUAGES C CXX)
+endif()
 
 # C++20 を使用
 set(CMAKE_CXX_STANDARD 20)
