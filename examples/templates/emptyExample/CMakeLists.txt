@@ -20,6 +20,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_SUPPRESS_REGENERATION true)
 # 自動スキーム生成を無効化（後でプロジェクトターゲットだけ有効にする）
 set(CMAKE_XCODE_GENERATE_SCHEME OFF)
+# サブプロジェクトを作らない（TrussC を別プロジェクトとして表示しない）
+set(CMAKE_XCODE_GENERATE_TOP_LEVEL_PROJECT_ONLY ON)
 
 # =============================================================================
 # TrussC パス設定
@@ -67,7 +69,12 @@ set(TCX_BOX2D_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(TCX_BOX2D_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
 # TrussC を追加
-add_subdirectory(${TC_ROOT} ${CMAKE_BINARY_DIR}/TrussC)
+add_subdirectory(${TC_ROOT} ${CMAKE_BINARY_DIR}/TrussC EXCLUDE_FROM_ALL)
+
+# Xcode: TrussC のスキームを非表示
+if(CMAKE_GENERATOR MATCHES "Xcode")
+    set_target_properties(TrussC PROPERTIES XCODE_GENERATE_SCHEME FALSE)
+endif()
 
 # use_addon マクロを読み込み（アドオン用）
 include(${TC_ROOT}/cmake/use_addon.cmake)
