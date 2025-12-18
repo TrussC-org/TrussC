@@ -96,6 +96,23 @@ openFrameworksとの機能比較に基づいた開発ロードマップ。
 
 ---
 
+## 既知の問題・課題
+
+### Windows 固有
+
+| 問題 | 説明 | 解決策案 |
+|------|------|----------|
+| コンソールウィンドウ表示 | 実行ファイルをダブルクリックするとコマンドプロンプトが背後に表示される | `#pragma comment(linker, "/SUBSYSTEM:WINDOWS")` + `WinMain` 対応。デフォルトで非表示、マクロ定義で表示可能にする |
+| アイコン未適用 | 実行ファイルに .ico が適用されていない | Windows リソースファイル (.rc) の設定が必要 |
+
+### クロスプラットフォーム
+
+| 問題 | 説明 | 解決策案 |
+|------|------|----------|
+| イベントベース描画時のちらつき | redraw() 等で1フレームだけ更新すると、ダブルバッファの影響で直前の状態と交互に表示され点滅する | 2フレーム連続で描画するか、フロントバッファ/バックバッファの同期を検討 |
+
+---
+
 ## Windows / Linux 対応状況
 
 現在 macOS (Metal) で開発中。Windows / Linux への移植作業の状況。
@@ -110,39 +127,30 @@ openFrameworksとの機能比較に基づいた開発ロードマップ。
 | **TCP Client/Server** | `#ifdef` 分岐 | Winsock / POSIX 両対応 |
 | **Sound** | miniaudio | クロスプラットフォーム |
 | **ImGui** | - | クロスプラットフォーム |
+| **Serial** | `tcSerial.h` | Win32 API / POSIX 両対応 |
+| **Platform** | `tcPlatform_win.cpp` | getExecutablePath, setWindowSize, getDisplayScaleFactor, captureWindow, saveScreenshot |
+| **FBO** | `tcFbo_win.cpp` | D3D11 Map/Unmap でピクセル読み取り |
+| **VideoGrabber** | `tcVideoGrabber_win.cpp` | Media Foundation でウェブカメラ対応 |
 
-### ⚠️ POSIX のみ（macOS + Linux）→ Windows 実装が必要
+### ❌ macOS のみ → Linux 実装が必要
 
-| 機能 | ファイル | Windows で必要な実装 |
-|:-----|:---------|:---------------------|
-| **Serial** | `tcSerial.h` | Win32 API (`CreateFile`, `ReadFile`, `WriteFile`, `SetCommState`) |
+| 機能 | ファイル | Linux |
+|:-----|:---------|:------|
+| **Platform** | `tcPlatform_linux.cpp` | |
+| ├ getDisplayScaleFactor | | X11: `XRRGetScreenResources` |
+| ├ setWindowSize | | X11: `XResizeWindow` |
+| ├ getExecutablePath | | `/proc/self/exe` |
+| ├ captureWindow | | OpenGL `glReadPixels` |
+| └ saveScreenshot | | stb_image_write で代用可 |
+| **FBO** | `tcFbo_linux.cpp` | OpenGL `glReadPixels` |
+| **VideoGrabber** | `tcVideoGrabber_linux.cpp` | V4L2 |
 
-### ❌ macOS のみ → Windows / Linux 両方の実装が必要
-
-| 機能 | ファイル | Windows | Linux |
-|:-----|:---------|:--------|:------|
-| **Platform** | `tcPlatform_mac.mm` | | |
-| ├ getDisplayScaleFactor | | `GetDpiForWindow()` | X11: `XRRGetScreenResources` |
-| ├ setWindowSize | | `SetWindowPos()` | X11: `XResizeWindow` |
-| ├ getExecutablePath | | `GetModuleFileName()` | `/proc/self/exe` |
-| ├ captureWindow | | D3D11 テクスチャ読み取り | OpenGL `glReadPixels` |
-| └ saveScreenshot | | stb_image_write で代用可 | 同左 |
-| **FBO** | `tcFbo_mac.mm` | | |
-| └ readPixelsPlatform | | D3D11 `Map/Unmap` | OpenGL `glReadPixels` |
-| **VideoGrabber** | `tcVideoGrabber_mac.mm` | Media Foundation | V4L2 |
-
-### 移植の優先度
-
-**高（基本機能）:**
-1. `tcPlatform_win.cpp` - getExecutablePath, setWindowSize, getDisplayScaleFactor
-2. `tcSerial_win.cpp` - シリアル通信
+### 移植の優先度（Linux）
 
 **中（使う人は使う）:**
-3. `tcFbo_win.cpp` / `tcFbo_linux.cpp` - FBO ピクセル読み取り
-4. `tcVideoGrabber_win.cpp` / `tcVideoGrabber_linux.cpp` - カメラ入力
-
-**低（スクリーンショットは stb で代用可）:**
-5. captureWindow / saveScreenshot のネイティブ実装
+1. `tcFbo_linux.cpp` - FBO ピクセル読み取り
+2. `tcVideoGrabber_linux.cpp` - カメラ入力
+3. `tcPlatform_linux.cpp` - プラットフォーム関数
 
 ---
 
