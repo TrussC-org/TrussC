@@ -7,91 +7,53 @@ openFrameworks に近いAPIを目指しつつ、モダンなC++でシンプル�
 ## フォルダ構造
 
 ```
-include/
-├── TrussC.h                  # エントリポイント（全部インクルード）
-├── tc/
-│   ├── app/
-│   │   ├── tcRunner.h            # runApp, WindowSettings
-│   │   ├── tcWindow.h            # ウィンドウ制御・情報
-│   │   └── tcBaseApp.h           # App基底クラス
-│   │
-│   ├── graphics/
-│   │   ├── tcGraphics.h          # 図形描画（rect, circle, line等）
-│   │   ├── tcBitmapFont.h        # ビットマップフォント
-│   │   ├── tcStyle.h             # 色設定、fill/stroke
-│   │   ├── tcImage.h             # [将来] 画像読み込み・描画
-│   │   ├── tcPath.h              # [将来] パス描画
-│   │   ├── tcPixels.h            # [将来] ピクセル操作
-│   │   └── tcTrueTypeFont.h      # [将来] TTFフォント
-│   │
-│   ├── math/
-│   │   ├── tcMath.h              # 数学ユーティリティ（lerp, map, clamp等）
-│   │   ├── tcVec.h               # [将来] Vec2/Vec3/Vec4（tcMathから分離）
-│   │   ├── tcMatrix.h            # [将来] Mat3/Mat4（tcMathから分離）
-│   │   └── tcTransform.h         # 変形（translate/rotate/scale等）
-│   │
-│   ├── types/
-│   │   ├── tcColor.h             # Color構造体、色空間（HSB/OKLab/OKLCH）
-│   │   ├── tcNode.h              # Node（シーングラフ）
-│   │   └── tcRectangle.h         # [将来] Rectangle型
-│   │
-│   ├── platform/
-│   │   └── tcPlatform.h          # プラットフォーム抽象化
-│   │
-│   ├── utils/
-│   │   ├── tcTime.h              # 時間関連（getElapsedTime, getDeltaTime等）
-│   │   ├── tcInput.h             # マウス・キーボード入力
-│   │   ├── tcTimer.h             # [将来] タイマー（callAfter, callEvery）
-│   │   └── tcFile.h              # [将来] ファイル操作
-│   │
-│   ├── events/                   # イベントシステム
-│   │   ├── tcEvent.h             # Event<T> テンプレートクラス
-│   │   ├── tcEventListener.h     # EventListener（RAII トークン）
-│   │   ├── tcEventArgs.h         # イベント引数構造体群
-│   │   └── tcCoreEvents.h        # CoreEvents + events() アクセサ
-│   │
-│   ├── 3d/                       # [将来] 3D機能
-│   │   ├── tc3dGraphics.h        # 3D描画
-│   │   ├── tcCamera.h            # カメラ
-│   │   ├── tcMesh.h              # メッシュ
-│   │   └── tcLight.h             # ライティング
-│   │
-│   ├── gl/                       # [将来] 低レベルグラフィックス
-│   │   ├── tcShader.h            # シェーダー
-│   │   ├── tcFbo.h               # フレームバッファオブジェクト
-│   │   ├── tcTexture.h           # テクスチャ
-│   │   └── tcVbo.h               # 頂点バッファ
-│   │
-│   ├── sound/                    # [将来] サウンド
-│   │   ├── tcSound.h             # サウンド再生
-│   │   └── tcSoundStream.h       # オーディオストリーム
-│   │
-│   └── video/                    # [将来] ビデオ
-│       ├── tcVideo.h             # ビデオ再生
-│       └── tcVideoGrabber.h      # カメラキャプチャ
-│
-├── sokol/                        # 外部ライブラリ（そのまま）
-│   ├── sokol_app.h
-│   ├── sokol_gfx.h
-│   ├── sokol_gl.h
+trussc/                           # TrussC コアライブラリ
+├── CMakeLists.txt                # メインCMake（GLOBベース）
+├── include/
+│   ├── TrussC.h                  # エントリポイント（全部インクルード）
+│   ├── impl/                     # ライブラリ実装（stb, pugixml等）
+│   ├── tc/
+│   │   ├── app/                  # アプリケーション基盤
+│   │   ├── graphics/             # 描画関連
+│   │   ├── math/                 # 数学ユーティリティ
+│   │   ├── types/                # 基本型（Color, Node等）
+│   │   ├── events/               # イベントシステム
+│   │   ├── utils/                # ユーティリティ
+│   │   ├── 3d/                   # 3D機能
+│   │   ├── gl/                   # 低レベルグラフィックス
+│   │   ├── sound/                # サウンド（.h + .cpp）
+│   │   ├── network/              # ネットワーク（.h + .cpp）
+│   │   └── video/                # ビデオ
+│   ├── sokol/                    # sokol ヘッダー
+│   ├── imgui/                    # Dear ImGui
+│   ├── stb/                      # stb ライブラリ
 │   └── ...
-│
-src/
-├── sokol_impl.mm                 # sokol実装（macOS）
-├── sokol_impl.cpp                # sokol実装（他プラットフォーム）
-└── tcPlatform_mac.mm             # macOS固有実装
+├── platform/                     # プラットフォーム固有実装
+│   ├── mac/                      # macOS (.mm)
+│   ├── win/                      # Windows (.cpp)
+│   └── linux/                    # Linux (.cpp)
+├── addons/                       # オプショナルアドオン
+│   └── tcxTls/                   # TLS/SSL サポート（mbedTLS）
+│       ├── CMakeLists.txt
+│       ├── include/
+│       ├── src/
+│       ├── libs/mbedtls/         # git submodule
+│       └── examples/
+└── resources/                    # リソース（アイコン等）
 
-examples/                             # oFと同じフォルダ構造
-├── templates/
-│   └── emptyExample/             # 最小構成テンプレート
-├── graphics/
-│   ├── graphicsExample/          # 図形描画
-│   └── colorExample/             # 色空間・補間
-├── 3d/
-│   ├── ofNodeExample/            # シーングラフ
-│   └── 3DPrimitivesExample/      # 3Dプリミティブ
-└── math/
-    └── vectorMathExample/        # 数学ライブラリ
+examples/                         # サンプルプロジェクト
+├── templates/                    # テンプレート
+├── graphics/                     # 描画サンプル
+├── 3d/                           # 3Dサンプル
+├── network/                      # ネットワークサンプル
+├── tools/
+│   └── projectGenerator/         # プロジェクト生成ツール
+└── ...
+
+projectGenerator/                 # ビルドスクリプト配布用
+├── buildProjectGenerator_mac.command
+├── buildProjectGenerator_win.bat
+└── buildProjectGenerator_linux.sh
 ```
 
 ## 命名規則
@@ -114,9 +76,14 @@ examples/                             # oFと同じフォルダ構造
 ## ビルド
 
 ```bash
-cd examples/graphics/colorExample/build
+# サンプルのビルド
+cd examples/graphics/colorExample
+mkdir build && cd build
 cmake ..
 cmake --build .
+
+# projectGenerator のビルド（macOS）
+./projectGenerator/buildProjectGenerator_mac.command
 ```
 
 ## 関連ドキュメント
