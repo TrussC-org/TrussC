@@ -66,10 +66,22 @@ void tcApp::mouseReleased(int x, int y, int button) {
 }
 
 void tcApp::mouseMoved(int x, int y) {
-    redraw();
+    // 画面内の時だけ再描画
+    if (x >= 0 && x < getWindowWidth() && y >= 0 && y < getWindowHeight()) {
+        redraw();
+    }
 }
 
 void tcApp::mouseDragged(int x, int y, int button) {
+    redraw();
+}
+
+// キーイベントで再描画
+void tcApp::keyPressed(int key) {
+    redraw();
+}
+
+void tcApp::keyReleased(int key) {
     redraw();
 }
 

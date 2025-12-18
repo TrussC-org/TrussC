@@ -31,6 +31,10 @@ public:
     void mouseMoved(int x, int y) override;
     void mouseDragged(int x, int y, int button) override;
 
+    // キーイベント（redraw 用）
+    void keyPressed(int key) override;
+    void keyReleased(int key) override;
+
 private:
     // 設定
     string tcRoot;                      // TC_ROOT (tc_vX.Y.Z フォルダへのパス)
