@@ -9,6 +9,20 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # =============================================================================
+# mbedTLS 設定（テストやプログラムをビルドしない）
+# =============================================================================
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(DISABLE_PACKAGE_CONFIG_AND_INSTALL ON CACHE BOOL "" FORCE)
+
+# mbedTLS を静的ライブラリとしてビルド
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libs/mbedtls/CMakeLists.txt")
+    add_subdirectory(libs/mbedtls)
+    message(STATUS "[TrussC] mbedTLS enabled for TLS support")
+endif()
+
+# =============================================================================
 # プラットフォーム検出
 # =============================================================================
 if(APPLE)
@@ -45,6 +59,7 @@ if(TC_PLATFORM_MACOS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcUdpSocket.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpClient.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpServer.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTlsClient.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_impl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/pugixml_impl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/imgui_impl.mm
@@ -58,6 +73,7 @@ elseif(TC_PLATFORM_WINDOWS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcUdpSocket.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpClient.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpServer.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTlsClient.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_impl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/pugixml_impl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/imgui_impl.cpp
@@ -71,6 +87,7 @@ elseif(TC_PLATFORM_LINUX)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcUdpSocket.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpClient.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpServer.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTlsClient.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_impl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/pugixml_impl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/imgui_impl.cpp
@@ -83,6 +100,7 @@ else()
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcUdpSocket.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpClient.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTcpServer.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcTlsClient.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/stb_impl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/pugixml_impl.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/imgui_impl.cpp
@@ -98,6 +116,18 @@ target_include_directories(TrussC PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include/sokol
 )
+
+# mbedTLS インクルードパス（PRIVATE: ユーザーのヘッダ探索パスを汚染しない）
+if(TARGET mbedtls)
+    target_include_directories(TrussC PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/libs/mbedtls/include
+    )
+    target_link_libraries(TrussC PRIVATE
+        mbedtls
+        mbedx509
+        mbedcrypto
+    )
+endif()
 
 # =============================================================================
 # プラットフォーム固有の設定
