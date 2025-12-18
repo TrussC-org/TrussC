@@ -18,7 +18,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # =============================================================================
 # TrussC と tcxTls アドオンを追加
 # =============================================================================
-set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
+set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../trussc")
 set(ADDON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 
 message(STATUS "[tlsExample] TrussC: ${TRUSSC_DIR}")
