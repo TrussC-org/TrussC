@@ -32,6 +32,9 @@
 #include "stb/stb_truetype.h"
 
 #include "../utils/tcLog.h"
+#include "../types/tcDirection.h"
+#include "../types/tcRectangle.h"
+#include "../../tcMath.h"  // Vec2
 
 namespace trussc {
 
@@ -543,11 +546,12 @@ private:
 
 // ---------------------------------------------------------------------------
 // TrueType フォントクラス（ユーザー向け）
+// 継承可能: 独自フォントシステムを実装する場合は継承してオーバーライド
 // ---------------------------------------------------------------------------
 class Font {
 public:
     Font() = default;
-    ~Font() = default;
+    virtual ~Font() = default;
 
     // コピー・ムーブ可能（shared_ptr なので軽量）
     Font(const Font&) = default;
@@ -578,9 +582,38 @@ public:
     bool isLoaded() const { return atlasManager_ != nullptr; }
 
     // -------------------------------------------------------------------------
-    // 文字列描画
+    // アラインメント設定
     // -------------------------------------------------------------------------
-    void drawString(const std::string& text, float x, float y) const {
+    void setAlign(Direction h, Direction v) {
+        alignH_ = h;
+        alignV_ = v;
+    }
+
+    void setAlign(Direction h) {
+        alignH_ = h;
+    }
+
+    Direction getAlignH() const { return alignH_; }
+    Direction getAlignV() const { return alignV_; }
+
+    // -------------------------------------------------------------------------
+    // 文字列描画（virtual - 継承先でカスタム可能）
+    // -------------------------------------------------------------------------
+    virtual void drawString(const std::string& text, float x, float y) const {
+        drawStringInternal(text, x, y, alignH_, alignV_);
+    }
+
+    virtual void drawString(const std::string& text, float x, float y,
+                            Direction h, Direction v) const {
+        drawStringInternal(text, x, y, h, v);
+    }
+
+    // -------------------------------------------------------------------------
+    // 内部描画実装
+    // -------------------------------------------------------------------------
+protected:
+    void drawStringInternal(const std::string& text, float x, float y,
+                            Direction h, Direction v) const {
         if (!atlasManager_ || text.empty()) return;
 
         // 必要なグリフをロード
@@ -593,6 +626,9 @@ public:
 
         // テクスチャを更新
         atlasManager_->ensureTexturesUpdated();
+
+        // アラインメントオフセットを計算
+        Vec2 offset = calcAlignOffset(text, h, v);
 
         // アトラスごとに描画
         size_t atlasCount = atlasManager_->getAtlasCount();
@@ -610,8 +646,8 @@ public:
 
             sgl_begin_quads();
 
-            float cursorX = x;
-            float cursorY = y + atlasManager_->getAscent();
+            float cursorX = x + offset.x;
+            float cursorY = y + offset.y + atlasManager_->getAscent();
 
             for (size_t i = 0; i < text.size(); ) {
                 uint32_t codepoint = decodeUTF8(text, i);
@@ -651,10 +687,11 @@ public:
         }
     }
 
+public:
     // -------------------------------------------------------------------------
-    // メトリクス
+    // メトリクス（virtual - 継承先でカスタム可能）
     // -------------------------------------------------------------------------
-    float stringWidth(const std::string& text) const {
+    virtual float getWidth(const std::string& text) const {
         if (!atlasManager_) return 0;
 
         float width = 0;
@@ -682,15 +719,33 @@ public:
         return (width > maxWidth) ? width : maxWidth;
     }
 
-    float getLineHeight() const {
+    // 後方互換性のため残す
+    float stringWidth(const std::string& text) const { return getWidth(text); }
+
+    virtual float getHeight(const std::string& text) const {
+        if (!atlasManager_) return 0;
+
+        int lines = 1;
+        for (char c : text) {
+            if (c == '\n') lines++;
+        }
+        return atlasManager_->getLineHeight() * lines;
+    }
+
+    // テキストの境界ボックスを取得（左上基準）
+    virtual Rectangle getBBox(const std::string& text) const {
+        return Rectangle(0, 0, getWidth(text), getHeight(text));
+    }
+
+    virtual float getLineHeight() const {
         return atlasManager_ ? atlasManager_->getLineHeight() : 0;
     }
 
-    float getAscent() const {
+    virtual float getAscent() const {
         return atlasManager_ ? atlasManager_->getAscent() : 0;
     }
 
-    float getDescent() const {
+    virtual float getDescent() const {
         return atlasManager_ ? atlasManager_->getDescent() : 0;
     }
 
@@ -698,6 +753,44 @@ public:
         return atlasManager_ ? atlasManager_->getFontSize() : 0;
     }
 
+protected:
+    // -------------------------------------------------------------------------
+    // アラインメントオフセット計算（継承先で利用可能）
+    // -------------------------------------------------------------------------
+    Vec2 calcAlignOffset(const std::string& text, Direction h, Direction v) const {
+        float offsetX = 0;
+        float offsetY = 0;
+
+        // 水平オフセット
+        float w = getWidth(text);
+        switch (h) {
+            case Direction::Left:   offsetX = 0; break;
+            case Direction::Center: offsetX = -w / 2; break;
+            case Direction::Right:  offsetX = -w; break;
+            default: break;
+        }
+
+        // 垂直オフセット
+        float ascent = getAscent();
+        float descent = getDescent();
+        float totalHeight = ascent - descent;
+
+        switch (v) {
+            case Direction::Top:      offsetY = 0; break;
+            case Direction::Baseline: offsetY = -ascent; break;
+            case Direction::Center:   offsetY = -totalHeight / 2; break;
+            case Direction::Bottom:   offsetY = -totalHeight; break;
+            default: break;
+        }
+
+        return Vec2(offsetX, offsetY);
+    }
+
+    // アラインメント設定（protected - 継承先でアクセス可能）
+    Direction alignH_ = Direction::Left;
+    Direction alignV_ = Direction::Top;
+
+public:
     // -------------------------------------------------------------------------
     // メモリ情報
     // -------------------------------------------------------------------------

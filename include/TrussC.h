@@ -27,6 +27,12 @@
 // TrussC 数学ライブラリ
 #include "tcMath.h"
 
+// TrussC 方向・位置指定
+#include "tc/types/tcDirection.h"
+
+// TrussC 矩形
+#include "tc/types/tcRectangle.h"
+
 // TrussC ノイズ関数
 #include "tc/math/tcNoise.h"
 
