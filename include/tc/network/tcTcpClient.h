@@ -55,7 +55,7 @@ struct TcpErrorEventArgs {
 };
 
 // =============================================================================
-// TcpClient クラス
+// TcpClient クラス（基底クラス - TlsClient の親）
 // =============================================================================
 class TcpClient {
 public:
@@ -71,7 +71,7 @@ public:
     // コンストラクタ / デストラクタ
     // -------------------------------------------------------------------------
     TcpClient();
-    ~TcpClient();
+    virtual ~TcpClient();
 
     // コピー禁止
     TcpClient(const TcpClient&) = delete;
@@ -82,29 +82,29 @@ public:
     TcpClient& operator=(TcpClient&& other) noexcept;
 
     // -------------------------------------------------------------------------
-    // 接続管理
+    // 接続管理（virtual - TlsClient でオーバーライド可能）
     // -------------------------------------------------------------------------
 
     // サーバーに接続（ブロッキング）
-    bool connect(const std::string& host, int port);
+    virtual bool connect(const std::string& host, int port);
 
     // サーバーに非同期接続（バックグラウンドで接続、onConnectで通知）
-    void connectAsync(const std::string& host, int port);
+    virtual void connectAsync(const std::string& host, int port);
 
     // 接続を切断
-    void disconnect();
+    virtual void disconnect();
 
     // 接続中かどうか
-    bool isConnected() const;
+    virtual bool isConnected() const;
 
     // -------------------------------------------------------------------------
-    // データ送受信
+    // データ送受信（virtual - TlsClient でオーバーライド可能）
     // -------------------------------------------------------------------------
 
     // データを送信
-    bool send(const void* data, size_t size);
-    bool send(const std::vector<char>& data);
-    bool send(const std::string& message);
+    virtual bool send(const void* data, size_t size);
+    virtual bool send(const std::vector<char>& data);
+    virtual bool send(const std::string& message);
 
     // -------------------------------------------------------------------------
     // 設定
@@ -126,9 +126,8 @@ public:
     // 接続先ポート
     int getRemotePort() const;
 
-private:
-    void receiveThreadFunc();
-    void connectThreadFunc(const std::string& host, int port);
+protected:
+    // 継承先からアクセス可能
     void notifyError(const std::string& msg, int code = 0);
 
 #ifdef _WIN32
@@ -140,13 +139,18 @@ private:
     std::string remoteHost_;
     int remotePort_ = 0;
 
-    std::thread receiveThread_;
-    std::thread connectThread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> connected_{false};
 
     size_t receiveBufferSize_ = 65536;
     std::mutex sendMutex_;
+
+private:
+    void receiveThreadFunc();
+    void connectThreadFunc(const std::string& host, int port);
+
+    std::thread receiveThread_;
+    std::thread connectThread_;
 
     static std::atomic<int> instanceCount_;
     static void initWinsock();
