@@ -89,3 +89,15 @@ addons/**/bin/*
 addons/**/*.xcodeproj/
 addons/**/*.sln
 addons/**/*.vcxproj
+
+# =============================================================================
+# Tools
+# =============================================================================
+
+# tools 内のビルド成果物を除外
+tools/**/build/
+tools/**/bin/*
+!tools/**/bin/data/
+tools/**/*.xcodeproj/
+tools/**/*.sln
+tools/**/*.vcxproj
