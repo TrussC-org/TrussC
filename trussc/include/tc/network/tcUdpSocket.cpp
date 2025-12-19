@@ -192,12 +192,19 @@ bool UdpSocket::connect(const std::string& host, int port) {
 // クローズ
 // ---------------------------------------------------------------------------
 void UdpSocket::close() {
-    stopReceiving();
+    shouldStop_ = true;
 
+    // 先にソケットを閉じる（recvfrom がエラーで返るようになる）
     if (socket_ != INVALID_SOCKET_HANDLE) {
         CLOSE_SOCKET(socket_);
         socket_ = INVALID_SOCKET_HANDLE;
     }
+
+    // スレッドが終了するのを待つ
+    if (receiveThread_.joinable()) {
+        receiveThread_.join();
+    }
+    receiving_ = false;
 
     localPort_ = 0;
     connectedHost_.clear();
