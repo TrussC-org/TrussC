@@ -194,8 +194,13 @@ bool UdpSocket::connect(const std::string& host, int port) {
 void UdpSocket::close() {
     shouldStop_ = true;
 
-    // 先にソケットを閉じる（recvfrom がエラーで返るようになる）
+    // 先にソケットをシャットダウン＆閉じる（recvfrom がエラーで返るようになる）
     if (socket_ != INVALID_SOCKET_HANDLE) {
+#ifdef _WIN32
+        shutdown(socket_, SD_BOTH);  // Windows: ブロッキング受信を解除
+#else
+        shutdown(socket_, SHUT_RDWR);
+#endif
         CLOSE_SOCKET(socket_);
         socket_ = INVALID_SOCKET_HANDLE;
     }
