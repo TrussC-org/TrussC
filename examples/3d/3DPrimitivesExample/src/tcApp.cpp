@@ -6,12 +6,12 @@ using namespace std;
 // setup
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    tcLogNotice() << "05_3d_primitives: 3D Primitives Demo";
-    tcLogNotice() << "  - 1/2/3/4: 解像度変更";
-    tcLogNotice() << "  - s: 塗りつぶし ON/OFF";
-    tcLogNotice() << "  - w: ワイヤーフレーム ON/OFF";
-    tcLogNotice() << "  - l: ライティング ON/OFF";
-    tcLogNotice() << "  - ESC: 終了";
+    tcLogNotice("tcApp") << "05_3d_primitives: 3D Primitives Demo";
+    tcLogNotice("tcApp") << "  - 1/2/3/4: 解像度変更";
+    tcLogNotice("tcApp") << "  - s: 塗りつぶし ON/OFF";
+    tcLogNotice("tcApp") << "  - w: ワイヤーフレーム ON/OFF";
+    tcLogNotice("tcApp") << "  - l: ライティング ON/OFF";
+    tcLogNotice("tcApp") << "  - ESC: 終了";
 
     // ライト設定（斜め上から照らす平行光源）
     light_.setDirectional(Vec3(-1, -1, -1));
@@ -61,7 +61,7 @@ void tcApp::rebuildPrimitives() {
     cylinder = createCylinder(size * 0.4f, size * 1.5f, cylRes);
     cone = createCone(size * 0.5f, size * 1.5f, coneRes);
 
-    tcLogNotice() << "Resolution mode: " << resolution;
+    tcLogNotice("tcApp") << "Resolution mode: " << resolution;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,14 +201,14 @@ void tcApp::keyPressed(int key) {
     }
     else if (key == 's' || key == 'S') {
         bFill = !bFill;
-        tcLogNotice() << "Fill: " << (bFill ? "ON" : "OFF");
+        tcLogNotice("tcApp") << "Fill: " << (bFill ? "ON" : "OFF");
     }
     else if (key == 'w' || key == 'W') {
         bWireframe = !bWireframe;
-        tcLogNotice() << "Wireframe: " << (bWireframe ? "ON" : "OFF");
+        tcLogNotice("tcApp") << "Wireframe: " << (bWireframe ? "ON" : "OFF");
     }
     else if (key == 'l' || key == 'L') {
         bLighting = !bLighting;
-        tcLogNotice() << "Lighting: " << (bLighting ? "ON" : "OFF");
+        tcLogNotice("tcApp") << "Lighting: " << (bLighting ? "ON" : "OFF");
     }
 }

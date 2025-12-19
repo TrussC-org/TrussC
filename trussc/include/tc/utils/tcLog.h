@@ -207,15 +207,23 @@ inline void tcCloseLogFile() {
 // ---------------------------------------------------------------------------
 class LogStream {
 public:
-    LogStream(LogLevel level) : level_(level) {}
+    LogStream(LogLevel level, const std::string& module = "")
+        : level_(level), module_(module) {}
 
     ~LogStream() {
-        tcGetLogger().log(level_, stream_.str());
+        if (!moved_) {
+            std::string msg = stream_.str();
+            if (!module_.empty()) {
+                msg = "[" + module_ + "] " + msg;
+            }
+            tcGetLogger().log(level_, msg);
+        }
     }
 
     // ムーブのみ許可
     LogStream(LogStream&& other) noexcept
         : level_(other.level_)
+        , module_(std::move(other.module_))
         , stream_(std::move(other.stream_)) {
         other.moved_ = true;
     }
@@ -238,35 +246,41 @@ public:
 
 private:
     LogLevel level_;
+    std::string module_;
     std::ostringstream stream_;
     bool moved_ = false;
 };
 
 // ---------------------------------------------------------------------------
 // ログ出力関数（ストリーム形式）
+// 使い方:
+//   tcLog() << "message";                    // デフォルト（Notice）
+//   tcLog(LogLevel::Warning) << "warning";   // レベル指定
+//   tcLogNotice("ClassName") << "message";   // モジュール名付き
+//   tcLogNotice() << "message";              // モジュール名なし
 // ---------------------------------------------------------------------------
 inline LogStream tcLog(LogLevel level = LogLevel::Notice) {
     return LogStream(level);
 }
 
-inline LogStream tcLogVerbose() {
-    return LogStream(LogLevel::Verbose);
+inline LogStream tcLogVerbose(const std::string& module = "") {
+    return LogStream(LogLevel::Verbose, module);
 }
 
-inline LogStream tcLogNotice() {
-    return LogStream(LogLevel::Notice);
+inline LogStream tcLogNotice(const std::string& module = "") {
+    return LogStream(LogLevel::Notice, module);
 }
 
-inline LogStream tcLogWarning() {
-    return LogStream(LogLevel::Warning);
+inline LogStream tcLogWarning(const std::string& module = "") {
+    return LogStream(LogLevel::Warning, module);
 }
 
-inline LogStream tcLogError() {
-    return LogStream(LogLevel::Error);
+inline LogStream tcLogError(const std::string& module = "") {
+    return LogStream(LogLevel::Error, module);
 }
 
-inline LogStream tcLogFatal() {
-    return LogStream(LogLevel::Fatal);
+inline LogStream tcLogFatal(const std::string& module = "") {
+    return LogStream(LogLevel::Fatal, module);
 }
 
 } // namespace trussc

@@ -14,13 +14,13 @@ void tcApp::setup() {
     if (permissionGranted_) {
         // 利用可能なカメラ一覧を取得
         devices_ = grabber_.listDevices();
-        tcLogNotice() << "=== Available Cameras ===";
+        tcLogNotice("tcApp") << "=== Available Cameras ===";
         for (auto& dev : devices_) {
-            tcLogNotice() << "[" << dev.deviceId << "] " << dev.deviceName;
+            tcLogNotice("tcApp") << "[" << dev.deviceId << "] " << dev.deviceName;
         }
-        tcLogNotice() << "========================";
-        tcLogNotice() << "";
-        tcLogNotice() << "Press 1-9 to switch camera, SPACE to restart current camera";
+        tcLogNotice("tcApp") << "========================";
+        tcLogNotice("tcApp") << "";
+        tcLogNotice("tcApp") << "Press 1-9 to switch camera, SPACE to restart current camera";
 
         // デフォルトカメラでキャプチャ開始
         if (!devices_.empty()) {
@@ -29,14 +29,14 @@ void tcApp::setup() {
             grabber_.setVerbose(true);  // 詳細ログを有効化
             // grabber_.setDesiredFrameRate(30);  // フレームレート指定（オプション）
             if (grabber_.setup(640, 480)) {
-                tcLogNotice() << "Camera started: " << grabber_.getWidth() << "x" << grabber_.getHeight()
+                tcLogNotice("tcApp") << "Camera started: " << grabber_.getWidth() << "x" << grabber_.getHeight()
                               << " (" << grabber_.getDeviceName() << ")";
             } else {
-                tcLogError() << "Failed to start camera";
+                tcLogError("tcApp") << "Failed to start camera";
             }
         }
     } else {
-        tcLogWarning() << "Camera permission not granted. Requesting...";
+        tcLogWarning("tcApp") << "Camera permission not granted. Requesting...";
         VideoGrabber::requestCameraPermission();
         permissionRequested_ = true;
     }
@@ -52,7 +52,7 @@ void tcApp::update() {
             if (!devices_.empty()) {
                 grabber_.setDeviceID(0);
                 grabber_.setup(640, 480);
-                tcLogNotice() << "Permission granted! Camera started.";
+                tcLogNotice("tcApp") << "Permission granted! Camera started.";
             }
         }
     }
@@ -146,16 +146,16 @@ void tcApp::keyPressed(int key) {
     if (key >= '1' && key <= '9') {
         int deviceIdx = key - '1';
         if (deviceIdx < (int)devices_.size() && deviceIdx != currentDevice_) {
-            tcLogNotice() << "Switching to camera " << deviceIdx << ": " << devices_[deviceIdx].deviceName;
+            tcLogNotice("tcApp") << "Switching to camera " << deviceIdx << ": " << devices_[deviceIdx].deviceName;
             grabber_.close();
             currentDevice_ = deviceIdx;
             grabber_.setDeviceID(currentDevice_);
             grabber_.setVerbose(true);
             if (grabber_.setup(640, 480)) {
-                tcLogNotice() << "Camera started: " << grabber_.getWidth() << "x" << grabber_.getHeight()
+                tcLogNotice("tcApp") << "Camera started: " << grabber_.getWidth() << "x" << grabber_.getHeight()
                               << " (" << grabber_.getDeviceName() << ")";
             } else {
-                tcLogError() << "Failed to start camera " << deviceIdx;
+                tcLogError("tcApp") << "Failed to start camera " << deviceIdx;
             }
             newFrameCount_ = 0;
             frameCount_ = 0;
@@ -163,7 +163,7 @@ void tcApp::keyPressed(int key) {
     }
     // スペースで現在のカメラを再起動
     else if (key == ' ') {
-        tcLogNotice() << "Restarting camera " << currentDevice_;
+        tcLogNotice("tcApp") << "Restarting camera " << currentDevice_;
         grabber_.close();
         grabber_.setDeviceID(currentDevice_);
         grabber_.setup(640, 480);

@@ -6,9 +6,9 @@ using namespace std;
 // setup - 初期化
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    tcLogNotice() << "02_nodes: Node System Demo";
-    tcLogNotice() << "  - Space: 回転を停止/再開";
-    tcLogNotice() << "  - ESC: 終了";
+    tcLogNotice("tcApp") << "02_nodes: Node System Demo";
+    tcLogNotice("tcApp") << "  - Space: 回転を停止/再開";
+    tcLogNotice("tcApp") << "  - ESC: 終了";
 
     // コンテナ1（左側、時計回り）
     container1_ = make_shared<RotatingContainer>();
@@ -125,17 +125,17 @@ void tcApp::keyPressed(int key) {
         container1_->rotationSpeed = paused ? 0.0f : 0.5f;
         container2_->rotationSpeed = paused ? 0.0f : -0.3f;
 
-        tcLogNotice() << "Rotation " << (paused ? "paused" : "resumed");
+        tcLogNotice("tcApp") << "Rotation " << (paused ? "paused" : "resumed");
     }
 }
 
 void tcApp::mousePressed(int x, int y, int button) {
-    tcLogVerbose() << "Global mouse: " << x << ", " << y;
+    tcLogVerbose("tcApp") << "Global mouse: " << x << ", " << y;
 
     // 各フォロワーのローカル座標を表示
-    tcLogVerbose() << "  Follower1 local: " << follower1_->getMouseX()
+    tcLogVerbose("tcApp") << "  Follower1 local: " << follower1_->getMouseX()
                        << ", " << follower1_->getMouseY();
-    tcLogVerbose() << "  Follower2 local: " << follower2_->getMouseX()
+    tcLogVerbose("tcApp") << "  Follower2 local: " << follower2_->getMouseX()
                        << ", " << follower2_->getMouseY();
 }
 

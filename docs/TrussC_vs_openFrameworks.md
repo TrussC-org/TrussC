@@ -504,10 +504,10 @@ oF ユーザーが TrussC で同等の機能を探す際のリファレンスで
 
 | openFrameworks | TrussC | Example | 備考 |
 |:---|:---|:---|:---|
-| `ofLog()` | `tc::tcLogNotice()` | fileDialogExample | |
-| `ofLogVerbose()` | `tc::tcLogVerbose()` | - | |
-| `ofLogWarning()` | `tc::tcLogWarning()` | tcpExample | |
-| `ofLogError()` | `tc::tcLogError()` | tcpExample | |
+| `ofLog()` | `tc::tcLogNotice("module")` | fileDialogExample | モジュール名はオプション |
+| `ofLogVerbose()` | `tc::tcLogVerbose("module")` | ofNodeExample | |
+| `ofLogWarning()` | `tc::tcLogWarning("module")` | tcpExample | |
+| `ofLogError()` | `tc::tcLogError("module")` | tcpExample | |
 
 ### **スレッド**
 

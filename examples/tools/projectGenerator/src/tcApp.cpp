@@ -305,22 +305,22 @@ void tcApp::cleanup() {
     // 終了時に現在の状態を保存
     projectName = projectNameBuf;
     projectDir = projectDirBuf;
-    tcLog() << "cleanup: saving projectName=" << projectName << ", projectDir=" << projectDir;
+    tcLogNotice("tcApp") << "cleanup: saving projectName=" << projectName << ", projectDir=" << projectDir;
     saveConfig();
 
     imguiShutdown();
 }
 
 void tcApp::loadConfig() {
-    tcLog() << "loadConfig: configPath = " << configPath;
+    tcLogNotice("tcApp") << "loadConfig: configPath = " << configPath;
     if (!fs::exists(configPath)) {
-        tcLog() << "loadConfig: config file not found";
+        tcLogNotice("tcApp") << "loadConfig: config file not found";
         return;
     }
 
     Json config = loadJson(configPath);
     if (config.empty()) {
-        tcLog() << "loadConfig: config is empty";
+        tcLogNotice("tcApp") << "loadConfig: config is empty";
         return;
     }
 
@@ -337,7 +337,7 @@ void tcApp::loadConfig() {
     if (config.contains("ide_type")) {
         ideType = static_cast<IdeType>(config["ide_type"].get<int>());
     }
-    tcLog() << "loadConfig: projectDir = " << projectDir << ", projectName = " << projectName;
+    tcLogNotice("tcApp") << "loadConfig: projectDir = " << projectDir << ", projectName = " << projectName;
 }
 
 void tcApp::saveConfig() {
@@ -536,11 +536,11 @@ void tcApp::generateXcodeProject(const string& path) {
     // GUI アプリから実行すると PATH が通ってないので cmake のフルパスを使用
     // TC_ROOT は CMakeLists.txt に直接書いてあるので環境変数不要
     string cmd = "cd \"" + buildPath + "\" && /opt/homebrew/bin/cmake -G Xcode ..";
-    tcLog() << "Xcode cmd: " << cmd;
+    tcLogNotice("tcApp") << "Xcode cmd: " << cmd;
     int result = system(cmd.c_str());
 
     if (result != 0) {
-        tcLogWarning() << "Failed to generate Xcode project (exit code: " << result << ")";
+        tcLogWarning("tcApp") << "Failed to generate Xcode project (exit code: " << result << ")";
         return;
     }
 
@@ -549,11 +549,11 @@ void tcApp::generateXcodeProject(const string& path) {
 }
 
 void tcApp::generateXcodeSchemes(const string& path) {
-    tcLog() << "generateXcodeSchemes called with path: " << path;
+    tcLogNotice("tcApp") << "generateXcodeSchemes called with path: " << path;
 
     string buildPath = path + "/build";
     string projectName = fs::path(path).filename().string();
-    tcLog() << "buildPath: " << buildPath << ", projectName: " << projectName;
+    tcLogNotice("tcApp") << "buildPath: " << buildPath << ", projectName: " << projectName;
 
     // .xcodeproj を探す
     string xcodeprojPath;
@@ -564,10 +564,10 @@ void tcApp::generateXcodeSchemes(const string& path) {
         }
     }
     if (xcodeprojPath.empty()) {
-        tcLogWarning() << "No .xcodeproj found in " << buildPath;
+        tcLogWarning("tcApp") << "No .xcodeproj found in " << buildPath;
         return;
     }
-    tcLog() << "Found xcodeproj: " << xcodeprojPath;
+    tcLogNotice("tcApp") << "Found xcodeproj: " << xcodeprojPath;
 
     // スキームディレクトリ
     string schemesDir = xcodeprojPath + "/xcshareddata/xcschemes";
@@ -615,7 +615,7 @@ void tcApp::generateXcodeSchemes(const string& path) {
     releaseFile << releaseContent;
     releaseFile.close();
 
-    tcLog() << "Generated Xcode schemes: Debug, Release";
+    tcLogNotice("tcApp") << "Generated Xcode schemes: Debug, Release";
 }
 
 void tcApp::generateVisualStudioProject(const string& path) {
@@ -632,11 +632,11 @@ void tcApp::generateVisualStudioProject(const string& path) {
     // macOS/Linux からは生成のみ（開くのは Windows で）
     string cmd = "cd \"" + buildPath + "\" && cmake -G \"Visual Studio 17 2022\" ..";
 #endif
-    tcLog() << "Visual Studio cmd: " << cmd;
+    tcLogNotice("tcApp") << "Visual Studio cmd: " << cmd;
     int result = system(cmd.c_str());
 
     if (result != 0) {
-        tcLogWarning() << "Failed to generate Visual Studio project (exit code: " << result << ")";
+        tcLogWarning("tcApp") << "Failed to generate Visual Studio project (exit code: " << result << ")";
     }
 }
 
@@ -723,7 +723,7 @@ void tcApp::openInIde(const string& path) {
 #endif
 
     if (!cmd.empty()) {
-        tcLog() << "Open in IDE: " << cmd;
+        tcLogNotice("tcApp") << "Open in IDE: " << cmd;
         system(cmd.c_str());
     }
 }

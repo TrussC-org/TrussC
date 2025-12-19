@@ -9,13 +9,13 @@ using namespace std;
 using namespace trussc;
 
 void tcApp::setup() {
-    tcLogNotice() << "=== TCP Socket Example ===";
-    tcLogNotice() << "Press S to start Server (port 9001)";
-    tcLogNotice() << "Press C to connect as Client";
-    tcLogNotice() << "Press SPACE to send a message";
-    tcLogNotice() << "Press D to disconnect";
-    tcLogNotice() << "Press X to clear log";
-    tcLogNotice() << "==========================";
+    tcLogNotice("tcApp") << "=== TCP Socket Example ===";
+    tcLogNotice("tcApp") << "Press S to start Server (port 9001)";
+    tcLogNotice("tcApp") << "Press C to connect as Client";
+    tcLogNotice("tcApp") << "Press SPACE to send a message";
+    tcLogNotice("tcApp") << "Press D to disconnect";
+    tcLogNotice("tcApp") << "Press X to clear log";
+    tcLogNotice("tcApp") << "==========================";
 
     addLog("Press S for Server, C for Client");
 
@@ -191,7 +191,7 @@ void tcApp::cleanup() {
 }
 
 void tcApp::addLog(const string& msg) {
-    tcLogNotice() << msg;
+    tcLogNotice("tcApp") << msg;
 
     lock_guard<mutex> lock(logMutex);
     logMessages.push_back(msg);

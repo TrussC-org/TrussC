@@ -732,11 +732,14 @@ bool flag = j.value("flag", false);  // デフォルト値付き
 ### ログ
 
 ```cpp
-// ストリーム形式
-tcLogNotice() << "Info: " << value;
-tcLogWarning() << "Warning: " << message;
-tcLogError() << "Error: " << error;
-tcLogVerbose() << "Debug: " << debug;
+// ストリーム形式（モジュール名付き推奨）
+tcLogNotice("tcApp") << "Info: " << value;
+tcLogWarning("tcApp") << "Warning: " << message;
+tcLogError("tcApp") << "Error: " << error;
+tcLogVerbose("tcApp") << "Debug: " << debug;
+
+// モジュール名なしも可
+tcLogNotice() << "Simple message";
 
 // レベル設定
 tcSetConsoleLogLevel(LogLevel::Warning);  // Warning以上のみ表示

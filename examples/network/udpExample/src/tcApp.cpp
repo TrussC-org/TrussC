@@ -9,15 +9,15 @@ using namespace std;
 using namespace trussc;
 
 void tcApp::setup() {
-    tcLogNotice() << "=== UDP Socket Example ===";
-    tcLogNotice() << "Press SPACE to send a message";
-    tcLogNotice() << "Press C to clear messages";
-    tcLogNotice() << "==========================";
+    tcLogNotice("tcApp") << "=== UDP Socket Example ===";
+    tcLogNotice("tcApp") << "Press SPACE to send a message";
+    tcLogNotice("tcApp") << "Press C to clear messages";
+    tcLogNotice("tcApp") << "==========================";
 
     // 受信イベントをリッスン
     receiveListener = receiver.onReceive.listen([this](UdpReceiveEventArgs& e) {
         string msg(e.data.begin(), e.data.end());
-        tcLogNotice() << "Received from " << e.remoteHost << ":" << e.remotePort << " -> " << msg;
+        tcLogNotice("UdpReceiver") << "Received from " << e.remoteHost << ":" << e.remotePort << " -> " << msg;
 
         lock_guard<mutex> lock(messagesMutex);
         receivedMessages.push_back(e.remoteHost + ":" + to_string(e.remotePort) + " -> " + msg);
@@ -28,12 +28,12 @@ void tcApp::setup() {
 
     // エラーイベントをリッスン
     errorListener = receiver.onError.listen([](UdpErrorEventArgs& e) {
-        tcLogError() << "UDP Error: " << e.message;
+        tcLogError("UdpReceiver") << "UDP Error: " << e.message;
     });
 
     // 受信用ソケットをバインド（ポート9000で受信開始）
     if (!receiver.bind(9000)) {
-        tcLogError() << "Failed to bind receiver to port 9000";
+        tcLogError("tcApp") << "Failed to bind receiver to port 9000";
     }
 
     // 送信用ソケットの送信先を設定
@@ -85,13 +85,13 @@ void tcApp::keyPressed(int key) {
         string msg = oss.str();
 
         if (sender.send(msg)) {
-            tcLogNotice() << "Sent: " << msg;
+            tcLogNotice("tcApp") << "Sent: " << msg;
         }
     } else if (key == 'C' || key == 'c') {
         lock_guard<mutex> lock(messagesMutex);
         receivedMessages.clear();
         sendCount = 0;
-        tcLogNotice() << "Messages cleared";
+        tcLogNotice("tcApp") << "Messages cleared";
     }
 }
 
