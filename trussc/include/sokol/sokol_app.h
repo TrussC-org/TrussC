@@ -2213,6 +2213,8 @@ SOKOL_APP_API_DECL const void* sapp_d3d11_get_swap_chain(void);
 
 /* Win32: get the HWND window handle */
 SOKOL_APP_API_DECL const void* sapp_win32_get_hwnd(void);
+/* TrussC: skip the next present call (for event-driven rendering) */
+SOKOL_APP_API_DECL void sapp_skip_present(void);
 
 /* GL: get major version */
 SOKOL_APP_API_DECL int sapp_gl_get_major_version(void);
@@ -3317,6 +3319,7 @@ typedef struct {
     wchar_t window_title_wide[_SAPP_MAX_TITLE_LENGTH];   // UTF-32 or UCS-2 */
     sapp_keycode keycodes[SAPP_MAX_KEYCODES];
     bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM]; // true if a custom mouse cursor is bound on that slot
+    bool skip_present;  // TrussC: skip next present call (for event-driven rendering)
 } _sapp_t;
 static _sapp_t _sapp;
 
@@ -8276,6 +8279,11 @@ _SOKOL_PRIVATE void _sapp_d3d11_resize_default_render_target(void) {
 }
 
 _SOKOL_PRIVATE void _sapp_d3d11_present(bool do_not_wait) {
+    /* TrussC: skip present if flag is set */
+    if (_sapp.skip_present) {
+        _sapp.skip_present = false;
+        return;
+    }
     UINT flags = 0;
     if (_sapp.win32.is_win10_or_greater && do_not_wait) {
         /* this hack/workaround somewhat improves window-movement and -sizing
@@ -13702,6 +13710,10 @@ SOKOL_API_IMPL void sapp_quit(void) {
 
 SOKOL_API_IMPL void sapp_consume_event(void) {
     _sapp.event_consumed = true;
+}
+/* TrussC: skip the next present call */
+SOKOL_API_IMPL void sapp_skip_present(void) {
+    _sapp.skip_present = true;
 }
 
 /* NOTE: on HTML5, sapp_set_clipboard_string() must be called from within event handler! */
