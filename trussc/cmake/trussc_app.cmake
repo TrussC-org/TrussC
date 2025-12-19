@@ -17,6 +17,11 @@
 # =============================================================================
 
 macro(trussc_app)
+    # デフォルトビルドタイプを RelWithDebInfo に設定
+    if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+        set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+    endif()
+
     # 引数をパース
     set(_options "")
     set(_oneValueArgs NAME)
@@ -57,6 +62,9 @@ macro(trussc_app)
             "${CMAKE_CURRENT_SOURCE_DIR}/src/*.m"
         )
     endif()
+
+    # Xcode / Visual Studio でディレクトリ構造を維持
+    source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "src" FILES ${_TC_SOURCES})
 
     # 実行ファイル作成
     add_executable(${PROJECT_NAME} ${_TC_SOURCES})

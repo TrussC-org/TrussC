@@ -527,7 +527,81 @@ void tcApp::generateXcodeProject(const string& path) {
 
     if (result != 0) {
         tcLogWarning() << "Failed to generate Xcode project (exit code: " << result << ")";
+        return;
     }
+
+    // Debug と Release の2つのスキームを生成
+    generateXcodeSchemes(path);
+}
+
+void tcApp::generateXcodeSchemes(const string& path) {
+    tcLog() << "generateXcodeSchemes called with path: " << path;
+
+    string buildPath = path + "/build";
+    string projectName = fs::path(path).filename().string();
+    tcLog() << "buildPath: " << buildPath << ", projectName: " << projectName;
+
+    // .xcodeproj を探す
+    string xcodeprojPath;
+    for (const auto& entry : fs::directory_iterator(buildPath)) {
+        if (entry.path().extension() == ".xcodeproj") {
+            xcodeprojPath = entry.path().string();
+            break;
+        }
+    }
+    if (xcodeprojPath.empty()) {
+        tcLogWarning() << "No .xcodeproj found in " << buildPath;
+        return;
+    }
+    tcLog() << "Found xcodeproj: " << xcodeprojPath;
+
+    // スキームディレクトリ
+    string schemesDir = xcodeprojPath + "/xcshareddata/xcschemes";
+    if (!fs::exists(schemesDir)) return;
+
+    // 元のスキームファイルを探す
+    string originalScheme;
+    for (const auto& entry : fs::directory_iterator(schemesDir)) {
+        if (entry.path().extension() == ".xcscheme") {
+            originalScheme = entry.path().string();
+            break;
+        }
+    }
+    if (originalScheme.empty()) return;
+
+    // スキームの内容を読み込む
+    ifstream schemeFile(originalScheme);
+    if (!schemeFile.is_open()) return;
+    stringstream buffer;
+    buffer << schemeFile.rdbuf();
+    string schemeContent = buffer.str();
+    schemeFile.close();
+
+    // 元のスキームを削除
+    fs::remove(originalScheme);
+
+    // Debug スキームを生成（デフォルトの buildConfiguration = "Debug" のまま）
+    string debugScheme = schemesDir + "/" + projectName + " Debug.xcscheme";
+    ofstream debugFile(debugScheme);
+    debugFile << schemeContent;
+    debugFile.close();
+
+    // Release スキームを生成（buildConfiguration を RelWithDebInfo に変更）
+    string releaseContent = schemeContent;
+    // 全ての buildConfiguration="Debug" を RelWithDebInfo に変更
+    string searchStr = "buildConfiguration=\"Debug\"";
+    string replaceStr = "buildConfiguration=\"RelWithDebInfo\"";
+    size_t pos = 0;
+    while ((pos = releaseContent.find(searchStr, pos)) != string::npos) {
+        releaseContent.replace(pos, searchStr.length(), replaceStr);
+        pos += replaceStr.length();
+    }
+    string releaseScheme = schemesDir + "/" + projectName + " Release.xcscheme";
+    ofstream releaseFile(releaseScheme);
+    releaseFile << releaseContent;
+    releaseFile.close();
+
+    tcLog() << "Generated Xcode schemes: Debug, Release";
 }
 
 void tcApp::generateVisualStudioProject(const string& path) {

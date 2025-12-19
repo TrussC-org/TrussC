@@ -77,6 +77,7 @@ private:
     void importProject(const string& path);
     void generateVSCodeFiles(const string& path);
     void generateXcodeProject(const string& path);
+    void generateXcodeSchemes(const string& path);
     void generateVisualStudioProject(const string& path);
     void openInIde(const string& path);
     string getTemplatePath();
