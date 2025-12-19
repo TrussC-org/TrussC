@@ -17,15 +17,15 @@ public:
 
 private:
     // 各種曲線のPolyline
-    Polyline linePolyline;      // 直線
-    Polyline bezierPolyline;    // 3次ベジェ
-    Polyline quadPolyline;      // 2次ベジェ
-    Polyline curvePolyline;     // Catmull-Rom スプライン
-    Polyline arcPolyline;       // 円弧
-    Polyline starPolyline;      // 星型（閉じた形状）
+    Path linePolyline;      // 直線
+    Path bezierPolyline;    // 3次ベジェ
+    Path quadPolyline;      // 2次ベジェ
+    Path curvePolyline;     // Catmull-Rom スプライン
+    Path arcPolyline;       // 円弧
+    Path starPolyline;      // 星型（閉じた形状）
 
     // マウスで描画するPolyline
-    Polyline mousePolyline;
+    Path mousePolyline;
     bool isDrawing = false;
 
     // 表示モード

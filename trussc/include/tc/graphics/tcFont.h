@@ -749,8 +749,8 @@ public:
     }
 
     // テキストの境界ボックスを取得（左上基準）
-    virtual Rectangle getBBox(const std::string& text) const {
-        return Rectangle(0, 0, getWidth(text), getHeight(text));
+    virtual Rect getBBox(const std::string& text) const {
+        return Rect(0, 0, getWidth(text), getHeight(text));
     }
 
     virtual float getLineHeight() const {

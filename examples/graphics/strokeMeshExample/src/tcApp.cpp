@@ -45,7 +45,7 @@ void tcApp::setup() {
     for (int cap = 0; cap < 3; cap++) {
         StrokeMesh stroke;
 
-        Polyline star;
+        Path star;
         float cy = gridTop + headerHeight + cap * rowHeight + rowHeight / 2;
         float outerR = 60, innerR = 25;
         int points = 5;

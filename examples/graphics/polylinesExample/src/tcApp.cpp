@@ -174,7 +174,7 @@ void tcApp::drawAnimatedCurve() {
     float cy = h / 2.0f;
 
     // アニメーションする花のような形状
-    Polyline flower;
+    Path flower;
     int petals = 6;
     int segments = 60;
 
@@ -194,7 +194,7 @@ void tcApp::drawAnimatedCurve() {
         float scale = 1.0f - i * 0.15f;
         setColorHSB(time + i * 0.1f, 0.8f, 0.9f);
 
-        Polyline scaled;
+        Path scaled;
         for (size_t j = 0; j < flower.size(); j++) {
             float x = cx + (flower[j].x - cx) * scale;
             float y = cy + (flower[j].y - cy) * scale;
@@ -205,7 +205,7 @@ void tcApp::drawAnimatedCurve() {
     }
 
     // リサージュ曲線
-    Polyline lissajous;
+    Path lissajous;
     int a = 3, b = 4;
     for (int i = 0; i <= 100; i++) {
         float t = (float)i / 100 * TAU;

@@ -549,6 +549,11 @@ inline void setColor(const Color& c) {
     getDefaultContext().setColor(c);
 }
 
+// 現在の描画色を取得
+inline Color getColor() {
+    return getDefaultContext().getColor();
+}
+
 // HSB で設定 (H: 0-TAU, S: 0-1, B: 0-1)
 inline void setColorHSB(float h, float s, float b, float a = 1.0f) {
     getDefaultContext().setColorHSB(h, s, b, a);
@@ -909,7 +914,7 @@ inline float getBitmapStringHeight(const std::string& text) {
 }
 
 // ビットマップ文字列のバウンディングボックスを取得
-inline Rectangle getBitmapStringBBox(const std::string& text) {
+inline Rect getBitmapStringBBox(const std::string& text) {
     return getDefaultContext().getBitmapStringBBox(text);
 }
 

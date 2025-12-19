@@ -107,7 +107,7 @@ public:
 
     void setValue(float v) {
         value = (v - minValue) / (maxValue - minValue);
-        value = max(0.0f, min(1.0f, value));
+        value = std::max<float>(0.0f, std::min<float>(1.0f, value));
     }
 
     // 外部からスクロールイベントを受け取る
@@ -115,7 +115,7 @@ public:
         (void)dx;  // 未使用
         float delta = dy * 0.05f;
         float oldValue = value;
-        value = max(0.0f, min(1.0f, value + delta));
+        value = std::max<float>(0.0f, std::min<float>(1.0f, value + delta));
         if (value != oldValue && onValueChanged) {
             onValueChanged(getValue());
         }
@@ -180,7 +180,7 @@ protected:
         // スクロールで値を変更
         float delta = sy * 0.05f;
         float oldValue = value;
-        value = max(0.0f, min(1.0f, value + delta));
+        value = std::max<float>(0.0f, std::min<float>(1.0f, value + delta));
         if (value != oldValue && onValueChanged) {
             onValueChanged(getValue());
         }
@@ -190,7 +190,7 @@ protected:
 private:
     void updateValue(float lx) {
         float oldValue = value;
-        value = max(0.0f, min(1.0f, lx / width));
+        value = std::max<float>(0.0f, std::min<float>(1.0f, lx / width));
         if (value != oldValue && onValueChanged) {
             onValueChanged(getValue());
         }
@@ -216,8 +216,8 @@ public:
     // 外部からスクロールイベントを受け取る
     void handleScroll(float dx, float dy) {
         (void)dx;  // 未使用
-        float maxScroll = max(0.0f, contentHeight - height);
-        scrollY = max(0.0f, min(maxScroll, scrollY - dy * 20));
+        float maxScroll = std::max<float>(0.0f, contentHeight - height);
+        scrollY = std::max<float>(0.0f, std::min<float>(maxScroll, scrollY - dy * 20));
     }
 
     void draw() override {
@@ -261,7 +261,7 @@ public:
         drawRect(0, 0, width, height);
 
         // スクロールバー
-        float maxScroll = max(0.0f, contentHeight - height);
+        float maxScroll = std::max<float>(0.0f, contentHeight - height);
         if (maxScroll > 0) {
             float barHeight = height * (height / contentHeight);
             float barY = (scrollY / maxScroll) * (height - barHeight);
@@ -273,8 +273,8 @@ public:
 
 protected:
     bool onMouseScroll(float lx, float ly, float sx, float sy) override {
-        float maxScroll = max(0.0f, contentHeight - height);
-        scrollY = max(0.0f, min(maxScroll, scrollY - sy * 20));
+        float maxScroll = std::max<float>(0.0f, contentHeight - height);
+        scrollY = std::max<float>(0.0f, std::min<float>(maxScroll, scrollY - sy * 20));
         return RectNode::onMouseScroll(lx, ly, sx, sy);
     }
 };

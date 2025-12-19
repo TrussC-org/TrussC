@@ -80,7 +80,7 @@ void PulseNode::setup() {
 
 void PulseNode::draw() {
     // パルスをゆっくり戻す
-    pulseScale_ = lerp(pulseScale_, 1.0f, 0.1f);
+    pulseScale_ = tc::lerp(pulseScale_, 1.0f, 0.1f);
 
     // パルスする四角形
     float size = 60.0f * pulseScale_;

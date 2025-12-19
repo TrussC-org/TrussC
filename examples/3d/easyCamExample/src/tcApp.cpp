@@ -102,7 +102,8 @@ void tcApp::drawGrid(float size, int divisions) {
     float halfSize = size / 2.0f;
 
     sgl_begin_lines();
-    sgl_c4f(internal::currentR, internal::currentG, internal::currentB, internal::currentA);
+    auto col = getColor();
+    sgl_c4f(col.r, col.g, col.b, col.a);
 
     // X軸に平行な線（Z方向に並ぶ）
     for (int i = 0; i <= divisions; i++) {

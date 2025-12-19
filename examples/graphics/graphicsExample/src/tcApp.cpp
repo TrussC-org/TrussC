@@ -122,7 +122,7 @@ void tcApp::draw() {
     }
     endShape(true);
 
-    // Polyline で波形（メンバ変数、100頂点）
+    // Path で波形（メンバ変数、100頂点）
     noFill();
     stroke();
     setColor(0.2f, 1.0f, 0.6f);

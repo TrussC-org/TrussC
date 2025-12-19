@@ -5,8 +5,6 @@
 // shared_ptr で管理し、root.addChild() で追加すると、
 // root.updateTree() / root.drawTree() で一括処理できる。
 //
-// NOTE: Windows環境ではGDIのPolygon関数と名前が衝突するため、
-//       Polygonはtcx::box2d::Polygonとフルネームで記述する必要がある
 // =============================================================================
 
 #include "tcBaseApp.h"
@@ -33,7 +31,7 @@ public:
     // Body たちを shared_ptr で保持
     std::vector<std::shared_ptr<Circle>> circles;
     std::vector<std::shared_ptr<Rect>> rects;
-    std::vector<std::shared_ptr<tcx::box2d::Polygon>> polygons;
+    std::vector<std::shared_ptr<PolyShape>> polygons;
 
     void setup() override {
         // 物理ワールドを初期化（重力: 下向き300px/sec^2）
@@ -74,7 +72,7 @@ public:
     }
 
     void addPolygon(float x, float y, float radius, int sides) {
-        auto poly = std::make_shared<tcx::box2d::Polygon>();
+        auto poly = std::make_shared<PolyShape>();
         poly->setupRegular(world, x, y, radius, sides);
         poly->setRestitution(0.5f);
 

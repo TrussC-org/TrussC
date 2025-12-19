@@ -14,14 +14,14 @@ namespace tcx::box2d {
 // =============================================================================
 // 凸多角形を表現（Box2Dの制限により凸形状のみ、最大8頂点）
 // =============================================================================
-class Polygon : public Body {
+class PolyShape : public Body {
 public:
-    Polygon() = default;
-    ~Polygon() override = default;
+    PolyShape() = default;
+    ~PolyShape() override = default;
 
     // ムーブ
-    Polygon(Polygon&& other) noexcept;
-    Polygon& operator=(Polygon&& other) noexcept;
+    PolyShape(PolyShape&& other) noexcept;
+    PolyShape& operator=(PolyShape&& other) noexcept;
 
     // ---------------------------------------------------------------------
     // 作成
@@ -33,7 +33,7 @@ public:
     void setup(World& world, const std::vector<tc::Vec2>& vertices, float x, float y);
 
     // Polylineからポリゴンを作成
-    void setup(World& world, const tc::Polyline& polyline, float x, float y);
+    void setup(World& world, const tc::Path& polyline, float x, float y);
 
     // 正多角形を作成
     // sides: 辺の数（3〜8）

@@ -567,8 +567,8 @@ public:
         return bitmapfont::CHAR_TEX_HEIGHT * lines;
     }
 
-    Rectangle getBitmapStringBBox(const std::string& text) const {
-        return Rectangle(0, 0, getBitmapStringWidth(text), getBitmapStringHeight(text));
+    Rect getBitmapStringBBox(const std::string& text) const {
+        return Rect(0, 0, getBitmapStringWidth(text), getBitmapStringHeight(text));
     }
 
 private:

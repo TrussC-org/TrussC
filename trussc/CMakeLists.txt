@@ -93,6 +93,8 @@ if(TC_PLATFORM_MACOS)
     target_compile_options(TrussC PRIVATE -fobjc-arc)
 
 elseif(TC_PLATFORM_WINDOWS)
+    # WIN32_LEAN_AND_MEAN: windows.h の読み込みを軽量化
+    # NOMINMAX: std::min / std::max との衝突を回避
     target_compile_definitions(TrussC PUBLIC
         SOKOL_D3D11
         WIN32_LEAN_AND_MEAN

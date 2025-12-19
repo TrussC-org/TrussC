@@ -125,7 +125,7 @@ void tcApp::draw() {
     // getBBox デモ
     y = 710;
     std::string boxText = "BoundingBox";
-    Rectangle bbox = font.getBBox(boxText);
+    Rect bbox = font.getBBox(boxText);
 
     // 描画位置
     float bx = 100, by = y;
