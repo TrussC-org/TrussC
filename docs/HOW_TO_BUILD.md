@@ -8,6 +8,16 @@
 - Windows: Visual Studio 2022 または MinGW
 - Linux: GCC 10+ または Clang 10+
 
+### VSCode / Cursor 拡張機能
+
+VSCode または Cursor を使う場合、以下の拡張機能をインストール：
+
+| 拡張機能 | 用途 |
+|----------|------|
+| **CMake Tools** | CMake ビルド統合 |
+| **CodeLLDB** | デバッグ実行（macOS/Linux） |
+| **C/C++** | IntelliSense、コード補完 |
+
 ---
 
 ## Project Generator を使う（推奨）
