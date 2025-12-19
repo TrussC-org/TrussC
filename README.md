@@ -18,7 +18,7 @@ openFrameworks に近い API を目指しつつ、モダンな C++ でシンプ�
 `tools/projectGenerator` で GUI からプロジェクトを作成できる。
 VSCode, Cursor, Xcode, Visual Studio に対応。
 
-詳細は [docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) を参照。
+詳細は [docs/GET_STARTED.md](docs/GET_STARTED.md) を参照。
 
 ### コマンドラインでビルド
 
@@ -141,10 +141,8 @@ tc::colors::cornflowerBlue;              // 定義済みカラー
 
 ## 依存関係
 
-- [sokol](https://github.com/floooh/sokol) - クロスプラットフォーム描画
-- [stb](https://github.com/nothings/stb) - 画像読み込み (stb_image)
-
-すべて `include/` 以下に同梱済み。
+sokol, Dear ImGui, stb, miniaudio など、すべて `trussc/include/` 以下に同梱済み。
+詳細は [LICENSE.md](LICENSE.md) を参照。
 
 ## ディレクトリ構成
 
@@ -168,15 +166,17 @@ src/                  # プラットフォーム固有実装
 
 ## ドキュメント
 
-- [HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) - ビルド方法
-- [DESIGN.md](docs/DESIGN.md) - 設計詳細（Loop Architecture, 3D Projection）
-- [PHILOSOPHY.md](docs/PHILOSOPHY.md) - コンセプト・哲学・技術スタック
+- [GET_STARTED.md](docs/GET_STARTED.md) - はじめの一歩
+- [TrussC_vs_openFrameworks.md](docs/TrussC_vs_openFrameworks.md) - oF ユーザー向け API 対応表
+- [HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) - 詳細ビルド方法、アイコン設定、配布
+- [ADDONS.md](docs/ADDONS.md) - アドオンの使い方
+- [DESIGN.md](docs/DESIGN.md) - 設計詳細
+- [PHILOSOPHY.md](docs/PHILOSOPHY.md) - コンセプト・哲学
 - [ROADMAP.md](docs/ROADMAP.md) - 実装ロードマップ
-- [TrussC_vs_openFrameworks.md](docs/TrussC_vs_openFrameworks.md) - oF ユーザー向けガイド・API対応表
 
 ## ライセンス
 
-MIT License
+MIT License - 詳細は [LICENSE.md](LICENSE.md) を参照。
 
 ## 参考
 

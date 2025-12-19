@@ -13,6 +13,20 @@ void tcApp::setup() {
     sphereMesh = createSphere(50, 24);
     coneMesh = createCone(50, 100, 24);
     cylinderMesh = createCylinder(50, 100, 24);
+
+    // ライト設定（ambient強め、軽い陰影）
+    light.setDirectional(Vec3(-0.7f, -1.0f, -0.4f));  // 非対称な角度
+    light.setAmbient(0.65f, 0.65f, 0.7f);
+    light.setDiffuse(0.5f, 0.5f, 0.45f);
+    light.setSpecular(0.5f, 0.5f, 0.5f);
+
+    // マテリアル設定
+    matRed = Material::plastic(Color(0.9f, 0.2f, 0.2f));
+    matOrange = Material::plastic(Color(1.0f, 0.6f, 0.2f));
+    matBlue = Material::plastic(Color(0.2f, 0.4f, 0.9f));
+    matCyan = Material::plastic(Color(0.2f, 0.8f, 0.8f));
+    matYellow = Material::plastic(Color(1.0f, 0.9f, 0.2f));
+    matMagenta = Material::plastic(Color(0.9f, 0.2f, 0.8f));
 }
 
 void tcApp::update() {
@@ -25,47 +39,57 @@ void tcApp::draw() {
     // --- 3D描画（カメラ有効） ---
     cam.begin();
 
+    // ライティング有効化
+    enableLighting();
+    addLight(light);
+    setCameraPosition(cam.getPosition());
+    setColor(1.0f, 1.0f, 1.0f);
+
     // 右: 赤いコーン
     pushMatrix();
     translate(150, 0, 0);
-    setColor(colors::red);
+    setMaterial(matRed);
     coneMesh.draw();
     popMatrix();
 
     // 左: オレンジの球
     pushMatrix();
     translate(-150, 0, 0);
-    setColor(colors::orange);
+    setMaterial(matOrange);
     sphereMesh.draw();
     popMatrix();
 
     // 下: 青いボックス
     pushMatrix();
     translate(0, 150, 0);
-    setColor(colors::blue);
+    setMaterial(matBlue);
     boxMesh.draw();
     popMatrix();
 
     // 上: シアンのシリンダー
     pushMatrix();
     translate(0, -150, 0);
-    setColor(colors::cyan);
+    setMaterial(matCyan);
     cylinderMesh.draw();
     popMatrix();
 
     // 前: 黄色いボックス
     pushMatrix();
     translate(0, 0, 150);
-    setColor(colors::yellow);
+    setMaterial(matYellow);
     boxMesh.draw();
     popMatrix();
 
     // 後: マゼンタのボックス
     pushMatrix();
     translate(0, 0, -150);
-    setColor(colors::magenta);
+    setMaterial(matMagenta);
     boxMesh.draw();
     popMatrix();
+
+    // ライティング終了
+    disableLighting();
+    clearLights();
 
     // グリッドを描画
     setColor(100, 100, 100);

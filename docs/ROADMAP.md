@@ -12,7 +12,7 @@ openFrameworksとの機能比較に基づいた開発ロードマップ。
 - [x] BitmapFont（テクスチャアトラス）
 - [x] TrueTypeFont（stb_truetype ベース）
 - [x] Shape API（beginShape/vertex/endShape）
-- [x] Polyline（頂点配列・曲線生成・ベジェ曲線・円弧）
+- [x] Path（頂点配列・曲線生成・ベジェ曲線・円弧）※旧 Polyline
 - [x] Mesh（頂点・色・インデックス・法線）
 - [x] StrokeMesh（太線描画）
 - [x] Scissor Clipping（再帰対応）

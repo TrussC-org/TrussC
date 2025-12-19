@@ -522,6 +522,25 @@ void tcApp::generateVSCodeFiles(const string& path) {
     settings["cmake.buildDirectory"] = "${workspaceFolder}/build";
     settings["cmake.sourceDirectory"] = "${workspaceFolder}";
     saveJson(settings, vscodePath + "/settings.json");
+
+    // tasks.json
+    Json tasks;
+    tasks["version"] = "2.0.0";
+
+    Json task;
+    task["label"] = "CMake: build";
+    task["type"] = "cmake";
+    task["command"] = "build";
+    task["problemMatcher"] = Json::array();
+
+    Json group;
+    group["kind"] = "build";
+    group["isDefault"] = true;
+    task["group"] = group;
+
+    tasks["tasks"] = Json::array();
+    tasks["tasks"].push_back(task);
+    saveJson(tasks, vscodePath + "/tasks.json");
 }
 
 void tcApp::generateXcodeProject(const string& path) {

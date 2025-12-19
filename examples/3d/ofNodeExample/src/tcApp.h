@@ -39,7 +39,7 @@ public:
 
         // タイトル（四角形の上部に表示）
         setColor(1.0f, 1.0f, 1.0f, 0.8f);
-        drawBitmapString("Local Coord System", -size/2, -size/2 - 12);
+        drawBitmapString("Local Coord System", -size/2, -size/2 - 12, false);
     }
 };
 

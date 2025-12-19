@@ -31,5 +31,9 @@ private:
     Mesh coneMesh;
     Mesh cylinderMesh;
 
+    // ライティング
+    Light light;
+    Material matRed, matOrange, matBlue, matCyan, matYellow, matMagenta;
+
     void drawGrid(float size, int divisions);
 };

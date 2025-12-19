@@ -156,12 +156,12 @@ stroke.moveTo(0, 0);
 stroke.lineTo(100, 100);
 stroke.draw();
 
-// Polyline からも生成可能
-tc::Polyline line;
-line.addVertex(0, 0);
-line.addVertex(100, 50);
-line.addVertex(200, 0);
-tc::StrokeMesh stroke2(line, 3.0f);  // 3px
+// Path からも生成可能
+tc::Path path;
+path.addVertex(0, 0);
+path.addVertex(100, 50);
+path.addVertex(200, 0);
+tc::StrokeMesh stroke2(path, 3.0f);  // 3px
 stroke2.draw();
 ```
 
@@ -304,7 +304,7 @@ oF ユーザーが TrussC で同等の機能を探す際のリファレンスで
 | `ofFill()` | `tc::fill()` | graphicsExample | |
 | `ofSetLineWidth(w)` | `tc::setLineWidth(w)` | graphicsExample | |
 | `ofDrawBitmapString(s, x, y)` | `tc::drawBitmapString(s, x, y)` | graphicsExample | |
-| `ofPolyline` | `tc::Polyline` | polylinesExample | |
+| `ofPolyline` | `tc::Path` | polylinesExample | 旧 Polyline |
 | - | `tc::StrokeMesh` | strokeMeshExample | 太線描画 |
 | `ofEnableBlendMode()` | `tc::setBlendMode()` | blendingExample | |
 | `ofScissor()` | `tc::setScissor()` | clippingExample | |

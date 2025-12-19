@@ -98,11 +98,13 @@ cmake --build .
 
 ## 関連ドキュメント
 
-- [docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) - ビルド方法
+- [docs/GET_STARTED.md](docs/GET_STARTED.md) - はじめの一歩（最初に読むならここ）
+- [docs/TrussC_vs_openFrameworks.md](docs/TrussC_vs_openFrameworks.md) - oF ユーザー向け API 対応表
+- [docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) - 詳細ビルド方法、アイコン設定、配布
+- [docs/ADDONS.md](docs/ADDONS.md) - アドオンの使い方
 - [docs/DESIGN.md](docs/DESIGN.md) - 設計詳細（Loop Architecture, 3D Projection等）
 - [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) - コンセプト・哲学・技術スタック
 - [docs/ROADMAP.md](docs/ROADMAP.md) - 実装ロードマップ
-- [docs/TrussC_vs_openFrameworks.md](docs/TrussC_vs_openFrameworks.md) - oF ユーザー向けガイド
 
 ## 参考
 
