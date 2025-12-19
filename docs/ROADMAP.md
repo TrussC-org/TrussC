@@ -112,13 +112,25 @@ TrussC はいくつかの外部ライブラリに依存している。
 | **stb_truetype** | フォント描画 | 中 | |
 | pugixml | XML パース | 中 | |
 | nlohmann/json | JSON パース | 中 | |
-| sokol | 描画バックエンド | 中 | API変更に注意 |
+| sokol | 描画バックエンド | 中 | API変更に注意、**TrussC カスタマイズあり（下記参照）** |
 | miniaudio | オーディオ | 中 | |
 | Dear ImGui | GUI | 低 | 安定版を使用 |
 
 **更新時の確認事項:**
 - GitHub の Release Notes / Security Advisories を確認
 - stb は https://github.com/nothings/stb のコミット履歴を直接確認（タグがないため）
+
+**sokol 更新時の注意（TrussC カスタマイズ）:**
+
+`sokol_app.h` にはイベント駆動描画のちらつき防止のため、以下のカスタマイズが施されている。
+sokol を更新する際は、これらの変更を再適用する必要がある。
+
+1. `_sapp_t` 構造体に `bool skip_present;` フラグを追加
+2. API宣言 `SOKOL_APP_API_DECL void sapp_skip_present(void);` を追加
+3. `_sapp_d3d11_present()` の先頭にスキップチェックを追加
+4. `sapp_skip_present()` の実装を追加
+
+詳細は git diff で確認: `git log --oneline -p -- trussc/include/sokol/sokol_app.h`
 
 ---
 
@@ -135,7 +147,7 @@ TrussC はいくつかの外部ライブラリに依存している。
 
 | 問題 | 説明 | 解決策案 |
 |------|------|----------|
-| イベントベース描画時のちらつき | redraw() 等で1フレームだけ更新すると、ダブルバッファの影響で直前の状態と交互に表示され点滅する | 2フレーム連続で描画するか、フロントバッファ/バックバッファの同期を検討 |
+| ~~イベントベース描画時のちらつき~~ | ~~redraw() 等で1フレームだけ更新すると、ダブルバッファの影響で直前の状態と交互に表示され点滅する~~ | ✅ 解決済み: sokol_app に `sapp_skip_present()` を追加し、描画スキップ時は Present もスキップ |
 
 ---
 
