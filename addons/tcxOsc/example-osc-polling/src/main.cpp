@@ -3,7 +3,7 @@
 
 int main() {
     WindowSettings settings;
-    settings.title = "OSC Example";
+    settings.title = "OSC Example (Polling)";
     settings.width = 700;
     settings.height = 500;
     settings.highDpi = false;

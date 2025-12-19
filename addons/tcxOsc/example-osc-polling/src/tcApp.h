@@ -37,8 +37,8 @@ private:
     deque<string> receiveLogs_;
     static constexpr size_t MAX_LOG_LINES = 20;
 
-    // ポート設定
-    int port_ = 9000;
+    // ポート設定（event版は9000、polling版は9001）
+    int port_ = 9001;
 
     // バンドル用
     OscBundle pendingBundle_;
