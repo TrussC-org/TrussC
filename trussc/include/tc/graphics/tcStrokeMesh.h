@@ -40,10 +40,10 @@ public:
         bClosed_ = false;
         bDirty_ = true;
 
-        polylines_.push_back(Polyline());
+        polylines_.push_back(Path());
     }
 
-    StrokeMesh(const Polyline& polyline) : StrokeMesh() {
+    StrokeMesh(const Path& polyline) : StrokeMesh() {
         setShape(polyline);
     }
 
@@ -87,7 +87,7 @@ public:
 
     void addVertex(const Vec3& p) {
         if (polylines_.empty()) {
-            polylines_.push_back(Polyline());
+            polylines_.push_back(Path());
         }
         polylines_[0].addVertex(p);
         bDirty_ = true;
@@ -104,7 +104,7 @@ public:
 
     void addVertexWithWidth(const Vec3& p, float width) {
         if (polylines_.empty()) {
-            polylines_.push_back(Polyline());
+            polylines_.push_back(Path());
         }
         polylines_[0].addVertex(p);
         widths_.push_back(width);
@@ -118,7 +118,7 @@ public:
     }
 
     // 既存の形状をセットして上書きする
-    void setShape(const Polyline& polyline) {
+    void setShape(const Path& polyline) {
         polylines_.clear();
         polylines_.push_back(polyline);
         widths_.clear();
@@ -135,7 +135,7 @@ public:
     // クリア
     void clear() {
         polylines_.clear();
-        polylines_.push_back(Polyline());
+        polylines_.push_back(Path());
         widths_.clear();
         mesh_.clear();
         bDirty_ = true;
@@ -196,12 +196,12 @@ public:
         return mesh_;
     }
 
-    std::vector<Polyline>& getPolylines() {
+    std::vector<Path>& getPolylines() {
         return polylines_;
     }
 
 private:
-    std::vector<Polyline> polylines_;
+    std::vector<Path> polylines_;
     std::vector<float> widths_;
     Mesh mesh_;
 
@@ -250,7 +250,7 @@ private:
     }
 
     // メインのストローク生成ロジック
-    void appendStrokeToMesh(const Polyline& pl, Mesh& targetMesh, const std::vector<float>& vertWidths) {
+    void appendStrokeToMesh(const Path& pl, Mesh& targetMesh, const std::vector<float>& vertWidths) {
         const auto& verts = pl.getVertices();
         int numVerts = pl.size();
         if (numVerts < 2) return;

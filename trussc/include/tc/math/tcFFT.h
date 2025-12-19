@@ -37,7 +37,7 @@ constexpr float FFT_PI = 3.14159265358979323846f;
 // 窓関数の種類
 // ---------------------------------------------------------------------------
 enum class WindowType {
-    Rectangle,  // 矩形窓（窓なし）
+    Rect,  // 矩形窓（窓なし）
     Hanning,    // ハニング窓
     Hamming,    // ハミング窓
     Blackman    // ブラックマン窓
@@ -51,7 +51,7 @@ enum class WindowType {
 inline float windowFunction(WindowType type, int i, int n) {
     float t = (float)i / (n - 1);
     switch (type) {
-        case WindowType::Rectangle:
+        case WindowType::Rect:
             return 1.0f;
         case WindowType::Hanning:
             return 0.5f * (1.0f - std::cos(2.0f * FFT_PI * t));

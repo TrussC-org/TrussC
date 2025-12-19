@@ -84,7 +84,7 @@ void tcApp::draw() {
     float colWidth = availWidth / 3;
     float rowHeight = availHeight / 2;
 
-    float imgSize = min(colWidth - 20, rowHeight - 30);
+    float imgSize = std::min<float>(colWidth - 20, rowHeight - 30);
 
     // --- 上段: Filter 比較（スライム）---
     float row1Y = headerHeight + (rowHeight - imgSize) / 2;
@@ -165,10 +165,10 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
     if (key == SAPP_KEYCODE_UP) {
-        scale_ = min(scale_ * 2.0f, 32.0f);
+        scale_ = std::min<float>(scale_ * 2.0f, 32.0f);
         cout << "Scale: " << scale_ << "x" << endl;
     } else if (key == SAPP_KEYCODE_DOWN) {
-        scale_ = max(scale_ / 2.0f, 2.0f);
+        scale_ = std::max<float>(scale_ / 2.0f, 2.0f);
         cout << "Scale: " << scale_ << "x" << endl;
     } else if (key == '1') {
         scale_ = 4.0f;

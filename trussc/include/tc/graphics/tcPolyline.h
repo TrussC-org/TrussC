@@ -2,25 +2,30 @@
 
 // このファイルは TrussC.h からインクルードされる
 
+// Windows GDI の Path マクロを無効化
+#ifdef _WIN32
+#undef Path
+#endif
+
 #include <vector>
 #include <cmath>
 #include <deque>
 
 namespace trussc {
 
-// Polyline - 頂点配列を持つクラス（曲線生成機能付き）
-class Polyline {
+// Path - 頂点配列を持つクラス（曲線生成機能付き）
+class Path {
 public:
-    Polyline() : closed_(false) {}
+    Path() : closed_(false) {}
 
     // コンストラクタ（頂点リストから）
-    Polyline(const std::vector<Vec2>& verts) : closed_(false) {
+    Path(const std::vector<Vec2>& verts) : closed_(false) {
         for (const auto& v : verts) {
             vertices_.push_back(Vec3{v.x, v.y, 0.0f});
         }
     }
 
-    Polyline(const std::vector<Vec3>& verts) : vertices_(verts), closed_(false) {}
+    Path(const std::vector<Vec3>& verts) : vertices_(verts), closed_(false) {}
 
     // 頂点を追加
     void addVertex(float x, float y) {

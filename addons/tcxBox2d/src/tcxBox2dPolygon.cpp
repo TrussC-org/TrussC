@@ -7,13 +7,13 @@
 
 namespace tcx::box2d {
 
-Polygon::Polygon(Polygon&& other) noexcept
+PolyShape::PolyShape(PolyShape&& other) noexcept
     : Body(std::move(other))
     , vertices_(std::move(other.vertices_))
 {
 }
 
-Polygon& Polygon::operator=(Polygon&& other) noexcept {
+PolyShape& PolyShape::operator=(PolyShape&& other) noexcept {
     if (this != &other) {
         Body::operator=(std::move(other));
         vertices_ = std::move(other.vertices_);
@@ -21,7 +21,7 @@ Polygon& Polygon::operator=(Polygon&& other) noexcept {
     return *this;
 }
 
-void Polygon::setup(World& world, const std::vector<tc::Vec2>& vertices, float cx, float cy) {
+void PolyShape::setup(World& world, const std::vector<tc::Vec2>& vertices, float cx, float cy) {
     if (vertices.size() < 3 || vertices.size() > 8) {
         // Box2Dは3〜8頂点のみサポート
         return;
@@ -64,7 +64,7 @@ void Polygon::setup(World& world, const std::vector<tc::Vec2>& vertices, float c
     y = cy;
 }
 
-void Polygon::setup(World& world, const tc::Polyline& polyline, float cx, float cy) {
+void PolyShape::setup(World& world, const tc::Path& polyline, float cx, float cy) {
     std::vector<tc::Vec2> vertices;
     for (int i = 0; i < polyline.size(); ++i) {
         vertices.push_back(tc::Vec2(polyline[i].x, polyline[i].y));
@@ -72,7 +72,7 @@ void Polygon::setup(World& world, const tc::Polyline& polyline, float cx, float 
     setup(world, vertices, cx, cy);
 }
 
-void Polygon::setupRegular(World& world, float cx, float cy, float radius, int sides) {
+void PolyShape::setupRegular(World& world, float cx, float cy, float radius, int sides) {
     if (sides < 3) sides = 3;
     if (sides > 8) sides = 8;
 
@@ -91,7 +91,7 @@ void Polygon::setupRegular(World& world, float cx, float cy, float radius, int s
 }
 
 // Node用: 原点(0,0)に描画（drawTree()が変換を適用する）
-void Polygon::draw() {
+void PolyShape::draw() {
     if (!body_ || vertices_.empty()) return;
 
     // ポリゴンを線で描画（原点中心）
@@ -102,7 +102,7 @@ void Polygon::draw() {
     }
 }
 
-void Polygon::drawFill() {
+void PolyShape::drawFill() {
     if (!body_ || vertices_.empty()) return;
 
     // 三角形ファンで塗りつぶし（原点中心）
@@ -122,7 +122,7 @@ void Polygon::drawFill() {
     mesh.draw();
 }
 
-void Polygon::draw(const tc::Color& color) {
+void PolyShape::draw(const tc::Color& color) {
     tc::setColor(color);
     draw();
 }

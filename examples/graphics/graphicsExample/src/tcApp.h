@@ -21,5 +21,5 @@ public:
     void mouseDragged(int x, int y, int button) override;
 
 private:
-    Polyline wave;  // テスト用
+    Path wave;  // テスト用
 };
