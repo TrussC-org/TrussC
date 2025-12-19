@@ -70,6 +70,16 @@ inline void stringReplace(std::string& input, const std::string& searchStr, cons
         pos += nextpos;
     }
 }
+// localtime のプラットフォーム分岐（Windows: localtime_s, その他: localtime）
+inline std::tm safeLocaltime(const std::time_t* t) {
+    std::tm result = {};
+#ifdef _WIN32
+    localtime_s(&result, t);
+#else
+    result = *std::localtime(t);
+#endif
+    return result;
+}
 
 } // namespace internal
 
@@ -142,7 +152,7 @@ inline std::string getTimestampString(const std::string& timestampFormat) {
     auto t = std::chrono::system_clock::to_time_t(now);
     std::chrono::duration<double> s = now - std::chrono::system_clock::from_time_t(t);
     int ms = static_cast<int>(s.count() * 1000);
-    auto tm = *std::localtime(&t);
+    auto tm = internal::safeLocaltime(&t);
     constexpr int bufsize = 256;
     char buf[bufsize];
 
@@ -171,7 +181,7 @@ inline std::string getTimestampString() {
 inline int getSeconds() {
     time_t curr;
     time(&curr);
-    tm local = *localtime(&curr);
+    tm local = internal::safeLocaltime(&curr);
     return local.tm_sec;
 }
 
@@ -179,7 +189,7 @@ inline int getSeconds() {
 inline int getMinutes() {
     time_t curr;
     time(&curr);
-    tm local = *localtime(&curr);
+    tm local = internal::safeLocaltime(&curr);
     return local.tm_min;
 }
 
@@ -187,7 +197,7 @@ inline int getMinutes() {
 inline int getHours() {
     time_t curr;
     time(&curr);
-    tm local = *localtime(&curr);
+    tm local = internal::safeLocaltime(&curr);
     return local.tm_hour;
 }
 
@@ -199,7 +209,7 @@ inline int getHours() {
 inline int getYear() {
     time_t curr;
     time(&curr);
-    tm local = *localtime(&curr);
+    tm local = internal::safeLocaltime(&curr);
     return local.tm_year + 1900;
 }
 
@@ -207,7 +217,7 @@ inline int getYear() {
 inline int getMonth() {
     time_t curr;
     time(&curr);
-    tm local = *localtime(&curr);
+    tm local = internal::safeLocaltime(&curr);
     return local.tm_mon + 1;
 }
 
@@ -215,7 +225,7 @@ inline int getMonth() {
 inline int getDay() {
     time_t curr;
     time(&curr);
-    tm local = *localtime(&curr);
+    tm local = internal::safeLocaltime(&curr);
     return local.tm_mday;
 }
 
@@ -223,7 +233,7 @@ inline int getDay() {
 inline int getWeekday() {
     time_t curr;
     time(&curr);
-    tm local = *localtime(&curr);
+    tm local = internal::safeLocaltime(&curr);
     return local.tm_wday;
 }
 
