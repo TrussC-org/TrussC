@@ -123,7 +123,8 @@ elseif(TC_PLATFORM_WINDOWS)
         ole32
     )
     # MSVC: ソースファイルをUTF-8として扱う
-    target_compile_options(TrussC PUBLIC /utf-8)
+    # /wd4244, /wd4267: int/float, size_t/int 変換警告を無効化
+    target_compile_options(TrussC PUBLIC /utf-8 /wd4244 /wd4267)
 
 elseif(TC_PLATFORM_LINUX)
     target_compile_definitions(TrussC PUBLIC SOKOL_GLCORE)

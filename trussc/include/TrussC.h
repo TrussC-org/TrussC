@@ -5,6 +5,12 @@
 // Version 0.0.1
 // =============================================================================
 
+// Windows: コンソールウィンドウを非表示（Release ビルド時）
+// TRUSSC_SHOW_CONSOLE を定義すると常にコンソールを表示
+#if defined(_WIN32) && !defined(_DEBUG) && !defined(TRUSSC_SHOW_CONSOLE)
+#pragma comment(linker, "/subsystem:\"windows\" /entry:\"mainCRTStartup\"")
+#endif
+
 // sokol ヘッダー
 #include "sokol/sokol_log.h"
 #define SOKOL_NO_ENTRY  // main() を自分で定義するため

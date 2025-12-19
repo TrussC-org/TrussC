@@ -160,7 +160,7 @@ FileDialogResult saveDialog(
     // 初期ファイル名を設定
     if (!defaultName.empty()) {
         std::wstring nameW = toWide(defaultName);
-        wcsncpy(szFileName, nameW.c_str(), MAX_PATH - 1);
+        wcsncpy_s(szFileName, MAX_PATH, nameW.c_str(), _TRUNCATE);
     }
 
     ofn.lStructSize = sizeof(ofn);

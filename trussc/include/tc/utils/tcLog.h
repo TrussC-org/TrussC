@@ -59,7 +59,13 @@ struct LogEventArgs {
             now.time_since_epoch()) % 1000;
 
         std::ostringstream oss;
+#ifdef _WIN32
+        std::tm tm_buf;
+        localtime_s(&tm_buf, &time);
+        oss << std::put_time(&tm_buf, "%H:%M:%S")
+#else
         oss << std::put_time(std::localtime(&time), "%H:%M:%S")
+#endif
             << '.' << std::setfill('0') << std::setw(3) << ms.count();
         timestamp = oss.str();
     }
