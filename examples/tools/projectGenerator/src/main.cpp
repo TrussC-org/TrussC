@@ -6,6 +6,5 @@ int main() {
     settings.title = "TrussC Project Generator";
     settings.width = 500;
     settings.height = 520;
-    settings.highDpi = false;
     return runApp<tcApp>(settings);
 }

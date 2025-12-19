@@ -44,13 +44,15 @@ macro(trussc_app)
     # TrussC を追加
     add_subdirectory(${TRUSSC_DIR} ${CMAKE_BINARY_DIR}/TrussC)
 
-    # ソースファイル（指定がなければ src/ から自動収集）
+    # ソースファイル（指定がなければ src/ から再帰的に自動収集）
     if(_TC_APP_SOURCES)
         set(_TC_SOURCES ${_TC_APP_SOURCES})
     else()
-        file(GLOB _TC_SOURCES
+        file(GLOB_RECURSE _TC_SOURCES
             "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/*.mm"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/*.m"
         )
@@ -76,6 +78,9 @@ macro(trussc_app)
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
             RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/bin"
             RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/bin"
+            # Xcode: スキームを生成してデフォルトターゲットにする
+            XCODE_GENERATE_SCHEME TRUE
+            XCODE_SCHEME_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         )
         trussc_setup_icon(${PROJECT_NAME})
     else()
