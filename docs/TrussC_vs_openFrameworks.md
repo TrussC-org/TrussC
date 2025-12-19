@@ -280,6 +280,11 @@ oF ユーザーが TrussC で同等の機能を探す際のリファレンスで
 | - | `tc::setUpdateFps(fps)` | loopModeExample | 更新レート個別設定 |
 | `ofGetElapsedTimef()` | `tc::getElapsedTime()` | graphicsExample | |
 | `ofGetFrameRate()` | `tc::getFrameRate()` | loopModeExample | |
+| `ofGetFrameNum()` | `tc::getFrameCount()` | utilsExample | update カウント |
+| - | `tc::getUpdateCount()` | utilsExample | update 呼び出し回数 |
+| - | `tc::getDrawCount()` | utilsExample | 描画フレーム回数 |
+| `exit()` | `exit()` | - | 終了時ハンドラ |
+| `OF_EXIT_APP()` | `tc::exitApp()` | - | アプリ終了リクエスト |
 | `ofGetWidth()` | `tc::getWindowWidth()` | vectorMathExample | |
 | `ofGetHeight()` | `tc::getWindowHeight()` | vectorMathExample | |
 
@@ -528,6 +533,50 @@ oF ユーザーが TrussC で同等の機能を探す際のリファレンスで
 |:---|:---|:---|:---|
 | - | `node->callAfter(sec, func)` | timerExample | 遅延実行 |
 | - | `node->callEvery(sec, func)` | timerExample | 繰り返し実行 |
+
+### **時間ユーティリティ**
+
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofGetElapsedTimef()` | `tc::getElapsedTimef()` | utilsExample | 経過時間（秒） |
+| `ofGetElapsedTimeMillis()` | `tc::getElapsedTimeMillis()` | utilsExample | 経過時間（ミリ秒） |
+| `ofGetElapsedTimeMicros()` | `tc::getElapsedTimeMicros()` | utilsExample | 経過時間（マイクロ秒） |
+| `ofResetElapsedTimeCounter()` | `tc::resetElapsedTimeCounter()` | utilsExample | |
+| `ofGetTimestampString()` | `tc::getTimestampString()` | utilsExample | |
+| `ofGetTimestampString(fmt)` | `tc::getTimestampString(fmt)` | utilsExample | %i でミリ秒 |
+| `ofSleepMillis(ms)` | `tc::sleepMillis(ms)` | - | |
+| - | `tc::sleepMicros(us)` | - | マイクロ秒スリープ |
+| `ofGetSeconds()` | `tc::getSeconds()` | utilsExample | |
+| `ofGetMinutes()` | `tc::getMinutes()` | utilsExample | |
+| `ofGetHours()` | `tc::getHours()` | utilsExample | |
+| `ofGetYear()` | `tc::getYear()` | utilsExample | |
+| `ofGetMonth()` | `tc::getMonth()` | utilsExample | |
+| `ofGetDay()` | `tc::getDay()` | utilsExample | |
+| `ofGetWeekday()` | `tc::getWeekday()` | utilsExample | |
+
+### **文字列ユーティリティ**
+
+| openFrameworks | TrussC | Example | 備考 |
+|:---|:---|:---|:---|
+| `ofToString(val)` | `tc::toString(val)` | utilsExample | |
+| `ofToString(val, precision)` | `tc::toString(val, precision)` | utilsExample | 小数点精度 |
+| `ofToString(val, width, fill)` | `tc::toString(val, width, fill)` | utilsExample | ゼロパディング等 |
+| `ofToInt(str)` | `tc::toInt(str)` | utilsExample | |
+| `ofToFloat(str)` | `tc::toFloat(str)` | utilsExample | |
+| `ofToBool(str)` | `tc::toBool(str)` | utilsExample | |
+| `ofToHex(val)` | `tc::toHex(val)` | utilsExample | |
+| `ofToBinary(val)` | `tc::toBinary(val)` | utilsExample | |
+| `ofHexToInt(str)` | `tc::hexToInt(str)` | utilsExample | |
+| `ofIsStringInString(s, sub)` | `tc::isStringInString(s, sub)` | utilsExample | |
+| `ofStringTimesInString(s, sub)` | `tc::stringTimesInString(s, sub)` | utilsExample | |
+| `ofSplitString(s, delim)` | `tc::splitString(s, delim)` | utilsExample | |
+| `ofJoinString(strs, delim)` | `tc::joinString(strs, delim)` | utilsExample | |
+| `ofStringReplace(s, from, to)` | `tc::stringReplace(s, from, to)` | utilsExample | 破壊的 |
+| `ofTrim(s)` | `tc::trim(s)` | utilsExample | |
+| `ofTrimFront(s)` | `tc::trimFront(s)` | utilsExample | |
+| `ofTrimBack(s)` | `tc::trimBack(s)` | utilsExample | |
+| `ofToLower(s)` | `tc::toLower(s)` | utilsExample | |
+| `ofToUpper(s)` | `tc::toUpper(s)` | utilsExample | |
 
 ### **アドオン**
 

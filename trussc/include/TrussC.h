@@ -1206,6 +1206,12 @@ inline void redraw() {
     internal::needsRedraw = true;
 }
 
+// アプリケーション終了をリクエスト
+// exit() → cleanup() → デストラクタ の順で呼ばれる
+inline void exitApp() {
+    sapp_request_quit();
+}
+
 // ---------------------------------------------------------------------------
 // スクリーンショット
 // ---------------------------------------------------------------------------
@@ -1628,8 +1634,9 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     };
     internal::appCleanupFunc = []() {
         if (app) {
+            app->exit();    // 終了ハンドラ（全オブジェクト生存中）
             app->cleanup();
-            delete app;
+            delete app;     // デストラクタ
             app = nullptr;
         }
     };

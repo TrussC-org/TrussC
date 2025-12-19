@@ -23,7 +23,8 @@ public:
     void setup() override;      // 初期化（1回だけ呼ばれる）
     void update() override;     // 毎フレーム更新
     void draw() override;       // 毎フレーム描画
-    void cleanup() override;    // 終了時
+    void exit() override;       // 終了時（cleanup の前、全オブジェクト生存中）
+    void cleanup() override;    // 終了時クリーンアップ
 
     // マウスイベント
     void mousePressed(int x, int y, int button) override;
@@ -343,11 +344,45 @@ KEY_F1 ~ KEY_F12
 ## 時間・フレーム
 
 ```cpp
-getElapsedTime();         // 起動からの経過時間（秒）
+// 経過時間
+getElapsedTime();         // 起動からの経過時間（秒、float）
+getElapsedTimef();        // 同上
+getElapsedTimeMillis();   // 経過時間（ミリ秒）
+getElapsedTimeMicros();   // 経過時間（マイクロ秒）
+resetElapsedTimeCounter(); // 経過時間カウンターをリセット
 getDeltaTime();           // 前フレームからの経過時間
-getFrameNum();            // フレーム番号
+
+// フレームカウント
+getFrameCount();          // update 呼び出し回数（= getUpdateCount）
+getUpdateCount();         // update 呼び出し回数
+getDrawCount();           // 描画フレーム回数
 getFrameRate();           // 現在のFPS
-setFrameRate(fps);        // 目標FPS設定
+
+// FPS 設定
+setFps(fps);              // 目標FPS設定（Update + Draw 同期）
+setDrawFps(fps);          // 描画レート個別設定
+setUpdateFps(fps);        // 更新レート個別設定（Decoupled モード）
+setVsync(true);           // VSync モード
+
+// タイムスタンプ
+getTimestampString();     // "2024-01-15-18-29-35-299"
+getTimestampString("%Y/%m/%d %H:%M:%S");  // フォーマット指定（%i でミリ秒）
+
+// 現在時刻
+getSeconds();             // 0-59
+getMinutes();             // 0-59
+getHours();               // 0-23
+getYear();                // 例: 2024
+getMonth();               // 1-12
+getDay();                 // 1-31
+getWeekday();             // 0=日曜, 1=月曜, ... 6=土曜
+
+// スリープ
+sleepMillis(ms);          // ミリ秒スリープ
+sleepMicros(us);          // マイクロ秒スリープ
+
+// アプリ終了
+exitApp();                // 終了リクエスト → exit() → cleanup() → デストラクタ
 ```
 
 ---
@@ -690,6 +725,7 @@ setDataPathToResources();
 string s = toString(42);
 string s = toString(3.14159, 2);         // "3.14"（小数点2桁）
 string s = toString(42, 5, '0');         // "00042"（5桁ゼロ埋め）
+string s = toString(3.14, 2, 6, '0');    // "003.14"（精度+幅+フィル）
 
 // 16進数
 string s = toHex(255);                   // "FF"
@@ -697,13 +733,41 @@ string s = toHex(255, 4);                // "00FF"
 
 // 2進数
 string s = toBinary(255);                // "00000000...11111111"
+string s = toBinary((char)65);           // "01000001" (= 'A')
 
 // 文字列 → 数値
 int i = toInt("42");
 float f = toFloat("3.14");
 double d = toDouble("3.14159");
-bool b = toBool("true");
-int i = hexToInt("FF");
+bool b = toBool("true");                 // "true", "1", "yes" → true
+int i = hexToInt("FF");                  // 255
+unsigned int u = hexToUInt("FFFFFFFF");
+```
+
+### 文字列操作
+
+```cpp
+// 検索
+bool found = isStringInString("hello world", "world");  // true
+size_t count = stringTimesInString("abcabc", "abc");    // 2
+
+// 分割・結合
+vector<string> parts = splitString("a,b,c", ",");       // {"a", "b", "c"}
+vector<string> parts = splitString("a, b, c", ",", true, true);  // ignoreEmpty, trim
+string joined = joinString(parts, "-");                 // "a-b-c"
+
+// 置換（破壊的）
+string s = "hello world";
+stringReplace(s, "world", "TrussC");                    // "hello TrussC"
+
+// トリム
+string s = trim("  hello  ");                           // "hello"
+string s = trimFront("  hello");                        // "hello"
+string s = trimBack("hello  ");                         // "hello"
+
+// 大文字・小文字
+string s = toLower("HELLO");                            // "hello"
+string s = toUpper("hello");                            // "HELLO"
 ```
 
 ### JSON
