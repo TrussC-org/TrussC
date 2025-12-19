@@ -44,6 +44,12 @@ endif()
 # =============================================================================
 # ライブラリ定義 (STATIC)
 # =============================================================================
+# 全てのヘッダーファイル（IDE でディレクトリ構造を表示するため）
+file(GLOB_RECURSE TC_HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp
+)
+
 # 共通ソースファイル（プラットフォーム非依存）
 file(GLOB TC_IMPL_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/impl/*.cpp)
 file(GLOB TC_NETWORK_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/network/*.cpp)
@@ -60,12 +66,19 @@ else()
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
 endif()
 
-add_library(TrussC STATIC
+# 全ソースをまとめる
+set(TC_ALL_SOURCES
+    ${TC_HEADERS}
     ${TC_IMPL_SOURCES}
     ${TC_NETWORK_SOURCES}
     ${TC_SOUND_SOURCES}
     ${TC_PLATFORM_SOURCES}
 )
+
+# Xcode / Visual Studio でディレクトリ構造を維持
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${TC_ALL_SOURCES})
+
+add_library(TrussC STATIC ${TC_ALL_SOURCES})
 
 add_library(tc::TrussC ALIAS TrussC)
 

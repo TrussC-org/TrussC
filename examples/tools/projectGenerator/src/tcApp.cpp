@@ -302,14 +302,27 @@ void tcApp::draw() {
 }
 
 void tcApp::cleanup() {
+    // 終了時に現在の状態を保存
+    projectName = projectNameBuf;
+    projectDir = projectDirBuf;
+    tcLog() << "cleanup: saving projectName=" << projectName << ", projectDir=" << projectDir;
+    saveConfig();
+
     imguiShutdown();
 }
 
 void tcApp::loadConfig() {
-    if (!fs::exists(configPath)) return;
+    tcLog() << "loadConfig: configPath = " << configPath;
+    if (!fs::exists(configPath)) {
+        tcLog() << "loadConfig: config file not found";
+        return;
+    }
 
     Json config = loadJson(configPath);
-    if (config.empty()) return;
+    if (config.empty()) {
+        tcLog() << "loadConfig: config is empty";
+        return;
+    }
 
     if (config.contains("tc_root")) {
         tcRoot = config["tc_root"].get<string>();
@@ -324,6 +337,7 @@ void tcApp::loadConfig() {
     if (config.contains("ide_type")) {
         ideType = static_cast<IdeType>(config["ide_type"].get<int>());
     }
+    tcLog() << "loadConfig: projectDir = " << projectDir << ", projectName = " << projectName;
 }
 
 void tcApp::saveConfig() {
@@ -861,8 +875,7 @@ bool tcApp::updateProject() {
 void tcApp::resetToNewProject() {
     isImportedProject = false;
     importedProjectPath = "";
-    projectName = "myProject";
-    strncpy(projectNameBuf, projectName.c_str(), sizeof(projectNameBuf) - 1);
+    // projectName は前回の値を維持（リセットしない）
 
     // アドオン選択をリセット
     for (size_t i = 0; i < addonSelected.size(); i++) {
