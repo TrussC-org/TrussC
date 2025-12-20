@@ -202,20 +202,20 @@ List of samples/features requiring focused testing due to OS-specific code.
 
 | Sample | Check Points | Status |
 |--------|--------------|--------|
-| network/tcpExample | Winsock connection, disconnection, error handling | ⬜ Untested |
-| network/udpExample | Winsock, broadcast, multicast | ⬜ Untested |
-| input_output/screenshotExample | Win32 GDI+ capture (`tcPlatform_win.cpp`) | ⬜ Untested |
-| input_output/fileDialogExample | Win32 IFileDialog (`tcFileDialog_win.cpp`) | ⬜ Untested |
-| video/videoGrabberExample | Media Foundation API (`tcVideoGrabber_win.cpp`) | ⬜ Untested |
+| network/tcpExample | Winsock connection, disconnection, error handling | ✅ Verified |
+| network/udpExample | Winsock, broadcast, multicast | ✅ Verified |
+| input_output/screenshotExample | D3D11 texture capture (`tcPlatform_win.cpp`) | ✅ Verified (MSAA fix applied) |
+| input_output/fileDialogExample | Win32 IFileDialog (`tcFileDialog_win.cpp`) | ✅ Verified |
+| video/videoGrabberExample | Media Foundation API (`tcVideoGrabber_win.cpp`) | ⬜ Untested (no camera available) |
 
 **🟡 Needs Verification (platform/win/ implementation)**
 
 | Feature | File | Sample | Status |
 |---------|------|--------|--------|
-| FBO pixel reading | `tcFbo_win.cpp` | gl/fboExample | ⬜ Untested |
+| FBO pixel reading | `tcFbo_win.cpp` | gl/fboExample | ✅ Verified |
 | DPI scaling | `tcPlatform_win.cpp` | All samples | ⬜ Untested |
-| Executable path | `tcPlatform_win.cpp` | Samples using dataPath | ⬜ Untested |
-| Console UTF-8 | sokol_app.h | All log output | ⬜ Untested |
+| Executable path | `tcPlatform_win.cpp` | Samples using dataPath | ✅ Verified |
+| Console UTF-8 | sokol_app.h | All log output | ✅ Verified |
 
 **🟢 Relatively Safe (cross-platform libraries)**
 
