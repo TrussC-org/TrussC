@@ -26,18 +26,18 @@ void tcApp::draw() {
     // =========================================================================
     // TTF アラインメントデモ
     // =========================================================================
-    setColor(40);
+    setColor(0.16f);
 
     // 水平アラインメント（画面上部）
     float y = 80;
     float centerX = w / 2;
 
     // 基準線を描画
-    setColor(200);
+    setColor(0.78f);
     drawLine(centerX, 40, centerX, 150);
     drawLine(50, y, w - 50, y);
 
-    setColor(40);
+    setColor(0.16f);
     font.drawString("Left", centerX, y, Left, Top);
     font.drawString("Center", centerX, y + 30, Center, Top);
     font.drawString("Right", centerX, y + 60, Right, Top);
@@ -47,11 +47,11 @@ void tcApp::draw() {
     y = 220;
 
     // 基準線を描画（長くした）
-    setColor(200);
+    setColor(0.78f);
     drawLine(50, y, w - 50, y);
     drawLine(x, y - 30, x, y + 30);
 
-    setColor(40);
+    setColor(0.16f);
     font.drawString("Top", x, y, Left, Top);
     font.drawString("Center", x + 80, y, Left, Center);
     font.drawString("Bottom", x + 180, y, Left, Bottom);
@@ -64,30 +64,30 @@ void tcApp::draw() {
     std::string multiLine = "Line 1\nLine 2\nLine 3";
 
     // デフォルト行高さ
-    setColor(100);
+    setColor(0.4f);
     drawBitmapString("Default (1.0em):", 50, y - 20);
-    setColor(40);
+    setColor(0.16f);
     font.resetLineHeight();
     font.drawString(multiLine, 50, y);
 
     // em単位（狭め）
-    setColor(100);
+    setColor(0.4f);
     drawBitmapString("0.8em:", 220, y - 20);
-    setColor(40);
+    setColor(0.16f);
     font.setLineHeightEm(0.8);
     font.drawString(multiLine, 220, y);
 
     // em単位（広め）
-    setColor(100);
+    setColor(0.4f);
     drawBitmapString("1.5em:", 350, y - 20);
-    setColor(40);
+    setColor(0.16f);
     font.setLineHeightEm(1.5);
     font.drawString(multiLine, 350, y);
 
     // ピクセル指定
-    setColor(100);
+    setColor(0.4f);
     drawBitmapString("50px:", 500, y - 20);
-    setColor(40);
+    setColor(0.16f);
     font.setLineHeight(50);
     font.drawString(multiLine, 500, y);
 
@@ -106,7 +106,7 @@ void tcApp::draw() {
     drawCircle(cx, cy, 5);
 
     // Center,Center でテキストを中央配置
-    setColor(40);
+    setColor(0.16f);
     fontLarge.drawString("Centered!", cx, cy, Center, Center);
 
     // =========================================================================
@@ -114,10 +114,10 @@ void tcApp::draw() {
     // =========================================================================
     y = 620;
 
-    setColor(200);
+    setColor(0.78f);
     drawLine(centerX, y - 10, centerX, y + 60);
 
-    setColor(80);
+    setColor(0.3f);
     drawBitmapString("BitmapFont Left", centerX, y, Left, Top);
     drawBitmapString("BitmapFont Center", centerX, y + 18, Center, Top);
     drawBitmapString("BitmapFont Right", centerX, y + 36, Right, Top);
@@ -131,11 +131,11 @@ void tcApp::draw() {
     float bx = 100, by = y;
     setColor(colors::lightBlue);
     drawRect(bx + bbox.x, by + bbox.y, bbox.width, bbox.height);
-    setColor(40);
+    setColor(0.16f);
     font.drawString(boxText, bx, by);
 
     // 情報表示
-    setColor(100);
+    setColor(0.4f);
     std::string info = "Glyphs: " + std::to_string(font.getLoadedGlyphCount());
     info += " | Memory: " + std::to_string(Font::getTotalCacheMemoryUsage() / 1024) + " KB";
     info += " | FPS: " + std::to_string((int)getFrameRate());

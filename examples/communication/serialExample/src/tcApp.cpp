@@ -98,7 +98,7 @@ void tcApp::update() {
 // =============================================================================
 void tcApp::draw() {
     clear(255);
-    setColor(40);
+    setColor(0.16f);
 
     // 接続状態
     std::string connStr = "Serial connected: ";
@@ -130,9 +130,9 @@ void tcApp::draw() {
     for (int i = (int)receivedMessages.size() - 1; i >= 0; i--) {
         // 最新のメッセージをハイライト
         if (i == (int)receivedMessages.size() - 1 && (getElapsedTime() - readTime) < 0.5f) {
-            setColor(40);
+            setColor(0.16f);
         } else {
-            setColor(120);
+            setColor(0.47f);
         }
         drawBitmapString(receivedMessages[i], 550, posY, 2.0f);
         posY += 42;

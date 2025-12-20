@@ -36,9 +36,9 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    clear(255);  // 白背景
+    clear(1.0f);  // 白背景
 
-    setColor(255);  // 白（画像の色をそのまま表示）
+    setColor(1.0f);  // 白（画像の色をそのまま表示）
 
     // bikers を左上に描画
     if (bikers.isAllocated()) {
@@ -82,7 +82,7 @@ void tcApp::draw() {
         }
 
         // 元のアイコンも表示
-        setColor(255);
+        setColor(1.0f);
         icon.draw(offsetX + w * diameter + 20, offsetY);
     }
 

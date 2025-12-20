@@ -6,6 +6,9 @@
 #include <filesystem>
 #include <fstream>
 #include <thread>
+#ifndef _WIN32
+#include <sys/stat.h>  // chmod
+#endif
 
 namespace fs = std::filesystem;
 
@@ -229,6 +232,27 @@ void tcApp::draw() {
     }
 
     ImGui::Spacing();
+
+    // Web ビルド オプション
+    if (ImGui::Checkbox("Web (Emscripten)", &generateWebBuild)) {
+        saveConfig();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Generate build scripts for WebAssembly.\nRequires Emscripten SDK installed.\nClick to open download page.");
+    }
+    if (ImGui::IsItemClicked()) {
+#ifdef __APPLE__
+        system("open https://emscripten.org/docs/getting_started/downloads.html");
+#elif defined(_WIN32)
+        system("start https://emscripten.org/docs/getting_started/downloads.html");
+#else
+        system("xdg-open https://emscripten.org/docs/getting_started/downloads.html");
+#endif
+    }
+
+    ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
 
@@ -337,6 +361,9 @@ void tcApp::loadConfig() {
     if (config.contains("ide_type")) {
         ideType = static_cast<IdeType>(config["ide_type"].get<int>());
     }
+    if (config.contains("generate_web_build")) {
+        generateWebBuild = config["generate_web_build"].get<bool>();
+    }
     tcLogNotice("tcApp") << "loadConfig: projectDir = " << projectDir << ", projectName = " << projectName;
 }
 
@@ -352,6 +379,7 @@ void tcApp::saveConfig() {
     config["last_project_dir"] = projectDir;
     config["last_project_name"] = projectName;
     config["ide_type"] = static_cast<int>(ideType);
+    config["generate_web_build"] = generateWebBuild;
     saveJson(config, configPath);
 }
 
@@ -1061,6 +1089,12 @@ void tcApp::doGenerateProject() {
             generateVisualStudioProject(destPath);
         }
 
+        // Web ビルドファイル生成
+        if (generateWebBuild) {
+            log("Generating Web build files...");
+            generateWebBuildFiles(destPath);
+        }
+
         log("Done!");
         saveConfig();
 
@@ -1149,6 +1183,12 @@ void tcApp::doUpdateProject() {
             generateVisualStudioProject(importedProjectPath);
         }
 
+        // Web ビルドファイル生成
+        if (generateWebBuild) {
+            log("Generating Web build files...");
+            generateWebBuildFiles(importedProjectPath);
+        }
+
         log("Done!");
         setStatus("Project updated successfully!");
         redraw();  // 完了時に再描画
@@ -1158,4 +1198,71 @@ void tcApp::doUpdateProject() {
         setStatus(string("Error: ") + e.what(), true);
         redraw();  // エラー時も再描画
     }
+}
+
+void tcApp::generateWebBuildFiles(const string& path) {
+    // build-web.sh (macOS / Linux)
+    string shPath = path + "/build-web.sh";
+    ofstream shFile(shPath);
+    shFile << "#!/bin/bash\n";
+    shFile << "# TrussC Web Build Script (Emscripten)\n";
+    shFile << "# Requires: Emscripten SDK (https://emscripten.org/docs/getting_started/downloads.html)\n";
+    shFile << "\n";
+    shFile << "set -e\n";
+    shFile << "\n";
+    shFile << "# ビルドディレクトリ作成\n";
+    shFile << "mkdir -p build-web\n";
+    shFile << "cd build-web\n";
+    shFile << "\n";
+    shFile << "# CMake 設定 (Emscripten)\n";
+    shFile << "emcmake cmake ..\n";
+    shFile << "\n";
+    shFile << "# ビルド\n";
+    shFile << "cmake --build .\n";
+    shFile << "\n";
+    shFile << "echo \"\"\n";
+    shFile << "echo \"Build complete! Output files are in bin/\"\n";
+    shFile << "echo \"To test locally:\"\n";
+    shFile << "echo \"  cd ../bin && python3 -m http.server 8080\"\n";
+    shFile << "echo \"  Open http://localhost:8080/$(basename $(pwd)).html\"\n";
+    shFile.close();
+
+    // 実行権限を付与
+#ifndef _WIN32
+    chmod(shPath.c_str(), 0755);
+#endif
+
+    // build-web.bat (Windows)
+    string batPath = path + "/build-web.bat";
+    ofstream batFile(batPath);
+    batFile << "@echo off\r\n";
+    batFile << "REM TrussC Web Build Script (Emscripten)\r\n";
+    batFile << "REM Requires: Emscripten SDK (https://emscripten.org/docs/getting_started/downloads.html)\r\n";
+    batFile << "\r\n";
+    batFile << "REM ビルドディレクトリ作成\r\n";
+    batFile << "if not exist build-web mkdir build-web\r\n";
+    batFile << "cd build-web\r\n";
+    batFile << "\r\n";
+    batFile << "REM CMake 設定 (Emscripten)\r\n";
+    batFile << "call emcmake cmake ..\r\n";
+    batFile << "if errorlevel 1 goto error\r\n";
+    batFile << "\r\n";
+    batFile << "REM ビルド\r\n";
+    batFile << "cmake --build .\r\n";
+    batFile << "if errorlevel 1 goto error\r\n";
+    batFile << "\r\n";
+    batFile << "echo.\r\n";
+    batFile << "echo Build complete! Output files are in bin\\\r\n";
+    batFile << "echo To test locally:\r\n";
+    batFile << "echo   cd ..\\bin ^&^& python -m http.server 8080\r\n";
+    batFile << "goto end\r\n";
+    batFile << "\r\n";
+    batFile << ":error\r\n";
+    batFile << "echo Build failed!\r\n";
+    batFile << "pause\r\n";
+    batFile << "exit /b 1\r\n";
+    batFile << "\r\n";
+    batFile << ":end\r\n";
+    batFile << "cd ..\r\n";
+    batFile.close();
 }

@@ -90,4 +90,12 @@ struct TouchEventArgs {
     float pressure = 1.0f;
 };
 
+// ---------------------------------------------------------------------------
+// コンソール入力イベント引数（stdin からのコマンド）
+// ---------------------------------------------------------------------------
+struct ConsoleEventArgs {
+    std::string raw;               // 生の入力行（例: "tcdebug screenshot /tmp/a.png"）
+    std::vector<std::string> args; // 空白区切りのパース結果（例: ["tcdebug", "screenshot", "/tmp/a.png"]）
+};
+
 } // namespace trussc

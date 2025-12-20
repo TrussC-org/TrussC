@@ -75,11 +75,11 @@ void tcApp::draw() {
     setColor(colors::blue);
     drawRect(boxX - 40, boxY - 40, 80, 80);
 
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("Arrow keys\nto move", boxX - 35, boxY - 15);
 
     // タイトル
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("=== Keyboard Input Demo ===", 20, 20);
 
     // 最後に押されたキー
@@ -88,10 +88,10 @@ void tcApp::draw() {
     drawBitmapString(ss.str(), 20, 50);
 
     // 現在押されているキー
-    setColor(150);
+    setColor(0.6f);
     drawBitmapString("Currently pressed:", 20, 80);
 
-    setColor(50, 150, 50);  // 暗い緑
+    setColor(0.2f, 0.6f, 0.2f);  // 暗い緑
     std::stringstream pressed;
     for (int k : pressedKeys) {
         pressed << keyToString(k) << " ";
@@ -102,10 +102,10 @@ void tcApp::draw() {
     drawBitmapString(pressed.str(), 20, 95);
 
     // キー入力履歴
-    setColor(100);
+    setColor(0.4f);
     drawBitmapString("Key History:", 20, 130);
 
-    setColor(180);
+    setColor(0.7f);
     float y = 150;
     for (const auto& h : keyHistory) {
         drawBitmapString(h, 30, y);
@@ -113,7 +113,7 @@ void tcApp::draw() {
     }
 
     // 操作説明
-    setColor(100);
+    setColor(0.4f);
     drawBitmapString("Use arrow keys to move the box", 20, h - 40);
     drawBitmapString("Press any key to see its code", 20, h - 25);
 }

@@ -37,15 +37,15 @@ void tcApp::draw() {
     int h = getWindowHeight();
 
     // タイトル
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("=== Drag & Drop Demo ===", 20, 20);
 
     // ステータスメッセージ
-    setColor(200, 200, 100);
+    setColor(0.78f, 0.78f, 0.4f);
     drawBitmapString(statusMessage, 20, 50);
 
     // ドロップ領域の枠（点線風）
-    setColor(100);
+    setColor(0.4f);
     noFill();
     drawRect(10, 70, w - 20, h - 80);
     fill();
@@ -57,22 +57,22 @@ void tcApp::draw() {
 
     for (const auto& file : droppedFiles) {
         if (count >= maxDisplay) {
-            setColor(150);
+            setColor(0.6f);
             drawBitmapString("... and more", 30, y);
             break;
         }
 
         // アイコン
         if (file.isImage) {
-            setColor(100, 200, 100);  // 画像は緑
+            setColor(0.4f, 0.78f, 0.4f);  // 画像は緑
             drawBitmapString("[IMG]", 30, y);
         } else {
-            setColor(100, 150, 200);  // その他は青
+            setColor(0.4f, 0.6f, 0.78f);  // その他は青
             drawBitmapString("[FILE]", 30, y);
         }
 
         // ファイル名
-        setColor(255);
+        setColor(1.0f);
         drawBitmapString(file.name, 90, y);
 
         y += 20;
@@ -93,22 +93,22 @@ void tcApp::draw() {
         float drawH = imgH * scale;
 
         // 枠
-        setColor(80);
+        setColor(0.3f);
         drawRect(previewX - 5, previewY - 5, drawW + 10, drawH + 10);
 
         // 画像
-        setColor(255);
+        setColor(1.0f);
         previewImage.draw(previewX, previewY, drawW, drawH);
 
         // サイズ情報
-        setColor(150);
+        setColor(0.6f);
         stringstream ss;
         ss << (int)imgW << " x " << (int)imgH;
         drawBitmapString(ss.str(), previewX, previewY + drawH + 15);
     }
 
     // 操作説明
-    setColor(120);
+    setColor(0.47f);
     drawBitmapString("Drag and drop files onto this window", 20, h - 25);
 }
 

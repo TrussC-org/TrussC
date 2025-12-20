@@ -21,7 +21,12 @@ set(TC_ROOT "${TC_ROOT}" CACHE PATH "TrussC root directory" FORCE)
 # =============================================================================
 # プラットフォーム検出
 # =============================================================================
-if(APPLE)
+if(EMSCRIPTEN)
+    # Emscripten は UNIX=TRUE を設定するので、UNIX より前にチェック
+    set(TC_PLATFORM_EMSCRIPTEN TRUE)
+    set(TC_GRAPHICS_BACKEND "GLES3")  # WebGL2
+    message(STATUS "[TrussC] Platform: Emscripten (WebGL2)")
+elseif(APPLE)
     set(TC_PLATFORM_MACOS TRUE)
     set(TC_GRAPHICS_BACKEND "METAL")
     message(STATUS "[TrussC] Platform: macOS (Metal)")
@@ -56,7 +61,9 @@ file(GLOB TC_NETWORK_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/network/*.cp
 file(GLOB TC_SOUND_SOURCES   ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/sound/*.cpp)
 
 # プラットフォーム固有ソースファイル
-if(TC_PLATFORM_MACOS)
+if(TC_PLATFORM_EMSCRIPTEN)
+    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/web/*.cpp)
+elseif(TC_PLATFORM_MACOS)
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/mac/*.mm)
 elseif(TC_PLATFORM_WINDOWS)
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/win/*.cpp)
@@ -91,7 +98,11 @@ target_include_directories(TrussC PUBLIC
 # =============================================================================
 # プラットフォーム固有の設定
 # =============================================================================
-if(TC_PLATFORM_MACOS)
+if(TC_PLATFORM_EMSCRIPTEN)
+    target_compile_definitions(TrussC PUBLIC SOKOL_GLES3)
+    # Emscripten リンクオプションはアプリ側で設定（trussc_app.cmake）
+
+elseif(TC_PLATFORM_MACOS)
     target_compile_definitions(TrussC PUBLIC SOKOL_METAL)
     target_link_libraries(TrussC PUBLIC
         "-framework Metal"

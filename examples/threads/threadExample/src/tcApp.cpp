@@ -30,26 +30,26 @@ void tcApp::draw() {
     clear(0.1f, 0.1f, 0.1f);
 
     // スレッドで生成したデータを描画
-    setColor(255);
+    setColor(1.0f);
     threadedObject.draw(20, 100);
 
     // フレーム情報を表示
     auto appFrame = getFrameCount();
     auto threadFrame = threadedObject.getThreadFrameNum();
 
-    setColor(255, 100, 100);
+    setColor(1.0f, 0.4f, 0.4f);
     drawBitmapString("app frame: " + toString(appFrame), 20, 20);
     drawBitmapString("thread frame: " + toString(threadFrame), 20, 35);
     drawBitmapString("diff: " + toString((int64_t)appFrame - threadFrame), 20, 50);
 
-    setColor(200, 200, 200);
+    setColor(0.78f, 0.78f, 0.78f);
     drawBitmapString("a: starts the thread", 20, 320);
     drawBitmapString("s: stops the thread", 20, 335);
     drawBitmapString("l: turns lock on", 20, 350);
     drawBitmapString("n: turns lock off (tearing)", 20, 365);
 
     // ロック状態を表示
-    setColor(100, 255, 100);
+    setColor(0.4f, 1.0f, 0.4f);
     drawBitmapString(doLock ? "Mode: LOCKED (safe)" : "Mode: NO LOCK (may tear)", 20, 395);
 }
 
