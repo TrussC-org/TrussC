@@ -1,15 +1,15 @@
 #pragma once
 
 // =============================================================================
-// tcLight.h - ライト（光源）
+// tcLight.h - Light (light source)
 // =============================================================================
 //
-// Phong ライティングモデル用の光源定義
-// CPU 側でライティング計算を行う
+// Light source definition for Phong lighting model
+// Lighting calculation is performed on CPU side
 //
-// 対応するライトタイプ:
-// - Directional: 平行光源（太陽光など、位置に関係なく一定方向）
-// - Point: 点光源（電球など、位置から放射状に光る）
+// Supported light types:
+// - Directional: Parallel light source (like sunlight, constant direction regardless of position)
+// - Point: Point light source (like a bulb, radiates from a position)
 //
 // =============================================================================
 
@@ -18,27 +18,27 @@
 
 namespace trussc {
 
-// 前方宣言
+// Forward declaration
 class Material;
 
 // ---------------------------------------------------------------------------
-// LightType - ライトの種類
+// LightType - Type of light
 // ---------------------------------------------------------------------------
 enum class LightType {
-    Directional,    // 平行光源（太陽光）
-    Point,          // 点光源
-    // Spot は将来対応
+    Directional,    // Parallel light (sunlight)
+    Point,          // Point light
+    // Spot to be supported in future
 };
 
 // ---------------------------------------------------------------------------
-// Light クラス
+// Light class
 // ---------------------------------------------------------------------------
 class Light {
 public:
     Light() {
-        // デフォルト: 白い平行光源、上から
+        // Default: white directional light from above
         type_ = LightType::Directional;
-        direction_ = Vec3(0, -1, 0);  // 上から下へ
+        direction_ = Vec3(0, -1, 0);  // From top to bottom
         position_ = Vec3(0, 0, 0);
         ambient_ = Color(0.2f, 0.2f, 0.2f, 1.0f);
         diffuse_ = Color(1.0f, 1.0f, 1.0f, 1.0f);
@@ -50,12 +50,12 @@ public:
         quadraticAttenuation_ = 0.0f;
     }
 
-    // === ライトタイプ設定 ===
+    // === Light type settings ===
 
-    // 平行光源として設定（方向を指定）
+    // Set as directional light (specify direction)
     void setDirectional(const Vec3& direction) {
         type_ = LightType::Directional;
-        // 方向を正規化して保存（光が進む方向）
+        // Normalize and store direction (direction light travels)
         float len = std::sqrt(direction.x * direction.x +
                               direction.y * direction.y +
                               direction.z * direction.z);
@@ -68,7 +68,7 @@ public:
         setDirectional(Vec3(dx, dy, dz));
     }
 
-    // 点光源として設定（位置を指定）
+    // Set as point light (specify position)
     void setPoint(const Vec3& position) {
         type_ = LightType::Point;
         position_ = position;
@@ -82,7 +82,7 @@ public:
     const Vec3& getDirection() const { return direction_; }
     const Vec3& getPosition() const { return position_; }
 
-    // === 色設定 ===
+    // === Color settings ===
 
     void setAmbient(const Color& c) { ambient_ = c; }
     void setAmbient(float r, float g, float b, float a = 1.0f) {
@@ -102,12 +102,12 @@ public:
     }
     const Color& getSpecular() const { return specular_; }
 
-    // === 強度 ===
+    // === Intensity ===
 
     void setIntensity(float i) { intensity_ = i; }
     float getIntensity() const { return intensity_; }
 
-    // === 減衰（Point ライト用） ===
+    // === Attenuation (for Point light) ===
     // attenuation = 1.0 / (constant + linear * d + quadratic * d²)
 
     void setAttenuation(float constant, float linear, float quadratic) {
@@ -116,33 +116,33 @@ public:
         quadraticAttenuation_ = quadratic;
     }
 
-    // === 有効/無効 ===
+    // === Enable/Disable ===
 
     void enable() { enabled_ = true; }
     void disable() { enabled_ = false; }
     bool isEnabled() const { return enabled_; }
 
     // -------------------------------------------------------------------------
-    // ライティング計算
+    // Lighting calculation
     // -------------------------------------------------------------------------
 
-    // 指定された位置・法線に対するライティングを計算
-    // viewDir: カメラから頂点への方向（正規化）
+    // Calculate lighting for given position and normal
+    // viewDir: direction from camera to vertex (normalized)
     Color calculate(const Vec3& worldPos, const Vec3& worldNormal,
                     const Material& material, const Vec3& viewPos) const {
         if (!enabled_) {
             return Color(0, 0, 0, 0);
         }
 
-        // ライト方向を計算
+        // Calculate light direction
         Vec3 lightDir;
         float attenuation = 1.0f;
 
         if (type_ == LightType::Directional) {
-            // 平行光源: 方向は一定（光が来る方向の逆）
+            // Directional: direction is constant (opposite of light travel direction)
             lightDir = Vec3(-direction_.x, -direction_.y, -direction_.z);
         } else {
-            // 点光源: 頂点からライトへの方向
+            // Point light: direction from vertex to light
             Vec3 toLight(position_.x - worldPos.x,
                          position_.y - worldPos.y,
                          position_.z - worldPos.z);
@@ -151,7 +151,7 @@ public:
                                    toLight.z * toLight.z);
             if (dist > 0) {
                 lightDir = Vec3(toLight.x / dist, toLight.y / dist, toLight.z / dist);
-                // 減衰計算
+                // Attenuation calculation
                 attenuation = 1.0f / (constantAttenuation_ +
                                       linearAttenuation_ * dist +
                                       quadraticAttenuation_ * dist * dist);
@@ -160,7 +160,7 @@ public:
             }
         }
 
-        // 視線方向（頂点からカメラへ）
+        // View direction (from vertex to camera)
         Vec3 viewDir(viewPos.x - worldPos.x,
                      viewPos.y - worldPos.y,
                      viewPos.z - worldPos.z);
@@ -173,12 +173,12 @@ public:
             viewDir.z /= viewLen;
         }
 
-        // Phong ライティング計算
+        // Phong lighting calculation
         return calculatePhong(worldNormal, lightDir, viewDir, material, attenuation);
     }
 
 private:
-    // Phong モデルでライティング計算
+    // Lighting calculation using Phong model
     Color calculatePhong(const Vec3& normal, const Vec3& lightDir,
                          const Vec3& viewDir, const Material& material,
                          float attenuation) const {
@@ -187,13 +187,13 @@ private:
         const Color& matSpecular = material.getSpecular();
         float shininess = material.getShininess();
 
-        // === Ambient（環境光） ===
+        // === Ambient ===
         float ar = ambient_.r * matAmbient.r;
         float ag = ambient_.g * matAmbient.g;
         float ab = ambient_.b * matAmbient.b;
 
-        // === Diffuse（拡散反射） ===
-        // N・L（法線とライト方向の内積）
+        // === Diffuse ===
+        // N dot L (dot product of normal and light direction)
         float NdotL = normal.x * lightDir.x +
                       normal.y * lightDir.y +
                       normal.z * lightDir.z;
@@ -203,16 +203,16 @@ private:
         float dg = diffuse_.g * matDiffuse.g * NdotL;
         float db = diffuse_.b * matDiffuse.b * NdotL;
 
-        // === Specular（鏡面反射） ===
+        // === Specular ===
         float sr = 0, sg = 0, sb = 0;
         if (NdotL > 0) {
-            // 反射ベクトル R = 2(N・L)N - L
+            // Reflection vector R = 2(N dot L)N - L
             float twoNdotL = 2.0f * NdotL;
             Vec3 reflect(twoNdotL * normal.x - lightDir.x,
                          twoNdotL * normal.y - lightDir.y,
                          twoNdotL * normal.z - lightDir.z);
 
-            // R・V（反射ベクトルと視線方向の内積）
+            // R dot V (dot product of reflection vector and view direction)
             float RdotV = reflect.x * viewDir.x +
                           reflect.y * viewDir.y +
                           reflect.z * viewDir.z;
@@ -224,7 +224,7 @@ private:
             sb = specular_.b * matSpecular.b * specFactor;
         }
 
-        // 合成（強度と減衰を適用）
+        // Combine (apply intensity and attenuation)
         float factor = intensity_ * attenuation;
         float r = ar + (dr + sr) * factor;
         float g = ag + (dg + sg) * factor;
@@ -234,40 +234,40 @@ private:
     }
 
     LightType type_;
-    Vec3 direction_;     // Directional 用（光が進む方向）
-    Vec3 position_;      // Point 用
-    Color ambient_;      // 環境光色
-    Color diffuse_;      // 拡散光色
-    Color specular_;     // 鏡面反射色
-    float intensity_;    // 強度
+    Vec3 direction_;     // For Directional (direction light travels)
+    Vec3 position_;      // For Point
+    Color ambient_;      // Ambient light color
+    Color diffuse_;      // Diffuse light color
+    Color specular_;     // Specular reflection color
+    float intensity_;    // Intensity
     bool enabled_;
 
-    // 減衰パラメータ（Point ライト用）
+    // Attenuation parameters (for Point light)
     float constantAttenuation_;
     float linearAttenuation_;
     float quadraticAttenuation_;
 };
 
 // ---------------------------------------------------------------------------
-// ライティング計算ヘルパー（Mesh から呼ばれる）
+// Lighting calculation helper (called from Mesh)
 // ---------------------------------------------------------------------------
 
-// 指定した位置・法線でのライティング結果を計算
-// 全てのアクティブなライトからの寄与を合計する
+// Calculate lighting result for given position and normal
+// Sum contributions from all active lights
 inline Color calculateLighting(const Vec3& worldPos, const Vec3& worldNormal,
                                const Material& material) {
     if (internal::activeLights.empty()) {
-        // ライトがない場合はマテリアルの Diffuse をそのまま返す
+        // If no lights, return material's Diffuse as-is
         return material.getDiffuse();
     }
 
-    // 自己発光
+    // Emission
     const Color& emission = material.getEmission();
     float r = emission.r;
     float g = emission.g;
     float b = emission.b;
 
-    // 各ライトからの寄与を合計
+    // Sum contributions from each light
     for (Light* light : internal::activeLights) {
         if (light && light->isEnabled()) {
             Color contribution = light->calculate(worldPos, worldNormal,
@@ -278,7 +278,7 @@ inline Color calculateLighting(const Vec3& worldPos, const Vec3& worldNormal,
         }
     }
 
-    // クランプ
+    // Clamp
     r = std::min(1.0f, r);
     g = std::min(1.0f, g);
     b = std::min(1.0f, b);

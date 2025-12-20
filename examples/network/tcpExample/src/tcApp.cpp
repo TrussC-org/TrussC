@@ -1,5 +1,5 @@
 // =============================================================================
-// tcApp.cpp - TCP ソケットサンプル（サーバー＆クライアント）
+// tcApp.cpp - TCP Socket Sample (Server & Client)
 // =============================================================================
 
 #include "tcApp.h"
@@ -19,7 +19,7 @@ void tcApp::setup() {
 
     addLog("Press S for Server, C for Client");
 
-    // サーバーイベント設定
+    // Server event setup
     server.onClientConnect.listen(clientConnectListener, [this](TcpClientConnectEventArgs& e) {
         ostringstream oss;
         oss << "[Server] Client " << e.clientId << " connected from " << e.host << ":" << e.port;
@@ -38,7 +38,7 @@ void tcApp::setup() {
         oss << "[Server] Received from client " << e.clientId << ": " << msg;
         addLog(oss.str());
 
-        // エコーバック
+        // Echo back
         string reply = "Echo: " + msg;
         server.send(e.clientId, reply);
     });
@@ -49,7 +49,7 @@ void tcApp::setup() {
         addLog(oss.str());
     });
 
-    // クライアントイベント設定
+    // Client event setup
     client.onConnect.listen(clientConnectedListener, [this](TcpConnectEventArgs& e) {
         ostringstream oss;
         if (e.success) {
@@ -82,12 +82,12 @@ void tcApp::draw() {
 
     float y = 40;
 
-    // タイトル
+    // Title
     setColor(1.0f);
     drawBitmapString("TCP Socket Example", 40, y);
     y += 30;
 
-    // 状態表示
+    // Status display
     setColor(0.4f, 0.78f, 1.0f);
     ostringstream status;
     if (server.isRunning()) {
@@ -107,12 +107,12 @@ void tcApp::draw() {
     }
     y += 30;
 
-    // 操作説明
+    // Instructions
     setColor(0.7f);
     drawBitmapString("S: Start Server  C: Connect Client  SPACE: Send  D: Disconnect  X: Clear", 40, y);
     y += 30;
 
-    // ログ表示
+    // Log display
     setColor(0.4f, 1.0f, 0.4f);
     drawBitmapString("Log:", 40, y);
     y += 25;
@@ -127,7 +127,7 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
     if (key == 'S' || key == 's') {
-        // サーバー開始
+        // Start server
         if (!server.isRunning()) {
             if (server.start(9001)) {
                 addLog("[Server] Started on port 9001");
@@ -136,7 +136,7 @@ void tcApp::keyPressed(int key) {
             addLog("[Server] Already running");
         }
     } else if (key == 'C' || key == 'c') {
-        // クライアント接続
+        // Client connect
         if (!client.isConnected()) {
             addLog("[Client] Connecting to 127.0.0.1:9001...");
             if (client.connect("127.0.0.1", 9001)) {
@@ -150,7 +150,7 @@ void tcApp::keyPressed(int key) {
     } else if (key == KEY_SPACE || key == ' ') {
         messageCount++;
 
-        // サーバーからブロードキャスト
+        // Broadcast from server
         if (server.isRunning() && server.getClientCount() > 0) {
             ostringstream oss;
             oss << "Server broadcast #" << messageCount;
@@ -158,7 +158,7 @@ void tcApp::keyPressed(int key) {
             addLog("[Server] Broadcast: " + oss.str());
         }
 
-        // クライアントから送信
+        // Send from client
         if (client.isConnected()) {
             ostringstream oss;
             oss << "Hello from client #" << messageCount;
@@ -166,7 +166,7 @@ void tcApp::keyPressed(int key) {
             addLog("[Client] Sent: " + oss.str());
         }
     } else if (key == 'D' || key == 'd') {
-        // 切断
+        // Disconnect
         if (client.isConnected()) {
             client.disconnect();
             addLog("[Client] Disconnecting...");

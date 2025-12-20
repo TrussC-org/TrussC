@@ -6,11 +6,11 @@ using namespace std;
 #include "AnalysisThread.h"
 
 // =============================================================================
-// tcApp - ThreadChannel サンプルアプリケーション
+// tcApp - ThreadChannel sample application
 // =============================================================================
 //
-// ThreadChannel を使ったスレッド間通信のデモ。
-// メインスレッドでパターンを生成し、ワーカースレッドで解析処理。
+// Demo of inter-thread communication using ThreadChannel.
+// Generates patterns in the main thread, processes analysis in the worker thread.
 //
 class tcApp : public App {
 public:
@@ -19,10 +19,10 @@ public:
     void draw() override;
 
 private:
-    // パターン生成用データ
+    // Data for pattern generation
     std::vector<float> sourcePixels_;
     int frameNum_ = 0;
 
-    // 解析スレッド
+    // Analysis thread
     AnalysisThread analyzer_;
 };

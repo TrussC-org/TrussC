@@ -1,8 +1,8 @@
 // =============================================================================
-// textureExample - テクスチャ Filter / Wrap モード比較デモ
+// textureExample - Texture Filter / Wrap mode comparison demo
 // =============================================================================
-// 上段: Filter 比較（Nearest / Linear / Cubic）- スライム
-// 下段: Wrap 比較（Repeat / ClampToEdge / MirroredRepeat）- レンガ
+// Top row: Filter comparison (Nearest / Linear / Cubic) - Slime
+// Bottom row: Wrap comparison (Repeat / ClampToEdge / MirroredRepeat) - Brick
 // =============================================================================
 
 #include "tcApp.h"
@@ -15,7 +15,7 @@ void tcApp::setup() {
     cout << "[UP/DOWN] Change scale" << endl;
     cout << "[1] Scale 4x  [2] Scale 8x  [3] Scale 16x  [4] Scale 32x" << endl;
 
-    // --- Filter 比較用（スライム）---
+    // --- For Filter comparison (Slime) ---
     imgOriginal_.allocate(SRC_SIZE, SRC_SIZE, 4);
     generatePixelArt(imgOriginal_);
     imgOriginal_.update();
@@ -30,9 +30,9 @@ void tcApp::setup() {
     imgLinear_.setFilter(TextureFilter::Linear);
     imgLinear_.update();
 
-    // Cubic 用は update() で生成
+    // Cubic is generated in update()
 
-    // --- Wrap 比較用（レンガ）---
+    // --- For Wrap comparison (Brick) ---
     imgBrickRepeat_.allocate(BRICK_SIZE, BRICK_SIZE, 4);
     generateBrickPattern(imgBrickRepeat_);
     imgBrickRepeat_.setFilter(TextureFilter::Nearest);
@@ -53,7 +53,7 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
-    // スケールが変わったら Cubic 画像を再生成
+    // Regenerate Cubic image when scale changes
     if (scale_ != lastScale_) {
         int newSize = (int)(SRC_SIZE * scale_);
         upscaleBicubic(imgOriginal_, imgCubic_, newSize, newSize);
@@ -69,13 +69,13 @@ void tcApp::draw() {
     float w = getWindowWidth();
     float h = getWindowHeight();
 
-    // タイトル
+    // Title
     setColor(1.0f, 1.0f, 1.0f);
     drawBitmapString("Texture Filter & Wrap Mode Demo", 20, 25);
     setColor(0.6f, 0.6f, 0.6f);
     drawBitmapString("Scale: " + to_string((int)scale_) + "x  [UP/DOWN or 1-4]", 20, 42);
 
-    // レイアウト計算
+    // Layout calculation
     float margin = 15;
     float headerHeight = 55;
     float labelHeight = 20;
@@ -86,21 +86,21 @@ void tcApp::draw() {
 
     float imgSize = std::min<float>(colWidth - 20, rowHeight - 30);
 
-    // --- 上段: Filter 比較（スライム）---
+    // --- Top row: Filter comparison (Slime) ---
     float row1Y = headerHeight + (rowHeight - imgSize) / 2;
 
-    // 行ラベル
+    // Row label
     setColor(0.8f, 0.8f, 0.8f);
     drawBitmapString("Filter:", margin, row1Y - 5);
 
     for (int i = 0; i < 3; i++) {
         float x = margin + i * (colWidth + margin) + (colWidth - imgSize) / 2;
 
-        // 背景
+        // Background
         setColor(0.25f, 0.25f, 0.28f);
         drawRect(x - 3, row1Y - 3, imgSize + 6, imgSize + 6);
 
-        // 画像
+        // Image
         setColor(1.0f, 1.0f, 1.0f);
         if (i == 0) {
             imgNearest_.draw(x, row1Y, imgSize, imgSize);
@@ -117,25 +117,25 @@ void tcApp::draw() {
         }
     }
 
-    // --- 下段: Wrap 比較（レンガ）---
+    // --- Bottom row: Wrap comparison (Brick) ---
     float row2Y = headerHeight + rowHeight + margin + (rowHeight - imgSize) / 2;
 
-    // 行ラベル
+    // Row label
     setColor(0.8f, 0.8f, 0.8f);
     drawBitmapString("Wrap:", margin, row2Y - 5);
 
-    // Wrap モードでは UV を 0-1 範囲外に設定して繰り返しを見せる
-    // drawSubsection を使って UV 範囲を拡張
-    float uvScale = 4.0f;  // 4x4 タイル分表示
+    // For Wrap mode, set UV outside 0-1 range to show repetition
+    // Use drawSubsection to extend UV range
+    float uvScale = 4.0f;  // Display 4x4 tiles
 
     for (int i = 0; i < 3; i++) {
         float x = margin + i * (colWidth + margin) + (colWidth - imgSize) / 2;
 
-        // 背景
+        // Background
         setColor(0.25f, 0.25f, 0.28f);
         drawRect(x - 3, row2Y - 3, imgSize + 6, imgSize + 6);
 
-        // 画像（UV 範囲を拡張して描画）
+        // Image (draw with extended UV range)
         setColor(1.0f, 1.0f, 1.0f);
         if (i == 0) {
             imgBrickRepeat_.getTexture().drawSubsection(x, row2Y, imgSize, imgSize,
@@ -155,7 +155,7 @@ void tcApp::draw() {
         }
     }
 
-    // 原寸表示
+    // Original size display
     setColor(0.5f, 0.5f, 0.5f);
     drawBitmapString("Original:", w - 100, h - 45);
     setColor(1.0f, 1.0f, 1.0f);
@@ -182,7 +182,7 @@ void tcApp::keyPressed(int key) {
 }
 
 // ---------------------------------------------------------------------------
-// バイキュービック補間の重み関数（Catmull-Rom スプライン）
+// Bicubic interpolation weight function (Catmull-Rom spline)
 // ---------------------------------------------------------------------------
 float tcApp::cubicWeight(float t) {
     t = fabs(t);
@@ -195,7 +195,7 @@ float tcApp::cubicWeight(float t) {
 }
 
 // ---------------------------------------------------------------------------
-// バイキュービック補間でアップスケール
+// Upscale with bicubic interpolation
 // ---------------------------------------------------------------------------
 void tcApp::upscaleBicubic(const Image& src, Image& dst, int newWidth, int newHeight) {
     int srcW = src.getWidth();
@@ -253,10 +253,10 @@ void tcApp::upscaleBicubic(const Image& src, Image& dst, int newWidth, int newHe
 }
 
 // ---------------------------------------------------------------------------
-// ピクセルアート生成（スライム）
+// Generate pixel art (Slime)
 // ---------------------------------------------------------------------------
 void tcApp::generatePixelArt(Image& img) {
-    // 背景を透明に
+    // Make background transparent
     for (int y = 0; y < SRC_SIZE; y++) {
         for (int x = 0; x < SRC_SIZE; x++) {
             img.setColor(x, y, Color(0, 0, 0, 0));
@@ -301,21 +301,21 @@ void tcApp::generatePixelArt(Image& img) {
 }
 
 // ---------------------------------------------------------------------------
-// レンガパターン生成（8x8）
+// Generate brick pattern (8x8)
 // ---------------------------------------------------------------------------
 void tcApp::generateBrickPattern(Image& img) {
-    Color brick(0.8f, 0.4f, 0.3f, 1.0f);      // レンガ色
-    Color brickDark(0.6f, 0.3f, 0.2f, 1.0f);  // レンガ暗め
-    Color mortar(0.5f, 0.5f, 0.45f, 1.0f);    // 目地
+    Color brick(0.8f, 0.4f, 0.3f, 1.0f);      // Brick color
+    Color brickDark(0.6f, 0.3f, 0.2f, 1.0f);  // Dark brick
+    Color mortar(0.5f, 0.5f, 0.45f, 1.0f);    // Mortar
 
-    // 全体を目地色で塗る
+    // Fill with mortar color
     for (int y = 0; y < BRICK_SIZE; y++) {
         for (int x = 0; x < BRICK_SIZE; x++) {
             img.setColor(x, y, mortar);
         }
     }
 
-    // 上段レンガ（0-2行目、左右にずれなし）
+    // Top row bricks (rows 0-2, no offset)
     for (int y = 0; y < 3; y++) {
         for (int x = 0; x < 3; x++) {
             img.setColor(x, y, (y == 0 || x == 0) ? brickDark : brick);
@@ -325,17 +325,17 @@ void tcApp::generateBrickPattern(Image& img) {
         }
     }
 
-    // 下段レンガ（4-6行目、半分ずらし）
+    // Bottom row bricks (rows 4-6, half offset)
     for (int y = 4; y < 7; y++) {
-        // 左端の半分
+        // Left half
         for (int x = 0; x < 1; x++) {
             img.setColor(x, y, (y == 4) ? brickDark : brick);
         }
-        // 中央
+        // Center
         for (int x = 2; x < 5; x++) {
             img.setColor(x, y, (y == 4 || x == 2) ? brickDark : brick);
         }
-        // 右端
+        // Right edge
         for (int x = 6; x < 8; x++) {
             img.setColor(x, y, (y == 4 || x == 6) ? brickDark : brick);
         }

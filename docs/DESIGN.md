@@ -1,74 +1,74 @@
-# TrussC 設計ドキュメント
+# TrussC Design Document
 
 ## Loop Architecture (Decoupled Update/Draw)
 
-「Enumによるモード指定」を廃止し、Draw（描画）とUpdate（論理）それぞれのタイミングをメソッドベースで独立設定できるアーキテクチャを採用する。
+Replaces the "mode enumeration" approach with a method-based architecture where Draw (rendering) and Update (logic) timing can be independently configured.
 
 ### Draw Loop (Render Timing)
 
-| メソッド | 動作 |
-|---------|------|
-| `tc::setDrawVsync(true)` | モニタのリフレッシュレートに同期（デフォルト） |
-| `tc::setDrawFps(n)` (n > 0) | 固定FPSで動作。VSyncは自動的にOFFになる |
-| `tc::setDrawFps(0)` (or negative) | 自動ループ停止。`tc::redraw()` 呼び出し時のみ描画 |
+| Method | Behavior |
+|--------|----------|
+| `tc::setDrawVsync(true)` | Sync to monitor refresh rate (default) |
+| `tc::setDrawFps(n)` (n > 0) | Fixed FPS. VSync is automatically disabled |
+| `tc::setDrawFps(0)` (or negative) | Auto loop stops. Draws only on `tc::redraw()` |
 
 ### Update Loop (Logic Timing)
 
-| メソッド | 動作 |
-|---------|------|
-| `tc::syncUpdateToDraw(true)` | `update()` は `draw()` の直前に1回だけ呼ばれる（Coupled、デフォルト） |
-| `tc::setUpdateFps(n)` (n > 0) | `update()` は `draw()` とは独立して、指定されたHzで定期的に呼ばれる（Decoupled） |
-| `tc::setUpdateFps(0)` (or negative) | Updateループ停止。入力イベントや `tc::redraw()` のみで駆動する完全なイベント駆動型アプリ |
+| Method | Behavior |
+|--------|----------|
+| `tc::syncUpdateToDraw(true)` | `update()` called once just before `draw()` (Coupled, default) |
+| `tc::setUpdateFps(n)` (n > 0) | `update()` runs independently at specified Hz (Decoupled) |
+| `tc::setUpdateFps(0)` (or negative) | Update loop stops. Fully event-driven app |
 
 ### Idle State (No Freeze)
 
-- DrawとUpdateの両方が停止（FPS <= 0）していても、OSのイベントループは動作し続ける
-- アプリはフリーズせず「待機状態（Idle）」となる
-- `onMousePress` などのイベントハンドラは正常に発火する
+- Even when both Draw and Update are stopped (FPS <= 0), the OS event loop continues
+- App doesn't freeze, enters "idle state"
+- Event handlers like `onMousePress` still fire normally
 
 ### Standard Helpers
 
-| ヘルパー | 動作 |
-|---------|------|
-| `tc::setFps(60)` | `setDrawFps(60)` + `syncUpdateToDraw(true)` を実行 |
-| `tc::setVsync(true)` | `setDrawVsync(true)` + `syncUpdateToDraw(true)` を実行 |
+| Helper | Behavior |
+|--------|----------|
+| `tc::setFps(60)` | Executes `setDrawFps(60)` + `syncUpdateToDraw(true)` |
+| `tc::setVsync(true)` | Executes `setDrawVsync(true)` + `syncUpdateToDraw(true)` |
 
-### 使用例
+### Examples
 
 ```cpp
-// 通常のゲームループ（60fps固定）
+// Standard game loop (60fps fixed)
 void tcApp::setup() {
     tc::setFps(60);
 }
 
-// VSync同期（デフォルト動作）
+// VSync sync (default behavior)
 void tcApp::setup() {
     tc::setVsync(true);
 }
 
-// 省電力モード（イベント駆動）
+// Power-saving mode (event-driven)
 void tcApp::setup() {
-    tc::setDrawFps(0);  // 描画停止
+    tc::setDrawFps(0);  // Stop drawing
 }
 void tcApp::onMousePress(...) {
-    // 何か処理
-    tc::redraw();  // 明示的に再描画
+    // Process something
+    tc::redraw();  // Explicitly request redraw
 }
 
-// 物理シミュレーション（固定タイムステップ）
+// Physics simulation (fixed timestep)
 void tcApp::setup() {
-    tc::setDrawVsync(true);    // 描画はVSync
-    tc::setUpdateFps(120);     // 物理更新は120Hz
+    tc::setDrawVsync(true);    // Draw with VSync
+    tc::setUpdateFps(120);     // Physics at 120Hz
 }
 ```
 
-### 現在の実装（廃止予定）
+### Current Implementation (Deprecated)
 
 ```cpp
-// 旧API（廃止予定）
+// Old API (deprecated)
 enum class LoopMode {
-    Game,   // 毎フレーム自動的にupdate/drawが呼ばれる
-    Demand  // redraw()が呼ばれた時だけupdate/drawが呼ばれる
+    Game,   // update/draw called automatically every frame
+    Demand  // update/draw called only on redraw()
 };
 tc::setLoopMode(LoopMode::Game);
 tc::setLoopMode(LoopMode::Demand);
@@ -78,49 +78,49 @@ tc::setLoopMode(LoopMode::Demand);
 
 ## 3D Projection
 
-### Metal クリップ空間
+### Metal Clip Space
 
-macOS (Metal) では、クリップ空間の Z 範囲が OpenGL と異なる：
+On macOS (Metal), clip space Z range differs from OpenGL:
 - OpenGL: Z = [-1, 1]
 - Metal: Z = [0, 1]
 
-`sgl_ortho` は OpenGL スタイルの行列を生成するため、Metal で深度テストが正しく動作しない。
+`sgl_ortho` generates OpenGL-style matrices, causing depth testing to malfunction on Metal.
 
-### 解決策
+### Solution
 
-3D 描画には `sgl_perspective` を使用する：
+Use `sgl_perspective` for 3D drawing:
 
 ```cpp
-tc::enable3DPerspective(fovY, nearZ, farZ);  // パースペクティブ + 深度テスト
-// ... 3D描画 ...
-tc::disable3D();  // 2D描画に戻す
+tc::enable3DPerspective(fovY, nearZ, farZ);  // Perspective + depth test
+// ... 3D drawing ...
+tc::disable3D();  // Return to 2D
 ```
 
-2D 描画は従来通り `sgl_ortho` を使用（深度テスト不要）。
+2D drawing continues using `sgl_ortho` (depth testing not needed).
 
 ---
 
-## Lighting System（CPU-based Phong）
+## Lighting System (CPU-based Phong)
 
-### 制約と設計判断
+### Constraints and Design Decisions
 
-sokol_gl は即時モード API であり、以下の制限がある：
-- 法線属性をシェーダーに渡せない
-- カスタムシェーダーが使えない（内蔵シェーダーのみ）
+sokol_gl is an immediate-mode API with the following limitations:
+- Cannot pass normal attributes to shaders
+- Cannot use custom shaders (built-in shaders only)
 
-そのため、**CPU 側でライティング計算を行い、結果を頂点カラーに反映する**方式を採用。
+Therefore, **lighting calculations are performed on CPU and results are reflected in vertex colors**.
 
-### アーキテクチャ
+### Architecture
 
 ```
 Light + Material + Normal
         ↓
-  CPU で Phong 計算
+  Phong calculation on CPU
         ↓
-  頂点カラーとして sokol_gl に渡す
+  Passed to sokol_gl as vertex colors
 ```
 
-### Phong ライティングモデル
+### Phong Lighting Model
 
 ```cpp
 finalColor = emission + ambient + diffuse + specular
@@ -130,42 +130,42 @@ diffuse  = lightDiffuse × materialDiffuse × max(0, N·L)
 specular = lightSpecular × materialSpecular × pow(max(0, R·V), shininess)
 ```
 
-- N: 法線ベクトル（正規化）
-- L: ライト方向（正規化）
-- R: 反射ベクトル
-- V: 視線方向（正規化）
+- N: Normal vector (normalized)
+- L: Light direction (normalized)
+- R: Reflection vector
+- V: View direction (normalized)
 
-### ライトタイプ
+### Light Types
 
-| タイプ | 説明 |
-|--------|------|
-| Directional | 平行光源（太陽光）。全頂点に同じ方向から光が当たる |
-| Point | 点光源（電球）。位置から放射状に光り、距離による減衰あり |
-| ~~Spot~~ | 未実装。将来対応予定 |
+| Type | Description |
+|------|-------------|
+| Directional | Parallel light source (sunlight). Same direction hits all vertices |
+| Point | Point light source (light bulb). Radiates from position with distance attenuation |
+| ~~Spot~~ | Not implemented. Planned for future |
 
-### マテリアルプリセット
+### Material Presets
 
 ```cpp
-Material::gold()      // 金
-Material::silver()    // 銀
-Material::copper()    // 銅
-Material::bronze()    // 青銅
-Material::emerald()   // エメラルド
-Material::ruby()      // ルビー
-Material::plastic(color)  // プラスチック（任意色）
-Material::rubber(color)   // ゴム（任意色）
+Material::gold()      // Gold
+Material::silver()    // Silver
+Material::copper()    // Copper
+Material::bronze()    // Bronze
+Material::emerald()   // Emerald
+Material::ruby()      // Ruby
+Material::plastic(color)  // Plastic (any color)
+Material::rubber(color)   // Rubber (any color)
 ```
 
-### 使用例
+### Usage Example
 
 ```cpp
 void tcApp::setup() {
-    // ライト設定
+    // Light setup
     light_.setDirectional(Vec3(-1, -1, -1));
     light_.setAmbient(0.2f, 0.2f, 0.25f);
     light_.setDiffuse(1.0f, 1.0f, 0.95f);
 
-    // マテリアル
+    // Material
     material_ = Material::gold();
 }
 
@@ -176,72 +176,72 @@ void tcApp::draw() {
     tc::addLight(light_);
     tc::setMaterial(material_);
 
-    sphere.draw();  // ライティング適用
+    sphere.draw();  // Lighting applied
 
     tc::disableLighting();
     tc::disable3D();
 }
 ```
 
-### 注意点
+### Notes
 
-- CPU 計算のため、頂点数が多いと負荷が高くなる
-- 1フレームごとに全頂点を再計算する
-- スペキュラー計算には `setCameraPosition()` が必要
+- CPU calculation means high vertex counts increase load
+- All vertices are recalculated each frame
+- Specular calculation requires `setCameraPosition()`
 
 ---
 
-## Module / Addon アーキテクチャ
+## Module / Addon Architecture
 
-TrussC では機能を「コアモジュール」と「アドオン」の2種類に分けて管理する。
+TrussC divides functionality into "core modules" and "addons".
 
-### コアモジュール (tc:: 名前空間)
+### Core Modules (tc:: namespace)
 
-**特徴:**
-- `#include <TrussC.h>` だけで使える
-- 実装は `libTrussC` にコンパイル済み
-- ユーザーは追加のビルド設定不要
+**Characteristics:**
+- Available with just `#include <TrussC.h>`
+- Implementation pre-compiled into `libTrussC`
+- No additional build configuration for users
 
-**含まれる機能:**
-- グラフィックス（描画、Image、FBO、Mesh 等）
-- 数学ライブラリ（Vec、Mat、ノイズ、FFT 等）
-- イベントシステム
-- JSON / XML（nlohmann/json, pugixml）
-- ImGui（Dear ImGui + sokol_imgui）
-- Sound（sokol_audio + dr_libs）
-- VideoGrabber（カメラ入力）
+**Included Features:**
+- Graphics (drawing, Image, FBO, Mesh, etc.)
+- Math library (Vec, Mat, noise, FFT, etc.)
+- Event system
+- JSON / XML (nlohmann/json, pugixml)
+- ImGui (Dear ImGui + sokol_imgui)
+- Sound (sokol_audio + dr_libs)
+- VideoGrabber (camera input)
 - FileDialog
 
-**単一ヘッダーライブラリの扱い:**
+**Single-Header Library Handling:**
 
-stb、dr_libs、nlohmann/json など「単一ヘッダーライブラリ」は、`#define XXX_IMPLEMENTATION` が必要なものがある。これらは TrussC の実装ファイル（`src/*.cpp` / `src/*.mm`）で一度だけ展開し、`libTrussC` にコンパイルする。ユーザーはヘッダーをインクルードするだけで使える。
+stb, dr_libs, nlohmann/json and other "single-header libraries" require `#define XXX_IMPLEMENTATION`. These are expanded once in TrussC implementation files (`src/*.cpp` / `src/*.mm`) and compiled into `libTrussC`. Users just include the header.
 
 ```
-例: stb_image.h の場合
+Example: stb_image.h
 
-include/stb_image.h        ← ヘッダー（宣言のみ）
+include/stb_image.h        ← Header (declarations only)
 src/stb_impl.cpp           ← #define STB_IMAGE_IMPLEMENTATION + #include "stb_image.h"
 ```
 
-**利点:**
-- コンパイル時間の短縮（実装は1回だけコンパイル）
-- リンクエラーの防止（多重定義を避ける）
-- ユーザーは何も考えずに `#include` するだけでOK
+**Benefits:**
+- Faster compile times (implementation compiled once)
+- Prevents link errors (avoids multiple definitions)
+- Users just `#include` without thinking
 
-### アドオン (tcx:: 名前空間)
+### Addons (tcx:: namespace)
 
-**特徴:**
-- 追加の CMake 設定が必要
-- 外部依存ライブラリを使用する場合がある
-- オプション機能や実験的機能
+**Characteristics:**
+- Requires additional CMake configuration
+- May use external dependency libraries
+- Optional or experimental features
 
-**将来の候補:**
-- tcxOsc（Open Sound Control）
-- tcxMidi（MIDI 入出力）
-- tcxOpenCV（画像処理）
-- tcxBox2D（物理演算）
+**Future Candidates:**
+- tcxOsc (Open Sound Control)
+- tcxMidi (MIDI I/O)
+- tcxOpenCV (image processing)
+- tcxBox2D (physics)
 
-**使い方:**
+**Usage:**
 
 ```cmake
 # CMakeLists.txt
@@ -255,12 +255,12 @@ target_link_libraries(myApp PRIVATE tcx::Osc)
 #include <tcx/Osc.h>
 ```
 
-### 判断基準
+### Decision Criteria
 
-| 条件 | 分類 |
-|------|------|
-| 多くのプロジェクトで使う | コアモジュール |
-| 外部依存なし or MIT互換 | コアモジュール |
-| 特定用途向け | アドオン |
-| 重い外部依存（OpenCV等） | アドオン |
-| 実験的・不安定 | アドオン |
+| Condition | Classification |
+|-----------|---------------|
+| Used in many projects | Core module |
+| No external deps or MIT-compatible | Core module |
+| Special purpose | Addon |
+| Heavy external deps (OpenCV, etc.) | Addon |
+| Experimental / unstable | Addon |

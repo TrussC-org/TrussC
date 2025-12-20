@@ -1,5 +1,5 @@
 // =============================================================================
-// micInputExample - マイク入力 FFT スペクトラム可視化サンプル
+// micInputExample - Microphone Input FFT Spectrum Visualization Sample
 // =============================================================================
 
 #include "tcApp.h"

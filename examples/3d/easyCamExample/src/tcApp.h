@@ -6,8 +6,8 @@ using namespace std;
 
 using namespace trussc;
 
-// easyCamExample - EasyCamによる3Dカメラ操作のデモ
-// oFのeasyCamExampleを参考に実装
+// easyCamExample - EasyCam 3D camera control demo
+// Implementation based on oF's easyCamExample
 
 class tcApp : public App {
 public:
@@ -25,13 +25,13 @@ private:
     EasyCam cam;
     bool showHelp = true;
 
-    // 3Dプリミティブ用メッシュ
+    // Meshes for 3D primitives
     Mesh boxMesh;
     Mesh sphereMesh;
     Mesh coneMesh;
     Mesh cylinderMesh;
 
-    // ライティング
+    // Lighting
     Light light;
     Material matRed, matOrange, matBlue, matCyan, matYellow, matMagenta;
 

@@ -1,5 +1,5 @@
 // =============================================================================
-// soundPlayerFFTExample - FFT スペクトラム可視化
+// soundPlayerFFTExample - FFT Spectrum Visualization
 // =============================================================================
 //
 // Audio Credit:
@@ -22,7 +22,7 @@ void tcApp::setup() {
     spectrum.resize(FFT_SIZE / 2, 0.0f);
     spectrumSmooth.resize(FFT_SIZE / 2, 0.0f);
 
-    // 音楽をロード
+    // Load music
     std::string musicPath = getDataPath("beat_loop.wav");
     if (music.load(musicPath)) {
         musicLoaded = true;
@@ -48,23 +48,23 @@ void tcApp::setup() {
 void tcApp::update() {
     if (!musicLoaded || !music.isPlaying()) return;
 
-    // AudioEngineから最新のオーディオサンプルを取得
+    // Get latest audio samples from AudioEngine
     getAudioAnalysisBuffer(fftInput.data(), FFT_SIZE);
 
-    // 窓関数を適用してFFT実行
+    // Apply window function and execute FFT
     auto fftResult = fftReal(fftInput, WindowType::Hanning);
 
-    // マグニチュードを計算（対数スケール対応）
+    // Calculate magnitude (with log scale support)
     for (size_t i = 0; i < spectrum.size(); i++) {
         float mag = std::abs(fftResult[i]);
 
         if (useLogScale) {
-            // dBスケール: -60dB ~ 0dB を 0.0 ~ 1.0 にマップ
+            // dB scale: map -60dB ~ 0dB to 0.0 ~ 1.0
             float db = (mag > 0) ? 20.0f * std::log10(mag) : -100.0f;
-            spectrum[i] = (db + 60.0f) / 60.0f;  // -60dB以下は0
+            spectrum[i] = (db + 60.0f) / 60.0f;  // Below -60dB is 0
             spectrum[i] = std::max(0.0f, std::min(1.0f, spectrum[i]));
         } else {
-            // リニアスケール（増幅）
+            // Linear scale (amplified)
             spectrum[i] = std::min(1.0f, mag * 4.0f);
         }
     }
@@ -76,15 +76,15 @@ void tcApp::draw() {
     float windowW = getWindowWidth();
     float windowH = getWindowHeight();
 
-    // タイトル
+    // Title
     setColor(colors::white);
     drawBitmapString("TrussC FFT Spectrum Analyzer", 20, 30);
 
-    // コントロール説明
+    // Control instructions
     setColor(0.6f);
     drawBitmapString("SPACE:Play/Stop  W:Waveform  L:LogScale  UP/DOWN:Smoothing", 20, 50);
 
-    // ステータス
+    // Status
     char buf[128];
     snprintf(buf, sizeof(buf), "Status: %s | Smoothing: %.0f%% | Scale: %s",
             music.isPlaying() ? "Playing" : "Stopped",
@@ -92,7 +92,7 @@ void tcApp::draw() {
             useLogScale ? "Log" : "Linear");
     drawBitmapString(buf, 20, 70);
 
-    // 波形表示エリア
+    // Waveform display area
     if (showWaveform) {
         float waveY = 120;
         float waveH = 100;
@@ -103,13 +103,13 @@ void tcApp::draw() {
         setColor(colors::lime);
         drawBitmapString("Waveform", 25, waveY + 15);
 
-        // 波形を描画（実際のオーディオデータ）
+        // Draw waveform (actual audio data)
         setColor(colors::cyan);
         int waveWidth = (int)(windowW - 40);
         float prevX = 20, prevY = waveY + waveH / 2;
 
         for (int i = 0; i < waveWidth; i++) {
-            // fftInput からサンプルをマッピング
+            // Map samples from fftInput
             int sampleIdx = (i * FFT_SIZE) / waveWidth;
             float sample = fftInput[sampleIdx];
 
@@ -123,7 +123,7 @@ void tcApp::draw() {
         }
     }
 
-    // スペクトラム表示エリア
+    // Spectrum display area
     float specY = showWaveform ? 240 : 120;
     float specH = windowH - specY - 80;
 
@@ -133,49 +133,49 @@ void tcApp::draw() {
     setColor(colors::lime);
     drawBitmapString("Spectrum", 25, specY + 15);
 
-    // スペクトラムバーを描画
+    // Draw spectrum bars
     int numBars = 64;
     float barWidth = (windowW - 60) / numBars;
     float barGap = 2;
 
-    // FFT結果を numBars 本にまとめる（低周波をより細かく表示）
+    // Group FFT results into numBars bars (show low frequencies in more detail)
     int spectrumSize = FFT_SIZE / 2;
 
     for (int i = 0; i < numBars; i++) {
-        // 対数スケールでビンをマッピング（低周波を細かく）
+        // Map bins with log scale (more detail for low frequencies)
         float ratio = (float)i / numBars;
         int binStart = (int)(ratio * ratio * spectrumSize);
         int binEnd = (int)(((float)(i + 1) / numBars) * ((float)(i + 1) / numBars) * spectrumSize);
         binEnd = std::max(binEnd, binStart + 1);
         binEnd = std::min(binEnd, spectrumSize);
 
-        // 範囲内の平均値を計算
+        // Calculate average within range
         float value = 0.0f;
         for (int bin = binStart; bin < binEnd; bin++) {
             value += spectrum[bin];
         }
         value /= (binEnd - binStart);
 
-        // スムージング
+        // Smoothing
         spectrumSmooth[i] = spectrumSmooth[i] * smoothing + value * (1.0f - smoothing);
 
         float barH = spectrumSmooth[i] * (specH - 30);
         float barX = 30 + i * barWidth;
         float barY = specY + specH - barH - 10;
 
-        // グラデーションカラー（HSB: 青→緑→黄）
+        // Gradient color (HSB: blue -> green -> yellow)
         float hue = 0.6f - spectrumSmooth[i] * 0.4f;
         setColorHSB(hue, 0.8f, 0.9f);
 
         drawRect(barX, barY, barWidth - barGap, barH);
     }
 
-    // 周波数ラベル
+    // Frequency labels
     setColor(0.4f);
     drawBitmapString("0 Hz", 30, specY + specH + 5);
     drawBitmapString("22050 Hz", windowW - 80, specY + specH + 5);
 
-    // クレジット
+    // Credits
     setColor(0.3f);
     drawBitmapString("Audio: \"113 2b loose-pants 4.2 mono\" by astro_denticle (CC0)", 20, windowH - 25);
 }

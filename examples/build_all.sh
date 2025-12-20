@@ -1,11 +1,11 @@
 #!/bin/bash
 # =============================================================================
-# build_all.sh - 全サンプルのビルドスクリプト
+# build_all.sh - Build script for all examples
 # =============================================================================
-# 使い方:
-#   ./build_all.sh          # 全サンプルをビルド
-#   ./build_all.sh --clean  # クリーンビルド（CMakeキャッシュを削除）
-#   ./build_all.sh --help   # ヘルプを表示
+# Usage:
+#   ./build_all.sh          # Build all examples
+#   ./build_all.sh --clean  # Clean build (delete CMake cache)
+#   ./build_all.sh --help   # Show help
 
 set -e
 
@@ -13,28 +13,28 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLEAN_BUILD=false
 VERBOSE=false
 
-# 色付き出力
+# Colored output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# ヘルプ表示
+# Show help
 show_help() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --clean    クリーンビルド（CMakeキャッシュを削除してから再ビルド）"
-    echo "  --verbose  詳細なビルド出力を表示"
-    echo "  --help     このヘルプを表示"
+    echo "  --clean    Clean build (delete CMake cache and rebuild)"
+    echo "  --verbose  Show detailed build output"
+    echo "  --help     Show this help"
     echo ""
     echo "Examples:"
-    echo "  $0              # 全サンプルをビルド"
-    echo "  $0 --clean      # クリーンビルド"
+    echo "  $0              # Build all examples"
+    echo "  $0 --clean      # Clean build"
 }
 
-# 引数パース
+# Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --clean)
@@ -60,12 +60,12 @@ done
 echo -e "${BLUE}=== TrussC Examples Build Script ===${NC}"
 echo ""
 
-# 並列ビルド用のジョブ数（CPUコア数）
+# Number of parallel jobs (CPU cores)
 JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 echo -e "Using ${JOBS} parallel jobs"
 echo ""
 
-# ビルドディレクトリを検索
+# Search for build directories
 BUILD_DIRS=$(find "$SCRIPT_DIR" -type d -name "build" | sort)
 
 if [ -z "$BUILD_DIRS" ]; then
@@ -73,15 +73,15 @@ if [ -z "$BUILD_DIRS" ]; then
     exit 1
 fi
 
-# 統計用変数
+# Statistics variables
 TOTAL=0
 SUCCESS=0
 FAILED=0
 FAILED_LIST=()
 
-# 各ビルドディレクトリでビルド実行
+# Execute build in each build directory
 for BUILD_DIR in $BUILD_DIRS; do
-    # サンプル名を抽出（例: 3d/ofNodeExample）
+    # Extract example name (e.g., 3d/ofNodeExample)
     EXAMPLE_NAME=$(echo "$BUILD_DIR" | sed "s|$SCRIPT_DIR/||" | sed 's|/build$||')
     TOTAL=$((TOTAL + 1))
 
@@ -89,7 +89,7 @@ for BUILD_DIR in $BUILD_DIRS; do
 
     cd "$BUILD_DIR"
 
-    # クリーンビルドの場合、CMakeキャッシュを削除
+    # If clean build, delete CMake cache
     if [ "$CLEAN_BUILD" = true ]; then
         rm -f CMakeCache.txt
         rm -rf CMakeFiles
@@ -112,7 +112,7 @@ for BUILD_DIR in $BUILD_DIRS; do
         fi
     fi
 
-    # ビルド（並列ビルド）
+    # Build (parallel build)
     if [ "$VERBOSE" = true ]; then
         if cmake --build . -j "$JOBS"; then
             echo -e "${GREEN}  Success!${NC}"
@@ -134,7 +134,7 @@ for BUILD_DIR in $BUILD_DIRS; do
     fi
 done
 
-# 結果サマリー
+# Result summary
 echo ""
 echo -e "${BLUE}=== Build Summary ===${NC}"
 echo -e "Total:   $TOTAL"

@@ -2,21 +2,21 @@
 #include "TrussC.h"
 
 // =============================================================================
-// setup - 初期化
+// setup - Initialization
 // =============================================================================
 void tcApp::setup() {
     setVsync(true);
 
-    // デバイス一覧を取得
+    // Get device list
     serial.listDevices();
     deviceList = serial.getDeviceList();
 
-    // 接続先デバイスパスを設定（例: Arduino）
+    // Set target device path (e.g., Arduino)
     // serialDevicePath = "/dev/tty.usbserial-A10172HG";
 
     int baud = 9600;
 
-    // 指定されたデバイスがあればそこに、なければ最初のデバイスに接続
+    // Connect to specified device if available, otherwise connect to first device
     if (!serialDevicePath.empty()) {
         serial.setup(serialDevicePath, baud);
     } else if (!deviceList.empty()) {
@@ -28,18 +28,18 @@ void tcApp::setup() {
 }
 
 // =============================================================================
-// update - 更新処理
+// update - Update Processing
 // =============================================================================
 void tcApp::update() {
     if (serial.isInitialized()) {
-        // メッセージ送信
+        // Send message
         if (bSendSerialMessage && !messageToSend.empty()) {
             serial.writeBytes(messageToSend);
             messageToSend.clear();
             bSendSerialMessage = false;
         }
 
-        // データ受信
+        // Receive data
         int numBytesToRead = serial.available();
         if (numBytesToRead > 512) {
             numBytesToRead = 512;
@@ -49,7 +49,7 @@ void tcApp::update() {
             std::string buffer;
             serial.readBytes(buffer, numBytesToRead);
 
-            // 受信データを処理（改行で分割、なければバッファに追加）
+            // Process received data (split by newline, otherwise add to buffer)
             for (char c : buffer) {
                 if (c == '\n' || c == '\r') {
                     if (!serialReadBuffer.empty()) {
@@ -61,7 +61,7 @@ void tcApp::update() {
                 }
             }
 
-            // 改行がなくてもデータがあれば表示（Arduinoが改行なしで送る場合用）
+            // Display data even without newline (for Arduino sending without newlines)
             if (!serialReadBuffer.empty() && serialReadBuffer.length() >= 3) {
                 receivedMessages.push_back(serialReadBuffer);
                 serialReadBuffer.clear();
@@ -70,7 +70,7 @@ void tcApp::update() {
             readTime = getElapsedTime();
         }
     } else {
-        // 未接続の場合、10秒ごとに再接続を試行
+        // If not connected, retry every 10 seconds
         float now = getElapsedTime();
         if (now - timeLastTryConnect > 10.0f) {
             deviceList = serial.getDeviceList();
@@ -87,20 +87,20 @@ void tcApp::update() {
         }
     }
 
-    // 古いメッセージを削除（最大10件）
+    // Remove old messages (keep max 10)
     while (receivedMessages.size() > 10) {
         receivedMessages.erase(receivedMessages.begin());
     }
 }
 
 // =============================================================================
-// draw - 描画
+// draw - Drawing
 // =============================================================================
 void tcApp::draw() {
     clear(255);
     setColor(0.16f);
 
-    // 接続状態
+    // Connection status
     std::string connStr = "Serial connected: ";
     connStr += serial.isInitialized() ? "true" : "false";
     if (serial.isInitialized()) {
@@ -108,27 +108,27 @@ void tcApp::draw() {
     }
     drawBitmapString(connStr, 50, 40);
 
-    // デバイス一覧
+    // Device list
     std::string deviceStr = "Devices:\n";
     for (const auto& dev : deviceList) {
         deviceStr += std::to_string(dev.getDeviceID()) + ": " + dev.getDevicePath() + "\n";
     }
     drawBitmapString(deviceStr, 50, 60);
 
-    // 送信メッセージ
+    // Message to send
     std::string msgStr = "Type to send message\n";
     if (!messageToSend.empty()) {
         msgStr += messageToSend;
     }
     drawBitmapString(msgStr, 50, 400, 2.0f);
 
-    // 受信メッセージ
+    // Received messages
     float posY = 60;
     drawBitmapString("Received messages", 550, posY, 2.0f);
     posY += 42;
 
     for (int i = (int)receivedMessages.size() - 1; i >= 0; i--) {
-        // 最新のメッセージをハイライト
+        // Highlight latest message
         if (i == (int)receivedMessages.size() - 1 && (getElapsedTime() - readTime) < 0.5f) {
             setColor(0.16f);
         } else {
@@ -140,29 +140,29 @@ void tcApp::draw() {
 }
 
 // =============================================================================
-// keyPressed - キー入力
+// keyPressed - Key Input
 // =============================================================================
 void tcApp::keyPressed(int key) {
-    // Enter: メッセージ送信
+    // Enter: Send message
     if (key == KEY_ENTER) {
         if (!messageToSend.empty()) {
             bSendSerialMessage = true;
         }
     }
-    // Backspace/Delete: 1文字削除
+    // Backspace/Delete: Delete one character
     else if (key == KEY_BACKSPACE || key == KEY_DELETE || key == 27) {
         if (!messageToSend.empty()) {
             messageToSend.pop_back();
         }
     }
-    // Escape: メッセージクリア
+    // Escape: Clear message
     else if (key == KEY_ESCAPE) {
         messageToSend.clear();
     }
-    // 通常の文字（sokol_appのキーコードは大文字ASCIIと同じなので小文字に変換）
+    // Regular characters (sokol_app key codes are same as uppercase ASCII, so convert to lowercase)
     else if (key >= 32 && key < 127) {
         char c = static_cast<char>(key);
-        // A-Z (65-90) を小文字に変換
+        // Convert A-Z (65-90) to lowercase
         if (c >= 'A' && c <= 'Z') {
             c = c + 32;  // 'a' - 'A' = 32
         }

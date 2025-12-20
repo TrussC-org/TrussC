@@ -7,16 +7,16 @@
 #include <cmath>
 
 // =============================================================================
-// ThreadedObject - スレッドで計算を行うオブジェクト
-// Thread を継承して使用する例
+// ThreadedObject - Object that performs calculations in a thread
+// Example of using Thread by inheritance
 // =============================================================================
 //
-// oF の threadExample を参考にした実装。
-// スレッドでピクセルデータ（ノイズパターン）を生成し、
-// メインスレッドで描画用データとして取得する。
+// Implementation based on oF's threadExample.
+// Generates pixel data (noise pattern) in a thread,
+// and retrieves it as drawing data in the main thread.
 //
-// Mutex を使ったデータ保護の重要性をデモするため、
-// update() と updateNoLock() の両方を提供。
+// To demonstrate the importance of data protection using Mutex,
+// both update() and updateNoLock() are provided.
 //
 class ThreadedObject : public Thread {
 public:
@@ -24,13 +24,13 @@ public:
     static constexpr int HEIGHT = 48;
     static constexpr int TOTAL_PIXELS = WIDTH * HEIGHT;
 
-    // デストラクタ - スレッド終了を待機
+    // Destructor - Wait for thread to finish
     ~ThreadedObject() {
         stop();
         waitForThread(false);
     }
 
-    // 初期化
+    // Initialize
     void setup() {
         pixelData.resize(TOTAL_PIXELS);
         displayData.resize(TOTAL_PIXELS);
@@ -41,50 +41,50 @@ public:
         start();
     }
 
-    // スレッド開始
+    // Start thread
     void start() {
-        // 前のスレッドが残っていたら停止して待機
+        // If previous thread remains, stop and wait
         if (isThreadRunning()) {
             stop();
         }
-        waitForThread(false);  // 古いスレッドが完全に終了するのを待つ
+        waitForThread(false);  // Wait for old thread to completely finish
         startThread();
     }
 
-    // スレッド停止
-    // condition_variable に通知して、スレッドのwaitを解除
+    // Stop thread
+    // Notify condition_variable to release thread's wait
     void stop() {
         std::unique_lock<std::mutex> lck(mutex);
         stopThread();
         condition.notify_all();
     }
 
-    // スレッドで実行される処理
+    // Processing executed in thread
     void threadedFunction() override {
         printf("[threadedFunction] thread started\n");
 
         while (isThreadRunning()) {
-            // スレッドフレーム数をインクリメント
+            // Increment thread frame count
             threadFrameNum++;
 
-            // ピクセルデータを更新（ロックしてから）
+            // Update pixel data (after locking)
             {
                 std::unique_lock<std::mutex> lock(mutex);
 
-                // シンプルなパターン生成（sin波 + 時間変化）
+                // Simple pattern generation (sin wave + time variation)
                 float t = threadFrameNum * 0.05f;
                 for (int i = 0; i < TOTAL_PIXELS; i++) {
                     float ux = (i % WIDTH) / (float)WIDTH;
                     float uy = (i / WIDTH) / (float)HEIGHT;
 
-                    // シンプルなノイズ的パターン
+                    // Simple noise-like pattern
                     float value = std::sin(ux * 10.0f + t) * std::sin(uy * 10.0f + t * 0.7f);
-                    value = (value + 1.0f) * 0.5f;  // 0-1 に正規化
+                    value = (value + 1.0f) * 0.5f;  // Normalize to 0-1
                     pixelData[i] = value;
                 }
 
-                // メインスレッドがデータを取得するまで待機
-                // ただし、停止シグナルが来たら抜ける
+                // Wait until main thread retrieves data
+                // However, exit if stop signal arrives
                 condition.wait(lock, [this]{ return !isThreadRunning() || dataReady; });
                 dataReady = false;
             }
@@ -93,26 +93,26 @@ public:
         printf("[threadedFunction] thread stopped\n");
     }
 
-    // 更新（ロックあり）- ティアリングなし
+    // Update (with lock) - No tearing
     void update() {
         std::unique_lock<std::mutex> lock(mutex);
-        // ピクセルデータを描画用バッファにコピー
+        // Copy pixel data to drawing buffer
         displayData = pixelData;
         dataReady = true;
         condition.notify_all();
     }
 
-    // 更新（ロックなし）- ティアリングあり
+    // Update (without lock) - Tearing may occur
     void updateNoLock() {
-        // ロックしないのでティアリングが発生する可能性
+        // Tearing may occur because no lock is used
         displayData = pixelData;
         dataReady = true;
         condition.notify_all();
     }
 
-    // 描画
+    // Draw
     void draw(float x, float y, float scale = 4.0f) {
-        // displayData を使って矩形を描画
+        // Draw rectangles using displayData
         for (int py = 0; py < HEIGHT; py++) {
             for (int px = 0; px < WIDTH; px++) {
                 int i = py * WIDTH + px;
@@ -123,24 +123,24 @@ public:
         }
     }
 
-    // スレッドフレーム数を取得
+    // Get thread frame count
     int getThreadFrameNum() const {
         return threadFrameNum;
     }
 
 protected:
-    // 計算用ピクセルデータ（スレッドで更新）
+    // Pixel data for calculation (updated in thread)
     std::vector<float> pixelData;
 
-    // 描画用ピクセルデータ（メインスレッドで使用）
+    // Pixel data for drawing (used in main thread)
     std::vector<float> displayData;
 
-    // 同期用
+    // For synchronization
     std::condition_variable condition;
 
-    // データ準備フラグ（スプリアスウェイクアップ対策）
+    // Data ready flag (for spurious wakeup protection)
     bool dataReady = false;
 
-    // スレッドのフレーム数
+    // Thread frame count
     int threadFrameNum = 0;
 };

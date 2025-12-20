@@ -18,14 +18,14 @@ public:
 private:
     bool micStarted = false;
 
-    // FFT 関連
+    // FFT related
     static constexpr int FFT_SIZE = 1024;
     std::vector<float> fftInput;
     std::vector<float> spectrum;
-    std::vector<float> spectrumSmooth;  // スムージング用
+    std::vector<float> spectrumSmooth;  // For smoothing
 
-    // 可視化設定
-    float smoothing = 0.8f;  // スムージング係数
-    bool useLogScale = true; // 対数スケール表示
+    // Visualization settings
+    float smoothing = 0.8f;  // Smoothing coefficient
+    bool useLogScale = true; // Logarithmic scale display
     bool showWaveform = true;
 };

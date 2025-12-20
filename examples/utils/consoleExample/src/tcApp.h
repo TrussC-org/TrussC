@@ -9,24 +9,24 @@ using namespace tc;
 using namespace std;
 
 // =============================================================================
-// consoleExample - stdin からコマンドを受け取るサンプル
+// consoleExample - Sample for receiving commands from stdin
 // =============================================================================
-// AI アシスタントや外部プロセスからコマンドを送信できる。
+// Commands can be sent from AI assistants or external processes.
 //
-// 使い方（ターミナルから実行）:
+// Usage (run from terminal):
 //   ./consoleExample
-//   >>> tcdebug info          # アプリ情報を JSON で取得
-//   >>> tcdebug screenshot /tmp/shot.png  # スクリーンショット
-//   >>> spawn 100 200         # (100, 200) にボールを生成
-//   >>> clear                  # ボールをクリア
+//   >>> tcdebug info          # Get app info as JSON
+//   >>> tcdebug screenshot /tmp/shot.png  # Take screenshot
+//   >>> spawn 100 200         # Spawn a ball at (100, 200)
+//   >>> clear                  # Clear all balls
 //
-// パイプで外部から送信:
+// Send via pipe from external source:
 //   echo "spawn 200 300" | ./consoleExample
 //
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// Ball - シンプルなボール
+// Ball - Simple ball
 // ---------------------------------------------------------------------------
 struct Ball {
     float x, y;
@@ -34,24 +34,24 @@ struct Ball {
 };
 
 // ---------------------------------------------------------------------------
-// tcApp - メインアプリケーション
+// tcApp - Main application
 // ---------------------------------------------------------------------------
 class tcApp : public App {
 public:
     void setup() override {
-        // コンソールイベントをリッスン（リスナーを保持）
+        // Listen to console events (retain the listener)
         events().console.listen(consoleListener_, [this](ConsoleEventArgs& e) {
-            // ログに追加（最新10件）
+            // Add to log (keep latest 10 entries)
             commandLog_.push_back(e.raw);
             if (commandLog_.size() > 10) {
                 commandLog_.pop_front();
             }
 
-            // カスタムコマンドを処理
+            // Process custom commands
             if (e.args.empty()) return;
 
             if (e.args[0] == "spawn" && e.args.size() >= 3) {
-                // spawn x y - ボールを生成
+                // spawn x y - Spawn a ball
                 float x = stof(e.args[1]);
                 float y = stof(e.args[2]);
                 Ball ball;
@@ -62,7 +62,7 @@ public:
                 cout << "{\"status\":\"ok\",\"command\":\"spawn\",\"ballCount\":" << balls_.size() << "}" << endl;
             }
             else if (e.args[0] == "clear") {
-                // clear - ボールをクリア
+                // clear - Clear all balls
                 balls_.clear();
                 cout << "{\"status\":\"ok\",\"command\":\"clear\"}" << endl;
             }
@@ -75,7 +75,7 @@ public:
     void draw() override {
         clear(30);
 
-        // 使い方を表示
+        // Display usage instructions
         setColor(200);
         drawBitmapString("Console Example - stdin commands", 20, 30);
         drawBitmapString("Commands:", 20, 60);
@@ -84,7 +84,7 @@ public:
         drawBitmapString("  spawn x y             - Spawn a ball", 20, 120);
         drawBitmapString("  clear                 - Clear all balls", 20, 140);
 
-        // コマンドログを表示
+        // Display command log
         setColor(150);
         drawBitmapString("Recent commands:", 20, 180);
         int y = 200;
@@ -93,13 +93,13 @@ public:
             y += 16;
         }
 
-        // ボールを描画
+        // Draw balls
         for (const auto& ball : balls_) {
             setColor(ball.color);
             drawCircle(ball.x, ball.y, 20);
         }
 
-        // ボール数を表示
+        // Display ball count
         setColor(255);
         drawBitmapString("Balls: " + to_string(balls_.size()), 20, getWindowHeight() - 30);
     }

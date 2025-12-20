@@ -4,23 +4,23 @@
 void tcApp::setup() {
     setWindowTitle("easyCamExample");
 
-    // カメラの初期設定
+    // Camera initial settings
     cam.setDistance(600);
     cam.setTarget(0, 0, 0);
 
-    // メッシュを生成
+    // Generate meshes
     boxMesh = createBox(100);
     sphereMesh = createSphere(50, 24);
     coneMesh = createCone(50, 100, 24);
     cylinderMesh = createCylinder(50, 100, 24);
 
-    // ライト設定（ambient強め、軽い陰影）
-    light.setDirectional(Vec3(-0.7f, -1.0f, -0.4f));  // 非対称な角度
+    // Light settings (strong ambient, light shading)
+    light.setDirectional(Vec3(-0.7f, -1.0f, -0.4f));  // Asymmetric angle
     light.setAmbient(0.65f, 0.65f, 0.7f);
     light.setDiffuse(0.5f, 0.5f, 0.45f);
     light.setSpecular(0.5f, 0.5f, 0.5f);
 
-    // マテリアル設定
+    // Material settings
     matRed = Material::plastic(Color(0.9f, 0.2f, 0.2f));
     matOrange = Material::plastic(Color(1.0f, 0.6f, 0.2f));
     matBlue = Material::plastic(Color(0.2f, 0.4f, 0.9f));
@@ -30,74 +30,74 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
-    // 特に処理なし
+    // No processing needed
 }
 
 void tcApp::draw() {
     clear(20);
 
-    // --- 3D描画（カメラ有効） ---
+    // --- 3D drawing (camera enabled) ---
     cam.begin();
 
-    // ライティング有効化
+    // Enable lighting
     enableLighting();
     addLight(light);
     setCameraPosition(cam.getPosition());
     setColor(1.0f, 1.0f, 1.0f);
 
-    // 右: 赤いコーン
+    // Right: Red cone
     pushMatrix();
     translate(150, 0, 0);
     setMaterial(matRed);
     coneMesh.draw();
     popMatrix();
 
-    // 左: オレンジの球
+    // Left: Orange sphere
     pushMatrix();
     translate(-150, 0, 0);
     setMaterial(matOrange);
     sphereMesh.draw();
     popMatrix();
 
-    // 下: 青いボックス
+    // Bottom: Blue box
     pushMatrix();
     translate(0, 150, 0);
     setMaterial(matBlue);
     boxMesh.draw();
     popMatrix();
 
-    // 上: シアンのシリンダー
+    // Top: Cyan cylinder
     pushMatrix();
     translate(0, -150, 0);
     setMaterial(matCyan);
     cylinderMesh.draw();
     popMatrix();
 
-    // 前: 黄色いボックス
+    // Front: Yellow box
     pushMatrix();
     translate(0, 0, 150);
     setMaterial(matYellow);
     boxMesh.draw();
     popMatrix();
 
-    // 後: マゼンタのボックス
+    // Back: Magenta box
     pushMatrix();
     translate(0, 0, -150);
     setMaterial(matMagenta);
     boxMesh.draw();
     popMatrix();
 
-    // ライティング終了
+    // End lighting
     disableLighting();
     clearLights();
 
-    // グリッドを描画
+    // Draw grid
     setColor(0.4f, 0.4f, 0.4f);
     drawGrid(400, 10);
 
     cam.end();
 
-    // --- 2D描画（UI） ---
+    // --- 2D drawing (UI) ---
     setColor(1.0f);
 
     if (showHelp) {
@@ -129,14 +129,14 @@ void tcApp::drawGrid(float size, int divisions) {
     auto col = getColor();
     sgl_c4f(col.r, col.g, col.b, col.a);
 
-    // X軸に平行な線（Z方向に並ぶ）
+    // Lines parallel to X-axis (arranged in Z direction)
     for (int i = 0; i <= divisions; i++) {
         float z = -halfSize + i * step;
         sgl_v3f(-halfSize, 0, z);
         sgl_v3f(halfSize, 0, z);
     }
 
-    // Z軸に平行な線（X方向に並ぶ）
+    // Lines parallel to Z-axis (arranged in X direction)
     for (int i = 0; i <= divisions; i++) {
         float x = -halfSize + i * step;
         sgl_v3f(x, 0, -halfSize);

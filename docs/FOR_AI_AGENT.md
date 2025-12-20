@@ -1,54 +1,54 @@
-# TrussC API リファレンス（AI エージェント用）
+# TrussC API Reference (For AI Agents)
 
-このドキュメントは AI エージェント（Cursor, Claude Code 等）が TrussC のコードを書く際に参照するための包括的な API リファレンス。
+This document is a comprehensive API reference for AI agents (Cursor, Claude Code, etc.) to write TrussC code.
 
-## 概要
+## Overview
 
-TrussC は sokol ベースの軽量クリエイティブコーディングフレームワーク。openFrameworks に近い API を目指している。
+TrussC is a lightweight creative coding framework based on sokol. It aims for an API similar to openFrameworks.
 
 ```cpp
 #include "TrussC.h"
 using namespace trussc;
-// または
+// or
 using namespace tc;
 ```
 
 ---
 
-## App 基本構造
+## App Basic Structure
 
 ```cpp
 class tcApp : public tc::App {
 public:
-    void setup() override;      // 初期化（1回だけ呼ばれる）
-    void update() override;     // 毎フレーム更新
-    void draw() override;       // 毎フレーム描画
-    void exit() override;       // 終了時（cleanup の前、全オブジェクト生存中）
-    void cleanup() override;    // 終了時クリーンアップ
+    void setup() override;      // Initialization (called once)
+    void update() override;     // Per-frame update
+    void draw() override;       // Per-frame rendering
+    void exit() override;       // On exit (before cleanup, all objects alive)
+    void cleanup() override;    // Exit cleanup
 
-    // マウスイベント
+    // Mouse events
     void mousePressed(int x, int y, int button) override;
     void mouseReleased(int x, int y, int button) override;
     void mouseMoved(int x, int y) override;
     void mouseDragged(int x, int y, int button) override;
     void mouseScrolled(float x, float y) override;
 
-    // キーボードイベント
+    // Keyboard events
     void keyPressed(int key) override;
     void keyReleased(int key) override;
 
-    // ウィンドウイベント
+    // Window events
     void windowResized(int w, int h) override;
 };
 
-// アプリ起動
+// Launch app
 int main() {
     WindowSettings settings;
     settings.title = "My App";
     settings.width = 1280;
     settings.height = 720;
     settings.highDpi = true;
-    settings.msaaSamples = 4;  // アンチエイリアス
+    settings.msaaSamples = 4;  // Anti-aliasing
     runApp<tcApp>(settings);
     return 0;
 }
@@ -56,77 +56,108 @@ int main() {
 
 ---
 
-## 描画関数
+## Drawing Functions
 
-### 基本図形
+### Basic Shapes
 
 ```cpp
-// 矩形
+// Rectangle
 drawRect(x, y, width, height);
 
-// 円
+// Circle
 drawCircle(cx, cy, radius);
 
-// 楕円
+// Ellipse
 drawEllipse(cx, cy, radiusX, radiusY);
 
-// 線
+// Line
 drawLine(x1, y1, x2, y2);
 
-// 三角形
+// Triangle
 drawTriangle(x1, y1, x2, y2, x3, y3);
 
-// 点
+// Point
 drawPoint(x, y);
 
-// 背景クリア
+// Clear background
 clear(r, g, b);           // 0-255
-clear(gray);              // グレースケール
-clear(Color c);           // Color構造体
+clear(gray);              // Grayscale
+clear(Color c);           // Color struct
 ```
 
-### 塗り・線
+### Fill & Stroke
 
 ```cpp
-fill();                   // 塗りつぶし有効
-noFill();                 // 塗りつぶし無効
-stroke();                 // 輪郭線有効
-noStroke();               // 輪郭線無効
-setStrokeWeight(weight);  // 線幅設定
+fill();                   // Enable fill
+noFill();                 // Disable fill
+stroke();                 // Enable outline
+noStroke();               // Disable outline
+setStrokeWeight(weight);  // Set line width
 ```
 
-### 文字列描画
+### Custom Shapes (beginShape/endShape)
 
 ```cpp
-// ビットマップフォント（固定幅、高速）Y座標はベースライン基準
+// Polygon
+beginShape();
+vertex(x1, y1);
+vertex(x2, y2);
+vertex(x3, y3);
+// ... more vertices
+endShape(true);  // true = close shape
+
+// Lines
+beginShape(ShapeMode::Lines);
+vertex(x1, y1);
+vertex(x2, y2);
+vertex(x3, y3);
+vertex(x4, y4);
+endShape();
+
+// Available modes:
+// ShapeMode::Polygon (default), ShapeMode::Lines,
+// ShapeMode::LineStrip, ShapeMode::Points
+```
+
+### Text Drawing
+
+```cpp
+// Bitmap font (fixed width, fast) - Y coordinate is baseline
 drawBitmapString("Hello", x, y);
-drawBitmapString("Hello", x, y, scale);  // スケール指定
+drawBitmapString("Hello", x, y, scale);  // With scale
+
+// TrueType font
+Font font;
+font.load("font.ttf", 24);  // Load with size
+font.drawString("Hello", x, y);
+font.getStringWidth("Hello");
+font.getLineHeight();
 ```
 
 ---
 
-## 色設定
+## Color Settings
 
 ### setColor
 
 ```cpp
 // RGB (0-255)
-setColor(255, 0, 0);           // 赤
-setColor(255, 0, 0, 128);      // 半透明赤
+setColor(255, 0, 0);           // Red
+setColor(255, 0, 0, 128);      // Semi-transparent red
 
 // RGB (0.0-1.0)
 setColor(1.0f, 0.0f, 0.0f);
 
-// グレースケール
-setColor(128);                 // 灰色
+// Grayscale
+setColor(128);                 // Gray
 setColor(0.5f);
 
-// Color構造体
+// Color struct
 setColor(Color c);
 setColor(colors::cornflowerBlue);
 ```
 
-### 色空間
+### Color Spaces
 
 ```cpp
 // HSB (H: 0-TAU, S: 0-1, B: 0-1)
@@ -137,12 +168,12 @@ setColorHSB(h, s, b, alpha);
 setColorOKLab(L, a, b);
 setColorOKLab(L, a, b, alpha);
 
-// OKLCH（彩度と色相で指定）
+// OKLCH (chroma and hue)
 setColorOKLCH(L, C, H);
 setColorOKLCH(L, C, H, alpha);
 ```
 
-### Color 構造体
+### Color Struct
 
 ```cpp
 Color c(r, g, b);
@@ -150,81 +181,81 @@ Color c(r, g, b, a);
 Color c(gray);
 Color c(gray, a);
 
-// HSB から作成
+// From HSB
 Color c = ColorHSB(h, s, b).toRGB();
 Color c = ColorHSB(h, s, b, a).toRGB();
 
-// OKLab / OKLCH から作成
+// From OKLab / OKLCH
 Color c = ColorOKLab(L, a, b).toRGB();
 Color c = ColorOKLCH(L, C, H).toRGB();
 
-// 色補間
-Color c = Color::lerp(c1, c2, t);          // RGB 線形補間
-Color c = Color::lerpHSB(c1, c2, t);       // HSB 補間
-Color c = Color::lerpOKLab(c1, c2, t);     // OKLab 補間（推奨）
-Color c = Color::lerpOKLCH(c1, c2, t);     // OKLCH 補間
+// Color interpolation
+Color c = Color::lerp(c1, c2, t);          // RGB linear
+Color c = Color::lerpHSB(c1, c2, t);       // HSB
+Color c = Color::lerpOKLab(c1, c2, t);     // OKLab (recommended)
+Color c = Color::lerpOKLCH(c1, c2, t);     // OKLCH
 ```
 
-### 定義済みカラー
+### Predefined Colors
 
 ```cpp
 colors::white, colors::black, colors::red, colors::green, colors::blue
 colors::yellow, colors::cyan, colors::magenta, colors::orange
-colors::cornflowerBlue  // oF デフォルト背景色
+colors::cornflowerBlue  // oF default background
 ```
 
 ---
 
-## 座標変換
+## Transform
 
 ```cpp
-pushMatrix();             // 行列をスタックに保存
-popMatrix();              // 行列をスタックから復元
+pushMatrix();             // Save matrix to stack
+popMatrix();              // Restore matrix from stack
 
-translate(x, y);          // 平行移動（2D）
-translate(x, y, z);       // 平行移動（3D）
+translate(x, y);          // 2D translation
+translate(x, y, z);       // 3D translation
 
-rotate(radians);          // Z軸回転（2D用）
-rotateX(radians);         // X軸回転
-rotateY(radians);         // Y軸回転
-rotateZ(radians);         // Z軸回転
+rotate(radians);          // Z-axis rotation (2D)
+rotateX(radians);         // X-axis rotation
+rotateY(radians);         // Y-axis rotation
+rotateZ(radians);         // Z-axis rotation
 
-rotateDeg(degrees);       // 度数法版
+rotateDeg(degrees);       // Degree versions
 rotateXDeg(degrees);
 rotateYDeg(degrees);
 rotateZDeg(degrees);
 
-scale(s);                 // 均等スケール
-scale(sx, sy);            // 2Dスケール
-scale(sx, sy, sz);        // 3Dスケール
+scale(s);                 // Uniform scale
+scale(sx, sy);            // 2D scale
+scale(sx, sy, sz);        // 3D scale
 
-resetMatrix();            // 行列をリセット
+resetMatrix();            // Reset matrix
 ```
 
 ---
 
-## 数学関数
+## Math Functions
 
-### 基本数学
+### Basic Math
 
 ```cpp
-// 定数
+// Constants
 PI                        // 3.14159...
 TAU                       // 6.28318... (2*PI)
 HALF_PI                   // PI/2
 DEG_TO_RAD                // PI/180
 RAD_TO_DEG                // 180/PI
 
-// 値の制限・補間
-clamp(value, min, max);   // 範囲内に制限
-lerp(a, b, t);            // 線形補間 (t: 0-1)
-map(value, inMin, inMax, outMin, outMax);  // 範囲変換
+// Clamping & Interpolation
+clamp(value, min, max);   // Limit to range
+lerp(a, b, t);            // Linear interpolation (t: 0-1)
+map(value, inMin, inMax, outMin, outMax);  // Range mapping
 
-// 角度変換
+// Angle conversion
 radians(degrees);
 degrees(radians);
 
-// その他
+// Other
 abs(x), floor(x), ceil(x), round(x)
 min(a, b), max(a, b)
 pow(x, y), sqrt(x)
@@ -232,24 +263,24 @@ sin(x), cos(x), tan(x)
 asin(x), acos(x), atan(x), atan2(y, x)
 ```
 
-### ベクトル
+### Vectors
 
 ```cpp
 // Vec2
 Vec2 v(x, y);
 Vec2 v = Vec2::zero();
 v.x, v.y
-v.length();               // 長さ
-v.lengthSquared();        // 長さの2乗
-v.normalized();           // 正規化
-v.dot(other);             // 内積
-v.cross(other);           // 外積（スカラー）
-v.distance(other);        // 距離
-v.lerp(other, t);         // 補間
-v.angle();                // X軸との角度
-Vec2::fromAngle(radians); // 角度から作成
+v.length();               // Length
+v.lengthSquared();        // Squared length
+v.normalized();           // Normalize
+v.dot(other);             // Dot product
+v.cross(other);           // Cross product (scalar)
+v.distance(other);        // Distance
+v.lerp(other, t);         // Interpolation
+v.angle();                // Angle from X-axis
+Vec2::fromAngle(radians); // Create from angle
 
-// 演算子
+// Operators
 v1 + v2, v1 - v2, v1 * scalar, v1 / scalar
 
 // Vec3
@@ -262,7 +293,7 @@ v.x, v.y, v.z
 v.length(), v.normalized(), v.dot(other), v.cross(other)
 ```
 
-### 行列
+### Matrix
 
 ```cpp
 Mat4 m = Mat4::identity();
@@ -271,30 +302,30 @@ Mat4 m = Mat4::rotateX(radians);
 Mat4 m = Mat4::rotateY(radians);
 Mat4 m = Mat4::rotateZ(radians);
 Mat4 m = Mat4::scale(sx, sy, sz);
-Mat4 m = m1 * m2;         // 行列の乗算
-Mat4 inv = m.inverted();  // 逆行列
+Mat4 m = m1 * m2;         // Matrix multiplication
+Mat4 inv = m.inverted();  // Inverse matrix
 ```
 
-### ノイズ
+### Noise
 
 ```cpp
-// パーリンノイズ (0.0 - 1.0)
+// Perlin noise (0.0 - 1.0)
 noise(x);
 noise(x, y);
 noise(x, y, z);
 
-// 符号付きノイズ (-1.0 - 1.0)
+// Signed noise (-1.0 - 1.0)
 signedNoise(x);
 signedNoise(x, y);
 signedNoise(x, y, z);
 
-// フラクタルノイズ (fbm)
+// Fractal noise (fbm)
 fbm(x, y);
 fbm(x, y, octaves, lacunarity, gain);
 fbm(x, y, z, octaves, lacunarity, gain);
 ```
 
-### 乱数
+### Random
 
 ```cpp
 random();                 // 0.0 - 1.0
@@ -302,36 +333,36 @@ random(max);              // 0.0 - max
 random(min, max);         // min - max
 randomInt(max);           // 0 - max-1
 randomInt(min, max);      // min - max
-randomSeed(seed);         // シード設定
+randomSeed(seed);         // Set seed
 ```
 
 ---
 
-## 入力
+## Input
 
-### マウス
+### Mouse
 
 ```cpp
-getMouseX();              // マウスX座標
-getMouseY();              // マウスY座標
-getPMouseX();             // 前フレームのマウスX
-getPMouseY();             // 前フレームのマウスY
-isMousePressed();         // マウスボタンが押されているか
-isMousePressed(button);   // 特定ボタン (MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE)
+getMouseX();              // Mouse X coordinate
+getMouseY();              // Mouse Y coordinate
+getPMouseX();             // Previous frame mouse X
+getPMouseY();             // Previous frame mouse Y
+isMousePressed();         // Any mouse button pressed
+isMousePressed(button);   // Specific button (MOUSE_BUTTON_LEFT, RIGHT, MIDDLE)
 
-// グローバル座標（Node内から使用）
+// Global coordinates (from inside Node)
 getGlobalMouseX();
 getGlobalMouseY();
 ```
 
-### キーボード
+### Keyboard
 
 ```cpp
-isKeyPressed();           // 何かキーが押されているか
-isKeyPressed(key);        // 特定キーが押されているか
-getLastKey();             // 最後に押されたキー
+isKeyPressed();           // Any key pressed
+isKeyPressed(key);        // Specific key pressed
+getLastKey();             // Last pressed key
 
-// 特殊キー定数
+// Special key constants
 KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN
 KEY_ENTER, KEY_ESCAPE, KEY_SPACE, KEY_TAB
 KEY_BACKSPACE, KEY_DELETE
@@ -341,131 +372,131 @@ KEY_F1 ~ KEY_F12
 
 ---
 
-## 時間・フレーム
+## Time & Frame
 
 ```cpp
-// 経過時間
-getElapsedTime();         // 起動からの経過時間（秒、float）
-getElapsedTimef();        // 同上
-getElapsedTimeMillis();   // 経過時間（ミリ秒）
-getElapsedTimeMicros();   // 経過時間（マイクロ秒）
-resetElapsedTimeCounter(); // 経過時間カウンターをリセット
-getDeltaTime();           // 前フレームからの経過時間
+// Elapsed time
+getElapsedTime();         // Seconds since start (float)
+getElapsedTimef();        // Same
+getElapsedTimeMillis();   // Milliseconds
+getElapsedTimeMicros();   // Microseconds
+resetElapsedTimeCounter(); // Reset elapsed time counter
+getDeltaTime();           // Time since last frame
 
-// フレームカウント
-getFrameCount();          // update 呼び出し回数（= getUpdateCount）
-getUpdateCount();         // update 呼び出し回数
-getDrawCount();           // 描画フレーム回数
-getFrameRate();           // 現在のFPS
+// Frame count
+getFrameCount();          // Update call count (= getUpdateCount)
+getUpdateCount();         // Update call count
+getDrawCount();           // Draw frame count
+getFrameRate();           // Current FPS
 
-// FPS 設定
-setFps(fps);              // 目標FPS設定（Update + Draw 同期）
-setDrawFps(fps);          // 描画レート個別設定
-setUpdateFps(fps);        // 更新レート個別設定（Decoupled モード）
-setVsync(true);           // VSync モード
+// FPS settings
+setFps(fps);              // Target FPS (Update + Draw sync)
+setDrawFps(fps);          // Draw rate separate setting
+setUpdateFps(fps);        // Update rate separate (Decoupled mode)
+setVsync(true);           // VSync mode
 
-// タイムスタンプ
+// Timestamp
 getTimestampString();     // "2024-01-15-18-29-35-299"
-getTimestampString("%Y/%m/%d %H:%M:%S");  // フォーマット指定（%i でミリ秒）
+getTimestampString("%Y/%m/%d %H:%M:%S");  // Custom format (%i for millis)
 
-// 現在時刻
+// Current time
 getSeconds();             // 0-59
 getMinutes();             // 0-59
 getHours();               // 0-23
-getYear();                // 例: 2024
+getYear();                // e.g. 2024
 getMonth();               // 1-12
 getDay();                 // 1-31
-getWeekday();             // 0=日曜, 1=月曜, ... 6=土曜
+getWeekday();             // 0=Sun, 1=Mon, ... 6=Sat
 
-// スリープ
-sleepMillis(ms);          // ミリ秒スリープ
-sleepMicros(us);          // マイクロ秒スリープ
+// Sleep
+sleepMillis(ms);          // Millisecond sleep
+sleepMicros(us);          // Microsecond sleep
 
-// アプリ終了
-exitApp();                // 終了リクエスト → exit() → cleanup() → デストラクタ
+// Exit app
+exitApp();                // Request exit -> exit() -> cleanup() -> destructors
 ```
 
 ---
 
-## ウィンドウ
+## Window
 
 ```cpp
-getWindowWidth();         // ウィンドウ幅
-getWindowHeight();        // ウィンドウ高さ
-getWidth();               // 描画領域幅（= getWindowWidth）
-getHeight();              // 描画領域高さ
-isFullscreen();           // フルスクリーンか
-setFullscreen(bool);      // フルスクリーン設定
-toggleFullscreen();       // フルスクリーン切り替え
-setWindowTitle("title");  // タイトル設定
+getWindowWidth();         // Window width
+getWindowHeight();        // Window height
+getWidth();               // Drawing area width (= getWindowWidth)
+getHeight();              // Drawing area height
+isFullscreen();           // Is fullscreen
+setFullscreen(bool);      // Set fullscreen
+toggleFullscreen();       // Toggle fullscreen
+setWindowTitle("title");  // Set title
 ```
 
 ---
 
-## 画像 (Image)
+## Image
 
 ```cpp
 Image img;
 
-// 読み込み
+// Load
 img.load("image.png");
 img.loadFromMemory(buffer, length);
 
-// 確保（動的更新用）
+// Allocate (for dynamic updates)
 img.allocate(width, height, channels);
 
-// 状態
+// State
 img.isAllocated();
 img.getWidth();
 img.getHeight();
 img.getChannels();
 
-// ピクセル操作
+// Pixel operations
 Color c = img.getColor(x, y);
 img.setColor(x, y, color);
-img.update();             // 変更をGPUに反映
+img.update();             // Upload changes to GPU
 
-// 描画
+// Draw
 img.draw(x, y);
 img.draw(x, y, width, height);
 
-// 保存
+// Save
 img.save("output.png");
 
-// ピクセルデータへのアクセス
+// Pixel data access
 Pixels& pixels = img.getPixels();
 unsigned char* data = img.getPixelsData();
 ```
 
 ---
 
-## FBO (フレームバッファ)
+## FBO (Framebuffer)
 
 ```cpp
 Fbo fbo;
 
-// 確保
+// Allocate
 fbo.allocate(width, height);
-fbo.allocate(width, height, msaaSamples);  // MSAA対応
+fbo.allocate(width, height, msaaSamples);  // MSAA support
 
-// オフスクリーン描画
-fbo.begin();              // 描画開始（透明でクリア）
-fbo.begin(r, g, b, a);    // 背景色指定
-// ... 描画処理 ...
-fbo.end();                // 描画終了
+// Offscreen drawing
+fbo.begin();              // Start drawing (clear transparent)
+fbo.begin(r, g, b, a);    // With background color
+// ... drawing ...
+fbo.end();                // End drawing
 
-// 描画
+// Draw
 fbo.draw(x, y);
 fbo.draw(x, y, width, height);
 
-// 保存
+// Save
 fbo.save("output.png");
 
-// Image にコピー
+// Copy to Image
 Image img;
 fbo.copyTo(img);
 
-// 状態
+// State
 fbo.getWidth();
 fbo.getHeight();
 fbo.isAllocated();
@@ -473,70 +504,70 @@ fbo.isAllocated();
 
 ---
 
-## スクリーンショット
+## Screenshot
 
 ```cpp
-// 画面全体をファイルに保存
+// Save entire screen to file
 saveScreenshot("screenshot.png");
 saveScreenshot(getDataPath("output/frame_" + toString(getFrameNum()) + ".png"));
 ```
 
-**AI エージェント向け情報**: `saveScreenshot()` は AI が自律的にデバッグを進める際に非常に有用。描画結果を画像として保存し、その画像を読み取ることで、コードの出力を視覚的に確認できる。例えば「円が表示されない」というバグを調査する際、スクリーンショットを取得して内容を確認することで、問題の原因（座標が画面外、色が背景と同じ、等）を特定できる。
+**For AI Agents**: `saveScreenshot()` is very useful for autonomous debugging. Save rendering results as images and read them to visually verify code output. For example, when investigating "circle not displaying", taking a screenshot helps identify causes (coordinates off-screen, color same as background, etc.).
 
 ---
 
-## コンソール入力（stdin からのコマンド）
+## Console Input (Commands from stdin)
 
-TrussC アプリは stdin からコマンドを受け取り、stdout に JSON で応答する機能を持つ。これにより AI エージェントが実行中のアプリと対話できる。
+TrussC apps can receive commands from stdin and respond with JSON on stdout. This enables AI agents to interact with running apps.
 
-### 組み込みコマンド
+### Built-in Commands
 
 ```bash
-# アプリ情報を取得
+# Get app info
 echo "tcdebug info" | ./myApp
-# 出力: {"fps":60.0,"width":800,"height":600,"updateCount":123,"drawCount":123,"elapsedTime":2.05}
+# Output: {"fps":60.0,"width":800,"height":600,"updateCount":123,"drawCount":123,"elapsedTime":2.05}
 
-# スクリーンショットを保存
+# Save screenshot
 echo "tcdebug screenshot /tmp/shot.png" | ./myApp
-# 出力: {"status":"ok","path":"/tmp/shot.png"}
+# Output: {"status":"ok","path":"/tmp/shot.png"}
 ```
 
-### AI エージェントからの使用
+### Usage from AI Agents
 
-FIFO（名前付きパイプ）を使うと、アプリを起動したまま複数のコマンドを送信できる：
+Use FIFO (named pipe) to send multiple commands while app is running:
 
 ```bash
-# FIFO を作成
+# Create FIFO
 mkfifo /tmp/app_fifo
 
-# アプリをバックグラウンドで起動（FIFO から読む）
+# Launch app in background (reading from FIFO)
 ./myApp < /tmp/app_fifo &
 APP_PID=$!
 
-# FIFO を書き込み用に開く
+# Open FIFO for writing
 exec 3>/tmp/app_fifo
 
-# コマンドを送信
+# Send commands
 echo "tcdebug info" >&3
 sleep 1
 echo "tcdebug screenshot /tmp/debug.png" >&3
 sleep 1
 
-# クリーンアップ
+# Cleanup
 exec 3>&-
 kill $APP_PID
 rm /tmp/app_fifo
 ```
 
-### カスタムコマンドの実装
+### Custom Command Implementation
 
-アプリ側でカスタムコマンドを処理できる：
+Handle custom commands in app:
 
 ```cpp
 class tcApp : public App {
 public:
     void setup() override {
-        // リスナーをメンバ変数に保持（重要！）
+        // Keep listener as member variable (IMPORTANT!)
         consoleListener_ = events().console.listen([this](ConsoleEventArgs& e) {
             if (e.args.empty()) return;
 
@@ -554,53 +585,53 @@ public:
     }
 
 private:
-    EventListener consoleListener_;  // リスナーを保持しないと即座に解除される
+    EventListener consoleListener_;  // Listener unregisters when destroyed
 };
 ```
 
-**重要**: `events().console.listen()` の戻り値（`EventListener`）は必ずメンバ変数に保持すること。保持しないとスコープ終了時にリスナーが自動解除される（RAII パターン）。
+**IMPORTANT**: The return value of `events().console.listen()` (`EventListener`) MUST be stored as a member variable. If not stored, the listener is automatically unregistered when scope ends (RAII pattern).
 
-### コンソール機能の無効化
+### Disabling Console
 
-stdin を他の用途で使いたい場合は、setup() 内で無効化できる：
+If using stdin for other purposes, disable in setup():
 
 ```cpp
 void setup() override {
-    console::stop();  // stdin 読み取りスレッドを停止
+    console::stop();  // Stop stdin reading thread
 }
 ```
 
-**AI エージェント向け情報**: この機能により、AI はビルド済みの TrussC アプリに対してリアルタイムでコマンドを送信し、アプリの状態を確認したり、スクリーンショットを取得したりできる。デバッグ、テスト、自動化に非常に有用。
+**For AI Agents**: This feature allows AI to send real-time commands to built-in TrussC apps, check app state, and capture screenshots. Very useful for debugging, testing, and automation.
 
 ---
 
-## 3D 描画
+## 3D Drawing
 
 ### EasyCam
 
 ```cpp
 EasyCam cam;
 
-// setup() で初期化
+// Initialize in setup()
 cam.setDistance(500);
 cam.setTarget(0, 0, 0);
 
-// draw() で使用
+// Use in draw()
 cam.begin();
-// ... 3D描画 ...
+// ... 3D drawing ...
 cam.end();
 
-// マウス操作を有効/無効
+// Enable/disable mouse input
 cam.enableMouseInput();
 cam.disableMouseInput();
 
-// マウスイベントを転送（mousePressed等から呼ぶ）
+// Forward mouse events (call from mousePressed, etc.)
 cam.mousePressed(x, y, button);
 cam.mouseReleased(x, y, button);
 cam.mouseDragged(x, y, button);
 cam.mouseScrolled(dx, dy);
 
-// パラメータ
+// Parameters
 cam.setFovDeg(45);
 cam.setNearClip(0.1f);
 cam.setFarClip(10000);
@@ -609,19 +640,19 @@ cam.setZoomSensitivity(10.0f);
 cam.reset();
 ```
 
-### 3D プリミティブ
+### 3D Primitives
 
 ```cpp
-// Mesh を生成
+// Generate Mesh
 Mesh box = createBox(width, height, depth);
-Mesh box = createBox(size);                    // 立方体
+Mesh box = createBox(size);                    // Cube
 Mesh sphere = createSphere(radius, resolution);
 Mesh cylinder = createCylinder(radius, height, resolution);
 Mesh cone = createCone(radius, height, resolution);
 Mesh plane = createPlane(width, height, cols, rows);
 Mesh icoSphere = createIcoSphere(radius, subdivisions);
 
-// 描画
+// Draw
 box.draw();
 box.drawWireframe();
 ```
@@ -631,7 +662,7 @@ box.drawWireframe();
 ```cpp
 Mesh mesh;
 
-// 頂点追加
+// Add vertices
 mesh.addVertex(x, y, z);
 mesh.addVertex(Vec3 v);
 mesh.addNormal(nx, ny, nz);
@@ -640,57 +671,97 @@ mesh.addColor(Color c);
 mesh.addIndex(index);
 mesh.addTriangle(i0, i1, i2);
 
-// プリミティブモード
+// Primitive mode
 mesh.setMode(PrimitiveMode::Triangles);
 mesh.setMode(PrimitiveMode::Lines);
 mesh.setMode(PrimitiveMode::Points);
 mesh.setMode(PrimitiveMode::TriangleStrip);
 
-// データ取得
+// Get data
 vector<Vec3>& verts = mesh.getVertices();
 int numVerts = mesh.getNumVertices();
 int numIndices = mesh.getNumIndices();
 
-// 描画
+// Draw
 mesh.draw();
 mesh.drawWireframe();
 
-// クリア
+// Clear
 mesh.clear();
+```
+
+### Lighting
+
+```cpp
+Light light;
+
+// Light type
+light.setDirectional(0, -1, 0);  // Direction (sunlight)
+light.setPoint(x, y, z);         // Position (point light)
+
+// Colors
+light.setAmbient(0.2f, 0.2f, 0.2f);
+light.setDiffuse(1.0f, 1.0f, 1.0f);
+light.setSpecular(1.0f, 1.0f, 1.0f);
+light.setIntensity(1.0f);
+
+// Attenuation (for point lights)
+light.setAttenuation(constant, linear, quadratic);
+
+// Enable/disable
+light.enable();
+light.disable();
+
+// Material
+Material mat;
+mat.setAmbient(0.2f, 0.2f, 0.2f);
+mat.setDiffuse(0.8f, 0.2f, 0.2f);  // Object color
+mat.setSpecular(1.0f, 1.0f, 1.0f);
+mat.setShininess(32.0f);
+mat.setEmission(0, 0, 0);  // Self-illumination
+
+// Use in draw()
+LightingState lighting;
+lighting.enableLighting();
+lighting.addLight(&light);
+lighting.setMaterial(&mat);
+lighting.begin();
+mesh.draw();  // Drawn with lighting
+lighting.end();
 ```
 
 ---
 
-## サウンド (Sound)
+## Sound
 
 ```cpp
 Sound sound;
 
-// 読み込み（.ogg, .wav, .mp3 対応）
+// Load (.ogg, .wav, .mp3 supported)
 sound.load("music.ogg");
-sound.loadTestTone(440.0f, 1.0f);  // テスト用サイン波
+sound.loadTestTone(440.0f, 1.0f);  // Test sine wave
 
-// 再生制御
+// Playback control
 sound.play();
 sound.stop();
 sound.pause();
 sound.resume();
 
-// 設定
+// Settings
 sound.setVolume(0.8f);      // 0.0 - 1.0
-sound.setPan(-0.5f);        // -1.0（左）〜 1.0（右）
-sound.setSpeed(1.5f);       // 再生速度（0.1 - 4.0）
+sound.setPan(-0.5f);        // -1.0 (left) to 1.0 (right)
+sound.setSpeed(1.5f);       // Playback speed (0.1 - 4.0)
 sound.setLoop(true);
 
-// 状態
+// State
 sound.isPlaying();
 sound.isPaused();
 sound.isLoaded();
-sound.getPosition();        // 再生位置（秒）
-sound.getDuration();        // 全長（秒）
+sound.getPosition();        // Position (seconds)
+sound.getDuration();        // Duration (seconds)
 ```
 
-### マイク入力
+### Microphone Input
 
 ```cpp
 MicInput& mic = getMicInput();
@@ -699,14 +770,133 @@ mic.start();
 mic.stop();
 mic.isRunning();
 
-// 波形データ取得
+// Get waveform data
 float buffer[1024];
 size_t count = mic.getBuffer(buffer, 1024);
 ```
 
 ---
 
-## Node (シーングラフ)
+## Network
+
+### TCP Client
+
+```cpp
+TcpClient client;
+
+// Event-driven pattern (IMPORTANT: store listeners!)
+connectListener_ = client.onConnect.listen([this]() {
+    tcLogNotice("TCP") << "Connected!";
+});
+disconnectListener_ = client.onDisconnect.listen([this]() {
+    tcLogNotice("TCP") << "Disconnected";
+});
+receiveListener_ = client.onReceive.listen([this](TcpReceiveEventArgs& e) {
+    string data(e.data.begin(), e.data.end());
+    tcLogNotice("TCP") << "Received: " << data;
+});
+
+// Connect
+client.connect("example.com", 80);
+
+// Send
+client.send("GET / HTTP/1.1\r\n\r\n");
+client.sendBytes(data, length);
+
+// State
+client.isConnected();
+
+// Must call in update()
+client.update();
+```
+
+### TCP Server
+
+```cpp
+TcpServer server;
+
+// Event handlers (store as members!)
+clientConnectListener_ = server.onClientConnect.listen([](TcpClientEventArgs& e) {
+    tcLogNotice("Server") << "Client connected: " << e.clientId;
+});
+clientReceiveListener_ = server.onClientReceive.listen([](TcpReceiveEventArgs& e) {
+    // e.clientId, e.data
+});
+
+// Start server
+server.start(8080);
+
+// Send to client
+server.send(clientId, data, length);
+server.broadcast(data, length);  // Send to all clients
+
+// Must call in update()
+server.update();
+```
+
+### UDP Socket
+
+```cpp
+UdpSocket udp;
+
+// Receive callback
+receiveListener_ = udp.onReceive.listen([](UdpReceiveEventArgs& e) {
+    // e.data, e.senderAddress, e.senderPort
+});
+
+// Bind to port
+udp.bind(9000);
+
+// Send
+udp.sendTo("192.168.1.100", 9000, data, length);
+
+// Must call in update()
+udp.update();
+```
+
+---
+
+## Threading
+
+```cpp
+// Thread (runs separate from main thread)
+Thread thread;
+
+// Start with lambda
+thread.start([]() {
+    // Background work
+    while (running) {
+        // ...
+    }
+});
+
+// Check state
+thread.isRunning();
+
+// Wait for completion
+thread.join();
+
+// Thread Channel (thread-safe queue)
+ThreadChannel<string> channel;
+
+// Producer thread
+thread.start([&channel]() {
+    channel.send("message");
+});
+
+// Consumer (main thread, in update())
+string msg;
+if (channel.tryReceive(msg)) {
+    // Process message
+}
+
+// Blocking receive
+channel.receive(msg);  // Waits until data available
+```
+
+---
+
+## Node (Scene Graph)
 
 ```cpp
 class MyNode : public Node {
@@ -719,16 +909,16 @@ public:
     }
 
 protected:
-    // イベント（オーバーライド可能）
+    // Events (overridable)
     bool hitTest(float localX, float localY) override {
         return localX >= -50 && localX <= 50 && localY >= -50 && localY <= 50;
     }
     bool onMousePress(float localX, float localY, int button) override {
-        return true;  // イベント消費
+        return true;  // Consume event
     }
 };
 
-// 使い方
+// Usage
 auto node = make_shared<MyNode>();
 node->x = 100;
 node->y = 100;
@@ -736,125 +926,125 @@ node->rotation = PI / 4;
 node->scaleX = 2.0f;
 node->scaleY = 2.0f;
 
-// ツリー操作
+// Tree operations
 parent->addChild(node);
 parent->removeChild(node);
 parent->getChildren();
 node->getParent();
 
-// 状態
-node->isActive = true;   // false で update/draw スキップ
-node->isVisible = true;  // false で draw のみスキップ
+// State
+node->isActive = true;   // false skips update/draw
+node->isVisible = true;  // false skips draw only
 
-// 座標変換
+// Coordinate conversion
 node->globalToLocal(gx, gy, lx, ly);
 node->localToGlobal(lx, ly, gx, gy);
-float mx = node->getMouseX();  // ローカル座標でのマウス位置
+float mx = node->getMouseX();  // Mouse in local coords
 
-// タイマー（update() 内で実行されるのでスレッドセーフ）
-uint64_t id = node->callAfter(2.0, []{ /* 2秒後に実行 */ });
-uint64_t id = node->callEvery(1.0, []{ /* 1秒ごとに実行 */ });
+// Timers (execute in update(), thread-safe)
+uint64_t id = node->callAfter(2.0, []{ /* Run after 2 sec */ });
+uint64_t id = node->callEvery(1.0, []{ /* Run every 1 sec */ });
 node->cancelTimer(id);
 node->cancelAllTimers();
 ```
 
-**タイマーの安全性**: `callAfter()` / `callEvery()` のコールバックは `update()` サイクル内（メインスレッド）で実行される。そのため、コールバック内でノードの状態変更、描画設定の変更、他のノード操作などを安全に行える。別スレッドからのコールバックではないので、mutex やロックは不要。
+**Timer Safety**: `callAfter()` / `callEvery()` callbacks execute during `update()` cycle (main thread). This means callbacks can safely modify node state, change drawing settings, and operate on other nodes. No mutex or locks needed since callbacks don't run from separate threads.
 
 ---
 
 ## ImGui
 
 ```cpp
-// setup() で初期化
+// Initialize in setup()
 imguiSetup();
 
-// draw() で使用
+// Use in draw()
 imguiBegin();
 
 ImGui::Begin("Window Title");
 ImGui::Text("Hello, world!");
 if (ImGui::Button("Click Me")) {
-    // ボタンが押された
+    // Button pressed
 }
 ImGui::SliderFloat("Value", &value, 0.0f, 1.0f);
 ImGui::End();
 
 imguiEnd();
 
-// ImGui がマウス/キーボードを使用中か
+// Check if ImGui using mouse/keyboard
 if (!imguiWantsMouse()) {
-    // 自前のマウス処理
+    // Custom mouse handling
 }
 if (!imguiWantsKeyboard()) {
-    // 自前のキーボード処理
+    // Custom keyboard handling
 }
 ```
 
 ---
 
-## ユーティリティ
+## Utilities
 
-### データパス
+### Data Path
 
 ```cpp
-// デフォルトは実行ファイルと同じディレクトリの data/ フォルダ
+// Default is data/ folder in same directory as executable
 string path = getDataPath("image.png");
 
-// ルートを変更
+// Change root
 setDataPathRoot("/path/to/data/");
 
-// macOS バンドル用（Resources/data/ を参照）
+// For macOS bundle (references Resources/data/)
 setDataPathToResources();
 ```
 
-### 文字列変換
+### String Conversion
 
 ```cpp
-// 数値 → 文字列
+// Number -> String
 string s = toString(42);
-string s = toString(3.14159, 2);         // "3.14"（小数点2桁）
-string s = toString(42, 5, '0');         // "00042"（5桁ゼロ埋め）
-string s = toString(3.14, 2, 6, '0');    // "003.14"（精度+幅+フィル）
+string s = toString(3.14159, 2);         // "3.14" (2 decimal places)
+string s = toString(42, 5, '0');         // "00042" (5 digits, zero-padded)
+string s = toString(3.14, 2, 6, '0');    // "003.14" (precision+width+fill)
 
-// 16進数
+// Hex
 string s = toHex(255);                   // "FF"
 string s = toHex(255, 4);                // "00FF"
 
-// 2進数
+// Binary
 string s = toBinary(255);                // "00000000...11111111"
 string s = toBinary((char)65);           // "01000001" (= 'A')
 
-// 文字列 → 数値
+// String -> Number
 int i = toInt("42");
 float f = toFloat("3.14");
 double d = toDouble("3.14159");
-bool b = toBool("true");                 // "true", "1", "yes" → true
+bool b = toBool("true");                 // "true", "1", "yes" -> true
 int i = hexToInt("FF");                  // 255
 unsigned int u = hexToUInt("FFFFFFFF");
 ```
 
-### 文字列操作
+### String Operations
 
 ```cpp
-// 検索
+// Search
 bool found = isStringInString("hello world", "world");  // true
 size_t count = stringTimesInString("abcabc", "abc");    // 2
 
-// 分割・結合
+// Split & Join
 vector<string> parts = splitString("a,b,c", ",");       // {"a", "b", "c"}
 vector<string> parts = splitString("a, b, c", ",", true, true);  // ignoreEmpty, trim
 string joined = joinString(parts, "-");                 // "a-b-c"
 
-// 置換（破壊的）
+// Replace (in-place)
 string s = "hello world";
 stringReplace(s, "world", "TrussC");                    // "hello TrussC"
 
-// トリム
+// Trim
 string s = trim("  hello  ");                           // "hello"
 string s = trimFront("  hello");                        // "hello"
 string s = trimBack("hello  ");                         // "hello"
 
-// 大文字・小文字
+// Case
 string s = toLower("HELLO");                            // "hello"
 string s = toUpper("hello");                            // "HELLO"
 ```
@@ -862,106 +1052,204 @@ string s = toUpper("hello");                            // "HELLO"
 ### JSON
 
 ```cpp
-// 読み込み
+// Load
 Json j = loadJson("config.json");
 
-// 書き込み
+// Save
 saveJson(j, "config.json");
-saveJson(j, "config.json", 4);  // インデント4
+saveJson(j, "config.json", 4);  // Indent 4
 
-// パース
+// Parse
 Json j = parseJson("{\"key\": \"value\"}");
 
-// 文字列化
+// Stringify
 string s = toJsonString(j);
 
-// 値の取得・設定
+// Get/Set values
 j["key"] = "value";
 string val = j["key"];
 int num = j["number"];
-bool flag = j.value("flag", false);  // デフォルト値付き
+bool flag = j.value("flag", false);  // With default
 ```
 
-### ログ
+### Logging
 
 ```cpp
-// ストリーム形式（モジュール名付き推奨）
+// Stream format (with module name recommended)
 tcLogNotice("tcApp") << "Info: " << value;
 tcLogWarning("tcApp") << "Warning: " << message;
 tcLogError("tcApp") << "Error: " << error;
 tcLogVerbose("tcApp") << "Debug: " << debug;
 
-// モジュール名なしも可
+// Without module name
 tcLogNotice() << "Simple message";
 
-// レベル設定
-tcSetConsoleLogLevel(LogLevel::Warning);  // Warning以上のみ表示
+// Level settings
+tcSetConsoleLogLevel(LogLevel::Warning);  // Show Warning+ only
 tcSetFileLogLevel(LogLevel::Verbose);
 
-// ファイル出力
+// File output
 tcSetLogFile("app.log");
 tcCloseLogFile();
 ```
 
-### イベント
+### Events
 
 ```cpp
-// イベント定義
+// Event definition
 Event<MouseEventArgs> onMousePress;
 
-// リスナー登録（RAII - スコープ終了で自動解除）
+// Register listener (RAII - auto-unregister on scope end)
 EventListener listener = onMousePress.listen([](MouseEventArgs& e) {
-    // イベント処理
+    // Event handling
 });
 
-// メンバ関数を登録
+// Register member function
 EventListener listener = onMousePress.listen(this, &MyClass::onPress);
 
-// 手動解除
+// Manual disconnect
 listener.disconnect();
 
-// イベント発火
+// Fire event
 MouseEventArgs args(x, y, button);
 onMousePress.notify(args);
 ```
 
 ---
 
-## ファイル構成例
+## Common Patterns & Gotchas
+
+### EventListener RAII Pattern (CRITICAL)
+
+```cpp
+// WRONG - Listener immediately unregistered!
+void setup() override {
+    events().console.listen([](ConsoleEventArgs& e) { });  // Lost immediately
+}
+
+// CORRECT - Store as member variable
+class tcApp : public App {
+    EventListener consoleListener_;
+    EventListener keyListener_;
+
+    void setup() override {
+        consoleListener_ = events().console.listen([](ConsoleEventArgs& e) { });
+        keyListener_ = events().keyPressed.listen([](KeyEventArgs& e) { });
+    }
+};
+```
+
+### Node hitTest Types
+
+```cpp
+// Rectangle hit test
+bool hitTest(float lx, float ly) override {
+    return lx >= 0 && lx <= width && ly >= 0 && ly <= height;
+}
+
+// Circle hit test
+bool hitTest(float lx, float ly) override {
+    float dx = lx - centerX;
+    float dy = ly - centerY;
+    return dx*dx + dy*dy <= radius*radius;
+}
+```
+
+### Decoupled Update/Draw Mode
+
+```cpp
+// Use when update needs higher rate than draw (e.g., physics)
+setUpdateFps(120);  // Update at 120fps
+setDrawFps(60);     // Draw at 60fps
+
+// Check which cycle in update()
+void update() override {
+    // This runs at 120fps
+    physics.step();
+}
+void draw() override {
+    // This runs at 60fps
+}
+```
+
+### Pixel-Perfect Coordinates
+
+```cpp
+// TrussC uses pixel coordinates (not normalized)
+// (0,0) is top-left, Y increases downward
+drawRect(0, 0, 100, 100);  // Top-left 100x100 rectangle
+
+// High-DPI: logical pixels, not physical
+// getWidth() returns logical width regardless of DPI scaling
+```
+
+### Platform Notes
+
+**macOS Bundle Path**:
+```cpp
+// In bundle, use setDataPathToResources() to reference
+// xxx.app/Contents/Resources/data/
+void setup() override {
+    setDataPathToResources();  // No-op on non-macOS
+    img.load(getDataPath("image.png"));
+}
+```
+
+**Windows Console**:
+```cpp
+// For GUI apps, console output may not show by default
+// Use subsystem:console in CMake or allocate console:
+#ifdef _WIN32
+AllocConsole();
+#endif
+```
+
+**DPI Scaling**:
+```cpp
+// getWidth()/getHeight() return logical (DPI-independent) sizes
+// Drawing is automatic - no manual scaling needed
+// Use sapp_dpi_scale() if you need the actual scale factor
+float scale = sapp_dpi_scale();
+```
+
+---
+
+## File Structure Example
 
 ```
 myProject/
 ├── CMakeLists.txt
-├── addons.make           # 使用アドオン
+├── addons.make           # Used addons
 ├── src/
 │   ├── main.cpp
 │   └── tcApp.cpp
-├── data/                 # アセット
+├── data/                 # Assets
 │   ├── image.png
 │   └── sound.ogg
-└── build/                # ビルド出力
+└── build/                # Build output
 ```
 
 ---
 
 ## addons.make
 
-使用するアドオンを1行に1つ記述：
+List used addons, one per line:
 
 ```
 tcxBox2d
 tcxOsc
+tcxTls
 ```
 
 ---
 
-## よくあるパターン
+## Common Patterns
 
-### 基本的な描画
+### Basic Drawing
 
 ```cpp
 void tcApp::draw() {
-    clear(30);  // 暗いグレー背景
+    clear(30);  // Dark gray background
 
     setColor(255, 100, 100);
     fill();
@@ -974,7 +1262,7 @@ void tcApp::draw() {
 }
 ```
 
-### アニメーション
+### Animation
 
 ```cpp
 void tcApp::draw() {
@@ -989,7 +1277,7 @@ void tcApp::draw() {
 }
 ```
 
-### 座標変換
+### Transform
 
 ```cpp
 void tcApp::draw() {
@@ -1006,7 +1294,7 @@ void tcApp::draw() {
 }
 ```
 
-### マウスインタラクション
+### Mouse Interaction
 
 ```cpp
 void tcApp::mousePressed(int x, int y, int button) {
@@ -1020,7 +1308,7 @@ void tcApp::mouseDragged(int x, int y, int button) {
 }
 ```
 
-### キーボード入力
+### Keyboard Input
 
 ```cpp
 void tcApp::keyPressed(int key) {

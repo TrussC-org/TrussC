@@ -1,36 +1,36 @@
 /**
  * TrussC Serial Test for Arduino
  *
- * openFrameworks の serialExample と同じ動作をするテストスケッチ
+ * Test sketch that works the same as openFrameworks' serialExample
  */
 
-int ledPin = 13;   // LEDのピン
-int val = 0;       // シリアルから読み込んだデータ
+int ledPin = 13;   // LED pin
+int val = 0;       // Data read from serial
 
 void setup() {
-    pinMode(ledPin, OUTPUT);    // LED ピンを出力に設定
-    Serial.begin(9600);         // シリアルポートに接続
+    pinMode(ledPin, OUTPUT);    // Set LED pin as output
+    Serial.begin(9600);         // Connect to serial port
 }
 
 void loop() {
-    // シリアルポートを読み取り
+    // Read from serial port
     val = Serial.read();
 
-    // -1 はデータがない状態
-    // 'a' を受信したら "ABC" を返してLEDを点滅
+    // -1 means no data available
+    // When 'a' is received, return "ABC" and blink LED
     //
-    // 注意: Arduino の TX/RX が安定するまで 5-10 秒かかることがある
-    // アップロード後、少し待ってからシリアルモニタを開く
-    // 'a' を入力して送信すると、コンソールに ABC が返ってくるはず
-    // まずこれを確認してから、TrussC のサンプルを試そう
+    // Note: Arduino TX/RX may take 5-10 seconds to stabilize
+    // After uploading, wait a moment before opening the serial monitor
+    // When you send 'a', you should see ABC returned in the console
+    // Verify this first before trying the TrussC sample
     //
-    // TrussC/oF では、どのシリアルポートで通信するか明示的に指定する必要がある
-    // "Tools > Serial Port" でポートを確認
-    // 例: "COM7" (Windows), "/dev/tty...." (Mac/Linux)
+    // In TrussC/oF, you need to explicitly specify which serial port to use
+    // Check the port under "Tools > Serial Port"
+    // Example: "COM7" (Windows), "/dev/tty...." (Mac/Linux)
 
     if (val != -1) {
         if (val == 'a') {
-            Serial.print("ABC");        // シンプルに ABC を返す
+            Serial.print("ABC");        // Simply return ABC
             digitalWrite(ledPin, HIGH);
             delay(200);
             digitalWrite(ledPin, LOW);

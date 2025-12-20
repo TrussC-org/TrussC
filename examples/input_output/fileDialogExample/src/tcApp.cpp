@@ -1,5 +1,5 @@
 // =============================================================================
-// tcApp.cpp - ファイルダイアログサンプル
+// tcApp.cpp - File Dialog Sample
 // =============================================================================
 
 #include "tcApp.h"
@@ -23,22 +23,22 @@ void tcApp::draw() {
 
     float y = 40;
 
-    // タイトル
+    // Title
     setColor(1.0f);
     drawBitmapString("File Dialog Example", 40, y);
     y += 30;
 
-    // 操作説明
+    // Instructions
     setColor(0.7f);
     drawBitmapString("O: Open file   F: Open folder   S: Save   A: Alert", 40, y);
     y += 40;
 
-    // ステータス
+    // Status
     setColor(0.4f, 0.78f, 1.0f);
     drawBitmapString("Status: " + statusMessage, 40, y);
     y += 40;
 
-    // 結果表示
+    // Display result
     if (lastResult.success) {
         setColor(0.4f, 1.0f, 0.4f);
         drawBitmapString("Success!", 40, y);
@@ -50,13 +50,13 @@ void tcApp::draw() {
         drawBitmapString("Path: " + lastResult.filePath, 40, y);
         y += 40;
 
-        // 画像が読み込まれていれば表示
+        // Display if image is loaded
         if (hasImage && loadedImage.isAllocated()) {
             setColor(1.0f);
             drawBitmapString("Loaded Image:", 40, y);
             y += 25;
 
-            // 画像を適切なサイズで表示
+            // Display image at appropriate size
             float maxW = getWindowWidth() - 80;
             float maxH = getWindowHeight() - y - 40;
             float imgW = loadedImage.getWidth();
@@ -76,7 +76,7 @@ void tcApp::keyPressed(int key) {
     switch (key) {
         case 'O':
         case 'o': {
-            // ファイル選択ダイアログ
+            // File selection dialog
             statusMessage = "Opening file dialog...";
             lastResult = loadDialog("Select a file");
             hasImage = false;
@@ -85,7 +85,7 @@ void tcApp::keyPressed(int key) {
                 statusMessage = "File selected";
                 tcLogNotice("tcApp") << "Selected: " << lastResult.filePath;
 
-                // 画像ファイルなら読み込みを試行
+                // Try to load if image file
                 string path = lastResult.filePath;
                 if (path.find(".png") != string::npos ||
                     path.find(".jpg") != string::npos ||
@@ -106,7 +106,7 @@ void tcApp::keyPressed(int key) {
 
         case 'F':
         case 'f': {
-            // フォルダ選択ダイアログ
+            // Folder selection dialog
             statusMessage = "Opening folder dialog...";
             lastResult = loadDialog("Select a folder", true);
             hasImage = false;
@@ -122,7 +122,7 @@ void tcApp::keyPressed(int key) {
 
         case 'S':
         case 's': {
-            // 保存ダイアログ
+            // Save dialog
             statusMessage = "Opening save dialog...";
             lastResult = saveDialog("untitled.txt", "Save your file");
             hasImage = false;
@@ -138,7 +138,7 @@ void tcApp::keyPressed(int key) {
 
         case 'A':
         case 'a': {
-            // アラートダイアログ
+            // Alert dialog
             statusMessage = "Showing alert...";
             alertDialog("This is a test alert from TrussC!");
             statusMessage = "Alert closed";

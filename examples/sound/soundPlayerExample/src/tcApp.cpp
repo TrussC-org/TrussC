@@ -1,7 +1,7 @@
 // =============================================================================
-// soundPlayerExample - サウンド再生サンプル
+// soundPlayerExample - Sound Player Sample
 //
-// 使用音源:
+// Audio source:
 //   "113 2b loose-pants 4.2 mono" by astro_denticle
 //   https://freesound.org/
 //   License: CC0 (Public Domain)
@@ -14,24 +14,24 @@
 void tcApp::setup() {
     setVsync(true);
 
-    // 音声ファイルパス（data フォルダ内の CC0 サンプル音源）
+    // Audio file path (CC0 sample audio in data folder)
     musicPath = getDataPath("beat_loop.wav");
     printf("Trying to load: %s\n", musicPath.c_str());
 
-    // 音楽をロード
+    // Load music
     if (music.load(musicPath)) {
         musicLoaded = true;
         music.setLoop(true);
         printf("Music loaded: %s (%.1f sec)\n", musicPath.c_str(), music.getDuration());
     } else {
         printf("Music not found: %s - using test tone\n", musicPath.c_str());
-        music.loadTestTone(440.0f, 3.0f);  // A4 (440Hz), 3秒
+        music.loadTestTone(440.0f, 3.0f);  // A4 (440Hz), 3 seconds
         music.setLoop(true);
         musicLoaded = true;
     }
 
-    // 効果音（テストトーンを使用）
-    sfx.loadTestTone(880.0f, 0.2f);  // A5 (880Hz), 0.2秒
+    // Sound effect (using test tone)
+    sfx.loadTestTone(880.0f, 0.2f);  // A5 (880Hz), 0.2 seconds
     sfxLoaded = true;
 
     printf("\n=== Controls ===\n");
@@ -49,12 +49,12 @@ void tcApp::draw() {
 
     float y = 50;
 
-    // タイトル
+    // Title
     setColor(colors::white);
     drawBitmapString("TrussC Sound Player Example", 50, y);
     y += 40;
 
-    // コントロール説明
+    // Control instructions
     setColor(0.7f);
     drawBitmapString("Controls:", 50, y);
     y += 25;
@@ -71,7 +71,7 @@ void tcApp::draw() {
     drawBitmapString("  +/- - Speed control", 50, y);
     y += 40;
 
-    // 音楽の状態
+    // Music status
     setColor(colors::white);
     drawBitmapString("=== Music ===", 50, y);
     y += 25;
@@ -106,7 +106,7 @@ void tcApp::draw() {
         drawBitmapString(std::string("Loop: ") + (music.isLoop() ? "ON" : "OFF"), 50, y);
         y += 30;
 
-        // プログレスバー
+        // Progress bar
         float progress = music.getDuration() > 0 ?
                         music.getPosition() / music.getDuration() : 0;
         setColor(0.24f);
@@ -120,7 +120,7 @@ void tcApp::draw() {
         y += 40;
     }
 
-    // 効果音の状態
+    // Sound effect status
     setColor(colors::white);
     drawBitmapString("=== Sound Effect ===", 50, y);
     y += 25;
@@ -136,7 +136,7 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
     if (key == ' ') {
-        // スペース: 音楽再生/停止
+        // Space: Play/Stop music
         if (musicLoaded) {
             if (music.isPlaying() || music.isPaused()) {
                 music.stop();
@@ -148,7 +148,7 @@ void tcApp::keyPressed(int key) {
         }
     }
     else if (key == 'p' || key == 'P') {
-        // P: 一時停止/再開
+        // P: Pause/Resume
         if (musicLoaded) {
             if (music.isPaused()) {
                 music.resume();
@@ -160,46 +160,46 @@ void tcApp::keyPressed(int key) {
         }
     }
     else if (key == 's' || key == 'S') {
-        // S: 効果音再生
+        // S: Play sound effect
         if (sfxLoaded) {
             sfx.play();
             printf("SFX playing\n");
         }
     }
     else if (key == SAPP_KEYCODE_UP) {
-        // 音量上げる
+        // Volume up
         float vol = music.getVolume() + 0.1f;
         if (vol > 1.0f) vol = 1.0f;
         music.setVolume(vol);
         printf("Volume: %.0f%%\n", vol * 100);
     }
     else if (key == SAPP_KEYCODE_DOWN) {
-        // 音量下げる
+        // Volume down
         float vol = music.getVolume() - 0.1f;
         if (vol < 0.0f) vol = 0.0f;
         music.setVolume(vol);
         printf("Volume: %.0f%%\n", vol * 100);
     }
     else if (key == SAPP_KEYCODE_LEFT) {
-        // パン左へ
+        // Pan left
         float pan = music.getPan() - 0.1f;
         music.setPan(pan);
         printf("Pan: %.1f\n", music.getPan());
     }
     else if (key == SAPP_KEYCODE_RIGHT) {
-        // パン右へ
+        // Pan right
         float pan = music.getPan() + 0.1f;
         music.setPan(pan);
         printf("Pan: %.1f\n", music.getPan());
     }
     else if (key == '+' || key == '=' || key == SAPP_KEYCODE_KP_ADD) {
-        // 速度上げる
+        // Speed up
         float speed = music.getSpeed() + 0.1f;
         music.setSpeed(speed);
         printf("Speed: %.1fx\n", music.getSpeed());
     }
     else if (key == '-' || key == SAPP_KEYCODE_KP_SUBTRACT) {
-        // 速度下げる
+        // Speed down
         float speed = music.getSpeed() - 0.1f;
         music.setSpeed(speed);
         printf("Speed: %.1fx\n", music.getSpeed());

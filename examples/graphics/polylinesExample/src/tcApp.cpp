@@ -14,37 +14,37 @@ void tcApp::setupPolylines() {
     float cx = w / 2.0f;
     float cy = h / 2.0f;
 
-    // 直線のPolyline
+    // Line Polyline
     linePolyline.clear();
     linePolyline.addVertex(50, 100);
     linePolyline.lineTo(150, 150);
     linePolyline.lineTo(100, 200);
     linePolyline.lineTo(200, 200);
 
-    // 3次ベジェ曲線
+    // Cubic Bezier curve
     bezierPolyline.clear();
     bezierPolyline.addVertex(250, 100);
     bezierPolyline.bezierTo(300, 50, 400, 250, 450, 100);
 
-    // 2次ベジェ曲線
+    // Quadratic Bezier curve
     quadPolyline.clear();
     quadPolyline.addVertex(500, 100);
     quadPolyline.quadBezierTo(600, 250, 700, 100);
 
-    // Catmull-Rom スプライン
+    // Catmull-Rom spline
     curvePolyline.clear();
-    curvePolyline.curveTo(50.0f, 350.0f);   // 制御点1
-    curvePolyline.curveTo(100.0f, 300.0f);  // 制御点2（ここから曲線開始）
+    curvePolyline.curveTo(50.0f, 350.0f);   // Control point 1
+    curvePolyline.curveTo(100.0f, 300.0f);  // Control point 2 (curve starts here)
     curvePolyline.curveTo(200.0f, 400.0f);
     curvePolyline.curveTo(300.0f, 300.0f);
     curvePolyline.curveTo(400.0f, 400.0f);
-    curvePolyline.curveTo(450.0f, 350.0f);  // 制御点（ここで曲線終了）
+    curvePolyline.curveTo(450.0f, 350.0f);  // Control point (curve ends here)
 
-    // 円弧
+    // Arc
     arcPolyline.clear();
     arcPolyline.arc(600.0f, 350.0f, 80.0f, 80.0f, 0.0f, 270.0f, 32);
 
-    // 星型（閉じた形状）
+    // Star (closed shape)
     starPolyline.clear();
     int points = 5;
     float outerR = 80;
@@ -89,23 +89,23 @@ void tcApp::draw() {
 }
 
 void tcApp::drawCurveDemo() {
-    // ストロークのみで描画（Polylineの塗りつぶしは凸形状のみ対応）
+    // Draw with stroke only (Polyline fill supports only convex shapes)
     noFill();
     stroke();
 
-    // 直線
+    // Line
     setColor(colors::red);
     linePolyline.draw();
     setColor(colors::darkGray);
     drawBitmapString("lineTo()", 100, 80);
 
-    // 3次ベジェ
+    // Cubic Bezier
     setColor(colors::green);
     bezierPolyline.draw();
     setColor(colors::darkGray);
     drawBitmapString("bezierTo()", 320, 80);
 
-    // 2次ベジェ
+    // Quadratic Bezier
     setColor(colors::blue);
     quadPolyline.draw();
     setColor(colors::darkGray);
@@ -117,19 +117,19 @@ void tcApp::drawCurveDemo() {
     setColor(colors::darkGray);
     drawBitmapString("curveTo()", 200, 280);
 
-    // 円弧
+    // Arc
     setColor(colors::blue);
     arcPolyline.draw();
     setColor(colors::darkGray);
     drawBitmapString("arc()", 570, 280);
 
-    // 星型（閉じた形状）
+    // Star (closed shape)
     setColor(colors::magenta);
     starPolyline.draw();
     setColor(colors::darkGray);
     drawBitmapString("closed star", getWindowWidth() / 2.0f - 40, getWindowHeight() / 2.0f + 100);
 
-    // デフォルトに戻す
+    // Reset to default
     stroke();
     fill();
 }
@@ -139,7 +139,7 @@ void tcApp::drawMouseDrawing() {
     drawBitmapString("Click and drag to draw a polyline", 20, 120);
     drawBitmapString("Press 'c' to clear", 20, 140);
 
-    // マウス追跡
+    // Mouse tracking
     if (isMousePressed()) {
         if (!isDrawing) {
             isDrawing = true;
@@ -149,17 +149,17 @@ void tcApp::drawMouseDrawing() {
         isDrawing = false;
     }
 
-    // 描画
+    // Draw
     setColor(colors::lime);
     mousePolyline.draw();
 
-    // 頂点表示
+    // Show vertices
     setColor(colors::red);
     for (size_t i = 0; i < mousePolyline.size(); i++) {
         drawCircle(mousePolyline[i].x, mousePolyline[i].y, 2);
     }
 
-    // 情報表示
+    // Info display
     setColor(0.78f);
     stringstream info;
     info << "Vertices: " << mousePolyline.size();
@@ -173,7 +173,7 @@ void tcApp::drawAnimatedCurve() {
     float cx = w / 2.0f;
     float cy = h / 2.0f;
 
-    // アニメーションする花のような形状
+    // Animated flower-like shape
     Path flower;
     int petals = 6;
     int segments = 60;
@@ -187,7 +187,7 @@ void tcApp::drawAnimatedCurve() {
     }
     flower.close();
 
-    // グラデーション的な描画
+    // Gradient-like drawing
     noFill();
     stroke();
     for (int i = 0; i < 5; i++) {
@@ -204,7 +204,7 @@ void tcApp::drawAnimatedCurve() {
         scaled.draw();
     }
 
-    // リサージュ曲線
+    // Lissajous curve
     Path lissajous;
     int a = 3, b = 4;
     for (int i = 0; i <= 100; i++) {

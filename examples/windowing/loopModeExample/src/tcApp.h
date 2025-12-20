@@ -13,7 +13,7 @@ public:
     void mousePressed(int x, int y, int button) override;
 
 private:
-    int mode = 0;  // 0: VSync, 1: 固定60fps, 2: 固定30fps, 3: イベント駆動
+    int mode = 0;  // 0: VSync, 1: Fixed 60fps, 2: Fixed 30fps, 3: Event-driven
     int updateCount = 0;
     int drawCount = 0;
     float lastResetTime = 0;

@@ -7,8 +7,8 @@ using namespace std;
 
 using namespace trussc;
 
-// mouseExample - マウス入力のデモ
-// マウス位置、ボタン、ドラッグ、スクロールの可視化
+// mouseExample - Mouse Input Demo
+// Visualization of mouse position, buttons, drag, and scroll
 
 class tcApp : public App {
 public:
@@ -22,26 +22,26 @@ public:
     void mouseScrolled(float dx, float dy) override;
 
 private:
-    // ドラッグ軌跡
+    // Drag trail
     struct DragPoint {
         float x, y;
         int button;
     };
     std::vector<DragPoint> dragTrail;
 
-    // クリック位置
+    // Click positions
     struct ClickPoint {
         float x, y;
         int button;
-        float alpha;  // フェードアウト用
+        float alpha;  // For fade out
     };
     std::vector<ClickPoint> clickPoints;
 
-    // スクロール累積値
+    // Accumulated scroll value
     float scrollX = 0;
     float scrollY = 0;
 
-    // 現在のマウス状態
+    // Current mouse state
     bool isDragging = false;
     int currentButton = -1;
 };

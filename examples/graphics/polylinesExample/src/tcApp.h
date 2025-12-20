@@ -6,8 +6,8 @@ using namespace std;
 
 using namespace trussc;
 
-// polylinesExample - Polylineの曲線機能デモ
-// lineTo, bezierTo, quadBezierTo, curveTo, arc の使用例
+// polylinesExample - Polyline curve feature demo
+// Examples of lineTo, bezierTo, quadBezierTo, curveTo, arc
 
 class tcApp : public App {
 public:
@@ -17,19 +17,19 @@ public:
     void keyPressed(int key) override;
 
 private:
-    // 各種曲線のPolyline
-    Path linePolyline;      // 直線
-    Path bezierPolyline;    // 3次ベジェ
-    Path quadPolyline;      // 2次ベジェ
-    Path curvePolyline;     // Catmull-Rom スプライン
-    Path arcPolyline;       // 円弧
-    Path starPolyline;      // 星型（閉じた形状）
+    // Polylines for various curves
+    Path linePolyline;      // Line
+    Path bezierPolyline;    // Cubic Bezier
+    Path quadPolyline;      // Quadratic Bezier
+    Path curvePolyline;     // Catmull-Rom spline
+    Path arcPolyline;       // Arc
+    Path starPolyline;      // Star (closed shape)
 
-    // マウスで描画するPolyline
+    // Polyline drawn with mouse
     Path mousePolyline;
     bool isDrawing = false;
 
-    // 表示モード
+    // Display mode
     int mode = 0;
     static const int NUM_MODES = 3;
 

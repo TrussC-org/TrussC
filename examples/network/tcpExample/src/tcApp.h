@@ -13,13 +13,13 @@ public:
     void cleanup() override;
 
 private:
-    // サーバーモードで起動
+    // Server mode
     TcpServer server;
 
-    // クライアントモード用
+    // Client mode
     TcpClient client;
 
-    // イベントリスナー
+    // Event listeners
     EventListener clientConnectListener;
     EventListener clientDisconnectListener;
     EventListener serverReceiveListener;
@@ -30,11 +30,11 @@ private:
     EventListener clientDisconnectListener2;
     EventListener clientErrorListener;
 
-    // ログメッセージ
+    // Log messages
     std::vector<std::string> logMessages;
     std::mutex logMutex;
 
-    // 状態
+    // State
     bool isServerMode = true;
     int messageCount = 0;
 

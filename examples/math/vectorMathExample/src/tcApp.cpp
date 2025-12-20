@@ -5,10 +5,10 @@
 using namespace std;
 
 // ---------------------------------------------------------------------------
-// HSB → RGB 変換
+// HSB to RGB conversion
 // ---------------------------------------------------------------------------
 void tcApp::setColorHSB(float h, float s, float b, float a) {
-    h = h - floor(h);  // 0-1 にクランプ
+    h = h - floor(h);  // Clamp to 0-1
     float r, g, bl;
 
     int i = (int)(h * 6);
@@ -34,9 +34,9 @@ void tcApp::setColorHSB(float h, float s, float b, float a) {
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
     cout << "03_math: Vector & Matrix Demo" << endl;
-    cout << "  - Space: モード切り替え" << endl;
-    cout << "  - Click: パーティクル生成" << endl;
-    cout << "  - ESC: 終了" << endl;
+    cout << "  - Space: Switch mode" << endl;
+    cout << "  - Click: Spawn particles" << endl;
+    cout << "  - ESC: Quit" << endl;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,54 +61,54 @@ void tcApp::draw() {
         case 3: drawParticleDemo(); break;
     }
 
-    // 画面下部に操作説明
+    // Instructions at the bottom of the screen
     setColor(0.5f, 0.5f, 0.5f);
     drawBitmapString("[SPACE] next mode  [Click] spawn particles (mode 3)  [ESC] quit", 20, getWindowHeight() - 20);
 }
 
 // ---------------------------------------------------------------------------
-// Vec2 基本演算デモ
+// Vec2 basic operations demo
 // ---------------------------------------------------------------------------
 void tcApp::drawVec2Demo() {
     Vec2 center(640, 360);
     Vec2 mouse(getGlobalMouseX(), getGlobalMouseY());
 
-    // マウスへのベクトル
+    // Vector to mouse
     Vec2 toMouse = mouse - center;
 
-    // 正規化
+    // Normalize
     Vec2 dir = toMouse.normalized();
 
-    // 長さを表示
+    // Display length
     float len = toMouse.length();
 
-    // 角度
+    // Angle
     float angle = toMouse.angle();
 
-    // 中心から矢印を描画
+    // Draw arrow from center
     setColor(0.3f, 0.8f, 0.3f);
     drawLine(center.x, center.y, mouse.x, mouse.y);
 
-    // 正規化ベクトル（固定長）を表示
+    // Display normalized vector (fixed length)
     Vec2 normEnd = center + dir * 100;
     setColor(1.0f, 0.5f, 0.2f);
     drawLine(center.x, center.y, normEnd.x, normEnd.y);
 
-    // 垂直ベクトル
+    // Perpendicular vector
     Vec2 perp = dir.perpendicular() * 50;
     setColor(0.2f, 0.5f, 1.0f);
     drawLine(center.x, center.y, center.x + perp.x, center.y + perp.y);
     drawLine(center.x, center.y, center.x - perp.x, center.y - perp.y);
 
-    // 中心点
+    // Center point
     setColor(1.0f, 1.0f, 1.0f);
     drawCircle(center.x, center.y, 8);
 
-    // マウス点
+    // Mouse point
     setColor(1.0f, 0.3f, 0.3f);
     drawCircle(mouse.x, mouse.y, 8);
 
-    // 角度を円弧で表示
+    // Display angle as arc
     setColor(1.0f, 1.0f, 0.3f, 0.5f);
     int segments = 32;
     float arcLen = fmin(len, 80.0f);
@@ -120,13 +120,13 @@ void tcApp::drawVec2Demo() {
         drawLine(p1.x, p1.y, p2.x, p2.y);
     }
 
-    // タイトルと説明
+    // Title and description
     setColor(1.0f, 1.0f, 1.0f);
     drawBitmapString("Mode 0: Vec2 Basic Operations", 20, 25);
     setColor(0.7f, 0.7f, 0.7f);
     drawBitmapString("Move mouse to see vector operations", 20, 45);
 
-    // ベクトル情報
+    // Vector information
     char buf[128];
     setColor(0.3f, 0.8f, 0.3f);
     snprintf(buf, sizeof(buf), "toMouse: (%.1f, %.1f)", toMouse.x, toMouse.y);
@@ -148,13 +148,13 @@ void tcApp::drawVec2Demo() {
 }
 
 // ---------------------------------------------------------------------------
-// 回転デモ
+// Rotation demo
 // ---------------------------------------------------------------------------
 void tcApp::drawRotationDemo() {
     double t = getElapsedTime();
     Vec2 center(640, 360);
 
-    // 回転する点群
+    // Rotating point cloud
     int numPoints = 12;
     float baseRadius = 150;
 
@@ -162,10 +162,10 @@ void tcApp::drawRotationDemo() {
         float baseAngle = (float)i / numPoints * TAU;
         Vec2 point = Vec2::fromAngle(baseAngle, baseRadius);
 
-        // 時間で回転
+        // Rotate over time
         point = point.rotated((float)t * 0.5f);
 
-        // 各点を中心にさらに小さい円を回転
+        // Rotate smaller circles around each point
         int numSub = 6;
         float subRadius = 30;
         for (int j = 0; j < numSub; j++) {
@@ -179,17 +179,17 @@ void tcApp::drawRotationDemo() {
             drawCircle(finalPos.x, finalPos.y, 5);
         }
 
-        // メインの点
+        // Main point
         Vec2 mainPos = center + point;
         setColorHSB((float)i / numPoints, 0.5f, 1.0f);
         drawCircle(mainPos.x, mainPos.y, 10);
     }
 
-    // 中心
+    // Center
     setColor(1.0f, 1.0f, 1.0f);
     drawCircle(center.x, center.y, 5);
 
-    // タイトルと説明
+    // Title and description
     setColor(1.0f, 1.0f, 1.0f);
     drawBitmapString("Mode 1: Vec2 Rotation", 20, 25);
     setColor(0.7f, 0.7f, 0.7f);
@@ -203,13 +203,13 @@ void tcApp::drawRotationDemo() {
 }
 
 // ---------------------------------------------------------------------------
-// 線形補間デモ
+// Linear interpolation demo
 // ---------------------------------------------------------------------------
 void tcApp::drawLerpDemo() {
     double t = getElapsedTime();
     Vec2 mouse(getGlobalMouseX(), getGlobalMouseY());
 
-    // 複数の点が lerp でマウスを追いかける
+    // Multiple points follow the mouse using lerp
     static vector<Vec2> followers;
     if (followers.empty()) {
         for (int i = 0; i < 20; i++) {
@@ -217,16 +217,16 @@ void tcApp::drawLerpDemo() {
         }
     }
 
-    // 最初の点はマウスを直接追いかける
+    // First point directly follows the mouse
     followers[0] = followers[0].lerp(mouse, 0.1f);
 
-    // 後続の点は前の点を追いかける
+    // Following points chase the previous point
     for (size_t i = 1; i < followers.size(); i++) {
         float lerpAmount = 0.15f - (float)i * 0.005f;
         followers[i] = followers[i].lerp(followers[i - 1], lerpAmount);
     }
 
-    // 描画
+    // Draw
     for (size_t i = 0; i < followers.size(); i++) {
         float ratio = (float)i / followers.size();
         setColorHSB(ratio * 0.3f + (float)t * 0.1f, 0.8f, 1.0f, 1.0f - ratio * 0.5f);
@@ -235,14 +235,14 @@ void tcApp::drawLerpDemo() {
         drawCircle(followers[i].x, followers[i].y, radius);
     }
 
-    // 線で結ぶ
+    // Connect with lines
     setColor(1.0f, 1.0f, 1.0f, 0.3f);
     for (size_t i = 1; i < followers.size(); i++) {
         drawLine(followers[i - 1].x, followers[i - 1].y,
                     followers[i].x, followers[i].y);
     }
 
-    // タイトルと説明
+    // Title and description
     setColor(1.0f, 1.0f, 1.0f);
     drawBitmapString("Mode 2: Vec2 Lerp (Linear Interpolation)", 20, 25);
     setColor(0.7f, 0.7f, 0.7f);
@@ -256,10 +256,10 @@ void tcApp::drawLerpDemo() {
 }
 
 // ---------------------------------------------------------------------------
-// パーティクルデモ
+// Particle demo
 // ---------------------------------------------------------------------------
 void tcApp::drawParticleDemo() {
-    // 自動でパーティクル生成
+    // Auto-spawn particles
     double t = getElapsedTime();
     if (fmod(t, 0.05) < getDeltaTime()) {
         float x = 640 + cos(t * 2) * 200;
@@ -269,7 +269,7 @@ void tcApp::drawParticleDemo() {
 
     drawParticles();
 
-    // タイトルと説明
+    // Title and description
     setColor(1.0f, 1.0f, 1.0f);
     drawBitmapString("Mode 3: Particle System with Vec2", 20, 25);
     setColor(0.7f, 0.7f, 0.7f);
@@ -286,12 +286,12 @@ void tcApp::spawnParticle(float x, float y) {
     Particle p;
     p.pos = Vec2(x, y);
 
-    // ランダムな方向
+    // Random direction
     float angle = (float)rand() / RAND_MAX * TAU;
     float speed = 50 + (float)rand() / RAND_MAX * 100;
     p.vel = Vec2::fromAngle(angle, speed);
 
-    p.acc = Vec2(0, 50);  // 重力
+    p.acc = Vec2(0, 50);  // Gravity
     p.radius = 5 + (float)rand() / RAND_MAX * 10;
     p.hue = (float)rand() / RAND_MAX;
     p.life = 2.0f + (float)rand() / RAND_MAX * 2.0f;
@@ -304,20 +304,20 @@ void tcApp::updateParticles() {
     float dt = (float)getDeltaTime();
 
     for (auto& p : particles_) {
-        // 速度に加速度を加算
+        // Add acceleration to velocity
         p.vel += p.acc * dt;
 
-        // 位置に速度を加算
+        // Add velocity to position
         p.pos += p.vel * dt;
 
-        // 寿命を減らす
+        // Decrease lifetime
         p.life -= dt;
 
-        // 速度を制限
+        // Limit velocity
         p.vel.limit(300);
     }
 
-    // 死んだパーティクルを削除
+    // Remove dead particles
     particles_.erase(
         remove_if(particles_.begin(), particles_.end(),
             [](const Particle& p) { return p.life <= 0; }),
@@ -334,7 +334,7 @@ void tcApp::drawParticles() {
 }
 
 // ---------------------------------------------------------------------------
-// 入力
+// Input
 // ---------------------------------------------------------------------------
 void tcApp::keyPressed(int key) {
     if (key == KEY_ESCAPE) {
@@ -348,7 +348,7 @@ void tcApp::keyPressed(int key) {
 
 void tcApp::mousePressed(int x, int y, int button) {
     if (mode_ == 3) {
-        // パーティクルを生成
+        // Spawn particles
         for (int i = 0; i < 20; i++) {
             spawnParticle((float)x, (float)y);
         }

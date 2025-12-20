@@ -3,7 +3,7 @@
 using namespace std;
 
 // ---------------------------------------------------------------------------
-// setup - 初期化
+// setup - Initialization
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
     cout << "hitTestExample: Ray-based Hit Test Demo" << endl;
@@ -12,7 +12,7 @@ void tcApp::setup() {
     cout << "  - Press SPACE to pause/resume rotation" << endl;
     cout << "  - Press ESC to quit" << endl;
 
-    // 静止ボタン（左側）- 斜めにオーバーラップさせて、手前だけ反応することを示す
+    // Static buttons (left side) - overlapped diagonally to show only front responds
     button1_ = make_shared<CounterButton>();
     button1_->x = 50;
     button1_->y = 150;
@@ -21,20 +21,20 @@ void tcApp::setup() {
     addChild(button1_);
 
     button2_ = make_shared<CounterButton>();
-    button2_->x = 100;  // 重なるようにずらす
+    button2_->x = 100;  // Shifted to overlap
     button2_->y = 180;
     button2_->label = "Middle";
     button2_->baseColor = Color(0.2f, 0.4f, 0.2f);
     addChild(button2_);
 
     button3_ = make_shared<CounterButton>();
-    button3_->x = 150;  // さらに重なるようにずらす
+    button3_->x = 150;  // Shifted more to overlap
     button3_->y = 210;
     button3_->label = "Front";
     button3_->baseColor = Color(0.2f, 0.2f, 0.4f);
     addChild(button3_);
 
-    // 回転パネル（右側）
+    // Rotating panel (right side)
     panel_ = make_shared<RotatingPanel>();
     panel_->x = 800;
     panel_->y = 300;
@@ -42,7 +42,7 @@ void tcApp::setup() {
     panel_->height = 250;
     addChild(panel_);
 
-    // パネル内のボタン
+    // Buttons inside panel
     panelButton1_ = make_shared<CounterButton>();
     panelButton1_->x = 30;
     panelButton1_->y = 50;
@@ -59,19 +59,19 @@ void tcApp::setup() {
 }
 
 // ---------------------------------------------------------------------------
-// update - 更新
+// update - Update
 // ---------------------------------------------------------------------------
 void tcApp::update() {
-    // 子ノードは自動更新される
+    // Child nodes are updated automatically
 }
 
 // ---------------------------------------------------------------------------
-// draw - 描画
+// draw - Draw
 // ---------------------------------------------------------------------------
 void tcApp::draw() {
     clear(0.1f, 0.1f, 0.12f);
 
-    // タイトル
+    // Title
     setColor(1.0f, 1.0f, 1.0f);
     drawBitmapString("Ray-based Hit Test Demo", 20, 30);
 
@@ -79,28 +79,28 @@ void tcApp::draw() {
     drawBitmapString("Static buttons (left) and rotating panel (right)", 20, 50);
     drawBitmapString("Click works on rotated buttons too!", 20, 65);
 
-    // マウス位置
+    // Mouse position
     char buf[128];
     snprintf(buf, sizeof(buf), "Mouse: %.0f, %.0f", getGlobalMouseX(), getGlobalMouseY());
     setColor(1.0f, 1.0f, 0.5f);
     drawBitmapString(buf, 20, getWindowHeight() - 40);
 
-    // 操作説明
+    // Controls description
     setColor(0.5f, 0.5f, 0.5f);
     drawBitmapString("[SPACE] pause/resume  [ESC] quit", 20, getWindowHeight() - 20);
 
-    // パネルの状態
+    // Panel status
     snprintf(buf, sizeof(buf), "Panel rotation: %.1f deg  %s",
              panel_->rotation * 180.0f / PI,
              paused_ ? "(PAUSED)" : "");
     setColor(0.8f, 0.8f, 0.8f);
     drawBitmapString(buf, 600, 50);
 
-    // 子ノードは自動描画される
+    // Child nodes are drawn automatically
 }
 
 // ---------------------------------------------------------------------------
-// 入力イベント
+// Input events
 // ---------------------------------------------------------------------------
 
 void tcApp::keyPressed(int key) {
@@ -115,7 +115,7 @@ void tcApp::keyPressed(int key) {
 }
 
 void tcApp::mousePressed(int x, int y, int button) {
-    // Ray-based Hit Test でイベントを配信
+    // Dispatch event using Ray-based Hit Test
     auto hitNode = dispatchMousePress((float)x, (float)y, button);
 
     if (hitNode) {
@@ -130,13 +130,13 @@ void tcApp::mouseReleased(int x, int y, int button) {
 }
 
 void tcApp::mouseMoved(int x, int y) {
-    // ホバー状態の更新
-    // 現在は簡易実装（全ボタンをチェック）
+    // Update hover state
+    // Currently simple implementation (check all buttons)
     Ray globalRay = Ray::fromScreenPoint2D((float)x, (float)y);
 
-    // 各ボタンのホバー状態を更新
+    // Update hover state for each button
     auto updateHover = [&](CounterButton::Ptr btn) {
-        // ボタンのグローバル逆行列を取得
+        // Get button's global inverse matrix
         Mat4 globalInv = btn->getGlobalMatrixInverse();
         Ray localRay = globalRay.transformed(globalInv);
 

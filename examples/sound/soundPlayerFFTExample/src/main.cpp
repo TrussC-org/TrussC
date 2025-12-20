@@ -1,5 +1,5 @@
 // =============================================================================
-// soundPlayerFFTExample - FFT スペクトラム可視化サンプル
+// soundPlayerFFTExample - FFT Spectrum Visualization Sample
 // =============================================================================
 //
 // Audio Credit:

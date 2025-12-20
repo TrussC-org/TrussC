@@ -4,7 +4,7 @@
 void tcApp::setup() {
     setVsync(true);
 
-    // システムフォントを使用
+    // Use system font
     std::string fontPath = "/System/Library/Fonts/Geneva.ttf";
 
     font.load(fontPath, 24);
@@ -24,15 +24,15 @@ void tcApp::draw() {
     float h = getWindowHeight();
 
     // =========================================================================
-    // TTF アラインメントデモ
+    // TTF Alignment demo
     // =========================================================================
     setColor(0.16f);
 
-    // 水平アラインメント（画面上部）
+    // Horizontal alignment (top of screen)
     float y = 80;
     float centerX = w / 2;
 
-    // 基準線を描画
+    // Draw reference line
     setColor(0.78f);
     drawLine(centerX, 40, centerX, 150);
     drawLine(50, y, w - 50, y);
@@ -42,11 +42,11 @@ void tcApp::draw() {
     font.drawString("Center", centerX, y + 30, Center, Top);
     font.drawString("Right", centerX, y + 60, Right, Top);
 
-    // 垂直アラインメント
+    // Vertical alignment
     float x = 120;
     y = 220;
 
-    // 基準線を描画（長くした）
+    // Draw reference line (extended)
     setColor(0.78f);
     drawLine(50, y, w - 50, y);
     drawLine(x, y - 30, x, y + 30);
@@ -58,33 +58,33 @@ void tcApp::draw() {
     font.drawString("Baseline", x + 290, y, Left, Baseline);
 
     // =========================================================================
-    // setLineHeight デモ（改行テキスト）
+    // setLineHeight demo (multiline text)
     // =========================================================================
     y = 310;
     std::string multiLine = "Line 1\nLine 2\nLine 3";
 
-    // デフォルト行高さ
+    // Default line height
     setColor(0.4f);
     drawBitmapString("Default (1.0em):", 50, y - 20);
     setColor(0.16f);
     font.resetLineHeight();
     font.drawString(multiLine, 50, y);
 
-    // em単位（狭め）
+    // em unit (narrower)
     setColor(0.4f);
     drawBitmapString("0.8em:", 220, y - 20);
     setColor(0.16f);
     font.setLineHeightEm(0.8);
     font.drawString(multiLine, 220, y);
 
-    // em単位（広め）
+    // em unit (wider)
     setColor(0.4f);
     drawBitmapString("1.5em:", 350, y - 20);
     setColor(0.16f);
     font.setLineHeightEm(1.5);
     font.drawString(multiLine, 350, y);
 
-    // ピクセル指定
+    // Pixel specified
     setColor(0.4f);
     drawBitmapString("50px:", 500, y - 20);
     setColor(0.16f);
@@ -94,23 +94,23 @@ void tcApp::draw() {
     font.resetLineHeight();
 
     // =========================================================================
-    // 中心点マーカー + Center,Center
+    // Center point marker + Center,Center
     // =========================================================================
     float cx = w / 2;
     float cy = 520;
 
-    // 十字マーカー
+    // Cross marker
     setColor(colors::red);
     drawLine(cx - 20, cy, cx + 20, cy);
     drawLine(cx, cy - 20, cx, cy + 20);
     drawCircle(cx, cy, 5);
 
-    // Center,Center でテキストを中央配置
+    // Center text with Center,Center
     setColor(0.16f);
     fontLarge.drawString("Centered!", cx, cy, Center, Center);
 
     // =========================================================================
-    // BitmapFont アラインメントデモ
+    // BitmapFont alignment demo
     // =========================================================================
     y = 620;
 
@@ -122,19 +122,19 @@ void tcApp::draw() {
     drawBitmapString("BitmapFont Center", centerX, y + 18, Center, Top);
     drawBitmapString("BitmapFont Right", centerX, y + 36, Right, Top);
 
-    // getBBox デモ
+    // getBBox demo
     y = 710;
     std::string boxText = "BoundingBox";
     Rect bbox = font.getBBox(boxText);
 
-    // 描画位置
+    // Draw position
     float bx = 100, by = y;
     setColor(colors::lightBlue);
     drawRect(bx + bbox.x, by + bbox.y, bbox.width, bbox.height);
     setColor(0.16f);
     font.drawString(boxText, bx, by);
 
-    // 情報表示
+    // Info display
     setColor(0.4f);
     std::string info = "Glyphs: " + std::to_string(font.getLoadedGlyphCount());
     info += " | Memory: " + std::to_string(Font::getTotalCacheMemoryUsage() / 1024) + " KB";

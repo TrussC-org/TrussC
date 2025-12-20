@@ -1,9 +1,9 @@
 // =============================================================================
-// main.cpp - threadExample エントリーポイント
+// main.cpp - threadExample entry point
 // =============================================================================
 //
-// Thread を使ったマルチスレッドプログラミングのサンプル。
-// oF の threadExample を参考に実装。
+// Sample of multi-threaded programming using Thread.
+// Implementation based on oF's threadExample.
 //
 
 #include "tcApp.h"

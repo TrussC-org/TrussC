@@ -13,13 +13,13 @@ public:
     void keyPressed(int key) override;
 
 private:
-    // デモモード
+    // Demo mode
     int mode_ = 0;
     static constexpr int NUM_MODES = 4;
 
-    // デモ描画
-    void drawLerpComparison();     // lerp 方式の比較
-    void drawHueWheel();           // 色相環 HSB vs OKLCH
-    void drawLightnessDemo();      // 明度均一性デモ
-    void drawGradientDemo();       // グラデーション比較
+    // Demo drawing
+    void drawLerpComparison();     // Lerp method comparison
+    void drawHueWheel();           // Hue wheel HSB vs OKLCH
+    void drawLightnessDemo();      // Lightness uniformity demo
+    void drawGradientDemo();       // Gradient comparison
 };

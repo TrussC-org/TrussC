@@ -11,7 +11,7 @@ void tcApp::setup() {
 }
 
 void tcApp::setupListeners() {
-    // キーイベントリスナー
+    // Key event listener
     if (keyListenerActive) {
         events().keyPressed.listen(keyListener, [this](KeyEventArgs& e) {
             std::stringstream ss;
@@ -25,7 +25,7 @@ void tcApp::setupListeners() {
         });
     }
 
-    // マウスクリックリスナー
+    // Mouse click listener
     if (mouseListenerActive) {
         events().mousePressed.listen(mouseListener, [this](MouseEventArgs& e) {
             std::stringstream ss;
@@ -35,7 +35,7 @@ void tcApp::setupListeners() {
         });
     }
 
-    // スクロールリスナー（常に有効）
+    // Scroll listener (always enabled)
     events().mouseScrolled.listen(scrollListener, [this](ScrollEventArgs& e) {
         std::stringstream ss;
         ss << "[ScrollEvent] dx=" << e.scrollX << " dy=" << e.scrollY;
@@ -54,22 +54,22 @@ void tcApp::draw() {
     clear(30);
     setColor(1.0f);
 
-    // タイトル
+    // Title
     drawBitmapString("=== Event System Demo ===", 20, 20);
 
-    // 状態表示
+    // Status display
     std::stringstream status;
     status << "Key Listener: " << (keyListenerActive ? "ON" : "OFF");
     status << "  |  Mouse Listener: " << (mouseListenerActive ? "ON" : "OFF");
     drawBitmapString(status.str(), 20, 50);
 
-    // 操作説明
+    // Controls description
     setColor(0.6f);
     drawBitmapString("Press 'k' to toggle key listener", 20, 80);
     drawBitmapString("Press 'm' to toggle mouse listener", 20, 95);
     drawBitmapString("Click anywhere or scroll to test events", 20, 110);
 
-    // イベントログ
+    // Event log
     setColor(0.4f, 1.0f, 0.4f);
     drawBitmapString("Event Log:", 20, 150);
 
@@ -85,7 +85,7 @@ void tcApp::keyPressed(int key) {
     if (key == 'k' || key == 'K') {
         keyListenerActive = !keyListenerActive;
 
-        // リスナーを切断または再接続
+        // Disconnect or reconnect listener
         if (keyListenerActive) {
             events().keyPressed.listen(keyListener, [this](KeyEventArgs& e) {
                 std::stringstream ss;

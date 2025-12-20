@@ -14,7 +14,7 @@ void tcApp::addHistory(const std::string& msg) {
 }
 
 std::string tcApp::keyToString(int key) {
-    // 特殊キーの名前を返す
+    // Return name of special key
     switch (key) {
         case KEY_SPACE: return "SPACE";
         case KEY_ESCAPE: return "ESCAPE";
@@ -57,13 +57,13 @@ std::string tcApp::keyToString(int key) {
 void tcApp::draw() {
     clear(30);
 
-    // 矢印キーで移動するボックス
+    // Box that moves with arrow keys
     if (pressedKeys.count(KEY_LEFT)) boxX -= boxSpeed;
     if (pressedKeys.count(KEY_RIGHT)) boxX += boxSpeed;
     if (pressedKeys.count(KEY_UP)) boxY -= boxSpeed;
     if (pressedKeys.count(KEY_DOWN)) boxY += boxSpeed;
 
-    // ボックスを画面内に制限
+    // Constrain box to screen
     int w = getWindowWidth();
     int h = getWindowHeight();
     if (boxX < 25) boxX = 25;
@@ -71,27 +71,27 @@ void tcApp::draw() {
     if (boxY < 25) boxY = 25;
     if (boxY > h - 25) boxY = h - 25;
 
-    // ボックスを描画
+    // Draw box
     setColor(colors::blue);
     drawRect(boxX - 40, boxY - 40, 80, 80);
 
     setColor(1.0f);
     drawBitmapString("Arrow keys\nto move", boxX - 35, boxY - 15);
 
-    // タイトル
+    // Title
     setColor(1.0f);
     drawBitmapString("=== Keyboard Input Demo ===", 20, 20);
 
-    // 最後に押されたキー
+    // Last pressed key
     std::stringstream ss;
     ss << "Last key: " << keyToString(lastKey) << " (code: " << lastKey << ")";
     drawBitmapString(ss.str(), 20, 50);
 
-    // 現在押されているキー
+    // Currently pressed keys
     setColor(0.6f);
     drawBitmapString("Currently pressed:", 20, 80);
 
-    setColor(0.2f, 0.6f, 0.2f);  // 暗い緑
+    setColor(0.2f, 0.6f, 0.2f);  // Dark green
     std::stringstream pressed;
     for (int k : pressedKeys) {
         pressed << keyToString(k) << " ";
@@ -101,7 +101,7 @@ void tcApp::draw() {
     }
     drawBitmapString(pressed.str(), 20, 95);
 
-    // キー入力履歴
+    // Key input history
     setColor(0.4f);
     drawBitmapString("Key History:", 20, 130);
 
@@ -112,7 +112,7 @@ void tcApp::draw() {
         y += 15;
     }
 
-    // 操作説明
+    // Instructions
     setColor(0.4f);
     drawBitmapString("Use arrow keys to move the box", 20, h - 40);
     drawBitmapString("Press any key to see its code", 20, h - 25);

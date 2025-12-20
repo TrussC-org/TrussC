@@ -1,12 +1,12 @@
 #pragma once
 
-// このファイルは TrussC.h からインクルードされる
+// This file is included from TrussC.h
 
 #include <vector>
 
 namespace trussc {
 
-// プリミティブモード
+// Primitive mode
 enum class PrimitiveMode {
     Triangles,
     TriangleStrip,
@@ -17,12 +17,12 @@ enum class PrimitiveMode {
     Points
 };
 
-// Mesh - 頂点、カラー、インデックスを持つクラス
+// Mesh - Class with vertices, colors, and indices
 class Mesh {
 public:
     Mesh() : mode_(PrimitiveMode::Triangles) {}
 
-    // モード設定
+    // Mode settings
     void setMode(PrimitiveMode mode) {
         mode_ = mode;
     }
@@ -32,7 +32,7 @@ public:
     }
 
     // ---------------------------------------------------------------------------
-    // 頂点
+    // Vertices
     // ---------------------------------------------------------------------------
     void addVertex(float x, float y, float z = 0.0f) {
         vertices_.push_back(Vec3{x, y, z});
@@ -57,7 +57,7 @@ public:
     int getNumVertices() const { return static_cast<int>(vertices_.size()); }
 
     // ---------------------------------------------------------------------------
-    // カラー（頂点カラー）
+    // Colors (vertex colors)
     // ---------------------------------------------------------------------------
     void addColor(const Color& c) {
         colors_.push_back(c);
@@ -79,7 +79,7 @@ public:
     bool hasColors() const { return !colors_.empty(); }
 
     // ---------------------------------------------------------------------------
-    // インデックス
+    // Indices
     // ---------------------------------------------------------------------------
     void addIndex(unsigned int index) {
         indices_.push_back(index);
@@ -91,7 +91,7 @@ public:
         }
     }
 
-    // 三角形を追加（3つのインデックス）
+    // Add triangle (3 indices)
     void addTriangle(unsigned int i0, unsigned int i1, unsigned int i2) {
         indices_.push_back(i0);
         indices_.push_back(i1);
@@ -104,7 +104,7 @@ public:
     bool hasIndices() const { return !indices_.empty(); }
 
     // ---------------------------------------------------------------------------
-    // 法線（ライティング用）
+    // Normals (for lighting)
     // ---------------------------------------------------------------------------
     void addNormal(float nx, float ny, float nz) {
         normals_.push_back(Vec3{nx, ny, nz});
@@ -130,7 +130,7 @@ public:
         if (index < normals_.size()) {
             return normals_[index];
         }
-        return Vec3{0, 0, 1};  // デフォルト: Z方向
+        return Vec3{0, 0, 1};  // Default: Z direction
     }
 
     std::vector<Vec3>& getNormals() { return normals_; }
@@ -139,7 +139,7 @@ public:
     bool hasNormals() const { return !normals_.empty(); }
 
     // ---------------------------------------------------------------------------
-    // テクスチャ座標
+    // Texture coordinates
     // ---------------------------------------------------------------------------
     void addTexCoord(float u, float v) {
         texCoords_.push_back(Vec2{u, v});
@@ -154,7 +154,7 @@ public:
     bool hasTexCoords() const { return !texCoords_.empty(); }
 
     // ---------------------------------------------------------------------------
-    // クリア
+    // Clear
     // ---------------------------------------------------------------------------
     void clear() {
         vertices_.clear();
@@ -171,23 +171,23 @@ public:
     void clearTexCoords() { texCoords_.clear(); }
 
     // ---------------------------------------------------------------------------
-    // 描画
+    // Drawing
     // ---------------------------------------------------------------------------
     void draw() const {
         if (vertices_.empty()) return;
 
-        // ライティングが有効で法線がある場合はライティング付き描画
+        // If lighting enabled and normals present, draw with lighting
         if (internal::lightingEnabled && hasNormals() &&
             normals_.size() >= vertices_.size() && internal::currentMaterial) {
             drawWithLighting();
             return;
         }
 
-        // 通常描画
+        // Normal drawing
         drawNoLighting();
     }
 
-    // ライティングなしの通常描画
+    // Normal drawing without lighting
     void drawNoLighting() const {
         if (vertices_.empty()) return;
 
@@ -195,7 +195,7 @@ public:
         bool useIndices = hasIndices();
         Color defColor = getDefaultContext().getColor();
 
-        // sokol_gl の描画モード開始
+        // Start sokol_gl draw mode
         switch (mode_) {
             case PrimitiveMode::Triangles:
                 sgl_begin_triangles();
@@ -204,7 +204,7 @@ public:
                 sgl_begin_triangle_strip();
                 break;
             case PrimitiveMode::TriangleFan:
-                // sokol_gl には triangle_fan がないので triangles で代用
+                // sokol_gl doesn't have triangle_fan, use triangles instead
                 drawTriangleFan(useColors, useIndices);
                 return;
             case PrimitiveMode::Lines:
@@ -214,7 +214,7 @@ public:
                 sgl_begin_line_strip();
                 break;
             case PrimitiveMode::LineLoop:
-                // sokol_gl には line_loop がないので line_strip + 閉じる
+                // sokol_gl doesn't have line_loop, use line_strip + close
                 drawLineLoop(useColors, useIndices);
                 return;
             case PrimitiveMode::Points:
@@ -222,7 +222,7 @@ public:
                 break;
         }
 
-        // 頂点を追加
+        // Add vertices
         if (useIndices) {
             for (auto idx : indices_) {
                 if (idx < vertices_.size()) {
@@ -248,20 +248,20 @@ public:
         sgl_end();
     }
 
-    // ライティング付き描画（CPU側でライティング計算）
+    // Draw with lighting (CPU-side lighting calculation)
     void drawWithLighting() const {
         if (mode_ != PrimitiveMode::Triangles) {
-            // 現在は三角形モードのみサポート
+            // Currently only triangle mode supported
             drawNoLighting();
             return;
         }
 
-        // 現在の変換行列を取得
+        // Get current transformation matrix
         Mat4 modelMatrix = getDefaultContext().getCurrentMatrix();
 
-        // 法線変換用行列（逆転置行列）
-        // 簡易実装: スケールが均一なら modelMatrix をそのまま使える
-        // TODO: 不均一スケールに対応する場合は逆転置行列を計算
+        // Matrix for normal transformation (inverse transpose)
+        // Simple implementation: if scale is uniform, modelMatrix can be used as-is
+        // TODO: Calculate inverse transpose for non-uniform scale
 
         const Material& material = *internal::currentMaterial;
 
@@ -273,10 +273,10 @@ public:
                     const Vec3& localPos = vertices_[idx];
                     const Vec3& localNormal = normals_[idx];
 
-                    // ワールド座標に変換
+                    // Transform to world coordinates
                     Vec3 worldPos = modelMatrix * localPos;
 
-                    // 法線を変換（回転のみ適用、平行移動は無視）
+                    // Transform normal (apply rotation only, ignore translation)
                     Vec3 worldNormal;
                     worldNormal.x = modelMatrix.m[0] * localNormal.x +
                                     modelMatrix.m[1] * localNormal.y +
@@ -288,7 +288,7 @@ public:
                                     modelMatrix.m[9] * localNormal.y +
                                     modelMatrix.m[10] * localNormal.z;
 
-                    // 法線を正規化
+                    // Normalize normal
                     float len = std::sqrt(worldNormal.x * worldNormal.x +
                                           worldNormal.y * worldNormal.y +
                                           worldNormal.z * worldNormal.z);
@@ -298,7 +298,7 @@ public:
                         worldNormal.z /= len;
                     }
 
-                    // ライティング計算
+                    // Lighting calculation
                     Color litColor = calculateLighting(worldPos, worldNormal, material);
 
                     sgl_c4f(litColor.r, litColor.g, litColor.b, litColor.a);
@@ -311,10 +311,10 @@ public:
                     const Vec3& localPos = vertices_[i];
                     const Vec3& localNormal = normals_[i];
 
-                    // ワールド座標に変換
+                    // Transform to world coordinates
                     Vec3 worldPos = modelMatrix * localPos;
 
-                    // 法線を変換
+                    // Transform normal
                     Vec3 worldNormal;
                     worldNormal.x = modelMatrix.m[0] * localNormal.x +
                                     modelMatrix.m[1] * localNormal.y +
@@ -326,7 +326,7 @@ public:
                                     modelMatrix.m[9] * localNormal.y +
                                     modelMatrix.m[10] * localNormal.z;
 
-                    // 法線を正規化
+                    // Normalize normal
                     float len = std::sqrt(worldNormal.x * worldNormal.x +
                                           worldNormal.y * worldNormal.y +
                                           worldNormal.z * worldNormal.z);
@@ -336,7 +336,7 @@ public:
                         worldNormal.z /= len;
                     }
 
-                    // ライティング計算
+                    // Lighting calculation
                     Color litColor = calculateLighting(worldPos, worldNormal, material);
 
                     sgl_c4f(litColor.r, litColor.g, litColor.b, litColor.a);
@@ -348,11 +348,11 @@ public:
         sgl_end();
     }
 
-    // ワイヤーフレーム描画（三角形のエッジをラインで描画）
+    // Wireframe drawing (draw triangle edges as lines)
     void drawWireframe() const {
         if (vertices_.empty()) return;
 
-        // 現在のモードが三角形系でない場合は通常のdrawを使う
+        // If current mode is not triangle-based, use normal draw
         if (mode_ != PrimitiveMode::Triangles &&
             mode_ != PrimitiveMode::TriangleStrip &&
             mode_ != PrimitiveMode::TriangleFan) {
@@ -364,7 +364,7 @@ public:
         sgl_begin_lines();
 
         if (hasIndices()) {
-            // インデックスを使う場合、三角形ごとにエッジを描画
+            // When using indices, draw edges for each triangle
             for (size_t i = 0; i + 2 < indices_.size(); i += 3) {
                 unsigned int i0 = indices_[i];
                 unsigned int i1 = indices_[i + 1];
@@ -373,33 +373,33 @@ public:
                 if (i0 < vertices_.size() && i1 < vertices_.size() && i2 < vertices_.size()) {
                     sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
 
-                    // エッジ 0-1
+                    // Edge 0-1
                     sgl_v3f(vertices_[i0].x, vertices_[i0].y, vertices_[i0].z);
                     sgl_v3f(vertices_[i1].x, vertices_[i1].y, vertices_[i1].z);
 
-                    // エッジ 1-2
+                    // Edge 1-2
                     sgl_v3f(vertices_[i1].x, vertices_[i1].y, vertices_[i1].z);
                     sgl_v3f(vertices_[i2].x, vertices_[i2].y, vertices_[i2].z);
 
-                    // エッジ 2-0
+                    // Edge 2-0
                     sgl_v3f(vertices_[i2].x, vertices_[i2].y, vertices_[i2].z);
                     sgl_v3f(vertices_[i0].x, vertices_[i0].y, vertices_[i0].z);
                 }
             }
         } else {
-            // インデックスなしの場合、3頂点ずつ三角形として処理
+            // Without indices, process 3 vertices at a time as triangles
             for (size_t i = 0; i + 2 < vertices_.size(); i += 3) {
                 sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
 
-                // エッジ 0-1
+                // Edge 0-1
                 sgl_v3f(vertices_[i].x, vertices_[i].y, vertices_[i].z);
                 sgl_v3f(vertices_[i+1].x, vertices_[i+1].y, vertices_[i+1].z);
 
-                // エッジ 1-2
+                // Edge 1-2
                 sgl_v3f(vertices_[i+1].x, vertices_[i+1].y, vertices_[i+1].z);
                 sgl_v3f(vertices_[i+2].x, vertices_[i+2].y, vertices_[i+2].z);
 
-                // エッジ 2-0
+                // Edge 2-0
                 sgl_v3f(vertices_[i+2].x, vertices_[i+2].y, vertices_[i+2].z);
                 sgl_v3f(vertices_[i].x, vertices_[i].y, vertices_[i].z);
             }
@@ -409,7 +409,7 @@ public:
     }
 
 private:
-    // Triangle Fan を triangles として描画
+    // Draw Triangle Fan as triangles
     void drawTriangleFan(bool useColors, bool useIndices) const {
         if (vertices_.size() < 3) return;
 
@@ -417,7 +417,7 @@ private:
         sgl_begin_triangles();
 
         if (useIndices && indices_.size() >= 3) {
-            // インデックス使用
+            // Using indices
             for (size_t i = 1; i < indices_.size() - 1; i++) {
                 unsigned int i0 = indices_[0];
                 unsigned int i1 = indices_[i];
@@ -435,7 +435,7 @@ private:
                 }
             }
         } else {
-            // 頂点のみ
+            // Vertices only
             for (size_t i = 1; i < vertices_.size() - 1; i++) {
                 for (size_t j : {(size_t)0, i, i + 1}) {
                     if (useColors) {
@@ -451,7 +451,7 @@ private:
         sgl_end();
     }
 
-    // Line Loop を line_strip として描画（最後に閉じる）
+    // Draw Line Loop as line_strip (close at end)
     void drawLineLoop(bool useColors, bool useIndices) const {
         if (vertices_.size() < 2) return;
 
@@ -469,7 +469,7 @@ private:
                     sgl_v3f(vertices_[idx].x, vertices_[idx].y, vertices_[idx].z);
                 }
             }
-            // 閉じる
+            // Close
             if (!indices_.empty() && indices_[0] < vertices_.size()) {
                 auto idx = indices_[0];
                 if (useColors && idx < colors_.size()) {
@@ -488,7 +488,7 @@ private:
                 }
                 sgl_v3f(vertices_[i].x, vertices_[i].y, vertices_[i].z);
             }
-            // 閉じる
+            // Close
             if (useColors) {
                 sgl_c4f(colors_[0].r, colors_[0].g, colors_[0].b, colors_[0].a);
             } else {

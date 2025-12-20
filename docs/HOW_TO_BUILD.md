@@ -1,37 +1,37 @@
-# TrussC ビルド方法
+# TrussC Build Guide
 
-## 前提条件
+## Prerequisites
 
-- CMake 3.20 以上
-- C++20 対応コンパイラ
+- CMake 3.20 or higher
+- C++20 compatible compiler
 - macOS: Xcode Command Line Tools (`xcode-select --install`)
-- Windows: Visual Studio 2022 または MinGW
-- Linux: GCC 10+ または Clang 10+
+- Windows: Visual Studio 2022 or MinGW
+- Linux: GCC 10+ or Clang 10+
 
-### VSCode / Cursor 拡張機能
+### VSCode / Cursor Extensions
 
-VSCode または Cursor を使う場合、以下の拡張機能をインストール：
+If using VSCode or Cursor, install the following extensions:
 
-| 拡張機能 | 用途 |
-|----------|------|
-| **CMake Tools** | CMake ビルド統合 |
-| **CodeLLDB** | デバッグ実行（macOS/Linux） |
-| **C/C++** | IntelliSense、コード補完 |
+| Extension | Purpose |
+|-----------|---------|
+| **CMake Tools** | CMake build integration |
+| **CodeLLDB** | Debug execution (macOS/Linux) |
+| **C/C++** | IntelliSense, code completion |
 
 ---
 
-## Project Generator を使う（推奨）
+## Using Project Generator (Recommended)
 
-TrussC には GUI ベースのプロジェクト生成ツールが付属している。
+TrussC includes a GUI-based project generation tool.
 
-### 1. Project Generator のビルド
+### 1. Build the Project Generator
 
-初回のみ、Project Generator 自体をビルドする必要がある。
+Build the Project Generator itself (first time only).
 
 **macOS:**
 ```bash
-# tools/buildProjectGenerator_mac.command をダブルクリック
-# または
+# Double-click tools/buildProjectGenerator_mac.command
+# or
 cd /path/to/tc_v0.0.1/tools/projectGenerator
 mkdir build && cd build
 cmake ..
@@ -40,74 +40,74 @@ cmake --build .
 
 **Windows:**
 ```bash
-# tools/buildProjectGenerator_win.bat をダブルクリック
-# または
+# Double-click tools/buildProjectGenerator_win.bat
+# or
 cd /path/to/tc_v0.0.1/tools/projectGenerator
 mkdir build && cd build
 cmake ..
 cmake --build . --config Release
 ```
 
-### 2. 新規プロジェクトの作成
+### 2. Create a New Project
 
-Project Generator を起動する。
+Launch the Project Generator.
 
-![Project Generator - 新規作成](images/projectGenerator_generate.png)
+![Project Generator - Create New](images/projectGenerator_generate.png)
 
-1. **Project Name**: プロジェクト名を入力
-2. **Location**: 保存先フォルダを選択
-3. **Addons**: 使用するアドオンにチェック
-4. **IDE**: 使用する IDE を選択
-   - CMake only: CMakeLists.txt のみ生成
-   - VSCode: .vscode/launch.json と settings.json も生成
-   - Cursor: VSCode と同様
-   - Xcode (macOS): cmake -G Xcode で .xcodeproj を生成
-   - Visual Studio (Windows): cmake -G "Visual Studio 17 2022" で .sln を生成
-5. **Generate Project** をクリック
+1. **Project Name**: Enter project name
+2. **Location**: Select save folder
+3. **Addons**: Check addons to use
+4. **IDE**: Select IDE to use
+   - CMake only: Generate CMakeLists.txt only
+   - VSCode: Also generate .vscode/launch.json and settings.json
+   - Cursor: Same as VSCode
+   - Xcode (macOS): Generate .xcodeproj with cmake -G Xcode
+   - Visual Studio (Windows): Generate .sln with cmake -G "Visual Studio 17 2022"
+5. Click **Generate Project**
 
-### 3. 既存プロジェクトの更新
+### 3. Update Existing Projects
 
-**Import** ボタンで既存プロジェクトを読み込むと、Update モードになる。
+Click **Import** to load an existing project, which switches to Update mode.
 
-![Project Generator - 更新](images/projectGenerator_update.png)
+![Project Generator - Update](images/projectGenerator_update.png)
 
-- アドオンの追加/削除
-- IDE 設定の変更
-- TrussC バージョンの切り替え（Settings から TrussC フォルダを変更）
+- Add/remove addons
+- Change IDE settings
+- Switch TrussC version (change TrussC folder in Settings)
 
-**Update Project** で CMakeLists.txt と addons.make を更新。
-**Open in IDE** で選択した IDE でプロジェクトを開く。
+**Update Project** updates CMakeLists.txt and addons.make.
+**Open in IDE** opens the project in the selected IDE.
 
-### 4. ビルドと実行
+### 4. Build and Run
 
 **VSCode / Cursor:**
-1. Open in IDE でプロジェクトを開く
-2. `F7` または `Cmd+Shift+P` → `CMake: Build`
-3. `F5` でデバッグ実行
+1. Open in IDE to open project
+2. `F7` or `Cmd+Shift+P` → `CMake: Build`
+3. `F5` for debug execution
 
 **Xcode:**
-1. Open in IDE で .xcodeproj を開く
-2. `Cmd+R` で実行
+1. Open in IDE to open .xcodeproj
+2. `Cmd+R` to run
 
 **Visual Studio:**
-1. Open in IDE で .sln を開く
-2. `F5` で実行
+1. Open in IDE to open .sln
+2. `F5` to run
 
 ---
 
-## アドオンの追加
+## Adding Addons
 
-アドオンは2つの方法で追加できる。
+Addons can be added in two ways.
 
-### 方法1: Project Generator で追加（推奨）
+### Method 1: Add via Project Generator (Recommended)
 
-1. Project Generator でプロジェクトを Import
-2. 使用するアドオンにチェック
+1. Import project in Project Generator
+2. Check addons to use
 3. Update Project
 
-### 方法2: addons.make を編集
+### Method 2: Edit addons.make
 
-プロジェクトフォルダの `addons.make` を編集：
+Edit `addons.make` in the project folder:
 
 ```
 # TrussC addons - one addon per line
@@ -115,30 +115,30 @@ tcxBox2d
 tcxSomeAddon
 ```
 
-詳しくは [ADDONS.md](ADDONS.md) を参照。
+See [ADDONS.md](ADDONS.md) for details.
 
 ---
 
-## CMake を直接使う（上級者向け）
+## Using CMake Directly (Advanced)
 
-Project Generator を使わずに、コマンドラインで直接ビルドすることもできる。
+You can build directly from command line without the Project Generator.
 
-### 1. テンプレートをコピー
+### 1. Copy Template
 
 ```bash
 cp -r /path/to/tc_v0.0.1/examples/templates/emptyExample ~/myProject
 cd ~/myProject
 ```
 
-### 2. TC_ROOT を設定
+### 2. Set TC_ROOT
 
-`CMakeLists.txt` の先頭付近を編集：
+Edit near the top of `CMakeLists.txt`:
 
 ```cmake
 set(TC_ROOT "/path/to/tc_v0.0.1" CACHE PATH "Path to TrussC")
 ```
 
-### 3. ビルド
+### 3. Build
 
 ```bash
 mkdir build && cd build
@@ -146,7 +146,7 @@ cmake ..
 cmake --build .
 ```
 
-### 4. 実行
+### 4. Run
 
 ```bash
 # macOS
@@ -159,7 +159,7 @@ open bin/myProject.app
 ./bin/myProject
 ```
 
-### IDE 用のプロジェクト生成
+### Generate IDE Projects
 
 ```bash
 # Xcode
@@ -171,15 +171,15 @@ cmake -G "Visual Studio 17 2022" ..
 
 ---
 
-## ビルドオプション
+## Build Options
 
-### リリースビルド
+### Release Build
 
 ```bash
 cmake --build . --config Release
 ```
 
-### クリーンビルド
+### Clean Build
 
 ```bash
 rm -rf build
@@ -190,76 +190,76 @@ cmake --build .
 
 ---
 
-## アイコン設定
+## Icon Configuration
 
-アプリのアイコンは `icon/` フォルダに画像を配置するだけで設定できる。
+App icons can be set by simply placing an image in the `icon/` folder.
 
-### 基本的な使い方（推奨）
+### Basic Usage (Recommended)
 
-**PNG を入れるだけでOK:**
+**Just add a PNG:**
 
 ```
 myProject/
 ├── icon/
-│   └── myicon.png    ← 512x512 以上の PNG を入れるだけ！
+│   └── myicon.png    ← Just put a 512x512+ PNG here!
 ├── src/
 └── CMakeLists.txt
 ```
 
-ビルド時に自動で OS 用のフォーマットに変換される。
+Automatically converted to OS-specific format at build time.
 
-### 対応フォーマット
+### Supported Formats
 
-| OS | 優先順位 |
+| OS | Priority |
 |----|----------|
-| macOS | 1. `.icns` → 2. `.png`（自動変換） → 3. デフォルト |
-| Windows | 1. `.ico` → 2. `.png`（自動変換） → 3. デフォルト |
+| macOS | 1. `.icns` → 2. `.png` (auto-converted) → 3. Default |
+| Windows | 1. `.ico` → 2. `.png` (auto-converted) → 3. Default |
 
-- **macOS**: PNG があれば sips + iconutil で `.icns` に自動変換（追加ツール不要）
-- **Windows**: PNG があれば ImageMagick で `.ico` に自動変換
+- **macOS**: PNG auto-converted to `.icns` with sips + iconutil (no extra tools needed)
+- **Windows**: PNG auto-converted to `.ico` with ImageMagick
 
-### 推奨仕様
+### Recommended Specs
 
-- **サイズ**: 512x512 ピクセル以上（1024x1024 推奨）
-- **形式**: PNG（透過対応）
-- **ファイル名**: 何でもOK（最初に見つかったファイルを使用）
+- **Size**: 512x512 pixels or larger (1024x1024 recommended)
+- **Format**: PNG (transparency supported)
+- **Filename**: Anything (uses first file found)
 
-### Windows での PNG 自動変換
+### PNG Auto-Conversion on Windows
 
-Windows で PNG → ICO 変換を使うには **ImageMagick** が必要:
+To use PNG → ICO conversion on Windows, **ImageMagick** is required:
 
-1. [ImageMagick 公式サイト](https://imagemagick.org/script/download.php) からインストーラをダウンロード
-2. インストール時に **「Add application directory to your system path」にチェック**
-3. コマンドプロンプトで確認:
+1. Download installer from [ImageMagick official site](https://imagemagick.org/script/download.php)
+2. During installation, **check "Add application directory to your system path"**
+3. Verify in command prompt:
    ```cmd
    magick --version
    ```
 
-ImageMagick がない場合は自動的にデフォルトアイコンが使われる。
-事前に `.ico` ファイルを用意しておけば変換は不要。
+If ImageMagick is unavailable, the default icon is used automatically.
+Pre-preparing an `.ico` file eliminates the need for conversion.
 
-### すべて手動で用意する場合
+### Manual Preparation
 
-PNG 変換に頼らず、プラットフォーム別のアイコンを自分で用意することもできる:
+You can also prepare platform-specific icons yourself instead of relying on PNG conversion:
 
 ```
 icon/
-├── app.icns    ← macOS 用
-├── app.ico     ← Windows 用
-└── app.png     ← 予備 / Linux 用（将来対応予定）
+├── app.icns    ← macOS
+├── app.ico     ← Windows
+└── app.png     ← Backup / Linux (future support)
 ```
 
-### アイコンなしの場合
+### No Icon
 
-`icon/` フォルダがない、または空の場合は TrussC のデフォルトアイコンが使われる。
+If the `icon/` folder doesn't exist or is empty, TrussC's default icon is used.
 
 ---
 
-## 配布
+## Distribution
 
-TrussC で作成したアプリは静的リンクされるため、外部 DLL は不要。
+Apps created with TrussC are statically linked, requiring no external DLLs.
 
-### 配布構成
+### Distribution Structure
 
 ```
 MyApp/
@@ -267,16 +267,16 @@ MyApp/
 │   ├── MyApp.exe      (Windows)
 │   ├── MyApp          (Linux)
 │   └── MyApp.app/     (macOS)
-└── data/              (アセットがあれば)
+└── data/              (if assets exist)
 ```
 
-フォルダごと Zip 圧縮して配布できる。
+Zip the folder for distribution.
 
 ---
 
-## トラブルシューティング
+## Troubleshooting
 
-### TC_ROOT が設定されていない
+### TC_ROOT Not Set
 
 ```
 ╔══════════════════════════════════════════════════════════════════╗
@@ -285,9 +285,9 @@ MyApp/
 ╚══════════════════════════════════════════════════════════════════╝
 ```
 
-→ Project Generator でプロジェクトを作成/更新するか、CMakeLists.txt の TC_ROOT を手動で設定。
+→ Create/update project with Project Generator, or manually set TC_ROOT in CMakeLists.txt.
 
-### TrussC が見つからない
+### TrussC Not Found
 
 ```
 ╔══════════════════════════════════════════════════════════════════╗
@@ -296,9 +296,9 @@ MyApp/
 ╚══════════════════════════════════════════════════════════════════╝
 ```
 
-→ TC_ROOT のパスが正しいか確認。Project Generator の Settings で TrussC フォルダを再設定。
+→ Verify TC_ROOT path is correct. Reset TrussC folder in Project Generator Settings.
 
-### CMake が見つからない
+### CMake Not Found
 
 ```bash
 # macOS (Homebrew)
@@ -311,16 +311,16 @@ winget install Kitware.CMake
 sudo apt install cmake
 ```
 
-### コンパイラが見つからない（macOS）
+### Compiler Not Found (macOS)
 
 ```bash
 xcode-select --install
 ```
 
-### ビルドエラーが出る
+### Build Errors
 
 ```bash
-# build フォルダを削除してやり直し
+# Delete build folder and retry
 rm -rf build
 mkdir build && cd build
 cmake ..

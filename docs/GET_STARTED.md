@@ -1,21 +1,21 @@
-# TrussC をはじめよう
+# Getting Started with TrussC
 
-TrussC は openFrameworks ライクな軽量クリエイティブコーディングフレームワーク。
-C++20 + sokol ベースで、シンプルに書けてクロスプラットフォームで動く。
+TrussC is a lightweight creative coding framework inspired by openFrameworks.
+Built on C++20 + sokol, it's simple to write and runs cross-platform.
 
 ---
 
-## 1. 環境を準備する
+## 1. Set Up Your Environment
 
-### 必要なもの
+### Requirements
 
-| OS | コンパイラ |
-|----|-----------|
-| macOS | Xcode Command Line Tools（`xcode-select --install`） |
+| OS | Compiler |
+|----|----------|
+| macOS | Xcode Command Line Tools (`xcode-select --install`) |
 | Windows | Visual Studio 2022 |
-| Linux | GCC 10+ または Clang 10+ |
+| Linux | GCC 10+ or Clang 10+ |
 
-**CMake** も必要：
+**CMake** is also required:
 ```bash
 # macOS
 brew install cmake
@@ -27,73 +27,73 @@ winget install Kitware.CMake
 sudo apt install cmake
 ```
 
-### エディタの準備（VSCode / Cursor）
+### Editor Setup (VSCode / Cursor)
 
-以下の拡張機能をインストール：
+Install the following extensions:
 
-| 拡張機能 | 用途 | 必要な OS |
-|----------|------|-----------|
-| **CMake Tools** | ビルド統合 | 全 OS |
-| **C/C++** | IntelliSense + デバッグ | 全 OS（Windows はデバッグにも使用） |
-| **CodeLLDB** | デバッグ実行 | macOS / Linux |
-
----
-
-## 2. Project Generator をビルドする
-
-初回のみ、プロジェクト作成ツールをビルドする。
-
-**macOS:** `projectGenerator/buildProjectGenerator_mac.command` をダブルクリック
-
-**Windows:** `projectGenerator/buildProjectGenerator_win.bat` をダブルクリック
+| Extension | Purpose | Required OS |
+|-----------|---------|-------------|
+| **CMake Tools** | Build integration | All |
+| **C/C++** | IntelliSense + debugging | All (Windows uses this for debugging) |
+| **CodeLLDB** | Debug execution | macOS / Linux |
 
 ---
 
-## 3. プロジェクトを作る
+## 2. Build the Project Generator
+
+Build the project creation tool (first time only).
+
+**macOS:** Double-click `projectGenerator/buildProjectGenerator_mac.command`
+
+**Windows:** Double-click `projectGenerator/buildProjectGenerator_win.bat`
+
+---
+
+## 3. Create a Project
 
 ![Project Generator](images/projectGenerator_generate.png)
 
-1. **Project Name** を入力
-2. **Location** で保存先を選択
-3. **IDE** で `Cursor` または `VSCode` を選択
-4. **Generate Project** をクリック
+1. Enter a **Project Name**
+2. Select a **Location** to save
+3. Choose `Cursor` or `VSCode` as **IDE**
+4. Click **Generate Project**
 
 ---
 
-## 4. ビルドして実行する
+## 4. Build and Run
 
-1. **Open in IDE** でプロジェクトを開く
-2. `F7` でビルド（または `Cmd+Shift+B` / `Ctrl+Shift+B`）
-3. `F5` で実行
+1. Click **Open in IDE** to open the project
+2. Press `F7` to build (or `Cmd+Shift+B` / `Ctrl+Shift+B`)
+3. Press `F5` to run
 
-これだけ！
+That's it!
 
 ---
 
-## 5. サンプルを動かす
+## 5. Run Examples
 
-`examples/` フォルダにたくさんのサンプルがある。
+The `examples/` folder contains many samples.
 
 ```
 examples/
-├── graphics/      # 2D 描画
-├── 3d/            # 3D 描画
-├── sound/         # サウンド
-├── network/       # ネットワーク
+├── graphics/      # 2D drawing
+├── 3d/            # 3D drawing
+├── sound/         # Sound
+├── network/       # Networking
 ├── gui/           # ImGui
 └── ...
 ```
 
-サンプルも同じ手順で動かせる：
-1. Project Generator で **Import** ボタンをクリック
-2. サンプルフォルダを選択
+Run examples the same way:
+1. Click **Import** in Project Generator
+2. Select an example folder
 3. **Open in IDE** → `F5`
 
 ---
 
-## 6. コードを書く
+## 6. Write Code
 
-基本的な構造：
+Basic structure:
 
 ```cpp
 // tcApp.h
@@ -115,15 +115,15 @@ public:
 #include "tcApp.h"
 
 void tcApp::setup() {
-    // 初期化
+    // Initialization
 }
 
 void tcApp::update() {
-    // 毎フレーム更新
+    // Called every frame
 }
 
 void tcApp::draw() {
-    clear(30);  // 背景色
+    clear(30);  // Background color
 
     setColor(colors::white);
     drawCircle(getWidth()/2, getHeight()/2, 100);
@@ -132,9 +132,9 @@ void tcApp::draw() {
 
 ---
 
-## 次のステップ
+## Next Steps
 
-- [TrussC_vs_openFrameworks.md](TrussC_vs_openFrameworks.md) - oF ユーザー向け API 対応表
-- [HOW_TO_BUILD.md](HOW_TO_BUILD.md) - 詳細なビルド方法、アイコン設定、配布など
-- [ADDONS.md](ADDONS.md) - アドオンの使い方
-- [DESIGN.md](DESIGN.md) - 内部設計について
+- [TrussC_vs_openFrameworks.md](TrussC_vs_openFrameworks.md) - API mapping for oF users
+- [HOW_TO_BUILD.md](HOW_TO_BUILD.md) - Detailed build instructions, icons, distribution
+- [ADDONS.md](ADDONS.md) - How to use addons
+- [DESIGN.md](DESIGN.md) - Internal design details

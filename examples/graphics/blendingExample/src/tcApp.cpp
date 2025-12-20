@@ -1,5 +1,5 @@
 // =============================================================================
-// blendingExample - ブレンドモードの比較デモ
+// blendingExample - Blend mode comparison demo
 // =============================================================================
 
 #include "tcApp.h"
@@ -26,13 +26,13 @@ void tcApp::draw() {
     float w = getWindowWidth();
     float h = getWindowHeight();
 
-    // タイトル
+    // Title
     setColor(1.0f, 1.0f, 1.0f);
     drawBitmapString("Blend Mode Comparison", 20, 30);
     setColor(0.7f, 0.7f, 0.7f);
     drawBitmapString("Press 1-6 to switch modes, each column shows different blend mode", 20, 50);
 
-    // 各ブレンドモードの説明
+    // Description of each blend mode
     BlendMode modes[] = {
         BlendMode::Alpha,
         BlendMode::Add,
@@ -46,70 +46,70 @@ void tcApp::draw() {
     float colWidth = w / numModes;
     float startY = 100;
 
-    // 背景パターンを描画（各列の下地）
+    // Draw background pattern (base for each column)
     for (int i = 0; i < numModes; i++) {
         float x = i * colWidth;
 
-        // 背景グラデーション（暗い→明るい）
-        setBlendMode(BlendMode::Disabled);  // 背景は上書きで描画
+        // Background gradient (dark -> bright)
+        setBlendMode(BlendMode::Disabled);  // Draw background with overwrite
         for (int j = 0; j < 10; j++) {
             float gray = 0.1f + j * 0.08f;
             setColor(gray, gray, gray);
             drawRect(x, startY + j * 50, colWidth - 10, 50);
         }
 
-        // カラフルな背景要素
+        // Colorful background elements
         setBlendMode(BlendMode::Alpha);
-        setColor(0.8f, 0.2f, 0.2f, 0.7f);  // 赤
+        setColor(0.8f, 0.2f, 0.2f, 0.7f);  // Red
         drawRect(x + 10, startY + 100, 60, 60);
-        setColor(0.2f, 0.8f, 0.2f, 0.7f);  // 緑
+        setColor(0.2f, 0.8f, 0.2f, 0.7f);  // Green
         drawRect(x + 40, startY + 140, 60, 60);
-        setColor(0.2f, 0.2f, 0.8f, 0.7f);  // 青
+        setColor(0.2f, 0.2f, 0.8f, 0.7f);  // Blue
         drawRect(x + 70, startY + 180, 60, 60);
     }
 
-    // 各モードで円を描画
+    // Draw circles with each mode
     for (int i = 0; i < numModes; i++) {
         float x = i * colWidth + colWidth / 2;
 
         setBlendMode(modes[i]);
 
-        // モード名ラベル
-        setBlendMode(BlendMode::Alpha);  // テキストは常に Alpha
+        // Mode name label
+        setBlendMode(BlendMode::Alpha);  // Text always uses Alpha
         setColor(1.0f, 1.0f, 1.0f);
         drawBitmapString(getBlendModeName(modes[i]), i * colWidth + 10, startY - 10);
 
-        // 再度ブレンドモードを設定
+        // Set blend mode again
         setBlendMode(modes[i]);
 
-        // アニメーションする円（半透明）
+        // Animated circle (semi-transparent)
         float anim = sin(animTime_ * 2.0f + i * 0.5f) * 0.5f + 0.5f;
 
-        // 白い円（alpha 0.7）
+        // White circle (alpha 0.7)
         setColor(1.0f, 1.0f, 1.0f, 0.7f);
         drawCircle(x, startY + 150 + anim * 50, 50);
 
-        // 赤い円
+        // Red circle
         setColor(1.0f, 0.3f, 0.3f, 0.7f);
         drawCircle(x - 30, startY + 280, 40);
 
-        // 緑の円
+        // Green circle
         setColor(0.3f, 1.0f, 0.3f, 0.7f);
         drawCircle(x, startY + 320, 40);
 
-        // 青い円
+        // Blue circle
         setColor(0.3f, 0.3f, 1.0f, 0.7f);
         drawCircle(x + 30, startY + 360, 40);
 
-        // 黄色い円（重なり部分を見るため）
+        // Yellow circle (to see overlapping parts)
         setColor(1.0f, 1.0f, 0.3f, 0.5f);
         drawCircle(x, startY + 450, 60);
     }
 
-    // デフォルトに戻す
+    // Reset to default
     resetBlendMode();
 
-    // 説明テキスト
+    // Description text
     setColor(0.6f, 0.6f, 0.6f);
     drawBitmapString("Alpha: Standard transparency blending", 20, h - 100);
     drawBitmapString("Add: Brightens (good for glow effects)", 20, h - 85);
@@ -120,7 +120,7 @@ void tcApp::draw() {
 }
 
 void tcApp::keyPressed(int key) {
-    // 現在のモードを即座に切り替えるデモ（画面全体には適用しないが確認用）
+    // Demo to switch current mode immediately (not applied to entire screen, just for confirmation)
     switch (key) {
         case '1':
             cout << "Alpha mode (default)" << endl;

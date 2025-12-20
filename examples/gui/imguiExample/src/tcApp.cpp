@@ -4,27 +4,27 @@
 void tcApp::setup() {
     setWindowTitle("imguiExample");
 
-    // ImGui を初期化
+    // Initialize ImGui
     imguiSetup();
 }
 
 void tcApp::draw() {
-    // 背景色でクリア
+    // Clear with background color
     clear(clearColor[0], clearColor[1], clearColor[2]);
 
-    // ImGui フレーム開始
+    // Begin ImGui frame
     imguiBegin();
 
-    // メインウィンドウ
+    // Main window
     ImGui::Begin("TrussC + ImGui Demo");
 
     ImGui::Text("Welcome to TrussC with Dear ImGui!");
     ImGui::Spacing();
 
-    // スライダー
+    // Slider
     ImGui::SliderFloat("Slider", &sliderValue, 0.0f, 1.0f);
 
-    // ボタン
+    // Button
     if (ImGui::Button("Click me!")) {
         counter++;
     }
@@ -35,42 +35,42 @@ void tcApp::draw() {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // 背景色ピッカー
+    // Background color picker
     ImGui::ColorEdit3("Background", clearColor);
 
-    // テキスト入力
+    // Text input
     ImGui::InputText("Text", textBuffer, sizeof(textBuffer));
 
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
 
-    // デモウィンドウの表示切り替え
+    // Toggle demo window visibility
     ImGui::Checkbox("Show ImGui Demo Window", &showDemoWindow);
 
     ImGui::Spacing();
 
-    // フレームレート表示
+    // Display frame rate
     ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
 
     ImGui::End();
 
-    // ImGui デモウィンドウ（オプション）
+    // ImGui demo window (optional)
     if (showDemoWindow) {
         ImGui::ShowDemoWindow(&showDemoWindow);
     }
 
-    // TrussC の描画（ImGui と共存可能）
-    // スライダーの値で円のサイズを変更
+    // TrussC drawing (can coexist with ImGui)
+    // Change circle size based on slider value
     float circleSize = 50 + sliderValue * 100;
     setColor(1.0f, 0.78f, 0.4f);
     drawCircle(getWindowWidth() / 2, getWindowHeight() / 2, circleSize);
 
-    // ImGui フレーム終了（描画）
+    // End ImGui frame (render)
     imguiEnd();
 }
 
 void tcApp::cleanup() {
-    // ImGui を終了
+    // Shutdown ImGui
     imguiShutdown();
 }

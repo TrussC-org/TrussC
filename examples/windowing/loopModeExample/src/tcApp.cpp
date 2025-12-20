@@ -12,7 +12,7 @@ void tcApp::setup() {
     cout << "  - 5: Decoupled Update (500Hz) + VSync Draw" << endl;
     cout << "  - ESC: Quit" << endl;
 
-    // デフォルト: VSync
+    // Default: VSync
     setVsync(true);
 }
 
@@ -23,7 +23,7 @@ void tcApp::update() {
 void tcApp::draw() {
     drawCount++;
 
-    // 1秒ごとにカウンタリセット
+    // Reset counter every second
     float t = getElapsedTime();
     if (t - lastResetTime >= 1.0f) {
         lastResetTime = t;
@@ -31,17 +31,17 @@ void tcApp::draw() {
         drawCount = 0;
     }
 
-    // 背景色をモードで変える
+    // Change background color based on mode
     switch (mode) {
-        case 0: clear(0.1f, 0.1f, 0.2f); break;  // VSync: 青
-        case 1: clear(0.1f, 0.2f, 0.1f); break;  // 30fps: 緑
-        case 2: clear(0.2f, 0.2f, 0.1f); break;  // 5fps: 黄
-        case 3: clear(0.2f, 0.1f, 0.1f); break;  // Event: 赤
-        case 4: clear(0.2f, 0.1f, 0.2f); break;  // Decoupled: 紫
+        case 0: clear(0.1f, 0.1f, 0.2f); break;  // VSync: Blue
+        case 1: clear(0.1f, 0.2f, 0.1f); break;  // 30fps: Green
+        case 2: clear(0.2f, 0.2f, 0.1f); break;  // 5fps: Yellow
+        case 3: clear(0.2f, 0.1f, 0.1f); break;  // Event: Red
+        case 4: clear(0.2f, 0.1f, 0.2f); break;  // Decoupled: Purple
         default: clear(0.1f, 0.1f, 0.1f); break;
     }
 
-    // 回転する四角形（アニメーション確認用）
+    // Rotating rectangle (for animation verification)
     float angle = getElapsedTime();
     pushMatrix();
     translate(getWindowWidth() / 2, getWindowHeight() / 2);
@@ -50,14 +50,14 @@ void tcApp::draw() {
     drawRect(-250, -50, 500, 100);
     popMatrix();
 
-    // 情報表示
+    // Display information
     setColor(1.0f, 1.0f, 1.0f);
     float y = 20;
 
     drawBitmapString("Loop Architecture Demo", 10, y); y += 20;
     y += 10;
 
-    // 現在のモード
+    // Current mode
     string modeStr;
     switch (mode) {
         case 0: modeStr = "VSync (default)"; break;
@@ -69,20 +69,20 @@ void tcApp::draw() {
     drawBitmapString("Mode: " + modeStr, 10, y); y += 16;
     y += 10;
 
-    // 設定状態
+    // Settings status
     drawBitmapString("Draw VSync: " + string(isDrawVsync() ? "ON" : "OFF"), 10, y); y += 16;
     drawBitmapString("Draw FPS setting: " + toString(getDrawFps()), 10, y); y += 16;
     drawBitmapString("Update synced: " + string(isUpdateSyncedToDraw() ? "YES" : "NO"), 10, y); y += 16;
     drawBitmapString("Update FPS setting: " + toString(getUpdateFps()), 10, y); y += 16;
     y += 10;
 
-    // 実際のFPS
+    // Actual FPS
     drawBitmapString("Actual FPS: " + toString(getFrameRate(), 1), 10, y); y += 16;
     drawBitmapString("Update/sec: " + toString(updateCount), 10, y); y += 16;
     drawBitmapString("Draw/sec: " + toString(drawCount), 10, y); y += 16;
     y += 20;
 
-    // 操作説明
+    // Controls
     drawBitmapString("Press 1-5 to change mode", 10, y); y += 16;
     if (mode == 3) {
         drawBitmapString("Click to redraw!", 10, y); y += 16;
@@ -110,21 +110,21 @@ void tcApp::keyPressed(int key) {
     }
     else if (key == '4') {
         mode = 3;
-        setDrawFps(0);  // 自動描画停止
+        setDrawFps(0);  // Stop automatic drawing
         syncUpdateToDraw(true);
-        redraw();  // モード切り替え直後に1回描画
+        redraw();  // Draw once immediately after mode switch
         cout << "Mode: Event-driven (click to redraw)" << endl;
     }
     else if (key == '5') {
         mode = 4;
         setDrawVsync(true);
-        setUpdateFps(500);  // Update は 500Hz で独立
+        setUpdateFps(500);  // Update runs independently at 500Hz
         cout << "Mode: Decoupled (Update 500Hz, Draw VSync)" << endl;
     }
 }
 
 void tcApp::mousePressed(int x, int y, int button) {
-    // イベント駆動モードでは、クリックで再描画
+    // In event-driven mode, redraw on click
     if (mode == 3) {
         redraw();
     }

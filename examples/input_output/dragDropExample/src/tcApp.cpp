@@ -3,24 +3,24 @@
 #include <sstream>
 #include <algorithm>
 
-// ファイル名を取得（パスの最後の部分）
+// Get file name (last part of path)
 static string getFileName(const string& path) {
     size_t pos = path.find_last_of("/\\");
     if (pos == string::npos) return path;
     return path.substr(pos + 1);
 }
 
-// 拡張子を取得
+// Get extension
 static string getExtension(const string& path) {
     size_t pos = path.find_last_of('.');
     if (pos == string::npos) return "";
     string ext = path.substr(pos + 1);
-    // 小文字に変換
+    // Convert to lowercase
     transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     return ext;
 }
 
-// 画像拡張子かどうか
+// Check if image extension
 static bool isImageExtension(const string& ext) {
     return ext == "png" || ext == "jpg" || ext == "jpeg" ||
            ext == "gif" || ext == "bmp" || ext == "tga";
@@ -36,23 +36,23 @@ void tcApp::draw() {
     int w = getWindowWidth();
     int h = getWindowHeight();
 
-    // タイトル
+    // Title
     setColor(1.0f);
     drawBitmapString("=== Drag & Drop Demo ===", 20, 20);
 
-    // ステータスメッセージ
+    // Status message
     setColor(0.78f, 0.78f, 0.4f);
     drawBitmapString(statusMessage, 20, 50);
 
-    // ドロップ領域の枠（点線風）
+    // Drop area border (dashed style)
     setColor(0.4f);
     noFill();
     drawRect(10, 70, w - 20, h - 80);
     fill();
 
-    // ドロップされたファイルのリスト表示
+    // Display list of dropped files
     float y = 100;
-    int maxDisplay = 10;  // 最大表示数
+    int maxDisplay = 10;  // Maximum display count
     int count = 0;
 
     for (const auto& file : droppedFiles) {
@@ -62,16 +62,16 @@ void tcApp::draw() {
             break;
         }
 
-        // アイコン
+        // Icon
         if (file.isImage) {
-            setColor(0.4f, 0.78f, 0.4f);  // 画像は緑
+            setColor(0.4f, 0.78f, 0.4f);  // Green for images
             drawBitmapString("[IMG]", 30, y);
         } else {
-            setColor(0.4f, 0.6f, 0.78f);  // その他は青
+            setColor(0.4f, 0.6f, 0.78f);  // Blue for others
             drawBitmapString("[FILE]", 30, y);
         }
 
-        // ファイル名
+        // File name
         setColor(1.0f);
         drawBitmapString(file.name, 90, y);
 
@@ -79,7 +79,7 @@ void tcApp::draw() {
         count++;
     }
 
-    // 画像プレビュー
+    // Image preview
     if (hasPreview && previewImage.isAllocated()) {
         float previewX = w - 250;
         float previewY = 100;
@@ -92,32 +92,32 @@ void tcApp::draw() {
         float drawW = imgW * scale;
         float drawH = imgH * scale;
 
-        // 枠
+        // Border
         setColor(0.3f);
         drawRect(previewX - 5, previewY - 5, drawW + 10, drawH + 10);
 
-        // 画像
+        // Image
         setColor(1.0f);
         previewImage.draw(previewX, previewY, drawW, drawH);
 
-        // サイズ情報
+        // Size information
         setColor(0.6f);
         stringstream ss;
         ss << (int)imgW << " x " << (int)imgH;
         drawBitmapString(ss.str(), previewX, previewY + drawH + 15);
     }
 
-    // 操作説明
+    // Instructions
     setColor(0.47f);
     drawBitmapString("Drag and drop files onto this window", 20, h - 25);
 }
 
 void tcApp::filesDropped(const vector<string>& files) {
-    // リストをクリア
+    // Clear list
     droppedFiles.clear();
     hasPreview = false;
 
-    // ファイル情報を収集
+    // Collect file information
     for (const auto& path : files) {
         DroppedFile df;
         df.path = path;
@@ -127,7 +127,7 @@ void tcApp::filesDropped(const vector<string>& files) {
 
         droppedFiles.push_back(df);
 
-        // 画像ならプレビュー用に読み込み（最後の画像）
+        // Load for preview if image (last image)
         if (df.isImage) {
             if (previewImage.load(path)) {
                 hasPreview = true;
@@ -135,7 +135,7 @@ void tcApp::filesDropped(const vector<string>& files) {
         }
     }
 
-    // ステータス更新
+    // Update status
     stringstream ss;
     ss << files.size() << " file(s) dropped";
     statusMessage = ss.str();

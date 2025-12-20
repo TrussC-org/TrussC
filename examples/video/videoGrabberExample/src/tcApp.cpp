@@ -1,5 +1,5 @@
 // =============================================================================
-// videoGrabberExample - Webカメラ入力サンプル
+// videoGrabberExample - Webcam input sample
 // =============================================================================
 
 #include "tcApp.h"
@@ -8,11 +8,11 @@ using namespace std;
 using namespace tc;
 
 void tcApp::setup() {
-    // カメラ権限を確認
+    // Check camera permission
     permissionGranted_ = VideoGrabber::checkCameraPermission();
 
     if (permissionGranted_) {
-        // 利用可能なカメラ一覧を取得
+        // Get list of available cameras
         devices_ = grabber_.listDevices();
         tcLogNotice("tcApp") << "=== Available Cameras ===";
         for (auto& dev : devices_) {
@@ -22,12 +22,12 @@ void tcApp::setup() {
         tcLogNotice("tcApp") << "";
         tcLogNotice("tcApp") << "Press 1-9 to switch camera, SPACE to restart current camera";
 
-        // デフォルトカメラでキャプチャ開始
+        // Start capture with default camera
         if (!devices_.empty()) {
             currentDevice_ = 0;
             grabber_.setDeviceID(currentDevice_);
-            grabber_.setVerbose(true);  // 詳細ログを有効化
-            // grabber_.setDesiredFrameRate(30);  // フレームレート指定（オプション）
+            grabber_.setVerbose(true);  // Enable verbose logging
+            // grabber_.setDesiredFrameRate(30);  // Set frame rate (optional)
             if (grabber_.setup(640, 480)) {
                 tcLogNotice("tcApp") << "Camera started: " << grabber_.getWidth() << "x" << grabber_.getHeight()
                               << " (" << grabber_.getDeviceName() << ")";
@@ -43,11 +43,11 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
-    // 権限がまだない場合は再チェック
+    // Re-check if permission not yet granted
     if (!permissionGranted_ && permissionRequested_) {
         permissionGranted_ = VideoGrabber::checkCameraPermission();
         if (permissionGranted_) {
-            // 権限が付与されたらカメラを開始
+            // Start camera once permission is granted
             devices_ = grabber_.listDevices();
             if (!devices_.empty()) {
                 grabber_.setDeviceID(0);
@@ -57,7 +57,7 @@ void tcApp::update() {
         }
     }
 
-    // カメラフレームを更新
+    // Update camera frame
     grabber_.update();
 
     frameCount_++;
@@ -67,10 +67,10 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    clear(50);  // 暗いグレー背景
+    clear(50);  // Dark gray background
 
     if (!permissionGranted_) {
-        // 権限がない場合のメッセージ
+        // Message when permission is not granted
         setColor(1.0f);
         drawBitmapString("Camera permission required.", 20, 30);
         drawBitmapString("Please grant camera access in System Settings.", 20, 50);
@@ -84,23 +84,23 @@ void tcApp::draw() {
         return;
     }
 
-    // カメラ映像を描画（ウィンドウにフィットするようにスケール）
+    // Draw camera image (scaled to fit window)
     setColor(1.0f);
     float videoW = grabber_.getWidth();
     float videoH = grabber_.getHeight();
     float winW = getWindowWidth();
     float winH = getWindowHeight();
 
-    // アスペクト比を維持してフィット
+    // Fit while maintaining aspect ratio
     float scale = std::min(winW / videoW, winH / videoH);
     float drawW = videoW * scale;
     float drawH = videoH * scale;
-    float drawX = (winW - drawW) / 2;  // センタリング
+    float drawX = (winW - drawW) / 2;  // Centering
     float drawY = (winH - drawH) / 2;
 
     grabber_.draw(drawX, drawY, drawW, drawH);
 
-    // 情報表示
+    // Display information
     int y = 20;
     setColor(colors::yellow);
     drawBitmapString("FPS: " + to_string((int)getFrameRate()), 10, y); y += 20;
@@ -112,7 +112,7 @@ void tcApp::draw() {
     setColor(colors::white);
     drawBitmapString("Size: " + to_string(grabber_.getWidth()) + "x" + to_string(grabber_.getHeight()), 10, y); y += 20;
 
-    // フレーム状態
+    // Frame status
     if (grabber_.isFrameNew()) {
         setColor(colors::green);
         drawBitmapString("Frame: NEW", 10, y);
@@ -125,7 +125,7 @@ void tcApp::draw() {
     setColor(colors::gray);
     drawBitmapString("New frames: " + to_string(newFrameCount_) + " / " + to_string(frameCount_), 10, y); y += 20;
 
-    // ピクセルデータの確認（最初の数ピクセルの値）
+    // Check pixel data (values of first few pixels)
     const unsigned char* pixels = grabber_.getPixels();
     if (pixels) {
         int sum = 0;
@@ -142,7 +142,7 @@ void tcApp::draw() {
 }
 
 void tcApp::keyPressed(int key) {
-    // 数字キーでカメラ切り替え
+    // Switch camera with number keys
     if (key >= '1' && key <= '9') {
         int deviceIdx = key - '1';
         if (deviceIdx < (int)devices_.size() && deviceIdx != currentDevice_) {
@@ -161,7 +161,7 @@ void tcApp::keyPressed(int key) {
             frameCount_ = 0;
         }
     }
-    // スペースで現在のカメラを再起動
+    // Restart current camera with space
     else if (key == ' ') {
         tcLogNotice("tcApp") << "Restarting camera " << currentDevice_;
         grabber_.close();

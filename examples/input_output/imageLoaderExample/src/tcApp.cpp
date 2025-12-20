@@ -9,7 +9,7 @@ void tcApp::setup() {
     cout << "  - Drawing with different sizes" << endl;
     cout << "  - Reading pixel colors" << endl;
 
-    // 画像を読み込む
+    // Load images
     if (!bikers.load(getDataPath("images/bikers.jpg"))) {
         cout << "Failed to load bikers.jpg" << endl;
     }
@@ -32,36 +32,36 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
-    // 何もしない
+    // Nothing to do
 }
 
 void tcApp::draw() {
-    clear(1.0f);  // 白背景
+    clear(1.0f);  // White background
 
-    setColor(1.0f);  // 白（画像の色をそのまま表示）
+    setColor(1.0f);  // White (display image colors as-is)
 
-    // bikers を左上に描画
+    // Draw bikers at top-left
     if (bikers.isAllocated()) {
         bikers.draw(0, 0);
     }
 
-    // gears を右上に描画
+    // Draw gears at top-right
     if (gears.isAllocated()) {
         gears.draw(600, 0);
     }
 
-    // poster を右下に描画
+    // Draw poster at bottom-right
     if (poster.isAllocated()) {
-        poster.draw(600, 300, 200, 300);  // サイズ指定
+        poster.draw(600, 300, 200, 300);  // Specify size
     }
 
-    // transparency を動かしながら描画
+    // Draw transparency while moving
     if (transparency.isAllocated()) {
         float wave = sin(getElapsedTime());
         transparency.draw(500 + wave * 50, 20);
     }
 
-    // icon のピクセルを読んで円を描画
+    // Read icon pixels and draw circles
     if (icon.isAllocated()) {
         int w = icon.getWidth();
         int h = icon.getHeight();
@@ -72,7 +72,7 @@ void tcApp::draw() {
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 Color c = icon.getColor(x, y);
-                // 明るさに基づいてサイズを決定
+                // Determine size based on brightness
                 float brightness = 0.299f * c.r + 0.587f * c.g + 0.114f * c.b;
                 float size = (1.0f - brightness) * diameter / 2;
 
@@ -81,12 +81,12 @@ void tcApp::draw() {
             }
         }
 
-        // 元のアイコンも表示
+        // Also display original icon
         setColor(1.0f);
         icon.draw(offsetX + w * diameter + 20, offsetY);
     }
 
-    // 情報を表示（半透明背景付き）
+    // Display information (with semi-transparent background)
     drawBitmapStringHighlight("imageLoaderExample", 10, 20,
         Color(0, 0, 0, 0.7f), Color(1, 1, 1));
     drawBitmapStringHighlight("Loaded images: bikers.jpg, gears.gif, poster.jpg, transparency.png, icon.png", 10, 40,

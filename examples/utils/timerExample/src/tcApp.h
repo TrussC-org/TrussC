@@ -9,15 +9,15 @@ using namespace tc;
 using namespace std;
 
 // =============================================================================
-// timerExample - callAfter / callEvery サンプル
+// timerExample - callAfter / callEvery sample
 // =============================================================================
-// - callAfter: 指定秒数後に1回だけ実行
-// - callEvery: 指定間隔で繰り返し実行
-// - cancelTimer: タイマーをキャンセル
+// - callAfter: Execute once after specified seconds
+// - callEvery: Execute repeatedly at specified interval
+// - cancelTimer: Cancel a timer
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// TimerBall - タイマーで色が変わるボール（Node を継承）
+// TimerBall - Ball that changes color with timer (inherits from Node)
 // ---------------------------------------------------------------------------
 class TimerBall : public Node {
 public:
@@ -33,7 +33,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// CountdownNode - callAfter で一度だけ実行するデモ
+// CountdownNode - Demo of executing once with callAfter
 // ---------------------------------------------------------------------------
 class CountdownNode : public Node {
 public:
@@ -43,12 +43,12 @@ public:
     void draw() override;
 
 private:
-    string message_ = "3秒後にメッセージが変わります...";
+    string message_ = "Message will change after 3 seconds...";
     bool triggered_ = false;
 };
 
 // ---------------------------------------------------------------------------
-// PulseNode - callEvery で繰り返し実行するデモ
+// PulseNode - Demo of repeated execution with callEvery
 // ---------------------------------------------------------------------------
 class PulseNode : public Node {
 public:
@@ -64,7 +64,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// tcApp - メインアプリケーション
+// tcApp - Main application
 // ---------------------------------------------------------------------------
 class tcApp : public App {
 public:

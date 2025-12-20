@@ -3,21 +3,21 @@
 using namespace std;
 
 // ---------------------------------------------------------------------------
-// setup - 初期化
+// setup - Initialization
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
     tcLogNotice("tcApp") << "02_nodes: Node System Demo";
-    tcLogNotice("tcApp") << "  - Space: 回転を停止/再開";
-    tcLogNotice("tcApp") << "  - ESC: 終了";
+    tcLogNotice("tcApp") << "  - Space: Pause/resume rotation";
+    tcLogNotice("tcApp") << "  - ESC: Exit";
 
-    // コンテナ1（左側、時計回り）
+    // Container 1 (left side, clockwise)
     container1_ = make_shared<RotatingContainer>();
     container1_->x = 320;
     container1_->y = 360;
     container1_->rotationSpeed = 0.5f;
     container1_->size = 250;
 
-    // コンテナ2（右側、反時計回り、少し小さめ）
+    // Container 2 (right side, counter-clockwise, slightly smaller)
     container2_ = make_shared<RotatingContainer>();
     container2_->x = 960;
     container2_->y = 360;
@@ -26,7 +26,7 @@ void tcApp::setup() {
     container2_->scaleX = 0.8f;
     container2_->scaleY = 0.8f;
 
-    // マウス追従ノード（各コンテナに1つずつ）
+    // Mouse follower nodes (one for each container)
     follower1_ = make_shared<MouseFollower>();
     follower1_->r = 1.0f;
     follower1_->g = 0.3f;
@@ -39,7 +39,7 @@ void tcApp::setup() {
     follower2_->b = 0.5f;
     container2_->addChild(follower2_);
 
-    // 固定位置の子ノード（四隅に配置）
+    // Fixed position child nodes (placed at corners)
     float offset = 80;
     vector<pair<float, float>> positions = {
         {-offset, -offset}, {offset, -offset},
@@ -63,54 +63,54 @@ void tcApp::setup() {
         container2_->addChild(child);
     }
 
-    // ルート（App）に追加
+    // Add to root (App)
     addChild(container1_);
     addChild(container2_);
 }
 
 // ---------------------------------------------------------------------------
-// update - 更新
+// update - Update
 // ---------------------------------------------------------------------------
 void tcApp::update() {
-    // App 自身の更新処理があればここに
-    // 子ノードはフレームワークが自動で更新する
+    // App's own update processing goes here if needed
+    // Child nodes are updated automatically by the framework
 }
 
 // ---------------------------------------------------------------------------
-// draw - 描画
+// draw - Draw
 // ---------------------------------------------------------------------------
 void tcApp::draw() {
-    // 背景クリア
+    // Clear background
     clear(0.1f, 0.1f, 0.15f);
 
-    // グローバル座標でのマウス位置を表示
+    // Display mouse position in global coordinates
     float gx = getGlobalMouseX();
     float gy = getGlobalMouseY();
     setColor(1.0f, 1.0f, 1.0f, 0.5f);
     drawCircle(gx, gy, 5);
 
-    // 画面左上に説明を表示
+    // Display description at top-left of screen
     setColor(1.0f, 1.0f, 1.0f);
     drawBitmapString("Node System Demo - Local Coordinate Transformation", 20, 25);
     setColor(0.7f, 0.7f, 0.7f);
     drawBitmapString("Each box has its own local coordinate system.", 20, 45);
     drawBitmapString("Mouse position is transformed to local coords.", 20, 60);
 
-    // グローバルマウス座標
+    // Global mouse coordinates
     char buf[64];
     snprintf(buf, sizeof(buf), "global: %.0f, %.0f", gx, gy);
     setColor(1.0f, 1.0f, 0.5f);
     drawBitmapString(buf, 20, 90);
 
-    // 操作説明
+    // Controls description
     setColor(0.5f, 0.5f, 0.5f);
     drawBitmapString("[SPACE] pause/resume rotation  [ESC] quit", 20, getWindowHeight() - 20);
 
-    // 子ノードはフレームワークが自動で描画する（この draw() の後に）
+    // Child nodes are drawn automatically by the framework (after this draw())
 }
 
 // ---------------------------------------------------------------------------
-// 入力イベント
+// Input events
 // ---------------------------------------------------------------------------
 
 void tcApp::keyPressed(int key) {
@@ -118,7 +118,7 @@ void tcApp::keyPressed(int key) {
         sapp_request_quit();
     }
     else if (key == KEY_SPACE) {
-        // 回転を停止/再開
+        // Pause/resume rotation
         static bool paused = false;
         paused = !paused;
 
@@ -132,7 +132,7 @@ void tcApp::keyPressed(int key) {
 void tcApp::mousePressed(int x, int y, int button) {
     tcLogVerbose("tcApp") << "Global mouse: " << x << ", " << y;
 
-    // 各フォロワーのローカル座標を表示
+    // Display each follower's local coordinates
     tcLogVerbose("tcApp") << "  Follower1 local: " << follower1_->getMouseX()
                        << ", " << follower1_->getMouseY();
     tcLogVerbose("tcApp") << "  Follower2 local: " << follower2_->getMouseX()

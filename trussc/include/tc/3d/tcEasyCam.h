@@ -1,7 +1,7 @@
 #pragma once
 
-// tc::EasyCam - oF互換の3Dカメラ
-// マウス操作で回転・ズーム・パンができるインタラクティブカメラ
+// tc::EasyCam - oF-compatible 3D camera
+// Interactive camera with mouse-controlled rotation, zoom, and pan
 
 #include <cmath>
 
@@ -14,7 +14,7 @@ public:
         , distance_(400.0f)
         , rotationX_(0.0f)
         , rotationY_(0.0f)
-        , fov_(0.785398f)  // 45度（ラジアン）
+        , fov_(0.785398f)  // 45 degrees (radians)
         , nearClip_(0.1f)
         , farClip_(10000.0f)
         , mouseInputEnabled_(true)
@@ -28,17 +28,17 @@ public:
     {}
 
     // ---------------------------------------------------------------------------
-    // カメラ制御
+    // Camera control
     // ---------------------------------------------------------------------------
 
-    // カメラモードを開始（3Dパースペクティブ + ビュー行列を設定）
+    // Start camera mode (set 3D perspective + view matrix)
     void begin() {
-        // 3Dパイプラインを有効化
+        // Enable 3D pipeline
         if (internal::pipeline3dInitialized) {
             sgl_load_pipeline(internal::pipeline3d);
         }
 
-        // プロジェクション行列を設定
+        // Set projection matrix
         sgl_matrix_mode_projection();
         sgl_load_identity();
 
@@ -48,32 +48,32 @@ public:
         float aspect = w / h;
         sgl_perspective(fov_, aspect, nearClip_, farClip_);
 
-        // ビュー行列を設定（lookAtをシミュレート）
+        // Set view matrix (simulate lookAt)
         sgl_matrix_mode_modelview();
         sgl_load_identity();
 
-        // カメラ位置を計算（ターゲットからdistance_だけ離れた位置）
+        // Calculate camera position (distance_ away from target)
         float cosX = cos(rotationX_);
         float sinX = sin(rotationX_);
         float cosY = cos(rotationY_);
         float sinY = sin(rotationY_);
 
-        // 球面座標からカメラ位置を計算
+        // Calculate camera position from spherical coordinates
         float camX = target_.x + distance_ * sinY * cosX;
         float camY = target_.y + distance_ * sinX;
         float camZ = target_.z + distance_ * cosY * cosX;
 
-        // lookAt 行列を手動で構築
+        // Manually construct lookAt matrix
         Vec3 eye = {camX, camY, camZ};
         Vec3 center = target_;
         Vec3 up = {0.0f, 1.0f, 0.0f};
 
-        // lookAt計算
+        // lookAt calculation
         Vec3 f = {center.x - eye.x, center.y - eye.y, center.z - eye.z};
         float fLen = sqrt(f.x*f.x + f.y*f.y + f.z*f.z);
         f.x /= fLen; f.y /= fLen; f.z /= fLen;
 
-        // sをf×upで計算
+        // Calculate s = f × up
         Vec3 s = {
             f.y * up.z - f.z * up.y,
             f.z * up.x - f.x * up.z,
@@ -82,14 +82,14 @@ public:
         float sLen = sqrt(s.x*s.x + s.y*s.y + s.z*s.z);
         s.x /= sLen; s.y /= sLen; s.z /= sLen;
 
-        // uをs×fで計算
+        // Calculate u = s × f
         Vec3 u = {
             s.y * f.z - s.z * f.y,
             s.z * f.x - s.x * f.z,
             s.x * f.y - s.y * f.x
         };
 
-        // lookAt行列を構築
+        // Construct lookAt matrix
         float m[16] = {
              s.x,  u.x, -f.x, 0.0f,
              s.y,  u.y, -f.y, 0.0f,
@@ -103,14 +103,14 @@ public:
         sgl_load_matrix(m);
     }
 
-    // カメラモードを終了（2D描画モードに戻す）
+    // End camera mode (return to 2D drawing mode)
     void end() {
         sgl_load_default_pipeline();
-        // 2D正射影に戻す
+        // Return to 2D orthographic projection
         beginFrame();
     }
 
-    // カメラをリセット
+    // Reset camera
     void reset() {
         target_ = {0.0f, 0.0f, 0.0f};
         distance_ = 400.0f;
@@ -119,10 +119,10 @@ public:
     }
 
     // ---------------------------------------------------------------------------
-    // パラメータ設定
+    // Parameter settings
     // ---------------------------------------------------------------------------
 
-    // ターゲット位置を設定
+    // Set target position
     void setTarget(float x, float y, float z) {
         target_ = {x, y, z};
     }
@@ -135,7 +135,7 @@ public:
         return target_;
     }
 
-    // カメラとターゲットの距離を設定
+    // Set distance between camera and target
     void setDistance(float d) {
         distance_ = d;
         if (distance_ < 0.1f) distance_ = 0.1f;
@@ -145,7 +145,7 @@ public:
         return distance_;
     }
 
-    // 視野角（FOV）を設定（ラジアン）
+    // Set field of view (FOV) in radians
     void setFov(float fov) {
         fov_ = fov;
     }
@@ -154,12 +154,12 @@ public:
         return fov_;
     }
 
-    // 視野角（FOV）を度数で設定
+    // Set field of view (FOV) in degrees
     void setFovDeg(float degrees) {
         fov_ = degrees * PI / 180.0f;
     }
 
-    // クリッピング面を設定
+    // Set clipping planes
     void setNearClip(float nearClip) {
         nearClip_ = nearClip;
     }
@@ -168,7 +168,7 @@ public:
         farClip_ = farClip;
     }
 
-    // 感度設定
+    // Sensitivity settings
     void setSensitivity(float s) {
         sensitivity_ = s;
     }
@@ -182,7 +182,7 @@ public:
     }
 
     // ---------------------------------------------------------------------------
-    // マウス操作
+    // Mouse input
     // ---------------------------------------------------------------------------
 
     void enableMouseInput() {
@@ -197,7 +197,7 @@ public:
         return mouseInputEnabled_;
     }
 
-    // マウスボタンが押された時（App::mousePressedから呼ぶ）
+    // When mouse button pressed (call from App::mousePressed)
     void mousePressed(int x, int y, int button) {
         if (!mouseInputEnabled_) return;
 
@@ -211,7 +211,7 @@ public:
         }
     }
 
-    // マウスボタンが離された時（App::mouseReleasedから呼ぶ）
+    // When mouse button released (call from App::mouseReleased)
     void mouseReleased(int x, int y, int button) {
         if (button == MOUSE_BUTTON_LEFT) {
             isDragging_ = false;
@@ -220,7 +220,7 @@ public:
         }
     }
 
-    // マウスドラッグ時（App::mouseDraggedから呼ぶ）
+    // When mouse dragged (call from App::mouseDragged)
     void mouseDragged(int x, int y, int button) {
         if (!mouseInputEnabled_) return;
 
@@ -228,24 +228,24 @@ public:
         float dy = (float)y - lastMouseY_;
 
         if (isDragging_ && button == MOUSE_BUTTON_LEFT) {
-            // 回転（Y上下ドラッグで仰角、X左右ドラッグで方位角）
+            // Rotation (Y drag for elevation, X drag for azimuth)
             rotationY_ -= dx * 0.01f * sensitivity_;
-            rotationX_ += dy * 0.01f * sensitivity_;  // 上下を直感的に
+            rotationX_ += dy * 0.01f * sensitivity_;  // Intuitive up/down
 
-            // X軸回転を制限（真上・真下に近づきすぎると反転するので約80度で制限）
-            float maxAngle = 1.4f;  // 約80度
+            // Limit X-axis rotation (restrict to ~80 degrees to prevent flipping near poles)
+            float maxAngle = 1.4f;  // ~80 degrees
             if (rotationX_ > maxAngle) rotationX_ = maxAngle;
             if (rotationX_ < -maxAngle) rotationX_ = -maxAngle;
         } else if (isPanning_ && button == MOUSE_BUTTON_MIDDLE) {
-            // パン（XY平面上の移動）
+            // Pan (movement in XY plane)
             float cosY = cos(rotationY_);
             float sinY = sin(rotationY_);
 
-            // カメラの右方向と上方向を計算
+            // Calculate camera's right and up directions
             float rightX = cosY;
             float rightZ = -sinY;
 
-            // パン量をスケール
+            // Scale pan amount
             float panX = dx * 0.5f * panSensitivity_;
             float panY = -dy * 0.5f * panSensitivity_;
 
@@ -258,20 +258,20 @@ public:
         lastMouseY_ = (float)y;
     }
 
-    // スクロール時（App::mouseScrolledから呼ぶ）
+    // When scrolled (call from App::mouseScrolled)
     void mouseScrolled(float dx, float dy) {
         if (!mouseInputEnabled_) return;
 
-        // ズーム（距離を変更）
+        // Zoom (change distance)
         distance_ -= dy * zoomSensitivity_;
         if (distance_ < 0.1f) distance_ = 0.1f;
     }
 
     // ---------------------------------------------------------------------------
-    // カメラ情報取得
+    // Camera info
     // ---------------------------------------------------------------------------
 
-    // カメラ位置を取得
+    // Get camera position
     Vec3 getPosition() const {
         float cosX = cos(rotationX_);
         float sinX = sin(rotationX_);
@@ -286,24 +286,24 @@ public:
     }
 
 private:
-    Vec3 target_;         // 注視点
-    float distance_;      // ターゲットからの距離
-    float rotationX_;     // X軸回転（仰角）
-    float rotationY_;     // Y軸回転（方位角）
+    Vec3 target_;         // Look-at target
+    float distance_;      // Distance from target
+    float rotationX_;     // X-axis rotation (elevation)
+    float rotationY_;     // Y-axis rotation (azimuth)
 
-    float fov_;           // 視野角（ラジアン）
-    float nearClip_;      // 近クリップ面
-    float farClip_;       // 遠クリップ面
+    float fov_;           // Field of view (radians)
+    float nearClip_;      // Near clipping plane
+    float farClip_;       // Far clipping plane
 
     bool mouseInputEnabled_;
-    bool isDragging_;     // 左ボタンドラッグ中
-    bool isPanning_;      // 中ボタンドラッグ中
+    bool isDragging_;     // Left button dragging
+    bool isPanning_;      // Middle button dragging
     float lastMouseX_;
     float lastMouseY_;
 
-    float sensitivity_;       // 回転感度
-    float zoomSensitivity_;   // ズーム感度
-    float panSensitivity_;    // パン感度
+    float sensitivity_;       // Rotation sensitivity
+    float zoomSensitivity_;   // Zoom sensitivity
+    float panSensitivity_;    // Pan sensitivity
 };
 
 } // namespace trussc

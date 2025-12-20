@@ -1,289 +1,289 @@
-# TrussC ロードマップ
+# TrussC Roadmap
 
-openFrameworksとの機能比較に基づいた開発ロードマップ。
+Development roadmap based on feature comparison with openFrameworks.
 
 ---
 
-## 実装済み機能
+## Implemented Features
 
-### Graphics（描画）
-- [x] 基本図形（rect, circle, ellipse, line, triangle, point）
-- [x] Image（読み込み・描画・保存）
-- [x] BitmapFont（テクスチャアトラス）
-- [x] TrueTypeFont（stb_truetype ベース）
-- [x] Shape API（beginShape/vertex/endShape）
-- [x] Path（頂点配列・曲線生成・ベジェ曲線・円弧）※旧 Polyline
-- [x] Mesh（頂点・色・インデックス・法線）
-- [x] StrokeMesh（太線描画）
-- [x] Scissor Clipping（再帰対応）
-- [x] ブレンドモード（Alpha, Add, Multiply, Screen, Subtract, Disabled）
+### Graphics (Drawing)
+- [x] Basic shapes (rect, circle, ellipse, line, triangle, point)
+- [x] Image (load, draw, save)
+- [x] BitmapFont (texture atlas)
+- [x] TrueTypeFont (stb_truetype based)
+- [x] Shape API (beginShape/vertex/endShape)
+- [x] Path (vertex arrays, curve generation, Bezier curves, arcs) *formerly Polyline*
+- [x] Mesh (vertices, colors, indices, normals)
+- [x] StrokeMesh (thick line drawing)
+- [x] Scissor Clipping (recursive support)
+- [x] Blend modes (Alpha, Add, Multiply, Screen, Subtract, Disabled)
 
 ### 3D
-- [x] 3D変形（translate/rotate/scale）
-- [x] 深度テスト・背面カリング
-- [x] 3Dプリミティブ（Plane, Box, Sphere, Cylinder, Cone, Torus, IcoSphere）
-- [x] EasyCam（マウス操作3Dカメラ）
-- [x] Node（シーングラフ）
-- [x] RectNode（2D UI、Ray-based Hit Test）
-- [x] ライティング（Ambient, Diffuse, Specular / Phong モデル）
-- [x] マテリアル（プリセット: gold, silver, copper, emerald 等）
-- [x] Light（Directional, Point）
+- [x] 3D transforms (translate/rotate/scale)
+- [x] Depth testing, back-face culling
+- [x] 3D primitives (Plane, Box, Sphere, Cylinder, Cone, Torus, IcoSphere)
+- [x] EasyCam (mouse-controlled 3D camera)
+- [x] Node (scene graph)
+- [x] RectNode (2D UI, Ray-based Hit Test)
+- [x] Lighting (Ambient, Diffuse, Specular / Phong model)
+- [x] Materials (presets: gold, silver, copper, emerald, etc.)
+- [x] Light (Directional, Point)
 
 ### Math
 - [x] Vec2, Vec3, Vec4
 - [x] Mat3, Mat4
-- [x] Perlin Noise（1D〜4D）
-- [x] Ray（Hit Test用）
-- [x] 色空間（RGB, HSB, OKLab, OKLCH）
-- [x] ユーティリティ（lerp, clamp, map, radians, degrees）
+- [x] Perlin Noise (1D-4D)
+- [x] Ray (for Hit Test)
+- [x] Color spaces (RGB, HSB, OKLab, OKLCH)
+- [x] Utilities (lerp, clamp, map, radians, degrees)
 
 ### Events
-- [x] キーボード（keyPressed, keyReleased）
-- [x] マウス（pressed, released, moved, dragged, scrolled）
-- [x] ウィンドウリサイズ
-- [x] Event<T> テンプレート
-- [x] EventListener（RAII）
-- [x] RectNode イベント（mousePressed/Released/Dragged/Scrolled）
-- [x] ドラッグ&ドロップ（ファイル受け取り）
+- [x] Keyboard (keyPressed, keyReleased)
+- [x] Mouse (pressed, released, moved, dragged, scrolled)
+- [x] Window resize
+- [x] Event<T> template
+- [x] EventListener (RAII)
+- [x] RectNode events (mousePressed/Released/Dragged/Scrolled)
+- [x] Drag & drop (file receiving)
 
 ### GL
-- [x] Shader（フルスクリーンシェーダー）
-- [x] FBO（フレームバッファオブジェクト）
-- [x] テクスチャ詳細制御（Filter: Nearest/Linear、Wrap: Repeat/MirroredRepeat/ClampToEdge）
+- [x] Shader (fullscreen shaders)
+- [x] FBO (frame buffer object)
+- [x] Texture detail control (Filter: Nearest/Linear, Wrap: Repeat/MirroredRepeat/ClampToEdge)
 
 ### Utils
-- [x] Timer（Node::addTimerFunction）
+- [x] Timer (Node::addTimerFunction)
 - [x] Thread, ThreadChannel
-- [x] Serial通信
-- [x] フレーム制御（FPS/VSync）
-- [x] Log（tcLog: Verbose/Notice/Warning/Error/Fatal）
-- [x] JSON / XML（nlohmann/json, pugixml）
-- [x] ファイルダイアログ（OS標準ダイアログ）
-- [x] ネットワーク（TCP/UDP）
+- [x] Serial communication
+- [x] Frame control (FPS/VSync)
+- [x] Log (tcLog: Verbose/Notice/Warning/Error/Fatal)
+- [x] JSON / XML (nlohmann/json, pugixml)
+- [x] File dialogs (OS native)
+- [x] Network (TCP/UDP)
 
-### Addons（オプショナル）
-- [x] tcxTls - TLS/SSL 通信（mbedTLS）
-- [x] tcxOsc - OSC プロトコル
-- [x] tcxBox2d - Box2D 物理エンジン
+### Addons (Optional)
+- [x] tcxTls - TLS/SSL communication (mbedTLS)
+- [x] tcxOsc - OSC protocol
+- [x] tcxBox2d - Box2D physics engine
 
 ### Sound
-- [x] Sound（sokol_audio + dr_libs）
-- [x] SoundStream（オーディオ入力）
+- [x] Sound (sokol_audio + dr_libs)
+- [x] SoundStream (audio input)
 
 ### Video
-- [x] VideoGrabber（Webカメラ入力）
+- [x] VideoGrabber (webcam input)
 
 ### UI
-- [x] Dear ImGui 統合
+- [x] Dear ImGui integration
 
 ---
 
-## 未実装機能（優先度別）
+## Unimplemented Features (by priority)
 
-### 優先度: 中
+### Priority: Medium
 
-| 機能 | 説明 | 難易度 |
-|------|------|--------|
-| 3Dモデル読み込み | obj/gltf | 高 |
-| テクスチャマッピング | Mesh へのテクスチャ適用 | 中 |
-| 法線マップ | バンプマッピング | 高 |
-| ビデオ再生 | 動画ファイル再生 | 高 |
+| Feature | Description | Difficulty |
+|---------|-------------|------------|
+| 3D model loading | obj/gltf | High |
+| Texture mapping | Texture application to Mesh | Medium |
+| Normal mapping | Bump mapping | High |
+| Video playback | Video file playback | High |
 
-### 優先度: 低
+### Priority: Low
 
-| 機能 | 説明 | 難易度 |
-|------|------|--------|
-| VBO詳細制御 | 動的頂点バッファ | 中 |
-| パーティクルシステム | アドオン化も検討 | 中 |
-| タッチ入力 | iOS/Android向け | 高 |
-| Spot ライト | スポットライト対応 | 中 |
-
----
-
-## 外部ライブラリの更新
-
-TrussC はいくつかの外部ライブラリに依存している。
-特に画像処理系は脆弱性が発見されやすいため、**リリースごとに最新版を確認する**。
-
-| ライブラリ | 用途 | 更新優先度 | 備考 |
-|:-----------|:-----|:-----------|:-----|
-| **stb_image** | 画像読み込み | **高** | CVE多数、必ず最新版を使用 |
-| **stb_image_write** | 画像書き出し | **高** | 同上 |
-| **stb_truetype** | フォント描画 | 中 | |
-| pugixml | XML パース | 中 | |
-| nlohmann/json | JSON パース | 中 | |
-| sokol | 描画バックエンド | 中 | API変更に注意、**TrussC カスタマイズあり（下記参照）** |
-| miniaudio | オーディオ | 中 | |
-| Dear ImGui | GUI | 低 | 安定版を使用 |
-
-**更新時の確認事項:**
-- GitHub の Release Notes / Security Advisories を確認
-- stb は https://github.com/nothings/stb のコミット履歴を直接確認（タグがないため）
-
-**sokol 更新時の注意（TrussC カスタマイズ）:**
-
-`sokol_app.h` にはイベント駆動描画のちらつき防止のため、以下のカスタマイズが施されている。
-sokol を更新する際は、これらの変更を再適用する必要がある。
-
-1. `_sapp_t` 構造体に `bool skip_present;` フラグを追加
-2. API宣言 `SOKOL_APP_API_DECL void sapp_skip_present(void);` を追加
-3. `_sapp_d3d11_present()` の先頭にスキップチェックを追加
-4. `sapp_skip_present()` の実装を追加
-
-詳細は git diff で確認: `git log --oneline -p -- trussc/include/sokol/sokol_app.h`
+| Feature | Description | Difficulty |
+|---------|-------------|------------|
+| VBO detail control | Dynamic vertex buffers | Medium |
+| Particle system | Consider as addon | Medium |
+| Touch input | iOS/Android | High |
+| Spot light | Spotlight support | Medium |
 
 ---
 
-## 既知の問題・課題
+## External Library Updates
 
-### Windows 固有
+TrussC depends on several external libraries.
+Image processing libraries are particularly prone to vulnerabilities, so **check for latest versions with each release**.
 
-| 問題 | 説明 | 解決策案 |
-|------|------|----------|
-| ~~コンソールウィンドウ表示~~ | ~~実行ファイルをダブルクリックするとコマンドプロンプトが背後に表示される~~ | ✅ 解決済み: Release時は非表示、`TRUSSC_SHOW_CONSOLE` で表示可能 |
-| ~~アイコン未適用~~ | ~~実行ファイルに .ico が適用されていない~~ | ✅ 解決済み: `trussc_setup_icon()` で .rc ファイル自動生成 |
+| Library | Purpose | Update Priority | Notes |
+|:--------|:--------|:----------------|:------|
+| **stb_image** | Image loading | **High** | Many CVEs, always use latest |
+| **stb_image_write** | Image writing | **High** | Same as above |
+| **stb_truetype** | Font rendering | Medium | |
+| pugixml | XML parsing | Medium | |
+| nlohmann/json | JSON parsing | Medium | |
+| sokol | Rendering backend | Medium | Watch for API changes, **TrussC has customizations (see below)** |
+| miniaudio | Audio | Medium | |
+| Dear ImGui | GUI | Low | Use stable versions |
 
-### クロスプラットフォーム
+**Update Checklist:**
+- Check GitHub Release Notes / Security Advisories
+- For stb, check commit history directly at https://github.com/nothings/stb (no tags)
 
-| 問題 | 説明 | 解決策案 |
-|------|------|----------|
-| ~~イベントベース描画時のちらつき~~ | ~~redraw() 等で1フレームだけ更新すると、ダブルバッファの影響で直前の状態と交互に表示され点滅する~~ | ✅ 解決済み: sokol_app に `sapp_skip_present()` を追加し、描画スキップ時は Present もスキップ |
+**sokol Update Notes (TrussC Customizations):**
+
+`sokol_app.h` has customizations to prevent flickering during event-driven rendering.
+When updating sokol, these changes must be reapplied.
+
+1. Add `bool skip_present;` flag to `_sapp_t` struct
+2. Add API declaration `SOKOL_APP_API_DECL void sapp_skip_present(void);`
+3. Add skip check at top of `_sapp_d3d11_present()`
+4. Add `sapp_skip_present()` implementation
+
+Details via git diff: `git log --oneline -p -- trussc/include/sokol/sokol_app.h`
 
 ---
 
-## Windows / Linux 対応状況
+## Known Issues
 
-現在 macOS (Metal) で開発中。Windows / Linux への移植作業の状況。
+### Windows Specific
 
-### ✅ 対応済み（クロスプラットフォーム）
+| Issue | Description | Solution |
+|-------|-------------|----------|
+| ~~Console window~~ | ~~Command prompt appears behind when double-clicking executable~~ | ✅ Resolved: Hidden in Release, show with `TRUSSC_SHOW_CONSOLE` |
+| ~~Icon not applied~~ | ~~.ico not applied to executable~~ | ✅ Resolved: `trussc_setup_icon()` auto-generates .rc file |
 
-| 機能 | 実装 | 備考 |
-|:-----|:-----|:-----|
+### Cross-Platform
+
+| Issue | Description | Solution |
+|-------|-------------|----------|
+| ~~Event-based drawing flicker~~ | ~~Single frame updates via redraw() cause flickering due to double buffering~~ | ✅ Resolved: Added `sapp_skip_present()` to sokol_app, skips Present when drawing is skipped |
+
+---
+
+## Windows / Linux Support Status
+
+Currently developed on macOS (Metal). Porting status for Windows / Linux.
+
+### ✅ Supported (Cross-Platform)
+
+| Feature | Implementation | Notes |
+|:--------|:---------------|:------|
 | **Core (sokol)** | sokol_app / sokol_gfx | Metal / D3D11 / OpenGL / Vulkan / WebGPU |
-| **FileDialog** | mac.mm / win.cpp / linux.cpp | OS標準ダイアログ |
-| **UDP Socket** | `#ifdef` 分岐 | Winsock / POSIX 両対応 |
-| **TCP Client/Server** | `#ifdef` 分岐 | Winsock / POSIX 両対応 |
-| **Sound** | miniaudio | クロスプラットフォーム |
-| **ImGui** | - | クロスプラットフォーム |
-| **Serial** | `tcSerial.h` | Win32 API / POSIX 両対応 |
+| **FileDialog** | mac.mm / win.cpp / linux.cpp | OS native dialogs |
+| **UDP Socket** | `#ifdef` branching | Winsock / POSIX both supported |
+| **TCP Client/Server** | `#ifdef` branching | Winsock / POSIX both supported |
+| **Sound** | miniaudio | Cross-platform |
+| **ImGui** | - | Cross-platform |
+| **Serial** | `tcSerial.h` | Win32 API / POSIX both supported |
 | **Platform** | `tcPlatform_win.cpp` | getExecutablePath, setWindowSize, getDisplayScaleFactor, captureWindow, saveScreenshot |
-| **FBO** | `tcFbo_win.cpp` | D3D11 Map/Unmap でピクセル読み取り |
-| **VideoGrabber** | `tcVideoGrabber_win.cpp` | Media Foundation でウェブカメラ対応 |
+| **FBO** | `tcFbo_win.cpp` | D3D11 Map/Unmap for pixel reading |
+| **VideoGrabber** | `tcVideoGrabber_win.cpp` | Media Foundation for webcam |
 
-### ❌ macOS のみ → Linux 実装が必要
+### ❌ macOS Only → Linux Implementation Needed
 
-| 機能 | ファイル | Linux |
-|:-----|:---------|:------|
+| Feature | File | Linux |
+|:--------|:-----|:------|
 | **Platform** | `tcPlatform_linux.cpp` | |
 | ├ getDisplayScaleFactor | | X11: `XRRGetScreenResources` |
 | ├ setWindowSize | | X11: `XResizeWindow` |
 | ├ getExecutablePath | | `/proc/self/exe` |
 | ├ captureWindow | | OpenGL `glReadPixels` |
-| └ saveScreenshot | | stb_image_write で代用可 |
+| └ saveScreenshot | | Can substitute with stb_image_write |
 | **FBO** | `tcFbo_linux.cpp` | OpenGL `glReadPixels` |
 | **VideoGrabber** | `tcVideoGrabber_linux.cpp` | V4L2 |
 
-### 移植の優先度（Linux）
+### Linux Porting Priority
 
-**中（使う人は使う）:**
-1. `tcFbo_linux.cpp` - FBO ピクセル読み取り
-2. `tcVideoGrabber_linux.cpp` - カメラ入力
-3. `tcPlatform_linux.cpp` - プラットフォーム関数
+**Medium (used by some):**
+1. `tcFbo_linux.cpp` - FBO pixel reading
+2. `tcVideoGrabber_linux.cpp` - Camera input
+3. `tcPlatform_linux.cpp` - Platform functions
 
 ---
 
-## プラットフォーム別テストチェックリスト
+## Platform-Specific Test Checklist
 
-OS固有コードを含むため、重点的にテストが必要なサンプル・機能のリスト。
+List of samples/features requiring focused testing due to OS-specific code.
 
-### Windows テスト項目
+### Windows Test Items
 
-**🔴 最優先（OS固有コードが多い）**
+**🔴 Highest Priority (OS-specific code heavy)**
 
-| サンプル | 確認ポイント | 状況 |
-|---------|-------------|------|
-| network/tcpExample | Winsock 接続・切断・エラー処理 | ⬜ 未確認 |
-| network/udpExample | Winsock、ブロードキャスト、マルチキャスト | ⬜ 未確認 |
-| input_output/screenshotExample | Win32 GDI+ キャプチャ (`tcPlatform_win.cpp`) | ⬜ 未確認 |
-| input_output/fileDialogExample | Win32 IFileDialog (`tcFileDialog_win.cpp`) | ⬜ 未確認 |
-| video/videoGrabberExample | Media Foundation API (`tcVideoGrabber_win.cpp`) | ⬜ 未確認 |
+| Sample | Check Points | Status |
+|--------|--------------|--------|
+| network/tcpExample | Winsock connection, disconnection, error handling | ⬜ Untested |
+| network/udpExample | Winsock, broadcast, multicast | ⬜ Untested |
+| input_output/screenshotExample | Win32 GDI+ capture (`tcPlatform_win.cpp`) | ⬜ Untested |
+| input_output/fileDialogExample | Win32 IFileDialog (`tcFileDialog_win.cpp`) | ⬜ Untested |
+| video/videoGrabberExample | Media Foundation API (`tcVideoGrabber_win.cpp`) | ⬜ Untested |
 
-**🟡 要確認（platform/win/ で実装あり）**
+**🟡 Needs Verification (platform/win/ implementation)**
 
-| 機能 | ファイル | 確認サンプル | 状況 |
-|------|---------|-------------|------|
-| FBO ピクセル読み取り | `tcFbo_win.cpp` | gl/fboExample | ⬜ 未確認 |
-| DPI スケール | `tcPlatform_win.cpp` | 全サンプル | ⬜ 未確認 |
-| 実行ファイルパス | `tcPlatform_win.cpp` | dataPath 使用サンプル | ⬜ 未確認 |
-| コンソール UTF-8 | sokol_app.h | ログ出力全般 | ⬜ 未確認 |
+| Feature | File | Sample | Status |
+|---------|------|--------|--------|
+| FBO pixel reading | `tcFbo_win.cpp` | gl/fboExample | ⬜ Untested |
+| DPI scaling | `tcPlatform_win.cpp` | All samples | ⬜ Untested |
+| Executable path | `tcPlatform_win.cpp` | Samples using dataPath | ⬜ Untested |
+| Console UTF-8 | sokol_app.h | All log output | ⬜ Untested |
 
-**🟢 比較的安全（クロスプラットフォームライブラリ）**
+**🟢 Relatively Safe (cross-platform libraries)**
 
-- graphics 系 - sokol が対応
-- sound 系 - miniaudio が対応
-- imgui 系 - sokol_imgui が対応
+- graphics - sokol handles
+- sound - miniaudio handles
+- imgui - sokol_imgui handles
 
-### Linux テスト項目
+### Linux Test Items
 
-**🔴 未実装（要作成）**
+**🔴 Not Implemented (needs creation)**
 
-| 機能 | ファイル | 必要な実装 | 状況 |
-|------|---------|-----------|------|
-| Platform 基本機能 | `tcPlatform_linux.cpp` | 現在スタブのみ、要実装 | ⬜ 未着手 |
+| Feature | File | Implementation Needed | Status |
+|---------|------|----------------------|--------|
+| Platform basic functions | `tcPlatform_linux.cpp` | Currently stubs only | ⬜ Not started |
 | ├ getDisplayScaleFactor | | X11 `XRRGetScreenResources` | ⬜ |
 | ├ setWindowSize | | X11 `XResizeWindow` | ⬜ |
 | ├ getExecutablePath | | `/proc/self/exe` readlink | ⬜ |
 | ├ captureWindow | | OpenGL `glReadPixels` | ⬜ |
 | └ saveScreenshot | | stb_image_write | ⬜ |
-| FBO ピクセル読み取り | `tcFbo_linux.cpp` | OpenGL `glReadPixels` | ⬜ 未着手 |
-| VideoGrabber | `tcVideoGrabber_linux.cpp` | V4L2 | ⬜ 未着手 |
+| FBO pixel reading | `tcFbo_linux.cpp` | OpenGL `glReadPixels` | ⬜ Not started |
+| VideoGrabber | `tcVideoGrabber_linux.cpp` | V4L2 | ⬜ Not started |
 
-**🟡 要確認（POSIX コード）**
+**🟡 Needs Verification (POSIX code)**
 
-| サンプル | 確認ポイント | 状況 |
-|---------|-------------|------|
-| network/tcpExample | POSIX ソケット | ⬜ 未確認 |
-| network/udpExample | POSIX ソケット | ⬜ 未確認 |
-| communication/serialExample | POSIX termios | ⬜ 未確認 |
-| input_output/fileDialogExample | GTK3 ダイアログ (`tcFileDialog_linux.cpp`) | ⬜ 未確認 |
+| Sample | Check Points | Status |
+|--------|--------------|--------|
+| network/tcpExample | POSIX sockets | ⬜ Untested |
+| network/udpExample | POSIX sockets | ⬜ Untested |
+| communication/serialExample | POSIX termios | ⬜ Untested |
+| input_output/fileDialogExample | GTK3 dialog (`tcFileDialog_linux.cpp`) | ⬜ Untested |
 
-**🟢 動作想定（クロスプラットフォーム）**
+**🟢 Expected to Work (cross-platform)**
 
-- graphics 系 - sokol OpenGL Core が対応
-- sound 系 - miniaudio ALSA/PulseAudio 対応
-- imgui 系 - sokol_imgui が対応
+- graphics - sokol OpenGL Core handles
+- sound - miniaudio ALSA/PulseAudio support
+- imgui - sokol_imgui handles
 
-### Web (Emscripten) テスト項目
+### Web (Emscripten) Test Items
 
-**✅ 基本動作確認済み**
+**✅ Basic Functionality Verified**
 
-| 機能 | 状況 |
-|------|------|
-| 描画（WebGL2） | ✅ 動作 |
-| リサイズ | ✅ 動作（カスタムシェル使用） |
-| フルスクリーン | ✅ 動作 |
+| Feature | Status |
+|---------|--------|
+| Drawing (WebGL2) | ✅ Works |
+| Resize | ✅ Works (custom shell) |
+| Fullscreen | ✅ Works |
 
-**⬜ 未確認**
+**⬜ Untested**
 
-| 機能 | 備考 |
-|------|------|
-| キーボード入力 | |
-| マウス入力 | |
+| Feature | Notes |
+|---------|-------|
+| Keyboard input | |
+| Mouse input | |
 | ImGui | |
-| Sound (miniaudio) | WebAudio 対応が必要かも |
-| Network | WebSocket 変換が必要 |
+| Sound (miniaudio) | May need WebAudio support |
+| Network | Needs WebSocket conversion |
 
 ---
 
-## サンプル一覧
+## Sample List
 
-### 実装済み
+### Implemented
 
-| カテゴリ | サンプル |
-|---------|---------|
+| Category | Samples |
+|----------|---------|
 | templates/ | emptyExample |
 | graphics/ | graphicsExample, colorExample, clippingExample, blendingExample, fontExample, polylinesExample, strokeMeshExample |
-| 3d/ | ofNodeExample, 3DPrimitivesExample（ライティング込み）, easyCamExample |
+| 3d/ | ofNodeExample, 3DPrimitivesExample (with lighting), easyCamExample |
 | math/ | vectorMathExample, noiseField2dExample |
 | events/ | eventsExample, hitTestExample, uiExample |
 | gl/ | shaderExample, textureExample |
@@ -296,15 +296,15 @@ OS固有コードを含むため、重点的にテストが必要なサンプル
 | threads/ | threadExample, threadChannelExample |
 | windowing/ | loopModeExample |
 
-### 今後
+### Future
 
-| カテゴリ | サンプル | 優先度 |
-|---------|---------|--------|
-| 3d/ | modelLoaderExample | 中 |
+| Category | Sample | Priority |
+|----------|--------|----------|
+| 3d/ | modelLoaderExample | Medium |
 
 ---
 
-## 参考リンク
+## Reference Links
 
 - [oF Examples](https://github.com/openframeworks/openFrameworks/tree/master/examples)
 - [oF Documentation](https://openframeworks.cc/documentation/)

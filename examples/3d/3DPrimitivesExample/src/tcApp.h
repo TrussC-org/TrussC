@@ -5,8 +5,8 @@ using namespace tc;
 using namespace std;
 
 // =============================================================================
-// tcApp - 3Dプリミティブデモ
-// oFの3DPrimitivesExampleを参考にしたシンプル版
+// tcApp - 3D Primitives Demo
+// Simple version based on oF's 3DPrimitivesExample
 // =============================================================================
 
 class tcApp : public App {
@@ -17,7 +17,7 @@ public:
     void keyPressed(int key) override;
 
 private:
-    // プリミティブのメッシュ
+    // Primitive meshes
     Mesh plane;
     Mesh box;
     Mesh sphere;
@@ -25,18 +25,18 @@ private:
     Mesh cylinder;
     Mesh cone;
 
-    // 描画モード
+    // Drawing mode
     bool bFill = true;
     bool bWireframe = true;
     bool bLighting = true;
 
-    // 解像度モード (1-4)
+    // Resolution mode (1-4)
     int resolution = 2;
 
-    // ライティング
+    // Lighting
     Light light_;
-    Material materials_[6];  // 各プリミティブ用マテリアル
+    Material materials_[6];  // Material for each primitive
 
-    // プリミティブを再生成
+    // Rebuild primitives
     void rebuildPrimitives();
 };

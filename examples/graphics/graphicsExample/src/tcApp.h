@@ -5,22 +5,22 @@ using namespace tc;
 using namespace std;
 
 // =============================================================================
-// tcApp - アプリケーションクラス
-// App を継承して、必要なメソッドをオーバーライドする
+// tcApp - Application class
+// Inherit from App and override required methods
 // =============================================================================
 
 class tcApp : public App {
 public:
-    // ライフサイクル
+    // Lifecycle
     void setup() override;
     void update() override;
     void draw() override;
 
-    // 入力イベント（必要なものだけオーバーライド）
+    // Input events (override only what you need)
     void keyPressed(int key) override;
     void mousePressed(int x, int y, int button) override;
     void mouseDragged(int x, int y, int button) override;
 
 private:
-    Path wave;  // テスト用
+    Path wave;  // For testing
 };

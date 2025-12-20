@@ -8,8 +8,8 @@ using namespace std;
 
 using namespace trussc;
 
-// eventsExample - イベントシステムのデモ
-// EventListenerのRAII動作とイベント購読を示す
+// eventsExample - Event system demo
+// Demonstrates EventListener RAII behavior and event subscription
 
 class tcApp : public App {
 public:
@@ -18,16 +18,16 @@ public:
     void keyPressed(int key) override;
 
 private:
-    // イベントリスナー（メンバとして保持）
+    // Event listeners (stored as members)
     EventListener keyListener;
     EventListener mouseListener;
     EventListener scrollListener;
 
-    // イベントログ
+    // Event log
     std::deque<std::string> eventLog;
     static const size_t MAX_LOG_LINES = 20;
 
-    // リスナーの有効状態
+    // Listener active states
     bool keyListenerActive = true;
     bool mouseListenerActive = true;
 

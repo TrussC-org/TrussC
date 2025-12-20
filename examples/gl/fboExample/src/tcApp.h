@@ -7,10 +7,10 @@ using namespace tc;
 using namespace std;
 
 // =============================================================================
-// fboExample - FBO（フレームバッファオブジェクト）サンプル
+// fboExample - FBO (Frame Buffer Object) sample
 // =============================================================================
-// - FBO にオフスクリーン描画して画面に表示
-// - FBO 内での clear() の動作テスト
+// - Render offscreen to FBO and display on screen
+// - Test clear() behavior inside FBO
 // =============================================================================
 class tcApp : public App {
 public:
@@ -22,7 +22,7 @@ public:
 private:
     Fbo fbo_;
     float time_ = 0;
-    bool useClearInFbo_ = false;  // FBO 内で clear() を呼ぶかどうか
+    bool useClearInFbo_ = false;  // Whether to call clear() inside FBO
     bool test1Done_ = false;
     bool test2Done_ = false;
 };

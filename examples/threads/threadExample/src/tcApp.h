@@ -6,17 +6,17 @@ using namespace std;
 #include "threadedObject.h"
 
 // =============================================================================
-// tcApp - スレッドサンプルアプリケーション
+// tcApp - Thread sample application
 // =============================================================================
 //
-// oF の threadExample を参考にした実装。
-// スレッドでデータを生成し、メインスレッドで描画する。
+// Implementation based on oF's threadExample.
+// Generates data in a thread, draws in the main thread.
 //
-// 操作:
-//   a: スレッド開始
-//   s: スレッド停止
-//   l: ロックあり更新に切り替え
-//   n: ロックなし更新に切り替え（ティアリング発生）
+// Controls:
+//   a: Start thread
+//   s: Stop thread
+//   l: Switch to update with lock
+//   n: Switch to update without lock (tearing occurs)
 //
 class tcApp : public App {
 public:
@@ -26,9 +26,9 @@ public:
 
     void keyPressed(int key) override;
 
-    // スレッドオブジェクト
+    // Thread object
     ThreadedObject threadedObject;
 
-    // ロックを使うかどうか
+    // Whether to use lock
     bool doLock = false;
 };

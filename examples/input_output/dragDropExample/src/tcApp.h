@@ -8,9 +8,9 @@ using namespace tc;
 using namespace trussc;
 using namespace std;
 
-// dragDropExample - ドラッグ&ドロップのデモ
-// ファイルをウィンドウにドロップすると、ファイル情報を表示
-// 画像ファイルの場合はプレビューも表示
+// dragDropExample - Drag & Drop Demo
+// Dropping files onto the window displays file information
+// Image files also show a preview
 
 class tcApp : public App {
 public:
@@ -20,7 +20,7 @@ public:
     void filesDropped(const vector<string>& files) override;
 
 private:
-    // ドロップされたファイル情報
+    // Dropped file information
     struct DroppedFile {
         string path;
         string name;
@@ -29,10 +29,10 @@ private:
     };
     vector<DroppedFile> droppedFiles;
 
-    // プレビュー用画像（最新1枚のみ）
+    // Preview image (only the latest one)
     Image previewImage;
     bool hasPreview = false;
 
-    // メッセージ表示用
+    // Status message display
     string statusMessage = "Drop files here!";
 };

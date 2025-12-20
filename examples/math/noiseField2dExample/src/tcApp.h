@@ -6,8 +6,8 @@ using namespace std;
 
 using namespace trussc;
 
-// noiseField2dExample - パーリンノイズのデモ
-// フローフィールドとノイズテクスチャの可視化
+// noiseField2dExample - Perlin noise demo
+// Flow field and noise texture visualization
 
 class tcApp : public App {
 public:
@@ -17,16 +17,16 @@ public:
     void keyPressed(int key) override;
 
 private:
-    // 表示モード
+    // Display mode
     int mode = 0;
     static const int NUM_MODES = 4;
 
-    // アニメーション用
+    // For animation
     float time = 0.0f;
     float noiseScale = 0.01f;
     float timeSpeed = 0.5f;
 
-    // パーティクル（フローフィールド用）
+    // Particles (for flow field)
     struct Particle {
         float x, y;
         float prevX, prevY;

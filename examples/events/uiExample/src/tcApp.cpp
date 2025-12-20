@@ -1,12 +1,12 @@
 // =============================================================================
-// uiExample - UI コンポーネントのサンプル実装
+// uiExample - UI Components Sample Implementation
 // =============================================================================
 
 #include "tcApp.h"
 
 void tcApp::setup() {
     // -------------------------------------------------------------------------
-    // ボタン1: クリックカウンター
+    // Button 1: Click counter
     // -------------------------------------------------------------------------
     button1_ = make_shared<UIButton>();
     button1_->label = "Click Me!";
@@ -22,7 +22,7 @@ void tcApp::setup() {
     addChild(button1_);
 
     // -------------------------------------------------------------------------
-    // ボタン2: 背景色リセット
+    // Button 2: Reset background color
     // -------------------------------------------------------------------------
     button2_ = make_shared<UIButton>();
     button2_->label = "Reset BG";
@@ -42,7 +42,7 @@ void tcApp::setup() {
     addChild(button2_);
 
     // -------------------------------------------------------------------------
-    // スライダー1: 背景色R成分
+    // Slider 1: Background color R component
     // -------------------------------------------------------------------------
     slider1_ = make_shared<UISlider>();
     slider1_->label = "BG Red";
@@ -58,7 +58,7 @@ void tcApp::setup() {
     addChild(slider1_);
 
     // -------------------------------------------------------------------------
-    // スライダー2: 背景色G成分
+    // Slider 2: Background color G component
     // -------------------------------------------------------------------------
     slider2_ = make_shared<UISlider>();
     slider2_->label = "BG Green";
@@ -74,14 +74,14 @@ void tcApp::setup() {
     addChild(slider2_);
 
     // -------------------------------------------------------------------------
-    // スクロールボックス: アイテムリスト
+    // Scroll box: Item list
     // -------------------------------------------------------------------------
     scrollBox_ = make_shared<UIScrollBox>();
     scrollBox_->x = 350;
     scrollBox_->y = 50;
     scrollBox_->width = 250;
     scrollBox_->height = 200;
-    scrollBox_->contentHeight = 300;  // 10アイテム x 30px
+    scrollBox_->contentHeight = 300;  // 10 items x 30px
     addChild(scrollBox_);
 
     cout << "=== uiExample ===" << endl;
@@ -93,37 +93,37 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
-    // 子ノードは自動更新される（updateTree で呼ばれる）
+    // Child nodes are updated automatically (called by updateTree)
 }
 
 void tcApp::draw() {
-    // 背景色
+    // Background color
     clear(bgColor_);
 
-    // 説明テキスト
+    // Description text
     setColor(0.7f, 0.7f, 0.75f);
     drawBitmapString("Buttons: Click to trigger events", 50, 170);
     drawBitmapString("Sliders: Drag or scroll wheel to change value", 50, 310);
     drawBitmapString("ScrollBox: Mouse wheel to scroll content", 350, 270);
 
-    // 現在の背景色を表示
+    // Display current background color
     char buf[128];
     snprintf(buf, sizeof(buf), "Background: R=%.2f G=%.2f B=%.2f",
              bgColor_.r, bgColor_.g, bgColor_.b);
     setColor(1.0f, 1.0f, 1.0f);
     drawBitmapString(buf, 50, 350);
 
-    // フレームレート
+    // Frame rate
     setColor(0.5f, 0.5f, 0.5f);
     snprintf(buf, sizeof(buf), "FPS: %.1f", getFrameRate());
     drawBitmapString(buf, getWindowWidth() - 100, 30);
 
-    // 子ノード（UIコンポーネント）は自動描画される（drawTree で呼ばれる）
+    // Child nodes (UI components) are drawn automatically (called by drawTree)
 }
 
 void tcApp::keyPressed(int key) {
     if (key == 'r' || key == 'R') {
-        // Rキーでリセット
+        // Reset with R key
         bgColor_ = Color(0.1f, 0.1f, 0.12f);
         slider1_->setValue(0.1f);
         slider2_->setValue(0.1f);
@@ -134,7 +134,7 @@ void tcApp::keyPressed(int key) {
 }
 
 void tcApp::mousePressed(int x, int y, int button) {
-    // Ray-based Hit Test でイベントを配信
+    // Dispatch event using Ray-based Hit Test
     dispatchMousePress((float)x, (float)y, button);
 }
 
@@ -143,18 +143,18 @@ void tcApp::mouseReleased(int x, int y, int button) {
 }
 
 void tcApp::mouseDragged(int x, int y, int button) {
-    (void)button;  // 未使用
+    (void)button;  // Unused
     dispatchMouseMove((float)x, (float)y);
 }
 
 void tcApp::mouseScrolled(float dx, float dy) {
-    // スクロールイベントを手動で配信
+    // Manually dispatch scroll event
     float mx = getGlobalMouseX();
     float my = getGlobalMouseY();
 
     Ray globalRay = Ray::fromScreenPoint2D(mx, my);
 
-    // スクロールボックス
+    // Scroll box
     Mat4 globalInv = scrollBox_->getGlobalMatrixInverse();
     Ray localRay = globalRay.transformed(globalInv);
     float dist;
@@ -163,7 +163,7 @@ void tcApp::mouseScrolled(float dx, float dy) {
         return;
     }
 
-    // スライダー2
+    // Slider 2
     globalInv = slider2_->getGlobalMatrixInverse();
     localRay = globalRay.transformed(globalInv);
     if (slider2_->hitTest(localRay, dist)) {
@@ -171,7 +171,7 @@ void tcApp::mouseScrolled(float dx, float dy) {
         return;
     }
 
-    // スライダー1
+    // Slider 1
     globalInv = slider1_->getGlobalMatrixInverse();
     localRay = globalRay.transformed(globalInv);
     if (slider1_->hitTest(localRay, dist)) {

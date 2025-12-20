@@ -2,12 +2,12 @@
 
 #include "tcBaseApp.h"
 using namespace tc;
-using namespace std;  // App, Node, TrussC.h を含む
+using namespace std;  // Includes App, Node, TrussC.h
 #include <cstdio>       // snprintf
 
 // =============================================================================
-// 回転するコンテナノード
-// 子ノードが追加される親ノード。マウスのローカル座標をテストできる
+// Rotating container node
+// Parent node for child nodes. Can test mouse local coordinates
 // =============================================================================
 class RotatingContainer : public Node {
 public:
@@ -19,7 +19,7 @@ public:
     }
 
     void draw() override {
-        // コンテナの境界を表示（ローカル座標 0,0 が中心）
+        // Display container boundary (local coords 0,0 is center)
         noFill();
         stroke();
         setColor(0.5f, 0.5f, 0.5f);
@@ -27,24 +27,24 @@ public:
         fill();
         noStroke();
 
-        // 中心点
+        // Center point
         setColor(1.0f, 1.0f, 0.0f);
         drawCircle(0, 0, 5);
 
-        // ローカル座標軸を表示
-        setColor(1.0f, 0.3f, 0.3f);  // X軸 = 赤
+        // Display local coordinate axes
+        setColor(1.0f, 0.3f, 0.3f);  // X-axis = Red
         drawLine(0, 0, 50, 0);
-        setColor(0.3f, 1.0f, 0.3f);  // Y軸 = 緑
+        setColor(0.3f, 1.0f, 0.3f);  // Y-axis = Green
         drawLine(0, 0, 0, 50);
 
-        // タイトル（四角形の上部に表示）
+        // Title (displayed above rectangle)
         setColor(1.0f, 1.0f, 1.0f, 0.8f);
         drawBitmapString("Local Coord System", -size/2, -size/2 - 12, false);
     }
 };
 
 // =============================================================================
-// マウス追従ノード（ローカル座標を使用）
+// Mouse follower node (uses local coordinates)
 // =============================================================================
 class MouseFollower : public Node {
 public:
@@ -52,23 +52,23 @@ public:
     float r = 0.3f, g = 0.7f, b = 1.0f;
 
     void draw() override {
-        // getMouseX/Y() は親の変換を考慮したローカル座標を返す
-        // 親が回転していても、正しい位置に描画される
+        // getMouseX/Y() returns local coords considering parent transform
+        // Draws at correct position even if parent is rotated
         float mx = getMouseX();
         float my = getMouseY();
 
-        // 親コンテナのサイズ（RotatingContainerのsize/2が境界）
-        float bound = 125.0f;  // コンテナサイズの半分程度
+        // Parent container size (RotatingContainer's size/2 is boundary)
+        float bound = 125.0f;  // About half of container size
         bool insideBox = (mx >= -bound && mx <= bound && my >= -bound && my <= bound);
 
         setColor(r, g, b, 0.8f);
         drawCircle(mx, my, radius);
 
-        // 中心点
+        // Center point
         setColor(1.0f, 1.0f, 1.0f);
         drawCircle(mx, my, 3);
 
-        // 四角形の中にいる時だけローカル座標を表示
+        // Show local coords only when inside rectangle
         if (insideBox) {
             char buf[64];
             snprintf(buf, sizeof(buf), "local: %.0f, %.0f", mx, my);
@@ -79,7 +79,7 @@ public:
 };
 
 // =============================================================================
-// 固定位置の子ノード（ローカル座標で配置）
+// Fixed position child node (placed in local coords)
 // =============================================================================
 class FixedChild : public Node {
 public:
@@ -87,7 +87,7 @@ public:
     float hue = 0.0f;
 
     void draw() override {
-        // hue に基づいて色を設定
+        // Set color based on hue
         float r = (sin(hue) * 0.5f + 0.5f);
         float g = (sin(hue + TAU / 3) * 0.5f + 0.5f);
         float b = (sin(hue + TAU * 2 / 3) * 0.5f + 0.5f);
@@ -98,7 +98,7 @@ public:
 };
 
 // =============================================================================
-// メインアプリ
+// Main app
 // =============================================================================
 class tcApp : public App {
 public:
@@ -111,7 +111,7 @@ public:
     void mouseDragged(int x, int y, int button) override;
 
 private:
-    // ノード
+    // Nodes
     std::shared_ptr<RotatingContainer> container1_;
     std::shared_ptr<RotatingContainer> container2_;
     std::shared_ptr<MouseFollower> follower1_;

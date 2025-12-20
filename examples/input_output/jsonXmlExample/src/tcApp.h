@@ -8,7 +8,7 @@ using namespace tc;
 using namespace trussc;
 using namespace std;
 
-// jsonXmlExample - JSON/XML 読み書きのデモ
+// jsonXmlExample - JSON/XML Read/Write Demo
 
 class tcApp : public App {
 public:
@@ -17,7 +17,7 @@ public:
     void keyPressed(int key) override;
 
 private:
-    // 表示用メッセージ
+    // Display messages
     vector<string> messages;
 
     void addMessage(const string& msg);

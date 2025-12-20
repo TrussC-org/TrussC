@@ -3,9 +3,9 @@
 
 using namespace std;
 
-// シェーダーエフェクト（Metal MSL フラグメントシェーダー）
+// Shader effects (Metal MSL fragment shaders)
 
-// エフェクト 0: グラデーション
+// Effect 0: Gradient
 const char* effectGradient = R"(
 #include <metal_stdlib>
 using namespace metal;
@@ -27,14 +27,14 @@ fragment float4 fragmentMain(FragmentIn in [[stage_in]],
                              constant Uniforms& u [[buffer(0)]]) {
     float2 uv = in.texcoord;
 
-    // 時間で変化する虹色グラデーション
+    // Rainbow gradient changing over time
     float3 col = 0.5 + 0.5 * cos(u.time + uv.xyx + float3(0, 2, 4));
 
     return float4(col, 1.0);
 }
 )";
 
-// エフェクト 1: 波紋
+// Effect 1: Ripple
 const char* effectRipple = R"(
 #include <metal_stdlib>
 using namespace metal;
@@ -68,7 +68,7 @@ fragment float4 fragmentMain(FragmentIn in [[stage_in]],
 }
 )";
 
-// エフェクト 2: プラズマ
+// Effect 2: Plasma
 const char* effectPlasma = R"(
 #include <metal_stdlib>
 using namespace metal;
@@ -107,7 +107,7 @@ fragment float4 fragmentMain(FragmentIn in [[stage_in]],
 }
 )";
 
-// エフェクト 3: マウス追従
+// Effect 3: Mouse follow
 const char* effectMouse = R"(
 #include <metal_stdlib>
 using namespace metal;
@@ -136,7 +136,7 @@ fragment float4 fragmentMain(FragmentIn in [[stage_in]],
 
     float3 col = float3(glow * 0.5, glow * 0.8, glow);
 
-    // 背景グリッド
+    // Background grid
     float2 grid = fract(uv * 20.0);
     float gridLine = step(0.95, grid.x) + step(0.95, grid.y);
     col += gridLine * 0.1;
@@ -154,13 +154,13 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
-    // なし
+    // Nothing
 }
 
 void tcApp::draw() {
     clear(0);
 
-    // シェーダーを適用してフルスクリーン描画
+    // Apply shader and draw fullscreen
     shader.begin();
     shader.setUniformTime(getElapsedTime());
     shader.setUniformResolution(getWindowWidth(), getWindowHeight());
@@ -168,7 +168,7 @@ void tcApp::draw() {
     shader.draw();
     shader.end();
 
-    // エフェクト名を表示
+    // Display effect name
     string effectNames[] = {"Gradient", "Ripple", "Plasma", "Mouse Follow"};
     string info = "Effect " + to_string(currentEffect + 1) + ": " + effectNames[currentEffect];
     drawBitmapStringHighlight(info, 10, 20,

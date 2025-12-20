@@ -13,10 +13,10 @@ public:
     void keyPressed(int key) override;
 
 private:
-    // スクリーンショット保存先
+    // Screenshot save path
     std::filesystem::path savePath;
     int screenshotCount = 0;
 
-    // 画面描画内容（デモ用）
+    // Screen drawing content (for demo)
     float time = 0.0f;
 };

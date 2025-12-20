@@ -7,10 +7,10 @@ using namespace tc;
 using namespace std;
 
 // =============================================================================
-// textureExample - テクスチャ Filter / Wrap モード比較デモ
+// textureExample - Texture Filter / Wrap mode comparison demo
 // =============================================================================
-// 上段: Filter 比較（Nearest / Linear / Cubic）- スライム
-// 下段: Wrap 比較（Repeat / ClampToEdge / MirroredRepeat）- レンガ
+// Top row: Filter comparison (Nearest / Linear / Cubic) - Slime
+// Bottom row: Wrap comparison (Repeat / ClampToEdge / MirroredRepeat) - Brick
 // =============================================================================
 class tcApp : public App {
 public:
@@ -20,30 +20,30 @@ public:
     void keyPressed(int key) override;
 
 private:
-    // --- Filter 比較用（スライム）---
+    // --- For Filter comparison (Slime) ---
     Image imgOriginal_;
     Image imgNearest_;
     Image imgLinear_;
-    Image imgCubic_;  // CPU でバイキュービック補間済み
+    Image imgCubic_;  // Bicubic interpolated on CPU
 
-    // --- Wrap 比較用（レンガ）---
+    // --- For Wrap comparison (Brick) ---
     Image imgBrickRepeat_;
     Image imgBrickClamp_;
     Image imgBrickMirrored_;
 
-    // パターン生成
-    void generatePixelArt(Image& img);   // スライム
-    void generateBrickPattern(Image& img);  // レンガ
+    // Pattern generation
+    void generatePixelArt(Image& img);   // Slime
+    void generateBrickPattern(Image& img);  // Brick
 
-    // バイキュービック補間でアップスケール
+    // Upscale with bicubic interpolation
     void upscaleBicubic(const Image& src, Image& dst, int newWidth, int newHeight);
     float cubicWeight(float t);
 
-    // 現在の表示スケール
-    float scale_ = 8.0f;  // 3x2 なので少し小さめに
+    // Current display scale
+    float scale_ = 8.0f;  // Slightly smaller for 3x2 layout
     float lastScale_ = 0.0f;
 
-    // 元画像サイズ
+    // Original image size
     static constexpr int SRC_SIZE = 16;
-    static constexpr int BRICK_SIZE = 8;  // レンガは小さめ（繰り返しを見せるため）
+    static constexpr int BRICK_SIZE = 8;  // Brick is smaller (to show repetition)
 };

@@ -1,11 +1,11 @@
 #pragma once
 
 // =============================================================================
-// tcVideoGrabber.h - Webカメラ入力
+// tcVideoGrabber.h - Webcam input
 // =============================================================================
 
-// このファイルは TrussC.h からインクルードされる
-// Texture, HasTexture が先にインクルードされている必要がある
+// This file is included from TrussC.h
+// Texture, HasTexture must be included first
 
 #include <vector>
 #include <string>
@@ -15,7 +15,7 @@
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// VideoDeviceInfo - カメラデバイス情報
+// VideoDeviceInfo - Camera device information
 // ---------------------------------------------------------------------------
 struct VideoDeviceInfo {
     int deviceId = -1;
@@ -28,18 +28,18 @@ struct VideoDeviceInfo {
 };
 
 // ---------------------------------------------------------------------------
-// VideoGrabber - Webカメラ入力クラス（HasTexture を継承）
+// VideoGrabber - Webcam input class (inherits HasTexture)
 // ---------------------------------------------------------------------------
 class VideoGrabber : public HasTexture {
 public:
     VideoGrabber() = default;
     ~VideoGrabber() { close(); }
 
-    // コピー禁止
+    // Non-copyable
     VideoGrabber(const VideoGrabber&) = delete;
     VideoGrabber& operator=(const VideoGrabber&) = delete;
 
-    // ムーブ対応
+    // Move-enabled
     VideoGrabber(VideoGrabber&& other) noexcept {
         moveFrom(std::move(other));
     }
@@ -53,15 +53,15 @@ public:
     }
 
     // =========================================================================
-    // デバイス管理
+    // Device management
     // =========================================================================
 
-    // 利用可能なカメラ一覧を取得
+    // Get list of available cameras
     std::vector<VideoDeviceInfo> listDevices() {
         return listDevicesPlatform();
     }
 
-    // 使用するカメラを指定（setup() の前に呼ぶ）
+    // Specify camera to use (call before setup())
     void setDeviceID(int deviceId) {
         deviceId_ = deviceId;
     }
@@ -70,7 +70,7 @@ public:
         return deviceId_;
     }
 
-    // 希望フレームレートを指定（setup() の前に呼ぶ）
+    // Specify desired frame rate (call before setup())
     void setDesiredFrameRate(int fps) {
         desiredFrameRate_ = fps;
     }
@@ -79,7 +79,7 @@ public:
         return desiredFrameRate_;
     }
 
-    // 詳細ログのON/OFF
+    // Enable/disable verbose logging
     void setVerbose(bool verbose) {
         verbose_ = verbose;
     }
@@ -89,10 +89,10 @@ public:
     }
 
     // =========================================================================
-    // セットアップ / クローズ
+    // Setup / Close
     // =========================================================================
 
-    // カメラを開始（デフォルト 640x480）
+    // Start camera (default 640x480)
     bool setup(int width = 640, int height = 480) {
         if (initialized_) {
             close();
@@ -101,27 +101,27 @@ public:
         requestedWidth_ = width;
         requestedHeight_ = height;
 
-        // プラットフォーム固有のセットアップ（width_, height_ が設定される）
+        // Platform-specific setup (sets width_, height_)
         if (!setupPlatform()) {
             return false;
         }
 
-        // ピクセルバッファを確保
+        // Allocate pixel buffer
         size_t bufferSize = width_ * height_ * 4;
         pixels_ = new unsigned char[bufferSize];
         std::memset(pixels_, 0, bufferSize);
 
-        // デリゲートにピクセルバッファのポインタを設定
+        // Set pixel buffer pointer for delegate
         updateDelegatePixels();
 
-        // テクスチャを作成（Stream モード: 毎フレーム更新用）
+        // Create texture (Stream mode: for per-frame updates)
         texture_.allocate(width_, height_, 4, TextureUsage::Stream);
 
         initialized_ = true;
         return true;
     }
 
-    // カメラを停止
+    // Stop camera
     void close() {
         if (!initialized_) return;
 
@@ -141,30 +141,30 @@ public:
     }
 
     // =========================================================================
-    // フレーム更新
+    // Frame update
     // =========================================================================
 
-    // 新しいフレームをチェック（毎フレーム呼ぶ）
+    // Check for new frame (call every frame)
     void update() {
         if (!initialized_) return;
 
         frameNew_ = false;
 
-        // プラットフォーム固有の更新処理
+        // Platform-specific update processing
         updatePlatform();
 
-        // カメラからのサイズ変更通知をチェック
+        // Check for size change notification from camera
         if (checkResizeNeeded()) {
             int newW = 0, newH = 0;
             getNewSize(newW, newH);
             if (newW > 0 && newH > 0 && (newW != width_ || newH != height_)) {
-                // メインスレッドでバッファをリサイズ
+                // Resize buffers on main thread
                 resizeBuffers(newW, newH);
             }
             clearResizeFlag();
         }
 
-        // バッファが更新されていたらテクスチャに反映
+        // Update texture if buffer was updated
         if (pixelsDirty_.exchange(false)) {
             std::lock_guard<std::mutex> lock(mutex_);
             texture_.loadData(pixels_, width_, height_, 4);
@@ -172,30 +172,30 @@ public:
         }
     }
 
-    // 新しいフレームが来たか
+    // Whether a new frame arrived
     bool isFrameNew() const {
         return frameNew_;
     }
 
     // =========================================================================
-    // 状態取得
+    // Status getters
     // =========================================================================
 
     bool isInitialized() const { return initialized_; }
     int getWidth() const { return width_; }
     int getHeight() const { return height_; }
 
-    // 現在のデバイス名を取得
+    // Get current device name
     const std::string& getDeviceName() const { return deviceName_; }
 
     // =========================================================================
-    // ピクセルアクセス
+    // Pixel access
     // =========================================================================
 
     unsigned char* getPixels() { return pixels_; }
     const unsigned char* getPixels() const { return pixels_; }
 
-    // Image にコピー
+    // Copy to Image
     void copyToImage(Image& image) const {
         if (!initialized_ || !pixels_) return;
 
@@ -207,54 +207,54 @@ public:
     }
 
     // =========================================================================
-    // HasTexture 実装
+    // HasTexture implementation
     // =========================================================================
 
     Texture& getTexture() override { return texture_; }
     const Texture& getTexture() const override { return texture_; }
 
-    // draw() は HasTexture のデフォルト実装を使用
+    // draw() uses HasTexture's default implementation
 
     // =========================================================================
-    // パーミッション（macOS）
+    // Permissions (macOS)
     // =========================================================================
 
-    // カメラ権限の状態を確認
+    // Check camera permission status
     static bool checkCameraPermission();
 
-    // カメラ権限をリクエスト（非同期）
+    // Request camera permission (async)
     static void requestCameraPermission();
 
 private:
-    // サイズ
+    // Size
     int width_ = 0;
     int height_ = 0;
     int requestedWidth_ = 640;
     int requestedHeight_ = 480;
     int deviceId_ = 0;
-    int desiredFrameRate_ = -1;  // -1 = 指定なし（カメラのデフォルト）
+    int desiredFrameRate_ = -1;  // -1 = unspecified (camera default)
 
-    // 状態
+    // State
     bool initialized_ = false;
     bool frameNew_ = false;
     bool verbose_ = false;
     std::string deviceName_;
 
-    // ピクセルデータ（RGBA）
+    // Pixel data (RGBA)
     unsigned char* pixels_ = nullptr;
 
-    // スレッド同期
+    // Thread synchronization
     mutable std::mutex mutex_;
     std::atomic<bool> pixelsDirty_{false};
 
-    // テクスチャ（Stream モード）
+    // Texture (Stream mode)
     Texture texture_;
 
-    // プラットフォーム固有ハンドル
+    // Platform-specific handle
     void* platformHandle_ = nullptr;
 
     // -------------------------------------------------------------------------
-    // 内部メソッド
+    // Internal methods
     // -------------------------------------------------------------------------
 
     void moveFrom(VideoGrabber&& other) {
@@ -273,7 +273,7 @@ private:
         texture_ = std::move(other.texture_);
         platformHandle_ = other.platformHandle_;
 
-        // 元のオブジェクトを無効化
+        // Invalidate source object
         other.pixels_ = nullptr;
         other.initialized_ = false;
         other.platformHandle_ = nullptr;
@@ -282,15 +282,15 @@ private:
     }
 
     // -------------------------------------------------------------------------
-    // リサイズ処理
+    // Resize processing
     // -------------------------------------------------------------------------
     void resizeBuffers(int newWidth, int newHeight) {
-        // 新しいピクセルバッファを確保
+        // Allocate new pixel buffer
         size_t newBufferSize = newWidth * newHeight * 4;
         unsigned char* newPixels = new unsigned char[newBufferSize];
         std::memset(newPixels, 0, newBufferSize);
 
-        // mutexでロックして古いバッファと入れ替え
+        // Lock mutex and swap old buffer
         {
             std::lock_guard<std::mutex> lock(mutex_);
             delete[] pixels_;
@@ -299,23 +299,23 @@ private:
             height_ = newHeight;
         }
 
-        // デリゲートに新しいポインタを通知
+        // Notify delegate of new pointer
         updateDelegatePixels();
 
-        // テクスチャを再作成
+        // Recreate texture
         texture_.allocate(width_, height_, 4, TextureUsage::Stream);
     }
 
     // -------------------------------------------------------------------------
-    // プラットフォーム固有メソッド（tcVideoGrabber_mac.mm で実装）
+    // Platform-specific methods (implemented in tcVideoGrabber_mac.mm)
     // -------------------------------------------------------------------------
     bool setupPlatform();
     void closePlatform();
     void updatePlatform();
-    void updateDelegatePixels();  // ピクセルバッファ確保後にデリゲートを更新
+    void updateDelegatePixels();  // Update delegate after pixel buffer allocation
     std::vector<VideoDeviceInfo> listDevicesPlatform();
 
-    // リサイズ通知用（プラットフォーム実装）
+    // For resize notification (platform implementation)
     bool checkResizeNeeded();
     void getNewSize(int& width, int& height);
     void clearResizeFlag();

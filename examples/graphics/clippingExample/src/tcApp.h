@@ -7,7 +7,7 @@ using namespace tc;
 using namespace std;
 
 // =============================================================================
-// ClipBox - クリッピング有効な矩形ノード
+// ClipBox - Rectangle node with clipping enabled
 // =============================================================================
 class ClipBox : public RectNode {
 public:
@@ -18,24 +18,24 @@ public:
     string label;
 
     ClipBox() {
-        setClipping(true);  // クリッピング有効
+        setClipping(true);  // Enable clipping
     }
 
     void draw() override {
-        // 背景
+        // Background
         setColor(bgColor);
         fill();
         noStroke();
         drawRect(0, 0, width, height);
 
-        // ラベル
+        // Label
         if (!label.empty()) {
             setColor(1.0f, 1.0f, 1.0f, 0.7f);
             drawBitmapString(label, 5, 15, false);
         }
     }
 
-    // 枠線は子を描画した後に描きたいので別メソッド
+    // Separate method to draw border after children
     void drawBorder() {
         noFill();
         stroke();
@@ -45,7 +45,7 @@ public:
 };
 
 // =============================================================================
-// BouncingCircle - 跳ね回る円（クリッピングテスト用）
+// BouncingCircle - Bouncing circle (for clipping test)
 // =============================================================================
 class BouncingCircle : public RectNode {
 public:
@@ -59,11 +59,11 @@ public:
     float boundsHeight = 200;
 
     void update() override {
-        // 移動
+        // Movement
         x += vx;
         y += vy;
 
-        // 跳ね返り
+        // Bounce
         if (x - radius < -50 || x + radius > boundsWidth + 50) vx = -vx;
         if (y - radius < -50 || y + radius > boundsHeight + 50) vy = -vy;
     }
@@ -74,14 +74,14 @@ public:
         noStroke();
         drawCircle(0, 0, radius);
 
-        // 中心点
+        // Center point
         setColor(1.0f, 1.0f, 1.0f);
         drawCircle(0, 0, 3);
     }
 };
 
 // =============================================================================
-// メインアプリ
+// Main app
 // =============================================================================
 class tcApp : public App {
 public:
@@ -91,12 +91,12 @@ public:
     void keyPressed(int key) override;
 
 private:
-    // 外側のクリップボックス
+    // Outer clip box
     ClipBox::Ptr outerBox_;
 
-    // 内側のクリップボックス（回転する）
+    // Inner clip box (rotating)
     ClipBox::Ptr innerBox_;
 
-    // 跳ね回る円たち
+    // Bouncing circles
     vector<BouncingCircle::Ptr> circles_;
 };

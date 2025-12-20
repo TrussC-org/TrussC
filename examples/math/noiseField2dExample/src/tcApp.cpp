@@ -24,7 +24,7 @@ void tcApp::resetParticles() {
 void tcApp::update() {
     time += getDeltaTime() * timeSpeed;
 
-    // フローフィールドモードのときパーティクルを更新
+    // Update particles when in flow field mode
     if (mode == 2) {
         int w = getWindowWidth();
         int h = getWindowHeight();
@@ -33,12 +33,12 @@ void tcApp::update() {
             p.prevX = p.x;
             p.prevY = p.y;
 
-            // ノイズからフローの角度を取得
+            // Get flow angle from noise
             float angle = noise(p.x * noiseScale, p.y * noiseScale, time) * TAU * 2;
             p.x += cos(angle) * 2.0f;
             p.y += sin(angle) * 2.0f;
 
-            // 画面外に出たらリセット
+            // Reset if particle goes off screen
             if (p.x < 0 || p.x > w || p.y < 0 || p.y > h) {
                 p.x = (float)(rand() % w);
                 p.y = (float)(rand() % h);
@@ -50,7 +50,7 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    // 全モード共通で背景クリア
+    // Clear background for all modes
     clear(mode == 2 ? 0 : 30);
 
     switch (mode) {
@@ -107,11 +107,11 @@ void tcApp::drawFlowField() {
             float dx = cos(angle) * len;
             float dy = sin(angle) * len;
 
-            // 角度に応じて色相を変える
+            // Change hue based on angle
             setColorHSB(angle, 0.7f, 0.9f);
             drawLine(x, y, x + dx, y + dy);
 
-            // 矢印の先端
+            // Arrow tip
             drawCircle(x + dx, y + dy, 2);
         }
     }

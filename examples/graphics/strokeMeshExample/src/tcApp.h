@@ -6,10 +6,10 @@ using namespace std;
 
 using namespace trussc;
 
-// strokeMeshExample - StrokeMesh（太線描画）のデモ
+// strokeMeshExample - StrokeMesh (thick line drawing) demo
 // Cap Types: BUTT, ROUND, SQUARE
 // Join Types: MITER, ROUND, BEVEL
-// 可変幅ストローク対応
+// Variable width stroke support
 
 class tcApp : public App {
 public:
@@ -18,9 +18,9 @@ public:
     void draw() override;
 
 private:
-    std::vector<StrokeMesh> strokes;        // 開いた形状（3x3グリッド）
-    std::vector<StrokeMesh> closedStrokes;  // 閉じた形状（星型）
-    StrokeMesh variableStroke;              // 可変幅ストローク
+    std::vector<StrokeMesh> strokes;        // Open shapes (3x3 grid)
+    std::vector<StrokeMesh> closedStrokes;  // Closed shapes (star)
+    StrokeMesh variableStroke;              // Variable width stroke
 
     float strokeWidth = 20.0f;
 };

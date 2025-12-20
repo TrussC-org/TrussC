@@ -6,7 +6,7 @@ using namespace std;
 
 using namespace trussc;
 
-// imguiExample - Dear ImGui のデモ
+// imguiExample - Dear ImGui demo
 
 class tcApp : public App {
 public:
@@ -15,7 +15,7 @@ public:
     void cleanup() override;
 
 private:
-    // デモ用の変数
+    // Variables for demo
     float sliderValue = 0.5f;
     int counter = 0;
     float clearColor[3] = {0.1f, 0.1f, 0.1f};

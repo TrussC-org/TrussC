@@ -8,7 +8,7 @@ using namespace tc;
 using namespace std;
 
 // =============================================================================
-// UIButton - クリックでイベント発火するボタン
+// UIButton - Button that fires event on click
 // =============================================================================
 class UIButton : public RectNode {
 public:
@@ -19,7 +19,7 @@ public:
     Color hoverColor = Color(0.35f, 0.35f, 0.45f);
     Color pressColor = Color(0.15f, 0.15f, 0.2f);
 
-    // クリックイベント（外部からコールバック登録）
+    // Click event (register callback from outside)
     function<void()> onClick;
 
     UIButton() {
@@ -29,14 +29,14 @@ public:
     }
 
     void update() override {
-        // ホバー判定（簡易）
+        // Simple hover detection
         float mx = getMouseX();
         float my = getMouseY();
         isHovered_ = (mx >= 0 && mx <= width && my >= 0 && my <= height);
     }
 
     void draw() override {
-        // 状態に応じた色
+        // Color based on state
         if (isPressed_) {
             setColor(pressColor);
         } else if (isHovered_) {
@@ -49,13 +49,13 @@ public:
         noStroke();
         drawRect(0, 0, width, height);
 
-        // 枠線
+        // Border
         noFill();
         stroke();
         setColor(0.5f, 0.5f, 0.6f);
         drawRect(0, 0, width, height);
 
-        // ラベル
+        // Label
         fill();
         setColor(1.0f, 1.0f, 1.0f);
         float textX = width / 2 - label.length() * 4;
@@ -73,7 +73,7 @@ protected:
 
     bool onMouseRelease(float lx, float ly, int btn) override {
         if (isPressed_ && isHovered_ && onClick) {
-            onClick();  // クリックイベント発火
+            onClick();  // Fire click event
         }
         isPressed_ = false;
         return RectNode::onMouseRelease(lx, ly, btn);
@@ -81,7 +81,7 @@ protected:
 };
 
 // =============================================================================
-// UISlider - ドラッグ＆スクロールで値を変更するスライダー
+// UISlider - Slider to change value by drag & scroll
 // =============================================================================
 class UISlider : public RectNode {
 public:
@@ -92,7 +92,7 @@ public:
     float maxValue = 1.0f;
     string label = "Slider";
 
-    // 値変更イベント
+    // Value change event
     function<void(float)> onValueChanged;
 
     UISlider() {
@@ -110,9 +110,9 @@ public:
         value = std::max<float>(0.0f, std::min<float>(1.0f, value));
     }
 
-    // 外部からスクロールイベントを受け取る
+    // Receive scroll event from outside
     void handleScroll(float dx, float dy) {
-        (void)dx;  // 未使用
+        (void)dx;  // Unused
         float delta = dy * 0.05f;
         float oldValue = value;
         value = std::max<float>(0.0f, std::min<float>(1.0f, value + delta));
@@ -122,25 +122,25 @@ public:
     }
 
     void draw() override {
-        // 背景
+        // Background
         setColor(0.2f, 0.2f, 0.25f);
         fill();
         drawRect(0, 0, width, height);
 
-        // トラック
+        // Track
         float trackY = height / 2;
         float trackH = 4;
         setColor(0.4f, 0.4f, 0.45f);
         drawRect(0, trackY - trackH / 2, width, trackH);
 
-        // ノブ
+        // Knob
         float knobX = value * width;
         float knobW = 12;
         float knobH = height - 4;
         setColor(isDragging_ ? Color(0.6f, 0.7f, 0.9f) : Color(0.5f, 0.6f, 0.8f));
         drawRect(knobX - knobW / 2, 2, knobW, knobH);
 
-        // ラベルと値
+        // Label and value
         setColor(1.0f, 1.0f, 1.0f);
         char buf[64];
         snprintf(buf, sizeof(buf), "%s: %.2f", label.c_str(), getValue());
@@ -169,7 +169,7 @@ protected:
     }
 
     bool onMouseMove(float lx, float ly) override {
-        // ドラッグ中なら値を更新
+        // Update value while dragging
         if (isDragging_) {
             updateValue(lx);
         }
@@ -177,7 +177,7 @@ protected:
     }
 
     bool onMouseScroll(float lx, float ly, float sx, float sy) override {
-        // スクロールで値を変更
+        // Change value by scroll
         float delta = sy * 0.05f;
         float oldValue = value;
         value = std::max<float>(0.0f, std::min<float>(1.0f, value + delta));
@@ -198,14 +198,14 @@ private:
 };
 
 // =============================================================================
-// UIScrollBox - スクロールで内容を移動するボックス
+// UIScrollBox - Box that scrolls content by scroll
 // =============================================================================
 class UIScrollBox : public RectNode {
 public:
     using Ptr = shared_ptr<UIScrollBox>;
 
     float scrollY = 0;
-    float contentHeight = 300;  // 内部コンテンツの高さ
+    float contentHeight = 300;  // Internal content height
 
     UIScrollBox() {
         enableEvents();
@@ -213,30 +213,30 @@ public:
         height = 150;
     }
 
-    // 外部からスクロールイベントを受け取る
+    // Receive scroll event from outside
     void handleScroll(float dx, float dy) {
-        (void)dx;  // 未使用
+        (void)dx;  // Unused
         float maxScroll = std::max<float>(0.0f, contentHeight - height);
         scrollY = std::max<float>(0.0f, std::min<float>(maxScroll, scrollY - dy * 20));
     }
 
     void draw() override {
-        // 背景
+        // Background
         setColor(0.15f, 0.15f, 0.18f);
         fill();
         drawRect(0, 0, width, height);
 
-        // クリッピングを設定（グローバル座標で、DPIスケール考慮）
+        // Set clipping (in global coordinates, considering DPI scale)
         float gx, gy;
         localToGlobal(0, 0, gx, gy);
         float dpi = sapp_dpi_scale();
         pushScissor(gx * dpi, gy * dpi, width * dpi, height * dpi);
 
-        // スクロール可能なコンテンツ
+        // Scrollable content
         pushMatrix();
         translate(0, -scrollY);
 
-        // コンテンツ（複数のアイテム）- クリッピングにより範囲外は自動的に非表示
+        // Content (multiple items) - automatically hidden outside range by clipping
         for (int i = 0; i < 10; i++) {
             float itemY = i * 30;
             setColor(0.3f + i * 0.05f, 0.3f, 0.35f);
@@ -251,16 +251,16 @@ public:
 
         popMatrix();
 
-        // クリッピングを復元
+        // Restore clipping
         popScissor();
 
-        // 枠線
+        // Border
         noFill();
         stroke();
         setColor(0.4f, 0.4f, 0.5f);
         drawRect(0, 0, width, height);
 
-        // スクロールバー
+        // Scrollbar
         float maxScroll = std::max<float>(0.0f, contentHeight - height);
         if (maxScroll > 0) {
             float barHeight = height * (height / contentHeight);
@@ -280,7 +280,7 @@ protected:
 };
 
 // =============================================================================
-// メインアプリ
+// Main app
 // =============================================================================
 class tcApp : public App {
 public:

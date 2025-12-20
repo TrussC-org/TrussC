@@ -33,7 +33,7 @@ void tcApp::keyPressed(int key) {
 
 void tcApp::addMessage(const string& msg) {
     messages.push_back(msg);
-    // 画面に収まるように古いメッセージを削除
+    // Remove old messages to fit on screen
     while (messages.size() > 35) {
         messages.erase(messages.begin());
     }
@@ -42,7 +42,7 @@ void tcApp::addMessage(const string& msg) {
 void tcApp::testJson() {
     addMessage("--- JSON Test ---");
 
-    // JSON 作成
+    // Create JSON
     Json j;
     j["name"] = "TrussC";
     j["version"] = 0.1;
@@ -51,24 +51,24 @@ void tcApp::testJson() {
     j["settings"]["height"] = 768;
     j["settings"]["fullscreen"] = false;
 
-    // 文字列に変換
+    // Convert to string
     string jsonStr = toJsonString(j, 2);
     addMessage("Created JSON:");
 
-    // 各行を表示
+    // Display each line
     stringstream ss(jsonStr);
     string line;
     while (getline(ss, line)) {
         addMessage("  " + line);
     }
 
-    // ファイルに保存
+    // Save to file
     string path = "/tmp/trussc_test.json";
     if (saveJson(j, path)) {
         addMessage("Saved to: " + path);
     }
 
-    // ファイルから読み込み
+    // Load from file
     Json loaded = loadJson(path);
     if (!loaded.empty()) {
         addMessage("Loaded back:");
@@ -83,7 +83,7 @@ void tcApp::testJson() {
 void tcApp::testXml() {
     addMessage("--- XML Test ---");
 
-    // XML 作成
+    // Create XML
     Xml xml;
     xml.addDeclaration();
 
@@ -99,24 +99,24 @@ void tcApp::testXml() {
     features.append_child("feature").text() = "audio";
     features.append_child("feature").text() = "events";
 
-    // 文字列に変換
+    // Convert to string
     string xmlStr = xml.toString();
     addMessage("Created XML:");
 
-    // 各行を表示
+    // Display each line
     stringstream ss(xmlStr);
     string line;
     while (getline(ss, line)) {
         addMessage("  " + line);
     }
 
-    // ファイルに保存
+    // Save to file
     string path = "/tmp/trussc_test.xml";
     if (xml.save(path)) {
         addMessage("Saved to: " + path);
     }
 
-    // ファイルから読み込み
+    // Load from file
     Xml loaded = loadXml(path);
     if (!loaded.empty()) {
         addMessage("Loaded back:");

@@ -16,7 +16,7 @@ public:
     void mousePressed(int x, int y, int button) override;
 
 private:
-    // パーティクル
+    // Particle
     struct Particle {
         Vec2 pos;
         Vec2 vel;
@@ -29,11 +29,11 @@ private:
 
     std::vector<Particle> particles_;
 
-    // デモモード
+    // Demo mode
     int mode_ = 0;
     static constexpr int NUM_MODES = 4;
 
-    // ヘルパー
+    // Helper
     void drawVec2Demo();
     void drawRotationDemo();
     void drawLerpDemo();
@@ -43,6 +43,6 @@ private:
     void updateParticles();
     void drawParticles();
 
-    // 色変換（hue: 0-1）
+    // Color conversion (hue: 0-1)
     void setColorHSB(float h, float s, float b, float a = 1.0f);
 };

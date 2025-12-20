@@ -9,8 +9,8 @@ using namespace std;
 
 using namespace trussc;
 
-// keyboardExample - キーボード入力のデモ
-// キーの押下状態、修飾キー、キーコードの可視化
+// keyboardExample - Keyboard Input Demo
+// Visualization of key press state, modifier keys, and key codes
 
 class tcApp : public App {
 public:
@@ -20,17 +20,17 @@ public:
     void keyReleased(int key) override;
 
 private:
-    // 現在押されているキー
+    // Currently pressed keys
     std::set<int> pressedKeys;
 
-    // 最後に押されたキー
+    // Last pressed key
     int lastKey = 0;
 
-    // キー入力履歴
+    // Key input history
     std::deque<std::string> keyHistory;
     static const size_t MAX_HISTORY = 15;
 
-    // ボックスの位置（矢印キーで移動）
+    // Box position (move with arrow keys)
     float boxX = 400;
     float boxY = 300;
     float boxSpeed = 5.0f;

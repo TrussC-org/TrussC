@@ -1,7 +1,7 @@
 #include "tcApp.h"
 
 // =============================================================================
-// TimerBall 実装
+// TimerBall implementation
 // =============================================================================
 
 TimerBall::TimerBall(float x, float y, float radius)
@@ -13,7 +13,7 @@ TimerBall::TimerBall(float x, float y, float radius)
 }
 
 void TimerBall::setup() {
-    // 0.5秒ごとに色をランダムに変更
+    // Change color randomly every 0.5 seconds
     callEvery(0.5, [this]() {
         color_ = colorFromHSB(random(TAU), 0.8f, 1.0f);
         colorChangeCount_++;
@@ -24,14 +24,14 @@ void TimerBall::draw() {
     setColor(color_);
     drawCircle(0, 0, radius_);
 
-    // 変更回数を表示
+    // Display change count
     setColor(0.0f);
     string countStr = to_string(colorChangeCount_);
     drawBitmapString(countStr, -4, 4);
 }
 
 // =============================================================================
-// CountdownNode 実装
+// CountdownNode implementation
 // =============================================================================
 
 CountdownNode::CountdownNode() {
@@ -40,9 +40,9 @@ CountdownNode::CountdownNode() {
 }
 
 void CountdownNode::setup() {
-    // 3秒後に1回だけメッセージを変更
+    // Change message once after 3 seconds
     callAfter(3.0, [this]() {
-        message_ = "callAfter で実行されました！";
+        message_ = "Executed by callAfter!";
         triggered_ = true;
         cout << "callAfter triggered!" << endl;
     });
@@ -56,7 +56,7 @@ void CountdownNode::draw() {
 }
 
 // =============================================================================
-// PulseNode 実装
+// PulseNode implementation
 // =============================================================================
 
 PulseNode::PulseNode() {
@@ -65,12 +65,12 @@ PulseNode::PulseNode() {
 }
 
 void PulseNode::setup() {
-    // 0.3秒ごとにパルス
+    // Pulse every 0.3 seconds
     pulseTimerId_ = callEvery(0.3, [this]() {
-        pulseScale_ = 1.5f;  // パルス開始
+        pulseScale_ = 1.5f;  // Start pulse
         pulseCount_++;
 
-        // 10回パルスしたらタイマーをキャンセル
+        // Cancel timer after 10 pulses
         if (pulseCount_ >= 10) {
             cancelTimer(pulseTimerId_);
             cout << "Pulse timer cancelled after 10 pulses" << endl;
@@ -79,16 +79,16 @@ void PulseNode::setup() {
 }
 
 void PulseNode::draw() {
-    // パルスをゆっくり戻す
+    // Slowly return pulse to normal
     pulseScale_ = tc::lerp(pulseScale_, 1.0f, 0.1f);
 
-    // パルスする四角形
+    // Pulsing rectangle
     float size = 60.0f * pulseScale_;
     Color c = (pulseCount_ >= 10) ? colors::gray : colors::coral;
     setColor(c);
     drawRect(-size / 2, -size / 2, size, size);
 
-    // パルス回数を表示
+    // Display pulse count
     setColor(1.0f);
     string info = "Pulse: " + to_string(pulseCount_) + "/10";
     drawBitmapString(info, -40, size / 2 + 15);
@@ -99,22 +99,22 @@ void PulseNode::draw() {
 }
 
 // =============================================================================
-// tcApp 実装
+// tcApp implementation
 // =============================================================================
 
 void tcApp::setup() {
     cout << "timerExample: callAfter / callEvery Demo" << endl;
     cout << "  - Press R to reset all timers" << endl;
 
-    // ルートノードを作成
+    // Create root node
     rootNode_ = make_shared<Node>();
 
-    // カウントダウンノード
+    // Countdown node
     countdownNode_ = make_shared<CountdownNode>();
     rootNode_->addChild(countdownNode_);
     countdownNode_->setup();
 
-    // タイマーボール（3つ）
+    // Timer balls (3 balls)
     float startX = 150;
     float spacing = 150;
     for (int i = 0; i < 3; i++) {
@@ -124,50 +124,50 @@ void tcApp::setup() {
         balls_.push_back(ball);
     }
 
-    // パルスノード
+    // Pulse node
     pulseNode_ = make_shared<PulseNode>();
     rootNode_->addChild(pulseNode_);
     pulseNode_->setup();
 }
 
 void tcApp::update() {
-    // ノードツリーを更新（タイマーもここで処理される）
+    // Update node tree (timers are also processed here)
     rootNode_->updateTree();
 }
 
 void tcApp::draw() {
     clear(30, 30, 40);
 
-    // タイトル
+    // Title
     setColor(1.0f);
     drawBitmapStringHighlight("timerExample - callAfter / callEvery Demo",
         10, 20, Color(0, 0, 0, 0.7f), colors::white);
 
-    // 説明
-    drawBitmapStringHighlight("callAfter: 3秒後に1回だけ実行",
+    // Description
+    drawBitmapStringHighlight("callAfter: Execute once after 3 seconds",
         50, 80, Color(0, 0, 0, 0.5f), colors::lightGray);
 
-    drawBitmapStringHighlight("callEvery: 0.5秒ごとに色が変わる",
+    drawBitmapStringHighlight("callEvery: Color changes every 0.5 seconds",
         100, 140, Color(0, 0, 0, 0.5f), colors::lightGray);
 
-    drawBitmapStringHighlight("callEvery + cancelTimer: 10回でタイマー停止",
+    drawBitmapStringHighlight("callEvery + cancelTimer: Timer stops after 10 pulses",
         200, 380, Color(0, 0, 0, 0.5f), colors::lightGray);
 
-    // ノードツリーを描画
+    // Draw node tree
     rootNode_->drawTree();
 
-    // 操作説明
+    // Control instructions
     drawBitmapStringHighlight("Press R to reset",
         10, getWindowHeight() - 20, Color(0, 0, 0, 0.7f), colors::white);
 }
 
 void tcApp::keyPressed(int key) {
     if (key == 'r' || key == 'R') {
-        // リセット: ノードを再作成
+        // Reset: recreate nodes
         rootNode_->removeAllChildren();
         balls_.clear();
 
-        // 再セットアップ
+        // Re-setup
         countdownNode_ = make_shared<CountdownNode>();
         rootNode_->addChild(countdownNode_);
         countdownNode_->setup();

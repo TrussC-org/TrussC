@@ -1,67 +1,67 @@
-# TrussC アドオン
+# TrussC Addons
 
-TrussC はアドオンシステムで機能を拡張できる。openFrameworks の ofxAddon に相当する仕組み。
-
----
-
-## 目次
-
-1. [設計思想](#設計思想)
-2. [アドオンの使い方](#アドオンの使い方)
-3. [既存アドオンの導入](#既存アドオンの導入)
-4. [アドオンの作り方](#アドオンの作り方)
-5. [命名規則](#命名規則)
-6. [依存関係](#依存関係)
+TrussC can be extended with an addon system, similar to openFrameworks' ofxAddon.
 
 ---
 
-## 設計思想
+## Table of Contents
 
-TrussC のプロジェクト構成は **「CMakeLists.txt は全プロジェクト共通、ユーザーが編集するのは addons.make だけ」** という思想に基づいている。
-
-### なぜこの設計か
-
-- **シンプル**: プロジェクト固有の設定ファイルは `addons.make` のみ
-- **メンテナンス容易**: CMakeLists.txt を更新する必要がない
-- **間違いにくい**: 「何を編集すべきか」が明確
-
-### ユーザーが編集するファイル
-
-| ファイル | 用途 | 編集タイミング |
-|---------|------|--------------|
-| `addons.make` | 使用するアドオンの指定 | アドオンを追加/削除するとき |
-| `src/*.cpp` | アプリケーションコード | 常に |
-
-### ユーザーが編集しないファイル
-
-| ファイル | 理由 |
-|---------|------|
-| `CMakeLists.txt` | 全プロジェクト共通。`trussc_app()` が全て自動処理 |
+1. [Design Philosophy](#design-philosophy)
+2. [Using Addons](#using-addons)
+3. [Installing Existing Addons](#installing-existing-addons)
+4. [Creating Addons](#creating-addons)
+5. [Naming Conventions](#naming-conventions)
+6. [Dependencies](#dependencies)
 
 ---
 
-## アドオンの使い方
+## Design Philosophy
 
-### 1. addons.make を作成
+TrussC project structure is based on **"CMakeLists.txt is shared across all projects, users only edit addons.make"**.
 
-プロジェクトフォルダに `addons.make` ファイルを作成し、使用するアドオン名を1行ずつ記述:
+### Why This Design
+
+- **Simple**: Only one project-specific file to edit: `addons.make`
+- **Easy maintenance**: No need to modify CMakeLists.txt
+- **Hard to get wrong**: Clear what file to edit
+
+### Files Users Edit
+
+| File | Purpose | When to Edit |
+|------|---------|--------------|
+| `addons.make` | Specify addons to use | When adding/removing addons |
+| `src/*.cpp` | Application code | Always |
+
+### Files Users Don't Edit
+
+| File | Reason |
+|------|--------|
+| `CMakeLists.txt` | Shared across all projects. `trussc_app()` handles everything automatically |
+
+---
+
+## Using Addons
+
+### 1. Create addons.make
+
+Create an `addons.make` file in your project folder, listing addon names one per line:
 
 ```
 tcxOsc
 tcxBox2d
 ```
 
-コメントも使える:
+Comments are also supported:
 
 ```
-# 物理エンジン
+# Physics engine
 tcxBox2d
 
-# ネットワーク（後で追加予定）
+# Networking (add later)
 # tcxOsc
 ```
 
-### 2. コードで使用
+### 2. Use in Code
 
 ```cpp
 #include <tcxBox2d.h>
@@ -77,9 +77,9 @@ void setup() {
 }
 ```
 
-### CMakeLists.txt（参考）
+### CMakeLists.txt (Reference)
 
-CMakeLists.txt は全プロジェクト共通。編集不要:
+CMakeLists.txt is shared across all projects. No editing required:
 
 ```cmake
 cmake_minimum_required(VERSION 3.20)
@@ -90,88 +90,88 @@ include(${TRUSSC_DIR}/cmake/trussc_app.cmake)
 trussc_app()
 ```
 
-`trussc_app()` が以下を自動で行う:
+`trussc_app()` automatically:
 
-- プロジェクト名をフォルダ名から取得
-- `src/*.cpp` を自動収集してビルド
-- TrussC をリンク
-- `addons.make` からアドオンを自動追加
-- macOS バンドル設定、アイコン設定など
+- Gets project name from folder name
+- Collects and builds `src/*.cpp`
+- Links TrussC
+- Adds addons from `addons.make`
+- Configures macOS bundle, icons, etc.
 
 ---
 
-## 既存アドオンの導入
+## Installing Existing Addons
 
-### 公式アドオン
+### Official Addons
 
-TrussC に同梱されているアドオン:
+Addons included with TrussC:
 
-| アドオン名 | 説明 |
-|-----------|------|
-| tcxBox2d | Box2D 2D物理エンジン |
-| tcxOsc | OSC プロトコル送受信 |
-| tcxTls | TLS/SSL 通信（mbedTLS） |
+| Addon Name | Description |
+|------------|-------------|
+| tcxBox2d | Box2D 2D physics engine |
+| tcxOsc | OSC protocol send/receive |
+| tcxTls | TLS/SSL communication (mbedTLS) |
 
-### サードパーティアドオン
+### Third-Party Addons
 
-1. アドオンを `addons/` フォルダに配置
-2. `addons.make` に追加
+1. Place addon in `addons/` folder
+2. Add to `addons.make`
 
 ```
 tc_v0.0.1/
 └── addons/
-    ├── tcxBox2d/        # 公式
-    ├── tcxOsc/          # 公式
-    └── tcxSomeAddon/    # サードパーティ
+    ├── tcxBox2d/        # Official
+    ├── tcxOsc/          # Official
+    └── tcxSomeAddon/    # Third-party
 ```
 
 ---
 
-## アドオンの作り方
+## Creating Addons
 
-### フォルダ構造
+### Folder Structure
 
 ```
 addons/tcxMyAddon/
-├── src/                     # アドオンのコード (.h + .cpp 一緒)
-│   ├── tcxMyAddon.h         # メインヘッダー（全部 include）
+├── src/                     # Addon code (.h + .cpp together)
+│   ├── tcxMyAddon.h         # Main header (includes everything)
 │   ├── tcxMyClass.h
 │   └── tcxMyClass.cpp
-├── libs/                    # 外部ライブラリ（git submodule等）
+├── libs/                    # External libraries (git submodule, etc.)
 │   └── somelib/
-├── example-basic/           # サンプル（srcと同階層、example-xxx形式）
+├── example-basic/           # Example (same level as src, example-xxx format)
 │   ├── src/
 │   │   ├── main.cpp
 │   │   └── tcApp.cpp
-│   ├── addons.make          # このサンプルで使うアドオン
-│   └── CMakeLists.txt       # 共通テンプレート
-└── CMakeLists.txt           # オプション（FetchContent等が必要な場合のみ）
+│   ├── addons.make          # Addons used by this example
+│   └── CMakeLists.txt       # Shared template
+└── CMakeLists.txt           # Optional (only for FetchContent, etc.)
 ```
 
-**ポイント:**
-- `src/`: アドオン自体のコード。`.h` と `.cpp` を同じ場所に置く
-- `libs/`: 外部から持ってきたソースコード、git submodule など
-- `example-xxx/`: サンプルは `src/` と同階層に配置。CMakeLists.txt は共通テンプレート
-- `CMakeLists.txt`: 基本的に不要。FetchContent など特殊処理が必要な場合のみ作成
+**Key Points:**
+- `src/`: Addon's own code. Keep `.h` and `.cpp` in the same place
+- `libs/`: External source code, git submodules, etc.
+- `example-xxx/`: Examples at same level as `src/`. CMakeLists.txt uses shared template
+- `CMakeLists.txt`: Usually not needed. Create only for special processing like FetchContent
 
-### CMakeLists.txt が不要なケース
+### When CMakeLists.txt Is Not Needed
 
-以下の条件を満たすアドオンは CMakeLists.txt 不要:
+Addons meeting these conditions don't need CMakeLists.txt:
 
-- `src/` 内のソースのみで完結
-- 外部ライブラリ不要、または `libs/` 内にソースコードとして含まれている
-- TrussC 以外への依存なし
+- Complete with just `src/` sources
+- No external libraries, or sources included in `libs/`
+- No dependencies other than TrussC
 
-### CMakeLists.txt が必要なケース
+### When CMakeLists.txt Is Needed
 
-FetchContent で外部ライブラリを取得する場合:
+When fetching external libraries with FetchContent:
 
 ```cmake
 # tcxBox2d/CMakeLists.txt
 
 set(ADDON_NAME tcxBox2d)
 
-# Box2D を FetchContent で取得
+# Get Box2D via FetchContent
 include(FetchContent)
 FetchContent_Declare(
     box2d
@@ -182,7 +182,7 @@ set(BOX2D_BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
 set(BOX2D_BUILD_TESTBED OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(box2d)
 
-# ソースファイル
+# Source files
 file(GLOB ADDON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 file(GLOB ADDON_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h)
 
@@ -191,21 +191,21 @@ target_include_directories(${ADDON_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(${ADDON_NAME} PUBLIC box2d TrussC)
 ```
 
-### メインヘッダー（tcxMyAddon.h）
+### Main Header (tcxMyAddon.h)
 
 ```cpp
 // =============================================================================
-// tcxMyAddon - アドオン説明
+// tcxMyAddon - Addon description
 // =============================================================================
 
 #pragma once
 
-// 全てのヘッダーをインクルード
+// Include all headers
 #include "tcxMyClass.h"
 #include "tcxAnotherClass.h"
 ```
 
-### クラス実装例
+### Class Implementation Example
 
 ```cpp
 // tcxMyClass.h
@@ -230,42 +230,42 @@ private:
 
 ---
 
-## 命名規則
+## Naming Conventions
 
-### アドオン名
+### Addon Names
 
-| 項目 | 規則 | 例 |
-|-----|------|-----|
-| フォルダ名 | `tcx` + PascalCase | `tcxBox2d`, `tcxGui` |
-| ライブラリ名 | フォルダ名と同じ | `tcxBox2d` |
-| メインヘッダー | `アドオン名.h` | `tcxBox2d.h` |
+| Item | Convention | Example |
+|------|------------|---------|
+| Folder name | `tcx` + PascalCase | `tcxBox2d`, `tcxGui` |
+| Library name | Same as folder name | `tcxBox2d` |
+| Main header | `AddonName.h` | `tcxBox2d.h` |
 
-### 名前空間
+### Namespaces
 
 ```cpp
-namespace tcx::アドオン名 {
+namespace tcx::addonname {
     // ...
 }
 ```
 
-| アドオン | 名前空間 |
-|---------|---------|
+| Addon | Namespace |
+|-------|-----------|
 | tcxBox2d | `tcx::box2d` |
 | tcxGui | `tcx::gui` |
 | tcxOsc | `tcx::osc` |
 
-**注意:** TrussC 本体は `tc::` を使用。アドオンは `tcx::` を使用。
+**Note:** TrussC core uses `tc::`. Addons use `tcx::`.
 
-### ファイル名
+### File Names
 
-| 種類 | 規則 | 例 |
-|-----|------|-----|
-| ヘッダー | `tcx` + PascalCase + `.h` | `tcxBox2dWorld.h` |
-| 実装 | `tcx` + PascalCase + `.cpp` | `tcxBox2dWorld.cpp` |
+| Type | Convention | Example |
+|------|------------|---------|
+| Header | `tcx` + PascalCase + `.h` | `tcxBox2dWorld.h` |
+| Implementation | `tcx` + PascalCase + `.cpp` | `tcxBox2dWorld.cpp` |
 
-### クラス名
+### Class Names
 
-名前空間内ではプレフィックスなし:
+No prefix within namespace:
 
 ```cpp
 namespace tcx::box2d {
@@ -276,14 +276,14 @@ namespace tcx::box2d {
 
 ---
 
-## 依存関係
+## Dependencies
 
-### 他のアドオンに依存する場合
+### Depending on Other Addons
 
-アドオンの CMakeLists.txt 内で `use_addon()` を使用:
+Use `use_addon()` in the addon's CMakeLists.txt:
 
 ```cmake
-# tcxMyAddon が tcxBox2d に依存
+# tcxMyAddon depends on tcxBox2d
 add_library(${ADDON_NAME} STATIC ...)
 
 use_addon(${ADDON_NAME} tcxBox2d)
@@ -291,11 +291,11 @@ use_addon(${ADDON_NAME} tcxBox2d)
 target_link_libraries(${ADDON_NAME} PUBLIC TrussC)
 ```
 
-ユーザーが `addons.make` に `tcxMyAddon` を書くだけで、tcxBox2d も自動的に追加される。
+When users add `tcxMyAddon` to `addons.make`, tcxBox2d is automatically included too.
 
-### 外部ライブラリに依存する場合
+### Depending on External Libraries
 
-FetchContent を使用:
+Use FetchContent:
 
 ```cmake
 include(FetchContent)
@@ -313,19 +313,19 @@ target_link_libraries(${ADDON_NAME} PUBLIC somelib)
 
 ---
 
-## 公式アドオン一覧
+## Official Addon List
 
 ### tcxBox2d
 
-Box2D 2D物理エンジンの TrussC ラッパー。
+TrussC wrapper for Box2D 2D physics engine.
 
-**機能:**
-- World（物理ワールド）
-- Body（物理ボディ基底クラス、tc::Node 継承）
-- Circle, Rect, Polygon（形状）
-- マウスドラッグ（b2MouseJoint）
+**Features:**
+- World (physics world)
+- Body (physics body base class, inherits tc::Node)
+- Circle, Rect, Polygon (shapes)
+- Mouse drag (b2MouseJoint)
 
-**使用例:**
+**Usage Example:**
 
 ```cpp
 #include <tcxBox2d.h>
@@ -338,37 +338,37 @@ class tcApp : public App {
     Circle circle;
 
     void setup() override {
-        world.setup(Vec2(0, 300));  // 重力
-        world.createBounds();        // 画面端に壁
+        world.setup(Vec2(0, 300));  // Gravity
+        world.createBounds();        // Screen edge walls
         circle.setup(world, 400, 100, 30);
     }
 
     void update() override {
         world.update();
-        circle.updateTree();  // Box2D → Node 座標同期
+        circle.updateTree();  // Sync Box2D → Node coordinates
     }
 
     void draw() override {
         clear(30);
         setColor(255, 200, 100);
-        circle.drawTree();    // 位置・回転を適用して描画
+        circle.drawTree();    // Draw with position/rotation applied
     }
 };
 ```
 
 ### tcxOsc
 
-OSC（Open Sound Control）プロトコルの送受信。
+OSC (Open Sound Control) protocol send/receive.
 
-**機能:**
-- OscSender（OSC メッセージ送信）
-- OscReceiver（OSC メッセージ受信）
-- OscMessage, OscBundle（メッセージ構築）
+**Features:**
+- OscSender (send OSC messages)
+- OscReceiver (receive OSC messages)
+- OscMessage, OscBundle (message construction)
 
 ### tcxTls
 
-TLS/SSL 通信サポート（mbedTLS 使用）。
+TLS/SSL communication support (using mbedTLS).
 
-**機能:**
-- セキュアな TCP 通信
-- 証明書検証
+**Features:**
+- Secure TCP communication
+- Certificate verification

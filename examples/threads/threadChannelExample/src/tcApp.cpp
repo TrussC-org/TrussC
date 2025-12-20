@@ -2,44 +2,44 @@
 #include <cmath>
 
 // ---------------------------------------------------------------------------
-// setup - 初期化
+// setup - Initialization
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
     sourcePixels_.resize(AnalysisThread::TOTAL_PIXELS);
 }
 
 // ---------------------------------------------------------------------------
-// update - 更新
+// update - Update
 // ---------------------------------------------------------------------------
 void tcApp::update() {
     frameNum_++;
 
-    // パターンを生成（sin波 + ノイズ）
+    // Generate pattern (sin wave + noise)
     float t = frameNum_ * 0.05f;
     for (int i = 0; i < AnalysisThread::TOTAL_PIXELS; i++) {
         float ux = (i % AnalysisThread::WIDTH) / (float)AnalysisThread::WIDTH;
         float uy = (i / AnalysisThread::WIDTH) / (float)AnalysisThread::HEIGHT;
 
-        // 波模様パターン
+        // Wave pattern
         float value = std::sin(ux * 10.0f + t) * std::sin(uy * 8.0f + t * 0.7f);
-        value = (value + 1.0f) * 0.5f;  // 0-1 に正規化
+        value = (value + 1.0f) * 0.5f;  // Normalize to 0-1
         sourcePixels_[i] = value;
     }
 
-    // 解析リクエストを送信
+    // Send analysis request
     analyzer_.analyze(sourcePixels_);
 
-    // 解析結果を受信
+    // Receive analysis result
     analyzer_.update();
 }
 
 // ---------------------------------------------------------------------------
-// draw - 描画
+// draw - Drawing
 // ---------------------------------------------------------------------------
 void tcApp::draw() {
     clear(0.1f, 0.1f, 0.1f);
 
-    // 元のパターンを描画（左側）
+    // Draw original pattern (left side)
     setColor(1.0f);
     drawBitmapString("Source (Main Thread)", 20, 20);
 
@@ -52,12 +52,12 @@ void tcApp::draw() {
         }
     }
 
-    // 解析結果を描画（右側）
+    // Draw analysis result (right side)
     setColor(1.0f);
     drawBitmapString("Analyzed (Worker Thread)", 300, 20);
     analyzer_.draw(300, 40);
 
-    // 情報表示
+    // Display information
     setColor(0.78f, 0.78f, 0.78f);
     drawBitmapString("Frame: " + toString(frameNum_), 20, 260);
     drawBitmapString("Analyzed: " + toString(analyzer_.getAnalyzedCount()), 20, 275);

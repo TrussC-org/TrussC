@@ -1,5 +1,5 @@
 // =============================================================================
-// tcApp.cpp - UDP ソケットサンプル
+// tcApp.cpp - UDP Socket Example
 // =============================================================================
 
 #include "tcApp.h"
@@ -14,7 +14,7 @@ void tcApp::setup() {
     tcLogNotice("tcApp") << "Press C to clear messages";
     tcLogNotice("tcApp") << "==========================";
 
-    // 受信イベントをリッスン
+    // Listen for receive events
     receiver.onReceive.listen(receiveListener, [this](UdpReceiveEventArgs& e) {
         string msg(e.data.begin(), e.data.end());
         tcLogNotice("UdpReceiver") << "Received from " << e.remoteHost << ":" << e.remotePort << " -> " << msg;
@@ -26,17 +26,17 @@ void tcApp::setup() {
         }
     });
 
-    // エラーイベントをリッスン
+    // Listen for error events
     receiver.onError.listen(errorListener, [](UdpErrorEventArgs& e) {
         tcLogError("UdpReceiver") << "UDP Error: " << e.message;
     });
 
-    // 受信用ソケットをバインド（ポート9000で受信開始）
+    // Bind the receiver socket (start receiving on port 9000)
     if (!receiver.bind(9000)) {
         tcLogError("tcApp") << "Failed to bind receiver to port 9000";
     }
 
-    // 送信用ソケットの送信先を設定
+    // Set the destination for the sender socket
     sender.connect("127.0.0.1", 9000);
 }
 
@@ -48,22 +48,22 @@ void tcApp::draw() {
 
     float y = 40;
 
-    // タイトル
+    // Title
     setColor(1.0f);
     drawBitmapString("UDP Socket Example", 40, y);
     y += 30;
 
-    // 操作説明
+    // Instructions
     setColor(0.7f);
     drawBitmapString("SPACE: Send message   C: Clear", 40, y);
     y += 40;
 
-    // 送信カウント
+    // Send count
     setColor(0.4f, 0.78f, 1.0f);
     drawBitmapString("Sent: " + to_string(sendCount) + " messages", 40, y);
     y += 30;
 
-    // 受信メッセージ
+    // Received messages
     setColor(0.4f, 1.0f, 0.4f);
     drawBitmapString("Received Messages:", 40, y);
     y += 25;
@@ -78,7 +78,7 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
     if (key == KEY_SPACE || key == ' ') {
-        // メッセージを送信
+        // Send message
         sendCount++;
         ostringstream oss;
         oss << "Hello from TrussC! #" << sendCount;

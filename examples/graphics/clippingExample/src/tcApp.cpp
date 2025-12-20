@@ -1,5 +1,5 @@
 // =============================================================================
-// clippingExample - Scissor Clipping のデモ実装
+// clippingExample - Scissor Clipping demo implementation
 // =============================================================================
 
 #include "tcApp.h"
@@ -12,7 +12,7 @@ void tcApp::setup() {
     cout << "- Circles only visible in intersection of both boxes" << endl;
     cout << "[R] reset positions" << endl;
 
-    // 外側のクリップボックス
+    // Outer clip box
     outerBox_ = make_shared<ClipBox>();
     outerBox_->x = 100;
     outerBox_->y = 100;
@@ -23,7 +23,7 @@ void tcApp::setup() {
     outerBox_->label = "Outer ClipBox";
     addChild(outerBox_);
 
-    // 内側のクリップボックス（回転する）
+    // Inner clip box (rotating)
     innerBox_ = make_shared<ClipBox>();
     innerBox_->x = 100;
     innerBox_->y = 80;
@@ -34,7 +34,7 @@ void tcApp::setup() {
     innerBox_->label = "Inner ClipBox (rotating)";
     outerBox_->addChild(innerBox_);
 
-    // 跳ね回る円を内側ボックスに追加
+    // Add bouncing circles to inner box
     for (int i = 0; i < 5; i++) {
         auto circle = make_shared<BouncingCircle>();
         circle->x = 50 + i * 50;
@@ -49,7 +49,7 @@ void tcApp::setup() {
         circles_.push_back(circle);
     }
 
-    // 外側ボックスにも直接円を追加（外側クリッピングのテスト）
+    // Add circle directly to outer box (outer clipping test)
     auto outerCircle = make_shared<BouncingCircle>();
     outerCircle->x = 400;
     outerCircle->y = 300;
@@ -64,13 +64,13 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
-    // 円は自動でupdateTreeで更新される
+    // Circles are automatically updated via updateTree
 }
 
 void tcApp::draw() {
     clear(0.08f, 0.08f, 0.1f);
 
-    // タイトル
+    // Title
     setColor(1.0f, 1.0f, 1.0f);
     drawBitmapString("Nested Scissor Clipping Demo", 20, 30);
 
@@ -78,22 +78,22 @@ void tcApp::draw() {
     drawBitmapString("Circles are clipped by BOTH outer and inner boxes", 20, 50);
     drawBitmapString("Inner box circles only visible in intersection area", 20, 65);
 
-    // 右側に説明
+    // Description on the right
     setColor(0.5f, 0.5f, 0.5f);
     drawBitmapString("[R] reset positions", 700, 100);
 
-    // クリッピングの状態表示
+    // Clipping status display
     setColor(0.3f, 0.5f, 0.8f);
     drawBitmapString("Blue = Outer clip boundary", 700, 180);
     setColor(0.8f, 0.5f, 0.3f);
     drawBitmapString("Orange = Inner clip boundary", 700, 200);
 
-    // 子ノードは自動描画される
+    // Child nodes are drawn automatically
 }
 
 void tcApp::keyPressed(int key) {
     if (key == 'r' || key == 'R') {
-        // リセット
+        // Reset
         for (size_t i = 0; i < circles_.size(); i++) {
             circles_[i]->x = 50 + i * 50;
             circles_[i]->y = 50 + i * 30;

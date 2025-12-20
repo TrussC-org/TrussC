@@ -2,21 +2,21 @@
 
 // =============================================================================
 // TrussC Sound
-// miniaudio ベースのサウンド再生・マイク入力
+// Sound playback and microphone input based on miniaudio
 //
-// 設計:
-// - AudioEngine: シングルトン、miniaudio の初期化、ミキサー管理
-// - SoundBuffer: デコード済みサウンドデータ（共有可能）
-// - Sound: ユーザー向けクラス、再生制御
-// - MicInput: マイク入力
+// Design:
+// - AudioEngine: Singleton, miniaudio initialization, mixer management
+// - SoundBuffer: Decoded sound data (shareable)
+// - Sound: User-facing class, playback control
+// - MicInput: Microphone input
 //
-// 使用例:
+// Usage:
 //   tc::Sound sound;
 //   sound.load("music.ogg");
 //   sound.play();
 //   sound.setVolume(0.8f);
-//   sound.setPan(-0.5f);   // 左寄り
-//   sound.setSpeed(1.5f);  // 1.5倍速
+//   sound.setPan(-0.5f);   // Left-biased
+//   sound.setSpeed(1.5f);  // 1.5x speed
 //   sound.setLoop(true);
 // =============================================================================
 
@@ -29,7 +29,7 @@
 #include <cstring>
 #include <cmath>
 
-// stb_vorbis 前方宣言
+// stb_vorbis forward declaration
 extern "C" {
     typedef struct stb_vorbis stb_vorbis;
 
@@ -49,7 +49,7 @@ extern "C" {
     void stb_vorbis_close(stb_vorbis *f);
 }
 
-// dr_wav 前方宣言
+// dr_wav forward declaration
 extern "C" {
     typedef uint64_t drwav_uint64;
     float* drwav_open_file_and_read_pcm_frames_f32(
@@ -58,7 +58,7 @@ extern "C" {
     void drwav_free(void* p, void* pAllocationCallbacks);
 }
 
-// dr_mp3 前方宣言
+// dr_mp3 forward declaration
 extern "C" {
     typedef uint64_t drmp3_uint64;
     typedef uint32_t drmp3_uint32;
@@ -75,14 +75,14 @@ extern "C" {
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// サウンドバッファ（デコード済みデータ）
+// Sound Buffer (decoded data)
 // ---------------------------------------------------------------------------
 class SoundBuffer {
 public:
-    std::vector<float> samples;  // インターリーブされたサンプル
+    std::vector<float> samples;  // Interleaved samples
     int channels = 0;
     int sampleRate = 0;
-    size_t numSamples = 0;       // チャンネルあたりのサンプル数
+    size_t numSamples = 0;       // Samples per channel
 
     bool loadOgg(const std::string& path) {
         int error = 0;
@@ -169,7 +169,7 @@ public:
         return (float)numSamples / sampleRate;
     }
 
-    // テスト用: サイン波を生成
+    // For testing: Generate sine wave
     void generateSineWave(float frequency, float duration, int sr = 44100) {
         sampleRate = sr;
         channels = 1;
@@ -186,43 +186,43 @@ public:
 };
 
 // ---------------------------------------------------------------------------
-// 再生中の音声インスタンス
+// Playing Sound Instance
 // ---------------------------------------------------------------------------
 struct PlayingSound {
     std::shared_ptr<SoundBuffer> buffer;
     std::atomic<float> volume{1.0f};
-    std::atomic<float> pan{0.0f};        // -1.0 (左) ~ 0.0 (中央) ~ 1.0 (右)
-    std::atomic<float> speed{1.0f};      // 0.5 (半速) ~ 1.0 (通常) ~ 2.0 (倍速)
+    std::atomic<float> pan{0.0f};        // -1.0 (left) ~ 0.0 (center) ~ 1.0 (right)
+    std::atomic<float> speed{1.0f};      // 0.5 (half speed) ~ 1.0 (normal) ~ 2.0 (double speed)
     std::atomic<bool> loop{false};
     std::atomic<bool> playing{false};
     std::atomic<bool> paused{false};
 
-    // 再生位置（浮動小数点で管理、speed 対応用）
+    // Playback position (floating-point for speed adjustment)
     double positionF{0.0};
 };
 
 // ---------------------------------------------------------------------------
-// オーディオエンジン（シングルトン、miniaudio ベース）
+// Audio Engine (singleton, miniaudio-based)
 // ---------------------------------------------------------------------------
 class AudioEngine {
 public:
     static constexpr int MAX_PLAYING_SOUNDS = 32;
     static constexpr int SAMPLE_RATE = 44100;
-    static constexpr int NUM_CHANNELS = 2;  // ステレオ出力
-    static constexpr int ANALYSIS_BUFFER_SIZE = 4096;  // FFT解析用バッファサイズ
+    static constexpr int NUM_CHANNELS = 2;  // Stereo output
+    static constexpr int ANALYSIS_BUFFER_SIZE = 4096;  // FFT analysis buffer size
 
     static AudioEngine& getInstance() {
         static AudioEngine instance;
         return instance;
     }
 
-    // 初期化・終了（実装は tcAudio_impl.cpp）
+    // Initialize and shutdown (implementation in tcAudio_impl.cpp)
     bool init();
     void shutdown();
 
-    // FFT解析用: 最新のオーディオサンプルを取得（モノラル、左右平均）
-    // numSamples: 取得するサンプル数（最大 ANALYSIS_BUFFER_SIZE）
-    // 戻り値: 取得したサンプル数
+    // FFT analysis: Get latest audio samples (mono, left+right average)
+    // numSamples: Number of samples to get (max ANALYSIS_BUFFER_SIZE)
+    // Returns: Number of samples retrieved
     size_t getAnalysisBuffer(float* outBuffer, size_t numSamples) {
         if (!initialized_ || numSamples == 0) return 0;
 
@@ -230,7 +230,7 @@ public:
 
         std::lock_guard<std::mutex> lock(analysisMutex_);
 
-        // リングバッファから最新のサンプルをコピー
+        // Copy latest samples from ring buffer
         size_t readPos = (analysisWritePos_ + ANALYSIS_BUFFER_SIZE - numSamples) % ANALYSIS_BUFFER_SIZE;
 
         for (size_t i = 0; i < numSamples; i++) {
@@ -240,13 +240,13 @@ public:
         return numSamples;
     }
 
-    // 新しい再生インスタンスを追加
+    // Add new playback instance
     std::shared_ptr<PlayingSound> play(std::shared_ptr<SoundBuffer> buffer) {
         if (!initialized_ || !buffer) return nullptr;
 
         std::lock_guard<std::mutex> lock(mutex_);
 
-        // 空きスロットを探す
+        // Find empty slot
         for (auto& slot : playingSounds_) {
             if (!slot || !slot->playing) {
                 slot = std::make_shared<PlayingSound>();
@@ -266,7 +266,7 @@ public:
         return nullptr;
     }
 
-    // オーディオコールバックから呼ばれる（内部使用）
+    // Called from audio callback (internal use)
     void mixAudio(float* buffer, int num_frames, int num_channels);
 
 private:
@@ -280,7 +280,7 @@ private:
     }
 
     void mixAudioInternal(float* buffer, int num_frames, int num_channels) {
-        // バッファをクリア
+        // Clear buffer
         std::memset(buffer, 0, num_frames * num_channels * sizeof(float));
 
         std::lock_guard<std::mutex> lock(mutex_);
@@ -294,10 +294,10 @@ private:
             float pan = sound->pan;
             float speed = sound->speed;
 
-            // pan から左右の音量係数を計算
-            // pan = -1.0: 左100%, 右0%
-            // pan =  0.0: 左100%, 右100%
-            // pan =  1.0: 左0%,   右100%
+            // Calculate left/right volume from pan
+            // pan = -1.0: left 100%, right 0%
+            // pan =  0.0: left 100%, right 100%
+            // pan =  1.0: left 0%,   right 100%
             float panL = (pan <= 0.0f) ? 1.0f : (1.0f - pan);
             float panR = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
 
@@ -306,7 +306,7 @@ private:
                 size_t pos1 = pos0 + 1;
                 float frac = (float)(posF - pos0);
 
-                // ループ処理
+                // Loop handling
                 if (pos0 >= src->numSamples) {
                     if (sound->loop) {
                         posF = 0.0;
@@ -319,34 +319,34 @@ private:
                     }
                 }
 
-                // 境界チェック (pos1 が範囲外の場合)
+                // Boundary check (when pos1 is out of range)
                 if (pos1 >= src->numSamples) {
                     pos1 = sound->loop ? 0 : pos0;
                 }
 
-                // サンプル取得 (線形補間)
+                // Get samples (linear interpolation)
                 float left0, right0, left1, right1;
                 if (src->channels == 1) {
-                    // モノラル
+                    // Mono
                     left0 = right0 = src->samples[pos0];
                     left1 = right1 = src->samples[pos1];
                 } else {
-                    // ステレオ
+                    // Stereo
                     left0 = src->samples[pos0 * 2];
                     right0 = src->samples[pos0 * 2 + 1];
                     left1 = src->samples[pos1 * 2];
                     right1 = src->samples[pos1 * 2 + 1];
                 }
 
-                // 線形補間
+                // Linear interpolation
                 float left = left0 + (left1 - left0) * frac;
                 float right = right0 + (right1 - right0) * frac;
 
-                // 音量とパンを適用
+                // Apply volume and pan
                 left *= vol * panL;
                 right *= vol * panR;
 
-                // ミックス
+                // Mix
                 buffer[frame * num_channels] += left;
                 if (num_channels > 1) {
                     buffer[frame * num_channels + 1] += right;
@@ -358,13 +358,13 @@ private:
             sound->positionF = posF;
         }
 
-        // クリッピング
+        // Clipping
         for (int i = 0; i < num_frames * num_channels; i++) {
             if (buffer[i] > 1.0f) buffer[i] = 1.0f;
             if (buffer[i] < -1.0f) buffer[i] = -1.0f;
         }
 
-        // FFT解析用リングバッファにコピー（モノラル化: 左右平均）
+        // Copy to FFT analysis ring buffer (mono: left+right average)
         {
             std::lock_guard<std::mutex> lock(analysisMutex_);
             for (int frame = 0; frame < num_frames; frame++) {
@@ -385,36 +385,36 @@ private:
     std::vector<std::shared_ptr<PlayingSound>> playingSounds_;
     std::mutex mutex_;
 
-    // FFT解析用リングバッファ
+    // FFT analysis ring buffer
     std::vector<float> analysisBuffer_;
     size_t analysisWritePos_ = 0;
     std::mutex analysisMutex_;
 };
 
 // ---------------------------------------------------------------------------
-// サウンドクラス（ユーザー向け）
+// Sound Class (user-facing)
 // ---------------------------------------------------------------------------
 class Sound {
 public:
     Sound() = default;
     ~Sound() = default;
 
-    // コピー・ムーブ
+    // Copy and move
     Sound(const Sound&) = default;
     Sound& operator=(const Sound&) = default;
     Sound(Sound&&) = default;
     Sound& operator=(Sound&&) = default;
 
     // -------------------------------------------------------------------------
-    // 読み込み
+    // Loading
     // -------------------------------------------------------------------------
     bool load(const std::string& path) {
-        // AudioEngine を初期化（初回のみ）
+        // Initialize AudioEngine (only once)
         AudioEngine::getInstance().init();
 
         buffer_ = std::make_shared<SoundBuffer>();
 
-        // 拡張子で判別
+        // Determine format by extension
         std::string ext = path.substr(path.find_last_of('.') + 1);
         bool success = false;
 
@@ -435,7 +435,7 @@ public:
         return true;
     }
 
-    // テスト用: サイン波を生成
+    // For testing: Generate sine wave
     void loadTestTone(float frequency = 440.0f, float duration = 1.0f) {
         AudioEngine::getInstance().init();
         buffer_ = std::make_shared<SoundBuffer>();
@@ -445,12 +445,12 @@ public:
     bool isLoaded() const { return buffer_ != nullptr; }
 
     // -------------------------------------------------------------------------
-    // 再生制御
+    // Playback Control
     // -------------------------------------------------------------------------
     void play() {
         if (!buffer_) return;
 
-        // 既に再生中なら停止
+        // Stop if already playing
         stop();
 
         playing_ = AudioEngine::getInstance().play(buffer_);
@@ -482,7 +482,7 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // 設定
+    // Settings
     // -------------------------------------------------------------------------
     void setVolume(float vol) {
         volume_ = vol;
@@ -503,7 +503,7 @@ public:
     bool isLoop() const { return loop_; }
 
     void setPan(float pan) {
-        // -1.0 (左) ~ 0.0 (中央) ~ 1.0 (右)
+        // -1.0 (left) ~ 0.0 (center) ~ 1.0 (right)
         pan_ = (pan < -1.0f) ? -1.0f : (pan > 1.0f) ? 1.0f : pan;
         if (playing_) {
             playing_->pan = pan_;
@@ -513,7 +513,7 @@ public:
     float getPan() const { return pan_; }
 
     void setSpeed(float speed) {
-        // 0.1 ~ 4.0 の範囲に制限（極端な値を防ぐ）
+        // Clamp to 0.1 ~ 4.0 range (prevent extreme values)
         speed_ = (speed < 0.1f) ? 0.1f : (speed > 4.0f) ? 4.0f : speed;
         if (playing_) {
             playing_->speed = speed_;
@@ -523,7 +523,7 @@ public:
     float getSpeed() const { return speed_; }
 
     // -------------------------------------------------------------------------
-    // 状態
+    // State
     // -------------------------------------------------------------------------
     bool isPlaying() const {
         return playing_ && playing_->playing && !playing_->paused;
@@ -552,52 +552,52 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// グローバル関数
+// Global Functions
 // ---------------------------------------------------------------------------
 
-// オーディオエンジンを初期化（setup() で自動的に呼ばれる）
+// Initialize audio engine (called automatically in setup())
 inline void initAudio() {
     AudioEngine::getInstance().init();
 }
 
-// オーディオエンジンをシャットダウン
+// Shutdown audio engine
 inline void shutdownAudio() {
     AudioEngine::getInstance().shutdown();
 }
 
-// FFT解析用: 最新のオーディオサンプルを取得
+// FFT analysis: Get latest audio samples
 inline size_t getAudioAnalysisBuffer(float* outBuffer, size_t numSamples) {
     return AudioEngine::getInstance().getAnalysisBuffer(outBuffer, numSamples);
 }
 
 // ---------------------------------------------------------------------------
-// マイク入力 (miniaudio ベース)
+// Microphone Input (miniaudio-based)
 // ---------------------------------------------------------------------------
 
 class MicInput {
 public:
-    static constexpr int BUFFER_SIZE = 4096;  // リングバッファサイズ
+    static constexpr int BUFFER_SIZE = 4096;  // Ring buffer size
     static constexpr int DEFAULT_SAMPLE_RATE = 44100;
 
     MicInput() = default;
     ~MicInput();
 
-    // 初期化（マイクデバイスを開く）
+    // Initialize (open microphone device)
     bool start(int sampleRate = DEFAULT_SAMPLE_RATE);
 
-    // 停止
+    // Stop
     void stop();
 
-    // 最新のサンプルを取得
-    // numSamples: 取得するサンプル数（最大 BUFFER_SIZE）
-    // 戻り値: 実際に取得したサンプル数
+    // Get latest samples
+    // numSamples: Number of samples to get (max BUFFER_SIZE)
+    // Returns: Actual number of samples retrieved
     size_t getBuffer(float* outBuffer, size_t numSamples);
 
-    // 状態
+    // State
     bool isRunning() const { return running_; }
     int getSampleRate() const { return sampleRate_; }
 
-    // コールバック（内部使用）
+    // Callback (internal use)
     void onAudioData(const float* input, size_t frameCount);
 
 private:
@@ -605,16 +605,16 @@ private:
     bool running_ = false;
     int sampleRate_ = DEFAULT_SAMPLE_RATE;
 
-    // リングバッファ
+    // Ring buffer
     std::vector<float> buffer_;
     size_t writePos_ = 0;
     std::mutex mutex_;
 };
 
-// グローバルMicInputインスタンス（シングルトン的に使用）
+// Global MicInput instance (singleton-like usage)
 MicInput& getMicInput();
 
-// マイク入力から最新のサンプルを取得
+// Get latest samples from microphone input
 inline size_t getMicAnalysisBuffer(float* outBuffer, size_t numSamples) {
     return getMicInput().getBuffer(outBuffer, numSamples);
 }

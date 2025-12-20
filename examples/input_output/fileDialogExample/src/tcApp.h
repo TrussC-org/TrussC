@@ -12,11 +12,11 @@ public:
     void keyPressed(int key) override;
 
 private:
-    // ダイアログの結果
+    // Dialog result
     FileDialogResult lastResult;
     std::string statusMessage = "Press keys to open dialogs";
 
-    // 読み込んだ画像（あれば）
+    // Loaded image (if any)
     Image loadedImage;
     bool hasImage = false;
 };

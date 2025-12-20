@@ -8,7 +8,7 @@ using namespace tc;
 using namespace std;
 
 // =============================================================================
-// blendingExample - ブレンドモードの比較デモ
+// blendingExample - Blend mode comparison demo
 // =============================================================================
 class tcApp : public App {
 public:
@@ -18,9 +18,9 @@ public:
     void keyPressed(int key) override;
 
 private:
-    // ブレンドモード名を取得
+    // Get blend mode name
     string getBlendModeName(BlendMode mode);
 
-    // デモ用パラメータ
+    // Demo parameters
     float animTime_ = 0.0f;
 };

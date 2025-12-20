@@ -1,9 +1,9 @@
 // =============================================================================
-// main.cpp - threadChannelExample エントリーポイント
+// main.cpp - threadChannelExample entry point
 // =============================================================================
 //
-// ThreadChannel を使ったスレッド間通信のサンプル。
-// oF の threadChannelExample を参考に実装。
+// Sample of inter-thread communication using ThreadChannel.
+// Implementation based on oF's threadChannelExample.
 //
 
 #include "tcApp.h"

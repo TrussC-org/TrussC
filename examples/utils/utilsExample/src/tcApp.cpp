@@ -1,19 +1,19 @@
 #include "tcApp.h"
 
 // =============================================================================
-// utilsExample - tcUtils.h と tcTime.h のユーティリティ関数デモ
+// utilsExample - Utility function demo for tcUtils.h and tcTime.h
 // =============================================================================
-// 画面に各種ユーティリティ関数の結果をリアルタイム表示する
+// Display results of various utility functions in real-time on screen
 
 void tcApp::setup() {
     cout << "utilsExample: Utility Functions Demo" << endl;
 
-    // 文字列分割のテスト
+    // String split test
     splitResult_ = splitString("apple,banana,cherry,date", ",");
 }
 
 void tcApp::update() {
-    // 特に更新処理なし
+    // No update processing needed
 }
 
 void tcApp::draw() {
@@ -24,7 +24,7 @@ void tcApp::draw() {
     float sectionGap = 25;
 
     // ==========================================================================
-    // タイトル
+    // Title
     // ==========================================================================
     setColor(colors::white);
     drawBitmapStringHighlight("utilsExample - Utility Functions Demo",
@@ -32,7 +32,7 @@ void tcApp::draw() {
     y += lineHeight + sectionGap;
 
     // ==========================================================================
-    // 時間ユーティリティ (tcTime.h)
+    // Time Utilities (tcTime.h)
     // ==========================================================================
     setColor(colors::cornflowerBlue);
     drawBitmapString("[ Time Utilities - tcTime.h ]", 10, y);
@@ -40,41 +40,41 @@ void tcApp::draw() {
 
     setColor(colors::lightGray);
 
-    // 経過時間
+    // Elapsed time
     drawBitmapString("getElapsedTimef(): " + toString(getElapsedTimef(), 3), 20, y);
     y += lineHeight;
 
     drawBitmapString("getElapsedTimeMillis(): " + to_string(getElapsedTimeMillis()), 20, y);
     y += lineHeight;
 
-    // タイムスタンプ
+    // Timestamp
     drawBitmapString("getTimestampString(): " + getTimestampString(), 20, y);
     y += lineHeight;
 
     drawBitmapString("getTimestampString(\"%H:%M:%S\"): " + getTimestampString("%H:%M:%S"), 20, y);
     y += lineHeight;
 
-    // 現在時刻
+    // Current time
     string timeStr = toString(getHours(), 2, '0') + ":" +
                      toString(getMinutes(), 2, '0') + ":" +
                      toString(getSeconds(), 2, '0');
     drawBitmapString("getHours/Minutes/Seconds: " + timeStr, 20, y);
     y += lineHeight;
 
-    // 現在日付
+    // Current date
     string dateStr = to_string(getYear()) + "/" +
                      toString(getMonth(), 2, '0') + "/" +
                      toString(getDay(), 2, '0');
     drawBitmapString("getYear/Month/Day: " + dateStr, 20, y);
     y += lineHeight;
 
-    // 曜日
+    // Day of week
     const char* weekdays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     drawBitmapString("getWeekday(): " + to_string(getWeekday()) + " (" + weekdays[getWeekday()] + ")", 20, y);
     y += lineHeight + sectionGap;
 
     // ==========================================================================
-    // 文字列ユーティリティ (tcUtils.h)
+    // String Utilities (tcUtils.h)
     // ==========================================================================
     setColor(colors::coral);
     drawBitmapString("[ String Utilities - tcUtils.h ]", 10, y);
@@ -82,7 +82,7 @@ void tcApp::draw() {
 
     setColor(colors::lightGray);
 
-    // テスト文字列
+    // Test string
     drawBitmapString("testString: \"" + testString_ + "\"", 20, y);
     y += lineHeight;
 
@@ -114,7 +114,7 @@ void tcApp::draw() {
     y += lineHeight + sectionGap;
 
     // ==========================================================================
-    // 数値変換ユーティリティ
+    // Number Conversion Utilities
     // ==========================================================================
     setColor(colors::mediumSeaGreen);
     drawBitmapString("[ Number Conversion - tcUtils.h ]", 10, y);
@@ -142,7 +142,7 @@ void tcApp::draw() {
     y += lineHeight + sectionGap;
 
     // ==========================================================================
-    // フレーム情報
+    // Frame Information
     // ==========================================================================
     setColor(colors::white);
     string frameInfo = "FPS: " + toString(getFrameRate(), 1) +

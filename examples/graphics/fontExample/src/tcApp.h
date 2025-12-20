@@ -6,7 +6,7 @@ using namespace std;
 #include "tc/graphics/tcFont.h"
 
 // =============================================================================
-// tcApp - TrueType フォント＆アラインメントサンプル
+// tcApp - TrueType font & alignment sample
 // =============================================================================
 
 class tcApp : public App {

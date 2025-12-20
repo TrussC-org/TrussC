@@ -9,7 +9,7 @@ void tcApp::setup() {
     cout << "  - Press SPACE to capture screenshot" << endl;
     cout << "  - Uses OS window capture (no FBO needed)" << endl;
 
-    // 保存先パス（dataフォルダ）
+    // Save path (data folder)
     savePath = getDataPath("");
     cout << "Screenshots will be saved to: " << savePath << endl;
 }
@@ -19,10 +19,10 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    // 背景をクリア（暗い青紫）
+    // Clear background (dark blue-purple)
     clear(51, 51, 76);
 
-    // デモ描画：回転する円たち
+    // Demo drawing: rotating circles
     int numCircles = 12;
     float centerX = getWindowWidth() / 2.0f;
     float centerY = getWindowHeight() / 2.0f;
@@ -33,7 +33,7 @@ void tcApp::draw() {
         float x = centerX + cos(angle) * radius;
         float y = centerY + sin(angle) * radius;
 
-        // 色相を変える
+        // Change hue
         float hue = float(i) / numCircles * TAU;
         Color c = colorFromHSB(hue, 0.8f, 1.0f);
         setColor(c);
@@ -42,11 +42,11 @@ void tcApp::draw() {
         drawCircle(x, y, circleRadius);
     }
 
-    // 中央に大きな円
+    // Large circle in center
     setColor(1.0f);
     drawCircle(centerX, centerY, 50.0f + sin(time * 3.0f) * 20.0f);
 
-    // グリッド線
+    // Grid lines
     setColor(1.0f, 1.0f, 1.0f, 0.2f);
     for (int x = 0; x < getWindowWidth(); x += 50) {
         drawLine(x, 0, x, getWindowHeight());
@@ -55,7 +55,7 @@ void tcApp::draw() {
         drawLine(0, y, getWindowWidth(), y);
     }
 
-    // 情報表示
+    // Display information
     drawBitmapStringHighlight("saveScreenshot() Demo", 10, 20,
         Color(0, 0, 0, 0.7f), Color(1, 1, 1));
 
@@ -76,7 +76,7 @@ void tcApp::keyPressed(int key) {
         string filename = "screenshot_" + to_string(screenshotCount) + ".png";
         fs::path filepath = savePath / filename;
 
-        // OS のウィンドウキャプチャ機能でスクリーンショットを保存
+        // Save screenshot using OS window capture feature
         if (saveScreenshot(filepath)) {
             cout << "Saved: " << filepath << endl;
             screenshotCount++;

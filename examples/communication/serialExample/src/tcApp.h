@@ -6,8 +6,8 @@ using namespace std;
 #include "tc/comm/tcSerial.h"
 
 // =============================================================================
-// tcApp - シリアル通信サンプル
-// openFrameworks の serialExample と同等の機能を持つ
+// tcApp - Serial Communication Sample
+// Provides equivalent functionality to openFrameworks' serialExample
 // =============================================================================
 
 class tcApp : public App {
@@ -18,24 +18,24 @@ public:
     void keyPressed(int key) override;
 
 private:
-    // シリアル通信
+    // Serial communication
     Serial serial;
 
-    // デバイスリスト
+    // Device list
     std::vector<SerialDeviceInfo> deviceList;
 
-    // メッセージ送受信
+    // Message send/receive
     bool bSendSerialMessage = false;
     std::string messageToSend;
     std::vector<std::string> receivedMessages;
     std::string serialReadBuffer;
 
-    // 接続リトライ用
+    // For connection retry
     float timeLastTryConnect = 0.0f;
 
-    // 最後に読み取った時刻（ハイライト表示用）
+    // Last read time (for highlight display)
     float readTime = 0.0f;
 
-    // 接続先デバイスパス（空なら最初のデバイス）
+    // Target device path (if empty, use first device)
     std::string serialDevicePath = "";
 };

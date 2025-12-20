@@ -13,7 +13,7 @@ public:
     void draw() override;
 
 private:
-    // 文字列テスト用のデータ
+    // Data for string testing
     string testString_ = "Hello, TrussC World!";
     vector<string> splitResult_;
 };

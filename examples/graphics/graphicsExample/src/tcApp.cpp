@@ -4,35 +4,35 @@
 using namespace std;
 
 // ---------------------------------------------------------------------------
-// setup - 初期化
+// setup - Initialization
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
     cout << "setup() called" << endl;
 }
 
 // ---------------------------------------------------------------------------
-// update - 更新
+// update - Update
 // ---------------------------------------------------------------------------
 void tcApp::update() {
-    // ロジック更新があればここに
+    // Logic updates go here
 }
 
 // ---------------------------------------------------------------------------
-// draw - 描画
+// draw - Drawing
 // ---------------------------------------------------------------------------
 void tcApp::draw() {
     double t = getElapsedTime();
 
-    // 背景クリア
+    // Clear background
     clear(0.15f, 0.15f, 0.2f);
 
     // ----------------------
-    // 四角形
+    // Rectangle
     // ----------------------
     setColor(0.9f, 0.3f, 0.3f);
     drawRect(50, 50, 150, 100);
 
-    // ストローク付きの四角形
+    // Rectangle with stroke
     noFill();
     stroke();
     setColor(1.0f, 1.0f, 0.3f);
@@ -41,27 +41,27 @@ void tcApp::draw() {
     noStroke();
 
     // ----------------------
-    // 円
+    // Circle
     // ----------------------
-    // 大きい円は解像度を上げて滑らかに
+    // Higher resolution for larger circles to be smooth
     setCircleResolution(100);
     setColor(0.3f, 0.9f, 0.3f);
     drawCircle(350, 100, 60);
-    setCircleResolution(20);  // デフォルトに戻す
+    setCircleResolution(20);  // Reset to default
 
-    // アニメーションする円（デフォルト解像度=20角形）
+    // Animated circle (default resolution = 20 segments)
     float pulse = (float)(sin(t * 3.0) * 0.3 + 0.7);
     setColor(0.3f, 0.7f, 0.9f, pulse);
     drawCircle(350, 250, 50);
 
     // ----------------------
-    // 楕円
+    // Ellipse
     // ----------------------
     setColor(0.9f, 0.5f, 0.9f);
     drawEllipse(550, 100, 80, 50);
 
     // ----------------------
-    // 線
+    // Lines
     // ----------------------
     setColor(1.0f, 1.0f, 1.0f);
     for (int i = 0; i < 10; i++) {
@@ -72,12 +72,12 @@ void tcApp::draw() {
     }
 
     // ----------------------
-    // 三角形
+    // Triangle
     // ----------------------
     setColor(0.9f, 0.6f, 0.2f);
     drawTriangle(750, 50, 850, 150, 650, 150);
 
-    // 回転する三角形
+    // Rotating triangle
     pushMatrix();
     translate(750, 250);
     rotate((float)t);
@@ -86,9 +86,9 @@ void tcApp::draw() {
     popMatrix();
 
     // ----------------------
-    // カスタムシェイプ（beginShape/endShape）
+    // Custom shapes (beginShape/endShape)
     // ----------------------
-    // 五角形（fill）
+    // Pentagon (filled)
     setColor(0.8f, 0.4f, 0.8f);
     beginShape();
     for (int i = 0; i < 5; i++) {
@@ -97,7 +97,7 @@ void tcApp::draw() {
     }
     endShape(true);
 
-    // 星型（stroke）
+    // Star shape (stroke)
     noFill();
     stroke();
     setColor(1.0f, 0.9f, 0.2f);
@@ -111,7 +111,7 @@ void tcApp::draw() {
     fill();
     noStroke();
 
-    // アニメーションするカスタムシェイプ
+    // Animated custom shape
     setColor(0.3f, 0.8f, 0.9f, 0.8f);
     beginShape();
     int numPoints = 6;
@@ -122,7 +122,7 @@ void tcApp::draw() {
     }
     endShape(true);
 
-    // Path で波形（メンバ変数、100頂点）
+    // Wave using Path (member variable, 100 vertices)
     noFill();
     stroke();
     setColor(0.2f, 1.0f, 0.6f);
@@ -137,22 +137,22 @@ void tcApp::draw() {
     noStroke();
 
     // ----------------------
-    // Mesh（頂点カラー付き三角形）
+    // Mesh (triangle with vertex colors)
     // ----------------------
     Mesh mesh;
     mesh.setMode(PrimitiveMode::Triangles);
-    // 3頂点
+    // 3 vertices
     mesh.addVertex(750, 530);
     mesh.addVertex(850, 650);
     mesh.addVertex(650, 650);
-    // 頂点カラー（RGB）
-    mesh.addColor(1.0f, 0.0f, 0.0f);  // 赤
-    mesh.addColor(0.0f, 1.0f, 0.0f);  // 緑
-    mesh.addColor(0.0f, 0.0f, 1.0f);  // 青
+    // Vertex colors (RGB)
+    mesh.addColor(1.0f, 0.0f, 0.0f);  // Red
+    mesh.addColor(0.0f, 1.0f, 0.0f);  // Green
+    mesh.addColor(0.0f, 0.0f, 1.0f);  // Blue
     mesh.draw();
 
     // ----------------------
-    // グリッド描画
+    // Grid drawing
     // ----------------------
     setColor(0.6f, 0.6f, 0.6f, 0.5f);
     for (int x = 0; x < 5; x++) {
@@ -165,30 +165,30 @@ void tcApp::draw() {
     }
 
     // ----------------------
-    // マウス位置に円を描画（getGlobalMouseX/Y を使用）
+    // Draw circle at mouse position (using getGlobalMouseX/Y)
     // ----------------------
     setColor(1.0f, 0.3f, 0.5f, 0.8f);
     drawCircle(getGlobalMouseX(), getGlobalMouseY(), 20);
 
-    // マウスが押されていたら色を変える
+    // Change color when mouse is pressed
     if (isMousePressed()) {
         setColor(0.3f, 1.0f, 0.5f, 0.8f);
         drawCircle(getGlobalMouseX(), getGlobalMouseY(), 30);
     }
 
-    // FPS表示
+    // FPS display
     setColor(1.0f, 1.0f, 1.0f);
     drawBitmapString("FPS: " + toString(getFrameRate(), 1), 10, 20);
 }
 
 // ---------------------------------------------------------------------------
-// 入力イベント
+// Input events
 // ---------------------------------------------------------------------------
 
 void tcApp::keyPressed(int key) {
     cout << "keyPressed: " << key << endl;
 
-    // ESC で終了
+    // ESC to quit
     if (key == KEY_ESCAPE) {
         sapp_request_quit();
     }
@@ -200,5 +200,5 @@ void tcApp::mousePressed(int x, int y, int button) {
 
 void tcApp::mouseDragged(int x, int y, int button) {
     (void)x; (void)y; (void)button;
-    // マウス位置は getMouseX/Y で取得できるので、ここでは何もしない
+    // Mouse position can be obtained via getMouseX/Y, so nothing here
 }

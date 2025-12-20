@@ -10,23 +10,23 @@ public:
     void update() override;
     void draw() override;
 
-    // キーイベント
+    // Key events
     void keyPressed(int key) override;
     void keyReleased(int key) override;
 
-    // マウスイベント
+    // Mouse events
     void mousePressed(int x, int y, int button) override;
     void mouseReleased(int x, int y, int button) override;
     void mouseMoved(int x, int y) override;
     void mouseDragged(int x, int y, int button) override;
     void mouseScrolled(float deltaX, float deltaY) override;
 
-    // ウィンドウイベント
+    // Window events
     void windowResized(int width, int height) override;
 
-    // 終了
+    // Exit
     void exit() override;
 
-    // ファイルドロップ
+    // File drop
     void filesDropped(const vector<string>& files) override;
 };
