@@ -327,16 +327,19 @@ public:
     void drawBitmapString(const std::string& text, float x, float y, bool screenFixed = true) {
         if (text.empty() || !internal::fontInitialized) return;
 
+        // 現在のアラインメント設定に基づいてオフセットを計算
+        Vec2 offset = calcBitmapAlignOffset(text, textAlignH_, textAlignV_);
+
         pushMatrix();
 
         if (screenFixed) {
             Mat4 currentMat = getCurrentMatrix();
-            float worldX = currentMat.m[0]*x + currentMat.m[1]*y + currentMat.m[3];
-            float worldY = currentMat.m[4]*x + currentMat.m[5]*y + currentMat.m[7];
+            float worldX = currentMat.m[0]*(x + offset.x) + currentMat.m[1]*(y + offset.y) + currentMat.m[3];
+            float worldY = currentMat.m[4]*(x + offset.x) + currentMat.m[5]*(y + offset.y) + currentMat.m[7];
             resetMatrix();
             translate(worldX, worldY);
         } else {
-            translate(x, y);
+            translate(x + offset.x, y + offset.y);
         }
 
         sgl_load_pipeline(internal::fontPipeline);
@@ -389,9 +392,14 @@ public:
     void drawBitmapString(const std::string& text, float x, float y, float scale) {
         if (text.empty() || !internal::fontInitialized) return;
 
+        // 現在のアラインメント設定に基づいてオフセットを計算（スケール適用）
+        Vec2 offset = calcBitmapAlignOffset(text, textAlignH_, textAlignV_);
+        offset.x *= scale;
+        offset.y *= scale;
+
         Mat4 currentMat = getCurrentMatrix();
-        float worldX = currentMat.m[0]*x + currentMat.m[1]*y + currentMat.m[3];
-        float worldY = currentMat.m[4]*x + currentMat.m[5]*y + currentMat.m[7];
+        float worldX = currentMat.m[0]*(x + offset.x) + currentMat.m[1]*(y + offset.y) + currentMat.m[3];
+        float worldY = currentMat.m[4]*(x + offset.x) + currentMat.m[5]*(y + offset.y) + currentMat.m[7];
 
         pushMatrix();
         resetMatrix();
@@ -445,16 +453,16 @@ public:
     }
 
     // -----------------------------------------------------------------------
-    // ビットマップ文字列アラインメント
+    // テキストアラインメント
     // -----------------------------------------------------------------------
 
-    void setBitmapTextAlign(Direction h, Direction v) {
-        bitmapAlignH_ = h;
-        bitmapAlignV_ = v;
+    void setTextAlign(Direction h, Direction v) {
+        textAlignH_ = h;
+        textAlignV_ = v;
     }
 
-    Direction getBitmapAlignH() const { return bitmapAlignH_; }
-    Direction getBitmapAlignV() const { return bitmapAlignV_; }
+    Direction getTextAlignH() const { return textAlignH_; }
+    Direction getTextAlignV() const { return textAlignV_; }
 
     // アラインメント指定付き描画
     void drawBitmapString(const std::string& text, float x, float y,
@@ -586,9 +594,9 @@ private:
     Mat4 currentMatrix_ = Mat4::identity();
     std::vector<Mat4> matrixStack_;
 
-    // ビットマップ文字列アラインメント
-    Direction bitmapAlignH_ = Direction::Left;
-    Direction bitmapAlignV_ = Direction::Top;
+    // テキストアラインメント
+    Direction textAlignH_ = Direction::Left;
+    Direction textAlignV_ = Direction::Top;
 
     // ビットマップ文字列アラインメントオフセット計算
     Vec2 calcBitmapAlignOffset(const std::string& text, Direction h, Direction v) const {
