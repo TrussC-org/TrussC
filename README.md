@@ -142,7 +142,7 @@ tc::colors::cornflowerBlue;              // 定義済みカラー
 ## 依存関係
 
 sokol, Dear ImGui, stb, miniaudio など、すべて `trussc/include/` 以下に同梱済み。
-詳細は [LICENSE.md](LICENSE.md) を参照。
+詳細は [LICENSE.md](docs/LICENSE.md) を参照。
 
 ## ディレクトリ構成
 
@@ -176,7 +176,7 @@ src/                  # プラットフォーム固有実装
 
 ## ライセンス
 
-MIT License - 詳細は [LICENSE.md](LICENSE.md) を参照。
+MIT License - 詳細は [LICENSE.md](docs/LICENSE.md) を参照。
 
 ## 参考
 

@@ -32,41 +32,43 @@ SOFTWARE.
 
 ## Third-Party Libraries
 
-TrussC includes or depends on the following third-party libraries. All are permissive open-source licenses compatible with commercial use.
+TrussC includes or depends on the following third-party libraries. All use permissive open-source licenses suitable for commercial use.
 
 ### Core Dependencies
 
-| Library | Version | License | Author/Organization | URL |
-|---------|---------|---------|---------------------|-----|
-| **sokol** | - | zlib/libpng | Andre Weissflog | https://github.com/floooh/sokol |
-| **Dear ImGui** | 1.92.6 | MIT | Omar Cornut | https://github.com/ocornut/imgui |
-| **stb_image** | 2.30 | MIT or Public Domain | Sean Barrett | https://github.com/nothings/stb |
-| **stb_image_write** | 1.16 | MIT or Public Domain | Sean Barrett | https://github.com/nothings/stb |
-| **stb_truetype** | 1.26 | MIT or Public Domain | Sean Barrett | https://github.com/nothings/stb |
-| **stb_vorbis** | 1.22 | MIT or Public Domain | Sean Barrett | https://github.com/nothings/stb |
-| **dr_mp3** | 0.6.39 | Public Domain or MIT-0 | David Reid | https://github.com/mackron/dr_libs |
-| **dr_wav** | 0.13.16 | Public Domain or MIT-0 | David Reid | https://github.com/mackron/dr_libs |
-| **miniaudio** | 0.11.21 | Public Domain or MIT-0 | David Reid | https://github.com/mackron/miniaudio |
-| **nlohmann/json** | 3.11.3 | MIT | Niels Lohmann | https://github.com/nlohmann/json |
-| **pugixml** | 1.15 | MIT | Arseny Kapoulkine | https://pugixml.org/ |
+| Library | Version | License | Author/Organization | License URL |
+|---------|---------|---------|---------------------|-------------|
+| **sokol** | - | zlib License | Andre Weissflog | [LICENSE (in headers)](https://github.com/floooh/sokol/blob/master/sokol_app.h) |
+| **Dear ImGui** | 1.92.6 | MIT | Omar Cornut | [LICENSE.txt](https://github.com/ocornut/imgui/blob/master/LICENSE.txt) |
+| **stb_image** | 2.30 | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE (in README)](https://github.com/nothings/stb?tab=readme-ov-file#whats-the-license) |
+| **stb_image_write** | 1.16 | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE (in README)](https://github.com/nothings/stb?tab=readme-ov-file#whats-the-license) |
+| **stb_truetype** | 1.26 | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE (in README)](https://github.com/nothings/stb?tab=readme-ov-file#whats-the-license) |
+| **stb_vorbis** | 1.22 | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE (in README)](https://github.com/nothings/stb?tab=readme-ov-file#whats-the-license) |
+| **dr_mp3** | 0.6.39 | Public Domain or MIT-0 | David Reid | [LICENSE (in source)](https://github.com/mackron/dr_libs/blob/master/dr_mp3.h) |
+| **dr_wav** | 0.13.16 | Public Domain or MIT-0 | David Reid | [LICENSE (in source)](https://github.com/mackron/dr_libs/blob/master/dr_wav.h) |
+| **miniaudio** | 0.11.21 | Public Domain or MIT-0 | David Reid | [LICENSE (in README)](https://github.com/mackron/miniaudio?tab=readme-ov-file#license) |
+| **nlohmann/json** | 3.11.3 | MIT | Niels Lohmann | [LICENSE.MIT](https://github.com/nlohmann/json/blob/develop/LICENSE.MIT) |
+| **pugixml** | 1.15 | MIT | Arseny Kapoulkine | [LICENSE.md](https://github.com/zeux/pugixml/blob/master/LICENSE.md) |
 
 ### Addon Dependencies (Optional)
 
 These libraries are only included if you use the corresponding addon.
 
-| Library | Version | License | Author/Organization | Addon | URL |
-|---------|---------|---------|---------------------|-------|-----|
-| **mbedTLS** | 3.6.2 | Apache-2.0 or GPL-2.0-or-later | Arm Limited | tcxTls | https://github.com/Mbed-TLS/mbedtls |
-| **Box2D** | 2.4.1 | MIT | Erin Catto | tcxBox2d | https://github.com/erincatto/box2d |
+| Library | Version | License | Author/Organization | Addon | License URL |
+|---------|---------|---------|---------------------|-------|-------------|
+| **mbedTLS** | 3.6.2 | Apache-2.0 or GPL-2.0-or-later (dual-licensed) | Arm Limited | tcxTls | [LICENSE](https://github.com/Mbed-TLS/mbedtls/blob/development/LICENSE) |
+| **Box2D** | 2.4.1 | MIT (v2.4.0以降) | Erin Catto | tcxBox2d | [LICENSE](https://github.com/erincatto/box2d/blob/main/LICENSE) |
+
+> **Note**: Box2D v2.3.x以前はzlib Licenseでした。TrussCはv2.4.1を使用しています。
 
 ---
 
 ## License Details
 
-### zlib/libpng License (sokol)
+### zlib License (sokol)
 
 ```
-zlib/libpng license
+zlib License
 
 Copyright (c) 2017 Andre Weissflog
 
@@ -113,9 +115,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### Public Domain / MIT-0 (stb, dr_libs, miniaudio)
+### Public Domain / MIT (stb)
 
-These libraries offer a choice of Public Domain (Unlicense) or MIT-0 license. You may choose either.
+stb ライブラリはPublic Domain（Unlicense）として公開されていますが、Public Domainを認めない法域のためにMITライセンスも選択可能です（dual-licensed）。
 
 **Public Domain (Unlicense):**
 ```
@@ -124,14 +126,15 @@ This is free and unencumbered software released into the public domain.
 Anyone is free to copy, modify, publish, use, compile, sell, or distribute this
 software, either in source code form or as a compiled binary, for any purpose,
 commercial or non-commercial, and by any means.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
-ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
+
+**MIT License (alternative):**
+
+MITライセンスを選択する場合は、上記のMIT Licenseセクションを参照してください。
+
+### Public Domain / MIT-0 (dr_libs, miniaudio)
+
+dr_libs と miniaudio はPublic Domain（Unlicense）または MIT-0（MIT No Attribution）のいずれかを選択できます。
 
 **MIT-0 (MIT No Attribution):**
 ```
