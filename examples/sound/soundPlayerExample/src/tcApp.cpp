@@ -55,7 +55,7 @@ void tcApp::draw() {
     y += 40;
 
     // コントロール説明
-    setColor(180);
+    setColor(0.7f);
     drawBitmapString("Controls:", 50, y);
     y += 25;
     drawBitmapString("  SPACE - Play/Stop music", 50, y);
@@ -83,7 +83,7 @@ void tcApp::draw() {
         drawBitmapString("Status: " + status, 50, y);
         y += 20;
 
-        setColor(180);
+        setColor(0.7f);
         char buf[128];
         snprintf(buf, sizeof(buf), "Position: %.1f / %.1f sec",
                 music.getPosition(), music.getDuration());
@@ -109,7 +109,7 @@ void tcApp::draw() {
         // プログレスバー
         float progress = music.getDuration() > 0 ?
                         music.getPosition() / music.getDuration() : 0;
-        setColor(60);
+        setColor(0.24f);
         drawRect(50, y, 300, 20);
         setColor(colors::dodgerBlue);
         drawRect(50, y, 300 * progress, 20);
@@ -130,7 +130,7 @@ void tcApp::draw() {
     drawBitmapString("Status: " + status, 50, y);
 
     // FPS
-    setColor(100);
+    setColor(0.4f);
     drawBitmapString("FPS: " + std::to_string((int)getFrameRate()), 50, 560);
 }
 

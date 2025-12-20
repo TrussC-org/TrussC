@@ -71,32 +71,32 @@ void tcApp::draw() {
     float midX = w / 2;
 
     // タイトル
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("TLS (HTTPS) Client Example", 40, 30);
 
     // 状態表示
     if (isConnected) {
-        setColor(100, 255, 100);
+        setColor(0.4f, 1.0f, 0.4f);
     } else {
-        setColor(255, 100, 100);
+        setColor(1.0f, 0.4f, 0.4f);
     }
     drawBitmapString(statusMessage, 40, 55);
 
     // 操作説明
-    setColor(180);
+    setColor(0.7f);
     drawBitmapString("C: Connect  SPACE: Send Request  D: Disconnect  X: Clear", 40, 80);
 
     // 中央の区切り線
-    setColor(80);
+    setColor(0.3f);
     drawLine(midX, 100, midX, h - 20);
 
     // 左側: 送信ログ
-    setColor(100, 200, 255);
+    setColor(0.4f, 0.8f, 1.0f);
     drawBitmapString("SENT", 40, 110);
-    setColor(60);
+    setColor(0.24f);
     drawRect(30, 125, midX - 50, h - 150);
 
-    setColor(200, 220, 255);
+    setColor(0.8f, 0.86f, 1.0f);
     float y = 140;
     {
         lock_guard<mutex> lock(sentMutex);
@@ -108,12 +108,12 @@ void tcApp::draw() {
     }
 
     // 右側: 受信ログ
-    setColor(100, 255, 100);
+    setColor(0.4f, 1.0f, 0.4f);
     drawBitmapString("RECEIVED", midX + 20, 110);
-    setColor(60);
+    setColor(0.24f);
     drawRect(midX + 10, 125, midX - 50, h - 150);
 
-    setColor(200, 255, 200);
+    setColor(0.8f, 1.0f, 0.8f);
     y = 140;
     {
         lock_guard<mutex> lock(receivedMutex);

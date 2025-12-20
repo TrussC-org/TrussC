@@ -43,7 +43,7 @@ void tcApp::draw() {
     }
 
     // 中央に大きな円
-    setColor(255);
+    setColor(1.0f);
     drawCircle(centerX, centerY, 50.0f + sin(time * 3.0f) * 20.0f);
 
     // グリッド線

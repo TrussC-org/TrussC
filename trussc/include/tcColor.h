@@ -65,6 +65,11 @@ struct Color {
     explicit Color(float gray, float a_ = 1.0f)
         : r(gray), g(gray), b(gray), a(a_) {}
 
+    // 0-255 の整数値から Color を生成
+    static Color fromBytes(int r, int g, int b, int a = 255) {
+        return Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
+    }
+
     // 16進数から (0xRRGGBB or 0xRRGGBBAA)
     static Color fromHex(uint32_t hex, bool hasAlpha = false) {
         if (hasAlpha) {

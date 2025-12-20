@@ -23,7 +23,7 @@ void tcApp::draw() {
 
     setColor(scrollColor);
     drawCircle(w - 100, h / 2, scrollSize);
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("Scroll\nto change", w - 130, h / 2 - 20);
 
     // ドラッグ軌跡を描画
@@ -47,11 +47,11 @@ void tcApp::draw() {
     // クリック位置を描画（フェードアウト）
     for (auto& cp : clickPoints) {
         if (cp.button == MOUSE_BUTTON_LEFT) {
-            setColor(255, 100, 100, (int)(cp.alpha * 255));
+            setColor(1.0f, 0.4f, 0.4f, cp.alpha);
         } else if (cp.button == MOUSE_BUTTON_MIDDLE) {
-            setColor(100, 255, 100, (int)(cp.alpha * 255));
+            setColor(0.4f, 1.0f, 0.4f, cp.alpha);
         } else {
-            setColor(100, 100, 255, (int)(cp.alpha * 255));
+            setColor(0.4f, 0.4f, 1.0f, cp.alpha);
         }
         drawCircle(cp.x, cp.y, 20 * cp.alpha + 5);
         cp.alpha -= 0.01f;
@@ -68,12 +68,12 @@ void tcApp::draw() {
     float mx = getGlobalMouseX();
     float my = getGlobalMouseY();
 
-    setColor(255);
+    setColor(1.0f);
     drawLine(mx - 10, my, mx + 10, my);
     drawLine(mx, my - 10, mx, my + 10);
 
     // マウス情報を表示
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("=== Mouse Input Demo ===", 20, 20);
 
     std::stringstream ss;
@@ -95,7 +95,7 @@ void tcApp::draw() {
     drawBitmapString(ss.str(), 20, 95);
 
     // 操作説明
-    setColor(150);
+    setColor(0.6f);
     drawBitmapString("Left drag: red trail", 20, h - 70);
     drawBitmapString("Middle drag: green trail", 20, h - 55);
     drawBitmapString("Right drag: blue trail", 20, h - 40);
@@ -104,17 +104,17 @@ void tcApp::draw() {
     // ボタン凡例
     setColor(colors::red);
     drawRect(w - 150, 20, 20, 20);
-    setColor(0);
+    setColor(0.0f);
     drawBitmapString("Left", w - 120, 25);
 
     setColor(colors::green);
     drawRect(w - 150, 45, 20, 20);
-    setColor(0);
+    setColor(0.0f);
     drawBitmapString("Middle", w - 120, 50);
 
     setColor(colors::blue);
     drawRect(w - 150, 70, 20, 20);
-    setColor(0);
+    setColor(0.0f);
     drawBitmapString("Right", w - 120, 75);
 }
 

@@ -40,7 +40,7 @@ void tcApp::draw() {
     clear(0.1f, 0.1f, 0.1f);
 
     // 元のパターンを描画（左側）
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("Source (Main Thread)", 20, 20);
 
     for (int py = 0; py < AnalysisThread::HEIGHT; py++) {
@@ -53,16 +53,16 @@ void tcApp::draw() {
     }
 
     // 解析結果を描画（右側）
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("Analyzed (Worker Thread)", 300, 20);
     analyzer_.draw(300, 40);
 
     // 情報表示
-    setColor(200, 200, 200);
+    setColor(0.78f, 0.78f, 0.78f);
     drawBitmapString("Frame: " + toString(frameNum_), 20, 260);
     drawBitmapString("Analyzed: " + toString(analyzer_.getAnalyzedCount()), 20, 275);
 
-    setColor(100, 200, 100);
+    setColor(0.4f, 0.78f, 0.4f);
     drawBitmapString("ThreadChannel Demo:", 20, 310);
     drawBitmapString("  Main -> Worker: source pixels", 20, 325);
     drawBitmapString("  Worker -> Main: thresholded result", 20, 340);

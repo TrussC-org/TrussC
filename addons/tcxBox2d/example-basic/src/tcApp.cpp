@@ -67,13 +67,13 @@ public:
         clear(30);
 
         // 全ての円を描画（drawTree で位置・回転を適用）
-        setColor(255, 200, 100);
+        setColor(1.0f, 0.78f, 0.4f);
         for (auto& circle : circles) {
             circle->drawTree();
         }
 
         // 全ての矩形を描画
-        setColor(100, 200, 255);
+        setColor(0.4f, 0.78f, 1.0f);
         for (auto& rect : rects) {
             rect->drawTree();
         }
@@ -81,12 +81,12 @@ public:
         // ドラッグ中ならバネの線を描画
         if (world.isDragging()) {
             Vec2 anchor = world.getDragAnchor();
-            setColor(255, 100, 100);
+            setColor(1.0f, 0.4f, 0.4f);
             drawLine(anchor.x, anchor.y, getMouseX(), getMouseY());
         }
 
         // 使い方の表示
-        setColor(255);
+        setColor(1.0f);
         drawBitmapString("Left click: Add circle / Drag body", 10, 20);
         drawBitmapString("Right click: Add rectangle", 10, 36);
         drawBitmapString("C: Clear all", 10, 52);

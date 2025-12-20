@@ -73,7 +73,7 @@ void tcApp::draw() {
     }
 
     // UI
-    setColor(255);
+    setColor(1.0f);
     stringstream ss;
     ss << "Mode " << (mode + 1) << "/" << NUM_MODES << ": ";
     switch (mode) {
@@ -135,7 +135,7 @@ void tcApp::drawCurveDemo() {
 }
 
 void tcApp::drawMouseDrawing() {
-    setColor(200);
+    setColor(0.78f);
     drawBitmapString("Click and drag to draw a polyline", 20, 120);
     drawBitmapString("Press 'c' to clear", 20, 140);
 
@@ -160,7 +160,7 @@ void tcApp::drawMouseDrawing() {
     }
 
     // 情報表示
-    setColor(200);
+    setColor(0.78f);
     stringstream info;
     info << "Vertices: " << mousePolyline.size();
     info << "\nPerimeter: " << (int)mousePolyline.getPerimeter() << " px";
@@ -218,7 +218,7 @@ void tcApp::drawAnimatedCurve() {
     setColor(colors::cyan);
     lissajous.draw();
 
-    setColor(200);
+    setColor(0.78f);
     drawBitmapString("Animated flower & Lissajous curve", 20, 120);
 }
 

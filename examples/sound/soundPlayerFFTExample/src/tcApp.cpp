@@ -81,7 +81,7 @@ void tcApp::draw() {
     drawBitmapString("TrussC FFT Spectrum Analyzer", 20, 30);
 
     // コントロール説明
-    setColor(150);
+    setColor(0.6f);
     drawBitmapString("SPACE:Play/Stop  W:Waveform  L:LogScale  UP/DOWN:Smoothing", 20, 50);
 
     // ステータス
@@ -97,7 +97,7 @@ void tcApp::draw() {
         float waveY = 120;
         float waveH = 100;
 
-        setColor(40);
+        setColor(0.16f);
         drawRect(20, waveY, windowW - 40, waveH);
 
         setColor(colors::lime);
@@ -127,7 +127,7 @@ void tcApp::draw() {
     float specY = showWaveform ? 240 : 120;
     float specH = windowH - specY - 80;
 
-    setColor(40);
+    setColor(0.16f);
     drawRect(20, specY, windowW - 40, specH);
 
     setColor(colors::lime);
@@ -171,12 +171,12 @@ void tcApp::draw() {
     }
 
     // 周波数ラベル
-    setColor(100);
+    setColor(0.4f);
     drawBitmapString("0 Hz", 30, specY + specH + 5);
     drawBitmapString("22050 Hz", windowW - 80, specY + specH + 5);
 
     // クレジット
-    setColor(80);
+    setColor(0.3f);
     drawBitmapString("Audio: \"113 2b loose-pants 4.2 mono\" by astro_denticle (CC0)", 20, windowH - 25);
 }
 

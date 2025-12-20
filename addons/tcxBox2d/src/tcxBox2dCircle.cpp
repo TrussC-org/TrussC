@@ -76,7 +76,7 @@ void Circle::drawFill() {
 
     // 回転がわかるように線を引く
     tc::stroke();
-    tc::setColor(0);
+    tc::setColor(0.0f);
     tc::drawLine(0, 0, radius_, 0);
 }
 

@@ -63,7 +63,7 @@ void tcApp::draw() {
     // TrussC の描画（ImGui と共存可能）
     // スライダーの値で円のサイズを変更
     float circleSize = 50 + sliderValue * 100;
-    setColor(255, 200, 100);
+    setColor(1.0f, 0.78f, 0.4f);
     drawCircle(getWindowWidth() / 2, getWindowHeight() / 2, circleSize);
 
     // ImGui フレーム終了（描画）

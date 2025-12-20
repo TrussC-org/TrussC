@@ -72,6 +72,9 @@
 #include "tc/utils/tcJson.h"
 #include "tc/utils/tcXml.h"
 
+// TrussC コンソール入力（stdin からのコマンド受付）
+#include "tc/utils/tcConsole.h"
+
 // =============================================================================
 // trussc 名前空間
 // =============================================================================
@@ -913,6 +916,11 @@ inline void setBitmapTextAlign(Direction h, Direction v) {
     getDefaultContext().setBitmapTextAlign(h, v);
 }
 
+// ビットマップフォントの行の高さを取得
+inline float getBitmapFontHeight() {
+    return getDefaultContext().getBitmapFontHeight();
+}
+
 // ビットマップ文字列の幅を取得
 inline float getBitmapStringWidth(const std::string& text) {
     return getDefaultContext().getBitmapStringWidth(text);
@@ -1363,6 +1371,37 @@ namespace internal {
         #ifdef __APPLE__
         setDataPathRoot("../../../data/");
         #endif
+
+        // コンソール入力スレッドを開始（デフォルト有効）
+        // 無効にしたい場合は setup() 内で console::stop() を呼ぶ
+        console::start();
+
+        // 組み込みコマンドハンドラを登録（static でリスナーを保持）
+        static EventListener consoleListener = events().console.listen([](ConsoleEventArgs& e) {
+            if (e.args.empty()) return;
+
+            // tcdebug コマンドを処理
+            if (e.args[0] == "tcdebug" && e.args.size() >= 2) {
+                if (e.args[1] == "info") {
+                    // 基本情報を JSON で出力
+                    std::cout << "{\"fps\":" << getFrameRate()
+                              << ",\"width\":" << getWindowWidth()
+                              << ",\"height\":" << getWindowHeight()
+                              << ",\"updateCount\":" << getUpdateCount()
+                              << ",\"drawCount\":" << getDrawCount()
+                              << ",\"elapsedTime\":" << getElapsedTime()
+                              << "}" << std::endl;
+                }
+                else if (e.args[1] == "screenshot") {
+                    // スクリーンショットを保存
+                    std::string path = (e.args.size() >= 3) ? e.args[2] : "/tmp/trussc_screenshot.png";
+                    bool success = saveScreenshot(path);
+                    std::cout << "{\"status\":\"" << (success ? "ok" : "error")
+                              << "\",\"path\":\"" << path << "\"}" << std::endl;
+                }
+            }
+        });
+        (void)consoleListener;  // 未使用警告を抑制
 
         if (appSetupFunc) appSetupFunc();
     }

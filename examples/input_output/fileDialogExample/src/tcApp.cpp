@@ -24,27 +24,27 @@ void tcApp::draw() {
     float y = 40;
 
     // タイトル
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("File Dialog Example", 40, y);
     y += 30;
 
     // 操作説明
-    setColor(180);
+    setColor(0.7f);
     drawBitmapString("O: Open file   F: Open folder   S: Save   A: Alert", 40, y);
     y += 40;
 
     // ステータス
-    setColor(100, 200, 255);
+    setColor(0.4f, 0.78f, 1.0f);
     drawBitmapString("Status: " + statusMessage, 40, y);
     y += 40;
 
     // 結果表示
     if (lastResult.success) {
-        setColor(100, 255, 100);
+        setColor(0.4f, 1.0f, 0.4f);
         drawBitmapString("Success!", 40, y);
         y += 25;
 
-        setColor(220);
+        setColor(0.86f);
         drawBitmapString("File: " + lastResult.fileName, 40, y);
         y += 20;
         drawBitmapString("Path: " + lastResult.filePath, 40, y);
@@ -52,7 +52,7 @@ void tcApp::draw() {
 
         // 画像が読み込まれていれば表示
         if (hasImage && loadedImage.isAllocated()) {
-            setColor(255);
+            setColor(1.0f);
             drawBitmapString("Loaded Image:", 40, y);
             y += 25;
 
@@ -67,7 +67,7 @@ void tcApp::draw() {
             loadedImage.draw(40, y, imgW * scale, imgH * scale);
         }
     } else if (!lastResult.filePath.empty()) {
-        setColor(255, 100, 100);
+        setColor(1.0f, 0.4f, 0.4f);
         drawBitmapString("Cancelled", 40, y);
     }
 }

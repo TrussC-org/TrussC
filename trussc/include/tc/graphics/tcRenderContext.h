@@ -70,17 +70,8 @@ public:
         currentA_ = a;
     }
 
-    // 描画色設定 (int: 0 ~ 255)
-    void setColor(int r, int g, int b, int a = 255) {
-        setColor(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
-    }
-
     // グレースケール
     void setColor(float gray, float a = 1.0f) {
-        setColor(gray, gray, gray, a);
-    }
-
-    void setColor(int gray, int a = 255) {
         setColor(gray, gray, gray, a);
     }
 
@@ -358,7 +349,7 @@ public:
         const float charW = bitmapfont::CHAR_TEX_WIDTH;
         const float charH = bitmapfont::CHAR_TEX_HEIGHT;
         float cursorX = 0;
-        float cursorY = -charH;
+        float cursorY = 0;  // Top 基準（指定座標が文字の上端）
 
         for (char c : text) {
             if (c == '\n') {
@@ -416,7 +407,7 @@ public:
         const float charW = bitmapfont::CHAR_TEX_WIDTH * scale;
         const float charH = bitmapfont::CHAR_TEX_HEIGHT * scale;
         float cursorX = 0;
-        float cursorY = -charH;
+        float cursorY = 0;  // Top 基準
 
         for (char c : text) {
             if (c == '\n') {
@@ -495,7 +486,7 @@ public:
         const float charW = bitmapfont::CHAR_TEX_WIDTH;
         const float charH = bitmapfont::CHAR_TEX_HEIGHT;
         float cursorX = 0;
-        float cursorY = -charH;
+        float cursorY = 0;  // Top 基準（指定座標が文字の上端）
 
         for (char c : text) {
             if (c == '\n') {
@@ -535,6 +526,11 @@ public:
     // -----------------------------------------------------------------------
     // ビットマップ文字列メトリクス
     // -----------------------------------------------------------------------
+
+    // フォントの行の高さ（1行あたりのピクセル数）
+    float getBitmapFontHeight() const {
+        return bitmapfont::CHAR_TEX_HEIGHT;
+    }
 
     float getBitmapStringWidth(const std::string& text) const {
         float width = 0;

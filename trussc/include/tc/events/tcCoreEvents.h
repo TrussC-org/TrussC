@@ -37,6 +37,9 @@ public:
     // ドラッグ&ドロップ
     Event<DragDropEventArgs> filesDropped;
 
+    // コンソール入力（stdin からのコマンド）
+    Event<ConsoleEventArgs> console;
+
     // 将来用
     // Event<TouchEventArgs> touchBegan;
     // Event<TouchEventArgs> touchMoved;

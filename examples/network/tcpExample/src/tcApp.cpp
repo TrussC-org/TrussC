@@ -83,12 +83,12 @@ void tcApp::draw() {
     float y = 40;
 
     // タイトル
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("TCP Socket Example", 40, y);
     y += 30;
 
     // 状態表示
-    setColor(100, 200, 255);
+    setColor(0.4f, 0.78f, 1.0f);
     ostringstream status;
     if (server.isRunning()) {
         status << "Server running on port " << server.getPort();
@@ -99,7 +99,7 @@ void tcApp::draw() {
     drawBitmapString(status.str(), 40, y);
     y += 20;
 
-    setColor(100, 255, 100);
+    setColor(0.4f, 1.0f, 0.4f);
     if (client.isConnected()) {
         drawBitmapString("Client connected to " + client.getRemoteHost(), 40, y);
     } else {
@@ -108,16 +108,16 @@ void tcApp::draw() {
     y += 30;
 
     // 操作説明
-    setColor(180);
+    setColor(0.7f);
     drawBitmapString("S: Start Server  C: Connect Client  SPACE: Send  D: Disconnect  X: Clear", 40, y);
     y += 30;
 
     // ログ表示
-    setColor(100, 255, 100);
+    setColor(0.4f, 1.0f, 0.4f);
     drawBitmapString("Log:", 40, y);
     y += 25;
 
-    setColor(220);
+    setColor(0.86f);
     lock_guard<mutex> lock(logMutex);
     for (const auto& msg : logMessages) {
         drawBitmapString(msg, 50, y);
