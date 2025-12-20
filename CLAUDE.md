@@ -1,112 +1,117 @@
-# TrussC プロジェクト設定
+# TrussC Project Settings
 
-## 概要
-TrussC は sokol ベースの軽量クリエイティブコーディングフレームワーク。
-openFrameworks に近いAPIを目指しつつ、モダンなC++でシンプルに実装する。
+## Overview
+TrussC is a lightweight creative coding framework based on sokol.
+It aims for an API similar to openFrameworks while implementing simply in modern C++.
 
-## フォルダ構造
+## Folder Structure
 
 ```
-trussc/                           # TrussC コアライブラリ
-├── CMakeLists.txt                # メインCMake（GLOBベース）
+trussc/                           # TrussC core library
+├── CMakeLists.txt                # Main CMake (GLOB-based)
 ├── include/
-│   ├── TrussC.h                  # エントリポイント（全部インクルード）
-│   ├── impl/                     # ライブラリ実装（stb, pugixml等）
+│   ├── TrussC.h                  # Entry point (includes everything)
+│   ├── impl/                     # Library implementations (stb, pugixml, etc.)
 │   ├── tc/
-│   │   ├── app/                  # アプリケーション基盤
-│   │   ├── graphics/             # 描画関連
-│   │   ├── math/                 # 数学ユーティリティ
-│   │   ├── types/                # 基本型（Color, Node等）
-│   │   ├── events/               # イベントシステム
-│   │   ├── utils/                # ユーティリティ
-│   │   ├── 3d/                   # 3D機能
-│   │   ├── gl/                   # 低レベルグラフィックス
-│   │   ├── sound/                # サウンド（.h + .cpp）
-│   │   ├── network/              # ネットワーク（.h + .cpp）
-│   │   └── video/                # ビデオ
-│   ├── sokol/                    # sokol ヘッダー
+│   │   ├── app/                  # Application foundation
+│   │   ├── graphics/             # Drawing related
+│   │   ├── math/                 # Math utilities
+│   │   ├── types/                # Basic types (Color, Node, etc.)
+│   │   ├── events/               # Event system
+│   │   ├── utils/                # Utilities
+│   │   ├── 3d/                   # 3D features
+│   │   ├── gl/                   # Low-level graphics
+│   │   ├── sound/                # Sound (.h + .cpp)
+│   │   ├── network/              # Network (.h + .cpp)
+│   │   └── video/                # Video
+│   ├── sokol/                    # sokol headers
 │   ├── imgui/                    # Dear ImGui
-│   ├── stb/                      # stb ライブラリ
+│   ├── stb/                      # stb libraries
 │   └── ...
-├── platform/                     # プラットフォーム固有実装
+├── platform/                     # Platform-specific implementations
 │   ├── mac/                      # macOS (.mm)
 │   ├── win/                      # Windows (.cpp)
 │   └── linux/                    # Linux (.cpp)
-├── cmake/                        # CMake ヘルパー
-│   ├── trussc_app.cmake          # アプリ設定マクロ
-│   └── use_addon.cmake           # アドオン読み込みマクロ
-└── resources/                    # リソース（デフォルトアイコン等）
+├── cmake/                        # CMake helpers
+│   ├── trussc_app.cmake          # App configuration macros
+│   └── use_addon.cmake           # Addon loading macros
+└── resources/                    # Resources (default icons, etc.)
 
-addons/                           # オプショナルアドオン（trusscと同階層）
-├── tcxTls/                       # TLS/SSL サポート（mbedTLS、FetchContent）
+addons/                           # Optional addons (same level as trussc)
+├── tcxTls/                       # TLS/SSL support (mbedTLS, FetchContent)
 │   ├── CMakeLists.txt
-│   ├── src/                      # ヘッダー + ソース
-│   └── example-tls/              # サンプル
-├── tcxBox2d/                     # Box2D 物理エンジン（FetchContent）
+│   ├── src/                      # Headers + source
+│   └── example-tls/              # Sample
+├── tcxBox2d/                     # Box2D physics engine (FetchContent)
 │   ├── CMakeLists.txt
 │   ├── src/
 │   ├── example-basic/
 │   └── example-node/
-└── tcxOsc/                       # OSC プロトコル
+└── tcxOsc/                       # OSC protocol
     ├── src/
     └── example-osc/
 
-examples/                         # サンプルプロジェクト
-├── templates/                    # テンプレート
-├── graphics/                     # 描画サンプル
-├── 3d/                           # 3Dサンプル
-├── network/                      # ネットワークサンプル
+examples/                         # Sample projects
+├── templates/                    # Templates
+├── graphics/                     # Drawing samples
+├── 3d/                           # 3D samples
+├── network/                      # Network samples
 ├── tools/
-│   └── projectGenerator/         # プロジェクト生成ツール
+│   └── projectGenerator/         # Project generation tool
 └── ...
 
-projectGenerator/                 # ビルドスクリプト配布用
+projectGenerator/                 # Build script distribution
 ├── buildProjectGenerator_mac.command
 ├── buildProjectGenerator_win.bat
 └── buildProjectGenerator_linux.sh
 ```
 
-## 命名規則
+## Naming Conventions
 
-- ファイル名: `tcXxx.h` （小文字tc + PascalCase）
-- 名前空間: `trussc::` (エイリアス `tc::`)
-- クラス/構造体: PascalCase（例: `Color`, `WindowSettings`）
-- 関数: camelCase（例: `drawRect`, `setColor`）
-- 定数: SCREAMING_SNAKE_CASE または camelCase（数学定数は `TAU`, `PI` など）
-- 色定数: `tc::colors::camelCase`（例: `tc::colors::cornflowerBlue`）
+- File names: `tcXxx.h` (lowercase tc + PascalCase)
+- Namespace: `trussc::` (alias `tc::`)
+- Classes/Structs: PascalCase (e.g., `Color`, `WindowSettings`)
+- Functions: camelCase (e.g., `drawRect`, `setColor`)
+- Constants: SCREAMING_SNAKE_CASE or camelCase (math constants: `TAU`, `PI`, etc.)
+- Color constants: `tc::colors::camelCase` (e.g., `tc::colors::cornflowerBlue`)
 
-## コーディングスタイル
+## Coding Style
 
-- C++20を使用
-- ヘッダーオンリー（inline関数）を基本とする
-- sokol の API をラップして使いやすくする
-- openFrameworks に近いAPIを目指す
-- `std::` プレフィックスは省略（using namespace std 前提）
+- Uses C++20
+- Header-only (inline functions) as default
+- Wrap sokol API for ease of use
+- Aim for API similar to openFrameworks
+- Omit `std::` prefix (assuming using namespace std)
 
-## ビルド
+## Build
 
 ```bash
-# サンプルのビルド
+# Build a sample
 cd examples/graphics/colorExample
 mkdir build && cd build
 cmake ..
 cmake --build .
 
-# projectGenerator のビルド（macOS）
+# Build projectGenerator (macOS)
 ./projectGenerator/buildProjectGenerator_mac.command
 ```
 
-## 関連ドキュメント
+## Related Documentation
 
-- [docs/GET_STARTED.md](docs/GET_STARTED.md) - はじめの一歩（最初に読むならここ）
-- [docs/TrussC_vs_openFrameworks.md](docs/TrussC_vs_openFrameworks.md) - oF ユーザー向け API 対応表
-- [docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) - 詳細ビルド方法、アイコン設定、配布
-- [docs/ADDONS.md](docs/ADDONS.md) - アドオンの使い方
-- [docs/DESIGN.md](docs/DESIGN.md) - 設計詳細（Loop Architecture, 3D Projection等）
-- [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) - コンセプト・哲学・技術スタック
-- [docs/ROADMAP.md](docs/ROADMAP.md) - 実装ロードマップ
+- [docs/GET_STARTED.md](docs/GET_STARTED.md) - Getting started (read this first)
+- [docs/TrussC_vs_openFrameworks.md](docs/TrussC_vs_openFrameworks.md) - API comparison for oF users
+- [docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) - Detailed build instructions, icon settings, distribution
+- [docs/ADDONS.md](docs/ADDONS.md) - How to use addons
+- [docs/DESIGN.md](docs/DESIGN.md) - Design details (Loop Architecture, 3D Projection, etc.)
+- [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) - Concept, philosophy, tech stack
+- [docs/ROADMAP.md](docs/ROADMAP.md) - Implementation roadmap
 
-## 参考
+## Language Policy
+
+All code comments and commit messages in this project should be written in **English**.
+This ensures consistency and accessibility for international contributors.
+
+## References
 
 - openFrameworks: https://openframeworks.cc/
 - sokol: https://github.com/floooh/sokol
