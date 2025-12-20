@@ -1,7 +1,7 @@
 #pragma once
 
 #include "tcBaseApp.h"
-#include "tc/network/tcTlsClient.h"
+#include "tcTlsClient.h"
 using namespace tc;
 
 class tcApp : public App {
