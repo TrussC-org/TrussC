@@ -13,7 +13,7 @@ void tcApp::setup() {
 void tcApp::setupListeners() {
     // キーイベントリスナー
     if (keyListenerActive) {
-        keyListener = events().keyPressed.listen([this](KeyEventArgs& e) {
+        events().keyPressed.listen(keyListener, [this](KeyEventArgs& e) {
             std::stringstream ss;
             ss << "[KeyEvent] key=" << e.key;
             if (e.shift) ss << " +Shift";
@@ -27,7 +27,7 @@ void tcApp::setupListeners() {
 
     // マウスクリックリスナー
     if (mouseListenerActive) {
-        mouseListener = events().mousePressed.listen([this](MouseEventArgs& e) {
+        events().mousePressed.listen(mouseListener, [this](MouseEventArgs& e) {
             std::stringstream ss;
             ss << "[MouseEvent] button=" << e.button;
             ss << " pos=(" << (int)e.x << "," << (int)e.y << ")";
@@ -36,7 +36,7 @@ void tcApp::setupListeners() {
     }
 
     // スクロールリスナー（常に有効）
-    scrollListener = events().mouseScrolled.listen([this](ScrollEventArgs& e) {
+    events().mouseScrolled.listen(scrollListener, [this](ScrollEventArgs& e) {
         std::stringstream ss;
         ss << "[ScrollEvent] dx=" << e.scrollX << " dy=" << e.scrollY;
         addLog(ss.str());
@@ -87,7 +87,7 @@ void tcApp::keyPressed(int key) {
 
         // リスナーを切断または再接続
         if (keyListenerActive) {
-            keyListener = events().keyPressed.listen([this](KeyEventArgs& e) {
+            events().keyPressed.listen(keyListener, [this](KeyEventArgs& e) {
                 std::stringstream ss;
                 ss << "[KeyEvent] key=" << e.key;
                 if (e.shift) ss << " +Shift";
@@ -106,7 +106,7 @@ void tcApp::keyPressed(int key) {
         mouseListenerActive = !mouseListenerActive;
 
         if (mouseListenerActive) {
-            mouseListener = events().mousePressed.listen([this](MouseEventArgs& e) {
+            events().mousePressed.listen(mouseListener, [this](MouseEventArgs& e) {
                 std::stringstream ss;
                 ss << "[MouseEvent] button=" << e.button;
                 ss << " pos=(" << (int)e.x << "," << (int)e.y << ")";

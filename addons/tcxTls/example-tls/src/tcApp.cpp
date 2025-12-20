@@ -19,7 +19,7 @@ void tcApp::setup() {
     client.setVerifyNone();
 
     // 接続イベント
-    connectListener = client.onConnect.listen([this](TcpConnectEventArgs& e) {
+    client.onConnect.listen(connectListener, [this](TcpConnectEventArgs& e) {
         if (e.success) {
             isConnected = true;
             statusMessage = "Connected! TLS: " + client.getTlsVersion() + " / " + client.getCipherSuite();
@@ -33,7 +33,7 @@ void tcApp::setup() {
     });
 
     // 受信イベント
-    receiveListener = client.onReceive.listen([this](TcpReceiveEventArgs& e) {
+    client.onReceive.listen(receiveListener, [this](TcpReceiveEventArgs& e) {
         string data(e.data.begin(), e.data.end());
 
         // 長すぎる場合は分割
@@ -48,14 +48,14 @@ void tcApp::setup() {
     });
 
     // 切断イベント
-    disconnectListener = client.onDisconnect.listen([this](TcpDisconnectEventArgs& e) {
+    client.onDisconnect.listen(disconnectListener, [this](TcpDisconnectEventArgs& e) {
         isConnected = false;
         statusMessage = "Disconnected: " + e.reason;
         addReceived("--- Disconnected ---");
     });
 
     // エラーイベント
-    errorListener = client.onError.listen([this](TcpErrorEventArgs& e) {
+    client.onError.listen(errorListener, [this](TcpErrorEventArgs& e) {
         addReceived("ERROR: " + e.message);
     });
 }

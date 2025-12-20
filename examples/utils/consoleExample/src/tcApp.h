@@ -40,7 +40,7 @@ class tcApp : public App {
 public:
     void setup() override {
         // コンソールイベントをリッスン（リスナーを保持）
-        consoleListener_ = events().console.listen([this](ConsoleEventArgs& e) {
+        events().console.listen(consoleListener_, [this](ConsoleEventArgs& e) {
             // ログに追加（最新10件）
             commandLog_.push_back(e.raw);
             if (commandLog_.size() > 10) {

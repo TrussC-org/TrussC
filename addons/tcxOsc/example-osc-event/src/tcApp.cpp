@@ -31,13 +31,13 @@ void tcApp::setup() {
     // ---------------------------------------------------------------------------
 
     // ラムダ版
-    messageListener_ = receiver_.onMessageReceived.listen([this](OscMessage& msg) {
+    receiver_.onMessageReceived.listen(messageListener_, [this](OscMessage& msg) {
         // ここは受信スレッドから呼ばれる！
         addReceiveLog("[RECEIVED] " + msg.toString());  // mutex で保護された関数
     });
 
     // メンバ関数ポインタ版（oF風）
-    errorListener_ = receiver_.onParseError.listen(this, &tcApp::onParseError);
+    receiver_.onParseError.listen(errorListener_, this, &tcApp::onParseError);
 
     if (!receiver_.setup(port_)) {
         addReceiveLog("[ERROR] Failed to bind port " + to_string(port_));

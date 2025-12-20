@@ -1377,7 +1377,8 @@ namespace internal {
         console::start();
 
         // 組み込みコマンドハンドラを登録（static でリスナーを保持）
-        static EventListener consoleListener = events().console.listen([](ConsoleEventArgs& e) {
+        static EventListener consoleListener;
+        events().console.listen(consoleListener, [](ConsoleEventArgs& e) {
             if (e.args.empty()) return;
 
             // tcdebug コマンドを処理
@@ -1401,7 +1402,6 @@ namespace internal {
                 }
             }
         });
-        (void)consoleListener;  // 未使用警告を抑制
 
         if (appSetupFunc) appSetupFunc();
     }

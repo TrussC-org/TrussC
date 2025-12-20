@@ -48,9 +48,14 @@ public:
     }
 
     // 明示的に切断
-    void disconnect() {
+    void disconnect() noexcept {
         if (connected_ && disconnector_) {
-            disconnector_();
+            try {
+                disconnector_();
+            } catch (...) {
+                // 終了時の破棄順序問題でEventが先に破棄されている場合がある
+                // その場合は例外を無視（デストラクタから呼ばれるのでnoexceptが必要）
+            }
             connected_ = false;
             disconnector_ = nullptr;
         }

@@ -40,25 +40,27 @@ public:
     Event(Event&&) = delete;
     Event& operator=(Event&&) = delete;
 
-    // ラムダ式でリスナーを登録
-    EventListener listen(Callback callback, EventPriority priority = EventPriority::App) {
-        std::lock_guard<std::recursive_mutex> lock(mutex_);
-
-        uint64_t id = nextId_++;
-        entries_.push_back({id, static_cast<int>(priority), std::move(callback)});
-        sortEntries();
-
-        // RAII トークンを返す
-        return EventListener([this, id]() {
+    // ラムダ式でリスナーを登録（EventListenerを参照で受け取る）
+    void listen(EventListener& listener, Callback callback,
+                EventPriority priority = EventPriority::App) {
+        uint64_t id;
+        {
+            std::lock_guard<std::recursive_mutex> lock(mutex_);
+            id = nextId_++;
+            entries_.push_back({id, static_cast<int>(priority), std::move(callback)});
+            sortEntries();
+        }
+        // ロック外でEventListenerを設定（既存接続の切断でremoveListener()が呼ばれるため）
+        listener = EventListener([this, id]() {
             this->removeListener(id);
         });
     }
 
     // メンバ関数でリスナーを登録
     template<typename Obj>
-    EventListener listen(Obj* obj, void (Obj::*method)(T&),
-                         EventPriority priority = EventPriority::App) {
-        return listen([obj, method](T& arg) {
+    void listen(EventListener& listener, Obj* obj, void (Obj::*method)(T&),
+                EventPriority priority = EventPriority::App) {
+        listen(listener, [obj, method](T& arg) {
             (obj->*method)(arg);
         }, priority);
     }
@@ -135,24 +137,27 @@ public:
     Event(Event&&) = delete;
     Event& operator=(Event&&) = delete;
 
-    // ラムダ式でリスナーを登録
-    EventListener listen(Callback callback, EventPriority priority = EventPriority::App) {
-        std::lock_guard<std::recursive_mutex> lock(mutex_);
-
-        uint64_t id = nextId_++;
-        entries_.push_back({id, static_cast<int>(priority), std::move(callback)});
-        sortEntries();
-
-        return EventListener([this, id]() {
+    // ラムダ式でリスナーを登録（EventListenerを参照で受け取る）
+    void listen(EventListener& listener, Callback callback,
+                EventPriority priority = EventPriority::App) {
+        uint64_t id;
+        {
+            std::lock_guard<std::recursive_mutex> lock(mutex_);
+            id = nextId_++;
+            entries_.push_back({id, static_cast<int>(priority), std::move(callback)});
+            sortEntries();
+        }
+        // ロック外でEventListenerを設定（既存接続の切断でremoveListener()が呼ばれるため）
+        listener = EventListener([this, id]() {
             this->removeListener(id);
         });
     }
 
     // メンバ関数でリスナーを登録
     template<typename Obj>
-    EventListener listen(Obj* obj, void (Obj::*method)(),
-                         EventPriority priority = EventPriority::App) {
-        return listen([obj, method]() {
+    void listen(EventListener& listener, Obj* obj, void (Obj::*method)(),
+                EventPriority priority = EventPriority::App) {
+        listen(listener, [obj, method]() {
             (obj->*method)();
         }, priority);
     }

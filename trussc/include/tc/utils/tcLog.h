@@ -81,7 +81,7 @@ public:
 
     Logger() {
         // コンソールリスナーをデフォルトで登録
-        consoleListener_ = onLog.listen([this](LogEventArgs& e) {
+        onLog.listen(consoleListener_, [this](LogEventArgs& e) {
             if (e.level >= consoleLevel_ && consoleLevel_ != LogLevel::Silent) {
                 std::ostream& out = (e.level >= LogLevel::Warning) ? std::cerr : std::cout;
                 out << "[" << e.timestamp << "] "
@@ -126,7 +126,7 @@ public:
         filePath_ = path;
 
         // ファイルリスナーを登録
-        fileListener_ = onLog.listen([this](LogEventArgs& e) {
+        onLog.listen(fileListener_, [this](LogEventArgs& e) {
             if (fileStream_.is_open() &&
                 e.level >= fileLevel_ && fileLevel_ != LogLevel::Silent) {
                 fileStream_ << "[" << e.timestamp << "] "
