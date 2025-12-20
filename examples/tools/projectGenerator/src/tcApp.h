@@ -43,6 +43,7 @@ private:
     vector<string> addons;              // 利用可能なアドオン
     vector<int> addonSelected;          // アドオン選択状態 (0/1)
     IdeType ideType = IdeType::VSCode;  // デフォルトは VSCode
+    bool generateWebBuild = false;      // Web (Emscripten) ビルドを生成
 
     // UI 状態
     bool showSetupDialog = false;       // TC_ROOT 設定ダイアログ
@@ -79,6 +80,7 @@ private:
     void generateXcodeProject(const string& path);
     void generateXcodeSchemes(const string& path);
     void generateVisualStudioProject(const string& path);
+    void generateWebBuildFiles(const string& path);
     void openInIde(const string& path);
     string getTemplatePath();
     void setStatus(const string& msg, bool isError = false);

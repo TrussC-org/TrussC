@@ -76,7 +76,22 @@ macro(trussc_app)
     apply_addons(${PROJECT_NAME})
 
     # 出力設定
-    if(APPLE)
+    if(EMSCRIPTEN)
+        # Emscripten: HTML 出力
+        set_target_properties(${PROJECT_NAME} PROPERTIES
+            SUFFIX ".html"
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
+        )
+        # カスタムシェル HTML のパス
+        set(_TC_SHELL_FILE "${TC_ROOT}/trussc/platform/web/shell.html")
+        # WebGL2 リンクオプション
+        target_link_options(${PROJECT_NAME} PRIVATE
+            -sUSE_WEBGL2=1
+            -sALLOW_MEMORY_GROWTH=1
+            -sFULL_ES3=1
+            --shell-file=${_TC_SHELL_FILE}
+        )
+    elseif(APPLE)
         set_target_properties(${PROJECT_NAME} PROPERTIES
             MACOSX_BUNDLE TRUE
             MACOSX_BUNDLE_BUNDLE_NAME "${PROJECT_NAME}"
