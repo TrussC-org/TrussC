@@ -692,6 +692,16 @@ inline void popMatrix() {
     getDefaultContext().popMatrix();
 }
 
+// スタイルをスタックに保存（色、fill/stroke、textAlign など）
+inline void pushStyle() {
+    getDefaultContext().pushStyle();
+}
+
+// スタイルをスタックから復元
+inline void popStyle() {
+    getDefaultContext().popStyle();
+}
+
 // 平行移動
 inline void translate(float x, float y) {
     getDefaultContext().translate(x, y);

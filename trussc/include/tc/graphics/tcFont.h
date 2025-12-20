@@ -582,21 +582,6 @@ public:
     bool isLoaded() const { return atlasManager_ != nullptr; }
 
     // -------------------------------------------------------------------------
-    // アラインメント設定
-    // -------------------------------------------------------------------------
-    void setAlign(Direction h, Direction v) {
-        alignH_ = h;
-        alignV_ = v;
-    }
-
-    void setAlign(Direction h) {
-        alignH_ = h;
-    }
-
-    Direction getAlignH() const { return alignH_; }
-    Direction getAlignV() const { return alignV_; }
-
-    // -------------------------------------------------------------------------
     // 行高さ設定（改行時の間隔）
     // -------------------------------------------------------------------------
     void setLineHeight(float pixels) {
@@ -614,9 +599,12 @@ public:
 
     // -------------------------------------------------------------------------
     // 文字列描画（virtual - 継承先でカスタム可能）
+    // グローバルの setTextAlign() で設定されたアラインメントを使用
     // -------------------------------------------------------------------------
     virtual void drawString(const std::string& text, float x, float y) const {
-        drawStringInternal(text, x, y, alignH_, alignV_);
+        Direction h = getDefaultContext().getTextAlignH();
+        Direction v = getDefaultContext().getTextAlignV();
+        drawStringInternal(text, x, y, h, v);
     }
 
     virtual void drawString(const std::string& text, float x, float y,
@@ -809,8 +797,6 @@ protected:
     }
 
     // 設定（protected - 継承先でアクセス可能）
-    Direction alignH_ = Direction::Left;
-    Direction alignV_ = Direction::Top;
     float lineHeight_ = 0;  // 0 = フォント本来の行高さを使用
 
 public:

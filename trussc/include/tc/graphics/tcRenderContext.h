@@ -141,6 +141,21 @@ public:
         sgl_pop_matrix();
     }
 
+    // -----------------------------------------------------------------------
+    // スタイルスタック
+    // -----------------------------------------------------------------------
+
+    void pushStyle() {
+        styleStack_.push_back(style_);
+    }
+
+    void popStyle() {
+        if (!styleStack_.empty()) {
+            style_ = styleStack_.back();
+            styleStack_.pop_back();
+        }
+    }
+
     void translate(float x, float y) {
         currentMatrix_ = currentMatrix_ * Mat4::translate(x, y, 0.0f);
         sgl_translate(x, y, 0.0f);
@@ -576,27 +591,44 @@ public:
     }
 
 private:
-    // 描画色
-    float currentR_ = 1.0f;
-    float currentG_ = 1.0f;
-    float currentB_ = 1.0f;
-    float currentA_ = 1.0f;
+    // スタイル構造体
+    struct Style {
+        float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
+        bool fillEnabled = true;
+        bool strokeEnabled = false;
+        float strokeWeight = 1.0f;
+        int circleResolution = 20;
+        Direction textAlignH = Direction::Left;
+        Direction textAlignV = Direction::Top;
+    };
 
-    // 塗りつぶし / ストローク
-    bool fillEnabled_ = true;
-    bool strokeEnabled_ = false;
-    float strokeWeight_ = 1.0f;
+    // 現在のスタイル
+    Style style_;
 
-    // 円の分割数
-    int circleResolution_ = 20;
+    // スタイルスタック
+    std::vector<Style> styleStack_;
+
+    // 描画色（style_ へのショートカット）
+    float& currentR_ = style_.r;
+    float& currentG_ = style_.g;
+    float& currentB_ = style_.b;
+    float& currentA_ = style_.a;
+
+    // 塗りつぶし / ストローク（style_ へのショートカット）
+    bool& fillEnabled_ = style_.fillEnabled;
+    bool& strokeEnabled_ = style_.strokeEnabled;
+    float& strokeWeight_ = style_.strokeWeight;
+
+    // 円の分割数（style_ へのショートカット）
+    int& circleResolution_ = style_.circleResolution;
 
     // 行列スタック
     Mat4 currentMatrix_ = Mat4::identity();
     std::vector<Mat4> matrixStack_;
 
-    // テキストアラインメント
-    Direction textAlignH_ = Direction::Left;
-    Direction textAlignV_ = Direction::Top;
+    // テキストアラインメント（style_ へのショートカット）
+    Direction& textAlignH_ = style_.textAlignH;
+    Direction& textAlignV_ = style_.textAlignV;
 
     // ビットマップ文字列アラインメントオフセット計算
     Vec2 calcBitmapAlignOffset(const std::string& text, Direction h, Direction v) const {
