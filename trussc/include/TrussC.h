@@ -911,9 +911,18 @@ inline void drawBitmapString(const std::string& text, float x, float y,
     getDefaultContext().drawBitmapString(text, x, y, h, v);
 }
 
-// ビットマップ文字列のデフォルトアラインメントを設定
-inline void setBitmapTextAlign(Direction h, Direction v) {
-    getDefaultContext().setBitmapTextAlign(h, v);
+// テキストアラインメントを設定
+inline void setTextAlign(Direction h, Direction v) {
+    getDefaultContext().setTextAlign(h, v);
+}
+
+// 現在のテキストアラインメントを取得
+inline Direction getTextAlignH() {
+    return getDefaultContext().getTextAlignH();
+}
+
+inline Direction getTextAlignV() {
+    return getDefaultContext().getTextAlignV();
 }
 
 // ビットマップフォントの行の高さを取得
@@ -949,20 +958,35 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     // パディング
     const float padding = 4.0f;
 
-    // ローカル座標をワールド座標に変換
+    // 現在のアラインメントに基づいてオフセットを計算
+    float offsetX = 0, offsetY = 0;
+    switch (getTextAlignH()) {
+        case Direction::Left:   offsetX = 0; break;
+        case Direction::Center: offsetX = -textWidth / 2; break;
+        case Direction::Right:  offsetX = -textWidth; break;
+        default: break;
+    }
+    switch (getTextAlignV()) {
+        case Direction::Top:      offsetY = 0; break;
+        case Direction::Center:   offsetY = -textHeight / 2; break;
+        case Direction::Bottom:   offsetY = -textHeight; break;
+        case Direction::Baseline: offsetY = -textHeight + 3; break;  // 近似値
+        default: break;
+    }
+
+    // ローカル座標をワールド座標に変換（オフセット込み）
     Mat4 currentMat = getCurrentMatrix();
-    float worldX = currentMat.m[0]*x + currentMat.m[1]*y + currentMat.m[3];
-    float worldY = currentMat.m[4]*x + currentMat.m[5]*y + currentMat.m[7];
+    float worldX = currentMat.m[0]*(x + offsetX) + currentMat.m[1]*(y + offsetY) + currentMat.m[3];
+    float worldY = currentMat.m[4]*(x + offsetX) + currentMat.m[5]*(y + offsetY) + currentMat.m[7];
 
     // 行列を保存
     pushMatrix();
     resetMatrix();
 
     // アルファブレンドパイプラインで背景を描画
-    // y はベースライン位置なので、背景は textHeight 分上から始める
     sgl_load_pipeline(internal::fontPipeline);
     setColor(background);
-    drawRect(worldX - padding, worldY - textHeight - padding,
+    drawRect(worldX - padding, worldY - padding,
              textWidth + padding * 2, textHeight + padding * 2);
     sgl_load_default_pipeline();
 
