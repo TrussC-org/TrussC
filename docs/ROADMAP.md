@@ -202,20 +202,20 @@ OS固有コードを含むため、重点的にテストが必要なサンプル
 
 | サンプル | 確認ポイント | 状況 |
 |---------|-------------|------|
-| network/tcpExample | Winsock 接続・切断・エラー処理 | ⬜ 未確認 |
-| network/udpExample | Winsock、ブロードキャスト、マルチキャスト | ⬜ 未確認 |
-| input_output/screenshotExample | Win32 GDI+ キャプチャ (`tcPlatform_win.cpp`) | ⬜ 未確認 |
-| input_output/fileDialogExample | Win32 IFileDialog (`tcFileDialog_win.cpp`) | ⬜ 未確認 |
-| video/videoGrabberExample | Media Foundation API (`tcVideoGrabber_win.cpp`) | ⬜ 未確認 |
+| network/tcpExample | Winsock 接続・切断・エラー処理 | ✅ 確認済み |
+| network/udpExample | Winsock、ブロードキャスト、マルチキャスト | ✅ 確認済み |
+| input_output/screenshotExample | D3D11 テクスチャキャプチャ (`tcPlatform_win.cpp`) | ✅ 確認済み（MSAA対応修正済み） |
+| input_output/fileDialogExample | Win32 IFileDialog (`tcFileDialog_win.cpp`) | ✅ 確認済み |
+| video/videoGrabberExample | Media Foundation API (`tcVideoGrabber_win.cpp`) | ⬜ 未確認（カメラ環境なし） |
 
 **🟡 要確認（platform/win/ で実装あり）**
 
 | 機能 | ファイル | 確認サンプル | 状況 |
 |------|---------|-------------|------|
-| FBO ピクセル読み取り | `tcFbo_win.cpp` | gl/fboExample | ⬜ 未確認 |
+| FBO ピクセル読み取り | `tcFbo_win.cpp` | gl/fboExample | ✅ 確認済み |
 | DPI スケール | `tcPlatform_win.cpp` | 全サンプル | ⬜ 未確認 |
-| 実行ファイルパス | `tcPlatform_win.cpp` | dataPath 使用サンプル | ⬜ 未確認 |
-| コンソール UTF-8 | sokol_app.h | ログ出力全般 | ⬜ 未確認 |
+| 実行ファイルパス | `tcPlatform_win.cpp` | dataPath 使用サンプル | ✅ 確認済み |
+| コンソール UTF-8 | sokol_app.h | ログ出力全般 | ✅ 確認済み |
 
 **🟢 比較的安全（クロスプラットフォームライブラリ）**
 
