@@ -195,8 +195,38 @@ bool captureWindow(Pixels& outPixels) {
         return false;
     }
 
+    // MSAA テクスチャかどうかをチェック
+    bool isMSAA = (desc.SampleDesc.Count > 1);
+
+    ID3D11Texture2D* sourceTexture = backBuffer;
+    ID3D11Texture2D* resolvedTexture = nullptr;
+
+    // MSAA の場合、まず非 MSAA テクスチャに解決する必要がある
+    if (isMSAA) {
+        D3D11_TEXTURE2D_DESC resolveDesc = desc;
+        resolveDesc.SampleDesc.Count = 1;
+        resolveDesc.SampleDesc.Quality = 0;
+        resolveDesc.Usage = D3D11_USAGE_DEFAULT;
+        resolveDesc.BindFlags = 0;
+        resolveDesc.CPUAccessFlags = 0;
+        resolveDesc.MiscFlags = 0;
+
+        hr = device->CreateTexture2D(&resolveDesc, nullptr, &resolvedTexture);
+        if (FAILED(hr) || !resolvedTexture) {
+            backBuffer->Release();
+            tcLogError() << "[Screenshot] Failed to create resolve texture";
+            return false;
+        }
+
+        // MSAA → 非 MSAA に解決
+        context->ResolveSubresource(resolvedTexture, 0, backBuffer, 0, desc.Format);
+        sourceTexture = resolvedTexture;
+    }
+
     // CPU 読み取り可能なステージングテクスチャを作成
     D3D11_TEXTURE2D_DESC stagingDesc = desc;
+    stagingDesc.SampleDesc.Count = 1;
+    stagingDesc.SampleDesc.Quality = 0;
     stagingDesc.Usage = D3D11_USAGE_STAGING;
     stagingDesc.BindFlags = 0;
     stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
@@ -205,14 +235,19 @@ bool captureWindow(Pixels& outPixels) {
     ID3D11Texture2D* stagingTexture = nullptr;
     hr = device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
     if (FAILED(hr) || !stagingTexture) {
+        if (resolvedTexture) resolvedTexture->Release();
         backBuffer->Release();
         tcLogError() << "[Screenshot] Failed to create staging texture";
         return false;
     }
 
-    // バックバッファをステージングテクスチャにコピー
-    context->CopyResource(stagingTexture, backBuffer);
+    // ソーステクスチャをステージングテクスチャにコピー
+    context->CopyResource(stagingTexture, sourceTexture);
+
+    // リソース解放
+    if (resolvedTexture) resolvedTexture->Release();
     backBuffer->Release();
+
 
     // ステージングテクスチャをマップしてピクセルデータを読み取る
     D3D11_MAPPED_SUBRESOURCE mapped;
