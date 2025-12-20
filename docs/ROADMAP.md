@@ -192,6 +192,89 @@ sokol を更新する際は、これらの変更を再適用する必要があ�
 
 ---
 
+## プラットフォーム別テストチェックリスト
+
+OS固有コードを含むため、重点的にテストが必要なサンプル・機能のリスト。
+
+### Windows テスト項目
+
+**🔴 最優先（OS固有コードが多い）**
+
+| サンプル | 確認ポイント | 状況 |
+|---------|-------------|------|
+| network/tcpExample | Winsock 接続・切断・エラー処理 | ⬜ 未確認 |
+| network/udpExample | Winsock、ブロードキャスト、マルチキャスト | ⬜ 未確認 |
+| input_output/screenshotExample | Win32 GDI+ キャプチャ (`tcPlatform_win.cpp`) | ⬜ 未確認 |
+| input_output/fileDialogExample | Win32 IFileDialog (`tcFileDialog_win.cpp`) | ⬜ 未確認 |
+| video/videoGrabberExample | Media Foundation API (`tcVideoGrabber_win.cpp`) | ⬜ 未確認 |
+
+**🟡 要確認（platform/win/ で実装あり）**
+
+| 機能 | ファイル | 確認サンプル | 状況 |
+|------|---------|-------------|------|
+| FBO ピクセル読み取り | `tcFbo_win.cpp` | gl/fboExample | ⬜ 未確認 |
+| DPI スケール | `tcPlatform_win.cpp` | 全サンプル | ⬜ 未確認 |
+| 実行ファイルパス | `tcPlatform_win.cpp` | dataPath 使用サンプル | ⬜ 未確認 |
+| コンソール UTF-8 | sokol_app.h | ログ出力全般 | ⬜ 未確認 |
+
+**🟢 比較的安全（クロスプラットフォームライブラリ）**
+
+- graphics 系 - sokol が対応
+- sound 系 - miniaudio が対応
+- imgui 系 - sokol_imgui が対応
+
+### Linux テスト項目
+
+**🔴 未実装（要作成）**
+
+| 機能 | ファイル | 必要な実装 | 状況 |
+|------|---------|-----------|------|
+| Platform 基本機能 | `tcPlatform_linux.cpp` | 現在スタブのみ、要実装 | ⬜ 未着手 |
+| ├ getDisplayScaleFactor | | X11 `XRRGetScreenResources` | ⬜ |
+| ├ setWindowSize | | X11 `XResizeWindow` | ⬜ |
+| ├ getExecutablePath | | `/proc/self/exe` readlink | ⬜ |
+| ├ captureWindow | | OpenGL `glReadPixels` | ⬜ |
+| └ saveScreenshot | | stb_image_write | ⬜ |
+| FBO ピクセル読み取り | `tcFbo_linux.cpp` | OpenGL `glReadPixels` | ⬜ 未着手 |
+| VideoGrabber | `tcVideoGrabber_linux.cpp` | V4L2 | ⬜ 未着手 |
+
+**🟡 要確認（POSIX コード）**
+
+| サンプル | 確認ポイント | 状況 |
+|---------|-------------|------|
+| network/tcpExample | POSIX ソケット | ⬜ 未確認 |
+| network/udpExample | POSIX ソケット | ⬜ 未確認 |
+| communication/serialExample | POSIX termios | ⬜ 未確認 |
+| input_output/fileDialogExample | GTK3 ダイアログ (`tcFileDialog_linux.cpp`) | ⬜ 未確認 |
+
+**🟢 動作想定（クロスプラットフォーム）**
+
+- graphics 系 - sokol OpenGL Core が対応
+- sound 系 - miniaudio ALSA/PulseAudio 対応
+- imgui 系 - sokol_imgui が対応
+
+### Web (Emscripten) テスト項目
+
+**✅ 基本動作確認済み**
+
+| 機能 | 状況 |
+|------|------|
+| 描画（WebGL2） | ✅ 動作 |
+| リサイズ | ✅ 動作（カスタムシェル使用） |
+| フルスクリーン | ✅ 動作 |
+
+**⬜ 未確認**
+
+| 機能 | 備考 |
+|------|------|
+| キーボード入力 | |
+| マウス入力 | |
+| ImGui | |
+| Sound (miniaudio) | WebAudio 対応が必要かも |
+| Network | WebSocket 変換が必要 |
+
+---
+
 ## サンプル一覧
 
 ### 実装済み
