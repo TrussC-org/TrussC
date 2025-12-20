@@ -88,8 +88,28 @@ void tcApp::keyReleased(int key) {
     redraw();
 }
 
+void tcApp::filesDropped(const vector<string>& files) {
+    if (files.empty()) return;
+
+    // Only process the first file/folder
+    const string& path = files[0];
+
+    // Check if it's a directory
+    if (fs::is_directory(path)) {
+        // Import as project if CMakeLists.txt exists
+        if (fs::exists(path + "/CMakeLists.txt")) {
+            importProject(path);
+        } else {
+            setStatus("Not a valid TrussC project (no CMakeLists.txt)", true);
+        }
+    }
+
+    // Draw twice: UI changes may not reflect until the next frame
+    redraw(2);
+}
+
 void tcApp::draw() {
-    clear(45, 45, 48);
+    clear(0.18f, 0.18f, 0.19f);
 
     imguiBegin();
 
@@ -119,6 +139,8 @@ void tcApp::draw() {
             if (result.success) {
                 strncpy(tcRootBuf, result.filePath.c_str(), sizeof(tcRootBuf) - 1);
             }
+            // Draw twice: UI changes may not reflect until the next frame
+            redraw(2);
         }
 
         ImGui::Spacing();
@@ -170,6 +192,8 @@ void tcApp::draw() {
         if (result.success) {
             importProject(result.filePath);
         }
+        // Draw twice: UI changes may not reflect until the next frame
+        redraw(2);
     }
 
     ImGui::Spacing();
@@ -197,6 +221,8 @@ void tcApp::draw() {
                 projectDir = projectDirBuf;
                 saveConfig();
             }
+            // Draw twice: UI changes may not reflect until the next frame
+            redraw(2);
         }
     }
 

@@ -166,7 +166,7 @@ namespace internal {
     // Draw Loop 設定
     inline bool drawVsyncEnabled = true;   // VSync 有効（デフォルト）
     inline int drawTargetFps = 0;          // 0 = VSync使用, >0 = 固定FPS, <0 = 自動描画停止
-    inline bool needsRedraw = true;        // redraw() フラグ
+    inline int redrawCount = 1;            // redraw() カウンター（残り描画回数）
 
     // Update Loop 設定
     inline bool updateSyncedToDraw = true; // true = draw直前にupdate（デフォルト）
@@ -1234,8 +1234,11 @@ inline void setVsync(bool enabled) {
 }
 
 // 再描画をリクエスト（自動描画停止時に使用）
-inline void redraw() {
-    internal::needsRedraw = true;
+// count: 描画回数（複数回呼ばれた場合は最大値を採用）
+inline void redraw(int count = 1) {
+    if (count > internal::redrawCount) {
+        internal::redrawCount = count;
+    }
 }
 
 // アプリケーション終了をリクエスト
@@ -1487,7 +1490,7 @@ namespace internal {
             }
         } else {
             // 自動描画停止: redraw() 時のみ描画
-            shouldDraw = needsRedraw;
+            shouldDraw = (redrawCount > 0);
         }
 
         if (shouldDraw) {
@@ -1500,7 +1503,11 @@ namespace internal {
 
             if (appDrawFunc) appDrawFunc();
             present();
-            needsRedraw = false;
+
+            // redrawCount をデクリメント（0未満にはしない）
+            if (redrawCount > 0) {
+                redrawCount--;
+            }
         } else {
             // 描画しないときは Present をスキップ（ダブルバッファのちらつき防止）
             sapp_skip_present();
