@@ -71,7 +71,7 @@ void tcApp::draw() {
 
     if (!permissionGranted_) {
         // 権限がない場合のメッセージ
-        setColor(255);
+        setColor(1.0f);
         drawBitmapString("Camera permission required.", 20, 30);
         drawBitmapString("Please grant camera access in System Settings.", 20, 50);
         drawBitmapString("Then restart the application.", 20, 70);
@@ -79,13 +79,13 @@ void tcApp::draw() {
     }
 
     if (!grabber_.isInitialized()) {
-        setColor(255);
+        setColor(1.0f);
         drawBitmapString("Initializing camera...", 20, 30);
         return;
     }
 
     // カメラ映像を描画（ウィンドウにフィットするようにスケール）
-    setColor(255);
+    setColor(1.0f);
     float videoW = grabber_.getWidth();
     float videoH = grabber_.getHeight();
     float winW = getWindowWidth();

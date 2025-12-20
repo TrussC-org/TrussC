@@ -42,6 +42,12 @@ void tcApp::draw() {
 // Lerp 方式の比較
 // ---------------------------------------------------------------------------
 void tcApp::drawLerpComparison() {
+    // 色の定義方法:
+    //   Color c = Color(1.0f, 0.5f, 0.0f);           // float (0-1)
+    //   Color c = Color::fromBytes(255, 127, 0);    // int (0-255)
+    //   Color c = Color::fromHex(0xFF7F00);         // HEX コード
+    //   Color c = colors::orange;                   // 定義済みカラー
+
     // 2色を選ぶ（赤 → シアン は違いが分かりやすい）
     Color c1 = colors::red;
     Color c2 = colors::cyan;

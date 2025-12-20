@@ -92,7 +92,7 @@ void tcApp::draw() {
     float labelWidth = 70;
 
     // グリッド線を描画
-    setColor(50);
+    setColor(0.2f);
     // 縦線
     drawLine(gridLeft, gridTop, gridLeft, gridTop + headerHeight + rowHeight * 3);
     drawLine(gridLeft + labelWidth, gridTop, gridLeft + labelWidth, gridTop + headerHeight + rowHeight * 3);
@@ -109,14 +109,14 @@ void tcApp::draw() {
     }
 
     // ヘッダー背景
-    setColor(40);
+    setColor(0.16f);
     drawRect(gridLeft + 1, gridTop + 1, labelWidth + colWidth * 4 - 2, headerHeight - 1);
     drawRect(gridLeft + 1, gridTop + headerHeight + 1, labelWidth - 1, rowHeight * 3 - 2);
 
     // 列ラベル (Join Type)
     // drawBitmapString の y はベースライン位置なので、見た目の位置に文字高さを足す
     const float charH = bitmapfont::CHAR_TEX_HEIGHT;
-    setColor(255);
+    setColor(1.0f);
     const char* joinNames[] = {"MITER", "ROUND", "BEVEL", "CLOSED"};
     for (int j = 0; j < 4; j++) {
         float x = gridLeft + labelWidth + j * colWidth + colWidth / 2 - 20;
@@ -131,7 +131,7 @@ void tcApp::draw() {
     }
 
     // 左上コーナーのラベル
-    setColor(120);
+    setColor(0.47f);
     drawBitmapString("Cap", gridLeft + 15, gridTop + 10 + charH);
     drawBitmapString("Join", gridLeft + 30, gridTop + charH);
 
@@ -147,10 +147,10 @@ void tcApp::draw() {
 
     // 可変幅ストロークを描画
     variableStroke.draw();
-    setColor(150);
+    setColor(0.6f);
     drawBitmapString("Variable Width Stroke", 400, 702 + charH);
 
     // 情報
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("Width: " + std::to_string((int)strokeWidth), 10, 20 + charH);
 }

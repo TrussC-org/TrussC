@@ -97,23 +97,23 @@ public:
         // 色は draw() 内で設定するか、描画前に設定
 
         // 色を種類ごとに設定するため、個別に drawTree
-        setColor(255, 200, 100);
+        setColor(1.0f, 0.78f, 0.4f);
         for (auto& circle : circles) {
             circle->drawTree();
         }
 
-        setColor(100, 200, 255);
+        setColor(0.4f, 0.78f, 1.0f);
         for (auto& rect : rects) {
             rect->drawTree();
         }
 
-        setColor(200, 100, 255);
+        setColor(0.78f, 0.4f, 1.0f);
         for (auto& poly : polygons) {
             poly->drawTree();
         }
 
         // 使い方の表示
-        setColor(255);
+        setColor(1.0f);
         drawBitmapString("Left click: Add circle", 10, 20);
         drawBitmapString("Right click: Add rectangle", 10, 36);
         drawBitmapString("Middle click: Add hexagon", 10, 52);

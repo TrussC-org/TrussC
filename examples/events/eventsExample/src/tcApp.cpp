@@ -52,7 +52,7 @@ void tcApp::addLog(const std::string& msg) {
 
 void tcApp::draw() {
     clear(30);
-    setColor(255);
+    setColor(1.0f);
 
     // タイトル
     drawBitmapString("=== Event System Demo ===", 20, 20);
@@ -64,16 +64,16 @@ void tcApp::draw() {
     drawBitmapString(status.str(), 20, 50);
 
     // 操作説明
-    setColor(150);
+    setColor(0.6f);
     drawBitmapString("Press 'k' to toggle key listener", 20, 80);
     drawBitmapString("Press 'm' to toggle mouse listener", 20, 95);
     drawBitmapString("Click anywhere or scroll to test events", 20, 110);
 
     // イベントログ
-    setColor(100, 255, 100);
+    setColor(0.4f, 1.0f, 0.4f);
     drawBitmapString("Event Log:", 20, 150);
 
-    setColor(200);
+    setColor(0.78f);
     float y = 170;
     for (const auto& log : eventLog) {
         drawBitmapString(log, 30, y);

@@ -15,7 +15,7 @@ void tcApp::setup() {
 void tcApp::draw() {
     clear(30);
 
-    setColor(255);
+    setColor(1.0f);
     float y = 20;
     for (const auto& msg : messages) {
         drawBitmapString(msg, 20, y);

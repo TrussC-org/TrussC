@@ -64,7 +64,7 @@ void tcApp::draw() {
     drawBitmapString("TrussC Microphone FFT Analyzer", 20, 30);
 
     // コントロール説明
-    setColor(150);
+    setColor(0.6f);
     drawBitmapString("SPACE:Start/Stop  W:Waveform  L:LogScale  UP/DOWN:Smoothing", 20, 50);
 
     // ステータス
@@ -80,7 +80,7 @@ void tcApp::draw() {
         float waveY = 120;
         float waveH = 100;
 
-        setColor(40);
+        setColor(0.16f);
         drawRect(20, waveY, windowW - 40, waveH);
 
         setColor(colors::lime);
@@ -110,7 +110,7 @@ void tcApp::draw() {
     float specY = showWaveform ? 240 : 120;
     float specH = windowH - specY - 40;
 
-    setColor(40);
+    setColor(0.16f);
     drawRect(20, specY, windowW - 40, specH);
 
     setColor(colors::lime);
@@ -154,7 +154,7 @@ void tcApp::draw() {
     }
 
     // 周波数ラベル
-    setColor(100);
+    setColor(0.4f);
     drawBitmapString("0 Hz", 30, specY + specH + 5);
     drawBitmapString("22050 Hz", windowW - 80, specY + specH + 5);
 }

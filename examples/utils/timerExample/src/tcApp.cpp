@@ -25,7 +25,7 @@ void TimerBall::draw() {
     drawCircle(0, 0, radius_);
 
     // 変更回数を表示
-    setColor(0);
+    setColor(0.0f);
     string countStr = to_string(colorChangeCount_);
     drawBitmapString(countStr, -4, 4);
 }
@@ -89,7 +89,7 @@ void PulseNode::draw() {
     drawRect(-size / 2, -size / 2, size, size);
 
     // パルス回数を表示
-    setColor(255);
+    setColor(1.0f);
     string info = "Pulse: " + to_string(pulseCount_) + "/10";
     drawBitmapString(info, -40, size / 2 + 15);
 
@@ -139,7 +139,7 @@ void tcApp::draw() {
     clear(30, 30, 40);
 
     // タイトル
-    setColor(255);
+    setColor(1.0f);
     drawBitmapStringHighlight("timerExample - callAfter / callEvery Demo",
         10, 20, Color(0, 0, 0, 0.7f), colors::white);
 

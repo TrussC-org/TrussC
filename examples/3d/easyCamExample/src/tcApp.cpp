@@ -92,13 +92,13 @@ void tcApp::draw() {
     clearLights();
 
     // グリッドを描画
-    setColor(100, 100, 100);
+    setColor(0.4f, 0.4f, 0.4f);
     drawGrid(400, 10);
 
     cam.end();
 
     // --- 2D描画（UI） ---
-    setColor(255);
+    setColor(1.0f);
 
     if (showHelp) {
         std::stringstream ss;

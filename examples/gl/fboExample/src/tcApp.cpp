@@ -61,13 +61,13 @@ void tcApp::draw() {
     }
 
     // 中央に白い円
-    setColor(255);
+    setColor(1.0f);
     drawCircle(centerX, centerY, 40.0f + sin(time_ * 3.0f) * 10.0f);
 
     fbo_.end();
 
     // --- FBO を画面に描画 ---
-    setColor(255);
+    setColor(1.0f);
 
     // 左上: 等倍
     fbo_.draw(20, 80);

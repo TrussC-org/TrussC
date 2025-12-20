@@ -49,26 +49,26 @@ void tcApp::draw() {
     float y = 40;
 
     // タイトル
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("UDP Socket Example", 40, y);
     y += 30;
 
     // 操作説明
-    setColor(180);
+    setColor(0.7f);
     drawBitmapString("SPACE: Send message   C: Clear", 40, y);
     y += 40;
 
     // 送信カウント
-    setColor(100, 200, 255);
+    setColor(0.4f, 0.78f, 1.0f);
     drawBitmapString("Sent: " + to_string(sendCount) + " messages", 40, y);
     y += 30;
 
     // 受信メッセージ
-    setColor(100, 255, 100);
+    setColor(0.4f, 1.0f, 0.4f);
     drawBitmapString("Received Messages:", 40, y);
     y += 25;
 
-    setColor(220);
+    setColor(0.86f);
     lock_guard<mutex> lock(messagesMutex);
     for (const auto& msg : receivedMessages) {
         drawBitmapString(msg, 50, y);

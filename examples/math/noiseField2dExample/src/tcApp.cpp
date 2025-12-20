@@ -61,7 +61,7 @@ void tcApp::draw() {
     }
 
     // UI
-    setColor(255);
+    setColor(1.0f);
     std::stringstream ss;
     ss << "Mode " << (mode + 1) << "/" << NUM_MODES << ": ";
     switch (mode) {
@@ -118,7 +118,7 @@ void tcApp::drawFlowField() {
 }
 
 void tcApp::drawFlowParticles() {
-    setColor(255, 255, 255, 50);
+    setColor(1.0f, 1.0f, 1.0f, 0.2f);
     for (const auto& p : particles) {
         drawLine(p.prevX, p.prevY, p.x, p.y);
     }
