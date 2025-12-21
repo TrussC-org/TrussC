@@ -1006,6 +1006,15 @@ bool tcApp::updateProject() {
         }
         addonsFile.close();
 
+        // Copy .gitignore if it doesn't exist
+        string gitignorePath = importedProjectPath + "/.gitignore";
+        if (!fs::exists(gitignorePath)) {
+            string templateGitignore = getTemplatePath() + "/.gitignore";
+            if (fs::exists(templateGitignore)) {
+                fs::copy_file(templateGitignore, gitignorePath);
+            }
+        }
+
         // Generate IDE-specific files
         if (ideType == IdeType::VSCode || ideType == IdeType::Cursor) {
             generateVSCodeFiles(importedProjectPath);
@@ -1275,6 +1284,16 @@ void tcApp::doUpdateProject() {
             }
         }
         addonsFile.close();
+
+        // Copy .gitignore if it doesn't exist
+        string gitignorePath = importedProjectPath + "/.gitignore";
+        if (!fs::exists(gitignorePath)) {
+            log("Adding .gitignore...");
+            string templateGitignore = getTemplatePath() + "/.gitignore";
+            if (fs::exists(templateGitignore)) {
+                fs::copy_file(templateGitignore, gitignorePath);
+            }
+        }
 
         // Generate IDE-specific files
         if (ideType == IdeType::VSCode || ideType == IdeType::Cursor) {
