@@ -6,14 +6,14 @@
 
 namespace tcx::box2d {
 
-Circle::Circle(Circle&& other) noexcept
+CircleBody::CircleBody(CircleBody&& other) noexcept
     : Body(std::move(other))
     , radius_(other.radius_)
 {
     other.radius_ = 0;
 }
 
-Circle& Circle::operator=(Circle&& other) noexcept {
+CircleBody& CircleBody::operator=(CircleBody&& other) noexcept {
     if (this != &other) {
         Body::operator=(std::move(other));
         radius_ = other.radius_;
@@ -22,7 +22,7 @@ Circle& Circle::operator=(Circle&& other) noexcept {
     return *this;
 }
 
-void Circle::setup(World& world, float cx, float cy, float radius) {
+void CircleBody::setup(World& world, float cx, float cy, float radius) {
     world_ = &world;
     radius_ = radius;
 
@@ -56,7 +56,7 @@ void Circle::setup(World& world, float cx, float cy, float radius) {
 }
 
 // Node用: 原点(0,0)に描画（drawTree()が変換を適用する）
-void Circle::draw() {
+void CircleBody::draw() {
     if (!body_) return;
 
     // 円を描画（原点中心）
@@ -66,7 +66,7 @@ void Circle::draw() {
     tc::drawLine(0, 0, radius_, 0);
 }
 
-void Circle::drawFill() {
+void CircleBody::drawFill() {
     if (!body_) return;
 
     // 塗りつぶしモードで円を描画
@@ -80,7 +80,7 @@ void Circle::drawFill() {
     tc::drawLine(0, 0, radius_, 0);
 }
 
-void Circle::draw(const tc::Color& color) {
+void CircleBody::draw(const tc::Color& color) {
     tc::setColor(color);
     draw();
 }

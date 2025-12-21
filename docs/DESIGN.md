@@ -2,76 +2,86 @@
 
 ## Loop Architecture (Decoupled Update/Draw)
 
-Replaces the "mode enumeration" approach with a method-based architecture where Draw (rendering) and Update (logic) timing can be independently configured.
+TrussC uses a flexible loop architecture where Update (logic) and Draw (rendering) timing can be controlled. Two modes are available: **Synchronized Mode** and **Independent Mode**.
 
-### Draw Loop (Render Timing)
+### Special FPS Constants
+
+| Constant | Value | Behavior |
+|----------|-------|----------|
+| `tc::VSYNC` | -1.0f | Sync to monitor refresh rate |
+| `tc::EVENT_DRIVEN` | 0.0f | Only on explicit `tc::redraw()` call |
+
+### Synchronized Mode (Default)
+
+Use `tc::setFps(fps)` for synchronized mode where `update()` is called exactly once before each `draw()`.
 
 | Method | Behavior |
 |--------|----------|
-| `tc::setDrawVsync(true)` | Sync to monitor refresh rate (default) |
-| `tc::setDrawFps(n)` (n > 0) | Fixed FPS. VSync is automatically disabled |
-| `tc::setDrawFps(0)` (or negative) | Auto loop stops. Draws only on `tc::redraw()` |
+| `tc::setFps(VSYNC)` | VSync mode (default). Update and draw synced to monitor refresh |
+| `tc::setFps(60)` | Fixed 60fps. Update/draw called together at 60Hz |
+| `tc::setFps(EVENT_DRIVEN)` | Event-driven. Update/draw only on `tc::redraw()` |
 
-### Update Loop (Logic Timing)
+### Independent Mode
 
-| Method | Behavior |
-|--------|----------|
-| `tc::syncUpdateToDraw(true)` | `update()` called once just before `draw()` (Coupled, default) |
-| `tc::setUpdateFps(n)` (n > 0) | `update()` runs independently at specified Hz (Decoupled) |
-| `tc::setUpdateFps(0)` (or negative) | Update loop stops. Fully event-driven app |
+Use `tc::setIndependentFps(updateFps, drawFps)` when you need different rates for update and draw.
+
+| Example | Behavior |
+|---------|----------|
+| `tc::setIndependentFps(120, VSYNC)` | Update at 120Hz, draw at VSync |
+| `tc::setIndependentFps(60, 30)` | Update at 60Hz, draw at 30fps |
+| `tc::setIndependentFps(30, EVENT_DRIVEN)` | Update at 30Hz, draw only on redraw() |
+
+**Note:** When `updateFps > drawFps` (e.g., 500Hz update with VSync draw), multiple update calls will burst before each draw, not evenly spaced.
+
+### Getting Current Settings
+
+```cpp
+FpsSettings fps = tc::getFpsSettings();
+// fps.updateFps   - Current update FPS setting (VSYNC, EVENT_DRIVEN, or fixed value)
+// fps.drawFps     - Current draw FPS setting
+// fps.synced      - true if update/draw are synchronized
+// fps.actualVsyncFps - Monitor refresh rate (if available)
+
+float actualFps = tc::getFps();  // Actual measured framerate
+```
 
 ### Idle State (No Freeze)
 
-- Even when both Draw and Update are stopped (FPS <= 0), the OS event loop continues
+- Even in event-driven mode, the OS event loop continues
 - App doesn't freeze, enters "idle state"
 - Event handlers like `onMousePress` still fire normally
-
-### Standard Helpers
-
-| Helper | Behavior |
-|--------|----------|
-| `tc::setFps(60)` | Executes `setDrawFps(60)` + `syncUpdateToDraw(true)` |
-| `tc::setVsync(true)` | Executes `setDrawVsync(true)` + `syncUpdateToDraw(true)` |
 
 ### Examples
 
 ```cpp
+// VSync mode (default behavior)
+void tcApp::setup() {
+    tc::setFps(VSYNC);
+}
+
 // Standard game loop (60fps fixed)
 void tcApp::setup() {
     tc::setFps(60);
 }
 
-// VSync sync (default behavior)
-void tcApp::setup() {
-    tc::setVsync(true);
-}
-
 // Power-saving mode (event-driven)
 void tcApp::setup() {
-    tc::setDrawFps(0);  // Stop drawing
+    tc::setFps(EVENT_DRIVEN);
 }
-void tcApp::onMousePress(...) {
+void tcApp::mousePressed(int x, int y, int button) {
     // Process something
     tc::redraw();  // Explicitly request redraw
 }
 
 // Physics simulation (fixed timestep)
 void tcApp::setup() {
-    tc::setDrawVsync(true);    // Draw with VSync
-    tc::setUpdateFps(120);     // Physics at 120Hz
+    tc::setIndependentFps(120, VSYNC);  // Physics 120Hz, draw VSync
 }
-```
 
-### Current Implementation (Deprecated)
-
-```cpp
-// Old API (deprecated)
-enum class LoopMode {
-    Game,   // update/draw called automatically every frame
-    Demand  // update/draw called only on redraw()
-};
-tc::setLoopMode(LoopMode::Game);
-tc::setLoopMode(LoopMode::Demand);
+// UI application (save CPU, responsive updates)
+void tcApp::setup() {
+    tc::setIndependentFps(30, EVENT_DRIVEN);  // Animations at 30Hz, draw on demand
+}
 ```
 
 ---

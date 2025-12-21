@@ -13,7 +13,7 @@ void tcApp::setup() {
     cout << "  - ESC: Quit" << endl;
 
     // Default: VSync
-    setVsync(true);
+    setFps(VSYNC);
 }
 
 void tcApp::update() {
@@ -70,10 +70,21 @@ void tcApp::draw() {
     y += 10;
 
     // Settings status
-    drawBitmapString("Draw VSync: " + string(isDrawVsync() ? "ON" : "OFF"), 10, y); y += 16;
-    drawBitmapString("Draw FPS setting: " + toString(getDrawFps()), 10, y); y += 16;
-    drawBitmapString("Update synced: " + string(isUpdateSyncedToDraw() ? "YES" : "NO"), 10, y); y += 16;
-    drawBitmapString("Update FPS setting: " + toString(getUpdateFps()), 10, y); y += 16;
+    auto fps = getFpsSettings();
+
+    // Helper to display FPS value
+    auto fpsToString = [](float f) -> string {
+        if (f == VSYNC) return "VSYNC";
+        if (f == EVENT_DRIVEN) return "EVENT_DRIVEN";
+        return toString(f, 1);
+    };
+
+    drawBitmapString("Draw FPS: " + fpsToString(fps.drawFps), 10, y); y += 16;
+    drawBitmapString("Update FPS: " + fpsToString(fps.updateFps), 10, y); y += 16;
+    drawBitmapString("Synced: " + string(fps.synced ? "YES" : "NO"), 10, y); y += 16;
+    if (fps.actualVsyncFps > 0) {
+        drawBitmapString("VSync rate: " + toString(fps.actualVsyncFps, 0) + " Hz", 10, y); y += 16;
+    }
     y += 10;
 
     // Actual FPS
@@ -95,7 +106,7 @@ void tcApp::keyPressed(int key) {
     }
     else if (key == '1') {
         mode = 0;
-        setVsync(true);
+        setFps(VSYNC);
         cout << "Mode: VSync" << endl;
     }
     else if (key == '2') {
@@ -110,15 +121,13 @@ void tcApp::keyPressed(int key) {
     }
     else if (key == '4') {
         mode = 3;
-        setDrawFps(0);  // Stop automatic drawing
-        syncUpdateToDraw(true);
+        setFps(EVENT_DRIVEN);
         redraw();  // Draw once immediately after mode switch
         cout << "Mode: Event-driven (click to redraw)" << endl;
     }
     else if (key == '5') {
         mode = 4;
-        setDrawVsync(true);
-        setUpdateFps(500);  // Update runs independently at 500Hz
+        setIndependentFps(500, VSYNC);  // Update: 500Hz, Draw: VSync
         cout << "Mode: Decoupled (Update 500Hz, Draw VSync)" << endl;
     }
 }

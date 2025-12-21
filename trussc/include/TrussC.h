@@ -163,14 +163,15 @@ namespace internal {
     // Loop Architecture (Decoupled Update/Draw)
     // ---------------------------------------------------------------------------
 
-    // Draw Loop settings
-    inline bool drawVsyncEnabled = true;   // VSync enabled (default)
-    inline int drawTargetFps = 0;          // 0 = use VSync, >0 = fixed FPS, <0 = auto draw stop
-    inline int redrawCount = 1;            // redraw() counter (remaining draw count)
+    // Special FPS values
+    constexpr float VSYNC = -1.0f;        // Sync to monitor refresh rate
+    constexpr float EVENT_DRIVEN = 0.0f;  // Only on redraw() call
 
-    // Update Loop settings
-    inline bool updateSyncedToDraw = true; // true = update before draw (default)
-    inline int updateTargetFps = 0;        // 0 = use syncedToDraw, >0 = independent fixed Hz
+    // FPS settings
+    inline float updateTargetFps = VSYNC; // VSYNC, EVENT_DRIVEN, or fixed fps
+    inline float drawTargetFps = VSYNC;   // VSYNC, EVENT_DRIVEN, or fixed fps
+    inline bool updateSyncedToDraw = true; // true = update/draw in sync (1:1)
+    inline int redrawCount = 1;            // redraw() counter (remaining draw count)
 
     // Update timing
     inline std::chrono::high_resolution_clock::time_point lastUpdateTime;
@@ -1166,80 +1167,65 @@ inline int getMouseButton() {
 // Loop Architecture (Decoupled Update/Draw)
 // ---------------------------------------------------------------------------
 
-// --- Draw Loop control ---
+// Special FPS values (exposed to user)
+constexpr float VSYNC = internal::VSYNC;              // Sync to monitor refresh rate
+constexpr float EVENT_DRIVEN = internal::EVENT_DRIVEN; // Only on redraw() call
 
-// Enable/disable VSync (default: true)
-inline void setDrawVsync(bool enabled) {
-    internal::drawVsyncEnabled = enabled;
-    if (enabled) {
-        internal::drawTargetFps = 0;  // Disable FPS setting when VSync is on
-        internal::drawAccumulator = 0.0;  // Reset accumulator
-    }
-}
+// FPS settings structure
+struct FpsSettings {
+    float updateFps;       // VSYNC(-1), EVENT_DRIVEN(0), or fixed fps
+    float drawFps;         // VSYNC(-1), EVENT_DRIVEN(0), or fixed fps
+    float actualVsyncFps;  // Actual monitor refresh rate (0 if unknown)
+    bool synced;           // true = update/draw in sync (1:1)
+};
 
-// Set draw FPS
-// n > 0: fixed FPS (VSync is automatically OFF)
-// n <= 0: auto draw stop, only draw on redraw() call
-inline void setDrawFps(int fps) {
-    internal::drawTargetFps = fps;
-    internal::drawVsyncEnabled = false;  // Always turn VSync OFF when FPS is specified
-}
+// --- Main FPS API ---
 
-// Get current draw FPS setting
-inline int getDrawFps() {
-    return internal::drawTargetFps;
-}
-
-// Is VSync enabled
-inline bool isDrawVsync() {
-    return internal::drawVsyncEnabled;
-}
-
-// --- Update Loop control ---
-
-// Set whether to sync Update to Draw (default: true)
-// true: update() is called once just before draw()
-// false: follows setUpdateFps() setting
-inline void syncUpdateToDraw(bool synced) {
-    internal::updateSyncedToDraw = synced;
-    if (synced) {
-        internal::updateTargetFps = 0;
-        internal::updateAccumulator = 0.0;  // Reset accumulator
-    }
-}
-
-// Set Update Hz (independent from Draw)
-// n > 0: update() is called periodically at specified Hz
-// n <= 0: Update loop stops (event-driven only)
-inline void setUpdateFps(int fps) {
+// Set FPS (update and draw synchronized, 1:1)
+// VSYNC: sync to monitor refresh rate
+// EVENT_DRIVEN: only on redraw() call
+// > 0: fixed fps
+inline void setFps(float fps) {
     internal::updateTargetFps = fps;
-    if (fps > 0) {
-        internal::updateSyncedToDraw = false;  // Turn sync OFF for independent Update
+    internal::drawTargetFps = fps;
+    internal::updateSyncedToDraw = true;
+    internal::updateAccumulator = 0.0;
+    internal::drawAccumulator = 0.0;
+}
+
+// Set independent FPS for update and draw (not synchronized)
+// Each loop runs at its own rate, may cause timing variations
+inline void setIndependentFps(float updateFps, float drawFps) {
+    internal::updateTargetFps = updateFps;
+    internal::drawTargetFps = drawFps;
+    internal::updateSyncedToDraw = false;
+    internal::updateAccumulator = 0.0;
+    internal::drawAccumulator = 0.0;
+}
+
+// Get current FPS settings
+inline FpsSettings getFpsSettings() {
+    FpsSettings settings;
+    settings.updateFps = internal::updateTargetFps;
+    settings.drawFps = internal::drawTargetFps;
+    settings.synced = internal::updateSyncedToDraw;
+
+    // Get actual VSync frequency (approximate from frame duration when VSYNC)
+    if (internal::updateTargetFps == internal::VSYNC ||
+        internal::drawTargetFps == internal::VSYNC) {
+        double dt = sapp_frame_duration();
+        settings.actualVsyncFps = (dt > 0.0) ? static_cast<float>(1.0 / dt) : 0.0f;
+    } else {
+        settings.actualVsyncFps = 0.0f;
     }
+
+    return settings;
 }
 
-// Get current Update Hz setting
-inline int getUpdateFps() {
-    return internal::updateTargetFps;
-}
-
-// Is Update synced to Draw
-inline bool isUpdateSyncedToDraw() {
-    return internal::updateSyncedToDraw;
-}
-
-// --- Helper functions ---
-
-// Set fixed FPS mode (Draw + Update synced)
-inline void setFps(int fps) {
-    setDrawFps(fps);
-    syncUpdateToDraw(true);
-}
-
-// Set VSync mode (Draw + Update synced)
-inline void setVsync(bool enabled) {
-    setDrawVsync(enabled);
-    syncUpdateToDraw(true);
+// Get current actual FPS (measured, 10-frame moving average)
+// Alias for getFrameRate() with clearer naming
+inline float getFps() {
+    return static_cast<float>(getFrameRate());
 }
 
 // Request redraw (used when auto-draw is stopped)
@@ -1461,6 +1447,9 @@ namespace internal {
         // --- Update Loop processing ---
         if (updateSyncedToDraw) {
             // Synced to Draw: handled with shouldDraw below
+        } else if (updateTargetFps == VSYNC) {
+            // VSYNC mode (independent): update every frame
+            if (appUpdateFunc) appUpdateFunc();
         } else if (updateTargetFps > 0) {
             // Independent fixed Hz Update
             double updateInterval = 1.0 / updateTargetFps;
@@ -1473,12 +1462,12 @@ namespace internal {
                 updateAccumulator -= updateInterval;
             }
         }
-        // If updateTargetFps <= 0, no Update (event-driven)
+        // If updateTargetFps == EVENT_DRIVEN (0), no Update (event-driven)
 
         // --- Draw Loop processing ---
         bool shouldDraw = false;
 
-        if (drawVsyncEnabled) {
+        if (drawTargetFps == VSYNC) {
             // VSync: draw every frame (sokol_app controls timing)
             shouldDraw = true;
         } else if (drawTargetFps > 0) {
@@ -1498,7 +1487,7 @@ namespace internal {
                 }
             }
         } else {
-            // Auto-draw stopped: draw only on redraw()
+            // EVENT_DRIVEN (0): draw only on redraw()
             shouldDraw = (redrawCount > 0);
         }
 
