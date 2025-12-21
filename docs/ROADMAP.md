@@ -304,6 +304,41 @@ List of samples/features requiring focused testing due to OS-specific code.
 
 ---
 
+## Raspberry Pi Support (Planned)
+
+Priority: Low | Difficulty: Medium
+
+### Investigation Phase
+- [ ] Check sokol Raspberry Pi support (OpenGL ES backend)
+- [ ] Decide whether to support RPi 4/5 only or include RPi 3 and earlier
+- [ ] Identify required Linux packages (libgl, libegl, x11-dev, etc.)
+
+### Build System
+- [ ] Add ARM architecture detection to CMakeLists.txt
+- [ ] Add OpenGL ES force flag (`SOKOL_GLES2` or `SOKOL_GLES3`)
+- [ ] Cross-compilation support (optional, build for RPi from Mac/PC)
+
+### Platform Code Verification
+- [ ] `tcPlatform_linux.cpp` - Verify on ARM
+- [ ] `tcFbo_linux.cpp` - Verify glReadPixels with OpenGL ES
+- [ ] `tcVideoGrabber_linux.cpp` - Verify V4L2 with RPi camera
+
+### Dependency Verification
+- [ ] miniaudio - Verify ALSA backend on ARM
+- [ ] stb_* - Header-only, should be OK
+- [ ] Dear ImGui - Verify OpenGL ES support
+
+### Testing
+- [ ] Test on actual hardware (RPi 4 or 5)
+- [ ] Verify basic sample (graphicsExample) runs
+- [ ] Performance measurement
+
+### Documentation
+- [ ] Add RPi setup instructions
+- [ ] Document known limitations
+
+---
+
 ## Reference Links
 
 - [oF Examples](https://github.com/openframeworks/openFrameworks/tree/master/examples)

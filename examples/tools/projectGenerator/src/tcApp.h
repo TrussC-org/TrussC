@@ -54,6 +54,7 @@ private:
     bool statusIsError = false;
     bool isImportedProject = false;     // Whether this is an imported project
     string importedProjectPath;         // Path of imported project
+    string pendingImportPath;           // Deferred import (to avoid crash during InputText edit)
 
     // Generation thread
     atomic<bool> isGenerating{false};   // Generation in progress flag
@@ -86,6 +87,7 @@ private:
     void generateWebBuildFiles(const string& path);
     void openInIde(const string& path);
     string getTemplatePath();
+    string getTrusscDirValue(const string& projectPath);
     void setStatus(const string& msg, bool isError = false);
     void resetToNewProject();
 };

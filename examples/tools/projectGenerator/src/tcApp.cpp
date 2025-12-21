@@ -40,10 +40,10 @@ void tcApp::setup() {
     }
     strncpy(projectDirBuf, projectDir.c_str(), sizeof(projectDirBuf) - 1);
 
-    // Auto-switch to Update mode if previous project exists
+    // Auto-switch to Update mode if previous project folder exists
     if (!projectDir.empty() && !projectName.empty()) {
         string lastProjectPath = projectDir + "/" + projectName;
-        if (fs::exists(lastProjectPath + "/CMakeLists.txt")) {
+        if (fs::is_directory(lastProjectPath)) {
             importProject(lastProjectPath);
         }
     }
@@ -94,14 +94,9 @@ void tcApp::filesDropped(const vector<string>& files) {
     // Only process the first file/folder
     const string& path = files[0];
 
-    // Check if it's a directory
+    // Check if it's a directory and import as project
     if (fs::is_directory(path)) {
-        // Import as project if CMakeLists.txt exists
-        if (fs::exists(path + "/CMakeLists.txt")) {
-            importProject(path);
-        } else {
-            setStatus("Not a valid TrussC project (no CMakeLists.txt)", true);
-        }
+        importProject(path);
     }
 
     // Draw twice: UI changes may not reflect until the next frame
@@ -112,6 +107,13 @@ void tcApp::draw() {
     clear(0.18f, 0.18f, 0.19f);
 
     imguiBegin();
+
+    // Handle deferred import (to avoid crash during InputText edit)
+    if (!pendingImportPath.empty()) {
+        string pathToImport = pendingImportPath;
+        pendingImportPath.clear();
+        importProject(pathToImport);
+    }
 
     // TC_ROOT setup dialog
     if (showSetupDialog) {
@@ -183,6 +185,15 @@ void tcApp::draw() {
         ImGui::BeginDisabled();
     }
     ImGui::InputText("##projectName", projectNameBuf, sizeof(projectNameBuf));
+    // Auto-switch to Update mode when input is deactivated (Enter or focus lost)
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        if (!isImportedProject && strlen(projectNameBuf) > 0 && strlen(projectDirBuf) > 0) {
+            string checkPath = string(projectDirBuf) + "/" + string(projectNameBuf);
+            if (fs::is_directory(checkPath)) {
+                pendingImportPath = checkPath;
+            }
+        }
+    }
     if (isImportedProject) {
         ImGui::EndDisabled();
     }
@@ -205,6 +216,15 @@ void tcApp::draw() {
         ImGui::BeginDisabled();
     }
     ImGui::InputText("##projectDir", projectDirBuf, sizeof(projectDirBuf));
+    // Auto-switch to Update mode when input is deactivated (Enter or focus lost)
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        if (!isImportedProject && strlen(projectNameBuf) > 0 && strlen(projectDirBuf) > 0) {
+            string checkPath = string(projectDirBuf) + "/" + string(projectNameBuf);
+            if (fs::is_directory(checkPath)) {
+                pendingImportPath = checkPath;
+            }
+        }
+    }
     if (isImportedProject) {
         ImGui::EndDisabled();
     }
@@ -220,6 +240,13 @@ void tcApp::draw() {
                 strncpy(projectDirBuf, result.filePath.c_str(), sizeof(projectDirBuf) - 1);
                 projectDir = projectDirBuf;
                 saveConfig();
+                // Auto-switch to Update mode if project folder exists (deferred to next frame)
+                if (strlen(projectNameBuf) > 0) {
+                    string checkPath = string(projectDirBuf) + "/" + string(projectNameBuf);
+                    if (fs::is_directory(checkPath)) {
+                        pendingImportPath = checkPath;
+                    }
+                }
             }
             // Draw twice: UI changes may not reflect until the next frame
             redraw(2);
@@ -438,6 +465,17 @@ string tcApp::getTemplatePath() {
     return tcRoot + "/examples/templates/emptyExample";
 }
 
+// Calculate TRUSSC_DIR value for CMakeLists.txt
+// Always uses relative path from project to trussc folder
+string tcApp::getTrusscDirValue(const string& projectPath) {
+    fs::path projPath = fs::weakly_canonical(projectPath);
+    fs::path trusscPath = fs::weakly_canonical(tcRoot + "/trussc");
+
+    // Calculate relative path from project to trussc
+    fs::path relPath = fs::relative(trusscPath, projPath);
+    return "${CMAKE_CURRENT_SOURCE_DIR}/" + relPath.string();
+}
+
 bool tcApp::generateProject() {
     // Validation
     if (projectName.empty()) {
@@ -466,44 +504,49 @@ bool tcApp::generateProject() {
         projectDir.pop_back();
     }
     string destPath = projectDir + "/" + projectName;
-
-    // Check if already exists
-    if (fs::exists(destPath)) {
-        setStatus("Project already exists", true);
-        return false;
-    }
+    bool folderExists = fs::is_directory(destPath);
 
     try {
         // Create parent directory
         fs::create_directories(projectDir);
 
-        // Copy template (exclude build, bin folders)
-        fs::create_directories(destPath);
-        for (const auto& entry : fs::directory_iterator(templatePath)) {
-            string name = entry.path().filename().string();
-            if (name == "build" || name == "bin") {
-                continue;  // Skip
+        // Copy template only if folder doesn't exist (new project)
+        if (!folderExists) {
+            fs::create_directories(destPath);
+            for (const auto& entry : fs::directory_iterator(templatePath)) {
+                string name = entry.path().filename().string();
+                if (name == "build" || name == "bin") {
+                    continue;  // Skip
+                }
+                fs::copy(entry.path(), destPath / entry.path().filename(),
+                         fs::copy_options::recursive);
             }
-            fs::copy(entry.path(), destPath / entry.path().filename(),
-                     fs::copy_options::recursive);
         }
+        // If folder exists, just update CMakeLists.txt (like update mode)
 
-        // Rewrite CMakeLists.txt (set TC_ROOT directly)
-        string cmakePath = destPath + "/CMakeLists.txt";
-        ifstream inFile(cmakePath);
+        // Read CMakeLists.txt from template and write to project
+        string templateCmakePath = templatePath + "/CMakeLists.txt";
+        ifstream inFile(templateCmakePath);
         stringstream buffer;
         buffer << inFile.rdbuf();
         inFile.close();
 
         string content = buffer.str();
 
-        // Set TC_ROOT directly
-        size_t pos = content.find("set(TC_ROOT \"\"");
+        // Replace TRUSSC_DIR (relative if inside tcRoot, absolute otherwise)
+        // Template: set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")
+        // Result:  set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../trussc") or absolute path
+        size_t pos = content.find("set(TRUSSC_DIR \"");
         if (pos != string::npos) {
-            content.replace(pos, 14, "set(TC_ROOT \"" + tcRoot + "\"");
+            size_t endPos = content.find("\")", pos);
+            if (endPos != string::npos) {
+                content.replace(pos, endPos - pos + 2,
+                    "set(TRUSSC_DIR \"" + getTrusscDirValue(destPath) + "\")");
+            }
         }
 
-        // Write back
+        // Write to project
+        string cmakePath = destPath + "/CMakeLists.txt";
         ofstream outFile(cmakePath);
         outFile << content;
         outFile.close();
@@ -628,7 +671,7 @@ void tcApp::generateXcodeProject(const string& path) {
     fs::create_directories(buildPath);
 
     // Use full path for cmake since PATH may not be set when running from GUI app
-    // TC_ROOT is written directly in CMakeLists.txt, no environment variable needed
+    // TRUSSC_DIR is written directly in CMakeLists.txt, no environment variable needed
     string cmd = "cd \"" + buildPath + "\" && /opt/homebrew/bin/cmake -G Xcode ..";
     tcLogNotice("tcApp") << "Xcode cmd: " << cmd;
     int result = system(cmd.c_str());
@@ -828,20 +871,6 @@ void tcApp::setStatus(const string& msg, bool isError) {
 }
 
 void tcApp::importProject(const string& path) {
-    // Check if CMakeLists.txt exists
-    string cmakePath = path + "/CMakeLists.txt";
-    if (!fs::exists(cmakePath)) {
-        setStatus("Not a valid TrussC project (CMakeLists.txt not found)", true);
-        return;
-    }
-
-    // Parse CMakeLists.txt
-    ifstream inFile(cmakePath);
-    stringstream buffer;
-    buffer << inFile.rdbuf();
-    inFile.close();
-    string content = buffer.str();
-
     // Get project name (folder name)
     projectName = fs::path(path).filename().string();
     strncpy(projectNameBuf, projectName.c_str(), sizeof(projectNameBuf) - 1);
@@ -850,20 +879,48 @@ void tcApp::importProject(const string& path) {
     projectDir = fs::path(path).parent_path().string();
     strncpy(projectDirBuf, projectDir.c_str(), sizeof(projectDirBuf) - 1);
 
-    // Parse TC_ROOT
-    // Format: set(TC_ROOT "/path/to/tc_v0.0.1"
-    size_t pos = content.find("set(TC_ROOT \"");
-    if (pos != string::npos) {
-        size_t start = pos + 13;
-        size_t end = content.find("\"", start);
-        if (end != string::npos) {
-            string importedTcRoot = content.substr(start, end - start);
-            // Update tcRoot if valid path (check trussc/CMakeLists.txt)
-            if (!importedTcRoot.empty() && fs::exists(importedTcRoot + "/trussc/CMakeLists.txt")) {
-                tcRoot = importedTcRoot;
-                strncpy(tcRootBuf, tcRoot.c_str(), sizeof(tcRootBuf) - 1);
-                saveConfig();
-                scanAddons();
+    // Try to parse TRUSSC_DIR from existing CMakeLists.txt (if it exists)
+    string cmakePath = path + "/CMakeLists.txt";
+    if (fs::exists(cmakePath)) {
+        ifstream inFile(cmakePath);
+        stringstream buffer;
+        buffer << inFile.rdbuf();
+        inFile.close();
+        string content = buffer.str();
+
+        // Parse TRUSSC_DIR to extract TC_ROOT
+        // Format: set(TRUSSC_DIR "/path/to/tc_root/trussc") or
+        //         set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../trussc")
+        size_t pos = content.find("set(TRUSSC_DIR \"");
+        if (pos != string::npos) {
+            size_t start = pos + 16;  // length of 'set(TRUSSC_DIR "'
+            size_t end = content.find("\"", start);
+            if (end != string::npos) {
+                string trusscDir = content.substr(start, end - start);
+                string importedTcRoot;
+
+                // Check if it's a relative path (starts with ${CMAKE_CURRENT_SOURCE_DIR}/)
+                const string cmakePrefix = "${CMAKE_CURRENT_SOURCE_DIR}/";
+                if (trusscDir.find(cmakePrefix) == 0) {
+                    // Relative path: resolve against project path
+                    string relativePath = trusscDir.substr(cmakePrefix.length());
+                    fs::path trusscPath = fs::weakly_canonical(fs::path(path) / relativePath);
+                    importedTcRoot = trusscPath.parent_path().string();
+                } else {
+                    // Absolute path: remove /trussc suffix to get TC_ROOT
+                    importedTcRoot = trusscDir;
+                    if (trusscDir.size() > 7 && trusscDir.substr(trusscDir.size() - 7) == "/trussc") {
+                        importedTcRoot = trusscDir.substr(0, trusscDir.size() - 7);
+                    }
+                }
+
+                // Update tcRoot if valid path (check trussc/CMakeLists.txt)
+                if (!importedTcRoot.empty() && fs::exists(importedTcRoot + "/trussc/CMakeLists.txt")) {
+                    tcRoot = importedTcRoot;
+                    strncpy(tcRootBuf, tcRoot.c_str(), sizeof(tcRootBuf) - 1);
+                    saveConfig();
+                    scanAddons();
+                }
             }
         }
     }
@@ -911,13 +968,9 @@ bool tcApp::updateProject() {
     }
 
     string cmakePath = importedProjectPath + "/CMakeLists.txt";
-    if (!fs::exists(cmakePath)) {
-        setStatus("CMakeLists.txt not found", true);
-        return false;
-    }
 
     try {
-        // Read new CMakeLists.txt from template
+        // Read new CMakeLists.txt from template (always overwrite)
         string templatePath = getTemplatePath();
         string templateCmakePath = templatePath + "/CMakeLists.txt";
 
@@ -927,10 +980,14 @@ bool tcApp::updateProject() {
         inFile.close();
         string content = buffer.str();
 
-        // Set TC_ROOT directly
-        size_t pos = content.find("set(TC_ROOT \"\"");
+        // Replace TRUSSC_DIR (relative if inside tcRoot, absolute otherwise)
+        size_t pos = content.find("set(TRUSSC_DIR \"");
         if (pos != string::npos) {
-            content.replace(pos, 14, "set(TC_ROOT \"" + tcRoot + "\"");
+            size_t endPos = content.find("\")", pos);
+            if (endPos != string::npos) {
+                content.replace(pos, endPos - pos + 2,
+                    "set(TRUSSC_DIR \"" + getTrusscDirValue(importedProjectPath) + "\")");
+            }
         }
 
         // Write back
@@ -1064,49 +1121,51 @@ void tcApp::doGenerateProject() {
         projDir.pop_back();
     }
     string destPath = projDir + "/" + projectName;
-
-    // Check if already exists
-    if (fs::exists(destPath)) {
-        log("Error: Project already exists");
-        setStatus("Project already exists", true);
-        return;
-    }
+    bool folderExists = fs::is_directory(destPath);
 
     try {
-        log("Creating project directory...");
-
         // Create parent directory
         fs::create_directories(projDir);
 
-        // Copy template (exclude build, bin folders)
-        fs::create_directories(destPath);
-        for (const auto& entry : fs::directory_iterator(templatePath)) {
-            string name = entry.path().filename().string();
-            if (name == "build" || name == "bin") {
-                continue;  // Skip
+        // Copy template only if folder doesn't exist (new project)
+        if (!folderExists) {
+            log("Creating project directory...");
+            fs::create_directories(destPath);
+            for (const auto& entry : fs::directory_iterator(templatePath)) {
+                string name = entry.path().filename().string();
+                if (name == "build" || name == "bin") {
+                    continue;  // Skip
+                }
+                fs::copy(entry.path(), destPath / entry.path().filename(),
+                         fs::copy_options::recursive);
             }
-            fs::copy(entry.path(), destPath / entry.path().filename(),
-                     fs::copy_options::recursive);
+        } else {
+            log("Updating existing project...");
         }
 
         log("Configuring CMakeLists.txt...");
 
-        // Rewrite CMakeLists.txt (set TC_ROOT directly)
-        string cmakePath = destPath + "/CMakeLists.txt";
-        ifstream inFile(cmakePath);
+        // Read CMakeLists.txt from template and write to project
+        string templateCmakePath = templatePath + "/CMakeLists.txt";
+        ifstream inFile(templateCmakePath);
         stringstream buffer;
         buffer << inFile.rdbuf();
         inFile.close();
 
         string content = buffer.str();
 
-        // Set TC_ROOT directly
-        size_t pos = content.find("set(TC_ROOT \"\"");
+        // Replace TRUSSC_DIR (relative if inside tcRoot, absolute otherwise)
+        size_t pos = content.find("set(TRUSSC_DIR \"");
         if (pos != string::npos) {
-            content.replace(pos, 14, "set(TC_ROOT \"" + tcRoot + "\"");
+            size_t endPos = content.find("\")", pos);
+            if (endPos != string::npos) {
+                content.replace(pos, endPos - pos + 2,
+                    "set(TRUSSC_DIR \"" + getTrusscDirValue(destPath) + "\")");
+            }
         }
 
-        // Write back
+        // Write to project
+        string cmakePath = destPath + "/CMakeLists.txt";
         ofstream outFile(cmakePath);
         outFile << content;
         outFile.close();
@@ -1173,16 +1232,11 @@ void tcApp::doUpdateProject() {
     }
 
     string cmakePath = importedProjectPath + "/CMakeLists.txt";
-    if (!fs::exists(cmakePath)) {
-        log("Error: CMakeLists.txt not found");
-        setStatus("CMakeLists.txt not found", true);
-        return;
-    }
 
     try {
         log("Reading template...");
 
-        // Read new CMakeLists.txt from template
+        // Read new CMakeLists.txt from template (always overwrite)
         string templatePath = getTemplatePath();
         string templateCmakePath = templatePath + "/CMakeLists.txt";
 
@@ -1194,10 +1248,14 @@ void tcApp::doUpdateProject() {
 
         log("Configuring CMakeLists.txt...");
 
-        // Set TC_ROOT directly
-        size_t pos = content.find("set(TC_ROOT \"\"");
+        // Replace TRUSSC_DIR (relative if inside tcRoot, absolute otherwise)
+        size_t pos = content.find("set(TRUSSC_DIR \"");
         if (pos != string::npos) {
-            content.replace(pos, 14, "set(TC_ROOT \"" + tcRoot + "\"");
+            size_t endPos = content.find("\")", pos);
+            if (endPos != string::npos) {
+                content.replace(pos, endPos - pos + 2,
+                    "set(TRUSSC_DIR \"" + getTrusscDirValue(importedProjectPath) + "\")");
+            }
         }
 
         // Write back
