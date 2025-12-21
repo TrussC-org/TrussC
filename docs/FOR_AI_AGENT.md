@@ -390,10 +390,12 @@ getDrawCount();           // Draw frame count
 getFrameRate();           // Current FPS
 
 // FPS settings
-setFps(fps);              // Target FPS (Update + Draw sync)
-setDrawFps(fps);          // Draw rate separate setting
-setUpdateFps(fps);        // Update rate separate (Decoupled mode)
-setVsync(true);           // VSync mode
+setFps(VSYNC);            // VSync mode (default)
+setFps(60);               // Target FPS (Update + Draw synced)
+setFps(EVENT_DRIVEN);     // Event-driven (only on redraw())
+setIndependentFps(120, VSYNC);  // Update 120Hz, Draw VSync (independent)
+getFpsSettings();         // Get current FPS settings (FpsSettings struct)
+getFps();                 // Get actual measured FPS
 
 // Timestamp
 getTimestampString();     // "2024-01-15-18-29-35-299"
@@ -567,8 +569,8 @@ Handle custom commands in app:
 class tcApp : public App {
 public:
     void setup() override {
-        // Keep listener as member variable (IMPORTANT!)
-        consoleListener_ = events().console.listen([this](ConsoleEventArgs& e) {
+        // Pass listener by reference - keeps connection alive
+        events().console.listen(consoleListener_, [this](ConsoleEventArgs& e) {
             if (e.args.empty()) return;
 
             if (e.args[0] == "spawn" && e.args.size() >= 3) {
@@ -589,7 +591,7 @@ private:
 };
 ```
 
-**IMPORTANT**: The return value of `events().console.listen()` (`EventListener`) MUST be stored as a member variable. If not stored, the listener is automatically unregistered when scope ends (RAII pattern).
+**IMPORTANT**: The `EventListener` MUST be stored as a member variable. When destroyed, the listener automatically unregisters (RAII pattern).
 
 ### Disabling Console
 
@@ -784,14 +786,14 @@ size_t count = mic.getBuffer(buffer, 1024);
 ```cpp
 TcpClient client;
 
-// Event-driven pattern (IMPORTANT: store listeners!)
-connectListener_ = client.onConnect.listen([this]() {
+// Event-driven pattern (pass listener by reference, store as member!)
+client.onConnect.listen(connectListener_, [this]() {
     tcLogNotice("TCP") << "Connected!";
 });
-disconnectListener_ = client.onDisconnect.listen([this]() {
+client.onDisconnect.listen(disconnectListener_, [this]() {
     tcLogNotice("TCP") << "Disconnected";
 });
-receiveListener_ = client.onReceive.listen([this](TcpReceiveEventArgs& e) {
+client.onReceive.listen(receiveListener_, [this](TcpReceiveEventArgs& e) {
     string data(e.data.begin(), e.data.end());
     tcLogNotice("TCP") << "Received: " << data;
 });
@@ -815,11 +817,11 @@ client.update();
 ```cpp
 TcpServer server;
 
-// Event handlers (store as members!)
-clientConnectListener_ = server.onClientConnect.listen([](TcpClientEventArgs& e) {
+// Event handlers (pass listener by reference, store as members!)
+server.onClientConnect.listen(clientConnectListener_, [](TcpClientEventArgs& e) {
     tcLogNotice("Server") << "Client connected: " << e.clientId;
 });
-clientReceiveListener_ = server.onClientReceive.listen([](TcpReceiveEventArgs& e) {
+server.onClientReceive.listen(clientReceiveListener_, [](TcpReceiveEventArgs& e) {
     // e.clientId, e.data
 });
 
@@ -839,8 +841,8 @@ server.update();
 ```cpp
 UdpSocket udp;
 
-// Receive callback
-receiveListener_ = udp.onReceive.listen([](UdpReceiveEventArgs& e) {
+// Receive callback (pass listener by reference)
+udp.onReceive.listen(receiveListener_, [](UdpReceiveEventArgs& e) {
     // e.data, e.senderAddress, e.senderPort
 });
 
@@ -1100,12 +1102,15 @@ tcCloseLogFile();
 Event<MouseEventArgs> onMousePress;
 
 // Register listener (RAII - auto-unregister on scope end)
-EventListener listener = onMousePress.listen([](MouseEventArgs& e) {
+// IMPORTANT: Pass EventListener by reference - it stores the connection
+EventListener listener;
+onMousePress.listen(listener, [](MouseEventArgs& e) {
     // Event handling
 });
 
 // Register member function
-EventListener listener = onMousePress.listen(this, &MyClass::onPress);
+EventListener listener;
+onMousePress.listen(listener, this, &MyClass::onPress);
 
 // Manual disconnect
 listener.disconnect();
@@ -1122,19 +1127,17 @@ onMousePress.notify(args);
 ### EventListener RAII Pattern (CRITICAL)
 
 ```cpp
-// WRONG - Listener immediately unregistered!
-void setup() override {
-    events().console.listen([](ConsoleEventArgs& e) { });  // Lost immediately
-}
+// EventListener stores the connection - it auto-unregisters when destroyed
+// MUST be stored as member variable to keep the listener alive
 
-// CORRECT - Store as member variable
 class tcApp : public App {
     EventListener consoleListener_;
     EventListener keyListener_;
 
     void setup() override {
-        consoleListener_ = events().console.listen([](ConsoleEventArgs& e) { });
-        keyListener_ = events().keyPressed.listen([](KeyEventArgs& e) { });
+        // Pass listener by reference - connection is stored in the listener
+        events().console.listen(consoleListener_, [](ConsoleEventArgs& e) { });
+        events().keyPressed.listen(keyListener_, [](KeyEventArgs& e) { });
     }
 };
 ```
@@ -1155,21 +1158,24 @@ bool hitTest(float lx, float ly) override {
 }
 ```
 
-### Decoupled Update/Draw Mode
+### FPS Modes
 
 ```cpp
-// Use when update needs higher rate than draw (e.g., physics)
-setUpdateFps(120);  // Update at 120fps
-setDrawFps(60);     // Draw at 60fps
+// VSync mode (default) - synced to monitor refresh
+setFps(VSYNC);
 
-// Check which cycle in update()
-void update() override {
-    // This runs at 120fps
-    physics.step();
-}
-void draw() override {
-    // This runs at 60fps
-}
+// Fixed FPS (update and draw synced)
+setFps(60);
+
+// Event-driven (only draws on redraw() call)
+setFps(EVENT_DRIVEN);
+
+// Independent mode (update and draw at different rates)
+setIndependentFps(120, VSYNC);  // Update at 120Hz, Draw at VSync
+
+// Get current settings
+FpsSettings fps = getFpsSettings();
+// fps.updateFps, fps.drawFps, fps.synced, fps.actualVsyncFps
 ```
 
 ### Pixel-Perfect Coordinates

@@ -174,12 +174,17 @@ stroke2.draw();
 
 **TrussC Solution:**
 ```cpp
-// Independent Draw and Update control
-tc::setDrawVsync(true);    // Draw at VSync (60Hz)
-tc::setUpdateFps(120);     // Physics update at 120Hz
+// Default: VSync mode (update and draw synced to monitor)
+tc::setFps(VSYNC);
+
+// Fixed FPS (update and draw synced)
+tc::setFps(60);
+
+// Independent rates (e.g., physics at 120Hz, draw at VSync)
+tc::setIndependentFps(120, VSYNC);
 
 // Event-driven (power-saving mode)
-tc::setDrawFps(0);         // Stop auto drawing
+tc::setFps(EVENT_DRIVEN);
 // Call tc::redraw() on mousePressed etc. to trigger draw
 ```
 
@@ -274,10 +279,11 @@ Reference for oF users finding equivalent features in TrussC.
 | `mousePressed(x, y, button)` | `mousePressed(x, y, button)` | mouseExample | Same |
 | `windowResized(w, h)` | `windowResized(w, h)` | emptyExample | Same |
 | `dragEvent(ofDragInfo)` | `filesDropped(paths)` | dragDropExample | |
-| `ofSetFrameRate(60)` | `tc::setFps(60)` | loopModeExample | |
-| `ofSetVerticalSync(true)` | `tc::setVsync(true)` | loopModeExample | |
-| - | `tc::setDrawFps(fps)` | loopModeExample | Independent draw rate |
-| - | `tc::setUpdateFps(fps)` | loopModeExample | Independent update rate |
+| `ofSetFrameRate(60)` | `tc::setFps(60)` | loopModeExample | Synced mode |
+| `ofSetVerticalSync(true)` | `tc::setFps(VSYNC)` | loopModeExample | VSync mode |
+| - | `tc::setFps(EVENT_DRIVEN)` | loopModeExample | Event-driven mode |
+| - | `tc::setIndependentFps(u, d)` | loopModeExample | Independent rates |
+| - | `tc::getFpsSettings()` | loopModeExample | Get current settings |
 | `ofGetElapsedTimef()` | `tc::getElapsedTime()` | graphicsExample | |
 | `ofGetFrameRate()` | `tc::getFrameRate()` | loopModeExample | |
 | `ofGetFrameNum()` | `tc::getFrameCount()` | utilsExample | update count |
