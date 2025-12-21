@@ -11,14 +11,14 @@ namespace tcx::box2d {
 // =============================================================================
 // 円形ボディ
 // =============================================================================
-class Circle : public Body {
+class CircleBody : public Body {
 public:
-    Circle() = default;
-    ~Circle() override = default;
+    CircleBody() = default;
+    ~CircleBody() override = default;
 
     // ムーブ
-    Circle(Circle&& other) noexcept;
-    Circle& operator=(Circle&& other) noexcept;
+    CircleBody(CircleBody&& other) noexcept;
+    CircleBody& operator=(CircleBody&& other) noexcept;
 
     // ---------------------------------------------------------------------
     // 作成

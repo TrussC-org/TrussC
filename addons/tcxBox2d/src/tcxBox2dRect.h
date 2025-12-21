@@ -11,14 +11,14 @@ namespace tcx::box2d {
 // =============================================================================
 // 矩形ボディ
 // =============================================================================
-class Rect : public Body {
+class RectBody : public Body {
 public:
-    Rect() = default;
-    ~Rect() override = default;
+    RectBody() = default;
+    ~RectBody() override = default;
 
     // ムーブ
-    Rect(Rect&& other) noexcept;
-    Rect& operator=(Rect&& other) noexcept;
+    RectBody(RectBody&& other) noexcept;
+    RectBody& operator=(RectBody&& other) noexcept;
 
     // ---------------------------------------------------------------------
     // 作成
