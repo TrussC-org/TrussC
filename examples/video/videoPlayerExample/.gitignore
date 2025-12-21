@@ -1,0 +1,22 @@
+# Build directory
+build/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Xcode project files
+*.xcodeproj/
+*.xcworkspace/
+
+# macOS specific
+.DS_Store
+
+# IDE settings
+.vscode/
+.idea/
+
+# Binary output
+*.app/

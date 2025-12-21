@@ -1818,6 +1818,9 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 // TrussC video input (webcam)
 #include "tc/video/tcVideoGrabber.h"
 
+// TrussC video playback
+#include "tc/video/tcVideoPlayer.h"
+
 // TrussC 3D primitives
 #include <map>
 #include "tc/3d/tcPrimitives.h"
