@@ -16,8 +16,7 @@ void tcApp::setup() {
     imguiSetup();
 
     // Power-saving mode: update at 30fps, draw is event-driven
-    setUpdateFps(30);
-    setDrawFps(0);  // Disable automatic drawing
+    setIndependentFps(30, EVENT_DRIVEN);
 
     // Config file path (~/.trussc/config.json)
     string home = getenv("HOME") ? getenv("HOME") : "";
