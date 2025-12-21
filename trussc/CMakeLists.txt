@@ -132,6 +132,10 @@ elseif(TC_PLATFORM_WINDOWS)
         comdlg32
         shell32
         ole32
+        # Media Foundation (VideoPlayer)
+        mf
+        mfplat
+        mfuuid
     )
     # MSVC: ソースファイルをUTF-8として扱う
     # /wd4244, /wd4267: int/float, size_t/int 変換警告を無効化
