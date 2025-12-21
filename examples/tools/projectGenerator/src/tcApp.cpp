@@ -837,8 +837,8 @@ void tcApp::importProject(const string& path) {
         size_t end = content.find("\"", start);
         if (end != string::npos) {
             string importedTcRoot = content.substr(start, end - start);
-            // Update tcRoot if valid path
-            if (!importedTcRoot.empty() && fs::exists(importedTcRoot + "/CMakeLists.txt")) {
+            // Update tcRoot if valid path (check trussc/CMakeLists.txt)
+            if (!importedTcRoot.empty() && fs::exists(importedTcRoot + "/trussc/CMakeLists.txt")) {
                 tcRoot = importedTcRoot;
                 strncpy(tcRootBuf, tcRoot.c_str(), sizeof(tcRootBuf) - 1);
                 saveConfig();
