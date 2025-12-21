@@ -5,8 +5,8 @@
 namespace trussc {
 
 // =============================================================================
-// RectNode - 矩形を持つ2D UIノード
-// Ray-based Hit Test により、3D空間内で回転・スケールしても正確に判定可能
+// RectNode - 2D UI node with rectangle
+// Supports accurate hit testing via ray-based approach, even with rotation/scale in 3D space
 // =============================================================================
 
 class RectNode : public Node {
@@ -15,22 +15,22 @@ public:
     using WeakPtr = std::weak_ptr<RectNode>;
 
     // -------------------------------------------------------------------------
-    // イベント（外部からリスナー登録可能）
+    // Events (listeners can be registered externally)
     // -------------------------------------------------------------------------
     Event<MouseEventArgs> mousePressed;
     Event<MouseEventArgs> mouseReleased;
     Event<MouseDragEventArgs> mouseDragged;
     Event<ScrollEventArgs> mouseScrolled;
 
-    // サイズ（ローカル座標系での幅・高さ）
+    // Size (width and height in local coordinates)
     float width = 100.0f;
     float height = 100.0f;
 
     // -------------------------------------------------------------------------
-    // クリッピング設定
+    // Clipping settings
     // -------------------------------------------------------------------------
 
-    // クリッピングを有効/無効にする
+    // Enable/disable clipping
     void setClipping(bool enabled) {
         clipping_ = enabled;
     }
@@ -40,7 +40,7 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // サイズ設定
+    // Size settings
     // -------------------------------------------------------------------------
 
     void setSize(float w, float h) {
@@ -57,11 +57,11 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // 矩形取得（ローカル座標系）
+    // Get rectangle (in local coordinates)
     // -------------------------------------------------------------------------
 
-    // 原点 (0,0) から始まる矩形として扱う
-    // 中心を原点にしたい場合は、描画時に -width/2, -height/2 オフセットする
+    // Treat as rectangle starting from origin (0,0)
+    // To center at origin, offset by -width/2, -height/2 when drawing
     float getLeft() const { return 0; }
     float getRight() const { return width; }
     float getTop() const { return 0; }
@@ -71,22 +71,22 @@ public:
     // Ray-based Hit Test
     // -------------------------------------------------------------------------
 
-    // Ray によるヒットテスト（Z=0 平面との交差判定）
-    // ローカル空間では、このノードは Z=0 平面上に width x height の矩形として存在する
+    // Hit test using ray (intersection with Z=0 plane)
+    // In local space, this node exists as a width x height rectangle on Z=0 plane
     bool hitTest(const Ray& localRay, float& outDistance) override {
-        // イベントが有効でない場合はヒットしない
+        // No hit if events are not enabled
         if (!isEventsEnabled()) {
             return false;
         }
 
-        // Z=0 平面との交差を計算
+        // Calculate intersection with Z=0 plane
         float t;
         Vec3 hitPoint;
         if (!localRay.intersectZPlane(t, hitPoint)) {
             return false;
         }
 
-        // 交点が矩形内にあるかチェック
+        // Check if intersection point is within rectangle
         if (hitPoint.x >= 0 && hitPoint.x <= width &&
             hitPoint.y >= 0 && hitPoint.y <= height) {
             outDistance = t;
@@ -96,7 +96,7 @@ public:
         return false;
     }
 
-    // 従来の2D用ヒットテスト（後方互換性）
+    // Traditional 2D hit test (backward compatibility)
     bool hitTest(float localX, float localY) override {
         if (!isEventsEnabled()) {
             return false;
@@ -106,22 +106,22 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // 描画ヘルパー（オーバーライド用）
+    // Drawing helpers (for overriding)
     // -------------------------------------------------------------------------
 
-    // 矩形を描画（派生クラスでオーバーライド可能）
+    // Draw rectangle (can be overridden in derived classes)
     void draw() override {
-        // デフォルトでは何も描画しない
-        // 派生クラスで drawRect(0, 0, width, height) などを呼ぶ
+        // By default, draw nothing
+        // Derived classes call drawRect(0, 0, width, height) etc.
     }
 
-    // クリッピング対応の描画ツリー
+    // Draw tree with clipping support
     void drawTree() override {
         if (!isActive) return;
 
         pushMatrix();
 
-        // 変換を適用
+        // Apply transformations
         translate(x, y);
         if (rotation != 0.0f) {
             rotate(rotation);
@@ -130,19 +130,19 @@ public:
             scale(scaleX, scaleY);
         }
 
-        // ユーザーの描画
+        // User drawing
         if (isVisible) {
             draw();
         }
 
-        // クリッピングが有効なら scissor を設定（スタックにプッシュ）
+        // If clipping enabled, set scissor (push to stack)
         if (clipping_) {
-            // ローカル座標 (0,0) と (width, height) をグローバル座標に変換
+            // Convert local coordinates (0,0) and (width, height) to global
             float gx1, gy1, gx2, gy2;
             localToGlobal(0, 0, gx1, gy1);
             localToGlobal(width, height, gx2, gy2);
 
-            // スクリーン座標での矩形を計算（DPIスケール考慮）
+            // Calculate rectangle in screen coordinates (considering DPI scale)
             float dpi = sapp_dpi_scale();
             float sx = std::min(gx1, gx2) * dpi;
             float sy = std::min(gy1, gy2) * dpi;
@@ -152,12 +152,12 @@ public:
             pushScissor(sx, sy, sw, sh);
         }
 
-        // 子ノードを描画
+        // Draw child nodes
         for (auto& child : children_) {
             child->drawTree();
         }
 
-        // クリッピングを復元（スタックからポップ）
+        // Restore clipping (pop from stack)
         if (clipping_) {
             popScissor();
         }
@@ -168,7 +168,7 @@ public:
 protected:
     bool clipping_ = false;
     // -------------------------------------------------------------------------
-    // マウスイベント（イベントを発火）
+    // Mouse events (fire events)
     // -------------------------------------------------------------------------
 
     bool onMousePress(float localX, float localY, int button) override {
@@ -177,7 +177,7 @@ protected:
         args.y = localY;
         args.button = button;
         mousePressed.notify(args);
-        return true;  // イベントを消費
+        return true;  // Consume event
     }
 
     bool onMouseRelease(float localX, float localY, int button) override {
@@ -194,7 +194,7 @@ protected:
         args.x = localX;
         args.y = localY;
         args.button = button;
-        args.deltaX = localX - getMouseX();  // 簡易的な delta
+        args.deltaX = localX - getMouseX();  // Simple delta
         args.deltaY = localY - getMouseY();
         mouseDragged.notify(args);
         return true;
@@ -211,24 +211,24 @@ protected:
     }
 
     // -------------------------------------------------------------------------
-    // 描画ヘルパー
+    // Drawing helpers
     // -------------------------------------------------------------------------
 
-    // 矩形を塗りつぶしで描画するヘルパー
+    // Helper to draw rectangle with fill
     void drawRectFill() {
         fill();
         noStroke();
         drawRect(0, 0, width, height);
     }
 
-    // 矩形を枠線で描画するヘルパー
+    // Helper to draw rectangle with stroke
     void drawRectStroke() {
         noFill();
         stroke();
         drawRect(0, 0, width, height);
     }
 
-    // 矩形を塗りつぶし＋枠線で描画するヘルパー
+    // Helper to draw rectangle with both fill and stroke
     void drawRectFillStroke() {
         fill();
         stroke();
@@ -237,31 +237,31 @@ protected:
 };
 
 // =============================================================================
-// Button - シンプルなボタン（RectNode の例）
+// Button - Simple button (example of RectNode)
 // =============================================================================
 
 class Button : public RectNode {
 public:
     using Ptr = std::shared_ptr<Button>;
 
-    // 状態
+    // State
     bool isHovered = false;
     bool isPressed = false;
 
-    // 色設定
+    // Color settings
     Color normalColor = Color(0.3f, 0.3f, 0.3f);
     Color hoverColor = Color(0.4f, 0.4f, 0.5f);
     Color pressColor = Color(0.2f, 0.2f, 0.3f);
 
-    // ラベル
+    // Label
     std::string label;
 
     Button() {
-        enableEvents();  // イベントを有効化
+        enableEvents();  // Enable events
     }
 
     void draw() override {
-        // 状態に応じた色を設定
+        // Set color based on state
         if (isPressed) {
             setColor(pressColor);
         } else if (isHovered) {
@@ -272,10 +272,10 @@ public:
 
         drawRectFill();
 
-        // ラベルを中央に描画
+        // Draw label at center
         if (!label.empty()) {
             setColor(1.0f, 1.0f, 1.0f);
-            // 簡易的な中央揃え（フォントサイズを考慮していない簡易版）
+            // Simple centering (simplified version without font size consideration)
             float textX = width / 2 - label.length() * 4;
             float textY = height / 2 + 4;
             drawBitmapString(label, textX, textY);
@@ -285,7 +285,7 @@ public:
 protected:
     bool onMousePress(float localX, float localY, int button) override {
         isPressed = true;
-        return RectNode::onMousePress(localX, localY, button);  // 親のイベントも発火
+        return RectNode::onMousePress(localX, localY, button);  // Also fire parent's event
     }
 
     bool onMouseRelease(float localX, float localY, int button) override {

@@ -1,23 +1,23 @@
 #pragma once
 
 // =============================================================================
-// tcMaterial.h - マテリアル（材質）
+// tcMaterial.h - Material
 // =============================================================================
 //
-// Phong ライティングモデル用のマテリアル定義
-// CPU 側でライティング計算に使用する
+// Material definition for Phong lighting model
+// Used for lighting calculations on CPU side
 //
 // =============================================================================
 
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// Material クラス
+// Material class
 // ---------------------------------------------------------------------------
 class Material {
 public:
     Material() {
-        // デフォルト: 白いプラスチック風
+        // Default: white plastic-like
         ambient_ = Color(0.2f, 0.2f, 0.2f, 1.0f);
         diffuse_ = Color(0.8f, 0.8f, 0.8f, 1.0f);
         specular_ = Color(0.5f, 0.5f, 0.5f, 1.0f);
@@ -25,51 +25,51 @@ public:
         shininess_ = 32.0f;
     }
 
-    // === Ambient（環境光反射率） ===
+    // === Ambient (ambient reflectance) ===
     void setAmbient(const Color& c) { ambient_ = c; }
     void setAmbient(float r, float g, float b, float a = 1.0f) {
         ambient_ = Color(r, g, b, a);
     }
     const Color& getAmbient() const { return ambient_; }
 
-    // === Diffuse（拡散反射率） ===
+    // === Diffuse (diffuse reflectance) ===
     void setDiffuse(const Color& c) { diffuse_ = c; }
     void setDiffuse(float r, float g, float b, float a = 1.0f) {
         diffuse_ = Color(r, g, b, a);
     }
     const Color& getDiffuse() const { return diffuse_; }
 
-    // === Specular（鏡面反射率） ===
+    // === Specular (specular reflectance) ===
     void setSpecular(const Color& c) { specular_ = c; }
     void setSpecular(float r, float g, float b, float a = 1.0f) {
         specular_ = Color(r, g, b, a);
     }
     const Color& getSpecular() const { return specular_; }
 
-    // === Emission（自己発光） ===
+    // === Emission (self-illumination) ===
     void setEmission(const Color& c) { emission_ = c; }
     void setEmission(float r, float g, float b, float a = 1.0f) {
         emission_ = Color(r, g, b, a);
     }
     const Color& getEmission() const { return emission_; }
 
-    // === Shininess（光沢度） ===
-    // 値が大きいほど鏡面ハイライトが鋭くなる（1〜128程度）
+    // === Shininess ===
+    // Higher values produce sharper specular highlights (around 1-128)
     void setShininess(float s) { shininess_ = s; }
     float getShininess() const { return shininess_; }
 
-    // === 一括設定 ===
-    // 色を指定して Ambient/Diffuse を一括設定（簡易設定）
+    // === Batch setting ===
+    // Set Ambient/Diffuse together from color (simple setting)
     void setColor(const Color& c) {
         ambient_ = Color(c.r * 0.2f, c.g * 0.2f, c.b * 0.2f, c.a);
         diffuse_ = c;
     }
 
     // -------------------------------------------------------------------------
-    // プリセットマテリアル
+    // Preset materials
     // -------------------------------------------------------------------------
 
-    // ゴールド（金）
+    // Gold
     static Material gold() {
         Material mat;
         mat.setAmbient(0.24725f, 0.1995f, 0.0745f);
@@ -79,7 +79,7 @@ public:
         return mat;
     }
 
-    // シルバー（銀）
+    // Silver
     static Material silver() {
         Material mat;
         mat.setAmbient(0.19225f, 0.19225f, 0.19225f);
@@ -89,7 +89,7 @@ public:
         return mat;
     }
 
-    // ブロンズ（青銅）
+    // Bronze
     static Material bronze() {
         Material mat;
         mat.setAmbient(0.2125f, 0.1275f, 0.054f);
@@ -99,7 +99,7 @@ public:
         return mat;
     }
 
-    // 銅
+    // Copper
     static Material copper() {
         Material mat;
         mat.setAmbient(0.19125f, 0.0735f, 0.0225f);
@@ -109,7 +109,7 @@ public:
         return mat;
     }
 
-    // プラスチック（指定色）
+    // Plastic (specified color)
     static Material plastic(const Color& baseColor) {
         Material mat;
         mat.setAmbient(baseColor.r * 0.1f, baseColor.g * 0.1f, baseColor.b * 0.1f);
@@ -119,7 +119,7 @@ public:
         return mat;
     }
 
-    // ゴム（指定色、低光沢）
+    // Rubber (specified color, low gloss)
     static Material rubber(const Color& baseColor) {
         Material mat;
         mat.setAmbient(baseColor.r * 0.05f, baseColor.g * 0.05f, baseColor.b * 0.05f);
@@ -129,7 +129,7 @@ public:
         return mat;
     }
 
-    // エメラルド
+    // Emerald
     static Material emerald() {
         Material mat;
         mat.setAmbient(0.0215f, 0.1745f, 0.0215f);
@@ -139,7 +139,7 @@ public:
         return mat;
     }
 
-    // ルビー
+    // Ruby
     static Material ruby() {
         Material mat;
         mat.setAmbient(0.1745f, 0.01175f, 0.01175f);
@@ -150,11 +150,11 @@ public:
     }
 
 private:
-    Color ambient_;      // 環境光反射率
-    Color diffuse_;      // 拡散反射率
-    Color specular_;     // 鏡面反射率
-    Color emission_;     // 自己発光
-    float shininess_;    // 光沢度（Phong指数）
+    Color ambient_;      // Ambient reflectance
+    Color diffuse_;      // Diffuse reflectance
+    Color specular_;     // Specular reflectance
+    Color emission_;     // Self-illumination
+    float shininess_;    // Shininess (Phong exponent)
 };
 
 } // namespace trussc

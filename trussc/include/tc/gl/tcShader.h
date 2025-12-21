@@ -1,21 +1,21 @@
 #pragma once
 
 // =============================================================================
-// tcShader.h - フルスクリーンシェーダー（ポストプロセス用）
+// tcShader.h - Fullscreen shader (for post-processing)
 // =============================================================================
 //
-// sokol_gfx を直接使用したフルスクリーンシェーダー
-// FBO と組み合わせてポストプロセスエフェクトを実現
+// Fullscreen shader using sokol_gfx directly
+// Combined with FBO to achieve post-process effects
 //
-// 使用例:
+// Usage example:
 //   tc::Shader shader;
 //   shader.loadFromSource(fragmentShaderSource);
 //
-//   // draw() 内で
+//   // Inside draw()
 //   shader.begin();
 //   shader.setUniformTime(tc::getElapsedTime());
 //   shader.setUniformResolution(tc::getWindowWidth(), tc::getWindowHeight());
-//   shader.draw();  // フルスクリーン描画
+//   shader.draw();  // Fullscreen draw
 //   shader.end();
 //
 // =============================================================================
@@ -32,18 +32,18 @@ namespace trussc {
 namespace fs = std::filesystem;
 
 // ---------------------------------------------------------------------------
-// Shader クラス（フルスクリーンシェーダー）
+// Shader class (fullscreen shader)
 // ---------------------------------------------------------------------------
 class Shader {
 public:
     Shader() = default;
     ~Shader() { clear(); }
 
-    // コピー禁止
+    // Copy prohibited
     Shader(const Shader&) = delete;
     Shader& operator=(const Shader&) = delete;
 
-    // ムーブ対応
+    // Move support
     Shader(Shader&& other) noexcept {
         moveFrom(std::move(other));
     }
@@ -57,10 +57,10 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // シェーダー読み込み
+    // Shader loading
     // -------------------------------------------------------------------------
 
-    // ファイルから読み込み
+    // Load from file
     bool load(const fs::path& path) {
         std::ifstream file(path);
         if (!file) {
@@ -73,13 +73,13 @@ public:
         return loadFromSource(buffer.str());
     }
 
-    // フラグメントシェーダーソースから読み込み（Metal MSL）
+    // Load from fragment shader source (Metal MSL)
     bool loadFromSource(const std::string& fragmentSource) {
         clear();
 
         fragmentSource_ = fragmentSource;
 
-        // 頂点シェーダー（固定: フルスクリーンクアッド用）
+        // Vertex shader (fixed: for fullscreen quad)
         const char* vertexSource = R"(
             #include <metal_stdlib>
             using namespace metal;
@@ -102,18 +102,18 @@ public:
             }
         )";
 
-        // シェーダーを作成
+        // Create shader
         sg_shader_desc shd_desc = {};
         shd_desc.vertex_func.source = vertexSource;
         shd_desc.vertex_func.entry = "vertexMain";
         shd_desc.fragment_func.source = fragmentSource_.c_str();
         shd_desc.fragment_func.entry = "fragmentMain";
 
-        // 頂点属性
+        // Vertex attributes
         shd_desc.attrs[0].base_type = SG_SHADERATTRBASETYPE_FLOAT;  // position
         shd_desc.attrs[1].base_type = SG_SHADERATTRBASETYPE_FLOAT;  // texcoord
 
-        // ユニフォームブロック
+        // Uniform block
         shd_desc.uniform_blocks[0].stage = SG_SHADERSTAGE_FRAGMENT;
         shd_desc.uniform_blocks[0].size = sizeof(Uniforms);
         shd_desc.uniform_blocks[0].msl_buffer_n = 0;
@@ -126,12 +126,12 @@ public:
             return false;
         }
 
-        // パイプラインを作成
+        // Create pipeline
         sg_pipeline_desc pip_desc = {};
         pip_desc.shader = shader_;
         pip_desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;  // position
         pip_desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;  // texcoord
-        pip_desc.index_type = SG_INDEXTYPE_UINT16;  // インデックスバッファを使用
+        pip_desc.index_type = SG_INDEXTYPE_UINT16;  // Use index buffer
         pip_desc.colors[0].blend.enabled = true;
         pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
         pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
@@ -145,7 +145,7 @@ public:
             return false;
         }
 
-        // フルスクリーンクアッドの頂点バッファを作成
+        // Create vertex buffer for fullscreen quad
         float vertices[] = {
             // position    texcoord
             -1.0f, -1.0f,  0.0f, 1.0f,
@@ -159,7 +159,7 @@ public:
         vbuf_desc.label = "fullscreen_vertices";
         vertexBuffer_ = sg_make_buffer(&vbuf_desc);
 
-        // インデックスバッファ
+        // Index buffer
         uint16_t indices[] = { 0, 1, 2, 0, 2, 3 };
         sg_buffer_desc ibuf_desc = {};
         ibuf_desc.usage.index_buffer = true;
@@ -171,7 +171,7 @@ public:
         return true;
     }
 
-    // リソースを解放
+    // Release resources
     void clear() {
         if (loaded_) {
             sg_destroy_buffer(indexBuffer_);
@@ -190,15 +190,15 @@ public:
     bool isLoaded() const { return loaded_; }
 
     // -------------------------------------------------------------------------
-    // シェーダー適用・描画
+    // Shader application and drawing
     // -------------------------------------------------------------------------
 
-    // シェーダーを有効化
+    // Enable shader
     void begin() {
         if (!loaded_) return;
         active_ = true;
 
-        // sokol_gl の描画を flush
+        // Flush sokol_gl drawing
         sgl_draw();
 
         sg_apply_pipeline(pipeline_);
@@ -209,22 +209,22 @@ public:
         sg_apply_bindings(&bindings);
     }
 
-    // フルスクリーン描画
+    // Fullscreen draw
     void draw() {
         if (!active_) return;
 
-        // ユニフォームを適用
+        // Apply uniforms
         sg_range range = { &uniforms_, sizeof(Uniforms) };
         sg_apply_uniforms(0, &range);
 
         sg_draw(0, 6, 1);
     }
 
-    // シェーダーを無効化
+    // Disable shader
     void end() {
         if (!active_) return;
         active_ = false;
-        // sokol_gl の状態をリセット
+        // Reset sokol_gl state
         sgl_defaults();
         sgl_matrix_mode_projection();
         sgl_ortho(0.0f, (float)sapp_width(), (float)sapp_height(), 0.0f, -10000.0f, 10000.0f);
@@ -233,7 +233,7 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // ユニフォーム設定
+    // Uniform settings
     // -------------------------------------------------------------------------
 
     void setUniformTime(float time) {
@@ -257,7 +257,7 @@ public:
     }
 
 private:
-    // ユニフォームブロック（Metal 16バイトアラインメント）
+    // Uniform block (Metal 16-byte alignment)
     struct Uniforms {
         float time = 0;
         float _pad0[3] = {0, 0, 0};

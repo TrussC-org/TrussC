@@ -1,11 +1,11 @@
 #pragma once
 
 // =============================================================================
-// tcLightingState.h - ライティングのグローバル状態（内部用）
+// tcLightingState.h - Lighting global state (internal use)
 // =============================================================================
 //
-// tcMesh.h からライティング状態にアクセスするために、
-// tc3DGraphics.h より前にインクルードする必要がある
+// Must be included before tc3DGraphics.h
+// to allow tcMesh.h to access lighting state
 //
 // =============================================================================
 
@@ -13,25 +13,25 @@
 
 namespace trussc {
 
-// 前方宣言
+// Forward declarations
 class Light;
 class Material;
 
 // ---------------------------------------------------------------------------
-// internal 名前空間 - ライティングのグローバル状態
+// internal namespace - Lighting global state
 // ---------------------------------------------------------------------------
 namespace internal {
-    // ライティングが有効かどうか
+    // Whether lighting is enabled
     inline bool lightingEnabled = false;
 
-    // アクティブなライトのリスト（最大8個）
+    // List of active lights (up to 8)
     inline std::vector<Light*> activeLights;
     inline constexpr int maxLights = 8;
 
-    // 現在のマテリアル
+    // Current material
     inline Material* currentMaterial = nullptr;
 
-    // カメラ位置（スペキュラー計算用）
+    // Camera position (for specular calculation)
     inline Vec3 cameraPosition = {0, 0, 0};
 }
 

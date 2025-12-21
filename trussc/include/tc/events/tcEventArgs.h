@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// tcEventArgs - イベント引数の構造体群
+// tcEventArgs - Event argument structures
 // =============================================================================
 
 #include <vector>
@@ -10,24 +10,24 @@
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// キーイベント引数
+// Key event arguments
 // ---------------------------------------------------------------------------
 struct KeyEventArgs {
-    int key = 0;              // キーコード（SAPP_KEYCODE_*）
-    bool isRepeat = false;    // リピート入力か
-    bool shift = false;       // Shift キー
-    bool ctrl = false;        // Ctrl キー
-    bool alt = false;         // Alt キー
-    bool super = false;       // Super/Command キー
+    int key = 0;              // Key code (SAPP_KEYCODE_*)
+    bool isRepeat = false;    // Whether this is a repeat input
+    bool shift = false;       // Shift key
+    bool ctrl = false;        // Ctrl key
+    bool alt = false;         // Alt key
+    bool super = false;       // Super/Command key
 };
 
 // ---------------------------------------------------------------------------
-// マウスボタンイベント引数
+// Mouse button event arguments
 // ---------------------------------------------------------------------------
 struct MouseEventArgs {
-    float x = 0.0f;           // マウスX座標
-    float y = 0.0f;           // マウスY座標
-    int button = 0;           // ボタン番号
+    float x = 0.0f;           // Mouse X coordinate
+    float y = 0.0f;           // Mouse Y coordinate
+    int button = 0;           // Button number
     bool shift = false;
     bool ctrl = false;
     bool alt = false;
@@ -35,36 +35,36 @@ struct MouseEventArgs {
 };
 
 // ---------------------------------------------------------------------------
-// マウス移動イベント引数
+// Mouse move event arguments
 // ---------------------------------------------------------------------------
 struct MouseMoveEventArgs {
-    float x = 0.0f;           // 現在のX座標
-    float y = 0.0f;           // 現在のY座標
-    float deltaX = 0.0f;      // 移動量X
-    float deltaY = 0.0f;      // 移動量Y
+    float x = 0.0f;           // Current X coordinate
+    float y = 0.0f;           // Current Y coordinate
+    float deltaX = 0.0f;      // Delta X
+    float deltaY = 0.0f;      // Delta Y
 };
 
 // ---------------------------------------------------------------------------
-// マウスドラッグイベント引数
+// Mouse drag event arguments
 // ---------------------------------------------------------------------------
 struct MouseDragEventArgs {
     float x = 0.0f;
     float y = 0.0f;
     float deltaX = 0.0f;
     float deltaY = 0.0f;
-    int button = 0;           // ドラッグ中のボタン
+    int button = 0;           // Button being dragged
 };
 
 // ---------------------------------------------------------------------------
-// マウススクロールイベント引数
+// Mouse scroll event arguments
 // ---------------------------------------------------------------------------
 struct ScrollEventArgs {
-    float scrollX = 0.0f;     // 横スクロール量
-    float scrollY = 0.0f;     // 縦スクロール量
+    float scrollX = 0.0f;     // Horizontal scroll amount
+    float scrollY = 0.0f;     // Vertical scroll amount
 };
 
 // ---------------------------------------------------------------------------
-// ウィンドウリサイズイベント引数
+// Window resize event arguments
 // ---------------------------------------------------------------------------
 struct ResizeEventArgs {
     int width = 0;
@@ -72,30 +72,30 @@ struct ResizeEventArgs {
 };
 
 // ---------------------------------------------------------------------------
-// ドラッグ&ドロップイベント引数（将来用）
+// Drag & drop event arguments (for future use)
 // ---------------------------------------------------------------------------
 struct DragDropEventArgs {
-    std::vector<std::string> files;  // ドロップされたファイルパス
+    std::vector<std::string> files;  // Dropped file paths
     float x = 0.0f;
     float y = 0.0f;
 };
 
 // ---------------------------------------------------------------------------
-// タッチイベント引数（将来用）
+// Touch event arguments (for future use)
 // ---------------------------------------------------------------------------
 struct TouchEventArgs {
-    int id = 0;               // タッチID
+    int id = 0;               // Touch ID
     float x = 0.0f;
     float y = 0.0f;
     float pressure = 1.0f;
 };
 
 // ---------------------------------------------------------------------------
-// コンソール入力イベント引数（stdin からのコマンド）
+// Console input event arguments (commands from stdin)
 // ---------------------------------------------------------------------------
 struct ConsoleEventArgs {
-    std::string raw;               // 生の入力行（例: "tcdebug screenshot /tmp/a.png"）
-    std::vector<std::string> args; // 空白区切りのパース結果（例: ["tcdebug", "screenshot", "/tmp/a.png"]）
+    std::string raw;               // Raw input line (e.g., "tcdebug screenshot /tmp/a.png")
+    std::vector<std::string> args; // Parsed by whitespace (e.g., ["tcdebug", "screenshot", "/tmp/a.png"])
 };
 
 } // namespace trussc

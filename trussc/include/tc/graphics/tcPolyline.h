@@ -1,8 +1,8 @@
 #pragma once
 
-// このファイルは TrussC.h からインクルードされる
+// This file is included from TrussC.h
 
-// Windows GDI の Path マクロを無効化
+// Disable Windows GDI Path macro
 #ifdef _WIN32
 #undef Path
 #endif
@@ -13,12 +13,12 @@
 
 namespace trussc {
 
-// Path - 頂点配列を持つクラス（曲線生成機能付き）
+// Path - Class that holds vertex array (with curve generation functionality)
 class Path {
 public:
     Path() : closed_(false) {}
 
-    // コンストラクタ（頂点リストから）
+    // Constructor (from vertex list)
     Path(const std::vector<Vec2>& verts) : closed_(false) {
         for (const auto& v : verts) {
             vertices_.push_back(Vec3{v.x, v.y, 0.0f});
@@ -27,7 +27,7 @@ public:
 
     Path(const std::vector<Vec3>& verts) : vertices_(verts), closed_(false) {}
 
-    // 頂点を追加
+    // Add vertex
     void addVertex(float x, float y) {
         vertices_.push_back(Vec3{x, y, 0.0f});
     }
@@ -44,7 +44,7 @@ public:
         vertices_.push_back(v);
     }
 
-    // 複数頂点を一度に追加
+    // Add multiple vertices at once
     void addVertices(const std::vector<Vec2>& verts) {
         for (const auto& v : verts) {
             addVertex(v);
@@ -57,7 +57,7 @@ public:
         }
     }
 
-    // 頂点を取得
+    // Get vertices
     const std::vector<Vec3>& getVertices() const {
         return vertices_;
     }
@@ -66,7 +66,7 @@ public:
         return vertices_;
     }
 
-    // 頂点数
+    // Vertex count
     int size() const {
         return static_cast<int>(vertices_.size());
     }
@@ -75,7 +75,7 @@ public:
         return vertices_.empty();
     }
 
-    // 特定の頂点にアクセス
+    // Access specific vertex
     Vec3& operator[](int index) {
         return vertices_[index];
     }
@@ -84,7 +84,7 @@ public:
         return vertices_[index];
     }
 
-    // クリア
+    // Clear
     void clear() {
         vertices_.clear();
         curveVertices_.clear();
@@ -92,10 +92,10 @@ public:
     }
 
     // =========================================================================
-    // 線と曲線の追加
+    // Adding lines and curves
     // =========================================================================
 
-    // lineTo は addVertex のエイリアス
+    // lineTo is an alias for addVertex
     void lineTo(float x, float y, float z = 0) {
         addVertex(x, y, z);
     }
@@ -108,8 +108,8 @@ public:
         addVertex(p);
     }
 
-    // 3次ベジェ曲線
-    // cp1, cp2: 制御点、to: 終点
+    // Cubic Bezier curve
+    // cp1, cp2: control points, to: end point
     void bezierTo(const Vec3& cp1, const Vec3& cp2, const Vec3& to, int resolution = 20) {
         if (vertices_.empty()) {
             vertices_.push_back(Vec3{0, 0, 0});
@@ -125,7 +125,7 @@ public:
             float mt2 = mt * mt;
             float mt3 = mt2 * mt;
 
-            // ベジェ曲線: B(t) = (1-t)^3*P0 + 3*(1-t)^2*t*P1 + 3*(1-t)*t^2*P2 + t^3*P3
+            // Bezier curve: B(t) = (1-t)^3*P0 + 3*(1-t)^2*t*P1 + 3*(1-t)*t^2*P2 + t^3*P3
             Vec3 p;
             p.x = mt3 * p0.x + 3 * mt2 * t * cp1.x + 3 * mt * t2 * cp2.x + t3 * to.x;
             p.y = mt3 * p0.y + 3 * mt2 * t * cp1.y + 3 * mt * t2 * cp2.y + t3 * to.y;
@@ -143,8 +143,8 @@ public:
         bezierTo(Vec3{cp1.x, cp1.y, 0}, Vec3{cp2.x, cp2.y, 0}, Vec3{to.x, to.y, 0}, resolution);
     }
 
-    // 2次ベジェ曲線（Quadratic Bezier）
-    // cp: 制御点、to: 終点
+    // Quadratic Bezier curve
+    // cp: control point, to: end point
     void quadBezierTo(const Vec3& cp, const Vec3& to, int resolution = 20) {
         if (vertices_.empty()) {
             vertices_.push_back(Vec3{0, 0, 0});
@@ -158,7 +158,7 @@ public:
             float mt = 1 - t;
             float mt2 = mt * mt;
 
-            // 2次ベジェ: B(t) = (1-t)^2*P0 + 2*(1-t)*t*P1 + t^2*P2
+            // Quadratic Bezier: B(t) = (1-t)^2*P0 + 2*(1-t)*t*P1 + t^2*P2
             Vec3 p;
             p.x = mt2 * p0.x + 2 * mt * t * cp.x + t2 * to.x;
             p.y = mt2 * p0.y + 2 * mt * t * cp.y + t2 * to.y;
@@ -176,12 +176,12 @@ public:
         quadBezierTo(Vec3{cp.x, cp.y, 0}, Vec3{to.x, to.y, 0}, resolution);
     }
 
-    // Catmull-Rom スプライン曲線
-    // curveTo を連続で呼ぶと滑らかな曲線を生成
+    // Catmull-Rom spline curve
+    // Calling curveTo consecutively generates smooth curves
     void curveTo(const Vec3& to, int resolution = 20) {
         curveVertices_.push_back(to);
 
-        // 4点以上あればスプライン計算
+        // Calculate spline if 4 or more points
         if (curveVertices_.size() >= 4) {
             size_t n = curveVertices_.size();
             const Vec3& p0 = curveVertices_[n - 4];
@@ -189,13 +189,13 @@ public:
             const Vec3& p2 = curveVertices_[n - 2];
             const Vec3& p3 = curveVertices_[n - 1];
 
-            // 最初の点を追加（まだ追加されていない場合）
+            // Add first point (if not already added)
             if (vertices_.empty() ||
                 (vertices_.back().x != p1.x || vertices_.back().y != p1.y || vertices_.back().z != p1.z)) {
                 vertices_.push_back(p1);
             }
 
-            // p1 から p2 までの曲線を生成
+            // Generate curve from p1 to p2
             for (int i = 1; i <= resolution; i++) {
                 float t = (float)i / resolution;
                 Vec3 p = catmullRom(p0, p1, p2, p3, t);
@@ -212,17 +212,17 @@ public:
         curveTo(Vec3{to.x, to.y, 0}, resolution);
     }
 
-    // 円弧
+    // Arc
     void arc(const Vec3& center, float radiusX, float radiusY,
              float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) {
 
-        // 度からラジアンへ
+        // Degrees to radians
         float startRad = angleBegin * TAU / 360.0f;
         float endRad = angleEnd * TAU / 360.0f;
 
         float diff = endRad - startRad;
 
-        // 分割数を角度の大きさに応じて調整
+        // Adjust segment count based on angle size
         int segments = std::max(2, (int)(std::abs(diff) / TAU * circleResolution));
 
         for (int i = 0; i <= segments; i++) {
@@ -248,7 +248,7 @@ public:
         arc(Vec3{center.x, center.y, 0}, radiusX, radiusY, angleBegin, angleEnd, true, circleResolution);
     }
 
-    // 閉じる/開く
+    // Close/Open path
     void close() {
         closed_ = true;
     }
@@ -261,7 +261,7 @@ public:
         return closed_;
     }
 
-    // 描画
+    // Draw
     void draw() const {
         if (vertices_.empty()) return;
 
@@ -269,7 +269,7 @@ public:
         auto& ctx = getDefaultContext();
         Color col = ctx.getColor();
 
-        // fill モード: 三角形ファン（凸形状のみ正しく描画）
+        // Fill mode: triangle fan (only convex shapes render correctly)
         if (ctx.isFillEnabled() && n >= 3) {
             sgl_begin_triangles();
             sgl_c4f(col.r, col.g, col.b, col.a);
@@ -281,7 +281,7 @@ public:
             sgl_end();
         }
 
-        // stroke モード: ラインストリップ
+        // Stroke mode: line strip
         if (ctx.isStrokeEnabled() && n >= 2) {
             sgl_c4f(col.r, col.g, col.b, col.a);
             sgl_begin_line_strip();
@@ -295,7 +295,7 @@ public:
         }
     }
 
-    // バウンディングボックス取得
+    // Get bounding box
     void getBoundingBox(float& minX, float& minY, float& maxX, float& maxY) const {
         if (vertices_.empty()) {
             minX = minY = maxX = maxY = 0;
@@ -311,7 +311,7 @@ public:
         }
     }
 
-    // 長さを計算（ライン長）
+    // Calculate length (line length)
     float getPerimeter() const {
         if (vertices_.size() < 2) return 0;
         float len = 0;
@@ -332,15 +332,15 @@ public:
 
 private:
     std::vector<Vec3> vertices_;
-    std::deque<Vec3> curveVertices_;  // curveTo 用のバッファ
+    std::deque<Vec3> curveVertices_;  // Buffer for curveTo
     bool closed_;
 
-    // Catmull-Rom スプライン補間
+    // Catmull-Rom spline interpolation
     static Vec3 catmullRom(const Vec3& p0, const Vec3& p1, const Vec3& p2, const Vec3& p3, float t) {
         float t2 = t * t;
         float t3 = t2 * t;
 
-        // Catmull-Rom 行列
+        // Catmull-Rom matrix
         Vec3 result;
         result.x = 0.5f * ((2 * p1.x) +
                           (-p0.x + p2.x) * t +

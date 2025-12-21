@@ -1,8 +1,8 @@
 #pragma once
 
 // =============================================================================
-// ファイルダイアログ
-// OS標準のファイル選択ダイアログを表示
+// File dialog
+// Display OS-native file selection dialog
 // =============================================================================
 
 #include <string>
@@ -10,18 +10,18 @@
 
 namespace trussc {
 
-// ダイアログの結果
+// Dialog result
 struct FileDialogResult {
-    std::string filePath;   // フルパス
-    std::string fileName;   // ファイル名のみ
-    bool success = false;   // キャンセルでない場合 true
+    std::string filePath;   // Full path
+    std::string fileName;   // Filename only
+    bool success = false;   // true if not cancelled
 };
 
 // -----------------------------------------------------------------------------
-// ファイル選択（開く）ダイアログ
-// windowTitle: ダイアログのタイトル（空なら"Open"）
-// folderSelection: true ならフォルダ選択モード
-// defaultPath: 初期表示パス（空ならホーム）
+// File open dialog
+// windowTitle: Dialog title (defaults to "Open" if empty)
+// folderSelection: true for folder selection mode
+// defaultPath: Initial display path (defaults to home if empty)
 // -----------------------------------------------------------------------------
 FileDialogResult loadDialog(
     const std::string& windowTitle = "",
@@ -30,9 +30,9 @@ FileDialogResult loadDialog(
 );
 
 // -----------------------------------------------------------------------------
-// ファイル保存ダイアログ
-// defaultName: 初期ファイル名
-// message: ダイアログに表示するメッセージ
+// File save dialog
+// defaultName: Initial filename
+// message: Message to display in dialog
 // -----------------------------------------------------------------------------
 FileDialogResult saveDialog(
     const std::string& defaultName = "",
@@ -40,12 +40,12 @@ FileDialogResult saveDialog(
 );
 
 // -----------------------------------------------------------------------------
-// アラートダイアログ（メッセージ表示）
+// Alert dialog (message display)
 // -----------------------------------------------------------------------------
 void alertDialog(const std::string& message);
 
 // -----------------------------------------------------------------------------
-// 拡張フィルタ付きバージョン（将来用）
+// Version with extended filters (for future use)
 // -----------------------------------------------------------------------------
 // struct FileFilter {
 //     std::string name;        // "Image Files"
@@ -59,5 +59,5 @@ void alertDialog(const std::string& message);
 
 } // namespace trussc
 
-// エイリアス
+// Alias
 namespace tc = trussc;

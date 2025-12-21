@@ -1,34 +1,33 @@
 #pragma once
 
 // =============================================================================
-// RenderContext - 描画状態を保持するコンテキストクラス
+// RenderContext - Context class holding rendering state
 // =============================================================================
 //
-// 将来的なマルチコンテキスト対応のための基盤。
-// 現在はデフォルトコンテキスト（シングルトン）として使用。
+// Foundation for future multi-context support.
+// Currently used as default context (singleton).
 //
-// 使い方:
-//   // グローバル関数（従来通り）
+// Usage:
+//   // Global functions (same as before)
 //   setColor(255, 0, 0);
 //   drawRect(10, 10, 100, 100);
 //
-//   // コンテキスト明示（将来用）
+//   // Explicit context (for future use)
 //   auto& ctx = getDefaultContext();
 //   ctx.setColor(255, 0, 0);
 //   ctx.drawRect(10, 10, 100, 100);
 //
 // =============================================================================
 
-// このファイルは TrussC.h からインクルードされるため、
-// 必要なヘッダーは既にインクルード済み
-// tcMath.h, tcColor.h, tcBitmapFont.h, sokol_gl.h
+// This file is included from TrussC.h, so required headers
+// are already included: tcMath.h, tcColor.h, tcBitmapFont.h, sokol_gl.h
 
 #include <vector>
 #include <string>
 
 namespace trussc {
 
-// 前方宣言
+// Forward declarations
 namespace internal {
     extern sg_view fontView;
     extern sg_sampler fontSampler;
@@ -40,29 +39,29 @@ namespace internal {
 }
 
 // ---------------------------------------------------------------------------
-// RenderContext クラス
+// RenderContext class
 // ---------------------------------------------------------------------------
 class RenderContext {
 public:
     // -----------------------------------------------------------------------
-    // コンストラクタ・デストラクタ
+    // Constructor / Destructor
     // -----------------------------------------------------------------------
     RenderContext() = default;
     ~RenderContext() = default;
 
-    // コピー禁止（状態を共有すると混乱するため）
+    // Copy forbidden (sharing state causes confusion)
     RenderContext(const RenderContext&) = delete;
     RenderContext& operator=(const RenderContext&) = delete;
 
-    // ムーブは許可
+    // Move allowed
     RenderContext(RenderContext&&) = default;
     RenderContext& operator=(RenderContext&&) = default;
 
     // -----------------------------------------------------------------------
-    // 色設定
+    // Color settings
     // -----------------------------------------------------------------------
 
-    // 描画色設定 (float: 0.0 ~ 1.0)
+    // Set draw color (float: 0.0 ~ 1.0)
     void setColor(float r, float g, float b, float a = 1.0f) {
         currentR_ = r;
         currentG_ = g;
@@ -70,41 +69,41 @@ public:
         currentA_ = a;
     }
 
-    // グレースケール
+    // Grayscale
     void setColor(float gray, float a = 1.0f) {
         setColor(gray, gray, gray, a);
     }
 
-    // Color 構造体で設定
+    // Set using Color struct
     void setColor(const Color& c) {
         setColor(c.r, c.g, c.b, c.a);
     }
 
-    // HSB で設定 (H: 0-TAU, S: 0-1, B: 0-1)
+    // Set with HSB (H: 0-TAU, S: 0-1, B: 0-1)
     void setColorHSB(float h, float s, float b, float a = 1.0f) {
         Color c = ColorHSB(h, s, b, a).toRGB();
         setColor(c.r, c.g, c.b, c.a);
     }
 
-    // OKLab で設定
+    // Set with OKLab
     void setColorOKLab(float L, float a_lab, float b_lab, float alpha = 1.0f) {
         Color c = ColorOKLab(L, a_lab, b_lab, alpha).toRGB();
         setColor(c.r, c.g, c.b, c.a);
     }
 
-    // OKLCH で設定
+    // Set with OKLCH
     void setColorOKLCH(float L, float C, float H, float alpha = 1.0f) {
         Color c = ColorOKLCH(L, C, H, alpha).toRGB();
         setColor(c.r, c.g, c.b, c.a);
     }
 
-    // 現在の色を取得
+    // Get current color
     Color getColor() const {
         return Color(currentR_, currentG_, currentB_, currentA_);
     }
 
     // -----------------------------------------------------------------------
-    // 塗りつぶし / ストローク
+    // Fill / Stroke
     // -----------------------------------------------------------------------
 
     void fill() { fillEnabled_ = true; }
@@ -118,14 +117,14 @@ public:
     float getStrokeWeight() const { return strokeWeight_; }
 
     // -----------------------------------------------------------------------
-    // 円の分割数
+    // Circle resolution
     // -----------------------------------------------------------------------
 
     void setCircleResolution(int res) { circleResolution_ = res; }
     int getCircleResolution() const { return circleResolution_; }
 
     // -----------------------------------------------------------------------
-    // 行列操作
+    // Matrix operations
     // -----------------------------------------------------------------------
 
     void pushMatrix() {
@@ -142,7 +141,7 @@ public:
     }
 
     // -----------------------------------------------------------------------
-    // スタイルスタック
+    // Style stack
     // -----------------------------------------------------------------------
 
     void pushStyle() {
@@ -219,7 +218,7 @@ public:
     }
 
     // -----------------------------------------------------------------------
-    // 基本図形描画
+    // Basic shape drawing
     // -----------------------------------------------------------------------
 
     void drawRect(float x, float y, float w, float h) {
@@ -336,13 +335,13 @@ public:
     }
 
     // -----------------------------------------------------------------------
-    // ビットマップ文字列描画
+    // Bitmap string drawing
     // -----------------------------------------------------------------------
 
     void drawBitmapString(const std::string& text, float x, float y, bool screenFixed = true) {
         if (text.empty() || !internal::fontInitialized) return;
 
-        // 現在のアラインメント設定に基づいてオフセットを計算
+        // Calculate offset based on current alignment settings
         Vec2 offset = calcBitmapAlignOffset(text, textAlignH_, textAlignV_);
 
         pushMatrix();
@@ -367,7 +366,7 @@ public:
         const float charW = bitmapfont::CHAR_TEX_WIDTH;
         const float charH = bitmapfont::CHAR_TEX_HEIGHT;
         float cursorX = 0;
-        float cursorY = 0;  // Top 基準（指定座標が文字の上端）
+        float cursorY = 0;  // Top-aligned (specified coordinate is top of text)
 
         for (char c : text) {
             if (c == '\n') {
@@ -407,7 +406,7 @@ public:
     void drawBitmapString(const std::string& text, float x, float y, float scale) {
         if (text.empty() || !internal::fontInitialized) return;
 
-        // 現在のアラインメント設定に基づいてオフセットを計算（スケール適用）
+        // Calculate offset based on current alignment settings (with scale)
         Vec2 offset = calcBitmapAlignOffset(text, textAlignH_, textAlignV_);
         offset.x *= scale;
         offset.y *= scale;
@@ -430,7 +429,7 @@ public:
         const float charW = bitmapfont::CHAR_TEX_WIDTH * scale;
         const float charH = bitmapfont::CHAR_TEX_HEIGHT * scale;
         float cursorX = 0;
-        float cursorY = 0;  // Top 基準
+        float cursorY = 0;  // Top-aligned
 
         for (char c : text) {
             if (c == '\n') {
@@ -468,7 +467,7 @@ public:
     }
 
     // -----------------------------------------------------------------------
-    // テキストアラインメント
+    // Text alignment
     // -----------------------------------------------------------------------
 
     void setTextAlign(Direction h, Direction v) {
@@ -479,12 +478,12 @@ public:
     Direction getTextAlignH() const { return textAlignH_; }
     Direction getTextAlignV() const { return textAlignV_; }
 
-    // アラインメント指定付き描画
+    // Draw with alignment specified
     void drawBitmapString(const std::string& text, float x, float y,
                           Direction h, Direction v, bool screenFixed = true) {
         if (text.empty() || !internal::fontInitialized) return;
 
-        // オフセット計算
+        // Calculate offset
         Vec2 offset = calcBitmapAlignOffset(text, h, v);
 
         pushMatrix();
@@ -509,7 +508,7 @@ public:
         const float charW = bitmapfont::CHAR_TEX_WIDTH;
         const float charH = bitmapfont::CHAR_TEX_HEIGHT;
         float cursorX = 0;
-        float cursorY = 0;  // Top 基準（指定座標が文字の上端）
+        float cursorY = 0;  // Top-aligned (specified coordinate is top of text)
 
         for (char c : text) {
             if (c == '\n') {
@@ -547,10 +546,10 @@ public:
     }
 
     // -----------------------------------------------------------------------
-    // ビットマップ文字列メトリクス
+    // Bitmap string metrics
     // -----------------------------------------------------------------------
 
-    // フォントの行の高さ（1行あたりのピクセル数）
+    // Font line height (pixels per line)
     float getBitmapFontHeight() const {
         return bitmapfont::CHAR_TEX_HEIGHT;
     }
@@ -591,7 +590,7 @@ public:
     }
 
 private:
-    // スタイル構造体
+    // Style structure
     struct Style {
         float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
         bool fillEnabled = true;
@@ -602,40 +601,40 @@ private:
         Direction textAlignV = Direction::Top;
     };
 
-    // 現在のスタイル
+    // Current style
     Style style_;
 
-    // スタイルスタック
+    // Style stack
     std::vector<Style> styleStack_;
 
-    // 描画色（style_ へのショートカット）
+    // Draw color (shortcut to style_)
     float& currentR_ = style_.r;
     float& currentG_ = style_.g;
     float& currentB_ = style_.b;
     float& currentA_ = style_.a;
 
-    // 塗りつぶし / ストローク（style_ へのショートカット）
+    // Fill / Stroke (shortcut to style_)
     bool& fillEnabled_ = style_.fillEnabled;
     bool& strokeEnabled_ = style_.strokeEnabled;
     float& strokeWeight_ = style_.strokeWeight;
 
-    // 円の分割数（style_ へのショートカット）
+    // Circle resolution (shortcut to style_)
     int& circleResolution_ = style_.circleResolution;
 
-    // 行列スタック
+    // Matrix stack
     Mat4 currentMatrix_ = Mat4::identity();
     std::vector<Mat4> matrixStack_;
 
-    // テキストアラインメント（style_ へのショートカット）
+    // Text alignment (shortcut to style_)
     Direction& textAlignH_ = style_.textAlignH;
     Direction& textAlignV_ = style_.textAlignV;
 
-    // ビットマップ文字列アラインメントオフセット計算
+    // Calculate bitmap string alignment offset
     Vec2 calcBitmapAlignOffset(const std::string& text, Direction h, Direction v) const {
         float offsetX = 0;
         float offsetY = 0;
 
-        // 水平オフセット
+        // Horizontal offset
         float w = getBitmapStringWidth(text);
         switch (h) {
             case Direction::Left:   offsetX = 0; break;
@@ -644,9 +643,9 @@ private:
             default: break;
         }
 
-        // 垂直オフセット
-        const float charH = bitmapfont::CHAR_HEIGHT;  // 文字の実際の高さ
-        const float totalH = bitmapfont::CHAR_TEX_HEIGHT;  // テクスチャの高さ
+        // Vertical offset
+        const float charH = bitmapfont::CHAR_HEIGHT;  // Actual character height
+        const float totalH = bitmapfont::CHAR_TEX_HEIGHT;  // Texture height
 
         switch (v) {
             case Direction::Top:      offsetY = 0; break;
@@ -661,7 +660,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// デフォルトコンテキスト（シングルトン）
+// Default context (singleton)
 // ---------------------------------------------------------------------------
 inline RenderContext& getDefaultContext() {
     static RenderContext instance;

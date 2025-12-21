@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// tcUdpSocket.h - UDP ソケット
+// tcUdpSocket.h - UDP socket
 // =============================================================================
 
 #include <string>
@@ -14,7 +14,7 @@
 #include "../events/tcEventListener.h"
 #include "../utils/tcLog.h"
 
-// プラットフォーム固有のソケット型
+// Platform-specific socket type
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
@@ -28,118 +28,118 @@
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// UDP 受信イベント引数
+// UDP receive event arguments
 // ---------------------------------------------------------------------------
 struct UdpReceiveEventArgs {
-    std::vector<char> data;     // 受信データ
-    std::string remoteHost;     // 送信元ホスト
-    int remotePort = 0;         // 送信元ポート
+    std::vector<char> data;     // Received data
+    std::string remoteHost;     // Source host
+    int remotePort = 0;         // Source port
 };
 
 // ---------------------------------------------------------------------------
-// UDP エラーイベント引数
+// UDP error event arguments
 // ---------------------------------------------------------------------------
 struct UdpErrorEventArgs {
-    std::string message;        // エラーメッセージ
-    int errorCode = 0;          // エラーコード
+    std::string message;        // Error message
+    int errorCode = 0;          // Error code
 };
 
 // ---------------------------------------------------------------------------
-// UdpSocket - UDP ソケットクラス
+// UdpSocket - UDP socket class
 // ---------------------------------------------------------------------------
 class UdpSocket {
 public:
-    // イベント
-    Event<UdpReceiveEventArgs> onReceive;   // データ受信時
-    Event<UdpErrorEventArgs> onError;       // エラー発生時
+    // Events
+    Event<UdpReceiveEventArgs> onReceive;   // On data receive
+    Event<UdpErrorEventArgs> onError;       // On error
 
     UdpSocket();
     ~UdpSocket();
 
-    // コピー禁止
+    // Copy prohibited
     UdpSocket(const UdpSocket&) = delete;
     UdpSocket& operator=(const UdpSocket&) = delete;
 
-    // ムーブ
+    // Move
     UdpSocket(UdpSocket&& other) noexcept;
     UdpSocket& operator=(UdpSocket&& other) noexcept;
 
     // -------------------------------------------------------------------------
-    // 設定
+    // Settings
     // -------------------------------------------------------------------------
 
-    // ソケットを作成（通常は bind/connect で自動作成されるので呼ばなくてOK）
+    // Create socket (usually not needed as bind/connect auto-create)
     bool create();
 
-    // 受信用にポートをバインド
-    // startReceiving=true で自動的に受信スレッドを開始
+    // Bind port for receiving
+    // startReceiving=true automatically starts receive thread
     bool bind(int port, bool startReceiving = true);
 
-    // 送信先を設定（設定後は send(data, size) で送信可能）
+    // Set destination (after setting, can send via send(data, size))
     bool connect(const std::string& host, int port);
 
-    // ソケットを閉じる
+    // Close socket
     void close();
 
     // -------------------------------------------------------------------------
-    // 送受信
+    // Send/Receive
     // -------------------------------------------------------------------------
 
-    // 指定したホスト・ポートに送信
+    // Send to specified host and port
     bool sendTo(const std::string& host, int port, const void* data, size_t size);
     bool sendTo(const std::string& host, int port, const std::string& message);
 
-    // connect() で設定した送信先に送信
+    // Send to destination set by connect()
     bool send(const void* data, size_t size);
     bool send(const std::string& message);
 
-    // 同期受信（ブロッキング）- イベントを使わない場合用
-    // 戻り値: 受信バイト数、エラー時は -1
+    // Synchronous receive (blocking) - for when not using events
+    // Returns: received byte count, -1 on error
     int receive(void* buffer, size_t bufferSize);
     int receive(void* buffer, size_t bufferSize, std::string& remoteHost, int& remotePort);
 
     // -------------------------------------------------------------------------
-    // 受信スレッド制御
+    // Receive thread control
     // -------------------------------------------------------------------------
 
-    // 受信スレッドを開始（bind後に自動で呼ばれる）
+    // Start receive thread (called automatically after bind)
     void startReceiving();
 
-    // 受信スレッドを停止
+    // Stop receive thread
     void stopReceiving();
 
-    // 受信中か
+    // Whether receiving
     bool isReceiving() const { return receiving_.load(); }
 
     // -------------------------------------------------------------------------
-    // 設定・情報
+    // Settings/Information
     // -------------------------------------------------------------------------
 
-    // ノンブロッキングモード設定
+    // Set non-blocking mode
     bool setNonBlocking(bool nonBlocking);
 
-    // ブロードキャスト許可
+    // Allow broadcast
     bool setBroadcast(bool enable);
 
-    // 再利用許可（bind前に設定）
+    // Allow reuse (set before bind)
     bool setReuseAddress(bool enable);
 
-    // 受信バッファサイズ設定
+    // Set receive buffer size
     bool setReceiveBufferSize(int size);
 
-    // 送信バッファサイズ設定
+    // Set send buffer size
     bool setSendBufferSize(int size);
 
-    // 受信タイムアウト設定（ミリ秒、0=無限）
+    // Set receive timeout (milliseconds, 0=infinite)
     bool setReceiveTimeout(int timeoutMs);
 
-    // バインドしているポートを取得
+    // Get bound port
     int getLocalPort() const { return localPort_; }
 
-    // ソケットが有効か
+    // Whether socket is valid
     bool isValid() const { return socket_ != INVALID_SOCKET_HANDLE; }
 
-    // 接続先情報
+    // Destination information
     const std::string& getConnectedHost() const { return connectedHost_; }
     int getConnectedPort() const { return connectedPort_; }
 
@@ -153,15 +153,15 @@ private:
     std::string connectedHost_;
     int connectedPort_ = 0;
 
-    // 受信スレッド
+    // Receive thread
     std::thread receiveThread_;
     std::atomic<bool> receiving_{false};
     std::atomic<bool> shouldStop_{false};
 
-    // 受信バッファサイズ
+    // Receive buffer size
     static constexpr size_t RECEIVE_BUFFER_SIZE = 65536;
 
-    // Winsock 初期化（Windows用）
+    // Winsock initialization (Windows)
     static bool initWinsock();
     static bool winsockInitialized_;
 };

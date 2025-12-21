@@ -6,14 +6,14 @@
 #include <string>
 
 // =============================================================================
-// trussc 名前空間
+// trussc namespace
 // =============================================================================
 namespace trussc {
 
 // =============================================================================
-// App - アプリケーション基底クラス
-// tc::Node を継承し、シーングラフのルートノードとして機能する
-// このクラスを継承して tcApp を作成する
+// App - Application base class
+// Inherits from tc::Node and functions as scene graph root node
+// Create tcApp by inheriting this class
 // =============================================================================
 
 class App : public Node {
@@ -21,13 +21,13 @@ public:
     virtual ~App() = default;
 
     // -------------------------------------------------------------------------
-    // ライフサイクル（Node から継承、追加のオーバーライド可能）
+    // Lifecycle (inherited from Node, additional overrides possible)
     // -------------------------------------------------------------------------
 
-    // setup(), update(), draw(), cleanup() は Node から継承
+    // setup(), update(), draw(), cleanup() are inherited from Node
 
     // -------------------------------------------------------------------------
-    // キーボードイベント（従来のスタイル）
+    // Keyboard events (traditional style)
     // -------------------------------------------------------------------------
 
     virtual void keyPressed(int key) {
@@ -39,7 +39,7 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // マウスイベント（従来のスタイル - 画面座標で届く）
+    // Mouse events (traditional style - delivered in screen coordinates)
     // -------------------------------------------------------------------------
 
     virtual void mousePressed(int x, int y, int button) {
@@ -71,7 +71,7 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // ウィンドウイベント
+    // Window events
     // -------------------------------------------------------------------------
 
     virtual void windowResized(int width, int height) {
@@ -80,7 +80,7 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // ドラッグ&ドロップイベント
+    // Drag & drop events
     // -------------------------------------------------------------------------
 
     virtual void filesDropped(const std::vector<std::string>& files) {
@@ -88,11 +88,11 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // 終了イベント
+    // Exit event
     // -------------------------------------------------------------------------
 
-    /// アプリ終了時に呼ばれる（cleanup の前）
-    /// リソースの解放や設定の保存などに使用
+    /// Called on app exit (before cleanup)
+    /// Use for resource release or settings save
     virtual void exit() {}
 };
 

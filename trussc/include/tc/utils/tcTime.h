@@ -1,9 +1,9 @@
 #pragma once
 
 // =============================================================================
-// tcTime.h - 時間・日付ユーティリティ
+// tcTime.h - Time/Date utilities
 // =============================================================================
-// oFの時間関連関数と同じAPI
+// API compatible with oF time-related functions
 // - getElapsedTimef / getElapsedTimeMillis / getElapsedTimeMicros
 // - resetElapsedTimeCounter
 // - sleepMillis
@@ -28,11 +28,11 @@
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// 内部実装
+// Internal implementation
 // ---------------------------------------------------------------------------
 namespace internal {
 
-// 経過時間計測用のクロック
+// Clock for elapsed time measurement
 class ElapsedTimeClock {
 public:
     ElapsedTimeClock() {
@@ -56,7 +56,7 @@ inline ElapsedTimeClock& getElapsedClock() {
     return clock;
 }
 
-// 文字列置換（getTimestampString 用）
+// String replacement (for getTimestampString)
 inline void stringReplace(std::string& input, const std::string& searchStr, const std::string& replaceStr) {
     auto pos = input.find(searchStr);
     while (pos != std::string::npos) {
@@ -70,7 +70,7 @@ inline void stringReplace(std::string& input, const std::string& searchStr, cons
         pos += nextpos;
     }
 }
-// localtime のプラットフォーム分岐（Windows: localtime_s, その他: localtime）
+// Platform-specific localtime (Windows: localtime_s, others: localtime)
 inline std::tm safeLocaltime(const std::time_t* t) {
     std::tm result = {};
 #ifdef _WIN32
@@ -84,68 +84,68 @@ inline std::tm safeLocaltime(const std::time_t* t) {
 } // namespace internal
 
 // ---------------------------------------------------------------------------
-// 経過時間
+// Elapsed time
 // ---------------------------------------------------------------------------
 
-/// 経過時間カウンターをリセット
+/// Reset elapsed time counter
 inline void resetElapsedTimeCounter() {
     internal::getElapsedClock().reset();
 }
 
-/// 経過時間を秒（float）で取得
+/// Get elapsed time in seconds (float)
 inline float getElapsedTimef() {
     return std::chrono::duration<float>(internal::getElapsedClock().getElapsed()).count();
 }
 
-/// 経過時間をミリ秒で取得
+/// Get elapsed time in milliseconds
 inline uint64_t getElapsedTimeMillis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         internal::getElapsedClock().getElapsed()).count();
 }
 
-/// 経過時間をマイクロ秒で取得
+/// Get elapsed time in microseconds
 inline uint64_t getElapsedTimeMicros() {
     return std::chrono::duration_cast<std::chrono::microseconds>(
         internal::getElapsedClock().getElapsed()).count();
 }
 
 // ---------------------------------------------------------------------------
-// システム時刻
+// System time
 // ---------------------------------------------------------------------------
 
-/// システム時刻をミリ秒で取得（Unix時刻）
+/// Get system time in milliseconds (Unix time)
 inline uint64_t getSystemTimeMillis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-/// システム時刻をマイクロ秒で取得
+/// Get system time in microseconds
 inline uint64_t getSystemTimeMicros() {
     return std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
 // ---------------------------------------------------------------------------
-// スリープ
+// Sleep
 // ---------------------------------------------------------------------------
 
-/// ミリ秒単位でスリープ
+/// Sleep for specified milliseconds
 inline void sleepMillis(int millis) {
     std::this_thread::sleep_for(std::chrono::milliseconds(millis));
 }
 
-/// マイクロ秒単位でスリープ
+/// Sleep for specified microseconds
 inline void sleepMicros(int micros) {
     std::this_thread::sleep_for(std::chrono::microseconds(micros));
 }
 
 // ---------------------------------------------------------------------------
-// タイムスタンプ文字列
+// Timestamp string
 // ---------------------------------------------------------------------------
 
-/// フォーマット指定でタイムスタンプ文字列を取得
-/// フォーマット: strftime互換 + %i（ミリ秒）
-/// 例: "%Y-%m-%d-%H-%M-%S-%i" → "2024-01-15-18-29-35-299"
+/// Get timestamp string with format specification
+/// Format: strftime compatible + %i (milliseconds)
+/// Example: "%Y-%m-%d-%H-%M-%S-%i" -> "2024-01-15-18-29-35-299"
 inline std::string getTimestampString(const std::string& timestampFormat) {
     std::stringstream str;
     auto now = std::chrono::system_clock::now();
@@ -156,7 +156,7 @@ inline std::string getTimestampString(const std::string& timestampFormat) {
     constexpr int bufsize = 256;
     char buf[bufsize];
 
-    // %i（ミリ秒）を置換（strftimeは %i をサポートしていないため）
+    // Replace %i (milliseconds) since strftime doesn't support it
     auto tmpFormat = timestampFormat;
     std::ostringstream msStr;
     msStr << std::setfill('0') << std::setw(3) << ms;
@@ -168,16 +168,16 @@ inline std::string getTimestampString(const std::string& timestampFormat) {
     return str.str();
 }
 
-/// タイムスタンプ文字列を取得（デフォルトフォーマット: "2024-01-15-18-29-35-299"）
+/// Get timestamp string (default format: "2024-01-15-18-29-35-299")
 inline std::string getTimestampString() {
     return getTimestampString("%Y-%m-%d-%H-%M-%S-%i");
 }
 
 // ---------------------------------------------------------------------------
-// 現在時刻の各要素
+// Current time components
 // ---------------------------------------------------------------------------
 
-/// 現在の秒（0-59）
+/// Current seconds (0-59)
 inline int getSeconds() {
     time_t curr;
     time(&curr);
@@ -185,7 +185,7 @@ inline int getSeconds() {
     return local.tm_sec;
 }
 
-/// 現在の分（0-59）
+/// Current minutes (0-59)
 inline int getMinutes() {
     time_t curr;
     time(&curr);
@@ -193,7 +193,7 @@ inline int getMinutes() {
     return local.tm_min;
 }
 
-/// 現在の時（0-23）
+/// Current hours (0-23)
 inline int getHours() {
     time_t curr;
     time(&curr);
@@ -202,10 +202,10 @@ inline int getHours() {
 }
 
 // ---------------------------------------------------------------------------
-// 現在日付の各要素
+// Current date components
 // ---------------------------------------------------------------------------
 
-/// 現在の年（例: 2024）
+/// Current year (e.g., 2024)
 inline int getYear() {
     time_t curr;
     time(&curr);
@@ -213,7 +213,7 @@ inline int getYear() {
     return local.tm_year + 1900;
 }
 
-/// 現在の月（1-12）
+/// Current month (1-12)
 inline int getMonth() {
     time_t curr;
     time(&curr);
@@ -221,7 +221,7 @@ inline int getMonth() {
     return local.tm_mon + 1;
 }
 
-/// 現在の日（1-31）
+/// Current day (1-31)
 inline int getDay() {
     time_t curr;
     time(&curr);
@@ -229,7 +229,7 @@ inline int getDay() {
     return local.tm_mday;
 }
 
-/// 現在の曜日（0=日曜, 1=月曜, ... 6=土曜）
+/// Current weekday (0=Sunday, 1=Monday, ... 6=Saturday)
 inline int getWeekday() {
     time_t curr;
     time(&curr);

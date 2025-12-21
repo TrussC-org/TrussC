@@ -1,6 +1,6 @@
 // =============================================================================
-// tcAudio 実装
-// miniaudio を使用したサウンド再生・マイク入力
+// tcAudio implementation
+// Sound playback and microphone input using miniaudio
 // =============================================================================
 
 #define MA_NO_DECODING
@@ -14,10 +14,10 @@
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// AudioEngine miniaudio コールバック
+// AudioEngine miniaudio callback
 // ---------------------------------------------------------------------------
 static void playbackDataCallback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
-    (void)pInput;  // 再生専用なので入力は使わない
+    (void)pInput;  // Playback only, input not used
 
     AudioEngine* engine = static_cast<AudioEngine*>(pDevice->pUserData);
     if (engine && pOutput) {
@@ -26,7 +26,7 @@ static void playbackDataCallback(ma_device* pDevice, void* pOutput, const void* 
 }
 
 // ---------------------------------------------------------------------------
-// AudioEngine 実装
+// AudioEngine implementation
 // ---------------------------------------------------------------------------
 
 bool AudioEngine::init() {
@@ -83,10 +83,10 @@ void AudioEngine::mixAudio(float* buffer, int num_frames, int num_channels) {
 }
 
 // ---------------------------------------------------------------------------
-// MicInput miniaudio コールバック
+// MicInput miniaudio callback
 // ---------------------------------------------------------------------------
 static void micDataCallback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
-    (void)pOutput;  // キャプチャなので出力は使わない
+    (void)pOutput;  // Capture only, output not used
 
     MicInput* mic = static_cast<MicInput*>(pDevice->pUserData);
     if (mic && pInput) {
@@ -95,7 +95,7 @@ static void micDataCallback(ma_device* pDevice, void* pOutput, const void* pInpu
 }
 
 // ---------------------------------------------------------------------------
-// MicInput 実装
+// MicInput implementation
 // ---------------------------------------------------------------------------
 
 MicInput::~MicInput() {
@@ -111,12 +111,12 @@ bool MicInput::start(int sampleRate) {
     buffer_.resize(BUFFER_SIZE, 0.0f);
     writePos_ = 0;
 
-    // ma_device を作成
+    // Create ma_device
     ma_device* device = new ma_device();
 
     ma_device_config config = ma_device_config_init(ma_device_type_capture);
     config.capture.format = ma_format_f32;
-    config.capture.channels = 1;  // モノラル
+    config.capture.channels = 1;  // Mono
     config.sampleRate = sampleRate;
     config.dataCallback = micDataCallback;
     config.pUserData = this;
@@ -165,7 +165,7 @@ size_t MicInput::getBuffer(float* outBuffer, size_t numSamples) {
 
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // リングバッファから最新のサンプルをコピー
+    // Copy latest samples from ring buffer
     size_t readPos = (writePos_ + BUFFER_SIZE - numSamples) % BUFFER_SIZE;
 
     for (size_t i = 0; i < numSamples; i++) {
@@ -185,7 +185,7 @@ void MicInput::onAudioData(const float* input, size_t frameCount) {
 }
 
 // ---------------------------------------------------------------------------
-// グローバルインスタンス
+// Global instance
 // ---------------------------------------------------------------------------
 MicInput& getMicInput() {
     static MicInput instance;

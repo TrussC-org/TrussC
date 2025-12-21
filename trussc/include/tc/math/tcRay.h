@@ -5,46 +5,46 @@
 namespace trussc {
 
 // =============================================================================
-// Ray - 光線（始点 + 方向）
-// Hit Test を統一的に扱うための基本構造体
+// Ray - Ray (origin + direction)
+// Basic struct for unified hit testing
 // =============================================================================
 
 struct Ray {
-    Vec3 origin;      // 始点
-    Vec3 direction;   // 方向（正規化されている前提）
+    Vec3 origin;      // Origin
+    Vec3 direction;   // Direction (assumed normalized)
 
-    // コンストラクタ
+    // Constructor
     Ray() : origin(0, 0, 0), direction(0, 0, -1) {}
     Ray(const Vec3& o, const Vec3& d) : origin(o), direction(d.normalized()) {}
 
-    // t の位置を取得: P(t) = origin + direction * t
+    // Get position at t: P(t) = origin + direction * t
     Vec3 at(float t) const {
         return origin + direction * t;
     }
 
-    // 逆行列で変換（ノードのローカル空間に変換）
-    // origin: 点として変換
-    // direction: 方向として変換（平行移動の影響を受けない）
+    // Transform with inverse matrix (transform to node's local space)
+    // origin: transform as point
+    // direction: transform as direction (not affected by translation)
     Ray transformed(const Mat4& inverseMatrix) const {
-        // origin を点として変換
+        // Transform origin as point
         Vec3 newOrigin = inverseMatrix * origin;
 
-        // direction を方向として変換（w=0 として扱う）
-        // 平行移動の影響を除外するため、行列の3x3部分だけ使う
+        // Transform direction as direction (treat w=0)
+        // Only use 3x3 part of matrix to exclude translation effect
         Vec3 newDir;
         newDir.x = inverseMatrix.m[0] * direction.x + inverseMatrix.m[1] * direction.y + inverseMatrix.m[2] * direction.z;
         newDir.y = inverseMatrix.m[4] * direction.x + inverseMatrix.m[5] * direction.y + inverseMatrix.m[6] * direction.z;
         newDir.z = inverseMatrix.m[8] * direction.x + inverseMatrix.m[9] * direction.y + inverseMatrix.m[10] * direction.z;
 
-        return Ray(newOrigin, newDir);  // コンストラクタで正規化される
+        return Ray(newOrigin, newDir);  // Normalized in constructor
     }
 
     // ==========================================================================
-    // 2D用ヘルパー: マウス座標からRayを生成（正射影）
+    // 2D helper: Generate ray from mouse coordinates (orthographic)
     // ==========================================================================
 
-    // 2Dモード（正射影）: マウス位置から Z 軸に平行な Ray を生成
-    // カメラは Z+ 方向から Z- 方向を見ている前提
+    // 2D mode (orthographic): Generate ray parallel to Z axis from mouse position
+    // Assumes camera looks from Z+ toward Z-
     static Ray fromScreenPoint2D(float screenX, float screenY, float startZ = 1000.0f) {
         return Ray(
             Vec3(screenX, screenY, startZ),
@@ -53,21 +53,21 @@ struct Ray {
     }
 
     // ==========================================================================
-    // 平面との交差判定
+    // Plane intersection
     // ==========================================================================
 
-    // Z=0 平面との交差（2D UI 用）
-    // 交差した場合 true を返し、outT に交差距離、outPoint に交差点を設定
+    // Intersection with Z=0 plane (for 2D UI)
+    // Returns true if intersection, sets outT to distance and outPoint to intersection point
     bool intersectZPlane(float& outT, Vec3& outPoint) const {
-        // direction.z が 0 に近い場合は平行（交差しない）
+        // If direction.z is near 0, parallel (no intersection)
         if (std::abs(direction.z) < 1e-6f) {
             return false;
         }
 
-        // Z=0 平面との交差: origin.z + t * direction.z = 0
+        // Intersection with Z=0 plane: origin.z + t * direction.z = 0
         float t = -origin.z / direction.z;
 
-        // t < 0 は Ray の後ろ側（交差しない）
+        // t < 0 is behind the ray (no intersection)
         if (t < 0) {
             return false;
         }
@@ -77,13 +77,13 @@ struct Ray {
         return true;
     }
 
-    // 任意の平面との交差
-    // plane: 平面の法線（正規化済み）
-    // planeD: 平面の距離（原点からの符号付き距離）
+    // Intersection with arbitrary plane
+    // plane: plane normal (normalized)
+    // planeD: plane distance (signed distance from origin)
     bool intersectPlane(const Vec3& planeNormal, float planeD, float& outT, Vec3& outPoint) const {
         float denom = direction.dot(planeNormal);
 
-        // 平行チェック
+        // Check if parallel
         if (std::abs(denom) < 1e-6f) {
             return false;
         }
@@ -100,14 +100,14 @@ struct Ray {
     }
 
     // ==========================================================================
-    // 球との交差判定
+    // Sphere intersection
     // ==========================================================================
 
-    // 原点を中心とする球との交差
+    // Intersection with sphere centered at origin
     bool intersectSphere(float radius, float& outT) const {
         // |origin + t * direction|^2 = radius^2
         // a*t^2 + b*t + c = 0
-        float a = direction.dot(direction);  // 正規化されていれば 1
+        float a = direction.dot(direction);  // 1 if normalized
         float b = 2.0f * origin.dot(direction);
         float c = origin.dot(origin) - radius * radius;
 
@@ -120,7 +120,7 @@ struct Ray {
         float t1 = (-b - sqrtD) / (2 * a);
         float t2 = (-b + sqrtD) / (2 * a);
 
-        // 最も近い正の t を選択
+        // Select the closest positive t
         if (t1 > 0) {
             outT = t1;
             return true;
@@ -134,10 +134,10 @@ struct Ray {
     }
 
     // ==========================================================================
-    // AABB（軸平行バウンディングボックス）との交差判定
+    // AABB (Axis-Aligned Bounding Box) intersection
     // ==========================================================================
 
-    // min/max で定義される AABB との交差
+    // Intersection with AABB defined by min/max
     bool intersectAABB(const Vec3& boxMin, const Vec3& boxMax, float& outT) const {
         float tmin = 0.0f;
         float tmax = std::numeric_limits<float>::max();

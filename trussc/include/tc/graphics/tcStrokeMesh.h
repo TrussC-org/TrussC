@@ -1,6 +1,6 @@
 #pragma once
 
-// このファイルは TrussC.h からインクルードされる
+// This file is included from TrussC.h
 
 #include <vector>
 #include <cmath>
@@ -9,26 +9,26 @@
 namespace trussc {
 
 // =============================================================================
-// StrokeMesh - Polylineから太さのある三角形メッシュを生成するクラス
+// StrokeMesh - Class to generate triangle mesh with width from Polyline
 // =============================================================================
 
 class StrokeMesh {
 public:
-    // Processing / NanoVG ライクなスタイル定義
+    // Processing / NanoVG-like style definitions
     enum CapType {
-        CAP_BUTT,   // バット（標準：スパッと切る）
-        CAP_ROUND,  // 丸（半円）
-        CAP_SQUARE  // 四角（太さの分だけ伸ばす）
+        CAP_BUTT,   // Butt (standard: cut flat)
+        CAP_ROUND,  // Round (semicircle)
+        CAP_SQUARE  // Square (extend by width)
     };
 
     enum JoinType {
-        JOIN_MITER, // マイター（鋭角に尖らせる）
-        JOIN_ROUND, // 丸（角を丸める）
-        JOIN_BEVEL  // ベベル（角を平らに落とす）
+        JOIN_MITER, // Miter (pointed sharp corners)
+        JOIN_ROUND, // Round (rounded corners)
+        JOIN_BEVEL  // Bevel (flat cut corners)
     };
 
     // =========================================================================
-    // コンストラクタ
+    // Constructor
     // =========================================================================
 
     StrokeMesh() {
@@ -48,7 +48,7 @@ public:
     }
 
     // =========================================================================
-    // 設定 (Settings)
+    // Settings
     // =========================================================================
 
     void setWidth(float width) {
@@ -71,14 +71,14 @@ public:
         bDirty_ = true;
     }
 
-    // Miter Join の時に、どこまで尖るのを許容するか
+    // How much sharpness to allow with Miter Join
     void setMiterLimit(float limit) {
         miterLimit_ = limit;
         bDirty_ = true;
     }
 
     // =========================================================================
-    // データ入力 (Input)
+    // Input
     // =========================================================================
 
     void addVertex(float x, float y, float z = 0) {
@@ -97,7 +97,7 @@ public:
         addVertex(Vec3{p.x, p.y, 0});
     }
 
-    // 頂点と太さを同時に追加（可変幅ストローク用）
+    // Add vertex and width together (for variable width strokes)
     void addVertexWithWidth(float x, float y, float width) {
         addVertexWithWidth(Vec3{x, y, 0}, width);
     }
@@ -111,13 +111,13 @@ public:
         bDirty_ = true;
     }
 
-    // 太さの配列を直接設定
+    // Set width array directly
     void setWidths(const std::vector<float>& w) {
         widths_ = w;
         bDirty_ = true;
     }
 
-    // 既存の形状をセットして上書きする
+    // Set and overwrite existing shape
     void setShape(const Path& polyline) {
         polylines_.clear();
         polylines_.push_back(polyline);
@@ -126,13 +126,13 @@ public:
         bDirty_ = true;
     }
 
-    // 閉じた形状にするかどうか
+    // Whether to make closed shape
     void setClosed(bool closed) {
         bClosed_ = closed;
         bDirty_ = true;
     }
 
-    // クリア
+    // Clear
     void clear() {
         polylines_.clear();
         polylines_.push_back(Path());
@@ -142,7 +142,7 @@ public:
     }
 
     // =========================================================================
-    // 更新と描画 (Core)
+    // Update and Draw (Core)
     // =========================================================================
 
     void update() {
@@ -151,7 +151,7 @@ public:
         mesh_.clear();
         mesh_.setMode(PrimitiveMode::Triangles);
 
-        // 頂点ごとの太さを準備（指定がなければデフォルト値で埋める）
+        // Prepare width per vertex (fill with default if not specified)
         std::vector<float> vertWidths;
         int totalVerts = 0;
         for (auto& pl : polylines_) {
@@ -189,7 +189,7 @@ public:
     }
 
     // =========================================================================
-    // アクセス (Accessors)
+    // Accessors
     // =========================================================================
 
     Mesh& getMesh() {
@@ -213,7 +213,7 @@ private:
     bool bClosed_;
     bool bDirty_;
 
-    // 法線計算
+    // Calculate normal vector
     Vec3 getNormal(const Vec3& p1, const Vec3& p2) {
         Vec3 dir = p2 - p1;
         float len = std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
@@ -225,7 +225,7 @@ private:
         return Vec3{-dir.y, dir.x, 0.0f};
     }
 
-    // 正規化
+    // Normalize vector
     Vec3 normalize(const Vec3& v) {
         float len = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
         if (len > 0) {
@@ -234,12 +234,12 @@ private:
         return v;
     }
 
-    // 内積
+    // Dot product
     float dot(const Vec3& a, const Vec3& b) {
         return a.x * b.x + a.y * b.y + a.z * b.z;
     }
 
-    // 三角形を追加
+    // Add triangle
     void addTriangle(Mesh& mesh, const Vec3& a, const Vec3& b, const Vec3& c, const Color& color) {
         mesh.addVertex(a);
         mesh.addColor(color);
@@ -249,7 +249,7 @@ private:
         mesh.addColor(color);
     }
 
-    // メインのストローク生成ロジック
+    // Main stroke generation logic
     void appendStrokeToMesh(const Path& pl, Mesh& targetMesh, const std::vector<float>& vertWidths) {
         const auto& verts = pl.getVertices();
         int numVerts = pl.size();
@@ -264,9 +264,9 @@ private:
             return vertWidths[idx] * 0.5f;
         };
 
-        // BEVEL/ROUNDの場合
+        // For BEVEL/ROUND join types
         if (joinType_ == JOIN_BEVEL || joinType_ == JOIN_ROUND) {
-            // 各セグメントを独立して描画
+            // Draw each segment independently
             for (int seg = 0; seg < numSegments; seg++) {
                 int i0 = seg;
                 int i1 = (seg + 1) % numVerts;
@@ -287,7 +287,7 @@ private:
                 addTriangle(targetMesh, right0, right1, left1, strokeColor_);
             }
 
-            // 角の処理
+            // Corner processing
             for (int i = 0; i < numVerts; i++) {
                 bool isEndpoint = !isClosed && (i == 0 || i == numVerts - 1);
                 if (isEndpoint) continue;
@@ -430,7 +430,7 @@ private:
             }
         }
 
-        // Cap処理（開いた線の端）
+        // Cap processing (ends of open lines)
         if (!isClosed) {
             float startHW = getHalfWidth(0);
             Vec3 startDir = normalize(Vec3{verts[1].x - verts[0].x, verts[1].y - verts[0].y, verts[1].z - verts[0].z});
@@ -465,7 +465,7 @@ private:
                 }
             }
 
-            // 終点
+            // End point
             int last = numVerts - 1;
             float endHW = getHalfWidth(last);
             Vec3 endDir = normalize(Vec3{verts[last].x - verts[last - 1].x, verts[last].y - verts[last - 1].y, verts[last].z - verts[last - 1].z});

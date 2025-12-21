@@ -1,13 +1,13 @@
 #pragma once
 
 // =============================================================================
-// tc3DGraphics.h - 3D グラフィックス（ライティング等）
+// tc3DGraphics.h - 3D graphics (lighting etc.)
 // =============================================================================
 //
-// ライティングシステムの API
-// CPU 側でライティング計算を行い、頂点カラーに反映する
+// Lighting system API
+// Performs lighting calculations on CPU and reflects in vertex colors
 //
-// 注意: 状態は tcLightingState.h で定義されている
+// Note: State is defined in tcLightingState.h
 //
 // =============================================================================
 
@@ -15,31 +15,31 @@
 
 namespace trussc {
 
-// internal 名前空間の状態は tcLightingState.h で定義済み
+// State in internal namespace is defined in tcLightingState.h
 
 // ---------------------------------------------------------------------------
-// ライティング API
+// Lighting API
 // ---------------------------------------------------------------------------
 
-// ライティングを有効化
+// Enable lighting
 inline void enableLighting() {
     internal::lightingEnabled = true;
 }
 
-// ライティングを無効化
+// Disable lighting
 inline void disableLighting() {
     internal::lightingEnabled = false;
 }
 
-// ライティングが有効かどうか
+// Whether lighting is enabled
 inline bool isLightingEnabled() {
     return internal::lightingEnabled;
 }
 
-// ライトを追加（最大8個まで）
+// Add light (up to 8 max)
 inline void addLight(Light& light) {
     if (internal::activeLights.size() < internal::maxLights) {
-        // 重複チェック
+        // Duplicate check
         auto it = std::find(internal::activeLights.begin(),
                             internal::activeLights.end(), &light);
         if (it == internal::activeLights.end()) {
@@ -48,7 +48,7 @@ inline void addLight(Light& light) {
     }
 }
 
-// ライトを削除
+// Remove light
 inline void removeLight(Light& light) {
     auto it = std::find(internal::activeLights.begin(),
                         internal::activeLights.end(), &light);
@@ -57,27 +57,27 @@ inline void removeLight(Light& light) {
     }
 }
 
-// 全ライトをクリア
+// Clear all lights
 inline void clearLights() {
     internal::activeLights.clear();
 }
 
-// アクティブなライトの数を取得
+// Get number of active lights
 inline int getNumLights() {
     return static_cast<int>(internal::activeLights.size());
 }
 
-// マテリアルを設定
+// Set material
 inline void setMaterial(Material& material) {
     internal::currentMaterial = &material;
 }
 
-// マテリアルをクリア（デフォルトに戻す）
+// Clear material (revert to default)
 inline void clearMaterial() {
     internal::currentMaterial = nullptr;
 }
 
-// カメラ位置を設定（スペキュラー計算用）
+// Set camera position (for specular calculation)
 inline void setCameraPosition(const Vec3& pos) {
     internal::cameraPosition = pos;
 }
@@ -86,11 +86,11 @@ inline void setCameraPosition(float x, float y, float z) {
     internal::cameraPosition = Vec3(x, y, z);
 }
 
-// カメラ位置を取得
+// Get camera position
 inline const Vec3& getCameraPosition() {
     return internal::cameraPosition;
 }
 
-// calculateLighting() は tcLight.h で定義されている
+// calculateLighting() is defined in tcLight.h
 
 } // namespace trussc

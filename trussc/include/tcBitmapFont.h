@@ -3,20 +3,20 @@
 // =============================================================================
 // TrussC Bitmap Font
 // =============================================================================
-// 8x13 ビットマップフォント（freeglut 互換）
-// ASCII 32-126 をサポート
+// 8x13 bitmap font (freeglut compatible)
+// Supports ASCII 32-126
 // =============================================================================
 
 namespace trussc {
 namespace bitmapfont {
 
-// フォントサイズ
+// Font size
 constexpr int CHAR_WIDTH = 8;
 constexpr int CHAR_HEIGHT = 13;
 
-// 8x13 ビットマップフォントデータ
-// 各文字は 13 バイト（各バイトが 1 行、8 ビットが 8 ピクセル）
-// freeglut / X11 固定幅フォントベース
+// 8x13 bitmap font data
+// Each character is 13 bytes (each byte is 1 row, 8 bits = 8 pixels)
+// Based on freeglut / X11 fixed-width font
 static const unsigned char fontData[95][13] = {
     // 32: ' ' (space)
     { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
@@ -210,67 +210,67 @@ static const unsigned char fontData[95][13] = {
     { 0x00, 0x00, 0x31, 0x49, 0x46, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
 };
 
-// 文字のビットマップを取得（ASCII 32-126）
+// Get character bitmap (ASCII 32-126)
 inline const unsigned char* getCharBitmap(char c) {
     int index = (int)c - 32;
     if (index < 0 || index >= 95) {
-        return fontData[0];  // スペースを返す
+        return fontData[0];  // Return space
     }
     return fontData[index];
 }
 
 // ---------------------------------------------------------------------------
-// テクスチャアトラス
+// Texture atlas
 // ---------------------------------------------------------------------------
 
-// アトラスサイズ: 128x128 (16文字 x 8文字、各 8x16 ピクセル)
+// Atlas size: 128x128 (16 chars x 8 chars, each 8x16 pixels)
 constexpr int ATLAS_WIDTH = 128;
 constexpr int ATLAS_HEIGHT = 128;
 constexpr int CHARS_PER_ROW = 16;
 constexpr int CHAR_TEX_WIDTH = 8;
-constexpr int CHAR_TEX_HEIGHT = 16;  // 13 + パディング
+constexpr int CHAR_TEX_HEIGHT = 16;  // 13 + padding
 
-// テクスチャ座標の正規化係数
+// Texture coordinate normalization factors
 constexpr float TEX_CHAR_WIDTH = (float)CHAR_TEX_WIDTH / ATLAS_WIDTH;   // 8/128 = 0.0625
 constexpr float TEX_CHAR_HEIGHT = (float)CHAR_TEX_HEIGHT / ATLAS_HEIGHT; // 16/128 = 0.125
 
-// テクスチャアトラスのピクセルデータを生成（RGBA形式）
-// 戻り値: 128x128x4 バイトの配列（呼び出し側で delete[] すること）
+// Generate texture atlas pixel data (RGBA format)
+// Returns: 128x128x4 byte array (caller must delete[])
 inline unsigned char* generateAtlasPixels() {
     unsigned char* pixels = new unsigned char[ATLAS_WIDTH * ATLAS_HEIGHT * 4];
 
-    // 全体を透明に初期化
+    // Initialize all to transparent
     for (int i = 0; i < ATLAS_WIDTH * ATLAS_HEIGHT * 4; i += 4) {
         pixels[i + 0] = 255;  // R
         pixels[i + 1] = 255;  // G
         pixels[i + 2] = 255;  // B
-        pixels[i + 3] = 0;    // A (透明)
+        pixels[i + 3] = 0;    // A (transparent)
     }
 
-    // 各文字（ASCII 32-126）をアトラスに配置
+    // Place each character (ASCII 32-126) in atlas
     for (int charIndex = 0; charIndex < 95; charIndex++) {
-        int c = charIndex + 32;  // ASCII コード
+        int c = charIndex + 32;  // ASCII code
 
-        // アトラス内の位置
+        // Position in atlas
         int atlasCol = charIndex % CHARS_PER_ROW;
         int atlasRow = charIndex / CHARS_PER_ROW;
         int baseX = atlasCol * CHAR_TEX_WIDTH;
         int baseY = atlasRow * CHAR_TEX_HEIGHT;
 
-        // ビットマップデータを書き込み
+        // Write bitmap data
         const unsigned char* bitmap = fontData[charIndex];
         for (int row = 0; row < CHAR_HEIGHT; row++) {
             unsigned char rowData = bitmap[row];
             for (int col = 0; col < CHAR_WIDTH; col++) {
-                // MSB から順にチェック
+                // Check from MSB
                 if (rowData & (0x80 >> col)) {
                     int px = baseX + col;
-                    int py = baseY + row + 1;  // 1ピクセル下にオフセット
+                    int py = baseY + row + 1;  // Offset 1 pixel down
                     int idx = (py * ATLAS_WIDTH + px) * 4;
                     pixels[idx + 0] = 255;  // R
                     pixels[idx + 1] = 255;  // G
                     pixels[idx + 2] = 255;  // B
-                    pixels[idx + 3] = 255;  // A (不透明)
+                    pixels[idx + 3] = 255;  // A (opaque)
                 }
             }
         }
@@ -279,11 +279,11 @@ inline unsigned char* generateAtlasPixels() {
     return pixels;
 }
 
-// 文字のテクスチャ座標を取得（左上）
+// Get texture coordinates for character (top-left)
 inline void getCharTexCoord(char c, float& u, float& v) {
     int index = (int)c - 32;
     if (index < 0 || index >= 95) {
-        index = 0;  // スペース
+        index = 0;  // Space
     }
     int col = index % CHARS_PER_ROW;
     int row = index / CHARS_PER_ROW;

@@ -1,35 +1,35 @@
 #pragma once
 
 // =============================================================================
-// tcTexture.h - GPU テクスチャ管理
+// tcTexture.h - GPU texture management
 // =============================================================================
 
-// このファイルは TrussC.h からインクルードされる
-// sokol と internal 名前空間の変数にアクセスするため
+// This file is included from TrussC.h
+// to access sokol and internal namespace variables
 
 namespace trussc {
 
-// テクスチャの使用モード
+// Texture usage mode
 enum class TextureUsage {
-    Immutable,      // 一度だけ設定、更新不可（Image::load 用）
-    Dynamic,        // CPU から定期的に更新（Image::allocate 用）
-    Stream,         // 毎フレーム更新（VideoGrabber 用）
-    RenderTarget    // FBO のカラーアタッチメント用
+    Immutable,      // Set once, cannot update (for Image::load)
+    Dynamic,        // Update periodically from CPU (for Image::allocate)
+    Stream,         // Update every frame (for VideoGrabber)
+    RenderTarget    // For FBO color attachment
 };
 
 // ---------------------------------------------------------------------------
-// Texture クラス - GPU 側のテクスチャを管理
+// Texture class - Manages GPU-side texture
 // ---------------------------------------------------------------------------
 class Texture {
 public:
     Texture() = default;
     ~Texture() { clear(); }
 
-    // コピー禁止
+    // Copy prohibited
     Texture(const Texture&) = delete;
     Texture& operator=(const Texture&) = delete;
 
-    // ムーブ対応
+    // Move support
     Texture(Texture&& other) noexcept {
         moveFrom(std::move(other));
     }
@@ -42,9 +42,9 @@ public:
         return *this;
     }
 
-    // === 確保・解放 ===
+    // === Allocation/Deallocation ===
 
-    // 空のテクスチャを確保
+    // Allocate empty texture
     void allocate(int width, int height, int channels = 4,
                   TextureUsage usage = TextureUsage::Immutable,
                   int sampleCount = 1) {
@@ -59,7 +59,7 @@ public:
         createResources(nullptr);
     }
 
-    // Pixels からテクスチャを確保
+    // Allocate texture from Pixels
     void allocate(const Pixels& pixels, TextureUsage usage = TextureUsage::Immutable) {
         clear();
 
@@ -69,15 +69,15 @@ public:
         usage_ = usage;
 
         if (usage == TextureUsage::Immutable) {
-            // Immutable は作成時にデータを渡す
+            // Immutable passes data at creation
             createResources(pixels.getData());
         } else {
-            // Dynamic/Stream は空で作成、ユーザーが update() を呼ぶまでデータなし
+            // Dynamic/Stream created empty, no data until user calls update()
             createResources(nullptr);
         }
     }
 
-    // リソースを解放
+    // Release resources
     void clear() {
         if (allocated_) {
             sg_destroy_sampler(sampler_);
@@ -97,7 +97,7 @@ public:
         sampler_ = {};
     }
 
-    // === 状態 ===
+    // === State ===
 
     bool isAllocated() const { return allocated_; }
     int getWidth() const { return width_; }
@@ -106,23 +106,23 @@ public:
     TextureUsage getUsage() const { return usage_; }
     int getSampleCount() const { return sampleCount_; }
 
-    // === データ更新（Immutable 以外） ===
+    // === Data update (except Immutable) ===
 
     void loadData(const Pixels& pixels) {
         loadData(pixels.getData(), pixels.getWidth(), pixels.getHeight(), pixels.getChannels());
     }
 
-    // ピクセルデータをテクスチャにアップロード
-    // 注意: sokol の制限により、1フレームに1回しか呼べない
-    // 同じフレームで2回呼ぶと、2回目は無視されて警告が出る
+    // Upload pixel data to texture
+    // Note: Due to sokol limitations, can only be called once per frame
+    // Calling twice in same frame ignores second call and logs warning
     void loadData(const unsigned char* data, int width, int height, int channels) {
         if (!allocated_ || usage_ == TextureUsage::Immutable) return;
         if (width != width_ || height != height_ || channels != channels_) return;
 
-        // 1フレームに1回だけ更新可能（sokol の制限）
+        // Can only update once per frame (sokol limitation)
         uint64_t currentFrame = sapp_frame_count();
         if (lastUpdateFrame_ == currentFrame) {
-            // 同じフレームでの2回目は無視して警告
+            // Ignore second call in same frame and log warning
             tcLogWarning() << "[Texture] loadData() called twice in same frame, skipped";
             return;
         }
@@ -134,7 +134,7 @@ public:
         sg_update_image(image_, &img_data);
     }
 
-    // === フィルター設定 ===
+    // === Filter settings ===
 
     void setMinFilter(TextureFilter filter) {
         if (minFilter_ != filter) {
@@ -161,7 +161,7 @@ public:
     TextureFilter getMinFilter() const { return minFilter_; }
     TextureFilter getMagFilter() const { return magFilter_; }
 
-    // === ラップモード設定 ===
+    // === Wrap mode settings ===
 
     void setWrapU(TextureWrap wrap) {
         if (wrapU_ != wrap) {
@@ -188,7 +188,7 @@ public:
     TextureWrap getWrapU() const { return wrapU_; }
     TextureWrap getWrapV() const { return wrapV_; }
 
-    // === 描画 ===
+    // === Draw ===
 
     void draw(float x, float y) const {
         if (allocated_) {
@@ -202,7 +202,7 @@ public:
         }
     }
 
-    // 部分描画（スプライトシート用）
+    // Partial draw (for sprite sheets)
     void drawSubsection(float x, float y, float w, float h,
                         float sx, float sy, float sw, float sh) const {
         if (allocated_ && width_ > 0 && height_ > 0) {
@@ -214,7 +214,7 @@ public:
         }
     }
 
-    // === バインド（シェーダー連携用） ===
+    // === Bind (for shader integration) ===
 
     void bind() const {
         if (allocated_) {
@@ -227,19 +227,19 @@ public:
         sgl_disable_texture();
     }
 
-    // === 内部リソースアクセス（上級者向け） ===
+    // === Internal resource access (advanced) ===
 
     sg_image getImage() const { return image_; }
     sg_view getView() const { return view_; }
     sg_sampler getSampler() const { return sampler_; }
 
-    // RenderTarget 用: アタッチメントビュー（FBO でレンダリング先として使う）
+    // For RenderTarget: attachment view (used as render target in FBO)
     sg_view getAttachmentView() const { return attachmentView_; }
 
 private:
     sg_image image_ = {};
-    sg_view view_ = {};              // テクスチャビュー（サンプリング用）
-    sg_view attachmentView_ = {};    // アタッチメントビュー（RenderTarget 用）
+    sg_view view_ = {};              // Texture view (for sampling)
+    sg_view attachmentView_ = {};    // Attachment view (for RenderTarget)
     sg_sampler sampler_ = {};
 
     int width_ = 0;
@@ -248,7 +248,7 @@ private:
     int sampleCount_ = 1;
     bool allocated_ = false;
     TextureUsage usage_ = TextureUsage::Immutable;
-    uint64_t lastUpdateFrame_ = UINT64_MAX;  // 最後に更新したフレーム
+    uint64_t lastUpdateFrame_ = UINT64_MAX;  // Last updated frame
 
     TextureFilter minFilter_ = TextureFilter::Linear;
     TextureFilter magFilter_ = TextureFilter::Linear;
@@ -256,7 +256,7 @@ private:
     TextureWrap wrapV_ = TextureWrap::ClampToEdge;
 
     void createResources(const unsigned char* initialData) {
-        // イメージを作成
+        // Create image
         sg_image_desc img_desc = {};
         img_desc.width = width_;
         img_desc.height = height_;
@@ -277,26 +277,26 @@ private:
                 break;
             case TextureUsage::RenderTarget:
                 img_desc.usage.color_attachment = true;
-                img_desc.usage.resolve_attachment = true;  // MSAA resolve 先としても使えるように
+                img_desc.usage.resolve_attachment = true;  // Can also be used as MSAA resolve target
                 img_desc.sample_count = sampleCount_;
                 break;
         }
 
         image_ = sg_make_image(&img_desc);
 
-        // テクスチャビューを作成（サンプリング用）
+        // Create texture view (for sampling)
         sg_view_desc view_desc = {};
         view_desc.texture.image = image_;
         view_ = sg_make_view(&view_desc);
 
-        // RenderTarget の場合はアタッチメントビューも作成
+        // Create attachment view for RenderTarget
         if (usage_ == TextureUsage::RenderTarget) {
             sg_view_desc att_desc = {};
             att_desc.color_attachment.image = image_;
             attachmentView_ = sg_make_view(&att_desc);
         }
 
-        // サンプラーを作成
+        // Create sampler
         createSampler();
 
         allocated_ = true;
@@ -305,11 +305,11 @@ private:
     void createSampler() {
         sg_sampler_desc smp_desc = {};
 
-        // フィルター設定
+        // Filter settings
         smp_desc.min_filter = (minFilter_ == TextureFilter::Nearest) ? SG_FILTER_NEAREST : SG_FILTER_LINEAR;
         smp_desc.mag_filter = (magFilter_ == TextureFilter::Nearest) ? SG_FILTER_NEAREST : SG_FILTER_LINEAR;
 
-        // ラップモード設定
+        // Wrap mode settings
         auto toSgWrap = [](TextureWrap wrap) -> sg_wrap {
             switch (wrap) {
                 case TextureWrap::Repeat: return SG_WRAP_REPEAT;
@@ -332,12 +332,12 @@ private:
 
     void drawInternal(float x, float y, float w, float h,
                       float u0, float v0, float u1, float v1) const {
-        // アルファブレンドパイプラインを使用
+        // Use alpha blend pipeline
         sgl_load_pipeline(internal::fontPipeline);
         sgl_enable_texture();
         sgl_texture(view_, sampler_);
 
-        // 現在の色で描画
+        // Draw with current color
         Color col = getDefaultContext().getColor();
         sgl_begin_quads();
         sgl_c4f(col.r, col.g, col.b, col.a);

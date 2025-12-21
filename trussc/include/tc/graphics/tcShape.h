@@ -1,51 +1,51 @@
 #pragma once
 
-// このファイルは TrussC.h からインクルードされる
-// internal 名前空間の変数にアクセスするため
+// This file is included from TrussC.h
+// To access variables in internal namespace
 
 #include <vector>
 
 namespace trussc {
 
-// シェイプ描画の内部状態
+// Internal state for shape drawing
 namespace internal {
     inline std::vector<Vec3> shapeVertices;
     inline bool shapeStarted = false;
 }
 
-// シェイプ描画を開始
-// fill と stroke の両方に対応
+// Begin shape drawing
+// Supports both fill and stroke
 inline void beginShape() {
     internal::shapeVertices.clear();
     internal::shapeStarted = true;
 }
 
-// 頂点を追加（2D）
+// Add vertex (2D)
 inline void vertex(float x, float y) {
     if (internal::shapeStarted) {
         internal::shapeVertices.push_back(Vec3{x, y, 0.0f});
     }
 }
 
-// 頂点を追加（3D）
+// Add vertex (3D)
 inline void vertex(float x, float y, float z) {
     if (internal::shapeStarted) {
         internal::shapeVertices.push_back(Vec3{x, y, z});
     }
 }
 
-// 頂点を追加（Vec2）
+// Add vertex (Vec2)
 inline void vertex(const Vec2& v) {
     vertex(v.x, v.y);
 }
 
-// 頂点を追加（Vec3）
+// Add vertex (Vec3)
 inline void vertex(const Vec3& v) {
     vertex(v.x, v.y, v.z);
 }
 
-// シェイプ描画を終了
-// close: true で始点と終点を結ぶ
+// End shape drawing
+// close: if true, connects start and end points
 inline void endShape(bool close = false) {
     if (!internal::shapeStarted || internal::shapeVertices.empty()) {
         internal::shapeStarted = false;
@@ -57,11 +57,11 @@ inline void endShape(bool close = false) {
     auto& ctx = getDefaultContext();
     Color col = ctx.getColor();
 
-    // fill モード: 三角形ファン（凸形状のみ正しく描画）
+    // Fill mode: triangle fan (only renders convex shapes correctly)
     if (ctx.isFillEnabled() && n >= 3) {
         sgl_begin_triangles();
         sgl_c4f(col.r, col.g, col.b, col.a);
-        // 三角形ファン: 0番目の頂点を中心に
+        // Triangle fan: vertex 0 as center
         for (size_t i = 1; i < n - 1; i++) {
             sgl_v3f(verts[0].x, verts[0].y, verts[0].z);
             sgl_v3f(verts[i].x, verts[i].y, verts[i].z);
@@ -70,7 +70,7 @@ inline void endShape(bool close = false) {
         sgl_end();
     }
 
-    // stroke モード: ラインストリップ
+    // Stroke mode: line strip
     if (ctx.isStrokeEnabled() && n >= 2) {
         sgl_c4f(col.r, col.g, col.b, col.a);
         sgl_begin_line_strip();

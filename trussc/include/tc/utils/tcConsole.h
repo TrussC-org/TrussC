@@ -1,24 +1,24 @@
 #pragma once
 
 // =============================================================================
-// tcConsole - stdin からのコマンド入力機能
+// tcConsole - Command input from stdin
 // =============================================================================
 //
-// AI アシスタントなど外部プロセスからのコマンドを受け取るためのモジュール。
-// stdin で受け取った行をパースして、ConsoleEventArgs としてイベント配信する。
+// Module for receiving commands from external processes like AI assistants.
+// Parses lines received from stdin and dispatches them as ConsoleEventArgs.
 //
-// 使い方:
-//   // 受信側（tcApp::setup() 内など）
+// Usage:
+//   // Receiver side (e.g., in tcApp::setup())
 //   tcEvents().console.listen([](const ConsoleEventArgs& e) {
 //       if (e.args[0] == "spawn") {
 //           spawnEnemy(stoi(e.args[1]), stoi(e.args[2]));
 //       }
 //   });
 //
-//   // 送信側（外部プロセス）
+//   // Sender side (external process)
 //   echo "spawn 100 200" | ./myapp
 //
-// デフォルトで有効。無効にしたい場合は setup() 内で console::stop() を呼ぶ。
+// Enabled by default. Call console::stop() in setup() to disable.
 //
 // =============================================================================
 
@@ -35,7 +35,7 @@ namespace trussc {
 namespace console {
 
 // ---------------------------------------------------------------------------
-// 内部状態
+// Internal state
 // ---------------------------------------------------------------------------
 namespace detail {
 
@@ -54,7 +54,7 @@ inline std::unique_ptr<std::thread>& getThread() {
     return t;
 }
 
-// 行を空白でパースして ConsoleEventArgs を作成
+// Parse line by whitespace and create ConsoleEventArgs
 inline ConsoleEventArgs parseLine(const std::string& line) {
     ConsoleEventArgs args;
     args.raw = line;
@@ -67,7 +67,7 @@ inline ConsoleEventArgs parseLine(const std::string& line) {
     return args;
 }
 
-// stdin 読み取りスレッド
+// stdin reading thread
 inline void readThread() {
     std::string line;
     while (isRunning().load() && std::getline(std::cin, line)) {
@@ -80,41 +80,41 @@ inline void readThread() {
 } // namespace detail
 
 // ---------------------------------------------------------------------------
-// 公開API
+// Public API
 // ---------------------------------------------------------------------------
 
-/// コンソール入力スレッドを開始
-/// TrussC.h の runApp() 内で自動的に呼ばれる
+/// Start console input thread
+/// Called automatically within runApp() in TrussC.h
 inline void start() {
     if (detail::isRunning().load()) {
-        return; // すでに起動中
+        return; // Already running
     }
 
     detail::isRunning().store(true);
     detail::getThread() = std::make_unique<std::thread>(detail::readThread);
 }
 
-/// コンソール入力スレッドを停止
-/// 無効にしたい場合は setup() 内で呼ぶ
+/// Stop console input thread
+/// Call in setup() to disable
 inline void stop() {
     if (!detail::isRunning().load()) {
-        return; // すでに停止中
+        return; // Already stopped
     }
 
     detail::isRunning().store(false);
     detail::getChannel().close();
 
-    // スレッドが getline で待機している場合、
-    // stdin を閉じない限りブロックし続ける可能性があるので detach する
+    // If thread is waiting on getline, it may block indefinitely
+    // unless stdin is closed, so detach it
     if (detail::getThread() && detail::getThread()->joinable()) {
         detail::getThread()->detach();
     }
     detail::getThread().reset();
 }
 
-/// キューに溜まったコマンドを処理
-/// TrussC.h の _frame_cb() 内で毎フレーム呼ばれる
-/// コマンドがあれば events().console にイベントを発火する
+/// Process commands in queue
+/// Called every frame within _frame_cb() in TrussC.h
+/// Fires events to events().console if commands exist
 inline void processQueue() {
     if (!detail::isRunning().load()) {
         return;
@@ -126,7 +126,7 @@ inline void processQueue() {
     }
 }
 
-/// コンソールが有効かどうか
+/// Whether console is enabled
 inline bool isEnabled() {
     return detail::isRunning().load();
 }

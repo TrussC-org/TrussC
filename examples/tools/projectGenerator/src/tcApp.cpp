@@ -126,7 +126,7 @@ void tcApp::draw() {
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::TextWrapped("Please select the TrussC folder (e.g. tc_v0.0.1).");
+        ImGui::TextWrapped("Please select the TrussC folder (e.g. TrussC).");
         ImGui::Spacing();
         ImGui::Spacing();
 
@@ -135,7 +135,7 @@ void tcApp::draw() {
         ImGui::InputText("##tcRoot", tcRootBuf, sizeof(tcRootBuf));
         ImGui::SameLine();
         if (ImGui::Button("Browse...")) {
-            auto result = loadDialog("Select TrussC folder (tc_vX.Y.Z)", true);
+            auto result = loadDialog("Select TrussC folder", true);
             if (result.success) {
                 strncpy(tcRootBuf, result.filePath.c_str(), sizeof(tcRootBuf) - 1);
             }
@@ -149,7 +149,7 @@ void tcApp::draw() {
         if (ImGui::Button("OK", ImVec2(120, 30))) {
             tcRoot = tcRootBuf;
             // Verify tc_vX.Y.Z folder (check if CMakeLists.txt exists)
-            if (!tcRoot.empty() && fs::exists(tcRoot + "/CMakeLists.txt")) {
+            if (!tcRoot.empty() && fs::exists(tcRoot + "/trussc") && fs::exists(tcRoot + "/trussc/CMakeLists.txt")) {
                 showSetupDialog = false;
                 saveConfig();
                 scanAddons();

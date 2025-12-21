@@ -15,7 +15,7 @@ inline Mesh createPlane(float width, float height, int cols = 2, int rows = 2) {
     float halfW = width * 0.5f;
     float halfH = height * 0.5f;
 
-    // 頂点と法線を生成
+    // Generate vertices and normals
     for (int y = 0; y <= rows; y++) {
         for (int x = 0; x <= cols; x++) {
             float px = -halfW + (width * x / cols);

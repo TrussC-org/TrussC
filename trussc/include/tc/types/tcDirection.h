@@ -1,24 +1,24 @@
 #pragma once
 
 // =============================================================================
-// tcDirection.h - 汎用方向・位置指定 enum
+// tcDirection.h - Generic direction/position enum
 // =============================================================================
-// テキストアラインメント、レイアウト指定などに使用
-// enum class で型安全を保ちつつ、tc::Left のように短く書ける
+// Used for text alignment, layout specification, etc.
+// Type-safe with enum class, yet can be written concisely like tc::Left
 
 namespace trussc {
 
-// 方向・位置指定（汎用）
+// Direction/position specification (generic)
 enum class Direction {
     Left,
     Center,
     Right,
     Top,
     Bottom,
-    Baseline  // テキスト専用：文字のベースライン
+    Baseline  // Text-specific: character baseline
 };
 
-// 名前空間に展開（tc::Left のように短く書ける）
+// Expand to namespace (can be written concisely like tc::Left)
 inline constexpr Direction Left = Direction::Left;
 inline constexpr Direction Center = Direction::Center;
 inline constexpr Direction Right = Direction::Right;

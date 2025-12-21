@@ -8,23 +8,23 @@
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// ThreadChannel - スレッド間通信用のスレッドセーフキュー（ofThreadChannel互換）
+// ThreadChannel - Thread-safe queue for inter-thread communication (ofThreadChannel compatible)
 // ---------------------------------------------------------------------------
 //
-// Producer-Consumer パターンの実装。
-// 一方向通信用。双方向通信には2つのチャンネルを使用する。
+// Implementation of the Producer-Consumer pattern.
+// For one-way communication. Use two channels for bidirectional communication.
 //
-// 使い方:
-//   // 送信側（ワーカースレッド）
+// Usage:
+//   // Sender side (worker thread)
 //   channel.send(data);
 //
-//   // 受信側（メインスレッド）
+//   // Receiver side (main thread)
 //   DataType received;
 //   if (channel.receive(received)) {
-//       // 受信成功
+//       // Receive successful
 //   }
 //
-// データはFIFO（先入れ先出し）順で送受信される。
+// Data is sent/received in FIFO (first-in-first-out) order.
 //
 // ---------------------------------------------------------------------------
 
@@ -33,16 +33,16 @@ class ThreadChannel {
 public:
     ThreadChannel() : closed_(false) {}
 
-    // コピー禁止
+    // No copy
     ThreadChannel(const ThreadChannel&) = delete;
     ThreadChannel& operator=(const ThreadChannel&) = delete;
 
     // ---------------------------------------------------------------------------
-    // 送信
+    // Send
     // ---------------------------------------------------------------------------
 
-    // 値を送信（コピー）
-    // チャンネルが閉じている場合は false を返す
+    // Send value (copy)
+    // Returns false if channel is closed
     bool send(const T& value) {
         std::unique_lock<std::mutex> lock(mutex_);
         if (closed_) {
@@ -53,9 +53,9 @@ public:
         return true;
     }
 
-    // 値を送信（ムーブ）
-    // チャンネルが閉じている場合は false を返す
-    // 注意: 失敗しても value は無効化される
+    // Send value (move)
+    // Returns false if channel is closed
+    // Note: value is invalidated even on failure
     bool send(T&& value) {
         std::unique_lock<std::mutex> lock(mutex_);
         if (closed_) {
@@ -67,12 +67,12 @@ public:
     }
 
     // ---------------------------------------------------------------------------
-    // 受信
+    // Receive
     // ---------------------------------------------------------------------------
 
-    // 値を受信（ブロッキング）
-    // データが届くまで待機する
-    // チャンネルが閉じられた場合は false を返す
+    // Receive value (blocking)
+    // Waits until data arrives
+    // Returns false if channel is closed
     bool receive(T& value) {
         std::unique_lock<std::mutex> lock(mutex_);
         if (closed_) {
@@ -89,8 +89,8 @@ public:
         return false;
     }
 
-    // 値を受信（ノンブロッキング）
-    // データがなければ即座に false を返す
+    // Receive value (non-blocking)
+    // Returns false immediately if no data
     bool tryReceive(T& value) {
         std::unique_lock<std::mutex> lock(mutex_);
         if (closed_ || queue_.empty()) {
@@ -101,8 +101,8 @@ public:
         return true;
     }
 
-    // 値を受信（タイムアウト付き）
-    // 指定時間だけ待機し、データがなければ false を返す
+    // Receive value (with timeout)
+    // Waits for specified time, returns false if no data
     bool tryReceive(T& value, int64_t timeoutMs) {
         std::unique_lock<std::mutex> lock(mutex_);
         if (closed_) {
@@ -123,39 +123,39 @@ public:
     }
 
     // ---------------------------------------------------------------------------
-    // 制御
+    // Control
     // ---------------------------------------------------------------------------
 
-    // チャンネルを閉じる
-    // 待機中のすべてのスレッドを起こす
-    // 閉じた後は send/receive は false を返す
+    // Close channel
+    // Wakes all waiting threads
+    // After closing, send/receive return false
     void close() {
         std::unique_lock<std::mutex> lock(mutex_);
         closed_ = true;
         condition_.notify_all();
     }
 
-    // キューをクリア
+    // Clear queue
     void clear() {
         std::unique_lock<std::mutex> lock(mutex_);
         queue_ = {};
     }
 
     // ---------------------------------------------------------------------------
-    // 状態取得
+    // State
     // ---------------------------------------------------------------------------
 
-    // キューが空かどうか（近似値）
+    // Whether queue is empty (approximate)
     bool empty() const {
         return queue_.empty();
     }
 
-    // キューのサイズ（近似値）
+    // Queue size (approximate)
     size_t size() const {
         return queue_.size();
     }
 
-    // チャンネルが閉じているかどうか
+    // Whether channel is closed
     bool isClosed() const {
         return closed_;
     }

@@ -1,10 +1,10 @@
 #pragma once
 
 // =============================================================================
-// tcPixels.h - CPU ピクセルバッファ管理
+// tcPixels.h - CPU pixel buffer management
 // =============================================================================
 
-// このファイルは TrussC.h からインクルードされる
+// This file is included from TrussC.h
 
 #include <filesystem>
 #include "stb/stb_image.h"
@@ -15,18 +15,18 @@ namespace trussc {
 namespace fs = std::filesystem;
 
 // ---------------------------------------------------------------------------
-// Pixels クラス - CPU 側のピクセルデータを管理
+// Pixels class - Manages CPU-side pixel data
 // ---------------------------------------------------------------------------
 class Pixels {
 public:
     Pixels() = default;
     ~Pixels() { clear(); }
 
-    // コピー禁止
+    // Copy prohibited
     Pixels(const Pixels&) = delete;
     Pixels& operator=(const Pixels&) = delete;
 
-    // ムーブ対応
+    // Move support
     Pixels(Pixels&& other) noexcept {
         moveFrom(std::move(other));
     }
@@ -39,9 +39,9 @@ public:
         return *this;
     }
 
-    // === 確保・解放 ===
+    // === Allocation/Deallocation ===
 
-    // 空のピクセルバッファを確保
+    // Allocate empty pixel buffer
     void allocate(int width, int height, int channels = 4) {
         clear();
 
@@ -55,7 +55,7 @@ public:
         allocated_ = true;
     }
 
-    // リソースを解放
+    // Release resources
     void clear() {
         if (data_) {
             delete[] data_;
@@ -67,7 +67,7 @@ public:
         allocated_ = false;
     }
 
-    // === 状態 ===
+    // === State ===
 
     bool isAllocated() const { return allocated_; }
     int getWidth() const { return width_; }
@@ -75,12 +75,12 @@ public:
     int getChannels() const { return channels_; }
     size_t getTotalBytes() const { return width_ * height_ * channels_; }
 
-    // === ピクセルデータアクセス ===
+    // === Pixel data access ===
 
     unsigned char* getData() { return data_; }
     const unsigned char* getData() const { return data_; }
 
-    // 指定座標のピクセル色を取得
+    // Get pixel color at specified coordinates
     Color getColor(int x, int y) const {
         if (!allocated_ || !data_ || x < 0 || x >= width_ || y < 0 || y >= height_) {
             return Color(0, 0, 0, 0);
@@ -94,13 +94,13 @@ public:
             float a = (channels_ == 4) ? data_[index + 3] / 255.0f : 1.0f;
             return Color(r, g, b, a);
         } else {
-            // グレースケール
+            // Grayscale
             float gray = data_[index] / 255.0f;
             return Color(gray, gray, gray, 1.0f);
         }
     }
 
-    // 指定座標のピクセル色を設定
+    // Set pixel color at specified coordinates
     void setColor(int x, int y, const Color& c) {
         if (!allocated_ || !data_ || x < 0 || x >= width_ || y < 0 || y >= height_) {
             return;
@@ -115,30 +115,30 @@ public:
                 data_[index + 3] = static_cast<unsigned char>(c.a * 255.0f);
             }
         } else {
-            // グレースケール（輝度で変換）
+            // Grayscale (convert by luminance)
             float gray = 0.299f * c.r + 0.587f * c.g + 0.114f * c.b;
             data_[index] = static_cast<unsigned char>(gray * 255.0f);
         }
     }
 
-    // === バルク操作 ===
+    // === Bulk operations ===
 
-    // 外部データからコピー
+    // Copy from external data
     void setFromPixels(const unsigned char* srcData, int width, int height, int channels) {
         allocate(width, height, channels);
         memcpy(data_, srcData, getTotalBytes());
     }
 
-    // 外部バッファにコピー
+    // Copy to external buffer
     void copyTo(unsigned char* dst) const {
         if (allocated_ && data_ && dst) {
             memcpy(dst, data_, getTotalBytes());
         }
     }
 
-    // === ファイル I/O ===
+    // === File I/O ===
 
-    // ファイルから読み込み
+    // Load from file
     bool load(const fs::path& path) {
         clear();
 
@@ -150,7 +150,7 @@ public:
 
         width_ = w;
         height_ = h;
-        channels_ = 4;  // 常に RGBA で読み込み
+        channels_ = 4;  // Always load as RGBA
 
         size_t size = width_ * height_ * channels_;
         data_ = new unsigned char[size];
@@ -161,7 +161,7 @@ public:
         return true;
     }
 
-    // メモリから読み込み
+    // Load from memory
     bool loadFromMemory(const unsigned char* buffer, int len) {
         clear();
 
@@ -184,7 +184,7 @@ public:
         return true;
     }
 
-    // ファイルに保存
+    // Save to file
     bool save(const fs::path& path) const {
         if (!allocated_ || !data_) return false;
 
@@ -199,7 +199,7 @@ public:
         } else if (ext == ".bmp" || ext == ".BMP") {
             result = stbi_write_bmp(pathStr.c_str(), width_, height_, channels_, data_);
         } else {
-            // デフォルトは PNG
+            // Default is PNG
             result = stbi_write_png(pathStr.c_str(), width_, height_, channels_, data_, width_ * channels_);
         }
 

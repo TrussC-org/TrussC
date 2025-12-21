@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// tcCoreEvents - フレームワークのコアイベント集
+// tcCoreEvents - Framework core events
 // =============================================================================
 
 #include "tcEvent.h"
@@ -10,44 +10,44 @@
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// CoreEvents - フレームワークのコアイベント
+// CoreEvents - Framework core events
 // ---------------------------------------------------------------------------
 class CoreEvents {
 public:
-    // アプリライフサイクル
-    Event<void> setup;            // setup完了後
-    Event<void> update;           // 毎フレーム update 前
-    Event<void> draw;             // 毎フレーム draw 前
-    Event<void> exit;             // アプリ終了時
+    // App lifecycle
+    Event<void> setup;            // After setup completes
+    Event<void> update;           // Before update each frame
+    Event<void> draw;             // Before draw each frame
+    Event<void> exit;             // On app exit
 
-    // キーボード
+    // Keyboard
     Event<KeyEventArgs> keyPressed;
     Event<KeyEventArgs> keyReleased;
 
-    // マウス
+    // Mouse
     Event<MouseEventArgs> mousePressed;
     Event<MouseEventArgs> mouseReleased;
     Event<MouseMoveEventArgs> mouseMoved;
     Event<MouseDragEventArgs> mouseDragged;
     Event<ScrollEventArgs> mouseScrolled;
 
-    // ウィンドウ
+    // Window
     Event<ResizeEventArgs> windowResized;
 
-    // ドラッグ&ドロップ
+    // Drag & drop
     Event<DragDropEventArgs> filesDropped;
 
-    // コンソール入力（stdin からのコマンド）
+    // Console input (commands from stdin)
     Event<ConsoleEventArgs> console;
 
-    // 将来用
+    // For future use
     // Event<TouchEventArgs> touchBegan;
     // Event<TouchEventArgs> touchMoved;
     // Event<TouchEventArgs> touchEnded;
 };
 
 // ---------------------------------------------------------------------------
-// グローバルアクセサ
+// Global accessor
 // ---------------------------------------------------------------------------
 inline CoreEvents& events() {
     static CoreEvents instance;

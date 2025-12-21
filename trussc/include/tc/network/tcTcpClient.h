@@ -1,5 +1,5 @@
 // =============================================================================
-// tcTcpClient.h - TCP クライアントソケット
+// tcTcpClient.h - TCP client socket
 // =============================================================================
 #pragma once
 
@@ -28,106 +28,106 @@
 namespace trussc {
 
 // =============================================================================
-// イベント引数
+// Event arguments
 // =============================================================================
 
-// 接続完了イベント
+// Connection complete event
 struct TcpConnectEventArgs {
     bool success = false;
     std::string message;
 };
 
-// データ受信イベント
+// Data receive event
 struct TcpReceiveEventArgs {
     std::vector<char> data;
 };
 
-// 切断イベント
+// Disconnect event
 struct TcpDisconnectEventArgs {
     std::string reason;
-    bool wasClean = true;  // 正常切断かどうか
+    bool wasClean = true;  // Whether it was a clean disconnect
 };
 
-// エラーイベント
+// Error event
 struct TcpErrorEventArgs {
     std::string message;
     int errorCode = 0;
 };
 
 // =============================================================================
-// TcpClient クラス（基底クラス - TlsClient の親）
+// TcpClient class (base class - parent of TlsClient)
 // =============================================================================
 class TcpClient {
 public:
     // -------------------------------------------------------------------------
-    // イベント
+    // Events
     // -------------------------------------------------------------------------
-    Event<TcpConnectEventArgs> onConnect;       // 接続完了時
-    Event<TcpReceiveEventArgs> onReceive;       // データ受信時
-    Event<TcpDisconnectEventArgs> onDisconnect; // 切断時
-    Event<TcpErrorEventArgs> onError;           // エラー発生時
+    Event<TcpConnectEventArgs> onConnect;       // On connection complete
+    Event<TcpReceiveEventArgs> onReceive;       // On data receive
+    Event<TcpDisconnectEventArgs> onDisconnect; // On disconnect
+    Event<TcpErrorEventArgs> onError;           // On error
 
     // -------------------------------------------------------------------------
-    // コンストラクタ / デストラクタ
+    // Constructor / Destructor
     // -------------------------------------------------------------------------
     TcpClient();
     virtual ~TcpClient();
 
-    // コピー禁止
+    // Copy prohibited
     TcpClient(const TcpClient&) = delete;
     TcpClient& operator=(const TcpClient&) = delete;
 
-    // ムーブは許可
+    // Move allowed
     TcpClient(TcpClient&& other) noexcept;
     TcpClient& operator=(TcpClient&& other) noexcept;
 
     // -------------------------------------------------------------------------
-    // 接続管理（virtual - TlsClient でオーバーライド可能）
+    // Connection management (virtual - can be overridden in TlsClient)
     // -------------------------------------------------------------------------
 
-    // サーバーに接続（ブロッキング）
+    // Connect to server (blocking)
     virtual bool connect(const std::string& host, int port);
 
-    // サーバーに非同期接続（バックグラウンドで接続、onConnectで通知）
+    // Connect to server asynchronously (connects in background, notifies via onConnect)
     virtual void connectAsync(const std::string& host, int port);
 
-    // 接続を切断
+    // Disconnect
     virtual void disconnect();
 
-    // 接続中かどうか
+    // Whether connected
     virtual bool isConnected() const;
 
     // -------------------------------------------------------------------------
-    // データ送受信（virtual - TlsClient でオーバーライド可能）
+    // Data send/receive (virtual - can be overridden in TlsClient)
     // -------------------------------------------------------------------------
 
-    // データを送信
+    // Send data
     virtual bool send(const void* data, size_t size);
     virtual bool send(const std::vector<char>& data);
     virtual bool send(const std::string& message);
 
     // -------------------------------------------------------------------------
-    // 設定
+    // Settings
     // -------------------------------------------------------------------------
 
-    // 受信バッファサイズを設定
+    // Set receive buffer size
     void setReceiveBufferSize(size_t size);
 
-    // ブロッキングモードを設定
+    // Set blocking mode
     void setBlocking(bool blocking);
 
     // -------------------------------------------------------------------------
-    // 情報取得
+    // Information retrieval
     // -------------------------------------------------------------------------
 
-    // 接続先ホスト名
+    // Remote host name
     std::string getRemoteHost() const;
 
-    // 接続先ポート
+    // Remote port
     int getRemotePort() const;
 
 protected:
-    // 継承先からアクセス可能
+    // Accessible from derived classes
     void notifyError(const std::string& msg, int code = 0);
 
 #ifdef _WIN32

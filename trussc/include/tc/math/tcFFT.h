@@ -2,20 +2,20 @@
 
 // =============================================================================
 // TrussC FFT
-// 高速フーリエ変換（Cooley-Tukey 基数2アルゴリズム）
+// Fast Fourier Transform (Cooley-Tukey radix-2 algorithm)
 //
-// 使用例:
+// Usage:
 //   vector<complex<float>> data(1024);
-//   // ... data にサンプルを設定 ...
+//   // ... set samples to data ...
 //   tc::fft(data);                    // FFT
-//   tc::ifft(data);                   // 逆FFT
+//   tc::ifft(data);                   // Inverse FFT
 //
-//   // 実数信号用
+//   // For real signals
 //   vector<float> signal(1024);
 //   auto spectrum = tc::fftReal(signal);
 //   auto magnitudes = tc::fftMagnitude(spectrum);
 //
-//   // 窓関数
+//   // Window function
 //   tc::applyWindow(signal, tc::WindowType::Hanning);
 // =============================================================================
 
@@ -29,25 +29,25 @@
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// 定数
+// Constants
 // ---------------------------------------------------------------------------
 constexpr float FFT_PI = 3.14159265358979323846f;
 
 // ---------------------------------------------------------------------------
-// 窓関数の種類
+// Window function types
 // ---------------------------------------------------------------------------
 enum class WindowType {
-    Rect,  // 矩形窓（窓なし）
-    Hanning,    // ハニング窓
-    Hamming,    // ハミング窓
-    Blackman    // ブラックマン窓
+    Rect,  // Rectangular window (no window)
+    Hanning,    // Hanning window
+    Hamming,    // Hamming window
+    Blackman    // Blackman window
 };
 
 // ---------------------------------------------------------------------------
-// 窓関数
+// Window functions
 // ---------------------------------------------------------------------------
 
-// 窓関数の値を取得
+// Get window function value
 inline float windowFunction(WindowType type, int i, int n) {
     float t = (float)i / (n - 1);
     switch (type) {
@@ -65,7 +65,7 @@ inline float windowFunction(WindowType type, int i, int n) {
     }
 }
 
-// 信号に窓関数を適用
+// Apply window function to signal
 inline void applyWindow(std::vector<float>& signal, WindowType type) {
     int n = static_cast<int>(signal.size());
     for (int i = 0; i < n; i++) {
@@ -81,22 +81,22 @@ inline void applyWindow(std::vector<std::complex<float>>& signal, WindowType typ
 }
 
 // ---------------------------------------------------------------------------
-// ユーティリティ
+// Utilities
 // ---------------------------------------------------------------------------
 
-// 2のべき乗かどうか
+// Check if power of 2
 inline bool isPowerOfTwo(int n) {
     return n > 0 && (n & (n - 1)) == 0;
 }
 
-// n 以上の最小の2のべき乗
+// Smallest power of 2 >= n
 inline int nextPowerOfTwo(int n) {
     int p = 1;
     while (p < n) p *= 2;
     return p;
 }
 
-// ビットリバース
+// Bit reverse
 inline int bitReverse(int x, int bits) {
     int result = 0;
     for (int i = 0; i < bits; i++) {
@@ -106,7 +106,7 @@ inline int bitReverse(int x, int bits) {
     return result;
 }
 
-// ビット数を取得
+// Get bit count
 inline int getBits(int n) {
     int bits = 0;
     while ((1 << bits) < n) bits++;
@@ -114,15 +114,15 @@ inline int getBits(int n) {
 }
 
 // ---------------------------------------------------------------------------
-// FFT (Cooley-Tukey 基数2 時間間引き)
+// FFT (Cooley-Tukey radix-2 decimation-in-time)
 // ---------------------------------------------------------------------------
 
-// インプレース FFT
+// In-place FFT
 inline void fft(std::vector<std::complex<float>>& data) {
     int n = static_cast<int>(data.size());
     if (n <= 1) return;
 
-    // 2のべき乗でなければエラー
+    // Error if not power of 2
     if (!isPowerOfTwo(n)) {
         tcLogError() << "FFT: size must be power of 2 (got " << n << ")";
         return;
@@ -130,7 +130,7 @@ inline void fft(std::vector<std::complex<float>>& data) {
 
     int bits = getBits(n);
 
-    // ビットリバース並び替え
+    // Bit reverse permutation
     for (int i = 0; i < n; i++) {
         int j = bitReverse(i, bits);
         if (i < j) {
@@ -138,7 +138,7 @@ inline void fft(std::vector<std::complex<float>>& data) {
         }
     }
 
-    // バタフライ演算
+    // Butterfly operation
     for (int len = 2; len <= n; len *= 2) {
         float angle = -2.0f * FFT_PI / len;
         std::complex<float> wn(std::cos(angle), std::sin(angle));
@@ -156,12 +156,12 @@ inline void fft(std::vector<std::complex<float>>& data) {
     }
 }
 
-// インプレース 逆FFT
+// In-place inverse FFT
 inline void ifft(std::vector<std::complex<float>>& data) {
     int n = static_cast<int>(data.size());
     if (n <= 1) return;
 
-    // 共役を取る
+    // Take conjugate
     for (auto& x : data) {
         x = std::conj(x);
     }
@@ -169,17 +169,17 @@ inline void ifft(std::vector<std::complex<float>>& data) {
     // FFT
     fft(data);
 
-    // 共役を取って正規化
+    // Take conjugate and normalize
     for (auto& x : data) {
         x = std::conj(x) / (float)n;
     }
 }
 
 // ---------------------------------------------------------------------------
-// 実数信号用の便利関数
+// Convenience functions for real signals
 // ---------------------------------------------------------------------------
 
-// 実数信号 → 複素数配列
+// Real signal -> complex array
 inline std::vector<std::complex<float>> toComplex(const std::vector<float>& real) {
     std::vector<std::complex<float>> result(real.size());
     for (size_t i = 0; i < real.size(); i++) {
@@ -188,14 +188,14 @@ inline std::vector<std::complex<float>> toComplex(const std::vector<float>& real
     return result;
 }
 
-// 実数信号の FFT
+// FFT of real signal
 inline std::vector<std::complex<float>> fftReal(const std::vector<float>& signal) {
     auto data = toComplex(signal);
     fft(data);
     return data;
 }
 
-// 実数信号の FFT（窓関数付き）
+// FFT of real signal (with window function)
 inline std::vector<std::complex<float>> fftReal(const std::vector<float>& signal, WindowType window) {
     std::vector<float> windowed = signal;
     applyWindow(windowed, window);
@@ -203,10 +203,10 @@ inline std::vector<std::complex<float>> fftReal(const std::vector<float>& signal
 }
 
 // ---------------------------------------------------------------------------
-// スペクトル解析
+// Spectrum analysis
 // ---------------------------------------------------------------------------
 
-// マグニチュード（振幅）を取得
+// Get magnitude (amplitude)
 inline std::vector<float> fftMagnitude(const std::vector<std::complex<float>>& spectrum) {
     std::vector<float> mag(spectrum.size());
     for (size_t i = 0; i < spectrum.size(); i++) {
@@ -215,7 +215,7 @@ inline std::vector<float> fftMagnitude(const std::vector<std::complex<float>>& s
     return mag;
 }
 
-// マグニチュード（dB）を取得
+// Get magnitude (dB)
 inline std::vector<float> fftMagnitudeDb(const std::vector<std::complex<float>>& spectrum, float minDb = -100.0f) {
     std::vector<float> db(spectrum.size());
     for (size_t i = 0; i < spectrum.size(); i++) {
@@ -230,7 +230,7 @@ inline std::vector<float> fftMagnitudeDb(const std::vector<std::complex<float>>&
     return db;
 }
 
-// 位相を取得
+// Get phase
 inline std::vector<float> fftPhase(const std::vector<std::complex<float>>& spectrum) {
     std::vector<float> phase(spectrum.size());
     for (size_t i = 0; i < spectrum.size(); i++) {
@@ -239,7 +239,7 @@ inline std::vector<float> fftPhase(const std::vector<std::complex<float>>& spect
     return phase;
 }
 
-// パワースペクトル（マグニチュードの2乗）
+// Power spectrum (magnitude squared)
 inline std::vector<float> fftPower(const std::vector<std::complex<float>>& spectrum) {
     std::vector<float> power(spectrum.size());
     for (size_t i = 0; i < spectrum.size(); i++) {
@@ -248,12 +248,12 @@ inline std::vector<float> fftPower(const std::vector<std::complex<float>>& spect
     return power;
 }
 
-// 周波数ビンのインデックスから周波数を取得
+// Get frequency from bin index
 inline float binToFrequency(int bin, int fftSize, int sampleRate) {
     return (float)bin * sampleRate / fftSize;
 }
 
-// 周波数からビンのインデックスを取得
+// Get bin index from frequency
 inline int frequencyToBin(float freq, int fftSize, int sampleRate) {
     return (int)(freq * fftSize / sampleRate + 0.5f);
 }

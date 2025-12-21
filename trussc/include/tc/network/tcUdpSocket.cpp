@@ -1,5 +1,5 @@
 // =============================================================================
-// tcUdpSocket.cpp - UDP ソケット実装
+// tcUdpSocket.cpp - UDP socket implementation
 // =============================================================================
 
 #include "tc/network/tcUdpSocket.h"
@@ -25,11 +25,11 @@
 
 namespace trussc {
 
-// Winsock 初期化フラグ
+// Winsock initialization flag
 bool UdpSocket::winsockInitialized_ = false;
 
 // ---------------------------------------------------------------------------
-// Winsock 初期化 (Windows)
+// Winsock initialization (Windows)
 // ---------------------------------------------------------------------------
 bool UdpSocket::initWinsock() {
 #ifdef _WIN32
@@ -47,7 +47,7 @@ bool UdpSocket::initWinsock() {
 }
 
 // ---------------------------------------------------------------------------
-// コンストラクタ・デストラクタ
+// Constructor / Destructor
 // ---------------------------------------------------------------------------
 UdpSocket::UdpSocket() {
     initWinsock();
@@ -58,7 +58,7 @@ UdpSocket::~UdpSocket() {
 }
 
 // ---------------------------------------------------------------------------
-// ムーブ
+// Move operations
 // ---------------------------------------------------------------------------
 UdpSocket::UdpSocket(UdpSocket&& other) noexcept
     : socket_(other.socket_)
@@ -104,11 +104,11 @@ UdpSocket& UdpSocket::operator=(UdpSocket&& other) noexcept {
 }
 
 // ---------------------------------------------------------------------------
-// ソケット作成
+// Socket creation
 // ---------------------------------------------------------------------------
 bool UdpSocket::create() {
     if (socket_ != INVALID_SOCKET_HANDLE) {
-        return true;  // 既に作成済み
+        return true;  // Already created
     }
 
     socket_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -128,7 +128,7 @@ bool UdpSocket::ensureSocket() {
 }
 
 // ---------------------------------------------------------------------------
-// バインド
+// Bind
 // ---------------------------------------------------------------------------
 bool UdpSocket::bind(int port, bool startReceiving) {
     if (!ensureSocket()) {
@@ -156,14 +156,14 @@ bool UdpSocket::bind(int port, bool startReceiving) {
 }
 
 // ---------------------------------------------------------------------------
-// 接続先設定
+// Set destination
 // ---------------------------------------------------------------------------
 bool UdpSocket::connect(const std::string& host, int port) {
     if (!ensureSocket()) {
         return false;
     }
 
-    // ホスト名解決
+    // Resolve hostname
     struct addrinfo hints{}, *result = nullptr;
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
@@ -174,7 +174,7 @@ bool UdpSocket::connect(const std::string& host, int port) {
         return false;
     }
 
-    // connect() で送信先を設定（UDP では接続ではなく、send() の宛先を固定するだけ）
+    // Set destination with connect() (for UDP, this just fixes the destination for send(), not an actual connection)
     if (::connect(socket_, result->ai_addr, static_cast<int>(result->ai_addrlen)) < 0) {
         notifyError("Failed to connect to " + host + ":" + std::to_string(port), SOCKET_ERROR_CODE);
         freeaddrinfo(result);
@@ -190,15 +190,15 @@ bool UdpSocket::connect(const std::string& host, int port) {
 }
 
 // ---------------------------------------------------------------------------
-// クローズ
+// Close
 // ---------------------------------------------------------------------------
 void UdpSocket::close() {
     shouldStop_ = true;
 
-    // 先にソケットをシャットダウン＆閉じる（recvfrom がエラーで返るようになる）
+    // Shutdown and close socket first (causes recvfrom to return with error)
     if (socket_ != INVALID_SOCKET_HANDLE) {
 #ifdef _WIN32
-        shutdown(socket_, SD_BOTH);  // Windows: ブロッキング受信を解除
+        shutdown(socket_, SD_BOTH);  // Windows: unblock blocking receive
 #else
         shutdown(socket_, SHUT_RDWR);
 #endif
@@ -206,7 +206,7 @@ void UdpSocket::close() {
         socket_ = INVALID_SOCKET_HANDLE;
     }
 
-    // スレッドが終了するのを待つ
+    // Wait for thread to finish
     if (receiveThread_.joinable()) {
         receiveThread_.join();
     }
@@ -218,14 +218,14 @@ void UdpSocket::close() {
 }
 
 // ---------------------------------------------------------------------------
-// 送信
+// Send
 // ---------------------------------------------------------------------------
 bool UdpSocket::sendTo(const std::string& host, int port, const void* data, size_t size) {
     if (!ensureSocket()) {
         return false;
     }
 
-    // ホスト名解決
+    // Resolve hostname
     struct addrinfo hints{}, *result = nullptr;
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
@@ -282,7 +282,7 @@ bool UdpSocket::send(const std::string& message) {
 }
 
 // ---------------------------------------------------------------------------
-// 受信（同期）
+// Receive (synchronous)
 // ---------------------------------------------------------------------------
 int UdpSocket::receive(void* buffer, size_t bufferSize) {
     std::string host;
@@ -316,11 +316,11 @@ int UdpSocket::receive(void* buffer, size_t bufferSize, std::string& remoteHost,
 }
 
 // ---------------------------------------------------------------------------
-// 受信スレッド
+// Receive thread
 // ---------------------------------------------------------------------------
 void UdpSocket::startReceiving() {
     if (receiving_.load()) {
-        return;  // 既に受信中
+        return;  // Already receiving
     }
 
     shouldStop_ = false;
@@ -385,7 +385,7 @@ void UdpSocket::receiveThreadFunc() {
 }
 
 // ---------------------------------------------------------------------------
-// 設定
+// Settings
 // ---------------------------------------------------------------------------
 bool UdpSocket::setNonBlocking(bool nonBlocking) {
     if (socket_ == INVALID_SOCKET_HANDLE) return false;
@@ -448,7 +448,7 @@ bool UdpSocket::setReceiveTimeout(int timeoutMs) {
 }
 
 // ---------------------------------------------------------------------------
-// エラー通知
+// Error notification
 // ---------------------------------------------------------------------------
 void UdpSocket::notifyError(const std::string& message, int code) {
     tcLogError() << "UdpSocket: " << message << " (code: " << code << ")";

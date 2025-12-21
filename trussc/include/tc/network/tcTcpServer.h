@@ -1,5 +1,5 @@
 // =============================================================================
-// tcTcpServer.h - TCP サーバーソケット
+// tcTcpServer.h - TCP server socket
 // =============================================================================
 #pragma once
 
@@ -30,12 +30,12 @@
 namespace trussc {
 
 // =============================================================================
-// 接続済みクライアント情報
+// Connected client information
 // =============================================================================
 struct TcpServerClient {
-    int id;                 // クライアントID（サーバーが割り当て）
-    std::string host;       // クライアントのIPアドレス
-    int port;               // クライアントのポート
+    int id;                 // Client ID (assigned by server)
+    std::string host;       // Client IP address
+    int port;               // Client port
 
 #ifdef _WIN32
     SOCKET socket;
@@ -45,117 +45,117 @@ struct TcpServerClient {
 };
 
 // =============================================================================
-// イベント引数
+// Event arguments
 // =============================================================================
 
-// クライアント接続イベント
+// Client connect event
 struct TcpClientConnectEventArgs {
     int clientId;
     std::string host;
     int port;
 };
 
-// クライアントからデータ受信イベント
+// Data receive from client event
 struct TcpServerReceiveEventArgs {
     int clientId;
     std::vector<char> data;
 };
 
-// クライアント切断イベント
+// Client disconnect event
 struct TcpClientDisconnectEventArgs {
     int clientId;
     std::string reason;
     bool wasClean;
 };
 
-// サーバーエラーイベント
+// Server error event
 struct TcpServerErrorEventArgs {
     std::string message;
     int errorCode = 0;
-    int clientId = -1;  // -1 = サーバー自体のエラー
+    int clientId = -1;  // -1 = server itself error
 };
 
 // =============================================================================
-// TcpServer クラス
+// TcpServer class
 // =============================================================================
 class TcpServer {
 public:
     // -------------------------------------------------------------------------
-    // イベント
+    // Events
     // -------------------------------------------------------------------------
-    Event<TcpClientConnectEventArgs> onClientConnect;       // クライアント接続時
-    Event<TcpServerReceiveEventArgs> onReceive;             // データ受信時
-    Event<TcpClientDisconnectEventArgs> onClientDisconnect; // クライアント切断時
-    Event<TcpServerErrorEventArgs> onError;                 // エラー発生時
+    Event<TcpClientConnectEventArgs> onClientConnect;       // On client connect
+    Event<TcpServerReceiveEventArgs> onReceive;             // On data receive
+    Event<TcpClientDisconnectEventArgs> onClientDisconnect; // On client disconnect
+    Event<TcpServerErrorEventArgs> onError;                 // On error
 
     // -------------------------------------------------------------------------
-    // コンストラクタ / デストラクタ
+    // Constructor / Destructor
     // -------------------------------------------------------------------------
     TcpServer();
     ~TcpServer();
 
-    // コピー禁止
+    // Copy prohibited
     TcpServer(const TcpServer&) = delete;
     TcpServer& operator=(const TcpServer&) = delete;
 
     // -------------------------------------------------------------------------
-    // サーバー管理
+    // Server management
     // -------------------------------------------------------------------------
 
-    // サーバーを開始（指定ポートでリッスン）
+    // Start server (listen on specified port)
     bool start(int port, int maxClients = 10);
 
-    // サーバーを停止
+    // Stop server
     void stop();
 
-    // サーバーが稼働中か
+    // Whether server is running
     bool isRunning() const;
 
     // -------------------------------------------------------------------------
-    // クライアント管理
+    // Client management
     // -------------------------------------------------------------------------
 
-    // 指定クライアントを切断
+    // Disconnect specified client
     void disconnectClient(int clientId);
 
-    // 全クライアントを切断
+    // Disconnect all clients
     void disconnectAllClients();
 
-    // 接続中のクライアント数
+    // Number of connected clients
     int getClientCount() const;
 
-    // 接続中の全クライアントIDを取得
+    // Get all connected client IDs
     std::vector<int> getClientIds() const;
 
-    // クライアント情報を取得（見つからなければnullptr）
+    // Get client information (nullptr if not found)
     const TcpServerClient* getClient(int clientId) const;
 
     // -------------------------------------------------------------------------
-    // データ送信
+    // Data send
     // -------------------------------------------------------------------------
 
-    // 指定クライアントにデータを送信
+    // Send data to specified client
     bool send(int clientId, const void* data, size_t size);
     bool send(int clientId, const std::vector<char>& data);
     bool send(int clientId, const std::string& message);
 
-    // 全クライアントにブロードキャスト
+    // Broadcast to all clients
     void broadcast(const void* data, size_t size);
     void broadcast(const std::vector<char>& data);
     void broadcast(const std::string& message);
 
     // -------------------------------------------------------------------------
-    // 設定
+    // Settings
     // -------------------------------------------------------------------------
 
-    // 受信バッファサイズを設定
+    // Set receive buffer size
     void setReceiveBufferSize(size_t size);
 
     // -------------------------------------------------------------------------
-    // 情報取得
+    // Information retrieval
     // -------------------------------------------------------------------------
 
-    // リッスン中のポート
+    // Listening port
     int getPort() const;
 
 private:

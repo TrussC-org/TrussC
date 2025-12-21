@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// tcEventListener - イベントリスナーのRAIIトークン
+// tcEventListener - RAII token for event listener
 // =============================================================================
 
 #include <functional>
@@ -9,16 +9,16 @@
 
 namespace trussc {
 
-// EventListener - リスナー登録の RAII トークン
-// スコープを外れると自動的にリスナーが解除される
+// EventListener - RAII token for listener registration
+// Listener is automatically disconnected when out of scope
 class EventListener {
 public:
     using DisconnectFunc = std::function<void()>;
 
-    // デフォルトコンストラクタ（未接続状態）
+    // Default constructor (disconnected state)
     EventListener() = default;
 
-    // ムーブコンストラクタ
+    // Move constructor
     EventListener(EventListener&& other) noexcept
         : disconnector_(std::move(other.disconnector_))
         , connected_(other.connected_) {
@@ -26,7 +26,7 @@ public:
         other.disconnector_ = nullptr;
     }
 
-    // ムーブ代入演算子
+    // Move assignment operator
     EventListener& operator=(EventListener&& other) noexcept {
         if (this != &other) {
             disconnect();
@@ -38,44 +38,44 @@ public:
         return *this;
     }
 
-    // コピー禁止（所有権は一意）
+    // Copy forbidden (ownership is unique)
     EventListener(const EventListener&) = delete;
     EventListener& operator=(const EventListener&) = delete;
 
-    // デストラクタ - 自動で disconnect
+    // Destructor - auto disconnect
     ~EventListener() {
         disconnect();
     }
 
-    // 明示的に切断
+    // Explicit disconnect
     void disconnect() noexcept {
         if (connected_ && disconnector_) {
             try {
                 disconnector_();
             } catch (...) {
-                // 終了時の破棄順序問題でEventが先に破棄されている場合がある
-                // その場合は例外を無視（デストラクタから呼ばれるのでnoexceptが必要）
+                // Event may have been destroyed first due to destruction order at exit
+                // Ignore exception in that case (noexcept required since called from destructor)
             }
             connected_ = false;
             disconnector_ = nullptr;
         }
     }
 
-    // 接続状態を確認
+    // Check connection state
     bool isConnected() const {
         return connected_;
     }
 
-    // 明示的にブール変換
+    // Explicit bool conversion
     explicit operator bool() const {
         return connected_;
     }
 
 private:
-    // Event<T> からのみ生成可能
+    // Only constructible from Event<T>
     template<typename T> friend class Event;
 
-    // 内部コンストラクタ
+    // Internal constructor
     explicit EventListener(DisconnectFunc disconnector)
         : disconnector_(std::move(disconnector))
         , connected_(true) {}

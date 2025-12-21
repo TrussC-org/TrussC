@@ -1,8 +1,8 @@
 #pragma once
 
 // =============================================================================
-// tcXml.h - XML 読み書き
-// pugixml のラッパー
+// tcXml.h - XML read/write
+// pugixml wrapper
 // =============================================================================
 
 #include <string>
@@ -12,89 +12,89 @@
 
 namespace trussc {
 
-// pugixml の型をエイリアス
+// Type aliases for pugixml
 using XmlDocument = pugi::xml_document;
 using XmlNode = pugi::xml_node;
 using XmlAttribute = pugi::xml_attribute;
 using XmlParseResult = pugi::xml_parse_result;
 
 // ---------------------------------------------------------------------------
-// Xml クラス - XML ドキュメントのラッパー
+// Xml class - XML document wrapper
 // ---------------------------------------------------------------------------
 class Xml {
 public:
     Xml() = default;
 
-    // ファイルから読み込み
+    // Load from file
     bool load(const std::string& path) {
         XmlParseResult result = doc_.load_file(path.c_str());
         if (!result) {
-            tcLogError() << "XML 読み込みエラー: " << path
+            tcLogError() << "XML load error: " << path
                          << " - " << result.description()
                          << " (offset: " << result.offset << ")";
             return false;
         }
-        tcLogVerbose() << "XML 読み込み完了: " << path;
+        tcLogVerbose() << "XML loaded: " << path;
         return true;
     }
 
-    // 文字列から読み込み
+    // Load from string
     bool parse(const std::string& str) {
         XmlParseResult result = doc_.load_string(str.c_str());
         if (!result) {
-            tcLogError() << "XML パースエラー: " << result.description()
+            tcLogError() << "XML parse error: " << result.description()
                          << " (offset: " << result.offset << ")";
             return false;
         }
         return true;
     }
 
-    // ファイルに保存
+    // Save to file
     bool save(const std::string& path, const std::string& indent = "  ") const {
         bool success = doc_.save_file(path.c_str(), indent.c_str());
         if (!success) {
-            tcLogError() << "XML 書き込みエラー: " << path;
+            tcLogError() << "XML write error: " << path;
             return false;
         }
-        tcLogVerbose() << "XML 書き込み完了: " << path;
+        tcLogVerbose() << "XML saved: " << path;
         return true;
     }
 
-    // 文字列に変換
+    // Convert to string
     std::string toString(const std::string& indent = "  ") const {
         std::ostringstream oss;
         doc_.save(oss, indent.c_str());
         return oss.str();
     }
 
-    // ルートノードを取得
+    // Get root node
     XmlNode root() {
         return doc_.document_element();
     }
 
-    // ルートノードを取得（const）
+    // Get root node (const)
     XmlNode root() const {
         return doc_.document_element();
     }
 
-    // 新しいルートノードを追加
+    // Add new root node
     XmlNode addRoot(const std::string& name) {
         return doc_.append_child(name.c_str());
     }
 
-    // 子ノードを名前で検索
+    // Find child node by name
     XmlNode child(const std::string& name) {
         return doc_.child(name.c_str());
     }
 
-    // 内部ドキュメントへのアクセス
+    // Access to internal document
     XmlDocument& document() { return doc_; }
     const XmlDocument& document() const { return doc_; }
 
-    // 空かどうか
+    // Check if empty
     bool empty() const { return doc_.empty(); }
 
-    // XML 宣言を追加
+    // Add XML declaration
     void addDeclaration(const std::string& version = "1.0",
                         const std::string& encoding = "UTF-8") {
         auto decl = doc_.prepend_child(pugi::node_declaration);
@@ -107,17 +107,17 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// 便利関数
+// Utility functions
 // ---------------------------------------------------------------------------
 
-// ファイルから XML を読み込み
+// Load XML from file
 inline Xml loadXml(const std::string& path) {
     Xml xml;
     xml.load(path);
     return xml;
 }
 
-// 文字列から XML をパース
+// Parse XML from string
 inline Xml parseXml(const std::string& str) {
     Xml xml;
     xml.parse(str);

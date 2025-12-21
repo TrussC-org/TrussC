@@ -1,5 +1,5 @@
 // =============================================================================
-// tcTcpClient.cpp - TCP クライアントソケット実装
+// tcTcpClient.cpp - TCP client socket implementation
 // =============================================================================
 
 #include "tc/network/tcTcpClient.h"
@@ -24,7 +24,7 @@ namespace trussc {
 std::atomic<int> TcpClient::instanceCount_{0};
 
 // =============================================================================
-// Winsock 初期化（Windows のみ）
+// Winsock initialization (Windows only)
 // =============================================================================
 void TcpClient::initWinsock() {
 #ifdef _WIN32
@@ -46,7 +46,7 @@ void TcpClient::cleanupWinsock() {
 }
 
 // =============================================================================
-// コンストラクタ / デストラクタ
+// Constructor / Destructor
 // =============================================================================
 TcpClient::TcpClient() {
     if (instanceCount_++ == 0) {
@@ -101,14 +101,14 @@ TcpClient& TcpClient::operator=(TcpClient&& other) noexcept {
 }
 
 // =============================================================================
-// 接続管理
+// Connection management
 // =============================================================================
 bool TcpClient::connect(const std::string& host, int port) {
     if (connected_) {
         disconnect();
     }
 
-    // ソケット作成
+    // Create socket
     socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 #ifdef _WIN32
     if (socket_ == INVALID_SOCKET) {
@@ -119,7 +119,7 @@ bool TcpClient::connect(const std::string& host, int port) {
         return false;
     }
 
-    // ホスト名解決
+    // Resolve hostname
     struct addrinfo hints, *result;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -138,7 +138,7 @@ bool TcpClient::connect(const std::string& host, int port) {
         return false;
     }
 
-    // 接続
+    // Connect
     ret = ::connect(socket_, result->ai_addr, (int)result->ai_addrlen);
     freeaddrinfo(result);
 
@@ -158,7 +158,7 @@ bool TcpClient::connect(const std::string& host, int port) {
     connected_ = true;
     running_ = true;
 
-    // 受信スレッド開始
+    // Start receive thread
     receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this);
 
     tcLogNotice() << "TCP connected to " << host << ":" << port;
@@ -172,7 +172,7 @@ bool TcpClient::connect(const std::string& host, int port) {
 }
 
 void TcpClient::connectAsync(const std::string& host, int port) {
-    // 既存の接続スレッドがあれば待機
+    // Wait for existing connection thread if any
     if (connectThread_.joinable()) {
         connectThread_.join();
     }
@@ -229,7 +229,7 @@ bool TcpClient::isConnected() const {
 }
 
 // =============================================================================
-// データ送受信
+// Data transmission
 // =============================================================================
 bool TcpClient::send(const void* data, size_t size) {
     if (!connected_) {
@@ -264,7 +264,7 @@ bool TcpClient::send(const std::string& message) {
 }
 
 // =============================================================================
-// 受信スレッド
+// Receive thread
 // =============================================================================
 void TcpClient::receiveThreadFunc() {
     std::vector<char> buffer(receiveBufferSize_);
@@ -277,7 +277,7 @@ void TcpClient::receiveThreadFunc() {
             args.data.assign(buffer.begin(), buffer.begin() + received);
             onReceive.notify(args);
         } else if (received == 0) {
-            // 接続が閉じられた
+            // Connection closed
             running_ = false;
             connected_ = false;
             TcpDisconnectEventArgs args;
@@ -286,7 +286,7 @@ void TcpClient::receiveThreadFunc() {
             onDisconnect.notify(args);
             break;
         } else {
-            // エラー
+            // Error
             int err = SOCKET_ERROR_CODE;
 #ifdef _WIN32
             if (err == WSAEWOULDBLOCK) continue;
@@ -307,7 +307,7 @@ void TcpClient::receiveThreadFunc() {
 }
 
 // =============================================================================
-// 設定
+// Settings
 // =============================================================================
 void TcpClient::setReceiveBufferSize(size_t size) {
     receiveBufferSize_ = size;
@@ -332,7 +332,7 @@ void TcpClient::setBlocking(bool blocking) {
 }
 
 // =============================================================================
-// 情報取得
+// Information retrieval
 // =============================================================================
 std::string TcpClient::getRemoteHost() const {
     return remoteHost_;
@@ -343,7 +343,7 @@ int TcpClient::getRemotePort() const {
 }
 
 // =============================================================================
-// エラー通知
+// Error notification
 // =============================================================================
 void TcpClient::notifyError(const std::string& msg, int code) {
     TcpErrorEventArgs args;

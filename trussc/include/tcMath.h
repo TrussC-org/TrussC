@@ -5,37 +5,37 @@
 #include <random>
 
 // =============================================================================
-// TrussC 数学ライブラリ
+// TrussC Math Library
 // =============================================================================
 
 namespace trussc {
 
-// 数学定数（TAU を基本とする）
-constexpr float TAU = 6.28318530717958647693f;      // 円周率 τ = 2π
-constexpr float HALF_TAU = TAU / 2.0f;              // τ/2 = π
-constexpr float QUARTER_TAU = TAU / 4.0f;           // τ/4 = π/2
-constexpr float PI = HALF_TAU;                      // π = τ/2（互換性のため）
+// Math constants (TAU as base)
+constexpr float TAU = 6.28318530717958647693f;      // Circle constant tau = 2pi
+constexpr float HALF_TAU = TAU / 2.0f;              // tau/2 = pi
+constexpr float QUARTER_TAU = TAU / 4.0f;           // tau/4 = pi/2
+constexpr float PI = HALF_TAU;                      // pi = tau/2 (for compatibility)
 
 // =============================================================================
-// Vec2 - 2次元ベクトル
+// Vec2 - 2D vector
 // =============================================================================
 
 struct Vec2 {
     float x = 0.0f;
     float y = 0.0f;
 
-    // コンストラクタ
+    // Constructors
     Vec2() = default;
     Vec2(float x_, float y_) : x(x_), y(y_) {}
     Vec2(float v) : x(v), y(v) {}
     Vec2(const Vec2&) = default;
     Vec2& operator=(const Vec2&) = default;
 
-    // 配列アクセス
+    // Array access
     float& operator[](int i) { return (&x)[i]; }
     const float& operator[](int i) const { return (&x)[i]; }
 
-    // 算術演算子
+    // Arithmetic operators
     Vec2 operator+(const Vec2& v) const { return Vec2(x + v.x, y + v.y); }
     Vec2 operator-(const Vec2& v) const { return Vec2(x - v.x, y - v.y); }
     Vec2 operator*(float s) const { return Vec2(x * s, y * s); }
@@ -44,7 +44,7 @@ struct Vec2 {
     Vec2 operator/(const Vec2& v) const { return Vec2(x / v.x, y / v.y); }
     Vec2 operator-() const { return Vec2(-x, -y); }
 
-    // 複合代入演算子
+    // Compound assignment operators
     Vec2& operator+=(const Vec2& v) { x += v.x; y += v.y; return *this; }
     Vec2& operator-=(const Vec2& v) { x -= v.x; y -= v.y; return *this; }
     Vec2& operator*=(float s) { x *= s; y *= s; return *this; }
@@ -52,15 +52,15 @@ struct Vec2 {
     Vec2& operator*=(const Vec2& v) { x *= v.x; y *= v.y; return *this; }
     Vec2& operator/=(const Vec2& v) { x /= v.x; y /= v.y; return *this; }
 
-    // 比較演算子
+    // Comparison operators
     bool operator==(const Vec2& v) const { return x == v.x && y == v.y; }
     bool operator!=(const Vec2& v) const { return !(*this == v); }
 
-    // 長さ
+    // Length
     float length() const { return std::sqrt(x * x + y * y); }
     float lengthSquared() const { return x * x + y * y; }
 
-    // 正規化
+    // Normalize
     Vec2 normalized() const {
         float len = length();
         if (len > 0) return *this / len;
@@ -72,7 +72,7 @@ struct Vec2 {
         return *this;
     }
 
-    // 制限
+    // Limit
     Vec2& limit(float max) {
         float lenSq = lengthSquared();
         if (lenSq > max * max) {
@@ -81,21 +81,21 @@ struct Vec2 {
         return *this;
     }
 
-    // 内積
+    // Dot product
     float dot(const Vec2& v) const { return x * v.x + y * v.y; }
 
-    // 外積（2Dでは z 成分のスカラー値を返す）
+    // Cross product (in 2D returns z component as scalar)
     float cross(const Vec2& v) const { return x * v.y - y * v.x; }
 
-    // 距離
+    // Distance
     float distance(const Vec2& v) const { return (*this - v).length(); }
     float distanceSquared(const Vec2& v) const { return (*this - v).lengthSquared(); }
 
-    // 角度（ラジアン、x軸正方向から反時計回り）
+    // Angle (radians, counter-clockwise from positive x-axis)
     float angle() const { return std::atan2(y, x); }
     float angle(const Vec2& v) const { return std::atan2(cross(v), dot(v)); }
 
-    // 回転
+    // Rotation
     Vec2 rotated(float radians) const {
         float c = std::cos(radians);
         float s = std::sin(radians);
@@ -106,30 +106,30 @@ struct Vec2 {
         return *this;
     }
 
-    // 線形補間
+    // Linear interpolation
     Vec2 lerp(const Vec2& v, float t) const {
         return *this + (v - *this) * t;
     }
 
-    // 垂直ベクトル
+    // Perpendicular vector
     Vec2 perpendicular() const { return Vec2(-y, x); }
 
-    // 反射
+    // Reflection
     Vec2 reflected(const Vec2& normal) const {
         return *this - normal * 2.0f * dot(normal);
     }
 
-    // 静的メソッド
+    // Static methods
     static Vec2 fromAngle(float radians, float length = 1.0f) {
         return Vec2(std::cos(radians) * length, std::sin(radians) * length);
     }
 };
 
-// スカラー * ベクトル
+// Scalar * vector
 inline Vec2 operator*(float s, const Vec2& v) { return v * s; }
 
 // =============================================================================
-// Vec3 - 3次元ベクトル
+// Vec3 - 3D vector
 // =============================================================================
 
 struct Vec3 {
@@ -137,7 +137,7 @@ struct Vec3 {
     float y = 0.0f;
     float z = 0.0f;
 
-    // コンストラクタ
+    // Constructors
     Vec3() = default;
     Vec3(float x_, float y_, float z_) : x(x_), y(y_), z(z_) {}
     Vec3(float v) : x(v), y(v), z(v) {}
@@ -145,11 +145,11 @@ struct Vec3 {
     Vec3(const Vec3&) = default;
     Vec3& operator=(const Vec3&) = default;
 
-    // 配列アクセス
+    // Array access
     float& operator[](int i) { return (&x)[i]; }
     const float& operator[](int i) const { return (&x)[i]; }
 
-    // 算術演算子
+    // Arithmetic operators
     Vec3 operator+(const Vec3& v) const { return Vec3(x + v.x, y + v.y, z + v.z); }
     Vec3 operator-(const Vec3& v) const { return Vec3(x - v.x, y - v.y, z - v.z); }
     Vec3 operator*(float s) const { return Vec3(x * s, y * s, z * s); }
@@ -158,7 +158,7 @@ struct Vec3 {
     Vec3 operator/(const Vec3& v) const { return Vec3(x / v.x, y / v.y, z / v.z); }
     Vec3 operator-() const { return Vec3(-x, -y, -z); }
 
-    // 複合代入演算子
+    // Compound assignment operators
     Vec3& operator+=(const Vec3& v) { x += v.x; y += v.y; z += v.z; return *this; }
     Vec3& operator-=(const Vec3& v) { x -= v.x; y -= v.y; z -= v.z; return *this; }
     Vec3& operator*=(float s) { x *= s; y *= s; z *= s; return *this; }
@@ -166,15 +166,15 @@ struct Vec3 {
     Vec3& operator*=(const Vec3& v) { x *= v.x; y *= v.y; z *= v.z; return *this; }
     Vec3& operator/=(const Vec3& v) { x /= v.x; y /= v.y; z /= v.z; return *this; }
 
-    // 比較演算子
+    // Comparison operators
     bool operator==(const Vec3& v) const { return x == v.x && y == v.y && z == v.z; }
     bool operator!=(const Vec3& v) const { return !(*this == v); }
 
-    // 長さ
+    // Length
     float length() const { return std::sqrt(x * x + y * y + z * z); }
     float lengthSquared() const { return x * x + y * y + z * z; }
 
-    // 正規化
+    // Normalize
     Vec3 normalized() const {
         float len = length();
         if (len > 0) return *this / len;
@@ -186,7 +186,7 @@ struct Vec3 {
         return *this;
     }
 
-    // 制限
+    // Limit
     Vec3& limit(float max) {
         float lenSq = lengthSquared();
         if (lenSq > max * max) {
@@ -195,10 +195,10 @@ struct Vec3 {
         return *this;
     }
 
-    // 内積
+    // Dot product
     float dot(const Vec3& v) const { return x * v.x + y * v.y + z * v.z; }
 
-    // 外積
+    // Cross product
     Vec3 cross(const Vec3& v) const {
         return Vec3(
             y * v.z - z * v.y,
@@ -207,29 +207,29 @@ struct Vec3 {
         );
     }
 
-    // 距離
+    // Distance
     float distance(const Vec3& v) const { return (*this - v).length(); }
     float distanceSquared(const Vec3& v) const { return (*this - v).lengthSquared(); }
 
-    // 線形補間
+    // Linear interpolation
     Vec3 lerp(const Vec3& v, float t) const {
         return *this + (v - *this) * t;
     }
 
-    // 反射
+    // Reflection
     Vec3 reflected(const Vec3& normal) const {
         return *this - normal * 2.0f * dot(normal);
     }
 
-    // Vec2 への変換
+    // Convert to Vec2
     Vec2 xy() const { return Vec2(x, y); }
 };
 
-// スカラー * ベクトル
+// Scalar * vector
 inline Vec3 operator*(float s, const Vec3& v) { return v * s; }
 
 // =============================================================================
-// Vec4 - 4次元ベクトル（同次座標、色など）
+// Vec4 - 4D vector (homogeneous coordinates, colors, etc.)
 // =============================================================================
 
 struct Vec4 {
@@ -238,7 +238,7 @@ struct Vec4 {
     float z = 0.0f;
     float w = 0.0f;
 
-    // コンストラクタ
+    // Constructors
     Vec4() = default;
     Vec4(float x_, float y_, float z_, float w_) : x(x_), y(y_), z(z_), w(w_) {}
     Vec4(float v) : x(v), y(v), z(v), w(v) {}
@@ -247,32 +247,32 @@ struct Vec4 {
     Vec4(const Vec4&) = default;
     Vec4& operator=(const Vec4&) = default;
 
-    // 配列アクセス
+    // Array access
     float& operator[](int i) { return (&x)[i]; }
     const float& operator[](int i) const { return (&x)[i]; }
 
-    // 算術演算子
+    // Arithmetic operators
     Vec4 operator+(const Vec4& v) const { return Vec4(x + v.x, y + v.y, z + v.z, w + v.w); }
     Vec4 operator-(const Vec4& v) const { return Vec4(x - v.x, y - v.y, z - v.z, w - v.w); }
     Vec4 operator*(float s) const { return Vec4(x * s, y * s, z * s, w * s); }
     Vec4 operator/(float s) const { return Vec4(x / s, y / s, z / s, w / s); }
     Vec4 operator-() const { return Vec4(-x, -y, -z, -w); }
 
-    // 複合代入演算子
+    // Compound assignment operators
     Vec4& operator+=(const Vec4& v) { x += v.x; y += v.y; z += v.z; w += v.w; return *this; }
     Vec4& operator-=(const Vec4& v) { x -= v.x; y -= v.y; z -= v.z; w -= v.w; return *this; }
     Vec4& operator*=(float s) { x *= s; y *= s; z *= s; w *= s; return *this; }
     Vec4& operator/=(float s) { x /= s; y /= s; z /= s; w /= s; return *this; }
 
-    // 比較演算子
+    // Comparison operators
     bool operator==(const Vec4& v) const { return x == v.x && y == v.y && z == v.z && w == v.w; }
     bool operator!=(const Vec4& v) const { return !(*this == v); }
 
-    // 長さ
+    // Length
     float length() const { return std::sqrt(x * x + y * y + z * z + w * w); }
     float lengthSquared() const { return x * x + y * y + z * z + w * w; }
 
-    // 正規化
+    // Normalize
     Vec4 normalized() const {
         float len = length();
         if (len > 0) return *this / len;
@@ -284,24 +284,24 @@ struct Vec4 {
         return *this;
     }
 
-    // 内積
+    // Dot product
     float dot(const Vec4& v) const { return x * v.x + y * v.y + z * v.z + w * v.w; }
 
-    // 線形補間
+    // Linear interpolation
     Vec4 lerp(const Vec4& v, float t) const {
         return *this + (v - *this) * t;
     }
 
-    // 部分ベクトルへの変換
+    // Convert to partial vectors
     Vec2 xy() const { return Vec2(x, y); }
     Vec3 xyz() const { return Vec3(x, y, z); }
 };
 
-// スカラー * ベクトル
+// Scalar * vector
 inline Vec4 operator*(float s, const Vec4& v) { return v * s; }
 
 // =============================================================================
-// Mat3 - 3x3 行列（2D変換用）
+// Mat3 - 3x3 matrix (for 2D transformations)
 // =============================================================================
 
 struct Mat3 {
@@ -311,7 +311,7 @@ struct Mat3 {
         0, 0, 1
     };
 
-    // コンストラクタ
+    // Constructors
     Mat3() = default;
     Mat3(float m00, float m01, float m02,
          float m10, float m11, float m12,
@@ -323,14 +323,14 @@ struct Mat3 {
     Mat3(const Mat3&) = default;
     Mat3& operator=(const Mat3&) = default;
 
-    // 配列アクセス (row, col)
+    // Array access (row, col)
     float& at(int row, int col) { return m[row * 3 + col]; }
     const float& at(int row, int col) const { return m[row * 3 + col]; }
 
-    // 単位行列
+    // Identity matrix
     static Mat3 identity() { return Mat3(); }
 
-    // 平行移動
+    // Translation
     static Mat3 translate(float tx, float ty) {
         return Mat3(
             1, 0, tx,
@@ -340,7 +340,7 @@ struct Mat3 {
     }
     static Mat3 translate(const Vec2& t) { return translate(t.x, t.y); }
 
-    // 回転（ラジアン）
+    // Rotation (radians)
     static Mat3 rotate(float radians) {
         float c = std::cos(radians);
         float s = std::sin(radians);
@@ -351,7 +351,7 @@ struct Mat3 {
         );
     }
 
-    // スケール
+    // Scale
     static Mat3 scale(float sx, float sy) {
         return Mat3(
             sx, 0,  0,
@@ -362,7 +362,7 @@ struct Mat3 {
     static Mat3 scale(float s) { return scale(s, s); }
     static Mat3 scale(const Vec2& s) { return scale(s.x, s.y); }
 
-    // 行列の乗算
+    // Matrix multiplication
     Mat3 operator*(const Mat3& other) const {
         Mat3 result;
         for (int row = 0; row < 3; row++) {
@@ -376,7 +376,7 @@ struct Mat3 {
         return result;
     }
 
-    // ベクトルの変換
+    // Vector transformation
     Vec2 operator*(const Vec2& v) const {
         float w = m[6] * v.x + m[7] * v.y + m[8];
         return Vec2(
@@ -393,7 +393,7 @@ struct Mat3 {
         );
     }
 
-    // 転置
+    // Transpose
     Mat3 transposed() const {
         return Mat3(
             m[0], m[3], m[6],
@@ -402,14 +402,14 @@ struct Mat3 {
         );
     }
 
-    // 行列式
+    // Determinant
     float determinant() const {
         return m[0] * (m[4] * m[8] - m[5] * m[7])
              - m[1] * (m[3] * m[8] - m[5] * m[6])
              + m[2] * (m[3] * m[7] - m[4] * m[6]);
     }
 
-    // 逆行列
+    // Inverse
     Mat3 inverted() const {
         float det = determinant();
         if (std::abs(det) < 1e-10f) return Mat3();
@@ -430,7 +430,7 @@ struct Mat3 {
 };
 
 // =============================================================================
-// Mat4 - 4x4 行列（3D変換用）
+// Mat4 - 4x4 matrix (for 3D transformations)
 // =============================================================================
 
 struct Mat4 {
@@ -441,7 +441,7 @@ struct Mat4 {
         0, 0, 0, 1
     };
 
-    // コンストラクタ
+    // Constructors
     Mat4() = default;
     Mat4(float m00, float m01, float m02, float m03,
          float m10, float m11, float m12, float m13,
@@ -455,14 +455,14 @@ struct Mat4 {
     Mat4(const Mat4&) = default;
     Mat4& operator=(const Mat4&) = default;
 
-    // 配列アクセス (row, col)
+    // Array access (row, col)
     float& at(int row, int col) { return m[row * 4 + col]; }
     const float& at(int row, int col) const { return m[row * 4 + col]; }
 
-    // 単位行列
+    // Identity matrix
     static Mat4 identity() { return Mat4(); }
 
-    // 平行移動
+    // Translation
     static Mat4 translate(float tx, float ty, float tz) {
         return Mat4(
             1, 0, 0, tx,
@@ -473,7 +473,7 @@ struct Mat4 {
     }
     static Mat4 translate(const Vec3& t) { return translate(t.x, t.y, t.z); }
 
-    // X軸回転
+    // X-axis rotation
     static Mat4 rotateX(float radians) {
         float c = std::cos(radians);
         float s = std::sin(radians);
@@ -485,7 +485,7 @@ struct Mat4 {
         );
     }
 
-    // Y軸回転
+    // Y-axis rotation
     static Mat4 rotateY(float radians) {
         float c = std::cos(radians);
         float s = std::sin(radians);
@@ -497,7 +497,7 @@ struct Mat4 {
         );
     }
 
-    // Z軸回転
+    // Z-axis rotation
     static Mat4 rotateZ(float radians) {
         float c = std::cos(radians);
         float s = std::sin(radians);
@@ -509,7 +509,7 @@ struct Mat4 {
         );
     }
 
-    // 任意軸回転
+    // Arbitrary axis rotation
     static Mat4 rotate(float radians, const Vec3& axis) {
         Vec3 a = axis.normalized();
         float c = std::cos(radians);
@@ -523,7 +523,7 @@ struct Mat4 {
         );
     }
 
-    // スケール
+    // Scale
     static Mat4 scale(float sx, float sy, float sz) {
         return Mat4(
             sx, 0,  0,  0,
@@ -535,7 +535,7 @@ struct Mat4 {
     static Mat4 scale(float s) { return scale(s, s, s); }
     static Mat4 scale(const Vec3& s) { return scale(s.x, s.y, s.z); }
 
-    // 行列の乗算
+    // Matrix multiplication
     Mat4 operator*(const Mat4& other) const {
         Mat4 result;
         for (int row = 0; row < 4; row++) {
@@ -549,7 +549,7 @@ struct Mat4 {
         return result;
     }
 
-    // ベクトルの変換
+    // Vector transformation
     Vec3 operator*(const Vec3& v) const {
         float w = m[12] * v.x + m[13] * v.y + m[14] * v.z + m[15];
         return Vec3(
@@ -568,7 +568,7 @@ struct Mat4 {
         );
     }
 
-    // 転置
+    // Transpose
     Mat4 transposed() const {
         return Mat4(
             m[0], m[4], m[8],  m[12],
@@ -578,7 +578,7 @@ struct Mat4 {
         );
     }
 
-    // 逆行列（簡易版、アフィン変換用）
+    // Inverse (simple version for affine transformations)
     Mat4 inverted() const {
         Mat4 inv;
 
@@ -628,7 +628,7 @@ struct Mat4 {
         return inv;
     }
 
-    // 視点変換（lookAt）
+    // View transformation (lookAt)
     static Mat4 lookAt(const Vec3& eye, const Vec3& target, const Vec3& up) {
         Vec3 f = (target - eye).normalized();
         Vec3 s = f.cross(up).normalized();
@@ -641,7 +641,7 @@ struct Mat4 {
         );
     }
 
-    // 正射影
+    // Orthographic projection
     static Mat4 ortho(float left, float right, float bottom, float top, float nearPlane, float farPlane) {
         return Mat4(
             2.0f / (right - left), 0, 0, -(right + left) / (right - left),
@@ -651,7 +651,7 @@ struct Mat4 {
         );
     }
 
-    // 透視投影
+    // Perspective projection
     static Mat4 perspective(float fovY, float aspect, float nearPlane, float farPlane) {
         float tanHalfFov = std::tan(fovY / 2.0f);
         return Mat4(
@@ -664,87 +664,87 @@ struct Mat4 {
 };
 
 // =============================================================================
-// ユーティリティ関数
+// Utility functions
 // =============================================================================
 
-// 度数法 → ラジアン
+// Degrees to radians
 inline float radians(float degrees) { return degrees * TAU / 360.0f; }
 
-// ラジアン → 度数法
+// Radians to degrees
 inline float degrees(float radians) { return radians * 360.0f / TAU; }
 
-// 線形補間
+// Linear interpolation
 inline float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
-// クランプ
+// Clamp
 inline float clamp(float value, float min, float max) {
     return std::max(min, std::min(max, value));
 }
 
-// マップ
+// Map
 inline float map(float value, float inMin, float inMax, float outMin, float outMax) {
     return outMin + (outMax - outMin) * ((value - inMin) / (inMax - inMin));
 }
 
-// 符号
+// Sign
 inline float sign(float value) { return (value > 0) - (value < 0); }
 
-// 小数部分
+// Fractional part
 inline float fract(float value) { return value - std::floor(value); }
 
-// 最小/最大
+// Min/Max
 template<typename T>
 T min(T a, T b) { return (a < b) ? a : b; }
 
 template<typename T>
 T max(T a, T b) { return (a > b) ? a : b; }
 
-// 絶対値
+// Absolute value
 inline float abs(float value) { return std::abs(value); }
 
 // =============================================================================
-// 乱数
+// Random numbers
 // =============================================================================
 
 namespace internal {
-    // スレッドローカルな乱数生成器
+    // Thread-local random number generator
     inline std::mt19937& getRandomEngine() {
         static thread_local std::mt19937 engine(std::random_device{}());
         return engine;
     }
 }
 
-// 0.0 ~ 1.0 の乱数
+// Random number from 0.0 to 1.0
 inline float random() {
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
     return dist(internal::getRandomEngine());
 }
 
-// 0.0 ~ max の乱数
+// Random number from 0.0 to max
 inline float random(float max) {
     std::uniform_real_distribution<float> dist(0.0f, max);
     return dist(internal::getRandomEngine());
 }
 
-// min ~ max の乱数
+// Random number from min to max
 inline float random(float min, float max) {
     std::uniform_real_distribution<float> dist(min, max);
     return dist(internal::getRandomEngine());
 }
 
-// 整数版: 0 ~ max-1 の乱数
+// Integer version: random from 0 to max-1
 inline int randomInt(int max) {
     std::uniform_int_distribution<int> dist(0, max - 1);
     return dist(internal::getRandomEngine());
 }
 
-// 整数版: min ~ max の乱数（両端含む）
+// Integer version: random from min to max (inclusive)
 inline int randomInt(int min, int max) {
     std::uniform_int_distribution<int> dist(min, max);
     return dist(internal::getRandomEngine());
 }
 
-// シードを設定
+// Set seed
 inline void randomSeed(unsigned int seed) {
     internal::getRandomEngine().seed(seed);
 }

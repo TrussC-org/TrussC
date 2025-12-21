@@ -1,11 +1,11 @@
 #pragma once
 
 // =============================================================================
-// tcHasTexture.h - テクスチャを持つオブジェクトのインターフェース
+// tcHasTexture.h - Interface for objects that have a texture
 // =============================================================================
 
-// このファイルは TrussC.h からインクルードされる
-// Texture クラスが先にインクルードされている必要がある
+// This file is included from TrussC.h
+// Texture class must be included first
 
 #include <filesystem>
 
@@ -14,24 +14,24 @@ namespace trussc {
 namespace fs = std::filesystem;
 
 // ---------------------------------------------------------------------------
-// HasTexture - テクスチャを持つオブジェクトの基底クラス
+// HasTexture - Base class for objects that have a texture
 // ---------------------------------------------------------------------------
 class HasTexture {
 public:
     virtual ~HasTexture() = default;
 
-    // === テクスチャアクセス（純粋仮想） ===
+    // === Texture access (pure virtual) ===
 
     virtual Texture& getTexture() = 0;
     virtual const Texture& getTexture() const = 0;
 
-    // === 状態 ===
+    // === State ===
 
     virtual bool hasTexture() const {
         return getTexture().isAllocated();
     }
 
-    // === 描画（デフォルト実装） ===
+    // === Draw (default implementation) ===
 
     virtual void draw(float x, float y) const {
         if (hasTexture()) {
@@ -45,7 +45,7 @@ public:
         }
     }
 
-    // === テクスチャ設定の委譲 ===
+    // === Texture setting delegation ===
 
     void setMinFilter(TextureFilter filter) {
         getTexture().setMinFilter(filter);
@@ -87,14 +87,14 @@ public:
         return getTexture().getWrapV();
     }
 
-    // === 保存（サブクラスでオーバーライド） ===
+    // === Save (override in subclass) ===
 
-    // テクスチャ内容をファイルに保存
-    // Image: 直接 pixels を保存（コピー不要）
-    // Fbo: テクスチャからピクセルを読み取って保存
+    // Save texture contents to file
+    // Image: saves pixels directly (no copy needed)
+    // Fbo: reads pixels from texture and saves
     virtual bool save(const fs::path& path) const {
         (void)path;
-        return false;  // デフォルトは未実装
+        return false;  // Default is not implemented
     }
 };
 

@@ -8,29 +8,29 @@
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// Thread - スレッド基底クラス（ofThread互換）
+// Thread - Thread base class (ofThread compatible)
 // ---------------------------------------------------------------------------
 //
-// 使い方:
-// 1. Thread を継承したクラスを作成
-// 2. threadedFunction() をオーバーライドして実装
-// 3. startThread() でスレッド開始
-// 4. stopThread() でスレッド停止シグナル
-// 5. waitForThread() でスレッド終了を待機
+// Usage:
+// 1. Create a class inheriting from Thread
+// 2. Override threadedFunction() with implementation
+// 3. Start thread with startThread()
+// 4. Signal thread stop with stopThread()
+// 5. Wait for thread to finish with waitForThread()
 //
-// 例:
+// Example:
 //   class MyThread : public tc::Thread {
 //   protected:
 //       void threadedFunction() override {
 //           while (isThreadRunning()) {
-//               // 処理
+//               // Processing
 //           }
 //       }
 //   };
 //
-// Mutex の使用:
-//   ドキュメントに記載の通り、独自ラッパーは提供しない。
-//   std::mutex と std::lock_guard の使用を推奨。
+// Mutex usage:
+//   As documented, no custom wrappers provided.
+//   std::mutex and std::lock_guard are recommended.
 //
 // ---------------------------------------------------------------------------
 
@@ -39,22 +39,22 @@ public:
     Thread() : threadRunning_(false) {}
 
     virtual ~Thread() {
-        // スレッドが実行中なら停止して待機
+        // If thread is running, stop and wait
         if (isThreadRunning()) {
             stopThread();
             waitForThread(false);
         }
     }
 
-    // コピー禁止
+    // No copy
     Thread(const Thread&) = delete;
     Thread& operator=(const Thread&) = delete;
 
-    // ムーブは許可（ただしスレッド実行中は不可）
+    // Move allowed (but not while thread is running)
     Thread(Thread&& other) noexcept : threadRunning_(false) {
-        // 移動元が実行中でないことを確認
+        // Ensure source is not running
         if (other.isThreadRunning()) {
-            // 実行中のスレッドはムーブできない
+            // Cannot move running thread
             return;
         }
     }
@@ -70,14 +70,14 @@ public:
     }
 
     // ---------------------------------------------------------------------------
-    // スレッド制御
+    // Thread control
     // ---------------------------------------------------------------------------
 
-    // スレッドを開始
+    // Start thread
     void startThread() {
         if (isThreadRunning()) return;
 
-        // 前のスレッドが残っていたら join する
+        // Join previous thread if still exists
         if (thread_.joinable()) {
             thread_.join();
         }
@@ -89,14 +89,14 @@ public:
         });
     }
 
-    // スレッドに停止シグナルを送る
-    // threadedFunction内で isThreadRunning() がfalseを返すようになる
+    // Send stop signal to thread
+    // isThreadRunning() will return false in threadedFunction
     void stopThread() {
         threadRunning_ = false;
     }
 
-    // スレッドの終了を待機
-    // callStopThread: trueの場合、stopThread()を先に呼ぶ
+    // Wait for thread to finish
+    // callStopThread: if true, calls stopThread() first
     void waitForThread(bool callStopThread = true) {
         if (callStopThread) {
             stopThread();
@@ -106,38 +106,38 @@ public:
         }
     }
 
-    // スレッドが実行中かどうか
+    // Whether thread is running
     bool isThreadRunning() const {
         return threadRunning_;
     }
 
-    // スレッドIDを取得
+    // Get thread ID
     std::thread::id getThreadId() const {
         return thread_.get_id();
     }
 
     // ---------------------------------------------------------------------------
-    // ユーティリティ
+    // Utilities
     // ---------------------------------------------------------------------------
 
-    // 現在のスレッドを一時停止
+    // Pause current thread
     static void sleep(unsigned long milliseconds) {
         std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
     }
 
-    // 他のスレッドに実行機会を譲る
+    // Yield execution to other threads
     static void yield() {
         std::this_thread::yield();
     }
 
-    // 現在のスレッドがメインスレッドかどうか
-    // 注: この関数を使うには、最初に一度メインスレッドから呼んでIDを記録する必要がある
+    // Whether current thread is main thread
+    // Note: Must call once from main thread first to record its ID
     static bool isCurrentThreadTheMainThread() {
         return std::this_thread::get_id() == getMainThreadId();
     }
 
-    // メインスレッドIDを取得/設定
-    // 最初の呼び出しで現在のスレッドIDを記録
+    // Get/set main thread ID
+    // Records current thread ID on first call
     static std::thread::id getMainThreadId() {
         static std::thread::id mainThreadId = std::this_thread::get_id();
         return mainThreadId;
@@ -145,19 +145,19 @@ public:
 
 protected:
     // ---------------------------------------------------------------------------
-    // サブクラスで実装する関数
+    // Functions to implement in subclass
     // ---------------------------------------------------------------------------
 
-    // スレッドで実行される処理
-    // サブクラスでオーバーライドして実装する
-    // while (isThreadRunning()) { ... } のループを使用することを推奨
+    // Processing executed in thread
+    // Override in subclass to implement
+    // Recommend using while (isThreadRunning()) { ... } loop
     virtual void threadedFunction() = 0;
 
     // ---------------------------------------------------------------------------
-    // ミューテックス（サブクラスで使用可能）
+    // Mutex (available to subclasses)
     // ---------------------------------------------------------------------------
 
-    // スレッド間でデータを共有する場合に使用
+    // Use when sharing data between threads
     std::mutex mutex;
 
 private:
@@ -166,15 +166,15 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// ヘルパー関数
+// Helper functions
 // ---------------------------------------------------------------------------
 
-// メインスレッドIDを取得（エイリアス）
+// Get main thread ID (alias)
 inline std::thread::id getMainThreadId() {
     return Thread::getMainThreadId();
 }
 
-// 現在のスレッドがメインスレッドかどうか
+// Whether current thread is main thread
 inline bool isMainThread() {
     return Thread::isCurrentThreadTheMainThread();
 }

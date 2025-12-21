@@ -1,5 +1,5 @@
 // =============================================================================
-// tcTcpServer.cpp - TCP サーバーソケット実装
+// tcTcpServer.cpp - TCP server socket implementation
 // =============================================================================
 
 #include "tc/network/tcTcpServer.h"
@@ -22,7 +22,7 @@ namespace trussc {
 std::atomic<int> TcpServer::instanceCount_{0};
 
 // =============================================================================
-// Winsock 初期化（Windows のみ）
+// Winsock initialization (Windows only)
 // =============================================================================
 void TcpServer::initWinsock() {
 #ifdef _WIN32
@@ -44,7 +44,7 @@ void TcpServer::cleanupWinsock() {
 }
 
 // =============================================================================
-// コンストラクタ / デストラクタ
+// Constructor / Destructor
 // =============================================================================
 TcpServer::TcpServer() {
     if (instanceCount_++ == 0) {
@@ -60,7 +60,7 @@ TcpServer::~TcpServer() {
 }
 
 // =============================================================================
-// サーバー管理
+// Server management
 // =============================================================================
 bool TcpServer::start(int port, int maxClients) {
     if (running_) {
@@ -70,7 +70,7 @@ bool TcpServer::start(int port, int maxClients) {
     port_ = port;
     maxClients_ = maxClients;
 
-    // ソケット作成
+    // Create socket
     serverSocket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 #ifdef _WIN32
     if (serverSocket_ == INVALID_SOCKET) {
@@ -81,7 +81,7 @@ bool TcpServer::start(int port, int maxClients) {
         return false;
     }
 
-    // SO_REUSEADDR オプション設定（再起動時にすぐにポートを再利用できるように）
+    // Set SO_REUSEADDR option (to allow immediate port reuse on restart)
     int opt = 1;
 #ifdef _WIN32
     setsockopt(serverSocket_, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
@@ -89,7 +89,7 @@ bool TcpServer::start(int port, int maxClients) {
     setsockopt(serverSocket_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 #endif
 
-    // バインド
+    // Bind
     struct sockaddr_in serverAddr;
     memset(&serverAddr, 0, sizeof(serverAddr));
     serverAddr.sin_family = AF_INET;
@@ -107,7 +107,7 @@ bool TcpServer::start(int port, int maxClients) {
         return false;
     }
 
-    // リッスン開始
+    // Start listening
     if (::listen(serverSocket_, maxClients) == SOCKET_ERROR) {
         notifyError("Failed to listen on port " + std::to_string(port), SOCKET_ERROR_CODE);
         CLOSE_SOCKET(serverSocket_);
@@ -129,7 +129,7 @@ bool TcpServer::start(int port, int maxClients) {
 void TcpServer::stop() {
     running_ = false;
 
-    // サーバーソケットを閉じる（acceptをブロック解除）
+    // Close server socket (unblocks accept)
 #ifdef _WIN32
     if (serverSocket_ != INVALID_SOCKET) {
         CLOSE_SOCKET(serverSocket_);
@@ -142,12 +142,12 @@ void TcpServer::stop() {
     }
 #endif
 
-    // acceptスレッドを待機
+    // Wait for accept thread
     if (acceptThread_.joinable()) {
         acceptThread_.join();
     }
 
-    // 全クライアントを切断
+    // Disconnect all clients
     disconnectAllClients();
 
     tcLogNotice() << "TCP server stopped";
@@ -158,7 +158,7 @@ bool TcpServer::isRunning() const {
 }
 
 // =============================================================================
-// Accept スレッド
+// Accept thread
 // =============================================================================
 void TcpServer::acceptThreadFunc() {
     while (running_) {
@@ -173,18 +173,18 @@ void TcpServer::acceptThreadFunc() {
         if (clientSocket < 0) {
 #endif
             if (running_) {
-                // 稼働中にエラーが発生した場合のみ通知
-                // （サーバー停止時のエラーは無視）
+                // Only notify error if occurred while running
+                // (ignore errors during server shutdown)
             }
             continue;
         }
 
-        // クライアント情報を取得
+        // Get client information
         char hostStr[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &clientAddr.sin_addr, hostStr, INET_ADDRSTRLEN);
         int clientPort = ntohs(clientAddr.sin_port);
 
-        // クライアントを登録
+        // Register client
         int clientId;
         {
             std::lock_guard<std::mutex> lock(clientsMutex_);
@@ -199,14 +199,14 @@ void TcpServer::acceptThreadFunc() {
 
         tcLogNotice() << "Client " << clientId << " connected from " << hostStr << ":" << clientPort;
 
-        // 接続イベントを通知
+        // Notify connection event
         TcpClientConnectEventArgs args;
         args.clientId = clientId;
         args.host = hostStr;
         args.port = clientPort;
         onClientConnect.notify(args);
 
-        // クライアント用の受信スレッドを開始
+        // Start receive thread for client
         {
             std::lock_guard<std::mutex> lock(clientsMutex_);
             clientThreads_[clientId] = std::thread(&TcpServer::clientThreadFunc, this, clientId);
@@ -215,7 +215,7 @@ void TcpServer::acceptThreadFunc() {
 }
 
 // =============================================================================
-// クライアント受信スレッド
+// Client receive thread
 // =============================================================================
 void TcpServer::clientThreadFunc(int clientId) {
     std::vector<char> buffer(receiveBufferSize_);
@@ -242,7 +242,7 @@ void TcpServer::clientThreadFunc(int clientId) {
             args.data.assign(buffer.begin(), buffer.begin() + received);
             onReceive.notify(args);
         } else if (received == 0) {
-            // クライアントが接続を閉じた
+            // Client closed connection
             TcpClientDisconnectEventArgs args;
             args.clientId = clientId;
             args.reason = "Connection closed by client";
@@ -253,7 +253,7 @@ void TcpServer::clientThreadFunc(int clientId) {
             removeClient(clientId);
             break;
         } else {
-            // エラー
+            // Error
             int err = SOCKET_ERROR_CODE;
 #ifdef _WIN32
             if (err == WSAEWOULDBLOCK) continue;
@@ -275,7 +275,7 @@ void TcpServer::clientThreadFunc(int clientId) {
 }
 
 // =============================================================================
-// クライアント管理
+// Client management
 // =============================================================================
 void TcpServer::disconnectClient(int clientId) {
     std::lock_guard<std::mutex> lock(clientsMutex_);
@@ -291,7 +291,7 @@ void TcpServer::disconnectClient(int clientId) {
         clients_.erase(it);
     }
 
-    // スレッドをデタッチ（自己終了させる）
+    // Detach thread (let it self-terminate)
     auto threadIt = clientThreads_.find(clientId);
     if (threadIt != clientThreads_.end()) {
         if (threadIt->second.joinable()) {
@@ -314,7 +314,7 @@ void TcpServer::disconnectAllClients() {
         disconnectClient(id);
     }
 
-    // 残っているスレッドをjoin
+    // Join remaining threads
     std::lock_guard<std::mutex> lock(clientsMutex_);
     for (auto& pair : clientThreads_) {
         if (pair.second.joinable()) {
@@ -357,7 +357,7 @@ const TcpServerClient* TcpServer::getClient(int clientId) const {
 }
 
 // =============================================================================
-// データ送信
+// Data send
 // =============================================================================
 bool TcpServer::send(int clientId, const void* data, size_t size) {
     std::lock_guard<std::mutex> lock(clientsMutex_);
@@ -407,21 +407,21 @@ void TcpServer::broadcast(const std::string& message) {
 }
 
 // =============================================================================
-// 設定
+// Settings
 // =============================================================================
 void TcpServer::setReceiveBufferSize(size_t size) {
     receiveBufferSize_ = size;
 }
 
 // =============================================================================
-// 情報取得
+// Information retrieval
 // =============================================================================
 int TcpServer::getPort() const {
     return port_;
 }
 
 // =============================================================================
-// エラー通知
+// Error notification
 // =============================================================================
 void TcpServer::notifyError(const std::string& msg, int code, int clientId) {
     TcpServerErrorEventArgs args;

@@ -5,15 +5,15 @@
 // Version 0.0.1
 // =============================================================================
 
-// Windows: コンソールウィンドウを非表示（Release ビルド時）
-// TRUSSC_SHOW_CONSOLE を定義すると常にコンソールを表示
+// Windows: Hide console window (in Release builds)
+// Define TRUSSC_SHOW_CONSOLE to always show console
 #if defined(_WIN32) && !defined(_DEBUG) && !defined(TRUSSC_SHOW_CONSOLE)
 #pragma comment(linker, "/subsystem:\"windows\" /entry:\"mainCRTStartup\"")
 #endif
 
-// sokol ヘッダー
+// sokol headers
 #include "sokol/sokol_log.h"
-#define SOKOL_NO_ENTRY  // main() を自分で定義するため
+#define SOKOL_NO_ENTRY  // We define our own main()
 #include "sokol/sokol_app.h"
 #include "sokol/sokol_gfx.h"
 #include "sokol/sokol_glue.h"
@@ -23,93 +23,93 @@
 #include "imgui/imgui.h"
 #include "sokol/sokol_imgui.h"
 
-// 標準ライブラリ
+// Standard libraries
 #include <cstdint>
 #include <cmath>
 #include <string>
 #include <vector>
 #include <chrono>
 
-// TrussC 数学ライブラリ
+// TrussC math library
 #include "tcMath.h"
 
-// TrussC 方向・位置指定
+// TrussC direction/position specifiers
 #include "tc/types/tcDirection.h"
 
-// TrussC 矩形
+// TrussC rectangle
 #include "tc/types/tcRectangle.h"
 
-// TrussC ノイズ関数
+// TrussC noise functions
 #include "tc/math/tcNoise.h"
 
-// TrussC レイ（Hit Test 用）
+// TrussC ray (for hit testing)
 #include "tc/math/tcRay.h"
 
-// TrussC FFT（高速フーリエ変換）
+// TrussC FFT (Fast Fourier Transform)
 #include "tc/math/tcFFT.h"
 
-// TrussC カラーライブラリ
+// TrussC color library
 #include "tcColor.h"
 
-// TrussC ビットマップフォント
+// TrussC bitmap font
 #include "tcBitmapFont.h"
 
-// TrussC プラットフォーム固有機能
+// TrussC platform-specific features
 #include "tcPlatform.h"
 
-// TrussC イベントシステム
+// TrussC event system
 #include "tc/events/tcCoreEvents.h"
 
-// TrussC ユーティリティ
+// TrussC utilities
 #include "tc/utils/tcUtils.h"
 #include "tc/utils/tcTime.h"
 #include "tc/utils/tcLog.h"
 
-// TrussC ファイルダイアログ
+// TrussC file dialogs
 #include "tc/utils/tcFileDialog.h"
 
 // TrussC JSON/XML
 #include "tc/utils/tcJson.h"
 #include "tc/utils/tcXml.h"
 
-// TrussC コンソール入力（stdin からのコマンド受付）
+// TrussC console input (accept commands from stdin)
 #include "tc/utils/tcConsole.h"
 
 // =============================================================================
-// trussc 名前空間
+// trussc namespace
 // =============================================================================
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// ブレンドモード
+// Blend mode
 // ---------------------------------------------------------------------------
 enum class BlendMode {
-    Alpha,      // 通常アルファブレンド（デフォルト）
-    Add,        // 加算合成
-    Multiply,   // 乗算合成
-    Screen,     // スクリーン合成
-    Subtract,   // 減算合成
-    Disabled    // ブレンドなし（上書き）
+    Alpha,      // Normal alpha blending (default)
+    Add,        // Additive blending
+    Multiply,   // Multiply blending
+    Screen,     // Screen blending
+    Subtract,   // Subtractive blending
+    Disabled    // No blending (overwrite)
 };
 
 // ---------------------------------------------------------------------------
-// テクスチャフィルター
+// Texture filter
 // ---------------------------------------------------------------------------
 enum class TextureFilter {
-    Nearest,    // ニアレストネイバー（ドット絵向け）
-    Linear      // バイリニア補間（デフォルト）
+    Nearest,    // Nearest neighbor (for pixel art)
+    Linear      // Bilinear interpolation (default)
 };
 
 // ---------------------------------------------------------------------------
-// テクスチャラップモード
+// Texture wrap mode
 // ---------------------------------------------------------------------------
 enum class TextureWrap {
-    Repeat,         // 繰り返し
-    ClampToEdge,    // 端のピクセルで止まる（デフォルト）
-    MirroredRepeat  // 反転して繰り返し
+    Repeat,         // Repeat
+    ClampToEdge,    // Clamp to edge pixel (default)
+    MirroredRepeat  // Mirrored repeat
 };
 
-// 前方宣言（RenderContext 用）
+// Forward declarations (for RenderContext)
 namespace internal {
     inline sg_image fontTexture = {};
     inline sg_view fontView = {};
@@ -120,41 +120,41 @@ namespace internal {
     inline bool pipeline3dInitialized = false;
     inline bool pixelPerfectMode = false;
 
-    // ImGui 統合
+    // ImGui integration
     inline bool imguiEnabled = false;
 
-    // ブレンドモード用パイプライン
+    // Blend mode pipelines
     inline sgl_pipeline blendPipelines[6] = {};
     inline bool blendPipelinesInitialized = false;
     inline BlendMode currentBlendMode = BlendMode::Alpha;
 }
 
-} // namespace trussc (一時的に閉じる)
+} // namespace trussc (temporarily closed)
 
-// RenderContext クラス（描画状態を保持）
+// RenderContext class (holds drawing state)
 #include "tc/graphics/tcRenderContext.h"
 
-// 名前空間を再開
+// Reopen namespace
 namespace trussc {
 
-// バージョン情報
+// Version information
 constexpr int VERSION_MAJOR = 0;
 constexpr int VERSION_MINOR = 0;
 constexpr int VERSION_PATCH = 1;
 
-// 数学定数は tcMath.h で定義: TAU, HALF_TAU, QUARTER_TAU, PI
+// Math constants defined in tcMath.h: TAU, HALF_TAU, QUARTER_TAU, PI
 
 // ---------------------------------------------------------------------------
-// 内部状態（アプリケーション・ウィンドウ関連）
-// 描画状態は RenderContext に移動済み
+// Internal state (application/window related)
+// Drawing state has been moved to RenderContext
 // ---------------------------------------------------------------------------
 namespace internal {
     // ---------------------------------------------------------------------------
-    // Scissor Clipping スタック
+    // Scissor Clipping stack
     // ---------------------------------------------------------------------------
     struct ScissorRect {
         float x, y, w, h;
-        bool active;  // スタックに有効な範囲があるか
+        bool active;  // Whether a valid range exists in the stack
     };
     inline std::vector<ScissorRect> scissorStack;
     inline ScissorRect currentScissor = {0, 0, 0, 0, false};
@@ -163,85 +163,85 @@ namespace internal {
     // Loop Architecture (Decoupled Update/Draw)
     // ---------------------------------------------------------------------------
 
-    // Draw Loop 設定
-    inline bool drawVsyncEnabled = true;   // VSync 有効（デフォルト）
-    inline int drawTargetFps = 0;          // 0 = VSync使用, >0 = 固定FPS, <0 = 自動描画停止
-    inline int redrawCount = 1;            // redraw() カウンター（残り描画回数）
+    // Draw Loop settings
+    inline bool drawVsyncEnabled = true;   // VSync enabled (default)
+    inline int drawTargetFps = 0;          // 0 = use VSync, >0 = fixed FPS, <0 = auto draw stop
+    inline int redrawCount = 1;            // redraw() counter (remaining draw count)
 
-    // Update Loop 設定
-    inline bool updateSyncedToDraw = true; // true = draw直前にupdate（デフォルト）
-    inline int updateTargetFps = 0;        // 0 = syncedToDraw使用, >0 = 独立した固定Hz
+    // Update Loop settings
+    inline bool updateSyncedToDraw = true; // true = update before draw (default)
+    inline int updateTargetFps = 0;        // 0 = use syncedToDraw, >0 = independent fixed Hz
 
-    // Update タイミング用
+    // Update timing
     inline std::chrono::high_resolution_clock::time_point lastUpdateTime;
     inline bool lastUpdateTimeInitialized = false;
-    inline double updateAccumulator = 0.0; // 独立Updateの蓄積時間
+    inline double updateAccumulator = 0.0; // Accumulated time for independent Update
 
-    // Draw タイミング用（フレームスキップ）
+    // Draw timing (frame skip)
     inline std::chrono::high_resolution_clock::time_point lastDrawTime;
     inline bool lastDrawTimeInitialized = false;
     inline double drawAccumulator = 0.0;
 
-    // マウス状態
+    // Mouse state
     inline float mouseX = 0.0f;
     inline float mouseY = 0.0f;
-    inline float pmouseX = 0.0f;  // 前フレームのマウス位置
+    inline float pmouseX = 0.0f;  // Previous frame mouse position
     inline float pmouseY = 0.0f;
-    inline int mouseButton = -1;  // 現在押されているボタン (-1 = なし)
+    inline int mouseButton = -1;  // Currently pressed button (-1 = none)
     inline bool mousePressed = false;
 
-    // フレームレート計測用（10フレーム移動平均）
+    // Frame rate measurement (10-frame moving average)
     inline double frameTimeBuffer[10] = {};
     inline int frameTimeIndex = 0;
     inline bool frameTimeBufferFilled = false;
 
-    // フレームカウント（update 呼び出し回数）
+    // Frame count (number of update calls)
     inline uint64_t updateFrameCount = 0;
 
-    // 経過時間計測用
+    // Elapsed time measurement
     inline std::chrono::high_resolution_clock::time_point startTime;
     inline bool startTimeInitialized = false;
 
-    // パス状態（FBO のためにスワップチェーンパスを一時中断するため）
+    // Pass state (for suspending swapchain pass for FBO)
     inline bool inSwapchainPass = false;
 
-    // FBO パス状態（clear() が FBO 内で呼ばれたときの判定用）
+    // FBO pass state (for detecting when clear() is called inside FBO)
     inline bool inFboPass = false;
 
-    // 現在アクティブな FBO 用パイプライン（clear() から使用）
+    // Current active FBO pipeline (used from clear())
     inline sgl_pipeline currentFboClearPipeline = {};
     inline sgl_pipeline currentFboBlendPipeline = {};
 
-    // FBO の clearColor 関数ポインタ（tcFbo.h で設定）
+    // FBO clearColor function pointer (set in tcFbo.h)
     inline void (*fboClearColorFunc)(float, float, float, float) = nullptr;
 
-    // 現在アクティブな FBO ポインタ（clearColor から使用）
+    // Current active FBO pointer (used from clearColor)
     inline void* currentFbo = nullptr;
 }
 
 // ---------------------------------------------------------------------------
-// 初期化・終了
+// Initialization and cleanup
 // ---------------------------------------------------------------------------
 
-// sokol_gfx + sokol_gl を初期化（setup コールバック内で呼ぶ）
+// Initialize sokol_gfx + sokol_gl (call in setup callback)
 inline void setup() {
-    // sokol_gfx 初期化
+    // Initialize sokol_gfx
     sg_desc sgdesc = {};
     sgdesc.environment = sglue_environment();
     sgdesc.logger.func = slog_func;
     sg_setup(&sgdesc);
 
-    // sokol_gl 初期化
+    // Initialize sokol_gl
     sgl_desc_t sgldesc = {};
     sgldesc.logger.func = slog_func;
     sgl_setup(&sgldesc);
 
-    // ビットマップフォントテクスチャを初期化
+    // Initialize bitmap font texture
     if (!internal::fontInitialized) {
-        // テクスチャアトラスのピクセルデータを生成
+        // Generate texture atlas pixel data
         unsigned char* pixels = bitmapfont::generateAtlasPixels();
 
-        // テクスチャを作成
+        // Create texture
         sg_image_desc img_desc = {};
         img_desc.width = bitmapfont::ATLAS_WIDTH;
         img_desc.height = bitmapfont::ATLAS_HEIGHT;
@@ -250,12 +250,12 @@ inline void setup() {
         img_desc.data.mip_levels[0].size = bitmapfont::ATLAS_WIDTH * bitmapfont::ATLAS_HEIGHT * 4;
         internal::fontTexture = sg_make_image(&img_desc);
 
-        // テクスチャビューを作成
+        // Create texture view
         sg_view_desc view_desc = {};
         view_desc.texture.image = internal::fontTexture;
         internal::fontView = sg_make_view(&view_desc);
 
-        // サンプラーを作成（ニアレストネイバー、ピクセルパーフェクト）
+        // Create sampler (nearest neighbor, pixel perfect)
         sg_sampler_desc smp_desc = {};
         smp_desc.min_filter = SG_FILTER_NEAREST;
         smp_desc.mag_filter = SG_FILTER_NEAREST;
@@ -263,9 +263,9 @@ inline void setup() {
         smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
         internal::fontSampler = sg_make_sampler(&smp_desc);
 
-        // アルファブレンド用パイプラインを作成
-        // RGB: 標準アルファブレンド
-        // Alpha: 上書き（FBOに描画時、FBOが半透明にならないように）
+        // Create pipeline for alpha blending
+        // RGB: standard alpha blend
+        // Alpha: overwrite (to prevent FBO from becoming semi-transparent when drawing to FBO)
         sg_pipeline_desc pip_desc = {};
         pip_desc.colors[0].blend.enabled = true;
         pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
@@ -278,10 +278,10 @@ inline void setup() {
         internal::fontInitialized = true;
     }
 
-    // 3D描画用パイプラインを作成（sokol-samples の sgl-sapp.c を参考）
+    // Create pipeline for 3D drawing (based on sokol-samples sgl-sapp.c)
     if (!internal::pipeline3dInitialized) {
         sg_pipeline_desc pip_desc = {};
-        pip_desc.cull_mode = SG_CULLMODE_NONE;  // カリングなし
+        pip_desc.cull_mode = SG_CULLMODE_NONE;  // No culling
         pip_desc.depth.write_enabled = true;
         pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
         pip_desc.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
@@ -289,10 +289,10 @@ inline void setup() {
         internal::pipeline3dInitialized = true;
     }
 
-    // ブレンドモード用パイプラインを作成
-    // 全モードで Alpha チャンネルは加算的（既存の alpha を減らさない）
+    // Create blend mode pipelines
+    // Alpha channel is additive in all modes (does not reduce existing alpha)
     if (!internal::blendPipelinesInitialized) {
-        // Alpha - 通常アルファブレンド
+        // Alpha - normal alpha blending
         {
             sg_pipeline_desc pip_desc = {};
             pip_desc.colors[0].blend.enabled = true;
@@ -302,7 +302,7 @@ inline void setup() {
             pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
             internal::blendPipelines[static_cast<int>(BlendMode::Alpha)] = sgl_make_pipeline(&pip_desc);
         }
-        // Add - 加算合成
+        // Add - additive blending
         {
             sg_pipeline_desc pip_desc = {};
             pip_desc.colors[0].blend.enabled = true;
@@ -312,9 +312,9 @@ inline void setup() {
             pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
             internal::blendPipelines[static_cast<int>(BlendMode::Add)] = sgl_make_pipeline(&pip_desc);
         }
-        // Multiply - 乗算合成
-        // 純粋な乗算: result = src × dst
-        // 半透明は色の暗さで表現（srcAlpha は RGB に事前乗算されている前提）
+        // Multiply - multiply blending
+        // Pure multiplication: result = src × dst
+        // Semi-transparency expressed by color darkness (assumes srcAlpha is premultiplied into RGB)
         {
             sg_pipeline_desc pip_desc = {};
             pip_desc.colors[0].blend.enabled = true;
@@ -324,7 +324,7 @@ inline void setup() {
             pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
             internal::blendPipelines[static_cast<int>(BlendMode::Multiply)] = sgl_make_pipeline(&pip_desc);
         }
-        // Screen - スクリーン合成
+        // Screen - screen blending
         {
             sg_pipeline_desc pip_desc = {};
             pip_desc.colors[0].blend.enabled = true;
@@ -334,19 +334,19 @@ inline void setup() {
             pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
             internal::blendPipelines[static_cast<int>(BlendMode::Screen)] = sgl_make_pipeline(&pip_desc);
         }
-        // Subtract - 減算合成
+        // Subtract - subtractive blending
         {
             sg_pipeline_desc pip_desc = {};
             pip_desc.colors[0].blend.enabled = true;
             pip_desc.colors[0].blend.op_rgb = SG_BLENDOP_REVERSE_SUBTRACT;
             pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
             pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
-            pip_desc.colors[0].blend.op_alpha = SG_BLENDOP_ADD;  // Alpha は加算のまま
+            pip_desc.colors[0].blend.op_alpha = SG_BLENDOP_ADD;  // Alpha remains additive
             pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
             pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
             internal::blendPipelines[static_cast<int>(BlendMode::Subtract)] = sgl_make_pipeline(&pip_desc);
         }
-        // Disabled - ブレンドなし（上書き）
+        // Disabled - no blending (overwrite)
         {
             sg_pipeline_desc pip_desc = {};
             pip_desc.colors[0].blend.enabled = false;
@@ -358,21 +358,21 @@ inline void setup() {
     }
 }
 
-// sokol_gfx + sokol_gl を終了（cleanup コールバック内で呼ぶ）
+// Shutdown sokol_gfx + sokol_gl (call in cleanup callback)
 inline void cleanup() {
-    // ブレンドモードパイプラインを解放
+    // Release blend mode pipelines
     if (internal::blendPipelinesInitialized) {
         for (int i = 0; i < 6; i++) {
             sgl_destroy_pipeline(internal::blendPipelines[i]);
         }
         internal::blendPipelinesInitialized = false;
     }
-    // 3Dパイプラインを解放
+    // Release 3D pipeline
     if (internal::pipeline3dInitialized) {
         sgl_destroy_pipeline(internal::pipeline3d);
         internal::pipeline3dInitialized = false;
     }
-    // フォントリソースを解放
+    // Release font resources
     if (internal::fontInitialized) {
         sgl_destroy_pipeline(internal::fontPipeline);
         sg_destroy_sampler(internal::fontSampler);
@@ -385,15 +385,15 @@ inline void cleanup() {
 }
 
 // ---------------------------------------------------------------------------
-// フレーム制御
+// Frame control
 // ---------------------------------------------------------------------------
 
-// DPIスケールを取得（Retinaディスプレイでは2.0など）
+// Get DPI scale (e.g., 2.0 for Retina displays)
 inline float getDpiScale() {
     return sapp_dpi_scale();
 }
 
-// フレームバッファの実サイズを取得（ピクセル単位）
+// Get actual framebuffer size (in pixels)
 inline int getFramebufferWidth() {
     return sapp_width();
 }
@@ -402,20 +402,19 @@ inline int getFramebufferHeight() {
     return sapp_height();
 }
 
-// フレーム開始時に呼ぶ（clearの前に）
+// Call at frame start (before clear)
 inline void beginFrame() {
-    // デフォルトのビューポート設定
+    // Set default viewport
     sgl_defaults();
     sgl_matrix_mode_projection();
 
     if (internal::pixelPerfectMode) {
-        // ピクセルパーフェクト: 座標系 = フレームバッファサイズ
-        // near/far: 正の値で指定（OpenGL慣例）
-        // Z=0を含む範囲: near=-10000, far=10000 ではなく
-        // 対称な範囲を指定
+        // Pixel perfect: coordinate system = framebuffer size
+        // near/far: specified as positive values (OpenGL convention)
+        // Range that includes Z=0: specify symmetric range
         sgl_ortho(0.0f, (float)sapp_width(), (float)sapp_height(), 0.0f, -10000.0f, 10000.0f);
     } else {
-        // 論理座標系: DPIスケールを考慮
+        // Logical coordinate system: consider DPI scale
         float dpiScale = sapp_dpi_scale();
         float logicalWidth = (float)sapp_width() / dpiScale;
         float logicalHeight = (float)sapp_height() / dpiScale;
@@ -426,14 +425,14 @@ inline void beginFrame() {
     sgl_load_identity();
 }
 
-// 画面クリア (RGB float: 0.0 ~ 1.0)
-// FBO 内や swapchain パス中でも正しく動作（oF 互換）
+// Clear screen (RGB float: 0.0 ~ 1.0)
+// Works correctly in FBO or during swapchain pass (oF compatible)
 inline void clear(float r, float g, float b, float a = 1.0f) {
     if (internal::inFboPass && internal::fboClearColorFunc) {
-        // FBO パス中は FBO の clearColor() を呼んでパスを再開始
+        // During FBO pass, call FBO's clearColor() to restart pass
         internal::fboClearColorFunc(r, g, b, a);
     } else if (internal::inSwapchainPass) {
-        // swapchain パス中
+        // During swapchain pass
         BlendMode prevBlendMode = internal::currentBlendMode;
 
         sgl_push_matrix();
@@ -462,11 +461,11 @@ inline void clear(float r, float g, float b, float a = 1.0f) {
 
         sgl_load_pipeline(internal::blendPipelines[static_cast<int>(prevBlendMode)]);
     } else {
-        // パス外では新しい swapchain パスを開始
+        // Outside pass, start new swapchain pass
         sg_pass pass = {};
         pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
         pass.action.colors[0].clear_value = { r, g, b, a };
-        // 深度バッファもクリア（3D描画用）
+        // Also clear depth buffer (for 3D drawing)
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         pass.action.depth.clear_value = 1.0f;
         pass.swapchain = sglue_swapchain();
@@ -475,27 +474,27 @@ inline void clear(float r, float g, float b, float a = 1.0f) {
     }
 }
 
-// 画面クリア (グレースケール)
+// Clear screen (grayscale)
 inline void clear(float gray, float a = 1.0f) {
     clear(gray, gray, gray, a);
 }
 
-// 画面クリア (8bit RGB: 0 ~ 255)
+// Clear screen (8bit RGB: 0 ~ 255)
 inline void clear(int r, int g, int b, int a = 255) {
     clear(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
 }
 
-// 画面クリア (8bit グレースケール: 0 ~ 255)
+// Clear screen (8bit grayscale: 0 ~ 255)
 inline void clear(int gray, int a = 255) {
     clear(gray / 255.0f, gray / 255.0f, gray / 255.0f, a / 255.0f);
 }
 
-// 画面クリア (Color)
+// Clear screen (Color)
 inline void clear(const Color& c) {
     clear(c.r, c.g, c.b, c.a);
 }
 
-// パス終了 & コミット（draw の最後で呼ぶ）
+// End pass and commit (call at end of draw)
 inline void present() {
     sgl_draw();
     sg_end_pass();
@@ -503,52 +502,52 @@ inline void present() {
     sg_commit();
 }
 
-// スワップチェーンパス状態を取得（FBO 用）
+// Get swapchain pass state (for FBO)
 inline bool isInSwapchainPass() {
     return internal::inSwapchainPass;
 }
 
-// スワップチェーンパスを一時中断（FBO 用）
-// FBO 描画前に呼んで、デフォルトコンテキストの内容を flush してからパスを終了する
+// Suspend swapchain pass (for FBO)
+// Call before FBO drawing to flush default context content and end pass
 inline void suspendSwapchainPass() {
     if (internal::inSwapchainPass) {
-        sgl_draw();  // デフォルトコンテキストの描画コマンドを flush
+        sgl_draw();  // Flush drawing commands from default context
         sg_end_pass();
         internal::inSwapchainPass = false;
     }
 }
 
-// スワップチェーンパスを再開（FBO 用）
-// FBO 描画後に呼んで、スワップチェーンへの描画を継続する
+// Resume swapchain pass (for FBO)
+// Call after FBO drawing to continue drawing to swapchain
 inline void resumeSwapchainPass() {
     if (!internal::inSwapchainPass) {
         sg_pass pass = {};
-        pass.action.colors[0].load_action = SG_LOADACTION_LOAD;  // 既存の内容を保持
+        pass.action.colors[0].load_action = SG_LOADACTION_LOAD;  // Preserve existing content
         pass.action.depth.load_action = SG_LOADACTION_LOAD;
         pass.swapchain = sglue_swapchain();
         sg_begin_pass(&pass);
         internal::inSwapchainPass = true;
-        // sokol_gl の状態をリセット
+        // Reset sokol_gl state
         sgl_defaults();
-        beginFrame();  // 投影行列を再設定
+        beginFrame();  // Reset projection matrix
     }
 }
 
 // ---------------------------------------------------------------------------
-// 色設定（RenderContext への委譲）
+// Color settings (delegated to RenderContext)
 // ---------------------------------------------------------------------------
 
-// 描画色設定 (float: 0.0 ~ 1.0)
+// Set drawing color (float: 0.0 ~ 1.0)
 inline void setColor(float r, float g, float b, float a = 1.0f) {
     getDefaultContext().setColor(r, g, b, a);
 }
 
-// 描画色設定 (int: 0 ~ 255)
+// Set drawing color (int: 0 ~ 255)
 inline void setColor(int r, int g, int b, int a = 255) {
     getDefaultContext().setColor(r, g, b, a);
 }
 
-// グレースケール
+// Grayscale
 inline void setColor(float gray, float a = 1.0f) {
     getDefaultContext().setColor(gray, a);
 }
@@ -557,61 +556,61 @@ inline void setColor(int gray, int a = 255) {
     getDefaultContext().setColor(gray, a);
 }
 
-// Color 構造体で設定
+// Set using Color struct
 inline void setColor(const Color& c) {
     getDefaultContext().setColor(c);
 }
 
-// 現在の描画色を取得
+// Get current drawing color
 inline Color getColor() {
     return getDefaultContext().getColor();
 }
 
-// HSB で設定 (H: 0-TAU, S: 0-1, B: 0-1)
+// Set using HSB (H: 0-TAU, S: 0-1, B: 0-1)
 inline void setColorHSB(float h, float s, float b, float a = 1.0f) {
     getDefaultContext().setColorHSB(h, s, b, a);
 }
 
-// OKLab で設定 (L: 0-1, a: ~-0.4-0.4, b: ~-0.4-0.4)
+// Set using OKLab (L: 0-1, a: ~-0.4-0.4, b: ~-0.4-0.4)
 inline void setColorOKLab(float L, float a_lab, float b_lab, float alpha = 1.0f) {
     getDefaultContext().setColorOKLab(L, a_lab, b_lab, alpha);
 }
 
-// OKLCH で設定 (L: 0-1, C: 0-0.4, H: 0-TAU) - 最も知覚的に自然
+// Set using OKLCH (L: 0-1, C: 0-0.4, H: 0-TAU) - most perceptually natural
 inline void setColorOKLCH(float L, float C, float H, float alpha = 1.0f) {
     getDefaultContext().setColorOKLCH(L, C, H, alpha);
 }
 
-// 塗りつぶしを有効化
+// Enable fill
 inline void fill() {
     getDefaultContext().fill();
 }
 
-// 塗りつぶしを無効化
+// Disable fill
 inline void noFill() {
     getDefaultContext().noFill();
 }
 
-// ストロークを有効化
+// Enable stroke
 inline void stroke() {
     getDefaultContext().stroke();
 }
 
-// ストロークを無効化
+// Disable stroke
 inline void noStroke() {
     getDefaultContext().noStroke();
 }
 
-// ストロークの太さ
+// Stroke weight
 inline void setStrokeWeight(float weight) {
     getDefaultContext().setStrokeWeight(weight);
 }
 
 // ---------------------------------------------------------------------------
-// Scissor Clipping（描画領域の制限）
+// Scissor Clipping (drawing region restriction)
 // ---------------------------------------------------------------------------
 
-// 2つの矩形の交差を計算（内部ヘルパー）
+// Calculate intersection of two rectangles (internal helper)
 inline void intersectRect(float x1, float y1, float w1, float h1,
                           float x2, float y2, float w2, float h2,
                           float& ox, float& oy, float& ow, float& oh) {
@@ -625,29 +624,29 @@ inline void intersectRect(float x1, float y1, float w1, float h1,
     oh = std::max(0.0f, bottom - top);
 }
 
-// Scissor矩形を設定（スクリーン座標）
+// Set scissor rectangle (screen coordinates)
 inline void setScissor(float x, float y, float w, float h) {
     internal::currentScissor = {x, y, w, h, true};
     sgl_scissor_rectf(x, y, w, h, true);  // origin_top_left = true
 }
 
-// Scissor矩形を設定（int版）
+// Set scissor rectangle (int version)
 inline void setScissor(int x, int y, int w, int h) {
     setScissor((float)x, (float)y, (float)w, (float)h);
 }
 
-// Scissorをウィンドウ全体にリセット
+// Reset scissor to entire window
 inline void resetScissor() {
     internal::currentScissor.active = false;
     sgl_scissor_rect(0, 0, sapp_width(), sapp_height(), true);
 }
 
-// Scissorをスタックに保存し、新しい範囲を設定（現在の範囲との交差）
+// Save scissor to stack and set new range (intersection with current range)
 inline void pushScissor(float x, float y, float w, float h) {
-    // 現在の状態をスタックに保存
+    // Save current state to stack
     internal::scissorStack.push_back(internal::currentScissor);
 
-    // 新しい範囲を計算（現在の範囲との交差）
+    // Calculate new range (intersection with current range)
     if (internal::currentScissor.active) {
         float nx, ny, nw, nh;
         intersectRect(internal::currentScissor.x, internal::currentScissor.y,
@@ -660,7 +659,7 @@ inline void pushScissor(float x, float y, float w, float h) {
     }
 }
 
-// Scissorをスタックから復元
+// Restore scissor from stack
 inline void popScissor() {
     if (internal::scissorStack.empty()) {
         resetScissor();
@@ -679,60 +678,60 @@ inline void popScissor() {
 }
 
 // ---------------------------------------------------------------------------
-// 変形（RenderContext への委譲）
+// Transformations (delegated to RenderContext)
 // ---------------------------------------------------------------------------
 
-// 行列をスタックに保存
+// Save matrix to stack
 inline void pushMatrix() {
     getDefaultContext().pushMatrix();
 }
 
-// 行列をスタックから復元
+// Restore matrix from stack
 inline void popMatrix() {
     getDefaultContext().popMatrix();
 }
 
-// スタイルをスタックに保存（色、fill/stroke、textAlign など）
+// Save style to stack (color, fill/stroke, textAlign, etc.)
 inline void pushStyle() {
     getDefaultContext().pushStyle();
 }
 
-// スタイルをスタックから復元
+// Restore style from stack
 inline void popStyle() {
     getDefaultContext().popStyle();
 }
 
-// 平行移動
+// Translation
 inline void translate(float x, float y) {
     getDefaultContext().translate(x, y);
 }
 
-// 3D移動
+// 3D translation
 inline void translate(float x, float y, float z) {
     getDefaultContext().translate(x, y, z);
 }
 
-// Z軸回転（ラジアン）
+// Z-axis rotation (radians)
 inline void rotate(float radians) {
     getDefaultContext().rotate(radians);
 }
 
-// X軸回転（ラジアン）
+// X-axis rotation (radians)
 inline void rotateX(float radians) {
     getDefaultContext().rotateX(radians);
 }
 
-// Y軸回転（ラジアン）
+// Y-axis rotation (radians)
 inline void rotateY(float radians) {
     getDefaultContext().rotateY(radians);
 }
 
-// Z軸回転（ラジアン）- 明示的
+// Z-axis rotation (radians) - explicit
 inline void rotateZ(float radians) {
     getDefaultContext().rotateZ(radians);
 }
 
-// 度数法でも回転できる
+// Rotation in degrees
 inline void rotateDeg(float degrees) {
     getDefaultContext().rotateDeg(degrees);
 }
@@ -749,76 +748,76 @@ inline void rotateZDeg(float degrees) {
     getDefaultContext().rotateZDeg(degrees);
 }
 
-// スケール（均一）
+// Scale (uniform)
 inline void scale(float s) {
     getDefaultContext().scale(s);
 }
 
-// スケール（非均一 2D）
+// Scale (non-uniform 2D)
 inline void scale(float sx, float sy) {
     getDefaultContext().scale(sx, sy);
 }
 
-// スケール（非均一 3D）
+// Scale (non-uniform 3D)
 inline void scale(float sx, float sy, float sz) {
     getDefaultContext().scale(sx, sy, sz);
 }
 
-// 現在の変換行列を取得
+// Get current transformation matrix
 inline Mat4 getCurrentMatrix() {
     return getDefaultContext().getCurrentMatrix();
 }
 
-// 変換行列をリセット
+// Reset transformation matrix
 inline void resetMatrix() {
     getDefaultContext().resetMatrix();
 }
 
-// 変換行列を直接設定
+// Set transformation matrix directly
 inline void setMatrix(const Mat4& mat) {
     getDefaultContext().setMatrix(mat);
 }
 
 // ---------------------------------------------------------------------------
-// ブレンドモード
+// Blend mode
 // ---------------------------------------------------------------------------
 
-// ブレンドモードを設定
-// Alpha チャンネルは全モードで加算的（FBO描画時に透明にならないように）
+// Set blend mode
+// Alpha channel is additive in all modes (to prevent transparency when drawing to FBO)
 inline void setBlendMode(BlendMode mode) {
     if (!internal::blendPipelinesInitialized) return;
     internal::currentBlendMode = mode;
     sgl_load_pipeline(internal::blendPipelines[static_cast<int>(mode)]);
 }
 
-// 現在のブレンドモードを取得
+// Get current blend mode
 inline BlendMode getBlendMode() {
     return internal::currentBlendMode;
 }
 
-// デフォルトのブレンドモード（Alpha）に戻す
+// Reset to default blend mode (Alpha)
 inline void resetBlendMode() {
     setBlendMode(BlendMode::Alpha);
 }
 
 // ---------------------------------------------------------------------------
-// 3D描画モード
+// 3D drawing mode
 // ---------------------------------------------------------------------------
 
-// 3D描画モードを有効化（深度テスト + 背面カリング）
+// Enable 3D drawing mode (depth test + back-face culling)
 inline void enable3D() {
     if (internal::pipeline3dInitialized) {
         sgl_load_pipeline(internal::pipeline3d);
     }
 }
 
-// 3D描画モード（パースペクティブ）を有効化
-// fov: 視野角（ラジアン）, near/far: クリップ面
+// Enable 3D drawing mode (perspective)
+// fov: field of view (radians), near/far: clip planes
 inline void enable3DPerspective(float fovY = 0.785f, float nearZ = 0.1f, float farZ = 1000.0f) {
     if (internal::pipeline3dInitialized) {
         sgl_load_pipeline(internal::pipeline3d);
     }
-    // パースペクティブ投影を設定
+    // Set perspective projection
     sgl_matrix_mode_projection();
     sgl_load_identity();
     float dpiScale = sapp_dpi_scale();
@@ -830,57 +829,57 @@ inline void enable3DPerspective(float fovY = 0.785f, float nearZ = 0.1f, float f
     sgl_load_identity();
 }
 
-// 3D描画モードを無効化（デフォルトの2D描画に戻る）
+// Disable 3D drawing mode (return to default 2D drawing)
 inline void disable3D() {
     sgl_load_default_pipeline();
-    // 2D用の正射影に戻す
+    // Return to orthographic projection for 2D
     beginFrame();
 }
 
 // ---------------------------------------------------------------------------
-// 基本図形描画（RenderContext への委譲）
+// Basic shape drawing (delegated to RenderContext)
 // ---------------------------------------------------------------------------
 
-// 四角形 (左上座標 + サイズ)
+// Rectangle (top-left coordinate + size)
 inline void drawRect(float x, float y, float w, float h) {
     getDefaultContext().drawRect(x, y, w, h);
 }
 
-// 円
+// Circle
 inline void drawCircle(float cx, float cy, float radius) {
     getDefaultContext().drawCircle(cx, cy, radius);
 }
 
-// 楕円
+// Ellipse
 inline void drawEllipse(float cx, float cy, float rx, float ry) {
     getDefaultContext().drawEllipse(cx, cy, rx, ry);
 }
 
-// 線
+// Line
 inline void drawLine(float x1, float y1, float x2, float y2) {
     getDefaultContext().drawLine(x1, y1, x2, y2);
 }
 
-// 三角形
+// Triangle
 inline void drawTriangle(float x1, float y1, float x2, float y2, float x3, float y3) {
     getDefaultContext().drawTriangle(x1, y1, x2, y2, x3, y3);
 }
 
-// 点
+// Point
 inline void drawPoint(float x, float y) {
     getDefaultContext().drawPoint(x, y);
 }
 
-// 円の分割数を設定
+// Set circle resolution
 inline void setCircleResolution(int res) {
     getDefaultContext().setCircleResolution(res);
 }
 
 // ---------------------------------------------------------------------------
-// ビットマップ文字列描画（RenderContext への委譲）
+// Bitmap string drawing (delegated to RenderContext)
 // ---------------------------------------------------------------------------
 
-// テキストのバウンディングボックスを計算
+// Calculate text bounding box
 inline void getBitmapStringBounds(const std::string& text, float& width, float& height) {
     float maxWidth = 0;
     float cursorX = 0;
@@ -903,30 +902,30 @@ inline void getBitmapStringBounds(const std::string& text, float& width, float& 
     height = lines * bitmapfont::CHAR_TEX_HEIGHT;
 }
 
-// ビットマップ文字列を描画
-// screenFixed = true (デフォルト): スクリーン固定（回転・スケールをキャンセル）
-// screenFixed = false: 現在の行列変換に追従（回転・スケールも適用）
+// Draw bitmap string
+// screenFixed = true (default): fixed to screen (cancel rotation/scale)
+// screenFixed = false: follow current matrix transformation (rotation/scale applied)
 inline void drawBitmapString(const std::string& text, float x, float y, bool screenFixed = true) {
     getDefaultContext().drawBitmapString(text, x, y, screenFixed);
 }
 
-// ビットマップ文字列を描画（スケール付き）
+// Draw bitmap string (with scale)
 inline void drawBitmapString(const std::string& text, float x, float y, float scale) {
     getDefaultContext().drawBitmapString(text, x, y, scale);
 }
 
-// ビットマップ文字列を描画（アラインメント指定）
+// Draw bitmap string (with alignment)
 inline void drawBitmapString(const std::string& text, float x, float y,
                               Direction h, Direction v) {
     getDefaultContext().drawBitmapString(text, x, y, h, v);
 }
 
-// テキストアラインメントを設定
+// Set text alignment
 inline void setTextAlign(Direction h, Direction v) {
     getDefaultContext().setTextAlign(h, v);
 }
 
-// 現在のテキストアラインメントを取得
+// Get current text alignment
 inline Direction getTextAlignH() {
     return getDefaultContext().getTextAlignH();
 }
@@ -935,40 +934,40 @@ inline Direction getTextAlignV() {
     return getDefaultContext().getTextAlignV();
 }
 
-// ビットマップフォントの行の高さを取得
+// Get bitmap font line height
 inline float getBitmapFontHeight() {
     return getDefaultContext().getBitmapFontHeight();
 }
 
-// ビットマップ文字列の幅を取得
+// Get bitmap string width
 inline float getBitmapStringWidth(const std::string& text) {
     return getDefaultContext().getBitmapStringWidth(text);
 }
 
-// ビットマップ文字列の高さを取得
+// Get bitmap string height
 inline float getBitmapStringHeight(const std::string& text) {
     return getDefaultContext().getBitmapStringHeight(text);
 }
 
-// ビットマップ文字列のバウンディングボックスを取得
+// Get bitmap string bounding box
 inline Rect getBitmapStringBBox(const std::string& text) {
     return getDefaultContext().getBitmapStringBBox(text);
 }
 
-// ビットマップ文字列を背景付きで描画
+// Draw bitmap string with background highlight
 inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
                                        const Color& background = Color(0, 0, 0),
                                        const Color& foreground = Color(1, 1, 1)) {
     if (text.empty()) return;
 
-    // テキストのサイズを計算
+    // Calculate text size
     float textWidth, textHeight;
     getBitmapStringBounds(text, textWidth, textHeight);
 
-    // パディング
+    // Padding
     const float padding = 4.0f;
 
-    // 現在のアラインメントに基づいてオフセットを計算
+    // Calculate offset based on current alignment
     float offsetX = 0, offsetY = 0;
     switch (getTextAlignH()) {
         case Direction::Left:   offsetX = 0; break;
@@ -980,20 +979,20 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
         case Direction::Top:      offsetY = 0; break;
         case Direction::Center:   offsetY = -textHeight / 2; break;
         case Direction::Bottom:   offsetY = -textHeight; break;
-        case Direction::Baseline: offsetY = -textHeight + 3; break;  // 近似値
+        case Direction::Baseline: offsetY = -textHeight + 3; break;  // Approximate value
         default: break;
     }
 
-    // ローカル座標をワールド座標に変換（オフセット込み）
+    // Convert local coordinates to world coordinates (including offset)
     Mat4 currentMat = getCurrentMatrix();
     float worldX = currentMat.m[0]*(x + offsetX) + currentMat.m[1]*(y + offsetY) + currentMat.m[3];
     float worldY = currentMat.m[4]*(x + offsetX) + currentMat.m[5]*(y + offsetY) + currentMat.m[7];
 
-    // 行列を保存
+    // Save matrix
     pushMatrix();
     resetMatrix();
 
-    // アルファブレンドパイプラインで背景を描画
+    // Draw background with alpha blend pipeline
     sgl_load_pipeline(internal::fontPipeline);
     setColor(background);
     drawRect(worldX - padding, worldY - padding,
@@ -1002,78 +1001,78 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
 
     popMatrix();
 
-    // 前景色で文字を描画
+    // Draw text in foreground color
     setColor(foreground);
     drawBitmapString(text, x, y);
 }
 
 // ---------------------------------------------------------------------------
-// ウィンドウ制御
+// Window control
 // ---------------------------------------------------------------------------
 
-// ウィンドウタイトルを設定
+// Set window title
 inline void setWindowTitle(const std::string& title) {
     sapp_set_window_title(title.c_str());
 }
 
-// ウィンドウサイズを変更（座標系に対応したサイズで指定）
-// pixelPerfect=true: フレームバッファサイズで指定
-// pixelPerfect=false: 論理サイズで指定
+// Change window size (specify in size corresponding to coordinate system)
+// pixelPerfect=true: specify in framebuffer size
+// pixelPerfect=false: specify in logical size
 inline void setWindowSize(int width, int height) {
     if (internal::pixelPerfectMode) {
-        // ピクセルパーフェクトモード: フレームバッファサイズ → 論理サイズに変換
+        // Pixel perfect mode: convert framebuffer size to logical size
         float scale = sapp_dpi_scale();
         platform::setWindowSize(static_cast<int>(width / scale), static_cast<int>(height / scale));
     } else {
-        // 論理座標モード: そのまま
+        // Logical coordinate mode: as is
         platform::setWindowSize(width, height);
     }
 }
 
-// フルスクリーン切り替え
+// Toggle fullscreen
 inline void setFullscreen(bool full) {
     if (full != sapp_is_fullscreen()) {
         sapp_toggle_fullscreen();
     }
 }
 
-// フルスクリーン状態を取得
+// Get fullscreen state
 inline bool isFullscreen() {
     return sapp_is_fullscreen();
 }
 
-// フルスクリーンをトグル
+// Toggle fullscreen
 inline void toggleFullscreen() {
     sapp_toggle_fullscreen();
 }
 
 // ---------------------------------------------------------------------------
-// ウィンドウ情報（座標系に対応したサイズ）
+// Window information (size corresponding to coordinate system)
 // ---------------------------------------------------------------------------
 
-// ウィンドウ幅を取得（座標系に対応したサイズ）
+// Get window width (size corresponding to coordinate system)
 inline int getWindowWidth() {
     if (internal::pixelPerfectMode) {
-        return sapp_width();  // フレームバッファサイズ
+        return sapp_width();  // Framebuffer size
     }
-    return static_cast<int>(sapp_width() / sapp_dpi_scale());  // 論理サイズ
+    return static_cast<int>(sapp_width() / sapp_dpi_scale());  // Logical size
 }
 
-// ウィンドウ高さを取得（座標系に対応したサイズ）
+// Get window height (size corresponding to coordinate system)
 inline int getWindowHeight() {
     if (internal::pixelPerfectMode) {
-        return sapp_height();  // フレームバッファサイズ
+        return sapp_height();  // Framebuffer size
     }
-    return static_cast<int>(sapp_height() / sapp_dpi_scale());  // 論理サイズ
+    return static_cast<int>(sapp_height() / sapp_dpi_scale());  // Logical size
 }
 
-// アスペクト比
+// Aspect ratio
 inline float getAspectRatio() {
     return static_cast<float>(sapp_width()) / static_cast<float>(sapp_height());
 }
 
 // ---------------------------------------------------------------------------
-// 時間
+// Time
 // ---------------------------------------------------------------------------
 
 inline double getElapsedTime() {
@@ -1087,18 +1086,18 @@ inline double getElapsedTime() {
     return duration.count();
 }
 
-// update の呼び出し回数
-// Decoupled モードでは draw より高頻度で呼ばれる可能性がある
+// Number of update calls
+// In decoupled mode, may be called more frequently than draw
 inline uint64_t getUpdateCount() {
     return internal::updateFrameCount;
 }
 
-// 描画フレームカウント（sokol の frame_count）
+// Draw frame count (sokol's frame_count)
 inline uint64_t getDrawCount() {
     return sapp_frame_count();
 }
 
-// getUpdateCount のエイリアス（一般的な用途向け）
+// Alias for getUpdateCount (for general use)
 inline uint64_t getFrameCount() {
     return internal::updateFrameCount;
 }
@@ -1107,9 +1106,9 @@ inline double getDeltaTime() {
     return sapp_frame_duration();
 }
 
-// フレームレート取得（10フレーム移動平均）
+// Get frame rate (10-frame moving average)
 inline double getFrameRate() {
-    // 現在のフレーム時間をバッファに追加
+    // Add current frame time to buffer
     double dt = sapp_frame_duration();
     internal::frameTimeBuffer[internal::frameTimeIndex] = dt;
     internal::frameTimeIndex = (internal::frameTimeIndex + 1) % 10;
@@ -1117,7 +1116,7 @@ inline double getFrameRate() {
         internal::frameTimeBufferFilled = true;
     }
 
-    // 平均を計算
+    // Calculate average
     int count = internal::frameTimeBufferFilled ? 10 : internal::frameTimeIndex;
     if (count == 0) return 0.0;
 
@@ -1130,35 +1129,35 @@ inline double getFrameRate() {
 }
 
 // ---------------------------------------------------------------------------
-// マウス状態（グローバル / ウィンドウ座標）
+// Mouse state (global / window coordinates)
 // ---------------------------------------------------------------------------
 
-// 現在のマウスX座標（ウィンドウ座標）
+// Current mouse X coordinate (window coordinates)
 inline float getGlobalMouseX() {
     return internal::mouseX;
 }
 
-// 現在のマウスY座標（ウィンドウ座標）
+// Current mouse Y coordinate (window coordinates)
 inline float getGlobalMouseY() {
     return internal::mouseY;
 }
 
-// 前フレームのマウスX座標（ウィンドウ座標）
+// Previous frame mouse X coordinate (window coordinates)
 inline float getGlobalPMouseX() {
     return internal::pmouseX;
 }
 
-// 前フレームのマウスY座標（ウィンドウ座標）
+// Previous frame mouse Y coordinate (window coordinates)
 inline float getGlobalPMouseY() {
     return internal::pmouseY;
 }
 
-// マウスボタンが押されているか
+// Is mouse button pressed
 inline bool isMousePressed() {
     return internal::mousePressed;
 }
 
-// 現在押されているマウスボタン (-1 = なし)
+// Currently pressed mouse button (-1 = none)
 inline int getMouseButton() {
     return internal::mouseButton;
 }
@@ -1167,122 +1166,122 @@ inline int getMouseButton() {
 // Loop Architecture (Decoupled Update/Draw)
 // ---------------------------------------------------------------------------
 
-// --- Draw Loop 制御 ---
+// --- Draw Loop control ---
 
-// VSync を有効/無効にする（デフォルト: true）
+// Enable/disable VSync (default: true)
 inline void setDrawVsync(bool enabled) {
     internal::drawVsyncEnabled = enabled;
     if (enabled) {
-        internal::drawTargetFps = 0;  // VSync時はFPS指定を無効化
-        internal::drawAccumulator = 0.0;  // アキュムレータリセット
+        internal::drawTargetFps = 0;  // Disable FPS setting when VSync is on
+        internal::drawAccumulator = 0.0;  // Reset accumulator
     }
 }
 
-// 描画FPSを設定
-// n > 0: 固定FPS（VSyncは自動的にOFF）
-// n <= 0: 自動描画停止、redraw()呼び出し時のみ描画
+// Set draw FPS
+// n > 0: fixed FPS (VSync is automatically OFF)
+// n <= 0: auto draw stop, only draw on redraw() call
 inline void setDrawFps(int fps) {
     internal::drawTargetFps = fps;
-    internal::drawVsyncEnabled = false;  // FPS指定時は常にVSyncをOFF
+    internal::drawVsyncEnabled = false;  // Always turn VSync OFF when FPS is specified
 }
 
-// 現在の描画FPS設定を取得
+// Get current draw FPS setting
 inline int getDrawFps() {
     return internal::drawTargetFps;
 }
 
-// VSync が有効かどうか
+// Is VSync enabled
 inline bool isDrawVsync() {
     return internal::drawVsyncEnabled;
 }
 
-// --- Update Loop 制御 ---
+// --- Update Loop control ---
 
-// Update を Draw に同期するか設定（デフォルト: true）
-// true: update() は draw() の直前に1回呼ばれる
-// false: setUpdateFps() の設定に従う
+// Set whether to sync Update to Draw (default: true)
+// true: update() is called once just before draw()
+// false: follows setUpdateFps() setting
 inline void syncUpdateToDraw(bool synced) {
     internal::updateSyncedToDraw = synced;
     if (synced) {
         internal::updateTargetFps = 0;
-        internal::updateAccumulator = 0.0;  // アキュムレータリセット
+        internal::updateAccumulator = 0.0;  // Reset accumulator
     }
 }
 
-// Update の Hz を設定（Draw とは独立）
-// n > 0: 指定した Hz で定期的に update() が呼ばれる
-// n <= 0: Update ループ停止（イベント駆動のみ）
+// Set Update Hz (independent from Draw)
+// n > 0: update() is called periodically at specified Hz
+// n <= 0: Update loop stops (event-driven only)
 inline void setUpdateFps(int fps) {
     internal::updateTargetFps = fps;
     if (fps > 0) {
-        internal::updateSyncedToDraw = false;  // 独立Update時は同期をOFF
+        internal::updateSyncedToDraw = false;  // Turn sync OFF for independent Update
     }
 }
 
-// 現在の Update Hz 設定を取得
+// Get current Update Hz setting
 inline int getUpdateFps() {
     return internal::updateTargetFps;
 }
 
-// Update が Draw に同期しているか
+// Is Update synced to Draw
 inline bool isUpdateSyncedToDraw() {
     return internal::updateSyncedToDraw;
 }
 
-// --- ヘルパー関数 ---
+// --- Helper functions ---
 
-// 固定FPSモードに設定（Draw + Update同期）
+// Set fixed FPS mode (Draw + Update synced)
 inline void setFps(int fps) {
     setDrawFps(fps);
     syncUpdateToDraw(true);
 }
 
-// VSyncモードに設定（Draw + Update同期）
+// Set VSync mode (Draw + Update synced)
 inline void setVsync(bool enabled) {
     setDrawVsync(enabled);
     syncUpdateToDraw(true);
 }
 
-// 再描画をリクエスト（自動描画停止時に使用）
-// count: 描画回数（複数回呼ばれた場合は最大値を採用）
+// Request redraw (used when auto-draw is stopped)
+// count: number of draws (max value is used when called multiple times)
 inline void redraw(int count = 1) {
     if (count > internal::redrawCount) {
         internal::redrawCount = count;
     }
 }
 
-// アプリケーション終了をリクエスト
-// exit() → cleanup() → デストラクタ の順で呼ばれる
+// Request application exit
+// Called in order: exit() -> cleanup() -> destructor
 inline void exitApp() {
     sapp_request_quit();
 }
 
 // ---------------------------------------------------------------------------
-// スクリーンショット
+// Screenshot
 // ---------------------------------------------------------------------------
 
-// スクリーンショットを保存（OS のウィンドウキャプチャ機能を使用）
-// 対応フォーマット: .png, .jpg/.jpeg, .tiff/.tif, .bmp
+// Save screenshot (uses OS window capture feature)
+// Supported formats: .png, .jpg/.jpeg, .tiff/.tif, .bmp
 inline bool saveScreenshot(const std::filesystem::path& path) {
     return platform::saveScreenshot(path);
 }
 
-// 画面をキャプチャして Pixels に格納
+// Capture screen to Pixels
 inline bool grabScreen(Pixels& outPixels) {
     return platform::captureWindow(outPixels);
 }
 
 // ---------------------------------------------------------------------------
-// 数学ユーティリティ（tcMath.h から提供）
+// Math utilities (provided by tcMath.h)
 // ---------------------------------------------------------------------------
-// Vec2, Vec3, Vec4, Mat3, Mat4, lerp, clamp, map, radians, degrees など
-// 詳細は tcMath.h を参照
+// Vec2, Vec3, Vec4, Mat3, Mat4, lerp, clamp, map, radians, degrees, etc.
+// See tcMath.h for details
 
 // ---------------------------------------------------------------------------
-// キーコード定数（sokol_app のキーコードをラップ）
+// Key code constants (wraps sokol_app key codes)
 // ---------------------------------------------------------------------------
 
-// 特殊キー
+// Special keys
 constexpr int KEY_SPACE = SAPP_KEYCODE_SPACE;
 constexpr int KEY_ESCAPE = SAPP_KEYCODE_ESCAPE;
 constexpr int KEY_ENTER = SAPP_KEYCODE_ENTER;
@@ -1290,13 +1289,13 @@ constexpr int KEY_TAB = SAPP_KEYCODE_TAB;
 constexpr int KEY_BACKSPACE = SAPP_KEYCODE_BACKSPACE;
 constexpr int KEY_DELETE = SAPP_KEYCODE_DELETE;
 
-// 矢印キー
+// Arrow keys
 constexpr int KEY_RIGHT = SAPP_KEYCODE_RIGHT;
 constexpr int KEY_LEFT = SAPP_KEYCODE_LEFT;
 constexpr int KEY_DOWN = SAPP_KEYCODE_DOWN;
 constexpr int KEY_UP = SAPP_KEYCODE_UP;
 
-// 修飾キー
+// Modifier keys
 constexpr int KEY_LEFT_SHIFT = SAPP_KEYCODE_LEFT_SHIFT;
 constexpr int KEY_RIGHT_SHIFT = SAPP_KEYCODE_RIGHT_SHIFT;
 constexpr int KEY_LEFT_CONTROL = SAPP_KEYCODE_LEFT_CONTROL;
@@ -1306,7 +1305,7 @@ constexpr int KEY_RIGHT_ALT = SAPP_KEYCODE_RIGHT_ALT;
 constexpr int KEY_LEFT_SUPER = SAPP_KEYCODE_LEFT_SUPER;
 constexpr int KEY_RIGHT_SUPER = SAPP_KEYCODE_RIGHT_SUPER;
 
-// ファンクションキー
+// Function keys
 constexpr int KEY_F1 = SAPP_KEYCODE_F1;
 constexpr int KEY_F2 = SAPP_KEYCODE_F2;
 constexpr int KEY_F3 = SAPP_KEYCODE_F3;
@@ -1320,24 +1319,24 @@ constexpr int KEY_F10 = SAPP_KEYCODE_F10;
 constexpr int KEY_F11 = SAPP_KEYCODE_F11;
 constexpr int KEY_F12 = SAPP_KEYCODE_F12;
 
-// マウスボタン
+// Mouse buttons
 constexpr int MOUSE_BUTTON_LEFT = SAPP_MOUSEBUTTON_LEFT;
 constexpr int MOUSE_BUTTON_RIGHT = SAPP_MOUSEBUTTON_RIGHT;
 constexpr int MOUSE_BUTTON_MIDDLE = SAPP_MOUSEBUTTON_MIDDLE;
 
 // ---------------------------------------------------------------------------
-// ウィンドウ設定
+// Window settings
 // ---------------------------------------------------------------------------
 
 struct WindowSettings {
     int width = 1280;
     int height = 720;
     std::string title = "TrussC App";
-    bool highDpi = true;  // High DPI対応（Retinaで鮮明に描画）
-    bool pixelPerfect = false;  // true: 座標系=フレームバッファサイズ, false: 座標系=論理サイズ
-    int sampleCount = 4;  // MSAA（デフォルト4x、8xは一部デバイスで非対応）
+    bool highDpi = true;  // High DPI support (sharp rendering on Retina)
+    bool pixelPerfect = false;  // true: coords = framebuffer size, false: coords = logical size
+    int sampleCount = 4;  // MSAA (default 4x, 8x not supported on some devices)
     bool fullscreen = false;
-    // bool headless = false;  // 将来用
+    // bool headless = false;  // For future use
 
     WindowSettings& setSize(int w, int h) {
         width = w;
@@ -1355,9 +1354,9 @@ struct WindowSettings {
         return *this;
     }
 
-    // ピクセルパーフェクトモード
-    // true: 座標系がフレームバッファサイズと一致（Retinaで2560x1440座標）
-    // false: 座標系は論理サイズ（Retinaでも1280x720座標）
+    // Pixel perfect mode
+    // true: coords match framebuffer size (2560x1440 coords on Retina)
+    // false: coords are logical size (1280x720 coords even on Retina)
     WindowSettings& setPixelPerfect(bool enabled) {
         pixelPerfect = enabled;
         return *this;
@@ -1375,15 +1374,15 @@ struct WindowSettings {
 };
 
 // ---------------------------------------------------------------------------
-// アプリケーション実行（内部実装）
+// Application execution (internal implementation)
 // ---------------------------------------------------------------------------
 
 namespace internal {
-    // アプリインスタンス（void* で保持）
+    // App instance (held as void*)
     inline void* appInstance = nullptr;
     inline int currentMouseButton = -1;
 
-    // コールバック関数ポインタ
+    // Callback function pointers
     inline void (*appSetupFunc)() = nullptr;
     inline void (*appUpdateFunc)() = nullptr;
     inline void (*appDrawFunc)() = nullptr;
@@ -1401,27 +1400,27 @@ namespace internal {
     inline void _setup_cb() {
         setup();
 
-        // macOS バンドルの場合、デフォルトの data パスを設定
-        // 実行ファイル: bin/xxx.app/Contents/MacOS/xxx
+        // For macOS bundles, set default data path
+        // Executable: bin/xxx.app/Contents/MacOS/xxx
         // data: bin/data/
-        // ../../../ = bin/ なので ../../../data/ が正しいパス
+        // ../../../ = bin/, so ../../../data/ is the correct path
         #ifdef __APPLE__
         setDataPathRoot("../../../data/");
         #endif
 
-        // コンソール入力スレッドを開始（デフォルト有効）
-        // 無効にしたい場合は setup() 内で console::stop() を呼ぶ
+        // Start console input thread (enabled by default)
+        // To disable, call console::stop() in setup()
         console::start();
 
-        // 組み込みコマンドハンドラを登録（static でリスナーを保持）
+        // Register built-in command handler (hold listener in static)
         static EventListener consoleListener;
         events().console.listen(consoleListener, [](ConsoleEventArgs& e) {
             if (e.args.empty()) return;
 
-            // tcdebug コマンドを処理
+            // Handle tcdebug command
             if (e.args[0] == "tcdebug" && e.args.size() >= 2) {
                 if (e.args[1] == "info") {
-                    // 基本情報を JSON で出力
+                    // Output basic info as JSON
                     std::cout << "{\"fps\":" << getFrameRate()
                               << ",\"width\":" << getWindowWidth()
                               << ",\"height\":" << getWindowHeight()
@@ -1431,7 +1430,7 @@ namespace internal {
                               << "}" << std::endl;
                 }
                 else if (e.args[1] == "screenshot") {
-                    // スクリーンショットを保存
+                    // Save screenshot
                     std::string path = (e.args.size() >= 3) ? e.args[2] : "/tmp/trussc_screenshot.png";
                     bool success = saveScreenshot(path);
                     std::cout << "{\"status\":\"" << (success ? "ok" : "error")
@@ -1446,7 +1445,7 @@ namespace internal {
     inline void _frame_cb() {
         auto now = std::chrono::high_resolution_clock::now();
 
-        // タイミング初期化
+        // Initialize timing
         if (!lastUpdateTimeInitialized) {
             lastUpdateTime = now;
             lastUpdateTimeInitialized = true;
@@ -1456,14 +1455,14 @@ namespace internal {
             lastDrawTimeInitialized = true;
         }
 
-        // コンソール入力を処理（イベント発火）
+        // Process console input (fire events)
         console::processQueue();
 
-        // --- Update Loop 処理 ---
+        // --- Update Loop processing ---
         if (updateSyncedToDraw) {
-            // Draw に同期: 後で shouldDraw と連動
+            // Synced to Draw: handled with shouldDraw below
         } else if (updateTargetFps > 0) {
-            // 独立した固定 Hz で Update
+            // Independent fixed Hz Update
             double updateInterval = 1.0 / updateTargetFps;
             double elapsed = std::chrono::duration<double>(now - lastUpdateTime).count();
             updateAccumulator += elapsed;
@@ -1474,16 +1473,16 @@ namespace internal {
                 updateAccumulator -= updateInterval;
             }
         }
-        // updateTargetFps <= 0 の場合は Update しない（イベント駆動）
+        // If updateTargetFps <= 0, no Update (event-driven)
 
-        // --- Draw Loop 処理 ---
+        // --- Draw Loop processing ---
         bool shouldDraw = false;
 
         if (drawVsyncEnabled) {
-            // VSync: 毎フレーム描画（sokol_app がタイミング制御）
+            // VSync: draw every frame (sokol_app controls timing)
             shouldDraw = true;
         } else if (drawTargetFps > 0) {
-            // 固定FPS: フレームスキップで制御
+            // Fixed FPS: controlled by frame skipping
             double drawInterval = 1.0 / drawTargetFps;
             double elapsed = std::chrono::duration<double>(now - lastDrawTime).count();
             drawAccumulator += elapsed;
@@ -1491,22 +1490,22 @@ namespace internal {
 
             if (drawAccumulator >= drawInterval) {
                 shouldDraw = true;
-                // 1回分だけ消費（複数フレーム溜まっても1回だけ描画）
+                // Consume only one frame (draw once even if multiple frames accumulated)
                 drawAccumulator -= drawInterval;
-                // 溜まりすぎ防止
+                // Prevent over-accumulation
                 if (drawAccumulator > drawInterval) {
                     drawAccumulator = 0.0;
                 }
             }
         } else {
-            // 自動描画停止: redraw() 時のみ描画
+            // Auto-draw stopped: draw only on redraw()
             shouldDraw = (redrawCount > 0);
         }
 
         if (shouldDraw) {
             beginFrame();
 
-            // Update が Draw に同期している場合、ここで Update
+            // If Update is synced to Draw, call Update here
             if (updateSyncedToDraw && appUpdateFunc) {
                 appUpdateFunc();
             }
@@ -1514,22 +1513,22 @@ namespace internal {
             if (appDrawFunc) appDrawFunc();
             present();
 
-            // redrawCount をデクリメント（0未満にはしない）
+            // Decrement redrawCount (don't go below 0)
             if (redrawCount > 0) {
                 redrawCount--;
             }
         } else {
-            // 描画しないときは Present をスキップ（ダブルバッファのちらつき防止）
+            // Skip Present when not drawing (prevent double-buffer flickering)
             sapp_skip_present();
         }
 
-        // 前フレームのマウス位置を保存
+        // Save previous frame's mouse position
         pmouseX = mouseX;
         pmouseY = mouseY;
     }
 
     inline void _cleanup_cb() {
-        // コンソール入力スレッドを停止
+        // Stop console input thread
         console::stop();
 
         if (appCleanupFunc) appCleanupFunc();
@@ -1537,14 +1536,14 @@ namespace internal {
     }
 
     inline void _event_cb(const sapp_event* ev) {
-        // ImGui にイベントを渡す
+        // Pass event to ImGui
         if (imguiEnabled) {
             simgui_handle_event(ev);
         }
 
-        // ev->mouse_x/y はフレームバッファ座標で届く
-        // pixelPerfectMode = true: そのまま使う（座標系=フレームバッファサイズ）
-        // pixelPerfectMode = false: DPIスケールで割って論理座標に変換
+        // ev->mouse_x/y arrive in framebuffer coordinates
+        // pixelPerfectMode = true: use as-is (coords = framebuffer size)
+        // pixelPerfectMode = false: divide by DPI scale to get logical coords
         float scale = pixelPerfectMode ? 1.0f : (1.0f / sapp_dpi_scale());
         bool hasModShift = (ev->modifiers & SAPP_MODIFIER_SHIFT) != 0;
         bool hasModCtrl = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
@@ -1553,7 +1552,7 @@ namespace internal {
 
         switch (ev->type) {
             case SAPP_EVENTTYPE_KEY_DOWN: {
-                // イベントシステムに通知
+                // Notify event system
                 KeyEventArgs args;
                 args.key = ev->key_code;
                 args.isRepeat = ev->key_repeat;
@@ -1563,7 +1562,7 @@ namespace internal {
                 args.super = hasModSuper;
                 events().keyPressed.notify(args);
 
-                // 従来のコールバック（互換性）
+                // Legacy callback (for compatibility)
                 if (!ev->key_repeat && appKeyPressedFunc) {
                     appKeyPressedFunc(ev->key_code);
                 }
@@ -1673,7 +1672,7 @@ namespace internal {
             }
             case SAPP_EVENTTYPE_FILES_DROPPED: {
                 DragDropEventArgs args;
-                args.x = mouseX;  // 最後のマウス位置
+                args.x = mouseX;  // Last mouse position
                 args.y = mouseY;
                 int numFiles = sapp_get_num_dropped_files();
                 for (int i = 0; i < numFiles; i++) {
@@ -1691,51 +1690,51 @@ namespace internal {
 }
 
 // ---------------------------------------------------------------------------
-// アプリケーション実行
+// Application execution
 // ---------------------------------------------------------------------------
 
 template<typename AppClass>
 int runApp(const WindowSettings& settings = WindowSettings()) {
-    // ピクセルパーフェクトモードを設定
+    // Set pixel perfect mode
     internal::pixelPerfectMode = settings.pixelPerfect;
 
-    // アプリインスタンスを生成
+    // Create app instance
     static AppClass* app = nullptr;
 
-    // コールバックを設定
+    // Set callbacks
     internal::appSetupFunc = []() {
         app = new AppClass();
         app->setup();
     };
     internal::appUpdateFunc = []() {
-        internal::updateFrameCount++;  // update フレームカウント
+        internal::updateFrameCount++;  // Update frame count
         if (app) {
-            app->updateTree();  // シーングラフ全体を更新
-            // ホバー状態を更新（毎フレーム1回だけ raycast）
+            app->updateTree();  // Update entire scene graph
+            // Update hover state (raycast only once per frame)
             app->updateHoverState((float)internal::mouseX, (float)internal::mouseY);
         }
     };
     internal::appDrawFunc = []() {
-        if (app) app->drawTree();  // シーングラフ全体を描画
+        if (app) app->drawTree();  // Draw entire scene graph
     };
     internal::appCleanupFunc = []() {
         if (app) {
-            app->exit();    // 終了ハンドラ（全オブジェクト生存中）
+            app->exit();    // Exit handler (all objects still alive)
             app->cleanup();
-            delete app;     // デストラクタ
+            delete app;     // Destructor
             app = nullptr;
         }
     };
     internal::appKeyPressedFunc = [](int key) {
         if (app) {
             app->keyPressed(key);
-            app->dispatchKeyPress(key);  // 子ノードにも配信
+            app->dispatchKeyPress(key);  // Also dispatch to child nodes
         }
     };
     internal::appKeyReleasedFunc = [](int key) {
         if (app) {
             app->keyReleased(key);
-            app->dispatchKeyRelease(key);  // 子ノードにも配信
+            app->dispatchKeyRelease(key);  // Also dispatch to child nodes
         }
     };
     internal::appMousePressedFunc = [](int x, int y, int button) {
@@ -1760,11 +1759,11 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
         if (app) app->filesDropped(files);
     };
 
-    // sapp_desc を構築
+    // Build sapp_desc
     sapp_desc desc = {};
     if (settings.pixelPerfect) {
-        // ピクセルパーフェクトの場合、指定サイズをフレームバッファサイズとして扱い、
-        // 論理ウィンドウサイズに変換する
+        // For pixel perfect, treat specified size as framebuffer size
+        // and convert to logical window size
         float displayScale = platform::getDisplayScaleFactor();
         desc.width = static_cast<int>(settings.width / displayScale);
         desc.height = static_cast<int>(settings.height / displayScale);
@@ -1782,12 +1781,12 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     desc.event_cb = internal::_event_cb;
     desc.logger.func = slog_func;
 
-    // ドラッグ&ドロップを有効化
+    // Enable drag and drop
     desc.enable_dragndrop = true;
-    desc.max_dropped_files = 16;           // 最大16ファイル
-    desc.max_dropped_file_path_length = 2048;  // パス最大長
+    desc.max_dropped_files = 16;           // Max 16 files
+    desc.max_dropped_file_path_length = 2048;  // Max path length
 
-    // アプリを実行
+    // Run the app
     sapp_run(&desc);
 
     return 0;
@@ -1795,61 +1794,61 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 
 } // namespace trussc
 
-// TrussC シェイプ描画
+// TrussC shape drawing
 #include "tc/graphics/tcShape.h"
 
-// TrussC ポリライン
+// TrussC polyline
 #include "tc/graphics/tcPolyline.h"
 
-// TrussC ライティング（tcMesh.h より前にインクルードが必要）
+// TrussC lighting (must be included before tcMesh.h)
 #include "tc/3d/tcLightingState.h"
 #include "tc/3d/tcMaterial.h"
 #include "tc/3d/tcLight.h"
 
-// TrussC メッシュ
+// TrussC mesh
 #include "tc/graphics/tcMesh.h"
 
-// TrussC ストロークメッシュ（太線描画）
+// TrussC stroke mesh (thick line drawing)
 #include "tc/graphics/tcStrokeMesh.h"
 
-// TrussC ピクセルバッファ
+// TrussC pixel buffer
 #include "tc/graphics/tcPixels.h"
 
-// TrussC テクスチャ
+// TrussC texture
 #include "tc/gl/tcTexture.h"
 
-// TrussC HasTexture インターフェース
+// TrussC HasTexture interface
 #include "tc/gl/tcHasTexture.h"
 
-// TrussC 画像
+// TrussC image
 #include "tc/graphics/tcImage.h"
 
-// TrussC FBO（オフスクリーンレンダリング）
+// TrussC FBO (offscreen rendering)
 #include "tc/gl/tcFbo.h"
 
-// TrussC ビデオ入力（Webカメラ）
+// TrussC video input (webcam)
 #include "tc/video/tcVideoGrabber.h"
 
-// TrussC 3Dプリミティブ
+// TrussC 3D primitives
 #include <map>
 #include "tc/3d/tcPrimitives.h"
 
-// TrussC ライティング API
+// TrussC lighting API
 #include "tc/3d/tc3DGraphics.h"
 
-// TrussC EasyCam（3Dカメラ）
+// TrussC EasyCam (3D camera)
 #include "tc/3d/tcEasyCam.h"
 
-// TrussC ImGui 統合
+// TrussC ImGui integration
 #include "tc/gui/tcImGui.h"
 
-// TrussC ネットワーク
+// TrussC network
 #include "tc/network/tcUdpSocket.h"
 #include "tc/network/tcTcpClient.h"
 #include "tc/network/tcTcpServer.h"
 
-// TrussC サウンド
+// TrussC sound
 #include "tc/sound/tcSound.h"
 
-// 短縮エイリアス
+// Shorthand alias
 namespace tc = trussc;

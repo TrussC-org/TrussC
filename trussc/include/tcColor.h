@@ -3,16 +3,16 @@
 // =============================================================================
 // TrussC Color Library
 // =============================================================================
-// OKLab/OKLCH を基本とした色空間ライブラリ
+// Color space library based on OKLab/OKLCH
 //
-// 色空間と変換パス:
+// Color spaces and conversion paths:
 //
-//        ColorHSB (sRGBベース)
+//        ColorHSB (sRGB-based)
 //            ↕
 //   Color (sRGB) ↔ ColorLinear ↔ ColorOKLab ↔ ColorOKLCH
 //
-// - Color:       sRGB (0-1), 画面表示用
-// - ColorLinear: Linear RGB, 計算・合成・HDR用
+// - Color:       sRGB (0-1), for display
+// - ColorLinear: Linear RGB, for calculations/compositing/HDR
 // - ColorHSB:    HSB (H: 0-TAU, S: 0-1, B: 0-1)
 // - ColorOKLab:  OKLab (L: 0-1, a: ~-0.4-0.4, b: ~-0.4-0.4)
 // - ColorOKLCH:  OKLCH (L: 0-1, C: 0-0.4, H: 0-TAU)
@@ -20,11 +20,11 @@
 
 #include <cmath>
 #include <algorithm>
-#include "tcMath.h"  // TAU, HALF_TAU 等の定数
+#include "tcMath.h"  // TAU, HALF_TAU constants
 
 namespace trussc {
 
-// 前方宣言
+// Forward declarations
 struct Color;
 struct ColorLinear;
 struct ColorHSB;
@@ -32,16 +32,16 @@ struct ColorOKLab;
 struct ColorOKLCH;
 
 // =============================================================================
-// ガンマ変換関数（共通）
+// Gamma conversion functions (common)
 // =============================================================================
 
-// sRGB → Linear RGB（単一チャンネル）
+// sRGB -> Linear RGB (single channel)
 inline float srgbToLinear(float x) {
     if (x <= 0.04045f) return x / 12.92f;
     return std::pow((x + 0.055f) / 1.055f, 2.4f);
 }
 
-// Linear RGB → sRGB（単一チャンネル）
+// Linear RGB -> sRGB (single channel)
 inline float linearToSrgb(float x) {
     if (x <= 0.0031308f) return 12.92f * x;
     return 1.055f * std::pow(x, 1.0f / 2.4f) - 0.055f;
@@ -56,21 +56,21 @@ struct Color {
     float b = 0.0f;
     float a = 1.0f;
 
-    // コンストラクタ
+    // Constructor
     Color() = default;
     Color(float r_, float g_, float b_, float a_ = 1.0f)
         : r(r_), g(g_), b(b_), a(a_) {}
 
-    // グレースケール
+    // Grayscale
     explicit Color(float gray, float a_ = 1.0f)
         : r(gray), g(gray), b(gray), a(a_) {}
 
-    // 0-255 の整数値から Color を生成
+    // Create Color from 0-255 integer values
     static Color fromBytes(int r, int g, int b, int a = 255) {
         return Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
     }
 
-    // 16進数から (0xRRGGBB or 0xRRGGBBAA)
+    // From hex (0xRRGGBB or 0xRRGGBBAA)
     static Color fromHex(uint32_t hex, bool hasAlpha = false) {
         if (hasAlpha) {
             return Color(
@@ -89,7 +89,7 @@ struct Color {
         }
     }
 
-    // 16進数へ
+    // To hex
     uint32_t toHex(bool includeAlpha = false) const {
         uint8_t ri = (uint8_t)(std::clamp(r, 0.0f, 1.0f) * 255);
         uint8_t gi = (uint8_t)(std::clamp(g, 0.0f, 1.0f) * 255);
@@ -101,19 +101,19 @@ struct Color {
         return (ri << 16) | (gi << 8) | bi;
     }
 
-    // 変換（宣言のみ、実装は後方）
+    // Conversion (declaration only, implementation below)
     ColorLinear toLinear() const;
     ColorHSB toHSB() const;
     ColorOKLab toOKLab() const;
     ColorOKLCH toOKLCH() const;
 
-    // 演算子
+    // Operators
     Color operator+(const Color& c) const { return Color(r + c.r, g + c.g, b + c.b, a + c.a); }
     Color operator-(const Color& c) const { return Color(r - c.r, g - c.g, b - c.b, a - c.a); }
     Color operator*(float s) const { return Color(r * s, g * s, b * s, a * s); }
     Color operator/(float s) const { return Color(r / s, g / s, b / s, a / s); }
 
-    // クランプ
+    // Clamp
     Color clamped() const {
         return Color(
             std::clamp(r, 0.0f, 1.0f),
@@ -123,7 +123,7 @@ struct Color {
         );
     }
 
-    // sRGB空間での線形補間（非推奨、知覚的に不均一）
+    // Linear interpolation in sRGB space (not recommended, perceptually non-uniform)
     Color lerpRGB(const Color& target, float t) const {
         return Color(
             r + (target.r - r) * t,
@@ -133,18 +133,18 @@ struct Color {
         );
     }
 
-    // 各色空間での補間（宣言のみ）
+    // Interpolation in each color space (declaration only)
     Color lerpLinear(const Color& target, float t) const;
     Color lerpHSB(const Color& target, float t) const;
     Color lerpOKLab(const Color& target, float t) const;
     Color lerpOKLCH(const Color& target, float t) const;
 
-    // デフォルトの lerp は OKLab（知覚的に均一）
+    // Default lerp uses OKLab (perceptually uniform)
     Color lerp(const Color& target, float t) const {
         return lerpOKLab(target, t);
     }
 
-    // 比較
+    // Comparison
     bool operator==(const Color& c) const {
         return r == c.r && g == c.g && b == c.b && a == c.a;
     }
@@ -160,29 +160,29 @@ struct ColorLinear {
     float b = 0.0f;
     float a = 1.0f;
 
-    // コンストラクタ
+    // Constructor
     ColorLinear() = default;
     ColorLinear(float r_, float g_, float b_, float a_ = 1.0f)
         : r(r_), g(g_), b(b_), a(a_) {}
 
-    // グレースケール
+    // Grayscale
     explicit ColorLinear(float gray, float a_ = 1.0f)
         : r(gray), g(gray), b(gray), a(a_) {}
 
-    // 変換（宣言のみ）
+    // Conversion (declaration only)
     Color toSRGB() const;
     ColorHSB toHSB() const;
     ColorOKLab toOKLab() const;
     ColorOKLCH toOKLCH() const;
 
-    // 演算子（リニア空間での演算は物理的に正しい）
+    // Operators (operations in linear space are physically correct)
     ColorLinear operator+(const ColorLinear& c) const { return ColorLinear(r + c.r, g + c.g, b + c.b, a + c.a); }
     ColorLinear operator-(const ColorLinear& c) const { return ColorLinear(r - c.r, g - c.g, b - c.b, a - c.a); }
     ColorLinear operator*(float s) const { return ColorLinear(r * s, g * s, b * s, a * s); }
     ColorLinear operator/(float s) const { return ColorLinear(r / s, g / s, b / s, a / s); }
     ColorLinear operator*(const ColorLinear& c) const { return ColorLinear(r * c.r, g * c.g, b * c.b, a * c.a); }
 
-    // クランプ（HDR用に上限なし版も用意）
+    // Clamp (unclamped version available for HDR)
     ColorLinear clamped() const {
         return ColorLinear(
             std::max(0.0f, r),
@@ -201,7 +201,7 @@ struct ColorLinear {
         );
     }
 
-    // リニア空間での補間（物理的に正しい）
+    // Interpolation in linear space (physically correct)
     ColorLinear lerp(const ColorLinear& target, float t) const {
         return ColorLinear(
             r + (target.r - r) * t,
@@ -211,7 +211,7 @@ struct ColorLinear {
         );
     }
 
-    // 比較
+    // Comparison
     bool operator==(const ColorLinear& c) const {
         return r == c.r && g == c.g && b == c.b && a == c.a;
     }
@@ -222,18 +222,18 @@ struct ColorLinear {
 // ColorHSB
 // =============================================================================
 struct ColorHSB {
-    float h = 0.0f;  // 色相 (0 - TAU)
-    float s = 0.0f;  // 彩度 (0 - 1)
-    float b = 1.0f;  // 明度 (0 - 1)
-    float a = 1.0f;  // アルファ
+    float h = 0.0f;  // Hue (0 - TAU)
+    float s = 0.0f;  // Saturation (0 - 1)
+    float b = 1.0f;  // Brightness (0 - 1)
+    float a = 1.0f;  // Alpha
 
     ColorHSB() = default;
     ColorHSB(float h_, float s_, float b_, float a_ = 1.0f)
         : h(h_), s(s_), b(b_), a(a_) {}
 
-    // 変換
+    // Conversion
     Color toRGB() const {
-        // hを正規化 (0-1)
+        // Normalize h (0-1)
         float hNorm = h / TAU;
         hNorm = hNorm - std::floor(hNorm);
 
@@ -260,11 +260,11 @@ struct ColorHSB {
     ColorOKLab toOKLab() const;
     ColorOKLCH toOKLCH() const;
 
-    // HSB空間での補間
+    // Interpolation in HSB space
     ColorHSB lerp(const ColorHSB& target, float t, bool shortestPath = true) const {
         float newH;
         if (shortestPath) {
-            // 最短経路で色相を補間
+            // Interpolate hue via shortest path
             float diff = target.h - h;
             if (diff > HALF_TAU) diff -= TAU;
             if (diff < -HALF_TAU) diff += TAU;
@@ -287,16 +287,16 @@ struct ColorHSB {
 // ColorOKLab
 // =============================================================================
 struct ColorOKLab {
-    float L = 0.0f;  // 明度 (0 - 1)
-    float a = 0.0f;  // 緑-赤 (~-0.4 - 0.4)
-    float b = 0.0f;  // 青-黄 (~-0.4 - 0.4)
+    float L = 0.0f;  // Lightness (0 - 1)
+    float a = 0.0f;  // Green-Red (~-0.4 - 0.4)
+    float b = 0.0f;  // Blue-Yellow (~-0.4 - 0.4)
     float alpha = 1.0f;
 
     ColorOKLab() = default;
     ColorOKLab(float L_, float a_, float b_, float alpha_ = 1.0f)
         : L(L_), a(a_), b(b_), alpha(alpha_) {}
 
-    // Linear RGB へ変換
+    // Convert to Linear RGB
     ColorLinear toLinear() const {
         float l_ = L + 0.3963377774f * a + 0.2158037573f * b;
         float m_ = L - 0.1055613458f * a - 0.0638541728f * b;
@@ -318,7 +318,7 @@ struct ColorOKLab {
     ColorHSB toHSB() const;
     ColorOKLCH toOKLCH() const;
 
-    // OKLab空間での補間
+    // Interpolation in OKLab space
     ColorOKLab lerp(const ColorOKLab& target, float t) const {
         return ColorOKLab(
             L + (target.L - L) * t,
@@ -333,16 +333,16 @@ struct ColorOKLab {
 // ColorOKLCH
 // =============================================================================
 struct ColorOKLCH {
-    float L = 0.0f;  // 明度 (0 - 1)
-    float C = 0.0f;  // 彩度 (0 - ~0.4)
-    float H = 0.0f;  // 色相 (0 - TAU)
+    float L = 0.0f;  // Lightness (0 - 1)
+    float C = 0.0f;  // Chroma (0 - ~0.4)
+    float H = 0.0f;  // Hue (0 - TAU)
     float alpha = 1.0f;
 
     ColorOKLCH() = default;
     ColorOKLCH(float L_, float C_, float H_, float alpha_ = 1.0f)
         : L(L_), C(C_), H(H_), alpha(alpha_) {}
 
-    // OKLabへ変換
+    // Convert to OKLab
     ColorOKLab toOKLab() const {
         return ColorOKLab(
             L,
@@ -356,7 +356,7 @@ struct ColorOKLCH {
     Color toRGB() const;
     ColorHSB toHSB() const;
 
-    // OKLCH空間での補間（色相は最短経路）
+    // Interpolation in OKLCH space (hue via shortest path)
     ColorOKLCH lerp(const ColorOKLCH& target, float t, bool shortestPath = true) const {
         float newH;
         if (shortestPath) {
@@ -370,7 +370,7 @@ struct ColorOKLCH {
             newH = H + (target.H - H) * t;
         }
 
-        // 彩度が0に近い場合の処理（グレーの色相は不定）
+        // Handle case when chroma is near 0 (gray has undefined hue)
         float newC = C + (target.C - C) * t;
         if (C < 0.001f && target.C >= 0.001f) {
             newH = target.H;
@@ -388,7 +388,7 @@ struct ColorOKLCH {
 };
 
 // =============================================================================
-// 変換メソッドの実装
+// Conversion method implementations
 // =============================================================================
 
 // --- Color ---
@@ -418,8 +418,8 @@ inline ColorHSB Color::toHSB() const {
         } else {
             h = (r - g) / delta + 4;
         }
-        h /= 6.0f;  // 0-1 に正規化
-        h *= TAU;   // TAU スケールに
+        h /= 6.0f;  // Normalize to 0-1
+        h *= TAU;   // Scale to TAU
     }
 
     return ColorHSB(h, s, bri, a);
@@ -527,34 +527,34 @@ inline ColorHSB ColorOKLCH::toHSB() const {
 }
 
 // =============================================================================
-// 便利なファクトリ関数
+// Convenient factory functions
 // =============================================================================
 
-// HSBから Color を生成
+// Create Color from HSB
 inline Color colorFromHSB(float h, float s, float b, float a = 1.0f) {
     return ColorHSB(h, s, b, a).toRGB();
 }
 
-// OKLCHから Color を生成
+// Create Color from OKLCH
 inline Color colorFromOKLCH(float L, float C, float H, float a = 1.0f) {
     return ColorOKLCH(L, C, H, a).toRGB();
 }
 
-// OKLabから Color を生成
+// Create Color from OKLab
 inline Color colorFromOKLab(float L, float a_lab, float b_lab, float alpha = 1.0f) {
     return ColorOKLab(L, a_lab, b_lab, alpha).toRGB();
 }
 
-// LinearRGBから Color を生成
+// Create Color from Linear RGB
 inline Color colorFromLinear(float r, float g, float b, float a = 1.0f) {
     return ColorLinear(r, g, b, a).toSRGB();
 }
 
 // =============================================================================
-// 定義済みカラー
+// Predefined colors
 // =============================================================================
 namespace colors {
-    // 基本色
+    // Basic colors
     inline const Color white(1.0f, 1.0f, 1.0f);
     inline const Color black(0.0f, 0.0f, 0.0f);
     inline const Color red(1.0f, 0.0f, 0.0f);
@@ -565,7 +565,7 @@ namespace colors {
     inline const Color magenta(1.0f, 0.0f, 1.0f);
     inline const Color transparent(0.0f, 0.0f, 0.0f, 0.0f);
 
-    // グレー系
+    // Grays
     inline const Color gray(0.501961f, 0.501961f, 0.501961f);
     inline const Color grey(0.501961f, 0.501961f, 0.501961f);
     inline const Color darkGray(0.662745f, 0.662745f, 0.662745f);
@@ -578,7 +578,7 @@ namespace colors {
     inline const Color gainsboro(0.862745f, 0.862745f, 0.862745f);
     inline const Color whiteSmoke(0.960784f, 0.960784f, 0.960784f);
 
-    // 赤系
+    // Reds
     inline const Color darkRed(0.545098f, 0.0f, 0.0f);
     inline const Color fireBrick(0.698039f, 0.133333f, 0.133333f);
     inline const Color crimson(0.862745f, 0.0784314f, 0.235294f);
@@ -588,14 +588,14 @@ namespace colors {
     inline const Color darkSalmon(0.913725f, 0.588235f, 0.478431f);
     inline const Color lightSalmon(1.0f, 0.627451f, 0.478431f);
 
-    // オレンジ系
+    // Oranges
     inline const Color orange(1.0f, 0.647059f, 0.0f);
     inline const Color darkOrange(1.0f, 0.54902f, 0.0f);
     inline const Color orangeRed(1.0f, 0.270588f, 0.0f);
     inline const Color tomato(1.0f, 0.388235f, 0.278431f);
     inline const Color coral(1.0f, 0.498039f, 0.313726f);
 
-    // 黄色系
+    // Yellows
     inline const Color gold(1.0f, 0.843137f, 0.0f);
     inline const Color goldenRod(0.854902f, 0.647059f, 0.12549f);
     inline const Color darkGoldenRod(0.721569f, 0.52549f, 0.0431373f);
@@ -604,7 +604,7 @@ namespace colors {
     inline const Color khaki(0.941176f, 0.901961f, 0.54902f);
     inline const Color darkKhaki(0.741176f, 0.717647f, 0.419608f);
 
-    // 緑系
+    // Greens
     inline const Color lime(0.0f, 1.0f, 0.0f);
     inline const Color limeGreen(0.196078f, 0.803922f, 0.196078f);
     inline const Color lightGreen(0.564706f, 0.933333f, 0.564706f);
@@ -625,7 +625,7 @@ namespace colors {
     inline const Color oliveDrab(0.419608f, 0.556863f, 0.137255f);
     inline const Color darkOliveGreen(0.333333f, 0.419608f, 0.184314f);
 
-    // シアン系
+    // Cyans
     inline const Color aqua(0.0f, 1.0f, 1.0f);
     inline const Color aquamarine(0.498039f, 1.0f, 0.831373f);
     inline const Color mediumAquaMarine(0.4f, 0.803922f, 0.666667f);
@@ -637,7 +637,7 @@ namespace colors {
     inline const Color darkTurquoise(0.0f, 0.807843f, 0.819608f);
     inline const Color paleTurquoise(0.686275f, 0.933333f, 0.933333f);
 
-    // 青系
+    // Blues
     inline const Color navy(0.0f, 0.0f, 0.501961f);
     inline const Color darkBlue(0.0f, 0.0f, 0.545098f);
     inline const Color mediumBlue(0.0f, 0.0f, 0.803922f);
@@ -656,7 +656,7 @@ namespace colors {
     inline const Color midnightBlue(0.0980392f, 0.0980392f, 0.439216f);
     inline const Color aliceBlue(0.941176f, 0.972549f, 1.0f);
 
-    // 紫系
+    // Purples
     inline const Color purple(0.501961f, 0.0f, 0.501961f);
     inline const Color darkMagenta(0.545098f, 0.0f, 0.545098f);
     inline const Color darkViolet(0.580392f, 0.0f, 0.827451f);
@@ -675,7 +675,7 @@ namespace colors {
     inline const Color lavender(0.901961f, 0.901961f, 0.980392f);
     inline const Color fuchsia(1.0f, 0.0f, 1.0f);
 
-    // ピンク系
+    // Pinks
     inline const Color pink(1.0f, 0.752941f, 0.796078f);
     inline const Color lightPink(1.0f, 0.713726f, 0.756863f);
     inline const Color hotPink(1.0f, 0.411765f, 0.705882f);
@@ -683,7 +683,7 @@ namespace colors {
     inline const Color mediumVioletRed(0.780392f, 0.0823529f, 0.521569f);
     inline const Color paleVioletRed(0.858824f, 0.439216f, 0.576471f);
 
-    // 茶色系
+    // Browns
     inline const Color brown(0.647059f, 0.164706f, 0.164706f);
     inline const Color maroon(0.501961f, 0.0f, 0.0f);
     inline const Color saddleBrown(0.545098f, 0.270588f, 0.0745098f);
@@ -695,7 +695,7 @@ namespace colors {
     inline const Color tan(0.823529f, 0.705882f, 0.54902f);
     inline const Color rosyBrown(0.737255f, 0.560784f, 0.560784f);
 
-    // 白系
+    // Whites
     inline const Color snow(1.0f, 0.980392f, 0.980392f);
     inline const Color honeyDew(0.941176f, 1.0f, 0.941176f);
     inline const Color mintCream(0.960784f, 1.0f, 0.980392f);
@@ -721,7 +721,7 @@ namespace colors {
     inline const Color bisque(1.0f, 0.894118f, 0.768627f);
     inline const Color navajoWhite(1.0f, 0.870588f, 0.678431f);
 
-    // スレート系
+    // Slates
     inline const Color slateGray(0.439216f, 0.501961f, 0.564706f);
     inline const Color slateGrey(0.439216f, 0.501961f, 0.564706f);
     inline const Color lightSlateGray(0.466667f, 0.533333f, 0.6f);
@@ -732,5 +732,5 @@ namespace colors {
 
 } // namespace trussc
 
-// 名前空間エイリアス
+// Namespace alias
 namespace tc = trussc;

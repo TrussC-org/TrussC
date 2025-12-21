@@ -8,24 +8,24 @@
 #include <cstdint>
 
 // =============================================================================
-// trussc 名前空間
+// trussc namespace
 // =============================================================================
 namespace trussc {
 
-// 前方宣言
+// Forward declaration
 class Node;
 using NodePtr = std::shared_ptr<Node>;
 using NodeWeakPtr = std::weak_ptr<Node>;
 
-// ホバー状態のキャッシュ（毎フレーム1回だけ更新）
+// Hover state cache (updated once per frame)
 namespace internal {
-    inline Node* hoveredNode = nullptr;      // 現在ホバー中のノード
-    inline Node* prevHoveredNode = nullptr;  // 前フレームのホバーノード
+    inline Node* hoveredNode = nullptr;      // Currently hovered node
+    inline Node* prevHoveredNode = nullptr;  // Previously hovered node
 }
 
 // =============================================================================
-// Node - シーングラフの基底クラス
-// すべてのノードはこのクラスを継承する
+// Node - Scene graph base class
+// All nodes inherit from this class
 // =============================================================================
 
 class Node : public std::enable_shared_from_this<Node> {
@@ -36,7 +36,7 @@ public:
     virtual ~Node() = default;
 
     // -------------------------------------------------------------------------
-    // ライフサイクル（オーバーライド可能）
+    // Lifecycle (overridable)
     // -------------------------------------------------------------------------
 
     virtual void setup() {}
@@ -45,21 +45,21 @@ public:
     virtual void cleanup() {}
 
     // -------------------------------------------------------------------------
-    // ツリー操作
+    // Tree operations
     // -------------------------------------------------------------------------
 
-    // 子ノードを追加
-    // keepGlobalPosition: true の場合、子のグローバル座標を維持する
+    // Add child node
+    // keepGlobalPosition: if true, preserves child's global position
     void addChild(Ptr child, bool keepGlobalPosition = false) {
         if (!child || child.get() == this) return;
 
-        // グローバル座標を保持する場合、移動前の位置を記録
+        // If preserving global position, record position before move
         float globalX = 0, globalY = 0;
         if (keepGlobalPosition) {
             child->localToGlobal(0, 0, globalX, globalY);
         }
 
-        // 既存の親から削除
+        // Remove from existing parent
         if (auto oldParent = child->parent_.lock()) {
             oldParent->removeChild(child);
         }
@@ -67,7 +67,7 @@ public:
         child->parent_ = weak_from_this();
         children_.push_back(child);
 
-        // グローバル座標を保持する場合、新しい親基準でローカル座標を再計算
+        // If preserving global position, recalculate local coordinates relative to new parent
         if (keepGlobalPosition) {
             float localX, localY;
             globalToLocal(globalX, globalY, localX, localY);
@@ -76,7 +76,7 @@ public:
         }
     }
 
-    // 子ノードを削除
+    // Remove child node
     void removeChild(Ptr child) {
         if (!child) return;
 
@@ -87,7 +87,7 @@ public:
         }
     }
 
-    // すべての子ノードを削除
+    // Remove all child nodes
     void removeAllChildren() {
         for (auto& child : children_) {
             child->parent_.reset();
@@ -95,61 +95,61 @@ public:
         children_.clear();
     }
 
-    // 親ノードを取得
+    // Get parent node
     Ptr getParent() const {
         return parent_.lock();
     }
 
-    // 子ノードのリストを取得
+    // Get list of child nodes
     const std::vector<Ptr>& getChildren() const {
         return children_;
     }
 
-    // 子ノードの数を取得
+    // Get number of child nodes
     size_t getChildCount() const {
         return children_.size();
     }
 
     // -------------------------------------------------------------------------
-    // 状態
+    // State
     // -------------------------------------------------------------------------
 
-    bool isActive = true;    // false: update/drawがスキップされる
-    bool isVisible = true;   // false: drawのみスキップされる
+    bool isActive = true;    // false: update/draw are skipped
+    bool isVisible = true;   // false: only draw is skipped
 
-    // イベント有効化（enableEvents() を呼んだノードのみがヒットテスト対象）
+    // Event enabling (only nodes that called enableEvents() are hit test targets)
     void enableEvents() { eventsEnabled_ = true; }
     void disableEvents() { eventsEnabled_ = false; }
     bool isEventsEnabled() const { return eventsEnabled_; }
 
-    // マウスがこのノードの上にあるか（毎フレーム自動更新、O(1)）
+    // Whether mouse is over this node (auto-updated each frame, O(1))
     bool isMouseOver() const { return internal::hoveredNode == this; }
 
     // -------------------------------------------------------------------------
-    // 変換（トランスフォーム）
+    // Transform
     // -------------------------------------------------------------------------
 
     float x = 0.0f;
     float y = 0.0f;
-    float rotation = 0.0f;      // ラジアン
+    float rotation = 0.0f;      // Radians
     float scaleX = 1.0f;
     float scaleY = 1.0f;
 
-    // 回転を度数法で設定
+    // Set rotation in degrees
     void setRotationDeg(float degrees) {
         rotation = degrees * PI / 180.0f;
     }
 
-    // 回転を度数法で取得
+    // Get rotation in degrees
     float getRotationDeg() const {
         return rotation * 180.0f / PI;
     }
 
     // -------------------------------------------------------------------------
-    // 座標変換
+    // Coordinate transformation
     // -------------------------------------------------------------------------
 
-    // このノードのローカル変換行列を取得
+    // Get local transform matrix for this node
     Mat4 getLocalMatrix() const {
         Mat4 mat = Mat4::translate(x, y, 0.0f);
         if (rotation != 0.0f) {
@@ -161,7 +161,7 @@ public:
         return mat;
     }
 
-    // このノードのグローバル変換行列を取得（親の変換を含む）
+    // Get global transform matrix for this node (includes parent transforms)
     Mat4 getGlobalMatrix() const {
         Mat4 local = getLocalMatrix();
         if (auto p = parent_.lock()) {
@@ -170,53 +170,53 @@ public:
         return local;
     }
 
-    // グローバル変換行列の逆行列を取得
+    // Get inverse of global transform matrix
     Mat4 getGlobalMatrixInverse() const {
         return getGlobalMatrix().inverted();
     }
 
-    // グローバル座標をこのノードのローカル座標に変換
+    // Convert global coordinates to this node's local coordinates
     void globalToLocal(float globalX, float globalY, float& localX, float& localY) const {
-        // まず親のローカル座標に変換
+        // First convert to parent's local coordinates
         float parentLocalX = globalX;
         float parentLocalY = globalY;
         if (auto p = parent_.lock()) {
             p->globalToLocal(globalX, globalY, parentLocalX, parentLocalY);
         }
 
-        // 親のローカル座標からこのノードのローカル座標に変換
-        // translate の逆
+        // Convert from parent's local to this node's local coordinates
+        // Inverse of translate
         float dx = parentLocalX - x;
         float dy = parentLocalY - y;
 
-        // rotate の逆
+        // Inverse of rotate
         float cosR = std::cos(-rotation);
         float sinR = std::sin(-rotation);
         float rx = dx * cosR - dy * sinR;
         float ry = dx * sinR + dy * cosR;
 
-        // scale の逆
+        // Inverse of scale
         localX = (scaleX != 0.0f) ? rx / scaleX : rx;
         localY = (scaleY != 0.0f) ? ry / scaleY : ry;
     }
 
-    // ローカル座標をグローバル座標に変換
+    // Convert local coordinates to global coordinates
     void localToGlobal(float localX, float localY, float& globalX, float& globalY) const {
-        // scale を適用
+        // Apply scale
         float sx = localX * scaleX;
         float sy = localY * scaleY;
 
-        // rotate を適用
+        // Apply rotate
         float cosR = std::cos(rotation);
         float sinR = std::sin(rotation);
         float rx = sx * cosR - sy * sinR;
         float ry = sx * sinR + sy * cosR;
 
-        // translate を適用
+        // Apply translate
         float tx = rx + x;
         float ty = ry + y;
 
-        // 親がいれば、親のローカル→グローバル変換を適用
+        // If parent exists, apply parent's local-to-global transform
         if (auto p = parent_.lock()) {
             p->localToGlobal(tx, ty, globalX, globalY);
         } else {
@@ -226,31 +226,31 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // マウス座標（ローカル座標系）
+    // Mouse coordinates (in local coordinate system)
     // -------------------------------------------------------------------------
 
-    // このノードのローカル座標系でのマウスX座標
+    // Mouse X in this node's local coordinate system
     float getMouseX() const {
         float lx, ly;
         globalToLocal(trussc::getGlobalMouseX(), trussc::getGlobalMouseY(), lx, ly);
         return lx;
     }
 
-    // このノードのローカル座標系でのマウスY座標
+    // Mouse Y in this node's local coordinate system
     float getMouseY() const {
         float lx, ly;
         globalToLocal(trussc::getGlobalMouseX(), trussc::getGlobalMouseY(), lx, ly);
         return ly;
     }
 
-    // 前フレームのマウスX座標（ローカル座標系）
+    // Previous frame mouse X (in local coordinate system)
     float getPMouseX() const {
         float lx, ly;
         globalToLocal(trussc::getGlobalPMouseX(), trussc::getGlobalPMouseY(), lx, ly);
         return lx;
     }
 
-    // 前フレームのマウスY座標（ローカル座標系）
+    // Previous frame mouse Y (in local coordinate system)
     float getPMouseY() const {
         float lx, ly;
         globalToLocal(trussc::getGlobalPMouseX(), trussc::getGlobalPMouseY(), lx, ly);
@@ -258,29 +258,29 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // 再帰的な更新・描画（フレームワークが自動で呼ぶ）
+    // Recursive update/draw (called automatically by framework)
     // -------------------------------------------------------------------------
 
-    // 自分と子ノードを再帰的に更新
+    // Recursively update self and child nodes
     void updateTree() {
         if (!isActive) return;
 
         processTimers();
-        update();  // ユーザーコード
+        update();  // User code
 
-        // 子ノードを自動的に更新
+        // Automatically update child nodes
         for (auto& child : children_) {
             child->updateTree();
         }
     }
 
-    // 自分と子ノードを再帰的に描画
+    // Recursively draw self and child nodes
     virtual void drawTree() {
         if (!isActive) return;
 
         pushMatrix();
 
-        // 変換を適用
+        // Apply transforms
         translate(x, y);
         if (rotation != 0.0f) {
             rotate(rotation);
@@ -289,12 +289,12 @@ public:
             scale(scaleX, scaleY);
         }
 
-        // ユーザーの描画
+        // User drawing
         if (isVisible) {
             draw();
         }
 
-        // 子ノードを自動的に描画
+        // Automatically draw child nodes
         for (auto& child : children_) {
             child->drawTree();
         }
@@ -303,37 +303,37 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // Ray-based Hit Test（イベントディスパッチ用）
+    // Ray-based Hit Test (for event dispatch)
     // -------------------------------------------------------------------------
 
-    // ヒットテスト結果
+    // Hit test result
     struct HitResult {
-        Ptr node;           // ヒットしたノード
-        float distance;     // Ray の origin からの距離
-        Vec3 localPoint;    // ローカル座標でのヒット位置
+        Ptr node;           // Hit node
+        float distance;     // Distance from ray origin
+        Vec3 localPoint;    // Hit position in local coordinates
 
         bool hit() const { return node != nullptr; }
     };
 
-    // Global Ray でツリー全体をヒットテストし、最も手前のノードを返す
-    // 描画順の逆（後から描画されたものが優先）で走査
+    // Hit test entire tree with global ray, return frontmost node
+    // Traversed in reverse draw order (later drawn = higher priority)
     HitResult findHitNode(const Ray& globalRay) {
         return findHitNodeRecursive(globalRay, getGlobalMatrixInverse());
     }
 
-    // マウスイベントをツリーに配信（2D モード用）
-    // screenX, screenY: スクリーン座標
-    // return: イベントを処理したノード（処理されなかった場合は nullptr）
+    // Dispatch mouse event to tree (for 2D mode)
+    // screenX, screenY: screen coordinates
+    // return: node that handled event (nullptr if not handled)
     Ptr dispatchMousePress(float screenX, float screenY, int button) {
         Ray globalRay = Ray::fromScreenPoint2D(screenX, screenY);
         HitResult result = findHitNode(globalRay);
 
         if (result.hit()) {
-            // ローカル座標を計算
+            // Calculate local coordinates
             float localX = result.localPoint.x;
             float localY = result.localPoint.y;
 
-            // イベントを配信
+            // Dispatch event
             if (result.node->onMousePress(localX, localY, button)) {
                 return result.node;
             }
@@ -375,33 +375,33 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // キーイベントのディスパッチ（全アクティブノードに broadcast）
+    // Key event dispatch (broadcast to all active nodes)
     // -------------------------------------------------------------------------
 
-    // キー押下を全ノードに配信
+    // Dispatch key press to all nodes
     bool dispatchKeyPress(int key) {
         return dispatchKeyPressRecursive(key);
     }
 
-    // キー離しを全ノードに配信
+    // Dispatch key release to all nodes
     bool dispatchKeyRelease(int key) {
         return dispatchKeyReleaseRecursive(key);
     }
 
     // -------------------------------------------------------------------------
-    // ホバー状態の更新（毎フレーム1回呼ぶ）
+    // Update hover state (call once per frame)
     // -------------------------------------------------------------------------
 
     void updateHoverState(float screenX, float screenY) {
-        // 前フレームのホバーノードを保存
+        // Save previous frame's hovered node
         internal::prevHoveredNode = internal::hoveredNode;
 
-        // 新しいホバーノードを検索
+        // Search for new hovered node
         Ray globalRay = Ray::fromScreenPoint2D(screenX, screenY);
         HitResult result = findHitNode(globalRay);
         internal::hoveredNode = result.hit() ? result.node.get() : nullptr;
 
-        // Enter/Leave イベントを発火
+        // Fire Enter/Leave events
         if (internal::prevHoveredNode != internal::hoveredNode) {
             if (internal::prevHoveredNode) {
                 internal::prevHoveredNode->onMouseLeave();
@@ -413,16 +413,16 @@ public:
     }
 
 private:
-    // キーイベントの再帰的な配信
+    // Recursive dispatch of key events
     bool dispatchKeyPressRecursive(int key) {
         if (!isActive) return false;
 
-        // 自分が処理
+        // Process self
         if (onKeyPress(key)) {
-            return true;  // 消費された
+            return true;  // Consumed
         }
 
-        // 子ノードに配信
+        // Dispatch to child nodes
         for (auto& child : children_) {
             if (child->dispatchKeyPressRecursive(key)) {
                 return true;
@@ -449,30 +449,30 @@ private:
     }
 
 
-    // 再帰的なヒットテスト（描画順の逆で走査）
+    // Recursive hit test (traversed in reverse draw order)
     HitResult findHitNodeRecursive(const Ray& globalRay, const Mat4& parentInverseMatrix) {
         if (!isActive) return HitResult{};
 
-        // このノードの逆行列を計算
+        // Calculate inverse matrix for this node
         Mat4 localInverse = getLocalMatrix().inverted();
         Mat4 globalInverse = localInverse * parentInverseMatrix;
 
-        // Global Ray を Local Ray に変換
+        // Convert global ray to local ray
         Ray localRay = globalRay.transformed(globalInverse);
 
         HitResult bestResult{};
 
-        // 子ノードを後ろから走査（描画順の逆）
+        // Traverse child nodes from back (reverse draw order)
         for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
             HitResult childResult = (*it)->findHitNodeRecursive(globalRay, globalInverse);
             if (childResult.hit()) {
-                // 子の結果を採用（描画順で後 = 手前）
+                // Use child's result (later in draw order = front)
                 bestResult = childResult;
-                break;  // 最初にヒットしたものを優先（描画順で最後）
+                break;  // Prioritize first hit (last in draw order)
             }
         }
 
-        // 子にヒットしなかった場合、自分をチェック
+        // If no child hit, check self
         if (!bestResult.hit()) {
             float distance;
             if (hitTest(localRay, distance)) {
@@ -488,33 +488,33 @@ private:
 protected:
 
     // -------------------------------------------------------------------------
-    // イベント（オーバーライド可能）
+    // Events (overridable)
     // -------------------------------------------------------------------------
 
     // -------------------------------------------------------------------------
-    // ヒットテスト（Ray ベース - 2D/3D 統一方式）
+    // Hit Test (Ray-based - unified 2D/3D approach)
     // -------------------------------------------------------------------------
 
-    // Ray によるヒットテスト（ローカル空間での判定）
-    // localRay: このノードのローカル座標系に変換済みの Ray
-    // outDistance: ヒットした場合の距離（Ray の origin からの t 値）
-    // return: ヒットした場合 true
+    // Ray-based hit test (in local space)
+    // localRay: Ray already transformed to this node's local coordinate system
+    // outDistance: Distance from ray origin (t value) if hit
+    // return: true if hit
     virtual bool hitTest(const Ray& localRay, float& outDistance) {
         (void)localRay;
         (void)outDistance;
         return false;
     }
 
-    // 従来の2D用ヒットテスト（後方互換性のため残す）
-    // trueを返すと、このノードがイベントを受け取る
+    // Legacy 2D hit test (kept for backward compatibility)
+    // Return true to receive events on this node
     virtual bool hitTest(float localX, float localY) {
         (void)localX;
         (void)localY;
         return false;
     }
 
-    // マウスイベント（ローカル座標で届く）
-    // trueを返すと、イベントが消費される（親に伝播しない）
+    // Mouse events (delivered in local coordinates)
+    // Return true to consume the event (prevents propagation to parent)
     virtual bool onMousePress(float localX, float localY, int button) {
         (void)localX;
         (void)localY;
@@ -550,7 +550,7 @@ protected:
         return false;
     }
 
-    // キーイベント（全ノードに broadcast される）
+    // Key events (broadcast to all nodes)
     virtual bool onKeyPress(int key) {
         (void)key;
         return false;
@@ -561,15 +561,15 @@ protected:
         return false;
     }
 
-    // マウス Enter/Leave（ホバー状態が変わった時に呼ばれる）
+    // Mouse Enter/Leave (called when hover state changes)
     virtual void onMouseEnter() {}
     virtual void onMouseLeave() {}
 
     // -------------------------------------------------------------------------
-    // タイマー
+    // Timers
     // -------------------------------------------------------------------------
 
-    // 指定秒数後に1回だけコールバックを実行
+    // Execute callback once after specified delay in seconds
     uint64_t callAfter(double delay, std::function<void()> callback) {
         uint64_t id = nextTimerId_++;
         double triggerTime = getElapsedTime() + delay;
@@ -577,7 +577,7 @@ protected:
         return id;
     }
 
-    // 指定間隔で繰り返しコールバックを実行
+    // Execute callback repeatedly at specified interval
     uint64_t callEvery(double interval, std::function<void()> callback) {
         uint64_t id = nextTimerId_++;
         double triggerTime = getElapsedTime() + interval;
@@ -585,7 +585,7 @@ protected:
         return id;
     }
 
-    // タイマーをキャンセル
+    // Cancel timer
     void cancelTimer(uint64_t id) {
         timers_.erase(
             std::remove_if(timers_.begin(), timers_.end(),
@@ -594,7 +594,7 @@ protected:
         );
     }
 
-    // すべてのタイマーをキャンセル
+    // Cancel all timers
     void cancelAllTimers() {
         timers_.clear();
     }
@@ -602,9 +602,9 @@ protected:
 protected:
     WeakPtr parent_;
     std::vector<Ptr> children_;
-    bool eventsEnabled_ = false;  // enableEvents() で有効化
+    bool eventsEnabled_ = false;  // Enabled via enableEvents()
 
-    // タイマー構造体
+    // Timer structure
     struct Timer {
         uint64_t id;
         double triggerTime;
@@ -616,7 +616,7 @@ protected:
     std::vector<Timer> timers_;
     inline static uint64_t nextTimerId_ = 1;
 
-    // タイマーを処理（updateRecursive内で呼ばれる）
+    // Process timers (called within updateRecursive)
     void processTimers() {
         double currentTime = getElapsedTime();
         std::vector<Timer> toRemove;
@@ -633,7 +633,7 @@ protected:
             }
         }
 
-        // 実行済みの非繰り返しタイマーを削除
+        // Remove completed non-repeating timers
         for (const auto& t : toRemove) {
             cancelTimer(t.id);
         }

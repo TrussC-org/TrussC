@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// tcLog.h - ロギングシステム
+// tcLog.h - Logging system
 // =============================================================================
 
 #include <sstream>
@@ -11,25 +11,25 @@
 #include <chrono>
 #include <ctime>
 
-// Event システムを使用
+// Uses Event system
 #include "../events/tcEvent.h"
 #include "../events/tcEventListener.h"
 
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// ログレベル
+// Log level
 // ---------------------------------------------------------------------------
 enum class LogLevel {
-    Verbose,    // 詳細情報（デバッグ用）
-    Notice,     // 通常の情報
-    Warning,    // 警告
-    Error,      // エラー
-    Fatal,      // 致命的エラー
-    Silent      // 出力しない（フィルタ用）
+    Verbose,    // Detailed info (for debugging)
+    Notice,     // Normal info
+    Warning,    // Warning
+    Error,      // Error
+    Fatal,      // Fatal error
+    Silent      // No output (for filtering)
 };
 
-// ログレベルを文字列に変換
+// Convert log level to string
 inline const char* logLevelToString(LogLevel level) {
     switch (level) {
         case LogLevel::Verbose: return "VERBOSE";
@@ -43,7 +43,7 @@ inline const char* logLevelToString(LogLevel level) {
 }
 
 // ---------------------------------------------------------------------------
-// LogEventArgs - ログイベントの引数
+// LogEventArgs - Log event arguments
 // ---------------------------------------------------------------------------
 struct LogEventArgs {
     LogLevel level;
@@ -52,7 +52,7 @@ struct LogEventArgs {
 
     LogEventArgs(LogLevel lvl, const std::string& msg)
         : level(lvl), message(msg) {
-        // タイムスタンプを生成
+        // Generate timestamp
         auto now = std::chrono::system_clock::now();
         auto time = std::chrono::system_clock::to_time_t(now);
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -72,15 +72,15 @@ struct LogEventArgs {
 };
 
 // ---------------------------------------------------------------------------
-// Logger - ロガー本体
+// Logger - Logger core
 // ---------------------------------------------------------------------------
 class Logger {
 public:
-    // ログイベント（全リスナーに通知）
+    // Log event (notifies all listeners)
     Event<LogEventArgs> onLog;
 
     Logger() {
-        // コンソールリスナーをデフォルトで登録
+        // Register console listener by default
         onLog.listen(consoleListener_, [this](LogEventArgs& e) {
             if (e.level >= consoleLevel_ && consoleLevel_ != LogLevel::Silent) {
                 std::ostream& out = (e.level >= LogLevel::Warning) ? std::cerr : std::cout;
@@ -95,14 +95,14 @@ public:
         closeFile();
     }
 
-    // === ログ出力 ===
+    // === Log output ===
 
     void log(LogLevel level, const std::string& message) {
         LogEventArgs args(level, message);
         onLog.notify(args);
     }
 
-    // === コンソール設定 ===
+    // === Console settings ===
 
     void setConsoleLogLevel(LogLevel level) {
         consoleLevel_ = level;
@@ -112,7 +112,7 @@ public:
         return consoleLevel_;
     }
 
-    // === ファイル設定 ===
+    // === File settings ===
 
     bool setLogFile(const std::string& path) {
         closeFile();
@@ -125,7 +125,7 @@ public:
 
         filePath_ = path;
 
-        // ファイルリスナーを登録
+        // Register file listener
         onLog.listen(fileListener_, [this](LogEventArgs& e) {
             if (fileStream_.is_open() &&
                 e.level >= fileLevel_ && fileLevel_ != LogLevel::Silent) {
@@ -164,11 +164,11 @@ public:
     }
 
 private:
-    // コンソール
+    // Console
     EventListener consoleListener_;
     LogLevel consoleLevel_ = LogLevel::Notice;
 
-    // ファイル
+    // File
     EventListener fileListener_;
     std::ofstream fileStream_;
     std::string filePath_;
@@ -176,7 +176,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// グローバルロガー
+// Global logger
 // ---------------------------------------------------------------------------
 inline Logger& tcGetLogger() {
     static Logger logger;
@@ -184,7 +184,7 @@ inline Logger& tcGetLogger() {
 }
 
 // ---------------------------------------------------------------------------
-// 便利関数
+// Convenience functions
 // ---------------------------------------------------------------------------
 inline void tcSetConsoleLogLevel(LogLevel level) {
     tcGetLogger().setConsoleLogLevel(level);
@@ -203,7 +203,7 @@ inline void tcCloseLogFile() {
 }
 
 // ---------------------------------------------------------------------------
-// LogStream - ストリーム形式でログ出力
+// LogStream - Stream-based log output
 // ---------------------------------------------------------------------------
 class LogStream {
 public:
@@ -220,7 +220,7 @@ public:
         }
     }
 
-    // ムーブのみ許可
+    // Move only allowed
     LogStream(LogStream&& other) noexcept
         : level_(other.level_)
         , module_(std::move(other.module_))
@@ -238,7 +238,7 @@ public:
         return *this;
     }
 
-    // std::endl 等のマニピュレータ対応
+    // Support for manipulators like std::endl
     LogStream& operator<<(std::ostream& (*manip)(std::ostream&)) {
         manip(stream_);
         return *this;
@@ -252,12 +252,12 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// ログ出力関数（ストリーム形式）
-// 使い方:
-//   tcLog() << "message";                    // デフォルト（Notice）
-//   tcLog(LogLevel::Warning) << "warning";   // レベル指定
-//   tcLogNotice("ClassName") << "message";   // モジュール名付き
-//   tcLogNotice() << "message";              // モジュール名なし
+// Log output functions (stream-based)
+// Usage:
+//   tcLog() << "message";                    // Default (Notice)
+//   tcLog(LogLevel::Warning) << "warning";   // Level specified
+//   tcLogNotice("ClassName") << "message";   // With module name
+//   tcLogNotice() << "message";              // Without module name
 // ---------------------------------------------------------------------------
 inline LogStream tcLog(LogLevel level = LogLevel::Notice) {
     return LogStream(level);
