@@ -14,7 +14,7 @@
 #include <cstdlib>
 
 using namespace tc;
-using namespace tcx::box2d;
+using namespace tcx;
 
 // ランダムな float を生成（min 〜 max）
 float randomFloat(float min, float max) {
@@ -23,15 +23,15 @@ float randomFloat(float min, float max) {
 
 class tcApp : public tc::App {
 public:
-    World world;
+    box2d::World world;
 
     // ルートノード（shared_ptr で作成）
     std::shared_ptr<Node> root = std::make_shared<Node>();
 
     // Body たちを shared_ptr で保持
-    std::vector<std::shared_ptr<Circle>> circles;
-    std::vector<std::shared_ptr<Rect>> rects;
-    std::vector<std::shared_ptr<PolyShape>> polygons;
+    std::vector<std::shared_ptr<box2d::CircleBody>> circles;
+    std::vector<std::shared_ptr<box2d::RectBody>> rects;
+    std::vector<std::shared_ptr<box2d::PolyShape>> polygons;
 
     void setup() override {
         // 物理ワールドを初期化（重力: 下向き300px/sec^2）
@@ -54,7 +54,7 @@ public:
     }
 
     void addCircle(float x, float y, float radius) {
-        auto circle = std::make_shared<Circle>();
+        auto circle = std::make_shared<box2d::CircleBody>();
         circle->setup(world, x, y, radius);
         circle->setRestitution(0.7f);
 
@@ -63,7 +63,7 @@ public:
     }
 
     void addRect(float x, float y, float w, float h) {
-        auto rect = std::make_shared<Rect>();
+        auto rect = std::make_shared<box2d::RectBody>();
         rect->setup(world, x, y, w, h);
         rect->setRestitution(0.3f);
 
@@ -72,7 +72,7 @@ public:
     }
 
     void addPolygon(float x, float y, float radius, int sides) {
-        auto poly = std::make_shared<PolyShape>();
+        auto poly = std::make_shared<box2d::PolyShape>();
         poly->setupRegular(world, x, y, radius, sides);
         poly->setRestitution(0.5f);
 

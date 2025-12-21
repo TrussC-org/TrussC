@@ -6,7 +6,7 @@
 
 namespace tcx::box2d {
 
-Rect::Rect(Rect&& other) noexcept
+RectBody::RectBody(RectBody&& other) noexcept
     : Body(std::move(other))
     , width_(other.width_)
     , height_(other.height_)
@@ -15,7 +15,7 @@ Rect::Rect(Rect&& other) noexcept
     other.height_ = 0;
 }
 
-Rect& Rect::operator=(Rect&& other) noexcept {
+RectBody& RectBody::operator=(RectBody&& other) noexcept {
     if (this != &other) {
         Body::operator=(std::move(other));
         width_ = other.width_;
@@ -26,7 +26,7 @@ Rect& Rect::operator=(Rect&& other) noexcept {
     return *this;
 }
 
-void Rect::setup(World& world, float cx, float cy, float width, float height) {
+void RectBody::setup(World& world, float cx, float cy, float width, float height) {
     world_ = &world;
     width_ = width;
     height_ = height;
@@ -61,14 +61,14 @@ void Rect::setup(World& world, float cx, float cy, float width, float height) {
 }
 
 // Node用: 原点(0,0)に描画（drawTree()が変換を適用する）
-void Rect::draw() {
+void RectBody::draw() {
     if (!body_) return;
 
     // 矩形を描画（中心基準）
     tc::drawRect(-width_ / 2, -height_ / 2, width_, height_);
 }
 
-void Rect::drawFill() {
+void RectBody::drawFill() {
     if (!body_) return;
 
     // 塗りつぶしモードで矩形を描画
@@ -77,7 +77,7 @@ void Rect::drawFill() {
     tc::drawRect(-width_ / 2, -height_ / 2, width_, height_);
 }
 
-void Rect::draw(const tc::Color& color) {
+void RectBody::draw(const tc::Color& color) {
     tc::setColor(color);
     draw();
 }

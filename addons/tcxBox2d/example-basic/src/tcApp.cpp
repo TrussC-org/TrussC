@@ -12,7 +12,7 @@
 #include <cstdlib>
 
 using namespace tc;
-using namespace tcx::box2d;
+using namespace tcx;
 
 // ランダムな float を生成（min 〜 max）
 float randomFloat(float min, float max) {
@@ -21,9 +21,9 @@ float randomFloat(float min, float max) {
 
 class tcApp : public tc::App {
 public:
-    World world;
-    std::vector<std::shared_ptr<Circle>> circles;
-    std::vector<std::shared_ptr<Rect>> rects;
+    box2d::World world;
+    std::vector<std::shared_ptr<box2d::CircleBody>> circles;
+    std::vector<std::shared_ptr<box2d::RectBody>> rects;
 
     void setup() override {
         // 物理ワールドを初期化（重力: 下向き300px/sec^2）
@@ -33,23 +33,23 @@ public:
         world.createBounds();
 
         // 初期オブジェクトを配置（ごちゃっと積む）
-        auto c1 = std::make_shared<Circle>();
+        auto c1 = std::make_shared<box2d::CircleBody>();
         c1->setup(world, 350, 80, 30);
         circles.push_back(c1);
 
-        auto c2 = std::make_shared<Circle>();
+        auto c2 = std::make_shared<box2d::CircleBody>();
         c2->setup(world, 380, 150, 25);
         circles.push_back(c2);
 
-        auto c3 = std::make_shared<Circle>();
+        auto c3 = std::make_shared<box2d::CircleBody>();
         c3->setup(world, 340, 200, 35);
         circles.push_back(c3);
 
-        auto c4 = std::make_shared<Circle>();
+        auto c4 = std::make_shared<box2d::CircleBody>();
         c4->setup(world, 400, 120, 20);
         circles.push_back(c4);
 
-        auto c5 = std::make_shared<Circle>();
+        auto c5 = std::make_shared<box2d::CircleBody>();
         c5->setup(world, 360, 250, 28);
         circles.push_back(c5);
     }
@@ -96,12 +96,12 @@ public:
     void mousePressed(int x, int y, int button) override {
         if (button == MOUSE_BUTTON_LEFT) {
             // 既存のボディがあればドラッグ開始
-            Body* body = world.getBodyAtPoint((float)x, (float)y);
+            box2d::Body* body = world.getBodyAtPoint((float)x, (float)y);
             if (body) {
                 world.startDrag(body, (float)x, (float)y);
             } else {
                 // なければ円を追加
-                auto circle = std::make_shared<Circle>();
+                auto circle = std::make_shared<box2d::CircleBody>();
                 circle->setup(world, (float)x, (float)y, randomFloat(15, 40));
                 circle->setRestitution(0.7f);  // よく跳ねる
                 circles.push_back(circle);
@@ -109,7 +109,7 @@ public:
         }
         else if (button == MOUSE_BUTTON_RIGHT) {
             // 右クリック: 矩形を追加
-            auto rect = std::make_shared<Rect>();
+            auto rect = std::make_shared<box2d::RectBody>();
             rect->setup(world, (float)x, (float)y, randomFloat(30, 60), randomFloat(20, 40));
             rect->setRestitution(0.3f);
             rects.push_back(rect);
