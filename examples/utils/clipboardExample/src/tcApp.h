@@ -11,13 +11,11 @@ using namespace std;
 // clipboardExample - クリップボードAPIのサンプル
 // =============================================================================
 // stdinからコマンドを受け取ってクリップボードを操作する。
-// clipboardSizeを100バイトに設定し、オーバーフロー警告をテストできる。
 //
 // 使い方（ターミナルから実行）:
 //   ./clipboardExample
 //   >>> set Hello World        # "Hello World"をクリップボードにセット
 //   >>> get                    # クリップボードの内容を取得
-//   >>> overflow               # 100バイト以上のテキストをセット（警告が出る）
 //
 // パイプで送る場合:
 //   echo "set test" | ./clipboardExample
@@ -55,17 +53,10 @@ public:
                 lastResult_ = "Get: \"" + text + "\" (" + to_string(text.size()) + " bytes)";
                 cout << "{\"status\":\"ok\",\"command\":\"get\",\"text\":\"" << text << "\"}" << endl;
             }
-            else if (e.args[0] == "overflow") {
-                // overflow - 100バイト以上のテキストをセット（警告テスト）
-                string longText(150, 'X');  // 150バイトのテキスト
-                setClipboardString(longText);
-                lastResult_ = "Set overflow test: 150 bytes (check console for warning)";
-                cout << "{\"status\":\"ok\",\"command\":\"overflow\",\"size\":150}" << endl;
-            }
         });
 
-        cout << "clipboardExample started. Buffer size: 100 bytes" << endl;
-        cout << "Commands: set <text>, get, overflow" << endl;
+        cout << "clipboardExample started." << endl;
+        cout << "Commands: set <text>, get" << endl;
     }
 
     void draw() override {
@@ -74,21 +65,19 @@ public:
         // 使い方表示
         setColor(200);
         drawBitmapString("Clipboard Example - stdin commands", 20, 30);
-        drawBitmapString("Buffer size: 100 bytes (for overflow testing)", 20, 50);
-        drawBitmapString("", 20, 70);
-        drawBitmapString("Commands:", 20, 90);
-        drawBitmapString("  set <text>   - Set text to clipboard", 20, 110);
-        drawBitmapString("  get          - Get text from clipboard", 20, 130);
-        drawBitmapString("  overflow     - Set 150 bytes (triggers warning)", 20, 150);
+        drawBitmapString("", 20, 50);
+        drawBitmapString("Commands:", 20, 70);
+        drawBitmapString("  set <text>   - Set text to clipboard", 20, 90);
+        drawBitmapString("  get          - Get text from clipboard", 20, 110);
 
         // 最後の結果
         setColor(100, 255, 100);
-        drawBitmapString("Result: " + lastResult_, 20, 190);
+        drawBitmapString("Result: " + lastResult_, 20, 150);
 
         // コマンドログ
         setColor(150);
-        drawBitmapString("Recent commands:", 20, 230);
-        int y = 250;
+        drawBitmapString("Recent commands:", 20, 190);
+        int y = 210;
         for (const auto& cmd : commandLog_) {
             drawBitmapString("> " + cmd, 20, y);
             y += 16;
