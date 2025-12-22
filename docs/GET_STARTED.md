@@ -27,15 +27,23 @@ winget install Kitware.CMake
 sudo apt install cmake
 ```
 
-### Editor Setup (VSCode / Cursor)
+### Editor Setup
 
-Install the following extensions:
+#### VSCode
 
-| Extension | Purpose | Required OS |
-|-----------|---------|-------------|
-| **CMake Tools** | Build integration | All |
-| **C/C++** | IntelliSense + debugging | All (Windows uses this for debugging) |
-| **CodeLLDB** | Debug execution | macOS / Linux |
+| Extension | Purpose |
+|-----------|---------|
+| **CMake Tools** | Build integration |
+| **C/C++** | IntelliSense + debugging |
+| **CodeLLDB** | Debug execution (macOS / Linux) |
+
+#### Cursor
+
+| Extension | Purpose |
+|-----------|---------|
+| **CMake Tools** | Build integration |
+| **clangd** | IntelliSense (C/C++ extension is blocked in Cursor) |
+| **CodeLLDB** | Debug execution (macOS / Linux) |
 
 ---
 
@@ -56,7 +64,20 @@ Build the project creation tool (first time only).
 1. Enter a **Project Name**
 2. Select a **Location** to save
 3. Choose `Cursor` or `VSCode` as **IDE**
-4. Click **Generate Project**
+4. (Optional) Check **Web Build** to generate Emscripten build scripts
+5. Click **Generate Project**
+
+### Web Build (WebGPU)
+
+TrussC supports browser deployment via **WebGPU** (not WebGL). To build for web:
+
+1. Check **Web Build** when generating/updating a project
+2. A `build-web.command` (macOS) or `build-web.bat` (Windows) script will be generated
+3. Run the script to build, then open `bin/<projectName>.html` in a WebGPU-compatible browser
+
+**VSCode/Cursor:** A "Build Web" task is also added. Run it via `Cmd+Shift+B` / `Ctrl+Shift+B` → "Build Web".
+
+> **Note:** WebGPU requires a modern browser (Chrome 113+, Edge 113+, or Safari 18+).
 
 ---
 
@@ -91,27 +112,66 @@ Run examples the same way:
 
 ---
 
-## 6. Write Code
+## 6. Update Existing Projects
 
-Basic structure:
+![Project Generator - Update](images/projectGenerator_update.png)
+
+When you clone a TrussC project or example (e.g., `examples/graphics/graphicsExample`), you need to generate the IDE project files before building.
+
+1. Click **Import** and select the project folder
+2. Click **Update Project** to generate CMakeLists.txt and IDE files
+3. **Open in IDE** → Build and run
+
+This is also useful when:
+- You cloned a repository that only contains source files
+- You want to regenerate project files after changing addons
+- You want to switch IDE (e.g., VSCode → Cursor)
+
+---
+
+## 7. Write Code
+
+### tcApp.h
 
 ```cpp
-// tcApp.h
 #pragma once
+
 #include "tcBaseApp.h"
 using namespace tc;
 using namespace std;
 
 class tcApp : public App {
 public:
-    void setup() override;
-    void update() override;
-    void draw() override;
+    // Lifecycle
+    void setup() override;      // Called once at start
+    void update() override;     // Called every frame (logic)
+    void draw() override;       // Called every frame (rendering)
+    void exit() override;       // Called before cleanup
+
+    // Key events
+    void keyPressed(int key) override;
+    void keyReleased(int key) override;
+
+    // Mouse events
+    void mousePressed(int x, int y, int button) override;
+    void mouseReleased(int x, int y, int button) override;
+    void mouseMoved(int x, int y) override;
+    void mouseDragged(int x, int y, int button) override;
+    void mouseScrolled(float deltaX, float deltaY) override;
+
+    // Window events
+    void windowResized(int width, int height) override;
+
+    // File drop
+    void filesDropped(const vector<string>& files) override;
 };
 ```
 
+Override only what you need. All methods have empty default implementations.
+
+### tcApp.cpp
+
 ```cpp
-// tcApp.cpp
 #include "tcApp.h"
 
 void tcApp::setup() {
@@ -128,13 +188,41 @@ void tcApp::draw() {
     setColor(colors::white);
     drawCircle(getWidth()/2, getHeight()/2, 100);
 }
+
+void tcApp::keyPressed(int key) {
+    if (key == 'f') toggleFullscreen();
+}
+
+void tcApp::mousePressed(int x, int y, int button) {
+    // Handle mouse click
+}
+
+// ... implement other overrides as needed
 ```
+
+---
+
+## 8. App Icon
+
+Place a **512x512+ PNG** in the `icon/` folder:
+
+```
+myProject/
+├── icon/
+│   └── myicon.png    ← Just put a PNG here!
+├── src/
+└── CMakeLists.txt
+```
+
+The PNG is automatically converted to `.icns` (macOS) or `.ico` (Windows) at build time.
+
+**Windows:** Requires [ImageMagick](https://imagemagick.org/) for PNG → ICO conversion. Alternatively, prepare an `.ico` file directly.
 
 ---
 
 ## Next Steps
 
 - [TrussC_vs_openFrameworks.md](TrussC_vs_openFrameworks.md) - API mapping for oF users
-- [HOW_TO_BUILD.md](HOW_TO_BUILD.md) - Detailed build instructions, icons, distribution
+- [FOR_AI_AGENT.md](FOR_AI_AGENT.md) - Complete API reference
 - [ADDONS.md](ADDONS.md) - How to use addons
 - [DESIGN.md](DESIGN.md) - Internal design details
