@@ -1,11 +1,28 @@
-# Preserve execute permission and line endings for scripts
+# Default: All text files use LF
+* text=auto eol=lf
+
+# Shell scripts (explicit)
 *.sh text eol=lf
 *.command text eol=lf
 
-# Windows batch files
+# Windows batch files (CRLF required)
 *.bat text eol=crlf
+*.cmd text eol=crlf
 
 # Binary files
 *.png binary
 *.jpg binary
+*.jpeg binary
+*.gif binary
 *.ico binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.ttf binary
+*.otf binary
+*.exe binary
+*.dll binary
+*.dylib binary
+*.so binary
+*.a binary
+*.lib binary
