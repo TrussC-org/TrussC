@@ -435,6 +435,18 @@ setWindowTitle("title");  // Set title
 
 ---
 
+## Clipboard
+
+```cpp
+// Copy string to clipboard
+setClipboardString("text to copy");
+
+// Get string from clipboard
+string text = getClipboardString();
+```
+
+---
+
 ## Image
 
 ```cpp

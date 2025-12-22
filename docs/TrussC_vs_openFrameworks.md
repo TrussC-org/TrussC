@@ -481,6 +481,13 @@ Reference for oF users finding equivalent features in TrussC.
 | - | `tc::loadXml(path)` | jsonXmlExample | pugixml |
 | - | `tc::saveXml(path, xml)` | jsonXmlExample | |
 
+### **Clipboard**
+
+| openFrameworks | TrussC | Example | Notes |
+|:---|:---|:---|:---|
+| `ofGetClipboardString()` | `tc::getClipboardString()` | - | Get from clipboard |
+| `ofSetClipboardString(s)` | `tc::setClipboardString(s)` | - | Copy to clipboard |
+
 ### **Network**
 
 | openFrameworks | TrussC | Example | Notes |
