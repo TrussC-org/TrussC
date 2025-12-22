@@ -130,23 +130,7 @@ void tcApp::mouseReleased(int x, int y, int button) {
 }
 
 void tcApp::mouseMoved(int x, int y) {
-    // Update hover state
-    // Currently simple implementation (check all buttons)
-    Ray globalRay = Ray::fromScreenPoint2D((float)x, (float)y);
-
-    // Update hover state for each button
-    auto updateHover = [&](CounterButton::Ptr btn) {
-        // Get button's global inverse matrix
-        Mat4 globalInv = btn->getGlobalMatrixInverse();
-        Ray localRay = globalRay.transformed(globalInv);
-
-        float dist;
-        btn->isHovered = btn->hitTest(localRay, dist);
-    };
-
-    updateHover(button1_);
-    updateHover(button2_);
-    updateHover(button3_);
-    updateHover(panelButton1_);
-    updateHover(panelButton2_);
+    // Update hover state using built-in mechanism
+    // This automatically calls onMouseEnter/onMouseLeave on the topmost hit node
+    updateHoverState((float)x, (float)y);
 }

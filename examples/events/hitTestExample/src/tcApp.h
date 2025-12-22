@@ -19,7 +19,6 @@ public:
     Color hoverColor = Color(0.4f, 0.4f, 0.6f);
     Color pressColor = Color(0.2f, 0.2f, 0.3f);
 
-    bool isHovered = false;
     bool isPressed = false;
 
     CounterButton() {
@@ -32,7 +31,7 @@ public:
         // Color based on state
         if (isPressed) {
             setColor(pressColor);
-        } else if (isHovered) {
+        } else if (isMouseOver()) {
             setColor(hoverColor);
         } else {
             setColor(baseColor);
