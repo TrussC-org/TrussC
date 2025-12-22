@@ -149,6 +149,9 @@ constexpr int VERSION_PATCH = 1;
 // Drawing state has been moved to RenderContext
 // ---------------------------------------------------------------------------
 namespace internal {
+    // Clipboard buffer size (for overflow check)
+    inline int clipboardSize = 65536;
+
     // ---------------------------------------------------------------------------
     // Scissor Clipping stack
     // ---------------------------------------------------------------------------
@@ -1022,6 +1025,10 @@ inline void setWindowTitle(const std::string& title) {
 
 // Copy string to clipboard
 inline void setClipboardString(const std::string& text) {
+    if (static_cast<int>(text.size()) >= internal::clipboardSize) {
+        tcLogWarning("Clipboard") << "Text truncated (" << text.size() << " bytes > "
+            << internal::clipboardSize << " buffer). Use WindowSettings::setClipboardSize() to increase.";
+    }
     sapp_set_clipboard_string(text.c_str());
 }
 
@@ -1802,6 +1809,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     // Enable clipboard
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;
+    internal::clipboardSize = settings.clipboardSize;
 
     // Run the app
     sapp_run(&desc);
