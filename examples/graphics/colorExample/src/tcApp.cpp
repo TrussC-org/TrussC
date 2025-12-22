@@ -7,7 +7,7 @@ using namespace std;
 // setup
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    cout << "04_color: Color Space Demo" << endl;
+    cout << "colorExample: Color Space Demo" << endl;
     cout << "  - Space: Switch mode" << endl;
     cout << "  - ESC: Exit" << endl;
     cout << endl;
@@ -16,6 +16,9 @@ void tcApp::setup() {
     cout << "  1: Hue wheel (HSB vs OKLCH)" << endl;
     cout << "  2: Lightness uniformity (OKLab feature)" << endl;
     cout << "  3: Gradient comparison" << endl;
+
+    // Initialize ImGui
+    imguiSetup();
 }
 
 // ---------------------------------------------------------------------------
@@ -36,6 +39,62 @@ void tcApp::draw() {
         case 2: drawLightnessDemo(); break;
         case 3: drawGradientDemo(); break;
     }
+
+    // ImGui
+    imguiBegin();
+    drawGui();
+    imguiEnd();
+}
+
+// ---------------------------------------------------------------------------
+// cleanup
+// ---------------------------------------------------------------------------
+void tcApp::cleanup() {
+    imguiShutdown();
+}
+
+// ---------------------------------------------------------------------------
+// ImGui panel
+// ---------------------------------------------------------------------------
+void tcApp::drawGui() {
+    // Fixed position and size for GUI panel
+    ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(260, getWindowHeight() - 40), ImGuiCond_Always);
+
+    ImGui::Begin("Color Settings", nullptr,
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoCollapse);
+
+    // Mode selector
+    ImGui::SetNextItemWidth(-1);
+    const char* modeNames[] = {
+        "Lerp Comparison",
+        "Hue Wheel",
+        "Lightness Demo",
+        "Gradient Demo"
+    };
+    ImGui::Combo("##mode", &mode_, modeNames, NUM_MODES);
+    ImGui::Separator();
+
+    // Inline color pickers
+    ImGui::Text("Start Color");
+    ImGui::ColorPicker3("##start", color1_,
+        ImGuiColorEditFlags_NoSidePreview |
+        ImGuiColorEditFlags_NoSmallPreview |
+        ImGuiColorEditFlags_PickerHueBar);
+
+    ImGui::Spacing();
+    ImGui::Text("End Color");
+    ImGui::ColorPicker3("##end", color2_,
+        ImGuiColorEditFlags_NoSidePreview |
+        ImGuiColorEditFlags_NoSmallPreview |
+        ImGuiColorEditFlags_PickerHueBar);
+
+    ImGui::Separator();
+    ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+
+    ImGui::End();
 }
 
 // ---------------------------------------------------------------------------
@@ -48,15 +107,21 @@ void tcApp::drawLerpComparison() {
     //   Color c = Color::fromHex(0xFF7F00);         // HEX code
     //   Color c = colors::orange;                   // Predefined color
 
-    // Choose 2 colors (red -> cyan shows the difference clearly)
-    Color c1 = colors::red;
-    Color c2 = colors::cyan;
+    // Use colors from ImGui color picker
+    Color c1(color1_[0], color1_[1], color1_[2], color1_[3]);
+    Color c2(color2_[0], color2_[1], color2_[2], color2_[3]);
 
-    float startX = 100;
-    float endX = 1180;
-    float barHeight = 60;
-    float y = 80;
-    float gap = 100;
+    // Layout (avoid GUI panel on left)
+    float margin = 20;
+    float guiWidth = 280;  // GUI panel width + margin
+    float startX = guiWidth + margin;
+    float endX = getWindowWidth() - margin;
+    float barHeight = 45;
+
+    // Vertically center the content
+    float totalHeight = 5 * barHeight + 4 * 40;  // 5 bars + 4 gaps (including labels)
+    float y = (getWindowHeight() - totalHeight) / 2;
+    float gap = 80;
     int steps = 256;
 
     const char* labels[] = {
@@ -93,22 +158,20 @@ void tcApp::drawLerpComparison() {
 
         y += gap;
     }
-
-    // Display start/end colors
-    setColor(c1);
-    drawRect(30, 80, 50, 50);
-    setColor(c2);
-    drawRect(30, 140, 50, 50);
 }
 
 // ---------------------------------------------------------------------------
 // Hue wheel HSB vs OKLCH
 // ---------------------------------------------------------------------------
 void tcApp::drawHueWheel() {
-    float centerX1 = 320;
-    float centerX2 = 960;
-    float centerY = 360;
-    float radius = 250;
+    // Layout (avoid GUI panel on left)
+    float margin = 20;
+    float guiWidth = 280;
+    float availWidth = getWindowWidth() - guiWidth - margin * 2;
+    float centerX1 = guiWidth + margin + availWidth * 0.25f;
+    float centerX2 = guiWidth + margin + availWidth * 0.75f;
+    float centerY = getWindowHeight() / 2;
+    float radius = std::min(availWidth * 0.22f, (getWindowHeight() - margin * 4) * 0.42f);
     int segments = 360;
 
     // HSB hue wheel
@@ -155,14 +218,22 @@ void tcApp::drawHueWheel() {
 // Lightness uniformity demo
 // ---------------------------------------------------------------------------
 void tcApp::drawLightnessDemo() {
-    float startX = 100;
-    float barWidth = 1080;
-    float barHeight = 80;
+    // Layout (avoid GUI panel on left)
+    float margin = 20;
+    float guiWidth = 280;
+    float startX = guiWidth + margin;
+    float barWidth = getWindowWidth() - startX - margin;
+    float barHeight = 60;
     int segments = 360;
     float segmentWidth = barWidth / segments;
 
+    // Vertically center the 4 bars
+    float gap = 100;
+    float totalHeight = 4 * barHeight + 3 * gap;
+    float baseY = (getWindowHeight() - totalHeight) / 2;
+
     // HSB: Same brightness (B=1) but perceptual lightness varies
-    float y1 = 150;
+    float y1 = baseY;
     for (int i = 0; i < segments; i++) {
         float hue = (float)i / segments * TAU;
         Color c = ColorHSB(hue, 1.0f, 1.0f).toRGB();
@@ -171,7 +242,7 @@ void tcApp::drawLightnessDemo() {
     }
 
     // Convert HSB to grayscale to check lightness
-    float y2 = 250;
+    float y2 = baseY + barHeight + gap;
     for (int i = 0; i < segments; i++) {
         float hue = (float)i / segments * TAU;
         Color c = ColorHSB(hue, 1.0f, 1.0f).toRGB();
@@ -182,7 +253,7 @@ void tcApp::drawLightnessDemo() {
     }
 
     // OKLCH: Perceptually uniform lightness with same L
-    float y3 = 400;
+    float y3 = baseY + 2 * (barHeight + gap);
     for (int i = 0; i < segments; i++) {
         float hue = (float)i / segments * TAU;
         Color c = ColorOKLCH(0.7f, 0.15f, hue).toRGB().clamped();
@@ -191,7 +262,7 @@ void tcApp::drawLightnessDemo() {
     }
 
     // Convert OKLCH to grayscale
-    float y4 = 500;
+    float y4 = baseY + 3 * (barHeight + gap);
     for (int i = 0; i < segments; i++) {
         float hue = (float)i / segments * TAU;
         Color c = ColorOKLCH(0.7f, 0.15f, hue).toRGB().clamped();
@@ -218,21 +289,31 @@ void tcApp::drawGradientDemo() {
         const char* name;
     };
 
+    // Use custom colors from ImGui
+    Color customC1(color1_[0], color1_[1], color1_[2], color1_[3]);
+    Color customC2(color2_[0], color2_[1], color2_[2], color2_[3]);
+
     ColorPair pairs[] = {
+        { customC1, customC2, "Custom (from picker)" },
         { colors::red, colors::blue, "Red -> Blue" },
         { colors::yellow, colors::magenta, "Yellow -> Magenta" },
         { Color(0.2f, 0.8f, 0.2f), Color(0.8f, 0.2f, 0.8f), "Green -> Purple" },
-        { colors::white, colors::black, "White -> Black" },
     };
 
-    float startX = 150;
-    float barWidth = 500;
-    float barHeight = 30;
+    // Layout (avoid GUI panel on left)
+    float margin = 20;
+    float guiWidth = 280;
+    float availWidth = getWindowWidth() - guiWidth - margin * 2;
+    float startX = guiWidth + margin;
+    float barWidth = availWidth * 0.45f;
+    float barHeight = 22;
     int steps = 64;
     float stepWidth = barWidth / steps;
 
-    float y = 60;
-    float colGap = 550;
+    // Vertically center
+    float totalHeight = 4 * (barHeight * 2 + 60);  // 4 pairs
+    float y = (getWindowHeight() - totalHeight) / 2 + 20;
+    float colGap = availWidth * 0.5f;
 
     for (int p = 0; p < 4; p++) {
         auto& pair = pairs[p];
