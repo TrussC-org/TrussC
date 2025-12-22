@@ -20,7 +20,7 @@ trussc/                           # TrussC core library
 │   │   ├── events/               # Event system
 │   │   ├── utils/                # Utilities
 │   │   ├── 3d/                   # 3D features
-│   │   ├── gl/                   # Low-level graphics
+│   │   ├── gpu/                  # GPU resources (Texture, Fbo, Shader)
 │   │   ├── sound/                # Sound (.h + .cpp)
 │   │   ├── network/              # Network (.h + .cpp)
 │   │   └── video/                # Video

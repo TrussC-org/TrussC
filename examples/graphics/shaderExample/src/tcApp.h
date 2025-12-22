@@ -4,7 +4,7 @@
 #include "tcBaseApp.h"
 using namespace tc;
 using namespace std;
-#include "tc/gl/tcShader.h"
+#include "tc/gpu/tcShader.h"
 
 class tcApp : public App {
 public:
