@@ -12,6 +12,28 @@
 
 namespace fs = std::filesystem;
 
+// コマンドを実行して出力をキャプチャ
+static pair<int, string> executeCommand(const string& cmd) {
+    string output;
+    string fullCmd = cmd + " 2>&1";
+#ifdef _WIN32
+    FILE* pipe = _popen(fullCmd.c_str(), "r");
+#else
+    FILE* pipe = popen(fullCmd.c_str(), "r");
+#endif
+    if (!pipe) return {-1, "Failed to execute command"};
+    char buffer[256];
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        output += buffer;
+    }
+#ifdef _WIN32
+    int result = _pclose(pipe);
+#else
+    int result = pclose(pipe);
+#endif
+    return {result, output};
+}
+
 void tcApp::setup() {
     imguiSetup();
 
@@ -75,6 +97,10 @@ void tcApp::mouseMoved(int x, int y) {
 }
 
 void tcApp::mouseDragged(int x, int y, int button) {
+    redraw();
+}
+
+void tcApp::mouseScrolled(float deltaX, float deltaY) {
     redraw();
 }
 
@@ -273,15 +299,54 @@ void tcApp::draw() {
 
     ImGui::Spacing();
 
-    // IDE selection
+    // IDE selection (OS-specific options)
     ImGui::Text("IDE");
     ImGui::SetNextItemWidth(-1);
-    const char* ideItems[] = { "CMake only", "VSCode", "Cursor", "Xcode (macOS)", "Visual Studio (Windows)" };
-    int ideIndex = static_cast<int>(ideType);
-    if (ImGui::Combo("##ide", &ideIndex, ideItems, 5)) {
-        ideType = static_cast<IdeType>(ideIndex);
-        saveConfig();  // Save on IDE change
+#ifdef __APPLE__
+    // macOS: CMake only, VSCode, Cursor, Xcode
+    const char* ideItems[] = { "CMake only", "VSCode", "Cursor", "Xcode" };
+    int displayIndex = static_cast<int>(ideType);
+    if (ideType == IdeType::VisualStudio) {
+        displayIndex = 0;  // Fallback
+        ideType = IdeType::CMakeOnly;
     }
+    if (ImGui::Combo("##ide", &displayIndex, ideItems, 4)) {
+        ideType = static_cast<IdeType>(displayIndex);
+        saveConfig();
+    }
+#elif defined(_WIN32)
+    // Windows: CMake only, VSCode, Cursor, Visual Studio
+    const char* ideItems[] = { "CMake only", "VSCode", "Cursor", "Visual Studio" };
+    int displayIndex;
+    if (ideType == IdeType::VisualStudio) {
+        displayIndex = 3;
+    } else if (ideType == IdeType::Xcode) {
+        displayIndex = 0;  // Fallback
+        ideType = IdeType::CMakeOnly;
+    } else {
+        displayIndex = static_cast<int>(ideType);
+    }
+    if (ImGui::Combo("##ide", &displayIndex, ideItems, 4)) {
+        if (displayIndex == 3) {
+            ideType = IdeType::VisualStudio;
+        } else {
+            ideType = static_cast<IdeType>(displayIndex);
+        }
+        saveConfig();
+    }
+#else
+    // Linux: CMake only, VSCode, Cursor
+    const char* ideItems[] = { "CMake only", "VSCode", "Cursor" };
+    int displayIndex = static_cast<int>(ideType);
+    if (displayIndex > 2) {
+        displayIndex = 0;  // Fallback
+        ideType = IdeType::CMakeOnly;
+    }
+    if (ImGui::Combo("##ide", &displayIndex, ideItems, 3)) {
+        ideType = static_cast<IdeType>(displayIndex);
+        saveConfig();
+    }
+#endif
 
     ImGui::Spacing();
 
@@ -336,14 +401,29 @@ void tcApp::draw() {
         }
     }
 
-    // Generation log display
+    // Generation log display (clickable to copy)
     if (isGenerating || !generatingLog.empty()) {
         ImGui::Spacing();
         ImGui::BeginChild("##log", ImVec2(0, 85), true);
-        lock_guard<mutex> lock(logMutex);
+        string logCopy;
+        {
+            lock_guard<mutex> lock(logMutex);
+            logCopy = generatingLog;
+        }
         ImGui::PushTextWrapPos(ImGui::GetWindowWidth() - 10);
-        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "%s", generatingLog.c_str());
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "%s", logCopy.c_str());
         ImGui::PopTextWrapPos();
+
+        // Click to copy log
+        if (ImGui::IsItemClicked() && !logCopy.empty()) {
+            setClipboardString(logCopy);
+            showCopiedPopup = true;
+            callAfter(2.0, [this]() {
+                showCopiedPopup = false;
+                redraw();
+            });
+        }
+
         // Auto-scroll to bottom
         if (isGenerating) {
             ImGui::SetScrollHereY(1.0f);
@@ -351,16 +431,30 @@ void tcApp::draw() {
         ImGui::EndChild();
     }
 
-    // Status message (wrap at window width - 10px)
+    // Status message (clickable to copy)
     if (!statusMessage.empty()) {
         ImGui::Spacing();
         ImGui::PushTextWrapPos(ImGui::GetWindowWidth() - 10);
-        if (statusIsError) {
-            ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", statusMessage.c_str());
-        } else {
-            ImGui::TextColored(ImVec4(0.4f, 1, 0.4f, 1), "%s", statusMessage.c_str());
-        }
+        ImVec4 color = statusIsError ? ImVec4(1, 0.4f, 0.4f, 1) : ImVec4(0.4f, 1, 0.4f, 1);
+        ImGui::TextColored(color, "%s", statusMessage.c_str());
         ImGui::PopTextWrapPos();
+
+        // Click to copy
+        if (ImGui::IsItemClicked()) {
+            setClipboardString(statusMessage);
+            showCopiedPopup = true;
+            callAfter(2.0, [this]() {
+                showCopiedPopup = false;
+                redraw();
+            });
+        }
+    }
+
+    // Copied popup
+    if (showCopiedPopup) {
+        ImGui::BeginTooltip();
+        ImGui::Text("Copied!");
+        ImGui::EndTooltip();
     }
 
     // TC_ROOT settings button (bottom)
@@ -691,11 +785,16 @@ void tcApp::generateXcodeProject(const string& path) {
     // TRUSSC_DIR is written directly in CMakeLists.txt, no environment variable needed
     string cmd = "cd \"" + xcodePath + "\" && /opt/homebrew/bin/cmake -G Xcode ..";
     tcLogNotice("tcApp") << "Xcode cmd: " << cmd;
-    int result = system(cmd.c_str());
 
+    auto [result, output] = executeCommand(cmd);
+    if (!output.empty()) {
+        tcLogNotice("tcApp") << "CMake output:\n" << output;
+        // CMake出力をログエリアに追加
+        lock_guard<mutex> lock(logMutex);
+        generatingLog += "\n" + output;
+    }
     if (result != 0) {
-        tcLogWarning("tcApp") << "Failed to generate Xcode project (exit code: " << result << ")";
-        return;
+        throw runtime_error("Failed to generate Xcode project");
     }
 
     // Generate two schemes: Debug and Release
@@ -787,10 +886,16 @@ void tcApp::generateVisualStudioProject(const string& path) {
     string cmd = "cd \"" + vsPath + "\" && cmake -G \"Visual Studio 17 2022\" ..";
 #endif
     tcLogNotice("tcApp") << "Visual Studio cmd: " << cmd;
-    int result = system(cmd.c_str());
 
+    auto [result, output] = executeCommand(cmd);
+    if (!output.empty()) {
+        tcLogNotice("tcApp") << "CMake output:\n" << output;
+        // CMake出力をログエリアに追加
+        lock_guard<mutex> lock(logMutex);
+        generatingLog += "\n" + output;
+    }
     if (result != 0) {
-        tcLogWarning("tcApp") << "Failed to generate Visual Studio project (exit code: " << result << ")";
+        throw runtime_error("Failed to generate Visual Studio project");
     }
 }
 

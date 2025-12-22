@@ -30,6 +30,7 @@ public:
     void mouseReleased(int x, int y, int button) override;
     void mouseMoved(int x, int y) override;
     void mouseDragged(int x, int y, int button) override;
+    void mouseScrolled(float deltaX, float deltaY) override;
 
     // Key events (for redraw)
     void keyPressed(int key) override;
@@ -55,6 +56,9 @@ private:
     bool isImportedProject = false;     // Whether this is an imported project
     string importedProjectPath;         // Path of imported project
     string pendingImportPath;           // Deferred import (to avoid crash during InputText edit)
+
+    // Copied popup
+    bool showCopiedPopup = false;
 
     // Generation thread
     atomic<bool> isGenerating{false};   // Generation in progress flag

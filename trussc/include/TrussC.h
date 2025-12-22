@@ -1016,6 +1016,21 @@ inline void setWindowTitle(const std::string& title) {
     sapp_set_window_title(title.c_str());
 }
 
+// ---------------------------------------------------------------------------
+// Clipboard
+// ---------------------------------------------------------------------------
+
+// Copy string to clipboard
+inline void setClipboardString(const std::string& text) {
+    sapp_set_clipboard_string(text.c_str());
+}
+
+// Get string from clipboard
+inline std::string getClipboardString() {
+    const char* str = sapp_get_clipboard_string();
+    return str ? str : "";
+}
+
 // Change window size (specify in size corresponding to coordinate system)
 // pixelPerfect=true: specify in framebuffer size
 // pixelPerfect=false: specify in logical size
@@ -1777,6 +1792,10 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     desc.enable_dragndrop = true;
     desc.max_dropped_files = 16;           // Max 16 files
     desc.max_dropped_file_path_length = 2048;  // Max path length
+
+    // Enable clipboard
+    desc.enable_clipboard = true;
+    desc.clipboard_size = 8192;  // 8KB buffer
 
     // Run the app
     sapp_run(&desc);
