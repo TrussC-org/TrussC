@@ -27,15 +27,23 @@ winget install Kitware.CMake
 sudo apt install cmake
 ```
 
-### Editor Setup (VSCode / Cursor)
+### Editor Setup
 
-Install the following extensions:
+#### VSCode
 
-| Extension | Purpose | Required OS |
-|-----------|---------|-------------|
-| **CMake Tools** | Build integration | All |
-| **C/C++** | IntelliSense + debugging | All (Windows uses this for debugging) |
-| **CodeLLDB** | Debug execution | macOS / Linux |
+| Extension | Purpose |
+|-----------|---------|
+| **CMake Tools** | Build integration |
+| **C/C++** | IntelliSense + debugging |
+| **CodeLLDB** | Debug execution (macOS / Linux) |
+
+#### Cursor
+
+| Extension | Purpose |
+|-----------|---------|
+| **CMake Tools** | Build integration |
+| **clangd** | IntelliSense (C/C++ extension is blocked in Cursor) |
+| **CodeLLDB** | Debug execution (macOS / Linux) |
 
 ---
 
