@@ -1337,6 +1337,7 @@ struct WindowSettings {
     bool pixelPerfect = false;  // true: coords = framebuffer size, false: coords = logical size
     int sampleCount = 4;  // MSAA (default 4x, 8x not supported on some devices)
     bool fullscreen = false;
+    int clipboardSize = 65536;  // Clipboard buffer size (default 64KB)
     // bool headless = false;  // For future use
 
     WindowSettings& setSize(int w, int h) {
@@ -1370,6 +1371,11 @@ struct WindowSettings {
 
     WindowSettings& setFullscreen(bool enabled) {
         fullscreen = enabled;
+        return *this;
+    }
+
+    WindowSettings& setClipboardSize(int size) {
+        clipboardSize = size;
         return *this;
     }
 };
@@ -1795,7 +1801,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 
     // Enable clipboard
     desc.enable_clipboard = true;
-    desc.clipboard_size = 8192;  // 8KB buffer
+    desc.clipboard_size = settings.clipboardSize;
 
     // Run the app
     sapp_run(&desc);
