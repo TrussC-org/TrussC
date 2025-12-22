@@ -79,18 +79,37 @@ void tcApp::draw() {
     drawBitmapString(ss.str(), 20, 20);
 }
 
-void tcApp::drawNoiseTexture() {
+void tcApp::updateNoiseImage(bool useFbm) {
     int w = getWindowWidth();
     int h = getWindowHeight();
-    int step = 8;
 
-    for (int y = 0; y < h; y += step) {
-        for (int x = 0; x < w; x += step) {
-            float n = noise(x * noiseScale, y * noiseScale, time);
-            setColor(n);
-            drawRect(x, y, step, step);
+    // Reallocate if size changed
+    if (w != lastWidth || h != lastHeight) {
+        noiseImage.allocate(w, h);
+        lastWidth = w;
+        lastHeight = h;
+    }
+
+    // Fill pixels with noise
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            float n;
+            if (useFbm) {
+                n = fbm(x * noiseScale, y * noiseScale, time, 6, 2.0f, 0.5f);
+            } else {
+                n = noise(x * noiseScale, y * noiseScale, time);
+            }
+            unsigned char gray = (unsigned char)(n * 255);
+            noiseImage.setColor(x, y, Color::fromBytes(gray, gray, gray));
         }
     }
+    noiseImage.update();
+}
+
+void tcApp::drawNoiseTexture() {
+    updateNoiseImage(false);
+    setColor(1.0f);
+    noiseImage.draw(0, 0);
 }
 
 void tcApp::drawFlowField() {
@@ -124,17 +143,9 @@ void tcApp::drawFlowParticles() {
 }
 
 void tcApp::drawFbmTexture() {
-    int w = getWindowWidth();
-    int h = getWindowHeight();
-    int step = 8;
-
-    for (int y = 0; y < h; y += step) {
-        for (int x = 0; x < w; x += step) {
-            float n = fbm(x * noiseScale, y * noiseScale, time, 6, 2.0f, 0.5f);
-            setColor(n);
-            drawRect(x, y, step, step);
-        }
-    }
+    updateNoiseImage(true);
+    setColor(1.0f);
+    noiseImage.draw(0, 0);
 }
 
 void tcApp::keyPressed(int key) {

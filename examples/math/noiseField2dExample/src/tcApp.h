@@ -33,10 +33,16 @@ private:
     };
     std::vector<Particle> particles;
 
+    // Noise texture (drawn to image for efficiency)
+    Image noiseImage;
+    int lastWidth = 0;
+    int lastHeight = 0;
+
     void drawNoiseTexture();
     void drawFlowField();
     void drawFlowParticles();
     void drawFbmTexture();
+    void updateNoiseImage(bool useFbm);
 
     void resetParticles();
 };
