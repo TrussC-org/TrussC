@@ -566,7 +566,7 @@ string tcApp::getTrusscDirValue(const string& projectPath) {
 
     // Calculate relative path from project to trussc
     fs::path relPath = fs::relative(trusscPath, projPath);
-    return "${CMAKE_CURRENT_SOURCE_DIR}/" + relPath.string();
+    return "${CMAKE_CURRENT_SOURCE_DIR}/" + relPath.generic_string();
 }
 
 bool tcApp::generateProject() {
