@@ -87,8 +87,7 @@ void tcApp::drawNoiseTexture() {
     for (int y = 0; y < h; y += step) {
         for (int x = 0; x < w; x += step) {
             float n = noise(x * noiseScale, y * noiseScale, time);
-            int gray = (int)(n * 255);
-            setColor(gray);
+            setColor(n);
             drawRect(x, y, step, step);
         }
     }
@@ -132,8 +131,7 @@ void tcApp::drawFbmTexture() {
     for (int y = 0; y < h; y += step) {
         for (int x = 0; x < w; x += step) {
             float n = fbm(x * noiseScale, y * noiseScale, time, 6, 2.0f, 0.5f);
-            int gray = (int)(n * 255);
-            setColor(gray);
+            setColor(n);
             drawRect(x, y, step, step);
         }
     }
