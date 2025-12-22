@@ -12,6 +12,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLEAN_BUILD=false
 VERBOSE=false
+WEB_BUILD=false
 
 # Colored output
 RED='\033[0;31m'
@@ -27,11 +28,13 @@ show_help() {
     echo "Options:"
     echo "  --clean    Clean build (delete CMake cache and rebuild)"
     echo "  --verbose  Show detailed build output"
+    echo "  --web      Build for WebAssembly using Emscripten"
     echo "  --help     Show this help"
     echo ""
     echo "Examples:"
     echo "  $0              # Build all examples"
     echo "  $0 --clean      # Clean build"
+    echo "  $0 --web        # Build for WebAssembly"
 }
 
 # Parse arguments
@@ -43,6 +46,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --verbose)
             VERBOSE=true
+            shift
+            ;;
+        --web)
+            WEB_BUILD=true
             shift
             ;;
         --help)
@@ -58,6 +65,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo -e "${BLUE}=== TrussC Examples Build Script ===${NC}"
+if [ "$WEB_BUILD" = true ]; then
+    echo -e "${YELLOW}Mode: WebAssembly (Emscripten)${NC}"
+fi
 echo ""
 
 # Number of parallel jobs (CPU cores)
@@ -65,11 +75,17 @@ JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 echo -e "Using ${JOBS} parallel jobs"
 echo ""
 
-# Search for build directories
-BUILD_DIRS=$(find "$SCRIPT_DIR" -type d -name "build" | sort)
+# Search for example directories (those with CMakeLists.txt)
+if [ "$WEB_BUILD" = true ]; then
+    # For web build, find example directories and create/use build-web
+    EXAMPLE_DIRS=$(find "$SCRIPT_DIR" -name "CMakeLists.txt" -path "*/examples/*" | xargs -I{} dirname {} | sort)
+else
+    # For native build, find existing build directories
+    EXAMPLE_DIRS=$(find "$SCRIPT_DIR" -type d -name "build" | xargs -I{} dirname {} | sort)
+fi
 
-if [ -z "$BUILD_DIRS" ]; then
-    echo -e "${RED}No build directories found!${NC}"
+if [ -z "$EXAMPLE_DIRS" ]; then
+    echo -e "${RED}No example directories found!${NC}"
     exit 1
 fi
 
@@ -79,13 +95,21 @@ SUCCESS=0
 FAILED=0
 FAILED_LIST=()
 
-# Execute build in each build directory
-for BUILD_DIR in $BUILD_DIRS; do
-    # Extract example name (e.g., 3d/ofNodeExample)
-    EXAMPLE_NAME=$(echo "$BUILD_DIR" | sed "s|$SCRIPT_DIR/||" | sed 's|/build$||')
+# Execute build for each example
+for EXAMPLE_DIR in $EXAMPLE_DIRS; do
+    # Extract example name (e.g., 3d/3DPrimitivesExample)
+    EXAMPLE_NAME=$(echo "$EXAMPLE_DIR" | sed "s|$SCRIPT_DIR/||")
     TOTAL=$((TOTAL + 1))
 
     echo -e "${YELLOW}[$TOTAL] Building: $EXAMPLE_NAME${NC}"
+
+    # Determine build directory
+    if [ "$WEB_BUILD" = true ]; then
+        BUILD_DIR="$EXAMPLE_DIR/build-web"
+        mkdir -p "$BUILD_DIR"
+    else
+        BUILD_DIR="$EXAMPLE_DIR/build"
+    fi
 
     cd "$BUILD_DIR"
 
@@ -96,15 +120,20 @@ for BUILD_DIR in $BUILD_DIRS; do
     fi
 
     # CMake configure
+    CMAKE_CMD="cmake .."
+    if [ "$WEB_BUILD" = true ]; then
+        CMAKE_CMD="emcmake cmake .."
+    fi
+
     if [ "$VERBOSE" = true ]; then
-        if ! cmake ..; then
+        if ! eval "$CMAKE_CMD"; then
             echo -e "${RED}  CMake configure failed!${NC}"
             FAILED=$((FAILED + 1))
             FAILED_LIST+=("$EXAMPLE_NAME (cmake)")
             continue
         fi
     else
-        if ! cmake .. > /dev/null 2>&1; then
+        if ! eval "$CMAKE_CMD" > /dev/null 2>&1; then
             echo -e "${RED}  CMake configure failed!${NC}"
             FAILED=$((FAILED + 1))
             FAILED_LIST+=("$EXAMPLE_NAME (cmake)")
