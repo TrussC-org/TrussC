@@ -665,7 +665,7 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
                 ComPtr<IMFMediaError> error;
                 mediaEngine_->GetError(&error);
                 if (error) {
-                    err = error->GetErrorCode();
+                    err = static_cast<MF_MEDIA_ENGINE_ERR>(error->GetErrorCode());
                     tcLogError("VideoPlayer") << "Media error: " << static_cast<int>(err);
                 }
             }
