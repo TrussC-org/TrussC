@@ -1840,16 +1840,16 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #include "tc/graphics/tcPixels.h"
 
 // TrussC texture
-#include "tc/gl/tcTexture.h"
+#include "tc/gpu/tcTexture.h"
 
 // TrussC HasTexture interface
-#include "tc/gl/tcHasTexture.h"
+#include "tc/gpu/tcHasTexture.h"
 
 // TrussC image
 #include "tc/graphics/tcImage.h"
 
 // TrussC FBO (offscreen rendering)
-#include "tc/gl/tcFbo.h"
+#include "tc/gpu/tcFbo.h"
 
 // TrussC video input (webcam)
 #include "tc/video/tcVideoGrabber.h"
