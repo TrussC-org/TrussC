@@ -139,6 +139,32 @@ tc::colorFromHSB(hue, sat, brightness);  // From HSB
 tc::colors::cornflowerBlue;              // Predefined colors
 ```
 
+## Why TAU?
+
+TrussC uses TAU (τ = 2π) as the primary circle constant instead of PI.
+
+```cpp
+// TAU = one full rotation
+rotate(TAU * 0.25f);   // Quarter turn (90°)
+rotate(TAU * 0.5f);    // Half turn (180°)
+rotate(TAU);           // Full turn (360°)
+
+// PI is deprecated (will emit compiler warning)
+rotate(PI);            // Warning: Use TAU instead
+```
+
+**Why?** TAU maps directly to the unit circle:
+- `TAU * 0.25` = quarter turn = 90°
+- `TAU * 0.5` = half turn = 180°
+- `TAU * 0.75` = three-quarter turn = 270°
+- `TAU` = full turn = 360°
+
+With PI, you constantly multiply by 2 for full rotations. TAU eliminates this mental overhead.
+
+PI is still available for compatibility, but marked `[[deprecated]]` to encourage TAU adoption.
+
+See also: [The Tau Manifesto](https://tauday.com/tau-manifesto)
+
 ## Dependencies
 
 sokol, Dear ImGui, stb, miniaudio, etc. are all bundled in `trussc/include/`.

@@ -14,7 +14,8 @@ namespace trussc {
 constexpr float TAU = 6.28318530717958647693f;      // Circle constant tau = 2pi
 constexpr float HALF_TAU = TAU / 2.0f;              // tau/2 = pi
 constexpr float QUARTER_TAU = TAU / 4.0f;           // tau/4 = pi/2
-constexpr float PI = HALF_TAU;                      // pi = tau/2 (for compatibility)
+[[deprecated("Use TAU instead. PI = TAU/2, but TAU is more intuitive for rotations.")]]
+constexpr float PI = HALF_TAU;
 
 // =============================================================================
 // Vec2 - 2D vector
