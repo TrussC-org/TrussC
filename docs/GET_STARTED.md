@@ -5,6 +5,14 @@ Built on C++20 + sokol, it's simple to write and runs cross-platform.
 
 ---
 
+## AI Assistant
+
+[![TrussC Assistant](images/TrussC_assistant.png)](https://gemini.google.com/gem/16aq3ccVPl33j6xSMyE7MWXDjaZvauL0I)
+
+**[TrussC Assistant](https://gemini.google.com/gem/16aq3ccVPl33j6xSMyE7MWXDjaZvauL0I)** - A Gemini-based AI that knows TrussC. Ask questions about APIs, get code examples, or troubleshoot issues.
+
+---
+
 ## 1. Set Up Your Environment
 
 ### Requirements
