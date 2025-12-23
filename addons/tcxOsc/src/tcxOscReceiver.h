@@ -12,31 +12,31 @@
 namespace trussc {
 
 // =============================================================================
-// OscReceiver - OSC 受信クラス
+// OscReceiver - OSC receiver class
 // =============================================================================
 class OscReceiver {
 public:
-    // イベント
-    Event<OscMessage> onMessageReceived;   // メッセージ受信
-    Event<OscBundle> onBundleReceived;     // バンドル受信
-    Event<std::string> onParseError;       // パースエラー（ロバスト性のため）
+    // Events
+    Event<OscMessage> onMessageReceived;   // Message received
+    Event<OscBundle> onBundleReceived;     // Bundle received
+    Event<std::string> onParseError;       // Parse error (for robustness)
 
     OscReceiver() = default;
     ~OscReceiver() { close(); }
 
-    // コピー禁止
+    // Non-copyable
     OscReceiver(const OscReceiver&) = delete;
     OscReceiver& operator=(const OscReceiver&) = delete;
 
     // -------------------------------------------------------------------------
-    // 設定
+    // Setup
     // -------------------------------------------------------------------------
 
-    // 受信を開始
+    // Start receiving
     bool setup(int port) {
         port_ = port;
 
-        // 受信イベントを設定
+        // Set receive event handler
         socket_.onReceive.listen(receiveListener_, [this](UdpReceiveEventArgs& args) {
             handleReceive(args);
         });
@@ -46,10 +46,10 @@ public:
             onParseError.notify(msg);
         });
 
-        return socket_.bind(port, true);  // 受信スレッド自動開始
+        return socket_.bind(port, true);  // Auto-start receive thread
     }
 
-    // 閉じる
+    // Close
     void close() {
         socket_.close();
         receiveListener_.disconnect();
@@ -58,24 +58,24 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // 情報
+    // Info
     // -------------------------------------------------------------------------
 
     int getPort() const { return port_; }
     bool isListening() const { return socket_.isReceiving(); }
 
     // -------------------------------------------------------------------------
-    // ポーリング API（初回呼び出しでバッファ有効化）
+    // Polling API (buffer enabled on first call)
     // -------------------------------------------------------------------------
 
-    // 未読メッセージがあるか（初回呼び出しでバッファ有効化）
+    // Check if there are unread messages (buffer enabled on first call)
     bool hasNewMessage() {
         bufferEnabled_ = true;
         std::lock_guard<std::mutex> lock(queueMutex_);
         return !messageQueue_.empty();
     }
 
-    // 次のメッセージを取得（キューから削除）
+    // Get next message (removes from queue)
     bool getNextMessage(OscMessage& msg) {
         std::lock_guard<std::mutex> lock(queueMutex_);
         if (messageQueue_.empty()) return false;
@@ -84,11 +84,11 @@ public:
         return true;
     }
 
-    // バッファサイズを設定（デフォルト100件）
+    // Set buffer size (default 100)
     void setBufferSize(size_t size) {
         std::lock_guard<std::mutex> lock(queueMutex_);
         bufferMax_ = size;
-        // 現在のキューが上限超えてたら削る
+        // Trim queue if over limit
         while (messageQueue_.size() > bufferMax_) {
             messageQueue_.pop();
         }
@@ -113,12 +113,12 @@ private:
             return;
         }
 
-        // バンドルかメッセージか判定
+        // Determine if bundle or message
         if (OscBundle::isBundle(data, size)) {
             bool ok = false;
             OscBundle bundle = OscBundle::fromBytes(data, size, ok);
             if (ok) {
-                // バンドル内のメッセージも個別に通知
+                // Dispatch messages inside bundle individually
                 dispatchBundle(bundle);
             }
             else {
@@ -130,7 +130,7 @@ private:
             bool ok = false;
             OscMessage msg = OscMessage::fromBytes(data, size, ok);
             if (ok) {
-                // バッファ有効ならキューに追加
+                // Add to queue if buffer enabled
                 if (bufferEnabled_) {
                     std::lock_guard<std::mutex> lock(queueMutex_);
                     messageQueue_.push(msg);
@@ -138,7 +138,7 @@ private:
                         messageQueue_.pop();
                     }
                 }
-                // リスナーには常に通知
+                // Always notify listeners
                 onMessageReceived.notify(msg);
             }
             else {
@@ -148,14 +148,14 @@ private:
         }
     }
 
-    // バンドル内のメッセージを再帰的に通知
+    // Recursively dispatch messages inside bundle
     void dispatchBundle(OscBundle bundle) {
         onBundleReceived.notify(bundle);
 
         for (size_t i = 0; i < bundle.getElementCount(); ++i) {
             if (bundle.isMessage(i)) {
                 OscMessage msg = bundle.getMessageAt(i);
-                // バッファ有効ならキューに追加
+                // Add to queue if buffer enabled
                 if (bufferEnabled_) {
                     std::lock_guard<std::mutex> lock(queueMutex_);
                     messageQueue_.push(msg);
@@ -176,7 +176,7 @@ private:
     EventListener receiveListener_;
     EventListener errorListener_;
 
-    // ポーリング用バッファ
+    // Polling buffer
     std::queue<OscMessage> messageQueue_;
     std::mutex queueMutex_;
     std::atomic<bool> bufferEnabled_{false};

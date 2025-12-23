@@ -1,5 +1,5 @@
 // =============================================================================
-// tcxBox2dPolygon.cpp - Box2D ポリゴンボディ
+// tcxBox2dPolygon.cpp - Box2D Polygon Body
 // =============================================================================
 
 #include "tcxBox2dPolygon.h"
@@ -23,31 +23,31 @@ PolyShape& PolyShape::operator=(PolyShape&& other) noexcept {
 
 void PolyShape::setup(World& world, const std::vector<tc::Vec2>& vertices, float cx, float cy) {
     if (vertices.size() < 3 || vertices.size() > 8) {
-        // Box2Dは3〜8頂点のみサポート
+        // Box2D only supports 3-8 vertices
         return;
     }
 
     world_ = &world;
     vertices_ = vertices;
 
-    // ボディ定義
+    // Body definition
     b2BodyDef bodyDef;
     bodyDef.type = b2_dynamicBody;
     bodyDef.position = World::toBox2d(cx, cy);
 
     body_ = world.getWorld()->CreateBody(&bodyDef);
 
-    // 頂点をBox2D形式に変換
+    // Convert vertices to Box2D format
     std::vector<b2Vec2> b2Vertices(vertices.size());
     for (size_t i = 0; i < vertices.size(); ++i) {
         b2Vertices[i] = World::toBox2d(vertices[i]);
     }
 
-    // ポリゴン形状
+    // Polygon shape
     b2PolygonShape polygon;
     polygon.Set(b2Vertices.data(), static_cast<int32>(b2Vertices.size()));
 
-    // フィクスチャ定義
+    // Fixture definition
     b2FixtureDef fixtureDef;
     fixtureDef.shape = &polygon;
     fixtureDef.density = 1.0f;
@@ -56,10 +56,10 @@ void PolyShape::setup(World& world, const std::vector<tc::Vec2>& vertices, float
 
     body_->CreateFixture(&fixtureDef);
 
-    // UserData に Body* を保存（World::getBodyAtPoint() で使用）
+    // Store Body* in UserData (used by World::getBodyAtPoint())
     body_->GetUserData().pointer = reinterpret_cast<uintptr_t>(this);
 
-    // Node の初期位置を設定
+    // Set Node's initial position
     x = cx;
     y = cy;
 }
@@ -80,7 +80,7 @@ void PolyShape::setupRegular(World& world, float cx, float cy, float radius, int
     float angleStep = 2.0f * M_PI / sides;
 
     for (int i = 0; i < sides; ++i) {
-        float angle = i * angleStep - M_PI / 2;  // 上から開始
+        float angle = i * angleStep - M_PI / 2;  // Start from top
         vertices[i] = tc::Vec2(
             std::cos(angle) * radius,
             std::sin(angle) * radius
@@ -90,11 +90,11 @@ void PolyShape::setupRegular(World& world, float cx, float cy, float radius, int
     setup(world, vertices, cx, cy);
 }
 
-// Node用: 原点(0,0)に描画（drawTree()が変換を適用する）
+// For Node: draw at origin (0,0) (drawTree() applies transform)
 void PolyShape::draw() {
     if (!body_ || vertices_.empty()) return;
 
-    // ポリゴンを線で描画（原点中心）
+    // Draw polygon with lines (centered at origin)
     for (size_t i = 0; i < vertices_.size(); ++i) {
         size_t next = (i + 1) % vertices_.size();
         tc::drawLine(vertices_[i].x, vertices_[i].y,
@@ -105,18 +105,18 @@ void PolyShape::draw() {
 void PolyShape::drawFill() {
     if (!body_ || vertices_.empty()) return;
 
-    // 三角形ファンで塗りつぶし（原点中心）
+    // Fill with triangle fan (centered at origin)
     tc::Mesh mesh;
     mesh.setMode(tc::PrimitiveMode::TriangleFan);
 
-    // 中心点
+    // Center point
     mesh.addVertex(tc::Vec3(0, 0, 0));
 
-    // 頂点
+    // Vertices
     for (const auto& v : vertices_) {
         mesh.addVertex(tc::Vec3(v.x, v.y, 0));
     }
-    // 最初の頂点に戻る
+    // Return to first vertex
     mesh.addVertex(tc::Vec3(vertices_[0].x, vertices_[0].y, 0));
 
     mesh.draw();

@@ -1,5 +1,5 @@
 // =============================================================================
-// tcxBox2dRect.cpp - Box2D 矩形ボディ
+// tcxBox2dRect.cpp - Box2D Rectangle Body
 // =============================================================================
 
 #include "tcxBox2dRect.h"
@@ -31,19 +31,19 @@ void RectBody::setup(World& world, float cx, float cy, float width, float height
     width_ = width;
     height_ = height;
 
-    // ボディ定義
+    // Body definition
     b2BodyDef bodyDef;
     bodyDef.type = b2_dynamicBody;
     bodyDef.position = World::toBox2d(cx, cy);
 
-    // ボディを作成
+    // Create body
     body_ = world.getWorld()->CreateBody(&bodyDef);
 
-    // 矩形形状（Box2DはSetAsBoxで半サイズを指定）
+    // Rectangle shape (Box2D SetAsBox uses half-size)
     b2PolygonShape box;
     box.SetAsBox(World::toBox2d(width / 2), World::toBox2d(height / 2));
 
-    // フィクスチャ定義
+    // Fixture definition
     b2FixtureDef fixtureDef;
     fixtureDef.shape = &box;
     fixtureDef.density = 1.0f;
@@ -52,26 +52,26 @@ void RectBody::setup(World& world, float cx, float cy, float width, float height
 
     body_->CreateFixture(&fixtureDef);
 
-    // UserData に Body* を保存（World::getBodyAtPoint() で使用）
+    // Store Body* in UserData (used by World::getBodyAtPoint())
     body_->GetUserData().pointer = reinterpret_cast<uintptr_t>(this);
 
-    // Node の初期位置を設定
+    // Set Node's initial position
     x = cx;
     y = cy;
 }
 
-// Node用: 原点(0,0)に描画（drawTree()が変換を適用する）
+// For Node: draw at origin (0,0) (drawTree() applies transform)
 void RectBody::draw() {
     if (!body_) return;
 
-    // 矩形を描画（中心基準）
+    // Draw rectangle (center-based)
     tc::drawRect(-width_ / 2, -height_ / 2, width_, height_);
 }
 
 void RectBody::drawFill() {
     if (!body_) return;
 
-    // 塗りつぶしモードで矩形を描画
+    // Draw filled rectangle
     tc::fill();
     tc::noStroke();
     tc::drawRect(-width_ / 2, -height_ / 2, width_, height_);

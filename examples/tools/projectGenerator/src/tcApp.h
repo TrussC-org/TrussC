@@ -36,7 +36,7 @@ public:
     void keyPressed(int key) override;
     void keyReleased(int key) override;
 
-    // ドラッグ&ドロップ
+    // Drag and drop
     void filesDropped(const vector<string>& files) override;
 
 private:

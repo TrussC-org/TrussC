@@ -5,7 +5,7 @@ namespace trussc {
 using namespace osc_internal;
 
 // =============================================================================
-// toBytes - バンドルをバイト列にシリアライズ
+// toBytes - Serialize bundle to byte array
 // =============================================================================
 std::vector<uint8_t> OscBundle::toBytes() const {
     std::vector<uint8_t> result;
@@ -14,12 +14,12 @@ std::vector<uint8_t> OscBundle::toBytes() const {
     const char* bundleId = "#bundle";
     result.insert(result.end(), bundleId, bundleId + 8);
 
-    // タイムタグ（8バイト、ビッグエンディアン）
+    // Timetag (8 bytes, big-endian)
     uint64_t be = toBigEndian64(timetag_);
     auto* p = reinterpret_cast<uint8_t*>(&be);
     result.insert(result.end(), p, p + 8);
 
-    // 各要素
+    // Each element
     for (const auto& element : elements_) {
         std::vector<uint8_t> elementBytes;
 
@@ -30,13 +30,13 @@ std::vector<uint8_t> OscBundle::toBytes() const {
             elementBytes = bundle->toBytes();
         }
 
-        // サイズ（4バイト、ビッグエンディアン）
+        // Size (4 bytes, big-endian)
         uint32_t size = static_cast<uint32_t>(elementBytes.size());
         uint32_t sizeBe = toBigEndian(size);
         auto* sp = reinterpret_cast<uint8_t*>(&sizeBe);
         result.insert(result.end(), sp, sp + 4);
 
-        // 要素データ
+        // Element data
         result.insert(result.end(), elementBytes.begin(), elementBytes.end());
     }
 
@@ -44,42 +44,42 @@ std::vector<uint8_t> OscBundle::toBytes() const {
 }
 
 // =============================================================================
-// fromBytes - バイト列からバンドルをパース（ロバスト実装）
+// fromBytes - Parse bundle from byte array (robust implementation)
 // =============================================================================
 OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok) {
     ok = false;
     OscBundle bundle;
 
-    // 最小サイズチェック: "#bundle\0" (8) + timetag (8) = 16
+    // Minimum size check: "#bundle\0" (8) + timetag (8) = 16
     if (!data || size < 16) return bundle;
 
-    // バンドルID確認
+    // Verify bundle ID
     if (!isBundle(data, size)) return bundle;
 
     size_t pos = 8;
 
-    // タイムタグ読み取り
+    // Read timetag
     uint64_t be;
     std::memcpy(&be, data + pos, 8);
     bundle.timetag_ = fromBigEndian64(be);
     pos += 8;
 
-    // 要素読み取り
+    // Read elements
     while (pos + 4 <= size) {
-        // 要素サイズ
+        // Element size
         uint32_t sizeBe;
         std::memcpy(&sizeBe, data + pos, 4);
         uint32_t elementSize = fromBigEndian(sizeBe);
         pos += 4;
 
         if (pos + elementSize > size) {
-            // サイズ不正（残りデータが足りない）
+            // Invalid size (not enough remaining data)
             break;
         }
 
         const uint8_t* elementData = data + pos;
 
-        // バンドルかメッセージか判定
+        // Determine if bundle or message
         if (isBundle(elementData, elementSize)) {
             bool elementOk = false;
             OscBundle childBundle = fromBytes(elementData, elementSize, elementOk);

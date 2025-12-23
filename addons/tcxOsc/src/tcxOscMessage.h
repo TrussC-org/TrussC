@@ -9,16 +9,16 @@
 namespace trussc {
 
 // =============================================================================
-// エンディアン変換ユーティリティ
+// Endian conversion utilities
 // =============================================================================
 namespace osc_internal {
 
-// 4バイト境界にアラインメント
+// Align to 4-byte boundary
 inline size_t alignTo4(size_t pos) {
     return (pos + 3) & ~3;
 }
 
-// ビッグエンディアン変換（ネットワークバイトオーダー）
+// Big-endian conversion (network byte order)
 inline uint32_t toBigEndian(uint32_t value) {
     uint8_t* p = reinterpret_cast<uint8_t*>(&value);
     return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) |
@@ -26,7 +26,7 @@ inline uint32_t toBigEndian(uint32_t value) {
 }
 
 inline uint32_t fromBigEndian(uint32_t value) {
-    return toBigEndian(value);  // 対称的
+    return toBigEndian(value);  // Symmetric
 }
 
 inline uint64_t toBigEndian64(uint64_t value) {
@@ -41,7 +41,7 @@ inline uint64_t fromBigEndian64(uint64_t value) {
     return toBigEndian64(value);
 }
 
-// float <-> uint32 のビット変換
+// Bit conversion between float and uint32
 inline uint32_t floatToUint32(float f) {
     uint32_t result;
     std::memcpy(&result, &f, sizeof(float));
@@ -54,35 +54,35 @@ inline float uint32ToFloat(uint32_t u) {
     return result;
 }
 
-// null終端を探す
+// Find null terminator
 inline size_t findNull(const uint8_t* data, size_t size, size_t start) {
     for (size_t i = start; i < size; ++i) {
         if (data[i] == 0) return i;
     }
-    return size_t(-1);  // 見つからない
+    return size_t(-1);  // Not found
 }
 
 }  // namespace osc_internal
 
 // =============================================================================
-// OscMessage - OSC メッセージクラス
+// OscMessage - OSC message class
 // =============================================================================
 class OscMessage {
 public:
-    // 引数の型
+    // Argument types
     using ArgVariant = std::variant<int32_t, float, std::string, std::vector<uint8_t>, bool>;
 
     OscMessage() = default;
     explicit OscMessage(const std::string& address) : address_(address) {}
 
     // -------------------------------------------------------------------------
-    // アドレス
+    // Address
     // -------------------------------------------------------------------------
     void setAddress(const std::string& address) { address_ = address; }
     std::string getAddress() const { return address_; }
 
     // -------------------------------------------------------------------------
-    // 引数追加
+    // Add arguments
     // -------------------------------------------------------------------------
     OscMessage& addInt(int32_t value) {
         typeTags_ += 'i';
@@ -117,7 +117,7 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // 引数取得
+    // Get arguments
     // -------------------------------------------------------------------------
     size_t getArgCount() const { return args_.size(); }
     std::string getTypeTags() const { return typeTags_; }
@@ -160,18 +160,18 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // シリアライズ
+    // Serialize
     // -------------------------------------------------------------------------
     std::vector<uint8_t> toBytes() const;
     static OscMessage fromBytes(const uint8_t* data, size_t size, bool& ok);
 
     // -------------------------------------------------------------------------
-    // デバッグ用文字列
+    // Debug string
     // -------------------------------------------------------------------------
     std::string toString() const;
 
     // -------------------------------------------------------------------------
-    // クリア
+    // Clear
     // -------------------------------------------------------------------------
     void clear() {
         address_.clear();

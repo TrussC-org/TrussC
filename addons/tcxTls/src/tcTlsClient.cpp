@@ -1,5 +1,5 @@
 // =============================================================================
-// tcTlsClient.cpp - TLS クライアントソケット実装
+// tcTlsClient.cpp - TLS Client Socket Implementation
 // =============================================================================
 
 #include "tcTlsClient.h"
@@ -19,7 +19,7 @@
 namespace trussc {
 
 // =============================================================================
-// TLS コンテキスト構造体（PIMPL）
+// TLS Context Structure (PIMPL)
 // =============================================================================
 struct TlsClient::TlsContext {
     mbedtls_ssl_context ssl;
@@ -46,7 +46,7 @@ struct TlsClient::TlsContext {
 };
 
 // =============================================================================
-// mbedTLS 用コールバック（ソケット送受信）
+// mbedTLS Callbacks (socket send/receive)
 // =============================================================================
 static int mbedtls_net_send_callback(void* ctx, const unsigned char* buf, size_t len) {
 #ifdef _WIN32
@@ -90,12 +90,12 @@ static int mbedtls_net_recv_callback(void* ctx, unsigned char* buf, size_t len) 
 }
 
 // =============================================================================
-// コンストラクタ / デストラクタ
+// Constructor / Destructor
 // =============================================================================
 TlsClient::TlsClient() {
     ctx_ = new TlsContext();
 
-    // 乱数生成器を初期化
+    // Initialize random number generator
     const char* pers = "trussc_tls_client";
     int ret = mbedtls_ctr_drbg_seed(&ctx_->ctr_drbg, mbedtls_entropy_func,
                                      &ctx_->entropy,
@@ -112,7 +112,7 @@ TlsClient::~TlsClient() {
 }
 
 // =============================================================================
-// TLS 設定
+// TLS Configuration
 // =============================================================================
 bool TlsClient::setCACertificate(const std::string& pemData) {
     int ret = mbedtls_x509_crt_parse(&ctx_->cacert,
@@ -148,20 +148,20 @@ void TlsClient::setHostname(const std::string& hostname) {
 }
 
 // =============================================================================
-// 接続管理
+// Connection Management
 // =============================================================================
 bool TlsClient::connect(const std::string& host, int port) {
-    // 既存の接続があれば切断
+    // Disconnect if already connected
     if (connected_ || running_) {
         disconnect();
     }
 
-    // 前回の受信スレッドが終了していることを確認
+    // Ensure previous receive thread has finished
     if (tlsReceiveThread_.joinable()) {
         tlsReceiveThread_.join();
     }
 
-    // SSL コンテキストをリセット（前回の接続状態をクリア）
+    // Reset SSL context (clear previous connection state)
     if (ctx_) {
         mbedtls_ssl_free(&ctx_->ssl);
         mbedtls_ssl_config_free(&ctx_->conf);
@@ -169,7 +169,7 @@ bool TlsClient::connect(const std::string& host, int port) {
         mbedtls_ssl_config_init(&ctx_->conf);
     }
 
-    // ソケット作成
+    // Create socket
 #ifdef _WIN32
     socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (socket_ == INVALID_SOCKET) {
@@ -184,7 +184,7 @@ bool TlsClient::connect(const std::string& host, int port) {
     }
 #endif
 
-    // ホスト名解決
+    // Resolve hostname
     struct addrinfo hints, *result;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -204,7 +204,7 @@ bool TlsClient::connect(const std::string& host, int port) {
         return false;
     }
 
-    // TCP 接続
+    // TCP connection
     ret = ::connect(socket_, result->ai_addr, static_cast<int>(result->ai_addrlen));
     freeaddrinfo(result);
 
@@ -226,7 +226,7 @@ bool TlsClient::connect(const std::string& host, int port) {
 
     tcLogNotice() << "TCP connected to " << host << ":" << port << ", starting TLS handshake...";
 
-    // TLS ハンドシェイク
+    // TLS handshake
     if (!performHandshake()) {
 #ifdef _WIN32
         closesocket(socket_);
@@ -241,7 +241,7 @@ bool TlsClient::connect(const std::string& host, int port) {
     connected_ = true;
     running_ = true;
 
-    // TLS 受信スレッド開始
+    // Start TLS receive thread
     tlsReceiveThread_ = std::thread(&TlsClient::tlsReceiveThreadFunc, this);
 
     tcLogNotice() << "TLS connected to " << host << ":" << port
@@ -258,7 +258,7 @@ bool TlsClient::connect(const std::string& host, int port) {
 bool TlsClient::performHandshake() {
     int ret;
 
-    // SSL 設定を初期化
+    // Initialize SSL configuration
     ret = mbedtls_ssl_config_defaults(&ctx_->conf,
                                        MBEDTLS_SSL_IS_CLIENT,
                                        MBEDTLS_SSL_TRANSPORT_STREAM,
@@ -270,7 +270,7 @@ bool TlsClient::performHandshake() {
         return false;
     }
 
-    // 証明書検証設定
+    // Certificate verification settings
     if (verifyNone_) {
         mbedtls_ssl_conf_authmode(&ctx_->conf, MBEDTLS_SSL_VERIFY_NONE);
     } else {
@@ -280,7 +280,7 @@ bool TlsClient::performHandshake() {
 
     mbedtls_ssl_conf_rng(&ctx_->conf, mbedtls_ctr_drbg_random, &ctx_->ctr_drbg);
 
-    // SSL コンテキストをセットアップ
+    // Setup SSL context
     ret = mbedtls_ssl_setup(&ctx_->ssl, &ctx_->conf);
     if (ret != 0) {
         char errBuf[256];
@@ -289,7 +289,7 @@ bool TlsClient::performHandshake() {
         return false;
     }
 
-    // ホスト名設定（SNI）
+    // Set hostname (SNI)
     std::string sniHost = hostname_.empty() ? remoteHost_ : hostname_;
     ret = mbedtls_ssl_set_hostname(&ctx_->ssl, sniHost.c_str());
     if (ret != 0) {
@@ -299,12 +299,12 @@ bool TlsClient::performHandshake() {
         return false;
     }
 
-    // BIO コールバック設定
+    // Set BIO callbacks
     mbedtls_ssl_set_bio(&ctx_->ssl, &socket_,
                          mbedtls_net_send_callback,
                          mbedtls_net_recv_callback, nullptr);
 
-    // ハンドシェイク実行
+    // Perform handshake
     while ((ret = mbedtls_ssl_handshake(&ctx_->ssl)) != 0) {
         if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
             char errBuf[256];
@@ -320,12 +320,12 @@ bool TlsClient::performHandshake() {
 void TlsClient::disconnect() {
     running_ = false;
 
-    // TLS クローズ通知
+    // Send TLS close notification
     if (ctx_ && connected_) {
         mbedtls_ssl_close_notify(&ctx_->ssl);
     }
 
-    // ソケットを閉じる
+    // Close socket
 #ifdef _WIN32
     if (socket_ != INVALID_SOCKET) {
         shutdown(socket_, SD_BOTH);
@@ -340,7 +340,7 @@ void TlsClient::disconnect() {
     }
 #endif
 
-    // 受信スレッド終了待ち
+    // Wait for receive thread to finish
     if (tlsReceiveThread_.joinable()) {
         tlsReceiveThread_.join();
     }
@@ -353,19 +353,19 @@ void TlsClient::disconnect() {
         onDisconnect.notify(args);
     }
 
-    // SSL コンテキストと設定を完全にリセット（再接続のため）
+    // Fully reset SSL context and config (for reconnection)
     if (ctx_) {
         mbedtls_ssl_free(&ctx_->ssl);
         mbedtls_ssl_config_free(&ctx_->conf);
 
-        // 再初期化
+        // Reinitialize
         mbedtls_ssl_init(&ctx_->ssl);
         mbedtls_ssl_config_init(&ctx_->conf);
     }
 }
 
 // =============================================================================
-// データ送受信
+// Data Send/Receive
 // =============================================================================
 bool TlsClient::send(const void* data, size_t size) {
     if (!connected_) {
@@ -403,7 +403,7 @@ bool TlsClient::send(const std::string& message) {
 }
 
 // =============================================================================
-// TLS 受信スレッド
+// TLS Receive Thread
 // =============================================================================
 void TlsClient::tlsReceiveThreadFunc() {
     std::vector<unsigned char> buffer(receiveBufferSize_);
@@ -417,7 +417,7 @@ void TlsClient::tlsReceiveThreadFunc() {
                             reinterpret_cast<char*>(buffer.data()) + ret);
             onReceive.notify(args);
         } else if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
-            // 接続が閉じられた
+            // Connection closed
             running_ = false;
             connected_ = false;
             TcpDisconnectEventArgs args;
@@ -428,7 +428,7 @@ void TlsClient::tlsReceiveThreadFunc() {
         } else if (ret == MBEDTLS_ERR_SSL_WANT_READ) {
             continue;
         } else {
-            // エラー
+            // Error
             if (running_) {
                 running_ = false;
                 connected_ = false;
@@ -445,7 +445,7 @@ void TlsClient::tlsReceiveThreadFunc() {
 }
 
 // =============================================================================
-// TLS 情報取得
+// TLS Information
 // =============================================================================
 std::string TlsClient::getCipherSuite() const {
     if (!connected_ || !ctx_) return "";

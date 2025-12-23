@@ -6,23 +6,23 @@ namespace trussc {
 using namespace osc_internal;
 
 // =============================================================================
-// toBytes - メッセージをバイト列にシリアライズ
+// toBytes - Serialize message to byte array
 // =============================================================================
 std::vector<uint8_t> OscMessage::toBytes() const {
     std::vector<uint8_t> result;
 
-    // アドレス（null終端 + パディング）
+    // Address (null-terminated + padding)
     result.insert(result.end(), address_.begin(), address_.end());
     result.push_back(0);
     while (result.size() % 4 != 0) result.push_back(0);
 
-    // 型タグ（カンマ + タグ + null終端 + パディング）
+    // Type tags (comma + tags + null-terminated + padding)
     result.push_back(',');
     result.insert(result.end(), typeTags_.begin(), typeTags_.end());
     result.push_back(0);
     while (result.size() % 4 != 0) result.push_back(0);
 
-    // 引数データ
+    // Argument data
     for (size_t i = 0; i < args_.size(); ++i) {
         char type = typeTags_[i];
 
@@ -53,14 +53,14 @@ std::vector<uint8_t> OscMessage::toBytes() const {
             result.insert(result.end(), blob.begin(), blob.end());
             while (result.size() % 4 != 0) result.push_back(0);
         }
-        // 'T' と 'F' はデータなし
+        // 'T' and 'F' have no data
     }
 
     return result;
 }
 
 // =============================================================================
-// fromBytes - バイト列からメッセージをパース（ロバスト実装）
+// fromBytes - Parse message from byte array (robust implementation)
 // =============================================================================
 OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
     ok = false;
@@ -70,8 +70,8 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
 
     size_t pos = 0;
 
-    // アドレス読み取り
-    if (data[pos] != '/') return msg;  // アドレスは '/' で始まる
+    // Read address
+    if (data[pos] != '/') return msg;  // Address must start with '/'
 
     size_t addrEnd = findNull(data, size, pos);
     if (addrEnd == size_t(-1)) return msg;
@@ -80,14 +80,14 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
     pos = alignTo4(addrEnd + 1);
 
     if (pos >= size) {
-        // 引数なしメッセージ（型タグなし）は許容
+        // Messages without arguments (no type tags) are allowed
         ok = true;
         return msg;
     }
 
-    // 型タグ読み取り
+    // Read type tags
     if (data[pos] != ',') {
-        // 型タグがないメッセージも許容（古い OSC 仕様）
+        // Messages without type tags are allowed (old OSC spec)
         ok = true;
         return msg;
     }
@@ -99,10 +99,10 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
     msg.typeTags_ = std::string(reinterpret_cast<const char*>(data + typeTagStart), typeTagEnd - typeTagStart);
     pos = alignTo4(typeTagEnd + 1);
 
-    // 引数読み取り
+    // Read arguments
     for (char type : msg.typeTags_) {
         if (type == 'i') {
-            if (pos + 4 > size) return msg;  // サイズ不足
+            if (pos + 4 > size) return msg;  // Insufficient size
             uint32_t be;
             std::memcpy(&be, data + pos, 4);
             int32_t value = static_cast<int32_t>(fromBigEndian(be));
@@ -142,8 +142,8 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
             msg.args_.emplace_back(false);
         }
         else {
-            // 未知の型タグはスキップ（ロバスト性のため）
-            // ただしサイズが不明なのでここで終了
+            // Unknown type tags are skipped (for robustness)
+            // But size is unknown, so stop here
             break;
         }
     }
@@ -153,7 +153,7 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
 }
 
 // =============================================================================
-// toString - デバッグ用文字列
+// toString - Debug string
 // =============================================================================
 std::string OscMessage::toString() const {
     std::ostringstream oss;

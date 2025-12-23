@@ -1,12 +1,12 @@
 # =============================================================================
-# tcxBox2d - TrussC Box2D アドオン
+# tcxBox2d - TrussC Box2D Addon
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.16)
 
 set(ADDON_NAME tcxBox2d)
 
-# Box2D を FetchContent で取得（libs/ に展開して共有）
+# Fetch Box2D via FetchContent (extract to libs/ for sharing)
 set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs)
 include(FetchContent)
 FetchContent_Declare(
@@ -20,7 +20,7 @@ set(BOX2D_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(BOX2D_USER_SETTINGS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(box2d)
 
-# ソースファイル
+# Source files
 file(GLOB ADDON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 file(GLOB ADDON_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h)
 

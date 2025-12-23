@@ -1,5 +1,5 @@
 // =============================================================================
-// tcxBox2dWorld.cpp - Box2D ワールド管理
+// tcxBox2dWorld.cpp - Box2D World Management
 // =============================================================================
 
 #include "tcxBox2dWorld.h"
@@ -7,11 +7,11 @@
 
 namespace tcx::box2d {
 
-// デフォルトスケール: 30ピクセル = 1メートル
+// Default scale: 30 pixels = 1 meter
 float World::scale = 30.0f;
 
 // =============================================================================
-// コンストラクタ / デストラクタ
+// Constructor / Destructor
 // =============================================================================
 World::World() = default;
 
@@ -43,20 +43,20 @@ World& World::operator=(World&& other) noexcept {
 }
 
 // =============================================================================
-// 初期化
+// Initialization
 // =============================================================================
 void World::setup(const tc::Vec2& gravity) {
     setup(gravity.x, gravity.y);
 }
 
 void World::setup(float gravityX, float gravityY) {
-    // Box2D座標系では下向きが正なので、そのまま使用
+    // In Box2D coordinate system, down is positive, so use as is
     b2Vec2 g(gravityX / scale, gravityY / scale);
     world_ = std::make_unique<b2World>(g);
 }
 
 // =============================================================================
-// シミュレーション
+// Simulation
 // =============================================================================
 void World::update() {
     if (world_) {
@@ -97,23 +97,23 @@ tc::Vec2 World::getGravity() const {
 }
 
 // =============================================================================
-// 境界
+// Bounds
 // =============================================================================
 void World::createBounds(float x, float y, float width, float height) {
     if (!world_) return;
 
-    // 既存の境界を削除
+    // Remove existing bounds
     if (groundBody_) {
         world_->DestroyBody(groundBody_);
         groundBody_ = nullptr;
     }
 
-    // 静的ボディを作成
+    // Create static body
     b2BodyDef bodyDef;
     bodyDef.type = b2_staticBody;
     groundBody_ = world_->CreateBody(&bodyDef);
 
-    // 四辺を作成
+    // Create four sides
     float halfW = toBox2d(width / 2);
     float halfH = toBox2d(height / 2);
     float centerX = toBox2d(x + width / 2);
@@ -121,22 +121,22 @@ void World::createBounds(float x, float y, float width, float height) {
 
     b2EdgeShape edge;
 
-    // 下辺
+    // Bottom edge
     edge.SetTwoSided(b2Vec2(centerX - halfW, centerY + halfH),
                      b2Vec2(centerX + halfW, centerY + halfH));
     groundBody_->CreateFixture(&edge, 0.0f);
 
-    // 上辺
+    // Top edge
     edge.SetTwoSided(b2Vec2(centerX - halfW, centerY - halfH),
                      b2Vec2(centerX + halfW, centerY - halfH));
     groundBody_->CreateFixture(&edge, 0.0f);
 
-    // 左辺
+    // Left edge
     edge.SetTwoSided(b2Vec2(centerX - halfW, centerY - halfH),
                      b2Vec2(centerX - halfW, centerY + halfH));
     groundBody_->CreateFixture(&edge, 0.0f);
 
-    // 右辺
+    // Right edge
     edge.SetTwoSided(b2Vec2(centerX + halfW, centerY - halfH),
                      b2Vec2(centerX + halfW, centerY + halfH));
     groundBody_->CreateFixture(&edge, 0.0f);
@@ -169,14 +169,14 @@ void World::createGround() {
 }
 
 // =============================================================================
-// ボディ管理
+// Body Management
 // =============================================================================
 void World::clear() {
     if (world_) {
-        // マウスジョイントを破棄
+        // Destroy mouse joint
         endDrag();
 
-        // 全ボディを削除
+        // Remove all bodies
         b2Body* body = world_->GetBodyList();
         while (body) {
             b2Body* next = body->GetNext();
@@ -193,7 +193,7 @@ int World::getBodyCount() const {
 }
 
 // =============================================================================
-// ポイントクエリ
+// Point Query
 // =============================================================================
 Body* World::getBodyAtPoint(const tc::Vec2& point) {
     return getBodyAtPoint(point.x, point.y);
@@ -204,13 +204,13 @@ Body* World::getBodyAtPoint(float px, float py) {
 
     b2Vec2 point = toBox2d(px, py);
 
-    // 全ボディをチェック（静的ボディは除外）
+    // Check all bodies (exclude static bodies)
     for (b2Body* b = world_->GetBodyList(); b; b = b->GetNext()) {
         if (b->GetType() != b2_dynamicBody) continue;
 
         for (b2Fixture* f = b->GetFixtureList(); f; f = f->GetNext()) {
             if (f->TestPoint(point)) {
-                // UserData から Body* を取得
+                // Get Body* from UserData
                 uintptr_t ptr = b->GetUserData().pointer;
                 if (ptr != 0) {
                     return reinterpret_cast<Body*>(ptr);
@@ -222,7 +222,7 @@ Body* World::getBodyAtPoint(float px, float py) {
 }
 
 // =============================================================================
-// マウスドラッグ
+// Mouse Drag
 // =============================================================================
 void World::startDrag(Body* body, const tc::Vec2& target) {
     startDrag(body, target.x, target.y);
@@ -231,17 +231,17 @@ void World::startDrag(Body* body, const tc::Vec2& target) {
 void World::startDrag(Body* body, float tx, float ty) {
     if (!world_ || !body || !body->getBody()) return;
 
-    // 既存のジョイントがあれば破棄
+    // Destroy existing joint if any
     endDrag();
 
-    // アンカー用の静的ボディを作成（まだなければ）
+    // Create static body for anchor (if not exists)
     if (!dragAnchorBody_) {
         b2BodyDef anchorDef;
         anchorDef.type = b2_staticBody;
         dragAnchorBody_ = world_->CreateBody(&anchorDef);
     }
 
-    // マウスジョイントを作成
+    // Create mouse joint
     b2MouseJointDef jointDef;
     jointDef.bodyA = dragAnchorBody_;
     jointDef.bodyB = body->getBody();
@@ -252,7 +252,7 @@ void World::startDrag(Body* body, float tx, float ty) {
 
     mouseJoint_ = static_cast<b2MouseJoint*>(world_->CreateJoint(&jointDef));
 
-    // ドラッグ中はボディを起こす
+    // Wake up body during drag
     body->getBody()->SetAwake(true);
 }
 
@@ -285,7 +285,7 @@ tc::Vec2 World::getDragAnchor() const {
 }
 
 // =============================================================================
-// 座標変換
+// Coordinate Conversion
 // =============================================================================
 b2Vec2 World::toBox2d(const tc::Vec2& v) {
     return b2Vec2(v.x / scale, v.y / scale);

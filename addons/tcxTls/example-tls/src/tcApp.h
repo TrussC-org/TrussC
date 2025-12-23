@@ -15,21 +15,21 @@ public:
 private:
     TlsClient client;
 
-    // イベントリスナー
+    // Event listeners
     EventListener connectListener;
     EventListener receiveListener;
     EventListener disconnectListener;
     EventListener errorListener;
 
-    // 送信ログ（左側）
+    // Send log (left side)
     std::vector<std::string> sentMessages;
     std::mutex sentMutex;
 
-    // 受信ログ（右側）
+    // Receive log (right side)
     std::vector<std::string> receivedMessages;
     std::mutex receivedMutex;
 
-    // 状態
+    // State
     bool isConnected = false;
     std::string statusMessage = "Press C to connect to httpbin.org";
 

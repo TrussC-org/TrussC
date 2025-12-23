@@ -1,13 +1,13 @@
 // =============================================================================
-// tcTlsClient.h - TLS クライアントソケット
-// TcpClient を継承し、mbedTLS で暗号化通信を行う
+// tcTlsClient.h - TLS Client Socket
+// Inherits from TcpClient and provides encrypted communication using mbedTLS
 // =============================================================================
 #pragma once
 
 #include "tc/network/tcTcpClient.h"
 #include <string>
 
-// 前方宣言（mbedtls ヘッダーを公開しない）
+// Forward declarations (don't expose mbedtls headers)
 struct mbedtls_ssl_context;
 struct mbedtls_ssl_config;
 struct mbedtls_x509_crt;
@@ -17,77 +17,77 @@ struct mbedtls_entropy_context;
 namespace trussc {
 
 // =============================================================================
-// TlsClient クラス（TcpClient を継承）
+// TlsClient Class (inherits from TcpClient)
 // =============================================================================
 class TlsClient : public TcpClient {
 public:
     // -------------------------------------------------------------------------
-    // コンストラクタ / デストラクタ
+    // Constructor / Destructor
     // -------------------------------------------------------------------------
     TlsClient();
     ~TlsClient() override;
 
-    // コピー禁止
+    // Non-copyable
     TlsClient(const TlsClient&) = delete;
     TlsClient& operator=(const TlsClient&) = delete;
 
     // -------------------------------------------------------------------------
-    // TLS 設定
+    // TLS Configuration
     // -------------------------------------------------------------------------
 
-    // CA 証明書を設定（PEM形式の文字列）
+    // Set CA certificate (PEM format string)
     bool setCACertificate(const std::string& pemData);
 
-    // CA 証明書をファイルから読み込み
+    // Load CA certificate from file
     bool setCACertificateFile(const std::string& path);
 
-    // サーバー証明書の検証を無効化（テスト用、本番では非推奨）
+    // Disable server certificate verification (for testing, not recommended for production)
     void setVerifyNone();
 
-    // ホスト名検証を設定（デフォルトは接続先ホスト名）
+    // Set hostname verification (default is connection host)
     void setHostname(const std::string& hostname);
 
     // -------------------------------------------------------------------------
-    // 接続管理（TcpClient をオーバーライド）
+    // Connection Management (override TcpClient)
     // -------------------------------------------------------------------------
 
-    // サーバーに接続（TCP接続 + TLSハンドシェイク）
+    // Connect to server (TCP connection + TLS handshake)
     bool connect(const std::string& host, int port) override;
 
-    // 接続を切断
+    // Disconnect
     void disconnect() override;
 
     // -------------------------------------------------------------------------
-    // データ送受信（TcpClient をオーバーライド）
+    // Data Send/Receive (override TcpClient)
     // -------------------------------------------------------------------------
 
-    // データを送信（TLS暗号化）
+    // Send data (TLS encrypted)
     bool send(const void* data, size_t size) override;
     bool send(const std::vector<char>& data) override;
     bool send(const std::string& message) override;
 
     // -------------------------------------------------------------------------
-    // TLS 情報取得
+    // TLS Information
     // -------------------------------------------------------------------------
 
-    // 接続中の暗号スイート名
+    // Get current cipher suite name
     std::string getCipherSuite() const;
 
-    // TLS バージョン文字列
+    // Get TLS version string
     std::string getTlsVersion() const;
 
 private:
-    // mbedTLS コンテキスト（PIMPL パターン）
+    // mbedTLS context (PIMPL pattern)
     struct TlsContext;
     TlsContext* ctx_ = nullptr;
 
     std::string hostname_;
     bool verifyNone_ = false;
 
-    // TLS ハンドシェイク実行
+    // Perform TLS handshake
     bool performHandshake();
 
-    // 受信スレッド（TLS用）
+    // Receive thread (for TLS)
     void tlsReceiveThreadFunc();
 
     std::thread tlsReceiveThread_;

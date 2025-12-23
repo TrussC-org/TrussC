@@ -18,7 +18,7 @@ void tcApp::update() {
 
 void tcApp::draw() {
     // Clear background (dark blue-purple)
-    clear(51, 51, 76);
+    clear(0.2f, 0.2f, 0.3f);
 
     // Demo drawing: rotating circles
     int numCircles = 12;

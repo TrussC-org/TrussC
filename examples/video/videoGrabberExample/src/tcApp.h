@@ -12,5 +12,5 @@ public:
 
 private:
     VideoGrabber grabber_;
-    bool flipH_ = true;  // 左右反転（デフォルトon）
+    bool flipH_ = true;  // Horizontal flip (default on)
 };

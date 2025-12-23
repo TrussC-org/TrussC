@@ -15,7 +15,7 @@ void tcApp::update() {
 
 void tcApp::draw() {
     // Clear the screen
-    clear(30, 30, 40);
+    clear(0.12f, 0.12f, 0.16f);
 
     // --- Offscreen rendering to FBO ---
     if (useClearInFbo_) {

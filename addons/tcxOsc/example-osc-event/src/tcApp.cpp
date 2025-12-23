@@ -59,10 +59,10 @@ void tcApp::update() {
 void tcApp::draw() {
     clear(0.12f);
 
-    // ImGui フレーム開始
+    // ImGui frame start
     imguiBegin();
 
-    // ImGui ウィンドウを画面全体に配置
+    // Position ImGui window to fill entire screen
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2((float)getWindowWidth(), (float)getWindowHeight()));
 
@@ -72,21 +72,21 @@ void tcApp::draw() {
                              ImGuiWindowFlags_NoCollapse;
 
     if (ImGui::Begin("OSC Example", nullptr, flags)) {
-        // タイトル
+        // Title
         ImGui::Text("OSC Example - Port %d", port_);
         ImGui::Separator();
 
-        // 左右ペイン
+        // Left and right panes
         float panelWidth = (ImGui::GetContentRegionAvail().x - 20) / 2;
 
-        // ==== 左ペイン: 送信 ====
+        // ==== Left pane: Send ====
         ImGui::BeginChild("Sender", ImVec2(panelWidth, -30), true);
         {
             ImGui::Text("SENDER");
             ImGui::Separator();
             ImGui::Spacing();
 
-            // アドレス入力
+            // Address input
             ImGui::Text("Address:");
             ImGui::SetNextItemWidth(-1);
             ImGui::InputText("##address", addressBuf_, sizeof(addressBuf_));
@@ -121,7 +121,7 @@ void tcApp::draw() {
             ImGui::Spacing();
             ImGui::Spacing();
 
-            // 送信ボタン
+            // Send button
             if (ImGui::Button("SEND MESSAGE", ImVec2(-1, 30))) {
                 sendMessage();
             }
@@ -130,14 +130,14 @@ void tcApp::draw() {
             ImGui::Separator();
             ImGui::Spacing();
 
-            // バンドル機能
+            // Bundle feature
             ImGui::Text("Bundle (%d messages)", bundleMessageCount_);
 
             if (ImGui::Button("ADD TO BUNDLE", ImVec2(-1, 30))) {
                 addToBundle();
             }
 
-            // バンドルにメッセージがある時だけ送信ボタン表示
+            // Show send button only when bundle has messages
             if (bundleMessageCount_ > 0) {
                 if (ImGui::Button("SEND BUNDLE", ImVec2(-1, 30))) {
                     sendBundle();
@@ -154,7 +154,7 @@ void tcApp::draw() {
             ImGui::Separator();
             ImGui::Spacing();
 
-            // 送信ログ
+            // Send log
             ImGui::Text("Log:");
             ImGui::BeginChild("SendLog", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
             {
@@ -172,28 +172,28 @@ void tcApp::draw() {
 
         ImGui::SameLine();
 
-        // ==== 右ペイン: 受信 ====
+        // ==== Right pane: Receive ====
         ImGui::BeginChild("Receiver", ImVec2(panelWidth, -30), true);
         {
             ImGui::Text("RECEIVER");
             ImGui::Separator();
             ImGui::Spacing();
 
-            // クリアボタン
+            // Clear button
             if (ImGui::Button("Clear")) {
                 lock_guard<mutex> lock(receiveLogMutex_);
                 receiveLogs_.clear();
             }
             ImGui::Separator();
 
-            // 受信ログ（スクロール可能）
+            // Receive log (scrollable)
             ImGui::BeginChild("ReceiveLog", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
             {
                 lock_guard<mutex> lock(receiveLogMutex_);
                 for (const auto& msg : receiveLogs_) {
                     ImGui::TextUnformatted(msg.c_str());
                 }
-                // 自動スクロール
+                // Auto-scroll
                 if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
                     ImGui::SetScrollHereY(1.0f);
                 }
@@ -202,7 +202,7 @@ void tcApp::draw() {
         }
         ImGui::EndChild();
 
-        // ステータスバー
+        // Status bar
         ImGui::Separator();
         if (receiver_.isListening()) {
             ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Status: Listening on port %d", port_);
@@ -213,7 +213,7 @@ void tcApp::draw() {
     }
     ImGui::End();
 
-    // ImGui フレーム終了
+    // ImGui frame end
     imguiEnd();
 }
 

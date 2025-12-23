@@ -1,12 +1,12 @@
 # =============================================================================
-# tcxTls - TLS/SSL サポートアドオン
+# tcxTls - TLS/SSL Support Addon
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.16)
 
 set(ADDON_NAME tcxTls)
 
-# mbedTLS を FetchContent で取得（libs/ に展開して共有）
+# Fetch mbedTLS via FetchContent (extract to libs/ for sharing)
 set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs)
 include(FetchContent)
 FetchContent_Declare(
@@ -20,7 +20,7 @@ set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
 set(DISABLE_PACKAGE_CONFIG_AND_INSTALL ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(mbedtls)
 
-# ソースファイル
+# Source files
 file(GLOB ADDON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 file(GLOB ADDON_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h)
 

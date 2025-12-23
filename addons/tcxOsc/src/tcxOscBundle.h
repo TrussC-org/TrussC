@@ -6,28 +6,28 @@
 namespace trussc {
 
 // =============================================================================
-// OscBundle - OSC バンドルクラス
-// バンドルは複数のメッセージや他のバンドルを含むことができる
+// OscBundle - OSC bundle class
+// Bundles can contain multiple messages or other bundles
 // =============================================================================
 class OscBundle {
 public:
-    // バンドルの要素（メッセージまたはバンドル）
+    // Bundle element (message or bundle)
     using Element = std::variant<OscMessage, OscBundle>;
 
-    // 即時実行を表すタイムタグ
+    // Timetag representing immediate execution
     static constexpr uint64_t TIMETAG_IMMEDIATELY = 1;
 
     OscBundle() : timetag_(TIMETAG_IMMEDIATELY) {}
     explicit OscBundle(uint64_t timetag) : timetag_(timetag) {}
 
     // -------------------------------------------------------------------------
-    // タイムタグ（NTP形式）
+    // Timetag (NTP format)
     // -------------------------------------------------------------------------
     void setTimetag(uint64_t timetag) { timetag_ = timetag; }
     uint64_t getTimetag() const { return timetag_; }
 
     // -------------------------------------------------------------------------
-    // 要素追加
+    // Add elements
     // -------------------------------------------------------------------------
     OscBundle& addMessage(const OscMessage& msg) {
         elements_.emplace_back(msg);
@@ -40,7 +40,7 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // 要素取得
+    // Get elements
     // -------------------------------------------------------------------------
     size_t getElementCount() const { return elements_.size(); }
 
@@ -71,13 +71,13 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // シリアライズ
+    // Serialize
     // -------------------------------------------------------------------------
     std::vector<uint8_t> toBytes() const;
     static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok);
 
     // -------------------------------------------------------------------------
-    // バンドル判定（データの先頭が "#bundle" かどうか）
+    // Bundle detection (check if data starts with "#bundle")
     // -------------------------------------------------------------------------
     static bool isBundle(const uint8_t* data, size_t size) {
         if (size < 8) return false;
@@ -87,7 +87,7 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // クリア
+    // Clear
     // -------------------------------------------------------------------------
     void clear() {
         timetag_ = TIMETAG_IMMEDIATELY;

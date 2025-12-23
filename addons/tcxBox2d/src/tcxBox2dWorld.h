@@ -1,5 +1,5 @@
 // =============================================================================
-// tcxBox2dWorld.h - Box2D ワールド管理
+// tcxBox2dWorld.h - Box2D World Management
 // =============================================================================
 
 #pragma once
@@ -11,137 +11,137 @@
 
 namespace tcx::box2d {
 
-// 前方宣言
+// Forward declarations
 class Body;
 
 // =============================================================================
-// Box2D ワールド
+// Box2D World
 // =============================================================================
-// 物理シミュレーションを管理するメインクラス
+// Main class for managing physics simulation
 // =============================================================================
 class World {
 public:
-    // ピクセル/メートル変換スケール（デフォルト: 30px = 1m）
+    // Pixel/meter conversion scale (default: 30px = 1m)
     static float scale;
 
     World();
     ~World();
 
-    // コピー禁止
+    // Non-copyable
     World(const World&) = delete;
     World& operator=(const World&) = delete;
 
-    // ムーブは許可
+    // Movable
     World(World&& other) noexcept;
     World& operator=(World&& other) noexcept;
 
-    // ---------------------------------------------------------------------
-    // 初期化
-    // ---------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Initialization
+    // -------------------------------------------------------------------------
 
-    // 重力を設定してワールドを初期化
+    // Initialize world with gravity
     void setup(const tc::Vec2& gravity = tc::Vec2(0, 10));
     void setup(float gravityX, float gravityY);
 
-    // ---------------------------------------------------------------------
-    // シミュレーション
-    // ---------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Simulation
+    // -------------------------------------------------------------------------
 
-    // 物理シミュレーションを1ステップ進める
+    // Advance physics simulation by one step
     void update();
 
-    // シミュレーションパラメータ
-    void setFPS(float fps);               // FPS（デフォルト: 60）
-    void setVelocityIterations(int n);    // 速度計算反復回数（デフォルト: 8）
-    void setPositionIterations(int n);    // 位置計算反復回数（デフォルト: 3）
+    // Simulation parameters
+    void setFPS(float fps);               // FPS (default: 60)
+    void setVelocityIterations(int n);    // Velocity iterations (default: 8)
+    void setPositionIterations(int n);    // Position iterations (default: 3)
 
-    // 重力
+    // Gravity
     void setGravity(const tc::Vec2& gravity);
     void setGravity(float x, float y);
     tc::Vec2 getGravity() const;
 
-    // ---------------------------------------------------------------------
-    // 境界（画面端の壁）
-    // ---------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Bounds (walls at screen edges)
+    // -------------------------------------------------------------------------
 
-    // 画面端に壁を作成
+    // Create walls at screen edges
     void createBounds(float x, float y, float width, float height);
-    void createBounds();  // 現在のウィンドウサイズで作成
+    void createBounds();  // Create with current window size
 
-    // 地面だけ作成（画面下端）
+    // Create ground only (at bottom of screen)
     void createGround(float y, float width);
-    void createGround();  // 現在のウィンドウサイズで作成
+    void createGround();  // Create with current window size
 
-    // ---------------------------------------------------------------------
-    // ボディ管理
-    // ---------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Body Management
+    // -------------------------------------------------------------------------
 
-    // 登録されている全ボディを削除
+    // Remove all registered bodies
     void clear();
 
-    // ボディ数
+    // Body count
     int getBodyCount() const;
 
-    // ---------------------------------------------------------------------
-    // ポイントクエリ（指定位置のボディを取得）
-    // ---------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Point Query (get body at specified position)
+    // -------------------------------------------------------------------------
     Body* getBodyAtPoint(const tc::Vec2& point);
     Body* getBodyAtPoint(float x, float y);
 
-    // ---------------------------------------------------------------------
-    // マウスドラッグ（b2MouseJoint を使用）
-    // ---------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Mouse Drag (using b2MouseJoint)
+    // -------------------------------------------------------------------------
 
-    // ドラッグ開始（ボディと開始位置を指定）
+    // Start dragging (specify body and start position)
     void startDrag(Body* body, const tc::Vec2& target);
     void startDrag(Body* body, float x, float y);
 
-    // ドラッグ中（マウス位置を更新）
+    // Update drag (update mouse position)
     void updateDrag(const tc::Vec2& target);
     void updateDrag(float x, float y);
 
-    // ドラッグ終了
+    // End dragging
     void endDrag();
 
-    // ドラッグ中かどうか
+    // Check if dragging
     bool isDragging() const;
 
-    // ドラッグ中のアンカー位置（ボディ側の接続点）を取得
+    // Get drag anchor position (connection point on body side)
     tc::Vec2 getDragAnchor() const;
 
-    // ---------------------------------------------------------------------
-    // 座標変換
-    // ---------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Coordinate Conversion
+    // -------------------------------------------------------------------------
 
-    // ピクセル座標 → Box2D座標
+    // Pixel coordinates → Box2D coordinates
     static b2Vec2 toBox2d(const tc::Vec2& v);
     static b2Vec2 toBox2d(float x, float y);
     static float toBox2d(float val);
 
-    // Box2D座標 → ピクセル座標
+    // Box2D coordinates → Pixel coordinates
     static tc::Vec2 toPixels(const b2Vec2& v);
     static float toPixels(float val);
 
-    // ---------------------------------------------------------------------
-    // Box2Dへの直接アクセス
-    // ---------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Direct Access to Box2D
+    // -------------------------------------------------------------------------
     b2World* getWorld() { return world_.get(); }
     const b2World* getWorld() const { return world_.get(); }
 
 private:
     std::unique_ptr<b2World> world_;
 
-    // シミュレーションパラメータ
+    // Simulation parameters
     float timeStep_ = 1.0f / 60.0f;
     int velocityIterations_ = 8;
     int positionIterations_ = 3;
 
-    // 境界用ボディ
+    // Bounds body
     b2Body* groundBody_ = nullptr;
 
-    // マウスドラッグ用
+    // Mouse drag
     b2MouseJoint* mouseJoint_ = nullptr;
-    b2Body* dragAnchorBody_ = nullptr;  // ジョイントのアンカー用静的ボディ
+    b2Body* dragAnchorBody_ = nullptr;  // Static body for joint anchor
 };
 
 } // namespace tcx::box2d

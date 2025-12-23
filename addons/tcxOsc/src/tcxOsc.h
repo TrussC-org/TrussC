@@ -1,8 +1,8 @@
 #pragma once
 
 // =============================================================================
-// tcxOsc - TrussC OSC アドオン
-// Open Sound Control プロトコルの送受信
+// tcxOsc - TrussC OSC addon
+// Open Sound Control protocol send/receive
 // =============================================================================
 
 #include "tcxOscMessage.h"

@@ -17,7 +17,7 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    clear(30, 35, 45);
+    clear(0.12f, 0.14f, 0.18f);
 
     float y = 30;
     float lineHeight = 18;

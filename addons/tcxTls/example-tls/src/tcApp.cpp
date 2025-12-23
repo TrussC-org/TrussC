@@ -1,5 +1,5 @@
 // =============================================================================
-// tcApp.cpp - TLS (HTTPS) クライアントサンプル
+// tcApp.cpp - TLS (HTTPS) Client Sample
 // =============================================================================
 
 #include "tcApp.h"
@@ -15,10 +15,10 @@ void tcApp::setup() {
     tcLogNotice() << "Press X to clear log";
     tcLogNotice() << "==================================";
 
-    // TLS 設定（証明書検証なし - テスト用）
+    // TLS configuration (no certificate verification - for testing)
     client.setVerifyNone();
 
-    // 接続イベント
+    // Connect event
     client.onConnect.listen(connectListener, [this](TcpConnectEventArgs& e) {
         if (e.success) {
             isConnected = true;
@@ -32,11 +32,11 @@ void tcApp::setup() {
         }
     });
 
-    // 受信イベント
+    // Receive event
     client.onReceive.listen(receiveListener, [this](TcpReceiveEventArgs& e) {
         string data(e.data.begin(), e.data.end());
 
-        // 長すぎる場合は分割
+        // Split if too long
         istringstream iss(data);
         string line;
         while (getline(iss, line)) {
@@ -47,14 +47,14 @@ void tcApp::setup() {
         }
     });
 
-    // 切断イベント
+    // Disconnect event
     client.onDisconnect.listen(disconnectListener, [this](TcpDisconnectEventArgs& e) {
         isConnected = false;
         statusMessage = "Disconnected: " + e.reason;
         addReceived("--- Disconnected ---");
     });
 
-    // エラーイベント
+    // Error event
     client.onError.listen(errorListener, [this](TcpErrorEventArgs& e) {
         addReceived("ERROR: " + e.message);
     });
@@ -70,11 +70,11 @@ void tcApp::draw() {
     float h = getWindowHeight();
     float midX = w / 2;
 
-    // タイトル
+    // Title
     setColor(1.0f);
     drawBitmapString("TLS (HTTPS) Client Example", 40, 30);
 
-    // 状態表示
+    // Status display
     if (isConnected) {
         setColor(0.4f, 1.0f, 0.4f);
     } else {
@@ -82,15 +82,15 @@ void tcApp::draw() {
     }
     drawBitmapString(statusMessage, 40, 55);
 
-    // 操作説明
+    // Instructions
     setColor(0.7f);
     drawBitmapString("C: Connect  SPACE: Send Request  D: Disconnect  X: Clear", 40, 80);
 
-    // 中央の区切り線
+    // Center divider line
     setColor(0.3f);
     drawLine(midX, 100, midX, h - 20);
 
-    // 左側: 送信ログ
+    // Left side: Send log
     setColor(0.4f, 0.8f, 1.0f);
     drawBitmapString("SENT", 40, 110);
     setColor(0.24f);
@@ -107,7 +107,7 @@ void tcApp::draw() {
         }
     }
 
-    // 右側: 受信ログ
+    // Right side: Receive log
     setColor(0.4f, 1.0f, 0.4f);
     drawBitmapString("RECEIVED", midX + 20, 110);
     setColor(0.24f);
@@ -131,9 +131,9 @@ void tcApp::keyPressed(int key) {
             statusMessage = "Connecting to httpbin.org:443...";
             addSent("Connecting to httpbin.org:443...");
 
-            // HTTPS 接続
+            // HTTPS connection
             if (client.connect("httpbin.org", 443)) {
-                // 接続成功は onConnect で通知される
+                // Connection success is notified via onConnect
             }
         } else {
             statusMessage = "Already connected";
@@ -162,7 +162,7 @@ void tcApp::keyPressed(int key) {
 }
 
 void tcApp::sendHttpRequest() {
-    // HTTP GET リクエストを送信
+    // Send HTTP GET request
     string request =
         "GET /get HTTP/1.1\r\n"
         "Host: httpbin.org\r\n"

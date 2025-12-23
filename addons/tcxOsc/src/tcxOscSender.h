@@ -7,29 +7,29 @@
 namespace trussc {
 
 // =============================================================================
-// OscSender - OSC 送信クラス
+// OscSender - OSC sender class
 // =============================================================================
 class OscSender {
 public:
     OscSender() = default;
     ~OscSender() { close(); }
 
-    // コピー禁止
+    // Non-copyable
     OscSender(const OscSender&) = delete;
     OscSender& operator=(const OscSender&) = delete;
 
     // -------------------------------------------------------------------------
-    // 設定
+    // Setup
     // -------------------------------------------------------------------------
 
-    // 送信先を設定
+    // Set destination
     bool setup(const std::string& host, int port) {
         host_ = host;
         port_ = port;
         return socket_.connect(host, port);
     }
 
-    // 閉じる
+    // Close
     void close() {
         socket_.close();
         host_.clear();
@@ -37,23 +37,23 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // 送信
+    // Send
     // -------------------------------------------------------------------------
 
-    // メッセージを送信
+    // Send message
     bool send(const OscMessage& msg) {
         auto bytes = msg.toBytes();
         return socket_.send(bytes.data(), bytes.size());
     }
 
-    // バンドルを送信
+    // Send bundle
     bool send(const OscBundle& bundle) {
         auto bytes = bundle.toBytes();
         return socket_.send(bytes.data(), bytes.size());
     }
 
     // -------------------------------------------------------------------------
-    // 情報
+    // Info
     // -------------------------------------------------------------------------
 
     const std::string& getHost() const { return host_; }

@@ -136,7 +136,7 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    clear(30, 30, 40);
+    clear(0.12f, 0.12f, 0.16f);
 
     // Title
     setColor(1.0f);

@@ -38,7 +38,7 @@ void tcApp::draw() {
     // Draw camera image
     setColor(1.0f);
     if (flipH_) {
-        // 左右反転して描画
+        // Draw with horizontal flip
         pushMatrix();
         translate(grabber_.getWidth(), 0);
         scale(-1, 1);

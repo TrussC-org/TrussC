@@ -12,7 +12,7 @@
 
 namespace fs = std::filesystem;
 
-// コマンドを実行して出力をキャプチャ
+// Execute command and capture output
 static pair<int, string> executeCommand(const string& cmd) {
     string output;
     string fullCmd = cmd + " 2>&1";
@@ -835,7 +835,7 @@ void tcApp::generateXcodeProject(const string& path) {
     auto [result, output] = executeCommand(cmd);
     if (!output.empty()) {
         tcLogNotice("tcApp") << "CMake output:\n" << output;
-        // CMake出力をログエリアに追加
+        // Add CMake output to log area
         lock_guard<mutex> lock(logMutex);
         generatingLog += "\n" + output;
     }
@@ -936,7 +936,7 @@ void tcApp::generateVisualStudioProject(const string& path) {
     auto [result, output] = executeCommand(cmd);
     if (!output.empty()) {
         tcLogNotice("tcApp") << "CMake output:\n" << output;
-        // CMake出力をログエリアに追加
+        // Add CMake output to log area
         lock_guard<mutex> lock(logMutex);
         generatingLog += "\n" + output;
     }

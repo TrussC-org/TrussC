@@ -1,5 +1,5 @@
 // =============================================================================
-// tcxBox2dCircle.cpp - Box2D 円形ボディ
+// tcxBox2dCircle.cpp - Box2D Circle Body
 // =============================================================================
 
 #include "tcxBox2dCircle.h"
@@ -26,19 +26,19 @@ void CircleBody::setup(World& world, float cx, float cy, float radius) {
     world_ = &world;
     radius_ = radius;
 
-    // ボディ定義
+    // Body definition
     b2BodyDef bodyDef;
     bodyDef.type = b2_dynamicBody;
     bodyDef.position = World::toBox2d(cx, cy);
 
-    // ボディを作成
+    // Create body
     body_ = world.getWorld()->CreateBody(&bodyDef);
 
-    // 円形状
+    // Circle shape
     b2CircleShape circle;
     circle.m_radius = World::toBox2d(radius);
 
-    // フィクスチャ定義
+    // Fixture definition
     b2FixtureDef fixtureDef;
     fixtureDef.shape = &circle;
     fixtureDef.density = 1.0f;
@@ -47,34 +47,34 @@ void CircleBody::setup(World& world, float cx, float cy, float radius) {
 
     body_->CreateFixture(&fixtureDef);
 
-    // UserData に Body* を保存（World::getBodyAtPoint() で使用）
+    // Store Body* in UserData (used by World::getBodyAtPoint())
     body_->GetUserData().pointer = reinterpret_cast<uintptr_t>(this);
 
-    // Node の初期位置を設定
+    // Set Node's initial position
     x = cx;
     y = cy;
 }
 
-// Node用: 原点(0,0)に描画（drawTree()が変換を適用する）
+// For Node: draw at origin (0,0) (drawTree() applies transform)
 void CircleBody::draw() {
     if (!body_) return;
 
-    // 円を描画（原点中心）
+    // Draw circle (centered at origin)
     tc::drawCircle(0, 0, radius_);
 
-    // 回転がわかるように線を引く
+    // Draw line to show rotation
     tc::drawLine(0, 0, radius_, 0);
 }
 
 void CircleBody::drawFill() {
     if (!body_) return;
 
-    // 塗りつぶしモードで円を描画
+    // Draw filled circle
     tc::fill();
     tc::noStroke();
     tc::drawCircle(0, 0, radius_);
 
-    // 回転がわかるように線を引く
+    // Draw line to show rotation
     tc::stroke();
     tc::setColor(0.0f);
     tc::drawLine(0, 0, radius_, 0);
