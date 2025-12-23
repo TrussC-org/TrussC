@@ -37,10 +37,26 @@ void tcApp::draw() {
 
     // Draw camera image
     setColor(1.0f);
-    grabber_.draw(0, 0);
+    if (flipH_) {
+        // 左右反転して描画
+        pushMatrix();
+        translate(grabber_.getWidth(), 0);
+        scale(-1, 1);
+        grabber_.draw(0, 0);
+        popMatrix();
+    } else {
+        grabber_.draw(0, 0);
+    }
 
     // Display info
     setColor(colors::yellow);
-    drawBitmapString(format("{}x{} | FPS: {:.0f}",
-        grabber_.getWidth(), grabber_.getHeight(), getFrameRate()), 10, 20);
+    drawBitmapString(format("{}x{} | FPS: {:.0f} | Flip: {} (F key)",
+        grabber_.getWidth(), grabber_.getHeight(), getFrameRate(),
+        flipH_ ? "ON" : "OFF"), 10, 20);
+}
+
+void tcApp::keyPressed(int key) {
+    if (key == 'f' || key == 'F') {
+        flipH_ = !flipH_;
+    }
 }
