@@ -45,7 +45,7 @@ void tcApp::setup() {
 }
 
 void tcApp::draw() {
-    clear(30);
+    clear(0.12f);
 
     float y = 50;
 

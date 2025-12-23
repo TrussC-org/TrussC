@@ -352,9 +352,18 @@ Reference for oF users finding equivalent features in TrussC.
 
 ### **Color**
 
+> ⚠️ **IMPORTANT: Color Range Difference**
+>
+> TrussC uses **0.0 - 1.0 float range** for all color values, NOT 0-255 like openFrameworks.
+>
+> - oF: `ofSetColor(255, 128, 0)` → TrussC: `tc::setColor(1.0f, 0.5f, 0.0f)`
+> - oF: `ofBackground(30)` → TrussC: `tc::clear(0.12f)`
+>
+> This applies to `setColor()`, `clear()`, `Color`, and all color-related functions.
+
 | openFrameworks | TrussC | Example | Notes |
 |:---|:---|:---|:---|
-| `ofColor(r, g, b, a)` | `tc::Color(r, g, b, a)` | colorExample | 0.0-1.0 |
+| `ofColor(r, g, b, a)` | `tc::Color(r, g, b, a)` | colorExample | **0.0-1.0 float** |
 | `ofColor::fromHsb(h, s, b)` | `tc::Color::fromHSB(h, s, b)` | colorExample | 0.0-1.0 |
 | - | `tc::Color::fromOKLab(L, a, b)` | colorExample | OKLab color space |
 | - | `tc::Color::fromOKLCH(L, C, h)` | colorExample | OKLCH color space |

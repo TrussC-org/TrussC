@@ -39,7 +39,7 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    clear(30);
+    clear(0.12f);
 
     if (video_.isLoaded()) {
         // Draw video centered
@@ -58,16 +58,16 @@ void tcApp::draw() {
         float progress = video_.getPosition();
 
         // Background
-        setColor(50);
+        setColor(0.2f);
         drawRect(20, barY, getWindowWidth() - 40, barHeight);
 
         // Progress
-        setColor(100, 200, 100);
+        setColor(0.4f, 0.78f, 0.4f);
         drawRect(20, barY, (getWindowWidth() - 40) * progress, barHeight);
 
         // Info
         if (showInfo_) {
-            setColor(255);
+            setColor(1.0f);
             int currentFrame = video_.getCurrentFrame();
             int totalFrames = video_.getTotalFrames();
             float currentTime = video_.getPosition() * video_.getDuration();
@@ -86,13 +86,13 @@ void tcApp::draw() {
         }
     } else {
         // No video loaded
-        setColor(255);
+        setColor(1.0f);
         drawBitmapString("No video loaded", getWindowWidth() / 2 - 50, getWindowHeight() / 2 - 20);
         drawBitmapString("Press 'L' or drop a video file", getWindowWidth() / 2 - 90, getWindowHeight() / 2);
     }
 
     // Controls help
-    setColor(200);
+    setColor(0.78f);
     drawBitmapString("Space: Play/Pause | R: Restart | Arrows: Seek/Volume | I: Info | L: Load",
                     20, getWindowHeight() - 50);
 }

@@ -57,7 +57,7 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    clear(30);
+    clear(0.12f);
 
     // ImGui フレーム開始
     imguiBegin();

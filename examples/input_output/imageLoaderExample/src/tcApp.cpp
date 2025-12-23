@@ -31,7 +31,7 @@ void tcApp::setup() {
 }
 
 void tcApp::draw() {
-    clear(100);
+    clear(0.4f);
 
     setColor(1.0f);
 

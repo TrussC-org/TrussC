@@ -38,10 +38,10 @@ void tcApp::setup() {
 }
 
 void tcApp::draw() {
-    clear(30);
+    clear(0.12f);
 
     // Display usage instructions
-    setColor(200);
+    setColor(0.78f);
     drawBitmapString("Console Example - stdin commands", 20, 30);
     drawBitmapString("Commands:", 20, 60);
     drawBitmapString("  tcdebug info          - Get app info (JSON)", 20, 80);
@@ -50,7 +50,7 @@ void tcApp::draw() {
     drawBitmapString("  clear                 - Clear all balls", 20, 140);
 
     // Display command log
-    setColor(150);
+    setColor(0.59f);
     drawBitmapString("Recent commands:", 20, 180);
     int y = 200;
     for (const auto& cmd : commandLog_) {
@@ -65,6 +65,6 @@ void tcApp::draw() {
     }
 
     // Display ball count
-    setColor(255);
+    setColor(1.0f);
     drawBitmapString("Balls: " + to_string(balls_.size()), 20, getWindowHeight() - 30);
 }

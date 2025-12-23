@@ -483,16 +483,6 @@ inline void clear(float gray, float a = 1.0f) {
     clear(gray, gray, gray, a);
 }
 
-// Clear screen (8bit RGB: 0 ~ 255)
-inline void clear(int r, int g, int b, int a = 255) {
-    clear(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
-}
-
-// Clear screen (8bit grayscale: 0 ~ 255)
-inline void clear(int gray, int a = 255) {
-    clear(gray / 255.0f, gray / 255.0f, gray / 255.0f, a / 255.0f);
-}
-
 // Clear screen (Color)
 inline void clear(const Color& c) {
     clear(c.r, c.g, c.b, c.a);
@@ -546,17 +536,8 @@ inline void setColor(float r, float g, float b, float a = 1.0f) {
     getDefaultContext().setColor(r, g, b, a);
 }
 
-// Set drawing color (int: 0 ~ 255)
-inline void setColor(int r, int g, int b, int a = 255) {
-    getDefaultContext().setColor(r, g, b, a);
-}
-
-// Grayscale
+// Grayscale (0.0-1.0)
 inline void setColor(float gray, float a = 1.0f) {
-    getDefaultContext().setColor(gray, a);
-}
-
-inline void setColor(int gray, int a = 255) {
     getDefaultContext().setColor(gray, a);
 }
 

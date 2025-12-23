@@ -51,7 +51,7 @@ void tcApp::addLog(const std::string& msg) {
 }
 
 void tcApp::draw() {
-    clear(30);
+    clear(0.12f);
     setColor(1.0f);
 
     // Title

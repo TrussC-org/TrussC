@@ -155,7 +155,7 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    clear(0);
+    clear(0.0f);
 
     // Apply shader and draw fullscreen
     shader.begin();

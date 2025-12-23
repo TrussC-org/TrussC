@@ -31,7 +31,7 @@ void tcApp::setup() {
 }
 
 void tcApp::draw() {
-    clear(40);
+    clear(0.16f);
 
     int w = getWindowWidth();
     int h = getWindowHeight();

@@ -55,7 +55,7 @@ std::string tcApp::keyToString(int key) {
 }
 
 void tcApp::draw() {
-    clear(30);
+    clear(0.12f);
 
     // Box that moves with arrow keys
     if (pressedKeys.count(KEY_LEFT)) boxX -= boxSpeed;
