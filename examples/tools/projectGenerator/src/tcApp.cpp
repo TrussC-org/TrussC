@@ -592,14 +592,27 @@ string tcApp::getTemplatePath() {
 }
 
 // Calculate TRUSSC_DIR value for CMakeLists.txt
-// Always uses relative path from project to trussc folder
+// Uses relative path if inside TC_ROOT, absolute path otherwise
 string tcApp::getTrusscDirValue(const string& projectPath) {
     fs::path projPath = fs::weakly_canonical(projectPath);
-    fs::path trusscPath = fs::weakly_canonical(tcRoot + "/trussc");
+    fs::path tcRootPath = fs::weakly_canonical(tcRoot);
+    fs::path trusscPath = tcRootPath / "trussc";
 
-    // Calculate relative path from project to trussc
-    fs::path relPath = fs::relative(trusscPath, projPath);
-    return "${CMAKE_CURRENT_SOURCE_DIR}/" + relPath.generic_string();
+    // Check if project is inside TC_ROOT
+    auto [projIter, rootIter] = std::mismatch(
+        projPath.begin(), projPath.end(),
+        tcRootPath.begin(), tcRootPath.end());
+
+    bool isInsideTcRoot = (rootIter == tcRootPath.end());
+
+    if (isInsideTcRoot) {
+        // Inside TC_ROOT: use relative path (portable within repo)
+        fs::path relPath = fs::relative(trusscPath, projPath);
+        return "${CMAKE_CURRENT_SOURCE_DIR}/" + relPath.generic_string();
+    } else {
+        // Outside TC_ROOT: use absolute path (project can be moved independently)
+        return trusscPath.generic_string();
+    }
 }
 
 bool tcApp::generateProject() {
