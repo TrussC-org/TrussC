@@ -23,7 +23,7 @@ void tcApp::setup() {
     outerBox_->label = "Outer ClipBox";
     addChild(outerBox_);
 
-    // Inner clip box (rotating)
+    // Inner clip box
     innerBox_ = make_shared<ClipBox>();
     innerBox_->x = 100;
     innerBox_->y = 80;
@@ -31,7 +31,7 @@ void tcApp::setup() {
     innerBox_->height = 220;
     innerBox_->bgColor = Color(0.2f, 0.15f, 0.15f);
     innerBox_->borderColor = Color(0.8f, 0.5f, 0.3f);
-    innerBox_->label = "Inner ClipBox (rotating)";
+    innerBox_->label = "Inner ClipBox";
     outerBox_->addChild(innerBox_);
 
     // Add bouncing circles to inner box

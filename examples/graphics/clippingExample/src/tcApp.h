@@ -94,7 +94,7 @@ private:
     // Outer clip box
     ClipBox::Ptr outerBox_;
 
-    // Inner clip box (rotating)
+    // Inner clip box
     ClipBox::Ptr innerBox_;
 
     // Bouncing circles
