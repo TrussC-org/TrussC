@@ -54,16 +54,16 @@ public:
     }
 
 protected:
-    bool onMousePress(float localX, float localY, int button) override {
-        (void)localX; (void)localY; (void)button;
+    bool onMousePress(Vec2 local, int button) override {
+        (void)local; (void)button;
         isPressed = true;
         count++;
         tcLogNotice("Button") << label << " pressed! count = " << count;
         return true;  // Consume event
     }
 
-    bool onMouseRelease(float localX, float localY, int button) override {
-        (void)localX; (void)localY; (void)button;
+    bool onMouseRelease(Vec2 local, int button) override {
+        (void)local; (void)button;
         isPressed = false;
         return true;
     }
@@ -119,9 +119,9 @@ public:
     void draw() override;
 
     void keyPressed(int key) override;
-    void mousePressed(int x, int y, int button) override;
-    void mouseReleased(int x, int y, int button) override;
-    void mouseMoved(int x, int y) override;
+    void mousePressed(Vec2 pos, int button) override;
+    void mouseReleased(Vec2 pos, int button) override;
+    void mouseMoved(Vec2 pos) override;
 
 private:
     // Static buttons

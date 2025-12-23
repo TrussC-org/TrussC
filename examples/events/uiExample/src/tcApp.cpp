@@ -130,25 +130,27 @@ void tcApp::keyPressed(int key) {
     }
 }
 
-void tcApp::mousePressed(int x, int y, int button) {
+void tcApp::mousePressed(Vec2 pos, int button) {
     // Dispatch event using Ray-based Hit Test
-    dispatchMousePress((float)x, (float)y, button);
+    dispatchMousePress(pos.x, pos.y, button);
 }
 
-void tcApp::mouseReleased(int x, int y, int button) {
-    dispatchMouseRelease((float)x, (float)y, button);
+void tcApp::mouseReleased(Vec2 pos, int button) {
+    dispatchMouseRelease(pos.x, pos.y, button);
 }
 
-void tcApp::mouseMoved(int x, int y) {
-    updateHoverState((float)x, (float)y);
+void tcApp::mouseMoved(Vec2 pos) {
+    updateHoverState(pos.x, pos.y);
 }
 
-void tcApp::mouseDragged(int x, int y, int button) {
+void tcApp::mouseDragged(Vec2 pos, int button) {
     (void)button;  // Unused
-    dispatchMouseMove((float)x, (float)y);
+    dispatchMouseMove(pos.x, pos.y);
 }
 
-void tcApp::mouseScrolled(float dx, float dy) {
+void tcApp::mouseScrolled(Vec2 delta) {
+    float dx = delta.x;
+    float dy = delta.y;
     // Manually dispatch scroll event
     float mx = getGlobalMouseX();
     float my = getGlobalMouseY();

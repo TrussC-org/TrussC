@@ -39,35 +39,30 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // Mouse events (traditional style - delivered in screen coordinates)
+    // Mouse events (delivered in screen coordinates)
     // -------------------------------------------------------------------------
 
-    virtual void mousePressed(int x, int y, int button) {
-        (void)x;
-        (void)y;
+    virtual void mousePressed(Vec2 pos, int button) {
+        (void)pos;
         (void)button;
     }
 
-    virtual void mouseReleased(int x, int y, int button) {
-        (void)x;
-        (void)y;
+    virtual void mouseReleased(Vec2 pos, int button) {
+        (void)pos;
         (void)button;
     }
 
-    virtual void mouseMoved(int x, int y) {
-        (void)x;
-        (void)y;
+    virtual void mouseMoved(Vec2 pos) {
+        (void)pos;
     }
 
-    virtual void mouseDragged(int x, int y, int button) {
-        (void)x;
-        (void)y;
+    virtual void mouseDragged(Vec2 pos, int button) {
+        (void)pos;
         (void)button;
     }
 
-    virtual void mouseScrolled(float deltaX, float deltaY) {
-        (void)deltaX;
-        (void)deltaY;
+    virtual void mouseScrolled(Vec2 delta) {
+        (void)delta;
     }
 
     // -------------------------------------------------------------------------

@@ -160,6 +160,10 @@ public:
         sgl_translate(x, y, 0.0f);
     }
 
+    void translate(Vec3 pos) {
+        translate(pos.x, pos.y, pos.z);
+    }
+
     void translate(float x, float y, float z) {
         currentMatrix_ = currentMatrix_ * Mat4::translate(x, y, z);
         sgl_translate(x, y, z);
@@ -243,6 +247,34 @@ public:
         }
     }
 
+    void drawRect(Vec3 pos, Vec2 size) {
+        float x = pos.x, y = pos.y, z = pos.z;
+        float w = size.x, h = size.y;
+        if (fillEnabled_) {
+            sgl_begin_quads();
+            sgl_c4f(currentR_, currentG_, currentB_, currentA_);
+            sgl_v3f(x, y, z);
+            sgl_v3f(x + w, y, z);
+            sgl_v3f(x + w, y + h, z);
+            sgl_v3f(x, y + h, z);
+            sgl_end();
+        }
+        if (strokeEnabled_) {
+            sgl_begin_line_strip();
+            sgl_c4f(currentR_, currentG_, currentB_, currentA_);
+            sgl_v3f(x, y, z);
+            sgl_v3f(x + w, y, z);
+            sgl_v3f(x + w, y + h, z);
+            sgl_v3f(x, y + h, z);
+            sgl_v3f(x, y, z);
+            sgl_end();
+        }
+    }
+
+    void drawRect(Vec3 pos, float w, float h) {
+        drawRect(pos, Vec2(w, h));
+    }
+
     void drawCircle(float cx, float cy, float radius) {
         int segments = circleResolution_;
 
@@ -266,6 +298,35 @@ public:
                 float px = cx + cos(angle) * radius;
                 float py = cy + sin(angle) * radius;
                 sgl_v2f(px, py);
+            }
+            sgl_end();
+        }
+    }
+
+    void drawCircle(Vec3 center, float radius) {
+        int segments = circleResolution_;
+        float cx = center.x, cy = center.y, cz = center.z;
+
+        if (fillEnabled_) {
+            sgl_begin_triangle_strip();
+            sgl_c4f(currentR_, currentG_, currentB_, currentA_);
+            for (int i = 0; i <= segments; i++) {
+                float angle = (float)i / segments * TAU;
+                float px = cx + cos(angle) * radius;
+                float py = cy + sin(angle) * radius;
+                sgl_v3f(cx, cy, cz);
+                sgl_v3f(px, py, cz);
+            }
+            sgl_end();
+        }
+        if (strokeEnabled_) {
+            sgl_begin_line_strip();
+            sgl_c4f(currentR_, currentG_, currentB_, currentA_);
+            for (int i = 0; i <= segments; i++) {
+                float angle = (float)i / segments * TAU;
+                float px = cx + cos(angle) * radius;
+                float py = cy + sin(angle) * radius;
+                sgl_v3f(px, py, cz);
             }
             sgl_end();
         }
@@ -299,11 +360,53 @@ public:
         }
     }
 
+    void drawEllipse(Vec3 center, Vec2 radii) {
+        int segments = circleResolution_;
+        float cx = center.x, cy = center.y, cz = center.z;
+        float rx = radii.x, ry = radii.y;
+
+        if (fillEnabled_) {
+            sgl_begin_triangle_strip();
+            sgl_c4f(currentR_, currentG_, currentB_, currentA_);
+            for (int i = 0; i <= segments; i++) {
+                float angle = (float)i / segments * TAU;
+                float px = cx + cos(angle) * rx;
+                float py = cy + sin(angle) * ry;
+                sgl_v3f(cx, cy, cz);
+                sgl_v3f(px, py, cz);
+            }
+            sgl_end();
+        }
+        if (strokeEnabled_) {
+            sgl_begin_line_strip();
+            sgl_c4f(currentR_, currentG_, currentB_, currentA_);
+            for (int i = 0; i <= segments; i++) {
+                float angle = (float)i / segments * TAU;
+                float px = cx + cos(angle) * rx;
+                float py = cy + sin(angle) * ry;
+                sgl_v3f(px, py, cz);
+            }
+            sgl_end();
+        }
+    }
+
+    void drawEllipse(Vec3 center, float rx, float ry) {
+        drawEllipse(center, Vec2(rx, ry));
+    }
+
     void drawLine(float x1, float y1, float x2, float y2) {
         sgl_begin_lines();
         sgl_c4f(currentR_, currentG_, currentB_, currentA_);
         sgl_v2f(x1, y1);
         sgl_v2f(x2, y2);
+        sgl_end();
+    }
+
+    void drawLine(Vec3 p1, Vec3 p2) {
+        sgl_begin_lines();
+        sgl_c4f(currentR_, currentG_, currentB_, currentA_);
+        sgl_v3f(p1.x, p1.y, p1.z);
+        sgl_v3f(p2.x, p2.y, p2.z);
         sgl_end();
     }
 
@@ -327,10 +430,37 @@ public:
         }
     }
 
+    void drawTriangle(Vec3 p1, Vec3 p2, Vec3 p3) {
+        if (fillEnabled_) {
+            sgl_begin_triangles();
+            sgl_c4f(currentR_, currentG_, currentB_, currentA_);
+            sgl_v3f(p1.x, p1.y, p1.z);
+            sgl_v3f(p2.x, p2.y, p2.z);
+            sgl_v3f(p3.x, p3.y, p3.z);
+            sgl_end();
+        }
+        if (strokeEnabled_) {
+            sgl_begin_line_strip();
+            sgl_c4f(currentR_, currentG_, currentB_, currentA_);
+            sgl_v3f(p1.x, p1.y, p1.z);
+            sgl_v3f(p2.x, p2.y, p2.z);
+            sgl_v3f(p3.x, p3.y, p3.z);
+            sgl_v3f(p1.x, p1.y, p1.z);
+            sgl_end();
+        }
+    }
+
     void drawPoint(float x, float y) {
         sgl_begin_points();
         sgl_c4f(currentR_, currentG_, currentB_, currentA_);
         sgl_v2f(x, y);
+        sgl_end();
+    }
+
+    void drawPoint(Vec3 pos) {
+        sgl_begin_points();
+        sgl_c4f(currentR_, currentG_, currentB_, currentA_);
+        sgl_v3f(pos.x, pos.y, pos.z);
         sgl_end();
     }
 
@@ -403,6 +533,10 @@ public:
         popMatrix();
     }
 
+    void drawBitmapString(const std::string& text, Vec3 pos, bool screenFixed = true) {
+        drawBitmapString(text, pos.x, pos.y, screenFixed);
+    }
+
     void drawBitmapString(const std::string& text, float x, float y, float scale) {
         if (text.empty() || !internal::fontInitialized) return;
 
@@ -464,6 +598,10 @@ public:
         sgl_load_default_pipeline();
 
         popMatrix();
+    }
+
+    void drawBitmapString(const std::string& text, Vec3 pos, float scale) {
+        drawBitmapString(text, pos.x, pos.y, scale);
     }
 
     // -----------------------------------------------------------------------
@@ -543,6 +681,11 @@ public:
         sgl_load_default_pipeline();
 
         popMatrix();
+    }
+
+    void drawBitmapString(const std::string& text, Vec3 pos,
+                          Direction h, Direction v, bool screenFixed = true) {
+        drawBitmapString(text, pos.x, pos.y, h, v, screenFixed);
     }
 
     // -----------------------------------------------------------------------

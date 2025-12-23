@@ -26,11 +26,11 @@ public:
     void cleanup() override;
 
     // Mouse events (for redraw)
-    void mousePressed(int x, int y, int button) override;
-    void mouseReleased(int x, int y, int button) override;
-    void mouseMoved(int x, int y) override;
-    void mouseDragged(int x, int y, int button) override;
-    void mouseScrolled(float deltaX, float deltaY) override;
+    void mousePressed(Vec2 pos, int button) override;
+    void mouseReleased(Vec2 pos, int button) override;
+    void mouseMoved(Vec2 pos) override;
+    void mouseDragged(Vec2 pos, int button) override;
+    void mouseScrolled(Vec2 delta) override;
 
     // Key events (for redraw)
     void keyPressed(int key) override;

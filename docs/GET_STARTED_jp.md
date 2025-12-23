@@ -169,11 +169,11 @@ public:
     void keyReleased(int key) override;
 
     // マウスイベント
-    void mousePressed(int x, int y, int button) override;
-    void mouseReleased(int x, int y, int button) override;
-    void mouseMoved(int x, int y) override;
-    void mouseDragged(int x, int y, int button) override;
-    void mouseScrolled(float deltaX, float deltaY) override;
+    void mousePressed(Vec2 pos, int button) override;
+    void mouseReleased(Vec2 pos, int button) override;
+    void mouseMoved(Vec2 pos) override;
+    void mouseDragged(Vec2 pos, int button) override;
+    void mouseScrolled(Vec2 delta) override;
 
     // ウィンドウイベント
     void windowResized(int width, int height) override;
@@ -209,8 +209,8 @@ void tcApp::keyPressed(int key) {
     if (key == 'f') toggleFullscreen();
 }
 
-void tcApp::mousePressed(int x, int y, int button) {
-    // マウスクリックの処理
+void tcApp::mousePressed(Vec2 pos, int button) {
+    // マウスクリックの処理（pos.x, pos.y で座標を取得）
 }
 
 // ... 必要に応じて他のオーバーライドを実装

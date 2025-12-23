@@ -61,17 +61,17 @@ public:
 protected:
     bool isPressed_ = false;
 
-    bool onMousePress(float lx, float ly, int btn) override {
+    bool onMousePress(Vec2 local, int button) override {
         isPressed_ = true;
-        return RectNode::onMousePress(lx, ly, btn);
+        return RectNode::onMousePress(local, button);
     }
 
-    bool onMouseRelease(float lx, float ly, int btn) override {
+    bool onMouseRelease(Vec2 local, int button) override {
         if (isPressed_ && isMouseOver() && onClick) {
             onClick();  // Fire click event
         }
         isPressed_ = false;
-        return RectNode::onMouseRelease(lx, ly, btn);
+        return RectNode::onMouseRelease(local, button);
     }
 };
 
@@ -143,41 +143,41 @@ public:
 protected:
     bool isDragging_ = false;
 
-    bool onMousePress(float lx, float ly, int btn) override {
+    bool onMousePress(Vec2 local, int button) override {
         isDragging_ = true;
-        updateValue(lx);
-        return RectNode::onMousePress(lx, ly, btn);
+        updateValue(local.x);
+        return RectNode::onMousePress(local, button);
     }
 
-    bool onMouseRelease(float lx, float ly, int btn) override {
+    bool onMouseRelease(Vec2 local, int button) override {
         isDragging_ = false;
-        return RectNode::onMouseRelease(lx, ly, btn);
+        return RectNode::onMouseRelease(local, button);
     }
 
-    bool onMouseDrag(float lx, float ly, int btn) override {
+    bool onMouseDrag(Vec2 local, int button) override {
         if (isDragging_) {
-            updateValue(lx);
+            updateValue(local.x);
         }
-        return RectNode::onMouseDrag(lx, ly, btn);
+        return RectNode::onMouseDrag(local, button);
     }
 
-    bool onMouseMove(float lx, float ly) override {
+    bool onMouseMove(Vec2 local) override {
         // Update value while dragging
         if (isDragging_) {
-            updateValue(lx);
+            updateValue(local.x);
         }
-        return RectNode::onMouseMove(lx, ly);
+        return RectNode::onMouseMove(local);
     }
 
-    bool onMouseScroll(float lx, float ly, float sx, float sy) override {
+    bool onMouseScroll(Vec2 local, Vec2 scroll) override {
         // Change value by scroll
-        float delta = sy * 0.05f;
+        float delta = scroll.y * 0.05f;
         float oldValue = value;
         value = std::max<float>(0.0f, std::min<float>(1.0f, value + delta));
         if (value != oldValue && onValueChanged) {
             onValueChanged(getValue());
         }
-        return RectNode::onMouseScroll(lx, ly, sx, sy);
+        return RectNode::onMouseScroll(local, scroll);
     }
 
 private:
@@ -263,10 +263,10 @@ public:
     }
 
 protected:
-    bool onMouseScroll(float lx, float ly, float sx, float sy) override {
+    bool onMouseScroll(Vec2 local, Vec2 scroll) override {
         float maxScroll = std::max<float>(0.0f, contentHeight - height);
-        scrollY = std::max<float>(0.0f, std::min<float>(maxScroll, scrollY - sy * 20));
-        return RectNode::onMouseScroll(lx, ly, sx, sy);
+        scrollY = std::max<float>(0.0f, std::min<float>(maxScroll, scrollY - scroll.y * 20));
+        return RectNode::onMouseScroll(local, scroll);
     }
 };
 
@@ -280,11 +280,11 @@ public:
     void draw() override;
 
     void keyPressed(int key) override;
-    void mousePressed(int x, int y, int button) override;
-    void mouseReleased(int x, int y, int button) override;
-    void mouseMoved(int x, int y) override;
-    void mouseDragged(int x, int y, int button) override;
-    void mouseScrolled(float dx, float dy) override;
+    void mousePressed(Vec2 pos, int button) override;
+    void mouseReleased(Vec2 pos, int button) override;
+    void mouseMoved(Vec2 pos) override;
+    void mouseDragged(Vec2 pos, int button) override;
+    void mouseScrolled(Vec2 delta) override;
 
 private:
     UIButton::Ptr button1_;

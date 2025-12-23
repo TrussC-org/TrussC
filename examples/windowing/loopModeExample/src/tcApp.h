@@ -10,7 +10,7 @@ public:
     void update() override;
     void draw() override;
     void keyPressed(int key) override;
-    void mousePressed(int x, int y, int button) override;
+    void mousePressed(Vec2 pos, int button) override;
 
 private:
     int mode = 0;  // 0: VSync, 1: Fixed 60fps, 2: Fixed 30fps, 3: Event-driven

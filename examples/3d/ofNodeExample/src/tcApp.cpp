@@ -127,8 +127,8 @@ void tcApp::keyPressed(int key) {
     }
 }
 
-void tcApp::mousePressed(int x, int y, int button) {
-    tcLogVerbose("tcApp") << "Global mouse: " << x << ", " << y;
+void tcApp::mousePressed(Vec2 pos, int button) {
+    tcLogVerbose("tcApp") << "Global mouse: " << pos.x << ", " << pos.y;
 
     // Display each follower's local coordinates
     tcLogVerbose("tcApp") << "  Follower1 local: " << follower1_->getMouseX()
@@ -137,6 +137,6 @@ void tcApp::mousePressed(int x, int y, int button) {
                        << ", " << follower2_->getMouseY();
 }
 
-void tcApp::mouseDragged(int x, int y, int button) {
-    (void)x; (void)y; (void)button;
+void tcApp::mouseDragged(Vec2 pos, int button) {
+    (void)pos; (void)button;
 }

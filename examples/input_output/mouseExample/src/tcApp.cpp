@@ -118,27 +118,27 @@ void tcApp::draw() {
     drawBitmapString("Right", w - 120, 75);
 }
 
-void tcApp::mousePressed(int x, int y, int button) {
+void tcApp::mousePressed(Vec2 pos, int button) {
     isDragging = true;
     currentButton = button;
     dragTrail.clear();
-    dragTrail.push_back({(float)x, (float)y, button});
+    dragTrail.push_back({pos.x, pos.y, button});
 
-    clickPoints.push_back({(float)x, (float)y, button, 1.0f});
+    clickPoints.push_back({pos.x, pos.y, button, 1.0f});
 }
 
-void tcApp::mouseReleased(int x, int y, int button) {
+void tcApp::mouseReleased(Vec2 pos, int button) {
     isDragging = false;
     currentButton = -1;
 }
 
-void tcApp::mouseMoved(int x, int y) {
+void tcApp::mouseMoved(Vec2 pos) {
     // Nothing to do on move
 }
 
-void tcApp::mouseDragged(int x, int y, int button) {
+void tcApp::mouseDragged(Vec2 pos, int button) {
     if (isDragging) {
-        dragTrail.push_back({(float)x, (float)y, button});
+        dragTrail.push_back({pos.x, pos.y, button});
 
         // Remove old points if trail gets too long
         if (dragTrail.size() > 500) {
@@ -147,9 +147,9 @@ void tcApp::mouseDragged(int x, int y, int button) {
     }
 }
 
-void tcApp::mouseScrolled(float dx, float dy) {
-    scrollX += dx;
-    scrollY += dy;
+void tcApp::mouseScrolled(Vec2 delta) {
+    scrollX += delta.x;
+    scrollY += delta.y;
 
     // Range limit (corresponds to size 10-300: scrollY = -20 to 125)
     if (scrollY < -20) scrollY = -20;

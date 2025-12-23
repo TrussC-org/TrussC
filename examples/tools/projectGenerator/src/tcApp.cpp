@@ -108,26 +108,26 @@ void tcApp::update() {
 }
 
 // Redraw on mouse events
-void tcApp::mousePressed(int x, int y, int button) {
+void tcApp::mousePressed(Vec2 pos, int button) {
     redraw();
 }
 
-void tcApp::mouseReleased(int x, int y, int button) {
+void tcApp::mouseReleased(Vec2 pos, int button) {
     redraw();
 }
 
-void tcApp::mouseMoved(int x, int y) {
+void tcApp::mouseMoved(Vec2 pos) {
     // Redraw only when inside the window
-    if (x >= 0 && x < getWindowWidth() && y >= 0 && y < getWindowHeight()) {
+    if (pos.x >= 0 && pos.x < getWindowWidth() && pos.y >= 0 && pos.y < getWindowHeight()) {
         redraw();
     }
 }
 
-void tcApp::mouseDragged(int x, int y, int button) {
+void tcApp::mouseDragged(Vec2 pos, int button) {
     redraw();
 }
 
-void tcApp::mouseScrolled(float deltaX, float deltaY) {
+void tcApp::mouseScrolled(Vec2 delta) {
     redraw();
 }
 

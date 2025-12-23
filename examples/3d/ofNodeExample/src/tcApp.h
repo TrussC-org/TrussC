@@ -104,8 +104,8 @@ public:
     void draw() override;
 
     void keyPressed(int key) override;
-    void mousePressed(int x, int y, int button) override;
-    void mouseDragged(int x, int y, int button) override;
+    void mousePressed(Vec2 pos, int button) override;
+    void mouseDragged(Vec2 pos, int button) override;
 
 private:
     // Nodes

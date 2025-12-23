@@ -111,9 +111,9 @@ void tcApp::keyPressed(int key) {
     }
 }
 
-void tcApp::mousePressed(int x, int y, int button) {
+void tcApp::mousePressed(Vec2 pos, int button) {
     // Dispatch event using Ray-based Hit Test
-    auto hitNode = dispatchMousePress((float)x, (float)y, button);
+    auto hitNode = dispatchMousePress(pos.x, pos.y, button);
 
     if (hitNode) {
         tcLogNotice("tcApp") << "Hit node received event";
@@ -122,12 +122,12 @@ void tcApp::mousePressed(int x, int y, int button) {
     }
 }
 
-void tcApp::mouseReleased(int x, int y, int button) {
-    dispatchMouseRelease((float)x, (float)y, button);
+void tcApp::mouseReleased(Vec2 pos, int button) {
+    dispatchMouseRelease(pos.x, pos.y, button);
 }
 
-void tcApp::mouseMoved(int x, int y) {
+void tcApp::mouseMoved(Vec2 pos) {
     // Update hover state using built-in mechanism
     // This automatically calls onMouseEnter/onMouseLeave on the topmost hit node
-    updateHoverState((float)x, (float)y);
+    updateHoverState(pos.x, pos.y);
 }

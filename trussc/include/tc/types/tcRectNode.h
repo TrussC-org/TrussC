@@ -96,13 +96,13 @@ public:
         return false;
     }
 
-    // Traditional 2D hit test (backward compatibility)
-    bool hitTest(float localX, float localY) override {
+    // 2D hit test
+    bool hitTest(Vec2 local) override {
         if (!isEventsEnabled()) {
             return false;
         }
-        return localX >= 0 && localX <= width &&
-               localY >= 0 && localY <= height;
+        return local.x >= 0 && local.x <= width &&
+               local.y >= 0 && local.y <= height;
     }
 
     // -------------------------------------------------------------------------
@@ -171,41 +171,40 @@ protected:
     // Mouse events (fire events)
     // -------------------------------------------------------------------------
 
-    bool onMousePress(float localX, float localY, int button) override {
+    bool onMousePress(Vec2 local, int button) override {
         MouseEventArgs args;
-        args.x = localX;
-        args.y = localY;
+        args.x = local.x;
+        args.y = local.y;
         args.button = button;
         mousePressed.notify(args);
         return true;  // Consume event
     }
 
-    bool onMouseRelease(float localX, float localY, int button) override {
+    bool onMouseRelease(Vec2 local, int button) override {
         MouseEventArgs args;
-        args.x = localX;
-        args.y = localY;
+        args.x = local.x;
+        args.y = local.y;
         args.button = button;
         mouseReleased.notify(args);
         return true;
     }
 
-    bool onMouseDrag(float localX, float localY, int button) override {
+    bool onMouseDrag(Vec2 local, int button) override {
         MouseDragEventArgs args;
-        args.x = localX;
-        args.y = localY;
+        args.x = local.x;
+        args.y = local.y;
         args.button = button;
-        args.deltaX = localX - getMouseX();  // Simple delta
-        args.deltaY = localY - getMouseY();
+        args.deltaX = local.x - getMouseX();  // Simple delta
+        args.deltaY = local.y - getMouseY();
         mouseDragged.notify(args);
         return true;
     }
 
-    bool onMouseScroll(float localX, float localY, float scrollX, float scrollY) override {
-        (void)localX;
-        (void)localY;
+    bool onMouseScroll(Vec2 local, Vec2 scroll) override {
+        (void)local;
         ScrollEventArgs args;
-        args.scrollX = scrollX;
-        args.scrollY = scrollY;
+        args.scrollX = scroll.x;
+        args.scrollY = scroll.y;
         mouseScrolled.notify(args);
         return true;
     }
@@ -283,14 +282,14 @@ public:
     }
 
 protected:
-    bool onMousePress(float localX, float localY, int button) override {
+    bool onMousePress(Vec2 local, int button) override {
         isPressed = true;
-        return RectNode::onMousePress(localX, localY, button);  // Also fire parent's event
+        return RectNode::onMousePress(local, button);  // Also fire parent's event
     }
 
-    bool onMouseRelease(float localX, float localY, int button) override {
+    bool onMouseRelease(Vec2 local, int button) override {
         isPressed = false;
-        return RectNode::onMouseRelease(localX, localY, button);
+        return RectNode::onMouseRelease(local, button);
     }
 };
 

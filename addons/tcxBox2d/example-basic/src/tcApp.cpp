@@ -93,16 +93,16 @@ public:
         drawBitmapString("Bodies: " + std::to_string(world.getBodyCount()), 10, 68);
     }
 
-    void mousePressed(int x, int y, int button) override {
+    void mousePressed(Vec2 pos, int button) override {
         if (button == MOUSE_BUTTON_LEFT) {
             // Start dragging if body exists at point
-            box2d::Body* body = world.getBodyAtPoint((float)x, (float)y);
+            box2d::Body* body = world.getBodyAtPoint(pos.x, pos.y);
             if (body) {
-                world.startDrag(body, (float)x, (float)y);
+                world.startDrag(body, pos.x, pos.y);
             } else {
                 // Otherwise add a circle
                 auto circle = std::make_shared<box2d::CircleBody>();
-                circle->setup(world, (float)x, (float)y, randomFloat(15, 40));
+                circle->setup(world, pos.x, pos.y, randomFloat(15, 40));
                 circle->setRestitution(0.7f);  // Bouncy
                 circles.push_back(circle);
             }
@@ -110,19 +110,19 @@ public:
         else if (button == MOUSE_BUTTON_RIGHT) {
             // Right click: add rectangle
             auto rect = std::make_shared<box2d::RectBody>();
-            rect->setup(world, (float)x, (float)y, randomFloat(30, 60), randomFloat(20, 40));
+            rect->setup(world, pos.x, pos.y, randomFloat(30, 60), randomFloat(20, 40));
             rect->setRestitution(0.3f);
             rects.push_back(rect);
         }
     }
 
-    void mouseDragged(int x, int y, int button) override {
+    void mouseDragged(Vec2 pos, int button) override {
         if (button == MOUSE_BUTTON_LEFT) {
-            world.updateDrag((float)x, (float)y);
+            world.updateDrag(pos.x, pos.y);
         }
     }
 
-    void mouseReleased(int x, int y, int button) override {
+    void mouseReleased(Vec2 pos, int button) override {
         if (button == MOUSE_BUTTON_LEFT) {
             world.endDrag();
         }

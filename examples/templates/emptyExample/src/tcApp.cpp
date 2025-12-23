@@ -20,23 +20,23 @@ void tcApp::keyReleased(int key) {
 
 }
 
-void tcApp::mousePressed(int x, int y, int button) {
+void tcApp::mousePressed(Vec2 pos, int button) {
 
 }
 
-void tcApp::mouseReleased(int x, int y, int button) {
+void tcApp::mouseReleased(Vec2 pos, int button) {
 
 }
 
-void tcApp::mouseMoved(int x, int y) {
+void tcApp::mouseMoved(Vec2 pos) {
 
 }
 
-void tcApp::mouseDragged(int x, int y, int button) {
+void tcApp::mouseDragged(Vec2 pos, int button) {
 
 }
 
-void tcApp::mouseScrolled(float deltaX, float deltaY) {
+void tcApp::mouseScrolled(Vec2 delta) {
 
 }
 

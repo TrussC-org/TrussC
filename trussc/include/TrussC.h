@@ -710,6 +710,10 @@ inline void translate(float x, float y) {
     getDefaultContext().translate(x, y);
 }
 
+inline void translate(Vec3 pos) {
+    getDefaultContext().translate(pos);
+}
+
 // 3D translation
 inline void translate(float x, float y, float z) {
     getDefaultContext().translate(x, y, z);
@@ -849,9 +853,21 @@ inline void drawRect(float x, float y, float w, float h) {
     getDefaultContext().drawRect(x, y, w, h);
 }
 
+inline void drawRect(Vec3 pos, Vec2 size) {
+    getDefaultContext().drawRect(pos, size);
+}
+
+inline void drawRect(Vec3 pos, float w, float h) {
+    getDefaultContext().drawRect(pos, w, h);
+}
+
 // Circle
 inline void drawCircle(float cx, float cy, float radius) {
     getDefaultContext().drawCircle(cx, cy, radius);
+}
+
+inline void drawCircle(Vec3 center, float radius) {
+    getDefaultContext().drawCircle(center, radius);
 }
 
 // Ellipse
@@ -859,9 +875,21 @@ inline void drawEllipse(float cx, float cy, float rx, float ry) {
     getDefaultContext().drawEllipse(cx, cy, rx, ry);
 }
 
+inline void drawEllipse(Vec3 center, Vec2 radii) {
+    getDefaultContext().drawEllipse(center, radii);
+}
+
+inline void drawEllipse(Vec3 center, float rx, float ry) {
+    getDefaultContext().drawEllipse(center, rx, ry);
+}
+
 // Line
 inline void drawLine(float x1, float y1, float x2, float y2) {
     getDefaultContext().drawLine(x1, y1, x2, y2);
+}
+
+inline void drawLine(Vec3 p1, Vec3 p2) {
+    getDefaultContext().drawLine(p1, p2);
 }
 
 // Triangle
@@ -869,9 +897,17 @@ inline void drawTriangle(float x1, float y1, float x2, float y2, float x3, float
     getDefaultContext().drawTriangle(x1, y1, x2, y2, x3, y3);
 }
 
+inline void drawTriangle(Vec3 p1, Vec3 p2, Vec3 p3) {
+    getDefaultContext().drawTriangle(p1, p2, p3);
+}
+
 // Point
 inline void drawPoint(float x, float y) {
     getDefaultContext().drawPoint(x, y);
+}
+
+inline void drawPoint(Vec3 pos) {
+    getDefaultContext().drawPoint(pos);
 }
 
 // Set circle resolution
@@ -913,15 +949,28 @@ inline void drawBitmapString(const std::string& text, float x, float y, bool scr
     getDefaultContext().drawBitmapString(text, x, y, screenFixed);
 }
 
+inline void drawBitmapString(const std::string& text, Vec3 pos, bool screenFixed = true) {
+    getDefaultContext().drawBitmapString(text, pos, screenFixed);
+}
+
 // Draw bitmap string (with scale)
 inline void drawBitmapString(const std::string& text, float x, float y, float scale) {
     getDefaultContext().drawBitmapString(text, x, y, scale);
+}
+
+inline void drawBitmapString(const std::string& text, Vec3 pos, float scale) {
+    getDefaultContext().drawBitmapString(text, pos, scale);
 }
 
 // Draw bitmap string (with alignment)
 inline void drawBitmapString(const std::string& text, float x, float y,
                               Direction h, Direction v) {
     getDefaultContext().drawBitmapString(text, x, y, h, v);
+}
+
+inline void drawBitmapString(const std::string& text, Vec3 pos,
+                              Direction h, Direction v) {
+    getDefaultContext().drawBitmapString(text, pos, h, v);
 }
 
 // Set text alignment
@@ -1766,19 +1815,19 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
         }
     };
     internal::appMousePressedFunc = [](int x, int y, int button) {
-        if (app) app->mousePressed(x, y, button);
+        if (app) app->mousePressed(Vec2(x, y), button);
     };
     internal::appMouseReleasedFunc = [](int x, int y, int button) {
-        if (app) app->mouseReleased(x, y, button);
+        if (app) app->mouseReleased(Vec2(x, y), button);
     };
     internal::appMouseMovedFunc = [](int x, int y) {
-        if (app) app->mouseMoved(x, y);
+        if (app) app->mouseMoved(Vec2(x, y));
     };
     internal::appMouseDraggedFunc = [](int x, int y, int button) {
-        if (app) app->mouseDragged(x, y, button);
+        if (app) app->mouseDragged(Vec2(x, y), button);
     };
     internal::appMouseScrolledFunc = [](float dx, float dy) {
-        if (app) app->mouseScrolled(dx, dy);
+        if (app) app->mouseScrolled(Vec2(dx, dy));
     };
     internal::appWindowResizedFunc = [](int w, int h) {
         if (app) app->windowResized(w, h);

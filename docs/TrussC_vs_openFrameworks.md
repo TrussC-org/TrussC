@@ -217,12 +217,13 @@ parent->addChild(child);
 ```cpp
 // RectNode automatically converts to local coordinates
 class MyButton : public tc::RectNode {
-    void onMousePressed(const tc::Vec2& localPos, int button) override {
-        // localPos is coordinates "for this node"
+    bool onMousePress(tc::Vec2 local, int button) override {
+        // local is coordinates "for this node"
         // Even if parent is rotated, arrives in own local coordinates
-        if (localPos.x < width/2) {
+        if (local.x < width/2) {
             // Left half clicked
         }
+        return true;  // Consume event
     }
 };
 ```
@@ -239,9 +240,9 @@ class MyButton : public tc::RectNode {
 // Front nodes receive events preferentially
 // If event is "consumed", it doesn't propagate behind
 
-void onMousePressed(const tc::Vec2& pos, int button) override {
-    // If processed by this node, nodes behind don't receive it
-    consumeEvent();
+bool onMousePress(tc::Vec2 local, int button) override {
+    // Return true to consume event, nodes behind don't receive it
+    return true;
 }
 ```
 
@@ -276,7 +277,11 @@ Reference for oF users finding equivalent features in TrussC.
 | `update()` | `update()` | emptyExample | Same |
 | `draw()` | `draw()` | emptyExample | Same |
 | `keyPressed(int key)` | `keyPressed(int key)` | keyboardExample | Same |
-| `mousePressed(x, y, button)` | `mousePressed(x, y, button)` | mouseExample | Same |
+| `mousePressed(x, y, button)` | `mousePressed(Vec2 pos, button)` | mouseExample | Vec2 style |
+| `mouseReleased(x, y, button)` | `mouseReleased(Vec2 pos, button)` | mouseExample | Vec2 style |
+| `mouseMoved(x, y)` | `mouseMoved(Vec2 pos)` | mouseExample | Vec2 style |
+| `mouseDragged(x, y, button)` | `mouseDragged(Vec2 pos, button)` | mouseExample | Vec2 style |
+| `mouseScrolled(x, y, scrollX, scrollY)` | `mouseScrolled(Vec2 delta)` | mouseExample | Vec2 style |
 | `windowResized(w, h)` | `windowResized(w, h)` | emptyExample | Same |
 | `dragEvent(ofDragInfo)` | `filesDropped(paths)` | dragDropExample | |
 | `ofSetFrameRate(60)` | `tc::setFps(60)` | loopModeExample | Synced mode |

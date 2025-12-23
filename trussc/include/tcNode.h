@@ -329,12 +329,8 @@ public:
         HitResult result = findHitNode(globalRay);
 
         if (result.hit()) {
-            // Calculate local coordinates
-            float localX = result.localPoint.x;
-            float localY = result.localPoint.y;
-
-            // Dispatch event
-            if (result.node->onMousePress(localX, localY, button)) {
+            Vec2 local(result.localPoint.x, result.localPoint.y);
+            if (result.node->onMousePress(local, button)) {
                 return result.node;
             }
         }
@@ -347,10 +343,8 @@ public:
         HitResult result = findHitNode(globalRay);
 
         if (result.hit()) {
-            float localX = result.localPoint.x;
-            float localY = result.localPoint.y;
-
-            if (result.node->onMouseRelease(localX, localY, button)) {
+            Vec2 local(result.localPoint.x, result.localPoint.y);
+            if (result.node->onMouseRelease(local, button)) {
                 return result.node;
             }
         }
@@ -363,10 +357,8 @@ public:
         HitResult result = findHitNode(globalRay);
 
         if (result.hit()) {
-            float localX = result.localPoint.x;
-            float localY = result.localPoint.y;
-
-            if (result.node->onMouseMove(localX, localY)) {
+            Vec2 local(result.localPoint.x, result.localPoint.y);
+            if (result.node->onMouseMove(local)) {
                 return result.node;
             }
         }
@@ -505,48 +497,40 @@ protected:
         return false;
     }
 
-    // Legacy 2D hit test (kept for backward compatibility)
-    // Return true to receive events on this node
-    virtual bool hitTest(float localX, float localY) {
-        (void)localX;
-        (void)localY;
+    // 2D hit test - Return true to receive events on this node
+    virtual bool hitTest(Vec2 local) {
+        (void)local;
         return false;
     }
 
     // Mouse events (delivered in local coordinates)
     // Return true to consume the event (prevents propagation to parent)
-    virtual bool onMousePress(float localX, float localY, int button) {
-        (void)localX;
-        (void)localY;
+    virtual bool onMousePress(Vec2 local, int button) {
+        (void)local;
         (void)button;
         return false;
     }
 
-    virtual bool onMouseRelease(float localX, float localY, int button) {
-        (void)localX;
-        (void)localY;
+    virtual bool onMouseRelease(Vec2 local, int button) {
+        (void)local;
         (void)button;
         return false;
     }
 
-    virtual bool onMouseMove(float localX, float localY) {
-        (void)localX;
-        (void)localY;
+    virtual bool onMouseMove(Vec2 local) {
+        (void)local;
         return false;
     }
 
-    virtual bool onMouseDrag(float localX, float localY, int button) {
-        (void)localX;
-        (void)localY;
+    virtual bool onMouseDrag(Vec2 local, int button) {
+        (void)local;
         (void)button;
         return false;
     }
 
-    virtual bool onMouseScroll(float localX, float localY, float scrollX, float scrollY) {
-        (void)localX;
-        (void)localY;
-        (void)scrollX;
-        (void)scrollY;
+    virtual bool onMouseScroll(Vec2 local, Vec2 scroll) {
+        (void)local;
+        (void)scroll;
         return false;
     }
 
