@@ -97,7 +97,7 @@ void tcApp::update() {
 // draw - Drawing
 // =============================================================================
 void tcApp::draw() {
-    clear(255);
+    clear(1.0f);
     setColor(0.16f);
 
     // Connection status

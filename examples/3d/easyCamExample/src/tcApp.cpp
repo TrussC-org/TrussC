@@ -34,7 +34,7 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    clear(20);
+    clear(0.08f);
 
     // --- 3D drawing (camera enabled) ---
     cam.begin();

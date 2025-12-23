@@ -82,7 +82,7 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    clear(0);
+    clear(0.0f);
 
     float gridLeft = 80;
     float gridTop = 60;

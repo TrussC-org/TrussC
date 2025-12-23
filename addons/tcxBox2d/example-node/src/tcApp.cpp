@@ -89,7 +89,7 @@ public:
     }
 
     void draw() override {
-        clear(30);
+        clear(0.12f);
 
         // root.drawTree() draws all child nodes at once
         // Each Body's drawTree() automatically applies x, y, rotation

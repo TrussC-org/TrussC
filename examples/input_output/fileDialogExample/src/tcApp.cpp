@@ -19,7 +19,7 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    clear(40);
+    clear(0.16f);
 
     float y = 40;
 

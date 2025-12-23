@@ -54,7 +54,7 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    clear(20);
+    clear(0.08f);
 
     float windowW = getWindowWidth();
     float windowH = getWindowHeight();

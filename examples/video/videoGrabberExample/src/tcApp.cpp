@@ -19,7 +19,7 @@ void tcApp::update() {
 }
 
 void tcApp::draw() {
-    clear(50);
+    clear(0.2f);
 
     if (grabber_.isPendingPermission()) {
         // Waiting for permission

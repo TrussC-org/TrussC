@@ -58,7 +58,7 @@ public:
     // Draw analysis result
     void draw(float x, float y, float scale = 4.0f) {
         if (pixels_.empty()) {
-            setColor(255);
+            setColor(1.0f);
             drawBitmapString("No frames analyzed yet", x + 20, y + 20);
             return;
         }

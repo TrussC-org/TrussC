@@ -64,7 +64,7 @@ public:
     }
 
     void draw() override {
-        clear(30);
+        clear(0.12f);
 
         // Draw all circles (drawTree applies position/rotation)
         setColor(1.0f, 0.78f, 0.4f);
