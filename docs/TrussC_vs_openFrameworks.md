@@ -13,7 +13,7 @@ To let oF users start writing with TrussC without feeling out of place, the foll
 | Item | openFrameworks | TrussC | Notes |
 |:-----|:---------------|:-------|:------|
 | **Lifecycle** | setup, update, draw | setup, update, draw | The basic rhythm of creative coding. This structure is unchanged. |
-| **Immediate Drawing** | ofDrawCircle(x, y, r) | tc::drawCircle(x, y, r) | The magical simplicity of "write one line, get a picture" must never be lost. |
+| **Immediate Drawing** | ofDrawCircle(x, y, r) | tc::drawCircle(Vec3 pos, r) | The magical simplicity of "write one line, get a picture" must never be lost. |
 | **State Machine** | ofSetColor, ofPushMatrix | tc::setColor, tc::pushMatrix | Following the style of modifying state and drawing. |
 | **Learning Curve** | Beginner-friendly | Beginner-friendly | Complex GPU concepts (command buffers, descriptor heaps, etc.) are hidden, letting anyone express through code. |
 
@@ -306,15 +306,15 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofBackground(r, g, b)` | `tc::clear(r, g, b)` | graphicsExample | 0.0-1.0, not 0-255 |
 | `ofSetColor(r, g, b, a)` | `tc::setColor(r, g, b, a)` | graphicsExample | 0.0-1.0 |
 | `ofSetColor(ofColor::red)` | `tc::setColor(tc::colors::red)` | colorExample | |
-| `ofDrawRectangle(x, y, w, h)` | `tc::drawRect(x, y, w, h)` | graphicsExample | |
-| `ofDrawCircle(x, y, r)` | `tc::drawCircle(x, y, r)` | graphicsExample | |
-| `ofDrawEllipse(x, y, w, h)` | `tc::drawEllipse(x, y, w, h)` | graphicsExample | |
-| `ofDrawLine(x1, y1, x2, y2)` | `tc::drawLine(x1, y1, x2, y2)` | graphicsExample | |
-| `ofDrawTriangle(...)` | `tc::drawTriangle(...)` | graphicsExample | |
+| `ofDrawRectangle(x, y, w, h)` | `tc::drawRect(Vec3 pos, Vec2 size)` | graphicsExample | Vec2→Vec3 auto convert |
+| `ofDrawCircle(x, y, r)` | `tc::drawCircle(Vec3 center, r)` | graphicsExample | Vec2→Vec3 auto convert |
+| `ofDrawEllipse(x, y, w, h)` | `tc::drawEllipse(Vec3 center, Vec2 size)` | graphicsExample | Vec2→Vec3 auto convert |
+| `ofDrawLine(x1, y1, x2, y2)` | `tc::drawLine(Vec3 p1, Vec3 p2)` | graphicsExample | Vec2→Vec3 auto convert |
+| `ofDrawTriangle(...)` | `tc::drawTriangle(Vec3, Vec3, Vec3)` | graphicsExample | Vec2→Vec3 auto convert |
 | `ofNoFill()` | `tc::noFill()` | graphicsExample | |
 | `ofFill()` | `tc::fill()` | graphicsExample | |
 | `ofSetLineWidth(w)` | `tc::setLineWidth(w)` | graphicsExample | |
-| `ofDrawBitmapString(s, x, y)` | `tc::drawBitmapString(s, x, y)` | graphicsExample | |
+| `ofDrawBitmapString(s, x, y)` | `tc::drawBitmapString(s, Vec3 pos)` | graphicsExample | Vec2→Vec3 auto convert |
 | `ofPolyline` | `tc::Path` | polylinesExample | Formerly Polyline |
 | - | `tc::StrokeMesh` | strokeMeshExample | Thick lines |
 | `ofEnableBlendMode()` | `tc::setBlendMode()` | blendingExample | |
@@ -326,7 +326,7 @@ Reference for oF users finding equivalent features in TrussC.
 |:---|:---|:---|:---|
 | `ofPushMatrix()` | `tc::pushMatrix()` | graphicsExample | |
 | `ofPopMatrix()` | `tc::popMatrix()` | graphicsExample | |
-| `ofTranslate(x, y, z)` | `tc::translate(x, y, z)` | graphicsExample | |
+| `ofTranslate(x, y, z)` | `tc::translate(Vec3 pos)` | graphicsExample | Vec2→Vec3 auto convert |
 | `ofRotateDeg(deg)` | `tc::rotateDeg(deg)` | graphicsExample | |
 | `ofRotateRad(rad)` | `tc::rotateRad(rad)` | graphicsExample | |
 | `ofScale(x, y, z)` | `tc::scale(x, y, z)` | 3DPrimitivesExample | |
