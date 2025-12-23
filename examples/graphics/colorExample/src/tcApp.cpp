@@ -1,21 +1,18 @@
 #include "tcApp.h"
-#include <iostream>
-
-using namespace std;
 
 // ---------------------------------------------------------------------------
 // setup
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    cout << "colorExample: Color Space Demo" << endl;
-    cout << "  - Space: Switch mode" << endl;
-    cout << "  - ESC: Exit" << endl;
-    cout << endl;
-    cout << "Modes:" << endl;
-    cout << "  0: Lerp comparison (RGB/Linear/HSB/OKLab/OKLCH)" << endl;
-    cout << "  1: Hue wheel (HSB vs OKLCH)" << endl;
-    cout << "  2: Lightness uniformity (OKLab feature)" << endl;
-    cout << "  3: Gradient comparison" << endl;
+    tcLogNotice("tcApp") << "colorExample: Color Space Demo";
+    tcLogNotice("tcApp") << "  - Space: Switch mode";
+    tcLogNotice("tcApp") << "  - ESC: Exit";
+    tcLogNotice("tcApp") << "";
+    tcLogNotice("tcApp") << "Modes:";
+    tcLogNotice("tcApp") << "  0: Lerp comparison (RGB/Linear/HSB/OKLab/OKLCH)";
+    tcLogNotice("tcApp") << "  1: Hue wheel (HSB vs OKLCH)";
+    tcLogNotice("tcApp") << "  2: Lightness uniformity (OKLab feature)";
+    tcLogNotice("tcApp") << "  3: Gradient comparison";
 
     // Initialize ImGui
     imguiSetup();
@@ -370,6 +367,6 @@ void tcApp::keyPressed(int key) {
     }
     else if (key == KEY_SPACE) {
         mode_ = (mode_ + 1) % NUM_MODES;
-        cout << "Mode: " << mode_ << endl;
+        tcLogNotice("tcApp") << "Mode: " << mode_;
     }
 }

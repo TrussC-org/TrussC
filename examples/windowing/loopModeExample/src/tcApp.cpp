@@ -1,16 +1,13 @@
 #include "tcApp.h"
-#include <iostream>
-
-using namespace std;
 
 void tcApp::setup() {
-    cout << "windowExample: Loop Architecture Demo" << endl;
-    cout << "  - 1: VSync (default)" << endl;
-    cout << "  - 2: Fixed 30 FPS" << endl;
-    cout << "  - 3: Fixed 5 FPS" << endl;
-    cout << "  - 4: Event-driven (click to redraw)" << endl;
-    cout << "  - 5: Decoupled Update (500Hz) + VSync Draw" << endl;
-    cout << "  - ESC: Quit" << endl;
+    tcLogNotice("tcApp") << "windowExample: Loop Architecture Demo";
+    tcLogNotice("tcApp") << "  - 1: VSync (default)";
+    tcLogNotice("tcApp") << "  - 2: Fixed 30 FPS";
+    tcLogNotice("tcApp") << "  - 3: Fixed 5 FPS";
+    tcLogNotice("tcApp") << "  - 4: Event-driven (click to redraw)";
+    tcLogNotice("tcApp") << "  - 5: Decoupled Update (500Hz) + VSync Draw";
+    tcLogNotice("tcApp") << "  - ESC: Quit";
 
     // Default: VSync
     setFps(VSYNC);
@@ -107,28 +104,28 @@ void tcApp::keyPressed(int key) {
     else if (key == '1') {
         mode = 0;
         setFps(VSYNC);
-        cout << "Mode: VSync" << endl;
+        tcLogNotice("tcApp") << "Mode: VSync";
     }
     else if (key == '2') {
         mode = 1;
         setFps(30);
-        cout << "Mode: Fixed 30 FPS" << endl;
+        tcLogNotice("tcApp") << "Mode: Fixed 30 FPS";
     }
     else if (key == '3') {
         mode = 2;
         setFps(5);
-        cout << "Mode: Fixed 5 FPS" << endl;
+        tcLogNotice("tcApp") << "Mode: Fixed 5 FPS";
     }
     else if (key == '4') {
         mode = 3;
         setFps(EVENT_DRIVEN);
         redraw();  // Draw once immediately after mode switch
-        cout << "Mode: Event-driven (click to redraw)" << endl;
+        tcLogNotice("tcApp") << "Mode: Event-driven (click to redraw)";
     }
     else if (key == '5') {
         mode = 4;
         setIndependentFps(500, VSYNC);  // Update: 500Hz, Draw: VSync
-        cout << "Mode: Decoupled (Update 500Hz, Draw VSync)" << endl;
+        tcLogNotice("tcApp") << "Mode: Decoupled (Update 500Hz, Draw VSync)";
     }
 }
 

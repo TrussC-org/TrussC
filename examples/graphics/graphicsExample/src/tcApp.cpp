@@ -1,13 +1,10 @@
 #include "tcApp.h"
-#include <iostream>
-
-using namespace std;
 
 // ---------------------------------------------------------------------------
 // setup - Initialization
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    cout << "setup() called" << endl;
+    tcLogNotice("tcApp") << "setup() called";
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +183,7 @@ void tcApp::draw() {
 // ---------------------------------------------------------------------------
 
 void tcApp::keyPressed(int key) {
-    cout << "keyPressed: " << key << endl;
+    tcLogVerbose("tcApp") << "keyPressed: " << key;
 
     // ESC to quit
     if (key == KEY_ESCAPE) {
@@ -195,7 +192,7 @@ void tcApp::keyPressed(int key) {
 }
 
 void tcApp::mousePressed(int x, int y, int button) {
-    cout << "mousePressed: " << x << ", " << y << " button=" << button << endl;
+    tcLogVerbose("tcApp") << "mousePressed: " << x << ", " << y << " button=" << button;
 }
 
 void tcApp::mouseDragged(int x, int y, int button) {

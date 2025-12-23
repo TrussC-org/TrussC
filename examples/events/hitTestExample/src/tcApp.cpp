@@ -1,16 +1,15 @@
 #include "tcApp.h"
 
-using namespace std;
 
 // ---------------------------------------------------------------------------
 // setup - Initialization
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    cout << "hitTestExample: Ray-based Hit Test Demo" << endl;
-    cout << "  - Click buttons to increment counter" << endl;
-    cout << "  - Rotating panel buttons also work!" << endl;
-    cout << "  - Press SPACE to pause/resume rotation" << endl;
-    cout << "  - Press ESC to quit" << endl;
+    tcLogNotice("tcApp") << "hitTestExample: Ray-based Hit Test Demo";
+    tcLogNotice("tcApp") << "  - Click buttons to increment counter";
+    tcLogNotice("tcApp") << "  - Rotating panel buttons also work!";
+    tcLogNotice("tcApp") << "  - Press SPACE to pause/resume rotation";
+    tcLogNotice("tcApp") << "  - Press ESC to quit";
 
     // Static buttons (left side) - overlapped diagonally to show only front responds
     button1_ = make_shared<CounterButton>();
@@ -80,21 +79,19 @@ void tcApp::draw() {
     drawBitmapString("Click works on rotated buttons too!", 20, 65);
 
     // Mouse position
-    char buf[128];
-    snprintf(buf, sizeof(buf), "Mouse: %.0f, %.0f", getGlobalMouseX(), getGlobalMouseY());
     setColor(1.0f, 1.0f, 0.5f);
-    drawBitmapString(buf, 20, getWindowHeight() - 40);
+    drawBitmapString(format("Mouse: {:.0f}, {:.0f}", getGlobalMouseX(), getGlobalMouseY()),
+        20, getWindowHeight() - 40);
 
     // Controls description
     setColor(0.5f, 0.5f, 0.5f);
     drawBitmapString("[SPACE] pause/resume  [ESC] quit", 20, getWindowHeight() - 20);
 
     // Panel status
-    snprintf(buf, sizeof(buf), "Panel rotation: %.1f deg  %s",
-             panel_->rotation * 180.0f / PI,
-             paused_ ? "(PAUSED)" : "");
     setColor(0.8f, 0.8f, 0.8f);
-    drawBitmapString(buf, 600, 50);
+    drawBitmapString(format("Panel rotation: {:.1f} deg  {}",
+             panel_->rotation * 180.0f / PI,
+             paused_ ? "(PAUSED)" : ""), 600, 50);
 
     // Child nodes are drawn automatically
 }
@@ -110,7 +107,7 @@ void tcApp::keyPressed(int key) {
     else if (key == KEY_SPACE) {
         paused_ = !paused_;
         panel_->rotationSpeed = paused_ ? 0.0f : 0.3f;
-        cout << "Rotation " << (paused_ ? "paused" : "resumed") << endl;
+        tcLogNotice("tcApp") << "Rotation " << (paused_ ? "paused" : "resumed");
     }
 }
 
@@ -119,9 +116,9 @@ void tcApp::mousePressed(int x, int y, int button) {
     auto hitNode = dispatchMousePress((float)x, (float)y, button);
 
     if (hitNode) {
-        cout << "Hit node received event" << endl;
+        tcLogNotice("tcApp") << "Hit node received event";
     } else {
-        cout << "No hit (clicked background)" << endl;
+        tcLogNotice("tcApp") << "No hit (clicked background)";
     }
 }
 

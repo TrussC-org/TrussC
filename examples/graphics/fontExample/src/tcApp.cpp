@@ -2,7 +2,7 @@
 #include "TrussC.h"
 
 void tcApp::setup() {
-    setVsync(true);
+    setFps(VSYNC);
 
     // Use system font
     std::string fontPath = "/System/Library/Fonts/Geneva.ttf";
@@ -11,10 +11,9 @@ void tcApp::setup() {
     fontSmall.load(fontPath, 14);
     fontLarge.load(fontPath, 48);
 
-    printf("Font loaded: size=%d, glyphs=%zu, memory=%zu bytes\n",
-           font.getSize(),
-           font.getLoadedGlyphCount(),
-           font.getMemoryUsage());
+    tcLogNotice("tcApp") << "Font loaded: size=" << font.getSize()
+                         << ", glyphs=" << font.getLoadedGlyphCount()
+                         << ", memory=" << font.getMemoryUsage() << " bytes";
 }
 
 void tcApp::draw() {

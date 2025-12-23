@@ -33,10 +33,10 @@ void tcApp::setColorHSB(float h, float s, float b, float a) {
 // setup
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    cout << "03_math: Vector & Matrix Demo" << endl;
-    cout << "  - Space: Switch mode" << endl;
-    cout << "  - Click: Spawn particles" << endl;
-    cout << "  - ESC: Quit" << endl;
+    tcLogNotice("tcApp") << "03_math: Vector & Matrix Demo";
+    tcLogNotice("tcApp") << "  - Space: Switch mode";
+    tcLogNotice("tcApp") << "  - Click: Spawn particles";
+    tcLogNotice("tcApp") << "  - ESC: Quit";
 }
 
 // ---------------------------------------------------------------------------
@@ -127,24 +127,18 @@ void tcApp::drawVec2Demo() {
     drawBitmapString("Move mouse to see vector operations", 20, 45);
 
     // Vector information
-    char buf[128];
     setColor(0.3f, 0.8f, 0.3f);
-    snprintf(buf, sizeof(buf), "toMouse: (%.1f, %.1f)", toMouse.x, toMouse.y);
-    drawBitmapString(buf, 20, 80);
-    snprintf(buf, sizeof(buf), "length: %.1f", len);
-    drawBitmapString(buf, 20, 95);
+    drawBitmapString(format("toMouse: ({:.1f}, {:.1f})", toMouse.x, toMouse.y), 20, 80);
+    drawBitmapString(format("length: {:.1f}", len), 20, 95);
 
     setColor(1.0f, 1.0f, 0.3f);
-    snprintf(buf, sizeof(buf), "angle: %.2f rad (%.1f deg)", angle, angle * 180.0f / PI);
-    drawBitmapString(buf, 20, 115);
+    drawBitmapString(format("angle: {:.2f} rad ({:.1f} deg)", angle, angle * 180.0f / PI), 20, 115);
 
     setColor(1.0f, 0.5f, 0.2f);
-    snprintf(buf, sizeof(buf), "normalized: (%.2f, %.2f)", dir.x, dir.y);
-    drawBitmapString(buf, 20, 135);
+    drawBitmapString(format("normalized: ({:.2f}, {:.2f})", dir.x, dir.y), 20, 135);
 
     setColor(0.2f, 0.5f, 1.0f);
-    snprintf(buf, sizeof(buf), "perpendicular: (%.2f, %.2f)", perp.x / 50, perp.y / 50);
-    drawBitmapString(buf, 20, 155);
+    drawBitmapString(format("perpendicular: ({:.2f}, {:.2f})", perp.x / 50, perp.y / 50), 20, 155);
 }
 
 // ---------------------------------------------------------------------------
@@ -196,10 +190,8 @@ void tcApp::drawRotationDemo() {
     drawBitmapString("Vec2::fromAngle() creates vectors from angle", 20, 45);
     drawBitmapString("Vec2::rotated() rotates vectors around origin", 20, 60);
 
-    char buf[64];
     setColor(0.8f, 0.8f, 0.8f);
-    snprintf(buf, sizeof(buf), "time: %.1f sec", t);
-    drawBitmapString(buf, 20, 90);
+    drawBitmapString(format("time: {:.1f} sec", t), 20, 90);
 }
 
 // ---------------------------------------------------------------------------
@@ -249,10 +241,8 @@ void tcApp::drawLerpDemo() {
     drawBitmapString("Move mouse - circles follow with easing", 20, 45);
     drawBitmapString("Vec2::lerp(target, amount) blends positions", 20, 60);
 
-    char buf[64];
     setColor(0.8f, 0.8f, 0.8f);
-    snprintf(buf, sizeof(buf), "followers: %zu", followers.size());
-    drawBitmapString(buf, 20, 90);
+    drawBitmapString(format("followers: {}", followers.size()), 20, 90);
 }
 
 // ---------------------------------------------------------------------------
@@ -276,10 +266,8 @@ void tcApp::drawParticleDemo() {
     drawBitmapString("Click to spawn particles", 20, 45);
     drawBitmapString("Uses Vec2 for pos, vel, acc (physics)", 20, 60);
 
-    char buf[64];
     setColor(0.8f, 0.8f, 0.8f);
-    snprintf(buf, sizeof(buf), "particles: %zu", particles_.size());
-    drawBitmapString(buf, 20, 90);
+    drawBitmapString(format("particles: {}", particles_.size()), 20, 90);
 }
 
 void tcApp::spawnParticle(float x, float y) {
@@ -342,7 +330,7 @@ void tcApp::keyPressed(int key) {
     }
     else if (key == KEY_SPACE) {
         mode_ = (mode_ + 1) % NUM_MODES;
-        cout << "Mode: " << mode_ << endl;
+        tcLogNotice("tcApp") << "Mode: " << mode_;
     }
 }
 

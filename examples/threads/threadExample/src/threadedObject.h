@@ -61,7 +61,7 @@ public:
 
     // Processing executed in thread
     void threadedFunction() override {
-        printf("[threadedFunction] thread started\n");
+        tcLogNotice("Thread") << "[threadedFunction] thread started";
 
         while (isThreadRunning()) {
             // Increment thread frame count
@@ -90,7 +90,7 @@ public:
             }
         }
 
-        printf("[threadedFunction] thread stopped\n");
+        tcLogNotice("Thread") << "[threadedFunction] thread stopped";
     }
 
     // Update (with lock) - No tearing

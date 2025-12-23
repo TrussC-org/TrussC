@@ -1,7 +1,4 @@
 #include "tcApp.h"
-#include <iostream>
-
-using namespace std;
 
 // Shader effects (Metal MSL fragment shaders)
 
@@ -146,9 +143,9 @@ fragment float4 fragmentMain(FragmentIn in [[stage_in]],
 )";
 
 void tcApp::setup() {
-    cout << "shaderExample: Custom Shader Demo" << endl;
-    cout << "  - Press 1-4 to switch effects" << endl;
-    cout << "  - Press SPACE to cycle effects" << endl;
+    tcLogNotice("tcApp") << "shaderExample: Custom Shader Demo";
+    tcLogNotice("tcApp") << "  - Press 1-4 to switch effects";
+    tcLogNotice("tcApp") << "  - Press SPACE to cycle effects";
 
     loadEffect(currentEffect);
 }
@@ -193,8 +190,8 @@ void tcApp::loadEffect(int index) {
 
     currentEffect = index;
     if (shader.loadFromSource(sources[index])) {
-        cout << "Loaded effect " << (index + 1) << endl;
+        tcLogNotice("tcApp") << "Loaded effect " << (index + 1);
     } else {
-        cout << "Failed to load effect " << (index + 1) << endl;
+        tcLogWarning("tcApp") << "Failed to load effect " << (index + 1);
     }
 }

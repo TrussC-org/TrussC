@@ -1,9 +1,9 @@
 #include "tcApp.h"
 
 void tcApp::setup() {
-    cout << "fboExample: FBO Demo" << endl;
-    cout << "  - Press SPACE to toggle clear() in FBO" << endl;
-    cout << "  - Current: using Fbo::begin(color)" << endl;
+    tcLogNotice("tcApp") << "fboExample: FBO Demo";
+    tcLogNotice("tcApp") << "  - Press SPACE to toggle clear() in FBO";
+    tcLogNotice("tcApp") << "  - Current: using Fbo::begin(color)";
 
     // Create FBO (400x300)
     fbo_.allocate(400, 300);
@@ -11,21 +11,6 @@ void tcApp::setup() {
 
 void tcApp::update() {
     time_ = getElapsedTime();
-
-    // Auto test: screenshots at 2 seconds and 4 seconds
-    if (!test1Done_ && time_ > 2.0f) {
-        fbo_.save("fbo_mode1_begin_color.png");
-        cout << "Saved: fbo_mode1_begin_color.png" << endl;
-        test1Done_ = true;
-        useClearInFbo_ = true;  // Switch mode
-        cout << "Switched to clear() mode" << endl;
-    }
-    if (!test2Done_ && time_ > 4.0f) {
-        fbo_.save("fbo_mode2_clear_in_fbo.png");
-        cout << "Saved: fbo_mode2_clear_in_fbo.png" << endl;
-        test2Done_ = true;
-        cout << "Test complete! Check the PNG files." << endl;
-    }
 }
 
 void tcApp::draw() {
@@ -89,9 +74,9 @@ void tcApp::keyPressed(int key) {
     if (key == ' ') {
         useClearInFbo_ = !useClearInFbo_;
         if (useClearInFbo_) {
-            cout << "Mode: Using clear() in FBO (may not work correctly)" << endl;
+            tcLogNotice("tcApp") << "Mode: Using clear() in FBO (may not work correctly)";
         } else {
-            cout << "Mode: Using Fbo::begin(color) (correct method)" << endl;
+            tcLogNotice("tcApp") << "Mode: Using Fbo::begin(color) (correct method)";
         }
     }
 }

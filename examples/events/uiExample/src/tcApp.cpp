@@ -17,7 +17,7 @@ void tcApp::setup() {
     button1_->onClick = [this]() {
         clickCount_++;
         button1_->label = "Clicked: " + to_string(clickCount_);
-        cout << "Button1 clicked! Count: " << clickCount_ << endl;
+        tcLogNotice("tcApp") << "Button1 clicked! Count: " << clickCount_;
     };
     addChild(button1_);
 
@@ -37,7 +37,7 @@ void tcApp::setup() {
         bgColor_ = Color(0.1f, 0.1f, 0.12f);
         slider1_->setValue(0.1f);
         slider2_->setValue(0.1f);
-        cout << "Background reset!" << endl;
+        tcLogNotice("tcApp") << "Background reset!";
     };
     addChild(button2_);
 
@@ -84,12 +84,12 @@ void tcApp::setup() {
     scrollBox_->contentHeight = 300;  // 10 items x 30px
     addChild(scrollBox_);
 
-    cout << "=== uiExample ===" << endl;
-    cout << "UI components demo with event handling" << endl;
-    cout << "- Click buttons to trigger events" << endl;
-    cout << "- Drag sliders or use scroll wheel to change values" << endl;
-    cout << "- Scroll inside the box to see items" << endl;
-    cout << "- Press R to reset" << endl;
+    tcLogNotice("tcApp") << "=== uiExample ===";
+    tcLogNotice("tcApp") << "UI components demo with event handling";
+    tcLogNotice("tcApp") << "- Click buttons to trigger events";
+    tcLogNotice("tcApp") << "- Drag sliders or use scroll wheel to change values";
+    tcLogNotice("tcApp") << "- Scroll inside the box to see items";
+    tcLogNotice("tcApp") << "- Press R to reset";
 }
 
 void tcApp::update() {
@@ -107,16 +107,13 @@ void tcApp::draw() {
     drawBitmapString("ScrollBox: Mouse wheel to scroll content", 350, 270);
 
     // Display current background color
-    char buf[128];
-    snprintf(buf, sizeof(buf), "Background: R=%.2f G=%.2f B=%.2f",
-             bgColor_.r, bgColor_.g, bgColor_.b);
     setColor(1.0f, 1.0f, 1.0f);
-    drawBitmapString(buf, 50, 350);
+    drawBitmapString(format("Background: R={:.2f} G={:.2f} B={:.2f}",
+             bgColor_.r, bgColor_.g, bgColor_.b), 50, 350);
 
     // Frame rate
     setColor(0.5f, 0.5f, 0.5f);
-    snprintf(buf, sizeof(buf), "FPS: %.1f", getFrameRate());
-    drawBitmapString(buf, getWindowWidth() - 100, 30);
+    drawBitmapString(format("FPS: {:.1f}", getFrameRate()), getWindowWidth() - 100, 30);
 
     // Child nodes (UI components) are drawn automatically (called by drawTree)
 }
@@ -129,7 +126,7 @@ void tcApp::keyPressed(int key) {
         slider2_->setValue(0.1f);
         clickCount_ = 0;
         button1_->label = "Click Me!";
-        cout << "Reset!" << endl;
+        tcLogNotice("tcApp") << "Reset!";
     }
 }
 
@@ -140,6 +137,10 @@ void tcApp::mousePressed(int x, int y, int button) {
 
 void tcApp::mouseReleased(int x, int y, int button) {
     dispatchMouseRelease((float)x, (float)y, button);
+}
+
+void tcApp::mouseMoved(int x, int y) {
+    updateHoverState((float)x, (float)y);
 }
 
 void tcApp::mouseDragged(int x, int y, int button) {

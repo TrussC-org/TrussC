@@ -18,17 +18,15 @@
 // =============================================================================
 
 #include "tcApp.h"
-#include <iostream>
-using namespace std;
 
 void tcApp::setup() {
     // Load images from data/images folder
     if (!tower.load(getDataPath("images/transmission_tower.jpg"))) {
-        cout << "Failed to load transmission_tower.jpg" << endl;
+        tcLogWarning("tcApp") << "Failed to load transmission_tower.jpg";
     }
 
     if (!transparency.load(getDataPath("images/transparency.png"))) {
-        cout << "Failed to load transparency.png" << endl;
+        tcLogWarning("tcApp") << "Failed to load transparency.png";
     }
 }
 

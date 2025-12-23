@@ -2,7 +2,6 @@
 
 #include "tcBaseApp.h"
 using namespace tc;
-#include <iostream>
 #include <functional>
 
 using namespace std;
@@ -29,17 +28,14 @@ public:
     }
 
     void update() override {
-        // Simple hover detection
-        float mx = getMouseX();
-        float my = getMouseY();
-        isHovered_ = (mx >= 0 && mx <= width && my >= 0 && my <= height);
+        // No manual hover detection needed - use isMouseOver() in draw()
     }
 
     void draw() override {
         // Color based on state
         if (isPressed_) {
             setColor(pressColor);
-        } else if (isHovered_) {
+        } else if (isMouseOver()) {
             setColor(hoverColor);
         } else {
             setColor(normalColor);
@@ -63,7 +59,6 @@ public:
     }
 
 protected:
-    bool isHovered_ = false;
     bool isPressed_ = false;
 
     bool onMousePress(float lx, float ly, int btn) override {
@@ -72,7 +67,7 @@ protected:
     }
 
     bool onMouseRelease(float lx, float ly, int btn) override {
-        if (isPressed_ && isHovered_ && onClick) {
+        if (isPressed_ && isMouseOver() && onClick) {
             onClick();  // Fire click event
         }
         isPressed_ = false;
@@ -142,9 +137,7 @@ public:
 
         // Label and value
         setColor(1.0f, 1.0f, 1.0f);
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%s: %.2f", label.c_str(), getValue());
-        drawBitmapString(buf, 4, -4, false);
+        drawBitmapString(format("{}: {:.2f}", label, getValue()), 4, -4, false);
     }
 
 protected:
@@ -244,9 +237,7 @@ public:
             drawRect(5, itemY + 2, width - 10, 26);
 
             setColor(1.0f, 1.0f, 1.0f);
-            char buf[32];
-            snprintf(buf, sizeof(buf), "Item %d", i + 1);
-            drawBitmapString(buf, 10, itemY + 18, false);
+            drawBitmapString(format("Item {}", i + 1), 10, itemY + 18, false);
         }
 
         popMatrix();
@@ -291,6 +282,7 @@ public:
     void keyPressed(int key) override;
     void mousePressed(int x, int y, int button) override;
     void mouseReleased(int x, int y, int button) override;
+    void mouseMoved(int x, int y) override;
     void mouseDragged(int x, int y, int button) override;
     void mouseScrolled(float dx, float dy) override;
 

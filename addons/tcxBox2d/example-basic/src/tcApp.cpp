@@ -1,8 +1,8 @@
 // =============================================================================
-// box2dBasicExample - tcxBox2d アドオンの基本サンプル
+// box2dBasicExample - Basic tcxBox2d addon sample
 // =============================================================================
-// クリックで円を生成、物理シミュレーションで落下する。
-// Node ツリーは使わず、各 Body を個別に描画するシンプルな例。
+// Click to spawn circles that fall with physics simulation.
+// Simple example without Node tree - each Body is drawn individually.
 // =============================================================================
 
 #include "tcBaseApp.h"
@@ -14,7 +14,7 @@
 using namespace tc;
 using namespace tcx;
 
-// ランダムな float を生成（min 〜 max）
+// Generate random float (min to max)
 float randomFloat(float min, float max) {
     return min + (float)rand() / RAND_MAX * (max - min);
 }
@@ -26,13 +26,13 @@ public:
     std::vector<std::shared_ptr<box2d::RectBody>> rects;
 
     void setup() override {
-        // 物理ワールドを初期化（重力: 下向き300px/sec^2）
+        // Initialize physics world (gravity: 300px/sec² downward)
         world.setup(Vec2(0, 300));
 
-        // 画面端に壁を作成
+        // Create boundary walls at screen edges
         world.createBounds();
 
-        // 初期オブジェクトを配置（ごちゃっと積む）
+        // Place initial objects (stacked loosely)
         auto c1 = std::make_shared<box2d::CircleBody>();
         c1->setup(world, 350, 80, 30);
         circles.push_back(c1);
@@ -55,10 +55,10 @@ public:
     }
 
     void update() override {
-        // 物理シミュレーションを進める
+        // Advance physics simulation
         world.update();
 
-        // Box2D の位置を Node の x, y, rotation に同期
+        // Sync Box2D positions to Node's x, y, rotation
         for (auto& c : circles) c->updateTree();
         for (auto& r : rects) r->updateTree();
     }
@@ -66,26 +66,26 @@ public:
     void draw() override {
         clear(30);
 
-        // 全ての円を描画（drawTree で位置・回転を適用）
+        // Draw all circles (drawTree applies position/rotation)
         setColor(1.0f, 0.78f, 0.4f);
         for (auto& circle : circles) {
             circle->drawTree();
         }
 
-        // 全ての矩形を描画
+        // Draw all rectangles
         setColor(0.4f, 0.78f, 1.0f);
         for (auto& rect : rects) {
             rect->drawTree();
         }
 
-        // ドラッグ中ならバネの線を描画
+        // Draw spring line if dragging
         if (world.isDragging()) {
             Vec2 anchor = world.getDragAnchor();
             setColor(1.0f, 0.4f, 0.4f);
             drawLine(anchor.x, anchor.y, getMouseX(), getMouseY());
         }
 
-        // 使い方の表示
+        // Display usage instructions
         setColor(1.0f);
         drawBitmapString("Left click: Add circle / Drag body", 10, 20);
         drawBitmapString("Right click: Add rectangle", 10, 36);
@@ -95,20 +95,20 @@ public:
 
     void mousePressed(int x, int y, int button) override {
         if (button == MOUSE_BUTTON_LEFT) {
-            // 既存のボディがあればドラッグ開始
+            // Start dragging if body exists at point
             box2d::Body* body = world.getBodyAtPoint((float)x, (float)y);
             if (body) {
                 world.startDrag(body, (float)x, (float)y);
             } else {
-                // なければ円を追加
+                // Otherwise add a circle
                 auto circle = std::make_shared<box2d::CircleBody>();
                 circle->setup(world, (float)x, (float)y, randomFloat(15, 40));
-                circle->setRestitution(0.7f);  // よく跳ねる
+                circle->setRestitution(0.7f);  // Bouncy
                 circles.push_back(circle);
             }
         }
         else if (button == MOUSE_BUTTON_RIGHT) {
-            // 右クリック: 矩形を追加
+            // Right click: add rectangle
             auto rect = std::make_shared<box2d::RectBody>();
             rect->setup(world, (float)x, (float)y, randomFloat(30, 60), randomFloat(20, 40));
             rect->setRestitution(0.3f);
@@ -130,7 +130,7 @@ public:
 
     void keyPressed(int key) override {
         if (key == 'c' || key == 'C') {
-            // Cキー: 全てクリア
+            // C key: clear all
             circles.clear();
             rects.clear();
             world.clear();

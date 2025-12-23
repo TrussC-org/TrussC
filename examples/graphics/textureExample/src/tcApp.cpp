@@ -10,10 +10,10 @@
 #include <algorithm>
 
 void tcApp::setup() {
-    cout << "=== textureExample ===" << endl;
-    cout << "Texture Filter & Wrap Mode Demo" << endl;
-    cout << "[UP/DOWN] Change scale" << endl;
-    cout << "[1] Scale 4x  [2] Scale 8x  [3] Scale 16x  [4] Scale 32x" << endl;
+    tcLogNotice("tcApp") << "=== textureExample ===";
+    tcLogNotice("tcApp") << "Texture Filter & Wrap Mode Demo";
+    tcLogNotice("tcApp") << "[UP/DOWN] Change scale";
+    tcLogNotice("tcApp") << "[1] Scale 4x  [2] Scale 8x  [3] Scale 16x  [4] Scale 32x";
 
     // --- For Filter comparison (Slime) ---
     imgOriginal_.allocate(SRC_SIZE, SRC_SIZE, 4);
@@ -166,10 +166,10 @@ void tcApp::draw() {
 void tcApp::keyPressed(int key) {
     if (key == SAPP_KEYCODE_UP) {
         scale_ = std::min<float>(scale_ * 2.0f, 32.0f);
-        cout << "Scale: " << scale_ << "x" << endl;
+        tcLogNotice("tcApp") << "Scale: " << scale_ << "x";
     } else if (key == SAPP_KEYCODE_DOWN) {
         scale_ = std::max<float>(scale_ / 2.0f, 2.0f);
-        cout << "Scale: " << scale_ << "x" << endl;
+        tcLogNotice("tcApp") << "Scale: " << scale_ << "x";
     } else if (key == '1') {
         scale_ = 4.0f;
     } else if (key == '2') {

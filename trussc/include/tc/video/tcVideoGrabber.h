@@ -93,6 +93,8 @@ public:
     // =========================================================================
 
     // Start camera (default 640x480)
+    // If permission is not granted, requests it and returns false.
+    // Call update() every frame - it will automatically initialize once permission is granted.
     bool setup(int width = 640, int height = 480) {
         if (initialized_) {
             close();
@@ -101,24 +103,15 @@ public:
         requestedWidth_ = width;
         requestedHeight_ = height;
 
-        // Platform-specific setup (sets width_, height_)
-        if (!setupPlatform()) {
+        // Check permission (macOS 10.14+)
+        if (!checkCameraPermission()) {
+            // Request permission and wait for it in update()
+            requestCameraPermission();
+            pendingSetup_ = true;
             return false;
         }
 
-        // Allocate pixel buffer
-        size_t bufferSize = width_ * height_ * 4;
-        pixels_ = new unsigned char[bufferSize];
-        std::memset(pixels_, 0, bufferSize);
-
-        // Set pixel buffer pointer for delegate
-        updateDelegatePixels();
-
-        // Create texture (Stream mode: for per-frame updates)
-        texture_.allocate(width_, height_, 4, TextureUsage::Stream);
-
-        initialized_ = true;
-        return true;
+        return completeSetup();
     }
 
     // Stop camera
@@ -145,7 +138,17 @@ public:
     // =========================================================================
 
     // Check for new frame (call every frame)
+    // Also handles pending setup after permission is granted
     void update() {
+        // Handle pending setup (permission was requested in setup())
+        if (pendingSetup_ && !initialized_) {
+            if (checkCameraPermission()) {
+                pendingSetup_ = false;
+                completeSetup();
+            }
+            return;
+        }
+
         if (!initialized_) return;
 
         frameNew_ = false;
@@ -182,6 +185,7 @@ public:
     // =========================================================================
 
     bool isInitialized() const { return initialized_; }
+    bool isPendingPermission() const { return pendingSetup_; }
     int getWidth() const { return width_; }
     int getHeight() const { return height_; }
 
@@ -238,6 +242,7 @@ private:
     bool initialized_ = false;
     bool frameNew_ = false;
     bool verbose_ = false;
+    bool pendingSetup_ = false;  // Waiting for permission
     std::string deviceName_;
 
     // Pixel data (RGBA)
@@ -267,6 +272,7 @@ private:
         initialized_ = other.initialized_;
         frameNew_ = other.frameNew_;
         verbose_ = other.verbose_;
+        pendingSetup_ = other.pendingSetup_;
         deviceName_ = std::move(other.deviceName_);
         pixels_ = other.pixels_;
         pixelsDirty_.store(other.pixelsDirty_.load());
@@ -276,9 +282,32 @@ private:
         // Invalidate source object
         other.pixels_ = nullptr;
         other.initialized_ = false;
+        other.pendingSetup_ = false;
         other.platformHandle_ = nullptr;
         other.width_ = 0;
         other.height_ = 0;
+    }
+
+    // Complete setup after permission is granted
+    bool completeSetup() {
+        // Platform-specific setup (sets width_, height_)
+        if (!setupPlatform()) {
+            return false;
+        }
+
+        // Allocate pixel buffer
+        size_t bufferSize = width_ * height_ * 4;
+        pixels_ = new unsigned char[bufferSize];
+        std::memset(pixels_, 0, bufferSize);
+
+        // Set pixel buffer pointer for delegate
+        updateDelegatePixels();
+
+        // Create texture (Stream mode: for per-frame updates)
+        texture_.allocate(width_, height_, 4, TextureUsage::Stream);
+
+        initialized_ = true;
+        return true;
     }
 
     // -------------------------------------------------------------------------

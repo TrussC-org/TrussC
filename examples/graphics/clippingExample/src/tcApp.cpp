@@ -5,12 +5,12 @@
 #include "tcApp.h"
 
 void tcApp::setup() {
-    cout << "=== clippingExample ===" << endl;
-    cout << "Nested Scissor Clipping Demo" << endl;
-    cout << "- Outer box clips inner content" << endl;
-    cout << "- Inner box also clips its content" << endl;
-    cout << "- Circles only visible in intersection of both boxes" << endl;
-    cout << "[R] reset positions" << endl;
+    tcLogNotice("tcApp") << "=== clippingExample ===";
+    tcLogNotice("tcApp") << "Nested Scissor Clipping Demo";
+    tcLogNotice("tcApp") << "- Outer box clips inner content";
+    tcLogNotice("tcApp") << "- Inner box also clips its content";
+    tcLogNotice("tcApp") << "- Circles only visible in intersection of both boxes";
+    tcLogNotice("tcApp") << "[R] reset positions";
 
     // Outer clip box
     outerBox_ = make_shared<ClipBox>();
@@ -98,6 +98,6 @@ void tcApp::keyPressed(int key) {
             circles_[i]->x = 50 + i * 50;
             circles_[i]->y = 50 + i * 30;
         }
-        cout << "Reset" << endl;
+        tcLogNotice("tcApp") << "Reset";
     }
 }

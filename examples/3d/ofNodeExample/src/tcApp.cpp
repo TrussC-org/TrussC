@@ -97,10 +97,8 @@ void tcApp::draw() {
     drawBitmapString("Mouse position is transformed to local coords.", 20, 60);
 
     // Global mouse coordinates
-    char buf[64];
-    snprintf(buf, sizeof(buf), "global: %.0f, %.0f", gx, gy);
     setColor(1.0f, 1.0f, 0.5f);
-    drawBitmapString(buf, 20, 90);
+    drawBitmapString(format("global: {:.0f}, {:.0f}", gx, gy), 20, 90);
 
     // Controls description
     setColor(0.5f, 0.5f, 0.5f);

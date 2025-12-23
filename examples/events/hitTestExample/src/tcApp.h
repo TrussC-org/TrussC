@@ -2,8 +2,6 @@
 
 #include "tcBaseApp.h"
 using namespace tc;
-#include <iostream>
-
 using namespace std;
 
 // =============================================================================
@@ -52,9 +50,7 @@ public:
         fill();
         noStroke();
         setColor(1.0f, 1.0f, 1.0f);
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%s: %d", label.c_str(), count);
-        drawBitmapString(buf, 4, 18, false);  // screenFixed = false follows rotation (baseline-based)
+        drawBitmapString(format("{}: {}", label, count), 4, 18, false);  // screenFixed = false follows rotation (baseline-based)
     }
 
 protected:
@@ -62,7 +58,7 @@ protected:
         (void)localX; (void)localY; (void)button;
         isPressed = true;
         count++;
-        cout << label << " pressed! count = " << count << endl;
+        tcLogNotice("Button") << label << " pressed! count = " << count;
         return true;  // Consume event
     }
 

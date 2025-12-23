@@ -3,7 +3,6 @@
 #include "tcBaseApp.h"
 using namespace tc;
 using namespace std;  // Includes App, Node, TrussC.h
-#include <cstdio>       // snprintf
 
 // =============================================================================
 // Rotating container node
@@ -70,10 +69,8 @@ public:
 
         // Show local coords only when inside rectangle
         if (insideBox) {
-            char buf[64];
-            snprintf(buf, sizeof(buf), "local: %.0f, %.0f", mx, my);
             setColor(1.0f, 1.0f, 1.0f, 0.9f);
-            drawBitmapString(buf, mx, my);
+            drawBitmapString(format("local: {:.0f}, {:.0f}", mx, my), mx, my);
         }
     }
 };

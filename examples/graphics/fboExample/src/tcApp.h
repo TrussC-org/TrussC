@@ -23,6 +23,4 @@ private:
     Fbo fbo_;
     float time_ = 0;
     bool useClearInFbo_ = false;  // Whether to call clear() inside FBO
-    bool test1Done_ = false;
-    bool test2Done_ = false;
 };

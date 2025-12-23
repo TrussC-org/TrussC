@@ -4,7 +4,6 @@
 using namespace tc;
 using namespace std;
 #include <vector>
-#include <cstdio>   // snprintf
 
 class tcApp : public App {
 public:

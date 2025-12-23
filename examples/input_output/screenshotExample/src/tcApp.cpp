@@ -1,17 +1,15 @@
 #include "tcApp.h"
-#include <iostream>
 
-using namespace std;
 namespace fs = std::filesystem;
 
 void tcApp::setup() {
-    cout << "screenshotExample: saveScreenshot() Demo" << endl;
-    cout << "  - Press SPACE to capture screenshot" << endl;
-    cout << "  - Uses OS window capture (no FBO needed)" << endl;
+    tcLogNotice("tcApp") << "screenshotExample: saveScreenshot() Demo";
+    tcLogNotice("tcApp") << "  - Press SPACE to capture screenshot";
+    tcLogNotice("tcApp") << "  - Uses OS window capture (no FBO needed)";
 
     // Save path (data folder)
     savePath = getDataPath("");
-    cout << "Screenshots will be saved to: " << savePath << endl;
+    tcLogNotice("tcApp") << "Screenshots will be saved to: " << savePath.string();
 }
 
 void tcApp::update() {
@@ -78,10 +76,10 @@ void tcApp::keyPressed(int key) {
 
         // Save screenshot using OS window capture feature
         if (saveScreenshot(filepath)) {
-            cout << "Saved: " << filepath << endl;
+            tcLogNotice("tcApp") << "Saved: " << filepath.string();
             screenshotCount++;
         } else {
-            cout << "Failed to save: " << filepath << endl;
+            tcLogWarning("tcApp") << "Failed to save: " << filepath.string();
         }
     }
 }

@@ -35,7 +35,6 @@ private:
     std::mutex logMutex;
 
     // State
-    bool isServerMode = true;
     int messageCount = 0;
 
     void addLog(const std::string& msg);

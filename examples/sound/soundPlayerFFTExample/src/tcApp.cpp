@@ -16,7 +16,7 @@
 #include "TrussC.h"
 
 void tcApp::setup() {
-    setVsync(true);
+    setFps(VSYNC);
 
     fftInput.resize(FFT_SIZE, 0.0f);
     spectrum.resize(FFT_SIZE / 2, 0.0f);
@@ -28,21 +28,21 @@ void tcApp::setup() {
         musicLoaded = true;
         music.setLoop(true);
         music.play();
-        printf("Music loaded: %s (%.1f sec)\n", musicPath.c_str(), music.getDuration());
+        tcLogNotice("tcApp") << "Music loaded: " << musicPath << " (" << music.getDuration() << " sec)";
     } else {
-        printf("Music not found: %s - using test tone\n", musicPath.c_str());
+        tcLogNotice("tcApp") << "Music not found: " << musicPath << " - using test tone";
         music.loadTestTone(440.0f, 3.0f);
         music.setLoop(true);
         music.play();
         musicLoaded = true;
     }
 
-    printf("\n=== Controls ===\n");
-    printf("SPACE: Play/Stop\n");
-    printf("W: Toggle waveform\n");
-    printf("L: Toggle log scale\n");
-    printf("UP/DOWN: Smoothing\n");
-    printf("================\n\n");
+    tcLogNotice("tcApp") << "=== Controls ===";
+    tcLogNotice("tcApp") << "SPACE: Play/Stop";
+    tcLogNotice("tcApp") << "W: Toggle waveform";
+    tcLogNotice("tcApp") << "L: Toggle log scale";
+    tcLogNotice("tcApp") << "UP/DOWN: Smoothing";
+    tcLogNotice("tcApp") << "================";
 }
 
 void tcApp::update() {
@@ -85,12 +85,10 @@ void tcApp::draw() {
     drawBitmapString("SPACE:Play/Stop  W:Waveform  L:LogScale  UP/DOWN:Smoothing", 20, 50);
 
     // Status
-    char buf[128];
-    snprintf(buf, sizeof(buf), "Status: %s | Smoothing: %.0f%% | Scale: %s",
+    drawBitmapString(format("Status: {} | Smoothing: {:.0f}% | Scale: {}",
             music.isPlaying() ? "Playing" : "Stopped",
             smoothing * 100,
-            useLogScale ? "Log" : "Linear");
-    drawBitmapString(buf, 20, 70);
+            useLogScale ? "Log" : "Linear"), 20, 70);
 
     // Waveform display area
     if (showWaveform) {
@@ -184,26 +182,26 @@ void tcApp::keyPressed(int key) {
     if (key == ' ') {
         if (music.isPlaying()) {
             music.stop();
-            printf("Music stopped\n");
+            tcLogNotice("tcApp") << "Music stopped";
         } else {
             music.play();
-            printf("Music playing\n");
+            tcLogNotice("tcApp") << "Music playing";
         }
     }
     else if (key == 'w' || key == 'W') {
         showWaveform = !showWaveform;
-        printf("Waveform: %s\n", showWaveform ? "ON" : "OFF");
+        tcLogNotice("tcApp") << "Waveform: " << (showWaveform ? "ON" : "OFF");
     }
     else if (key == 'l' || key == 'L') {
         useLogScale = !useLogScale;
-        printf("Log scale: %s\n", useLogScale ? "ON" : "OFF");
+        tcLogNotice("tcApp") << "Log scale: " << (useLogScale ? "ON" : "OFF");
     }
     else if (key == SAPP_KEYCODE_UP) {
         smoothing = std::min(0.99f, smoothing + 0.05f);
-        printf("Smoothing: %.0f%%\n", smoothing * 100);
+        tcLogNotice("tcApp") << "Smoothing: " << (int)(smoothing * 100) << "%";
     }
     else if (key == SAPP_KEYCODE_DOWN) {
         smoothing = std::max(0.0f, smoothing - 0.05f);
-        printf("Smoothing: %.0f%%\n", smoothing * 100);
+        tcLogNotice("tcApp") << "Smoothing: " << (int)(smoothing * 100) << "%";
     }
 }

@@ -12,19 +12,19 @@
 #include "TrussC.h"
 
 void tcApp::setup() {
-    setVsync(true);
+    setFps(VSYNC);
 
     // Audio file path (CC0 sample audio in data folder)
     musicPath = getDataPath("beat_loop.wav");
-    printf("Trying to load: %s\n", musicPath.c_str());
+    tcLogNotice("tcApp") << "Trying to load: " << musicPath;
 
     // Load music
     if (music.load(musicPath)) {
         musicLoaded = true;
         music.setLoop(true);
-        printf("Music loaded: %s (%.1f sec)\n", musicPath.c_str(), music.getDuration());
+        tcLogNotice("tcApp") << "Music loaded: " << musicPath << " (" << music.getDuration() << " sec)";
     } else {
-        printf("Music not found: %s - using test tone\n", musicPath.c_str());
+        tcLogNotice("tcApp") << "Music not found: " << musicPath << " - using test tone";
         music.loadTestTone(440.0f, 3.0f);  // A4 (440Hz), 3 seconds
         music.setLoop(true);
         musicLoaded = true;
@@ -34,14 +34,14 @@ void tcApp::setup() {
     sfx.loadTestTone(880.0f, 0.2f);  // A5 (880Hz), 0.2 seconds
     sfxLoaded = true;
 
-    printf("\n=== Controls ===\n");
-    printf("SPACE: Play/Stop music\n");
-    printf("P: Pause/Resume music\n");
-    printf("S: Play sound effect\n");
-    printf("UP/DOWN: Volume control\n");
-    printf("LEFT/RIGHT: Pan control\n");
-    printf("+/-: Speed control\n");
-    printf("================\n\n");
+    tcLogNotice("tcApp") << "=== Controls ===";
+    tcLogNotice("tcApp") << "SPACE: Play/Stop music";
+    tcLogNotice("tcApp") << "P: Pause/Resume music";
+    tcLogNotice("tcApp") << "S: Play sound effect";
+    tcLogNotice("tcApp") << "UP/DOWN: Volume control";
+    tcLogNotice("tcApp") << "LEFT/RIGHT: Pan control";
+    tcLogNotice("tcApp") << "+/-: Speed control";
+    tcLogNotice("tcApp") << "================";
 }
 
 void tcApp::draw() {
@@ -84,23 +84,18 @@ void tcApp::draw() {
         y += 20;
 
         setColor(0.7f);
-        char buf[128];
-        snprintf(buf, sizeof(buf), "Position: %.1f / %.1f sec",
-                music.getPosition(), music.getDuration());
-        drawBitmapString(buf, 50, y);
+        drawBitmapString(format("Position: {:.1f} / {:.1f} sec",
+                music.getPosition(), music.getDuration()), 50, y);
         y += 20;
 
-        snprintf(buf, sizeof(buf), "Volume: %.0f%%", music.getVolume() * 100);
-        drawBitmapString(buf, 50, y);
+        drawBitmapString(format("Volume: {:.0f}%", music.getVolume() * 100), 50, y);
         y += 20;
 
-        snprintf(buf, sizeof(buf), "Pan: %.1f (%s)", music.getPan(),
-                music.getPan() < -0.1f ? "Left" : music.getPan() > 0.1f ? "Right" : "Center");
-        drawBitmapString(buf, 50, y);
+        drawBitmapString(format("Pan: {:.1f} ({})", music.getPan(),
+                music.getPan() < -0.1f ? "Left" : music.getPan() > 0.1f ? "Right" : "Center"), 50, y);
         y += 20;
 
-        snprintf(buf, sizeof(buf), "Speed: %.1fx", music.getSpeed());
-        drawBitmapString(buf, 50, y);
+        drawBitmapString(format("Speed: {:.1f}x", music.getSpeed()), 50, y);
         y += 20;
 
         drawBitmapString(std::string("Loop: ") + (music.isLoop() ? "ON" : "OFF"), 50, y);
@@ -140,10 +135,10 @@ void tcApp::keyPressed(int key) {
         if (musicLoaded) {
             if (music.isPlaying() || music.isPaused()) {
                 music.stop();
-                printf("Music stopped\n");
+                tcLogNotice("tcApp") << "Music stopped";
             } else {
                 music.play();
-                printf("Music playing\n");
+                tcLogNotice("tcApp") << "Music playing";
             }
         }
     }
@@ -152,10 +147,10 @@ void tcApp::keyPressed(int key) {
         if (musicLoaded) {
             if (music.isPaused()) {
                 music.resume();
-                printf("Music resumed\n");
+                tcLogNotice("tcApp") << "Music resumed";
             } else if (music.isPlaying()) {
                 music.pause();
-                printf("Music paused\n");
+                tcLogNotice("tcApp") << "Music paused";
             }
         }
     }
@@ -163,7 +158,7 @@ void tcApp::keyPressed(int key) {
         // S: Play sound effect
         if (sfxLoaded) {
             sfx.play();
-            printf("SFX playing\n");
+            tcLogNotice("tcApp") << "SFX playing";
         }
     }
     else if (key == SAPP_KEYCODE_UP) {
@@ -171,37 +166,37 @@ void tcApp::keyPressed(int key) {
         float vol = music.getVolume() + 0.1f;
         if (vol > 1.0f) vol = 1.0f;
         music.setVolume(vol);
-        printf("Volume: %.0f%%\n", vol * 100);
+        tcLogNotice("tcApp") << "Volume: " << (int)(vol * 100) << "%";
     }
     else if (key == SAPP_KEYCODE_DOWN) {
         // Volume down
         float vol = music.getVolume() - 0.1f;
         if (vol < 0.0f) vol = 0.0f;
         music.setVolume(vol);
-        printf("Volume: %.0f%%\n", vol * 100);
+        tcLogNotice("tcApp") << "Volume: " << (int)(vol * 100) << "%";
     }
     else if (key == SAPP_KEYCODE_LEFT) {
         // Pan left
         float pan = music.getPan() - 0.1f;
         music.setPan(pan);
-        printf("Pan: %.1f\n", music.getPan());
+        tcLogNotice("tcApp") << "Pan: " << music.getPan();
     }
     else if (key == SAPP_KEYCODE_RIGHT) {
         // Pan right
         float pan = music.getPan() + 0.1f;
         music.setPan(pan);
-        printf("Pan: %.1f\n", music.getPan());
+        tcLogNotice("tcApp") << "Pan: " << music.getPan();
     }
     else if (key == '+' || key == '=' || key == SAPP_KEYCODE_KP_ADD) {
         // Speed up
         float speed = music.getSpeed() + 0.1f;
         music.setSpeed(speed);
-        printf("Speed: %.1fx\n", music.getSpeed());
+        tcLogNotice("tcApp") << "Speed: " << music.getSpeed() << "x";
     }
     else if (key == '-' || key == SAPP_KEYCODE_KP_SUBTRACT) {
         // Speed down
         float speed = music.getSpeed() - 0.1f;
         music.setSpeed(speed);
-        printf("Speed: %.1fx\n", music.getSpeed());
+        tcLogNotice("tcApp") << "Speed: " << music.getSpeed() << "x";
     }
 }

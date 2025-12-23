@@ -297,9 +297,15 @@ List of samples/features requiring focused testing due to OS-specific code.
 
 ### Future
 
-| Category | Sample | Priority |
-|----------|--------|----------|
-| 3d/ | modelLoaderExample | Medium |
+| Category | Sample | Description | Priority |
+|----------|--------|-------------|----------|
+| 3d/ | modelLoaderExample | OBJ/glTF model loading | Medium |
+| graphics/ | particleExample | Particle system | Medium |
+| animation/ | tweenExample | Value interpolation with easing (linear, ease-in/out, bounce, etc.) | Medium |
+| animation/ | spriteSheetExample | Sprite sheet animation | Low |
+| game/ | pongExample | Simple game demo | Low |
+| generative/ | flowFieldExample | Generative art with flow fields | Low |
+| generative/ | lSystemExample | L-System tree/plant generation | Low |
 
 ---
 

@@ -7,7 +7,7 @@ void tcApp::setup() {
     threadedObject.setup();
     doLock = false;
 
-    printf("main thread id: %llu\n", (unsigned long long)std::hash<std::thread::id>{}(getMainThreadId()));
+    tcLogNotice("tcApp") << "main thread id: " << std::hash<std::thread::id>{}(getMainThreadId());
 }
 
 // ---------------------------------------------------------------------------
@@ -58,22 +58,22 @@ void tcApp::draw() {
 // ---------------------------------------------------------------------------
 void tcApp::keyPressed(int key) {
     if (isMainThread()) {
-        printf("[keyPressed] processed in main thread\n");
+        tcLogNotice("tcApp") << "[keyPressed] processed in main thread";
     } else {
-        printf("[keyPressed] processed in other thread\n");
+        tcLogNotice("tcApp") << "[keyPressed] processed in other thread";
     }
 
     if (key == 'a' || key == 'A') {
         threadedObject.start();
-        printf("Thread started\n");
+        tcLogNotice("tcApp") << "Thread started";
     } else if (key == 's' || key == 'S') {
         threadedObject.stop();
-        printf("Thread stopped\n");
+        tcLogNotice("tcApp") << "Thread stopped";
     } else if (key == 'n' || key == 'N') {
         doLock = false;
-        printf("Lock OFF - may see tearing\n");
+        tcLogNotice("tcApp") << "Lock OFF - may see tearing";
     } else if (key == 'l' || key == 'L') {
         doLock = true;
-        printf("Lock ON - safe mode\n");
+        tcLogNotice("tcApp") << "Lock ON - safe mode";
     }
 }

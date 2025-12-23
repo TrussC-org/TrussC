@@ -6,7 +6,7 @@
 #include "TrussC.h"
 
 void tcApp::setup() {
-    setVsync(true);
+    setFps(VSYNC);
 
     fftInput.resize(FFT_SIZE, 0.0f);
     spectrum.resize(FFT_SIZE / 2, 0.0f);
@@ -15,17 +15,17 @@ void tcApp::setup() {
     // Start microphone input
     if (getMicInput().start()) {
         micStarted = true;
-        printf("Microphone started!\n");
+        tcLogNotice("tcApp") << "Microphone started!";
     } else {
-        printf("Failed to start microphone.\n");
+        tcLogNotice("tcApp") << "Failed to start microphone.";
     }
 
-    printf("\n=== Controls ===\n");
-    printf("SPACE: Start/Stop mic\n");
-    printf("W: Toggle waveform\n");
-    printf("L: Toggle log scale\n");
-    printf("UP/DOWN: Smoothing\n");
-    printf("================\n\n");
+    tcLogNotice("tcApp") << "=== Controls ===";
+    tcLogNotice("tcApp") << "SPACE: Start/Stop mic";
+    tcLogNotice("tcApp") << "W: Toggle waveform";
+    tcLogNotice("tcApp") << "L: Toggle log scale";
+    tcLogNotice("tcApp") << "UP/DOWN: Smoothing";
+    tcLogNotice("tcApp") << "================";
 }
 
 void tcApp::update() {
@@ -68,12 +68,10 @@ void tcApp::draw() {
     drawBitmapString("SPACE:Start/Stop  W:Waveform  L:LogScale  UP/DOWN:Smoothing", 20, 50);
 
     // Status
-    char buf[128];
-    snprintf(buf, sizeof(buf), "Status: %s | Smoothing: %.0f%% | Scale: %s",
+    drawBitmapString(format("Status: {} | Smoothing: {:.0f}% | Scale: {}",
             getMicInput().isRunning() ? "Recording" : "Stopped",
             smoothing * 100,
-            useLogScale ? "Log" : "Linear");
-    drawBitmapString(buf, 20, 70);
+            useLogScale ? "Log" : "Linear"), 20, 70);
 
     // Waveform display area
     if (showWaveform) {
@@ -163,27 +161,27 @@ void tcApp::keyPressed(int key) {
     if (key == ' ') {
         if (getMicInput().isRunning()) {
             getMicInput().stop();
-            printf("Microphone stopped\n");
+            tcLogNotice("tcApp") << "Microphone stopped";
         } else {
             getMicInput().start();
-            printf("Microphone started\n");
+            tcLogNotice("tcApp") << "Microphone started";
         }
     }
     else if (key == 'w' || key == 'W') {
         showWaveform = !showWaveform;
-        printf("Waveform: %s\n", showWaveform ? "ON" : "OFF");
+        tcLogNotice("tcApp") << "Waveform: " << (showWaveform ? "ON" : "OFF");
     }
     else if (key == 'l' || key == 'L') {
         useLogScale = !useLogScale;
-        printf("Log scale: %s\n", useLogScale ? "ON" : "OFF");
+        tcLogNotice("tcApp") << "Log scale: " << (useLogScale ? "ON" : "OFF");
     }
     else if (key == SAPP_KEYCODE_UP) {
         smoothing = std::min(0.99f, smoothing + 0.05f);
-        printf("Smoothing: %.0f%%\n", smoothing * 100);
+        tcLogNotice("tcApp") << "Smoothing: " << (int)(smoothing * 100) << "%";
     }
     else if (key == SAPP_KEYCODE_DOWN) {
         smoothing = std::max(0.0f, smoothing - 0.05f);
-        printf("Smoothing: %.0f%%\n", smoothing * 100);
+        tcLogNotice("tcApp") << "Smoothing: " << (int)(smoothing * 100) << "%";
     }
 }
 

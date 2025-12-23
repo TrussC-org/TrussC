@@ -44,7 +44,7 @@ void CountdownNode::setup() {
     callAfter(3.0, [this]() {
         message_ = "Executed by callAfter!";
         triggered_ = true;
-        cout << "callAfter triggered!" << endl;
+        tcLogNotice("Timer") << "callAfter triggered!";
     });
 }
 
@@ -73,7 +73,7 @@ void PulseNode::setup() {
         // Cancel timer after 10 pulses
         if (pulseCount_ >= 10) {
             cancelTimer(pulseTimerId_);
-            cout << "Pulse timer cancelled after 10 pulses" << endl;
+            tcLogNotice("Timer") << "Pulse timer cancelled after 10 pulses";
         }
     });
 }
@@ -103,8 +103,8 @@ void PulseNode::draw() {
 // =============================================================================
 
 void tcApp::setup() {
-    cout << "timerExample: callAfter / callEvery Demo" << endl;
-    cout << "  - Press R to reset all timers" << endl;
+    tcLogNotice("tcApp") << "timerExample: callAfter / callEvery Demo";
+    tcLogNotice("tcApp") << "  - Press R to reset all timers";
 
     // Create root node
     rootNode_ = make_shared<Node>();
@@ -183,6 +183,6 @@ void tcApp::keyPressed(int key) {
         rootNode_->addChild(pulseNode_);
         pulseNode_->setup();
 
-        cout << "Reset all timers" << endl;
+        tcLogNotice("tcApp") << "Reset all timers";
     }
 }
