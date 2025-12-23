@@ -10,7 +10,7 @@ using namespace std;
 
 void tcApp::setup() {
     // Start camera (if permission not granted, it will be requested automatically)
-    grabber_.setup(640, 480);
+    grabber_.setup(1280, 720);
 }
 
 void tcApp::update() {
