@@ -83,8 +83,11 @@ void AudioEngine::mixAudio(float* buffer, int num_frames, int num_channels) {
 }
 
 // ---------------------------------------------------------------------------
-// MicInput miniaudio callback
+// MicInput implementation (Native only - Web version in platform/web/tcMicInput_web.cpp)
 // ---------------------------------------------------------------------------
+#ifndef __EMSCRIPTEN__
+
+// MicInput miniaudio callback
 static void micDataCallback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
     (void)pOutput;  // Capture only, output not used
 
@@ -93,10 +96,6 @@ static void micDataCallback(ma_device* pDevice, void* pOutput, const void* pInpu
         mic->onAudioData(static_cast<const float*>(pInput), frameCount);
     }
 }
-
-// ---------------------------------------------------------------------------
-// MicInput implementation
-// ---------------------------------------------------------------------------
 
 MicInput::~MicInput() {
     stop();
@@ -191,5 +190,7 @@ MicInput& getMicInput() {
     static MicInput instance;
     return instance;
 }
+
+#endif // !__EMSCRIPTEN__
 
 } // namespace trussc
