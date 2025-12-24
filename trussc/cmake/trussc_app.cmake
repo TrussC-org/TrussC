@@ -100,8 +100,14 @@ macro(trussc_app)
                 set(_TC_SOKOL_SHDC_DIR "linux")
             endif()
         endif()
-        set(_TC_SOKOL_SHDC_URL "${_TC_SOKOL_SHDC_BASE_URL}/${_TC_SOKOL_SHDC_DIR}/sokol-shdc")
-        set(_TC_SOKOL_SHDC_NAME "sokol-shdc")
+        # Windows uses .exe extension
+        if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+            set(_TC_SOKOL_SHDC_EXT ".exe")
+        else()
+            set(_TC_SOKOL_SHDC_EXT "")
+        endif()
+        set(_TC_SOKOL_SHDC_URL "${_TC_SOKOL_SHDC_BASE_URL}/${_TC_SOKOL_SHDC_DIR}/sokol-shdc${_TC_SOKOL_SHDC_EXT}")
+        set(_TC_SOKOL_SHDC_NAME "sokol-shdc${_TC_SOKOL_SHDC_EXT}")
 
         set(_TC_SOKOL_SHDC "${TC_ROOT}/trussc/tools/sokol-shdc/${_TC_SOKOL_SHDC_NAME}")
 
