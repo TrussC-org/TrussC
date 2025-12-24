@@ -1,173 +1,122 @@
 #include "tcApp.h"
 
-// Shader effects (Metal MSL fragment shaders)
-
-// Effect 0: Gradient
-const char* effectGradient = R"(
-#include <metal_stdlib>
-using namespace metal;
-
-struct Uniforms {
-    float time;
-    float _pad0[3];
-    float4 resolution;
-    float4 mouse;
-    float4 custom;
+// Shader desc getter function array
+typedef const sg_shader_desc* (*ShaderDescFunc)(sg_backend);
+static ShaderDescFunc shaderDescFuncs[] = {
+    gradient_shader_desc,
+    ripple_shader_desc,
+    plasma_shader_desc,
+    mouse_follow_shader_desc
 };
-
-struct FragmentIn {
-    float4 position [[position]];
-    float2 texcoord;
-};
-
-fragment float4 fragmentMain(FragmentIn in [[stage_in]],
-                             constant Uniforms& u [[buffer(0)]]) {
-    float2 uv = in.texcoord;
-
-    // Rainbow gradient changing over time
-    float3 col = 0.5 + 0.5 * cos(u.time + uv.xyx + float3(0, 2, 4));
-
-    return float4(col, 1.0);
-}
-)";
-
-// Effect 1: Ripple
-const char* effectRipple = R"(
-#include <metal_stdlib>
-using namespace metal;
-
-struct Uniforms {
-    float time;
-    float _pad0[3];
-    float4 resolution;
-    float4 mouse;
-    float4 custom;
-};
-
-struct FragmentIn {
-    float4 position [[position]];
-    float2 texcoord;
-};
-
-fragment float4 fragmentMain(FragmentIn in [[stage_in]],
-                             constant Uniforms& u [[buffer(0)]]) {
-    float2 uv = in.texcoord - 0.5;
-    float aspect = u.resolution.x / u.resolution.y;
-    uv.x *= aspect;
-
-    float dist = length(uv);
-    float wave = sin(dist * 20.0 - u.time * 3.0) * 0.5 + 0.5;
-    wave *= 1.0 - smoothstep(0.0, 0.5, dist);
-
-    float3 col = mix(float3(0.1, 0.1, 0.3), float3(0.3, 0.6, 1.0), wave);
-
-    return float4(col, 1.0);
-}
-)";
-
-// Effect 2: Plasma
-const char* effectPlasma = R"(
-#include <metal_stdlib>
-using namespace metal;
-
-struct Uniforms {
-    float time;
-    float _pad0[3];
-    float4 resolution;
-    float4 mouse;
-    float4 custom;
-};
-
-struct FragmentIn {
-    float4 position [[position]];
-    float2 texcoord;
-};
-
-fragment float4 fragmentMain(FragmentIn in [[stage_in]],
-                             constant Uniforms& u [[buffer(0)]]) {
-    float2 uv = in.texcoord * 4.0;
-    float t = u.time * 0.5;
-
-    float v1 = sin(uv.x + t);
-    float v2 = sin(uv.y + t);
-    float v3 = sin(uv.x + uv.y + t);
-    float v4 = sin(length(uv - float2(2.0)) + t);
-
-    float v = v1 + v2 + v3 + v4;
-
-    float3 col;
-    col.r = sin(v * 3.14159) * 0.5 + 0.5;
-    col.g = sin(v * 3.14159 + 2.094) * 0.5 + 0.5;
-    col.b = sin(v * 3.14159 + 4.188) * 0.5 + 0.5;
-
-    return float4(col, 1.0);
-}
-)";
-
-// Effect 3: Mouse follow
-const char* effectMouse = R"(
-#include <metal_stdlib>
-using namespace metal;
-
-struct Uniforms {
-    float time;
-    float _pad0[3];
-    float4 resolution;
-    float4 mouse;
-    float4 custom;
-};
-
-struct FragmentIn {
-    float4 position [[position]];
-    float2 texcoord;
-};
-
-fragment float4 fragmentMain(FragmentIn in [[stage_in]],
-                             constant Uniforms& u [[buffer(0)]]) {
-    float2 uv = in.texcoord;
-    float2 mouseUV = u.mouse.xy / u.resolution.xy;
-
-    float dist = distance(uv, mouseUV);
-    float glow = 0.05 / (dist + 0.01);
-    glow = clamp(glow, 0.0, 1.0);
-
-    float3 col = float3(glow * 0.5, glow * 0.8, glow);
-
-    // Background grid
-    float2 grid = fract(uv * 20.0);
-    float gridLine = step(0.95, grid.x) + step(0.95, grid.y);
-    col += gridLine * 0.1;
-
-    return float4(col, 1.0);
-}
-)";
 
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "shaderExample: Custom Shader Demo";
+    tcLogNotice("tcApp") << "shaderExample: Cross-Platform Shader Demo";
     tcLogNotice("tcApp") << "  - Press 1-4 to switch effects";
     tcLogNotice("tcApp") << "  - Press SPACE to cycle effects";
 
-    loadEffect(currentEffect);
+    sg_backend backend = sg_query_backend();
+
+    // Create 4 shaders and pipelines
+    for (int i = 0; i < NUM_EFFECTS; i++) {
+        const sg_shader_desc* shd_desc = shaderDescFuncs[i](backend);
+        if (!shd_desc) {
+            tcLogError("tcApp") << "Failed to get shader desc for effect " << i;
+            return;
+        }
+
+        shaders[i] = sg_make_shader(shd_desc);
+        if (sg_query_shader_state(shaders[i]) != SG_RESOURCESTATE_VALID) {
+            tcLogError("tcApp") << "Failed to create shader for effect " << i;
+            return;
+        }
+
+        // Create pipeline (attributes are the same for all)
+        sg_pipeline_desc pip_desc = {};
+        pip_desc.shader = shaders[i];
+        pip_desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;  // position
+        pip_desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;  // texcoord0
+        pip_desc.index_type = SG_INDEXTYPE_UINT16;
+        pip_desc.colors[0].blend.enabled = true;
+        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+
+        pipelines[i] = sg_make_pipeline(&pip_desc);
+        if (sg_query_pipeline_state(pipelines[i]) != SG_RESOURCESTATE_VALID) {
+            tcLogError("tcApp") << "Failed to create pipeline for effect " << i;
+            return;
+        }
+    }
+
+    // Fullscreen quad vertex buffer (shared)
+    float vertices[] = {
+        // position    texcoord
+        -1.0f, -1.0f,  0.0f, 1.0f,
+         1.0f, -1.0f,  1.0f, 1.0f,
+         1.0f,  1.0f,  1.0f, 0.0f,
+        -1.0f,  1.0f,  0.0f, 0.0f,
+    };
+
+    sg_buffer_desc vbuf_desc = {};
+    vbuf_desc.data = SG_RANGE(vertices);
+    vbuf_desc.label = "effect_vertices";
+    vertexBuffer = sg_make_buffer(&vbuf_desc);
+
+    // Index buffer (shared)
+    uint16_t indices[] = { 0, 1, 2, 0, 2, 3 };
+    sg_buffer_desc ibuf_desc = {};
+    ibuf_desc.usage.index_buffer = true;
+    ibuf_desc.data = SG_RANGE(indices);
+    ibuf_desc.label = "effect_indices";
+    indexBuffer = sg_make_buffer(&ibuf_desc);
+
+    loaded = true;
+    tcLogNotice("tcApp") << "All 4 effects loaded successfully!";
 }
 
 void tcApp::update() {
-    // Nothing
+    uniforms.time = getElapsedTime();
+    uniforms.resolution[0] = (float)getWindowWidth();
+    uniforms.resolution[1] = (float)getWindowHeight();
+    uniforms.mouse[0] = (float)getGlobalMouseX();
+    uniforms.mouse[1] = (float)getGlobalMouseY();
 }
 
 void tcApp::draw() {
     clear(0.0f);
 
-    // Apply shader and draw fullscreen
-    shader.begin();
-    shader.setUniformTime(getElapsedTime());
-    shader.setUniformResolution(getWindowWidth(), getWindowHeight());
-    shader.setUniformMouse(getGlobalMouseX(), getGlobalMouseY());
-    shader.draw();
-    shader.end();
+    if (!loaded) {
+        drawBitmapStringHighlight("Shader failed to load", 10, 20,
+            Color(0, 0, 0, 0.7f), Color(1, 0, 0));
+        return;
+    }
 
-    // Display effect name
-    string effectNames[] = {"Gradient", "Ripple", "Plasma", "Mouse Follow"};
-    string info = "Effect " + to_string(currentEffect + 1) + ": " + effectNames[currentEffect];
+    // Flush sokol_gl drawing
+    sgl_draw();
+
+    // Apply current effect pipeline
+    sg_apply_pipeline(pipelines[currentEffect]);
+
+    sg_bindings bindings = {};
+    bindings.vertex_buffers[0] = vertexBuffer;
+    bindings.index_buffer = indexBuffer;
+    sg_apply_bindings(&bindings);
+
+    // Apply uniforms
+    sg_range range = { &uniforms, sizeof(fs_params_t) };
+    sg_apply_uniforms(UB_fs_params, &range);
+
+    // Fullscreen draw
+    sg_draw(0, 6, 1);
+
+    // Reset sokol_gl state
+    sgl_defaults();
+    sgl_matrix_mode_projection();
+    sgl_ortho(0.0f, (float)sapp_width(), (float)sapp_height(), 0.0f, -10000.0f, 10000.0f);
+    sgl_matrix_mode_modelview();
+    sgl_load_identity();
+
+    // Display info
+    string info = "Effect " + to_string(currentEffect + 1) + ": " + getEffectName(currentEffect);
     drawBitmapStringHighlight(info, 10, 20,
         Color(0, 0, 0, 0.7f), Color(1, 1, 1));
     drawBitmapStringHighlight("Press 1-4 or SPACE to change", 10, 40,
@@ -175,23 +124,21 @@ void tcApp::draw() {
 }
 
 void tcApp::keyPressed(int key) {
-    if (key == '1') loadEffect(0);
-    else if (key == '2') loadEffect(1);
-    else if (key == '3') loadEffect(2);
-    else if (key == '4') loadEffect(3);
+    if (key == '1') currentEffect = 0;
+    else if (key == '2') currentEffect = 1;
+    else if (key == '3') currentEffect = 2;
+    else if (key == '4') currentEffect = 3;
     else if (key == ' ') {
         currentEffect = (currentEffect + 1) % NUM_EFFECTS;
-        loadEffect(currentEffect);
     }
 }
 
-void tcApp::loadEffect(int index) {
-    const char* sources[] = {effectGradient, effectRipple, effectPlasma, effectMouse};
-
-    currentEffect = index;
-    if (shader.loadFromSource(sources[index])) {
-        tcLogNotice("tcApp") << "Loaded effect " << (index + 1);
-    } else {
-        tcLogWarning("tcApp") << "Failed to load effect " << (index + 1);
-    }
+const char* tcApp::getEffectName(int index) {
+    static const char* names[] = {
+        "Gradient",
+        "Ripple",
+        "Plasma",
+        "Mouse Follow"
+    };
+    return names[index];
 }

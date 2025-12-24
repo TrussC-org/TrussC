@@ -7,9 +7,34 @@
 #include <functional>
 #include <vector>
 #include <algorithm>
-#include <mutex>
 #include <cstdint>
 #include "tcEventListener.h"
+
+// ---------------------------------------------------------------------------
+// Mutex configuration for thread safety
+// ---------------------------------------------------------------------------
+// Emscripten in single-threaded mode (default) does not support pthreads.
+// Including <mutex> or using std::recursive_mutex causes WASM instantiation
+// to fail with "Import #0 env: module is not an object or function".
+//
+// Solution: Use a no-op mutex for single-threaded Emscripten builds.
+// If you need threading in Emscripten, compile with -pthread flag, which
+// defines __EMSCRIPTEN_PTHREADS__ and enables Web Workers-based threading.
+// ---------------------------------------------------------------------------
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+namespace trussc {
+    struct NullMutex {
+        void lock() {}
+        void unlock() {}
+    };
+}
+#define TC_MUTEX trussc::NullMutex
+#define TC_LOCK_GUARD(m) (void)0
+#else
+#include <mutex>
+#define TC_MUTEX std::recursive_mutex
+#define TC_LOCK_GUARD(m) std::lock_guard<std::recursive_mutex> lock(m)
+#endif
 
 namespace trussc {
 
@@ -45,7 +70,7 @@ public:
                 EventPriority priority = EventPriority::App) {
         uint64_t id;
         {
-            std::lock_guard<std::recursive_mutex> lock(mutex_);
+            TC_LOCK_GUARD(mutex_);
             id = nextId_++;
             entries_.push_back({id, static_cast<int>(priority), std::move(callback)});
             sortEntries();
@@ -69,7 +94,7 @@ public:
     void notify(T& arg) {
         std::vector<Entry> entriesCopy;
         {
-            std::lock_guard<std::recursive_mutex> lock(mutex_);
+            TC_LOCK_GUARD(mutex_);
             entriesCopy = entries_;
         }
         // Execute outside lock (prevent deadlock)
@@ -82,13 +107,13 @@ public:
 
     // Get listener count
     size_t listenerCount() const {
-        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        TC_LOCK_GUARD(mutex_);
         return entries_.size();
     }
 
     // Remove all listeners
     void clear() {
-        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        TC_LOCK_GUARD(mutex_);
         entries_.clear();
     }
 
@@ -100,7 +125,7 @@ private:
     };
 
     void removeListener(uint64_t id) {
-        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        TC_LOCK_GUARD(mutex_);
         entries_.erase(
             std::remove_if(entries_.begin(), entries_.end(),
                 [id](const Entry& e) { return e.id == id; }),
@@ -115,7 +140,7 @@ private:
             });
     }
 
-    mutable std::recursive_mutex mutex_;
+    mutable TC_MUTEX mutex_;
     std::vector<Entry> entries_;
     uint64_t nextId_ = 0;
 };
@@ -142,7 +167,7 @@ public:
                 EventPriority priority = EventPriority::App) {
         uint64_t id;
         {
-            std::lock_guard<std::recursive_mutex> lock(mutex_);
+            TC_LOCK_GUARD(mutex_);
             id = nextId_++;
             entries_.push_back({id, static_cast<int>(priority), std::move(callback)});
             sortEntries();
@@ -166,7 +191,7 @@ public:
     void notify() {
         std::vector<Entry> entriesCopy;
         {
-            std::lock_guard<std::recursive_mutex> lock(mutex_);
+            TC_LOCK_GUARD(mutex_);
             entriesCopy = entries_;
         }
         for (auto& entry : entriesCopy) {
@@ -177,12 +202,12 @@ public:
     }
 
     size_t listenerCount() const {
-        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        TC_LOCK_GUARD(mutex_);
         return entries_.size();
     }
 
     void clear() {
-        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        TC_LOCK_GUARD(mutex_);
         entries_.clear();
     }
 
@@ -194,7 +219,7 @@ private:
     };
 
     void removeListener(uint64_t id) {
-        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        TC_LOCK_GUARD(mutex_);
         entries_.erase(
             std::remove_if(entries_.begin(), entries_.end(),
                 [id](const Entry& e) { return e.id == id; }),
@@ -209,7 +234,7 @@ private:
             });
     }
 
-    mutable std::recursive_mutex mutex_;
+    mutable TC_MUTEX mutex_;
     std::vector<Entry> entries_;
     uint64_t nextId_ = 0;
 };

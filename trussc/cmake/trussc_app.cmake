@@ -1,18 +1,22 @@
 # =============================================================================
-# trussc_app.cmake - TrussC アプリケーション設定マクロ
+# trussc_app.cmake - TrussC application setup macro
 # =============================================================================
 #
-# 使い方:
+# Usage:
 #   set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")
 #   include(${TRUSSC_DIR}/cmake/trussc_app.cmake)
 #   trussc_app()
 #
-# これだけで TrussC アプリがビルド可能になる。
-# アドオンを使う場合は addons.make ファイルにアドオン名を記述する。
+# This is all you need to build a TrussC app.
+# To use addons, list addon names in addons.make file.
 #
-# オプション:
-#   trussc_app(SOURCES file1.cpp file2.cpp)  # ソースを明示指定
-#   trussc_app(NAME myapp)                    # プロジェクト名を明示指定
+# Options:
+#   trussc_app(SOURCES file1.cpp file2.cpp)  # Explicit source files
+#   trussc_app(NAME myapp)                    # Explicit project name
+#
+# Shader compilation:
+#   If src/**/*.glsl files exist, they are automatically compiled
+#   with sokol-shdc to generate cross-platform shader headers.
 #
 # =============================================================================
 
@@ -72,10 +76,48 @@ macro(trussc_app)
     # TrussC リンク
     target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC)
 
-    # addons.make からアドオン追加
+    # Apply addons from addons.make
     apply_addons(${PROJECT_NAME})
 
-    # 出力設定
+    # Compile shaders with sokol-shdc (if any .glsl files exist)
+    file(GLOB_RECURSE _TC_SHADER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.glsl")
+    if(_TC_SHADER_SOURCES)
+        # Select sokol-shdc binary based on host platform
+        if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+            if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
+                set(_TC_SOKOL_SHDC "${TC_ROOT}/tools/sokol-shdc/sokol-shdc-osx_arm64")
+            else()
+                set(_TC_SOKOL_SHDC "${TC_ROOT}/tools/sokol-shdc/sokol-shdc-osx_x64")
+            endif()
+        elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+            set(_TC_SOKOL_SHDC "${TC_ROOT}/tools/sokol-shdc/sokol-shdc-win32.exe")
+        else()
+            set(_TC_SOKOL_SHDC "${TC_ROOT}/tools/sokol-shdc/sokol-shdc-linux")
+        endif()
+
+        # Output languages: Metal macOS, GLES3 for Web, WGSL for WebGPU
+        set(_TC_SOKOL_SLANG "metal_macos:glsl300es:wgsl")
+
+        set(_TC_SHADER_OUTPUTS "")
+        foreach(_shader_src ${_TC_SHADER_SOURCES})
+            set(_shader_out "${_shader_src}.h")
+            list(APPEND _TC_SHADER_OUTPUTS ${_shader_out})
+
+            get_filename_component(_shader_name ${_shader_src} NAME)
+            add_custom_command(
+                OUTPUT ${_shader_out}
+                COMMAND ${_TC_SOKOL_SHDC} -i ${_shader_src} -o ${_shader_out} -l ${_TC_SOKOL_SLANG} --ifdef
+                DEPENDS ${_shader_src}
+                COMMENT "Compiling shader: ${_shader_name}"
+            )
+        endforeach()
+
+        add_custom_target(${PROJECT_NAME}_shaders DEPENDS ${_TC_SHADER_OUTPUTS})
+        add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_shaders)
+        message(STATUS "[${PROJECT_NAME}] Shader compilation enabled for ${_TC_SHADER_SOURCES}")
+    endif()
+
+    # Output settings
     if(EMSCRIPTEN)
         # Emscripten: HTML 出力
         set_target_properties(${PROJECT_NAME} PROPERTIES

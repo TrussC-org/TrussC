@@ -9,6 +9,16 @@
 using namespace std;
 
 void tcApp::setup() {
+    // List available cameras
+    auto devices = grabber_.listDevices();
+    tcLogNotice("tcApp") << "Available cameras:";
+    for (const auto& d : devices) {
+        tcLogNotice("tcApp") << "  [" << d.deviceId << "] " << d.deviceName;
+    }
+
+    // Select camera device (0 = default/first camera)
+    grabber_.setDeviceID(0);
+
     // Start camera (if permission not granted, it will be requested automatically)
     grabber_.setup(1280, 720);
 }
@@ -50,7 +60,8 @@ void tcApp::draw() {
 
     // Display info
     setColor(colors::yellow);
-    drawBitmapString(format("{}x{} | FPS: {:.0f} | Flip: {} (F key)",
+    drawBitmapString(format("{} | {}x{} | FPS: {:.0f} | Flip: {} (F key)",
+        grabber_.getDeviceName(),
         grabber_.getWidth(), grabber_.getHeight(), getFrameRate(),
         flipH_ ? "ON" : "OFF"), 10, 20);
 }
