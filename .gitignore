@@ -101,3 +101,10 @@ addons/**/*.vcxproj
 projectGenerator/projectGenerator.app
 projectGenerator/projectGenerator.exe
 projectGenerator/projectGenerator
+
+# =============================================================================
+# Tools (auto-downloaded)
+# =============================================================================
+
+# sokol-shdc などのツールは初回ビルド時に自動ダウンロードされる
+trussc/tools/
