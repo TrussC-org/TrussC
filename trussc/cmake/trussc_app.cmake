@@ -83,16 +83,50 @@ macro(trussc_app)
     file(GLOB_RECURSE _TC_SHADER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.glsl")
     if(_TC_SHADER_SOURCES)
         # Select sokol-shdc binary based on host platform
+        # Download from official sokol-tools-bin repository
+        set(_TC_SOKOL_SHDC_BASE_URL "https://raw.githubusercontent.com/floooh/sokol-tools-bin/master/bin")
         if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
             if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
-                set(_TC_SOKOL_SHDC "${TC_ROOT}/tools/sokol-shdc/sokol-shdc-osx_arm64")
+                set(_TC_SOKOL_SHDC_DIR "osx_arm64")
             else()
-                set(_TC_SOKOL_SHDC "${TC_ROOT}/tools/sokol-shdc/sokol-shdc-osx_x64")
+                set(_TC_SOKOL_SHDC_DIR "osx")
             endif()
         elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-            set(_TC_SOKOL_SHDC "${TC_ROOT}/tools/sokol-shdc/sokol-shdc-win32.exe")
+            set(_TC_SOKOL_SHDC_DIR "win32")
         else()
-            set(_TC_SOKOL_SHDC "${TC_ROOT}/tools/sokol-shdc/sokol-shdc-linux")
+            if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "aarch64")
+                set(_TC_SOKOL_SHDC_DIR "linux_arm64")
+            else()
+                set(_TC_SOKOL_SHDC_DIR "linux")
+            endif()
+        endif()
+        # Windows uses .exe extension
+        if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+            set(_TC_SOKOL_SHDC_EXT ".exe")
+        else()
+            set(_TC_SOKOL_SHDC_EXT "")
+        endif()
+        set(_TC_SOKOL_SHDC_URL "${_TC_SOKOL_SHDC_BASE_URL}/${_TC_SOKOL_SHDC_DIR}/sokol-shdc${_TC_SOKOL_SHDC_EXT}")
+        set(_TC_SOKOL_SHDC_NAME "sokol-shdc${_TC_SOKOL_SHDC_EXT}")
+
+        set(_TC_SOKOL_SHDC "${TC_ROOT}/trussc/tools/sokol-shdc/${_TC_SOKOL_SHDC_NAME}")
+
+        # Download sokol-shdc if not present
+        if(NOT EXISTS "${_TC_SOKOL_SHDC}")
+            message(STATUS "[${PROJECT_NAME}] Downloading sokol-shdc...")
+            file(MAKE_DIRECTORY "${TC_ROOT}/trussc/tools/sokol-shdc")
+            file(DOWNLOAD "${_TC_SOKOL_SHDC_URL}" "${_TC_SOKOL_SHDC}"
+                SHOW_PROGRESS
+                STATUS _TC_DOWNLOAD_STATUS)
+            list(GET _TC_DOWNLOAD_STATUS 0 _TC_DOWNLOAD_ERROR)
+            if(_TC_DOWNLOAD_ERROR)
+                message(FATAL_ERROR "Failed to download sokol-shdc: ${_TC_DOWNLOAD_STATUS}")
+            endif()
+            # Make executable on Unix
+            if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+                file(CHMOD "${_TC_SOKOL_SHDC}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+            endif()
+            message(STATUS "[${PROJECT_NAME}] sokol-shdc downloaded successfully")
         endif()
 
         # Output languages: Metal macOS, GLES3 for Web, WGSL for WebGPU

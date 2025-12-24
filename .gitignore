@@ -2,7 +2,7 @@
 # TrussC .gitignore
 # =============================================================================
 
-# ビルド関連（共通）
+# Build artifacts
 build/
 out/
 cmake-build-*/
@@ -72,7 +72,7 @@ _deps/
 # Examples
 # =============================================================================
 
-# examples 内のビルド成果物を除外（サブフォルダも含む）
+# Exclude build artifacts in examples (including subfolders)
 examples/**/build/
 examples/**/bin/*
 !examples/**/bin/data/
@@ -85,7 +85,7 @@ examples/**/*.vcxproj
 # Addons
 # =============================================================================
 
-# addons 内のビルド成果物を除外
+# Exclude build artifacts in addons
 addons/**/build/
 addons/**/bin/*
 !addons/**/bin/data/
@@ -97,7 +97,14 @@ addons/**/*.vcxproj
 # Project Generator
 # =============================================================================
 
-# projectGenerator のバイナリを除外（ビルドスクリプトのみ管理）
+# Exclude projectGenerator binaries (only build scripts are tracked)
 projectGenerator/projectGenerator.app
 projectGenerator/projectGenerator.exe
 projectGenerator/projectGenerator
+
+# =============================================================================
+# Tools (auto-downloaded)
+# =============================================================================
+
+# Tools like sokol-shdc are auto-downloaded on first build
+trussc/tools/
