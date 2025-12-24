@@ -1,0 +1,51 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "macos",
+      "displayName": "macOS",
+      "binaryDir": "${sourceDir}/build-macos",
+      "generator": "Unix Makefiles"
+    },
+    {
+      "name": "windows",
+      "displayName": "Windows",
+      "binaryDir": "${sourceDir}/build-windows",
+      "generator": "Visual Studio 17 2022"
+    },
+    {
+      "name": "linux",
+      "displayName": "Linux",
+      "binaryDir": "${sourceDir}/build-linux",
+      "generator": "Unix Makefiles"
+    },
+    {
+      "name": "web",
+      "displayName": "Web (Emscripten)",
+      "binaryDir": "${sourceDir}/build-web",
+      "generator": "Unix Makefiles",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "macos",
+      "configurePreset": "macos",
+      "jobs": 4
+    },
+    {
+      "name": "windows",
+      "configurePreset": "windows"
+    },
+    {
+      "name": "linux",
+      "configurePreset": "linux",
+      "jobs": 4
+    },
+    {
+      "name": "web",
+      "configurePreset": "web",
+      "jobs": 4
+    }
+  ]
+}

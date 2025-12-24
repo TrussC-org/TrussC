@@ -7,6 +7,7 @@ CMakeLists.txt
 
 # Build directories
 build/
+build-*/
 emscripten/
 xcode/
 vs/
