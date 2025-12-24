@@ -924,9 +924,9 @@ inline void getBitmapStringBounds(const std::string& text, float& width, float& 
             cursorX = 0;
             lines++;
         } else if (c == '\t') {
-            cursorX += bitmapfont::CHAR_WIDTH * 8;
+            cursorX += bitmapfont::GLYPH_WIDTH * 8;
         } else {
-            cursorX += bitmapfont::CHAR_WIDTH;
+            cursorX += bitmapfont::GLYPH_WIDTH;
         }
     }
     if (cursorX > maxWidth) maxWidth = cursorX;

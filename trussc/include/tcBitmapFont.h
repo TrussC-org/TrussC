@@ -11,7 +11,9 @@ namespace trussc {
 namespace bitmapfont {
 
 // Font size
-constexpr int CHAR_WIDTH = 8;
+// Note: Using GLYPH_WIDTH instead of CHAR_WIDTH to avoid conflict
+// with Linux limits.h which defines CHAR_WIDTH as a macro
+constexpr int GLYPH_WIDTH = 8;
 constexpr int CHAR_HEIGHT = 13;
 
 // 8x13 bitmap font data
@@ -261,7 +263,7 @@ inline unsigned char* generateAtlasPixels() {
         const unsigned char* bitmap = fontData[charIndex];
         for (int row = 0; row < CHAR_HEIGHT; row++) {
             unsigned char rowData = bitmap[row];
-            for (int col = 0; col < CHAR_WIDTH; col++) {
+            for (int col = 0; col < GLYPH_WIDTH; col++) {
                 // Check from MSB
                 if (rowData & (0x80 >> col)) {
                     int px = baseX + col;
