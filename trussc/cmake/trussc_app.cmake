@@ -21,25 +21,25 @@
 # =============================================================================
 
 macro(trussc_app)
-    # デフォルトビルドタイプを RelWithDebInfo に設定
+    # Set default build type to RelWithDebInfo
     if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
         set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
     endif()
 
-    # 引数をパース
+    # Parse arguments
     set(_options "")
     set(_oneValueArgs NAME)
     set(_multiValueArgs SOURCES)
     cmake_parse_arguments(_TC_APP "${_options}" "${_oneValueArgs}" "${_multiValueArgs}" ${ARGN})
 
-    # プロジェクト名（指定がなければフォルダ名から取得）
+    # Project name (use folder name if not specified)
     if(_TC_APP_NAME)
         set(_TC_PROJECT_NAME ${_TC_APP_NAME})
     else()
         get_filename_component(_TC_PROJECT_NAME ${CMAKE_CURRENT_SOURCE_DIR} NAME)
     endif()
 
-    # プラットフォームに応じて言語を設定
+    # Set languages based on platform
     if(APPLE)
         project(${_TC_PROJECT_NAME} LANGUAGES C CXX OBJC OBJCXX)
     else()
@@ -50,10 +50,10 @@ macro(trussc_app)
     set(CMAKE_CXX_STANDARD 20)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-    # TrussC を追加
+    # Add TrussC
     add_subdirectory(${TRUSSC_DIR} ${CMAKE_BINARY_DIR}/TrussC)
 
-    # ソースファイル（指定がなければ src/ から再帰的に自動収集）
+    # Source files (auto-collect from src/ recursively if not specified)
     if(_TC_APP_SOURCES)
         set(_TC_SOURCES ${_TC_APP_SOURCES})
     else()
@@ -67,13 +67,13 @@ macro(trussc_app)
         )
     endif()
 
-    # Xcode / Visual Studio でディレクトリ構造を維持
+    # Preserve directory structure in Xcode / Visual Studio
     source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "src" FILES ${_TC_SOURCES})
 
-    # 実行ファイル作成
+    # Create executable
     add_executable(${PROJECT_NAME} ${_TC_SOURCES})
 
-    # TrussC リンク
+    # Link TrussC
     target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC)
 
     # Apply addons from addons.make
@@ -153,21 +153,21 @@ macro(trussc_app)
 
     # Output settings
     if(EMSCRIPTEN)
-        # Emscripten: HTML 出力
+        # Emscripten: HTML output
         set_target_properties(${PROJECT_NAME} PROPERTIES
             SUFFIX ".html"
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         )
-        # カスタムシェル HTML のパス
+        # Custom shell HTML path
         set(_TC_SHELL_FILE "${TC_ROOT}/trussc/platform/web/shell.html")
-        # WebGL2 リンクオプション
+        # WebGL2 link options
         target_link_options(${PROJECT_NAME} PRIVATE
             -sUSE_WEBGL2=1
             -sALLOW_MEMORY_GROWTH=1
             -sFULL_ES3=1
             --shell-file=${_TC_SHELL_FILE}
         )
-        # bin/data フォルダが存在する場合は自動的にプリロード
+        # Auto-preload bin/data folder if it exists
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bin/data")
             target_link_options(${PROJECT_NAME} PRIVATE
                 --preload-file ${CMAKE_CURRENT_SOURCE_DIR}/bin/data@/data
@@ -184,7 +184,7 @@ macro(trussc_app)
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
             RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/bin"
             RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/bin"
-            # Xcode: スキームを生成してデフォルトターゲットにする
+            # Xcode: Generate scheme and set as default target
             XCODE_GENERATE_SCHEME TRUE
             XCODE_SCHEME_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         )
@@ -195,9 +195,9 @@ macro(trussc_app)
             RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/bin"
             RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         )
-        # Visual Studio: スタートアッププロジェクトを設定
+        # Visual Studio: Set as startup project
         set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
-        # Windows: アイコン設定
+        # Windows: Setup icon
         trussc_setup_icon(${PROJECT_NAME})
     endif()
 
