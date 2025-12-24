@@ -51,6 +51,17 @@ size_t getNodeCount();
 size_t getTextureCount();
 size_t getFboCount();
 
+namespace internal {
+    extern void (*appKeyPressedFunc)(int);
+    extern void (*appKeyReleasedFunc)(int);
+    extern void (*appMousePressedFunc)(int, int, int);
+    extern void (*appMouseReleasedFunc)(int, int, int);
+    extern void (*appMouseMovedFunc)(int, int);
+    extern void (*appMouseDraggedFunc)(int, int, int);
+    extern void (*appMouseScrolledFunc)(float, float);
+    extern void (*appFilesDroppedFunc)(const std::vector<std::string>&);
+}
+
 namespace debuginput {
 
 // ---------------------------------------------------------------------------
@@ -154,26 +165,45 @@ inline void handleCommand(ConsoleEventArgs& e) {
         type = e.args[1];
     }
 
+    // Track button state for drag detection
+    static int pressedButton = -1;
+
     // Helper lambdas for event injection
     auto injectMouseEvent = [](const std::string& action, float x, float y, int button) {
         isInjecting = true;
         if (action == "mouse_press" || action == "press") {
+            pressedButton = button;
             MouseEventArgs args;
             args.x = x;
             args.y = y;
             args.button = button;
             events().mousePressed.notify(args);
+            if (internal::appMousePressedFunc) internal::appMousePressedFunc((int)x, (int)y, button);
         } else if (action == "mouse_release" || action == "release") {
+            pressedButton = -1;
             MouseEventArgs args;
             args.x = x;
             args.y = y;
             args.button = button;
             events().mouseReleased.notify(args);
+            if (internal::appMouseReleasedFunc) internal::appMouseReleasedFunc((int)x, (int)y, button);
         } else if (action == "mouse_move" || action == "move") {
-            MouseMoveEventArgs args;
-            args.x = x;
-            args.y = y;
-            events().mouseMoved.notify(args);
+            if (pressedButton >= 0) {
+                // Dragging
+                MouseDragEventArgs args;
+                args.x = x;
+                args.y = y;
+                args.button = pressedButton;
+                events().mouseDragged.notify(args);
+                if (internal::appMouseDraggedFunc) internal::appMouseDraggedFunc((int)x, (int)y, pressedButton);
+            } else {
+                // Just moving
+                MouseMoveEventArgs args;
+                args.x = x;
+                args.y = y;
+                events().mouseMoved.notify(args);
+                if (internal::appMouseMovedFunc) internal::appMouseMovedFunc((int)x, (int)y);
+            }
         }
         isInjecting = false;
     };
@@ -184,8 +214,10 @@ inline void handleCommand(ConsoleEventArgs& e) {
         args.key = key;
         if (action == "key_press" || action == "press") {
             events().keyPressed.notify(args);
+            if (internal::appKeyPressedFunc) internal::appKeyPressedFunc(key);
         } else if (action == "key_release" || action == "release") {
             events().keyReleased.notify(args);
+            if (internal::appKeyReleasedFunc) internal::appKeyReleasedFunc(key);
         }
         isInjecting = false;
     };
@@ -290,9 +322,12 @@ inline void handleCommand(ConsoleEventArgs& e) {
             injectMouseEvent("press", x, y, button);
             injectMouseEvent("release", x, y, button);
         } else if (action == "mouse_scroll") {
-            float dx = isJson ? j.value("dx", 0.0f) : 0.0f;
-            float dy = isJson ? j.value("dy", 0.0f) : 0.0f;
-            if (!isJson && e.args.size() >= 4) {
+            float dx = 0.0f, dy = 0.0f;
+            if (isJson) {
+                // Support both dx/dy and deltaX/deltaY
+                dx = j.contains("dx") ? j.value("dx", 0.0f) : j.value("deltaX", 0.0f);
+                dy = j.contains("dy") ? j.value("dy", 0.0f) : j.value("deltaY", 0.0f);
+            } else if (e.args.size() >= 4) {
                 dx = std::stof(e.args[2]);
                 dy = std::stof(e.args[3]);
             }
@@ -301,6 +336,7 @@ inline void handleCommand(ConsoleEventArgs& e) {
             args.scrollX = dx;
             args.scrollY = dy;
             events().mouseScrolled.notify(args);
+            if (internal::appMouseScrolledFunc) internal::appMouseScrolledFunc(dx, dy);
             isInjecting = false;
         } else {
             injectMouseEvent(action, x, y, button);
@@ -358,6 +394,7 @@ inline void handleCommand(ConsoleEventArgs& e) {
         DragDropEventArgs args;
         args.files = files;
         events().filesDropped.notify(args);
+        if (internal::appFilesDroppedFunc) internal::appFilesDroppedFunc(files);
         isInjecting = false;
 
         std::cout << "tcdebug {\"status\":\"ok\",\"type\":\"drop\",\"files\":" << files.size() << "}" << std::endl;
