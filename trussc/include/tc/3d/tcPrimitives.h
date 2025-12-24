@@ -116,7 +116,7 @@ inline Mesh createSphere(float radius, int resolution = 16) {
     // Generate vertices and normals
     for (int r = 0; r <= rings; r++) {
         float v = (float)r / rings;
-        float phi = v * PI;
+        float phi = v * HALF_TAU;
 
         for (int s = 0; s <= sectors; s++) {
             float u = (float)s / sectors;

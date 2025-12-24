@@ -339,8 +339,8 @@ private:
                     float angle2 = std::atan2(dir2.y, dir2.x);
 
                     float deltaAngle = angle2 - angle1;
-                    while (deltaAngle > PI) deltaAngle -= TAU;
-                    while (deltaAngle < -PI) deltaAngle += TAU;
+                    while (deltaAngle > HALF_TAU) deltaAngle -= TAU;
+                    while (deltaAngle < -HALF_TAU) deltaAngle += TAU;
 
                     for (int j = 0; j < segments; j++) {
                         float t1 = (float)j / segments;
@@ -447,8 +447,8 @@ private:
             else if (capType_ == CAP_ROUND) {
                 int segments = std::max(8, (int)(startHW * 4));
                 for (int j = 0; j < segments; j++) {
-                    float a1 = PI * (float)j / segments;
-                    float a2 = PI * (float)(j + 1) / segments;
+                    float a1 = HALF_TAU * (float)j / segments;
+                    float a2 = HALF_TAU * (float)(j + 1) / segments;
 
                     Vec3 pt1 = Vec3{
                         verts[0].x - startNormal.x * std::cos(a1) * startHW - startDir.x * std::sin(a1) * startHW,
@@ -482,8 +482,8 @@ private:
             else if (capType_ == CAP_ROUND) {
                 int segments = std::max(8, (int)(endHW * 4));
                 for (int j = 0; j < segments; j++) {
-                    float a1 = PI * (float)j / segments;
-                    float a2 = PI * (float)(j + 1) / segments;
+                    float a1 = HALF_TAU * (float)j / segments;
+                    float a2 = HALF_TAU * (float)(j + 1) / segments;
 
                     Vec3 pt1 = Vec3{
                         verts[last].x + endNormal.x * std::cos(a1) * endHW + endDir.x * std::sin(a1) * endHW,

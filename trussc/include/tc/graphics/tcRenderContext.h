@@ -189,10 +189,10 @@ public:
         sgl_rotate(radians, 0.0f, 0.0f, 1.0f);
     }
 
-    void rotateDeg(float degrees) { rotate(degrees * PI / 180.0f); }
-    void rotateXDeg(float degrees) { rotateX(degrees * PI / 180.0f); }
-    void rotateYDeg(float degrees) { rotateY(degrees * PI / 180.0f); }
-    void rotateZDeg(float degrees) { rotateZ(degrees * PI / 180.0f); }
+    void rotateDeg(float degrees) { rotate(deg2rad(degrees)); }
+    void rotateXDeg(float degrees) { rotateX(deg2rad(degrees)); }
+    void rotateYDeg(float degrees) { rotateY(deg2rad(degrees)); }
+    void rotateZDeg(float degrees) { rotateZ(deg2rad(degrees)); }
 
     void scale(float s) {
         currentMatrix_ = currentMatrix_ * Mat4::scale(s, s, 1.0f);

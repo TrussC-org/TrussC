@@ -137,12 +137,12 @@ public:
 
     // Set rotation in degrees
     void setRotationDeg(float degrees) {
-        rotation = degrees * PI / 180.0f;
+        rotation = deg2rad(degrees);
     }
 
     // Get rotation in degrees
     float getRotationDeg() const {
-        return rotation * 180.0f / PI;
+        return rad2deg(rotation);
     }
 
     // -------------------------------------------------------------------------

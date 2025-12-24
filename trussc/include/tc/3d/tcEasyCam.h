@@ -156,7 +156,7 @@ public:
 
     // Set field of view (FOV) in degrees
     void setFovDeg(float degrees) {
-        fov_ = degrees * PI / 180.0f;
+        fov_ = deg2rad(degrees);
     }
 
     // Set clipping planes
