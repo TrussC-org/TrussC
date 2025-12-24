@@ -246,6 +246,138 @@ tcdebug info  # Check status
 4. **Check `status` field** in responses to detect errors
 5. **Use `screenshot`** to get visual feedback when needed
 
+## Sending stdin to GUI Apps (For AI Agents)
+
+GUI applications need special handling for stdin. Here are proven patterns:
+
+### Method 1: Pipe with Grouped Commands (Simplest)
+
+Send all commands at once with sleep delays:
+
+```bash
+(
+echo 'tcdebug info'
+sleep 0.5
+echo 'tcdebug {"type":"mouse_click","x":100,"y":200}'
+sleep 0.5
+echo 'tcdebug {"type":"screenshot","path":"/tmp/result.png"}'
+sleep 1
+) | ./myapp.app/Contents/MacOS/myapp
+```
+
+**Pros:** Simple, works everywhere
+**Cons:** Can't send commands interactively after app starts
+
+### Method 2: Named Pipe (FIFO) - Recommended for Interactive Control
+
+Create a named pipe to send commands at any time:
+
+```bash
+# 1. Create named pipe
+mkfifo /tmp/myapp_input
+
+# 2. Start app reading from pipe (background)
+./myapp < /tmp/myapp_input &
+APP_PID=$!
+
+# 3. Keep pipe open with a background cat
+# (prevents EOF when first echo finishes)
+sleep infinity > /tmp/myapp_input &
+KEEP_OPEN_PID=$!
+
+# 4. Now send commands anytime!
+echo 'tcdebug info' > /tmp/myapp_input
+sleep 1
+echo 'tcdebug {"type":"mouse_click","x":100,"y":200}' > /tmp/myapp_input
+sleep 1
+echo 'tcdebug {"type":"screenshot","path":"/tmp/result.png"}' > /tmp/myapp_input
+
+# 5. Cleanup
+kill $KEEP_OPEN_PID $APP_PID 2>/dev/null
+rm /tmp/myapp_input
+```
+
+**Pros:** Full interactive control, send commands anytime
+**Cons:** Slightly more setup, need to manage pipe lifecycle
+
+### Method 3: Process Substitution (Linux/macOS)
+
+```bash
+# Start app and capture its PID
+./myapp < <(
+    echo 'tcdebug info'
+    sleep 2
+    echo 'tcdebug {"type":"mouse_click","x":100,"y":200}'
+    sleep 5
+) &
+```
+
+### Platform Notes
+
+| Platform | Named Pipe | /proc/PID/fd/0 | Notes |
+|----------|------------|----------------|-------|
+| macOS    | ✅ `mkfifo` | ❌ No /proc | Use named pipe |
+| Linux    | ✅ `mkfifo` | ✅ Works | Either method works |
+| Windows  | ❌ Different | ❌ No /proc | Use PowerShell named pipe or Method 1 |
+
+### Windows Alternative
+
+On Windows, use PowerShell with Start-Process:
+
+```powershell
+# Method 1: Pipe
+$commands = @"
+tcdebug info
+tcdebug {"type":"mouse_click","x":100,"y":200}
+"@
+$commands | ./myapp.exe
+```
+
+### Common Pitfalls
+
+1. **Pipe closes immediately** - Use `sleep infinity` or `cat` to keep pipe open
+2. **Commands not received** - Add `sleep` between commands for processing time
+3. **App exits early** - Make sure stdin doesn't close (EOF) until you're done
+4. **Output not visible** - Redirect stdout: `./myapp 2>&1 | tee output.log`
+
+### Recommended Pattern for AI Agents
+
+```bash
+#!/bin/bash
+# ai_control_app.sh - Template for AI agent control
+
+APP_PATH="./myapp.app/Contents/MacOS/myapp"
+FIFO="/tmp/tcdebug_$$"
+OUTPUT="/tmp/tcdebug_output_$$"
+
+# Setup
+mkfifo "$FIFO"
+$APP_PATH < "$FIFO" > "$OUTPUT" 2>&1 &
+APP_PID=$!
+sleep infinity > "$FIFO" &
+KEEP_PID=$!
+sleep 1  # Wait for app startup
+
+# Helper function to send command
+send_cmd() {
+    echo "$1" > "$FIFO"
+    sleep 0.3
+    tail -1 "$OUTPUT"  # Return last response
+}
+
+# Example usage
+send_cmd 'tcdebug info'
+send_cmd 'tcdebug {"type":"mouse_click","x":100,"y":200}'
+send_cmd 'tcdebug {"type":"screenshot","path":"/tmp/shot.png"}'
+
+# Cleanup
+cleanup() {
+    kill $KEEP_PID $APP_PID 2>/dev/null
+    rm -f "$FIFO" "$OUTPUT"
+}
+trap cleanup EXIT
+```
+
 ## Related
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Console system overview
