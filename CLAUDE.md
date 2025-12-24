@@ -96,12 +96,50 @@ cmake --build .
 ./projectGenerator/buildProjectGenerator_mac.command
 ```
 
+## AI Automation Interface
+
+TrussC apps can be controlled via stdin commands. **This is designed for AI agents.**
+
+### Quick Reference
+
+```bash
+# Get app status
+echo 'tcdebug info' | ./myapp
+# Output: tcdebug {"type":"info","fps":60,"width":1280,"height":720,...}
+
+# Simulate mouse click (requires enableDebugInput)
+echo 'tcdebug {"type":"mouse_click","x":100,"y":200}' | ./myapp
+
+# Capture user input
+echo 'tcdebug stream normal' | ./myapp
+# Output: tcdebug {"type":"mouse_press","x":150,"y":300,"button":"left","time":1.23}
+
+# Take screenshot
+echo 'tcdebug {"type":"screenshot","path":"/tmp/shot.png"}' | ./myapp
+```
+
+### Security Note
+
+Input simulation (`mouse_*`, `key_*`, `drop`) requires opt-in:
+
+```cpp
+WindowSettings settings;
+settings.enableDebugInput = true;  // Required for input simulation
+```
+
+Without this, only read-only commands (`info`, `help`, `screenshot`) work.
+
+### Full Documentation
+
+See [docs/AI_AUTOMATION.md](docs/AI_AUTOMATION.md) for complete command reference.
+
 ## Related Documentation
 
 - [docs/GET_STARTED.md](docs/GET_STARTED.md) - Getting started (read this first)
 - [docs/TrussC_vs_openFrameworks.md](docs/TrussC_vs_openFrameworks.md) - API comparison for oF users
 - [docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md) - Detailed build instructions, icon settings, distribution
 - [docs/ADDONS.md](docs/ADDONS.md) - How to use addons
+- [docs/AI_AUTOMATION.md](docs/AI_AUTOMATION.md) - Stdin automation for AI agents
 - [docs/DESIGN.md](docs/DESIGN.md) - Design details (Loop Architecture, 3D Projection, etc.)
 - [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) - Concept, philosophy, tech stack
 - [docs/ROADMAP.md](docs/ROADMAP.md) - Implementation roadmap

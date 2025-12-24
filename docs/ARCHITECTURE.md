@@ -218,6 +218,27 @@ Based on C++ standard features:
 - Use `std::mutex` and `std::lock_guard` for synchronization
 - `tc::Thread` class wraps `std::thread` for lifecycle management
 
+### F. Console & AI Automation
+
+TrussC apps accept commands via stdin and output events to stdout, enabling:
+
+- **AI agent control** - Claude, GPT can simulate input
+- **Automated testing** - Script UI interactions
+- **Operation replay** - Capture and replay user actions
+
+```bash
+# Get app status
+echo 'tcdebug info' | ./myapp
+
+# Simulate click (requires enableDebugInput)
+echo 'tcdebug {"type":"mouse_click","x":100,"y":200}' | ./myapp
+
+# Capture user input
+echo 'tcdebug stream normal' | ./myapp
+```
+
+See [AI_AUTOMATION.md](AI_AUTOMATION.md) for full command reference.
+
 ---
 
 ## 6. 3D Graphics
