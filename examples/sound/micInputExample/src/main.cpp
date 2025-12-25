@@ -6,7 +6,7 @@
 
 int main() {
     WindowSettings settings;
-    settings.setSize(1024, 600);
+    settings.setSize(960, 600);
     settings.setTitle("micInputExample - TrussC");
 
     return runApp<tcApp>(settings);

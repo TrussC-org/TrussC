@@ -220,14 +220,14 @@ void tcApp::drawLightnessDemo() {
     float guiWidth = 280;
     float startX = guiWidth + margin;
     float barWidth = getWindowWidth() - startX - margin;
-    float barHeight = 60;
+    float barHeight = 45;
     int segments = 360;
     float segmentWidth = barWidth / segments;
 
-    // Vertically center the 4 bars
-    float gap = 100;
+    // Vertically center the 4 bars with more padding
+    float gap = 70;
     float totalHeight = 4 * barHeight + 3 * gap;
-    float baseY = (getWindowHeight() - totalHeight) / 2;
+    float baseY = (getWindowHeight() - totalHeight) / 2 + 10;
 
     // HSB: Same brightness (B=1) but perceptual lightness varies
     float y1 = baseY;
@@ -303,13 +303,15 @@ void tcApp::drawGradientDemo() {
     float availWidth = getWindowWidth() - guiWidth - margin * 2;
     float startX = guiWidth + margin;
     float barWidth = availWidth * 0.45f;
-    float barHeight = 22;
+    float barHeight = 18;
     int steps = 64;
     float stepWidth = barWidth / steps;
 
-    // Vertically center
-    float totalHeight = 4 * (barHeight * 2 + 60);  // 4 pairs
-    float y = (getWindowHeight() - totalHeight) / 2 + 20;
+    // Vertically center with tighter spacing
+    float pairGap = 30;  // Gap between two bars in a pair
+    float groupGap = 55; // Gap between pairs
+    float totalHeight = 4 * (barHeight * 2 + pairGap) + 3 * groupGap;
+    float y = (getWindowHeight() - totalHeight) / 2 + 15;
     float colGap = availWidth * 0.5f;
 
     for (int p = 0; p < 4; p++) {
@@ -331,7 +333,7 @@ void tcApp::drawGradientDemo() {
             drawRect(startX + colGap + i * stepWidth, y, stepWidth + 1, barHeight);
         }
 
-        y += 50;
+        y += pairGap;
 
         // HSB
         for (int i = 0; i < steps; i++) {
@@ -349,7 +351,7 @@ void tcApp::drawGradientDemo() {
             drawRect(startX + colGap + i * stepWidth, y, stepWidth + 1, barHeight);
         }
 
-        y += 100;
+        y += barHeight + groupGap;
     }
 
     // Legend

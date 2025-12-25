@@ -4,16 +4,10 @@
 
 #include "tcApp.h"
 
-int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
-
+int main() {
     WindowSettings settings;
-    settings.title = "clippingExample";
-    settings.width = 1280;
-    settings.height = 720;
+    settings.setSize(960, 600);
+    settings.setTitle("clippingExample - TrussC");
 
-    runApp<tcApp>(settings);
-
-    return 0;
+    return runApp<tcApp>(settings);
 }

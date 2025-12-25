@@ -1,7 +1,6 @@
 #pragma once
 
 #include <TrussC.h>
-#include <complex>
 using namespace std;
 using namespace tc;
 
@@ -13,16 +12,7 @@ public:
     void keyPressed(int key) override;
 
 private:
-    bool micStarted = false;
-
-    // FFT related
     static constexpr int FFT_SIZE = 1024;
-    std::vector<float> fftInput;
-    std::vector<float> spectrum;
-    std::vector<float> spectrumSmooth;  // For smoothing
-
-    // Visualization settings
-    float smoothing = 0.8f;  // Smoothing coefficient
-    bool useLogScale = true; // Logarithmic scale display
-    bool showWaveform = true;
+    vector<float> fftInput;
+    vector<float> spectrum;
 };

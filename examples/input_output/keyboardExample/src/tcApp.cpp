@@ -73,7 +73,7 @@ void tcApp::draw() {
 
     // Draw box
     setColor(colors::blue);
-    drawRect(boxX - 40, boxY - 40, 80, 80);
+    drawRect(boxX - 50, boxY - 50, 100, 100);
 
     setColor(1.0f);
     drawBitmapString("Arrow keys\nto move", boxX - 35, boxY - 15);

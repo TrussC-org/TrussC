@@ -6,7 +6,7 @@
 
 int main() {
     WindowSettings settings;
-    settings.setSize(800, 600);
+    settings.setSize(960, 600);
     settings.setTitle("soundPlayerExample - TrussC");
 
     return runApp<tcApp>(settings);

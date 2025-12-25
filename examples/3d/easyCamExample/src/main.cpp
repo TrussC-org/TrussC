@@ -1,5 +1,9 @@
 #include "tcApp.h"
 
 int main() {
-    return runApp<tcApp>();
+    WindowSettings settings;
+    settings.setSize(960, 600);
+    settings.setTitle("easyCamExample - TrussC");
+
+    return runApp<tcApp>(settings);
 }

@@ -101,11 +101,6 @@ public:
         stroke();
         setColor(0.5f, 0.5f, 0.6f);
         drawRect(0, 0, width, height);
-
-        // Center mark
-        fill();
-        setColor(1.0f, 1.0f, 0.0f, 0.5f);
-        drawCircle(width / 2, height / 2, 5);
     }
 };
 

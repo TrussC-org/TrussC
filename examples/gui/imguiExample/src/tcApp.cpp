@@ -12,10 +12,17 @@ void tcApp::draw() {
     // Clear with background color
     clear(clearColor[0], clearColor[1], clearColor[2]);
 
+    // TrussC drawing (draw before ImGui so ImGui appears on top)
+    // Change circle size based on slider value
+    float circleSize = 50 + sliderValue * 100;
+    setColor(1.0f, 0.78f, 0.4f);
+    drawCircle(getWindowWidth() / 2, getWindowHeight() / 2, circleSize);
+
     // Begin ImGui frame
     imguiBegin();
 
-    // Main window
+    // Main window (positioned at left)
+    ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
     ImGui::Begin("TrussC + ImGui Demo");
 
     ImGui::Text("Welcome to TrussC with Dear ImGui!");
@@ -55,16 +62,11 @@ void tcApp::draw() {
 
     ImGui::End();
 
-    // ImGui demo window (optional)
+    // ImGui demo window (optional, positioned next to main window)
     if (showDemoWindow) {
+        ImGui::SetNextWindowPos(ImVec2(320, 10), ImGuiCond_Once);
         ImGui::ShowDemoWindow(&showDemoWindow);
     }
-
-    // TrussC drawing (can coexist with ImGui)
-    // Change circle size based on slider value
-    float circleSize = 50 + sliderValue * 100;
-    setColor(1.0f, 0.78f, 0.4f);
-    drawCircle(getWindowWidth() / 2, getWindowHeight() / 2, circleSize);
 
     // End ImGui frame (render)
     imguiEnd();

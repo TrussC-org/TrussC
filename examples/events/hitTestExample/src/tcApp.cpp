@@ -35,10 +35,10 @@ void tcApp::setup() {
 
     // Rotating panel (right side)
     panel_ = make_shared<RotatingPanel>();
-    panel_->x = 800;
-    panel_->y = 300;
-    panel_->width = 350;
-    panel_->height = 250;
+    panel_->x = 620;
+    panel_->y = 280;
+    panel_->width = 250;
+    panel_->height = 200;
     addChild(panel_);
 
     // Buttons inside panel
@@ -90,7 +90,7 @@ void tcApp::draw() {
     // Panel status
     setColor(0.8f, 0.8f, 0.8f);
     drawBitmapString(format("Panel rotation: {:.1f} deg  {}",
-             panel_->rotation * 180.0f / PI,
+             panel_->rotation * 360.0f / TAU,
              paused_ ? "(PAUSED)" : ""), 600, 50);
 
     // Child nodes are drawn automatically

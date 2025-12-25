@@ -10,8 +10,7 @@ int main(int argc, char* argv[]) {
 
     WindowSettings settings;
     settings.title = "hitTestExample";
-    settings.width = 1280;
-    settings.height = 720;
+    settings.setSize(960, 600);
 
     runApp<tcApp>(settings);
 

@@ -1,10 +1,9 @@
 #include "tcApp.h"
 
 int main() {
-    runApp<tcApp>({
-        .width = 800,
-        .height = 600,
-        .title = "shaderExample"
-    });
-    return 0;
+    WindowSettings settings;
+    settings.setSize(960, 600);
+    settings.setTitle("shaderExample - TrussC");
+
+    return runApp<tcApp>(settings);
 }

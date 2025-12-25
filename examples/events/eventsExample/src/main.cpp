@@ -1,5 +1,7 @@
 #include "tcApp.h"
 
 int main() {
-    return runApp<tcApp>();
+    WindowSettings settings;
+    settings.setSize(960, 600);
+    return runApp<tcApp>(settings);
 }

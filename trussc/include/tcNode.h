@@ -457,7 +457,7 @@ private:
 
     // Recursive hit test (traversed in reverse draw order)
     HitResult findHitNodeRecursive(const Ray& globalRay, const Mat4& parentInverseMatrix) {
-        if (!isActive) return HitResult{};
+        if (!isActive || !isVisible) return HitResult{};
 
         // Calculate inverse matrix for this node
         Mat4 localInverse = getLocalMatrix().inverted();

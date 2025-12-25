@@ -22,9 +22,9 @@ void tcApp::draw() {
     Color scrollColor = ColorHSB(hue, 0.8f, 0.9f).toRGB();
 
     setColor(scrollColor);
-    drawCircle(w - 100, h / 2, scrollSize);
+    drawCircle(w / 2, h / 2, scrollSize);
     setColor(1.0f);
-    drawBitmapString("Scroll\nto change", w - 130, h / 2 - 20);
+    drawBitmapString("Scroll\nto change", w / 2 - 30, h / 2 - 20);
 
     // Draw drag trail
     if (dragTrail.size() > 1) {
@@ -104,17 +104,17 @@ void tcApp::draw() {
     // Button legend
     setColor(colors::red);
     drawRect(w - 150, 20, 20, 20);
-    setColor(0.0f);
+    setColor(1.0f);
     drawBitmapString("Left", w - 120, 25);
 
     setColor(colors::green);
     drawRect(w - 150, 45, 20, 20);
-    setColor(0.0f);
+    setColor(1.0f);
     drawBitmapString("Middle", w - 120, 50);
 
     setColor(colors::blue);
     drawRect(w - 150, 70, 20, 20);
-    setColor(0.0f);
+    setColor(1.0f);
     drawBitmapString("Right", w - 120, 75);
 }
 

@@ -90,7 +90,7 @@ void tcApp::draw() {
     beginShape();
     for (int i = 0; i < 5; i++) {
         float angle = TAU * i / 5.0f - HALF_TAU / 2.0f;
-        vertex(150 + cos(angle) * 50, 450 + sin(angle) * 50);
+        vertex(150 + cos(angle) * 50, 380 + sin(angle) * 50);
     }
     endShape(true);
 
@@ -102,7 +102,7 @@ void tcApp::draw() {
     for (int i = 0; i < 10; i++) {
         float angle = TAU * i / 10.0f - HALF_TAU / 2.0f;
         float r = (i % 2 == 0) ? 60.0f : 30.0f;
-        vertex(350 + cos(angle) * r, 450 + sin(angle) * r);
+        vertex(350 + cos(angle) * r, 380 + sin(angle) * r);
     }
     endShape(true);
     fill();
@@ -115,7 +115,7 @@ void tcApp::draw() {
     for (int i = 0; i < numPoints; i++) {
         float angle = TAU * i / numPoints + (float)t;
         float r = 40 + sin(t * 2 + i) * 20;
-        vertex(550 + cos(angle) * r, 450 + sin(angle) * r);
+        vertex(550 + cos(angle) * r, 380 + sin(angle) * r);
     }
     endShape(true);
 
@@ -126,7 +126,7 @@ void tcApp::draw() {
     wave.clear();
     for (int i = 0; i < 100; i++) {
         float x = 650 + i * 2;
-        float y = 450 + sin(i * 0.1f + t * 3) * 30;
+        float y = 380 + sin(i * 0.1f + t * 3) * 30;
         wave.addVertex(x, y);
     }
     wave.draw();
@@ -139,9 +139,9 @@ void tcApp::draw() {
     Mesh mesh;
     mesh.setMode(PrimitiveMode::Triangles);
     // 3 vertices
-    mesh.addVertex(750, 530);
-    mesh.addVertex(850, 650);
-    mesh.addVertex(650, 650);
+    mesh.addVertex(750, 460);
+    mesh.addVertex(850, 560);
+    mesh.addVertex(650, 560);
     // Vertex colors (RGB)
     mesh.addColor(1.0f, 0.0f, 0.0f);  // Red
     mesh.addColor(0.0f, 1.0f, 0.0f);  // Green
@@ -155,7 +155,7 @@ void tcApp::draw() {
     for (int x = 0; x < 5; x++) {
         for (int y = 0; y < 2; y++) {
             float px = 100.0f + x * 80.0f;
-            float py = 550.0f + y * 80.0f;
+            float py = 480.0f + y * 60.0f;
             float size = 20.0f + (float)sin(t * 2.0 + x * 0.5 + y * 0.3) * 10.0f;
             drawCircle(px, py, size);
         }

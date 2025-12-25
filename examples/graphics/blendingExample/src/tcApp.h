@@ -1,7 +1,6 @@
 #pragma once
 
 #include <TrussC.h>
-#include <iostream>
 using namespace std;
 using namespace tc;
 

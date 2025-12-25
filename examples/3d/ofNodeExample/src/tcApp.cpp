@@ -12,17 +12,17 @@ void tcApp::setup() {
 
     // Container 1 (left side, clockwise)
     container1_ = make_shared<RotatingContainer>();
-    container1_->x = 320;
-    container1_->y = 360;
+    container1_->x = 240;
+    container1_->y = 320;
     container1_->rotationSpeed = 0.5f;
-    container1_->size = 250;
+    container1_->size = 200;
 
     // Container 2 (right side, counter-clockwise, slightly smaller)
     container2_ = make_shared<RotatingContainer>();
-    container2_->x = 960;
-    container2_->y = 360;
+    container2_->x = 720;
+    container2_->y = 320;
     container2_->rotationSpeed = -0.3f;
-    container2_->size = 200;
+    container2_->size = 160;
     container2_->scaleX = 0.8f;
     container2_->scaleY = 0.8f;
 

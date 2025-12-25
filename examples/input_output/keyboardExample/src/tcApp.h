@@ -27,7 +27,7 @@ private:
     static const size_t MAX_HISTORY = 15;
 
     // Box position (move with arrow keys)
-    float boxX = 400;
+    float boxX = 480;
     float boxY = 300;
     float boxSpeed = 5.0f;
 

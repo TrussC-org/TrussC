@@ -1,15 +1,11 @@
 #pragma once
 
 #include <TrussC.h>
-#include <iostream>
 using namespace std;
 using namespace tc;
 
 // =============================================================================
 // fboExample - FBO (Frame Buffer Object) sample
-// =============================================================================
-// - Render offscreen to FBO and display on screen
-// - Test clear() behavior inside FBO
 // =============================================================================
 class tcApp : public App {
 public:
@@ -20,6 +16,4 @@ public:
 
 private:
     Fbo fbo_;
-    float time_ = 0;
-    bool useClearInFbo_ = false;  // Whether to call clear() inside FBO
 };

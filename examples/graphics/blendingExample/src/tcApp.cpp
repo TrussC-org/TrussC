@@ -19,9 +19,9 @@ void tcApp::draw() {
 
     // Title
     setColor(1.0f, 1.0f, 1.0f);
-    drawBitmapString("Blend Mode Comparison", 20, 30);
+    drawBitmapString("Blend Mode Comparison", 20, 25);
 
-    // Description of each blend mode
+    // Blend modes to demonstrate
     BlendMode modes[] = {
         BlendMode::Alpha,
         BlendMode::Add,
@@ -33,79 +33,78 @@ void tcApp::draw() {
 
     int numModes = 6;
     float colWidth = w / numModes;
-    float startY = 100;
+    float startY = 65;
+    float contentH = h - startY - 70;  // Space for content (minus bottom text area)
 
     // Draw background pattern (base for each column)
     for (int i = 0; i < numModes; i++) {
         float x = i * colWidth;
 
-        // Background gradient (dark -> bright)
-        setBlendMode(BlendMode::Disabled);  // Draw background with overwrite
-        for (int j = 0; j < 10; j++) {
+        // Background gradient (dark -> bright) - cover full content height
+        setBlendMode(BlendMode::Disabled);
+        int numRows = 10;
+        float rowH = contentH / numRows;
+        for (int j = 0; j < numRows; j++) {
             float gray = 0.1f + j * 0.08f;
             setColor(gray, gray, gray);
-            drawRect(x, startY + j * 50, colWidth - 10, 50);
+            drawRect(x, startY + j * rowH, colWidth - 8, rowH);
         }
 
-        // Colorful background elements
+        // Colorful background elements - distributed throughout
         setBlendMode(BlendMode::Alpha);
-        setColor(0.8f, 0.2f, 0.2f, 0.7f);  // Red
-        drawRect(x + 10, startY + 100, 60, 60);
-        setColor(0.2f, 0.8f, 0.2f, 0.7f);  // Green
-        drawRect(x + 40, startY + 140, 60, 60);
-        setColor(0.2f, 0.2f, 0.8f, 0.7f);  // Blue
-        drawRect(x + 70, startY + 180, 60, 60);
+        setColor(0.8f, 0.2f, 0.2f, 0.7f);
+        drawRect(x + 8, startY + 20, 55, 55);
+        setColor(0.2f, 0.8f, 0.2f, 0.7f);
+        drawRect(x + 40, startY + contentH * 0.25f, 55, 55);
+        setColor(0.2f, 0.2f, 0.8f, 0.7f);
+        drawRect(x + 70, startY + contentH * 0.5f, 55, 55);
+        setColor(0.6f, 0.2f, 0.6f, 0.7f);
+        drawRect(x + 20, startY + contentH * 0.7f, 55, 55);
     }
 
-    // Draw circles with each mode
+    // Draw circles with each blend mode - distributed from top to bottom
     for (int i = 0; i < numModes; i++) {
         float x = i * colWidth + colWidth / 2;
 
-        setBlendMode(modes[i]);
-
         // Mode name label
-        setBlendMode(BlendMode::Alpha);  // Text always uses Alpha
+        setBlendMode(BlendMode::Alpha);
         setColor(1.0f, 1.0f, 1.0f);
-        drawBitmapString(getBlendModeName(modes[i]), i * colWidth + 10, startY - 10);
+        drawBitmapString(getBlendModeName(modes[i]), i * colWidth + 8, startY - 12);
 
-        // Set blend mode again
         setBlendMode(modes[i]);
 
-        // Animated circle (semi-transparent)
-        float anim = sin(animTime_ * 2.0f + i * 0.5f) * 0.5f + 0.5f;
-
-        // White circle (alpha 0.7)
+        // Animated white circle - travels through the gradient
+        float anim = sin(animTime_ * 1.0f + i * 0.5f) * 0.5f + 0.5f;
         setColor(1.0f, 1.0f, 1.0f, 0.7f);
-        drawCircle(x, startY + 150 + anim * 50, 50);
+        drawCircle(x, startY + 40 + anim * (contentH - 80), 44);
 
-        // Red circle
+        // Circles distributed throughout the gradient (tighter spacing)
         setColor(1.0f, 0.3f, 0.3f, 0.7f);
-        drawCircle(x - 30, startY + 280, 40);
+        drawCircle(x - 15, startY + contentH * 0.22f, 39);
 
-        // Green circle
         setColor(0.3f, 1.0f, 0.3f, 0.7f);
-        drawCircle(x, startY + 320, 40);
+        drawCircle(x + 15, startY + contentH * 0.36f, 39);
 
-        // Blue circle
         setColor(0.3f, 0.3f, 1.0f, 0.7f);
-        drawCircle(x + 30, startY + 360, 40);
+        drawCircle(x - 15, startY + contentH * 0.50f, 39);
 
-        // Yellow circle (to see overlapping parts)
-        setColor(1.0f, 1.0f, 0.3f, 0.5f);
-        drawCircle(x, startY + 450, 60);
+        setColor(1.0f, 1.0f, 0.3f, 0.6f);
+        drawCircle(x + 15, startY + contentH * 0.64f, 42);
+
+        setColor(0.3f, 1.0f, 1.0f, 0.6f);
+        drawCircle(x, startY + contentH * 0.78f, 44);
     }
 
-    // Reset to default
     resetBlendMode();
 
-    // Description text
+    // Description text (compact, 2 columns)
     setColor(0.6f, 0.6f, 0.6f);
-    drawBitmapString("Alpha: Standard transparency blending", 20, h - 100);
-    drawBitmapString("Add: Brightens (good for glow effects)", 20, h - 85);
-    drawBitmapString("Multiply: Darkens (good for shadows)", 20, h - 70);
-    drawBitmapString("Screen: Brightens (inverse of Multiply)", 20, h - 55);
-    drawBitmapString("Subtract: Darkens by subtracting", 20, h - 40);
-    drawBitmapString("Disabled: No blending (overwrites)", 20, h - 25);
+    drawBitmapString("Alpha: Standard transparency", 20, h - 55);
+    drawBitmapString("Add: Brightens (glow)", 20, h - 40);
+    drawBitmapString("Multiply: Darkens (shadow)", 20, h - 25);
+    drawBitmapString("Screen: Brightens (inv Multiply)", w/2, h - 55);
+    drawBitmapString("Subtract: Darkens by sub", w/2, h - 40);
+    drawBitmapString("Disabled: Overwrites", w/2, h - 25);
 }
 
 void tcApp::keyPressed(int key) {
