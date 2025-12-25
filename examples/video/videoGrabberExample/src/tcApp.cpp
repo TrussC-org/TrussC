@@ -45,24 +45,31 @@ void tcApp::draw() {
         return;
     }
 
-    // Draw camera image
+    // Draw camera image fitted to window (letterbox/pillarbox)
+    float s = std::min(getWindowWidth() / (float)grabber_.getWidth(),
+                       getWindowHeight() / (float)grabber_.getHeight());
+    float w = grabber_.getWidth() * s;
+    float h = grabber_.getHeight() * s;
+    float x = (getWindowWidth() - w) / 2;
+    float y = (getWindowHeight() - h) / 2;
+
     setColor(1.0f);
     if (flipH_) {
         // Draw with horizontal flip
         pushMatrix();
-        translate(grabber_.getWidth(), 0);
+        translate(x + w, y);
         scale(-1, 1);
-        grabber_.draw(0, 0);
+        grabber_.draw(0, 0, w, h);
         popMatrix();
     } else {
-        grabber_.draw(0, 0);
+        grabber_.draw(x, y, w, h);
     }
 
     // Display info
     setColor(colors::yellow);
-    drawBitmapString(format("{} | {}x{} | FPS: {:.0f} | Flip: {} (F key)",
+    drawBitmapString(format("{} ({}x{}) | Flip: {} (F key)",
         grabber_.getDeviceName(),
-        grabber_.getWidth(), grabber_.getHeight(), getFrameRate(),
+        grabber_.getWidth(), grabber_.getHeight(),
         flipH_ ? "ON" : "OFF"), 10, 20);
 }
 
