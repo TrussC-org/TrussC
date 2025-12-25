@@ -111,23 +111,4 @@ void tcApp::keyPressed(int key) {
     }
 }
 
-void tcApp::mousePressed(Vec2 pos, int button) {
-    // Dispatch event using Ray-based Hit Test
-    auto hitNode = dispatchMousePress(pos.x, pos.y, button);
-
-    if (hitNode) {
-        tcLogNotice("tcApp") << "Hit node received event";
-    } else {
-        tcLogNotice("tcApp") << "No hit (clicked background)";
-    }
-}
-
-void tcApp::mouseReleased(Vec2 pos, int button) {
-    dispatchMouseRelease(pos.x, pos.y, button);
-}
-
-void tcApp::mouseMoved(Vec2 pos) {
-    // Update hover state using built-in mechanism
-    // This automatically calls onMouseEnter/onMouseLeave on the topmost hit node
-    updateHoverState(pos.x, pos.y);
-}
+// Mouse events are automatically dispatched by TrussC.h

@@ -1869,63 +1869,40 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     internal::appUpdateFunc = []() {
         internal::updateFrameCount++;  // Update frame count
         if (app) {
-            app->updateTree();  // Update entire scene graph
-            // Update hover state (raycast only once per frame)
-            app->updateHoverState((float)internal::mouseX, (float)internal::mouseY);
+            app->handleUpdate(internal::mouseX, internal::mouseY);
         }
     };
     internal::appDrawFunc = []() {
-        if (app) app->drawTree();  // Draw entire scene graph
+        if (app) app->drawTree();
     };
     internal::appCleanupFunc = []() {
         if (app) {
-            app->exit();    // Exit handler (all objects still alive)
+            app->exit();
             app->cleanup();
-            delete app;     // Destructor
+            delete app;
             app = nullptr;
         }
     };
     internal::appKeyPressedFunc = [](int key) {
-        if (app) {
-            app->keyPressed(key);
-            app->dispatchKeyPress(key);  // Also dispatch to child nodes
-        }
+        if (app) app->handleKeyPressed(key);
     };
     internal::appKeyReleasedFunc = [](int key) {
-        if (app) {
-            app->keyReleased(key);
-            app->dispatchKeyRelease(key);  // Also dispatch to child nodes
-        }
+        if (app) app->handleKeyReleased(key);
     };
     internal::appMousePressedFunc = [](int x, int y, int button) {
-        if (app) {
-            app->mousePressed(Vec2(x, y), button);
-            app->dispatchMousePress((float)x, (float)y, button);
-        }
+        if (app) app->handleMousePressed(x, y, button);
     };
     internal::appMouseReleasedFunc = [](int x, int y, int button) {
-        if (app) {
-            app->mouseReleased(Vec2(x, y), button);
-            app->dispatchMouseRelease((float)x, (float)y, button);
-        }
+        if (app) app->handleMouseReleased(x, y, button);
     };
     internal::appMouseMovedFunc = [](int x, int y) {
-        if (app) {
-            app->mouseMoved(Vec2(x, y));
-            app->dispatchMouseMove((float)x, (float)y);
-        }
+        if (app) app->handleMouseMoved(x, y);
     };
     internal::appMouseDraggedFunc = [](int x, int y, int button) {
-        if (app) {
-            app->mouseDragged(Vec2(x, y), button);
-            app->dispatchMouseMove((float)x, (float)y);  // Drag also dispatches move
-        }
+        if (app) app->handleMouseDragged(x, y, button);
     };
     internal::appMouseScrolledFunc = [](float dx, float dy) {
-        if (app) {
-            app->mouseScrolled(Vec2(dx, dy));
-            app->dispatchMouseScroll((float)internal::mouseX, (float)internal::mouseY, Vec2(dx, dy));
-        }
+        if (app) app->handleMouseScrolled(dx, dy, internal::mouseX, internal::mouseY);
     };
     internal::appWindowResizedFunc = [](int w, int h) {
         if (app) app->windowResized(w, h);
@@ -2041,6 +2018,10 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #include "tc/sound/tcSound.h"
 #include "tc/sound/tcChipSound.h"
 
+// TrussC threading
+#include "tc/utils/tcThread.h"
+#include "tc/utils/tcThreadChannel.h"
+
 // TrussC application base class
 #include "tcBaseApp.h"
 
@@ -2083,6 +2064,12 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #include <limits>
 #include <numeric>
 #include <random>
+
+// Threading
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 
 // =============================================================================
 // Namespace alias

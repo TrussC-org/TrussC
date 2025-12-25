@@ -119,9 +119,6 @@ public:
     void draw() override;
 
     void keyPressed(int key) override;
-    void mousePressed(Vec2 pos, int button) override;
-    void mouseReleased(Vec2 pos, int button) override;
-    void mouseMoved(Vec2 pos) override;
 
 private:
     // Static buttons

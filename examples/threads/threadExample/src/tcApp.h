@@ -1,6 +1,7 @@
 #pragma once
 
 #include <TrussC.h>
+#include "threadedObject.h"
 using namespace std;
 using namespace tc;
 

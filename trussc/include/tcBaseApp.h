@@ -89,6 +89,50 @@ public:
     /// Called on app exit (before cleanup)
     /// Use for resource release or settings save
     virtual void exit() {}
+
+    // -------------------------------------------------------------------------
+    // Event handlers (called by TrussC.h, dispatches to scene graph)
+    // -------------------------------------------------------------------------
+
+    void handleKeyPressed(int key) {
+        keyPressed(key);
+        dispatchKeyPress(key);
+    }
+
+    void handleKeyReleased(int key) {
+        keyReleased(key);
+        dispatchKeyRelease(key);
+    }
+
+    void handleMousePressed(int x, int y, int button) {
+        mousePressed(Vec2(x, y), button);
+        dispatchMousePress((float)x, (float)y, button);
+    }
+
+    void handleMouseReleased(int x, int y, int button) {
+        mouseReleased(Vec2(x, y), button);
+        dispatchMouseRelease((float)x, (float)y, button);
+    }
+
+    void handleMouseMoved(int x, int y) {
+        mouseMoved(Vec2(x, y));
+        dispatchMouseMove((float)x, (float)y);
+    }
+
+    void handleMouseDragged(int x, int y, int button) {
+        mouseDragged(Vec2(x, y), button);
+        dispatchMouseMove((float)x, (float)y);
+    }
+
+    void handleMouseScrolled(float dx, float dy, int mouseX, int mouseY) {
+        mouseScrolled(Vec2(dx, dy));
+        dispatchMouseScroll((float)mouseX, (float)mouseY, Vec2(dx, dy));
+    }
+
+    void handleUpdate(int mouseX, int mouseY) {
+        updateTree();
+        updateHoverState((float)mouseX, (float)mouseY);
+    }
 };
 
 } // namespace trussc

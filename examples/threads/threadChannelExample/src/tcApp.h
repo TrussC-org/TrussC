@@ -1,6 +1,7 @@
 #pragma once
 
 #include <TrussC.h>
+#include "AnalysisThread.h"
 using namespace std;
 using namespace tc;
 

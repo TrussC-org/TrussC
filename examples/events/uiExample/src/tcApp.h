@@ -50,11 +50,11 @@ public:
         setColor(0.5f, 0.5f, 0.6f);
         drawRect(0, 0, width, height);
 
-        // Label
+        // Label (y is baseline position)
         fill();
         setColor(1.0f, 1.0f, 1.0f);
         float textX = width / 2 - label.length() * 4;
-        drawBitmapString(label, textX, height / 2 + 5, false);
+        drawBitmapString(label, textX, height / 2 - 13 + 10, false);
     }
 
 protected:
@@ -134,9 +134,9 @@ public:
         setColor(isDragging_ ? Color(0.6f, 0.7f, 0.9f) : Color(0.5f, 0.6f, 0.8f));
         drawRect(knobX - knobW / 2, 2, knobW, knobH);
 
-        // Label and value
+        // Label and value (above slider, y is baseline)
         setColor(1.0f, 1.0f, 1.0f);
-        drawBitmapString(format("{}: {:.2f}", label, getValue()), 4, -4, false);
+        drawBitmapString(format("{}: {:.2f}", label, getValue()), 4, -13 - 4, false);
     }
 
 protected:
@@ -236,7 +236,7 @@ public:
             drawRect(5, itemY + 2, width - 10, 26);
 
             setColor(1.0f, 1.0f, 1.0f);
-            drawBitmapString(format("Item {}", i + 1), 10, itemY + 18, false);
+            drawBitmapString(format("Item {}", i + 1), 10, itemY, false);
         }
 
         popMatrix();
@@ -279,11 +279,6 @@ public:
     void draw() override;
 
     void keyPressed(int key) override;
-    void mousePressed(Vec2 pos, int button) override;
-    void mouseReleased(Vec2 pos, int button) override;
-    void mouseMoved(Vec2 pos) override;
-    void mouseDragged(Vec2 pos, int button) override;
-    void mouseScrolled(Vec2 delta) override;
 
 private:
     UIButton::Ptr button1_;
