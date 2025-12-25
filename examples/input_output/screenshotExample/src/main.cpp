@@ -2,10 +2,8 @@
 
 int main() {
     WindowSettings settings;
-    settings.width = 800;
-    settings.height = 600;
-    settings.title = "screenshotExample";
+    settings.setSize(960, 600);
+    settings.setTitle("screenshotExample - TrussC");
 
-    runApp<tcApp>(settings);
-    return 0;
+    return runApp<tcApp>(settings);
 }

@@ -1,9 +1,8 @@
 #pragma once
 
-#include "TrussC.h"
-#include "tc/utils/tcThread.h"
-#include "tc/utils/tcThreadChannel.h"
-#include <vector>
+#include <TrussC.h>
+using namespace std;
+using namespace tc;
 
 // =============================================================================
 // AnalysisThread - Worker thread example using ThreadChannel

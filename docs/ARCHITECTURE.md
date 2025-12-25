@@ -151,12 +151,77 @@ tc::setIndependentFps(60, 30);      // Update 60Hz, draw 30fps
 
 ### B. Scene Graph & Event System
 
+**Node Basics:**
+
 - **tc::Node**: Base class with parent-child relationships and local transformation
 - **Activation Control**: `isActive` stops node and all descendants completely
 - **Visibility Control**: `isVisible` skips only draw (update/events continue)
 - **Event Traverse**: Child nodes receive events even if parent has events disabled
-- **Hit Test**: `hitTest(Ray)` in local coordinates, supports 2D/3D
-- **Event Consumption**: Return `true` to consume event and stop propagation
+
+**Event Dispatch (Internal):**
+
+Events are automatically dispatched by `App::handle*` methods. The `Node::dispatch*` methods are **private** and accessed only via `friend class App`. User code should **never** call dispatch methods manually.
+
+```cpp
+// WRONG - Don't do this
+void tcApp::mousePressed(Vec2 pos, int button) {
+    dispatchMousePress(pos.x, pos.y, button);  // Compile error: private
+}
+
+// CORRECT - Just override and use
+void tcApp::mousePressed(Vec2 pos, int button) {
+    // Your custom logic here (dispatch happens automatically)
+}
+```
+
+**RectNode - 2D UI Base:**
+
+`RectNode` provides rectangle-based hit testing. Events are **disabled by default** - call `enableEvents()` to make a node touchable.
+
+```cpp
+class MyButton : public RectNode {
+public:
+    MyButton() {
+        enableEvents();  // Required to receive events
+        width = 120;
+        height = 40;
+    }
+
+protected:
+    bool onMousePress(Vec2 local, int button) override {
+        // Handle click
+        return true;  // Consume event
+    }
+};
+```
+
+**Key Points:**
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `eventsEnabled_` | `false` | Call `enableEvents()` to receive events |
+| `width`, `height` | `100.0f` | Hit area size (0 = no hit) |
+| `isActive` | `true` | If false, node and children are completely disabled |
+| `isVisible` | `true` | If false, draw and hit test are skipped |
+
+**Event Handler Return Values:**
+
+- Return `true` to **consume** the event (stop propagation)
+- Return `false` to let the event **bubble** to other nodes
+
+**Available Event Handlers (override in subclass):**
+
+```cpp
+bool onMousePress(Vec2 local, int button) override;
+bool onMouseRelease(Vec2 local, int button) override;
+bool onMouseMove(Vec2 local) override;
+bool onMouseDrag(Vec2 local, int button) override;
+bool onMouseScroll(Vec2 local, Vec2 scroll) override;
+void onMouseEnter() override;
+void onMouseLeave() override;
+bool onKeyPress(int key) override;
+bool onKeyRelease(int key) override;
+```
 
 ### C. Timer System
 

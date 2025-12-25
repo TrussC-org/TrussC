@@ -1,10 +1,8 @@
 #pragma once
 
-#include "TrussC.h"
-#include "tc/utils/tcThread.h"
-#include <condition_variable>
-#include <vector>
-#include <cmath>
+#include <TrussC.h>
+using namespace std;
+using namespace tc;
 
 // =============================================================================
 // ThreadedObject - Object that performs calculations in a thread
@@ -54,7 +52,7 @@ public:
     // Stop thread
     // Notify condition_variable to release thread's wait
     void stop() {
-        std::unique_lock<std::mutex> lck(mutex);
+        std::unique_lock<std::mutex> lck{dataMutex_};
         stopThread();
         condition.notify_all();
     }
@@ -69,7 +67,7 @@ public:
 
             // Update pixel data (after locking)
             {
-                std::unique_lock<std::mutex> lock(mutex);
+                std::unique_lock<std::mutex> lk{dataMutex_};
 
                 // Simple pattern generation (sin wave + time variation)
                 float t = threadFrameNum * 0.05f;
@@ -85,7 +83,7 @@ public:
 
                 // Wait until main thread retrieves data
                 // However, exit if stop signal arrives
-                condition.wait(lock, [this]{ return !isThreadRunning() || dataReady; });
+                condition.wait(lk, [this]{ return !isThreadRunning() || dataReady; });
                 dataReady = false;
             }
         }
@@ -95,7 +93,7 @@ public:
 
     // Update (with lock) - No tearing
     void update() {
-        std::unique_lock<std::mutex> lock(mutex);
+        std::unique_lock<std::mutex> lk{dataMutex_};
         // Copy pixel data to drawing buffer
         displayData = pixelData;
         dataReady = true;

@@ -7,17 +7,13 @@
 void tcApp::setup() {
     tcLogNotice("tcApp") << "=== clippingExample ===";
     tcLogNotice("tcApp") << "Nested Scissor Clipping Demo";
-    tcLogNotice("tcApp") << "- Outer box clips inner content";
-    tcLogNotice("tcApp") << "- Inner box also clips its content";
-    tcLogNotice("tcApp") << "- Circles only visible in intersection of both boxes";
-    tcLogNotice("tcApp") << "[R] reset positions";
 
     // Outer clip box
     outerBox_ = make_shared<ClipBox>();
-    outerBox_->x = 100;
-    outerBox_->y = 100;
-    outerBox_->width = 500;
-    outerBox_->height = 400;
+    outerBox_->x = 80;
+    outerBox_->y = 80;
+    outerBox_->width = 450;
+    outerBox_->height = 350;
     outerBox_->bgColor = Color(0.15f, 0.15f, 0.2f);
     outerBox_->borderColor = Color(0.3f, 0.5f, 0.8f);
     outerBox_->label = "Outer ClipBox";
@@ -25,10 +21,10 @@ void tcApp::setup() {
 
     // Inner clip box
     innerBox_ = make_shared<ClipBox>();
-    innerBox_->x = 100;
-    innerBox_->y = 80;
-    innerBox_->width = 300;
-    innerBox_->height = 220;
+    innerBox_->x = 80;
+    innerBox_->y = 60;
+    innerBox_->width = 280;
+    innerBox_->height = 200;
     innerBox_->bgColor = Color(0.2f, 0.15f, 0.15f);
     innerBox_->borderColor = Color(0.8f, 0.5f, 0.3f);
     innerBox_->label = "Inner ClipBox";
@@ -37,9 +33,9 @@ void tcApp::setup() {
     // Add bouncing circles to inner box
     for (int i = 0; i < 5; i++) {
         auto circle = make_shared<BouncingCircle>();
-        circle->x = 50 + i * 50;
-        circle->y = 50 + i * 30;
-        circle->radius = 20 + i * 5;
+        circle->x = 50 + i * 40;
+        circle->y = 50 + i * 25;
+        circle->radius = 18 + i * 4;
         circle->vx = 1.5f + i * 0.3f;
         circle->vy = 1.0f + i * 0.4f;
         circle->boundsWidth = innerBox_->width;
@@ -51,9 +47,9 @@ void tcApp::setup() {
 
     // Add circle directly to outer box (outer clipping test)
     auto outerCircle = make_shared<BouncingCircle>();
-    outerCircle->x = 400;
-    outerCircle->y = 300;
-    outerCircle->radius = 40;
+    outerCircle->x = 350;
+    outerCircle->y = 260;
+    outerCircle->radius = 35;
     outerCircle->vx = -1.2f;
     outerCircle->vy = 0.8f;
     outerCircle->boundsWidth = outerBox_->width;
@@ -64,7 +60,6 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
-    // Circles are automatically updated via updateTree
 }
 
 void tcApp::draw() {
@@ -72,32 +67,19 @@ void tcApp::draw() {
 
     // Title
     setColor(1.0f, 1.0f, 1.0f);
-    drawBitmapString("Nested Scissor Clipping Demo", 20, 30);
+    drawBitmapString("Nested Scissor Clipping Demo", 20, 25);
 
     setColor(0.7f, 0.7f, 0.7f);
-    drawBitmapString("Circles are clipped by BOTH outer and inner boxes", 20, 50);
-    drawBitmapString("Inner box circles only visible in intersection area", 20, 65);
+    drawBitmapString("Circles are clipped by BOTH outer and inner boxes", 20, 45);
 
-    // Description on the right
-    setColor(0.5f, 0.5f, 0.5f);
-    drawBitmapString("[R] reset positions", 700, 100);
-
-    // Clipping status display
+    // Legend on the right
     setColor(0.3f, 0.5f, 0.8f);
-    drawBitmapString("Blue = Outer clip boundary", 700, 180);
+    drawBitmapString("Blue = Outer clip", 600, 120);
     setColor(0.8f, 0.5f, 0.3f);
-    drawBitmapString("Orange = Inner clip boundary", 700, 200);
-
-    // Child nodes are drawn automatically
+    drawBitmapString("Orange = Inner clip", 600, 140);
+    setColor(0.3f, 0.8f, 0.4f);
+    drawBitmapString("Green = Outer only", 600, 160);
 }
 
 void tcApp::keyPressed(int key) {
-    if (key == 'r' || key == 'R') {
-        // Reset
-        for (size_t i = 0; i < circles_.size(); i++) {
-            circles_[i]->x = 50 + i * 50;
-            circles_[i]->y = 50 + i * 30;
-        }
-        tcLogNotice("tcApp") << "Reset";
-    }
 }

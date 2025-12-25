@@ -35,12 +35,12 @@ void tcApp::draw() {
 
     // Horizontal alignment (top of screen)
     // Use setTextAlign + pushStyle/popStyle for style management
-    float y = 80;
+    float y = 60;
     float centerX = w / 2;
 
     // Draw reference line
     setColor(0.78f);
-    drawLine(centerX, 40, centerX, 150);
+    drawLine(centerX, 30, centerX, 130);
     drawLine(50, y, w - 50, y);
 
     pushStyle();
@@ -59,7 +59,7 @@ void tcApp::draw() {
 
     // Vertical alignment
     float x = 120;
-    y = 220;
+    y = 160;
 
     // Draw reference line (extended)
     setColor(0.78f);
@@ -75,7 +75,7 @@ void tcApp::draw() {
     // =========================================================================
     // setLineHeight demo (multiline text)
     // =========================================================================
-    y = 310;
+    y = 220;
     std::string multiLine = "Line 1\nLine 2\nLine 3";
 
     // Default line height
@@ -112,7 +112,7 @@ void tcApp::draw() {
     // Center point marker + Center,Center
     // =========================================================================
     float cx = w / 2;
-    float cy = 520;
+    float cy = 360;
 
     // Cross marker
     setColor(colors::red);
@@ -127,7 +127,7 @@ void tcApp::draw() {
     // =========================================================================
     // BitmapFont + setTextAlign / pushStyle demo
     // =========================================================================
-    y = 620;
+    y = 430;
 
     setColor(0.78f);
     drawLine(centerX, y - 10, centerX, y + 60);
@@ -149,7 +149,7 @@ void tcApp::draw() {
     popStyle();  // Restores color and alignment
 
     // getBBox demo
-    y = 710;
+    y = 530;
     std::string boxText = "BoundingBox";
     Rect bbox = font.getBBox(boxText);
 

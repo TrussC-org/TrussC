@@ -2,8 +2,7 @@
 
 int main() {
     WindowSettings settings;
-    settings.width = 800;
-    settings.height = 400;
+    settings.setSize(960, 600);
     settings.title = "clipboardExample";
 
     // Clipboard buffer is default 64KB

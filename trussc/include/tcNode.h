@@ -29,6 +29,8 @@ namespace internal {
 // =============================================================================
 
 class Node : public std::enable_shared_from_this<Node> {
+    friend class App;  // Allow App to call dispatch methods
+
 public:
     using Ptr = std::shared_ptr<Node>;
     using WeakPtr = std::weak_ptr<Node>;
@@ -322,6 +324,11 @@ public:
         return findHitNodeRecursive(globalRay, getGlobalMatrixInverse());
     }
 
+private:
+    // -------------------------------------------------------------------------
+    // Event dispatch (called by App only via friend access)
+    // -------------------------------------------------------------------------
+
     // Dispatch mouse event to tree (for 2D mode)
     // screenX, screenY: screen coordinates
     // return: node that handled event (nullptr if not handled)
@@ -367,9 +374,19 @@ public:
         return nullptr;
     }
 
-    // -------------------------------------------------------------------------
-    // Key event dispatch (broadcast to all active nodes)
-    // -------------------------------------------------------------------------
+    Ptr dispatchMouseScroll(float screenX, float screenY, Vec2 scroll) {
+        Ray globalRay = Ray::fromScreenPoint2D(screenX, screenY);
+        HitResult result = findHitNode(globalRay);
+
+        if (result.hit()) {
+            Vec2 local(result.localPoint.x, result.localPoint.y);
+            if (result.node->onMouseScroll(local, scroll)) {
+                return result.node;
+            }
+        }
+
+        return nullptr;
+    }
 
     // Dispatch key press to all nodes
     bool dispatchKeyPress(int key) {
@@ -381,10 +398,7 @@ public:
         return dispatchKeyReleaseRecursive(key);
     }
 
-    // -------------------------------------------------------------------------
     // Update hover state (call once per frame)
-    // -------------------------------------------------------------------------
-
     void updateHoverState(float screenX, float screenY) {
         // Save previous frame's hovered node
         internal::prevHoveredNode = internal::hoveredNode;
@@ -405,7 +419,6 @@ public:
         }
     }
 
-private:
     // Recursive dispatch of key events
     bool dispatchKeyPressRecursive(int key) {
         if (!isActive) return false;
@@ -444,7 +457,7 @@ private:
 
     // Recursive hit test (traversed in reverse draw order)
     HitResult findHitNodeRecursive(const Ray& globalRay, const Mat4& parentInverseMatrix) {
-        if (!isActive) return HitResult{};
+        if (!isActive || !isVisible) return HitResult{};
 
         // Calculate inverse matrix for this node
         Mat4 localInverse = getLocalMatrix().inverted();

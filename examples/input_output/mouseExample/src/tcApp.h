@@ -1,11 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 using namespace std;
-#include <vector>
-
-using namespace trussc;
+using namespace tc;
 
 // mouseExample - Mouse Input Demo
 // Visualization of mouse position, buttons, drag, and scroll

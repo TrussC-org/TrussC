@@ -1,11 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
-#include <iostream>
-#include <string>
-
+#include <TrussC.h>
 using namespace std;
+using namespace tc;
 
 // =============================================================================
 // blendingExample - Blend mode comparison demo

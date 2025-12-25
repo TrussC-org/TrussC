@@ -1,12 +1,9 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
-#include "tcNode.h"
+#include <TrussC.h>
 #include <iostream>
-#include <vector>
-
 using namespace std;
+using namespace tc;
 
 // =============================================================================
 // timerExample - callAfter / callEvery sample

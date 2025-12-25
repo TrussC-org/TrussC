@@ -2,9 +2,8 @@
 
 int main() {
     WindowSettings settings;
+    settings.setSize(960, 600);
     settings.title = "Utils Example";
-    settings.width = 750;
-    settings.height = 580;
 
     return runApp<tcApp>(settings);
 }

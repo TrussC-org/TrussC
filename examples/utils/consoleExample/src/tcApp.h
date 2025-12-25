@@ -1,12 +1,9 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 #include <iostream>
-#include <vector>
-#include <deque>
-
 using namespace std;
+using namespace tc;
 
 // =============================================================================
 // consoleExample - Sample for receiving commands from stdin

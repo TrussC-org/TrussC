@@ -6,8 +6,8 @@
 
 int main() {
     tc::WindowSettings settings;
-    settings.setSize(1280, 720);
-    settings.setTitle("00_base - TrussC");
+    settings.setSize(960, 600);
+    settings.setTitle("emptyExample - TrussC");
 
     return tc::runApp<tcApp>(settings);
 }

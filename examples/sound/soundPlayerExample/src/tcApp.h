@@ -1,9 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 using namespace std;
-#include "tc/sound/tcSound.h"
+using namespace tc;
 
 class tcApp : public App {
 public:

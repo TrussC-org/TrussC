@@ -34,7 +34,7 @@ void tcApp::setup() {
 // Rebuild primitives
 // ---------------------------------------------------------------------------
 void tcApp::rebuildPrimitives() {
-    float size = 80.0f;
+    float size = 120.0f;
 
     int planeRes, sphereRes, icoRes, cylRes, coneRes;
 

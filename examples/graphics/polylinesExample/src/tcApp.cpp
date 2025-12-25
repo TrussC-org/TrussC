@@ -170,18 +170,18 @@ void tcApp::drawMouseDrawing() {
 void tcApp::drawAnimatedCurve() {
     int w = getWindowWidth();
     int h = getWindowHeight();
-    float cx = w / 2.0f;
-    float cy = h / 2.0f;
+    float cy = h / 2.0f + 30;
 
-    // Animated flower-like shape
+    // Animated flower-like shape (left side, 1.5x size)
+    float flowerCx = w * 0.3f;
     Path flower;
     int petals = 6;
     int segments = 60;
 
     for (int i = 0; i <= segments; i++) {
         float angle = (float)i / segments * TAU;
-        float r = 100 + 50 * sin(petals * angle + time * 2);
-        float x = cx + cos(angle) * r;
+        float r = 150 + 75 * sin(petals * angle + time * 2);  // 1.5x
+        float x = flowerCx + cos(angle) * r;
         float y = cy + sin(angle) * r;
         flower.addVertex(x, y);
     }
@@ -196,7 +196,7 @@ void tcApp::drawAnimatedCurve() {
 
         Path scaled;
         for (size_t j = 0; j < flower.size(); j++) {
-            float x = cx + (flower[j].x - cx) * scale;
+            float x = flowerCx + (flower[j].x - flowerCx) * scale;
             float y = cy + (flower[j].y - cy) * scale;
             scaled.addVertex(x, y);
         }
@@ -204,13 +204,14 @@ void tcApp::drawAnimatedCurve() {
         scaled.draw();
     }
 
-    // Lissajous curve
+    // Lissajous curve (right side, 1.5x size)
+    float lissaCx = w * 0.75f;
     Path lissajous;
     int a = 3, b = 4;
     for (int i = 0; i <= 100; i++) {
         float t = (float)i / 100 * TAU;
-        float x = cx + 200 + 80 * sin(a * t + time);
-        float y = cy + 80 * sin(b * t);
+        float x = lissaCx + 120 * sin(a * t + time);  // 1.5x
+        float y = cy + 120 * sin(b * t);              // 1.5x
         lissajous.addVertex(x, y);
     }
     lissajous.close();

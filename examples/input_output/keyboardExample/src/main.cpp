@@ -2,6 +2,9 @@
 
 int main() {
     WindowSettings settings;
+    settings.setSize(960, 600);
+    settings.setTitle("keyboardExample - TrussC");
     settings.enableDebugInput = true;
+
     return runApp<tcApp>(settings);
 }

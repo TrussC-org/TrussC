@@ -14,11 +14,11 @@ void tcApp::setup() {
     coneMesh = createCone(50, 100, 24);
     cylinderMesh = createCylinder(50, 100, 24);
 
-    // Light settings (strong ambient, light shading)
+    // Light settings (bright ambient for clear visibility)
     light.setDirectional(Vec3(-0.7f, -1.0f, -0.4f));  // Asymmetric angle
-    light.setAmbient(0.65f, 0.65f, 0.7f);
-    light.setDiffuse(0.5f, 0.5f, 0.45f);
-    light.setSpecular(0.5f, 0.5f, 0.5f);
+    light.setAmbient(0.8f, 0.8f, 0.85f);
+    light.setDiffuse(0.6f, 0.6f, 0.55f);
+    light.setSpecular(0.6f, 0.6f, 0.6f);
 
     // Material settings
     matRed = Material::plastic(Color(0.9f, 0.2f, 0.2f));

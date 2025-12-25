@@ -1,12 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
-#include <vector>
-#include <string>
-
-using namespace trussc;
+#include <TrussC.h>
 using namespace std;
+using namespace tc;
 
 // dragDropExample - Drag & Drop Demo
 // Dropping files onto the window displays file information

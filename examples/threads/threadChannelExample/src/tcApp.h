@@ -1,9 +1,9 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
-using namespace std;
+#include <TrussC.h>
 #include "AnalysisThread.h"
+using namespace std;
+using namespace tc;
 
 // =============================================================================
 // tcApp - ThreadChannel sample application

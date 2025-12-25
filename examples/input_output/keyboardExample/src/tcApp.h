@@ -1,13 +1,9 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
-using namespace std;
+#include <TrussC.h>
 #include <set>
-#include <deque>
-#include <string>
-
-using namespace trussc;
+using namespace std;
+using namespace tc;
 
 // keyboardExample - Keyboard Input Demo
 // Visualization of key press state, modifier keys, and key codes
@@ -31,7 +27,7 @@ private:
     static const size_t MAX_HISTORY = 15;
 
     // Box position (move with arrow keys)
-    float boxX = 400;
+    float boxX = 480;
     float boxY = 300;
     float boxSpeed = 5.0f;
 

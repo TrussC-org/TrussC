@@ -158,7 +158,7 @@ protected:
     // ---------------------------------------------------------------------------
 
     // Use when sharing data between threads
-    std::mutex mutex;
+    std::mutex dataMutex_;
 
 private:
     std::thread thread_;

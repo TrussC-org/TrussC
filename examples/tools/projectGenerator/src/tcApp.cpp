@@ -1329,30 +1329,31 @@ void tcApp::doGenerateProject() {
 
         log("Configuring CMakeLists.txt...");
 
-        // Read CMakeLists.txt from template and write to project
+        // Copy CMakeLists.txt from template (no modification needed)
         string templateCmakePath = templatePath + "/CMakeLists.txt";
-        ifstream inFile(templateCmakePath);
-        stringstream buffer;
-        buffer << inFile.rdbuf();
-        inFile.close();
+        string cmakePath = destPath + "/CMakeLists.txt";
+        fs::copy_file(templateCmakePath, cmakePath, fs::copy_options::overwrite_existing);
 
-        string content = buffer.str();
+        // Generate .trussc file if project is outside TC_ROOT
+        fs::path projPath = fs::weakly_canonical(destPath);
+        fs::path tcRootPath = fs::weakly_canonical(tcRoot);
+        auto [projIter, rootIter] = std::mismatch(
+            projPath.begin(), projPath.end(),
+            tcRootPath.begin(), tcRootPath.end());
+        bool isInsideTcRoot = (rootIter == tcRootPath.end());
 
-        // Replace TRUSSC_DIR (relative if inside tcRoot, absolute otherwise)
-        size_t pos = content.find("set(TRUSSC_DIR \"");
-        if (pos != string::npos) {
-            size_t endPos = content.find("\")", pos);
-            if (endPos != string::npos) {
-                content.replace(pos, endPos - pos + 2,
-                    "set(TRUSSC_DIR \"" + getTrusscDirValue(destPath) + "\")");
+        string trusscPath = destPath + "/.trussc";
+        if (!isInsideTcRoot) {
+            log("Creating .trussc (outside TC_ROOT)...");
+            ofstream trusscFile(trusscPath);
+            trusscFile << (tcRootPath / "trussc").generic_string() << "\n";
+            trusscFile.close();
+        } else {
+            // Remove .trussc if inside TC_ROOT (not needed)
+            if (fs::exists(trusscPath)) {
+                fs::remove(trusscPath);
             }
         }
-
-        // Write to project
-        string cmakePath = destPath + "/CMakeLists.txt";
-        ofstream outFile(cmakePath);
-        outFile << content;
-        outFile.close();
 
         log("Creating addons.make...");
 
@@ -1432,20 +1433,29 @@ void tcApp::doUpdateProject() {
 
         log("Configuring CMakeLists.txt...");
 
-        // Replace TRUSSC_DIR (relative if inside tcRoot, absolute otherwise)
-        size_t pos = content.find("set(TRUSSC_DIR \"");
-        if (pos != string::npos) {
-            size_t endPos = content.find("\")", pos);
-            if (endPos != string::npos) {
-                content.replace(pos, endPos - pos + 2,
-                    "set(TRUSSC_DIR \"" + getTrusscDirValue(importedProjectPath) + "\")");
+        // Copy CMakeLists.txt from template (no modification needed)
+        fs::copy_file(templateCmakePath, cmakePath, fs::copy_options::overwrite_existing);
+
+        // Generate .trussc file if project is outside TC_ROOT
+        fs::path projPath = fs::weakly_canonical(importedProjectPath);
+        fs::path tcRootPath = fs::weakly_canonical(tcRoot);
+        auto [projIter, rootIter] = std::mismatch(
+            projPath.begin(), projPath.end(),
+            tcRootPath.begin(), tcRootPath.end());
+        bool isInsideTcRoot = (rootIter == tcRootPath.end());
+
+        string trusscPath = importedProjectPath + "/.trussc";
+        if (!isInsideTcRoot) {
+            log("Creating .trussc (outside TC_ROOT)...");
+            ofstream trusscFile(trusscPath);
+            trusscFile << (tcRootPath / "trussc").generic_string() << "\n";
+            trusscFile.close();
+        } else {
+            // Remove .trussc if inside TC_ROOT (not needed)
+            if (fs::exists(trusscPath)) {
+                fs::remove(trusscPath);
             }
         }
-
-        // Write back
-        ofstream outFile(cmakePath);
-        outFile << content;
-        outFile.close();
 
         log("Updating addons.make...");
 

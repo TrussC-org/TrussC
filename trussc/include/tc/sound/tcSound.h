@@ -169,8 +169,38 @@ public:
         return (float)numSamples / sampleRate;
     }
 
-    // For testing: Generate sine wave
-    void generateSineWave(float frequency, float duration, int sr = 44100) {
+    // -------------------------------------------------------------------------
+    // Waveform Generation
+    // -------------------------------------------------------------------------
+
+    void generateSineWave(float frequency, float duration, float volume = 0.5f, int sr = 44100) {
+        sampleRate = sr;
+        channels = 1;
+        numSamples = (size_t)(duration * sampleRate);
+        samples.resize(numSamples);
+
+        constexpr float PI2 = 2.0f * 3.14159265f;
+        for (size_t i = 0; i < numSamples; i++) {
+            float t = (float)i / sampleRate;
+            samples[i] = volume * std::sin(PI2 * frequency * t);
+        }
+    }
+
+    void generateSquareWave(float frequency, float duration, float volume = 0.5f, int sr = 44100) {
+        sampleRate = sr;
+        channels = 1;
+        numSamples = (size_t)(duration * sampleRate);
+        samples.resize(numSamples);
+
+        constexpr float PI2 = 2.0f * 3.14159265f;
+        for (size_t i = 0; i < numSamples; i++) {
+            float t = (float)i / sampleRate;
+            float phase = std::fmod(frequency * t, 1.0f);
+            samples[i] = volume * (phase < 0.5f ? 1.0f : -1.0f);
+        }
+    }
+
+    void generateTriangleWave(float frequency, float duration, float volume = 0.5f, int sr = 44100) {
         sampleRate = sr;
         channels = 1;
         numSamples = (size_t)(duration * sampleRate);
@@ -178,10 +208,143 @@ public:
 
         for (size_t i = 0; i < numSamples; i++) {
             float t = (float)i / sampleRate;
-            samples[i] = 0.5f * std::sin(2.0f * 3.14159265f * frequency * t);
+            float phase = std::fmod(frequency * t, 1.0f);
+            // Triangle: 0->1->0->-1->0 over one period
+            float value = phase < 0.5f
+                ? (4.0f * phase - 1.0f)
+                : (3.0f - 4.0f * phase);
+            samples[i] = volume * value;
+        }
+    }
+
+    void generateSawtoothWave(float frequency, float duration, float volume = 0.5f, int sr = 44100) {
+        sampleRate = sr;
+        channels = 1;
+        numSamples = (size_t)(duration * sampleRate);
+        samples.resize(numSamples);
+
+        for (size_t i = 0; i < numSamples; i++) {
+            float t = (float)i / sampleRate;
+            float phase = std::fmod(frequency * t, 1.0f);
+            // Sawtooth: -1 to 1 over one period
+            samples[i] = volume * (2.0f * phase - 1.0f);
+        }
+    }
+
+    void generateNoise(float duration, float volume = 0.5f, int sr = 44100) {
+        sampleRate = sr;
+        channels = 1;
+        numSamples = (size_t)(duration * sampleRate);
+        samples.resize(numSamples);
+
+        // Simple white noise using linear congruential generator
+        uint32_t seed = 12345;
+        for (size_t i = 0; i < numSamples; i++) {
+            seed = seed * 1103515245 + 12345;
+            float noise = ((seed >> 16) & 0x7FFF) / 16383.5f - 1.0f;
+            samples[i] = volume * noise;
+        }
+    }
+
+    void generatePinkNoise(float duration, float volume = 0.5f, int sr = 44100) {
+        sampleRate = sr;
+        channels = 1;
+        numSamples = (size_t)(duration * sampleRate);
+        samples.resize(numSamples);
+
+        // Pink noise using Paul Kellet's refined method
+        // Uses 7 first-order filters to approximate 1/f spectrum
+        float b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+        uint32_t seed = 12345;
+
+        for (size_t i = 0; i < numSamples; i++) {
+            // Generate white noise
+            seed = seed * 1103515245 + 12345;
+            float white = ((seed >> 16) & 0x7FFF) / 16383.5f - 1.0f;
+
+            // Apply pink noise filter (Paul Kellet's economy method)
+            b0 = 0.99886f * b0 + white * 0.0555179f;
+            b1 = 0.99332f * b1 + white * 0.0750759f;
+            b2 = 0.96900f * b2 + white * 0.1538520f;
+            b3 = 0.86650f * b3 + white * 0.3104856f;
+            b4 = 0.55000f * b4 + white * 0.5329522f;
+            b5 = -0.7616f * b5 - white * 0.0168980f;
+
+            float pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362f;
+            b6 = white * 0.115926f;
+
+            // Normalize (pink noise is louder than white)
+            samples[i] = volume * pink * 0.11f;
+        }
+    }
+
+    void generateSilence(float duration, int sr = 44100) {
+        sampleRate = sr;
+        channels = 1;
+        numSamples = (size_t)(duration * sampleRate);
+        samples.resize(numSamples, 0.0f);
+    }
+
+    // -------------------------------------------------------------------------
+    // ADSR Envelope
+    // -------------------------------------------------------------------------
+    void applyADSR(float attack, float decay, float sustainLevel, float release) {
+        if (samples.empty() || sampleRate == 0) return;
+
+        float duration = (float)numSamples / sampleRate;
+        float sustainTime = duration - attack - decay - release;
+        if (sustainTime < 0) sustainTime = 0;
+
+        for (size_t i = 0; i < numSamples; i++) {
+            float t = (float)i / sampleRate;
+            float envelope = 0.0f;
+
+            if (t < attack) {
+                // Attack: 0 -> 1
+                envelope = t / attack;
+            } else if (t < attack + decay) {
+                // Decay: 1 -> sustainLevel
+                float dt = t - attack;
+                envelope = 1.0f - (1.0f - sustainLevel) * (dt / decay);
+            } else if (t < attack + decay + sustainTime) {
+                // Sustain
+                envelope = sustainLevel;
+            } else {
+                // Release: sustainLevel -> 0
+                float dt = t - (attack + decay + sustainTime);
+                envelope = sustainLevel * (1.0f - dt / release);
+                if (envelope < 0) envelope = 0;
+            }
+
+            samples[i] *= envelope;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Mixing
+    // -------------------------------------------------------------------------
+    void mixFrom(const SoundBuffer& other, size_t offsetSamples, float volume = 1.0f) {
+        if (other.samples.empty()) return;
+
+        // Ensure we have enough space
+        size_t requiredSize = offsetSamples + other.numSamples;
+        if (samples.size() < requiredSize) {
+            samples.resize(requiredSize, 0.0f);
+            numSamples = requiredSize;
         }
 
-        printf("SoundBuffer: generated sine wave (%.0f Hz, %.1f sec)\n", frequency, duration);
+        // Mix (add) samples
+        for (size_t i = 0; i < other.numSamples && i < other.samples.size(); i++) {
+            samples[offsetSamples + i] += other.samples[i] * volume;
+        }
+    }
+
+    // Clip samples to -1.0 ~ 1.0 range
+    void clip() {
+        for (auto& s : samples) {
+            if (s > 1.0f) s = 1.0f;
+            else if (s < -1.0f) s = -1.0f;
+        }
     }
 };
 
@@ -439,7 +602,18 @@ public:
     void loadTestTone(float frequency = 440.0f, float duration = 1.0f) {
         AudioEngine::getInstance().init();
         buffer_ = std::make_shared<SoundBuffer>();
-        buffer_->generateSineWave(frequency, duration);
+        buffer_->generateSineWave(frequency, duration, 0.5f);
+    }
+
+    // Load from pre-generated SoundBuffer
+    void loadFromBuffer(const SoundBuffer& buf) {
+        AudioEngine::getInstance().init();
+        buffer_ = std::make_shared<SoundBuffer>(buf);
+    }
+
+    void loadFromBuffer(std::shared_ptr<SoundBuffer> buf) {
+        AudioEngine::getInstance().init();
+        buffer_ = buf;
     }
 
     bool isLoaded() const { return buffer_ != nullptr; }

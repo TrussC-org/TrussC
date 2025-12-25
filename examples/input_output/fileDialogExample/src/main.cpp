@@ -6,7 +6,7 @@
 
 int main() {
     WindowSettings settings;
-    settings.setSize(800, 600);
+    settings.setSize(960, 600);
     settings.setTitle("fileDialogExample - File Dialog Demo");
 
     return runApp<tcApp>(settings);

@@ -1,12 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 using namespace std;
-#include <deque>
-#include <string>
-
-using namespace trussc;
+using namespace tc;
 
 // eventsExample - Event system demo
 // Demonstrates EventListener RAII behavior and event subscription
