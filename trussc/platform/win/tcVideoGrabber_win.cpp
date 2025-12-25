@@ -23,6 +23,7 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
+
 #include <cstring>
 
 #pragma comment(lib, "mf.lib")
@@ -98,10 +99,18 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
             &sample
         );
 
+        // Check if we should exit (running flag was cleared or source was shut down)
+        if (!data->running) {
+            if (sample) sample->Release();
+            break;
+        }
+
         if (FAILED(hr) || !sample) {
             if (flags & MF_SOURCE_READERF_STREAMTICK) {
                 continue;
             }
+            // If not running, exit the loop
+            if (!data->running) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
         }
@@ -117,28 +126,27 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
             if (SUCCEEDED(hr) && rawData) {
                 int w = data->bufferWidth;
                 int h = data->bufferHeight;
+                size_t expectedSize = (size_t)w * h * 4;
 
-                // バックバッファにコピー（RGB24 -> RGBA 変換）
-                if (data->backBuffer && w > 0 && h > 0) {
-                    // サンプルの形式によって変換が異なる
-                    // ここでは RGB24 を想定（Media Foundation のデフォルト）
+                // Validate buffer size before copy (RGB32/BGRA -> RGBA conversion)
+                if (data->backBuffer && w > 0 && h > 0 && currentLength >= expectedSize) {
                     unsigned char* src = rawData;
                     unsigned char* dst = data->backBuffer;
 
-                    // Media Foundation の RGB24 は上下反転していることが多い
+                    // RGB32 is BGRA format, flip vertically and swap R/B
                     for (int y = 0; y < h; y++) {
-                        int srcY = h - 1 - y;  // 上下反転
-                        unsigned char* srcRow = src + srcY * w * 3;
+                        int srcY = h - 1 - y;  // flip vertically
+                        unsigned char* srcRow = src + srcY * w * 4;
                         unsigned char* dstRow = dst + y * w * 4;
                         for (int x = 0; x < w; x++) {
-                            dstRow[x * 4 + 0] = srcRow[x * 3 + 2];  // R <- B (BGR->RGB)
-                            dstRow[x * 4 + 1] = srcRow[x * 3 + 1];  // G
-                            dstRow[x * 4 + 2] = srcRow[x * 3 + 0];  // B <- R
-                            dstRow[x * 4 + 3] = 255;                 // A
+                            dstRow[x * 4 + 0] = srcRow[x * 4 + 2];  // R <- B (BGRA->RGBA)
+                            dstRow[x * 4 + 1] = srcRow[x * 4 + 1];  // G
+                            dstRow[x * 4 + 2] = srcRow[x * 4 + 0];  // B <- R
+                            dstRow[x * 4 + 3] = 255;  // A (force opaque)
                         }
                     }
 
-                    // メインスレッドのバッファにコピー
+                    // Copy to main thread buffer
                     if (data->targetPixels && data->mainMutex && !data->needsResize.load()) {
                         std::lock_guard<std::mutex> lock(*data->mainMutex);
                         std::memcpy(data->targetPixels, data->backBuffer, w * h * 4);
@@ -314,21 +322,24 @@ bool VideoGrabber::setupPlatform() {
         return false;
     }
 
-    // 出力フォーマットを RGB24 に設定
+    // Set output format to RGB32 (BGRA, better supported than RGB24)
     IMFMediaType* outputType = nullptr;
     MFCreateMediaType(&outputType);
     if (outputType) {
         outputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-        outputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB24);
+        outputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
         outputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
         MFSetAttributeSize(outputType, MF_MT_FRAME_SIZE, requestedWidth_, requestedHeight_);
 
         hr = data->sourceReader->SetCurrentMediaType(
             MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, outputType);
+        if (FAILED(hr)) {
+            tcLogWarning() << "VideoGrabber: Failed to set RGB32 format, hr=" << std::hex << hr;
+        }
         outputType->Release();
     }
 
-    // 実際のフォーマットを取得
+    // Get actual format after setting
     IMFMediaType* currentType = nullptr;
     hr = data->sourceReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &currentType);
     if (SUCCEEDED(hr) && currentType) {
@@ -336,6 +347,7 @@ bool VideoGrabber::setupPlatform() {
         MFGetAttributeSize(currentType, MF_MT_FRAME_SIZE, &w, &h);
         width_ = (int)w;
         height_ = (int)h;
+        
         currentType->Release();
     } else {
         width_ = requestedWidth_;
@@ -370,20 +382,40 @@ void VideoGrabber::closePlatform() {
 
     auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
 
-    // キャプチャスレッドを停止
+    // Signal thread to stop
     data->running = false;
-    if (data->captureThread.joinable()) {
-        data->captureThread.join();
+
+    // Flush pending reads first
+    if (data->sourceReader) {
+        data->sourceReader->Flush(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
     }
 
-    // リソースを解放
+    // Shutdown media source - this will cause ReadSample to fail and return
+    if (data->mediaSource) {
+        data->mediaSource->Shutdown();
+    }
+
+    // Wait for thread to finish with timeout
+    if (data->captureThread.joinable()) {
+        HANDLE hThread = (HANDLE)data->captureThread.native_handle();
+        DWORD result = WaitForSingleObject(hThread, 500);  // 500ms timeout
+        if (result == WAIT_OBJECT_0) {
+            // Thread exited cleanly
+            data->captureThread.join();
+        } else {
+            // Thread didn't exit in time, detach to avoid hanging
+            tcLogWarning() << "VideoGrabber: Capture thread did not exit in time, detaching";
+            data->captureThread.detach();
+        }
+    }
+
+    // Release resources
     if (data->sourceReader) {
         data->sourceReader->Release();
         data->sourceReader = nullptr;
     }
 
     if (data->mediaSource) {
-        data->mediaSource->Shutdown();
         data->mediaSource->Release();
         data->mediaSource = nullptr;
     }
