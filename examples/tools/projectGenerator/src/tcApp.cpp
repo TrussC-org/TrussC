@@ -661,8 +661,9 @@ bool tcApp::generateProject() {
             fs::create_directories(destPath);
             for (const auto& entry : fs::directory_iterator(templatePath)) {
                 string name = entry.path().filename().string();
-                if (name == "build" || name == "bin") {
-                    continue;  // Skip
+                // Skip build directories, bin, and .vscode (generated separately)
+                if (name == "bin" || name == "build" || name.starts_with("build-") || name == ".vscode") {
+                    continue;
                 }
                 fs::copy(entry.path(), destPath / entry.path().filename(),
                          fs::copy_options::recursive);
@@ -762,8 +763,8 @@ void tcApp::generateVSCodeFiles(const string& path) {
 
     // settings.json
     Json settings;
-    settings["cmake.buildDirectory"] = "${workspaceFolder}/build";
     settings["cmake.sourceDirectory"] = "${workspaceFolder}";
+    settings["cmake.useCMakePresets"] = "always";
     saveJson(settings, vscodePath + "/settings.json");
 
     // tasks.json
@@ -1317,8 +1318,9 @@ void tcApp::doGenerateProject() {
             fs::create_directories(destPath);
             for (const auto& entry : fs::directory_iterator(templatePath)) {
                 string name = entry.path().filename().string();
-                if (name == "build" || name == "bin") {
-                    continue;  // Skip
+                // Skip build directories, bin, and .vscode (generated separately)
+                if (name == "bin" || name == "build" || name.starts_with("build-") || name == ".vscode") {
+                    continue;
                 }
                 fs::copy(entry.path(), destPath / entry.path().filename(),
                          fs::copy_options::recursive);
