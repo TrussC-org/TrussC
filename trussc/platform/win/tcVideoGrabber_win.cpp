@@ -23,6 +23,7 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
+
 #include <cstring>
 
 #pragma comment(lib, "mf.lib")
@@ -98,10 +99,18 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
             &sample
         );
 
+        // Check if we should exit (running flag was cleared or source was shut down)
+        if (!data->running) {
+            if (sample) sample->Release();
+            break;
+        }
+
         if (FAILED(hr) || !sample) {
             if (flags & MF_SOURCE_READERF_STREAMTICK) {
                 continue;
             }
+            // If not running, exit the loop
+            if (!data->running) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
         }
@@ -133,11 +142,11 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
                             dstRow[x * 4 + 0] = srcRow[x * 4 + 2];  // R <- B (BGRA->RGBA)
                             dstRow[x * 4 + 1] = srcRow[x * 4 + 1];  // G
                             dstRow[x * 4 + 2] = srcRow[x * 4 + 0];  // B <- R
-                            dstRow[x * 4 + 3] = srcRow[x * 4 + 3];  // A
+                            dstRow[x * 4 + 3] = 255;  // A (force opaque)
                         }
                     }
 
-                    // メインスレッドのバッファにコピー
+                    // Copy to main thread buffer
                     if (data->targetPixels && data->mainMutex && !data->needsResize.load()) {
                         std::lock_guard<std::mutex> lock(*data->mainMutex);
                         std::memcpy(data->targetPixels, data->backBuffer, w * h * 4);
@@ -373,20 +382,40 @@ void VideoGrabber::closePlatform() {
 
     auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
 
-    // キャプチャスレッドを停止
+    // Signal thread to stop
     data->running = false;
-    if (data->captureThread.joinable()) {
-        data->captureThread.join();
+
+    // Flush pending reads first
+    if (data->sourceReader) {
+        data->sourceReader->Flush(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
     }
 
-    // リソースを解放
+    // Shutdown media source - this will cause ReadSample to fail and return
+    if (data->mediaSource) {
+        data->mediaSource->Shutdown();
+    }
+
+    // Wait for thread to finish with timeout
+    if (data->captureThread.joinable()) {
+        HANDLE hThread = (HANDLE)data->captureThread.native_handle();
+        DWORD result = WaitForSingleObject(hThread, 500);  // 500ms timeout
+        if (result == WAIT_OBJECT_0) {
+            // Thread exited cleanly
+            data->captureThread.join();
+        } else {
+            // Thread didn't exit in time, detach to avoid hanging
+            tcLogWarning() << "VideoGrabber: Capture thread did not exit in time, detaching";
+            data->captureThread.detach();
+        }
+    }
+
+    // Release resources
     if (data->sourceReader) {
         data->sourceReader->Release();
         data->sourceReader = nullptr;
     }
 
     if (data->mediaSource) {
-        data->mediaSource->Shutdown();
         data->mediaSource->Release();
         data->mediaSource = nullptr;
     }
