@@ -1,13 +1,9 @@
 #pragma once
 
-#include "tcBaseApp.h"
-#include "tc/utils/tcThread.h"
-#include <vector>
-#include <string>
+#include <TrussC.h>
 #include <atomic>
-
-using namespace tc;
 using namespace std;
+using namespace tc;
 
 // IDE selection
 enum class IdeType {

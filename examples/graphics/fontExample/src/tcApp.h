@@ -1,9 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 using namespace std;
-#include "tc/graphics/tcFont.h"
+using namespace tc;
 
 // =============================================================================
 // tcApp - TrueType font & alignment sample

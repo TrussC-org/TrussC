@@ -1,10 +1,9 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 #include <iostream>
-#include <vector>
 using namespace std;
+using namespace tc;
 
 class tcApp : public App {
 public:

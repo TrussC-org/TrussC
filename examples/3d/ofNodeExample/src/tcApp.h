@@ -1,8 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
+#include <TrussC.h>
+using namespace std;
 using namespace tc;
-using namespace std;  // Includes App, Node, TrussC.h
 
 // =============================================================================
 // Rotating container node

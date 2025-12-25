@@ -1,12 +1,10 @@
 #pragma once
 
-#include "TrussC.h"
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 using namespace std;
+using namespace tc;
 
 // sokol-shdc で生成されたシェーダーヘッダー
-#include "shaders/effects.glsl.h"
 
 class tcApp : public App {
 public:

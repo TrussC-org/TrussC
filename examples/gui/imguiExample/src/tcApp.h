@@ -1,10 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 using namespace std;
-
-using namespace trussc;
+using namespace tc;
 
 // imguiExample - Dear ImGui demo
 

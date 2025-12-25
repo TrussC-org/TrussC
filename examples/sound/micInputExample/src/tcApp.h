@@ -1,12 +1,9 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
-using namespace std;
-#include "tc/sound/tcSound.h"
-#include "tc/math/tcFFT.h"
-#include <vector>
+#include <TrussC.h>
 #include <complex>
+using namespace std;
+using namespace tc;
 
 class tcApp : public App {
 public:

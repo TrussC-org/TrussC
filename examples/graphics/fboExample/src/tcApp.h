@@ -1,10 +1,9 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 #include <iostream>
-
 using namespace std;
+using namespace tc;
 
 // =============================================================================
 // fboExample - FBO (Frame Buffer Object) sample

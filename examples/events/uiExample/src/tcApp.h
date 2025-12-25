@@ -1,10 +1,9 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 #include <functional>
-
 using namespace std;
+using namespace tc;
 
 // =============================================================================
 // UIButton - Button that fires event on click

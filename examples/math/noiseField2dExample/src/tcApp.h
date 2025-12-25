@@ -1,10 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 using namespace std;
-
-using namespace trussc;
+using namespace tc;
 
 // noiseField2dExample - Perlin noise demo
 // Flow field and noise texture visualization

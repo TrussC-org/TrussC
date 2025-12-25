@@ -1,10 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 using namespace std;
-
-using namespace trussc;
+using namespace tc;
 
 // strokeMeshExample - StrokeMesh (thick line drawing) demo
 // Cap Types: BUTT, ROUND, SQUARE

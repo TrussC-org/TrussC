@@ -1,10 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 using namespace std;
-
-using namespace trussc;
+using namespace tc;
 
 // easyCamExample - EasyCam 3D camera control demo
 // Implementation based on oF's easyCamExample

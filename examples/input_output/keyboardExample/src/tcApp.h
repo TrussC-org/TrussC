@@ -1,13 +1,9 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
-using namespace std;
+#include <TrussC.h>
 #include <set>
-#include <deque>
-#include <string>
-
-using namespace trussc;
+using namespace std;
+using namespace tc;
 
 // keyboardExample - Keyboard Input Demo
 // Visualization of key press state, modifier keys, and key codes

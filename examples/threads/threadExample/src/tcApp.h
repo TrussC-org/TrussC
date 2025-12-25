@@ -1,9 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 using namespace std;
-#include "threadedObject.h"
+using namespace tc;
 
 // =============================================================================
 // tcApp - Thread sample application

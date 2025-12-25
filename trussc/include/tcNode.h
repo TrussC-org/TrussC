@@ -367,6 +367,20 @@ public:
         return nullptr;
     }
 
+    Ptr dispatchMouseScroll(float screenX, float screenY, Vec2 scroll) {
+        Ray globalRay = Ray::fromScreenPoint2D(screenX, screenY);
+        HitResult result = findHitNode(globalRay);
+
+        if (result.hit()) {
+            Vec2 local(result.localPoint.x, result.localPoint.y);
+            if (result.node->onMouseScroll(local, scroll)) {
+                return result.node;
+            }
+        }
+
+        return nullptr;
+    }
+
     // -------------------------------------------------------------------------
     // Key event dispatch (broadcast to all active nodes)
     // -------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 using namespace std;
+using namespace tc;
 
 // =============================================================================
 // tcApp - 3D Primitives Demo

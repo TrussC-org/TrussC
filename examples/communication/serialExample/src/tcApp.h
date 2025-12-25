@@ -1,9 +1,8 @@
 #pragma once
 
-#include "tcBaseApp.h"
-using namespace tc;
+#include <TrussC.h>
 using namespace std;
-#include "tc/comm/tcSerial.h"
+using namespace tc;
 
 // =============================================================================
 // tcApp - Serial Communication Sample
