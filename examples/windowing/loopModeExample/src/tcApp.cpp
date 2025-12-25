@@ -44,7 +44,7 @@ void tcApp::draw() {
     translate(getWindowWidth() / 2, getWindowHeight() / 2);
     rotate(angle);
     setColor(1.0f, 1.0f, 1.0f);
-    drawRect(-250, -50, 500, 100);
+    drawRect(-200, -40, 400, 80);
     popMatrix();
 
     // Display information

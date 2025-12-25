@@ -52,9 +52,9 @@ void tcApp::draw() {
 
         video_.draw(x, y, w, h);
 
-        // Draw progress bar
-        float barY = getWindowHeight() - 30;
+        // Progress bar at bottom
         float barHeight = 10;
+        float barY = getWindowHeight() - barHeight;
         float progress = video_.getPosition();
 
         // Background
@@ -65,8 +65,10 @@ void tcApp::draw() {
         setColor(0.4f, 0.78f, 0.4f);
         drawRect(20, barY, (getWindowWidth() - 40) * progress, barHeight);
 
-        // Info
+        // Info display at top
         if (showInfo_) {
+            pushStyle();
+            setTextAlign(Left, Baseline);
             setColor(1.0f);
             int currentFrame = video_.getCurrentFrame();
             int totalFrames = video_.getTotalFrames();
@@ -76,25 +78,31 @@ void tcApp::draw() {
                          formatTime(video_.getDuration()) +
                          " (" + to_string(currentFrame) + "/" +
                          to_string(totalFrames) + ")";
-
             drawBitmapString(info, 20, 20);
 
             string state = video_.isPlaying() ? "Playing" :
                           video_.isPaused() ? "Paused" : "Stopped";
-            drawBitmapString("State: " + state, 20, 40);
-            drawBitmapString("Volume: " + to_string((int)(video_.getVolume() * 100)) + "%", 20, 60);
+            setTextAlign(Center, Baseline);
+            drawBitmapString("State: " + state, getWindowWidth() / 2, 20);
+
+            setTextAlign(Right, Baseline);
+            drawBitmapString("Volume: " + to_string((int)(video_.getVolume() * 100)) + "%", getWindowWidth() - 20, 20);
+            popStyle();
         }
     } else {
         // No video loaded
+        pushStyle();
         setColor(1.0f);
-        drawBitmapString("No video loaded", getWindowWidth() / 2 - 50, getWindowHeight() / 2 - 20);
-        drawBitmapString("Press 'L' or drop a video file", getWindowWidth() / 2 - 90, getWindowHeight() / 2);
+        setTextAlign(Center, Baseline);
+        drawBitmapString("No video loaded", getWindowWidth() / 2, getWindowHeight() / 2 - 20);
+        drawBitmapString("Press 'L' or drop a video file", getWindowWidth() / 2, getWindowHeight() / 2);
+        popStyle();
     }
 
     // Controls help
     setColor(0.78f);
     drawBitmapString("Space: Play/Pause | R: Restart | Arrows: Seek/Volume | I: Info | L: Load",
-                    20, getWindowHeight() - 50);
+                    20, getWindowHeight() - 30);
 }
 
 string tcApp::formatTime(float seconds) {

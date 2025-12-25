@@ -7,7 +7,7 @@
 
 int main() {
     WindowSettings settings;
-    settings.setSize(1280, 720);
+    settings.setSize(960, 600);
     settings.setTitle("videoPlayerWebExample - TrussC");
 
     return runApp<tcApp>(settings);
