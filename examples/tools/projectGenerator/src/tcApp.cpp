@@ -534,9 +534,7 @@ void tcApp::loadConfig() {
         return;
     }
 
-    if (config.contains("tc_root")) {
-        tcRoot = config["tc_root"].get<string>();
-    }
+    // tc_root is NOT loaded from config (always auto-detect or select manually)
     if (config.contains("last_project_dir")) {
         projectDir = config["last_project_dir"].get<string>();
     }
@@ -561,7 +559,7 @@ void tcApp::saveConfig() {
     }
 
     Json config;
-    config["tc_root"] = tcRoot;
+    // tc_root is NOT saved (always auto-detect on startup)
     config["last_project_dir"] = projectDir;
     config["last_project_name"] = projectName;
     config["ide_type"] = static_cast<int>(ideType);
