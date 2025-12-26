@@ -71,7 +71,6 @@ public:
     void keyPressed(int key) override;
 
 private:
-    Node::Ptr rootNode_;
     vector<shared_ptr<TimerBall>> balls_;
     shared_ptr<CountdownNode> countdownNode_;
     shared_ptr<PulseNode> pulseNode_;

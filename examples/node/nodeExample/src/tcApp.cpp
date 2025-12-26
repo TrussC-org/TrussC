@@ -12,19 +12,16 @@ void tcApp::setup() {
 
     // Container 1 (left side, clockwise)
     container1_ = make_shared<RotatingContainer>();
-    container1_->x = 240;
-    container1_->y = 320;
+    container1_->setPos(240, 320);
     container1_->rotationSpeed = 0.5f;
     container1_->size = 200;
 
     // Container 2 (right side, counter-clockwise, slightly smaller)
     container2_ = make_shared<RotatingContainer>();
-    container2_->x = 720;
-    container2_->y = 320;
+    container2_->setPos(720, 320);
     container2_->rotationSpeed = -0.3f;
     container2_->size = 160;
-    container2_->scaleX = 0.8f;
-    container2_->scaleY = 0.8f;
+    container2_->setScale(0.8f, 0.8f);
 
     // Mouse follower nodes (one for each container)
     follower1_ = make_shared<MouseFollower>();
@@ -48,16 +45,14 @@ void tcApp::setup() {
 
     for (int i = 0; i < 4; i++) {
         auto child = make_shared<FixedChild>();
-        child->x = positions[i].first;
-        child->y = positions[i].second;
+        child->setPos(positions[i].first, positions[i].second);
         child->hue = i * QUARTER_TAU;
         container1_->addChild(child);
     }
 
     for (int i = 0; i < 4; i++) {
         auto child = make_shared<FixedChild>();
-        child->x = positions[i].first;
-        child->y = positions[i].second;
+        child->setPos(positions[i].first, positions[i].second);
         child->hue = i * QUARTER_TAU + HALF_TAU;
         child->size = 20;
         container2_->addChild(child);

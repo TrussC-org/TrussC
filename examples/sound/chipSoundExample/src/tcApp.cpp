@@ -9,9 +9,7 @@ void tcApp::setup() {
 SoundButton::Ptr makeButton(float x, float y, float w, float h,
                             const string& label, Sound sound, bool isLoop = false) {
     auto btn = make_shared<SoundButton>();
-    btn->x = x;
-    btn->y = y;
-    btn->setSize(w, h);
+    btn->setRect(x, y, w, h);
     btn->label = label;
     btn->sound = sound;
     btn->isLoop = isLoop;

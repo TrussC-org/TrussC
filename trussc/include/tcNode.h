@@ -74,8 +74,7 @@ public:
         if (keepGlobalPosition) {
             float localX, localY;
             globalToLocal(globalX, globalY, localX, localY);
-            child->x = localX;
-            child->y = localY;
+            child->setPos(localX, localY, child->getZ());
         }
     }
 
@@ -129,48 +128,99 @@ public:
     bool isMouseOver() const { return internal::hoveredNode == this; }
 
     // -------------------------------------------------------------------------
-    // Transform
+    // Transform - Position
     // -------------------------------------------------------------------------
 
-    float x = 0.0f;
-    float y = 0.0f;
-    float rotation = 0.0f;      // Radians
-    float scaleX = 1.0f;
-    float scaleY = 1.0f;
+    const Vec3& getPos() const { return position_; }
+    float getX() const { return position_.x; }
+    float getY() const { return position_.y; }
+    float getZ() const { return position_.z; }
 
-    // Set rotation in degrees
-    void setRotationDeg(float degrees) {
-        rotation = deg2rad(degrees);
+    void setPos(const Vec3& pos) {
+        if (position_ != pos) {
+            position_ = pos;
+            notifyLocalMatrixChanged();
+        }
     }
-
-    // Get rotation in degrees
-    float getRotationDeg() const {
-        return rad2deg(rotation);
+    void setPos(float x, float y, float z = 0.0f) {
+        setPos(Vec3(x, y, z));
     }
+    void setX(float x) { setPos(x, position_.y, position_.z); }
+    void setY(float y) { setPos(position_.x, y, position_.z); }
+    void setZ(float z) { setPos(position_.x, position_.y, z); }
 
     // -------------------------------------------------------------------------
-    // Coordinate transformation
+    // Transform - Rotation (Quaternion internally, various interfaces)
     // -------------------------------------------------------------------------
 
-    // Get local transform matrix for this node
-    Mat4 getLocalMatrix() const {
-        Mat4 mat = Mat4::translate(x, y, 0.0f);
-        if (rotation != 0.0f) {
-            mat = mat * Mat4::rotateZ(rotation);
+    const Quaternion& getQuaternion() const { return rotation_; }
+    void setQuaternion(const Quaternion& q) {
+        if (rotation_ != q) {
+            rotation_ = q;
+            notifyLocalMatrixChanged();
         }
-        if (scaleX != 1.0f || scaleY != 1.0f) {
-            mat = mat * Mat4::scale(scaleX, scaleY, 1.0f);
-        }
-        return mat;
     }
 
-    // Get global transform matrix for this node (includes parent transforms)
-    Mat4 getGlobalMatrix() const {
-        Mat4 local = getLocalMatrix();
-        if (auto p = parent_.lock()) {
-            return p->getGlobalMatrix() * local;
+    // Euler angles (pitch=X, yaw=Y, roll=Z)
+    Vec3 getEuler() const { return rotation_.toEuler(); }
+    void setEuler(const Vec3& euler) { setQuaternion(Quaternion::fromEuler(euler)); }
+    void setEuler(float pitch, float yaw, float roll) { setEuler(Vec3(pitch, yaw, roll)); }
+
+    // 2D convenience: Z-axis rotation only (radians)
+    float getRot() const {
+        return rotation_.toEuler().z;
+    }
+    void setRot(float radians) {
+        setQuaternion(Quaternion::fromAxisAngle(Vec3(0, 0, 1), radians));
+    }
+    float getRotDeg() const { return rad2deg(getRot()); }
+    void setRotDeg(float degrees) { setRot(deg2rad(degrees)); }
+
+    // -------------------------------------------------------------------------
+    // Transform - Scale
+    // -------------------------------------------------------------------------
+
+    const Vec3& getScale() const { return scale_; }
+    float getScaleX() const { return scale_.x; }
+    float getScaleY() const { return scale_.y; }
+    float getScaleZ() const { return scale_.z; }
+
+    void setScale(const Vec3& s) {
+        if (scale_ != s) {
+            scale_ = s;
+            notifyLocalMatrixChanged();
         }
-        return local;
+    }
+    void setScale(float uniform) { setScale(Vec3(uniform, uniform, uniform)); }
+    void setScale(float sx, float sy, float sz = 1.0f) { setScale(Vec3(sx, sy, sz)); }
+    void setScaleX(float sx) { setScale(sx, scale_.y, scale_.z); }
+    void setScaleY(float sy) { setScale(scale_.x, sy, scale_.z); }
+    void setScaleZ(float sz) { setScale(scale_.x, scale_.y, sz); }
+
+    // -------------------------------------------------------------------------
+    // Transform change notification
+    // -------------------------------------------------------------------------
+
+    Event<void> localMatrixChanged;
+
+    // -------------------------------------------------------------------------
+    // Coordinate transformation (Matrix cached)
+    // -------------------------------------------------------------------------
+
+    // Get local transform matrix for this node (cached)
+    const Mat4& getLocalMatrix() const {
+        if (localMatrixDirty_) {
+            updateLocalMatrix();
+        }
+        return localMatrix_;
+    }
+
+    // Get global transform matrix for this node (includes parent transforms, cached)
+    const Mat4& getGlobalMatrix() const {
+        if (globalMatrixDirty_) {
+            updateGlobalMatrix();
+        }
+        return globalMatrix_;
     }
 
     // Get inverse of global transform matrix
@@ -180,52 +230,18 @@ public:
 
     // Convert global coordinates to this node's local coordinates
     void globalToLocal(float globalX, float globalY, float& localX, float& localY) const {
-        // First convert to parent's local coordinates
-        float parentLocalX = globalX;
-        float parentLocalY = globalY;
-        if (auto p = parent_.lock()) {
-            p->globalToLocal(globalX, globalY, parentLocalX, parentLocalY);
-        }
-
-        // Convert from parent's local to this node's local coordinates
-        // Inverse of translate
-        float dx = parentLocalX - x;
-        float dy = parentLocalY - y;
-
-        // Inverse of rotate
-        float cosR = std::cos(-rotation);
-        float sinR = std::sin(-rotation);
-        float rx = dx * cosR - dy * sinR;
-        float ry = dx * sinR + dy * cosR;
-
-        // Inverse of scale
-        localX = (scaleX != 0.0f) ? rx / scaleX : rx;
-        localY = (scaleY != 0.0f) ? ry / scaleY : ry;
+        // Use inverse matrix for coordinate transformation
+        Mat4 inv = getGlobalMatrixInverse();
+        Vec3 local = inv * Vec3(globalX, globalY, 0.0f);
+        localX = local.x;
+        localY = local.y;
     }
 
     // Convert local coordinates to global coordinates
     void localToGlobal(float localX, float localY, float& globalX, float& globalY) const {
-        // Apply scale
-        float sx = localX * scaleX;
-        float sy = localY * scaleY;
-
-        // Apply rotate
-        float cosR = std::cos(rotation);
-        float sinR = std::sin(rotation);
-        float rx = sx * cosR - sy * sinR;
-        float ry = sx * sinR + sy * cosR;
-
-        // Apply translate
-        float tx = rx + x;
-        float ty = ry + y;
-
-        // If parent exists, apply parent's local-to-global transform
-        if (auto p = parent_.lock()) {
-            p->localToGlobal(tx, ty, globalX, globalY);
-        } else {
-            globalX = tx;
-            globalY = ty;
-        }
+        Vec3 global = getGlobalMatrix() * Vec3(localX, localY, 0.0f);
+        globalX = global.x;
+        globalY = global.y;
     }
 
     // -------------------------------------------------------------------------
@@ -261,51 +277,6 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // Recursive update/draw (called automatically by framework)
-    // -------------------------------------------------------------------------
-
-    // Recursively update self and child nodes
-    void updateTree() {
-        if (!isActive) return;
-
-        processTimers();
-        update();  // User code
-
-        // Automatically update child nodes
-        for (auto& child : children_) {
-            child->updateTree();
-        }
-    }
-
-    // Recursively draw self and child nodes
-    virtual void drawTree() {
-        if (!isActive) return;
-
-        pushMatrix();
-
-        // Apply transforms
-        translate(x, y);
-        if (rotation != 0.0f) {
-            rotate(rotation);
-        }
-        if (scaleX != 1.0f || scaleY != 1.0f) {
-            scale(scaleX, scaleY);
-        }
-
-        // User drawing
-        if (isVisible) {
-            draw();
-        }
-
-        // Automatically draw child nodes
-        for (auto& child : children_) {
-            child->drawTree();
-        }
-
-        popMatrix();
-    }
-
-    // -------------------------------------------------------------------------
     // Ray-based Hit Test (for event dispatch)
     // -------------------------------------------------------------------------
 
@@ -325,6 +296,65 @@ public:
     }
 
 private:
+    // -------------------------------------------------------------------------
+    // Recursive update/draw (called by App via friend access)
+    // -------------------------------------------------------------------------
+
+    // Recursively update self and child nodes
+    void updateTree() {
+        if (!isActive) return;
+
+        // Call setup() once on first update/draw
+        if (!setupCalled_) {
+            setupCalled_ = true;
+            setup();
+        }
+
+        processTimers();
+        update();  // User code
+
+        // Automatically update child nodes
+        for (auto& child : children_) {
+            child->updateTree();
+        }
+    }
+
+    // Recursively draw self and child nodes
+    void drawTree() {
+        if (!isActive) return;
+
+        // Call setup() once on first update/draw
+        if (!setupCalled_) {
+            setupCalled_ = true;
+            setup();
+        }
+
+        pushMatrix();
+
+        // Apply transforms using cached matrix
+        translate(position_.x, position_.y, position_.z);
+        if (rotation_ != Quaternion::identity()) {
+            // Apply rotation via Euler angles for now (sokol uses axis-angle or euler)
+            Vec3 euler = rotation_.toEuler();
+            if (euler.x != 0.0f) rotateX(euler.x);
+            if (euler.y != 0.0f) rotateY(euler.y);
+            if (euler.z != 0.0f) rotateZ(euler.z);
+        }
+        if (scale_.x != 1.0f || scale_.y != 1.0f || scale_.z != 1.0f) {
+            scale(scale_.x, scale_.y, scale_.z);
+        }
+
+        // User drawing
+        if (isVisible) {
+            draw();
+        }
+
+        // Draw child nodes (overridable for clipping, etc.)
+        drawChildren();
+
+        popMatrix();
+    }
+
     // -------------------------------------------------------------------------
     // Event dispatch (called by App only via friend access)
     // -------------------------------------------------------------------------
@@ -494,6 +524,16 @@ private:
 protected:
 
     // -------------------------------------------------------------------------
+    // Draw children (overridable for clipping, etc.)
+    // -------------------------------------------------------------------------
+
+    virtual void drawChildren() {
+        for (auto& child : children_) {
+            child->drawTree();
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Events (overridable)
     // -------------------------------------------------------------------------
 
@@ -597,10 +637,66 @@ protected:
         timers_.clear();
     }
 
-protected:
+private:
+    bool setupCalled_ = false;    // Ensures setup() is called only once
     WeakPtr parent_;
     std::vector<Ptr> children_;
     bool eventsEnabled_ = false;  // Enabled via enableEvents()
+
+    // -------------------------------------------------------------------------
+    // Transform data (private)
+    // -------------------------------------------------------------------------
+    Vec3 position_;
+    Quaternion rotation_;
+    Vec3 scale_ = Vec3(1.0f, 1.0f, 1.0f);
+
+    // -------------------------------------------------------------------------
+    // Matrix cache
+    // -------------------------------------------------------------------------
+    mutable Mat4 localMatrix_;
+    mutable Mat4 globalMatrix_;
+    mutable bool localMatrixDirty_ = true;
+    mutable bool globalMatrixDirty_ = true;
+
+    void updateLocalMatrix() const {
+        localMatrix_ = Mat4::translate(position_) * rotation_.toMatrix() * Mat4::scale(scale_);
+        localMatrixDirty_ = false;
+    }
+
+    void updateGlobalMatrix() const {
+        if (auto p = parent_.lock()) {
+            globalMatrix_ = p->getGlobalMatrix() * getLocalMatrix();
+        } else {
+            globalMatrix_ = getLocalMatrix();
+        }
+        globalMatrixDirty_ = false;
+    }
+
+    void markMatrixDirty() {
+        localMatrixDirty_ = true;
+        globalMatrixDirty_ = true;
+        // Mark children's global matrix as dirty
+        for (auto& child : children_) {
+            child->markGlobalMatrixDirty();
+        }
+    }
+
+    void markGlobalMatrixDirty() {
+        globalMatrixDirty_ = true;
+        for (auto& child : children_) {
+            child->markGlobalMatrixDirty();
+        }
+    }
+
+    void notifyLocalMatrixChanged() {
+        markMatrixDirty();
+        onLocalMatrixChanged();
+        localMatrixChanged.notify();
+    }
+
+protected:
+    // Override for custom behavior when local matrix changes
+    virtual void onLocalMatrixChanged() {}
 
     // Timer structure
     struct Timer {

@@ -133,6 +133,10 @@ public:
         updateTree();
         updateHoverState((float)mouseX, (float)mouseY);
     }
+
+    void handleDraw() {
+        drawTree();
+    }
 };
 
 } // namespace trussc

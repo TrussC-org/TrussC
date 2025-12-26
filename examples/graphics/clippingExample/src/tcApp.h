@@ -25,7 +25,7 @@ public:
         setColor(bgColor);
         fill();
         noStroke();
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, getWidth(), getHeight());
 
         // Label
         if (!label.empty()) {
@@ -39,7 +39,7 @@ public:
         noFill();
         stroke();
         setColor(borderColor);
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, getWidth(), getHeight());
     }
 };
 
@@ -59,12 +59,15 @@ public:
 
     void update() override {
         // Movement
-        x += vx;
-        y += vy;
+        Vec3 pos = getPos();
+        pos.x += vx;
+        pos.y += vy;
 
         // Bounce
-        if (x - radius < -50 || x + radius > boundsWidth + 50) vx = -vx;
-        if (y - radius < -50 || y + radius > boundsHeight + 50) vy = -vy;
+        if (pos.x - radius < -50 || pos.x + radius > boundsWidth + 50) vx = -vx;
+        if (pos.y - radius < -50 || pos.y + radius > boundsHeight + 50) vy = -vy;
+
+        setPos(pos);
     }
 
     void draw() override {

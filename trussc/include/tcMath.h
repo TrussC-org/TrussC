@@ -302,6 +302,163 @@ struct Vec4 {
 inline Vec4 operator*(float s, const Vec4& v) { return v * s; }
 
 // =============================================================================
+// Quaternion - 3D rotation representation
+// =============================================================================
+
+// Forward declaration for toMatrix()
+struct Mat4;
+
+struct Quaternion {
+    float w = 1.0f;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+
+    // Constructors
+    Quaternion() = default;
+    Quaternion(float w_, float x_, float y_, float z_) : w(w_), x(x_), y(y_), z(z_) {}
+    Quaternion(const Quaternion&) = default;
+    Quaternion& operator=(const Quaternion&) = default;
+
+    // Comparison operators
+    bool operator==(const Quaternion& q) const {
+        return w == q.w && x == q.x && y == q.y && z == q.z;
+    }
+    bool operator!=(const Quaternion& q) const { return !(*this == q); }
+
+    // Identity quaternion
+    static Quaternion identity() { return Quaternion(); }
+
+    // Create from axis-angle
+    static Quaternion fromAxisAngle(const Vec3& axis, float radians) {
+        float halfAngle = radians * 0.5f;
+        float s = std::sin(halfAngle);
+        Vec3 a = axis.normalized();
+        return Quaternion(std::cos(halfAngle), a.x * s, a.y * s, a.z * s);
+    }
+
+    // Create from Euler angles (pitch=X, yaw=Y, roll=Z, applied in ZYX order)
+    static Quaternion fromEuler(float pitch, float yaw, float roll) {
+        float cp = std::cos(pitch * 0.5f);
+        float sp = std::sin(pitch * 0.5f);
+        float cy = std::cos(yaw * 0.5f);
+        float sy = std::sin(yaw * 0.5f);
+        float cr = std::cos(roll * 0.5f);
+        float sr = std::sin(roll * 0.5f);
+
+        return Quaternion(
+            cr * cp * cy + sr * sp * sy,
+            cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - sr * sp * cy,
+            sr * cp * cy - cr * sp * sy
+        );
+    }
+    static Quaternion fromEuler(const Vec3& euler) {
+        return fromEuler(euler.x, euler.y, euler.z);
+    }
+
+    // Convert to Euler angles (pitch=X, yaw=Y, roll=Z)
+    Vec3 toEuler() const {
+        Vec3 euler;
+
+        // Roll (Z)
+        float sinr_cosp = 2.0f * (w * z + x * y);
+        float cosr_cosp = 1.0f - 2.0f * (y * y + z * z);
+        euler.z = std::atan2(sinr_cosp, cosr_cosp);
+
+        // Pitch (X)
+        float sinp = 2.0f * (w * x - y * z);
+        if (std::abs(sinp) >= 1.0f) {
+            euler.x = std::copysign(QUARTER_TAU, sinp); // Gimbal lock
+        } else {
+            euler.x = std::asin(sinp);
+        }
+
+        // Yaw (Y)
+        float siny_cosp = 2.0f * (w * y + z * x);
+        float cosy_cosp = 1.0f - 2.0f * (x * x + y * y);
+        euler.y = std::atan2(siny_cosp, cosy_cosp);
+
+        return euler;
+    }
+
+    // Convert to 4x4 rotation matrix
+    Mat4 toMatrix() const;  // Defined after Mat4
+
+    // Length
+    float length() const { return std::sqrt(w * w + x * x + y * y + z * z); }
+    float lengthSquared() const { return w * w + x * x + y * y + z * z; }
+
+    // Normalize
+    Quaternion normalized() const {
+        float len = length();
+        if (len > 0) return Quaternion(w / len, x / len, y / len, z / len);
+        return Quaternion();
+    }
+    Quaternion& normalize() {
+        float len = length();
+        if (len > 0) { w /= len; x /= len; y /= len; z /= len; }
+        return *this;
+    }
+
+    // Conjugate (inverse for unit quaternions)
+    Quaternion conjugate() const { return Quaternion(w, -x, -y, -z); }
+
+    // Quaternion multiplication (rotation composition)
+    Quaternion operator*(const Quaternion& q) const {
+        return Quaternion(
+            w * q.w - x * q.x - y * q.y - z * q.z,
+            w * q.x + x * q.w + y * q.z - z * q.y,
+            w * q.y - x * q.z + y * q.w + z * q.x,
+            w * q.z + x * q.y - y * q.x + z * q.w
+        );
+    }
+
+    // Rotate a vector
+    Vec3 rotate(const Vec3& v) const {
+        // q * v * q^-1 (optimized)
+        Vec3 qv(x, y, z);
+        Vec3 uv = qv.cross(v);
+        Vec3 uuv = qv.cross(uv);
+        return v + ((uv * w) + uuv) * 2.0f;
+    }
+
+    // Spherical linear interpolation
+    static Quaternion slerp(const Quaternion& a, const Quaternion& b, float t) {
+        float dot = a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z;
+
+        // If negative dot, negate one quaternion to take shorter path
+        Quaternion b2 = b;
+        if (dot < 0.0f) {
+            b2 = Quaternion(-b.w, -b.x, -b.y, -b.z);
+            dot = -dot;
+        }
+
+        // If very close, use linear interpolation
+        if (dot > 0.9995f) {
+            return Quaternion(
+                a.w + t * (b2.w - a.w),
+                a.x + t * (b2.x - a.x),
+                a.y + t * (b2.y - a.y),
+                a.z + t * (b2.z - a.z)
+            ).normalized();
+        }
+
+        float theta = std::acos(dot);
+        float sinTheta = std::sin(theta);
+        float wa = std::sin((1.0f - t) * theta) / sinTheta;
+        float wb = std::sin(t * theta) / sinTheta;
+
+        return Quaternion(
+            wa * a.w + wb * b2.w,
+            wa * a.x + wb * b2.x,
+            wa * a.y + wb * b2.y,
+            wa * a.z + wb * b2.z
+        );
+    }
+};
+
+// =============================================================================
 // Mat3 - 3x3 matrix (for 2D transformations)
 // =============================================================================
 
@@ -663,6 +820,23 @@ struct Mat4 {
         );
     }
 };
+
+// =============================================================================
+// Quaternion::toMatrix implementation (after Mat4 is defined)
+// =============================================================================
+
+inline Mat4 Quaternion::toMatrix() const {
+    float xx = x * x, yy = y * y, zz = z * z;
+    float xy = x * y, xz = x * z, yz = y * z;
+    float wx = w * x, wy = w * y, wz = w * z;
+
+    return Mat4(
+        1.0f - 2.0f * (yy + zz), 2.0f * (xy - wz),        2.0f * (xz + wy),        0,
+        2.0f * (xy + wz),        1.0f - 2.0f * (xx + zz), 2.0f * (yz - wx),        0,
+        2.0f * (xz - wy),        2.0f * (yz + wx),        1.0f - 2.0f * (xx + yy), 0,
+        0,                       0,                       0,                       1
+    );
+}
 
 // =============================================================================
 // Utility functions

@@ -1873,7 +1873,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
         }
     };
     internal::appDrawFunc = []() {
-        if (app) app->drawTree();
+        if (app) app->handleDraw();
     };
     internal::appCleanupFunc = []() {
         if (app) {

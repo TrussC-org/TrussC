@@ -21,8 +21,7 @@ public:
 
     CounterButton() {
         enableEvents();  // Enable events
-        width = 150;
-        height = 50;
+        setSize(150, 50);
     }
 
     void draw() override {
@@ -38,13 +37,13 @@ public:
         // Background
         fill();
         noStroke();
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, getWidth(), getHeight());
 
         // Border
         noFill();
         stroke();
         setColor(0.6f, 0.6f, 0.7f);
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, getWidth(), getHeight());
 
         // Label and count (placed at top-left, follows rotation)
         fill();
@@ -81,12 +80,11 @@ public:
 
     RotatingPanel() {
         enableEvents();
-        width = 300;
-        height = 200;
+        setSize(300, 200);
     }
 
     void update() override {
-        rotation += (float)getDeltaTime() * rotationSpeed;
+        setRot(getRot() + (float)getDeltaTime() * rotationSpeed);
     }
 
     void draw() override {
@@ -94,13 +92,13 @@ public:
         setColor(panelColor);
         fill();
         noStroke();
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, getWidth(), getHeight());
 
         // Border
         noFill();
         stroke();
         setColor(0.5f, 0.5f, 0.6f);
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, getWidth(), getHeight());
     }
 };
 

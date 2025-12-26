@@ -14,7 +14,7 @@ public:
     float size = 200.0f;
 
     void update() override {
-        rotation += (float)getDeltaTime() * rotationSpeed;
+        setRot(getRot() + (float)getDeltaTime() * rotationSpeed);
     }
 
     void draw() override {

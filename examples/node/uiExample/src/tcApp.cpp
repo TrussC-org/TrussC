@@ -10,10 +10,7 @@ void tcApp::setup() {
     // -------------------------------------------------------------------------
     button1_ = make_shared<UIButton>();
     button1_->label = "Click Me!";
-    button1_->x = 50;
-    button1_->y = 50;
-    button1_->width = 140;
-    button1_->height = 45;
+    button1_->setRect(50, 50, 140, 45);
     button1_->onClick = [this]() {
         clickCount_++;
         button1_->label = "Clicked: " + to_string(clickCount_);
@@ -26,10 +23,7 @@ void tcApp::setup() {
     // -------------------------------------------------------------------------
     button2_ = make_shared<UIButton>();
     button2_->label = "Reset BG";
-    button2_->x = 50;
-    button2_->y = 110;
-    button2_->width = 140;
-    button2_->height = 45;
+    button2_->setRect(50, 110, 140, 45);
     button2_->normalColor = Color(0.3f, 0.25f, 0.25f);
     button2_->hoverColor = Color(0.45f, 0.35f, 0.35f);
     button2_->pressColor = Color(0.2f, 0.15f, 0.15f);
@@ -46,9 +40,7 @@ void tcApp::setup() {
     // -------------------------------------------------------------------------
     slider1_ = make_shared<UISlider>();
     slider1_->label = "BG Red";
-    slider1_->x = 50;
-    slider1_->y = 200;
-    slider1_->width = 250;
+    slider1_->setRect(50, 200, 250, 30);
     slider1_->minValue = 0.0f;
     slider1_->maxValue = 0.5f;
     slider1_->setValue(bgColor_.r);
@@ -62,9 +54,7 @@ void tcApp::setup() {
     // -------------------------------------------------------------------------
     slider2_ = make_shared<UISlider>();
     slider2_->label = "BG Green";
-    slider2_->x = 50;
-    slider2_->y = 260;
-    slider2_->width = 250;
+    slider2_->setRect(50, 260, 250, 30);
     slider2_->minValue = 0.0f;
     slider2_->maxValue = 0.5f;
     slider2_->setValue(bgColor_.g);
@@ -77,10 +67,7 @@ void tcApp::setup() {
     // Scroll box: Item list
     // -------------------------------------------------------------------------
     scrollBox_ = make_shared<UIScrollBox>();
-    scrollBox_->x = 350;
-    scrollBox_->y = 50;
-    scrollBox_->width = 250;
-    scrollBox_->height = 200;
+    scrollBox_->setRect(350, 50, 250, 200);
     scrollBox_->contentHeight = 300;  // 10 items x 30px
     addChild(scrollBox_);
 

@@ -22,8 +22,7 @@ public:
 
     UIButton() {
         enableEvents();
-        width = 120;
-        height = 40;
+        setSize(120, 40);
     }
 
     void update() override {
@@ -42,19 +41,19 @@ public:
 
         fill();
         noStroke();
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, getWidth(), getHeight());
 
         // Border
         noFill();
         stroke();
         setColor(0.5f, 0.5f, 0.6f);
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, getWidth(), getHeight());
 
         // Label (y is baseline position)
         fill();
         setColor(1.0f, 1.0f, 1.0f);
-        float textX = width / 2 - label.length() * 4;
-        drawBitmapString(label, textX, height / 2 - 13 + 10, false);
+        float textX = getWidth() / 2 - label.length() * 4;
+        drawBitmapString(label, textX, getHeight() / 2 - 13 + 10, false);
     }
 
 protected:
@@ -91,8 +90,7 @@ public:
 
     UISlider() {
         enableEvents();
-        width = 200;
-        height = 30;
+        setSize(200, 30);
     }
 
     float getValue() const {
@@ -119,18 +117,18 @@ public:
         // Background
         setColor(0.2f, 0.2f, 0.25f);
         fill();
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, getWidth(), getHeight());
 
         // Track
-        float trackY = height / 2;
+        float trackY = getHeight() / 2;
         float trackH = 4;
         setColor(0.4f, 0.4f, 0.45f);
-        drawRect(0, trackY - trackH / 2, width, trackH);
+        drawRect(0, trackY - trackH / 2, getWidth(), trackH);
 
         // Knob
-        float knobX = value * width;
+        float knobX = value * getWidth();
         float knobW = 12;
-        float knobH = height - 4;
+        float knobH = getHeight() - 4;
         setColor(isDragging_ ? Color(0.6f, 0.7f, 0.9f) : Color(0.5f, 0.6f, 0.8f));
         drawRect(knobX - knobW / 2, 2, knobW, knobH);
 
@@ -182,7 +180,7 @@ protected:
 private:
     void updateValue(float lx) {
         float oldValue = value;
-        value = std::max<float>(0.0f, std::min<float>(1.0f, lx / width));
+        value = std::max<float>(0.0f, std::min<float>(1.0f, lx / getWidth()));
         if (value != oldValue && onValueChanged) {
             onValueChanged(getValue());
         }
@@ -201,14 +199,13 @@ public:
 
     UIScrollBox() {
         enableEvents();
-        width = 200;
-        height = 150;
+        setSize(200, 150);
     }
 
     // Receive scroll event from outside
     void handleScroll(float dx, float dy) {
         (void)dx;  // Unused
-        float maxScroll = std::max<float>(0.0f, contentHeight - height);
+        float maxScroll = std::max<float>(0.0f, contentHeight - getHeight());
         scrollY = std::max<float>(0.0f, std::min<float>(maxScroll, scrollY - dy * 20));
     }
 
@@ -216,13 +213,13 @@ public:
         // Background
         setColor(0.15f, 0.15f, 0.18f);
         fill();
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, getWidth(), getHeight());
 
         // Set clipping (in global coordinates, considering DPI scale)
         float gx, gy;
         localToGlobal(0, 0, gx, gy);
         float dpi = sapp_dpi_scale();
-        pushScissor(gx * dpi, gy * dpi, width * dpi, height * dpi);
+        pushScissor(gx * dpi, gy * dpi, getWidth() * dpi, getHeight() * dpi);
 
         // Scrollable content
         pushMatrix();
@@ -233,7 +230,7 @@ public:
             float itemY = i * 30;
             setColor(0.3f + i * 0.05f, 0.3f, 0.35f);
             fill();
-            drawRect(5, itemY + 2, width - 10, 26);
+            drawRect(5, itemY + 2, getWidth() - 10, 26);
 
             setColor(1.0f, 1.0f, 1.0f);
             drawBitmapString(format("Item {}", i + 1), 10, itemY, false);
@@ -248,22 +245,22 @@ public:
         noFill();
         stroke();
         setColor(0.4f, 0.4f, 0.5f);
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, getWidth(), getHeight());
 
         // Scrollbar
-        float maxScroll = std::max<float>(0.0f, contentHeight - height);
+        float maxScroll = std::max<float>(0.0f, contentHeight - getHeight());
         if (maxScroll > 0) {
-            float barHeight = height * (height / contentHeight);
-            float barY = (scrollY / maxScroll) * (height - barHeight);
+            float barHeight = getHeight() * (getHeight() / contentHeight);
+            float barY = (scrollY / maxScroll) * (getHeight() - barHeight);
             fill();
             setColor(0.5f, 0.5f, 0.6f);
-            drawRect(width - 8, barY, 6, barHeight);
+            drawRect(getWidth() - 8, barY, 6, barHeight);
         }
     }
 
 protected:
     bool onMouseScroll(Vec2 local, Vec2 scroll) override {
-        float maxScroll = std::max<float>(0.0f, contentHeight - height);
+        float maxScroll = std::max<float>(0.0f, contentHeight - getHeight());
         scrollY = std::max<float>(0.0f, std::min<float>(maxScroll, scrollY - scroll.y * 20));
         return RectNode::onMouseScroll(local, scroll);
     }

@@ -8,8 +8,7 @@ TimerBall::TimerBall(float x, float y, float radius)
     : radius_(radius)
     , color_(colors::white)
 {
-    this->x = x;
-    this->y = y;
+    setPos(x, y);
 }
 
 void TimerBall::setup() {
@@ -35,8 +34,7 @@ void TimerBall::draw() {
 // =============================================================================
 
 CountdownNode::CountdownNode() {
-    x = 50;
-    y = 50;
+    setPos(50, 50);
 }
 
 void CountdownNode::setup() {
@@ -60,8 +58,7 @@ void CountdownNode::draw() {
 // =============================================================================
 
 PulseNode::PulseNode() {
-    x = 400;
-    y = 450;
+    setPos(400, 450);
 }
 
 void PulseNode::setup() {
@@ -106,33 +103,26 @@ void tcApp::setup() {
     tcLogNotice("tcApp") << "timerExample: callAfter / callEvery Demo";
     tcLogNotice("tcApp") << "  - Press R to reset all timers";
 
-    // Create root node
-    rootNode_ = make_shared<Node>();
-
     // Countdown node
     countdownNode_ = make_shared<CountdownNode>();
-    rootNode_->addChild(countdownNode_);
-    countdownNode_->setup();
+    addChild(countdownNode_);
 
     // Timer balls (3 balls)
     float startX = 150;
     float spacing = 150;
     for (int i = 0; i < 3; i++) {
         auto ball = make_shared<TimerBall>(startX + i * spacing, 200, 40);
-        rootNode_->addChild(ball);
-        ball->setup();
+        addChild(ball);
         balls_.push_back(ball);
     }
 
     // Pulse node
     pulseNode_ = make_shared<PulseNode>();
-    rootNode_->addChild(pulseNode_);
-    pulseNode_->setup();
+    addChild(pulseNode_);
 }
 
 void tcApp::update() {
-    // Update node tree (timers are also processed here)
-    rootNode_->updateTree();
+    // Child nodes are updated automatically by App
 }
 
 void tcApp::draw() {
@@ -153,8 +143,7 @@ void tcApp::draw() {
     drawBitmapStringHighlight("callEvery + cancelTimer: Timer stops after 10 pulses",
         200, 380, Color(0, 0, 0, 0.5f), colors::lightGray);
 
-    // Draw node tree
-    rootNode_->drawTree();
+    // Child nodes are drawn automatically by App
 
     // Control instructions
     drawBitmapStringHighlight("Press R to reset",
@@ -164,24 +153,21 @@ void tcApp::draw() {
 void tcApp::keyPressed(int key) {
     if (key == 'r' || key == 'R') {
         // Reset: recreate nodes
-        rootNode_->removeAllChildren();
+        removeAllChildren();
         balls_.clear();
 
-        // Re-setup
+        // Re-setup (setup() is called automatically on first update)
         countdownNode_ = make_shared<CountdownNode>();
-        rootNode_->addChild(countdownNode_);
-        countdownNode_->setup();
+        addChild(countdownNode_);
 
         for (int i = 0; i < 3; i++) {
             auto ball = make_shared<TimerBall>(150 + i * 150, 200, 40);
-            rootNode_->addChild(ball);
-            ball->setup();
+            addChild(ball);
             balls_.push_back(ball);
         }
 
         pulseNode_ = make_shared<PulseNode>();
-        rootNode_->addChild(pulseNode_);
-        pulseNode_->setup();
+        addChild(pulseNode_);
 
         tcLogNotice("tcApp") << "Reset all timers";
     }

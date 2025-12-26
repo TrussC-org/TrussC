@@ -44,7 +44,7 @@ public:
 
         // Label
         setColor(1.0f);
-        drawBitmapString(label, 10, height / 2 - 5);
+        drawBitmapString(label, 10, getHeight() / 2 - 5);
     }
 
 protected:

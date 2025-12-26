@@ -22,15 +22,50 @@ public:
     Event<MouseDragEventArgs> mouseDragged;
     Event<ScrollEventArgs> mouseScrolled;
 
-    // Size (width and height in local coordinates)
-    float width = 100.0f;
-    float height = 100.0f;
+    // -------------------------------------------------------------------------
+    // Size settings
+    // -------------------------------------------------------------------------
+
+    float getWidth() const { return width_; }
+    float getHeight() const { return height_; }
+    Vec2 getSize() const { return Vec2(width_, height_); }
+
+    void setWidth(float w) {
+        if (width_ != w) {
+            width_ = w;
+            onSizeChanged();
+        }
+    }
+
+    void setHeight(float h) {
+        if (height_ != h) {
+            height_ = h;
+            onSizeChanged();
+        }
+    }
+
+    void setSize(float w, float h) {
+        if (width_ != w || height_ != h) {
+            width_ = w;
+            height_ = h;
+            onSizeChanged();
+        }
+    }
+
+    void setSize(float size) {
+        setSize(size, size);
+    }
+
+    // Set position and size at once
+    void setRect(float x, float y, float w, float h) {
+        setPos(x, y);
+        setSize(w, h);
+    }
 
     // -------------------------------------------------------------------------
     // Clipping settings
     // -------------------------------------------------------------------------
 
-    // Enable/disable clipping
     void setClipping(bool enabled) {
         clipping_ = enabled;
     }
@@ -40,32 +75,15 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // Size settings
-    // -------------------------------------------------------------------------
-
-    void setSize(float w, float h) {
-        width = w;
-        height = h;
-    }
-
-    void setSize(float size) {
-        width = height = size;
-    }
-
-    Vec2 getSize() const {
-        return Vec2(width, height);
-    }
-
-    // -------------------------------------------------------------------------
     // Get rectangle (in local coordinates)
     // -------------------------------------------------------------------------
 
     // Treat as rectangle starting from origin (0,0)
     // To center at origin, offset by -width/2, -height/2 when drawing
     float getLeft() const { return 0; }
-    float getRight() const { return width; }
+    float getRight() const { return width_; }
     float getTop() const { return 0; }
-    float getBottom() const { return height; }
+    float getBottom() const { return height_; }
 
     // -------------------------------------------------------------------------
     // Ray-based Hit Test
@@ -87,8 +105,8 @@ public:
         }
 
         // Check if intersection point is within rectangle
-        if (hitPoint.x >= 0 && hitPoint.x <= width &&
-            hitPoint.y >= 0 && hitPoint.y <= height) {
+        if (hitPoint.x >= 0 && hitPoint.x <= width_ &&
+            hitPoint.y >= 0 && hitPoint.y <= height_) {
             outDistance = t;
             return true;
         }
@@ -101,8 +119,8 @@ public:
         if (!isEventsEnabled()) {
             return false;
         }
-        return local.x >= 0 && local.x <= width &&
-               local.y >= 0 && local.y <= height;
+        return local.x >= 0 && local.x <= width_ &&
+               local.y >= 0 && local.y <= height_;
     }
 
     // -------------------------------------------------------------------------
@@ -115,32 +133,15 @@ public:
         // Derived classes call drawRect(0, 0, width, height) etc.
     }
 
-    // Draw tree with clipping support
-    void drawTree() override {
-        if (!isActive) return;
-
-        pushMatrix();
-
-        // Apply transformations
-        translate(x, y);
-        if (rotation != 0.0f) {
-            rotate(rotation);
-        }
-        if (scaleX != 1.0f || scaleY != 1.0f) {
-            scale(scaleX, scaleY);
-        }
-
-        // User drawing
-        if (isVisible) {
-            draw();
-        }
-
+protected:
+    // Draw children with clipping support
+    void drawChildren() override {
         // If clipping enabled, set scissor (push to stack)
         if (clipping_) {
-            // Convert local coordinates (0,0) and (width, height) to global
+            // Convert local coordinates (0,0) and (width_, height_) to global
             float gx1, gy1, gx2, gy2;
             localToGlobal(0, 0, gx1, gy1);
-            localToGlobal(width, height, gx2, gy2);
+            localToGlobal(width_, height_, gx2, gy2);
 
             // Calculate rectangle in screen coordinates (considering DPI scale)
             float dpi = sapp_dpi_scale();
@@ -153,20 +154,14 @@ public:
         }
 
         // Draw child nodes
-        for (auto& child : children_) {
-            child->drawTree();
-        }
+        Node::drawChildren();
 
         // Restore clipping (pop from stack)
         if (clipping_) {
             popScissor();
         }
-
-        popMatrix();
     }
 
-protected:
-    bool clipping_ = false;
     // -------------------------------------------------------------------------
     // Mouse events (fire events)
     // -------------------------------------------------------------------------
@@ -217,22 +212,30 @@ protected:
     void drawRectFill() {
         fill();
         noStroke();
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, width_, height_);
     }
 
     // Helper to draw rectangle with stroke
     void drawRectStroke() {
         noFill();
         stroke();
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, width_, height_);
     }
 
     // Helper to draw rectangle with both fill and stroke
     void drawRectFillStroke() {
         fill();
         stroke();
-        drawRect(0, 0, width, height);
+        drawRect(0, 0, width_, height_);
     }
+
+    // Override for custom behavior when size changes
+    virtual void onSizeChanged() {}
+
+private:
+    float width_ = 100.0f;
+    float height_ = 100.0f;
+    bool clipping_ = false;
 };
 
 // =============================================================================
@@ -275,8 +278,8 @@ public:
         if (!label.empty()) {
             setColor(1.0f, 1.0f, 1.0f);
             // Simple centering (simplified version without font size consideration)
-            float textX = width / 2 - label.length() * 4;
-            float textY = height / 2 + 4;
+            float textX = getWidth() / 2 - label.length() * 4;
+            float textY = getHeight() / 2 + 4;
             drawBitmapString(label, textX, textY);
         }
     }
