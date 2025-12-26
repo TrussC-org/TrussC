@@ -1,6 +1,7 @@
 # TrussC
 
 [![Build](https://github.com/TrussC-org/TrussC/actions/workflows/build.yml/badge.svg)](https://github.com/TrussC-org/TrussC/actions/workflows/build.yml)
+[![Discord](https://img.shields.io/discord/1454128450112847998?label=discord&logo=discord&color=5865F2)](https://discord.gg/7MRRny56VQ)
 
 A lightweight creative coding framework based on sokol.
 Inspired by openFrameworks, implemented simply with modern C++.
