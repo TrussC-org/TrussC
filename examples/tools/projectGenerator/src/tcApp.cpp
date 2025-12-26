@@ -763,8 +763,29 @@ void tcApp::generateVSCodeFiles(const string& path) {
 
     // settings.json
     Json settings;
+    settings["cmake.buildDirectory"] = "${workspaceFolder}/build-macos";
     settings["cmake.sourceDirectory"] = "${workspaceFolder}";
     settings["cmake.useCMakePresets"] = "always";
+    settings["cmake.configureOnOpen"] = true;
+    settings["cmake.buildBeforeRun"] = true;
+#ifdef __APPLE__
+    settings["cmake.configurePreset"] = "macos";
+    settings["cmake.buildPreset"] = "macos";
+#elif defined(_WIN32)
+    settings["cmake.configurePreset"] = "windows";
+    settings["cmake.buildPreset"] = "windows";
+#else
+    settings["cmake.configurePreset"] = "linux";
+    settings["cmake.buildPreset"] = "linux";
+#endif
+
+    // Hide misleading launch button
+    Json launchOptions;
+    launchOptions["statusBarVisibility"] = "hidden";
+    Json advancedOptions;
+    advancedOptions["launch"] = launchOptions;
+    settings["cmake.options.advanced"] = advancedOptions;
+
     saveJson(settings, vscodePath + "/settings.json");
 
     // tasks.json
