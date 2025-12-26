@@ -192,10 +192,10 @@ void TcpServer::acceptThreadFunc() {
             std::lock_guard<std::mutex> lock(clientsMutex_);
             clientId = nextClientId_++;
             TcpServerClient client;
-            client.id = clientId;
-            client.host = hostStr;
-            client.port = clientPort;
-            client.socket = clientSocket;
+            client.id_ = clientId;
+            client.host_ = hostStr;
+            client.port_ = clientPort;
+            client.socket_ = clientSocket;
             clients_[clientId] = client;
         }
 
@@ -232,7 +232,7 @@ void TcpServer::clientThreadFunc(int clientId) {
         std::lock_guard<std::mutex> lock(clientsMutex_);
         auto it = clients_.find(clientId);
         if (it == clients_.end()) return;
-        clientSocket = it->second.socket;
+        clientSocket = it->second.socket_;
     }
 
     while (running_) {
@@ -284,11 +284,11 @@ void TcpServer::disconnectClient(int clientId) {
     auto it = clients_.find(clientId);
     if (it != clients_.end()) {
 #ifdef _WIN32
-        shutdown(it->second.socket, SD_BOTH);
-        CLOSE_SOCKET(it->second.socket);
+        shutdown(it->second.socket_, SD_BOTH);
+        CLOSE_SOCKET(it->second.socket_);
 #else
-        shutdown(it->second.socket, SHUT_RDWR);
-        CLOSE_SOCKET(it->second.socket);
+        shutdown(it->second.socket_, SHUT_RDWR);
+        CLOSE_SOCKET(it->second.socket_);
 #endif
         clients_.erase(it);
     }
@@ -338,7 +338,7 @@ void TcpServer::removeClient(int clientId) {
     std::lock_guard<std::mutex> lock(clientsMutex_);
     auto it = clients_.find(clientId);
     if (it != clients_.end()) {
-        CLOSE_SOCKET(it->second.socket);
+        CLOSE_SOCKET(it->second.socket_);
         clients_.erase(it);
     }
 }
@@ -381,7 +381,7 @@ bool TcpServer::send(int clientId, const void* data, size_t size) {
     size_t remaining = size;
 
     while (remaining > 0) {
-        int sent = static_cast<int>(::send(it->second.socket, ptr, remaining, 0));
+        int sent = static_cast<int>(::send(it->second.socket_, ptr, remaining, 0));
         if (sent == SOCKET_ERROR) {
             notifyError("Send failed", SOCKET_ERROR_CODE, clientId);
             return false;

@@ -32,15 +32,23 @@ namespace trussc {
 // =============================================================================
 // Connected client information
 // =============================================================================
-struct TcpServerClient {
-    int id;                 // Client ID (assigned by server)
-    std::string host;       // Client IP address
-    int port;               // Client port
+class TcpServerClient {
+public:
+    int getId() const { return id_; }
+    const std::string& getHost() const { return host_; }
+    int getPort() const { return port_; }
+
+private:
+    friend class TcpServer;
+
+    int id_;                // Client ID (assigned by server)
+    std::string host_;      // Client IP address
+    int port_;              // Client port
 
 #ifdef _WIN32
-    SOCKET socket;
+    SOCKET socket_;
 #else
-    int socket;
+    int socket_;
 #endif
 };
 
