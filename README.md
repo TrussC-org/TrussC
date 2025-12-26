@@ -27,9 +27,8 @@ Supports VSCode, Cursor, Xcode, and Visual Studio.
 ```bash
 # Build an example
 cd examples/graphics/graphicsExample
-mkdir build && cd build
-cmake ..
-cmake --build .
+cmake --preset macos      # or: windows, linux, web
+cmake --build build-macos
 
 # Run (macOS)
 ./bin/graphicsExample.app/Contents/MacOS/graphicsExample
@@ -39,106 +38,87 @@ cmake --build .
 
 ```cpp
 #include "TrussC.h"
-#include "tcBaseApp.h"
+using namespace std;
+using namespace tc;
 
-class MyApp : public tc::App {
-public:
-    void setup() override {
-        // Initialization
-    }
-
+class MyApp : public App {
     void draw() override {
-        tc::clear(30);  // Clear background to gray
+        clear(0.1);  // Clear to dark gray
 
-        tc::setColor(255, 100, 100);
-        tc::drawCircle(400, 300, 100);  // Draw a red circle
+        setColor(1.0, 0.4, 0.4);
+        drawCircle(getWindowWidth() / 2, getWindowHeight() / 2, 100);
     }
 };
 
 int main() {
-    tc::runApp<MyApp>({
-        .width = 800,
-        .height = 600,
-        .title = "My App"
-    });
-    return 0;
+    WindowSettings settings;
+    settings.setSize(960, 600);
+    settings.setTitle("My App");
+    return runApp<MyApp>(settings);
 }
 ```
 
 ## Examples
 
-### templates/
-- **emptyExample** - Minimal project template
-
-### graphics/
-- **graphicsExample** - Basic shape drawing
-- **colorExample** - Color spaces and interpolation
-
-### 3d/
-- **ofNodeExample** - Scene graph / node system
-- **3DPrimitivesExample** - 3D primitives
-- **easyCamExample** - Mouse-controlled 3D camera
-
-### math/
-- **vectorMathExample** - Vector and matrix operations
-
-### input_output/
-- **imageLoaderExample** - Image loading and drawing
-- **screenshotExample** - Screenshot using FBO
-
-### events/
-- **keyPressedExample** - Keyboard events
-- **mouseExample** - Mouse events
-- **allEventsExample** - All events overview
-
-### threads/
-- **threadExample** - Multithreading
+| Category | Examples |
+|----------|----------|
+| **templates/** | emptyExample |
+| **graphics/** | graphicsExample, colorExample, fontExample, shaderExample, fboExample |
+| **3d/** | 3DPrimitivesExample, easyCamExample |
+| **node/** | nodeExample, hitTestExample, uiExample |
+| **input_output/** | keyboardExample, mouseExample, imageLoaderExample, screenshotExample |
+| **sound/** | soundPlayerExample, micInputExample, chipSoundExample |
+| **video/** | videoPlayerExample, videoGrabberExample |
+| **network/** | tcpExample, udpExample |
+| **ImGui/** | imguiExample |
+| **utils/** | timerExample, clipboardExample |
+| **tools/** | projectGenerator |
 
 ## Main API
 
 ### Drawing
 
 ```cpp
-tc::clear(r, g, b);              // Clear background
-tc::setColor(r, g, b, a);        // Set draw color
-tc::drawRect(x, y, w, h);        // Rectangle
-tc::drawCircle(x, y, radius);    // Circle
-tc::drawLine(x1, y1, x2, y2);    // Line
-tc::drawTriangle(x1, y1, ...);   // Triangle
+clear(0.1);                      // Clear background (0-1)
+setColor(1.0, 0.5, 0.0);         // Set draw color (0-1)
+drawRect(x, y, w, h);            // Rectangle
+drawCircle(x, y, radius);        // Circle
+drawLine(x1, y1, x2, y2);        // Line
+drawTriangle(x1, y1, ...);       // Triangle
 ```
 
 ### Transform
 
 ```cpp
-tc::translate(x, y);
-tc::rotate(radians);
-tc::scale(sx, sy);
-tc::pushMatrix();
-tc::popMatrix();
+translate(x, y);
+rotate(radians);
+scale(sx, sy);
+pushMatrix();
+popMatrix();
 ```
 
 ### Input
 
 ```cpp
-tc::getMouseX();
-tc::getMouseY();
-tc::isMousePressed();
+getMouseX();
+getMouseY();
+isMousePressed();
 ```
 
 ### Time
 
 ```cpp
-tc::getElapsedTime();    // Seconds since start
-tc::getDeltaTime();      // Seconds since last frame
-tc::getFrameRate();      // FPS
+getElapsedTime();    // Seconds since start
+getDeltaTime();      // Seconds since last frame
+getFrameRate();      // FPS
 ```
 
 ### Color
 
 ```cpp
-tc::Color c(1.0f, 0.5f, 0.0f);           // RGB
-tc::colorFromHSB(hue, sat, brightness);  // From HSB
-tc::colors::cornflowerBlue;              // Predefined colors
+Color c(1.0, 0.5, 0.0);              // RGB (0-1)
+Color::fromHSB(hue, sat, bri);       // From HSB
+colors::cornflowerBlue;              // Predefined colors
 ```
 
 ## Why TAU?
@@ -175,16 +155,21 @@ See [LICENSE.md](docs/LICENSE.md) for details.
 ## Directory Structure
 
 ```
-include/
+trussc/include/
 ├── TrussC.h          # Main header (include this)
 ├── tcBaseApp.h       # App base class
 ├── tc/               # Feature headers
-│   ├── graphics/     # Drawing
-│   ├── math/         # Math utilities
-│   ├── types/        # Color, Vec2, etc.
+│   ├── graphics/     # Shapes, images, fonts
+│   ├── gpu/          # FBO, shaders, textures
+│   ├── 3d/           # 3D transforms, primitives, camera
+│   ├── types/        # Color, Vec2/3/4, etc.
 │   ├── events/       # Event system
-│   ├── 3d/           # 3D features
-│   └── gl/           # FBO, shaders, etc.
+│   ├── math/         # Math utilities, noise
+│   ├── sound/        # Audio playback
+│   ├── video/        # Video playback, webcam
+│   ├── network/      # TCP, UDP
+│   ├── utils/        # Timer, file dialogs, etc.
+│   └── gui/          # Dear ImGui integration
 ├── sokol/            # sokol library
 └── stb/              # stb library
 
