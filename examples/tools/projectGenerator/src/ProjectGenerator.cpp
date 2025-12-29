@@ -253,8 +253,34 @@ void ProjectGenerator::generateVSCodeFiles(const string& path) {
 
     // settings.json
     Json settings;
-    settings["cmake.buildDirectory"] = "${workspaceFolder}/build";
     settings["cmake.sourceDirectory"] = "${workspaceFolder}";
+    settings["cmake.useCMakePresets"] = "always";
+    settings["cmake.configureOnOpen"] = true;
+    settings["cmake.buildBeforeRun"] = true;
+#ifdef __APPLE__
+    settings["cmake.buildDirectory"] = "${workspaceFolder}/build-macos";
+    settings["cmake.configurePreset"] = "macos";
+    settings["cmake.buildPreset"] = "macos";
+    settings["clangd.arguments"] = Json::array({"--compile-commands-dir=${workspaceFolder}/build-macos"});
+#elif defined(_WIN32)
+    settings["cmake.buildDirectory"] = "${workspaceFolder}/build-windows";
+    settings["cmake.configurePreset"] = "windows";
+    settings["cmake.buildPreset"] = "windows";
+    settings["clangd.arguments"] = Json::array({"--compile-commands-dir=${workspaceFolder}/build-windows"});
+#else
+    settings["cmake.buildDirectory"] = "${workspaceFolder}/build-linux";
+    settings["cmake.configurePreset"] = "linux";
+    settings["cmake.buildPreset"] = "linux";
+    settings["clangd.arguments"] = Json::array({"--compile-commands-dir=${workspaceFolder}/build-linux"});
+#endif
+    // Hide misleading launch button
+    Json launchOptions;
+    launchOptions["statusBarVisibility"] = "hidden";
+    Json advancedOptions;
+    advancedOptions["launch"] = launchOptions;
+    settings["cmake.options.advanced"] = advancedOptions;
+    // IntelliSense providers
+    settings["C_Cpp.default.configurationProvider"] = "ms-vscode.cmake-tools";
     saveJson(settings, vscodePath + "/settings.json");
 
     // tasks.json

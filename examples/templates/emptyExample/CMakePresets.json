@@ -5,7 +5,10 @@
       "name": "macos",
       "displayName": "macOS",
       "binaryDir": "${sourceDir}/build-macos",
-      "generator": "Unix Makefiles"
+      "generator": "Unix Makefiles",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
     },
     {
       "name": "windows",
@@ -17,14 +20,20 @@
       "name": "linux",
       "displayName": "Linux",
       "binaryDir": "${sourceDir}/build-linux",
-      "generator": "Unix Makefiles"
+      "generator": "Unix Makefiles",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
     },
     {
       "name": "web",
       "displayName": "Web (Emscripten)",
       "binaryDir": "${sourceDir}/build-web",
       "generator": "Unix Makefiles",
-      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
     }
   ],
   "buildPresets": [
