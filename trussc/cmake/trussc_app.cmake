@@ -81,15 +81,9 @@ macro(trussc_app)
     source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "src" FILES ${_TC_SOURCES})
 
     # Create executable
+    # Note: Windows console hiding is handled via #pragma in TrussC.h
+    # (hidden in Release, shown in Debug or when TRUSSC_SHOW_CONSOLE is defined)
     add_executable(${PROJECT_NAME} ${_TC_SOURCES})
-
-    # Windows: hide console window (use WINDOWS subsystem with main() entry point)
-    if(WIN32)
-        target_link_options(${PROJECT_NAME} PRIVATE
-            "/SUBSYSTEM:WINDOWS"
-            "/ENTRY:mainCRTStartup"
-        )
-    endif()
 
     # Link TrussC
     target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC)
