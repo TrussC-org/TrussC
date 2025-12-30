@@ -113,49 +113,94 @@ void ProjectGenerator::writeAddonsMake(const string& destPath) {
     addonsFile.close();
 }
 
-void ProjectGenerator::writeCMakeUserPresets(const string& destPath) {
-#ifdef _WIN32
-    // Get ninja path from detected VS versions
-    if (settings_.installedVsVersions.empty() ||
-        settings_.selectedVsIndex >= (int)settings_.installedVsVersions.size()) {
-        return;
-    }
+void ProjectGenerator::writeCMakePresets(const string& destPath) {
+    log("Writing CMakePresets.json...");
 
-    string ninjaPath = settings_.installedVsVersions[settings_.selectedVsIndex].ninjaPath;
-    if (ninjaPath.empty()) {
-        return;
-    }
-
-    // Convert backslashes to forward slashes for JSON
-    for (char& c : ninjaPath) {
-        if (c == '\\') c = '/';
-    }
-
-    log("Writing CMakeUserPresets.json...");
-
-    // Generate CMakeUserPresets.json with ninja path
-    // Uses "default" preset name which inherits from "windows" and adds CMAKE_MAKE_PROGRAM
     Json presets;
     presets["version"] = 6;
-
-    Json defaultPreset;
-    defaultPreset["name"] = "default";
-    defaultPreset["displayName"] = "Default (Windows)";
-    defaultPreset["inherits"] = "windows";
-    defaultPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = ninjaPath;
-
     presets["configurePresets"] = Json::array();
-    presets["configurePresets"].push_back(defaultPreset);
-
-    Json defaultBuildPreset;
-    defaultBuildPreset["name"] = "default";
-    defaultBuildPreset["configurePreset"] = "default";
-
     presets["buildPresets"] = Json::array();
-    presets["buildPresets"].push_back(defaultBuildPreset);
 
-    saveJson(presets, destPath + "/CMakeUserPresets.json");
+#ifdef __APPLE__
+    // macOS preset
+    Json macosPreset;
+    macosPreset["name"] = "macos";
+    macosPreset["displayName"] = "macOS";
+    macosPreset["binaryDir"] = "${sourceDir}/build-macos";
+    macosPreset["generator"] = "Unix Makefiles";
+    macosPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
+    presets["configurePresets"].push_back(macosPreset);
+
+    Json macosBuildPreset;
+    macosBuildPreset["name"] = "macos";
+    macosBuildPreset["configurePreset"] = "macos";
+    macosBuildPreset["jobs"] = 4;
+    presets["buildPresets"].push_back(macosBuildPreset);
+
+#elif defined(_WIN32)
+    // Windows preset with ninja path
+    Json windowsPreset;
+    windowsPreset["name"] = "windows";
+    windowsPreset["displayName"] = "Windows";
+    windowsPreset["binaryDir"] = "${sourceDir}/build-windows";
+    windowsPreset["generator"] = "Ninja";
+    windowsPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
+
+    // Add ninja path if available
+    if (!settings_.installedVsVersions.empty() &&
+        settings_.selectedVsIndex < (int)settings_.installedVsVersions.size()) {
+        string ninjaPath = settings_.installedVsVersions[settings_.selectedVsIndex].ninjaPath;
+        if (!ninjaPath.empty()) {
+            // Convert backslashes to forward slashes for JSON
+            for (char& c : ninjaPath) {
+                if (c == '\\') c = '/';
+            }
+            windowsPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = ninjaPath;
+        }
+    }
+    presets["configurePresets"].push_back(windowsPreset);
+
+    Json windowsBuildPreset;
+    windowsBuildPreset["name"] = "windows";
+    windowsBuildPreset["configurePreset"] = "windows";
+    presets["buildPresets"].push_back(windowsBuildPreset);
+
+#else
+    // Linux preset
+    Json linuxPreset;
+    linuxPreset["name"] = "linux";
+    linuxPreset["displayName"] = "Linux";
+    linuxPreset["binaryDir"] = "${sourceDir}/build-linux";
+    linuxPreset["generator"] = "Unix Makefiles";
+    linuxPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
+    presets["configurePresets"].push_back(linuxPreset);
+
+    Json linuxBuildPreset;
+    linuxBuildPreset["name"] = "linux";
+    linuxBuildPreset["configurePreset"] = "linux";
+    linuxBuildPreset["jobs"] = 4;
+    presets["buildPresets"].push_back(linuxBuildPreset);
 #endif
+
+    // Add web preset if web build is enabled
+    if (settings_.generateWebBuild) {
+        Json webPreset;
+        webPreset["name"] = "web";
+        webPreset["displayName"] = "Web (Emscripten)";
+        webPreset["binaryDir"] = "${sourceDir}/build-web";
+        webPreset["generator"] = "Unix Makefiles";
+        webPreset["toolchainFile"] = "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake";
+        webPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
+        presets["configurePresets"].push_back(webPreset);
+
+        Json webBuildPreset;
+        webBuildPreset["name"] = "web";
+        webBuildPreset["configurePreset"] = "web";
+        webBuildPreset["jobs"] = 4;
+        presets["buildPresets"].push_back(webBuildPreset);
+    }
+
+    saveJson(presets, destPath + "/CMakePresets.json");
 }
 
 string ProjectGenerator::generate() {
@@ -188,9 +233,10 @@ string ProjectGenerator::generate() {
             fs::create_directories(destPath);
             for (const auto& entry : fs::directory_iterator(settings_.templatePath)) {
                 string name = entry.path().filename().string();
-                // Skip build directories and output
+                // Skip build directories, output, and generated files
                 if (name == "build" || name == "bin" ||
-                    name == "build-macos" || name == "build-windows" || name == "build-linux") {
+                    name == "build-macos" || name == "build-windows" || name == "build-linux" ||
+                    name == "CMakePresets.json" || name == "CMakeUserPresets.json") {
                     continue;
                 }
                 fs::copy(entry.path(), destPath + "/" + name,
@@ -204,12 +250,13 @@ string ProjectGenerator::generate() {
         log("Writing addons.make...");
         writeAddonsMake(destPath);
 
+        // Write CMakePresets.json (OS-specific)
+        writeCMakePresets(destPath);
+
         // Generate IDE-specific files
         if (settings_.ideType == IdeType::VSCode || settings_.ideType == IdeType::Cursor) {
             log("Generating VSCode files...");
             generateVSCodeFiles(destPath);
-            // Write CMakeUserPresets.json for Windows (contains ninja path)
-            writeCMakeUserPresets(destPath);
             // Run CMake configure to generate compile_commands.json
             runCMakeConfigure(destPath);
         } else if (settings_.ideType == IdeType::Xcode) {
@@ -241,24 +288,17 @@ string ProjectGenerator::update(const string& projectPath) {
         log("Updating CMakeLists.txt...");
         writeCMakeLists(projectPath);
 
-        // Update CMakePresets.json (always overwrite with latest template)
-        string templatePresets = settings_.templatePath + "/CMakePresets.json";
-        string destPresets = projectPath + "/CMakePresets.json";
-        if (fs::exists(templatePresets)) {
-            log("Updating CMakePresets.json...");
-            fs::copy_file(templatePresets, destPresets, fs::copy_options::overwrite_existing);
-        }
-
         // Update addons.make
         log("Updating addons.make...");
         writeAddonsMake(projectPath);
+
+        // Write CMakePresets.json (OS-specific)
+        writeCMakePresets(projectPath);
 
         // Regenerate IDE-specific files
         if (settings_.ideType == IdeType::VSCode || settings_.ideType == IdeType::Cursor) {
             log("Updating VSCode files...");
             generateVSCodeFiles(projectPath);
-            // Write CMakeUserPresets.json for Windows (contains ninja path)
-            writeCMakeUserPresets(projectPath);
             // Run CMake configure to generate compile_commands.json
             runCMakeConfigure(projectPath);
         } else if (settings_.ideType == IdeType::Xcode) {
@@ -341,8 +381,8 @@ void ProjectGenerator::generateVSCodeFiles(const string& path) {
     settings["clangd.arguments"] = Json::array({"--compile-commands-dir=${workspaceFolder}/build-macos"});
 #elif defined(_WIN32)
     settings["cmake.buildDirectory"] = "${workspaceFolder}/build-windows";
-    settings["cmake.configurePreset"] = "default";  // Uses CMakeUserPresets.json with ninja path
-    settings["cmake.buildPreset"] = "default";
+    settings["cmake.configurePreset"] = "windows";
+    settings["cmake.buildPreset"] = "windows";
     settings["clangd.arguments"] = Json::array({"--compile-commands-dir=${workspaceFolder}/build-windows"});
 #else
     settings["cmake.buildDirectory"] = "${workspaceFolder}/build-linux";
@@ -548,7 +588,7 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
 // Visual Studio generator does NOT support compile_commands.json.
 void ProjectGenerator::runCMakeConfigure(const string& path) {
 #ifdef _WIN32
-    string preset = "default";  // Uses CMakeUserPresets.json which has ninja path
+    string preset = "windows";
 
     // Get vcvarsall.bat path from detected VS versions
     string vcvarsallPath;
