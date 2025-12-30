@@ -55,6 +55,9 @@ private:
     void generateVisualStudioProject(const std::string& path);
     void generateWebBuildFiles(const std::string& path);
 
+    // Run CMake configure for VSCode/Cursor (generates compile_commands.json)
+    void runCMakeConfigure(const std::string& path);
+
     // Write CMakeLists.txt with updated TRUSSC_DIR
     void writeCMakeLists(const std::string& destPath);
 

@@ -44,6 +44,10 @@ sudo apt install cmake
 winget install Ninja-build.Ninja
 ```
 
+> **Why Ninja instead of Visual Studio's bundled tools?**
+> We intentionally use standalone Ninja so that VSCode/Cursor users don't need full Visual Studio installed.
+> This keeps the VS requirement optional for lightweight development setups.
+
 ### Editor Setup
 
 #### VSCode

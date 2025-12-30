@@ -143,7 +143,9 @@ string ProjectGenerator::generate() {
             fs::create_directories(destPath);
             for (const auto& entry : fs::directory_iterator(settings_.templatePath)) {
                 string name = entry.path().filename().string();
-                if (name == "build" || name == "bin") {
+                // Skip build directories and output
+                if (name == "build" || name == "bin" ||
+                    name == "build-macos" || name == "build-windows" || name == "build-linux") {
                     continue;
                 }
                 fs::copy(entry.path(), destPath + "/" + name,
@@ -161,6 +163,8 @@ string ProjectGenerator::generate() {
         if (settings_.ideType == IdeType::VSCode || settings_.ideType == IdeType::Cursor) {
             log("Generating VSCode files...");
             generateVSCodeFiles(destPath);
+            // Run CMake configure to generate compile_commands.json
+            runCMakeConfigure(destPath);
         } else if (settings_.ideType == IdeType::Xcode) {
             log("Generating Xcode project...");
             generateXcodeProject(destPath);
@@ -206,6 +210,8 @@ string ProjectGenerator::update(const string& projectPath) {
         if (settings_.ideType == IdeType::VSCode || settings_.ideType == IdeType::Cursor) {
             log("Updating VSCode files...");
             generateVSCodeFiles(projectPath);
+            // Run CMake configure to generate compile_commands.json
+            runCMakeConfigure(projectPath);
         } else if (settings_.ideType == IdeType::Xcode) {
             log("Regenerating Xcode project...");
             generateXcodeProject(projectPath);
@@ -468,4 +474,56 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
     file.close();
     chmod(scriptPath.c_str(), 0755);
 #endif
+}
+
+// Run CMake configure to generate compile_commands.json for IntelliSense.
+//
+// Architecture decision: On Windows, we use standalone Ninja instead of
+// Visual Studio's bundled toolchain. This is intentional because:
+// - VSCode/Cursor users don't necessarily need full Visual Studio installed
+// - We want to keep the VS requirement optional for lightweight development
+// - Ninja is a small standalone tool that's easy to install (winget install Ninja-build.Ninja)
+//
+// Unix Makefiles (macOS/Linux) and Ninja both support CMAKE_EXPORT_COMPILE_COMMANDS.
+// Visual Studio generator does NOT support compile_commands.json.
+void ProjectGenerator::runCMakeConfigure(const string& path) {
+    // Determine preset name based on OS
+#ifdef __APPLE__
+    string preset = "macos";
+#elif defined(_WIN32)
+    string preset = "windows";
+#else
+    string preset = "linux";
+#endif
+
+    log("Running CMake configure (preset: " + preset + ")...");
+
+    // Run cmake --preset <preset>
+#ifdef _WIN32
+    string cmd = "cd /d \"" + path + "\" && cmake --preset " + preset;
+#else
+    string cmd = "cd \"" + path + "\" && cmake --preset " + preset;
+#endif
+
+    auto [result, output] = executeCommand(cmd);
+
+    if (!output.empty()) {
+        log(output);
+    }
+
+    if (result != 0) {
+        // Check for common errors and provide helpful messages
+#ifdef _WIN32
+        if (output.find("Ninja") != string::npos) {
+            log("");
+            log("ERROR: Ninja is not installed.");
+            log("Install with: winget install Ninja-build.Ninja");
+            log("Or download from: https://github.com/ninja-build/ninja/releases");
+            throw runtime_error("Ninja is not installed. See log for installation instructions.");
+        }
+#endif
+        throw runtime_error("CMake configure failed");
+    }
+
+    log("CMake configure complete. compile_commands.json generated.");
 }
