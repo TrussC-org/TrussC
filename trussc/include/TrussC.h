@@ -1974,23 +1974,23 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #include "tc/3d/tcMaterial.h"
 #include "tc/3d/tcLight.h"
 
-// TrussC mesh
-#include "tc/graphics/tcMesh.h"
-
-// TrussC stroke mesh (thick line drawing)
-#include "tc/graphics/tcStrokeMesh.h"
-
 // TrussC pixel buffer
 #include "tc/graphics/tcPixels.h"
 
-// TrussC texture
+// TrussC texture (needed before tcMesh.h)
 #include "tc/gpu/tcTexture.h"
 
 // TrussC HasTexture interface
 #include "tc/gpu/tcHasTexture.h"
 
-// TrussC image
+// TrussC image (needed before tcMesh.h)
 #include "tc/graphics/tcImage.h"
+
+// TrussC mesh
+#include "tc/graphics/tcMesh.h"
+
+// TrussC stroke mesh (thick line drawing)
+#include "tc/graphics/tcStrokeMesh.h"
 #include "tc/graphics/tcFont.h"
 
 // TrussC FBO (offscreen rendering)

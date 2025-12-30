@@ -1,6 +1,7 @@
 #pragma once
 
 // This file is included from TrussC.h
+// Note: tcTexture.h and tcImage.h must be included before this file
 
 #include <vector>
 
@@ -152,6 +153,9 @@ public:
     std::vector<Vec2>& getTexCoords() { return texCoords_; }
     const std::vector<Vec2>& getTexCoords() const { return texCoords_; }
     bool hasTexCoords() const { return !texCoords_.empty(); }
+    bool hasValidTexCoords() const {
+        return hasTexCoords() && texCoords_.size() >= vertices_.size();
+    }
 
     // ---------------------------------------------------------------------------
     // Clear
@@ -185,6 +189,17 @@ public:
 
         // Normal drawing
         drawNoLighting();
+    }
+
+    // Draw with texture
+    void draw(const Texture& texture) const {
+        if (vertices_.empty()) return;
+        drawNoLightingWithTexture(texture);
+    }
+
+    // Draw with image (convenience method)
+    void draw(const Image& image) const {
+        draw(image.getTexture());
     }
 
     // Normal drawing without lighting
@@ -348,6 +363,78 @@ public:
         sgl_end();
     }
 
+    // Draw with texture (no lighting)
+    void drawNoLightingWithTexture(const Texture& texture) const {
+        if (vertices_.empty()) return;
+
+        bool useColors = hasColors() && colors_.size() >= vertices_.size();
+        bool useIndices = hasIndices();
+        bool useTexCoords = hasValidTexCoords();
+        Color defColor = getDefaultContext().getColor();
+
+        // Enable texture
+        texture.bind();
+
+        // Start sokol_gl draw mode
+        switch (mode_) {
+            case PrimitiveMode::Triangles:
+                sgl_begin_triangles();
+                break;
+            case PrimitiveMode::TriangleStrip:
+                sgl_begin_triangle_strip();
+                break;
+            case PrimitiveMode::TriangleFan:
+                // sokol_gl doesn't have triangle_fan, use triangles instead
+                drawTriangleFanWithTexture(useColors, useIndices, useTexCoords, defColor, texture);
+                texture.unbind();
+                return;
+            case PrimitiveMode::Lines:
+                sgl_begin_lines();
+                break;
+            case PrimitiveMode::LineStrip:
+                sgl_begin_line_strip();
+                break;
+            case PrimitiveMode::LineLoop:
+                // sokol_gl doesn't have line_loop, use line_strip + close
+                drawLineLoopWithTexture(useColors, useIndices, useTexCoords, defColor, texture);
+                texture.unbind();
+                return;
+            case PrimitiveMode::Points:
+                sgl_begin_points();
+                break;
+        }
+
+        // Add vertices with texture coordinates (using combined API)
+        if (useIndices) {
+            for (auto idx : indices_) {
+                if (idx < vertices_.size()) {
+                    const Color& col = useColors ? colors_[idx] : defColor;
+                    const Vec2& tex = useTexCoords && idx < texCoords_.size() 
+                                      ? texCoords_[idx] : Vec2(0.0f, 0.0f);
+                    
+                    // Use combined API: position + texture + color in one call
+                    sgl_v3f_t2f_c4f(vertices_[idx].x, vertices_[idx].y, vertices_[idx].z,
+                                    tex.x, tex.y,
+                                    col.r, col.g, col.b, col.a);
+                }
+            }
+        } else {
+            for (size_t i = 0; i < vertices_.size(); i++) {
+                const Color& col = useColors ? colors_[i] : defColor;
+                const Vec2& tex = useTexCoords && i < texCoords_.size() 
+                                  ? texCoords_[i] : Vec2(0.0f, 0.0f);
+                
+                // Use combined API: position + texture + color in one call
+                sgl_v3f_t2f_c4f(vertices_[i].x, vertices_[i].y, vertices_[i].z,
+                                tex.x, tex.y,
+                                col.r, col.g, col.b, col.a);
+            }
+        }
+
+        sgl_end();
+        texture.unbind();
+    }
+
     // Wireframe drawing (draw triangle edges as lines)
     void drawWireframe() const {
         if (vertices_.empty()) return;
@@ -495,6 +582,111 @@ private:
                 sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
             }
             sgl_v3f(vertices_[0].x, vertices_[0].y, vertices_[0].z);
+        }
+
+        sgl_end();
+    }
+
+    // Draw Triangle Fan with texture
+    void drawTriangleFanWithTexture(bool useColors, bool useIndices, bool useTexCoords,
+                                    const Color& defColor, const Texture& texture) const {
+        if (vertices_.size() < 3) return;
+
+        sgl_begin_triangles();
+
+        if (useIndices && indices_.size() >= 3) {
+            // Using indices
+            for (size_t i = 1; i < indices_.size() - 1; i++) {
+                unsigned int i0 = indices_[0];
+                unsigned int i1 = indices_[i];
+                unsigned int i2 = indices_[i + 1];
+
+                for (auto idx : {i0, i1, i2}) {
+                    if (idx < vertices_.size()) {
+                        const Color& col = (useColors && idx < colors_.size()) 
+                                          ? colors_[idx] : defColor;
+                        const Vec2& tex = useTexCoords && idx < texCoords_.size() 
+                                          ? texCoords_[idx] : Vec2(0.0f, 0.0f);
+                        
+                        sgl_v3f_t2f_c4f(vertices_[idx].x, vertices_[idx].y, vertices_[idx].z,
+                                        tex.x, tex.y,
+                                        col.r, col.g, col.b, col.a);
+                    }
+                }
+            }
+        } else {
+            // Vertices only
+            for (size_t i = 1; i < vertices_.size() - 1; i++) {
+                for (size_t j : {(size_t)0, i, i + 1}) {
+                    const Color& col = useColors ? colors_[j] : defColor;
+                    const Vec2& tex = useTexCoords && j < texCoords_.size() 
+                                      ? texCoords_[j] : Vec2(0.0f, 0.0f);
+                    
+                    sgl_v3f_t2f_c4f(vertices_[j].x, vertices_[j].y, vertices_[j].z,
+                                    tex.x, tex.y,
+                                    col.r, col.g, col.b, col.a);
+                }
+            }
+        }
+
+        sgl_end();
+    }
+
+    // Draw Line Loop with texture
+    void drawLineLoopWithTexture(bool useColors, bool useIndices, bool useTexCoords,
+                                  const Color& defColor, const Texture& texture) const {
+        if (vertices_.size() < 2) return;
+
+        sgl_begin_line_strip();
+
+        if (useIndices && !indices_.empty()) {
+            for (auto idx : indices_) {
+                if (idx < vertices_.size()) {
+                    const Color& col = (useColors && idx < colors_.size()) 
+                                      ? colors_[idx] : defColor;
+                    const Vec2& tex = useTexCoords && idx < texCoords_.size() 
+                                      ? texCoords_[idx] : Vec2(0.0f, 0.0f);
+                    
+                    sgl_v3f_t2f_c4f(vertices_[idx].x, vertices_[idx].y, vertices_[idx].z,
+                                    tex.x, tex.y,
+                                    col.r, col.g, col.b, col.a);
+                }
+            }
+            // Close
+            if (!indices_.empty() && indices_[0] < vertices_.size()) {
+                auto idx = indices_[0];
+                if (useColors && idx < colors_.size()) {
+                    sgl_c4f(colors_[idx].r, colors_[idx].g, colors_[idx].b, colors_[idx].a);
+                } else {
+                    sgl_c4f(defColor.r, defColor.g, defColor.b, defColor.a);
+                }
+                
+                if (useTexCoords && idx < texCoords_.size()) {
+                    sgl_t2f(texCoords_[idx].x, texCoords_[idx].y);
+                } else {
+                    sgl_t2f(0.0f, 0.0f);
+                }
+                
+                sgl_v3f(vertices_[idx].x, vertices_[idx].y, vertices_[idx].z);
+            }
+        } else {
+            for (size_t i = 0; i < vertices_.size(); i++) {
+                const Color& col = useColors ? colors_[i] : defColor;
+                const Vec2& tex = useTexCoords && i < texCoords_.size() 
+                                  ? texCoords_[i] : Vec2(0.0f, 0.0f);
+                
+                sgl_v3f_t2f_c4f(vertices_[i].x, vertices_[i].y, vertices_[i].z,
+                                tex.x, tex.y,
+                                col.r, col.g, col.b, col.a);
+            }
+            // Close
+            const Color& col0 = useColors ? colors_[0] : defColor;
+            const Vec2& tex0 = useTexCoords && !texCoords_.empty() 
+                               ? texCoords_[0] : Vec2(0.0f, 0.0f);
+            
+            sgl_v3f_t2f_c4f(vertices_[0].x, vertices_[0].y, vertices_[0].z,
+                            tex0.x, tex0.y,
+                            col0.r, col0.g, col0.b, col0.a);
         }
 
         sgl_end();

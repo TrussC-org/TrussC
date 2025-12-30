@@ -54,40 +54,40 @@ inline Mesh createBox(float width, float height, float depth) {
 
     // 4 vertices per face (for flat shading)
     // Front face (Z+) - vertices 0-3
-    mesh.addVertex(-w, -h,  d); mesh.addNormal(0, 0, 1);
-    mesh.addVertex( w, -h,  d); mesh.addNormal(0, 0, 1);
-    mesh.addVertex( w,  h,  d); mesh.addNormal(0, 0, 1);
-    mesh.addVertex(-w,  h,  d); mesh.addNormal(0, 0, 1);
+    mesh.addVertex(-w, -h,  d); mesh.addNormal(0, 0, 1); mesh.addTexCoord(0, 1);
+    mesh.addVertex( w, -h,  d); mesh.addNormal(0, 0, 1); mesh.addTexCoord(1, 1);
+    mesh.addVertex( w,  h,  d); mesh.addNormal(0, 0, 1); mesh.addTexCoord(1, 0);
+    mesh.addVertex(-w,  h,  d); mesh.addNormal(0, 0, 1); mesh.addTexCoord(0, 0);
 
     // Back face (Z-) - vertices 4-7
-    mesh.addVertex( w, -h, -d); mesh.addNormal(0, 0, -1);
-    mesh.addVertex(-w, -h, -d); mesh.addNormal(0, 0, -1);
-    mesh.addVertex(-w,  h, -d); mesh.addNormal(0, 0, -1);
-    mesh.addVertex( w,  h, -d); mesh.addNormal(0, 0, -1);
+    mesh.addVertex( w, -h, -d); mesh.addNormal(0, 0, -1); mesh.addTexCoord(0, 1);
+    mesh.addVertex(-w, -h, -d); mesh.addNormal(0, 0, -1); mesh.addTexCoord(1, 1);
+    mesh.addVertex(-w,  h, -d); mesh.addNormal(0, 0, -1); mesh.addTexCoord(1, 0);
+    mesh.addVertex( w,  h, -d); mesh.addNormal(0, 0, -1); mesh.addTexCoord(0, 0);
 
     // Top face (Y+) - vertices 8-11
-    mesh.addVertex(-w,  h,  d); mesh.addNormal(0, 1, 0);
-    mesh.addVertex( w,  h,  d); mesh.addNormal(0, 1, 0);
-    mesh.addVertex( w,  h, -d); mesh.addNormal(0, 1, 0);
-    mesh.addVertex(-w,  h, -d); mesh.addNormal(0, 1, 0);
+    mesh.addVertex(-w,  h,  d); mesh.addNormal(0, 1, 0); mesh.addTexCoord(0, 1);
+    mesh.addVertex( w,  h,  d); mesh.addNormal(0, 1, 0); mesh.addTexCoord(1, 1);
+    mesh.addVertex( w,  h, -d); mesh.addNormal(0, 1, 0); mesh.addTexCoord(1, 0);
+    mesh.addVertex(-w,  h, -d); mesh.addNormal(0, 1, 0); mesh.addTexCoord(0, 0);
 
     // Bottom face (Y-) - vertices 12-15
-    mesh.addVertex(-w, -h, -d); mesh.addNormal(0, -1, 0);
-    mesh.addVertex( w, -h, -d); mesh.addNormal(0, -1, 0);
-    mesh.addVertex( w, -h,  d); mesh.addNormal(0, -1, 0);
-    mesh.addVertex(-w, -h,  d); mesh.addNormal(0, -1, 0);
+    mesh.addVertex(-w, -h, -d); mesh.addNormal(0, -1, 0); mesh.addTexCoord(0, 1);
+    mesh.addVertex( w, -h, -d); mesh.addNormal(0, -1, 0); mesh.addTexCoord(1, 1);
+    mesh.addVertex( w, -h,  d); mesh.addNormal(0, -1, 0); mesh.addTexCoord(1, 0);
+    mesh.addVertex(-w, -h,  d); mesh.addNormal(0, -1, 0); mesh.addTexCoord(0, 0);
 
     // Right face (X+) - vertices 16-19
-    mesh.addVertex( w, -h,  d); mesh.addNormal(1, 0, 0);
-    mesh.addVertex( w, -h, -d); mesh.addNormal(1, 0, 0);
-    mesh.addVertex( w,  h, -d); mesh.addNormal(1, 0, 0);
-    mesh.addVertex( w,  h,  d); mesh.addNormal(1, 0, 0);
+    mesh.addVertex( w, -h,  d); mesh.addNormal(1, 0, 0); mesh.addTexCoord(0, 1);
+    mesh.addVertex( w, -h, -d); mesh.addNormal(1, 0, 0); mesh.addTexCoord(1, 1);
+    mesh.addVertex( w,  h, -d); mesh.addNormal(1, 0, 0); mesh.addTexCoord(1, 0);
+    mesh.addVertex( w,  h,  d); mesh.addNormal(1, 0, 0); mesh.addTexCoord(0, 0);
 
     // Left face (X-) - vertices 20-23
-    mesh.addVertex(-w, -h, -d); mesh.addNormal(-1, 0, 0);
-    mesh.addVertex(-w, -h,  d); mesh.addNormal(-1, 0, 0);
-    mesh.addVertex(-w,  h,  d); mesh.addNormal(-1, 0, 0);
-    mesh.addVertex(-w,  h, -d); mesh.addNormal(-1, 0, 0);
+    mesh.addVertex(-w, -h, -d); mesh.addNormal(-1, 0, 0); mesh.addTexCoord(0, 1);
+    mesh.addVertex(-w, -h,  d); mesh.addNormal(-1, 0, 0); mesh.addTexCoord(1, 1);
+    mesh.addVertex(-w,  h,  d); mesh.addNormal(-1, 0, 0); mesh.addTexCoord(1, 0);
+    mesh.addVertex(-w,  h, -d); mesh.addNormal(-1, 0, 0); mesh.addTexCoord(0, 0);
 
     // Indices (2 triangles per face)
     for (int face = 0; face < 6; face++) {
