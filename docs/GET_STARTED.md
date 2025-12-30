@@ -39,6 +39,11 @@ winget install Kitware.CMake
 sudo apt install cmake
 ```
 
+**Windows only:** Ninja is required for IntelliSense in VSCode/Cursor:
+```bash
+winget install Ninja-build.Ninja
+```
+
 ### Editor Setup
 
 #### VSCode
