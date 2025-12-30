@@ -93,13 +93,48 @@ vector<VsVersionInfo> VsDetector::detectInstalledVersions() {
                         continue;
                     }
 
+                    // Store install path
+                    info.installPath = installPath;
+
                     // Construct paths from VS installation
                     info.cmakePath = installPath + R"(\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe)";
                     info.vcvarsallPath = installPath + R"(\VC\Auxiliary\Build\vcvarsall.bat)";
                     info.ninjaPath = installPath + R"(\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe)";
 
+                    // Find VC Tools version (latest in VC/Tools/MSVC/)
+                    string vcToolsDir = installPath + R"(\VC\Tools\MSVC)";
+                    if (fs::exists(vcToolsDir)) {
+                        string latestVersion;
+                        for (const auto& entry : fs::directory_iterator(vcToolsDir)) {
+                            if (entry.is_directory()) {
+                                string dirName = entry.path().filename().string();
+                                if (dirName > latestVersion) {
+                                    latestVersion = dirName;
+                                }
+                            }
+                        }
+                        info.vcToolsVersion = latestVersion;
+                    }
+
+                    // Find Windows SDK version (latest in Windows Kits/10/Include/)
+                    string sdkIncludeDir = R"(C:\Program Files (x86)\Windows Kits\10\Include)";
+                    if (fs::exists(sdkIncludeDir)) {
+                        string latestSdk;
+                        for (const auto& entry : fs::directory_iterator(sdkIncludeDir)) {
+                            if (entry.is_directory()) {
+                                string dirName = entry.path().filename().string();
+                                // SDK versions start with "10."
+                                if (dirName.find("10.") == 0 && dirName > latestSdk) {
+                                    latestSdk = dirName;
+                                }
+                            }
+                        }
+                        info.windowsSdkVersion = latestSdk;
+                    }
+
                     // Verify required files exist
-                    if (fs::exists(info.cmakePath) && fs::exists(info.vcvarsallPath) && fs::exists(info.ninjaPath)) {
+                    if (fs::exists(info.cmakePath) && fs::exists(info.vcvarsallPath) && fs::exists(info.ninjaPath) &&
+                        !info.vcToolsVersion.empty() && !info.windowsSdkVersion.empty()) {
                         versions.push_back(info);
                     }
                 }

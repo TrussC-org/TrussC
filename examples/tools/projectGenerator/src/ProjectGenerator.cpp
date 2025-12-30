@@ -138,7 +138,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     presets["buildPresets"].push_back(macosBuildPreset);
 
 #elif defined(_WIN32)
-    // Windows preset with ninja path
+    // Windows preset with ninja path and environment
     Json windowsPreset;
     windowsPreset["name"] = "windows";
     windowsPreset["displayName"] = "Windows";
@@ -146,16 +146,51 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     windowsPreset["generator"] = "Ninja";
     windowsPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
 
-    // Add ninja path if available
+    // Add ninja path and environment if VS info available
     if (!settings_.installedVsVersions.empty() &&
         settings_.selectedVsIndex < (int)settings_.installedVsVersions.size()) {
-        string ninjaPath = settings_.installedVsVersions[settings_.selectedVsIndex].ninjaPath;
-        if (!ninjaPath.empty()) {
-            // Convert backslashes to forward slashes for JSON
-            for (char& c : ninjaPath) {
+        const auto& vsInfo = settings_.installedVsVersions[settings_.selectedVsIndex];
+
+        // Convert path to forward slashes for JSON
+        auto toForwardSlash = [](string path) {
+            for (char& c : path) {
                 if (c == '\\') c = '/';
             }
-            windowsPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = ninjaPath;
+            return path;
+        };
+
+        if (!vsInfo.ninjaPath.empty()) {
+            windowsPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = toForwardSlash(vsInfo.ninjaPath);
+        }
+
+        // Add environment for INCLUDE, LIB, PATH
+        if (!vsInfo.vcToolsVersion.empty() && !vsInfo.windowsSdkVersion.empty()) {
+            string vsPath = toForwardSlash(vsInfo.installPath);
+            string vcToolsVer = vsInfo.vcToolsVersion;
+            string sdkVer = vsInfo.windowsSdkVersion;
+
+            // INCLUDE paths
+            string includePath =
+                vsPath + "/VC/Tools/MSVC/" + vcToolsVer + "/include;" +
+                "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/ucrt;" +
+                "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/shared;" +
+                "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/um;" +
+                "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/winrt";
+
+            // LIB paths
+            string libPath =
+                vsPath + "/VC/Tools/MSVC/" + vcToolsVer + "/lib/x64;" +
+                "C:/Program Files (x86)/Windows Kits/10/Lib/" + sdkVer + "/ucrt/x64;" +
+                "C:/Program Files (x86)/Windows Kits/10/Lib/" + sdkVer + "/um/x64";
+
+            // PATH additions
+            string pathAddition =
+                vsPath + "/VC/Tools/MSVC/" + vcToolsVer + "/bin/Hostx64/x64;" +
+                "C:/Program Files (x86)/Windows Kits/10/bin/" + sdkVer + "/x64;$penv{PATH}";
+
+            windowsPreset["environment"]["INCLUDE"] = includePath;
+            windowsPreset["environment"]["LIB"] = libPath;
+            windowsPreset["environment"]["PATH"] = pathAddition;
         }
     }
     presets["configurePresets"].push_back(windowsPreset);
