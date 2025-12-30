@@ -492,23 +492,44 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
 
 // Run CMake configure to generate compile_commands.json for IntelliSense.
 //
-// Architecture decision: On Windows, we use standalone Ninja instead of
-// Visual Studio's bundled toolchain. This is intentional because:
-// - VSCode/Cursor users don't necessarily need full Visual Studio installed
-// - We want to keep the VS requirement optional for lightweight development
-// - Ninja is a small standalone tool that's easy to install (winget install Ninja-build.Ninja)
+// On Windows, we use VS-bundled cmake and ninja via vcvarsall.bat.
+// This sets up the environment (cl.exe, ninja, cmake in PATH) properly.
 //
 // Unix Makefiles (macOS/Linux) and Ninja both support CMAKE_EXPORT_COMPILE_COMMANDS.
 // Visual Studio generator does NOT support compile_commands.json.
-//
-// Note: On Windows, we skip running CMake configure here because cl.exe is not
-// in PATH from a regular command prompt. CMake Tools in VSCode/Cursor will
-// automatically configure when the project is opened (cmake.configureOnOpen: true).
 void ProjectGenerator::runCMakeConfigure(const string& path) {
 #ifdef _WIN32
-    // Skip on Windows - CMake Tools will auto-configure when project is opened
-    log("CMake will auto-configure when you open the project in VSCode/Cursor.");
-    return;
+    string preset = "windows";
+
+    // Get vcvarsall.bat path from detected VS versions
+    string vcvarsallPath;
+    if (!settings_.installedVsVersions.empty() &&
+        settings_.selectedVsIndex < (int)settings_.installedVsVersions.size()) {
+        vcvarsallPath = settings_.installedVsVersions[settings_.selectedVsIndex].vcvarsallPath;
+    }
+
+    if (vcvarsallPath.empty()) {
+        log("Visual Studio not found. CMake will auto-configure when you open the project.");
+        return;
+    }
+
+    log("Running CMake configure (preset: " + preset + ")...");
+
+    // Use vcvarsall.bat to set up VS environment, then run cmake
+    // This makes cl.exe and VS-bundled ninja available
+    string cmd = "cmd /c \"\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + "\"";
+
+    auto [result, output] = executeCommand(cmd);
+
+    if (!output.empty()) {
+        log(output);
+    }
+
+    if (result != 0) {
+        throw runtime_error("CMake configure failed");
+    }
+
+    log("CMake configure complete. compile_commands.json generated.");
 #else
     // Determine preset name based on OS
 #ifdef __APPLE__

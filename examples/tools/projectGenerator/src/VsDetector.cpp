@@ -93,11 +93,12 @@ vector<VsVersionInfo> VsDetector::detectInstalledVersions() {
                         continue;
                     }
 
-                    // Construct cmake path from VS installation
+                    // Construct paths from VS installation
                     info.cmakePath = installPath + R"(\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe)";
+                    info.vcvarsallPath = installPath + R"(\VC\Auxiliary\Build\vcvarsall.bat)";
 
-                    // Verify cmake exists
-                    if (fs::exists(info.cmakePath)) {
+                    // Verify cmake and vcvarsall exist
+                    if (fs::exists(info.cmakePath) && fs::exists(info.vcvarsallPath)) {
                         versions.push_back(info);
                     }
                 }
