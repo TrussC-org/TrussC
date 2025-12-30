@@ -134,27 +134,25 @@ void ProjectGenerator::writeCMakeUserPresets(const string& destPath) {
     log("Writing CMakeUserPresets.json...");
 
     // Generate CMakeUserPresets.json with ninja path
-    // This overrides the "windows" preset from CMakePresets.json
+    // Uses "default" preset name which inherits from "windows" and adds CMAKE_MAKE_PROGRAM
     Json presets;
     presets["version"] = 6;
 
-    Json windowsPreset;
-    windowsPreset["name"] = "windows";
-    windowsPreset["displayName"] = "Windows";
-    windowsPreset["binaryDir"] = "${sourceDir}/build-windows";
-    windowsPreset["generator"] = "Ninja";
-    windowsPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
-    windowsPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = ninjaPath;
+    Json defaultPreset;
+    defaultPreset["name"] = "default";
+    defaultPreset["displayName"] = "Default (Windows)";
+    defaultPreset["inherits"] = "windows";
+    defaultPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = ninjaPath;
 
     presets["configurePresets"] = Json::array();
-    presets["configurePresets"].push_back(windowsPreset);
+    presets["configurePresets"].push_back(defaultPreset);
 
-    Json windowsBuildPreset;
-    windowsBuildPreset["name"] = "windows";
-    windowsBuildPreset["configurePreset"] = "windows";
+    Json defaultBuildPreset;
+    defaultBuildPreset["name"] = "default";
+    defaultBuildPreset["configurePreset"] = "default";
 
     presets["buildPresets"] = Json::array();
-    presets["buildPresets"].push_back(windowsBuildPreset);
+    presets["buildPresets"].push_back(defaultBuildPreset);
 
     saveJson(presets, destPath + "/CMakeUserPresets.json");
 #endif
@@ -343,8 +341,8 @@ void ProjectGenerator::generateVSCodeFiles(const string& path) {
     settings["clangd.arguments"] = Json::array({"--compile-commands-dir=${workspaceFolder}/build-macos"});
 #elif defined(_WIN32)
     settings["cmake.buildDirectory"] = "${workspaceFolder}/build-windows";
-    settings["cmake.configurePreset"] = "windows";
-    settings["cmake.buildPreset"] = "windows";
+    settings["cmake.configurePreset"] = "default";  // Uses CMakeUserPresets.json with ninja path
+    settings["cmake.buildPreset"] = "default";
     settings["clangd.arguments"] = Json::array({"--compile-commands-dir=${workspaceFolder}/build-windows"});
 #else
     settings["cmake.buildDirectory"] = "${workspaceFolder}/build-linux";
@@ -550,7 +548,7 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
 // Visual Studio generator does NOT support compile_commands.json.
 void ProjectGenerator::runCMakeConfigure(const string& path) {
 #ifdef _WIN32
-    string preset = "windows";
+    string preset = "default";  // Uses CMakeUserPresets.json which has ninja path
 
     // Get vcvarsall.bat path from detected VS versions
     string vcvarsallPath;
@@ -564,14 +562,11 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
         return;
     }
 
-    // Get ninja path
-    string ninjaPath = settings_.installedVsVersions[settings_.selectedVsIndex].ninjaPath;
-
     log("Running CMake configure (preset: " + preset + ")...");
 
-    // Use vcvarsall.bat to set up VS environment, then run cmake with explicit ninja path
-    // vcvarsall.bat sets up cl.exe, but ninja needs to be specified explicitly
-    string cmd = "cmd /c \"\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + " -DCMAKE_MAKE_PROGRAM=\"" + ninjaPath + "\"\"";
+    // Use vcvarsall.bat to set up VS environment, then run cmake
+    // CMAKE_MAKE_PROGRAM is set in CMakeUserPresets.json
+    string cmd = "cmd /c \"\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + "\"";
 
     auto [result, output] = executeCommand(cmd);
 
