@@ -486,24 +486,26 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
 //
 // Unix Makefiles (macOS/Linux) and Ninja both support CMAKE_EXPORT_COMPILE_COMMANDS.
 // Visual Studio generator does NOT support compile_commands.json.
+//
+// Note: On Windows, we skip running CMake configure here because cl.exe is not
+// in PATH from a regular command prompt. CMake Tools in VSCode/Cursor will
+// automatically configure when the project is opened (cmake.configureOnOpen: true).
 void ProjectGenerator::runCMakeConfigure(const string& path) {
+#ifdef _WIN32
+    // Skip on Windows - CMake Tools will auto-configure when project is opened
+    log("CMake will auto-configure when you open the project in VSCode/Cursor.");
+    return;
+#else
     // Determine preset name based on OS
 #ifdef __APPLE__
     string preset = "macos";
-#elif defined(_WIN32)
-    string preset = "windows";
 #else
     string preset = "linux";
 #endif
 
     log("Running CMake configure (preset: " + preset + ")...");
 
-    // Run cmake --preset <preset>
-#ifdef _WIN32
-    string cmd = "cd /d \"" + path + "\" && cmake --preset " + preset;
-#else
     string cmd = "cd \"" + path + "\" && cmake --preset " + preset;
-#endif
 
     auto [result, output] = executeCommand(cmd);
 
@@ -512,18 +514,9 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
     }
 
     if (result != 0) {
-        // Check for common errors and provide helpful messages
-#ifdef _WIN32
-        if (output.find("Ninja") != string::npos) {
-            log("");
-            log("ERROR: Ninja is not installed.");
-            log("Install with: winget install Ninja-build.Ninja");
-            log("Or download from: https://github.com/ninja-build/ninja/releases");
-            throw runtime_error("Ninja is not installed. See log for installation instructions.");
-        }
-#endif
         throw runtime_error("CMake configure failed");
     }
 
     log("CMake configure complete. compile_commands.json generated.");
+#endif
 }
