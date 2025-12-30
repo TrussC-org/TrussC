@@ -22,11 +22,11 @@
 void tcApp::setup() {
     // Load images from data/images folder
     if (!tower.load(getDataPath("images/transmission_tower.jpg"))) {
-        tcLogWarning("tcApp") << "Failed to load transmission_tower.jpg";
+        logWarning("tcApp") << "Failed to load transmission_tower.jpg";
     }
 
     if (!transparency.load(getDataPath("images/transparency.png"))) {
-        tcLogWarning("tcApp") << "Failed to load transparency.png";
+        logWarning("tcApp") << "Failed to load transparency.png";
     }
 }
 

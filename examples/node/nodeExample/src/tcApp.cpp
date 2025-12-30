@@ -6,9 +6,9 @@ using namespace std;
 // setup - Initialization
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "02_nodes: Node System Demo";
-    tcLogNotice("tcApp") << "  - Space: Pause/resume rotation";
-    tcLogNotice("tcApp") << "  - ESC: Exit";
+    logNotice("tcApp") << "02_nodes: Node System Demo";
+    logNotice("tcApp") << "  - Space: Pause/resume rotation";
+    logNotice("tcApp") << "  - ESC: Exit";
 
     // Container 1 (left side, clockwise)
     container1_ = make_shared<RotatingContainer>();
@@ -118,17 +118,17 @@ void tcApp::keyPressed(int key) {
         container1_->rotationSpeed = paused ? 0.0f : 0.5f;
         container2_->rotationSpeed = paused ? 0.0f : -0.3f;
 
-        tcLogNotice("tcApp") << "Rotation " << (paused ? "paused" : "resumed");
+        logNotice("tcApp") << "Rotation " << (paused ? "paused" : "resumed");
     }
 }
 
 void tcApp::mousePressed(Vec2 pos, int button) {
-    tcLogVerbose("tcApp") << "Global mouse: " << pos.x << ", " << pos.y;
+    logVerbose("tcApp") << "Global mouse: " << pos.x << ", " << pos.y;
 
     // Display each follower's local coordinates
-    tcLogVerbose("tcApp") << "  Follower1 local: " << follower1_->getMouseX()
+    logVerbose("tcApp") << "  Follower1 local: " << follower1_->getMouseX()
                        << ", " << follower1_->getMouseY();
-    tcLogVerbose("tcApp") << "  Follower2 local: " << follower2_->getMouseX()
+    logVerbose("tcApp") << "  Follower2 local: " << follower2_->getMouseX()
                        << ", " << follower2_->getMouseY();
 }
 

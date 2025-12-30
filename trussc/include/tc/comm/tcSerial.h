@@ -105,9 +105,9 @@ public:
     // Print available serial devices to console
     void listDevices() {
         auto devices = getDeviceList();
-        tcLogNotice() << "Serial devices:";
+        logNotice() << "Serial devices:";
         for (const auto& dev : devices) {
-            tcLogNotice() << "  [" << dev.deviceId << "] " << dev.devicePath;
+            logNotice() << "  [" << dev.deviceId << "] " << dev.devicePath;
         }
     }
 
@@ -204,7 +204,7 @@ public:
                               nullptr);
 
         if (handle_ == INVALID_HANDLE_VALUE) {
-            tcLogError() << "Serial: failed to open " << portName << " (error: " << GetLastError() << ")";
+            logError() << "Serial: failed to open " << portName << " (error: " << GetLastError() << ")";
             return false;
         }
 
@@ -221,7 +221,7 @@ public:
         DCB dcb = {};
         dcb.DCBlength = sizeof(DCB);
         if (!GetCommState(handle_, &dcb)) {
-            tcLogError() << "Serial: failed to get comm state";
+            logError() << "Serial: failed to get comm state";
             CloseHandle(handle_);
             handle_ = INVALID_HANDLE_VALUE;
             return false;
@@ -247,7 +247,7 @@ public:
         dcb.fAbortOnError = FALSE;
 
         if (!SetCommState(handle_, &dcb)) {
-            tcLogError() << "Serial: failed to set comm state";
+            logError() << "Serial: failed to set comm state";
             CloseHandle(handle_);
             handle_ = INVALID_HANDLE_VALUE;
             return false;
@@ -258,7 +258,7 @@ public:
 
         devicePath_ = portName;
         initialized_ = true;
-        tcLogNotice() << "Serial: connected to " << portName << " at " << baudRate << " baud";
+        logNotice() << "Serial: connected to " << portName << " at " << baudRate << " baud";
         return true;
 
 #else
@@ -266,13 +266,13 @@ public:
         // Open device (non-blocking)
         fd_ = open(portName.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
         if (fd_ == -1) {
-            tcLogError() << "Serial: failed to open " << portName;
+            logError() << "Serial: failed to open " << portName;
             return false;
         }
 
         // Get exclusive lock
         if (ioctl(fd_, TIOCEXCL) == -1) {
-            tcLogError() << "Serial: failed to get exclusive access";
+            logError() << "Serial: failed to get exclusive access";
             ::close(fd_);
             fd_ = -1;
             return false;
@@ -281,7 +281,7 @@ public:
         // Get terminal settings
         struct termios options;
         if (tcgetattr(fd_, &options) == -1) {
-            tcLogError() << "Serial: failed to get terminal attributes";
+            logError() << "Serial: failed to get terminal attributes";
             ::close(fd_);
             fd_ = -1;
             return false;
@@ -316,7 +316,7 @@ public:
 
         // Apply settings
         if (tcsetattr(fd_, TCSANOW, &options) == -1) {
-            tcLogError() << "Serial: failed to set terminal attributes";
+            logError() << "Serial: failed to set terminal attributes";
             ::close(fd_);
             fd_ = -1;
             return false;
@@ -327,7 +327,7 @@ public:
 
         devicePath_ = portName;
         initialized_ = true;
-        tcLogNotice() << "Serial: connected to " << portName << " at " << baudRate << " baud";
+        logNotice() << "Serial: connected to " << portName << " at " << baudRate << " baud";
         return true;
 #endif
     }
@@ -336,7 +336,7 @@ public:
     bool setup(int deviceIndex, int baudRate) {
         auto devices = getDeviceList();
         if (deviceIndex < 0 || deviceIndex >= (int)devices.size()) {
-            tcLogError() << "Serial: device index " << deviceIndex << " out of range (0-" << (int)devices.size() - 1 << ")";
+            logError() << "Serial: device index " << deviceIndex << " out of range (0-" << (int)devices.size() - 1 << ")";
             return false;
         }
         return setup(devices[deviceIndex].devicePath, baudRate);
@@ -348,13 +348,13 @@ public:
         if (handle_ != INVALID_HANDLE_VALUE) {
             CloseHandle(handle_);
             handle_ = INVALID_HANDLE_VALUE;
-            tcLogVerbose() << "Serial: disconnected from " << devicePath_;
+            logVerbose() << "Serial: disconnected from " << devicePath_;
         }
 #else
         if (fd_ != -1) {
             ::close(fd_);
             fd_ = -1;
-            tcLogVerbose() << "Serial: disconnected from " << devicePath_;
+            logVerbose() << "Serial: disconnected from " << devicePath_;
         }
 #endif
         initialized_ = false;
@@ -573,7 +573,7 @@ private:
             case 921600: return B921600;
 #endif
             default:
-                tcLogWarning() << "Serial: unsupported baud rate " << baudRate << ", using 9600";
+                logWarning() << "Serial: unsupported baud rate " << baudRate << ", using 9600";
                 return B9600;
         }
     }

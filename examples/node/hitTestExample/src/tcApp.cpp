@@ -5,11 +5,11 @@
 // setup - Initialization
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "hitTestExample: Ray-based Hit Test Demo";
-    tcLogNotice("tcApp") << "  - Click buttons to increment counter";
-    tcLogNotice("tcApp") << "  - Rotating panel buttons also work!";
-    tcLogNotice("tcApp") << "  - Press SPACE to pause/resume rotation";
-    tcLogNotice("tcApp") << "  - Press ESC to quit";
+    logNotice("tcApp") << "hitTestExample: Ray-based Hit Test Demo";
+    logNotice("tcApp") << "  - Click buttons to increment counter";
+    logNotice("tcApp") << "  - Rotating panel buttons also work!";
+    logNotice("tcApp") << "  - Press SPACE to pause/resume rotation";
+    logNotice("tcApp") << "  - Press ESC to quit";
 
     // Static buttons (left side) - overlapped diagonally to show only front responds
     button1_ = make_shared<CounterButton>();
@@ -99,7 +99,7 @@ void tcApp::keyPressed(int key) {
     else if (key == KEY_SPACE) {
         paused_ = !paused_;
         panel_->rotationSpeed = paused_ ? 0.0f : 0.3f;
-        tcLogNotice("tcApp") << "Rotation " << (paused_ ? "paused" : "resumed");
+        logNotice("tcApp") << "Rotation " << (paused_ ? "paused" : "resumed");
     }
 }
 

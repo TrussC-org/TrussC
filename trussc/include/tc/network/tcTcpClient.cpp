@@ -32,7 +32,7 @@ void TcpClient::initWinsock() {
     if (!initialized) {
         WSADATA wsaData;
         if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-            tcLogError() << "Winsock initialization failed";
+            logError() << "Winsock initialization failed";
         }
         initialized = true;
     }
@@ -161,7 +161,7 @@ bool TcpClient::connect(const std::string& host, int port) {
     // Start receive thread
     receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this);
 
-    tcLogNotice() << "TCP connected to " << host << ":" << port;
+    logNotice() << "TCP connected to " << host << ":" << port;
 
     TcpConnectEventArgs args;
     args.success = true;

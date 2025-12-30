@@ -1088,7 +1088,7 @@ inline void setWindowTitle(const std::string& title) {
 // Copy string to clipboard
 inline void setClipboardString(const std::string& text) {
     if (static_cast<int>(text.size()) >= internal::clipboardSize) {
-        tcLogWarning("Clipboard") << "Text truncated (" << text.size() << " bytes > "
+        logWarning("Clipboard") << "Text truncated (" << text.size() << " bytes > "
             << internal::clipboardSize << " buffer). Use WindowSettings::setClipboardSize() to increase.";
     }
     sapp_set_clipboard_string(text.c_str());

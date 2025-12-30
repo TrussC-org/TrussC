@@ -18,19 +18,19 @@ void tcApp::setup() {
     // videoPath_ = "/path/to/your/video.mp4";
     // loadVideo(videoPath_);
 
-    tcLogNotice("tcApp") << "Press 'L' to load a video file";
+    logNotice("tcApp") << "Press 'L' to load a video file";
 }
 
 void tcApp::loadVideo(const string& path) {
-    tcLogNotice("tcApp") << "Loading video: " << path;
+    logNotice("tcApp") << "Loading video: " << path;
 
     if (video_.load(path)) {
-        tcLogNotice("tcApp") << "Video loaded: " << (int)video_.getWidth() << "x"
+        logNotice("tcApp") << "Video loaded: " << (int)video_.getWidth() << "x"
                              << (int)video_.getHeight() << ", "
                              << video_.getDuration() << " sec";
         video_.play();
     } else {
-        tcLogError("tcApp") << "Failed to load video: " << path;
+        logError("tcApp") << "Failed to load video: " << path;
     }
 }
 

@@ -57,7 +57,7 @@ protected:
         (void)local; (void)button;
         isPressed = true;
         count++;
-        tcLogNotice("Button") << label << " pressed! count = " << count;
+        logNotice("Button") << label << " pressed! count = " << count;
         return true;  // Consume event
     }
 

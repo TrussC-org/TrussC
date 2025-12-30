@@ -32,13 +32,13 @@ std::string getExecutableDir() {
 
 bool captureWindow(Pixels& outPixels) {
     // TODO: WebGL からピクセル読み取り
-    tcLogWarning() << "[Screenshot] Emscripten では未実装";
+    logWarning() << "[Screenshot] Emscripten では未実装";
     return false;
 }
 
 bool saveScreenshot(const std::filesystem::path& path) {
     // TODO: ダウンロードとして保存
-    tcLogWarning() << "[Screenshot] Emscripten では未実装";
+    logWarning() << "[Screenshot] Emscripten では未実装";
     return false;
 }
 

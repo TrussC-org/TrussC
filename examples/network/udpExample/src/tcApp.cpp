@@ -9,15 +9,15 @@ using namespace std;
 using namespace trussc;
 
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "=== UDP Socket Example ===";
-    tcLogNotice("tcApp") << "Press SPACE to send a message";
-    tcLogNotice("tcApp") << "Press C to clear messages";
-    tcLogNotice("tcApp") << "==========================";
+    logNotice("tcApp") << "=== UDP Socket Example ===";
+    logNotice("tcApp") << "Press SPACE to send a message";
+    logNotice("tcApp") << "Press C to clear messages";
+    logNotice("tcApp") << "==========================";
 
     // Listen for receive events
     receiver.onReceive.listen(receiveListener, [this](UdpReceiveEventArgs& e) {
         string msg(e.data.begin(), e.data.end());
-        tcLogNotice("UdpReceiver") << "Received from " << e.remoteHost << ":" << e.remotePort << " -> " << msg;
+        logNotice("UdpReceiver") << "Received from " << e.remoteHost << ":" << e.remotePort << " -> " << msg;
 
         lock_guard<mutex> lock(messagesMutex);
         receivedMessages.push_back(e.remoteHost + ":" + to_string(e.remotePort) + " -> " + msg);
@@ -28,12 +28,12 @@ void tcApp::setup() {
 
     // Listen for error events
     receiver.onError.listen(errorListener, [](UdpErrorEventArgs& e) {
-        tcLogError("UdpReceiver") << "UDP Error: " << e.message;
+        logError("UdpReceiver") << "UDP Error: " << e.message;
     });
 
     // Bind the receiver socket (start receiving on port 9000)
     if (!receiver.bind(9000)) {
-        tcLogError("tcApp") << "Failed to bind receiver to port 9000";
+        logError("tcApp") << "Failed to bind receiver to port 9000";
     }
 
     // Set the destination for the sender socket
@@ -85,13 +85,13 @@ void tcApp::keyPressed(int key) {
         string msg = oss.str();
 
         if (sender.send(msg)) {
-            tcLogNotice("tcApp") << "Sent: " << msg;
+            logNotice("tcApp") << "Sent: " << msg;
         }
     } else if (key == 'C' || key == 'c') {
         lock_guard<mutex> lock(messagesMutex);
         receivedMessages.clear();
         sendCount = 0;
-        tcLogNotice("tcApp") << "Messages cleared";
+        logNotice("tcApp") << "Messages cleared";
     }
 }
 

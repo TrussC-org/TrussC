@@ -1,13 +1,13 @@
 #include "tcApp.h"
 
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "windowExample: Loop Architecture Demo";
-    tcLogNotice("tcApp") << "  - 1: VSync (default)";
-    tcLogNotice("tcApp") << "  - 2: Fixed 30 FPS";
-    tcLogNotice("tcApp") << "  - 3: Fixed 5 FPS";
-    tcLogNotice("tcApp") << "  - 4: Event-driven (click to redraw)";
-    tcLogNotice("tcApp") << "  - 5: Decoupled Update (500Hz) + VSync Draw";
-    tcLogNotice("tcApp") << "  - ESC: Quit";
+    logNotice("tcApp") << "windowExample: Loop Architecture Demo";
+    logNotice("tcApp") << "  - 1: VSync (default)";
+    logNotice("tcApp") << "  - 2: Fixed 30 FPS";
+    logNotice("tcApp") << "  - 3: Fixed 5 FPS";
+    logNotice("tcApp") << "  - 4: Event-driven (click to redraw)";
+    logNotice("tcApp") << "  - 5: Decoupled Update (500Hz) + VSync Draw";
+    logNotice("tcApp") << "  - ESC: Quit";
 
     // Default: VSync
     setFps(VSYNC);
@@ -104,28 +104,28 @@ void tcApp::keyPressed(int key) {
     else if (key == '1') {
         mode = 0;
         setFps(VSYNC);
-        tcLogNotice("tcApp") << "Mode: VSync";
+        logNotice("tcApp") << "Mode: VSync";
     }
     else if (key == '2') {
         mode = 1;
         setFps(30);
-        tcLogNotice("tcApp") << "Mode: Fixed 30 FPS";
+        logNotice("tcApp") << "Mode: Fixed 30 FPS";
     }
     else if (key == '3') {
         mode = 2;
         setFps(5);
-        tcLogNotice("tcApp") << "Mode: Fixed 5 FPS";
+        logNotice("tcApp") << "Mode: Fixed 5 FPS";
     }
     else if (key == '4') {
         mode = 3;
         setFps(EVENT_DRIVEN);
         redraw();  // Draw once immediately after mode switch
-        tcLogNotice("tcApp") << "Mode: Event-driven (click to redraw)";
+        logNotice("tcApp") << "Mode: Event-driven (click to redraw)";
     }
     else if (key == '5') {
         mode = 4;
         setIndependentFps(500, VSYNC);  // Update: 500Hz, Draw: VSync
-        tcLogNotice("tcApp") << "Mode: Decoupled (Update 500Hz, Draw VSync)";
+        logNotice("tcApp") << "Mode: Decoupled (Update 500Hz, Draw VSync)";
     }
 }
 

@@ -3,13 +3,13 @@
 namespace fs = std::filesystem;
 
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "screenshotExample: saveScreenshot() Demo";
-    tcLogNotice("tcApp") << "  - Press SPACE to capture screenshot";
-    tcLogNotice("tcApp") << "  - Uses OS window capture (no FBO needed)";
+    logNotice("tcApp") << "screenshotExample: saveScreenshot() Demo";
+    logNotice("tcApp") << "  - Press SPACE to capture screenshot";
+    logNotice("tcApp") << "  - Uses OS window capture (no FBO needed)";
 
     // Save path (data folder)
     savePath = getDataPath("");
-    tcLogNotice("tcApp") << "Screenshots will be saved to: " << savePath.string();
+    logNotice("tcApp") << "Screenshots will be saved to: " << savePath.string();
 }
 
 void tcApp::update() {
@@ -76,10 +76,10 @@ void tcApp::keyPressed(int key) {
 
         // Save screenshot using OS window capture feature
         if (saveScreenshot(filepath)) {
-            tcLogNotice("tcApp") << "Saved: " << filepath.string();
+            logNotice("tcApp") << "Saved: " << filepath.string();
             screenshotCount++;
         } else {
-            tcLogWarning("tcApp") << "Failed to save: " << filepath.string();
+            logWarning("tcApp") << "Failed to save: " << filepath.string();
         }
     }
 }

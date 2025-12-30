@@ -123,7 +123,7 @@ public:
         uint64_t currentFrame = sapp_frame_count();
         if (lastUpdateFrame_ == currentFrame) {
             // Ignore second call in same frame and log warning
-            tcLogWarning() << "[Texture] loadData() called twice in same frame, skipped";
+            logWarning() << "[Texture] loadData() called twice in same frame, skipped";
             return;
         }
         lastUpdateFrame_ = currentFrame;

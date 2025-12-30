@@ -4,7 +4,7 @@
 // setup - Initialization
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "setup() called";
+    logNotice("tcApp") << "setup() called";
 }
 
 // ---------------------------------------------------------------------------
@@ -183,7 +183,7 @@ void tcApp::draw() {
 // ---------------------------------------------------------------------------
 
 void tcApp::keyPressed(int key) {
-    tcLogVerbose("tcApp") << "keyPressed: " << key;
+    logVerbose("tcApp") << "keyPressed: " << key;
 
     // ESC to quit
     if (key == KEY_ESCAPE) {
@@ -192,7 +192,7 @@ void tcApp::keyPressed(int key) {
 }
 
 void tcApp::mousePressed(Vec2 pos, int button) {
-    tcLogVerbose("tcApp") << "mousePressed: " << pos.x << ", " << pos.y << " button=" << button;
+    logVerbose("tcApp") << "mousePressed: " << pos.x << ", " << pos.y << " button=" << button;
 }
 
 void tcApp::mouseDragged(Vec2 pos, int button) {

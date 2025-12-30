@@ -85,13 +85,13 @@ bool captureWindow(Pixels& outPixels) {
     sapp_swapchain sc = sapp_get_swapchain();
     id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)sc.metal.current_drawable;
     if (!drawable) {
-        tcLogError() << "[Screenshot] Metal drawable が取得できません";
+        logError() << "[Screenshot] Metal drawable が取得できません";
         return false;
     }
 
     id<MTLTexture> texture = drawable.texture;
     if (!texture) {
-        tcLogError() << "[Screenshot] Metal テクスチャが取得できません";
+        logError() << "[Screenshot] Metal テクスチャが取得できません";
         return false;
     }
 
@@ -144,7 +144,7 @@ bool saveScreenshot(const std::filesystem::path& path) {
 
     if (!context) {
         CGColorSpaceRelease(colorSpace);
-        tcLogError() << "[Screenshot] CGContext の作成に失敗しました";
+        logError() << "[Screenshot] CGContext の作成に失敗しました";
         return false;
     }
 
@@ -153,7 +153,7 @@ bool saveScreenshot(const std::filesystem::path& path) {
     CGColorSpaceRelease(colorSpace);
 
     if (!cgImage) {
-        tcLogError() << "[Screenshot] CGImage の作成に失敗しました";
+        logError() << "[Screenshot] CGImage の作成に失敗しました";
         return false;
     }
 
@@ -162,7 +162,7 @@ bool saveScreenshot(const std::filesystem::path& path) {
     CGImageRelease(cgImage);
 
     if (!rep) {
-        tcLogError() << "[Screenshot] NSBitmapImageRep の作成に失敗しました";
+        logError() << "[Screenshot] NSBitmapImageRep の作成に失敗しました";
         return false;
     }
 
@@ -182,7 +182,7 @@ bool saveScreenshot(const std::filesystem::path& path) {
     // ファイルに保存
     NSData* data = [rep representationUsingType:fileType properties:@{}];
     if (!data) {
-        tcLogError() << "[Screenshot] 画像データの作成に失敗しました";
+        logError() << "[Screenshot] 画像データの作成に失敗しました";
         return false;
     }
 
@@ -190,9 +190,9 @@ bool saveScreenshot(const std::filesystem::path& path) {
     BOOL success = [data writeToFile:nsPath atomically:YES];
 
     if (success) {
-        tcLogVerbose() << "[Screenshot] 保存完了: " << path;
+        logVerbose() << "[Screenshot] 保存完了: " << path;
     } else {
-        tcLogError() << "[Screenshot] 保存に失敗しました: " << path;
+        logError() << "[Screenshot] 保存に失敗しました: " << path;
     }
 
     return success;

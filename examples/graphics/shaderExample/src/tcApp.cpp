@@ -10,9 +10,9 @@ static ShaderDescFunc shaderDescFuncs[] = {
 };
 
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "shaderExample: Cross-Platform Shader Demo";
-    tcLogNotice("tcApp") << "  - Press 1-4 to switch effects";
-    tcLogNotice("tcApp") << "  - Press SPACE to cycle effects";
+    logNotice("tcApp") << "shaderExample: Cross-Platform Shader Demo";
+    logNotice("tcApp") << "  - Press 1-4 to switch effects";
+    logNotice("tcApp") << "  - Press SPACE to cycle effects";
 
     sg_backend backend = sg_query_backend();
 
@@ -20,13 +20,13 @@ void tcApp::setup() {
     for (int i = 0; i < NUM_EFFECTS; i++) {
         const sg_shader_desc* shd_desc = shaderDescFuncs[i](backend);
         if (!shd_desc) {
-            tcLogError("tcApp") << "Failed to get shader desc for effect " << i;
+            logError("tcApp") << "Failed to get shader desc for effect " << i;
             return;
         }
 
         shaders[i] = sg_make_shader(shd_desc);
         if (sg_query_shader_state(shaders[i]) != SG_RESOURCESTATE_VALID) {
-            tcLogError("tcApp") << "Failed to create shader for effect " << i;
+            logError("tcApp") << "Failed to create shader for effect " << i;
             return;
         }
 
@@ -42,7 +42,7 @@ void tcApp::setup() {
 
         pipelines[i] = sg_make_pipeline(&pip_desc);
         if (sg_query_pipeline_state(pipelines[i]) != SG_RESOURCESTATE_VALID) {
-            tcLogError("tcApp") << "Failed to create pipeline for effect " << i;
+            logError("tcApp") << "Failed to create pipeline for effect " << i;
             return;
         }
     }
@@ -70,7 +70,7 @@ void tcApp::setup() {
     indexBuffer = sg_make_buffer(&ibuf_desc);
 
     loaded = true;
-    tcLogNotice("tcApp") << "All 4 effects loaded successfully!";
+    logNotice("tcApp") << "All 4 effects loaded successfully!";
 }
 
 void tcApp::update() {

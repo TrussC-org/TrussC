@@ -33,10 +33,10 @@ void tcApp::setColorHSB(float h, float s, float b, float a) {
 // setup
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "03_math: Vector & Matrix Demo";
-    tcLogNotice("tcApp") << "  - Space: Switch mode";
-    tcLogNotice("tcApp") << "  - Click: Spawn particles";
-    tcLogNotice("tcApp") << "  - ESC: Quit";
+    logNotice("tcApp") << "03_math: Vector & Matrix Demo";
+    logNotice("tcApp") << "  - Space: Switch mode";
+    logNotice("tcApp") << "  - Click: Spawn particles";
+    logNotice("tcApp") << "  - ESC: Quit";
 }
 
 // ---------------------------------------------------------------------------
@@ -333,7 +333,7 @@ void tcApp::keyPressed(int key) {
     }
     else if (key == KEY_SPACE) {
         mode_ = (mode_ + 1) % NUM_MODES;
-        tcLogNotice("tcApp") << "Mode: " << mode_;
+        logNotice("tcApp") << "Mode: " << mode_;
     }
 }
 

@@ -21,16 +21,16 @@ using Json = nlohmann::json;
 inline Json loadJson(const std::string& path) {
     std::ifstream file(path);
     if (!file.is_open()) {
-        tcLogError() << "Cannot open JSON file: " << path;
+        logError() << "Cannot open JSON file: " << path;
         return Json();
     }
 
     try {
         Json j = Json::parse(file);
-        tcLogVerbose() << "JSON loaded: " << path;
+        logVerbose() << "JSON loaded: " << path;
         return j;
     } catch (const Json::parse_error& e) {
-        tcLogError() << "JSON parse error: " << path << " - " << e.what();
+        logError() << "JSON parse error: " << path << " - " << e.what();
         return Json();
     }
 }
@@ -41,7 +41,7 @@ inline Json loadJson(const std::string& path) {
 inline bool saveJson(const Json& j, const std::string& path, int indent = 2) {
     std::ofstream file(path);
     if (!file.is_open()) {
-        tcLogError() << "Cannot create JSON file: " << path;
+        logError() << "Cannot create JSON file: " << path;
         return false;
     }
 
@@ -51,10 +51,10 @@ inline bool saveJson(const Json& j, const std::string& path, int indent = 2) {
         } else {
             file << j.dump();  // Compact format
         }
-        tcLogVerbose() << "JSON saved: " << path;
+        logVerbose() << "JSON saved: " << path;
         return true;
     } catch (const std::exception& e) {
-        tcLogError() << "JSON write error: " << path << " - " << e.what();
+        logError() << "JSON write error: " << path << " - " << e.what();
         return false;
     }
 }
@@ -66,7 +66,7 @@ inline Json parseJson(const std::string& str) {
     try {
         return Json::parse(str);
     } catch (const Json::parse_error& e) {
-        tcLogError() << "JSON parse error: " << e.what();
+        logError() << "JSON parse error: " << e.what();
         return Json();
     }
 }

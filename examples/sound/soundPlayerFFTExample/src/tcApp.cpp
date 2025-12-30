@@ -28,21 +28,21 @@ void tcApp::setup() {
         musicLoaded = true;
         music.setLoop(true);
         music.play();
-        tcLogNotice("tcApp") << "Music loaded: " << musicPath << " (" << music.getDuration() << " sec)";
+        logNotice("tcApp") << "Music loaded: " << musicPath << " (" << music.getDuration() << " sec)";
     } else {
-        tcLogNotice("tcApp") << "Music not found: " << musicPath << " - using test tone";
+        logNotice("tcApp") << "Music not found: " << musicPath << " - using test tone";
         music.loadTestTone(440.0f, 3.0f);
         music.setLoop(true);
         music.play();
         musicLoaded = true;
     }
 
-    tcLogNotice("tcApp") << "=== Controls ===";
-    tcLogNotice("tcApp") << "SPACE: Play/Stop";
-    tcLogNotice("tcApp") << "W: Toggle waveform";
-    tcLogNotice("tcApp") << "L: Toggle log scale";
-    tcLogNotice("tcApp") << "UP/DOWN: Smoothing";
-    tcLogNotice("tcApp") << "================";
+    logNotice("tcApp") << "=== Controls ===";
+    logNotice("tcApp") << "SPACE: Play/Stop";
+    logNotice("tcApp") << "W: Toggle waveform";
+    logNotice("tcApp") << "L: Toggle log scale";
+    logNotice("tcApp") << "UP/DOWN: Smoothing";
+    logNotice("tcApp") << "================";
 }
 
 void tcApp::update() {
@@ -182,26 +182,26 @@ void tcApp::keyPressed(int key) {
     if (key == ' ') {
         if (music.isPlaying()) {
             music.stop();
-            tcLogNotice("tcApp") << "Music stopped";
+            logNotice("tcApp") << "Music stopped";
         } else {
             music.play();
-            tcLogNotice("tcApp") << "Music playing";
+            logNotice("tcApp") << "Music playing";
         }
     }
     else if (key == 'w' || key == 'W') {
         showWaveform = !showWaveform;
-        tcLogNotice("tcApp") << "Waveform: " << (showWaveform ? "ON" : "OFF");
+        logNotice("tcApp") << "Waveform: " << (showWaveform ? "ON" : "OFF");
     }
     else if (key == 'l' || key == 'L') {
         useLogScale = !useLogScale;
-        tcLogNotice("tcApp") << "Log scale: " << (useLogScale ? "ON" : "OFF");
+        logNotice("tcApp") << "Log scale: " << (useLogScale ? "ON" : "OFF");
     }
     else if (key == SAPP_KEYCODE_UP) {
         smoothing = std::min(0.99f, smoothing + 0.05f);
-        tcLogNotice("tcApp") << "Smoothing: " << (int)(smoothing * 100) << "%";
+        logNotice("tcApp") << "Smoothing: " << (int)(smoothing * 100) << "%";
     }
     else if (key == SAPP_KEYCODE_DOWN) {
         smoothing = std::max(0.0f, smoothing - 0.05f);
-        tcLogNotice("tcApp") << "Smoothing: " << (int)(smoothing * 100) << "%";
+        logNotice("tcApp") << "Smoothing: " << (int)(smoothing * 100) << "%";
     }
 }

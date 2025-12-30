@@ -5,8 +5,8 @@
 #include "tcApp.h"
 
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "=== clippingExample ===";
-    tcLogNotice("tcApp") << "Nested Scissor Clipping Demo";
+    logNotice("tcApp") << "=== clippingExample ===";
+    logNotice("tcApp") << "Nested Scissor Clipping Demo";
 
     // Outer clip box
     outerBox_ = make_shared<ClipBox>();

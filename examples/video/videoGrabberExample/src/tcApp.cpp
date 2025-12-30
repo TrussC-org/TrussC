@@ -11,9 +11,9 @@ using namespace std;
 void tcApp::setup() {
     // List available cameras
     auto devices = grabber_.listDevices();
-    tcLogNotice("tcApp") << "Available cameras:";
+    logNotice("tcApp") << "Available cameras:";
     for (const auto& d : devices) {
-        tcLogNotice("tcApp") << "  [" << d.deviceId << "] " << d.deviceName;
+        logNotice("tcApp") << "  [" << d.deviceId << "] " << d.deviceName;
     }
 
     // Select camera device (0 = default/first camera)

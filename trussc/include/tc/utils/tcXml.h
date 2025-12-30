@@ -29,12 +29,12 @@ public:
     bool load(const std::string& path) {
         XmlParseResult result = doc_.load_file(path.c_str());
         if (!result) {
-            tcLogError() << "XML load error: " << path
+            logError() << "XML load error: " << path
                          << " - " << result.description()
                          << " (offset: " << result.offset << ")";
             return false;
         }
-        tcLogVerbose() << "XML loaded: " << path;
+        logVerbose() << "XML loaded: " << path;
         return true;
     }
 
@@ -42,7 +42,7 @@ public:
     bool parse(const std::string& str) {
         XmlParseResult result = doc_.load_string(str.c_str());
         if (!result) {
-            tcLogError() << "XML parse error: " << result.description()
+            logError() << "XML parse error: " << result.description()
                          << " (offset: " << result.offset << ")";
             return false;
         }
@@ -53,10 +53,10 @@ public:
     bool save(const std::string& path, const std::string& indent = "  ") const {
         bool success = doc_.save_file(path.c_str(), indent.c_str());
         if (!success) {
-            tcLogError() << "XML write error: " << path;
+            logError() << "XML write error: " << path;
             return false;
         }
-        tcLogVerbose() << "XML saved: " << path;
+        logVerbose() << "XML saved: " << path;
         return true;
     }
 

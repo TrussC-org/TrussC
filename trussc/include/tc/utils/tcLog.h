@@ -256,31 +256,40 @@ private:
 // Usage:
 //   tcLog() << "message";                    // Default (Notice)
 //   tcLog(LogLevel::Warning) << "warning";   // Level specified
-//   tcLogNotice("ClassName") << "message";   // With module name
-//   tcLogNotice() << "message";              // Without module name
+//   logNotice("ClassName") << "message";     // With module name
+//   logNotice() << "message";                // Without module name
 // ---------------------------------------------------------------------------
 inline LogStream tcLog(LogLevel level = LogLevel::Notice) {
     return LogStream(level);
 }
 
-inline LogStream tcLogVerbose(const std::string& module = "") {
+inline LogStream logVerbose(const std::string& module = "") {
     return LogStream(LogLevel::Verbose, module);
 }
 
-inline LogStream tcLogNotice(const std::string& module = "") {
+inline LogStream logNotice(const std::string& module = "") {
     return LogStream(LogLevel::Notice, module);
 }
 
-inline LogStream tcLogWarning(const std::string& module = "") {
+inline LogStream logWarning(const std::string& module = "") {
     return LogStream(LogLevel::Warning, module);
 }
 
-inline LogStream tcLogError(const std::string& module = "") {
+inline LogStream logError(const std::string& module = "") {
     return LogStream(LogLevel::Error, module);
 }
 
-inline LogStream tcLogFatal(const std::string& module = "") {
+inline LogStream logFatal(const std::string& module = "") {
     return LogStream(LogLevel::Fatal, module);
 }
+
+// ---------------------------------------------------------------------------
+// Backward compatibility aliases (deprecated, use non-prefixed versions)
+// ---------------------------------------------------------------------------
+inline LogStream tcLogVerbose(const std::string& module = "") { return logVerbose(module); }
+inline LogStream tcLogNotice(const std::string& module = "") { return logNotice(module); }
+inline LogStream tcLogWarning(const std::string& module = "") { return logWarning(module); }
+inline LogStream tcLogError(const std::string& module = "") { return logError(module); }
+inline LogStream tcLogFatal(const std::string& module = "") { return logFatal(module); }
 
 } // namespace trussc

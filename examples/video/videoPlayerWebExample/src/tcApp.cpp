@@ -23,14 +23,14 @@ void tcApp::setup() {
     // Big Buck Bunny (CC BY 3.0)
     string videoUrl = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
 
-    tcLogNotice("tcApp") << "Loading video from URL...";
+    logNotice("tcApp") << "Loading video from URL...";
 
     if (video_.load(videoUrl)) {
-        tcLogNotice("tcApp") << "Video loading started";
+        logNotice("tcApp") << "Video loading started";
         // Start paused, user presses Space to play
         loading_ = false;
     } else {
-        tcLogError("tcApp") << "Failed to load video";
+        logError("tcApp") << "Failed to load video";
     }
 }
 
@@ -40,7 +40,7 @@ void tcApp::update() {
     // Detect when loading completes
     if (loading_ && video_.isLoaded()) {
         loading_ = false;
-        tcLogNotice("tcApp") << "Video loaded: " << (int)video_.getWidth() << "x"
+        logNotice("tcApp") << "Video loaded: " << (int)video_.getWidth() << "x"
                              << (int)video_.getHeight() << ", "
                              << video_.getDuration() << " sec";
     }

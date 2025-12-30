@@ -6,12 +6,12 @@ using namespace std;
 // setup
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "05_3d_primitives: 3D Primitives Demo";
-    tcLogNotice("tcApp") << "  - 1/2/3/4: Change resolution";
-    tcLogNotice("tcApp") << "  - s: Fill ON/OFF";
-    tcLogNotice("tcApp") << "  - w: Wireframe ON/OFF";
-    tcLogNotice("tcApp") << "  - l: Lighting ON/OFF";
-    tcLogNotice("tcApp") << "  - ESC: Exit";
+    logNotice("tcApp") << "05_3d_primitives: 3D Primitives Demo";
+    logNotice("tcApp") << "  - 1/2/3/4: Change resolution";
+    logNotice("tcApp") << "  - s: Fill ON/OFF";
+    logNotice("tcApp") << "  - w: Wireframe ON/OFF";
+    logNotice("tcApp") << "  - l: Lighting ON/OFF";
+    logNotice("tcApp") << "  - ESC: Exit";
 
     // Light settings (directional light from diagonal above)
     light_.setDirectional(Vec3(-1, -1, -1));
@@ -61,7 +61,7 @@ void tcApp::rebuildPrimitives() {
     cylinder = createCylinder(size * 0.4f, size * 1.5f, cylRes);
     cone = createCone(size * 0.5f, size * 1.5f, coneRes);
 
-    tcLogNotice("tcApp") << "Resolution mode: " << resolution;
+    logNotice("tcApp") << "Resolution mode: " << resolution;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,14 +201,14 @@ void tcApp::keyPressed(int key) {
     }
     else if (key == 's' || key == 'S') {
         bFill = !bFill;
-        tcLogNotice("tcApp") << "Fill: " << (bFill ? "ON" : "OFF");
+        logNotice("tcApp") << "Fill: " << (bFill ? "ON" : "OFF");
     }
     else if (key == 'w' || key == 'W') {
         bWireframe = !bWireframe;
-        tcLogNotice("tcApp") << "Wireframe: " << (bWireframe ? "ON" : "OFF");
+        logNotice("tcApp") << "Wireframe: " << (bWireframe ? "ON" : "OFF");
     }
     else if (key == 'l' || key == 'L') {
         bLighting = !bLighting;
-        tcLogNotice("tcApp") << "Lighting: " << (bLighting ? "ON" : "OFF");
+        logNotice("tcApp") << "Lighting: " << (bLighting ? "ON" : "OFF");
     }
 }

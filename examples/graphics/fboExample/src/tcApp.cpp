@@ -1,7 +1,7 @@
 #include "tcApp.h"
 
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "fboExample: FBO Demo";
+    logNotice("tcApp") << "fboExample: FBO Demo";
 
     // Create FBO (400x300)
     fbo_.allocate(400, 300);

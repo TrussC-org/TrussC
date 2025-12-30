@@ -64,7 +64,7 @@ public:
     bool load(const fs::path& path) {
         std::ifstream file(path);
         if (!file) {
-            tcLogError() << "Shader: failed to open " << path.string();
+            logError() << "Shader: failed to open " << path.string();
             return false;
         }
 
@@ -122,7 +122,7 @@ public:
 
         shader_ = sg_make_shader(&shd_desc);
         if (sg_query_shader_state(shader_) != SG_RESOURCESTATE_VALID) {
-            tcLogError() << "Shader: failed to create shader";
+            logError() << "Shader: failed to create shader";
             return false;
         }
 
@@ -139,7 +139,7 @@ public:
 
         pipeline_ = sg_make_pipeline(&pip_desc);
         if (sg_query_pipeline_state(pipeline_) != SG_RESOURCESTATE_VALID) {
-            tcLogError() << "Shader: failed to create pipeline";
+            logError() << "Shader: failed to create pipeline";
             sg_destroy_shader(shader_);
             shader_ = {};
             return false;

@@ -208,7 +208,7 @@ bool VideoGrabber::setupPlatform() {
     data->fd = open(devicePath.c_str(), O_RDWR | O_NONBLOCK);
 
     if (data->fd == -1) {
-        tcLogError("VideoGrabber") << "Failed to open " << devicePath;
+        logError("VideoGrabber") << "Failed to open " << devicePath;
         delete data;
         platformHandle_ = nullptr;
         return false;
@@ -217,7 +217,7 @@ bool VideoGrabber::setupPlatform() {
     // Query capabilities
     struct v4l2_capability cap;
     if (xioctl(data->fd, VIDIOC_QUERYCAP, &cap) == -1) {
-        tcLogError("VideoGrabber") << "Failed to query capabilities";
+        logError("VideoGrabber") << "Failed to query capabilities";
         ::close(data->fd);
         delete data;
         platformHandle_ = nullptr;
@@ -225,7 +225,7 @@ bool VideoGrabber::setupPlatform() {
     }
 
     if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
-        tcLogError("VideoGrabber") << "Device does not support video capture";
+        logError("VideoGrabber") << "Device does not support video capture";
         ::close(data->fd);
         delete data;
         platformHandle_ = nullptr;
@@ -233,7 +233,7 @@ bool VideoGrabber::setupPlatform() {
     }
 
     deviceName_ = std::string((char*)cap.card);
-    tcLogNotice("VideoGrabber") << "Device: " << deviceName_;
+    logNotice("VideoGrabber") << "Device: " << deviceName_;
 
     // Set format
     struct v4l2_format fmt = {};
@@ -247,7 +247,7 @@ bool VideoGrabber::setupPlatform() {
         // Try YUYV
         fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
         if (xioctl(data->fd, VIDIOC_S_FMT, &fmt) == -1) {
-            tcLogError("VideoGrabber") << "Failed to set format";
+            logError("VideoGrabber") << "Failed to set format";
             ::close(data->fd);
             delete data;
             platformHandle_ = nullptr;
@@ -261,7 +261,7 @@ bool VideoGrabber::setupPlatform() {
     data->bufferHeight = height_;
     data->pixelFormat = fmt.fmt.pix.pixelformat;
 
-    tcLogNotice("VideoGrabber") << "Format: " << width_ << "x" << height_
+    logNotice("VideoGrabber") << "Format: " << width_ << "x" << height_
                                 << " (" << (char*)&data->pixelFormat << ")";
 
     // Set frame rate if specified
@@ -280,7 +280,7 @@ bool VideoGrabber::setupPlatform() {
     req.memory = V4L2_MEMORY_MMAP;
 
     if (xioctl(data->fd, VIDIOC_REQBUFS, &req) == -1) {
-        tcLogError("VideoGrabber") << "Failed to request buffers";
+        logError("VideoGrabber") << "Failed to request buffers";
         ::close(data->fd);
         delete data;
         platformHandle_ = nullptr;
@@ -298,7 +298,7 @@ bool VideoGrabber::setupPlatform() {
         buf.index = i;
 
         if (xioctl(data->fd, VIDIOC_QUERYBUF, &buf) == -1) {
-            tcLogError("VideoGrabber") << "Failed to query buffer";
+            logError("VideoGrabber") << "Failed to query buffer";
             // Cleanup
             for (unsigned int j = 0; j < i; j++) {
                 munmap(data->buffers[j].start, data->buffers[j].length);
@@ -315,7 +315,7 @@ bool VideoGrabber::setupPlatform() {
                                        MAP_SHARED, data->fd, buf.m.offset);
 
         if (data->buffers[i].start == MAP_FAILED) {
-            tcLogError("VideoGrabber") << "Failed to mmap buffer";
+            logError("VideoGrabber") << "Failed to mmap buffer";
             for (unsigned int j = 0; j < i; j++) {
                 munmap(data->buffers[j].start, data->buffers[j].length);
             }
@@ -338,14 +338,14 @@ bool VideoGrabber::setupPlatform() {
         buf.index = i;
 
         if (xioctl(data->fd, VIDIOC_QBUF, &buf) == -1) {
-            tcLogError("VideoGrabber") << "Failed to queue buffer";
+            logError("VideoGrabber") << "Failed to queue buffer";
         }
     }
 
     // Start streaming
     enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (xioctl(data->fd, VIDIOC_STREAMON, &type) == -1) {
-        tcLogError("VideoGrabber") << "Failed to start streaming";
+        logError("VideoGrabber") << "Failed to start streaming";
         // Cleanup
         for (unsigned int i = 0; i < data->bufferCount; i++) {
             munmap(data->buffers[i].start, data->buffers[i].length);
@@ -362,7 +362,7 @@ bool VideoGrabber::setupPlatform() {
     data->running = true;
     data->captureThread = std::thread(captureThreadFunc, data);
 
-    tcLogNotice("VideoGrabber") << "Started capturing";
+    logNotice("VideoGrabber") << "Started capturing";
     return true;
 }
 

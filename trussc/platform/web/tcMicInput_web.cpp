@@ -99,7 +99,7 @@ bool MicInput::start(int sampleRate) {
     emscripten_run_script(script.c_str());
 
     running_ = true;
-    tcLogNotice("MicInput") << "started (" << sampleRate << " Hz, mono) [Web]";
+    logNotice("MicInput") << "started (" << sampleRate << " Hz, mono) [Web]";
     return true;
 }
 
@@ -126,7 +126,7 @@ void MicInput::stop() {
     )JS");
 
     running_ = false;
-    tcLogNotice("MicInput") << "stopped [Web]";
+    logNotice("MicInput") << "stopped [Web]";
 }
 
 size_t MicInput::getBuffer(float* outBuffer, size_t numSamples) {

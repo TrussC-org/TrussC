@@ -41,7 +41,7 @@ static bool InitMediaFoundation() {
     if (sMFRefCount.fetch_add(1) == 0) {
         HRESULT hr = MFStartup(MF_VERSION);
         if (FAILED(hr)) {
-            tcLogError("VideoPlayer") << "Failed to initialize Media Foundation";
+            logError("VideoPlayer") << "Failed to initialize Media Foundation";
             sMFRefCount--;
             return false;
         }
@@ -214,7 +214,7 @@ bool TCVideoPlayerImpl::createD3D11Device() {
     );
 
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to create D3D11 device";
+        logError("VideoPlayer") << "Failed to create D3D11 device";
         return false;
     }
 
@@ -227,13 +227,13 @@ bool TCVideoPlayerImpl::createD3D11Device() {
     // Create DXGI device manager
     hr = MFCreateDXGIDeviceManager(&dxgiResetToken_, &dxgiManager_);
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to create DXGI device manager";
+        logError("VideoPlayer") << "Failed to create DXGI device manager";
         return false;
     }
 
     hr = dxgiManager_->ResetDevice(d3dDevice_.Get(), dxgiResetToken_);
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to reset DXGI device";
+        logError("VideoPlayer") << "Failed to reset DXGI device";
         return false;
     }
 
@@ -253,7 +253,7 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
     );
 
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to create MediaEngine factory";
+        logError("VideoPlayer") << "Failed to create MediaEngine factory";
         return false;
     }
 
@@ -261,14 +261,14 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
     ComPtr<IMFAttributes> attributes;
     hr = MFCreateAttributes(&attributes, 3);
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to create attributes";
+        logError("VideoPlayer") << "Failed to create attributes";
         return false;
     }
 
     // Set DXGI manager for HW acceleration
     hr = attributes->SetUnknown(MF_MEDIA_ENGINE_DXGI_MANAGER, dxgiManager_.Get());
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to set DXGI manager";
+        logError("VideoPlayer") << "Failed to set DXGI manager";
         return false;
     }
 
@@ -276,14 +276,14 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
     eventNotify_ = new MediaEngineNotify(this);
     hr = attributes->SetUnknown(MF_MEDIA_ENGINE_CALLBACK, eventNotify_);
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to set callback";
+        logError("VideoPlayer") << "Failed to set callback";
         return false;
     }
 
     // Set output format (BGRA for D3D11)
     hr = attributes->SetUINT32(MF_MEDIA_ENGINE_VIDEO_OUTPUT_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM);
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to set output format";
+        logError("VideoPlayer") << "Failed to set output format";
         return false;
     }
 
@@ -295,7 +295,7 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
     );
 
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to create MediaEngine";
+        logError("VideoPlayer") << "Failed to create MediaEngine";
         return false;
     }
 
@@ -315,14 +315,14 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
     SysFreeString(bstrPath);
 
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to set source";
+        logError("VideoPlayer") << "Failed to set source";
         return false;
     }
 
     // Start loading
     hr = mediaEngine_->Load();
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to load";
+        logError("VideoPlayer") << "Failed to load";
         return false;
     }
 
@@ -346,7 +346,7 @@ bool TCVideoPlayerImpl::createRenderTexture() {
 
     HRESULT hr = d3dDevice_->CreateTexture2D(&desc, nullptr, &renderTexture_);
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to create render texture";
+        logError("VideoPlayer") << "Failed to create render texture";
         return false;
     }
 
@@ -357,7 +357,7 @@ bool TCVideoPlayerImpl::createRenderTexture() {
 
     hr = d3dDevice_->CreateTexture2D(&desc, nullptr, &stagingTexture_);
     if (FAILED(hr)) {
-        tcLogError("VideoPlayer") << "Failed to create staging texture";
+        logError("VideoPlayer") << "Failed to create staging texture";
         return false;
     }
 
@@ -457,7 +457,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     }
 
     if (!isReady_) {
-        tcLogError("VideoPlayer") << "Timeout waiting for video to load";
+        logError("VideoPlayer") << "Timeout waiting for video to load";
         return false;
     }
 
@@ -638,12 +638,12 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
             if (SUCCEEDED(mediaEngine_->GetNativeVideoSize(&w, &h))) {
                 width_ = static_cast<int>(w);
                 height_ = static_cast<int>(h);
-                tcLogNotice("VideoPlayer") << "Video size: " << width_ << "x" << height_;
+                logNotice("VideoPlayer") << "Video size: " << width_ << "x" << height_;
             }
 
             // Get duration
             duration_ = static_cast<float>(mediaEngine_->GetDuration());
-            tcLogNotice("VideoPlayer") << "Duration: " << duration_ << " sec";
+            logNotice("VideoPlayer") << "Duration: " << duration_ << " sec";
 
             // Create render texture
             createRenderTexture();
@@ -666,7 +666,7 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
                 mediaEngine_->GetError(&error);
                 if (error) {
                     err = static_cast<MF_MEDIA_ENGINE_ERR>(error->GetErrorCode());
-                    tcLogError("VideoPlayer") << "Media error: " << static_cast<int>(err);
+                    logError("VideoPlayer") << "Media error: " << static_cast<int>(err);
                 }
             }
             break;

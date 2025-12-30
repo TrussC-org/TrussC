@@ -6,7 +6,7 @@
 // Display results of various utility functions in real-time on screen
 
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "utilsExample: Utility Functions Demo";
+    logNotice("tcApp") << "utilsExample: Utility Functions Demo";
 
     // String split test
     splitResult_ = splitString("apple,banana,cherry,date", ",");

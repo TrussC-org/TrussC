@@ -78,10 +78,10 @@ void tcApp::update() {
 
             int baud = 9600;
             if (!serialDevicePath.empty()) {
-                tcLogNotice("tcApp") << "Attempting to connect to serial device: " << serialDevicePath;
+                logNotice("tcApp") << "Attempting to connect to serial device: " << serialDevicePath;
                 serial.setup(serialDevicePath, baud);
             } else if (!deviceList.empty()) {
-                tcLogNotice("tcApp") << "Attempting to connect to serial device: 0";
+                logNotice("tcApp") << "Attempting to connect to serial device: 0";
                 serial.setup(0, baud);
             }
         }

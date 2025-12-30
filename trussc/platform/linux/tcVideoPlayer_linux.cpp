@@ -125,13 +125,13 @@ private:
 bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     // Open file
     if (avformat_open_input(&formatCtx_, path.c_str(), nullptr, nullptr) < 0) {
-        tcLogError("VideoPlayer") << "Failed to open file: " << path;
+        logError("VideoPlayer") << "Failed to open file: " << path;
         return false;
     }
 
     // Get stream info
     if (avformat_find_stream_info(formatCtx_, nullptr) < 0) {
-        tcLogError("VideoPlayer") << "Failed to find stream info";
+        logError("VideoPlayer") << "Failed to find stream info";
         avformat_close_input(&formatCtx_);
         return false;
     }
@@ -145,7 +145,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     }
 
     if (videoStreamIndex_ < 0) {
-        tcLogError("VideoPlayer") << "No video stream found";
+        logError("VideoPlayer") << "No video stream found";
         avformat_close_input(&formatCtx_);
         return false;
     }
@@ -156,7 +156,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     // Find decoder
     const AVCodec* codec = avcodec_find_decoder(codecPar->codec_id);
     if (!codec) {
-        tcLogError("VideoPlayer") << "Codec not found";
+        logError("VideoPlayer") << "Codec not found";
         avformat_close_input(&formatCtx_);
         return false;
     }
@@ -164,13 +164,13 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     // Create codec context
     codecCtx_ = avcodec_alloc_context3(codec);
     if (!codecCtx_) {
-        tcLogError("VideoPlayer") << "Failed to allocate codec context";
+        logError("VideoPlayer") << "Failed to allocate codec context";
         avformat_close_input(&formatCtx_);
         return false;
     }
 
     if (avcodec_parameters_to_context(codecCtx_, codecPar) < 0) {
-        tcLogError("VideoPlayer") << "Failed to copy codec parameters";
+        logError("VideoPlayer") << "Failed to copy codec parameters";
         avcodec_free_context(&codecCtx_);
         avformat_close_input(&formatCtx_);
         return false;
@@ -178,7 +178,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
 
     // Open codec
     if (avcodec_open2(codecCtx_, codec, nullptr) < 0) {
-        tcLogError("VideoPlayer") << "Failed to open codec";
+        logError("VideoPlayer") << "Failed to open codec";
         avcodec_free_context(&codecCtx_);
         avformat_close_input(&formatCtx_);
         return false;
@@ -203,7 +203,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         duration_ = videoStream->duration * av_q2d(timeBase_);
     }
 
-    tcLogNotice("VideoPlayer") << "Video: " << width_ << "x" << height_
+    logNotice("VideoPlayer") << "Video: " << width_ << "x" << height_
                                << " @ " << frameRate_ << " fps, "
                                << duration_ << " sec";
 
@@ -215,7 +215,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     );
 
     if (!swsCtx_) {
-        tcLogError("VideoPlayer") << "Failed to create scaler context";
+        logError("VideoPlayer") << "Failed to create scaler context";
         avcodec_free_context(&codecCtx_);
         avformat_close_input(&formatCtx_);
         return false;
@@ -227,7 +227,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     packet_ = av_packet_alloc();
 
     if (!frame_ || !frameRGBA_ || !packet_) {
-        tcLogError("VideoPlayer") << "Failed to allocate frames";
+        logError("VideoPlayer") << "Failed to allocate frames";
         close();
         return false;
     }

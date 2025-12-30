@@ -16,15 +16,15 @@ void tcApp::setup() {
 
     // Audio file path (CC0 sample audio in data folder)
     musicPath = getDataPath("beat_loop.wav");
-    tcLogNotice("tcApp") << "Trying to load: " << musicPath;
+    logNotice("tcApp") << "Trying to load: " << musicPath;
 
     // Load music
     if (music.load(musicPath)) {
         musicLoaded = true;
         music.setLoop(true);
-        tcLogNotice("tcApp") << "Music loaded: " << musicPath << " (" << music.getDuration() << " sec)";
+        logNotice("tcApp") << "Music loaded: " << musicPath << " (" << music.getDuration() << " sec)";
     } else {
-        tcLogNotice("tcApp") << "Music not found: " << musicPath << " - using test tone";
+        logNotice("tcApp") << "Music not found: " << musicPath << " - using test tone";
         music.loadTestTone(440.0f, 3.0f);  // A4 (440Hz), 3 seconds
         music.setLoop(true);
         musicLoaded = true;
@@ -34,14 +34,14 @@ void tcApp::setup() {
     sfx.loadTestTone(880.0f, 0.2f);  // A5 (880Hz), 0.2 seconds
     sfxLoaded = true;
 
-    tcLogNotice("tcApp") << "=== Controls ===";
-    tcLogNotice("tcApp") << "SPACE: Play/Stop music";
-    tcLogNotice("tcApp") << "P: Pause/Resume music";
-    tcLogNotice("tcApp") << "S: Play sound effect";
-    tcLogNotice("tcApp") << "UP/DOWN: Volume control";
-    tcLogNotice("tcApp") << "LEFT/RIGHT: Pan control";
-    tcLogNotice("tcApp") << "+/-: Speed control";
-    tcLogNotice("tcApp") << "================";
+    logNotice("tcApp") << "=== Controls ===";
+    logNotice("tcApp") << "SPACE: Play/Stop music";
+    logNotice("tcApp") << "P: Pause/Resume music";
+    logNotice("tcApp") << "S: Play sound effect";
+    logNotice("tcApp") << "UP/DOWN: Volume control";
+    logNotice("tcApp") << "LEFT/RIGHT: Pan control";
+    logNotice("tcApp") << "+/-: Speed control";
+    logNotice("tcApp") << "================";
 }
 
 void tcApp::draw() {
@@ -135,10 +135,10 @@ void tcApp::keyPressed(int key) {
         if (musicLoaded) {
             if (music.isPlaying() || music.isPaused()) {
                 music.stop();
-                tcLogNotice("tcApp") << "Music stopped";
+                logNotice("tcApp") << "Music stopped";
             } else {
                 music.play();
-                tcLogNotice("tcApp") << "Music playing";
+                logNotice("tcApp") << "Music playing";
             }
         }
     }
@@ -147,10 +147,10 @@ void tcApp::keyPressed(int key) {
         if (musicLoaded) {
             if (music.isPaused()) {
                 music.resume();
-                tcLogNotice("tcApp") << "Music resumed";
+                logNotice("tcApp") << "Music resumed";
             } else if (music.isPlaying()) {
                 music.pause();
-                tcLogNotice("tcApp") << "Music paused";
+                logNotice("tcApp") << "Music paused";
             }
         }
     }
@@ -158,7 +158,7 @@ void tcApp::keyPressed(int key) {
         // S: Play sound effect
         if (sfxLoaded) {
             sfx.play();
-            tcLogNotice("tcApp") << "SFX playing";
+            logNotice("tcApp") << "SFX playing";
         }
     }
     else if (key == SAPP_KEYCODE_UP) {
@@ -166,37 +166,37 @@ void tcApp::keyPressed(int key) {
         float vol = music.getVolume() + 0.1f;
         if (vol > 1.0f) vol = 1.0f;
         music.setVolume(vol);
-        tcLogNotice("tcApp") << "Volume: " << (int)(vol * 100) << "%";
+        logNotice("tcApp") << "Volume: " << (int)(vol * 100) << "%";
     }
     else if (key == SAPP_KEYCODE_DOWN) {
         // Volume down
         float vol = music.getVolume() - 0.1f;
         if (vol < 0.0f) vol = 0.0f;
         music.setVolume(vol);
-        tcLogNotice("tcApp") << "Volume: " << (int)(vol * 100) << "%";
+        logNotice("tcApp") << "Volume: " << (int)(vol * 100) << "%";
     }
     else if (key == SAPP_KEYCODE_LEFT) {
         // Pan left
         float pan = music.getPan() - 0.1f;
         music.setPan(pan);
-        tcLogNotice("tcApp") << "Pan: " << music.getPan();
+        logNotice("tcApp") << "Pan: " << music.getPan();
     }
     else if (key == SAPP_KEYCODE_RIGHT) {
         // Pan right
         float pan = music.getPan() + 0.1f;
         music.setPan(pan);
-        tcLogNotice("tcApp") << "Pan: " << music.getPan();
+        logNotice("tcApp") << "Pan: " << music.getPan();
     }
     else if (key == '+' || key == '=' || key == SAPP_KEYCODE_KP_ADD) {
         // Speed up
         float speed = music.getSpeed() + 0.1f;
         music.setSpeed(speed);
-        tcLogNotice("tcApp") << "Speed: " << music.getSpeed() << "x";
+        logNotice("tcApp") << "Speed: " << music.getSpeed() << "x";
     }
     else if (key == '-' || key == SAPP_KEYCODE_KP_SUBTRACT) {
         // Speed down
         float speed = music.getSpeed() - 0.1f;
         music.setSpeed(speed);
-        tcLogNotice("tcApp") << "Speed: " << music.getSpeed() << "x";
+        logNotice("tcApp") << "Speed: " << music.getSpeed() << "x";
     }
 }

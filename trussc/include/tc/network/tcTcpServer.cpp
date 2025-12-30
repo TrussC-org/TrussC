@@ -30,7 +30,7 @@ void TcpServer::initWinsock() {
     if (!initialized) {
         WSADATA wsaData;
         if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-            tcLogError() << "Winsock initialization failed";
+            logError() << "Winsock initialization failed";
         }
         initialized = true;
     }
@@ -122,7 +122,7 @@ bool TcpServer::start(int port, int maxClients) {
     running_ = true;
     acceptThread_ = std::thread(&TcpServer::acceptThreadFunc, this);
 
-    tcLogNotice() << "TCP server started on port " << port;
+    logNotice() << "TCP server started on port " << port;
     return true;
 }
 
@@ -152,7 +152,7 @@ void TcpServer::stop() {
     // Disconnect all clients
     disconnectAllClients();
 
-    tcLogNotice() << "TCP server stopped";
+    logNotice() << "TCP server stopped";
 }
 
 bool TcpServer::isRunning() const {
@@ -199,7 +199,7 @@ void TcpServer::acceptThreadFunc() {
             clients_[clientId] = client;
         }
 
-        tcLogNotice() << "Client " << clientId << " connected from " << hostStr << ":" << clientPort;
+        logNotice() << "Client " << clientId << " connected from " << hostStr << ":" << clientPort;
 
         // Notify connection event
         TcpClientConnectEventArgs args;
@@ -251,7 +251,7 @@ void TcpServer::clientThreadFunc(int clientId) {
             args.wasClean = true;
             onClientDisconnect.notify(args);
 
-            tcLogNotice() << "Client " << clientId << " disconnected";
+            logNotice() << "Client " << clientId << " disconnected";
             removeClient(clientId);
             break;
         } else {

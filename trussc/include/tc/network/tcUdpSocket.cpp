@@ -37,7 +37,7 @@ bool UdpSocket::initWinsock() {
         WSADATA wsaData;
         int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
         if (result != 0) {
-            tcLogError() << "WSAStartup failed: " << result;
+            logError() << "WSAStartup failed: " << result;
             return false;
         }
         winsockInitialized_ = true;
@@ -146,7 +146,7 @@ bool UdpSocket::bind(int port, bool startReceiving) {
     }
 
     localPort_ = port;
-    tcLogNotice() << "UDP socket bound to port " << port;
+    logNotice() << "UDP socket bound to port " << port;
 
     if (startReceiving) {
         this->startReceiving();
@@ -185,7 +185,7 @@ bool UdpSocket::connect(const std::string& host, int port) {
     connectedHost_ = host;
     connectedPort_ = port;
 
-    tcLogNotice() << "UDP socket connected to " << host << ":" << port;
+    logNotice() << "UDP socket connected to " << host << ":" << port;
     return true;
 }
 
@@ -451,7 +451,7 @@ bool UdpSocket::setReceiveTimeout(int timeoutMs) {
 // Error notification
 // ---------------------------------------------------------------------------
 void UdpSocket::notifyError(const std::string& message, int code) {
-    tcLogError() << "UdpSocket: " << message << " (code: " << code << ")";
+    logError() << "UdpSocket: " << message << " (code: " << code << ")";
 
     UdpErrorEventArgs args;
     args.message = message;

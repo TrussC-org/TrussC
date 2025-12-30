@@ -51,7 +51,7 @@ void setWindowSize(int width, int height) {
     // TODO: Implement using X11
     // sokol_app handles window creation, so we need to access the X11 window
     // For now, this is a no-op
-    tcLogWarning("Platform") << "setWindowSize not yet implemented on Linux";
+    logWarning("Platform") << "setWindowSize not yet implemented on Linux";
 }
 
 std::string getExecutablePath() {
@@ -83,7 +83,7 @@ bool captureWindow(Pixels& outPixels) {
     int height = sapp_height();
 
     if (width <= 0 || height <= 0) {
-        tcLogError("Screenshot") << "Invalid window dimensions";
+        logError("Screenshot") << "Invalid window dimensions";
         return false;
     }
 
@@ -134,10 +134,10 @@ bool saveScreenshot(const std::filesystem::path& path) {
     }
 
     if (result) {
-        tcLogVerbose("Screenshot") << "Saved: " << path;
+        logVerbose("Screenshot") << "Saved: " << path;
         return true;
     } else {
-        tcLogError("Screenshot") << "Failed to save: " << path;
+        logError("Screenshot") << "Failed to save: " << path;
         return false;
     }
 }

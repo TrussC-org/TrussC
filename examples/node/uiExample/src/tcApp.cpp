@@ -14,7 +14,7 @@ void tcApp::setup() {
     button1_->onClick = [this]() {
         clickCount_++;
         button1_->label = "Clicked: " + to_string(clickCount_);
-        tcLogNotice("tcApp") << "Button1 clicked! Count: " << clickCount_;
+        logNotice("tcApp") << "Button1 clicked! Count: " << clickCount_;
     };
     addChild(button1_);
 
@@ -31,7 +31,7 @@ void tcApp::setup() {
         bgColor_ = Color(0.1f, 0.1f, 0.12f);
         slider1_->setValue(0.1f);
         slider2_->setValue(0.1f);
-        tcLogNotice("tcApp") << "Background reset!";
+        logNotice("tcApp") << "Background reset!";
     };
     addChild(button2_);
 
@@ -71,12 +71,12 @@ void tcApp::setup() {
     scrollBox_->contentHeight = 300;  // 10 items x 30px
     addChild(scrollBox_);
 
-    tcLogNotice("tcApp") << "=== uiExample ===";
-    tcLogNotice("tcApp") << "UI components demo with event handling";
-    tcLogNotice("tcApp") << "- Click buttons to trigger events";
-    tcLogNotice("tcApp") << "- Drag sliders or use scroll wheel to change values";
-    tcLogNotice("tcApp") << "- Scroll inside the box to see items";
-    tcLogNotice("tcApp") << "- Press R to reset";
+    logNotice("tcApp") << "=== uiExample ===";
+    logNotice("tcApp") << "UI components demo with event handling";
+    logNotice("tcApp") << "- Click buttons to trigger events";
+    logNotice("tcApp") << "- Drag sliders or use scroll wheel to change values";
+    logNotice("tcApp") << "- Scroll inside the box to see items";
+    logNotice("tcApp") << "- Press R to reset";
 }
 
 void tcApp::update() {
@@ -113,7 +113,7 @@ void tcApp::keyPressed(int key) {
         slider2_->setValue(0.1f);
         clickCount_ = 0;
         button1_->label = "Click Me!";
-        tcLogNotice("tcApp") << "Reset!";
+        logNotice("tcApp") << "Reset!";
     }
 }
 

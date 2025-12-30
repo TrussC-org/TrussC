@@ -4,15 +4,15 @@
 // setup
 // ---------------------------------------------------------------------------
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "colorExample: Color Space Demo";
-    tcLogNotice("tcApp") << "  - Space: Switch mode";
-    tcLogNotice("tcApp") << "  - ESC: Exit";
-    tcLogNotice("tcApp") << "";
-    tcLogNotice("tcApp") << "Modes:";
-    tcLogNotice("tcApp") << "  0: Lerp comparison (RGB/Linear/HSB/OKLab/OKLCH)";
-    tcLogNotice("tcApp") << "  1: Hue wheel (HSB vs OKLCH)";
-    tcLogNotice("tcApp") << "  2: Lightness uniformity (OKLab feature)";
-    tcLogNotice("tcApp") << "  3: Gradient comparison";
+    logNotice("tcApp") << "colorExample: Color Space Demo";
+    logNotice("tcApp") << "  - Space: Switch mode";
+    logNotice("tcApp") << "  - ESC: Exit";
+    logNotice("tcApp") << "";
+    logNotice("tcApp") << "Modes:";
+    logNotice("tcApp") << "  0: Lerp comparison (RGB/Linear/HSB/OKLab/OKLCH)";
+    logNotice("tcApp") << "  1: Hue wheel (HSB vs OKLCH)";
+    logNotice("tcApp") << "  2: Lightness uniformity (OKLab feature)";
+    logNotice("tcApp") << "  3: Gradient comparison";
 
     // Initialize ImGui
     imguiSetup();
@@ -369,6 +369,6 @@ void tcApp::keyPressed(int key) {
     }
     else if (key == KEY_SPACE) {
         mode_ = (mode_ + 1) % NUM_MODES;
-        tcLogNotice("tcApp") << "Mode: " << mode_;
+        logNotice("tcApp") << "Mode: " << mode_;
     }
 }

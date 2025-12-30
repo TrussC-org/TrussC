@@ -19,7 +19,7 @@
 //   - Math utilities (tc::Vec2, Vec3, Mat4, noise, etc.)
 //   - Threading (tc::Thread, ThreadChannel)
 //   - Timers and timing (tc::getElapsedTime, headless::getElapsedTime)
-//   - Logging (tc::tcLogNotice, tcLogWarning, tcLogError)
+//   - Logging (tc::logNotice, logWarning, logError)
 //   - Console input (tc::console)
 //
 // NOT available in headless mode (no-op or skipped):
@@ -36,9 +36,9 @@
 #include "tcApp.h"
 
 void tcApp::setup() {
-    tcLogNotice("noWindowMode") << "=== noWindowMode Example ===";
-    tcLogNotice("noWindowMode") << "Running in headless mode (no window)";
-    tcLogNotice("noWindowMode") << "Press Ctrl+C to exit";
+    logNotice("noWindowMode") << "=== noWindowMode Example ===";
+    logNotice("noWindowMode") << "Running in headless mode (no window)";
+    logNotice("noWindowMode") << "Press Ctrl+C to exit";
 }
 
 void tcApp::update() {
@@ -47,13 +47,13 @@ void tcApp::update() {
     // Print status every second (60 frames at 60fps)
     if (frameCount_ % 60 == 0) {
         double elapsed = headless::getElapsedTime();
-        tcLogNotice("noWindowMode") << "Running... Frame " << frameCount_
+        logNotice("noWindowMode") << "Running... Frame " << frameCount_
                                     << " | Elapsed: " << elapsed << "s";
     }
 }
 
 void tcApp::cleanup() {
-    tcLogNotice("noWindowMode") << "cleanup() called";
-    tcLogNotice("noWindowMode") << "Total frames: " << frameCount_;
-    tcLogNotice("noWindowMode") << "=== Done ===";
+    logNotice("noWindowMode") << "cleanup() called";
+    logNotice("noWindowMode") << "Total frames: " << frameCount_;
+    logNotice("noWindowMode") << "=== Done ===";
 }

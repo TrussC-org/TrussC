@@ -89,7 +89,7 @@ float getDisplayScaleFactor() {
 void setWindowSize(int width, int height) {
     HWND hwnd = (HWND)sapp_win32_get_hwnd();
     if (!hwnd) {
-        tcLogWarning() << "[Platform] Failed to get window handle";
+        logWarning() << "[Platform] Failed to get window handle";
         return;
     }
 
@@ -155,7 +155,7 @@ bool captureWindow(Pixels& outPixels) {
     // sokol の swapchain から D3D11 テクスチャを取得
     sapp_swapchain sc = sapp_get_swapchain();
     if (!sc.d3d11.render_view) {
-        tcLogError() << "[Screenshot] D3D11 render target view is null";
+        logError() << "[Screenshot] D3D11 render target view is null";
         return false;
     }
 
@@ -165,7 +165,7 @@ bool captureWindow(Pixels& outPixels) {
     rtv->GetResource(&resource);
 
     if (!resource) {
-        tcLogError() << "[Screenshot] Failed to get D3D11 resource";
+        logError() << "[Screenshot] Failed to get D3D11 resource";
         return false;
     }
 
@@ -174,7 +174,7 @@ bool captureWindow(Pixels& outPixels) {
     resource->Release();
 
     if (FAILED(hr) || !backBuffer) {
-        tcLogError() << "[Screenshot] Failed to get back buffer texture";
+        logError() << "[Screenshot] Failed to get back buffer texture";
         return false;
     }
 
@@ -191,7 +191,7 @@ bool captureWindow(Pixels& outPixels) {
 
     if (!device || !context) {
         backBuffer->Release();
-        tcLogError() << "[Screenshot] Failed to get D3D11 device/context";
+        logError() << "[Screenshot] Failed to get D3D11 device/context";
         return false;
     }
 
@@ -214,7 +214,7 @@ bool captureWindow(Pixels& outPixels) {
         hr = device->CreateTexture2D(&resolveDesc, nullptr, &resolvedTexture);
         if (FAILED(hr) || !resolvedTexture) {
             backBuffer->Release();
-            tcLogError() << "[Screenshot] Failed to create resolve texture";
+            logError() << "[Screenshot] Failed to create resolve texture";
             return false;
         }
 
@@ -237,7 +237,7 @@ bool captureWindow(Pixels& outPixels) {
     if (FAILED(hr) || !stagingTexture) {
         if (resolvedTexture) resolvedTexture->Release();
         backBuffer->Release();
-        tcLogError() << "[Screenshot] Failed to create staging texture";
+        logError() << "[Screenshot] Failed to create staging texture";
         return false;
     }
 
@@ -254,7 +254,7 @@ bool captureWindow(Pixels& outPixels) {
     hr = context->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
     if (FAILED(hr)) {
         stagingTexture->Release();
-        tcLogError() << "[Screenshot] Failed to map staging texture";
+        logError() << "[Screenshot] Failed to map staging texture";
         return false;
     }
 
@@ -321,10 +321,10 @@ bool saveScreenshot(const std::filesystem::path& path) {
     }
 
     if (result) {
-        tcLogVerbose() << "[Screenshot] Saved: " << pathStr;
+        logVerbose() << "[Screenshot] Saved: " << pathStr;
         return true;
     } else {
-        tcLogError() << "[Screenshot] Failed to save: " << pathStr;
+        logError() << "[Screenshot] Failed to save: " << pathStr;
         return false;
     }
 }

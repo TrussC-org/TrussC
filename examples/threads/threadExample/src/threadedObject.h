@@ -59,7 +59,7 @@ public:
 
     // Processing executed in thread
     void threadedFunction() override {
-        tcLogNotice("Thread") << "[threadedFunction] thread started";
+        logNotice("Thread") << "[threadedFunction] thread started";
 
         while (isThreadRunning()) {
             // Increment thread frame count
@@ -88,7 +88,7 @@ public:
             }
         }
 
-        tcLogNotice("Thread") << "[threadedFunction] thread stopped";
+        logNotice("Thread") << "[threadedFunction] thread stopped";
     }
 
     // Update (with lock) - No tearing

@@ -25,7 +25,7 @@ void tcApp::setup() {
 
     // Validate TC_ROOT - clear if invalid (triggers auto-detection)
     if (!tcRoot.empty() && !fs::exists(tcRoot + "/trussc/CMakeLists.txt")) {
-        tcLogNotice("tcApp") << "TC_ROOT is invalid, clearing: " << tcRoot;
+        logNotice("tcApp") << "TC_ROOT is invalid, clearing: " << tcRoot;
         tcRoot.clear();
         tcRootBuf[0] = '\0';
     }
@@ -50,7 +50,7 @@ void tcApp::setup() {
             if (fs::exists(checkPath)) {
                 tcRoot = searchPath.string();
                 strncpy(tcRootBuf, tcRoot.c_str(), sizeof(tcRootBuf) - 1);
-                tcLogNotice("tcApp") << "Auto-detected TC_ROOT: " << tcRoot;
+                logNotice("tcApp") << "Auto-detected TC_ROOT: " << tcRoot;
                 break;
             }
             searchPath = searchPath.parent_path();
@@ -498,22 +498,22 @@ void tcApp::cleanup() {
     // Save current state on exit
     projectName = projectNameBuf;
     projectDir = projectDirBuf;
-    tcLogNotice("tcApp") << "cleanup: saving projectName=" << projectName << ", projectDir=" << projectDir;
+    logNotice("tcApp") << "cleanup: saving projectName=" << projectName << ", projectDir=" << projectDir;
     saveConfig();
 
     imguiShutdown();
 }
 
 void tcApp::loadConfig() {
-    tcLogNotice("tcApp") << "loadConfig: configPath = " << configPath;
+    logNotice("tcApp") << "loadConfig: configPath = " << configPath;
     if (!fs::exists(configPath)) {
-        tcLogNotice("tcApp") << "loadConfig: config file not found";
+        logNotice("tcApp") << "loadConfig: config file not found";
         return;
     }
 
     Json config = loadJson(configPath);
     if (config.empty()) {
-        tcLogNotice("tcApp") << "loadConfig: config is empty";
+        logNotice("tcApp") << "loadConfig: config is empty";
         return;
     }
 
@@ -531,7 +531,7 @@ void tcApp::loadConfig() {
     if (config.contains("generate_web_build")) {
         generateWebBuild = config["generate_web_build"].get<bool>();
     }
-    tcLogNotice("tcApp") << "loadConfig: projectDir = " << projectDir << ", projectName = " << projectName;
+    logNotice("tcApp") << "loadConfig: projectDir = " << projectDir << ", projectName = " << projectName;
 }
 
 void tcApp::saveConfig() {

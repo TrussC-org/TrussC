@@ -124,7 +124,7 @@ inline void fft(std::vector<std::complex<float>>& data) {
 
     // Error if not power of 2
     if (!isPowerOfTwo(n)) {
-        tcLogError() << "FFT: size must be power of 2 (got " << n << ")";
+        logError() << "FFT: size must be power of 2 (got " << n << ")";
         return;
     }
 

@@ -170,7 +170,7 @@ public:
         // Load font file
         std::ifstream file(fontPath, std::ios::binary | std::ios::ate);
         if (!file) {
-            tcLogError() << "FontAtlasManager: failed to open " << fontPath;
+            logError() << "FontAtlasManager: failed to open " << fontPath;
             return false;
         }
 
@@ -178,7 +178,7 @@ public:
         file.seekg(0, std::ios::beg);
         fontData_.resize(fileSize);
         if (!file.read(reinterpret_cast<char*>(fontData_.data()), fileSize)) {
-            tcLogError() << "FontAtlasManager: failed to read " << fontPath;
+            logError() << "FontAtlasManager: failed to read " << fontPath;
             return false;
         }
 
@@ -199,14 +199,14 @@ private:
         // Get font offset (required for .ttc files with multiple fonts)
         int offset = stbtt_GetFontOffsetForIndex(fontData_.data(), fontIndex);
         if (offset < 0) {
-            tcLogError() << "FontAtlasManager: invalid font index " << fontIndex;
+            logError() << "FontAtlasManager: invalid font index " << fontIndex;
             fontData_.clear();
             return false;
         }
 
         // Initialize with stb_truetype
         if (!stbtt_InitFont(&fontInfo_, fontData_.data(), offset)) {
-            tcLogError() << "FontAtlasManager: failed to init font";
+            logError() << "FontAtlasManager: failed to init font";
             fontData_.clear();
             return false;
         }
@@ -363,7 +363,7 @@ private:
             return false;
         }
 
-        tcLogVerbose() << "FontAtlasManager: expanding atlas " << atlasIndex
+        logVerbose() << "FontAtlasManager: expanding atlas " << atlasIndex
                        << " from " << atlas.width_ << "x" << atlas.height_
                        << " to " << newWidth << "x" << newHeight;
 
@@ -457,7 +457,7 @@ private:
             // Expand until it fits
             while (!tryFitGlyph(targetAtlas, paddedWidth, paddedHeight)) {
                 if (!expandAtlas(targetAtlas)) {
-                    tcLogWarning() << "FontAtlasManager: cannot fit glyph for U+" << std::hex << codepoint << std::dec;
+                    logWarning() << "FontAtlasManager: cannot fit glyph for U+" << std::hex << codepoint << std::dec;
                     outInfo.valid_ = false;
                     return false;
                 }
@@ -685,7 +685,7 @@ public:
             loadFromUrlAsync(path, size);
             return true;  // Will be loaded asynchronously
 #else
-            tcLogError() << "Font: URL loading only supported in WebAssembly";
+            logError() << "Font: URL loading only supported in WebAssembly";
             return false;
 #endif
         } else {
@@ -717,7 +717,7 @@ private:
         );
 
         if (ctx->font->atlasManager_) {
-            tcLogNotice("Font") << "Loaded from URL: " << ctx->key.fontPath;
+            logNotice("Font") << "Loaded from URL: " << ctx->key.fontPath;
         }
 
         delete ctx;
@@ -726,7 +726,7 @@ private:
 
     static void onFetchError(emscripten_fetch_t* fetch) {
         FontLoadContext* ctx = reinterpret_cast<FontLoadContext*>(fetch->userData);
-        tcLogError() << "Font: failed to fetch " << ctx->key.fontPath
+        logError() << "Font: failed to fetch " << ctx->key.fontPath
                      << " (status: " << fetch->status << ")";
         delete ctx;
         emscripten_fetch_close(fetch);

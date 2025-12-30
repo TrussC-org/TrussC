@@ -7,12 +7,12 @@
 using namespace std;
 
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "=== File Dialog Example ===";
-    tcLogNotice("tcApp") << "O: Open file dialog";
-    tcLogNotice("tcApp") << "F: Open folder dialog";
-    tcLogNotice("tcApp") << "S: Save dialog";
-    tcLogNotice("tcApp") << "A: Alert dialog";
-    tcLogNotice("tcApp") << "===========================";
+    logNotice("tcApp") << "=== File Dialog Example ===";
+    logNotice("tcApp") << "O: Open file dialog";
+    logNotice("tcApp") << "F: Open folder dialog";
+    logNotice("tcApp") << "S: Save dialog";
+    logNotice("tcApp") << "A: Alert dialog";
+    logNotice("tcApp") << "===========================";
 }
 
 void tcApp::update() {
@@ -83,7 +83,7 @@ void tcApp::keyPressed(int key) {
 
             if (lastResult.success) {
                 statusMessage = "File selected";
-                tcLogNotice("tcApp") << "Selected: " << lastResult.filePath;
+                logNotice("tcApp") << "Selected: " << lastResult.filePath;
 
                 // Try to load if image file
                 string path = lastResult.filePath;
@@ -95,7 +95,7 @@ void tcApp::keyPressed(int key) {
                     path.find(".JPEG") != string::npos) {
                     if (loadedImage.load(path)) {
                         hasImage = true;
-                        tcLogNotice("tcApp") << "Image loaded: " << loadedImage.getWidth() << "x" << loadedImage.getHeight();
+                        logNotice("tcApp") << "Image loaded: " << loadedImage.getWidth() << "x" << loadedImage.getHeight();
                     }
                 }
             } else {
@@ -113,7 +113,7 @@ void tcApp::keyPressed(int key) {
 
             if (lastResult.success) {
                 statusMessage = "Folder selected";
-                tcLogNotice("tcApp") << "Selected folder: " << lastResult.filePath;
+                logNotice("tcApp") << "Selected folder: " << lastResult.filePath;
             } else {
                 statusMessage = "Folder dialog cancelled";
             }
@@ -129,7 +129,7 @@ void tcApp::keyPressed(int key) {
 
             if (lastResult.success) {
                 statusMessage = "Save location selected";
-                tcLogNotice("tcApp") << "Save to: " << lastResult.filePath;
+                logNotice("tcApp") << "Save to: " << lastResult.filePath;
             } else {
                 statusMessage = "Save dialog cancelled";
             }

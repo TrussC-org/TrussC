@@ -42,7 +42,7 @@ void CountdownNode::setup() {
     callAfter(3.0, [this]() {
         message_ = "Executed by callAfter!";
         triggered_ = true;
-        tcLogNotice("Timer") << "callAfter triggered!";
+        logNotice("Timer") << "callAfter triggered!";
     });
 }
 
@@ -70,7 +70,7 @@ void PulseNode::setup() {
         // Cancel timer after 10 pulses
         if (pulseCount_ >= 10) {
             cancelTimer(pulseTimerId_);
-            tcLogNotice("Timer") << "Pulse timer cancelled after 10 pulses";
+            logNotice("Timer") << "Pulse timer cancelled after 10 pulses";
         }
     });
 }
@@ -100,8 +100,8 @@ void PulseNode::draw() {
 // =============================================================================
 
 void tcApp::setup() {
-    tcLogNotice("tcApp") << "timerExample: callAfter / callEvery Demo";
-    tcLogNotice("tcApp") << "  - Press R to reset all timers";
+    logNotice("tcApp") << "timerExample: callAfter / callEvery Demo";
+    logNotice("tcApp") << "  - Press R to reset all timers";
 
     // Countdown node
     countdownNode_ = make_shared<CountdownNode>();
@@ -169,6 +169,6 @@ void tcApp::keyPressed(int key) {
         pulseNode_ = make_shared<PulseNode>();
         addChild(pulseNode_);
 
-        tcLogNotice("tcApp") << "Reset all timers";
+        logNotice("tcApp") << "Reset all timers";
     }
 }

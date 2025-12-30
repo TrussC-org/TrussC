@@ -31,7 +31,7 @@ public:
 
         initialized_ = true;
         internal::imguiEnabled = true;
-        tcLogVerbose() << "ImGui initialized";
+        logVerbose() << "ImGui initialized";
     }
 
     // Shutdown (called automatically)
@@ -40,7 +40,7 @@ public:
         simgui_shutdown();
         initialized_ = false;
         internal::imguiEnabled = false;
-        tcLogVerbose() << "ImGui shutdown";
+        logVerbose() << "ImGui shutdown";
     }
 
     // Begin frame (call at start of draw)

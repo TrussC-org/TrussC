@@ -172,7 +172,7 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
     std::vector<VideoDeviceInfo> devices;
 
     if (!ensureMFInitialized()) {
-        tcLogError() << "VideoGrabber: Failed to initialize Media Foundation";
+        logError() << "VideoGrabber: Failed to initialize Media Foundation";
         return devices;
     }
 
@@ -233,7 +233,7 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
 // ---------------------------------------------------------------------------
 bool VideoGrabber::setupPlatform() {
     if (!ensureMFInitialized()) {
-        tcLogError() << "VideoGrabber: Failed to initialize Media Foundation";
+        logError() << "VideoGrabber: Failed to initialize Media Foundation";
         return false;
     }
 
@@ -260,14 +260,14 @@ bool VideoGrabber::setupPlatform() {
     attributes->Release();
 
     if (FAILED(hr) || count == 0) {
-        tcLogError() << "VideoGrabber: No video devices found";
+        logError() << "VideoGrabber: No video devices found";
         delete data;
         platformHandle_ = nullptr;
         return false;
     }
 
     if (deviceId_ >= (int)count) {
-        tcLogError() << "VideoGrabber: Invalid device ID " << deviceId_;
+        logError() << "VideoGrabber: Invalid device ID " << deviceId_;
         for (UINT32 i = 0; i < count; i++) ppDevices[i]->Release();
         CoTaskMemFree(ppDevices);
         delete data;
@@ -298,7 +298,7 @@ bool VideoGrabber::setupPlatform() {
     CoTaskMemFree(ppDevices);
 
     if (FAILED(hr)) {
-        tcLogError() << "VideoGrabber: Failed to activate media source";
+        logError() << "VideoGrabber: Failed to activate media source";
         delete data;
         platformHandle_ = nullptr;
         return false;
@@ -315,7 +315,7 @@ bool VideoGrabber::setupPlatform() {
     if (readerAttributes) readerAttributes->Release();
 
     if (FAILED(hr)) {
-        tcLogError() << "VideoGrabber: Failed to create source reader";
+        logError() << "VideoGrabber: Failed to create source reader";
         data->mediaSource->Release();
         delete data;
         platformHandle_ = nullptr;
@@ -334,7 +334,7 @@ bool VideoGrabber::setupPlatform() {
         hr = data->sourceReader->SetCurrentMediaType(
             MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, outputType);
         if (FAILED(hr)) {
-            tcLogWarning() << "VideoGrabber: Failed to set RGB32 format, hr=" << std::hex << hr;
+            logWarning() << "VideoGrabber: Failed to set RGB32 format, hr=" << std::hex << hr;
         }
         outputType->Release();
     }
@@ -368,7 +368,7 @@ bool VideoGrabber::setupPlatform() {
     data->running = true;
     data->captureThread = std::thread(captureThreadFunc, data);
 
-    tcLogNotice() << "VideoGrabber: Started capturing at " << width_ << "x" << height_
+    logNotice() << "VideoGrabber: Started capturing at " << width_ << "x" << height_
                   << " from " << deviceName_;
 
     return true;
@@ -404,7 +404,7 @@ void VideoGrabber::closePlatform() {
             data->captureThread.join();
         } else {
             // Thread didn't exit in time, detach to avoid hanging
-            tcLogWarning() << "VideoGrabber: Capture thread did not exit in time, detaching";
+            logWarning() << "VideoGrabber: Capture thread did not exit in time, detaching";
             data->captureThread.detach();
         }
     }
@@ -478,7 +478,7 @@ void VideoGrabber::updateDelegatePixels() {
     auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
     data->targetPixels = pixels_;
     if (verbose_) {
-        tcLogVerbose() << "VideoGrabber: Updated target pixels pointer to " << (void*)pixels_;
+        logVerbose() << "VideoGrabber: Updated target pixels pointer to " << (void*)pixels_;
     }
 }
 
@@ -497,7 +497,7 @@ bool VideoGrabber::checkCameraPermission() {
 void VideoGrabber::requestCameraPermission() {
     // Windows ではシステム設定からカメラ権限を有効にする必要がある
     // アプリから直接リクエストする標準 API はない
-    tcLogNotice() << "VideoGrabber: Please enable camera access in Windows Settings > Privacy > Camera";
+    logNotice() << "VideoGrabber: Please enable camera access in Windows Settings > Privacy > Camera";
 }
 
 } // namespace trussc

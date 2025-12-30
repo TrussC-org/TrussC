@@ -9,7 +9,7 @@ void tcApp::setup() {
     fontSmall.load(TC_FONT_SANS, 14);
     fontLarge.load(TC_FONT_SANS, 48);
 
-    tcLogNotice("tcApp") << "Font loaded: size=" << font.getSize()
+    logNotice("tcApp") << "Font loaded: size=" << font.getSize()
                          << ", glyphs=" << font.getLoadedGlyphCount()
                          << ", memory=" << font.getMemoryUsage() << " bytes";
 }
