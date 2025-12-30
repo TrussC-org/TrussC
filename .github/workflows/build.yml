@@ -43,6 +43,11 @@ jobs:
             libavutil-dev \
             pkg-config
 
+      # Windows: Setup MSVC environment (provides cl.exe, ninja, etc. in PATH)
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Build emptyExample
         run: |
           cd examples/templates/emptyExample

@@ -57,49 +57,47 @@ string ProjectGenerator::getDestPath() const {
     return dir + "/" + settings_.projectName;
 }
 
+// Get TRUSSC_DIR value for CMakePresets.json
+//
+// DESIGN NOTE - Why relative vs absolute path:
+//
+// 1. Examples inside TrussC repo (../../../trussc works):
+//    - Return empty string -> use CMakeLists.txt fallback (relative path)
+//    - Relative path is correct here because examples move WITH trussc
+//    - If you move the entire TrussC repo, examples still work
+//
+// 2. User projects outside TrussC repo:
+//    - Return ABSOLUTE path to trussc
+//    - User projects should NOT use relative paths because:
+//      a) trussc location is typically fixed (user won't move it)
+//      b) User might move their project to a different location
+//      c) Absolute path ensures the project works after being moved
+//
+// Summary: Examples move with trussc, user projects move independently.
+//
 string ProjectGenerator::getTrusscDirValue(const string& projectPath) {
     fs::path project = fs::absolute(projectPath);
     fs::path trussc = fs::absolute(settings_.tcRoot) / "trussc";
 
-    // Calculate relative path
-    fs::path rel = fs::relative(trussc, project);
-
-    // Use relative path if it exists, otherwise use absolute
-    if (fs::exists(project / rel)) {
-        string result = "${CMAKE_CURRENT_SOURCE_DIR}/" + rel.string();
-        // Normalize path separators
-        for (char& c : result) {
-            if (c == '\\') c = '/';
-        }
-        return result;
-    }
-    return trussc.string();
-}
-
-void ProjectGenerator::writeCMakeLists(const string& destPath) {
-    string templateCmakePath = settings_.templatePath + "/CMakeLists.txt";
-    ifstream inFile(templateCmakePath);
-    stringstream buffer;
-    buffer << inFile.rdbuf();
-    inFile.close();
-
-    string content = buffer.str();
-
-    // Replace TRUSSC_DIR
-    size_t pos = content.find("set(TRUSSC_DIR \"");
-    if (pos != string::npos) {
-        size_t endPos = content.find("\")", pos);
-        if (endPos != string::npos) {
-            content.replace(pos, endPos - pos + 2,
-                "set(TRUSSC_DIR \"" + getTrusscDirValue(destPath) + "\")");
-        }
+    // Check if template default path (../../../trussc) would work
+    fs::path templateDefault = project / "../../../trussc";
+    if (fs::exists(templateDefault) && fs::equivalent(templateDefault, trussc)) {
+        // Template default works - don't override TRUSSC_DIR
+        return "";
     }
 
-    string cmakePath = destPath + "/CMakeLists.txt";
-    ofstream outFile(cmakePath);
-    outFile << content;
-    outFile.close();
+    // Template default won't work - use absolute path
+    string result = trussc.string();
+    for (char& c : result) {
+        if (c == '\\') c = '/';
+    }
+    return result;
 }
+
+// DESIGN NOTE: CMakeLists.txt is NOT modified by projectGenerator.
+// All project-specific configuration (TRUSSC_DIR, paths, etc.) goes into CMakePresets.json.
+// This keeps CMakeLists.txt as a simple copy from the template, making it easier to maintain
+// and allowing manual project setup without projectGenerator.
 
 void ProjectGenerator::writeAddonsMake(const string& destPath) {
     string addonsMakePath = destPath + "/addons.make";
@@ -116,6 +114,9 @@ void ProjectGenerator::writeAddonsMake(const string& destPath) {
 void ProjectGenerator::writeCMakePresets(const string& destPath) {
     log("Writing CMakePresets.json...");
 
+    // Get TRUSSC_DIR value for this project
+    string trusscDir = getTrusscDirValue(destPath);
+
     Json presets;
     presets["version"] = 6;
     presets["configurePresets"] = Json::array();
@@ -129,6 +130,10 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     macosPreset["binaryDir"] = "${sourceDir}/build-macos";
     macosPreset["generator"] = "Unix Makefiles";
     macosPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
+    // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
+    if (!trusscDir.empty()) {
+        macosPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
+    }
     presets["configurePresets"].push_back(macosPreset);
 
     Json macosBuildPreset;
@@ -145,6 +150,10 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     windowsPreset["binaryDir"] = "${sourceDir}/build-windows";
     windowsPreset["generator"] = "Ninja";
     windowsPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
+    // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
+    if (!trusscDir.empty()) {
+        windowsPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
+    }
 
     // Add ninja path and environment if VS info available
     if (!settings_.installedVsVersions.empty() &&
@@ -208,6 +217,10 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     linuxPreset["binaryDir"] = "${sourceDir}/build-linux";
     linuxPreset["generator"] = "Unix Makefiles";
     linuxPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
+    // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
+    if (!trusscDir.empty()) {
+        linuxPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
+    }
     presets["configurePresets"].push_back(linuxPreset);
 
     Json linuxBuildPreset;
@@ -226,6 +239,10 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         webPreset["generator"] = "Unix Makefiles";
         webPreset["toolchainFile"] = "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake";
         webPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
+        // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
+        if (!trusscDir.empty()) {
+            webPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
+        }
         presets["configurePresets"].push_back(webPreset);
 
         Json webBuildPreset;
@@ -279,13 +296,11 @@ string ProjectGenerator::generate() {
             }
         }
 
-        log("Writing CMakeLists.txt...");
-        writeCMakeLists(destPath);
-
         log("Writing addons.make...");
         writeAddonsMake(destPath);
 
-        // Write CMakePresets.json (OS-specific)
+        // Write CMakePresets.json (OS-specific with TRUSSC_DIR)
+        // CMakeLists.txt is already copied from template (no modification needed)
         writeCMakePresets(destPath);
 
         // Generate IDE-specific files
@@ -319,15 +334,12 @@ string ProjectGenerator::update(const string& projectPath) {
     try {
         log("Updating project...");
 
-        // Update CMakeLists.txt
-        log("Updating CMakeLists.txt...");
-        writeCMakeLists(projectPath);
-
         // Update addons.make
         log("Updating addons.make...");
         writeAddonsMake(projectPath);
 
-        // Write CMakePresets.json (OS-specific)
+        // Write CMakePresets.json (OS-specific with TRUSSC_DIR)
+        // CMakeLists.txt is NOT modified - it's a simple copy from template
         writeCMakePresets(projectPath);
 
         // Regenerate IDE-specific files

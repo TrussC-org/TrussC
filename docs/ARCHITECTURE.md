@@ -56,6 +56,49 @@ MyProject/
 
 ---
 
+## 3.5 Project Generation & TRUSSC_DIR
+
+### How projectGenerator Works
+
+The `projectGenerator` tool creates new projects by:
+1. Copying template files (CMakeLists.txt copied as-is, no modification)
+2. Generating `CMakePresets.json` with OS-specific configuration
+3. Generating IDE-specific files (.vscode/, Xcode project, etc.)
+
+### TRUSSC_DIR Strategy
+
+**Design Principle:** CMakeLists.txt is never modified. All project-specific configuration goes into CMakePresets.json.
+
+**Why relative vs absolute path:**
+
+| Project Location | Path Type | Reason |
+|------------------|-----------|--------|
+| Inside TrussC repo (examples) | Relative (fallback) | Examples move WITH trussc. Moving the entire repo keeps things working. |
+| Outside TrussC repo (user projects) | Absolute | User projects move INDEPENDENTLY. trussc location is typically fixed, but users may relocate their projects. |
+
+**Template CMakeLists.txt fallback:**
+```cmake
+if(NOT DEFINED TRUSSC_DIR)
+    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")
+endif()
+```
+
+**Generated CMakePresets.json (user project):**
+```json
+{
+  "cacheVariables": {
+    "TRUSSC_DIR": "/absolute/path/to/trussc"
+  }
+}
+```
+
+This ensures:
+- Examples work when you move the entire TrussC repo
+- User projects work when you move just the project folder
+- No complex relative path calculations needed
+
+---
+
 ## 4. API Design
 
 ### User Application

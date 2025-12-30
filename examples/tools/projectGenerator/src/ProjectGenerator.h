@@ -58,12 +58,11 @@ private:
     // Run CMake configure for VSCode/Cursor (generates compile_commands.json)
     void runCMakeConfigure(const std::string& path);
 
-    // Write CMakeLists.txt with updated TRUSSC_DIR
-    void writeCMakeLists(const std::string& destPath);
-
     // Write addons.make
     void writeAddonsMake(const std::string& destPath);
 
-    // Write CMakePresets.json (OS-specific preset only)
+    // Write CMakePresets.json (OS-specific preset with TRUSSC_DIR)
+    // DESIGN NOTE: All project-specific configuration goes into CMakePresets.json
+    // CMakeLists.txt is copied as-is from template (no modifications)
     void writeCMakePresets(const std::string& destPath);
 };
