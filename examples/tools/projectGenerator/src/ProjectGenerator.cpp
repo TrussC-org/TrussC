@@ -244,23 +244,37 @@ void ProjectGenerator::generateVSCodeFiles(const string& path) {
 
     Json config;
     config["name"] = "Debug";
-    config["type"] = "lldb";
     config["request"] = "launch";
     config["cwd"] = "${workspaceFolder}";
     config["preLaunchTask"] = "CMake: build";
 
-    Json osx;
-    osx["program"] = "${workspaceFolder}/bin/${workspaceFolderBasename}.app/Contents/MacOS/${workspaceFolderBasename}";
-    config["osx"] = osx;
+    if (settings_.ideType == IdeType::Cursor) {
+        // Cursor: C/C++ extension is blocked, use CodeLLDB for all platforms
+        config["type"] = "lldb";
+#ifdef __APPLE__
+        config["program"] = "${workspaceFolder}/bin/${workspaceFolderBasename}.app/Contents/MacOS/${workspaceFolderBasename}";
+#elif defined(_WIN32)
+        config["program"] = "${workspaceFolder}/bin/${workspaceFolderBasename}.exe";
+#else
+        config["program"] = "${workspaceFolder}/bin/${workspaceFolderBasename}";
+#endif
+    } else {
+        // VSCode: use platform-specific debuggers
+        config["type"] = "lldb";
 
-    Json linux_cfg;
-    linux_cfg["program"] = "${workspaceFolder}/bin/${workspaceFolderBasename}";
-    config["linux"] = linux_cfg;
+        Json osx;
+        osx["program"] = "${workspaceFolder}/bin/${workspaceFolderBasename}.app/Contents/MacOS/${workspaceFolderBasename}";
+        config["osx"] = osx;
 
-    Json windows;
-    windows["program"] = "${workspaceFolder}/bin/${workspaceFolderBasename}.exe";
-    windows["type"] = "cppvsdbg";
-    config["windows"] = windows;
+        Json linux_cfg;
+        linux_cfg["program"] = "${workspaceFolder}/bin/${workspaceFolderBasename}";
+        config["linux"] = linux_cfg;
+
+        Json windows;
+        windows["program"] = "${workspaceFolder}/bin/${workspaceFolderBasename}.exe";
+        windows["type"] = "cppvsdbg";
+        config["windows"] = windows;
+    }
 
     launch["configurations"].push_back(config);
     saveJson(launch, vscodePath + "/launch.json");
