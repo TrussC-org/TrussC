@@ -2,8 +2,9 @@
 # TrussC Project .gitignore
 # =============================================================================
 
-# CMakeLists.txt (machine/path dependent)
-CMakeLists.txt
+# CMakeLists.txt (machine/path dependent - but keep for examples)
+# CMakeLists.txt
+!CMakeLists.txt
 
 # Build directories
 build/
