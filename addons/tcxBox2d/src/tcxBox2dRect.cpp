@@ -55,23 +55,21 @@ void RectBody::setup(World& world, float cx, float cy, float width, float height
     // Store Body* in UserData (used by World::getBodyAtPoint())
     body_->GetUserData().pointer = reinterpret_cast<uintptr_t>(this);
 
-    // Set Node's initial position
-    x = cx;
-    y = cy;
+    // Create collider component
+    auto* collider = setupCollider<BoxCollider2D>();
+    collider->setSize(width, height);
 }
 
-// For Node: draw at origin (0,0) (drawTree() applies transform)
 void RectBody::draw() {
     if (!body_) return;
 
-    // Draw rectangle (center-based)
+    // Draw at local origin (Node transform already applied)
     tc::drawRect(-width_ / 2, -height_ / 2, width_, height_);
 }
 
 void RectBody::drawFill() {
     if (!body_) return;
 
-    // Draw filled rectangle
     tc::fill();
     tc::noStroke();
     tc::drawRect(-width_ / 2, -height_ / 2, width_, height_);

@@ -16,6 +16,27 @@ namespace fs = std::filesystem;
 using namespace std;
 using namespace tc;
 
+// Get cmake path (handles macOS where PATH may not be set in GUI apps)
+static string getCmakePath() {
+#ifdef __APPLE__
+    // Try common cmake locations on macOS
+    const char* paths[] = {
+        "/opt/homebrew/bin/cmake",  // Apple Silicon Homebrew
+        "/usr/local/bin/cmake",     // Intel Homebrew
+        "/Applications/CMake.app/Contents/bin/cmake",  // CMake.app
+        "cmake"  // Fallback to PATH
+    };
+    for (const char* path : paths) {
+        if (fs::exists(path)) {
+            return path;
+        }
+    }
+    return "cmake";  // Fallback
+#else
+    return "cmake";
+#endif
+}
+
 // Execute command and capture output
 static pair<int, string> executeCommand(const string& cmd) {
     string output;
@@ -505,7 +526,7 @@ void ProjectGenerator::generateXcodeProject(const string& path) {
     }
     fs::create_directories(xcodePath);
 
-    string cmd = "cd \"" + xcodePath + "\" && /opt/homebrew/bin/cmake -G Xcode ..";
+    string cmd = "cd \"" + xcodePath + "\" && " + getCmakePath() + " -G Xcode ..";
     log("Running: cmake -G Xcode");
 
     auto [result, output] = executeCommand(cmd);
@@ -556,7 +577,7 @@ void ProjectGenerator::generateVisualStudioProject(const string& path) {
 #ifdef _WIN32
     string cmd = "cd /d \"" + vsPath + "\" && " + cmakeBin + " -G \"" + generator + "\" ..";
 #else
-    string cmd = "cd \"" + vsPath + "\" && cmake -G \"" + generator + "\" ..";
+    string cmd = "cd \"" + vsPath + "\" && " + getCmakePath() + " -G \"" + generator + "\" ..";
 #endif
     log("Running: " + cmakeBin + " -G \"" + generator + "\"");
 
@@ -676,7 +697,7 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
 
     log("Running CMake configure (preset: " + preset + ")...");
 
-    string cmd = "cd \"" + path + "\" && cmake --preset " + preset;
+    string cmd = "cd \"" + path + "\" && " + getCmakePath() + " --preset " + preset;
 
     auto [result, output] = executeCommand(cmd);
 

@@ -1876,7 +1876,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     // Set callbacks
     internal::appSetupFunc = []() {
         app = new AppClass();
-        app->setup();
+        // Note: setup() is called automatically in updateTree() via setupCalled_ flag
     };
     internal::appUpdateFunc = []() {
         internal::updateFrameCount++;  // Update frame count

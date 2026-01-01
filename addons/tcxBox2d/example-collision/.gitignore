@@ -1,0 +1,33 @@
+# =============================================================================
+# TrussC Project .gitignore
+# =============================================================================
+
+# CMakeLists.txt (machine/path dependent)
+CMakeLists.txt
+
+# Build directories
+build/
+build-*/
+emscripten/
+xcode/
+vs/
+
+# Build scripts (generated, OS dependent)
+build-web.*
+
+# Binary output (keep data folder)
+bin/*
+!bin/data/
+
+# IDE specific
+.vscode/
+.vs/
+.cache/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Secrets (don't commit these!)
+.env
+secrets.*

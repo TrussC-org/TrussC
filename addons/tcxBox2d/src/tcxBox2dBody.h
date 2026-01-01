@@ -5,8 +5,10 @@
 #pragma once
 
 #include "tcxBox2dWorld.h"
+#include "tcxCollider2D.h"
 #include <tcNode.h>
 #include <box2d/box2d.h>
+#include <memory>
 
 namespace tcx::box2d {
 
@@ -50,14 +52,13 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // Node Integration: sync Box2D coordinates to Node in update
+    // Node Integration: sync Box2D position to Node each frame
     // -------------------------------------------------------------------------
     void update() override {
         if (body_) {
             tc::Vec2 pos = World::toPixels(body_->GetPosition());
-            x = pos.x;
-            y = pos.y;
-            rotation = body_->GetAngle();
+            setPos(pos.x, pos.y);
+            setRot(body_->GetAngle());
         }
     }
 
@@ -334,6 +335,12 @@ public:
     b2Body* getBody() { return body_; }
     const b2Body* getBody() const { return body_; }
 
+    // -------------------------------------------------------------------------
+    // Collider Access
+    // -------------------------------------------------------------------------
+    Collider2D* getCollider() { return collider_.get(); }
+    const Collider2D* getCollider() const { return collider_.get(); }
+
 protected:
     void setBody(b2Body* body) { body_ = body; }
 
@@ -345,8 +352,27 @@ protected:
         return body_ ? body_->GetFixtureList() : nullptr;
     }
 
+    // Setup collider and link to fixture
+    template<typename ColliderType>
+    ColliderType* setupCollider() {
+        auto collider = std::make_unique<ColliderType>();
+        collider->body_ = this;
+        collider->fixture_ = getFixture();
+
+        // Store collider pointer in fixture's UserData
+        if (collider->fixture_) {
+            collider->fixture_->GetUserData().pointer =
+                reinterpret_cast<uintptr_t>(collider.get());
+        }
+
+        ColliderType* ptr = collider.get();
+        collider_ = std::move(collider);
+        return ptr;
+    }
+
     World* world_ = nullptr;
     b2Body* body_ = nullptr;
+    std::unique_ptr<Collider2D> collider_;
 };
 
 } // namespace tcx::box2d

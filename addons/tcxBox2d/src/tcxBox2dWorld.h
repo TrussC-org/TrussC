@@ -13,6 +13,7 @@ namespace tcx::box2d {
 
 // Forward declarations
 class Body;
+class CollisionManager;
 
 // =============================================================================
 // Box2D World
@@ -128,8 +129,14 @@ public:
     b2World* getWorld() { return world_.get(); }
     const b2World* getWorld() const { return world_.get(); }
 
+    // -------------------------------------------------------------------------
+    // Collision Manager Access
+    // -------------------------------------------------------------------------
+    CollisionManager* getCollisionManager() { return collisionManager_.get(); }
+
 private:
     std::unique_ptr<b2World> world_;
+    std::unique_ptr<CollisionManager> collisionManager_;
 
     // Simulation parameters
     float timeStep_ = 1.0f / 60.0f;

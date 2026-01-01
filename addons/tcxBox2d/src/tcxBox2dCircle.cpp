@@ -50,26 +50,22 @@ void CircleBody::setup(World& world, float cx, float cy, float radius) {
     // Store Body* in UserData (used by World::getBodyAtPoint())
     body_->GetUserData().pointer = reinterpret_cast<uintptr_t>(this);
 
-    // Set Node's initial position
-    x = cx;
-    y = cy;
+    // Create collider component
+    auto* collider = setupCollider<CircleCollider2D>();
+    collider->setRadius(radius);
 }
 
-// For Node: draw at origin (0,0) (drawTree() applies transform)
 void CircleBody::draw() {
     if (!body_) return;
 
-    // Draw circle (centered at origin)
+    // Draw at local origin (Node transform already applied)
     tc::drawCircle(0, 0, radius_);
-
-    // Draw line to show rotation
-    tc::drawLine(0, 0, radius_, 0);
+    tc::drawLine(0, 0, radius_, 0);  // Show rotation
 }
 
 void CircleBody::drawFill() {
     if (!body_) return;
 
-    // Draw filled circle
     tc::fill();
     tc::noStroke();
     tc::drawCircle(0, 0, radius_);
