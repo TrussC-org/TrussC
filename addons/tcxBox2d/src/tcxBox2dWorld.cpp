@@ -4,6 +4,7 @@
 
 #include "tcxBox2dWorld.h"
 #include "tcxBox2dBody.h"
+#include "tcxCollisionManager.h"
 
 namespace tcx::box2d {
 
@@ -21,6 +22,7 @@ World::~World() {
 
 World::World(World&& other) noexcept
     : world_(std::move(other.world_))
+    , collisionManager_(std::move(other.collisionManager_))
     , timeStep_(other.timeStep_)
     , velocityIterations_(other.velocityIterations_)
     , positionIterations_(other.positionIterations_)
@@ -33,6 +35,7 @@ World& World::operator=(World&& other) noexcept {
     if (this != &other) {
         clear();
         world_ = std::move(other.world_);
+        collisionManager_ = std::move(other.collisionManager_);
         timeStep_ = other.timeStep_;
         velocityIterations_ = other.velocityIterations_;
         positionIterations_ = other.positionIterations_;
@@ -50,9 +53,21 @@ void World::setup(const tc::Vec2& gravity) {
 }
 
 void World::setup(float gravityX, float gravityY) {
+    // Clean up existing state if setup() is called multiple times
+    if (world_) {
+        clear();
+    }
+
+    // Reset groundBody_ to ensure clean state
+    groundBody_ = nullptr;
+
     // In Box2D coordinate system, down is positive, so use as is
     b2Vec2 g(gravityX / scale, gravityY / scale);
     world_ = std::make_unique<b2World>(g);
+
+    // Create and register collision manager
+    collisionManager_ = std::make_unique<CollisionManager>();
+    world_->SetContactListener(collisionManager_.get());
 }
 
 // =============================================================================
@@ -61,6 +76,11 @@ void World::setup(float gravityX, float gravityY) {
 void World::update() {
     if (world_) {
         world_->Step(timeStep_, velocityIterations_, positionIterations_);
+
+        // Dispatch onCollisionStay events
+        if (collisionManager_) {
+            collisionManager_->update();
+        }
     }
 }
 

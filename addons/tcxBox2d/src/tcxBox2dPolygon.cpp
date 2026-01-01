@@ -59,9 +59,9 @@ void PolyShape::setup(World& world, const std::vector<tc::Vec2>& vertices, float
     // Store Body* in UserData (used by World::getBodyAtPoint())
     body_->GetUserData().pointer = reinterpret_cast<uintptr_t>(this);
 
-    // Set Node's initial position
-    x = cx;
-    y = cy;
+    // Create collider component
+    auto* collider = setupCollider<PolygonCollider2D>();
+    collider->setVertexCount(static_cast<int>(vertices.size()));
 }
 
 void PolyShape::setup(World& world, const tc::Path& polyline, float cx, float cy) {
@@ -90,11 +90,10 @@ void PolyShape::setupRegular(World& world, float cx, float cy, float radius, int
     setup(world, vertices, cx, cy);
 }
 
-// For Node: draw at origin (0,0) (drawTree() applies transform)
 void PolyShape::draw() {
     if (!body_ || vertices_.empty()) return;
 
-    // Draw polygon with lines (centered at origin)
+    // Draw at local origin (Node transform already applied)
     for (size_t i = 0; i < vertices_.size(); ++i) {
         size_t next = (i + 1) % vertices_.size();
         tc::drawLine(vertices_[i].x, vertices_[i].y,
@@ -105,18 +104,14 @@ void PolyShape::draw() {
 void PolyShape::drawFill() {
     if (!body_ || vertices_.empty()) return;
 
-    // Fill with triangle fan (centered at origin)
+    // Fill with triangle fan
     tc::Mesh mesh;
     mesh.setMode(tc::PrimitiveMode::TriangleFan);
 
-    // Center point
-    mesh.addVertex(tc::Vec3(0, 0, 0));
-
-    // Vertices
+    mesh.addVertex(tc::Vec3(0, 0, 0));  // Center
     for (const auto& v : vertices_) {
         mesh.addVertex(tc::Vec3(v.x, v.y, 0));
     }
-    // Return to first vertex
     mesh.addVertex(tc::Vec3(vertices_[0].x, vertices_[0].y, 0));
 
     mesh.draw();

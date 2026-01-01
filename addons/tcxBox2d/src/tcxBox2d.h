@@ -11,3 +11,8 @@
 #include "tcxBox2dCircle.h"
 #include "tcxBox2dRect.h"
 #include "tcxBox2dPolygon.h"
+
+// Collision system
+#include "tcxCollisionEvent.h"
+#include "tcxCollider2D.h"
+#include "tcxCollisionManager.h"
