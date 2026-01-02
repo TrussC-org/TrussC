@@ -72,6 +72,11 @@
             e.preventDefault();
         }, false);
 
+        // Focus canvas on click (required for keyboard input)
+        canvasElement.addEventListener('mousedown', function() {
+            canvasElement.focus();
+        });
+
         var Module = {
             canvas: canvasElement,
             print: function(text) {
