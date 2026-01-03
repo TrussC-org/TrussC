@@ -132,6 +132,36 @@ void ProjectGenerator::writeAddonsMake(const string& destPath) {
     addonsFile.close();
 }
 
+// Clean build directories that will be recreated by this platform's build.
+// Only removes directories for the current platform to avoid accidentally
+// deleting cross-compiled builds.
+void ProjectGenerator::cleanBuildDirectories(const string& path) {
+    vector<string> dirsToClean;
+
+    // Add platform-specific build directory
+#ifdef __APPLE__
+    dirsToClean.push_back("build-macos");
+#elif defined(_WIN32)
+    dirsToClean.push_back("build-windows");
+#else
+    dirsToClean.push_back("build-linux");
+#endif
+
+    // Add web build directory if web build is enabled
+    if (settings_.generateWebBuild) {
+        dirsToClean.push_back("build-web");
+    }
+
+    // Remove existing build directories
+    for (const auto& dir : dirsToClean) {
+        fs::path buildPath = fs::path(path) / dir;
+        if (fs::exists(buildPath)) {
+            log("Cleaning " + dir + "...");
+            fs::remove_all(buildPath);
+        }
+    }
+}
+
 void ProjectGenerator::writeCMakePresets(const string& destPath) {
     log("Writing CMakePresets.json...");
 
@@ -324,6 +354,9 @@ string ProjectGenerator::generate() {
         // CMakeLists.txt is already copied from template (no modification needed)
         writeCMakePresets(destPath);
 
+        // Clean build directories for this platform before regenerating
+        cleanBuildDirectories(destPath);
+
         // Generate IDE-specific files
         if (settings_.ideType == IdeType::VSCode || settings_.ideType == IdeType::Cursor) {
             log("Generating VSCode files...");
@@ -362,6 +395,9 @@ string ProjectGenerator::update(const string& projectPath) {
         // Write CMakePresets.json (OS-specific with TRUSSC_DIR)
         // CMakeLists.txt is NOT modified - it's a simple copy from template
         writeCMakePresets(projectPath);
+
+        // Clean build directories for this platform before regenerating
+        cleanBuildDirectories(projectPath);
 
         // Regenerate IDE-specific files
         if (settings_.ideType == IdeType::VSCode || settings_.ideType == IdeType::Cursor) {
@@ -591,39 +627,59 @@ void ProjectGenerator::generateVisualStudioProject(const string& path) {
 }
 
 void ProjectGenerator::generateWebBuildFiles(const string& path) {
+    // Get project name from path for output message
+    string projectName = fs::path(path).filename().string();
+
 #ifdef _WIN32
     // Windows: build-web.bat
     string scriptPath = path + "/build-web.bat";
     ofstream file(scriptPath);
     file << "@echo off\n";
     file << "setlocal\n\n";
-    file << "REM TrussC Web Build Script (Windows)\n\n";
-    file << "if not exist emscripten mkdir emscripten\n";
-    file << "cd emscripten\n\n";
-    file << "call emcmake cmake ..\n";
-    file << "cmake --build .\n\n";
+    file << "REM TrussC Web Build Script (Windows)\n";
+    file << "REM Uses CMake presets for consistent build configuration\n\n";
+    file << "cd /d \"%~dp0\"\n\n";
+    file << "REM Setup Emscripten environment\n";
+    file << "if not defined EMSDK (\n";
+    file << "    echo Error: EMSDK environment variable is not set.\n";
+    file << "    echo Please run emsdk_env.bat first or set EMSDK.\n";
+    file << "    exit /b 1\n";
+    file << ")\n";
+    file << "call \"%EMSDK%\\emsdk_env.bat\"\n\n";
+    file << "REM Configure and build using CMake presets\n";
+    file << "cmake --preset web\n";
+    file << "if errorlevel 1 exit /b 1\n\n";
+    file << "cmake --build --preset web\n";
+    file << "if errorlevel 1 exit /b 1\n\n";
     file << "echo.\n";
     file << "echo Build complete! Output files are in bin\\\n";
     file << "echo To test locally:\n";
-    file << "echo   cd ..\\bin ^&^& python -m http.server 8080\n";
-    file << "echo   Open http://localhost:8080/%~n0.html\n";
+    file << "echo   cd bin ^&^& python -m http.server 8080\n";
+    file << "echo   Open http://localhost:8080/" << projectName << ".html\n";
     file.close();
 #elif defined(__APPLE__)
     // macOS: build-web.command
     string scriptPath = path + "/build-web.command";
     ofstream file(scriptPath);
     file << "#!/bin/bash\n";
-    file << "# TrussC Web Build Script (macOS)\n\n";
+    file << "# TrussC Web Build Script (macOS)\n";
+    file << "# Uses CMake presets for consistent build configuration\n\n";
     file << "cd \"$(dirname \"$0\")\"\n\n";
-    file << "mkdir -p emscripten\n";
-    file << "cd emscripten\n\n";
-    file << "emcmake cmake ..\n";
-    file << "cmake --build .\n\n";
+    file << "# Setup Emscripten environment\n";
+    file << "if [ -z \"$EMSDK\" ]; then\n";
+    file << "    echo \"Error: EMSDK environment variable is not set.\"\n";
+    file << "    echo \"Please source emsdk_env.sh first or set EMSDK.\"\n";
+    file << "    exit 1\n";
+    file << "fi\n";
+    file << "source \"$EMSDK/emsdk_env.sh\"\n\n";
+    file << "# Configure and build using CMake presets\n";
+    file << "cmake --preset web || exit 1\n";
+    file << "cmake --build --preset web || exit 1\n\n";
     file << "echo \"\"\n";
     file << "echo \"Build complete! Output files are in bin/\"\n";
     file << "echo \"To test locally:\"\n";
-    file << "echo \"  cd ../bin && python3 -m http.server 8080\"\n";
-    file << "echo \"  Open http://localhost:8080/$(basename $(pwd)).html\"\n";
+    file << "echo \"  cd bin && python3 -m http.server 8080\"\n";
+    file << "echo \"  Open http://localhost:8080/" << projectName << ".html\"\n";
     file.close();
     chmod(scriptPath.c_str(), 0755);
 #else
@@ -631,17 +687,24 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
     string scriptPath = path + "/build-web.sh";
     ofstream file(scriptPath);
     file << "#!/bin/bash\n";
-    file << "# TrussC Web Build Script (Linux)\n\n";
+    file << "# TrussC Web Build Script (Linux)\n";
+    file << "# Uses CMake presets for consistent build configuration\n\n";
     file << "cd \"$(dirname \"$0\")\"\n\n";
-    file << "mkdir -p emscripten\n";
-    file << "cd emscripten\n\n";
-    file << "emcmake cmake ..\n";
-    file << "cmake --build .\n\n";
+    file << "# Setup Emscripten environment\n";
+    file << "if [ -z \"$EMSDK\" ]; then\n";
+    file << "    echo \"Error: EMSDK environment variable is not set.\"\n";
+    file << "    echo \"Please source emsdk_env.sh first or set EMSDK.\"\n";
+    file << "    exit 1\n";
+    file << "fi\n";
+    file << "source \"$EMSDK/emsdk_env.sh\"\n\n";
+    file << "# Configure and build using CMake presets\n";
+    file << "cmake --preset web || exit 1\n";
+    file << "cmake --build --preset web || exit 1\n\n";
     file << "echo \"\"\n";
     file << "echo \"Build complete! Output files are in bin/\"\n";
     file << "echo \"To test locally:\"\n";
-    file << "echo \"  cd ../bin && python3 -m http.server 8080\"\n";
-    file << "echo \"  Open http://localhost:8080/$(basename $(pwd)).html\"\n";
+    file << "echo \"  cd bin && python3 -m http.server 8080\"\n";
+    file << "echo \"  Open http://localhost:8080/" << projectName << ".html\"\n";
     file.close();
     chmod(scriptPath.c_str(), 0755);
 #endif

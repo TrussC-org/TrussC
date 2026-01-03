@@ -146,23 +146,21 @@ Currently developed on macOS (Metal). Porting status for Windows / Linux.
 
 ### ❌ macOS Only → Linux Implementation Needed
 
-| Feature | File | Linux |
-|:--------|:-----|:------|
-| **Platform** | `tcPlatform_linux.cpp` | |
-| ├ getDisplayScaleFactor | | X11: `XRRGetScreenResources` |
-| ├ setWindowSize | | X11: `XResizeWindow` |
-| ├ getExecutablePath | | `/proc/self/exe` |
-| ├ captureWindow | | OpenGL `glReadPixels` |
-| └ saveScreenshot | | Can substitute with stb_image_write |
-| **FBO** | `tcFbo_linux.cpp` | OpenGL `glReadPixels` |
-| **VideoGrabber** | `tcVideoGrabber_linux.cpp` | V4L2 |
+| Feature | File | Linux | Status |
+|:--------|:-----|:------|:-------|
+| **Platform** | `tcPlatform_linux.cpp` | | |
+| ├ getDisplayScaleFactor | | X11: `XRRGetScreenResources` | ⬜ |
+| ├ setWindowSize | | X11: `XResizeWindow` | ⬜ |
+| ├ getExecutablePath | | `/proc/self/exe` | ⬜ |
+| ├ captureWindow | | OpenGL `glReadPixels` | ⬜ |
+| └ saveScreenshot | | stb_image_write | ⬜ |
+| **FBO** | `tcFbo_linux.cpp` | OpenGL `glReadPixels` | ✅ Implemented |
+| **VideoGrabber** | `tcVideoGrabber_linux.cpp` | V4L2 | ✅ Implemented |
 
 ### Linux Porting Priority
 
 **Medium (used by some):**
-1. `tcFbo_linux.cpp` - FBO pixel reading
-2. `tcVideoGrabber_linux.cpp` - Camera input
-3. `tcPlatform_linux.cpp` - Platform functions
+1. `tcPlatform_linux.cpp` - Platform functions (getDisplayScaleFactor, setWindowSize, etc.)
 
 ---
 
@@ -209,8 +207,13 @@ List of samples/features requiring focused testing due to OS-specific code.
 | ├ getExecutablePath | | `/proc/self/exe` readlink | ⬜ |
 | ├ captureWindow | | OpenGL `glReadPixels` | ⬜ |
 | └ saveScreenshot | | stb_image_write | ⬜ |
-| FBO pixel reading | `tcFbo_linux.cpp` | OpenGL `glReadPixels` | ⬜ Not started |
-| VideoGrabber | `tcVideoGrabber_linux.cpp` | V4L2 | ⬜ Not started |
+
+**✅ Implemented**
+
+| Feature | File | Implementation | Status |
+|---------|------|----------------|--------|
+| FBO pixel reading | `tcFbo_linux.cpp` | OpenGL `glReadPixels` | ✅ Implemented |
+| VideoGrabber | `tcVideoGrabber_linux.cpp` | V4L2 | ✅ Implemented |
 
 **🟡 Needs Verification (POSIX code)**
 

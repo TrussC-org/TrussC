@@ -61,6 +61,9 @@ private:
     // Write addons.make
     void writeAddonsMake(const std::string& destPath);
 
+    // Clean build directories for current platform
+    void cleanBuildDirectories(const std::string& path);
+
     // Write CMakePresets.json (OS-specific preset with TRUSSC_DIR)
     // DESIGN NOTE: All project-specific configuration goes into CMakePresets.json
     // CMakeLists.txt is copied as-is from template (no modifications)
