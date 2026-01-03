@@ -22,7 +22,7 @@ Search for `tettou771` or `Modified by` to find all modified sections.
 
 **Lines:** ~7495-7500, ~7530-7533
 
-**Purpose:** Register keyboard events on canvas element instead of window, allowing other page elements (like Monaco editor in tcScript) to handle keyboard events independently.
+**Purpose:** Register keyboard events on canvas element instead of window, allowing other page elements (like Monaco editor in TrussSketch) to handle keyboard events independently.
 
 **Changes:**
 - Changed `EMSCRIPTEN_EVENT_TARGET_WINDOW` to `_sapp.html5_canvas_selector` for keydown/keyup/keypress callbacks

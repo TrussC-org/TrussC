@@ -2,7 +2,7 @@
 # Single source of truth for all TrussC API documentation
 #
 # Used to generate:
-#   - tcscript-api.js (autocomplete/reference)
+#   - trusssketch-api.js (autocomplete/reference)
 #   - REFERENCE.md
 #   - API_QUICK_REFERENCE.md (future)
 #   - TrussC_vs_openFrameworks.md mapping (future)
@@ -24,7 +24,7 @@ categories:
             params_simple: ""
         description: "Called once at start"
         description_ja: "開始時に一度呼ばれる"
-        tcscript: true
+        sketch: true
         snippet: "setup() {\n\t$0\n}"
 
       - name: update
@@ -33,7 +33,7 @@ categories:
             params_simple: ""
         description: "Called every frame before draw"
         description_ja: "毎フレーム、drawの前に呼ばれる"
-        tcscript: true
+        sketch: true
         snippet: "update() {\n\t$0\n}"
 
       - name: draw
@@ -42,7 +42,7 @@ categories:
             params_simple: ""
         description: "Called every frame after update"
         description_ja: "毎フレーム、updateの後に呼ばれる"
-        tcscript: true
+        sketch: true
         snippet: "draw() {\n\t$0\n}"
 
   # ==========================================================================
@@ -58,7 +58,7 @@ categories:
             params_simple: "x, y, button"
         description: "Mouse button pressed"
         description_ja: "マウスボタンが押された"
-        tcscript: true
+        sketch: true
         snippet: "mousePressed(x, y, button) {\n\t$0\n}"
 
       - name: mouseReleased
@@ -67,7 +67,7 @@ categories:
             params_simple: "x, y, button"
         description: "Mouse button released"
         description_ja: "マウスボタンが離された"
-        tcscript: true
+        sketch: true
         snippet: "mouseReleased(x, y, button) {\n\t$0\n}"
 
       - name: mouseMoved
@@ -76,7 +76,7 @@ categories:
             params_simple: "x, y"
         description: "Mouse moved"
         description_ja: "マウスが移動した"
-        tcscript: true
+        sketch: true
         snippet: "mouseMoved(x, y) {\n\t$0\n}"
 
       - name: mouseDragged
@@ -85,7 +85,7 @@ categories:
             params_simple: "x, y, button"
         description: "Mouse dragged"
         description_ja: "マウスがドラッグされた"
-        tcscript: true
+        sketch: true
         snippet: "mouseDragged(x, y, button) {\n\t$0\n}"
 
       - name: keyPressed
@@ -94,7 +94,7 @@ categories:
             params_simple: "key"
         description: "Key pressed"
         description_ja: "キーが押された"
-        tcscript: true
+        sketch: true
         snippet: "keyPressed(key) {\n\t$0\n}"
 
       - name: keyReleased
@@ -103,7 +103,7 @@ categories:
             params_simple: "key"
         description: "Key released"
         description_ja: "キーが離された"
-        tcscript: true
+        sketch: true
         snippet: "keyReleased(key) {\n\t$0\n}"
 
       - name: windowResized
@@ -112,7 +112,7 @@ categories:
             params_simple: "width, height"
         description: "Window resized"
         description_ja: "ウィンドウがリサイズされた"
-        tcscript: true
+        sketch: true
         snippet: "windowResized(width, height) {\n\t$0\n}"
 
   # ==========================================================================
@@ -131,7 +131,7 @@ categories:
         description: "Clear screen"
         description_ja: "画面をクリア"
         of_equivalent: "ofClear / ofBackground"
-        tcscript: true
+        sketch: true
         snippet: "clear(${1:0.0})"
 
       - name: setColor
@@ -146,7 +146,7 @@ categories:
         description_ja: "描画色を設定 (0.0-1.0)"
         of_equivalent: "ofSetColor"
         of_notes: "Range 0-1 instead of 0-255"
-        tcscript: true
+        sketch: true
         snippet: "setColor(${1:1.0}, ${2:1.0}, ${3:1.0})"
 
       - name: setColorHSB
@@ -155,7 +155,7 @@ categories:
             params_simple: "h, s, b"
         description: "Set color from HSB (H: 0-TAU)"
         description_ja: "HSBで色を設定 (H: 0-TAU)"
-        tcscript: true
+        sketch: true
         snippet: "setColorHSB(${1:0.0}, ${2:1.0}, ${3:1.0})"
 
       - name: setColorOKLCH
@@ -164,7 +164,7 @@ categories:
             params_simple: "L, C, H"
         description: "Set color from OKLCH"
         description_ja: "OKLCHで色を設定"
-        tcscript: true
+        sketch: true
         snippet: "setColorOKLCH(${1:0.7}, ${2:0.15}, ${3:0.0})"
 
       - name: setColorOKLab
@@ -173,7 +173,7 @@ categories:
             params_simple: "L, a, b"
         description: "Set color from OKLab"
         description_ja: "OKLabで色を設定"
-        tcscript: true
+        sketch: true
         snippet: "setColorOKLab(${1:0.7}, ${2:0.0}, ${3:0.0})"
 
   # ==========================================================================
@@ -190,7 +190,7 @@ categories:
         description: "Draw rectangle"
         description_ja: "矩形を描画"
         of_equivalent: "ofDrawRectangle"
-        tcscript: true
+        sketch: true
         snippet: "drawRect(${1:x}, ${2:y}, ${3:w}, ${4:h})"
 
       - name: drawCircle
@@ -200,7 +200,7 @@ categories:
         description: "Draw circle"
         description_ja: "円を描画"
         of_equivalent: "ofDrawCircle"
-        tcscript: true
+        sketch: true
         snippet: "drawCircle(${1:x}, ${2:y}, ${3:radius})"
 
       - name: drawEllipse
@@ -210,7 +210,7 @@ categories:
         description: "Draw ellipse"
         description_ja: "楕円を描画"
         of_equivalent: "ofDrawEllipse"
-        tcscript: true
+        sketch: true
         snippet: "drawEllipse(${1:x}, ${2:y}, ${3:w}, ${4:h})"
 
       - name: drawLine
@@ -220,7 +220,7 @@ categories:
         description: "Draw line"
         description_ja: "線を描画"
         of_equivalent: "ofDrawLine"
-        tcscript: true
+        sketch: true
         snippet: "drawLine(${1:x1}, ${2:y1}, ${3:x2}, ${4:y2})"
 
       - name: drawTriangle
@@ -230,7 +230,7 @@ categories:
         description: "Draw triangle"
         description_ja: "三角形を描画"
         of_equivalent: "ofDrawTriangle"
-        tcscript: true
+        sketch: true
         snippet: "drawTriangle(${1:x1}, ${2:y1}, ${3:x2}, ${4:y2}, ${5:x3}, ${6:y3})"
 
       - name: drawBitmapString
@@ -240,7 +240,7 @@ categories:
         description: "Draw text"
         description_ja: "テキストを描画"
         of_equivalent: "ofDrawBitmapString"
-        tcscript: true
+        sketch: true
         snippet: "drawBitmapString(${1:\"text\"}, ${2:x}, ${3:y})"
 
   # ==========================================================================
@@ -257,7 +257,7 @@ categories:
         description: "Enable fill"
         description_ja: "塗りつぶしを有効化"
         of_equivalent: "ofFill"
-        tcscript: true
+        sketch: true
         snippet: "fill()"
 
       - name: noFill
@@ -267,7 +267,7 @@ categories:
         description: "Disable fill"
         description_ja: "塗りつぶしを無効化"
         of_equivalent: "ofNoFill"
-        tcscript: true
+        sketch: true
         snippet: "noFill()"
 
       - name: stroke
@@ -276,7 +276,7 @@ categories:
             params_simple: ""
         description: "Enable stroke"
         description_ja: "ストロークを有効化"
-        tcscript: true
+        sketch: true
         snippet: "stroke()"
 
       - name: noStroke
@@ -285,7 +285,7 @@ categories:
             params_simple: ""
         description: "Disable stroke"
         description_ja: "ストロークを無効化"
-        tcscript: true
+        sketch: true
         snippet: "noStroke()"
 
       - name: setStrokeWeight
@@ -295,7 +295,7 @@ categories:
         description: "Set stroke width"
         description_ja: "ストロークの太さを設定"
         of_equivalent: "ofSetLineWidth"
-        tcscript: true
+        sketch: true
         snippet: "setStrokeWeight(${1:1.0})"
 
   # ==========================================================================
@@ -314,7 +314,7 @@ categories:
         description: "Move origin"
         description_ja: "原点を移動"
         of_equivalent: "ofTranslate"
-        tcscript: true
+        sketch: true
         snippet: "translate(${1:x}, ${2:y})"
 
       - name: rotate
@@ -325,7 +325,7 @@ categories:
         description_ja: "ラジアンで回転"
         of_equivalent: "ofRotateRad"
         of_notes: "Always radians (not degrees like oF default)"
-        tcscript: true
+        sketch: true
         snippet: "rotate(${1:radians})"
 
       - name: rotateDeg
@@ -335,7 +335,7 @@ categories:
         description: "Rotate by degrees"
         description_ja: "度で回転"
         of_equivalent: "ofRotateDeg"
-        tcscript: true
+        sketch: true
         snippet: "rotateDeg(${1:degrees})"
 
       - name: scale
@@ -347,7 +347,7 @@ categories:
         description: "Scale"
         description_ja: "拡大縮小"
         of_equivalent: "ofScale"
-        tcscript: true
+        sketch: true
         snippet: "scale(${1:s})"
 
       - name: pushMatrix
@@ -357,7 +357,7 @@ categories:
         description: "Save transform state"
         description_ja: "変換状態を保存"
         of_equivalent: "ofPushMatrix"
-        tcscript: true
+        sketch: true
         snippet: "pushMatrix()"
 
       - name: popMatrix
@@ -367,7 +367,7 @@ categories:
         description: "Restore transform state"
         description_ja: "変換状態を復元"
         of_equivalent: "ofPopMatrix"
-        tcscript: true
+        sketch: true
         snippet: "popMatrix()"
 
   # ==========================================================================
@@ -384,7 +384,7 @@ categories:
         description: "Get canvas width"
         description_ja: "キャンバスの幅を取得"
         of_equivalent: "ofGetWidth"
-        tcscript: true
+        sketch: true
         snippet: "getWindowWidth()"
 
       - name: getWindowHeight
@@ -394,7 +394,7 @@ categories:
         description: "Get canvas height"
         description_ja: "キャンバスの高さを取得"
         of_equivalent: "ofGetHeight"
-        tcscript: true
+        sketch: true
         snippet: "getWindowHeight()"
 
       - name: getMouseX
@@ -404,7 +404,7 @@ categories:
         description: "Get mouse X position"
         description_ja: "マウスのX座標を取得"
         of_equivalent: "ofGetMouseX"
-        tcscript: true
+        sketch: true
         snippet: "getMouseX()"
 
       - name: getMouseY
@@ -414,7 +414,7 @@ categories:
         description: "Get mouse Y position"
         description_ja: "マウスのY座標を取得"
         of_equivalent: "ofGetMouseY"
-        tcscript: true
+        sketch: true
         snippet: "getMouseY()"
 
       - name: isMousePressed
@@ -424,7 +424,7 @@ categories:
         description: "Is mouse button pressed"
         description_ja: "マウスボタンが押されているか"
         of_equivalent: "ofGetMousePressed"
-        tcscript: true
+        sketch: true
         snippet: "isMousePressed()"
 
   # ==========================================================================
@@ -441,7 +441,7 @@ categories:
         description: "Seconds since last frame"
         description_ja: "前フレームからの経過秒数"
         of_equivalent: "ofGetLastFrameTime"
-        tcscript: true
+        sketch: true
         snippet: "getDeltaTime()"
 
       - name: getFrameRate
@@ -451,7 +451,7 @@ categories:
         description: "Current FPS"
         description_ja: "現在のFPS"
         of_equivalent: "ofGetFrameRate"
-        tcscript: true
+        sketch: true
         snippet: "getFrameRate()"
 
       - name: getFrameCount
@@ -461,7 +461,7 @@ categories:
         description: "Total frames rendered"
         description_ja: "描画されたフレーム数"
         of_equivalent: "ofGetFrameNum"
-        tcscript: true
+        sketch: true
         snippet: "getFrameCount()"
 
   # ==========================================================================
@@ -478,7 +478,7 @@ categories:
         description: "Elapsed seconds (float)"
         description_ja: "経過秒数（float）"
         of_equivalent: "ofGetElapsedTimef"
-        tcscript: true
+        sketch: true
         snippet: "getElapsedTimef()"
 
       - name: getElapsedTimeMillis
@@ -488,7 +488,7 @@ categories:
         description: "Elapsed milliseconds (int64)"
         description_ja: "経過ミリ秒（int64）"
         of_equivalent: "ofGetElapsedTimeMillis"
-        tcscript: true
+        sketch: true
         snippet: "getElapsedTimeMillis()"
 
       - name: getElapsedTimeMicros
@@ -498,7 +498,7 @@ categories:
         description: "Elapsed microseconds (int64)"
         description_ja: "経過マイクロ秒（int64）"
         of_equivalent: "ofGetElapsedTimeMicros"
-        tcscript: true
+        sketch: true
         snippet: "getElapsedTimeMicros()"
 
       - name: resetElapsedTimeCounter
@@ -508,7 +508,7 @@ categories:
         description: "Reset elapsed time"
         description_ja: "経過時間をリセット"
         of_equivalent: "ofResetElapsedTimeCounter"
-        tcscript: true
+        sketch: true
         snippet: "resetElapsedTimeCounter()"
 
   # ==========================================================================
@@ -525,7 +525,7 @@ categories:
         description: "Unix time in milliseconds"
         description_ja: "Unix時間（ミリ秒）"
         of_equivalent: "ofGetSystemTimeMillis"
-        tcscript: true
+        sketch: true
         snippet: "getSystemTimeMillis()"
 
       - name: getSystemTimeMicros
@@ -534,7 +534,7 @@ categories:
             params_simple: ""
         description: "Unix time in microseconds"
         description_ja: "Unix時間（マイクロ秒）"
-        tcscript: true
+        sketch: true
         snippet: "getSystemTimeMicros()"
 
       - name: getTimestampString
@@ -546,7 +546,7 @@ categories:
         description: "Formatted timestamp"
         description_ja: "フォーマット済みタイムスタンプ"
         of_equivalent: "ofGetTimestampString"
-        tcscript: true
+        sketch: true
         snippet: "getTimestampString()"
 
   # ==========================================================================
@@ -563,7 +563,7 @@ categories:
         description: "Current seconds (0-59)"
         description_ja: "現在の秒 (0-59)"
         of_equivalent: "ofGetSeconds"
-        tcscript: true
+        sketch: true
         snippet: "getSeconds()"
 
       - name: getMinutes
@@ -573,7 +573,7 @@ categories:
         description: "Current minutes (0-59)"
         description_ja: "現在の分 (0-59)"
         of_equivalent: "ofGetMinutes"
-        tcscript: true
+        sketch: true
         snippet: "getMinutes()"
 
       - name: getHours
@@ -583,7 +583,7 @@ categories:
         description: "Current hours (0-23)"
         description_ja: "現在の時 (0-23)"
         of_equivalent: "ofGetHours"
-        tcscript: true
+        sketch: true
         snippet: "getHours()"
 
       - name: getYear
@@ -593,7 +593,7 @@ categories:
         description: "Current year"
         description_ja: "現在の年"
         of_equivalent: "ofGetYear"
-        tcscript: true
+        sketch: true
         snippet: "getYear()"
 
       - name: getMonth
@@ -603,7 +603,7 @@ categories:
         description: "Current month (1-12)"
         description_ja: "現在の月 (1-12)"
         of_equivalent: "ofGetMonth"
-        tcscript: true
+        sketch: true
         snippet: "getMonth()"
 
       - name: getDay
@@ -613,7 +613,7 @@ categories:
         description: "Current day (1-31)"
         description_ja: "現在の日 (1-31)"
         of_equivalent: "ofGetDay"
-        tcscript: true
+        sketch: true
         snippet: "getDay()"
 
       - name: getWeekday
@@ -623,7 +623,7 @@ categories:
         description: "Weekday (0=Sun, 6=Sat)"
         description_ja: "曜日 (0=日, 6=土)"
         of_equivalent: "ofGetWeekday"
-        tcscript: true
+        sketch: true
         snippet: "getWeekday()"
 
   # ==========================================================================
@@ -644,7 +644,7 @@ categories:
         description: "Random number"
         description_ja: "乱数"
         of_equivalent: "ofRandom"
-        tcscript: true
+        sketch: true
         snippet: "random()"
 
       - name: noise
@@ -658,7 +658,7 @@ categories:
         description: "Perlin noise"
         description_ja: "パーリンノイズ"
         of_equivalent: "ofNoise"
-        tcscript: true
+        sketch: true
         snippet: "noise(${1:x})"
 
   # ==========================================================================
@@ -675,7 +675,7 @@ categories:
         description: "Linear interpolation"
         description_ja: "線形補間"
         of_equivalent: "ofLerp"
-        tcscript: true
+        sketch: true
         snippet: "lerp(${1:a}, ${2:b}, ${3:t})"
 
       - name: clamp
@@ -685,7 +685,7 @@ categories:
         description: "Clamp value to range"
         description_ja: "値を範囲に制限"
         of_equivalent: "ofClamp"
-        tcscript: true
+        sketch: true
         snippet: "clamp(${1:v}, ${2:min}, ${3:max})"
 
       - name: map
@@ -695,7 +695,7 @@ categories:
         description: "Map value between ranges"
         description_ja: "値を範囲間でマッピング"
         of_equivalent: "ofMap"
-        tcscript: true
+        sketch: true
         snippet: "map(${1:v}, ${2:inMin}, ${3:inMax}, ${4:outMin}, ${5:outMax})"
 
   # ==========================================================================
@@ -711,7 +711,7 @@ categories:
             params_simple: "x"
         description: "Sine"
         description_ja: "正弦"
-        tcscript: true
+        sketch: true
         snippet: "sin(${1:x})"
 
       - name: cos
@@ -720,7 +720,7 @@ categories:
             params_simple: "x"
         description: "Cosine"
         description_ja: "余弦"
-        tcscript: true
+        sketch: true
         snippet: "cos(${1:x})"
 
       - name: tan
@@ -729,7 +729,7 @@ categories:
             params_simple: "x"
         description: "Tangent"
         description_ja: "正接"
-        tcscript: true
+        sketch: true
         snippet: "tan(${1:x})"
 
       - name: asin
@@ -738,7 +738,7 @@ categories:
             params_simple: "x"
         description: "Arc sine"
         description_ja: "逆正弦"
-        tcscript: true
+        sketch: true
         snippet: "asin(${1:x})"
 
       - name: acos
@@ -747,7 +747,7 @@ categories:
             params_simple: "x"
         description: "Arc cosine"
         description_ja: "逆余弦"
-        tcscript: true
+        sketch: true
         snippet: "acos(${1:x})"
 
       - name: atan
@@ -756,7 +756,7 @@ categories:
             params_simple: "x"
         description: "Arc tangent"
         description_ja: "逆正接"
-        tcscript: true
+        sketch: true
         snippet: "atan(${1:x})"
 
       - name: atan2
@@ -765,7 +765,7 @@ categories:
             params_simple: "y, x"
         description: "Arc tangent of y/x"
         description_ja: "y/xの逆正接"
-        tcscript: true
+        sketch: true
         snippet: "atan2(${1:y}, ${2:x})"
 
       - name: deg2rad
@@ -775,7 +775,7 @@ categories:
         description: "Degrees to radians"
         description_ja: "度からラジアンへ"
         of_equivalent: "ofDegToRad"
-        tcscript: true
+        sketch: true
         snippet: "deg2rad(${1:degrees})"
 
       - name: rad2deg
@@ -785,7 +785,7 @@ categories:
         description: "Radians to degrees"
         description_ja: "ラジアンから度へ"
         of_equivalent: "ofRadToDeg"
-        tcscript: true
+        sketch: true
         snippet: "rad2deg(${1:radians})"
 
   # ==========================================================================
@@ -801,7 +801,7 @@ categories:
             params_simple: "x"
         description: "Absolute value"
         description_ja: "絶対値"
-        tcscript: true
+        sketch: true
         snippet: "abs(${1:x})"
 
       - name: sqrt
@@ -810,7 +810,7 @@ categories:
             params_simple: "x"
         description: "Square root"
         description_ja: "平方根"
-        tcscript: true
+        sketch: true
         snippet: "sqrt(${1:x})"
 
       - name: sq
@@ -819,7 +819,7 @@ categories:
             params_simple: "x"
         description: "Square (x*x)"
         description_ja: "二乗 (x*x)"
-        tcscript: true
+        sketch: true
         snippet: "sq(${1:x})"
 
       - name: pow
@@ -828,7 +828,7 @@ categories:
             params_simple: "x, y"
         description: "Power (x^y)"
         description_ja: "累乗 (x^y)"
-        tcscript: true
+        sketch: true
         snippet: "pow(${1:x}, ${2:y})"
 
       - name: log
@@ -837,7 +837,7 @@ categories:
             params_simple: "x"
         description: "Natural logarithm"
         description_ja: "自然対数"
-        tcscript: true
+        sketch: true
         snippet: "log(${1:x})"
 
       - name: exp
@@ -846,7 +846,7 @@ categories:
             params_simple: "x"
         description: "Exponential (e^x)"
         description_ja: "指数関数 (e^x)"
-        tcscript: true
+        sketch: true
         snippet: "exp(${1:x})"
 
       - name: min
@@ -855,7 +855,7 @@ categories:
             params_simple: "a, b"
         description: "Minimum"
         description_ja: "最小値"
-        tcscript: true
+        sketch: true
         snippet: "min(${1:a}, ${2:b})"
 
       - name: max
@@ -864,7 +864,7 @@ categories:
             params_simple: "a, b"
         description: "Maximum"
         description_ja: "最大値"
-        tcscript: true
+        sketch: true
         snippet: "max(${1:a}, ${2:b})"
 
       - name: floor
@@ -873,7 +873,7 @@ categories:
             params_simple: "x"
         description: "Round down"
         description_ja: "切り捨て"
-        tcscript: true
+        sketch: true
         snippet: "floor(${1:x})"
 
       - name: ceil
@@ -882,7 +882,7 @@ categories:
             params_simple: "x"
         description: "Round up"
         description_ja: "切り上げ"
-        tcscript: true
+        sketch: true
         snippet: "ceil(${1:x})"
 
       - name: round
@@ -891,7 +891,7 @@ categories:
             params_simple: "x"
         description: "Round to nearest"
         description_ja: "四捨五入"
-        tcscript: true
+        sketch: true
         snippet: "round(${1:x})"
 
       - name: fmod
@@ -900,7 +900,7 @@ categories:
             params_simple: "x, y"
         description: "Floating-point modulo"
         description_ja: "浮動小数点剰余"
-        tcscript: true
+        sketch: true
         snippet: "fmod(${1:x}, ${2:y})"
 
       - name: sign
@@ -910,7 +910,7 @@ categories:
         description: "Sign (-1, 0, 1)"
         description_ja: "符号 (-1, 0, 1)"
         of_equivalent: "ofSign"
-        tcscript: true
+        sketch: true
         snippet: "sign(${1:x})"
 
       - name: fract
@@ -919,7 +919,7 @@ categories:
             params_simple: "x"
         description: "Fractional part"
         description_ja: "小数部"
-        tcscript: true
+        sketch: true
         snippet: "fract(${1:x})"
 
   # ==========================================================================
@@ -936,7 +936,7 @@ categories:
         description: "Distance between points"
         description_ja: "2点間の距離"
         of_equivalent: "ofDist"
-        tcscript: true
+        sketch: true
         snippet: "dist(${1:x1}, ${2:y1}, ${3:x2}, ${4:y2})"
 
       - name: distSquared
@@ -946,7 +946,7 @@ categories:
         description: "Squared distance"
         description_ja: "距離の二乗"
         of_equivalent: "ofDistSquared"
-        tcscript: true
+        sketch: true
         snippet: "distSquared(${1:x1}, ${2:y1}, ${3:x2}, ${4:y2})"
 
   # ==========================================================================
@@ -963,7 +963,7 @@ categories:
         description: "Print to console"
         description_ja: "コンソールに出力"
         of_equivalent: "ofLog"
-        tcscript: true
+        sketch: true
         snippet: "logNotice(${1:\"message\"})"
 
       - name: to_string
@@ -973,7 +973,7 @@ categories:
         description: "Convert to string"
         description_ja: "文字列に変換"
         of_equivalent: "ofToString"
-        tcscript: true
+        sketch: true
         snippet: "to_string(${1:value})"
 
   # ==========================================================================
@@ -993,7 +993,7 @@ categories:
             params_simple: "v"
         description: "Create 2D vector"
         description_ja: "2Dベクトルを作成"
-        tcscript: true
+        sketch: true
         snippet: "Vec2(${1:x}, ${2:y})"
 
       - name: Vec2_fromAngle
@@ -1004,7 +1004,7 @@ categories:
             params_simple: "radians, length"
         description: "Create Vec2 from angle"
         description_ja: "角度からVec2を作成"
-        tcscript: true
+        sketch: true
         snippet: "Vec2_fromAngle(${1:radians})"
 
   # ==========================================================================
@@ -1024,7 +1024,7 @@ categories:
             params_simple: "v"
         description: "Create 3D vector"
         description_ja: "3Dベクトルを作成"
-        tcscript: true
+        sketch: true
         snippet: "Vec3(${1:x}, ${2:y}, ${3:z})"
 
   # ==========================================================================
@@ -1044,7 +1044,7 @@ categories:
             params_simple: "r, g, b, a"
         description: "Create color (0.0-1.0)"
         description_ja: "色を作成 (0.0-1.0)"
-        tcscript: true
+        sketch: true
         snippet: "Color(${1:r}, ${2:g}, ${3:b})"
 
       - name: Color_fromHSB
@@ -1055,7 +1055,7 @@ categories:
             params_simple: "h, s, b, a"
         description: "Create Color from HSB"
         description_ja: "HSBからColorを作成"
-        tcscript: true
+        sketch: true
         snippet: "Color_fromHSB(${1:h}, ${2:s}, ${3:b})"
 
       - name: Color_fromOKLCH
@@ -1066,7 +1066,7 @@ categories:
             params_simple: "L, C, H, a"
         description: "Create Color from OKLCH"
         description_ja: "OKLCHからColorを作成"
-        tcscript: true
+        sketch: true
         snippet: "Color_fromOKLCH(${1:L}, ${2:C}, ${3:H})"
 
       - name: Color_fromOKLab
@@ -1077,7 +1077,7 @@ categories:
             params_simple: "L, a, b, alpha"
         description: "Create Color from OKLab"
         description_ja: "OKLabからColorを作成"
-        tcscript: true
+        sketch: true
         snippet: "Color_fromOKLab(${1:L}, ${2:a}, ${3:b})"
 
 # ==========================================================================
@@ -1088,28 +1088,28 @@ constants:
     value: "6.283..."
     description: "Full circle (2*PI)"
     description_ja: "一周 (2*PI)"
-    tcscript: true
+    sketch: true
 
   - name: HALF_TAU
     value: "3.141..."
     description: "Half circle (PI)"
     description_ja: "半周 (PI)"
-    tcscript: true
+    sketch: true
 
   - name: QUARTER_TAU
     value: "1.570..."
     description: "Quarter circle (PI/2)"
     description_ja: "四分の一周 (PI/2)"
-    tcscript: true
+    sketch: true
 
   - name: PI
     value: "3.141..."
     description: "Pi (use TAU instead)"
     description_ja: "円周率（TAUを推奨）"
-    tcscript: true
+    sketch: true
 
 # ==========================================================================
-# Keywords (for tcScript syntax highlighting)
+# Keywords (for TrussSketch syntax highlighting)
 # ==========================================================================
 keywords:
   - "def"

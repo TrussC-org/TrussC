@@ -4,12 +4,12 @@
  *
  * Usage:
  *   node generate-docs.js                  # Generate all outputs
- *   node generate-docs.js --tcscript       # Generate tcScript-related files only
+ *   node generate-docs.js --sketch         # Generate TrussSketch-related files only
  *   node generate-docs.js --reference      # Generate REFERENCE.md only
  *
  * Outputs:
- *   --tcscript:
- *     - ../trussc.org/tcscript/tcscript-api.js
+ *   --sketch:
+ *     - ../trussc.org/sketch/trusssketch-api.js
  *     - ../TrussSketch/REFERENCE.md
  */
 
@@ -19,13 +19,13 @@ const yaml = require('js-yaml');
 
 // Paths
 const API_YAML = path.join(__dirname, '../api-definition.yaml');
-const TCSCRIPT_API_JS = path.join(__dirname, '../../../trussc.org/sketch/tcscript-api.js');
+const SKETCH_API_JS = path.join(__dirname, '../../../trussc.org/sketch/trusssketch-api.js');
 const REFERENCE_MD = path.join(__dirname, '../../../TrussSketch/REFERENCE.md');
 
 // Parse command line args
 const args = process.argv.slice(2);
 const generateAll = args.length === 0;
-const generateTcScript = generateAll || args.includes('--tcscript');
+const generateSketch = generateAll || args.includes('--sketch');
 const generateReference = generateAll || args.includes('--reference');
 
 // Load YAML
@@ -34,8 +34,8 @@ function loadAPI() {
     return yaml.load(content);
 }
 
-// Generate tcscript-api.js
-function generateTcScriptAPI(api) {
+// Generate trusssketch-api.js
+function generateSketchAPI(api) {
     const categories = [];
 
     for (const cat of api.categories) {
@@ -60,7 +60,7 @@ function generateTcScriptAPI(api) {
     }
 
     const constants = api.constants
-        .filter(c => c.tcscript)
+        .filter(c => c.sketch)
         .map(c => ({
             name: c.name,
             value: c.value,
@@ -74,18 +74,18 @@ function generateTcScriptAPI(api) {
     };
 
     // Generate JavaScript source
-    let js = `// tcScript API Definition
-// This is the single source of truth for all tcScript functions.
+    let js = `// TrussSketch API Definition
+// This is the single source of truth for all TrussSketch functions.
 // Used by: autocomplete, reference page, REFERENCE.md generation
 //
 // AUTO-GENERATED from api-definition.yaml
 // Do not edit directly - edit api-definition.yaml instead
 
-const tcScriptAPI = ${JSON.stringify(output, null, 4)};
+const TrussSketchAPI = ${JSON.stringify(output, null, 4)};
 
 // Export for different environments
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = tcScriptAPI;
+    module.exports = TrussSketchAPI;
 }
 `;
 
@@ -94,24 +94,24 @@ if (typeof module !== 'undefined' && module.exports) {
 
 // Generate REFERENCE.md
 function generateReferenceMd(api) {
-    let md = `# tcScript API Reference
+    let md = `# TrussSketch API Reference
 
-Complete API reference for tcScript. All functions are directly mapped from TrussC.
+Complete API reference for TrussSketch. All functions are directly mapped from TrussC.
 
 `;
 
     // Generate each category
     for (const cat of api.categories) {
-        // Only include tcScript-enabled functions
-        const tcFunctions = cat.functions.filter(fn => fn.tcscript);
-        if (tcFunctions.length === 0) continue;
+        // Only include TrussSketch-enabled functions
+        const sketchFunctions = cat.functions.filter(fn => fn.sketch);
+        if (sketchFunctions.length === 0) continue;
 
         md += `## ${cat.name}\n\n`;
         md += '```javascript\n';
 
         // Group overloads
         const seen = new Set();
-        for (const fn of tcFunctions) {
+        for (const fn of sketchFunctions) {
             for (const sig of fn.signatures) {
                 const sigStr = `${fn.name}(${sig.params_simple})`;
                 if (seen.has(sigStr)) continue;
@@ -130,7 +130,7 @@ Complete API reference for tcScript. All functions are directly mapped from Trus
 
 \`\`\`javascript
 `;
-    for (const c of api.constants.filter(c => c.tcscript)) {
+    for (const c of api.constants.filter(c => c.sketch)) {
         const padding = Math.max(0, 28 - c.name.length);
         md += `${c.name}${' '.repeat(padding)} // ${c.value} (${c.description})\n`;
     }
@@ -185,12 +185,12 @@ function main() {
     const api = loadAPI();
     console.log(`  Found ${api.categories.length} categories`);
 
-    if (generateTcScript || generateReference) {
-        if (generateTcScript) {
-            console.log('\nGenerating tcscript-api.js...');
-            const js = generateTcScriptAPI(api);
-            fs.writeFileSync(TCSCRIPT_API_JS, js);
-            console.log(`  Written: ${TCSCRIPT_API_JS}`);
+    if (generateSketch || generateReference) {
+        if (generateSketch) {
+            console.log('\nGenerating trusssketch-api.js...');
+            const js = generateSketchAPI(api);
+            fs.writeFileSync(SKETCH_API_JS, js);
+            console.log(`  Written: ${SKETCH_API_JS}`);
         }
 
         if (generateReference) {
