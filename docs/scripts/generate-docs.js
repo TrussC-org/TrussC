@@ -9,8 +9,8 @@
  *
  * Outputs:
  *   --tcscript:
- *     - ../../TrussC_site/trussc.cc/tcscript/tcscript-api.js
- *     - ../../tcScriptEngine/REFERENCE.md
+ *     - ../trussc.org/tcscript/tcscript-api.js
+ *     - ../TrussSketch/REFERENCE.md
  */
 
 const fs = require('fs');
@@ -19,8 +19,8 @@ const yaml = require('js-yaml');
 
 // Paths
 const API_YAML = path.join(__dirname, '../api-definition.yaml');
-const TCSCRIPT_API_JS = path.join(__dirname, '../../../../TrussC_site/trussc.cc/tcscript/tcscript-api.js');
-const REFERENCE_MD = path.join(__dirname, '../../../tcScriptEngine/REFERENCE.md');
+const TCSCRIPT_API_JS = path.join(__dirname, '../../../trussc.org/sketch/tcscript-api.js');
+const REFERENCE_MD = path.join(__dirname, '../../../TrussSketch/REFERENCE.md');
 
 // Parse command line args
 const args = process.argv.slice(2);

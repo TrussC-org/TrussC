@@ -976,6 +976,110 @@ categories:
         tcscript: true
         snippet: "to_string(${1:value})"
 
+  # ==========================================================================
+  # Types - Vec2
+  # ==========================================================================
+  - id: types_vec2
+    name: "Types - Vec2"
+    name_ja: "型 - Vec2"
+    functions:
+      - name: Vec2
+        signatures:
+          - params: ""
+            params_simple: ""
+          - params: "float x, float y"
+            params_simple: "x, y"
+          - params: "float v"
+            params_simple: "v"
+        description: "Create 2D vector"
+        description_ja: "2Dベクトルを作成"
+        tcscript: true
+        snippet: "Vec2(${1:x}, ${2:y})"
+
+      - name: Vec2_fromAngle
+        signatures:
+          - params: "float radians"
+            params_simple: "radians"
+          - params: "float radians, float length"
+            params_simple: "radians, length"
+        description: "Create Vec2 from angle"
+        description_ja: "角度からVec2を作成"
+        tcscript: true
+        snippet: "Vec2_fromAngle(${1:radians})"
+
+  # ==========================================================================
+  # Types - Vec3
+  # ==========================================================================
+  - id: types_vec3
+    name: "Types - Vec3"
+    name_ja: "型 - Vec3"
+    functions:
+      - name: Vec3
+        signatures:
+          - params: ""
+            params_simple: ""
+          - params: "float x, float y, float z"
+            params_simple: "x, y, z"
+          - params: "float v"
+            params_simple: "v"
+        description: "Create 3D vector"
+        description_ja: "3Dベクトルを作成"
+        tcscript: true
+        snippet: "Vec3(${1:x}, ${2:y}, ${3:z})"
+
+  # ==========================================================================
+  # Types - Color
+  # ==========================================================================
+  - id: types_color
+    name: "Types - Color"
+    name_ja: "型 - Color"
+    functions:
+      - name: Color
+        signatures:
+          - params: ""
+            params_simple: ""
+          - params: "float r, float g, float b"
+            params_simple: "r, g, b"
+          - params: "float r, float g, float b, float a"
+            params_simple: "r, g, b, a"
+        description: "Create color (0.0-1.0)"
+        description_ja: "色を作成 (0.0-1.0)"
+        tcscript: true
+        snippet: "Color(${1:r}, ${2:g}, ${3:b})"
+
+      - name: Color_fromHSB
+        signatures:
+          - params: "float h, float s, float b"
+            params_simple: "h, s, b"
+          - params: "float h, float s, float b, float a"
+            params_simple: "h, s, b, a"
+        description: "Create Color from HSB"
+        description_ja: "HSBからColorを作成"
+        tcscript: true
+        snippet: "Color_fromHSB(${1:h}, ${2:s}, ${3:b})"
+
+      - name: Color_fromOKLCH
+        signatures:
+          - params: "float L, float C, float H"
+            params_simple: "L, C, H"
+          - params: "float L, float C, float H, float a"
+            params_simple: "L, C, H, a"
+        description: "Create Color from OKLCH"
+        description_ja: "OKLCHからColorを作成"
+        tcscript: true
+        snippet: "Color_fromOKLCH(${1:L}, ${2:C}, ${3:H})"
+
+      - name: Color_fromOKLab
+        signatures:
+          - params: "float L, float a, float b"
+            params_simple: "L, a, b"
+          - params: "float L, float a, float b, float alpha"
+            params_simple: "L, a, b, alpha"
+        description: "Create Color from OKLab"
+        description_ja: "OKLabからColorを作成"
+        tcscript: true
+        snippet: "Color_fromOKLab(${1:L}, ${2:a}, ${3:b})"
+
 # ==========================================================================
 # Constants
 # ==========================================================================
