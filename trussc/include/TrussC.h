@@ -2030,6 +2030,9 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #include "tc/sound/tcSound.h"
 #include "tc/sound/tcChipSound.h"
 
+// TrussC debug utilities
+#include "tc/debug/tcDebugSound.h"
+
 // TrussC threading
 #include "tc/utils/tcThread.h"
 #include "tc/utils/tcThreadChannel.h"
