@@ -164,7 +164,11 @@ protected:
     size_t receiveBufferSize_ = 65536;
     std::mutex sendMutex_;
 
+#ifdef __EMSCRIPTEN__
+    bool useThread_ = false;
+#else
     bool useThread_ = true;
+#endif
     EventListener updateListener_;
     bool connectPending_ = false;
 

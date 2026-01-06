@@ -19,9 +19,12 @@
     #include <unistd.h>
     #include <fcntl.h>
     #include <errno.h>
+    #include <poll.h>
     #define CLOSE_SOCKET ::close
     #define SOCKET_ERROR_CODE errno
 #endif
+
+#include "tc/events/tcCoreEvents.h"
 
 namespace trussc {
 
@@ -51,6 +54,9 @@ bool UdpSocket::initWinsock() {
 // ---------------------------------------------------------------------------
 UdpSocket::UdpSocket() {
     initWinsock();
+#ifdef __EMSCRIPTEN__
+    useThread_ = false;
+#endif
 }
 
 UdpSocket::~UdpSocket() {
@@ -326,23 +332,48 @@ void UdpSocket::startReceiving() {
     shouldStop_ = false;
     receiving_ = true;
 
-    receiveThread_ = std::thread(&UdpSocket::receiveThreadFunc, this);
+    if (useThread_) {
+        // Ensure blocking mode for thread
+        setNonBlocking(false);
+        receiveThread_ = std::thread(&UdpSocket::receiveThreadFunc, this);
+    } else {
+        // Ensure non-blocking mode for event loop
+        setNonBlocking(true);
+        events().update.listen(updateListener_, this, &UdpSocket::processNetwork);
+    }
 }
 
 void UdpSocket::stopReceiving() {
     shouldStop_ = true;
+    updateListener_.disconnect();
 
     if (receiveThread_.joinable()) {
-        receiveThread_.join();
+        // Avoid joining self
+        if (receiveThread_.get_id() == std::this_thread::get_id()) {
+            receiveThread_.detach();
+        } else {
+            // Close socket to unblock recvfrom if blocking
+            // (Note: close() calls stopReceiving, so we might be here via close())
+            // If called directly, we might need to interrupt recvfrom.
+            // On Windows shutdown() helps, on POSIX closing socket helps.
+            receiveThread_.join();
+        }
     }
 
     receiving_ = false;
 }
 
-void UdpSocket::receiveThreadFunc() {
-    std::vector<char> buffer(RECEIVE_BUFFER_SIZE);
+void UdpSocket::processNetwork() {
+    if (!receiving_.load()) return;
 
-    while (!shouldStop_.load()) {
+    // Use a static buffer to avoid allocation every frame
+    static std::vector<char> buffer(RECEIVE_BUFFER_SIZE);
+
+    // In event loop mode, we poll first or just try recvfrom in non-blocking mode.
+    // Since we set non-blocking in startReceiving, we can just try recvfrom.
+    // Loop until WouldBlock
+    
+    while (receiving_.load()) {
         sockaddr_in fromAddr{};
         socklen_t fromLen = sizeof(fromAddr);
 
@@ -352,10 +383,6 @@ void UdpSocket::receiveThreadFunc() {
                                  0,
                                  reinterpret_cast<sockaddr*>(&fromAddr),
                                  &fromLen);
-
-        if (shouldStop_.load()) {
-            break;
-        }
 
         if (received > 0) {
             UdpReceiveEventArgs args;
@@ -367,21 +394,112 @@ void UdpSocket::receiveThreadFunc() {
             args.remotePort = ntohs(fromAddr.sin_port);
 
             onReceive.notify(args);
-        } else if (received < 0) {
+            
+            // If not threaded, we process one packet per update to avoid stalling?
+            // Or process all pending? All pending is better for latency.
+            // But limit loop count to prevent infinite loop if data comes faster than process.
+            // For now, process all available.
+        } else {
             int err = SOCKET_ERROR_CODE;
 #ifdef _WIN32
-            if (err == WSAEWOULDBLOCK || err == WSAEINTR) continue;
+            if (received < 0 && (err == WSAEWOULDBLOCK || err == WSAEINTR)) break;
 #else
-            if (err == EAGAIN || err == EWOULDBLOCK || err == EINTR) continue;
+            if (received < 0 && (err == EAGAIN || err == EWOULDBLOCK || err == EINTR)) break;
 #endif
-            if (!shouldStop_.load()) {
-                notifyError("Receive error", err);
+            // Check for actual error
+            if (received < 0) {
+                if (!shouldStop_.load()) {
+                    notifyError("Receive error", err);
+                }
+                // Don't stop receiving on error, just log and wait for next
+                break; 
             }
+            // received == 0 (should not happen for UDP usually, but break if it does)
             break;
+        }
+    }
+}
+
+void UdpSocket::receiveThreadFunc() {
+    // In thread mode, we use blocking IO or select/poll
+    // Re-implementing with select/poll to allow proper stopping
+    
+    std::vector<char> buffer(RECEIVE_BUFFER_SIZE);
+
+    while (!shouldStop_.load()) {
+        // Poll with timeout to allow checking shouldStop
+        bool dataReady = false;
+        
+#ifdef _WIN32
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET(socket_, &readfds);
+        timeval tv = {0, 100000}; // 100ms
+        int res = select(0, &readfds, NULL, NULL, &tv);
+        if (res > 0) dataReady = true;
+#else
+        struct pollfd pfd;
+        pfd.fd = socket_;
+        pfd.events = POLLIN;
+        int res = poll(&pfd, 1, 100); // 100ms
+        if (res > 0) dataReady = true;
+#endif
+
+        if (shouldStop_.load()) break;
+
+        if (dataReady) {
+            sockaddr_in fromAddr{};
+            socklen_t fromLen = sizeof(fromAddr);
+
+            auto received = recvfrom(socket_,
+                                     buffer.data(),
+                                     static_cast<int>(buffer.size()),
+                                     0,
+                                     reinterpret_cast<sockaddr*>(&fromAddr),
+                                     &fromLen);
+
+            if (shouldStop_.load()) break;
+
+            if (received > 0) {
+                UdpReceiveEventArgs args;
+                args.data.assign(buffer.begin(), buffer.begin() + received);
+
+                char hostStr[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, &fromAddr.sin_addr, hostStr, INET_ADDRSTRLEN);
+                args.remoteHost = hostStr;
+                args.remotePort = ntohs(fromAddr.sin_port);
+
+                onReceive.notify(args);
+            } else if (received < 0) {
+                int err = SOCKET_ERROR_CODE;
+                // Ignore wouldblock in case of spurious wakeup
+#ifdef _WIN32
+                if (err != WSAEWOULDBLOCK && err != WSAEINTR)
+#else
+                if (err != EAGAIN && err != EWOULDBLOCK && err != EINTR)
+#endif
+                {
+                    notifyError("Receive error", err);
+                }
+            }
         }
     }
 
     receiving_ = false;
+}
+
+void UdpSocket::setUseThread(bool use) {
+#ifdef __EMSCRIPTEN__
+    if (use) {
+        logWarning() << "Threads are not supported on Emscripten in this build. useThread remains false.";
+        return;
+    }
+#endif
+    if (receiving_) {
+        logWarning() << "Cannot change threading mode while receiving. Stop receiving first.";
+        return;
+    }
+    useThread_ = use;
 }
 
 // ---------------------------------------------------------------------------

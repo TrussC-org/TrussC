@@ -133,8 +133,14 @@ public:
     // Set receive timeout (milliseconds, 0=infinite)
     bool setReceiveTimeout(int timeoutMs);
 
+    // Set whether to use thread for receiving (Wasm must be false)
+    void setUseThread(bool useThread);
+
     // Get bound port
     int getLocalPort() const { return localPort_; }
+
+    // Internal update method (called by event listener if not using threads)
+    void processNetwork();
 
     // Whether socket is valid
     bool isValid() const { return socket_ != INVALID_SOCKET_HANDLE; }
@@ -157,6 +163,13 @@ private:
     std::thread receiveThread_;
     std::atomic<bool> receiving_{false};
     std::atomic<bool> shouldStop_{false};
+    
+#ifdef __EMSCRIPTEN__
+    bool useThread_ = false;
+#else
+    bool useThread_ = true;
+#endif
+    EventListener updateListener_;
 
     // Receive buffer size
     static constexpr size_t RECEIVE_BUFFER_SIZE = 65536;
