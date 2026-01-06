@@ -23,6 +23,8 @@
     #include <unistd.h>
     #include <netdb.h>
     #include <fcntl.h>
+    #include <poll.h>
+    #include <errno.h>
 #endif
 
 namespace trussc {
@@ -116,6 +118,15 @@ public:
     // Set blocking mode
     void setBlocking(bool blocking);
 
+    // Set whether to use threads (Wasm must be false)
+    void setUseThread(bool useThread);
+
+    // Whether threading is being used
+    bool isUsingThread() const;
+
+    // Internal update method (called by event listener if not using threads)
+    void processNetwork();
+
     // -------------------------------------------------------------------------
     // Information retrieval
     // -------------------------------------------------------------------------
@@ -144,6 +155,10 @@ protected:
 
     size_t receiveBufferSize_ = 65536;
     std::mutex sendMutex_;
+
+    bool useThread_ = true;
+    tcEventListener updateListener_;
+    bool connectPending_ = false;
 
 private:
     void receiveThreadFunc();

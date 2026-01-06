@@ -61,10 +61,13 @@ public:
     // Data Send/Receive (override TcpClient)
     // -------------------------------------------------------------------------
 
-    // Send data (TLS encrypted)
+    // Receive data (TLS encrypted)
     bool send(const void* data, size_t size) override;
     bool send(const std::vector<char>& data) override;
     bool send(const std::string& message) override;
+
+    // Internal network processing (overrides TcpClient)
+    void processNetwork() override;
 
     // -------------------------------------------------------------------------
     // TLS Information
@@ -83,6 +86,7 @@ private:
 
     std::string hostname_;
     bool verifyNone_ = false;
+    bool handshakePending_ = false;
 
     // Perform TLS handshake
     bool performHandshake();

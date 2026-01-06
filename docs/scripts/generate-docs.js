@@ -40,14 +40,18 @@ function generateSketchAPI(api) {
     const categories = [];
 
     for (const cat of api.categories) {
+        const sketchFunctions = cat.functions.filter(fn => fn.sketch);
+        if (sketchFunctions.length === 0) continue;
+
         const functions = [];
 
-        for (const fn of cat.functions) {
+        for (const fn of sketchFunctions) {
             // Create entry for each signature
             for (const sig of fn.signatures) {
                 functions.push({
                     name: fn.name,
                     params: sig.params_simple,
+                    params_typed: sig.params,
                     desc: fn.description,
                     snippet: fn.snippet
                 });
@@ -116,7 +120,7 @@ For the latest interactive reference, visit [trussc.org/reference](https://truss
         const seen = new Set();
         for (const fn of sketchFunctions) {
             for (const sig of fn.signatures) {
-                const sigStr = `${fn.name}(${sig.params_simple})`;
+                const sigStr = `${fn.name}(${sig.params || ''})`;
                 if (seen.has(sigStr)) continue;
                 seen.add(sigStr);
 

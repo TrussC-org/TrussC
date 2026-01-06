@@ -52,6 +52,9 @@ TcpClient::TcpClient() {
     if (instanceCount_++ == 0) {
         initWinsock();
     }
+#ifdef __EMSCRIPTEN__
+    useThread_ = false;
+#endif
 }
 
 TcpClient::~TcpClient() {
@@ -104,7 +107,7 @@ TcpClient& TcpClient::operator=(TcpClient&& other) noexcept {
 // Connection management
 // =============================================================================
 bool TcpClient::connect(const std::string& host, int port) {
-    if (connected_) {
+    if (connected_ || connectPending_) {
         disconnect();
     }
 
@@ -117,6 +120,11 @@ bool TcpClient::connect(const std::string& host, int port) {
 #endif
         notifyError("Failed to create socket", SOCKET_ERROR_CODE);
         return false;
+    }
+
+    // Set non-blocking if not using threads to avoid blocking connect
+    if (!useThread_) {
+        setBlocking(false);
     }
 
     // Resolve hostname
@@ -142,42 +150,67 @@ bool TcpClient::connect(const std::string& host, int port) {
     ret = ::connect(socket_, result->ai_addr, (int)result->ai_addrlen);
     freeaddrinfo(result);
 
-    if (ret == SOCKET_ERROR) {
-        notifyError("Failed to connect to " + host + ":" + std::to_string(port), SOCKET_ERROR_CODE);
-        CLOSE_SOCKET(socket_);
-#ifdef _WIN32
-        socket_ = INVALID_SOCKET;
-#else
-        socket_ = -1;
-#endif
-        return false;
-    }
-
     remoteHost_ = host;
     remotePort_ = port;
-    connected_ = true;
-    running_ = true;
 
-    // Start receive thread
-    receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this);
+    if (ret == SOCKET_ERROR) {
+        int err = SOCKET_ERROR_CODE;
+#ifdef _WIN32
+        if (err == WSAEWOULDBLOCK) {
+#else
+        if (err == EINPROGRESS) {
+#endif
+            // Async connection started
+            connectPending_ = true;
+            running_ = true;
+        } else {
+            notifyError("Failed to connect to " + host + ":" + std::to_string(port), err);
+            CLOSE_SOCKET(socket_);
+#ifdef _WIN32
+            socket_ = INVALID_SOCKET;
+#else
+            socket_ = -1;
+#endif
+            return false;
+        }
+    } else {
+        // Connected immediately
+        connected_ = true;
+        running_ = true;
+        
+        logNotice() << "TCP connected to " << host << ":" << port;
 
-    logNotice() << "TCP connected to " << host << ":" << port;
+        TcpConnectEventArgs args;
+        args.success = true;
+        args.message = "Connected";
+        onConnect.notify(args);
+    }
 
-    TcpConnectEventArgs args;
-    args.success = true;
-    args.message = "Connected";
-    onConnect.notify(args);
+    if (running_) {
+        if (useThread_) {
+            // Start receive thread (ensure blocking mode for thread unless explicitly set otherwise)
+            setBlocking(true);
+            receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this);
+        } else {
+            // Register update listener
+            events().update.listen(updateListener_, this, &TcpClient::processNetwork);
+        }
+    }
 
     return true;
 }
 
 void TcpClient::connectAsync(const std::string& host, int port) {
-    // Wait for existing connection thread if any
-    if (connectThread_.joinable()) {
-        connectThread_.join();
+    if (useThread_) {
+        // Wait for existing connection thread if any
+        if (connectThread_.joinable()) {
+            connectThread_.join();
+        }
+        connectThread_ = std::thread(&TcpClient::connectThreadFunc, this, host, port);
+    } else {
+        // Non-blocking connect handled in connect() + processNetwork()
+        connect(host, port);
     }
-
-    connectThread_ = std::thread(&TcpClient::connectThreadFunc, this, host, port);
 }
 
 void TcpClient::connectThreadFunc(const std::string& host, int port) {
@@ -192,6 +225,8 @@ void TcpClient::connectThreadFunc(const std::string& host, int port) {
 
 void TcpClient::disconnect() {
     running_ = false;
+    connectPending_ = false;
+    updateListener_.disconnect();
 
 #ifdef _WIN32
     if (socket_ != INVALID_SOCKET) {
@@ -245,7 +280,14 @@ bool TcpClient::send(const void* data, size_t size) {
     while (remaining > 0) {
         int sent = static_cast<int>(::send(socket_, ptr, remaining, 0));
         if (sent == SOCKET_ERROR) {
-            notifyError("Send failed", SOCKET_ERROR_CODE);
+            int err = SOCKET_ERROR_CODE;
+            if (err == WOULD_BLOCK_ERROR) {
+                // In non-blocking mode, we should ideally buffer this, 
+                // but for now we just return false or wait.
+                // Simple implementation: wait a bit or fail.
+                continue; 
+            }
+            notifyError("Send failed", err);
             return false;
         }
         ptr += sent;
@@ -264,18 +306,93 @@ bool TcpClient::send(const std::string& message) {
 }
 
 // =============================================================================
-// Receive thread
+// Update / Receive logic
 // =============================================================================
-void TcpClient::receiveThreadFunc() {
-    std::vector<char> buffer(receiveBufferSize_);
+void TcpClient::processNetwork() {
+    if (!running_) return;
 
-    while (running_) {
+    // Handle pending connection
+    if (connectPending_) {
+#ifdef _WIN32
+        struct fd_set writefds, exceptfds;
+        FD_ZERO(&writefds);
+        FD_ZERO(&exceptfds);
+        FD_SET(socket_, &writefds);
+        FD_SET(socket_, &exceptfds);
+        struct timeval tv = {0, 0};
+        int res = select(0, NULL, &writefds, &exceptfds, &tv);
+        if (res > 0) {
+            if (FD_ISSET(socket_, &exceptfds)) {
+                int err = 0;
+                int len = sizeof(err);
+                getsockopt(socket_, SOL_SOCKET, SO_ERROR, (char*)&err, &len);
+                notifyError("Connection failed", err);
+                disconnect();
+                TcpConnectEventArgs args;
+                args.success = false;
+                args.message = "Connection failed";
+                onConnect.notify(args);
+                return;
+            }
+            if (FD_ISSET(socket_, &writefds)) {
+                connectPending_ = false;
+                connected_ = true;
+                logNotice() << "TCP connected (async) to " << remoteHost_ << ":" << remotePort_;
+                TcpConnectEventArgs args;
+                args.success = true;
+                args.message = "Connected";
+                onConnect.notify(args);
+            }
+        }
+#else
+        struct pollfd pfd;
+        pfd.fd = socket_;
+        pfd.events = POLLOUT;
+        int res = poll(&pfd, 1, 0);
+        if (res > 0) {
+            int err = 0;
+            socklen_t len = sizeof(err);
+            getsockopt(socket_, SOL_SOCKET, SO_ERROR, &err, &len);
+            if (err == 0) {
+                connectPending_ = false;
+                connected_ = true;
+                logNotice() << "TCP connected (async) to " << remoteHost_ << ":" << remotePort_;
+                TcpConnectEventArgs args;
+                args.success = true;
+                args.message = "Connected";
+                onConnect.notify(args);
+            } else {
+                notifyError("Connection failed", err);
+                disconnect();
+                TcpConnectEventArgs args;
+                args.success = false;
+                args.message = "Connection failed";
+                onConnect.notify(args);
+                return;
+            }
+        }
+#endif
+    }
+
+    if (!connected_) return;
+
+    // Receive data
+    static std::vector<char> buffer;
+    if (buffer.size() != receiveBufferSize_) {
+        buffer.resize(receiveBufferSize_);
+    }
+
+    while (connected_) {
         int received = static_cast<int>(recv(socket_, buffer.data(), buffer.size(), 0));
 
         if (received > 0) {
             TcpReceiveEventArgs args;
             args.data.assign(buffer.begin(), buffer.begin() + received);
             onReceive.notify(args);
+            
+            // If using threads, we might block again. 
+            // If not, we should return to let the app run.
+            if (!useThread_) break; 
         } else if (received == 0) {
             // Connection closed
             running_ = false;
@@ -288,11 +405,8 @@ void TcpClient::receiveThreadFunc() {
         } else {
             // Error
             int err = SOCKET_ERROR_CODE;
-#ifdef _WIN32
-            if (err == WSAEWOULDBLOCK) continue;
-#else
-            if (err == EWOULDBLOCK || err == EAGAIN) continue;
-#endif
+            if (err == WOULD_BLOCK_ERROR) break;
+            
             if (running_) {
                 running_ = false;
                 connected_ = false;
@@ -306,11 +420,38 @@ void TcpClient::receiveThreadFunc() {
     }
 }
 
+void TcpClient::receiveThreadFunc() {
+    while (running_) {
+        processNetwork();
+        if (running_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+}
+
 // =============================================================================
 // Settings
 // =============================================================================
 void TcpClient::setReceiveBufferSize(size_t size) {
     receiveBufferSize_ = size;
+}
+
+void TcpClient::setUseThread(bool use) {
+#ifdef __EMSCRIPTEN__
+    if (use) {
+        logWarning() << "Threads are not supported on Emscripten in this build. useThread remains false.";
+        return;
+    }
+#endif
+    if (running_) {
+        logWarning() << "Cannot change threading mode while running. Disconnect first.";
+        return;
+    }
+    useThread_ = use;
+}
+
+bool TcpClient::isUsingThread() const {
+    return useThread_;
 }
 
 void TcpClient::setBlocking(bool blocking) {
