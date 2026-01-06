@@ -27,167 +27,170 @@ windowResized(int width, int height)     // Window resized
 ## Graphics - Color
 
 ```javascript
-clear(float gray)                        // Clear screen
-clear(float r, float g, float b)         // Clear screen
-setColor(float gray)                     // Set drawing color (0.0-1.0)
-setColor(float r, float g, float b)      // Set drawing color (0.0-1.0)
-setColor(float r, float g, float b, float a) // Set drawing color (0.0-1.0)
-setColorHSB(float h, float s, float b)   // Set color from HSB (H: 0-TAU)
-setColorOKLCH(float L, float C, float H) // Set color from OKLCH
-setColorOKLab(float L, float a, float b) // Set color from OKLab
+void clear(float gray)                   // Clear screen
+void clear(float r, float g, float b)    // Clear screen
+void setColor(float gray)                // Set drawing color (0.0-1.0)
+void setColor(float r, float g, float b) // Set drawing color (0.0-1.0)
+void setColor(float r, float g, float b, float a) // Set drawing color (0.0-1.0)
+void setColorHSB(float h, float s, float b) // Set color from HSB (H: 0-TAU)
+void setColorOKLCH(float L, float C, float H) // Set color from OKLCH
+void setColorOKLab(float L, float a, float b) // Set color from OKLab
 ```
 
 ## Graphics - Shapes
 
 ```javascript
-drawRect(float x, float y, float w, float h) // Draw rectangle
-drawCircle(float x, float y, float radius) // Draw circle
-drawEllipse(float x, float y, float w, float h) // Draw ellipse
-drawLine(float x1, float y1, float x2, float y2) // Draw line
-drawTriangle(float x1, float y1, float x2, float y2, float x3, float y3) // Draw triangle
-beginShape()                             // Begin drawing a shape
-vertex(float x, float y)                 // Add a vertex
-vertex(float x, float y, float z)        // Add a vertex
-vertex(const Vec2& v)                    // Add a vertex
-vertex(const Vec3& v)                    // Add a vertex
-endShape(bool close = false)             // End drawing a shape
-drawBitmapString(const string& text, float x, float y) // Draw text
+void drawRect(float x, float y, float w, float h) // Draw rectangle
+void drawCircle(float x, float y, float radius) // Draw circle
+void drawEllipse(float x, float y, float w, float h) // Draw ellipse
+void drawLine(float x1, float y1, float x2, float y2) // Draw line
+void drawTriangle(float x1, float y1, float x2, float y2, float x3, float y3) // Draw triangle
+void beginShape()                        // Begin drawing a shape
+void vertex(float x, float y)            // Add a vertex
+void vertex(float x, float y, float z)   // Add a vertex
+void vertex(const Vec2& v)               // Add a vertex
+void vertex(const Vec3& v)               // Add a vertex
+void endShape(bool close = false)        // End drawing a shape
+void drawBitmapString(const string& text, float x, float y) // Draw text
 ```
 
 ## Graphics - Style
 
 ```javascript
-fill()                                   // Enable fill
-noFill()                                 // Disable fill
-stroke()                                 // Enable stroke
-noStroke()                               // Disable stroke
-setStrokeWeight(float weight)            // Set stroke width
+void fill()                              // Enable fill
+void noFill()                            // Disable fill
+void stroke()                            // Enable stroke
+void noStroke()                          // Disable stroke
+void setStrokeWeight(float weight)       // Set stroke width
 ```
 
 ## Transform
 
 ```javascript
-translate(float x, float y)              // Move origin
-translate(float x, float y, float z)     // Move origin
-rotate(float radians)                    // Rotate by radians
-rotateDeg(float degrees)                 // Rotate by degrees
-scale(float s)                           // Scale
-scale(float sx, float sy)                // Scale
-pushMatrix()                             // Save transform state
-popMatrix()                              // Restore transform state
+void translate(float x, float y)         // Move origin
+void translate(float x, float y, float z) // Move origin
+void rotate(float radians)               // Rotate by radians
+void rotateDeg(float degrees)            // Rotate by degrees
+void scale(float s)                      // Scale
+void scale(float sx, float sy)           // Scale
+void pushMatrix()                        // Save transform state
+void popMatrix()                         // Restore transform state
 ```
 
 ## Window & Input
 
 ```javascript
-getWindowWidth()                         // Get canvas width
-getWindowHeight()                        // Get canvas height
-getMouseX()                              // Get mouse X position
-getMouseY()                              // Get mouse Y position
-isMousePressed()                         // Is mouse button pressed
+int getWindowWidth()                     // Get canvas width
+int getWindowHeight()                    // Get canvas height
+float getMouseX()                        // Get mouse X position
+float getMouseY()                        // Get mouse Y position
+bool isMousePressed()                    // Is mouse button pressed
 ```
 
 ## Time - Frame
 
 ```javascript
-getDeltaTime()                           // Seconds since last frame
-getFrameRate()                           // Current FPS
-getFrameCount()                          // Total frames rendered
+double getDeltaTime()                    // Seconds since last frame
+double getFrameRate()                    // Current FPS
+uint64_t getFrameCount()                 // Total frames rendered
 ```
 
 ## Time - Elapsed
 
 ```javascript
-getElapsedTimef()                        // Elapsed seconds (float)
-getElapsedTimeMillis()                   // Elapsed milliseconds (int64)
-getElapsedTimeMicros()                   // Elapsed microseconds (int64)
-resetElapsedTimeCounter()                // Reset elapsed time
+float getElapsedTimef()                  // Elapsed seconds (float)
+uint64_t getElapsedTimeMillis()          // Elapsed milliseconds (int64)
+uint64_t getElapsedTimeMicros()          // Elapsed microseconds (int64)
+void resetElapsedTimeCounter()           // Reset elapsed time
 ```
 
 ## Time - System
 
 ```javascript
-getSystemTimeMillis()                    // Unix time in milliseconds
-getSystemTimeMicros()                    // Unix time in microseconds
-getTimestampString()                     // Formatted timestamp
-getTimestampString(const string& format) // Formatted timestamp
+uint64_t getSystemTimeMillis()           // Unix time in milliseconds
+uint64_t getSystemTimeMicros()           // Unix time in microseconds
+string getTimestampString()              // Formatted timestamp
+string getTimestampString(const string& format) // Formatted timestamp
 ```
 
 ## Time - Current
 
 ```javascript
-getSeconds()                             // Current seconds (0-59)
-getMinutes()                             // Current minutes (0-59)
-getHours()                               // Current hours (0-23)
-getYear()                                // Current year
-getMonth()                               // Current month (1-12)
-getDay()                                 // Current day (1-31)
-getWeekday()                             // Weekday (0=Sun, 6=Sat)
+int getSeconds()                         // Current seconds (0-59)
+int getMinutes()                         // Current minutes (0-59)
+int getHours()                           // Current hours (0-23)
+int getYear()                            // Current year
+int getMonth()                           // Current month (1-12)
+int getDay()                             // Current day (1-31)
+int getWeekday()                         // Weekday (0=Sun, 6=Sat)
 ```
 
 ## Math - Random & Noise
 
 ```javascript
-random()                                 // Random number
-random(float max)                        // Random number
-random(float min, float max)             // Random number
-noise(float x)                           // Perlin noise
-noise(float x, float y)                  // Perlin noise
-noise(float x, float y, float z)         // Perlin noise
-signedNoise(float x)                     // Perlin noise (-1.0 to 1.0)
-signedNoise(float x, float y)            // Perlin noise (-1.0 to 1.0)
-signedNoise(float x, float y, float z)   // Perlin noise (-1.0 to 1.0)
-signedNoise(float x, float y, float z, float w) // Perlin noise (-1.0 to 1.0)
-fbm(float x, float y, int octaves = 4, float lacunarity = 2.0, float gain = 0.5) // Fractal Brownian Motion noise
-fbm(float x, float y, float z, int octaves = 4, float lacunarity = 2.0, float gain = 0.5) // Fractal Brownian Motion noise
+float random()                           // Random number
+float random(float max)                  // Random number
+float random(float min, float max)       // Random number
+int randomInt(int max)                   // Random integer
+int randomInt(int min, int max)          // Random integer
+void randomSeed(unsigned int seed)       // Set random seed
+float noise(float x)                     // Perlin noise
+float noise(float x, float y)            // Perlin noise
+float noise(float x, float y, float z)   // Perlin noise
+float signedNoise(float x)               // Perlin noise (-1.0 to 1.0)
+float signedNoise(float x, float y)      // Perlin noise (-1.0 to 1.0)
+float signedNoise(float x, float y, float z) // Perlin noise (-1.0 to 1.0)
+float signedNoise(float x, float y, float z, float w) // Perlin noise (-1.0 to 1.0)
+float fbm(float x, float y, int octaves = 4, float lacunarity = 2.0, float gain = 0.5) // Fractal Brownian Motion noise
+float fbm(float x, float y, float z, int octaves = 4, float lacunarity = 2.0, float gain = 0.5) // Fractal Brownian Motion noise
 ```
 
 ## Math - Interpolation
 
 ```javascript
-lerp(float a, float b, float t)          // Linear interpolation
-clamp(float v, float min, float max)     // Clamp value to range
-map(float v, float inMin, float inMax, float outMin, float outMax) // Map value between ranges
+float lerp(float a, float b, float t)    // Linear interpolation
+float clamp(float v, float min, float max) // Clamp value to range
+float map(float v, float inMin, float inMax, float outMin, float outMax) // Map value between ranges
 ```
 
 ## Math - Trigonometry
 
 ```javascript
-sin(float x)                             // Sine
-cos(float x)                             // Cosine
-tan(float x)                             // Tangent
-asin(float x)                            // Arc sine
-acos(float x)                            // Arc cosine
-atan(float x)                            // Arc tangent
-atan2(float y, float x)                  // Arc tangent of y/x
-deg2rad(float degrees)                   // Degrees to radians
-rad2deg(float radians)                   // Radians to degrees
+float sin(float x)                       // Sine
+float cos(float x)                       // Cosine
+float tan(float x)                       // Tangent
+float asin(float x)                      // Arc sine
+float acos(float x)                      // Arc cosine
+float atan(float x)                      // Arc tangent
+float atan2(float y, float x)            // Arc tangent of y/x
+float deg2rad(float degrees)             // Degrees to radians
+float rad2deg(float radians)             // Radians to degrees
 ```
 
 ## Math - General
 
 ```javascript
-abs(float x)                             // Absolute value
-sqrt(float x)                            // Square root
-sq(float x)                              // Square (x*x)
-pow(float x, float y)                    // Power (x^y)
-log(float x)                             // Natural logarithm
-exp(float x)                             // Exponential (e^x)
-min(float a, float b)                    // Minimum
-max(float a, float b)                    // Maximum
-floor(float x)                           // Round down
-ceil(float x)                            // Round up
-round(float x)                           // Round to nearest
-fmod(float x, float y)                   // Floating-point modulo
-sign(float x)                            // Sign (-1, 0, 1)
-fract(float x)                           // Fractional part
+float abs(float x)                       // Absolute value
+float sqrt(float x)                      // Square root
+float sq(float x)                        // Square (x*x)
+float pow(float x, float y)              // Power (x^y)
+float log(float x)                       // Natural logarithm
+float exp(float x)                       // Exponential (e^x)
+float min(float a, float b)              // Minimum
+float max(float a, float b)              // Maximum
+float floor(float x)                     // Round down
+float ceil(float x)                      // Round up
+float round(float x)                     // Round to nearest
+float fmod(float x, float y)             // Floating-point modulo
+float sign(float x)                      // Sign (-1, 0, 1)
+float fract(float x)                     // Fractional part
 ```
 
 ## Math - Geometry
 
 ```javascript
-dist(float x1, float y1, float x2, float y2) // Distance between points
-distSquared(float x1, float y1, float x2, float y2) // Squared distance
+float dist(float x1, float y1, float x2, float y2) // Distance between points
+float distSquared(float x1, float y1, float x2, float y2) // Squared distance
 ```
 
 ## Window & System
@@ -318,42 +321,42 @@ createSphere(float radius, int res = 20) // Create a sphere mesh
 
 ```javascript
 Mesh()                                   // Create a new Mesh
-setMode(int mode)                        // Set primitive mode (MESH_TRIANGLES, etc.)
-addVertex(float x, float y, float z)     // Add a vertex
-addVertex(Vec3 v)                        // Add a vertex
-addColor(float r, float g, float b, float a) // Add a color for the vertex
-addColor(Color c)                        // Add a color for the vertex
-addTexCoord(float u, float v)            // Add a texture coordinate
-addNormal(float x, float y, float z)     // Add a normal vector
-addIndex(int index)                      // Add an index
-addTriangle(int i1, int i2, int i3)      // Add a triangle (3 indices)
-clear()                                  // Clear all data
-draw()                                   // Draw the mesh
+void setMode(int mode)                   // Set primitive mode (MESH_TRIANGLES, etc.)
+void addVertex(float x, float y, float z) // Add a vertex
+void addVertex(Vec3 v)                   // Add a vertex
+void addColor(float r, float g, float b, float a) // Add a color for the vertex
+void addColor(Color c)                   // Add a color for the vertex
+void addTexCoord(float u, float v)       // Add a texture coordinate
+void addNormal(float x, float y, float z) // Add a normal vector
+void addIndex(int index)                 // Add an index
+void addTriangle(int i1, int i2, int i3) // Add a triangle (3 indices)
+void clear()                             // Clear all data
+void draw()                              // Draw the mesh
 ```
 
 ## Types - Polyline
 
 ```javascript
 Polyline()                               // Create a new Polyline (Path)
-addVertex(float x, float y)              // Add a vertex
-lineTo(float x, float y)                 // Add a line segment to point
-bezierTo(float cx1, float cy1, float cx2, float cy2, float x, float y) // Add a cubic bezier curve
-quadBezierTo(float cx, float cy, float x, float y) // Add a quadratic bezier curve
-curveTo(float x, float y)                // Add a Catmull-Rom curve segment
-arc(float x, float y, float rX, float rY, float angleBegin, float angleEnd) // Add an arc
-close()                                  // Close the shape
+void addVertex(float x, float y)         // Add a vertex
+void lineTo(float x, float y)            // Add a line segment to point
+void bezierTo(float cx1, float cy1, float cx2, float cy2, float x, float y) // Add a cubic bezier curve
+void quadBezierTo(float cx, float cy, float x, float y) // Add a quadratic bezier curve
+void curveTo(float x, float y)           // Add a Catmull-Rom curve segment
+void arc(float x, float y, float rX, float rY, float angleBegin, float angleEnd) // Add an arc
+void close()                             // Close the shape
 ```
 
 ## Types - StrokeMesh
 
 ```javascript
 StrokeMesh()                             // Create a new StrokeMesh
-setWidth(float width)                    // Set stroke width
-setColor(Color color)                    // Set stroke color
-setCapType(int type)                     // Set cap type (CAP_BUTT, CAP_ROUND, CAP_SQUARE)
-setJoinType(int type)                    // Set join type (JOIN_MITER, JOIN_ROUND, JOIN_BEVEL)
-addVertex(float x, float y)              // Add a vertex
-update()                                 // Update the internal mesh
+void setWidth(float width)               // Set stroke width
+void setColor(Color color)               // Set stroke color
+void setCapType(int type)                // Set cap type (CAP_BUTT, CAP_ROUND, CAP_SQUARE)
+void setJoinType(int type)               // Set join type (JOIN_MITER, JOIN_ROUND, JOIN_BEVEL)
+void addVertex(float x, float y)         // Add a vertex
+void update()                            // Update the internal mesh
 ```
 
 ## Constants

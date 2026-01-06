@@ -123,6 +123,7 @@ categories:
     name_ja: "グラフィックス - 色"
     functions:
       - name: clear
+        return: "void"
         signatures:
           - params: "float gray"
             params_simple: "gray"
@@ -135,6 +136,7 @@ categories:
         snippet: "clear(${1:0.0})"
 
       - name: setColor
+        return: "void"
         signatures:
           - params: "float gray"
             params_simple: "gray"
@@ -150,6 +152,7 @@ categories:
         snippet: "setColor(${1:1.0}, ${2:1.0}, ${3:1.0})"
 
       - name: setColorHSB
+        return: "void"
         signatures:
           - params: "float h, float s, float b"
             params_simple: "h, s, b"
@@ -159,6 +162,7 @@ categories:
         snippet: "setColorHSB(${1:0.0}, ${2:1.0}, ${3:1.0})"
 
       - name: setColorOKLCH
+        return: "void"
         signatures:
           - params: "float L, float C, float H"
             params_simple: "L, C, H"
@@ -168,6 +172,7 @@ categories:
         snippet: "setColorOKLCH(${1:0.7}, ${2:0.15}, ${3:0.0})"
 
       - name: setColorOKLab
+        return: "void"
         signatures:
           - params: "float L, float a, float b"
             params_simple: "L, a, b"
@@ -184,6 +189,7 @@ categories:
     name_ja: "グラフィックス - 図形"
     functions:
       - name: drawRect
+        return: "void"
         signatures:
           - params: "float x, float y, float w, float h"
             params_simple: "x, y, w, h"
@@ -194,6 +200,7 @@ categories:
         snippet: "drawRect(${1:x}, ${2:y}, ${3:w}, ${4:h})"
 
       - name: drawCircle
+        return: "void"
         signatures:
           - params: "float x, float y, float radius"
             params_simple: "x, y, radius"
@@ -204,6 +211,7 @@ categories:
         snippet: "drawCircle(${1:x}, ${2:y}, ${3:radius})"
 
       - name: drawEllipse
+        return: "void"
         signatures:
           - params: "float x, float y, float w, float h"
             params_simple: "x, y, w, h"
@@ -214,6 +222,7 @@ categories:
         snippet: "drawEllipse(${1:x}, ${2:y}, ${3:w}, ${4:h})"
 
       - name: drawLine
+        return: "void"
         signatures:
           - params: "float x1, float y1, float x2, float y2"
             params_simple: "x1, y1, x2, y2"
@@ -224,6 +233,7 @@ categories:
         snippet: "drawLine(${1:x1}, ${2:y1}, ${3:x2}, ${4:y2})"
 
       - name: drawTriangle
+        return: "void"
         signatures:
           - params: "float x1, float y1, float x2, float y2, float x3, float y3"
             params_simple: "x1, y1, x2, y2, x3, y3"
@@ -234,6 +244,7 @@ categories:
         snippet: "drawTriangle(${1:x1}, ${2:y1}, ${3:x2}, ${4:y2}, ${5:x3}, ${6:y3})"
 
       - name: beginShape
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -244,6 +255,7 @@ categories:
         snippet: "beginShape()"
 
       - name: vertex
+        return: "void"
         signatures:
           - params: "float x, float y"
             params_simple: "x, y"
@@ -260,6 +272,7 @@ categories:
         snippet: "vertex(${1:x}, ${2:y})"
 
       - name: endShape
+        return: "void"
         signatures:
           - params: "bool close = false"
             params_simple: "close"
@@ -270,6 +283,7 @@ categories:
         snippet: "endShape()"
 
       - name: drawBitmapString
+        return: "void"
         signatures:
           - params: "const string& text, float x, float y"
             params_simple: "text, x, y"
@@ -287,6 +301,7 @@ categories:
     name_ja: "グラフィックス - スタイル"
     functions:
       - name: fill
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -297,6 +312,7 @@ categories:
         snippet: "fill()"
 
       - name: noFill
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -307,6 +323,7 @@ categories:
         snippet: "noFill()"
 
       - name: stroke
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -316,6 +333,7 @@ categories:
         snippet: "stroke()"
 
       - name: noStroke
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -325,6 +343,7 @@ categories:
         snippet: "noStroke()"
 
       - name: setStrokeWeight
+        return: "void"
         signatures:
           - params: "float weight"
             params_simple: "weight"
@@ -342,6 +361,7 @@ categories:
     name_ja: "変換"
     functions:
       - name: translate
+        return: "void"
         signatures:
           - params: "float x, float y"
             params_simple: "x, y"
@@ -354,6 +374,7 @@ categories:
         snippet: "translate(${1:x}, ${2:y})"
 
       - name: rotate
+        return: "void"
         signatures:
           - params: "float radians"
             params_simple: "radians"
@@ -365,6 +386,7 @@ categories:
         snippet: "rotate(${1:radians})"
 
       - name: rotateDeg
+        return: "void"
         signatures:
           - params: "float degrees"
             params_simple: "degrees"
@@ -375,6 +397,7 @@ categories:
         snippet: "rotateDeg(${1:degrees})"
 
       - name: scale
+        return: "void"
         signatures:
           - params: "float s"
             params_simple: "s"
@@ -387,6 +410,7 @@ categories:
         snippet: "scale(${1:s})"
 
       - name: pushMatrix
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -397,6 +421,7 @@ categories:
         snippet: "pushMatrix()"
 
       - name: popMatrix
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -414,6 +439,7 @@ categories:
     name_ja: "ウィンドウと入力"
     functions:
       - name: getWindowWidth
+        return: "int"
         signatures:
           - params: ""
             params_simple: ""
@@ -424,6 +450,7 @@ categories:
         snippet: "getWindowWidth()"
 
       - name: getWindowHeight
+        return: "int"
         signatures:
           - params: ""
             params_simple: ""
@@ -434,6 +461,7 @@ categories:
         snippet: "getWindowHeight()"
 
       - name: getMouseX
+        return: "float"
         signatures:
           - params: ""
             params_simple: ""
@@ -444,6 +472,7 @@ categories:
         snippet: "getMouseX()"
 
       - name: getMouseY
+        return: "float"
         signatures:
           - params: ""
             params_simple: ""
@@ -454,6 +483,7 @@ categories:
         snippet: "getMouseY()"
 
       - name: isMousePressed
+        return: "bool"
         signatures:
           - params: ""
             params_simple: ""
@@ -471,6 +501,7 @@ categories:
     name_ja: "時間 - フレーム"
     functions:
       - name: getDeltaTime
+        return: "double"
         signatures:
           - params: ""
             params_simple: ""
@@ -481,6 +512,7 @@ categories:
         snippet: "getDeltaTime()"
 
       - name: getFrameRate
+        return: "double"
         signatures:
           - params: ""
             params_simple: ""
@@ -491,6 +523,7 @@ categories:
         snippet: "getFrameRate()"
 
       - name: getFrameCount
+        return: "uint64_t"
         signatures:
           - params: ""
             params_simple: ""
@@ -508,6 +541,7 @@ categories:
     name_ja: "時間 - 経過"
     functions:
       - name: getElapsedTimef
+        return: "float"
         signatures:
           - params: ""
             params_simple: ""
@@ -518,6 +552,7 @@ categories:
         snippet: "getElapsedTimef()"
 
       - name: getElapsedTimeMillis
+        return: "uint64_t"
         signatures:
           - params: ""
             params_simple: ""
@@ -528,6 +563,7 @@ categories:
         snippet: "getElapsedTimeMillis()"
 
       - name: getElapsedTimeMicros
+        return: "uint64_t"
         signatures:
           - params: ""
             params_simple: ""
@@ -538,6 +574,7 @@ categories:
         snippet: "getElapsedTimeMicros()"
 
       - name: resetElapsedTimeCounter
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -555,6 +592,7 @@ categories:
     name_ja: "時間 - システム"
     functions:
       - name: getSystemTimeMillis
+        return: "uint64_t"
         signatures:
           - params: ""
             params_simple: ""
@@ -565,6 +603,7 @@ categories:
         snippet: "getSystemTimeMillis()"
 
       - name: getSystemTimeMicros
+        return: "uint64_t"
         signatures:
           - params: ""
             params_simple: ""
@@ -574,6 +613,7 @@ categories:
         snippet: "getSystemTimeMicros()"
 
       - name: getTimestampString
+        return: "string"
         signatures:
           - params: ""
             params_simple: ""
@@ -593,6 +633,7 @@ categories:
     name_ja: "時間 - 現在"
     functions:
       - name: getSeconds
+        return: "int"
         signatures:
           - params: ""
             params_simple: ""
@@ -603,6 +644,7 @@ categories:
         snippet: "getSeconds()"
 
       - name: getMinutes
+        return: "int"
         signatures:
           - params: ""
             params_simple: ""
@@ -613,6 +655,7 @@ categories:
         snippet: "getMinutes()"
 
       - name: getHours
+        return: "int"
         signatures:
           - params: ""
             params_simple: ""
@@ -623,6 +666,7 @@ categories:
         snippet: "getHours()"
 
       - name: getYear
+        return: "int"
         signatures:
           - params: ""
             params_simple: ""
@@ -633,6 +677,7 @@ categories:
         snippet: "getYear()"
 
       - name: getMonth
+        return: "int"
         signatures:
           - params: ""
             params_simple: ""
@@ -643,6 +688,7 @@ categories:
         snippet: "getMonth()"
 
       - name: getDay
+        return: "int"
         signatures:
           - params: ""
             params_simple: ""
@@ -653,6 +699,7 @@ categories:
         snippet: "getDay()"
 
       - name: getWeekday
+        return: "int"
         signatures:
           - params: ""
             params_simple: ""
@@ -670,6 +717,7 @@ categories:
     name_ja: "数学 - 乱数とノイズ"
     functions:
       - name: random
+        return: "float"
         signatures:
           - params: ""
             params_simple: ""
@@ -683,7 +731,31 @@ categories:
         sketch: true
         snippet: "random()"
 
+      - name: randomInt
+        return: "int"
+        signatures:
+          - params: "int max"
+            params_simple: "max"
+          - params: "int min, int max"
+            params_simple: "min, max"
+        description: "Random integer"
+        description_ja: "整数の乱数"
+        sketch: true
+        snippet: "randomInt(${1:max})"
+
+      - name: randomSeed
+        return: "void"
+        signatures:
+          - params: "unsigned int seed"
+            params_simple: "seed"
+        description: "Set random seed"
+        description_ja: "乱数シードを設定"
+        of_equivalent: "ofSeedRandom"
+        sketch: true
+        snippet: "randomSeed(${1:seed})"
+
       - name: noise
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -698,6 +770,7 @@ categories:
         snippet: "noise(${1:x})"
 
       - name: signedNoise
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -714,6 +787,7 @@ categories:
         snippet: "signedNoise(${1:x})"
 
       - name: fbm
+        return: "float"
         signatures:
           - params: "float x, float y, int octaves = 4, float lacunarity = 2.0, float gain = 0.5"
             params_simple: "x, y, octaves, lacunarity, gain"
@@ -732,6 +806,7 @@ categories:
     name_ja: "数学 - 補間"
     functions:
       - name: lerp
+        return: "float"
         signatures:
           - params: "float a, float b, float t"
             params_simple: "a, b, t"
@@ -742,6 +817,7 @@ categories:
         snippet: "lerp(${1:a}, ${2:b}, ${3:t})"
 
       - name: clamp
+        return: "float"
         signatures:
           - params: "float v, float min, float max"
             params_simple: "v, min, max"
@@ -752,6 +828,7 @@ categories:
         snippet: "clamp(${1:v}, ${2:min}, ${3:max})"
 
       - name: map
+        return: "float"
         signatures:
           - params: "float v, float inMin, float inMax, float outMin, float outMax"
             params_simple: "v, inMin, inMax, outMin, outMax"
@@ -769,6 +846,7 @@ categories:
     name_ja: "数学 - 三角関数"
     functions:
       - name: sin
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -778,6 +856,7 @@ categories:
         snippet: "sin(${1:x})"
 
       - name: cos
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -787,6 +866,7 @@ categories:
         snippet: "cos(${1:x})"
 
       - name: tan
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -796,6 +876,7 @@ categories:
         snippet: "tan(${1:x})"
 
       - name: asin
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -805,6 +886,7 @@ categories:
         snippet: "asin(${1:x})"
 
       - name: acos
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -814,6 +896,7 @@ categories:
         snippet: "acos(${1:x})"
 
       - name: atan
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -823,6 +906,7 @@ categories:
         snippet: "atan(${1:x})"
 
       - name: atan2
+        return: "float"
         signatures:
           - params: "float y, float x"
             params_simple: "y, x"
@@ -832,6 +916,7 @@ categories:
         snippet: "atan2(${1:y}, ${2:x})"
 
       - name: deg2rad
+        return: "float"
         signatures:
           - params: "float degrees"
             params_simple: "degrees"
@@ -842,6 +927,7 @@ categories:
         snippet: "deg2rad(${1:degrees})"
 
       - name: rad2deg
+        return: "float"
         signatures:
           - params: "float radians"
             params_simple: "radians"
@@ -859,6 +945,7 @@ categories:
     name_ja: "数学 - 一般"
     functions:
       - name: abs
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -868,6 +955,7 @@ categories:
         snippet: "abs(${1:x})"
 
       - name: sqrt
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -877,6 +965,7 @@ categories:
         snippet: "sqrt(${1:x})"
 
       - name: sq
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -886,6 +975,7 @@ categories:
         snippet: "sq(${1:x})"
 
       - name: pow
+        return: "float"
         signatures:
           - params: "float x, float y"
             params_simple: "x, y"
@@ -895,6 +985,7 @@ categories:
         snippet: "pow(${1:x}, ${2:y})"
 
       - name: log
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -904,6 +995,7 @@ categories:
         snippet: "log(${1:x})"
 
       - name: exp
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -913,6 +1005,7 @@ categories:
         snippet: "exp(${1:x})"
 
       - name: min
+        return: "float"
         signatures:
           - params: "float a, float b"
             params_simple: "a, b"
@@ -922,6 +1015,7 @@ categories:
         snippet: "min(${1:a}, ${2:b})"
 
       - name: max
+        return: "float"
         signatures:
           - params: "float a, float b"
             params_simple: "a, b"
@@ -931,6 +1025,7 @@ categories:
         snippet: "max(${1:a}, ${2:b})"
 
       - name: floor
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -940,6 +1035,7 @@ categories:
         snippet: "floor(${1:x})"
 
       - name: ceil
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -949,6 +1045,7 @@ categories:
         snippet: "ceil(${1:x})"
 
       - name: round
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -958,6 +1055,7 @@ categories:
         snippet: "round(${1:x})"
 
       - name: fmod
+        return: "float"
         signatures:
           - params: "float x, float y"
             params_simple: "x, y"
@@ -967,6 +1065,7 @@ categories:
         snippet: "fmod(${1:x}, ${2:y})"
 
       - name: sign
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -977,6 +1076,7 @@ categories:
         snippet: "sign(${1:x})"
 
       - name: fract
+        return: "float"
         signatures:
           - params: "float x"
             params_simple: "x"
@@ -993,6 +1093,7 @@ categories:
     name_ja: "数学 - 幾何"
     functions:
       - name: dist
+        return: "float"
         signatures:
           - params: "float x1, float y1, float x2, float y2"
             params_simple: "x1, y1, x2, y2"
@@ -1003,6 +1104,7 @@ categories:
         snippet: "dist(${1:x1}, ${2:y1}, ${3:x2}, ${4:y2})"
 
       - name: distSquared
+        return: "float"
         signatures:
           - params: "float x1, float y1, float x2, float y2"
             params_simple: "x1, y1, x2, y2"
@@ -1561,6 +1663,7 @@ categories:
         sketch: true
 
       - name: drawTexture
+        return: "void"
         signatures:
           - params: "const Texture& tex, float x, float y"
             params_simple: "tex, x, y"
@@ -1578,6 +1681,7 @@ categories:
     name_ja: "グラフィックス - テクスチャとGPU"
     functions:
       - name: Texture
+        return: ""
         signatures:
           - params: ""
             params_simple: ""
@@ -1586,6 +1690,7 @@ categories:
         sketch: false
 
       - name: load
+        return: "bool"
         signatures:
           - params: "const string& path"
             params_simple: "path"
@@ -1594,6 +1699,7 @@ categories:
         sketch: false
 
       - name: loadFromPixels
+        return: "bool"
         signatures:
           - params: "const Pixels& pixels"
             params_simple: "pixels"
@@ -1602,6 +1708,7 @@ categories:
         sketch: false
 
       - name: bind
+        return: "void"
         signatures:
           - params: "int slot = 0"
             params_simple: "slot"
@@ -1610,6 +1717,7 @@ categories:
         sketch: false
 
       - name: unbind
+        return: "void"
         signatures:
           - params: "int slot = 0"
             params_simple: "slot"
@@ -1618,6 +1726,7 @@ categories:
         sketch: false
 
       - name: getWidth
+        return: "int"
         signatures:
           - params: ""
             params_simple: ""
@@ -1626,6 +1735,7 @@ categories:
         sketch: false
 
       - name: getHeight
+        return: "int"
         signatures:
           - params: ""
             params_simple: ""
@@ -1638,6 +1748,7 @@ categories:
     name_ja: "グラフィックス - FBO"
     functions:
       - name: Fbo
+        return: ""
         signatures:
           - params: ""
             params_simple: ""
@@ -1646,6 +1757,7 @@ categories:
         sketch: false
 
       - name: allocate
+        return: "void"
         signatures:
           - params: "int w, int h"
             params_simple: "w, h"
@@ -1654,6 +1766,7 @@ categories:
         sketch: false
 
       - name: begin
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -1662,6 +1775,7 @@ categories:
         sketch: false
 
       - name: end
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -1670,6 +1784,7 @@ categories:
         sketch: false
 
       - name: getTexture
+        return: "Texture&"
         signatures:
           - params: ""
             params_simple: ""
@@ -1678,6 +1793,7 @@ categories:
         sketch: false
 
       - name: readToPixels
+        return: "void"
         signatures:
           - params: "Pixels& pixels"
             params_simple: "pixels"
@@ -1690,6 +1806,7 @@ categories:
     name_ja: "グラフィックス - シェーダー"
     functions:
       - name: Shader
+        return: ""
         signatures:
           - params: ""
             params_simple: ""
@@ -1698,6 +1815,7 @@ categories:
         sketch: false
 
       - name: load
+        return: "bool"
         signatures:
           - params: "const string& vertPath, const string& fragPath"
             params_simple: "vert, frag"
@@ -1706,6 +1824,7 @@ categories:
         sketch: false
 
       - name: begin
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -1714,6 +1833,7 @@ categories:
         sketch: false
 
       - name: end
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -1722,6 +1842,7 @@ categories:
         sketch: false
 
       - name: setUniform
+        return: "void"
         signatures:
           - params: "const string& name, float value"
             params_simple: "name, val"
@@ -1795,6 +1916,7 @@ categories:
     name_ja: "型 - Mesh"
     functions:
       - name: Mesh
+        return: ""
         signatures:
           - params: ""
             params_simple: ""
@@ -1804,6 +1926,7 @@ categories:
         snippet: "Mesh()"
 
       - name: setMode
+        return: "void"
         signatures:
           - params: "int mode"
             params_simple: "mode"
@@ -1813,6 +1936,7 @@ categories:
         snippet: "setMode(${1:MESH_TRIANGLES})"
 
       - name: addVertex
+        return: "void"
         signatures:
           - params: "float x, float y, float z"
             params_simple: "x, y, z"
@@ -1824,6 +1948,7 @@ categories:
         snippet: "addVertex(${1:x}, ${2:y}, ${3:0})"
 
       - name: addColor
+        return: "void"
         signatures:
           - params: "float r, float g, float b, float a"
             params_simple: "r, g, b, a"
@@ -1835,6 +1960,7 @@ categories:
         snippet: "addColor(${1:1}, ${2:1}, ${3:1}, ${4:1})"
 
       - name: addTexCoord
+        return: "void"
         signatures:
           - params: "float u, float v"
             params_simple: "u, v"
@@ -1844,6 +1970,7 @@ categories:
         snippet: "addTexCoord(${1:u}, ${2:v})"
 
       - name: addNormal
+        return: "void"
         signatures:
           - params: "float x, float y, float z"
             params_simple: "x, y, z"
@@ -1853,6 +1980,7 @@ categories:
         snippet: "addNormal(${1:x}, ${2:y}, ${3:z})"
 
       - name: addIndex
+        return: "void"
         signatures:
           - params: "int index"
             params_simple: "index"
@@ -1862,6 +1990,7 @@ categories:
         snippet: "addIndex(${1:index})"
 
       - name: addTriangle
+        return: "void"
         signatures:
           - params: "int i1, int i2, int i3"
             params_simple: "i1, i2, i3"
@@ -1871,6 +2000,7 @@ categories:
         snippet: "addTriangle(${1:i1}, ${2:i2}, ${3:i3})"
 
       - name: clear
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -1880,6 +2010,7 @@ categories:
         snippet: "clear()"
 
       - name: draw
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -1896,6 +2027,7 @@ categories:
     name_ja: "型 - Polyline"
     functions:
       - name: Polyline
+        return: ""
         signatures:
           - params: ""
             params_simple: ""
@@ -1905,6 +2037,7 @@ categories:
         snippet: "Polyline()"
 
       - name: addVertex
+        return: "void"
         signatures:
           - params: "float x, float y"
             params_simple: "x, y"
@@ -1914,6 +2047,7 @@ categories:
         snippet: "addVertex(${1:x}, ${2:y})"
 
       - name: lineTo
+        return: "void"
         signatures:
           - params: "float x, float y"
             params_simple: "x, y"
@@ -1923,6 +2057,7 @@ categories:
         snippet: "lineTo(${1:x}, ${2:y})"
 
       - name: bezierTo
+        return: "void"
         signatures:
           - params: "float cx1, float cy1, float cx2, float cy2, float x, float y"
             params_simple: "cx1, cy1, cx2, cy2, x, y"
@@ -1932,6 +2067,7 @@ categories:
         snippet: "bezierTo(${1:cx1}, ${2:cy1}, ${3:cx2}, ${4:cy2}, ${5:x}, ${6:y})"
 
       - name: quadBezierTo
+        return: "void"
         signatures:
           - params: "float cx, float cy, float x, float y"
             params_simple: "cx, cy, x, y"
@@ -1941,6 +2077,7 @@ categories:
         snippet: "quadBezierTo(${1:cx}, ${2:cy}, ${3:x}, ${4:y})"
 
       - name: curveTo
+        return: "void"
         signatures:
           - params: "float x, float y"
             params_simple: "x, y"
@@ -1950,6 +2087,7 @@ categories:
         snippet: "curveTo(${1:x}, ${2:y})"
 
       - name: arc
+        return: "void"
         signatures:
           - params: "float x, float y, float rX, float rY, float angleBegin, float angleEnd"
             params_simple: "x, y, rX, rY, start, end"
@@ -1959,6 +2097,7 @@ categories:
         snippet: "arc(${1:x}, ${2:y}, ${3:rX}, ${4:rY}, ${5:0}, ${6:360})"
 
       - name: close
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""
@@ -1975,6 +2114,7 @@ categories:
     name_ja: "型 - StrokeMesh"
     functions:
       - name: StrokeMesh
+        return: ""
         signatures:
           - params: ""
             params_simple: ""
@@ -1984,6 +2124,7 @@ categories:
         snippet: "StrokeMesh()"
 
       - name: setWidth
+        return: "void"
         signatures:
           - params: "float width"
             params_simple: "width"
@@ -1993,6 +2134,7 @@ categories:
         snippet: "setWidth(${1:5.0})"
 
       - name: setColor
+        return: "void"
         signatures:
           - params: "Color color"
             params_simple: "color"
@@ -2002,6 +2144,7 @@ categories:
         snippet: "setColor(${1:color})"
 
       - name: setCapType
+        return: "void"
         signatures:
           - params: "int type"
             params_simple: "type"
@@ -2011,6 +2154,7 @@ categories:
         snippet: "setCapType(${1:CAP_ROUND})"
 
       - name: setJoinType
+        return: "void"
         signatures:
           - params: "int type"
             params_simple: "type"
@@ -2020,6 +2164,7 @@ categories:
         snippet: "setJoinType(${1:JOIN_ROUND})"
 
       - name: addVertex
+        return: "void"
         signatures:
           - params: "float x, float y"
             params_simple: "x, y"
@@ -2029,6 +2174,7 @@ categories:
         snippet: "addVertex(${1:x}, ${2:y})"
 
       - name: update
+        return: "void"
         signatures:
           - params: ""
             params_simple: ""

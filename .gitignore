@@ -102,6 +102,7 @@ addons/*
 !addons/tcxBox2d
 !addons/tcxOsc
 !addons/tcxTls
+!addons/tcxWebSocket
 
 # =============================================================================
 # Project Generator

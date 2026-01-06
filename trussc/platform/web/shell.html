@@ -77,6 +77,11 @@
             canvasElement.focus();
         });
 
+        // Auto focus on load
+        window.addEventListener('load', function() {
+            canvasElement.focus();
+        });
+
         var Module = {
             canvas: canvasElement,
             print: function(text) {

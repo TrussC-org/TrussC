@@ -28,6 +28,11 @@ void tcApp::setup() {
     });
 
     // Connect to a public echo server
+    // For Wasm, we must use wss:// because the page will likely be HTTPS or localhost
+    // And non-secure ws:// is often blocked by browsers if origin is secure.
+    // Also, direct TCP sockets are not available in Wasm, so TcpClient will likely fail
+    // unless compiled with Emscripten's WebSocket/TCP emulation or if we use WebSocket directly.
+    // But tcxWebSocket wraps TcpClient, so it should work if TcpClient works in Wasm (via emulation).
     ws_.connect("wss://echo.websocket.org");
 }
 
@@ -65,3 +70,10 @@ void tcApp::draw() {
 void tcApp::keyPressed(int key) {
     // Sokol keycode for 'S' is 83. ASCII 's' is 115.
     if (key == 's' || key == 'S' || key == 83) {
+        if (ws_.isConnected()) {
+            string msg = "Test message " + to_string(getFrameCount());
+            ws_.send(msg);
+            messages_.push_back("Sent: " + msg);
+        }
+    }
+}
