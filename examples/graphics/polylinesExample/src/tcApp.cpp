@@ -91,7 +91,6 @@ void tcApp::draw() {
 void tcApp::drawCurveDemo() {
     // Draw with stroke only (Polyline fill supports only convex shapes)
     noFill();
-    stroke();
 
     // Line
     setColor(colors::red);
@@ -130,7 +129,6 @@ void tcApp::drawCurveDemo() {
     drawBitmapString("closed star", getWindowWidth() / 2.0f - 40, getWindowHeight() / 2.0f + 100);
 
     // Reset to default
-    stroke();
     fill();
 }
 
@@ -189,7 +187,6 @@ void tcApp::drawAnimatedCurve() {
 
     // Gradient-like drawing
     noFill();
-    stroke();
     for (int i = 0; i < 5; i++) {
         float scale = 1.0f - i * 0.15f;
         setColorHSB(time + i * 0.1f, 0.8f, 0.9f);

@@ -67,11 +67,10 @@ void CircleBody::drawFill() {
     if (!body_) return;
 
     tc::fill();
-    tc::noStroke();
     tc::drawCircle(0, 0, radius_);
 
     // Draw line to show rotation
-    tc::stroke();
+    tc::noFill();
     tc::setColor(0.0f);
     tc::drawLine(0, 0, radius_, 0);
 }

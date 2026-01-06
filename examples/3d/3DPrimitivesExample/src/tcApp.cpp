@@ -1,4 +1,5 @@
 #include "tcApp.h"
+#include "TrussC.h"
 
 using namespace std;
 
@@ -13,13 +14,14 @@ void tcApp::setup() {
     logNotice("tcApp") << "  - l: Lighting ON/OFF";
     logNotice("tcApp") << "  - ESC: Exit";
 
-    // Light settings (directional light from diagonal above)
-    light_.setDirectional(Vec3(-1, -1, -1));
+    // Light settings (directional light from diagonal above-left)
+    // Y+ is down in screen coords, so Y=+1 means "from above"
+    light_.setDirectional(Vec3(-1, 1, -1));
     light_.setAmbient(0.2f, 0.2f, 0.25f);
     light_.setDiffuse(1.0f, 1.0f, 0.95f);
     light_.setSpecular(1.0f, 1.0f, 1.0f);
 
-    // Material for each primitive
+    // Material for each primitive (order matches primitives array)
     materials_[0] = Material::plastic(Color(0.8f, 0.2f, 0.2f));  // Plane: Red
     materials_[1] = Material::gold();                                  // Box: Gold
     materials_[2] = Material::plastic(Color(0.2f, 0.6f, 0.9f));  // Sphere: Blue
@@ -76,8 +78,8 @@ void tcApp::update() {
 void tcApp::draw() {
     clear(0.1f, 0.1f, 0.12f);
 
-    // Enable 3D drawing mode (perspective + depth test)
-    enable3DPerspective(deg2rad(45.0f), 0.1f, 100.0f);
+    // Now using default perspective from setupScreenFov (45° FOV)
+    // Camera is at (screenW/2, screenH/2, dist) looking at Z=0
 
     float t = getElapsedTime();
 
@@ -91,25 +93,34 @@ void tcApp::draw() {
     struct PrimitiveInfo {
         Mesh* mesh;
         const char* name;
-        float x, y;  // Position in 3D space (-1 to 1 range)
+        float x, y;  // Position offset from center
     };
 
-    // Arrange in 3x2 grid (perspective space)
+    // Grid spacing based on window size (with padding for visibility)
+    float baseSize = tc::min(getWindowWidth(), getWindowHeight());
+    float spacingX = baseSize * 0.4f;   // Horizontal spacing
+    float spacingY = baseSize * 0.4f;   // Vertical spacing
+
+    // Arrange in 3x2 grid (screen space, centered)
+    // Y+ is down in screen coordinates, so negative Y offset = top row
     PrimitiveInfo primitives[] = {
-        { &plane,     "Plane",      -3.0f, 1.5f },
-        { &box,       "Box",         0.0f, 1.5f },
-        { &sphere,    "Sphere",      3.0f, 1.5f },
-        { &icoSphere, "IcoSphere",  -3.0f, -1.5f },
-        { &cylinder,  "Cylinder",    0.0f, -1.5f },
-        { &cone,      "Cone",        3.0f, -1.5f },
+        { &plane,     "Plane",      -spacingX, -spacingY * 0.5f },
+        { &box,       "Box",         0.0f,     -spacingY * 0.5f },
+        { &sphere,    "Sphere",      spacingX, -spacingY * 0.5f },
+        { &icoSphere, "IcoSphere",  -spacingX,  spacingY * 0.5f },
+        { &cylinder,  "Cylinder",    0.0f,      spacingY * 0.5f },
+        { &cone,      "Cone",        spacingX,  spacingY * 0.5f },
     };
+
+    // Center of screen
+    float cx = getWindowWidth() / 2.0f;
+    float cy = getWindowHeight() / 2.0f;
 
     // Lighting settings
     if (bLighting) {
         enableLighting();
         addLight(light_);
-        // Set camera position (for specular calculation)
-        setCameraPosition(0, 0, 0);
+        setCameraPosition(cx, cy, 1000);  // Approximate camera position
     }
 
     // Draw each primitive
@@ -117,23 +128,19 @@ void tcApp::draw() {
         auto& p = primitives[i];
 
         pushMatrix();
-        translate(p.x, p.y, -8.0f);
+        // Position at screen center + offset, Z=0
+        translate(cx + p.x, cy + p.y, 0.0f);
 
         // 3D rotation (rotate on X and Y axes like oF)
         rotateY(spinX);
         rotateX(spinY);
 
-        // Scale down (for perspective)
-        scale(0.01f, 0.01f, 0.01f);
-
         // Fill
         if (bFill) {
             if (bLighting) {
-                // When using lighting, set material
                 setMaterial(materials_[i]);
-                setColor(1.0f, 1.0f, 1.0f);  // Draw white (material determines color)
+                setColor(1.0f, 1.0f, 1.0f);
             } else {
-                // Without lighting, use traditional color
                 float hue = (float)i / 6.0f * TAU;
                 setColor(
                     0.5f + 0.4f * cos(hue),
@@ -144,7 +151,7 @@ void tcApp::draw() {
             p.mesh->draw();
         }
 
-        // Wireframe (draw without lighting)
+        // Wireframe
         if (bWireframe) {
             disableLighting();
             setColor(0.0f, 0.0f, 0.0f);
@@ -162,10 +169,8 @@ void tcApp::draw() {
     disableLighting();
     clearLights();
 
-    // Return to 2D drawing
-    disable3D();
-
     // Controls description (top-left)
+    // No need to call setupScreenOrtho() - 2D drawing works in perspective mode
     setColor(1.0f, 1.0f, 1.0f);
     float y = 20;
     drawBitmapString("3D Primitives Demo", 10, y); y += 16;

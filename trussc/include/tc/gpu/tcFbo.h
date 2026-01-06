@@ -343,12 +343,12 @@ private:
         // Switch to FBO's sokol_gl context
         sgl_set_context(context_);
         sgl_defaults();
-        // Use FBO pipeline (alpha blend enabled)
+
+        // Setup screen projection using defaultScreenFov (like main screen)
+        internal::setupScreenFovWithSize(internal::defaultScreenFov, (float)width_, (float)height_, 0.0f, 0.0f);
+
+        // Use FBO pipeline (alpha blend enabled) - override after setupScreenFov
         sgl_load_pipeline(pipelineBlend_);
-        sgl_matrix_mode_projection();
-        sgl_ortho(0.0f, (float)width_, (float)height_, 0.0f, -10000.0f, 10000.0f);
-        sgl_matrix_mode_modelview();
-        sgl_load_identity();
 
         active_ = true;
         internal::inFboPass = true;

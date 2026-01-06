@@ -155,9 +155,17 @@ void ProjectGenerator::cleanBuildDirectories(const string& path) {
     // Remove existing build directories
     for (const auto& dir : dirsToClean) {
         fs::path buildPath = fs::path(path) / dir;
+        log("Checking: " + buildPath.string());
         if (fs::exists(buildPath)) {
             log("Cleaning " + dir + "...");
-            fs::remove_all(buildPath);
+            try {
+                fs::remove_all(buildPath);
+                log("Removed " + dir);
+            } catch (const exception& e) {
+                log("Failed to remove " + dir + ": " + e.what());
+            }
+        } else {
+            log("Not found: " + dir);
         }
     }
 }

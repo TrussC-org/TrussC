@@ -20,11 +20,9 @@ public:
     void draw() override {
         // Display container boundary (local coords 0,0 is center)
         noFill();
-        stroke();
         setColor(0.5f, 0.5f, 0.5f);
         drawRect(-size/2, -size/2, size, size);
         fill();
-        noStroke();
 
         // Center point
         setColor(1.0f, 1.0f, 0.0f);

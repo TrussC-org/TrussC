@@ -24,7 +24,6 @@ public:
         // Background
         setColor(bgColor);
         fill();
-        noStroke();
         drawRect(0, 0, getWidth(), getHeight());
 
         // Label
@@ -37,7 +36,6 @@ public:
     // Separate method to draw border after children
     void drawBorder() {
         noFill();
-        stroke();
         setColor(borderColor);
         drawRect(0, 0, getWidth(), getHeight());
     }
@@ -73,7 +71,6 @@ public:
     void draw() override {
         setColor(color);
         fill();
-        noStroke();
         drawCircle(0, 0, radius);
 
         // Center point

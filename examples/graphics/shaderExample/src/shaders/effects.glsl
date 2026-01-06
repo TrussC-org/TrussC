@@ -111,8 +111,15 @@ out vec4 frag_color;
 
 void main() {
     vec2 mouseUV = mouse.xy / resolution.xy;
+    float aspect = resolution.x / resolution.y;
 
-    float dist = distance(uv, mouseUV);
+    // Adjust for aspect ratio
+    vec2 p = uv;
+    vec2 m = mouseUV;
+    p.x *= aspect;
+    m.x *= aspect;
+
+    float dist = distance(p, m);
     float glow = 0.05 / (dist + 0.01);
     glow = clamp(glow, 0.0, 1.0);
 

@@ -136,6 +136,23 @@ namespace internal {
     inline bool pipeline3dInitialized = false;
     inline bool pixelPerfectMode = false;
 
+    // Default screen FOV (45 = perspective ~28mm equivalent, 0 = ortho)
+    inline float defaultScreenFov = 45.0f;
+
+    // Near/far clip overrides (0 = auto-calculate based on camera distance)
+    inline float nearClipOverride = 0.0f;
+    inline float farClipOverride = 0.0f;
+
+    // Current screen setup state (for 2D drawing in perspective mode)
+    inline float currentScreenFov = 45.0f;
+    inline float currentViewW = 0.0f;
+    inline float currentViewH = 0.0f;
+    inline float currentCameraDist = 0.0f;  // Distance from camera to Z=0 plane
+
+    // Forward declaration of setupScreenFov functions (defined later, after TAU is available)
+    inline void setupScreenFovWithSize(float fovDeg, float viewW, float viewH, float nearDist = 0.0f, float farDist = 0.0f);
+    inline void setupScreenFov(float fovDeg, float nearDist = 0.0f, float farDist = 0.0f);
+
     // ImGui integration
     inline bool imguiEnabled = false;
 
@@ -423,29 +440,13 @@ inline int getFramebufferHeight() {
 }
 
 // Call at frame start (before clear)
+// Sets up the default projection based on internal::defaultScreenFov
 inline void beginFrame() {
     // Skip in headless mode (no graphics context)
     if (headless::isActive()) return;
 
-    // Set default viewport
-    sgl_defaults();
-    sgl_matrix_mode_projection();
-
-    if (internal::pixelPerfectMode) {
-        // Pixel perfect: coordinate system = framebuffer size
-        // near/far: specified as positive values (OpenGL convention)
-        // Range that includes Z=0: specify symmetric range
-        sgl_ortho(0.0f, (float)sapp_width(), (float)sapp_height(), 0.0f, -10000.0f, 10000.0f);
-    } else {
-        // Logical coordinate system: consider DPI scale
-        float dpiScale = sapp_dpi_scale();
-        float logicalWidth = (float)sapp_width() / dpiScale;
-        float logicalHeight = (float)sapp_height() / dpiScale;
-        sgl_ortho(0.0f, logicalWidth, logicalHeight, 0.0f, -10000.0f, 10000.0f);
-    }
-
-    sgl_matrix_mode_modelview();
-    sgl_load_identity();
+    // Setup screen with default FOV (60 = perspective, 0 = ortho)
+    internal::setupScreenFov(internal::defaultScreenFov);
 }
 
 // Clear screen (RGB float: 0.0 ~ 1.0)
@@ -591,24 +592,14 @@ inline void setColorOKLCH(float L, float C, float H, float alpha = 1.0f) {
     getDefaultContext().setColorOKLCH(L, C, H, alpha);
 }
 
-// Enable fill
+// Enable fill mode (solid shapes)
 inline void fill() {
     getDefaultContext().fill();
 }
 
-// Disable fill
+// Enable stroke mode (outlines only) - like oF's noFill()
 inline void noFill() {
     getDefaultContext().noFill();
-}
-
-// Enable stroke
-inline void stroke() {
-    getDefaultContext().stroke();
-}
-
-// Disable stroke
-inline void noStroke() {
-    getDefaultContext().noStroke();
 }
 
 // Stroke weight
@@ -844,6 +835,8 @@ inline void resetBlendMode() {
 // ---------------------------------------------------------------------------
 
 // Enable 3D drawing mode (depth test + back-face culling)
+// Deprecated: 3D is now enabled by default with setupScreenFov
+[[deprecated("3D is now enabled by default. Use setupScreenPerspective() to change FOV.")]]
 inline void enable3D() {
     if (internal::pipeline3dInitialized) {
         sgl_load_pipeline(internal::pipeline3d);
@@ -851,7 +844,8 @@ inline void enable3D() {
 }
 
 // Enable 3D drawing mode (perspective)
-// fov: field of view (radians), near/far: clip planes
+// Deprecated: use setupScreenPerspective() or setupScreenFov() instead
+[[deprecated("Use setupScreenPerspective(fovDeg) or setupScreenFov(fovDeg) instead. Note: FOV is now in degrees, not radians.")]]
 inline void enable3DPerspective(float fovY = 0.785f, float nearZ = 0.1f, float farZ = 1000.0f) {
     if (internal::pipeline3dInitialized) {
         sgl_load_pipeline(internal::pipeline3d);
@@ -868,11 +862,139 @@ inline void enable3DPerspective(float fovY = 0.785f, float nearZ = 0.1f, float f
     sgl_load_identity();
 }
 
-// Disable 3D drawing mode (return to default 2D drawing)
+// Internal: Setup screen with FOV (0 = ortho, >0 = perspective)
+// This is the core function that setupScreenPerspective and setupScreenOrtho call
+namespace internal {
+    // Minimum FOV for calculating camera distance and clip planes (even in ortho mode)
+    constexpr float minFovForCalc = 10.0f;
+
+    // Core implementation with explicit width/height (for FBO support)
+    inline void setupScreenFovWithSize(float fovDeg, float viewW, float viewH, float nearDist, float farDist) {
+        // Skip in headless mode
+        if (headless::isActive()) return;
+
+        // Calculate camera distance using effective FOV (min 10° for ortho)
+        float effectiveFov = (fovDeg <= 0.0f) ? minFovForCalc : fovDeg;
+        float halfFov = effectiveFov * TAU / 720.0f;  // half FOV in radians
+        float theTan = std::tan(halfFov);
+        float dist = viewH / (2.0f * theTan);
+
+        // Save current screen state for 2D drawing
+        currentScreenFov = fovDeg;
+        currentViewW = viewW;
+        currentViewH = viewH;
+        currentCameraDist = dist;
+
+        // Apply clip overrides or auto-calculate
+        if (nearDist == 0.0f) nearDist = (nearClipOverride > 0.0f) ? nearClipOverride : dist / 10.0f;
+        if (farDist == 0.0f) farDist = (farClipOverride > 0.0f) ? farClipOverride : dist * 10.0f;
+
+        float eyeX = viewW / 2.0f;
+        float eyeY = viewH / 2.0f;
+
+        if (fovDeg <= 0.0f) {
+            // Orthographic projection (2D mode)
+            sgl_load_default_pipeline();
+            sgl_defaults();
+            sgl_matrix_mode_projection();
+            sgl_ortho(0.0f, viewW, viewH, 0.0f, -farDist, farDist);
+            sgl_matrix_mode_modelview();
+            sgl_load_identity();
+            // Camera position (for consistent Z behavior with perspective)
+            sgl_lookat(
+                eyeX, eyeY, dist,
+                eyeX, eyeY, 0.0f,
+                0.0f, 1.0f, 0.0f
+            );
+        } else {
+            // Perspective projection (3D mode)
+            if (pipeline3dInitialized) {
+                sgl_load_pipeline(pipeline3d);
+            }
+
+            float aspect = viewW / viewH;
+
+            // Set perspective projection with Y-flip for screen coordinates (Y down)
+            sgl_matrix_mode_projection();
+            sgl_load_identity();
+            float fovRad = fovDeg * TAU / 360.0f;
+            float top = nearDist * tanf(fovRad * 0.5f);
+            float bottom = -top;
+            float right = top * aspect;
+            float left = -right;
+            // Swap top/bottom to flip Y axis (screen coords: Y increases downward)
+            sgl_frustum(left, right, top, bottom, nearDist, farDist);
+
+            // Set view matrix (camera at viewport center, looking at Z=0)
+            sgl_matrix_mode_modelview();
+            sgl_load_identity();
+            sgl_lookat(
+                eyeX, eyeY, dist,    // eye position
+                eyeX, eyeY, 0.0f,    // look at center
+                0.0f, 1.0f, 0.0f     // up vector
+            );
+        }
+    }
+
+    // Wrapper that uses main screen size
+    inline void setupScreenFov(float fovDeg, float nearDist, float farDist) {
+        float dpiScale = sapp_dpi_scale();
+        float viewW = pixelPerfectMode ? (float)sapp_width() : (float)sapp_width() / dpiScale;
+        float viewH = pixelPerfectMode ? (float)sapp_height() : (float)sapp_height() / dpiScale;
+        setupScreenFovWithSize(fovDeg, viewW, viewH, nearDist, farDist);
+    }
+} // namespace internal
+
+// Setup screen with FOV (0 = ortho, >0 = perspective)
+// This is the primary function - setupScreenPerspective/Ortho are convenience wrappers
+inline void setupScreenFov(float fovDeg, float nearDist = 0.0f, float farDist = 0.0f) {
+    internal::setupScreenFov(fovDeg, nearDist, farDist);
+}
+
+// Setup screen perspective (oF-style default 3D setup)
+// Camera positioned above viewport center, looking down at Z=0 plane
+// fovDeg: field of view in degrees (default 45 = ~28mm equivalent)
+inline void setupScreenPerspective(float fovDeg = 45.0f, float nearDist = 0.0f, float farDist = 0.0f) {
+    internal::setupScreenFov(fovDeg, nearDist, farDist);
+}
+
+// Setup orthographic projection (2D mode, origin at top-left)
+inline void setupScreenOrtho() {
+    internal::setupScreenFov(0.0f);
+}
+
+// Set/get default screen FOV (called automatically at frame start and FBO begin)
+// 0 = ortho (2D), 45 = default perspective (~28mm equivalent)
+inline void setDefaultScreenFov(float fovDeg) {
+    internal::defaultScreenFov = fovDeg;
+}
+
+inline float getDefaultScreenFov() {
+    return internal::defaultScreenFov;
+}
+
+// Set/get near/far clip planes (0 = auto-calculate based on camera distance)
+inline void setNearClip(float nearDist) {
+    internal::nearClipOverride = nearDist;
+}
+
+inline void setFarClip(float farDist) {
+    internal::farClipOverride = farDist;
+}
+
+inline float getNearClip() {
+    return internal::nearClipOverride;
+}
+
+inline float getFarClip() {
+    return internal::farClipOverride;
+}
+
+// Disable 3D drawing mode (return to 2D ortho)
+// Deprecated: use setupScreenOrtho() instead
+[[deprecated("Use setupScreenOrtho() instead")]]
 inline void disable3D() {
-    sgl_load_default_pipeline();
-    // Return to orthographic projection for 2D
-    beginFrame();
+    setupScreenOrtho();
 }
 
 // ---------------------------------------------------------------------------
@@ -1080,22 +1202,58 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     float worldX = currentMat.m[0]*(x + offsetX) + currentMat.m[1]*(y + offsetY) + currentMat.m[3];
     float worldY = currentMat.m[4]*(x + offsetX) + currentMat.m[5]*(y + offsetY) + currentMat.m[7];
 
-    // Save matrix
-    pushMatrix();
-    resetMatrix();
+    // Switch to ortho projection (same coordinate system as drawBitmapString)
+    sgl_matrix_mode_projection();
+    sgl_push_matrix();
+    sgl_load_identity();
+    sgl_ortho(0.0f, internal::currentViewW, internal::currentViewH, 0.0f, -10000.0f, 10000.0f);
+    sgl_matrix_mode_modelview();
+    sgl_push_matrix();
+    sgl_load_identity();
 
-    // Draw background with alpha blend pipeline
-    // Height is exactly lineHeight * lineCount so adjacent lines don't overlap
+    // Draw background rect (before text, same ortho coordinate system)
     sgl_load_pipeline(internal::fontPipeline);
     setColor(background);
     drawRect(worldX - paddingH, worldY, textWidth + paddingH * 2, exactHeight);
-    sgl_load_default_pipeline();
-
-    popMatrix();
 
     // Draw text in foreground color
-    setColor(foreground);
-    drawBitmapString(text, x, y);
+    sgl_load_pipeline(internal::fontPipeline);
+    sgl_enable_texture();
+    sgl_texture(internal::fontView, internal::fontSampler);
+
+    sgl_begin_quads();
+    sgl_c4f(foreground.r, foreground.g, foreground.b, foreground.a);
+    const float charW = bitmapfont::CHAR_TEX_WIDTH;
+    const float charH = bitmapfont::CHAR_TEX_HEIGHT;
+    float cursorX = worldX;
+    float cursorY = worldY;
+
+    for (char c : text) {
+        if (c == '\n') { cursorX = worldX; cursorY += charH; continue; }
+        if (c == '\t') { cursorX += charW * 8; continue; }
+        if (c < 32) continue;
+
+        float u, v;
+        bitmapfont::getCharTexCoord(c, u, v);
+        float u2 = u + bitmapfont::TEX_CHAR_WIDTH;
+        float v2 = v + bitmapfont::TEX_CHAR_HEIGHT;
+
+        sgl_v2f_t2f(cursorX, cursorY, u, v);
+        sgl_v2f_t2f(cursorX + charW, cursorY, u2, v);
+        sgl_v2f_t2f(cursorX + charW, cursorY + charH, u2, v2);
+        sgl_v2f_t2f(cursorX, cursorY + charH, u, v2);
+
+        cursorX += charW;
+    }
+    sgl_end();
+    sgl_disable_texture();
+    sgl_load_default_pipeline();
+
+    // Restore matrices
+    sgl_pop_matrix();
+    sgl_matrix_mode_projection();
+    sgl_pop_matrix();
+    sgl_matrix_mode_modelview();
 }
 
 // ---------------------------------------------------------------------------

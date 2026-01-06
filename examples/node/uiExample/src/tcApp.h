@@ -40,12 +40,10 @@ public:
         }
 
         fill();
-        noStroke();
         drawRect(0, 0, getWidth(), getHeight());
 
         // Border
         noFill();
-        stroke();
         setColor(0.5f, 0.5f, 0.6f);
         drawRect(0, 0, getWidth(), getHeight());
 
@@ -243,7 +241,6 @@ public:
 
         // Border
         noFill();
-        stroke();
         setColor(0.4f, 0.4f, 0.5f);
         drawRect(0, 0, getWidth(), getHeight());
 

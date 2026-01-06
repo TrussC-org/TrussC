@@ -31,11 +31,9 @@ void tcApp::draw() {
 
     // Rectangle with stroke
     noFill();
-    stroke();
     setColor(1.0f, 1.0f, 0.3f);
     drawRect(50, 180, 150, 100);
     fill();
-    noStroke();
 
     // ----------------------
     // Circle
@@ -96,7 +94,6 @@ void tcApp::draw() {
 
     // Star shape (stroke)
     noFill();
-    stroke();
     setColor(1.0f, 0.9f, 0.2f);
     beginShape();
     for (int i = 0; i < 10; i++) {
@@ -106,7 +103,6 @@ void tcApp::draw() {
     }
     endShape(true);
     fill();
-    noStroke();
 
     // Animated custom shape
     setColor(0.3f, 0.8f, 0.9f, 0.8f);
@@ -121,7 +117,6 @@ void tcApp::draw() {
 
     // Wave using Path (member variable, 100 vertices)
     noFill();
-    stroke();
     setColor(0.2f, 1.0f, 0.6f);
     wave.clear();
     for (int i = 0; i < 100; i++) {
@@ -131,7 +126,6 @@ void tcApp::draw() {
     }
     wave.draw();
     fill();
-    noStroke();
 
     // ----------------------
     // Mesh (triangle with vertex colors)

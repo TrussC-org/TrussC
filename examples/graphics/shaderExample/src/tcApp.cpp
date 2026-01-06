@@ -108,12 +108,9 @@ void tcApp::draw() {
     // Fullscreen draw
     sg_draw(0, 6, 1);
 
-    // Reset sokol_gl state
+    // Reset sokol_gl state and restore ortho projection for 2D UI
     sgl_defaults();
-    sgl_matrix_mode_projection();
-    sgl_ortho(0.0f, (float)sapp_width(), (float)sapp_height(), 0.0f, -10000.0f, 10000.0f);
-    sgl_matrix_mode_modelview();
-    sgl_load_identity();
+    setupScreenOrtho();
 
     // Display info
     string info = "Effect " + to_string(currentEffect + 1) + ": " + getEffectName(currentEffect);

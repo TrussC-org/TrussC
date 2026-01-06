@@ -380,8 +380,8 @@ categories:
         signatures:
           - params: ""
             params_simple: ""
-        description: "Enable fill"
-        description_ja: "塗りつぶしを有効化"
+        description: "Enable fill mode (shapes are solid, no outline)"
+        description_ja: "塗りつぶしモードを有効化（シェイプは塗りつぶし、輪郭なし）"
         of_equivalent: "ofFill"
         sketch: true
         snippet: "fill()"
@@ -391,31 +391,11 @@ categories:
         signatures:
           - params: ""
             params_simple: ""
-        description: "Disable fill"
-        description_ja: "塗りつぶしを無効化"
+        description: "Enable stroke mode (shapes show outline only)"
+        description_ja: "ストロークモードを有効化（シェイプは輪郭のみ）"
         of_equivalent: "ofNoFill"
         sketch: true
         snippet: "noFill()"
-
-      - name: stroke
-        return: "void"
-        signatures:
-          - params: ""
-            params_simple: ""
-        description: "Enable stroke"
-        description_ja: "ストロークを有効化"
-        sketch: true
-        snippet: "stroke()"
-
-      - name: noStroke
-        return: "void"
-        signatures:
-          - params: ""
-            params_simple: ""
-        description: "Disable stroke"
-        description_ja: "ストロークを無効化"
-        sketch: true
-        snippet: "noStroke()"
 
       - name: setStrokeWeight
         return: "void"
@@ -1709,6 +1689,71 @@ categories:
         description_ja: "サイズを設定"
         sketch: true
         snippet: "setSize(${1:w}, ${2:h})"
+
+  # ==========================================================================
+  # 3D Setup
+  # ==========================================================================
+  - id: graphics_3d_setup
+    name: "3D Setup"
+    name_ja: "3Dセットアップ"
+    functions:
+      - name: setupScreenPerspective
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+          - params: "float fovDeg"
+            params_simple: "fovDeg"
+          - params: "float fovDeg, float nearDist, float farDist"
+            params_simple: "fovDeg, nearDist, farDist"
+        description: "Set up perspective projection (oF-style default 3D)"
+        description_ja: "パースペクティブ投影を設定（oF風デフォルト3D）"
+        of_equivalent: "ofSetupScreenPerspective"
+        sketch: true
+        snippet: "setupScreenPerspective()"
+
+      - name: setupScreenOrtho
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Set up orthographic projection (2D mode)"
+        description_ja: "正投影を設定（2Dモード）"
+        of_equivalent: "ofSetupScreenOrtho"
+        sketch: true
+        snippet: "setupScreenOrtho()"
+
+      - name: setupScreenFov
+        return: "void"
+        signatures:
+          - params: "float fovDeg"
+            params_simple: "fovDeg"
+          - params: "float fovDeg, float nearDist, float farDist"
+            params_simple: "fovDeg, nearDist, farDist"
+        description: "Set up screen projection with specified FOV (0 = ortho, >0 = perspective)"
+        description_ja: "指定したFOVで画面投影を設定（0 = 正投影、0より大 = パースペクティブ）"
+        sketch: true
+        snippet: "setupScreenFov(${1:45.0})"
+
+      - name: setDefaultScreenFov
+        return: "void"
+        signatures:
+          - params: "float fovDeg"
+            params_simple: "fovDeg"
+        description: "Set default screen FOV (applied at frame start)"
+        description_ja: "デフォルトのスクリーンFOVを設定（フレーム開始時に適用）"
+        sketch: true
+        snippet: "setDefaultScreenFov(${1:45.0})"
+
+      - name: getDefaultScreenFov
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get current default screen FOV"
+        description_ja: "現在のデフォルトスクリーンFOVを取得"
+        sketch: true
+        snippet: "getDefaultScreenFov()"
 
   # ==========================================================================
   # 3D Camera

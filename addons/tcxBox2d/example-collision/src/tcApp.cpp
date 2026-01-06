@@ -100,7 +100,6 @@ void tcApp::draw() {
 
     // Reset drawing state for bodies (drawn after by Node system)
     noFill();
-    stroke();
     setColor(0.8f);
 
     // Draw drag line

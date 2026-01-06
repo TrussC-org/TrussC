@@ -76,10 +76,8 @@ void drawBitmapString(const string& text, float x, float y) // Draw text
 ## Graphics - Style
 
 ```javascript
-void fill()                              // Enable fill
-void noFill()                            // Disable fill
-void stroke()                            // Enable stroke
-void noStroke()                          // Disable stroke
+void fill()                              // Enable fill mode (shapes are solid, no outline)
+void noFill()                            // Enable stroke mode (shapes show outline only)
 void setStrokeWeight(float weight)       // Set stroke width
 ```
 
@@ -317,6 +315,19 @@ void setPosition(float x, float y)       // Set position
 void setPosition(Vec3 pos)               // Set position
 RectNode()                               // Create a 2D rectangle node
 void setSize(float w, float h)           // Set size
+```
+
+## 3D Setup
+
+```javascript
+void setupScreenPerspective()            // Set up perspective projection (oF-style default 3D)
+void setupScreenPerspective(float fovDeg) // Set up perspective projection (oF-style default 3D)
+void setupScreenPerspective(float fovDeg, float nearDist, float farDist) // Set up perspective projection (oF-style default 3D)
+void setupScreenOrtho()                  // Set up orthographic projection (2D mode)
+void setupScreenFov(float fovDeg)        // Set up screen projection with specified FOV (0 = ortho, >0 = perspective)
+void setupScreenFov(float fovDeg, float nearDist, float farDist) // Set up screen projection with specified FOV (0 = ortho, >0 = perspective)
+void setDefaultScreenFov(float fovDeg)   // Set default screen FOV (applied at frame start)
+float getDefaultScreenFov()              // Get current default screen FOV
 ```
 
 ## 3D Camera

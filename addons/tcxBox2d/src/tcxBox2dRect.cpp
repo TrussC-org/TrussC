@@ -71,7 +71,6 @@ void RectBody::drawFill() {
     if (!body_) return;
 
     tc::fill();
-    tc::noStroke();
     tc::drawRect(-width_ / 2, -height_ / 2, width_, height_);
 }
 

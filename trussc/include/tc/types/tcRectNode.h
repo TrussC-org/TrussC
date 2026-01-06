@@ -211,21 +211,20 @@ protected:
     // Helper to draw rectangle with fill
     void drawRectFill() {
         fill();
-        noStroke();
         drawRect(0, 0, width_, height_);
     }
 
     // Helper to draw rectangle with stroke
     void drawRectStroke() {
         noFill();
-        stroke();
         drawRect(0, 0, width_, height_);
     }
 
     // Helper to draw rectangle with both fill and stroke
-    void drawRectFillStroke() {
+    void drawRectFillAndStroke() {
         fill();
-        stroke();
+        drawRect(0, 0, width_, height_);
+        noFill();
         drawRect(0, 0, width_, height_);
     }
 

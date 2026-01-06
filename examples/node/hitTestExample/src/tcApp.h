@@ -36,18 +36,15 @@ public:
 
         // Background
         fill();
-        noStroke();
         drawRect(0, 0, getWidth(), getHeight());
 
         // Border
         noFill();
-        stroke();
         setColor(0.6f, 0.6f, 0.7f);
         drawRect(0, 0, getWidth(), getHeight());
 
         // Label and count (placed at top-left, follows rotation)
         fill();
-        noStroke();
         setColor(1.0f, 1.0f, 1.0f);
         drawBitmapString(format("{}: {}", label, count), 4, 18, false);  // screenFixed = false follows rotation (baseline-based)
     }
@@ -91,12 +88,10 @@ public:
         // Panel background
         setColor(panelColor);
         fill();
-        noStroke();
         drawRect(0, 0, getWidth(), getHeight());
 
         // Border
         noFill();
-        stroke();
         setColor(0.5f, 0.5f, 0.6f);
         drawRect(0, 0, getWidth(), getHeight());
     }
