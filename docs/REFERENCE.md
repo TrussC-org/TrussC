@@ -45,6 +45,11 @@ drawCircle(x, y, radius)         // Draw circle
 drawEllipse(x, y, w, h)          // Draw ellipse
 drawLine(x1, y1, x2, y2)         // Draw line
 drawTriangle(x1, y1, x2, y2, x3, y3) // Draw triangle
+beginShape()                     // Begin drawing a shape
+vertex(x, y)                     // Add a vertex
+vertex(x, y, z)                  // Add a vertex
+vertex(v)                        // Add a vertex
+endShape(close)                  // End drawing a shape
 drawBitmapString(text, x, y)     // Draw text
 ```
 
@@ -128,6 +133,12 @@ random(min, max)                 // Random number
 noise(x)                         // Perlin noise
 noise(x, y)                      // Perlin noise
 noise(x, y, z)                   // Perlin noise
+signedNoise(x)                   // Perlin noise (-1.0 to 1.0)
+signedNoise(x, y)                // Perlin noise (-1.0 to 1.0)
+signedNoise(x, y, z)             // Perlin noise (-1.0 to 1.0)
+signedNoise(x, y, z, w)          // Perlin noise (-1.0 to 1.0)
+fbm(x, y, octaves, lacunarity, gain) // Fractal Brownian Motion noise
+fbm(x, y, z, octaves, lacunarity, gain) // Fractal Brownian Motion noise
 ```
 
 ## Math - Interpolation
@@ -178,6 +189,14 @@ dist(x1, y1, x2, y2)             // Distance between points
 distSquared(x1, y1, x2, y2)      // Squared distance
 ```
 
+## Window & System
+
+```javascript
+toggleFullscreen()               // Toggle fullscreen mode
+setClipboardString(text)         // Copy text to clipboard
+getClipboardString()             // Get text from clipboard
+```
+
 ## Utility
 
 ```javascript
@@ -185,6 +204,26 @@ logNotice(message)               // Print to console
 to_string(value)                 // Convert to string
 beep()                           // Play a beep sound
 beep(frequency)                  // Play a beep sound
+```
+
+## Sound
+
+```javascript
+Sound()                          // Create a sound player
+play()                           // Play sound
+stop()                           // Stop sound
+setVolume(vol)                   // Set volume (0.0-1.0)
+setLoop(loop)                    // Enable/disable looping
+```
+
+## Animation
+
+```javascript
+Tween()                          // Create a tween
+setDuration(seconds)             // Set animation duration
+start()                          // Start animation
+update(dt)                       // Update animation
+getValue()                       // Get current tween value
 ```
 
 ## Types - Vec2
@@ -238,11 +277,40 @@ contains(x, y)                   // Check if point is inside
 intersects(other)                // Check intersection
 ```
 
+## Scene Graph
+
+```javascript
+Node()                           // Create a base scene node
+addChild(child)                  // Add a child node
+setPosition(x, y)                // Set position
+setPosition(pos)                 // Set position
+RectNode()                       // Create a 2D rectangle node
+setSize(w, h)                    // Set size
+```
+
+## 3D Camera
+
+```javascript
+EasyCam()                        // Create an easy-to-use 3D camera
+begin()                          // Apply camera transform
+end()                            // Restore previous transform
+```
+
+## Math - 3D
+
+```javascript
+Mat4()                           // Create a 4x4 matrix
+Quaternion()                     // Create a quaternion
+```
+
 ## Graphics - Advanced
 
 ```javascript
 drawMesh(mesh)                   // Draw a mesh
 drawPolyline(polyline)           // Draw a polyline
+createBox(size)                  // Create a box mesh
+createBox(w, h, d)               // Create a box mesh
+createSphere(radius, res)        // Create a sphere mesh
 ```
 
 ## Types - Mesh

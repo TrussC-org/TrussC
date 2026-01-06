@@ -233,6 +233,42 @@ categories:
         sketch: true
         snippet: "drawTriangle(${1:x1}, ${2:y1}, ${3:x2}, ${4:y2}, ${5:x3}, ${6:y3})"
 
+      - name: beginShape
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Begin drawing a shape"
+        description_ja: "図形の描画を開始"
+        of_equivalent: "ofBeginShape"
+        sketch: true
+        snippet: "beginShape()"
+
+      - name: vertex
+        signatures:
+          - params: "float x, float y"
+            params_simple: "x, y"
+          - params: "float x, float y, float z"
+            params_simple: "x, y, z"
+          - params: "const Vec2& v"
+            params_simple: "v"
+          - params: "const Vec3& v"
+            params_simple: "v"
+        description: "Add a vertex"
+        description_ja: "頂点を追加"
+        of_equivalent: "ofVertex"
+        sketch: true
+        snippet: "vertex(${1:x}, ${2:y})"
+
+      - name: endShape
+        signatures:
+          - params: "bool close = false"
+            params_simple: "close"
+        description: "End drawing a shape"
+        description_ja: "図形の描画を終了"
+        of_equivalent: "ofEndShape"
+        sketch: true
+        snippet: "endShape()"
+
       - name: drawBitmapString
         signatures:
           - params: "const string& text, float x, float y"
@@ -661,6 +697,33 @@ categories:
         sketch: true
         snippet: "noise(${1:x})"
 
+      - name: signedNoise
+        signatures:
+          - params: "float x"
+            params_simple: "x"
+          - params: "float x, float y"
+            params_simple: "x, y"
+          - params: "float x, float y, float z"
+            params_simple: "x, y, z"
+          - params: "float x, float y, float z, float w"
+            params_simple: "x, y, z, w"
+        description: "Perlin noise (-1.0 to 1.0)"
+        description_ja: "パーリンノイズ (-1.0〜1.0)"
+        of_equivalent: "ofSignedNoise"
+        sketch: true
+        snippet: "signedNoise(${1:x})"
+
+      - name: fbm
+        signatures:
+          - params: "float x, float y, int octaves = 4, float lacunarity = 2.0, float gain = 0.5"
+            params_simple: "x, y, octaves, lacunarity, gain"
+          - params: "float x, float y, float z, int octaves = 4, float lacunarity = 2.0, float gain = 0.5"
+            params_simple: "x, y, z, octaves, lacunarity, gain"
+        description: "Fractal Brownian Motion noise"
+        description_ja: "フラクタルノイズ"
+        sketch: true
+        snippet: "fbm(${1:x}, ${2:y})"
+
   # ==========================================================================
   # Math - Interpolation
   # ==========================================================================
@@ -950,6 +1013,53 @@ categories:
         snippet: "distSquared(${1:x1}, ${2:y1}, ${3:x2}, ${4:y2})"
 
   # ==========================================================================
+  # Window & System
+  # ==========================================================================
+  - id: window_system
+    name: "Window & System"
+    name_ja: "ウィンドウとシステム"
+    functions:
+      - name: setWindowTitle
+        signatures:
+          - params: "const string& title"
+            params_simple: "title"
+        description: "Set window title"
+        description_ja: "ウィンドウのタイトルを設定"
+        sketch: false
+
+      - name: setWindowSize
+        signatures:
+          - params: "int width, int height"
+            params_simple: "width, height"
+        description: "Set window size"
+        description_ja: "ウィンドウのサイズを設定"
+        sketch: false
+
+      - name: toggleFullscreen
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Toggle fullscreen mode"
+        description_ja: "フルスクリーンを切り替え"
+        sketch: true
+
+      - name: setClipboardString
+        signatures:
+          - params: "const string& text"
+            params_simple: "text"
+        description: "Copy text to clipboard"
+        description_ja: "クリップボードにコピー"
+        sketch: true
+
+      - name: getClipboardString
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get text from clipboard"
+        description_ja: "クリップボードから取得"
+        sketch: true
+
+  # ==========================================================================
   # Utility
   # ==========================================================================
   - id: utility
@@ -986,6 +1096,118 @@ categories:
         description_ja: "ビープ音を再生"
         sketch: true
         snippet: "beep()"
+
+  # ==========================================================================
+  # Sound
+  # ==========================================================================
+  - id: sound
+    name: "Sound"
+    name_ja: "サウンド"
+    functions:
+      - name: Sound
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a sound player"
+        description_ja: "サウンドプレイヤーを作成"
+        sketch: true
+        snippet: "Sound()"
+
+      - name: load
+        signatures:
+          - params: "const string& path"
+            params_simple: "path"
+        description: "Load sound file"
+        description_ja: "サウンドファイルを読み込む"
+        sketch: false
+
+      - name: play
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Play sound"
+        description_ja: "再生"
+        sketch: true
+        snippet: "play()"
+
+      - name: stop
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Stop sound"
+        description_ja: "停止"
+        sketch: true
+        snippet: "stop()"
+
+      - name: setVolume
+        signatures:
+          - params: "float vol"
+            params_simple: "vol"
+        description: "Set volume (0.0-1.0)"
+        description_ja: "音量を設定"
+        sketch: true
+        snippet: "setVolume(${1:0.8})"
+
+      - name: setLoop
+        signatures:
+          - params: "bool loop"
+            params_simple: "loop"
+        description: "Enable/disable looping"
+        description_ja: "ループ再生を設定"
+        sketch: true
+        snippet: "setLoop(${1:true})"
+
+  # ==========================================================================
+  # Animation
+  # ==========================================================================
+  - id: animation
+    name: "Animation"
+    name_ja: "アニメーション"
+    functions:
+      - name: Tween
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a tween"
+        description_ja: "トゥイーンを作成"
+        sketch: true
+        snippet: "Tween()"
+
+      - name: setDuration
+        signatures:
+          - params: "float seconds"
+            params_simple: "seconds"
+        description: "Set animation duration"
+        description_ja: "再生時間を設定"
+        sketch: true
+        snippet: "setDuration(${1:1.0})"
+
+      - name: start
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Start animation"
+        description_ja: "開始"
+        sketch: true
+        snippet: "start()"
+
+      - name: update
+        signatures:
+          - params: "float dt"
+            params_simple: "dt"
+        description: "Update animation"
+        description_ja: "更新"
+        sketch: true
+        snippet: "update(getDeltaTime())"
+
+      - name: getValue
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get current tween value"
+        description_ja: "現在の値を取得"
+        sketch: true
+        snippet: "getValue()"
 
   # ==========================================================================
   # Types - Vec2
@@ -1176,6 +1398,114 @@ categories:
         snippet: "intersects(${1:other})"
 
   # ==========================================================================
+  # Scene Graph
+  # ==========================================================================
+  - id: scene_graph
+    name: "Scene Graph"
+    name_ja: "シーングラフ"
+    functions:
+      - name: Node
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a base scene node"
+        description_ja: "ベースノードを作成"
+        sketch: true
+        snippet: "Node()"
+
+      - name: addChild
+        signatures:
+          - params: "shared_ptr<Node> child"
+            params_simple: "child"
+        description: "Add a child node"
+        description_ja: "子ノードを追加"
+        sketch: true
+
+      - name: setPosition
+        signatures:
+          - params: "float x, float y"
+            params_simple: "x, y"
+          - params: "Vec3 pos"
+            params_simple: "pos"
+        description: "Set position"
+        description_ja: "位置を設定"
+        sketch: true
+
+      - name: RectNode
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a 2D rectangle node"
+        description_ja: "矩形ノードを作成"
+        sketch: true
+        snippet: "RectNode()"
+
+      - name: setSize
+        signatures:
+          - params: "float w, float h"
+            params_simple: "w, h"
+        description: "Set size"
+        description_ja: "サイズを設定"
+        sketch: true
+
+  # ==========================================================================
+  # 3D Camera
+  # ==========================================================================
+  - id: graphics_camera
+    name: "3D Camera"
+    name_ja: "3Dカメラ"
+    functions:
+      - name: EasyCam
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create an easy-to-use 3D camera"
+        description_ja: "簡易3Dカメラを作成"
+        sketch: true
+        snippet: "EasyCam()"
+
+      - name: begin
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Apply camera transform"
+        description_ja: "カメラ視点を適用"
+        sketch: true
+
+      - name: end
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Restore previous transform"
+        description_ja: "カメラ視点を解除"
+        sketch: true
+
+  # ==========================================================================
+  # Math - 3D (Matrix / Quaternion)
+  # ==========================================================================
+  - id: math_3d
+    name: "Math - 3D"
+    name_ja: "数学 - 3D"
+    functions:
+      - name: Mat4
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a 4x4 matrix"
+        description_ja: "4x4行列を作成"
+        sketch: true
+        snippet: "Mat4()"
+
+      - name: Quaternion
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a quaternion"
+        description_ja: "クォータニオンを作成"
+        sketch: true
+        snippet: "Quaternion()"
+
+  # ==========================================================================
   # Graphics - Advanced
   # ==========================================================================
   - id: graphics_advanced
@@ -1199,6 +1529,251 @@ categories:
         description_ja: "ポリラインを描画"
         sketch: true
         snippet: "drawPolyline(${1:polyline})"
+
+      - name: createBox
+        signatures:
+          - params: "float size"
+            params_simple: "size"
+          - params: "float w, float h, float d"
+            params_simple: "w, h, d"
+        description: "Create a box mesh"
+        description_ja: "ボックスメッシュを作成"
+        sketch: true
+
+      - name: createSphere
+        signatures:
+          - params: "float radius, int res = 20"
+            params_simple: "radius, res"
+        description: "Create a sphere mesh"
+        description_ja: "球体メッシュを作成"
+        sketch: true
+
+      - name: drawTexture
+        signatures:
+          - params: "const Texture& tex, float x, float y"
+            params_simple: "tex, x, y"
+          - params: "const Texture& tex, float x, float y, float w, float h"
+            params_simple: "tex, x, y, w, h"
+        description: "Draw a texture"
+        description_ja: "テクスチャを描画"
+        sketch: false
+
+  # ==========================================================================
+  # Graphics - Texture & GPU
+  # ==========================================================================
+  - id: graphics_texture
+    name: "Graphics - Texture & GPU"
+    name_ja: "グラフィックス - テクスチャとGPU"
+    functions:
+      - name: Texture
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a texture"
+        description_ja: "テクスチャを作成"
+        sketch: false
+
+      - name: load
+        signatures:
+          - params: "const string& path"
+            params_simple: "path"
+        description: "Load image from file"
+        description_ja: "ファイルから画像を読み込む"
+        sketch: false
+
+      - name: loadFromPixels
+        signatures:
+          - params: "const Pixels& pixels"
+            params_simple: "pixels"
+        description: "Load from pixel data"
+        description_ja: "ピクセルデータから読み込む"
+        sketch: false
+
+      - name: bind
+        signatures:
+          - params: "int slot = 0"
+            params_simple: "slot"
+        description: "Bind texture"
+        description_ja: "テクスチャをバインド"
+        sketch: false
+
+      - name: unbind
+        signatures:
+          - params: "int slot = 0"
+            params_simple: "slot"
+        description: "Unbind texture"
+        description_ja: "テクスチャのバインド解除"
+        sketch: false
+
+      - name: getWidth
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get width"
+        description_ja: "幅を取得"
+        sketch: false
+
+      - name: getHeight
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get height"
+        description_ja: "高さを取得"
+        sketch: false
+
+  - id: graphics_fbo
+    name: "Graphics - FBO"
+    name_ja: "グラフィックス - FBO"
+    functions:
+      - name: Fbo
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create an FBO"
+        description_ja: "FBOを作成"
+        sketch: false
+
+      - name: allocate
+        signatures:
+          - params: "int w, int h"
+            params_simple: "w, h"
+        description: "Allocate buffer"
+        description_ja: "バッファを確保"
+        sketch: false
+
+      - name: begin
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Begin drawing to FBO"
+        description_ja: "FBOへの描画を開始"
+        sketch: false
+
+      - name: end
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "End drawing to FBO"
+        description_ja: "FBOへの描画を終了"
+        sketch: false
+
+      - name: getTexture
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get internal texture"
+        description_ja: "内部テクスチャを取得"
+        sketch: false
+
+      - name: readToPixels
+        signatures:
+          - params: "Pixels& pixels"
+            params_simple: "pixels"
+        description: "Read pixels to CPU memory"
+        description_ja: "ピクセルをCPUメモリに読み出す"
+        sketch: false
+
+  - id: graphics_shader
+    name: "Graphics - Shader"
+    name_ja: "グラフィックス - シェーダー"
+    functions:
+      - name: Shader
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a shader"
+        description_ja: "シェーダーを作成"
+        sketch: false
+
+      - name: load
+        signatures:
+          - params: "const string& vertPath, const string& fragPath"
+            params_simple: "vert, frag"
+        description: "Load shader from files"
+        description_ja: "ファイルからシェーダーを読み込む"
+        sketch: false
+
+      - name: begin
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Begin shader"
+        description_ja: "シェーダーを開始"
+        sketch: false
+
+      - name: end
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "End shader"
+        description_ja: "シェーダーを終了"
+        sketch: false
+
+      - name: setUniform
+        signatures:
+          - params: "const string& name, float value"
+            params_simple: "name, val"
+          - params: "const string& name, float x, float y"
+            params_simple: "name, x, y"
+          - params: "const string& name, const Vec2& v"
+            params_simple: "name, v"
+          - params: "const string& name, const Color& c"
+            params_simple: "name, c"
+        description: "Set uniform variable"
+        description_ja: "Uniform変数を設定"
+        sketch: false
+
+  - id: graphics_pixels
+    name: "Types - Pixels"
+    name_ja: "型 - Pixels"
+    functions:
+      - name: Pixels
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create pixel buffer"
+        description_ja: "ピクセルバッファを作成"
+        sketch: false
+
+      - name: allocate
+        signatures:
+          - params: "int w, int h, int channels"
+            params_simple: "w, h, channels"
+        description: "Allocate memory"
+        description_ja: "メモリを確保"
+        sketch: false
+
+      - name: getData
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get raw data pointer"
+        description_ja: "生データポインタを取得"
+        sketch: false
+
+      - name: getColor
+        signatures:
+          - params: "int x, int y"
+            params_simple: "x, y"
+        description: "Get color at pixel"
+        description_ja: "指定座標の色を取得"
+        sketch: false
+
+      - name: setColor
+        signatures:
+          - params: "int x, int y, const Color& c"
+            params_simple: "x, y, c"
+        description: "Set color at pixel"
+        description_ja: "指定座標の色を設定"
+        sketch: false
+
+      - name: save
+        signatures:
+          - params: "const string& path"
+            params_simple: "path"
+        description: "Save to file"
+        description_ja: "ファイルに保存"
+        sketch: false
 
   # ==========================================================================
   # Types - Mesh
