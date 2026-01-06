@@ -87,6 +87,7 @@ private:
     std::string hostname_;
     bool verifyNone_ = false;
     bool handshakePending_ = false;
+    bool handshakeStarted_ = false;
 
     // Perform TLS handshake
     bool performHandshake();

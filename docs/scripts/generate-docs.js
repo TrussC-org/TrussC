@@ -46,91 +46,101 @@ function generateSketchAPI(api) {
         const functions = [];
 
         for (const fn of sketchFunctions) {
-            // Create entry for each signature
-            for (const sig of fn.signatures) {
-                functions.push({
-                    name: fn.name,
-                    params: sig.params_simple,
-                    params_typed: sig.params,
-                    desc: fn.description,
-                    snippet: fn.snippet
-                });
+                                    // Create entry for each signature
+                                    for (const sig of fn.signatures) {
+                                        functions.push({
+                                            name: fn.name,
+                                            params: sig.params_simple,
+                                            params_typed: sig.params,
+                                            return_type: fn.return !== undefined ? fn.return : null,
+                                            desc: fn.description,
+                                            snippet: fn.snippet
+                                        });
+                                    }                    }
+            
+                    categories.push({
+                        name: cat.name,
+                        functions: functions
+                    });
+                }
+            
+                const constants = api.constants
+                    .filter(c => c.sketch)
+                    .map(c => ({
+                        name: c.name,
+                        value: c.value,
+                        desc: c.description
+                    }));
+            
+                const output = {
+                    categories: categories,
+                    constants: constants,
+                    keywords: api.keywords
+                };
+            
+                // Generate JavaScript source
+                let js = `// TrussSketch API Definition
+            // This is the single source of truth for all TrussSketch functions.
+            // Used by: autocomplete, reference page, REFERENCE.md generation
+            //
+            // AUTO-GENERATED from api-definition.yaml
+            // Do not edit directly - edit api-definition.yaml instead
+            
+            const TrussSketchAPI = ${JSON.stringify(output, null, 4)};
+            
+            // Export for different environments
+            if (typeof module !== 'undefined' && module.exports) {
+                module.exports = TrussSketchAPI;
             }
-        }
-
-        categories.push({
-            name: cat.name,
-            functions: functions
-        });
-    }
-
-    const constants = api.constants
-        .filter(c => c.sketch)
-        .map(c => ({
-            name: c.name,
-            value: c.value,
-            desc: c.description
-        }));
-
-    const output = {
-        categories: categories,
-        constants: constants,
-        keywords: api.keywords
-    };
-
-    // Generate JavaScript source
-    let js = `// TrussSketch API Definition
-// This is the single source of truth for all TrussSketch functions.
-// Used by: autocomplete, reference page, REFERENCE.md generation
-//
-// AUTO-GENERATED from api-definition.yaml
-// Do not edit directly - edit api-definition.yaml instead
-
-const TrussSketchAPI = ${JSON.stringify(output, null, 4)};
-
-// Export for different environments
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = TrussSketchAPI;
-}
-`;
-
-    return js;
-}
-
-// Generate REFERENCE.md
-function generateReferenceMd(api) {
-    let md = `# TrussC API Reference
-
-Complete API reference. This document is auto-generated from \`api-definition.yaml\`.
-
-For the latest interactive reference, visit [trussc.org/reference](https://trussc.org/reference/).
-
-`;
-
-    // Generate each category
-    for (const cat of api.categories) {
-        // Only include TrussSketch-enabled functions
-        const sketchFunctions = cat.functions.filter(fn => fn.sketch);
-        if (sketchFunctions.length === 0) continue;
-
-        md += `## ${cat.name}\n\n`;
-        md += '```javascript\n';
-
-        // Group overloads
-        const seen = new Set();
-        for (const fn of sketchFunctions) {
-            for (const sig of fn.signatures) {
-                const sigStr = `${fn.name}(${sig.params || ''})`;
-                if (seen.has(sigStr)) continue;
-                seen.add(sigStr);
-
-                const padding = Math.max(0, 32 - sigStr.length);
-                md += `${sigStr}${' '.repeat(padding)} // ${fn.description}\n`;
+            `;
+            
+                return js;
             }
-        }
-
-        md += '```\n\n';
-    }
+            
+            // Generate REFERENCE.md
+            function generateReferenceMd(api) {
+                let md = `# TrussC API Reference
+            
+            Complete API reference. This document is auto-generated from \`api-definition.yaml\`.
+            
+            For the latest interactive reference, visit [trussc.org/reference](https://trussc.org/reference/).
+            
+            `;
+                // Generate each category
+                for (const cat of api.categories) {
+                    // Only include TrussSketch-enabled functions
+                    const sketchFunctions = cat.functions.filter(fn => fn.sketch);
+                    if (sketchFunctions.length === 0) continue;
+            
+                    md += `## ${cat.name}\n\n`;
+                    md += '```javascript\n';
+            
+                    // Group overloads
+                    const seen = new Set();
+                    for (const fn of sketchFunctions) {
+                        for (const sig of fn.signatures) {
+                            let sigStr = `${fn.name}(${sig.params || ''})`;
+                            
+                            // Prepend return type if available
+                            if (fn.return !== undefined) {
+                                // Empty string return type means constructor (no return type displayed)
+                                if (fn.return === '') {
+                                    sigStr = `${fn.name}(${sig.params || ''})`;
+                                } else {
+                                    sigStr = `${fn.return} ${fn.name}(${sig.params || ''})`;
+                                }
+                            }
+            
+                            if (seen.has(sigStr)) continue;
+                            seen.add(sigStr);
+            
+                            const padding = Math.max(0, 40 - sigStr.length);
+                            md += `${sigStr}${' '.repeat(padding)} // ${fn.description}\n`;
+                        }
+                    }
+            
+                    md += '```\n\n';
+                }
 
     // Constants
     md += `## Constants

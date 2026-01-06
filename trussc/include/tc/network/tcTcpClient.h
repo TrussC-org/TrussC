@@ -16,6 +16,9 @@
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #pragma comment(lib, "ws2_32.lib")
+    #define CLOSE_SOCKET closesocket
+    #define SOCKET_ERROR_CODE WSAGetLastError()
+    #define WOULD_BLOCK_ERROR WSAEWOULDBLOCK
 #else
     #include <sys/socket.h>
     #include <netinet/in.h>
@@ -25,6 +28,11 @@
     #include <fcntl.h>
     #include <poll.h>
     #include <errno.h>
+    #define CLOSE_SOCKET ::close
+    #define SOCKET_ERROR_CODE errno
+    #define WOULD_BLOCK_ERROR EWOULDBLOCK
+    #define INVALID_SOCKET -1
+    #define SOCKET_ERROR -1
 #endif
 
 namespace trussc {
@@ -125,7 +133,7 @@ public:
     bool isUsingThread() const;
 
     // Internal update method (called by event listener if not using threads)
-    void processNetwork();
+    virtual void processNetwork();
 
     // -------------------------------------------------------------------------
     // Information retrieval
@@ -157,7 +165,7 @@ protected:
     std::mutex sendMutex_;
 
     bool useThread_ = true;
-    tcEventListener updateListener_;
+    EventListener updateListener_;
     bool connectPending_ = false;
 
 private:

@@ -4,6 +4,7 @@
 
 #include "tcTlsClient.h"
 #include "tc/utils/tcLog.h"
+#include "tc/events/tcCoreEvents.h"
 
 #include <mbedtls/ssl.h>
 #include <mbedtls/entropy.h>
@@ -213,6 +214,7 @@ bool TlsClient::connect(const std::string& host, int port) {
 
     remoteHost_ = host;
     remotePort_ = port;
+    handshakeStarted_ = false;
 
     if (ret == SOCKET_ERROR) {
         int err = SOCKET_ERROR_CODE;
@@ -259,7 +261,7 @@ bool TlsClient::performHandshake() {
     int ret;
 
     // Initialize SSL configuration if not already done
-    if (ctx_->conf.rng == nullptr) {
+    if (!handshakeStarted_) {
         ret = mbedtls_ssl_config_defaults(&ctx_->conf,
                                            MBEDTLS_SSL_IS_CLIENT,
                                            MBEDTLS_SSL_TRANSPORT_STREAM,
@@ -304,6 +306,8 @@ bool TlsClient::performHandshake() {
         mbedtls_ssl_set_bio(&ctx_->ssl, &socket_,
                              mbedtls_net_send_callback,
                              mbedtls_net_recv_callback, nullptr);
+        
+        handshakeStarted_ = true;
     }
 
     // Perform handshake step
@@ -444,7 +448,11 @@ void TlsClient::disconnect() {
 
     // Wait for receive thread to finish
     if (tlsReceiveThread_.joinable()) {
-        tlsReceiveThread_.join();
+        if (tlsReceiveThread_.get_id() == std::this_thread::get_id()) {
+            tlsReceiveThread_.detach();
+        } else {
+            tlsReceiveThread_.join();
+        }
     }
 
     if (connected_) {

@@ -53,13 +53,13 @@ public:
     RenderContext(const RenderContext&) = delete;
     RenderContext& operator=(const RenderContext&) = delete;
 
-    // Move allowed
+    // Move allowed (only construction)
     RenderContext(RenderContext&&) = default;
-    RenderContext& operator=(RenderContext&&) = default;
+    RenderContext& operator=(RenderContext&&) = delete;
 
-    // -----------------------------------------------------------------------
-    // Color settings
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Singleton access
+    // -------------------------------------------------------------------------
 
     // Set draw color (float: 0.0 ~ 1.0)
     void setColor(float r, float g, float b, float a = 1.0f) {

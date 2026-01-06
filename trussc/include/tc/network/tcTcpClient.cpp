@@ -4,20 +4,8 @@
 
 #include "tc/network/tcTcpClient.h"
 #include "tc/utils/tcLog.h"
+#include "tc/events/tcCoreEvents.h"
 #include <cstring>
-
-#ifdef _WIN32
-    #define CLOSE_SOCKET closesocket
-    #define SOCKET_ERROR_CODE WSAGetLastError()
-    #define WOULD_BLOCK_ERROR WSAEWOULDBLOCK
-#else
-    #include <errno.h>
-    #define CLOSE_SOCKET ::close
-    #define SOCKET_ERROR_CODE errno
-    #define WOULD_BLOCK_ERROR EWOULDBLOCK
-    #define INVALID_SOCKET -1
-    #define SOCKET_ERROR -1
-#endif
 
 namespace trussc {
 
@@ -243,11 +231,21 @@ void TcpClient::disconnect() {
 #endif
 
     if (receiveThread_.joinable()) {
-        receiveThread_.join();
+        if (receiveThread_.get_id() == std::this_thread::get_id()) {
+            // Called from within the receive thread (e.g. via callback)
+            // Cannot join self. Detach to allow thread to finish naturally.
+            receiveThread_.detach();
+        } else {
+            receiveThread_.join();
+        }
     }
 
     if (connectThread_.joinable()) {
-        connectThread_.join();
+        if (connectThread_.get_id() == std::this_thread::get_id()) {
+            connectThread_.detach();
+        } else {
+            connectThread_.join();
+        }
     }
 
     if (connected_) {
