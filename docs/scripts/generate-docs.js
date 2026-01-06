@@ -21,6 +21,7 @@ const yaml = require('js-yaml');
 const API_YAML = path.join(__dirname, '../api-definition.yaml');
 const SKETCH_API_JS = path.join(__dirname, '../../../trussc.org/sketch/trusssketch-api.js');
 const REFERENCE_MD = path.join(__dirname, '../../../TrussSketch/REFERENCE.md');
+const REFERENCE_MD_DOCS = path.join(__dirname, '../REFERENCE.md');
 
 // Parse command line args
 const args = process.argv.slice(2);
@@ -94,9 +95,11 @@ if (typeof module !== 'undefined' && module.exports) {
 
 // Generate REFERENCE.md
 function generateReferenceMd(api) {
-    let md = `# TrussSketch API Reference
+    let md = `# TrussC API Reference
 
-Complete API reference for TrussSketch. All functions are directly mapped from TrussC.
+Complete API reference. This document is auto-generated from \`api-definition.yaml\`.
+
+For the latest interactive reference, visit [trussc.org/reference](https://trussc.org/reference/).
 
 `;
 
@@ -196,8 +199,14 @@ function main() {
         if (generateReference) {
             console.log('\nGenerating REFERENCE.md...');
             const md = generateReferenceMd(api);
+            
+            // Write to TrussSketch
             fs.writeFileSync(REFERENCE_MD, md);
             console.log(`  Written: ${REFERENCE_MD}`);
+
+            // Write to TrussC/docs
+            fs.writeFileSync(REFERENCE_MD_DOCS, md);
+            console.log(`  Written: ${REFERENCE_MD_DOCS}`);
         }
     }
 

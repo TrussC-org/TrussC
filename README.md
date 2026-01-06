@@ -61,66 +61,16 @@ int main() {
 
 ## Examples
 
-| Category | Examples |
-|----------|----------|
-| **templates/** | emptyExample |
-| **graphics/** | graphicsExample, colorExample, fontExample, shaderExample, fboExample |
-| **3d/** | 3DPrimitivesExample, easyCamExample |
-| **node/** | nodeExample, hitTestExample, uiExample |
-| **input_output/** | keyboardExample, mouseExample, imageLoaderExample, screenshotExample |
-| **sound/** | soundPlayerExample, micInputExample, chipSoundExample |
-| **video/** | videoPlayerExample, videoGrabberExample |
-| **network/** | tcpExample, udpExample |
-| **ImGui/** | imguiExample |
-| **utils/** | timerExample, clipboardExample |
-| **tools/** | projectGenerator |
+TrussC comes with over 30 examples covering graphics, 3D, sound, video, and more.
+See them running in your browser at **[trussc.org/examples](https://trussc.org/examples/)**.
 
-## Main API
+Source code is available in the `examples/` directory.
 
-### Drawing
+## API Reference
 
-```cpp
-clear(0.1);                      // Clear background (0-1)
-setColor(1.0, 0.5, 0.0);         // Set draw color (0-1)
-drawRect(x, y, w, h);            // Rectangle
-drawCircle(x, y, radius);        // Circle
-drawLine(x1, y1, x2, y2);        // Line
-drawTriangle(x1, y1, ...);       // Triangle
-```
+Comprehensive API reference is available at **[trussc.org/reference](https://trussc.org/reference/)**.
 
-### Transform
-
-```cpp
-translate(x, y);
-rotate(radians);
-scale(sx, sy);
-pushMatrix();
-popMatrix();
-```
-
-### Input
-
-```cpp
-getMouseX();
-getMouseY();
-isMousePressed();
-```
-
-### Time
-
-```cpp
-getElapsedTime();    // Seconds since start
-getDeltaTime();      // Seconds since last frame
-getFrameRate();      // FPS
-```
-
-### Color
-
-```cpp
-Color c(1.0, 0.5, 0.0);              // RGB (0-1)
-Color::fromHSB(hue, sat, bri);       // From HSB
-colors::cornflowerBlue;              // Predefined colors
-```
+Markdown version is also available in [docs/REFERENCE.md](docs/REFERENCE.md).
 
 ## Why TAU?
 
@@ -181,8 +131,10 @@ src/                  # Platform-specific implementations
 ## Documentation
 
 - [GET_STARTED.md](docs/GET_STARTED.md) - Getting started guide
+- [REFERENCE.md](docs/REFERENCE.md) - API Reference
 - [TrussC_vs_openFrameworks.md](docs/TrussC_vs_openFrameworks.md) - API mapping for oF users
 - [ADDONS.md](docs/ADDONS.md) - How to use addons
+- [AI_AUTOMATION.md](docs/AI_AUTOMATION.md) - MCP Integration & Automation
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Design philosophy and architecture
 - [BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) - CMake build system details
 - [ROADMAP.md](docs/ROADMAP.md) - Development roadmap
