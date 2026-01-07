@@ -120,3 +120,17 @@ projectGenerator/projectGenerator
 # Tools like sokol-shdc are auto-downloaded on first build
 trussc/tools/
 docs/scripts/node_modules/
+
+# =============================================================================
+# Project Generator Auto-generated Files
+# =============================================================================
+examples/**/CMakePresets.json
+examples/**/build-web.command
+examples/**/build-web.bat
+examples/**/build-web.sh
+addons/**/CMakePresets.json
+addons/**/build-web.command
+addons/**/build-web.bat
+addons/**/build-web.sh
+examples/CMakeLists.txt
+addons/CMakeLists.txt
