@@ -1,59 +1,132 @@
 # TrussC Build System
 
-TrussC uses CMake with custom macros that automate most configuration. Users typically only need to edit `addons.make`.
+TrussC uses a modern CMake-based build system designed to be automated via the **Project Generator**.
+
+> ⚠️ **IMPORTANT**
+>
+> **Do NOT edit `CMakeLists.txt` or `CMakePresets.json` manually.**
+> These files are automatically generated and managed by the Project Generator.
+>
+> - To add addons: Edit `addons.make` or use the Project Generator GUI.
+> - To change project settings: Use the Project Generator.
 
 ---
 
-## Quick Start
+## 1. Project Generator
 
-A minimal TrussC project needs only this CMakeLists.txt:
+The **Project Generator** is the core tool for managing TrussC projects. It handles:
+- Creating new projects
+- Updating existing projects (e.g. after TrussC updates)
+- Managing addons (`addons.make`)
+- Generating IDE project files (VSCode, Xcode, Visual Studio)
+- Configuring Web (WASM) builds
 
-```cmake
-cmake_minimum_required(VERSION 3.20)
+### GUI Mode
+Run the `projectGenerator` app (found in `trussc/projectGenerator/`).
+- **Create:** Select a name and path, choose addons, and click "Generate".
+- **Update:** Use "Import" to select an existing project folder, modify settings, and click "Update".
 
-set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")
-include(${TRUSSC_DIR}/cmake/trussc_app.cmake)
+### CLI Mode (Automation)
+The Project Generator can be run from the command line for automation or headless environments.
 
-trussc_app()
-```
+```bash
+# Update an existing project
+projectGenerator --update path/to/myProject
 
-That's it. Everything else is automatic.
+# Enable Web build (WASM)
+projectGenerator --update path/to/myProject --web
 
----
+# Specify TrussC root explicitly (if auto-detection fails)
+projectGenerator --update path/to/myProject --tc-root path/to/TrussC
 
-## What `trussc_app()` Does
-
-The `trussc_app()` macro handles all standard configuration:
-
-| Task | Automatic Behavior |
-|------|-------------------|
-| **Project name** | Derived from folder name |
-| **Source files** | Recursively collects `src/*.cpp`, `*.c`, `*.h`, `*.mm` |
-| **C++ standard** | C++20 |
-| **TrussC linking** | Links `tc::TrussC` |
-| **Addons** | Reads `addons.make` and applies all listed addons |
-| **Output directory** | `bin/` in project folder |
-| **macOS bundle** | Creates `.app` bundle with proper Info.plist |
-| **Windows** | Sets startup project in Visual Studio |
-| **App icon** | Auto-converts PNG in `icon/` folder |
-
-### Optional Parameters
-
-```cmake
-# Explicit project name
-trussc_app(NAME myCustomName)
-
-# Explicit source files (skip auto-collection)
-trussc_app(SOURCES main.cpp app.cpp)
+# Generate a new project
+projectGenerator --generate --name myNewApp --dir path/to/projects
 ```
 
 ---
 
-## Addon System
+## 2. Building Projects
+
+TrussC uses **CMake Presets** to ensure consistent build configurations across platforms (macOS, Windows, Linux, Web).
+
+### Using VSCode (Recommended)
+1. Install **CMake Tools** extension.
+2. Open the project folder.
+3. Select a preset (e.g., `macos`, `windows`, `linux`, `web`) from the status bar or command palette.
+4. Press `F7` (Build) or `F5` (Debug).
+
+### Using Command Line
+
+**Native Build (macOS/Linux/Windows):**
+```bash
+cmake --preset <os>   # e.g., macos, linux, windows
+cmake --build --preset <os>
+```
+
+**Web Build (WASM):**
+The Project Generator creates a helper script (`build-web.command`, `build-web.bat`, or `build-web.sh`) in your project folder. This script automatically handles Emscripten environment setup.
+
+```bash
+./build-web.command
+```
+
+Or manually using CMake:
+```bash
+# Requires Emscripten SDK to be set up
+cmake --preset web
+cmake --build --preset web
+```
+
+### Building All Examples
+To build all examples in the repository (useful for testing):
+
+```bash
+cd examples
+./build_all.sh          # Native build only
+./build_all.sh --web    # Native + Web build
+./build_all.sh --clean  # Clean rebuild
+```
+This script automatically uses `projectGenerator` to update each example before building.
+
+---
+
+## 3. Project Structure
+
+A standard TrussC project looks like this:
+
+```
+myProject/
+├── addons.make          # List of used addons (User editable)
+├── bin/                 # Output executables & assets
+│   ├── data/            # Place your assets here (images, fonts, etc.)
+│   ├── myProject.app    # (macOS)
+│   ├── myProject.exe    # (Windows)
+│   └── myProject.html   # (Web)
+├── build-macos/         # Build artifacts (do not touch)
+├── build-web/           # Build artifacts (do not touch)
+├── CMakeLists.txt       # AUTO-GENERATED (Do not edit)
+├── CMakePresets.json    # AUTO-GENERATED (Do not edit)
+├── icon/                # App icon (512x512 png)
+└── src/                 # Source code
+    ├── main.cpp
+    └── tcApp.cpp
+```
+
+### Data Folder
+Place assets (images, fonts, sounds) in `bin/data/`.
+This path is automatically resolved at runtime via `tc::getDataPath()`.
+
+### App Icon
+Place a 512x512+ PNG file in the `icon/` folder.
+- **macOS:** Converted to `.icns` automatically (requires Xcode tools).
+- **Windows:** Converted to `.ico` automatically (requires ImageMagick).
+
+---
+
+## 4. Addon System
 
 ### Using Addons
-
-Create `addons.make` in your project folder:
+Addons are libraries located in `TrussC/addons/`. To use an addon, add its name to `addons.make` in your project folder:
 
 ```
 # Physics
@@ -63,240 +136,32 @@ tcxBox2d
 tcxOsc
 ```
 
-Lines starting with `#` are comments. Empty lines are ignored.
+Then run **Project Generator** (Update) to apply changes.
 
-### How Addon Loading Works
+### Creating Addons
+An addon is simply a folder in `TrussC/addons/`.
 
-When `apply_addons()` is called (automatically by `trussc_app()`):
-
-1. Reads `addons.make` line by line
-2. For each addon name, calls `use_addon(target, addonName)`
-3. `use_addon()` resolves the addon path: `${TC_ROOT}/addons/${addonName}`
-
-### Addon Resolution
-
-Each addon is processed based on whether it has a CMakeLists.txt:
-
-**With CMakeLists.txt:**
+**Simple Addon:**
 ```
-tcxBox2d/
-├── CMakeLists.txt  ← Used directly (full control)
-├── src/
-└── libs/
-```
-The addon's CMakeLists.txt is included via `add_subdirectory()`. Use this for:
-- FetchContent dependencies
-- Complex build logic
-- Platform-specific configuration
-
-**Without CMakeLists.txt:**
-```
-tcxSimple/
-├── src/           ← Auto-collected
-│   ├── tcxSimple.h
-│   └── tcxSimple.cpp
-└── libs/          ← Auto-collected
-    └── somelib/
-        ├── src/
-        └── include/
-```
-The build system automatically:
-- Collects all `.cpp`, `.c`, `.mm`, `.m` from `src/` and `libs/*/src/`
-- Sets up include paths for `src/`, `include/`, and `libs/*/include/`
-- Creates a static library and links TrussC
-
-### Addon Dependencies
-
-Addons can depend on other addons using `use_addon()` in their CMakeLists.txt:
-
-```cmake
-# tcxMyAddon/CMakeLists.txt
-add_library(tcxMyAddon STATIC ...)
-use_addon(tcxMyAddon tcxBox2d)  # Depends on tcxBox2d
-target_link_libraries(tcxMyAddon PUBLIC TrussC)
+tcxMyAddon/
+├── src/           # Source files (auto-collected)
+│   ├── tcxMyAddon.h
+│   └── tcxMyAddon.cpp
+└── libs/          # External libraries (optional)
 ```
 
-Users only need to add `tcxMyAddon` to their `addons.make`; `tcxBox2d` is automatically included.
+**Complex Addon (with CMakeLists.txt):**
+If you need custom build logic, add a `CMakeLists.txt` in the addon root. It will be included via `add_subdirectory()`.
 
 ---
 
-## Cross-Platform Builds
+## 5. Under the Hood
 
-### macOS
+The `trussc_app()` CMake macro (in `trussc/cmake/trussc_app.cmake`) handles:
+*   Recursively collecting source files from `src/`
+*   Setting C++20 standard
+*   Linking `tc::TrussC` core library
+*   Applying addons defined in `addons.make`
+*   Configuring platform-specific bundles (macOS .app, Windows resource files)
 
-```bash
-mkdir build && cd build
-cmake ..
-cmake --build .
-```
-
-Or use Xcode:
-```bash
-cmake -G Xcode ..
-open *.xcodeproj
-```
-
-**Output:** `bin/ProjectName.app` (macOS bundle)
-
-### Windows
-
-```bash
-mkdir build && cd build
-cmake ..
-cmake --build . --config Release
-```
-
-Or open in Visual Studio:
-```bash
-cmake -G "Visual Studio 17 2022" ..
-```
-
-**Output:** `bin/ProjectName.exe`
-
-### Linux
-
-**Required packages (Ubuntu/Debian):**
-
-```bash
-sudo apt install -y \
-    libx11-dev \
-    libxcursor-dev \
-    libxi-dev \
-    libxrandr-dev \
-    libgl1-mesa-dev \
-    libasound2-dev \
-    libgtk-3-dev \
-    libavcodec-dev \
-    libavformat-dev \
-    libswscale-dev \
-    libavutil-dev \
-    pkg-config
-```
-
-| Package | Purpose |
-|---------|---------|
-| `libx11-dev` | X11 window system |
-| `libxcursor-dev` | Cursor management |
-| `libxi-dev` | X Input Extension |
-| `libxrandr-dev` | Display settings |
-| `libgl1-mesa-dev` | OpenGL |
-| `libasound2-dev` | ALSA (audio) |
-| `libgtk-3-dev` | GTK3 (file dialogs) |
-| `libavcodec-dev` | FFmpeg video/audio codecs |
-| `libavformat-dev` | FFmpeg container formats |
-| `libswscale-dev` | FFmpeg pixel format conversion |
-| `libavutil-dev` | FFmpeg utilities |
-| `pkg-config` | Library discovery |
-
-**Build:**
-
-```bash
-mkdir build && cd build
-cmake ..
-cmake --build .
-```
-
-**Output:** `bin/ProjectName`
-
-### Web (Emscripten)
-
-Requires [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html).
-
-```bash
-source /path/to/emsdk/emsdk_env.sh
-mkdir build-web && cd build-web
-emcmake cmake ..
-cmake --build .
-```
-
-**Output:** `bin/ProjectName.html` (plus `.js` and `.wasm`)
-
-The Project Generator can create a `build-web.command` (macOS) or `build-web.bat` (Windows) script that handles this automatically.
-
----
-
-## Output Structure
-
-All builds output to the `bin/` folder in your project:
-
-```
-myProject/
-├── bin/
-│   ├── myProject.app/    # macOS bundle
-│   │   └── Contents/
-│   │       └── Resources/
-│   │           └── data/  # Symlink to bin/data
-│   ├── myProject.exe      # Windows
-│   ├── myProject          # Linux
-│   ├── myProject.html     # Web
-│   └── data/              # Assets folder
-└── src/
-```
-
-### Data Folder
-
-Place assets (images, fonts, sounds) in `bin/data/`. This path is automatically resolved at runtime via `tc::getDataPath()`.
-
----
-
-## App Icon
-
-Place a 512x512+ PNG in the `icon/` folder:
-
-```
-myProject/
-├── icon/
-│   └── myicon.png
-└── src/
-```
-
-At build time:
-- **macOS:** Converted to `.icns` (requires `sips` and `iconutil`, included with Xcode)
-- **Windows:** Converted to `.ico` (requires [ImageMagick](https://imagemagick.org/))
-
-If conversion tools are not available, the icon step is skipped silently.
-
----
-
-## Build Types
-
-CMake supports multiple build types:
-
-| Type | Description |
-|------|-------------|
-| `Debug` | No optimization, full debug symbols |
-| `Release` | Full optimization, no debug symbols |
-| `RelWithDebInfo` | Optimization with debug symbols (default) |
-| `MinSizeRel` | Optimize for size |
-
-```bash
-cmake -DCMAKE_BUILD_TYPE=Release ..
-```
-
-For multi-config generators (Xcode, Visual Studio):
-```bash
-cmake --build . --config Release
-```
-
----
-
-## Troubleshooting
-
-### "TrussC addon not found"
-
-Check that:
-1. Addon name in `addons.make` matches the folder name exactly
-2. Addon exists in `${TC_ROOT}/addons/`
-
-### "Cannot find TrussC.h"
-
-Check that `TRUSSC_DIR` in CMakeLists.txt points to the correct path.
-
-### Build is slow
-
-- Use `cmake --build . -j` for parallel builds
-- On Windows, avoid Debug builds for daily development (use RelWithDebInfo)
-
-### Emscripten errors
-
-Make sure to source `emsdk_env.sh` before running `emcmake cmake`.
+The **Project Generator** ensures that `CMakePresets.json` is correctly configured with the absolute path to your TrussC installation (`TRUSSC_DIR`), so you can move your project folder anywhere without breaking the build.
