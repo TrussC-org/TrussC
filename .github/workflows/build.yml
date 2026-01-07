@@ -59,19 +59,26 @@ jobs:
           elif [ "$RUNNER_OS" == "Linux" ]; then
             chmod +x projectGenerator/buildProjectGenerator_linux.sh
             sed -i 's/read -p/#read -p/g' projectGenerator/buildProjectGenerator_linux.sh
-            sed -i 's|"\$SCRIPT_DIR/projectGenerator"|#&|g' projectGenerator/buildProjectGenerator_linux.sh
+            sed -i 's|\"$SCRIPT_DIR/projectGenerator\"|#&|g' projectGenerator/buildProjectGenerator_linux.sh
             ./projectGenerator/buildProjectGenerator_linux.sh
           elif [ "$RUNNER_OS" == "Windows" ]; then
-            sed -i 's/pause/#pause/g' projectGenerator/buildProjectGenerator_win.bat
-            sed -i 's/start ""/#start ""/g' projectGenerator/buildProjectGenerator_win.bat
-            cmd.exe /c "projectGenerator\\buildProjectGenerator_win.bat"
+            # Run batch file directly (Git Bash handles it)
+            ./projectGenerator/buildProjectGenerator_win.bat
+            echo "Searching for projectGenerator.exe..."
+            find . -name projectGenerator.exe
           fi
 
-      - name: Build all examples
+      - name: Build examples
         shell: bash
         run: |
           chmod +x examples/build_all.py
-          ./examples/build_all.py --verbose
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+             echo "Running quick build (AllFeaturesExample only)..."
+             ./examples/build_all.py --test-only --verbose
+          else
+             echo "Running full build..."
+             ./examples/build_all.py --verbose
+          fi
 
   build-web:
     runs-on: ubuntu-latest
@@ -96,10 +103,16 @@ jobs:
         run: |
           chmod +x projectGenerator/buildProjectGenerator_linux.sh
           sed -i 's/read -p/#read -p/g' projectGenerator/buildProjectGenerator_linux.sh
-          sed -i 's|"\$SCRIPT_DIR/projectGenerator"|#&|g' projectGenerator/buildProjectGenerator_linux.sh
+          sed -i 's|\"$SCRIPT_DIR/projectGenerator\"|#&|g' projectGenerator/buildProjectGenerator_linux.sh
           ./projectGenerator/buildProjectGenerator_linux.sh
 
-      - name: Build all examples (Web)
+      - name: Build examples (Web)
         run: |
           chmod +x examples/build_all.py
-          ./examples/build_all.py --web-only --verbose
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+             echo "Running quick build (AllFeaturesExample only)..."
+             ./examples/build_all.py --web-only --test-only --verbose
+          else
+             echo "Running full build..."
+             ./examples/build_all.py --web-only --verbose
+          fi

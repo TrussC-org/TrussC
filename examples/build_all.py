@@ -7,6 +7,7 @@ import shutil
 import argparse
 import glob
 from pathlib import Path
+import time
 
 # =============================================================================
 # Configuration & Constants
@@ -30,88 +31,93 @@ class Colors:
             print(msg)
 
 # Paths
-SCRIPT_DIR = Path(__file__).resolve().parent
-ROOT_DIR = SCRIPT_DIR.parent
+SCRIPT_DIR = os.path.abspath(os.path.dirname(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
 
-def detect_platform_preset():
+def get_platform_info():
     system = platform.system()
-    if system == 'Darwin':
-        return 'macos'
-    elif system == 'Windows':
-        return 'windows'
-    elif system == 'Linux':
-        return 'linux'
+    if system == "Windows":
+        return {
+            "os": "windows",
+            "build_dir": "build-windows",
+            "cmake_generator": "Visual Studio 17 2022",
+            "pg_bin_path": ["projectGenerator", "tools", "projectGenerator", "bin", "projectGenerator.exe"]
+        }
+    elif system == "Darwin":
+        return {
+            "os": "macos",
+            "build_dir": "build-macos",
+            "cmake_generator": None, 
+            "pg_bin_path": ["projectGenerator", "tools", "projectGenerator", "bin", "projectGenerator.app", "Contents", "MacOS", "projectGenerator"]
+        }
     else:
-        Colors.print(f"Unknown platform: {system}", Colors.RED)
-        sys.exit(1)
+        return {
+            "os": "linux",
+            "build_dir": "build-linux",
+            "cmake_generator": None,
+            "pg_bin_path": ["projectGenerator", "tools", "projectGenerator", "bin", "projectGenerator"]
+        }
 
-def find_project_generator(preset):
-    pg_path = None
-    if preset == 'macos':
-        pg_path = ROOT_DIR / "projectGenerator/tools/projectGenerator/bin/projectGenerator.app/Contents/MacOS/projectGenerator"
-    elif preset == 'windows':
-        pg_path = ROOT_DIR / "projectGenerator/tools/projectGenerator/bin/projectGenerator.exe"
-    else: # linux
-        pg_path = ROOT_DIR / "projectGenerator/tools/projectGenerator/bin/projectGenerator"
-
-    if not pg_path.exists():
-        Colors.print(f"ProjectGenerator not found at: {pg_path}", Colors.RED)
-        Colors.print("Please build projectGenerator first.", Colors.YELLOW)
-        sys.exit(1)
+def find_project_generator(root_dir, platform_info):
+    exe_name = "projectGenerator.exe" if platform_info["os"] == "windows" else "projectGenerator"
     
-    return pg_path
+    # Priority list of paths to check
+    search_paths = [
+        os.path.join(root_dir, *platform_info["pg_bin_path"]),
+        os.path.join(root_dir, "projectGenerator", "tools", "projectGenerator", "bin", exe_name),
+        os.path.join(root_dir, "projectGenerator", exe_name),
+        os.path.join(root_dir, "projectGenerator", "tools", "projectGenerator", "build", "Release", exe_name),
+        os.path.join(root_dir, "projectGenerator", "tools", "projectGenerator", "bin", "Release", exe_name),
+        os.path.join(root_dir, "projectGenerator", "tools", "projectGenerator", "bin", "projectGenerator.app", "Contents", "MacOS", "projectGenerator"),
+    ]
 
-def find_examples():
-    examples = []
+    for pg_path in search_paths:
+        if os.path.exists(pg_path):
+            Colors.print(f"Found ProjectGenerator at: {pg_path}", Colors.GREEN)
+            return pg_path
+            
+    Colors.print(f"ProjectGenerator not found. Searched locations:", Colors.RED)
+    for p in search_paths:
+        print(f" - {p}")
+    sys.exit(1)
+
+def find_examples(root_dir):
+    examples_dir = os.path.join(root_dir, "examples")
+    addons_dir = os.path.join(root_dir, "addons")
     
-    # 1. Core examples in examples/
-    # Look for directories containing 'src'
-    # Exclude templates, tools, build dirs, bin, etc.
-    skip_dirs = {'templates', 'tools', 'build', 'bin', 'emscripten', 'CMakeFiles', '.git'}
+    example_paths = []
     
-    for root, dirs, files in os.walk(SCRIPT_DIR):
-        # Modify dirs in-place to skip unwanted directories
-        dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith('build-')]
-        
-        if 'src' in dirs:
-            path = Path(root)
-            # Double check it's not in an excluded path
-            rel_parts = path.relative_to(SCRIPT_DIR).parts
-            if not any(p in skip_dirs for p in rel_parts):
-                examples.append(path)
+    for root, dirs, files in os.walk(examples_dir):
+        if "src" in dirs:
+            if "templates" in root or "tools" in root or "build" in root or "bin" in root or "emscripten" in root or "CMakeFiles" in root:
+                continue
+            example_paths.append(root)
 
-    # 2. Addon examples in addons/
-    # Look for addons/*/example-*
-    addons_dir = ROOT_DIR / "addons"
-    if addons_dir.exists():
-        # Iterate over addon directories (depth 1)
-        for addon in addons_dir.iterdir():
-            if addon.is_dir():
-                # Iterate over example directories (depth 2)
-                for example in addon.iterdir():
-                    if example.is_dir() and example.name.startswith("example-") and \
-                       not example.name.startswith("build") and example.name != "bin":
-                        examples.append(example)
+    if os.path.exists(addons_dir):
+        for addon in os.listdir(addons_dir):
+            addon_path = os.path.join(addons_dir, addon)
+            if os.path.isdir(addon_path):
+                for item in os.listdir(addon_path):
+                    if item.startswith("example-"):
+                        example_path = os.path.join(addon_path, item)
+                        if os.path.exists(os.path.join(example_path, "src")):
+                            example_paths.append(example_path)
 
-    # Remove duplicates and sort
-    return sorted(list(set(examples)))
+    return sorted(list(set(example_paths)))
 
 def run_command(cmd, cwd, verbose=False):
-    """Run a shell command. Returns True if successful."""
     try:
         if verbose:
             subprocess.run(cmd, cwd=cwd, check=True)
         else:
-            # Capture output and only show on error
             subprocess.run(cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         return True
     except subprocess.CalledProcessError as e:
         if not verbose:
-            # Show the captured output if it failed (and wasn't already shown)
             if e.stdout:
                 print(e.stdout.decode('utf-8', errors='replace'))
         return False
@@ -125,23 +131,34 @@ def main():
     parser.add_argument('--clean', action='store_true', help="Clean build directories before building")
     parser.add_argument('--web', action='store_true', help="Also build for WebAssembly")
     parser.add_argument('--web-only', action='store_true', help="Build for WebAssembly only (skip native build)")
+    parser.add_argument('--test-only', action='store_true', help="Build ONLY AllFeaturesExample for quick CI check")
     parser.add_argument('--verbose', action='store_true', help="Show detailed build output")
     args = parser.parse_args()
 
     if args.web_only:
         args.web = True
 
-    preset = detect_platform_preset()
-    pg_bin = find_project_generator(preset)
+    platform_info = get_platform_info()
+    pg_bin = find_project_generator(ROOT_DIR, platform_info)
     
     Colors.print("=== TrussC Examples Batch Build (Python) ===", Colors.BLUE)
-    Colors.print(f"Platform: {preset}", Colors.YELLOW)
+    Colors.print(f"Platform: {platform_info['os']}", Colors.YELLOW)
     Colors.print(f"ProjectGenerator: {pg_bin}", Colors.YELLOW)
     if args.web_only:
         Colors.print("Mode: Web Only", Colors.YELLOW)
+    if args.test_only:
+        Colors.print("Mode: AllFeaturesExample Only", Colors.YELLOW)
     print("")
 
-    example_dirs = find_examples()
+    if args.test_only:
+        test_example = os.path.join(ROOT_DIR, "examples", "tests", "AllFeaturesExample")
+        if os.path.exists(test_example):
+            example_dirs = [test_example]
+        else:
+            Colors.print(f"AllFeaturesExample not found at: {test_example}", Colors.RED)
+            sys.exit(1)
+    else:
+        example_dirs = find_examples(ROOT_DIR)
     
     if not example_dirs:
         Colors.print("No example directories found!", Colors.RED)
@@ -151,18 +168,17 @@ def main():
     print(f"Found {total} examples")
     print("")
 
-    # Clean TrussC shared build if requested
     if args.clean:
-        trussc_dir = ROOT_DIR / "trussc"
+        trussc_dir = os.path.join(ROOT_DIR, "trussc")
         Colors.print("Cleaning TrussC shared build...", Colors.YELLOW)
         if not args.web_only:
-            shared_build = trussc_dir / f"build-{preset}"
-            if shared_build.exists():
+            shared_build = os.path.join(trussc_dir, platform_info["build_dir"])
+            if os.path.exists(shared_build):
                 shutil.rmtree(shared_build)
         
         if args.web:
-            web_build = trussc_dir / "build-web"
-            if web_build.exists():
+            web_build = os.path.join(trussc_dir, "build-web")
+            if os.path.exists(web_build):
                 shutil.rmtree(web_build)
 
     success_count = 0
@@ -170,18 +186,14 @@ def main():
     failed_list = []
 
     for i, example_dir in enumerate(example_dirs):
-        # Calculate relative name for display
         try:
-            example_name = example_dir.relative_to(ROOT_DIR)
+            example_name = os.path.relpath(example_dir, ROOT_DIR)
         except ValueError:
-            example_name = example_dir # Fallback
+            example_name = example_dir
 
         Colors.print(f"[{i+1}/{total}] Updating & Building: {example_name}", Colors.YELLOW)
 
-        # ---------------------------------------------------------
-        # 1. Update Project
-        # ---------------------------------------------------------
-        pg_cmd = [str(pg_bin), "--update", str(example_dir), "--tc-root", str(ROOT_DIR)]
+        pg_cmd = [str(pg_bin), "--update", example_dir, "--tc-root", ROOT_DIR]
         if args.web:
             pg_cmd.append("--web")
         
@@ -191,49 +203,58 @@ def main():
             failed_list.append(f"{example_name} (update)")
             continue
 
-        # ---------------------------------------------------------
-        # 2. Build Native
-        # ---------------------------------------------------------
         if not args.web_only:
-            build_dir = example_dir / f"build-{preset}"
-            if args.clean and build_dir.exists():
+            build_dir_name = platform_info["build_dir"]
+            build_dir = os.path.join(example_dir, build_dir_name)
+            
+            if args.clean and os.path.exists(build_dir):
                 shutil.rmtree(build_dir)
 
-            # Configure
-            if not run_command(["cmake", "--preset", preset], cwd=example_dir, verbose=args.verbose):
+            cmd_config = ["cmake", "-S", ".", "-B", build_dir_name]
+            if platform_info["cmake_generator"]:
+                cmd_config.extend(["-G", platform_info["cmake_generator"]])
+            
+            if not run_command(cmd_config, cwd=example_dir, verbose=args.verbose):
                 Colors.print(f"  Native Configure failed!", Colors.RED)
                 failed_count += 1
                 failed_list.append(f"{example_name} (native-conf)")
                 continue
 
-            # Build
-            if not run_command(["cmake", "--build", "--preset", preset], cwd=example_dir, verbose=args.verbose):
+            cmd_build = ["cmake", "--build", build_dir_name, "--config", "Release"]
+            
+            if "Visual Studio" not in (platform_info["cmake_generator"] or ""):
+                import multiprocessing
+                jobs = str(multiprocessing.cpu_count())
+                cmd_build.extend(["-j", jobs])
+
+            if not run_command(cmd_build, cwd=example_dir, verbose=args.verbose):
                 Colors.print(f"  Native Build failed!", Colors.RED)
                 failed_count += 1
                 failed_list.append(f"{example_name} (native-build)")
                 continue
 
-        # ---------------------------------------------------------
-        # 3. Build Web (Optional)
-        # ---------------------------------------------------------
         if args.web:
-            # ProjectGenerator has already updated presets and scripts
-            build_dir_web = example_dir / "build-web"
-            if args.clean and build_dir_web.exists():
+            build_dir_web = os.path.join(example_dir, "build-web")
+            if args.clean and os.path.exists(build_dir_web):
                 shutil.rmtree(build_dir_web)
 
-            # Check for cmake (we assume environment is set up if not using emcmake wrapper explicitly)
-            # The preset 'web' handles the toolchain file.
+            if shutil.which("emcmake"):
+                cmd_config_web = ["emcmake", "cmake", "-S", ".", "-B", "build-web"]
+            else:
+                cmd_config_web = ["cmake", "-S", ".", "-B", "build-web"]
             
-            # Configure
-            if not run_command(["cmake", "--preset", "web"], cwd=example_dir, verbose=args.verbose):
+            if not run_command(cmd_config_web, cwd=example_dir, verbose=args.verbose):
                 Colors.print(f"  Web Configure failed!", Colors.RED)
                 failed_count += 1
                 failed_list.append(f"{example_name} (web-conf)")
                 continue
 
-            # Build
-            if not run_command(["cmake", "--build", "--preset", "web"], cwd=example_dir, verbose=args.verbose):
+            cmd_build_web = ["cmake", "--build", "build-web"]
+            import multiprocessing
+            jobs = str(multiprocessing.cpu_count())
+            cmd_build_web.extend(["-j", jobs])
+
+            if not run_command(cmd_build_web, cwd=example_dir, verbose=args.verbose):
                 Colors.print(f"  Web Build failed!", Colors.RED)
                 failed_count += 1
                 failed_list.append(f"{example_name} (web-build)")
@@ -242,9 +263,6 @@ def main():
         Colors.print("  Success!", Colors.GREEN)
         success_count += 1
 
-    # ---------------------------------------------------------
-    # Summary
-    # ---------------------------------------------------------
     print("")
     Colors.print("=== Build Summary ===", Colors.BLUE)
     print(f"Total:   {total}")
