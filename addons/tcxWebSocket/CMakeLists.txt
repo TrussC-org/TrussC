@@ -19,6 +19,7 @@ target_include_directories(${ADDON_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # If tcxTls is not used, only ws:// will work on native.
 if(EMSCRIPTEN)
     target_link_libraries(${ADDON_NAME} PUBLIC TrussC)
+    target_link_options(${ADDON_NAME} PUBLIC "SHELL:-lwebsocket.js")
 else()
     target_link_libraries(${ADDON_NAME} PUBLIC TrussC tc::tcxTls)
 endif()
