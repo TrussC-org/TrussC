@@ -9,7 +9,7 @@ void tcApp::draw() {
     clear(0.12f);
 
     setColor(0.7f);
-    drawBitmapString(R"(dbg::beep() - Debug Sound Presets
+    drawBitmapString(R"(beep() - Debug Sound Presets
 
 [Basic]       1: ping
 [Positive]    2: success     3: complete    4: coin
@@ -22,37 +22,37 @@ UP/DOWN: Volume    Click: ping)", 50, 50);
     // Volume bar
     float y = 200;
     setColor(0.5f);
-    drawBitmapString(format("Volume: {:.0f}%", dbg::getBeepVolume() * 100), 50, y);
+    drawBitmapString(format("Volume: {:.0f}%", getBeepVolume() * 100), 50, y);
     setColor(0.3f);
     drawRect(170, y - 3, 150, 14);
     setColor(colors::lime);
-    drawRect(170, y - 3, 150 * dbg::getBeepVolume(), 14);
+    drawRect(170, y - 3, 150 * getBeepVolume(), 14);
 }
 
 void tcApp::keyPressed(int key) {
     switch (key) {
-        case '1': dbg::beep(dbg::Beep::ping); break;
-        case '2': dbg::beep(dbg::Beep::success); break;
-        case '3': dbg::beep(dbg::Beep::complete); break;
-        case '4': dbg::beep(dbg::Beep::coin); break;
-        case '5': dbg::beep(dbg::Beep::error); break;
-        case '6': dbg::beep(dbg::Beep::warning); break;
-        case '7': dbg::beep(dbg::Beep::cancel); break;
-        case '8': dbg::beep(dbg::Beep::click); break;
-        case '9': dbg::beep(dbg::Beep::typing); break;
-        case '0': dbg::beep(dbg::Beep::notify); break;
-        case '-': dbg::beep(dbg::Beep::sweep); break;
+        case '1': beep(Beep::ping); break;
+        case '2': beep(Beep::success); break;
+        case '3': beep(Beep::complete); break;
+        case '4': beep(Beep::coin); break;
+        case '5': beep(Beep::error); break;
+        case '6': beep(Beep::warning); break;
+        case '7': beep(Beep::cancel); break;
+        case '8': beep(Beep::click); break;
+        case '9': beep(Beep::typing); break;
+        case '0': beep(Beep::notify); break;
+        case '-': beep(Beep::sweep); break;
         case KEY_UP:
-            dbg::setBeepVolume(dbg::getBeepVolume() + 0.1f);
-            dbg::beep();
+            setBeepVolume(getBeepVolume() + 0.1f);
+            beep();
             break;
         case KEY_DOWN:
-            dbg::setBeepVolume(dbg::getBeepVolume() - 0.1f);
-            dbg::beep();
+            setBeepVolume(getBeepVolume() - 0.1f);
+            beep();
             break;
     }
 }
 
 void tcApp::mousePressed(Vec2 pos, int button) {
-    dbg::beep();
+    beep();
 }

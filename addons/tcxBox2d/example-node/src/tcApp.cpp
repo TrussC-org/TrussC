@@ -39,6 +39,9 @@ public:
         // Create boundary walls at screen edges
         world.createBounds();
 
+        // Add root node to scene graph for automatic update/draw
+        addChild(root);
+
         // Place initial objects
         for (int i = 0; i < 3; ++i) {
             addCircle(200 + i * 100, 100, 25 + i * 10);
@@ -83,33 +86,15 @@ public:
         // Advance physics simulation
         world.update();
 
-        // root.updateTree() calls update() on all child nodes
-        // Body::update() syncs Box2D position to Node's x, y, rotation
-        root->updateTree();
+        // No need to call root->updateTree() manually
     }
 
     void draw() override {
         clear(0.12f);
 
-        // root.drawTree() draws all child nodes at once
-        // Each Body's drawTree() automatically applies x, y, rotation
-        // Set color inside draw() or before drawing
-
-        // Draw each type separately to set different colors
+        // Nodes are drawn automatically after this function.
+        // Set a default color for them.
         setColor(1.0f, 0.78f, 0.4f);
-        for (auto& circle : circles) {
-            circle->drawTree();
-        }
-
-        setColor(0.4f, 0.78f, 1.0f);
-        for (auto& rect : rects) {
-            rect->drawTree();
-        }
-
-        setColor(0.78f, 0.4f, 1.0f);
-        for (auto& poly : polygons) {
-            poly->drawTree();
-        }
 
         // Draw spring line if dragging
         if (world.isDragging()) {
@@ -131,8 +116,11 @@ public:
         if (!circles.empty()) {
             auto& c = circles[0];
             drawBitmapString("Circle[0] Node x,y: " +
-                std::to_string((int)c->x) + ", " + std::to_string((int)c->y), 10, 126);
+                std::to_string((int)c->getX()) + ", " + std::to_string((int)c->getY()), 10, 126);
         }
+        
+        // Reset color for automatic drawing
+        setColor(1.0f, 0.78f, 0.4f);
     }
 
     void mousePressed(Vec2 pos, int button) override {

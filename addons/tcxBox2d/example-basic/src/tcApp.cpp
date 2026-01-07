@@ -36,47 +36,43 @@ public:
         auto c1 = std::make_shared<box2d::CircleBody>();
         c1->setup(world, 350, 80, 30);
         circles.push_back(c1);
+        addChild(c1);
 
         auto c2 = std::make_shared<box2d::CircleBody>();
         c2->setup(world, 380, 150, 25);
         circles.push_back(c2);
+        addChild(c2);
 
         auto c3 = std::make_shared<box2d::CircleBody>();
         c3->setup(world, 340, 200, 35);
         circles.push_back(c3);
+        addChild(c3);
 
         auto c4 = std::make_shared<box2d::CircleBody>();
         c4->setup(world, 400, 120, 20);
         circles.push_back(c4);
+        addChild(c4);
 
         auto c5 = std::make_shared<box2d::CircleBody>();
         c5->setup(world, 360, 250, 28);
         circles.push_back(c5);
+        addChild(c5);
     }
 
     void update() override {
         // Advance physics simulation
         world.update();
 
-        // Sync Box2D positions to Node's x, y, rotation
-        for (auto& c : circles) c->updateTree();
-        for (auto& r : rects) r->updateTree();
+        // Sync Box2D positions to Node's x, y, rotation is handled 
+        // automatically by Body::update() which is called via updateTree()
     }
 
     void draw() override {
         clear(0.12f);
 
-        // Draw all circles (drawTree applies position/rotation)
+        // Bodies are drawn automatically by the Node system after this function.
+        // We set the default color for them here.
         setColor(1.0f, 0.78f, 0.4f);
-        for (auto& circle : circles) {
-            circle->drawTree();
-        }
-
-        // Draw all rectangles
-        setColor(0.4f, 0.78f, 1.0f);
-        for (auto& rect : rects) {
-            rect->drawTree();
-        }
 
         // Draw spring line if dragging
         if (world.isDragging()) {
@@ -91,6 +87,9 @@ public:
         drawBitmapString("Right click: Add rectangle", 10, 36);
         drawBitmapString("C: Clear all", 10, 52);
         drawBitmapString("Bodies: " + std::to_string(world.getBodyCount()), 10, 68);
+        
+        // Reset to body color for automatic drawing
+        setColor(1.0f, 0.78f, 0.4f);
     }
 
     void mousePressed(Vec2 pos, int button) override {
@@ -105,6 +104,7 @@ public:
                 circle->setup(world, pos.x, pos.y, randomFloat(15, 40));
                 circle->setRestitution(0.7f);  // Bouncy
                 circles.push_back(circle);
+                addChild(circle);
             }
         }
         else if (button == MOUSE_BUTTON_RIGHT) {
@@ -113,6 +113,7 @@ public:
             rect->setup(world, pos.x, pos.y, randomFloat(30, 60), randomFloat(20, 40));
             rect->setRestitution(0.3f);
             rects.push_back(rect);
+            addChild(rect);
         }
     }
 
