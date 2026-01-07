@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <cstdio>
+#include <cstdlib>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -57,6 +58,63 @@ static pair<int, string> executeCommand(const string& cmd) {
     int result = pclose(pipe);
 #endif
     return {result, output};
+}
+
+// Helper to find Emscripten toolchain
+static string detectEmscriptenToolchain() {
+    // 1. Check EMSDK environment variable (Official installer)
+    const char* envEmsdk = std::getenv("EMSDK");
+    if (envEmsdk) {
+        fs::path path = fs::path(envEmsdk) / "upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake";
+        if (fs::exists(path)) return path.string();
+    }
+
+    // 2. Check emcc in PATH (Homebrew, package managers)
+#ifdef _WIN32
+    auto [res, emccPath] = executeCommand("where emcc");
+#else
+    auto [res, emccPath] = executeCommand("which emcc");
+#endif
+    if (res == 0 && !emccPath.empty()) {
+        // Remove newline
+        while (!emccPath.empty() && isspace(emccPath.back())) emccPath.pop_back();
+        
+        fs::path p = emccPath;
+        if (fs::exists(p)) {
+            // Resolve symlink
+            if (fs::is_symlink(p)) {
+                p = fs::read_symlink(p);
+                // If relative symlink, resolve against parent
+                if (p.is_relative()) {
+                    p = fs::path(emccPath).parent_path() / p;
+                }
+            }
+            p = fs::canonical(p); // Absolute path to real emcc executable
+            
+            // Expected structure (Homebrew): .../bin/emcc
+            // Toolchain: .../libexec/cmake/Modules/Platform/Emscripten.cmake
+            
+            // Search patterns relative to emcc's directory or parent
+            fs::path binDir = p.parent_path();
+            fs::path installDir = binDir.parent_path(); // e.g. /opt/.../emscripten/4.0.22
+
+            vector<fs::path> candidates = {
+                installDir / "libexec/cmake/Modules/Platform/Emscripten.cmake", // Homebrew
+                installDir / "cmake/Modules/Platform/Emscripten.cmake",         // Linux standard?
+                binDir / "cmake/Modules/Platform/Emscripten.cmake",
+                installDir / "upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" // EMSDK style if in PATH
+            };
+
+            for (const auto& candidate : candidates) {
+                if (fs::exists(candidate)) {
+                    return candidate.string();
+                }
+            }
+        }
+    }
+    
+    // Fallback: Default EMSDK pattern (will be evaluated by CMake if EMSDK env var is set later)
+    return "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake";
 }
 
 ProjectGenerator::ProjectGenerator(const ProjectSettings& settings)
@@ -296,7 +354,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         webPreset["displayName"] = "Web (Emscripten)";
         webPreset["binaryDir"] = "${sourceDir}/build-web";
         webPreset["generator"] = "Unix Makefiles";
-        webPreset["toolchainFile"] = "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake";
+        webPreset["toolchainFile"] = detectEmscriptenToolchain();
         webPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
         // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
         if (!trusscDir.empty()) {
@@ -649,11 +707,12 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
     file << "cd /d \"%~dp0\"\n\n";
     file << "REM Setup Emscripten environment\n";
     file << "if not defined EMSDK (\n";
-    file << "    echo Error: EMSDK environment variable is not set.\n";
-    file << "    echo Please run emsdk_env.bat first or set EMSDK.\n";
-    file << "    exit /b 1\n";
+    file << "    REM Only warn if using auto-detected toolchain\n";
+    file << "    REM echo Warning: EMSDK environment variable is not set.\n";
     file << ")\n";
-    file << "call \"%EMSDK%\\emsdk_env.bat\"\n\n";
+    file << "if defined EMSDK (\n";
+    file << "    call \"%EMSDK%\\emsdk_env.bat\"\n";
+    file << ")\n\n";
     file << "REM Configure and build using CMake presets\n";
     file << "cmake --preset web\n";
     file << "if errorlevel 1 exit /b 1\n\n";
@@ -675,11 +734,12 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
     file << "cd \"$(dirname \"$0\")\"\n\n";
     file << "# Setup Emscripten environment\n";
     file << "if [ -z \"$EMSDK\" ]; then\n";
-    file << "    echo \"Error: EMSDK environment variable is not set.\"\n";
-    file << "    echo \"Please source emsdk_env.sh first or set EMSDK.\"\n";
-    file << "    exit 1\n";
-    file << "fi\n";
-    file << "source \"$EMSDK/emsdk_env.sh\"\n\n";
+    file << "    # Only warn if using auto-detected toolchain\n";
+    file << "    # echo \"Warning: EMSDK environment variable is not set.\"\n";
+    file << "    :\n";
+    file << "else\n";
+    file << "    source \"$EMSDK/emsdk_env.sh\"\n";
+    file << "fi\n\n";
     file << "# Configure and build using CMake presets\n";
     file << "cmake --preset web || exit 1\n";
     file << "cmake --build --preset web || exit 1\n\n";
@@ -700,11 +760,12 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
     file << "cd \"$(dirname \"$0\")\"\n\n";
     file << "# Setup Emscripten environment\n";
     file << "if [ -z \"$EMSDK\" ]; then\n";
-    file << "    echo \"Error: EMSDK environment variable is not set.\"\n";
-    file << "    echo \"Please source emsdk_env.sh first or set EMSDK.\"\n";
-    file << "    exit 1\n";
-    file << "fi\n";
-    file << "source \"$EMSDK/emsdk_env.sh\"\n\n";
+    file << "    # Only warn if using auto-detected toolchain\n";
+    file << "    # echo \"Warning: EMSDK environment variable is not set.\"\n";
+    file << "    :\n";
+    file << "else\n";
+    file << "    source \"$EMSDK/emsdk_env.sh\"\n";
+    file << "fi\n\n";
     file << "# Configure and build using CMake presets\n";
     file << "cmake --preset web || exit 1\n";
     file << "cmake --build --preset web || exit 1\n\n";
