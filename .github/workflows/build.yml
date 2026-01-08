@@ -29,6 +29,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache build directories
+        uses: actions/cache@v4
+        with:
+          path: |
+            trussc/build-${{ matrix.preset }}
+            projectGenerator/tools/projectGenerator/build
+          key: ${{ runner.os }}-build-${{ hashFiles('trussc/**/*.h', 'trussc/**/*.cpp', 'trussc/**/*.mm') }}
+          restore-keys: |
+            ${{ runner.os }}-build-
+
       # Linux: Install dependencies
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -91,6 +101,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache build directories
+        uses: actions/cache@v4
+        with:
+          path: |
+            trussc/build-web
+            projectGenerator/tools/projectGenerator/build
+          key: web-build-${{ hashFiles('trussc/**/*.h', 'trussc/**/*.cpp') }}
+          restore-keys: |
+            web-build-
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
