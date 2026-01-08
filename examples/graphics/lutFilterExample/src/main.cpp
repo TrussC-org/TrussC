@@ -6,7 +6,7 @@
 
 int main() {
     WindowSettings settings;
-    settings.setSize(1280, 720);
+    settings.setSize(960, 540);
     settings.setTitle("lutFilterExample - TrussC");
     settings.setHighDpi(false);
 
