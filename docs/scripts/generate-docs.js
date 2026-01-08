@@ -113,7 +113,7 @@ function generateSketchAPI(api) {
                     if (sketchFunctions.length === 0) continue;
             
                     md += `## ${cat.name}\n\n`;
-                    md += '```javascript\n';
+                    md += '```cpp\n';
             
                     // Group overloads
                     const seen = new Set();
@@ -145,7 +145,7 @@ function generateSketchAPI(api) {
     // Constants
     md += `## Constants
 
-\`\`\`javascript
+\`\`\`cpp
 `;
     for (const c of api.constants.filter(c => c.sketch)) {
         const padding = Math.max(0, 28 - c.name.length);
@@ -156,14 +156,14 @@ function generateSketchAPI(api) {
     // Variables section
     md += `## Variables
 
-\`\`\`javascript
+\`\`\`cpp
 global myVar = 0         // Global variable (persists across frames)
 var localVar = 0         // Local variable (scope-limited)
 \`\`\`
 
 ## Example
 
-\`\`\`javascript
+\`\`\`cpp
 global angle = 0.0
 
 def setup() {
