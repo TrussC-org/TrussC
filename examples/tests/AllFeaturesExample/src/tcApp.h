@@ -36,4 +36,7 @@ public:
     tcx::box2d::World box2d;
     tc::OscSender oscSender;
     tc::OscReceiver oscReceiver;
+
+    // Core GPU features
+    Lut3D lut;
 };

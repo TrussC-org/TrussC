@@ -19,7 +19,11 @@ void tcApp::setup() {
     // WebSocket
     tc::WebSocketClient ws;
 
-    tc::logNotice("AllFeaturesExample") << "All addons linked successfully";
+    // LUT (3D color grading)
+    lut = lut::createVintage(16);
+    tc::logNotice("AllFeaturesExample") << "LUT initialized: " << lut.getSize() << "x" << lut.getSize() << "x" << lut.getSize();
+
+    tc::logNotice("AllFeaturesExample") << "All features linked successfully";
 }
 
 void tcApp::update() {

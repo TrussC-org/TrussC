@@ -87,12 +87,13 @@ jobs:
         shell: bash
         run: |
           chmod +x examples/build_all.py
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          if [[ "$COMMIT_MSG" == *"[full]"* ]]; then
+             echo "Running full build (triggered by [full] in commit message)..."
+             ./examples/build_all.py --verbose
+          else
              echo "Running quick build (AllFeaturesExample only)..."
              ./examples/build_all.py --test-only --verbose
-          else
-             echo "Running full build..."
-             ./examples/build_all.py --verbose
           fi
 
   build-web:
@@ -135,10 +136,11 @@ jobs:
       - name: Build examples (Web)
         run: |
           chmod +x examples/build_all.py
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          if [[ "$COMMIT_MSG" == *"[full]"* ]]; then
+             echo "Running full build (triggered by [full] in commit message)..."
+             ./examples/build_all.py --web-only --verbose
+          else
              echo "Running quick build (AllFeaturesExample only)..."
              ./examples/build_all.py --web-only --test-only --verbose
-          else
-             echo "Running full build..."
-             ./examples/build_all.py --web-only --verbose
           fi
