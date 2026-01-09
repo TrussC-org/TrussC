@@ -137,6 +137,8 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
         NSArray<AVCaptureDevice*>* avDevices = nil;
 
         // macOS 14.0+ では AVCaptureDeviceTypeExternal と AVCaptureDeviceTypeContinuityCamera を使用
+        // Note: Need compile-time SDK check because these symbols don't exist in older SDKs
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 140000
         if (@available(macOS 14.0, *)) {
             NSArray<AVCaptureDeviceType>* deviceTypes = @[
                 AVCaptureDeviceTypeBuiltInWideAngleCamera,
@@ -149,8 +151,10 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
                                                                         position:AVCaptureDevicePositionUnspecified];
             avDevices = discoverySession.devices;
         }
+        else
+#endif
         // macOS 10.15〜13.x では AVCaptureDeviceTypeExternalUnknown を使用
-        else if (@available(macOS 10.15, *)) {
+        if (@available(macOS 10.15, *)) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
             NSArray<AVCaptureDeviceType>* deviceTypes = @[
@@ -196,6 +200,8 @@ bool VideoGrabber::setupPlatform() {
         // デバイスを取得
         NSArray<AVCaptureDevice*>* devices = nil;
         // macOS 14.0+ では AVCaptureDeviceTypeExternal と AVCaptureDeviceTypeContinuityCamera を使用
+        // Note: Need compile-time SDK check because these symbols don't exist in older SDKs
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 140000
         if (@available(macOS 14.0, *)) {
             NSArray<AVCaptureDeviceType>* deviceTypes = @[
                 AVCaptureDeviceTypeBuiltInWideAngleCamera,
@@ -208,8 +214,10 @@ bool VideoGrabber::setupPlatform() {
                                                                         position:AVCaptureDevicePositionUnspecified];
             devices = discoverySession.devices;
         }
+        else
+#endif
         // macOS 10.15〜13.x では AVCaptureDeviceTypeExternalUnknown を使用
-        else if (@available(macOS 10.15, *)) {
+        if (@available(macOS 10.15, *)) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
             NSArray<AVCaptureDeviceType>* deviceTypes = @[
