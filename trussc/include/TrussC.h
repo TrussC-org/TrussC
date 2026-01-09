@@ -610,9 +610,29 @@ inline void noFill() {
     getDefaultContext().noFill();
 }
 
-// Stroke weight
+// Stroke style
 inline void setStrokeWeight(float weight) {
     getDefaultContext().setStrokeWeight(weight);
+}
+
+inline float getStrokeWeight() {
+    return getDefaultContext().getStrokeWeight();
+}
+
+inline void setStrokeCap(StrokeCap cap) {
+    getDefaultContext().setStrokeCap(cap);
+}
+
+inline StrokeCap getStrokeCap() {
+    return getDefaultContext().getStrokeCap();
+}
+
+inline void setStrokeJoin(StrokeJoin join) {
+    getDefaultContext().setStrokeJoin(join);
+}
+
+inline StrokeJoin getStrokeJoin() {
+    return getDefaultContext().getStrokeJoin();
 }
 
 // ---------------------------------------------------------------------------

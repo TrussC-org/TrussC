@@ -28,11 +28,9 @@ public:
 private:
     Shader shader;
     Mesh starMesh;
-    StrokeMesh strokeMesh;
 
     float effectStrength = 0.8f;
 
     void createStarMesh();
-    void createStrokeMesh();
     void drawShapes();
 };

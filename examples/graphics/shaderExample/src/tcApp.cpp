@@ -15,7 +15,6 @@ void tcApp::setup() {
     }
 
     createStarMesh();
-    createStrokeMesh();
 }
 
 void tcApp::createStarMesh() {
@@ -40,20 +39,6 @@ void tcApp::createStarMesh() {
         starMesh.addVertex(x, y, 0);
         starMesh.addColor(colors::yellow);
     }
-}
-
-void tcApp::createStrokeMesh() {
-    // Create a zigzag stroke
-    strokeMesh.addVertex(-50, -15);
-    strokeMesh.addVertex(-20, 15);
-    strokeMesh.addVertex(20, -15);
-    strokeMesh.addVertex(50, 15);
-
-    strokeMesh.setWidth(8.0f);
-    strokeMesh.setCapType(StrokeMesh::CAP_ROUND);
-    strokeMesh.setJoinType(StrokeMesh::JOIN_ROUND);
-    strokeMesh.setColor(colors::hotPink);
-    strokeMesh.update();
 }
 
 void tcApp::drawShapes() {
@@ -90,10 +75,19 @@ void tcApp::drawShapes() {
     starMesh.draw();
     popMatrix();
 
-    // StrokeMesh (shader-compatible alternative to drawLine)
+    // beginStroke/endStroke (shader-compatible alternative to drawLine)
     pushMatrix();
     translate(0, 530);
-    strokeMesh.draw();
+    setStrokeWeight(8.0f);
+    setStrokeCap(StrokeCap::Round);
+    setStrokeJoin(StrokeJoin::Round);
+    setColor(colors::hotPink);
+    beginStroke();
+    vertex(-50, -15);
+    vertex(-20, 15);
+    vertex(20, -15);
+    vertex(50, 15);
+    endStroke();
     popMatrix();
 }
 

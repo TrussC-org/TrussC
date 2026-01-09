@@ -27,6 +27,21 @@
 
 namespace trussc {
 
+// ---------------------------------------------------------------------------
+// Stroke style enums (used by RenderContext and StrokeMesh)
+// ---------------------------------------------------------------------------
+enum class StrokeCap {
+    Butt,    // Cut flat at endpoint
+    Round,   // Semicircle at endpoint
+    Square   // Extend by half width
+};
+
+enum class StrokeJoin {
+    Miter,   // Pointed sharp corners
+    Round,   // Rounded corners
+    Bevel    // Flat cut corners
+};
+
 // Forward declarations
 namespace internal {
     extern sg_view fontView;
@@ -124,10 +139,14 @@ public:
     }
 
     void setStrokeWeight(float weight) { strokeWeight_ = weight; }
+    void setStrokeCap(StrokeCap cap) { style_.strokeCap = cap; }
+    void setStrokeJoin(StrokeJoin join) { style_.strokeJoin = join; }
 
     bool isFillEnabled() const { return fillEnabled_; }
     bool isStrokeEnabled() const { return strokeEnabled_; }
     float getStrokeWeight() const { return strokeWeight_; }
+    StrokeCap getStrokeCap() const { return style_.strokeCap; }
+    StrokeJoin getStrokeJoin() const { return style_.strokeJoin; }
 
     // -----------------------------------------------------------------------
     // Circle resolution
@@ -727,6 +746,8 @@ private:
         bool fillEnabled = true;
         bool strokeEnabled = false;
         float strokeWeight = 1.0f;
+        StrokeCap strokeCap = StrokeCap::Butt;
+        StrokeJoin strokeJoin = StrokeJoin::Miter;
         int circleResolution = 20;
         Direction textAlignH = Direction::Left;
         Direction textAlignV = Direction::Top;

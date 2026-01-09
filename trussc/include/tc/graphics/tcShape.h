@@ -7,41 +7,36 @@
 
 namespace trussc {
 
-// Internal state for shape drawing
+// ---------------------------------------------------------------------------
+// Stroke vertex (position + color + width)
+// ---------------------------------------------------------------------------
+struct StrokeVertex {
+    Vec3 pos;
+    Color color;
+    float width;
+};
+
+// Internal state for shape/stroke drawing
 namespace internal {
+    // Shape (polygon) vertices
     inline std::vector<Vec3> shapeVertices;
     inline bool shapeStarted = false;
+
+    // Stroke vertices
+    inline std::vector<StrokeVertex> strokeVertices;
+    inline bool strokeStarted = false;
+    inline StrokeCap strokeStartCap = StrokeCap::Butt;  // Cap at first vertex
 }
 
+// ===========================================================================
+// Shape drawing (polygons)
+// ===========================================================================
+
 // Begin shape drawing
-// Supports both fill and stroke
 inline void beginShape() {
     internal::shapeVertices.clear();
     internal::shapeStarted = true;
-}
-
-// Add vertex (2D)
-inline void vertex(float x, float y) {
-    if (internal::shapeStarted) {
-        internal::shapeVertices.push_back(Vec3{x, y, 0.0f});
-    }
-}
-
-// Add vertex (3D)
-inline void vertex(float x, float y, float z) {
-    if (internal::shapeStarted) {
-        internal::shapeVertices.push_back(Vec3{x, y, z});
-    }
-}
-
-// Add vertex (Vec2)
-inline void vertex(const Vec2& v) {
-    vertex(v.x, v.y);
-}
-
-// Add vertex (Vec3)
-inline void vertex(const Vec3& v) {
-    vertex(v.x, v.y, v.z);
+    internal::strokeStarted = false;
 }
 
 // End shape drawing
@@ -86,6 +81,58 @@ inline void endShape(bool close = false) {
 
     internal::shapeVertices.clear();
     internal::shapeStarted = false;
+}
+
+// ===========================================================================
+// Stroke drawing (lines with width/cap/join)
+// ===========================================================================
+
+// Begin stroke drawing
+inline void beginStroke() {
+    internal::strokeVertices.clear();
+    internal::strokeStarted = true;
+    internal::shapeStarted = false;
+}
+
+// End stroke drawing - renders using StrokeMesh
+// close: if true, connects end to start
+inline void endStroke(bool close = false);  // Forward declaration (implemented after StrokeMesh)
+
+// ===========================================================================
+// Vertex functions (shared between shape and stroke)
+// ===========================================================================
+
+// Add vertex (3D)
+inline void vertex(float x, float y, float z) {
+    if (internal::shapeStarted) {
+        internal::shapeVertices.push_back(Vec3{x, y, z});
+    } else if (internal::strokeStarted) {
+        auto& ctx = getDefaultContext();
+        // Save start cap on first vertex
+        if (internal::strokeVertices.empty()) {
+            internal::strokeStartCap = ctx.getStrokeCap();
+        }
+        internal::strokeVertices.push_back({
+            Vec3{x, y, z},
+            ctx.getColor(),
+            ctx.getStrokeWeight()
+        });
+    }
+}
+
+// Add vertex (2D)
+inline void vertex(float x, float y) {
+    vertex(x, y, 0.0f);
+}
+
+// Add vertex (Vec2)
+inline void vertex(const Vec2& v) {
+    vertex(v.x, v.y);
+}
+
+// Add vertex (Vec3)
+inline void vertex(const Vec3& v) {
+    vertex(v.x, v.y, v.z);
 }
 
 } // namespace trussc

@@ -503,4 +503,78 @@ private:
     }
 };
 
+// ===========================================================================
+// endStroke() implementation (uses StrokeMesh)
+// ===========================================================================
+inline void endStroke(bool close) {
+    if (!internal::strokeStarted || internal::strokeVertices.empty()) {
+        internal::strokeStarted = false;
+        return;
+    }
+
+    auto& verts = internal::strokeVertices;
+    if (verts.size() < 2) {
+        internal::strokeVertices.clear();
+        internal::strokeStarted = false;
+        return;
+    }
+
+    auto& ctx = getDefaultContext();
+
+    // Convert StrokeCap to StrokeMesh::CapType
+    auto toMeshCap = [](StrokeCap cap) -> StrokeMesh::CapType {
+        switch (cap) {
+            case StrokeCap::Round:  return StrokeMesh::CAP_ROUND;
+            case StrokeCap::Square: return StrokeMesh::CAP_SQUARE;
+            default:                return StrokeMesh::CAP_BUTT;
+        }
+    };
+
+    // Convert StrokeJoin to StrokeMesh::JoinType
+    auto toMeshJoin = [](StrokeJoin join) -> StrokeMesh::JoinType {
+        switch (join) {
+            case StrokeJoin::Round: return StrokeMesh::JOIN_ROUND;
+            case StrokeJoin::Bevel: return StrokeMesh::JOIN_BEVEL;
+            default:                return StrokeMesh::JOIN_MITER;
+        }
+    };
+
+    // Build StrokeMesh from stroke vertices
+    StrokeMesh stroke;
+    stroke.setCapType(toMeshCap(internal::strokeStartCap));  // Start cap from first vertex
+    stroke.setJoinType(toMeshJoin(ctx.getStrokeJoin()));
+
+    // Add vertices with per-vertex width
+    // Note: StrokeMesh uses single color, so we use first vertex's color
+    stroke.setColor(verts[0].color);
+
+    for (auto& v : verts) {
+        stroke.addVertexWithWidth(v.pos, v.width);
+    }
+
+    if (close) {
+        stroke.setClosed(true);
+    }
+
+    stroke.update();
+    stroke.draw();
+
+    internal::strokeVertices.clear();
+    internal::strokeStarted = false;
+}
+
+// ===========================================================================
+// drawStroke() - Draw a single line segment with stroke style
+// ===========================================================================
+inline void drawStroke(float x1, float y1, float x2, float y2) {
+    beginStroke();
+    vertex(x1, y1);
+    vertex(x2, y2);
+    endStroke();
+}
+
+inline void drawStroke(const Vec2& p1, const Vec2& p2) {
+    drawStroke(p1.x, p1.y, p2.x, p2.y);
+}
+
 } // namespace trussc
