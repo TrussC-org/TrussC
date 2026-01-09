@@ -251,18 +251,45 @@ private:
 
     // Main stroke generation logic
     void appendStrokeToMesh(const Path& pl, Mesh& targetMesh, const std::vector<float>& vertWidths) {
-        const auto& verts = pl.getVertices();
-        int numVerts = pl.size();
+        const auto& srcVerts = pl.getVertices();
+        if (srcVerts.size() < 2) return;
+
+        // Filter out points that are too close together (prevents jagged strokes)
+        // Minimum distance is proportional to stroke width to avoid self-intersection
+        std::vector<Vec3> verts;
+        std::vector<float> filteredWidths;
+        verts.reserve(srcVerts.size());
+        filteredWidths.reserve(vertWidths.size());
+
+        for (size_t i = 0; i < srcVerts.size(); i++) {
+            float w = (i < vertWidths.size()) ? vertWidths[i] : strokeWidth_;
+            if (verts.empty()) {
+                verts.push_back(srcVerts[i]);
+                filteredWidths.push_back(w);
+            } else {
+                Vec3 diff = srcVerts[i] - verts.back();
+                float dist = std::sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
+                float minDist = w * 0.3f;
+                if (dist >= minDist) {
+                    verts.push_back(srcVerts[i]);
+                    filteredWidths.push_back(w);
+                }
+            }
+        }
+
+        int numVerts = (int)verts.size();
         if (numVerts < 2) return;
 
-        bool isClosed = pl.isClosed();
-        int numSegments = isClosed ? numVerts : numVerts - 1;
-
+        // Use filtered widths
         auto getHalfWidth = [&](int idx) -> float {
             if (idx < 0) idx += numVerts;
             idx = idx % numVerts;
-            return vertWidths[idx] * 0.5f;
+            if (idx < (int)filteredWidths.size()) return filteredWidths[idx] * 0.5f;
+            return strokeWidth_ * 0.5f;
         };
+
+        bool isClosed = pl.isClosed();
+        int numSegments = isClosed ? numVerts : numVerts - 1;
 
         // For BEVEL/ROUND join types
         if (joinType_ == JOIN_BEVEL || joinType_ == JOIN_ROUND) {

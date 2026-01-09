@@ -70,6 +70,10 @@ void vertex(float x, float y, float z)   // Add a vertex
 void vertex(const Vec2& v)               // Add a vertex
 void vertex(const Vec3& v)               // Add a vertex
 void endShape(bool close = false)        // End drawing a shape
+void beginStroke()                       // Begin drawing a stroke (uses StrokeMesh internally)
+void endStroke(bool close = false)       // End drawing a stroke
+void drawStroke(float x1, float y1, float x2, float y2) // Draw a single stroke segment (thick line with cap/join)
+void drawStroke(const Vec2& p1, const Vec2& p2) // Draw a single stroke segment (thick line with cap/join)
 void drawBitmapString(const string& text, float x, float y) // Draw text
 ```
 
@@ -79,6 +83,11 @@ void drawBitmapString(const string& text, float x, float y) // Draw text
 void fill()                              // Enable fill mode (shapes are solid, no outline)
 void noFill()                            // Enable stroke mode (shapes show outline only)
 void setStrokeWeight(float weight)       // Set stroke width
+float getStrokeWeight()                  // Get current stroke width
+void setStrokeCap(StrokeCap cap)         // Set stroke cap style (Butt, Round, Square)
+StrokeCap getStrokeCap()                 // Get current stroke cap style
+void setStrokeJoin(StrokeJoin join)      // Set stroke join style (Miter, Round, Bevel)
+StrokeJoin getStrokeJoin()               // Get current stroke join style
 ```
 
 ## Transform

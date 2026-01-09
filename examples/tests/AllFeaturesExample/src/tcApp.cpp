@@ -33,14 +33,30 @@ void tcApp::update() {
 void tcApp::draw() {
     clear(0.12f);
 
+    pushMatrix();
+
     // Rotating box (Core graphics test)
     noFill();
     setColor(colors::white);
     translate(getWindowWidth() / 2.0f, getWindowHeight() / 2.0f);
     rotate(getElapsedTimef() * 0.5f);
     drawBox(200.0f);
-    
-    drawBitmapString("All Features Test", -60, 0);
+
+    popMatrix();
+
+    // beginStroke/endStroke test
+    setColor(colors::hotPink);
+    setStrokeWeight(8.0f);
+    setStrokeCap(StrokeCap::Round);
+    setStrokeJoin(StrokeJoin::Round);
+    beginStroke();
+    vertex(50, 50);
+    vertex(150, 80);
+    vertex(100, 150);
+    endStroke();
+
+    setColor(colors::white);
+    drawBitmapString("All Features Test", 10, 20);
 }
 
 void tcApp::keyPressed(int key) {}
