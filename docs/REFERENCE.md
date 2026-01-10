@@ -230,6 +230,8 @@ float distSquared(float x1, float y1, float x2, float y2) // Squared distance
 ## Window & System
 
 ```cpp
+void setWindowTitle(const string& title) // Set window title
+void setWindowSize(int width, int height) // Set window size
 void toggleFullscreen()                  // Toggle fullscreen mode
 void setClipboardString(const string& text) // Copy text to clipboard
 string getClipboardString()              // Get text from clipboard
@@ -239,7 +241,7 @@ string getClipboardString()              // Get text from clipboard
 
 ```cpp
 void logNotice(const string& message)    // Print to console
-string to_string(value)                  // Convert to string
+string toString(value)                   // Convert to string
 void beep()                              // Play a beep sound
 void beep(float frequency)               // Play a beep sound
 ```
@@ -248,6 +250,7 @@ void beep(float frequency)               // Play a beep sound
 
 ```cpp
 Sound()                                  // Create a sound player
+bool load(const string& path)            // Load sound file
 void play()                              // Play sound
 void stop()                              // Stop sound
 void setVolume(float vol)                // Set volume (0.0-1.0)
@@ -362,6 +365,40 @@ void drawPolyline(Polyline polyline)     // Draw a polyline
 Mesh createBox(float size)               // Create a box mesh
 Mesh createBox(float w, float h, float d) // Create a box mesh
 Mesh createSphere(float radius, int res = 20) // Create a sphere mesh
+void drawTexture(const Texture& tex, float x, float y) // Draw a texture
+void drawTexture(const Texture& tex, float x, float y, float w, float h) // Draw a texture
+```
+
+## Graphics - Texture & GPU
+
+```cpp
+Texture()                                // Create a texture
+bool load(const string& path)            // Load image from file
+bool loadFromPixels(const Pixels& pixels) // Load from pixel data
+void bind(int slot = 0)                  // Bind texture
+void unbind(int slot = 0)                // Unbind texture
+int getWidth()                           // Get width
+int getHeight()                          // Get height
+```
+
+## Graphics - FBO
+
+```cpp
+Fbo()                                    // Create an FBO
+void allocate(int w, int h)              // Allocate buffer
+void begin()                             // Begin drawing to FBO
+void end()                               // End drawing to FBO
+Texture& getTexture()                    // Get internal texture
+void readToPixels(Pixels& pixels)        // Read pixels to CPU memory
+```
+
+## Types - Pixels
+
+```cpp
+Pixels()                                 // Create pixel buffer
+void allocate(int w, int h, int channels) // Allocate memory
+Color getColor(int x, int y)             // Get color at pixel
+void setColor(int x, int y, const Color& c) // Set color at pixel
 ```
 
 ## Types - Mesh
@@ -413,42 +450,47 @@ TAU                          // 6.283... (Full circle (2*PI))
 HALF_TAU                     // 3.141... (Half circle (PI))
 QUARTER_TAU                  // 1.570... (Quarter circle (PI/2))
 PI                           // 3.141... (Pi (use TAU instead))
+StrokeCap_Butt               // 0 (Flat line cap (no extension))
+StrokeCap_Round              // 1 (Rounded line cap)
+StrokeCap_Square             // 2 (Square line cap (extends by half stroke width))
+StrokeJoin_Miter             // 0 (Sharp corner join)
+StrokeJoin_Round             // 1 (Rounded corner join)
+StrokeJoin_Bevel             // 2 (Beveled corner join)
 ```
 
 ## Variables
 
 ```cpp
-global myVar = 0         // Global variable (persists across frames)
-var localVar = 0         // Local variable (scope-limited)
+float myVar = 0.0;       // Global variable (persists across frames)
 ```
 
 ## Example
 
 ```cpp
-global angle = 0.0
+float angle = 0.0;
 
-def setup() {
-    logNotice("Starting!")
+void setup() {
+    logNotice("Starting!");
 }
 
-def update() {
-    angle = angle + getDeltaTime()
+void update() {
+    angle = angle + getDeltaTime();
 }
 
-def draw() {
-    clear(0.1)
+void draw() {
+    clear(0.1);
 
-    pushMatrix()
-    translate(getWindowWidth() / 2.0, getWindowHeight() / 2.0)
-    rotate(angle)
+    pushMatrix();
+    translate(getWindowWidth() / 2.0, getWindowHeight() / 2.0);
+    rotate(angle);
 
-    setColor(1.0, 0.5, 0.2)
-    drawRect(-50.0, -50.0, 100.0, 100.0)
+    setColor(1.0, 0.5, 0.2);
+    drawRect(-50.0, -50.0, 100.0, 100.0);
 
-    popMatrix()
+    popMatrix();
 }
 
-def keyPressed(key) {
-    logNotice("Key: " + to_string(key))
+void keyPressed(int key) {
+    logNotice("Key: " + toString(key));
 }
 ```

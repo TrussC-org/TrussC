@@ -904,16 +904,6 @@ inline float distSquared(const Vec2& a, const Vec2& b) { return a.distanceSquare
 inline float dist(const Vec3& a, const Vec3& b) { return a.distance(b); }
 inline float distSquared(const Vec3& a, const Vec3& b) { return a.distanceSquared(b); }
 
-// Min/Max
-template<typename T>
-T min(T a, T b) { return (a < b) ? a : b; }
-
-template<typename T>
-T max(T a, T b) { return (a > b) ? a : b; }
-
-// Absolute value
-inline float abs(float value) { return std::abs(value); }
-
 // =============================================================================
 // Random numbers
 // =============================================================================

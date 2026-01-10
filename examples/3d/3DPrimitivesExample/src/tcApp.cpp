@@ -97,7 +97,7 @@ void tcApp::draw() {
     };
 
     // Grid spacing based on window size (with padding for visibility)
-    float baseSize = tc::min(getWindowWidth(), getWindowHeight());
+    float baseSize = min(getWindowWidth(), getWindowHeight());
     float spacingX = baseSize * 0.4f;   // Horizontal spacing
     float spacingY = baseSize * 0.4f;   // Vertical spacing
 

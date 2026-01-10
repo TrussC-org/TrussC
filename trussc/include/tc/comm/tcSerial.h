@@ -119,7 +119,7 @@ public:
         // Windows: Try COM1 to COM256
         int id = 0;
         for (int i = 1; i <= 256; i++) {
-            std::string portName = "COM" + std::to_string(i);
+            std::string portName = "COM" + toString(i);
             std::string fullPath = "\\\\.\\" + portName;
 
             HANDLE hPort = CreateFileA(fullPath.c_str(), GENERIC_READ | GENERIC_WRITE,

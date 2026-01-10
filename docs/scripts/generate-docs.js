@@ -168,38 +168,37 @@ function generateSketchAPI(api) {
     md += `## Variables
 
 \`\`\`cpp
-global myVar = 0         // Global variable (persists across frames)
-var localVar = 0         // Local variable (scope-limited)
+float myVar = 0.0;       // Global variable (persists across frames)
 \`\`\`
 
 ## Example
 
 \`\`\`cpp
-global angle = 0.0
+float angle = 0.0;
 
-def setup() {
-    logNotice("Starting!")
+void setup() {
+    logNotice("Starting!");
 }
 
-def update() {
-    angle = angle + getDeltaTime()
+void update() {
+    angle = angle + getDeltaTime();
 }
 
-def draw() {
-    clear(0.1)
+void draw() {
+    clear(0.1);
 
-    pushMatrix()
-    translate(getWindowWidth() / 2.0, getWindowHeight() / 2.0)
-    rotate(angle)
+    pushMatrix();
+    translate(getWindowWidth() / 2.0, getWindowHeight() / 2.0);
+    rotate(angle);
 
-    setColor(1.0, 0.5, 0.2)
-    drawRect(-50.0, -50.0, 100.0, 100.0)
+    setColor(1.0, 0.5, 0.2);
+    drawRect(-50.0, -50.0, 100.0, 100.0);
 
-    popMatrix()
+    popMatrix();
 }
 
-def keyPressed(key) {
-    logNotice("Key: " + to_string(key))
+void keyPressed(int key) {
+    logNotice("Key: " + toString(key));
 }
 \`\`\`
 `;

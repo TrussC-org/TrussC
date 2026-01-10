@@ -282,7 +282,7 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofDrawRectangle` | `drawRect(x, y, w, h)` |  |
 | `ofDrawCircle` | `drawCircle(x, y, radius)` |  |
 | `ofDrawEllipse` | `drawEllipse(x, y, w, h)` |  |
-| `ofDrawLine` | `drawLine(x1, y1, x2, y2)` | Line width not supported (always 1px). Use `beginStroke()/endStroke()` for thick lines with caps/joins |
+| `ofDrawLine` | `drawLine(x1, y1, x2, y2)` |  |
 | `ofDrawTriangle` | `drawTriangle(x1, y1, x2, y2, x3, y3)` |  |
 | `ofDrawBox` | `drawBox(size)` |  |
 | `ofDrawSphere` | `drawSphere(radius)` |  |
@@ -293,7 +293,7 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofDrawBitmapString` | `drawBitmapString(text, x, y)` |  |
 | `ofFill` | `fill()` |  |
 | `ofNoFill` | `noFill()` |  |
-| `ofSetLineWidth` | `setStrokeWeight(weight)` | Only affects `beginStroke()/endStroke()`, not `drawLine()` |
+| `ofSetLineWidth` | `setStrokeWeight(weight)` |  |
 
 ### **Transform**
 
@@ -374,7 +374,7 @@ Reference for oF users finding equivalent features in TrussC.
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
 | `ofLog` | `logNotice(message)` |  |
-| `ofToString` | `to_string(value)` |  |
+| `ofToString` | `toString(value)` |  |
 
 ### **GUI**
 
