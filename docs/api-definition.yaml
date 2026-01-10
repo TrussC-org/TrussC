@@ -2719,6 +2719,44 @@ constants:
     description_ja: "円周率（TAUを推奨）"
     sketch: true
 
+  # StrokeCap constants
+  - name: StrokeCap_Butt
+    value: "0"
+    description: "Flat line cap (no extension)"
+    description_ja: "フラットなラインキャップ（延長なし）"
+    sketch: true
+
+  - name: StrokeCap_Round
+    value: "1"
+    description: "Rounded line cap"
+    description_ja: "丸いラインキャップ"
+    sketch: true
+
+  - name: StrokeCap_Square
+    value: "2"
+    description: "Square line cap (extends by half stroke width)"
+    description_ja: "四角いラインキャップ（線幅の半分延長）"
+    sketch: true
+
+  # StrokeJoin constants
+  - name: StrokeJoin_Miter
+    value: "0"
+    description: "Sharp corner join"
+    description_ja: "尖った角のジョイン"
+    sketch: true
+
+  - name: StrokeJoin_Round
+    value: "1"
+    description: "Rounded corner join"
+    description_ja: "丸い角のジョイン"
+    sketch: true
+
+  - name: StrokeJoin_Bevel
+    value: "2"
+    description: "Beveled corner join"
+    description_ja: "面取りされた角のジョイン"
+    sketch: true
+
 # ==========================================================================
 # Keywords (for TrussSketch syntax highlighting)
 # ==========================================================================
