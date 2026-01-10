@@ -2512,13 +2512,13 @@ categories:
         snippet: "update()"
 
   # ==========================================================================
-  # GPU - LUT (Color Grading)
+  # tcxLut Addon - LUT (Color Grading)
   # ==========================================================================
-  - id: gpu_lut
-    name: "GPU - LUT (Color Grading)"
-    name_ja: "GPU - LUT（カラーグレーディング）"
+  - id: addon_tcxlut
+    name: "Addon: tcxLut (Color Grading)"
+    name_ja: "アドオン: tcxLut（カラーグレーディング）"
     functions:
-      - name: Lut3D
+      - name: tcx::lut::Lut3D
         return: ""
         signatures:
           - params: ""
@@ -2563,7 +2563,7 @@ categories:
         description_ja: "LUTサイズを取得（32x32x32なら32）"
         sketch: false
 
-      - name: lut::createIdentity
+      - name: tcx::lut::createIdentity
         return: "Lut3D"
         signatures:
           - params: "int size = 32"
@@ -2572,7 +2572,7 @@ categories:
         description_ja: "Identity LUTを生成（色変更なし）"
         sketch: false
 
-      - name: lut::createVintage
+      - name: tcx::lut::createVintage
         return: "Lut3D"
         signatures:
           - params: "int size = 32"
@@ -2581,7 +2581,7 @@ categories:
         description_ja: "ビンテージ/フェード風LUTを生成"
         sketch: false
 
-      - name: lut::createCinematic
+      - name: tcx::lut::createCinematic
         return: "Lut3D"
         signatures:
           - params: "int size = 32"
@@ -2590,7 +2590,7 @@ categories:
         description_ja: "シネマティック（オレンジ/ティール）LUTを生成"
         sketch: false
 
-      - name: lut::createFilmNoir
+      - name: tcx::lut::createFilmNoir
         return: "Lut3D"
         signatures:
           - params: "int size = 32"
@@ -2599,7 +2599,7 @@ categories:
         description_ja: "フィルムノワール（高コントラストB&W）LUTを生成"
         sketch: false
 
-      - name: lut::createWarm
+      - name: tcx::lut::createWarm
         return: "Lut3D"
         signatures:
           - params: "int size = 32"
@@ -2608,7 +2608,7 @@ categories:
         description_ja: "暖色系LUTを生成"
         sketch: false
 
-      - name: lut::createCool
+      - name: tcx::lut::createCool
         return: "Lut3D"
         signatures:
           - params: "int size = 32"
@@ -2617,7 +2617,7 @@ categories:
         description_ja: "寒色系LUTを生成"
         sketch: false
 
-      - name: lut::createCyberpunk
+      - name: tcx::lut::createCyberpunk
         return: "Lut3D"
         signatures:
           - params: "int size = 32"
@@ -2626,7 +2626,7 @@ categories:
         description_ja: "サイバーパンク（ネオンピンク/シアン）LUTを生成"
         sketch: false
 
-      - name: lut::createPastel
+      - name: tcx::lut::createPastel
         return: "Lut3D"
         signatures:
           - params: "int size = 32"
@@ -2635,7 +2635,7 @@ categories:
         description_ja: "パステル調LUTを生成"
         sketch: false
 
-      - name: LutShader
+      - name: tcx::lut::LutShader
         return: ""
         signatures:
           - params: ""

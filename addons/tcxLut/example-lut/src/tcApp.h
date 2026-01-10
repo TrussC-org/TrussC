@@ -1,12 +1,14 @@
 // =============================================================================
-// lutFilterExample - LUT (Look-Up Table) color grading demo
+// example-lut - LUT (Look-Up Table) color grading demo
 // =============================================================================
 
 #pragma once
 
 #include <TrussC.h>
+#include "tcLut.h"
 using namespace std;
 using namespace tc;
+using namespace tcx::lut;
 
 class tcApp : public App {
 public:
@@ -21,14 +23,14 @@ private:
 
     // LUTs (generated in code, no .cube files needed)
     static constexpr int NUM_LUTS = 8;
-    Lut3D luts[NUM_LUTS];
+    tcx::lut::Lut3D luts[NUM_LUTS];
     string lutNames[NUM_LUTS] = {
         "Identity", "Vintage", "Cinematic", "Film Noir",
         "Warm", "Cool", "Cyberpunk", "Custom (.cube)"
     };
 
     // LUT Shader (uses new Shader system)
-    LutShader lutShader;
+    tcx::lut::LutShader lutShader;
 
     // Selected LUT for fullscreen view (-1 = grid view)
     int selectedLut = -1;

@@ -1,6 +1,2 @@
 # TrussC addons - one addon per line
-tcxBox2d
 tcxLut
-tcxOsc
-tcxTls
-tcxWebSocket

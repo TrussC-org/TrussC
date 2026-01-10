@@ -9,6 +9,7 @@
 #include "tcxOsc.h"
 #include "tcTlsClient.h"
 #include "tcWebSocketClient.h"
+#include "tcLut.h"
 
 using namespace std;
 using namespace tc;
@@ -37,6 +38,6 @@ public:
     tc::OscSender oscSender;
     tc::OscReceiver oscReceiver;
 
-    // Core GPU features
-    Lut3D lut;
+    // LUT addon
+    tcx::lut::Lut3D lut;
 };

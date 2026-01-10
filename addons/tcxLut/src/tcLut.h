@@ -1,20 +1,23 @@
 #pragma once
 
 // =============================================================================
-// tcLut.h - 3D LUT (Look-Up Table) for color grading
+// tcxLut - 3D LUT (Look-Up Table) for color grading
 // =============================================================================
+//
+// Addon for TrussC. Add "tcxLut" to addons.make to use.
 //
 // Supports .cube file format (industry standard for color LUTs)
 // Uses 3D texture for GPU-accelerated color transformation
 //
 // Usage example:
-//   tc::Lut3D lut;
+//   tcx::lut::Lut3D lut;
 //   lut.load("data/luts/cinematic.cube");
 //
 //   // In shader, sample using: texture(lut3D, color.rgb)
 //
 // =============================================================================
 
+#include <TrussC.h>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -22,11 +25,14 @@
 #include <filesystem>
 #include <cmath>
 #include <algorithm>
+#include <iomanip>
 
-#include "../utils/tcLog.h"
 #include "shaders/lut.glsl.h"
 
-namespace trussc {
+namespace tcx {
+namespace lut {
+
+using namespace tc;
 
 namespace fs = std::filesystem;
 
@@ -272,7 +278,6 @@ private:
 // =============================================================================
 // LUT Generation Utilities
 // =============================================================================
-namespace lut {
 
 // Generate identity LUT (no color change)
 inline void generateIdentity(float* data, int size) {
@@ -614,8 +619,6 @@ inline Lut3D createPastel(int size = 32) {
     return lut;
 }
 
-} // namespace lut
-
 // =============================================================================
 // LutShader - Shader specialized for LUT color grading
 // =============================================================================
@@ -818,4 +821,5 @@ private:
     float blend = 1.0f;
 };
 
-} // namespace trussc
+} // namespace lut
+} // namespace tcx

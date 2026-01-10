@@ -21,18 +21,18 @@ void tcApp::setup() {
     grabber.setup(1280, 720);
 
     // Generate LUTs (32x32x32 size, good balance of quality/memory)
-    luts[0] = lut::createIdentity(32);
-    luts[1] = lut::createVintage(32);
-    luts[2] = lut::createCinematic(32);
-    luts[3] = lut::createFilmNoir(32);
-    luts[4] = lut::createWarm(32);
-    luts[5] = lut::createCool(32);
-    luts[6] = lut::createCyberpunk(32);
+    luts[0] = createIdentity(32);
+    luts[1] = createVintage(32);
+    luts[2] = createCinematic(32);
+    luts[3] = createFilmNoir(32);
+    luts[4] = createWarm(32);
+    luts[5] = createCool(32);
+    luts[6] = createCyberpunk(32);
 
     // Load custom LUT from .cube file (demonstrating file loading)
 #ifdef __EMSCRIPTEN__
     // Web: use generated version (file loading requires async fetch)
-    luts[7] = lut::createPastel(32);
+    luts[7] = createPastel(32);
 #else
     luts[7].load(getDataPath("customLut.cube"));
 #endif

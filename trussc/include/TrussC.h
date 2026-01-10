@@ -2199,7 +2199,8 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #include "tc/gpu/tcShader.h"
 
 // TrussC 3D LUT (color grading)
-#include "tc/gpu/tcLut.h"
+// Note: tcLut.h is NOT included by default to avoid shader symbol collisions.
+// Include <tc/gpu/tcLut.h> explicitly when you need LUT functionality.
 
 // TrussC video input (webcam)
 #include "tc/video/tcVideoGrabber.h"

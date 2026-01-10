@@ -20,7 +20,7 @@ void tcApp::setup() {
     tc::WebSocketClient ws;
 
     // LUT (3D color grading)
-    lut = lut::createVintage(16);
+    lut = tcx::lut::createVintage(16);
     tc::logNotice("AllFeaturesExample") << "LUT initialized: " << lut.getSize() << "x" << lut.getSize() << "x" << lut.getSize();
 
     tc::logNotice("AllFeaturesExample") << "All features linked successfully";
