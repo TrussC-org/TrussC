@@ -267,351 +267,168 @@ node->addTimerFunction(3.0f, []() {
 
 Reference for oF users finding equivalent features in TrussC.
 
+<!-- AUTO-GENERATED-START -->
+
 ### **App Structure**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofApp : public ofBaseApp` | `tcApp : public tc::App` | emptyExample | |
-| `ofRunApp(new ofApp())` | `tc::runApp<tcApp>()` | emptyExample | Template style |
-| `setup()` | `setup()` | emptyExample | Same |
-| `update()` | `update()` | emptyExample | Same |
-| `draw()` | `draw()` | emptyExample | Same |
-| `keyPressed(int key)` | `keyPressed(int key)` | keyboardExample | Same |
-| `mousePressed(x, y, button)` | `mousePressed(Vec2 pos, button)` | mouseExample | Vec2 style |
-| `mouseReleased(x, y, button)` | `mouseReleased(Vec2 pos, button)` | mouseExample | Vec2 style |
-| `mouseMoved(x, y)` | `mouseMoved(Vec2 pos)` | mouseExample | Vec2 style |
-| `mouseDragged(x, y, button)` | `mouseDragged(Vec2 pos, button)` | mouseExample | Vec2 style |
-| `mouseScrolled(x, y, scrollX, scrollY)` | `mouseScrolled(Vec2 delta)` | mouseExample | Vec2 style |
-| `windowResized(w, h)` | `windowResized(w, h)` | emptyExample | Same |
-| `dragEvent(ofDragInfo)` | `filesDropped(paths)` | dragDropExample | |
-| `ofSetFrameRate(60)` | `tc::setFps(60)` | loopModeExample | Synced mode |
-| `ofSetVerticalSync(true)` | `tc::setFps(VSYNC)` | loopModeExample | VSync mode |
-| - | `tc::setFps(EVENT_DRIVEN)` | loopModeExample | Event-driven mode |
-| - | `tc::setIndependentFps(u, d)` | loopModeExample | Independent rates |
-| - | `tc::getFpsSettings()` | loopModeExample | Get current settings |
-| `ofGetElapsedTimef()` | `tc::getElapsedTime()` | graphicsExample | |
-| `ofGetFrameRate()` | `tc::getFrameRate()` | loopModeExample | |
-| `ofGetFrameNum()` | `tc::getFrameCount()` | utilsExample | update count |
-| - | `tc::getUpdateCount()` | utilsExample | update call count |
-| - | `tc::getDrawCount()` | utilsExample | draw frame count |
-| `exit()` | `exit()` | - | Exit handler |
-| `OF_EXIT_APP()` | `tc::exitApp()` | - | App exit request |
-| `ofGetWidth()` | `tc::getWindowWidth()` | vectorMathExample | |
-| `ofGetHeight()` | `tc::getWindowHeight()` | vectorMathExample | |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofGetWidth` | `getWindowWidth()` |  |
+| `ofGetHeight` | `getWindowHeight()` |  |
+| `ofGetWindowSize` | `getWindowSize()` |  |
+| `ofGetMouseX` | `getMouseX()` |  |
+| `ofGetMouseY` | `getMouseY()` |  |
+| `ofGetMousePressed` | `isMousePressed()` |  |
 
-### **Graphics (Drawing)**
+### **Graphics**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofBackground(r, g, b)` | `tc::clear(r, g, b)` | graphicsExample | 0.0-1.0, not 0-255 |
-| `ofSetColor(r, g, b, a)` | `tc::setColor(r, g, b, a)` | graphicsExample | 0.0-1.0 |
-| `ofSetColor(ofColor::red)` | `tc::setColor(tc::colors::red)` | colorExample | |
-| `ofDrawRectangle(x, y, w, h)` | `tc::drawRect(Vec3 pos, Vec2 size)` | graphicsExample | Vec2→Vec3 auto convert |
-| `ofDrawCircle(x, y, r)` | `tc::drawCircle(Vec3 center, r)` | graphicsExample | Vec2→Vec3 auto convert |
-| `ofDrawEllipse(x, y, w, h)` | `tc::drawEllipse(Vec3 center, Vec2 size)` | graphicsExample | Vec2→Vec3 auto convert |
-| `ofDrawLine(x1, y1, x2, y2)` | `tc::drawLine(Vec3 p1, Vec3 p2)` | graphicsExample | Vec2→Vec3 auto convert |
-| `ofDrawTriangle(...)` | `tc::drawTriangle(Vec3, Vec3, Vec3)` | graphicsExample | Vec2→Vec3 auto convert |
-| `ofNoFill()` | `tc::noFill()` | graphicsExample | |
-| `ofFill()` | `tc::fill()` | graphicsExample | |
-| `ofSetLineWidth(w)` | `tc::setLineWidth(w)` | graphicsExample | |
-| `ofDrawBitmapString(s, x, y)` | `tc::drawBitmapString(s, Vec3 pos)` | graphicsExample | Vec2→Vec3 auto convert |
-| `ofPolyline` | `tc::Path` | polylinesExample | Formerly Polyline |
-| - | `tc::StrokeMesh` | strokeMeshExample | Thick lines |
-| `ofEnableBlendMode()` | `tc::setBlendMode()` | blendingExample | |
-| `ofScissor()` | `tc::setScissor()` | clippingExample | |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofClear / ofBackground` | `clear(gray)` |  |
+| `ofSetColor` | `setColor(gray)` | Range 0-1 instead of 0-255 |
+| `ofDrawRectangle` | `drawRect(x, y, w, h)` |  |
+| `ofDrawCircle` | `drawCircle(x, y, radius)` |  |
+| `ofDrawEllipse` | `drawEllipse(x, y, w, h)` |  |
+| `ofDrawLine` | `drawLine(x1, y1, x2, y2)` | Line width not supported (always 1px). Use `beginStroke()/endStroke()` for thick lines with caps/joins |
+| `ofDrawTriangle` | `drawTriangle(x1, y1, x2, y2, x3, y3)` |  |
+| `ofDrawBox` | `drawBox(size)` |  |
+| `ofDrawSphere` | `drawSphere(radius)` |  |
+| `ofDrawCone` | `drawCone(radius, height)` |  |
+| `ofBeginShape` | `beginShape()` |  |
+| `ofVertex` | `vertex(x, y)` |  |
+| `ofEndShape` | `endShape(close)` |  |
+| `ofDrawBitmapString` | `drawBitmapString(text, x, y)` |  |
+| `ofFill` | `fill()` |  |
+| `ofNoFill` | `noFill()` |  |
+| `ofSetLineWidth` | `setStrokeWeight(weight)` | Only affects `beginStroke()/endStroke()`, not `drawLine()` |
 
 ### **Transform**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofPushMatrix()` | `tc::pushMatrix()` | graphicsExample | |
-| `ofPopMatrix()` | `tc::popMatrix()` | graphicsExample | |
-| `ofTranslate(x, y, z)` | `tc::translate(Vec3 pos)` | graphicsExample | Vec2→Vec3 auto convert |
-| `ofRotateDeg(deg)` | `tc::rotateDeg(deg)` | graphicsExample | |
-| `ofRotateRad(rad)` | `tc::rotateRad(rad)` | graphicsExample | |
-| `ofScale(x, y, z)` | `tc::scale(x, y, z)` | 3DPrimitivesExample | |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofTranslate` | `translate(x, y)` |  |
+| `ofRotateRad` | `rotate(radians)` | Always radians (not degrees like oF default) |
+| `ofRotateDeg` | `rotateDeg(degrees)` |  |
+| `ofScale` | `scale(s)` |  |
+| `ofPushMatrix` | `pushMatrix()` |  |
+| `ofPopMatrix` | `popMatrix()` |  |
 
 ### **Math**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `glm::vec2` / `ofVec2f` | `tc::Vec2` | vectorMathExample | |
-| `glm::vec3` / `ofVec3f` | `tc::Vec3` | vectorMathExample | |
-| `glm::vec4` / `ofVec4f` | `tc::Vec4` | vectorMathExample | |
-| `glm::mat4` / `ofMatrix4x4` | `tc::Mat4` | vectorMathExample | |
-| `ofMap(v, a, b, c, d)` | `tc::map(v, a, b, c, d)` | vectorMathExample | |
-| `ofClamp(v, min, max)` | `tc::clamp(v, min, max)` | vectorMathExample | std::clamp also works |
-| `ofLerp(a, b, t)` | `tc::lerp(a, b, t)` | vectorMathExample | |
-| `ofNoise(x)` | `tc::noise(x)` | noiseField2dExample | Perlin noise |
-| `ofSignedNoise(x)` | `tc::signedNoise(x)` | noiseField2dExample | |
-| `ofRandom(min, max)` | `tc::random(min, max)` | vectorMathExample | |
-| `ofDegToRad(deg)` | `tc::radians(deg)` | vectorMathExample | |
-| `ofRadToDeg(rad)` | `tc::degrees(rad)` | vectorMathExample | |
-| `PI` | `tc::PI` | vectorMathExample | |
-| `TWO_PI` | `tc::TAU` | vectorMathExample | τ = 2π |
-
-### **Color**
-
-> ⚠️ **IMPORTANT: Color Range Difference**
->
-> TrussC uses **0.0 - 1.0 float range** for all color values, NOT 0-255 like openFrameworks.
->
-> - oF: `ofSetColor(255, 128, 0)` → TrussC: `tc::setColor(1.0f, 0.5f, 0.0f)`
-> - oF: `ofBackground(30)` → TrussC: `tc::clear(0.12f)`
->
-> This applies to `setColor()`, `clear()`, `Color`, and all color-related functions.
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofColor(r, g, b, a)` | `tc::Color(r, g, b, a)` | colorExample | **0.0-1.0 float** |
-| `ofColor::fromHsb(h, s, b)` | `tc::Color::fromHSB(h, s, b)` | colorExample | 0.0-1.0 |
-| - | `tc::Color::fromOKLab(L, a, b)` | colorExample | OKLab color space |
-| - | `tc::Color::fromOKLCH(L, C, h)` | colorExample | OKLCH color space |
-
-### **Image**
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofImage` | `tc::Image` | imageLoaderExample | |
-| `img.load("path")` | `img.load("path")` | imageLoaderExample | Same |
-| `img.draw(x, y)` | `img.draw(x, y)` | imageLoaderExample | Same |
-| `img.draw(x, y, w, h)` | `img.draw(x, y, w, h)` | imageLoaderExample | Same |
-| `img.save("path")` | `img.save("path")` | screenshotExample | Same |
-| `img.getWidth()` | `img.getWidth()` | imageLoaderExample | Same |
-| `img.getHeight()` | `img.getHeight()` | imageLoaderExample | Same |
-| `img.setColor(x, y, c)` | `img.setColor(x, y, c)` | - | Same |
-| `img.getColor(x, y)` | `img.getColor(x, y)` | - | Same |
-| - | `img.setFilter(Nearest/Linear)` | textureExample | Texture filter |
-| - | `img.setWrap(Repeat/Clamp/...)` | textureExample | Texture wrap |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofRandom` | `random()` |  |
+| `ofSeedRandom` | `randomSeed(seed)` |  |
+| `ofNoise` | `noise(x)` |  |
+| `ofSignedNoise` | `signedNoise(x)` |  |
+| `ofLerp` | `lerp(a, b, t)` |  |
+| `ofClamp` | `clamp(v, min, max)` |  |
+| `ofMap` | `map(v, inMin, inMax, outMin, outMax)` |  |
+| `ofDegToRad` | `deg2rad(degrees)` |  |
+| `ofRadToDeg` | `rad2deg(radians)` |  |
+| `ofSign` | `sign(x)` |  |
+| `ofDist` | `dist(x1, y1, x2, y2)` |  |
+| `ofDistSquared` | `distSquared(x1, y1, x2, y2)` |  |
 
 ### **Font**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofTrueTypeFont` | `tc::TrueTypeFont` | fontExample | |
-| `font.load("font.ttf", size)` | `font.load("font.ttf", size)` | fontExample | |
-| `font.drawString(s, x, y)` | `font.drawString(s, x, y)` | fontExample | |
-| - | `tc::drawBitmapString(s, x, y)` | graphicsExample | Built-in font |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofTrueTypeFont` | `Font` |  |
+| `font.load("font.ttf", size)` | `font.load("font.ttf", size)` | Same |
+| `font.drawString(text, x, y)` | `font.drawString(text, x, y)` | Same |
 
 ### **3D Primitives**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofPlanePrimitive` | `tc::createPlane(w, h)` | 3DPrimitivesExample | Returns Mesh |
-| `ofBoxPrimitive` | `tc::createBox(size)` | 3DPrimitivesExample | |
-| `ofSpherePrimitive` | `tc::createSphere(r, res)` | 3DPrimitivesExample | |
-| `ofIcoSpherePrimitive` | `tc::createIcoSphere(r, res)` | 3DPrimitivesExample | |
-| `ofCylinderPrimitive` | `tc::createCylinder(r, h, res)` | 3DPrimitivesExample | |
-| `ofConePrimitive` | `tc::createCone(r, h, res)` | 3DPrimitivesExample | |
-
-### **3D Camera**
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofEasyCam` | `tc::EasyCam` | easyCamExample | |
-| `cam.begin()` | `cam.begin()` | easyCamExample | |
-| `cam.end()` | `cam.end()` | easyCamExample | |
-
-### **Lighting & Materials**
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofEnableLighting()` | `tc::enableLighting()` | 3DPrimitivesExample | |
-| `ofDisableLighting()` | `tc::disableLighting()` | 3DPrimitivesExample | |
-| `ofLight` | `tc::Light` | 3DPrimitivesExample | |
-| `light.setDirectional(dir)` | `light.setDirectional(dir)` | 3DPrimitivesExample | |
-| `light.setPointLight()` | `light.setPoint(pos)` | 3DPrimitivesExample | |
-| `light.setAmbientColor(c)` | `light.setAmbient(c)` | 3DPrimitivesExample | |
-| `light.setDiffuseColor(c)` | `light.setDiffuse(c)` | 3DPrimitivesExample | |
-| `light.setSpecularColor(c)` | `light.setSpecular(c)` | 3DPrimitivesExample | |
-| `ofMaterial` | `tc::Material` | 3DPrimitivesExample | |
-| - | `tc::Material::gold()` | 3DPrimitivesExample | Preset |
-| - | `tc::Material::silver()` | 3DPrimitivesExample | Preset |
-| - | `tc::Material::plastic(color)` | 3DPrimitivesExample | Preset |
-
-### **Mesh**
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofMesh` | `tc::Mesh` | 3DPrimitivesExample | |
-| `mesh.addVertex(v)` | `mesh.addVertex(v)` | 3DPrimitivesExample | |
-| `mesh.addColor(c)` | `mesh.addColor(c)` | 3DPrimitivesExample | |
-| `mesh.addNormal(n)` | `mesh.addNormal(n)` | 3DPrimitivesExample | |
-| `mesh.addIndex(i)` | `mesh.addIndex(i)` | 3DPrimitivesExample | |
-| `mesh.draw()` | `mesh.draw()` | 3DPrimitivesExample | |
-| `mesh.drawWireframe()` | `mesh.drawWireframe()` | 3DPrimitivesExample | |
-
-### **FBO**
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofFbo` | `tc::Fbo` | fboExample | |
-| `fbo.allocate(w, h)` | `fbo.allocate(w, h)` | fboExample | |
-| `fbo.begin()` | `fbo.begin()` | fboExample | |
-| `fbo.end()` | `fbo.end()` | fboExample | |
-| `fbo.draw(x, y)` | `fbo.draw(x, y)` | fboExample | |
-
-### **Shader**
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofShader` | `tc::Shader` | shaderExample | |
-| `shader.load(vert, frag)` | `shader.load(vert, frag)` | shaderExample | |
-| `shader.begin()` | `shader.begin()` | shaderExample | |
-| `shader.end()` | `shader.end()` | shaderExample | |
-| `shader.setUniform*()` | `shader.setUniform*()` | shaderExample | |
-
-### **Sound**
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofSoundPlayer` | `tc::Sound` | soundPlayerExample | |
-| `sound.load("file.wav")` | `sound.load("file.wav")` | soundPlayerExample | |
-| `sound.play()` | `sound.play()` | soundPlayerExample | |
-| `sound.stop()` | `sound.stop()` | soundPlayerExample | |
-| `sound.setVolume(v)` | `sound.setVolume(v)` | soundPlayerExample | |
-| `sound.setLoop(true)` | `sound.setLoop(true)` | soundPlayerExample | |
-| `ofSoundStream` | `tc::SoundStream` | micInputExample | Mic input |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofSetupScreenPerspective` | `setupScreenPerspective()` |  |
+| `ofSetupScreenOrtho` | `setupScreenOrtho()` |  |
 
 ### **Video**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofVideoGrabber` | `tc::VideoGrabber` | videoGrabberExample | |
-| `grabber.setup(w, h)` | `grabber.setup(w, h)` | videoGrabberExample | |
-| `grabber.update()` | `grabber.update()` | videoGrabberExample | |
-| `grabber.draw(x, y)` | `grabber.draw(x, y)` | videoGrabberExample | |
-| `grabber.isFrameNew()` | `grabber.isFrameNew()` | videoGrabberExample | |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofVideoGrabber` | `VideoGrabber` |  |
+| `grabber.setup(w, h)` | `grabber.setup(w, h)` |  |
+| `grabber.update()` | `grabber.update()` |  |
+| `grabber.draw(x, y)` | `grabber.draw(x, y)` |  |
+| `grabber.isFrameNew()` | `grabber.isFrameNew()` |  |
 
-### **I/O**
+### **Time**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofSystemLoadDialog()` | `tc::systemLoadDialog()` | fileDialogExample | |
-| `ofSystemSaveDialog()` | `tc::systemSaveDialog()` | fileDialogExample | |
-| `ofToDataPath("file")` | `tc::getDataPath() + "file"` | imageLoaderExample | |
-| `ofLoadJson(path)` | `tc::loadJson(path)` | jsonXmlExample | nlohmann/json |
-| `ofSaveJson(path, json)` | `tc::saveJson(path, json)` | jsonXmlExample | |
-| - | `tc::loadXml(path)` | jsonXmlExample | pugixml |
-| - | `tc::saveXml(path, xml)` | jsonXmlExample | |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofGetLastFrameTime` | `getDeltaTime()` |  |
+| `ofGetFrameRate` | `getFrameRate()` |  |
+| `ofGetFrameNum` | `getFrameCount()` |  |
+| `ofGetElapsedTimef` | `getElapsedTimef()` |  |
+| `ofGetElapsedTimeMillis` | `getElapsedTimeMillis()` |  |
+| `ofGetElapsedTimeMicros` | `getElapsedTimeMicros()` |  |
+| `ofResetElapsedTimeCounter` | `resetElapsedTimeCounter()` |  |
+| `ofGetSystemTimeMillis` | `getSystemTimeMillis()` |  |
+| `ofGetTimestampString` | `getTimestampString()` |  |
+| `ofGetSeconds` | `getSeconds()` |  |
+| `ofGetMinutes` | `getMinutes()` |  |
+| `ofGetHours` | `getHours()` |  |
+| `ofGetYear` | `getYear()` |  |
+| `ofGetMonth` | `getMonth()` |  |
+| `ofGetDay` | `getDay()` |  |
+| `ofGetWeekday` | `getWeekday()` |  |
 
-### **Clipboard**
+### **Utility**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofGetClipboardString()` | `tc::getClipboardString()` | - | Get from clipboard |
-| `ofSetClipboardString(s)` | `tc::setClipboardString(s)` | - | Copy to clipboard |
-
-### **Network**
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofxTCPClient` | `tc::TcpClient` | tcpExample | |
-| `ofxTCPServer` | `tc::TcpServer` | tcpExample | |
-| `ofxUDPManager` | `tc::UdpSocket` | udpExample | |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofLog` | `logNotice(message)` |  |
+| `ofToString` | `to_string(value)` |  |
 
 ### **GUI**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofxGui` / `ofxImGui` | Dear ImGui (built-in) | imguiExample | `tc::imgui::Begin()` etc. |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofxGui / ofxImGui` | `ImGui (built-in)` | Included by default |
 
-### **Events**
+### **I/O**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofEvent<T>` | `tc::Event<T>` | eventsExample | |
-| `ofAddListener(event, obj, &method)` | `tc::EventListener` | eventsExample | RAII style |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofSystemLoadDialog()` | `systemLoadDialog()` |  |
+| `ofSystemSaveDialog()` | `systemSaveDialog()` |  |
+| `ofLoadJson(path)` | `loadJson(path)` | nlohmann/json |
+| `-` | `loadXml(path)` | pugixml |
 
-### **Scene Graph**
+### **Network**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofNode` | `tc::Node` | ofNodeExample | shared_ptr based |
-| `node.setPosition(x, y, z)` | `node->setPosition(x, y, z)` | ofNodeExample | |
-| `node.setParent(parent)` | `parent->addChild(child)` | ofNodeExample | |
-| - | `tc::RectNode` | hitTestExample | 2D UI, hit test support |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofxTCPClient` | `TcpClient` |  |
+| `ofxTCPServer` | `TcpServer` |  |
+| `ofxUDPManager` | `UdpSocket` |  |
+| `ofxOsc` | `OscReceiver / OscSender` |  |
 
 ### **Log**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofLog()` | `logNotice("module")` | fileDialogExample | Module name optional |
-| `ofLogVerbose()` | `logVerbose("module")` | ofNodeExample | |
-| `ofLogWarning()` | `logWarning("module")` | tcpExample | |
-| `ofLogError()` | `logError("module")` | tcpExample | |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofLog()` | `logNotice()` |  |
+| `ofLogWarning()` | `logWarning()` |  |
+| `ofLogError()` | `logError()` |  |
 
 ### **Thread**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofThread` | `tc::Thread` | threadExample | |
-| - | `tc::ThreadChannel` | threadChannelExample | Thread-safe queue |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofThread` | `std::thread + MainThreadRunner` | Safe sync |
+| `-` | `MainThreadRunner::run(func)` | Execute on main thread |
 
 ### **Serial**
 
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofSerial` | `tc::Serial` | serialExample | |
+| openFrameworks | TrussC | Notes |
+|:---|:---|:---|
+| `ofSerial` | `Serial` |  |
+| `serial.setup(port, baud)` | `serial.setup(port, baud)` | Same |
+| `serial.readBytes(...)` | `serial.readBytes(...)` | Same |
+| `serial.writeBytes(...)` | `serial.writeBytes(...)` | Same |
 
-### **Timer**
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| - | `node->callAfter(sec, func)` | timerExample | Delayed execution |
-| - | `node->callEvery(sec, func)` | timerExample | Repeated execution |
-
-### **Time Utilities**
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofGetElapsedTimef()` | `tc::getElapsedTimef()` | utilsExample | Elapsed time (seconds) |
-| `ofGetElapsedTimeMillis()` | `tc::getElapsedTimeMillis()` | utilsExample | Elapsed time (milliseconds) |
-| `ofGetElapsedTimeMicros()` | `tc::getElapsedTimeMicros()` | utilsExample | Elapsed time (microseconds) |
-| `ofResetElapsedTimeCounter()` | `tc::resetElapsedTimeCounter()` | utilsExample | |
-| `ofGetTimestampString()` | `tc::getTimestampString()` | utilsExample | |
-| `ofGetTimestampString(fmt)` | `tc::getTimestampString(fmt)` | utilsExample | %i for milliseconds |
-| `ofSleepMillis(ms)` | `tc::sleepMillis(ms)` | - | |
-| - | `tc::sleepMicros(us)` | - | Microsecond sleep |
-| `ofGetSeconds()` | `tc::getSeconds()` | utilsExample | |
-| `ofGetMinutes()` | `tc::getMinutes()` | utilsExample | |
-| `ofGetHours()` | `tc::getHours()` | utilsExample | |
-| `ofGetYear()` | `tc::getYear()` | utilsExample | |
-| `ofGetMonth()` | `tc::getMonth()` | utilsExample | |
-| `ofGetDay()` | `tc::getDay()` | utilsExample | |
-| `ofGetWeekday()` | `tc::getWeekday()` | utilsExample | |
-
-### **String Utilities**
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofToString(val)` | `tc::toString(val)` | utilsExample | |
-| `ofToString(val, precision)` | `tc::toString(val, precision)` | utilsExample | Decimal precision |
-| `ofToString(val, width, fill)` | `tc::toString(val, width, fill)` | utilsExample | Zero padding etc. |
-| `ofToInt(str)` | `tc::toInt(str)` | utilsExample | |
-| `ofToFloat(str)` | `tc::toFloat(str)` | utilsExample | |
-| `ofToBool(str)` | `tc::toBool(str)` | utilsExample | |
-| `ofToHex(val)` | `tc::toHex(val)` | utilsExample | |
-| `ofToBinary(val)` | `tc::toBinary(val)` | utilsExample | |
-| `ofHexToInt(str)` | `tc::hexToInt(str)` | utilsExample | |
-| `ofIsStringInString(s, sub)` | `tc::isStringInString(s, sub)` | utilsExample | |
-| `ofStringTimesInString(s, sub)` | `tc::stringTimesInString(s, sub)` | utilsExample | |
-| `ofSplitString(s, delim)` | `tc::splitString(s, delim)` | utilsExample | |
-| `ofJoinString(strs, delim)` | `tc::joinString(strs, delim)` | utilsExample | |
-| `ofStringReplace(s, from, to)` | `tc::stringReplace(s, from, to)` | utilsExample | Mutating |
-| `ofTrim(s)` | `tc::trim(s)` | utilsExample | |
-| `ofTrimFront(s)` | `tc::trimFront(s)` | utilsExample | |
-| `ofTrimBack(s)` | `tc::trimBack(s)` | utilsExample | |
-| `ofToLower(s)` | `tc::toLower(s)` | utilsExample | |
-| `ofToUpper(s)` | `tc::toUpper(s)` | utilsExample | |
-
-### **Addons**
-
-| openFrameworks | TrussC | Example | Notes |
-|:---|:---|:---|:---|
-| `ofxAddon` | `tcxAddon` | - | Prefix |
-| Write in `addons.make` | `use_addon()` | - | CMake function |
-| `ofxGui` | `tcxGui` | - | GUI |
-| `ofxOsc` | `tcxOsc` | - | OSC communication |
-| `ofxBox2d` | `tcxBox2d` | - | 2D physics engine |
-| - | `tcx::addonname::Class` | - | Namespace convention |
+<!-- AUTO-GENERATED-END -->
