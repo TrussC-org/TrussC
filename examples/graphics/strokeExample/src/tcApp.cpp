@@ -11,8 +11,26 @@ void tcApp::draw() {
 
     setColor(colors::hotPink);
     setStrokeWeight(30.0f);
-    setStrokeCap(StrokeCap::Round);
-    setStrokeJoin(StrokeJoin::Round);
+
+    // Apply style based on styleIndex
+    string styleName;
+    switch (styleIndex) {
+        case 0:
+            setStrokeCap(StrokeCap::Round);
+            setStrokeJoin(StrokeJoin::Round);
+            styleName = "ROUND-ROUND";
+            break;
+        case 1:
+            setStrokeCap(StrokeCap::Butt);
+            setStrokeJoin(StrokeJoin::Miter);
+            styleName = "MITER-BUTT";
+            break;
+        case 2:
+            setStrokeCap(StrokeCap::Square);
+            setStrokeJoin(StrokeJoin::Bevel);
+            styleName = "BEVEL-SQUARE";
+            break;
+    }
 
     if (useStroke) {
         beginStroke();
@@ -34,7 +52,7 @@ void tcApp::draw() {
     // Mode indicator
     setColor(colors::white);
     string mode = useStroke ? "beginStroke" : "beginShape";
-    string info = mode + " | weight=" + to_string((int)getStrokeWeight()) + " (click to toggle)";
+    string info = mode + " | " + styleName + " (click: mode, space: style)";
     drawBitmapString(info, 10, 20);
 }
 
@@ -47,4 +65,10 @@ void tcApp::mouseMoved(Vec2 pos) {
 
 void tcApp::mousePressed(Vec2 pos, int button) {
     useStroke = !useStroke;
+}
+
+void tcApp::keyPressed(int key) {
+    if (key == ' ') {
+        styleIndex = (styleIndex + 1) % 3;
+    }
 }

@@ -267,10 +267,10 @@ private:
                 verts.push_back(srcVerts[i]);
                 filteredWidths.push_back(w);
             } else {
+                // Skip only if exactly same position (distance ~= 0)
                 Vec3 diff = srcVerts[i] - verts.back();
-                float dist = std::sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
-                float minDist = w * 0.3f;
-                if (dist >= minDist) {
+                float distSq = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
+                if (distSq > 0.0001f) {  // epsilon for floating point comparison
                     verts.push_back(srcVerts[i]);
                     filteredWidths.push_back(w);
                 }
@@ -334,10 +334,61 @@ private:
                 Vec3 d1 = normalize(Vec3{curr.x - prev.x, curr.y - prev.y, curr.z - prev.z});
                 Vec3 d2 = normalize(Vec3{next.x - curr.x, next.y - curr.y, next.z - curr.z});
                 float cross = d1.x * d2.y - d1.y * d2.x;
+                float dotDir = d1.x * d2.x + d1.y * d2.y;
 
-                if (std::abs(cross) < 0.0001f) continue;
+                // Near 180-degree turn: need to fill both sides
+                bool is180Turn = (dotDir < -0.5f && std::abs(cross) < 0.5f);
 
                 bool turnsLeft = cross < 0;
+
+                // For 180-degree turn, we need to fill both sides
+                if (is180Turn) {
+                    Vec3 leftP1 = Vec3{curr.x + n1.x * hw, curr.y + n1.y * hw, curr.z};
+                    Vec3 leftP2 = Vec3{curr.x + n2.x * hw, curr.y + n2.y * hw, curr.z};
+                    Vec3 rightP1 = Vec3{curr.x - n1.x * hw, curr.y - n1.y * hw, curr.z};
+                    Vec3 rightP2 = Vec3{curr.x - n2.x * hw, curr.y - n2.y * hw, curr.z};
+
+                    if (joinType_ == JOIN_ROUND) {
+                        // Draw semicircles on both sides
+                        float angleL1 = std::atan2(n1.y, n1.x);
+                        float angleL2 = std::atan2(n2.y, n2.x);
+                        float deltaL = angleL2 - angleL1;
+                        while (deltaL > HALF_TAU) deltaL -= TAU;
+                        while (deltaL < -HALF_TAU) deltaL += TAU;
+
+                        int segments = std::max(8, (int)(hw * 2));
+                        for (int j = 0; j < segments; j++) {
+                            float t1 = (float)j / segments;
+                            float t2 = (float)(j + 1) / segments;
+                            float a1 = angleL1 + deltaL * t1;
+                            float a2 = angleL1 + deltaL * t2;
+                            Vec3 pt1 = Vec3{curr.x + std::cos(a1) * hw, curr.y + std::sin(a1) * hw, curr.z};
+                            Vec3 pt2 = Vec3{curr.x + std::cos(a2) * hw, curr.y + std::sin(a2) * hw, curr.z};
+                            addTriangle(targetMesh, curr, pt1, pt2, strokeColor_);
+                        }
+
+                        float angleR1 = angleL1 + HALF_TAU;
+                        float angleR2 = angleL2 + HALF_TAU;
+                        float deltaR = angleR2 - angleR1;
+                        while (deltaR > HALF_TAU) deltaR -= TAU;
+                        while (deltaR < -HALF_TAU) deltaR += TAU;
+
+                        for (int j = 0; j < segments; j++) {
+                            float t1 = (float)j / segments;
+                            float t2 = (float)(j + 1) / segments;
+                            float a1 = angleR1 + deltaR * t1;
+                            float a2 = angleR1 + deltaR * t2;
+                            Vec3 pt1 = Vec3{curr.x + std::cos(a1) * hw, curr.y + std::sin(a1) * hw, curr.z};
+                            Vec3 pt2 = Vec3{curr.x + std::cos(a2) * hw, curr.y + std::sin(a2) * hw, curr.z};
+                            addTriangle(targetMesh, curr, pt1, pt2, strokeColor_);
+                        }
+                    } else {
+                        // BEVEL or MITER: just fill with triangles on both sides
+                        addTriangle(targetMesh, curr, leftP1, leftP2, strokeColor_);
+                        addTriangle(targetMesh, curr, rightP1, rightP2, strokeColor_);
+                    }
+                    continue;
+                }
 
                 Vec3 innerP1, innerP2;
                 if (turnsLeft) {
