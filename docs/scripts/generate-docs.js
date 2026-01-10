@@ -6,28 +6,39 @@
  *   node generate-docs.js                  # Generate all outputs
  *   node generate-docs.js --sketch         # Generate TrussSketch-related files only
  *   node generate-docs.js --reference      # Generate REFERENCE.md only
+ *   node generate-docs.js --of-mapping     # Generate oF mapping JSON for website
+ *   node generate-docs.js --of-markdown    # Generate oF comparison markdown
  *
  * Outputs:
  *   --sketch:
  *     - ../trussc.org/sketch/trusssketch-api.js
  *     - ../TrussSketch/REFERENCE.md
+ *   --of-mapping:
+ *     - ../trussc.org/of-mapping.json
+ *   --of-markdown:
+ *     - ../TrussC_vs_openFrameworks.md (Section 5)
  */
 
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
+const { categoryMapping, ofOnlyEntries } = require('./of-category-mapping.js');
 
 // Paths
 const API_YAML = path.join(__dirname, '../api-definition.yaml');
 const SKETCH_API_JS = path.join(__dirname, '../../../trussc.org/sketch/trusssketch-api.js');
 const REFERENCE_MD = path.join(__dirname, '../../../TrussSketch/REFERENCE.md');
 const REFERENCE_MD_DOCS = path.join(__dirname, '../REFERENCE.md');
+const OF_MAPPING_JSON = path.join(__dirname, '../../../trussc.org/of-mapping.json');
+const OF_COMPARISON_MD = path.join(__dirname, '../TrussC_vs_openFrameworks.md');
 
 // Parse command line args
 const args = process.argv.slice(2);
 const generateAll = args.length === 0;
 const generateSketch = generateAll || args.includes('--sketch');
 const generateReference = generateAll || args.includes('--reference');
+const generateOfMapping = generateAll || args.includes('--of-mapping');
+const generateOfMarkdown = generateAll || args.includes('--of-markdown');
 
 // Load YAML
 function loadAPI() {
@@ -196,6 +207,164 @@ def keyPressed(key) {
     return md;
 }
 
+// Generate oF mapping JSON for website
+function generateOfMappingJson(api) {
+    // Group functions by display category
+    const categoryGroups = {};
+
+    for (const cat of api.categories) {
+        const mapping = categoryMapping[cat.id];
+        if (!mapping) continue;
+
+        const displayId = mapping.id;
+        if (!categoryGroups[displayId]) {
+            categoryGroups[displayId] = {
+                id: displayId,
+                name: mapping.name,
+                name_ja: mapping.name_ja,
+                order: mapping.order,
+                mappings: []
+            };
+        }
+
+        // Add functions that have of_equivalent
+        for (const fn of cat.functions) {
+            if (fn.of_equivalent) {
+                // Use simple params for cleaner display
+                const params = fn.signatures[0]?.params_simple || '';
+                categoryGroups[displayId].mappings.push({
+                    of: fn.of_equivalent,
+                    tc: fn.name + (params ? `(${params})` : '()'),
+                    notes: fn.of_notes || '',
+                    notes_ja: fn.of_notes_ja || fn.of_notes || ''
+                });
+            }
+        }
+    }
+
+    // Add ofOnlyEntries (categories/functions not yet in YAML)
+    for (const entry of ofOnlyEntries) {
+        if (!categoryGroups[entry.category]) {
+            categoryGroups[entry.category] = {
+                id: entry.category,
+                name: entry.name,
+                name_ja: entry.name_ja,
+                order: entry.order,
+                mappings: []
+            };
+        }
+        for (const e of entry.entries) {
+            categoryGroups[entry.category].mappings.push({
+                of: e.of,
+                tc: e.tc,
+                notes: e.notes || '',
+                notes_ja: e.notes_ja || e.notes || ''
+            });
+        }
+    }
+
+    // Convert to sorted array
+    const categories = Object.values(categoryGroups)
+        .filter(cat => cat.mappings.length > 0)
+        .sort((a, b) => a.order - b.order);
+
+    return JSON.stringify({ categories }, null, 2);
+}
+
+// Generate oF comparison markdown (Section 5)
+function generateOfMarkdownSection(api) {
+    // Same grouping logic as JSON
+    const categoryGroups = {};
+
+    for (const cat of api.categories) {
+        const mapping = categoryMapping[cat.id];
+        if (!mapping) continue;
+
+        const displayId = mapping.id;
+        if (!categoryGroups[displayId]) {
+            categoryGroups[displayId] = {
+                id: displayId,
+                name: mapping.name,
+                order: mapping.order,
+                mappings: []
+            };
+        }
+
+        for (const fn of cat.functions) {
+            if (fn.of_equivalent) {
+                const params = fn.signatures[0]?.params_simple || '';
+                categoryGroups[displayId].mappings.push({
+                    of: fn.of_equivalent,
+                    tc: fn.name + (params ? `(${params})` : '()'),
+                    notes: fn.of_notes || ''
+                });
+            }
+        }
+    }
+
+    // Add ofOnlyEntries
+    for (const entry of ofOnlyEntries) {
+        if (!categoryGroups[entry.category]) {
+            categoryGroups[entry.category] = {
+                id: entry.category,
+                name: entry.name,
+                order: entry.order,
+                mappings: []
+            };
+        }
+        for (const e of entry.entries) {
+            categoryGroups[entry.category].mappings.push({
+                of: e.of,
+                tc: e.tc,
+                notes: e.notes || ''
+            });
+        }
+    }
+
+    // Convert to sorted array
+    const categories = Object.values(categoryGroups)
+        .filter(cat => cat.mappings.length > 0)
+        .sort((a, b) => a.order - b.order);
+
+    // Generate markdown
+    let md = '';
+    for (const cat of categories) {
+        md += `### **${cat.name}**\n\n`;
+        md += '| openFrameworks | TrussC | Notes |\n';
+        md += '|:---|:---|:---|\n';
+        for (const m of cat.mappings) {
+            md += `| \`${m.of}\` | \`${m.tc}\` | ${m.notes} |\n`;
+        }
+        md += '\n';
+    }
+
+    return md;
+}
+
+// Update TrussC_vs_openFrameworks.md with auto-generated section
+function updateOfComparisonMarkdown(api) {
+    const START_MARKER = '<!-- AUTO-GENERATED-START -->';
+    const END_MARKER = '<!-- AUTO-GENERATED-END -->';
+
+    let content = fs.readFileSync(OF_COMPARISON_MD, 'utf8');
+    const generatedSection = generateOfMarkdownSection(api);
+
+    const startIdx = content.indexOf(START_MARKER);
+    const endIdx = content.indexOf(END_MARKER);
+
+    if (startIdx === -1 || endIdx === -1) {
+        console.log('  Warning: Markers not found in TrussC_vs_openFrameworks.md');
+        console.log('  Add <!-- AUTO-GENERATED-START --> and <!-- AUTO-GENERATED-END --> markers');
+        return null;
+    }
+
+    const newContent = content.substring(0, startIdx + START_MARKER.length) +
+        '\n\n' + generatedSection +
+        content.substring(endIdx);
+
+    return newContent;
+}
+
 // Main
 function main() {
     console.log('Loading api-definition.yaml...');
@@ -221,6 +390,24 @@ function main() {
             // Write to TrussC/docs
             fs.writeFileSync(REFERENCE_MD_DOCS, md);
             console.log(`  Written: ${REFERENCE_MD_DOCS}`);
+        }
+    }
+
+    // Generate oF mapping JSON
+    if (generateOfMapping) {
+        console.log('\nGenerating of-mapping.json...');
+        const json = generateOfMappingJson(api);
+        fs.writeFileSync(OF_MAPPING_JSON, json);
+        console.log(`  Written: ${OF_MAPPING_JSON}`);
+    }
+
+    // Update oF comparison markdown
+    if (generateOfMarkdown) {
+        console.log('\nUpdating TrussC_vs_openFrameworks.md...');
+        const updatedMd = updateOfComparisonMarkdown(api);
+        if (updatedMd) {
+            fs.writeFileSync(OF_COMPARISON_MD, updatedMd);
+            console.log(`  Updated: ${OF_COMPARISON_MD}`);
         }
     }
 

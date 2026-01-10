@@ -140,7 +140,7 @@ TrussC is built with respect for oF, as **"a new foundation (Truss) for fighting
 
 Solutions in TrussC for problems that have plagued oF users for years.
 
-### **Thick Line Drawing (StrokeMesh)**
+### **Thick Line Drawing**
 
 **oF Problem:**
 - `ofSetLineWidth()` can't guarantee thickness beyond 1px due to OpenGL limitations
@@ -149,20 +149,13 @@ Solutions in TrussC for problems that have plagued oF users for years.
 
 **TrussC Solution:**
 ```cpp
-// StrokeMesh can draw lines of any thickness
-tc::StrokeMesh stroke;
-stroke.setStrokeWidth(5.0f);  // 5px thick line
-stroke.moveTo(0, 0);
-stroke.lineTo(100, 100);
-stroke.draw();
-
-// Can also generate from Path
-tc::Path path;
-path.addVertex(0, 0);
-path.addVertex(100, 50);
-path.addVertex(200, 0);
-tc::StrokeMesh stroke2(path, 3.0f);  // 3px
-stroke2.draw();
+// Beautiful thick lines with beginStroke/endStroke
+setStrokeWeight(5.0f);  // 5px thick line
+beginStroke();
+vertex(0, 0);
+vertex(100, 50);
+vertex(200, 0);
+endStroke();  // Automatic line caps and joins
 ```
 
 ### **Update and Draw Cycle Control**
