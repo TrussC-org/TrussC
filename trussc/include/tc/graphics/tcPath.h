@@ -295,20 +295,20 @@ public:
         }
     }
 
-    // Get bounding box
-    void getBoundingBox(float& minX, float& minY, float& maxX, float& maxY) const {
+    // Get bounding box as Rect
+    Rect getBounds() const {
         if (vertices_.empty()) {
-            minX = minY = maxX = maxY = 0;
-            return;
+            return Rect{0, 0, 0, 0};
         }
-        minX = maxX = vertices_[0].x;
-        minY = maxY = vertices_[0].y;
+        float minX = vertices_[0].x, maxX = vertices_[0].x;
+        float minY = vertices_[0].y, maxY = vertices_[0].y;
         for (const auto& v : vertices_) {
             if (v.x < minX) minX = v.x;
             if (v.x > maxX) maxX = v.x;
             if (v.y < minY) minY = v.y;
             if (v.y > maxY) maxY = v.y;
         }
+        return Rect{minX, minY, maxX - minX, maxY - minY};
     }
 
     // Calculate length (line length)

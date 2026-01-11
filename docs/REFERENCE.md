@@ -48,6 +48,8 @@ void drawCircle(Vec3 center, float radius) // Draw circle
 void drawEllipse(float x, float y, float w, float h) // Draw ellipse
 void drawEllipse(Vec3 center, float rx, float ry) // Draw ellipse
 void drawEllipse(Vec3 center, Vec2 radii) // Draw ellipse
+void drawPoint(float x, float y)         // Draw a single point
+void drawPoint(Vec3 pos)                 // Draw a single point
 void drawLine(float x1, float y1, float x2, float y2) // Draw line
 void drawLine(Vec3 p1, Vec3 p2)          // Draw line
 void drawTriangle(float x1, float y1, float x2, float y2, float x3, float y3) // Draw triangle
@@ -75,6 +77,14 @@ void endStroke(bool close = false)       // End drawing a stroke
 void drawStroke(float x1, float y1, float x2, float y2) // Draw a single stroke segment (thick line with cap/join)
 void drawStroke(const Vec2& p1, const Vec2& p2) // Draw a single stroke segment (thick line with cap/join)
 void drawBitmapString(const string& text, float x, float y) // Draw text
+void setTextAlign(TextAlign horizontal)  // Set text alignment
+void setTextAlign(TextAlign horizontal, TextAlign vertical) // Set text alignment
+TextAlign getTextAlignH()                // Get horizontal text alignment
+TextAlign getTextAlignV()                // Get vertical text alignment
+float getBitmapFontHeight()              // Get bitmap font height
+float getBitmapStringWidth(const string& text) // Get text width
+float getBitmapStringHeight(const string& text) // Get text height
+Rect getBitmapStringBBox(const string& text, float x, float y) // Get text bounding box
 ```
 
 ## Graphics - Style
@@ -88,6 +98,13 @@ void setStrokeCap(StrokeCap cap)         // Set stroke cap style (Butt, Round, S
 StrokeCap getStrokeCap()                 // Get current stroke cap style
 void setStrokeJoin(StrokeJoin join)      // Set stroke join style (Miter, Round, Bevel)
 StrokeJoin getStrokeJoin()               // Get current stroke join style
+bool isFillEnabled()                     // Check if fill mode is enabled
+bool isStrokeEnabled()                   // Check if stroke mode is enabled
+void setCircleResolution(int resolution) // Set circle segment count
+int getCircleResolution()                // Get circle segment count
+void pushStyle()                         // Save current style state (color, stroke, fill)
+void popStyle()                          // Restore previous style state
+Color getColor()                         // Get current fill color
 ```
 
 ## Transform
@@ -102,10 +119,19 @@ void rotate(Quaternion quat)             // Rotate by radians (single axis, eule
 void rotateDeg(float degrees)            // Rotate by degrees
 void rotateDeg(float x, float y, float z) // Rotate by degrees
 void rotateDeg(Vec3 euler)               // Rotate by degrees
+void rotateX(float radians)              // Rotate around X axis
+void rotateY(float radians)              // Rotate around Y axis
+void rotateZ(float radians)              // Rotate around Z axis
+void rotateXDeg(float degrees)           // Rotate around X axis (degrees)
+void rotateYDeg(float degrees)           // Rotate around Y axis (degrees)
+void rotateZDeg(float degrees)           // Rotate around Z axis (degrees)
 void scale(float s)                      // Scale
 void scale(float sx, float sy)           // Scale
 void pushMatrix()                        // Save transform state
 void popMatrix()                         // Restore transform state
+Mat4 getCurrentMatrix()                  // Get current transformation matrix
+void resetMatrix()                       // Reset transformation matrix to identity
+void setMatrix(const Mat4& mat)          // Set transformation matrix directly
 ```
 
 ## Window & Input
@@ -257,14 +283,64 @@ void setVolume(float vol)                // Set volume (0.0-1.0)
 void setLoop(bool loop)                  // Enable/disable looping
 ```
 
+## ChipSound
+
+```cpp
+ChipSoundNote()                          // Create a chip sound note (8-bit style sound)
+ChipSoundNote& wave(Wave type)           // Set wave type (Sin, Square, Triangle, Sawtooth, Noise, PinkNoise)
+ChipSoundNote& hz(float frequency)       // Set frequency in Hz
+ChipSoundNote& duration(float seconds)   // Set note duration in seconds
+ChipSoundNote& volume(float vol)         // Set volume (0.0-1.0)
+ChipSoundNote& attack(float seconds)     // Set attack time (ADSR envelope)
+ChipSoundNote& decay(float seconds)      // Set decay time (ADSR envelope)
+ChipSoundNote& sustain(float level)      // Set sustain level (0.0-1.0)
+ChipSoundNote& release(float seconds)    // Set release time (ADSR envelope)
+ChipSoundNote& adsr(float a, float d, float s, float r) // Set ADSR envelope (attack, decay, sustain, release)
+Sound@ build()                           // Build and return Sound object from note
+ChipSoundBundle@ createChipBundle()      // Create a chip sound bundle for sequencing multiple notes
+ChipSoundBundle& add(const ChipSoundNote& note, float time) // Add a note at specified time (seconds)
+ChipSoundBundle& clear()                 // Clear all notes from bundle
+```
+
+## Font
+
+```cpp
+Font@ createFont()                       // Create a TrueType font
+bool load(const string& path, int size)  // Load TTF font file
+bool isLoaded()                          // Check if font is loaded
+void drawString(const string& text, float x, float y) // Draw text at position
+float getWidth(const string& text)       // Get text width in pixels
+float getHeight(const string& text)      // Get text height in pixels
+float getLineHeight()                    // Get line height
+int getSize()                            // Get font size
+```
+
 ## Animation
 
 ```cpp
-Tween()                                  // Create a tween
-void setDuration(float seconds)          // Set animation duration
-void start()                             // Start animation
+float ease(float t, EaseType type, EaseMode mode) // Apply easing to value (0-1)
+float easeIn(float t, EaseType type)     // Apply ease-in to value (0-1)
+float easeOut(float t, EaseType type)    // Apply ease-out to value (0-1)
+float easeInOut(float t, EaseType type)  // Apply ease-in-out to value (0-1)
+Tween@ createTween()                     // Create a tween object
+Tween@ from(float value)                 // Set start value
+Tween@ to(float value)                   // Set end value
+Tween@ duration(float seconds)           // Set animation duration
+Tween@ ease(EaseType type)               // Set easing type
+Tween@ start()                           // Start animation (chainable)
+Tween@ pause()                           // Pause animation (chainable)
+Tween@ resume()                          // Resume animation (chainable)
+Tween@ reset()                           // Reset animation (chainable)
+Tween@ finish()                          // Jump to end (chainable)
 void update(float dt)                    // Update animation
 float getValue()                         // Get current tween value
+float getProgress()                      // Get progress (0-1)
+float getElapsed()                       // Get elapsed time
+float getDuration()                      // Get duration
+bool isPlaying()                         // Check if playing
+bool isComplete()                        // Check if complete
+float getStart()                         // Get start value
+float getEnd()                           // Get end value
 ```
 
 ## Types - Vec2
@@ -450,12 +526,22 @@ TAU                          // 6.283... (Full circle (2*PI))
 HALF_TAU                     // 3.141... (Half circle (PI))
 QUARTER_TAU                  // 1.570... (Quarter circle (PI/2))
 PI                           // 3.141... (Pi (use TAU instead))
-StrokeCap_Butt               // 0 (Flat line cap (no extension))
-StrokeCap_Round              // 1 (Rounded line cap)
-StrokeCap_Square             // 2 (Square line cap (extends by half stroke width))
-StrokeJoin_Miter             // 0 (Sharp corner join)
-StrokeJoin_Round             // 1 (Rounded corner join)
-StrokeJoin_Bevel             // 2 (Beveled corner join)
+StrokeCap::Butt              // 0 (Flat line cap (no extension))
+StrokeCap::Round             // 1 (Rounded line cap)
+StrokeCap::Square            // 2 (Square line cap (extends by half stroke width))
+StrokeJoin::Miter            // 0 (Sharp corner join)
+StrokeJoin::Round            // 1 (Rounded corner join)
+StrokeJoin::Bevel            // 2 (Beveled corner join)
+FONT_SANS                    // string (System sans-serif font path (CDN URL on Web))
+FONT_SERIF                   // string (System serif font path (CDN URL on Web))
+FONT_MONO                    // string (System monospace font path (CDN URL on Web))
+Wave::Sin                    // 0 (Sine wave (smooth, pure tone))
+Wave::Square                 // 1 (Square wave (harsh, 8-bit style))
+Wave::Triangle               // 2 (Triangle wave (softer than square))
+Wave::Sawtooth               // 3 (Sawtooth wave (bright, buzzy))
+Wave::Noise                  // 4 (White noise)
+Wave::PinkNoise              // 5 (Pink noise (1/f noise, more natural))
+Wave::Silent                 // 6 (Silent (no sound))
 ```
 
 ## Variables

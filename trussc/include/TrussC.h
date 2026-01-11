@@ -2179,7 +2179,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #include "tc/graphics/tcShape.h"
 
 // TrussC polyline
-#include "tc/graphics/tcPolyline.h"
+#include "tc/graphics/tcPath.h"
 
 // TrussC lighting (must be included before tcMesh.h)
 #include "tc/3d/tcLightingState.h"

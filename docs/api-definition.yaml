@@ -976,6 +976,16 @@ categories:
         sketch: true
         snippet: "getElapsedTimef()"
 
+      - name: getElapsedTime
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Elapsed seconds (alias for getElapsedTimef)"
+        description_ja: "経過秒数（getElapsedTimefのエイリアス）"
+        sketch: true
+        snippet: "getElapsedTime()"
+
       - name: getElapsedTimeMillis
         return: "uint64_t"
         signatures:
@@ -1651,8 +1661,18 @@ categories:
             params_simple: ""
         description: "Create a sound player"
         description_ja: "サウンドプレイヤーを作成"
-        sketch: true
+        sketch: false
         snippet: "Sound()"
+
+      - name: createSound
+        return: "Sound@"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a sound player (TrussSketch factory)"
+        description_ja: "サウンドプレイヤーを作成（TrussSketch用ファクトリ）"
+        sketch: true
+        snippet: "Sound@ snd = createSound();"
 
       - name: load
         return: "bool"
@@ -1703,6 +1723,163 @@ categories:
         description_ja: "ループ再生を設定"
         sketch: true
         snippet: "setLoop(${1:true})"
+
+  # ==========================================================================
+  # ChipSound
+  # ==========================================================================
+  - id: chipsound
+    name: "ChipSound"
+    name_ja: "チップサウンド"
+    functions:
+      - name: ChipSoundNote
+        return: ""
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a chip sound note (8-bit style sound)"
+        description_ja: "チップサウンドノートを作成（8bitスタイルのサウンド）"
+        sketch: false
+        snippet: "ChipSoundNote note;"
+
+      - name: wave
+        return: "ChipSoundNote&"
+        signatures:
+          - params: "Wave type"
+            params_simple: "type"
+        description: "Set wave type (Sin, Square, Triangle, Sawtooth, Noise, PinkNoise)"
+        description_ja: "波形タイプを設定"
+        sketch: true
+        snippet: "wave(Wave::Square)"
+
+      - name: hz
+        return: "ChipSoundNote&"
+        signatures:
+          - params: "float frequency"
+            params_simple: "frequency"
+        description: "Set frequency in Hz"
+        description_ja: "周波数を設定（Hz）"
+        sketch: true
+        snippet: "hz(${1:440})"
+
+      - name: duration
+        return: "ChipSoundNote&"
+        signatures:
+          - params: "float seconds"
+            params_simple: "seconds"
+        description: "Set note duration in seconds"
+        description_ja: "ノートの長さを設定（秒）"
+        sketch: true
+        snippet: "duration(${1:0.5})"
+
+      - name: volume
+        return: "ChipSoundNote&"
+        signatures:
+          - params: "float vol"
+            params_simple: "vol"
+        description: "Set volume (0.0-1.0)"
+        description_ja: "音量を設定"
+        sketch: true
+        snippet: "volume(${1:0.8})"
+
+      - name: attack
+        return: "ChipSoundNote&"
+        signatures:
+          - params: "float seconds"
+            params_simple: "seconds"
+        description: "Set attack time (ADSR envelope)"
+        description_ja: "アタック時間を設定"
+        sketch: true
+        snippet: "attack(${1:0.01})"
+
+      - name: decay
+        return: "ChipSoundNote&"
+        signatures:
+          - params: "float seconds"
+            params_simple: "seconds"
+        description: "Set decay time (ADSR envelope)"
+        description_ja: "ディケイ時間を設定"
+        sketch: true
+        snippet: "decay(${1:0.1})"
+
+      - name: sustain
+        return: "ChipSoundNote&"
+        signatures:
+          - params: "float level"
+            params_simple: "level"
+        description: "Set sustain level (0.0-1.0)"
+        description_ja: "サスティンレベルを設定"
+        sketch: true
+        snippet: "sustain(${1:0.7})"
+
+      - name: release
+        return: "ChipSoundNote&"
+        signatures:
+          - params: "float seconds"
+            params_simple: "seconds"
+        description: "Set release time (ADSR envelope)"
+        description_ja: "リリース時間を設定"
+        sketch: true
+        snippet: "release(${1:0.2})"
+
+      - name: adsr
+        return: "ChipSoundNote&"
+        signatures:
+          - params: "float a, float d, float s, float r"
+            params_simple: "a, d, s, r"
+        description: "Set ADSR envelope (attack, decay, sustain, release)"
+        description_ja: "ADSRエンベロープを設定"
+        sketch: true
+        snippet: "adsr(${1:0.01}, ${2:0.1}, ${3:0.7}, ${4:0.2})"
+
+      - name: build
+        return: "Sound@"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Build and return Sound object from note"
+        description_ja: "ノートからSoundオブジェクトを生成"
+        sketch: true
+        snippet: "build()"
+
+      - name: createChipBundle
+        return: "ChipSoundBundle@"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a chip sound bundle for sequencing multiple notes"
+        description_ja: "複数ノートのシーケンス用バンドルを作成"
+        sketch: true
+        snippet: "ChipSoundBundle@ bundle = createChipBundle();"
+
+      - name: add
+        return: "ChipSoundBundle&"
+        signatures:
+          - params: "const ChipSoundNote& note, float time"
+            params_simple: "note, time"
+        description: "Add a note at specified time (seconds)"
+        description_ja: "指定時間にノートを追加"
+        sketch: true
+        snippet: "add(${1:note}, ${2:0.0})"
+
+      - name: clear
+        return: "ChipSoundBundle&"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Clear all notes from bundle"
+        description_ja: "バンドル内の全ノートをクリア"
+        sketch: true
+        snippet: "clear()"
+
+      - name: getDuration
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get the total duration of the bundle"
+        description_ja: "バンドルの総再生時間を取得"
+        sketch: true
+        snippet: "getDuration()"
 
   # ==========================================================================
   # Font
@@ -2038,6 +2215,7 @@ categories:
     name_ja: "型 - Vec2"
     functions:
       - name: Vec2
+        sketch: false
         return: ""
         signatures:
           - params: ""
@@ -2046,21 +2224,20 @@ categories:
             params_simple: "x, y"
           - params: "float v"
             params_simple: "v"
-        description: "Create 2D vector"
-        description_ja: "2Dベクトルを作成"
-        sketch: true
+        description: "Create 2D vector (type constructor)"
+        description_ja: "2Dベクトルを作成（型コンストラクタ）"
         snippet: "Vec2(${1:x}, ${2:y})"
 
       - name: set
+        sketch: false
         return: "Vec2&"
         signatures:
           - params: "float x, float y"
             params_simple: "x, y"
           - params: "Vec2 v"
             params_simple: "v"
-        description: "Set vector components"
-        description_ja: "ベクトルの成分を設定"
-        sketch: true
+        description: "Set vector components (type method)"
+        description_ja: "ベクトルの成分を設定（型メソッド）"
         snippet: "set(${1:x}, ${2:y})"
 
       - name: Vec2_fromAngle
@@ -2083,6 +2260,7 @@ categories:
     name_ja: "型 - Vec3"
     functions:
       - name: Vec3
+        sketch: false
         return: ""
         signatures:
           - params: ""
@@ -2091,21 +2269,20 @@ categories:
             params_simple: "x, y, z"
           - params: "float v"
             params_simple: "v"
-        description: "Create 3D vector"
-        description_ja: "3Dベクトルを作成"
-        sketch: true
+        description: "Create 3D vector (type constructor)"
+        description_ja: "3Dベクトルを作成（型コンストラクタ）"
         snippet: "Vec3(${1:x}, ${2:y}, ${3:z})"
 
       - name: set
+        sketch: false
         return: "Vec3&"
         signatures:
           - params: "float x, float y, float z"
             params_simple: "x, y, z"
           - params: "Vec3 v"
             params_simple: "v"
-        description: "Set vector components"
-        description_ja: "ベクトルの成分を設定"
-        sketch: true
+        description: "Set vector components (type method)"
+        description_ja: "ベクトルの成分を設定（型メソッド）"
         snippet: "set(${1:x}, ${2:y}, ${3:z})"
 
   # ==========================================================================
@@ -2116,6 +2293,7 @@ categories:
     name_ja: "型 - Color"
     functions:
       - name: Color
+        sketch: false
         return: ""
         signatures:
           - params: ""
@@ -2124,12 +2302,12 @@ categories:
             params_simple: "r, g, b"
           - params: "float r, float g, float b, float a"
             params_simple: "r, g, b, a"
-        description: "Create color (0.0-1.0)"
-        description_ja: "色を作成 (0.0-1.0)"
-        sketch: true
+        description: "Create color (type constructor)"
+        description_ja: "色を作成（型コンストラクタ）"
         snippet: "Color(${1:r}, ${2:g}, ${3:b})"
 
       - name: set
+        sketch: false
         return: "Color&"
         signatures:
           - params: "float r, float g, float b"
@@ -2140,9 +2318,8 @@ categories:
             params_simple: "gray"
           - params: "Color c"
             params_simple: "c"
-        description: "Set color components"
-        description_ja: "色の成分を設定"
-        sketch: true
+        description: "Set color components (type method)"
+        description_ja: "色の成分を設定（型メソッド）"
         snippet: "set(${1:r}, ${2:g}, ${3:b})"
 
       - name: Color_fromHSB
@@ -2156,6 +2333,18 @@ categories:
         description_ja: "HSBからColorを作成"
         sketch: true
         snippet: "Color_fromHSB(${1:h}, ${2:s}, ${3:b})"
+
+      - name: colorFromHSB
+        return: "Color"
+        signatures:
+          - params: "float h, float s, float b"
+            params_simple: "h, s, b"
+          - params: "float h, float s, float b, float a"
+            params_simple: "h, s, b, a"
+        description: "Create Color from HSB (alias for Color_fromHSB)"
+        description_ja: "HSBからColorを作成（Color_fromHSBのエイリアス）"
+        sketch: true
+        snippet: "colorFromHSB(${1:h}, ${2:s}, ${3:b})"
 
       - name: Color_fromOKLCH
         return: "Color"
@@ -2189,51 +2378,51 @@ categories:
     name_ja: "型 - Rect"
     functions:
       - name: Rect
+        sketch: false
         return: ""
         signatures:
           - params: ""
             params_simple: ""
           - params: "float x, float y, float w, float h"
             params_simple: "x, y, w, h"
-        description: "Create a rectangle"
-        description_ja: "矩形を作成"
-        sketch: true
+        description: "Create a rectangle (type constructor)"
+        description_ja: "矩形を作成（型コンストラクタ）"
         snippet: "Rect(${1:x}, ${2:y}, ${3:w}, ${4:h})"
 
       - name: set
+        sketch: false
         return: "Rect&"
         signatures:
           - params: "float x, float y, float w, float h"
             params_simple: "x, y, w, h"
           - params: "Vec2 pos, float w, float h"
             params_simple: "pos, w, h"
-        description: "Set rectangle properties"
-        description_ja: "矩形のプロパティを設定"
-        sketch: true
+        description: "Set rectangle properties (type method)"
+        description_ja: "矩形のプロパティを設定（型メソッド）"
         snippet: "set(${1:x}, ${2:y}, ${3:w}, ${4:h})"
 
       - name: contains
+        sketch: false
         return: "bool"
         signatures:
           - params: "float x, float y"
             params_simple: "x, y"
-        description: "Check if point is inside"
-        description_ja: "点が内部にあるか判定"
-        sketch: true
+        description: "Check if point is inside (type method)"
+        description_ja: "点が内部にあるか判定（型メソッド）"
         snippet: "contains(${1:x}, ${2:y})"
 
       - name: intersects
+        sketch: false
         return: "bool"
         signatures:
           - params: "Rect other"
             params_simple: "other"
-        description: "Check intersection"
-        description_ja: "交差判定"
-        sketch: true
+        description: "Check intersection (type method)"
+        description_ja: "交差判定（型メソッド）"
         snippet: "intersects(${1:other})"
 
   # ==========================================================================
-  # Scene Graph
+  # Scene Graph (not available in TrussSketch - uses shared_ptr which is complex)
   # ==========================================================================
   - id: scene_graph
     name: "Scene Graph"
@@ -2244,9 +2433,9 @@ categories:
         signatures:
           - params: ""
             params_simple: ""
-        description: "Create a base scene node"
-        description_ja: "ベースノードを作成"
-        sketch: true
+        description: "Create a base scene node (C++ only - uses shared_ptr)"
+        description_ja: "ベースノードを作成（C++のみ - shared_ptr使用）"
+        sketch: false
         snippet: "Node()"
 
       - name: addChild
@@ -2254,9 +2443,9 @@ categories:
         signatures:
           - params: "shared_ptr<Node> child"
             params_simple: "child"
-        description: "Add a child node"
-        description_ja: "子ノードを追加"
-        sketch: true
+        description: "Add a child node (C++ only)"
+        description_ja: "子ノードを追加（C++のみ）"
+        sketch: false
         snippet: "addChild(${1:child})"
 
       - name: setPosition
@@ -2266,9 +2455,9 @@ categories:
             params_simple: "x, y"
           - params: "Vec3 pos"
             params_simple: "pos"
-        description: "Set position"
-        description_ja: "位置を設定"
-        sketch: true
+        description: "Set position (C++ only)"
+        description_ja: "位置を設定（C++のみ）"
+        sketch: false
         snippet: "setPosition(${1:x}, ${2:y})"
 
       - name: RectNode
@@ -2276,9 +2465,9 @@ categories:
         signatures:
           - params: ""
             params_simple: ""
-        description: "Create a 2D rectangle node"
-        description_ja: "矩形ノードを作成"
-        sketch: true
+        description: "Create a 2D rectangle node (C++ only - uses shared_ptr)"
+        description_ja: "矩形ノードを作成（C++のみ - shared_ptr使用）"
+        sketch: false
         snippet: "RectNode()"
 
       - name: setSize
@@ -2286,9 +2475,9 @@ categories:
         signatures:
           - params: "float w, float h"
             params_simple: "w, h"
-        description: "Set size"
-        description_ja: "サイズを設定"
-        sketch: true
+        description: "Set size (C++ only)"
+        description_ja: "サイズを設定（C++のみ）"
+        sketch: false
         snippet: "setSize(${1:w}, ${2:h})"
 
   # ==========================================================================
@@ -2363,23 +2552,23 @@ categories:
     name: "3D Camera"
     name_ja: "3Dカメラ"
     functions:
-      - name: EasyCam
-        return: ""
+      - name: createEasyCam
+        return: "EasyCam@"
         signatures:
           - params: ""
             params_simple: ""
-        description: "Create an easy-to-use 3D camera"
-        description_ja: "簡易3Dカメラを作成"
+        description: "Create an EasyCam instance"
+        description_ja: "EasyCamインスタンスを作成"
         sketch: true
-        snippet: "EasyCam()"
+        snippet: "createEasyCam()"
 
       - name: begin
         return: "void"
         signatures:
           - params: ""
             params_simple: ""
-        description: "Apply camera transform"
-        description_ja: "カメラ視点を適用"
+        description: "Apply camera transform (start 3D mode)"
+        description_ja: "カメラ視点を適用（3Dモード開始）"
         sketch: true
         snippet: "begin()"
 
@@ -2388,10 +2577,222 @@ categories:
         signatures:
           - params: ""
             params_simple: ""
-        description: "Restore previous transform"
-        description_ja: "カメラ視点を解除"
+        description: "Restore previous transform (end 3D mode)"
+        description_ja: "カメラ視点を解除（3Dモード終了）"
         sketch: true
         snippet: "end()"
+
+      - name: reset
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Reset camera to default position"
+        description_ja: "カメラをデフォルト位置にリセット"
+        sketch: true
+        snippet: "reset()"
+
+      - name: setTarget
+        return: "void"
+        signatures:
+          - params: "float x, float y, float z"
+            params_simple: "x, y, z"
+          - params: "const Vec3 &in target"
+            params_simple: "target"
+        description: "Set camera look-at target"
+        description_ja: "カメラの注視点を設定"
+        sketch: true
+        snippet: "setTarget(${1:0}, ${2:0}, ${3:0})"
+
+      - name: getTarget
+        return: "Vec3"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get camera look-at target"
+        description_ja: "カメラの注視点を取得"
+        sketch: true
+        snippet: "getTarget()"
+
+      - name: setDistance
+        return: "void"
+        signatures:
+          - params: "float distance"
+            params_simple: "distance"
+        description: "Set distance from target"
+        description_ja: "注視点からの距離を設定"
+        sketch: true
+        snippet: "setDistance(${1:400})"
+
+      - name: getDistance
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get distance from target"
+        description_ja: "注視点からの距離を取得"
+        sketch: true
+        snippet: "getDistance()"
+
+      - name: setFov
+        return: "void"
+        signatures:
+          - params: "float radians"
+            params_simple: "radians"
+        description: "Set field of view in radians"
+        description_ja: "視野角をラジアンで設定"
+        sketch: true
+        snippet: "setFov(${1:0.785})"
+
+      - name: getFov
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get field of view in radians"
+        description_ja: "視野角をラジアンで取得"
+        sketch: true
+        snippet: "getFov()"
+
+      - name: setFovDeg
+        return: "void"
+        signatures:
+          - params: "float degrees"
+            params_simple: "degrees"
+        description: "Set field of view in degrees"
+        description_ja: "視野角を度数で設定"
+        sketch: true
+        snippet: "setFovDeg(${1:45})"
+
+      - name: setNearClip
+        return: "void"
+        signatures:
+          - params: "float nearClip"
+            params_simple: "nearClip"
+        description: "Set near clipping plane"
+        description_ja: "近クリップ面を設定"
+        sketch: true
+        snippet: "setNearClip(${1:0.1})"
+
+      - name: setFarClip
+        return: "void"
+        signatures:
+          - params: "float farClip"
+            params_simple: "farClip"
+        description: "Set far clipping plane"
+        description_ja: "遠クリップ面を設定"
+        sketch: true
+        snippet: "setFarClip(${1:10000})"
+
+      - name: enableMouseInput
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Enable mouse input for camera control"
+        description_ja: "マウス入力によるカメラ操作を有効化"
+        sketch: true
+        snippet: "enableMouseInput()"
+
+      - name: disableMouseInput
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Disable mouse input for camera control"
+        description_ja: "マウス入力によるカメラ操作を無効化"
+        sketch: true
+        snippet: "disableMouseInput()"
+
+      - name: isMouseInputEnabled
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Check if mouse input is enabled"
+        description_ja: "マウス入力が有効かどうか確認"
+        sketch: true
+        snippet: "isMouseInputEnabled()"
+
+      - name: mousePressed
+        return: "void"
+        signatures:
+          - params: "int x, int y, int button"
+            params_simple: "x, y, button"
+        description: "Handle mouse press event"
+        description_ja: "マウス押下イベントを処理"
+        sketch: true
+        snippet: "mousePressed(${1:x}, ${2:y}, ${3:button})"
+
+      - name: mouseReleased
+        return: "void"
+        signatures:
+          - params: "int x, int y, int button"
+            params_simple: "x, y, button"
+        description: "Handle mouse release event"
+        description_ja: "マウス離上イベントを処理"
+        sketch: true
+        snippet: "mouseReleased(${1:x}, ${2:y}, ${3:button})"
+
+      - name: mouseDragged
+        return: "void"
+        signatures:
+          - params: "int x, int y, int button"
+            params_simple: "x, y, button"
+        description: "Handle mouse drag event"
+        description_ja: "マウスドラッグイベントを処理"
+        sketch: true
+        snippet: "mouseDragged(${1:x}, ${2:y}, ${3:button})"
+
+      - name: mouseScrolled
+        return: "void"
+        signatures:
+          - params: "float dx, float dy"
+            params_simple: "dx, dy"
+        description: "Handle mouse scroll event (for zoom)"
+        description_ja: "マウススクロールイベントを処理（ズーム用）"
+        sketch: true
+        snippet: "mouseScrolled(${1:dx}, ${2:dy})"
+
+      - name: getPosition
+        return: "Vec3"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get camera position"
+        description_ja: "カメラ位置を取得"
+        sketch: true
+        snippet: "getPosition()"
+
+      - name: setSensitivity
+        return: "void"
+        signatures:
+          - params: "float sensitivity"
+            params_simple: "sensitivity"
+        description: "Set rotation sensitivity"
+        description_ja: "回転感度を設定"
+        sketch: true
+        snippet: "setSensitivity(${1:1.0})"
+
+      - name: setZoomSensitivity
+        return: "void"
+        signatures:
+          - params: "float sensitivity"
+            params_simple: "sensitivity"
+        description: "Set zoom sensitivity"
+        description_ja: "ズーム感度を設定"
+        sketch: true
+        snippet: "setZoomSensitivity(${1:10.0})"
+
+      - name: setPanSensitivity
+        return: "void"
+        signatures:
+          - params: "float sensitivity"
+            params_simple: "sensitivity"
+        description: "Set pan sensitivity"
+        description_ja: "パン感度を設定"
+        sketch: true
+        snippet: "setPanSensitivity(${1:1.0})"
 
   # ==========================================================================
   # Math - 3D (Matrix / Quaternion)
@@ -2400,25 +2801,143 @@ categories:
     name: "Math - 3D"
     name_ja: "数学 - 3D"
     functions:
-      - name: Mat4
-        return: ""
+      # Mat4 static factory functions
+      - name: Mat4_identity
+        sketch: true
+        return: "Mat4"
         signatures:
           - params: ""
             params_simple: ""
-        description: "Create a 4x4 matrix"
-        description_ja: "4x4行列を作成"
-        sketch: true
-        snippet: "Mat4()"
+        description: "Create an identity matrix"
+        description_ja: "単位行列を作成"
+        snippet: "Mat4_identity()"
 
-      - name: Quaternion
-        return: ""
+      - name: Mat4_translate
+        sketch: true
+        return: "Mat4"
+        signatures:
+          - params: "float x, float y, float z"
+            params_simple: "x, y, z"
+          - params: "Vec3 v"
+            params_simple: "v"
+        description: "Create a translation matrix"
+        description_ja: "平行移動行列を作成"
+        snippet: "Mat4_translate(${1:x}, ${2:y}, ${3:z})"
+
+      - name: Mat4_rotateX
+        sketch: true
+        return: "Mat4"
+        signatures:
+          - params: "float radians"
+            params_simple: "radians"
+        description: "Create X-axis rotation matrix"
+        description_ja: "X軸回転行列を作成"
+        snippet: "Mat4_rotateX(${1:radians})"
+
+      - name: Mat4_rotateY
+        sketch: true
+        return: "Mat4"
+        signatures:
+          - params: "float radians"
+            params_simple: "radians"
+        description: "Create Y-axis rotation matrix"
+        description_ja: "Y軸回転行列を作成"
+        snippet: "Mat4_rotateY(${1:radians})"
+
+      - name: Mat4_rotateZ
+        sketch: true
+        return: "Mat4"
+        signatures:
+          - params: "float radians"
+            params_simple: "radians"
+        description: "Create Z-axis rotation matrix"
+        description_ja: "Z軸回転行列を作成"
+        snippet: "Mat4_rotateZ(${1:radians})"
+
+      - name: Mat4_scale
+        sketch: true
+        return: "Mat4"
+        signatures:
+          - params: "float s"
+            params_simple: "s"
+          - params: "float sx, float sy, float sz"
+            params_simple: "sx, sy, sz"
+        description: "Create a scaling matrix"
+        description_ja: "スケーリング行列を作成"
+        snippet: "Mat4_scale(${1:s})"
+
+      - name: Mat4_lookAt
+        sketch: true
+        return: "Mat4"
+        signatures:
+          - params: "Vec3 eye, Vec3 target, Vec3 up"
+            params_simple: "eye, target, up"
+        description: "Create a view matrix"
+        description_ja: "ビュー行列を作成"
+        snippet: "Mat4_lookAt(${1:eye}, ${2:target}, ${3:up})"
+
+      - name: Mat4_ortho
+        sketch: true
+        return: "Mat4"
+        signatures:
+          - params: "float left, float right, float bottom, float top, float nearPlane, float farPlane"
+            params_simple: "left, right, bottom, top, near, far"
+        description: "Create an orthographic projection matrix"
+        description_ja: "正投影行列を作成"
+        snippet: "Mat4_ortho(${1:left}, ${2:right}, ${3:bottom}, ${4:top}, ${5:near}, ${6:far})"
+
+      - name: Mat4_perspective
+        sketch: true
+        return: "Mat4"
+        signatures:
+          - params: "float fovY, float aspect, float nearPlane, float farPlane"
+            params_simple: "fov, aspect, near, far"
+        description: "Create a perspective projection matrix"
+        description_ja: "透視投影行列を作成"
+        snippet: "Mat4_perspective(${1:fov}, ${2:aspect}, ${3:near}, ${4:far})"
+
+      # Quaternion static factory functions
+      - name: Quaternion_identity
+        sketch: true
+        return: "Quaternion"
         signatures:
           - params: ""
             params_simple: ""
-        description: "Create a quaternion"
-        description_ja: "クォータニオンを作成"
+        description: "Create an identity quaternion"
+        description_ja: "単位クォータニオンを作成"
+        snippet: "Quaternion_identity()"
+
+      - name: Quaternion_fromAxisAngle
         sketch: true
-        snippet: "Quaternion()"
+        return: "Quaternion"
+        signatures:
+          - params: "Vec3 axis, float radians"
+            params_simple: "axis, radians"
+        description: "Create quaternion from axis-angle"
+        description_ja: "軸-角度からクォータニオンを作成"
+        snippet: "Quaternion_fromAxisAngle(${1:axis}, ${2:radians})"
+
+      - name: Quaternion_fromEuler
+        sketch: true
+        return: "Quaternion"
+        signatures:
+          - params: "float pitch, float yaw, float roll"
+            params_simple: "pitch, yaw, roll"
+          - params: "Vec3 euler"
+            params_simple: "euler"
+        description: "Create quaternion from Euler angles"
+        description_ja: "オイラー角からクォータニオンを作成"
+        snippet: "Quaternion_fromEuler(${1:pitch}, ${2:yaw}, ${3:roll})"
+
+      - name: Quaternion_slerp
+        sketch: true
+        return: "Quaternion"
+        signatures:
+          - params: "Quaternion a, Quaternion b, float t"
+            params_simple: "a, b, t"
+        description: "Spherical linear interpolation"
+        description_ja: "球面線形補間"
+        snippet: "Quaternion_slerp(${1:a}, ${2:b}, ${3:t})"
 
   # ==========================================================================
   # Graphics - Advanced
@@ -2495,8 +3014,18 @@ categories:
             params_simple: ""
         description: "Create a texture"
         description_ja: "テクスチャを作成"
-        sketch: true
+        sketch: false
         snippet: "Texture()"
+
+      - name: createTexture
+        return: "Texture@"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a texture (TrussSketch factory)"
+        description_ja: "テクスチャを作成（TrussSketch用ファクトリ）"
+        sketch: true
+        snippet: "Texture@ tex = createTexture();"
 
       - name: load
         return: "bool"
@@ -2515,7 +3044,7 @@ categories:
             params_simple: "pixels"
         description: "Load from pixel data"
         description_ja: "ピクセルデータから読み込む"
-        sketch: true
+        sketch: false
         snippet: "loadFromPixels(${1:pixels})"
 
       - name: bind
@@ -2569,8 +3098,18 @@ categories:
             params_simple: ""
         description: "Create an FBO"
         description_ja: "FBOを作成"
-        sketch: true
+        sketch: false
         snippet: "Fbo()"
+
+      - name: createFbo
+        return: "Fbo@"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create an FBO (TrussSketch factory)"
+        description_ja: "FBOを作成（TrussSketch用ファクトリ）"
+        sketch: true
+        snippet: "Fbo@ fbo = createFbo();"
 
       - name: allocate
         return: "void"
@@ -2619,7 +3158,7 @@ categories:
             params_simple: "pixels"
         description: "Read pixels to CPU memory"
         description_ja: "ピクセルをCPUメモリに読み出す"
-        sketch: true
+        sketch: false
         snippet: "readToPixels(${1:pixels})"
 
   - id: graphics_shader
@@ -2728,8 +3267,18 @@ categories:
             params_simple: ""
         description: "Create pixel buffer"
         description_ja: "ピクセルバッファを作成"
-        sketch: true
+        sketch: false
         snippet: "Pixels()"
+
+      - name: createPixels
+        return: "Pixels@"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create pixel buffer (TrussSketch factory)"
+        description_ja: "ピクセルバッファを作成（TrussSketch用ファクトリ）"
+        sketch: true
+        snippet: "Pixels@ px = createPixels();"
 
       - name: allocate
         return: "void"
@@ -2786,14 +3335,24 @@ categories:
     name: "Types - Mesh"
     name_ja: "型 - Mesh"
     functions:
-      - name: Mesh
-        return: ""
+      - name: createMesh
+        return: "Mesh@"
         signatures:
           - params: ""
             params_simple: ""
         description: "Create a new Mesh"
         description_ja: "メッシュを作成"
         sketch: true
+        snippet: "Mesh@ mesh = createMesh();"
+
+      - name: Mesh
+        return: ""
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a new Mesh (constructor)"
+        description_ja: "メッシュを作成（コンストラクタ）"
+        sketch: false
         snippet: "Mesh()"
 
       - name: setMode
@@ -2891,21 +3450,31 @@ categories:
         snippet: "draw()"
 
   # ==========================================================================
-  # Types - Polyline
+  # Types - Path
   # ==========================================================================
-  - id: types_polyline
-    name: "Types - Polyline"
-    name_ja: "型 - Polyline"
+  - id: types_path
+    name: "Types - Path"
+    name_ja: "型 - Path"
     functions:
-      - name: Polyline
+      - name: createPath
+        return: "Path@"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Create a new Path"
+        description_ja: "パスを作成"
+        sketch: true
+        snippet: "Path@ path = createPath();"
+
+      - name: Path
         return: ""
         signatures:
           - params: ""
             params_simple: ""
-        description: "Create a new Polyline (Path)"
-        description_ja: "ポリライン（パス）を作成"
-        sketch: true
-        snippet: "Polyline()"
+        description: "Create a new Path (constructor)"
+        description_ja: "パスを作成（コンストラクタ）"
+        sketch: false
+        snippet: "Path()"
 
       - name: addVertex
         return: "void"
@@ -2984,75 +3553,141 @@ categories:
     name: "Types - StrokeMesh"
     name_ja: "型 - StrokeMesh"
     functions:
-      - name: StrokeMesh
-        return: ""
+      - name: createStrokeMesh
+        return: "StrokeMesh@"
         signatures:
           - params: ""
             params_simple: ""
-        description: "Create a new StrokeMesh"
-        description_ja: "StrokeMeshを作成"
+        description: "Create a new StrokeMesh instance"
+        description_ja: "StrokeMeshインスタンスを作成"
         sketch: true
-        snippet: "StrokeMesh()"
+        snippet: "createStrokeMesh()"
 
       - name: setWidth
-        return: "void"
+        return: "StrokeMesh&"
         signatures:
           - params: "float width"
             params_simple: "width"
-        description: "Set stroke width"
-        description_ja: "線の太さを設定"
+        description: "Set stroke width (method chaining)"
+        description_ja: "線の太さを設定（メソッドチェーン対応）"
         sketch: true
         snippet: "setWidth(${1:5.0})"
 
       - name: setColor
-        return: "void"
+        return: "StrokeMesh&"
         signatures:
-          - params: "Color color"
+          - params: "const Color &in color"
             params_simple: "color"
-        description: "Set stroke color"
-        description_ja: "線の色を設定"
+        description: "Set stroke color (method chaining)"
+        description_ja: "線の色を設定（メソッドチェーン対応）"
         sketch: true
         snippet: "setColor(${1:color})"
 
       - name: setCapType
-        return: "void"
+        return: "StrokeMesh&"
         signatures:
           - params: "int type"
             params_simple: "type"
-        description: "Set cap type (CAP_BUTT, CAP_ROUND, CAP_SQUARE)"
-        description_ja: "端点の形状を設定"
+        description: "Set cap type: Butt, Round, Square (method chaining)"
+        description_ja: "端点の形状を設定（メソッドチェーン対応）"
         sketch: true
-        snippet: "setCapType(${1:CAP_ROUND})"
+        snippet: "setCapType(${1:Round})"
 
       - name: setJoinType
-        return: "void"
+        return: "StrokeMesh&"
         signatures:
           - params: "int type"
             params_simple: "type"
-        description: "Set join type (JOIN_MITER, JOIN_ROUND, JOIN_BEVEL)"
-        description_ja: "結合部の形状を設定"
+        description: "Set join type: Miter, Round, Bevel (method chaining)"
+        description_ja: "結合部の形状を設定（メソッドチェーン対応）"
         sketch: true
-        snippet: "setJoinType(${1:JOIN_ROUND})"
+        snippet: "setJoinType(${1:Round})"
+
+      - name: setMiterLimit
+        return: "StrokeMesh&"
+        signatures:
+          - params: "float limit"
+            params_simple: "limit"
+        description: "Set miter limit for sharp corners (method chaining)"
+        description_ja: "マイター結合の限界値を設定（メソッドチェーン対応）"
+        sketch: true
+        snippet: "setMiterLimit(${1:10.0})"
 
       - name: addVertex
-        return: "void"
+        return: "StrokeMesh&"
         signatures:
           - params: "float x, float y"
             params_simple: "x, y"
-        description: "Add a vertex"
-        description_ja: "頂点を追加"
+          - params: "float x, float y, float z"
+            params_simple: "x, y, z"
+          - params: "const Vec2 &in v"
+            params_simple: "v"
+          - params: "const Vec3 &in v"
+            params_simple: "v"
+        description: "Add a vertex (method chaining)"
+        description_ja: "頂点を追加（メソッドチェーン対応）"
         sketch: true
         snippet: "addVertex(${1:x}, ${2:y})"
+
+      - name: addVertexWithWidth
+        return: "StrokeMesh&"
+        signatures:
+          - params: "float x, float y, float width"
+            params_simple: "x, y, width"
+        description: "Add a vertex with variable width (method chaining)"
+        description_ja: "可変幅で頂点を追加（メソッドチェーン対応）"
+        sketch: true
+        snippet: "addVertexWithWidth(${1:x}, ${2:y}, ${3:width})"
+
+      - name: setShape
+        return: "StrokeMesh&"
+        signatures:
+          - params: "Path@ path"
+            params_simple: "path"
+        description: "Set shape from Path (method chaining)"
+        description_ja: "Pathから形状を設定（メソッドチェーン対応）"
+        sketch: true
+        snippet: "setShape(${1:path})"
+
+      - name: setClosed
+        return: "StrokeMesh&"
+        signatures:
+          - params: "bool closed"
+            params_simple: "closed"
+        description: "Set whether the stroke is closed (method chaining)"
+        description_ja: "閉じたストロークかどうかを設定（メソッドチェーン対応）"
+        sketch: true
+        snippet: "setClosed(${1:true})"
+
+      - name: clear
+        return: "StrokeMesh&"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Clear all vertices (method chaining)"
+        description_ja: "全頂点をクリア（メソッドチェーン対応）"
+        sketch: true
+        snippet: "clear()"
 
       - name: update
         return: "void"
         signatures:
           - params: ""
             params_simple: ""
-        description: "Update the internal mesh"
+        description: "Update the internal mesh (required before draw)"
         description_ja: "内部メッシュを更新（描画前に必須）"
         sketch: true
         snippet: "update()"
+
+      - name: draw
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Draw the stroke mesh"
+        description_ja: "ストロークメッシュを描画"
+        sketch: true
+        snippet: "draw()"
 
   # ==========================================================================
   # tcxLut Addon - LUT (Color Grading)
@@ -3319,6 +3954,49 @@ constants:
     description_ja: "システムの等幅フォントパス（Webでは CDN URL）"
     sketch: true
 
+  # Wave type constants for ChipSound
+  - name: "Wave::Sin"
+    value: "0"
+    description: "Sine wave (smooth, pure tone)"
+    description_ja: "サイン波（滑らかな純音）"
+    sketch: true
+
+  - name: "Wave::Square"
+    value: "1"
+    description: "Square wave (harsh, 8-bit style)"
+    description_ja: "矩形波（硬い、8bitスタイル）"
+    sketch: true
+
+  - name: "Wave::Triangle"
+    value: "2"
+    description: "Triangle wave (softer than square)"
+    description_ja: "三角波（矩形波より柔らかい）"
+    sketch: true
+
+  - name: "Wave::Sawtooth"
+    value: "3"
+    description: "Sawtooth wave (bright, buzzy)"
+    description_ja: "ノコギリ波（明るく、ブザー音的）"
+    sketch: true
+
+  - name: "Wave::Noise"
+    value: "4"
+    description: "White noise"
+    description_ja: "ホワイトノイズ"
+    sketch: true
+
+  - name: "Wave::PinkNoise"
+    value: "5"
+    description: "Pink noise (1/f noise, more natural)"
+    description_ja: "ピンクノイズ（1/fノイズ、より自然）"
+    sketch: true
+
+  - name: "Wave::Silent"
+    value: "6"
+    description: "Silent (no sound)"
+    description_ja: "無音"
+    sketch: true
+
 # ==========================================================================
 # Keywords (for TrussSketch syntax highlighting - AngelScript)
 # ==========================================================================
@@ -3492,14 +4170,14 @@ types:
         description_ja: "反射ベクトルを取得"
         snippet: "reflected(${1:normal})"
     static_methods:
-      - name: fromAngle
+      - name: Vec2_fromAngle
         return: Vec2
         signatures:
           - params: "float radians"
           - params: "float radians, float length"
         description: "Create Vec2 from angle"
         description_ja: "角度からVec2を作成"
-        snippet: "Vec2::fromAngle(${1:radians})"
+        snippet: "Vec2_fromAngle(${1:radians})"
 
   - name: Vec3
     description: "3D vector"
@@ -3687,30 +4365,30 @@ types:
         description_ja: "クランプしたコピーを取得"
         snippet: "clamped()"
     static_methods:
-      - name: fromHex
+      - name: Color_fromHex
         return: Color
         signatures:
-          - params: "uint32_t hex"
-          - params: "uint32_t hex, bool hasAlpha"
+          - params: "uint hex"
+          - params: "uint hex, bool hasAlpha"
         description: "Create from hex value"
         description_ja: "16進数値から作成"
-        snippet: "Color::fromHex(${1:0xRRGGBB})"
-      - name: fromHSB
+        snippet: "Color_fromHex(${1:0xRRGGBB})"
+      - name: Color_fromHSB
         return: Color
         signatures:
           - params: "float h, float s, float b"
           - params: "float h, float s, float b, float a"
         description: "Create from HSB (H: 0-TAU)"
         description_ja: "HSBから作成 (H: 0-TAU)"
-        snippet: "Color::fromHSB(${1:h}, ${2:s}, ${3:b})"
-      - name: fromBytes
+        snippet: "Color_fromHSB(${1:h}, ${2:s}, ${3:b})"
+      - name: Color_fromBytes
         return: Color
         signatures:
           - params: "int r, int g, int b"
           - params: "int r, int g, int b, int a"
         description: "Create from 0-255 values"
         description_ja: "0-255の値から作成"
-        snippet: "Color::fromBytes(${1:r}, ${2:g}, ${3:b})"
+        snippet: "Color_fromBytes(${1:r}, ${2:g}, ${3:b})"
 
   - name: Rect
     description: "Rectangle (x, y, width, height)"
@@ -3789,6 +4467,100 @@ types:
         description_ja: "別の矩形と交差するか判定"
         snippet: "intersects(${1:other})"
 
+  - name: Mat4
+    description: "4x4 matrix for 3D transformations"
+    description_ja: "3D変換用4x4行列"
+    sketch: true
+    constructor:
+      signatures:
+        - params: ""
+      snippet: "Mat4()"
+    methods:
+      - name: transposed
+        return: "Mat4"
+        signatures:
+          - params: ""
+        description: "Get transposed matrix"
+        description_ja: "転置行列を取得"
+        snippet: "transposed()"
+      - name: inverted
+        return: "Mat4"
+        signatures:
+          - params: ""
+        description: "Get inverse matrix"
+        description_ja: "逆行列を取得"
+        snippet: "inverted()"
+
+  - name: Quaternion
+    description: "Unit quaternion for 3D rotations"
+    description_ja: "3D回転用単位クォータニオン"
+    sketch: true
+    constructor:
+      signatures:
+        - params: ""
+        - params: "float w, float x, float y, float z"
+      snippet: "Quaternion()"
+    properties:
+      - name: w
+        type: float
+        description: "W component"
+        description_ja: "W成分"
+      - name: x
+        type: float
+        description: "X component"
+        description_ja: "X成分"
+      - name: y
+        type: float
+        description: "Y component"
+        description_ja: "Y成分"
+      - name: z
+        type: float
+        description: "Z component"
+        description_ja: "Z成分"
+    methods:
+      - name: rotate
+        return: "Vec3"
+        signatures:
+          - params: "Vec3 v"
+        description: "Rotate a vector"
+        description_ja: "ベクトルを回転"
+        snippet: "rotate(${1:v})"
+      - name: toEuler
+        return: "Vec3"
+        signatures:
+          - params: ""
+        description: "Convert to Euler angles"
+        description_ja: "オイラー角に変換"
+        snippet: "toEuler()"
+      - name: toMatrix
+        return: "Mat4"
+        signatures:
+          - params: ""
+        description: "Convert to rotation matrix"
+        description_ja: "回転行列に変換"
+        snippet: "toMatrix()"
+      - name: normalized
+        return: "Quaternion"
+        signatures:
+          - params: ""
+        description: "Get normalized quaternion"
+        description_ja: "正規化したクォータニオンを取得"
+        snippet: "normalized()"
+      - name: length
+        return: float
+        signatures:
+          - params: ""
+        description: "Get quaternion length"
+        description_ja: "クォータニオンの長さを取得"
+        snippet: "length()"
+      - name: conjugate
+        return: "Quaternion"
+        signatures:
+          - params: ""
+        description: "Get conjugate quaternion"
+        description_ja: "共役クォータニオンを取得"
+        snippet: "conjugate()"
+
   - name: Pixels
     description: "Pixel buffer for image manipulation"
     description_ja: "画像操作用ピクセルバッファ"
@@ -3856,6 +4628,7 @@ types:
         description_ja: "確保されているか確認"
         snippet: "isAllocated()"
       - name: clear
+        sketch: false
         return: "void"
         signatures:
           - params: ""
@@ -3863,6 +4636,7 @@ types:
         description_ja: "ピクセルバッファを解放"
         snippet: "clear()"
       - name: getChannels
+        sketch: false
         return: int
         signatures:
           - params: ""
@@ -3870,6 +4644,7 @@ types:
         description_ja: "チャンネル数を取得"
         snippet: "getChannels()"
       - name: getTotalBytes
+        sketch: false
         return: int
         signatures:
           - params: ""
@@ -3913,10 +4688,15 @@ types:
     description: "Image with CPU pixels and GPU texture"
     description_ja: "CPUピクセルとGPUテクスチャを持つ画像"
     sketch: true
-    constructor:
-      signatures:
-        - params: ""
-      snippet: "Image()"
+    static_methods:
+      - name: createImage
+        return: "Image@"
+        signatures:
+          - params: ""
+        description: "Create a new Image instance"
+        description_ja: "Imageインスタンスを作成"
+        sketch: true
+        snippet: "createImage()"
     methods:
       - name: load
         return: bool
@@ -4036,8 +4816,12 @@ types:
       - name: draw
         return: "void"
         signatures:
+          - params: ""
+            params_simple: ""
           - params: "float x, float y"
+            params_simple: "x, y"
           - params: "float x, float y, float w, float h"
+            params_simple: "x, y, w, h"
         description: "Draw image"
         description_ja: "画像を描画"
         snippet: "draw(${1:x}, ${2:y})"
@@ -4110,6 +4894,7 @@ types:
         description_ja: "テクスチャを描画"
         snippet: "draw(${1:x}, ${2:y})"
       - name: drawSubsection
+        sketch: false
         return: "void"
         signatures:
           - params: "float x, float y, float w, float h, float sx, float sy, float sw, float sh"
@@ -4117,6 +4902,7 @@ types:
         description_ja: "テクスチャの一部を描画"
         snippet: "drawSubsection(${1:x}, ${2:y}, ${3:w}, ${4:h}, ${5:sx}, ${6:sy}, ${7:sw}, ${8:sh})"
       - name: clear
+        sketch: false
         return: "void"
         signatures:
           - params: ""
@@ -4124,6 +4910,7 @@ types:
         description_ja: "テクスチャリソースを解放"
         snippet: "clear()"
       - name: getChannels
+        sketch: false
         return: int
         signatures:
           - params: ""
@@ -4131,6 +4918,7 @@ types:
         description_ja: "チャンネル数を取得"
         snippet: "getChannels()"
       - name: getUsage
+        sketch: false
         return: TextureUsage
         signatures:
           - params: ""
@@ -4138,6 +4926,7 @@ types:
         description_ja: "テクスチャ使用モードを取得"
         snippet: "getUsage()"
       - name: getSampleCount
+        sketch: false
         return: int
         signatures:
           - params: ""
@@ -4145,6 +4934,7 @@ types:
         description_ja: "MSAAサンプル数を取得"
         snippet: "getSampleCount()"
       - name: setMinFilter
+        sketch: false
         return: "void"
         signatures:
           - params: "TextureFilter filter"
@@ -4152,6 +4942,7 @@ types:
         description_ja: "縮小フィルタを設定"
         snippet: "setMinFilter(${1:TextureFilter::Linear})"
       - name: setMagFilter
+        sketch: false
         return: "void"
         signatures:
           - params: "TextureFilter filter"
@@ -4159,6 +4950,7 @@ types:
         description_ja: "拡大フィルタを設定"
         snippet: "setMagFilter(${1:TextureFilter::Linear})"
       - name: setFilter
+        sketch: false
         return: "void"
         signatures:
           - params: "TextureFilter filter"
@@ -4166,6 +4958,7 @@ types:
         description_ja: "縮小・拡大フィルタを両方設定"
         snippet: "setFilter(${1:TextureFilter::Linear})"
       - name: getMinFilter
+        sketch: false
         return: TextureFilter
         signatures:
           - params: ""
@@ -4173,6 +4966,7 @@ types:
         description_ja: "縮小フィルタを取得"
         snippet: "getMinFilter()"
       - name: getMagFilter
+        sketch: false
         return: TextureFilter
         signatures:
           - params: ""
@@ -4180,6 +4974,7 @@ types:
         description_ja: "拡大フィルタを取得"
         snippet: "getMagFilter()"
       - name: setWrapU
+        sketch: false
         return: "void"
         signatures:
           - params: "TextureWrap wrap"
@@ -4187,6 +4982,7 @@ types:
         description_ja: "水平方向のラップモードを設定"
         snippet: "setWrapU(${1:TextureWrap::ClampToEdge})"
       - name: setWrapV
+        sketch: false
         return: "void"
         signatures:
           - params: "TextureWrap wrap"
@@ -4194,6 +4990,7 @@ types:
         description_ja: "垂直方向のラップモードを設定"
         snippet: "setWrapV(${1:TextureWrap::ClampToEdge})"
       - name: setWrap
+        sketch: false
         return: "void"
         signatures:
           - params: "TextureWrap wrap"
@@ -4201,6 +4998,7 @@ types:
         description_ja: "ラップモードを両方設定"
         snippet: "setWrap(${1:TextureWrap::ClampToEdge})"
       - name: getWrapU
+        sketch: false
         return: TextureWrap
         signatures:
           - params: ""
@@ -4208,6 +5006,7 @@ types:
         description_ja: "水平方向のラップモードを取得"
         snippet: "getWrapU()"
       - name: getWrapV
+        sketch: false
         return: TextureWrap
         signatures:
           - params: ""
@@ -4283,6 +5082,7 @@ types:
         description_ja: "FBOの内容を描画"
         snippet: "draw(${1:x}, ${2:y})"
       - name: getSampleCount
+        sketch: false
         return: int
         signatures:
           - params: ""
@@ -4290,6 +5090,7 @@ types:
         description_ja: "MSAAサンプル数を取得"
         snippet: "getSampleCount()"
       - name: isActive
+        sketch: false
         return: bool
         signatures:
           - params: ""
@@ -4297,6 +5098,7 @@ types:
         description_ja: "FBOに描画中か確認"
         snippet: "isActive()"
       - name: clear
+        sketch: false
         return: "void"
         signatures:
           - params: ""
@@ -4304,6 +5106,7 @@ types:
         description_ja: "FBOリソースを解放"
         snippet: "clear()"
       - name: save
+        sketch: false
         return: bool
         signatures:
           - params: "string path"
@@ -4311,6 +5114,7 @@ types:
         description_ja: "FBOの内容をファイルに保存"
         snippet: "save(${1:\"path\"})"
       - name: copyTo
+        sketch: false
         return: bool
         signatures:
           - params: "Image image"
@@ -4351,13 +5155,17 @@ types:
         description_ja: "頂点を追加"
         snippet: "addVertex(${1:x}, ${2:y}, ${3:z})"
       - name: addVertices
-        return: "void"
+        return: "Mesh@"
         signatures:
-          - params: "vector<Vec3> verts"
+          - params: "array<Vec3>@ verts"
+            params_simple: "verts"
+          - params: "array<Vec2>@ verts"
+            params_simple: "verts"
         description: "Add multiple vertices"
         description_ja: "複数の頂点を追加"
         snippet: "addVertices(${1:verts})"
       - name: getVertices
+        sketch: false
         return: "vector<Vec3>"
         signatures:
           - params: ""
@@ -4380,13 +5188,15 @@ types:
         description_ja: "頂点カラーを追加"
         snippet: "addColor(${1:color})"
       - name: addColors
-        return: "void"
+        return: "Mesh@"
         signatures:
-          - params: "vector<Color> cols"
+          - params: "array<Color>@ cols"
+            params_simple: "cols"
         description: "Add multiple vertex colors"
         description_ja: "複数の頂点カラーを追加"
         snippet: "addColors(${1:colors})"
       - name: getColors
+        sketch: false
         return: "vector<Color>"
         signatures:
           - params: ""
@@ -4415,9 +5225,10 @@ types:
         description_ja: "インデックスを追加"
         snippet: "addIndex(${1:index})"
       - name: addIndices
-        return: "void"
+        return: "Mesh@"
         signatures:
-          - params: "vector<int> indices"
+          - params: "array<uint>@ indices"
+            params_simple: "indices"
         description: "Add multiple indices"
         description_ja: "複数のインデックスを追加"
         snippet: "addIndices(${1:indices})"
@@ -4429,6 +5240,7 @@ types:
         description_ja: "三角形を追加（インデックス3つ）"
         snippet: "addTriangle(${1:i0}, ${2:i1}, ${3:i2})"
       - name: getIndices
+        sketch: false
         return: "vector<int>"
         signatures:
           - params: ""
@@ -4458,13 +5270,15 @@ types:
         description_ja: "法線ベクトルを追加"
         snippet: "addNormal(${1:nx}, ${2:ny}, ${3:nz})"
       - name: addNormals
-        return: "void"
+        return: "Mesh@"
         signatures:
-          - params: "vector<Vec3> normals"
+          - params: "array<Vec3>@ normals"
+            params_simple: "normals"
         description: "Add multiple normals"
         description_ja: "複数の法線を追加"
         snippet: "addNormals(${1:normals})"
       - name: setNormal
+        sketch: false
         return: "void"
         signatures:
           - params: "int index, Vec3 n"
@@ -4472,6 +5286,7 @@ types:
         description_ja: "指定インデックスの法線を設定"
         snippet: "setNormal(${1:index}, ${2:normal})"
       - name: getNormal
+        sketch: false
         return: Vec3
         signatures:
           - params: "int index"
@@ -4479,6 +5294,7 @@ types:
         description_ja: "指定インデックスの法線を取得"
         snippet: "getNormal(${1:index})"
       - name: getNormals
+        sketch: false
         return: "vector<Vec3>"
         signatures:
           - params: ""
@@ -4508,6 +5324,7 @@ types:
         description_ja: "テクスチャ座標を追加"
         snippet: "addTexCoord(${1:u}, ${2:v})"
       - name: getTexCoords
+        sketch: false
         return: "vector<Vec2>"
         signatures:
           - params: ""
@@ -4515,6 +5332,7 @@ types:
         description_ja: "全テクスチャ座標を取得"
         snippet: "getTexCoords()"
       - name: getNumTexCoords
+        sketch: false
         return: int
         signatures:
           - params: ""
@@ -4529,6 +5347,7 @@ types:
         description_ja: "テクスチャ座標があるか確認"
         snippet: "hasTexCoords()"
       - name: hasValidTexCoords
+        sketch: false
         return: bool
         signatures:
           - params: ""
@@ -4543,6 +5362,7 @@ types:
         description_ja: "全メッシュデータをクリア"
         snippet: "clear()"
       - name: clearVertices
+        sketch: false
         return: "void"
         signatures:
           - params: ""
@@ -4550,6 +5370,7 @@ types:
         description_ja: "頂点のみクリア"
         snippet: "clearVertices()"
       - name: clearColors
+        sketch: false
         return: "void"
         signatures:
           - params: ""
@@ -4557,6 +5378,7 @@ types:
         description_ja: "色のみクリア"
         snippet: "clearColors()"
       - name: clearIndices
+        sketch: false
         return: "void"
         signatures:
           - params: ""
@@ -4564,6 +5386,7 @@ types:
         description_ja: "インデックスのみクリア"
         snippet: "clearIndices()"
       - name: clearNormals
+        sketch: false
         return: "void"
         signatures:
           - params: ""
@@ -4571,6 +5394,7 @@ types:
         description_ja: "法線のみクリア"
         snippet: "clearNormals()"
       - name: clearTexCoords
+        sketch: false
         return: "void"
         signatures:
           - params: ""
@@ -4578,7 +5402,7 @@ types:
         description_ja: "テクスチャ座標のみクリア"
         snippet: "clearTexCoords()"
       - name: translate
-        return: "void"
+        return: "Mesh@"
         signatures:
           - params: "float x, float y, float z"
           - params: "Vec3 offset"
@@ -4586,28 +5410,28 @@ types:
         description_ja: "全頂点を移動"
         snippet: "translate(${1:x}, ${2:y}, ${3:z})"
       - name: rotateX
-        return: "void"
+        return: "Mesh@"
         signatures:
           - params: "float radians"
         description: "Rotate mesh around X axis"
         description_ja: "X軸周りにメッシュを回転"
         snippet: "rotateX(${1:radians})"
       - name: rotateY
-        return: "void"
+        return: "Mesh@"
         signatures:
           - params: "float radians"
         description: "Rotate mesh around Y axis"
         description_ja: "Y軸周りにメッシュを回転"
         snippet: "rotateY(${1:radians})"
       - name: rotateZ
-        return: "void"
+        return: "Mesh@"
         signatures:
           - params: "float radians"
         description: "Rotate mesh around Z axis"
         description_ja: "Z軸周りにメッシュを回転"
         snippet: "rotateZ(${1:radians})"
       - name: scale
-        return: "void"
+        return: "Mesh@"
         signatures:
           - params: "float s"
           - params: "float x, float y, float z"
@@ -4615,6 +5439,7 @@ types:
         description_ja: "メッシュをスケール"
         snippet: "scale(${1:s})"
       - name: transform
+        sketch: false
         return: "void"
         signatures:
           - params: "Mat4 matrix"
@@ -4622,6 +5447,7 @@ types:
         description_ja: "変換行列を適用"
         snippet: "transform(${1:matrix})"
       - name: append
+        sketch: false
         return: "void"
         signatures:
           - params: "Mesh other"
@@ -4645,7 +5471,7 @@ types:
         description_ja: "ワイヤーフレームで描画"
         snippet: "drawWireframe()"
 
-  - name: Polyline
+  - name: Path
     description: "Path/Polyline for drawing lines and curves"
     description_ja: "線や曲線を描画するためのパス/ポリライン"
     sketch: true
@@ -4654,7 +5480,7 @@ types:
         - params: ""
         - params: "vector<Vec2> verts"
         - params: "vector<Vec3> verts"
-      snippet: "Polyline()"
+      snippet: "Path()"
     methods:
       - name: addVertex
         return: "void"
@@ -4667,14 +5493,17 @@ types:
         description_ja: "頂点を追加"
         snippet: "addVertex(${1:x}, ${2:y})"
       - name: addVertices
-        return: "void"
+        return: "Path@"
         signatures:
-          - params: "vector<Vec2> verts"
-          - params: "vector<Vec3> verts"
+          - params: "array<Vec3>@ verts"
+            params_simple: "verts"
+          - params: "array<Vec2>@ verts"
+            params_simple: "verts"
         description: "Add multiple vertices"
         description_ja: "複数の頂点を追加"
         snippet: "addVertices(${1:verts})"
       - name: getVertices
+        sketch: false
         return: "vector<Vec3>"
         signatures:
           - params: ""
@@ -4775,13 +5604,13 @@ types:
         description: "Draw the polyline"
         description_ja: "ポリラインを描画"
         snippet: "draw()"
-      - name: getBoundingBox
-        return: "void"
+      - name: getBounds
+        return: "Rect"
         signatures:
-          - params: "float minX, float minY, float maxX, float maxY"
-        description: "Get bounding box (output parameters)"
-        description_ja: "バウンディングボックスを取得（出力パラメータ）"
-        snippet: "getBoundingBox(${1:minX}, ${2:minY}, ${3:maxX}, ${4:maxY})"
+          - params: ""
+        description: "Get bounding box as Rect"
+        description_ja: "バウンディングボックスをRectで取得"
+        snippet: "getBounds()"
       - name: getPerimeter
         return: float
         signatures:
