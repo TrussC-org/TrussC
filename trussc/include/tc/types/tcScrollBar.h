@@ -30,6 +30,8 @@ public:
     ScrollBar(ScrollContainer* container, Direction dir = Vertical)
         : container_(container), direction_(dir) {
 
+        enableEvents();  // Enable drag interaction
+
         if (direction_ == Vertical) {
             setSize(barWidth_, 100);  // Height will be updated
         } else {
@@ -89,6 +91,8 @@ protected:
     Color barColor_ = Color(1.0f, 1.0f, 1.0f, 0.5f);
     float barWidth_ = 5.0f;
     float margin_ = 2.0f;
+    bool isDragging_ = false;
+    float dragOffset_ = 0;  // Offset from bar top/left to click position
 
     // -------------------------------------------------------------------------
     // Update methods
@@ -186,6 +190,84 @@ protected:
         endStroke();
 
         popStyle();
+    }
+
+    // -------------------------------------------------------------------------
+    // Mouse events for drag scrolling
+    // -------------------------------------------------------------------------
+
+    bool onMousePress(Vec2 local, int button) override {
+        if (button != 0 || !container_) return false;
+
+        isDragging_ = true;
+        // Store offset from bar origin to click position
+        dragOffset_ = (direction_ == Vertical) ? local.y : local.x;
+        return true;
+    }
+
+    bool onMouseRelease(Vec2 local, int button) override {
+        (void)local;
+        if (button == 0) {
+            isDragging_ = false;
+        }
+        return true;
+    }
+
+    bool onMouseDrag(Vec2 local, int button) override {
+        (void)button;
+        if (!isDragging_ || !container_) return false;
+
+        if (direction_ == Vertical) {
+            handleVerticalDrag(local.y);
+        } else {
+            handleHorizontalDrag(local.x);
+        }
+        return true;
+    }
+
+    void handleVerticalDrag(float localY) {
+        float maxScroll = container_->getMaxScrollY();
+        if (maxScroll <= 0) return;
+
+        float margin = getMargin();
+        float containerHeight = container_->getHeight();
+        float barHeight = getHeight();
+
+        // Calculate new bar Y position (accounting for drag offset)
+        float newBarY = getY() + (localY - dragOffset_);
+
+        // Clamp to valid range
+        float minBarY = margin;
+        float maxBarY = containerHeight - margin - barHeight;
+        newBarY = std::max(minBarY, std::min(maxBarY, newBarY));
+
+        // Convert bar position to scroll ratio
+        float scrollRange = maxBarY - minBarY;
+        if (scrollRange > 0) {
+            float scrollRatio = (newBarY - minBarY) / scrollRange;
+            container_->setScrollY(scrollRatio * maxScroll);
+        }
+    }
+
+    void handleHorizontalDrag(float localX) {
+        float maxScroll = container_->getMaxScrollX();
+        if (maxScroll <= 0) return;
+
+        float margin = getMargin();
+        float containerWidth = container_->getWidth();
+        float barWidth = getWidth();
+
+        float newBarX = getX() + (localX - dragOffset_);
+
+        float minBarX = margin;
+        float maxBarX = containerWidth - margin - barWidth;
+        newBarX = std::max(minBarX, std::min(maxBarX, newBarX));
+
+        float scrollRange = maxBarX - minBarX;
+        if (scrollRange > 0) {
+            float scrollRatio = (newBarX - minBarX) / scrollRange;
+            container_->setScrollX(scrollRatio * maxScroll);
+        }
     }
 };
 
