@@ -159,6 +159,7 @@ uint64_t getFrameCount()                 // Total frames rendered
 
 ```cpp
 float getElapsedTimef()                  // Elapsed seconds (float)
+float getElapsedTime()                   // Elapsed seconds (alias for getElapsedTimef)
 uint64_t getElapsedTimeMillis()          // Elapsed milliseconds (int64)
 uint64_t getElapsedTimeMicros()          // Elapsed microseconds (int64)
 void resetElapsedTimeCounter()           // Reset elapsed time
@@ -275,7 +276,7 @@ void beep(float frequency)               // Play a beep sound
 ## Sound
 
 ```cpp
-Sound()                                  // Create a sound player
+Sound@ createSound()                     // Create a sound player (TrussSketch factory)
 bool load(const string& path)            // Load sound file
 void play()                              // Play sound
 void stop()                              // Stop sound
@@ -286,7 +287,6 @@ void setLoop(bool loop)                  // Enable/disable looping
 ## ChipSound
 
 ```cpp
-ChipSoundNote()                          // Create a chip sound note (8-bit style sound)
 ChipSoundNote& wave(Wave type)           // Set wave type (Sin, Square, Triangle, Sawtooth, Noise, PinkNoise)
 ChipSoundNote& hz(float frequency)       // Set frequency in Hz
 ChipSoundNote& duration(float seconds)   // Set note duration in seconds
@@ -300,6 +300,7 @@ Sound@ build()                           // Build and return Sound object from n
 ChipSoundBundle@ createChipBundle()      // Create a chip sound bundle for sequencing multiple notes
 ChipSoundBundle& add(const ChipSoundNote& note, float time) // Add a note at specified time (seconds)
 ChipSoundBundle& clear()                 // Clear all notes from bundle
+float getDuration()                      // Get the total duration of the bundle
 ```
 
 ## Font
@@ -346,63 +347,21 @@ float getEnd()                           // Get end value
 ## Types - Vec2
 
 ```cpp
-Vec2()                                   // Create 2D vector
-Vec2(float x, float y)                   // Create 2D vector
-Vec2(float v)                            // Create 2D vector
-Vec2& set(float x, float y)              // Set vector components
-Vec2& set(Vec2 v)                        // Set vector components
 Vec2 Vec2_fromAngle(float radians)       // Create Vec2 from angle
 Vec2 Vec2_fromAngle(float radians, float length) // Create Vec2 from angle
-```
-
-## Types - Vec3
-
-```cpp
-Vec3()                                   // Create 3D vector
-Vec3(float x, float y, float z)          // Create 3D vector
-Vec3(float v)                            // Create 3D vector
-Vec3& set(float x, float y, float z)     // Set vector components
-Vec3& set(Vec3 v)                        // Set vector components
 ```
 
 ## Types - Color
 
 ```cpp
-Color()                                  // Create color (0.0-1.0)
-Color(float r, float g, float b)         // Create color (0.0-1.0)
-Color(float r, float g, float b, float a) // Create color (0.0-1.0)
-Color& set(float r, float g, float b)    // Set color components
-Color& set(float r, float g, float b, float a) // Set color components
-Color& set(float gray)                   // Set color components
-Color& set(Color c)                      // Set color components
 Color Color_fromHSB(float h, float s, float b) // Create Color from HSB
 Color Color_fromHSB(float h, float s, float b, float a) // Create Color from HSB
+Color colorFromHSB(float h, float s, float b) // Create Color from HSB (alias for Color_fromHSB)
+Color colorFromHSB(float h, float s, float b, float a) // Create Color from HSB (alias for Color_fromHSB)
 Color Color_fromOKLCH(float L, float C, float H) // Create Color from OKLCH
 Color Color_fromOKLCH(float L, float C, float H, float a) // Create Color from OKLCH
 Color Color_fromOKLab(float L, float a, float b) // Create Color from OKLab
 Color Color_fromOKLab(float L, float a, float b, float alpha) // Create Color from OKLab
-```
-
-## Types - Rect
-
-```cpp
-Rect()                                   // Create a rectangle
-Rect(float x, float y, float w, float h) // Create a rectangle
-Rect& set(float x, float y, float w, float h) // Set rectangle properties
-Rect& set(Vec2 pos, float w, float h)    // Set rectangle properties
-bool contains(float x, float y)          // Check if point is inside
-bool intersects(Rect other)              // Check intersection
-```
-
-## Scene Graph
-
-```cpp
-Node()                                   // Create a base scene node
-void addChild(shared_ptr<Node> child)    // Add a child node
-void setPosition(float x, float y)       // Set position
-void setPosition(Vec3 pos)               // Set position
-RectNode()                               // Create a 2D rectangle node
-void setSize(float w, float h)           // Set size
 ```
 
 ## 3D Setup
@@ -421,16 +380,52 @@ float getDefaultScreenFov()              // Get current default screen FOV
 ## 3D Camera
 
 ```cpp
-EasyCam()                                // Create an easy-to-use 3D camera
-void begin()                             // Apply camera transform
-void end()                               // Restore previous transform
+EasyCam@ createEasyCam()                 // Create an EasyCam instance
+void begin()                             // Apply camera transform (start 3D mode)
+void end()                               // Restore previous transform (end 3D mode)
+void reset()                             // Reset camera to default position
+void setTarget(float x, float y, float z) // Set camera look-at target
+void setTarget(const Vec3 &in target)    // Set camera look-at target
+Vec3 getTarget()                         // Get camera look-at target
+void setDistance(float distance)         // Set distance from target
+float getDistance()                      // Get distance from target
+void setFov(float radians)               // Set field of view in radians
+float getFov()                           // Get field of view in radians
+void setFovDeg(float degrees)            // Set field of view in degrees
+void setNearClip(float nearClip)         // Set near clipping plane
+void setFarClip(float farClip)           // Set far clipping plane
+void enableMouseInput()                  // Enable mouse input for camera control
+void disableMouseInput()                 // Disable mouse input for camera control
+bool isMouseInputEnabled()               // Check if mouse input is enabled
+void mousePressed(int x, int y, int button) // Handle mouse press event
+void mouseReleased(int x, int y, int button) // Handle mouse release event
+void mouseDragged(int x, int y, int button) // Handle mouse drag event
+void mouseScrolled(float dx, float dy)   // Handle mouse scroll event (for zoom)
+Vec3 getPosition()                       // Get camera position
+void setSensitivity(float sensitivity)   // Set rotation sensitivity
+void setZoomSensitivity(float sensitivity) // Set zoom sensitivity
+void setPanSensitivity(float sensitivity) // Set pan sensitivity
 ```
 
 ## Math - 3D
 
 ```cpp
-Mat4()                                   // Create a 4x4 matrix
-Quaternion()                             // Create a quaternion
+Mat4 Mat4_identity()                     // Create an identity matrix
+Mat4 Mat4_translate(float x, float y, float z) // Create a translation matrix
+Mat4 Mat4_translate(Vec3 v)              // Create a translation matrix
+Mat4 Mat4_rotateX(float radians)         // Create X-axis rotation matrix
+Mat4 Mat4_rotateY(float radians)         // Create Y-axis rotation matrix
+Mat4 Mat4_rotateZ(float radians)         // Create Z-axis rotation matrix
+Mat4 Mat4_scale(float s)                 // Create a scaling matrix
+Mat4 Mat4_scale(float sx, float sy, float sz) // Create a scaling matrix
+Mat4 Mat4_lookAt(Vec3 eye, Vec3 target, Vec3 up) // Create a view matrix
+Mat4 Mat4_ortho(float left, float right, float bottom, float top, float nearPlane, float farPlane) // Create an orthographic projection matrix
+Mat4 Mat4_perspective(float fovY, float aspect, float nearPlane, float farPlane) // Create a perspective projection matrix
+Quaternion Quaternion_identity()         // Create an identity quaternion
+Quaternion Quaternion_fromAxisAngle(Vec3 axis, float radians) // Create quaternion from axis-angle
+Quaternion Quaternion_fromEuler(float pitch, float yaw, float roll) // Create quaternion from Euler angles
+Quaternion Quaternion_fromEuler(Vec3 euler) // Create quaternion from Euler angles
+Quaternion Quaternion_slerp(Quaternion a, Quaternion b, float t) // Spherical linear interpolation
 ```
 
 ## Graphics - Advanced
@@ -448,9 +443,8 @@ void drawTexture(const Texture& tex, float x, float y, float w, float h) // Draw
 ## Graphics - Texture & GPU
 
 ```cpp
-Texture()                                // Create a texture
+Texture@ createTexture()                 // Create a texture (TrussSketch factory)
 bool load(const string& path)            // Load image from file
-bool loadFromPixels(const Pixels& pixels) // Load from pixel data
 void bind(int slot = 0)                  // Bind texture
 void unbind(int slot = 0)                // Unbind texture
 int getWidth()                           // Get width
@@ -460,18 +454,17 @@ int getHeight()                          // Get height
 ## Graphics - FBO
 
 ```cpp
-Fbo()                                    // Create an FBO
+Fbo@ createFbo()                         // Create an FBO (TrussSketch factory)
 void allocate(int w, int h)              // Allocate buffer
 void begin()                             // Begin drawing to FBO
 void end()                               // End drawing to FBO
 Texture& getTexture()                    // Get internal texture
-void readToPixels(Pixels& pixels)        // Read pixels to CPU memory
 ```
 
 ## Types - Pixels
 
 ```cpp
-Pixels()                                 // Create pixel buffer
+Pixels@ createPixels()                   // Create pixel buffer (TrussSketch factory)
 void allocate(int w, int h, int channels) // Allocate memory
 Color getColor(int x, int y)             // Get color at pixel
 void setColor(int x, int y, const Color& c) // Set color at pixel
@@ -480,7 +473,7 @@ void setColor(int x, int y, const Color& c) // Set color at pixel
 ## Types - Mesh
 
 ```cpp
-Mesh()                                   // Create a new Mesh
+Mesh@ createMesh()                       // Create a new Mesh
 void setMode(int mode)                   // Set primitive mode (MESH_TRIANGLES, etc.)
 void addVertex(float x, float y, float z) // Add a vertex
 void addVertex(Vec3 v)                   // Add a vertex
@@ -494,10 +487,10 @@ void clear()                             // Clear all data
 void draw()                              // Draw the mesh
 ```
 
-## Types - Polyline
+## Types - Path
 
 ```cpp
-Polyline()                               // Create a new Polyline (Path)
+Path@ createPath()                       // Create a new Path
 void addVertex(float x, float y)         // Add a vertex
 void lineTo(float x, float y)            // Add a line segment to point
 void bezierTo(float cx1, float cy1, float cx2, float cy2, float x, float y) // Add a cubic bezier curve
@@ -510,13 +503,22 @@ void close()                             // Close the shape
 ## Types - StrokeMesh
 
 ```cpp
-StrokeMesh()                             // Create a new StrokeMesh
-void setWidth(float width)               // Set stroke width
-void setColor(Color color)               // Set stroke color
-void setCapType(int type)                // Set cap type (CAP_BUTT, CAP_ROUND, CAP_SQUARE)
-void setJoinType(int type)               // Set join type (JOIN_MITER, JOIN_ROUND, JOIN_BEVEL)
-void addVertex(float x, float y)         // Add a vertex
-void update()                            // Update the internal mesh
+StrokeMesh@ createStrokeMesh()           // Create a new StrokeMesh instance
+StrokeMesh& setWidth(float width)        // Set stroke width (method chaining)
+StrokeMesh& setColor(const Color &in color) // Set stroke color (method chaining)
+StrokeMesh& setCapType(int type)         // Set cap type: Butt, Round, Square (method chaining)
+StrokeMesh& setJoinType(int type)        // Set join type: Miter, Round, Bevel (method chaining)
+StrokeMesh& setMiterLimit(float limit)   // Set miter limit for sharp corners (method chaining)
+StrokeMesh& addVertex(float x, float y)  // Add a vertex (method chaining)
+StrokeMesh& addVertex(float x, float y, float z) // Add a vertex (method chaining)
+StrokeMesh& addVertex(const Vec2 &in v)  // Add a vertex (method chaining)
+StrokeMesh& addVertex(const Vec3 &in v)  // Add a vertex (method chaining)
+StrokeMesh& addVertexWithWidth(float x, float y, float width) // Add a vertex with variable width (method chaining)
+StrokeMesh& setShape(Path@ path)         // Set shape from Path (method chaining)
+StrokeMesh& setClosed(bool closed)       // Set whether the stroke is closed (method chaining)
+StrokeMesh& clear()                      // Clear all vertices (method chaining)
+void update()                            // Update the internal mesh (required before draw)
+void draw()                              // Draw the stroke mesh
 ```
 
 ## Constants

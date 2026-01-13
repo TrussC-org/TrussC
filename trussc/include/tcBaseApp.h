@@ -6,6 +6,7 @@
 #include "tc/types/tcLayoutMod.h"
 #include "tc/types/tcScrollContainer.h"
 #include "tc/types/tcScrollBar.h"
+#include "tc/types/tcTweenMod.h"
 #include <vector>
 #include <string>
 

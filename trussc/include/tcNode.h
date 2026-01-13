@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TrussC.h"
+#include "tc/types/tcMod.h"
 #include <memory>
 #include <vector>
 #include <functional>
@@ -391,8 +392,18 @@ private:
             setup();
         }
 
+        // Mod early update (before Node::update)
+        for (auto& [type, mod] : mods_) {
+            mod->earlyUpdate();
+        }
+
         processTimers();
         update();  // User code
+
+        // Mod update (after Node::update)
+        for (auto& [type, mod] : mods_) {
+            mod->update();
+        }
 
         // Automatically update child nodes
         for (auto& child : children_) {

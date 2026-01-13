@@ -2560,6 +2560,112 @@ categories:
         sketch: false
         snippet: "updateLayout()"
 
+      - name: TweenMod
+        return: ""
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Animation modifier for Node properties (position, scale, rotation) with easing (C++ only)"
+        description_ja: "Nodeプロパティ（位置、スケール、回転）のイージングアニメーションMod（C++のみ）"
+        sketch: false
+        snippet: "addMod<TweenMod>()"
+
+      - name: moveTo
+        return: "TweenMod&"
+        signatures:
+          - params: "float x, float y"
+            params_simple: "x, y"
+          - params: "Vec3 pos"
+            params_simple: "pos"
+        description: "Animate position to target (TweenMod method) (C++ only)"
+        description_ja: "位置を目標値へアニメーション（TweenModメソッド）（C++のみ）"
+        sketch: false
+        snippet: "moveTo(${1:x}, ${2:y})"
+
+      - name: moveBy
+        return: "TweenMod&"
+        signatures:
+          - params: "float dx, float dy"
+            params_simple: "dx, dy"
+        description: "Animate position by relative amount (TweenMod method) (C++ only)"
+        description_ja: "位置を相対量だけアニメーション（TweenModメソッド）（C++のみ）"
+        sketch: false
+        snippet: "moveBy(${1:dx}, ${2:dy})"
+
+      - name: scaleTo
+        return: "TweenMod&"
+        signatures:
+          - params: "float uniform"
+            params_simple: "uniform"
+          - params: "float sx, float sy, float sz = 1"
+            params_simple: "sx, sy, sz"
+        description: "Animate scale to target (TweenMod method) (C++ only)"
+        description_ja: "スケールを目標値へアニメーション（TweenModメソッド）（C++のみ）"
+        sketch: false
+        snippet: "scaleTo(${1:scale})"
+
+      - name: scaleBy
+        return: "TweenMod&"
+        signatures:
+          - params: "float factor"
+            params_simple: "factor"
+        description: "Animate scale by relative multiplier (TweenMod method) (C++ only)"
+        description_ja: "スケールを相対倍率でアニメーション（TweenModメソッド）（C++のみ）"
+        sketch: false
+        snippet: "scaleBy(${1:factor})"
+
+      - name: rotateTo
+        return: "TweenMod&"
+        signatures:
+          - params: "float radians"
+            params_simple: "radians"
+          - params: "Quaternion q"
+            params_simple: "q"
+        description: "Animate rotation to target angle or quaternion (TweenMod method) (C++ only)"
+        description_ja: "回転を目標角度またはクォータニオンへアニメーション（TweenModメソッド）（C++のみ）"
+        sketch: false
+        snippet: "rotateTo(${1:radians})"
+
+      - name: rotateBy
+        return: "TweenMod&"
+        signatures:
+          - params: "float radians"
+            params_simple: "radians"
+        description: "Animate rotation by relative angle (TweenMod method) (C++ only)"
+        description_ja: "回転を相対角度でアニメーション（TweenModメソッド）（C++のみ）"
+        sketch: false
+        snippet: "rotateBy(${1:radians})"
+
+      - name: duration
+        return: "TweenMod&"
+        signatures:
+          - params: "float seconds"
+            params_simple: "seconds"
+        description: "Set animation duration (TweenMod method) (C++ only)"
+        description_ja: "アニメーション時間を設定（TweenModメソッド）（C++のみ）"
+        sketch: false
+        snippet: "duration(${1:1.0f})"
+
+      - name: ease
+        return: "TweenMod&"
+        signatures:
+          - params: "EaseType type, EaseMode mode = InOut"
+            params_simple: "type, mode"
+        description: "Set easing function (TweenMod method). Types: Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce. Modes: In, Out, InOut (C++ only)"
+        description_ja: "イージング関数を設定（TweenModメソッド）。Types: Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce。Modes: In, Out, InOut（C++のみ）"
+        sketch: false
+        snippet: "ease(EaseType::${1:Cubic}, EaseMode::${2:InOut})"
+
+      - name: delay
+        return: "TweenMod&"
+        signatures:
+          - params: "float seconds"
+            params_simple: "seconds"
+        description: "Set delay before animation starts (TweenMod method) (C++ only)"
+        description_ja: "アニメーション開始前の遅延を設定（TweenModメソッド）（C++のみ）"
+        sketch: false
+        snippet: "delay(${1:0.5f})"
+
   # ==========================================================================
   # 3D Setup
   # ==========================================================================

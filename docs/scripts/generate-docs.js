@@ -100,7 +100,7 @@ function generateSketchAPI(api) {
                         };
 
                         // Constructor
-                        if (type.constructor) {
+                        if (type.constructor && type.constructor.signatures) {
                             typeData.constructor = {
                                 signatures: type.constructor.signatures.map(s => s.params || ''),
                                 snippet: type.constructor.snippet
@@ -631,7 +631,7 @@ void draw() {
             md += `${type.description}\n\n`;
 
             // Constructor
-            if (type.constructor) {
+            if (type.constructor && type.constructor.signatures) {
                 md += `**Constructor:**\n`;
                 for (const sig of type.constructor.signatures) {
                     md += `- \`${type.name}(${sig.params || ''})\`\n`;
