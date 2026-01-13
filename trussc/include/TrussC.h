@@ -864,6 +864,13 @@ inline void resetBlendMode() {
     setBlendMode(BlendMode::Alpha);
 }
 
+// Restore current blend mode pipeline (use after temporary pipeline changes)
+inline void restoreBlendPipeline() {
+    if (internal::blendPipelinesInitialized) {
+        sgl_load_pipeline(internal::blendPipelines[static_cast<int>(internal::currentBlendMode)]);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 3D drawing mode
 // ---------------------------------------------------------------------------

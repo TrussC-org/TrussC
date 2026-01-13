@@ -491,7 +491,7 @@ public:
 
             sgl_end();
             sgl_disable_texture();
-            sgl_load_default_pipeline();
+            if (internal::blendPipelinesInitialized) sgl_load_pipeline(internal::blendPipelines[static_cast<int>(internal::currentBlendMode)]);
 
             // Restore matrices
             sgl_pop_matrix();
@@ -534,7 +534,7 @@ public:
 
             sgl_end();
             sgl_disable_texture();
-            sgl_load_default_pipeline();
+            if (internal::blendPipelinesInitialized) sgl_load_pipeline(internal::blendPipelines[static_cast<int>(internal::currentBlendMode)]);
 
             popMatrix();
         }
@@ -602,7 +602,7 @@ public:
 
         sgl_end();
         sgl_disable_texture();
-        sgl_load_default_pipeline();
+        if (internal::blendPipelinesInitialized) sgl_load_pipeline(internal::blendPipelines[static_cast<int>(internal::currentBlendMode)]);
 
         popMatrix();
     }
@@ -685,7 +685,7 @@ public:
 
         sgl_end();
         sgl_disable_texture();
-        sgl_load_default_pipeline();
+        if (internal::blendPipelinesInitialized) sgl_load_pipeline(internal::blendPipelines[static_cast<int>(internal::currentBlendMode)]);
 
         popMatrix();
     }
