@@ -116,28 +116,61 @@ int main(int argc, char* argv[]) {
     bool web = false;
     string ideStr = "vscode";
 
-    // Parse arguments
+    // Helper to check if next arg is a valid value (not another flag)
+    auto getNextArg = [&](size_t i) -> string {
+        if (i + 1 < args.size() && !args[i + 1].empty() && args[i + 1][0] != '-') {
+            return args[i + 1];
+        }
+        return "";
+    };
+
+    // Parse arguments (two passes: flags first, then positional)
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--update" && i + 1 < args.size()) {
+        if (args[i] == "--update") {
             cliMode = true;
             updateMode = true;
-            targetPath = args[++i];
+            string next = getNextArg(i);
+            if (!next.empty()) {
+                targetPath = next;
+                ++i;
+            }
         } else if (args[i] == "--generate") {
             cliMode = true;
             generateMode = true;
-        } else if (args[i] == "--name" && i + 1 < args.size()) {
-            projectName = args[++i];
-        } else if (args[i] == "--dir" && i + 1 < args.size()) {
-            targetPath = args[++i]; // reusing targetPath
-        } else if (args[i] == "--tc-root" && i + 1 < args.size()) {
-            tcRoot = args[++i];
+        } else if (args[i] == "--name") {
+            string next = getNextArg(i);
+            if (!next.empty()) {
+                projectName = next;
+                ++i;
+            }
+        } else if (args[i] == "--dir") {
+            string next = getNextArg(i);
+            if (!next.empty()) {
+                targetPath = next;
+                ++i;
+            }
+        } else if (args[i] == "--tc-root") {
+            string next = getNextArg(i);
+            if (!next.empty()) {
+                tcRoot = next;
+                ++i;
+            }
         } else if (args[i] == "--web") {
             web = true;
-        } else if (args[i] == "--ide" && i + 1 < args.size()) {
-            ideStr = args[++i];
+        } else if (args[i] == "--ide") {
+            string next = getNextArg(i);
+            if (!next.empty()) {
+                ideStr = next;
+                ++i;
+            }
         } else if (args[i] == "--help") {
             printHelp();
             return 0;
+        } else if (args[i][0] != '-') {
+            // Positional argument - use as path if not already set
+            if (targetPath.empty()) {
+                targetPath = args[i];
+            }
         }
     }
 

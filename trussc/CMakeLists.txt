@@ -24,8 +24,8 @@ set(TC_ROOT "${TC_ROOT}" CACHE PATH "TrussC root directory" FORCE)
 if(EMSCRIPTEN)
     # Emscripten は UNIX=TRUE を設定するので、UNIX より前にチェック
     set(TC_PLATFORM_EMSCRIPTEN TRUE)
-    set(TC_GRAPHICS_BACKEND "GLES3")  # WebGL2
-    message(STATUS "[TrussC] Platform: Emscripten (WebGL2)")
+    set(TC_GRAPHICS_BACKEND "WGPU")  # WebGPU
+    message(STATUS "[TrussC] Platform: Emscripten (WebGPU)")
 elseif(APPLE)
     set(TC_PLATFORM_MACOS TRUE)
     set(TC_GRAPHICS_BACKEND "METAL")
@@ -99,7 +99,9 @@ target_include_directories(TrussC PUBLIC
 # プラットフォーム固有の設定
 # =============================================================================
 if(TC_PLATFORM_EMSCRIPTEN)
-    target_compile_definitions(TrussC PUBLIC SOKOL_GLES3)
+    target_compile_definitions(TrussC PUBLIC SOKOL_WGPU)
+    # WebGPU port for headers (emdawnwebgpu provides webgpu/webgpu.h)
+    target_compile_options(TrussC PUBLIC --use-port=emdawnwebgpu)
     # Emscripten リンクオプションはアプリ側で設定（trussc_app.cmake）
 
 elseif(TC_PLATFORM_MACOS)

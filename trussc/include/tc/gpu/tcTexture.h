@@ -55,9 +55,40 @@ public:
         channels_ = channels;
         usage_ = usage;
         sampleCount_ = sampleCount;
+        pixelFormat_ = SG_PIXELFORMAT_NONE;  // Use default based on channels
 
         createResources(nullptr);
     }
+
+    // Allocate compressed texture (BC1/BC3/BC7 etc.)
+    // Data must be provided for immutable compressed textures
+    void allocateCompressed(int width, int height, sg_pixel_format format,
+                            const void* data, size_t dataSize) {
+        clear();
+
+        width_ = width;
+        height_ = height;
+        channels_ = 4;  // Compressed textures treated as RGBA
+        usage_ = TextureUsage::Immutable;
+        pixelFormat_ = format;
+
+        createCompressedResources(data, dataSize);
+    }
+
+    // Update compressed texture (recreates texture - BC textures are immutable)
+    void updateCompressed(const void* data, size_t dataSize) {
+        if (!allocated_ || pixelFormat_ == SG_PIXELFORMAT_NONE) return;
+
+        // Destroy old resources
+        sg_destroy_sampler(sampler_);
+        sg_destroy_view(view_);
+        sg_destroy_image(image_);
+
+        // Recreate with new data
+        createCompressedResources(data, dataSize);
+    }
+
+    bool isCompressed() const { return pixelFormat_ != SG_PIXELFORMAT_NONE; }
 
     // Allocate texture from Pixels
     void allocate(const Pixels& pixels, TextureUsage usage = TextureUsage::Immutable) {
@@ -249,11 +280,33 @@ private:
     bool allocated_ = false;
     TextureUsage usage_ = TextureUsage::Immutable;
     uint64_t lastUpdateFrame_ = UINT64_MAX;  // Last updated frame
+    sg_pixel_format pixelFormat_ = SG_PIXELFORMAT_NONE;  // For compressed textures
 
     TextureFilter minFilter_ = TextureFilter::Linear;
     TextureFilter magFilter_ = TextureFilter::Linear;
     TextureWrap wrapU_ = TextureWrap::ClampToEdge;
     TextureWrap wrapV_ = TextureWrap::ClampToEdge;
+
+    void createCompressedResources(const void* data, size_t dataSize) {
+        sg_image_desc img_desc = {};
+        img_desc.width = width_;
+        img_desc.height = height_;
+        img_desc.pixel_format = pixelFormat_;
+        img_desc.data.mip_levels[0].ptr = data;
+        img_desc.data.mip_levels[0].size = dataSize;
+
+        image_ = sg_make_image(&img_desc);
+
+        // Create texture view
+        sg_view_desc view_desc = {};
+        view_desc.texture.image = image_;
+        view_ = sg_make_view(&view_desc);
+
+        // Create sampler
+        createSampler();
+
+        allocated_ = true;
+    }
 
     void createResources(const unsigned char* initialData) {
         // Create image

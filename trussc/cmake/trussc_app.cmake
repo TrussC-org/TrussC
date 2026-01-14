@@ -152,7 +152,7 @@ macro(trussc_app)
             message(STATUS "[${PROJECT_NAME}] sokol-shdc downloaded successfully")
         endif()
 
-        # Output languages: Metal macOS, GLES3 for Web, WGSL for WebGPU
+        # Output languages: Metal (macOS), HLSL (Windows), GLSL (Linux), WGSL (Web/WebGPU)
         set(_TC_SOKOL_SLANG "metal_macos:hlsl5:glsl300es:wgsl")
 
         set(_TC_SHADER_OUTPUTS "")
@@ -183,12 +183,11 @@ macro(trussc_app)
         )
         # Custom shell HTML path
         set(_TC_SHELL_FILE "${TC_ROOT}/trussc/platform/web/shell.html")
-        # WebGL2 link options
+        # WebGPU link options
         target_link_options(${PROJECT_NAME} PRIVATE
-            -sUSE_WEBGL2=1
+            --use-port=emdawnwebgpu
             -sALLOW_MEMORY_GROWTH=1
             -sALLOW_TABLE_GROWTH=1
-            -sFULL_ES3=1
             -sFETCH=1
             -sASYNCIFY=1
             --shell-file=${_TC_SHELL_FILE}
