@@ -64,6 +64,28 @@ void tcApp::setup() {
     }
 
     // =========================================================================
+    // Both directions scroll demo (bottom right)
+    // =========================================================================
+    bothScrollContainer_ = make_shared<ScrollContainer>();
+    bothScrollContainer_->setPos(450, 300);
+    bothScrollContainer_->setSize(300, 230);
+    bothScrollContainer_->setHorizontalScrollEnabled(true);
+    bothScrollContainer_->setVerticalScrollEnabled(true);
+    addChild(bothScrollContainer_);
+
+    // Fixed size crosshatch content (600x600 - larger than container)
+    crossHatch_ = make_shared<CrossHatch>(600, 600);
+    bothScrollContainer_->setContent(crossHatch_);
+
+    // Vertical scroll bar for both-direction container
+    bothVScrollBar_ = make_shared<ScrollBar>(bothScrollContainer_.get(), ScrollBar::Vertical);
+    bothScrollContainer_->addChild(bothVScrollBar_);
+
+    // Horizontal scroll bar for both-direction container
+    bothHScrollBar_ = make_shared<ScrollBar>(bothScrollContainer_.get(), ScrollBar::Horizontal);
+    bothScrollContainer_->addChild(bothHScrollBar_);
+
+    // =========================================================================
     // Log
     // =========================================================================
     logNotice("tcApp") << "=== scrollContainerExample ===";
@@ -75,8 +97,11 @@ void tcApp::setup() {
 void tcApp::update() {
     vScrollContainer_->updateScrollBounds();
     hScrollContainer_->updateScrollBounds();
+    bothScrollContainer_->updateScrollBounds();
     vScrollBar_->updateFromContainer();
     hScrollBar_->updateFromContainer();
+    bothVScrollBar_->updateFromContainer();
+    bothHScrollBar_->updateFromContainer();
 }
 
 void tcApp::draw() {
@@ -110,12 +135,9 @@ void tcApp::draw() {
             hContentRect->getWidth(), hContentRect->getHeight()), 450, 260);
     }
 
-    // Scroll bar info
-    setColor(0.4f, 0.4f, 0.45f);
-    drawBitmapString("ScrollBar:", 450, 300);
-    drawBitmapString("  - Syncs with ScrollContainer", 450, 320);
-    drawBitmapString("  - Hidden when no scroll range", 450, 340);
-    drawBitmapString("  - Rounded slot shape (stroke + cap)", 450, 360);
+    // Both directions section label
+    setColor(0.6f, 0.6f, 0.65f);
+    drawBitmapString("Both Directions (600x600 content)", 450, 285);
 }
 
 void tcApp::keyPressed(int key) {

@@ -5,6 +5,51 @@ using namespace std;
 using namespace tc;
 
 // =============================================================================
+// CrossHatch - Fixed size content with crosshatch pattern
+// =============================================================================
+class CrossHatch : public RectNode {
+public:
+    using Ptr = shared_ptr<CrossHatch>;
+
+    float gridSize = 50.0f;
+    Color bgColor = Color(0.15f, 0.15f, 0.18f);
+    Color lineColor = Color(0.3f, 0.3f, 0.35f);
+
+    CrossHatch(float w, float h) {
+        setSize(w, h);
+    }
+
+    void draw() override {
+        // Background
+        setColor(bgColor);
+        fill();
+        drawRect(0, 0, getWidth(), getHeight());
+
+        // Grid lines
+        setColor(lineColor);
+        noFill();
+
+        // Vertical lines
+        for (float x = 0; x <= getWidth(); x += gridSize) {
+            drawLine(x, 0, x, getHeight());
+        }
+
+        // Horizontal lines
+        for (float y = 0; y <= getHeight(); y += gridSize) {
+            drawLine(0, y, getWidth(), y);
+        }
+
+        // Border
+        setColor(0.5f, 0.5f, 0.55f);
+        drawRect(0, 0, getWidth(), getHeight());
+
+        // Size label
+        setColor(0.6f, 0.6f, 0.65f);
+        drawBitmapString(format("{:.0f}x{:.0f}", getWidth(), getHeight()), 10, 20);
+    }
+};
+
+// =============================================================================
 // ListItem - Simple item for scroll list
 // =============================================================================
 class ListItem : public RectNode {
@@ -75,6 +120,12 @@ private:
     RectNode::Ptr hContent_;
     LayoutMod* hLayout_ = nullptr;
     ScrollBar::Ptr hScrollBar_;
+
+    // Both directions scroll demo
+    ScrollContainer::Ptr bothScrollContainer_;
+    CrossHatch::Ptr crossHatch_;
+    ScrollBar::Ptr bothVScrollBar_;
+    ScrollBar::Ptr bothHScrollBar_;
 
     int itemCount_ = 0;
 
