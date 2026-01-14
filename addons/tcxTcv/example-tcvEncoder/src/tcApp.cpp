@@ -219,11 +219,19 @@ void tcApp::encodeNextFrame() {
         if (waitCounter_ > 100) {
             retryCount_++;
             if (retryCount_ > 3) {
-                logError("TcvEncoder") << "Fatal: Failed to decode frame " << currentFrame_ << " after multiple retries. Finishing early.";
+                // Check if we're near end of video (metadata frame count can be inaccurate)
+                float progress = static_cast<float>(currentFrame_) / totalFrames_;
+                if (progress > 0.98f) {
+                    logNotice("TcvEncoder") << "Reached end of video at frame " << currentFrame_
+                                            << " (metadata reported " << totalFrames_ << " frames)";
+                } else {
+                    logWarning("TcvEncoder") << "Failed to decode frame " << currentFrame_
+                                             << " after retries. Finishing at " << static_cast<int>(progress * 100) << "%";
+                }
                 finishEncoding();
                 return;
             }
-            logWarning("TcvEncoder") << "Timeout waiting for frame " << currentFrame_ << ". Retrying with setFrame... (Retry " << retryCount_ << ")";
+            logNotice("TcvEncoder") << "Waiting for frame " << currentFrame_ << "... (attempt " << retryCount_ << ")";
             source_.setFrame(currentFrame_); // Fallback to absolute seek
             waitCounter_ = 0;
             return;
