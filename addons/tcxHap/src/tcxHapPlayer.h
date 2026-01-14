@@ -310,11 +310,9 @@ protected:
         playbackTime_ = pct * duration_;
         int targetFrame = static_cast<int>(pct * totalFrames_);
         setFrame(targetFrame);
-        // Note: Sound doesn't support seeking yet, so audio may be out of sync
-        // For now, restart audio from beginning if position changes
-        if (hasAudio_ && playing_) {
-            audioPlayer_.stop();
-            audioPlayer_.play();
+        // Sync audio position
+        if (hasAudio_) {
+            audioPlayer_.setPosition(playbackTime_);
         }
     }
 

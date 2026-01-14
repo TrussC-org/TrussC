@@ -785,6 +785,15 @@ public:
         return (float)playing_->positionF / buffer_->sampleRate;
     }
 
+    void setPosition(float seconds) {
+        if (!playing_ || !buffer_) return;
+        double pos = seconds * buffer_->sampleRate;
+        // Clamp to valid range
+        if (pos < 0) pos = 0;
+        if (pos >= buffer_->numSamples) pos = buffer_->numSamples - 1;
+        playing_->positionF = pos;
+    }
+
     float getDuration() const {
         return buffer_ ? buffer_->getDuration() : 0;
     }

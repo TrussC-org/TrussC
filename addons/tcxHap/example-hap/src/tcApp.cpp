@@ -55,7 +55,7 @@ void tcApp::draw() {
             player_.isPlaying() ? "Playing" : (player_.isPaused() ? "Paused" : "Stopped"));
         drawBitmapString(info, 20, getWindowHeight() - 50);
 
-        string controls = "Space: Play/Pause | R: Restart | L: Loop | Left/Right: Frame step";
+        string controls = "Space: Play/Pause | R: Restart | L: Loop | 0-9: Seek | Left/Right: Frame step";
         setColor(0.5f, 0.5f, 0.55f);
         drawBitmapString(controls, 20, getWindowHeight() - 30);
     } else {
@@ -91,6 +91,16 @@ void tcApp::keyPressed(int key) {
             break;
         case SAPP_KEYCODE_RIGHT:
             player_.nextFrame();
+            break;
+        // Number keys 1-9 for seeking to 10%-90%
+        case '1': case '2': case '3': case '4': case '5':
+        case '6': case '7': case '8': case '9':
+            player_.setPosition((key - '0') * 0.1f);
+            logNotice("tcApp") << "Seek to " << ((key - '0') * 10) << "%";
+            break;
+        case '0':
+            player_.setPosition(0);
+            logNotice("tcApp") << "Seek to 0%";
             break;
     }
 }
