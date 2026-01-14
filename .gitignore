@@ -100,6 +100,7 @@ addons/**/*.vcxproj
 
 addons/*
 !addons/tcxBox2d
+!addons/tcxHap
 !addons/tcxLut
 !addons/tcxOsc
 !addons/tcxTls
