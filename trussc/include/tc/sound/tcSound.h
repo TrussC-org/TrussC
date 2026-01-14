@@ -69,6 +69,9 @@ extern "C" {
     float* drmp3_open_file_and_read_pcm_frames_f32(
         const char* filePath, drmp3_config* pConfig,
         drmp3_uint64* pTotalFrameCount, void* pAllocationCallbacks);
+    float* drmp3_open_memory_and_read_pcm_frames_f32(
+        const void* pData, size_t dataSize, drmp3_config* pConfig,
+        drmp3_uint64* pTotalFrameCount, void* pAllocationCallbacks);
     void drmp3_free(void* p, void* pAllocationCallbacks);
 }
 
@@ -160,6 +163,76 @@ public:
 
         printf("SoundBuffer: loaded MP3 %s (%d ch, %d Hz, %zu samples)\n",
                path.c_str(), channels, sampleRate, numSamples);
+
+        return true;
+    }
+
+    bool loadMp3FromMemory(const void* data, size_t dataSize) {
+        drmp3_config config = {0, 0};
+        drmp3_uint64 frameCount = 0;
+
+        float* decoded = drmp3_open_memory_and_read_pcm_frames_f32(
+            data, dataSize, &config, &frameCount, nullptr);
+
+        if (!decoded) {
+            printf("SoundBuffer: failed to decode MP3 from memory\n");
+            return false;
+        }
+
+        channels = config.channels;
+        sampleRate = config.sampleRate;
+        numSamples = frameCount;
+
+        samples.resize(numSamples * channels);
+        std::memcpy(samples.data(), decoded, samples.size() * sizeof(float));
+
+        drmp3_free(decoded, nullptr);
+
+        printf("SoundBuffer: decoded MP3 from memory (%d ch, %d Hz, %zu samples)\n",
+               channels, sampleRate, numSamples);
+
+        return true;
+    }
+
+    // Load raw PCM data (16-bit signed, little-endian)
+    bool loadPcmFromMemory(const void* data, size_t dataSize,
+                           int numChannels, int rate, int bitsPerSample = 16,
+                           bool bigEndian = false) {
+        if (bitsPerSample != 16 && bitsPerSample != 32) {
+            printf("SoundBuffer: unsupported bits per sample: %d\n", bitsPerSample);
+            return false;
+        }
+
+        channels = numChannels;
+        sampleRate = rate;
+
+        if (bitsPerSample == 16) {
+            // 16-bit signed integer -> float
+            size_t sampleCount = dataSize / 2;
+            numSamples = sampleCount / channels;
+            samples.resize(sampleCount);
+
+            const int16_t* src = static_cast<const int16_t*>(data);
+            for (size_t i = 0; i < sampleCount; i++) {
+                int16_t s = src[i];
+                if (bigEndian) {
+                    // Swap bytes for big-endian
+                    s = static_cast<int16_t>((s >> 8) | (s << 8));
+                }
+                samples[i] = s / 32768.0f;
+            }
+        } else {
+            // 32-bit float
+            size_t sampleCount = dataSize / 4;
+            numSamples = sampleCount / channels;
+            samples.resize(sampleCount);
+
+            const float* src = static_cast<const float*>(data);
+            std::memcpy(samples.data(), src, dataSize);
+        }
+
+        printf("SoundBuffer: loaded PCM from memory (%d ch, %d Hz, %zu samples)\n",
+               channels, sampleRate, numSamples);
 
         return true;
     }

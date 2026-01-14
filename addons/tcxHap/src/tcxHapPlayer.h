@@ -116,9 +116,16 @@ public:
             return false;
         }
 
+        // Load audio track if available
+        audioTrack_ = info.getAudioTrack();
+        if (audioTrack_) {
+            loadAudio();
+        }
+
         tc::logNotice("HapPlayer") << "Loaded: " << width_ << "x" << height_
             << ", " << totalFrames_ << " frames, "
-            << duration_ << "s, format: " << static_cast<int>(hapFormat_);
+            << duration_ << "s, format: " << static_cast<int>(hapFormat_)
+            << (hasAudio_ ? ", with audio" : ", no audio");
 
         initialized_ = true;
         currentFrame_ = 0;
@@ -128,10 +135,17 @@ public:
     void close() override {
         if (!initialized_) return;
 
+        // Stop audio
+        if (hasAudio_) {
+            audioPlayer_.stop();
+        }
+
         movParser_.close();
         texture_.clear();
         frameBuffer_.clear();
         videoTrack_ = nullptr;
+        audioTrack_ = nullptr;
+        hasAudio_ = false;
 
         initialized_ = false;
         playing_ = false;
@@ -269,39 +283,64 @@ protected:
     void playImpl() override {
         playbackTime_ = 0;
         currentFrame_ = -1;  // Force first frame decode
+        if (hasAudio_) {
+            audioPlayer_.play();
+        }
     }
 
     void stopImpl() override {
         playbackTime_ = 0;
         currentFrame_ = 0;
+        if (hasAudio_) {
+            audioPlayer_.stop();
+        }
     }
 
-    void setPausedImpl(bool /*paused*/) override {
-        // Nothing special needed
+    void setPausedImpl(bool paused) override {
+        if (hasAudio_) {
+            if (paused) {
+                audioPlayer_.pause();
+            } else {
+                audioPlayer_.resume();
+            }
+        }
     }
 
     void setPositionImpl(float pct) override {
         playbackTime_ = pct * duration_;
         int targetFrame = static_cast<int>(pct * totalFrames_);
         setFrame(targetFrame);
+        // Note: Sound doesn't support seeking yet, so audio may be out of sync
+        // For now, restart audio from beginning if position changes
+        if (hasAudio_ && playing_) {
+            audioPlayer_.stop();
+            audioPlayer_.play();
+        }
     }
 
-    void setVolumeImpl(float /*vol*/) override {
-        // TODO: Audio support
+    void setVolumeImpl(float vol) override {
+        if (hasAudio_) {
+            audioPlayer_.setVolume(vol);
+        }
     }
 
-    void setSpeedImpl(float /*speed*/) override {
-        // speed_ is already set by base class
+    void setSpeedImpl(float speed) override {
+        if (hasAudio_) {
+            audioPlayer_.setSpeed(speed);
+        }
     }
 
-    void setLoopImpl(bool /*loop*/) override {
-        // loop_ is already set by base class
+    void setLoopImpl(bool loop) override {
+        if (hasAudio_) {
+            audioPlayer_.setLoop(loop);
+        }
     }
 
 private:
     MovParser movParser_;
     HapDecoder hapDecoder_;
     const MovTrack* videoTrack_ = nullptr;
+    const MovTrack* audioTrack_ = nullptr;
 
     HapFormat hapFormat_ = HapFormat::Unknown;
     std::vector<uint8_t> frameBuffer_;
@@ -311,6 +350,10 @@ private:
     int totalFrames_ = 0;
     int currentFrame_ = 0;
     double playbackTime_ = 0;
+
+    // Audio playback
+    tc::Sound audioPlayer_;
+    bool hasAudio_ = false;
 
     // YCoCg shader for HAP-Q
     mutable tc::Shader ycocgShader_;
@@ -337,6 +380,7 @@ private:
         // Move HapPlayer-specific state
         movParser_ = std::move(other.movParser_);
         videoTrack_ = other.videoTrack_;
+        audioTrack_ = other.audioTrack_;
         hapFormat_ = other.hapFormat_;
         frameBuffer_ = std::move(other.frameBuffer_);
         sampleBuffer_ = std::move(other.sampleBuffer_);
@@ -344,12 +388,126 @@ private:
         totalFrames_ = other.totalFrames_;
         currentFrame_ = other.currentFrame_;
         playbackTime_ = other.playbackTime_;
+        audioPlayer_ = std::move(other.audioPlayer_);
+        hasAudio_ = other.hasAudio_;
 
         // Invalidate source
         other.initialized_ = false;
         other.videoTrack_ = nullptr;
+        other.audioTrack_ = nullptr;
+        other.hasAudio_ = false;
         other.width_ = 0;
         other.height_ = 0;
+    }
+
+    bool loadAudio() {
+        if (!audioTrack_) return false;
+
+        // Check codec type
+        uint32_t codec = audioTrack_->codecFourCC;
+
+        if (audioTrack_->isPcm()) {
+            // PCM audio - read all samples and convert to float
+            return loadPcmAudio();
+        }
+        else if (audioTrack_->isMp3()) {
+            // MP3 audio - extract and decode
+            return loadMp3Audio();
+        }
+        else {
+            tc::logWarning("HapPlayer") << "Unsupported audio codec: "
+                << MovParser::fourccToString(codec);
+            return false;
+        }
+    }
+
+    bool loadPcmAudio() {
+        if (!audioTrack_) return false;
+
+        // Calculate total audio data size
+        size_t totalSize = 0;
+        for (const auto& sample : audioTrack_->samples) {
+            totalSize += sample.size;
+        }
+
+        // Read all audio samples
+        std::vector<uint8_t> audioData;
+        audioData.reserve(totalSize);
+
+        for (size_t i = 0; i < audioTrack_->samples.size(); i++) {
+            std::vector<uint8_t> sampleData;
+            if (movParser_.readSample(*audioTrack_, i, sampleData)) {
+                audioData.insert(audioData.end(), sampleData.begin(), sampleData.end());
+            }
+        }
+
+        if (audioData.empty()) {
+            tc::logWarning("HapPlayer") << "Failed to read PCM audio data";
+            return false;
+        }
+
+        // Create SoundBuffer from PCM data
+        tc::SoundBuffer buffer;
+        bool bigEndian = audioTrack_->isBigEndianPcm();
+        int bitsPerSample = audioTrack_->isFloatPcm() ? 32 : audioTrack_->bitsPerSample;
+
+        if (!buffer.loadPcmFromMemory(audioData.data(), audioData.size(),
+                                       audioTrack_->channels, audioTrack_->sampleRate,
+                                       bitsPerSample, bigEndian)) {
+            tc::logWarning("HapPlayer") << "Failed to load PCM audio";
+            return false;
+        }
+
+        audioPlayer_.loadFromBuffer(buffer);
+        hasAudio_ = true;
+
+        tc::logNotice("HapPlayer") << "Loaded PCM audio: "
+            << audioTrack_->channels << " ch, "
+            << audioTrack_->sampleRate << " Hz";
+
+        return true;
+    }
+
+    bool loadMp3Audio() {
+        if (!audioTrack_) return false;
+
+        // Calculate total MP3 data size
+        size_t totalSize = 0;
+        for (const auto& sample : audioTrack_->samples) {
+            totalSize += sample.size;
+        }
+
+        // Read all MP3 data
+        std::vector<uint8_t> mp3Data;
+        mp3Data.reserve(totalSize);
+
+        for (size_t i = 0; i < audioTrack_->samples.size(); i++) {
+            std::vector<uint8_t> sampleData;
+            if (movParser_.readSample(*audioTrack_, i, sampleData)) {
+                mp3Data.insert(mp3Data.end(), sampleData.begin(), sampleData.end());
+            }
+        }
+
+        if (mp3Data.empty()) {
+            tc::logWarning("HapPlayer") << "Failed to read MP3 audio data";
+            return false;
+        }
+
+        // Decode MP3 from memory
+        tc::SoundBuffer buffer;
+        if (!buffer.loadMp3FromMemory(mp3Data.data(), mp3Data.size())) {
+            tc::logWarning("HapPlayer") << "Failed to decode MP3 audio";
+            return false;
+        }
+
+        audioPlayer_.loadFromBuffer(buffer);
+        hasAudio_ = true;
+
+        tc::logNotice("HapPlayer") << "Loaded MP3 audio: "
+            << buffer.channels << " ch, "
+            << buffer.sampleRate << " Hz";
+
+        return true;
     }
 
     bool decodeFrame(int frameIndex) {

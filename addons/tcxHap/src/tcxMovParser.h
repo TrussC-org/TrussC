@@ -45,6 +45,14 @@ constexpr uint32_t ATOM_MDAT = 0x6D646174;
 constexpr uint32_t HANDLER_VIDE = 0x76696465; // 'vide'
 constexpr uint32_t HANDLER_SOUN = 0x736F756E; // 'soun'
 
+// Audio codec FourCCs
+constexpr uint32_t FOURCC_SOWT = 0x736F7774; // 'sowt' - 16-bit LE PCM
+constexpr uint32_t FOURCC_TWOS = 0x74776F73; // 'twos' - 16-bit BE PCM
+constexpr uint32_t FOURCC_LPCM = 0x6C70636D; // 'lpcm' - Linear PCM
+constexpr uint32_t FOURCC_FL32 = 0x666C3332; // 'fl32' - 32-bit float
+constexpr uint32_t FOURCC_MP3  = 0x2E6D7033; // '.mp3' - MP3
+constexpr uint32_t FOURCC_MP4A = 0x6D703461; // 'mp4a' - AAC
+
 // -----------------------------------------------------------------------------
 // Sample (frame) information
 // -----------------------------------------------------------------------------
@@ -85,6 +93,25 @@ struct MovTrack {
                codecFourCC == FOURCC_HAPY ||
                codecFourCC == FOURCC_HAPM ||
                codecFourCC == FOURCC_HAPA;
+    }
+
+    bool isPcm() const {
+        return codecFourCC == FOURCC_SOWT ||
+               codecFourCC == FOURCC_TWOS ||
+               codecFourCC == FOURCC_LPCM ||
+               codecFourCC == FOURCC_FL32;
+    }
+
+    bool isMp3() const {
+        return codecFourCC == FOURCC_MP3;
+    }
+
+    bool isBigEndianPcm() const {
+        return codecFourCC == FOURCC_TWOS;
+    }
+
+    bool isFloatPcm() const {
+        return codecFourCC == FOURCC_FL32;
     }
 
     double getDurationSeconds() const {
