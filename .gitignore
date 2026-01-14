@@ -102,6 +102,7 @@ addons/*
 !addons/tcxBox2d
 !addons/tcxLut
 !addons/tcxOsc
+!addons/tcxTcv
 !addons/tcxTls
 !addons/tcxWebSocket
 
