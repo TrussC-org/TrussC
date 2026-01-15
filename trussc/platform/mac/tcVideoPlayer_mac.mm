@@ -452,6 +452,49 @@
     [self.playerItem stepByCount:-1];
 }
 
+// Helper: Get sample rate index for ADTS header
+static int getADTSSampleRateIndex(int sampleRate) {
+    static const int rates[] = {96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350};
+    for (int i = 0; i < 13; i++) {
+        if (rates[i] == sampleRate) return i;
+    }
+    return 4; // Default to 44100
+}
+
+// Helper: Create ADTS header (7 bytes)
+static void createADTSHeader(uint8_t* header, int frameLength, int sampleRate, int channels, int profile) {
+    int sampleRateIndex = getADTSSampleRateIndex(sampleRate);
+    int channelConfig = channels;
+    int fullLength = frameLength + 7; // ADTS header is 7 bytes
+
+    // ADTS header structure (7 bytes = 56 bits)
+    // Syncword: 12 bits = 0xFFF
+    // ID: 1 bit = 0 (MPEG-4)
+    // Layer: 2 bits = 0
+    // Protection absent: 1 bit = 1 (no CRC)
+    // Profile: 2 bits (0=Main, 1=LC, 2=SSR, 3=LTP) - we use profile-1 for ADTS
+    // Sample rate index: 4 bits
+    // Private: 1 bit = 0
+    // Channel config: 3 bits
+    // Original: 1 bit = 0
+    // Home: 1 bit = 0
+    // Copyright ID: 1 bit = 0
+    // Copyright start: 1 bit = 0
+    // Frame length: 13 bits (includes header)
+    // Buffer fullness: 11 bits = 0x7FF (VBR)
+    // Number of AAC frames - 1: 2 bits = 0
+
+    int adtsProfile = (profile > 0) ? (profile - 1) : 1; // AAC-LC = 1, ADTS uses profile-1
+
+    header[0] = 0xFF; // Syncword high
+    header[1] = 0xF1; // Syncword low (4) + ID (0) + Layer (00) + Protection absent (1)
+    header[2] = ((adtsProfile & 0x03) << 6) | ((sampleRateIndex & 0x0F) << 2) | ((channelConfig >> 2) & 0x01);
+    header[3] = ((channelConfig & 0x03) << 6) | ((fullLength >> 11) & 0x03);
+    header[4] = (fullLength >> 3) & 0xFF;
+    header[5] = ((fullLength & 0x07) << 5) | 0x1F; // Buffer fullness high (0x7FF)
+    header[6] = 0xFC; // Buffer fullness low + frames - 1
+}
+
 - (NSData*)extractAudioData {
     if (!_hasAudioTrack || !self.asset) {
         return nil;
@@ -463,6 +506,13 @@
     }
 
     AVAssetTrack* audioTrack = audioTracks[0];
+
+    // Check if this is AAC - we need to add ADTS headers for AAC
+    BOOL isAAC = (_audioCodecFourCC == kAudioFormatMPEG4AAC ||
+                  _audioCodecFourCC == kAudioFormatMPEG4AAC_HE ||
+                  _audioCodecFourCC == kAudioFormatMPEG4AAC_HE_V2 ||
+                  _audioCodecFourCC == kAudioFormatMPEG4AAC_LD ||
+                  _audioCodecFourCC == kAudioFormatMPEG4AAC_ELD);
 
     // Create asset reader
     NSError* error = nil;
@@ -494,15 +544,55 @@
     NSMutableData* audioData = [[NSMutableData alloc] init];
     CMSampleBufferRef sampleBuffer;
 
+    // Get AAC profile from format description (for ADTS header)
+    int aacProfile = 2; // Default to AAC-LC
+
     while ((sampleBuffer = [trackOutput copyNextSampleBuffer])) {
         CMBlockBufferRef blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer);
         if (blockBuffer) {
-            size_t length = CMBlockBufferGetDataLength(blockBuffer);
-            char* data = (char*)malloc(length);
-            if (data) {
-                CMBlockBufferCopyDataBytes(blockBuffer, 0, length, data);
-                [audioData appendBytes:data length:length];
-                free(data);
+            if (isAAC) {
+                // For AAC: add ADTS header to each packet
+                // Get packet sizes
+                size_t totalLength = 0;
+                char* rawData = nullptr;
+                OSStatus status = CMBlockBufferGetDataPointer(blockBuffer, 0, nullptr, &totalLength, &rawData);
+
+                if (status == noErr && rawData) {
+                    // Get number of samples (packets) in this buffer
+                    CMItemCount sampleCount = CMSampleBufferGetNumSamples(sampleBuffer);
+
+                    if (sampleCount > 1) {
+                        // Multiple packets - get size of each
+                        size_t offset = 0;
+                        for (CMItemIndex i = 0; i < sampleCount; i++) {
+                            size_t packetSize = CMSampleBufferGetSampleSize(sampleBuffer, i);
+
+                            // Create and write ADTS header
+                            uint8_t adtsHeader[7];
+                            createADTSHeader(adtsHeader, (int)packetSize, _audioSampleRate, _audioChannels, aacProfile);
+                            [audioData appendBytes:adtsHeader length:7];
+
+                            // Write AAC frame data
+                            [audioData appendBytes:(rawData + offset) length:packetSize];
+                            offset += packetSize;
+                        }
+                    } else {
+                        // Single packet - treat entire buffer as one packet
+                        uint8_t adtsHeader[7];
+                        createADTSHeader(adtsHeader, (int)totalLength, _audioSampleRate, _audioChannels, aacProfile);
+                        [audioData appendBytes:adtsHeader length:7];
+                        [audioData appendBytes:rawData length:totalLength];
+                    }
+                }
+            } else {
+                // For non-AAC (MP3, etc.): direct copy
+                size_t length = CMBlockBufferGetDataLength(blockBuffer);
+                char* data = (char*)malloc(length);
+                if (data) {
+                    CMBlockBufferCopyDataBytes(blockBuffer, 0, length, data);
+                    [audioData appendBytes:data length:length];
+                    free(data);
+                }
             }
         }
         CFRelease(sampleBuffer);
@@ -513,7 +603,8 @@
         return nil;
     }
 
-    NSLog(@"TCVideoPlayer: Extracted %lu bytes of audio data", (unsigned long)audioData.length);
+    NSLog(@"TCVideoPlayer: Extracted %lu bytes of audio data (ADTS: %s)",
+          (unsigned long)audioData.length, isAAC ? "yes" : "no");
     return audioData;
 }
 
