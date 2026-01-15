@@ -2,6 +2,7 @@
 
 #include <TrussC.h>
 #include <tcxTcv.h>
+#include <thread>
 
 using namespace std;
 using namespace tc;
@@ -21,8 +22,6 @@ public:
         // Compression options
         bool forceAllIFrames = false;
         bool enableSkip = true;
-        bool enableSolid = true;
-        bool enableQuarterBC7 = true;
     };
 
     // Begin encoding with given settings

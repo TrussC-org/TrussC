@@ -28,8 +28,6 @@ bool EncodingSession::begin(const Settings& settings) {
     encoder_.setThreadCount(settings.jobs);
     encoder_.setForceAllIFrames(settings.forceAllIFrames);
     encoder_.setEnableSkip(settings.enableSkip);
-    encoder_.setEnableSolid(settings.enableSolid);
-    encoder_.setEnableQuarterBC7(settings.enableQuarterBC7);
 
     // Start encoder
     if (!encoder_.begin(settings.outputPath,
@@ -42,11 +40,12 @@ bool EncodingSession::begin(const Settings& settings) {
     }
 
     const char* qualityNames[] = {"fast", "balanced", "high"};
+    int threads = settings.jobs > 0 ? settings.jobs : static_cast<int>(std::thread::hardware_concurrency());
     logNotice("EncodingSession") << "Starting encode: " << settings.inputPath;
     logNotice("EncodingSession") << "Output: " << settings.outputPath;
     logNotice("EncodingSession") << "Size: " << source_.getWidth() << "x" << source_.getHeight();
     logNotice("EncodingSession") << "Frames: " << totalFrames_ << " @ " << fps << " fps";
-    logNotice("EncodingSession") << "Quality: " << qualityNames[settings.quality];
+    logNotice("EncodingSession") << "Quality: " << qualityNames[settings.quality] << ", Threads: " << threads;
 
     currentFrame_ = 0;
     progress_ = 0.0f;

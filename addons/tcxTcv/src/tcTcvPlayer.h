@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// tcTcvPlayer.h - TCVC video player (v2: I/P/REF frame support)
+// tcTcvPlayer.h - TCVC video player (v4: GPU layout, zero-copy decode)
 // =============================================================================
 
 #include <TrussC.h>
@@ -9,9 +9,9 @@
 #include <vector>
 #include <cstring>
 #include <unordered_map>
+#include <chrono>
 
 #include "tcTcvEncoder.h"  // For TcvHeader and constants
-#include "impl/bcdec.h"    // For BC7 decompression
 #include <lz4.h>           // For LZ4 decompression
 
 namespace tcx {
@@ -21,18 +21,14 @@ namespace tcx {
 // ---------------------------------------------------------------------------
 class TcvPlayer : public tc::VideoPlayerBase {
 public:
-    // Debug block types for visualization
+    // Debug block types for visualization (v3: Skip or BC7 only)
     enum class DebugBlockType : uint8_t {
         None,    // I-frame or no debug
         Skip,    // Copy from reference
-        Solid,   // Solid color
-        QuarterBC7,  // Quarter BC7
-        BC7      // Full BC7
+        BC7      // BC7 encoded
     };
 
-    TcvPlayer() {
-        bc7enc_compress_block_init();
-    }
+    TcvPlayer() = default;
     ~TcvPlayer() { close(); }
 
     // Non-copyable
@@ -43,6 +39,15 @@ public:
     void setDebug(bool enabled) { debugMode_ = enabled; }
     bool isDebug() const { return debugMode_; }
 
+    // Performance stats
+    double getAvgDecodeTimeMs() const {
+        return decodeCount_ > 0 ? totalDecodeTimeMs_ / decodeCount_ : 0.0;
+    }
+    void resetStats() {
+        totalDecodeTimeMs_ = 0.0;
+        decodeCount_ = 0;
+    }
+
     // Draw debug overlay (call after drawing video)
     void drawDebugOverlay(float x, float y, float scale = 1.0f) {
         if (!debugMode_ || debugBlockTypes_.empty()) return;
@@ -50,39 +55,20 @@ public:
         float blockSize = TCV_BLOCK_SIZE * scale;
 
         tc::noFill();
+        tc::setColor(1.0f, 0.0f, 0.0f, 0.8f);  // Red for BC7 blocks
 
         for (int by = 0; by < blocksY_; by++) {
             for (int bx = 0; bx < blocksX_; bx++) {
                 int idx = by * blocksX_ + bx;
-                DebugBlockType type = debugBlockTypes_[idx];
-
-                // Skip None and Skip types (Skip is obvious from context)
-                if (type == DebugBlockType::None || type == DebugBlockType::Skip) continue;
+                // Only draw BC7 blocks (Skip blocks are unchanged from reference)
+                if (debugBlockTypes_[idx] != DebugBlockType::BC7) continue;
 
                 float rx = x + bx * blockSize;
                 float ry = y + by * blockSize;
-
-                // Set color based on block type
-                switch (type) {
-                    case DebugBlockType::Solid:
-                        tc::setColor(0.0f, 1.0f, 0.0f, 0.8f);  // Green for solid
-                        break;
-                    case DebugBlockType::QuarterBC7:
-                        tc::setColor(1.0f, 1.0f, 0.0f, 0.8f);  // Yellow for Q-BC7
-                        break;
-                    case DebugBlockType::BC7:
-                        tc::setColor(1.0f, 0.0f, 0.0f, 0.8f);  // Red for BC7
-                        break;
-                    default:
-                        continue;
-                }
-
-                // Draw 1px rectangle outline
                 tc::drawRect(rx + 0.5f, ry + 0.5f, blockSize - 1, blockSize - 1);
             }
         }
 
-        // Reset drawing state
         tc::fill();
         tc::setColor(1.0f);
     }
@@ -135,7 +121,7 @@ public:
         bc7Buffer_.resize(bc7FrameSize_);
 
         // Allocate LZ4 decompression buffers
-        lz4CompressedBuffer_.resize(bc7FrameSize_ + 1024);  // Compressed should be smaller
+        lz4CompressedBuffer_.resize(bc7FrameSize_ + 1024);
         lz4DecompressedBuffer_.resize(bc7FrameSize_ + 1024);
 
         // Allocate debug block types buffer
@@ -274,7 +260,7 @@ protected:
     }
 
     void setVolumeImpl(float vol) override {
-        // TODO: Audio support in Phase 4
+        // TODO: Audio support
     }
 
     void setSpeedImpl(float speed) override {
@@ -303,9 +289,9 @@ private:
     struct FrameIndexEntry {
         std::streampos offset;
         uint8_t packetType;
-        uint32_t refFrame;      // For P/REF frames
-        uint32_t dataSize;      // Uncompressed size (or data size for non-LZ4)
-        uint32_t compressedSize; // LZ4 compressed size (0 for non-LZ4)
+        uint32_t refFrame;       // For P/REF frames
+        uint32_t dataSize;       // Uncompressed size
+        uint32_t compressedSize; // LZ4 compressed size
     };
     std::vector<FrameIndexEntry> frameIndex_;
 
@@ -319,6 +305,10 @@ private:
     // Debug mode
     bool debugMode_ = false;
     std::vector<DebugBlockType> debugBlockTypes_;
+
+    // Performance stats
+    double totalDecodeTimeMs_ = 0.0;
+    int decodeCount_ = 0;
 
     // Build index of frame offsets for seeking
     void buildFrameIndex() {
@@ -336,21 +326,15 @@ private:
             file_.read(reinterpret_cast<char*>(&entry.packetType), 1);
 
             if (entry.packetType == TCV_PACKET_I_FRAME) {
+                // v3: I-frame always LZ4 [type][dataSize][compSize][data]
                 file_.read(reinterpret_cast<char*>(&entry.dataSize), 4);
-                entry.refFrame = 0;
-                file_.seekg(entry.dataSize, std::ios::cur);
-            } else if (entry.packetType == TCV_PACKET_I_FRAME_LZ4) {
-                file_.read(reinterpret_cast<char*>(&entry.dataSize), 4);  // uncompressed
                 file_.read(reinterpret_cast<char*>(&entry.compressedSize), 4);
                 entry.refFrame = 0;
                 file_.seekg(entry.compressedSize, std::ios::cur);
             } else if (entry.packetType == TCV_PACKET_P_FRAME) {
+                // v3: P-frame always LZ4 [type][refFrame][dataSize][compSize][data]
                 file_.read(reinterpret_cast<char*>(&entry.refFrame), 4);
                 file_.read(reinterpret_cast<char*>(&entry.dataSize), 4);
-                file_.seekg(entry.dataSize, std::ios::cur);
-            } else if (entry.packetType == TCV_PACKET_P_FRAME_LZ4) {
-                file_.read(reinterpret_cast<char*>(&entry.refFrame), 4);
-                file_.read(reinterpret_cast<char*>(&entry.dataSize), 4);  // uncompressed
                 file_.read(reinterpret_cast<char*>(&entry.compressedSize), 4);
                 file_.seekg(entry.compressedSize, std::ios::cur);
             } else if (entry.packetType == TCV_PACKET_REF_FRAME) {
@@ -377,9 +361,7 @@ private:
 
         // Load from file
         const auto& entry = frameIndex_[frameNum];
-        bool isIFrame = (entry.packetType == TCV_PACKET_I_FRAME ||
-                         entry.packetType == TCV_PACKET_I_FRAME_LZ4);
-        if (!isIFrame) {
+        if (entry.packetType != TCV_PACKET_I_FRAME) {
             tc::logError("TcvPlayer") << "Frame " << frameNum << " is not an I-frame";
             static std::vector<uint8_t> empty;
             return empty;
@@ -393,37 +375,26 @@ private:
         uint8_t packetType;
         file_.read(reinterpret_cast<char*>(&packetType), 1);
 
-        // Get pointer to block command data
-        const uint8_t* blockData = nullptr;
+        // Read sizes and decompress (v3: always LZ4)
+        uint32_t uncompressedSize, compressedSize;
+        file_.read(reinterpret_cast<char*>(&uncompressedSize), 4);
+        file_.read(reinterpret_cast<char*>(&compressedSize), 4);
 
-        if (packetType == TCV_PACKET_I_FRAME_LZ4) {
-            // Read sizes and decompress
-            uint32_t uncompressedSize, compressedSize;
-            file_.read(reinterpret_cast<char*>(&uncompressedSize), 4);
-            file_.read(reinterpret_cast<char*>(&compressedSize), 4);
-
-            file_.read(lz4CompressedBuffer_.data(), compressedSize);
-            int decompressed = LZ4_decompress_safe(
-                lz4CompressedBuffer_.data(),
-                lz4DecompressedBuffer_.data(),
-                static_cast<int>(compressedSize),
-                static_cast<int>(lz4DecompressedBuffer_.size())
-            );
-            if (decompressed != static_cast<int>(uncompressedSize)) {
-                tc::logError("TcvPlayer") << "LZ4 decompression failed for I-frame " << frameNum;
-                static std::vector<uint8_t> empty;
-                return empty;
-            }
-            blockData = reinterpret_cast<const uint8_t*>(lz4DecompressedBuffer_.data());
-        } else {
-            // Read uncompressed data
-            uint32_t dataSize;
-            file_.read(reinterpret_cast<char*>(&dataSize), 4);
-            file_.read(lz4DecompressedBuffer_.data(), dataSize);
-            blockData = reinterpret_cast<const uint8_t*>(lz4DecompressedBuffer_.data());
+        file_.read(lz4CompressedBuffer_.data(), compressedSize);
+        int decompressed = LZ4_decompress_safe(
+            lz4CompressedBuffer_.data(),
+            lz4DecompressedBuffer_.data(),
+            static_cast<int>(compressedSize),
+            static_cast<int>(lz4DecompressedBuffer_.size())
+        );
+        if (decompressed != static_cast<int>(uncompressedSize)) {
+            tc::logError("TcvPlayer") << "LZ4 decompression failed for I-frame " << frameNum;
+            static std::vector<uint8_t> empty;
+            return empty;
         }
 
-        // Parse block commands from buffer
+        // Parse BC7 block data from buffer
+        const uint8_t* blockData = reinterpret_cast<const uint8_t*>(lz4DecompressedBuffer_.data());
         decodeIFrameFromBuffer(blockData, bc7Result.data());
 
         // Cache it (limit cache size to avoid memory issues)
@@ -435,197 +406,19 @@ private:
         return iFrameCache_[frameNum];
     }
 
-    // Decode I-frame block commands from buffer to BC7 output
+    // Decode I-frame BC7 blocks from buffer (v4: already GPU layout, just memcpy)
     void decodeIFrameFromBuffer(const uint8_t* data, uint8_t* bc7Output) {
-        int blockIdx = 0;
-        size_t offset = 0;
-
-        while (blockIdx < totalBlocks_) {
-            uint8_t cmd = data[offset++];
-            uint8_t blockType = cmd & TCV_BLOCK_TYPE_MASK;
-            int runLength = (cmd & TCV_BLOCK_RUN_MASK) + 1;
-
-            // Read SOLID color once for entire run
-            uint32_t solidColor = 0;
-            if (blockType == TCV_BLOCK_SOLID) {
-                std::memcpy(&solidColor, data + offset, 4);
-                offset += 4;
-            }
-
-            for (int i = 0; i < runLength && blockIdx < totalBlocks_; i++, blockIdx++) {
-                int bx16 = blockIdx % blocksX_;
-                int by16 = blockIdx / blocksX_;
-
-                if (blockType == TCV_BLOCK_SOLID) {
-                    writeIFrameSolidBlock(bc7Output, bx16, by16, solidColor);
-                } else if (blockType == TCV_BLOCK_BC7_Q) {
-                    writeIFrameQuarterBC7(bc7Output, bx16, by16, data + offset);
-                    offset += 16;
-                } else if (blockType == TCV_BLOCK_BC7) {
-                    writeIFrameBC7Block(bc7Output, bx16, by16, data + offset);
-                    offset += 256;
-                }
-            }
-        }
+        // v4: Data is already in GPU layout (4x4 blocks row-major)
+        std::memcpy(bc7Output, data, bc7FrameSize_);
     }
 
-    // Decode I-frame with block commands (for display + debug)
-    void decodeIFrameWithBlocks(int frameNum, const FrameIndexEntry& entry) {
-        // Check if already cached
-        auto it = iFrameCache_.find(frameNum);
-        if (it != iFrameCache_.end()) {
-            // Use cached data
-            std::memcpy(bc7Buffer_.data(), it->second.data(), bc7FrameSize_);
-            // Still need to parse for debug info
-            if (!debugMode_) return;
-        }
-
-        // Need to decode from file
-        file_.seekg(entry.offset);
-        uint8_t packetType;
-        file_.read(reinterpret_cast<char*>(&packetType), 1);
-
-        // Get pointer to block command data (decompress if LZ4)
-        const uint8_t* blockData = nullptr;
-
-        if (packetType == TCV_PACKET_I_FRAME_LZ4) {
-            uint32_t uncompressedSize, compressedSize;
-            file_.read(reinterpret_cast<char*>(&uncompressedSize), 4);
-            file_.read(reinterpret_cast<char*>(&compressedSize), 4);
-            file_.read(lz4CompressedBuffer_.data(), compressedSize);
-            int decompressed = LZ4_decompress_safe(
-                lz4CompressedBuffer_.data(),
-                lz4DecompressedBuffer_.data(),
-                static_cast<int>(compressedSize),
-                static_cast<int>(lz4DecompressedBuffer_.size())
-            );
-            if (decompressed != static_cast<int>(uncompressedSize)) {
-                tc::logError("TcvPlayer") << "LZ4 decompression failed in decodeIFrameWithBlocks";
-                return;
-            }
-            blockData = reinterpret_cast<const uint8_t*>(lz4DecompressedBuffer_.data());
-        } else {
-            uint32_t dataSize;
-            file_.read(reinterpret_cast<char*>(&dataSize), 4);
-            file_.read(lz4DecompressedBuffer_.data(), dataSize);
-            blockData = reinterpret_cast<const uint8_t*>(lz4DecompressedBuffer_.data());
-        }
-
-        // If not cached, we'll build the BC7 buffer while parsing
-        bool needBuild = (it == iFrameCache_.end());
-
-        size_t offset = 0;
-        int blockIdx = 0;
-        while (blockIdx < totalBlocks_) {
-            uint8_t cmd = blockData[offset++];
-
-            uint8_t blockType = cmd & TCV_BLOCK_TYPE_MASK;
-            int runLength = (cmd & TCV_BLOCK_RUN_MASK) + 1;
-
-            // Read SOLID color once for entire run
-            uint32_t solidColor = 0;
-            if (blockType == TCV_BLOCK_SOLID) {
-                std::memcpy(&solidColor, blockData + offset, 4);
-                offset += 4;
-            }
-
-            for (int i = 0; i < runLength && blockIdx < totalBlocks_; i++, blockIdx++) {
-                int bx16 = blockIdx % blocksX_;
-                int by16 = blockIdx / blocksX_;
-
-                if (blockType == TCV_BLOCK_SOLID) {
-                    if (needBuild) writeSolidBlockToGpuLayout(bx16, by16, solidColor);
-                    if (debugMode_) debugBlockTypes_[blockIdx] = DebugBlockType::Solid;
-                } else if (blockType == TCV_BLOCK_BC7_Q) {
-                    if (needBuild) writeQuarterBC7ToGpuLayout(bx16, by16, blockData + offset);
-                    if (debugMode_) debugBlockTypes_[blockIdx] = DebugBlockType::QuarterBC7;
-                    offset += 16;
-                } else if (blockType == TCV_BLOCK_BC7) {
-                    if (needBuild) writeBlockToGpuLayout(bx16, by16, blockData + offset);
-                    if (debugMode_) debugBlockTypes_[blockIdx] = DebugBlockType::BC7;
-                    offset += 256;
-                }
-            }
-        }
-
-        // Cache the result if not already cached
-        if (needBuild) {
-            if (iFrameCache_.size() >= TCV_IFRAME_BUFFER_SIZE) {
-                iFrameCache_.erase(iFrameCache_.begin());
-            }
-            iFrameCache_[frameNum] = std::vector<uint8_t>(bc7Buffer_.begin(), bc7Buffer_.end());
-        }
-    }
-
-    // Helper functions for I-frame decoding (write to arbitrary buffer)
-    void writeIFrameBC7Block(uint8_t* buffer, int bx16, int by16, const uint8_t* bc7Data) {
-        int bc7BlocksX = blocksX_ * 4;
-        for (int by4 = 0; by4 < 4; by4++) {
-            for (int bx4 = 0; bx4 < 4; bx4++) {
-                int gpuX = bx16 * 4 + bx4;
-                int gpuY = by16 * 4 + by4;
-                int gpuIdx = gpuY * bc7BlocksX + gpuX;
-                std::memcpy(buffer + gpuIdx * 16, bc7Data + (by4 * 4 + bx4) * 16, 16);
-            }
-        }
-    }
-
-    void writeIFrameSolidBlock(uint8_t* buffer, int bx16, int by16, uint32_t color) {
-        uint8_t block4x4[64];
-        for (int i = 0; i < 16; i++) {
-            std::memcpy(block4x4 + i * 4, &color, 4);
-        }
-
-        bc7enc_compress_block_params params;
-        bc7enc_compress_block_params_init(&params);
-        params.m_max_partitions = 0;
-        params.m_uber_level = 0;
-
-        int bc7BlocksX = blocksX_ * 4;
-        for (int by4 = 0; by4 < 4; by4++) {
-            for (int bx4 = 0; bx4 < 4; bx4++) {
-                int gpuX = bx16 * 4 + bx4;
-                int gpuY = by16 * 4 + by4;
-                int gpuIdx = gpuY * bc7BlocksX + gpuX;
-                bc7enc_compress_block(buffer + gpuIdx * 16, block4x4, &params);
-            }
-        }
-    }
-
-    void writeIFrameQuarterBC7(uint8_t* buffer, int bx16, int by16, const uint8_t* bc7Data) {
-        uint8_t decoded4x4[64];
-        bcdec_bc7(bc7Data, decoded4x4, 4 * 4);
-
-        bc7enc_compress_block_params params;
-        bc7enc_compress_block_params_init(&params);
-        params.m_max_partitions = 0;
-        params.m_uber_level = 0;
-
-        int bc7BlocksX = blocksX_ * 4;
-        for (int dy = 0; dy < 4; dy++) {
-            for (int dx = 0; dx < 4; dx++) {
-                const uint8_t* pixel = decoded4x4 + (dy * 4 + dx) * 4;
-                uint8_t block4x4[64];
-                for (int i = 0; i < 16; i++) {
-                    std::memcpy(block4x4 + i * 4, pixel, 4);
-                }
-
-                int gpuX = bx16 * 4 + dx;
-                int gpuY = by16 * 4 + dy;
-                int gpuIdx = gpuY * bc7BlocksX + gpuX;
-                bc7enc_compress_block(buffer + gpuIdx * 16, block4x4, &params);
-            }
-        }
-    }
-
-    // Write a 16x16 block (16 4x4 blocks) to GPU layout buffer
-    // bx16, by16: 16x16 block coordinates
-    void writeBlockToGpuLayout(int bx16, int by16, const uint8_t* bc7Data) {
+    // Copy a 16x16 block (256 bytes) directly to GPU buffer position
+    // v4: Data is already in GPU layout order within the 256-byte block
+    void copyBlockToGpuPosition(int bx16, int by16, const uint8_t* bc7Data) {
         int bc7BlocksX = blocksX_ * 4;  // 4x4 blocks per row
 
         for (int by4 = 0; by4 < 4; by4++) {
             for (int bx4 = 0; bx4 < 4; bx4++) {
-                // GPU coordinates for this 4x4 block
                 int gpuX = bx16 * 4 + bx4;
                 int gpuY = by16 * 4 + by4;
                 int gpuIdx = gpuY * bc7BlocksX + gpuX;
@@ -638,70 +431,10 @@ private:
         }
     }
 
-    // Upscale quarter BC7 (4x4 BC7 block) to 16x16 and write to GPU layout
-    void writeQuarterBC7ToGpuLayout(int bx16, int by16, const uint8_t* bc7Data) {
-        // Decode the single BC7 block to 4x4 pixels (pitch = 4 pixels * 4 bytes)
-        uint8_t decoded4x4[64];
-        bcdec_bc7(bc7Data, decoded4x4, 4 * 4);
-
-        bc7enc_compress_block_params params;
-        bc7enc_compress_block_params_init(&params);
-        params.m_max_partitions = 0;  // Fast for solid blocks
-        params.m_uber_level = 0;
-
-        int bc7BlocksX = blocksX_ * 4;
-
-        // Each pixel in 4x4 becomes a 4x4 region of solid color
-        for (int dy = 0; dy < 4; dy++) {
-            for (int dx = 0; dx < 4; dx++) {
-                // Get the color from decoded pixel
-                const uint8_t* pixel = decoded4x4 + (dy * 4 + dx) * 4;
-
-                // Create solid 4x4 block
-                uint8_t block4x4[64];
-                for (int i = 0; i < 16; i++) {
-                    std::memcpy(block4x4 + i * 4, pixel, 4);
-                }
-
-                // Encode and write to GPU position
-                int gpuX = bx16 * 4 + dx;
-                int gpuY = by16 * 4 + dy;
-                int gpuIdx = gpuY * bc7BlocksX + gpuX;
-
-                bc7enc_compress_block(bc7Buffer_.data() + gpuIdx * 16, block4x4, &params);
-            }
-        }
-    }
-
-    // Encode solid color to BC7 and write to GPU layout
-    void writeSolidBlockToGpuLayout(int bx16, int by16, uint32_t color) {
-        // Create a 4x4 block of solid color
-        uint8_t block4x4[64];
-        for (int i = 0; i < 16; i++) {
-            std::memcpy(block4x4 + i * 4, &color, 4);
-        }
-
-        bc7enc_compress_block_params params;
-        bc7enc_compress_block_params_init(&params);
-        params.m_max_partitions = 0;
-        params.m_uber_level = 0;
-
-        int bc7BlocksX = blocksX_ * 4;
-
-        // Encode and write each 4x4 block to correct GPU position
-        for (int by4 = 0; by4 < 4; by4++) {
-            for (int bx4 = 0; bx4 < 4; bx4++) {
-                int gpuX = bx16 * 4 + bx4;
-                int gpuY = by16 * 4 + by4;
-                int gpuIdx = gpuY * bc7BlocksX + gpuX;
-
-                bc7enc_compress_block(bc7Buffer_.data() + gpuIdx * 16, block4x4, &params);
-            }
-        }
-    }
-
     // Decode a specific frame
     void decodeFrame(int frameNum) {
+        auto startTime = std::chrono::high_resolution_clock::now();
+
         if (frameNum < 0 || frameNum >= static_cast<int>(frameIndex_.size())) {
             return;
         }
@@ -713,60 +446,66 @@ private:
             std::fill(debugBlockTypes_.begin(), debugBlockTypes_.end(), DebugBlockType::None);
         }
 
-        if (entry.packetType == TCV_PACKET_I_FRAME ||
-            entry.packetType == TCV_PACKET_I_FRAME_LZ4) {
-            // Decode I-frame with block commands (same format as P-frame but no SKIP)
-            decodeIFrameWithBlocks(frameNum, entry);
+        if (entry.packetType == TCV_PACKET_I_FRAME) {
+            // I-frame: upload directly from cache (no intermediate copy)
+            const auto& iData = getIFrameData(frameNum);
+            if (iData.size() == bc7FrameSize_) {
+                texture_.updateCompressed(iData.data(), bc7FrameSize_);
+                // Record decode time and return early
+                auto endTime = std::chrono::high_resolution_clock::now();
+                double ms = std::chrono::duration<double, std::milli>(endTime - startTime).count();
+                totalDecodeTimeMs_ += ms;
+                decodeCount_++;
+                return;
+            }
         } else if (entry.packetType == TCV_PACKET_REF_FRAME) {
-            // REF-frame: copy from referenced I-frame
+            // REF-frame: upload directly from referenced I-frame cache
             const auto& refData = getIFrameData(entry.refFrame);
             if (refData.size() == bc7FrameSize_) {
-                std::memcpy(bc7Buffer_.data(), refData.data(), bc7FrameSize_);
+                texture_.updateCompressed(refData.data(), bc7FrameSize_);
+                // For debug: REF-frame = all Skip
+                if (debugMode_) {
+                    std::fill(debugBlockTypes_.begin(), debugBlockTypes_.end(), DebugBlockType::Skip);
+                }
+                // Record decode time and return early
+                auto endTime = std::chrono::high_resolution_clock::now();
+                double ms = std::chrono::duration<double, std::milli>(endTime - startTime).count();
+                totalDecodeTimeMs_ += ms;
+                decodeCount_++;
+                return;
             }
-            // For debug: REF-frame = all Skip (copy from I-frame)
-            if (debugMode_) {
-                std::fill(debugBlockTypes_.begin(), debugBlockTypes_.end(), DebugBlockType::Skip);
-            }
-        } else if (entry.packetType == TCV_PACKET_P_FRAME ||
-                   entry.packetType == TCV_PACKET_P_FRAME_LZ4) {
+        } else if (entry.packetType == TCV_PACKET_P_FRAME) {
             // P-frame: start with reference (GPU layout), apply deltas
             const auto& refData = getIFrameData(entry.refFrame);
             if (refData.size() == bc7FrameSize_) {
                 std::memcpy(bc7Buffer_.data(), refData.data(), bc7FrameSize_);
             }
 
-            // Read and apply block commands (decompress if LZ4)
+            // Read and decompress block commands (v3: always LZ4)
             file_.seekg(entry.offset);
             uint8_t packetType;
             uint32_t refFrame;
+            uint32_t uncompressedSize, compressedSize;
             file_.read(reinterpret_cast<char*>(&packetType), 1);
             file_.read(reinterpret_cast<char*>(&refFrame), 4);
+            file_.read(reinterpret_cast<char*>(&uncompressedSize), 4);
+            file_.read(reinterpret_cast<char*>(&compressedSize), 4);
 
-            const uint8_t* blockData = nullptr;
-
-            if (packetType == TCV_PACKET_P_FRAME_LZ4) {
-                uint32_t uncompressedSize, compressedSize;
-                file_.read(reinterpret_cast<char*>(&uncompressedSize), 4);
-                file_.read(reinterpret_cast<char*>(&compressedSize), 4);
-                file_.read(lz4CompressedBuffer_.data(), compressedSize);
-                int decompressed = LZ4_decompress_safe(
-                    lz4CompressedBuffer_.data(),
-                    lz4DecompressedBuffer_.data(),
-                    static_cast<int>(compressedSize),
-                    static_cast<int>(lz4DecompressedBuffer_.size())
-                );
-                if (decompressed != static_cast<int>(uncompressedSize)) {
-                    tc::logError("TcvPlayer") << "LZ4 decompression failed for P-frame " << frameNum;
-                    return;
-                }
-                blockData = reinterpret_cast<const uint8_t*>(lz4DecompressedBuffer_.data());
-            } else {
-                uint32_t dataSize;
-                file_.read(reinterpret_cast<char*>(&dataSize), 4);
-                file_.read(lz4DecompressedBuffer_.data(), dataSize);
-                blockData = reinterpret_cast<const uint8_t*>(lz4DecompressedBuffer_.data());
+            file_.read(lz4CompressedBuffer_.data(), compressedSize);
+            int decompressed = LZ4_decompress_safe(
+                lz4CompressedBuffer_.data(),
+                lz4DecompressedBuffer_.data(),
+                static_cast<int>(compressedSize),
+                static_cast<int>(lz4DecompressedBuffer_.size())
+            );
+            if (decompressed != static_cast<int>(uncompressedSize)) {
+                tc::logError("TcvPlayer") << "LZ4 decompression failed for P-frame " << frameNum;
+                return;
             }
 
+            const uint8_t* blockData = reinterpret_cast<const uint8_t*>(lz4DecompressedBuffer_.data());
+
+            // Parse block commands (v3: SKIP or BC7 only)
             size_t offset = 0;
             int blockIdx = 0;
             while (blockIdx < totalBlocks_) {
@@ -775,13 +514,6 @@ private:
                 uint8_t blockType = cmd & TCV_BLOCK_TYPE_MASK;
                 int runLength = (cmd & TCV_BLOCK_RUN_MASK) + 1;
 
-                // Read SOLID color once for entire run
-                uint32_t solidColor = 0;
-                if (blockType == TCV_BLOCK_SOLID) {
-                    std::memcpy(&solidColor, blockData + offset, 4);
-                    offset += 4;
-                }
-
                 for (int i = 0; i < runLength && blockIdx < totalBlocks_; i++, blockIdx++) {
                     int bx16 = blockIdx % blocksX_;
                     int by16 = blockIdx / blocksX_;
@@ -789,15 +521,8 @@ private:
                     if (blockType == TCV_BLOCK_SKIP) {
                         // Keep reference data (already copied in GPU layout)
                         if (debugMode_) debugBlockTypes_[blockIdx] = DebugBlockType::Skip;
-                    } else if (blockType == TCV_BLOCK_SOLID) {
-                        writeSolidBlockToGpuLayout(bx16, by16, solidColor);
-                        if (debugMode_) debugBlockTypes_[blockIdx] = DebugBlockType::Solid;
-                    } else if (blockType == TCV_BLOCK_BC7_Q) {
-                        writeQuarterBC7ToGpuLayout(bx16, by16, blockData + offset);
-                        offset += 16;
-                        if (debugMode_) debugBlockTypes_[blockIdx] = DebugBlockType::QuarterBC7;
-                    } else if (blockType == TCV_BLOCK_BC7) {
-                        writeBlockToGpuLayout(bx16, by16, blockData + offset);
+                    } else {  // TCV_BLOCK_BC7
+                        copyBlockToGpuPosition(bx16, by16, blockData + offset);
                         offset += 256;
                         if (debugMode_) debugBlockTypes_[blockIdx] = DebugBlockType::BC7;
                     }
@@ -807,6 +532,12 @@ private:
 
         // Upload to GPU texture
         texture_.updateCompressed(bc7Buffer_.data(), bc7FrameSize_);
+
+        // Record decode time
+        auto endTime = std::chrono::high_resolution_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(endTime - startTime).count();
+        totalDecodeTimeMs_ += ms;
+        decodeCount_++;
     }
 };
 

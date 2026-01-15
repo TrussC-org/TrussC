@@ -4,6 +4,14 @@ void tcApp::setup() {
     logNotice("TcvPlayer") << "TCV Player - Phase 1";
     logNotice("TcvPlayer") << "Drag & drop a .tcv file or press O to open";
 
+    // Check command line arguments first
+    int argc = getArgCount();
+    char** argv = getArgValues();
+    if (argc > 1) {
+        loadVideo(argv[1]);
+        return;
+    }
+
     // Try to load sample.tcv from data folder
     string samplePath = getDataPath("sample.tcv");
     if (filesystem::exists(samplePath)) {
@@ -66,6 +74,12 @@ void tcApp::draw() {
     string info = string(fpsStr) + "  |  Frame: " + to_string(player_.getCurrentFrame()) + " / " + to_string(player_.getTotalFrames());
     info += "  |  Time: " + to_string(static_cast<int>(player_.getCurrentTime())) + "s / " + to_string(static_cast<int>(player_.getDuration())) + "s";
     info += "  |  " + string(player_.isPlaying() ? "Playing" : (player_.isPaused() ? "Paused" : "Stopped"));
+
+    // Show average decode time
+    char decodeStr[32];
+    snprintf(decodeStr, sizeof(decodeStr), "  |  Decode: %.2fms", player_.getAvgDecodeTimeMs());
+    info += decodeStr;
+
     drawBitmapString(info, 20, infoY);
 
     string helpText = "SPACE: Play/Pause  |  LEFT/RIGHT: Prev/Next frame  |  R: Restart  |  D: Debug";
@@ -73,6 +87,28 @@ void tcApp::draw() {
         helpText += " [ON - Green:Solid, Yellow:Q-BC7, Red:BC7]";
     }
     drawBitmapString(helpText, 20, infoY + 15);
+
+    // Draw seekbar
+    float seekbarY = infoY + 35;
+    float seekbarH = 24;
+    float seekbarMargin = 20;
+    seekbarRect_ = Rect(seekbarMargin, seekbarY, getWindowWidth() - seekbarMargin * 2, seekbarH);
+
+    // Background
+    setColor(0.25f);
+    drawRect(seekbarRect_.x, seekbarRect_.y, seekbarRect_.width, seekbarRect_.height);
+
+    // Progress
+    float progress = static_cast<float>(player_.getCurrentFrame()) / max(1, player_.getTotalFrames() - 1);
+    setColor(0.4f, 0.6f, 0.9f);
+    drawRect(seekbarRect_.x, seekbarRect_.y, seekbarRect_.width * progress, seekbarRect_.height);
+
+    // Handle
+    float handleX = seekbarRect_.x + seekbarRect_.width * progress;
+    float handleW = 12;
+    float handleH = seekbarH + 6;
+    setColor(1.0f);
+    drawRect(handleX - handleW / 2, seekbarRect_.y - 3, handleW, handleH);
 }
 
 void tcApp::keyPressed(int key) {
@@ -130,4 +166,51 @@ void tcApp::loadVideo(const string& path) {
         loaded_ = false;
         logError("TcvPlayer") << "Failed to load: " << path;
     }
+}
+
+void tcApp::mousePressed(Vec2 pos, int button) {
+    if (!loaded_ || button != 0) return;
+
+    if (isInsideSeekbar(pos.x, pos.y)) {
+        isDraggingSeekbar_ = true;
+        wasPlayingBeforeDrag_ = player_.isPlaying();
+        if (wasPlayingBeforeDrag_) {
+            player_.togglePause();
+        }
+        updateSeekbarFromMouse(pos.x);
+    }
+}
+
+void tcApp::mouseDragged(Vec2 pos, int button) {
+    if (!loaded_ || button != 0) return;
+
+    if (isDraggingSeekbar_) {
+        updateSeekbarFromMouse(pos.x);
+    }
+}
+
+void tcApp::mouseReleased(Vec2 pos, int button) {
+    if (!loaded_ || button != 0) return;
+
+    if (isDraggingSeekbar_) {
+        isDraggingSeekbar_ = false;
+        if (wasPlayingBeforeDrag_) {
+            player_.play();
+        }
+    }
+}
+
+bool tcApp::isInsideSeekbar(float x, float y) {
+    // Expand hit area vertically for easier clicking
+    float expandedY = seekbarRect_.y - 5;
+    float expandedH = seekbarRect_.height + 10;
+    return x >= seekbarRect_.x && x <= seekbarRect_.x + seekbarRect_.width &&
+           y >= expandedY && y <= expandedY + expandedH;
+}
+
+void tcApp::updateSeekbarFromMouse(float x) {
+    float relX = (x - seekbarRect_.x) / seekbarRect_.width;
+    relX = max(0.0f, min(1.0f, relX));
+    int frame = static_cast<int>(relX * (player_.getTotalFrames() - 1));
+    player_.setFrame(frame);
 }

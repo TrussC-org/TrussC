@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// tcTcvEncoder.h - TCVC video encoder (v2: I/P frame with block optimization)
+// tcTcvEncoder.h - TCVC video encoder (v4: GPU layout, parallel encoding)
 // =============================================================================
 
 #include <TrussC.h>
@@ -24,26 +24,20 @@ namespace tcx {
 // TCVC File Format Constants
 // ---------------------------------------------------------------------------
 constexpr uint32_t TCV_SIGNATURE = 0x56435654;  // "TCVC" little-endian
-constexpr uint16_t TCV_VERSION = 2;             // v2: I/P frame with block optimization
+constexpr uint16_t TCV_VERSION = 4;             // v4: GPU layout (no conversion on decode)
 constexpr uint16_t TCV_HEADER_SIZE = 64;
 constexpr uint16_t TCV_BLOCK_SIZE = 16;         // 16x16 pixel blocks
 
-// Packet types (uncompressed)
-constexpr uint8_t TCV_PACKET_I_FRAME   = 0x01;  // I-frame: full BC7 data
-constexpr uint8_t TCV_PACKET_P_FRAME   = 0x02;  // P-frame: reference + block commands
-constexpr uint8_t TCV_PACKET_REF_FRAME = 0x03;  // REF-frame: exact duplicate, reference only
+// Packet types
+constexpr uint8_t TCV_PACKET_I_FRAME   = 0x01;  // I-frame: BC7 block data + LZ4
+constexpr uint8_t TCV_PACKET_P_FRAME   = 0x02;  // P-frame: SKIP/BC7 commands + LZ4
+constexpr uint8_t TCV_PACKET_REF_FRAME = 0x03;  // REF-frame: exact duplicate reference
 
-// Packet types (LZ4 compressed)
-constexpr uint8_t TCV_PACKET_I_FRAME_LZ4 = 0x11;  // I-frame with LZ4 compression
-constexpr uint8_t TCV_PACKET_P_FRAME_LZ4 = 0x12;  // P-frame with LZ4 compression
-
-// Block command types (bits 7-6 of command byte)
-constexpr uint8_t TCV_BLOCK_SKIP    = 0x00;     // Same as reference frame (00xxxxxx)
-constexpr uint8_t TCV_BLOCK_SOLID   = 0x40;     // Single color (01xxxxxx)
-constexpr uint8_t TCV_BLOCK_BC7     = 0x80;     // BC7 encoded (10xxxxxx)
-constexpr uint8_t TCV_BLOCK_BC7_Q   = 0xC0;     // Quarter BC7: 4x4 upscaled to 16x16 (11xxxxxx)
-constexpr uint8_t TCV_BLOCK_TYPE_MASK = 0xC0;   // Mask for type bits
-constexpr uint8_t TCV_BLOCK_RUN_MASK  = 0x3F;   // Mask for run length (0-63 = 1-64)
+// Block command types (bit 7 of command byte)
+constexpr uint8_t TCV_BLOCK_SKIP    = 0x00;     // Same as reference frame (0xxxxxxx)
+constexpr uint8_t TCV_BLOCK_BC7     = 0x80;     // BC7 encoded (1xxxxxxx)
+constexpr uint8_t TCV_BLOCK_TYPE_MASK = 0x80;   // Mask for type bit
+constexpr uint8_t TCV_BLOCK_RUN_MASK  = 0x7F;   // Mask for run length (0-127 = 1-128)
 
 // I-frame buffer size
 constexpr int TCV_IFRAME_BUFFER_SIZE = 10;
@@ -166,12 +160,7 @@ public:
         statPFrames_ = 0;
         statRefFrames_ = 0;
         statSkipBlocks_ = 0;
-        statSolidBlocks_ = 0;
-        statQuarterBC7Blocks_ = 0;
         statBc7Blocks_ = 0;
-
-        // Initialize QuarterBC7 cache
-        quarterBC7Cache_.resize(totalBlocks_);
 
         // Initialize LZ4 buffer (worst case: slightly larger than input)
         lz4Buffer_.resize(LZ4_compressBound(static_cast<int>(bc7BufferSize + 1024)));
@@ -185,13 +174,9 @@ public:
                                     << " @ " << fps << " fps (" << actualThreads << " threads)";
 
         if (forceAllIFrames_) {
-            tc::logNotice("TcvEncoder") << "Mode: All I-frames (no compression)";
+            tc::logNotice("TcvEncoder") << "Mode: All I-frames";
         } else {
-            tc::logNotice("TcvEncoder") << "Mode: I/P frames, SKIP="
-                                        << (enableSkip_ ? "on" : "off")
-                                        << ", SOLID=" << (enableSolid_ ? "on" : "off")
-                                        << ", Q-BC7=" << (enableQuarterBC7_ ? "on" : "off")
-                                        << ", LZ4=" << (enableLZ4_ ? "on" : "off");
+            tc::logNotice("TcvEncoder") << "Mode: I/P frames + LZ4";
         }
 
         return true;
@@ -255,7 +240,7 @@ public:
                         int blockIdx = by * blocksX_ + bx;
                         BlockType type = analyzeBlock(bx, by, entry.pixels.data());
                         curBlockTypes[blockIdx] = type;
-                        if (type == BlockType::Skip || type == BlockType::Solid) {
+                        if (type == BlockType::Skip) {
                             matchCount++;
                         }
                     }
@@ -339,13 +324,9 @@ public:
                                     << ", P: " << statPFrames_
                                     << ", REF: " << statRefFrames_ << ")";
         if (statPFrames_ > 0) {
-            uint64_t totalPBlocks = statSkipBlocks_ + statSolidBlocks_ + statQuarterBC7Blocks_ + statBc7Blocks_;
+            uint64_t totalPBlocks = statSkipBlocks_ + statBc7Blocks_;
             tc::logNotice("TcvEncoder") << "P-frame blocks: SKIP=" << statSkipBlocks_
                                         << " (" << (100.0f * statSkipBlocks_ / totalPBlocks) << "%)"
-                                        << ", SOLID=" << statSolidBlocks_
-                                        << " (" << (100.0f * statSolidBlocks_ / totalPBlocks) << "%)"
-                                        << ", Q-BC7=" << statQuarterBC7Blocks_
-                                        << " (" << (100.0f * statQuarterBC7Blocks_ / totalPBlocks) << "%)"
                                         << ", BC7=" << statBc7Blocks_
                                         << " (" << (100.0f * statBc7Blocks_ / totalPBlocks) << "%)";
         }
@@ -373,22 +354,13 @@ public:
         if (numThreads_ < 0) numThreads_ = 0;
     }
 
-    // === Compression options (for benchmarking) ===
+    // === Compression options ===
 
-    // Force all frames to be I-frames (no P-frames, like v1)
+    // Force all frames to be I-frames (no P-frames)
     void setForceAllIFrames(bool force) { forceAllIFrames_ = force; }
 
-    // Enable/disable SKIP blocks
+    // Enable/disable SKIP blocks (for benchmarking)
     void setEnableSkip(bool enable) { enableSkip_ = enable; }
-
-    // Enable/disable SOLID blocks
-    void setEnableSolid(bool enable) { enableSolid_ = enable; }
-
-    // Enable/disable QUARTER_BC7 blocks (4x4 BC7 upscaled to 16x16)
-    void setEnableQuarterBC7(bool enable) { enableQuarterBC7_ = enable; }
-
-    // Enable/disable LZ4 compression
-    void setEnableLZ4(bool enable) { enableLZ4_ = enable; }
 
 private:
     // File output
@@ -404,15 +376,9 @@ private:
     // Compression options
     bool forceAllIFrames_ = false;
     bool enableSkip_ = true;
-    bool enableSolid_ = true;
-    bool enableQuarterBC7_ = true;
-    bool enableLZ4_ = true;  // LZ4 compression enabled by default
 
     // LZ4 compression buffer
     std::vector<char> lz4Buffer_;
-
-    // QuarterBC7 cache: block index -> 16 bytes BC7 data
-    std::vector<std::array<uint8_t, 16>> quarterBC7Cache_;
 
     // Video properties
     int width_ = 0;
@@ -444,16 +410,14 @@ private:
     int iFrameBufferCount_ = 0;
     int lastIFrameNumber_ = -1;
 
-    // Block types
-    enum class BlockType { Skip, Solid, QuarterBC7, BC7 };
+    // Block types (v3: simplified to Skip and BC7 only)
+    enum class BlockType { Skip, BC7 };
 
     // Stats
     uint64_t statIFrames_ = 0;
     uint64_t statPFrames_ = 0;
     uint64_t statRefFrames_ = 0;
     uint64_t statSkipBlocks_ = 0;
-    uint64_t statSolidBlocks_ = 0;
-    uint64_t statQuarterBC7Blocks_ = 0;
     uint64_t statBc7Blocks_ = 0;
 
     bc7enc_compress_block_params bc7Params_;
@@ -481,158 +445,26 @@ private:
         return hash;
     }
 
-    // Analyze a 16x16 block and determine its type
+    // Analyze a 16x16 block: returns Skip if identical to reference, BC7 otherwise
     BlockType analyzeBlock(int bx, int by, const uint8_t* refPixels) {
+        if (!enableSkip_) return BlockType::BC7;
+
         int startX = bx * TCV_BLOCK_SIZE;
         int startY = by * TCV_BLOCK_SIZE;
 
         const uint8_t* curBlock = paddedPixels_.data();
         const uint8_t* refBlock = refPixels;
 
-        // Check SKIP first (compare with reference)
-        if (enableSkip_) {
-            bool allSame = true;
-            for (int py = 0; py < TCV_BLOCK_SIZE && allSame; py++) {
-                int y = startY + py;
-                const uint8_t* curRow = curBlock + (y * paddedWidth_ + startX) * 4;
-                const uint8_t* refRow = refBlock + (y * paddedWidth_ + startX) * 4;
-                if (std::memcmp(curRow, refRow, TCV_BLOCK_SIZE * 4) != 0) {
-                    allSame = false;
-                }
-            }
-            if (allSame) {
-                return BlockType::Skip;
+        // Compare with reference
+        for (int py = 0; py < TCV_BLOCK_SIZE; py++) {
+            int y = startY + py;
+            const uint8_t* curRow = curBlock + (y * paddedWidth_ + startX) * 4;
+            const uint8_t* refRow = refBlock + (y * paddedWidth_ + startX) * 4;
+            if (std::memcmp(curRow, refRow, TCV_BLOCK_SIZE * 4) != 0) {
+                return BlockType::BC7;
             }
         }
-
-        // Check SOLID (all pixels same color)
-        if (enableSolid_) {
-            const uint8_t* firstPixel = curBlock + (startY * paddedWidth_ + startX) * 4;
-            uint32_t firstColor;
-            std::memcpy(&firstColor, firstPixel, 4);
-
-            bool allSolid = true;
-            for (int py = 0; py < TCV_BLOCK_SIZE && allSolid; py++) {
-                int y = startY + py;
-                for (int px = 0; px < TCV_BLOCK_SIZE && allSolid; px++) {
-                    int x = startX + px;
-                    const uint8_t* pixel = curBlock + (y * paddedWidth_ + x) * 4;
-                    uint32_t color;
-                    std::memcpy(&color, pixel, 4);
-                    if (color != firstColor) {
-                        allSolid = false;
-                    }
-                }
-            }
-            if (allSolid) {
-                return BlockType::Solid;
-            }
-        }
-
-        // Try QUARTER_BC7 (4x4 BC7 upscaled to 16x16)
-        if (enableQuarterBC7_) {
-            if (tryQuarterBC7(bx, by)) {
-                return BlockType::QuarterBC7;
-            }
-        }
-
-        return BlockType::BC7;
-    }
-
-    // Get solid color for a block
-    uint32_t getBlockSolidColor(int bx, int by) {
-        int startX = bx * TCV_BLOCK_SIZE;
-        int startY = by * TCV_BLOCK_SIZE;
-        const uint8_t* pixel = paddedPixels_.data() + (startY * paddedWidth_ + startX) * 4;
-        uint32_t color;
-        std::memcpy(&color, pixel, 4);
-        return color;
-    }
-
-    // Try to encode a 16x16 block as quarter BC7 (single 4x4 BC7 upscaled)
-    // Returns true if quality is acceptable, stores result in quarterBC7Cache_
-    bool tryQuarterBC7(int bx, int by) {
-        int startX = bx * TCV_BLOCK_SIZE;
-        int startY = by * TCV_BLOCK_SIZE;
-        int blockIdx = by * blocksX_ + bx;
-
-        // Step 1: Downsample 16x16 to 4x4 (average 4x4 pixel regions)
-        uint8_t downsampled[64];  // 4x4 RGBA
-        for (int dy = 0; dy < 4; dy++) {
-            for (int dx = 0; dx < 4; dx++) {
-                int r = 0, g = 0, b = 0, a = 0;
-                // Average 4x4 region
-                for (int py = 0; py < 4; py++) {
-                    for (int px = 0; px < 4; px++) {
-                        int x = startX + dx * 4 + px;
-                        int y = startY + dy * 4 + py;
-                        const uint8_t* pixel = paddedPixels_.data() + (y * paddedWidth_ + x) * 4;
-                        r += pixel[0];
-                        g += pixel[1];
-                        b += pixel[2];
-                        a += pixel[3];
-                    }
-                }
-                uint8_t* out = downsampled + (dy * 4 + dx) * 4;
-                out[0] = static_cast<uint8_t>(r / 16);
-                out[1] = static_cast<uint8_t>(g / 16);
-                out[2] = static_cast<uint8_t>(b / 16);
-                out[3] = static_cast<uint8_t>(a / 16);
-            }
-        }
-
-        // Step 2: Compare each original pixel with downsampled average
-        // (BC7 adds minimal error for smooth content, so main error is from downsampling)
-        // Error criteria:
-        //   - error > 2% (~5 in 0-255): 1 pixel = reject
-        //   - 1% < error <= 2% (~2.5 to 5): > 5% pixels (>13) = reject
-        //   - 0 < error <= 1%: allowed (no limit)
-        constexpr int THRESHOLD_HIGH = 5;    // 2%
-        constexpr int THRESHOLD_MED = 2;     // 1% (255 * 0.01 = 2.55)
-        constexpr int MAX_MED_PIXELS = 13;   // 5% of 256
-
-        int medErrorPixels = 0;
-
-        for (int py = 0; py < 16; py++) {
-            for (int px = 0; px < 16; px++) {
-                int x = startX + px;
-                int y = startY + py;
-                const uint8_t* original = paddedPixels_.data() + (y * paddedWidth_ + x) * 4;
-
-                // Nearest neighbor upscale: which 4x4 cell does this pixel belong to?
-                int dx = px / 4;
-                int dpy = py / 4;
-                const uint8_t* avg = downsampled + (dpy * 4 + dx) * 4;
-
-                // Calculate max channel error
-                int maxError = 0;
-                for (int c = 0; c < 4; c++) {
-                    int diff = std::abs(static_cast<int>(original[c]) - static_cast<int>(avg[c]));
-                    if (diff > maxError) maxError = diff;
-                }
-
-                // Apply criteria
-                if (maxError > THRESHOLD_HIGH) {
-                    // Immediate reject
-                    return false;
-                } else if (maxError > THRESHOLD_MED) {
-                    medErrorPixels++;
-                    if (medErrorPixels > MAX_MED_PIXELS) {
-                        return false;
-                    }
-                }
-                // error <= 0.5%: allowed
-            }
-        }
-
-        // Step 3: Passed quality check - encode to BC7 and store
-        bc7enc_compress_block_params params;
-        bc7enc_compress_block_params_init(&params);
-        params.m_max_partitions = 64;  // High quality for single block
-        params.m_uber_level = 4;
-
-        bc7enc_compress_block(quarterBC7Cache_[blockIdx].data(), downsampled, &params);
-        return true;
+        return BlockType::Skip;
     }
 
     // Encode a 16x16 block to BC7 (16 4x4 blocks = 256 bytes)
@@ -737,123 +569,27 @@ private:
     // =========================================================================
 
     void encodeIFrame() {
-        // Analyze blocks for optimization (no SKIP since no reference)
-        std::vector<BlockType> blockTypes(totalBlocks_);
+        // Encode all blocks to BC7 (multi-threaded)
+        encodeAllBlocksToBC7();
 
-        for (int by = 0; by < blocksY_; by++) {
-            for (int bx = 0; bx < blocksX_; bx++) {
-                int blockIdx = by * blocksX_ + bx;
-                blockTypes[blockIdx] = analyzeBlockForIFrame(bx, by);
-            }
-        }
+        // Build packet: all BC7 blocks with LZ4 compression
+        uint32_t dataSize = static_cast<uint32_t>(bc7Buffer_.size());
+        int compressedSize = LZ4_compress_default(
+            reinterpret_cast<const char*>(bc7Buffer_.data()),
+            lz4Buffer_.data(),
+            static_cast<int>(dataSize),
+            static_cast<int>(lz4Buffer_.size())
+        );
 
-        // Build optimized packet (like P-frame format)
-        framePacketBuffer_.clear();
+        // Write I-frame packet
+        uint8_t packetType = TCV_PACKET_I_FRAME;
+        uint32_t compSize = static_cast<uint32_t>(compressedSize);
+        file_.write(reinterpret_cast<const char*>(&packetType), 1);
+        file_.write(reinterpret_cast<const char*>(&dataSize), 4);
+        file_.write(reinterpret_cast<const char*>(&compSize), 4);
+        file_.write(lz4Buffer_.data(), compressedSize);
 
-        int blockIdx = 0;
-        while (blockIdx < totalBlocks_) {
-            BlockType type = blockTypes[blockIdx];
-            int runStart = blockIdx;
-            int runLength = 1;
-
-            // Get first block's color for SOLID comparison
-            int startBx = runStart % blocksX_;
-            int startBy = runStart / blocksX_;
-            uint32_t firstColor = (type == BlockType::Solid) ? getBlockSolidColor(startBx, startBy) : 0;
-
-            // Count consecutive blocks of same type (and same color for SOLID)
-            while (blockIdx + runLength < totalBlocks_ &&
-                   runLength < 64 &&
-                   blockTypes[blockIdx + runLength] == type) {
-                // For SOLID, also check if color matches
-                if (type == BlockType::Solid) {
-                    int nextBx = (blockIdx + runLength) % blocksX_;
-                    int nextBy = (blockIdx + runLength) / blocksX_;
-                    if (getBlockSolidColor(nextBx, nextBy) != firstColor) {
-                        break;
-                    }
-                }
-                runLength++;
-            }
-
-            // Write command byte
-            uint8_t cmd = 0;
-            switch (type) {
-                case BlockType::Solid:     cmd = TCV_BLOCK_SOLID; break;
-                case BlockType::QuarterBC7: cmd = TCV_BLOCK_BC7_Q; break;
-                case BlockType::BC7:       cmd = TCV_BLOCK_BC7; break;
-                default:                   cmd = TCV_BLOCK_BC7; break;
-            }
-            cmd |= (runLength - 1);
-            framePacketBuffer_.push_back(cmd);
-
-            // Write data for blocks
-            if (type == BlockType::Solid) {
-                statSolidBlocks_ += runLength;
-                // Write color ONCE for all blocks in run
-                framePacketBuffer_.insert(framePacketBuffer_.end(),
-                    reinterpret_cast<uint8_t*>(&firstColor),
-                    reinterpret_cast<uint8_t*>(&firstColor) + 4);
-            } else if (type == BlockType::QuarterBC7) {
-                for (int i = 0; i < runLength; i++) {
-                    statQuarterBC7Blocks_++;
-                    int bi = runStart + i;
-                    const auto& bc7Block = quarterBC7Cache_[bi];
-                    framePacketBuffer_.insert(framePacketBuffer_.end(),
-                        bc7Block.begin(), bc7Block.end());
-                }
-            } else {  // BC7
-                for (int i = 0; i < runLength; i++) {
-                    statBc7Blocks_++;
-                    int bi = runStart + i;
-                    int bx = bi % blocksX_;
-                    int by = bi / blocksX_;
-                    uint8_t bc7Data[256];
-                    encodeBlockToBC7(bx, by, bc7Data);
-                    framePacketBuffer_.insert(framePacketBuffer_.end(), bc7Data, bc7Data + 256);
-                }
-            }
-
-            blockIdx += runLength;
-        }
-
-        // Write I-frame packet (with optional LZ4 compression)
-        if (enableLZ4_) {
-            uint32_t uncompressedSize = static_cast<uint32_t>(framePacketBuffer_.size());
-            int compressedSize = LZ4_compress_default(
-                reinterpret_cast<const char*>(framePacketBuffer_.data()),
-                lz4Buffer_.data(),
-                static_cast<int>(uncompressedSize),
-                static_cast<int>(lz4Buffer_.size())
-            );
-
-            if (compressedSize > 0 && static_cast<uint32_t>(compressedSize) < uncompressedSize) {
-                // Use compressed data
-                uint8_t packetType = TCV_PACKET_I_FRAME_LZ4;
-                uint32_t compSize = static_cast<uint32_t>(compressedSize);
-                file_.write(reinterpret_cast<const char*>(&packetType), 1);
-                file_.write(reinterpret_cast<const char*>(&uncompressedSize), 4);
-                file_.write(reinterpret_cast<const char*>(&compSize), 4);
-                file_.write(lz4Buffer_.data(), compressedSize);
-            } else {
-                // Compression didn't help, write uncompressed
-                uint8_t packetType = TCV_PACKET_I_FRAME;
-                file_.write(reinterpret_cast<const char*>(&packetType), 1);
-                file_.write(reinterpret_cast<const char*>(&uncompressedSize), 4);
-                file_.write(reinterpret_cast<const char*>(framePacketBuffer_.data()), uncompressedSize);
-            }
-        } else {
-            uint8_t packetType = TCV_PACKET_I_FRAME;
-            uint32_t dataSize = static_cast<uint32_t>(framePacketBuffer_.size());
-            file_.write(reinterpret_cast<const char*>(&packetType), 1);
-            file_.write(reinterpret_cast<const char*>(&dataSize), 4);
-            file_.write(reinterpret_cast<const char*>(framePacketBuffer_.data()), dataSize);
-        }
-
-        // Build full BC7 buffer for I-frame cache (needed for P-frame references)
-        buildFullBC7Buffer(blockTypes);
-
-        // Add to I-frame buffer
+        // Add to I-frame buffer for P-frame references
         IFrameEntry& entry = iFrameBuffer_[iFrameBufferHead_];
         entry.frameNumber = frameCount_;
         entry.pixels = paddedPixels_;
@@ -869,133 +605,6 @@ private:
         statIFrames_++;
     }
 
-    // Analyze block for I-frame (no reference, so no SKIP)
-    BlockType analyzeBlockForIFrame(int bx, int by) {
-        int startX = bx * TCV_BLOCK_SIZE;
-        int startY = by * TCV_BLOCK_SIZE;
-        const uint8_t* curBlock = paddedPixels_.data();
-
-        // Check SOLID
-        if (enableSolid_) {
-            const uint8_t* firstPixel = curBlock + (startY * paddedWidth_ + startX) * 4;
-            uint32_t firstColor;
-            std::memcpy(&firstColor, firstPixel, 4);
-
-            bool allSolid = true;
-            for (int py = 0; py < TCV_BLOCK_SIZE && allSolid; py++) {
-                int y = startY + py;
-                for (int px = 0; px < TCV_BLOCK_SIZE && allSolid; px++) {
-                    int x = startX + px;
-                    const uint8_t* pixel = curBlock + (y * paddedWidth_ + x) * 4;
-                    uint32_t color;
-                    std::memcpy(&color, pixel, 4);
-                    if (color != firstColor) {
-                        allSolid = false;
-                    }
-                }
-            }
-            if (allSolid) {
-                return BlockType::Solid;
-            }
-        }
-
-        // Check QUARTER_BC7
-        if (enableQuarterBC7_) {
-            if (tryQuarterBC7(bx, by)) {
-                return BlockType::QuarterBC7;
-            }
-        }
-
-        return BlockType::BC7;
-    }
-
-    // Build full BC7 buffer from block types (for I-frame cache)
-    void buildFullBC7Buffer(const std::vector<BlockType>& blockTypes) {
-        bc7enc_compress_block_params params;
-        bc7enc_compress_block_params_init(&params);
-        params.m_max_partitions = 0;
-        params.m_uber_level = 0;
-
-        int bc7BlocksX = paddedWidth_ / 4;
-
-        for (int by = 0; by < blocksY_; by++) {
-            for (int bx = 0; bx < blocksX_; bx++) {
-                int blockIdx = by * blocksX_ + bx;
-                BlockType type = blockTypes[blockIdx];
-
-                if (type == BlockType::Solid) {
-                    // Encode solid color to BC7 for each 4x4 sub-block
-                    uint32_t color = getBlockSolidColor(bx, by);
-                    uint8_t block4x4[64];
-                    for (int i = 0; i < 16; i++) {
-                        std::memcpy(block4x4 + i * 4, &color, 4);
-                    }
-
-                    for (int by4 = 0; by4 < 4; by4++) {
-                        for (int bx4 = 0; bx4 < 4; bx4++) {
-                            int gpuX = bx * 4 + bx4;
-                            int gpuY = by * 4 + by4;
-                            int gpuIdx = gpuY * bc7BlocksX + gpuX;
-                            bc7enc_compress_block(bc7Buffer_.data() + gpuIdx * 16, block4x4, &params);
-                        }
-                    }
-                } else if (type == BlockType::QuarterBC7) {
-                    // Expand Q-BC7 to full 16 BC7 blocks
-                    const auto& qbc7 = quarterBC7Cache_[blockIdx];
-                    uint8_t decoded4x4[64];
-                    bcdec_bc7(qbc7.data(), decoded4x4, 4 * 4);
-
-                    for (int dy = 0; dy < 4; dy++) {
-                        for (int dx = 0; dx < 4; dx++) {
-                            const uint8_t* pixel = decoded4x4 + (dy * 4 + dx) * 4;
-                            uint8_t block4x4[64];
-                            for (int i = 0; i < 16; i++) {
-                                std::memcpy(block4x4 + i * 4, pixel, 4);
-                            }
-
-                            int gpuX = bx * 4 + dx;
-                            int gpuY = by * 4 + dy;
-                            int gpuIdx = gpuY * bc7BlocksX + gpuX;
-                            bc7enc_compress_block(bc7Buffer_.data() + gpuIdx * 16, block4x4, &params);
-                        }
-                    }
-                } else {
-                    // Full BC7 - encode directly to GPU layout
-                    int startX = bx * TCV_BLOCK_SIZE;
-                    int startY = by * TCV_BLOCK_SIZE;
-
-                    bc7enc_compress_block_params fullParams;
-                    bc7enc_compress_block_params_init(&fullParams);
-                    switch (quality_) {
-                        case 0: fullParams.m_max_partitions = 0; fullParams.m_uber_level = 0; break;
-                        case 1: fullParams.m_max_partitions = 16; fullParams.m_uber_level = 1; break;
-                        case 2: default: fullParams.m_max_partitions = 64; fullParams.m_uber_level = 4; break;
-                    }
-                    if (partitions_ >= 0) fullParams.m_max_partitions = std::clamp(partitions_, 0, 64);
-                    if (uber_ >= 0) fullParams.m_uber_level = std::clamp(uber_, 0, 4);
-
-                    for (int by4 = 0; by4 < 4; by4++) {
-                        for (int bx4 = 0; bx4 < 4; bx4++) {
-                            int x = startX + bx4 * 4;
-                            int y = startY + by4 * 4;
-
-                            uint8_t block4x4[64];
-                            for (int py = 0; py < 4; py++) {
-                                const uint8_t* srcRow = paddedPixels_.data() + ((y + py) * paddedWidth_ + x) * 4;
-                                std::memcpy(block4x4 + py * 16, srcRow, 16);
-                            }
-
-                            int gpuX = bx * 4 + bx4;
-                            int gpuY = by * 4 + by4;
-                            int gpuIdx = gpuY * bc7BlocksX + gpuX;
-                            bc7enc_compress_block(bc7Buffer_.data() + gpuIdx * 16, block4x4, &fullParams);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     void encodeRefFrame(int refFrameNum) {
         // Write REF-frame packet (just reference, no data)
         uint8_t packetType = TCV_PACKET_REF_FRAME;
@@ -1008,118 +617,136 @@ private:
     }
 
     void encodePFrame(int refFrameNum, const std::vector<BlockType>& blockTypes) {
-        framePacketBuffer_.clear();
+        // Step 1: Collect BC7 block indices
+        std::vector<int> bc7BlockIndices;
+        for (int i = 0; i < totalBlocks_; i++) {
+            if (blockTypes[i] == BlockType::BC7) {
+                bc7BlockIndices.push_back(i);
+            }
+        }
 
-        // Encode blocks with RLE
-        int blockIdx = 0;
-        while (blockIdx < totalBlocks_) {
-            BlockType type = blockTypes[blockIdx];
-            int runStart = blockIdx;
-            int runLength = 1;
+        // Step 2: Parallel encode all BC7 blocks
+        std::vector<std::array<uint8_t, 256>> bc7Results(bc7BlockIndices.size());
 
-            // Get first block's color for SOLID comparison
-            int startBx = runStart % blocksX_;
-            int startBy = runStart / blocksX_;
-            uint32_t firstColor = (type == BlockType::Solid) ? getBlockSolidColor(startBx, startBy) : 0;
+        if (!bc7BlockIndices.empty()) {
+            int actualThreads = (numThreads_ > 0) ? numThreads_ : std::thread::hardware_concurrency();
+            if (actualThreads < 1) actualThreads = 1;
 
-            // Count consecutive blocks of same type (and same color for SOLID)
-            while (blockIdx + runLength < totalBlocks_ &&
-                   runLength < 64 &&
-                   blockTypes[blockIdx + runLength] == type) {
-                // For SOLID, also check if color matches
-                if (type == BlockType::Solid) {
-                    int nextBx = (blockIdx + runLength) % blocksX_;
-                    int nextBy = (blockIdx + runLength) / blocksX_;
-                    if (getBlockSolidColor(nextBx, nextBy) != firstColor) {
-                        break;  // Different color, end this run
+            bc7enc_compress_block_params params;
+            bc7enc_compress_block_params_init(&params);
+            switch (quality_) {
+                case 0: params.m_max_partitions = 0; params.m_uber_level = 0; break;
+                case 1: params.m_max_partitions = 16; params.m_uber_level = 1; break;
+                case 2: default: params.m_max_partitions = 64; params.m_uber_level = 4; break;
+            }
+            if (partitions_ >= 0) params.m_max_partitions = std::clamp(partitions_, 0, 64);
+            if (uber_ >= 0) params.m_uber_level = std::clamp(uber_, 0, 4);
+
+            auto encodeBlocks = [&](int startIdx, int endIdx) {
+                bc7enc_compress_block_params localParams = params;
+                uint8_t block4x4[64];
+
+                for (int idx = startIdx; idx < endIdx; idx++) {
+                    int blockIdx = bc7BlockIndices[idx];
+                    int bx = blockIdx % blocksX_;
+                    int by = blockIdx / blocksX_;
+                    int startX = bx * TCV_BLOCK_SIZE;
+                    int startY = by * TCV_BLOCK_SIZE;
+
+                    // Encode 16x16 block (4x4 grid of BC7 blocks)
+                    for (int by4 = 0; by4 < 4; by4++) {
+                        for (int bx4 = 0; bx4 < 4; bx4++) {
+                            int x = startX + bx4 * 4;
+                            int y = startY + by4 * 4;
+
+                            for (int py = 0; py < 4; py++) {
+                                const uint8_t* srcRow = paddedPixels_.data() + ((y + py) * paddedWidth_ + x) * 4;
+                                std::memcpy(block4x4 + py * 16, srcRow, 16);
+                            }
+
+                            bc7enc_compress_block(bc7Results[idx].data() + (by4 * 4 + bx4) * 16, block4x4, &localParams);
+                        }
                     }
                 }
+            };
+
+            int numBlocks = static_cast<int>(bc7BlockIndices.size());
+            if (actualThreads == 1 || numBlocks < actualThreads) {
+                encodeBlocks(0, numBlocks);
+            } else {
+                std::vector<std::thread> threads;
+                int blocksPerThread = numBlocks / actualThreads;
+                int remainder = numBlocks % actualThreads;
+                int current = 0;
+
+                for (int i = 0; i < actualThreads; i++) {
+                    int count = blocksPerThread + (i < remainder ? 1 : 0);
+                    if (count > 0) {
+                        threads.emplace_back(encodeBlocks, current, current + count);
+                        current += count;
+                    }
+                }
+
+                for (auto& t : threads) {
+                    t.join();
+                }
+            }
+        }
+
+        // Step 3: Build packet with RLE (sequential)
+        framePacketBuffer_.clear();
+        int bc7ResultIdx = 0;
+        int blockIdx = 0;
+
+        while (blockIdx < totalBlocks_) {
+            BlockType type = blockTypes[blockIdx];
+            int runLength = 1;
+
+            // Count consecutive blocks of same type (max 128)
+            while (blockIdx + runLength < totalBlocks_ &&
+                   runLength < 128 &&
+                   blockTypes[blockIdx + runLength] == type) {
                 runLength++;
             }
 
             // Write command byte
-            uint8_t cmd = 0;
-            switch (type) {
-                case BlockType::Skip:      cmd = TCV_BLOCK_SKIP; break;
-                case BlockType::Solid:     cmd = TCV_BLOCK_SOLID; break;
-                case BlockType::QuarterBC7: cmd = TCV_BLOCK_BC7_Q; break;
-                case BlockType::BC7:       cmd = TCV_BLOCK_BC7; break;
-            }
-            cmd |= (runLength - 1);  // 0-63 = 1-64 blocks
+            uint8_t cmd = (type == BlockType::BC7) ? TCV_BLOCK_BC7 : TCV_BLOCK_SKIP;
+            cmd |= (runLength - 1);
             framePacketBuffer_.push_back(cmd);
 
-            // Write data for blocks
+            // Write BC7 data
             if (type == BlockType::Skip) {
                 statSkipBlocks_ += runLength;
-                // No data needed
-            } else if (type == BlockType::Solid) {
-                statSolidBlocks_ += runLength;
-                // Write color ONCE for all blocks in run
-                framePacketBuffer_.insert(framePacketBuffer_.end(),
-                    reinterpret_cast<uint8_t*>(&firstColor),
-                    reinterpret_cast<uint8_t*>(&firstColor) + 4);
-            } else if (type == BlockType::QuarterBC7) {
-                // Q-BC7: each block has different data
-                for (int i = 0; i < runLength; i++) {
-                    statQuarterBC7Blocks_++;
-                    int bi = runStart + i;
-                    const auto& bc7Block = quarterBC7Cache_[bi];
-                    framePacketBuffer_.insert(framePacketBuffer_.end(),
-                        bc7Block.begin(), bc7Block.end());
-                }
-            } else {  // BC7
-                // BC7: each block has different data
+            } else {
                 for (int i = 0; i < runLength; i++) {
                     statBc7Blocks_++;
-                    int bi = runStart + i;
-                    int bx = bi % blocksX_;
-                    int by = bi / blocksX_;
-                    uint8_t bc7Data[256];
-                    encodeBlockToBC7(bx, by, bc7Data);
-                    framePacketBuffer_.insert(framePacketBuffer_.end(), bc7Data, bc7Data + 256);
+                    framePacketBuffer_.insert(framePacketBuffer_.end(),
+                                              bc7Results[bc7ResultIdx].begin(),
+                                              bc7Results[bc7ResultIdx].end());
+                    bc7ResultIdx++;
                 }
             }
 
             blockIdx += runLength;
         }
 
-        // Write P-frame packet (with optional LZ4 compression)
+        // Step 4: Write P-frame packet with LZ4 compression
         uint32_t refFrame = static_cast<uint32_t>(refFrameNum);
+        uint32_t uncompressedSize = static_cast<uint32_t>(framePacketBuffer_.size());
+        int compressedSize = LZ4_compress_default(
+            reinterpret_cast<const char*>(framePacketBuffer_.data()),
+            lz4Buffer_.data(),
+            static_cast<int>(uncompressedSize),
+            static_cast<int>(lz4Buffer_.size())
+        );
 
-        if (enableLZ4_) {
-            uint32_t uncompressedSize = static_cast<uint32_t>(framePacketBuffer_.size());
-            int compressedSize = LZ4_compress_default(
-                reinterpret_cast<const char*>(framePacketBuffer_.data()),
-                lz4Buffer_.data(),
-                static_cast<int>(uncompressedSize),
-                static_cast<int>(lz4Buffer_.size())
-            );
-
-            if (compressedSize > 0 && static_cast<uint32_t>(compressedSize) < uncompressedSize) {
-                // Use compressed data
-                uint8_t packetType = TCV_PACKET_P_FRAME_LZ4;
-                uint32_t compSize = static_cast<uint32_t>(compressedSize);
-                file_.write(reinterpret_cast<const char*>(&packetType), 1);
-                file_.write(reinterpret_cast<const char*>(&refFrame), 4);
-                file_.write(reinterpret_cast<const char*>(&uncompressedSize), 4);
-                file_.write(reinterpret_cast<const char*>(&compSize), 4);
-                file_.write(lz4Buffer_.data(), compressedSize);
-            } else {
-                // Compression didn't help, write uncompressed
-                uint8_t packetType = TCV_PACKET_P_FRAME;
-                file_.write(reinterpret_cast<const char*>(&packetType), 1);
-                file_.write(reinterpret_cast<const char*>(&refFrame), 4);
-                file_.write(reinterpret_cast<const char*>(&uncompressedSize), 4);
-                file_.write(reinterpret_cast<const char*>(framePacketBuffer_.data()), uncompressedSize);
-            }
-        } else {
-            uint8_t packetType = TCV_PACKET_P_FRAME;
-            uint32_t dataSize = static_cast<uint32_t>(framePacketBuffer_.size());
-            file_.write(reinterpret_cast<const char*>(&packetType), 1);
-            file_.write(reinterpret_cast<const char*>(&refFrame), 4);
-            file_.write(reinterpret_cast<const char*>(&dataSize), 4);
-            file_.write(reinterpret_cast<const char*>(framePacketBuffer_.data()), dataSize);
-        }
+        uint8_t packetType = TCV_PACKET_P_FRAME;
+        uint32_t compSize = static_cast<uint32_t>(compressedSize);
+        file_.write(reinterpret_cast<const char*>(&packetType), 1);
+        file_.write(reinterpret_cast<const char*>(&refFrame), 4);
+        file_.write(reinterpret_cast<const char*>(&uncompressedSize), 4);
+        file_.write(reinterpret_cast<const char*>(&compSize), 4);
+        file_.write(lz4Buffer_.data(), compressedSize);
 
         statPFrames_++;
     }
