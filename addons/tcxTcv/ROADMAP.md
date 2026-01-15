@@ -36,26 +36,31 @@
 
 ---
 
-## Phase 3: HAP Support (NEXT)
+## Phase 3: HAP Support (DONE)
 
 ### HAP Input
-- [ ] tcxHapブランチをマージ
-- [ ] HAPファイルからTCVへの変換対応
-- [ ] HAP → TCV ワークフロー最適化
+- [x] tcxHapブランチをマージ
+- [x] HAPファイルからTCVへの変換対応
+- [x] HAP → TCV ワークフロー最適化
 
 ---
 
-## Phase 4: Audio Support
+## Phase 4: Audio Support (DONE)
 
 ### Audio Embedding
-- [ ] TCV内に音声トラック埋め込み
-- [ ] 対応コーデック: AAC, MP3, Opus（元のまま埋め込み）
-- [ ] VideoPlayerから音声抽出API追加
+- [x] TCV内に音声トラック埋め込み
+- [x] 対応コーデック: AAC, MP3（元のまま埋め込み、AACはADTSヘッダー付加）
+- [x] VideoPlayerから音声抽出API追加
 
 ### Audio Playback
-- [ ] TcvPlayerにSoundPlayer内蔵
-- [ ] 映像/音声の同期再生
-- [ ] シーク時の音声同期
+- [x] TcvPlayerにSoundPlayer内蔵
+- [x] 映像/音声の同期再生
+- [x] シーク時の音声同期
+
+### Platform Support
+- [x] macOS: AudioToolbox (AAC/MP3デコード)
+- [ ] Windows: Media Foundation (未実装)
+- [ ] Linux: GStreamer等 (未実装)
 
 ---
 

@@ -44,7 +44,7 @@ void tcApp::parseCommandLine() {
     char** argv = getArgValues();
 
     if (argc <= 1) {
-        logNotice("TcvEncoder") << "Drag & drop a video file to encode";
+        logNotice("TcvEncoder") << "Drag & drop video files to encode";
         return;
     }
 
@@ -89,7 +89,8 @@ void tcApp::parseCommandLine() {
         if (!outputPath.empty()) {
             settings_.outputPath = outputPath;
         }
-        startEncoding(inputPath);
+        addToQueue(inputPath);
+        startNextInQueue();
     }
 }
 
@@ -102,24 +103,49 @@ void tcApp::showHelp() {
 }
 
 void tcApp::update() {
-    if (state_ == State::Encoding) {
+    if (state_ == State::Encoding && currentQueueIndex_ >= 0) {
         session_.update();
 
-        if (session_.isComplete() || session_.hasFailed()) {
-            state_ = State::Done;
+        // Update current item's encoded frames
+        queue_[currentQueueIndex_].encodedFrames = session_.getCurrentFrame();
+
+        if (session_.isComplete()) {
+            auto& item = queue_[currentQueueIndex_];
+            item.status = QueueStatus::Done;
+            item.encodedFrames = session_.getEncodedFrames();
 
             // Update output file size
-            if (session_.isComplete() && filesystem::exists(session_.getOutputPath())) {
-                fileInfo_.outputSize = filesystem::file_size(session_.getOutputPath());
+            if (filesystem::exists(item.outputPath)) {
+                item.outputSize = filesystem::file_size(item.outputPath);
             }
+
+            logNotice("TcvEncoder") << "Complete: " << item.name;
+            currentQueueIndex_ = -1;
+            state_ = State::Idle;
+
+            // Start next in queue
+            startNextInQueue();
+        } else if (session_.hasFailed()) {
+            queue_[currentQueueIndex_].status = QueueStatus::Failed;
+            logError("TcvEncoder") << "Failed: " << queue_[currentQueueIndex_].name;
+            currentQueueIndex_ = -1;
+            state_ = State::Idle;
+
+            // Start next in queue
+            startNextInQueue();
         }
     }
 
-    if (cliMode_ && state_ == State::Done) {
-        currentFileIndex_++;
-        if (currentFileIndex_ < static_cast<int>(filesToEncode_.size())) {
-            startEncoding(filesToEncode_[currentFileIndex_]);
-        } else {
+    if (cliMode_ && state_ == State::Idle) {
+        // Check if all done
+        bool allDone = true;
+        for (const auto& item : queue_) {
+            if (item.status == QueueStatus::Pending || item.status == QueueStatus::Encoding) {
+                allDone = false;
+                break;
+            }
+        }
+        if (allDone) {
             logNotice("TcvEncoder") << "All files encoded";
             exitApp();
         }
@@ -130,12 +156,8 @@ void tcApp::draw() {
     clear(0.12f);
 
     if (!cliMode_) {
-        // Begin ImGui frame
         imguiBegin();
-
         drawGui();
-
-        // End ImGui frame
         imguiEnd();
     }
 }
@@ -150,24 +172,183 @@ void tcApp::drawGui() {
         ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-    // Split into left and right panes
+    // Layout: Left (settings + queue) | Right (preview + info + log)
     float leftWidth = 300;
     float rightWidth = getWindowWidth() - leftWidth - 20;
 
+    // Left pane - Settings + Queue
     ImGui::BeginChild("LeftPane", ImVec2(leftWidth, 0), true);
-    drawLeftPane(leftWidth);
+
+    // Settings at top
+    drawSettingsPane();
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Queue list below settings
+    drawQueuePane(leftWidth);
+
     ImGui::EndChild();
 
     ImGui::SameLine();
 
+    // Right pane - Preview + File Info + Log (bordered)
     ImGui::BeginChild("RightPane", ImVec2(rightWidth, 0), true);
-    drawRightPane();
+
+    // Preview at top
+    drawPreviewPane();
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // File information
+    drawFileInfoPane();
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Log at bottom
+    drawLogPane();
+
     ImGui::EndChild();
 
     ImGui::End();
 }
 
-void tcApp::drawLeftPane(float width) {
+void tcApp::drawQueuePane(float width) {
+    ImGui::Text("Encoding Queue");
+    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Drop files or press O to add");
+    ImGui::Separator();
+
+    // Queue list with scrolling (takes remaining space)
+    float listHeight = ImGui::GetContentRegionAvail().y;
+    ImGui::BeginChild("QueueList", ImVec2(0, listHeight), true);
+
+    if (queue_.empty()) {
+        ImGui::TextColored(ImVec4(0.4f, 0.4f, 0.4f, 1.0f), "No files in queue");
+    }
+
+    for (size_t i = 0; i < queue_.size(); i++) {
+        auto& item = queue_[i];
+
+        // Status color and icon
+        ImVec4 textColor;
+        const char* statusIcon = "";
+
+        switch (item.status) {
+            case QueueStatus::Done:
+                textColor = ImVec4(0.6f, 0.85f, 0.65f, 1.0f);  // Green
+                statusIcon = "[Done] ";
+                break;
+            case QueueStatus::Failed:
+                textColor = ImVec4(0.95f, 0.5f, 0.5f, 1.0f);  // Red
+                statusIcon = "[Fail] ";
+                break;
+            case QueueStatus::Cancelled:
+                textColor = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);  // Gray
+                statusIcon = "[Cancel] ";
+                break;
+            case QueueStatus::Encoding:
+                textColor = ImVec4(0.7f, 0.8f, 1.0f, 1.0f);  // Blue
+                statusIcon = "[...] ";
+                break;
+            case QueueStatus::Pending:
+            default:
+                textColor = ImVec4(0.7f, 0.7f, 0.7f, 1.0f);  // Neutral
+                statusIcon = "";
+                break;
+        }
+
+        ImGui::PushID(static_cast<int>(i));
+
+        // Combine into single line for simpler click handling
+        string label = string(statusIcon) + item.name;
+        if (item.width > 0) {
+            label += " (" + to_string(item.width) + "x" + to_string(item.height) + ")";
+        }
+
+        ImGui::PushStyleColor(ImGuiCol_Text, textColor);
+        ImGui::Selectable(label.c_str(), false);
+        ImGui::PopStyleColor();
+
+        // Context menu
+        if (ImGui::BeginPopupContextItem("ctx")) {
+            if (item.status == QueueStatus::Encoding) {
+                if (ImGui::MenuItem("Cancel")) {
+                    cancelCurrentEncoding();
+                }
+            } else if (item.status == QueueStatus::Pending) {
+                if (ImGui::MenuItem("Remove")) {
+                    ImGui::EndPopup();
+                    ImGui::PopID();
+                    queue_.erase(queue_.begin() + i);
+                    i--;
+                    continue;
+                }
+            } else {
+                if (ImGui::MenuItem("Remove from list")) {
+                    ImGui::EndPopup();
+                    ImGui::PopID();
+                    queue_.erase(queue_.begin() + i);
+                    i--;
+                    continue;
+                }
+            }
+            ImGui::EndPopup();
+        }
+
+        ImGui::PopID();
+    }
+
+    ImGui::EndChild();
+}
+
+void tcApp::drawPreviewPane() {
+    // Preview section (150px height max)
+    float previewHeight = 150;
+    float availWidth = ImGui::GetContentRegionAvail().x;
+
+    ImGui::Text("Preview");
+
+    if (currentQueueIndex_ >= 0 && session_.hasSourceTexture()) {
+        const Texture& tex = session_.getSourceTexture();
+        if (tex.isAllocated()) {
+            float aspect = static_cast<float>(tex.getHeight()) / tex.getWidth();
+            float previewW = min(availWidth, previewHeight / aspect);
+            float previewH = previewW * aspect;
+            if (previewH > previewHeight) {
+                previewH = previewHeight;
+                previewW = previewH / aspect;
+            }
+
+            // Center the preview
+            float offsetX = (availWidth - previewW) * 0.5f;
+            if (offsetX > 0) {
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offsetX);
+            }
+
+            ImTextureID texId = simgui_imtextureid(tex.getView());
+            ImGui::Image(texId, ImVec2(previewW, previewH));
+        }
+
+        // Progress bar (thin)
+        float progress = session_.getProgress();
+        ImGui::ProgressBar(progress, ImVec2(-1, 8), "");
+
+        // Frame info
+        ImGui::Text("Frame: %d / %d  |  %s",
+            session_.getCurrentFrame(), session_.getTotalFrames(),
+            session_.getPhaseString().c_str());
+    } else {
+        ImGui::TextColored(ImVec4(0.4f, 0.4f, 0.4f, 1.0f), "No encoding in progress");
+        ImGui::Dummy(ImVec2(0, previewHeight - 20));
+    }
+}
+
+void tcApp::drawSettingsPane() {
     ImGui::Text("TCV Encoder v4");
     ImGui::Separator();
 
@@ -194,99 +375,49 @@ void tcApp::drawLeftPane(float width) {
 
     ImGui::Spacing();
 
-    // Advanced settings
+    // Advanced settings (collapsed by default)
     if (ImGui::CollapsingHeader("Advanced Settings")) {
         ImGui::SliderInt("Threads", &settings_.jobs, 0, 16, settings_.jobs == 0 ? "Auto" : "%d");
         ImGui::Checkbox("Force All I-Frames", &settings_.forceAllIFrames);
         ImGui::Checkbox("Enable SKIP", &settings_.enableSkip);
     }
-
-    ImGui::Separator();
-
-    // Encoding status
-    ImGui::Text("Status:");
-    if (state_ == State::Idle) {
-        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Drop a video file to encode");
-    } else if (state_ == State::Encoding) {
-        ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "Encoding...");
-
-        // Progress bar
-        float progress = session_.getProgress();
-        ImGui::ProgressBar(progress, ImVec2(-1, 0));
-
-        // Frame info
-        ImGui::Text("Frame: %d / %d", session_.getCurrentFrame(), session_.getTotalFrames());
-        ImGui::Text("Phase: %s", session_.getPhaseString().c_str());
-    } else if (state_ == State::Done) {
-        if (session_.hasFailed()) {
-            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed!");
-        } else {
-            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Complete!");
-        }
-        ImGui::Text("Encoded %d frames", session_.getEncodedFrames());
-
-        ImGui::Spacing();
-        if (ImGui::Button("Encode Another", ImVec2(-1, 0))) {
-            state_ = State::Idle;
-            fileInfo_ = FileInfo();
-        }
-    }
-
-    ImGui::Separator();
-
-    // Preview
-    if (state_ == State::Encoding && session_.hasSourceTexture()) {
-        ImGui::Text("Preview:");
-        const Texture& tex = session_.getSourceTexture();
-        if (tex.isAllocated()) {
-            float previewW = width - 20;
-            float aspect = static_cast<float>(tex.getHeight()) / tex.getWidth();
-            float previewH = previewW * aspect;
-            // Use sokol imgui to display texture
-            ImTextureID texId = simgui_imtextureid(tex.getView());
-            ImGui::Image(texId, ImVec2(previewW, previewH));
-        }
-    }
-
-    ImGui::Spacing();
-
-    // Instructions
-    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Press O to open file dialog");
-    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Or drag & drop video file");
 }
 
-void tcApp::drawRightPane() {
-    // File info (top section)
+void tcApp::drawFileInfoPane() {
     ImGui::Text("File Information");
     ImGui::Separator();
 
-    if (!fileInfo_.path.empty()) {
-        ImGui::Text("Name: %s", fileInfo_.name.c_str());
-        ImGui::Text("Size: %dx%d @ %.2f fps", fileInfo_.width, fileInfo_.height, fileInfo_.fps);
-        ImGui::Text("Frames: %d", fileInfo_.totalFrames);
+    if (currentQueueIndex_ >= 0) {
+        const auto& item = queue_[currentQueueIndex_];
 
-        // File sizes
-        auto formatSize = [](size_t bytes) -> string {
-            if (bytes < 1024) return to_string(bytes) + " B";
-            if (bytes < 1024 * 1024) return to_string(bytes / 1024) + " KB";
-            return to_string(bytes / (1024 * 1024)) + " MB";
-        };
+        ImGui::Text("Name: %s", item.name.c_str());
+        ImGui::Text("Video: %dx%d @ %.2f fps, %d frames", item.width, item.height, item.fps, item.totalFrames);
 
-        ImGui::Text("Input: %s", formatSize(fileInfo_.inputSize).c_str());
-        if (fileInfo_.outputSize > 0) {
-            ImGui::Text("Output: %s", formatSize(fileInfo_.outputSize).c_str());
-            float ratio = static_cast<float>(fileInfo_.outputSize) / fileInfo_.inputSize * 100.0f;
-            ImGui::Text("Ratio: %.1f%%", ratio);
+        // Audio info
+        if (session_.hasAudio()) {
+            // Convert FourCC to string
+            uint32_t codec = session_.getAudioCodec();
+            char codecStr[5] = {0};
+            codecStr[0] = static_cast<char>((codec >> 24) & 0xFF);
+            codecStr[1] = static_cast<char>((codec >> 16) & 0xFF);
+            codecStr[2] = static_cast<char>((codec >> 8) & 0xFF);
+            codecStr[3] = static_cast<char>(codec & 0xFF);
+
+            ImGui::Text("Audio: %s, %d Hz, %d ch",
+                codecStr,
+                session_.getAudioSampleRate(),
+                session_.getAudioChannels());
+        } else {
+            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Audio: none");
         }
-        ImGui::Text("Output: %s", session_.getOutputPath().c_str());
+
+        ImGui::Text("Output: %s", item.outputPath.c_str());
     } else {
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No file loaded");
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No file being encoded");
     }
+}
 
-    ImGui::Spacing();
-    ImGui::Separator();
-
-    // Log window (bottom section, takes remaining space)
+void tcApp::drawLogPane() {
     ImGui::Text("Log");
     ImGui::SameLine();
     ImGui::Checkbox("Auto-scroll", &autoScrollLog_);
@@ -295,7 +426,7 @@ void tcApp::drawRightPane() {
         logBuffer_.clear();
     }
 
-    float logHeight = ImGui::GetContentRegionAvail().y - 10;
+    float logHeight = ImGui::GetContentRegionAvail().y - 5;
     ImGui::BeginChild("LogWindow", ImVec2(0, logHeight), true,
         ImGuiWindowFlags_HorizontalScrollbar);
 
@@ -316,9 +447,6 @@ void tcApp::drawRightPane() {
                 color = ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
                 break;
         }
-
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "[%s]", entry.timestamp.c_str());
-        ImGui::SameLine();
         ImGui::TextColored(color, "%s", entry.message.c_str());
     }
 
@@ -333,40 +461,83 @@ void tcApp::keyPressed(int key) {
     if (key == 'o' || key == 'O') {
         auto result = loadDialog("Select video file");
         if (result.success && !result.filePath.empty()) {
-            startEncoding(result.filePath);
+            addToQueue(result.filePath);
+            if (state_ == State::Idle) {
+                startNextInQueue();
+            }
         }
     }
 }
 
 void tcApp::filesDropped(const vector<string>& files) {
-    if (!files.empty() && state_ != State::Encoding) {
-        startEncoding(files[0]);
+    for (const auto& file : files) {
+        addToQueue(file);
+    }
+
+    if (state_ == State::Idle) {
+        startNextInQueue();
     }
 }
 
-void tcApp::startEncoding(const string& inputPath) {
-    settings_.inputPath = inputPath;
-    settings_.outputPath = getOutputPath(inputPath);
-
-    // Update file info
-    fileInfo_.path = inputPath;
-    fileInfo_.name = filesystem::path(inputPath).filename().string();
-    fileInfo_.outputSize = 0;
+void tcApp::addToQueue(const string& inputPath) {
+    QueueItem item;
+    item.inputPath = inputPath;
+    item.outputPath = getOutputPath(inputPath);
+    item.name = filesystem::path(inputPath).filename().string();
+    item.status = QueueStatus::Pending;
 
     if (filesystem::exists(inputPath)) {
-        fileInfo_.inputSize = filesystem::file_size(inputPath);
+        item.inputSize = filesystem::file_size(inputPath);
     }
 
-    if (session_.begin(settings_)) {
-        state_ = State::Encoding;
+    queue_.push_back(item);
+    logNotice("TcvEncoder") << "Added to queue: " << item.name;
+}
 
-        // Get video info from session
-        fileInfo_.width = session_.getVideoWidth();
-        fileInfo_.height = session_.getVideoHeight();
-        fileInfo_.fps = session_.getVideoFps();
-        fileInfo_.totalFrames = session_.getTotalFrames();
-    } else {
-        logError("TcvEncoder") << "Failed to start encoding";
+void tcApp::startNextInQueue() {
+    // Find next pending item
+    for (size_t i = 0; i < queue_.size(); i++) {
+        if (queue_[i].status == QueueStatus::Pending) {
+            currentQueueIndex_ = static_cast<int>(i);
+            auto& item = queue_[i];
+
+            settings_.inputPath = item.inputPath;
+            settings_.outputPath = item.outputPath;
+
+            if (session_.begin(settings_)) {
+                item.status = QueueStatus::Encoding;
+                item.width = session_.getVideoWidth();
+                item.height = session_.getVideoHeight();
+                item.fps = session_.getVideoFps();
+                item.totalFrames = session_.getTotalFrames();
+                state_ = State::Encoding;
+
+                logNotice("TcvEncoder") << "Encoding: " << item.name;
+            } else {
+                item.status = QueueStatus::Failed;
+                logError("TcvEncoder") << "Failed to start: " << item.name;
+                currentQueueIndex_ = -1;
+                // Try next
+                startNextInQueue();
+            }
+            return;
+        }
+    }
+
+    // Nothing to encode
+    currentQueueIndex_ = -1;
+}
+
+void tcApp::cancelCurrentEncoding() {
+    if (currentQueueIndex_ >= 0) {
+        queue_[currentQueueIndex_].status = QueueStatus::Cancelled;
+        session_.cancel();
+        logNotice("TcvEncoder") << "Cancelled: " << queue_[currentQueueIndex_].name;
+        currentQueueIndex_ = -1;
+        state_ = State::Idle;
+
+        // Start next
+        startNextInQueue();
     }
 }
 

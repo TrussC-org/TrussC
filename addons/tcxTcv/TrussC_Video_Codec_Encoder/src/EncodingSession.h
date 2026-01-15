@@ -35,10 +35,14 @@ public:
     // Draw preview and progress bar
     void draw(float x, float y, float maxW, float maxH);
 
+    // Cancel current encoding
+    void cancel();
+
     // State queries
     bool isComplete() const { return phase_ == Phase::Complete; }
     bool hasFailed() const { return phase_ == Phase::Failed; }
-    bool isRunning() const { return phase_ != Phase::Idle && phase_ != Phase::Complete && phase_ != Phase::Failed; }
+    bool isCancelled() const { return phase_ == Phase::Cancelled; }
+    bool isRunning() const { return phase_ != Phase::Idle && phase_ != Phase::Complete && phase_ != Phase::Failed && phase_ != Phase::Cancelled; }
     float getProgress() const { return progress_; }
 
     // Get info
@@ -57,6 +61,13 @@ public:
         return (duration > 0 && totalFrames_ > 0) ? totalFrames_ / duration : 30.0f;
     }
 
+    // Audio info (available after begin())
+    bool hasAudio() const { return !audioData_.empty() && audioCodec_ != 0; }
+    uint32_t getAudioCodec() const { return audioCodec_; }
+    int getAudioSampleRate() const { return audioSampleRate_; }
+    int getAudioChannels() const { return audioChannels_; }
+    size_t getAudioDataSize() const { return audioData_.size(); }
+
     // Get current phase as string (for display)
     string getPhaseString() const;
 
@@ -69,7 +80,8 @@ private:
         Idle,
         Encoding,
         Complete,
-        Failed
+        Failed,
+        Cancelled
     };
 
     Phase phase_ = Phase::Idle;

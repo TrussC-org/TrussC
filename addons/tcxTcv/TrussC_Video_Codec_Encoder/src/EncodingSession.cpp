@@ -96,6 +96,17 @@ void EncodingSession::update() {
     }
 }
 
+void EncodingSession::cancel() {
+    if (phase_ == Phase::Encoding) {
+        // Clean up
+        if (source_) {
+            source_->close();
+        }
+        encoder_.end();  // Close the file (partial)
+        phase_ = Phase::Cancelled;
+    }
+}
+
 void EncodingSession::encodeNextFrame() {
     if (currentFrame_ >= totalFrames_) {
         finishEncoding();
@@ -221,6 +232,7 @@ string EncodingSession::getPhaseString() const {
         case Phase::Encoding: return "Encoding";
         case Phase::Complete: return "Complete";
         case Phase::Failed: return "Failed";
+        case Phase::Cancelled: return "Cancelled";
         default: return "Unknown";
     }
 }

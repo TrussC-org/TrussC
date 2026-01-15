@@ -39,18 +39,31 @@ private:
     // Settings
     EncodingSession::Settings settings_;
 
-    // GUI state
-    struct FileInfo {
+    // Queue item status
+    enum class QueueStatus {
+        Pending,
+        Encoding,
+        Done,
+        Failed,
+        Cancelled
+    };
+
+    // Queue item
+    struct QueueItem {
         string name;
-        string path;
+        string inputPath;
+        string outputPath;
+        QueueStatus status = QueueStatus::Pending;
         int width = 0;
         int height = 0;
         float fps = 0;
         int totalFrames = 0;
+        int encodedFrames = 0;
         size_t inputSize = 0;
         size_t outputSize = 0;
     };
-    FileInfo fileInfo_;
+    vector<QueueItem> queue_;
+    int currentQueueIndex_ = -1;  // -1 = nothing encoding
 
     // Log buffer
     struct LogEntry {
@@ -64,14 +77,19 @@ private:
     static constexpr size_t MAX_LOG_ENTRIES = 1000;
 
     // Methods
-    void startEncoding(const string& inputPath);
+    void addToQueue(const string& inputPath);
+    void startNextInQueue();
+    void cancelCurrentEncoding();
     string getOutputPath(const string& inputPath);
     void parseCommandLine();
     void showHelp();
 
     // GUI
     void drawGui();
-    void drawLeftPane(float width);
-    void drawRightPane();
+    void drawQueuePane(float width);
+    void drawPreviewPane();
+    void drawSettingsPane();
+    void drawFileInfoPane();
+    void drawLogPane();
     void setupLogListener();
 };
