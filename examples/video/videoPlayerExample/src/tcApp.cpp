@@ -6,6 +6,7 @@
 // - R: Restart from beginning
 // - Left/Right arrows: Seek
 // - Up/Down arrows: Volume
+// - [ / ]: Speed down/up
 // - L: Load video (enter path in console)
 // =============================================================================
 
@@ -86,7 +87,9 @@ void tcApp::draw() {
             drawBitmapString("State: " + state, getWindowWidth() / 2, 20);
 
             setTextAlign(Right, Baseline);
-            drawBitmapString("Volume: " + to_string((int)(video_.getVolume() * 100)) + "%", getWindowWidth() - 20, 20);
+            string volSpeed = "Vol: " + to_string((int)(video_.getVolume() * 100)) + "% | " +
+                             "Speed: " + to_string(video_.getSpeed()).substr(0, 4) + "x";
+            drawBitmapString(volSpeed, getWindowWidth() - 20, 20);
             popStyle();
         }
     } else {
@@ -101,7 +104,7 @@ void tcApp::draw() {
 
     // Controls help
     setColor(0.78f);
-    drawBitmapString("Space: Play/Pause | R: Restart | Arrows: Seek/Volume | I: Info | L: Load",
+    drawBitmapString("Space: Play/Pause | R: Restart | Arrows: Seek/Vol | []: Speed | I: Info | L: Load",
                     20, getWindowHeight() - 30);
 }
 
@@ -142,6 +145,14 @@ void tcApp::keyPressed(int key) {
     else if (key == KEY_DOWN) {
         // Volume down
         video_.setVolume(video_.getVolume() - 0.1f);
+    }
+    else if (key == '[') {
+        // Speed down
+        video_.setSpeed(video_.getSpeed() - 0.25f);
+    }
+    else if (key == ']') {
+        // Speed up
+        video_.setSpeed(video_.getSpeed() + 0.25f);
     }
     else if (key == 'i' || key == 'I') {
         showInfo_ = !showInfo_;

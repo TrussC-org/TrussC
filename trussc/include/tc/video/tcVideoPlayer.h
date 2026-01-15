@@ -210,6 +210,12 @@ protected:
         setSpeedPlatform(speed);
     }
 
+    void setPanImpl(float pan) override {
+        if (pan != 0.0f) {
+            logWarning("VideoPlayer") << "setPan not supported for native video (AVPlayer)";
+        }
+    }
+
     void setLoopImpl(bool loop) override {
         setLoopPlatform(loop);
     }

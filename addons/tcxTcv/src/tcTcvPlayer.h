@@ -317,6 +317,12 @@ protected:
         }
     }
 
+    void setPanImpl(float pan) override {
+        if (hasAudio_) {
+            audio_.setPan(pan);
+        }
+    }
+
     void setLoopImpl(bool loop) override {
         if (hasAudio_) {
             audio_.setLoop(loop);

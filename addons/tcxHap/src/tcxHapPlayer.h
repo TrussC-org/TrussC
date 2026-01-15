@@ -176,19 +176,31 @@ public:
         // (preserve frameNew_ set by setFrame() for encoding workflows)
         if (playing_ && !paused_) {
             frameNew_ = false;
-            // Advance playback time
+            // Advance playback time (can be negative for reverse)
             playbackTime_ += tc::getDeltaTime() * speed_;
 
             // Calculate target frame
             int targetFrame = static_cast<int>(playbackTime_ / duration_ * totalFrames_);
 
-            // Handle loop / end
+            // Handle forward end (reached last frame)
             if (targetFrame >= totalFrames_) {
                 if (loop_) {
                     playbackTime_ = fmod(playbackTime_, duration_);
                     targetFrame = static_cast<int>(playbackTime_ / duration_ * totalFrames_);
                 } else {
                     targetFrame = totalFrames_ - 1;
+                    markDone();
+                }
+            }
+            // Handle reverse end (reached first frame)
+            else if (targetFrame < 0) {
+                if (loop_) {
+                    playbackTime_ = duration_ + fmod(playbackTime_, duration_);
+                    targetFrame = static_cast<int>(playbackTime_ / duration_ * totalFrames_);
+                    if (targetFrame >= totalFrames_) targetFrame = totalFrames_ - 1;
+                } else {
+                    targetFrame = 0;
+                    playbackTime_ = 0;
                     markDone();
                 }
             }
@@ -253,6 +265,14 @@ public:
     // =========================================================================
 
     HapFormat getHapFormat() const { return hapFormat_; }
+
+    // Override setSpeed to allow negative values (reverse playback)
+    void setSpeed(float speed) {
+        speed_ = speed;  // Allow any value including negative
+        if (initialized_) {
+            setSpeedImpl(speed_);
+        }
+    }
 
     // Check if a file is HAP encoded (static utility)
     static bool isHapFile(const std::string& path) {
@@ -350,7 +370,19 @@ protected:
 
     void setSpeedImpl(float speed) override {
         if (hasAudio_) {
-            audioPlayer_.setSpeed(speed);
+            if (speed < 0) {
+                // Mute audio during reverse playback
+                audioPlayer_.setVolume(0);
+            } else {
+                audioPlayer_.setVolume(volume_);
+                audioPlayer_.setSpeed(speed);
+            }
+        }
+    }
+
+    void setPanImpl(float pan) override {
+        if (hasAudio_) {
+            audioPlayer_.setPan(pan);
         }
     }
 

@@ -43,6 +43,10 @@ public:
         playImpl();
         playing_ = true;
         paused_ = false;
+        // Reapply speed (some platforms reset to 1.0 on play)
+        if (speed_ != 1.0f) {
+            setSpeedImpl(speed_);
+        }
     }
 
     virtual void stop() {
@@ -58,6 +62,10 @@ public:
         if (!initialized_) return;
         setPausedImpl(paused);
         paused_ = paused;
+        // Reapply speed when resuming (some platforms reset to 1.0)
+        if (!paused && speed_ != 1.0f) {
+            setSpeedImpl(speed_);
+        }
     }
 
     void togglePause() {
@@ -113,13 +121,22 @@ public:
     float getVolume() const { return volume_; }
 
     void setSpeed(float speed) {
-        speed_ = (speed < 0.0f) ? 0.0f : (speed > 4.0f) ? 4.0f : speed;
+        speed_ = (speed < 0.0f) ? 0.0f : speed;  // Min 0 (no reverse for standard players)
         if (initialized_) {
             setSpeedImpl(speed_);
         }
     }
 
     float getSpeed() const { return speed_; }
+
+    void setPan(float pan) {
+        pan_ = (pan < -1.0f) ? -1.0f : (pan > 1.0f) ? 1.0f : pan;
+        if (initialized_) {
+            setPanImpl(pan_);
+        }
+    }
+
+    float getPan() const { return pan_; }
 
     void setLoop(bool loop) {
         loop_ = loop;
@@ -194,6 +211,7 @@ protected:
     bool loop_ = false;
     float volume_ = 1.0f;
     float speed_ = 1.0f;
+    float pan_ = 0.0f;
 
     // Thread synchronization
     mutable std::mutex mutex_;
@@ -210,6 +228,7 @@ protected:
     virtual void setPositionImpl(float pct) = 0;
     virtual void setVolumeImpl(float vol) = 0;
     virtual void setSpeedImpl(float speed) = 0;
+    virtual void setPanImpl(float pan) = 0;
     virtual void setLoopImpl(bool loop) = 0;
 
     // Helper to mark frame as new
