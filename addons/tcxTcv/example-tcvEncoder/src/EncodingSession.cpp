@@ -26,6 +26,9 @@ bool EncodingSession::begin(const Settings& settings) {
     if (settings.partitions >= 0) encoder_.setPartitions(settings.partitions);
     if (settings.uber >= 0) encoder_.setUberLevel(settings.uber);
     encoder_.setThreadCount(settings.jobs);
+    encoder_.setForceAllIFrames(settings.forceAllIFrames);
+    encoder_.setEnableSkip(settings.enableSkip);
+    encoder_.setEnableSolid(settings.enableSolid);
 
     // Start encoder
     if (!encoder_.begin(settings.outputPath,

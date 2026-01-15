@@ -41,6 +41,12 @@ void tcApp::parseCommandLine() {
             settings_.partitions = std::stoi(argv[++i]);
         } else if (arg == "--uber" && i + 1 < argc) {
             settings_.uber = std::stoi(argv[++i]);
+        } else if (arg == "--all-i") {
+            settings_.forceAllIFrames = true;
+        } else if (arg == "--no-skip") {
+            settings_.enableSkip = false;
+        } else if (arg == "--no-solid") {
+            settings_.enableSolid = false;
         } else if (arg == "-h" || arg == "--help") {
             showHelp();
             exitApp();

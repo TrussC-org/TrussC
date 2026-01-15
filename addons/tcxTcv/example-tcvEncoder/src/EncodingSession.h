@@ -18,6 +18,10 @@ public:
         int partitions = -1;  // -1 = use quality preset
         int uber = -1;        // -1 = use quality preset
         int jobs = 0;         // 0 = auto
+        // Compression options
+        bool forceAllIFrames = false;
+        bool enableSkip = true;
+        bool enableSolid = true;
     };
 
     // Begin encoding with given settings
