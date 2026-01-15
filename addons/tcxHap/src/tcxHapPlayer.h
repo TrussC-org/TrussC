@@ -172,9 +172,10 @@ public:
     void update() override {
         if (!initialized_) return;
 
-        frameNew_ = false;
-
+        // Only reset frameNew_ when actively playing
+        // (preserve frameNew_ set by setFrame() for encoding workflows)
         if (playing_ && !paused_) {
+            frameNew_ = false;
             // Advance playback time
             playbackTime_ += tc::getDeltaTime() * speed_;
 
