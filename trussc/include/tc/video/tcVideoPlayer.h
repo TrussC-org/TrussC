@@ -167,8 +167,8 @@ public:
     // Pixel access
     // =========================================================================
 
-    unsigned char* getPixels() { return pixels_; }
-    const unsigned char* getPixels() const { return pixels_; }
+    unsigned char* getPixels() override { return pixels_; }
+    const unsigned char* getPixels() const override { return pixels_; }
 
 protected:
     // -------------------------------------------------------------------------

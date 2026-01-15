@@ -264,14 +264,14 @@ public:
 
     // Get RGBA pixels (decoded from BC/DXT)
     // Returns nullptr if no frame has been decoded yet
-    unsigned char* getPixels() {
+    unsigned char* getPixels() override {
         if (!pixelsValid_) {
             decodeFrameToRgba();
         }
         return pixels_.empty() ? nullptr : pixels_.data();
     }
 
-    const unsigned char* getPixels() const {
+    const unsigned char* getPixels() const override {
         if (!pixelsValid_) {
             const_cast<HapPlayer*>(this)->decodeFrameToRgba();
         }
