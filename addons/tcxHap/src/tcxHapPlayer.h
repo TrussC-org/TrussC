@@ -291,6 +291,8 @@ protected:
     void stopImpl() override {
         playbackTime_ = 0;
         currentFrame_ = 0;
+        // Clear texture to prevent old frame from showing
+        texture_.clear();
         if (hasAudio_) {
             audioPlayer_.stop();
         }
