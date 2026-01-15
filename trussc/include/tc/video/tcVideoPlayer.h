@@ -176,7 +176,6 @@ protected:
     // -------------------------------------------------------------------------
 
     void playImpl() override {
-        clearTexture();
         playPlatform();
     }
 
