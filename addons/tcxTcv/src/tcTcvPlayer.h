@@ -586,6 +586,10 @@ private:
                 auto gpuEnd = std::chrono::high_resolution_clock::now();
                 profileGpuMs_ = std::chrono::duration<double, std::milli>(gpuEnd - gpuStart).count();
 #endif
+                // For debug: I-frame = all BC7
+                if (debugMode_) {
+                    std::fill(debugBlockTypes_.begin(), debugBlockTypes_.end(), DebugBlockType::BC7);
+                }
 
                 // Record decode time and return early
                 auto endTime = std::chrono::high_resolution_clock::now();
