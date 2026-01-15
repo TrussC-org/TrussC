@@ -645,8 +645,17 @@ private:
                 tc::logError("TcvPlayer") << "MP3 decode failed!";
             }
         } else if (codec == FOURCC_AAC || codec == FOURCC_MP4A) {
-            // AAC: not directly supported, would need decoder
-            tc::logWarning("TcvPlayer") << "AAC audio codec not yet supported for playback";
+            // AAC: decode using platform-specific decoder
+            tc::logNotice("TcvPlayer") << "Attempting AAC decode...";
+            loaded = soundBuffer->loadAacFromMemory(audioData.data(), audioData.size());
+            if (loaded) {
+                tc::logNotice("TcvPlayer") << "AAC decode successful: "
+                                           << soundBuffer->channels << " ch, "
+                                           << soundBuffer->sampleRate << " Hz, "
+                                           << soundBuffer->numSamples << " samples";
+            } else {
+                tc::logWarning("TcvPlayer") << "AAC decode failed (may not be supported on this platform)";
+            }
         } else {
             tc::logWarning("TcvPlayer") << "Unknown audio codec - cannot decode";
         }

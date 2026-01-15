@@ -194,6 +194,14 @@ public:
         return true;
     }
 
+    // Load AAC/M4A file (platform-specific implementation)
+    // Returns false on unsupported platforms
+    bool loadAac(const std::string& path);
+
+    // Load AAC data from memory (platform-specific implementation)
+    // Returns false on unsupported platforms
+    bool loadAacFromMemory(const void* data, size_t dataSize);
+
     // Load raw PCM data (16-bit signed, little-endian)
     bool loadPcmFromMemory(const void* data, size_t dataSize,
                            int numChannels, int rate, int bitsPerSample = 16,
@@ -660,6 +668,8 @@ public:
             success = buffer_->loadWav(path);
         } else if (ext == "mp3" || ext == "MP3") {
             success = buffer_->loadMp3(path);
+        } else if (ext == "aac" || ext == "AAC" || ext == "m4a" || ext == "M4A") {
+            success = buffer_->loadAac(path);
         } else {
             printf("Sound: unsupported format: %s\n", ext.c_str());
         }

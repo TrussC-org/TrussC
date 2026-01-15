@@ -15,7 +15,7 @@
 | **GPU** | Shader, FBO, Texture |
 | **Math** | Vec2/3/4, Mat3/4, Perlin Noise, Ray, Color spaces (RGB/HSB/OKLab/OKLCH) |
 | **Events** | Keyboard, Mouse, Window resize, Drag & drop, Event<T>, RectNode events |
-| **Sound** | SoundPlayer, SoundStream (mic input), ChipSound |
+| **Sound** | SoundPlayer, SoundStream (mic input), ChipSound, AAC decoding (macOS) |
 | **Video** | VideoPlayer (FFmpeg), VideoGrabber (webcam) |
 | **Network** | TCP Client/Server, UDP |
 | **Utils** | Timer, Thread, Serial, File dialogs, JSON/XML, Clipboard |
@@ -61,6 +61,21 @@
 | animation/ | spriteSheetExample | Sprite sheet animation |
 | game/ | pongExample | Simple game demo |
 | generative/ | flowFieldExample | Generative art with flow fields |
+
+---
+
+## Platform-Specific Audio Features
+
+### AAC Decoding (`SoundBuffer::loadAacFromMemory`)
+
+| Platform | Status | Implementation |
+|----------|--------|----------------|
+| **macOS** | ✅ Implemented | AudioToolbox (ExtAudioFile) |
+| **Windows** | ⬜ Not yet | Media Foundation (planned) |
+| **Linux** | ⬜ Not yet | GStreamer or similar (planned) |
+| **Web** | ❌ N/A | Not applicable |
+
+Used by: TcvPlayer, HapPlayer (for AAC audio tracks)
 
 ---
 
