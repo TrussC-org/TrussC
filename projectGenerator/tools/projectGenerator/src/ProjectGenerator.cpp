@@ -415,8 +415,9 @@ string ProjectGenerator::generate() {
                 string name = entry.path().filename().string();
                 // Skip build directories, output, and generated files
                 if (name == "build" || name == "bin" ||
-                    name == "build-macos" || name == "build-windows" || name == "build-linux" ||
-                    name == "CMakePresets.json" || name == "CMakeUserPresets.json") {
+                    name == "build-macos" || name == "build-windows" || name == "build-linux" || name == "build-web" ||
+                    name == "CMakePresets.json" || name == "CMakeUserPresets.json" ||
+                    name.rfind("build-web.", 0) == 0) {  // build-web.command, build-web.bat, build-web.sh
                     continue;
                 }
                 fs::copy(entry.path(), destPath + "/" + name,
