@@ -44,6 +44,7 @@ void tcApp::draw() {
         float x = (getWindowWidth() - vw * scale) / 2;
         float y = (getWindowHeight() - 80 - vh * scale) / 2;
 
+        resetStyle();  // 描画前にスタイルをリセット（色を白に戻す）
         player_.draw(x, y, vw * scale, vh * scale);
 
         // Info bar

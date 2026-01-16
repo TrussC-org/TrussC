@@ -739,6 +739,11 @@ inline void popStyle() {
     getDefaultContext().popStyle();
 }
 
+// Reset style to default values (white color, fill enabled, etc.)
+inline void resetStyle() {
+    getDefaultContext().resetStyle();
+}
+
 // Translation
 inline void translate(Vec3 pos) {
     getDefaultContext().translate(pos);

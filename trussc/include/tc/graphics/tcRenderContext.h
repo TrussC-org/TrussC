@@ -187,6 +187,11 @@ public:
         }
     }
 
+    // Reset style to default values (white color, fill enabled, etc.)
+    void resetStyle() {
+        style_ = Style();
+    }
+
     // Main implementation (Vec3)
     void translate(Vec3 pos) {
         currentMatrix_ = currentMatrix_ * Mat4::translate(pos.x, pos.y, pos.z);

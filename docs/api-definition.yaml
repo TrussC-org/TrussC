@@ -637,6 +637,16 @@ categories:
         sketch: true
         snippet: "popStyle()"
 
+      - name: resetStyle
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Reset style to default values (white color, fill enabled, stroke disabled)"
+        description_ja: "スタイルをデフォルト値にリセット（白色、塗りつぶし有効、ストローク無効）"
+        sketch: true
+        snippet: "resetStyle()"
+
       - name: getColor
         return: "Color"
         signatures:
