@@ -6,8 +6,7 @@ cmake_minimum_required(VERSION 3.16)
 
 set(ADDON_NAME tcxTls)
 
-# Fetch mbedTLS via FetchContent (extract to libs/ for sharing)
-set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs)
+# Fetch mbedTLS via FetchContent
 include(FetchContent)
 FetchContent_Declare(
     mbedtls

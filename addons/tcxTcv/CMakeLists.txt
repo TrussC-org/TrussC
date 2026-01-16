@@ -9,7 +9,6 @@ cmake_minimum_required(VERSION 3.16)
 set(ADDON_NAME tcxTcv)
 
 # Fetch LZ4 via FetchContent
-set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs)
 include(FetchContent)
 FetchContent_Declare(
     lz4

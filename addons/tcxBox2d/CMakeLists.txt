@@ -6,8 +6,7 @@ cmake_minimum_required(VERSION 3.16)
 
 set(ADDON_NAME tcxBox2d)
 
-# Fetch Box2D via FetchContent (extract to libs/ for sharing)
-set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs)
+# Fetch Box2D via FetchContent
 include(FetchContent)
 FetchContent_Declare(
     box2d

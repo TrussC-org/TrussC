@@ -820,6 +820,14 @@ void VideoPlayer::previousFramePlatform() {
     }
 }
 
+
+// Audio track support (stub - not yet implemented for Windows)
+bool VideoPlayer::hasAudioPlatform() const { return false; }
+uint32_t VideoPlayer::getAudioCodecPlatform() const { return 0; }
+int VideoPlayer::getAudioSampleRatePlatform() const { return 0; }
+int VideoPlayer::getAudioChannelsPlatform() const { return 0; }
+std::vector<uint8_t> VideoPlayer::getAudioDataPlatform() const { return {}; }
+
 } // namespace trussc
 
 #endif // _WIN32

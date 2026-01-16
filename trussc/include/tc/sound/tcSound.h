@@ -29,6 +29,7 @@
 #include <cstring>
 #include <cmath>
 
+#ifndef TC_SOUND_IMPL
 // stb_vorbis forward declaration
 extern "C" {
     typedef struct stb_vorbis stb_vorbis;
@@ -74,8 +75,10 @@ extern "C" {
         drmp3_uint64* pTotalFrameCount, void* pAllocationCallbacks);
     void drmp3_free(void* p, void* pAllocationCallbacks);
 }
+#endif // TC_SOUND_IMPL
 
 namespace trussc {
+
 
 // ---------------------------------------------------------------------------
 // Sound Buffer (decoded data)

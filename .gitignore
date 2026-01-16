@@ -139,3 +139,8 @@ addons/**/build-web.sh
 examples/CMakeLists.txt
 addons/CMakeLists.txt
 addons/tcxTcv/libs/
+
+# =============================================================================
+# Auto-generated Shader Headers (sokol-shdc output)
+# =============================================================================
+trussc/include/tc/gpu/shaders/lut.glsl.h

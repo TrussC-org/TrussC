@@ -7,7 +7,6 @@ cmake_minimum_required(VERSION 3.16)
 set(ADDON_NAME tcxHap)
 
 # Fetch dependencies to libs/ for sharing
-set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs)
 include(FetchContent)
 
 # Allow older CMake versions in dependencies (Snappy uses 2.4)
