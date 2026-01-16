@@ -15,6 +15,8 @@
 #include <windows.h>
 #include <mfapi.h>
 #include <mfmediaengine.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
 #include <mferror.h>
 #include <d3d11.h>
 #include <wrl/client.h>
@@ -22,6 +24,7 @@
 #pragma comment(lib, "mf.lib")
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfuuid.lib")
+#pragma comment(lib, "mfreadwrite.lib")
 #pragma comment(lib, "d3d11.lib")
 
 using namespace Microsoft::WRL;
@@ -131,11 +134,19 @@ public:
     int getWidth() const { return width_; }
     int getHeight() const { return height_; }
 
+    // Audio track info
+    bool hasAudio() const { return hasAudio_; }
+    uint32_t getAudioCodec() const { return audioCodec_; }
+    int getAudioSampleRate() const { return audioSampleRate_; }
+    int getAudioChannels() const { return audioChannels_; }
+    std::vector<uint8_t> getAudioData() const;
+
 private:
     bool createD3D11Device();
     bool createMediaEngine(const std::string& path);
     bool createRenderTexture();
     bool transferVideoFrame();
+    bool loadAudioInfo(const std::string& path);
 
     // D3D11 resources
     ComPtr<ID3D11Device> d3dDevice_;
@@ -165,6 +176,13 @@ private:
 
     // Pixel buffer for CPU readback
     unsigned char* pixels_ = nullptr;
+
+    // Audio track info
+    bool hasAudio_ = false;
+    uint32_t audioCodec_ = 0;
+    int audioSampleRate_ = 0;
+    int audioChannels_ = 0;
+    std::string mediaPath_;
 
     CRITICAL_SECTION criticalSection_;
     bool csInitialized_ = false;
@@ -425,10 +443,119 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
     return false;
 }
 
+bool TCVideoPlayerImpl::loadAudioInfo(const std::string& path) {
+    // Use IMFSourceReader to get audio track info
+    int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+    std::wstring widePath(wideLen, 0);
+    MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, &widePath[0], wideLen);
+
+    ComPtr<IMFSourceReader> reader;
+    HRESULT hr = MFCreateSourceReaderFromURL(widePath.c_str(), nullptr, &reader);
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    // Get native audio media type
+    ComPtr<IMFMediaType> nativeType;
+    hr = reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &nativeType);
+    if (FAILED(hr)) {
+        // No audio stream
+        hasAudio_ = false;
+        return true;
+    }
+
+    hasAudio_ = true;
+
+    // Get audio format info
+    GUID subtype;
+    hr = nativeType->GetGUID(MF_MT_SUBTYPE, &subtype);
+    if (SUCCEEDED(hr)) {
+        audioCodec_ = subtype.Data1;
+    }
+
+    UINT32 sampleRate = 0;
+    hr = nativeType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sampleRate);
+    if (SUCCEEDED(hr)) {
+        audioSampleRate_ = sampleRate;
+    }
+
+    UINT32 channels = 0;
+    hr = nativeType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &channels);
+    if (SUCCEEDED(hr)) {
+        audioChannels_ = channels;
+    }
+
+    logNotice("VideoPlayer") << "Audio: " << audioChannels_ << "ch, " << audioSampleRate_ << "Hz";
+    return true;
+}
+
+std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
+    if (!hasAudio_ || mediaPath_.empty()) {
+        return {};
+    }
+
+    // Use IMFSourceReader to decode audio to PCM
+    int wideLen = MultiByteToWideChar(CP_UTF8, 0, mediaPath_.c_str(), -1, nullptr, 0);
+    std::wstring widePath(wideLen, 0);
+    MultiByteToWideChar(CP_UTF8, 0, mediaPath_.c_str(), -1, &widePath[0], wideLen);
+
+    ComPtr<IMFSourceReader> reader;
+    HRESULT hr = MFCreateSourceReaderFromURL(widePath.c_str(), nullptr, &reader);
+    if (FAILED(hr)) {
+        return {};
+    }
+
+    // Configure to output PCM
+    ComPtr<IMFMediaType> pcmType;
+    hr = MFCreateMediaType(&pcmType);
+    if (FAILED(hr)) return {};
+
+    pcmType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+    pcmType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
+    pcmType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+    pcmType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, audioSampleRate_);
+    pcmType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, audioChannels_);
+
+    hr = reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, pcmType.Get());
+    if (FAILED(hr)) return {};
+
+    // Read all audio samples
+    std::vector<uint8_t> audioData;
+    audioData.reserve(audioSampleRate_ * audioChannels_ * 2 * 10); // Reserve for ~10 sec
+
+    while (true) {
+        ComPtr<IMFSample> sample;
+        DWORD flags = 0;
+
+        hr = reader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nullptr, &flags, nullptr, &sample);
+        if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) {
+            break;
+        }
+
+        if (!sample) continue;
+
+        ComPtr<IMFMediaBuffer> buffer;
+        hr = sample->ConvertToContiguousBuffer(&buffer);
+        if (FAILED(hr)) continue;
+
+        BYTE* data = nullptr;
+        DWORD length = 0;
+        hr = buffer->Lock(&data, nullptr, &length);
+        if (SUCCEEDED(hr)) {
+            audioData.insert(audioData.end(), data, data + length);
+            buffer->Unlock();
+        }
+    }
+
+    return audioData;
+}
+
 bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     if (!InitMediaFoundation()) {
         return false;
     }
+
+    mediaPath_ = path;
 
     InitializeCriticalSection(&criticalSection_);
     csInitialized_ = true;
@@ -460,6 +587,9 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         logError("VideoPlayer") << "Timeout waiting for video to load";
         return false;
     }
+
+    // Load audio track info
+    loadAudioInfo(path);
 
     isLoaded_ = true;
     return true;
@@ -496,6 +626,11 @@ void TCVideoPlayerImpl::close() {
     isFinished_ = false;
     width_ = 0;
     height_ = 0;
+    hasAudio_ = false;
+    audioCodec_ = 0;
+    audioSampleRate_ = 0;
+    audioChannels_ = 0;
+    mediaPath_.clear();
 
     LeaveCriticalSection(&criticalSection_);
 
@@ -821,12 +956,41 @@ void VideoPlayer::previousFramePlatform() {
 }
 
 
-// Audio track support (stub - not yet implemented for Windows)
-bool VideoPlayer::hasAudioPlatform() const { return false; }
-uint32_t VideoPlayer::getAudioCodecPlatform() const { return 0; }
-int VideoPlayer::getAudioSampleRatePlatform() const { return 0; }
-int VideoPlayer::getAudioChannelsPlatform() const { return 0; }
-std::vector<uint8_t> VideoPlayer::getAudioDataPlatform() const { return {}; }
+// Audio track support
+bool VideoPlayer::hasAudioPlatform() const {
+    if (platformHandle_) {
+        return static_cast<TCVideoPlayerImpl*>(platformHandle_)->hasAudio();
+    }
+    return false;
+}
+
+uint32_t VideoPlayer::getAudioCodecPlatform() const {
+    if (platformHandle_) {
+        return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getAudioCodec();
+    }
+    return 0;
+}
+
+int VideoPlayer::getAudioSampleRatePlatform() const {
+    if (platformHandle_) {
+        return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getAudioSampleRate();
+    }
+    return 0;
+}
+
+int VideoPlayer::getAudioChannelsPlatform() const {
+    if (platformHandle_) {
+        return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getAudioChannels();
+    }
+    return 0;
+}
+
+std::vector<uint8_t> VideoPlayer::getAudioDataPlatform() const {
+    if (platformHandle_) {
+        return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getAudioData();
+    }
+    return {};
+}
 
 } // namespace trussc
 
