@@ -202,6 +202,36 @@ public:
     // Returns false on unsupported platforms
     bool loadAacFromMemory(const void* data, size_t dataSize);
 
+    // -------------------------------------------------------------------------
+    // ADTS header utilities (for raw AAC from MOV containers)
+    // -------------------------------------------------------------------------
+    // Get ADTS sample rate index
+    static int getAdtsSampleRateIndex(int sampleRate) {
+        static const int rates[] = {96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350};
+        for (int i = 0; i < 13; i++) {
+            if (rates[i] == sampleRate) return i;
+        }
+        return 4; // Default to 44100
+    }
+
+    // Create 7-byte ADTS header for one AAC frame
+    // frameLength: size of raw AAC frame data (without header)
+    // profile: AAC profile (2 = AAC-LC, which is most common)
+    static void createAdtsHeader(uint8_t* header, int frameLength, int sampleRate, int channels, int profile = 2) {
+        int sampleRateIndex = getAdtsSampleRateIndex(sampleRate);
+        int channelConfig = channels;
+        int fullLength = frameLength + 7; // ADTS header is 7 bytes
+        int adtsProfile = (profile > 0) ? (profile - 1) : 1; // ADTS uses profile-1
+
+        header[0] = 0xFF; // Syncword high
+        header[1] = 0xF1; // Syncword low (4) + ID (0) + Layer (00) + Protection absent (1)
+        header[2] = ((adtsProfile & 0x03) << 6) | ((sampleRateIndex & 0x0F) << 2) | ((channelConfig >> 2) & 0x01);
+        header[3] = ((channelConfig & 0x03) << 6) | ((fullLength >> 11) & 0x03);
+        header[4] = (fullLength >> 3) & 0xFF;
+        header[5] = ((fullLength & 0x07) << 5) | 0x1F; // Buffer fullness high (0x7FF)
+        header[6] = 0xFC; // Buffer fullness low + frames - 1
+    }
+
 #ifdef __EMSCRIPTEN__
     // Web platform: complete deferred AAC loading (blocking)
     // Called from Sound::play() if loading was deferred during setup

@@ -106,6 +106,10 @@ struct MovTrack {
         return codecFourCC == FOURCC_MP3;
     }
 
+    bool isAac() const {
+        return codecFourCC == FOURCC_MP4A;
+    }
+
     bool isBigEndianPcm() const {
         return codecFourCC == FOURCC_TWOS;
     }

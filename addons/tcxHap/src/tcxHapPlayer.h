@@ -477,6 +477,10 @@ private:
             // MP3 audio - extract and decode
             return loadMp3Audio();
         }
+        else if (audioTrack_->isAac()) {
+            // AAC audio - extract and decode
+            return loadAacAudio();
+        }
         else {
             tc::logWarning("HapPlayer") << "Unsupported audio codec: "
                 << MovParser::fourccToString(codec);
@@ -567,6 +571,59 @@ private:
         hasAudio_ = true;
 
         tc::logNotice("HapPlayer") << "Loaded MP3 audio: "
+            << buffer.channels << " ch, "
+            << buffer.sampleRate << " Hz";
+
+        return true;
+    }
+
+    bool loadAacAudio() {
+        if (!audioTrack_) return false;
+
+        // Calculate total size including ADTS headers (7 bytes per frame)
+        size_t totalSize = 0;
+        for (const auto& sample : audioTrack_->samples) {
+            totalSize += sample.size + 7;  // raw frame + ADTS header
+        }
+
+        // Read all AAC data with ADTS headers
+        std::vector<uint8_t> aacData;
+        aacData.reserve(totalSize);
+
+        int sampleRate = audioTrack_->sampleRate;
+        int channels = audioTrack_->channels;
+
+        for (size_t i = 0; i < audioTrack_->samples.size(); i++) {
+            std::vector<uint8_t> sampleData;
+            if (movParser_.readSample(*audioTrack_, i, sampleData)) {
+                // Add ADTS header for this frame
+                uint8_t adtsHeader[7];
+                tc::SoundBuffer::createAdtsHeader(adtsHeader, static_cast<int>(sampleData.size()),
+                                                   sampleRate, channels);
+                aacData.insert(aacData.end(), adtsHeader, adtsHeader + 7);
+                aacData.insert(aacData.end(), sampleData.begin(), sampleData.end());
+            }
+        }
+
+        if (aacData.empty()) {
+            tc::logWarning("HapPlayer") << "Failed to read AAC audio data";
+            return false;
+        }
+
+        tc::logNotice("HapPlayer") << "AAC data with ADTS: " << aacData.size() << " bytes, "
+            << audioTrack_->samples.size() << " frames";
+
+        // Decode AAC from memory (now with ADTS headers)
+        tc::SoundBuffer buffer;
+        if (!buffer.loadAacFromMemory(aacData.data(), aacData.size())) {
+            tc::logWarning("HapPlayer") << "Failed to decode AAC audio";
+            return false;
+        }
+
+        audioPlayer_.loadFromBuffer(buffer);
+        hasAudio_ = true;
+
+        tc::logNotice("HapPlayer") << "Loaded AAC audio: "
             << buffer.channels << " ch, "
             << buffer.sampleRate << " Hz";
 
