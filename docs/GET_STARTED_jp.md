@@ -45,7 +45,7 @@ Linux では追加の開発パッケージが必要です:
 
 ```bash
 # 必須: コアビルド依存
-sudo apt install build-essential libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libgtk-3-0-dev
+sudo apt install build-essential libx11-dev libxi-dev libxcursor-dev libxrandr-dev libgl1-mesa-dev libasound2-dev libgtk-3-dev pkg-config
 
 # 必須: 動画再生 (FFmpeg)
 sudo apt install libavcodec-dev libavformat-dev libswscale-dev libavutil-dev

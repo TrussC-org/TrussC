@@ -45,7 +45,7 @@ Linux requires additional development packages:
 
 ```bash
 # Required: Core build dependencies
-sudo apt install build-essential libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libgtk-3-0-dev
+sudo apt install build-essential libx11-dev libxi-dev libxcursor-dev libxrandr-dev libgl1-mesa-dev libasound2-dev libgtk-3-dev pkg-config
 
 # Required: Video playback (FFmpeg)
 sudo apt install libavcodec-dev libavformat-dev libswscale-dev libavutil-dev
