@@ -8,7 +8,7 @@ void tcApp::setup() {
     // Setup log listener
     setupLogListener();
 
-    logNotice("TcvEncoder") << "TCV Encoder v4 - ImGui Edition";
+    logNotice("TcvEncoder") << "TCV Encoder v5 - ImGui Edition";
 
     // Initialize default settings (balanced preset)
     settings_.quality = 1;
@@ -68,6 +68,8 @@ void tcApp::parseCommandLine() {
             settings_.partitions = stoi(argv[++i]);
         } else if (arg == "--uber" && i + 1 < argc) {
             settings_.uber = stoi(argv[++i]);
+        } else if (arg == "--chunks" && i + 1 < argc) {
+            settings_.maxChunks = stoi(argv[++i]);
         } else if (arg == "--all-i") {
             settings_.forceAllIFrames = true;
         } else if (arg == "--no-skip") {
@@ -100,6 +102,7 @@ void tcApp::showHelp() {
     logNotice("TcvEncoder") << "  -o, --output     Output .tcv file";
     logNotice("TcvEncoder") << "  -q, --quality    fast(0), balanced(1), high(2)";
     logNotice("TcvEncoder") << "  -j, --jobs N     Number of threads (0=auto)";
+    logNotice("TcvEncoder") << "  --chunks N       LZ4 chunks for parallel decode (1-16, default 16)";
 }
 
 void tcApp::update() {
@@ -349,7 +352,7 @@ void tcApp::drawPreviewPane() {
 }
 
 void tcApp::drawSettingsPane() {
-    ImGui::Text("TCV Encoder v4");
+    ImGui::Text("TCV Encoder v5");
     ImGui::Separator();
 
     // Quality presets
@@ -378,6 +381,9 @@ void tcApp::drawSettingsPane() {
     // Advanced settings (collapsed by default)
     if (ImGui::CollapsingHeader("Advanced Settings")) {
         ImGui::SliderInt("Threads", &settings_.jobs, 0, 16, settings_.jobs == 0 ? "Auto" : "%d");
+        ImGui::SliderInt("LZ4 Chunks", &settings_.maxChunks, 1, 16);
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "(parallel decode)");
         ImGui::Checkbox("Force All I-Frames", &settings_.forceAllIFrames);
         ImGui::Checkbox("Enable SKIP", &settings_.enableSkip);
     }

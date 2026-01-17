@@ -24,12 +24,12 @@ namespace tcx {
 // TCVC File Format Constants
 // ---------------------------------------------------------------------------
 constexpr uint32_t TCV_SIGNATURE = 0x56435654;  // "TCVC" little-endian
-constexpr uint16_t TCV_VERSION = 4;             // v4: GPU layout (no conversion on decode)
+constexpr uint16_t TCV_VERSION = 5;             // v5: Chunked LZ4 for parallel decode
 constexpr uint16_t TCV_HEADER_SIZE = 64;
 constexpr uint16_t TCV_BLOCK_SIZE = 16;         // 16x16 pixel blocks
 
 // Packet types
-constexpr uint8_t TCV_PACKET_I_FRAME   = 0x01;  // I-frame: BC7 block data + LZ4
+constexpr uint8_t TCV_PACKET_I_FRAME   = 0x01;  // I-frame: BC7 block data + chunked LZ4
 constexpr uint8_t TCV_PACKET_P_FRAME   = 0x02;  // P-frame: SKIP/BC7 commands + LZ4
 constexpr uint8_t TCV_PACKET_REF_FRAME = 0x03;  // REF-frame: exact duplicate reference
 
@@ -41,6 +41,10 @@ constexpr uint8_t TCV_BLOCK_RUN_MASK  = 0x7F;   // Mask for run length (0-127 = 
 
 // I-frame buffer size
 constexpr int TCV_IFRAME_BUFFER_SIZE = 10;
+
+// LZ4 chunk settings (v5)
+constexpr size_t TCV_MIN_CHUNK_SIZE = 128 * 1024;  // 128KB minimum per chunk
+constexpr int TCV_MAX_CHUNKS = 16;                  // Encoder limit (decoder accepts any)
 
 // ---------------------------------------------------------------------------
 // TCVC Header Structure (64 bytes)
@@ -417,6 +421,9 @@ public:
     // Enable/disable SKIP blocks (for benchmarking)
     void setEnableSkip(bool enable) { enableSkip_ = enable; }
 
+    // Max LZ4 chunks for I-frame parallel decode (1-16)
+    void setMaxChunks(int maxChunks) { maxChunks_ = std::clamp(maxChunks, 1, 16); }
+
 private:
     // File output
     std::ofstream file_;
@@ -427,6 +434,7 @@ private:
     int partitions_ = -1;
     int uber_ = -1;
     int numThreads_ = 0;
+    int maxChunks_ = TCV_MAX_CHUNKS;  // Default 16
 
     // Compression options
     bool forceAllIFrames_ = false;
@@ -644,22 +652,50 @@ private:
         // Encode all blocks to BC7 (multi-threaded)
         encodeAllBlocksToBC7();
 
-        // Build packet: all BC7 blocks with LZ4 compression
+        // Calculate chunk count based on data size and maxChunks_ setting
         uint32_t dataSize = static_cast<uint32_t>(bc7Buffer_.size());
-        int compressedSize = LZ4_compress_default(
-            reinterpret_cast<const char*>(bc7Buffer_.data()),
-            lz4Buffer_.data(),
-            static_cast<int>(dataSize),
-            static_cast<int>(lz4Buffer_.size())
-        );
+        int chunkCount = std::max(1, std::min(maxChunks_,
+            static_cast<int>(dataSize / TCV_MIN_CHUNK_SIZE)));
+        size_t chunkSize = dataSize / chunkCount;
 
-        // Write I-frame packet
+        // Compress each chunk with LZ4
+        std::vector<uint32_t> chunkCompressedSizes(chunkCount);
+        std::vector<std::vector<char>> chunkBuffers(chunkCount);
+
+        for (int i = 0; i < chunkCount; i++) {
+            size_t offset = i * chunkSize;
+            size_t thisChunkSize = (i == chunkCount - 1)
+                ? (dataSize - offset)  // Last chunk gets remainder
+                : chunkSize;
+
+            // Allocate buffer for compressed data
+            chunkBuffers[i].resize(LZ4_compressBound(static_cast<int>(thisChunkSize)));
+
+            int compressed = LZ4_compress_default(
+                reinterpret_cast<const char*>(bc7Buffer_.data() + offset),
+                chunkBuffers[i].data(),
+                static_cast<int>(thisChunkSize),
+                static_cast<int>(chunkBuffers[i].size())
+            );
+            chunkCompressedSizes[i] = static_cast<uint32_t>(compressed);
+        }
+
+        // Write I-frame packet (v5 chunked format)
         uint8_t packetType = TCV_PACKET_I_FRAME;
-        uint32_t compSize = static_cast<uint32_t>(compressedSize);
+        uint8_t chunkCountU8 = static_cast<uint8_t>(chunkCount);
         file_.write(reinterpret_cast<const char*>(&packetType), 1);
+        file_.write(reinterpret_cast<const char*>(&chunkCountU8), 1);
         file_.write(reinterpret_cast<const char*>(&dataSize), 4);
-        file_.write(reinterpret_cast<const char*>(&compSize), 4);
-        file_.write(lz4Buffer_.data(), compressedSize);
+
+        // Write chunk sizes
+        for (int i = 0; i < chunkCount; i++) {
+            file_.write(reinterpret_cast<const char*>(&chunkCompressedSizes[i]), 4);
+        }
+
+        // Write chunk data
+        for (int i = 0; i < chunkCount; i++) {
+            file_.write(chunkBuffers[i].data(), chunkCompressedSizes[i]);
+        }
 
         // Add to I-frame buffer for P-frame references
         IFrameEntry& entry = iFrameBuffer_[iFrameBufferHead_];

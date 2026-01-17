@@ -36,6 +36,7 @@ bool EncodingSession::begin(const Settings& settings) {
     encoder_.setThreadCount(settings.jobs);
     encoder_.setForceAllIFrames(settings.forceAllIFrames);
     encoder_.setEnableSkip(settings.enableSkip);
+    encoder_.setMaxChunks(settings.maxChunks);
 
     // Start encoder
     if (!encoder_.begin(settings.outputPath,

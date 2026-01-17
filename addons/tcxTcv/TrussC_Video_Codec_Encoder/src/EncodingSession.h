@@ -21,6 +21,7 @@ public:
         int partitions = -1;  // -1 = use quality preset
         int uber = -1;        // -1 = use quality preset
         int jobs = 0;         // 0 = auto
+        int maxChunks = 16;   // LZ4 chunks for parallel decode (1-16)
         // Compression options
         bool forceAllIFrames = false;
         bool enableSkip = true;

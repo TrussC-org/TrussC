@@ -1,8 +1,11 @@
 #pragma once
 
 // =============================================================================
-// tcTcvPlayer.h - TCVC video player (v4: GPU layout, zero-copy decode)
+// tcTcvPlayer.h - TCVC video player (v5: chunked LZ4 parallel decode)
 // =============================================================================
+
+// DEBUG: Enable profiling to see where time is spent
+// #define TCV_PROFILE
 
 #include <TrussC.h>
 #include <fstream>
@@ -10,6 +13,7 @@
 #include <cstring>
 #include <unordered_map>
 #include <chrono>
+#include <thread>
 
 #include "tcTcvEncoder.h"  // For TcvHeader and constants
 #include <lz4.h>           // For LZ4 decompression
@@ -425,7 +429,7 @@ private:
     double profileCopyMs_ = 0.0;
     double profileGpuMs_ = 0.0;
     bool profileCacheHit_ = false;
-    int profileFrameCount_ = 0;
+    int profileChunkCount_ = 0;
 #endif
 
     // Build index of frame offsets for seeking
@@ -444,11 +448,21 @@ private:
             file_.read(reinterpret_cast<char*>(&entry.packetType), 1);
 
             if (entry.packetType == TCV_PACKET_I_FRAME) {
-                // v3: I-frame always LZ4 [type][dataSize][compSize][data]
+                // v5: I-frame chunked LZ4 [type][chunkCount][uncompSize][chunkSizes...][data...]
+                uint8_t chunkCount;
+                file_.read(reinterpret_cast<char*>(&chunkCount), 1);
                 file_.read(reinterpret_cast<char*>(&entry.dataSize), 4);
-                file_.read(reinterpret_cast<char*>(&entry.compressedSize), 4);
                 entry.refFrame = 0;
-                file_.seekg(entry.compressedSize, std::ios::cur);
+
+                // Read and sum chunk sizes to get total compressed size
+                uint32_t totalCompressed = 0;
+                for (int c = 0; c < chunkCount; c++) {
+                    uint32_t chunkSize;
+                    file_.read(reinterpret_cast<char*>(&chunkSize), 4);
+                    totalCompressed += chunkSize;
+                }
+                entry.compressedSize = totalCompressed;
+                file_.seekg(totalCompressed, std::ios::cur);
             } else if (entry.packetType == TCV_PACKET_P_FRAME) {
                 // v3: P-frame always LZ4 [type][refFrame][dataSize][compSize][data]
                 file_.read(reinterpret_cast<char*>(&entry.refFrame), 4);
@@ -498,17 +512,34 @@ private:
         auto ioStart = std::chrono::high_resolution_clock::now();
 #endif
 
-        // Seek to frame data and skip header
+        // Seek to frame data
         file_.seekg(entry.offset);
+
+        // Read packet header (v5 chunked format)
         uint8_t packetType;
+        uint8_t chunkCount;
+        uint32_t uncompressedSize;
         file_.read(reinterpret_cast<char*>(&packetType), 1);
-
-        // Read sizes and decompress (v3: always LZ4)
-        uint32_t uncompressedSize, compressedSize;
+        file_.read(reinterpret_cast<char*>(&chunkCount), 1);
         file_.read(reinterpret_cast<char*>(&uncompressedSize), 4);
-        file_.read(reinterpret_cast<char*>(&compressedSize), 4);
 
-        file_.read(lz4CompressedBuffer_.data(), compressedSize);
+        // Read chunk sizes
+        std::vector<uint32_t> chunkSizes(chunkCount);
+        for (int i = 0; i < chunkCount; i++) {
+            file_.read(reinterpret_cast<char*>(&chunkSizes[i]), 4);
+        }
+
+        // Calculate total compressed size and read all chunk data
+        size_t totalCompressed = 0;
+        for (int i = 0; i < chunkCount; i++) {
+            totalCompressed += chunkSizes[i];
+        }
+
+        // Ensure buffer is large enough
+        if (lz4CompressedBuffer_.size() < totalCompressed) {
+            lz4CompressedBuffer_.resize(totalCompressed);
+        }
+        file_.read(lz4CompressedBuffer_.data(), totalCompressed);
 
 #ifdef TCV_PROFILE
         auto ioEnd = std::chrono::high_resolution_clock::now();
@@ -516,31 +547,52 @@ private:
         auto lz4Start = std::chrono::high_resolution_clock::now();
 #endif
 
-        int decompressed = LZ4_decompress_safe(
-            lz4CompressedBuffer_.data(),
-            lz4DecompressedBuffer_.data(),
-            static_cast<int>(compressedSize),
-            static_cast<int>(lz4DecompressedBuffer_.size())
-        );
-        if (decompressed != static_cast<int>(uncompressedSize)) {
-            tc::logError("TcvPlayer") << "LZ4 decompression failed for I-frame " << frameNum;
-            static std::vector<uint8_t> empty;
-            return empty;
+        // Parallel LZ4 decompress each chunk
+        size_t chunkUncompressedSize = uncompressedSize / chunkCount;
+        std::vector<std::thread> threads;
+        std::vector<bool> success(chunkCount, true);
+
+        size_t compressedOffset = 0;
+        for (int i = 0; i < chunkCount; i++) {
+            size_t outOffset = i * chunkUncompressedSize;
+            size_t outSize = (i == chunkCount - 1)
+                ? (uncompressedSize - outOffset)  // Last chunk gets remainder
+                : chunkUncompressedSize;
+            size_t inOffset = compressedOffset;
+            uint32_t inSize = chunkSizes[i];
+            compressedOffset += inSize;
+
+            threads.emplace_back([this, &bc7Result, &success, i, inOffset, inSize, outOffset, outSize]() {
+                int decompressed = LZ4_decompress_safe(
+                    lz4CompressedBuffer_.data() + inOffset,
+                    reinterpret_cast<char*>(bc7Result.data() + outOffset),
+                    static_cast<int>(inSize),
+                    static_cast<int>(outSize)
+                );
+                if (decompressed != static_cast<int>(outSize)) {
+                    success[i] = false;
+                }
+            });
+        }
+
+        for (auto& t : threads) {
+            t.join();
+        }
+
+        // Check for errors
+        for (int i = 0; i < chunkCount; i++) {
+            if (!success[i]) {
+                tc::logError("TcvPlayer") << "LZ4 decompression failed for I-frame " << frameNum << " chunk " << i;
+                static std::vector<uint8_t> empty;
+                return empty;
+            }
         }
 
 #ifdef TCV_PROFILE
         auto lz4End = std::chrono::high_resolution_clock::now();
         profileLz4Ms_ = std::chrono::duration<double, std::milli>(lz4End - lz4Start).count();
-        auto copyStart = std::chrono::high_resolution_clock::now();
-#endif
-
-        // Parse BC7 block data from buffer
-        const uint8_t* blockData = reinterpret_cast<const uint8_t*>(lz4DecompressedBuffer_.data());
-        decodeIFrameFromBuffer(blockData, bc7Result.data());
-
-#ifdef TCV_PROFILE
-        auto copyEnd = std::chrono::high_resolution_clock::now();
-        profileCopyMs_ = std::chrono::duration<double, std::milli>(copyEnd - copyStart).count();
+        profileCopyMs_ = 0.0;
+        profileChunkCount_ = chunkCount;
 #endif
 
         // Cache it (limit cache size to avoid memory issues)
@@ -618,15 +670,14 @@ private:
                 }
 
 #ifdef TCV_PROFILE
-                // Log profile every 30 frames
-                profileFrameCount_++;
-                if (profileFrameCount_ % 30 == 0) {
-                    tc::logNotice("TcvPlayer") << "Profile: IO=" << profileFileIoMs_
-                        << "ms, LZ4=" << profileLz4Ms_
-                        << "ms, Copy=" << profileCopyMs_
-                        << "ms, GPU=" << profileGpuMs_
-                        << "ms, Cache=" << (profileCacheHit_ ? "HIT" : "MISS");
-                }
+                // Log every I-frame profile
+                tc::logNotice("TcvPlayer") << "I-frame " << frameNum
+                    << ": IO=" << profileFileIoMs_
+                    << "ms, LZ4=" << profileLz4Ms_
+                    << "ms, GPU=" << profileGpuMs_
+                    << "ms, Chunks=" << profileChunkCount_
+                    << ", Cache=" << (profileCacheHit_ ? "HIT" : "MISS")
+                    << ", Total=" << ms << "ms";
 #endif
                 return;
             }
@@ -707,7 +758,10 @@ private:
         }
 
         // Upload to GPU texture
+        auto gpuStart = std::chrono::high_resolution_clock::now();
         texture_.updateCompressed(bc7Buffer_.data(), bc7FrameSize_);
+        auto gpuEnd = std::chrono::high_resolution_clock::now();
+        double gpuMs = std::chrono::duration<double, std::milli>(gpuEnd - gpuStart).count();
 
         // Record decode time (low-pass filter)
         auto endTime = std::chrono::high_resolution_clock::now();
@@ -717,6 +771,13 @@ private:
         } else {
             constexpr double kAlpha = 0.05;
             decodeTimeMs_ = decodeTimeMs_ * (1.0 - kAlpha) + ms * kAlpha;
+        }
+
+        // Debug: log P-frame timing every 30 frames
+        static int pFrameLogCount = 0;
+        if (pFrameLogCount++ % 30 == 0) {
+            tc::logNotice("TcvPlayer") << "P-frame " << frameNum
+                << ": total=" << ms << "ms, GPU=" << gpuMs << "ms";
         }
     }
 
