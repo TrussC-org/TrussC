@@ -62,6 +62,10 @@ public:
         return decodeTimeMs_;
     }
 
+    int getChunkCount() const {
+        return hapDecoder_.getLastChunkCount();
+    }
+
     void resetStats() {
         decodeTimeMs_ = 0.0;
     }
@@ -157,6 +161,7 @@ public:
         movParser_.close();
         texture_.clear();
         frameBuffer_.clear();
+        sampleBuffer_.clear();
         pixels_.clear();
         pixelsValid_ = false;
         videoTrack_ = nullptr;
@@ -719,8 +724,12 @@ private:
         // Record decode time (low-pass filter)
         auto endTime = std::chrono::high_resolution_clock::now();
         double ms = std::chrono::duration<double, std::milli>(endTime - startTime).count();
-        constexpr double kAlpha = 0.05;
-        decodeTimeMs_ = decodeTimeMs_ * (1.0 - kAlpha) + ms * kAlpha;
+        if (decodeTimeMs_ == 0.0) {
+            decodeTimeMs_ = ms;  // First measurement after reset
+        } else {
+            constexpr double kAlpha = 0.05;
+            decodeTimeMs_ = decodeTimeMs_ * (1.0 - kAlpha) + ms * kAlpha;
+        }
 
         return true;
     }

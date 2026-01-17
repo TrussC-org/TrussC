@@ -187,7 +187,9 @@ public:
 
     bool open(const std::string& path) {
         close();
-        file_.open(path, std::ios::binary);
+
+        // Create a completely fresh fstream object (not reusing old one)
+        file_ = std::ifstream(path, std::ios::binary);
         if (!file_.is_open()) return false;
 
         // Get file size
@@ -202,6 +204,8 @@ public:
         if (file_.is_open()) {
             file_.close();
         }
+        // Reset to fresh state by assigning default-constructed object
+        file_ = std::ifstream();
         info_ = MovInfo();
     }
 

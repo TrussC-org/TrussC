@@ -90,7 +90,8 @@ public:
             close();
         }
 
-        file_.open(path, std::ios::binary);
+        // Create fresh fstream object (don't reuse - causes performance issues)
+        file_ = std::ifstream(path, std::ios::binary);
         if (!file_.is_open()) {
             tc::logError("TcvPlayer") << "Failed to open file: " << path;
             return false;
@@ -102,7 +103,7 @@ public:
         // Validate signature
         if (std::memcmp(header_.signature, "TCVC", 4) != 0) {
             tc::logError("TcvPlayer") << "Invalid TCVC signature";
-            file_.close();
+            file_ = std::ifstream();
             return false;
         }
 
@@ -110,7 +111,7 @@ public:
         if (header_.version != TCV_VERSION) {
             tc::logError("TcvPlayer") << "Unsupported version: " << header_.version
                                       << " (expected " << TCV_VERSION << ")";
-            file_.close();
+            file_ = std::ifstream();
             return false;
         }
 
@@ -185,6 +186,7 @@ public:
         }
 
         file_.close();
+        file_ = std::ifstream();  // Reset to fresh state
         texture_.clear();
         frameIndex_.clear();
         iFrameCache_.clear();
@@ -608,8 +610,12 @@ private:
                 // Record decode time (low-pass filter) and return early
                 auto endTime = std::chrono::high_resolution_clock::now();
                 double ms = std::chrono::duration<double, std::milli>(endTime - startTime).count();
-                constexpr double kAlpha = 0.05;
-                decodeTimeMs_ = decodeTimeMs_ * (1.0 - kAlpha) + ms * kAlpha;
+                if (decodeTimeMs_ == 0.0) {
+                    decodeTimeMs_ = ms;
+                } else {
+                    constexpr double kAlpha = 0.05;
+                    decodeTimeMs_ = decodeTimeMs_ * (1.0 - kAlpha) + ms * kAlpha;
+                }
 
 #ifdef TCV_PROFILE
                 // Log profile every 30 frames
@@ -636,8 +642,12 @@ private:
                 // Record decode time (low-pass filter) and return early
                 auto endTime = std::chrono::high_resolution_clock::now();
                 double ms = std::chrono::duration<double, std::milli>(endTime - startTime).count();
-                constexpr double kAlpha = 0.05;
-                decodeTimeMs_ = decodeTimeMs_ * (1.0 - kAlpha) + ms * kAlpha;
+                if (decodeTimeMs_ == 0.0) {
+                    decodeTimeMs_ = ms;
+                } else {
+                    constexpr double kAlpha = 0.05;
+                    decodeTimeMs_ = decodeTimeMs_ * (1.0 - kAlpha) + ms * kAlpha;
+                }
                 return;
             }
         } else if (entry.packetType == TCV_PACKET_P_FRAME) {
@@ -702,8 +712,12 @@ private:
         // Record decode time (low-pass filter)
         auto endTime = std::chrono::high_resolution_clock::now();
         double ms = std::chrono::duration<double, std::milli>(endTime - startTime).count();
-        constexpr double kAlpha = 0.05;
-        decodeTimeMs_ = decodeTimeMs_ * (1.0 - kAlpha) + ms * kAlpha;
+        if (decodeTimeMs_ == 0.0) {
+            decodeTimeMs_ = ms;
+        } else {
+            constexpr double kAlpha = 0.05;
+            decodeTimeMs_ = decodeTimeMs_ * (1.0 - kAlpha) + ms * kAlpha;
+        }
     }
 
     // Load audio from TCV file

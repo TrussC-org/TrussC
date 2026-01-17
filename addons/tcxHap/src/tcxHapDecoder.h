@@ -9,6 +9,7 @@
 #include <vector>
 #include <cstdint>
 #include <functional>
+#include <thread>
 
 // HAP reference decoder (BSD-2-Clause)
 extern "C" {
@@ -90,6 +91,9 @@ struct HapDecodedFrame {
 class HapDecoder {
 public:
     HapDecoder() = default;
+
+    // Get last chunk count (for debugging, -1 = callback not called)
+    int getLastChunkCount() const { return lastChunkCount_; }
 
     // Decode a HAP frame
     // Input: raw HAP frame data from MOV container
@@ -192,12 +196,36 @@ public:
     }
 
 private:
+    mutable int lastChunkCount_ = -1;  // -1 = callback never called
+
     // HAP decode callback for parallel decoding
     static void hapDecodeCallback(HapDecodeWorkFunction work, void* p, unsigned int count, void* info) {
-        // Simple single-threaded implementation
-        // TODO: Add multi-threaded support for better performance
+        // Store chunk count (always, even for count=0 or 1)
+        if (info) {
+            auto* decoder = static_cast<HapDecoder*>(info);
+            decoder->lastChunkCount_ = static_cast<int>(count);
+        }
+
+        if (count <= 1) {
+            // Single-threaded
+            for (unsigned int i = 0; i < count; i++) {
+                work(p, i);
+            }
+            return;
+        }
+
+        // Parallel decode using threads
+        std::vector<std::thread> threads;
+        threads.reserve(count);
+
         for (unsigned int i = 0; i < count; i++) {
-            work(p, i);
+            threads.emplace_back([work, p, i]() {
+                work(p, i);
+            });
+        }
+
+        for (auto& t : threads) {
+            t.join();
         }
     }
 };
