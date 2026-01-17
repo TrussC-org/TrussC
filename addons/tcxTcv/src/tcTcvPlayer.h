@@ -139,15 +139,29 @@ public:
         // Build frame index for seeking
         buildFrameIndex();
 
-        // Allocate texture as BC7 compressed
+        // Decode first frame to get initial texture data
+        // (必要: BC7圧縮テクスチャはImmutableなので初期データが必須)
         int paddedWidth = blocksX_ * TCV_BLOCK_SIZE;
         int paddedHeight = blocksY_ * TCV_BLOCK_SIZE;
-        texture_.allocateCompressed(paddedWidth, paddedHeight,
-                                    SG_PIXELFORMAT_BC7_RGBA,
-                                    nullptr, 0);
+
+        if (!frameIndex_.empty()) {
+            // 最初のI-frameのデータを取得してテクスチャを作成
+            const auto& firstFrameData = getIFrameData(0);
+            if (firstFrameData.size() == bc7FrameSize_) {
+                texture_.allocateCompressed(paddedWidth, paddedHeight,
+                                            SG_PIXELFORMAT_BC7_RGBA,
+                                            firstFrameData.data(), bc7FrameSize_);
+            } else {
+                tc::logError("TcvPlayer") << "Failed to decode first frame";
+                return false;
+            }
+        } else {
+            tc::logError("TcvPlayer") << "No frames in file";
+            return false;
+        }
 
         initialized_ = true;
-        currentFrame_ = -1;
+        currentFrame_ = 0;  // 最初のフレームは既にデコード済み
 
         // Load audio if present
         hasAudio_ = false;

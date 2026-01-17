@@ -8,6 +8,9 @@ cmake_minimum_required(VERSION 3.16)
 
 set(ADDON_NAME tcxTcv)
 
+# Allow older CMake versions in FetchContent dependencies
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+
 # Fetch LZ4 via FetchContent
 include(FetchContent)
 FetchContent_Declare(
