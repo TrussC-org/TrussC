@@ -125,7 +125,7 @@ void EncodingSession::encodeNextFrame() {
     } else {
         waitCounter_++;
 
-        if (waitCounter_ > WAIT_TIMEOUT) {
+        if (waitCounter_ > kWaitTimeout) {
             retryCount_++;
             if (retryCount_ > MAX_RETRIES) {
                 // Check if we're near end (metadata frame count can be inaccurate)

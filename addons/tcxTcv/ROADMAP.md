@@ -62,13 +62,10 @@
 - [ ] Windows: Media Foundation (未実装)
 - [ ] Linux: GStreamer等 (未実装)
 
-### Windows Build Issue (調査中)
-- [ ] TrussC_Video_Codec_Encoder がWindowsでビルドできない
-  - CMake 3.29.5 + Ninja環境でPermission deniedエラー
-  - snappyのcmake_minimum_required(VERSION 3.1) 警告も出るが、直接の原因ではない
-  - example-hap (tcxHapのみ) はビルド可能
-  - TrussC_Video_Codec_Encoder (tcxHap + tcxTcv) でエラー発生
-  - macOSでは問題なくビルド可能
+### Windows Build Issue (FIXED)
+- [x] TrussC_Video_Codec_Encoder がWindowsでビルドできない
+  - 原因: `WAIT_TIMEOUT` が Windows ヘッダーでマクロ定義されている
+  - 修正: `WAIT_TIMEOUT` → `kWaitTimeout` にリネーム
 
 ---
 
