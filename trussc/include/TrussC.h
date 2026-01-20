@@ -2112,6 +2112,14 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     // Set callbacks
     internal::appSetupFunc = []() {
         app = new AppClass();
+        
+        // Force initial size update to ensure getWidth()/getHeight() are correct
+        // before setup() is called (in first updateTree)
+        int w = sapp_width();
+        int h = sapp_height();
+        float scale = internal::pixelPerfectMode ? 1.0f : (1.0f / sapp_dpi_scale());
+        app->handleWindowResized(static_cast<int>(w * scale), static_cast<int>(h * scale));
+        
         // Note: setup() is called automatically in updateTree() via setupCalled_ flag
     };
     internal::appUpdateFunc = []() {
