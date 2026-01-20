@@ -2117,7 +2117,14 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
         // before setup() is called (in first updateTree)
         int w = sapp_width();
         int h = sapp_height();
-        float scale = internal::pixelPerfectMode ? 1.0f : (1.0f / sapp_dpi_scale());
+        
+        float dpiScale = sapp_dpi_scale();
+        if (dpiScale == 1.0f) {
+             // Fallback if sokol returns 1.0 initially (common on macOS startup)
+             dpiScale = platform::getDisplayScaleFactor();
+        }
+        
+        float scale = internal::pixelPerfectMode ? 1.0f : (1.0f / dpiScale);
         app->handleWindowResized(static_cast<int>(w * scale), static_cast<int>(h * scale));
         
         // Note: setup() is called automatically in updateTree() via setupCalled_ flag
