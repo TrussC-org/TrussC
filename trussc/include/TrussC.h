@@ -2067,8 +2067,13 @@ namespace internal {
                 break;
             }
             case SAPP_EVENTTYPE_RESIZED: {
-                int w = static_cast<int>(ev->window_width * scale);
-                int h = static_cast<int>(ev->window_height * scale);
+                // Use sapp_width() (framebuffer size) instead of ev->window_width
+                // because event data might be logical size on some platforms, causing double scaling.
+                int fbW = sapp_width();
+                int fbH = sapp_height();
+                
+                int w = static_cast<int>(fbW * scale);
+                int h = static_cast<int>(fbH * scale);
 
                 ResizeEventArgs args;
                 args.width = w;
