@@ -104,7 +104,6 @@ addons/*
 !addons/tcxLut
 !addons/tcxOsc
 !addons/tcxQuadWarp
-!addons/tcxTcv
 !addons/tcxTls
 !addons/tcxWebSocket
 
@@ -138,7 +137,6 @@ addons/**/build-web.bat
 addons/**/build-web.sh
 examples/CMakeLists.txt
 addons/CMakeLists.txt
-addons/tcxTcv/libs/
 
 # =============================================================================
 # Auto-generated Shader Headers (sokol-shdc output)
