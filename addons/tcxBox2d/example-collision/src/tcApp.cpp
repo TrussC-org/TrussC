@@ -29,7 +29,7 @@ void tcApp::setupFloorCollider() {
     if (!collider) return;
 
     // onCollisionEnter - flash green
-    collider->onCollisionEnter.listen(enterListener, [this](box2d::CollisionEvent& e) {
+    enterListener = collider->onCollisionEnter.listen([this](box2d::CollisionEvent& e) {
         enterCount++;
         collisionMarkers.push_back({
             e.contactPoint,
@@ -41,7 +41,7 @@ void tcApp::setupFloorCollider() {
     });
 
     // onCollisionExit - just count (no marker, contact point not reliable)
-    collider->onCollisionExit.listen(exitListener, [this](box2d::CollisionEvent& e) {
+    exitListener = collider->onCollisionExit.listen([this](box2d::CollisionEvent& e) {
         exitCount++;
     });
 }

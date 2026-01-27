@@ -13,7 +13,7 @@ void tcApp::setup() {
 void tcApp::setupListeners() {
     // Key event listener
     if (keyListenerActive) {
-        events().keyPressed.listen(keyListener, [this](KeyEventArgs& e) {
+        keyListener = events().keyPressed.listen([this](KeyEventArgs& e) {
             std::stringstream ss;
             ss << "[KeyEvent] key=" << e.key;
             if (e.shift) ss << " +Shift";
@@ -27,7 +27,7 @@ void tcApp::setupListeners() {
 
     // Mouse click listener
     if (mouseListenerActive) {
-        events().mousePressed.listen(mouseListener, [this](MouseEventArgs& e) {
+        mouseListener = events().mousePressed.listen([this](MouseEventArgs& e) {
             std::stringstream ss;
             ss << "[MouseEvent] button=" << e.button;
             ss << " pos=(" << (int)e.x << "," << (int)e.y << ")";
@@ -36,7 +36,7 @@ void tcApp::setupListeners() {
     }
 
     // Scroll listener (always enabled)
-    events().mouseScrolled.listen(scrollListener, [this](ScrollEventArgs& e) {
+    scrollListener = events().mouseScrolled.listen([this](ScrollEventArgs& e) {
         std::stringstream ss;
         ss << "[ScrollEvent] dx=" << e.scrollX << " dy=" << e.scrollY;
         addLog(ss.str());
@@ -87,7 +87,7 @@ void tcApp::keyPressed(int key) {
 
         // Disconnect or reconnect listener
         if (keyListenerActive) {
-            events().keyPressed.listen(keyListener, [this](KeyEventArgs& e) {
+            keyListener = events().keyPressed.listen([this](KeyEventArgs& e) {
                 std::stringstream ss;
                 ss << "[KeyEvent] key=" << e.key;
                 if (e.shift) ss << " +Shift";
@@ -106,7 +106,7 @@ void tcApp::keyPressed(int key) {
         mouseListenerActive = !mouseListenerActive;
 
         if (mouseListenerActive) {
-            events().mousePressed.listen(mouseListener, [this](MouseEventArgs& e) {
+            mouseListener = events().mousePressed.listen([this](MouseEventArgs& e) {
                 std::stringstream ss;
                 ss << "[MouseEvent] button=" << e.button;
                 ss << " pos=(" << (int)e.x << "," << (int)e.y << ")";

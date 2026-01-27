@@ -89,11 +89,11 @@ void QuadWarp::setInputEnabled(bool enabled) {
     inputEnabled_ = enabled;
     
     if (enabled) {
-        tc::events().mouseMoved.listen(mouseMoveListener_, this, &QuadWarp::onMouseMoved);
-        tc::events().mousePressed.listen(mousePressListener_, this, &QuadWarp::onMousePressed);
-        tc::events().mouseDragged.listen(mouseDragListener_, this, &QuadWarp::onMouseDragged);
-        tc::events().mouseReleased.listen(mouseReleaseListener_, this, &QuadWarp::onMouseReleased);
-        tc::events().keyPressed.listen(keyPressListener_, this, &QuadWarp::onKeyPressed);
+        mouseMoveListener_ = tc::events().mouseMoved.listen(this, &QuadWarp::onMouseMoved);
+        mousePressListener_ = tc::events().mousePressed.listen(this, &QuadWarp::onMousePressed);
+        mouseDragListener_ = tc::events().mouseDragged.listen(this, &QuadWarp::onMouseDragged);
+        mouseReleaseListener_ = tc::events().mouseReleased.listen(this, &QuadWarp::onMouseReleased);
+        keyPressListener_ = tc::events().keyPressed.listen(this, &QuadWarp::onKeyPressed);
     } else {
         mouseMoveListener_.disconnect();
         mousePressListener_.disconnect();

@@ -66,9 +66,43 @@ public:
     Event(Event&&) = delete;
     Event& operator=(Event&&) = delete;
 
-    // Register listener with lambda (EventListener passed by reference)
+    // Register listener with lambda (returns EventListener) - preferred API
+    [[nodiscard]] EventListener listen(Callback callback,
+                                       EventPriority priority = EventPriority::App) {
+        EventListener listener;
+        listenImpl(listener, std::move(callback), priority);
+        return listener;
+    }
+
+    // Register listener with member function (returns EventListener) - preferred API
+    template<typename Obj>
+    [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(T&),
+                                       EventPriority priority = EventPriority::App) {
+        return listen([obj, method](T& arg) {
+            (obj->*method)(arg);
+        }, priority);
+    }
+
+    // Deprecated: use `listener = event.listen(callback)` instead
+    [[deprecated("Use 'listener = event.listen(callback)' instead")]]
     void listen(EventListener& listener, Callback callback,
                 EventPriority priority = EventPriority::App) {
+        listenImpl(listener, std::move(callback), priority);
+    }
+
+    // Deprecated: use `listener = event.listen(obj, &Class::method)` instead
+    template<typename Obj>
+    [[deprecated("Use 'listener = event.listen(obj, &Class::method)' instead")]]
+    void listen(EventListener& listener, Obj* obj, void (Obj::*method)(T&),
+                EventPriority priority = EventPriority::App) {
+        listenImpl(listener, [obj, method](T& arg) {
+            (obj->*method)(arg);
+        }, priority);
+    }
+
+private:
+    void listenImpl(EventListener& listener, Callback callback,
+                    EventPriority priority) {
         uint64_t id;
         {
             TC_LOCK_GUARD(mutex_);
@@ -88,14 +122,7 @@ public:
         });
     }
 
-    // Register listener with member function
-    template<typename Obj>
-    void listen(EventListener& listener, Obj* obj, void (Obj::*method)(T&),
-                EventPriority priority = EventPriority::App) {
-        listen(listener, [obj, method](T& arg) {
-            (obj->*method)(arg);
-        }, priority);
-    }
+public:
 
     // Fire event
     void notify(T& arg) {
@@ -170,9 +197,43 @@ public:
     Event(Event&&) = delete;
     Event& operator=(Event&&) = delete;
 
-    // Register listener with lambda (EventListener passed by reference)
+    // Register listener with lambda (returns EventListener) - preferred API
+    [[nodiscard]] EventListener listen(Callback callback,
+                                       EventPriority priority = EventPriority::App) {
+        EventListener listener;
+        listenImpl(listener, std::move(callback), priority);
+        return listener;
+    }
+
+    // Register listener with member function (returns EventListener) - preferred API
+    template<typename Obj>
+    [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(),
+                                       EventPriority priority = EventPriority::App) {
+        return listen([obj, method]() {
+            (obj->*method)();
+        }, priority);
+    }
+
+    // Deprecated: use `listener = event.listen(callback)` instead
+    [[deprecated("Use 'listener = event.listen(callback)' instead")]]
     void listen(EventListener& listener, Callback callback,
                 EventPriority priority = EventPriority::App) {
+        listenImpl(listener, std::move(callback), priority);
+    }
+
+    // Deprecated: use `listener = event.listen(obj, &Class::method)` instead
+    template<typename Obj>
+    [[deprecated("Use 'listener = event.listen(obj, &Class::method)' instead")]]
+    void listen(EventListener& listener, Obj* obj, void (Obj::*method)(),
+                EventPriority priority = EventPriority::App) {
+        listenImpl(listener, [obj, method]() {
+            (obj->*method)();
+        }, priority);
+    }
+
+private:
+    void listenImpl(EventListener& listener, Callback callback,
+                    EventPriority priority) {
         uint64_t id;
         {
             TC_LOCK_GUARD(mutex_);
@@ -192,15 +253,7 @@ public:
         });
     }
 
-    // Register listener with member function
-    template<typename Obj>
-    void listen(EventListener& listener, Obj* obj, void (Obj::*method)(),
-                EventPriority priority = EventPriority::App) {
-        listen(listener, [obj, method]() {
-            (obj->*method)();
-        }, priority);
-    }
-
+public:
     // Fire event
     void notify() {
         std::vector<Entry> entriesCopy;

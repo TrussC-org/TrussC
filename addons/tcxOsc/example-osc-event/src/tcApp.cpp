@@ -31,13 +31,13 @@ void tcApp::setup() {
     // ---------------------------------------------------------------------------
 
     // Lambda version
-    receiver_.onMessageReceived.listen(messageListener_, [this](OscMessage& msg) {
+    messageListener_ = receiver_.onMessageReceived.listen([this](OscMessage& msg) {
         // This is called from the receive thread!
         addReceiveLog("[RECEIVED] " + msg.toString());  // mutex-protected function
     });
 
     // Member function pointer version (oF style)
-    receiver_.onParseError.listen(errorListener_, this, &tcApp::onParseError);
+    errorListener_ = receiver_.onParseError.listen(this, &tcApp::onParseError);
 
     if (!receiver_.setup(port_)) {
         addReceiveLog("[ERROR] Failed to bind port " + to_string(port_));

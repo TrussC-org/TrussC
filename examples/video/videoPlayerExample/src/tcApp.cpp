@@ -159,7 +159,7 @@ void tcApp::keyPressed(int key) {
     }
     else if (key == 'l' || key == 'L') {
         // Open file dialog
-        auto result = loadDialog("Select Video File");
+        auto result = loadDialog("Select Video File", "");
         if (result.success) {
             loadVideo(result.filePath);
         }

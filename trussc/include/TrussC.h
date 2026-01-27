@@ -1956,7 +1956,7 @@ namespace internal {
 
         // Register built-in command handler (hold listener in static)
         static EventListener consoleListener;
-        events().console.listen(consoleListener, [](ConsoleEventArgs& e) {
+        consoleListener = events().console.listen([](ConsoleEventArgs& e) {
             // Pass raw input to MCP processor (always active)
             mcp::processInput(e.raw);
         });

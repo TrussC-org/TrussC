@@ -19,7 +19,7 @@ void tcApp::setup() {
     client.setVerifyNone();
 
     // Connect event
-    client.onConnect.listen(connectListener, [this](TcpConnectEventArgs& e) {
+    connectListener = client.onConnect.listen([this](TcpConnectEventArgs& e) {
         if (e.success) {
             isConnected = true;
             statusMessage = "Connected! TLS: " + client.getTlsVersion() + " / " + client.getCipherSuite();
@@ -33,7 +33,7 @@ void tcApp::setup() {
     });
 
     // Receive event
-    client.onReceive.listen(receiveListener, [this](TcpReceiveEventArgs& e) {
+    receiveListener = client.onReceive.listen([this](TcpReceiveEventArgs& e) {
         string data(e.data.begin(), e.data.end());
 
         // Split if too long
@@ -48,14 +48,14 @@ void tcApp::setup() {
     });
 
     // Disconnect event
-    client.onDisconnect.listen(disconnectListener, [this](TcpDisconnectEventArgs& e) {
+    disconnectListener = client.onDisconnect.listen([this](TcpDisconnectEventArgs& e) {
         isConnected = false;
         statusMessage = "Disconnected: " + e.reason;
         addReceived("--- Disconnected ---");
     });
 
     // Error event
-    client.onError.listen(errorListener, [this](TcpErrorEventArgs& e) {
+    errorListener = client.onError.listen([this](TcpErrorEventArgs& e) {
         addReceived("ERROR: " + e.message);
     });
 }

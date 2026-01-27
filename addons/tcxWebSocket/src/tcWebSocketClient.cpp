@@ -161,11 +161,11 @@ void WebSocketClient::setupClient(bool useTls) {
     }
 
     // Connect event
-    client_->onConnect.listen(connectListener_, this, &WebSocketClient::handleTcpConnect);
+    connectListener_ = client_->onConnect.listen(this, &WebSocketClient::handleTcpConnect);
     // Receive event
-    client_->onReceive.listen(receiveListener_, this, &WebSocketClient::handleRawReceive);
+    receiveListener_ = client_->onReceive.listen(this, &WebSocketClient::handleRawReceive);
     // Disconnect event
-    client_->onDisconnect.listen(disconnectListener_, this, &WebSocketClient::handleTcpDisconnect);
+    disconnectListener_ = client_->onDisconnect.listen(this, &WebSocketClient::handleTcpDisconnect);
 #endif
 }
 

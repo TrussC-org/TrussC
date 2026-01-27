@@ -6,23 +6,23 @@ using namespace tc;
 void tcApp::setup() {
     logNotice() << "WebSocket setup";
 
-    ws_.onOpen.listen(onOpen_, [this]() {
+    onOpen_ = ws_.onOpen.listen([this]() {
         lock_guard<mutex> lock(messageMutex_);
         pendingMessages_.push_back("Connected!");
         ws_.send("Hello from TrussC!");
     });
 
-    ws_.onMessage.listen(onMessage_, [this](WebSocketEventArgs& e) {
+    onMessage_ = ws_.onMessage.listen([this](WebSocketEventArgs& e) {
         lock_guard<mutex> lock(messageMutex_);
         pendingMessages_.push_back(">> " + e.message);
     });
 
-    ws_.onClose.listen(onClose_, [this]() {
+    onClose_ = ws_.onClose.listen([this]() {
         lock_guard<mutex> lock(messageMutex_);
         pendingMessages_.push_back("Disconnected");
     });
 
-    ws_.onError.listen(onError_, [this](TcpErrorEventArgs& e) {
+    onError_ = ws_.onError.listen([this](TcpErrorEventArgs& e) {
         lock_guard<mutex> lock(messageMutex_);
         pendingMessages_.push_back("Error: " + e.message);
     });

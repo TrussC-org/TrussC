@@ -160,7 +160,7 @@ void tcApp::draw() {
     }
     
     // Enable 3D drawing mode
-    enable3DPerspective(deg2rad(45.0f), 0.1f, 100.0f);
+    setupScreenPerspective(45.0f);
     
     float time = (float)getElapsedTime();
     
@@ -196,8 +196,8 @@ void tcApp::draw() {
     drawMesh(cone_,      0.0f, -1.5f);
     drawMesh(torus_,     3.0f, -1.5f);
     
-    // Disable 3D mode
-    disable3D();
+    // Return to 2D mode
+    setupScreenOrtho();
     
     // Draw info text
     setColor(1.0f, 1.0f, 1.0f);

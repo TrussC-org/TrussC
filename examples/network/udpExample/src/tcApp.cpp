@@ -15,7 +15,7 @@ void tcApp::setup() {
     logNotice("tcApp") << "==========================";
 
     // Listen for receive events
-    receiver.onReceive.listen(receiveListener, [this](UdpReceiveEventArgs& e) {
+    receiveListener = receiver.onReceive.listen([this](UdpReceiveEventArgs& e) {
         string msg(e.data.begin(), e.data.end());
         logNotice("UdpReceiver") << "Received from " << e.remoteHost << ":" << e.remotePort << " -> " << msg;
 
@@ -27,7 +27,7 @@ void tcApp::setup() {
     });
 
     // Listen for error events
-    receiver.onError.listen(errorListener, [](UdpErrorEventArgs& e) {
+    errorListener = receiver.onError.listen([](UdpErrorEventArgs& e) {
         logError("UdpReceiver") << "UDP Error: " << e.message;
     });
 

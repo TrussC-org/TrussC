@@ -92,7 +92,7 @@ public:
         }
 
         // Register console listener by default
-        onLog.listen(consoleListener_, [this](LogEventArgs& e) {
+        consoleListener_ = onLog.listen([this](LogEventArgs& e) {
             if (e.level >= consoleLevel_ && consoleLevel_ != LogLevel::Silent) {
                 if (mcpMode_) {
                     // MCP mode:
@@ -174,7 +174,7 @@ public:
         filePath_ = path;
 
         // Register file listener
-        onLog.listen(fileListener_, [this](LogEventArgs& e) {
+        fileListener_ = onLog.listen([this](LogEventArgs& e) {
             if (fileStream_.is_open() &&
                 e.level >= fileLevel_ && fileLevel_ != LogLevel::Silent) {
                 fileStream_ << "[" << e.timestamp << "] "

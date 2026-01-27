@@ -339,7 +339,7 @@ void UdpSocket::startReceiving() {
     } else {
         // Ensure non-blocking mode for event loop
         setNonBlocking(true);
-        events().update.listen(updateListener_, this, &UdpSocket::processNetwork);
+        updateListener_ = events().update.listen(this, &UdpSocket::processNetwork);
     }
 }
 

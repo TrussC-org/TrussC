@@ -37,11 +37,11 @@ public:
         port_ = port;
 
         // Set receive event handler
-        socket_.onReceive.listen(receiveListener_, [this](UdpReceiveEventArgs& args) {
+        receiveListener_ = socket_.onReceive.listen([this](UdpReceiveEventArgs& args) {
             handleReceive(args);
         });
 
-        socket_.onError.listen(errorListener_, [this](UdpErrorEventArgs& args) {
+        errorListener_ = socket_.onError.listen([this](UdpErrorEventArgs& args) {
             std::string msg = "Socket error: " + args.message;
             onParseError.notify(msg);
         });

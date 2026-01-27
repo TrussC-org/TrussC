@@ -20,19 +20,19 @@ void tcApp::setup() {
     addLog("Press S for Server, C for Client");
 
     // Server event setup
-    server.onClientConnect.listen(clientConnectListener, [this](TcpClientConnectEventArgs& e) {
+    clientConnectListener = server.onClientConnect.listen([this](TcpClientConnectEventArgs& e) {
         ostringstream oss;
         oss << "[Server] Client " << e.clientId << " connected from " << e.host << ":" << e.port;
         addLog(oss.str());
     });
 
-    server.onClientDisconnect.listen(clientDisconnectListener, [this](TcpClientDisconnectEventArgs& e) {
+    clientDisconnectListener = server.onClientDisconnect.listen([this](TcpClientDisconnectEventArgs& e) {
         ostringstream oss;
         oss << "[Server] Client " << e.clientId << " disconnected: " << e.reason;
         addLog(oss.str());
     });
 
-    server.onReceive.listen(serverReceiveListener, [this](TcpServerReceiveEventArgs& e) {
+    serverReceiveListener = server.onReceive.listen([this](TcpServerReceiveEventArgs& e) {
         string msg(e.data.begin(), e.data.end());
         ostringstream oss;
         oss << "[Server] Received from client " << e.clientId << ": " << msg;
@@ -43,14 +43,14 @@ void tcApp::setup() {
         server.send(e.clientId, reply);
     });
 
-    server.onError.listen(serverErrorListener, [this](TcpServerErrorEventArgs& e) {
+    serverErrorListener = server.onError.listen([this](TcpServerErrorEventArgs& e) {
         ostringstream oss;
         oss << "[Server] Error: " << e.message;
         addLog(oss.str());
     });
 
     // Client event setup
-    client.onConnect.listen(clientConnectedListener, [this](TcpConnectEventArgs& e) {
+    clientConnectedListener = client.onConnect.listen([this](TcpConnectEventArgs& e) {
         ostringstream oss;
         if (e.success) {
             oss << "[Client] Connected to server";
@@ -60,16 +60,16 @@ void tcApp::setup() {
         addLog(oss.str());
     });
 
-    client.onReceive.listen(clientReceiveListener, [this](TcpReceiveEventArgs& e) {
+    clientReceiveListener = client.onReceive.listen([this](TcpReceiveEventArgs& e) {
         string msg(e.data.begin(), e.data.end());
         addLog("[Client] Received: " + msg);
     });
 
-    client.onDisconnect.listen(clientDisconnectListener2, [this](TcpDisconnectEventArgs& e) {
+    clientDisconnectListener2 = client.onDisconnect.listen([this](TcpDisconnectEventArgs& e) {
         addLog("[Client] Disconnected: " + e.reason);
     });
 
-    client.onError.listen(clientErrorListener, [this](TcpErrorEventArgs& e) {
+    clientErrorListener = client.onError.listen([this](TcpErrorEventArgs& e) {
         addLog("[Client] Error: " + e.message);
     });
 }

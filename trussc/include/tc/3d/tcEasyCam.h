@@ -166,16 +166,16 @@ public:
         mouseInputEnabled_ = true;
 
         // Subscribe to mouse events
-        events().mousePressed.listen(listenerPressed_, [this](MouseEventArgs& e) {
+        listenerPressed_ = events().mousePressed.listen([this](MouseEventArgs& e) {
             onMousePressed(e.x, e.y, e.button);
         });
-        events().mouseReleased.listen(listenerReleased_, [this](MouseEventArgs& e) {
+        listenerReleased_ = events().mouseReleased.listen([this](MouseEventArgs& e) {
             onMouseReleased(e.x, e.y, e.button);
         });
-        events().mouseDragged.listen(listenerDragged_, [this](MouseDragEventArgs& e) {
+        listenerDragged_ = events().mouseDragged.listen([this](MouseDragEventArgs& e) {
             onMouseDragged(e.x, e.y, e.button);
         });
-        events().mouseScrolled.listen(listenerScrolled_, [this](ScrollEventArgs& e) {
+        listenerScrolled_ = events().mouseScrolled.listen([this](ScrollEventArgs& e) {
             onMouseScrolled(e.scrollX, e.scrollY);
         });
     }

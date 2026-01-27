@@ -11,8 +11,8 @@
 void tcApp::setup() {
     setWindowTitle("Exit Example");
 
-    // Listen to exitRequested event with member function
-    events().exitRequested.listen(exitListener_, this, &tcApp::onExitRequested);
+    // Listen to exitRequested event (new API: returns EventListener)
+    exitListener_ = events().exitRequested.listen(this, &tcApp::onExitRequested);
 }
 
 void tcApp::onExitRequested(ExitRequestEventArgs& args) {
@@ -20,7 +20,9 @@ void tcApp::onExitRequested(ExitRequestEventArgs& args) {
     args.cancel = true;
 
     // Show async confirmation dialog (title, message, callback)
-    confirmDialogAsync("Confirm Exit", "Are you sure you want to quit?", [this](bool confirmed){exitApp();});
+    confirmDialogAsync("Confirm Exit", "Are you sure you want to quit?", [](bool confirmed) {
+        if (confirmed) exitApp();
+    });
 }
 
 void tcApp::draw() {

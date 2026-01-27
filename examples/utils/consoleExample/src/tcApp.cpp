@@ -2,7 +2,7 @@
 
 void tcApp::setup() {
     // Listen to console events (retain the listener)
-    events().console.listen(consoleListener_, [this](ConsoleEventArgs& e) {
+    consoleListener_ = events().console.listen([this](ConsoleEventArgs& e) {
         // Add to log (keep latest 10 entries)
         commandLog_.push_back(e.raw);
         if (commandLog_.size() > 10) {

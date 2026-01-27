@@ -181,7 +181,7 @@ bool TcpClient::connect(const std::string& host, int port) {
             receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this);
         } else {
             // Register update listener
-            events().update.listen(updateListener_, this, &TcpClient::processNetwork);
+            updateListener_ = events().update.listen(this, &TcpClient::processNetwork);
         }
     }
 

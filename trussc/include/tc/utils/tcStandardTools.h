@@ -187,23 +187,23 @@ inline void registerStandardTools() {
                 // Here we just attach to the global events.
                 
                 // Mouse Press
-                events().mousePressed.listen(internal::monitorListener, [](MouseEventArgs& e) {
+                internal::monitorListener = events().mousePressed.listen([](MouseEventArgs& e) {
                     if (internal::inputMonitoringEnabled) {
                         json j = {{"type", "mouse_press"}, {"x", e.x}, {"y", e.y}, {"button", e.button}};
                         Server::instance().sendNotification("input", j);
                     }
                 });
-                
-                // Mouse Release
-                events().mouseReleased.listen(internal::monitorListener, [](MouseEventArgs& e) {
+
+                // Mouse Release (using additional listeners via lambda capture)
+                events().mouseReleased.listen([](MouseEventArgs& e) {
                     if (internal::inputMonitoringEnabled) {
                         json j = {{"type", "mouse_release"}, {"x", e.x}, {"y", e.y}, {"button", e.button}};
                         Server::instance().sendNotification("input", j);
                     }
                 });
-                
+
                 // Key Press
-                events().keyPressed.listen(internal::monitorListener, [](KeyEventArgs& e) {
+                events().keyPressed.listen([](KeyEventArgs& e) {
                     if (internal::inputMonitoringEnabled) {
                         json j = {{"type", "key_press"}, {"key", e.key}};
                         Server::instance().sendNotification("input", j);
