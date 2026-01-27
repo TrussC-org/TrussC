@@ -56,9 +56,11 @@ file(GLOB_RECURSE TC_HEADERS
 )
 
 # 共通ソースファイル（プラットフォーム非依存）
-file(GLOB TC_IMPL_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/impl/*.cpp)
-file(GLOB TC_NETWORK_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/network/*.cpp)
-file(GLOB TC_SOUND_SOURCES   ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/sound/*.cpp)
+file(GLOB TC_IMPL_SOURCES     ${CMAKE_CURRENT_SOURCE_DIR}/include/impl/*.cpp)
+file(GLOB TC_APP_SOURCES      ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/app/*.cpp)
+file(GLOB TC_GRAPHICS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/graphics/*.cpp)
+file(GLOB TC_NETWORK_SOURCES  ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/network/*.cpp)
+file(GLOB TC_SOUND_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/sound/*.cpp)
 
 # プラットフォーム固有ソースファイル
 if(TC_PLATFORM_EMSCRIPTEN)
@@ -77,6 +79,8 @@ endif()
 set(TC_ALL_SOURCES
     ${TC_HEADERS}
     ${TC_IMPL_SOURCES}
+    ${TC_APP_SOURCES}
+    ${TC_GRAPHICS_SOURCES}
     ${TC_NETWORK_SOURCES}
     ${TC_SOUND_SOURCES}
     ${TC_PLATFORM_SOURCES}
