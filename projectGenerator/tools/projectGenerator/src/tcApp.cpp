@@ -181,7 +181,7 @@ void tcApp::draw() {
         ImGui::InputText("##tcRoot", tcRootBuf, sizeof(tcRootBuf));
         ImGui::SameLine();
         if (ImGui::Button("Browse...")) {
-            auto result = loadDialog("Select TrussC folder", true);
+            auto result = loadDialog("Select TrussC folder", "", "", true);
             if (result.success) {
                 strncpy(tcRootBuf, result.filePath.c_str(), sizeof(tcRootBuf) - 1);
             }
@@ -243,7 +243,7 @@ void tcApp::draw() {
     }
     ImGui::SameLine();
     if (ImGui::Button("Import")) {
-        auto result = loadDialog("Select existing project", true);
+        auto result = loadDialog("Select existing project", "", "", true);
         if (result.success) {
             importProject(result.filePath);
         }
@@ -279,7 +279,7 @@ void tcApp::draw() {
         }
     } else {
         if (ImGui::Button("Browse##dir")) {
-            auto result = loadDialog("Select project location", true);
+            auto result = loadDialog("Select project location", "", "", true);
             if (result.success) {
                 strncpy(projectDirBuf, result.filePath.c_str(), sizeof(projectDirBuf) - 1);
                 projectDir = projectDirBuf;
