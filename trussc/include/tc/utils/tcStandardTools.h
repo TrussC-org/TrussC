@@ -20,7 +20,9 @@ namespace mcp {
 // Input monitoring state
 namespace internal {
     inline bool inputMonitoringEnabled = false;
-    inline EventListener monitorListener;
+    inline EventListener mousePressListener;
+    inline EventListener mouseReleaseListener;
+    inline EventListener keyPressListener;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,15 +189,15 @@ inline void registerStandardTools() {
                 // Here we just attach to the global events.
                 
                 // Mouse Press
-                internal::monitorListener = events().mousePressed.listen([](MouseEventArgs& e) {
+                internal::mousePressListener = events().mousePressed.listen([](MouseEventArgs& e) {
                     if (internal::inputMonitoringEnabled) {
                         json j = {{"type", "mouse_press"}, {"x", e.x}, {"y", e.y}, {"button", e.button}};
                         Server::instance().sendNotification("input", j);
                     }
                 });
 
-                // Mouse Release (using additional listeners via lambda capture)
-                events().mouseReleased.listen([](MouseEventArgs& e) {
+                // Mouse Release
+                internal::mouseReleaseListener = events().mouseReleased.listen([](MouseEventArgs& e) {
                     if (internal::inputMonitoringEnabled) {
                         json j = {{"type", "mouse_release"}, {"x", e.x}, {"y", e.y}, {"button", e.button}};
                         Server::instance().sendNotification("input", j);
@@ -203,14 +205,16 @@ inline void registerStandardTools() {
                 });
 
                 // Key Press
-                events().keyPressed.listen([](KeyEventArgs& e) {
+                internal::keyPressListener = events().keyPressed.listen([](KeyEventArgs& e) {
                     if (internal::inputMonitoringEnabled) {
                         json j = {{"type", "key_press"}, {"key", e.key}};
                         Server::instance().sendNotification("input", j);
                     }
                 });
             } else {
-                internal::monitorListener.disconnect();
+                internal::mousePressListener.disconnect();
+                internal::mouseReleaseListener.disconnect();
+                internal::keyPressListener.disconnect();
             }
             
             return json{{"status", "ok"}};
