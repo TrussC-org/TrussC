@@ -9,6 +9,7 @@
 #
 # This is all you need to build a TrussC app.
 # To use addons, list addon names in addons.make file.
+# For project-specific CMake config, create local.cmake in project root.
 #
 # Options:
 #   trussc_app(SOURCES file1.cpp file2.cpp)  # Explicit source files
@@ -101,6 +102,12 @@ macro(trussc_app)
 
     # Apply addons from addons.make
     apply_addons(${PROJECT_NAME})
+
+    # Include project-local CMake config if it exists
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/local.cmake")
+        include("${CMAKE_CURRENT_SOURCE_DIR}/local.cmake")
+        message(STATUS "[${PROJECT_NAME}] Loaded local.cmake")
+    endif()
 
     # Compile shaders with sokol-shdc (if any .glsl files exist)
     file(GLOB_RECURSE _TC_SHADER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.glsl")

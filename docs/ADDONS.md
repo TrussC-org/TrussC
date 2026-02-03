@@ -30,6 +30,7 @@ TrussC project structure is based on **"CMakeLists.txt is shared across all proj
 | File | Purpose | When to Edit |
 |------|---------|--------------|
 | `addons.make` | Specify addons to use | When adding/removing addons |
+| `local.cmake` | Project-specific CMake config (optional) | When linking system libraries or adding project-specific build settings |
 | `src/*.cpp` | Application code | Always |
 
 ### Files Users Don't Edit
@@ -37,6 +38,23 @@ TrussC project structure is based on **"CMakeLists.txt is shared across all proj
 | File | Reason |
 |------|--------|
 | `CMakeLists.txt` | Shared across all projects. `trussc_app()` handles everything automatically |
+
+### Addons vs `local.cmake`
+
+Not every dependency needs to be an addon. If a library is only used by one project, use `local.cmake` instead:
+
+```cmake
+# local.cmake - project-specific dependencies
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(EXIV2 REQUIRED exiv2)
+target_include_directories(${PROJECT_NAME} PRIVATE ${EXIV2_INCLUDE_DIRS})
+target_link_directories(${PROJECT_NAME} PRIVATE ${EXIV2_LIBRARY_DIRS})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${EXIV2_LIBRARIES})
+```
+
+**Make it an addon** when the library needs a reusable wrapper (classes, helper functions) or when multiple projects will use it. **Use `local.cmake`** when you just need to link a system library with no wrapper code.
+
+See [BUILD_SYSTEM.md](BUILD_SYSTEM.md#6-project-local-cmake-config-localcmake) for details.
 
 ---
 

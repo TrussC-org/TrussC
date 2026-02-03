@@ -106,6 +106,7 @@ myProject/
 ├── build-web/           # Build artifacts (do not touch)
 ├── CMakeLists.txt       # AUTO-GENERATED (Do not edit)
 ├── CMakePresets.json    # AUTO-GENERATED (Do not edit)
+├── local.cmake          # Project-local CMake config (optional, user editable)
 ├── icon/                # App icon (.icns, .icon, .ico, .png)
 └── src/                 # Source code
     ├── main.cpp
@@ -168,6 +169,49 @@ The `trussc_app()` CMake macro (in `trussc/cmake/trussc_app.cmake`) handles:
 *   Setting C++20 standard
 *   Linking `tc::TrussC` core library
 *   Applying addons defined in `addons.make`
+*   Loading `local.cmake` if it exists (see below)
 *   Configuring platform-specific bundles (macOS .app, Windows resource files)
 
 The **Project Generator** ensures that `CMakePresets.json` is correctly configured with the absolute path to your TrussC installation (`TRUSSC_DIR`), so you can move your project folder anywhere without breaking the build.
+
+---
+
+## 6. Project-Local CMake Config (`local.cmake`)
+
+For project-specific build settings that don't belong in a shared addon, you can create a `local.cmake` file in your project root. It is automatically included by `trussc_app()` after addons are applied.
+
+This is useful for:
+- Linking system libraries installed via package managers (e.g. `brew`, `apt`)
+- Adding project-specific compile definitions
+- Any CMake configuration that only applies to this project
+
+### Example
+
+```cmake
+# local.cmake - link system-installed libraries
+
+find_package(PkgConfig REQUIRED)
+
+# exiv2 (EXIF metadata)
+pkg_check_modules(EXIV2 REQUIRED exiv2)
+target_include_directories(${PROJECT_NAME} PRIVATE ${EXIV2_INCLUDE_DIRS})
+target_link_directories(${PROJECT_NAME} PRIVATE ${EXIV2_LIBRARY_DIRS})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${EXIV2_LIBRARIES})
+
+# lensfun (lens correction)
+pkg_check_modules(LENSFUN REQUIRED lensfun)
+target_include_directories(${PROJECT_NAME} PRIVATE ${LENSFUN_INCLUDE_DIRS})
+target_link_directories(${PROJECT_NAME} PRIVATE ${LENSFUN_LIBRARY_DIRS})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${LENSFUN_LIBRARIES})
+```
+
+### `local.cmake` vs Addons
+
+| | `local.cmake` | Addon (`addons.make`) |
+|--|---------------|----------------------|
+| Scope | This project only | Shared across projects |
+| Location | Project root | `TrussC/addons/` |
+| Reusability | Not reusable | Reusable by any project |
+| Use case | System library linking, project-specific flags | Reusable wrappers, FetchContent libraries |
+
+**Rule of thumb:** If only one project uses it, put it in `local.cmake`. If multiple projects could benefit, make it an addon.
