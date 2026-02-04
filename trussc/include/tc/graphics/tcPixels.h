@@ -196,6 +196,18 @@ public:
         }
     }
 
+    // Deep copy (since copy constructor is deleted)
+    Pixels clone() const {
+        Pixels p;
+        if (!allocated_ || !data_) return p;
+        if (format_ == PixelFormat::F32) {
+            p.setFromFloats(static_cast<const float*>(data_), width_, height_, channels_);
+        } else {
+            p.setFromPixels(static_cast<const unsigned char*>(data_), width_, height_, channels_);
+        }
+        return p;
+    }
+
     // === File I/O ===
 
     // Load from file
