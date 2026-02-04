@@ -1843,6 +1843,7 @@ typedef enum sapp_pixel_format {
     SAPP_PIXELFORMAT_SRGB8A8,
     SAPP_PIXELFORMAT_BGRA8,
     SAPP_PIXELFORMAT_SBGRA8,
+    SAPP_PIXELFORMAT_RGB10A2,    // Modified by tettou771 for TrussC: 10-bit color output support
     SAPP_PIXELFORMAT_DEPTH,
     SAPP_PIXELFORMAT_DEPTH_STENCIL,
     _SA_PPPIXELFORMAT_FORCE_U32 = 0x7FFFFFFF
@@ -4968,7 +4969,8 @@ _SOKOL_PRIVATE void _sapp_macos_mtl_init(void) {
     [_sapp.macos.view updateTrackingAreas];
     _sapp.macos.view.preferredFramesPerSecond = max_fps / _sapp.swap_interval;
     _sapp.macos.view.device = _sapp.macos.mtl_device;
-    _sapp.macos.view.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
+    // Modified by tettou771 for TrussC: use 10-bit color output (RGB10A2) for reduced banding
+    _sapp.macos.view.colorPixelFormat = MTLPixelFormatBGR10A2Unorm;
     _sapp.macos.view.depthStencilPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
     _sapp.macos.view.sampleCount = (NSUInteger) _sapp.sample_count;
     _sapp.macos.view.autoResizeDrawable = false;
@@ -6085,7 +6087,8 @@ _SOKOL_PRIVATE void _sapp_ios_mtl_init(void) {
     _sapp.ios.view = [[_sapp_ios_view alloc] init];
     _sapp.ios.view.preferredFramesPerSecond = max_fps / _sapp.swap_interval;
     _sapp.ios.view.device = _sapp.ios.mtl_device;
-    _sapp.ios.view.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
+    // Modified by tettou771 for TrussC: use 10-bit color output (RGB10A2) for reduced banding
+    _sapp.ios.view.colorPixelFormat = MTLPixelFormatBGR10A2Unorm;
     _sapp.ios.view.depthStencilPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
     _sapp.ios.view.sampleCount = (NSUInteger)_sapp.sample_count;
     /* NOTE: iOS MTKView seems to ignore thew view's contentScaleFactor
@@ -8121,7 +8124,8 @@ _SOKOL_PRIVATE void _sapp_d3d11_create_device_and_swapchain(void) {
     DXGI_SWAP_CHAIN_DESC* sc_desc = &_sapp.d3d11.swap_chain_desc;
     sc_desc->BufferDesc.Width = (UINT)_sapp.framebuffer_width;
     sc_desc->BufferDesc.Height = (UINT)_sapp.framebuffer_height;
-    sc_desc->BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    // Modified by tettou771 for TrussC: use 10-bit color output (RGB10A2) for reduced banding
+    sc_desc->BufferDesc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
     sc_desc->BufferDesc.RefreshRate.Numerator = 60;
     sc_desc->BufferDesc.RefreshRate.Denominator = 1;
     sc_desc->OutputWindow = _sapp.win32.hwnd;
@@ -8249,7 +8253,8 @@ _SOKOL_PRIVATE void _sapp_d3d11_create_default_render_target(void) {
 
     /* create MSAA texture and view if antialiasing requested */
     if (_sapp.sample_count > 1) {
-        tex_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        // Modified by tettou771 for TrussC: use 10-bit color output (RGB10A2) for reduced banding
+        tex_desc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
         hr = _sapp_d3d11_CreateTexture2D(_sapp.d3d11.device, &tex_desc, NULL, &_sapp.d3d11.msaa_rt);
         SOKOL_ASSERT(SUCCEEDED(hr) && _sapp.d3d11.msaa_rt);
         hr = _sapp_d3d11_CreateRenderTargetView(_sapp.d3d11.device, (ID3D11Resource*)_sapp.d3d11.msaa_rt, NULL, &_sapp.d3d11.msaa_rtv);
@@ -8277,7 +8282,8 @@ _SOKOL_PRIVATE void _sapp_d3d11_destroy_default_render_target(void) {
 _SOKOL_PRIVATE void _sapp_d3d11_resize_default_render_target(void) {
     if (_sapp.d3d11.swap_chain) {
         _sapp_d3d11_destroy_default_render_target();
-        _sapp_dxgi_ResizeBuffers(_sapp.d3d11.swap_chain, _sapp.d3d11.swap_chain_desc.BufferCount, (UINT)_sapp.framebuffer_width, (UINT)_sapp.framebuffer_height, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+        // Modified by tettou771 for TrussC: use 10-bit color output (RGB10A2) for reduced banding
+        _sapp_dxgi_ResizeBuffers(_sapp.d3d11.swap_chain, _sapp.d3d11.swap_chain_desc.BufferCount, (UINT)_sapp.framebuffer_width, (UINT)_sapp.framebuffer_height, DXGI_FORMAT_R10G10B10A2_UNORM, 0);
         _sapp_d3d11_create_default_render_target();
     }
 }
@@ -13518,7 +13524,8 @@ SOKOL_API_IMPL sapp_pixel_format sapp_color_format(void) {
                 return SAPP_PIXELFORMAT_NONE;
         }
     #elif defined(SOKOL_METAL) || defined(SOKOL_D3D11)
-        return SAPP_PIXELFORMAT_BGRA8;
+        // Modified by tettou771 for TrussC: report 10-bit color format (RGB10A2)
+        return SAPP_PIXELFORMAT_RGB10A2;
     #else
         return SAPP_PIXELFORMAT_RGBA8;
     #endif
