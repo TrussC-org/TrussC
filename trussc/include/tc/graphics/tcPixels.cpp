@@ -7,7 +7,7 @@
 namespace trussc {
 
 bool Pixels::save(const fs::path& path) const {
-    if (!allocated_ || !data_) return false;
+    if (!allocated_ || !data_ || format_ == PixelFormat::F32) return false;
 
     // Convert relative paths to data path
     fs::path savePath = path;

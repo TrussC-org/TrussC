@@ -88,9 +88,11 @@ public:
         createCompressedResources(data, dataSize);
     }
 
-    bool isCompressed() const { return pixelFormat_ != SG_PIXELFORMAT_NONE; }
+    bool isCompressed() const {
+        return pixelFormat_ != SG_PIXELFORMAT_NONE && pixelFormat_ != SG_PIXELFORMAT_RGBA32F;
+    }
 
-    // Allocate texture from Pixels
+    // Allocate texture from Pixels (auto-detects F32 → RGBA32F)
     void allocate(const Pixels& pixels, TextureUsage usage = TextureUsage::Immutable) {
         clear();
 
@@ -99,11 +101,13 @@ public:
         channels_ = pixels.getChannels();
         usage_ = usage;
 
+        if (pixels.isFloat()) {
+            pixelFormat_ = SG_PIXELFORMAT_RGBA32F;
+        }
+
         if (usage == TextureUsage::Immutable) {
-            // Immutable passes data at creation
-            createResources(pixels.getData());
+            createResources(pixels.getDataVoid());
         } else {
-            // Dynamic/Stream created empty, no data until user calls update()
             createResources(nullptr);
         }
     }
@@ -122,6 +126,7 @@ public:
         width_ = 0;
         height_ = 0;
         channels_ = 0;
+        pixelFormat_ = SG_PIXELFORMAT_NONE;
         image_ = {};
         view_ = {};
         attachmentView_ = {};
@@ -140,29 +145,38 @@ public:
     // === Data update (except Immutable) ===
 
     void loadData(const Pixels& pixels) {
-        loadData(pixels.getData(), pixels.getWidth(), pixels.getHeight(), pixels.getChannels());
+        loadData(pixels.getDataVoid(), pixels.getWidth(), pixels.getHeight(), pixels.getChannels());
     }
 
     // Upload pixel data to texture
     // Note: Due to sokol limitations, can only be called once per frame
     // Calling twice in same frame ignores second call and logs warning
-    void loadData(const unsigned char* data, int width, int height, int channels) {
+    void loadData(const void* data, int width, int height, int channels) {
         if (!allocated_ || usage_ == TextureUsage::Immutable) return;
         if (width != width_ || height != height_ || channels != channels_) return;
 
         // Can only update once per frame (sokol limitation)
         uint64_t currentFrame = sapp_frame_count();
         if (lastUpdateFrame_ == currentFrame) {
-            // Ignore second call in same frame and log warning
             logWarning() << "[Texture] loadData() called twice in same frame, skipped";
             return;
         }
         lastUpdateFrame_ = currentFrame;
 
+        size_t dataSize = (size_t)width * height * channels;
+        if (pixelFormat_ == SG_PIXELFORMAT_RGBA32F) {
+            dataSize *= sizeof(float);
+        }
+
         sg_image_data img_data = {};
         img_data.mip_levels[0].ptr = data;
-        img_data.mip_levels[0].size = width * height * channels;
+        img_data.mip_levels[0].size = dataSize;
         sg_update_image(image_, &img_data);
+    }
+
+    // Backward-compatible U8 overload
+    void loadData(const unsigned char* data, int width, int height, int channels) {
+        loadData(static_cast<const void*>(data), width, height, channels);
     }
 
     // === Filter settings ===
@@ -308,18 +322,30 @@ private:
         allocated_ = true;
     }
 
-    void createResources(const unsigned char* initialData) {
+    void createResources(const void* initialData) {
         // Create image
         sg_image_desc img_desc = {};
         img_desc.width = width_;
         img_desc.height = height_;
-        img_desc.pixel_format = (channels_ == 4) ? SG_PIXELFORMAT_RGBA8 : SG_PIXELFORMAT_R8;
+
+        // Determine pixel format
+        if (pixelFormat_ != SG_PIXELFORMAT_NONE) {
+            img_desc.pixel_format = pixelFormat_;
+        } else {
+            img_desc.pixel_format = (channels_ == 4) ? SG_PIXELFORMAT_RGBA8 : SG_PIXELFORMAT_R8;
+        }
+
+        // Compute data size (RGBA32F = 4 bytes per component)
+        size_t dataSize = (size_t)width_ * height_ * channels_;
+        if (pixelFormat_ == SG_PIXELFORMAT_RGBA32F) {
+            dataSize *= sizeof(float);
+        }
 
         switch (usage_) {
             case TextureUsage::Immutable:
                 if (initialData) {
                     img_desc.data.mip_levels[0].ptr = initialData;
-                    img_desc.data.mip_levels[0].size = width_ * height_ * channels_;
+                    img_desc.data.mip_levels[0].size = dataSize;
                 }
                 break;
             case TextureUsage::Dynamic:
@@ -421,6 +447,7 @@ private:
         allocated_ = other.allocated_;
         usage_ = other.usage_;
         lastUpdateFrame_ = other.lastUpdateFrame_;
+        pixelFormat_ = other.pixelFormat_;
         minFilter_ = other.minFilter_;
         magFilter_ = other.magFilter_;
         wrapU_ = other.wrapU_;
@@ -435,6 +462,7 @@ private:
         other.channels_ = 0;
         other.sampleCount_ = 1;
         other.allocated_ = false;
+        other.pixelFormat_ = SG_PIXELFORMAT_NONE;
     }
 };
 
