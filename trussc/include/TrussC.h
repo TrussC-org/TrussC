@@ -179,6 +179,16 @@ namespace internal {
 namespace trussc { namespace internal {
     inline bool inFboPass = false;
     inline sgl_pipeline currentFboBlendPipeline = {};
+
+    // Restore current blend pipeline after temporary pipeline changes
+    // Handles both FBO and main context
+    inline void restoreCurrentPipeline() {
+        if (inFboPass && currentFboBlendPipeline.id != 0) {
+            sgl_load_pipeline(currentFboBlendPipeline);
+        } else if (blendPipelinesInitialized) {
+            sgl_load_pipeline(blendPipelines[static_cast<int>(currentBlendMode)]);
+        }
+    }
 }}
 
 // VertexWriter abstraction (for shader integration)
@@ -1232,7 +1242,13 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     }
     sgl_end();
     sgl_disable_texture();
-    sgl_load_default_pipeline();
+
+    // Restore current blend pipeline (not default, which has blend disabled)
+    if (internal::inFboPass && internal::currentFboBlendPipeline.id != 0) {
+        sgl_load_pipeline(internal::currentFboBlendPipeline);
+    } else if (internal::blendPipelinesInitialized) {
+        sgl_load_pipeline(internal::blendPipelines[static_cast<int>(internal::currentBlendMode)]);
+    }
 
     // Restore matrices
     sgl_pop_matrix();

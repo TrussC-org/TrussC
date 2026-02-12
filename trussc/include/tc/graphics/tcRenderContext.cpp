@@ -359,7 +359,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
 
     sgl_end();
     sgl_disable_texture();
-    sgl_load_default_pipeline();
+    internal::restoreCurrentPipeline();
 
     popMatrix();
 }
@@ -425,7 +425,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y,
 
         sgl_end();
         sgl_disable_texture();
-        sgl_load_default_pipeline();
+        internal::restoreCurrentPipeline();
 
         // Restore matrices
         sgl_pop_matrix();  // modelview
@@ -469,7 +469,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y,
 
         sgl_end();
         sgl_disable_texture();
-        sgl_load_default_pipeline();
+        internal::restoreCurrentPipeline();
 
         popMatrix();
     }

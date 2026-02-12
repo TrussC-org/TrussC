@@ -81,7 +81,7 @@ public:
 
     // End camera mode (return to 2D drawing mode)
     void end() {
-        sgl_load_default_pipeline();
+        internal::restoreCurrentPipeline();
         // Return to 2D orthographic projection
         beginFrame();
     }

@@ -881,7 +881,7 @@ protected:
 
             sgl_end();
             sgl_disable_texture();
-            sgl_load_default_pipeline();
+            internal::restoreCurrentPipeline();
         }
     }
 
