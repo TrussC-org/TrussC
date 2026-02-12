@@ -210,6 +210,10 @@ public:
     TextureFilter getMinFilter() const { return minFilter_; }
     TextureFilter getMagFilter() const { return magFilter_; }
 
+    // Premultiplied alpha flag (set automatically for FBO color textures)
+    void setPremultipliedAlpha(bool v) { premultipliedAlpha_ = v; }
+    bool isPremultipliedAlpha() const { return premultipliedAlpha_; }
+
     // === Wrap mode settings ===
 
     void setWrapU(TextureWrap wrap) {
@@ -305,6 +309,7 @@ private:
     TextureFilter magFilter_ = TextureFilter::Linear;
     TextureWrap wrapU_ = TextureWrap::ClampToEdge;
     TextureWrap wrapV_ = TextureWrap::ClampToEdge;
+    bool premultipliedAlpha_ = false;
 
     void createCompressedResources(const void* data, size_t dataSize) {
         sg_image_desc img_desc = {};
@@ -449,9 +454,11 @@ private:
 
     void drawInternal(float x, float y, float w, float h,
                       float u0, float v0, float u1, float v1) const {
-        // Use appropriate alpha blend pipeline (FBO or main swapchain)
+        // Use appropriate blend pipeline
         if (internal::inFboPass && internal::currentFboBlendPipeline.id != 0) {
             sgl_load_pipeline(internal::currentFboBlendPipeline);
+        } else if (premultipliedAlpha_ && internal::premultipliedBlendPipelineInitialized) {
+            sgl_load_pipeline(internal::premultipliedBlendPipeline);
         } else {
             sgl_load_pipeline(internal::fontPipeline);
         }
@@ -535,6 +542,7 @@ private:
         magFilter_ = other.magFilter_;
         wrapU_ = other.wrapU_;
         wrapV_ = other.wrapV_;
+        premultipliedAlpha_ = other.premultipliedAlpha_;
 
         other.image_ = {};
         other.view_ = {};

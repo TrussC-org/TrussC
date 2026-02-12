@@ -167,6 +167,10 @@ namespace internal {
     inline sgl_pipeline blendPipelines[6] = {};
     inline bool blendPipelinesInitialized = false;
     inline BlendMode currentBlendMode = BlendMode::Alpha;
+
+    // Premultiplied alpha blend pipeline (for FBO texture compositing)
+    inline sgl_pipeline premultipliedBlendPipeline = {};
+    inline bool premultipliedBlendPipelineInitialized = false;
 }
 
 } // namespace trussc (temporarily closed)

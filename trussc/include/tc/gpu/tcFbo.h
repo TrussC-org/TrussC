@@ -107,6 +107,9 @@ public:
         // Ensure shared rendering resources exist for this sample count
         ensureShared(sampleCount_);
 
+        // FBO color texture stores premultiplied alpha (due to alpha blending + MSAA resolve)
+        colorTexture_.setPremultipliedAlpha(true);
+
         allocated_ = true;
     }
 
@@ -324,7 +327,7 @@ private:
         ctx_desc.sample_count = sampleCount;
         s.context = sgl_make_context(&ctx_desc);
 
-        // Alpha blend pipeline
+        // Alpha blend pipeline (Porter-Duff over, produces premultiplied alpha)
         {
             sg_pipeline_desc pip_desc = {};
             pip_desc.sample_count = sampleCount;
@@ -333,7 +336,8 @@ private:
             pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
             pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
             pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-            pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ZERO;
+            pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            pip_desc.colors[0].write_mask = SG_COLORMASK_RGBA;
             s.pipelineBlend = sgl_context_make_pipeline(s.context, &pip_desc);
         }
 
@@ -396,14 +400,14 @@ private:
         // Setup screen projection using defaultScreenFov (like main screen)
         internal::setupScreenFovWithSize(internal::defaultScreenFov, (float)width_, (float)height_, 0.0f, 0.0f);
 
-        // Use FBO pipeline (no blend = overwrite, ensures alpha is written correctly)
-        // Note: This means shapes overwrite each other rather than blending
-        sgl_load_pipeline(shared.pipelineClear);
+        // Use alpha blend pipeline (Porter-Duff over)
+        // Result stored as premultiplied alpha in FBO
+        sgl_load_pipeline(shared.pipelineBlend);
 
         active_ = true;
         internal::inFboPass = true;
         internal::currentFboClearPipeline = shared.pipelineClear;
-        internal::currentFboBlendPipeline = shared.pipelineClear;  // Use overwrite for all drawing
+        internal::currentFboBlendPipeline = shared.pipelineBlend;
         internal::currentFbo = this;
         internal::fboClearColorFunc = _fboClearColorHelper;
     }

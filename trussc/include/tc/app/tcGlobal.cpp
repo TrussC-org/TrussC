@@ -150,12 +150,29 @@ void setup() {
         internal::blendPipelinesInitialized = true;
         internal::currentBlendMode = BlendMode::Alpha;
     }
+
+    // Premultiplied alpha blend pipeline (for compositing FBO textures to screen)
+    if (!internal::premultipliedBlendPipelineInitialized) {
+        sg_pipeline_desc pip_desc = {};
+        pip_desc.colors[0].blend.enabled = true;
+        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
+        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        internal::premultipliedBlendPipeline = sgl_make_pipeline(&pip_desc);
+        internal::premultipliedBlendPipelineInitialized = true;
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Cleanup (shutdown)
 // ---------------------------------------------------------------------------
 void cleanup() {
+    // Release premultiplied blend pipeline
+    if (internal::premultipliedBlendPipelineInitialized) {
+        sgl_destroy_pipeline(internal::premultipliedBlendPipeline);
+        internal::premultipliedBlendPipelineInitialized = false;
+    }
     // Release blend mode pipelines
     if (internal::blendPipelinesInitialized) {
         for (int i = 0; i < 6; i++) {
