@@ -16,6 +16,9 @@ void setup() {
     sgdesc.environment = sglue_environment();
     sgdesc.logger.func = slog_func;
     sgdesc.pipeline_pool_size = 256;  // default 64 is too small when FBOs are used
+    sgdesc.image_pool_size = 10000;
+    sgdesc.view_pool_size = 10000;
+    sgdesc.sampler_pool_size = 10000;
     sg_setup(&sgdesc);
 
     // Initialize sokol_gl
