@@ -216,6 +216,11 @@ namespace internal {
     // Clipboard buffer size (for overflow check)
     inline int clipboardSize = 65536;
 
+    // sokol_gl vertex buffer management (auto-grows on overflow)
+    inline int sglMaxVertices = 65536;
+    inline int sglMaxCommands = 16384;
+    inline int sglPendingResize = 0;  // non-zero = need resize next frame
+
     // ---------------------------------------------------------------------------
     // Scissor Clipping stack
     // ---------------------------------------------------------------------------
@@ -319,9 +324,19 @@ inline int getFramebufferHeight() {
 
 // Call at frame start (before clear)
 // Sets up the default projection based on internal::defaultScreenFov
+namespace internal {
+    // Forward declaration (implemented in tcGlobal.cpp)
+    void resizeSgl(int newMaxVertices, int newMaxCommands);
+}
+
 inline void beginFrame() {
     // Skip in headless mode (no graphics context)
     if (headless::isActive()) return;
+
+    // Auto-resize sokol_gl buffers if overflow was detected last frame
+    if (internal::sglPendingResize > 0) {
+        internal::resizeSgl(internal::sglPendingResize, std::max(16384, internal::sglPendingResize / 4));
+    }
 
     // Setup screen with default FOV (60 = perspective, 0 = ortho)
     internal::setupScreenFov(internal::defaultScreenFov);
@@ -352,6 +367,21 @@ inline void present() {
 
     // Flush sokol_gl layers and deferred shader draws
     flushDeferredShaderDraws();
+
+    // Check for vertex buffer overflow before sg_commit resets errors
+    sgl_error_t err = sgl_error();
+    if (err.vertices_full || err.commands_full) {
+        // Schedule resize for next frame (4x to minimize repeated resizes)
+        int newVerts = internal::sglMaxVertices * 4;
+        int newCmds = internal::sglMaxCommands * 4;
+        if (newVerts > internal::sglPendingResize) {
+            internal::sglPendingResize = newVerts;
+            logNotice("sokol_gl") << "Vertex buffer overflow detected ("
+                << internal::sglMaxVertices << " vertices, "
+                << internal::sglMaxCommands << " commands). "
+                << "Will resize to " << newVerts << " next frame.";
+        }
+    }
 
     sg_end_pass();
     internal::inSwapchainPass = false;
@@ -2177,7 +2207,6 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;
     internal::clipboardSize = settings.clipboardSize;
-
     // Run the app
     sapp_run(&desc);
 
