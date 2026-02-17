@@ -1169,7 +1169,17 @@ inline Direction getTextAlignV() {
     return getDefaultContext().getTextAlignV();
 }
 
-// Get bitmap font line height
+// Set bitmap font line height (spacing for \n in drawBitmapString)
+inline void setBitmapLineHeight(float h) {
+    getDefaultContext().setBitmapLineHeight(h);
+}
+
+// Get bitmap font line height (spacing for \n in drawBitmapString)
+inline float getBitmapLineHeight() {
+    return getDefaultContext().getBitmapLineHeight();
+}
+
+// Get bitmap font character height (CHAR_TEX_HEIGHT = 16)
 inline float getBitmapFontHeight() {
     return getDefaultContext().getBitmapFontHeight();
 }
@@ -1204,8 +1214,8 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     for (char c : text) {
         if (c == '\n') lineCount++;
     }
-    float lineHeight = bitmapfont::CHAR_TEX_HEIGHT;
-    float exactHeight = lineCount * lineHeight;
+    float lineHeight = getBitmapLineHeight();
+    float exactHeight = bitmapfont::CHAR_TEX_HEIGHT + (lineCount - 1) * lineHeight;
 
     // Horizontal padding only (no vertical padding to prevent overlap with adjacent lines)
     const float paddingH = 4.0f;
@@ -1258,7 +1268,7 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     float cursorY = worldY;
 
     for (char c : text) {
-        if (c == '\n') { cursorX = worldX; cursorY += charH; continue; }
+        if (c == '\n') { cursorX = worldX; cursorY += lineHeight; continue; }
         if (c == '\t') { cursorX += charW * 8; continue; }
         if (c < 32) continue;
 

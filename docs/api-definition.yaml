@@ -509,6 +509,26 @@ categories:
         sketch: true
         snippet: "getBitmapStringBBox(${1:\"text\"}, ${2:x}, ${3:y})"
 
+      - name: setBitmapLineHeight
+        return: "void"
+        signatures:
+          - params: "float height"
+            params_simple: "height"
+        description: "Set line height for bitmap string newlines (default: 16)"
+        description_ja: "ビットマップ文字列の改行時の行の高さを設定（デフォルト: 16）"
+        sketch: true
+        snippet: "setBitmapLineHeight(${1:16})"
+
+      - name: getBitmapLineHeight
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get line height for bitmap string newlines"
+        description_ja: "ビットマップ文字列の改行時の行の高さを取得"
+        sketch: true
+        snippet: "getBitmapLineHeight()"
+
       - name: setFps
         return: "void"
         signatures:

@@ -236,7 +236,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
         float cursorY = 0;
 
         for (char c : text) {
-            if (c == '\n') { cursorX = 0; cursorY += charH; continue; }
+            if (c == '\n') { cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
             if (c == '\t') { cursorX += charW * 8; continue; }
             if (c < 32) continue;
 
@@ -279,7 +279,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
         float cursorY = 0;
 
         for (char c : text) {
-            if (c == '\n') { cursorX = 0; cursorY += charH; continue; }
+            if (c == '\n') { cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
             if (c == '\t') { cursorX += charW * 8; continue; }
             if (c < 32) continue;
 
@@ -332,7 +332,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
     for (char c : text) {
         if (c == '\n') {
             cursorX = 0;
-            cursorY += charH;
+            cursorY += style_.bitmapLineHeight;
             continue;
         }
         if (c == '\t') {
@@ -406,7 +406,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y,
         float cursorY = 0;
 
         for (char c : text) {
-            if (c == '\n') { cursorX = 0; cursorY += charH; continue; }
+            if (c == '\n') { cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
             if (c == '\t') { cursorX += charW * 8; continue; }
             if (c < 32) continue;
 
@@ -450,7 +450,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y,
         float cursorY = 0;
 
         for (char c : text) {
-            if (c == '\n') { cursorX = 0; cursorY += charH; continue; }
+            if (c == '\n') { cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
             if (c == '\t') { cursorX += charW * 8; continue; }
             if (c < 32) continue;
 

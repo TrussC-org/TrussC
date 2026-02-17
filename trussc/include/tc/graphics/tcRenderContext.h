@@ -501,6 +501,10 @@ public:
     Direction getTextAlignH() const { return textAlignH_; }
     Direction getTextAlignV() const { return textAlignV_; }
 
+    // Bitmap font line height (spacing for \n)
+    void setBitmapLineHeight(float h) { style_.bitmapLineHeight = h; }
+    float getBitmapLineHeight() const { return style_.bitmapLineHeight; }
+
     // Draw with alignment specified (Implementation in tcRenderContext.cpp)
     void drawBitmapString(const std::string& text, float x, float y,
                           Direction h, Direction v, bool screenFixed = true);
@@ -547,7 +551,8 @@ public:
         for (char c : text) {
             if (c == '\n') lines++;
         }
-        return bitmapfont::CHAR_TEX_HEIGHT * lines;
+        // First line uses CHAR_TEX_HEIGHT, subsequent lines use bitmapLineHeight
+        return bitmapfont::CHAR_TEX_HEIGHT + (lines - 1) * style_.bitmapLineHeight;
     }
 
     Rect getBitmapStringBBox(const std::string& text) const {
@@ -566,6 +571,7 @@ private:
         int circleResolution = 20;
         Direction textAlignH = Direction::Left;
         Direction textAlignV = Direction::Top;
+        float bitmapLineHeight = bitmapfont::CHAR_TEX_HEIGHT;
     };
 
     // Current style

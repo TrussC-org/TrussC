@@ -277,10 +277,8 @@ public:
         // Draw label at center
         if (!label.empty()) {
             setColor(1.0f, 1.0f, 1.0f);
-            // Simple centering (simplified version without font size consideration)
-            float textX = getWidth() / 2 - label.length() * 4;
-            float textY = getHeight() / 2 + 4;
-            drawBitmapString(label, textX, textY);
+            drawBitmapString(label, getWidth() / 2, getHeight() / 2,
+                             Direction::Center, Direction::Baseline);
         }
     }
 
