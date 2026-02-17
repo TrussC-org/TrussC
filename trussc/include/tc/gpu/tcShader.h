@@ -466,12 +466,19 @@ inline void resetShaderStack() {
 // Flush deferred shader draws (called from present())
 // Draws sokol_gl layers interleaved with shader draws for correct ordering
 inline void flushDeferredShaderDraws() {
+    // Check for vertex buffer overflow — skip sgl draw to avoid crash
+    // (overflowed commands may contain invalid pipeline IDs)
+    sgl_error_t err = sgl_error();
+    bool sglOverflow = err.vertices_full || err.commands_full;
+
     // For each layer: draw sokol_gl, then execute shader draws for that layer
     for (int layer = 0; layer <= internal::sglLayerNext; layer++) {
-        // Draw sokol_gl content for this layer
-        sgl_draw_layer(layer);
+        // Draw sokol_gl content for this layer (skip if overflowed)
+        if (!sglOverflow) {
+            sgl_draw_layer(layer);
+        }
 
-        // Execute deferred shader draws that belong after this layer
+        // Deferred shader draws are independent of sgl, always safe
         for (auto& draw : internal::deferredShaderDraws) {
             if (draw.layerId == layer) {
                 draw.shader->executeDeferredDraw(draw.vertices, draw.type);
