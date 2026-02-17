@@ -1078,6 +1078,17 @@ categories:
         sketch: true
         snippet: "isMousePressed()"
 
+      - name: isKeyPressed
+        return: "bool"
+        signatures:
+          - params: "int key"
+            params_simple: "key"
+        description: "Is specific key currently pressed"
+        description_ja: "指定キーが押されているか"
+        of_equivalent: "ofGetKeyPressed"
+        sketch: true
+        snippet: "isKeyPressed(${1:key})"
+
   # ==========================================================================
   # Time - Frame
   # ==========================================================================
@@ -2942,6 +2953,26 @@ categories:
         description_ja: "子ノードを追加（C++のみ）"
         sketch: false
         snippet: "addChild(${1:child})"
+
+      - name: destroy
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Mark node for deferred removal from scene graph (C++ only)"
+        description_ja: "ノードを削除予約する（次のupdate時にツリーから除去、C++のみ）"
+        sketch: false
+        snippet: "destroy()"
+
+      - name: isDead
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Check if node is marked for destruction (C++ only)"
+        description_ja: "ノードが削除予約されているか（C++のみ）"
+        sketch: false
+        snippet: "isDead()"
 
       - name: setPosition
         return: "void"

@@ -89,6 +89,8 @@ float getBitmapFontHeight()              // Get bitmap font height
 float getBitmapStringWidth(const string& text) // Get text width
 float getBitmapStringHeight(const string& text) // Get text height
 Rect getBitmapStringBBox(const string& text, float x, float y) // Get text bounding box
+void setBitmapLineHeight(float height)   // Set line height for bitmap string newlines (default: 16)
+float getBitmapLineHeight()              // Get line height for bitmap string newlines
 void setFps(float fps)                   // Set target frame rate (VSYNC = -1.0)
 ```
 
@@ -151,6 +153,7 @@ float getMouseY()                        // Get mouse Y position
 Vec2 getMousePos()                       // Get mouse position as Vec2
 Vec2 getGlobalMousePos()                 // Get global mouse position as Vec2
 bool isMousePressed()                    // Is mouse button pressed
+bool isKeyPressed(int key)               // Is specific key currently pressed
 ```
 
 ## Time - Frame

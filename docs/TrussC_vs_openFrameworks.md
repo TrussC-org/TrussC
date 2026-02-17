@@ -269,9 +269,14 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofGetWidth` | `getWindowWidth()` |  |
 | `ofGetHeight` | `getWindowHeight()` |  |
 | `ofGetWindowSize` | `getWindowSize()` |  |
+| `ofExit` | `requestExitApp()` |  |
+| `ofSystemLoadDialog` | `loadDialog(title, message, defaultPath, folderSelection)` |  |
+| `ofSystemSaveDialog` | `saveDialog(title, message, defaultPath, defaultName)` |  |
+| `ofSystemAlertDialog` | `alertDialog(title, message)` |  |
 | `ofGetMouseX` | `getMouseX()` |  |
 | `ofGetMouseY` | `getMouseY()` |  |
 | `ofGetMousePressed` | `isMousePressed()` |  |
+| `ofGetKeyPressed` | `isKeyPressed(key)` |  |
 
 ### **Graphics**
 
