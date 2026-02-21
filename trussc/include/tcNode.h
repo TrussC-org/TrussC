@@ -160,8 +160,8 @@ public:
         return parent_.lock();
     }
 
-    // Get list of child nodes
-    const std::vector<Ptr>& getChildren() const {
+    // Get list of child nodes (returns a copy — safe to iterate while modifying the tree)
+    std::vector<Ptr> getChildren() const {
         return children_;
     }
 
