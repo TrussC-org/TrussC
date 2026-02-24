@@ -378,16 +378,11 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
 
         sgl_load_pipeline(internal::blendPipelines[static_cast<int>(prevBlendMode)]);
     } else {
-        // Outside pass, start new swapchain pass
-        sg_pass pass = {};
-        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        pass.action.colors[0].clear_value = { r, g, b, a };
-        // Also clear depth buffer (for 3D drawing)
-        pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-        pass.action.depth.clear_value = 1.0f;
-        pass.swapchain = sglue_swapchain();
-        sg_begin_pass(&pass);
-        internal::inSwapchainPass = true;
+        // Outside pass: defer swapchain pass start to present().
+        // Save clear color — the pass will start in present() with this value.
+        // sgl commands accumulate without an active pass, so FBOs can render
+        // in their own passes without interrupting the swapchain pass.
+        internal::swapchainClearValue = { r, g, b, a };
     }
 }
 

@@ -280,6 +280,8 @@ namespace internal {
 
     // Pass state (for suspending swapchain pass for FBO)
     inline bool inSwapchainPass = false;
+    // Saved clear color for resume after FBO suspend (set by clear())
+    inline sg_color swapchainClearValue = { 0.0f, 0.0f, 0.0f, 1.0f };
 
     // inFboPass and currentFboBlendPipeline are declared earlier (before tcRenderContext.h)
 
@@ -365,6 +367,19 @@ inline void present() {
     // Skip in headless mode (no graphics context)
     if (headless::isActive()) return;
 
+    // Start swapchain pass now (deferred from clear()).
+    // All sgl commands recorded during draw() will be submitted in this single pass.
+    if (!internal::inSwapchainPass) {
+        sg_pass pass = {};
+        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+        pass.action.colors[0].clear_value = internal::swapchainClearValue;
+        pass.action.depth.load_action = SG_LOADACTION_CLEAR;
+        pass.action.depth.clear_value = 1.0f;
+        pass.swapchain = sglue_swapchain();
+        sg_begin_pass(&pass);
+        internal::inSwapchainPass = true;
+    }
+
     // Flush sokol_gl layers and deferred shader draws
     flushDeferredShaderDraws();
 
@@ -394,8 +409,8 @@ inline bool isInSwapchainPass() {
 }
 
 // Suspend swapchain pass (for FBO begin/end during draw)
-// Commands recorded before suspend remain in the buffer and will be
-// drawn by present() together with commands recorded after resume.
+// The pass is simply ended. All sgl commands (pre- and post-FBO) remain in the
+// command buffer and will be drawn together by present() after resume.
 inline void suspendSwapchainPass() {
     if (internal::inSwapchainPass) {
         sg_end_pass();
@@ -404,13 +419,16 @@ inline void suspendSwapchainPass() {
 }
 
 // Resume swapchain pass (for FBO)
-// Start a new pass with LOAD action to preserve prior content.
-// sgl_tc_draw_rewind() preserves the matrix stack, so no need to reset state.
+// Start a fresh pass with CLEAR action. present() → sgl_draw_layer() will
+// redraw ALL sgl commands (including pre-suspend ones), so no content is lost.
+// This avoids LOADACTION_LOAD on Metal swapchain drawables which can flicker.
 inline void resumeSwapchainPass() {
     if (!internal::inSwapchainPass) {
         sg_pass pass = {};
-        pass.action.colors[0].load_action = SG_LOADACTION_LOAD;  // Preserve existing content
-        pass.action.depth.load_action = SG_LOADACTION_LOAD;
+        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+        pass.action.colors[0].clear_value = internal::swapchainClearValue;
+        pass.action.depth.load_action = SG_LOADACTION_CLEAR;
+        pass.action.depth.clear_value = 1.0f;
         pass.swapchain = sglue_swapchain();
         sg_begin_pass(&pass);
         internal::inSwapchainPass = true;
@@ -1325,9 +1343,22 @@ enum class Cursor {
     ResizeAll   = SAPP_MOUSECURSOR_RESIZE_ALL,
     NotAllowed  = SAPP_MOUSECURSOR_NOT_ALLOWED,
     // Custom cursor slots (must call bindCursorImage first)
-    Rotate      = SAPP_MOUSECURSOR_CUSTOM_0,
+    Custom0     = SAPP_MOUSECURSOR_CUSTOM_0,
     Custom1     = SAPP_MOUSECURSOR_CUSTOM_1,
     Custom2     = SAPP_MOUSECURSOR_CUSTOM_2,
+    Custom3     = SAPP_MOUSECURSOR_CUSTOM_3,
+    Custom4     = SAPP_MOUSECURSOR_CUSTOM_4,
+    Custom5     = SAPP_MOUSECURSOR_CUSTOM_5,
+    Custom6     = SAPP_MOUSECURSOR_CUSTOM_6,
+    Custom7     = SAPP_MOUSECURSOR_CUSTOM_7,
+    Custom8     = SAPP_MOUSECURSOR_CUSTOM_8,
+    Custom9     = SAPP_MOUSECURSOR_CUSTOM_9,
+    Custom10    = SAPP_MOUSECURSOR_CUSTOM_10,
+    Custom11    = SAPP_MOUSECURSOR_CUSTOM_11,
+    Custom12    = SAPP_MOUSECURSOR_CUSTOM_12,
+    Custom13    = SAPP_MOUSECURSOR_CUSTOM_13,
+    Custom14    = SAPP_MOUSECURSOR_CUSTOM_14,
+    Custom15    = SAPP_MOUSECURSOR_CUSTOM_15,
 };
 
 // Show the mouse cursor (default)

@@ -3041,6 +3041,11 @@ typedef struct {
         _sgl_command_t* ptr;
     } commands;
 
+    /* [TrussC fork] draw rewind offsets — sgl_draw() starts from these positions,
+       and sgl_tc_draw_rewind() updates them after flushing to allow partial draws. */
+    int draw_base_cmd;      /* command index: _sgl_draw starts iterating from here */
+    int draw_base_vertex;   /* vertex count: only vertices from here are appended to GPU */
+
     /* state tracking */
     int base_vertex;
     int quad_vtx_count; /* number of times vtx function has been called, used for non-triangle primitives */
@@ -3633,6 +3638,8 @@ static void _sgl_rewind(_sgl_context_t* ctx) {
     ctx->uniforms.next = 0;
     ctx->commands.next = 0;
     ctx->base_vertex = 0;
+    ctx->draw_base_cmd = 0;
+    ctx->draw_base_vertex = 0;
     ctx->error = _sgl_error_defaults();
     ctx->layer_id = 0;
     ctx->matrix_dirty = true;
@@ -4152,7 +4159,12 @@ static bool _sgl_grow_gpu_buffer(_sgl_context_t* ctx, int min_vertices) {
    If the GPU buffer overflows, grow it and retry. */
 static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
     SOKOL_ASSERT(ctx);
-    if ((ctx->vertices.next > 0) && (ctx->commands.next > 0)) {
+    /* [TrussC fork] Only process commands from draw_base_cmd onwards.
+       sgl_tc_draw_rewind() advances draw_base_cmd after flushing, so the
+       next sgl_draw() skips already-rendered commands (suspend/resume pattern).
+       Vertex data is always uploaded in full for correct base_vertex indexing. */
+    const int cmd_start = ctx->draw_base_cmd;
+    if ((ctx->vertices.next > 0) && (ctx->commands.next > cmd_start)) {
         /* [TrussC fork] If GPU buffer was released, recreate it */
         if (SG_INVALID_ID == ctx->vbuf.id) {
             sg_buffer_desc vbuf_desc;
@@ -4174,7 +4186,7 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
         uint32_t cur_smp_id = SG_INVALID_ID;
         int cur_uniform_index = -1;
 
-        /* [TrussC fork] append vertex data (can be called multiple times per frame) */
+        /* [TrussC fork] append ALL vertex data (commands reference absolute base_vertex) */
         const size_t data_size = (size_t)ctx->vertices.next * sizeof(_sgl_vertex_t);
         const sg_range range = { ctx->vertices.ptr, data_size };
         int base_offset = sg_append_buffer(ctx->vbuf, &range);
@@ -4195,9 +4207,8 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
         /* convert byte offset to vertex offset */
         const int vtx_offset = base_offset / (int)sizeof(_sgl_vertex_t);
 
-        // render all successfully recorded commands (this may be less than the
-        // issued commands if we're in an error state)
-        for (int i = 0; i < ctx->commands.next; i++) {
+        /* Render commands from cmd_start onwards (skip already-drawn commands) */
+        for (int i = cmd_start; i < ctx->commands.next; i++) {
             const _sgl_command_t* cmd = &ctx->commands.ptr[i];
             if (cmd->layer_id != layer_id) {
                 continue;
@@ -5141,10 +5152,12 @@ SOKOL_API_IMPL void sgl_context_draw_layer(sgl_context ctx_id, int layer_id) {
    Useful for suspend/resume pattern (FBO begin/end during draw). */
 static void _sgl_draw_rewind(_sgl_context_t* ctx) {
     SOKOL_ASSERT(ctx);
-    /* [TrussC fork] Do NOT flush or reset buffers.
-       Commands recorded before and after the FBO suspend/resume will accumulate
-       in the same buffer and be drawn together by present() → sgl_draw_layer().
-       This avoids the need to call sg_append_buffer multiple times per frame. */
+    /* [TrussC fork] Advance draw base offsets to current position.
+       The next sgl_draw() will only submit commands/vertices recorded after
+       this point. Call after sgl_draw() in suspend/resume pattern so that
+       pre-suspend content is not drawn twice. */
+    ctx->draw_base_cmd = ctx->commands.next;
+    ctx->draw_base_vertex = ctx->vertices.next;
     ctx->matrix_dirty = true;
 }
 
@@ -5173,6 +5186,8 @@ static void _sgl_reset_buffers(_sgl_context_t* ctx) {
     ctx->uniforms.next = 0;
     ctx->commands.next = 0;
     ctx->base_vertex = 0;
+    ctx->draw_base_cmd = 0;
+    ctx->draw_base_vertex = 0;
     ctx->matrix_dirty = true;
 }
 
