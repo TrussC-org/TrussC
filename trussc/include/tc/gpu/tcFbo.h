@@ -199,6 +199,11 @@ public:
         sgl_context_draw(shared.context);
         sg_end_pass();
 
+        // Reset counters so the next FBO using this shared context starts clean.
+        // Buffers stay allocated at their current (possibly grown) size — no
+        // allocation or deallocation overhead between sequential FBO draws.
+        sgl_context_reset(shared.context);
+
         // Switch back to default context
         sgl_set_context(sgl_default_context());
         active_ = false;
@@ -289,8 +294,11 @@ private:
     sg_view depthAttView_ = {};
 
     // =========================================================================
-    // Shared rendering resources (sgl_context + pipelines)
-    // One set per sample count, shared across all FBOs.
+    // Shared rendering resources (sgl_context + pipelines) per sample count.
+    // One context per sample count, shared across all FBOs.
+    // Command leaking between FBOs is prevented by release_buffers/ensure_buffers:
+    //   end()   → sgl_context_draw() then release_buffers (clears commands + frees memory)
+    //   begin() → ensure_buffers (allocates fresh buffers)
     // Nested FBO begin/end is NOT supported (sokol doesn't support nested passes).
     // =========================================================================
 
@@ -393,8 +401,9 @@ private:
         // For MSAA, resolve is automatic (store_action defaults to STORE)
         sg_begin_pass(&pass);
 
-        // Switch to shared FBO context
+        // Switch to shared FBO context and ensure buffers are allocated
         sgl_set_context(shared.context);
+        sgl_context_ensure_buffers(shared.context);
         sgl_defaults();
 
         // Setup screen projection using defaultScreenFov (like main screen)

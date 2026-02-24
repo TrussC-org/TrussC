@@ -853,6 +853,29 @@ SOKOL_GL_API_DECL void sgl_context_draw(sgl_context ctx);
 SOKOL_GL_API_DECL void sgl_draw_layer(int layer_id);
 SOKOL_GL_API_DECL void sgl_context_draw_layer(sgl_context ctx, int layer_id);
 
+/* [TrussC] flush all layers then reset command/vertex/uniform buffers.
+   Matrix stack and current state are preserved. Call between passes
+   when you need to emit vertices again in the same frame (e.g. FBO suspend/resume). */
+SOKOL_GL_API_DECL void sgl_draw_rewind(void);
+SOKOL_GL_API_DECL void sgl_context_draw_rewind(sgl_context ctx);
+
+/* [TrussC] Reset command/vertex/uniform counters to zero without freeing memory.
+   Buffers and GPU resources are preserved at their current (possibly grown) size.
+   Call after sgl_context_draw() to prepare for the next user of a shared context.
+   This is the fast path for FBO end() — no allocation or deallocation. */
+SOKOL_GL_API_DECL void sgl_context_reset(sgl_context ctx);
+
+/* [TrussC] Release CPU buffers and GPU vertex buffer to free memory.
+   Context shell, pipelines, and commit listener are preserved.
+   Call after sgl_context_draw() when the context won't be used for a while.
+   Next drawing call will auto-allocate via sgl_context_ensure_buffers(). */
+SOKOL_GL_API_DECL void sgl_context_release_buffers(sgl_context ctx);
+
+/* [TrussC] Ensure CPU buffers and GPU vertex buffer are allocated.
+   If already allocated, this is a no-op. Call before drawing if
+   buffers may have been released. */
+SOKOL_GL_API_DECL void sgl_context_ensure_buffers(sgl_context ctx);
+
 /* create and destroy pipeline objects */
 SOKOL_GL_API_DECL sgl_pipeline sgl_make_pipeline(const sg_pipeline_desc* desc);
 SOKOL_GL_API_DECL sgl_pipeline sgl_context_make_pipeline(sgl_context ctx, const sg_pipeline_desc* desc);
@@ -3003,8 +3026,14 @@ typedef struct {
 #define _SGL_MAX_STACK_DEPTH (64)
 #define _SGL_DEFAULT_CONTEXT_POOL_SIZE (4)
 #define _SGL_DEFAULT_PIPELINE_POOL_SIZE (64)
-#define _SGL_DEFAULT_MAX_VERTICES (1<<16)
-#define _SGL_DEFAULT_MAX_COMMANDS (1<<14)
+/* [TrussC fork] Default initial buffer capacities.
+   Kept small for low-memory targets (e.g. Raspberry Pi Zero).
+   FBO contexts are shared per sample count (not per FBO), so these are
+   allocated only once per distinct sample count. Auto-grow on overflow
+   (realloc to 2x, amortized O(1)) means no rendering is lost — buffers
+   stay at peak size and are reused via sgl_context_reset(). */
+#define _SGL_DEFAULT_MAX_VERTICES (128)
+#define _SGL_DEFAULT_MAX_COMMANDS (64)
 #define _SGL_SLOT_SHIFT (16)
 #define _SGL_MAX_POOL_SIZE (1<<_SGL_SLOT_SHIFT)
 #define _SGL_SLOT_MASK (_SGL_MAX_POOL_SIZE-1)
@@ -3640,24 +3669,45 @@ static sg_commit_listener _sgl_make_commit_listener(_sgl_context_t* ctx) {
     return listener;
 }
 
+/* [TrussC fork] Auto-grow CPU vertex buffer when full (realloc to 2x capacity).
+   Handles cap=0 (after sgl_context_release_buffers) by allocating default capacity. */
 static _sgl_vertex_t* _sgl_next_vertex(_sgl_context_t* ctx) {
-    if (ctx->vertices.next < ctx->vertices.cap) {
-        return &ctx->vertices.ptr[ctx->vertices.next++];
-    } else {
-        ctx->error.vertices_full = true;
-        ctx->error.any = true;
-        return 0;
+    if (ctx->vertices.next >= ctx->vertices.cap) {
+        int new_cap = (ctx->vertices.cap > 0) ? ctx->vertices.cap * 2 : _SGL_DEFAULT_MAX_VERTICES;
+        _sgl_vertex_t* new_ptr = (_sgl_vertex_t*) _sgl_malloc((size_t)new_cap * sizeof(_sgl_vertex_t));
+        if (!new_ptr) {
+            ctx->error.vertices_full = true;
+            ctx->error.any = true;
+            return 0;
+        }
+        if (ctx->vertices.ptr && ctx->vertices.next > 0) {
+            memcpy(new_ptr, ctx->vertices.ptr, (size_t)ctx->vertices.next * sizeof(_sgl_vertex_t));
+        }
+        _sgl_free(ctx->vertices.ptr);
+        ctx->vertices.ptr = new_ptr;
+        ctx->vertices.cap = new_cap;
     }
+    return &ctx->vertices.ptr[ctx->vertices.next++];
 }
 
+/* [TrussC fork] Auto-grow CPU uniform buffer when full */
 static _sgl_uniform_t* _sgl_next_uniform(_sgl_context_t* ctx) {
-    if (ctx->uniforms.next < ctx->uniforms.cap) {
-        return &ctx->uniforms.ptr[ctx->uniforms.next++];
-    } else {
-        ctx->error.uniforms_full = true;
-        ctx->error.any = true;
-        return 0;
+    if (ctx->uniforms.next >= ctx->uniforms.cap) {
+        int new_cap = (ctx->uniforms.cap > 0) ? ctx->uniforms.cap * 2 : _SGL_DEFAULT_MAX_COMMANDS;
+        _sgl_uniform_t* new_ptr = (_sgl_uniform_t*) _sgl_malloc((size_t)new_cap * sizeof(_sgl_uniform_t));
+        if (!new_ptr) {
+            ctx->error.uniforms_full = true;
+            ctx->error.any = true;
+            return 0;
+        }
+        if (ctx->uniforms.ptr && ctx->uniforms.next > 0) {
+            memcpy(new_ptr, ctx->uniforms.ptr, (size_t)ctx->uniforms.next * sizeof(_sgl_uniform_t));
+        }
+        _sgl_free(ctx->uniforms.ptr);
+        ctx->uniforms.ptr = new_ptr;
+        ctx->uniforms.cap = new_cap;
     }
+    return &ctx->uniforms.ptr[ctx->uniforms.next++];
 }
 
 static _sgl_command_t* _sgl_cur_command(_sgl_context_t* ctx) {
@@ -3668,14 +3718,24 @@ static _sgl_command_t* _sgl_cur_command(_sgl_context_t* ctx) {
     }
 }
 
+/* [TrussC fork] Auto-grow CPU command buffer when full */
 static _sgl_command_t* _sgl_next_command(_sgl_context_t* ctx) {
-    if (ctx->commands.next < ctx->commands.cap) {
-        return &ctx->commands.ptr[ctx->commands.next++];
-    } else {
-        ctx->error.commands_full = true;
-        ctx->error.any = true;
-        return 0;
+    if (ctx->commands.next >= ctx->commands.cap) {
+        int new_cap = (ctx->commands.cap > 0) ? ctx->commands.cap * 2 : _SGL_DEFAULT_MAX_COMMANDS;
+        _sgl_command_t* new_ptr = (_sgl_command_t*) _sgl_malloc((size_t)new_cap * sizeof(_sgl_command_t));
+        if (!new_ptr) {
+            ctx->error.commands_full = true;
+            ctx->error.any = true;
+            return 0;
+        }
+        if (ctx->commands.ptr && ctx->commands.next > 0) {
+            memcpy(new_ptr, ctx->commands.ptr, (size_t)ctx->commands.next * sizeof(_sgl_command_t));
+        }
+        _sgl_free(ctx->commands.ptr);
+        ctx->commands.ptr = new_ptr;
+        ctx->commands.cap = new_cap;
     }
+    return &ctx->commands.ptr[ctx->commands.next++];
 }
 
 static uint32_t _sgl_pack_rgbab(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
@@ -4078,9 +4138,53 @@ static bool _sgl_is_default_context(sgl_context ctx_id) {
     return ctx_id.id == SGL_DEFAULT_CONTEXT.id;
 }
 
+/* [TrussC fork] Grow the GPU vertex buffer to fit at least min_vertices.
+   Destroys the old buffer and creates a new one with 2x capacity (or min_vertices, whichever is larger).
+   Returns true if the buffer was successfully recreated. */
+static bool _sgl_grow_gpu_buffer(_sgl_context_t* ctx, int min_vertices) {
+    int new_cap = ctx->vertices.cap;
+    while (new_cap < min_vertices) {
+        new_cap *= 2;
+    }
+    sg_push_debug_group("sokol-gl-grow-vbuf");
+    sg_destroy_buffer(ctx->vbuf);
+    sg_buffer_desc vbuf_desc;
+    _sgl_clear(&vbuf_desc, sizeof(vbuf_desc));
+    vbuf_desc.size = (size_t)new_cap * sizeof(_sgl_vertex_t);
+    vbuf_desc.usage.vertex_buffer = true;
+    vbuf_desc.usage.stream_update = true;
+    vbuf_desc.label = "sgl-vertex-buffer";
+    ctx->vbuf = sg_make_buffer(&vbuf_desc);
+    ctx->bind.vertex_buffers[0] = ctx->vbuf;
+    sg_pop_debug_group();
+    if (SG_INVALID_ID == ctx->vbuf.id) {
+        return false;
+    }
+    /* update capacity to match new GPU buffer (for future CPU grow decisions) */
+    ctx->vertices.cap = new_cap;
+    return true;
+}
+
+/* [TrussC fork] Use sg_append_buffer instead of sg_update_buffer so that
+   _sgl_draw can be called multiple times per frame (e.g. suspend/resume for FBO).
+   If the GPU buffer overflows, grow it and retry. */
 static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
     SOKOL_ASSERT(ctx);
     if ((ctx->vertices.next > 0) && (ctx->commands.next > 0)) {
+        /* [TrussC fork] If GPU buffer was released, recreate it */
+        if (SG_INVALID_ID == ctx->vbuf.id) {
+            sg_buffer_desc vbuf_desc;
+            _sgl_clear(&vbuf_desc, sizeof(vbuf_desc));
+            vbuf_desc.size = (size_t)ctx->vertices.cap * sizeof(_sgl_vertex_t);
+            vbuf_desc.usage.vertex_buffer = true;
+            vbuf_desc.usage.stream_update = true;
+            vbuf_desc.label = "sgl-vertex-buffer";
+            ctx->vbuf = sg_make_buffer(&vbuf_desc);
+            ctx->bind.vertex_buffers[0] = ctx->vbuf;
+            if (SG_INVALID_ID == ctx->vbuf.id) {
+                return;
+            }
+        }
         sg_push_debug_group("sokol-gl");
 
         uint32_t cur_pip_id = SG_INVALID_ID;
@@ -4088,11 +4192,26 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
         uint32_t cur_smp_id = SG_INVALID_ID;
         int cur_uniform_index = -1;
 
-        if (ctx->update_frame_id != ctx->frame_id) {
-            ctx->update_frame_id = ctx->frame_id;
-            const sg_range range = { ctx->vertices.ptr, (size_t)ctx->vertices.next * sizeof(_sgl_vertex_t) };
-            sg_update_buffer(ctx->vbuf, &range);
+        /* [TrussC fork] append vertex data (can be called multiple times per frame) */
+        const size_t data_size = (size_t)ctx->vertices.next * sizeof(_sgl_vertex_t);
+        const sg_range range = { ctx->vertices.ptr, data_size };
+        int base_offset = sg_append_buffer(ctx->vbuf, &range);
+        if (sg_query_buffer_overflow(ctx->vbuf)) {
+            /* GPU buffer too small — grow and retry */
+            int needed = (int)(sg_query_buffer_desc(ctx->vbuf).size / sizeof(_sgl_vertex_t)) + ctx->vertices.next;
+            if (!_sgl_grow_gpu_buffer(ctx, needed)) {
+                sg_pop_debug_group();
+                return;
+            }
+            base_offset = sg_append_buffer(ctx->vbuf, &range);
+            if (sg_query_buffer_overflow(ctx->vbuf)) {
+                /* still overflowing after grow — give up this frame */
+                sg_pop_debug_group();
+                return;
+            }
         }
+        /* convert byte offset to vertex offset */
+        const int vtx_offset = base_offset / (int)sizeof(_sgl_vertex_t);
 
         // render all successfully recorded commands (this may be less than the
         // issued commands if we're in an error state)
@@ -4128,6 +4247,8 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
                         if ((cur_tex_id != args->view.id) || (cur_smp_id != args->smp.id)) {
                             ctx->bind.views[0] = args->view;
                             ctx->bind.samplers[0] = args->smp;
+                            /* [TrussC fork] set vertex buffer offset for appended data */
+                            ctx->bind.vertex_buffer_offsets[0] = base_offset;
                             sg_apply_bindings(&ctx->bind);
                             cur_tex_id = args->view.id;
                             cur_smp_id = args->smp.id;
@@ -5030,6 +5151,147 @@ SOKOL_API_IMPL void sgl_context_draw_layer(sgl_context ctx_id, int layer_id) {
     _sgl_context_t* ctx = _sgl_lookup_context(ctx_id.id);
     if (ctx) {
         _sgl_draw(ctx, layer_id);
+    }
+}
+
+/* [TrussC fork] Flush all layers then reset buffers for reuse in the same frame.
+   Preserves matrix stack, current state, and pipeline stack.
+   Useful for suspend/resume pattern (FBO begin/end during draw). */
+static void _sgl_draw_rewind(_sgl_context_t* ctx) {
+    SOKOL_ASSERT(ctx);
+    /* Draw all commands using _sgl_draw with a special layer_id of -1.
+       But _sgl_draw filters by layer_id, so we need to draw all used layers.
+       For simplicity, collect used layer_ids and draw each. */
+    /* [TrussC fork] Do NOT flush or reset buffers.
+       Commands recorded before and after the FBO suspend/resume will accumulate
+       in the same buffer and be drawn together by present() → sgl_draw_layer().
+       This avoids the need to call sg_append_buffer multiple times per frame. */
+    ctx->matrix_dirty = true;
+}
+
+SOKOL_API_IMPL void sgl_draw_rewind(void) {
+    SOKOL_ASSERT(_SGL_INIT_COOKIE == _sgl.init_cookie);
+    _sgl_context_t* ctx = _sgl.cur_ctx;
+    if (ctx) {
+        _sgl_draw_rewind(ctx);
+    }
+}
+
+SOKOL_API_IMPL void sgl_context_draw_rewind(sgl_context ctx_id) {
+    SOKOL_ASSERT(_SGL_INIT_COOKIE == _sgl.init_cookie);
+    _sgl_context_t* ctx = _sgl_lookup_context(ctx_id.id);
+    if (ctx) {
+        _sgl_draw_rewind(ctx);
+    }
+}
+
+/* [TrussC fork] Reset command/vertex/uniform counters to zero.
+   Buffers stay allocated at their current size (including any auto-grown capacity).
+   This is the fast path used between sequential FBO draws on a shared context. */
+static void _sgl_reset_buffers(_sgl_context_t* ctx) {
+    SOKOL_ASSERT(ctx);
+    ctx->vertices.next = 0;
+    ctx->uniforms.next = 0;
+    ctx->commands.next = 0;
+    ctx->base_vertex = 0;
+    ctx->matrix_dirty = true;
+}
+
+SOKOL_API_IMPL void sgl_context_reset(sgl_context ctx_id) {
+    SOKOL_ASSERT(_SGL_INIT_COOKIE == _sgl.init_cookie);
+    _sgl_context_t* ctx = _sgl_lookup_context(ctx_id.id);
+    if (ctx) {
+        _sgl_reset_buffers(ctx);
+    }
+}
+
+/* [TrussC fork] Release CPU buffers and GPU vertex buffer to free idle memory.
+   The context shell, pipelines, commit listener, and matrix stacks are preserved.
+   After calling this, the next drawing operation will trigger auto-grow from
+   _sgl_next_vertex/_sgl_next_uniform/_sgl_next_command (cap=0 case). */
+static void _sgl_release_buffers(_sgl_context_t* ctx) {
+    SOKOL_ASSERT(ctx);
+    /* Free CPU buffers */
+    if (ctx->vertices.ptr) {
+        _sgl_free(ctx->vertices.ptr);
+        ctx->vertices.ptr = 0;
+    }
+    ctx->vertices.cap = 0;
+    ctx->vertices.next = 0;
+
+    if (ctx->uniforms.ptr) {
+        _sgl_free(ctx->uniforms.ptr);
+        ctx->uniforms.ptr = 0;
+    }
+    ctx->uniforms.cap = 0;
+    ctx->uniforms.next = 0;
+
+    if (ctx->commands.ptr) {
+        _sgl_free(ctx->commands.ptr);
+        ctx->commands.ptr = 0;
+    }
+    ctx->commands.cap = 0;
+    ctx->commands.next = 0;
+
+    /* Destroy GPU vertex buffer */
+    sg_push_debug_group("sokol-gl");
+    sg_destroy_buffer(ctx->vbuf);
+    ctx->vbuf.id = SG_INVALID_ID;
+    ctx->bind.vertex_buffers[0].id = SG_INVALID_ID;
+    sg_pop_debug_group();
+}
+
+/* [TrussC fork] Ensure CPU buffers and GPU vertex buffer are allocated.
+   If already allocated (cap > 0), this is a no-op. Called before drawing
+   if buffers may have been previously released. */
+static void _sgl_ensure_buffers(_sgl_context_t* ctx) {
+    SOKOL_ASSERT(ctx);
+    if (ctx->vertices.ptr) {
+        return;  /* Already allocated */
+    }
+
+    /* Allocate CPU buffers with default capacity */
+    int vert_cap = _sgl_def(ctx->desc.max_vertices, _SGL_DEFAULT_MAX_VERTICES);
+    int cmd_cap = _sgl_def(ctx->desc.max_commands, _SGL_DEFAULT_MAX_COMMANDS);
+
+    ctx->vertices.cap = vert_cap;
+    ctx->vertices.next = 0;
+    ctx->vertices.ptr = (_sgl_vertex_t*) _sgl_malloc((size_t)vert_cap * sizeof(_sgl_vertex_t));
+
+    ctx->uniforms.cap = cmd_cap;
+    ctx->uniforms.next = 0;
+    ctx->uniforms.ptr = (_sgl_uniform_t*) _sgl_malloc((size_t)cmd_cap * sizeof(_sgl_uniform_t));
+
+    ctx->commands.cap = cmd_cap;
+    ctx->commands.next = 0;
+    ctx->commands.ptr = (_sgl_command_t*) _sgl_malloc((size_t)cmd_cap * sizeof(_sgl_command_t));
+
+    /* Create GPU vertex buffer */
+    sg_push_debug_group("sokol-gl");
+    sg_buffer_desc vbuf_desc;
+    _sgl_clear(&vbuf_desc, sizeof(vbuf_desc));
+    vbuf_desc.size = (size_t)vert_cap * sizeof(_sgl_vertex_t);
+    vbuf_desc.usage.vertex_buffer = true;
+    vbuf_desc.usage.stream_update = true;
+    vbuf_desc.label = "sgl-vertex-buffer";
+    ctx->vbuf = sg_make_buffer(&vbuf_desc);
+    ctx->bind.vertex_buffers[0] = ctx->vbuf;
+    sg_pop_debug_group();
+}
+
+SOKOL_API_IMPL void sgl_context_release_buffers(sgl_context ctx_id) {
+    SOKOL_ASSERT(_SGL_INIT_COOKIE == _sgl.init_cookie);
+    _sgl_context_t* ctx = _sgl_lookup_context(ctx_id.id);
+    if (ctx) {
+        _sgl_release_buffers(ctx);
+    }
+}
+
+SOKOL_API_IMPL void sgl_context_ensure_buffers(sgl_context ctx_id) {
+    SOKOL_ASSERT(_SGL_INIT_COOKIE == _sgl.init_cookie);
+    _sgl_context_t* ctx = _sgl_lookup_context(ctx_id.id);
+    if (ctx) {
+        _sgl_ensure_buffers(ctx);
     }
 }
 

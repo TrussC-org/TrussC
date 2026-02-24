@@ -393,18 +393,19 @@ inline bool isInSwapchainPass() {
     return internal::inSwapchainPass;
 }
 
-// Suspend swapchain pass (for FBO)
-// Call before FBO drawing to flush default context content and end pass
+// Suspend swapchain pass (for FBO begin/end during draw)
+// Commands recorded before suspend remain in the buffer and will be
+// drawn by present() together with commands recorded after resume.
 inline void suspendSwapchainPass() {
     if (internal::inSwapchainPass) {
-        sgl_draw();  // Flush drawing commands from default context
         sg_end_pass();
         internal::inSwapchainPass = false;
     }
 }
 
 // Resume swapchain pass (for FBO)
-// Call after FBO drawing to continue drawing to swapchain
+// Start a new pass with LOAD action to preserve prior content.
+// sgl_draw_rewind() preserves the matrix stack, so no need to reset state.
 inline void resumeSwapchainPass() {
     if (!internal::inSwapchainPass) {
         sg_pass pass = {};
@@ -413,9 +414,6 @@ inline void resumeSwapchainPass() {
         pass.swapchain = sglue_swapchain();
         sg_begin_pass(&pass);
         internal::inSwapchainPass = true;
-        // Reset sokol_gl state
-        sgl_defaults();
-        beginFrame();  // Reset projection matrix
     }
 }
 
