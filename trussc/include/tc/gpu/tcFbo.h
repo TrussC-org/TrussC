@@ -343,8 +343,10 @@ private:
 
         sg_pixel_format sgFormat = toSokolFormat(format);
 
-        // Create sgl context
+        // Create sgl context (match main context buffer sizes)
         sgl_context_desc_t ctx_desc = {};
+        ctx_desc.max_vertices = internal::sglMaxVertices;
+        ctx_desc.max_commands = internal::sglMaxCommands;
         ctx_desc.color_format = sgFormat;
         ctx_desc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
         ctx_desc.sample_count = sampleCount;
