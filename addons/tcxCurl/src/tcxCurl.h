@@ -53,20 +53,33 @@ struct HttpResponse {
     }
 };
 
+// Process-wide curl init/cleanup (called once automatically)
+namespace detail {
+    struct CurlGlobalGuard {
+        CurlGlobalGuard() {
+#ifdef TCX_HTTP_CURL
+            curl_global_init(CURL_GLOBAL_DEFAULT);
+#endif
+        }
+        ~CurlGlobalGuard() {
+#ifdef TCX_HTTP_CURL
+            curl_global_cleanup();
+#endif
+        }
+    };
+    inline void ensureCurlInit() {
+        static CurlGlobalGuard guard;
+    }
+} // namespace detail
+
 // HTTP client
 class HttpClient {
 public:
     HttpClient() {
-#ifdef TCX_HTTP_CURL
-        curl_global_init(CURL_GLOBAL_DEFAULT);
-#endif
+        detail::ensureCurlInit();
     }
 
-    ~HttpClient() {
-#ifdef TCX_HTTP_CURL
-        curl_global_cleanup();
-#endif
-    }
+    ~HttpClient() = default;
 
     // Set base URL (e.g. "https://server:8080")
     void setBaseUrl(const std::string& url) { baseUrl_ = url; }
@@ -112,7 +125,7 @@ public:
 
     // POST request with JSON body
     HttpResponse post(const std::string& path, const nlohmann::json& data) {
-        return request("POST", path, data.dump());
+        return request("POST", path, data.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
     }
 
     // POST request with raw body
