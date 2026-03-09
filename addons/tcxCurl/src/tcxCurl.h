@@ -192,6 +192,10 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds_);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+#ifdef _WIN32
+    // Force TLS 1.3 on Windows to avoid Schannel renegotiation failures
+    curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_3);
+#endif
     if (verbose_) {
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
     }
