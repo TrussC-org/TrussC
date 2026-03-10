@@ -32,6 +32,13 @@ else()
         FetchContent_MakeAvailable(mbedtls)
     endif()
 
+    # Help curl's FindMbedTLS.cmake locate FetchContent-built mbedTLS
+    FetchContent_GetProperties(mbedtls SOURCE_DIR MBEDTLS_SRC_DIR)
+    set(MBEDTLS_INCLUDE_DIR "${MBEDTLS_SRC_DIR}/include" CACHE PATH "" FORCE)
+    set(MBEDTLS_LIBRARY mbedtls CACHE STRING "" FORCE)
+    set(MBEDX509_LIBRARY mbedx509 CACHE STRING "" FORCE)
+    set(MBEDCRYPTO_LIBRARY mbedcrypto CACHE STRING "" FORCE)
+
     # Fetch curl with mbedTLS backend
     message(STATUS "[tcxCurl] Fetching curl with mbedTLS backend...")
     set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
