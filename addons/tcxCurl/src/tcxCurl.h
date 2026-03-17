@@ -140,6 +140,12 @@ public:
         return request("POST", path, body, contentType);
     }
 
+    // PUT request with raw body
+    HttpResponse put(const std::string& path, const std::string& body,
+                     const std::string& contentType = "application/octet-stream") {
+        return request("PUT", path, body, contentType);
+    }
+
     // DELETE request
     HttpResponse del(const std::string& path) {
         return request("DELETE", path, "");
