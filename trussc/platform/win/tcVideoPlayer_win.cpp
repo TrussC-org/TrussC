@@ -232,10 +232,15 @@ bool TCVideoPlayerImpl::createD3D11Device() {
     );
 
     if (FAILED(hr)) {
-        logWarning("VideoPlayer") << "Hardware D3D11 failed, trying WARP software fallback";
+        // Retry without VIDEO_SUPPORT (use CPU decoding instead of GPU)
+        logWarning("VideoPlayer") << "D3D11 with VIDEO_SUPPORT failed, retrying without";
+        flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+#ifdef _DEBUG
+        flags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
         hr = D3D11CreateDevice(
             nullptr,
-            D3D_DRIVER_TYPE_WARP,
+            D3D_DRIVER_TYPE_HARDWARE,
             nullptr,
             flags,
             featureLevels,
@@ -248,7 +253,7 @@ bool TCVideoPlayerImpl::createD3D11Device() {
     }
 
     if (FAILED(hr)) {
-        logError("VideoPlayer") << "Failed to create D3D11 device (hardware and WARP both failed)";
+        logError("VideoPlayer") << "Failed to create D3D11 device";
         return false;
     }
 
