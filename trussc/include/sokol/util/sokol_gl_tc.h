@@ -3071,6 +3071,8 @@ typedef struct {
     /* sokol-gfx resources */
     sg_buffer vbuf;
     int pending_grow_vertices;  /* [TrussC fork] deferred grow: if >0, grow buffer at start of next _sgl_draw */
+    sg_buffer retired_bufs[4];  /* [TrussC fork] retire list: old GPU buffers awaiting destruction */
+    int retired_count;
     sgl_pipeline def_pip;
     sg_bindings bind;
 
@@ -3601,6 +3603,11 @@ static void _sgl_destroy_context(sgl_context ctx_id) {
         ctx->commands.ptr = 0;
 
         sg_push_debug_group("sokol-gl");
+        /* [TrussC fork] retire リスト内の旧バッファも破棄 */
+        for (int ri = 0; ri < ctx->retired_count; ri++) {
+            sg_destroy_buffer(ctx->retired_bufs[ri]);
+        }
+        ctx->retired_count = 0;
         sg_destroy_buffer(ctx->vbuf);
         _sgl_destroy_pipeline(ctx->def_pip);
         sg_remove_commit_listener(_sgl_make_commit_listener(ctx));
@@ -4146,7 +4153,16 @@ static bool _sgl_grow_gpu_buffer(_sgl_context_t* ctx, int min_vertices) {
         new_cap *= 2;
     }
     sg_push_debug_group("sokol-gl-grow-vbuf");
-    sg_destroy_buffer(ctx->vbuf);
+    /* [TrussC fork] retire old buffer instead of immediate destroy —
+       D3D11 may still reference it in the current frame's command list */
+    if (ctx->retired_count < 4) {
+        ctx->retired_bufs[ctx->retired_count++] = ctx->vbuf;
+    } else {
+        /* retire リストが満杯なら最古を破棄して詰める */
+        sg_destroy_buffer(ctx->retired_bufs[0]);
+        for (int i = 1; i < 4; i++) { ctx->retired_bufs[i-1] = ctx->retired_bufs[i]; }
+        ctx->retired_bufs[3] = ctx->vbuf;
+    }
     sg_buffer_desc vbuf_desc;
     _sgl_clear(&vbuf_desc, sizeof(vbuf_desc));
     vbuf_desc.size = (size_t)new_cap * sizeof(_sgl_vertex_t);
@@ -4176,6 +4192,13 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
        Vertex data is always uploaded in full for correct base_vertex indexing. */
     const int cmd_start = ctx->draw_base_cmd;
     if ((ctx->vertices.next > 0) && (ctx->commands.next > cmd_start)) {
+        /* [TrussC fork] retire リスト内の旧バッファを破棄。
+           _sgl_draw はフレーム末尾で呼ばれるので、前フレームの GPU コマンドは完了済み */
+        for (int ri = 0; ri < ctx->retired_count; ri++) {
+            sg_destroy_buffer(ctx->retired_bufs[ri]);
+        }
+        ctx->retired_count = 0;
+
         /* [TrussC fork] If a deferred grow was requested last frame, do it now
            (safe because we're at the start of a new frame's draw) */
         if (ctx->pending_grow_vertices > 0) {
@@ -4213,27 +4236,19 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
             size_t append_pos = (size_t)sg_query_buffer_info(ctx->vbuf).append_pos;
             if (buf_desc.size < append_pos + data_size) {
                 int needed = (int)((buf_desc.size + data_size) / sizeof(_sgl_vertex_t)) + 1;
-#ifdef SOKOL_METAL
-                /* Metal: safe to grow immediately (ARC retains GPU resources) */
+                /* [TrussC fork] 旧バッファは retire リストに退避されるので
+                   D3D11 でも即座に grow + 再アップロードが可能 */
                 if (!_sgl_grow_gpu_buffer(ctx, needed)) {
                     sg_pop_debug_group();
                     return;
                 }
-#else
-                /* D3D11/Vulkan/WebGPU: defer grow to next frame to avoid
-                   driver crash from destroying in-flight buffer */
-                ctx->pending_grow_vertices = needed;
-                sg_pop_debug_group();
-                return;
-#endif
             }
         }
 
         int base_offset = sg_append_buffer(ctx->vbuf, &range);
         if (sg_query_buffer_overflow(ctx->vbuf)) {
-            /* GPU buffer too small — grow and retry (Metal) or defer (others) */
+            /* [TrussC fork] GPU buffer too small — grow and retry */
             int needed = (int)(sg_query_buffer_desc(ctx->vbuf).size / sizeof(_sgl_vertex_t) + (size_t)ctx->vertices.next);
-#ifdef SOKOL_METAL
             if (!_sgl_grow_gpu_buffer(ctx, needed)) {
                 sg_pop_debug_group();
                 return;
@@ -4243,11 +4258,6 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
                 sg_pop_debug_group();
                 return;
             }
-#else
-            ctx->pending_grow_vertices = needed;
-            sg_pop_debug_group();
-            return;
-#endif
         }
         /* convert byte offset to vertex offset */
         const int vtx_offset = base_offset / (int)sizeof(_sgl_vertex_t);
