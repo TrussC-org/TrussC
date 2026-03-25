@@ -135,12 +135,14 @@ categories:
       - name: clear
         return: "void"
         signatures:
+          - params: ""
+            params_simple: ""
           - params: "float gray"
             params_simple: "gray"
           - params: "float r, float g, float b"
             params_simple: "r, g, b"
-        description: "Clear screen"
-        description_ja: "画面をクリア"
+        description: "Clear screen. No args = transparent black (0,0,0,0)"
+        description_ja: "画面をクリア。引数なし = 透明黒 (0,0,0,0)"
         of_equivalent: "ofClear / ofBackground"
         sketch: true
         snippet: "clear(${1:0.0})"
@@ -4065,8 +4067,10 @@ categories:
         signatures:
           - params: ""
             params_simple: ""
-        description: "Begin drawing to FBO"
-        description_ja: "FBOへの描画を開始"
+          - params: "float r, float g, float b, float a = 1.0"
+            params_simple: "r, g, b, a"
+        description: "Begin drawing to FBO. No args = preserve previous content. With args = clear with specified color"
+        description_ja: "FBOへの描画を開始。引数なし = 前の内容を保持。引数あり = 指定色でクリア"
         sketch: true
         snippet: "begin()"
 

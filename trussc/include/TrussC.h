@@ -352,6 +352,11 @@ inline void beginFrame() {
 // (Implementation in tc/app/tcGlobal.cpp)
 void clear(float r, float g, float b, float a = 1.0f);
 
+// Clear screen (transparent black)
+inline void clear() {
+    clear(0.0f, 0.0f, 0.0f, 0.0f);
+}
+
 // Clear screen (grayscale)
 inline void clear(float gray, float a = 1.0f) {
     clear(gray, gray, gray, a);

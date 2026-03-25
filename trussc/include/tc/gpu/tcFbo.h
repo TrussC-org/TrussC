@@ -145,18 +145,18 @@ public:
         depthAttView_ = {};
     }
 
-    // Begin rendering to FBO
+    // Begin rendering to FBO (preserves previous content)
     void begin() {
         // Skip in headless mode (no graphics context)
         if (headless::isActive()) return;
-        beginInternal(0.0f, 0.0f, 0.0f, 0.0f);  // Clear with transparent
+        beginInternal(0.0f, 0.0f, 0.0f, 0.0f, false);  // LOAD: keep previous content
     }
 
-    // Begin with specified background color
+    // Begin with specified background color (clears FBO)
     void begin(float r, float g, float b, float a = 1.0f) {
         // Skip in headless mode (no graphics context)
         if (headless::isActive()) return;
-        beginInternal(r, g, b, a);
+        beginInternal(r, g, b, a, true);  // CLEAR: fill with specified color
     }
 
     // Change background color during FBO rendering (restart pass)
@@ -381,7 +381,7 @@ private:
         s.initialized = true;
     }
 
-    void beginInternal(float r, float g, float b, float a) {
+    void beginInternal(float r, float g, float b, float a, bool doClear) {
         if (!allocated_) return;
 
         // Guard: nested FBO begin is not supported
@@ -412,8 +412,12 @@ private:
         }
         pass.attachments.depth_stencil = depthAttView_;
 
-        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        pass.action.colors[0].clear_value = { r, g, b, a };
+        if (doClear) {
+            pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+            pass.action.colors[0].clear_value = { r, g, b, a };
+        } else {
+            pass.action.colors[0].load_action = SG_LOADACTION_LOAD;
+        }
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         pass.action.depth.clear_value = 1.0f;
 
