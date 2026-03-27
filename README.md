@@ -29,7 +29,7 @@ Supports VSCode, Cursor, Xcode, and Visual Studio.
 # Build an example
 cd examples/graphics/graphicsExample
 cmake --preset macos      # or: windows, linux, web
-cmake --build build-macos
+cmake --build build-macos --parallel
 
 # Run (macOS)
 ./bin/graphicsExample.app/Contents/MacOS/graphicsExample

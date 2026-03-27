@@ -60,7 +60,7 @@ TrussC uses **CMake Presets** to ensure consistent build configurations across p
 **Native Build (macOS/Linux/Windows):**
 ```bash
 cmake --preset <os>   # e.g., macos, linux, windows
-cmake --build --preset <os>
+cmake --build --preset <os> --parallel
 ```
 
 **Web Build (WASM):**
@@ -74,7 +74,7 @@ Or manually using CMake:
 ```bash
 # Requires Emscripten SDK to be set up
 cmake --preset web
-cmake --build --preset web
+cmake --build --preset web --parallel
 ```
 
 ### Building All Examples
@@ -188,7 +188,7 @@ For most users, the default RelWithDebInfo is sufficient. If you need a full Deb
 
 ```bash
 cmake -DCMAKE_BUILD_TYPE=Debug --preset macos
-cmake --build --preset macos
+cmake --build --preset macos --parallel
 ```
 
 > **Note:** Xcode and Visual Studio are multi-config generators and support switching between Debug/Release directly in the IDE without reconfiguring.

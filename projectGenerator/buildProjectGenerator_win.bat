@@ -44,7 +44,7 @@ if %ERRORLEVEL% neq 0 (
 REM Build
 echo.
 echo Building...
-cmake --build . --config Release
+cmake --build . --config Release --parallel
 if %ERRORLEVEL% neq 0 (
     echo.
     echo ERROR: Build failed!

@@ -35,10 +35,18 @@ elseif(WIN32)
     set(TC_GRAPHICS_BACKEND "D3D11")
     message(STATUS "[TrussC] Platform: Windows (D3D11)")
 elseif(UNIX)
-    if(EXISTS "/opt/vc/include/bcm_host.h")
+    # Raspberry Pi detection via Device Tree (works on all Pi OS versions)
+    set(_TC_IS_RASPI FALSE)
+    if(EXISTS "/proc/device-tree/model")
+        file(READ "/proc/device-tree/model" _TC_DEVICE_MODEL)
+        if(_TC_DEVICE_MODEL MATCHES "Raspberry Pi")
+            set(_TC_IS_RASPI TRUE)
+        endif()
+    endif()
+    if(_TC_IS_RASPI)
         set(TC_PLATFORM_RASPBIAN TRUE)
         set(TC_GRAPHICS_BACKEND "GLES3")
-        message(STATUS "[TrussC] Platform: Raspbian (GLES3)")
+        message(STATUS "[TrussC] Platform: Raspberry Pi (GLES3)")
     else()
         set(TC_PLATFORM_LINUX TRUE)
         set(TC_GRAPHICS_BACKEND "GLCORE")
@@ -69,7 +77,7 @@ elseif(TC_PLATFORM_MACOS)
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/mac/*.mm)
 elseif(TC_PLATFORM_WINDOWS)
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/win/*.cpp)
-elseif(TC_PLATFORM_LINUX)
+elseif(TC_PLATFORM_LINUX OR TC_PLATFORM_RASPBIAN)
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
 else()
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
@@ -177,12 +185,27 @@ elseif(TC_PLATFORM_LINUX)
 
 elseif(TC_PLATFORM_RASPBIAN)
     target_compile_definitions(TrussC PUBLIC SOKOL_GLES3)
-    target_include_directories(TrussC PUBLIC /opt/vc/include)
+    find_package(X11 REQUIRED)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+    pkg_check_modules(FFMPEG REQUIRED libavcodec libavformat libswscale libavutil)
+    pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0 gstreamer-app-1.0 gstreamer-audio-1.0)
+    target_include_directories(TrussC PUBLIC
+        ${GTK3_INCLUDE_DIRS}
+        ${FFMPEG_INCLUDE_DIRS}
+        ${GSTREAMER_INCLUDE_DIRS}
+    )
     target_link_libraries(TrussC PUBLIC
+        ${X11_LIBRARIES}
+        ${X11_Xi_LIB}
+        ${X11_Xcursor_LIB}
         GLESv2
         EGL
-        bcm_host
+        ${GTK3_LIBRARIES}
+        ${FFMPEG_LIBRARIES}
+        ${GSTREAMER_LIBRARIES}
         pthread
+        dl
     )
 endif()
 

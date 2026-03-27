@@ -260,6 +260,18 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    #ifdef __linux__
+    const char* display = std::getenv("DISPLAY");
+    const char* wayland = std::getenv("WAYLAND_DISPLAY");
+    if ((!display || display[0] == '\0') && (!wayland || wayland[0] == '\0')) {
+        cerr << "Error: No display server found (DISPLAY and WAYLAND_DISPLAY are not set)." << endl;
+        cerr << "Please run this from a desktop environment (X11 or Wayland)." << endl;
+        cerr << "  - If using SSH, connect with: ssh -X user@host" << endl;
+        cerr << "  - For CLI usage, run with --help" << endl;
+        return 1;
+    }
+    #endif
+
     WindowSettings settings;
     settings.title = "TrussC Project Generator";
     settings.width = 500;
