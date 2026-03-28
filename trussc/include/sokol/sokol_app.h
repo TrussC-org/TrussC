@@ -13790,17 +13790,11 @@ _SOKOL_PRIVATE void _sapp_linux_frame(void) {
         _sapp_vk_frame();
     #else
         _sapp_frame();
-        // Modified by tettou771 for TrussC: skip present if flag is set (fix flickering with event-driven rendering)
-        if (_sapp.skip_present) {
-            _sapp.skip_present = false;
-        } else {
-            #if defined(_SAPP_GLX)
-                _sapp_glx_swap_buffers();
-            #elif defined(_SAPP_EGL)
-                eglSwapBuffers(_sapp.egl.display, _sapp.egl.surface);
-            #endif
-        }
-        // end of modification
+        #if defined(_SAPP_GLX)
+            _sapp_glx_swap_buffers();
+        #elif defined(_SAPP_EGL)
+            eglSwapBuffers(_sapp.egl.display, _sapp.egl.surface);
+        #endif
     #endif
 }
 
