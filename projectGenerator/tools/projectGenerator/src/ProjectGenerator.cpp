@@ -414,6 +414,8 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         webPreset["binaryDir"] = "${sourceDir}/build-web";
         webPreset["generator"] = "Unix Makefiles";
         webPreset["toolchainFile"] = detectEmscriptenToolchain();
+        webPreset["cacheVariables"]["CMAKE_BUILD_TYPE"] = "MinSizeRel";
+        webPreset["cacheVariables"]["TC_WEB_BACKEND"] = (settings_.webBackend == 0) ? "WGPU" : "GLES3";
         webPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
         // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
         if (!trusscDir.empty()) {

@@ -258,15 +258,23 @@ macro(trussc_app)
         )
         # Custom shell HTML path
         set(_TC_SHELL_FILE "${TC_ROOT}/trussc/platform/web/shell.html")
-        # WebGPU link options
+        # Common Emscripten link options
         target_link_options(${PROJECT_NAME} PRIVATE
-            --use-port=emdawnwebgpu
             -sALLOW_MEMORY_GROWTH=1
             -sALLOW_TABLE_GROWTH=1
             -sFETCH=1
             -sASYNCIFY=1
             --shell-file=${_TC_SHELL_FILE}
         )
+        # Backend-specific link options
+        if(TC_GRAPHICS_BACKEND STREQUAL "WGPU")
+            target_link_options(${PROJECT_NAME} PRIVATE --use-port=emdawnwebgpu)
+        else()
+            target_link_options(${PROJECT_NAME} PRIVATE
+                -sMIN_WEBGL_VERSION=2
+                -sMAX_WEBGL_VERSION=2
+            )
+        endif()
         # Auto-preload bin/data folder if it exists
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bin/data")
             target_link_options(${PROJECT_NAME} PRIVATE
