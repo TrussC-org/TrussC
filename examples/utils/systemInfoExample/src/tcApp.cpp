@@ -92,7 +92,7 @@ void tcApp::draw() {
     setColor(0.3f);
     drawCircle(cx, cy, 20);
     setColor(colors::red);
-    drawLine(cx, cy, cx + sin(heading) * 18, cy - cos(heading) * 18);
+    drawLine(cx, cy, cx - sin(heading) * 18, cy - cos(heading) * 18);
     setColor(colors::white);
     y += lineH + 8;
 
