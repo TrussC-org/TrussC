@@ -267,7 +267,11 @@ macro(trussc_app)
             --shell-file=${_TC_SHELL_FILE}
         )
         # Backend-specific link options
-        if(TC_GRAPHICS_BACKEND STREQUAL "WGPU")
+        # TC_WEB_BACKEND is set in trussc/CMakeLists.txt (defaults to WGPU)
+        if(NOT DEFINED TC_WEB_BACKEND)
+            set(TC_WEB_BACKEND "WGPU")
+        endif()
+        if(TC_WEB_BACKEND STREQUAL "WGPU")
             target_link_options(${PROJECT_NAME} PRIVATE --use-port=emdawnwebgpu)
         else()
             target_link_options(${PROJECT_NAME} PRIVATE
