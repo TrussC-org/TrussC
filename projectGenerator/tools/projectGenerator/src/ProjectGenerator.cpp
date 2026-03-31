@@ -133,7 +133,7 @@ string ProjectGenerator::getDestPath() const {
     while (!dir.empty() && dir.back() == '/') {
         dir.pop_back();
     }
-    return dir + "/" + settings_.projectName;
+    return fs::absolute(dir + "/" + settings_.projectName).string();
 }
 
 // Get TRUSSC_DIR value for CMakePresets.json
@@ -358,6 +358,79 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     presets["buildPresets"].push_back(linuxBuildPreset);
 #endif
 
+    // Add Android preset if enabled
+    if (settings_.generateAndroidBuild) {
+        Json androidPreset;
+        androidPreset["name"] = "android";
+        androidPreset["displayName"] = "Android (ARM64)";
+        androidPreset["binaryDir"] = "${sourceDir}/build-android";
+        androidPreset["generator"] = "Unix Makefiles";
+        androidPreset["cacheVariables"]["CMAKE_BUILD_TYPE"] = "Release";
+        androidPreset["cacheVariables"]["ANDROID_ABI"] = "arm64-v8a";
+        androidPreset["cacheVariables"]["ANDROID_PLATFORM"] = "android-26";
+
+        // NDK toolchain: try to resolve at generation time, fallback to $env{}
+        string ndkHome;
+        if (getenv("ANDROID_NDK_HOME")) {
+            ndkHome = getenv("ANDROID_NDK_HOME");
+        } else if (getenv("ANDROID_HOME")) {
+            // Scan $ANDROID_HOME/ndk/ for latest version
+            string ndkDir = string(getenv("ANDROID_HOME")) + "/ndk";
+            if (fs::exists(ndkDir)) {
+                string latest;
+                for (auto& entry : fs::directory_iterator(ndkDir)) {
+                    if (entry.is_directory()) {
+                        string name = entry.path().filename().string();
+                        if (name > latest) latest = name;
+                    }
+                }
+                if (!latest.empty()) ndkHome = ndkDir + "/" + latest;
+            }
+        }
+        if (!ndkHome.empty()) {
+            androidPreset["toolchainFile"] = ndkHome + "/build/cmake/android.toolchain.cmake";
+            log("Android NDK: " + ndkHome);
+        } else {
+            // Use CMake env expansion — resolved at build time, not generation time
+            // Works when ANDROID_NDK_HOME is set in the terminal but not in GUI app
+            androidPreset["toolchainFile"] = "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake";
+            log("Android NDK not found at generation time. Using $env{ANDROID_NDK_HOME} (resolved at build time).");
+        }
+
+        if (!trusscDir.empty()) {
+            androidPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
+        }
+        presets["configurePresets"].push_back(androidPreset);
+
+        Json androidBuildPreset;
+        androidBuildPreset["name"] = "android";
+        androidBuildPreset["configurePreset"] = "android";
+        androidBuildPreset["jobs"] = 4;
+        presets["buildPresets"].push_back(androidBuildPreset);
+    }
+
+    // Add iOS preset if enabled (macOS host only)
+#ifdef __APPLE__
+    if (settings_.generateIosBuild) {
+        Json iosPreset;
+        iosPreset["name"] = "ios";
+        iosPreset["displayName"] = "iOS";
+        iosPreset["binaryDir"] = "${sourceDir}/xcode-ios";
+        iosPreset["generator"] = "Xcode";
+        iosPreset["cacheVariables"]["CMAKE_SYSTEM_NAME"] = "iOS";
+        iosPreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "15.0";
+        if (!trusscDir.empty()) {
+            iosPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
+        }
+        presets["configurePresets"].push_back(iosPreset);
+
+        Json iosBuildPreset;
+        iosBuildPreset["name"] = "ios";
+        iosBuildPreset["configurePreset"] = "ios";
+        presets["buildPresets"].push_back(iosBuildPreset);
+    }
+#endif
+
     // Add web preset if web build is enabled
     if (settings_.generateWebBuild) {
         Json webPreset;
@@ -366,6 +439,8 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         webPreset["binaryDir"] = "${sourceDir}/build-web";
         webPreset["generator"] = "Unix Makefiles";
         webPreset["toolchainFile"] = detectEmscriptenToolchain();
+        webPreset["cacheVariables"]["CMAKE_BUILD_TYPE"] = "MinSizeRel";
+        webPreset["cacheVariables"]["TC_WEB_BACKEND"] = (settings_.webBackend == 0) ? "WGPU" : "GLES3";
         webPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
         // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
         if (!trusscDir.empty()) {
@@ -459,6 +534,9 @@ string ProjectGenerator::generate() {
             generateWebBuildFiles(destPath);
         }
 
+        // Configure cross-compile presets
+        runCrossCompilePresets(destPath);
+
         log("Done!");
         return "";  // Success
 
@@ -467,7 +545,9 @@ string ProjectGenerator::generate() {
     }
 }
 
-string ProjectGenerator::update(const string& projectPath) {
+string ProjectGenerator::update(const string& projectPath_) {
+    // Resolve to absolute path so saveJson (which uses getDataPath) works correctly
+    string projectPath = fs::absolute(projectPath_).string();
     try {
         log("Updating project...");
 
@@ -517,6 +597,9 @@ string ProjectGenerator::update(const string& projectPath) {
             log("Updating Web build files...");
             generateWebBuildFiles(projectPath);
         }
+
+        // Configure cross-compile presets
+        runCrossCompilePresets(projectPath);
 
         log("Update complete!");
         return "";
@@ -819,6 +902,40 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
 //
 // Unix Makefiles (macOS/Linux) and Ninja both support CMAKE_EXPORT_COMPILE_COMMANDS.
 // Visual Studio generator does NOT support compile_commands.json.
+void ProjectGenerator::runCrossCompilePresets(const string& path) {
+    // Collect presets to configure
+    vector<string> presets;
+
+#ifdef __APPLE__
+    if (settings_.generateIosBuild) presets.push_back("ios");
+#endif
+    if (settings_.generateAndroidBuild) presets.push_back("android");
+
+    // Map preset name to build directory
+    auto getBuildDir = [](const string& preset) -> string {
+        if (preset == "ios") return "xcode-ios";
+        if (preset == "android") return "build-android";
+        return "build-" + preset;
+    };
+
+    for (auto& preset : presets) {
+        // Clean existing build directory to avoid stale cache
+        string buildDir = path + "/" + getBuildDir(preset);
+        if (fs::exists(buildDir)) {
+            log("Cleaning " + getBuildDir(preset) + "...");
+            fs::remove_all(buildDir);
+        }
+
+        log("Running CMake configure (preset: " + preset + ")...");
+        string cmd = "cd \"" + path + "\" && " + getCmakePath() + " --preset " + preset;
+        auto [result, output] = executeCommand(cmd);
+        if (!output.empty()) log(output);
+        if (result != 0) {
+            log("WARNING: cmake --preset " + preset + " failed (non-fatal)");
+        }
+    }
+}
+
 void ProjectGenerator::runCMakeConfigure(const string& path) {
 #ifdef _WIN32
     string preset = "windows";

@@ -16,6 +16,10 @@ float getDisplayScaleFactor() {
     return (float)emscripten_get_device_pixel_ratio();
 }
 
+// Immersive mode (no-op on web)
+void setImmersiveMode(bool enabled) { (void)enabled; }
+bool getImmersiveMode() { return false; }
+
 void setWindowSize(int width, int height) {
     // Emscripten では canvas サイズを変更
     // sokol_app が使用する canvas ID を指定
@@ -41,6 +45,24 @@ bool saveScreenshot(const std::filesystem::path& path) {
     logWarning() << "[Screenshot] Emscripten では未実装";
     return false;
 }
+
+// ---------------------------------------------------------------------------
+// System sensors (stubs)
+// ---------------------------------------------------------------------------
+float getSystemVolume() { return -1.0f; }
+void setSystemVolume(float volume) { (void)volume; }
+float getSystemBrightness() { return -1.0f; }
+void setSystemBrightness(float brightness) { (void)brightness; }
+ThermalState getThermalState() { return ThermalState::Nominal; }
+float getThermalTemperature() { return -1.0f; }
+float getBatteryLevel() { return -1.0f; }
+bool isBatteryCharging() { return false; }
+Vec3 getAccelerometer() { return Vec3(0, 0, 0); }
+Vec3 getGyroscope() { return Vec3(0, 0, 0); }
+Quaternion getDeviceOrientation() { return Quaternion(1, 0, 0, 0); }
+float getCompassHeading() { return 0.0f; }
+bool isProximityClose() { return false; }
+Location getLocation() { return Location(); }
 
 } // namespace platform
 } // namespace trussc

@@ -13,7 +13,7 @@ CMakePresets.json
 build/
 build-*/
 emscripten/
-xcode/
+xcode*/
 vs/
 
 # Build scripts (generated, OS dependent)

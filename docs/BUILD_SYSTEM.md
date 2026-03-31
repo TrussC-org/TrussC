@@ -36,6 +36,12 @@ projectGenerator --update path/to/myProject
 # Enable Web build (WASM)
 projectGenerator --update path/to/myProject --web
 
+# Enable Android build
+projectGenerator --update path/to/myProject --android
+
+# Enable iOS build
+projectGenerator --update path/to/myProject --ios
+
 # Specify TrussC root explicitly (if auto-detection fails)
 projectGenerator --update path/to/myProject --tc-root path/to/TrussC
 
@@ -77,6 +83,61 @@ cmake --preset web
 cmake --build --preset web --parallel
 ```
 
+**Android Build (beta):**
+
+Requires:
+- Android SDK (`ANDROID_HOME` environment variable)
+- Android NDK (`ANDROID_NDK_HOME` environment variable)
+- Java (`JAVA_HOME` environment variable) — for APK signing
+
+```bash
+# Using Project Generator (adds android preset to CMakePresets.json)
+projectGenerator --update path/to/myProject --android
+
+# Build
+cmake --preset android
+cmake --build --preset android
+# → APK is generated at bin/android/<project>.apk
+# Upload to device via adb or other tools.
+```
+
+Notes:
+- The Project Generator detects the NDK from `ANDROID_NDK_HOME` or `$ANDROID_HOME/ndk/`.
+- APK signing uses `~/.android/debug.keystore`. If missing, APK packaging is skipped and only the .so is built.
+- Touch input: On Android, touch events are delivered via `touchPressed()`/`touchMoved()`/`touchReleased()`. To also receive them as mouse events, call `setTouchAsMouse(true)` in `setup()`.
+- Data files: Use `adb push` to transfer assets to the app's internal storage.
+- **If `cmake --preset android` fails after Project Generator**, try running the command manually from the terminal. The Project Generator may not fully configure the Android preset in some environments.
+
+**iOS Build (beta):**
+
+Requires:
+- Xcode (full installation, not just Command Line Tools)
+- Apple Developer account (for device deployment)
+
+```bash
+# Using Project Generator (adds ios preset)
+projectGenerator --update path/to/myProject --ios
+
+# Generate Xcode project
+cmake --preset ios
+
+# Open in Xcode
+open xcode-ios/*.xcodeproj
+```
+
+Then in Xcode:
+- Select your device or simulator as the build target
+- **Set your Development Team** in Signing & Capabilities (required — build will fail without it)
+- Press ⌘R to build and run
+
+Notes:
+- Touch input works the same as Android (`touchPressed`/`touchMoved`/`touchReleased`).
+- `setTouchAsMouse(true)` is ON by default on iOS, same as Android.
+- System sensors (accelerometer, gyroscope, compass, etc.) are available via `tc::platform::getAccelerometer()` etc.
+- Screen brightness: iOS returns linear 0.0-1.0 matching the slider. Android returns a gamma-corrected value (see API docs).
+- **First launch may show a black screen for up to 30 seconds** before the app appears. This is a known issue with initial Metal/GPU setup. Subsequent launches are faster.
+- Frame rate may be very low for the first few seconds after launch. This stabilizes quickly.
+
 ### Building All Examples
 To build all examples in the repository (useful for testing):
 
@@ -101,8 +162,10 @@ myProject/
 │   ├── data/            # Place your assets here (images, fonts, etc.)
 │   ├── myProject.app    # (macOS)
 │   ├── myProject.exe    # (Windows)
-│   └── myProject.html   # (Web)
+│   ├── myProject.html   # (Web)
+│   └── android/         # (Android APK)
 ├── build-macos/         # Build artifacts (do not touch)
+├── build-android/       # Build artifacts (do not touch)
 ├── build-web/           # Build artifacts (do not touch)
 ├── CMakeLists.txt       # AUTO-GENERATED (Do not edit)
 ├── CMakePresets.json    # AUTO-GENERATED (Do not edit)

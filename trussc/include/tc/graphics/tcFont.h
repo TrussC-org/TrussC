@@ -60,6 +60,11 @@
     #define TC_FONT_SANS  "/System/Library/Fonts/Helvetica.ttc"
     #define TC_FONT_SERIF "/System/Library/Fonts/Times.ttc"
     #define TC_FONT_MONO  "/System/Library/Fonts/Menlo.ttc"
+#elif defined(__ANDROID__)
+    // Android system fonts (accessible from NDK without permissions)
+    #define TC_FONT_SANS  "/system/fonts/Roboto-Regular.ttf"
+    #define TC_FONT_SERIF "/system/fonts/NotoSerif-Regular.ttf"
+    #define TC_FONT_MONO  "/system/fonts/DroidSansMono.ttf"
 #else
     // Linux
     #define TC_FONT_SANS  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"

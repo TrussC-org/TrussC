@@ -83,6 +83,10 @@ float getDisplayScaleFactor() {
     return scaleFactor;
 }
 
+// Immersive mode (no-op on desktop)
+void setImmersiveMode(bool enabled) { (void)enabled; }
+bool getImmersiveMode() { return false; }
+
 // ---------------------------------------------------------------------------
 // setWindowSize - ウィンドウサイズを変更
 // ---------------------------------------------------------------------------
@@ -346,6 +350,24 @@ bool saveScreenshot(const std::filesystem::path& path) {
         return false;
     }
 }
+
+// ---------------------------------------------------------------------------
+// System sensors (stubs)
+// ---------------------------------------------------------------------------
+float getSystemVolume() { return -1.0f; }
+void setSystemVolume(float volume) { (void)volume; }
+float getSystemBrightness() { return -1.0f; }
+void setSystemBrightness(float brightness) { (void)brightness; }
+ThermalState getThermalState() { return ThermalState::Nominal; }
+float getThermalTemperature() { return -1.0f; }
+float getBatteryLevel() { return -1.0f; }
+bool isBatteryCharging() { return false; }
+Vec3 getAccelerometer() { return Vec3(0, 0, 0); }
+Vec3 getGyroscope() { return Vec3(0, 0, 0); }
+Quaternion getDeviceOrientation() { return Quaternion(1, 0, 0, 0); }
+float getCompassHeading() { return 0.0f; }
+bool isProximityClose() { return false; }
+Location getLocation() { return Location(); }
 
 } // namespace platform
 } // namespace trussc

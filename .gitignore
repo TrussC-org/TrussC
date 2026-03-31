@@ -5,6 +5,7 @@
 # Build artifacts
 build/
 build-*/
+xcode*/
 out/
 cmake-build-*/
 *.a

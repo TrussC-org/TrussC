@@ -263,6 +263,21 @@ namespace internal {
     inline int mouseButton = -1;  // Currently pressed button (-1 = none)
     inline bool mousePressed = false;
 
+    // Touch-as-mouse mapping
+    // Mobile (Android/iOS): default ON — existing mouse-based code works on touch screens.
+    // Desktop/Web: default OFF — touch and mouse are separate.
+    // Override with setTouchAsMouse(true/false) in setup().
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+    inline bool touchAsMouse = true;
+#else
+    inline bool touchAsMouse = false;
+#endif
+
+    // Touch event listeners (must persist to keep subscriptions alive)
+    inline EventListener touchPressedListener;
+    inline EventListener touchMovedListener;
+    inline EventListener touchReleasedListener;
+
     // Keyboard state
     inline std::unordered_set<int> keysPressed;
 
@@ -1478,6 +1493,32 @@ inline void toggleFullscreen() {
 }
 
 // ---------------------------------------------------------------------------
+// Orientation control (iOS only, no-op on other platforms)
+// ---------------------------------------------------------------------------
+enum class Orientation : uint32_t {
+    Portrait            = (1 << 1),  // UIInterfaceOrientationMaskPortrait
+    PortraitUpsideDown  = (1 << 2),  // UIInterfaceOrientationMaskPortraitUpsideDown
+    LandscapeLeft       = (1 << 4),  // UIInterfaceOrientationMaskLandscapeLeft
+    LandscapeRight      = (1 << 3),  // UIInterfaceOrientationMaskLandscapeRight
+    Landscape           = LandscapeLeft | LandscapeRight,
+    All                 = Portrait | PortraitUpsideDown | LandscapeLeft | LandscapeRight,
+    AllButUpsideDown    = Portrait | LandscapeLeft | LandscapeRight,
+};
+
+inline Orientation operator|(Orientation a, Orientation b) {
+    return static_cast<Orientation>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+
+inline Orientation operator&(Orientation a, Orientation b) {
+    return static_cast<Orientation>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+}
+
+// Set supported orientations (iOS only)
+inline void setOrientation(Orientation mask) {
+    sapp_ios_set_supported_orientations(static_cast<uint32_t>(mask));
+}
+
+// ---------------------------------------------------------------------------
 // Window information (size corresponding to coordinate system)
 // ---------------------------------------------------------------------------
 
@@ -1608,6 +1649,15 @@ inline float getMouseX() { return internal::mouseX; }
 inline float getMouseY() { return internal::mouseY; }
 inline Vec2 getMousePos() { return Vec2(internal::mouseX, internal::mouseY); }
 inline Vec2 getGlobalMousePos() { return Vec2(getGlobalMouseX(), getGlobalMouseY()); }
+
+// ---------------------------------------------------------------------------
+// Touch-as-mouse mapping
+// When enabled, the first touch point is also delivered as mouse events.
+// Useful for running desktop apps (that use mousePressed) on mobile unchanged.
+// Default: OFF. Call setTouchAsMouse(true) in setup() for mobile apps.
+// ---------------------------------------------------------------------------
+inline void setTouchAsMouse(bool enabled) { internal::touchAsMouse = enabled; }
+inline bool getTouchAsMouse() { return internal::touchAsMouse; }
 
 // ---------------------------------------------------------------------------
 // System Information
@@ -2208,6 +2258,72 @@ namespace internal {
                 if (appMouseScrolledFunc) appMouseScrolledFunc(ev->scroll_x, ev->scroll_y);
                 break;
             }
+            // Touch events (Android/iOS)
+            case SAPP_EVENTTYPE_TOUCHES_BEGAN:
+            case SAPP_EVENTTYPE_TOUCHES_MOVED:
+            case SAPP_EVENTTYPE_TOUCHES_ENDED:
+            case SAPP_EVENTTYPE_TOUCHES_CANCELLED: {
+                // Build TouchEventArgs from sokol touchpoints
+                TouchEventArgs touchArgs;
+                touchArgs.numTouches = ev->num_touches;
+                if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)
+                    touchArgs.numTouches = TouchEventArgs::MAX_TOUCHES;
+                for (int i = 0; i < touchArgs.numTouches; i++) {
+                    touchArgs.touches[i].id = (int)ev->touches[i].identifier;
+                    touchArgs.touches[i].x = ev->touches[i].pos_x * scale;
+                    touchArgs.touches[i].y = ev->touches[i].pos_y * scale;
+                    touchArgs.touches[i].changed = ev->touches[i].changed;
+                }
+
+                // Fire touch events
+                if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
+                    events().touchPressed.notify(touchArgs);
+                } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
+                    events().touchMoved.notify(touchArgs);
+                } else {
+                    touchArgs.cancelled = (ev->type == SAPP_EVENTTYPE_TOUCHES_CANCELLED);
+                    events().touchReleased.notify(touchArgs);
+                }
+
+                // Touch-as-mouse: map first touch to mouse events
+                if (touchAsMouse && touchArgs.numTouches > 0) {
+                    float tx = touchArgs.touches[0].x;
+                    float ty = touchArgs.touches[0].y;
+
+                    if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
+                        currentMouseButton = 0;
+                        mouseX = tx; mouseY = ty;
+                        mouseButton = 0;
+                        mousePressed = true;
+
+                        MouseEventArgs margs;
+                        margs.x = tx; margs.y = ty; margs.button = 0;
+                        events().mousePressed.notify(margs);
+                        if (appMousePressedFunc) appMousePressedFunc((int)tx, (int)ty, 0);
+                    } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
+                        float prevX = mouseX, prevY = mouseY;
+                        mouseX = tx; mouseY = ty;
+
+                        MouseDragEventArgs margs;
+                        margs.x = tx; margs.y = ty;
+                        margs.deltaX = tx - prevX; margs.deltaY = ty - prevY;
+                        margs.button = 0;
+                        events().mouseDragged.notify(margs);
+                        if (appMouseDraggedFunc) appMouseDraggedFunc((int)tx, (int)ty, 0);
+                    } else {
+                        currentMouseButton = -1;
+                        mouseX = tx; mouseY = ty;
+                        mouseButton = -1;
+                        mousePressed = false;
+
+                        MouseEventArgs margs;
+                        margs.x = tx; margs.y = ty; margs.button = 0;
+                        events().mouseReleased.notify(margs);
+                        if (appMouseReleasedFunc) appMouseReleasedFunc((int)tx, (int)ty, 0);
+                    }
+                }
+                break;
+            }
             case SAPP_EVENTTYPE_RESIZED: {
                 // Use sapp_width() (framebuffer size) instead of ev->window_width
                 // because event data might be logical size on some platforms, causing double scaling.
@@ -2257,8 +2373,10 @@ namespace internal {
 // Application execution
 // ---------------------------------------------------------------------------
 
+// Build sapp_desc without starting the event loop.
+// Used by runApp() on desktop and by sokol_main() on Android.
 template<typename AppClass>
-int runApp(const WindowSettings& settings = WindowSettings()) {
+sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
     // Set pixel perfect mode
     internal::pixelPerfectMode = settings.pixelPerfect;
 
@@ -2321,6 +2439,17 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
         if (app) app->filesDropped(files);
     };
 
+    // Touch events — delivered via events() system, forwarded to App virtual methods
+    internal::touchPressedListener = events().touchPressed.listen([](TouchEventArgs& args) {
+        if (app) app->touchPressed(args);
+    });
+    internal::touchMovedListener = events().touchMoved.listen([](TouchEventArgs& args) {
+        if (app) app->touchMoved(args);
+    });
+    internal::touchReleasedListener = events().touchReleased.listen([](TouchEventArgs& args) {
+        if (app) app->touchReleased(args);
+    });
+
     // Build sapp_desc
     sapp_desc desc = {};
     if (settings.pixelPerfect) {
@@ -2353,11 +2482,33 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;
     internal::clipboardSize = settings.clipboardSize;
-    // Run the app
-    sapp_run(&desc);
 
+    return desc;
+}
+
+// Desktop: build descriptor and run the event loop.
+// Android: sokol handles the event loop via ANativeActivity_onCreate → sokol_main().
+//          runApp() just stores the descriptor for sokol_main() to retrieve.
+#ifdef __ANDROID__
+namespace internal {
+    inline sapp_desc g_androidDesc = {};
+}
+
+template<typename AppClass>
+int runApp(const WindowSettings& settings = WindowSettings()) {
+    internal::g_androidDesc = buildAppDescriptor<AppClass>(settings);
+    // On Android, sokol_main() will return g_androidDesc.
+    // runApp() is called from sokol_main() context, so just return.
     return 0;
 }
+#else
+template<typename AppClass>
+int runApp(const WindowSettings& settings = WindowSettings()) {
+    sapp_desc desc = buildAppDescriptor<AppClass>(settings);
+    sapp_run(&desc);
+    return 0;
+}
+#endif
 
 } // namespace trussc
 

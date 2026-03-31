@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="@TC_APP_PACKAGE@"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35"/>
+    <uses-feature android:glEsVersion="0x00030000" android:required="true"/>
+
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <application
+        android:hasCode="false"
+        android:label="@TC_APP_LIB_NAME@">
+        <activity
+            android:name="android.app.NativeActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:exported="true">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="@TC_APP_LIB_NAME@"/>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

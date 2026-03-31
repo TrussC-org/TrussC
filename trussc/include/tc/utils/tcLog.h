@@ -10,6 +10,9 @@
 #include <iomanip>
 #include <chrono>
 #include <ctime>
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
 // Uses Event system
 #include "../events/tcEvent.h"
 #include "../events/tcEventListener.h"
@@ -79,7 +82,8 @@ public:
     Event<LogEventArgs> onLog;
 
     Logger() {
-        // Register console listener by default
+        // Console: stderr/stdout (desktop/web)
+#ifndef __ANDROID__
         consoleListener_ = onLog.listen([this](LogEventArgs& e) {
             if (e.level >= consoleLevel_ && consoleLevel_ != LogLevel::Silent) {
                 std::ostream& out = (e.level >= LogLevel::Warning) ? std::cerr : std::cout;
@@ -88,6 +92,22 @@ public:
                     << e.message << std::endl;
             }
         });
+#endif
+
+        // Android: logcat via __android_log_write
+#ifdef __ANDROID__
+        androidListener_ = onLog.listen([this](LogEventArgs& e) {
+            if (e.level >= consoleLevel_ && consoleLevel_ != LogLevel::Silent) {
+                int prio;
+                switch (e.level) {
+                    case LogLevel::Error:   prio = ANDROID_LOG_ERROR; break;
+                    case LogLevel::Warning: prio = ANDROID_LOG_WARN; break;
+                    default:                prio = ANDROID_LOG_INFO; break;
+                }
+                __android_log_write(prio, "TrussC", e.message.c_str());
+            }
+        });
+#endif
     }
 
     ~Logger() {
@@ -163,9 +183,12 @@ public:
     }
 
 private:
-    // Console
+    // Console (desktop/web)
     EventListener consoleListener_;
     LogLevel consoleLevel_ = LogLevel::Notice;
+
+    // Android logcat
+    EventListener androidListener_;
 
     // File
     EventListener fileListener_;

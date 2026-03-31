@@ -495,7 +495,8 @@ Sound sfx = bundle.build();
 ## Code Examples
 
 ### Example 1: Tween Animation
-Tween animates values with easing. Chainable API, works with float/Vec2/Vec3/Color.
+Tween animates values with easing. Auto-updates via `events().update` — no manual `update()` call needed.
+Chainable API, works with float/Vec2/Vec3/Color. Supports loop and yoyo.
 
 ```cpp
 // tcApp.h
@@ -503,7 +504,6 @@ class tcApp : public App {
     Tween<float> sizeTween;
     Tween<Color> colorTween;
     void setup() override;
-    void update() override;
     void draw() override;
     void mousePressed(Vec2 pos, int button) override;
 };
@@ -514,13 +514,9 @@ void tcApp::setup() {
         .ease(EaseType::Elastic, EaseMode::Out).start();
 
     colorTween.from(colors::cornflowerBlue).to(colors::hotPink)
-        .duration(1.0f).ease(EaseType::Cubic).start();
-}
-
-void tcApp::update() {
-    float dt = getDeltaTime();
-    sizeTween.update(dt);
-    colorTween.update(dt);
+        .duration(1.0f).ease(EaseType::Cubic)
+        .loop(-1).yoyo()   // Infinite ping-pong
+        .start();
 }
 
 void tcApp::draw() {
@@ -531,13 +527,14 @@ void tcApp::draw() {
 }
 
 void tcApp::mousePressed(Vec2 pos, int button) {
-    sizeTween.reset().start();   // Restart on click
-    colorTween.reset().start();
+    sizeTween.from(50.0f).to(200.0f).start();   // Restart on click
 }
 ```
 
 EaseType: `Linear`, `Quad`, `Cubic`, `Quart`, `Quint`, `Sine`, `Expo`, `Circ`, `Back`, `Elastic`, `Bounce`
 EaseMode: `In`, `Out`, `InOut`
+Loop: `loop(3)` = repeat 3 times, `loop(-1)` = infinite, `loop(0)` = no loop (default)
+Yoyo: `yoyo()` = reverse direction each loop iteration
 
 ### Example 2: Stroke Drawing (strokeExample)
 Mouse trail with thick strokes. `beginStroke()`/`endStroke()` draws variable-width lines (unlike `drawLine()` which is always 1px).
@@ -733,11 +730,25 @@ void tcApp::setup() {
 
 ## Beginner Guidance
 
+### Prerequisites (verify before anything else)
+
+**1. C++ Compiler (required even if not using the IDE directly)**
+- **macOS (14 Sonoma or later required):** Xcode from App Store (recommended). If Xcode cannot be installed (disk space, managed device, etc.), the Command Line Tools alone are enough: `xcode-select --install`. Verify either way: `clang --version`
+  - macOS 13 and earlier are not supported (sokol uses newer Metal/display APIs)
+- **Windows:** Visual Studio (Community is free). Must install "Desktop development with C++" workload. Verify: open "Developer Command Prompt" and run `cl`
+- **Linux:** GCC or Clang. Install: `sudo apt install build-essential` (Ubuntu/Debian). Verify: `g++ --version`
+
+**2. CMake (required, version 3.20+)**
+- Verify: `cmake --version`
+- If not installed:
+  - macOS: `brew install cmake` or download from cmake.org
+  - Windows: Download from cmake.org, check "Add to PATH" during install
+  - Linux: `sudo apt install cmake`
+- CMake installation is a common stumbling block — provide careful support here
+- Confirm cmake is working before proceeding to next step
+
 ### Getting Started
-- First, check if CMake is installed (many beginners don't have it)
-  - CMake installation is a common stumbling block — provide careful support here
-  - Confirm cmake is working before proceeding to next step
-  - If user says they already have cmake, skip to projectGenerator
+- If user says they already have cmake + compiler, skip to projectGenerator
 
 - To get projectGenerator:
   1. Go to the `projectGenerator` folder in TrussC
@@ -753,7 +764,11 @@ void tcApp::setup() {
 
 ### IDE Setup
 - Ask which IDE they use first: VSCode, Cursor, or Xcode
-- VSCode/Cursor: After generating, open the project in IDE. Recommended extensions will be suggested automatically — guide them to install these.
+- VSCode/Cursor: After generating, open the project in IDE. Three required extensions will be suggested automatically:
+  1. **C/C++** (`ms-vscode.cpptools`) — IntelliSense and syntax highlighting
+  2. **CMake Tools** (`ms-vscode.cmake-tools`) — Build integration
+  3. **CodeLLDB** (`vadimcn.vscode-lldb`) — Debugger
+  - If the popup doesn't appear, open Extensions panel and search for each one
 - Build key is F5.
 - Xcode: Can build directly. The .xcodeproj file is inside the `xcode` folder within the project.
 

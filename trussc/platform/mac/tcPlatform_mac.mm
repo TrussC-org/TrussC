@@ -10,6 +10,11 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 #include <CoreGraphics/CoreGraphics.h>
+#include <CoreAudio/CoreAudio.h>
+#include <AudioToolbox/AudioServices.h>
+#include <IOKit/ps/IOPowerSources.h>
+#include <IOKit/ps/IOPSKeys.h>
+#import <CoreLocation/CoreLocation.h>
 
 // sokol_app の swapchain 取得関数
 #include "sokol_app.h"
@@ -36,6 +41,10 @@ float getDisplayScaleFactor() {
 
     return (float)pixelWidth / (float)pointWidth;
 }
+
+// Immersive mode (no-op on desktop)
+void setImmersiveMode(bool enabled) { (void)enabled; }
+bool getImmersiveMode() { return false; }
 
 void setWindowSize(int width, int height) {
     // メインウィンドウを取得
@@ -216,6 +225,197 @@ bool saveScreenshot(const std::filesystem::path& path) {
     }
 
     return success;
+}
+
+// ---------------------------------------------------------------------------
+// System sensors (stubs for macOS — most are mobile-only)
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// System Volume (CoreAudio)
+// ---------------------------------------------------------------------------
+static AudioDeviceID _tcGetDefaultOutputDevice() {
+    AudioDeviceID deviceId = 0;
+    UInt32 size = sizeof(deviceId);
+    AudioObjectPropertyAddress addr = {
+        kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, nullptr, &size, &deviceId);
+    return deviceId;
+}
+
+float getSystemVolume() {
+    AudioDeviceID device = _tcGetDefaultOutputDevice();
+    if (device == 0) return -1.0f;
+
+    Float32 volume = 0;
+    UInt32 size = sizeof(volume);
+    AudioObjectPropertyAddress addr = {
+        kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+        kAudioDevicePropertyScopeOutput,
+        kAudioObjectPropertyElementMain
+    };
+    OSStatus status = AudioObjectGetPropertyData(device, &addr, 0, nullptr, &size, &volume);
+    if (status != noErr) return -1.0f;
+    return (float)volume;
+}
+
+void setSystemVolume(float volume) {
+    AudioDeviceID device = _tcGetDefaultOutputDevice();
+    if (device == 0) return;
+
+    Float32 vol = std::clamp(volume, 0.0f, 1.0f);
+    AudioObjectPropertyAddress addr = {
+        kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+        kAudioDevicePropertyScopeOutput,
+        kAudioObjectPropertyElementMain
+    };
+    AudioObjectSetPropertyData(device, &addr, 0, nullptr, sizeof(vol), &vol);
+}
+
+// ---------------------------------------------------------------------------
+// Screen Brightness (CoreGraphics private API)
+// ---------------------------------------------------------------------------
+extern "C" {
+    double CoreDisplay_Display_GetUserBrightness(CGDirectDisplayID id);
+    void CoreDisplay_Display_SetUserBrightness(CGDirectDisplayID id, double brightness);
+}
+
+float getSystemBrightness() {
+    double b = CoreDisplay_Display_GetUserBrightness(CGMainDisplayID());
+    return (float)b;
+}
+
+void setSystemBrightness(float brightness) {
+    CoreDisplay_Display_SetUserBrightness(CGMainDisplayID(), (double)std::clamp(brightness, 0.0f, 1.0f));
+}
+
+ThermalState getThermalState() {
+    NSProcessInfoThermalState state = [NSProcessInfo processInfo].thermalState;
+    switch (state) {
+        case NSProcessInfoThermalStateFair:     return ThermalState::Fair;
+        case NSProcessInfoThermalStateSerious:  return ThermalState::Serious;
+        case NSProcessInfoThermalStateCritical: return ThermalState::Critical;
+        default: return ThermalState::Nominal;
+    }
+}
+float getThermalTemperature() { return -1.0f; }
+
+// ---------------------------------------------------------------------------
+// Battery (IOPowerSources)
+// ---------------------------------------------------------------------------
+float getBatteryLevel() {
+    CFTypeRef info = IOPSCopyPowerSourcesInfo();
+    if (!info) return -1.0f;
+
+    CFArrayRef sources = IOPSCopyPowerSourcesList(info);
+    if (!sources || CFArrayGetCount(sources) == 0) {
+        if (sources) CFRelease(sources);
+        CFRelease(info);
+        return -1.0f;
+    }
+
+    float level = -1.0f;
+    CFDictionaryRef ps = IOPSGetPowerSourceDescription(info, CFArrayGetValueAtIndex(sources, 0));
+    if (ps) {
+        CFNumberRef capacityRef = (CFNumberRef)CFDictionaryGetValue(ps, CFSTR(kIOPSCurrentCapacityKey));
+        CFNumberRef maxRef = (CFNumberRef)CFDictionaryGetValue(ps, CFSTR(kIOPSMaxCapacityKey));
+        if (capacityRef && maxRef) {
+            int capacity = 0, maxCapacity = 0;
+            CFNumberGetValue(capacityRef, kCFNumberIntType, &capacity);
+            CFNumberGetValue(maxRef, kCFNumberIntType, &maxCapacity);
+            if (maxCapacity > 0) level = (float)capacity / (float)maxCapacity;
+        }
+    }
+
+    CFRelease(sources);
+    CFRelease(info);
+    return level;
+}
+
+bool isBatteryCharging() {
+    CFTypeRef info = IOPSCopyPowerSourcesInfo();
+    if (!info) return false;
+
+    CFArrayRef sources = IOPSCopyPowerSourcesList(info);
+    if (!sources || CFArrayGetCount(sources) == 0) {
+        if (sources) CFRelease(sources);
+        CFRelease(info);
+        return false;
+    }
+
+    bool charging = false;
+    CFDictionaryRef ps = IOPSGetPowerSourceDescription(info, CFArrayGetValueAtIndex(sources, 0));
+    if (ps) {
+        CFStringRef state = (CFStringRef)CFDictionaryGetValue(ps, CFSTR(kIOPSPowerSourceStateKey));
+        if (state && CFStringCompare(state, CFSTR(kIOPSACPowerValue), 0) == kCFCompareEqualTo) {
+            charging = true;
+        }
+    }
+
+    CFRelease(sources);
+    CFRelease(info);
+    return charging;
+}
+
+Vec3 getAccelerometer() { return Vec3(0, 0, 0); }
+Vec3 getGyroscope() { return Vec3(0, 0, 0); }
+Quaternion getDeviceOrientation() { return Quaternion(1, 0, 0, 0); }
+float getCompassHeading() { return 0.0f; }
+
+bool isProximityClose() { return false; }
+
+} // namespace platform
+} // namespace trussc
+
+// ---------------------------------------------------------------------------
+// Location (CoreLocation) — ObjC declarations must be at global scope
+// ---------------------------------------------------------------------------
+static trussc::Location _macLastLocation;
+static bool _macLocationStarted = false;
+
+@interface _TCMacLocationDelegate : NSObject <CLLocationManagerDelegate>
+@end
+static _TCMacLocationDelegate* _macLocationDelegate = nil;
+static CLLocationManager* _macLocationManager = nil;
+
+@implementation _TCMacLocationDelegate
+- (void)locationManager:(CLLocationManager*)manager didUpdateLocations:(NSArray<CLLocation*>*)locations {
+    CLLocation* loc = locations.lastObject;
+    if (loc) {
+        _macLastLocation.latitude = loc.coordinate.latitude;
+        _macLastLocation.longitude = loc.coordinate.longitude;
+        _macLastLocation.altitude = loc.altitude;
+        _macLastLocation.accuracy = (float)loc.horizontalAccuracy;
+    }
+}
+- (void)locationManager:(CLLocationManager*)manager didFailWithError:(NSError*)error {
+    trussc::logWarning() << "[Location] " << [[error localizedDescription] UTF8String];
+}
+- (void)locationManagerDidChangeAuthorization:(CLLocationManager*)manager {
+    if (manager.authorizationStatus == kCLAuthorizationStatusAuthorized) {
+        [manager startUpdatingLocation];
+    }
+}
+@end
+
+namespace trussc {
+namespace platform {
+
+Location getLocation() {
+    if (!_macLocationStarted) {
+        _macLocationStarted = true;
+        _macLocationDelegate = [[_TCMacLocationDelegate alloc] init];
+        _macLocationManager = [[CLLocationManager alloc] init];
+        _macLocationManager.delegate = _macLocationDelegate;
+        _macLocationManager.desiredAccuracy = kCLLocationAccuracyBest;
+        if ([_macLocationManager respondsToSelector:@selector(requestAlwaysAuthorization)]) {
+            [_macLocationManager requestAlwaysAuthorization];
+        }
+        [_macLocationManager startUpdatingLocation];
+    }
+    return _macLastLocation;
 }
 
 } // namespace platform

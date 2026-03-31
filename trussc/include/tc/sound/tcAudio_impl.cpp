@@ -1,6 +1,15 @@
 // =============================================================================
 // tcAudio implementation
 // Sound playback and microphone input using miniaudio
+//
+// Why miniaudio instead of sokol_audio:
+// - sokol_audio is playback-only (no microphone/capture support)
+// - miniaudio configures AAudio properly on Android (usage, content type),
+//   while sokol_audio's minimal AAudio init can fail to produce audible output
+// - miniaudio provides device enumeration and format conversion
+//
+// Note: MA_NO_DECODING is set — codec handling is done per-platform
+// (AudioToolbox on macOS, GStreamer on Linux, MediaCodec on Android)
 // =============================================================================
 
 #define MA_NO_DECODING
