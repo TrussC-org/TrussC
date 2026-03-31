@@ -7,10 +7,25 @@
 // All dialog functions follow unified parameter order:
 //   (title, message, ..., callback for async)
 // =============================================================================
+// NOTE: Sync dialog functions are not available on iOS.
+//       Use async versions instead (alertDialogAsync, confirmDialogAsync, etc.)
+// =============================================================================
 
 #include <string>
 #include <vector>
 #include <functional>
+
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+// Mark sync dialogs as compile error on iOS
+#if defined(__APPLE__) && TARGET_OS_IOS
+#define TC_SYNC_DIALOG_UNAVAILABLE \
+    __attribute__((unavailable("Sync dialogs are not supported on iOS. Use async version instead.")))
+#else
+#define TC_SYNC_DIALOG_UNAVAILABLE
+#endif
 
 namespace trussc {
 
@@ -26,6 +41,7 @@ struct FileDialogResult {
 // title: Bold header text
 // message: Body text
 // -----------------------------------------------------------------------------
+TC_SYNC_DIALOG_UNAVAILABLE
 void alertDialog(const std::string& title, const std::string& message);
 
 void alertDialogAsync(const std::string& title,
@@ -36,6 +52,7 @@ void alertDialogAsync(const std::string& title,
 // Confirm dialog (Yes/No)
 // Returns true if user clicked Yes
 // -----------------------------------------------------------------------------
+TC_SYNC_DIALOG_UNAVAILABLE
 bool confirmDialog(const std::string& title, const std::string& message);
 
 void confirmDialogAsync(const std::string& title,
@@ -46,6 +63,7 @@ void confirmDialogAsync(const std::string& title,
 // File open dialog
 // folderSelection: true for folder selection mode
 // -----------------------------------------------------------------------------
+TC_SYNC_DIALOG_UNAVAILABLE
 FileDialogResult loadDialog(const std::string& title = "",
                             const std::string& message = "",
                             const std::string& defaultPath = "",
@@ -61,6 +79,7 @@ void loadDialogAsync(const std::string& title,
 // File save dialog
 // defaultName: Initial filename
 // -----------------------------------------------------------------------------
+TC_SYNC_DIALOG_UNAVAILABLE
 FileDialogResult saveDialog(const std::string& title = "",
                             const std::string& message = "",
                             const std::string& defaultPath = "",

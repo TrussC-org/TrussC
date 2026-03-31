@@ -10,6 +10,10 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 #include <CoreGraphics/CoreGraphics.h>
+#include <CoreAudio/CoreAudio.h>
+#include <AudioToolbox/AudioServices.h>
+#include <IOKit/ps/IOPowerSources.h>
+#include <IOKit/ps/IOPSKeys.h>
 
 // sokol_app の swapchain 取得関数
 #include "sokol_app.h"
@@ -221,6 +225,147 @@ bool saveScreenshot(const std::filesystem::path& path) {
 
     return success;
 }
+
+// ---------------------------------------------------------------------------
+// System sensors (stubs for macOS — most are mobile-only)
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// System Volume (CoreAudio)
+// ---------------------------------------------------------------------------
+static AudioDeviceID _tcGetDefaultOutputDevice() {
+    AudioDeviceID deviceId = 0;
+    UInt32 size = sizeof(deviceId);
+    AudioObjectPropertyAddress addr = {
+        kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, nullptr, &size, &deviceId);
+    return deviceId;
+}
+
+float getSystemVolume() {
+    AudioDeviceID device = _tcGetDefaultOutputDevice();
+    if (device == 0) return -1.0f;
+
+    Float32 volume = 0;
+    UInt32 size = sizeof(volume);
+    AudioObjectPropertyAddress addr = {
+        kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+        kAudioDevicePropertyScopeOutput,
+        kAudioObjectPropertyElementMain
+    };
+    OSStatus status = AudioObjectGetPropertyData(device, &addr, 0, nullptr, &size, &volume);
+    if (status != noErr) return -1.0f;
+    return (float)volume;
+}
+
+void setSystemVolume(float volume) {
+    AudioDeviceID device = _tcGetDefaultOutputDevice();
+    if (device == 0) return;
+
+    Float32 vol = std::clamp(volume, 0.0f, 1.0f);
+    AudioObjectPropertyAddress addr = {
+        kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+        kAudioDevicePropertyScopeOutput,
+        kAudioObjectPropertyElementMain
+    };
+    AudioObjectSetPropertyData(device, &addr, 0, nullptr, sizeof(vol), &vol);
+}
+
+// ---------------------------------------------------------------------------
+// Screen Brightness (CoreGraphics private API)
+// ---------------------------------------------------------------------------
+extern "C" {
+    double CoreDisplay_Display_GetUserBrightness(CGDirectDisplayID id);
+    void CoreDisplay_Display_SetUserBrightness(CGDirectDisplayID id, double brightness);
+}
+
+float getSystemBrightness() {
+    double b = CoreDisplay_Display_GetUserBrightness(CGMainDisplayID());
+    return (float)b;
+}
+
+void setSystemBrightness(float brightness) {
+    CoreDisplay_Display_SetUserBrightness(CGMainDisplayID(), (double)std::clamp(brightness, 0.0f, 1.0f));
+}
+
+ThermalState getThermalState() {
+    NSProcessInfoThermalState state = [NSProcessInfo processInfo].thermalState;
+    switch (state) {
+        case NSProcessInfoThermalStateFair:     return ThermalState::Fair;
+        case NSProcessInfoThermalStateSerious:  return ThermalState::Serious;
+        case NSProcessInfoThermalStateCritical: return ThermalState::Critical;
+        default: return ThermalState::Nominal;
+    }
+}
+float getThermalTemperature() { return -1.0f; }
+
+// ---------------------------------------------------------------------------
+// Battery (IOPowerSources)
+// ---------------------------------------------------------------------------
+float getBatteryLevel() {
+    CFTypeRef info = IOPSCopyPowerSourcesInfo();
+    if (!info) return -1.0f;
+
+    CFArrayRef sources = IOPSCopyPowerSourcesList(info);
+    if (!sources || CFArrayGetCount(sources) == 0) {
+        if (sources) CFRelease(sources);
+        CFRelease(info);
+        return -1.0f;
+    }
+
+    float level = -1.0f;
+    CFDictionaryRef ps = IOPSGetPowerSourceDescription(info, CFArrayGetValueAtIndex(sources, 0));
+    if (ps) {
+        CFNumberRef capacityRef = (CFNumberRef)CFDictionaryGetValue(ps, CFSTR(kIOPSCurrentCapacityKey));
+        CFNumberRef maxRef = (CFNumberRef)CFDictionaryGetValue(ps, CFSTR(kIOPSMaxCapacityKey));
+        if (capacityRef && maxRef) {
+            int capacity = 0, maxCapacity = 0;
+            CFNumberGetValue(capacityRef, kCFNumberIntType, &capacity);
+            CFNumberGetValue(maxRef, kCFNumberIntType, &maxCapacity);
+            if (maxCapacity > 0) level = (float)capacity / (float)maxCapacity;
+        }
+    }
+
+    CFRelease(sources);
+    CFRelease(info);
+    return level;
+}
+
+bool isBatteryCharging() {
+    CFTypeRef info = IOPSCopyPowerSourcesInfo();
+    if (!info) return false;
+
+    CFArrayRef sources = IOPSCopyPowerSourcesList(info);
+    if (!sources || CFArrayGetCount(sources) == 0) {
+        if (sources) CFRelease(sources);
+        CFRelease(info);
+        return false;
+    }
+
+    bool charging = false;
+    CFDictionaryRef ps = IOPSGetPowerSourceDescription(info, CFArrayGetValueAtIndex(sources, 0));
+    if (ps) {
+        CFStringRef state = (CFStringRef)CFDictionaryGetValue(ps, CFSTR(kIOPSPowerSourceStateKey));
+        if (state && CFStringCompare(state, CFSTR(kIOPSACPowerValue), 0) == kCFCompareEqualTo) {
+            charging = true;
+        }
+    }
+
+    CFRelease(sources);
+    CFRelease(info);
+    return charging;
+}
+
+Vec3 getAccelerometer() { return Vec3(0, 0, 0); }
+Vec3 getGyroscope() { return Vec3(0, 0, 0); }
+Quaternion getDeviceOrientation() { return Quaternion(1, 0, 0, 0); }
+float getCompassHeading() { return 0.0f; }
+
+bool isProximityClose() { return false; }
+
+Location getLocation() { return Location(); } // TODO: CoreLocation
 
 } // namespace platform
 } // namespace trussc

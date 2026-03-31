@@ -133,7 +133,7 @@ string ProjectGenerator::getDestPath() const {
     while (!dir.empty() && dir.back() == '/') {
         dir.pop_back();
     }
-    return dir + "/" + settings_.projectName;
+    return fs::absolute(dir + "/" + settings_.projectName).string();
 }
 
 // Get TRUSSC_DIR value for CMakePresets.json
@@ -517,7 +517,9 @@ string ProjectGenerator::generate() {
     }
 }
 
-string ProjectGenerator::update(const string& projectPath) {
+string ProjectGenerator::update(const string& projectPath_) {
+    // Resolve to absolute path so saveJson (which uses getDataPath) works correctly
+    string projectPath = fs::absolute(projectPath_).string();
     try {
         log("Updating project...");
 

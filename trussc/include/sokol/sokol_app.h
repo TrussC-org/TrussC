@@ -2224,6 +2224,8 @@ SOKOL_APP_API_DECL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_req
 SOKOL_APP_API_DECL const void* sapp_macos_get_window(void);
 /* iOS: get bridged pointer to iOS UIWindow */
 SOKOL_APP_API_DECL const void* sapp_ios_get_window(void);
+/* iOS: set supported interface orientations (UIInterfaceOrientationMask values) */
+SOKOL_APP_API_DECL void sapp_ios_set_supported_orientations(uint32_t mask);
 
 /* D3D11: get pointer to IDXGISwapChain object */
 SOKOL_APP_API_DECL const void* sapp_d3d11_get_swap_chain(void);
@@ -2898,6 +2900,10 @@ typedef struct {
     @end
 #endif
 
+// Modified by tettou771 for TrussC: custom view controller for runtime orientation control
+@interface _sapp_ios_view_ctrl : UIViewController
+@end
+
 typedef struct {
     UIWindow* window;
     _sapp_ios_view* view;
@@ -2924,6 +2930,7 @@ typedef struct {
     EAGLContext* eagl_ctx;
     #endif
     bool suspended;
+    NSUInteger supported_orientations;  // UIInterfaceOrientationMask (default: all)
 } _sapp_ios_t;
 
 #endif // _SAPP_IOS
@@ -6531,6 +6538,7 @@ _SOKOL_PRIVATE void _sapp_ios_mtl_init(UIWindowScene* windowScene) {
     #if !defined(_SAPP_TVOS)
         _sapp.ios.view.multipleTouchEnabled = YES;
     #endif
+    _sapp.ios.supported_orientations = UIInterfaceOrientationMaskAll;
 
     _sapp.ios.mtl.layer = [CAMetalLayer layer];
     _sapp.ios.mtl.layer.device = _sapp.ios.mtl.device;
@@ -6542,7 +6550,7 @@ _SOKOL_PRIVATE void _sapp_ios_mtl_init(UIWindowScene* windowScene) {
 
     [_sapp.ios.view.layer addSublayer:_sapp.ios.mtl.layer];
 
-    _sapp.ios.view_ctrl = [[UIViewController alloc] init];
+    _sapp.ios.view_ctrl = [[_sapp_ios_view_ctrl alloc] init];
     _sapp.ios.view_ctrl.modalPresentationStyle = UIModalPresentationFullScreen;
     _sapp.ios.view_ctrl.view = _sapp.ios.view;
     _sapp.ios.window.rootViewController = _sapp.ios.view_ctrl;
@@ -6560,7 +6568,8 @@ _SOKOL_PRIVATE void _sapp_ios_mtl_discard_state(void) {
 }
 
 _SOKOL_PRIVATE bool _sapp_ios_mtl_update_framebuffer_dimensions(CGRect screen_rect) {
-    // get current screen size and if it changed, update the MTKView drawable size
+    // Modified by tettou771 for TrussC: use actual drawable dimensions for framebuffer size
+    // to avoid chicken-egg mismatch between sapp_width()/sapp_height() and Metal render pass dimensions.
     _sapp.framebuffer_width = _sapp_roundf_gzero(screen_rect.size.width * _sapp.dpi_scale);
     _sapp.framebuffer_height = _sapp_roundf_gzero(screen_rect.size.height * _sapp.dpi_scale);
     const CGSize cur_size = _sapp.ios.mtl.layer.drawableSize;
@@ -6573,6 +6582,11 @@ _SOKOL_PRIVATE bool _sapp_ios_mtl_update_framebuffer_dimensions(CGRect screen_re
         _sapp.ios.mtl.layer.frame = screen_rect;
         _sapp_ios_mtl_swapchain_resize(_sapp.framebuffer_width, _sapp.framebuffer_height);
     }
+    // Always read back actual drawable dimensions to ensure framebuffer_width/height
+    // matches the Metal drawable (prevents scissor rect exceeding render pass bounds)
+    const CGSize actual_size = _sapp.ios.mtl.layer.drawableSize;
+    _sapp.framebuffer_width = _sapp_roundf_gzero(actual_size.width);
+    _sapp.framebuffer_height = _sapp_roundf_gzero(actual_size.height);
     return dim_changed;
 }
 #endif
@@ -6700,13 +6714,20 @@ _SOKOL_PRIVATE void _sapp_ios_touch_event(sapp_event_type type, NSSet<UITouch *>
 }
 
 _SOKOL_PRIVATE void _sapp_ios_update_dimensions(void) {
-    CGRect screen_rect = _sapp.ios.window.windowScene.screen.bounds;
-    _sapp.window_width = _sapp_roundf_gzero(screen_rect.size.width);
-    _sapp.window_height = _sapp_roundf_gzero(screen_rect.size.height);
+    // Modified by tettou771 for TrussC: use view bounds instead of UIScreen.mainScreen.bounds
+    // (consistent with macOS which uses [view bounds], avoids potential timing issues
+    // with screen bounds not matching the view's actual layout)
+    CGRect view_rect = _sapp.ios.view.bounds;
+    if (view_rect.size.width < 1.0 || view_rect.size.height < 1.0) {
+        // View not laid out yet, fall back to screen bounds
+        view_rect = _sapp.ios.window.windowScene.screen.bounds;
+    }
+    _sapp.window_width = _sapp_roundf_gzero(view_rect.size.width);
+    _sapp.window_height = _sapp_roundf_gzero(view_rect.size.height);
     #if defined(SOKOL_METAL)
-        bool dim_changed = _sapp_ios_mtl_update_framebuffer_dimensions(screen_rect);
+        bool dim_changed = _sapp_ios_mtl_update_framebuffer_dimensions(view_rect);
     #else
-        bool dim_changed = _sapp_ios_gles3_update_framebuffer_dimensions(screen_rect);
+        bool dim_changed = _sapp_ios_gles3_update_framebuffer_dimensions(view_rect);
     #endif
     if (dim_changed && !_sapp.first_frame) {
         _sapp_ios_app_event(SAPP_EVENTTYPE_RESIZED);
@@ -6944,6 +6965,21 @@ _SOKOL_PRIVATE void _sapp_ios_show_keyboard(bool shown) {
     _sapp_ios_touch_event(SAPP_EVENTTYPE_TOUCHES_CANCELLED, touches, event);
 }
 @end
+
+// Modified by tettou771 for TrussC: custom view controller for runtime orientation + immersive mode
+static bool _sapp_ios_immersive_mode = false;
+@implementation _sapp_ios_view_ctrl
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+    return _sapp.ios.supported_orientations;
+}
+- (BOOL)prefersStatusBarHidden {
+    return _sapp_ios_immersive_mode;
+}
+- (BOOL)prefersHomeIndicatorAutoHidden {
+    return _sapp_ios_immersive_mode;
+}
+@end
+
 #endif /* TARGET_OS_IPHONE */
 
 #endif /* _SAPP_APPLE */
@@ -14485,6 +14521,20 @@ SOKOL_API_IMPL const void* sapp_ios_get_window(void) {
         return obj;
     #else
         return 0;
+    #endif
+}
+
+// Modified by tettou771 for TrussC: runtime orientation control
+SOKOL_API_IMPL void sapp_ios_set_supported_orientations(uint32_t mask) {
+    #if defined(_SAPP_IOS)
+        _sapp.ios.supported_orientations = (NSUInteger)mask;
+        #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 160000
+            if (@available(iOS 16.0, *)) {
+                [_sapp.ios.view_ctrl setNeedsUpdateOfSupportedInterfaceOrientations];
+            }
+        #endif
+    #else
+        (void)mask;
     #endif
 }
 

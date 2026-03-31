@@ -36,9 +36,15 @@ elseif(ANDROID)
     set(TC_GRAPHICS_BACKEND "GLES3")
     message(STATUS "[TrussC] Platform: Android (GLES3)")
 elseif(APPLE)
-    set(TC_PLATFORM_MACOS TRUE)
-    set(TC_GRAPHICS_BACKEND "METAL")
-    message(STATUS "[TrussC] Platform: macOS (Metal)")
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(TC_PLATFORM_IOS TRUE)
+        set(TC_GRAPHICS_BACKEND "METAL")
+        message(STATUS "[TrussC] Platform: iOS (Metal)")
+    else()
+        set(TC_PLATFORM_MACOS TRUE)
+        set(TC_GRAPHICS_BACKEND "METAL")
+        message(STATUS "[TrussC] Platform: macOS (Metal)")
+    endif()
 elseif(WIN32)
     set(TC_PLATFORM_WINDOWS TRUE)
     set(TC_GRAPHICS_BACKEND "D3D11")
@@ -74,6 +80,8 @@ file(GLOB TC_SOUND_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/sound/*.cpp
 # プラットフォーム固有ソースファイル
 if(TC_PLATFORM_EMSCRIPTEN)
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/web/*.cpp)
+elseif(TC_PLATFORM_IOS)
+    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/ios/*.mm)
 elseif(TC_PLATFORM_ANDROID)
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/android/*.cpp)
 elseif(TC_PLATFORM_MACOS)
@@ -104,6 +112,12 @@ add_library(TrussC STATIC ${TC_ALL_SOURCES})
 
 add_library(tc::TrussC ALIAS TrussC)
 
+# iOS: sound sources include ObjC headers (AVFoundation) via miniaudio,
+# so they must be compiled as Objective-C++
+if(TC_PLATFORM_IOS AND TC_SOUND_SOURCES)
+    set_source_files_properties(${TC_SOUND_SOURCES} PROPERTIES LANGUAGE OBJCXX)
+endif()
+
 # インクルードパス
 target_include_directories(TrussC PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -122,6 +136,23 @@ if(TC_PLATFORM_EMSCRIPTEN)
     endif()
     # Emscripten リンクオプションはアプリ側で設定（trussc_app.cmake）
 
+elseif(TC_PLATFORM_IOS)
+    target_compile_definitions(TrussC PUBLIC SOKOL_METAL)
+    target_link_libraries(TrussC PUBLIC
+        "-framework Foundation"
+        "-framework UIKit"
+        "-framework Metal"
+        "-framework MetalKit"
+        "-framework QuartzCore"
+        "-framework CoreGraphics"
+        "-framework AudioToolbox"
+        "-framework AVFoundation"
+        "-framework CoreMedia"
+        "-framework CoreVideo"
+        "-framework UniformTypeIdentifiers"
+    )
+    target_compile_options(TrussC PRIVATE -fobjc-arc)
+
 elseif(TC_PLATFORM_MACOS)
     target_compile_definitions(TrussC PUBLIC SOKOL_METAL)
     target_link_libraries(TrussC PUBLIC
@@ -134,6 +165,9 @@ elseif(TC_PLATFORM_MACOS)
         "-framework AVFoundation"
         "-framework CoreMedia"
         "-framework CoreVideo"
+        "-framework CoreAudio"
+        "-framework IOKit"
+        "-framework CoreDisplay"
     )
     target_compile_options(TrussC PRIVATE -fobjc-arc)
 
@@ -226,11 +260,68 @@ function(trussc_setup_icon TARGET_NAME)
     set(ICON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/icon")
     set(DEFAULT_DIR "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/resources")
 
-    if(APPLE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        _trussc_setup_icon_ios(${TARGET_NAME} "${ICON_DIR}" "${DEFAULT_DIR}")
+    elseif(APPLE)
         _trussc_setup_icon_macos(${TARGET_NAME} "${ICON_DIR}" "${DEFAULT_DIR}")
     elseif(WIN32)
         _trussc_setup_icon_windows(${TARGET_NAME} "${ICON_DIR}" "${DEFAULT_DIR}")
     endif()
+endfunction()
+
+# -----------------------------------------------------------------------------
+# iOS icon setup (AppIcon.xcassets with single 1024x1024 PNG)
+# -----------------------------------------------------------------------------
+function(_trussc_setup_icon_ios TARGET_NAME ICON_DIR DEFAULT_DIR)
+    # Find icon PNG: project icon/ dir first, then default
+    set(ICON_PNG "")
+    file(GLOB PROJECT_PNGS "${ICON_DIR}/*.png")
+    if(PROJECT_PNGS)
+        list(GET PROJECT_PNGS 0 ICON_PNG)
+        get_filename_component(ICON_PNG_NAME "${ICON_PNG}" NAME)
+        message(STATUS "[${TARGET_NAME}] Using iOS icon: ${ICON_PNG_NAME}")
+    elseif(EXISTS "${DEFAULT_DIR}/default.png")
+        set(ICON_PNG "${DEFAULT_DIR}/default.png")
+        message(STATUS "[${TARGET_NAME}] Using default iOS icon")
+    else()
+        message(STATUS "[${TARGET_NAME}] No iOS icon found, skipping")
+        return()
+    endif()
+
+    # Generate AppIcon.xcassets in build directory
+    set(XCASSETS_DIR "${CMAKE_CURRENT_BINARY_DIR}/AppIcon.xcassets")
+    set(APPICONSET_DIR "${XCASSETS_DIR}/AppIcon.appiconset")
+    file(MAKE_DIRECTORY "${APPICONSET_DIR}")
+
+    # Copy PNG
+    file(COPY "${ICON_PNG}" DESTINATION "${APPICONSET_DIR}")
+    get_filename_component(ICON_FILENAME "${ICON_PNG}" NAME)
+
+    # Generate Contents.json (single size, Xcode 14+)
+    file(WRITE "${APPICONSET_DIR}/Contents.json"
+"{
+  \"images\" : [
+    {
+      \"filename\" : \"${ICON_FILENAME}\",
+      \"idiom\" : \"universal\",
+      \"platform\" : \"ios\",
+      \"size\" : \"1024x1024\"
+    }
+  ],
+  \"info\" : {
+    \"author\" : \"xcode\",
+    \"version\" : 1
+  }
+}
+")
+
+    # Add xcassets to target (Xcode handles asset catalog compilation automatically)
+    target_sources(${TARGET_NAME} PRIVATE "${XCASSETS_DIR}")
+
+    # Tell Xcode to use this icon
+    set_target_properties(${TARGET_NAME} PROPERTIES
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+    )
 endfunction()
 
 # -----------------------------------------------------------------------------
@@ -493,7 +584,7 @@ if(TC_SHADER_SOURCES)
     set(_TC_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/tc/gpu/shaders")
     file(MAKE_DIRECTORY "${_TC_SHADER_OUTPUT_DIR}")
 
-    set(_TC_SOKOL_SLANG "metal_macos:hlsl5:glsl300es:wgsl")
+    set(_TC_SOKOL_SLANG "metal_macos:metal_ios:hlsl5:glsl300es:wgsl")
 
     set(_TC_SHADER_OUTPUTS "")
     foreach(_shader_src ${TC_SHADER_SOURCES})

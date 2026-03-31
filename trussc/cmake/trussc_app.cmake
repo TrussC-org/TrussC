@@ -63,6 +63,8 @@ macro(trussc_app)
     # Separate directories per platform to avoid conflicts (e.g. Dropbox sync)
     if(EMSCRIPTEN)
         set(_TC_BUILD_DIR "${TRUSSC_DIR}/build-web")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(_TC_BUILD_DIR "${TRUSSC_DIR}/build-ios")
     elseif(ANDROID)
         set(_TC_BUILD_DIR "${TRUSSC_DIR}/build-android")
     elseif(APPLE)
@@ -170,8 +172,8 @@ macro(trussc_app)
             message(STATUS "[${PROJECT_NAME}] sokol-shdc downloaded successfully")
         endif()
 
-        # Output languages: Metal (macOS), HLSL (Windows), GLSL (Linux), WGSL (Web/WebGPU)
-        set(_TC_SOKOL_SLANG "metal_macos:hlsl5:glsl300es:wgsl")
+        # Output languages: Metal (macOS/iOS), HLSL (Windows), GLSL (Linux), WGSL (Web/WebGPU)
+        set(_TC_SOKOL_SLANG "metal_macos:metal_ios:hlsl5:glsl300es:wgsl")
 
         set(_TC_SHADER_OUTPUTS "")
         foreach(_shader_src ${_TC_SHADER_SOURCES})
@@ -286,6 +288,46 @@ macro(trussc_app)
             )
             message(STATUS "[${PROJECT_NAME}] Preloading data folder for Emscripten")
         endif()
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set_target_properties(${PROJECT_NAME} PROPERTIES
+            MACOSX_BUNDLE TRUE
+            MACOSX_BUNDLE_BUNDLE_NAME "${PROJECT_NAME}"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "com.trussc.${PROJECT_NAME}"
+            MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
+            MACOSX_BUNDLE_INFO_PLIST "${TRUSSC_DIR}/resources/Info-iOS.plist.in"
+            XCODE_GENERATE_SCHEME TRUE
+            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "com.trussc.${PROJECT_NAME}"
+        )
+        # Code signing: if TRUSSC_IOS_TEAM_ID is set, enable signing for device deployment
+        if(TRUSSC_IOS_TEAM_ID)
+            set_target_properties(${PROJECT_NAME} PROPERTIES
+                XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Apple Development"
+                XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+                XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "YES"
+                XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "YES"
+                XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${TRUSSC_IOS_TEAM_ID}"
+            )
+        else()
+            set_target_properties(${PROJECT_NAME} PROPERTIES
+                XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
+                XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO"
+                XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
+            )
+        endif()
+        # Copy data folder into app bundle
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bin/data")
+            file(GLOB_RECURSE _TC_DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/bin/data/*")
+            foreach(_data_file ${_TC_DATA_FILES})
+                file(RELATIVE_PATH _rel_path "${CMAKE_CURRENT_SOURCE_DIR}/bin/data" "${_data_file}")
+                get_filename_component(_rel_dir "${_rel_path}" DIRECTORY)
+                set_source_files_properties("${_data_file}" PROPERTIES
+                    MACOSX_PACKAGE_LOCATION "data/${_rel_dir}")
+                target_sources(${PROJECT_NAME} PRIVATE "${_data_file}")
+            endforeach()
+        endif()
+        trussc_setup_icon(${PROJECT_NAME})
     elseif(APPLE)
         set_target_properties(${PROJECT_NAME} PROPERTIES
             MACOSX_BUNDLE TRUE

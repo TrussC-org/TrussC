@@ -1493,6 +1493,32 @@ inline void toggleFullscreen() {
 }
 
 // ---------------------------------------------------------------------------
+// Orientation control (iOS only, no-op on other platforms)
+// ---------------------------------------------------------------------------
+enum class Orientation : uint32_t {
+    Portrait            = (1 << 1),  // UIInterfaceOrientationMaskPortrait
+    PortraitUpsideDown  = (1 << 2),  // UIInterfaceOrientationMaskPortraitUpsideDown
+    LandscapeLeft       = (1 << 4),  // UIInterfaceOrientationMaskLandscapeLeft
+    LandscapeRight      = (1 << 3),  // UIInterfaceOrientationMaskLandscapeRight
+    Landscape           = LandscapeLeft | LandscapeRight,
+    All                 = Portrait | PortraitUpsideDown | LandscapeLeft | LandscapeRight,
+    AllButUpsideDown    = Portrait | LandscapeLeft | LandscapeRight,
+};
+
+inline Orientation operator|(Orientation a, Orientation b) {
+    return static_cast<Orientation>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+
+inline Orientation operator&(Orientation a, Orientation b) {
+    return static_cast<Orientation>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+}
+
+// Set supported orientations (iOS only)
+inline void setOrientation(Orientation mask) {
+    sapp_ios_set_supported_orientations(static_cast<uint32_t>(mask));
+}
+
+// ---------------------------------------------------------------------------
 // Window information (size corresponding to coordinate system)
 // ---------------------------------------------------------------------------
 
