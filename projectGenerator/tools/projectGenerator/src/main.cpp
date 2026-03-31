@@ -101,6 +101,7 @@ void printHelp() {
     cout << "  --tc-root <path>         Path to TrussC root directory" << endl;
     cout << "  --web                    Enable Web build (Emscripten)" << endl;
     cout << "  --android                Enable Android build (requires ANDROID_HOME)" << endl;
+    cout << "  --ios                    Enable iOS build (macOS only, generates Xcode project)" << endl;
     cout << "  --ide <type>             IDE type (vscode, cursor, xcode, vs, cmake)" << endl;
     cout << "  --help                   Show this help" << endl;
 }
@@ -116,6 +117,7 @@ int main(int argc, char* argv[]) {
     string tcRoot;
     bool web = false;
     bool android = false;
+    bool ios = false;
     string ideStr = "vscode";
 
     // Helper to check if next arg is a valid value (not another flag)
@@ -161,6 +163,8 @@ int main(int argc, char* argv[]) {
             web = true;
         } else if (args[i] == "--android") {
             android = true;
+        } else if (args[i] == "--ios") {
+            ios = true;
         } else if (args[i] == "--ide") {
             string next = getNextArg(i);
             if (!next.empty()) {
@@ -196,6 +200,7 @@ int main(int argc, char* argv[]) {
         settings.tcRoot = tcRoot;
         settings.generateWebBuild = web;
         settings.generateAndroidBuild = android;
+        settings.generateIosBuild = ios;
         settings.detectBuildEnvironment();
         
         // Parse IDE type
@@ -268,6 +273,6 @@ int main(int argc, char* argv[]) {
     WindowSettings settings;
     settings.title = "TrussC Project Generator";
     settings.width = 500;
-    settings.height = 560;
+    settings.height = 600;
     return runApp<tcApp>(settings);
 }

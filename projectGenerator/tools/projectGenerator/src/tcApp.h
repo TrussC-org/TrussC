@@ -44,6 +44,7 @@ private:
     IdeType ideType = IdeType::VSCode;  // Default is VSCode
     bool generateWebBuild = false;      // Generate Web (Emscripten) build
     bool generateAndroidBuild = false;  // Generate Android build
+    bool generateIosBuild = false;      // Generate iOS build
     int webBackend = 0;                 // 0: WebGPU, 1: WebGL
 
     // Visual Studio versions (Windows only)

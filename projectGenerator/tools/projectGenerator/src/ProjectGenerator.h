@@ -17,6 +17,7 @@ struct ProjectSettings {
     IdeType ideType = IdeType::VSCode;
     bool generateWebBuild = false;
     bool generateAndroidBuild = false;
+    bool generateIosBuild = false;
     int webBackend = 0;  // 0: WebGPU, 1: WebGL
     int selectedVsIndex = 0;
     std::vector<VsVersionInfo> installedVsVersions;
@@ -81,4 +82,7 @@ private:
     // DESIGN NOTE: All project-specific configuration goes into CMakePresets.json
     // CMakeLists.txt is copied as-is from template (no modifications)
     void writeCMakePresets(const std::string& destPath);
+
+    // Run cmake --preset for enabled cross-compile targets (iOS, Android)
+    void runCrossCompilePresets(const std::string& path);
 };

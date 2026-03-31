@@ -406,6 +406,28 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         presets["buildPresets"].push_back(androidBuildPreset);
     }
 
+    // Add iOS preset if enabled (macOS host only)
+#ifdef __APPLE__
+    if (settings_.generateIosBuild) {
+        Json iosPreset;
+        iosPreset["name"] = "ios";
+        iosPreset["displayName"] = "iOS";
+        iosPreset["binaryDir"] = "${sourceDir}/xcode-ios";
+        iosPreset["generator"] = "Xcode";
+        iosPreset["cacheVariables"]["CMAKE_SYSTEM_NAME"] = "iOS";
+        iosPreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "15.0";
+        if (!trusscDir.empty()) {
+            iosPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
+        }
+        presets["configurePresets"].push_back(iosPreset);
+
+        Json iosBuildPreset;
+        iosBuildPreset["name"] = "ios";
+        iosBuildPreset["configurePreset"] = "ios";
+        presets["buildPresets"].push_back(iosBuildPreset);
+    }
+#endif
+
     // Add web preset if web build is enabled
     if (settings_.generateWebBuild) {
         Json webPreset;
@@ -509,6 +531,9 @@ string ProjectGenerator::generate() {
             generateWebBuildFiles(destPath);
         }
 
+        // Configure cross-compile presets
+        runCrossCompilePresets(destPath);
+
         log("Done!");
         return "";  // Success
 
@@ -569,6 +594,9 @@ string ProjectGenerator::update(const string& projectPath_) {
             log("Updating Web build files...");
             generateWebBuildFiles(projectPath);
         }
+
+        // Configure cross-compile presets
+        runCrossCompilePresets(projectPath);
 
         log("Update complete!");
         return "";
@@ -871,6 +899,26 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
 //
 // Unix Makefiles (macOS/Linux) and Ninja both support CMAKE_EXPORT_COMPILE_COMMANDS.
 // Visual Studio generator does NOT support compile_commands.json.
+void ProjectGenerator::runCrossCompilePresets(const string& path) {
+    // Collect presets to configure
+    vector<string> presets;
+
+#ifdef __APPLE__
+    if (settings_.generateIosBuild) presets.push_back("ios");
+#endif
+    if (settings_.generateAndroidBuild) presets.push_back("android");
+
+    for (auto& preset : presets) {
+        log("Running CMake configure (preset: " + preset + ")...");
+        string cmd = "cd \"" + path + "\" && " + getCmakePath() + " --preset " + preset;
+        auto [result, output] = executeCommand(cmd);
+        if (!output.empty()) log(output);
+        if (result != 0) {
+            log("WARNING: cmake --preset " + preset + " failed (non-fatal)");
+        }
+    }
+}
+
 void ProjectGenerator::runCMakeConfigure(const string& path) {
 #ifdef _WIN32
     string preset = "windows";

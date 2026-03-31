@@ -417,6 +417,13 @@ void tcApp::draw() {
             }
         }
 
+        // iOS (macOS only)
+#ifdef __APPLE__
+        if (ImGui::Checkbox("iOS", &generateIosBuild)) {
+            saveConfig();
+        }
+#endif
+
         // Web
         if (ImGui::Checkbox("Web", &generateWebBuild)) {
             saveConfig();
@@ -591,6 +598,9 @@ void tcApp::loadConfig() {
     if (config.contains("generate_android_build")) {
         generateAndroidBuild = config["generate_android_build"].get<bool>();
     }
+    if (config.contains("generate_ios_build")) {
+        generateIosBuild = config["generate_ios_build"].get<bool>();
+    }
     if (config.contains("web_backend")) {
         webBackend = config["web_backend"].get<int>();
     }
@@ -614,6 +624,7 @@ void tcApp::saveConfig() {
     config["ide_type"] = static_cast<int>(ideType);
     config["generate_web_build"] = generateWebBuild;
     config["generate_android_build"] = generateAndroidBuild;
+    config["generate_ios_build"] = generateIosBuild;
     config["web_backend"] = webBackend;
     config["last_imported_path"] = importedProjectPath;
     saveJson(config, configPath);
@@ -815,6 +826,7 @@ ProjectSettings tcApp::buildProjectSettings() {
     s.ideType = ideType;
     s.generateWebBuild = generateWebBuild;
     s.generateAndroidBuild = generateAndroidBuild;
+    s.generateIosBuild = generateIosBuild;
     s.webBackend = webBackend;
     s.detectBuildEnvironment();
     return s;
