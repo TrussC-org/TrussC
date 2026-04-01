@@ -2017,7 +2017,14 @@ namespace internal {
         }
     }
 
+    inline bool frameReentryGuard = false;
+
     inline void _frame_cb() {
+        // Guard against reentry (e.g. macOS modal dialogs pump the event loop
+        // which can cause sokol to call frame_cb while ImGui is mid-frame)
+        if (frameReentryGuard) return;
+        frameReentryGuard = true;
+
         auto now = std::chrono::high_resolution_clock::now();
 
         // Initialize timing
@@ -2112,6 +2119,8 @@ namespace internal {
         // Save previous frame's mouse position
         pmouseX = mouseX;
         pmouseY = mouseY;
+
+        frameReentryGuard = false;
     }
 
     inline void _cleanup_cb() {
