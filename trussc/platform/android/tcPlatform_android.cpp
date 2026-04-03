@@ -15,7 +15,6 @@
 #include <GLES3/gl3.h>
 
 namespace trussc {
-namespace platform {
 
 static bool immersiveMode_ = false;
 
@@ -155,7 +154,7 @@ struct SensorState {
 
     void init() {
         if (initialized) return;
-        manager = ASensorManager_getInstance();
+        manager = ASensorManager_getInstanceForPackage(nullptr);
         if (!manager) return;
 
         looper = ALooper_forThread();
@@ -493,7 +492,6 @@ void bringWindowToFront() {
     // no-op: Android apps are always foreground when running
 }
 
-} // namespace platform
 } // namespace trussc
 
 #endif // __ANDROID__
