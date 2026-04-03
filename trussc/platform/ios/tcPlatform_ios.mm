@@ -92,13 +92,12 @@ static void _tcEnsureLocation() {
 }
 
 namespace trussc {
-namespace platform {
 
 float getDisplayScaleFactor() {
     return (float)[UIScreen mainScreen].scale;
 }
 
-void setWindowSize(int width, int height) {
+void setWindowSizeLogical(int width, int height) {
     // no-op on iOS (window size is fixed to screen size)
     (void)width;
     (void)height;
@@ -158,6 +157,9 @@ bool captureWindow(Pixels& outPixels) {
 }
 
 bool saveScreenshot(const std::filesystem::path& path) {
+    if (path.is_relative()) {
+        return saveScreenshot(getDataPath(path.string()));
+    }
     Pixels pixels;
     if (!captureWindow(pixels)) {
         return false;
@@ -339,11 +341,9 @@ Location getLocation() {
 
 // ---------------------------------------------------------------------------
 // iOS immersive mode: hide status bar
-} // namespace platform (temporarily close for extern)
-} // namespace trussc
+} // namespace trussc (temporarily close for extern)
 extern bool _sapp_ios_immersive_mode;
 namespace trussc {
-namespace platform {
 void setImmersiveMode(bool enabled) {
     _sapp_ios_immersive_mode = enabled;
     // Tell UIKit to re-query prefersStatusBarHidden
@@ -357,7 +357,10 @@ void setImmersiveMode(bool enabled) {
 }
 bool getImmersiveMode() { return _sapp_ios_immersive_mode; }
 
-} // namespace platform
+void bringWindowToFront() {
+    // no-op: iOS apps are always foreground when running
+}
+
 } // namespace trussc
 
 #endif // TARGET_OS_IOS

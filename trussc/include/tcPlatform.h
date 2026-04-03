@@ -33,7 +33,10 @@ struct Location {
     float accuracy = -1;   // meters, -1 = not available yet
 };
 
-namespace platform {
+// Bring the application window to front and give it focus
+// Desktop: activates and raises the window
+// Mobile/Web: no-op (always foreground)
+void bringWindowToFront();
 
 // Get DPI scale of main display (available before window creation)
 // macOS: 1.0 (normal) or 2.0 (Retina)
@@ -42,7 +45,7 @@ float getDisplayScaleFactor();
 
 // Change window size (specified in logical size)
 // macOS: Uses NSWindow
-void setWindowSize(int width, int height);
+void setWindowSizeLogical(int width, int height);
 
 // Get absolute path of executable
 std::string getExecutablePath();
@@ -69,6 +72,9 @@ bool captureWindow(Pixels& outPixels);
 
 // Capture current window and save to file
 // Returns true on success, false on failure
+// Save screenshot (uses OS window capture feature)
+// Relative paths are resolved relative to executable directory + data path
+// Supported formats: .png, .jpg/.jpeg, .tiff/.tif, .bmp
 bool saveScreenshot(const std::filesystem::path& path);
 
 // ---------------------------------------------------------------------------
@@ -120,5 +126,4 @@ bool isProximityClose();
 // ---------------------------------------------------------------------------
 Location getLocation();
 
-} // namespace platform
 } // namespace trussc

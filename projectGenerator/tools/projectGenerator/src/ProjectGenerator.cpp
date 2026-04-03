@@ -41,23 +41,71 @@ static string getCmakePath() {
 // Execute command and capture output
 static pair<int, string> executeCommand(const string& cmd) {
     string output;
-    string fullCmd = cmd + " 2>&1";
 #ifdef _WIN32
-    FILE* pipe = _popen(fullCmd.c_str(), "r");
+    // CreateProcessでコンソールウィンドウを非表示にして実行
+    string fullCmd = "cmd.exe /c " + cmd + " 2>&1";
+
+    SECURITY_ATTRIBUTES sa = {};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+
+    HANDLE hReadPipe, hWritePipe;
+    if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
+        return {-1, "Failed to create pipe"};
+    }
+    // 読み取り側は子プロセスに継承させない
+    SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOA si = {};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.hStdOutput = hWritePipe;
+    si.hStdError = hWritePipe;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION pi = {};
+    BOOL ok = CreateProcessA(
+        nullptr, const_cast<char*>(fullCmd.c_str()),
+        nullptr, nullptr, TRUE,
+        CREATE_NO_WINDOW,
+        nullptr, nullptr, &si, &pi);
+
+    // 書き込み側を閉じる（子プロセスが使うので親では不要）
+    CloseHandle(hWritePipe);
+
+    if (!ok) {
+        CloseHandle(hReadPipe);
+        return {-1, "Failed to execute command"};
+    }
+
+    // パイプから出力を読み取る
+    char buffer[256];
+    DWORD bytesRead;
+    while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytesRead, nullptr) && bytesRead > 0) {
+        buffer[bytesRead] = '\0';
+        output += buffer;
+    }
+    CloseHandle(hReadPipe);
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exitCode;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    return {(int)exitCode, output};
 #else
+    string fullCmd = cmd + " 2>&1";
     FILE* pipe = popen(fullCmd.c_str(), "r");
-#endif
     if (!pipe) return {-1, "Failed to execute command"};
     char buffer[256];
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
         output += buffer;
     }
-#ifdef _WIN32
-    int result = _pclose(pipe);
-#else
     int result = pclose(pipe);
-#endif
     return {result, output};
+#endif
 }
 
 // Helper to find Emscripten toolchain

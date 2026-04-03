@@ -15,7 +15,6 @@
 #include <GLES3/gl3.h>
 
 namespace trussc {
-namespace platform {
 
 static bool immersiveMode_ = false;
 
@@ -46,7 +45,7 @@ bool getImmersiveMode() {
     return immersiveMode_;
 }
 
-void setWindowSize(int width, int height) {
+void setWindowSizeLogical(int width, int height) {
     // Android apps are fullscreen — window size is determined by the device
     (void)width;
     (void)height;
@@ -100,6 +99,9 @@ bool captureWindow(Pixels& outPixels) {
 }
 
 bool saveScreenshot(const std::filesystem::path& path) {
+    if (path.is_relative()) {
+        return saveScreenshot(getDataPath(path.string()));
+    }
     Pixels pixels;
     if (!captureWindow(pixels)) {
         return false;
@@ -155,7 +157,7 @@ struct SensorState {
 
     void init() {
         if (initialized) return;
-        manager = ASensorManager_getInstance();
+        manager = ASensorManager_getInstanceForPackage(nullptr);
         if (!manager) return;
 
         looper = ALooper_forThread();
@@ -489,7 +491,10 @@ ThermalState getThermalState() { return ThermalState::Nominal; }
 #endif
 float getThermalTemperature() { return -1.0f; }  // No NDK API for temperature value
 
-} // namespace platform
+void bringWindowToFront() {
+    // no-op: Android apps are always foreground when running
+}
+
 } // namespace trussc
 
 #endif // __ANDROID__

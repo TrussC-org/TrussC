@@ -2,6 +2,10 @@
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
+#ifdef _WIN32
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 using namespace std;
 
@@ -39,8 +43,51 @@ string IdeHelper::openInIde(IdeType ideType, const string& path) {
             cmd = "open -a Terminal \"" + path + "\"";
             break;
     }
+#elif defined(_WIN32)
+    // Windows: コンソールウィンドウを出さずに起動
+    switch (ideType) {
+        case IdeType::VSCode:
+        case IdeType::Cursor: {
+            // code / cursor コマンドをコンソール非表示で実行
+            string exe = (ideType == IdeType::VSCode) ? "code" : "cursor";
+            string fullCmd = "cmd.exe /c " + exe + " \"" + path + "\"";
+            STARTUPINFOA si = {};
+            si.cb = sizeof(si);
+            si.dwFlags = STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_HIDE;
+            PROCESS_INFORMATION pi = {};
+            if (CreateProcessA(nullptr, const_cast<char*>(fullCmd.c_str()),
+                               nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                               nullptr, nullptr, &si, &pi)) {
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+            }
+            return "";
+        }
+        case IdeType::Xcode:
+            return "Xcode is not available on Windows";
+        case IdeType::VisualStudio: {
+            // .slnファイルをShellExecuteで直接開く（コンソール不要）
+            string vsPath = path + "/vs";
+            if (fs::exists(vsPath)) {
+                for (const auto& entry : fs::directory_iterator(vsPath)) {
+                    string name = entry.path().filename().string();
+                    if (name.find(".sln") != string::npos) {
+                        ShellExecuteA(nullptr, "open", entry.path().string().c_str(),
+                                      nullptr, nullptr, SW_SHOWNORMAL);
+                        return "";
+                    }
+                }
+            }
+            return "Visual Studio project not found. Run Update first.";
+        }
+        case IdeType::CMakeOnly:
+            // ターミナルを意図的に表示する
+            cmd = "start cmd /k \"cd /d " + path + "\"";
+            break;
+    }
 #else
-    // Windows / Linux
+    // Linux
     switch (ideType) {
         case IdeType::VSCode:
             cmd = "code \"" + path + "\"";
@@ -49,34 +96,11 @@ string IdeHelper::openInIde(IdeType ideType, const string& path) {
             cmd = "cursor \"" + path + "\"";
             break;
         case IdeType::Xcode:
-            return "Xcode is not available on Windows/Linux";
-        case IdeType::VisualStudio: {
-            // Find and open vs/*.sln
-            string vsPath = path + "/vs";
-            if (fs::exists(vsPath)) {
-                for (const auto& entry : fs::directory_iterator(vsPath)) {
-                    string name = entry.path().filename().string();
-                    if (name.find(".sln") != string::npos) {
-#ifdef _WIN32
-                        cmd = "start \"\" \"" + entry.path().string() + "\"";
-#else
-                        return "Visual Studio is not available on Linux";
-#endif
-                        break;
-                    }
-                }
-            }
-            if (cmd.empty()) {
-                return "Visual Studio project not found. Run Update first.";
-            }
-            break;
-        }
+            return "Xcode is not available on Linux";
+        case IdeType::VisualStudio:
+            return "Visual Studio is not available on Linux";
         case IdeType::CMakeOnly:
-#ifdef _WIN32
-            cmd = "start cmd /k \"cd /d " + path + "\"";
-#else
             cmd = "x-terminal-emulator --working-directory=\"" + path + "\" || gnome-terminal --working-directory=\"" + path + "\"";
-#endif
             break;
     }
 #endif

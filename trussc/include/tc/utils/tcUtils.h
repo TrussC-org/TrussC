@@ -13,9 +13,9 @@
 #include "../sound/tcSound.h"
 
 // Forward declaration for tcPlatform.h (avoid circular include)
-namespace trussc { namespace platform {
+namespace trussc {
     std::string getExecutableDir();
-}}
+}
 
 namespace trussc {
 
@@ -72,7 +72,7 @@ inline std::string getDataPath(const std::string& filename) {
         return internal::dataPathRoot + filename;
     } else {
         // Relative path: resolve relative to executable directory
-        return platform::getExecutableDir() + internal::dataPathRoot + filename;
+        return getExecutableDir() + internal::dataPathRoot + filename;
     }
 }
 

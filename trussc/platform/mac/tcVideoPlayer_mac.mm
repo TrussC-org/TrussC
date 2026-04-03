@@ -870,7 +870,7 @@ bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixel
         CGContextRef ctx = CGBitmapContextCreate(
             outPixels.getData(), w, h, 8, w * 4,
             colorSpace,
-            kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+            (CGBitmapInfo)kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
 
         CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), cgImage);
 

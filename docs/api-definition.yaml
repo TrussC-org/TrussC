@@ -1220,6 +1220,40 @@ categories:
         snippet: "getFrameCount()"
 
   # ==========================================================================
+  # Memory
+  # ==========================================================================
+  - id: memory
+    name: "Memory"
+    name_ja: "メモリ"
+    functions:
+      - name: getSokolMemoryBytes
+        return: "int"
+        signatures:
+          - params: ""
+        description: "Total bytes allocated by sokol libraries"
+        description_ja: "sokolライブラリの総メモリ使用量（バイト）"
+        sketch: true
+        snippet: "getSokolMemoryBytes()"
+
+      - name: getSokolMemoryAllocs
+        return: "int"
+        signatures:
+          - params: ""
+        description: "Number of active allocations in sokol libraries"
+        description_ja: "sokolライブラリのアクティブなアロケーション数"
+        sketch: true
+        snippet: "getSokolMemoryAllocs()"
+
+      - name: releaseSglBuffers
+        return: "void"
+        signatures:
+          - params: ""
+        description: "Release sokol_gl vertex/command buffers (auto re-allocated on next draw)"
+        description_ja: "sokol_glのバッファを解放（次の描画時に自動再確保）"
+        sketch: true
+        snippet: "releaseSglBuffers()"
+
+  # ==========================================================================
   # Time - Elapsed
   # ==========================================================================
   - id: time_elapsed
@@ -6965,6 +6999,38 @@ types:
         description: "Get font size"
         description_ja: "フォントサイズを取得"
         snippet: "getSize()"
+      - name: clearAtlas
+        return: void
+        signatures:
+          - params: ""
+        description: "Clear font atlas (GPU memory freed, glyphs re-rasterized on next draw)"
+        description_ja: "フォントアトラスをクリア（GPU解放、次の描画時に再ラスタライズ）"
+        sketch: true
+        snippet: "clearAtlas()"
+      - name: getMemoryUsage
+        return: size_t
+        signatures:
+          - params: ""
+        description: "Get atlas memory usage in bytes"
+        description_ja: "アトラスのメモリ使用量（バイト）を取得"
+        sketch: true
+        snippet: "getMemoryUsage()"
+      - name: getLoadedGlyphCount
+        return: size_t
+        signatures:
+          - params: ""
+        description: "Get number of loaded glyphs"
+        description_ja: "読み込み済みグリフ数を取得"
+        sketch: true
+        snippet: "getLoadedGlyphCount()"
+      - name: getAtlasCount
+        return: size_t
+        signatures:
+          - params: ""
+        description: "Get number of atlas pages"
+        description_ja: "アトラスページ数を取得"
+        sketch: true
+        snippet: "getAtlasCount()"
 
   - name: FileWriter
     description: "Streaming file writer with immediate flush"

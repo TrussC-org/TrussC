@@ -26,7 +26,13 @@
 #pragma comment(lib, "shcore.lib")
 
 namespace trussc {
-namespace platform {
+
+void bringWindowToFront() {
+    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+    if (hwnd) {
+        SetForegroundWindow(hwnd);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // getDisplayScaleFactor - DPIスケールを取得
@@ -90,7 +96,7 @@ bool getImmersiveMode() { return false; }
 // ---------------------------------------------------------------------------
 // setWindowSize - ウィンドウサイズを変更
 // ---------------------------------------------------------------------------
-void setWindowSize(int width, int height) {
+void setWindowSizeLogical(int width, int height) {
     HWND hwnd = (HWND)sapp_win32_get_hwnd();
     if (!hwnd) {
         logWarning() << "[Platform] Failed to get window handle";
@@ -307,7 +313,10 @@ bool captureWindow(Pixels& outPixels) {
 // saveScreenshot - スクリーンショットをファイルに保存
 // ---------------------------------------------------------------------------
 bool saveScreenshot(const std::filesystem::path& path) {
-    // まず Pixels にキャプチャ
+    if (path.is_relative()) {
+        return saveScreenshot(getDataPath(path.string()));
+    }
+    // Capture to Pixels
     Pixels pixels;
     if (!captureWindow(pixels)) {
         return false;
@@ -369,7 +378,6 @@ float getCompassHeading() { return 0.0f; }
 bool isProximityClose() { return false; }
 Location getLocation() { return Location(); }
 
-} // namespace platform
 } // namespace trussc
 
 #endif // _WIN32

@@ -11,7 +11,7 @@ namespace trussc {
 // Initialization (setup)
 // ---------------------------------------------------------------------------
 void setup() {
-    // Initialize sokol_gfx
+    // Initialize sokol_gfx (with memory tracking allocator)
     sg_desc sgdesc = {};
     sgdesc.environment = sglue_environment();
     sgdesc.logger.func = slog_func;
@@ -19,14 +19,18 @@ void setup() {
     sgdesc.image_pool_size = 10000;
     sgdesc.view_pool_size = 10000;
     sgdesc.sampler_pool_size = 10000;
+    sgdesc.allocator.alloc_fn = smemtrack_alloc;
+    sgdesc.allocator.free_fn = smemtrack_free;
     sg_setup(&sgdesc);
 
-    // Initialize sokol_gl
+    // Initialize sokol_gl (with memory tracking allocator)
     sgl_desc_t sgldesc = {};
     sgldesc.logger.func = slog_func;
     sgldesc.pipeline_pool_size = 256;
     sgldesc.max_vertices = internal::sglMaxVertices;
     sgldesc.max_commands = internal::sglMaxCommands;
+    sgldesc.allocator.alloc_fn = smemtrack_alloc;
+    sgldesc.allocator.free_fn = smemtrack_free;
     sgl_setup(&sgldesc);
 
     // Initialize bitmap font texture
@@ -240,6 +244,8 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     sgldesc.pipeline_pool_size = 256;
     sgldesc.max_vertices = newMaxVertices;
     sgldesc.max_commands = newMaxCommands;
+    sgldesc.allocator.alloc_fn = smemtrack_alloc;
+    sgldesc.allocator.free_fn = smemtrack_free;
     sgl_setup(&sgldesc);
 
     // 3. Recreate all sgl pipelines

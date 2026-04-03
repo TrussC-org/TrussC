@@ -38,7 +38,7 @@ bool Pixels::loadPlatform(const fs::path& path) {
         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
         CGContextRef ctx = CGBitmapContextCreate(
             pixels, w, h, 8, w * channels, colorSpace,
-            kCGImageAlphaNoneSkipLast | kCGBitmapByteOrder32Big
+            (CGBitmapInfo)kCGImageAlphaNoneSkipLast | kCGBitmapByteOrder32Big
         );
         CGColorSpaceRelease(colorSpace);
 

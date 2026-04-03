@@ -16,6 +16,7 @@
 #include "sokol_gfx.h"
 #include "sokol_glue.h"
 #include "util/sokol_gl_tc.h"
+#include "util/sokol_memtrack.h"
 
 // ---------------------------------------------------------------------------
 // Android entry point bridge

@@ -232,6 +232,12 @@ private:
         stbtt_GetGlyphHMetrics(&fontInfo_, spaceIndex, &advanceWidth, &leftSideBearing);
         spaceAdvance_ = advanceWidth * scale_;
 
+        // Query GPU max texture size (cap at 8192 for sanity)
+        if (sg_isvalid()) {
+            int gpuMax = sg_query_limits().max_image_size_2d;
+            maxAtlasSize_ = (gpuMax > 0) ? std::min(gpuMax, 8192) : 4096;
+        }
+
         // Create first atlas
         createNewAtlas();
 
@@ -314,6 +320,33 @@ public:
     int getFontSize() const { return fontSize_; }
 
     // -------------------------------------------------------------------------
+    // Atlas management
+    // -------------------------------------------------------------------------
+
+    // Clear all atlas pages and cached glyphs.
+    // Font data and metrics are preserved, so glyphs are re-rasterized on demand.
+    void clearAtlas() {
+        if (sg_isvalid()) {
+            for (auto& pd : pendingDestroys_) {
+                sg_destroy_view(pd.view);
+                sg_destroy_image(pd.image);
+            }
+            for (auto& atlas : atlases_) {
+                if (atlas.textureValid_) {
+                    sg_destroy_view(atlas.view_);
+                    sg_destroy_image(atlas.texture_);
+                }
+            }
+        }
+        pendingDestroys_.clear();
+        atlases_.clear();
+        glyphs_.clear();
+        if (loaded_) {
+            createNewAtlas();
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Memory usage
     // -------------------------------------------------------------------------
     size_t getMemoryUsage() const {
@@ -328,8 +361,10 @@ public:
 
 private:
     static constexpr int INITIAL_ATLAS_SIZE = 256;
-    static constexpr int MAX_ATLAS_SIZE = 4096;
     static constexpr int GLYPH_PADDING = 2;
+
+    // Queried at runtime from GPU limits (capped to 8192 for sanity)
+    int maxAtlasSize_ = 4096;
 
     // Font data
     std::vector<uint8_t> fontData_;
@@ -381,7 +416,7 @@ private:
         int newWidth = atlas.width_ * 2;
         int newHeight = atlas.height_ * 2;
 
-        if (newWidth > MAX_ATLAS_SIZE || newHeight > MAX_ATLAS_SIZE) {
+        if (newWidth > maxAtlasSize_ || newHeight > maxAtlasSize_) {
             return false;
         }
 
@@ -415,6 +450,12 @@ private:
         atlas.pixels_ = std::move(newPixels);
         atlas.width_ = newWidth;
         atlas.height_ = newHeight;
+
+        // Start filling from top-right corner of new space
+        // Old content is in top-left quadrant (newWidth/2 x newHeight/2)
+        atlas.currentX_ = newWidth / 2 + GLYPH_PADDING;
+        atlas.currentY_ = GLYPH_PADDING;
+        atlas.rowHeight_ = 0;
 
         // Defer GPU resource destruction (old view may still be in sgl command queue)
         if (atlas.textureValid_) {
@@ -491,9 +532,16 @@ private:
 
         // Move to next row if current row overflows
         if (atlas.currentX_ + paddedWidth > atlas.width_) {
-            atlas.currentX_ = GLYPH_PADDING;
             atlas.currentY_ += atlas.rowHeight_ + GLYPH_PADDING;
             atlas.rowHeight_ = 0;
+
+            // After expand, old content occupies top-left quadrant (width/2 x height/2).
+            // While in that vertical range, start rows from the right half.
+            if (atlas.width_ > INITIAL_ATLAS_SIZE && atlas.currentY_ < atlas.height_ / 2) {
+                atlas.currentX_ = atlas.width_ / 2 + GLYPH_PADDING;
+            } else {
+                atlas.currentX_ = GLYPH_PADDING;
+            }
         }
 
         int destX = atlas.currentX_;
@@ -557,7 +605,15 @@ private:
         // Fits in next row?
         int nextY = atlas.currentY_ + atlas.rowHeight_ + GLYPH_PADDING;
         if (nextY + height <= atlas.height_) {
-            return true;
+            // Check if the glyph fits horizontally in the next row
+            // (right-half rows are narrower)
+            int nextX = GLYPH_PADDING;
+            if (atlas.width_ > INITIAL_ATLAS_SIZE && nextY < atlas.height_ / 2) {
+                nextX = atlas.width_ / 2 + GLYPH_PADDING;
+            }
+            if (nextX + width <= atlas.width_) {
+                return true;
+            }
         }
 
         return false;
@@ -1100,6 +1156,26 @@ public:
     size_t getMemoryUsage() const {
         return atlasManager_ ? atlasManager_->getMemoryUsage() : 0;
     }
+
+    // Alias for clarity
+    size_t getAtlasMemoryUsage() const { return getMemoryUsage(); }
+
+    // Clear atlas pages (glyphs re-rasterized on next draw)
+    void clearAtlas() {
+        if (atlasManager_) atlasManager_->clearAtlas();
+    }
+
+    // Atlas page access (for debug visualization)
+    size_t getAtlasCount() const {
+        return atlasManager_ ? atlasManager_->getAtlasCount() : 0;
+    }
+
+    const AtlasState* getAtlas(size_t index) const {
+        return atlasManager_ ? &atlasManager_->getAtlas(index) : nullptr;
+    }
+
+    // Get shared sampler (for debug atlas rendering)
+    sg_sampler getSampler() { initResources(); return sampler_; }
 
     size_t getLoadedGlyphCount() const {
         return atlasManager_ ? atlasManager_->getLoadedGlyphCount() : 0;
