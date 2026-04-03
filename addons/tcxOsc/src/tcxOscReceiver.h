@@ -46,6 +46,10 @@ public:
             onParseError.notify(msg);
         });
 
+        // Allow multiple receivers on the same port
+        socket_.create();
+        socket_.setReuseAddress(true);
+
         return socket_.bind(port, true);  // Auto-start receive thread
     }
 
