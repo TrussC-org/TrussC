@@ -5,7 +5,7 @@ When updating from upstream, these changes need to be re-applied.
 
 Search for `tettou771` or `Modified by` or `[TrussC` to find all modified sections.
 
-**Upstream base:** https://github.com/floooh/sokol commit `4838409` (2026-02-23)
+**Upstream base:** https://github.com/floooh/sokol commit `672dea0` (2026-04-03)
 
 ---
 

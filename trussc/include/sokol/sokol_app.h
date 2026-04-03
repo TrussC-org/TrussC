@@ -288,8 +288,11 @@
             in more strongly typed languages than C and C++.
 
         double sapp_frame_duration(void)
-            Returns the frame duration in seconds averaged over a number of
-            frames to smooth out any jittering spikes.
+            Returns a smoothed frame duration.
+
+        double sapp_frame_duration_unfiltered(void)
+            Returns the unfiltered frame duration with varying degree of
+            jitter (depending on platform and backend).
 
         int sapp_color_format(void)
         int sapp_depth_format(void)
@@ -1857,8 +1860,8 @@ typedef enum sapp_pixel_format {
     SAPP_PIXELFORMAT_RGBA8,
     SAPP_PIXELFORMAT_SRGB8A8,
     SAPP_PIXELFORMAT_BGRA8,
-    SAPP_PIXELFORMAT_SBGRA8,
     SAPP_PIXELFORMAT_RGB10A2,    // Modified by tettou771 for TrussC: 10-bit color output support
+    SAPP_PIXELFORMAT_SBGRA8,
     SAPP_PIXELFORMAT_DEPTH,
     SAPP_PIXELFORMAT_DEPTH_STENCIL,
     _SA_PPPIXELFORMAT_FORCE_U32 = 0x7FFFFFFF
@@ -2187,6 +2190,8 @@ SOKOL_APP_API_DECL void sapp_consume_event(void);
 SOKOL_APP_API_DECL uint64_t sapp_frame_count(void);
 /* get an averaged/smoothed frame duration in seconds */
 SOKOL_APP_API_DECL double sapp_frame_duration(void);
+/* get 'raw' unfiltered frame duration in seconds */
+SOKOL_APP_API_DECL double sapp_frame_duration_unfiltered(void);
 /* write string into clipboard */
 SOKOL_APP_API_DECL void sapp_set_clipboard_string(const char* str);
 /* read string from clipboard (usually during SAPP_EVENTTYPE_CLIPBOARD_PASTED) */
@@ -2224,16 +2229,12 @@ SOKOL_APP_API_DECL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_req
 SOKOL_APP_API_DECL const void* sapp_macos_get_window(void);
 /* iOS: get bridged pointer to iOS UIWindow */
 SOKOL_APP_API_DECL const void* sapp_ios_get_window(void);
-/* iOS: set supported interface orientations (UIInterfaceOrientationMask values) */
-SOKOL_APP_API_DECL void sapp_ios_set_supported_orientations(uint32_t mask);
 
 /* D3D11: get pointer to IDXGISwapChain object */
 SOKOL_APP_API_DECL const void* sapp_d3d11_get_swap_chain(void);
 
 /* Win32: get the HWND window handle */
 SOKOL_APP_API_DECL const void* sapp_win32_get_hwnd(void);
-// Modified by tettou771 for TrussC: skip the next present call (for event-driven rendering)
-SOKOL_APP_API_DECL void sapp_skip_present(void);
 
 /* GL: get major version */
 SOKOL_APP_API_DECL int sapp_gl_get_major_version(void);
@@ -2249,6 +2250,12 @@ SOKOL_APP_API_DECL const void* sapp_x11_get_display(void);
 
 /* Android: get native activity handle */
 SOKOL_APP_API_DECL const void* sapp_android_get_native_activity(void);
+
+/* iOS: set supported interface orientations (UIInterfaceOrientationMask values) */
+SOKOL_APP_API_DECL void sapp_ios_set_supported_orientations(uint32_t mask);
+
+// Modified by tettou771 for TrussC: skip the next present call (for event-driven rendering)
+SOKOL_APP_API_DECL void sapp_skip_present(void);
 
 #ifdef __cplusplus
 } /* extern "C" */
@@ -2309,17 +2316,11 @@ inline void sapp_run(const sapp_desc& desc) { return sapp_run(&desc); }
         #if !defined(SOKOL_METAL) && !defined(SOKOL_GLCORE) && !defined(SOKOL_WGPU)
         #error("sokol_app.h: unknown 3D API selected for MacOS, must be SOKOL_METAL, SOKOL_GLCORE or SOKOL_WGPU")
         #endif
-        #if !defined(SOKOL_METAL)
-        #define _SAPP_USE_FILTERED_FRAME_TIMING (1)
-        #endif
     #else
         // iOS or iOS Simulator
         #define _SAPP_IOS (1)
         #if !defined(SOKOL_METAL) && !defined(SOKOL_GLES3)
         #error("sokol_app.h: unknown 3D API selected for iOS, must be SOKOL_METAL or SOKOL_GLES3")
-        #endif
-        #if !defined(SOKOL_METAL)
-        #define _SAPP_USE_FILTERED_FRAME_TIMING (1)
         #endif
         #if TARGET_OS_TV
         #define _SAPP_TVOS (1)
@@ -2328,14 +2329,12 @@ inline void sapp_run(const sapp_desc& desc) { return sapp_run(&desc); }
 #elif defined(__EMSCRIPTEN__)
     // Emscripten
     #define _SAPP_EMSCRIPTEN (1)
-    #define _SAPP_USE_FILTERED_FRAME_TIMING (1)
     #if !defined(SOKOL_GLES3) && !defined(SOKOL_WGPU)
     #error("sokol_app.h: unknown 3D API selected for emscripten, must be SOKOL_GLES3 or SOKOL_WGPU")
     #endif
 #elif defined(_WIN32)
     // Windows (D3D11 or GL)
     #define _SAPP_WIN32 (1)
-    #define _SAPP_USE_FILTERED_FRAME_TIMING (1)
     #if !defined(SOKOL_D3D11) && !defined(SOKOL_GLCORE) && !defined(SOKOL_WGPU) && !defined(SOKOL_VULKAN) && !defined(SOKOL_NOAPI)
     #error("sokol_app.h: unknown 3D API selected for Win32, must be SOKOL_D3D11, SOKOL_GLCORE, SOKOL_WGPU, SOKOL_VULKAN or SOKOL_NOAPI")
     #endif
@@ -2346,7 +2345,6 @@ inline void sapp_run(const sapp_desc& desc) { return sapp_run(&desc); }
 #elif defined(__ANDROID__)
     // Android
     #define _SAPP_ANDROID (1)
-    #define _SAPP_USE_FILTERED_FRAME_TIMING (1)
     #if !defined(SOKOL_GLES3)
     #error("sokol_app.h: unknown 3D API selected for Android, must be SOKOL_GLES3")
     #endif
@@ -2356,7 +2354,6 @@ inline void sapp_run(const sapp_desc& desc) { return sapp_run(&desc); }
 #elif defined(__linux__) || defined(__unix__)
     // Linux
     #define _SAPP_LINUX (1)
-    #define _SAPP_USE_FILTERED_FRAME_TIMING (1)
     #if !defined(SOKOL_GLCORE) && !defined(SOKOL_GLES3) && !defined(SOKOL_WGPU) && !defined(SOKOL_VULKAN)
         #error("sokol_app.h: unknown 3D API selected for Linux, must be SOKOL_GLCORE, SOKOL_GLES3, SOKOL_WGPU or SOKOL_VULKAN")
     #endif
@@ -2524,8 +2521,8 @@ inline void sapp_run(const sapp_desc& desc) { return sapp_run(&desc); }
     #include <unistd.h>
     #include <time.h>
     #include <android/native_activity.h>
-    #include <android/looper.h>
     #include <android/configuration.h>  // [TrussC] AConfiguration for display density
+    #include <android/looper.h>
     #include <EGL/egl.h>
     #include <GLES3/gl3.h>
 #elif defined(_SAPP_LINUX)
@@ -2562,7 +2559,6 @@ inline void sapp_run(const sapp_desc& desc) { return sapp_run(&desc); }
 #endif
 
 
-#if defined(_SAPP_USE_FILTERED_FRAME_TIMING)
 // ███████ ██████   █████  ███    ███ ███████     ████████ ██ ███    ███ ██ ███    ██  ██████
 // ██      ██   ██ ██   ██ ████  ████ ██             ██    ██ ████  ████ ██ ████   ██ ██
 // █████   ██████  ███████ ██ ████ ██ █████          ██    ██ ██ ████ ██ ██ ██ ██  ██ ██   ███
@@ -2570,54 +2566,6 @@ inline void sapp_run(const sapp_desc& desc) { return sapp_run(&desc); }
 // ██      ██   ██ ██   ██ ██      ██ ███████        ██    ██ ██      ██ ██ ██   ████  ██████
 //
 // >>frame timing
-#define _SAPP_RING_NUM_SLOTS (256)
-typedef struct {
-    int head;
-    int tail;
-    double buf[_SAPP_RING_NUM_SLOTS];
-} _sapp_ring_t;
-
-_SOKOL_PRIVATE int _sapp_ring_idx(int i) {
-    return i % _SAPP_RING_NUM_SLOTS;
-}
-
-_SOKOL_PRIVATE void _sapp_ring_init(_sapp_ring_t* ring) {
-    ring->head = 0;
-    ring->tail = 0;
-}
-
-_SOKOL_PRIVATE bool _sapp_ring_full(_sapp_ring_t* ring) {
-    return _sapp_ring_idx(ring->head + 1) == ring->tail;
-}
-
-_SOKOL_PRIVATE bool _sapp_ring_empty(_sapp_ring_t* ring) {
-    return ring->head == ring->tail;
-}
-
-_SOKOL_PRIVATE int _sapp_ring_count(_sapp_ring_t* ring) {
-    int count;
-    if (ring->head >= ring->tail) {
-        count = ring->head - ring->tail;
-    } else {
-        count = (ring->head + _SAPP_RING_NUM_SLOTS) - ring->tail;
-    }
-    SOKOL_ASSERT((count >= 0) && (count < _SAPP_RING_NUM_SLOTS));
-    return count;
-}
-
-_SOKOL_PRIVATE void _sapp_ring_enqueue(_sapp_ring_t* ring, double val) {
-    SOKOL_ASSERT(!_sapp_ring_full(ring));
-    ring->buf[ring->head] = val;
-    ring->head = _sapp_ring_idx(ring->head + 1);
-}
-
-_SOKOL_PRIVATE double _sapp_ring_dequeue(_sapp_ring_t* ring) {
-    SOKOL_ASSERT(!_sapp_ring_empty(ring));
-    double val = ring->buf[ring->tail];
-    ring->tail = _sapp_ring_idx(ring->tail + 1);
-    return val;
-}
-
 typedef struct {
     #if defined(_SAPP_APPLE)
         struct {
@@ -2689,85 +2637,74 @@ _SOKOL_PRIVATE double _sapp_timestamp_now(_sapp_timestamp_t* ts) {
 }
 
 typedef struct {
-    double last;
-    double accum;
-    double avg;
-    int spike_count;
-    int num;
     _sapp_timestamp_t timestamp;
-    _sapp_ring_t ring;
+    double dt_min;          // config: min clamp value for unfiltered time delta (seconds)
+    double dt_max;          // config: max clamp value for unfiltered time delta (seconds)
+    double dt_threshold;    // config: threshold time delta for 'resetting' filtering (default: 0.004s, 4ms)
+    double alpha;           // config: smoothing constant, lower values smoother, higher values faster response
+    double last;        // last absolute time in seconds
+    double dt;          // unfiltered frame delta in seconds, clamped to dt_min/dt_max
+    double ema;         // intermediate ema-filter result
+    double smooth_dt;   // smoothed frame delta in seconds
 } _sapp_timing_t;
 
-_SOKOL_PRIVATE void _sapp_timing_reset(_sapp_timing_t* t) {
-    t->last = 0.0;
-    t->accum = 0.0;
-    t->spike_count = 0;
-    t->num = 0;
-    _sapp_ring_init(&t->ring);
-}
-
 _SOKOL_PRIVATE void _sapp_timing_init(_sapp_timing_t* t) {
-    t->avg = 1.0 / 60.0;    // dummy value until first actual value is available
-    _sapp_timing_reset(t);
     _sapp_timestamp_init(&t->timestamp);
+    t->dt_min = 0.000001;       // 1 us
+    t->dt_max = 0.1;            // 100 ms
+    t->dt_threshold = 0.004;    // 4ms
+    t->alpha = 0.025;
+    t->dt = 1.0 / 60.0;         // a 'likely' non-null value
+    t->ema = t->dt;
+    t->smooth_dt = t->dt;
 }
 
-_SOKOL_PRIVATE void _sapp_timing_put(_sapp_timing_t* t, double dur) {
-    // arbitrary upper limit to ignore outliers (e.g. during window resizing, or debugging)
-    double min_dur = 0.0;
-    double max_dur = 0.1;
-    // if we have enough samples for a useful average, use a much tighter 'valid window'
-    if (_sapp_ring_full(&t->ring)) {
-        min_dur = t->avg * 0.8;
-        max_dur = t->avg * 1.2;
+_SOKOL_PRIVATE double _sapp_timing_clamp(_sapp_timing_t* t, double dt) {
+    SOKOL_ASSERT((t->dt_min > 0.0) && (t->dt_max > 0.0) && (t->dt_max >= t->dt_min));
+    if (dt < t->dt_min) {
+        return t->dt_min;
+    } else if (dt > t->dt_max) {
+        return t->dt_max;
+    } else {
+        return dt;
     }
-    if ((dur < min_dur) || (dur > max_dur)) {
-        t->spike_count++;
-        // if there have been many spikes in a row, the display refresh rate
-        // might have changed, so a timing reset is needed
-        if (t->spike_count > 20) {
-            _sapp_timing_reset(t);
-        }
-        return;
-    }
-    if (_sapp_ring_full(&t->ring)) {
-        double old_val = _sapp_ring_dequeue(&t->ring);
-        t->accum -= old_val;
-        t->num -= 1;
-    }
-    _sapp_ring_enqueue(&t->ring, dur);
-    t->accum += dur;
-    t->num += 1;
-    SOKOL_ASSERT(t->num > 0);
-    t->avg = t->accum / t->num;
-    t->spike_count = 0;
 }
 
-_SOKOL_PRIVATE void _sapp_timing_discontinuity(_sapp_timing_t* t) {
-    t->last = 0.0;
+_SOKOL_PRIVATE void _sapp_timing_delta(_sapp_timing_t* t, double dt) {
+    // first clamp raw dt against min/max (min avoid division by zero, max
+    // may avoids glitches and 'death-spirals' during debugging
+    dt = _sapp_timing_clamp(t, dt);
+    t->dt = dt;
+    const double error = fabs(dt - t->smooth_dt);
+    if (error > t->dt_threshold) {
+        // 'reset' filter when new delta is outside threshold
+        t->ema = dt;
+        t->smooth_dt = dt;
+    } else {
+        // simple ema-filter with fixed alpha
+        t->ema = t->ema + t->alpha * (dt - t->ema);
+        t->smooth_dt = _sapp_timing_clamp(t, t->ema);
+    }
 }
 
-_SOKOL_PRIVATE void _sapp_timing_measure(_sapp_timing_t* t) {
-    const double now = _sapp_timestamp_now(&t->timestamp);
+_SOKOL_PRIVATE void _sapp_timing_update(_sapp_timing_t* t, double external_now) {
+    double now;
+    if (external_now == 0.0) {
+        now = _sapp_timestamp_now(&t->timestamp);
+    } else {
+        now = external_now;
+    }
     if (t->last > 0.0) {
-        double dur = now - t->last;
-        _sapp_timing_put(t, dur);
+        double dt = now - t->last;
+        _sapp_timing_delta(t, dt);
     }
     t->last = now;
+
 }
 
-_SOKOL_PRIVATE void _sapp_timing_external(_sapp_timing_t* t, double now) {
-    if (t->last > 0.0) {
-        double dur = now - t->last;
-        _sapp_timing_put(t, dur);
-    }
-    t->last = now;
+_SOKOL_PRIVATE double _sapp_timing_get(_sapp_timing_t* t) {
+    return t->smooth_dt;
 }
-
-_SOKOL_PRIVATE double _sapp_timing_get_avg(_sapp_timing_t* t) {
-    return t->avg;
-}
-#endif
 
 // ███████ ████████ ██████  ██    ██  ██████ ████████ ███████
 // ██         ██    ██   ██ ██    ██ ██         ██    ██
@@ -2891,6 +2828,11 @@ typedef struct {
 - (void)keyboardWillBeHidden:(NSNotification*)notif;
 - (void)keyboardDidChangeFrame:(NSNotification*)notif;
 @end
+
+// Modified by tettou771 for TrussC: custom view controller for runtime orientation control
+@interface _sapp_ios_view_ctrl : UIViewController
+@end
+
 #if defined(SOKOL_METAL)
     @interface _sapp_ios_view : UIView
     - (void)displayLinkFired:(id)sender;
@@ -2900,15 +2842,12 @@ typedef struct {
     @end
 #endif
 
-// Modified by tettou771 for TrussC: custom view controller for runtime orientation control
-@interface _sapp_ios_view_ctrl : UIViewController
-@end
-
 typedef struct {
     UIWindow* window;
     _sapp_ios_view* view;
     UITextField* textfield;
     _sapp_textfield_dlg* textfield_dlg;
+    NSUInteger supported_orientations;  // UIInterfaceOrientationMask (default: all)
     #if defined(SOKOL_METAL)
         UIViewController* view_ctrl;
     #else
@@ -2930,7 +2869,6 @@ typedef struct {
     EAGLContext* eagl_ctx;
     #endif
     bool suspended;
-    NSUInteger supported_orientations;  // UIInterfaceOrientationMask (default: all)
 } _sapp_ios_t;
 
 #endif // _SAPP_IOS
@@ -2956,8 +2894,6 @@ typedef struct {
     DXGI_SWAP_CHAIN_DESC swap_chain_desc;
     IDXGISwapChain* swap_chain;
     IDXGIDevice1* dxgi_device;
-    bool use_dxgi_frame_stats;
-    UINT sync_refresh_count;
 } _sapp_d3d11_t;
 #endif
 
@@ -3328,6 +3264,7 @@ typedef struct {
     bool event_consumed;
     bool html5_ask_leave_site;
     bool onscreen_keyboard_shown;
+    bool skip_present;  // Modified by tettou771 for TrussC: skip next present call (for event-driven rendering)
     int window_width;
     int window_height;
     int framebuffer_width;
@@ -3342,9 +3279,7 @@ typedef struct {
     _sapp_drop_t drop;
     sapp_icon_desc default_icon_desc;
     uint32_t* default_icon_pixels;
-    #if defined(_SAPP_USE_FILTERED_FRAME_TIMING)
-        _sapp_timing_t timing;
-    #endif
+    _sapp_timing_t timing;
     #if defined(SOKOL_WGPU)
         _sapp_wgpu_t wgpu;
     #endif
@@ -3382,7 +3317,6 @@ typedef struct {
     wchar_t window_title_wide[_SAPP_MAX_TITLE_LENGTH];   // UTF-32 or UCS-2 */
     sapp_keycode keycodes[SAPP_MAX_KEYCODES];
     bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM]; // true if a custom mouse cursor is bound on that slot
-    bool skip_present;  // Modified by tettou771 for TrussC: skip next present call (for event-driven rendering)
 } _sapp_t;
 static _sapp_t _sapp;
 
@@ -3647,9 +3581,7 @@ _SOKOL_PRIVATE void _sapp_init_state(const sapp_desc* desc) {
     _sapp.dpi_scale = 1.0f;
     _sapp.fullscreen = _sapp.desc.fullscreen;
     _sapp.mouse.shown = true;
-    #if defined(_SAPP_USE_FILTERED_FRAME_TIMING)
     _sapp_timing_init(&_sapp.timing);
-    #endif
 }
 
 _SOKOL_PRIVATE void _sapp_discard_state(void) {
@@ -5087,8 +5019,7 @@ _SOKOL_PRIVATE void _sapp_vk_frame(void) {
 // >>macos
 #if defined(_SAPP_MACOS)
 
-#define _SAPP_MACOS_MTL_OBSCURED_FRAME_DURATION_IN_SECONDS (0.01667)
-#define _SAPP_MACOS_MTL_MAX_FRAME_DURATION_IN_SECONDS (0.25)
+#define _SAPP_MACOS_MTL_OBSCURED_FRAME_DURATION_IN_SECONDS (0.0166667)
 
 _SOKOL_PRIVATE NSInteger _sapp_macos_max_fps(void) {
     return [NSScreen.mainScreen maximumFramesPerSecond];
@@ -5129,8 +5060,7 @@ _SOKOL_PRIVATE void _sapp_macos_mtl_swapchain_create(int width, int height) {
         _SAPP_PANIC(METAL_CREATE_SWAPCHAIN_DEPTH_TEXTURE_FAILED);
     }
     if (_sapp.sample_count > 1) {
-        // Modified by tettou771 for TrussC: use 10-bit color output (RGB10A2) for reduced banding
-        _sapp.macos.mtl.msaa_tex = _sapp_macos_mtl_create_texture(width, height, MTLPixelFormatRGB10A2Unorm, _sapp.sample_count, "swapchain_msaa_tex");
+        _sapp.macos.mtl.msaa_tex = _sapp_macos_mtl_create_texture(width, height, MTLPixelFormatRGB10A2Unorm  /* Modified by tettou771 for TrussC: 10-bit color */, _sapp.sample_count, "swapchain_msaa_tex");
         if (nil == _sapp.macos.mtl.msaa_tex) {
             _SAPP_PANIC(METAL_CREATE_SWAPCHAIN_MSAA_TEXTURE_FAILED);
         }
@@ -5158,7 +5088,7 @@ _SOKOL_PRIVATE id<CAMetalDrawable> _sapp_macos_mtl_swapchain_next(void) {
 }
 
 _SOKOL_PRIVATE bool _sapp_macos_mtl_display_link_active(void) {
-    return _sapp.macos.mtl.display_link != nil;
+    return (nil != _sapp.macos.mtl.display_link) && (!_sapp.macos.mtl.display_link.paused);
 }
 
 _SOKOL_PRIVATE void _sapp_macos_mtl_timing_init(void) {
@@ -5167,37 +5097,35 @@ _SOKOL_PRIVATE void _sapp_macos_mtl_timing_init(void) {
 }
 
 _SOKOL_PRIVATE void _sapp_macos_mtl_timing_update(void) {
-    CFTimeInterval cur_timestamp = 0.0;
+    // NOTE: if display link is not active, frame duration will be provided
+    // by the regular platform-agnostic timing code
     if (_sapp_macos_mtl_display_link_active()) {
-        cur_timestamp = _sapp.macos.mtl.display_link.timestamp;
-    } else {
-        // fallback timer is active (NOTE: this assumes that the application is starting
-        // in display-link mode, so that the currently stored timestamp is valid
-        cur_timestamp = _sapp.macos.mtl.timing.timestamp + _SAPP_MACOS_MTL_OBSCURED_FRAME_DURATION_IN_SECONDS;
-    }
-    // skip first frame (frame_duration had been initialized to display refresh rate)
-    if (_sapp.macos.mtl.timing.timestamp > 0.0) {
-        _sapp.macos.mtl.timing.frame_duration_sec = cur_timestamp - _sapp.macos.mtl.timing.timestamp;
-        if (_sapp.macos.mtl.timing.frame_duration_sec <= 0.00001) {
-            // this should never actually happen, but just to be sure we don't end up with
-            // a negative or zero frame duration for some reason
-            _sapp.macos.mtl.timing.frame_duration_sec = 1.0 / _sapp_macos_max_fps();
-        } else if (_sapp.macos.mtl.timing.frame_duration_sec > _SAPP_MACOS_MTL_MAX_FRAME_DURATION_IN_SECONDS) {
-            // avoid death-spiral in case of ultra-slow framerate (e.g. when debugging)
-            _sapp.macos.mtl.timing.frame_duration_sec = _SAPP_MACOS_MTL_MAX_FRAME_DURATION_IN_SECONDS;
+        CFTimeInterval cur_timestamp = _sapp.macos.mtl.display_link.timestamp;
+        // skip first frame (frame_duration had been initialized to display refresh rate)
+        if (_sapp.macos.mtl.timing.timestamp > 0.0) {
+            const double dt = cur_timestamp - _sapp.macos.mtl.timing.timestamp;
+            _sapp.macos.mtl.timing.frame_duration_sec = _sapp_timing_clamp(&_sapp.timing, dt);
+        } else {
+            SOKOL_ASSERT(_sapp.macos.mtl.timing.frame_duration_sec > 0.0);
         }
-    } else {
-        SOKOL_ASSERT(_sapp.macos.mtl.timing.frame_duration_sec > 0.0);
+        _sapp.macos.mtl.timing.timestamp = cur_timestamp;
     }
-    _sapp.macos.mtl.timing.timestamp = cur_timestamp;
 }
 
 _SOKOL_PRIVATE double _sapp_macos_mtl_timing_frame_duration(void) {
-    SOKOL_ASSERT(_sapp.macos.mtl.timing.frame_duration_sec > 0.0);
-    return _sapp.macos.mtl.timing.frame_duration_sec;
+    if (_sapp_macos_mtl_display_link_active()) {
+        SOKOL_ASSERT(_sapp.macos.mtl.timing.frame_duration_sec > 0.0);
+        return _sapp.macos.mtl.timing.frame_duration_sec;
+    } else {
+        return _sapp_timing_get(&_sapp.timing);
+    }
 }
 
 _SOKOL_PRIVATE void _sapp_macos_mtl_start_display_link(void) {
+    if (nil != _sapp.macos.mtl.display_link) {
+        _sapp.macos.mtl.display_link.paused = false;
+        return;
+    }
     // NOTE: CADisplayLink is only available since macOS 14.0
     SOKOL_ASSERT(nil == _sapp.macos.mtl.display_link);
     SOKOL_ASSERT(nil == _sapp.macos.mtl.fallback_timer);
@@ -5212,14 +5140,11 @@ _SOKOL_PRIVATE void _sapp_macos_mtl_start_display_link(void) {
 
 _SOKOL_PRIVATE void _sapp_macos_mtl_stop_display_link(void) {
     if (nil != _sapp.macos.mtl.display_link) {
-        [_sapp.macos.mtl.display_link invalidate];
-        // NOTE: the run-loop held the only strong reference to the display link
-        _sapp.macos.mtl.display_link = nil;
+        _sapp.macos.mtl.display_link.paused = true;
     }
 }
 
 _SOKOL_PRIVATE void _sapp_macos_mtl_start_fallback_timer(void) {
-    SOKOL_ASSERT(nil == _sapp.macos.mtl.display_link);
     SOKOL_ASSERT(nil == _sapp.macos.mtl.fallback_timer);
     _sapp.macos.mtl.fallback_timer = [NSTimer
         timerWithTimeInterval: _SAPP_MACOS_MTL_OBSCURED_FRAME_DURATION_IN_SECONDS
@@ -5257,8 +5182,7 @@ _SOKOL_PRIVATE void _sapp_macos_mtl_init(void) {
     _sapp.macos.mtl.layer.device = _sapp.macos.mtl.device;
     _sapp.macos.mtl.layer.magnificationFilter = kCAFilterNearest;
     _sapp.macos.mtl.layer.opaque = true;
-    // Modified by tettou771 for TrussC: use 10-bit color output (RGB10A2) for reduced banding
-    _sapp.macos.mtl.layer.pixelFormat = MTLPixelFormatRGB10A2Unorm;
+    _sapp.macos.mtl.layer.pixelFormat = MTLPixelFormatRGB10A2Unorm  /* Modified by tettou771 for TrussC: 10-bit color */;
     _sapp.macos.mtl.layer.framebufferOnly = true;
     //NOTE: default is 3: _sapp.macos.mtl.layer.maximumDrawableCount = 2;
     // FIXME: _sapp.macos.mtl.layer.colorspace = ...;
@@ -5891,12 +5815,9 @@ _SOKOL_PRIVATE void _sapp_macos_set_icon(const sapp_icon_desc* icon_desc, int nu
 }
 
 _SOKOL_PRIVATE void _sapp_macos_frame(void) {
-    #if defined(_SAPP_USE_FILTERED_FRAME_TIMING)
-    _sapp_timing_measure(&_sapp.timing);
-    #elif defined(SOKOL_METAL)
+    _sapp_timing_update(&_sapp.timing, 0.0);
+    #if defined(SOKOL_METAL)
     _sapp_macos_mtl_timing_update();
-    #else
-    #error "FIXME: invalid frame timing configuration"
     #endif
     #if defined(_SAPP_ANY_GL)
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, (GLint*)&_sapp.gl.framebuffer);
@@ -6036,9 +5957,6 @@ _SOKOL_PRIVATE void _sapp_macos_frame(void) {
 
 - (void)windowDidChangeScreen:(NSNotification*)notification {
     _SOKOL_UNUSED(notification);
-    #if defined(_SAPP_USE_FILTERED_FRAME_TIMING)
-    _sapp_timing_reset(&_sapp.timing);
-    #endif
     _sapp_macos_update_dimensions();
 }
 
@@ -6413,8 +6331,6 @@ static void _sapp_gl_make_current(void) {
 // >>ios
 #if defined(_SAPP_IOS)
 
-#define _SAPP_IOS_MTL_MAX_FRAME_DURATION_IN_SECONDS (0.25)
-
 _SOKOL_PRIVATE NSInteger _sapp_ios_max_fps(void) {
     return _sapp.ios.window.windowScene.screen.maximumFramesPerSecond;
 }
@@ -6455,8 +6371,7 @@ _SOKOL_PRIVATE void _sapp_ios_mtl_swapchain_create(int width, int height) {
         _SAPP_PANIC(METAL_CREATE_SWAPCHAIN_DEPTH_TEXTURE_FAILED);
     }
     if (_sapp.sample_count > 1) {
-        // Modified by tettou771 for TrussC: use 10-bit color output (RGB10A2) for reduced banding
-        _sapp.ios.mtl.msaa_tex = _sapp_ios_mtl_create_texture(width, height, MTLPixelFormatRGB10A2Unorm, _sapp.sample_count, "swapchain_msaa_tex");
+        _sapp.ios.mtl.msaa_tex = _sapp_ios_mtl_create_texture(width, height, MTLPixelFormatRGB10A2Unorm  /* Modified by tettou771 for TrussC: 10-bit color */, _sapp.sample_count, "swapchain_msaa_tex");
         if (nil == _sapp.ios.mtl.msaa_tex) {
             _SAPP_PANIC(METAL_CREATE_SWAPCHAIN_MSAA_TEXTURE_FAILED);
         }
@@ -6492,15 +6407,8 @@ _SOKOL_PRIVATE void _sapp_ios_mtl_timing_update(void) {
     const CFTimeInterval cur_timestamp = _sapp.ios.mtl.display_link.timestamp;
     // skip first frame (frame_duration had been initialized to display refresh rate)
     if (_sapp.ios.mtl.timing.timestamp > 0.0) {
-        _sapp.ios.mtl.timing.frame_duration_sec = cur_timestamp - _sapp.ios.mtl.timing.timestamp;
-        if (_sapp.ios.mtl.timing.frame_duration_sec <= 0.00001) {
-            // this should never actually happen, but just to be sure we don't end up with
-            // a negative or zero frame duration for some reason
-            _sapp.ios.mtl.timing.frame_duration_sec = 1.0 / _sapp_ios_max_fps();
-        } else if (_sapp.ios.mtl.timing.frame_duration_sec > _SAPP_IOS_MTL_MAX_FRAME_DURATION_IN_SECONDS) {
-            // avoid death-spiral in case of ultra-slow framerate (e.g. when debugging)
-            _sapp.ios.mtl.timing.frame_duration_sec = _SAPP_IOS_MTL_MAX_FRAME_DURATION_IN_SECONDS;
-        }
+        const double dt = cur_timestamp - _sapp.ios.mtl.timing.timestamp;
+        _sapp.ios.mtl.timing.frame_duration_sec = _sapp_timing_clamp(&_sapp.timing, dt);
     } else {
         SOKOL_ASSERT(_sapp.ios.mtl.timing.frame_duration_sec > 0.0);
     }
@@ -6538,18 +6446,17 @@ _SOKOL_PRIVATE void _sapp_ios_mtl_init(UIWindowScene* windowScene) {
     #if !defined(_SAPP_TVOS)
         _sapp.ios.view.multipleTouchEnabled = YES;
     #endif
-    _sapp.ios.supported_orientations = UIInterfaceOrientationMaskAll;
 
     _sapp.ios.mtl.layer = [CAMetalLayer layer];
     _sapp.ios.mtl.layer.device = _sapp.ios.mtl.device;
     _sapp.ios.mtl.layer.opaque = true;
     _sapp.ios.mtl.layer.framebufferOnly = true;
-    // Modified by tettou771 for TrussC: use 10-bit color output (RGB10A2) for reduced banding
-    _sapp.ios.mtl.layer.pixelFormat = MTLPixelFormatRGB10A2Unorm;
+    _sapp.ios.mtl.layer.pixelFormat = MTLPixelFormatRGB10A2Unorm  /* Modified by tettou771 for TrussC: 10-bit color */;
     _sapp.ios.mtl.layer.frame = _sapp.ios.view.layer.frame;
 
     [_sapp.ios.view.layer addSublayer:_sapp.ios.mtl.layer];
 
+    _sapp.ios.supported_orientations = UIInterfaceOrientationMaskAll;
     _sapp.ios.view_ctrl = [[_sapp_ios_view_ctrl alloc] init];
     _sapp.ios.view_ctrl.modalPresentationStyle = UIModalPresentationFullScreen;
     _sapp.ios.view_ctrl.view = _sapp.ios.view;
@@ -6735,12 +6642,9 @@ _SOKOL_PRIVATE void _sapp_ios_update_dimensions(void) {
 }
 
 _SOKOL_PRIVATE void _sapp_ios_frame(void) {
-    #if defined(_SAPP_USE_FILTERED_FRAME_TIMING)
-    _sapp_timing_measure(&_sapp.timing);
-    #elif defined(SOKOL_METAL)
+    _sapp_timing_update(&_sapp.timing, 0.0);
+    #if defined(SOKOL_METAL)
     _sapp_ios_mtl_timing_update();
-    #else
-    #error "FIXME: Invalid frame timing configuration"
     #endif
     #if defined(_SAPP_ANY_GL)
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, (GLint*)&_sapp.gl.framebuffer);
@@ -8075,7 +7979,7 @@ _SOKOL_PRIVATE void _sapp_emsc_unregister_eventhandlers(void) {
 
 _SOKOL_PRIVATE EM_BOOL _sapp_emsc_frame_animation_loop(double time, void* userData) {
     _SOKOL_UNUSED(userData);
-    _sapp_timing_external(&_sapp.timing, time / 1000.0);
+    _sapp_timing_update(&_sapp.timing, time / 1000.0);
 
     #if defined(SOKOL_WGPU)
         _sapp_wgpu_frame();
@@ -8638,8 +8542,7 @@ _SOKOL_PRIVATE void _sapp_d3d11_create_device_and_swapchain(void) {
     DXGI_SWAP_CHAIN_DESC* sc_desc = &_sapp.d3d11.swap_chain_desc;
     sc_desc->BufferDesc.Width = (UINT)_sapp.framebuffer_width;
     sc_desc->BufferDesc.Height = (UINT)_sapp.framebuffer_height;
-    // Modified by tettou771 for TrussC: use 10-bit color output (RGB10A2) for reduced banding
-    sc_desc->BufferDesc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
+    sc_desc->BufferDesc.Format = DXGI_FORMAT_R10G10B10A2_UNORM  /* Modified by tettou771 for TrussC: 10-bit color */;
     sc_desc->BufferDesc.RefreshRate.Numerator = 60;
     sc_desc->BufferDesc.RefreshRate.Denominator = 1;
     sc_desc->OutputWindow = _sapp.win32.hwnd;
@@ -8647,11 +8550,9 @@ _SOKOL_PRIVATE void _sapp_d3d11_create_device_and_swapchain(void) {
     if (_sapp.win32.is_win10_or_greater) {
         sc_desc->BufferCount = 2;
         sc_desc->SwapEffect = (DXGI_SWAP_EFFECT) _SAPP_DXGI_SWAP_EFFECT_FLIP_DISCARD;
-        _sapp.d3d11.use_dxgi_frame_stats = true;
     } else {
         sc_desc->BufferCount = 1;
         sc_desc->SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-        _sapp.d3d11.use_dxgi_frame_stats = false;
     }
     sc_desc->SampleDesc.Count = 1;
     sc_desc->SampleDesc.Quality = 0;
@@ -8766,8 +8667,7 @@ _SOKOL_PRIVATE void _sapp_d3d11_create_default_render_target(void) {
 
     /* create MSAA texture and view if antialiasing requested */
     if (_sapp.sample_count > 1) {
-        // Modified by tettou771 for TrussC: use 10-bit color output (RGB10A2) for reduced banding
-        tex_desc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
+        tex_desc.Format = DXGI_FORMAT_R10G10B10A2_UNORM  /* Modified by tettou771 for TrussC: 10-bit color */;
         hr = _sapp_d3d11_CreateTexture2D(_sapp.d3d11.device, &tex_desc, NULL, &_sapp.d3d11.msaa_rt);
         SOKOL_ASSERT(SUCCEEDED(hr) && _sapp.d3d11.msaa_rt);
         hr = _sapp_d3d11_CreateRenderTargetView(_sapp.d3d11.device, (ID3D11Resource*)_sapp.d3d11.msaa_rt, NULL, &_sapp.d3d11.msaa_rtv);
@@ -8795,8 +8695,7 @@ _SOKOL_PRIVATE void _sapp_d3d11_destroy_default_render_target(void) {
 _SOKOL_PRIVATE void _sapp_d3d11_resize_default_render_target(void) {
     if (_sapp.d3d11.swap_chain) {
         _sapp_d3d11_destroy_default_render_target();
-        // Modified by tettou771 for TrussC: use 10-bit color output (RGB10A2) for reduced banding
-        _sapp_dxgi_ResizeBuffers(_sapp.d3d11.swap_chain, _sapp.d3d11.swap_chain_desc.BufferCount, (UINT)_sapp.framebuffer_width, (UINT)_sapp.framebuffer_height, DXGI_FORMAT_R10G10B10A2_UNORM, 0);
+        _sapp_dxgi_ResizeBuffers(_sapp.d3d11.swap_chain, _sapp.d3d11.swap_chain_desc.BufferCount, (UINT)_sapp.framebuffer_width, (UINT)_sapp.framebuffer_height, DXGI_FORMAT_R10G10B10A2_UNORM  /* Modified by tettou771 for TrussC: 10-bit color */, 0);
         _sapp_d3d11_create_default_render_target();
     }
 }
@@ -9588,29 +9487,6 @@ _SOKOL_PRIVATE void _sapp_win32_files_dropped(HDROP hdrop) {
     }
 }
 
-_SOKOL_PRIVATE void _sapp_win32_timing_measure(void) {
-    #if defined(SOKOL_D3D11)
-        // on D3D11, use the more precise DXGI timestamp
-        if (_sapp.d3d11.use_dxgi_frame_stats) {
-            _SAPP_STRUCT(DXGI_FRAME_STATISTICS, dxgi_stats);
-            HRESULT hr = _sapp_dxgi_GetFrameStatistics(_sapp.d3d11.swap_chain, &dxgi_stats);
-            if (SUCCEEDED(hr)) {
-                if (dxgi_stats.SyncRefreshCount != _sapp.d3d11.sync_refresh_count) {
-                    _sapp.d3d11.sync_refresh_count = dxgi_stats.SyncRefreshCount;
-                    LARGE_INTEGER qpc = dxgi_stats.SyncQPCTime;
-                    const uint64_t now = (uint64_t)_sapp_int64_muldiv(qpc.QuadPart - _sapp.timing.timestamp.win.start.QuadPart, 1000000000, _sapp.timing.timestamp.win.freq.QuadPart);
-                    _sapp_timing_external(&_sapp.timing, (double)now / 1000000000.0);
-                }
-                return;
-            }
-        }
-        // fallback if swap model isn't "flip-discard" or GetFrameStatistics failed for another reason
-        _sapp_timing_measure(&_sapp.timing);
-    #else
-        _sapp_timing_measure(&_sapp.timing);
-    #endif
-}
-
 _SOKOL_PRIVATE void _sapp_win32_frame(bool from_winproc) {
     #if defined(SOKOL_WGPU)
         _sapp_wgpu_frame();
@@ -9822,14 +9698,16 @@ _SOKOL_PRIVATE LRESULT CALLBACK _sapp_win32_wndproc(HWND hWnd, UINT uMsg, WPARAM
                 KillTimer(_sapp.win32.hwnd, 1);
                 break;
             case WM_TIMER:
-                _sapp_win32_timing_measure();
+                _sapp_timing_update(&_sapp.timing, 0.0);
                 _sapp_win32_frame(true);
-                /* NOTE: resizing the swap-chain during resize leads to a substantial
-                   memory spike (hundreds of megabytes for a few seconds).
-
+                /*
+                * NOTE: resizing each frame explodes memory usage
+                *
                 if (_sapp_win32_update_dimensions()) {
                     #if defined(SOKOL_D3D11)
                     _sapp_d3d11_resize_default_render_target();
+                    #elif defined(SOKOL_WGPU)
+                    _sapp_wgpu_swapchain_size_changed();
                     #endif
                     _sapp_win32_app_event(SAPP_EVENTTYPE_RESIZED);
                 }
@@ -9849,10 +9727,6 @@ _SOKOL_PRIVATE LRESULT CALLBACK _sapp_win32_wndproc(HWND hWnd, UINT uMsg, WPARAM
                 break;
             case WM_DROPFILES:
                 _sapp_win32_files_dropped((HDROP)wParam);
-                break;
-            case WM_DISPLAYCHANGE:
-                // refresh rate might have changed
-                _sapp_timing_reset(&_sapp.timing);
                 break;
 
             default:
@@ -10240,7 +10114,7 @@ _SOKOL_PRIVATE void _sapp_win32_run(const sapp_desc* desc) {
 
     bool done = false;
     while (!(done || _sapp.quit_ordered)) {
-        _sapp_win32_timing_measure();
+        _sapp_timing_update(&_sapp.timing, 0.0);
         MSG msg;
         while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
             if (WM_QUIT == msg.message) {
@@ -10262,12 +10136,6 @@ _SOKOL_PRIVATE void _sapp_win32_run(const sapp_desc* desc) {
             _sapp_wgpu_swapchain_size_changed();
             #endif
             _sapp_win32_app_event(SAPP_EVENTTYPE_RESIZED);
-        }
-        /* check if the window monitor has changed, need to reset timing because
-           the new monitor might have a different refresh rate
-        */
-        if (_sapp_win32_update_monitor()) {
-            _sapp_timing_reset(&_sapp.timing);
         }
         if (_sapp.quit_requested) {
             PostMessage(_sapp.win32.hwnd, WM_CLOSE, 0, 0);
@@ -10593,7 +10461,7 @@ _SOKOL_PRIVATE void _sapp_android_frame(void) {
     SOKOL_ASSERT(_sapp.android.display != EGL_NO_DISPLAY);
     SOKOL_ASSERT(_sapp.android.context != EGL_NO_CONTEXT);
     SOKOL_ASSERT(_sapp.android.surface != EGL_NO_SURFACE);
-    _sapp_timing_measure(&_sapp.timing);
+    _sapp_timing_update(&_sapp.timing, 0.0);
     _sapp_android_update_dimensions(_sapp.android.current.window, false);
     _sapp_frame();
     eglSwapBuffers(_sapp.android.display, _sapp.android.surface);
@@ -13903,7 +13771,7 @@ _SOKOL_PRIVATE void _sapp_linux_run(const sapp_desc* desc) {
 
     XFlush(_sapp.x11.display);
     while (!_sapp.quit_ordered) {
-        _sapp_timing_measure(&_sapp.timing);
+        _sapp_timing_update(&_sapp.timing, 0.0);
         int count = XPending(_sapp.x11.display);
         while (count--) {
             XEvent event;
@@ -14008,8 +13876,12 @@ SOKOL_API_IMPL double sapp_frame_duration(void) {
     #elif defined(_SAPP_IOS) && defined(SOKOL_METAL)
         return _sapp_ios_mtl_timing_frame_duration();
     #else
-        return _sapp_timing_get_avg(&_sapp.timing);
+        return _sapp_timing_get(&_sapp.timing);
     #endif
+}
+
+SOKOL_API_IMPL double sapp_frame_duration_unfiltered(void) {
+    return _sapp.timing.dt;
 }
 
 SOKOL_API_IMPL int sapp_width(void) {
@@ -14251,12 +14123,6 @@ SOKOL_API_IMPL void sapp_consume_event(void) {
     _sapp.event_consumed = true;
 }
 
-// Modified by tettou771 for TrussC: skip the next present call (fix D3D11 flickering)
-SOKOL_API_IMPL void sapp_skip_present(void) {
-    _sapp.skip_present = true;
-}
-// end of modification
-
 /* NOTE: on HTML5, sapp_set_clipboard_string() must be called from within event handler! */
 SOKOL_API_IMPL void sapp_set_clipboard_string(const char* str) {
     if (!_sapp.clipboard.enabled) {
@@ -14336,17 +14202,18 @@ SOKOL_API_IMPL void sapp_set_icon(const sapp_icon_desc* desc) {
 }
 
 SOKOL_API_IMPL int sapp_get_num_dropped_files(void) {
-    SOKOL_ASSERT(_sapp.drop.enabled);
+    if (!_sapp.drop.enabled) {
+        return 0;
+    }
     return _sapp.drop.num_files;
 }
 
 SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
-    SOKOL_ASSERT(_sapp.drop.enabled);
     SOKOL_ASSERT((index >= 0) && (index < _sapp.drop.num_files));
-    SOKOL_ASSERT(_sapp.drop.buffer);
     if (!_sapp.drop.enabled) {
         return "";
     }
+    SOKOL_ASSERT(_sapp.drop.buffer);
     if ((index < 0) || (index >= _sapp.drop.max_files)) {
         return "";
     }
@@ -14354,7 +14221,6 @@ SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
-    SOKOL_ASSERT(_sapp.drop.enabled);
     SOKOL_ASSERT((index >= 0) && (index < _sapp.drop.num_files));
     #if defined(_SAPP_EMSCRIPTEN)
         if (!_sapp.drop.enabled) {
@@ -14524,20 +14390,6 @@ SOKOL_API_IMPL const void* sapp_ios_get_window(void) {
     #endif
 }
 
-// Modified by tettou771 for TrussC: runtime orientation control
-SOKOL_API_IMPL void sapp_ios_set_supported_orientations(uint32_t mask) {
-    #if defined(_SAPP_IOS)
-        _sapp.ios.supported_orientations = (NSUInteger)mask;
-        #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 160000
-            if (@available(iOS 16.0, *)) {
-                [_sapp.ios.view_ctrl setNeedsUpdateOfSupportedInterfaceOrientations];
-            }
-        #endif
-    #else
-        (void)mask;
-    #endif
-}
-
 SOKOL_API_IMPL const void* sapp_d3d11_get_swap_chain(void) {
     SOKOL_ASSERT(_sapp.valid);
 #if defined(SOKOL_D3D11)
@@ -14610,6 +14462,26 @@ SOKOL_API_IMPL const void* sapp_android_get_native_activity(void) {
 
 SOKOL_API_IMPL void sapp_html5_ask_leave_site(bool ask) {
     _sapp.html5_ask_leave_site = ask;
+}
+
+// Modified by tettou771 for TrussC: skip the next present call (fix D3D11 flickering)
+SOKOL_API_IMPL void sapp_skip_present(void) {
+    _sapp.skip_present = true;
+}
+// end of modification
+
+// Modified by tettou771 for TrussC: runtime orientation control
+SOKOL_API_IMPL void sapp_ios_set_supported_orientations(uint32_t mask) {
+    #if defined(_SAPP_IOS)
+        _sapp.ios.supported_orientations = (NSUInteger)mask;
+        #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 160000
+            if (@available(iOS 16.0, *)) {
+                [_sapp.ios.view_ctrl setNeedsUpdateOfSupportedInterfaceOrientations];
+            }
+        #endif
+    #else
+        (void)mask;
+    #endif
 }
 
 #endif /* SOKOL_APP_IMPL */
