@@ -133,7 +133,6 @@ examples/
 ├── 3d/            # 3D 描画
 ├── sound/         # サウンド
 ├── network/       # ネットワーク
-├── gui/           # ImGui
 └── ...
 ```
 

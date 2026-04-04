@@ -402,7 +402,7 @@ Reference for oF users finding equivalent features in TrussC.
 
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
-| `ofxGui / ofxImGui` | `ImGui (built-in)` | Included by default |
+| `ofxGui / ofxImGui` | `tcxImGui` addon | Add via projectGenerator or addons.make |
 
 ### **I/O**
 

@@ -100,7 +100,7 @@ See also: [The Tau Manifesto](https://tauday.com/tau-manifesto)
 
 ## Dependencies
 
-sokol, Dear ImGui, stb, miniaudio, etc. are all bundled in `trussc/include/`.
+sokol, stb, miniaudio, etc. are all bundled in `trussc/include/`. Dear ImGui is available as the `tcxImGui` addon.
 See [LICENSE.md](docs/LICENSE.md) for details.
 
 ## Directory Structure
@@ -119,8 +119,7 @@ trussc/include/
 │   ├── sound/        # Audio playback
 │   ├── video/        # Video playback, webcam
 │   ├── network/      # TCP, UDP
-│   ├── utils/        # Timer, file dialogs, etc.
-│   └── gui/          # Dear ImGui integration
+│   └── utils/        # Timer, file dialogs, etc.
 ├── sokol/            # sokol library
 └── stb/              # stb library
 

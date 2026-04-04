@@ -19,8 +19,7 @@
 | **Video** | VideoPlayer (FFmpeg), VideoGrabber (webcam) |
 | **Network** | TCP Client/Server, UDP |
 | **Utils** | Timer, Thread, Serial, File dialogs, JSON/XML, Clipboard |
-| **UI** | Dear ImGui integration |
-| **Addons** | tcxTls (TLS/SSL), tcxOsc (OSC), tcxBox2d (physics), tcxWebSocket |
+| **Addons** | tcxImGui (Dear ImGui), tcxTls (TLS/SSL), tcxOsc (OSC), tcxBox2d (physics), tcxWebSocket |
 
 ---
 
@@ -204,7 +203,7 @@ Image processing libraries are particularly prone to vulnerabilities, so **check
 | nlohmann/json | JSON parsing | Medium | |
 | sokol | Rendering backend | Medium | **TrussC has customizations (see below)** |
 | miniaudio | Audio | Medium | |
-| Dear ImGui | GUI | Low | Use stable versions |
+| Dear ImGui | GUI (tcxImGui addon) | Low | Use stable versions |
 
 **Update Checklist:**
 - Check GitHub Release Notes / Security Advisories
@@ -232,7 +231,7 @@ See: [`trussc/include/sokol/TRUSSC_MODIFICATIONS.md`](../trussc/include/sokol/TR
 | video/ | videoGrabberExample |
 | network/ | tcpExample, udpExample |
 | communication/ | serialExample |
-| gui/ | imguiExample |
+| ~~gui/~~ | ~~imguiExample~~ (moved to addons/tcxImGui/example-basic) |
 | threads/ | threadExample, threadChannelExample |
 | windowing/ | loopModeExample |
 | animation/ | tweenExample |

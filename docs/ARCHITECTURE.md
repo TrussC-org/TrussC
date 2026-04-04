@@ -29,7 +29,7 @@ Hybrid composition of native wrappers and high-quality lightweight libraries. Se
 | **Graphics** | sokol_gfx (Metal/DX12/Vulkan) | zlib |
 | **Shader** | sokol-shdc (GLSL → Native) | zlib |
 | **Math** | In-house (C++20 template) | MIT |
-| **UI** | Dear ImGui | MIT |
+| **UI** | Dear ImGui (tcxImGui addon) | MIT |
 | **Image** | stb_image, stb_image_write | Public Domain |
 | **Font** | stb_truetype + fontstash | Public Domain |
 | **Audio** | sokol_audio + dr_libs | zlib/PD |

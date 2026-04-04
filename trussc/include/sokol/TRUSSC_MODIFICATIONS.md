@@ -20,11 +20,12 @@ sokol/
 ├── sokol_audio.h        # Untouched
 ├── TRUSSC_MODIFICATIONS.md
 └── util/
-    ├── sokol_gl_tc.h    # Forked from upstream util/sokol_gl.h + TrussC modifications
-    └── sokol_imgui.h    # Untouched (direct copy from upstream util/)
+    └── sokol_gl_tc.h    # Forked from upstream util/sokol_gl.h + TrussC modifications
 ```
 
 Matches upstream directory layout: core headers at root, utility headers in `util/`.
+
+**Note:** `sokol_imgui.h` has been moved to `addons/tcxImGui/src/sokol_imgui.h`. When updating sokol, update that copy as well (see How to Update Sokol below).
 
 ---
 
@@ -181,8 +182,8 @@ These functions do NOT exist in upstream sokol_gl. They are TrussC additions.
 2. **sokol_gfx.h** -- overwrite directly (no modifications)
 3. **sokol_app.h** -- overwrite, then re-apply patches #1--#8 (search `tettou771` or `[TrussC`)
 4. **sokol_glue.h** -- overwrite, then re-apply patch #9
-5. **util/sokol_imgui.h** -- overwrite directly from upstream `util/sokol_imgui.h`
-6. **util/sokol_gl_tc.h** -- copy upstream `util/sokol_gl.h`, rename, then re-apply patches #10--#13 (search `[TrussC`)
+5. **util/sokol_gl_tc.h** -- copy upstream `util/sokol_gl.h`, rename, then re-apply patches #10--#13 (search `[TrussC`)
+6. **addons/tcxImGui/src/sokol_imgui.h** -- overwrite directly from upstream `util/sokol_imgui.h` (moved from trussc core to tcxImGui addon)
 7. **Other headers** (sokol_log.h, etc.) -- overwrite directly
 8. Update the **Upstream base** commit hash at the top of this file
 9. Test on all platforms (macOS, Windows D3D11, Emscripten Web)
