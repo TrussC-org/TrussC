@@ -1,8 +1,10 @@
 #pragma once
 
 #include <TrussC.h>
+#include <tcxImGui.h>
 using namespace std;
 using namespace tc;
+using namespace tcx;
 
 class tcApp : public App {
 public:

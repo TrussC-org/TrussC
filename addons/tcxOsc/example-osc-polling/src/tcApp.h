@@ -2,9 +2,11 @@
 
 #include "tcBaseApp.h"
 #include "tcxOsc.h"
+#include <tcxImGui.h>
 #include <deque>
 
 using namespace tc;
+using namespace tcx;
 using namespace std;
 
 class tcApp : public App {
@@ -25,7 +27,7 @@ private:
     // UI state
     char addressBuf_[256] = "/test/message";
     int intValue_ = 42;
-    float floatValue_ = 3.14f;
+    float floatValue_ = 6.28f;
     char stringBuf_[256] = "hello";
     bool sendInt_ = true;
     bool sendFloat_ = true;

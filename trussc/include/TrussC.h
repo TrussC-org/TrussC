@@ -20,10 +20,6 @@
 #include "sokol/util/sokol_gl_tc.h"
 #include "sokol/util/sokol_memtrack.h"
 
-// Dear ImGui + sokol_imgui
-#include "imgui/imgui.h"
-#include "sokol/util/sokol_imgui.h"
-
 // Standard libraries
 #include <cstdint>
 #include <cmath>
@@ -162,8 +158,6 @@ namespace internal {
     inline void setupScreenFovWithSize(float fovDeg, float viewW, float viewH, float nearDist = 0.0f, float farDist = 0.0f);
     inline void setupScreenFov(float fovDeg, float nearDist = 0.0f, float farDist = 0.0f);
 
-    // ImGui integration
-    inline bool imguiEnabled = false;
 
     // Blend mode pipelines
     inline sgl_pipeline blendPipelines[6] = {};
@@ -297,8 +291,6 @@ namespace internal {
     // Pass state (for suspending swapchain pass for FBO)
     inline bool inSwapchainPass = false;
 
-    // ImGui deferred render flag (set by imguiEnd, consumed by present)
-    inline bool imguiRenderPending = false;
     // Saved clear color for resume after FBO suspend (set by clear())
     inline sg_color swapchainClearValue = { 0.0f, 0.0f, 0.0f, 1.0f };
 
@@ -414,11 +406,8 @@ inline void present() {
     // Flush sokol_gl layers and deferred shader draws
     flushDeferredShaderDraws();
 
-    // Render ImGui on top of all sokol_gl content (deferred from imguiEnd)
-    if (internal::imguiRenderPending) {
-        simgui_render();
-        internal::imguiRenderPending = false;
-    }
+    // Before present (after sokol_gl flush, render pass still active)
+    events().onRender.notify();
 
     // Check for vertex buffer overflow before sg_commit resets errors
     sgl_error_t err = sgl_error();
@@ -2033,8 +2022,7 @@ namespace internal {
     inline bool frameReentryGuard = false;
 
     inline void _frame_cb() {
-        // Guard against reentry (e.g. macOS modal dialogs pump the event loop
-        // which can cause sokol to call frame_cb while ImGui is mid-frame)
+        // Guard against reentry (e.g. macOS modal dialogs pump the event loop)
         if (frameReentryGuard) return;
         frameReentryGuard = true;
 
@@ -2150,10 +2138,8 @@ namespace internal {
     }
 
     inline void _event_cb(const sapp_event* ev) {
-        // Pass event to ImGui
-        if (imguiEnabled) {
-            simgui_handle_event(ev);
-        }
+        // Notify raw event listeners (used by addons like tcxImGui)
+        events().rawEvent.notify(*ev);
 
         // ev->mouse_x/y arrive in framebuffer coordinates
         // pixelPerfectMode = true: use as-is (coords = framebuffer size)
@@ -2675,9 +2661,6 @@ inline void drawCone(float x, float y, float z, float radius, float height, int 
 
 // TrussC EasyCam (3D camera)
 #include "tc/3d/tcEasyCam.h"
-
-// TrussC ImGui integration
-#include "tc/gui/tcImGui.h"
 
 // TrussC network
 #include "tc/network/tcUdpSocket.h"

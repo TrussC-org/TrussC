@@ -1,10 +1,12 @@
 #pragma once
 
 #include <TrussC.h>
+#include <tcxImGui.h>
 #include "ProjectGenerator.h"
 #include <atomic>
 using namespace std;
 using namespace tc;
+using namespace tcx;
 
 // Project mode
 enum class ProjectMode {

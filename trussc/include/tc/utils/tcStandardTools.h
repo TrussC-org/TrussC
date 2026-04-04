@@ -9,7 +9,6 @@
 #include "../events/tcCoreEvents.h"
 #include "stb/stb_image_write.h"
 #include "../graphics/tcPixels.h"
-#include "../gui/tcImGuiTools.h"
 #include <cstdlib>
 
 // Forward declaration for stbi_write_png_to_mem (missing in older stb_image_write.h headers)
@@ -175,10 +174,6 @@ inline void registerDebuggerTools() {
             return json{{"status", "ok"}};
         });
 
-    // Register ImGui MCP tools (widget inspection & interaction)
-    if (::trussc::internal::imguiEnabled) {
-        ::trussc::imgui_tools::registerImGuiTools();
-    }
 }
 
 } // namespace mcp

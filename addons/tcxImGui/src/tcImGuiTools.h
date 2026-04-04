@@ -9,7 +9,7 @@
 // with them.
 // =============================================================================
 
-#include "tc/gui/tcImGuiHooks.h"
+#include "tcImGuiHooks.h"
 #include "tc/utils/tcMCP.h"
 #include "tc/utils/tcLog.h"
 

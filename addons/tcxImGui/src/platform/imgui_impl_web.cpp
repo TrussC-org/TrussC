@@ -1,5 +1,5 @@
 // =============================================================================
-// imgui_impl.cpp - Dear ImGui + sokol_imgui 実装 (Windows/Linux)
+// imgui_impl.cpp - Dear ImGui + sokol_imgui 実装 (Emscripten/Web)
 // =============================================================================
 
 // sokol ヘッダー（sokol_imgui.h より先に必要）
@@ -16,7 +16,7 @@
 
 // sokol_imgui 実装
 #define SOKOL_IMGUI_IMPL
-#include "sokol/util/sokol_imgui.h"
+#include "sokol_imgui.h"
 
 // Test Engine hook implementations (provides ImGuiTestEngineHook_* functions)
-#include "tc/gui/tcImGuiHooks.h"
+#include "tcImGuiHooks.h"

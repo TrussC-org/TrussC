@@ -102,6 +102,7 @@ addons/**/*.vcxproj
 addons/*
 !addons/tcxBox2d
 !addons/tcxCurl
+!addons/tcxImGui
 !addons/tcxHap
 !addons/tcxLut
 !addons/tcxOsc

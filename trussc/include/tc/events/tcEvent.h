@@ -42,11 +42,11 @@ namespace trussc {
 // ---------------------------------------------------------------------------
 // Event priority
 // ---------------------------------------------------------------------------
-enum class EventPriority : int {
-    BeforeApp = 0,    // Process before app
-    App = 100,        // Normal app processing (default)
-    AfterApp = 200    // Process after app
-};
+namespace EventPriority {
+    constexpr int BeforeApp = 0;
+    constexpr int App = 100;
+    constexpr int AfterApp = 200;
+}
 
 // ---------------------------------------------------------------------------
 // Event<T> - Event with arguments
@@ -68,7 +68,7 @@ public:
 
     // Register listener with lambda (returns EventListener) - preferred API
     [[nodiscard]] EventListener listen(Callback callback,
-                                       EventPriority priority = EventPriority::App) {
+                                       int priority = EventPriority::App) {
         EventListener listener;
         listenImpl(listener, std::move(callback), priority);
         return listener;
@@ -77,7 +77,7 @@ public:
     // Register listener with member function (returns EventListener) - preferred API
     template<typename Obj>
     [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(T&),
-                                       EventPriority priority = EventPriority::App) {
+                                       int priority = EventPriority::App) {
         return listen([obj, method](T& arg) {
             (obj->*method)(arg);
         }, priority);
@@ -86,7 +86,7 @@ public:
     // Deprecated: use `listener = event.listen(callback)` instead
     [[deprecated("Use 'listener = event.listen(callback)' instead")]]
     void listen(EventListener& listener, Callback callback,
-                EventPriority priority = EventPriority::App) {
+                int priority = EventPriority::App) {
         listenImpl(listener, std::move(callback), priority);
     }
 
@@ -94,7 +94,7 @@ public:
     template<typename Obj>
     [[deprecated("Use 'listener = event.listen(obj, &Class::method)' instead")]]
     void listen(EventListener& listener, Obj* obj, void (Obj::*method)(T&),
-                EventPriority priority = EventPriority::App) {
+                int priority = EventPriority::App) {
         listenImpl(listener, [obj, method](T& arg) {
             (obj->*method)(arg);
         }, priority);
@@ -102,12 +102,12 @@ public:
 
 private:
     void listenImpl(EventListener& listener, Callback callback,
-                    EventPriority priority) {
+                    int priority) {
         uint64_t id;
         {
             TC_LOCK_GUARD(mutex_);
             id = nextId_++;
-            entries_.push_back({id, static_cast<int>(priority), std::move(callback)});
+            entries_.push_back({id, priority, std::move(callback)});
             sortEntries();
         }
         // Set EventListener outside lock (removeListener() may be called when disconnecting existing)
@@ -199,7 +199,7 @@ public:
 
     // Register listener with lambda (returns EventListener) - preferred API
     [[nodiscard]] EventListener listen(Callback callback,
-                                       EventPriority priority = EventPriority::App) {
+                                       int priority = EventPriority::App) {
         EventListener listener;
         listenImpl(listener, std::move(callback), priority);
         return listener;
@@ -208,7 +208,7 @@ public:
     // Register listener with member function (returns EventListener) - preferred API
     template<typename Obj>
     [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(),
-                                       EventPriority priority = EventPriority::App) {
+                                       int priority = EventPriority::App) {
         return listen([obj, method]() {
             (obj->*method)();
         }, priority);
@@ -217,7 +217,7 @@ public:
     // Deprecated: use `listener = event.listen(callback)` instead
     [[deprecated("Use 'listener = event.listen(callback)' instead")]]
     void listen(EventListener& listener, Callback callback,
-                EventPriority priority = EventPriority::App) {
+                int priority = EventPriority::App) {
         listenImpl(listener, std::move(callback), priority);
     }
 
@@ -225,7 +225,7 @@ public:
     template<typename Obj>
     [[deprecated("Use 'listener = event.listen(obj, &Class::method)' instead")]]
     void listen(EventListener& listener, Obj* obj, void (Obj::*method)(),
-                EventPriority priority = EventPriority::App) {
+                int priority = EventPriority::App) {
         listenImpl(listener, [obj, method]() {
             (obj->*method)();
         }, priority);
@@ -233,12 +233,12 @@ public:
 
 private:
     void listenImpl(EventListener& listener, Callback callback,
-                    EventPriority priority) {
+                    int priority) {
         uint64_t id;
         {
             TC_LOCK_GUARD(mutex_);
             id = nextId_++;
-            entries_.push_back({id, static_cast<int>(priority), std::move(callback)});
+            entries_.push_back({id, priority, std::move(callback)});
             sortEntries();
         }
         // Set EventListener outside lock (removeListener() may be called when disconnecting existing)

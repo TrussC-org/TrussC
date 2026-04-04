@@ -1,26 +1,19 @@
 #pragma once
 
 // =============================================================================
-// tcImGui.h - Dear ImGui integration
-// Wrapper for sokol_imgui
+// tcxImGui.h - Dear ImGui addon for TrussC
 // =============================================================================
 
+#include <TrussC.h>
 #include "imgui/imgui.h"
-#include "sokol/util/sokol_imgui.h"
-#include "tc/utils/tcLog.h"
-#include "tc/gui/tcImGuiHooks.h"
-#include "tc/gui/tcImGuiTools.h"
+#include "sokol_imgui.h"
+#include "tcImGuiHooks.h"
+#include "tcImGuiTools.h"
 
-namespace trussc {
-
-// Access to internal flags
-namespace internal {
-    extern bool imguiEnabled;
-    // imguiRenderPending is declared in TrussC.h internal namespace
-}
+namespace tcx {
 
 // ---------------------------------------------------------------------------
-// ImGui manager class
+// ImGui manager
 // ---------------------------------------------------------------------------
 class ImGuiManager {
 public:
@@ -33,47 +26,51 @@ public:
         simgui_setup(&desc);
 
         initialized_ = true;
-        internal::imguiEnabled = true;
-        logVerbose() << "ImGui initialized";
+
+        // Listen to beforePresent for rendering
+        renderListener_ = tc::events().onRender.listen([this]() {
+            if (renderPending_) {
+                simgui_render();
+                renderPending_ = false;
+            }
+        }, 1000);
+
+        // Listen to rawEvent for input handling
+        eventListener_ = tc::events().rawEvent.listen([this](const sapp_event& ev) {
+            simgui_handle_event(&ev);
+        }, tc::EventPriority::BeforeApp);
+
+        tc::logVerbose() << "ImGui initialized";
     }
 
-    // Shutdown (called automatically)
+    // Shutdown
     void shutdown() {
         if (!initialized_) return;
+        renderListener_ = {};
+        eventListener_ = {};
         simgui_shutdown();
         initialized_ = false;
-        internal::imguiEnabled = false;
-        logVerbose() << "ImGui shutdown";
+        tc::logVerbose() << "ImGui shutdown";
     }
 
     // Begin frame (call at start of draw)
-    void begin(int width, int height, float deltaTime) {
+    void begin() {
         if (!initialized_) return;
 
         simgui_frame_desc_t desc = {};
-        desc.width = width;
-        desc.height = height;
-        desc.delta_time = deltaTime;
+        desc.width = sapp_width();
+        desc.height = sapp_height();
+        desc.delta_time = static_cast<float>(sapp_frame_duration());
         desc.dpi_scale = sapp_dpi_scale();
         simgui_new_frame(&desc);
     }
 
-    // End frame — defer actual GPU render to present()
-    // simgui_render() requires an active render pass (sg_begin_pass),
-    // which may not have started yet during draw(). Deferring to present()
-    // ensures the pass is active and ImGui renders on top of all sokol_gl content.
+    // End frame (defers render to beforePresent)
     void end() {
         if (!initialized_) return;
-        internal::imguiRenderPending = true;
+        renderPending_ = true;
     }
 
-    // Event handling (called automatically internally)
-    bool handleEvent(const sapp_event* event) {
-        if (!initialized_) return false;
-        return simgui_handle_event(event);
-    }
-
-    // Is initialized
     bool isInitialized() const { return initialized_; }
 
     // Singleton access
@@ -87,50 +84,39 @@ private:
     ~ImGuiManager() { shutdown(); }
 
     bool initialized_ = false;
+    bool renderPending_ = false;
+    tc::EventListener renderListener_;
+    tc::EventListener eventListener_;
 };
 
 // ---------------------------------------------------------------------------
 // Convenience functions
 // ---------------------------------------------------------------------------
 
-// ImGui initialization
 inline void imguiSetup() {
     ImGuiManager::instance().setup();
 }
 
-// ImGui shutdown
 inline void imguiShutdown() {
     ImGuiManager::instance().shutdown();
 }
 
-// Begin frame
 inline void imguiBegin() {
-    int w = sapp_width();
-    int h = sapp_height();
-    float dt = static_cast<float>(sapp_frame_duration());
-    ImGuiManager::instance().begin(w, h, dt);
-    imgui_tools::beginFrame();
+    ImGuiManager::instance().begin();
+    trussc::imgui_tools::beginFrame();
 }
 
-// End frame (render)
 inline void imguiEnd() {
     ImGuiManager::instance().end();
-    imgui_tools::swapFrames();
+    trussc::imgui_tools::swapFrames();
 }
 
-// Event handling (internal use)
-inline bool imguiHandleEvent(const sapp_event* event) {
-    return ImGuiManager::instance().handleEvent(event);
-}
-
-// Is ImGui using mouse input
 inline bool imguiWantsMouse() {
     return ImGui::GetIO().WantCaptureMouse;
 }
 
-// Is ImGui using keyboard input
 inline bool imguiWantsKeyboard() {
     return ImGui::GetIO().WantCaptureKeyboard;
 }
 
-} // namespace trussc
+} // namespace tcx
