@@ -74,9 +74,10 @@ jobs:
 
       - name: Build examples
         shell: bash
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           chmod +x examples/build_all.py
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
           if [[ "$COMMIT_MSG" == *"[full]"* ]]; then
              echo "Running full build (triggered by [full] in commit message)..."
              ./examples/build_all.py --verbose
@@ -166,9 +167,10 @@ jobs:
           ./projectGenerator/buildProjectGenerator_linux.sh
 
       - name: Build examples (Web)
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           chmod +x examples/build_all.py
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
           if [[ "$COMMIT_MSG" == *"[full]"* ]]; then
              echo "Running full build (triggered by [full] in commit message)..."
              ./examples/build_all.py --web-only --verbose

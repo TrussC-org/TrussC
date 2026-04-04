@@ -10,6 +10,7 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <shlobj.h>
+#include <shobjidl.h>
 #include <locale>
 #include <sstream>
 
@@ -38,17 +39,6 @@ std::string extractFileName(const std::string& path) {
     size_t pos = path.find_last_of("/\\");
     if (pos == std::string::npos) return path;
     return path.substr(pos + 1);
-}
-
-// Folder selection dialog callback
-static int CALLBACK browseCallback(HWND hwnd, UINT uMsg, LPARAM lParam, LPARAM lpData) {
-    if (uMsg == BFFM_INITIALIZED && lpData != 0) {
-        std::wstring* defaultPath = reinterpret_cast<std::wstring*>(lpData);
-        if (!defaultPath->empty()) {
-            SendMessageW(hwnd, BFFM_SETSELECTION, TRUE, (LPARAM)defaultPath->c_str());
-        }
-    }
-    return 0;
 }
 
 } // anonymous namespace
@@ -132,41 +122,49 @@ FileDialogResult loadDialog(const std::string& title,
             result.fileName = extractFileName(result.filePath);
         }
     } else {
-        // Folder selection dialog
-        BROWSEINFOW bi;
-        ZeroMemory(&bi, sizeof(bi));
+        // フォルダ選択ダイアログ（IFileDialog / モダンUI）
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        IFileOpenDialog* pDialog = nullptr;
+        HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL,
+                                     IID_IFileOpenDialog, (void**)&pDialog);
+        if (SUCCEEDED(hr)) {
+            // フォルダ選択モードに設定
+            DWORD options;
+            pDialog->GetOptions(&options);
+            pDialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
 
-        wchar_t szDisplayName[MAX_PATH] = L"";
+            // タイトル設定
+            std::wstring titleW = toWide(title.empty() ? "Select Folder" : title);
+            pDialog->SetTitle(titleW.c_str());
 
-        bi.hwndOwner = GetActiveWindow();
-        bi.pszDisplayName = szDisplayName;
-        bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_USENEWUI;
-
-        std::wstring titleW;
-        if (!title.empty()) {
-            titleW = toWide(title);
-        } else {
-            titleW = L"Select Folder";
-        }
-        bi.lpszTitle = titleW.c_str();
-
-        std::wstring defaultPathW;
-        if (!defaultPath.empty()) {
-            defaultPathW = toWide(defaultPath);
-            bi.lpfn = browseCallback;
-            bi.lParam = (LPARAM)&defaultPathW;
-        }
-
-        LPITEMIDLIST pidl = SHBrowseForFolderW(&bi);
-        if (pidl) {
-            wchar_t szPath[MAX_PATH];
-            if (SHGetPathFromIDListW(pidl, szPath)) {
-                result.success = true;
-                result.filePath = toUtf8(szPath);
-                result.fileName = extractFileName(result.filePath);
+            // デフォルトパス設定
+            if (!defaultPath.empty()) {
+                std::wstring defaultPathW = toWide(defaultPath);
+                IShellItem* pDefaultFolder = nullptr;
+                if (SUCCEEDED(SHCreateItemFromParsingName(defaultPathW.c_str(), nullptr,
+                              IID_IShellItem, (void**)&pDefaultFolder))) {
+                    pDialog->SetFolder(pDefaultFolder);
+                    pDefaultFolder->Release();
+                }
             }
-            CoTaskMemFree(pidl);
+
+            hr = pDialog->Show(GetActiveWindow());
+            if (SUCCEEDED(hr)) {
+                IShellItem* pItem = nullptr;
+                if (SUCCEEDED(pDialog->GetResult(&pItem))) {
+                    PWSTR pszPath = nullptr;
+                    if (SUCCEEDED(pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszPath))) {
+                        result.success = true;
+                        result.filePath = toUtf8(pszPath);
+                        result.fileName = extractFileName(result.filePath);
+                        CoTaskMemFree(pszPath);
+                    }
+                    pItem->Release();
+                }
+            }
+            pDialog->Release();
         }
+        CoUninitialize();
     }
 
     return result;
