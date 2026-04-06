@@ -1,0 +1,388 @@
+# ============================================================
+# TrussC Reusable Workflow: Build & Release
+# 配置先: TrussC リポジトリの .github/workflows/release.yml
+# ============================================================
+name: Build & Release
+
+on:
+  workflow_call:
+    inputs:
+      platforms:
+        description: 'ビルド対象プラットフォーム (JSON配列)'
+        type: string
+        default: '["macos", "windows", "linux"]'
+      sign-identity:
+        description: 'macOS Code Sign 署名者名 (未指定で署名スキップ)'
+        type: string
+        default: ''
+      trussc-repository:
+        description: 'TrussC リポジトリ (owner/repo 形式)'
+        type: string
+        default: 'TrussC-org/TrussC'
+      trussc-ref:
+        description: 'TrussC のブランチ/タグ/コミット (未指定: .trussc-version → main)'
+        type: string
+        default: ''
+      bundle-id:
+        description: 'macOS Bundle ID (未指定: Info.plist のデフォルト値を使用)'
+        type: string
+        default: ''
+      extra-apt-packages:
+        description: 'Linux 追加パッケージ (スペース区切り)'
+        type: string
+        default: ''
+    secrets:
+      APPLE_CERTIFICATE_P12:
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        required: false
+      APPLE_ID:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
+      APPLE_APP_SPECIFIC_PASSWORD:
+        required: false
+
+jobs:
+  # -----------------------------------------------------------
+  # macOS — build, sign (optional), notarize (optional), DMG
+  # -----------------------------------------------------------
+  macos:
+    if: contains(fromJSON(inputs.platforms), 'macos')
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Resolve TrussC version
+        id: trussc-ver
+        run: |
+          REF="${{ inputs.trussc-ref }}"
+          if [ -z "$REF" ] && [ -f .trussc-version ]; then
+            REF=$(cat .trussc-version)
+          fi
+          echo "ref=${REF:-main}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone TrussC
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.trussc-repository }}
+          path: TrussC
+          ref: ${{ steps.trussc-ver.outputs.ref }}
+
+      - name: Generate CMakeLists.txt
+        if: ${{ hashFiles('CMakeLists.txt') == '' }}
+        run: |
+          printf '%s\n' \
+            'cmake_minimum_required(VERSION 3.20)' \
+            'project(app)' \
+            'if(NOT DEFINED TRUSSC_DIR)' \
+            '    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")' \
+            'endif()' \
+            'include(${TRUSSC_DIR}/cmake/trussc_app.cmake)' \
+            'trussc_app()' \
+            > CMakeLists.txt
+
+      - name: Import signing certificate
+        if: inputs.sign-identity != ''
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          echo -n "$APPLE_CERTIFICATE_P12" | base64 --decode -o "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+      - name: Configure (CMake)
+        run: |
+          cmake -B build \
+            -G "Unix Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DTRUSSC_DIR="${GITHUB_WORKSPACE}/TrussC/trussc"
+
+      - name: Build
+        run: cmake --build build -j$(sysctl -n hw.logicalcpu)
+
+      - name: Find .app bundle
+        id: find-app
+        run: |
+          APP_PATH=$(find bin -name "*.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: .app bundle not found"
+            exit 1
+          fi
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "app_name=$(basename "$APP_PATH" .app)" >> "$GITHUB_OUTPUT"
+
+      - name: Set Bundle ID
+        if: inputs.bundle-id != ''
+        run: |
+          plutil -replace CFBundleIdentifier \
+            -string "${{ inputs.bundle-id }}" \
+            "${{ steps.find-app.outputs.app_path }}/Contents/Info.plist"
+
+      - name: Code Sign
+        if: inputs.sign-identity != ''
+        run: |
+          codesign --deep --force --options runtime \
+            --sign "${{ inputs.sign-identity }}" \
+            "${{ steps.find-app.outputs.app_path }}"
+
+      - name: Create DMG
+        run: |
+          brew install create-dmg
+          APP_NAME="${{ steps.find-app.outputs.app_name }}"
+
+          # --volicon はアイコンがある場合のみ追加
+          VOLICON_OPT=""
+          if [ -d "icon" ]; then
+            ICON_FILE=$(find icon -name "*.icns" | head -1)
+            if [ -n "$ICON_FILE" ]; then
+              VOLICON_OPT="--volicon $ICON_FILE"
+            fi
+          fi
+
+          create-dmg \
+            --volname "$APP_NAME" \
+            $VOLICON_OPT \
+            --window-pos 200 120 \
+            --window-size 640 480 \
+            --icon-size 128 \
+            --icon "${APP_NAME}.app" 160 200 \
+            --app-drop-link 480 200 \
+            --hide-extension "${APP_NAME}.app" \
+            --hdiutil-quiet \
+            "$RUNNER_TEMP/${APP_NAME}.dmg" \
+            "${{ steps.find-app.outputs.app_path }}"
+
+      - name: Notarize DMG
+        if: inputs.sign-identity != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          APP_NAME="${{ steps.find-app.outputs.app_name }}"
+          xcrun notarytool submit "$RUNNER_TEMP/${APP_NAME}.dmg" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --wait
+
+      - name: Staple
+        if: inputs.sign-identity != ''
+        run: |
+          APP_NAME="${{ steps.find-app.outputs.app_name }}"
+          xcrun stapler staple "$RUNNER_TEMP/${APP_NAME}.dmg"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: macos-dmg
+          path: ${{ runner.temp }}/${{ steps.find-app.outputs.app_name }}.dmg
+
+  # -----------------------------------------------------------
+  # Windows — build, zip
+  # -----------------------------------------------------------
+  windows:
+    if: contains(fromJSON(inputs.platforms), 'windows')
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Resolve TrussC version
+        id: trussc-ver
+        shell: bash
+        run: |
+          REF="${{ inputs.trussc-ref }}"
+          if [ -z "$REF" ] && [ -f .trussc-version ]; then
+            REF=$(cat .trussc-version)
+          fi
+          echo "ref=${REF:-main}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone TrussC
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.trussc-repository }}
+          path: TrussC
+          ref: ${{ steps.trussc-ver.outputs.ref }}
+
+      - name: Generate CMakeLists.txt
+        if: ${{ hashFiles('CMakeLists.txt') == '' }}
+        shell: bash
+        run: |
+          printf '%s\n' \
+            'cmake_minimum_required(VERSION 3.20)' \
+            'project(app)' \
+            'if(NOT DEFINED TRUSSC_DIR)' \
+            '    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")' \
+            'endif()' \
+            'include(${TRUSSC_DIR}/cmake/trussc_app.cmake)' \
+            'trussc_app()' \
+            > CMakeLists.txt
+
+      - name: Configure (CMake)
+        run: |
+          cmake -B build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DTRUSSC_DIR="${{ github.workspace }}/TrussC/trussc"
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package (zip)
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Find app name from built executable
+          APP_NAME=$(basename "$(find bin -name '*.exe' | head -1)" .exe)
+          if [ -z "$APP_NAME" ]; then
+            echo "ERROR: executable not found"
+            exit 1
+          fi
+          if [ -d "bin/Release" ]; then
+            DIST_DIR="bin/Release"
+          else
+            DIST_DIR="bin"
+          fi
+          mkdir -p "$RUNNER_TEMP/package"
+          cp "$DIST_DIR"/*.exe "$RUNNER_TEMP/package/" 2>/dev/null || true
+          cp "$DIST_DIR"/*.dll "$RUNNER_TEMP/package/" 2>/dev/null || true
+          cd "$RUNNER_TEMP/package"
+          7z a "$RUNNER_TEMP/${APP_NAME}-${TAG}-windows.zip" .
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: windows-zip
+          path: ${{ runner.temp }}/${{ env.APP_NAME }}-*-windows.zip
+
+  # -----------------------------------------------------------
+  # Linux — build, tar.gz
+  # -----------------------------------------------------------
+  linux:
+    if: contains(fromJSON(inputs.platforms), 'linux')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Resolve TrussC version
+        id: trussc-ver
+        run: |
+          REF="${{ inputs.trussc-ref }}"
+          if [ -z "$REF" ] && [ -f .trussc-version ]; then
+            REF=$(cat .trussc-version)
+          fi
+          echo "ref=${REF:-main}" >> "$GITHUB_OUTPUT"
+
+      - name: Clone TrussC
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.trussc-repository }}
+          path: TrussC
+          ref: ${{ steps.trussc-ver.outputs.ref }}
+
+      - name: Generate CMakeLists.txt
+        if: ${{ hashFiles('CMakeLists.txt') == '' }}
+        run: |
+          printf '%s\n' \
+            'cmake_minimum_required(VERSION 3.20)' \
+            'project(app)' \
+            'if(NOT DEFINED TRUSSC_DIR)' \
+            '    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")' \
+            'endif()' \
+            'include(${TRUSSC_DIR}/cmake/trussc_app.cmake)' \
+            'trussc_app()' \
+            > CMakeLists.txt
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libgl1-mesa-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libgtk-3-dev \
+            libavcodec-dev libavformat-dev libswscale-dev libavutil-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+          if [ -n "${{ inputs.extra-apt-packages }}" ]; then
+            sudo apt-get install -y ${{ inputs.extra-apt-packages }}
+          fi
+
+      - name: Configure (CMake)
+        run: |
+          cmake -B build \
+            -G "Unix Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DTRUSSC_DIR="${GITHUB_WORKSPACE}/TrussC/trussc"
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Package (tar.gz)
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Find app name from built executable
+          APP_NAME=$(find bin -maxdepth 1 -type f -executable | head -1 | xargs basename)
+          if [ -z "$APP_NAME" ]; then
+            echo "ERROR: executable not found"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/package"
+          cp "bin/${APP_NAME}" "$RUNNER_TEMP/package/" 2>/dev/null || \
+            find bin -maxdepth 2 -type f -executable ! -name "*.cmake" \
+              -exec cp {} "$RUNNER_TEMP/package/" \;
+          tar -czf "$RUNNER_TEMP/${APP_NAME}-${TAG}-linux.tar.gz" \
+            -C "$RUNNER_TEMP/package" .
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: linux-tar
+          path: ${{ runner.temp }}/${{ env.APP_NAME }}-*-linux.tar.gz
+
+  # -----------------------------------------------------------
+  # Release — collect all artifacts and publish
+  # -----------------------------------------------------------
+  release:
+    needs: [macos, windows, linux]
+    if: always() && !cancelled() && !contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release create "$TAG" \
+            artifacts/**/* \
+            --title "$TAG" \
+            --generate-notes
