@@ -6056,20 +6056,70 @@ types:
         description: "Get clamped copy (0.0-1.0)"
         description_ja: "クランプしたコピーを取得"
         snippet: "clamped()"
+      - name: toLinear
+        return: ColorLinear
+        signatures:
+          - params: ""
+        description: "Convert to linear RGB color space"
+        description_ja: "リニアRGB色空間に変換"
+        description_ko: "리니어 RGB 색공간으로 변환"
+        snippet: "toLinear()"
       - name: toHSB
         return: ColorHSB
         signatures:
           - params: ""
         description: "Convert to HSB (H: 0-1, S: 0-1, B: 0-1)"
         description_ja: "HSBに変換 (H: 0-1, S: 0-1, B: 0-1)"
+        description_ko: "HSB로 변환 (H: 0-1, S: 0-1, B: 0-1)"
         snippet: "toHSB()"
+      - name: toOKLab
+        return: ColorOKLab
+        signatures:
+          - params: ""
+        description: "Convert to OKLab (perceptually uniform)"
+        description_ja: "OKLabに変換（知覚的に均一）"
+        description_ko: "OKLab으로 변환 (지각적으로 균일)"
+        snippet: "toOKLab()"
       - name: toOKLCH
         return: ColorOKLCH
         signatures:
           - params: ""
         description: "Convert to OKLCH (L: 0-1, C: 0-0.4, H: 0-1)"
         description_ja: "OKLCHに変換 (L: 0-1, C: 0-0.4, H: 0-1)"
+        description_ko: "OKLCH로 변환 (L: 0-1, C: 0-0.4, H: 0-1)"
         snippet: "toOKLCH()"
+      - name: lerpLinear
+        return: Color
+        signatures:
+          - params: "Color target, float t"
+        description: "Interpolate in linear RGB space"
+        description_ja: "リニアRGB空間で補間"
+        description_ko: "리니어 RGB 공간에서 보간"
+        snippet: "lerpLinear(${1:target}, ${2:t})"
+      - name: lerpHSB
+        return: Color
+        signatures:
+          - params: "Color target, float t"
+        description: "Interpolate in HSB space"
+        description_ja: "HSB空間で補間"
+        description_ko: "HSB 공간에서 보간"
+        snippet: "lerpHSB(${1:target}, ${2:t})"
+      - name: lerpOKLab
+        return: Color
+        signatures:
+          - params: "Color target, float t"
+        description: "Interpolate in OKLab space (perceptually uniform)"
+        description_ja: "OKLab空間で補間（知覚的に均一）"
+        description_ko: "OKLab 공간에서 보간 (지각적으로 균일)"
+        snippet: "lerpOKLab(${1:target}, ${2:t})"
+      - name: lerpOKLCH
+        return: Color
+        signatures:
+          - params: "Color target, float t"
+        description: "Interpolate in OKLCH space (shortest hue path)"
+        description_ja: "OKLCH空間で補間（色相は最短経路）"
+        description_ko: "OKLCH 공간에서 보간 (색상은 최단 경로)"
+        snippet: "lerpOKLCH(${1:target}, ${2:t})"
     static_methods:
       - name: Color_fromHex
         return: Color
@@ -6087,6 +6137,33 @@ types:
         description: "Create from HSB (H: 0-1)"
         description_ja: "HSBから作成 (H: 0-1)"
         snippet: "Color_fromHSB(${1:h}, ${2:s}, ${3:b})"
+      - name: Color_fromOKLab
+        return: Color
+        signatures:
+          - params: "float L, float a, float b"
+          - params: "float L, float a, float b, float alpha"
+        description: "Create from OKLab (L: 0-1, a: ~-0.4-0.4, b: ~-0.4-0.4)"
+        description_ja: "OKLabから作成 (L: 0-1, a: ~-0.4-0.4, b: ~-0.4-0.4)"
+        description_ko: "OKLab으로부터 생성 (L: 0-1, a: ~-0.4-0.4, b: ~-0.4-0.4)"
+        snippet: "Color_fromOKLab(${1:L}, ${2:a}, ${3:b})"
+      - name: Color_fromOKLCH
+        return: Color
+        signatures:
+          - params: "float L, float C, float H"
+          - params: "float L, float C, float H, float a"
+        description: "Create from OKLCH (L: 0-1, C: 0-0.4, H: 0-1)"
+        description_ja: "OKLCHから作成 (L: 0-1, C: 0-0.4, H: 0-1)"
+        description_ko: "OKLCH로부터 생성 (L: 0-1, C: 0-0.4, H: 0-1)"
+        snippet: "Color_fromOKLCH(${1:L}, ${2:C}, ${3:H})"
+      - name: Color_fromLinear
+        return: Color
+        signatures:
+          - params: "float r, float g, float b"
+          - params: "float r, float g, float b, float a"
+        description: "Create from linear RGB"
+        description_ja: "リニアRGBから作成"
+        description_ko: "리니어 RGB로부터 생성"
+        snippet: "Color_fromLinear(${1:r}, ${2:g}, ${3:b})"
       - name: Color_fromBytes
         return: Color
         signatures:
