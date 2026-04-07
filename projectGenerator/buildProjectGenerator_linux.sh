@@ -100,6 +100,7 @@ Type=Application
 Name=TrussC Project Generator
 GenericName=TrussC Project Generator
 Comment=Generate TrussC projects
+Exec="$BIN_PATH" %F
 Path=$SOURCE_DIR/bin
 Icon=trussc-projectGenerator
 Terminal=false
