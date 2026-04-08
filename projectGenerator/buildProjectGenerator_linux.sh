@@ -73,6 +73,59 @@ echo "Creating symlink to distribution folder..."
 rm -f "$SCRIPT_DIR/projectGenerator"
 ln -s "$SOURCE_DIR/bin/projectGenerator" "$SCRIPT_DIR/projectGenerator"
 
+# Install desktop entry and icon (XDG user-level, no root required)
+echo ""
+read -r -p "Install desktop entry to application menu? [y/N]: " INSTALL_DESKTOP
+case "$INSTALL_DESKTOP" in
+    [yY]|[yY][eE][sS])
+        echo "Installing desktop entry..."
+
+        BIN_PATH="$SOURCE_DIR/bin/projectGenerator"
+        ICON_SRC="$SOURCE_DIR/icon/generator.png"
+
+        DESKTOP_DIR="$HOME/.local/share/applications"
+        ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+        DESKTOP_FILE="$DESKTOP_DIR/trussc-projectGenerator.desktop"
+        ICON_DEST="$ICON_DIR/trussc-projectGenerator.png"
+
+        mkdir -p "$DESKTOP_DIR" "$ICON_DIR"
+
+        if [ -f "$ICON_SRC" ]; then
+            cp -f "$ICON_SRC" "$ICON_DEST"
+        fi
+
+        cat > "$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Name=TrussC Project Generator
+GenericName=TrussC Project Generator
+Comment=Generate TrussC projects
+Exec="$BIN_PATH" %F
+Path=$SOURCE_DIR/bin
+Icon=trussc-projectGenerator
+Terminal=false
+Categories=Development;IDE;
+StartupNotify=true
+EOF
+
+        chmod +x "$DESKTOP_FILE"
+
+        # Refresh desktop database / icon cache if available
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
+        fi
+        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+        fi
+
+        echo "  Desktop entry: $DESKTOP_FILE"
+        echo "  Icon:          $ICON_DEST"
+        ;;
+    *)
+        echo "Skipped desktop entry installation."
+        ;;
+esac
+
 echo ""
 echo "=========================================="
 echo "  Build completed successfully!"
