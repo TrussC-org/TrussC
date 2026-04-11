@@ -5,10 +5,11 @@ TrussC uses a modern CMake-based build system designed to be automated via the *
 > ⚠️ **IMPORTANT**
 >
 > **Do NOT edit `CMakeLists.txt` or `CMakePresets.json` manually.**
-> These files are automatically generated and managed by the Project Generator.
+> These files are regenerated every time by the Project Generator and your changes will be lost.
 >
 > - To add addons: Edit `addons.make` or use the Project Generator GUI.
 > - To change project settings: Use the Project Generator.
+> - For project-specific CMake config: Create `local.cmake` in your project root (see [Section 6](#6-project-local-cmake-config-localcmake)).
 
 ---
 
@@ -236,6 +237,12 @@ The `trussc_app()` CMake macro (in `trussc/cmake/trussc_app.cmake`) handles:
 *   Configuring platform-specific bundles (macOS .app, Windows resource files)
 
 The **Project Generator** ensures that `CMakePresets.json` is correctly configured with the absolute path to your TrussC installation (`TRUSSC_DIR`), so you can move your project folder anywhere without breaking the build.
+
+### macOS Deployment Target
+
+TrussC requires **macOS 14.0 (Sonoma)** or later. This is because sokol's display backend uses `CADisplayLink` and `CAFrameRateRange` (introduced in macOS 14.0) for proper frame rate control, including ProMotion 120Hz support.
+
+The Project Generator automatically sets `CMAKE_OSX_DEPLOYMENT_TARGET=14.0` in both the `macos` and `xcode` presets.
 
 ### Build Type
 

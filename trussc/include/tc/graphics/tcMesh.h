@@ -435,88 +435,67 @@ public:
         // Get current transformation matrix
         Mat4 modelMatrix = getDefaultContext().getCurrentMatrix();
 
-        // Matrix for normal transformation (inverse transpose)
-        // Simple implementation: if scale is uniform, modelMatrix can be used as-is
-        // TODO: Calculate inverse transpose for non-uniform scale
-
-        const Material& material = *internal::currentMaterial;
+        const Material& baseMaterial = *internal::currentMaterial;
+        bool useVertexColors = hasColors() && colors_.size() >= vertices_.size();
 
         sgl_begin_triangles();
+
+        auto processVertex = [&](size_t idx) {
+            const Vec3& localPos = vertices_[idx];
+            const Vec3& localNormal = normals_[idx];
+
+            // Transform to world coordinates
+            Vec3 worldPos = modelMatrix * localPos;
+
+            // Transform normal (rotation only, ignore translation)
+            Vec3 worldNormal;
+            worldNormal.x = modelMatrix.m[0] * localNormal.x +
+                            modelMatrix.m[1] * localNormal.y +
+                            modelMatrix.m[2] * localNormal.z;
+            worldNormal.y = modelMatrix.m[4] * localNormal.x +
+                            modelMatrix.m[5] * localNormal.y +
+                            modelMatrix.m[6] * localNormal.z;
+            worldNormal.z = modelMatrix.m[8] * localNormal.x +
+                            modelMatrix.m[9] * localNormal.y +
+                            modelMatrix.m[10] * localNormal.z;
+
+            // Normalize
+            float len = std::sqrt(worldNormal.x * worldNormal.x +
+                                  worldNormal.y * worldNormal.y +
+                                  worldNormal.z * worldNormal.z);
+            if (len > 0.0001f) {
+                worldNormal.x /= len;
+                worldNormal.y /= len;
+                worldNormal.z /= len;
+            }
+
+            // Lighting calculation
+            Color litColor;
+            if (useVertexColors) {
+                // Use vertex color as diffuse/ambient
+                Material mat = baseMaterial;
+                mat.setDiffuse(colors_[idx]);
+                mat.setAmbient(colors_[idx]);
+                litColor = calculateLighting(worldPos, worldNormal, mat);
+                litColor.a = colors_[idx].a;
+            } else {
+                litColor = calculateLighting(worldPos, worldNormal, baseMaterial);
+            }
+
+            sgl_c4f(litColor.r, litColor.g, litColor.b, litColor.a);
+            sgl_v3f(localPos.x, localPos.y, localPos.z);
+        };
 
         if (hasIndices()) {
             for (auto idx : indices_) {
                 if (idx < vertices_.size() && idx < normals_.size()) {
-                    const Vec3& localPos = vertices_[idx];
-                    const Vec3& localNormal = normals_[idx];
-
-                    // Transform to world coordinates
-                    Vec3 worldPos = modelMatrix * localPos;
-
-                    // Transform normal (apply rotation only, ignore translation)
-                    Vec3 worldNormal;
-                    worldNormal.x = modelMatrix.m[0] * localNormal.x +
-                                    modelMatrix.m[1] * localNormal.y +
-                                    modelMatrix.m[2] * localNormal.z;
-                    worldNormal.y = modelMatrix.m[4] * localNormal.x +
-                                    modelMatrix.m[5] * localNormal.y +
-                                    modelMatrix.m[6] * localNormal.z;
-                    worldNormal.z = modelMatrix.m[8] * localNormal.x +
-                                    modelMatrix.m[9] * localNormal.y +
-                                    modelMatrix.m[10] * localNormal.z;
-
-                    // Normalize normal
-                    float len = std::sqrt(worldNormal.x * worldNormal.x +
-                                          worldNormal.y * worldNormal.y +
-                                          worldNormal.z * worldNormal.z);
-                    if (len > 0.0001f) {
-                        worldNormal.x /= len;
-                        worldNormal.y /= len;
-                        worldNormal.z /= len;
-                    }
-
-                    // Lighting calculation
-                    Color litColor = calculateLighting(worldPos, worldNormal, material);
-
-                    sgl_c4f(litColor.r, litColor.g, litColor.b, litColor.a);
-                    sgl_v3f(localPos.x, localPos.y, localPos.z);
+                    processVertex(idx);
                 }
             }
         } else {
             for (size_t i = 0; i < vertices_.size(); i++) {
                 if (i < normals_.size()) {
-                    const Vec3& localPos = vertices_[i];
-                    const Vec3& localNormal = normals_[i];
-
-                    // Transform to world coordinates
-                    Vec3 worldPos = modelMatrix * localPos;
-
-                    // Transform normal
-                    Vec3 worldNormal;
-                    worldNormal.x = modelMatrix.m[0] * localNormal.x +
-                                    modelMatrix.m[1] * localNormal.y +
-                                    modelMatrix.m[2] * localNormal.z;
-                    worldNormal.y = modelMatrix.m[4] * localNormal.x +
-                                    modelMatrix.m[5] * localNormal.y +
-                                    modelMatrix.m[6] * localNormal.z;
-                    worldNormal.z = modelMatrix.m[8] * localNormal.x +
-                                    modelMatrix.m[9] * localNormal.y +
-                                    modelMatrix.m[10] * localNormal.z;
-
-                    // Normalize normal
-                    float len = std::sqrt(worldNormal.x * worldNormal.x +
-                                          worldNormal.y * worldNormal.y +
-                                          worldNormal.z * worldNormal.z);
-                    if (len > 0.0001f) {
-                        worldNormal.x /= len;
-                        worldNormal.y /= len;
-                        worldNormal.z /= len;
-                    }
-
-                    // Lighting calculation
-                    Color litColor = calculateLighting(worldPos, worldNormal, material);
-
-                    sgl_c4f(litColor.r, litColor.g, litColor.b, litColor.a);
-                    sgl_v3f(localPos.x, localPos.y, localPos.z);
+                    processVertex(i);
                 }
             }
         }

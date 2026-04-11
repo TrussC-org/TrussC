@@ -200,12 +200,13 @@ function generateTrussCApiJS(api) {
                     return_type: fn.return !== undefined ? fn.return : null,
                     desc: fn.description,
                     desc_ja: fn.description_ja || '',
+                    desc_ko: fn.description_ko || '',
                     snippet: fn.snippet
                 });
             }
         }
         if (functions.length === 0) continue;
-        categories.push({ name: cat.name, name_ja: cat.name_ja || '', functions });
+        categories.push({ name: cat.name, name_ja: cat.name_ja || '', name_ko: cat.name_ko || '', functions });
     }
 
     const constants = (api.constants || []).map(c => ({
@@ -220,7 +221,8 @@ function generateTrussCApiJS(api) {
             const typeData = {
                 name: type.name,
                 desc: type.description,
-                desc_ja: type.description_ja || ''
+                desc_ja: type.description_ja || '',
+                desc_ko: type.description_ko || ''
             };
 
             if (type.constructor && type.constructor.signatures) {
