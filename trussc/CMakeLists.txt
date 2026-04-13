@@ -214,9 +214,9 @@ elseif(TC_PLATFORM_LINUX)
     find_package(OpenGL REQUIRED)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
-    # FFmpeg for VideoPlayer
-    pkg_check_modules(FFMPEG REQUIRED libavcodec libavformat libswscale libavutil)
-    # GStreamer for AAC audio decoding
+    # FFmpeg for VideoPlayer and audio decoding
+    pkg_check_modules(FFMPEG REQUIRED libavcodec libavformat libswscale libavutil libswresample)
+    # GStreamer for AAC audio decoding (Sound)
     pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0 gstreamer-app-1.0 gstreamer-audio-1.0)
     target_include_directories(TrussC PUBLIC
         ${GTK3_INCLUDE_DIRS}
@@ -249,7 +249,7 @@ elseif(TC_PLATFORM_RASPBIAN)
     find_package(X11 REQUIRED)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
-    pkg_check_modules(FFMPEG REQUIRED libavcodec libavformat libswscale libavutil)
+    pkg_check_modules(FFMPEG REQUIRED libavcodec libavformat libswscale libavutil libswresample)
     pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0 gstreamer-app-1.0 gstreamer-audio-1.0)
     target_include_directories(TrussC PUBLIC
         ${GTK3_INCLUDE_DIRS}

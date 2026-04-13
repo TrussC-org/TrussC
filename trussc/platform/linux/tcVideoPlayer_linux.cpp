@@ -13,8 +13,10 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
+#include <libswresample/swresample.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/time.h>
+#include <libavutil/opt.h>
 }
 
 #include <thread>
@@ -65,7 +67,11 @@ public:
     int getAudioChannels() const { return audioChannels_; }
     std::vector<uint8_t> getAudioData() const;
 
+    Sound audioSound_;
+    std::shared_ptr<SoundBuffer> audioBuffer_;
+
 private:
+    bool loadAudioForPlayback();
     void decodeThread();
     bool decodeNextFrame();
     void seekToTime(double seconds);
@@ -284,6 +290,16 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     );
 
     isLoaded_ = true;
+
+    // Pre-decode audio for playback using FFmpeg (audio stream only)
+    if (hasAudio_) {
+        if (loadAudioForPlayback()) {
+            logNotice("VideoPlayer") << "Audio decoded and ready";
+        } else {
+            logWarning("VideoPlayer") << "Failed to decode audio";
+        }
+    }
+
     return true;
 }
 
@@ -347,6 +363,8 @@ void TCVideoPlayerImpl::close() {
     isFinished_ = false;
     width_ = 0;
     height_ = 0;
+    audioSound_.stop();
+    audioBuffer_.reset();
     hasAudio_ = false;
     audioStreamIndex_ = -1;
     audioCodec_ = 0;
@@ -376,11 +394,19 @@ void TCVideoPlayerImpl::play() {
     isPlaying_ = true;
     isPaused_ = false;
     cv_.notify_all();
+
+    if (audioBuffer_) {
+        audioSound_.play();
+        audioSound_.setPosition(static_cast<float>(currentPts_));
+        audioSound_.setVolume(volume_);
+    }
 }
 
 void TCVideoPlayerImpl::stop() {
     isPlaying_ = false;
     isPaused_ = false;
+
+    audioSound_.stop();
 
     // Seek to beginning
     seekToTime(0.0);
@@ -406,6 +432,11 @@ void TCVideoPlayerImpl::setPaused(bool paused) {
         playbackStartTime_ += pauseDuration;
         isPaused_ = false;
         cv_.notify_all();
+    }
+
+    if (audioBuffer_) {
+        if (paused) audioSound_.pause();
+        else audioSound_.resume();
     }
 }
 
@@ -555,6 +586,120 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
     }
 }
 
+bool TCVideoPlayerImpl::loadAudioForPlayback() {
+    if (!hasAudio_ || filePath_.empty()) return false;
+
+    AVFormatContext* fmtCtx = nullptr;
+    if (avformat_open_input(&fmtCtx, filePath_.c_str(), nullptr, nullptr) < 0) return false;
+    if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
+        avformat_close_input(&fmtCtx);
+        return false;
+    }
+
+    // Find audio stream only
+    int audioIdx = -1;
+    for (unsigned int i = 0; i < fmtCtx->nb_streams; i++) {
+        if (fmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            audioIdx = i;
+            break;
+        }
+    }
+    if (audioIdx < 0) {
+        avformat_close_input(&fmtCtx);
+        return false;
+    }
+
+    // Open audio decoder
+    AVCodecParameters* par = fmtCtx->streams[audioIdx]->codecpar;
+    const AVCodec* codec = avcodec_find_decoder(par->codec_id);
+    if (!codec) {
+        avformat_close_input(&fmtCtx);
+        return false;
+    }
+    AVCodecContext* audioCtx = avcodec_alloc_context3(codec);
+    avcodec_parameters_to_context(audioCtx, par);
+    if (avcodec_open2(audioCtx, codec, nullptr) < 0) {
+        avcodec_free_context(&audioCtx);
+        avformat_close_input(&fmtCtx);
+        return false;
+    }
+
+    // Set up resampler: native → F32 interleaved stereo at AudioEngine::SAMPLE_RATE
+    SwrContext* swr = nullptr;
+    AVChannelLayout outLayout = AV_CHANNEL_LAYOUT_STEREO;
+    if (swr_alloc_set_opts2(&swr,
+            &outLayout,           AV_SAMPLE_FMT_FLT, AudioEngine::SAMPLE_RATE,
+            &audioCtx->ch_layout, audioCtx->sample_fmt, audioCtx->sample_rate,
+            0, nullptr) < 0 || swr_init(swr) < 0) {
+        if (swr) swr_free(&swr);
+        avcodec_free_context(&audioCtx);
+        avformat_close_input(&fmtCtx);
+        return false;
+    }
+
+    // Reserve estimated buffer space
+    std::vector<float> samples;
+    if (duration_ > 0)
+        samples.reserve((size_t)(duration_ * AudioEngine::SAMPLE_RATE * 2 * 1.05));
+
+    AVFrame* frame = av_frame_alloc();
+    AVPacket* pkt  = av_packet_alloc();
+
+    auto appendConverted = [&](int nbIn) {
+        int outN = av_rescale_rnd(
+            swr_get_delay(swr, audioCtx->sample_rate) + nbIn,
+            AudioEngine::SAMPLE_RATE, audioCtx->sample_rate, AV_ROUND_UP);
+        std::vector<float> buf(outN * 2);
+        uint8_t* outData[1] = { (uint8_t*)buf.data() };
+        int n = swr_convert(swr, outData, outN,
+                            nbIn > 0 ? (const uint8_t**)frame->data : nullptr, nbIn);
+        if (n > 0)
+            samples.insert(samples.end(), buf.begin(), buf.begin() + n * 2);
+    };
+
+    while (av_read_frame(fmtCtx, pkt) >= 0) {
+        if (pkt->stream_index == audioIdx) {
+            if (avcodec_send_packet(audioCtx, pkt) == 0) {
+                while (avcodec_receive_frame(audioCtx, frame) == 0) {
+                    appendConverted(frame->nb_samples);
+                    av_frame_unref(frame);
+                }
+            }
+        }
+        av_packet_unref(pkt);
+    }
+
+    // Flush decoder
+    avcodec_send_packet(audioCtx, nullptr);
+    while (avcodec_receive_frame(audioCtx, frame) == 0) {
+        appendConverted(frame->nb_samples);
+        av_frame_unref(frame);
+    }
+
+    // Flush resampler
+    appendConverted(0);
+
+    av_frame_free(&frame);
+    av_packet_free(&pkt);
+    swr_free(&swr);
+    avcodec_free_context(&audioCtx);
+    avformat_close_input(&fmtCtx);
+
+    if (samples.empty()) return false;
+
+    auto buf = std::make_shared<SoundBuffer>();
+    buf->samples   = std::move(samples);
+    buf->channels  = 2;
+    buf->sampleRate = AudioEngine::SAMPLE_RATE;
+    buf->numSamples = buf->samples.size() / 2;
+    audioBuffer_ = buf;
+    audioSound_.loadFromBuffer(audioBuffer_);
+
+    logNotice("VideoPlayer") << "Audio: " << buf->numSamples << " frames @ "
+                              << buf->sampleRate << " Hz";
+    return true;
+}
+
 // Helper: sample rate index for ADTS header
 static int adtsSampleRateIndex(int sampleRate) {
     static const int rates[] = {96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350};
@@ -640,6 +785,9 @@ void TCVideoPlayerImpl::setPosition(float pct) {
     double targetTime = pct * duration_;
     seekToTime(targetTime);
     playbackStartTime_ = av_gettime_relative() / 1000000.0 - targetTime;
+    if (audioBuffer_) {
+        audioSound_.setPosition(static_cast<float>(targetTime));
+    }
 }
 
 float TCVideoPlayerImpl::getDuration() const {
@@ -648,7 +796,7 @@ float TCVideoPlayerImpl::getDuration() const {
 
 void TCVideoPlayerImpl::setVolume(float vol) {
     volume_ = vol;
-    // Audio not implemented yet
+    audioSound_.setVolume(vol);
 }
 
 void TCVideoPlayerImpl::setSpeed(float speed) {
