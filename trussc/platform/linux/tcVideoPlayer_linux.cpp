@@ -59,6 +59,12 @@ public:
     int getWidth() const { return width_; }
     int getHeight() const { return height_; }
 
+    bool hasAudio() const { return hasAudio_; }
+    uint32_t getAudioCodec() const { return audioCodec_; }
+    int getAudioSampleRate() const { return audioSampleRate_; }
+    int getAudioChannels() const { return audioChannels_; }
+    std::vector<uint8_t> getAudioData() const;
+
 private:
     void decodeThread();
     bool decodeNextFrame();
@@ -73,6 +79,14 @@ private:
     AVPacket* packet_ = nullptr;
 
     int videoStreamIndex_ = -1;
+    int audioStreamIndex_ = -1;
+
+    // Audio properties
+    bool hasAudio_ = false;
+    uint32_t audioCodec_ = 0;
+    int audioSampleRate_ = 0;
+    int audioChannels_ = 0;
+    std::string filePath_;
 
     // Video properties
     int width_ = 0;
@@ -123,6 +137,8 @@ private:
 // =============================================================================
 
 bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
+    filePath_ = path;
+
     // Open file
     if (avformat_open_input(&formatCtx_, path.c_str(), nullptr, nullptr) < 0) {
         logError("VideoPlayer") << "Failed to open file: " << path;
@@ -148,6 +164,31 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         logError("VideoPlayer") << "No video stream found";
         avformat_close_input(&formatCtx_);
         return false;
+    }
+
+    // Find audio stream
+    for (unsigned int i = 0; i < formatCtx_->nb_streams; i++) {
+        if (formatCtx_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            audioStreamIndex_ = i;
+            break;
+        }
+    }
+
+    if (audioStreamIndex_ >= 0) {
+        AVCodecParameters* audioPar = formatCtx_->streams[audioStreamIndex_]->codecpar;
+        hasAudio_ = true;
+        audioSampleRate_ = audioPar->sample_rate;
+        audioChannels_ = audioPar->ch_layout.nb_channels;
+
+        if (audioPar->codec_id == AV_CODEC_ID_AAC) {
+            audioCodec_ = 0x61616320; // 'aac '
+        } else if (audioPar->codec_id == AV_CODEC_ID_MP3) {
+            audioCodec_ = 0x6D703320; // 'mp3 '
+        } else {
+            audioCodec_ = audioPar->codec_tag;
+        }
+
+        logNotice("VideoPlayer") << "Audio: " << audioChannels_ << "ch, " << audioSampleRate_ << "Hz";
     }
 
     AVStream* videoStream = formatCtx_->streams[videoStreamIndex_];
@@ -306,6 +347,12 @@ void TCVideoPlayerImpl::close() {
     isFinished_ = false;
     width_ = 0;
     height_ = 0;
+    hasAudio_ = false;
+    audioStreamIndex_ = -1;
+    audioCodec_ = 0;
+    audioSampleRate_ = 0;
+    audioChannels_ = 0;
+    filePath_.clear();
 }
 
 void TCVideoPlayerImpl::play() {
@@ -506,6 +553,76 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
         av_frame_unref(frame_);
         return true;
     }
+}
+
+// Helper: sample rate index for ADTS header
+static int adtsSampleRateIndex(int sampleRate) {
+    static const int rates[] = {96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350};
+    for (int i = 0; i < 13; i++) {
+        if (rates[i] == sampleRate) return i;
+    }
+    return 4; // default: 44100
+}
+
+// Helper: create 7-byte ADTS header
+static void createADTSHeader(uint8_t* hdr, int frameSize, int sampleRate, int channels) {
+    int srIdx = adtsSampleRateIndex(sampleRate);
+    int fullLen = frameSize + 7;
+    // AAC-LC profile (adtsProfile=1)
+    hdr[0] = 0xFF;
+    hdr[1] = 0xF1;
+    hdr[2] = (1 << 6) | ((srIdx & 0x0F) << 2) | ((channels >> 2) & 0x01);
+    hdr[3] = ((channels & 0x03) << 6) | ((fullLen >> 11) & 0x03);
+    hdr[4] = (fullLen >> 3) & 0xFF;
+    hdr[5] = ((fullLen & 0x07) << 5) | 0x1F;
+    hdr[6] = 0xFC;
+}
+
+std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
+    if (!hasAudio_ || filePath_.empty()) return {};
+
+    AVFormatContext* fmtCtx = nullptr;
+    if (avformat_open_input(&fmtCtx, filePath_.c_str(), nullptr, nullptr) < 0) return {};
+    if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
+        avformat_close_input(&fmtCtx);
+        return {};
+    }
+
+    int audioIdx = -1;
+    for (unsigned int i = 0; i < fmtCtx->nb_streams; i++) {
+        if (fmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            audioIdx = i;
+            break;
+        }
+    }
+
+    if (audioIdx < 0) {
+        avformat_close_input(&fmtCtx);
+        return {};
+    }
+
+    bool isAAC = (fmtCtx->streams[audioIdx]->codecpar->codec_id == AV_CODEC_ID_AAC);
+
+    std::vector<uint8_t> audioData;
+    AVPacket* pkt = av_packet_alloc();
+
+    while (av_read_frame(fmtCtx, pkt) >= 0) {
+        if (pkt->stream_index == audioIdx) {
+            if (isAAC) {
+                uint8_t adtsHdr[7];
+                createADTSHeader(adtsHdr, pkt->size, audioSampleRate_, audioChannels_);
+                audioData.insert(audioData.end(), adtsHdr, adtsHdr + 7);
+            }
+            audioData.insert(audioData.end(), pkt->data, pkt->data + pkt->size);
+        }
+        av_packet_unref(pkt);
+    }
+
+    av_packet_free(&pkt);
+    avformat_close_input(&fmtCtx);
+
+    logNotice("VideoPlayer") << "Extracted audio: " << audioData.size() << " bytes";
+    return audioData;
 }
 
 void TCVideoPlayerImpl::seekToTime(double seconds) {
@@ -721,24 +838,34 @@ void VideoPlayer::previousFramePlatform() {
     }
 }
 
-// Audio access (not yet implemented for Linux FFmpeg)
+// Audio access
 bool VideoPlayer::hasAudioPlatform() const {
+    if (platformHandle_)
+        return static_cast<TCVideoPlayerImpl*>(platformHandle_)->hasAudio();
     return false;
 }
 
 uint32_t VideoPlayer::getAudioCodecPlatform() const {
+    if (platformHandle_)
+        return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getAudioCodec();
     return 0;
 }
 
 std::vector<uint8_t> VideoPlayer::getAudioDataPlatform() const {
+    if (platformHandle_)
+        return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getAudioData();
     return {};
 }
 
 int VideoPlayer::getAudioSampleRatePlatform() const {
+    if (platformHandle_)
+        return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getAudioSampleRate();
     return 0;
 }
 
 int VideoPlayer::getAudioChannelsPlatform() const {
+    if (platformHandle_)
+        return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getAudioChannels();
     return 0;
 }
 
