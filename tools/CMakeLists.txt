@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(projectGenerator)
+project(trusscli)
 
 # Default path (for TrussC repository)
 set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../core")
@@ -12,6 +12,11 @@ endif()
 
 include(${TRUSSC_DIR}/cmake/trussc_app.cmake)
 
-# NAME is required because the tool lives in tools/ — without it, trussc_app()
-# would derive the binary name from the folder ("tools") instead.
-trussc_app(NAME projectGenerator)
+# Binary is trusscli (CLI-friendly name); the .app bundle advertises itself
+# as "TrussC Project Generator" in Finder / Dock so the GUI mode still reads
+# naturally. NAME is required because the folder is "tools" — without it
+# trussc_app() would derive the binary name from the folder.
+trussc_app(
+    NAME trusscli
+    DISPLAY_NAME "TrussC Project Generator"
+)

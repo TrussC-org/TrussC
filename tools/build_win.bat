@@ -1,12 +1,13 @@
 @echo off
 REM =============================================================================
-REM TrussC Project Generator Build Script (Windows)
+REM trusscli Build Script (Windows)
 REM =============================================================================
-REM Run this script to build projectGenerator
+REM Run this script to build trusscli (TrussC Project Generator GUI + the
+REM trusscli command-line tool — same binary, different entry points).
 REM =============================================================================
 
 echo ==========================================
-echo   TrussC Project Generator Build Script
+echo   trusscli Build Script
 echo ==========================================
 echo.
 
@@ -56,11 +57,11 @@ if %ERRORLEVEL% neq 0 (
 REM Create symlink to binary in distribution folder (requires admin or Developer Mode)
 echo.
 echo Creating symlink to distribution folder...
-if exist "%SCRIPT_DIR%\projectGenerator.exe" del "%SCRIPT_DIR%\projectGenerator.exe"
-mklink "%SCRIPT_DIR%\projectGenerator.exe" "%SOURCE_DIR%\bin\projectGenerator.exe"
+if exist "%SCRIPT_DIR%\trusscli.exe" del "%SCRIPT_DIR%\trusscli.exe"
+mklink "%SCRIPT_DIR%\trusscli.exe" "%SOURCE_DIR%\bin\trusscli.exe"
 if %ERRORLEVEL% neq 0 (
     echo Symlink failed, falling back to copy...
-    copy /Y "%SOURCE_DIR%\bin\projectGenerator.exe" "%SCRIPT_DIR%\"
+    copy /Y "%SOURCE_DIR%\bin\trusscli.exe" "%SCRIPT_DIR%\"
 )
 
 echo.
@@ -68,5 +69,5 @@ echo ==========================================
 echo   Build completed successfully!
 echo ==========================================
 echo.
-echo Launching projectGenerator...
-start "" "%SCRIPT_DIR%\projectGenerator.exe"
+echo Launching TrussC Project Generator...
+start "" "%SCRIPT_DIR%\trusscli.exe"

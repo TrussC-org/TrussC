@@ -29,7 +29,7 @@ macro(trussc_app)
 
     # Parse arguments
     set(_options "")
-    set(_oneValueArgs NAME)
+    set(_oneValueArgs NAME DISPLAY_NAME)
     set(_multiValueArgs SOURCES)
     cmake_parse_arguments(_TC_APP "${_options}" "${_oneValueArgs}" "${_multiValueArgs}" ${ARGN})
 
@@ -38,6 +38,16 @@ macro(trussc_app)
         set(_TC_PROJECT_NAME ${_TC_APP_NAME})
     else()
         get_filename_component(_TC_PROJECT_NAME ${CMAKE_CURRENT_SOURCE_DIR} NAME)
+    endif()
+
+    # Display name for GUI (Finder/Dock on macOS, app menu on iOS).
+    # Defaults to the project name; override with DISPLAY_NAME when the binary
+    # name should differ from the human-readable name (e.g. a CLI tool whose
+    # GUI mode shows a friendlier label).
+    if(_TC_APP_DISPLAY_NAME)
+        set(MACOSX_BUNDLE_DISPLAY_NAME "${_TC_APP_DISPLAY_NAME}")
+    else()
+        set(MACOSX_BUNDLE_DISPLAY_NAME "${_TC_PROJECT_NAME}")
     endif()
 
     # Check for target collision (for batch builds)
@@ -296,7 +306,7 @@ macro(trussc_app)
     elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         set_target_properties(${PROJECT_NAME} PROPERTIES
             MACOSX_BUNDLE TRUE
-            MACOSX_BUNDLE_BUNDLE_NAME "${PROJECT_NAME}"
+            MACOSX_BUNDLE_BUNDLE_NAME "${MACOSX_BUNDLE_DISPLAY_NAME}"
             MACOSX_BUNDLE_GUI_IDENTIFIER "com.trussc.${PROJECT_NAME}"
             MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
             MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
@@ -332,7 +342,7 @@ macro(trussc_app)
     elseif(APPLE)
         set_target_properties(${PROJECT_NAME} PROPERTIES
             MACOSX_BUNDLE TRUE
-            MACOSX_BUNDLE_BUNDLE_NAME "${PROJECT_NAME}"
+            MACOSX_BUNDLE_BUNDLE_NAME "${MACOSX_BUNDLE_DISPLAY_NAME}"
             MACOSX_BUNDLE_GUI_IDENTIFIER "com.trussc.${PROJECT_NAME}"
             MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
             MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"

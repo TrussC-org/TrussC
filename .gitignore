@@ -111,13 +111,15 @@ addons/*
 !addons/tcxWebSocket
 
 # =============================================================================
-# Project Generator (built binary + build artifacts in tools/)
+# trusscli / Project Generator (built binary + build artifacts in tools/)
 # =============================================================================
 
-# Exclude projectGenerator binaries and build output (only source is tracked)
-tools/projectGenerator.app
-tools/projectGenerator.exe
-tools/projectGenerator
+# Exclude trusscli binaries and build output (only source is tracked).
+# trusscli is the single binary that backs both the CLI and the GUI
+# ("TrussC Project Generator").
+tools/trusscli.app
+tools/trusscli.exe
+tools/trusscli
 tools/bin/
 tools/build/
 

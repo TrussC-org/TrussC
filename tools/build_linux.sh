@@ -1,8 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# TrussC Project Generator Build Script (Linux)
+# trusscli Build Script (Linux)
 # =============================================================================
-# Run this script to build projectGenerator
+# Run this script to build trusscli (TrussC Project Generator GUI + the
+# trusscli command-line tool — same binary, different entry points).
 # Usage: ./build_linux.sh
 # =============================================================================
 
@@ -11,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "=========================================="
-echo "  TrussC Project Generator Build Script"
+echo "  trusscli Build Script"
 echo "=========================================="
 echo ""
 
@@ -70,8 +71,8 @@ fi
 # Create symlink to binary in distribution folder
 echo ""
 echo "Creating symlink to distribution folder..."
-rm -f "$SCRIPT_DIR/projectGenerator"
-ln -s "$SOURCE_DIR/bin/projectGenerator" "$SCRIPT_DIR/projectGenerator"
+rm -f "$SCRIPT_DIR/trusscli"
+ln -s "$SOURCE_DIR/bin/trusscli" "$SCRIPT_DIR/trusscli"
 
 # Install desktop entry and icon (XDG user-level, no root required)
 echo ""
@@ -80,13 +81,13 @@ case "$INSTALL_DESKTOP" in
     [yY]|[yY][eE][sS])
         echo "Installing desktop entry..."
 
-        BIN_PATH="$SOURCE_DIR/bin/projectGenerator"
+        BIN_PATH="$SOURCE_DIR/bin/trusscli"
         ICON_SRC="$SOURCE_DIR/icon/generator.png"
 
         DESKTOP_DIR="$HOME/.local/share/applications"
         ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
-        DESKTOP_FILE="$DESKTOP_DIR/trussc-projectGenerator.desktop"
-        ICON_DEST="$ICON_DIR/trussc-projectGenerator.png"
+        DESKTOP_FILE="$DESKTOP_DIR/trusscli.desktop"
+        ICON_DEST="$ICON_DIR/trusscli.png"
 
         mkdir -p "$DESKTOP_DIR" "$ICON_DIR"
 
@@ -102,7 +103,7 @@ GenericName=TrussC Project Generator
 Comment=Generate TrussC projects
 Exec="$BIN_PATH" %F
 Path=$SOURCE_DIR/bin
-Icon=trussc-projectGenerator
+Icon=trusscli
 Terminal=false
 Categories=Development;IDE;
 StartupNotify=true
@@ -126,13 +127,13 @@ EOF
         ;;
 esac
 
-# Install symlink to /usr/local/bin so projectGenerator is on PATH
+# Install symlink to /usr/local/bin so trusscli is on PATH
 echo ""
-read -r -p "Add projectGenerator to PATH via /usr/local/bin? [y/N]: " INSTALL_PATH_LINK
+read -r -p "Add trusscli to PATH via /usr/local/bin? [y/N]: " INSTALL_PATH_LINK
 case "$INSTALL_PATH_LINK" in
     [yY]|[yY][eE][sS])
-        LINK_PATH="/usr/local/bin/projectGenerator"
-        BIN_TARGET="$SOURCE_DIR/bin/projectGenerator"
+        LINK_PATH="/usr/local/bin/trusscli"
+        BIN_TARGET="$SOURCE_DIR/bin/trusscli"
         if [ -w "/usr/local/bin" ]; then
             ln -sf "$BIN_TARGET" "$LINK_PATH"
         else
@@ -155,5 +156,5 @@ echo "=========================================="
 echo "  Build completed successfully!"
 echo "=========================================="
 echo ""
-echo "Launching projectGenerator..."
-"$SCRIPT_DIR/projectGenerator"
+echo "Launching TrussC Project Generator..."
+"$SCRIPT_DIR/trusscli"

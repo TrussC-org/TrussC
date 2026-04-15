@@ -65,8 +65,8 @@ static string autoDetectTcRoot() {
     }
 
     // 2. Try relative path from executable
-    // Typically projectGenerator lives in TRUSSC_ROOT/tools/bin/projectGenerator.app/Contents/MacOS/
-    // (Linux/Windows: TRUSSC_ROOT/tools/bin/projectGenerator[.exe])
+    // Typically trusscli lives in TRUSSC_ROOT/tools/bin/trusscli.app/Contents/MacOS/
+    // (Linux/Windows: TRUSSC_ROOT/tools/bin/trusscli[.exe])
     // We assume we are in TRUSSC_ROOT/... something
 
     // Search up to 5 parent directories
@@ -92,7 +92,7 @@ static string autoDetectTcRoot() {
 }
 
 void printHelp() {
-    cout << "Usage: projectGenerator [options]" << endl;
+    cout << "Usage: trusscli [options]" << endl;
     cout << "Options:" << endl;
     cout << "  --update <path>          Update existing project (path to project folder)" << endl;
     cout << "  --generate               Generate new project (requires --name and --dir)" << endl;

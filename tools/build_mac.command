@@ -1,8 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# TrussC Project Generator Build Script (macOS)
+# trusscli Build Script (macOS)
 # =============================================================================
-# Double-click this script to build projectGenerator
+# Double-click this script to build trusscli (TrussC Project Generator GUI +
+# the trusscli command-line tool — same binary, different entry points).
 #
 # NOTE: If macOS blocks this script, right-click and select "Open"
 # =============================================================================
@@ -12,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "=========================================="
-echo "  TrussC Project Generator Build Script"
+echo "  trusscli Build Script"
 echo "=========================================="
 echo ""
 
@@ -55,16 +56,16 @@ fi
 # Create symlink to binary in distribution folder
 echo ""
 echo "Creating symlink to distribution folder..."
-rm -rf "$SCRIPT_DIR/projectGenerator.app"
-ln -s "$SOURCE_DIR/bin/projectGenerator.app" "$SCRIPT_DIR/projectGenerator.app"
+rm -rf "$SCRIPT_DIR/trusscli.app"
+ln -s "$SOURCE_DIR/bin/trusscli.app" "$SCRIPT_DIR/trusscli.app"
 
-# Install symlink to /usr/local/bin so projectGenerator is on PATH
+# Install symlink to /usr/local/bin so trusscli is on PATH
 echo ""
-read -r -p "Add projectGenerator to PATH via /usr/local/bin? [y/N]: " INSTALL_PATH_LINK
+read -r -p "Add trusscli to PATH via /usr/local/bin? [y/N]: " INSTALL_PATH_LINK
 case "$INSTALL_PATH_LINK" in
     [yY]|[yY][eE][sS])
-        LINK_PATH="/usr/local/bin/projectGenerator"
-        BIN_TARGET="$SOURCE_DIR/bin/projectGenerator.app/Contents/MacOS/projectGenerator"
+        LINK_PATH="/usr/local/bin/trusscli"
+        BIN_TARGET="$SOURCE_DIR/bin/trusscli.app/Contents/MacOS/trusscli"
         # /usr/local/bin may not exist on a clean Apple Silicon install
         if [ ! -d "/usr/local/bin" ]; then
             echo "  /usr/local/bin does not exist — creating it (requires sudo)."
@@ -92,5 +93,5 @@ echo "=========================================="
 echo "  Build completed successfully!"
 echo "=========================================="
 echo ""
-echo "Launching projectGenerator..."
-open "$SCRIPT_DIR/projectGenerator.app"
+echo "Launching TrussC Project Generator..."
+open "$SCRIPT_DIR/trusscli.app"
