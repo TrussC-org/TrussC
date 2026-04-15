@@ -109,7 +109,7 @@ TrussC has undergone bold structural reforms to solve "complexity" and "performa
 
 | Item | openFrameworks | TrussC |
 |:-----|:---------------|:-------|
-| Location | `of/addons/ofxName/` | `trussc/addons/tcxName/` |
+| Location | `of/addons/ofxName/` | `addons/tcxName/` |
 | Source code | `src/` | `src/` |
 | Headers | `src/` (mixed) | `include/tcxName/` (separate) |
 | Examples | `example/` | `examples/` |

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(projectGenerator)
 
 # Default path (for TrussC repository)
-set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")
+set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../core")
 
 # Override with local config if exists
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.trussc")

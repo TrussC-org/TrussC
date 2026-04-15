@@ -80,7 +80,7 @@ Image processing libraries are particularly prone to vulnerabilities, so **check
 
 `sokol_app.h` has TrussC-specific modifications. When updating sokol, these changes must be reapplied.
 
-See: [`trussc/include/sokol/TRUSSC_MODIFICATIONS.md`](../trussc/include/sokol/TRUSSC_MODIFICATIONS.md)
+See: [`core/include/sokol/TRUSSC_MODIFICATIONS.md`](../core/include/sokol/TRUSSC_MODIFICATIONS.md)
 
 ---
 

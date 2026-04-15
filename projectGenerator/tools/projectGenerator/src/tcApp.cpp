@@ -41,7 +41,7 @@ void tcApp::setup() {
     loadConfig();
 
     // Validate TC_ROOT - clear if invalid (triggers auto-detection)
-    if (!tcRoot.empty() && !fs::exists(tcRoot + "/trussc/cmake/trussc_app.cmake")) {
+    if (!tcRoot.empty() && !fs::exists(tcRoot + "/core/cmake/trussc_app.cmake")) {
         logNotice("tcApp") << "TC_ROOT is invalid, clearing: " << tcRoot;
         tcRoot.clear();
         tcRootBuf[0] = '\0';
@@ -63,7 +63,7 @@ void tcApp::setup() {
 
         // Search up to 5 parent directories
         for (int i = 0; i < 5 && searchPath.has_parent_path(); i++) {
-            fs::path checkPath = searchPath / "trussc" / "cmake" / "trussc_app.cmake";
+            fs::path checkPath = searchPath / "core" / "cmake" / "trussc_app.cmake";
             if (fs::exists(checkPath)) {
                 tcRoot = searchPath.string();
                 strncpy(tcRootBuf, tcRoot.c_str(), sizeof(tcRootBuf) - 1);
@@ -224,7 +224,7 @@ void tcApp::draw() {
         if (ImGui::Button("OK", ImVec2(120, 30))) {
             tcRoot = tcRootBuf;
             // Verify tc_vX.Y.Z folder (check if CMakeLists.txt exists)
-            if (!tcRoot.empty() && fs::exists(tcRoot + "/trussc/cmake/trussc_app.cmake")) {
+            if (!tcRoot.empty() && fs::exists(tcRoot + "/core/cmake/trussc_app.cmake")) {
                 showSetupDialog = false;
                 saveConfig();
                 scanAddons();
@@ -701,8 +701,8 @@ void tcApp::importProject(const string& path) {
         string content = buffer.str();
 
         // Parse TRUSSC_DIR to extract TC_ROOT
-        // Format: set(TRUSSC_DIR "/path/to/tc_root/trussc") or
-        //         set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../trussc")
+        // Format: set(TRUSSC_DIR "/path/to/tc_root/core") or
+        //         set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../core")
         size_t pos = content.find("set(TRUSSC_DIR \"");
         if (pos != string::npos) {
             size_t start = pos + 16;  // length of 'set(TRUSSC_DIR "'
@@ -719,15 +719,15 @@ void tcApp::importProject(const string& path) {
                     fs::path trusscPath = fs::weakly_canonical(fs::path(path) / relativePath);
                     importedTcRoot = trusscPath.parent_path().string();
                 } else {
-                    // Absolute path: remove /trussc suffix to get TC_ROOT
+                    // Absolute path: remove /core suffix to get TC_ROOT
                     importedTcRoot = trusscDir;
-                    if (trusscDir.size() > 7 && trusscDir.substr(trusscDir.size() - 7) == "/trussc") {
-                        importedTcRoot = trusscDir.substr(0, trusscDir.size() - 7);
+                    if (trusscDir.size() > 5 && trusscDir.substr(trusscDir.size() - 5) == "/core") {
+                        importedTcRoot = trusscDir.substr(0, trusscDir.size() - 5);
                     }
                 }
 
                 // Update tcRoot if valid path
-                if (!importedTcRoot.empty() && fs::exists(importedTcRoot + "/trussc/cmake/trussc_app.cmake")) {
+                if (!importedTcRoot.empty() && fs::exists(importedTcRoot + "/core/cmake/trussc_app.cmake")) {
                     tcRoot = importedTcRoot;
                     strncpy(tcRootBuf, tcRoot.c_str(), sizeof(tcRootBuf) - 1);
                     saveConfig();

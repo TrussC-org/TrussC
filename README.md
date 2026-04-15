@@ -100,13 +100,13 @@ See also: [The Tau Manifesto](https://tauday.com/tau-manifesto)
 
 ## Dependencies
 
-sokol, stb, miniaudio, etc. are all bundled in `trussc/include/`. Dear ImGui is available as the `tcxImGui` addon.
+sokol, stb, miniaudio, etc. are all bundled in `core/include/`. Dear ImGui is available as the `tcxImGui` addon.
 See [LICENSE.md](docs/LICENSE.md) for details.
 
 ## Directory Structure
 
 ```
-trussc/include/
+core/include/
 ├── TrussC.h          # Main header (include this)
 ├── tcBaseApp.h       # App base class
 ├── tc/               # Feature headers

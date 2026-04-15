@@ -124,7 +124,7 @@ projectGenerator/projectGenerator
 # =============================================================================
 
 # Tools like sokol-shdc are auto-downloaded on first build
-trussc/tools/
+core/tools/
 docs/scripts/node_modules/
 
 # =============================================================================
@@ -144,4 +144,4 @@ addons/CMakeLists.txt
 # =============================================================================
 # Auto-generated Shader Headers (sokol-shdc output)
 # =============================================================================
-trussc/include/tc/gpu/shaders/lut.glsl.h
+core/include/tc/gpu/shaders/lut.glsl.h

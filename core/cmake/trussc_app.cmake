@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Usage:
-#   set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")
+#   set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../core")
 #   include(${TRUSSC_DIR}/cmake/trussc_app.cmake)
 #   trussc_app()
 #
@@ -152,12 +152,12 @@ macro(trussc_app)
         set(_TC_SOKOL_SHDC_URL "${_TC_SOKOL_SHDC_BASE_URL}/${_TC_SOKOL_SHDC_DIR}/sokol-shdc${_TC_SOKOL_SHDC_EXT}")
         set(_TC_SOKOL_SHDC_NAME "sokol-shdc${_TC_SOKOL_SHDC_EXT}")
 
-        set(_TC_SOKOL_SHDC "${TC_ROOT}/trussc/tools/sokol-shdc/${_TC_SOKOL_SHDC_NAME}")
+        set(_TC_SOKOL_SHDC "${TC_ROOT}/core/tools/sokol-shdc/${_TC_SOKOL_SHDC_NAME}")
 
         # Download sokol-shdc if not present
         if(NOT EXISTS "${_TC_SOKOL_SHDC}")
             message(STATUS "[${PROJECT_NAME}] Downloading sokol-shdc...")
-            file(MAKE_DIRECTORY "${TC_ROOT}/trussc/tools/sokol-shdc")
+            file(MAKE_DIRECTORY "${TC_ROOT}/core/tools/sokol-shdc")
             file(DOWNLOAD "${_TC_SOKOL_SHDC_URL}" "${_TC_SOKOL_SHDC}"
                 SHOW_PROGRESS
                 STATUS _TC_DOWNLOAD_STATUS)
@@ -261,7 +261,7 @@ macro(trussc_app)
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
         )
         # Custom shell HTML path
-        set(_TC_SHELL_FILE "${TC_ROOT}/trussc/platform/web/shell.html")
+        set(_TC_SHELL_FILE "${TC_ROOT}/core/platform/web/shell.html")
         # Common Emscripten link options
         target_link_options(${PROJECT_NAME} PRIVATE
             -sALLOW_MEMORY_GROWTH=1
@@ -271,7 +271,7 @@ macro(trussc_app)
             --shell-file=${_TC_SHELL_FILE}
         )
         # Backend-specific link options
-        # TC_WEB_BACKEND is set in trussc/CMakeLists.txt (defaults to WGPU)
+        # TC_WEB_BACKEND is set in core/CMakeLists.txt (defaults to WGPU)
         if(NOT DEFINED TC_WEB_BACKEND)
             set(TC_WEB_BACKEND "WGPU")
         endif()

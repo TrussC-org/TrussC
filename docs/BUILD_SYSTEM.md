@@ -23,7 +23,7 @@ The **Project Generator** is the core tool for managing TrussC projects. It hand
 - Configuring Web (WASM) builds
 
 ### GUI Mode
-Run the `projectGenerator` app (found in `trussc/projectGenerator/`).
+Run the `projectGenerator` app (found in `projectGenerator/`).
 - **Create:** Select a name and path, choose addons, and click "Generate".
 - **Update:** Use "Import" to select an existing project folder, modify settings, and click "Update".
 
@@ -228,7 +228,7 @@ If you need custom build logic, add a `CMakeLists.txt` in the addon root. It wil
 
 ## 5. Under the Hood
 
-The `trussc_app()` CMake macro (in `trussc/cmake/trussc_app.cmake`) handles:
+The `trussc_app()` CMake macro (in `core/cmake/trussc_app.cmake`) handles:
 *   Recursively collecting source files from `src/`
 *   Setting C++20 standard
 *   Linking `tc::TrussC` core library

@@ -14,7 +14,7 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# TC_ROOT（trussc と addons を含むルートディレクトリ）
+# TC_ROOT（core と addons を含むルートディレクトリ）
 get_filename_component(TC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 set(TC_ROOT "${TC_ROOT}" CACHE PATH "TrussC root directory" FORCE)
 

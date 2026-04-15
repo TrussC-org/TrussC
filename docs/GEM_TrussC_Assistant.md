@@ -784,7 +784,7 @@ void tcApp::setup() {
 ### Folder Structure
 ```
 TrussC/
-├── trussc/              # Core library
+├── core/                # Core library
 ├── addons/              # Optional addons (tcxBox2d, tcxOsc, etc.)
 ├── examples/            # Sample projects
 ├── docs/                # Documentation
