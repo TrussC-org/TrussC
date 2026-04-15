@@ -42,6 +42,10 @@ std::vector<uint8_t> VideoPlayer::getAudioDataPlatform() const { return {}; }
 int VideoPlayer::getAudioSampleRatePlatform() const { return 0; }
 int VideoPlayer::getAudioChannelsPlatform() const { return 0; }
 
+// Hardware acceleration info — Android VideoPlayer is currently a stub.
+bool VideoPlayer::isUsingHwAccelPlatform() const { return false; }
+std::string VideoPlayer::getHwAccelNamePlatform() const { return "none"; }
+
 bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
                                        float timeSec, float* outDuration) {
     (void)path; (void)outPixels; (void)timeSec; (void)outDuration;
