@@ -190,6 +190,22 @@ public:
     virtual int getAudioChannels() const { return 0; }
 
     // =========================================================================
+    // Hardware acceleration info
+    // =========================================================================
+
+    /// Returns true if hardware-accelerated decoding is currently active.
+    /// Concrete players that use HW decode should override this.
+    virtual bool isUsingHwAccel() const { return false; }
+
+    /// Returns the name of the active decode backend.
+    /// Possible values on the standard VideoPlayer:
+    ///   - macOS:   "videotoolbox", "software"
+    ///   - Windows: "mediafoundation", "software"
+    ///   - Linux:   "vaapi", "v4l2m2m", "drm", "cuda", "software"
+    /// Returns "none" when no video is loaded or the player has no HW path.
+    virtual std::string getHwAccelName() const { return "none"; }
+
+    // =========================================================================
     // HasTexture implementation
     // =========================================================================
 
