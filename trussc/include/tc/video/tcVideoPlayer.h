@@ -200,6 +200,13 @@ public:
     int getAudioSampleRate() const override { return getAudioSampleRatePlatform(); }
     int getAudioChannels() const override { return getAudioChannelsPlatform(); }
 
+    // =========================================================================
+    // Hardware acceleration info
+    // =========================================================================
+
+    bool isUsingHwAccel() const override { return isUsingHwAccelPlatform(); }
+    std::string getHwAccelName() const override { return getHwAccelNamePlatform(); }
+
 protected:
     // -------------------------------------------------------------------------
     // Implementation methods
@@ -320,6 +327,10 @@ private:
     std::vector<uint8_t> getAudioDataPlatform() const;
     int getAudioSampleRatePlatform() const;
     int getAudioChannelsPlatform() const;
+
+    // Hardware acceleration info
+    bool isUsingHwAccelPlatform() const;
+    std::string getHwAccelNamePlatform() const;
 
     // =========================================================================
     // Static utility — frame extraction (thread-safe, no GPU required)

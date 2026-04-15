@@ -742,6 +742,17 @@ int VideoPlayer::getAudioChannelsPlatform() const {
     return 0;
 }
 
+// Hardware acceleration info
+// Current Linux implementation is software-only; returns "software" when
+// a video is loaded. Will be replaced when tcxHwVideo is integrated.
+bool VideoPlayer::isUsingHwAccelPlatform() const {
+    return false;
+}
+
+std::string VideoPlayer::getHwAccelNamePlatform() const {
+    return platformHandle_ ? "software" : "none";
+}
+
 bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
                                        float timeSec, float* outDuration) {
     // TODO: implement frame extraction on Linux
