@@ -462,7 +462,10 @@ void tcApp::draw() {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // Generate/Update button
+    // GUI scope: only Generate / Update for now. The trusscli CLI also exposes
+    // add / remove / info / build / run subcommands; if any of those benefit
+    // from a visual UI later, a Build / Run button (Xcode-style ▶) could live
+    // here too — see issue #24 for the design discussion.
     if (isGenerating) {
         // Generating: pulsing button
         float t = getElapsedTime();

@@ -11,29 +11,28 @@
 using namespace std;
 namespace fs = std::filesystem;
 
-// Helper to scan available addons
+// =============================================================================
+// Helpers
+// =============================================================================
+
 static void scanAddons(const string& tcRoot, vector<string>& addons) {
     addons.clear();
     if (tcRoot.empty()) return;
-
     string addonsPath = tcRoot + "/addons";
     if (!fs::exists(addonsPath)) return;
-
     for (const auto& entry : fs::directory_iterator(addonsPath)) {
         if (entry.is_directory()) {
             string name = entry.path().filename().string();
-            if (name.substr(0, 3) == "tcx") {
-                addons.push_back(name);
-            }
+            if (name.substr(0, 3) == "tcx") addons.push_back(name);
         }
     }
     sort(addons.begin(), addons.end());
 }
 
-// Helper to parse existing addons.make
-static void parseAddonsMake(const string& projectPath, const vector<string>& availableAddons, vector<int>& addonSelected) {
+static void parseAddonsMake(const string& projectPath,
+                            const vector<string>& availableAddons,
+                            vector<int>& addonSelected) {
     addonSelected.assign(availableAddons.size(), 0);
-
     string addonsMakePath = projectPath + "/addons.make";
     if (!fs::exists(addonsMakePath)) return;
 
@@ -43,248 +42,461 @@ static void parseAddonsMake(const string& projectPath, const vector<string>& ava
         size_t start = line.find_first_not_of(" \t");
         if (start == string::npos) continue;
         size_t end = line.find_last_not_of(" \t\r\n");
-        string addonName = line.substr(start, end - start + 1);
-
-        if (addonName.empty() || addonName[0] == '#') continue;
-
-        for (size_t i = 0; i < availableAddons.size(); i++) {
-            if (availableAddons[i] == addonName) {
-                addonSelected[i] = 1;
-                break;
-            }
+        string name = line.substr(start, end - start + 1);
+        if (name.empty() || name[0] == '#') continue;
+        for (size_t i = 0; i < availableAddons.size(); ++i) {
+            if (availableAddons[i] == name) { addonSelected[i] = 1; break; }
         }
     }
 }
 
-// Helper to try auto-detect TC_ROOT
 static string autoDetectTcRoot() {
-    // 1. Try environment variable
     const char* envRoot = std::getenv("TRUSSC_DIR");
     if (envRoot && fs::exists(string(envRoot) + "/core/cmake/trussc_app.cmake")) {
         return string(envRoot);
     }
 
-    // 2. Try relative path from executable
+    // Walk up from the executable looking for core/cmake/trussc_app.cmake.
     // Typically trusscli lives in TRUSSC_ROOT/tools/bin/trusscli.app/Contents/MacOS/
     // (Linux/Windows: TRUSSC_ROOT/tools/bin/trusscli[.exe])
-    // We assume we are in TRUSSC_ROOT/... something
-
-    // Search up to 5 parent directories
-    fs::path exePath = getExecutablePath();
-    fs::path searchPath = exePath.parent_path();
-
+    fs::path searchPath = fs::path(getExecutablePath()).parent_path();
     #ifdef __APPLE__
-    // Go up 3 levels: MacOS -> Contents -> .app -> parent
-    for (int i = 0; i < 3 && searchPath.has_parent_path(); i++) {
+    // Climb out of MacOS -> Contents -> .app -> parent dir
+    for (int i = 0; i < 3 && searchPath.has_parent_path(); ++i) {
         searchPath = searchPath.parent_path();
     }
     #endif
-
-    for (int i = 0; i < 5 && searchPath.has_parent_path(); i++) {
-        fs::path checkPath = searchPath / "core" / "cmake" / "trussc_app.cmake";
-        if (fs::exists(checkPath)) {
+    for (int i = 0; i < 5 && searchPath.has_parent_path(); ++i) {
+        if (fs::exists(searchPath / "core" / "cmake" / "trussc_app.cmake")) {
             return searchPath.string();
         }
         searchPath = searchPath.parent_path();
     }
-
     return "";
 }
 
-void printHelp() {
-    cout << "Usage: trusscli [options]" << endl;
-    cout << "Options:" << endl;
-    cout << "  --update <path>          Update existing project (path to project folder)" << endl;
-    cout << "  --generate               Generate new project (requires --name and --dir)" << endl;
-    cout << "  --name <name>            Project name (for --generate)" << endl;
-    cout << "  --dir <path>             Project parent directory (for --generate)" << endl;
-    cout << "  --tc-root <path>         Path to TrussC root directory" << endl;
-    cout << "  --web                    Enable Web build (Emscripten)" << endl;
-    cout << "  --android                Enable Android build (requires ANDROID_HOME)" << endl;
-    cout << "  --ios                    Enable iOS build (macOS only, generates Xcode project)" << endl;
-    cout << "  --ide <type>             IDE type (vscode, cursor, xcode, vs, cmake)" << endl;
-    cout << "  --help                   Show this help" << endl;
+// Walk up from `startPath` (or CWD if empty) looking for a TrussC project
+// marker (CMakeLists.txt + addons.make in the same dir). Returns absolute
+// path to the project root, or empty string if none found.
+static string autoDetectProjectRoot(const string& startPath) {
+    fs::path searchPath = fs::absolute(
+        startPath.empty() ? fs::current_path() : fs::path(startPath));
+    for (int i = 0; i < 10; ++i) {
+        if (fs::exists(searchPath / "CMakeLists.txt") &&
+            fs::exists(searchPath / "addons.make")) {
+            return searchPath.string();
+        }
+        if (!searchPath.has_parent_path() ||
+            searchPath == searchPath.parent_path()) break;
+        searchPath = searchPath.parent_path();
+    }
+    return "";
 }
+
+// Map IDE name string to enum. Returns true on success.
+static bool parseIdeType(const string& s, IdeType& out) {
+    if      (s == "vscode") out = IdeType::VSCode;
+    else if (s == "cursor") out = IdeType::Cursor;
+    else if (s == "xcode")  out = IdeType::Xcode;
+    else if (s == "vs")     out = IdeType::VisualStudio;
+    else if (s == "cmake")  out = IdeType::CMakeOnly;
+    else return false;
+    return true;
+}
+
+// Parse a -a / --addon / --addons value: accepts a single name or a comma-list.
+// Catches the common "stray space after comma" mistake (which the shell has
+// already split into two argv elements by the time we see it: the previous
+// arg ends with ',' and the next arg looks like a bare name).
+static bool parseAddonValue(const string& value,
+                            vector<string>& out,
+                            string& errMsg) {
+    if (value.empty()) {
+        errMsg = "addon flag requires a value";
+        return false;
+    }
+    if (value.back() == ',') {
+        errMsg = "trailing comma in addon value '" + value +
+                 "' — looks like a stray space after a comma. "
+                 "Write 'tcxOsc,tcxIME' (no space), or use repeat form '-a tcxOsc -a tcxIME'.";
+        return false;
+    }
+    string current;
+    for (char c : value) {
+        if (c == ',') {
+            if (current.empty()) {
+                errMsg = "empty element in addon list '" + value + "'";
+                return false;
+            }
+            out.push_back(current);
+            current.clear();
+        } else {
+            current += c;
+        }
+    }
+    if (!current.empty()) out.push_back(current);
+    return true;
+}
+
+// =============================================================================
+// Subcommand: new
+// =============================================================================
+
+static void printNewHelp() {
+    cout << "Usage: trusscli new <path> [options]\n"
+         << "\n"
+         << "Create a new TrussC project at <path>. The project name is the last\n"
+         << "path component (e.g. `trusscli new ./apps/myApp` creates ./apps/myApp\n"
+         << "with name 'myApp').\n"
+         << "\n"
+         << "Options:\n"
+         << "      --web                  Enable Web (WebAssembly) build\n"
+         << "      --android              Enable Android build\n"
+         << "      --ios                  Enable iOS build\n"
+         << "      --ide <type>           IDE: vscode, cursor, xcode, vs, cmake (default: vscode)\n"
+         << "  -a, --addon <name>         Add an addon. Repeatable, comma-list also OK\n"
+         << "      --addons <list>        Same as -a, alternative spelling\n"
+         << "      --tc-root <path>       Path to TrussC root directory (auto-detected by default)\n"
+         << "  -h, --help                 Show this help\n";
+}
+
+static int cmdNew(const vector<string>& args) {
+    string positional;
+    bool web = false, android = false, ios = false;
+    string ideStr = "vscode";
+    string tcRoot;
+    vector<string> requestedAddons;
+
+    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << opt << " requires a value\n";
+            return false;
+        }
+        out = args[++i];
+        return true;
+    };
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printNewHelp(); return 0; }
+        else if (a == "--web") web = true;
+        else if (a == "--android") android = true;
+        else if (a == "--ios") ios = true;
+        else if (a == "--ide") {
+            if (!needValue(i, a, ideStr)) return 1;
+        }
+        else if (a == "-a" || a == "--addon" || a == "--addons") {
+            string val;
+            if (!needValue(i, a, val)) return 1;
+            string err;
+            if (!parseAddonValue(val, requestedAddons, err)) {
+                cerr << "Error: " << err << "\n";
+                return 1;
+            }
+        }
+        else if (a == "--tc-root") {
+            if (!needValue(i, a, tcRoot)) return 1;
+        }
+        else if (!a.empty() && a[0] == '-') {
+            cerr << "Error: unknown option '" << a << "'\n";
+            cerr << "Run 'trusscli new --help' for usage.\n";
+            return 1;
+        }
+        else {
+            if (!positional.empty()) {
+                cerr << "Error: 'new' takes a single path argument "
+                     << "(got '" << positional << "' and '" << a << "')\n";
+                return 1;
+            }
+            positional = a;
+        }
+    }
+
+    if (positional.empty()) {
+        cerr << "Error: 'new' requires a project path\n";
+        cerr << "Usage: trusscli new <path> [options]\n";
+        return 1;
+    }
+
+    if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
+    if (tcRoot.empty()) {
+        cerr << "Error: could not detect TrussC root. "
+             << "Use --tc-root <path> or set TRUSSC_DIR.\n";
+        return 1;
+    }
+
+    // Derive name + parent dir from the positional path
+    fs::path projPath = fs::absolute(positional);
+    string projectName = projPath.filename().string();
+    string projectDir = projPath.parent_path().string();
+    if (projectName.empty()) {
+        cerr << "Error: could not derive project name from path '" << positional << "'\n";
+        return 1;
+    }
+    if (fs::exists(projPath)) {
+        cerr << "Error: '" << projPath.string() << "' already exists\n";
+        return 1;
+    }
+
+    // Scan available addons and resolve the requested ones
+    vector<string> availableAddons;
+    scanAddons(tcRoot, availableAddons);
+    vector<int> addonSelected(availableAddons.size(), 0);
+    for (const string& want : requestedAddons) {
+        bool found = false;
+        for (size_t i = 0; i < availableAddons.size(); ++i) {
+            if (availableAddons[i] == want) {
+                addonSelected[i] = 1;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            cerr << "Error: addon '" << want << "' not found in " << tcRoot << "/addons/\n";
+            cerr << "Available addons:\n";
+            for (const string& aa : availableAddons) cerr << "  " << aa << "\n";
+            return 1;
+        }
+    }
+
+    ProjectSettings settings;
+    settings.tcRoot = tcRoot;
+    settings.projectName = projectName;
+    settings.projectDir = projectDir;
+    settings.addons = availableAddons;
+    settings.addonSelected = addonSelected;
+    settings.generateWebBuild = web;
+    settings.generateAndroidBuild = android;
+    settings.generateIosBuild = ios;
+    settings.detectBuildEnvironment();
+
+    if (!parseIdeType(ideStr, settings.ideType)) {
+        cerr << "Error: unknown IDE type '" << ideStr
+             << "'. Valid: vscode, cursor, xcode, vs, cmake\n";
+        return 1;
+    }
+
+    settings.templatePath = tcRoot + "/examples/templates/emptyExample";
+    if (!fs::exists(settings.templatePath)) {
+        cerr << "Error: template not found at " << settings.templatePath << "\n";
+        return 1;
+    }
+
+    ProjectGenerator gen(settings);
+    gen.setLogCallback([](const string& msg) { cout << msg << endl; });
+    string err = gen.generate();
+    if (!err.empty()) {
+        cerr << "Error: " << err << "\n";
+        return 1;
+    }
+    cout << "Project created: " << projPath.string() << "\n";
+    return 0;
+}
+
+// =============================================================================
+// Subcommand: update
+// =============================================================================
+
+static void printUpdateHelp() {
+    cout << "Usage: trusscli update [options]\n"
+         << "\n"
+         << "Regenerate build files (CMakeLists.txt, CMakePresets.json, IDE files)\n"
+         << "for the TrussC project in the current directory. The addon list is\n"
+         << "read from the existing addons.make.\n"
+         << "\n"
+         << "Options:\n"
+         << "  -p, --path <path>          Operate on a specific project path\n"
+         << "      --web                  Enable Web build\n"
+         << "      --android              Enable Android build\n"
+         << "      --ios                  Enable iOS build\n"
+         << "      --ide <type>           IDE: vscode, cursor, xcode, vs, cmake\n"
+         << "      --tc-root <path>       Path to TrussC root directory (auto-detected by default)\n"
+         << "  -h, --help                 Show this help\n";
+}
+
+static int cmdUpdate(const vector<string>& args) {
+    string projectPath;
+    bool web = false, android = false, ios = false;
+    string ideStr = "vscode";
+    string tcRoot;
+
+    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << opt << " requires a value\n";
+            return false;
+        }
+        out = args[++i];
+        return true;
+    };
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printUpdateHelp(); return 0; }
+        else if (a == "-p" || a == "--path") {
+            if (!needValue(i, a, projectPath)) return 1;
+        }
+        else if (a == "--web") web = true;
+        else if (a == "--android") android = true;
+        else if (a == "--ios") ios = true;
+        else if (a == "--ide") {
+            if (!needValue(i, a, ideStr)) return 1;
+        }
+        else if (a == "--tc-root") {
+            if (!needValue(i, a, tcRoot)) return 1;
+        }
+        else {
+            cerr << "Error: unknown argument '" << a << "'\n";
+            cerr << "Run 'trusscli update --help' for usage.\n";
+            return 1;
+        }
+    }
+
+    if (projectPath.empty()) {
+        projectPath = autoDetectProjectRoot("");
+        if (projectPath.empty()) {
+            cerr << "Error: not inside a TrussC project (no CMakeLists.txt + "
+                 << "addons.make found in CWD or any parent).\n";
+            cerr << "Use 'trusscli update -p <path>' or run from inside a project.\n";
+            return 1;
+        }
+    } else if (!fs::is_directory(projectPath)) {
+        cerr << "Error: project path '" << projectPath << "' does not exist\n";
+        return 1;
+    }
+
+    if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
+    if (tcRoot.empty()) {
+        cerr << "Error: could not detect TrussC root. "
+             << "Use --tc-root <path> or set TRUSSC_DIR.\n";
+        return 1;
+    }
+
+    vector<string> availableAddons;
+    scanAddons(tcRoot, availableAddons);
+
+    ProjectSettings settings;
+    settings.tcRoot = tcRoot;
+    settings.projectName = fs::canonical(projectPath).filename().string();
+    settings.addons = availableAddons;
+    parseAddonsMake(projectPath, availableAddons, settings.addonSelected);
+    settings.generateWebBuild = web;
+    settings.generateAndroidBuild = android;
+    settings.generateIosBuild = ios;
+    settings.detectBuildEnvironment();
+
+    // TODO: target flags (--web/--android/--ios) and --ide aren't persisted in
+    // the project — running update without them resets to defaults. Persist
+    // them in CMakePresets.json or a sidecar config so subsequent updates
+    // remember the previous selection.
+    if (!parseIdeType(ideStr, settings.ideType)) {
+        cerr << "Error: unknown IDE type '" << ideStr
+             << "'. Valid: vscode, cursor, xcode, vs, cmake\n";
+        return 1;
+    }
+
+    settings.templatePath = tcRoot + "/examples/templates/emptyExample";
+
+    ProjectGenerator gen(settings);
+    gen.setLogCallback([](const string& msg) { cout << msg << endl; });
+    string err = gen.update(projectPath);
+    if (!err.empty()) {
+        cerr << "Error: " << err << "\n";
+        return 1;
+    }
+    cout << "Project updated: " << projectPath << "\n";
+    return 0;
+}
+
+// =============================================================================
+// Stub for unimplemented commands
+// =============================================================================
+
+static int cmdNotImplemented(const string& cmdName) {
+    cerr << "Error: '" << cmdName << "' is not yet implemented.\n"
+         << "See https://github.com/TrussC-org/TrussC/issues/24 for the design.\n";
+    return 1;
+}
+
+// =============================================================================
+// Top-level help
+// =============================================================================
+
+static void printTopHelp() {
+    cout << "trusscli — TrussC project tool\n"
+         << "\n"
+         << "Usage:\n"
+         << "  trusscli <command> [options]\n"
+         << "  trusscli                       Launch the GUI (TrussC Project Generator)\n"
+         << "\n"
+         << "Commands:\n"
+         << "  new <path>                     Create a new project at <path>\n"
+         << "  update                         Regenerate build files for the project in CWD\n"
+         << "  add <addon>...                 Add addons to the project          [not yet implemented]\n"
+         << "  remove <addon>                 Remove an addon                    [not yet implemented]\n"
+         << "  info                           Show project / framework info      [not yet implemented]\n"
+         << "  build                          Build the project                  [not yet implemented]\n"
+         << "  run                            Build and launch the project       [not yet implemented]\n"
+         << "\n"
+         << "Common options (per subcommand):\n"
+         << "  -p, --path <path>              Operate on a specific project path\n"
+         << "      --tc-root <path>           Path to TrussC root directory\n"
+         << "  -h, --help                     Show command-specific help\n"
+         << "\n"
+         << "Examples:\n"
+         << "  trusscli new myApp                        Create ./myApp\n"
+         << "  trusscli new ./apps/myApp --web           Create with Web build enabled\n"
+         << "  trusscli new myApp -a tcxOsc -a tcxIME    With addons (repeat form)\n"
+         << "  trusscli new myApp -a tcxOsc,tcxIME       With addons (comma form)\n"
+         << "  trusscli update                           Regenerate the project in CWD\n"
+         << "  trusscli update -p ./apps/myApp           Regenerate a specific project\n"
+         << "\n"
+         << "Run 'trusscli <command> --help' for command-specific help.\n";
+}
+
+// =============================================================================
+// main: subcommand dispatch
+// =============================================================================
 
 int main(int argc, char* argv[]) {
     vector<string> args(argv + 1, argv + argc);
 
-    bool cliMode = false;
-    bool updateMode = false;
-    bool generateMode = false;
-    string targetPath; // For update: project folder. For generate: project PARENT folder (from --dir)
-    string projectName;
-    string tcRoot;
-    bool web = false;
-    bool android = false;
-    bool ios = false;
-    string ideStr = "vscode";
-
-    // Helper to check if next arg is a valid value (not another flag)
-    auto getNextArg = [&](size_t i) -> string {
-        if (i + 1 < args.size() && !args[i + 1].empty() && args[i + 1][0] != '-') {
-            return args[i + 1];
+    // No args → launch the GUI (TrussC Project Generator)
+    if (args.empty()) {
+        #ifdef __linux__
+        const char* display = std::getenv("DISPLAY");
+        const char* wayland = std::getenv("WAYLAND_DISPLAY");
+        if ((!display || display[0] == '\0') &&
+            (!wayland || wayland[0] == '\0')) {
+            cerr << "Error: no display server found "
+                 << "(DISPLAY and WAYLAND_DISPLAY are unset).\n"
+                 << "Run 'trusscli --help' for CLI usage.\n";
+            return 1;
         }
-        return "";
-    };
-
-    // Parse arguments (two passes: flags first, then positional)
-    for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--update") {
-            cliMode = true;
-            updateMode = true;
-            string next = getNextArg(i);
-            if (!next.empty()) {
-                targetPath = next;
-                ++i;
-            }
-        } else if (args[i] == "--generate") {
-            cliMode = true;
-            generateMode = true;
-        } else if (args[i] == "--name") {
-            string next = getNextArg(i);
-            if (!next.empty()) {
-                projectName = next;
-                ++i;
-            }
-        } else if (args[i] == "--dir") {
-            string next = getNextArg(i);
-            if (!next.empty()) {
-                targetPath = next;
-                ++i;
-            }
-        } else if (args[i] == "--tc-root") {
-            string next = getNextArg(i);
-            if (!next.empty()) {
-                tcRoot = next;
-                ++i;
-            }
-        } else if (args[i] == "--web") {
-            web = true;
-        } else if (args[i] == "--android") {
-            android = true;
-        } else if (args[i] == "--ios") {
-            ios = true;
-        } else if (args[i] == "--ide") {
-            string next = getNextArg(i);
-            if (!next.empty()) {
-                ideStr = next;
-                ++i;
-            }
-        } else if (args[i] == "--help") {
-            printHelp();
-            return 0;
-        } else if (args[i][0] != '-') {
-            // Positional argument - use as path if not already set
-            if (targetPath.empty()) {
-                targetPath = args[i];
-            }
-        }
+        #endif
+        WindowSettings settings;
+        settings.title = "TrussC Project Generator";
+        settings.width = 500;
+        settings.height = 600;
+        return runApp<tcApp>(settings);
     }
 
-    if (cliMode) {
-        // Detect TC_ROOT
-        if (tcRoot.empty()) {
-            tcRoot = autoDetectTcRoot();
-        }
-        if (tcRoot.empty()) {
-            cerr << "Error: Could not detect TrussC root. Please use --tc-root <path> or set TRUSSC_DIR env var." << endl;
-            return 1;
-        }
-        
-        // Scan addons
-        vector<string> availableAddons;
-        scanAddons(tcRoot, availableAddons);
-        
-        ProjectSettings settings;
-        settings.tcRoot = tcRoot;
-        settings.generateWebBuild = web;
-        settings.generateAndroidBuild = android;
-        settings.generateIosBuild = ios;
-        settings.detectBuildEnvironment();
-        
-        // Parse IDE type
-        if (ideStr == "vscode") settings.ideType = IdeType::VSCode;
-        else if (ideStr == "cursor") settings.ideType = IdeType::Cursor;
-        else if (ideStr == "xcode") settings.ideType = IdeType::Xcode;
-        else if (ideStr == "vs") settings.ideType = IdeType::VisualStudio;
-        else if (ideStr == "cmake") settings.ideType = IdeType::CMakeOnly;
-        else {
-            cerr << "Warning: Unknown IDE type '" << ideStr << "', using VSCode." << endl;
-            settings.ideType = IdeType::VSCode;
-        }
-        
-        // Set template path
-        settings.templatePath = tcRoot + "/examples/templates/emptyExample";
-        if (!fs::exists(settings.templatePath)) {
-            cerr << "Error: Template not found at " << settings.templatePath << endl;
-            return 1;
-        }
-
-        if (updateMode) {
-            if (!fs::is_directory(targetPath)) {
-                cerr << "Error: Project path '" << targetPath << "' does not exist." << endl;
-                return 1;
-            }
-
-            // Derive project name from folder name
-            settings.projectName = fs::canonical(targetPath).filename().string();
-
-            // Parse existing addons.make
-            parseAddonsMake(targetPath, availableAddons, settings.addonSelected);
-            settings.addons = availableAddons; // Pass all available, selection is in addonSelected
-            
-            // Re-create generator with updated settings (addons)
-            ProjectGenerator updateGen(settings);
-            updateGen.setLogCallback([](const string& msg) { cout << msg << endl; });
-            
-            string result = updateGen.update(targetPath);
-            if (!result.empty()) {
-                cerr << "Update failed: " << result << endl;
-                return 1;
-            }
-            cout << "Project updated successfully: " << targetPath << endl;
-            
-        } else if (generateMode) {
-            if (projectName.empty() || targetPath.empty()) {
-                cerr << "Error: --name and --dir are required for --generate" << endl;
-                return 1;
-            }
-            
-            settings.projectName = projectName;
-            settings.projectDir = targetPath;
-            settings.addons = availableAddons;
-            settings.addonSelected.assign(availableAddons.size(), 0); // No addons by default for CLI generate
-            
-            ProjectGenerator genGen(settings);
-            genGen.setLogCallback([](const string& msg) { cout << msg << endl; });
-            
-            string result = genGen.generate();
-            if (!result.empty()) {
-                cerr << "Generation failed: " << result << endl;
-                return 1;
-            }
-            cout << "Project generated successfully: " << targetPath << "/" << projectName << endl;
-        }
-        
+    // Top-level help (also accept bare `help` for friendliness)
+    const string& first = args[0];
+    if (first == "-h" || first == "--help" || first == "help") {
+        printTopHelp();
         return 0;
     }
 
-    #ifdef __linux__
-    const char* display = std::getenv("DISPLAY");
-    const char* wayland = std::getenv("WAYLAND_DISPLAY");
-    if ((!display || display[0] == '\0') && (!wayland || wayland[0] == '\0')) {
-        cerr << "Error: No display server found (DISPLAY and WAYLAND_DISPLAY are not set)." << endl;
-        cerr << "Please run this from a desktop environment (X11 or Wayland)." << endl;
-        cerr << "  - If using SSH, connect with: ssh -X user@host" << endl;
-        cerr << "  - For CLI usage, run with --help" << endl;
-        return 1;
+    // Dispatch
+    vector<string> subArgs(args.begin() + 1, args.end());
+    if (first == "new")    return cmdNew(subArgs);
+    if (first == "update") return cmdUpdate(subArgs);
+    if (first == "add" || first == "remove" || first == "info" ||
+        first == "build" || first == "run") {
+        return cmdNotImplemented(first);
     }
-    #endif
 
-    WindowSettings settings;
-    settings.title = "TrussC Project Generator";
-    settings.width = 500;
-    settings.height = 600;
-    return runApp<tcApp>(settings);
+    cerr << "Error: unknown command '" << first << "'\n"
+         << "Run 'trusscli --help' for usage.\n";
+    return 1;
 }
