@@ -52,10 +52,20 @@ layout(binding=1) uniform fs_params {
     vec4 pbrParams;   // x=metallic, y=roughness, z=ao, w=emissiveStrength
     vec4 emissive;    // rgb=emissive color
     vec4 cameraPos;   // xyz=camera world pos, w=numLights (as float)
+    vec4 iblParams;   // x=hasIbl (0 or 1), y=prefilterMaxLod, z=exposure, w=unused
     vec4 lightPosType[MAX_LIGHTS];
     vec4 lightColorIntensity[MAX_LIGHTS];
     vec4 lightAttenuation[MAX_LIGHTS];
 };
+
+// IBL resources. Bound only when iblParams.x > 0.5; otherwise the samples
+// are technically undefined but dead code thanks to the branch.
+layout(binding=0) uniform textureCube irradianceMap;
+layout(binding=0) uniform sampler irradianceSmp;
+layout(binding=1) uniform textureCube prefilterMap;
+layout(binding=1) uniform sampler prefilterSmp;
+layout(binding=2) uniform texture2D brdfLut;
+layout(binding=2) uniform sampler brdfLutSmp;
 
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
@@ -86,6 +96,22 @@ float V_SmithGGXCorrelated(float NdotV, float NdotL, float alpha) {
 vec3 F_Schlick(float VdotH, vec3 F0) {
     float f = pow(1.0 - VdotH, 5.0);
     return F0 + (vec3(1.0) - F0) * f;
+}
+
+// Fresnel with roughness bias (for IBL diffuse kS computation, Karis 2013)
+vec3 F_SchlickRoughness(float NdotV, vec3 F0, float roughness) {
+    float f = pow(1.0 - NdotV, 5.0);
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * f;
+}
+
+// ACES filmic tonemapping (Narkowicz 2015 approximation)
+vec3 tonemapACES(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -161,12 +187,36 @@ void main() {
                         albedo, metallic, roughness, F0);
     }
 
-    // Simple hemisphere ambient (no IBL yet). Scaled by AO.
-    vec3 ambient = albedo * (1.0 - metallic) * 0.03 * ao;
+    // Indirect (IBL). Split-sum approximation:
+    //   diffuse  ≈ irradianceMap(N) * albedo * kD
+    //   specular ≈ prefilterMap(R, roughness*mipMax) * (F0 * brdf.x + brdf.y)
+    vec3 ambient;
+    if (iblParams.x > 0.5) {
+        float NdotV = max(dot(N, V), 0.0);
+        vec3 F = F_SchlickRoughness(NdotV, F0, roughness);
+        vec3 kS = F;
+        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+
+        vec3 irradiance = texture(samplerCube(irradianceMap, irradianceSmp), N).rgb;
+        vec3 diffuse = irradiance * albedo;
+
+        vec3 R = reflect(-V, N);
+        float lod = roughness * iblParams.y;
+        vec3 prefiltered = textureLod(samplerCube(prefilterMap, prefilterSmp), R, lod).rgb;
+        vec2 envBRDF = texture(sampler2D(brdfLut, brdfLutSmp), vec2(NdotV, roughness)).rg;
+        vec3 specular = prefiltered * (F * envBRDF.x + envBRDF.y);
+
+        ambient = (kD * diffuse + specular) * ao;
+    } else {
+        // Fallback hemisphere ambient when no environment is bound.
+        ambient = albedo * (1.0 - metallic) * 0.03 * ao;
+    }
 
     vec3 color = ambient + Lo + emissive.rgb * emissiveK;
 
-    // Gamma correct (no tonemap in this phase)
+    // Apply exposure, ACES filmic tonemap, then sRGB gamma.
+    color *= iblParams.z;
+    color = tonemapACES(color);
     color = pow(color, vec3(1.0 / 2.2));
 
     frag_color = vec4(color, baseColor.a);

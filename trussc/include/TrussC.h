@@ -2592,6 +2592,10 @@ inline void bindCursorImage(Cursor cursor, const Image& image,
 // TrussC mesh
 #include "tc/graphics/tcMesh.h"
 
+// TrussC image-based lighting environment (must come before the pipeline
+// so PbrPipeline::drawMesh() can call Environment methods by value)
+#include "tc/3d/tcEnvironment.h"
+
 // TrussC PBR mesh pipeline (defines Mesh::drawGpuPbr() out-of-class)
 #include "tc/3d/tcMeshPbrPipeline.h"
 

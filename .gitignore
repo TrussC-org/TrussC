@@ -145,3 +145,4 @@ addons/CMakeLists.txt
 # =============================================================================
 trussc/include/tc/gpu/shaders/lut.glsl.h
 trussc/include/tc/gpu/shaders/meshPbr.glsl.h
+trussc/include/tc/gpu/shaders/iblBake.glsl.h

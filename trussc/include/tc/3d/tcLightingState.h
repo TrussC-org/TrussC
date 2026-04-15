@@ -53,6 +53,9 @@ namespace internal {
 
     // Camera position (for specular calculation / PBR view vector)
     inline Vec3 cameraPosition = {0, 0, 0};
+
+    // Global exposure scalar applied before ACES tonemap (GpuPbr path only)
+    inline float pbrExposure = 1.0f;
 }
 
 } // namespace trussc

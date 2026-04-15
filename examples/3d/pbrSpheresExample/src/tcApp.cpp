@@ -12,6 +12,11 @@ void tcApp::setup() {
 
     sphereMesh = createSphere(SPHERE_R, 32);
 
+    // Procedural IBL: blue sky + sun, baked into irradiance / prefilter /
+    // BRDF LUT at startup. The metals in the grid reflect this environment.
+    env.loadProcedural();
+    setEnvironment(env);
+
     keyLight.setDirectional(Vec3(-0.5f, -1.0f, -0.6f));
     keyLight.setDiffuse(1.0f, 0.98f, 0.92f);
     keyLight.setIntensity(3.0f);

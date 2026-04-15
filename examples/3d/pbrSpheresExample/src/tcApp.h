@@ -19,5 +19,6 @@ private:
     Mesh sphereMesh;
     Light keyLight;
     Light fillLight;
+    Environment env;
     PbrMaterial materials[5][5];
 };

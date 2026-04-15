@@ -85,6 +85,29 @@ public:
         if (mesh.getGpuIndexCount() > 0) {
             bind.index_buffer = mesh.getGpuIndexBuffer();
         }
+
+        // IBL resources. When no environment is bound we still have to supply
+        // valid view/sampler handles because sokol-gfx validates bindings;
+        // fall back to whatever the environment-less defaults are on the GPU
+        // (a 1x1 black cubemap / 2D texture held by the pipeline singleton).
+        Environment* env = internal::currentEnvironment;
+        bool hasIbl = (env != nullptr && env->isLoaded());
+        ensureFallbacks();
+        if (hasIbl) {
+            bind.views[VIEW_irradianceMap] = env->getIrradianceMap().getView();
+            bind.views[VIEW_prefilterMap]  = env->getPrefilterMap().getView();
+            bind.views[VIEW_brdfLut]       = env->getBrdfLut().getView();
+            bind.samplers[SMP_irradianceSmp] = env->getIrradianceMap().getSampler();
+            bind.samplers[SMP_prefilterSmp]  = env->getPrefilterMap().getSampler();
+            bind.samplers[SMP_brdfLutSmp]    = env->getBrdfLut().getSampler();
+        } else {
+            bind.views[VIEW_irradianceMap] = fallbackCubeView_;
+            bind.views[VIEW_prefilterMap]  = fallbackCubeView_;
+            bind.views[VIEW_brdfLut]       = fallback2dView_;
+            bind.samplers[SMP_irradianceSmp] = fallbackSampler_;
+            bind.samplers[SMP_prefilterSmp]  = fallbackSampler_;
+            bind.samplers[SMP_brdfLutSmp]    = fallbackSampler_;
+        }
         sg_apply_bindings(&bind);
 
         // --- vs_params ------------------------------------------------------
@@ -132,6 +155,12 @@ public:
         fsp.cameraPos[2] = cam.z;
         fsp.cameraPos[3] = static_cast<float>(numLights);
 
+        // iblParams: x=hasIbl, y=prefilterMaxLod, z=exposure, w=reserved
+        fsp.iblParams[0] = hasIbl ? 1.0f : 0.0f;
+        fsp.iblParams[1] = hasIbl ? static_cast<float>(env->getPrefilterMipLevels() - 1) : 0.0f;
+        fsp.iblParams[2] = internal::pbrExposure;
+        fsp.iblParams[3] = 0.0f;
+
         for (int i = 0; i < numLights; i++) {
             const Light& L = *internal::activeLights[i];
             if (L.getType() == LightType::Directional) {
@@ -174,9 +203,72 @@ public:
     }
 
 private:
+    // Create dummy 1x1 cube and 2D textures used when no Environment is
+    // bound. sokol-gfx requires the bound views/samplers to be valid; we
+    // supply black for samples and 0 for iblParams.x so the shader branches
+    // away from IBL evaluation.
+    void ensureFallbacks() {
+        if (fallbackInitialized_) return;
+
+        // 1x1x6 RGBA8 cubemap, all zeros
+        sg_image_desc cube_desc = {};
+        cube_desc.type = SG_IMAGETYPE_CUBE;
+        cube_desc.width = 1;
+        cube_desc.height = 1;
+        cube_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        cube_desc.usage.dynamic_update = true;
+        cube_desc.label = "tc_pbr_fallback_cube";
+        fallbackCube_ = sg_make_image(&cube_desc);
+        // Zero-init all 6 faces
+        uint8_t zero[4 * 6] = {0};
+        sg_image_data cube_data = {};
+        cube_data.mip_levels[0].ptr = zero;
+        cube_data.mip_levels[0].size = sizeof(zero);
+        sg_update_image(fallbackCube_, &cube_data);
+        sg_view_desc cube_view_desc = {};
+        cube_view_desc.texture.image = fallbackCube_;
+        fallbackCubeView_ = sg_make_view(&cube_view_desc);
+
+        // 1x1 RG16F 2D texture
+        sg_image_desc tex_desc = {};
+        tex_desc.type = SG_IMAGETYPE_2D;
+        tex_desc.width = 1;
+        tex_desc.height = 1;
+        tex_desc.pixel_format = SG_PIXELFORMAT_RG16F;
+        tex_desc.usage.dynamic_update = true;
+        tex_desc.label = "tc_pbr_fallback_2d";
+        fallback2d_ = sg_make_image(&tex_desc);
+        uint16_t zero2d[2] = {0, 0};
+        sg_image_data tex_data = {};
+        tex_data.mip_levels[0].ptr = zero2d;
+        tex_data.mip_levels[0].size = sizeof(zero2d);
+        sg_update_image(fallback2d_, &tex_data);
+        sg_view_desc tex_view_desc = {};
+        tex_view_desc.texture.image = fallback2d_;
+        fallback2dView_ = sg_make_view(&tex_view_desc);
+
+        sg_sampler_desc smp_desc = {};
+        smp_desc.min_filter = SG_FILTER_LINEAR;
+        smp_desc.mag_filter = SG_FILTER_LINEAR;
+        smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
+        smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+        smp_desc.wrap_w = SG_WRAP_CLAMP_TO_EDGE;
+        smp_desc.label = "tc_pbr_fallback_smp";
+        fallbackSampler_ = sg_make_sampler(&smp_desc);
+
+        fallbackInitialized_ = true;
+    }
+
     sg_shader shader_{};
     sg_pipeline pipeline_{};
     bool initialized_{false};
+
+    sg_image fallbackCube_{};
+    sg_view fallbackCubeView_{};
+    sg_image fallback2d_{};
+    sg_view fallback2dView_{};
+    sg_sampler fallbackSampler_{};
+    bool fallbackInitialized_{false};
 };
 
 // Singleton accessor. The instance lives in the first TU that calls this.
