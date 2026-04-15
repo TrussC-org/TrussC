@@ -97,6 +97,16 @@ float getDisplayScaleFactor() {
     return (float)[UIScreen mainScreen].scale;
 }
 
+IVec2 getWindowPosition() {
+    logWarning("Platform") << "getWindowPosition() is not supported on iOS";
+    return IVec2(-1, -1);
+}
+
+void setWindowPosition(int x, int y) {
+    logWarning("Platform") << "setWindowPosition() is not supported on iOS";
+    (void)x; (void)y;
+}
+
 void setWindowSizeLogical(int width, int height) {
     // no-op on iOS (window size is fixed to screen size)
     (void)width;
@@ -228,6 +238,13 @@ bool saveScreenshot(const std::filesystem::path& path) {
 }
 
 // ---------------------------------------------------------------------------
+// App menu (macOS only) — stub
+// ---------------------------------------------------------------------------
+namespace internal {
+void installAppMenu() {}
+} // namespace internal
+
+// ---------------------------------------------------------------------------
 // System Volume
 // ---------------------------------------------------------------------------
 float getSystemVolume() {
@@ -320,7 +337,7 @@ float getCompassHeading() {
     if (!motion) return 0.0f;
     // heading from magnetic north, convert degrees to radians
     double heading = motion.heading;
-    return (float)(heading * M_PI / 180.0);
+    return (float)(heading * TAU / 360.0);
 }
 
 // ---------------------------------------------------------------------------

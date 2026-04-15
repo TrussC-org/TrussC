@@ -50,7 +50,7 @@ void tcApp::setup() {
         float outerR = 45, innerR = 20;
         int points = 5;
         for (int i = 0; i < points * 2; i++) {
-            float angle = i * PI / points - QUARTER_TAU;
+            float angle = i * HALF_TAU / points - QUARTER_TAU;
             float r = (i % 2 == 0) ? outerR : innerR;
             star.addVertex(starX + cos(angle) * r, cy + sin(angle) * r);
         }

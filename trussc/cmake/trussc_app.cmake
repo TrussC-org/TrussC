@@ -283,12 +283,15 @@ macro(trussc_app)
                 -sMAX_WEBGL_VERSION=2
             )
         endif()
-        # Auto-preload bin/data folder if it exists
+        # Auto-preload bin/data folder if it exists and is non-empty
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bin/data")
-            target_link_options(${PROJECT_NAME} PRIVATE
-                --preload-file ${CMAKE_CURRENT_SOURCE_DIR}/bin/data@/data
-            )
-            message(STATUS "[${PROJECT_NAME}] Preloading data folder for Emscripten")
+            file(GLOB _TC_DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/bin/data/*")
+            if(_TC_DATA_FILES)
+                target_link_options(${PROJECT_NAME} PRIVATE
+                    --preload-file ${CMAKE_CURRENT_SOURCE_DIR}/bin/data@/data
+                )
+                message(STATUS "[${PROJECT_NAME}] Preloading data folder for Emscripten")
+            endif()
         endif()
     elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         set_target_properties(${PROJECT_NAME} PROPERTIES

@@ -238,6 +238,67 @@ struct Vec3 {
 inline Vec3 operator*(float s, const Vec3& v) { return v * s; }
 
 // =============================================================================
+// IVec2 - 2D integer vector
+// =============================================================================
+
+struct IVec2 {
+    int x = 0;
+    int y = 0;
+
+    IVec2() = default;
+    IVec2(int x_, int y_) : x(x_), y(y_) {}
+    IVec2(int v) : x(v), y(v) {}
+
+    IVec2 operator+(const IVec2& v) const { return IVec2(x + v.x, y + v.y); }
+    IVec2 operator-(const IVec2& v) const { return IVec2(x - v.x, y - v.y); }
+    IVec2 operator*(int s) const { return IVec2(x * s, y * s); }
+    IVec2 operator-() const { return IVec2(-x, -y); }
+
+    IVec2& operator+=(const IVec2& v) { x += v.x; y += v.y; return *this; }
+    IVec2& operator-=(const IVec2& v) { x -= v.x; y -= v.y; return *this; }
+    IVec2& operator*=(int s) { x *= s; y *= s; return *this; }
+
+    bool operator==(const IVec2& v) const { return x == v.x && y == v.y; }
+    bool operator!=(const IVec2& v) const { return !(*this == v); }
+
+    Vec2 toVec2() const { return Vec2((float)x, (float)y); }
+};
+
+inline IVec2 operator*(int s, const IVec2& v) { return v * s; }
+
+// =============================================================================
+// IVec3 - 3D integer vector
+// =============================================================================
+
+struct IVec3 {
+    int x = 0;
+    int y = 0;
+    int z = 0;
+
+    IVec3() = default;
+    IVec3(int x_, int y_, int z_) : x(x_), y(y_), z(z_) {}
+    IVec3(int v) : x(v), y(v), z(v) {}
+    IVec3(const IVec2& v, int z_ = 0) : x(v.x), y(v.y), z(z_) {}
+
+    IVec3 operator+(const IVec3& v) const { return IVec3(x + v.x, y + v.y, z + v.z); }
+    IVec3 operator-(const IVec3& v) const { return IVec3(x - v.x, y - v.y, z - v.z); }
+    IVec3 operator*(int s) const { return IVec3(x * s, y * s, z * s); }
+    IVec3 operator-() const { return IVec3(-x, -y, -z); }
+
+    IVec3& operator+=(const IVec3& v) { x += v.x; y += v.y; z += v.z; return *this; }
+    IVec3& operator-=(const IVec3& v) { x -= v.x; y -= v.y; z -= v.z; return *this; }
+    IVec3& operator*=(int s) { x *= s; y *= s; z *= s; return *this; }
+
+    bool operator==(const IVec3& v) const { return x == v.x && y == v.y && z == v.z; }
+    bool operator!=(const IVec3& v) const { return !(*this == v); }
+
+    Vec3 toVec3() const { return Vec3((float)x, (float)y, (float)z); }
+    IVec2 xy() const { return IVec2(x, y); }
+};
+
+inline IVec3 operator*(int s, const IVec3& v) { return v * s; }
+
+// =============================================================================
 // Vec4 - 4D vector (homogeneous coordinates, colors, etc.)
 // =============================================================================
 

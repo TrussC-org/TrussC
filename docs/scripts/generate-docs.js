@@ -5,6 +5,7 @@
  * Usage:
  *   node generate-docs.js                  # Generate all outputs
  *   node generate-docs.js --sketch         # Generate TrussSketch-related files only
+ *   node generate-docs.js --trussc-api     # Generate TrussC API JS (all APIs + version)
  *   node generate-docs.js --reference      # Generate REFERENCE.md only
  *   node generate-docs.js --of-mapping     # Generate oF mapping JSON for website
  *   node generate-docs.js --of-markdown    # Generate oF comparison markdown
@@ -12,10 +13,12 @@
  *
  * Outputs:
  *   --sketch:
- *     - ../trussc.org/sketch/trusssketch-api.js
+ *     - ../trussc.org/generated/trusssketch-api.js
  *     - ../TrussSketch/REFERENCE.md
+ *   --trussc-api:
+ *     - ../trussc.org/generated/trussc-api.js
  *   --of-mapping:
- *     - ../trussc.org/of-mapping.json
+ *     - ../trussc.org/generated/of-mapping.json
  *   --of-markdown:
  *     - ../TrussC_vs_openFrameworks.md (Section 5)
  *   --gemini:
@@ -25,14 +28,16 @@
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
-const { categoryMapping, ofOnlyEntries } = require('./of-category-mapping.js');
+const { execSync } = require('child_process');
+const { categoryMapping, typeCategoryMapping, ofOnlyEntries } = require('./of-category-mapping.js');
 
 // Paths
 const API_YAML = path.join(__dirname, '../api-definition.yaml');
-const SKETCH_API_JS = path.join(__dirname, '../../../trussc.org/sketch/trusssketch-api.js');
+const SKETCH_API_JS = path.join(__dirname, '../../../trussc.org/generated/trusssketch-api.js');
+const TRUSSC_API_JS = path.join(__dirname, '../../../trussc.org/generated/trussc-api.js');
 const REFERENCE_MD = path.join(__dirname, '../../../TrussSketch/REFERENCE.md');
 const REFERENCE_MD_DOCS = path.join(__dirname, '../REFERENCE.md');
-const OF_MAPPING_JSON = path.join(__dirname, '../../../trussc.org/of-mapping.json');
+const OF_MAPPING_JSON = path.join(__dirname, '../../../trussc.org/generated/of-mapping.json');
 const OF_COMPARISON_MD = path.join(__dirname, '../TrussC_vs_openFrameworks.md');
 const GEMINI_KNOWLEDGE_MD = path.join(__dirname, './trusssketch-knowledge.md');
 
@@ -40,6 +45,7 @@ const GEMINI_KNOWLEDGE_MD = path.join(__dirname, './trusssketch-knowledge.md');
 const args = process.argv.slice(2);
 const generateAll = args.length === 0;
 const generateSketch = generateAll || args.includes('--sketch');
+const generateTrussCApi = generateAll || args.includes('--trussc-api');
 const generateReference = generateAll || args.includes('--reference');
 const generateOfMapping = generateAll || args.includes('--of-mapping');
 const generateOfMarkdown = generateAll || args.includes('--of-markdown');
@@ -167,7 +173,122 @@ function generateSketchAPI(api) {
             
                 return js;
             }
-            
+
+// Get version from latest git tag
+function getVersion() {
+    try {
+        return execSync('git describe --tags --abbrev=0', { cwd: path.join(__dirname, '../..') })
+            .toString().trim();
+    } catch {
+        return 'unknown';
+    }
+}
+
+// Generate trussc-api.js (all APIs, no sketch filter)
+function generateTrussCApiJS(api) {
+    const version = getVersion();
+
+    const categories = [];
+    for (const cat of api.categories) {
+        const functions = [];
+        for (const fn of cat.functions) {
+            for (const sig of fn.signatures) {
+                functions.push({
+                    name: fn.name,
+                    params: sig.params_simple || sig.params || '',
+                    params_typed: sig.params || '',
+                    return_type: fn.return !== undefined ? fn.return : null,
+                    desc: fn.description,
+                    desc_ja: fn.description_ja || '',
+                    desc_ko: fn.description_ko || '',
+                    snippet: fn.snippet
+                });
+            }
+        }
+        if (functions.length === 0) continue;
+        categories.push({ name: cat.name, name_ja: cat.name_ja || '', name_ko: cat.name_ko || '', functions });
+    }
+
+    const constants = (api.constants || []).map(c => ({
+        name: c.name,
+        value: c.value,
+        desc: c.description
+    }));
+
+    const types = [];
+    if (api.types) {
+        for (const type of api.types) {
+            const typeData = {
+                name: type.name,
+                desc: type.description,
+                desc_ja: type.description_ja || '',
+                desc_ko: type.description_ko || ''
+            };
+
+            if (type.constructor && type.constructor.signatures) {
+                typeData.constructor = {
+                    signatures: type.constructor.signatures.map(s => s.params || ''),
+                    snippet: type.constructor.snippet
+                };
+            }
+
+            if (type.properties) {
+                typeData.properties = type.properties.map(p => ({
+                    name: p.name,
+                    type: p.type,
+                    desc: p.description
+                }));
+            }
+
+            if (type.methods) {
+                typeData.methods = type.methods.map(m => ({
+                    name: m.name,
+                    return: m.return,
+                    signatures: m.signatures.map(s => s.params || ''),
+                    desc: m.description,
+                    snippet: m.snippet
+                }));
+            }
+
+            if (type.static_methods) {
+                typeData.static_methods = type.static_methods.map(m => ({
+                    name: m.name,
+                    return: m.return,
+                    signatures: m.signatures.map(s => s.params || ''),
+                    desc: m.description,
+                    snippet: m.snippet
+                }));
+            }
+
+            types.push(typeData);
+        }
+    }
+
+    const output = {
+        version: version,
+        categories: categories,
+        constants: constants,
+        keywords: api.keywords,
+        types: types
+    };
+
+    let js = `// TrussC API Definition
+// Complete C++ API reference (all functions, types, constants)
+//
+// AUTO-GENERATED from api-definition.yaml
+// Do not edit directly - edit api-definition.yaml instead
+
+const TrussCAPI = ${JSON.stringify(output, null, 4)};
+
+// Export for different environments
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = TrussCAPI;
+}
+`;
+
+    return js;
+}
+
             // Generate REFERENCE.md
             function generateReferenceMd(api) {
                 let md = `# TrussC API Reference
@@ -281,6 +402,7 @@ function generateOfMappingJson(api) {
                 id: displayId,
                 name: mapping.name,
                 name_ja: mapping.name_ja,
+                name_ko: mapping.name_ko || '',
                 order: mapping.order,
                 mappings: []
             };
@@ -289,13 +411,16 @@ function generateOfMappingJson(api) {
         // Add functions that have of_equivalent
         for (const fn of cat.functions) {
             if (fn.of_equivalent) {
-                // Use simple params for cleaner display
-                const params = fn.signatures[0]?.params_simple || '';
+                // Use of_signature_index to pick which overload to display (default: 0)
+                const sigIdx = fn.of_signature_index || 0;
+                const sig = fn.signatures[sigIdx] || fn.signatures[0];
+                const params = sig.params_simple || '';
                 categoryGroups[displayId].mappings.push({
                     of: fn.of_equivalent,
                     tc: fn.name + (params ? `(${params})` : '()'),
                     notes: fn.of_notes || '',
-                    notes_ja: fn.of_notes_ja || fn.of_notes || ''
+                    notes_ja: fn.of_notes_ja || fn.of_notes || '',
+                    notes_ko: fn.of_notes_ko || ''
                 });
             }
         }
@@ -308,6 +433,7 @@ function generateOfMappingJson(api) {
                 id: entry.category,
                 name: entry.name,
                 name_ja: entry.name_ja,
+                name_ko: entry.name_ko || '',
                 order: entry.order,
                 mappings: []
             };
@@ -317,17 +443,53 @@ function generateOfMappingJson(api) {
                 of: e.of,
                 tc: e.tc,
                 notes: e.notes || '',
-                notes_ja: e.notes_ja || e.notes || ''
+                notes_ja: e.notes_ja || e.notes || '',
+                notes_ko: e.notes_ko || ''
             });
         }
     }
 
     // Convert to sorted array
-    const categories = Object.values(categoryGroups)
+    const functions = Object.values(categoryGroups)
         .filter(cat => cat.mappings.length > 0)
         .sort((a, b) => a.order - b.order);
 
-    return JSON.stringify({ categories }, null, 2);
+    // Group types by of_type_category
+    const typeGroups = {};
+
+    if (api.types) {
+        for (const type of api.types) {
+            if (!type.of_type_category) continue;
+
+            const catDef = typeCategoryMapping[type.of_type_category];
+            if (!catDef) continue;
+
+            const catId = catDef.id;
+            if (!typeGroups[catId]) {
+                typeGroups[catId] = {
+                    id: catDef.id,
+                    name: catDef.name,
+                    name_ja: catDef.name_ja,
+                    name_ko: catDef.name_ko || '',
+                    order: catDef.order,
+                    mappings: []
+                };
+            }
+
+            typeGroups[catId].mappings.push({
+                of: type.of_equivalent || '-',
+                tc: type.name,
+                notes: type.description || '',
+                notes_ja: type.description_ja || type.description || '',
+                notes_ko: type.description_ko || ''
+            });
+        }
+    }
+
+    const types = Object.values(typeGroups)
+        .sort((a, b) => a.order - b.order);
+
+    return JSON.stringify({ functions, types }, null, 2);
 }
 
 // Generate oF comparison markdown (Section 5)
@@ -949,6 +1111,14 @@ function main() {
             fs.writeFileSync(REFERENCE_MD_DOCS, md);
             console.log(`  Written: ${REFERENCE_MD_DOCS}`);
         }
+    }
+
+    // Generate TrussC API JS
+    if (generateTrussCApi) {
+        console.log('\nGenerating trussc-api.js...');
+        const js = generateTrussCApiJS(api);
+        fs.writeFileSync(TRUSSC_API_JS, js);
+        console.log(`  Written: ${TRUSSC_API_JS}`);
     }
 
     // Generate oF mapping JSON

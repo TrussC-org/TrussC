@@ -23,7 +23,7 @@ Built on C++20 + sokol, it's simple to write and runs cross-platform.
 
 | OS | Compiler |
 |----|----------|
-| macOS | Xcode Command Line Tools (`xcode-select --install`) |
+| macOS 14+ (Sonoma) | Xcode Command Line Tools (`xcode-select --install`) |
 | Windows | Visual Studio 2022 |
 | Linux | GCC 10+ or Clang 10+ |
 

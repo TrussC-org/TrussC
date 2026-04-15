@@ -27,8 +27,9 @@ void windowResized(int width, int height) // Window resized
 ## Graphics - Color
 
 ```cpp
-void clear(float gray)                   // Clear screen
-void clear(float r, float g, float b)    // Clear screen
+void clear()                             // Clear screen. No args = transparent black (0,0,0,0)
+void clear(float gray)                   // Clear screen. No args = transparent black (0,0,0,0)
+void clear(float r, float g, float b)    // Clear screen. No args = transparent black (0,0,0,0)
 void setColor(float gray)                // Set drawing color (0.0-1.0)
 void setColor(float r, float g, float b) // Set drawing color (0.0-1.0)
 void setColor(float r, float g, float b, float a) // Set drawing color (0.0-1.0)
@@ -174,6 +175,14 @@ double getFrameRate()                    // Current FPS
 uint64_t getFrameCount()                 // Total frames rendered
 ```
 
+## Memory
+
+```cpp
+int getSokolMemoryBytes()                // Total bytes allocated by sokol libraries
+int getSokolMemoryAllocs()               // Number of active allocations in sokol libraries
+void releaseSglBuffers()                 // Release sokol_gl vertex/command buffers (auto re-allocated on next draw)
+```
+
 ## Time - Elapsed
 
 ```cpp
@@ -229,7 +238,6 @@ float fbm(float x, float y, float z, int octaves = 4, float lacunarity = 2.0, fl
 ## Math - Interpolation
 
 ```cpp
-float lerp(float a, float b, float t)    // Linear interpolation
 float clamp(float v, float min, float max) // Clamp value to range
 float remap(float v, float inMin, float inMax, float outMin, float outMax) // Remap value from one range to another
 ```
@@ -285,6 +293,8 @@ void setWindowSize(int width, int height) // Set window size
 void toggleFullscreen()                  // Toggle fullscreen mode
 void setClipboardString(const string& text) // Copy text to clipboard
 string getClipboardString()              // Get text from clipboard
+bool isFullscreen()                      // Check if window is fullscreen
+void setFullscreen(bool fullscreen)      // Set fullscreen mode
 ```
 
 ## Utility
@@ -380,7 +390,8 @@ Tween@ pause()                           // Pause animation (chainable)
 Tween@ resume()                          // Resume animation (chainable)
 Tween@ reset()                           // Reset animation (chainable)
 Tween@ finish()                          // Jump to end (chainable)
-void update(float dt)                    // Update animation
+Tween@ loop(int count = -1)              // Set loop count (-1=infinite, 0=none, N=repeat N times)
+Tween@ yoyo(bool enable = true)          // Enable yoyo (reverse direction each loop)
 float getValue()                         // Get current tween value
 float getProgress()                      // Get progress (0-1)
 float getElapsed()                       // Get elapsed time
@@ -389,6 +400,7 @@ bool isPlaying()                         // Check if playing
 bool isComplete()                        // Check if complete
 float getStart()                         // Get start value
 float getEnd()                           // Get end value
+int getLoopCount()                       // Get number of completed loop iterations
 ```
 
 ## Types - Vec2
@@ -524,7 +536,8 @@ int getHeight()                          // Get height
 ```cpp
 Fbo@ createFbo()                         // Create an FBO (TrussSketch factory)
 void allocate(int w, int h)              // Allocate buffer
-void begin()                             // Begin drawing to FBO
+void begin()                             // Begin drawing to FBO. No args = preserve previous content. With args = clear with specified color
+void begin(float r, float g, float b, float a = 1.0) // Begin drawing to FBO. No args = preserve previous content. With args = clear with specified color
 void end()                               // End drawing to FBO
 Texture& getTexture()                    // Get internal texture
 ```

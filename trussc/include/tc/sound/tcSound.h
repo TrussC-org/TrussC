@@ -28,6 +28,7 @@
 #include <atomic>
 #include <cstring>
 #include <cmath>
+#include "../../tcMath.h"
 
 #ifndef TC_SOUND_IMPL
 // stb_vorbis forward declaration
@@ -304,10 +305,9 @@ public:
         numSamples = (size_t)(duration * sampleRate);
         samples.resize(numSamples);
 
-        constexpr float PI2 = 2.0f * 3.14159265f;
         for (size_t i = 0; i < numSamples; i++) {
             float t = (float)i / sampleRate;
-            samples[i] = volume * std::sin(PI2 * frequency * t);
+            samples[i] = volume * std::sin(TAU * frequency * t);
         }
     }
 
@@ -317,7 +317,6 @@ public:
         numSamples = (size_t)(duration * sampleRate);
         samples.resize(numSamples);
 
-        constexpr float PI2 = 2.0f * 3.14159265f;
         for (size_t i = 0; i < numSamples; i++) {
             float t = (float)i / sampleRate;
             float phase = std::fmod(frequency * t, 1.0f);

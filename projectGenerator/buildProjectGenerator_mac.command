@@ -58,6 +58,35 @@ echo "Creating symlink to distribution folder..."
 rm -rf "$SCRIPT_DIR/projectGenerator.app"
 ln -s "$SOURCE_DIR/bin/projectGenerator.app" "$SCRIPT_DIR/projectGenerator.app"
 
+# Install symlink to /usr/local/bin so projectGenerator is on PATH
+echo ""
+read -r -p "Add projectGenerator to PATH via /usr/local/bin? [y/N]: " INSTALL_PATH_LINK
+case "$INSTALL_PATH_LINK" in
+    [yY]|[yY][eE][sS])
+        LINK_PATH="/usr/local/bin/projectGenerator"
+        BIN_TARGET="$SOURCE_DIR/bin/projectGenerator.app/Contents/MacOS/projectGenerator"
+        # /usr/local/bin may not exist on a clean Apple Silicon install
+        if [ ! -d "/usr/local/bin" ]; then
+            echo "  /usr/local/bin does not exist — creating it (requires sudo)."
+            sudo mkdir -p /usr/local/bin
+        fi
+        if [ -w "/usr/local/bin" ]; then
+            ln -sf "$BIN_TARGET" "$LINK_PATH"
+        else
+            echo "  /usr/local/bin requires sudo — you may be prompted for your password."
+            sudo ln -sf "$BIN_TARGET" "$LINK_PATH"
+        fi
+        if [ $? -eq 0 ]; then
+            echo "  Symlink: $LINK_PATH -> $BIN_TARGET"
+        else
+            echo "  ERROR: Failed to create symlink."
+        fi
+        ;;
+    *)
+        echo "Skipped PATH symlink installation."
+        ;;
+esac
+
 echo ""
 echo "=========================================="
 echo "  Build completed successfully!"

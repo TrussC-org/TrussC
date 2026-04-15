@@ -96,6 +96,23 @@ bool getImmersiveMode() { return false; }
 // ---------------------------------------------------------------------------
 // setWindowSize - ウィンドウサイズを変更
 // ---------------------------------------------------------------------------
+IVec2 getWindowPosition() {
+    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+    if (!hwnd) return IVec2(-1, -1);
+
+    RECT rect;
+    if (GetWindowRect(hwnd, &rect)) {
+        return IVec2(rect.left, rect.top);
+    }
+    return IVec2(-1, -1);
+}
+
+void setWindowPosition(int x, int y) {
+    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+    if (!hwnd) return;
+    SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 void setWindowSizeLogical(int width, int height) {
     HWND hwnd = (HWND)sapp_win32_get_hwnd();
     if (!hwnd) {
@@ -363,6 +380,10 @@ bool saveScreenshot(const std::filesystem::path& path) {
 // ---------------------------------------------------------------------------
 // System sensors (stubs)
 // ---------------------------------------------------------------------------
+namespace internal {
+void installAppMenu() {}  // macOS-only
+} // namespace internal
+
 float getSystemVolume() { return -1.0f; }
 void setSystemVolume(float volume) { (void)volume; }
 float getSystemBrightness() { return -1.0f; }

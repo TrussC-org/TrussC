@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include "../../tcMath.h"
 
 namespace trussc {
 
@@ -52,7 +53,7 @@ inline float easeQuint(float t) {
 }
 
 inline float easeSine(float t) {
-    return 1.0f - std::cos(t * 3.14159265359f * 0.5f);
+    return 1.0f - std::cos(t * QUARTER_TAU);
 }
 
 inline float easeExpo(float t) {
@@ -71,7 +72,7 @@ inline float easeBack(float t) {
 
 inline float easeElastic(float t) {
     if (t == 0.0f || t == 1.0f) return t;
-    constexpr float c4 = (2.0f * 3.14159265359f) / 3.0f;
+    constexpr float c4 = TAU / 3.0f;
     return -std::pow(2.0f, 10.0f * t - 10.0f) * std::sin((t * 10.0f - 10.75f) * c4);
 }
 

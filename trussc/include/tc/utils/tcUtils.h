@@ -98,7 +98,7 @@ std::string toString(const T& value) {
 }
 
 // Convert to string with specified decimal precision
-// Example: toString(3.14159, 2) → "3.14"
+// Example: toString(6.28318, 2) → "6.28"
 template <class T>
 std::string toString(const T& value, int precision) {
     std::ostringstream out;
@@ -116,7 +116,7 @@ std::string toString(const T& value, int width, char fill) {
 }
 
 // Convert to string with precision, width, and fill character
-// Example: toString(3.14, 2, 6, '0') → "003.14"
+// Example: toString(6.28, 2, 6, '0') → "006.28"
 template <class T>
 std::string toString(const T& value, int precision, int width, char fill) {
     std::ostringstream out;
@@ -647,10 +647,10 @@ struct BeepManager {
                     float t = static_cast<float>(i) / sr;
                     float progress = static_cast<float>(i) / numSamples;
                     float freq = 300.0f * std::pow(6.0f, progress);
-                    float env = std::sin(progress * 3.14159f);
+                    float env = std::sin(progress * HALF_TAU);
                     env = env * env;
                     float noise = (static_cast<float>(rand()) / static_cast<float>(RAND_MAX) - 0.5f) * 0.15f;
-                    float sample = (std::sin(2.0f * 3.14159f * freq * t) + noise * env) * env * volume * 0.4f;
+                    float sample = (std::sin(TAU * freq * t) + noise * env) * env * volume * 0.4f;
                     buffer.samples[i] = sample;
                 }
                 break;

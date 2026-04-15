@@ -38,6 +38,8 @@ public:
         , playing_(other.playing_)
         , completed_(other.completed_)
         , asymmetric_(other.asymmetric_)
+        , delay_(other.delay_)
+        , delayRemaining_(other.delayRemaining_)
         , loopTotal_(other.loopTotal_)
         , loopRemaining_(other.loopRemaining_)
         , loopCount_(other.loopCount_)
@@ -71,6 +73,8 @@ public:
             playing_ = other.playing_;
             completed_ = other.completed_;
             asymmetric_ = other.asymmetric_;
+            delay_ = other.delay_;
+            delayRemaining_ = other.delayRemaining_;
             loopTotal_ = other.loopTotal_;
             loopRemaining_ = other.loopRemaining_;
             loopCount_ = other.loopCount_;
@@ -151,10 +155,17 @@ public:
         return *this;
     }
 
+    // Delay before animation starts (seconds)
+    Tween& delay(float seconds) {
+        delay_ = seconds;
+        return *this;
+    }
+
     // ----- Control (chainable) -----
 
     Tween& start() {
         elapsed_ = 0.0f;
+        delayRemaining_ = delay_;
         playing_ = true;
         completed_ = false;
         loopRemaining_ = loopTotal_;
@@ -241,6 +252,10 @@ private:
     bool completed_ = false;
     bool asymmetric_ = false;
 
+    // Delay
+    float delay_ = 0.0f;
+    float delayRemaining_ = 0.0f;
+
     // Loop state
     int loopTotal_ = 0;       // -1=infinite, 0=no loop, N=repeat N times
     int loopRemaining_ = 0;
@@ -260,6 +275,14 @@ private:
     void update(float deltaTime) {
         if (!playing_ || completed_) return;
 
+        // Consume delay first
+        if (delayRemaining_ > 0.0f) {
+            delayRemaining_ -= deltaTime;
+            if (delayRemaining_ > 0.0f) return;
+            deltaTime = -delayRemaining_;
+            delayRemaining_ = 0.0f;
+        }
+
         elapsed_ += deltaTime;
 
         if (elapsed_ >= duration_) {
@@ -278,6 +301,9 @@ private:
                 if (yoyo_) {
                     yoyoReversed_ = !yoyoReversed_;
                 }
+
+                // Re-apply delay for next loop iteration
+                delayRemaining_ = delay_;
                 return;
             }
 

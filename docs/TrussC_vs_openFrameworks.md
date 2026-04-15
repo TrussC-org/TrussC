@@ -279,12 +279,14 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofGetKeyPressed` | `isKeyPressed(key)` |  |
 | `ofShowCursor` | `showCursor()` |  |
 | `ofHideCursor` | `hideCursor()` |  |
+| `ofGetWindowMode` | `isFullscreen()` |  |
+| `ofSetFullscreen` | `setFullscreen(fullscreen)` |  |
 
 ### **Graphics**
 
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
-| `ofClear / ofBackground` | `clear(gray)` |  |
+| `ofClear / ofBackground` | `clear()` |  |
 | `ofSetColor` | `setColor(gray)` | Range 0-1 instead of 0-255 |
 | `ofDrawRectangle` | `drawRect(x, y, w, h)` |  |
 | `ofDrawRectRounded` | `drawRectRounded(x, y, w, h, radius)` |  |
@@ -299,11 +301,15 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofVertex` | `vertex(x, y)` |  |
 | `ofEndShape` | `endShape(close)` |  |
 | `ofDrawBitmapString` | `drawBitmapString(text, x, y)` |  |
+| `ofDrawBitmapStringHighlight` | `drawBitmapStringHighlight(text, x, y, background, foreground)` |  |
 | `ofSetFrameRate` | `setFps(fps)` |  |
 | `ofFill` | `fill()` |  |
 | `ofNoFill` | `noFill()` |  |
 | `ofSetLineWidth` | `setStrokeWeight(weight)` |  |
 | `ofSetCircleResolution` | `setCircleResolution(resolution)` |  |
+| `ofPushStyle` | `pushStyle()` |  |
+| `ofPopStyle` | `popStyle()` |  |
+| `ofEnableBlendMode` | `setBlendMode(mode)` |  |
 | `ofPushStyle` | `pushStyle()` |  |
 | `ofPopStyle` | `popStyle()` |  |
 
@@ -326,7 +332,7 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofSeedRandom` | `randomSeed(seed)` |  |
 | `ofNoise` | `noise(x)` |  |
 | `ofSignedNoise` | `signedNoise(x)` |  |
-| `ofLerp` | `lerp(a, b, t)` |  |
+| `ofLerp` | `lerp(a, b, t)` | std::lerp (C++20) |
 | `ofClamp` | `clamp(v, min, max)` |  |
 | `ofMap` | `remap(v, inMin, inMax, outMin, outMax)` |  |
 | `ofDegToRad` | `deg2rad(degrees)` |  |

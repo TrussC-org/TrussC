@@ -11,7 +11,7 @@ Inspired by openFrameworks, implemented simply with modern C++.
 - **Lightweight**: Minimal dependencies, built on sokol
 - **Header-only**: Most features are header-only
 - **C++20**: Leverages modern C++ features
-- **Cross-platform**: macOS (Metal), Windows (D3D11), Web (WebGPU). Linux/Raspberry Pi planned.
+- **Cross-platform**: macOS 14+ (Metal), Windows (D3D11), Web (WebGPU). Linux/Raspberry Pi planned.
 - **oF-like API**: Familiar design for openFrameworks users
 
 ## Quick Start

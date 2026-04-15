@@ -19,6 +19,16 @@ float getDisplayScaleFactor() {
 void setImmersiveMode(bool enabled) { (void)enabled; }
 bool getImmersiveMode() { return false; }
 
+IVec2 getWindowPosition() {
+    logWarning("Platform") << "getWindowPosition() is not supported on Web";
+    return IVec2(-1, -1);
+}
+
+void setWindowPosition(int x, int y) {
+    logWarning("Platform") << "setWindowPosition() is not supported on Web";
+    (void)x; (void)y;
+}
+
 void setWindowSizeLogical(int width, int height) {
     // Emscripten では canvas サイズを変更
     // sokol_app が使用する canvas ID を指定
@@ -44,6 +54,13 @@ bool saveScreenshot(const std::filesystem::path& path) {
     logWarning() << "[Screenshot] Emscripten では未実装";
     return false;
 }
+
+// ---------------------------------------------------------------------------
+// App menu (macOS only) — stub
+// ---------------------------------------------------------------------------
+namespace internal {
+void installAppMenu() {}
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // System sensors (stubs)

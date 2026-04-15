@@ -77,10 +77,10 @@ void PolyShape::setupRegular(World& world, float cx, float cy, float radius, int
     if (sides > 8) sides = 8;
 
     std::vector<tc::Vec2> vertices(sides);
-    float angleStep = 2.0f * M_PI / sides;
+    float angleStep = tc::TAU / sides;
 
     for (int i = 0; i < sides; ++i) {
-        float angle = i * angleStep - M_PI / 2;  // Start from top
+        float angle = i * angleStep - tc::QUARTER_TAU;  // Start from top
         vertices[i] = tc::Vec2(
             std::cos(angle) * radius,
             std::sin(angle) * radius

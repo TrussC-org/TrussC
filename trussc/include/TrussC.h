@@ -276,6 +276,11 @@ namespace internal {
     // Keyboard state
     inline std::unordered_set<int> keysPressed;
 
+    // Delta time (actual elapsed time since last update call)
+    inline double updateDeltaTime = 0.0;
+    inline std::chrono::high_resolution_clock::time_point lastUpdateCallTime;
+    inline bool lastUpdateCallTimeInitialized = false;
+
     // Frame rate measurement (10-frame moving average)
     inline double frameTimeBuffer[10] = {};
     inline int frameTimeIndex = 0;
@@ -1571,13 +1576,14 @@ inline uint64_t getFrameCount() {
 }
 
 inline double getDeltaTime() {
-    return sapp_frame_duration();
+    return internal::updateDeltaTime;
 }
 
-// Get frame rate (10-frame moving average)
+// Get frame rate (10-frame moving average, based on update delta time)
 inline double getFrameRate() {
-    // Add current frame time to buffer
-    double dt = sapp_frame_duration();
+    // Add current update delta time to buffer
+    double dt = internal::updateDeltaTime;
+    if (dt <= 0.0) return 0.0;
     internal::frameTimeBuffer[internal::frameTimeIndex] = dt;
     internal::frameTimeIndex = (internal::frameTimeIndex + 1) % 10;
     if (internal::frameTimeIndex == 0) {
@@ -2004,6 +2010,10 @@ namespace internal {
         }
         #endif
 
+        // Install the standard application menu on macOS so Cmd+Q etc. work
+        // out of the box. No-op on other platforms.
+        internal::installAppMenu();
+
         // Bring window to front on startup
         bringWindowToFront();
 
@@ -2046,11 +2056,25 @@ namespace internal {
         mcp::processHttpQueue();
         #endif
 
+        // Compute update delta time (actual elapsed since last update call)
+        auto computeUpdateDelta = [&]() {
+            if (!lastUpdateCallTimeInitialized) {
+                lastUpdateCallTimeInitialized = true;
+                lastUpdateCallTime = now;
+                updateDeltaTime = sapp_frame_duration(); // first frame: use sokol's estimate
+            } else {
+                auto callNow = std::chrono::high_resolution_clock::now();
+                updateDeltaTime = std::chrono::duration<double>(callNow - lastUpdateCallTime).count();
+                lastUpdateCallTime = callNow;
+            }
+        };
+
         // --- Update Loop processing ---
         if (updateSyncedToDraw) {
             // Synced to Draw: handled with shouldDraw below
         } else if (updateTargetFps == VSYNC) {
             // VSYNC mode (independent): update every frame
+            computeUpdateDelta();
             if (appUpdateFunc) appUpdateFunc();
         } else if (updateTargetFps > 0) {
             // Independent fixed Hz Update
@@ -2060,6 +2084,7 @@ namespace internal {
             lastUpdateTime = now;
 
             while (updateAccumulator >= updateInterval) {
+                computeUpdateDelta();
                 if (appUpdateFunc) appUpdateFunc();
                 updateAccumulator -= updateInterval;
             }
@@ -2098,6 +2123,7 @@ namespace internal {
 
             // If Update is synced to Draw, call Update here
             if (updateSyncedToDraw && appUpdateFunc) {
+                computeUpdateDelta();
                 appUpdateFunc();
             }
 

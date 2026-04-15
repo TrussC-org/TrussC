@@ -43,6 +43,16 @@ void bringWindowToFront();
 // Other: 1.0
 float getDisplayScaleFactor();
 
+// Get window position in screen coordinates (logical pixels, top-left origin)
+// macOS/Windows: returns top-left corner of the window frame
+// Linux/Mobile/Web: stub, returns (-1, -1)
+IVec2 getWindowPosition();
+
+// Set window position in screen coordinates (logical pixels, top-left origin)
+// macOS/Windows: moves the window
+// Linux/Mobile/Web: no-op (stub)
+void setWindowPosition(int x, int y);
+
 // Change window size (specified in logical size)
 // macOS: Uses NSWindow
 void setWindowSizeLogical(int width, int height);
@@ -125,5 +135,15 @@ bool isProximityClose();
 // Starts location updates on first call. Returns most recent fix.
 // ---------------------------------------------------------------------------
 Location getLocation();
+
+// ---------------------------------------------------------------------------
+// Internal — called by the framework, not user code
+// ---------------------------------------------------------------------------
+namespace internal {
+    // Install the standard macOS application menu (About / Hide / Hide Others /
+    // Show All / Quit). Called automatically from _setup_cb on macOS.
+    // No-op on other platforms.
+    void installAppMenu();
+}
 
 } // namespace trussc

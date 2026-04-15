@@ -123,7 +123,7 @@ void tcApp::draw() {
     setColor(colors::lightGray);
 
     // toString
-    drawBitmapString("toString(3.14159, 2): " + toString(3.14159, 2), 20, y);
+    drawBitmapString("toString(6.28318, 2): " + toString(6.28318, 2), 20, y);
     y += lineHeight;
 
     drawBitmapString("toString(42, 5, '0'): " + toString(42, 5, '0'), 20, y);

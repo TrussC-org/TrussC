@@ -45,6 +45,16 @@ bool getImmersiveMode() {
     return immersiveMode_;
 }
 
+IVec2 getWindowPosition() {
+    logWarning("Platform") << "getWindowPosition() is not supported on Android";
+    return IVec2(-1, -1);
+}
+
+void setWindowPosition(int x, int y) {
+    logWarning("Platform") << "setWindowPosition() is not supported on Android";
+    (void)x; (void)y;
+}
+
 void setWindowSizeLogical(int width, int height) {
     // Android apps are fullscreen — window size is determined by the device
     (void)width;
@@ -278,7 +288,7 @@ float getCompassHeading() {
 
     // Azimuth: 0=North, positive=East (clockwise), in radians
     float heading = atan2f(Hy, My);
-    if (heading < 0) heading += 2.0f * 3.14159265f;
+    if (heading < 0) heading += TAU;
     return heading;
 }
 
@@ -371,6 +381,13 @@ bool isBatteryCharging() {
 
     return charging;
 }
+
+// ---------------------------------------------------------------------------
+// App menu (macOS only) — stub
+// ---------------------------------------------------------------------------
+namespace internal {
+void installAppMenu() {}
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // Volume (via AudioManager)

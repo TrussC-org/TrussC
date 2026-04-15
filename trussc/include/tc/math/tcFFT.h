@@ -25,13 +25,9 @@
 #include <algorithm>
 
 #include "../utils/tcLog.h"
+#include "../../tcMath.h"
 
 namespace trussc {
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-constexpr float FFT_PI = 3.14159265358979323846f;
 
 // ---------------------------------------------------------------------------
 // Window function types
@@ -54,12 +50,12 @@ inline float windowFunction(WindowType type, int i, int n) {
         case WindowType::Rect:
             return 1.0f;
         case WindowType::Hanning:
-            return 0.5f * (1.0f - std::cos(2.0f * FFT_PI * t));
+            return 0.5f * (1.0f - std::cos(TAU * t));
         case WindowType::Hamming:
-            return 0.54f - 0.46f * std::cos(2.0f * FFT_PI * t);
+            return 0.54f - 0.46f * std::cos(TAU * t);
         case WindowType::Blackman:
-            return 0.42f - 0.5f * std::cos(2.0f * FFT_PI * t)
-                        + 0.08f * std::cos(4.0f * FFT_PI * t);
+            return 0.42f - 0.5f * std::cos(TAU * t)
+                        + 0.08f * std::cos(2.0f * TAU * t);
         default:
             return 1.0f;
     }
@@ -140,7 +136,7 @@ inline void fft(std::vector<std::complex<float>>& data) {
 
     // Butterfly operation
     for (int len = 2; len <= n; len *= 2) {
-        float angle = -2.0f * FFT_PI / len;
+        float angle = -TAU / len;
         std::complex<float> wn(std::cos(angle), std::sin(angle));
 
         for (int i = 0; i < n; i += len) {
