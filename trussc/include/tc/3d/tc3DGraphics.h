@@ -77,6 +77,30 @@ inline void clearMaterial() {
     internal::currentMaterial = nullptr;
 }
 
+// ---------------------------------------------------------------------------
+// PBR lighting API (LightingMode::GpuPbr)
+// ---------------------------------------------------------------------------
+
+// Select which lighting pipeline Mesh::draw() uses.
+inline void setLightingMode(LightingMode mode) {
+    internal::lightingMode = mode;
+}
+
+inline LightingMode getLightingMode() {
+    return internal::lightingMode;
+}
+
+// Set the current PBR material. Also switches lightingMode to GpuPbr as a
+// convenience so the user doesn't need to call setLightingMode() separately.
+inline void setPbrMaterial(PbrMaterial& material) {
+    internal::currentPbrMaterial = &material;
+    internal::lightingMode = LightingMode::GpuPbr;
+}
+
+inline void clearPbrMaterial() {
+    internal::currentPbrMaterial = nullptr;
+}
+
 // Set camera position (for specular calculation)
 inline void setCameraPosition(const Vec3& pos) {
     internal::cameraPosition = pos;

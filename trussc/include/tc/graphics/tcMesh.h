@@ -23,6 +23,74 @@ class Mesh {
 public:
     Mesh() : mode_(PrimitiveMode::Triangles) {}
 
+    ~Mesh() {
+        releaseGpuBuffers();
+    }
+
+    // Copy does not transfer GPU buffers; the copy starts out dirty and will
+    // re-upload on next GpuPbr draw. This matches VBO ownership semantics.
+    Mesh(const Mesh& other)
+        : mode_(other.mode_),
+          vertices_(other.vertices_),
+          normals_(other.normals_),
+          colors_(other.colors_),
+          indices_(other.indices_),
+          texCoords_(other.texCoords_) {}
+
+    Mesh& operator=(const Mesh& other) {
+        if (this == &other) return *this;
+        releaseGpuBuffers();
+        mode_ = other.mode_;
+        vertices_ = other.vertices_;
+        normals_ = other.normals_;
+        colors_ = other.colors_;
+        indices_ = other.indices_;
+        texCoords_ = other.texCoords_;
+        gpuDirty_ = true;
+        return *this;
+    }
+
+    Mesh(Mesh&& other) noexcept
+        : mode_(other.mode_),
+          vertices_(std::move(other.vertices_)),
+          normals_(std::move(other.normals_)),
+          colors_(std::move(other.colors_)),
+          indices_(std::move(other.indices_)),
+          texCoords_(std::move(other.texCoords_)),
+          vbuf_(other.vbuf_),
+          ibuf_(other.ibuf_),
+          gpuVertexCount_(other.gpuVertexCount_),
+          gpuIndexCount_(other.gpuIndexCount_),
+          gpuDirty_(other.gpuDirty_) {
+        other.vbuf_ = {};
+        other.ibuf_ = {};
+        other.gpuVertexCount_ = 0;
+        other.gpuIndexCount_ = 0;
+        other.gpuDirty_ = true;
+    }
+
+    Mesh& operator=(Mesh&& other) noexcept {
+        if (this == &other) return *this;
+        releaseGpuBuffers();
+        mode_ = other.mode_;
+        vertices_ = std::move(other.vertices_);
+        normals_ = std::move(other.normals_);
+        colors_ = std::move(other.colors_);
+        indices_ = std::move(other.indices_);
+        texCoords_ = std::move(other.texCoords_);
+        vbuf_ = other.vbuf_;
+        ibuf_ = other.ibuf_;
+        gpuVertexCount_ = other.gpuVertexCount_;
+        gpuIndexCount_ = other.gpuIndexCount_;
+        gpuDirty_ = other.gpuDirty_;
+        other.vbuf_ = {};
+        other.ibuf_ = {};
+        other.gpuVertexCount_ = 0;
+        other.gpuIndexCount_ = 0;
+        other.gpuDirty_ = true;
+        return *this;
+    }
+
     // Mode settings
     void setMode(PrimitiveMode mode) {
         mode_ = mode;
@@ -337,7 +405,16 @@ public:
     void draw() const {
         if (vertices_.empty()) return;
 
-        // If lighting enabled and normals present, draw with lighting
+        // GPU PBR path: requires normals and a PbrMaterial. Evaluated per-pixel
+        // on the GPU via the meshPbr shader. See tcMeshPbrPipeline.h.
+        if (internal::lightingMode == LightingMode::GpuPbr &&
+            hasNormals() && normals_.size() >= vertices_.size() &&
+            internal::currentPbrMaterial) {
+            drawGpuPbr();
+            return;
+        }
+
+        // CPU Phong path: legacy per-vertex lighting baked into vertex colors.
         if (internal::lightingEnabled && hasNormals() &&
             normals_.size() >= vertices_.size() && internal::currentMaterial) {
             drawWithLighting();
@@ -834,12 +911,124 @@ private:
         sgl_end();
     }
 
+public:
+    // ---------------------------------------------------------------------------
+    // GPU buffer management (for LightingMode::GpuPbr path)
+    // ---------------------------------------------------------------------------
+    //
+    // Mesh owns optional sg_buffer handles which are created lazily on the
+    // first GpuPbr draw and kept alive until the Mesh is destroyed.
+    //
+    // The buffers are marked dirty automatically when the vertex or index
+    // vector size changes. For in-place modifications that don't change size
+    // (e.g. writing directly into getVertices()[i].x), call markGpuDirty()
+    // explicitly before the next draw.
+
+    // Force a re-upload on the next GpuPbr draw.
+    void markGpuDirty() const { gpuDirty_ = true; }
+
+    // Upload interleaved (pos, normal, uv) data to a sg_buffer. Lazy; no-op if
+    // already clean and sizes match. Called automatically from drawGpuPbr().
+    void uploadToGpu() const {
+        // Detect external mutation via size change (best effort)
+        if (static_cast<int>(vertices_.size()) != gpuVertexCount_ ||
+            static_cast<int>(indices_.size()) != gpuIndexCount_) {
+            gpuDirty_ = true;
+        }
+        if (!gpuDirty_) return;
+        if (vertices_.empty()) return;
+
+        // Pack interleaved vertex data: pos(3) + normal(3) + uv(2) = 32 bytes
+        struct PbrVertex {
+            float x, y, z;
+            float nx, ny, nz;
+            float u, v;
+        };
+        std::vector<PbrVertex> packed;
+        packed.resize(vertices_.size());
+        for (size_t i = 0; i < vertices_.size(); ++i) {
+            PbrVertex& pv = packed[i];
+            pv.x = vertices_[i].x;
+            pv.y = vertices_[i].y;
+            pv.z = vertices_[i].z;
+            if (i < normals_.size()) {
+                pv.nx = normals_[i].x;
+                pv.ny = normals_[i].y;
+                pv.nz = normals_[i].z;
+            } else {
+                pv.nx = 0.0f; pv.ny = 1.0f; pv.nz = 0.0f;
+            }
+            if (i < texCoords_.size()) {
+                pv.u = texCoords_[i].x;
+                pv.v = texCoords_[i].y;
+            } else {
+                pv.u = 0.0f; pv.v = 0.0f;
+            }
+        }
+
+        releaseGpuBuffers();
+
+        sg_buffer_desc vbd = {};
+        vbd.data.ptr = packed.data();
+        vbd.data.size = packed.size() * sizeof(PbrVertex);
+        vbd.label = "tc_mesh_pbr_vbuf";
+        vbuf_ = sg_make_buffer(&vbd);
+        gpuVertexCount_ = static_cast<int>(vertices_.size());
+
+        if (!indices_.empty()) {
+            sg_buffer_desc ibd = {};
+            ibd.usage.index_buffer = true;
+            ibd.data.ptr = indices_.data();
+            ibd.data.size = indices_.size() * sizeof(unsigned int);
+            ibd.label = "tc_mesh_pbr_ibuf";
+            ibuf_ = sg_make_buffer(&ibd);
+            gpuIndexCount_ = static_cast<int>(indices_.size());
+        } else {
+            gpuIndexCount_ = 0;
+        }
+
+        gpuDirty_ = false;
+    }
+
+    // Draw via the GPU PBR pipeline. Defined in tcMeshPbrPipeline.h which is
+    // included after this file by TrussC.h.
+    void drawGpuPbr() const;
+
+    // Accessors used by PbrPipeline
+    sg_buffer getGpuVertexBuffer() const { return vbuf_; }
+    sg_buffer getGpuIndexBuffer() const { return ibuf_; }
+    int getGpuVertexCount() const { return gpuVertexCount_; }
+    int getGpuIndexCount() const { return gpuIndexCount_; }
+
+private:
+    void releaseGpuBuffers() const {
+        if (vbuf_.id != 0) {
+            sg_destroy_buffer(vbuf_);
+            vbuf_ = {};
+        }
+        if (ibuf_.id != 0) {
+            sg_destroy_buffer(ibuf_);
+            ibuf_ = {};
+        }
+        gpuVertexCount_ = 0;
+        gpuIndexCount_ = 0;
+        gpuDirty_ = true;
+    }
+
     PrimitiveMode mode_;
     std::vector<Vec3> vertices_;
     std::vector<Vec3> normals_;
     std::vector<Color> colors_;
     std::vector<unsigned int> indices_;
     std::vector<Vec2> texCoords_;
+
+    // GPU buffers for LightingMode::GpuPbr. mutable so that draw() (const) can
+    // lazily upload.
+    mutable sg_buffer vbuf_{};
+    mutable sg_buffer ibuf_{};
+    mutable int gpuVertexCount_{0};
+    mutable int gpuIndexCount_{0};
+    mutable bool gpuDirty_{true};
 };
 
 } // namespace trussc

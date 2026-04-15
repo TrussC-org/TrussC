@@ -144,3 +144,4 @@ addons/CMakeLists.txt
 # Auto-generated Shader Headers (sokol-shdc output)
 # =============================================================================
 trussc/include/tc/gpu/shaders/lut.glsl.h
+trussc/include/tc/gpu/shaders/meshPbr.glsl.h

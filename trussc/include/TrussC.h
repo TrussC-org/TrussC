@@ -2565,6 +2565,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 // TrussC lighting (must be included before tcMesh.h)
 #include "tc/3d/tcLightingState.h"
 #include "tc/3d/tcMaterial.h"
+#include "tc/3d/tcPbrMaterial.h"
 #include "tc/3d/tcLight.h"
 
 // TrussC pixel buffer
@@ -2590,6 +2591,9 @@ inline void bindCursorImage(Cursor cursor, const Image& image,
 
 // TrussC mesh
 #include "tc/graphics/tcMesh.h"
+
+// TrussC PBR mesh pipeline (defines Mesh::drawGpuPbr() out-of-class)
+#include "tc/3d/tcMeshPbrPipeline.h"
 
 // TrussC stroke mesh (thick line drawing)
 #include "tc/graphics/tcStrokeMesh.h"

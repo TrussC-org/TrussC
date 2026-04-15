@@ -116,6 +116,10 @@ public:
         quadraticAttenuation_ = quadratic;
     }
 
+    float getConstantAttenuation() const { return constantAttenuation_; }
+    float getLinearAttenuation() const { return linearAttenuation_; }
+    float getQuadraticAttenuation() const { return quadraticAttenuation_; }
+
     // === Enable/Disable ===
 
     void enable() { enabled_ = true; }
