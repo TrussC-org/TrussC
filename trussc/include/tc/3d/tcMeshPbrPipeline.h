@@ -46,12 +46,13 @@ public:
         pd.layout.attrs[ATTR_pbr_mesh_normal].format   = SG_VERTEXFORMAT_FLOAT3;
         pd.layout.attrs[ATTR_pbr_mesh_texcoord0].format = SG_VERTEXFORMAT_FLOAT2;
 
-        // Depth test + back-face cull for solid mesh rendering.
+        // Depth test on, no culling. createSphere and friends use CW winding
+        // while most PBR content assumes CCW, so disabling cull matches the
+        // behaviour of the default sokol_gl 3D pipeline (tcGlobal.cpp).
         pd.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
         pd.depth.write_enabled = true;
         pd.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-        pd.cull_mode = SG_CULLMODE_BACK;
-        pd.face_winding = SG_FACEWINDING_CCW;
+        pd.cull_mode = SG_CULLMODE_NONE;
 
         // Opaque draw. baseColor.a is preserved but not blended for v1.
         pd.colors[0].blend.enabled = false;
