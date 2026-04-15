@@ -14,8 +14,8 @@ REM Move to script directory
 cd /d "%~dp0"
 set SCRIPT_DIR=%cd%
 
-REM Source directory
-set SOURCE_DIR=%SCRIPT_DIR%\tools\projectGenerator
+REM Source directory (flat layout — CMakeLists.txt lives at SCRIPT_DIR)
+set SOURCE_DIR=%SCRIPT_DIR%
 
 REM Create build folder
 if not exist "%SOURCE_DIR%\build" (

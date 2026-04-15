@@ -3,7 +3,7 @@
 # TrussC Project Generator Build Script (Linux)
 # =============================================================================
 # Run this script to build projectGenerator
-# Usage: ./buildProjectGenerator_linux.sh
+# Usage: ./build_linux.sh
 # =============================================================================
 
 # Move to script directory
@@ -23,8 +23,8 @@ if [ $? -ne 0 ]; then
 fi
 echo ""
 
-# Source directory
-SOURCE_DIR="$SCRIPT_DIR/tools/projectGenerator"
+# Source directory (flat layout — CMakeLists.txt lives at SCRIPT_DIR)
+SOURCE_DIR="$SCRIPT_DIR"
 
 # Create build folder
 if [ ! -d "$SOURCE_DIR/build" ]; then

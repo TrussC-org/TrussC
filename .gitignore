@@ -111,13 +111,15 @@ addons/*
 !addons/tcxWebSocket
 
 # =============================================================================
-# Project Generator
+# Project Generator (built binary + build artifacts in tools/)
 # =============================================================================
 
-# Exclude projectGenerator binaries (only build scripts are tracked)
-projectGenerator/projectGenerator.app
-projectGenerator/projectGenerator.exe
-projectGenerator/projectGenerator
+# Exclude projectGenerator binaries and build output (only source is tracked)
+tools/projectGenerator.app
+tools/projectGenerator.exe
+tools/projectGenerator
+tools/bin/
+tools/build/
 
 # =============================================================================
 # Tools (auto-downloaded)

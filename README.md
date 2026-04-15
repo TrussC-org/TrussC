@@ -20,7 +20,7 @@ Inspired by openFrameworks, implemented simply with modern C++.
 
 ### Using Project Generator (Recommended)
 
-Use `projectGenerator/` to create projects via GUI.
+Build it once from `tools/` (run `tools/build_mac.command`, `tools/build_linux.sh`, or `tools/build_win.bat`) to create projects via GUI.
 Supports VSCode, Cursor, Xcode, and Visual Studio.
 
 ### Command Line Build

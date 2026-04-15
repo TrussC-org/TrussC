@@ -16,8 +16,8 @@ echo "  TrussC Project Generator Build Script"
 echo "=========================================="
 echo ""
 
-# Source directory
-SOURCE_DIR="$SCRIPT_DIR/tools/projectGenerator"
+# Source directory (flat layout — CMakeLists.txt lives at SCRIPT_DIR)
+SOURCE_DIR="$SCRIPT_DIR"
 
 # Create build folder
 if [ ! -d "$SOURCE_DIR/build" ]; then

@@ -23,7 +23,7 @@ The **Project Generator** is the core tool for managing TrussC projects. It hand
 - Configuring Web (WASM) builds
 
 ### GUI Mode
-Run the `projectGenerator` app (found in `projectGenerator/`).
+Run the `projectGenerator` app (built from `tools/`).
 - **Create:** Select a name and path, choose addons, and click "Generate".
 - **Update:** Use "Import" to select an existing project folder, modify settings, and click "Update".
 

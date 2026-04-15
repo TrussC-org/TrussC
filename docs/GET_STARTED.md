@@ -44,16 +44,16 @@ sudo apt install cmake
 Linux requires additional development packages. A helper script is provided to check and install them:
 
 ```bash
-./projectGenerator/install_dependencies_linux.sh
+./tools/install_dependencies_linux.sh
 ```
 
 This will list any missing packages and ask to install them. Use `-y` to skip the prompt:
 
 ```bash
-./projectGenerator/install_dependencies_linux.sh -y
+./tools/install_dependencies_linux.sh -y
 ```
 
-> **Note:** The build script (`buildProjectGenerator_linux.sh`) also runs this check automatically.
+> **Note:** The build script (`tools/build_linux.sh`) also runs this check automatically.
 
 ### Editor Setup
 

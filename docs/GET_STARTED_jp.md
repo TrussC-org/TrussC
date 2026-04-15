@@ -44,16 +44,16 @@ sudo apt install cmake
 Linux では追加の開発パッケージが必要です。ヘルパースクリプトでチェック＆インストールできます:
 
 ```bash
-./projectGenerator/install_dependencies_linux.sh
+./tools/install_dependencies_linux.sh
 ```
 
 不足パッケージを一覧表示し、インストールするか確認します。`-y` でプロンプトをスキップ:
 
 ```bash
-./projectGenerator/install_dependencies_linux.sh -y
+./tools/install_dependencies_linux.sh -y
 ```
 
-> **注意:** ビルドスクリプト（`buildProjectGenerator_linux.sh`）実行時にも自動でこのチェックが走ります。
+> **注意:** ビルドスクリプト（`tools/build_linux.sh`）実行時にも自動でこのチェックが走ります。
 
 ### エディタのセットアップ
 

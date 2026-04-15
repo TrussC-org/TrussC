@@ -788,9 +788,9 @@ TrussC/
 ├── addons/              # Optional addons (tcxBox2d, tcxOsc, etc.)
 ├── examples/            # Sample projects
 ├── docs/                # Documentation
-└── projectGenerator/    # Build scripts (run these first!)
-    ├── buildProjectGenerator_mac.command
-    ├── buildProjectGenerator_win.bat
-    └── buildProjectGenerator_linux.sh
+└── tools/               # Build scripts and CLI source (run these first!)
+    ├── build_mac.command
+    ├── build_win.bat
+    └── build_linux.sh
 ```
 

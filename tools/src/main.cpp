@@ -60,15 +60,15 @@ static void parseAddonsMake(const string& projectPath, const vector<string>& ava
 static string autoDetectTcRoot() {
     // 1. Try environment variable
     const char* envRoot = std::getenv("TRUSSC_DIR");
-    if (envRoot && fs::exists(string(envRoot) + "/trussc/cmake/trussc_app.cmake")) {
+    if (envRoot && fs::exists(string(envRoot) + "/core/cmake/trussc_app.cmake")) {
         return string(envRoot);
     }
 
     // 2. Try relative path from executable
-    // Typically projectGenerator is in TRUSSC_ROOT/projectGenerator/projectGenerator.app/Contents/MacOS/
-    // or TRUSSC_ROOT/projectGenerator/tools/projectGenerator/bin/
+    // Typically projectGenerator lives in TRUSSC_ROOT/tools/bin/projectGenerator.app/Contents/MacOS/
+    // (Linux/Windows: TRUSSC_ROOT/tools/bin/projectGenerator[.exe])
     // We assume we are in TRUSSC_ROOT/... something
-    
+
     // Search up to 5 parent directories
     fs::path exePath = getExecutablePath();
     fs::path searchPath = exePath.parent_path();
@@ -81,7 +81,7 @@ static string autoDetectTcRoot() {
     #endif
 
     for (int i = 0; i < 5 && searchPath.has_parent_path(); i++) {
-        fs::path checkPath = searchPath / "trussc" / "cmake" / "trussc_app.cmake";
+        fs::path checkPath = searchPath / "core" / "cmake" / "trussc_app.cmake";
         if (fs::exists(checkPath)) {
             return searchPath.string();
         }
