@@ -1,0 +1,5 @@
+{
+  "description": "TLS/SSL support (mbedTLS)",
+  "author": "TrussC",
+  "license": "MIT"
+}

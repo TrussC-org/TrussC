@@ -1,0 +1,5 @@
+{
+  "description": "HTTPS client (libcurl)",
+  "author": "TrussC",
+  "license": "MIT"
+}
