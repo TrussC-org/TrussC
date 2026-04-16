@@ -1724,6 +1724,7 @@ static void printTopHelp() {
          << "  doctor                         Check development environment\n"
          << "  build                          Build the project\n"
          << "  run                            Build and launch the project\n"
+         << "  self-update                    Update TrussC and rebuild trusscli\n"
          << "\n"
          << "Common options (per subcommand):\n"
          << "  -p, --path <path>              Operate on a specific project path\n"
@@ -1740,6 +1741,91 @@ static void printTopHelp() {
          << "  trusscli update -p ./apps/myApp           Regenerate a specific project\n"
          << "\n"
          << "Run 'trusscli <command> --help' for command-specific help.\n";
+}
+
+// =============================================================================
+// Subcommand: self-update
+// =============================================================================
+
+static void printSelfUpdateHelp() {
+    cout << "Usage: trusscli self-update [options]\n"
+         << "\n"
+         << "Update TrussC to the latest version by pulling the latest code from\n"
+         << "the git repository and rebuilding trusscli. The /usr/local/bin symlink\n"
+         << "(if present) automatically points to the new binary.\n"
+         << "\n"
+         << "Options:\n"
+         << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "  -h, --help                 Show this help\n";
+}
+
+static int cmdSelfUpdate(const vector<string>& args) {
+    string tcRoot;
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printSelfUpdateHelp(); return 0; }
+        else if (a == "--tc-root") {
+            if (i + 1 >= args.size()) {
+                cerr << "Error: --tc-root requires a value\n";
+                return 1;
+            }
+            tcRoot = args[++i];
+        }
+        else {
+            cerr << "Error: unknown option '" << a << "'\n"
+                 << "Run 'trusscli self-update --help' for usage.\n";
+            return 1;
+        }
+    }
+
+    if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
+    if (tcRoot.empty()) {
+        cerr << "Error: could not detect TrussC root. Use --tc-root <path>.\n";
+        return 1;
+    }
+
+    // Step 1: git pull
+    cout << "Updating TrussC (" << tcRoot << ") ...\n";
+    int rc = runProcess({"git", "-C", tcRoot, "pull"});
+    if (rc != 0) {
+        cerr << "Error: git pull failed (exit code " << rc << ").\n";
+        return 1;
+    }
+
+    // Step 2: rebuild trusscli
+#ifdef _WIN32
+    cout << "\nGit pull succeeded. Please rebuild trusscli manually:\n"
+         << "  cd " << tcRoot << "/tools\n"
+         << "  build_win.bat\n";
+    return 0;
+#else
+    cout << "\nRebuilding trusscli ...\n";
+    string cmake = findCMake();
+    string toolsDir = tcRoot + "/tools";
+    string buildDir = toolsDir + "/build";
+
+    // Ensure build directory exists
+    fs::create_directories(buildDir);
+
+    // cmake configure
+    rc = runProcess({cmake, "-S", toolsDir, "-B", buildDir});
+    if (rc != 0) {
+        cerr << "Error: cmake configure failed.\n";
+        return 1;
+    }
+
+    // cmake build
+    rc = runProcess({cmake, "--build", buildDir, "--parallel"});
+    if (rc != 0) {
+        cerr << "Error: build failed.\n";
+        return 1;
+    }
+
+    cout << "\ntrusscli updated successfully.\n"
+         << "The new version will be used on the next invocation.\n";
+    return 0;
+#endif
 }
 
 // =============================================================================
@@ -1783,8 +1869,9 @@ int main(int argc, char* argv[]) {
     if (first == "addon")  return cmdAddon(subArgs);
     if (first == "info")   return cmdInfo(subArgs);
     if (first == "doctor") return cmdDoctor(subArgs);
-    if (first == "build")  return cmdBuild(subArgs);
-    if (first == "run")    return cmdRun(subArgs);
+    if (first == "build")       return cmdBuild(subArgs);
+    if (first == "run")         return cmdRun(subArgs);
+    if (first == "self-update") return cmdSelfUpdate(subArgs);
 
     cerr << "Error: unknown command '" << first << "'\n"
          << "Run 'trusscli --help' for usage.\n";
