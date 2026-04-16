@@ -462,8 +462,9 @@ static bool writeAddonsMake(const string& projectPath,
     return true;
 }
 
-// Forward declarations for functions defined later but used by update
+// Forward declarations for functions defined later
 static string findCMake();
+static vector<string> readProjectAddons(const string& projectPath);
 
 // =============================================================================
 // Subcommand: new
@@ -776,9 +777,9 @@ static int cmdAdd(const vector<string>& args) {
     // Validate requested addons against the available set
     for (const string& want : requestedAddons) {
         if (find(availableAddons.begin(), availableAddons.end(), want) == availableAddons.end()) {
-            cerr << "Error: addon '" << want << "' not found in " << resolvedTcRoot << "/addons/\n"
-                 << "Available addons:\n";
-            for (const string& aa : availableAddons) cerr << "  " << aa << "\n";
+            cerr << "Error: addon '" << want << "' is not available locally.\n"
+                 << "Clone it first:  trusscli addon clone " << want << "\n"
+                 << "Or list remote addons:  trusscli addon list --remote\n";
             return 1;
         }
     }
@@ -961,17 +962,406 @@ static int cmdRemove(const vector<string>& args) {
 }
 
 // =============================================================================
-// Subcommand: addon (dispatches to add / remove / future: list, update, etc.)
+// Addon registry
+// =============================================================================
+
+static const char* kRegistryURL =
+    "https://raw.githubusercontent.com/TrussC-org/trussc-addons/gh-pages/registry.json";
+
+struct AddonInfo {
+    string name;
+    string url;        // git clone URL
+    string version;
+    string description;
+    string author;
+};
+
+// Fetch the addon registry from GitHub. Returns empty vector on network error.
+static vector<AddonInfo> fetchRegistry() {
+    cout << "Fetching addon registry ...\n";
+    auto [code, out] = captureCommand("curl -sf \"" + string(kRegistryURL) + "\"");
+    if (code != 0 || out.empty()) {
+        cerr << "Error: could not fetch addon registry.\n"
+             << "URL: " << kRegistryURL << "\n"
+             << "Check your network connection.\n";
+        return {};
+    }
+    try {
+        Json data = Json::parse(out);
+        vector<AddonInfo> result;
+        for (const auto& a : data["addons"]) {
+            result.push_back({
+                a.value("name", ""),
+                a.value("url", ""),
+                a.value("version", "unknown"),
+                a.value("description", ""),
+                a.value("author", "")
+            });
+        }
+        return result;
+    } catch (...) {
+        cerr << "Error: failed to parse registry JSON.\n";
+        return {};
+    }
+}
+
+// =============================================================================
+// Subcommand: addon list
+// =============================================================================
+
+static int cmdAddonList(const vector<string>& args) {
+    bool showRemote = false;
+    string explicitPath;
+    string tcRoot;
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") {
+            cout << "Usage: trusscli addon list [options]\n"
+                 << "\n"
+                 << "List addons. By default shows locally available addons and which\n"
+                 << "are installed in the current project. Use --remote to also show\n"
+                 << "addons available from the registry.\n"
+                 << "\n"
+                 << "Options:\n"
+                 << "      --remote               Include addons from the online registry\n"
+                 << "  -p, --path <path>          Project path (for installed check)\n"
+                 << "      --tc-root <path>       TrussC root directory\n"
+                 << "  -h, --help                 Show this help\n";
+            return 0;
+        }
+        else if (a == "--remote") showRemote = true;
+        else if (a == "-p" || a == "--path") {
+            if (++i >= args.size()) { cerr << "Error: " << a << " requires a value\n"; return 1; }
+            explicitPath = args[i];
+        }
+        else if (a == "--tc-root") {
+            if (++i >= args.size()) { cerr << "Error: --tc-root requires a value\n"; return 1; }
+            tcRoot = args[i];
+        }
+    }
+
+    if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
+    if (tcRoot.empty()) {
+        cerr << "Error: could not detect TrussC root.\n";
+        return 1;
+    }
+
+    // Scan local addons
+    vector<string> localAddons;
+    scanAddons(tcRoot, localAddons);
+
+    // Check which are installed in the current project
+    string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
+    vector<string> installedAddons;
+    if (!projectPath.empty()) {
+        installedAddons = readProjectAddons(projectPath);
+    }
+    auto isInstalled = [&](const string& name) {
+        return find(installedAddons.begin(), installedAddons.end(), name) != installedAddons.end();
+    };
+    auto isLocal = [&](const string& name) {
+        return find(localAddons.begin(), localAddons.end(), name) != localAddons.end();
+    };
+
+    // Display local addons
+    if (!localAddons.empty()) {
+        for (const string& name : localAddons) {
+            string status = isInstalled(name) ? "[installed]" : "[available]";
+            cout << "  " << status << "   " << name << "\n";
+        }
+    } else {
+        cout << "  (no local addons found)\n";
+    }
+
+    // Optionally show remote addons
+    if (showRemote) {
+        auto registry = fetchRegistry();
+        if (registry.empty()) return 1;
+
+        bool hasRemote = false;
+        for (const auto& addon : registry) {
+            if (!isLocal(addon.name)) {
+                if (!hasRemote) {
+                    cout << "\n  Remote (use 'trusscli addon clone <name>' to download):\n";
+                    hasRemote = true;
+                }
+                cout << "  [remote]      " << addon.name;
+                if (!addon.version.empty() && addon.version != "unknown") {
+                    cout << "  " << addon.version;
+                }
+                if (!addon.description.empty()) {
+                    cout << "  " << addon.description;
+                }
+                cout << "\n";
+            }
+        }
+        if (!hasRemote) {
+            cout << "\n  All registry addons are already available locally.\n";
+        }
+    }
+
+    return 0;
+}
+
+// =============================================================================
+// Subcommand: addon clone
+// =============================================================================
+
+static int cmdAddonClone(const vector<string>& args) {
+    vector<string> addonNames;
+    string tcRoot;
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") {
+            cout << "Usage: trusscli addon clone <addon> [<addon>...]\n"
+                 << "\n"
+                 << "Clone addon(s) from the registry into the TrussC addons/ folder.\n"
+                 << "After cloning, use 'trusscli addon add <addon>' to add it to a project.\n"
+                 << "\n"
+                 << "Options:\n"
+                 << "      --tc-root <path>       TrussC root directory\n"
+                 << "  -h, --help                 Show this help\n";
+            return 0;
+        }
+        else if (a == "--tc-root") {
+            if (++i >= args.size()) { cerr << "Error: --tc-root requires a value\n"; return 1; }
+            tcRoot = args[i];
+        }
+        else if (!a.empty() && a[0] == '-') {
+            cerr << "Error: unknown option '" << a << "'\n"; return 1;
+        }
+        else {
+            addonNames.push_back(a);
+        }
+    }
+
+    if (addonNames.empty()) {
+        cerr << "Error: 'addon clone' requires at least one addon name\n"
+             << "Usage: trusscli addon clone <addon> [<addon>...]\n";
+        return 1;
+    }
+
+    if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
+    if (tcRoot.empty()) {
+        cerr << "Error: could not detect TrussC root.\n";
+        return 1;
+    }
+
+    auto registry = fetchRegistry();
+    if (registry.empty()) return 1;
+
+    int failures = 0;
+    for (const string& name : addonNames) {
+        // Find in registry
+        const AddonInfo* found = nullptr;
+        for (const auto& a : registry) {
+            if (a.name == name) { found = &a; break; }
+        }
+        if (!found) {
+            cerr << "Error: '" << name << "' not found in registry.\n"
+                 << "Run 'trusscli addon list --remote' to see available addons.\n";
+            failures++;
+            continue;
+        }
+
+        string targetDir = tcRoot + "/addons/" + name;
+        if (fs::exists(targetDir)) {
+            cout << "  (already exists) " << name << " → " << targetDir << "\n";
+            continue;
+        }
+
+        cout << "Cloning " << name << " ...\n";
+        int rc = runProcess({"git", "clone", found->url, targetDir});
+        if (rc != 0) {
+            cerr << "Error: git clone failed for " << name << "\n";
+            failures++;
+        } else {
+            cout << "  Cloned " << name << " → " << targetDir << "\n";
+        }
+    }
+
+    return failures > 0 ? 1 : 0;
+}
+
+// =============================================================================
+// Subcommand: addon pull
+// =============================================================================
+
+static int cmdAddonPull(const vector<string>& args) {
+    vector<string> addonNames;
+    bool pullAll = false;
+    string tcRoot;
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") {
+            cout << "Usage: trusscli addon pull [<addon>...] [--all]\n"
+                 << "\n"
+                 << "Update addon(s) by running git pull in their directory.\n"
+                 << "Only affects addons that were cloned via git (have a .git/ folder).\n"
+                 << "\n"
+                 << "Options:\n"
+                 << "      --all                  Pull all git-based addons\n"
+                 << "      --tc-root <path>       TrussC root directory\n"
+                 << "  -h, --help                 Show this help\n";
+            return 0;
+        }
+        else if (a == "--all") pullAll = true;
+        else if (a == "--tc-root") {
+            if (++i >= args.size()) { cerr << "Error: --tc-root requires a value\n"; return 1; }
+            tcRoot = args[i];
+        }
+        else if (!a.empty() && a[0] == '-') {
+            cerr << "Error: unknown option '" << a << "'\n"; return 1;
+        }
+        else {
+            addonNames.push_back(a);
+        }
+    }
+
+    if (addonNames.empty() && !pullAll) {
+        cerr << "Error: specify addon name(s) or use --all\n"
+             << "Usage: trusscli addon pull [<addon>...] [--all]\n";
+        return 1;
+    }
+
+    if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
+    if (tcRoot.empty()) {
+        cerr << "Error: could not detect TrussC root.\n";
+        return 1;
+    }
+
+    string addonsDir = tcRoot + "/addons";
+    if (!fs::exists(addonsDir)) {
+        cerr << "Error: addons directory not found at " << addonsDir << "\n";
+        return 1;
+    }
+
+    // If --all, collect all git-based addons
+    if (pullAll) {
+        addonNames.clear();
+        for (const auto& entry : fs::directory_iterator(addonsDir)) {
+            if (entry.is_directory() &&
+                fs::exists(entry.path() / ".git")) {
+                addonNames.push_back(entry.path().filename().string());
+            }
+        }
+        sort(addonNames.begin(), addonNames.end());
+        if (addonNames.empty()) {
+            cout << "No git-based addons found in " << addonsDir << "\n";
+            return 0;
+        }
+    }
+
+    int failures = 0;
+    for (const string& name : addonNames) {
+        string addonDir = addonsDir + "/" + name;
+        if (!fs::exists(addonDir)) {
+            cerr << "  (not found) " << name << "\n";
+            failures++;
+            continue;
+        }
+        if (!fs::exists(addonDir + "/.git")) {
+            cout << "  (not a git repo, skipping) " << name << "\n";
+            continue;
+        }
+        cout << "Pulling " << name << " ...\n";
+        int rc = runProcess({"git", "-C", addonDir, "pull"});
+        if (rc != 0) {
+            cerr << "  Error: git pull failed for " << name << "\n";
+            failures++;
+        }
+    }
+
+    return failures > 0 ? 1 : 0;
+}
+
+// =============================================================================
+// Subcommand: addon search
+// =============================================================================
+
+static int cmdAddonSearch(const vector<string>& args) {
+    string query;
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") {
+            cout << "Usage: trusscli addon search <query>\n"
+                 << "\n"
+                 << "Search the addon registry by name or description.\n";
+            return 0;
+        }
+        else if (!a.empty() && a[0] == '-') {
+            cerr << "Error: unknown option '" << a << "'\n"; return 1;
+        }
+        else {
+            if (!query.empty()) query += " ";
+            query += a;
+        }
+    }
+
+    if (query.empty()) {
+        cerr << "Error: 'addon search' requires a search query\n"
+             << "Usage: trusscli addon search <query>\n";
+        return 1;
+    }
+
+    auto registry = fetchRegistry();
+    if (registry.empty()) return 1;
+
+    // Case-insensitive search
+    string lowerQuery = query;
+    transform(lowerQuery.begin(), lowerQuery.end(), lowerQuery.begin(), ::tolower);
+
+    vector<const AddonInfo*> matches;
+    for (const auto& a : registry) {
+        string lowerName = a.name;
+        transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+        string lowerDesc = a.description;
+        transform(lowerDesc.begin(), lowerDesc.end(), lowerDesc.begin(), ::tolower);
+
+        if (lowerName.find(lowerQuery) != string::npos ||
+            lowerDesc.find(lowerQuery) != string::npos) {
+            matches.push_back(&a);
+        }
+    }
+
+    if (matches.empty()) {
+        cout << "No addons matching '" << query << "' found in registry.\n";
+        return 0;
+    }
+
+    cout << matches.size() << " addon(s) matching '" << query << "':\n\n";
+    for (const auto* a : matches) {
+        cout << "  " << a->name;
+        if (!a->version.empty() && a->version != "unknown") cout << "  " << a->version;
+        cout << "\n";
+        if (!a->description.empty()) cout << "    " << a->description << "\n";
+        if (!a->author.empty()) cout << "    by " << a->author << "\n";
+        cout << "    " << a->url << "\n\n";
+    }
+
+    return 0;
+}
+
+// =============================================================================
+// Subcommand: addon (dispatches to add / remove / list / clone / pull / search)
 // =============================================================================
 
 static void printAddonHelp() {
     cout << "Usage: trusscli addon <command> [options]\n"
          << "\n"
-         << "Manage addons for the TrussC project in the current directory.\n"
+         << "Manage addons for TrussC projects.\n"
          << "\n"
          << "Commands:\n"
+         << "  list                       List addons (local + optionally remote)\n"
          << "  add <addon>...             Add addons to the project\n"
          << "  remove <addon>...          Remove addons from the project\n"
+         << "  clone <addon>...           Clone addons from the registry\n"
+         << "  pull [<addon>...] [--all]  Update addons via git pull\n"
+         << "  search <query>             Search the addon registry\n"
          << "\n"
          << "Run 'trusscli addon <command> --help' for command-specific help.\n";
 }
@@ -987,8 +1377,12 @@ static int cmdAddon(const vector<string>& args) {
         return 0;
     }
     vector<string> subArgs(args.begin() + 1, args.end());
+    if (sub == "list")   return cmdAddonList(subArgs);
     if (sub == "add")    return cmdAdd(subArgs);
     if (sub == "remove") return cmdRemove(subArgs);
+    if (sub == "clone")  return cmdAddonClone(subArgs);
+    if (sub == "pull")   return cmdAddonPull(subArgs);
+    if (sub == "search") return cmdAddonSearch(subArgs);
 
     cerr << "Error: unknown addon command '" << sub << "'\n"
          << "Run 'trusscli addon --help' for usage.\n";
