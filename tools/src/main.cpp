@@ -9,6 +9,7 @@
 #include <cstdlib>
 
 using namespace std;
+using namespace tc;
 namespace fs = std::filesystem;
 
 // =============================================================================
@@ -135,6 +136,67 @@ static bool parseAddonValue(const string& value,
         }
     }
     if (!current.empty()) out.push_back(current);
+    return true;
+}
+
+// Resolve project path + TC_ROOT for commands that operate on an existing
+// project (update / add / remove / info / build / run). Prints an error and
+// returns non-zero on failure. Both out-params are populated on success.
+static int resolveProjectAndTcRoot(const string& explicitPath,
+                                   const string& explicitTcRoot,
+                                   string& outProjectPath,
+                                   string& outTcRoot) {
+    if (explicitPath.empty()) {
+        outProjectPath = autoDetectProjectRoot("");
+        if (outProjectPath.empty()) {
+            cerr << "Error: not inside a TrussC project (no CMakeLists.txt + "
+                 << "addons.make found in CWD or any parent).\n"
+                 << "Use '-p <path>' or run from inside a project.\n";
+            return 1;
+        }
+    } else if (!fs::is_directory(explicitPath)) {
+        cerr << "Error: project path '" << explicitPath << "' does not exist\n";
+        return 1;
+    } else {
+        outProjectPath = explicitPath;
+    }
+
+    outTcRoot = explicitTcRoot.empty() ? autoDetectTcRoot() : explicitTcRoot;
+    if (outTcRoot.empty()) {
+        cerr << "Error: could not detect TrussC root. "
+             << "Use --tc-root <path> or set TRUSSC_DIR.\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Rebuild a project from a populated ProjectSettings. Used by update / add /
+// remove to regenerate CMakeLists.txt / CMakePresets.json after any change.
+static int runProjectUpdate(ProjectSettings& settings, const string& projectPath) {
+    ProjectGenerator gen(settings);
+    gen.setLogCallback([](const string& msg) { cout << msg << endl; });
+    string err = gen.update(projectPath);
+    if (!err.empty()) {
+        cerr << "Error: " << err << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Write an addons.make file containing the selected addon names. Called from
+// add / remove after modifying the selection set.
+static bool writeAddonsMake(const string& projectPath,
+                            const vector<string>& selectedAddons) {
+    string path = projectPath + "/addons.make";
+    ofstream out(path);
+    if (!out) {
+        cerr << "Error: could not write " << path << "\n";
+        return false;
+    }
+    out << "# TrussC addons - one addon per line\n";
+    for (const string& name : selectedAddons) {
+        out << name << "\n";
+    }
     return true;
 }
 
@@ -351,25 +413,13 @@ static int cmdUpdate(const vector<string>& args) {
         }
     }
 
-    if (projectPath.empty()) {
-        projectPath = autoDetectProjectRoot("");
-        if (projectPath.empty()) {
-            cerr << "Error: not inside a TrussC project (no CMakeLists.txt + "
-                 << "addons.make found in CWD or any parent).\n";
-            cerr << "Use 'trusscli update -p <path>' or run from inside a project.\n";
-            return 1;
-        }
-    } else if (!fs::is_directory(projectPath)) {
-        cerr << "Error: project path '" << projectPath << "' does not exist\n";
-        return 1;
+    string resolvedProjectPath;
+    string resolvedTcRoot;
+    if (int rc = resolveProjectAndTcRoot(projectPath, tcRoot, resolvedProjectPath, resolvedTcRoot)) {
+        return rc;
     }
-
-    if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
-    if (tcRoot.empty()) {
-        cerr << "Error: could not detect TrussC root. "
-             << "Use --tc-root <path> or set TRUSSC_DIR.\n";
-        return 1;
-    }
+    projectPath = resolvedProjectPath;
+    tcRoot = resolvedTcRoot;
 
     vector<string> availableAddons;
     scanAddons(tcRoot, availableAddons);
@@ -396,14 +446,528 @@ static int cmdUpdate(const vector<string>& args) {
 
     settings.templatePath = tcRoot + "/examples/templates/emptyExample";
 
-    ProjectGenerator gen(settings);
-    gen.setLogCallback([](const string& msg) { cout << msg << endl; });
-    string err = gen.update(projectPath);
-    if (!err.empty()) {
-        cerr << "Error: " << err << "\n";
+    if (int rc = runProjectUpdate(settings, projectPath)) return rc;
+    cout << "Project updated: " << projectPath << "\n";
+    return 0;
+}
+
+// =============================================================================
+// Subcommand: add
+// =============================================================================
+
+static void printAddHelp() {
+    cout << "Usage: trusscli add <addon> [<addon>...]\n"
+         << "\n"
+         << "Add one or more addons to the TrussC project in the current directory.\n"
+         << "The project is detected by walking up from CWD. The addons.make file\n"
+         << "is updated and the build files are regenerated.\n"
+         << "\n"
+         << "Options:\n"
+         << "  -p, --path <path>          Operate on a specific project path\n"
+         << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "  -h, --help                 Show this help\n"
+         << "\n"
+         << "Examples:\n"
+         << "  trusscli add tcxOsc                      Add a single addon\n"
+         << "  trusscli add tcxOsc tcxImGui tcxBox2d    Add multiple addons at once\n";
+}
+
+static int cmdAdd(const vector<string>& args) {
+    vector<string> requestedAddons;
+    string explicitPath;
+    string tcRoot;
+
+    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << opt << " requires a value\n";
+            return false;
+        }
+        out = args[++i];
+        return true;
+    };
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printAddHelp(); return 0; }
+        else if (a == "-p" || a == "--path") {
+            if (!needValue(i, a, explicitPath)) return 1;
+        }
+        else if (a == "--tc-root") {
+            if (!needValue(i, a, tcRoot)) return 1;
+        }
+        else if (!a.empty() && a[0] == '-') {
+            cerr << "Error: unknown option '" << a << "'\n"
+                 << "Run 'trusscli add --help' for usage.\n";
+            return 1;
+        }
+        else {
+            requestedAddons.push_back(a);
+        }
+    }
+
+    if (requestedAddons.empty()) {
+        cerr << "Error: 'add' requires at least one addon name\n"
+             << "Usage: trusscli add <addon> [<addon>...]\n";
         return 1;
     }
+
+    string projectPath, resolvedTcRoot;
+    if (int rc = resolveProjectAndTcRoot(explicitPath, tcRoot, projectPath, resolvedTcRoot)) {
+        return rc;
+    }
+
+    vector<string> availableAddons;
+    scanAddons(resolvedTcRoot, availableAddons);
+
+    // Validate requested addons against the available set
+    for (const string& want : requestedAddons) {
+        if (find(availableAddons.begin(), availableAddons.end(), want) == availableAddons.end()) {
+            cerr << "Error: addon '" << want << "' not found in " << resolvedTcRoot << "/addons/\n"
+                 << "Available addons:\n";
+            for (const string& aa : availableAddons) cerr << "  " << aa << "\n";
+            return 1;
+        }
+    }
+
+    // Read current selection, add the requested addons (idempotent — duplicates warn)
+    vector<int> addonSelected;
+    parseAddonsMake(projectPath, availableAddons, addonSelected);
+
+    vector<string> addedNow;
+    for (const string& want : requestedAddons) {
+        for (size_t i = 0; i < availableAddons.size(); ++i) {
+            if (availableAddons[i] == want) {
+                if (addonSelected[i]) {
+                    cout << "  (already present) " << want << "\n";
+                } else {
+                    addonSelected[i] = 1;
+                    addedNow.push_back(want);
+                }
+                break;
+            }
+        }
+    }
+
+    // Build the new addons list in the order they appear in availableAddons
+    vector<string> selectedNames;
+    for (size_t i = 0; i < availableAddons.size(); ++i) {
+        if (addonSelected[i]) selectedNames.push_back(availableAddons[i]);
+    }
+
+    if (!writeAddonsMake(projectPath, selectedNames)) return 1;
+
+    if (addedNow.empty()) {
+        cout << "No changes to addons.make. Regenerating build files anyway...\n";
+    } else {
+        cout << "Added " << addedNow.size() << " addon(s): ";
+        for (size_t i = 0; i < addedNow.size(); ++i) {
+            if (i > 0) cout << ", ";
+            cout << addedNow[i];
+        }
+        cout << "\n";
+    }
+
+    // Regenerate
+    ProjectSettings settings;
+    settings.tcRoot = resolvedTcRoot;
+    settings.projectName = fs::canonical(projectPath).filename().string();
+    settings.addons = availableAddons;
+    settings.addonSelected = addonSelected;
+    settings.detectBuildEnvironment();
+    settings.templatePath = resolvedTcRoot + "/examples/templates/emptyExample";
+
+    if (int rc = runProjectUpdate(settings, projectPath)) return rc;
     cout << "Project updated: " << projectPath << "\n";
+    return 0;
+}
+
+// =============================================================================
+// Subcommand: remove
+// =============================================================================
+
+static void printRemoveHelp() {
+    cout << "Usage: trusscli remove <addon> [<addon>...]\n"
+         << "\n"
+         << "Remove one or more addons from the TrussC project in the current\n"
+         << "directory. The project is detected by walking up from CWD. The\n"
+         << "addons.make file is updated and the build files are regenerated.\n"
+         << "\n"
+         << "Options:\n"
+         << "  -p, --path <path>          Operate on a specific project path\n"
+         << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "  -h, --help                 Show this help\n"
+         << "\n"
+         << "Examples:\n"
+         << "  trusscli remove tcxOsc                   Remove a single addon\n"
+         << "  trusscli remove tcxOsc tcxImGui          Remove multiple addons at once\n";
+}
+
+static int cmdRemove(const vector<string>& args) {
+    vector<string> requestedAddons;
+    string explicitPath;
+    string tcRoot;
+
+    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << opt << " requires a value\n";
+            return false;
+        }
+        out = args[++i];
+        return true;
+    };
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printRemoveHelp(); return 0; }
+        else if (a == "-p" || a == "--path") {
+            if (!needValue(i, a, explicitPath)) return 1;
+        }
+        else if (a == "--tc-root") {
+            if (!needValue(i, a, tcRoot)) return 1;
+        }
+        else if (!a.empty() && a[0] == '-') {
+            cerr << "Error: unknown option '" << a << "'\n"
+                 << "Run 'trusscli remove --help' for usage.\n";
+            return 1;
+        }
+        else {
+            requestedAddons.push_back(a);
+        }
+    }
+
+    if (requestedAddons.empty()) {
+        cerr << "Error: 'remove' requires at least one addon name\n"
+             << "Usage: trusscli remove <addon> [<addon>...]\n";
+        return 1;
+    }
+
+    string projectPath, resolvedTcRoot;
+    if (int rc = resolveProjectAndTcRoot(explicitPath, tcRoot, projectPath, resolvedTcRoot)) {
+        return rc;
+    }
+
+    vector<string> availableAddons;
+    scanAddons(resolvedTcRoot, availableAddons);
+
+    // Read current selection
+    vector<int> addonSelected;
+    parseAddonsMake(projectPath, availableAddons, addonSelected);
+
+    vector<string> removedNow;
+    for (const string& want : requestedAddons) {
+        bool found = false;
+        for (size_t i = 0; i < availableAddons.size(); ++i) {
+            if (availableAddons[i] == want) {
+                found = true;
+                if (addonSelected[i]) {
+                    addonSelected[i] = 0;
+                    removedNow.push_back(want);
+                } else {
+                    cout << "  (not present) " << want << "\n";
+                }
+                break;
+            }
+        }
+        if (!found) {
+            // Unknown addon name. Could be a typo — warn but don't fail.
+            cout << "  (unknown addon, not in " << resolvedTcRoot << "/addons/) " << want << "\n";
+        }
+    }
+
+    // Build the new addons list in the order they appear in availableAddons
+    vector<string> selectedNames;
+    for (size_t i = 0; i < availableAddons.size(); ++i) {
+        if (addonSelected[i]) selectedNames.push_back(availableAddons[i]);
+    }
+
+    if (!writeAddonsMake(projectPath, selectedNames)) return 1;
+
+    if (removedNow.empty()) {
+        cout << "No changes to addons.make. Regenerating build files anyway...\n";
+    } else {
+        cout << "Removed " << removedNow.size() << " addon(s): ";
+        for (size_t i = 0; i < removedNow.size(); ++i) {
+            if (i > 0) cout << ", ";
+            cout << removedNow[i];
+        }
+        cout << "\n";
+    }
+
+    ProjectSettings settings;
+    settings.tcRoot = resolvedTcRoot;
+    settings.projectName = fs::canonical(projectPath).filename().string();
+    settings.addons = availableAddons;
+    settings.addonSelected = addonSelected;
+    settings.detectBuildEnvironment();
+    settings.templatePath = resolvedTcRoot + "/examples/templates/emptyExample";
+
+    if (int rc = runProjectUpdate(settings, projectPath)) return rc;
+    cout << "Project updated: " << projectPath << "\n";
+    return 0;
+}
+
+// =============================================================================
+// Subcommand: info
+// =============================================================================
+
+enum class InfoFormat { Human, Plain, Json };
+enum class InfoSection { All, Project, Targets, Addons };
+
+static void printInfoHelp() {
+    cout << "Usage: trusscli info [section] [options]\n"
+         << "\n"
+         << "Show information about the TrussC project in the current directory.\n"
+         << "If no project is found, prints framework info instead (TrussC root,\n"
+         << "available addons).\n"
+         << "\n"
+         << "Sections:\n"
+         << "  (default)                  All sections\n"
+         << "  project                    Project name, path, TrussC root\n"
+         << "  targets                    Enabled build targets\n"
+         << "  addons                     Addons listed in addons.make\n"
+         << "\n"
+         << "Options:\n"
+         << "  -p, --path <path>          Operate on a specific project path\n"
+         << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "      --json                 Machine-readable JSON output\n"
+         << "      --format <fmt>         Output format: human, plain, json (default: human)\n"
+         << "  -h, --help                 Show this help\n"
+         << "\n"
+         << "Examples:\n"
+         << "  trusscli info                    Full human-readable overview\n"
+         << "  trusscli info addons             Just the addon list\n"
+         << "  trusscli info --json             Full info as JSON\n"
+         << "  trusscli info addons --format=plain   Grep-friendly addon list\n";
+}
+
+// Parse the CMakePresets.json of a project and return the list of configure
+// preset names. Returns empty vector on any error.
+static vector<string> readEnabledTargets(const string& projectPath) {
+    vector<string> out;
+    string presetsPath = projectPath + "/CMakePresets.json";
+    if (!fs::exists(presetsPath)) return out;
+    try {
+        ifstream file(presetsPath);
+        Json data = Json::parse(file);
+        if (data.contains("configurePresets") && data["configurePresets"].is_array()) {
+            for (const auto& p : data["configurePresets"]) {
+                if (p.contains("name") && p["name"].is_string()) {
+                    out.push_back(p["name"].get<string>());
+                }
+            }
+        }
+    } catch (...) {
+        // Silently ignore parse errors — info is read-only and best-effort.
+    }
+    return out;
+}
+
+// Read the addons listed in addons.make (in order).
+static vector<string> readProjectAddons(const string& projectPath) {
+    vector<string> out;
+    string path = projectPath + "/addons.make";
+    if (!fs::exists(path)) return out;
+    ifstream f(path);
+    string line;
+    while (getline(f, line)) {
+        size_t start = line.find_first_not_of(" \t");
+        if (start == string::npos) continue;
+        size_t end = line.find_last_not_of(" \t\r\n");
+        string name = line.substr(start, end - start + 1);
+        if (name.empty() || name[0] == '#') continue;
+        out.push_back(name);
+    }
+    return out;
+}
+
+static int cmdInfo(const vector<string>& args) {
+    string explicitPath;
+    string tcRoot;
+    InfoFormat format = InfoFormat::Human;
+    InfoSection section = InfoSection::All;
+    bool sectionSet = false;
+
+    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << opt << " requires a value\n";
+            return false;
+        }
+        out = args[++i];
+        return true;
+    };
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printInfoHelp(); return 0; }
+        else if (a == "-p" || a == "--path") {
+            if (!needValue(i, a, explicitPath)) return 1;
+        }
+        else if (a == "--tc-root") {
+            if (!needValue(i, a, tcRoot)) return 1;
+        }
+        else if (a == "--json") {
+            format = InfoFormat::Json;
+        }
+        else if (a == "--format") {
+            string v;
+            if (!needValue(i, a, v)) return 1;
+            if      (v == "human") format = InfoFormat::Human;
+            else if (v == "plain") format = InfoFormat::Plain;
+            else if (v == "json")  format = InfoFormat::Json;
+            else {
+                cerr << "Error: unknown --format '" << v << "'. Valid: human, plain, json\n";
+                return 1;
+            }
+        }
+        else if (!a.empty() && a[0] == '-') {
+            // Accept --format=json style
+            const string prefix = "--format=";
+            if (a.rfind(prefix, 0) == 0) {
+                string v = a.substr(prefix.size());
+                if      (v == "human") format = InfoFormat::Human;
+                else if (v == "plain") format = InfoFormat::Plain;
+                else if (v == "json")  format = InfoFormat::Json;
+                else {
+                    cerr << "Error: unknown --format '" << v << "'. Valid: human, plain, json\n";
+                    return 1;
+                }
+                continue;
+            }
+            cerr << "Error: unknown option '" << a << "'\n"
+                 << "Run 'trusscli info --help' for usage.\n";
+            return 1;
+        }
+        else {
+            if (sectionSet) {
+                cerr << "Error: 'info' takes a single section argument\n";
+                return 1;
+            }
+            if      (a == "all")     section = InfoSection::All;
+            else if (a == "project") section = InfoSection::Project;
+            else if (a == "targets") section = InfoSection::Targets;
+            else if (a == "addons")  section = InfoSection::Addons;
+            else {
+                cerr << "Error: unknown section '" << a << "'. Valid: project, targets, addons, all\n";
+                return 1;
+            }
+            sectionSet = true;
+        }
+    }
+
+    // Resolve project path — empty if not inside a project.
+    string projectPath;
+    if (!explicitPath.empty()) {
+        if (!fs::is_directory(explicitPath)) {
+            cerr << "Error: project path '" << explicitPath << "' does not exist\n";
+            return 1;
+        }
+        projectPath = explicitPath;
+    } else {
+        projectPath = autoDetectProjectRoot("");
+    }
+
+    // Resolve TC_ROOT.
+    string resolvedTcRoot = tcRoot.empty() ? autoDetectTcRoot() : tcRoot;
+    if (resolvedTcRoot.empty()) {
+        cerr << "Error: could not detect TrussC root. Use --tc-root <path> or set TRUSSC_DIR.\n";
+        return 1;
+    }
+
+    // Gather data.
+    string projectName;
+    vector<string> targets;
+    vector<string> addons;
+    bool inProject = !projectPath.empty();
+    if (inProject) {
+        projectName = fs::canonical(projectPath).filename().string();
+        targets = readEnabledTargets(projectPath);
+        addons = readProjectAddons(projectPath);
+    } else {
+        // Framework mode: list available addons from tcRoot
+        scanAddons(resolvedTcRoot, addons);
+    }
+
+    // JSON output
+    if (format == InfoFormat::Json) {
+        Json out = Json::object();
+        if (inProject) {
+            out["project"] = {
+                {"name", projectName},
+                {"path", fs::absolute(projectPath).string()},
+                {"tc_root", fs::absolute(resolvedTcRoot).string()}
+            };
+            out["targets"] = targets;
+            out["addons"] = addons;
+        } else {
+            out["project"] = nullptr;
+            out["tc_root"] = fs::absolute(resolvedTcRoot).string();
+            out["available_addons"] = addons;
+        }
+        if (section == InfoSection::Addons) {
+            cout << (inProject ? out["addons"] : out["available_addons"]).dump(2) << "\n";
+        } else if (section == InfoSection::Targets) {
+            cout << (inProject ? out["targets"] : Json::array()).dump(2) << "\n";
+        } else if (section == InfoSection::Project) {
+            cout << (inProject ? out["project"] : Json()).dump(2) << "\n";
+        } else {
+            cout << out.dump(2) << "\n";
+        }
+        return 0;
+    }
+
+    // Plain output — one value per line, no decoration (grep-friendly)
+    if (format == InfoFormat::Plain) {
+        if (section == InfoSection::Addons || section == InfoSection::All) {
+            for (const string& a : addons) cout << a << "\n";
+        }
+        if (section == InfoSection::Targets && inProject) {
+            for (const string& t : targets) cout << t << "\n";
+        }
+        if (section == InfoSection::Project && inProject) {
+            cout << "name=" << projectName << "\n"
+                 << "path=" << fs::absolute(projectPath).string() << "\n"
+                 << "tc_root=" << fs::absolute(resolvedTcRoot).string() << "\n";
+        }
+        return 0;
+    }
+
+    // Human output — pretty sections
+    if (!inProject) {
+        cout << "Not inside a TrussC project.\n\n"
+             << "TrussC root: " << fs::absolute(resolvedTcRoot).string() << "\n\n";
+        if (section == InfoSection::All || section == InfoSection::Addons) {
+            cout << "Available addons (" << addons.size() << "):\n";
+            for (const string& a : addons) cout << "  " << a << "\n";
+        }
+        return 0;
+    }
+
+    if (section == InfoSection::All || section == InfoSection::Project) {
+        cout << "Project: " << projectName << "\n"
+             << "Path:    " << fs::absolute(projectPath).string() << "\n"
+             << "TrussC:  " << fs::absolute(resolvedTcRoot).string() << "\n";
+    }
+
+    if (section == InfoSection::All || section == InfoSection::Targets) {
+        if (section == InfoSection::All) cout << "\n";
+        if (targets.empty()) {
+            cout << "Targets: (none — run 'trusscli update' to generate CMakePresets.json)\n";
+        } else {
+            cout << "Targets (" << targets.size() << "):\n";
+            for (const string& t : targets) cout << "  " << t << "\n";
+        }
+    }
+
+    if (section == InfoSection::All || section == InfoSection::Addons) {
+        if (section == InfoSection::All) cout << "\n";
+        if (addons.empty()) {
+            cout << "Addons:  (none)\n";
+        } else {
+            cout << "Addons (" << addons.size() << "):\n";
+            for (const string& a : addons) cout << "  " << a << "\n";
+        }
+    }
+
     return 0;
 }
 
@@ -431,9 +995,9 @@ static void printTopHelp() {
          << "Commands:\n"
          << "  new <path>                     Create a new project at <path>\n"
          << "  update                         Regenerate build files for the project in CWD\n"
-         << "  add <addon>...                 Add addons to the project          [not yet implemented]\n"
-         << "  remove <addon>                 Remove an addon                    [not yet implemented]\n"
-         << "  info                           Show project / framework info      [not yet implemented]\n"
+         << "  add <addon>...                 Add addons to the project\n"
+         << "  remove <addon>...              Remove addons from the project\n"
+         << "  info [section]                 Show project / framework info\n"
          << "  build                          Build the project                  [not yet implemented]\n"
          << "  run                            Build and launch the project       [not yet implemented]\n"
          << "\n"
@@ -491,8 +1055,10 @@ int main(int argc, char* argv[]) {
     vector<string> subArgs(args.begin() + 1, args.end());
     if (first == "new")    return cmdNew(subArgs);
     if (first == "update") return cmdUpdate(subArgs);
-    if (first == "add" || first == "remove" || first == "info" ||
-        first == "build" || first == "run") {
+    if (first == "add")    return cmdAdd(subArgs);
+    if (first == "remove") return cmdRemove(subArgs);
+    if (first == "info")   return cmdInfo(subArgs);
+    if (first == "build" || first == "run") {
         return cmdNotImplemented(first);
     }
 
