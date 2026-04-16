@@ -25,6 +25,42 @@ void tcApp::setup() {
     fillLight.setDiffuse(0.4f, 0.5f, 0.7f);
     fillLight.setIntensity(0.6f);
 
+    // Procedural normal map: overlapping sine bumps
+    {
+        const int S = 256;
+        Pixels nmap;
+        nmap.allocate(S, S, 4, PixelFormat::U8);
+        auto* px = static_cast<unsigned char*>(nmap.getDataVoid());
+        for (int iy = 0; iy < S; ++iy) {
+            for (int ix = 0; ix < S; ++ix) {
+                float u = float(ix) / S;
+                float v = float(iy) / S;
+                // Height from overlapping sine waves
+                float h = std::sin(u * TAU * 6) * std::cos(v * TAU * 6) * 0.5f
+                        + std::sin((u + v) * TAU * 4) * 0.3f;
+                // Finite-difference partial derivatives
+                float du = std::cos(u * TAU * 6) * TAU * 6 * std::cos(v * TAU * 6) * 0.5f
+                         + std::cos((u + v) * TAU * 4) * TAU * 4 * 0.3f;
+                float dv = std::sin(u * TAU * 6) * (-std::sin(v * TAU * 6)) * TAU * 6 * 0.5f
+                         + std::cos((u + v) * TAU * 4) * TAU * 4 * 0.3f;
+                (void)h;
+                // Tangent-space normal from height derivatives (scale down for subtlety)
+                float scale = 0.15f;
+                float nx = -du * scale;
+                float ny = -dv * scale;
+                float nz = 1.0f;
+                float len = std::sqrt(nx*nx + ny*ny + nz*nz);
+                nx /= len; ny /= len; nz /= len;
+                int idx = (iy * S + ix) * 4;
+                px[idx + 0] = (unsigned char)((nx * 0.5f + 0.5f) * 255);
+                px[idx + 1] = (unsigned char)((ny * 0.5f + 0.5f) * 255);
+                px[idx + 2] = (unsigned char)((nz * 0.5f + 0.5f) * 255);
+                px[idx + 3] = 255;
+            }
+        }
+        normalMapTex.allocate(nmap, TextureUsage::Immutable);
+    }
+
     // X axis = roughness, Y axis = metallic
     const Color baseColor(0.90f, 0.80f, 0.70f);
     for (int y = 0; y < GRID; ++y) {
@@ -32,7 +68,8 @@ void tcApp::setup() {
             materials[y][x]
                 .setBaseColor(baseColor)
                 .setRoughness(0.05f + (float(x) / (GRID - 1)) * 0.95f)
-                .setMetallic(float(y) / (GRID - 1));
+                .setMetallic(float(y) / (GRID - 1))
+                .setNormalMap(&normalMapTex);
         }
     }
 }

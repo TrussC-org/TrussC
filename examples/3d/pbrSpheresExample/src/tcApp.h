@@ -20,5 +20,6 @@ private:
     Light keyLight;
     Light fillLight;
     Environment env;
+    Texture normalMapTex;
     PbrMaterial materials[5][5];
 };
