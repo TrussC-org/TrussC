@@ -128,8 +128,17 @@ inline Mesh createSphere(float radius, int resolution = 16) {
             float z = sin(theta) * sin(phi);
 
             mesh.addVertex(x * radius, y * radius, z * radius);
-            mesh.addNormal(x, y, z);  // Already normalized
+            mesh.addNormal(x, y, z);
             mesh.addTexCoord(u, v);
+
+            // Tangent = ∂P/∂θ normalized = (-sinθ, 0, cosθ).
+            // At poles (sinφ ≈ 0) this degenerates; pick +X as fallback.
+            float sinPhi = std::sin(phi);
+            if (sinPhi > 0.001f) {
+                mesh.addTangent(-std::sin(theta), 0.0f, std::cos(theta), 1.0f);
+            } else {
+                mesh.addTangent(1.0f, 0.0f, 0.0f, 1.0f);
+            }
         }
     }
 

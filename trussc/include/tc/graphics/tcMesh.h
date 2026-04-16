@@ -35,7 +35,8 @@ public:
           normals_(other.normals_),
           colors_(other.colors_),
           indices_(other.indices_),
-          texCoords_(other.texCoords_) {}
+          texCoords_(other.texCoords_),
+          tangents_(other.tangents_) {}
 
     Mesh& operator=(const Mesh& other) {
         if (this == &other) return *this;
@@ -46,6 +47,7 @@ public:
         colors_ = other.colors_;
         indices_ = other.indices_;
         texCoords_ = other.texCoords_;
+        tangents_ = other.tangents_;
         gpuDirty_ = true;
         return *this;
     }
@@ -57,6 +59,7 @@ public:
           colors_(std::move(other.colors_)),
           indices_(std::move(other.indices_)),
           texCoords_(std::move(other.texCoords_)),
+          tangents_(std::move(other.tangents_)),
           vbuf_(other.vbuf_),
           ibuf_(other.ibuf_),
           gpuVertexCount_(other.gpuVertexCount_),
@@ -78,6 +81,7 @@ public:
         colors_ = std::move(other.colors_);
         indices_ = std::move(other.indices_);
         texCoords_ = std::move(other.texCoords_);
+        tangents_ = std::move(other.tangents_);
         vbuf_ = other.vbuf_;
         ibuf_ = other.ibuf_;
         gpuVertexCount_ = other.gpuVertexCount_;
@@ -226,6 +230,29 @@ public:
     }
 
     // ---------------------------------------------------------------------------
+    // Tangents (for normal mapping)
+    // ---------------------------------------------------------------------------
+    // Vec4: xyz = tangent direction along texture U axis,
+    //       w   = bitangent sign (+1 or -1) for handedness.
+    // Bitangent is reconstructed in the shader: B = cross(N, T.xyz) * T.w
+    void addTangent(float tx, float ty, float tz, float tw = 1.0f) {
+        tangents_.push_back(Vec4{tx, ty, tz, tw});
+    }
+
+    void addTangent(const Vec4& t) {
+        tangents_.push_back(t);
+    }
+
+    void addTangent(const Vec3& t, float w = 1.0f) {
+        tangents_.push_back(Vec4{t.x, t.y, t.z, w});
+    }
+
+    std::vector<Vec4>& getTangents() { return tangents_; }
+    const std::vector<Vec4>& getTangents() const { return tangents_; }
+    int getNumTangents() const { return static_cast<int>(tangents_.size()); }
+    bool hasTangents() const { return !tangents_.empty(); }
+
+    // ---------------------------------------------------------------------------
     // Clear
     // ---------------------------------------------------------------------------
     void clear() {
@@ -234,6 +261,7 @@ public:
         colors_.clear();
         indices_.clear();
         texCoords_.clear();
+        tangents_.clear();
     }
 
     void clearVertices() { vertices_.clear(); }
@@ -241,6 +269,7 @@ public:
     void clearColors() { colors_.clear(); }
     void clearIndices() { indices_.clear(); }
     void clearTexCoords() { texCoords_.clear(); }
+    void clearTangents() { tangents_.clear(); }
 
     // ---------------------------------------------------------------------------
     // Transform
@@ -391,6 +420,11 @@ public:
         // Append texcoords
         for (const auto& t : other.texCoords_) {
             texCoords_.push_back(t);
+        }
+
+        // Append tangents
+        for (const auto& t : other.tangents_) {
+            tangents_.push_back(t);
         }
 
         // Append indices with offset
@@ -938,11 +972,12 @@ public:
         if (!gpuDirty_) return;
         if (vertices_.empty()) return;
 
-        // Pack interleaved vertex data: pos(3) + normal(3) + uv(2) = 32 bytes
+        // Pack interleaved: pos(3) + normal(3) + uv(2) + tangent(4) = 48 bytes
         struct PbrVertex {
             float x, y, z;
             float nx, ny, nz;
             float u, v;
+            float tx, ty, tz, tw;
         };
         std::vector<PbrVertex> packed;
         packed.resize(vertices_.size());
@@ -963,6 +998,14 @@ public:
                 pv.v = texCoords_[i].y;
             } else {
                 pv.u = 0.0f; pv.v = 0.0f;
+            }
+            if (i < tangents_.size()) {
+                pv.tx = tangents_[i].x;
+                pv.ty = tangents_[i].y;
+                pv.tz = tangents_[i].z;
+                pv.tw = tangents_[i].w;
+            } else {
+                pv.tx = 0.0f; pv.ty = 0.0f; pv.tz = 0.0f; pv.tw = 0.0f;
             }
         }
 
@@ -1021,6 +1064,7 @@ private:
     std::vector<Color> colors_;
     std::vector<unsigned int> indices_;
     std::vector<Vec2> texCoords_;
+    std::vector<Vec4> tangents_;
 
     // GPU buffers for LightingMode::GpuPbr. mutable so that draw() (const) can
     // lazily upload.

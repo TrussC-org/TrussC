@@ -41,10 +41,11 @@ public:
         sg_pipeline_desc pd = {};
         pd.shader = shader_;
 
-        // Vertex layout: pos(3) + normal(3) + uv(2), interleaved, single buffer.
-        pd.layout.attrs[ATTR_pbr_mesh_position].format = SG_VERTEXFORMAT_FLOAT3;
-        pd.layout.attrs[ATTR_pbr_mesh_normal].format   = SG_VERTEXFORMAT_FLOAT3;
+        // Vertex layout: pos(3) + normal(3) + uv(2) + tangent(4), interleaved.
+        pd.layout.attrs[ATTR_pbr_mesh_position].format  = SG_VERTEXFORMAT_FLOAT3;
+        pd.layout.attrs[ATTR_pbr_mesh_normal].format    = SG_VERTEXFORMAT_FLOAT3;
         pd.layout.attrs[ATTR_pbr_mesh_texcoord0].format = SG_VERTEXFORMAT_FLOAT2;
+        pd.layout.attrs[ATTR_pbr_mesh_tangent].format   = SG_VERTEXFORMAT_FLOAT4;
 
         // Depth test on, no culling. createSphere and friends use CW winding
         // while most PBR content assumes CCW, so disabling cull matches the
@@ -108,6 +109,20 @@ public:
             bind.samplers[SMP_prefilterSmp]  = fallbackSampler_;
             bind.samplers[SMP_brdfLutSmp]    = fallbackSampler_;
         }
+
+        // PbrMaterial reference (used for both normal map binding and uniform packing)
+        const PbrMaterial& pbrMat = *internal::currentPbrMaterial;
+
+        // Normal map from PbrMaterial (or fallback flat normal)
+        bool hasNormalMap = pbrMat.hasNormalMap();
+        if (hasNormalMap) {
+            bind.views[VIEW_normalMap]      = pbrMat.getNormalMap()->getView();
+            bind.samplers[SMP_normalMapSmp] = pbrMat.getNormalMap()->getSampler();
+        } else {
+            bind.views[VIEW_normalMap]      = fallbackNormalView_;
+            bind.samplers[SMP_normalMapSmp] = fallbackSampler_;
+        }
+
         sg_apply_bindings(&bind);
 
         // --- vs_params ------------------------------------------------------
@@ -131,17 +146,16 @@ public:
 
         // --- fs_params ------------------------------------------------------
         fs_params_t fsp = {};
-        const PbrMaterial& mat = *internal::currentPbrMaterial;
-        const Color& bc = mat.getBaseColor();
+        const Color& bc = pbrMat.getBaseColor();
         fsp.baseColor[0] = bc.r;
         fsp.baseColor[1] = bc.g;
         fsp.baseColor[2] = bc.b;
         fsp.baseColor[3] = bc.a;
-        fsp.pbrParams[0] = mat.getMetallic();
-        fsp.pbrParams[1] = mat.getRoughness();
-        fsp.pbrParams[2] = mat.getAo();
-        fsp.pbrParams[3] = mat.getEmissiveStrength();
-        const Color& em = mat.getEmissive();
+        fsp.pbrParams[0] = pbrMat.getMetallic();
+        fsp.pbrParams[1] = pbrMat.getRoughness();
+        fsp.pbrParams[2] = pbrMat.getAo();
+        fsp.pbrParams[3] = pbrMat.getEmissiveStrength();
+        const Color& em = pbrMat.getEmissive();
         fsp.emissive[0] = em.r;
         fsp.emissive[1] = em.g;
         fsp.emissive[2] = em.b;
@@ -155,11 +169,11 @@ public:
         fsp.cameraPos[2] = cam.z;
         fsp.cameraPos[3] = static_cast<float>(numLights);
 
-        // iblParams: x=hasIbl, y=prefilterMaxLod, z=exposure, w=reserved
+        // iblParams: x=hasIbl, y=prefilterMaxLod, z=exposure, w=hasNormalMap
         fsp.iblParams[0] = hasIbl ? 1.0f : 0.0f;
         fsp.iblParams[1] = hasIbl ? static_cast<float>(env->getPrefilterMipLevels() - 1) : 0.0f;
         fsp.iblParams[2] = internal::pbrExposure;
-        fsp.iblParams[3] = 0.0f;
+        fsp.iblParams[3] = hasNormalMap ? 1.0f : 0.0f;
 
         for (int i = 0; i < numLights; i++) {
             const Light& L = *internal::activeLights[i];
@@ -256,6 +270,21 @@ private:
         smp_desc.label = "tc_pbr_fallback_smp";
         fallbackSampler_ = sg_make_sampler(&smp_desc);
 
+        // 1x1 flat normal map: (0.5, 0.5, 1.0, 1.0) = tangent-space "no bump"
+        sg_image_desc nm_desc = {};
+        nm_desc.type = SG_IMAGETYPE_2D;
+        nm_desc.width = 1;
+        nm_desc.height = 1;
+        nm_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        uint8_t flat_normal[4] = { 128, 128, 255, 255 };
+        nm_desc.data.mip_levels[0].ptr = flat_normal;
+        nm_desc.data.mip_levels[0].size = sizeof(flat_normal);
+        nm_desc.label = "tc_pbr_fallback_normal";
+        fallbackNormal_ = sg_make_image(&nm_desc);
+        sg_view_desc nm_view_desc = {};
+        nm_view_desc.texture.image = fallbackNormal_;
+        fallbackNormalView_ = sg_make_view(&nm_view_desc);
+
         fallbackInitialized_ = true;
     }
 
@@ -267,6 +296,8 @@ private:
     sg_view fallbackCubeView_{};
     sg_image fallback2d_{};
     sg_view fallback2dView_{};
+    sg_image fallbackNormal_{};
+    sg_view fallbackNormalView_{};
     sg_sampler fallbackSampler_{};
     bool fallbackInitialized_{false};
 };

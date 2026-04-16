@@ -18,18 +18,20 @@ layout(binding=0) uniform vs_params {
 in vec3 position;
 in vec3 normal;
 in vec2 texcoord0;
+in vec4 tangent;
 
 out vec3 v_worldPos;
 out vec3 v_worldNormal;
+out vec3 v_worldTangent;
+out float v_bitangentSign;
 out vec2 v_uv;
 
 void main() {
     vec4 wp = model * vec4(position, 1.0);
     v_worldPos = wp.xyz;
-    // normalMat is the inverse-transpose of the upper-left 3x3 of the model
-    // matrix, expanded to mat4. The w component of the input is zero so any
-    // translation in column 4 is discarded.
     v_worldNormal = normalize((normalMat * vec4(normal, 0.0)).xyz);
+    v_worldTangent = normalize((normalMat * vec4(tangent.xyz, 0.0)).xyz);
+    v_bitangentSign = tangent.w;
     v_uv = texcoord0;
     gl_Position = viewProj * wp;
 }
@@ -52,14 +54,13 @@ layout(binding=1) uniform fs_params {
     vec4 pbrParams;   // x=metallic, y=roughness, z=ao, w=emissiveStrength
     vec4 emissive;    // rgb=emissive color
     vec4 cameraPos;   // xyz=camera world pos, w=numLights (as float)
-    vec4 iblParams;   // x=hasIbl (0 or 1), y=prefilterMaxLod, z=exposure, w=unused
+    vec4 iblParams;   // x=hasIbl (0 or 1), y=prefilterMaxLod, z=exposure, w=hasNormalMap
     vec4 lightPosType[MAX_LIGHTS];
     vec4 lightColorIntensity[MAX_LIGHTS];
     vec4 lightAttenuation[MAX_LIGHTS];
 };
 
-// IBL resources. Bound only when iblParams.x > 0.5; otherwise the samples
-// are technically undefined but dead code thanks to the branch.
+// IBL resources. Bound only when iblParams.x > 0.5.
 layout(binding=0) uniform textureCube irradianceMap;
 layout(binding=0) uniform sampler irradianceSmp;
 layout(binding=1) uniform textureCube prefilterMap;
@@ -67,8 +68,15 @@ layout(binding=1) uniform sampler prefilterSmp;
 layout(binding=2) uniform texture2D brdfLut;
 layout(binding=2) uniform sampler brdfLutSmp;
 
+// Normal map (optional). When not set, a 1x1 flat normal (0.5, 0.5, 1.0) is
+// bound by the pipeline and hasNormalMap is 0.
+layout(binding=3) uniform texture2D normalMap;
+layout(binding=3) uniform sampler normalMapSmp;
+
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
+in vec3 v_worldTangent;
+in float v_bitangentSign;
 in vec2 v_uv;
 
 out vec4 frag_color;
@@ -164,9 +172,41 @@ vec3 evalLight(vec4 posType, vec4 colorIntensity, vec4 atten,
     return (diffuse + specular) * radiance * NdotL;
 }
 
+// Construct TBN matrix from vertex tangent, or fall back to screen-space
+// derivatives if no tangent was supplied (tangent vector is zero).
+mat3 buildTBN(vec3 N, vec3 T, float bSign, vec3 worldPos, vec2 uv) {
+    float tLen = length(T);
+    if (tLen > 0.001) {
+        // Explicit tangent supplied by the mesh
+        T = normalize(T);
+        // Re-orthogonalize against N (Gram-Schmidt)
+        T = normalize(T - N * dot(N, T));
+        vec3 B = cross(N, T) * bSign;
+        return mat3(T, B, N);
+    }
+    // Derivatives fallback for meshes without tangent data
+    vec3 dp1 = dFdx(worldPos);
+    vec3 dp2 = dFdy(worldPos);
+    vec2 duv1 = dFdx(uv);
+    vec2 duv2 = dFdy(uv);
+    vec3 dp2perp = cross(dp2, N);
+    vec3 dp1perp = cross(N, dp1);
+    vec3 dT = dp2perp * duv1.x + dp1perp * duv2.x;
+    vec3 dB = dp2perp * duv1.y + dp1perp * duv2.y;
+    float invmax = inversesqrt(max(dot(dT, dT), dot(dB, dB)));
+    return mat3(dT * invmax, dB * invmax, N);
+}
+
 void main() {
     vec3 N = normalize(v_worldNormal);
     vec3 V = normalize(cameraPos.xyz - v_worldPos);
+
+    // Apply normal map if bound
+    if (iblParams.w > 0.5) {
+        mat3 TBN = buildTBN(N, v_worldTangent, v_bitangentSign, v_worldPos, v_uv);
+        vec3 mapN = texture(sampler2D(normalMap, normalMapSmp), v_uv).xyz * 2.0 - 1.0;
+        N = normalize(TBN * mapN);
+    }
 
     vec3 albedo      = baseColor.rgb;
     float metallic   = pbrParams.x;

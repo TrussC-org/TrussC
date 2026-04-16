@@ -20,6 +20,8 @@
 
 namespace trussc {
 
+class Texture;  // forward declare (full definition in tcTexture.h, included later)
+
 class PbrMaterial {
 public:
     PbrMaterial() = default;
@@ -122,6 +124,11 @@ public:
         return m;
     }
 
+    // --- Normal map (optional) ---
+    PbrMaterial& setNormalMap(const Texture* tex) { normalMap_ = tex; return *this; }
+    const Texture* getNormalMap() const { return normalMap_; }
+    bool hasNormalMap() const { return normalMap_ != nullptr; }
+
 private:
     Color baseColor_        = Color(0.8f, 0.8f, 0.8f, 1.0f);
     float metallic_         = 0.0f;
@@ -129,6 +136,7 @@ private:
     float ao_               = 1.0f;
     Color emissive_         = Color(0.0f, 0.0f, 0.0f, 1.0f);
     float emissiveStrength_ = 0.0f;
+    const Texture* normalMap_ = nullptr;
 };
 
 } // namespace trussc
