@@ -462,6 +462,9 @@ static bool writeAddonsMake(const string& projectPath,
     return true;
 }
 
+// Forward declarations for functions defined later but used by update
+static string findCMake();
+
 // =============================================================================
 // Subcommand: new
 // =============================================================================
@@ -624,93 +627,82 @@ static int cmdNew(const vector<string>& args) {
 static void printUpdateHelp() {
     cout << "Usage: trusscli update [options]\n"
          << "\n"
-         << "Regenerate build files (CMakeLists.txt, CMakePresets.json, IDE files)\n"
-         << "for the TrussC project in the current directory. The addon list is\n"
-         << "read from the existing addons.make.\n"
+         << "Update TrussC to the latest version by pulling the latest code from\n"
+         << "the git repository and rebuilding trusscli. The /usr/local/bin symlink\n"
+         << "(if present) automatically points to the new binary.\n"
+         << "\n"
+         << "On Windows, the rebuild step is skipped — you'll be asked to run the\n"
+         << "build script manually.\n"
          << "\n"
          << "Options:\n"
-         << "  -p, --path <path>          Operate on a specific project path\n"
-         << "      --web                  Enable Web build\n"
-         << "      --android              Enable Android build\n"
-         << "      --ios                  Enable iOS build\n"
-         << "      --ide <type>           IDE: vscode, cursor, xcode, vs, cmake\n"
-         << "      --tc-root <path>       Path to TrussC root directory (auto-detected by default)\n"
+         << "      --tc-root <path>       Path to TrussC root directory\n"
          << "  -h, --help                 Show this help\n";
 }
 
 static int cmdUpdate(const vector<string>& args) {
-    string projectPath;
-    bool web = false, android = false, ios = false;
-    string ideStr = "vscode";
     string tcRoot;
-
-    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
-        if (i + 1 >= args.size()) {
-            cerr << "Error: " << opt << " requires a value\n";
-            return false;
-        }
-        out = args[++i];
-        return true;
-    };
 
     for (size_t i = 0; i < args.size(); ++i) {
         const string& a = args[i];
         if (a == "-h" || a == "--help") { printUpdateHelp(); return 0; }
-        else if (a == "-p" || a == "--path") {
-            if (!needValue(i, a, projectPath)) return 1;
-        }
-        else if (a == "--web") web = true;
-        else if (a == "--android") android = true;
-        else if (a == "--ios") ios = true;
-        else if (a == "--ide") {
-            if (!needValue(i, a, ideStr)) return 1;
-        }
         else if (a == "--tc-root") {
-            if (!needValue(i, a, tcRoot)) return 1;
+            if (i + 1 >= args.size()) {
+                cerr << "Error: --tc-root requires a value\n";
+                return 1;
+            }
+            tcRoot = args[++i];
         }
         else {
-            cerr << "Error: unknown argument '" << a << "'\n";
-            cerr << "Run 'trusscli update --help' for usage.\n";
+            cerr << "Error: unknown option '" << a << "'\n"
+                 << "Run 'trusscli update --help' for usage.\n";
             return 1;
         }
     }
 
-    string resolvedProjectPath;
-    string resolvedTcRoot;
-    if (int rc = resolveProjectAndTcRoot(projectPath, tcRoot, resolvedProjectPath, resolvedTcRoot)) {
-        return rc;
-    }
-    projectPath = resolvedProjectPath;
-    tcRoot = resolvedTcRoot;
-
-    vector<string> availableAddons;
-    scanAddons(tcRoot, availableAddons);
-
-    ProjectSettings settings;
-    settings.tcRoot = tcRoot;
-    settings.projectName = fs::canonical(projectPath).filename().string();
-    settings.addons = availableAddons;
-    parseAddonsMake(projectPath, availableAddons, settings.addonSelected);
-    settings.generateWebBuild = web;
-    settings.generateAndroidBuild = android;
-    settings.generateIosBuild = ios;
-    settings.detectBuildEnvironment();
-
-    // TODO: target flags (--web/--android/--ios) and --ide aren't persisted in
-    // the project — running update without them resets to defaults. Persist
-    // them in CMakePresets.json or a sidecar config so subsequent updates
-    // remember the previous selection.
-    if (!parseIdeType(ideStr, settings.ideType)) {
-        cerr << "Error: unknown IDE type '" << ideStr
-             << "'. Valid: vscode, cursor, xcode, vs, cmake\n";
+    if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
+    if (tcRoot.empty()) {
+        cerr << "Error: could not detect TrussC root. Use --tc-root <path>.\n";
         return 1;
     }
 
-    settings.templatePath = tcRoot + "/examples/templates/emptyExample";
+    // Step 1: git pull
+    cout << "Updating TrussC (" << tcRoot << ") ...\n";
+    int rc = runProcess({"git", "-C", tcRoot, "pull"});
+    if (rc != 0) {
+        cerr << "Error: git pull failed (exit code " << rc << ").\n";
+        return 1;
+    }
 
-    if (int rc = runProjectUpdate(settings, projectPath)) return rc;
-    cout << "Project updated: " << projectPath << "\n";
+    // Step 2: rebuild trusscli
+#ifdef _WIN32
+    cout << "\nGit pull succeeded. Please rebuild trusscli manually:\n"
+         << "  cd " << tcRoot << "\\tools\n"
+         << "  build_win.bat\n";
     return 0;
+#else
+    cout << "\nRebuilding trusscli ...\n";
+    string cmake = findCMake();
+    string toolsDir = tcRoot + "/tools";
+    string buildDir = toolsDir + "/build";
+
+    fs::create_directories(buildDir);
+
+    rc = runProcess({cmake, "-S", toolsDir, "-B", buildDir});
+    if (rc != 0) {
+        cerr << "Error: cmake configure failed.\n";
+        return 1;
+    }
+
+    rc = runProcess({cmake, "--build", buildDir, "--parallel"});
+    if (rc != 0) {
+        cerr << "Error: build failed.\n";
+        return 1;
+    }
+
+    cout << "\ntrusscli updated successfully.\n"
+         << "The new version will be used on the next invocation.\n";
+    return 0;
+#endif
 }
 
 // =============================================================================
@@ -1718,13 +1710,12 @@ static void printTopHelp() {
          << "\n"
          << "Commands:\n"
          << "  new <path>                     Create a new project at <path>\n"
-         << "  update                         Regenerate build files for the project in CWD\n"
+         << "  update                         Update TrussC (git pull + rebuild trusscli)\n"
          << "  addon <add|remove>             Manage addons\n"
          << "  info [section]                 Show project / framework info\n"
          << "  doctor                         Check development environment\n"
          << "  build                          Build the project\n"
          << "  run                            Build and launch the project\n"
-         << "  self-update                    Update TrussC and rebuild trusscli\n"
          << "\n"
          << "Common options (per subcommand):\n"
          << "  -p, --path <path>              Operate on a specific project path\n"
@@ -1741,91 +1732,6 @@ static void printTopHelp() {
          << "  trusscli update -p ./apps/myApp           Regenerate a specific project\n"
          << "\n"
          << "Run 'trusscli <command> --help' for command-specific help.\n";
-}
-
-// =============================================================================
-// Subcommand: self-update
-// =============================================================================
-
-static void printSelfUpdateHelp() {
-    cout << "Usage: trusscli self-update [options]\n"
-         << "\n"
-         << "Update TrussC to the latest version by pulling the latest code from\n"
-         << "the git repository and rebuilding trusscli. The /usr/local/bin symlink\n"
-         << "(if present) automatically points to the new binary.\n"
-         << "\n"
-         << "Options:\n"
-         << "      --tc-root <path>       Path to TrussC root directory\n"
-         << "  -h, --help                 Show this help\n";
-}
-
-static int cmdSelfUpdate(const vector<string>& args) {
-    string tcRoot;
-
-    for (size_t i = 0; i < args.size(); ++i) {
-        const string& a = args[i];
-        if (a == "-h" || a == "--help") { printSelfUpdateHelp(); return 0; }
-        else if (a == "--tc-root") {
-            if (i + 1 >= args.size()) {
-                cerr << "Error: --tc-root requires a value\n";
-                return 1;
-            }
-            tcRoot = args[++i];
-        }
-        else {
-            cerr << "Error: unknown option '" << a << "'\n"
-                 << "Run 'trusscli self-update --help' for usage.\n";
-            return 1;
-        }
-    }
-
-    if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
-    if (tcRoot.empty()) {
-        cerr << "Error: could not detect TrussC root. Use --tc-root <path>.\n";
-        return 1;
-    }
-
-    // Step 1: git pull
-    cout << "Updating TrussC (" << tcRoot << ") ...\n";
-    int rc = runProcess({"git", "-C", tcRoot, "pull"});
-    if (rc != 0) {
-        cerr << "Error: git pull failed (exit code " << rc << ").\n";
-        return 1;
-    }
-
-    // Step 2: rebuild trusscli
-#ifdef _WIN32
-    cout << "\nGit pull succeeded. Please rebuild trusscli manually:\n"
-         << "  cd " << tcRoot << "/tools\n"
-         << "  build_win.bat\n";
-    return 0;
-#else
-    cout << "\nRebuilding trusscli ...\n";
-    string cmake = findCMake();
-    string toolsDir = tcRoot + "/tools";
-    string buildDir = toolsDir + "/build";
-
-    // Ensure build directory exists
-    fs::create_directories(buildDir);
-
-    // cmake configure
-    rc = runProcess({cmake, "-S", toolsDir, "-B", buildDir});
-    if (rc != 0) {
-        cerr << "Error: cmake configure failed.\n";
-        return 1;
-    }
-
-    // cmake build
-    rc = runProcess({cmake, "--build", buildDir, "--parallel"});
-    if (rc != 0) {
-        cerr << "Error: build failed.\n";
-        return 1;
-    }
-
-    cout << "\ntrusscli updated successfully.\n"
-         << "The new version will be used on the next invocation.\n";
-    return 0;
-#endif
 }
 
 // =============================================================================
@@ -1869,9 +1775,8 @@ int main(int argc, char* argv[]) {
     if (first == "addon")  return cmdAddon(subArgs);
     if (first == "info")   return cmdInfo(subArgs);
     if (first == "doctor") return cmdDoctor(subArgs);
-    if (first == "build")       return cmdBuild(subArgs);
-    if (first == "run")         return cmdRun(subArgs);
-    if (first == "self-update") return cmdSelfUpdate(subArgs);
+    if (first == "build")  return cmdBuild(subArgs);
+    if (first == "run")    return cmdRun(subArgs);
 
     cerr << "Error: unknown command '" << first << "'\n"
          << "Run 'trusscli --help' for usage.\n";
