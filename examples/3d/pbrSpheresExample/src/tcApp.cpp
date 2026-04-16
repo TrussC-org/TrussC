@@ -17,10 +17,14 @@ void tcApp::setup() {
     env.loadProcedural();
     setEnvironment(env);
 
-    keyLight.setDirectional(Vec3(-0.5f, -1.0f, -0.6f));
-    keyLight.setDiffuse(1.0f, 0.98f, 0.92f);
-    keyLight.setIntensity(3.0f);
+    // Key light: tight spot from front-above, warm white
+    keyLight.setSpot(Vec3(0, -300, 800), Vec3(0.0f, 0.3f, -1.0f),
+                     0.05f, 0.20f);  // inner ~3°, outer ~11° half-angles
+    keyLight.setDiffuse(1.0f, 0.95f, 0.85f);
+    keyLight.setIntensity(8.0f);
+    keyLight.setAttenuation(1.0f, 0.0f, 0.0f);
 
+    // Fill light: directional, cool, from opposite side
     fillLight.setDirectional(Vec3(0.7f, -0.3f, 0.4f));
     fillLight.setDiffuse(0.4f, 0.5f, 0.7f);
     fillLight.setIntensity(0.6f);

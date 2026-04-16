@@ -27,7 +27,7 @@ class Material;
 enum class LightType {
     Directional,    // Parallel light (sunlight)
     Point,          // Point light
-    // Spot to be supported in future
+    Spot,           // Spot light (point + cone)
 };
 
 // ---------------------------------------------------------------------------
@@ -77,6 +77,32 @@ public:
     void setPoint(float x, float y, float z) {
         setPoint(Vec3(x, y, z));
     }
+
+    // Set as spot light (cone with smooth falloff between inner and outer angle)
+    // Angles are half-angles in radians, matching glTF KHR_lights_punctual.
+    // Default: innerHalfAngle=0 (sharp center), outerHalfAngle=π/4 (90° full cone)
+    void setSpot(const Vec3& position, const Vec3& direction,
+                 float innerHalfAngle = 0.0f, float outerHalfAngle = 0.7854f) {
+        type_ = LightType::Spot;
+        position_ = position;
+        float len = std::sqrt(direction.x * direction.x +
+                              direction.y * direction.y +
+                              direction.z * direction.z);
+        if (len > 0) {
+            direction_ = Vec3(direction.x / len, direction.y / len, direction.z / len);
+        }
+        spotInnerCos_ = std::cos(innerHalfAngle);
+        spotOuterCos_ = std::cos(outerHalfAngle);
+    }
+
+    void setSpot(float px, float py, float pz,
+                 float dx, float dy, float dz,
+                 float innerHalfAngle = 0.0f, float outerHalfAngle = 0.7854f) {
+        setSpot(Vec3(px, py, pz), Vec3(dx, dy, dz), innerHalfAngle, outerHalfAngle);
+    }
+
+    float getSpotInnerCos() const { return spotInnerCos_; }
+    float getSpotOuterCos() const { return spotOuterCos_; }
 
     LightType getType() const { return type_; }
     const Vec3& getDirection() const { return direction_; }
@@ -246,10 +272,14 @@ private:
     float intensity_;    // Intensity
     bool enabled_;
 
-    // Attenuation parameters (for Point light)
+    // Attenuation parameters (for Point/Spot light)
     float constantAttenuation_;
     float linearAttenuation_;
     float quadraticAttenuation_;
+
+    // Spot light cone (cosines of half-angles)
+    float spotInnerCos_ = 1.0f;   // cos(0) = full intensity at center
+    float spotOuterCos_ = 0.707f; // cos(π/4) ≈ 45° half-angle
 };
 
 // ---------------------------------------------------------------------------

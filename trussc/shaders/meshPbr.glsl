@@ -57,7 +57,8 @@ layout(binding=1) uniform fs_params {
     vec4 iblParams;   // x=hasIbl (0 or 1), y=prefilterMaxLod, z=exposure, w=hasNormalMap
     vec4 lightPosType[MAX_LIGHTS];
     vec4 lightColorIntensity[MAX_LIGHTS];
-    vec4 lightAttenuation[MAX_LIGHTS];
+    vec4 lightAttenuation[MAX_LIGHTS];    // xyz=c/l/q, w=spotOuterCos
+    vec4 lightSpotDir[MAX_LIGHTS];        // xyz=spot direction, w=spotInnerCos
 };
 
 // IBL resources. Bound only when iblParams.x > 0.5.
@@ -126,14 +127,20 @@ vec3 tonemapACES(vec3 x) {
 // Per-light evaluation
 // ---------------------------------------------------------------------------
 
-vec3 evalLight(vec4 posType, vec4 colorIntensity, vec4 atten,
+// type encoding: 0=directional, 1=point, 2=spot
+vec3 evalLight(vec4 posType, vec4 colorIntensity, vec4 atten, vec4 spotDir,
                vec3 N, vec3 V, vec3 worldPos,
                vec3 albedo, float metallic, float roughness, vec3 F0) {
-    bool isPoint = posType.w > 0.5;
+    int type = int(posType.w + 0.5);
 
     vec3 toLight;
     float attenuation;
-    if (isPoint) {
+    if (type == 0) {
+        // Directional
+        toLight = normalize(-posType.xyz);
+        attenuation = 1.0;
+    } else {
+        // Point or Spot (both have position + attenuation)
         vec3 d = posType.xyz - worldPos;
         float dist = length(d);
         toLight = d / max(dist, 1e-5);
@@ -141,9 +148,17 @@ vec3 evalLight(vec4 posType, vec4 colorIntensity, vec4 atten,
                     + atten.y * dist
                     + atten.z * dist * dist;
         attenuation = 1.0 / max(denom, 1e-5);
-    } else {
-        toLight = normalize(-posType.xyz);
-        attenuation = 1.0;
+
+        // Spot cone falloff
+        if (type == 2) {
+            vec3 sDir = normalize(spotDir.xyz);
+            float theta = dot(-toLight, sDir);  // cosine of angle from spot axis
+            float innerCos = spotDir.w;
+            float outerCos = atten.w;
+            float epsilon = innerCos - outerCos;
+            float spotFalloff = clamp((theta - outerCos) / max(epsilon, 1e-5), 0.0, 1.0);
+            attenuation *= spotFalloff;
+        }
     }
 
     vec3 L = toLight;
@@ -222,7 +237,8 @@ void main() {
     vec3 Lo = vec3(0.0);
     for (int i = 0; i < MAX_LIGHTS; i++) {
         if (i >= numLights) break;
-        Lo += evalLight(lightPosType[i], lightColorIntensity[i], lightAttenuation[i],
+        Lo += evalLight(lightPosType[i], lightColorIntensity[i],
+                        lightAttenuation[i], lightSpotDir[i],
                         N, V, v_worldPos,
                         albedo, metallic, roughness, F0);
     }

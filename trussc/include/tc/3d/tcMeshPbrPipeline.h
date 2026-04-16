@@ -182,13 +182,24 @@ public:
                 fsp.lightPosType[i][0] = d.x;
                 fsp.lightPosType[i][1] = d.y;
                 fsp.lightPosType[i][2] = d.z;
-                fsp.lightPosType[i][3] = 0.0f;  // 0 = directional
+                fsp.lightPosType[i][3] = 0.0f;
             } else {
+                // Point and Spot both use position
                 const Vec3& p = L.getPosition();
                 fsp.lightPosType[i][0] = p.x;
                 fsp.lightPosType[i][1] = p.y;
                 fsp.lightPosType[i][2] = p.z;
-                fsp.lightPosType[i][3] = 1.0f;  // 1 = point
+                fsp.lightPosType[i][3] = (L.getType() == LightType::Spot) ? 2.0f : 1.0f;
+            }
+
+            // Spot direction + cone angles (ignored for non-spot)
+            if (L.getType() == LightType::Spot) {
+                const Vec3& sd = L.getDirection();
+                fsp.lightSpotDir[i][0] = sd.x;
+                fsp.lightSpotDir[i][1] = sd.y;
+                fsp.lightSpotDir[i][2] = sd.z;
+                fsp.lightSpotDir[i][3] = L.getSpotInnerCos();
+                fsp.lightAttenuation[i][3] = L.getSpotOuterCos();
             }
             // Light contributes its diffuse color as the PBR radiance. The
             // Phong ambient/specular split isn't meaningful here; we pick
