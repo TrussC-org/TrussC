@@ -67,7 +67,9 @@ static string autoDetectTcRoot() {
     // Walk up from the executable looking for core/cmake/trussc_app.cmake.
     // Typically trusscli lives in TRUSSC_ROOT/tools/bin/trusscli.app/Contents/MacOS/
     // (Linux/Windows: TRUSSC_ROOT/tools/bin/trusscli[.exe])
-    fs::path searchPath = fs::path(getExecutablePath()).parent_path();
+    // Use canonical() to resolve symlinks — when invoked via /usr/local/bin/trusscli,
+    // the raw path would be the symlink location, not the actual binary.
+    fs::path searchPath = fs::canonical(getExecutablePath()).parent_path();
     #ifdef __APPLE__
     // Climb out of MacOS -> Contents -> .app -> parent dir
     for (int i = 0; i < 3 && searchPath.has_parent_path(); ++i) {
@@ -716,7 +718,7 @@ static int cmdUpdate(const vector<string>& args) {
 // =============================================================================
 
 static void printAddHelp() {
-    cout << "Usage: trusscli add <addon> [<addon>...]\n"
+    cout << "Usage: trusscli addon add <addon> [<addon>...]\n"
          << "\n"
          << "Add one or more addons to the TrussC project in the current directory.\n"
          << "The project is detected by walking up from CWD. The addons.make file\n"
@@ -728,8 +730,8 @@ static void printAddHelp() {
          << "  -h, --help                 Show this help\n"
          << "\n"
          << "Examples:\n"
-         << "  trusscli add tcxOsc                      Add a single addon\n"
-         << "  trusscli add tcxOsc tcxImGui tcxBox2d    Add multiple addons at once\n";
+         << "  trusscli addon add tcxOsc                      Add a single addon\n"
+         << "  trusscli addon add tcxOsc tcxImGui tcxBox2d    Add multiple addons at once\n";
 }
 
 static int cmdAdd(const vector<string>& args) {
@@ -846,7 +848,7 @@ static int cmdAdd(const vector<string>& args) {
 // =============================================================================
 
 static void printRemoveHelp() {
-    cout << "Usage: trusscli remove <addon> [<addon>...]\n"
+    cout << "Usage: trusscli addon remove <addon> [<addon>...]\n"
          << "\n"
          << "Remove one or more addons from the TrussC project in the current\n"
          << "directory. The project is detected by walking up from CWD. The\n"
@@ -858,8 +860,8 @@ static void printRemoveHelp() {
          << "  -h, --help                 Show this help\n"
          << "\n"
          << "Examples:\n"
-         << "  trusscli remove tcxOsc                   Remove a single addon\n"
-         << "  trusscli remove tcxOsc tcxImGui          Remove multiple addons at once\n";
+         << "  trusscli addon remove tcxOsc              Remove a single addon\n"
+         << "  trusscli addon remove tcxOsc tcxImGui     Remove multiple addons at once\n";
 }
 
 static int cmdRemove(const vector<string>& args) {
@@ -964,6 +966,41 @@ static int cmdRemove(const vector<string>& args) {
     if (int rc = runProjectUpdate(settings, projectPath)) return rc;
     cout << "Project updated: " << projectPath << "\n";
     return 0;
+}
+
+// =============================================================================
+// Subcommand: addon (dispatches to add / remove / future: list, update, etc.)
+// =============================================================================
+
+static void printAddonHelp() {
+    cout << "Usage: trusscli addon <command> [options]\n"
+         << "\n"
+         << "Manage addons for the TrussC project in the current directory.\n"
+         << "\n"
+         << "Commands:\n"
+         << "  add <addon>...             Add addons to the project\n"
+         << "  remove <addon>...          Remove addons from the project\n"
+         << "\n"
+         << "Run 'trusscli addon <command> --help' for command-specific help.\n";
+}
+
+static int cmdAddon(const vector<string>& args) {
+    if (args.empty()) {
+        printAddonHelp();
+        return 0;
+    }
+    const string& sub = args[0];
+    if (sub == "-h" || sub == "--help" || sub == "help") {
+        printAddonHelp();
+        return 0;
+    }
+    vector<string> subArgs(args.begin() + 1, args.end());
+    if (sub == "add")    return cmdAdd(subArgs);
+    if (sub == "remove") return cmdRemove(subArgs);
+
+    cerr << "Error: unknown addon command '" << sub << "'\n"
+         << "Run 'trusscli addon --help' for usage.\n";
+    return 1;
 }
 
 // =============================================================================
@@ -1682,8 +1719,7 @@ static void printTopHelp() {
          << "Commands:\n"
          << "  new <path>                     Create a new project at <path>\n"
          << "  update                         Regenerate build files for the project in CWD\n"
-         << "  add <addon>...                 Add addons to the project\n"
-         << "  remove <addon>...              Remove addons from the project\n"
+         << "  addon <add|remove>             Manage addons\n"
          << "  info [section]                 Show project / framework info\n"
          << "  doctor                         Check development environment\n"
          << "  build                          Build the project\n"
@@ -1697,8 +1733,9 @@ static void printTopHelp() {
          << "Examples:\n"
          << "  trusscli new myApp                        Create ./myApp\n"
          << "  trusscli new ./apps/myApp --web           Create with Web build enabled\n"
-         << "  trusscli new myApp -a tcxOsc -a tcxIME    With addons (repeat form)\n"
-         << "  trusscli new myApp -a tcxOsc,tcxIME       With addons (comma form)\n"
+         << "  trusscli new myApp -a tcxOsc -a tcxIME    With addons\n"
+         << "  trusscli addon add tcxOsc                 Add an addon to existing project\n"
+         << "  trusscli addon remove tcxOsc              Remove an addon\n"
          << "  trusscli update                           Regenerate the project in CWD\n"
          << "  trusscli update -p ./apps/myApp           Regenerate a specific project\n"
          << "\n"
@@ -1743,8 +1780,7 @@ int main(int argc, char* argv[]) {
     vector<string> subArgs(args.begin() + 1, args.end());
     if (first == "new")    return cmdNew(subArgs);
     if (first == "update") return cmdUpdate(subArgs);
-    if (first == "add")    return cmdAdd(subArgs);
-    if (first == "remove") return cmdRemove(subArgs);
+    if (first == "addon")  return cmdAddon(subArgs);
     if (first == "info")   return cmdInfo(subArgs);
     if (first == "doctor") return cmdDoctor(subArgs);
     if (first == "build")  return cmdBuild(subArgs);
