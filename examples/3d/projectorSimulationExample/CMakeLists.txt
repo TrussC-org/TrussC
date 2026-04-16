@@ -1,0 +1,9 @@
+cmake_minimum_required(VERSION 3.20)
+
+if(NOT DEFINED TRUSSC_DIR)
+    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")
+endif()
+
+include(${TRUSSC_DIR}/cmake/trussc_app.cmake)
+
+trussc_app()
