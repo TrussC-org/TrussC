@@ -258,13 +258,18 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         return false;
     }
 
-    // Try hardware acceleration (VAAPI / V4L2M2M / DRM). Falls back to SW.
-    hwType_ = tryCreateHwDevice(&hwDeviceCtx_);
-    if (hwType_ != AV_HWDEVICE_TYPE_NONE) {
-        codecCtx_->hw_device_ctx = av_buffer_ref(hwDeviceCtx_);
-        logNotice("VideoPlayer") << "Using HW backend: " << av_hwdevice_get_type_name(hwType_);
+    // Try hardware acceleration (CUDA / VAAPI / VDPAU / V4L2M2M / DRM).
+    // User can opt out via VideoPlayer::setUseHwAccel(false). Falls back to SW.
+    if (player && player->getUseHwAccel()) {
+        hwType_ = tryCreateHwDevice(&hwDeviceCtx_);
+        if (hwType_ != AV_HWDEVICE_TYPE_NONE) {
+            codecCtx_->hw_device_ctx = av_buffer_ref(hwDeviceCtx_);
+            logNotice("VideoPlayer") << "Using HW backend: " << av_hwdevice_get_type_name(hwType_);
+        } else {
+            logNotice("VideoPlayer") << "No HW backend available, using software decoding";
+        }
     } else {
-        logNotice("VideoPlayer") << "No HW backend available, using software decoding";
+        logNotice("VideoPlayer") << "HW accel disabled by user, using software decoding";
     }
 
     // Open codec (fallback to SW on HW open failure)
