@@ -7,6 +7,13 @@
 #include <fstream>
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
+#ifndef _WIN32
+#include <spawn.h>
+#include <sys/wait.h>
+#else
+#include <process.h>
+#endif
 
 using namespace std;
 using namespace tc;
@@ -137,6 +144,40 @@ static bool parseAddonValue(const string& value,
     }
     if (!current.empty()) out.push_back(current);
     return true;
+}
+
+// =============================================================================
+// Subprocess: run an external command with inherited stdout/stderr
+// =============================================================================
+
+// Run a command with argv passed as an array (no shell involvement). stdout and
+// stderr are inherited from the parent process so build output streams through.
+// Returns the child's exit code, or -1 on spawn failure.
+static int runProcess(const vector<string>& argv) {
+    if (argv.empty()) return -1;
+#ifdef _WIN32
+    // Build a null-terminated argv for _spawnvp
+    vector<const char*> cargv;
+    for (const auto& a : argv) cargv.push_back(a.c_str());
+    cargv.push_back(nullptr);
+    return (int)_spawnvp(_P_WAIT, cargv[0], cargv.data());
+#else
+    // POSIX: posix_spawnp + waitpid
+    vector<char*> cargv;
+    for (const auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
+    cargv.push_back(nullptr);
+
+    extern char** environ;
+    pid_t pid = 0;
+    int err = posix_spawnp(&pid, cargv[0], nullptr, nullptr, cargv.data(), environ);
+    if (err != 0) {
+        cerr << "Error: failed to spawn '" << argv[0] << "': " << strerror(err) << "\n";
+        return -1;
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#endif
 }
 
 // =============================================================================
@@ -1362,12 +1403,268 @@ static int cmdDoctor(const vector<string>& args) {
 }
 
 // =============================================================================
-// Stub for unimplemented commands
+// Subcommand: build
 // =============================================================================
 
-static int cmdNotImplemented(const string& cmdName) {
-    cerr << "Error: '" << cmdName << "' is not yet implemented.\n"
-         << "See https://github.com/TrussC-org/TrussC/issues/24 for the design.\n";
+// Detect the native CMake preset name at compile time.
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+static constexpr const char* kNativePreset = "macos";
+#elif defined(_WIN32)
+static constexpr const char* kNativePreset = "windows";
+#elif defined(__linux__)
+static constexpr const char* kNativePreset = "linux";
+#else
+static constexpr const char* kNativePreset = nullptr;
+#endif
+
+// Find the cmake binary. On macOS, PATH may not contain cmake when launched
+// from Finder, so check common Homebrew paths as well.
+static string findCMake() {
+#ifdef __APPLE__
+    const char* paths[] = {
+        "/opt/homebrew/bin/cmake",
+        "/usr/local/bin/cmake",
+        "/Applications/CMake.app/Contents/bin/cmake",
+    };
+    for (const char* p : paths) {
+        if (fs::exists(p)) return p;
+    }
+#endif
+    return "cmake";
+}
+
+static void printBuildHelp() {
+    cout << "Usage: trusscli build [options]\n"
+         << "\n"
+         << "Build the TrussC project in the current directory. By default builds\n"
+         << "for the native platform; use --web / --android / --ios to cross-compile.\n"
+         << "\n"
+         << "Options:\n"
+         << "      --web                  Build for WebAssembly\n"
+         << "      --android              Build for Android\n"
+         << "      --ios                  Build for iOS\n"
+         << "      --release              Build in Release configuration\n"
+         << "      --clean                Clean before building (--clean-first)\n"
+         << "  -p, --path <path>          Operate on a specific project path\n"
+         << "  -h, --help                 Show this help\n";
+}
+
+static int cmdBuild(const vector<string>& args) {
+    string explicitPath;
+    string targetPreset;
+    bool release = false;
+    bool clean = false;
+
+    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << opt << " requires a value\n";
+            return false;
+        }
+        out = args[++i];
+        return true;
+    };
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printBuildHelp(); return 0; }
+        else if (a == "--web")     targetPreset = "web";
+        else if (a == "--android") targetPreset = "android";
+        else if (a == "--ios")     targetPreset = "ios";
+        else if (a == "--release") release = true;
+        else if (a == "--clean")   clean = true;
+        else if (a == "-p" || a == "--path") {
+            if (!needValue(i, a, explicitPath)) return 1;
+        }
+        else {
+            cerr << "Error: unknown option '" << a << "'\n"
+                 << "Run 'trusscli build --help' for usage.\n";
+            return 1;
+        }
+    }
+
+    string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
+    if (projectPath.empty()) {
+        cerr << "Error: not inside a TrussC project.\n"
+             << "Use 'trusscli build -p <path>' or run from inside a project.\n";
+        return 1;
+    }
+
+    if (targetPreset.empty()) {
+        if (!kNativePreset) {
+            cerr << "Error: cannot detect native platform. Use --web, --android, or --ios.\n";
+            return 1;
+        }
+        targetPreset = kNativePreset;
+    }
+
+    // Check that the preset exists in the project
+    string presetsFile = projectPath + "/CMakePresets.json";
+    if (!fs::exists(presetsFile)) {
+        cerr << "Error: no CMakePresets.json in " << projectPath << "\n"
+             << "Run 'trusscli update' first to generate build files.\n";
+        return 1;
+    }
+
+    string cmake = findCMake();
+
+    // cmake --build --preset <target> [--config Release] [--clean-first]
+    vector<string> cmd = {cmake, "--build", "--preset", targetPreset};
+    if (release) { cmd.push_back("--config"); cmd.push_back("Release"); }
+    if (clean) cmd.push_back("--clean-first");
+
+    // Run from the project directory
+    string savedCwd = fs::current_path().string();
+    fs::current_path(projectPath);
+    int rc = runProcess(cmd);
+    fs::current_path(savedCwd);
+
+    if (rc != 0) {
+        cerr << "Build failed (exit code " << rc << ").\n";
+    }
+    return rc;
+}
+
+// =============================================================================
+// Subcommand: run
+// =============================================================================
+
+static void printRunHelp() {
+    cout << "Usage: trusscli run [options]\n"
+         << "\n"
+         << "Build and launch the TrussC project in the current directory.\n"
+         << "Default: native build + launch. Use --web / --android / --ios to\n"
+         << "cross-compile and launch on the appropriate target.\n"
+         << "\n"
+         << "Options:\n"
+         << "      --web                  Build WASM and start a local HTTP server\n"
+         << "      --android              Build, adb install, and launch    [not yet implemented]\n"
+         << "      --ios                  Build and run in iOS Simulator    [not yet implemented]\n"
+         << "      --headless             Launch via labwc Wayland session (headless Linux)\n"
+         << "      --release              Build in Release configuration\n"
+         << "  -p, --path <path>          Operate on a specific project path\n"
+         << "  -h, --help                 Show this help\n";
+}
+
+static int cmdRun(const vector<string>& args) {
+    string explicitPath;
+    string target; // "", "web", "android", "ios"
+    bool headless = false;
+    bool release = false;
+
+    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << opt << " requires a value\n";
+            return false;
+        }
+        out = args[++i];
+        return true;
+    };
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printRunHelp(); return 0; }
+        else if (a == "--web")      target = "web";
+        else if (a == "--android")  target = "android";
+        else if (a == "--ios")      target = "ios";
+        else if (a == "--headless") headless = true;
+        else if (a == "--release")  release = true;
+        else if (a == "-p" || a == "--path") {
+            if (!needValue(i, a, explicitPath)) return 1;
+        }
+        else {
+            cerr << "Error: unknown option '" << a << "'\n"
+                 << "Run 'trusscli run --help' for usage.\n";
+            return 1;
+        }
+    }
+
+    string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
+    if (projectPath.empty()) {
+        cerr << "Error: not inside a TrussC project.\n"
+             << "Use 'trusscli run -p <path>' or run from inside a project.\n";
+        return 1;
+    }
+
+    string projectName = fs::canonical(projectPath).filename().string();
+
+    // Android / iOS: not yet implemented — check before building
+    if (target == "android") {
+        cerr << "Error: 'run --android' is not yet implemented (adb install + launch).\n"
+             << "For now, build with 'trusscli build --android' and deploy manually.\n"
+             << "See https://github.com/TrussC-org/TrussC/issues/24\n";
+        return 1;
+    }
+    if (target == "ios") {
+        cerr << "Error: 'run --ios' is not yet implemented (xcrun simctl).\n"
+             << "For now, build with 'trusscli build --ios' and run from Xcode.\n"
+             << "See https://github.com/TrussC-org/TrussC/issues/24\n";
+        return 1;
+    }
+
+    // --- Build phase ---
+    vector<string> buildArgs;
+    if (!target.empty()) buildArgs.push_back("--" + target);
+    if (release) buildArgs.push_back("--release");
+    if (!explicitPath.empty()) { buildArgs.push_back("-p"); buildArgs.push_back(explicitPath); }
+
+    int buildRc = cmdBuild(buildArgs);
+    if (buildRc != 0) return buildRc;
+
+    cout << "\n";
+
+    // --- Launch phase ---
+
+    // Web: use emrun or python http.server
+    if (target == "web") {
+        string htmlPath = projectPath + "/bin/" + projectName + ".html";
+        if (!fs::exists(htmlPath)) {
+            cerr << "Error: built HTML not found at " << htmlPath << "\n";
+            return 1;
+        }
+        cout << "Launching web server for " << htmlPath << " ...\n";
+        // Try emrun first (Emscripten's built-in server)
+        auto [emrunCode, emrunOut] = captureCommand("which emrun 2>/dev/null");
+        if (emrunCode == 0 && !emrunOut.empty()) {
+            return runProcess({"emrun", htmlPath});
+        }
+        // Fallback: python3 http.server
+        cout << "emrun not found, using python3 http.server ...\n";
+        string binDir = projectPath + "/bin";
+        cout << "Open http://localhost:8000/" << projectName << ".html in your browser.\n";
+        return runProcess({"python3", "-m", "http.server", "8000", "-d", binDir});
+    }
+
+    // Native: find and launch the binary
+#ifdef __APPLE__
+    string appPath = projectPath + "/bin/" + projectName + ".app";
+    if (fs::exists(appPath)) {
+        string binPath = appPath + "/Contents/MacOS/" + projectName;
+        if (headless) {
+            cerr << "Warning: --headless is a Linux-only option (ignored on macOS).\n";
+        }
+        cout << "Launching " << projectName << " ...\n";
+        return runProcess({binPath});
+    }
+#elif defined(__linux__)
+    string binPath = projectPath + "/bin/" + projectName;
+    if (fs::exists(binPath)) {
+        if (headless) {
+            cout << "Launching via labwc (headless Wayland session) ...\n";
+            return runProcess({"labwc", "-s", binPath});
+        }
+        cout << "Launching " << projectName << " ...\n";
+        return runProcess({binPath});
+    }
+#elif defined(_WIN32)
+    string exePath = projectPath + "/bin/" + projectName + ".exe";
+    if (fs::exists(exePath)) {
+        cout << "Launching " << projectName << " ...\n";
+        return runProcess({exePath});
+    }
+#endif
+
+    cerr << "Error: built binary not found in " << projectPath << "/bin/\n"
+         << "Make sure the build succeeded.\n";
     return 1;
 }
 
@@ -1389,8 +1686,8 @@ static void printTopHelp() {
          << "  remove <addon>...              Remove addons from the project\n"
          << "  info [section]                 Show project / framework info\n"
          << "  doctor                         Check development environment\n"
-         << "  build                          Build the project                  [not yet implemented]\n"
-         << "  run                            Build and launch the project       [not yet implemented]\n"
+         << "  build                          Build the project\n"
+         << "  run                            Build and launch the project\n"
          << "\n"
          << "Common options (per subcommand):\n"
          << "  -p, --path <path>              Operate on a specific project path\n"
@@ -1450,9 +1747,8 @@ int main(int argc, char* argv[]) {
     if (first == "remove") return cmdRemove(subArgs);
     if (first == "info")   return cmdInfo(subArgs);
     if (first == "doctor") return cmdDoctor(subArgs);
-    if (first == "build" || first == "run") {
-        return cmdNotImplemented(first);
-    }
+    if (first == "build")  return cmdBuild(subArgs);
+    if (first == "run")    return cmdRun(subArgs);
 
     cerr << "Error: unknown command '" << first << "'\n"
          << "Run 'trusscli --help' for usage.\n";
