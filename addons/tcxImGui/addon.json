@@ -1,5 +1,6 @@
 {
   "description": "Dear ImGui integration",
-  "author": "TrussC",
-  "license": "MIT"
+  "author": "tettou771",
+  "license": "MIT",
+  "keywords": ["gui", "imgui", "ui", "debug"]
 }

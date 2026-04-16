@@ -1,5 +1,6 @@
 {
   "description": "Hap video codec for fast GPU playback",
-  "author": "TrussC",
-  "license": "MIT"
+  "author": "tettou771",
+  "license": "MIT",
+  "keywords": ["video", "codec", "gpu", "hap"]
 }

@@ -1,5 +1,6 @@
 {
   "description": "TLS/SSL support (mbedTLS)",
-  "author": "TrussC",
-  "license": "MIT"
+  "author": "tettou771",
+  "license": "MIT",
+  "keywords": ["tls", "ssl", "security", "network"]
 }

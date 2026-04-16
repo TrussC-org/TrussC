@@ -1,5 +1,6 @@
 {
   "description": "Quad warp / projection mapping",
-  "author": "TrussC",
-  "license": "MIT"
+  "author": "tettou771",
+  "license": "MIT",
+  "keywords": ["projection", "mapping", "warp"]
 }

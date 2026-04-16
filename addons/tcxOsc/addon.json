@@ -1,5 +1,6 @@
 {
   "description": "OSC (Open Sound Control) protocol",
-  "author": "TrussC",
-  "license": "MIT"
+  "author": "tettou771",
+  "license": "MIT",
+  "keywords": ["osc", "network", "sound", "control"]
 }

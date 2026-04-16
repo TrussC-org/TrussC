@@ -1,5 +1,6 @@
 {
   "description": "3D LUT color grading",
-  "author": "TrussC",
-  "license": "MIT"
+  "author": "tettou771",
+  "license": "MIT",
+  "keywords": ["color", "lut", "grading", "shader"]
 }

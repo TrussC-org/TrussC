@@ -1,5 +1,6 @@
 {
   "description": "WebSocket client and server",
-  "author": "TrussC",
-  "license": "MIT"
+  "author": "tettou771",
+  "license": "MIT",
+  "keywords": ["websocket", "network", "server"]
 }
