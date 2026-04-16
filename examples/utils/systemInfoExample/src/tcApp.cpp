@@ -1,7 +1,5 @@
 #include "tcApp.h"
 
-using namespace tc::platform;
-
 void tcApp::setup() {
     setImmersiveMode(true);
 }

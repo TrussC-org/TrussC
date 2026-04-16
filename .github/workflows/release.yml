@@ -79,7 +79,7 @@ jobs:
             'cmake_minimum_required(VERSION 3.20)' \
             'project(app)' \
             'if(NOT DEFINED TRUSSC_DIR)' \
-            '    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")' \
+            '    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../core")' \
             'endif()' \
             'include(${TRUSSC_DIR}/cmake/trussc_app.cmake)' \
             'trussc_app()' \
@@ -112,7 +112,7 @@ jobs:
           cmake -B build \
             -G "Unix Makefiles" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DTRUSSC_DIR="${GITHUB_WORKSPACE}/TrussC/trussc"
+            -DTRUSSC_DIR="${GITHUB_WORKSPACE}/TrussC/core"
 
       - name: Build
         run: cmake --build build -j$(sysctl -n hw.logicalcpu)
@@ -232,7 +232,7 @@ jobs:
             'cmake_minimum_required(VERSION 3.20)' \
             'project(app)' \
             'if(NOT DEFINED TRUSSC_DIR)' \
-            '    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")' \
+            '    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../core")' \
             'endif()' \
             'include(${TRUSSC_DIR}/cmake/trussc_app.cmake)' \
             'trussc_app()' \
@@ -310,7 +310,7 @@ jobs:
             'cmake_minimum_required(VERSION 3.20)' \
             'project(app)' \
             'if(NOT DEFINED TRUSSC_DIR)' \
-            '    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")' \
+            '    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../core")' \
             'endif()' \
             'include(${TRUSSC_DIR}/cmake/trussc_app.cmake)' \
             'trussc_app()' \
@@ -333,7 +333,7 @@ jobs:
           cmake -B build \
             -G "Unix Makefiles" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DTRUSSC_DIR="${GITHUB_WORKSPACE}/TrussC/trussc"
+            -DTRUSSC_DIR="${GITHUB_WORKSPACE}/TrussC/core"
 
       - name: Build
         run: cmake --build build -j$(nproc)
