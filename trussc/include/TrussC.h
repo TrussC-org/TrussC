@@ -2021,6 +2021,10 @@ namespace internal {
         }
         #endif
 
+        // Install the standard application menu on macOS so Cmd+Q etc. work
+        // out of the box. No-op on other platforms.
+        internal::installAppMenu();
+
         // Bring window to front on startup
         bringWindowToFront();
 

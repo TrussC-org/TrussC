@@ -380,6 +380,10 @@ bool saveScreenshot(const std::filesystem::path& path) {
 // ---------------------------------------------------------------------------
 // System sensors (stubs)
 // ---------------------------------------------------------------------------
+namespace internal {
+void installAppMenu() {}  // macOS-only
+} // namespace internal
+
 float getSystemVolume() { return -1.0f; }
 void setSystemVolume(float volume) { (void)volume; }
 float getSystemBrightness() { return -1.0f; }

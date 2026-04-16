@@ -136,4 +136,14 @@ bool isProximityClose();
 // ---------------------------------------------------------------------------
 Location getLocation();
 
+// ---------------------------------------------------------------------------
+// Internal — called by the framework, not user code
+// ---------------------------------------------------------------------------
+namespace internal {
+    // Install the standard macOS application menu (About / Hide / Hide Others /
+    // Show All / Quit). Called automatically from _setup_cb on macOS.
+    // No-op on other platforms.
+    void installAppMenu();
+}
+
 } // namespace trussc

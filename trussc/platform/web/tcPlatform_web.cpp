@@ -56,6 +56,13 @@ bool saveScreenshot(const std::filesystem::path& path) {
 }
 
 // ---------------------------------------------------------------------------
+// App menu (macOS only) — stub
+// ---------------------------------------------------------------------------
+namespace internal {
+void installAppMenu() {}
+} // namespace internal
+
+// ---------------------------------------------------------------------------
 // System sensors (stubs)
 // ---------------------------------------------------------------------------
 float getSystemVolume() { return -1.0f; }

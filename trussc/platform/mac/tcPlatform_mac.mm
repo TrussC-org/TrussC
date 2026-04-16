@@ -407,6 +407,31 @@ bool isProximityClose() { return false; }
 } // namespace trussc
 
 // ---------------------------------------------------------------------------
+// Application menu (NSMenu) — ObjC declarations must be at global scope
+// ---------------------------------------------------------------------------
+
+@interface _TCMacAppMenuTarget : NSObject
+- (void)tcQuit:(id)sender;
+- (void)tcShowAbout:(id)sender;
+@end
+static _TCMacAppMenuTarget* _macAppMenuTarget = nil;
+
+@implementation _TCMacAppMenuTarget
+- (void)tcQuit:(id)sender {
+    (void)sender;
+    // Route through sokol's cancellable quit path so user code can intercept
+    // via events().exitRequested.
+    sapp_request_quit();
+}
+- (void)tcShowAbout:(id)sender {
+    (void)sender;
+    // App name, icon, version and copyright are pulled from the bundle's
+    // Info.plist automatically.
+    [NSApp orderFrontStandardAboutPanel:@{}];
+}
+@end
+
+// ---------------------------------------------------------------------------
 // Location (CoreLocation) — ObjC declarations must be at global scope
 // ---------------------------------------------------------------------------
 static trussc::Location _macLastLocation;
@@ -438,6 +463,73 @@ static CLLocationManager* _macLocationManager = nil;
 @end
 
 namespace trussc {
+
+// ---------------------------------------------------------------------------
+// Application menu (NSMenu)
+// ---------------------------------------------------------------------------
+
+namespace internal {
+
+void installAppMenu() {
+    // Note: cannot short-circuit on existing mainMenu — macOS auto-creates
+    // an empty placeholder menu when activationPolicy becomes Regular, so
+    // the menu is always already non-nil by the time this runs. Just overwrite.
+    if (_macAppMenuTarget == nil) {
+        _macAppMenuTarget = [[_TCMacAppMenuTarget alloc] init];
+    }
+
+    NSString* appName = [[NSRunningApplication currentApplication] localizedName];
+    if (appName.length == 0) {
+        appName = [[NSProcessInfo processInfo] processName];
+    }
+
+    NSMenu* mainMenu = [[NSMenu alloc] init];
+    NSMenuItem* appMenuItem = [[NSMenuItem alloc] init];
+    [mainMenu addItem:appMenuItem];
+
+    NSMenu* appMenu = [[NSMenu alloc] init];
+
+    // About <App>
+    NSMenuItem* aboutItem = [[NSMenuItem alloc]
+        initWithTitle:[NSString stringWithFormat:@"About %@", appName]
+        action:@selector(tcShowAbout:)
+        keyEquivalent:@""];
+    [aboutItem setTarget:_macAppMenuTarget];
+    [appMenu addItem:aboutItem];
+
+    [appMenu addItem:[NSMenuItem separatorItem]];
+
+    // Hide <App>  (Cmd+H)
+    [appMenu addItemWithTitle:[NSString stringWithFormat:@"Hide %@", appName]
+                       action:@selector(hide:)
+                keyEquivalent:@"h"];
+
+    // Hide Others (Cmd+Option+H)
+    NSMenuItem* hideOthers = [appMenu addItemWithTitle:@"Hide Others"
+                                                action:@selector(hideOtherApplications:)
+                                         keyEquivalent:@"h"];
+    [hideOthers setKeyEquivalentModifierMask:(NSEventModifierFlagOption | NSEventModifierFlagCommand)];
+
+    // Show All
+    [appMenu addItemWithTitle:@"Show All"
+                       action:@selector(unhideAllApplications:)
+                keyEquivalent:@""];
+
+    [appMenu addItem:[NSMenuItem separatorItem]];
+
+    // Quit <App>  (Cmd+Q) — cancellable via events().exitRequested
+    NSMenuItem* quitItem = [[NSMenuItem alloc]
+        initWithTitle:[NSString stringWithFormat:@"Quit %@", appName]
+        action:@selector(tcQuit:)
+        keyEquivalent:@"q"];
+    [quitItem setTarget:_macAppMenuTarget];
+    [appMenu addItem:quitItem];
+
+    [appMenuItem setSubmenu:appMenu];
+    [NSApp setMainMenu:mainMenu];
+}
+
+} // namespace internal
 
 Location getLocation() {
     if (!_macLocationStarted) {
