@@ -34,7 +34,7 @@ private:
     Light projector;
     Fbo goboFbo;
     float projectorX = 0.0f;
-    float projectorZ = 400.0f;
+    float projectorZ = 250.0f;
 
     // Ambient
     Light ambientLight;

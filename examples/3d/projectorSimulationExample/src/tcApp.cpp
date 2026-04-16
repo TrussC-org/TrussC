@@ -21,14 +21,14 @@ void tcApp::setup() {
     // Floor
     floorMesh = createPlane(600, 600, 1, 1);
 
-    // Materials
-    wallMat.setBaseColor(0.92f, 0.90f, 0.88f)
+    // Materials (dark surfaces to avoid washout from projector)
+    wallMat.setBaseColor(0.15f, 0.14f, 0.13f)
            .setMetallic(0.0f)
-           .setRoughness(0.6f);
+           .setRoughness(0.7f);
 
-    floorMat.setBaseColor(0.3f, 0.28f, 0.25f)
+    floorMat.setBaseColor(0.12f, 0.11f, 0.10f)
             .setMetallic(0.0f)
-            .setRoughness(0.8f);
+            .setRoughness(0.9f);
 
     // -------------------------------------------------------------------------
     // Projector: on the ground (Y=0), pointing forward (-Z) toward the screen,
@@ -40,9 +40,9 @@ void tcApp::setup() {
         Vec3(0.0f, 0.0f, -1.0f),
         0.0f, projFov);
     projector.setDiffuse(1.0f, 1.0f, 1.0f);
-    projector.setIntensity(12.0f);
+    projector.setIntensity(10.0f);
     projector.setAttenuation(1.0f, 0.0f, 0.0f);
-    projector.setLensShift(0.0f, 0.5f);   // shift upward
+    projector.setLensShift(0.0f, 1.0f);   // full upward shift: image starts at projector height
     projector.setProjectorAspect(16.0f / 9.0f);
 
     // Dynamic gobo: FBO that we draw into every frame
@@ -52,7 +52,7 @@ void tcApp::setup() {
     // Ambient: soft fill so the room isn't pitch black
     ambientLight.setDirectional(Vec3(0.0f, -1.0f, 0.2f));
     ambientLight.setDiffuse(0.6f, 0.65f, 0.7f);
-    ambientLight.setIntensity(0.3f);
+    ambientLight.setIntensity(0.15f);
 
     // Simple procedural IBL for ambient reflections
     env.loadProcedural();
@@ -65,7 +65,7 @@ void tcApp::update() {
         Vec3(projectorX, 10.0f, projectorZ),
         Vec3(0.0f, 0.0f, -1.0f),
         0.0f, 0.45f);
-    projector.setLensShift(0.0f, 0.5f);
+    projector.setLensShift(0.0f, 1.0f);
     projector.setProjectorAspect(16.0f / 9.0f);
     projector.setProjectionTexture(&goboFbo.getTexture());
 }
@@ -142,8 +142,8 @@ void tcApp::draw() {
     setColor(1.0f);
     drawBitmapString(
         "projectorSimulation\n"
-        "drag: move projector (left mouse on floor area)\n"
-        "cam: right-drag rotate, scroll zoom",
+        "right-drag: move projector\n"
+        "left-drag: rotate camera / scroll: zoom",
         20, 20);
 
     // Show gobo preview in corner
@@ -186,19 +186,19 @@ void tcApp::drawGoboContent() {
 }
 
 void tcApp::mousePressed(Vec2 pos, int button) {
-    if (button == 2) {  // middle button for projector drag
+    if (button == 1) {  // right button for projector drag
         isDraggingProjector = true;
     }
 }
 
 void tcApp::mouseReleased(Vec2 pos, int button) {
-    if (button == 2) {
+    if (button == 1) {
         isDraggingProjector = false;
     }
 }
 
 void tcApp::mouseDragged(Vec2 pos, int button) {
-    if (isDraggingProjector && button == 2) {
+    if (isDraggingProjector && button == 1) {
         float normX = (pos.x / getWidth() - 0.5f) * 2.0f;
         float normY = (pos.y / getHeight() - 0.5f) * 2.0f;
         projectorX = normX * 300.0f;
