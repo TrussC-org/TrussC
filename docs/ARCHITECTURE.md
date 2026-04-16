@@ -58,9 +58,9 @@ MyProject/
 
 ## 3.5 Project Generation & TRUSSC_DIR
 
-### How projectGenerator Works
+### How trusscli Works
 
-The `projectGenerator` tool creates new projects by:
+The `trusscli` tool (TrussC Project Generator) creates new projects by:
 1. Copying template files (CMakeLists.txt copied as-is, no modification)
 2. Generating `CMakePresets.json` with OS-specific configuration
 3. Generating IDE-specific files (.vscode/, Xcode project, etc.)

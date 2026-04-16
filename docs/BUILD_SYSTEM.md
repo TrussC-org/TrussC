@@ -28,26 +28,26 @@ Run the `projectGenerator` app (built from `tools/`).
 - **Update:** Use "Import" to select an existing project folder, modify settings, and click "Update".
 
 ### CLI Mode (Automation)
-The Project Generator can be run from the command line for automation or headless environments.
+`trusscli` can be run from the command line for automation or headless environments.
 
 ```bash
 # Update an existing project
-projectGenerator --update path/to/myProject
+trusscli update -p path/to/myProject
 
 # Enable Web build (WASM)
-projectGenerator --update path/to/myProject --web
+trusscli update -p path/to/myProject --web
 
 # Enable Android build
-projectGenerator --update path/to/myProject --android
+trusscli update -p path/to/myProject --android
 
 # Enable iOS build
-projectGenerator --update path/to/myProject --ios
+trusscli update -p path/to/myProject --ios
 
 # Specify TrussC root explicitly (if auto-detection fails)
-projectGenerator --update path/to/myProject --tc-root path/to/TrussC
+trusscli update -p path/to/myProject --tc-root path/to/TrussC
 
 # Generate a new project
-projectGenerator --generate --name myNewApp --dir path/to/projects
+trusscli new path/to/myNewApp
 ```
 
 ---
@@ -92,8 +92,8 @@ Requires:
 - Java (`JAVA_HOME` environment variable) — for APK signing
 
 ```bash
-# Using Project Generator (adds android preset to CMakePresets.json)
-projectGenerator --update path/to/myProject --android
+# Using trusscli (adds android preset to CMakePresets.json)
+trusscli update -p path/to/myProject --android
 
 # Build
 cmake --preset android
@@ -103,11 +103,11 @@ cmake --build --preset android
 ```
 
 Notes:
-- The Project Generator detects the NDK from `ANDROID_NDK_HOME` or `$ANDROID_HOME/ndk/`.
+- trusscli detects the NDK from `ANDROID_NDK_HOME` or `$ANDROID_HOME/ndk/`.
 - APK signing uses `~/.android/debug.keystore`. If missing, APK packaging is skipped and only the .so is built.
 - Touch input: On Android, touch events are delivered via `touchPressed()`/`touchMoved()`/`touchReleased()`. To also receive them as mouse events, call `setTouchAsMouse(true)` in `setup()`.
 - Data files: Use `adb push` to transfer assets to the app's internal storage.
-- **If `cmake --preset android` fails after Project Generator**, try running the command manually from the terminal. The Project Generator may not fully configure the Android preset in some environments.
+- **If `cmake --preset android` fails after trusscli update**, try running the command manually from the terminal.
 
 **iOS Build (beta):**
 
@@ -116,8 +116,8 @@ Requires:
 - Apple Developer account (for device deployment)
 
 ```bash
-# Using Project Generator (adds ios preset)
-projectGenerator --update path/to/myProject --ios
+# Using trusscli (adds ios preset)
+trusscli update -p path/to/myProject --ios
 
 # Generate Xcode project
 cmake --preset ios
@@ -148,7 +148,7 @@ cd examples
 ./build_all.sh --web    # Native + Web build
 ./build_all.sh --clean  # Clean rebuild
 ```
-This script automatically uses `projectGenerator` to update each example before building.
+This script automatically uses `trusscli` to update each example before building.
 
 ---
 

@@ -75,15 +75,15 @@ This will list any missing packages and ask to install them. Use `-y` to skip th
 
 ---
 
-## 2. Build the Project Generator
+## 2. Build trusscli
 
 Build the project creation tool (first time only).
 
-**macOS:** Double-click `projectGenerator/buildProjectGenerator_mac.command`
+**macOS:** Double-click `tools/build_mac.command`
 
-**Windows:** Double-click `projectGenerator/buildProjectGenerator_win.bat`
+**Windows:** Double-click `tools/build_win.bat`
 
-**Linux:** Run `./projectGenerator/buildProjectGenerator_linux.sh` (dependencies are installed automatically)
+**Linux:** Run `./tools/build_linux.sh` (dependencies are installed automatically)
 
 ---
 

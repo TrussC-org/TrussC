@@ -87,7 +87,7 @@ TrussC has undergone bold structural reforms to solve "complexity" and "performa
 
 * **openFrameworks:**
   * **Naming:** `ofx` prefix (e.g.: `ofxGui`, `ofxOsc`)
-  * **Installation:** Select checkboxes in projectGenerator, or write in `addons.make` file.
+  * **Installation:** Select checkboxes in projectGenerator, or write in `addons.make` file. (TrussC: use `trusscli add` or the GUI)
   * **Build:** Often requires manually adding paths to IDE project settings.
   * **Namespace:** No standard convention, often defined directly in global namespace.
   * **Issue:** Manual dependency resolution between addons. If "ofxA depends on ofxB", both must be written in addons.make.
@@ -408,7 +408,7 @@ Reference for oF users finding equivalent features in TrussC.
 
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
-| `ofxGui / ofxImGui` | `tcxImGui` addon | Add via projectGenerator or addons.make |
+| `ofxGui / ofxImGui` | `tcxImGui` addon | Add via `trusscli add tcxImGui` or addons.make |
 
 ### **I/O**
 

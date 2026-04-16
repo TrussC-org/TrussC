@@ -10,7 +10,7 @@ Provides immediate-mode GUI with full input handling and rendering, connected vi
    ```
    tcxImGui
    ```
-   Or use projectGenerator to add the addon to your project.
+   Or use `trusscli add tcxImGui` to add the addon to your project.
 
 2. Include the header and add the namespace:
    ```cpp

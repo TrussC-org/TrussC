@@ -359,7 +359,7 @@ EasyCam provides orbit controls automatically (drag to rotate, scroll to zoom, r
 
 ## Addons
 
-Addons add optional features. To use: check the addon in projectGenerator, then `#include` the addon header.
+Addons add optional features. To use: run `trusscli add <addon>` (or check the addon in the GUI), then `#include` the addon header.
 
 ```cpp
 #include <tcxBox2d.h>
@@ -748,17 +748,17 @@ void tcApp::setup() {
 - Confirm cmake is working before proceeding to next step
 
 ### Getting Started
-- If user says they already have cmake + compiler, skip to projectGenerator
+- If user says they already have cmake + compiler, skip to building trusscli
 
-- To get projectGenerator:
-  1. Go to the `projectGenerator` folder in TrussC
-  2. Double-click the script for your OS (works normally on Mac too)
-  3. Wait 10-20 seconds — projectGenerator will appear in the same folder
-  4. Use this generated projectGenerator app
+- To get trusscli:
+  1. Go to the `tools/` folder in TrussC
+  2. Double-click the build script for your OS (`build_mac.command`, `build_win.bat`, or `build_linux.sh`)
+  3. Wait 10-20 seconds — trusscli (TrussC Project Generator) will appear in the same folder
+  4. Use the generated app (GUI mode) or run `trusscli` from the command line
 
 - For users unsure where to start: guide them to build a sample first
-- To build a sample: drag the sample folder (the one containing `src`) into projectGenerator
-- For new projects: explain how to create via projectGenerator
+- To build a sample: drag the sample folder (the one containing `src`) into the trusscli GUI
+- For new projects: explain how to create via `trusscli new myApp` (CLI) or the GUI
 - Examples can also be viewed online at https://trussc.org/examples
 - cmake-based building is advanced — only explain if specifically asked
 
