@@ -139,6 +139,225 @@ static bool parseAddonValue(const string& value,
     return true;
 }
 
+// =============================================================================
+// Doctor: environment checks
+// =============================================================================
+
+struct CaptureResult { int exitCode; string output; };
+
+static CaptureResult captureCommand(const string& cmd) {
+    string output;
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return {-1, ""};
+    char buf[256];
+    while (fgets(buf, sizeof(buf), pipe)) output += buf;
+    int status = pclose(pipe);
+#ifdef _WIN32
+    return {status, output};
+#else
+    return {WIFEXITED(status) ? WEXITSTATUS(status) : -1, output};
+#endif
+}
+
+enum class CheckStatus { OK, Warning, Error, Skipped };
+
+struct CheckResult {
+    string name;
+    CheckStatus status = CheckStatus::OK;
+    string detail;
+    string hint;
+    bool essential = false;
+};
+
+static CheckResult checkCMake() {
+    CheckResult r{"CMake", CheckStatus::OK, "", "", true};
+    auto [code, out] = captureCommand("cmake --version 2>/dev/null");
+    if (code != 0 || out.empty()) {
+        r.status = CheckStatus::Error;
+        r.detail = "not found";
+#ifdef __APPLE__
+        r.hint = "brew install cmake";
+#elif defined(__linux__)
+        r.hint = "sudo apt install cmake  (or: sudo dnf install cmake)";
+#else
+        r.hint = "https://cmake.org/download/";
+#endif
+        return r;
+    }
+    // Parse "cmake version X.Y.Z"
+    size_t pos = out.find("cmake version ");
+    if (pos != string::npos) {
+        size_t end = out.find('\n', pos);
+        r.detail = out.substr(pos + 14, end - pos - 14);
+    } else {
+        r.detail = "(version unknown)";
+    }
+    return r;
+}
+
+static CheckResult checkCompiler() {
+    CheckResult r{"C++ Compiler", CheckStatus::OK, "", "", true};
+#ifdef __APPLE__
+    auto [code, out] = captureCommand("clang++ --version 2>/dev/null");
+    if (code != 0 || out.empty()) {
+        r.status = CheckStatus::Error;
+        r.detail = "not found";
+        r.hint = "xcode-select --install";
+        return r;
+    }
+    size_t pos = out.find("Apple clang version ");
+    if (pos != string::npos) {
+        size_t end = out.find(' ', pos + 20);
+        r.detail = "Apple Clang " + out.substr(pos + 20, end - pos - 20) + " (C++20)";
+    } else {
+        r.detail = "(detected)";
+    }
+#elif defined(__linux__)
+    auto [code, out] = captureCommand("g++ --version 2>/dev/null");
+    if (code != 0 || out.empty()) {
+        auto [code2, out2] = captureCommand("clang++ --version 2>/dev/null");
+        if (code2 != 0 || out2.empty()) {
+            r.status = CheckStatus::Error;
+            r.detail = "not found (need g++ or clang++)";
+            r.hint = "sudo apt install g++  (or: sudo apt install clang)";
+            return r;
+        }
+        r.detail = "(clang++)";
+        return r;
+    }
+    size_t pos = out.find(')');
+    if (pos != string::npos && pos + 2 < out.size()) {
+        size_t end = out.find('\n', pos);
+        r.detail = "g++ " + out.substr(pos + 2, end - pos - 2);
+    } else {
+        r.detail = "(g++)";
+    }
+#elif defined(_WIN32)
+    auto [code, out] = captureCommand("cl 2>&1");
+    r.detail = code == 0 ? "(MSVC)" : "not found";
+    if (code != 0) {
+        r.status = CheckStatus::Error;
+        r.hint = "Install Visual Studio with C++ workload";
+    }
+#endif
+    return r;
+}
+
+static CheckResult checkTrussCCore(const string& tcRoot) {
+    CheckResult r{"TrussC core", CheckStatus::OK, "found", "", true};
+    if (tcRoot.empty() ||
+        !fs::exists(tcRoot + "/core/cmake/trussc_app.cmake")) {
+        r.status = CheckStatus::Error;
+        r.detail = "not found";
+        r.hint = "Ensure you're inside a TrussC repo or set TRUSSC_DIR";
+    }
+    return r;
+}
+
+static CheckResult checkPlatformSDK() {
+#ifdef __APPLE__
+    CheckResult r{"macOS SDK", CheckStatus::OK, "", "", true};
+    auto [code, out] = captureCommand("xcrun --show-sdk-version 2>/dev/null");
+    if (code != 0 || out.empty()) {
+        r.status = CheckStatus::Error;
+        r.detail = "not found";
+        r.hint = "xcode-select --install";
+    } else {
+        size_t end = out.find('\n');
+        r.detail = out.substr(0, end);
+    }
+    return r;
+#elif defined(__linux__)
+    CheckResult r{"Linux build deps", CheckStatus::OK, "", "", true};
+    auto [code, out] = captureCommand("pkg-config --exists gl egl 2>/dev/null; echo $?");
+    // Simple heuristic: check for development headers
+    bool hasGL = fs::exists("/usr/include/GL/gl.h") ||
+                 fs::exists("/usr/include/GLES2/gl2.h");
+    bool hasEGL = fs::exists("/usr/include/EGL/egl.h");
+    if (!hasGL || !hasEGL) {
+        r.status = CheckStatus::Error;
+        r.detail = "missing OpenGL/EGL development headers";
+        r.hint = "sudo apt install libgl1-mesa-dev libegl1-mesa-dev";
+    } else {
+        r.detail = "GL + EGL headers found";
+    }
+    return r;
+#elif defined(_WIN32)
+    CheckResult r{"Windows SDK", CheckStatus::OK, "(detected via MSVC)", "", true};
+    return r;
+#else
+    return {"Platform SDK", CheckStatus::Skipped, "", "", false};
+#endif
+}
+
+static CheckResult checkEmscripten() {
+    CheckResult r{"Emscripten", CheckStatus::OK, "", ""};
+    auto [code, out] = captureCommand("emcc --version 2>/dev/null");
+    if (code != 0 || out.empty()) {
+        r.status = CheckStatus::Error;
+        r.detail = "not found";
+        r.hint = "https://emscripten.org/docs/getting_started/downloads.html";
+    } else {
+        size_t pos = out.find("emcc");
+        size_t end = out.find('\n', pos);
+        r.detail = (pos != string::npos) ? out.substr(pos, end - pos) : "(detected)";
+    }
+    return r;
+}
+
+static CheckResult checkAndroidNDK() {
+    CheckResult r{"Android NDK", CheckStatus::OK, "", ""};
+    const char* home = std::getenv("ANDROID_HOME");
+    if (!home || !fs::exists(string(home))) {
+        r.status = CheckStatus::Error;
+        r.detail = "ANDROID_HOME not set";
+        r.hint = "Set ANDROID_HOME to your Android SDK path";
+    } else if (!fs::exists(string(home) + "/ndk")) {
+        r.status = CheckStatus::Error;
+        r.detail = "NDK directory not found in ANDROID_HOME";
+        r.hint = "Install NDK via Android Studio SDK Manager";
+    } else {
+        r.detail = string(home);
+    }
+    return r;
+}
+
+static CheckResult checkNinja() {
+    CheckResult r{"Ninja", CheckStatus::OK, "", ""};
+    auto [code, out] = captureCommand("ninja --version 2>/dev/null");
+    if (code != 0 || out.empty()) {
+        r.status = CheckStatus::Warning;
+        r.detail = "not found (optional — cmake uses make as fallback)";
+#ifdef __APPLE__
+        r.hint = "brew install ninja";
+#elif defined(__linux__)
+        r.hint = "sudo apt install ninja-build";
+#endif
+    } else {
+        size_t end = out.find('\n');
+        r.detail = out.substr(0, end);
+    }
+    return r;
+}
+
+static CheckResult checkGit() {
+    CheckResult r{"Git", CheckStatus::OK, "", ""};
+    auto [code, out] = captureCommand("git --version 2>/dev/null");
+    if (code != 0 || out.empty()) {
+        r.status = CheckStatus::Warning;
+        r.detail = "not found";
+    } else {
+        size_t pos = out.find("git version ");
+        size_t end = out.find('\n', pos);
+        r.detail = (pos != string::npos) ? out.substr(pos + 12, end - pos - 12) : "(detected)";
+    }
+    return r;
+}
+
+// =============================================================================
+// Common helpers for project-based subcommands
+// =============================================================================
+
 // Resolve project path + TC_ROOT for commands that operate on an existing
 // project (update / add / remove / info / build / run). Prints an error and
 // returns non-zero on failure. Both out-params are populated on success.
@@ -972,6 +1191,177 @@ static int cmdInfo(const vector<string>& args) {
 }
 
 // =============================================================================
+// Subcommand: doctor
+// =============================================================================
+
+static void printDoctorHelp() {
+    cout << "Usage: trusscli doctor [options]\n"
+         << "\n"
+         << "Check your development environment for TrussC build prerequisites.\n"
+         << "By default shows only essential checks and any failures. Use --verbose\n"
+         << "to see all checks including optional tools and cross-compile targets.\n"
+         << "\n"
+         << "Options:\n"
+         << "      --verbose              Show all checks (including OK / optional / skipped)\n"
+         << "      --json                 Machine-readable JSON output\n"
+         << "  -p, --path <path>          Check against a specific project's target list\n"
+         << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "  -h, --help                 Show this help\n";
+}
+
+static int cmdDoctor(const vector<string>& args) {
+    bool verbose = false;
+    bool jsonOut = false;
+    string explicitPath;
+    string tcRoot;
+
+    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << opt << " requires a value\n";
+            return false;
+        }
+        out = args[++i];
+        return true;
+    };
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printDoctorHelp(); return 0; }
+        else if (a == "--verbose") verbose = true;
+        else if (a == "--json") jsonOut = true;
+        else if (a == "-p" || a == "--path") {
+            if (!needValue(i, a, explicitPath)) return 1;
+        }
+        else if (a == "--tc-root") {
+            if (!needValue(i, a, tcRoot)) return 1;
+        }
+        else {
+            cerr << "Error: unknown option '" << a << "'\n"
+                 << "Run 'trusscli doctor --help' for usage.\n";
+            return 1;
+        }
+    }
+
+    // Resolve TC_ROOT (best-effort for doctor — we still check even if missing)
+    string resolvedTcRoot = tcRoot.empty() ? autoDetectTcRoot() : tcRoot;
+
+    // Detect project targets (if inside a project)
+    string projectPath;
+    if (!explicitPath.empty()) {
+        projectPath = explicitPath;
+    } else {
+        projectPath = autoDetectProjectRoot("");
+    }
+
+    vector<string> targets;
+    if (!projectPath.empty()) {
+        targets = readEnabledTargets(projectPath);
+    }
+    auto hasTarget = [&](const string& t) {
+        return find(targets.begin(), targets.end(), t) != targets.end();
+    };
+
+    // Run essential checks
+    vector<CheckResult> results;
+    results.push_back(checkCMake());
+    results.push_back(checkCompiler());
+    results.push_back(checkTrussCCore(resolvedTcRoot));
+    results.push_back(checkPlatformSDK());
+
+    // Cross-compile checks: only run if the project targets them
+    bool checkWeb = hasTarget("web");
+    bool checkAndroid = hasTarget("android");
+
+    if (checkWeb || verbose) {
+        auto r = checkEmscripten();
+        if (!checkWeb) r.status = CheckStatus::Skipped;
+        results.push_back(r);
+    }
+    if (checkAndroid || verbose) {
+        auto r = checkAndroidNDK();
+        if (!checkAndroid) r.status = CheckStatus::Skipped;
+        results.push_back(r);
+    }
+
+    // Optional tools
+    if (verbose) {
+        results.push_back(checkNinja());
+        results.push_back(checkGit());
+    }
+
+    // Count issues
+    int errors = 0, warnings = 0;
+    for (const auto& r : results) {
+        if (r.status == CheckStatus::Error) errors++;
+        if (r.status == CheckStatus::Warning) warnings++;
+    }
+
+    // JSON output
+    if (jsonOut) {
+        Json out = Json::array();
+        for (const auto& r : results) {
+            Json item;
+            item["name"] = r.name;
+            item["status"] = r.status == CheckStatus::OK      ? "ok"
+                           : r.status == CheckStatus::Warning  ? "warning"
+                           : r.status == CheckStatus::Error    ? "error"
+                           : "skipped";
+            item["detail"] = r.detail;
+            if (!r.hint.empty()) item["hint"] = r.hint;
+            out.push_back(item);
+        }
+        cout << out.dump(2) << "\n";
+        return errors > 0 ? 1 : 0;
+    }
+
+    // Human output
+    auto statusIcon = [](CheckStatus s) -> const char* {
+        switch (s) {
+            case CheckStatus::OK:      return "[OK]";
+            case CheckStatus::Warning: return "[??]";
+            case CheckStatus::Error:   return "[NG]";
+            case CheckStatus::Skipped: return "[--]";
+        }
+        return "[??]";
+    };
+
+    for (const auto& r : results) {
+        // In default mode: skip OK non-essential items, skip Skipped items
+        if (!verbose) {
+            if (r.status == CheckStatus::Skipped) continue;
+            if (r.status == CheckStatus::OK && !r.essential) continue;
+        }
+
+        cout << "  " << statusIcon(r.status)
+             << " " << r.name;
+        // Pad to align detail
+        int pad = 20 - (int)r.name.size();
+        if (pad > 0) cout << string(pad, ' ');
+        if (!r.detail.empty()) cout << r.detail;
+        cout << "\n";
+        if (!r.hint.empty() && (r.status != CheckStatus::OK || verbose)) {
+            cout << "       -> " << r.hint << "\n";
+        }
+    }
+
+    cout << "\n";
+    if (errors == 0 && warnings == 0) {
+        cout << "No issues found.";
+        if (!verbose) cout << " Run 'trusscli doctor --verbose' for full details.";
+        cout << "\n";
+    } else {
+        if (errors > 0) cout << errors << " error(s)";
+        if (errors > 0 && warnings > 0) cout << ", ";
+        if (warnings > 0) cout << warnings << " warning(s)";
+        cout << " found.";
+        if (!verbose) cout << " Run 'trusscli doctor --verbose' for full details.";
+        cout << "\n";
+    }
+
+    return errors > 0 ? 1 : 0;
+}
+
+// =============================================================================
 // Stub for unimplemented commands
 // =============================================================================
 
@@ -998,6 +1388,7 @@ static void printTopHelp() {
          << "  add <addon>...                 Add addons to the project\n"
          << "  remove <addon>...              Remove addons from the project\n"
          << "  info [section]                 Show project / framework info\n"
+         << "  doctor                         Check development environment\n"
          << "  build                          Build the project                  [not yet implemented]\n"
          << "  run                            Build and launch the project       [not yet implemented]\n"
          << "\n"
@@ -1058,6 +1449,7 @@ int main(int argc, char* argv[]) {
     if (first == "add")    return cmdAdd(subArgs);
     if (first == "remove") return cmdRemove(subArgs);
     if (first == "info")   return cmdInfo(subArgs);
+    if (first == "doctor") return cmdDoctor(subArgs);
     if (first == "build" || first == "run") {
         return cmdNotImplemented(first);
     }
