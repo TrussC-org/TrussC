@@ -108,6 +108,7 @@ addons/*
 !addons/tcxQuadWarp
 !addons/tcxTls
 !addons/tcxWebSocket
+!addons/tcxGltf
 
 # =============================================================================
 # Project Generator

@@ -21,6 +21,7 @@ namespace trussc {
 // Forward declarations
 class Material;
 class Texture;
+class IesProfile;
 
 // ---------------------------------------------------------------------------
 // LightType - Type of light
@@ -151,6 +152,16 @@ public:
                                   nearClip, farClip);
         return proj * view;
     }
+
+    // === IES photometric profile ===
+
+    // Attach an IES angular intensity profile to this light. The IesProfile
+    // must remain alive while the Light is in use (weak pointer).
+    // IES modulates light intensity by angular distribution independently of
+    // the projector texture (which modulates color).
+    void setIesProfile(const IesProfile* ies) { iesProfile_ = ies; }
+    const IesProfile* getIesProfile() const { return iesProfile_; }
+    bool hasIesProfile() const { return iesProfile_ != nullptr; }
 
     // TODO: focus blur requires aperture integration or prefiltered mip LOD heuristic
 
@@ -336,6 +347,9 @@ private:
     float lensShiftX_ = 0.0f;
     float lensShiftY_ = 0.0f;
     float projectorAspect_ = 16.0f / 9.0f;
+
+    // IES photometric profile (angular intensity modulation)
+    const IesProfile* iesProfile_ = nullptr;
 };
 
 // ---------------------------------------------------------------------------

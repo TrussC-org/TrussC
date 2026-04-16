@@ -113,15 +113,19 @@ public:
         // PbrMaterial reference (used for both normal map binding and uniform packing)
         const PbrMaterial& pbrMat = *internal::currentPbrMaterial;
 
-        // Find the first projector-type light (spot with projection texture)
+        // Find the first projector-type light and the first IES-profiled light
         int nActiveLights = static_cast<int>(internal::activeLights.size());
         if (nActiveLights > internal::maxLights) nActiveLights = internal::maxLights;
         int projectorLightIdx = -1;
+        int iesLightIdx = -1;
         for (int i = 0; i < nActiveLights; ++i) {
             const Light& L = *internal::activeLights[i];
-            if (L.getType() == LightType::Spot && L.hasProjectionTexture()) {
+            if (projectorLightIdx < 0 &&
+                L.getType() == LightType::Spot && L.hasProjectionTexture()) {
                 projectorLightIdx = i;
-                break;
+            }
+            if (iesLightIdx < 0 && L.hasIesProfile()) {
+                iesLightIdx = i;
             }
         }
 
@@ -144,6 +148,31 @@ public:
             bind.views[VIEW_projectorTex]       = fallbackNormalView_;  // reuse 1x1 fallback
             bind.samplers[SMP_projectorTexSmp]  = fallbackSampler_;
         }
+
+        // IES profile texture (or fallback white = no angular modulation)
+        if (iesLightIdx >= 0) {
+            const IesProfile* ies = internal::activeLights[iesLightIdx]->getIesProfile();
+            bind.views[VIEW_iesProfileTex]       = ies->getView();
+            bind.samplers[SMP_iesProfileTexSmp]  = ies->getSampler();
+        } else {
+            bind.views[VIEW_iesProfileTex]       = fallbackIesView_;
+            bind.samplers[SMP_iesProfileTexSmp]  = fallbackSampler_;
+        }
+
+        // PBR material texture maps (or fallback white = identity multiplication)
+        auto bindMatTex = [&](int viewSlot, int smpSlot, const Texture* tex) {
+            if (tex) {
+                bind.views[viewSlot]    = tex->getView();
+                bind.samplers[smpSlot]  = tex->getSampler();
+            } else {
+                bind.views[viewSlot]    = fallbackWhiteView_;
+                bind.samplers[smpSlot]  = fallbackSampler_;
+            }
+        };
+        bindMatTex(VIEW_baseColorTex,          SMP_baseColorTexSmp,          pbrMat.getBaseColorTexture());
+        bindMatTex(VIEW_metallicRoughnessTex,  SMP_metallicRoughnessTexSmp,  pbrMat.getMetallicRoughnessTexture());
+        bindMatTex(VIEW_emissiveTex,           SMP_emissiveTexSmp,           pbrMat.getEmissiveTexture());
+        bindMatTex(VIEW_occlusionTex,          SMP_occlusionTexSmp,          pbrMat.getOcclusionTexture());
 
         sg_apply_bindings(&bind);
 
@@ -214,19 +243,7 @@ public:
                 fsp.lightPosType[i][3] = (L.getType() == LightType::Spot) ? 2.0f : 1.0f;
             }
 
-            // Spot direction + cone angles (ignored for non-spot)
-            if (L.getType() == LightType::Spot) {
-                const Vec3& sd = L.getDirection();
-                fsp.lightSpotDir[i][0] = sd.x;
-                fsp.lightSpotDir[i][1] = sd.y;
-                fsp.lightSpotDir[i][2] = sd.z;
-                fsp.lightSpotDir[i][3] = L.getSpotInnerCos();
-                fsp.lightAttenuation[i][3] = L.getSpotOuterCos();
-            }
-            // Light contributes its diffuse color as the PBR radiance. The
-            // Phong ambient/specular split isn't meaningful here; we pick
-            // diffuse as the representative color for backward compatibility
-            // with existing Light presets.
+            // Light color and attenuation (common to all types)
             const Color& c = L.getDiffuse();
             fsp.lightColorIntensity[i][0] = c.r;
             fsp.lightColorIntensity[i][1] = c.g;
@@ -236,6 +253,25 @@ public:
             fsp.lightAttenuation[i][1] = L.getLinearAttenuation();
             fsp.lightAttenuation[i][2] = L.getQuadraticAttenuation();
             fsp.lightAttenuation[i][3] = 0.0f;
+
+            // Spot direction + cone angles
+            if (L.getType() == LightType::Spot) {
+                const Vec3& sd = L.getDirection();
+                fsp.lightSpotDir[i][0] = sd.x;
+                fsp.lightSpotDir[i][1] = sd.y;
+                fsp.lightSpotDir[i][2] = sd.z;
+                fsp.lightSpotDir[i][3] = L.getSpotInnerCos();
+                fsp.lightAttenuation[i][3] = L.getSpotOuterCos();
+            }
+            // For point lights with IES, pack direction into spotDir so the
+            // shader can compute the vertical angle. Default direction (0,-1,0)
+            // corresponds to a downlight mounting.
+            else if (L.getType() == LightType::Point && L.hasIesProfile()) {
+                const Vec3& sd = L.getDirection();
+                fsp.lightSpotDir[i][0] = sd.x;
+                fsp.lightSpotDir[i][1] = sd.y;
+                fsp.lightSpotDir[i][2] = sd.z;
+            }
         }
 
         // Projector VP matrix (single projector, first spot with texture)
@@ -245,6 +281,20 @@ public:
             Mat4 pvpT = pvp.transposed();
             std::memcpy(fsp.projectorViewProj, pvpT.m, sizeof(fsp.projectorViewProj));
         }
+
+        // IES profile params
+        fsp.iesParams[0] = static_cast<float>(iesLightIdx);
+        if (iesLightIdx >= 0) {
+            fsp.iesParams[1] = internal::activeLights[iesLightIdx]->getIesProfile()->getMaxVerticalAngle();
+            fsp.iesParams[2] = 0.0f;
+            fsp.iesParams[3] = 0.0f;
+        }
+
+        // PBR texture map flags
+        fsp.texFlags[0] = pbrMat.hasBaseColorTexture()          ? 1.0f : 0.0f;
+        fsp.texFlags[1] = pbrMat.hasMetallicRoughnessTexture()  ? 1.0f : 0.0f;
+        fsp.texFlags[2] = pbrMat.hasEmissiveTexture()           ? 1.0f : 0.0f;
+        fsp.texFlags[3] = pbrMat.hasOcclusionTexture()          ? 1.0f : 0.0f;
 
         sg_range fsRange = { &fsp, sizeof(fsp) };
         sg_apply_uniforms(UB_fs_params, &fsRange);
@@ -326,6 +376,25 @@ private:
         nm_view_desc.texture.image = fallbackNormal_;
         fallbackNormalView_ = sg_make_view(&nm_view_desc);
 
+        // 1x1 white texture (shared by IES fallback and material texture fallbacks)
+        sg_image_desc white_desc = {};
+        white_desc.type = SG_IMAGETYPE_2D;
+        white_desc.width = 1;
+        white_desc.height = 1;
+        white_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        uint8_t white_pixel[4] = { 255, 255, 255, 255 };
+        white_desc.data.mip_levels[0].ptr = white_pixel;
+        white_desc.data.mip_levels[0].size = sizeof(white_pixel);
+        white_desc.label = "tc_pbr_fallback_white";
+        fallbackWhite_ = sg_make_image(&white_desc);
+        sg_view_desc white_view_desc = {};
+        white_view_desc.texture.image = fallbackWhite_;
+        fallbackWhiteView_ = sg_make_view(&white_view_desc);
+
+        // IES uses the same white fallback
+        fallbackIes_ = fallbackWhite_;
+        fallbackIesView_ = fallbackWhiteView_;
+
         fallbackInitialized_ = true;
     }
 
@@ -339,6 +408,10 @@ private:
     sg_view fallback2dView_{};
     sg_image fallbackNormal_{};
     sg_view fallbackNormalView_{};
+    sg_image fallbackWhite_{};
+    sg_view fallbackWhiteView_{};
+    sg_image fallbackIes_{};       // alias of fallbackWhite_
+    sg_view fallbackIesView_{};
     sg_sampler fallbackSampler_{};
     bool fallbackInitialized_{false};
 };

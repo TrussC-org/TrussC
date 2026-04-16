@@ -54,6 +54,24 @@ void tcApp::setup() {
     ambientLight.setDiffuse(0.6f, 0.65f, 0.7f);
     ambientLight.setIntensity(0.15f);
 
+    // IES downlight above the screen
+    // Narrow spot IES: bright center, sharp falloff at ~25°
+    iesProfile.loadFromString(
+        "IESNA:LM-63-2002\n"
+        "[TEST] Narrow spot\n"
+        "TILT=NONE\n"
+        "1 -1 1.0 19 1 1 2 0.0 0.0 0.0\n"
+        "1.0 1 100\n"
+        "0 5 10 15 20 25 30 35 40 45 50 55 60 65 70 75 80 85 90\n"
+        "0\n"
+        "1000 980 900 700 400 100 10 0 0 0 0 0 0 0 0 0 0 0 0\n"
+    );
+    downlight.setSpot(Vec3(0, 350, 100), Vec3(0, -1, 0), 0.0f, QUARTER_TAU);
+    downlight.setDiffuse(1.0f, 0.95f, 0.85f);
+    downlight.setIntensity(8.0f);
+    downlight.setAttenuation(1.0f, 0.0f, 0.0f);
+    downlight.setIesProfile(&iesProfile);
+
     // Simple procedural IBL for ambient reflections
     env.loadProcedural();
     setEnvironment(env);
@@ -85,6 +103,7 @@ void tcApp::draw() {
 
     clearLights();
     addLight(projector);
+    addLight(downlight);
     addLight(ambientLight);
     setCameraPosition(cam.getPosition());
 

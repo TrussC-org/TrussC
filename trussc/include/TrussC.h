@@ -2570,6 +2570,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #include "tc/3d/tcLightingState.h"
 #include "tc/3d/tcMaterial.h"
 #include "tc/3d/tcPbrMaterial.h"
+#include "tc/3d/tcIesProfile.h"
 #include "tc/3d/tcLight.h"
 
 // TrussC pixel buffer

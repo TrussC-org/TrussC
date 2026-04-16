@@ -40,6 +40,10 @@ private:
     Light ambientLight;
     Environment env;
 
+    // IES downlight
+    Light downlight;
+    IesProfile iesProfile;
+
     // Mouse interaction
     bool isDraggingProjector = false;
 

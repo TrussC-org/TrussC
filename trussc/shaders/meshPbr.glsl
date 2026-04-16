@@ -61,6 +61,8 @@ layout(binding=1) uniform fs_params {
     vec4 lightSpotDir[MAX_LIGHTS];        // xyz=spot direction, w=spotInnerCos
     mat4 projectorViewProj;               // single projector VP matrix
     vec4 projectorParams;                 // x=projectorLightIndex (-1=none), yzw=unused
+    vec4 iesParams;                       // x=iesLightIndex (-1=none), y=maxVertAngle (rad), zw=unused
+    vec4 texFlags;                        // x=hasBaseColorTex, y=hasMetRoughTex, z=hasEmissiveTex, w=hasOcclusionTex
 };
 
 // IBL resources. Bound only when iblParams.x > 0.5.
@@ -78,6 +80,20 @@ layout(binding=3) uniform sampler normalMapSmp;
 // Projector texture (modulates spot light color via projection)
 layout(binding=4) uniform texture2D projectorTex;
 layout(binding=4) uniform sampler projectorTexSmp;
+
+// IES photometric profile (1D intensity lookup, U = vertical angle / maxAngle)
+layout(binding=5) uniform texture2D iesProfileTex;
+layout(binding=5) uniform sampler iesProfileTexSmp;
+
+// PBR material texture maps (glTF 2.0 convention)
+layout(binding=6) uniform texture2D baseColorTex;
+layout(binding=6) uniform sampler baseColorTexSmp;
+layout(binding=7) uniform texture2D metallicRoughnessTex;
+layout(binding=7) uniform sampler metallicRoughnessTexSmp;
+layout(binding=8) uniform texture2D emissiveTex;
+layout(binding=8) uniform sampler emissiveTexSmp;
+layout(binding=9) uniform texture2D occlusionTex;
+layout(binding=9) uniform sampler occlusionTexSmp;
 
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
@@ -154,8 +170,10 @@ vec3 evalLight(int lightIdx, vec4 posType, vec4 colorIntensity, vec4 atten, vec4
                     + atten.z * dist * dist;
         attenuation = 1.0 / max(denom, 1e-5);
 
-        // Spot cone falloff
-        if (type == 2) {
+        // Spot cone falloff. Skipped for projector lights — the projector
+        // frustum defines the boundary instead of the spot cone.
+        int projIdx = int(projectorParams.x + 0.5);
+        if (type == 2 && lightIdx != projIdx) {
             vec3 sDir = normalize(spotDir.xyz);
             float theta = dot(-toLight, sDir);  // cosine of angle from spot axis
             float innerCos = spotDir.w;
@@ -189,6 +207,24 @@ vec3 evalLight(int lightIdx, vec4 posType, vec4 colorIntensity, vec4 atten, vec4
     vec3 diffuse = kd * albedo * INV_PI;
 
     vec3 radiance = colorIntensity.rgb * colorIntensity.a * attenuation;
+
+    // IES photometric profile: modulate intensity by angular distribution.
+    // The texture stores normalized candela as a 1D lookup (U = vertAngle / maxAngle).
+    // iesParams.x stores the light index (>=0) or -1 for none. We compare with
+    // a threshold rather than rounding to avoid int(-0.5)→0 truncation ambiguity.
+    if (iesParams.x >= -0.5 && lightIdx == int(iesParams.x + 0.5) && type != 0) {
+        // Direction from light to fragment (= aim direction at 0 vertical angle)
+        vec3 toFrag = -toLight;
+        // spotDir.xyz is the light's aiming direction
+        vec3 aimDir = normalize(spotDir.xyz);
+        // Vertical angle: angle between fragment direction and aim axis
+        float cosAngle = dot(toFrag, aimDir);
+        float vertAngle = acos(clamp(cosAngle, -1.0, 1.0));
+        float maxAngle = iesParams.y;
+        float u = clamp(vertAngle / max(maxAngle, 0.001), 0.0, 1.0);
+        float iesIntensity = texture(sampler2D(iesProfileTex, iesProfileTexSmp), vec2(u, 0.5)).r;
+        radiance *= iesIntensity;
+    }
 
     // Projector texture modulation: multiply light color by the projected image
     int projIdx = int(projectorParams.x + 0.5);
@@ -246,10 +282,27 @@ void main() {
     }
 
     vec3 albedo      = baseColor.rgb;
+    float alpha      = baseColor.a;
     float metallic   = pbrParams.x;
     float roughness  = pbrParams.y;
     float ao         = pbrParams.z;
     float emissiveK  = pbrParams.w;
+
+    // Apply PBR texture maps (each multiplies the corresponding scalar)
+    if (texFlags.x > 0.5) {
+        vec4 bc = texture(sampler2D(baseColorTex, baseColorTexSmp), v_uv);
+        albedo *= bc.rgb;
+        alpha  *= bc.a;
+    }
+    if (texFlags.y > 0.5) {
+        vec4 mr = texture(sampler2D(metallicRoughnessTex, metallicRoughnessTexSmp), v_uv);
+        roughness *= mr.g;   // glTF: green channel = roughness
+        metallic  *= mr.b;   // glTF: blue channel = metallic
+    }
+    if (texFlags.w > 0.5) {
+        float aoTex = texture(sampler2D(occlusionTex, occlusionTexSmp), v_uv).r;
+        ao *= aoTex;
+    }
 
     // F0 for dielectrics is 0.04, for metals it's the albedo (tinted reflection)
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
@@ -290,14 +343,18 @@ void main() {
         ambient = albedo * (1.0 - metallic) * 0.03 * ao;
     }
 
-    vec3 color = ambient + Lo + emissive.rgb * emissiveK;
+    vec3 emissiveColor = emissive.rgb;
+    if (texFlags.z > 0.5) {
+        emissiveColor *= texture(sampler2D(emissiveTex, emissiveTexSmp), v_uv).rgb;
+    }
+    vec3 color = ambient + Lo + emissiveColor * emissiveK;
 
     // Apply exposure, ACES filmic tonemap, then sRGB gamma.
     color *= iblParams.z;
     color = tonemapACES(color);
     color = pow(color, vec3(1.0 / 2.2));
 
-    frag_color = vec4(color, baseColor.a);
+    frag_color = vec4(color, alpha);
 }
 @end
 

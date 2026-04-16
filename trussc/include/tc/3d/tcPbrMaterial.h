@@ -129,6 +129,35 @@ public:
     const Texture* getNormalMap() const { return normalMap_; }
     bool hasNormalMap() const { return normalMap_ != nullptr; }
 
+    // -------------------------------------------------------------------------
+    // PBR texture maps (optional, glTF 2.0 compatible)
+    // -------------------------------------------------------------------------
+    // Each texture modulates the corresponding scalar parameter. When bound,
+    // the shader samples the texture and multiplies by the scalar factor.
+    // When not bound, only the scalar is used.
+
+    // Base color texture (RGBA). RGB multiplied with baseColor scalar.
+    // Alpha multiplied with baseColor.a for cutout transparency.
+    PbrMaterial& setBaseColorTexture(const Texture* tex) { baseColorTex_ = tex; return *this; }
+    const Texture* getBaseColorTexture() const { return baseColorTex_; }
+    bool hasBaseColorTexture() const { return baseColorTex_ != nullptr; }
+
+    // Metallic-roughness texture (glTF convention: G=roughness, B=metallic).
+    // Multiplied with scalar metallic/roughness values.
+    PbrMaterial& setMetallicRoughnessTexture(const Texture* tex) { metallicRoughnessTex_ = tex; return *this; }
+    const Texture* getMetallicRoughnessTexture() const { return metallicRoughnessTex_; }
+    bool hasMetallicRoughnessTexture() const { return metallicRoughnessTex_ != nullptr; }
+
+    // Emissive texture (RGB). Multiplied with emissive scalar color.
+    PbrMaterial& setEmissiveTexture(const Texture* tex) { emissiveTex_ = tex; return *this; }
+    const Texture* getEmissiveTexture() const { return emissiveTex_; }
+    bool hasEmissiveTexture() const { return emissiveTex_ != nullptr; }
+
+    // Occlusion texture (R channel). Multiplied with ao scalar.
+    PbrMaterial& setOcclusionTexture(const Texture* tex) { occlusionTex_ = tex; return *this; }
+    const Texture* getOcclusionTexture() const { return occlusionTex_; }
+    bool hasOcclusionTexture() const { return occlusionTex_ != nullptr; }
+
 private:
     Color baseColor_        = Color(0.8f, 0.8f, 0.8f, 1.0f);
     float metallic_         = 0.0f;
@@ -137,6 +166,10 @@ private:
     Color emissive_         = Color(0.0f, 0.0f, 0.0f, 1.0f);
     float emissiveStrength_ = 0.0f;
     const Texture* normalMap_ = nullptr;
+    const Texture* baseColorTex_ = nullptr;
+    const Texture* metallicRoughnessTex_ = nullptr;
+    const Texture* emissiveTex_ = nullptr;
+    const Texture* occlusionTex_ = nullptr;
 };
 
 } // namespace trussc
