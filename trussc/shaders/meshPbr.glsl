@@ -59,6 +59,8 @@ layout(binding=1) uniform fs_params {
     vec4 lightColorIntensity[MAX_LIGHTS];
     vec4 lightAttenuation[MAX_LIGHTS];    // xyz=c/l/q, w=spotOuterCos
     vec4 lightSpotDir[MAX_LIGHTS];        // xyz=spot direction, w=spotInnerCos
+    mat4 projectorViewProj;               // single projector VP matrix
+    vec4 projectorParams;                 // x=projectorLightIndex (-1=none), yzw=unused
 };
 
 // IBL resources. Bound only when iblParams.x > 0.5.
@@ -69,10 +71,13 @@ layout(binding=1) uniform sampler prefilterSmp;
 layout(binding=2) uniform texture2D brdfLut;
 layout(binding=2) uniform sampler brdfLutSmp;
 
-// Normal map (optional). When not set, a 1x1 flat normal (0.5, 0.5, 1.0) is
-// bound by the pipeline and hasNormalMap is 0.
+// Normal map
 layout(binding=3) uniform texture2D normalMap;
 layout(binding=3) uniform sampler normalMapSmp;
+
+// Projector texture (modulates spot light color via projection)
+layout(binding=4) uniform texture2D projectorTex;
+layout(binding=4) uniform sampler projectorTexSmp;
 
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
@@ -127,8 +132,8 @@ vec3 tonemapACES(vec3 x) {
 // Per-light evaluation
 // ---------------------------------------------------------------------------
 
-// type encoding: 0=directional, 1=point, 2=spot
-vec3 evalLight(vec4 posType, vec4 colorIntensity, vec4 atten, vec4 spotDir,
+// type encoding: 0=directional, 1=point, 2=spot (+ optional projector)
+vec3 evalLight(int lightIdx, vec4 posType, vec4 colorIntensity, vec4 atten, vec4 spotDir,
                vec3 N, vec3 V, vec3 worldPos,
                vec3 albedo, float metallic, float roughness, vec3 F0) {
     int type = int(posType.w + 0.5);
@@ -184,6 +189,23 @@ vec3 evalLight(vec4 posType, vec4 colorIntensity, vec4 atten, vec4 spotDir,
     vec3 diffuse = kd * albedo * INV_PI;
 
     vec3 radiance = colorIntensity.rgb * colorIntensity.a * attenuation;
+
+    // Projector texture modulation: multiply light color by the projected image
+    int projIdx = int(projectorParams.x + 0.5);
+    if (lightIdx == projIdx && type == 2) {
+        vec4 clip = projectorViewProj * vec4(worldPos, 1.0);
+        vec3 ndc = clip.xyz / clip.w;
+        vec2 projUV = ndc.xy * 0.5 + 0.5;
+        if (projUV.x >= 0.0 && projUV.x <= 1.0 &&
+            projUV.y >= 0.0 && projUV.y <= 1.0 &&
+            ndc.z >= -1.0 && ndc.z <= 1.0) {
+            vec3 projColor = texture(sampler2D(projectorTex, projectorTexSmp), projUV).rgb;
+            radiance *= projColor;
+        } else {
+            return vec3(0.0);  // outside projector frustum
+        }
+    }
+
     return (diffuse + specular) * radiance * NdotL;
 }
 
@@ -237,7 +259,7 @@ void main() {
     vec3 Lo = vec3(0.0);
     for (int i = 0; i < MAX_LIGHTS; i++) {
         if (i >= numLights) break;
-        Lo += evalLight(lightPosType[i], lightColorIntensity[i],
+        Lo += evalLight(i, lightPosType[i], lightColorIntensity[i],
                         lightAttenuation[i], lightSpotDir[i],
                         N, V, v_worldPos,
                         albedo, metallic, roughness, F0);

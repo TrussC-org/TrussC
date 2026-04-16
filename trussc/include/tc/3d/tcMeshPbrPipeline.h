@@ -113,6 +113,18 @@ public:
         // PbrMaterial reference (used for both normal map binding and uniform packing)
         const PbrMaterial& pbrMat = *internal::currentPbrMaterial;
 
+        // Find the first projector-type light (spot with projection texture)
+        int nActiveLights = static_cast<int>(internal::activeLights.size());
+        if (nActiveLights > internal::maxLights) nActiveLights = internal::maxLights;
+        int projectorLightIdx = -1;
+        for (int i = 0; i < nActiveLights; ++i) {
+            const Light& L = *internal::activeLights[i];
+            if (L.getType() == LightType::Spot && L.hasProjectionTexture()) {
+                projectorLightIdx = i;
+                break;
+            }
+        }
+
         // Normal map from PbrMaterial (or fallback flat normal)
         bool hasNormalMap = pbrMat.hasNormalMap();
         if (hasNormalMap) {
@@ -121,6 +133,16 @@ public:
         } else {
             bind.views[VIEW_normalMap]      = fallbackNormalView_;
             bind.samplers[SMP_normalMapSmp] = fallbackSampler_;
+        }
+
+        // Projector texture (or fallback)
+        if (projectorLightIdx >= 0) {
+            const Texture* pTex = internal::activeLights[projectorLightIdx]->getProjectionTexture();
+            bind.views[VIEW_projectorTex]       = pTex->getView();
+            bind.samplers[SMP_projectorTexSmp]  = pTex->getSampler();
+        } else {
+            bind.views[VIEW_projectorTex]       = fallbackNormalView_;  // reuse 1x1 fallback
+            bind.samplers[SMP_projectorTexSmp]  = fallbackSampler_;
         }
 
         sg_apply_bindings(&bind);
@@ -214,6 +236,14 @@ public:
             fsp.lightAttenuation[i][1] = L.getLinearAttenuation();
             fsp.lightAttenuation[i][2] = L.getQuadraticAttenuation();
             fsp.lightAttenuation[i][3] = 0.0f;
+        }
+
+        // Projector VP matrix (single projector, first spot with texture)
+        fsp.projectorParams[0] = static_cast<float>(projectorLightIdx);
+        if (projectorLightIdx >= 0) {
+            Mat4 pvp = internal::activeLights[projectorLightIdx]->computeProjectorViewProj();
+            Mat4 pvpT = pvp.transposed();
+            std::memcpy(fsp.projectorViewProj, pvpT.m, sizeof(fsp.projectorViewProj));
         }
 
         sg_range fsRange = { &fsp, sizeof(fsp) };

@@ -17,12 +17,14 @@ void tcApp::setup() {
     env.loadProcedural();
     setEnvironment(env);
 
-    // Key light: tight spot from front-above, warm white
+    // Key light: spot projector from front-above
     keyLight.setSpot(Vec3(0, -300, 800), Vec3(0.0f, 0.3f, -1.0f),
-                     0.05f, 0.20f);  // inner ~3°, outer ~11° half-angles
+                     0.05f, 0.25f);  // inner ~3°, outer ~14° half-angles
     keyLight.setDiffuse(1.0f, 0.95f, 0.85f);
     keyLight.setIntensity(8.0f);
     keyLight.setAttenuation(1.0f, 0.0f, 0.0f);
+    keyLight.setProjectionTexture(&normalMapTex);  // reuse bump texture as gobo
+    keyLight.setProjectorAspect(1.0f);
 
     // Fill light: directional, cool, from opposite side
     fillLight.setDirectional(Vec3(0.7f, -0.3f, 0.4f));

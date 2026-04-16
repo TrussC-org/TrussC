@@ -18,8 +18,9 @@
 
 namespace trussc {
 
-// Forward declaration
+// Forward declarations
 class Material;
+class Texture;
 
 // ---------------------------------------------------------------------------
 // LightType - Type of light
@@ -103,6 +104,55 @@ public:
 
     float getSpotInnerCos() const { return spotInnerCos_; }
     float getSpotOuterCos() const { return spotOuterCos_; }
+
+    // === Projector (texture projection on Spot light) ===
+
+    // Set a texture to project through the spot cone. The texture modulates
+    // the light's color per-pixel in the projected area. Pass nullptr to
+    // disable. The Texture must remain alive while the Light is in use.
+    void setProjectionTexture(const Texture* tex) { projectionTexture_ = tex; }
+    const Texture* getProjectionTexture() const { return projectionTexture_; }
+    bool hasProjectionTexture() const { return projectionTexture_ != nullptr; }
+
+    // Lens shift ([-1, 1], fraction of half-frame). Shifts the optical axis
+    // relative to the projected image center — same concept as a real
+    // projector's lens shift dial. Only meaningful for Spot/Projector lights.
+    void setLensShift(float sx, float sy) { lensShiftX_ = sx; lensShiftY_ = sy; }
+    float getLensShiftX() const { return lensShiftX_; }
+    float getLensShiftY() const { return lensShiftY_; }
+
+    // Aspect ratio of the projected image (width/height). Defaults to 16/9.
+    // Overridden automatically from the texture dimensions if set.
+    void setProjectorAspect(float a) { projectorAspect_ = a; }
+    float getProjectorAspect() const { return projectorAspect_; }
+
+    // Build the projector's view-projection matrix from spot params + lens shift.
+    // Used by PbrPipeline to fill the projectorViewProj uniform.
+    Mat4 computeProjectorViewProj(float nearClip = 0.1f, float farClip = 10000.0f) const {
+        // View matrix: look along spot direction from position
+        Vec3 up(0.0f, 1.0f, 0.0f);
+        if (std::abs(direction_.y) > 0.99f) up = Vec3(0.0f, 0.0f, 1.0f);
+        Vec3 target = Vec3(position_.x + direction_.x,
+                           position_.y + direction_.y,
+                           position_.z + direction_.z);
+        Mat4 view = Mat4::lookAt(position_, target, up);
+
+        // Projection: asymmetric frustum with lens shift
+        float outerAngle = std::acos(std::max(-1.0f, std::min(1.0f, spotOuterCos_)));
+        float halfH = nearClip * std::tan(outerAngle);
+        float aspect = getProjectorAspect();
+        float halfW = halfH * aspect;
+
+        float shiftX = lensShiftX_ * halfW;
+        float shiftY = lensShiftY_ * halfH;
+
+        Mat4 proj = Mat4::frustum(-halfW + shiftX, halfW + shiftX,
+                                  -halfH + shiftY, halfH + shiftY,
+                                  nearClip, farClip);
+        return proj * view;
+    }
+
+    // TODO: focus blur requires aperture integration or prefiltered mip LOD heuristic
 
     LightType getType() const { return type_; }
     const Vec3& getDirection() const { return direction_; }
@@ -278,8 +328,14 @@ private:
     float quadraticAttenuation_;
 
     // Spot light cone (cosines of half-angles)
-    float spotInnerCos_ = 1.0f;   // cos(0) = full intensity at center
-    float spotOuterCos_ = 0.707f; // cos(π/4) ≈ 45° half-angle
+    float spotInnerCos_ = 1.0f;
+    float spotOuterCos_ = 0.707f;
+
+    // Projector (texture projection through spot cone)
+    const Texture* projectionTexture_ = nullptr;
+    float lensShiftX_ = 0.0f;
+    float lensShiftY_ = 0.0f;
+    float projectorAspect_ = 16.0f / 9.0f;
 };
 
 // ---------------------------------------------------------------------------
