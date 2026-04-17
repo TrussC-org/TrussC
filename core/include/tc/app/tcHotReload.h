@@ -76,10 +76,36 @@ namespace trussc {
 
 // ---------------------------------------------------------------------------
 // TC_RUN_APP(AppClass, settings)
-// Use in main.cpp instead of tc::runApp<AppClass>(settings).
-// When compiled in hot reload mode (TC_HOT_RELOAD_BUILD defined by CMake),
-// launches the hot reload host. Otherwise, falls through to normal static
-// runApp.
+//
+// The standard way to start a TrussC app. Use this in main.cpp:
+//
+//   int main() {
+//       tc::WindowSettings settings;
+//       settings.setSize(960, 600);
+//       return TC_RUN_APP(tcApp, settings);
+//   }
+//
+// This macro automatically selects between two modes:
+//
+//   1. NORMAL MODE (default)
+//      Expands to tc::runApp<AppClass>(settings) — the traditional single-
+//      binary build. All code is statically linked into one executable.
+//      Identical behavior to calling runApp<>() directly.
+//
+//   2. HOT RELOAD MODE (when TC_HOT_RELOAD is in a source file)
+//      Expands to tc::runHotReloadApp(settings) — the app's user code
+//      (everything except main.cpp) is built as a shared library (Guest).
+//      The Host executable monitors src/ for file changes and automatically
+//      rebuilds + reloads the Guest without restarting the app.
+//      See tcHotReloadHost.h for implementation details.
+//
+// The mode is determined at cmake configure time by scanning source files
+// for the TC_HOT_RELOAD macro. No runtime overhead in normal mode — the
+// hot reload code is compiled out entirely.
+//
+// You can safely use TC_RUN_APP in all projects. It behaves identically
+// to runApp<>() unless you explicitly opt in to hot reload by adding
+// TC_HOT_RELOAD(YourAppClass) to your app's .cpp file.
 // ---------------------------------------------------------------------------
 #ifdef TC_HOT_RELOAD_BUILD
 #define TC_RUN_APP(AppClass, settings)   \

@@ -8,7 +8,7 @@ int main(int argc, char* argv[]) {
     settings.title = "grabExample";
     settings.setSize(650, 480);
 
-    runApp<tcApp>(settings);
+    TC_RUN_APP(tcApp, settings);
 
     return 0;
 }

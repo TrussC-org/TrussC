@@ -177,6 +177,19 @@ myProject/
     └── tcApp.cpp
 ```
 
+### Entry Point (`main.cpp`)
+
+All TrussC projects use `TC_RUN_APP` to start the app:
+```cpp
+int main() {
+    tc::WindowSettings settings;
+    return TC_RUN_APP(tcApp, settings);
+}
+```
+`TC_RUN_APP` is a drop-in replacement for `tc::runApp<>()` that adds support for [hot reload](#7-hot-reload-development). In normal builds it behaves identically to `runApp<>()` with zero overhead.
+
+> **Migration note:** If your project uses the older `tc::runApp<tcApp>(settings)` syntax, replace it with `TC_RUN_APP(tcApp, settings)`. Both work, but `TC_RUN_APP` enables hot reload when you opt in later.
+
 ### Data Folder
 Place assets (images, fonts, sounds) in `bin/data/`.
 This path is automatically resolved at runtime via `tc::getDataPath()`.
@@ -304,3 +317,59 @@ target_link_libraries(${PROJECT_NAME} PRIVATE ${LENSFUN_LIBRARIES})
 | Use case | System library linking, project-specific flags | Reusable wrappers, FetchContent libraries |
 
 **Rule of thumb:** If only one project uses it, put it in `local.cmake`. If multiple projects could benefit, make it an addon.
+
+---
+
+## 7. Hot Reload (Development)
+
+Edit C++ code and see changes reflected in a running app within seconds — no restart needed.
+
+### Quick Start
+
+1. Add `TC_HOT_RELOAD(tcApp)` to the top of your app's `.cpp` file:
+   ```cpp
+   // tcApp.cpp
+   #include "tcApp.h"
+   TC_HOT_RELOAD(tcApp)
+
+   void tcApp::setup() { ... }
+   void tcApp::draw() { ... }
+   ```
+
+2. Build and run as usual. On the first build after adding `TC_HOT_RELOAD`, cmake will automatically reconfigure to enable hot reload.
+
+3. While the app is running, edit and save any source file in `src/`. The change is compiled and loaded within 1-3 seconds.
+
+### How It Works
+
+When `TC_HOT_RELOAD` is detected in a source file, the build splits into two targets:
+
+- **Host (EXE)**: `main.cpp` + TrussC core. Owns the window, event loop, and file watcher.
+- **Guest (shared library)**: Your app code (`tcApp.cpp` etc.). Rebuilt on every file change.
+
+The Host monitors `src/` for file modifications (polling every 500ms). When a change is detected:
+1. Guest is rebuilt via `cmake --build --target guest` (incremental — only your code, not TrussC core)
+2. Old Guest is unloaded (`dlclose` / `FreeLibrary`)
+3. New Guest is loaded (`dlopen` / `LoadLibrary`)
+4. A new App instance is created → `setup()` runs again
+
+### State Reset (Stage 1)
+
+Currently, all state is reset on reload — `setup()` runs from scratch each time. Member variables, scene graph, loaded resources are all recreated. This is the same model as Processing / p5.js live coding.
+
+For most creative coding use cases (adjusting colors, positions, animations), this is sufficient.
+
+### Disabling Hot Reload
+
+Comment out or delete the `TC_HOT_RELOAD` line:
+```cpp
+// TC_HOT_RELOAD(tcApp)   ← commented out
+```
+On the next build, cmake reconfigures back to a single static binary. The `TC_RUN_APP` macro in `main.cpp` automatically falls through to normal `runApp<>()`.
+
+### Limitations
+
+- **Supported platforms**: macOS (`.dylib`), Linux (`.so`), Windows (`.dll`). Wasm / iOS / Android fall back to static mode automatically.
+- **Comment style**: Use `//` to disable. `/* */` block comments are not detected by the cmake scanner.
+- **Build tool**: `trusscli build` handles hot reload state changes in one step. Raw `cmake --build` may require building twice when toggling `TC_HOT_RELOAD` on/off.
+- **Build errors**: If the code doesn't compile, the previous version keeps running. Fix the error and save again.

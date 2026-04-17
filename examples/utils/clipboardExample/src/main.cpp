@@ -8,6 +8,6 @@ int main() {
     // Clipboard buffer is default 64KB
     // For larger data, use settings.setClipboardSize(1024 * 1024) to expand
 
-    runApp<tcApp>(settings);
+    TC_RUN_APP(tcApp, settings);
     return 0;
 }

@@ -5,6 +5,6 @@ int main() {
     settings.setSize(960, 600);
     settings.title = "consoleExample";
 
-    runApp<tcApp>(settings);
+    TC_RUN_APP(tcApp, settings);
     return 0;
 }

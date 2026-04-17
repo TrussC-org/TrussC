@@ -13,5 +13,5 @@ int main() {
     settings.setSize(640, 480);
     settings.setTitle("threadExample - TrussC");
 
-    return runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }

@@ -9,5 +9,5 @@ int main() {
     settings.setSize(480, 800);
     settings.setTitle("asyncDialogExample");
 
-    return runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }

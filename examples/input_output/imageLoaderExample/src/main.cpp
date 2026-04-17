@@ -9,5 +9,5 @@ int main() {
     settings.setSize(960, 600);
     settings.setTitle("imageLoaderExample - Image Loading Demo");
 
-    return runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }

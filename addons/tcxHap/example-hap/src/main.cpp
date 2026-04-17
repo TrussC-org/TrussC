@@ -5,5 +5,5 @@ int main() {
     settings.setSize(1280, 720);
     settings.setTitle("HAP Player Example");
 
-    return runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }
