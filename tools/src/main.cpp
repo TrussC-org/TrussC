@@ -1872,6 +1872,79 @@ static void printBuildHelp() {
          << "  -h, --help                 Show this help\n";
 }
 
+// =============================================================================
+// Subcommand: clean
+// =============================================================================
+
+static void printCleanHelp() {
+    cout << "Usage: trusscli clean [options]\n"
+         << "\n"
+         << "Delete build directories for the TrussC project in the current directory.\n"
+         << "By default deletes the native platform build directory. Use --all to\n"
+         << "delete all build directories (web, android, ios, etc.).\n"
+         << "\n"
+         << "Options:\n"
+         << "      --all                  Delete all build directories\n"
+         << "  -p, --path <path>          Operate on a specific project path\n"
+         << "  -h, --help                 Show this help\n";
+}
+
+static int cmdClean(const vector<string>& args) {
+    string explicitPath;
+    bool cleanAll = false;
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printCleanHelp(); return 0; }
+        else if (a == "--all") cleanAll = true;
+        else if (a == "-p" || a == "--path") {
+            if (++i >= args.size()) { cerr << "Error: " << a << " requires a value\n"; return 1; }
+            explicitPath = args[i];
+        }
+        else {
+            cerr << "Error: unknown option '" << a << "'\n"
+                 << "Run 'trusscli clean --help' for usage.\n";
+            return 1;
+        }
+    }
+
+    string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
+    if (projectPath.empty()) {
+        cerr << "Error: not inside a TrussC project.\n";
+        return 1;
+    }
+
+    const char* buildDirs[] = {
+        "build-macos", "build-linux", "build-windows",
+        "build-web", "build-android", "build-ios",
+        "build"
+    };
+
+    int removed = 0;
+    for (const char* dir : buildDirs) {
+        string fullPath = projectPath + "/" + dir;
+        if (fs::exists(fullPath)) {
+            if (!cleanAll && string(dir) != string("build-") + kNativePreset && string(dir) != "build") {
+                continue;  // skip non-native dirs unless --all
+            }
+            cout << "  Removing " << dir << "/\n";
+            fs::remove_all(fullPath);
+            removed++;
+        }
+    }
+
+    if (removed == 0) {
+        cout << "Nothing to clean.\n";
+    } else {
+        cout << "Cleaned " << removed << " build director" << (removed == 1 ? "y" : "ies") << ".\n";
+    }
+    return 0;
+}
+
+// =============================================================================
+// Subcommand: build
+// =============================================================================
+
 static int cmdBuild(const vector<string>& args) {
     string explicitPath;
     string targetPreset;
@@ -2108,6 +2181,7 @@ static void printTopHelp() {
          << "  addon <add|remove>             Manage addons\n"
          << "  info [section]                 Show project / framework info\n"
          << "  doctor                         Check development environment\n"
+         << "  clean                          Delete build directories\n"
          << "  build                          Build the project\n"
          << "  run                            Build and launch the project\n"
          << "\n"
@@ -2169,6 +2243,7 @@ int main(int argc, char* argv[]) {
     if (first == "addon")  return cmdAddon(subArgs);
     if (first == "info")   return cmdInfo(subArgs);
     if (first == "doctor") return cmdDoctor(subArgs);
+    if (first == "clean")  return cmdClean(subArgs);
     if (first == "build")  return cmdBuild(subArgs);
     if (first == "run")    return cmdRun(subArgs);
 
