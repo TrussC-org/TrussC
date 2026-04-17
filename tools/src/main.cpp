@@ -188,13 +188,22 @@ static int runProcess(const vector<string>& argv) {
 
 struct CaptureResult { int exitCode; string output; };
 
+// Windows uses _popen/_pclose (POSIX names without underscore are not available)
+#ifdef _WIN32
+#define tc_popen  _popen
+#define tc_pclose _pclose
+#else
+#define tc_popen  popen
+#define tc_pclose pclose
+#endif
+
 static CaptureResult captureCommand(const string& cmd) {
     string output;
-    FILE* pipe = popen(cmd.c_str(), "r");
+    FILE* pipe = tc_popen(cmd.c_str(), "r");
     if (!pipe) return {-1, ""};
     char buf[256];
     while (fgets(buf, sizeof(buf), pipe)) output += buf;
-    int status = pclose(pipe);
+    int status = tc_pclose(pipe);
 #ifdef _WIN32
     return {status, output};
 #else
