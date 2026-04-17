@@ -173,29 +173,39 @@ macro(trussc_app)
             "${TRUSSC_DIR}/include"
         )
         target_compile_features(guest PRIVATE cxx_std_20)
+        # Guest: resolve TrussC symbols at runtime from the Host process.
+        # macOS/Linux use flat namespace lookup; Windows uses import library.
+        if(APPLE)
+            target_link_options(guest PRIVATE -undefined dynamic_lookup)
+        elseif(WIN32)
+            # Windows: Guest links Host's import library (set below)
+        else()
+            target_link_options(guest PRIVATE -Wl,--unresolved-symbols=ignore-in-shared-libs)
+        endif()
         # Guest output directory
         set_target_properties(guest PROPERTIES
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"  # Windows puts DLLs in RUNTIME
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
         )
 
         # Host: executable with main.cpp + TrussC core
         add_executable(${PROJECT_NAME} ${_TC_HOST_SOURCES})
         target_compile_definitions(${PROJECT_NAME} PRIVATE TC_HOT_RELOAD_BUILD)
-        # Export ALL symbols (including those from libTrussC.a) so the Guest can
-        # use any TrussC function. Without force_load/whole-archive, the linker
-        # only pulls in symbols that main.cpp actually references — leaving most
-        # of TrussC invisible to the Guest.
         set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS TRUE)
+        # Force-load ALL symbols from libTrussC.a into the Host (not just the ones
+        # main.cpp uses) AND export them in the dynamic symbol table. This makes
+        # every TrussC function visible to the Guest at runtime.
         if(APPLE)
             target_link_options(${PROJECT_NAME} PRIVATE
-                -Wl,-force_load,$<TARGET_FILE:TrussC>)
-        elseif(UNIX AND NOT WIN32)
+                -Wl,-force_load,$<TARGET_FILE:TrussC>
+                -Wl,-export_dynamic)
+        elseif(WIN32)
+            target_link_libraries(guest PRIVATE ${PROJECT_NAME})
+        else()
             target_link_options(${PROJECT_NAME} PRIVATE
-                -Wl,--whole-archive $<TARGET_FILE:TrussC> -Wl,--no-whole-archive)
+                -Wl,--whole-archive $<TARGET_FILE:TrussC> -Wl,--no-whole-archive
+                -rdynamic)
         endif()
-        # Guest links against Host's import library
-        target_link_libraries(guest PRIVATE ${PROJECT_NAME})
 
     elseif(ANDROID)
         add_library(${PROJECT_NAME} SHARED ${_TC_SOURCES})
