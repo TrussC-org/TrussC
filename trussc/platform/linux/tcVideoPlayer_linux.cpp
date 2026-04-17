@@ -445,9 +445,15 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
 
     if (!isLoaded_ || !isPlaying_ || isPaused_) return;
 
-    // Calculate target PTS based on elapsed time
-    double elapsed = av_gettime_relative() / 1000000.0 - playbackStartTime_;
-    double targetPts = elapsed * speed_;
+    // Target PTS: use audio as master clock when available (no drift).
+    // Fall back to wall clock for audio-less videos.
+    double targetPts;
+    if (audioBuffer_) {
+        targetPts = audioSound_.getPosition();
+    } else {
+        double elapsed = av_gettime_relative() / 1000000.0 - playbackStartTime_;
+        targetPts = elapsed * speed_;
+    }
 
     // Get frame from queue if available and PTS is right
     std::lock_guard<std::mutex> lock(mutex_);
