@@ -218,6 +218,7 @@ fi
             "${TRUSSC_DIR}/include"
         )
         target_compile_features(guest PRIVATE cxx_std_20)
+        target_compile_definitions(guest PRIVATE TC_HOT_RELOAD_BUILD)
         # Guest: resolve TrussC symbols at runtime from the Host process.
         # macOS/Linux use flat namespace lookup; Windows uses import library.
         if(APPLE)
