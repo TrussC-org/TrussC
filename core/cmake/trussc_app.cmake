@@ -182,11 +182,19 @@ macro(trussc_app)
         # Host: executable with main.cpp + TrussC core
         add_executable(${PROJECT_NAME} ${_TC_HOST_SOURCES})
         target_compile_definitions(${PROJECT_NAME} PRIVATE TC_HOT_RELOAD_BUILD)
-        # Export symbols so the Guest can link against the Host's import library.
-        # ENABLE_EXPORTS makes CMake generate a stub (.tbd on macOS, .lib on Windows)
-        # that the Guest links against. At runtime, symbols resolve from the Host.
+        # Export ALL symbols (including those from libTrussC.a) so the Guest can
+        # use any TrussC function. Without force_load/whole-archive, the linker
+        # only pulls in symbols that main.cpp actually references — leaving most
+        # of TrussC invisible to the Guest.
         set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS TRUE)
-        # Guest links against Host — resolves all TrussC symbols from the running executable
+        if(APPLE)
+            target_link_options(${PROJECT_NAME} PRIVATE
+                -Wl,-force_load,$<TARGET_FILE:TrussC>)
+        elseif(UNIX AND NOT WIN32)
+            target_link_options(${PROJECT_NAME} PRIVATE
+                -Wl,--whole-archive $<TARGET_FILE:TrussC> -Wl,--no-whole-archive)
+        endif()
+        # Guest links against Host's import library
         target_link_libraries(guest PRIVATE ${PROJECT_NAME})
 
     elseif(ANDROID)
