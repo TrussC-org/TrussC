@@ -44,13 +44,17 @@ namespace trussc {
 // Place in the .cpp file of your App subclass. Generates extern "C" factory
 // functions that the Host uses to create/destroy your App via dlopen/dlsym.
 // ---------------------------------------------------------------------------
+#ifdef _WIN32
+#define _TC_EXPORT extern "C" __declspec(dllexport)
+#else
+#define _TC_EXPORT extern "C" __attribute__((visibility("default")))
+#endif
+
 #define TC_HOT_RELOAD(AppClass)                                             \
-    extern "C" __attribute__((visibility("default")))                        \
-    trussc::App* tcHotReloadCreateApp() {                                   \
+    _TC_EXPORT trussc::App* tcHotReloadCreateApp() {                        \
         return new AppClass();                                               \
     }                                                                        \
-    extern "C" __attribute__((visibility("default")))                        \
-    void tcHotReloadDestroyApp(trussc::App* app) {                          \
+    _TC_EXPORT void tcHotReloadDestroyApp(trussc::App* app) {               \
         delete app;                                                          \
     }
 

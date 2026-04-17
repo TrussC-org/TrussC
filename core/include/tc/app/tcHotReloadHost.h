@@ -14,7 +14,11 @@
 #ifdef TC_HOT_RELOAD_BUILD
 
 // Note: this header is included BY TrussC.h (after all core types are defined).
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <filesystem>
 #include <chrono>
 #include <string>
@@ -41,12 +45,39 @@ using DestroyAppFn = void (*)(App*);
 // ---------------------------------------------------------------------------
 
 struct GuestLibrary {
+#ifdef _WIN32
+    HMODULE handle = nullptr;
+#else
     void* handle = nullptr;
+#endif
     CreateAppFn createApp = nullptr;
     DestroyAppFn destroyApp = nullptr;
     App* app = nullptr;
+    string loadedPath;  // actual path loaded (may be a temp copy on Windows)
 
     bool load(const string& path) {
+#ifdef _WIN32
+        // Windows: can't overwrite a loaded DLL, so copy to a temp name first
+        static int loadCounter = 0;
+        string tempPath = path + "." + std::to_string(loadCounter++) + ".tmp.dll";
+        try { fs::copy_file(path, tempPath, fs::copy_options::overwrite_existing); }
+        catch (...) { cerr << "[HotReload] Failed to copy DLL to " << tempPath << "\n"; return false; }
+
+        handle = LoadLibraryA(tempPath.c_str());
+        if (!handle) {
+            cerr << "[HotReload] LoadLibrary failed (error " << GetLastError() << ")\n";
+            return false;
+        }
+        createApp = (CreateAppFn)GetProcAddress(handle, "tcHotReloadCreateApp");
+        destroyApp = (DestroyAppFn)GetProcAddress(handle, "tcHotReloadDestroyApp");
+        if (!createApp || !destroyApp) {
+            cerr << "[HotReload] GetProcAddress failed\n";
+            FreeLibrary(handle);
+            handle = nullptr;
+            return false;
+        }
+        loadedPath = tempPath;
+#else
         handle = dlopen(path.c_str(), RTLD_NOW);
         if (!handle) {
             cerr << "[HotReload] dlopen failed: " << dlerror() << "\n";
@@ -60,6 +91,8 @@ struct GuestLibrary {
             handle = nullptr;
             return false;
         }
+        loadedPath = path;
+#endif
         return true;
     }
 
@@ -81,7 +114,13 @@ struct GuestLibrary {
     void unload() {
         destroy();
         if (handle) {
+#ifdef _WIN32
+            FreeLibrary(handle);
+            // Delete the temp copy
+            try { fs::remove(loadedPath); } catch (...) {}
+#else
             dlclose(handle);
+#endif
             handle = nullptr;
         }
         createApp = nullptr;
@@ -194,6 +233,8 @@ struct Host {
         // Guest library path
 #ifdef __APPLE__
         guestLibPath = buildDir + "/libguest.dylib";
+#elif defined(_WIN32)
+        guestLibPath = buildDir + "/Release/guest.dll";
 #else
         guestLibPath = buildDir + "/libguest.so";
 #endif
