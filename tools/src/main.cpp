@@ -622,13 +622,105 @@ static int cmdNew(const vector<string>& args) {
 }
 
 // =============================================================================
-// Subcommand: update
+// Subcommand: update (regenerate project build files)
 // =============================================================================
 
 static void printUpdateHelp() {
     cout << "Usage: trusscli update [options]\n"
          << "\n"
-         << "Update TrussC to the latest version by pulling the latest code from\n"
+         << "Regenerate build files (CMakeLists.txt, CMakePresets.json, IDE files)\n"
+         << "for the TrussC project in the current directory. The addon list is\n"
+         << "read from the existing addons.make.\n"
+         << "\n"
+         << "Options:\n"
+         << "  -p, --path <path>          Operate on a specific project path\n"
+         << "      --web                  Enable Web build\n"
+         << "      --android              Enable Android build\n"
+         << "      --ios                  Enable iOS build\n"
+         << "      --ide <type>           IDE: vscode, cursor, xcode, vs, cmake\n"
+         << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "  -h, --help                 Show this help\n";
+}
+
+static int cmdUpdate(const vector<string>& args) {
+    string projectPath;
+    bool web = false, android = false, ios = false;
+    string ideStr = "vscode";
+    string tcRoot;
+
+    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << opt << " requires a value\n";
+            return false;
+        }
+        out = args[++i];
+        return true;
+    };
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printUpdateHelp(); return 0; }
+        else if (a == "-p" || a == "--path") {
+            if (!needValue(i, a, projectPath)) return 1;
+        }
+        else if (a == "--web") web = true;
+        else if (a == "--android") android = true;
+        else if (a == "--ios") ios = true;
+        else if (a == "--ide") {
+            if (!needValue(i, a, ideStr)) return 1;
+        }
+        else if (a == "--tc-root") {
+            if (!needValue(i, a, tcRoot)) return 1;
+        }
+        else {
+            cerr << "Error: unknown argument '" << a << "'\n"
+                 << "Run 'trusscli update --help' for usage.\n";
+            return 1;
+        }
+    }
+
+    string resolvedProjectPath;
+    string resolvedTcRoot;
+    if (int rc = resolveProjectAndTcRoot(projectPath, tcRoot, resolvedProjectPath, resolvedTcRoot)) {
+        return rc;
+    }
+    projectPath = resolvedProjectPath;
+    tcRoot = resolvedTcRoot;
+
+    vector<string> availableAddons;
+    scanAddons(tcRoot, availableAddons);
+
+    ProjectSettings settings;
+    settings.tcRoot = tcRoot;
+    settings.projectName = fs::canonical(projectPath).filename().string();
+    settings.addons = availableAddons;
+    parseAddonsMake(projectPath, availableAddons, settings.addonSelected);
+    settings.generateWebBuild = web;
+    settings.generateAndroidBuild = android;
+    settings.generateIosBuild = ios;
+    settings.detectBuildEnvironment();
+
+    if (!parseIdeType(ideStr, settings.ideType)) {
+        cerr << "Error: unknown IDE type '" << ideStr
+             << "'. Valid: vscode, cursor, xcode, vs, cmake\n";
+        return 1;
+    }
+
+    settings.templatePath = tcRoot + "/examples/templates/emptyExample";
+
+    if (int rc = runProjectUpdate(settings, projectPath)) return rc;
+    cout << "Project updated: " << projectPath << "\n";
+    return 0;
+}
+
+// =============================================================================
+// Subcommand: upgrade (update TrussC itself)
+// =============================================================================
+
+static void printUpgradeHelp() {
+    cout << "Usage: trusscli upgrade [options]\n"
+         << "\n"
+         << "Upgrade TrussC to the latest version by pulling the latest code from\n"
          << "the git repository and rebuilding trusscli. The /usr/local/bin symlink\n"
          << "(if present) automatically points to the new binary.\n"
          << "\n"
@@ -640,12 +732,12 @@ static void printUpdateHelp() {
          << "  -h, --help                 Show this help\n";
 }
 
-static int cmdUpdate(const vector<string>& args) {
+static int cmdUpgrade(const vector<string>& args) {
     string tcRoot;
 
     for (size_t i = 0; i < args.size(); ++i) {
         const string& a = args[i];
-        if (a == "-h" || a == "--help") { printUpdateHelp(); return 0; }
+        if (a == "-h" || a == "--help") { printUpgradeHelp(); return 0; }
         else if (a == "--tc-root") {
             if (i + 1 >= args.size()) {
                 cerr << "Error: --tc-root requires a value\n";
@@ -655,7 +747,7 @@ static int cmdUpdate(const vector<string>& args) {
         }
         else {
             cerr << "Error: unknown option '" << a << "'\n"
-                 << "Run 'trusscli update --help' for usage.\n";
+                 << "Run 'trusscli upgrade --help' for usage.\n";
             return 1;
         }
     }
@@ -667,7 +759,7 @@ static int cmdUpdate(const vector<string>& args) {
     }
 
     // Step 1: git pull
-    cout << "Updating TrussC (" << tcRoot << ") ...\n";
+    cout << "Upgrading TrussC (" << tcRoot << ") ...\n";
     int rc = runProcess({"git", "-C", tcRoot, "pull"});
     if (rc != 0) {
         cerr << "Error: git pull failed (exit code " << rc << ").\n";
@@ -700,7 +792,7 @@ static int cmdUpdate(const vector<string>& args) {
         return 1;
     }
 
-    cout << "\ntrusscli updated successfully.\n"
+    cout << "\ntrusscli upgraded successfully.\n"
          << "The new version will be used on the next invocation.\n";
     return 0;
 #endif
@@ -2192,7 +2284,8 @@ static void printTopHelp() {
          << "\n"
          << "Commands:\n"
          << "  new <path>                     Create a new project at <path>\n"
-         << "  update                         Update TrussC (git pull + rebuild trusscli)\n"
+         << "  update                         Regenerate build files for the project in CWD\n"
+         << "  upgrade                        Upgrade TrussC (git pull + rebuild trusscli)\n"
          << "  addon <add|remove>             Manage addons\n"
          << "  info [section]                 Show project / framework info\n"
          << "  doctor                         Check development environment\n"
@@ -2253,8 +2346,9 @@ int main(int argc, char* argv[]) {
 
     // Dispatch
     vector<string> subArgs(args.begin() + 1, args.end());
-    if (first == "new")    return cmdNew(subArgs);
-    if (first == "update") return cmdUpdate(subArgs);
+    if (first == "new")     return cmdNew(subArgs);
+    if (first == "update")  return cmdUpdate(subArgs);
+    if (first == "upgrade") return cmdUpgrade(subArgs);
     if (first == "addon")  return cmdAddon(subArgs);
     if (first == "info")   return cmdInfo(subArgs);
     if (first == "doctor") return cmdDoctor(subArgs);
