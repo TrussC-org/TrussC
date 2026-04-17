@@ -9,22 +9,37 @@
 
 ## Planned Features
 
+### Implemented (gpu-pbr branch)
+
+| Feature | Description |
+|---------|-------------|
+| GPU PBR lighting | Cook-Torrance GGX BRDF, metallic-roughness workflow, up to 8 lights |
+| Light types | Directional, Point, Spot with cone falloff |
+| Projector light | Texture projection with lens shift, aspect ratio, gobo |
+| IES profiles | IESNA LM-63 photometric profiles for angular intensity |
+| IBL environment | HDR / procedural sky, irradiance + prefilter + BRDF LUT |
+| Normal mapping | Tangent-space normal maps with TBN matrix |
+| PBR texture maps | Base color, metallic-roughness, emissive, occlusion (glTF 2.0) |
+| Shadow mapping | R32F depth map, 3x3 PCF, per-light bias control |
+| glTF loader | tcxGltf addon (cgltf), GLB/glTF with embedded textures |
+| ImGui addon extraction | Extracted to tcxImGui addon |
+
 ### High Priority
 
 | Feature | Description | Difficulty |
 |---------|-------------|------------|
-| GPU lighting | Move lighting from CPU to shader-based rendering. Add spot light support | High |
-| 3D model loading | OBJ/glTF loader | High |
-| ImGui addon extraction | Extract Dear ImGui from core to tcxImGui addon | Medium |
+| Multi-light shadows | Support shadow maps for multiple lights simultaneously | High |
+| Area lights | Rectangle / disc / line area light sources | High |
+| Cascaded shadow maps | CSM for directional lights (large outdoor scenes) | High |
 
 ### Medium Priority
 
 | Feature | Description | Difficulty |
 |---------|-------------|------------|
 | FLAC support | Enable FLAC decoding via miniaudio configuration | Low |
-| Normal mapping | Bump mapping with normal textures | High |
 | VBO detail control | Dynamic vertex buffers | Medium |
 | macOS deprecated API migration | Replace `tracksWithMediaType:` / `copyCGImageAtTime:` with async equivalents (deprecated in macOS 15.0) | Medium |
+| PBR in Fbo | Allow PBR mesh rendering inside Fbo passes | Medium |
 
 
 ---

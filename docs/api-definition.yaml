@@ -4607,6 +4607,148 @@ categories:
         snippet: "setPanSensitivity(${1:1.0})"
 
   # ==========================================================================
+  # Lighting & PBR
+  # ==========================================================================
+  - id: graphics_lighting
+    name: "Lighting & PBR"
+    name_ja: "照明・PBR"
+    name_ko: "조명 및 PBR"
+    functions:
+      - name: addLight
+        return: "void"
+        signatures:
+          - params: "Light& light"
+            params_simple: "light"
+        description: "Add a light to the scene"
+        description_ja: "シーンにlightを追加"
+        description_ko: "씬에 조명을 추가"
+        sketch: true
+        snippet: "addLight(${1:light})"
+
+      - name: removeLight
+        return: "void"
+        signatures:
+          - params: "Light& light"
+            params_simple: "light"
+        description: "Remove a light from the scene"
+        description_ja: "シーンからlightを削除"
+        description_ko: "씬에서 조명을 제거"
+        sketch: true
+        snippet: "removeLight(${1:light})"
+
+      - name: clearLights
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Remove all lights from the scene"
+        description_ja: "全てのlightを削除"
+        description_ko: "모든 조명을 제거"
+        sketch: true
+        snippet: "clearLights()"
+
+      - name: setLightingMode
+        return: "void"
+        signatures:
+          - params: "LightingMode mode"
+            params_simple: "mode"
+        description: "Set lighting mode (CpuPhong or GpuPbr)"
+        description_ja: "lighting modeを設定（CpuPhong / GpuPbr）"
+        description_ko: "조명 모드를 설정 (CpuPhong 또는 GpuPbr)"
+        sketch: true
+        snippet: "setLightingMode(${1:LightingMode::GpuPbr})"
+
+      - name: setPbrMaterial
+        return: "void"
+        signatures:
+          - params: "PbrMaterial& material"
+            params_simple: "material"
+        description: "Set PBR material for subsequent mesh draws"
+        description_ja: "以降のmesh描画に使うPBR materialを設定"
+        description_ko: "이후 메쉬 렌더링에 사용할 PBR 재질을 설정"
+        sketch: true
+        snippet: "setPbrMaterial(${1:material})"
+
+      - name: clearPbrMaterial
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Clear PBR material (return to default rendering)"
+        description_ja: "PBR materialをクリア（デフォルトに戻す）"
+        description_ko: "PBR 재질을 해제 (기본 렌더링으로 복귀)"
+        sketch: true
+        snippet: "clearPbrMaterial()"
+
+      - name: setCameraPosition
+        return: "void"
+        signatures:
+          - params: "const Vec3& pos"
+            params_simple: "pos"
+          - params: "float x, float y, float z"
+            params_simple: "x, y, z"
+        description: "Set camera position for specular calculation"
+        description_ja: "specular計算用のcamera位置を設定"
+        description_ko: "스페큘러 계산을 위한 카메라 위치를 설정"
+        sketch: true
+        snippet: "setCameraPosition(${1:cam.getPosition()})"
+
+      - name: setEnvironment
+        return: "void"
+        signatures:
+          - params: "Environment& env"
+            params_simple: "env"
+        description: "Set IBL environment for PBR ambient lighting"
+        description_ja: "PBR ambient用のIBL environment mapを設定"
+        description_ko: "PBR 앰비언트용 IBL 환경맵을 설정"
+        sketch: true
+        snippet: "setEnvironment(${1:env})"
+
+      - name: clearEnvironment
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Clear IBL environment"
+        description_ja: "IBL environment mapをクリア"
+        description_ko: "IBL 환경맵을 해제"
+        sketch: true
+        snippet: "clearEnvironment()"
+
+      - name: beginShadowPass
+        return: "void"
+        signatures:
+          - params: "Light& light"
+            params_simple: "light"
+        description: "Begin shadow depth pass from the light's point of view"
+        description_ja: "light視点のshadow depth passを開始"
+        description_ko: "조명 시점의 섀도우 뎁스 패스를 시작"
+        sketch: true
+        snippet: "beginShadowPass(${1:light})"
+
+      - name: endShadowPass
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "End shadow depth pass"
+        description_ja: "shadow depth passを終了"
+        description_ko: "섀도우 뎁스 패스를 종료"
+        sketch: true
+        snippet: "endShadowPass()"
+
+      - name: shadowDraw
+        return: "void"
+        signatures:
+          - params: "const Mesh& mesh"
+            params_simple: "mesh"
+        description: "Draw a mesh into the shadow depth pass (depth only)"
+        description_ja: "shadow depth passにmeshを描画（depthのみ）"
+        description_ko: "섀도우 뎁스 패스에 메쉬를 렌더링 (뎁스 전용)"
+        sketch: true
+        snippet: "shadowDraw(${1:mesh})"
+
+  # ==========================================================================
   # Math - 3D (Matrix / Quaternion)
   # ==========================================================================
   - id: math_3d
@@ -8710,6 +8852,390 @@ types:
     description_ko: "칩/합성 사운드 생성"
     of_type_category: "audio-types"
     sketch: false
+
+  - name: Light
+    description: "Light source for 3D PBR rendering (directional, point, or spot)"
+    description_ja: "3D PBR用light（directional, point, spot）"
+    description_ko: "3D PBR 렌더링용 광원 (평행광, 점광, 스포트라이트)"
+    of_equivalent: "ofLight"
+    of_type_category: "light-types"
+    sketch: true
+    constructor:
+      signatures:
+        - params: ""
+      snippet: "Light()"
+    methods:
+      - name: setDirectional
+        return: "void"
+        signatures:
+          - params: "const Vec3& direction"
+          - params: "float dx, float dy, float dz"
+        description: "Set as directional light"
+        description_ja: "平行光源に設定"
+        description_ko: "방향성 조명으로 설정"
+        snippet: "setDirectional(${1:Vec3(0, -1, 0)})"
+      - name: setPoint
+        return: "void"
+        signatures:
+          - params: "const Vec3& position"
+          - params: "float x, float y, float z"
+        description: "Set as point light"
+        description_ja: "点光源に設定"
+        description_ko: "점 광원으로 설정"
+        snippet: "setPoint(${1:Vec3(0, 100, 0)})"
+      - name: setSpot
+        return: "void"
+        signatures:
+          - params: "const Vec3& position, const Vec3& direction, float innerHalfAngle, float outerHalfAngle"
+          - params: "float px, float py, float pz, float dx, float dy, float dz, float innerHalfAngle, float outerHalfAngle"
+        description: "Set as spot light with cone angles"
+        description_ja: "spot lightに設定（cone角度指定）"
+        description_ko: "스포트 라이트로 설정 (콘 각도 지정)"
+        snippet: "setSpot(${1:pos}, ${2:dir}, ${3:0.0f}, ${4:0.45f})"
+      - name: setDiffuse
+        return: "void"
+        signatures:
+          - params: "const Color& c"
+          - params: "float r, float g, float b, float a"
+        description: "Set diffuse (main) light color"
+        description_ja: "diffuse色を設定"
+        description_ko: "디퓨즈 (메인) 조명 색상을 설정"
+        snippet: "setDiffuse(${1:1.0f}, ${2:1.0f}, ${3:1.0f})"
+      - name: setIntensity
+        return: "void"
+        signatures:
+          - params: "float intensity"
+        description: "Set light intensity multiplier"
+        description_ja: "light intensityを設定"
+        description_ko: "조명 강도를 설정"
+        snippet: "setIntensity(${1:1.0f})"
+      - name: setAttenuation
+        return: "void"
+        signatures:
+          - params: "float constant, float linear, float quadratic"
+        description: "Set distance attenuation factors"
+        description_ja: "距離減衰係数を設定"
+        description_ko: "거리 감쇠 계수를 설정"
+        snippet: "setAttenuation(${1:1.0f}, ${2:0.0f}, ${3:0.0f})"
+      - name: setProjectionTexture
+        return: "void"
+        signatures:
+          - params: "const Texture* tex"
+        description: "Set texture for projector-style light (gobo)"
+        description_ja: "projector投影用texture（gobo）を設定"
+        description_ko: "프로젝터 투영용 텍스처 (고보)를 설정"
+        snippet: "setProjectionTexture(${1:&texture})"
+      - name: setLensShift
+        return: "void"
+        signatures:
+          - params: "float sx, float sy"
+        description: "Set projector lens shift (-1 to 1, normalized)"
+        description_ja: "projectorのlens shiftを設定（-1〜1）"
+        description_ko: "프로젝터 렌즈 시프트를 설정 (-1~1)"
+        snippet: "setLensShift(${1:0.0f}, ${2:1.0f})"
+      - name: setProjectorAspect
+        return: "void"
+        signatures:
+          - params: "float aspect"
+        description: "Set projector aspect ratio"
+        description_ja: "projectorのaspect ratioを設定"
+        description_ko: "프로젝터 종횡비를 설정"
+        snippet: "setProjectorAspect(${1:16.0f / 9.0f})"
+      - name: setIesProfile
+        return: "void"
+        signatures:
+          - params: "const IesProfile* ies"
+        description: "Attach IES photometric profile for angular intensity"
+        description_ja: "IES配光profileを設定"
+        description_ko: "IES 배광 프로파일을 설정"
+        snippet: "setIesProfile(${1:&iesProfile})"
+      - name: enableShadow
+        return: "void"
+        signatures:
+          - params: "int resolution"
+        description: "Enable shadow casting (depth map at given resolution)"
+        description_ja: "shadow castingを有効化（指定解像度のdepth map）"
+        description_ko: "섀도우 캐스팅을 활성화 (지정 해상도의 뎁스맵)"
+        snippet: "enableShadow(${1:1024})"
+      - name: disableShadow
+        return: "void"
+        signatures:
+          - params: ""
+        description: "Disable shadow casting"
+        description_ja: "shadow castingを無効化"
+        description_ko: "섀도우 캐스팅을 비활성화"
+        snippet: "disableShadow()"
+      - name: setShadowBias
+        return: "void"
+        signatures:
+          - params: "float bias"
+        description: "Set shadow depth bias in world units"
+        description_ja: "shadow depth biasを設定（world単位）"
+        description_ko: "섀도우 뎁스 바이어스를 설정 (월드 단위)"
+        snippet: "setShadowBias(${1:1.0f})"
+      - name: getType
+        return: "LightType"
+        signatures:
+          - params: ""
+        description: "Get light type (Directional, Point, or Spot)"
+        description_ja: "light typeを取得"
+        description_ko: "조명 유형을 얻음"
+        snippet: "getType()"
+      - name: getPosition
+        return: "const Vec3&"
+        signatures:
+          - params: ""
+        description: "Get light position"
+        description_ja: "light位置を取得"
+        description_ko: "조명 위치를 얻음"
+        snippet: "getPosition()"
+      - name: getDirection
+        return: "const Vec3&"
+        signatures:
+          - params: ""
+        description: "Get light direction"
+        description_ja: "light方向を取得"
+        description_ko: "조명 방향을 얻음"
+        snippet: "getDirection()"
+      - name: getIntensity
+        return: "float"
+        signatures:
+          - params: ""
+        description: "Get light intensity"
+        description_ja: "light intensityを取得"
+        description_ko: "조명 강도를 얻음"
+        snippet: "getIntensity()"
+
+  - name: PbrMaterial
+    description: "PBR material (metallic-roughness workflow, glTF 2.0 compatible)"
+    description_ja: "PBR material（metallic-roughness、glTF 2.0互換）"
+    description_ko: "PBR 재질 (메탈릭-러프니스 워크플로우, glTF 2.0 호환)"
+    of_type_category: "material-types"
+    sketch: true
+    constructor:
+      signatures:
+        - params: ""
+      snippet: "PbrMaterial()"
+    methods:
+      - name: setBaseColor
+        return: "PbrMaterial&"
+        signatures:
+          - params: "const Color& c"
+          - params: "float r, float g, float b, float a"
+        description: "Set base color (albedo)"
+        description_ja: "base color（albedo）を設定"
+        description_ko: "베이스 컬러 (알베도)를 설정"
+        snippet: "setBaseColor(${1:0.8f}, ${2:0.8f}, ${3:0.8f})"
+      - name: setMetallic
+        return: "PbrMaterial&"
+        signatures:
+          - params: "float m"
+        description: "Set metallic factor (0=dielectric, 1=metal)"
+        description_ja: "metallic値を設定（0=非金属、1=金属）"
+        description_ko: "메탈릭 값을 설정 (0=비금속, 1=금속)"
+        snippet: "setMetallic(${1:0.0f})"
+      - name: setRoughness
+        return: "PbrMaterial&"
+        signatures:
+          - params: "float r"
+        description: "Set roughness factor (0=mirror, 1=matte)"
+        description_ja: "roughness値を設定（0=鏡面、1=matte）"
+        description_ko: "러프니스 값을 설정 (0=거울, 1=무광)"
+        snippet: "setRoughness(${1:0.5f})"
+      - name: setEmissive
+        return: "PbrMaterial&"
+        signatures:
+          - params: "const Color& c"
+          - params: "float r, float g, float b"
+        description: "Set emissive color"
+        description_ja: "emissive色を設定"
+        description_ko: "이미시브 색상을 설정"
+        snippet: "setEmissive(${1:0.0f}, ${2:0.0f}, ${3:0.0f})"
+      - name: setEmissiveStrength
+        return: "PbrMaterial&"
+        signatures:
+          - params: "float s"
+        description: "Set emissive strength multiplier"
+        description_ja: "emissive強度を設定"
+        description_ko: "이미시브 강도를 설정"
+        snippet: "setEmissiveStrength(${1:1.0f})"
+      - name: setAo
+        return: "PbrMaterial&"
+        signatures:
+          - params: "float ao"
+        description: "Set ambient occlusion factor"
+        description_ja: "ambient occlusion値を設定"
+        description_ko: "앰비언트 오클루전 값을 설정"
+        snippet: "setAo(${1:1.0f})"
+      - name: setNormalMap
+        return: "PbrMaterial&"
+        signatures:
+          - params: "const Texture* tex"
+        description: "Set normal map texture for bump mapping"
+        description_ja: "bump mapping用normal mapを設定"
+        description_ko: "범프 매핑용 노멀맵을 설정"
+        snippet: "setNormalMap(${1:&normalTex})"
+      - name: setBaseColorTexture
+        return: "PbrMaterial&"
+        signatures:
+          - params: "const Texture* tex"
+        description: "Set base color (albedo) texture map"
+        description_ja: "base color textureを設定"
+        description_ko: "베이스 컬러 텍스처를 설정"
+        snippet: "setBaseColorTexture(${1:&tex})"
+      - name: setMetallicRoughnessTexture
+        return: "PbrMaterial&"
+        signatures:
+          - params: "const Texture* tex"
+        description: "Set metallic-roughness texture (glTF: G=roughness, B=metallic)"
+        description_ja: "metallic-roughness textureを設定（glTF: G=roughness, B=metallic）"
+        description_ko: "메탈릭-러프니스 텍스처를 설정 (glTF: G=러프니스, B=메탈릭)"
+        snippet: "setMetallicRoughnessTexture(${1:&tex})"
+      - name: setEmissiveTexture
+        return: "PbrMaterial&"
+        signatures:
+          - params: "const Texture* tex"
+        description: "Set emissive texture map"
+        description_ja: "emissive textureを設定"
+        description_ko: "이미시브 텍스처를 설정"
+        snippet: "setEmissiveTexture(${1:&tex})"
+      - name: setOcclusionTexture
+        return: "PbrMaterial&"
+        signatures:
+          - params: "const Texture* tex"
+        description: "Set occlusion texture map"
+        description_ja: "occlusion textureを設定"
+        description_ko: "오클루전 텍스처를 설정"
+        snippet: "setOcclusionTexture(${1:&tex})"
+    static_methods:
+      - name: gold
+        return: "PbrMaterial"
+        signatures:
+          - params: ""
+        description: "Gold material preset"
+        description_ja: "金のプリセット"
+        description_ko: "금 프리셋"
+        snippet: "PbrMaterial::gold()"
+      - name: silver
+        return: "PbrMaterial"
+        signatures:
+          - params: ""
+        description: "Silver material preset"
+        description_ja: "銀のプリセット"
+        description_ko: "은 프리셋"
+        snippet: "PbrMaterial::silver()"
+      - name: copper
+        return: "PbrMaterial"
+        signatures:
+          - params: ""
+        description: "Copper material preset"
+        description_ja: "銅のプリセット"
+        description_ko: "구리 프리셋"
+        snippet: "PbrMaterial::copper()"
+      - name: iron
+        return: "PbrMaterial"
+        signatures:
+          - params: ""
+        description: "Iron material preset"
+        description_ja: "鉄のプリセット"
+        description_ko: "철 프리셋"
+        snippet: "PbrMaterial::iron()"
+      - name: plastic
+        return: "PbrMaterial"
+        signatures:
+          - params: "const Color& baseColor, float roughness"
+        description: "Plastic material preset"
+        description_ja: "プラスチックのプリセット"
+        description_ko: "플라스틱 프리셋"
+        snippet: "PbrMaterial::plastic(${1:Color(0.8f, 0.2f, 0.2f)})"
+      - name: rubber
+        return: "PbrMaterial"
+        signatures:
+          - params: "const Color& baseColor"
+        description: "Rubber material preset"
+        description_ja: "ゴムのプリセット"
+        description_ko: "고무 프리셋"
+        snippet: "PbrMaterial::rubber(${1:Color(0.1f, 0.1f, 0.1f)})"
+
+  - name: IesProfile
+    description: "IESNA LM-63 photometric profile for angular light intensity"
+    description_ja: "IESNA LM-63配光profile（角度別の光強度分布）"
+    description_ko: "IESNA LM-63 배광 프로파일 (각도별 조명 강도)"
+    of_type_category: "light-types"
+    sketch: true
+    constructor:
+      signatures:
+        - params: ""
+      snippet: "IesProfile()"
+    methods:
+      - name: load
+        return: "bool"
+        signatures:
+          - params: "const string& path"
+        description: "Load IES profile from file"
+        description_ja: "ファイルからIES profileを読み込み"
+        description_ko: "파일에서 IES 프로파일을 로드"
+        snippet: "load(${1:\"spotlight.ies\"})"
+      - name: loadFromString
+        return: "bool"
+        signatures:
+          - params: "const string& data"
+        description: "Load IES profile from inline string data"
+        description_ja: "文字列データからIES profileを読み込み"
+        description_ko: "문자열 데이터에서 IES 프로파일을 로드"
+        snippet: "loadFromString(${1:data})"
+      - name: isLoaded
+        return: "bool"
+        signatures:
+          - params: ""
+        description: "Check if profile is loaded"
+        description_ja: "profileが読み込み済みか確認"
+        description_ko: "프로파일이 로드되었는지 확인"
+        snippet: "isLoaded()"
+
+  - name: Environment
+    description: "IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT)"
+    description_ja: "PBR ambient用IBL environment map（irradiance + prefilter + BRDF LUT）"
+    description_ko: "PBR 앰비언트용 IBL 환경맵 (이래디언스 + 프리필터 + BRDF LUT)"
+    of_type_category: "light-types"
+    sketch: true
+    constructor:
+      signatures:
+        - params: ""
+      snippet: "Environment()"
+    methods:
+      - name: loadFromHDR
+        return: "bool"
+        signatures:
+          - params: "const string& path"
+        description: "Load environment from HDR image file"
+        description_ja: "HDR画像からIBL environment mapを生成"
+        description_ko: "HDR 이미지에서 IBL 환경맵을 생성"
+        snippet: "loadFromHDR(${1:\"env.hdr\"})"
+      - name: loadProcedural
+        return: "bool"
+        signatures:
+          - params: ""
+        description: "Generate a simple procedural sky environment"
+        description_ja: "procedural sky environmentを生成"
+        description_ko: "간단한 절차적 스카이 환경을 생성"
+        snippet: "loadProcedural()"
+      - name: isLoaded
+        return: "bool"
+        signatures:
+          - params: ""
+        description: "Check if environment is loaded"
+        description_ja: "environment mapが読み込み済みか確認"
+        description_ko: "환경맵이 로드되었는지 확인"
+        snippet: "isLoaded()"
+      - name: release
+        return: "void"
+        signatures:
+          - params: ""
+        description: "Release GPU resources"
+        description_ja: "GPU resourceを解放"
+        description_ko: "GPU 리소스를 해제"
+        snippet: "release()"
 
   - name: EasyCam
     description: "3D camera with mouse control"
