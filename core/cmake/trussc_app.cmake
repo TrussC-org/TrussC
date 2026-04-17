@@ -166,16 +166,16 @@ CURRENT=OFF
 if grep -rq '^[^/]*TC_HOT_RELOAD' \"$SRC_DIR\"/*.cpp 2>/dev/null; then CURRENT=ON; fi
 if [ \"$PREV\" != \"$CURRENT\" ]; then
   if [ \"$CURRENT\" = \"ON\" ]; then
-    echo \"[HotReload] TC_HOT_RELOAD detected — reconfiguring for hot reload...\"
+    echo \"\"
+    echo \"  [HotReload] TC_HOT_RELOAD detected. Please build again to enable hot reload.\"
+    echo \"\"
   else
-    echo \"[HotReload] TC_HOT_RELOAD removed — reconfiguring for static mode...\"
+    echo \"\"
+    echo \"  [HotReload] TC_HOT_RELOAD removed. Please build again to revert to static mode.\"
+    echo \"\"
   fi
-  # Reconfigure and rebuild in-place. The outer cmake --build will see
-  # everything as up-to-date when this returns.
-  BUILD_DIR=\"${CMAKE_BINARY_DIR}\"
-  cmake \"$BUILD_DIR\" > /dev/null 2>&1
-  cmake --build \"$BUILD_DIR\" --parallel
-  exit \$?
+  touch \"$CMAKELISTS\"
+  exit 1
 fi
 ")
     file(CHMOD "${_TC_HR_CHECK_SCRIPT}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
@@ -266,6 +266,16 @@ fi
 
     # Link TrussC
     target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC)
+
+    # Ensure the hot reload check runs BEFORE any compilation starts.
+    # If the check fails (state changed), the build stops immediately
+    # with a clear message — no wasted compilation time.
+    if(TARGET _tc_hot_reload_check)
+        add_dependencies(${PROJECT_NAME} _tc_hot_reload_check)
+        if(TARGET guest)
+            add_dependencies(guest _tc_hot_reload_check)
+        endif()
+    endif()
 
     # Apply addons from addons.make
     apply_addons(${PROJECT_NAME})
