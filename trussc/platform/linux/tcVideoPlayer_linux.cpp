@@ -647,7 +647,10 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
         AVFrame* swFrame  = nullptr;
         if (hwType_ != AV_HWDEVICE_TYPE_NONE && frame_->hw_frames_ctx) {
             swFrame = av_frame_alloc();
-            swFrame->format = AV_PIX_FMT_YUV420P;
+            // Use the HW backend's native format (e.g. NV12 on VAAPI) to
+            // avoid an extra pixel-format conversion during transfer. The
+            // scaler is rebuilt lazily on format change (lastScalerFmt_).
+            swFrame->format = AV_PIX_FMT_NONE;
             if (av_hwframe_transfer_data(swFrame, frame_, 0) < 0) {
                 logWarning("VideoPlayer") << "HW frame transfer failed, dropping frame";
                 av_frame_free(&swFrame);
