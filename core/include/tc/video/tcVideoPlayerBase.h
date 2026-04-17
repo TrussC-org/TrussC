@@ -190,6 +190,36 @@ public:
     virtual int getAudioChannels() const { return 0; }
 
     // =========================================================================
+    // Hardware acceleration info
+    // =========================================================================
+
+    /// Returns true if hardware-accelerated decoding is currently active.
+    /// Concrete players that use HW decode should override this.
+    virtual bool isUsingHwAccel() const { return false; }
+
+    /// Returns the name of the active decode backend.
+    /// Possible values on the standard VideoPlayer:
+    ///   - macOS:   "videotoolbox", "software"
+    ///   - Windows: "mediafoundation", "software"
+    ///   - Linux:   "vaapi", "v4l2m2m", "drm", "cuda", "software"
+    /// Returns "none" when no video is loaded or the player has no HW path.
+    virtual std::string getHwAccelName() const { return "none"; }
+
+    // =========================================================================
+    // AV sync control
+    // =========================================================================
+
+    /// Set the maximum allowed video/audio drift (in seconds) before a hard
+    /// re-sync (video seeks to the audio position). Set to 0 or negative to
+    /// disable. Primarily affects the Linux (FFmpeg) backend — other
+    /// platforms delegate sync to their native framework.
+    /// Default: 0.5s
+    virtual void setResyncThreshold(float seconds) { resyncThreshold_ = seconds; }
+
+    /// Get the current resync threshold in seconds.
+    virtual float getResyncThreshold() const { return resyncThreshold_; }
+
+    // =========================================================================
     // HasTexture implementation
     // =========================================================================
 
@@ -212,6 +242,7 @@ protected:
     float volume_ = 1.0f;
     float speed_ = 1.0f;
     float pan_ = 0.0f;
+    float resyncThreshold_ = 0.5f;
 
     // Thread synchronization
     mutable std::mutex mutex_;

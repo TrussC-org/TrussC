@@ -184,6 +184,23 @@ public:
     }
 
     // =========================================================================
+    // Hardware decode control
+    // =========================================================================
+
+    /// Force software decoding (disable hardware acceleration).
+    /// Must be called **before** load(). Default: true (use HW if available).
+    /// Currently only affects the Linux backend.
+    void setUseHwAccel(bool enable) {
+        useHwAccel_ = enable;
+    }
+
+    /// Get current HW accel preference (not the actual backend in use —
+    /// use isUsingHwAccel() for that).
+    bool getUseHwAccel() const {
+        return useHwAccel_;
+    }
+
+    // =========================================================================
     // Pixel access
     // =========================================================================
 
@@ -199,6 +216,13 @@ public:
     std::vector<uint8_t> getAudioData() const override { return getAudioDataPlatform(); }
     int getAudioSampleRate() const override { return getAudioSampleRatePlatform(); }
     int getAudioChannels() const override { return getAudioChannelsPlatform(); }
+
+    // =========================================================================
+    // Hardware acceleration info
+    // =========================================================================
+
+    bool isUsingHwAccel() const override { return isUsingHwAccelPlatform(); }
+    std::string getHwAccelName() const override { return getHwAccelNamePlatform(); }
 
 protected:
     // -------------------------------------------------------------------------
@@ -246,6 +270,9 @@ private:
     
     // Gamma correction (1.0 = none)
     float gammaCorrection_ = 1.0f;
+
+    // HW decode preference (default on; Linux backend honors this)
+    bool useHwAccel_ = true;
 
     // Platform-specific handle
     void* platformHandle_ = nullptr;
@@ -320,6 +347,10 @@ private:
     std::vector<uint8_t> getAudioDataPlatform() const;
     int getAudioSampleRatePlatform() const;
     int getAudioChannelsPlatform() const;
+
+    // Hardware acceleration info
+    bool isUsingHwAccelPlatform() const;
+    std::string getHwAccelNamePlatform() const;
 
     // =========================================================================
     // Static utility — frame extraction (thread-safe, no GPU required)

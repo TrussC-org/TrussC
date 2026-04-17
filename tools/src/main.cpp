@@ -188,13 +188,22 @@ static int runProcess(const vector<string>& argv) {
 
 struct CaptureResult { int exitCode; string output; };
 
+// Windows uses _popen/_pclose (POSIX names without underscore are not available)
+#ifdef _WIN32
+#define tc_popen  _popen
+#define tc_pclose _pclose
+#else
+#define tc_popen  popen
+#define tc_pclose pclose
+#endif
+
 static CaptureResult captureCommand(const string& cmd) {
     string output;
-    FILE* pipe = popen(cmd.c_str(), "r");
+    FILE* pipe = tc_popen(cmd.c_str(), "r");
     if (!pipe) return {-1, ""};
     char buf[256];
     while (fgets(buf, sizeof(buf), pipe)) output += buf;
-    int status = pclose(pipe);
+    int status = tc_pclose(pipe);
 #ifdef _WIN32
     return {status, output};
 #else
@@ -622,13 +631,105 @@ static int cmdNew(const vector<string>& args) {
 }
 
 // =============================================================================
-// Subcommand: update
+// Subcommand: update (regenerate project build files)
 // =============================================================================
 
 static void printUpdateHelp() {
     cout << "Usage: trusscli update [options]\n"
          << "\n"
-         << "Update TrussC to the latest version by pulling the latest code from\n"
+         << "Regenerate build files (CMakeLists.txt, CMakePresets.json, IDE files)\n"
+         << "for the TrussC project in the current directory. The addon list is\n"
+         << "read from the existing addons.make.\n"
+         << "\n"
+         << "Options:\n"
+         << "  -p, --path <path>          Operate on a specific project path\n"
+         << "      --web                  Enable Web build\n"
+         << "      --android              Enable Android build\n"
+         << "      --ios                  Enable iOS build\n"
+         << "      --ide <type>           IDE: vscode, cursor, xcode, vs, cmake\n"
+         << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "  -h, --help                 Show this help\n";
+}
+
+static int cmdUpdate(const vector<string>& args) {
+    string projectPath;
+    bool web = false, android = false, ios = false;
+    string ideStr = "vscode";
+    string tcRoot;
+
+    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << opt << " requires a value\n";
+            return false;
+        }
+        out = args[++i];
+        return true;
+    };
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printUpdateHelp(); return 0; }
+        else if (a == "-p" || a == "--path") {
+            if (!needValue(i, a, projectPath)) return 1;
+        }
+        else if (a == "--web") web = true;
+        else if (a == "--android") android = true;
+        else if (a == "--ios") ios = true;
+        else if (a == "--ide") {
+            if (!needValue(i, a, ideStr)) return 1;
+        }
+        else if (a == "--tc-root") {
+            if (!needValue(i, a, tcRoot)) return 1;
+        }
+        else {
+            cerr << "Error: unknown argument '" << a << "'\n"
+                 << "Run 'trusscli update --help' for usage.\n";
+            return 1;
+        }
+    }
+
+    string resolvedProjectPath;
+    string resolvedTcRoot;
+    if (int rc = resolveProjectAndTcRoot(projectPath, tcRoot, resolvedProjectPath, resolvedTcRoot)) {
+        return rc;
+    }
+    projectPath = resolvedProjectPath;
+    tcRoot = resolvedTcRoot;
+
+    vector<string> availableAddons;
+    scanAddons(tcRoot, availableAddons);
+
+    ProjectSettings settings;
+    settings.tcRoot = tcRoot;
+    settings.projectName = fs::canonical(projectPath).filename().string();
+    settings.addons = availableAddons;
+    parseAddonsMake(projectPath, availableAddons, settings.addonSelected);
+    settings.generateWebBuild = web;
+    settings.generateAndroidBuild = android;
+    settings.generateIosBuild = ios;
+    settings.detectBuildEnvironment();
+
+    if (!parseIdeType(ideStr, settings.ideType)) {
+        cerr << "Error: unknown IDE type '" << ideStr
+             << "'. Valid: vscode, cursor, xcode, vs, cmake\n";
+        return 1;
+    }
+
+    settings.templatePath = tcRoot + "/examples/templates/emptyExample";
+
+    if (int rc = runProjectUpdate(settings, projectPath)) return rc;
+    cout << "Project updated: " << projectPath << "\n";
+    return 0;
+}
+
+// =============================================================================
+// Subcommand: upgrade (update TrussC itself)
+// =============================================================================
+
+static void printUpgradeHelp() {
+    cout << "Usage: trusscli upgrade [options]\n"
+         << "\n"
+         << "Upgrade TrussC to the latest version by pulling the latest code from\n"
          << "the git repository and rebuilding trusscli. The /usr/local/bin symlink\n"
          << "(if present) automatically points to the new binary.\n"
          << "\n"
@@ -640,12 +741,12 @@ static void printUpdateHelp() {
          << "  -h, --help                 Show this help\n";
 }
 
-static int cmdUpdate(const vector<string>& args) {
+static int cmdUpgrade(const vector<string>& args) {
     string tcRoot;
 
     for (size_t i = 0; i < args.size(); ++i) {
         const string& a = args[i];
-        if (a == "-h" || a == "--help") { printUpdateHelp(); return 0; }
+        if (a == "-h" || a == "--help") { printUpgradeHelp(); return 0; }
         else if (a == "--tc-root") {
             if (i + 1 >= args.size()) {
                 cerr << "Error: --tc-root requires a value\n";
@@ -655,7 +756,7 @@ static int cmdUpdate(const vector<string>& args) {
         }
         else {
             cerr << "Error: unknown option '" << a << "'\n"
-                 << "Run 'trusscli update --help' for usage.\n";
+                 << "Run 'trusscli upgrade --help' for usage.\n";
             return 1;
         }
     }
@@ -667,7 +768,7 @@ static int cmdUpdate(const vector<string>& args) {
     }
 
     // Step 1: git pull
-    cout << "Updating TrussC (" << tcRoot << ") ...\n";
+    cout << "Upgrading TrussC (" << tcRoot << ") ...\n";
     int rc = runProcess({"git", "-C", tcRoot, "pull"});
     if (rc != 0) {
         cerr << "Error: git pull failed (exit code " << rc << ").\n";
@@ -700,7 +801,7 @@ static int cmdUpdate(const vector<string>& args) {
         return 1;
     }
 
-    cout << "\ntrusscli updated successfully.\n"
+    cout << "\ntrusscli upgraded successfully.\n"
          << "The new version will be used on the next invocation.\n";
     return 0;
 #endif
@@ -1872,6 +1973,79 @@ static void printBuildHelp() {
          << "  -h, --help                 Show this help\n";
 }
 
+// =============================================================================
+// Subcommand: clean
+// =============================================================================
+
+static void printCleanHelp() {
+    cout << "Usage: trusscli clean [options]\n"
+         << "\n"
+         << "Delete build directories for the TrussC project in the current directory.\n"
+         << "By default deletes the native platform build directory. Use --all to\n"
+         << "delete all build directories (web, android, ios, etc.).\n"
+         << "\n"
+         << "Options:\n"
+         << "      --all                  Delete all build directories\n"
+         << "  -p, --path <path>          Operate on a specific project path\n"
+         << "  -h, --help                 Show this help\n";
+}
+
+static int cmdClean(const vector<string>& args) {
+    string explicitPath;
+    bool cleanAll = false;
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printCleanHelp(); return 0; }
+        else if (a == "--all") cleanAll = true;
+        else if (a == "-p" || a == "--path") {
+            if (++i >= args.size()) { cerr << "Error: " << a << " requires a value\n"; return 1; }
+            explicitPath = args[i];
+        }
+        else {
+            cerr << "Error: unknown option '" << a << "'\n"
+                 << "Run 'trusscli clean --help' for usage.\n";
+            return 1;
+        }
+    }
+
+    string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
+    if (projectPath.empty()) {
+        cerr << "Error: not inside a TrussC project.\n";
+        return 1;
+    }
+
+    const char* buildDirs[] = {
+        "build-macos", "build-linux", "build-windows",
+        "build-web", "build-android", "build-ios",
+        "build"
+    };
+
+    int removed = 0;
+    for (const char* dir : buildDirs) {
+        string fullPath = projectPath + "/" + dir;
+        if (fs::exists(fullPath)) {
+            if (!cleanAll && string(dir) != string("build-") + kNativePreset && string(dir) != "build") {
+                continue;  // skip non-native dirs unless --all
+            }
+            cout << "  Removing " << dir << "/\n";
+            fs::remove_all(fullPath);
+            removed++;
+        }
+    }
+
+    if (removed == 0) {
+        cout << "Nothing to clean.\n";
+    } else {
+        cout << "Cleaned " << removed << " build director" << (removed == 1 ? "y" : "ies") << ".\n";
+    }
+    return 0;
+}
+
+// =============================================================================
+// Subcommand: build
+// =============================================================================
+
 static int cmdBuild(const vector<string>& args) {
     string explicitPath;
     string targetPreset;
@@ -1930,54 +2104,8 @@ static int cmdBuild(const vector<string>& args) {
 
     string cmake = findCMake();
 
-    // Hot reload state check: if TC_HOT_RELOAD was added or removed since
-    // last configure, run cmake configure before building. This avoids the
-    // "build twice" problem when toggling hot reload.
-    string buildDir = projectPath + "/build-" + string(kNativePreset);
-    string stateFile = buildDir + "/.tc_hot_reload_state";
-    string srcDir = projectPath + "/src";
-    if (fs::exists(srcDir) && fs::exists(buildDir)) {
-        // Scan sources for TC_HOT_RELOAD
-        bool hasHotReload = false;
-        for (const auto& entry : fs::recursive_directory_iterator(srcDir)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".cpp") {
-                ifstream f(entry.path());
-                string line;
-                while (getline(f, line)) {
-                    // Skip comment lines
-                    size_t first = line.find_first_not_of(" \t");
-                    if (first != string::npos && line[first] != '/' &&
-                        line.find("TC_HOT_RELOAD") != string::npos) {
-                        hasHotReload = true;
-                        break;
-                    }
-                }
-                if (hasHotReload) break;
-            }
-        }
-        string currentState = hasHotReload ? "ON" : "OFF";
-
-        // Compare with saved state
-        string prevState;
-        if (fs::exists(stateFile)) {
-            ifstream sf(stateFile);
-            getline(sf, prevState);
-        }
-
-        if (prevState != currentState) {
-            cout << "[HotReload] State changed (" << prevState << " -> " << currentState
-                 << ") — reconfiguring...\n";
-            // Run cmake configure to pick up the new target layout
-            int rc = runProcess({cmake, "--preset", targetPreset});
-            if (rc != 0) {
-                cerr << "Error: cmake configure failed during hot reload reconfig.\n";
-                return 1;
-            }
-        }
-    }
-
-    // cmake --build --preset <target> [--config Release] [--clean-first]
-    vector<string> cmd = {cmake, "--build", "--preset", targetPreset};
+    // cmake --build --preset <target> --parallel [--config Release] [--clean-first]
+    vector<string> cmd = {cmake, "--build", "--preset", targetPreset, "--parallel"};
     if (release) { cmd.push_back("--config"); cmd.push_back("Release"); }
     if (clean) cmd.push_back("--clean-first");
 
@@ -2008,7 +2136,8 @@ static void printRunHelp() {
          << "      --web                  Build WASM and start a local HTTP server\n"
          << "      --android              Build, adb install, and launch    [not yet implemented]\n"
          << "      --ios                  Build and run in iOS Simulator    [not yet implemented]\n"
-         << "      --headless             Launch via labwc Wayland session (headless Linux)\n"
+         << "      --session <backend>    Launch inside a display session (Linux, no desktop).\n"
+         << "                             Backends: labwc, x11. Example: --session labwc\n"
          << "      --release              Build in Release configuration\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n";
@@ -2017,7 +2146,7 @@ static void printRunHelp() {
 static int cmdRun(const vector<string>& args) {
     string explicitPath;
     string target; // "", "web", "android", "ios"
-    bool headless = false;
+    string session; // display session backend: "labwc", "x11", ""
     bool release = false;
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -2035,7 +2164,14 @@ static int cmdRun(const vector<string>& args) {
         else if (a == "--web")      target = "web";
         else if (a == "--android")  target = "android";
         else if (a == "--ios")      target = "ios";
-        else if (a == "--headless") headless = true;
+        else if (a == "--session") {
+            if (!needValue(i, a, session)) return 1;
+            if (session != "labwc" && session != "x11") {
+                cerr << "Error: unknown session backend '" << session << "'\n"
+                     << "Available: labwc, x11\n";
+                return 1;
+            }
+        }
         else if (a == "--release")  release = true;
         else if (a == "-p" || a == "--path") {
             if (!needValue(i, a, explicitPath)) return 1;
@@ -2108,8 +2244,8 @@ static int cmdRun(const vector<string>& args) {
     string appPath = projectPath + "/bin/" + projectName + ".app";
     if (fs::exists(appPath)) {
         string binPath = appPath + "/Contents/MacOS/" + projectName;
-        if (headless) {
-            cerr << "Warning: --headless is a Linux-only option (ignored on macOS).\n";
+        if (!session.empty()) {
+            cerr << "Warning: --session is a Linux-only option (ignored on macOS).\n";
         }
         cout << "Launching " << projectName << " ...\n";
         return runProcess({binPath});
@@ -2117,9 +2253,13 @@ static int cmdRun(const vector<string>& args) {
 #elif defined(__linux__)
     string binPath = projectPath + "/bin/" + projectName;
     if (fs::exists(binPath)) {
-        if (headless) {
-            cout << "Launching via labwc (headless Wayland session) ...\n";
+        if (session == "labwc") {
+            cout << "Launching via labwc Wayland session ...\n";
             return runProcess({"labwc", "-s", binPath});
+        }
+        if (session == "x11") {
+            cout << "Launching via xinit (X11 session) ...\n";
+            return runProcess({"xinit", binPath});
         }
         cout << "Launching " << projectName << " ...\n";
         return runProcess({binPath});
@@ -2127,6 +2267,9 @@ static int cmdRun(const vector<string>& args) {
 #elif defined(_WIN32)
     string exePath = projectPath + "/bin/" + projectName + ".exe";
     if (fs::exists(exePath)) {
+        if (!session.empty()) {
+            cerr << "Warning: --session is a Linux-only option (ignored on Windows).\n";
+        }
         cout << "Launching " << projectName << " ...\n";
         return runProcess({exePath});
     }
@@ -2150,10 +2293,12 @@ static void printTopHelp() {
          << "\n"
          << "Commands:\n"
          << "  new <path>                     Create a new project at <path>\n"
-         << "  update                         Update TrussC (git pull + rebuild trusscli)\n"
+         << "  update                         Regenerate build files for the project in CWD\n"
+         << "  upgrade                        Upgrade TrussC (git pull + rebuild trusscli)\n"
          << "  addon <add|remove>             Manage addons\n"
          << "  info [section]                 Show project / framework info\n"
          << "  doctor                         Check development environment\n"
+         << "  clean                          Delete build directories\n"
          << "  build                          Build the project\n"
          << "  run                            Build and launch the project\n"
          << "\n"
@@ -2210,11 +2355,13 @@ int main(int argc, char* argv[]) {
 
     // Dispatch
     vector<string> subArgs(args.begin() + 1, args.end());
-    if (first == "new")    return cmdNew(subArgs);
-    if (first == "update") return cmdUpdate(subArgs);
+    if (first == "new")     return cmdNew(subArgs);
+    if (first == "update")  return cmdUpdate(subArgs);
+    if (first == "upgrade") return cmdUpgrade(subArgs);
     if (first == "addon")  return cmdAddon(subArgs);
     if (first == "info")   return cmdInfo(subArgs);
     if (first == "doctor") return cmdDoctor(subArgs);
+    if (first == "clean")  return cmdClean(subArgs);
     if (first == "build")  return cmdBuild(subArgs);
     if (first == "run")    return cmdRun(subArgs);
 

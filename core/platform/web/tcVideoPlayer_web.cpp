@@ -380,6 +380,18 @@ int VideoPlayer::getAudioChannelsPlatform() const {
     return 0;
 }
 
+// Hardware acceleration info
+// HTML5 <video> delegates decoding to the browser, which uses the GPU
+// for mainstream codecs whenever available. We report "browser" to
+// indicate that the decode path is out of TrussC's direct control.
+bool VideoPlayer::isUsingHwAccelPlatform() const {
+    return platformHandle_ != nullptr;
+}
+
+std::string VideoPlayer::getHwAccelNamePlatform() const {
+    return platformHandle_ ? "browser" : "none";
+}
+
 } // namespace trussc
 
 #endif // __EMSCRIPTEN__
