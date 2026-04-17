@@ -2003,8 +2003,8 @@ static int cmdBuild(const vector<string>& args) {
 
     string cmake = findCMake();
 
-    // cmake --build --preset <target> [--config Release] [--clean-first]
-    vector<string> cmd = {cmake, "--build", "--preset", targetPreset};
+    // cmake --build --preset <target> --parallel [--config Release] [--clean-first]
+    vector<string> cmd = {cmake, "--build", "--preset", targetPreset, "--parallel"};
     if (release) { cmd.push_back("--config"); cmd.push_back("Release"); }
     if (clean) cmd.push_back("--clean-first");
 
