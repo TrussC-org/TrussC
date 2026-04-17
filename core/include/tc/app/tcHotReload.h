@@ -43,7 +43,14 @@ namespace trussc {
 // TC_HOT_RELOAD(AppClass)
 // Place in the .cpp file of your App subclass. Generates extern "C" factory
 // functions that the Host uses to create/destroy your App via dlopen/dlsym.
+//
+// If the build is NOT configured for hot reload (TC_HOT_RELOAD_BUILD not
+// defined), the macro emits a compile-time error with instructions to
+// reconfigure. This catches the common mistake of adding TC_HOT_RELOAD
+// without re-running cmake configure.
 // ---------------------------------------------------------------------------
+#ifdef TC_HOT_RELOAD_BUILD
+
 #ifdef _WIN32
 #define _TC_EXPORT extern "C" __declspec(dllexport)
 #else
@@ -57,6 +64,17 @@ namespace trussc {
     _TC_EXPORT void tcHotReloadDestroyApp(trussc::App* app) {               \
         delete app;                                                          \
     }
+
+#else // not TC_HOT_RELOAD_BUILD
+
+#define TC_HOT_RELOAD(AppClass)                                             \
+    static_assert(false,                                                     \
+        "TC_HOT_RELOAD(" #AppClass ") found but hot reload is not "          \
+        "configured in this build. Please reconfigure:\n"                    \
+        "  cmake --preset macos   (or: rm -rf build-macos && cmake --preset macos)\n" \
+        "Then rebuild.")
+
+#endif // TC_HOT_RELOAD_BUILD
 
 // ---------------------------------------------------------------------------
 // TC_RUN_APP(AppClass, settings)
