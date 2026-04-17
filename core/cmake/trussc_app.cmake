@@ -111,10 +111,77 @@ macro(trussc_app)
     # Preserve directory structure in Xcode / Visual Studio
     source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "src" FILES ${_TC_SOURCES})
 
+    # =========================================================================
+    # Hot Reload detection
+    # Scan source files for TC_HOT_RELOAD macro. If found on a supported
+    # platform, split the build into Host (EXE) + Guest (shared library).
+    # =========================================================================
+    set(_TC_HOT_RELOAD OFF)
+    if(NOT EMSCRIPTEN AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT WIN32)
+        foreach(_src ${_TC_SOURCES})
+            if(_src MATCHES "\\.cpp$")
+                file(READ "${_src}" _content)
+                # Match TC_HOT_RELOAD that is NOT on a comment line
+                string(REGEX MATCH "\n[^/\n]*TC_HOT_RELOAD" _match "${_content}")
+                if(_match)
+                    set(_TC_HOT_RELOAD ON)
+                    break()
+                endif()
+                # Also check first line (no preceding newline)
+                string(REGEX MATCH "^[^/\n]*TC_HOT_RELOAD" _match2 "${_content}")
+                if(_match2)
+                    set(_TC_HOT_RELOAD ON)
+                    break()
+                endif()
+            endif()
+        endforeach()
+    endif()
+
     # Create target
-    # Android: shared library (.so) loaded by NativeActivity
-    # Others: executable
-    if(ANDROID)
+    if(_TC_HOT_RELOAD)
+        message(STATUS "[${_TC_PROJECT_NAME}] Hot reload enabled — building Host + Guest")
+
+        # Split sources: main.cpp → Host, everything else → Guest
+        set(_TC_HOST_SOURCES "")
+        set(_TC_GUEST_SOURCES "")
+        foreach(_src ${_TC_SOURCES})
+            get_filename_component(_fname "${_src}" NAME)
+            if(_fname STREQUAL "main.cpp")
+                list(APPEND _TC_HOST_SOURCES "${_src}")
+            else()
+                list(APPEND _TC_GUEST_SOURCES "${_src}")
+            endif()
+        endforeach()
+
+        if(NOT _TC_HOST_SOURCES)
+            message(FATAL_ERROR "[${_TC_PROJECT_NAME}] Hot reload requires main.cpp in src/")
+        endif()
+
+        # Guest: shared library with user code
+        add_library(guest SHARED ${_TC_GUEST_SOURCES})
+        target_include_directories(guest PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/src"
+            "${TRUSSC_DIR}/include"
+        )
+        target_compile_features(guest PRIVATE cxx_std_20)
+        # Resolve TrussC symbols from the Host at runtime (not linked statically)
+        if(APPLE)
+            target_link_options(guest PRIVATE -undefined dynamic_lookup)
+        else()
+            target_link_options(guest PRIVATE -Wl,--unresolved-symbols=ignore-in-shared-libs)
+        endif()
+        # Guest output goes to build/ directory
+        set_target_properties(guest PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        )
+
+        # Host: executable with main.cpp + TrussC core
+        add_executable(${PROJECT_NAME} ${_TC_HOST_SOURCES})
+        target_compile_definitions(${PROJECT_NAME} PRIVATE TC_HOT_RELOAD_BUILD)
+        # Export symbols so the Guest can resolve them at runtime
+        set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS TRUE)
+
+    elseif(ANDROID)
         add_library(${PROJECT_NAME} SHARED ${_TC_SOURCES})
     else()
         add_executable(${PROJECT_NAME} ${_TC_SOURCES})
