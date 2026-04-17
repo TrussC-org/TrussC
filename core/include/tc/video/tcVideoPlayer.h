@@ -184,6 +184,23 @@ public:
     }
 
     // =========================================================================
+    // Hardware decode control
+    // =========================================================================
+
+    /// Force software decoding (disable hardware acceleration).
+    /// Must be called **before** load(). Default: true (use HW if available).
+    /// Currently only affects the Linux backend.
+    void setUseHwAccel(bool enable) {
+        useHwAccel_ = enable;
+    }
+
+    /// Get current HW accel preference (not the actual backend in use —
+    /// use isUsingHwAccel() for that).
+    bool getUseHwAccel() const {
+        return useHwAccel_;
+    }
+
+    // =========================================================================
     // Pixel access
     // =========================================================================
 
@@ -253,6 +270,9 @@ private:
     
     // Gamma correction (1.0 = none)
     float gammaCorrection_ = 1.0f;
+
+    // HW decode preference (default on; Linux backend honors this)
+    bool useHwAccel_ = true;
 
     // Platform-specific handle
     void* platformHandle_ = nullptr;

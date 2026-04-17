@@ -17,6 +17,7 @@ extern "C" {
 #include <libavutil/imgutils.h>
 #include <libavutil/time.h>
 #include <libavutil/opt.h>
+#include <libavutil/hwcontext.h>
 }
 
 #include <thread>
@@ -25,6 +26,30 @@ extern "C" {
 #include <condition_variable>
 
 using namespace trussc;
+
+// =============================================================================
+// HW backend detection
+// =============================================================================
+// Runtime lookup (no compile-time ifdefs) — returns AV_HWDEVICE_TYPE_NONE
+// if no listed backend is available on this system.
+static AVHWDeviceType tryCreateHwDevice(AVBufferRef** outCtx) {
+    static const char* kOrder[] = {
+        "cuda",     // NVIDIA NVDEC (Kepler / Maxwell gen2+)
+        "vaapi",    // Intel / AMD
+        "vdpau",    // Older NVIDIA (X11 only, pre-NVDEC)
+        "v4l2m2m",  // RPi / ARM SoCs (hardware codec)
+        "drm",      // RPi 5 DRM/KMS path
+        nullptr,
+    };
+    for (int i = 0; kOrder[i] != nullptr; ++i) {
+        AVHWDeviceType type = av_hwdevice_find_type_by_name(kOrder[i]);
+        if (type == AV_HWDEVICE_TYPE_NONE) continue;
+        if (av_hwdevice_ctx_create(outCtx, type, nullptr, nullptr, 0) >= 0) {
+            return type;
+        }
+    }
+    return AV_HWDEVICE_TYPE_NONE;
+}
 
 // =============================================================================
 // TCVideoPlayerImpl - Linux implementation using FFmpeg
@@ -67,6 +92,13 @@ public:
     int getAudioChannels() const { return audioChannels_; }
     std::vector<uint8_t> getAudioData() const;
 
+    bool        isUsingHwAccel() const { return hwType_ != AV_HWDEVICE_TYPE_NONE; }
+    std::string getHwAccelName() const {
+        if (hwType_ == AV_HWDEVICE_TYPE_NONE) return "software";
+        const char* n = av_hwdevice_get_type_name(hwType_);
+        return n ? n : "unknown";
+    }
+
     Sound audioSound_;
     std::shared_ptr<SoundBuffer> audioBuffer_;
 
@@ -83,6 +115,9 @@ private:
     AVFrame* frame_ = nullptr;
     AVFrame* frameRGBA_ = nullptr;
     AVPacket* packet_ = nullptr;
+    AVBufferRef*   hwDeviceCtx_   = nullptr;
+    AVHWDeviceType hwType_        = AV_HWDEVICE_TYPE_NONE;
+    AVPixelFormat  lastScalerFmt_ = AV_PIX_FMT_NONE;
 
     int videoStreamIndex_ = -1;
     int audioStreamIndex_ = -1;
@@ -223,12 +258,36 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         return false;
     }
 
-    // Open codec
+    // Try hardware acceleration (CUDA / VAAPI / VDPAU / V4L2M2M / DRM).
+    // User can opt out via VideoPlayer::setUseHwAccel(false). Falls back to SW.
+    if (player && player->getUseHwAccel()) {
+        hwType_ = tryCreateHwDevice(&hwDeviceCtx_);
+        if (hwType_ != AV_HWDEVICE_TYPE_NONE) {
+            codecCtx_->hw_device_ctx = av_buffer_ref(hwDeviceCtx_);
+            logNotice("VideoPlayer") << "Using HW backend: " << av_hwdevice_get_type_name(hwType_);
+        } else {
+            logNotice("VideoPlayer") << "No HW backend available, using software decoding";
+        }
+    } else {
+        logNotice("VideoPlayer") << "HW accel disabled by user, using software decoding";
+    }
+
+    // Open codec (fallback to SW on HW open failure)
     if (avcodec_open2(codecCtx_, codec, nullptr) < 0) {
-        logError("VideoPlayer") << "Failed to open codec";
-        avcodec_free_context(&codecCtx_);
-        avformat_close_input(&formatCtx_);
-        return false;
+        if (hwType_ != AV_HWDEVICE_TYPE_NONE) {
+            logWarning("VideoPlayer") << "HW codec open failed, falling back to SW";
+            hwType_ = AV_HWDEVICE_TYPE_NONE;
+            av_buffer_unref(&hwDeviceCtx_);
+            avcodec_free_context(&codecCtx_);
+            codecCtx_ = avcodec_alloc_context3(codec);
+            avcodec_parameters_to_context(codecCtx_, codecPar);
+        }
+        if (avcodec_open2(codecCtx_, codec, nullptr) < 0) {
+            logError("VideoPlayer") << "Failed to open codec";
+            avcodec_free_context(&codecCtx_);
+            avformat_close_input(&formatCtx_);
+            return false;
+        }
     }
 
     // Get video properties
@@ -321,6 +380,13 @@ void TCVideoPlayerImpl::close() {
     }
 
     // Free FFmpeg resources
+    if (hwDeviceCtx_) {
+        av_buffer_unref(&hwDeviceCtx_);
+        hwDeviceCtx_ = nullptr;
+    }
+    hwType_        = AV_HWDEVICE_TYPE_NONE;
+    lastScalerFmt_ = AV_PIX_FMT_NONE;
+
     if (rgbaBuffer_) {
         av_free(rgbaBuffer_);
         rgbaBuffer_ = nullptr;
@@ -445,9 +511,28 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
 
     if (!isLoaded_ || !isPlaying_ || isPaused_) return;
 
-    // Calculate target PTS based on elapsed time
-    double elapsed = av_gettime_relative() / 1000000.0 - playbackStartTime_;
-    double targetPts = elapsed * speed_;
+    // Target PTS: use audio as master clock when available (no drift).
+    // Fall back to wall clock for audio-less videos.
+    double targetPts;
+    if (audioBuffer_) {
+        targetPts = audioSound_.getPosition();
+    } else {
+        double elapsed = av_gettime_relative() / 1000000.0 - playbackStartTime_;
+        targetPts = elapsed * speed_;
+    }
+
+    // Hard re-sync if drift exceeds threshold (e.g. window backgrounded on
+    // Wayland — compositor throttles frame callbacks while audio keeps
+    // playing; CPU spikes; decode stalls). Seeking is far cheaper than
+    // decoding every intermediate frame to catch up.
+    // Threshold configurable via VideoPlayer::setResyncThreshold();
+    // <= 0 disables the check.
+    float resyncThreshold = player ? player->getResyncThreshold() : 0.5f;
+    if (resyncThreshold > 0.0f &&
+        std::abs(targetPts - currentPts_) > resyncThreshold) {
+        seekToTime(targetPts);
+        return;  // next update() will pick up freshly decoded frames
+    }
 
     // Get frame from queue if available and PTS is right
     std::lock_guard<std::mutex> lock(mutex_);
@@ -557,13 +642,41 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             return false;
         }
 
-        // Convert to RGBA
-        sws_scale(
-            swsCtx_,
-            frame_->data, frame_->linesize,
-            0, height_,
-            frameRGBA_->data, frameRGBA_->linesize
-        );
+        // HW frames need to be transferred to CPU before scaling
+        AVFrame* srcFrame = frame_;
+        AVFrame* swFrame  = nullptr;
+        if (hwType_ != AV_HWDEVICE_TYPE_NONE && frame_->hw_frames_ctx) {
+            swFrame = av_frame_alloc();
+            swFrame->format = AV_PIX_FMT_YUV420P;
+            if (av_hwframe_transfer_data(swFrame, frame_, 0) < 0) {
+                av_frame_free(&swFrame);
+                av_frame_unref(frame_);
+                continue;
+            }
+            srcFrame = swFrame;
+        }
+
+        // Recreate scaler if source pixel format changed (HW transfer may
+        // produce NV12 / YUV420P depending on backend).
+        AVPixelFormat srcFmt = (AVPixelFormat)srcFrame->format;
+        if (srcFmt != lastScalerFmt_ && srcFmt != AV_PIX_FMT_NONE) {
+            if (swsCtx_) sws_freeContext(swsCtx_);
+            swsCtx_ = sws_getContext(
+                width_, height_, srcFmt,
+                width_, height_, AV_PIX_FMT_RGBA,
+                SWS_BILINEAR, nullptr, nullptr, nullptr);
+            lastScalerFmt_ = srcFmt;
+        }
+
+        if (swsCtx_ && srcFrame->data[0]) {
+            sws_scale(
+                swsCtx_,
+                srcFrame->data, srcFrame->linesize,
+                0, height_,
+                frameRGBA_->data, frameRGBA_->linesize);
+        }
+
+        if (swFrame) av_frame_free(&swFrame);
 
         // Calculate PTS
         double pts = 0.0;
@@ -1017,15 +1130,16 @@ int VideoPlayer::getAudioChannelsPlatform() const {
     return 0;
 }
 
-// Hardware acceleration info
-// Current Linux implementation is software-only; returns "software" when
-// a video is loaded. Will be replaced when tcxHwVideo is integrated.
 bool VideoPlayer::isUsingHwAccelPlatform() const {
+    if (platformHandle_)
+        return static_cast<TCVideoPlayerImpl*>(platformHandle_)->isUsingHwAccel();
     return false;
 }
 
 std::string VideoPlayer::getHwAccelNamePlatform() const {
-    return platformHandle_ ? "software" : "none";
+    if (platformHandle_)
+        return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getHwAccelName();
+    return "none";
 }
 
 bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
