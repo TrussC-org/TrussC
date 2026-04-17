@@ -165,7 +165,11 @@ if [ -f \"$STATE_FILE\" ]; then PREV=$(cat \"$STATE_FILE\"); fi
 CURRENT=OFF
 if grep -rq '^[^/]*TC_HOT_RELOAD' \"$SRC_DIR\"/*.cpp 2>/dev/null; then CURRENT=ON; fi
 if [ \"$PREV\" != \"$CURRENT\" ]; then
-  echo \"[HotReload] State changed ($PREV -> $CURRENT) — triggering reconfig...\"
+  if [ \"$CURRENT\" = \"ON\" ]; then
+    echo \"[HotReload] TC_HOT_RELOAD detected — hot reload will be active after next build.\"
+  else
+    echo \"[HotReload] TC_HOT_RELOAD removed — reverting to static mode on next build.\"
+  fi
   touch \"$CMAKELISTS\"
 fi
 ")

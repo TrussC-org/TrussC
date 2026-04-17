@@ -67,12 +67,10 @@ namespace trussc {
 
 #else // not TC_HOT_RELOAD_BUILD
 
-#define TC_HOT_RELOAD(AppClass)                                             \
-    static_assert(false,                                                     \
-        "TC_HOT_RELOAD(" #AppClass ") found but hot reload is not "          \
-        "configured in this build. Please reconfigure:\n"                    \
-        "  cmake --preset macos   (or: rm -rf build-macos && cmake --preset macos)\n" \
-        "Then rebuild.")
+// Hot reload is not configured yet — TC_HOT_RELOAD is a harmless no-op.
+// The pre-build auto-reconfig check will detect the macro and trigger
+// cmake reconfiguration. Hot reload becomes active on the NEXT build.
+#define TC_HOT_RELOAD(AppClass) /* awaiting reconfig — no-op for now */
 
 #endif // TC_HOT_RELOAD_BUILD
 
