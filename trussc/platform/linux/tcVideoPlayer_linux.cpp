@@ -649,6 +649,7 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             swFrame = av_frame_alloc();
             swFrame->format = AV_PIX_FMT_YUV420P;
             if (av_hwframe_transfer_data(swFrame, frame_, 0) < 0) {
+                logWarning("VideoPlayer") << "HW frame transfer failed, dropping frame";
                 av_frame_free(&swFrame);
                 av_frame_unref(frame_);
                 continue;
