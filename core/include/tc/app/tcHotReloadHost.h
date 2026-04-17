@@ -223,7 +223,27 @@ struct Host {
 
         projectDir = searchPath.string();
         srcDir = projectDir + "/src";
-        buildDir = projectDir + "/build";
+
+        // Detect the build directory — try preset-style names first, fall back to build/
+#ifdef __APPLE__
+        const char* presetDirs[] = {"build-macos", "build"};
+#elif defined(_WIN32)
+        const char* presetDirs[] = {"build-windows", "build"};
+#else
+        const char* presetDirs[] = {"build-linux", "build"};
+#endif
+        buildDir = "";
+        for (const char* d : presetDirs) {
+            string candidate = projectDir + "/" + d;
+            if (fs::exists(candidate + "/CMakeCache.txt")) {
+                buildDir = candidate;
+                break;
+            }
+        }
+        if (buildDir.empty()) {
+            // No configured build dir found — use the first preset name
+            buildDir = projectDir + "/" + presetDirs[0];
+        }
 
         if (!fs::exists(srcDir)) {
             cerr << "[HotReload] src/ directory not found at " << srcDir << "\n";
