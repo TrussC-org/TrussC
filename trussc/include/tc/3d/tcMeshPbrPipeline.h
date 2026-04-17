@@ -8,8 +8,8 @@
 // Cook-Torrance PBR in the fragment shader. Not part of the public API.
 //
 // Include order (enforced by TrussC.h):
-//   1. tcLightingState.h          (LightingMode, currentPbrMaterial)
-//   2. tcPbrMaterial.h            (PbrMaterial class)
+//   1. tcLightingState.h          (currentMaterial)
+//   2. tcMaterial.h               (Material class)
 //   3. tcLight.h                  (Light class)
 //   4. tcMesh.h                   (Mesh class with drawGpuPbr() declaration)
 //   5. tc/gpu/shaders/meshPbr.glsl.h (generated sokol-shdc output)
@@ -24,6 +24,7 @@
 // =============================================================================
 
 #include <cstring>
+#include <map>
 
 #include "tc/gpu/shaders/meshPbr.glsl.h"
 #include "tc/gpu/shaders/shadowDepth.glsl.h"
@@ -33,53 +34,66 @@ namespace internal {
 
 class PbrPipeline {
 public:
-    // Lazily create shader + pipeline on first use. Safe to call every frame.
+    // Lazily create shader on first use. Safe to call every frame.
     void ensureInit() {
         if (initialized_) return;
-
         shader_ = sg_make_shader(pbr_mesh_shader_desc(sg_query_backend()));
+        initialized_ = true;
+    }
+
+    // Get or create a pipeline for the given color pixel format.
+    sg_pipeline getPipeline(sg_pixel_format colorFormat) {
+        int key = static_cast<int>(colorFormat);
+        auto it = pipelineCache_.find(key);
+        if (it != pipelineCache_.end()) return it->second;
 
         sg_pipeline_desc pd = {};
         pd.shader = shader_;
 
-        // Vertex layout: pos(3) + normal(3) + uv(2) + tangent(4), interleaved.
         pd.layout.attrs[ATTR_pbr_mesh_position].format  = SG_VERTEXFORMAT_FLOAT3;
         pd.layout.attrs[ATTR_pbr_mesh_normal].format    = SG_VERTEXFORMAT_FLOAT3;
         pd.layout.attrs[ATTR_pbr_mesh_texcoord0].format = SG_VERTEXFORMAT_FLOAT2;
         pd.layout.attrs[ATTR_pbr_mesh_tangent].format   = SG_VERTEXFORMAT_FLOAT4;
 
-        // Depth test on, no culling. createSphere and friends use CW winding
-        // while most PBR content assumes CCW, so disabling cull matches the
-        // behaviour of the default sokol_gl 3D pipeline (tcGlobal.cpp).
         pd.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
         pd.depth.write_enabled = true;
         pd.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
         pd.cull_mode = SG_CULLMODE_NONE;
 
-        // Opaque draw. baseColor.a is preserved but not blended for v1.
+        pd.colors[0].pixel_format = colorFormat;
         pd.colors[0].blend.enabled = false;
 
         pd.index_type = SG_INDEXTYPE_UINT32;
         pd.label = "tc_mesh_pbr_pipeline";
 
-        pipeline_ = sg_make_pipeline(&pd);
-        initialized_ = true;
+        sg_pipeline pip = sg_make_pipeline(&pd);
+        pipelineCache_[key] = pip;
+        return pip;
     }
 
     // Draw a single Mesh with the current PBR state.
-    // Assumes mesh has uploaded GPU buffers and currentPbrMaterial is set.
+    // Assumes mesh has uploaded GPU buffers and currentMaterial is set.
     void drawMesh(const Mesh& mesh) {
         ensureInit();
 
-        // Ensure we are inside a render pass. Mirrors FullscreenShader::draw().
-        ensureSwapchainPass();
+        // Determine color format for current render target.
+        // _SG_PIXELFORMAT_DEFAULT (0) = use sokol environment default (swapchain).
+        // Note: SG_PIXELFORMAT_NONE (1) means "no color attachment" — don't use it.
+        sg_pixel_format colorFmt = internal::inFboPass
+            ? internal::currentFboColorFormat
+            : _SG_PIXELFORMAT_DEFAULT;
+
+        // Ensure we are inside a render pass
+        if (!internal::inFboPass) {
+            ensureSwapchainPass();
+        }
 
         // Flush any pending sokol_gl commands so they are drawn *before* this
         // PBR mesh. This preserves "drawBox → mesh.draw() → drawBox" intent
         // where the first drawBox should appear beneath the PBR mesh.
         sgl_draw();
 
-        sg_apply_pipeline(pipeline_);
+        sg_apply_pipeline(getPipeline(colorFmt));
 
         // --- Bindings -------------------------------------------------------
         sg_bindings bind = {};
@@ -111,8 +125,8 @@ public:
             bind.samplers[SMP_brdfLutSmp]    = fallbackSampler_;
         }
 
-        // PbrMaterial reference (used for both normal map binding and uniform packing)
-        const PbrMaterial& pbrMat = *internal::currentPbrMaterial;
+        // Material reference (used for both normal map binding and uniform packing)
+        const Material& pbrMat = *internal::currentMaterial;
 
         // Find the first projector-type light and the first IES-profiled light
         int nActiveLights = static_cast<int>(internal::activeLights.size());
@@ -130,7 +144,7 @@ public:
             }
         }
 
-        // Normal map from PbrMaterial (or fallback flat normal)
+        // Normal map from Material (or fallback flat normal)
         bool hasNormalMap = pbrMat.hasNormalMap();
         if (hasNormalMap) {
             bind.views[VIEW_normalMap]      = pbrMat.getNormalMap()->getView();
@@ -579,7 +593,7 @@ private:
 
     // --- PBR pipeline state ---
     sg_shader shader_{};
-    sg_pipeline pipeline_{};
+    std::map<int, sg_pipeline> pipelineCache_;  // keyed by sg_pixel_format
     bool initialized_{false};
 
     // --- Shadow pipeline state ---

@@ -67,8 +67,8 @@ void main() {
     //   theta = asin(y)      ∈ [-pi/2, pi/2]
     float phi = atan(dir.z, dir.x);
     float theta = asin(clamp(dir.y, -1.0, 1.0));
-    vec2 uv = vec2(phi * 0.15915494 + 0.5,  // 1 / (2*pi)
-                   theta * 0.31830989 + 0.5); // 1 / pi
+    vec2 uv = vec2(phi * 0.15915494 + 0.5,          // 1 / (2*pi)
+                   0.5 - theta * 0.31830989); // 1 / pi, flipped: v=0 is north pole
     vec3 color = texture(sampler2D(equirectTex, equirectSmp), uv).rgb;
     frag_color = vec4(color, 1.0);
 }

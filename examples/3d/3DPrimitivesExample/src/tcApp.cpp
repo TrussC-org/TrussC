@@ -29,6 +29,10 @@ void tcApp::setup() {
     materials_[4] = Material::silver();                               // Cylinder: Silver
     materials_[5] = Material::copper();                               // Cone: Copper
 
+    // Procedural IBL for metal reflections
+    env_.loadProcedural();
+    setEnvironment(env_);
+
     rebuildPrimitives();
 }
 
@@ -118,7 +122,6 @@ void tcApp::draw() {
 
     // Lighting settings
     if (bLighting) {
-        enableLighting();
         addLight(light_);
         setCameraPosition(cx, cy, 1000);  // Approximate camera position
     }
@@ -139,25 +142,20 @@ void tcApp::draw() {
         if (bFill) {
             if (bLighting) {
                 setMaterial(materials_[i]);
-                setColor(1.0f, 1.0f, 1.0f);
             } else {
-                float hue = (float)i / 6.0f * TAU;
-                setColor(
-                    0.5f + 0.4f * cos(hue),
-                    0.5f + 0.4f * cos(hue + TAU / 3),
-                    0.5f + 0.4f * cos(hue + TAU * 2 / 3)
-                );
+                const Color& bc = materials_[i].getBaseColor();
+                setColor(bc.r, bc.g, bc.b);
             }
             p.mesh->draw();
         }
 
         // Wireframe
         if (bWireframe) {
-            disableLighting();
+            clearMaterial();
+            clearLights();
             setColor(0.0f, 0.0f, 0.0f);
             p.mesh->drawWireframe();
             if (bLighting) {
-                enableLighting();
                 addLight(light_);
             }
         }
@@ -166,7 +164,7 @@ void tcApp::draw() {
     }
 
     // End lighting
-    disableLighting();
+    clearMaterial();
     clearLights();
 
     // Controls description (top-left)

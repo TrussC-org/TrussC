@@ -280,14 +280,22 @@ public:
     }
 
 private:
-    // Lighting calculation using Phong model
+    // Lighting calculation using Phong model (PBR params → Phong conversion)
     Color calculatePhong(const Vec3& normal, const Vec3& lightDir,
                          const Vec3& viewDir, const Material& material,
                          float attenuation) const {
-        const Color& matAmbient = material.getAmbient();
-        const Color& matDiffuse = material.getDiffuse();
-        const Color& matSpecular = material.getSpecular();
-        float shininess = material.getShininess();
+        // Derive Phong parameters from PBR material
+        const Color& bc = material.getBaseColor();
+        float met = material.getMetallic();
+        float rough = material.getRoughness();
+        Color matAmbient(bc.r * 0.2f, bc.g * 0.2f, bc.b * 0.2f, bc.a);
+        Color matDiffuse = bc;
+        // F0: dielectric=0.04, metal=baseColor
+        Color matSpecular(0.04f + met * (bc.r - 0.04f),
+                          0.04f + met * (bc.g - 0.04f),
+                          0.04f + met * (bc.b - 0.04f), 1.0f);
+        float inv = 1.0f - rough;
+        float shininess = inv * inv * 128.0f;
 
         // === Ambient ===
         float ar = ambient_.r * matAmbient.r;
@@ -377,15 +385,15 @@ private:
 inline Color calculateLighting(const Vec3& worldPos, const Vec3& worldNormal,
                                const Material& material) {
     if (internal::activeLights.empty()) {
-        // If no lights, return material's Diffuse as-is
-        return material.getDiffuse();
+        return material.getBaseColor();
     }
 
-    // Emission
-    const Color& emission = material.getEmission();
-    float r = emission.r;
-    float g = emission.g;
-    float b = emission.b;
+    // Emission (emissive color * strength)
+    const Color& em = material.getEmissive();
+    float es = material.getEmissiveStrength();
+    float r = em.r * es;
+    float g = em.g * es;
+    float b = em.b * es;
 
     // Sum contributions from each light
     for (Light* light : internal::activeLights) {
@@ -403,7 +411,7 @@ inline Color calculateLighting(const Vec3& worldPos, const Vec3& worldNormal,
     g = std::min(1.0f, g);
     b = std::min(1.0f, b);
 
-    return Color(r, g, b, material.getDiffuse().a);
+    return Color(r, g, b, material.getBaseColor().a);
 }
 
 } // namespace trussc

@@ -35,7 +35,8 @@ private:
 
     // Lighting
     Light light_;
-    Material materials_[6];  // Material for each primitive
+    Material materials_[6];
+    Environment env_;
 
     // Rebuild primitives
     void rebuildPrimitives();

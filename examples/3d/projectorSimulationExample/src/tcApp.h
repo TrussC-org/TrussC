@@ -27,8 +27,8 @@ private:
     Mesh floorMesh;
 
     // Materials
-    PbrMaterial wallMat;
-    PbrMaterial floorMat;
+    Material wallMat;
+    Material floorMat;
 
     // Projector
     Light projector;

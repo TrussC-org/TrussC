@@ -439,23 +439,15 @@ public:
     void draw() const {
         if (vertices_.empty()) return;
 
-        // GPU PBR path: requires normals and a PbrMaterial. Evaluated per-pixel
-        // on the GPU via the meshPbr shader. See tcMeshPbrPipeline.h.
-        if (internal::lightingMode == LightingMode::GpuPbr &&
-            hasNormals() && normals_.size() >= vertices_.size() &&
-            internal::currentPbrMaterial) {
+        // GPU PBR path: requires normals and a Material.
+        // Evaluated per-pixel on the GPU via the meshPbr shader.
+        if (hasNormals() && normals_.size() >= vertices_.size() &&
+            internal::currentMaterial) {
             drawGpuPbr();
             return;
         }
 
-        // CPU Phong path: legacy per-vertex lighting baked into vertex colors.
-        if (internal::lightingEnabled && hasNormals() &&
-            normals_.size() >= vertices_.size() && internal::currentMaterial) {
-            drawWithLighting();
-            return;
-        }
-
-        // Normal drawing
+        // Normal drawing (no material set or no normals)
         drawNoLighting();
     }
 
@@ -583,10 +575,9 @@ public:
             // Lighting calculation
             Color litColor;
             if (useVertexColors) {
-                // Use vertex color as diffuse/ambient
+                // Use vertex color as base color
                 Material mat = baseMaterial;
-                mat.setDiffuse(colors_[idx]);
-                mat.setAmbient(colors_[idx]);
+                mat.setBaseColor(colors_[idx]);
                 litColor = calculateLighting(worldPos, worldNormal, mat);
                 litColor.a = colors_[idx].a;
             } else {

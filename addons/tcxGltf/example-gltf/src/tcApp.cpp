@@ -42,8 +42,7 @@ void tcApp::draw() {
         popMatrix();
     }
 
-    setLightingMode(LightingMode::CpuPhong);
-    clearPbrMaterial();
+    clearMaterial();
 
     cam.end();
 

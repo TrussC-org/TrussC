@@ -4,13 +4,13 @@
 // tcxGltf.h - glTF 2.0 model loader for TrussC
 // =============================================================================
 //
-// Loads .gltf/.glb files and creates TrussC Mesh + PbrMaterial + Texture
+// Loads .gltf/.glb files and creates TrussC Mesh + Material + Texture
 // objects. Uses cgltf for parsing.
 //
 // Usage:
 //   GltfModel model;
 //   model.load("helmet.glb");
-//   model.draw();   // draws all nodes with their PBR materials
+//   model.draw();   // draws all nodes with their materials
 //
 // Supports:
 //   - Mesh geometry: positions, normals, UVs, tangents, indices
@@ -61,7 +61,7 @@ public:
     // -------------------------------------------------------------------------
 
     // Draw all nodes using their associated PBR materials.
-    // Requires LightingMode::GpuPbr to be active (via setPbrMaterial).
+    // Requires setMaterial() to activate PBR lighting.
     void draw() const;
 
     // -------------------------------------------------------------------------
@@ -70,7 +70,7 @@ public:
 
     struct Node {
         Mesh mesh;
-        PbrMaterial material;
+        Material material;
         Mat4 transform;
         std::string name;
     };

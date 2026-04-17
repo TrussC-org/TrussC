@@ -1,5 +1,29 @@
 #include "tcApp.h"
 
+/*
+ * pbrSpheresExample - PBR Material Parameter Grid
+ *
+ * This example demonstrates physically-based rendering (PBR) using the
+ * metallic-roughness workflow. Instead of the traditional Phong shading
+ * model, PBR simulates how light interacts with surfaces based on
+ * physical properties:
+ *
+ *   - baseColor:  The surface color (albedo for dielectrics, reflectance
+ *                 tint for metals)
+ *   - metallic:   0 = dielectric (plastic, wood, etc.), 1 = metal (gold,
+ *                 silver, etc.). Metals have no diffuse, only colored
+ *                 specular reflection.
+ *   - roughness:  0 = mirror-smooth, 1 = fully diffuse/matte.
+ *
+ * The appearance is controlled by two classes:
+ *   - Light:     Light source (directional, point, spot, or projector)
+ *   - Material:  Surface properties (baseColor, metallic, roughness, etc.)
+ *
+ * A 5x5 grid of spheres shows the full range of these parameters:
+ *   X axis = roughness (smooth -> rough)
+ *   Y axis = metallic  (dielectric -> metal)
+ */
+
 static constexpr int GRID = 5;
 static constexpr float SPACING = 140.0f;
 static constexpr float SPHERE_R = 50.0f;
@@ -12,70 +36,34 @@ void tcApp::setup() {
 
     sphereMesh = createSphere(SPHERE_R, 32);
 
-    // Procedural IBL: blue sky + sun, baked into irradiance / prefilter /
-    // BRDF LUT at startup. The metals in the grid reflect this environment.
+    // Load a procedural sky/ground environment for image-based lighting (IBL).
+    // Without IBL, metallic surfaces appear black because they have no diffuse
+    // component — their appearance comes entirely from reflecting the environment.
     env.loadProcedural();
     setEnvironment(env);
 
-    // Key light: spot projector from front-above
-    keyLight.setSpot(Vec3(0, -300, 800), Vec3(0.0f, 0.3f, -1.0f),
-                     0.05f, 0.25f);  // inner ~3°, outer ~14° half-angles
-    keyLight.setDiffuse(1.0f, 0.95f, 0.85f);
-    keyLight.setIntensity(8.0f);
-    keyLight.setAttenuation(1.0f, 0.0f, 0.0f);
-    keyLight.setProjectionTexture(&normalMapTex);  // reuse bump texture as gobo
-    keyLight.setProjectorAspect(1.0f);
+    // Key light: warm directional light from the front-above.
+    // This provides the primary illumination and specular highlights.
+    keyLight.setDirectional(Vec3(-0.5f, -1.0f, -0.8f));
+    keyLight.setDiffuse(1.0f, 0.95f, 0.85f);  // slightly warm white
+    keyLight.setIntensity(3.0f);
 
-    // Fill light: directional, cool, from opposite side
+    // Fill light: cool directional light from the opposite side.
+    // Prevents the shadowed side from going completely black.
     fillLight.setDirectional(Vec3(0.7f, -0.3f, 0.4f));
-    fillLight.setDiffuse(0.4f, 0.5f, 0.7f);
-    fillLight.setIntensity(0.6f);
+    fillLight.setDiffuse(0.4f, 0.5f, 0.7f);  // cool blue tint
+    fillLight.setIntensity(0.4f);
 
-    // Procedural normal map: overlapping sine bumps
-    {
-        const int S = 256;
-        Pixels nmap;
-        nmap.allocate(S, S, 4, PixelFormat::U8);
-        auto* px = static_cast<unsigned char*>(nmap.getDataVoid());
-        for (int iy = 0; iy < S; ++iy) {
-            for (int ix = 0; ix < S; ++ix) {
-                float u = float(ix) / S;
-                float v = float(iy) / S;
-                // Height from overlapping sine waves
-                float h = std::sin(u * TAU * 6) * std::cos(v * TAU * 6) * 0.5f
-                        + std::sin((u + v) * TAU * 4) * 0.3f;
-                // Finite-difference partial derivatives
-                float du = std::cos(u * TAU * 6) * TAU * 6 * std::cos(v * TAU * 6) * 0.5f
-                         + std::cos((u + v) * TAU * 4) * TAU * 4 * 0.3f;
-                float dv = std::sin(u * TAU * 6) * (-std::sin(v * TAU * 6)) * TAU * 6 * 0.5f
-                         + std::cos((u + v) * TAU * 4) * TAU * 4 * 0.3f;
-                (void)h;
-                // Tangent-space normal from height derivatives (scale down for subtlety)
-                float scale = 0.15f;
-                float nx = -du * scale;
-                float ny = -dv * scale;
-                float nz = 1.0f;
-                float len = std::sqrt(nx*nx + ny*ny + nz*nz);
-                nx /= len; ny /= len; nz /= len;
-                int idx = (iy * S + ix) * 4;
-                px[idx + 0] = (unsigned char)((nx * 0.5f + 0.5f) * 255);
-                px[idx + 1] = (unsigned char)((ny * 0.5f + 0.5f) * 255);
-                px[idx + 2] = (unsigned char)((nz * 0.5f + 0.5f) * 255);
-                px[idx + 3] = 255;
-            }
-        }
-        normalMapTex.allocate(nmap, TextureUsage::Immutable);
-    }
-
-    // X axis = roughness, Y axis = metallic
-    const Color baseColor(0.90f, 0.80f, 0.70f);
+    // Build the 5x5 material grid.
+    // All spheres share the same baseColor so the visual differences come
+    // purely from the roughness and metallic parameters.
+    const Color baseColor(0.75f, 0.65f, 0.55f);
     for (int y = 0; y < GRID; ++y) {
         for (int x = 0; x < GRID; ++x) {
             materials[y][x]
                 .setBaseColor(baseColor)
                 .setRoughness(0.05f + (float(x) / (GRID - 1)) * 0.95f)
-                .setMetallic(float(y) / (GRID - 1))
-                .setNormalMap(&normalMapTex);
+                .setMetallic(float(y) / (GRID - 1));
         }
     }
 }
@@ -86,17 +74,23 @@ void tcApp::update() {
 void tcApp::draw() {
     clear(0.05f, 0.05f, 0.07f);
 
+    // EasyCam: drag to rotate the view
     cam.begin();
 
+    // Register lights for this frame.
+    // clearLights() removes previous frame's lights; addLight() registers new ones.
     clearLights();
     addLight(keyLight);
     addLight(fillLight);
+    // Camera position is needed for specular reflection calculation.
     setCameraPosition(cam.getPosition());
 
+    // Draw the sphere grid
     const float offset = -0.5f * (GRID - 1) * SPACING;
     for (int y = 0; y < GRID; ++y) {
         for (int x = 0; x < GRID; ++x) {
-            setPbrMaterial(materials[y][x]);
+            // setMaterial() activates PBR rendering for subsequent mesh draws.
+            setMaterial(materials[y][x]);
             pushMatrix();
             translate(offset + x * SPACING, offset + y * SPACING, 0);
             sphereMesh.draw();
@@ -104,11 +98,12 @@ void tcApp::draw() {
         }
     }
 
-    setLightingMode(LightingMode::CpuPhong);
-    clearPbrMaterial();
+    // clearMaterial() returns to default (unlit) rendering.
+    clearMaterial();
 
     cam.end();
 
+    // 2D overlay text
     setColor(1.0f);
     drawBitmapString(
         "pbrSpheres\n"

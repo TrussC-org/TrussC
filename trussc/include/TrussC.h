@@ -317,6 +317,9 @@ namespace internal {
 
     // Current active FBO pointer (used from clearColor)
     inline void* currentFbo = nullptr;
+
+    // Color pixel format of the current FBO pass (for PBR pipeline format matching)
+    inline sg_pixel_format currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
 }
 
 // ---------------------------------------------------------------------------
@@ -2569,7 +2572,6 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 // TrussC lighting (must be included before tcMesh.h)
 #include "tc/3d/tcLightingState.h"
 #include "tc/3d/tcMaterial.h"
-#include "tc/3d/tcPbrMaterial.h"
 #include "tc/3d/tcIesProfile.h"
 #include "tc/3d/tcLight.h"
 

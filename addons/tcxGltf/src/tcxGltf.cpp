@@ -87,11 +87,11 @@ static Texture* loadGltfTexture(const cgltf_texture* tex,
 // Material loading
 // ---------------------------------------------------------------------------
 
-static PbrMaterial loadGltfMaterial(const cgltf_material* mat,
-                                    vector<unique_ptr<Texture>>& texStore,
-                                    const string& baseDir,
-                                    const cgltf_data* data) {
-    PbrMaterial m;
+static Material loadGltfMaterial(const cgltf_material* mat,
+                                 vector<unique_ptr<Texture>>& texStore,
+                                 const string& baseDir,
+                                 const cgltf_data* data) {
+    Material m;
     if (!mat) return m;
 
     if (mat->has_pbr_metallic_roughness) {
@@ -293,10 +293,10 @@ bool GltfModel::load(const string& path) {
 
 void GltfModel::draw() const {
     for (const auto& node : nodes_) {
-        PbrMaterial mat = node.material;
-        setPbrMaterial(mat);
+        Material mat = node.material;
+        setMaterial(mat);
         node.mesh.draw();
-        clearPbrMaterial();
+        clearMaterial();
     }
 }
 

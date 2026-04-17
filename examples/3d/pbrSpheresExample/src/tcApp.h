@@ -4,9 +4,8 @@
 using namespace std;
 using namespace tc;
 
-// pbrSpheresExample - PBR material grid demo
+// pbrSpheresExample - PBR material parameter grid
 // 5x5 sphere grid: X axis = roughness, Y axis = metallic.
-// Uses LightingMode::GpuPbr / Cook-Torrance GGX on the GPU.
 
 class tcApp : public App {
 public:
@@ -20,6 +19,5 @@ private:
     Light keyLight;
     Light fillLight;
     Environment env;
-    Texture normalMapTex;
-    PbrMaterial materials[5][5];
+    Material materials[5][5];
 };

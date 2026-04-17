@@ -123,8 +123,7 @@ void tcApp::draw() {
     // -------------------------------------------------------------------------
     drawScenePbr(foldAngle);
 
-    setLightingMode(LightingMode::CpuPhong);
-    clearPbrMaterial();
+    clearMaterial();
 
     cam.end();
 
@@ -200,14 +199,14 @@ void tcApp::mouseDragged(Vec2 pos, int button) {
 
 void tcApp::drawSceneGeometry(float foldAngle, bool shadow) {
     // Floor (Y=0, horizontal)
-    if (!shadow) setPbrMaterial(floorMat);
+    if (!shadow) setMaterial(floorMat);
     pushMatrix();
     rotateX(-QUARTER_TAU);
     shadow ? shadowDraw(floorMesh) : floorMesh.draw();
     popMatrix();
 
     // Screen center panel
-    if (!shadow) setPbrMaterial(wallMat);
+    if (!shadow) setMaterial(wallMat);
     pushMatrix();
     translate(0, 150, 0);
     shadow ? shadowDraw(screenCenter) : screenCenter.draw();
@@ -237,8 +236,8 @@ void tcApp::drawScenePbr(float foldAngle) {
     drawSceneGeometry(foldAngle, false);
 
     // Projector body indicator
-    PbrMaterial projBodyMat = PbrMaterial::iron();
-    setPbrMaterial(projBodyMat);
+    Material projBodyMat = Material::iron();
+    setMaterial(projBodyMat);
     pushMatrix();
     translate(projectorX, 10, projectorZ);
     drawBox(30, 20, 40);
