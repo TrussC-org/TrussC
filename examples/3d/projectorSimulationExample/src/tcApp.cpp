@@ -11,12 +11,13 @@ void tcApp::setup() {
     // Scene: folded screen (byoubu) — 3 panels angled inward
     // -------------------------------------------------------------------------
     float panelW = 200.0f;
+    float wingW  = 230.0f;  // slightly wider wings so they overlap at the fold
     float panelH = 300.0f;
     float foldAngle = 0.4f;  // radians, each wing folds inward
 
     screenCenter = createPlane(panelW, panelH, 4, 4);
-    screenLeft   = createPlane(panelW, panelH, 4, 4);
-    screenRight  = createPlane(panelW, panelH, 4, 4);
+    screenLeft   = createPlane(wingW, panelH, 4, 4);
+    screenRight  = createPlane(wingW, panelH, 4, 4);
 
     // Floor
     floorMesh = createPlane(600, 600, 1, 1);
@@ -44,6 +45,7 @@ void tcApp::setup() {
     projector.setAttenuation(1.0f, 0.0f, 0.0f);
     projector.setLensShift(0.0f, 1.0f);   // full upward shift: image starts at projector height
     projector.setProjectorAspect(16.0f / 9.0f);
+    projector.enableShadow(1024);
 
     // Dynamic gobo: FBO that we draw into every frame
     goboFbo.allocate(512, 288);  // 16:9
@@ -109,46 +111,17 @@ void tcApp::draw() {
 
     float foldAngle = 0.4f;
 
-    // Floor (Y=0, horizontal)
-    setPbrMaterial(floorMat);
-    pushMatrix();
-    rotateX(-QUARTER_TAU);  // lay flat (XZ plane)
-    floorMesh.draw();
-    popMatrix();
+    // -------------------------------------------------------------------------
+    // 2a. Shadow depth pass (render scene from projector's POV)
+    // -------------------------------------------------------------------------
+    beginShadowPass(projector);
+    drawSceneShadow(foldAngle);
+    endShadowPass();
 
-    // Screen center panel (bottom at Y=0, top at Y=300, facing +Z)
-    setPbrMaterial(wallMat);
-    pushMatrix();
-    translate(0, 150, 0);
-    screenCenter.draw();
-    popMatrix();
-
-    // Screen left wing (folded inward)
-    pushMatrix();
-    translate(-200, 150, 0);
-    rotateY(foldAngle);
-    screenLeft.draw();
-    popMatrix();
-
-    // Screen right wing (folded inward)
-    pushMatrix();
-    translate(200, 150, 0);
-    rotateY(-foldAngle);
-    screenRight.draw();
-    popMatrix();
-
-    // Draw projector body indicator (small box sitting on the floor)
-    PbrMaterial projBodyMat = PbrMaterial::iron();
-    setPbrMaterial(projBodyMat);
-    pushMatrix();
-    translate(projectorX, 10, projectorZ);  // Y=10: half-height above floor
-    drawBox(30, 20, 40);
-    popMatrix();
-
-    // NOTE: Light currently passes through geometry because there is no
-    // shadow map. The back side of panels and the floor behind them get
-    // illuminated unrealistically. Shadow mapping (Phase 10+) would fix
-    // this by depth-testing the projector's view against scene geometry.
+    // -------------------------------------------------------------------------
+    // 2b. Main PBR pass (shadow is applied automatically)
+    // -------------------------------------------------------------------------
+    drawScenePbr(foldAngle);
 
     setLightingMode(LightingMode::CpuPhong);
     clearPbrMaterial();
@@ -223,6 +196,53 @@ void tcApp::mouseDragged(Vec2 pos, int button) {
         projectorX = normX * 300.0f;
         projectorZ = 200.0f + normY * 300.0f;
     }
+}
+
+void tcApp::drawSceneGeometry(float foldAngle, bool shadow) {
+    // Floor (Y=0, horizontal)
+    if (!shadow) setPbrMaterial(floorMat);
+    pushMatrix();
+    rotateX(-QUARTER_TAU);
+    shadow ? shadowDraw(floorMesh) : floorMesh.draw();
+    popMatrix();
+
+    // Screen center panel
+    if (!shadow) setPbrMaterial(wallMat);
+    pushMatrix();
+    translate(0, 150, 0);
+    shadow ? shadowDraw(screenCenter) : screenCenter.draw();
+    popMatrix();
+
+    // Screen left wing (folded inward)
+    pushMatrix();
+    translate(-200, 150, 0);
+    rotateY(foldAngle);
+    shadow ? shadowDraw(screenLeft) : screenLeft.draw();
+    popMatrix();
+
+    // Screen right wing (folded inward)
+    pushMatrix();
+    translate(200, 150, 0);
+    rotateY(-foldAngle);
+    shadow ? shadowDraw(screenRight) : screenRight.draw();
+    popMatrix();
+
+}
+
+void tcApp::drawSceneShadow(float foldAngle) {
+    drawSceneGeometry(foldAngle, true);
+}
+
+void tcApp::drawScenePbr(float foldAngle) {
+    drawSceneGeometry(foldAngle, false);
+
+    // Projector body indicator
+    PbrMaterial projBodyMat = PbrMaterial::iron();
+    setPbrMaterial(projBodyMat);
+    pushMatrix();
+    translate(projectorX, 10, projectorZ);
+    drawBox(30, 20, 40);
+    popMatrix();
 }
 
 Mesh tcApp::createPlane(float w, float h, int segsW, int segsH) {

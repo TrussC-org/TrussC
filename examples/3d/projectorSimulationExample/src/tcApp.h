@@ -50,4 +50,7 @@ private:
     // Helpers
     Mesh createPlane(float w, float h, int segsW = 1, int segsH = 1);
     void drawGoboContent();
+    void drawSceneGeometry(float foldAngle, bool shadowPass);
+    void drawSceneShadow(float foldAngle);
+    void drawScenePbr(float foldAngle);
 };

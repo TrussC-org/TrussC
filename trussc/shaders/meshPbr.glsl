@@ -63,6 +63,8 @@ layout(binding=1) uniform fs_params {
     vec4 projectorParams;                 // x=projectorLightIndex (-1=none), yzw=unused
     vec4 iesParams;                       // x=iesLightIndex (-1=none), y=maxVertAngle (rad), zw=unused
     vec4 texFlags;                        // x=hasBaseColorTex, y=hasMetRoughTex, z=hasEmissiveTex, w=hasOcclusionTex
+    mat4 shadowViewProj;                  // light VP for shadow depth comparison
+    vec4 shadowParams;                    // x=shadowLightIndex (-1=none), y=bias, z=mapSize, w=strength
 };
 
 // IBL resources. Bound only when iblParams.x > 0.5.
@@ -94,6 +96,10 @@ layout(binding=8) uniform texture2D emissiveTex;
 layout(binding=8) uniform sampler emissiveTexSmp;
 layout(binding=9) uniform texture2D occlusionTex;
 layout(binding=9) uniform sampler occlusionTexSmp;
+
+// Shadow map (R32F depth from light's POV)
+layout(binding=10) uniform texture2D shadowMap;
+layout(binding=10) uniform sampler shadowMapSmp;
 
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
@@ -142,6 +148,44 @@ vec3 tonemapACES(vec3 x) {
     const float d = 0.59;
     const float e = 0.14;
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// ---------------------------------------------------------------------------
+// Shadow map sampling with 3x3 PCF
+// ---------------------------------------------------------------------------
+
+float calcShadow(vec3 worldPos) {
+    if (shadowParams.x < -0.5) return 1.0;  // no shadow light
+
+    vec4 clip = shadowViewProj * vec4(worldPos, 1.0);
+    vec3 ndc = clip.xyz / clip.w;
+    vec2 shadowUV = ndc.xy * 0.5 + 0.5;
+
+    // Outside shadow frustum = fully lit
+    if (shadowUV.x < 0.0 || shadowUV.x > 1.0 ||
+        shadowUV.y < 0.0 || shadowUV.y > 1.0 ||
+        clip.w < 0.0) {  // behind the light
+        return 1.0;
+    }
+
+    // Linear depth comparison: clip.w = -z_eye (distance from light).
+    // Shadow pass stores clip.w, so we compute the same here.
+    float currentDepth = clip.w;
+    float bias = shadowParams.y;  // in world units
+    float texelSize = 1.0 / max(shadowParams.z, 1.0);
+
+    // 3x3 PCF kernel
+    float shadow = 0.0;
+    for (int x = -1; x <= 1; x++) {
+        for (int y = -1; y <= 1; y++) {
+            vec2 offset = vec2(float(x), float(y)) * texelSize;
+            float storedDepth = texture(sampler2D(shadowMap, shadowMapSmp), shadowUV + offset).r;
+            shadow += (currentDepth - bias > storedDepth) ? 0.0 : 1.0;
+        }
+    }
+    shadow /= 9.0;
+
+    return mix(1.0, shadow, shadowParams.w);
 }
 
 // ---------------------------------------------------------------------------
@@ -310,12 +354,18 @@ void main() {
     int numLights = int(cameraPos.w + 0.5);
 
     vec3 Lo = vec3(0.0);
+    float shadowFactor = calcShadow(v_worldPos);
+    int shadowIdx = int(shadowParams.x + 0.5);
+
     for (int i = 0; i < MAX_LIGHTS; i++) {
         if (i >= numLights) break;
-        Lo += evalLight(i, lightPosType[i], lightColorIntensity[i],
-                        lightAttenuation[i], lightSpotDir[i],
-                        N, V, v_worldPos,
-                        albedo, metallic, roughness, F0);
+        vec3 contribution = evalLight(i, lightPosType[i], lightColorIntensity[i],
+                                      lightAttenuation[i], lightSpotDir[i],
+                                      N, V, v_worldPos,
+                                      albedo, metallic, roughness, F0);
+        // Apply shadow only to the shadow-casting light
+        if (i == shadowIdx) contribution *= shadowFactor;
+        Lo += contribution;
     }
 
     // Indirect (IBL). Split-sum approximation:

@@ -101,6 +101,28 @@ inline void clearPbrMaterial() {
     internal::currentPbrMaterial = nullptr;
 }
 
+// --- Shadow mapping ---
+// Begin a shadow depth pass from the given light's point of view.
+// The light must already be in the activeLights list (via addLight).
+// Between begin/end, call shadowDraw() for each shadow-casting mesh.
+inline void beginShadowPass(Light& light) {
+    int idx = -1;
+    for (int i = 0; i < (int)internal::activeLights.size(); i++) {
+        if (internal::activeLights[i] == &light) { idx = i; break; }
+    }
+    if (idx < 0) return;
+    internal::getPbrPipeline().beginShadowPass(idx);
+}
+
+inline void endShadowPass() {
+    internal::getPbrPipeline().endShadowPass();
+}
+
+// Draw a mesh into the shadow depth pass (depth-only, no material evaluation).
+inline void shadowDraw(const Mesh& mesh) {
+    internal::getPbrPipeline().shadowDrawMesh(mesh);
+}
+
 // Set camera position (for specular calculation)
 inline void setCameraPosition(const Vec3& pos) {
     internal::cameraPosition = pos;

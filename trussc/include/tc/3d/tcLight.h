@@ -163,6 +163,17 @@ public:
     const IesProfile* getIesProfile() const { return iesProfile_; }
     bool hasIesProfile() const { return iesProfile_ != nullptr; }
 
+    // === Shadow mapping ===
+
+    // Enable shadow casting for this light. Only one light with shadows is
+    // supported at a time (v1). Resolution controls the depth texture size.
+    void enableShadow(int resolution = 1024) { shadowEnabled_ = true; shadowResolution_ = resolution; }
+    void disableShadow() { shadowEnabled_ = false; }
+    bool isShadowEnabled() const { return shadowEnabled_; }
+    int getShadowResolution() const { return shadowResolution_; }
+    void setShadowBias(float bias) { shadowBias_ = bias; }
+    float getShadowBias() const { return shadowBias_; }
+
     // TODO: focus blur requires aperture integration or prefiltered mip LOD heuristic
 
     LightType getType() const { return type_; }
@@ -350,6 +361,11 @@ private:
 
     // IES photometric profile (angular intensity modulation)
     const IesProfile* iesProfile_ = nullptr;
+
+    // Shadow mapping
+    bool shadowEnabled_ = false;
+    int shadowResolution_ = 1024;
+    float shadowBias_ = 1.0f;
 };
 
 // ---------------------------------------------------------------------------
