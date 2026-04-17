@@ -235,26 +235,25 @@ struct Host {
     }
 
     bool reload() {
-        // Destroy old App + unload old library
-        guest.unload();
+        // IMPORTANT: rebuild BEFORE unloading the old Guest. On macOS/Linux,
+        // overwriting a loaded dylib is safe (the old inode stays in memory).
+        // If the build fails, the old App keeps running undisturbed.
 
-        // Rebuild
         if (!rebuildGuest()) {
-            logWarning() << "[HotReload] Rebuild failed — keeping previous version";
-            // Try to reload the old library
-            if (guest.load(guestLibPath)) {
-                guest.create();
-            }
+            logWarning() << "[HotReload] Build failed — keeping current version";
+            watcher.markBuilt();  // don't re-trigger on the same mtime
             return false;
         }
 
-        // Load new library
+        // Build succeeded — now swap: destroy old App, unload old library,
+        // load the new one.
+        guest.unload();
+
         if (!guest.load(guestLibPath)) {
             logError() << "[HotReload] Failed to load rebuilt library";
             return false;
         }
 
-        // Create new App instance
         App* newApp = guest.create();
         if (!newApp) {
             logError() << "[HotReload] Failed to create App instance";
