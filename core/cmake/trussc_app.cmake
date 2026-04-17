@@ -166,11 +166,16 @@ CURRENT=OFF
 if grep -rq '^[^/]*TC_HOT_RELOAD' \"$SRC_DIR\"/*.cpp 2>/dev/null; then CURRENT=ON; fi
 if [ \"$PREV\" != \"$CURRENT\" ]; then
   if [ \"$CURRENT\" = \"ON\" ]; then
-    echo \"[HotReload] TC_HOT_RELOAD detected — hot reload will be active after next build.\"
+    echo \"[HotReload] TC_HOT_RELOAD detected — reconfiguring for hot reload...\"
   else
-    echo \"[HotReload] TC_HOT_RELOAD removed — reverting to static mode on next build.\"
+    echo \"[HotReload] TC_HOT_RELOAD removed — reconfiguring for static mode...\"
   fi
-  touch \"$CMAKELISTS\"
+  # Reconfigure and rebuild in-place. The outer cmake --build will see
+  # everything as up-to-date when this returns.
+  BUILD_DIR=\"${CMAKE_BINARY_DIR}\"
+  cmake \"$BUILD_DIR\" > /dev/null 2>&1
+  cmake --build \"$BUILD_DIR\" --parallel
+  exit \$?
 fi
 ")
     file(CHMOD "${_TC_HR_CHECK_SCRIPT}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
