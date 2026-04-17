@@ -820,6 +820,22 @@ std::vector<uint8_t> VideoPlayer::getAudioDataPlatform() const {
 }
 
 // =============================================================================
+// Hardware acceleration info
+// =============================================================================
+// AVFoundation uses VideoToolbox for hardware decoding on all supported codecs
+// (H.264, HEVC, ProRes, etc.). There is no public AVPlayer API to query whether
+// a given asset is actually being HW-decoded, so we report "videotoolbox" for
+// any loaded video and trust the system to fall back internally if needed.
+
+bool VideoPlayer::isUsingHwAccelPlatform() const {
+    return platformHandle_ != nullptr;
+}
+
+std::string VideoPlayer::getHwAccelNamePlatform() const {
+    return platformHandle_ ? "videotoolbox" : "none";
+}
+
+// =============================================================================
 // Static frame extraction (thread-safe, no GPU)
 // =============================================================================
 

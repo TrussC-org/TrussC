@@ -820,4 +820,13 @@ std::vector<uint8_t> VideoPlayer::getAudioDataPlatform() const {
     return result;
 }
 
+// Hardware acceleration info — iOS uses AVFoundation (VideoToolbox), same as macOS.
+bool VideoPlayer::isUsingHwAccelPlatform() const {
+    return platformHandle_ != nullptr;
+}
+
+std::string VideoPlayer::getHwAccelNamePlatform() const {
+    return platformHandle_ ? "videotoolbox" : "none";
+}
+
 } // namespace trussc

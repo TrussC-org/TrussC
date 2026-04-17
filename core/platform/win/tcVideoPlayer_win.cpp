@@ -1019,6 +1019,23 @@ std::vector<uint8_t> VideoPlayer::getAudioDataPlatform() const {
     return {};
 }
 
+// =============================================================================
+// Hardware acceleration info
+// =============================================================================
+// Media Foundation is configured with a DXGI device manager backed by a D3D11
+// device created with D3D11_CREATE_DEVICE_VIDEO_SUPPORT, so decoding runs on
+// the GPU via D3D11VA whenever the codec is supported. IMFMediaEngine does not
+// expose a direct "is HW active" query, so we report "mediafoundation" for any
+// successfully loaded video.
+
+bool VideoPlayer::isUsingHwAccelPlatform() const {
+    return platformHandle_ != nullptr;
+}
+
+std::string VideoPlayer::getHwAccelNamePlatform() const {
+    return platformHandle_ ? "mediafoundation" : "none";
+}
+
 bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
                                        float timeSec, float* outDuration) {
     // TODO: implement frame extraction on Windows
