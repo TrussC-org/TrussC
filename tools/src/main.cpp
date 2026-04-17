@@ -1930,6 +1930,52 @@ static int cmdBuild(const vector<string>& args) {
 
     string cmake = findCMake();
 
+    // Hot reload state check: if TC_HOT_RELOAD was added or removed since
+    // last configure, run cmake configure before building. This avoids the
+    // "build twice" problem when toggling hot reload.
+    string buildDir = projectPath + "/build-" + string(kNativePreset);
+    string stateFile = buildDir + "/.tc_hot_reload_state";
+    string srcDir = projectPath + "/src";
+    if (fs::exists(srcDir) && fs::exists(buildDir)) {
+        // Scan sources for TC_HOT_RELOAD
+        bool hasHotReload = false;
+        for (const auto& entry : fs::recursive_directory_iterator(srcDir)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".cpp") {
+                ifstream f(entry.path());
+                string line;
+                while (getline(f, line)) {
+                    // Skip comment lines
+                    size_t first = line.find_first_not_of(" \t");
+                    if (first != string::npos && line[first] != '/' &&
+                        line.find("TC_HOT_RELOAD") != string::npos) {
+                        hasHotReload = true;
+                        break;
+                    }
+                }
+                if (hasHotReload) break;
+            }
+        }
+        string currentState = hasHotReload ? "ON" : "OFF";
+
+        // Compare with saved state
+        string prevState;
+        if (fs::exists(stateFile)) {
+            ifstream sf(stateFile);
+            getline(sf, prevState);
+        }
+
+        if (prevState != currentState) {
+            cout << "[HotReload] State changed (" << prevState << " -> " << currentState
+                 << ") — reconfiguring...\n";
+            // Run cmake configure to pick up the new target layout
+            int rc = runProcess({cmake, "--preset", targetPreset});
+            if (rc != 0) {
+                cerr << "Error: cmake configure failed during hot reload reconfig.\n";
+                return 1;
+            }
+        }
+    }
+
     // cmake --build --preset <target> [--config Release] [--clean-first]
     vector<string> cmd = {cmake, "--build", "--preset", targetPreset};
     if (release) { cmd.push_back("--config"); cmd.push_back("Release"); }

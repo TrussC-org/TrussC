@@ -167,13 +167,13 @@ if grep -rq '^[^/]*TC_HOT_RELOAD' \"$SRC_DIR\"/*.cpp 2>/dev/null; then CURRENT=O
 if [ \"$PREV\" != \"$CURRENT\" ]; then
   if [ \"$CURRENT\" = \"ON\" ]; then
     echo \"\"
-    echo \"  [HotReload] TC_HOT_RELOAD detected. Please build again to enable hot reload.\"
-    echo \"\"
+    echo \"  [HotReload] TC_HOT_RELOAD detected.\"
   else
     echo \"\"
-    echo \"  [HotReload] TC_HOT_RELOAD removed. Please build again to revert to static mode.\"
-    echo \"\"
+    echo \"  [HotReload] TC_HOT_RELOAD removed.\"
   fi
+  echo \"  Use 'trusscli build' for automatic reconfig, or build again with cmake.\"
+  echo \"\"
   touch \"$CMAKELISTS\"
   exit 1
 fi
