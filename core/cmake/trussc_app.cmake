@@ -137,6 +137,15 @@ macro(trussc_app)
         endforeach()
     endif()
 
+    # Clean up old guest libraries when hot reload is disabled
+    if(NOT _TC_HOT_RELOAD)
+        file(GLOB _TC_OLD_GUESTS "${CMAKE_BINARY_DIR}/libguest.*")
+        if(_TC_OLD_GUESTS)
+            file(REMOVE ${_TC_OLD_GUESTS})
+            message(STATUS "[${_TC_PROJECT_NAME}] Cleaned up old hot reload guest library")
+        endif()
+    endif()
+
     # Create target
     if(_TC_HOT_RELOAD)
         message(STATUS "[${_TC_PROJECT_NAME}] Hot reload enabled — building Host + Guest")
