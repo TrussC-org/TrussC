@@ -265,9 +265,13 @@ struct Host {
             return false;
         }
 
-        // Load the Guest
+        // Load the Guest and create the initial App instance
         if (!guest.load(guestLibPath)) {
             cerr << "[HotReload] Failed to load Guest library\n";
+            return false;
+        }
+        if (!guest.create()) {
+            cerr << "[HotReload] Failed to create initial App instance\n";
             return false;
         }
 
