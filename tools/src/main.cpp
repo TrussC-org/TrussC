@@ -2035,7 +2035,8 @@ static void printRunHelp() {
          << "      --web                  Build WASM and start a local HTTP server\n"
          << "      --android              Build, adb install, and launch    [not yet implemented]\n"
          << "      --ios                  Build and run in iOS Simulator    [not yet implemented]\n"
-         << "      --headless             Launch via labwc Wayland session (headless Linux)\n"
+         << "      --session <backend>    Launch inside a display session (Linux, no desktop).\n"
+         << "                             Backends: labwc, x11. Example: --session labwc\n"
          << "      --release              Build in Release configuration\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n";
@@ -2044,7 +2045,7 @@ static void printRunHelp() {
 static int cmdRun(const vector<string>& args) {
     string explicitPath;
     string target; // "", "web", "android", "ios"
-    bool headless = false;
+    string session; // display session backend: "labwc", "x11", ""
     bool release = false;
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -2062,7 +2063,14 @@ static int cmdRun(const vector<string>& args) {
         else if (a == "--web")      target = "web";
         else if (a == "--android")  target = "android";
         else if (a == "--ios")      target = "ios";
-        else if (a == "--headless") headless = true;
+        else if (a == "--session") {
+            if (!needValue(i, a, session)) return 1;
+            if (session != "labwc" && session != "x11") {
+                cerr << "Error: unknown session backend '" << session << "'\n"
+                     << "Available: labwc, x11\n";
+                return 1;
+            }
+        }
         else if (a == "--release")  release = true;
         else if (a == "-p" || a == "--path") {
             if (!needValue(i, a, explicitPath)) return 1;
@@ -2135,8 +2143,8 @@ static int cmdRun(const vector<string>& args) {
     string appPath = projectPath + "/bin/" + projectName + ".app";
     if (fs::exists(appPath)) {
         string binPath = appPath + "/Contents/MacOS/" + projectName;
-        if (headless) {
-            cerr << "Warning: --headless is a Linux-only option (ignored on macOS).\n";
+        if (!session.empty()) {
+            cerr << "Warning: --session is a Linux-only option (ignored on macOS).\n";
         }
         cout << "Launching " << projectName << " ...\n";
         return runProcess({binPath});
@@ -2144,9 +2152,13 @@ static int cmdRun(const vector<string>& args) {
 #elif defined(__linux__)
     string binPath = projectPath + "/bin/" + projectName;
     if (fs::exists(binPath)) {
-        if (headless) {
-            cout << "Launching via labwc (headless Wayland session) ...\n";
+        if (session == "labwc") {
+            cout << "Launching via labwc Wayland session ...\n";
             return runProcess({"labwc", "-s", binPath});
+        }
+        if (session == "x11") {
+            cout << "Launching via xinit (X11 session) ...\n";
+            return runProcess({"xinit", binPath});
         }
         cout << "Launching " << projectName << " ...\n";
         return runProcess({binPath});
@@ -2154,6 +2166,9 @@ static int cmdRun(const vector<string>& args) {
 #elif defined(_WIN32)
     string exePath = projectPath + "/bin/" + projectName + ".exe";
     if (fs::exists(exePath)) {
+        if (!session.empty()) {
+            cerr << "Warning: --session is a Linux-only option (ignored on Windows).\n";
+        }
         cout << "Launching " << projectName << " ...\n";
         return runProcess({exePath});
     }
