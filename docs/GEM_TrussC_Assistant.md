@@ -357,6 +357,24 @@ void draw() override {
 
 EasyCam provides orbit controls automatically (drag to rotate, scroll to zoom, right-drag to pan).
 
+## Hot Reload
+
+TrussC supports live code reloading during development. Add one line to your app's `.cpp` file:
+
+```cpp
+// tcApp.cpp
+TC_HOT_RELOAD(tcApp)
+```
+
+While the app is running, saving any source file in `src/` triggers an automatic rebuild and reload (1-3 seconds). The app window stays open — only the user code is swapped.
+
+- **State resets on each reload** (setup() runs again) — same model as Processing/p5.js
+- **Disable**: comment out `TC_HOT_RELOAD` with `//`
+- **Build errors**: the previous version keeps running; fix and save again
+- Works on macOS, Linux, and Windows. Wasm/iOS/Android fall back to static mode
+
+All projects use `TC_RUN_APP(tcApp, settings)` in `main.cpp` by default. This macro automatically selects between normal and hot reload mode — no changes to `main.cpp` needed.
+
 ## Addons
 
 Addons add optional features. To use: run `trusscli add <addon>` (or check the addon in the GUI), then `#include` the addon header.

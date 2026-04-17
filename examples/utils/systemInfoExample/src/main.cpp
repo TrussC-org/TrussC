@@ -15,5 +15,5 @@ int main() {
     settings.setSize(480, 800);
     settings.setTitle("System Info");
 
-    return tc::runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }

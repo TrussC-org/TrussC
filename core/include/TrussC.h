@@ -2714,6 +2714,12 @@ inline void drawCone(float x, float y, float z, float radius, float height, int 
 // TrussC headless mode (no window)
 #include "tc/app/tcHeadlessApp.h"
 
+// Hot reload support (must be after tcBaseApp.h — needs App class definition)
+#include "tc/app/tcHotReload.h"
+#ifdef TC_HOT_RELOAD_BUILD
+#include "tc/app/tcHotReloadHost.h"
+#endif
+
 // =============================================================================
 // Standard library includes (convenience)
 // =============================================================================

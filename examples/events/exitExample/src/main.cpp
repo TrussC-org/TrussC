@@ -8,5 +8,5 @@ int main() {
     tc::WindowSettings settings;
     settings.setSize(480, 200);
 
-    return tc::runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }

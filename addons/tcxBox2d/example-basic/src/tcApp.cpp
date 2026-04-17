@@ -146,5 +146,5 @@ int main() {
     settings.height = 600;
     settings.title = "box2dBasicExample";
 
-    return runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }

@@ -78,5 +78,5 @@ int main() {
     settings.height = 320;
     settings.title = "curlExample";
 
-    return runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }

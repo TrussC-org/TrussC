@@ -214,7 +214,7 @@ public:
 };
 
 int main() {
-    return runApp<tcApp>(WindowSettings()
+    return TC_RUN_APP(tcApp, WindowSettings()
         .setSize(960, 800)
         .setTitle("Tween Example"));
 }

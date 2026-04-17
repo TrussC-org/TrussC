@@ -121,6 +121,8 @@ TrussC supports browser deployment via **WebGPU** (not WebGL). To build for web:
 
 That's it!
 
+> **Tip:** Want to see code changes reflected instantly without restarting? Add `TC_HOT_RELOAD(tcApp)` to your `tcApp.cpp` and save — the app reloads automatically. See [Hot Reload](BUILD_SYSTEM.md#7-hot-reload-development) for details.
+
 ---
 
 ## 5. Run Examples

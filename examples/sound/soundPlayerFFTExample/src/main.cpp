@@ -21,5 +21,5 @@ int main() {
     settings.setSize(960, 600);
     settings.setTitle("soundPlayerFFTExample - TrussC");
 
-    return runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }

@@ -10,5 +10,5 @@ int main() {
     settings.setTitle("lutFilterExample - TrussC");
     settings.setHighDpi(false);
 
-    return runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }
