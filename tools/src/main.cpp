@@ -2315,6 +2315,184 @@ static int cmdRun(const vector<string>& args) {
 }
 
 // =============================================================================
+// Subcommand: completion
+// =============================================================================
+
+static const char* kZshCompletion = R"ZSH(#compdef trusscli
+
+_trusscli() {
+    local -a commands addon_commands
+    commands=(
+        'new:Create a new project'
+        'update:Regenerate build files'
+        'upgrade:Upgrade TrussC (git pull + rebuild)'
+        'addon:Manage addons'
+        'info:Show project / framework info'
+        'doctor:Check development environment'
+        'clean:Delete build directories'
+        'build:Build the project'
+        'run:Build and launch the project'
+        'completion:Generate shell completion script'
+    )
+    addon_commands=(
+        'list:List addons'
+        'add:Add addons to the project'
+        'remove:Remove addons from the project'
+        'clone:Clone addons from the registry'
+        'pull:Update addons via git pull'
+        'search:Search the addon registry'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'command' commands
+        return
+    fi
+
+    case "$words[2]" in
+        addon)
+            if (( CURRENT == 3 )); then
+                _describe 'addon command' addon_commands
+            elif (( CURRENT >= 4 )); then
+                case "$words[3]" in
+                    add|remove)
+                        local -a addons
+                        addons=(${(f)"$(ls -d addons/tcx* 2>/dev/null | xargs -n1 basename 2>/dev/null)"})
+                        if [[ -n "$addons" ]]; then
+                            _describe 'addon' addons
+                        fi
+                        ;;
+                    clone|search)
+                        # No completion for these (require registry or free text)
+                        ;;
+                esac
+            fi
+            ;;
+        new)
+            _files -/
+            ;;
+        update|build|run|clean)
+            local -a opts
+            case "$words[2]" in
+                update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
+                build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--release:Release config' '--clean:Clean first' '-p:Project path' '--path:Project path') ;;
+                run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--release:Release' '-p:Project path' '--path:Project path') ;;
+                clean)  opts=('--all:Delete all build dirs' '-p:Project path' '--path:Project path') ;;
+            esac
+            _describe 'option' opts
+            ;;
+        info)
+            if (( CURRENT == 3 )); then
+                local -a sections
+                sections=('project' 'targets' 'addons' 'all')
+                _describe 'section' sections
+            fi
+            ;;
+        completion)
+            if (( CURRENT == 3 )); then
+                _describe 'shell' '(zsh bash)'
+            fi
+            ;;
+    esac
+}
+
+_trusscli "$@"
+)ZSH";
+
+static const char* kBashCompletion = R"BASH(
+_trusscli() {
+    local cur prev words cword
+    _init_completion 2>/dev/null || {
+        COMPREPLY=()
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+        cword=$COMP_CWORD
+    }
+
+    if [[ $cword -eq 1 ]]; then
+        COMPREPLY=($(compgen -W "new update upgrade addon info doctor clean build run completion" -- "$cur"))
+        return
+    fi
+
+    case "${COMP_WORDS[1]}" in
+        addon)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=($(compgen -W "list add remove clone pull search" -- "$cur"))
+            elif [[ $cword -ge 3 ]]; then
+                case "${COMP_WORDS[2]}" in
+                    add|remove)
+                        local addons=$(ls -d addons/tcx* 2>/dev/null | xargs -n1 basename 2>/dev/null)
+                        COMPREPLY=($(compgen -W "$addons" -- "$cur"))
+                        ;;
+                esac
+            fi
+            ;;
+        new)
+            COMPREPLY=($(compgen -d -- "$cur"))
+            ;;
+        update|build|run|clean)
+            case "$prev" in
+                -p|--path|--tc-root)
+                    COMPREPLY=($(compgen -d -- "$cur"))
+                    return
+                    ;;
+                --ide)
+                    COMPREPLY=($(compgen -W "vscode cursor xcode vs cmake" -- "$cur"))
+                    return
+                    ;;
+                --session)
+                    COMPREPLY=($(compgen -W "labwc x11" -- "$cur"))
+                    return
+                    ;;
+            esac
+            case "${COMP_WORDS[1]}" in
+                update) COMPREPLY=($(compgen -W "-p --path --web --android --ios --ide --tc-root" -- "$cur")) ;;
+                build)  COMPREPLY=($(compgen -W "--web --android --ios --release --clean -p --path" -- "$cur")) ;;
+                run)    COMPREPLY=($(compgen -W "--web --android --ios --session --release -p --path" -- "$cur")) ;;
+                clean)  COMPREPLY=($(compgen -W "--all -p --path" -- "$cur")) ;;
+            esac
+            ;;
+        info)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=($(compgen -W "project targets addons all --json --format" -- "$cur"))
+            fi
+            ;;
+        completion)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=($(compgen -W "zsh bash" -- "$cur"))
+            fi
+            ;;
+    esac
+}
+
+complete -o default -F _trusscli trusscli
+)BASH";
+
+static int cmdCompletion(const vector<string>& args) {
+    if (args.empty() || args[0] == "-h" || args[0] == "--help") {
+        cout << "Usage: trusscli completion <shell>\n"
+             << "\n"
+             << "Generate shell completion script. Add to your shell config:\n"
+             << "\n"
+             << "  # zsh (~/.zshrc)\n"
+             << "  eval \"$(trusscli completion zsh)\"\n"
+             << "\n"
+             << "  # bash (~/.bashrc)\n"
+             << "  eval \"$(trusscli completion bash)\"\n";
+        return args.empty() ? 1 : 0;
+    }
+    if (args[0] == "zsh") {
+        cout << kZshCompletion;
+        return 0;
+    }
+    if (args[0] == "bash") {
+        cout << kBashCompletion;
+        return 0;
+    }
+    cerr << "Error: unknown shell '" << args[0] << "'. Available: zsh, bash\n";
+    return 1;
+}
+
+// =============================================================================
 // Top-level help
 // =============================================================================
 
@@ -2396,8 +2574,9 @@ int main(int argc, char* argv[]) {
     if (first == "info")   return cmdInfo(subArgs);
     if (first == "doctor") return cmdDoctor(subArgs);
     if (first == "clean")  return cmdClean(subArgs);
-    if (first == "build")  return cmdBuild(subArgs);
-    if (first == "run")    return cmdRun(subArgs);
+    if (first == "build")      return cmdBuild(subArgs);
+    if (first == "run")        return cmdRun(subArgs);
+    if (first == "completion") return cmdCompletion(subArgs);
 
     cerr << "Error: unknown command '" << first << "'\n"
          << "Run 'trusscli --help' for usage.\n";
