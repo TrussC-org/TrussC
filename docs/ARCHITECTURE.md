@@ -390,7 +390,7 @@ void tcApp::setup() {
     light.setIntensity(5.0f);
     light.enableShadow(1024);
 
-    mat = PbrMaterial::gold();
+    mat = Material::gold();
     env.loadProcedural();
     setEnvironment(env);
 }
@@ -407,18 +407,17 @@ void tcApp::draw() {
     endShadowPass();
 
     // PBR pass
-    setPbrMaterial(mat);
+    setMaterial(mat);
     mesh.draw();
 
-    setLightingMode(LightingMode::CpuPhong);
-    clearPbrMaterial();
+    clearMaterial();
     cam.end();
 }
 ```
 
 **Light Types:** Directional, Point, Spot (with cone falloff), Projector (texture + lens shift)
 
-**PBR Material Presets:** `PbrMaterial::gold()`, `PbrMaterial::silver()`, `PbrMaterial::copper()`, `PbrMaterial::iron()`, `PbrMaterial::plastic(color)`, `PbrMaterial::rubber(color)`
+**PBR Material Presets:** `Material::gold()`, `Material::silver()`, `Material::copper()`, `Material::iron()`, `Material::plastic(color)`, `Material::rubber(color)`
 
 **Features:** IES photometric profiles, IBL environment maps (HDR/procedural), normal maps, PBR texture maps (glTF 2.0), shadow mapping with PCF
 
