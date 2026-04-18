@@ -1,160 +1,198 @@
 #pragma once
 
 // =============================================================================
-// tcMaterial.h - Material
+// tcMaterial.h - PBR Material
 // =============================================================================
 //
-// Material definition for Phong lighting model
-// Used for lighting calculations on CPU side
+// Metallic-roughness workflow material evaluated on GPU by the meshPbr shader.
+//
+// Parameters follow the glTF 2.0 PBR metallic-roughness specification:
+// - baseColor: albedo for dielectrics, F0 tint for metals
+// - metallic: 0 = dielectric, 1 = pure metal
+// - roughness: 0 = mirror, 1 = fully diffuse
+// - ao: ambient occlusion scalar (multiplier on indirect contribution)
+// - emissive + emissiveStrength: self-illumination
 //
 // =============================================================================
+
+#include <algorithm>
 
 namespace trussc {
 
-// ---------------------------------------------------------------------------
-// Material class
-// ---------------------------------------------------------------------------
+class Texture;  // forward declare (full definition in tcTexture.h, included later)
+
 class Material {
 public:
-    Material() {
-        // Default: white plastic-like
-        ambient_ = Color(0.2f, 0.2f, 0.2f, 1.0f);
-        diffuse_ = Color(0.8f, 0.8f, 0.8f, 1.0f);
-        specular_ = Color(0.5f, 0.5f, 0.5f, 1.0f);
-        emission_ = Color(0.0f, 0.0f, 0.0f, 1.0f);
-        shininess_ = 32.0f;
-    }
+    Material() = default;
 
-    // === Ambient (ambient reflectance) ===
-    void setAmbient(const Color& c) { ambient_ = c; }
-    void setAmbient(float r, float g, float b, float a = 1.0f) {
-        ambient_ = Color(r, g, b, a);
+    // --- baseColor ---
+    Material& setBaseColor(const Color& c) { baseColor_ = c; return *this; }
+    Material& setBaseColor(float r, float g, float b, float a = 1.0f) {
+        baseColor_ = Color(r, g, b, a);
+        return *this;
     }
-    const Color& getAmbient() const { return ambient_; }
+    const Color& getBaseColor() const { return baseColor_; }
 
-    // === Diffuse (diffuse reflectance) ===
-    void setDiffuse(const Color& c) { diffuse_ = c; }
-    void setDiffuse(float r, float g, float b, float a = 1.0f) {
-        diffuse_ = Color(r, g, b, a);
+    // --- metallic ---
+    Material& setMetallic(float m) {
+        metallic_ = std::clamp(m, 0.0f, 1.0f);
+        return *this;
     }
-    const Color& getDiffuse() const { return diffuse_; }
+    float getMetallic() const { return metallic_; }
 
-    // === Specular (specular reflectance) ===
-    void setSpecular(const Color& c) { specular_ = c; }
-    void setSpecular(float r, float g, float b, float a = 1.0f) {
-        specular_ = Color(r, g, b, a);
+    // --- roughness ---
+    // Clamped to a small minimum to avoid singular GGX at perfect mirror.
+    Material& setRoughness(float r) {
+        roughness_ = std::clamp(r, 0.045f, 1.0f);
+        return *this;
     }
-    const Color& getSpecular() const { return specular_; }
+    float getRoughness() const { return roughness_; }
 
-    // === Emission (self-illumination) ===
-    void setEmission(const Color& c) { emission_ = c; }
-    void setEmission(float r, float g, float b, float a = 1.0f) {
-        emission_ = Color(r, g, b, a);
+    // --- ao ---
+    Material& setAo(float ao) {
+        ao_ = std::clamp(ao, 0.0f, 1.0f);
+        return *this;
     }
-    const Color& getEmission() const { return emission_; }
+    float getAo() const { return ao_; }
 
-    // === Shininess ===
-    // Higher values produce sharper specular highlights (around 1-128)
-    void setShininess(float s) { shininess_ = s; }
-    float getShininess() const { return shininess_; }
-
-    // === Batch setting ===
-    // Set Ambient/Diffuse together from color (simple setting)
-    void setColor(const Color& c) {
-        ambient_ = Color(c.r * 0.2f, c.g * 0.2f, c.b * 0.2f, c.a);
-        diffuse_ = c;
+    // --- emissive ---
+    Material& setEmissive(const Color& c) { emissive_ = c; return *this; }
+    Material& setEmissive(float r, float g, float b) {
+        emissive_ = Color(r, g, b, 1.0f);
+        return *this;
     }
+    const Color& getEmissive() const { return emissive_; }
+
+    Material& setEmissiveStrength(float s) {
+        emissiveStrength_ = std::max(0.0f, s);
+        return *this;
+    }
+    float getEmissiveStrength() const { return emissiveStrength_; }
 
     // -------------------------------------------------------------------------
     // Preset materials
     // -------------------------------------------------------------------------
 
-    // Gold
     static Material gold() {
-        Material mat;
-        mat.setAmbient(0.24725f, 0.1995f, 0.0745f);
-        mat.setDiffuse(0.75164f, 0.60648f, 0.22648f);
-        mat.setSpecular(0.628281f, 0.555802f, 0.366065f);
-        mat.setShininess(51.2f);
-        return mat;
+        Material m;
+        m.setBaseColor(1.000f, 0.766f, 0.336f);
+        m.setMetallic(1.0f);
+        m.setRoughness(0.15f);
+        return m;
     }
 
-    // Silver
     static Material silver() {
-        Material mat;
-        mat.setAmbient(0.19225f, 0.19225f, 0.19225f);
-        mat.setDiffuse(0.50754f, 0.50754f, 0.50754f);
-        mat.setSpecular(0.508273f, 0.508273f, 0.508273f);
-        mat.setShininess(51.2f);
-        return mat;
+        Material m;
+        m.setBaseColor(0.972f, 0.960f, 0.915f);
+        m.setMetallic(1.0f);
+        m.setRoughness(0.10f);
+        return m;
     }
 
-    // Bronze
-    static Material bronze() {
-        Material mat;
-        mat.setAmbient(0.2125f, 0.1275f, 0.054f);
-        mat.setDiffuse(0.714f, 0.4284f, 0.18144f);
-        mat.setSpecular(0.393548f, 0.271906f, 0.166721f);
-        mat.setShininess(25.6f);
-        return mat;
-    }
-
-    // Copper
     static Material copper() {
-        Material mat;
-        mat.setAmbient(0.19125f, 0.0735f, 0.0225f);
-        mat.setDiffuse(0.7038f, 0.27048f, 0.0828f);
-        mat.setSpecular(0.256777f, 0.137622f, 0.086014f);
-        mat.setShininess(12.8f);
-        return mat;
+        Material m;
+        m.setBaseColor(0.955f, 0.637f, 0.538f);
+        m.setMetallic(1.0f);
+        m.setRoughness(0.20f);
+        return m;
     }
 
-    // Plastic (specified color)
-    static Material plastic(const Color& baseColor) {
-        Material mat;
-        mat.setAmbient(baseColor.r * 0.1f, baseColor.g * 0.1f, baseColor.b * 0.1f);
-        mat.setDiffuse(baseColor.r * 0.6f, baseColor.g * 0.6f, baseColor.b * 0.6f);
-        mat.setSpecular(0.7f, 0.7f, 0.7f);
-        mat.setShininess(32.0f);
-        return mat;
+    static Material iron() {
+        Material m;
+        m.setBaseColor(0.560f, 0.570f, 0.580f);
+        m.setMetallic(1.0f);
+        m.setRoughness(0.35f);
+        return m;
     }
 
-    // Rubber (specified color, low gloss)
-    static Material rubber(const Color& baseColor) {
-        Material mat;
-        mat.setAmbient(baseColor.r * 0.05f, baseColor.g * 0.05f, baseColor.b * 0.05f);
-        mat.setDiffuse(baseColor.r * 0.5f, baseColor.g * 0.5f, baseColor.b * 0.5f);
-        mat.setSpecular(0.1f, 0.1f, 0.1f);
-        mat.setShininess(10.0f);
-        return mat;
+    static Material bronze() {
+        Material m;
+        m.setBaseColor(0.800f, 0.500f, 0.200f);
+        m.setMetallic(1.0f);
+        m.setRoughness(0.30f);
+        return m;
     }
 
-    // Emerald
     static Material emerald() {
-        Material mat;
-        mat.setAmbient(0.0215f, 0.1745f, 0.0215f);
-        mat.setDiffuse(0.07568f, 0.61424f, 0.07568f);
-        mat.setSpecular(0.633f, 0.727811f, 0.633f);
-        mat.setShininess(76.8f);
-        return mat;
+        Material m;
+        m.setBaseColor(0.150f, 0.650f, 0.150f);
+        m.setMetallic(0.0f);
+        m.setRoughness(0.15f);
+        return m;
     }
 
-    // Ruby
     static Material ruby() {
-        Material mat;
-        mat.setAmbient(0.1745f, 0.01175f, 0.01175f);
-        mat.setDiffuse(0.61424f, 0.04136f, 0.04136f);
-        mat.setSpecular(0.727811f, 0.626959f, 0.626959f);
-        mat.setShininess(76.8f);
-        return mat;
+        Material m;
+        m.setBaseColor(0.650f, 0.100f, 0.100f);
+        m.setMetallic(0.0f);
+        m.setRoughness(0.15f);
+        return m;
     }
+
+    // Plastic-like dielectric with the given color
+    static Material plastic(const Color& baseColor, float roughness = 0.5f) {
+        Material m;
+        m.setBaseColor(baseColor);
+        m.setMetallic(0.0f);
+        m.setRoughness(roughness);
+        return m;
+    }
+
+    // Rubber-like dielectric (high roughness)
+    static Material rubber(const Color& baseColor) {
+        Material m;
+        m.setBaseColor(baseColor);
+        m.setMetallic(0.0f);
+        m.setRoughness(0.85f);
+        return m;
+    }
+
+    // --- Normal map (optional) ---
+    Material& setNormalMap(const Texture* tex) { normalMap_ = tex; return *this; }
+    const Texture* getNormalMap() const { return normalMap_; }
+    bool hasNormalMap() const { return normalMap_ != nullptr; }
+
+    // -------------------------------------------------------------------------
+    // PBR texture maps (optional, glTF 2.0 compatible)
+    // -------------------------------------------------------------------------
+    // Each texture modulates the corresponding scalar parameter. When bound,
+    // the shader samples the texture and multiplies by the scalar factor.
+    // When not bound, only the scalar is used.
+
+    // Base color texture (RGBA). RGB multiplied with baseColor scalar.
+    // Alpha multiplied with baseColor.a for cutout transparency.
+    Material& setBaseColorTexture(const Texture* tex) { baseColorTex_ = tex; return *this; }
+    const Texture* getBaseColorTexture() const { return baseColorTex_; }
+    bool hasBaseColorTexture() const { return baseColorTex_ != nullptr; }
+
+    // Metallic-roughness texture (glTF convention: G=roughness, B=metallic).
+    // Multiplied with scalar metallic/roughness values.
+    Material& setMetallicRoughnessTexture(const Texture* tex) { metallicRoughnessTex_ = tex; return *this; }
+    const Texture* getMetallicRoughnessTexture() const { return metallicRoughnessTex_; }
+    bool hasMetallicRoughnessTexture() const { return metallicRoughnessTex_ != nullptr; }
+
+    // Emissive texture (RGB). Multiplied with emissive scalar color.
+    Material& setEmissiveTexture(const Texture* tex) { emissiveTex_ = tex; return *this; }
+    const Texture* getEmissiveTexture() const { return emissiveTex_; }
+    bool hasEmissiveTexture() const { return emissiveTex_ != nullptr; }
+
+    // Occlusion texture (R channel). Multiplied with ao scalar.
+    Material& setOcclusionTexture(const Texture* tex) { occlusionTex_ = tex; return *this; }
+    const Texture* getOcclusionTexture() const { return occlusionTex_; }
+    bool hasOcclusionTexture() const { return occlusionTex_ != nullptr; }
 
 private:
-    Color ambient_;      // Ambient reflectance
-    Color diffuse_;      // Diffuse reflectance
-    Color specular_;     // Specular reflectance
-    Color emission_;     // Self-illumination
-    float shininess_;    // Shininess (Phong exponent)
+    Color baseColor_        = Color(0.8f, 0.8f, 0.8f, 1.0f);
+    float metallic_         = 0.0f;
+    float roughness_        = 0.5f;
+    float ao_               = 1.0f;
+    Color emissive_         = Color(0.0f, 0.0f, 0.0f, 1.0f);
+    float emissiveStrength_ = 0.0f;
+    const Texture* normalMap_ = nullptr;
+    const Texture* baseColorTex_ = nullptr;
+    const Texture* metallicRoughnessTex_ = nullptr;
+    const Texture* emissiveTex_ = nullptr;
+    const Texture* occlusionTex_ = nullptr;
 };
 
 } // namespace trussc

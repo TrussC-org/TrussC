@@ -235,6 +235,38 @@ public:
         return true;
     }
 
+    // Load an HDR (Radiance .hdr / .pic) image as float pixels. stb_image
+    // decodes radiance RGBE into linear float32 RGB. The alpha channel is
+    // synthesized as 1.0 to keep downstream code RGBA-friendly.
+    bool loadHDR(const fs::path& path) {
+        clear();
+
+        int w, h, channels;
+        float* loaded = stbi_loadf(path.string().c_str(), &w, &h, &channels, 3);
+        if (!loaded) {
+            return false;
+        }
+
+        width_ = w;
+        height_ = h;
+        channels_ = 4;
+        format_ = PixelFormat::F32;
+
+        size_t count = (size_t)width_ * height_;
+        float* rgba = new float[count * 4];
+        for (size_t i = 0; i < count; ++i) {
+            rgba[i * 4 + 0] = loaded[i * 3 + 0];
+            rgba[i * 4 + 1] = loaded[i * 3 + 1];
+            rgba[i * 4 + 2] = loaded[i * 3 + 2];
+            rgba[i * 4 + 3] = 1.0f;
+        }
+        data_ = rgba;
+        stbi_image_free(loaded);
+
+        allocated_ = true;
+        return true;
+    }
+
     // Platform-specific image loader (implemented per platform)
     bool loadPlatform(const fs::path& path);
 

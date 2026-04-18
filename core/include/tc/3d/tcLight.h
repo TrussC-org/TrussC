@@ -18,8 +18,10 @@
 
 namespace trussc {
 
-// Forward declaration
+// Forward declarations
 class Material;
+class Texture;
+class IesProfile;
 
 // ---------------------------------------------------------------------------
 // LightType - Type of light
@@ -27,7 +29,7 @@ class Material;
 enum class LightType {
     Directional,    // Parallel light (sunlight)
     Point,          // Point light
-    // Spot to be supported in future
+    Spot,           // Spot light (point + cone)
 };
 
 // ---------------------------------------------------------------------------
@@ -78,6 +80,102 @@ public:
         setPoint(Vec3(x, y, z));
     }
 
+    // Set as spot light (cone with smooth falloff between inner and outer angle)
+    // Angles are half-angles in radians, matching glTF KHR_lights_punctual.
+    // Default: innerHalfAngle=0 (sharp center), outerHalfAngle=π/4 (90° full cone)
+    void setSpot(const Vec3& position, const Vec3& direction,
+                 float innerHalfAngle = 0.0f, float outerHalfAngle = 0.7854f) {
+        type_ = LightType::Spot;
+        position_ = position;
+        float len = std::sqrt(direction.x * direction.x +
+                              direction.y * direction.y +
+                              direction.z * direction.z);
+        if (len > 0) {
+            direction_ = Vec3(direction.x / len, direction.y / len, direction.z / len);
+        }
+        spotInnerCos_ = std::cos(innerHalfAngle);
+        spotOuterCos_ = std::cos(outerHalfAngle);
+    }
+
+    void setSpot(float px, float py, float pz,
+                 float dx, float dy, float dz,
+                 float innerHalfAngle = 0.0f, float outerHalfAngle = 0.7854f) {
+        setSpot(Vec3(px, py, pz), Vec3(dx, dy, dz), innerHalfAngle, outerHalfAngle);
+    }
+
+    float getSpotInnerCos() const { return spotInnerCos_; }
+    float getSpotOuterCos() const { return spotOuterCos_; }
+
+    // === Projector (texture projection on Spot light) ===
+
+    // Set a texture to project through the spot cone. The texture modulates
+    // the light's color per-pixel in the projected area. Pass nullptr to
+    // disable. The Texture must remain alive while the Light is in use.
+    void setProjectionTexture(const Texture* tex) { projectionTexture_ = tex; }
+    const Texture* getProjectionTexture() const { return projectionTexture_; }
+    bool hasProjectionTexture() const { return projectionTexture_ != nullptr; }
+
+    // Lens shift ([-1, 1], fraction of half-frame). Shifts the optical axis
+    // relative to the projected image center — same concept as a real
+    // projector's lens shift dial. Only meaningful for Spot/Projector lights.
+    void setLensShift(float sx, float sy) { lensShiftX_ = sx; lensShiftY_ = sy; }
+    float getLensShiftX() const { return lensShiftX_; }
+    float getLensShiftY() const { return lensShiftY_; }
+
+    // Aspect ratio of the projected image (width/height). Defaults to 16/9.
+    // Overridden automatically from the texture dimensions if set.
+    void setProjectorAspect(float a) { projectorAspect_ = a; }
+    float getProjectorAspect() const { return projectorAspect_; }
+
+    // Build the projector's view-projection matrix from spot params + lens shift.
+    // Used by PbrPipeline to fill the projectorViewProj uniform.
+    Mat4 computeProjectorViewProj(float nearClip = 0.1f, float farClip = 10000.0f) const {
+        // View matrix: look along spot direction from position
+        Vec3 up(0.0f, 1.0f, 0.0f);
+        if (std::abs(direction_.y) > 0.99f) up = Vec3(0.0f, 0.0f, 1.0f);
+        Vec3 target = Vec3(position_.x + direction_.x,
+                           position_.y + direction_.y,
+                           position_.z + direction_.z);
+        Mat4 view = Mat4::lookAt(position_, target, up);
+
+        // Projection: asymmetric frustum with lens shift
+        float outerAngle = std::acos(std::max(-1.0f, std::min(1.0f, spotOuterCos_)));
+        float halfH = nearClip * std::tan(outerAngle);
+        float aspect = getProjectorAspect();
+        float halfW = halfH * aspect;
+
+        float shiftX = lensShiftX_ * halfW;
+        float shiftY = lensShiftY_ * halfH;
+
+        Mat4 proj = Mat4::frustum(-halfW + shiftX, halfW + shiftX,
+                                  -halfH + shiftY, halfH + shiftY,
+                                  nearClip, farClip);
+        return proj * view;
+    }
+
+    // === IES photometric profile ===
+
+    // Attach an IES angular intensity profile to this light. The IesProfile
+    // must remain alive while the Light is in use (weak pointer).
+    // IES modulates light intensity by angular distribution independently of
+    // the projector texture (which modulates color).
+    void setIesProfile(const IesProfile* ies) { iesProfile_ = ies; }
+    const IesProfile* getIesProfile() const { return iesProfile_; }
+    bool hasIesProfile() const { return iesProfile_ != nullptr; }
+
+    // === Shadow mapping ===
+
+    // Enable shadow casting for this light. Only one light with shadows is
+    // supported at a time (v1). Resolution controls the depth texture size.
+    void enableShadow(int resolution = 1024) { shadowEnabled_ = true; shadowResolution_ = resolution; }
+    void disableShadow() { shadowEnabled_ = false; }
+    bool isShadowEnabled() const { return shadowEnabled_; }
+    int getShadowResolution() const { return shadowResolution_; }
+    void setShadowBias(float bias) { shadowBias_ = bias; }
+    float getShadowBias() const { return shadowBias_; }
+
+    // TODO: focus blur requires aperture integration or prefiltered mip LOD heuristic
+
     LightType getType() const { return type_; }
     const Vec3& getDirection() const { return direction_; }
     const Vec3& getPosition() const { return position_; }
@@ -115,6 +213,10 @@ public:
         linearAttenuation_ = linear;
         quadraticAttenuation_ = quadratic;
     }
+
+    float getConstantAttenuation() const { return constantAttenuation_; }
+    float getLinearAttenuation() const { return linearAttenuation_; }
+    float getQuadraticAttenuation() const { return quadraticAttenuation_; }
 
     // === Enable/Disable ===
 
@@ -178,14 +280,22 @@ public:
     }
 
 private:
-    // Lighting calculation using Phong model
+    // Lighting calculation using Phong model (PBR params → Phong conversion)
     Color calculatePhong(const Vec3& normal, const Vec3& lightDir,
                          const Vec3& viewDir, const Material& material,
                          float attenuation) const {
-        const Color& matAmbient = material.getAmbient();
-        const Color& matDiffuse = material.getDiffuse();
-        const Color& matSpecular = material.getSpecular();
-        float shininess = material.getShininess();
+        // Derive Phong parameters from PBR material
+        const Color& bc = material.getBaseColor();
+        float met = material.getMetallic();
+        float rough = material.getRoughness();
+        Color matAmbient(bc.r * 0.2f, bc.g * 0.2f, bc.b * 0.2f, bc.a);
+        Color matDiffuse = bc;
+        // F0: dielectric=0.04, metal=baseColor
+        Color matSpecular(0.04f + met * (bc.r - 0.04f),
+                          0.04f + met * (bc.g - 0.04f),
+                          0.04f + met * (bc.b - 0.04f), 1.0f);
+        float inv = 1.0f - rough;
+        float shininess = inv * inv * 128.0f;
 
         // === Ambient ===
         float ar = ambient_.r * matAmbient.r;
@@ -242,10 +352,28 @@ private:
     float intensity_;    // Intensity
     bool enabled_;
 
-    // Attenuation parameters (for Point light)
+    // Attenuation parameters (for Point/Spot light)
     float constantAttenuation_;
     float linearAttenuation_;
     float quadraticAttenuation_;
+
+    // Spot light cone (cosines of half-angles)
+    float spotInnerCos_ = 1.0f;
+    float spotOuterCos_ = 0.707f;
+
+    // Projector (texture projection through spot cone)
+    const Texture* projectionTexture_ = nullptr;
+    float lensShiftX_ = 0.0f;
+    float lensShiftY_ = 0.0f;
+    float projectorAspect_ = 16.0f / 9.0f;
+
+    // IES photometric profile (angular intensity modulation)
+    const IesProfile* iesProfile_ = nullptr;
+
+    // Shadow mapping
+    bool shadowEnabled_ = false;
+    int shadowResolution_ = 1024;
+    float shadowBias_ = 1.0f;
 };
 
 // ---------------------------------------------------------------------------
@@ -257,15 +385,15 @@ private:
 inline Color calculateLighting(const Vec3& worldPos, const Vec3& worldNormal,
                                const Material& material) {
     if (internal::activeLights.empty()) {
-        // If no lights, return material's Diffuse as-is
-        return material.getDiffuse();
+        return material.getBaseColor();
     }
 
-    // Emission
-    const Color& emission = material.getEmission();
-    float r = emission.r;
-    float g = emission.g;
-    float b = emission.b;
+    // Emission (emissive color * strength)
+    const Color& em = material.getEmissive();
+    float es = material.getEmissiveStrength();
+    float r = em.r * es;
+    float g = em.g * es;
+    float b = em.b * es;
 
     // Sum contributions from each light
     for (Light* light : internal::activeLights) {
@@ -283,7 +411,7 @@ inline Color calculateLighting(const Vec3& worldPos, const Vec3& worldNormal,
     g = std::min(1.0f, g);
     b = std::min(1.0f, b);
 
-    return Color(r, g, b, material.getDiffuse().a);
+    return Color(r, g, b, material.getBaseColor().a);
 }
 
 } // namespace trussc

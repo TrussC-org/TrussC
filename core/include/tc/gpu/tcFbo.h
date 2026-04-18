@@ -216,6 +216,7 @@ public:
         internal::currentFboClearPipeline = {};
         internal::currentFboBlendPipeline = {};
         internal::currentFbo = nullptr;
+        internal::currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
         internal::fboClearColorFunc = nullptr;
 
         // Resume swapchain pass (if we were in one before)
@@ -441,6 +442,7 @@ private:
         internal::currentFboClearPipeline = shared.pipelineClear;
         internal::currentFboBlendPipeline = shared.pipelineBlend;
         internal::currentFbo = this;
+        internal::currentFboColorFormat = toSokolFormat(format_);
         internal::fboClearColorFunc = _fboClearColorHelper;
     }
 
