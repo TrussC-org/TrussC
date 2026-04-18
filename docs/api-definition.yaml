@@ -4647,38 +4647,27 @@ categories:
         sketch: true
         snippet: "clearLights()"
 
-      - name: setLightingMode
+      - name: setMaterial
         return: "void"
         signatures:
-          - params: "LightingMode mode"
-            params_simple: "mode"
-        description: "Set lighting mode (CpuPhong or GpuPbr)"
-        description_ja: "lighting modeを設定（CpuPhong / GpuPbr）"
-        description_ko: "조명 모드를 설정 (CpuPhong 또는 GpuPbr)"
-        sketch: true
-        snippet: "setLightingMode(${1:LightingMode::GpuPbr})"
-
-      - name: setPbrMaterial
-        return: "void"
-        signatures:
-          - params: "PbrMaterial& material"
+          - params: "Material& material"
             params_simple: "material"
-        description: "Set PBR material for subsequent mesh draws"
-        description_ja: "以降のmesh描画に使うPBR materialを設定"
-        description_ko: "이후 메쉬 렌더링에 사용할 PBR 재질을 설정"
+        description: "Set material for subsequent mesh draws (activates PBR)"
+        description_ja: "以降のmesh描画に使うmaterialを設定（PBR有効化）"
+        description_ko: "이후 메쉬 렌더링에 사용할 재질을 설정 (PBR 활성화)"
         sketch: true
-        snippet: "setPbrMaterial(${1:material})"
+        snippet: "setMaterial(${1:material})"
 
-      - name: clearPbrMaterial
+      - name: clearMaterial
         return: "void"
         signatures:
           - params: ""
             params_simple: ""
-        description: "Clear PBR material (return to default rendering)"
-        description_ja: "PBR materialをクリア（デフォルトに戻す）"
-        description_ko: "PBR 재질을 해제 (기본 렌더링으로 복귀)"
+        description: "Clear material (return to default rendering)"
+        description_ja: "materialをクリア（デフォルトに戻す）"
+        description_ko: "재질을 해제 (기본 렌더링으로 복귀)"
         sketch: true
-        snippet: "clearPbrMaterial()"
+        snippet: "clearMaterial()"
 
       - name: setCameraPosition
         return: "void"
@@ -9006,19 +8995,20 @@ types:
         description_ko: "조명 강도를 얻음"
         snippet: "getIntensity()"
 
-  - name: PbrMaterial
+  - name: Material
     description: "PBR material (metallic-roughness workflow, glTF 2.0 compatible)"
     description_ja: "PBR material（metallic-roughness、glTF 2.0互換）"
     description_ko: "PBR 재질 (메탈릭-러프니스 워크플로우, glTF 2.0 호환)"
+    of_equivalent: "ofMaterial"
     of_type_category: "material-types"
     sketch: true
     constructor:
       signatures:
         - params: ""
-      snippet: "PbrMaterial()"
+      snippet: "Material()"
     methods:
       - name: setBaseColor
-        return: "PbrMaterial&"
+        return: "Material&"
         signatures:
           - params: "const Color& c"
           - params: "float r, float g, float b, float a"
@@ -9027,7 +9017,7 @@ types:
         description_ko: "베이스 컬러 (알베도)를 설정"
         snippet: "setBaseColor(${1:0.8f}, ${2:0.8f}, ${3:0.8f})"
       - name: setMetallic
-        return: "PbrMaterial&"
+        return: "Material&"
         signatures:
           - params: "float m"
         description: "Set metallic factor (0=dielectric, 1=metal)"
@@ -9035,7 +9025,7 @@ types:
         description_ko: "메탈릭 값을 설정 (0=비금속, 1=금속)"
         snippet: "setMetallic(${1:0.0f})"
       - name: setRoughness
-        return: "PbrMaterial&"
+        return: "Material&"
         signatures:
           - params: "float r"
         description: "Set roughness factor (0=mirror, 1=matte)"
@@ -9043,7 +9033,7 @@ types:
         description_ko: "러프니스 값을 설정 (0=거울, 1=무광)"
         snippet: "setRoughness(${1:0.5f})"
       - name: setEmissive
-        return: "PbrMaterial&"
+        return: "Material&"
         signatures:
           - params: "const Color& c"
           - params: "float r, float g, float b"
@@ -9052,7 +9042,7 @@ types:
         description_ko: "이미시브 색상을 설정"
         snippet: "setEmissive(${1:0.0f}, ${2:0.0f}, ${3:0.0f})"
       - name: setEmissiveStrength
-        return: "PbrMaterial&"
+        return: "Material&"
         signatures:
           - params: "float s"
         description: "Set emissive strength multiplier"
@@ -9060,7 +9050,7 @@ types:
         description_ko: "이미시브 강도를 설정"
         snippet: "setEmissiveStrength(${1:1.0f})"
       - name: setAo
-        return: "PbrMaterial&"
+        return: "Material&"
         signatures:
           - params: "float ao"
         description: "Set ambient occlusion factor"
@@ -9068,7 +9058,7 @@ types:
         description_ko: "앰비언트 오클루전 값을 설정"
         snippet: "setAo(${1:1.0f})"
       - name: setNormalMap
-        return: "PbrMaterial&"
+        return: "Material&"
         signatures:
           - params: "const Texture* tex"
         description: "Set normal map texture for bump mapping"
@@ -9076,7 +9066,7 @@ types:
         description_ko: "범프 매핑용 노멀맵을 설정"
         snippet: "setNormalMap(${1:&normalTex})"
       - name: setBaseColorTexture
-        return: "PbrMaterial&"
+        return: "Material&"
         signatures:
           - params: "const Texture* tex"
         description: "Set base color (albedo) texture map"
@@ -9084,7 +9074,7 @@ types:
         description_ko: "베이스 컬러 텍스처를 설정"
         snippet: "setBaseColorTexture(${1:&tex})"
       - name: setMetallicRoughnessTexture
-        return: "PbrMaterial&"
+        return: "Material&"
         signatures:
           - params: "const Texture* tex"
         description: "Set metallic-roughness texture (glTF: G=roughness, B=metallic)"
@@ -9092,7 +9082,7 @@ types:
         description_ko: "메탈릭-러프니스 텍스처를 설정 (glTF: G=러프니스, B=메탈릭)"
         snippet: "setMetallicRoughnessTexture(${1:&tex})"
       - name: setEmissiveTexture
-        return: "PbrMaterial&"
+        return: "Material&"
         signatures:
           - params: "const Texture* tex"
         description: "Set emissive texture map"
@@ -9100,7 +9090,7 @@ types:
         description_ko: "이미시브 텍스처를 설정"
         snippet: "setEmissiveTexture(${1:&tex})"
       - name: setOcclusionTexture
-        return: "PbrMaterial&"
+        return: "Material&"
         signatures:
           - params: "const Texture* tex"
         description: "Set occlusion texture map"
@@ -9109,53 +9099,77 @@ types:
         snippet: "setOcclusionTexture(${1:&tex})"
     static_methods:
       - name: gold
-        return: "PbrMaterial"
+        return: "Material"
         signatures:
           - params: ""
         description: "Gold material preset"
         description_ja: "金のプリセット"
         description_ko: "금 프리셋"
-        snippet: "PbrMaterial::gold()"
+        snippet: "Material::gold()"
       - name: silver
-        return: "PbrMaterial"
+        return: "Material"
         signatures:
           - params: ""
         description: "Silver material preset"
         description_ja: "銀のプリセット"
         description_ko: "은 프리셋"
-        snippet: "PbrMaterial::silver()"
+        snippet: "Material::silver()"
       - name: copper
-        return: "PbrMaterial"
+        return: "Material"
         signatures:
           - params: ""
         description: "Copper material preset"
         description_ja: "銅のプリセット"
         description_ko: "구리 프리셋"
-        snippet: "PbrMaterial::copper()"
+        snippet: "Material::copper()"
       - name: iron
-        return: "PbrMaterial"
+        return: "Material"
         signatures:
           - params: ""
         description: "Iron material preset"
         description_ja: "鉄のプリセット"
         description_ko: "철 프리셋"
-        snippet: "PbrMaterial::iron()"
+        snippet: "Material::iron()"
       - name: plastic
-        return: "PbrMaterial"
+        return: "Material"
         signatures:
           - params: "const Color& baseColor, float roughness"
         description: "Plastic material preset"
         description_ja: "プラスチックのプリセット"
         description_ko: "플라스틱 프리셋"
-        snippet: "PbrMaterial::plastic(${1:Color(0.8f, 0.2f, 0.2f)})"
+        snippet: "Material::plastic(${1:Color(0.8f, 0.2f, 0.2f)})"
       - name: rubber
-        return: "PbrMaterial"
+        return: "Material"
         signatures:
           - params: "const Color& baseColor"
         description: "Rubber material preset"
         description_ja: "ゴムのプリセット"
         description_ko: "고무 프리셋"
-        snippet: "PbrMaterial::rubber(${1:Color(0.1f, 0.1f, 0.1f)})"
+        snippet: "Material::rubber(${1:Color(0.1f, 0.1f, 0.1f)})"
+      - name: bronze
+        return: "Material"
+        signatures:
+          - params: ""
+        description: "Bronze material preset"
+        description_ja: "青銅のプリセット"
+        description_ko: "청동 프리셋"
+        snippet: "Material::bronze()"
+      - name: emerald
+        return: "Material"
+        signatures:
+          - params: ""
+        description: "Emerald material preset"
+        description_ja: "エメラルドのプリセット"
+        description_ko: "에메랄드 프리셋"
+        snippet: "Material::emerald()"
+      - name: ruby
+        return: "Material"
+        signatures:
+          - params: ""
+        description: "Ruby material preset"
+        description_ja: "ルビーのプリセット"
+        description_ko: "루비 프리셋"
+        snippet: "Material::ruby()"
 
   - name: IesProfile
     description: "IESNA LM-63 photometric profile for angular light intensity"
