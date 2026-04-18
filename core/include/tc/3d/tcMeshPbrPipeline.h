@@ -37,7 +37,7 @@ public:
     // Lazily create shader on first use. Safe to call every frame.
     void ensureInit() {
         if (initialized_) return;
-        shader_ = sg_make_shader(pbr_mesh_shader_desc(sg_query_backend()));
+        shader_ = sg_make_shader(tc_pbr_pbr_mesh_shader_desc(sg_query_backend()));
         initialized_ = true;
     }
 
@@ -50,10 +50,10 @@ public:
         sg_pipeline_desc pd = {};
         pd.shader = shader_;
 
-        pd.layout.attrs[ATTR_pbr_mesh_position].format  = SG_VERTEXFORMAT_FLOAT3;
-        pd.layout.attrs[ATTR_pbr_mesh_normal].format    = SG_VERTEXFORMAT_FLOAT3;
-        pd.layout.attrs[ATTR_pbr_mesh_texcoord0].format = SG_VERTEXFORMAT_FLOAT2;
-        pd.layout.attrs[ATTR_pbr_mesh_tangent].format   = SG_VERTEXFORMAT_FLOAT4;
+        pd.layout.attrs[ATTR_tc_pbr_pbr_mesh_position].format  = SG_VERTEXFORMAT_FLOAT3;
+        pd.layout.attrs[ATTR_tc_pbr_pbr_mesh_normal].format    = SG_VERTEXFORMAT_FLOAT3;
+        pd.layout.attrs[ATTR_tc_pbr_pbr_mesh_texcoord0].format = SG_VERTEXFORMAT_FLOAT2;
+        pd.layout.attrs[ATTR_tc_pbr_pbr_mesh_tangent].format   = SG_VERTEXFORMAT_FLOAT4;
 
         pd.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
         pd.depth.write_enabled = true;
@@ -110,19 +110,19 @@ public:
         bool hasIbl = (env != nullptr && env->isLoaded());
         ensureFallbacks();
         if (hasIbl) {
-            bind.views[VIEW_irradianceMap] = env->getIrradianceMap().getView();
-            bind.views[VIEW_prefilterMap]  = env->getPrefilterMap().getView();
-            bind.views[VIEW_brdfLut]       = env->getBrdfLut().getView();
-            bind.samplers[SMP_irradianceSmp] = env->getIrradianceMap().getSampler();
-            bind.samplers[SMP_prefilterSmp]  = env->getPrefilterMap().getSampler();
-            bind.samplers[SMP_brdfLutSmp]    = env->getBrdfLut().getSampler();
+            bind.views[VIEW_tc_pbr_irradianceMap] = env->getIrradianceMap().getView();
+            bind.views[VIEW_tc_pbr_prefilterMap]  = env->getPrefilterMap().getView();
+            bind.views[VIEW_tc_pbr_brdfLut]       = env->getBrdfLut().getView();
+            bind.samplers[SMP_tc_pbr_irradianceSmp] = env->getIrradianceMap().getSampler();
+            bind.samplers[SMP_tc_pbr_prefilterSmp]  = env->getPrefilterMap().getSampler();
+            bind.samplers[SMP_tc_pbr_brdfLutSmp]    = env->getBrdfLut().getSampler();
         } else {
-            bind.views[VIEW_irradianceMap] = fallbackCubeView_;
-            bind.views[VIEW_prefilterMap]  = fallbackCubeView_;
-            bind.views[VIEW_brdfLut]       = fallback2dView_;
-            bind.samplers[SMP_irradianceSmp] = fallbackSampler_;
-            bind.samplers[SMP_prefilterSmp]  = fallbackSampler_;
-            bind.samplers[SMP_brdfLutSmp]    = fallbackSampler_;
+            bind.views[VIEW_tc_pbr_irradianceMap] = fallbackCubeView_;
+            bind.views[VIEW_tc_pbr_prefilterMap]  = fallbackCubeView_;
+            bind.views[VIEW_tc_pbr_brdfLut]       = fallback2dView_;
+            bind.samplers[SMP_tc_pbr_irradianceSmp] = fallbackSampler_;
+            bind.samplers[SMP_tc_pbr_prefilterSmp]  = fallbackSampler_;
+            bind.samplers[SMP_tc_pbr_brdfLutSmp]    = fallbackSampler_;
         }
 
         // Material reference (used for both normal map binding and uniform packing)
@@ -147,31 +147,31 @@ public:
         // Normal map from Material (or fallback flat normal)
         bool hasNormalMap = pbrMat.hasNormalMap();
         if (hasNormalMap) {
-            bind.views[VIEW_normalMap]      = pbrMat.getNormalMap()->getView();
-            bind.samplers[SMP_normalMapSmp] = pbrMat.getNormalMap()->getSampler();
+            bind.views[VIEW_tc_pbr_normalMap]      = pbrMat.getNormalMap()->getView();
+            bind.samplers[SMP_tc_pbr_normalMapSmp] = pbrMat.getNormalMap()->getSampler();
         } else {
-            bind.views[VIEW_normalMap]      = fallbackNormalView_;
-            bind.samplers[SMP_normalMapSmp] = fallbackSampler_;
+            bind.views[VIEW_tc_pbr_normalMap]      = fallbackNormalView_;
+            bind.samplers[SMP_tc_pbr_normalMapSmp] = fallbackSampler_;
         }
 
         // Projector texture (or fallback)
         if (projectorLightIdx >= 0) {
             const Texture* pTex = internal::activeLights[projectorLightIdx]->getProjectionTexture();
-            bind.views[VIEW_projectorTex]       = pTex->getView();
-            bind.samplers[SMP_projectorTexSmp]  = pTex->getSampler();
+            bind.views[VIEW_tc_pbr_projectorTex]       = pTex->getView();
+            bind.samplers[SMP_tc_pbr_projectorTexSmp]  = pTex->getSampler();
         } else {
-            bind.views[VIEW_projectorTex]       = fallbackNormalView_;  // reuse 1x1 fallback
-            bind.samplers[SMP_projectorTexSmp]  = fallbackSampler_;
+            bind.views[VIEW_tc_pbr_projectorTex]       = fallbackNormalView_;  // reuse 1x1 fallback
+            bind.samplers[SMP_tc_pbr_projectorTexSmp]  = fallbackSampler_;
         }
 
         // IES profile texture (or fallback white = no angular modulation)
         if (iesLightIdx >= 0) {
             const IesProfile* ies = internal::activeLights[iesLightIdx]->getIesProfile();
-            bind.views[VIEW_iesProfileTex]       = ies->getView();
-            bind.samplers[SMP_iesProfileTexSmp]  = ies->getSampler();
+            bind.views[VIEW_tc_pbr_iesProfileTex]       = ies->getView();
+            bind.samplers[SMP_tc_pbr_iesProfileTexSmp]  = ies->getSampler();
         } else {
-            bind.views[VIEW_iesProfileTex]       = fallbackIesView_;
-            bind.samplers[SMP_iesProfileTexSmp]  = fallbackSampler_;
+            bind.views[VIEW_tc_pbr_iesProfileTex]       = fallbackIesView_;
+            bind.samplers[SMP_tc_pbr_iesProfileTexSmp]  = fallbackSampler_;
         }
 
         // PBR material texture maps (or fallback white = identity multiplication)
@@ -184,24 +184,24 @@ public:
                 bind.samplers[smpSlot]  = fallbackSampler_;
             }
         };
-        bindMatTex(VIEW_baseColorTex,          SMP_baseColorTexSmp,          pbrMat.getBaseColorTexture());
-        bindMatTex(VIEW_metallicRoughnessTex,  SMP_metallicRoughnessTexSmp,  pbrMat.getMetallicRoughnessTexture());
-        bindMatTex(VIEW_emissiveTex,           SMP_emissiveTexSmp,           pbrMat.getEmissiveTexture());
-        bindMatTex(VIEW_occlusionTex,          SMP_occlusionTexSmp,          pbrMat.getOcclusionTexture());
+        bindMatTex(VIEW_tc_pbr_baseColorTex,          SMP_tc_pbr_baseColorTexSmp,          pbrMat.getBaseColorTexture());
+        bindMatTex(VIEW_tc_pbr_metallicRoughnessTex,  SMP_tc_pbr_metallicRoughnessTexSmp,  pbrMat.getMetallicRoughnessTexture());
+        bindMatTex(VIEW_tc_pbr_emissiveTex,           SMP_tc_pbr_emissiveTexSmp,           pbrMat.getEmissiveTexture());
+        bindMatTex(VIEW_tc_pbr_occlusionTex,          SMP_tc_pbr_occlusionTexSmp,          pbrMat.getOcclusionTexture());
 
         // Shadow map texture (or fallback white = fully lit)
         if (shadowLightIndex_ >= 0 && shadowColorTexView_.id != 0) {
-            bind.views[VIEW_shadowMap]      = shadowColorTexView_;
-            bind.samplers[SMP_shadowMapSmp] = shadowSampler_;
+            bind.views[VIEW_tc_pbr_shadowMap]      = shadowColorTexView_;
+            bind.samplers[SMP_tc_pbr_shadowMapSmp] = shadowSampler_;
         } else {
-            bind.views[VIEW_shadowMap]      = fallbackWhiteView_;
-            bind.samplers[SMP_shadowMapSmp] = fallbackSampler_;
+            bind.views[VIEW_tc_pbr_shadowMap]      = fallbackWhiteView_;
+            bind.samplers[SMP_tc_pbr_shadowMapSmp] = fallbackSampler_;
         }
 
         sg_apply_bindings(&bind);
 
         // --- vs_params ------------------------------------------------------
-        vs_params_t vsp = {};
+        tc_pbr_vs_params_t vsp = {};
         // TrussC Mat4 is row-major; GLSL mat4 is column-major. Transpose the
         // storage before upload so shader can use the conventional `model * v`.
         Mat4 modelT = getDefaultContext().getCurrentMatrix().transposed();
@@ -217,10 +217,10 @@ public:
         std::memcpy(vsp.normalMat, normalMatT.m, sizeof(vsp.normalMat));
 
         sg_range vsRange = { &vsp, sizeof(vsp) };
-        sg_apply_uniforms(UB_vs_params, &vsRange);
+        sg_apply_uniforms(UB_tc_pbr_vs_params, &vsRange);
 
         // --- fs_params ------------------------------------------------------
-        fs_params_t fsp = {};
+        tc_pbr_fs_params_t fsp = {};
         const Color& bc = pbrMat.getBaseColor();
         fsp.baseColor[0] = bc.r;
         fsp.baseColor[1] = bc.g;
@@ -333,7 +333,7 @@ public:
         }
 
         sg_range fsRange = { &fsp, sizeof(fsp) };
-        sg_apply_uniforms(UB_fs_params, &fsRange);
+        sg_apply_uniforms(UB_tc_pbr_fs_params, &fsRange);
 
         // --- Draw -----------------------------------------------------------
         if (mesh.getGpuIndexCount() > 0) {
@@ -485,13 +485,13 @@ public:
         sg_apply_bindings(&bind);
 
         // Shadow VS uniforms: model + lightViewProj
-        shadow_vs_params_t svp = {};
+        tc_shadow_shadow_vs_params_t svp = {};
         Mat4 modelT = getDefaultContext().getCurrentMatrix().transposed();
         Mat4 lightVPT = shadowViewProj_.transposed();
         std::memcpy(svp.model, modelT.m, sizeof(svp.model));
         std::memcpy(svp.lightViewProj, lightVPT.m, sizeof(svp.lightViewProj));
         sg_range r = { &svp, sizeof(svp) };
-        sg_apply_uniforms(UB_shadow_vs_params, &r);
+        sg_apply_uniforms(UB_tc_shadow_shadow_vs_params, &r);
 
         int count = mesh.getGpuIndexCount() > 0 ? mesh.getGpuIndexCount() : mesh.getGpuVertexCount();
         sg_draw(0, count, 1);
@@ -512,13 +512,13 @@ private:
     void ensureShadowInit() {
         if (shadowInitialized_) return;
 
-        shadowShader_ = sg_make_shader(shadow_depth_shader_desc(sg_query_backend()));
+        shadowShader_ = sg_make_shader(tc_shadow_shadow_depth_shader_desc(sg_query_backend()));
 
         sg_pipeline_desc pd = {};
         pd.shader = shadowShader_;
 
         // Match PBR vertex layout stride (48 bytes) — shadow VS only reads position
-        pd.layout.attrs[ATTR_shadow_depth_position].format = SG_VERTEXFORMAT_FLOAT3;
+        pd.layout.attrs[ATTR_tc_shadow_shadow_depth_position].format = SG_VERTEXFORMAT_FLOAT3;
         pd.layout.buffers[0].stride = 48;
 
         pd.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;

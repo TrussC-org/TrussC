@@ -116,14 +116,14 @@ void tcApp::setup() {
     tc::Texture texTest;
     tc::Fbo fboTest;
     tc::Pixels pixTest;
-    pixTest.allocate(4, 4, tc::PixelFormat::RGBA);
+    pixTest.allocate(4, 4, 4, tc::PixelFormat::U8);
 
     tc::logNotice("AllFeaturesExample") << "GPU resources test completed";
 
     // --- Animation / Types ---
     tc::logNotice("AllFeaturesExample") << "Testing animation/types...";
 
-    tc::Tween tweenTest;
+    tc::Tween<float> tweenTest;
     tc::Font fontTest;
     tc::Node nodeTest;
     tc::Rect rectTest(0, 0, 100, 100);

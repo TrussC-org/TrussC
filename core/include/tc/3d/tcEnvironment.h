@@ -198,10 +198,10 @@ private:
         BakeResources& r = bake();
         if (r.initialized) return;
 
-        r.eqShader  = sg_make_shader(equirect_to_cube_shader_desc(sg_query_backend()));
-        r.irrShader = sg_make_shader(irradiance_shader_desc(sg_query_backend()));
-        r.preShader = sg_make_shader(prefilter_shader_desc(sg_query_backend()));
-        r.lutShader = sg_make_shader(brdf_lut_shader_desc(sg_query_backend()));
+        r.eqShader  = sg_make_shader(tc_ibl_equirect_to_cube_shader_desc(sg_query_backend()));
+        r.irrShader = sg_make_shader(tc_ibl_irradiance_shader_desc(sg_query_backend()));
+        r.preShader = sg_make_shader(tc_ibl_prefilter_shader_desc(sg_query_backend()));
+        r.lutShader = sg_make_shader(tc_ibl_brdf_lut_shader_desc(sg_query_backend()));
 
         auto makePipe = [](sg_shader sh, sg_pixel_format colorFmt) {
             sg_pipeline_desc pd = {};
@@ -293,36 +293,36 @@ private:
 
         // 1. equirect → envCube (6 faces)
         for (int face = 0; face < 6; ++face) {
-            equirect_params_t params = {};
+            tc_ibl_equirect_params_t params = {};
             params.faceIdx[0] = static_cast<float>(face);
 
             sg_bindings bind = {};
             bind.vertex_buffers[0] = r.quadVbuf;
-            bind.views[VIEW_equirectTex] = equirect.getView();
-            bind.samplers[SMP_equirectSmp] = equirect.getSampler();
+            bind.views[VIEW_tc_ibl_equirectTex] = equirect.getView();
+            bind.samplers[SMP_tc_ibl_equirectSmp] = equirect.getSampler();
 
             runFullscreenPass(envCube.getCubemapFaceAttachmentView(face, 0),
                               kEnvCubeSize, kEnvCubeSize,
                               r.eqPipe, bind,
-                              UB_equirect_params, &params, sizeof(params));
+                              UB_tc_ibl_equirect_params, &params, sizeof(params));
         }
 
         // 2. envCube → irradianceMap (6 faces, 1 mip)
         irradiance_.allocateCubemap(kIrradianceSize, TextureFormat::RGBA16F,
                                     TextureUsage::RenderTarget, 1);
         for (int face = 0; face < 6; ++face) {
-            irradiance_params_t params = {};
+            tc_ibl_irradiance_params_t params = {};
             params.faceIdx[0] = static_cast<float>(face);
 
             sg_bindings bind = {};
             bind.vertex_buffers[0] = r.quadVbuf;
-            bind.views[VIEW_envTex] = envCube.getView();
-            bind.samplers[SMP_envSmp] = r.linearSampler;
+            bind.views[VIEW_tc_ibl_envTex] = envCube.getView();
+            bind.samplers[SMP_tc_ibl_envSmp] = r.linearSampler;
 
             runFullscreenPass(irradiance_.getCubemapFaceAttachmentView(face, 0),
                               kIrradianceSize, kIrradianceSize,
                               r.irrPipe, bind,
-                              UB_irradiance_params, &params, sizeof(params));
+                              UB_tc_ibl_irradiance_params, &params, sizeof(params));
         }
 
         // 3. envCube → prefilterMap (6 faces × kPrefilterMipLevels mips)
@@ -334,19 +334,19 @@ private:
             float roughness = static_cast<float>(mip) / static_cast<float>(kPrefilterMipLevels - 1);
 
             for (int face = 0; face < 6; ++face) {
-                prefilter_params_t params = {};
+                tc_ibl_prefilter_params_t params = {};
                 params.faceIdx[0] = static_cast<float>(face);
                 params.params[0] = roughness;
 
                 sg_bindings bind = {};
                 bind.vertex_buffers[0] = r.quadVbuf;
-                bind.views[VIEW_envTex] = envCube.getView();
-                bind.samplers[SMP_envSmp] = r.linearSampler;
+                bind.views[VIEW_tc_ibl_envTex] = envCube.getView();
+                bind.samplers[SMP_tc_ibl_envSmp] = r.linearSampler;
 
                 runFullscreenPass(prefilter_.getCubemapFaceAttachmentView(face, mip),
                                   mipSize, mipSize,
                                   r.prePipe, bind,
-                                  UB_prefilter_params, &params, sizeof(params));
+                                  UB_tc_ibl_prefilter_params, &params, sizeof(params));
             }
         }
 
