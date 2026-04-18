@@ -85,7 +85,7 @@ Image processing libraries are particularly prone to vulnerabilities, so **check
 | nlohmann/json | JSON parsing | Medium | |
 | sokol | Rendering backend | Medium | **TrussC has customizations (see below)** |
 | miniaudio | Audio | Medium | |
-| Dear ImGui | GUI | Low | Use stable versions |
+| Dear ImGui | GUI (tcxImGui addon) | Low | Use stable versions |
 
 **Update Checklist:**
 - Check GitHub Release Notes / Security Advisories
@@ -95,7 +95,7 @@ Image processing libraries are particularly prone to vulnerabilities, so **check
 
 `sokol_app.h` has TrussC-specific modifications. When updating sokol, these changes must be reapplied.
 
-See: [`trussc/include/sokol/TRUSSC_MODIFICATIONS.md`](../trussc/include/sokol/TRUSSC_MODIFICATIONS.md)
+See: [`core/include/sokol/TRUSSC_MODIFICATIONS.md`](../core/include/sokol/TRUSSC_MODIFICATIONS.md)
 
 ---
 

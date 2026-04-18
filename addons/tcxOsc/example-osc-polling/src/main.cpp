@@ -7,5 +7,5 @@ int main() {
     settings.width = 700;
     settings.height = 500;
     settings.highDpi = false;
-    return runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }

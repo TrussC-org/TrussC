@@ -45,42 +45,40 @@ def get_platform_info():
             "os": "windows",
             "build_dir": "build-windows",
             "cmake_generator": "Visual Studio 17 2022",
-            "pg_bin_path": ["projectGenerator", "tools", "projectGenerator", "bin", "projectGenerator.exe"]
+            "pg_bin_path": ["tools", "bin", "trusscli.exe"]
         }
     elif system == "Darwin":
         return {
             "os": "macos",
             "build_dir": "build-macos",
-            "cmake_generator": None, 
-            "pg_bin_path": ["projectGenerator", "tools", "projectGenerator", "bin", "projectGenerator.app", "Contents", "MacOS", "projectGenerator"]
+            "cmake_generator": None,
+            "pg_bin_path": ["tools", "bin", "trusscli.app", "Contents", "MacOS", "trusscli"]
         }
     else:
         return {
             "os": "linux",
             "build_dir": "build-linux",
             "cmake_generator": None,
-            "pg_bin_path": ["projectGenerator", "tools", "projectGenerator", "bin", "projectGenerator"]
+            "pg_bin_path": ["tools", "bin", "trusscli"]
         }
 
 def find_project_generator(root_dir, platform_info):
-    exe_name = "projectGenerator.exe" if platform_info["os"] == "windows" else "projectGenerator"
-    
+    exe_name = "trusscli.exe" if platform_info["os"] == "windows" else "trusscli"
+
     # Priority list of paths to check
     search_paths = [
         os.path.join(root_dir, *platform_info["pg_bin_path"]),
-        os.path.join(root_dir, "projectGenerator", "tools", "projectGenerator", "bin", exe_name),
-        os.path.join(root_dir, "projectGenerator", exe_name),
-        os.path.join(root_dir, "projectGenerator", "tools", "projectGenerator", "build", "Release", exe_name),
-        os.path.join(root_dir, "projectGenerator", "tools", "projectGenerator", "bin", "Release", exe_name),
-        os.path.join(root_dir, "projectGenerator", "tools", "projectGenerator", "bin", "projectGenerator.app", "Contents", "MacOS", "projectGenerator"),
+        os.path.join(root_dir, "tools", "bin", exe_name),
+        os.path.join(root_dir, "tools", "bin", "trusscli.app", "Contents", "MacOS", "trusscli"),
+        os.path.join(root_dir, "tools", "bin", "Release", exe_name),
     ]
 
     for pg_path in search_paths:
         if os.path.exists(pg_path):
-            Colors.print(f"Found ProjectGenerator at: {pg_path}", Colors.GREEN)
+            Colors.print(f"Found trusscli at: {pg_path}", Colors.GREEN)
             return pg_path
-            
-    Colors.print(f"ProjectGenerator not found. Searched locations:", Colors.RED)
+
+    Colors.print(f"trusscli not found. Searched locations:", Colors.RED)
     for p in search_paths:
         print(f" - {p}")
     sys.exit(1)
@@ -169,7 +167,7 @@ def main():
     print("")
 
     if args.clean:
-        trussc_dir = os.path.join(ROOT_DIR, "trussc")
+        trussc_dir = os.path.join(ROOT_DIR, "core")
         Colors.print("Cleaning TrussC shared build...", Colors.YELLOW)
         if not args.web_only:
             shared_build = os.path.join(trussc_dir, platform_info["build_dir"])
@@ -193,7 +191,8 @@ def main():
 
         Colors.print(f"[{i+1}/{total}] Updating & Building: {example_name}", Colors.YELLOW)
 
-        pg_cmd = [str(pg_bin), "--update", example_dir, "--tc-root", ROOT_DIR, "--ide", "cmake"]
+        # Regenerate build files for each example before building
+        pg_cmd = [str(pg_bin), "update", "-p", example_dir, "--tc-root", ROOT_DIR, "--ide", "cmake"]
         if args.web:
             pg_cmd.append("--web")
         

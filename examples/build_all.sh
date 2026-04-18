@@ -38,20 +38,20 @@ detect_platform() {
 
 PLATFORM=$(detect_platform)
 
-# Find ProjectGenerator executable
+# Find trusscli executable
 find_pg() {
     local PG_BIN=""
     if [ "$PLATFORM" == "macos" ]; then
-        PG_BIN="$ROOT_DIR/projectGenerator/projectGenerator.app/Contents/MacOS/projectGenerator"
+        PG_BIN="$ROOT_DIR/tools/bin/trusscli.app/Contents/MacOS/trusscli"
     elif [ "$PLATFORM" == "windows" ]; then
-        PG_BIN="$ROOT_DIR/projectGenerator/tools/projectGenerator/bin/projectGenerator.exe"
+        PG_BIN="$ROOT_DIR/tools/bin/trusscli.exe"
     else
-        PG_BIN="$ROOT_DIR/projectGenerator/tools/projectGenerator/bin/projectGenerator"
+        PG_BIN="$ROOT_DIR/tools/bin/trusscli"
     fi
 
     if [ ! -f "$PG_BIN" ]; then
-        echo -e "${RED}ProjectGenerator not found at: $PG_BIN${NC}"
-        echo "Please build projectGenerator first."
+        echo -e "${RED}trusscli not found at: $PG_BIN${NC}"
+        echo "Please build trusscli first (run tools/build_*.{sh,command,bat})."
         exit 1
     fi
     echo "$PG_BIN"
@@ -189,7 +189,7 @@ cmake_minimum_required(VERSION 3.20)
 project(TrussC_All_Examples)
 
 # Set TRUSSC_DIR relative to examples/
-set(TRUSSC_DIR "\${CMAKE_CURRENT_SOURCE_DIR}/../trussc")
+set(TRUSSC_DIR "\${CMAKE_CURRENT_SOURCE_DIR}/../core")
 
 # Add TrussC first (shared build)
 if(EMSCRIPTEN)

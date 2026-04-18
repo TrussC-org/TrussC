@@ -10,5 +10,5 @@ int main() {
     settings.height = 600;
     settings.title = "example-collision";
 
-    return runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }

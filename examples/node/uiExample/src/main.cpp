@@ -12,7 +12,7 @@ int main(int argc, char* argv[]) {
     settings.title = "uiExample";
     settings.setSize(960, 600);
 
-    runApp<tcApp>(settings);
+    TC_RUN_APP(tcApp, settings);
 
     return 0;
 }

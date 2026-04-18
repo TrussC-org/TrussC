@@ -2,10 +2,12 @@
 
 #include "tcBaseApp.h"
 #include "tcxOsc.h"
+#include <tcxImGui.h>
 #include <deque>
 #include <mutex>
 
 using namespace tc;
+using namespace tcx;
 using namespace std;
 
 class tcApp : public App {

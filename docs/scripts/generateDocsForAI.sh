@@ -90,15 +90,15 @@ echo "Generated: $DATE_STR" >> "$API_FILE"
 echo "  [3/3] Collecting API headers..."
 
 # TrussC's own headers in tc/ directory (headers only, no .cpp)
-find "$ROOT_DIR/trussc/include/tc" -name "*.h" -type f | sort | while read f; do
+find "$ROOT_DIR/core/include/tc" -name "*.h" -type f | sort | while read f; do
     add_file "$f" "$API_FILE"
 done
 
 # TrussC's own headers in root include (tc*.h and TrussC.h only)
-find "$ROOT_DIR/trussc/include" -maxdepth 1 -name "tc*.h" -type f | sort | while read f; do
+find "$ROOT_DIR/core/include" -maxdepth 1 -name "tc*.h" -type f | sort | while read f; do
     add_file "$f" "$API_FILE"
 done
-add_file "$ROOT_DIR/trussc/include/TrussC.h" "$API_FILE"
+add_file "$ROOT_DIR/core/include/TrussC.h" "$API_FILE"
 
 # =============================================================================
 # Summary

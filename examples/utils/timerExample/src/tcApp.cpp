@@ -77,7 +77,7 @@ void PulseNode::setup() {
 
 void PulseNode::draw() {
     // Slowly return pulse to normal
-    pulseScale_ = tc::lerp(pulseScale_, 1.0f, 0.1f);
+    pulseScale_ = lerp(pulseScale_, 1.0f, 0.1f);
 
     // Pulsing rectangle
     float size = 60.0f * pulseScale_;

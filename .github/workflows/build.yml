@@ -34,42 +34,40 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            trussc/build-${{ matrix.preset }}
-            projectGenerator/tools/projectGenerator/build
-          key: ${{ runner.os }}-build-v2-${{ hashFiles('trussc/**/*.h', 'trussc/**/*.cpp', 'trussc/**/*.mm') }}
+            core/build-${{ matrix.preset }}
+            tools/build
+          key: ${{ runner.os }}-build-v3-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
           restore-keys: |
-            ${{ runner.os }}-build-v2-
+            ${{ runner.os }}-build-v3-
 
       # Linux: Install dependencies using shared script
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
-          chmod +x projectGenerator/install_dependencies_linux.sh
-          ./projectGenerator/install_dependencies_linux.sh -y
+          chmod +x tools/install_dependencies_linux.sh
+          ./tools/install_dependencies_linux.sh -y
 
       # Windows: Setup MSVC environment (provides cl.exe, ninja, etc. in PATH)
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Build ProjectGenerator
+      - name: Build trusscli
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "macOS" ]; then
-            # Disable interactive commands
-            sed -i '' 's/read -p/#read -p/g' projectGenerator/buildProjectGenerator_mac.command
-            sed -i '' 's/open /#open /g' projectGenerator/buildProjectGenerator_mac.command
-            ./projectGenerator/buildProjectGenerator_mac.command
+            sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
+            sed -i '' 's/open /#open /g' tools/build_mac.command
+            ./tools/build_mac.command
           elif [ "$RUNNER_OS" == "Linux" ]; then
-            chmod +x projectGenerator/buildProjectGenerator_linux.sh
-            sed -i 's/read -p/#read -p/g' projectGenerator/buildProjectGenerator_linux.sh
-            sed -i 's|\"$SCRIPT_DIR/projectGenerator\"|#&|g' projectGenerator/buildProjectGenerator_linux.sh
-            ./projectGenerator/buildProjectGenerator_linux.sh
+            chmod +x tools/build_linux.sh
+            sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
+            sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
+            ./tools/build_linux.sh
           elif [ "$RUNNER_OS" == "Windows" ]; then
-            # Run batch file directly (Git Bash handles it)
-            ./projectGenerator/buildProjectGenerator_win.bat
-            echo "Searching for projectGenerator.exe..."
-            find . -name projectGenerator.exe
+            ./tools/build_win.bat
+            echo "Searching for trusscli.exe..."
+            find . -name trusscli.exe
           fi
 
       - name: Build examples
@@ -97,30 +95,30 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            trussc/build-android
-            projectGenerator/tools/projectGenerator/build
-          key: android-build-v2-${{ hashFiles('trussc/**/*.h', 'trussc/**/*.cpp') }}
-          restore-keys: android-build-v2-
+            core/build-android
+            tools/build
+          key: android-build-v3-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
+          restore-keys: android-build-v3-
 
-      - name: Install Linux dependencies (for ProjectGenerator)
+      - name: Install Linux dependencies (for trusscli)
         run: |
-          chmod +x projectGenerator/install_dependencies_linux.sh
-          ./projectGenerator/install_dependencies_linux.sh -y
+          chmod +x tools/install_dependencies_linux.sh
+          ./tools/install_dependencies_linux.sh -y
 
-      - name: Build ProjectGenerator
+      - name: Build trusscli
         run: |
-          chmod +x projectGenerator/buildProjectGenerator_linux.sh
-          sed -i 's/read -p/#read -p/g' projectGenerator/buildProjectGenerator_linux.sh
-          sed -i 's|\"$SCRIPT_DIR/projectGenerator\"|#&|g' projectGenerator/buildProjectGenerator_linux.sh
-          ./projectGenerator/buildProjectGenerator_linux.sh
+          chmod +x tools/build_linux.sh
+          sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
+          sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
+          ./tools/build_linux.sh
 
       - name: Build AllFeaturesExample (Android)
         run: |
-          PG=projectGenerator/tools/projectGenerator/bin/projectGenerator
+          PG=tools/bin/trusscli
           EXAMPLE=examples/tests/AllFeaturesExample
 
           # Update project with Android preset
-          $PG --update $EXAMPLE --tc-root . --ide cmake --android
+          $PG update -p $EXAMPLE --android
 
           # Configure and build
           cd $EXAMPLE
@@ -143,28 +141,28 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            trussc/build-web
-            projectGenerator/tools/projectGenerator/build
-          key: web-build-${{ hashFiles('trussc/**/*.h', 'trussc/**/*.cpp') }}
+            core/build-web
+            tools/build
+          key: web-build-v3-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
           restore-keys: |
-            web-build-
+            web-build-v3-
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: 'latest'
 
-      - name: Install Linux dependencies (for ProjectGenerator)
+      - name: Install Linux dependencies (for trusscli)
         run: |
-          chmod +x projectGenerator/install_dependencies_linux.sh
-          ./projectGenerator/install_dependencies_linux.sh -y
+          chmod +x tools/install_dependencies_linux.sh
+          ./tools/install_dependencies_linux.sh -y
 
-      - name: Build ProjectGenerator
+      - name: Build trusscli
         run: |
-          chmod +x projectGenerator/buildProjectGenerator_linux.sh
-          sed -i 's/read -p/#read -p/g' projectGenerator/buildProjectGenerator_linux.sh
-          sed -i 's|\"$SCRIPT_DIR/projectGenerator\"|#&|g' projectGenerator/buildProjectGenerator_linux.sh
-          ./projectGenerator/buildProjectGenerator_linux.sh
+          chmod +x tools/build_linux.sh
+          sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
+          sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
+          ./tools/build_linux.sh
 
       - name: Build examples (Web)
         env:

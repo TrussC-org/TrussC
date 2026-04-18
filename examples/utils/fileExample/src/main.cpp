@@ -5,5 +5,5 @@ int main() {
     settings.setSize(800, 600);
     settings.title = "File Example";
 
-    return runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }

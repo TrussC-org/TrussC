@@ -102,6 +102,7 @@ addons/**/*.vcxproj
 addons/*
 !addons/tcxBox2d
 !addons/tcxCurl
+!addons/tcxImGui
 !addons/tcxHap
 !addons/tcxLut
 !addons/tcxOsc
@@ -111,20 +112,24 @@ addons/*
 !addons/tcxGltf
 
 # =============================================================================
-# Project Generator
+# trusscli / Project Generator (built binary + build artifacts in tools/)
 # =============================================================================
 
-# Exclude projectGenerator binaries (only build scripts are tracked)
-projectGenerator/projectGenerator.app
-projectGenerator/projectGenerator.exe
-projectGenerator/projectGenerator
+# Exclude trusscli binaries and build output (only source is tracked).
+# trusscli is the single binary that backs both the CLI and the GUI
+# ("TrussC Project Generator").
+tools/trusscli.app
+tools/trusscli.exe
+tools/trusscli
+tools/bin/
+tools/build/
 
 # =============================================================================
 # Tools (auto-downloaded)
 # =============================================================================
 
 # Tools like sokol-shdc are auto-downloaded on first build
-trussc/tools/
+core/tools/
 docs/scripts/node_modules/
 
 # =============================================================================
@@ -144,6 +149,7 @@ addons/CMakeLists.txt
 # =============================================================================
 # Auto-generated Shader Headers (sokol-shdc output)
 # =============================================================================
-trussc/include/tc/gpu/shaders/lut.glsl.h
-trussc/include/tc/gpu/shaders/meshPbr.glsl.h
-trussc/include/tc/gpu/shaders/iblBake.glsl.h
+core/include/tc/gpu/shaders/lut.glsl.h
+core/include/tc/gpu/shaders/meshPbr.glsl.h
+core/include/tc/gpu/shaders/iblBake.glsl.h
+core/include/tc/gpu/shaders/shadowDepth.glsl.h

@@ -44,16 +44,16 @@ sudo apt install cmake
 Linux requires additional development packages. A helper script is provided to check and install them:
 
 ```bash
-./projectGenerator/install_dependencies_linux.sh
+./tools/install_dependencies_linux.sh
 ```
 
 This will list any missing packages and ask to install them. Use `-y` to skip the prompt:
 
 ```bash
-./projectGenerator/install_dependencies_linux.sh -y
+./tools/install_dependencies_linux.sh -y
 ```
 
-> **Note:** The build script (`buildProjectGenerator_linux.sh`) also runs this check automatically.
+> **Note:** The build script (`tools/build_linux.sh`) also runs this check automatically.
 
 ### Editor Setup
 
@@ -75,15 +75,15 @@ This will list any missing packages and ask to install them. Use `-y` to skip th
 
 ---
 
-## 2. Build the Project Generator
+## 2. Build trusscli
 
 Build the project creation tool (first time only).
 
-**macOS:** Double-click `projectGenerator/buildProjectGenerator_mac.command`
+**macOS:** Double-click `tools/build_mac.command`
 
-**Windows:** Double-click `projectGenerator/buildProjectGenerator_win.bat`
+**Windows:** Double-click `tools/build_win.bat`
 
-**Linux:** Run `./projectGenerator/buildProjectGenerator_linux.sh` (dependencies are installed automatically)
+**Linux:** Run `./tools/build_linux.sh` (dependencies are installed automatically)
 
 ---
 
@@ -121,6 +121,8 @@ TrussC supports browser deployment via **WebGPU** (not WebGL). To build for web:
 
 That's it!
 
+> **Tip:** Want to see code changes reflected instantly without restarting? Add `TC_HOT_RELOAD(tcApp)` to your `tcApp.cpp` and save — the app reloads automatically. See [Hot Reload](BUILD_SYSTEM.md#7-hot-reload-development) for details.
+
 ---
 
 ## 5. Run Examples
@@ -133,7 +135,6 @@ examples/
 ├── 3d/            # 3D drawing
 ├── sound/         # Sound
 ├── network/       # Networking
-├── gui/           # ImGui
 └── ...
 ```
 

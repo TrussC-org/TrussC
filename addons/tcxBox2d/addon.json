@@ -1,0 +1,6 @@
+{
+  "description": "2D physics engine (Box2D)",
+  "author": "tettou771",
+  "license": "MIT",
+  "keywords": ["physics", "2d", "collision", "simulation"]
+}

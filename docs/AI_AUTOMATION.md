@@ -60,54 +60,16 @@ To enable debugger tools, call `mcp::enableDebugger()` in your `setup()`:
 
 ```cpp
 void tcApp::setup() {
-    imguiSetup();              // Initialize ImGui first
     mcp::enableDebugger();
-    mcp::registerDebuggerTools();  // Also registers ImGui tools if ImGui is enabled
+    mcp::registerDebuggerTools();
 }
 ```
 
-### ImGui Tools (auto-registered when ImGui is enabled)
+### ImGui Tools (requires tcxImGui addon)
 
-When `imguiSetup()` is called before `mcp::registerDebuggerTools()`, ImGui-specific tools are automatically registered. These allow AI agents to inspect and interact with ImGui UI without writing custom tools.
+The **tcxImGui** addon provides additional MCP tools for AI agents to inspect and interact with ImGui widgets. To use these, add `tcxImGui` to your project via `trusscli add tcxImGui` or `addons.make`, then call `imguiSetup()` before `mcp::registerDebuggerTools()`.
 
-| Tool | Arguments | Description |
-|------|-----------|-------------|
-| `imgui_get_widgets` | `window` (optional) | List all ImGui widgets with labels, types, and positions |
-| `imgui_click` | `label`, `window` (optional) | Click a widget by its label text |
-| `imgui_input` | `label`, `text`, `window` (optional) | Type text into an input widget |
-| `imgui_checkbox` | `label`, `value` (optional), `window` (optional) | Toggle or set a checkbox |
-
-**How it works:**
-- Uses ImGui's Test Engine hooks (`IMGUI_ENABLE_TEST_ENGINE`) to collect widget info each frame
-- Widget data is double-buffered: current frame writes, MCP reads from last frame
-- Input injection uses `ImGuiIO` public API (`AddMousePosEvent`, `AddMouseButtonEvent`, `AddInputCharactersUTF8`)
-- Zero cost when debugger is not enabled
-
-**Window resolution:**
-- If `window` is omitted, the label must be unique across all windows
-- If the label exists in multiple windows, an error is returned with candidate window names
-
-**Example: Interacting with ImGui UI via curl**
-
-```bash
-# List all widgets
-curl -s -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","id":1,
-       "params":{"name":"imgui_get_widgets","arguments":{}}}'
-
-# Type into an input field
-curl -s -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","id":2,
-       "params":{"name":"imgui_input","arguments":{"label":"##input","text":"Hello"}}}'
-
-# Click a button
-curl -s -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","id":3,
-       "params":{"name":"imgui_click","arguments":{"label":"Add"}}}'
-```
+See [addons/tcxImGui/README.md](../addons/tcxImGui/README.md) for full details on available tools and setup.
 
 ## Creating Custom Tools
 
@@ -237,7 +199,7 @@ Configure your MCP client with the HTTP URL:
 |----------|-------|------------|
 | Inspection (read-only) | `get_screenshot`, `save_screenshot` | Automatic when MCP is enabled |
 | Debugger (input injection) | `mouse_click`, `key_press`, `mouse_move`, `mouse_scroll`, `key_release` | `mcp::enableDebugger()` + `mcp::registerDebuggerTools()` |
-| ImGui (widget interaction) | `imgui_get_widgets`, `imgui_click`, `imgui_input`, `imgui_checkbox` | Auto-registered when ImGui + debugger are both enabled |
+| ImGui (widget interaction) | `imgui_get_widgets`, `imgui_click`, `imgui_input`, `imgui_checkbox` | Requires tcxImGui addon + `mcp::registerDebuggerTools()` |
 | Custom | `mcp::tool(...)` | Your code |
 
 MCP communicates over localhost only. For remote access, use SSH tunneling or similar.
