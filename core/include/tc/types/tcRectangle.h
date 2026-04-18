@@ -48,6 +48,7 @@ struct Rect {
     float getBottom() const { return y + height; }
 
     // Center
+    Vec2 getCenter() const { return Vec2(x + width / 2, y + height / 2); }
     float getCenterX() const { return x + width / 2; }
     float getCenterY() const { return y + height / 2; }
 

@@ -109,6 +109,7 @@ addons/*
 !addons/tcxQuadWarp
 !addons/tcxTls
 !addons/tcxWebSocket
+!addons/tcxGltf
 
 # =============================================================================
 # trusscli / Project Generator (built binary + build artifacts in tools/)
@@ -149,3 +150,6 @@ addons/CMakeLists.txt
 # Auto-generated Shader Headers (sokol-shdc output)
 # =============================================================================
 core/include/tc/gpu/shaders/lut.glsl.h
+core/include/tc/gpu/shaders/meshPbr.glsl.h
+core/include/tc/gpu/shaders/iblBake.glsl.h
+core/include/tc/gpu/shaders/shadowDepth.glsl.h

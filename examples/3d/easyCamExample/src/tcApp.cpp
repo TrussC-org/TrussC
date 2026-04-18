@@ -41,7 +41,6 @@ void tcApp::draw() {
     cam.begin();
 
     // Enable lighting
-    enableLighting();
     addLight(light);
     setCameraPosition(cam.getPosition());
     setColor(1.0f, 1.0f, 1.0f);
@@ -89,7 +88,7 @@ void tcApp::draw() {
     popMatrix();
 
     // End lighting
-    disableLighting();
+    clearMaterial();
     clearLights();
 
     // Draw grid

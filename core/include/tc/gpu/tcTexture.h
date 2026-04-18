@@ -147,6 +147,124 @@ public:
         createResources(nullptr);
     }
 
+    // -------------------------------------------------------------------------
+    // Cubemap allocation
+    // -------------------------------------------------------------------------
+    //
+    // A cubemap texture has 6 square faces (+X, -X, +Y, -Y, +Z, -Z) sampled
+    // by a 3D direction vector in the shader. Used for skyboxes, environment
+    // probes, and image-based lighting.
+    //
+    // `mipLevels` > 1 allocates a mip chain (rounded-down halving); useful
+    // for prefiltered environment maps.
+    //
+    // Allocation without initial data; use uploadCubemapFace() (Dynamic)
+    // or render into each face via getCubemapFaceAttachmentView() (RenderTarget).
+
+    void allocateCubemap(int sideSize, TextureFormat format,
+                         TextureUsage usage = TextureUsage::RenderTarget,
+                         int mipLevels = 1) {
+        clear();
+
+        width_ = sideSize;
+        height_ = sideSize;
+        channels_ = channelCount(format);
+        usage_ = usage;
+        sampleCount_ = 1;
+        pixelFormat_ = toSokolFormat(format);
+        isCubemap_ = true;
+        numMipLevels_ = (mipLevels < 1) ? 1 : mipLevels;
+        mipmapped_ = numMipLevels_ > 1;
+        // Cubemaps default to ClampToEdge wrap (any other choice creates seams).
+        wrapU_ = TextureWrap::ClampToEdge;
+        wrapV_ = TextureWrap::ClampToEdge;
+
+        createCubemapResources();
+    }
+
+    // Upload data for one face at one mip level. Requires Dynamic usage.
+    // `data` is a single-face buffer (sideSize(mip) * sideSize(mip) * bpp bytes).
+    void uploadCubemapFace(int face, int mipLevel, const void* data, size_t dataSize) {
+        if (!allocated_ || !isCubemap_) return;
+        if (face < 0 || face >= 6) return;
+        if (mipLevel < 0 || mipLevel >= numMipLevels_) return;
+        if (usage_ == TextureUsage::Immutable) return;
+
+        // sokol's sg_update_image for cubemap expects all 6 faces of one mip
+        // level concatenated. For single-face updates we stage a buffer and
+        // fill the remaining 5 faces with zeros. This is wasteful for rapid
+        // updates but fine for one-off IBL-style baking.
+        int mipW = mipDim(width_, mipLevel);
+        int mipH = mipDim(height_, mipLevel);
+        size_t bpp = computeBytesPerPixel();
+        size_t faceSize = (size_t)mipW * mipH * bpp;
+        if (dataSize != faceSize) {
+            logWarning() << "[Texture] uploadCubemapFace: data size mismatch, expected "
+                         << faceSize << " got " << dataSize;
+            return;
+        }
+        std::vector<uint8_t> buffer(faceSize * 6, 0);
+        std::memcpy(buffer.data() + face * faceSize, data, faceSize);
+
+        sg_image_data img_data = {};
+        for (int m = 0; m < numMipLevels_; ++m) {
+            // Only fill the target mip; other mips get null (ignored by update).
+            if (m == mipLevel) {
+                img_data.mip_levels[m].ptr = buffer.data();
+                img_data.mip_levels[m].size = buffer.size();
+            }
+        }
+        sg_update_image(image_, &img_data);
+    }
+
+    // Upload all 6 faces for one mip level at once. `data` points to 6 face
+    // buffers laid out consecutively (face 0..5, each sideSize(mip)^2 * bpp).
+    void uploadCubemapMip(int mipLevel, const void* data, size_t dataSize) {
+        if (!allocated_ || !isCubemap_) return;
+        if (mipLevel < 0 || mipLevel >= numMipLevels_) return;
+        if (usage_ == TextureUsage::Immutable) return;
+
+        int mipW = mipDim(width_, mipLevel);
+        int mipH = mipDim(height_, mipLevel);
+        size_t bpp = computeBytesPerPixel();
+        size_t expected = (size_t)mipW * mipH * bpp * 6;
+        if (dataSize != expected) {
+            logWarning() << "[Texture] uploadCubemapMip: data size mismatch, expected "
+                         << expected << " got " << dataSize;
+            return;
+        }
+
+        sg_image_data img_data = {};
+        img_data.mip_levels[mipLevel].ptr = data;
+        img_data.mip_levels[mipLevel].size = dataSize;
+        sg_update_image(image_, &img_data);
+    }
+
+    // Get (and lazily create) an attachment view targeting one (face, mip) of
+    // this cubemap. Used as color_attachment in sg_pass when rendering into
+    // cube faces for IBL generation.
+    sg_view getCubemapFaceAttachmentView(int face, int mipLevel) {
+        if (!allocated_ || !isCubemap_) return sg_view{};
+        if (face < 0 || face >= 6) return sg_view{};
+        if (mipLevel < 0 || mipLevel >= numMipLevels_) return sg_view{};
+
+        int idx = face * numMipLevels_ + mipLevel;
+        if ((int)cubeFaceAttachmentViews_.size() <= idx) {
+            cubeFaceAttachmentViews_.resize(idx + 1, sg_view{});
+        }
+        if (cubeFaceAttachmentViews_[idx].id == 0) {
+            sg_view_desc att_desc = {};
+            att_desc.color_attachment.image = image_;
+            att_desc.color_attachment.mip_level = mipLevel;
+            att_desc.color_attachment.slice = face;
+            cubeFaceAttachmentViews_[idx] = sg_make_view(&att_desc);
+        }
+        return cubeFaceAttachmentViews_[idx];
+    }
+
+    bool isCubemap() const { return isCubemap_; }
+    int getNumMipLevels() const { return numMipLevels_; }
+
     // Allocate compressed texture (BC1/BC3/BC7 etc.)
     // Data must be provided for immutable compressed textures
     void allocateCompressed(int width, int height, sg_pixel_format format,
@@ -211,6 +329,10 @@ public:
             if (attachmentView_.id != 0) {
                 sg_destroy_view(attachmentView_);
             }
+            for (sg_view v : cubeFaceAttachmentViews_) {
+                if (v.id != 0) sg_destroy_view(v);
+            }
+            cubeFaceAttachmentViews_.clear();
             sg_destroy_image(image_);
             allocated_ = false;
         }
@@ -218,6 +340,8 @@ public:
         height_ = 0;
         channels_ = 0;
         mipmapped_ = false;
+        isCubemap_ = false;
+        numMipLevels_ = 1;
         pixelFormat_ = SG_PIXELFORMAT_NONE;
         image_ = {};
         view_ = {};
@@ -397,6 +521,16 @@ private:
     TextureWrap wrapV_ = TextureWrap::ClampToEdge;
     bool premultipliedAlpha_ = false;
 
+    // Cubemap state
+    bool isCubemap_ = false;
+    int numMipLevels_ = 1;
+    std::vector<sg_view> cubeFaceAttachmentViews_;
+
+    static int mipDim(int base, int mip) {
+        int d = base >> mip;
+        return d < 1 ? 1 : d;
+    }
+
     // Bytes per pixel for current pixelFormat_ / channels_
     size_t computeBytesPerPixel() const {
         switch (pixelFormat_) {
@@ -518,6 +652,48 @@ private:
         // Create sampler
         createSampler();
 
+        allocated_ = true;
+    }
+
+    void createCubemapResources() {
+        sg_image_desc img_desc = {};
+        img_desc.type = SG_IMAGETYPE_CUBE;
+        img_desc.width = width_;
+        img_desc.height = height_;
+        img_desc.num_mipmaps = numMipLevels_;
+        img_desc.pixel_format = pixelFormat_;
+
+        switch (usage_) {
+            case TextureUsage::Immutable:
+                // Immutable cubemap not supported yet (would need initial data
+                // for all 6 faces and all mips). Use Dynamic + uploadCubemapFace
+                // or RenderTarget + face attachment views instead.
+                logWarning() << "[Texture] allocateCubemap Immutable not supported; using Dynamic";
+                img_desc.usage.dynamic_update = true;
+                break;
+            case TextureUsage::Dynamic:
+                img_desc.usage.dynamic_update = true;
+                break;
+            case TextureUsage::Stream:
+                img_desc.usage.stream_update = true;
+                break;
+            case TextureUsage::RenderTarget:
+                img_desc.usage.color_attachment = true;
+                img_desc.sample_count = 1;  // MSAA cube attachments add complexity we skip here
+                break;
+        }
+
+        image_ = sg_make_image(&img_desc);
+
+        // Sampling view covers the whole cube (all faces, all mips).
+        sg_view_desc view_desc = {};
+        view_desc.texture.image = image_;
+        view_ = sg_make_view(&view_desc);
+
+        // Per-face attachment views are created lazily in
+        // getCubemapFaceAttachmentView() only for RenderTarget cubemaps.
+
+        createSampler();
         allocated_ = true;
     }
 

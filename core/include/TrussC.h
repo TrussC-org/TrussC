@@ -309,6 +309,9 @@ namespace internal {
 
     // Current active FBO pointer (used from clearColor)
     inline void* currentFbo = nullptr;
+
+    // Color pixel format of the current FBO pass (for PBR pipeline format matching)
+    inline sg_pixel_format currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
 }
 
 // ---------------------------------------------------------------------------
@@ -2555,6 +2558,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 // TrussC lighting (must be included before tcMesh.h)
 #include "tc/3d/tcLightingState.h"
 #include "tc/3d/tcMaterial.h"
+#include "tc/3d/tcIesProfile.h"
 #include "tc/3d/tcLight.h"
 
 // TrussC pixel buffer
@@ -2580,6 +2584,13 @@ inline void bindCursorImage(Cursor cursor, const Image& image,
 
 // TrussC mesh
 #include "tc/graphics/tcMesh.h"
+
+// TrussC image-based lighting environment (must come before the pipeline
+// so PbrPipeline::drawMesh() can call Environment methods by value)
+#include "tc/3d/tcEnvironment.h"
+
+// TrussC PBR mesh pipeline (defines Mesh::drawGpuPbr() out-of-class)
+#include "tc/3d/tcMeshPbrPipeline.h"
 
 // TrussC stroke mesh (thick line drawing)
 #include "tc/graphics/tcStrokeMesh.h"

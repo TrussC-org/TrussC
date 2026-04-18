@@ -58,7 +58,7 @@ void tcApp::draw() {
 int main() {
     tc::WindowSettings settings;
     settings.setSize(960, 600);
-    return tc::runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }
 ```
 
@@ -357,6 +357,81 @@ void draw() override {
 
 EasyCam provides orbit controls automatically (drag to rotate, scroll to zoom, right-drag to pan).
 
+### 3D Lighting & PBR
+
+TrussC uses GPU-based PBR (Physically Based Rendering) with metallic-roughness workflow.
+
+```cpp
+Light light;
+Material mat;
+Environment env;
+EasyCam cam;
+
+void setup() override {
+    cam.setDistance(500);
+    cam.enableMouseInput();
+
+    light.setDirectional(Vec3(-0.5f, -1.0f, -0.8f));
+    light.setDiffuse(1.0f, 0.95f, 0.85f);
+    light.setIntensity(3.0f);
+
+    mat = Material::gold();  // Presets: gold, silver, copper, iron, plastic, rubber, emerald, ruby, bronze
+    // Or custom: mat.setBaseColor(0.8f, 0.2f, 0.2f).setMetallic(0.0f).setRoughness(0.5f);
+
+    env.loadProcedural();  // IBL environment (needed for metal reflections)
+    setEnvironment(env);
+}
+
+void draw() override {
+    clear(0.05f);
+    cam.begin();
+
+    clearLights();
+    addLight(light);
+    setCameraPosition(cam.getPosition());  // Needed for specular
+
+    setMaterial(mat);       // Activates PBR rendering
+    drawSphere(100);        // PBR-lit sphere
+
+    clearMaterial();        // Back to default (unlit)
+    cam.end();
+}
+```
+
+**Key concepts:**
+- `Light`: Directional, Point, or Spot (with cone falloff). Also supports projector texture and IES profiles
+- `Material`: PBR properties — `setBaseColor()`, `setMetallic()`, `setRoughness()`, `setNormalMap()`, etc.
+- `Environment`: IBL (Image-Based Lighting) for ambient reflections. `loadProcedural()` or `loadFromHDR()`
+- `setMaterial()` activates PBR for all subsequent `mesh.draw()` calls until `clearMaterial()`
+
+**Shadow mapping:**
+```cpp
+// In setup:
+light.enableShadow(1024);        // Enable with 1024x1024 depth map
+light.setShadowBias(1.0f);       // Adjust depth bias (world units)
+
+// In draw (before PBR pass):
+beginShadowPass(light);
+shadowDraw(floorMesh);           // Render shadow casters
+shadowDraw(wallMesh);
+endShadowPass();
+
+// Then draw normally — shadows applied automatically
+setMaterial(mat);
+floorMesh.draw();
+wallMesh.draw();
+```
+
+**Light types:**
+```cpp
+light.setDirectional(Vec3(0, -1, 0));                      // Sun-like
+light.setPoint(Vec3(0, 100, 0));                            // Omnidirectional
+light.setSpot(pos, dir, innerAngle, outerAngle);            // Cone
+light.setProjectionTexture(&texture);                       // Projector (gobo)
+light.setLensShift(0.0f, 1.0f);                            // Projector lens shift
+light.setIesProfile(&iesProfile);                           // Photometric profile
+```
+
 ## Hot Reload
 
 TrussC supports live code reloading during development. Add one line to your app's `.cpp` file:
@@ -497,6 +572,10 @@ Sound sfx = bundle.build();
 - **Font**: TrueType font rendering
 - **StrokeMesh**: Variable-width stroked paths
 - **EasyCam**: 3D orbit camera
+- **Light**: Light source (directional, point, spot, projector)
+- **Material**: PBR material (metallic-roughness, presets: gold/silver/etc.)
+- **Environment**: IBL environment map (HDR or procedural)
+- **IesProfile**: IESNA photometric profile for angular light distribution
 - **VideoGrabber, VideoPlayer**: Video capture/playback
 - **TcpClient, TcpServer, UdpSocket**: Network
 - **Sound, ChipSound**: Audio playback / procedural sound

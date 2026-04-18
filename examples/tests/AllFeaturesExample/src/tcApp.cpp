@@ -70,6 +70,70 @@ void tcApp::setup() {
 
     tc::logNotice("AllFeaturesExample") << "File utilities test completed";
 
+    // --- 3D / PBR Lighting ---
+    tc::logNotice("AllFeaturesExample") << "Testing 3D/PBR features...";
+
+    // Light (all types)
+    tc::Light dirLight;
+    dirLight.setDirectional(tc::Vec3(0, -1, 0));
+    dirLight.setDiffuse(1.0f, 1.0f, 1.0f);
+    dirLight.setIntensity(1.0f);
+
+    tc::Light spotLight;
+    spotLight.setSpot(tc::Vec3(0, 100, 0), tc::Vec3(0, -1, 0), 0.0f, 0.45f);
+    spotLight.setAttenuation(1.0f, 0.0f, 0.0f);
+    spotLight.enableShadow(512);
+    spotLight.setShadowBias(1.0f);
+
+    // Material (PBR presets)
+    tc::Material matGold = tc::Material::gold();
+    tc::Material matPlastic = tc::Material::plastic(tc::Color(0.8f, 0.2f, 0.2f));
+    tc::Material matEmerald = tc::Material::emerald();
+    matGold.setBaseColor(1, 0.8f, 0.3f).setMetallic(1.0f).setRoughness(0.2f);
+
+    // IesProfile
+    tc::IesProfile iesTest;
+    // Environment
+    tc::Environment envTest;
+
+    // EasyCam
+    tc::EasyCam camTest;
+    camTest.setDistance(500);
+    camTest.setTarget(0, 0, 0);
+
+    // Mesh primitives
+    tc::Mesh sphereMesh = tc::createSphere(50, 16);
+    tc::Mesh boxMesh = tc::createBox(50);
+    tc::Mesh planeMesh = tc::createPlane(100, 100);
+    tc::Mesh cylMesh = tc::createCylinder(20, 60, 12);
+    tc::Mesh coneMesh = tc::createCone(20, 60, 12);
+
+    tc::logNotice("AllFeaturesExample") << "3D/PBR test completed";
+
+    // --- GPU Resources ---
+    tc::logNotice("AllFeaturesExample") << "Testing GPU resources...";
+
+    tc::Texture texTest;
+    tc::Fbo fboTest;
+    tc::Pixels pixTest;
+    pixTest.allocate(4, 4, 4, tc::PixelFormat::U8);
+
+    tc::logNotice("AllFeaturesExample") << "GPU resources test completed";
+
+    // --- Animation / Types ---
+    tc::logNotice("AllFeaturesExample") << "Testing animation/types...";
+
+    tc::Tween<float> tweenTest;
+    tc::Font fontTest;
+    tc::Node nodeTest;
+    tc::Rect rectTest(0, 0, 100, 100);
+    rectTest.getCenter();
+
+    tc::logNotice("AllFeaturesExample") << "Animation/types test completed";
+
+    // --- Serial ---
+    tc::Serial serialTest;
+
     tc::logNotice("AllFeaturesExample") << "All features linked successfully";
 }
 
