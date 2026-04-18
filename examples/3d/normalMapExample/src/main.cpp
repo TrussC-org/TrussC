@@ -5,5 +5,5 @@ int main() {
     settings.setSize(960, 720);
     settings.setTitle("normalMapExample - TrussC");
 
-    return runApp<tcApp>(settings);
+    return TC_RUN_APP(tcApp, settings);
 }
