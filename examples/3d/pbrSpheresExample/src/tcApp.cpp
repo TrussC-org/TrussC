@@ -57,7 +57,8 @@ void tcApp::setup() {
     // Build the 5x5 material grid.
     // All spheres share the same baseColor so the visual differences come
     // purely from the roughness and metallic parameters.
-    const Color baseColor(0.75f, 0.65f, 0.55f);
+    // Values in linear space (equivalent to sRGB ~0.75, 0.65, 0.55)
+    const Color baseColor(0.53f, 0.39f, 0.27f);
     for (int y = 0; y < GRID; ++y) {
         for (int x = 0; x < GRID; ++x) {
             materials[y][x]
@@ -77,12 +78,8 @@ void tcApp::draw() {
     // EasyCam: drag to rotate the view
     cam.begin();
 
-    // Register lights for this frame.
-    // clearLights() removes previous frame's lights; addLight() registers new ones.
+    // IBL only (no direct lights) — test to see pure environment lighting
     clearLights();
-    addLight(keyLight);
-    addLight(fillLight);
-    // Camera position is needed for specular reflection calculation.
     setCameraPosition(cam.getPosition());
 
     // Draw the sphere grid

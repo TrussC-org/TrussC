@@ -96,9 +96,9 @@ public:
                          1.0f);
         };
 
-        const Color skyTop    (0.15f, 0.30f, 0.75f);
-        const Color skyHoriz  (0.70f, 0.80f, 0.92f);
-        const Color ground    (0.08f, 0.06f, 0.05f);
+        const Color skyTop    (0.25f, 0.50f, 1.30f);
+        const Color skyHoriz  (1.10f, 1.30f, 1.55f);
+        const Color ground    (0.12f, 0.10f, 0.08f);
         const Color sunColor  (18.0f, 15.0f, 11.0f);
 
         for (int y = 0; y < H; ++y) {

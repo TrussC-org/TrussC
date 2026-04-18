@@ -24,14 +24,16 @@ void tcApp::setup() {
     // Material for each primitive (order matches primitives array)
     materials_[0] = Material::plastic(Color(0.8f, 0.2f, 0.2f));  // Plane: Red
     materials_[1] = Material::gold();                                  // Box: Gold
+    materials_[1].setRoughness(0.4f);                                  // Rougher for direct-light-only visibility
     materials_[2] = Material::plastic(Color(0.2f, 0.6f, 0.9f));  // Sphere: Blue
     materials_[3] = Material::emerald();                              // IcoSphere: Emerald
     materials_[4] = Material::silver();                               // Cylinder: Silver
+    materials_[4].setRoughness(0.4f);
     materials_[5] = Material::copper();                               // Cone: Copper
+    materials_[5].setRoughness(0.4f);
 
-    // Procedural IBL for metal reflections
-    env_.loadProcedural();
-    setEnvironment(env_);
+    // No IBL — this example uses screen coordinates (Y-down) which are
+    // incompatible with cubemap Y-up convention. Direct light only.
 
     rebuildPrimitives();
 }

@@ -147,6 +147,34 @@ public:
         return m;
     }
 
+    // Convert Phong material parameters to PBR.
+    // Uses the physically-derived Filament formula: roughness = sqrt(2 / (shininess + 2))
+    // Metallic is estimated from specular color luminance (heuristic).
+    // Input colors are assumed to be in sRGB space (typical for OBJ/MTL files)
+    // and are converted to linear for PBR shader consumption.
+    static Material fromPhong(const Color& diffuse, const Color& specular,
+                              float shininess, const Color& emissive = Color(0,0,0)) {
+        // sRGB to linear conversion
+        auto toLinear = [](float s) { return std::pow(s, 2.2f); };
+        Material m;
+        m.setBaseColor(toLinear(diffuse.r), toLinear(diffuse.g), toLinear(diffuse.b), diffuse.a);
+        // Roughness: match Phong cosⁿ lobe width with GGX distribution
+        float rough = std::sqrt(2.0f / (shininess + 2.0f));
+        m.setRoughness(rough);
+        // Metallic heuristic: if specular color is similar to diffuse, likely metallic.
+        // For typical Phong materials (white specular on colored diffuse), metallic ≈ 0.
+        float sR = toLinear(specular.r), sG = toLinear(specular.g), sB = toLinear(specular.b);
+        float specLum = sR * 0.2126f + sG * 0.7152f + sB * 0.0722f;
+        m.setMetallic(specLum > 0.5f ? std::clamp(specLum, 0.0f, 1.0f) : 0.0f);
+        // Emissive
+        float emLum = emissive.r + emissive.g + emissive.b;
+        if (emLum > 0.001f) {
+            m.setEmissive(toLinear(emissive.r), toLinear(emissive.g), toLinear(emissive.b));
+            m.setEmissiveStrength(1.0f);
+        }
+        return m;
+    }
+
     // --- Normal map (optional) ---
     Material& setNormalMap(const Texture* tex) { normalMap_ = tex; return *this; }
     const Texture* getNormalMap() const { return normalMap_; }
