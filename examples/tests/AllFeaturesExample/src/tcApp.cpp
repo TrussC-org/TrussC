@@ -127,7 +127,7 @@ void tcApp::setup() {
     tc::Font fontTest;
     tc::Node nodeTest;
     tc::Rect rectTest(0, 0, 100, 100);
-    rectTest.getCenterX();
+    rectTest.getCenter();
 
     tc::logNotice("AllFeaturesExample") << "Animation/types test completed";
 
