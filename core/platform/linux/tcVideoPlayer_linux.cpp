@@ -107,6 +107,7 @@ private:
     void decodeThread();
     bool decodeNextFrame();
     void seekToTime(double seconds);
+    void probeHwOutputFormat();
 
     // FFmpeg context
     AVFormatContext* formatCtx_ = nullptr;
@@ -122,6 +123,11 @@ private:
     AVBufferRef*   hwDeviceCtx_   = nullptr;
     AVHWDeviceType hwType_        = AV_HWDEVICE_TYPE_NONE;
     AVPixelFormat  lastScalerFmt_ = AV_PIX_FMT_NONE;
+    // Filled by probeHwOutputFormat() after opening the codec. For HW decode
+    // this is the format the first transferred frame actually produced (e.g.
+    // NV12 on most VAAPI/NVDEC paths, P010 for 10-bit, YUV420P for some
+    // V4L2M2M). AV_PIX_FMT_NONE if no HW or probe failed.
+    AVPixelFormat  probedFormat_  = AV_PIX_FMT_NONE;
 
     int videoStreamIndex_ = -1;
     int audioStreamIndex_ = -1;
@@ -179,8 +185,14 @@ private:
     int rgbaBufferSize_ = 0;
 
 public:
-    bool nv12Mode_ = false;  // set by loadPlatform() when CUDA is active
-    bool isNV12Capable() const { return hwType_ == AV_HWDEVICE_TYPE_CUDA; }
+    bool nv12Mode_ = false;  // set by loadPlatform() when HW decode produces NV12
+    // Runtime check: HW backend is active AND the first probed frame came
+    // out as NV12 after hwframe_transfer. Different backends / codecs /
+    // bit-depths can produce P010, YUV420P, etc. — those fall back to RGBA.
+    bool isNV12Capable() const {
+        return hwType_ != AV_HWDEVICE_TYPE_NONE
+            && probedFormat_ == AV_PIX_FMT_NV12;
+    }
 };
 
 // =============================================================================
@@ -368,6 +380,10 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
             logWarning("VideoPlayer") << "Failed to decode audio";
         }
     }
+
+    // Probe the first decoded frame so callers can see the post-transfer
+    // pixel format and pick NV12 fast path vs RGBA fallback accurately.
+    probeHwOutputFormat();
 
     return true;
 }
@@ -640,6 +656,68 @@ void TCVideoPlayerImpl::decodeThread() {
         if (!decodeNextFrame()) {
             isFinished_ = true;
         }
+    }
+}
+
+// Decodes a single frame up-front to learn the actual post-transfer pixel
+// format (e.g. NV12 on VAAPI/NVDEC, P010 for 10-bit, YUV420P on some
+// V4L2M2M). The format only becomes knowable after av_hwframe_transfer_data
+// runs, so we cannot decide it from hwType_ alone. The demuxer is rewound
+// and the codec flushed afterwards so playback starts cleanly from frame 0.
+void TCVideoPlayerImpl::probeHwOutputFormat() {
+    probedFormat_ = AV_PIX_FMT_NONE;
+    if (hwType_ == AV_HWDEVICE_TYPE_NONE) return;  // SW decode: nothing to probe
+
+    AVFrame* probeFrame = av_frame_alloc();
+    bool captured = false;
+    constexpr int kMaxPackets = 64;  // keep probe bounded
+
+    for (int i = 0; i < kMaxPackets && !captured; ++i) {
+        int ret = av_read_frame(formatCtx_, packet_);
+        if (ret < 0) break;
+        if (packet_->stream_index != videoStreamIndex_) {
+            av_packet_unref(packet_);
+            continue;
+        }
+
+        ret = avcodec_send_packet(codecCtx_, packet_);
+        av_packet_unref(packet_);
+        if (ret < 0 && ret != AVERROR(EAGAIN)) continue;
+
+        while (!captured) {
+            ret = avcodec_receive_frame(codecCtx_, frame_);
+            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
+            if (ret < 0) { captured = false; break; }
+
+            if (frame_->hw_frames_ctx) {
+                probeFrame->format = AV_PIX_FMT_NONE;
+                if (av_hwframe_transfer_data(probeFrame, frame_, 0) >= 0) {
+                    probedFormat_ = (AVPixelFormat)probeFrame->format;
+                    captured = true;
+                }
+                av_frame_unref(probeFrame);
+            } else {
+                probedFormat_ = (AVPixelFormat)frame_->format;
+                captured = true;
+            }
+            av_frame_unref(frame_);
+        }
+    }
+
+    av_frame_free(&probeFrame);
+    av_frame_unref(frame_);
+
+    // Reset demuxer + codec state so the decode thread starts from frame 0.
+    av_seek_frame(formatCtx_, videoStreamIndex_, 0, AVSEEK_FLAG_BACKWARD);
+    avcodec_flush_buffers(codecCtx_);
+    packetPending_ = false;
+
+    if (captured) {
+        const char* name = av_get_pix_fmt_name(probedFormat_);
+        logNotice("VideoPlayer") << "HW transfer format: "
+                                  << (name ? name : "unknown");
+    } else {
+        logWarning("VideoPlayer") << "HW format probe failed; using RGBA fallback";
     }
 }
 
