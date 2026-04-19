@@ -560,6 +560,9 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
     // Check if finished
     if (frameQueue_.empty() && isFinished_) {
         if (isLoop_) {
+            if (audioBuffer_) {
+                audioSound_.setPosition(0.0f);
+            }
             seekToTime(0.0);
             playbackStartTime_ = av_gettime_relative() / 1000000.0;
             isFinished_ = false;
