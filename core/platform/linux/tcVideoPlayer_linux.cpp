@@ -115,6 +115,10 @@ private:
     AVFrame* frame_ = nullptr;
     AVFrame* frameRGBA_ = nullptr;
     AVPacket* packet_ = nullptr;
+    // Set when packet_ holds a referenced packet that avcodec_send_packet
+    // returned EAGAIN on. The packet must be re-sent (not re-read) after the
+    // decoder is drained, otherwise the stream would lose data.
+    bool packetPending_ = false;
     AVBufferRef*   hwDeviceCtx_   = nullptr;
     AVHWDeviceType hwType_        = AV_HWDEVICE_TYPE_NONE;
     AVPixelFormat  lastScalerFmt_ = AV_PIX_FMT_NONE;
@@ -595,6 +599,12 @@ void TCVideoPlayerImpl::decodeThread() {
             av_seek_frame(formatCtx_, videoStreamIndex_, timestamp, AVSEEK_FLAG_BACKWARD);
             avcodec_flush_buffers(codecCtx_);
 
+            // Any packet held from a previous EAGAIN is invalidated by the seek.
+            if (packetPending_) {
+                av_packet_unref(packet_);
+                packetPending_ = false;
+            }
+
             // Clear queue
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -615,30 +625,65 @@ void TCVideoPlayerImpl::decodeThread() {
 }
 
 bool TCVideoPlayerImpl::decodeNextFrame() {
+    char errbuf[128];
     while (true) {
-        int ret = av_read_frame(formatCtx_, packet_);
-        if (ret < 0) {
-            // End of file or error
+        // Drain the decoder first. HW backends (VAAPI/NVDEC) and streams with
+        // B-frames keep several frames in flight, so output is often ready
+        // before the next packet is fed. Pulling frames first prevents the
+        // internal queue from filling up and producing spurious EAGAIN on
+        // subsequent avcodec_send_packet calls.
+        int ret = avcodec_receive_frame(codecCtx_, frame_);
+
+        if (ret == AVERROR(EAGAIN)) {
+            // Decoder wants more input. Either resend a pending packet held
+            // from a prior EAGAIN on send, or read a new one from the demuxer.
+            if (!packetPending_) {
+                int rret = av_read_frame(formatCtx_, packet_);
+                if (rret == AVERROR_EOF) {
+                    // Enter drain mode so remaining buffered frames are
+                    // flushed out on following receive_frame calls.
+                    avcodec_send_packet(codecCtx_, nullptr);
+                    continue;
+                }
+                if (rret < 0) {
+                    av_strerror(rret, errbuf, sizeof(errbuf));
+                    logWarning("VideoPlayer") << "av_read_frame ended: " << errbuf
+                                              << " (pts=" << currentPts_ << ")";
+                    return false;
+                }
+                if (packet_->stream_index != videoStreamIndex_) {
+                    av_packet_unref(packet_);
+                    continue;
+                }
+                packetPending_ = true;
+            }
+
+            int sret = avcodec_send_packet(codecCtx_, packet_);
+            if (sret == AVERROR(EAGAIN)) {
+                // Decoder is still full even after the receive above (can
+                // happen across format transitions). Keep the packet
+                // referenced and try to drain again on the next iteration.
+                continue;
+            }
+            av_packet_unref(packet_);
+            packetPending_ = false;
+
+            if (sret < 0 && sret != AVERROR_EOF) {
+                av_strerror(sret, errbuf, sizeof(errbuf));
+                logWarning("VideoPlayer") << "send_packet failed: " << errbuf
+                                          << " (pts=" << currentPts_ << ")";
+            }
+            continue;
+        }
+
+        if (ret == AVERROR_EOF) {
+            // Decoder fully drained after EOF was signalled upstream.
             return false;
         }
-
-        if (packet_->stream_index != videoStreamIndex_) {
-            av_packet_unref(packet_);
-            continue;
-        }
-
-        ret = avcodec_send_packet(codecCtx_, packet_);
-        av_packet_unref(packet_);
-
         if (ret < 0) {
-            continue;
-        }
-
-        ret = avcodec_receive_frame(codecCtx_, frame_);
-        if (ret == AVERROR(EAGAIN)) {
-            continue;
-        }
-        if (ret < 0) {
+            av_strerror(ret, errbuf, sizeof(errbuf));
+            logWarning("VideoPlayer") << "receive_frame failed: " << errbuf
+                                      << " (pts=" << currentPts_ << ")";
             return false;
         }
 
