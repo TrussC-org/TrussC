@@ -271,6 +271,16 @@ endif()
             target_compile_options(guest PRIVATE /Z7)
             set_target_properties(guest PROPERTIES LINK_FLAGS "/DEBUG /PDBALTPATH:none")
         endif()
+        # Guest: disable codegen optimization to speed up reload iterations.
+        # Host and TrussC keep the project's configured optimization level;
+        # only the hot-reload Guest trades runtime speed for compile speed.
+        # Trailing position ensures these flags override the earlier -O2/-O3
+        # inherited from CMAKE_CXX_FLAGS_<CONFIG>.
+        if(MSVC)
+            target_compile_options(guest PRIVATE /Od)
+        else()
+            target_compile_options(guest PRIVATE -O0)
+        endif()
         # Guest: resolve TrussC symbols at runtime from the Host process.
         # macOS/Linux use flat namespace lookup; Windows uses import library.
         if(APPLE)
