@@ -157,7 +157,7 @@ public:
     }
 
     void draw(float x, float y, float w, float h) const override {
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
         if (nv12Mode_ && nv12ShaderHandle_) {
             drawNV12Platform(x, y, w, h);
             return;
@@ -436,7 +436,7 @@ private:
     // Allow platform implementations to access internals
     friend class VideoPlayerPlatformAccess;
 
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
     void drawNV12Platform(float x, float y, float w, float h) const;
 #endif
 };
