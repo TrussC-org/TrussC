@@ -2292,8 +2292,19 @@ static int cmdRun(const vector<string>& args) {
             return runProcess({"labwc", "-s", binPath});
         }
         if (session == "x11") {
-            cout << "Launching via xinit (X11 session) ...\n";
-            return runProcess({"xinit", binPath});
+            // Put Xorg on the currently-active VT so output is visible on
+            // the attached monitor. Without this, xinit can allocate an
+            // inactive VT (common when launched over SSH) and the app
+            // renders off-screen while the monitor keeps showing tty1.
+            string vt = "vt7";  // Debian/Raspbian traditional fallback
+            ifstream activeTty("/sys/class/tty/tty0/active");
+            string line;
+            if (activeTty && getline(activeTty, line)) {
+                auto pos = line.find_first_of("0123456789");
+                if (pos != string::npos) vt = "vt" + line.substr(pos);
+            }
+            cout << "Launching via xinit (X11 session) on " << vt << " ...\n";
+            return runProcess({"xinit", binPath, "--", ":0", vt});
         }
         cout << "Launching " << projectName << " ...\n";
         return runProcess({binPath});
