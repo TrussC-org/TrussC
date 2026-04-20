@@ -179,14 +179,16 @@ Replace `/path/to/your/project` with your project directory and `your_username` 
 ### Raspberry Pi (Raspbian Lite)
 
 - **Recommended OS**: Raspberry Pi OS Lite (64-bit)
-- **GPU**: VideoCore (Pi 4) or VideoCore VII (Pi 5) — TrussC uses OpenGL ES 3.0
-- **HW video decode**: VAAPI / V4L2M2M / DRM supported (auto-detected by TrussC)
+- **GPU**: VideoCore VI (Pi 4) or VideoCore VII (Pi 5) — TrussC uses OpenGL ES 3.0
+- **HW video decode** (auto-detected by TrussC, falls back to SW):
+  - **Pi 4**: V4L2M2M interface exposes H.264 / HEVC HW decoder
+  - **Pi 5**: H.264 HW decoder removed; HEVC still available via DRM (prime interop)
 - **Boot to CLI**: `sudo raspi-config` → System Options → Boot / Auto Login → Console
 - **Remote access**: SSH for development, physical display for final output
 
 ### Orange Pi / Other Allwinner SBCs
 
-- Install ARM-compatible GPU drivers (Mali, PowerVR)
+- Install ARM-compatible Mali GPU drivers (Allwinner SoCs use Mali exclusively)
 - `install_dependencies_linux.sh` should cover build deps on Debian-based distros
 - Use `--session x11` for display; Wayland support varies by GPU driver
 
