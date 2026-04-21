@@ -108,9 +108,11 @@ sudo apt install twm        # Debian / Raspbian
 sudo pacman -S xorg-twm     # Arch
 ```
 
-> **Raspberry Pi 5 only** — Pi 5 has no legacy `/dev/fb0`, so Xorg falls back
-> to `fbdev` and fails with "Cannot run in framebuffer mode". Force the
-> `modesetting` driver by creating `/etc/X11/xorg.conf.d/99-vc4.conf`:
+> **Raspberry Pi 5 troubleshooting** — Pi 5 has no legacy `/dev/fb0`. Modern
+> Xorg auto-selects the `modesetting` driver for the V3D KMS device, but if
+> Xorg aborts with `(EE) Cannot run in framebuffer mode. Please specify busIDs
+> for all framebuffer devices`, force `modesetting` by creating
+> `/etc/X11/xorg.conf.d/99-vc4.conf`:
 >
 > ```bash
 > sudo tee /etc/X11/xorg.conf.d/99-vc4.conf > /dev/null << 'EOF'
