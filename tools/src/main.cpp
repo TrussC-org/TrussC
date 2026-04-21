@@ -2295,31 +2295,42 @@ static int cmdRun(const vector<string>& args) {
         if (session == "x11") {
             // On Pi 5 (modesetting + V3D), running the binary directly as
             // xinit's client races with driver init and the app renders
-            // invisibly. The reliable path is:
-            //   1. Start xinit in the background with the default xinitrc
-            //      (pulls up twm / resources so the X session is stable)
-            //   2. Wait for the X socket to exist
-            //   3. Authorize the local user via xhost
-            //   4. Run the binary as a separate X client with DISPLAY=:0
-            //   5. Tear xinit down when the app exits
-            // xinit is pinned to vt7 so the monitor follows the kernel's VT
-            // switch (without explicit vt, xinit can pick an inactive VT).
+            // invisibly. A window manager must be running before our GL
+            // client connects, but the default xinitrc also spawns xterm
+            // and friends which flash on screen. Use a minimal custom
+            // xinitrc that only runs twm, then run the binary as a
+            // separate X client with DISPLAY=:0:
+            //   1. Write a temp xinitrc: `exec twm`
+            //   2. Spawn xinit on vt7 with that script as the client
+            //   3. Wait for the X socket
+            //   4. Authorize the local user via xhost
+            //   5. Run the binary
+            //   6. Tear xinit down when the app exits
             cout << "Launching via xinit (X11 session) on vt7 ...\n";
+
+            // 1. Write minimal xinitrc that keeps a WM alive without xterm.
+            string xinitrcPath = "/tmp/trusscli-x11-" + to_string(getpid()) + ".sh";
+            {
+                ofstream f(xinitrcPath);
+                f << "#!/bin/sh\nexec twm\n";
+            }
+            chmod(xinitrcPath.c_str(), 0755);
 
             extern char** environ;
             vector<char*> xinitArgv = {
-                (char*)"xinit", (char*)"--", (char*)":0", (char*)"vt7", nullptr
+                (char*)"xinit",
+                (char*)xinitrcPath.c_str(),
+                (char*)"--", (char*)":0", (char*)"vt7", nullptr
             };
             pid_t xinitPid = 0;
             if (posix_spawnp(&xinitPid, "xinit", nullptr, nullptr,
                              xinitArgv.data(), environ) != 0) {
                 cerr << "Error: failed to spawn xinit (is xserver-xorg installed?)\n";
+                std::remove(xinitrcPath.c_str());
                 return -1;
             }
 
-            // Poll for the X socket (<=6s). Socket appears as soon as Xorg
-            // starts listening; that's enough for xhost to work. A small
-            // extra sleep lets xinitrc (twm etc.) settle.
+            // 2. Poll for the X socket (<=6s).
             bool xReady = false;
             for (int i = 0; i < 30; ++i) {
                 if (access("/tmp/.X11-unix/X0", F_OK) == 0) { xReady = true; break; }
@@ -2329,25 +2340,27 @@ static int cmdRun(const vector<string>& args) {
                 cerr << "Error: X server did not start within 6 seconds\n";
                 kill(xinitPid, SIGTERM);
                 waitpid(xinitPid, nullptr, 0);
+                std::remove(xinitrcPath.c_str());
                 return -1;
             }
-            sleep(1);  // let WM / xinitrc finish coming up
+            sleep(1);  // let twm settle
 
             setenv("DISPLAY", ":0", 1);
 
-            // Authorize this user so DISPLAY=:0 connects without needing
+            // 3. Authorize this user so DISPLAY=:0 connects without needing
             // the server's XAUTHORITY file (which xinit keeps private).
             const char* user = getenv("USER");
             if (user && *user) {
                 runProcess({"xhost", string("+SI:localuser:") + user});
             }
 
-            // Run the app (blocks until it exits).
+            // 4. Run the app (blocks until it exits).
             int rc = runProcess({binPath});
 
-            // Tear down the X session.
+            // 5. Tear down the X session.
             kill(xinitPid, SIGTERM);
             waitpid(xinitPid, nullptr, 0);
+            std::remove(xinitrcPath.c_str());
             return rc;
         }
         cout << "Launching " << projectName << " ...\n";
