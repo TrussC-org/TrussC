@@ -279,6 +279,20 @@ sudo pacman -S mesa
 
 This is expected — labwc creates a Wayland session without a physical display. The app runs in the background. Connect a monitor to see the output, or use MCP mode (`TRUSSC_MCP=1`) for headless interaction.
 
+### Monitor goes to sleep / screen blanks during long runs
+
+For installations and kiosk setups you typically want the display always on. X11 has its own screensaver and DPMS (power management) that blank the screen after a few minutes of no input.
+
+Disable them inside the X session — easiest is to add the commands to `~/.xprofile` (sourced when X starts) or run them once after launch:
+
+```bash
+xset s off       # disable screensaver
+xset -dpms       # disable display power management
+xset s noblank   # don't blank the screen
+```
+
+For the Linux console framebuffer (non-X), add `consoleblank=0` to `/boot/firmware/cmdline.txt` and reboot.
+
 ---
 
 ## See Also
