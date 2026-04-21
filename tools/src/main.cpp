@@ -633,6 +633,368 @@ static int cmdNew(const vector<string>& args) {
 }
 
 // =============================================================================
+// Subcommand: cp (duplicate an existing project)
+// =============================================================================
+
+static void printCpHelp() {
+    cout << "Usage: trusscli cp <src> <dst> [options]\n"
+         << "\n"
+         << "Copy an existing TrussC project to a new location. If <src> is a\n"
+         << "git work tree, only git-tracked and non-ignored files are copied\n"
+         << "(so .gitignore controls what counts as generated). Otherwise a\n"
+         << "built-in skip list for known build/IDE artifacts is used.\n"
+         << "Generated build / IDE files are re-created at the destination.\n"
+         << "\n"
+         << "Options:\n"
+         << "  -n, --dry-run              Show what would be copied, don't modify anything\n"
+         << "      --no-git               Force the built-in skip list even if <src> is a git repo\n"
+         << "      --web                  Enable Web (WebAssembly) build\n"
+         << "      --android              Enable Android build\n"
+         << "      --ios                  Enable iOS build\n"
+         << "      --ide <type>           IDE: vscode, cursor, xcode, vs, cmake (default: vscode)\n"
+         << "      --tc-root <path>       Path to TrussC root directory (auto-detected by default)\n"
+         << "  -h, --help                 Show this help\n"
+         << "\n"
+         << "Examples:\n"
+         << "  trusscli cp myApp myApp2               Duplicate ./myApp to ./myApp2\n"
+         << "  trusscli cp . ../myApp2                Copy current project to sibling dir\n"
+         << "  trusscli cp -n ../ref/myApp ./fork     Preview without copying\n";
+}
+
+// Returns true if the top-level entry name should be skipped when copying a
+// project. Build artifacts, IDE-generated files, CMake caches, and VCS data
+// are regenerated or meaningless at the destination.
+// Used only when git is unavailable or --no-git is set.
+static bool isSkippedInCp(const string& name) {
+    // Build artifacts
+    if (name == "build" || name == "bin") return true;
+    if (name.rfind("build-", 0) == 0) return true;  // build-macos, build-win-msvc-x64, build-web, ...
+    if (name.rfind("xcode", 0) == 0) return true;   // xcode, xcode-debug, ... (trussc pattern is 'xcode*/')
+    if (name == "vs" || name == "emscripten") return true;
+    // CMake generated
+    if (name == "CMakePresets.json" || name == "CMakeUserPresets.json") return true;
+    if (name == "CMakeCache.txt" || name == "CMakeFiles") return true;
+    if (name == "compile_commands.json") return true;
+    // TrussC local override (regenerated if present at build time)
+    if (name == ".trussc") return true;
+    // IDE / LSP caches
+    if (name == ".vscode" || name == ".idea" || name == ".vs" || name == ".cache") return true;
+    if (name == ".ccls-cache" || name == ".clangd") return true;
+    auto endsWith = [&](const string& suffix) {
+        return name.size() >= suffix.size() &&
+               name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+    if (endsWith(".xcodeproj")) return true;
+    if (endsWith(".sln")) return true;
+    if (endsWith(".vcxproj") || endsWith(".vcxproj.filters") || endsWith(".vcxproj.user")) return true;
+    // Generator wrapper scripts
+    if (name.rfind("build-web.", 0) == 0) return true;   // build-web.command / .bat / .sh
+    // OS cruft
+    if (name == ".DS_Store" || name == "Thumbs.db" || name == "desktop.ini") return true;
+    // VCS
+    if (name == ".git") return true;
+    return false;
+}
+
+// Returns true if `path` sits inside a git work tree.
+static bool isGitWorkTree(const fs::path& path) {
+    string cmd = "git -C \"" + path.string() + "\" rev-parse --is-inside-work-tree 2>/dev/null";
+    auto [code, out] = captureCommand(cmd);
+    if (code != 0) return false;
+    // Expect "true\n"
+    return out.rfind("true", 0) == 0;
+}
+
+// Lists files under `srcRoot` as relative paths. Respects .gitignore via
+// --exclude-standard, and includes both tracked and untracked (but not ignored)
+// files. Caller must ensure srcRoot is a git work tree.
+// Paths containing newlines would break this parser, but TrussC projects are
+// not expected to have such paths (and captureCommand() reads line-by-line via
+// fgets(), which can't safely handle NUL-separated output from `ls-files -z`).
+static vector<string> gitListFiles(const fs::path& srcRoot) {
+    // -c: cached (tracked), -o: others (untracked), --exclude-standard: honor .gitignore
+    string cmd = "git -C \"" + srcRoot.string() +
+                 "\" ls-files -co --exclude-standard 2>/dev/null";
+    auto [code, out] = captureCommand(cmd);
+    vector<string> files;
+    if (code != 0) return files;
+    size_t start = 0;
+    while (start < out.size()) {
+        size_t end = out.find('\n', start);
+        if (end == string::npos) end = out.size();
+        string line = out.substr(start, end - start);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.empty()) files.push_back(std::move(line));
+        if (end == out.size()) break;
+        start = end + 1;
+    }
+    return files;
+}
+
+static int cmdCp(const vector<string>& args) {
+    string srcArg, dstArg;
+    bool web = false, android = false, ios = false;
+    bool dryRun = false, noGit = false;
+    string ideStr = "vscode";
+    string tcRoot;
+
+    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << opt << " requires a value\n";
+            return false;
+        }
+        out = args[++i];
+        return true;
+    };
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printCpHelp(); return 0; }
+        else if (a == "-n" || a == "--dry-run") dryRun = true;
+        else if (a == "--no-git") noGit = true;
+        else if (a == "--web") web = true;
+        else if (a == "--android") android = true;
+        else if (a == "--ios") ios = true;
+        else if (a == "--ide") {
+            if (!needValue(i, a, ideStr)) return 1;
+        }
+        else if (a == "--tc-root") {
+            if (!needValue(i, a, tcRoot)) return 1;
+        }
+        else if (!a.empty() && a[0] == '-') {
+            cerr << "Error: unknown option '" << a << "'\n";
+            cerr << "Run 'trusscli cp --help' for usage.\n";
+            return 1;
+        }
+        else {
+            if (srcArg.empty()) srcArg = a;
+            else if (dstArg.empty()) dstArg = a;
+            else {
+                cerr << "Error: 'cp' takes exactly two path arguments "
+                     << "(got extra: '" << a << "')\n";
+                return 1;
+            }
+        }
+    }
+
+    if (srcArg.empty() || dstArg.empty()) {
+        cerr << "Error: 'cp' requires <src> and <dst>\n";
+        cerr << "Usage: trusscli cp <src> <dst> [options]\n";
+        return 1;
+    }
+
+    fs::path srcPath = fs::absolute(srcArg);
+    if (!fs::is_directory(srcPath)) {
+        cerr << "Error: source '" << srcArg << "' is not a directory\n";
+        return 1;
+    }
+    if (!fs::exists(srcPath / "CMakeLists.txt") ||
+        !fs::exists(srcPath / "addons.make")) {
+        cerr << "Error: source '" << srcArg << "' is not a TrussC project "
+             << "(missing CMakeLists.txt or addons.make)\n";
+        return 1;
+    }
+
+    fs::path dstPath = fs::absolute(dstArg);
+    if (fs::exists(dstPath)) {
+        cerr << "Error: destination '" << dstPath.string() << "' already exists\n";
+        return 1;
+    }
+    // Reject dst inside src (would loop forever if copy happens before exist check
+    // is re-evaluated, and is almost certainly a typo).
+    {
+        fs::path d = dstPath;
+        while (d.has_parent_path() && d != d.parent_path()) {
+            d = d.parent_path();
+            if (fs::exists(d) && fs::exists(srcPath) &&
+                fs::equivalent(d, srcPath)) {
+                cerr << "Error: destination '" << dstPath.string()
+                     << "' is inside source '" << srcPath.string() << "'\n";
+                return 1;
+            }
+        }
+    }
+
+    if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
+    if (tcRoot.empty()) {
+        cerr << "Error: could not detect TrussC root. "
+             << "Use --tc-root <path> or set TRUSSC_DIR.\n";
+        return 1;
+    }
+
+    // Inherit addon list from source
+    vector<string> requestedAddons = readProjectAddons(srcPath.string());
+    vector<string> availableAddons;
+    scanAddons(tcRoot, availableAddons);
+    vector<int> addonSelected(availableAddons.size(), 0);
+    vector<string> missingAddons;
+    for (const string& want : requestedAddons) {
+        bool found = false;
+        for (size_t i = 0; i < availableAddons.size(); ++i) {
+            if (availableAddons[i] == want) {
+                addonSelected[i] = 1;
+                found = true;
+                break;
+            }
+        }
+        if (!found) missingAddons.push_back(want);
+    }
+    // Preserve missing addons by appending them as "selected" entries. They
+    // won't be in TRUSSC/addons/, but ProjectGenerator::writeAddonsMake will
+    // still emit them, so the destination's addons.make mirrors the source's.
+    for (const string& m : missingAddons) {
+        availableAddons.push_back(m);
+        addonSelected.push_back(1);
+    }
+
+    string projectName = dstPath.filename().string();
+    string projectDir = dstPath.parent_path().string();
+    if (projectName.empty()) {
+        cerr << "Error: could not derive project name from path '" << dstArg << "'\n";
+        return 1;
+    }
+
+    bool useGit = !noGit && isGitWorkTree(srcPath);
+
+    cout << "Copying " << srcPath.string() << " -> " << dstPath.string()
+         << " [" << (useGit ? "git" : "skip-list")
+         << (dryRun ? ", dry-run" : "") << "]\n";
+
+    if (useGit) {
+        vector<string> files = gitListFiles(srcPath);
+        if (files.empty()) {
+            cerr << "Error: `git ls-files` returned nothing under " << srcPath.string()
+                 << ". Is this a valid TrussC project?\n";
+            return 1;
+        }
+        if (dryRun) {
+            for (const string& f : files) cout << "  " << f << "\n";
+            cout << "(" << files.size() << " file" << (files.size() == 1 ? "" : "s") << ")\n";
+        } else {
+            try {
+                fs::create_directories(projectDir);
+                fs::create_directories(dstPath);
+                for (const string& rel : files) {
+                    fs::path from = srcPath / rel;
+                    fs::path to = dstPath / rel;
+                    // git ls-files may list entries that no longer exist on disk
+                    // (rare, but safer to skip than to fail).
+                    if (!fs::exists(from)) continue;
+                    fs::create_directories(to.parent_path());
+                    if (fs::is_symlink(from) || fs::is_regular_file(from)) {
+                        fs::copy_file(from, to);
+                    } else if (fs::is_directory(from)) {
+                        fs::copy(from, to, fs::copy_options::recursive);
+                    }
+                }
+            } catch (const fs::filesystem_error& e) {
+                cerr << "Error: copy failed: " << e.what() << "\n";
+                return 1;
+            }
+        }
+    } else {
+        // Non-git: enumerate top-level entries with the built-in skip list, then
+        // special-case bin/data/ so user assets survive even though bin/ is skipped.
+        vector<fs::path> toCopy;
+        for (const auto& entry : fs::directory_iterator(srcPath)) {
+            string name = entry.path().filename().string();
+            if (isSkippedInCp(name)) continue;
+            toCopy.push_back(entry.path());
+        }
+        fs::path srcBinData = srcPath / "bin" / "data";
+        bool hasBinData = fs::exists(srcBinData);
+
+        if (dryRun) {
+            for (const auto& p : toCopy) {
+                string name = p.filename().string();
+                cout << "  " << name << (fs::is_directory(p) ? "/" : "") << "\n";
+            }
+            if (hasBinData) cout << "  bin/data/ (preserved)\n";
+            else            cout << "  bin/data/ (created empty)\n";
+        } else {
+            try {
+                fs::create_directories(projectDir);
+                fs::create_directories(dstPath);
+                for (const auto& src : toCopy) {
+                    fs::copy(src, dstPath / src.filename().string(),
+                             fs::copy_options::recursive);
+                }
+                fs::path dstBinData = dstPath / "bin" / "data";
+                if (hasBinData) {
+                    fs::create_directories(dstPath / "bin");
+                    fs::copy(srcBinData, dstBinData, fs::copy_options::recursive);
+                } else {
+                    fs::create_directories(dstBinData);
+                    ofstream gitkeep((dstBinData / ".gitkeep").string());
+                }
+            } catch (const fs::filesystem_error& e) {
+                cerr << "Error: copy failed: " << e.what() << "\n";
+                return 1;
+            }
+        }
+    }
+
+    if (dryRun) {
+        cout << "\n(dry run) Would regenerate at " << dstPath.string() << ":\n"
+             << "  CMakeLists.txt\n"
+             << "  CMakePresets.json\n"
+             << "  addons.make (" << requestedAddons.size() << " addon"
+             << (requestedAddons.size() == 1 ? "" : "s") << ")\n"
+             << "  IDE files for: " << ideStr << "\n";
+        if (!missingAddons.empty()) {
+            cout << "\n(dry run) Warning: these addons are referenced by the source "
+                 << "but not present under " << tcRoot << "/addons/:\n";
+            for (const string& m : missingAddons) cout << "  " << m << "\n";
+        }
+        return 0;
+    }
+
+    ProjectSettings settings;
+    settings.tcRoot = tcRoot;
+    settings.projectName = projectName;
+    settings.projectDir = projectDir;
+    settings.addons = availableAddons;
+    settings.addonSelected = addonSelected;
+    settings.generateWebBuild = web;
+    settings.generateAndroidBuild = android;
+    settings.generateIosBuild = ios;
+    settings.detectBuildEnvironment();
+
+    if (!parseIdeType(ideStr, settings.ideType)) {
+        cerr << "Error: unknown IDE type '" << ideStr
+             << "'. Valid: vscode, cursor, xcode, vs, cmake\n";
+        return 1;
+    }
+
+    if (!missingAddons.empty()) {
+        cerr << "Warning: these addons are referenced by the source but not "
+             << "present under " << tcRoot << "/addons/:\n";
+        for (const string& m : missingAddons) cerr << "  " << m << "\n";
+        cerr << "They were preserved in addons.make. CMake configure will fail "
+             << "until you clone them (e.g. `trusscli addon clone <name>`).\n";
+    }
+
+    cout << "Regenerating build files for new location...\n";
+    ProjectGenerator gen(settings);
+    gen.setLogCallback([](const string& msg) { cout << msg << endl; });
+    string err = gen.update(dstPath.string());
+    if (!err.empty()) {
+        if (!missingAddons.empty()) {
+            cerr << "Note: regen failed, likely due to missing addons above. "
+                 << "Files are still at " << dstPath.string() << ". "
+                 << "Clone the addons then run `trusscli update -p "
+                 << dstPath.string() << "`.\n";
+            return 0;
+        }
+        cerr << "Error: " << err << "\n";
+        return 1;
+    }
+
+    cout << "Project copied: " << dstPath.string() << "\n";
+    return 0;
+}
+
+// =============================================================================
 // Subcommand: update (regenerate project build files)
 // =============================================================================
 
@@ -2324,6 +2686,7 @@ _trusscli() {
     local -a commands addon_commands
     commands=(
         'new:Create a new project'
+        'cp:Copy an existing project'
         'update:Regenerate build files'
         'upgrade:Upgrade TrussC (git pull + rebuild)'
         'addon:Manage addons'
@@ -2370,6 +2733,14 @@ _trusscli() {
         new)
             _files -/
             ;;
+        cp)
+            local -a cp_opts
+            cp_opts=('-n:Dry run' '--dry-run:Dry run' '--no-git:Use built-in skip list'
+                     '--web:Enable web' '--android:Enable android' '--ios:Enable ios'
+                     '--ide:IDE type' '--tc-root:TrussC root')
+            _describe 'option' cp_opts
+            _files -/
+            ;;
         update|build|run|clean)
             local -a opts
             case "$words[2]" in
@@ -2409,7 +2780,7 @@ _trusscli() {
     }
 
     if [[ $cword -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "new update upgrade addon info doctor clean build run completion" -- "$cur"))
+        COMPREPLY=($(compgen -W "new cp update upgrade addon info doctor clean build run completion" -- "$cur"))
         return
     fi
 
@@ -2428,6 +2799,17 @@ _trusscli() {
             ;;
         new)
             COMPREPLY=($(compgen -d -- "$cur"))
+            ;;
+        cp)
+            case "$prev" in
+                --ide) COMPREPLY=($(compgen -W "vscode cursor xcode vs cmake" -- "$cur")); return ;;
+                --tc-root) COMPREPLY=($(compgen -d -- "$cur")); return ;;
+            esac
+            if [[ $cur == -* ]]; then
+                COMPREPLY=($(compgen -W "-n --dry-run --no-git --web --android --ios --ide --tc-root" -- "$cur"))
+            else
+                COMPREPLY=($(compgen -d -- "$cur"))
+            fi
             ;;
         update|build|run|clean)
             case "$prev" in
@@ -2505,6 +2887,7 @@ static void printTopHelp() {
          << "\n"
          << "Commands:\n"
          << "  new <path>                     Create a new project at <path>\n"
+         << "  cp <src> <dst>                 Copy an existing project to <dst>\n"
          << "  update                         Regenerate build files for the project in CWD\n"
          << "  upgrade                        Upgrade TrussC (git pull + rebuild trusscli)\n"
          << "  addon <add|remove>             Manage addons\n"
@@ -2568,6 +2951,7 @@ int main(int argc, char* argv[]) {
     // Dispatch
     vector<string> subArgs(args.begin() + 1, args.end());
     if (first == "new")     return cmdNew(subArgs);
+    if (first == "cp")      return cmdCp(subArgs);
     if (first == "update")  return cmdUpdate(subArgs);
     if (first == "upgrade") return cmdUpgrade(subArgs);
     if (first == "addon")  return cmdAddon(subArgs);
