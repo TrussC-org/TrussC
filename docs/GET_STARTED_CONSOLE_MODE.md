@@ -90,10 +90,44 @@ The simplest option. Works well and avoids Wayland-specific issues (e.g., surfac
 **Install X11:**
 ```bash
 # Debian / Raspbian / Ubuntu
-sudo apt install xserver-xorg xinit
+sudo apt install xserver-xorg xinit libgl1-mesa-dri x11-xserver-utils
 
 # Arch
-sudo pacman -S xorg-server xorg-xinit
+sudo pacman -S xorg-server xorg-xinit mesa xorg-xhost
+```
+
+`x11-xserver-utils` (Arch: `xorg-xhost`) provides `xhost`, which
+`trusscli run --session x11` uses to authorize the local user.
+
+**Optional — window manager for multi-window apps:**
+Single-window apps run fine without a WM. If your app opens file
+dialogs, popups, or extra windows, install a minimal WM (`trusscli`
+auto-detects and uses it):
+```bash
+sudo apt install twm        # Debian / Raspbian
+sudo pacman -S xorg-twm     # Arch
+```
+
+> **Raspberry Pi 5 only** — Pi 5 has no legacy `/dev/fb0`, so Xorg falls back
+> to `fbdev` and fails with "Cannot run in framebuffer mode". Force the
+> `modesetting` driver by creating `/etc/X11/xorg.conf.d/99-vc4.conf`:
+>
+> ```bash
+> sudo tee /etc/X11/xorg.conf.d/99-vc4.conf > /dev/null << 'EOF'
+> Section "OutputClass"
+>     Identifier "vc4"
+>     MatchDriver "vc4"
+>     Driver "modesetting"
+>     Option "PrimaryGPU" "true"
+> EndSection
+> EOF
+> ```
+
+**Permissions** — add yourself to the video / render groups so the X
+server can access the GPU:
+```bash
+sudo usermod -aG video,render $USER
+# Log out and back in for changes to take effect
 ```
 
 **Run:**
@@ -242,6 +276,20 @@ sudo pacman -S mesa
 ### App runs but no display output (labwc, no physical monitor)
 
 This is expected — labwc creates a Wayland session without a physical display. The app runs in the background. Connect a monitor to see the output, or use MCP mode (`TRUSSC_MCP=1`) for headless interaction.
+
+### Monitor goes to sleep / screen blanks during long runs
+
+For installations and kiosk setups you typically want the display always on. X11 has its own screensaver and DPMS (power management) that blank the screen after a few minutes of no input.
+
+Disable them inside the X session — easiest is to add the commands to `~/.xprofile` (sourced when X starts) or run them once after launch:
+
+```bash
+xset s off       # disable screensaver
+xset -dpms       # disable display power management
+xset s noblank   # don't blank the screen
+```
+
+For the Linux console framebuffer (non-X), add `consoleblank=0` to `/boot/firmware/cmdline.txt` and reboot.
 
 ---
 
