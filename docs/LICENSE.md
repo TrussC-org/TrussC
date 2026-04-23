@@ -64,6 +64,7 @@ These libraries are only included if you use the corresponding addon.
 | **LZ4** | 1.10.0 | BSD 2-Clause | Yann Collet | tcxTcv | [LICENSE](https://github.com/lz4/lz4/blob/dev/lib/LICENSE) |
 | **Snappy** | 1.2.1 | BSD 3-Clause | Google Inc. | tcxHap | [COPYING](https://github.com/google/snappy/blob/main/COPYING) |
 | **HAP** | - | BSD 2-Clause | Tom Butterworth, Vidvox LLC | tcxHap | [LICENSE](https://github.com/Vidvox/hap/blob/master/LICENSE) |
+| **Lua** | 5.4.8 | MIT (v5.0 or later) | Lua.org, PUC-Rio | tcxLua | [LICENSE](https://www.lua.org/license.html) |
 
 > **Note**: Box2D v2.3.x以前はzlib Licenseでした。TrussCはv2.4.1を使用しています。
 
@@ -97,7 +98,7 @@ freely, subject to the following restrictions:
     3. This notice may not be removed or altered from any source distribution.
 ```
 
-### MIT License (Dear ImGui, nlohmann/json, pugixml, cpp-httplib, Box2D)
+### MIT License (Dear ImGui, nlohmann/json, pugixml, cpp-httplib, Box2D, Lua)
 
 ```
 MIT License
