@@ -1,0 +1,6 @@
+{
+  "description": "Lua binding",
+  "author": "Fumiya Funatsu",
+  "license": "MIT",
+  "keywords": ["language"]
+}

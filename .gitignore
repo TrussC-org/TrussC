@@ -104,6 +104,7 @@ addons/*
 !addons/tcxCurl
 !addons/tcxImGui
 !addons/tcxHap
+!addons/tcxLua
 !addons/tcxLut
 !addons/tcxOsc
 !addons/tcxQuadWarp
