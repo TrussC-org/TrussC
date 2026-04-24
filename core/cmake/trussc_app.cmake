@@ -549,6 +549,14 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
 
     # Output settings
     if(ANDROID)
+        if(NOT "$ENV{USERPROFILE}" STREQUAL "")
+            set(_USER_DIR "$ENV{USERPROFILE}")
+        else()
+            set(_USER_DIR "$ENV{HOME}")
+        endif()
+
+        string(REPLACE "\\" "/" ANDROID_HOME $ENV{ANDROID_HOME})
+
         # Android: build .so, then package into APK via post-build script
         set(_TC_APK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/bin/android")
         set(_TC_APK_STAGING "${CMAKE_CURRENT_BINARY_DIR}/apk_staging")
@@ -572,16 +580,46 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
             LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${_TC_LIB_DIR}"
         )
 
-        # Post-build: package APK (if Android SDK build-tools available)
-        find_program(_TC_AAPT aapt HINTS "$ENV{ANDROID_HOME}/build-tools/35.0.0" "$ENV{ANDROID_HOME}/build-tools/34.0.0")
-        find_program(_TC_ZIPALIGN zipalign HINTS "$ENV{ANDROID_HOME}/build-tools/35.0.0" "$ENV{ANDROID_HOME}/build-tools/34.0.0")
-        find_program(_TC_APKSIGNER apksigner HINTS "$ENV{ANDROID_HOME}/build-tools/35.0.0" "$ENV{ANDROID_HOME}/build-tools/34.0.0")
+        set(ANDROID_BUILD_TOOLS_DIR "${ANDROID_HOME}/build-tools")
+        FILE(GLOB children RELATIVE "${ANDROID_BUILD_TOOLS_DIR}" "${ANDROID_BUILD_TOOLS_DIR}/*")
+        set(ANDROID_BUILD_TOOLS_LATEST_VERSION "")
+        FOREACH(child ${children})
+            IF(IS_DIRECTORY ${ANDROID_BUILD_TOOLS_DIR}/${child})
+            set(ANDROID_BUILD_TOOLS_LATEST_VERSION "${child}")
+            ENDIF()
+        ENDFOREACH()
+        if(NOT ANDROID_BUILD_TOOLS_LATEST_VERSION STREQUAL "")
+            set(ANDROID_BUILD_TOOLS_DIR "${ANDROID_HOME}/build-tools/${ANDROID_BUILD_TOOLS_LATEST_VERSION}")
+        endif()
 
-        if(_TC_AAPT AND _TC_ZIPALIGN AND _TC_APKSIGNER AND EXISTS "$ENV{HOME}/.android/debug.keystore")
+        # Post-build: package APK (if Android SDK build-tools available)
+        find_program(_TC_AAPT aapt HINTS "${ANDROID_BUILD_TOOLS_DIR}")
+        find_program(_TC_ZIPALIGN zipalign HINTS "${ANDROID_BUILD_TOOLS_DIR}")
+        find_program(_TC_APKSIGNER apksigner HINTS "${ANDROID_BUILD_TOOLS_DIR}")
+        if("${_TC_APKSIGNER}" MATCHES "NOTFOUND$")
+            if(EXISTS "${ANDROID_BUILD_TOOLS_DIR}/apksigner.bat")
+                set(_TC_APKSIGNER "${ANDROID_BUILD_TOOLS_DIR}/apksigner.bat")
+            endif()
+        endif()
+
+        if(_TC_AAPT AND _TC_ZIPALIGN AND _TC_APKSIGNER AND EXISTS "${_USER_DIR}/.android/debug.keystore")
             # Find android.jar
-            set(_TC_ANDROID_JAR "$ENV{ANDROID_HOME}/platforms/android-35/android.jar")
+            set(_TC_ANDROID_JAR_PARENT_DIR "${ANDROID_HOME}/platforms")
+            FILE(GLOB children RELATIVE "${_TC_ANDROID_JAR_PARENT_DIR}" "${_TC_ANDROID_JAR_PARENT_DIR}/*")
+            set(ANDROID_PLATFORM_JAR_LATEST_VERSION "")
+            FOREACH(child ${children})
+                IF(IS_DIRECTORY ${_TC_ANDROID_JAR_PARENT_DIR}/${child})
+                    IF(${child} MATCHES "^android-")
+                        set(ANDROID_PLATFORM_JAR_LATEST_VERSION "${child}")
+                    ENDIF()
+                ENDIF()
+            ENDFOREACH()
+            if(NOT ANDROID_PLATFORM_JAR_LATEST_VERSION STREQUAL "")
+                set(_TC_ANDROID_JAR "${ANDROID_HOME}/platforms/${ANDROID_PLATFORM_JAR_LATEST_VERSION}/android.jar")
+            endif()
+
             if(NOT EXISTS "${_TC_ANDROID_JAR}")
-                set(_TC_ANDROID_JAR "$ENV{ANDROID_HOME}/platforms/android-34/android.jar")
+                message(FATAL_ERROR "[${PROJECT_NAME}] ${ANDROID_HOME}/platforms/andoid-XXX/android.jar not found")
             endif()
 
             file(MAKE_DIRECTORY "${_TC_APK_DIR}")
@@ -597,7 +635,7 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
                     "${_TC_APK_STAGING}"
                 COMMAND ${_TC_ZIPALIGN} -f 4 "${_TC_UNSIGNED}" "${_TC_ALIGNED}"
                 COMMAND ${_TC_APKSIGNER} sign
-                    --ks "$ENV{HOME}/.android/debug.keystore"
+                    --ks "${_USER_DIR}/.android/debug.keystore"
                     --ks-pass pass:android --key-pass pass:android
                     --out "${_TC_APK_OUT}" "${_TC_ALIGNED}"
                 COMMENT "[${PROJECT_NAME}] Packaging APK → ${_TC_APK_OUT}"
