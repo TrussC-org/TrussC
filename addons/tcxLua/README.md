@@ -2,7 +2,7 @@
 
 - Using Lua 5.4.8 sources now (NOTE: Lua 5.5 is currently not supported by Sol2)
 - Using [sol2](https://github.com/ThePhD/sol2) (v3.5.0).
-- Currently LuaJIT support is not implemented yet.
+- LuaJIT v2.1 can be enabled with `-DUSE_LUAJIT=ON` in cmake (using [luajit-cmake](https://github.com/zhaozg/luajit-cmake), disabled by default).
 
 ## Binding coverage
 
@@ -40,3 +40,7 @@ $ cd tools/bingen
 $ uv run main.py ../../../../core/include/TrussC.h
 $ cp trussc_generated.cpp ../../src/generated
 ```
+
+## License
+
+[LICENSE](./LICENSE) is combined result. Please also check [docs/LICENSE_NOTE.md](docs/LICENSE_NOTE.md/) in detail.

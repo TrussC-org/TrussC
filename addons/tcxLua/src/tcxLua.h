@@ -10,6 +10,18 @@ public:
     std::shared_ptr<sol::state> getLuaState();
     void setBindings(const std::shared_ptr<sol::state>& lua);
 
+    /// @brief Get Estimated Lua version by checking Lua feature from Lua code side
+    /// @return 
+    std::string getLuaVersionEstimated(const std::shared_ptr<sol::state>& lua);
+
+    /// @brief Estimate LuaJIT is used or not by checking Lua feature from Lua code side
+    /// @return 
+    bool isLuaJITUsedEstimated(const std::shared_ptr<sol::state>& lua);
+
+    /// @brief Get able to use LuaJIT or not from Sol2
+    /// @return 
+    bool canUseLuaJITFromSol2();
+
 protected:
     void setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua);
     void setTypeBindings(const std::shared_ptr<sol::state>& lua);

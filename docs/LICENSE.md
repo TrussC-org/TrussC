@@ -65,6 +65,8 @@ These libraries are only included if you use the corresponding addon.
 | **Snappy** | 1.2.1 | BSD 3-Clause | Google Inc. | tcxHap | [COPYING](https://github.com/google/snappy/blob/main/COPYING) |
 | **HAP** | - | BSD 2-Clause | Tom Butterworth, Vidvox LLC | tcxHap | [LICENSE](https://github.com/Vidvox/hap/blob/master/LICENSE) |
 | **Lua** | 5.4.8 | MIT (v5.0 or later) | Lua.org, PUC-Rio | tcxLua | [LICENSE](https://www.lua.org/license.html) |
+| **LuaJIT** | 2.1 | MIT | Mike Pall | tcxLua | [COPYRIGHT](https://github.com/LuaJIT/LuaJIT/blob/v2.1/COPYRIGHT) |
+| **luajit-cmake** | [67637d0](https://github.com/zhaozg/luajit-cmake/commit/67637d05afadea249c2ef466ba1273db0f8bb772) (2026/3/18) | MIT | George Zhao (zhaozg) | tcxLua | [LICENSE](https://github.com/zhaozg/luajit-cmake/blob/master/LICENSE) |
 
 > **Note**: Box2D v2.3.x以前はzlib Licenseでした。TrussCはv2.4.1を使用しています。
 
@@ -98,7 +100,7 @@ freely, subject to the following restrictions:
     3. This notice may not be removed or altered from any source distribution.
 ```
 
-### MIT License (Dear ImGui, nlohmann/json, pugixml, cpp-httplib, Box2D, Lua)
+### MIT License (Dear ImGui, nlohmann/json, pugixml, cpp-httplib, Box2D, Lua, LuaJIT, luajit-cmake)
 
 ```
 MIT License

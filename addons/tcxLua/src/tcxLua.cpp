@@ -1,6 +1,10 @@
 #include "tcxLua.h"
 #include "TrussC.h"
 
+#ifdef TCXLUA_USE_LUAJIT
+#define SOL_LUAJIT 1
+#endif // TCXLUA_USE_LUAJIT
+
 #include "sol/sol.hpp"
 using namespace tc;
 
@@ -14,10 +18,21 @@ using namespace tc;
 
 // namespace tcx::lua {
 
+bool tcxLua::canUseLuaJITFromSol2(){
+    #ifdef TCXLUA_USE_LUAJIT
+    return true;
+    #else // TCXLUA_USE_LUAJIT
+    return false;
+    #endif // TCXLUA_USE_LUAJIT
+}
+
 std::shared_ptr<sol::state> tcxLua::getLuaState(){
     std::shared_ptr<sol::state> lua = std::make_shared<sol::state>();
 
-    // lua->open_libraries(sol::lib::base, sol::lib::jit);
+    #ifdef TCXLUA_USE_LUAJIT
+    lua->open_libraries(sol::lib::jit);
+    #endif // TCXLUA_USE_LUAJIT
+
     lua->open_libraries(
         sol::lib::base,
         sol::lib::math,
@@ -28,6 +43,35 @@ std::shared_ptr<sol::state> tcxLua::getLuaState(){
     setBindings(lua);
 
     return lua;
+}
+
+std::string tcxLua::getLuaVersionEstimated(const std::shared_ptr<sol::state>& lua){
+    std::string luaSource = R"LUA(
+        function ___internal_estimated_lua_version()
+            if ({false, [1] = true})[1] then   -- luacheck: ignore 314
+                return 'LuaJIT'
+            elseif 1 / 0 == 1 / '-0' then
+                return 0 + '0' .. '' == '0' and 'Lua 5.4' or 'Lua 5.3'
+            end
+            local f = function() return function() end end
+            return f() == f() and 'Lua 5.2' or 'Lua 5.1'
+        end
+    )LUA";
+    
+    lua->safe_script(luaSource);
+
+    sol::protected_function_result result = ((*lua)["___internal_estimated_lua_version"])();
+
+    if (result.get_type() == sol::type::string){
+        return result.get<std::string>();
+    }else{
+        return "Unknown";
+    }
+}
+
+bool tcxLua::isLuaJITUsedEstimated(const std::shared_ptr<sol::state>& lua){
+    std::string luaVersionStr = getLuaVersionEstimated(lua);
+    return luaVersionStr == "LuaJIT";
 }
 
 void tcxLua::setBindings(const std::shared_ptr<sol::state>& lua){
