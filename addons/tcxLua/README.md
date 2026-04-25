@@ -10,7 +10,7 @@
 
 - trussc (TrussC.h directly defined functions)
 - cmath (common use ones only), tcMath
-- tcPrimitives.h
+- tcPrimitives.h, tcLog.h
 - Vec2, Vec3, Vec4, Mat4, Quaternion
 - Color, colors (constants)
 - Mesh, Shader
