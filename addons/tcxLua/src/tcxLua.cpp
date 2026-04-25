@@ -121,7 +121,6 @@ inline void json_new_index_table_fn(Json& j, T i, const sol::table& tbl){
     }
 }
 
-
 void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     sol::usertype<Vec2> vec2_type = lua->new_usertype<Vec2>("Vec2",
         sol::constructors<Vec2(), Vec2(float, float), Vec2(const Vec2&)>(),
@@ -958,6 +957,116 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         sol::constructors<Font(), Font(const Font&), Font(Font&&)>(),
         "load", &Font::load
     );
+
+    sol::usertype<Rect> rect_t = lua->new_usertype<Rect>("Rect",
+        sol::constructors<Rect(),
+            Rect(float, float, float, float),
+            Rect(float, float, float, float, float),
+            Rect(const Vec2&, float, float),
+            Rect(const Vec3&, float, float),
+            Rect(const Rect&), Rect(Rect&&)>(),
+        "x", &Rect::x,
+        "y", &Rect::y,
+        "width", &Rect::width,
+        "height", &Rect::height,
+        "getRight", &Rect::getRight,
+        "getBottom", &Rect::getBottom,
+        "getCenter", &Rect::getCenter,
+        "getCenterX", &Rect::getCenterX,
+        "getCenterY", &Rect::getCenterY,
+        "contains", &Rect::contains,
+        "intersects", &Rect::intersects
+    );
+    
+    sol::usertype<Path> path_t = lua->new_usertype<Path>("Path",
+        sol::constructors<Path(),
+            Path(const std::vector<Vec2>&),
+            Path(const std::vector<Vec3>&),
+            Path(const Path&), Path(Path&&)>(),
+        "addVertex", sol::overload(
+            [](Path& p, float x, float y){ return p.addVertex(x, y); },
+            [](Path& p, float x, float y, float z){ return p.addVertex(x, y, z); },
+            [](Path& p, const Vec2& v){ return p.addVertex(v); },
+            [](Path& p, const Vec3& v){ return p.addVertex(v); }
+        ),
+        "addVertices", sol::overload(
+            [](Path& p, const std::vector<Vec2>& v){ return p.addVertices(v); },
+            [](Path& p, const std::vector<Vec3>& v){ return p.addVertices(v); }
+        ),
+        "getVertices", [](Path& p){ return p.getVertices(); },
+        "size", &Path::size,
+        "empty", &Path::empty,
+        sol::meta_function::index,  [](Path& p, int index){ return p[index]; },
+        "clear", &Path::clear,
+        "lineTo", sol::overload(
+            [](Path& p, float x, float y){ return p.lineTo(x, y); },
+            [](Path& p, float x, float y, float z){ return p.lineTo(x, y, z); },
+            [](Path& p, const Vec2& v){ return p.lineTo(v); },
+            [](Path& p, const Vec3& v){ return p.lineTo(v); }
+        ),
+        "bezierTo", sol::overload(
+            [](Path& p, const Vec2& a, const Vec2& b, const Vec2& c){ return p.bezierTo(a, b, c); },
+            [](Path& p, const Vec2& a, const Vec2& b, const Vec2& c, int d){ return p.bezierTo(a, b, c, d); },
+            [](Path& p, const Vec3& a, const Vec3& b, const Vec3& c){ return p.bezierTo(a, b, c); },
+            [](Path& p, const Vec3& a, const Vec3& b, const Vec3& c, int d){ return p.bezierTo(a, b, c, d); },
+            [](Path& p,float a,float b,float c,float d,float e,float f){ return p.bezierTo(a,b,c,d,e,f); },
+            [](Path& p,float a,float b,float c,float d,float e,float f,int g){ return p.bezierTo(a,b,c,d,e,f,g); }
+        ),
+        "quadBezierTo", sol::overload(
+            [](Path& p, const Vec2& a, const Vec2& b){ return p.quadBezierTo(a, b); },
+            [](Path& p, const Vec2& a, const Vec2& b, int d){ return p.quadBezierTo(a, b, d); },
+            [](Path& p, const Vec3& a, const Vec3& b){ return p.quadBezierTo(a, b); },
+            [](Path& p, const Vec3& a, const Vec3& b, int d){ return p.quadBezierTo(a, b, d); },
+            [](Path& p,float a,float b,float c,float d){ return p.quadBezierTo(a,b,c,d); },
+            [](Path& p,float a,float b,float c,float d,int g){ return p.quadBezierTo(a,b,c,d,g); }
+        ),
+        "curveTo", sol::overload(
+            [](Path& p, float x, float y){ return p.curveTo(x, y); },
+            [](Path& p, float x, float y, float z){ return p.curveTo(x, y, z); },
+            [](Path& p, const Vec2& v){ return p.curveTo(v); },
+            [](Path& p, const Vec3& v){ return p.curveTo(v); }
+        ),
+        "arc", sol::overload(
+            [](Path& p, const Vec3& v, float a, float b, float c, float d) { return p.arc(v,a,b,c,d); },
+            [](Path& p, const Vec3& v, float a, float b, float c, float d, bool e) { return p.arc(v,a,b,c,d,e); },
+            [](Path& p, const Vec3& v, float a, float b, float c, float d, bool e, int f) { return p.arc(v,a,b,c,d,e,f); },
+            [](Path& p, const Vec2& v, float a, float b, float c, float d, int f) { return p.arc(v,a,b,c,d,f); },
+            [](Path& p, float a, float b, float c, float d, float e, float f, int g) { return p.arc(a,b,c,d,e,f,g); },
+            [](Path& p, float a, float b, float c, float d, float e, float f) { return p.arc(a,b,c,d,e,f); }
+        ),
+        "close", &Path::close,
+        "setClosed", &Path::setClosed,
+        "isClosed", &Path::isClosed,
+        "draw", &Path::draw,
+        "getBounds", &Path::getBounds,
+        "getPerimeter", &Path::getPerimeter
+    );
+
+    sol::usertype<EaseType> easetype_t = lua->new_usertype<EaseType>("EaseType",
+        sol::meta_function::equal_to, [](EaseType a, EaseType b){ return a == b; },
+        "Linear", sol::var(EaseType::Linear),
+        "Quad", sol::var(EaseType::Quad),
+        "Cubic", sol::var(EaseType::Cubic),
+        "Quart", sol::var(EaseType::Quart),
+        "Quint", sol::var(EaseType::Quint),
+        "Sine", sol::var(EaseType::Sine),
+        "Expo", sol::var(EaseType::Expo),
+        "Circ", sol::var(EaseType::Circ),
+        "Back", sol::var(EaseType::Back),
+        "Elastic", sol::var(EaseType::Elastic),
+        "Bounce", sol::var(EaseType::Bounce)
+    );
+    sol::usertype<EaseMode> easemode_t = lua->new_usertype<EaseMode>("EaseMode",
+        sol::meta_function::equal_to, [](EaseMode a, EaseMode b){ return a == b; },
+        "In", sol::var(EaseMode::In),
+        "Out", sol::var(EaseMode::Out),
+        "InOut", sol::var(EaseMode::InOut)
+    );
+
+    defineTween<Tween<float>, float>(lua, "TweenFloat");
+    defineTween<Tween<Vec2>, Vec2>(lua, "TweenVec2");
+    defineTween<Tween<Vec3>, Vec3>(lua, "TweenVec3");
+    defineTween<Tween<Color>, Color>(lua, "TweenColor");
 }
 
 struct Colors{};

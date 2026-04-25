@@ -82,12 +82,14 @@ ignore_classes = {
 additional_overloads = {
     "TrussC.h": {
         "trussc#setColor": [
+            "[](float r){  trussc::setColor(r); }",
             "[](float r, float g, float b){  trussc::setColor(r, g, b); }"
         ],
         "trussc#setColorHSB": [
             "[](float h, float s, float b){  trussc::setColorHSB(h, s, b); }"
         ],
         "trussc#clear": [
+            "[](float r){  trussc::clear(r); }",
             "[](float r, float g, float b){  trussc::clear(r, g, b); }"
         ]
     },

@@ -121,6 +121,8 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua){
         [](float gray, float a){  trussc::clear(gray, a); },
         [](const Color & c){  trussc::clear(c); },
         // NOTE: additional overloads provided by user,
+        [](float r){  trussc::clear(r); },
+        // NOTE: additional overloads provided by user,
         [](float r, float g, float b){  trussc::clear(r, g, b); }
     ));
     // TrussC.h, LINE 397
@@ -142,6 +144,8 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua){
         [](float r, float g, float b, float a){  trussc::setColor(r, g, b, a); },
         [](float gray, float a){  trussc::setColor(gray, a); },
         [](const Color & c){  trussc::setColor(c); },
+        // NOTE: additional overloads provided by user,
+        [](float r){  trussc::setColor(r); },
         // NOTE: additional overloads provided by user,
         [](float r, float g, float b){  trussc::setColor(r, g, b); }
     ));
