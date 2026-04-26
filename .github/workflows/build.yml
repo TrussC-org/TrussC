@@ -96,9 +96,18 @@ jobs:
       # binding usertypes via tcxLua). Pin to r29 to match the local dev
       # baseline and Fumiya's verified setup.
       - name: Set up Android NDK r29
+        id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r29
+
+      # Force ANDROID_NDK_HOME to the freshly-installed r29; the runner image
+      # pre-sets this env var to its bundled (older) NDK, which otherwise wins
+      # over what setup-ndk would export.
+      - name: Force ANDROID_NDK_HOME to r29
+        run: |
+          echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
 
       - name: Cache Android build
         uses: actions/cache@v5
