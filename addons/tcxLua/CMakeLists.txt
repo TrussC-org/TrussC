@@ -47,7 +47,7 @@ add_library(${ADDON_NAME} STATIC
 )
 
 if(USE_LUAJIT)
-    target_compile_definitions(${ADDON_NAME} PRIVATE TCXLUA_USE_LUAJIT=1)
+    target_compile_definitions(${ADDON_NAME} PRIVATE TCXLUA_USE_LUAJIT=1 SOL_LUAJIT=1)
     target_include_directories(${ADDON_NAME} PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/luajit-header/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src

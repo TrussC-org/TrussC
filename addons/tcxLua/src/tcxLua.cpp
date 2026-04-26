@@ -1,10 +1,6 @@
 #include "tcxLua.h"
 #include "TrussC.h"
 
-#ifdef TCXLUA_USE_LUAJIT
-#define SOL_LUAJIT 1
-#endif // TCXLUA_USE_LUAJIT
-
 #include "sol/sol.hpp"
 using namespace tc;
 
