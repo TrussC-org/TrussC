@@ -2,24 +2,13 @@
 
 #include "sol/sol.hpp"
 
-inline int lua_exception_handler(lua_State* L,
-     sol::optional<const std::exception&> maybe_exception,
-     sol::string_view description)
-{
-    // do nothing now
-    return 1;
-}
-
 void tcApp::setup() {
     lua.open_libraries(sol::lib::base);
-    lua.set_exception_handler(lua_exception_handler);
 
     fbo.allocate(getWidth(), getHeight());
 
     reset();
 }
-
-
 
 void tcApp::reset() {
     x = getWidth() / 2;
@@ -99,7 +88,7 @@ void tcApp::draw() {
 void tcApp::keyPressed(int key) {
     if(key == KEY_BACKSPACE){
         if(script.size() > 0){
-            script = script.substr(0, script.length()-1);  
+            script.pop_back();
         }
     }else if(key == 'r' || key == 'R'){
         reset();
