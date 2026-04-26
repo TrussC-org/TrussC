@@ -131,7 +131,7 @@ void tcApp::keyPressed(int key) {
             key = '*';
         }
 
-        char s[2] = {key, '\0'};
+        char s[2] = {static_cast<char>(key), '\0'};
         script = script + std::string(s);
     }
 }
