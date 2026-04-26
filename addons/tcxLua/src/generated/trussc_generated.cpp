@@ -361,7 +361,9 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua){
         [](const std::string & text, Vec3 pos, float scale){  trussc::drawBitmapString(text, pos, scale); },
         [](const std::string & text, float x, float y, float scale){  trussc::drawBitmapString(text, x, y, scale); },
         [](const std::string & text, Vec3 pos, Direction h, Direction v){  trussc::drawBitmapString(text, pos, h, v); },
-        [](const std::string & text, float x, float y, Direction h, Direction v){  trussc::drawBitmapString(text, x, y, h, v); }
+        [](const std::string & text, float x, float y, Direction h, Direction v){  trussc::drawBitmapString(text, x, y, h, v); },
+        // NOTE: additional overloads provided by user,
+        [](const std::string& s, float x, float y){  trussc::drawBitmapString(s, x, y); }
     ));
     // TrussC.h, LINE 1159
     lua->set_function("setTextAlign", [](Direction h, Direction v){  trussc::setTextAlign(h, v); });
@@ -382,7 +384,11 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua){
     // TrussC.h, LINE 1198
     lua->set_function("getBitmapStringBBox", [](const std::string & text){ return trussc::getBitmapStringBBox(text); });
     // TrussC.h, LINE 1203
-    lua->set_function("drawBitmapStringHighlight", [](const std::string & text, float x, float y, const Color & background, const Color & foreground){  trussc::drawBitmapStringHighlight(text, x, y, background, foreground); });
+    lua->set_function("drawBitmapStringHighlight", sol::overload(
+        [](const std::string & text, float x, float y, const Color & background, const Color & foreground){  trussc::drawBitmapStringHighlight(text, x, y, background, foreground); },
+        // NOTE: additional overloads provided by user,
+        [](const std::string& s, float x, float y){  trussc::drawBitmapStringHighlight(s, x, y); }
+    ));
     // TrussC.h, LINE 1309
     lua->set_function("setWindowTitle", [](const std::string & title){  trussc::setWindowTitle(title); });
     // TrussC.h, LINE 1349

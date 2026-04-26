@@ -91,6 +91,12 @@ additional_overloads = {
         "trussc#clear": [
             "[](float r){  trussc::clear(r); }",
             "[](float r, float g, float b){  trussc::clear(r, g, b); }"
+        ],
+        "trussc#drawBitmapString": [
+            "[](const std::string& s, float x, float y){  trussc::drawBitmapString(s, x, y); }"
+        ],
+        "trussc#drawBitmapStringHighlight": [
+            "[](const std::string& s, float x, float y){  trussc::drawBitmapStringHighlight(s, x, y); }"
         ]
     },
 }
