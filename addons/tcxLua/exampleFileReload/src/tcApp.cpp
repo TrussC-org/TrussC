@@ -1,5 +1,21 @@
 #include "tcApp.h"
 
+#if defined(TARGET_OS_IPHONE)
+#define FILE_RELOAD_UNSUPPORTED
+#elif defined(__ANDROID__)
+#define FILE_RELOAD_UNSUPPORTED
+#elif defined(__EMSCRIPTEN__)
+#define FILE_RELOAD_UNSUPPORTED
+#elif defined(_WIN32)
+#define FILE_RELOAD_SUPPORTED
+#elif defined(TARGET_OS_MAC)
+#define FILE_RELOAD_SUPPORTED
+#elif defined(__linux__)
+#define FILE_RELOAD_SUPPORTED
+#else
+#define FILE_RELOAD_UNSUPPORTED
+#endif
+
 #ifdef _WIN32
 std::string sep = "\\";
 #else
@@ -7,6 +23,7 @@ std::string sep = "/";
 #endif // _WIN32
 
 void tcApp::reloadLuaFile(){
+#ifdef FILE_RELOAD_SUPPORTED
     std::string luaScriptBaseName = "sketch.lua";
     std::string luaScriptPath = getDataPath(luaScriptBaseName);
 
@@ -19,6 +36,9 @@ void tcApp::reloadLuaFile(){
     }else{
         tcLogError("tcApp") << "Lua file not found at: " << luaScriptPath;
     }
+#else
+    tcLogWarning("tcApp") << "[file reload] sorry, this platform currently not supported";
+#endif // FILE_RELOAD_SUPPORTED
 }
 
 void tcApp::setup() {
@@ -43,8 +63,13 @@ void tcApp::draw() {
 
     popStyle();
 
+#ifdef FILE_RELOAD_SUPPORTED
     setColor(1.0f);
     drawBitmapString("key [R] to reload lua file", 20, getHeight() - 50);
+#else
+    setColor(1.0f, 1.0f, 0.0f);
+    drawBitmapString("[Error] file reload: sorry, this platform currently not supported", 20, 20);
+#endif // FILE_RELOAD_SUPPORTED
 }
 
 void tcApp::keyPressed(int key) {
