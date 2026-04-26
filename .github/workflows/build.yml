@@ -91,14 +91,23 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The NDK shipped with ubuntu-latest runners is too old for sol2's
+      # libc++ trait checks (causes "substitution failure" errors when
+      # binding usertypes via tcxLua). Pin to r29 to match the local dev
+      # baseline and Fumiya's verified setup.
+      - name: Set up Android NDK r29
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+
       - name: Cache Android build
         uses: actions/cache@v5
         with:
           path: |
             core/build-android
             tools/build
-          key: android-build-v3-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
-          restore-keys: android-build-v3-
+          key: android-build-v4-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
+          restore-keys: android-build-v4-
 
       - name: Install Linux dependencies (for trusscli)
         run: |
