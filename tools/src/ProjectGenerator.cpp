@@ -598,6 +598,24 @@ string ProjectGenerator::update(const string& projectPath_) {
     // Resolve to absolute path so saveJson (which uses getDataPath) works correctly
     string projectPath = fs::absolute(projectPath_).string();
     try {
+        // Safety check: if an existing CMakeLists.txt is present, verify it's
+        // actually a TrussC project before overwriting. This guards against
+        // accidentally clobbering an unrelated project whose directory just
+        // happened to contain a src/ folder.
+        string cmakeListsPath = projectPath + "/CMakeLists.txt";
+        if (fs::exists(cmakeListsPath)) {
+            ifstream in(cmakeListsPath);
+            stringstream ss;
+            ss << in.rdbuf();
+            string content = ss.str();
+            if (content.find("trussc_app(") == string::npos &&
+                content.find("TRUSSC_DIR") == string::npos) {
+                return "'" + cmakeListsPath + "' exists but does not look like "
+                       "a TrussC project (no trussc_app() or TRUSSC_DIR). "
+                       "Refusing to overwrite.";
+            }
+        }
+
         log("Updating project...");
 
         // Update addons.make
@@ -606,7 +624,6 @@ string ProjectGenerator::update(const string& projectPath_) {
 
         // Always regenerate CMakeLists.txt
         // User-specific CMake config goes in local.cmake (loaded by trussc_app())
-        string cmakeListsPath = projectPath + "/CMakeLists.txt";
         log("Writing CMakeLists.txt...");
         {
             ofstream cmake(cmakeListsPath);

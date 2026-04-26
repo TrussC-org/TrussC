@@ -183,6 +183,48 @@ int getSokolMemoryAllocs()               // Number of active allocations in soko
 void releaseSglBuffers()                 // Release sokol_gl vertex/command buffers (auto re-allocated on next draw)
 ```
 
+## Platform
+
+```cpp
+bool Platform::isWeb()                   // True on Web (Emscripten / WASM)
+bool Platform::isMacOS()                 // True on macOS
+bool Platform::isIOS()                   // True on iOS
+bool Platform::isWindows()               // True on Windows
+bool Platform::isAndroid()               // True on Android
+bool Platform::isLinux()                 // True on Linux (desktop, excludes Android)
+bool Platform::isApple()                 // True on any Apple platform (macOS or iOS)
+bool Platform::isMobile()                // True on mobile (iOS or Android)
+bool Platform::isDesktop()               // True on desktop (macOS, Windows, or Linux)
+const char* Platform::name()             // Short platform name: "web" / "macos" / "ios" / "windows" / "android" / "linux" / "unknown"
+```
+
+## Graphics Backend
+
+```cpp
+bool GraphicsBackend::isOpenGL()         // True when running on OpenGL (core or GLES3)
+bool GraphicsBackend::isMetal()          // True when running on Apple Metal
+bool GraphicsBackend::isD3D11()          // True when running on Direct3D 11
+bool GraphicsBackend::isWebGPU()         // True when running on WebGPU
+bool GraphicsBackend::isWebGL2()         // True when running on WebGL2 (GLES3 under Emscripten)
+bool GraphicsBackend::isVulkan()         // True when running on Vulkan
+const char* GraphicsBackend::name()      // Short backend name: "opengl" / "gles3" / "webgl2" / "d3d11" / "metal" / "webgpu" / "vulkan" / "dummy" / "unknown"
+```
+
+## Build Info
+
+```cpp
+const char* BuildInfo::date()            // Build date in "YYYY-MM-DD" form (local time, CMake configure time)
+const char* BuildInfo::time()            // Build time in "HH:MM:SS" form (local time)
+const char* BuildInfo::dateTime()        // Build date-time in "YYYY-MM-DD HH:MM:SS" form (local time)
+int64_t BuildInfo::timestamp()           // Build timestamp as Unix seconds (UTC)
+int BuildInfo::year()                    // Build year (e.g. 2026)
+int BuildInfo::month()                   // Build month (1-12)
+int BuildInfo::day()                     // Build day of month (1-31)
+int BuildInfo::hour()                    // Build hour (0-23)
+int BuildInfo::minute()                  // Build minute (0-59)
+int BuildInfo::second()                  // Build second (0-59)
+```
+
 ## Time - Elapsed
 
 ```cpp

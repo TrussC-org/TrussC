@@ -186,6 +186,18 @@ public:
         storeUniform(slot, v.data(), v.size() * sizeof(Vec2));
     }
 
+    // NOTE: unlike Vec2/Vec4 overloads this one is NOT zero-copy. std140
+    // uniform block layout aligns each vec3[] element to 16B, so we pad
+    // every Vec3 to a Vec4 (w=0) before sending. GLSL side can still
+    // declare the array as `uniform vec3 arr[N];` — the alignment is
+    // handled under the hood.
+    void setUniform(int slot, const std::vector<Vec3>& v) {
+        std::vector<Vec4> padded;
+        padded.reserve(v.size());
+        for (const auto& e : v) padded.emplace_back(e.x, e.y, e.z, 0.0f);
+        storeUniform(slot, padded.data(), padded.size() * sizeof(Vec4));
+    }
+
     void setUniform(int slot, const std::vector<Vec4>& v) {
         storeUniform(slot, v.data(), v.size() * sizeof(Vec4));
     }

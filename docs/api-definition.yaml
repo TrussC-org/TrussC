@@ -1665,6 +1665,276 @@ categories:
         snippet: "getNodeCount()"
 
   # ==========================================================================
+  # Platform
+  # ==========================================================================
+  - id: platform
+    name: "Platform"
+    name_ja: "プラットフォーム"
+    name_ko: "플랫폼"
+    functions:
+      - name: "Platform::isWeb"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on Web (Emscripten / WASM)"
+        description_ja: "Web (Emscripten / WASM) で true"
+        description_ko: "Web (Emscripten / WASM)에서 true"
+        sketch: true
+        snippet: "Platform::isWeb()"
+      - name: "Platform::isMacOS"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on macOS"
+        description_ja: "macOSで true"
+        description_ko: "macOS에서 true"
+        sketch: true
+        snippet: "Platform::isMacOS()"
+      - name: "Platform::isIOS"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on iOS"
+        description_ja: "iOSで true"
+        description_ko: "iOS에서 true"
+        sketch: true
+        snippet: "Platform::isIOS()"
+      - name: "Platform::isWindows"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on Windows"
+        description_ja: "Windowsで true"
+        description_ko: "Windows에서 true"
+        sketch: true
+        snippet: "Platform::isWindows()"
+      - name: "Platform::isAndroid"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on Android"
+        description_ja: "Androidで true"
+        description_ko: "Android에서 true"
+        sketch: true
+        snippet: "Platform::isAndroid()"
+      - name: "Platform::isLinux"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on Linux (desktop, excludes Android)"
+        description_ja: "Linux (デスクトップ、Android除く) で true"
+        description_ko: "Linux (데스크톱, Android 제외)에서 true"
+        sketch: true
+        snippet: "Platform::isLinux()"
+      - name: "Platform::isApple"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on any Apple platform (macOS or iOS)"
+        description_ja: "Apple系 (macOS または iOS) で true"
+        description_ko: "Apple 플랫폼 (macOS 또는 iOS)에서 true"
+        sketch: true
+        snippet: "Platform::isApple()"
+      - name: "Platform::isMobile"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on mobile (iOS or Android)"
+        description_ja: "モバイル (iOS または Android) で true"
+        description_ko: "모바일 (iOS 또는 Android)에서 true"
+        sketch: true
+        snippet: "Platform::isMobile()"
+      - name: "Platform::isDesktop"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on desktop (macOS, Windows, or Linux)"
+        description_ja: "デスクトップ (macOS, Windows, Linux) で true"
+        description_ko: "데스크톱 (macOS, Windows, Linux)에서 true"
+        sketch: true
+        snippet: "Platform::isDesktop()"
+      - name: "Platform::name"
+        return: "const char*"
+        signatures:
+          - params: ""
+        description: "Short platform name: \"web\" / \"macos\" / \"ios\" / \"windows\" / \"android\" / \"linux\" / \"unknown\""
+        description_ja: "短いプラットフォーム名: \"web\" / \"macos\" / \"ios\" / \"windows\" / \"android\" / \"linux\" / \"unknown\""
+        description_ko: "짧은 플랫폼 이름: \"web\" / \"macos\" / \"ios\" / \"windows\" / \"android\" / \"linux\" / \"unknown\""
+        sketch: true
+        snippet: "Platform::name()"
+
+  # ==========================================================================
+  # Graphics Backend
+  # ==========================================================================
+  - id: graphics_backend
+    name: "Graphics Backend"
+    name_ja: "グラフィックスバックエンド"
+    name_ko: "그래픽스 백엔드"
+    functions:
+      - name: "GraphicsBackend::isOpenGL"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True when running on OpenGL (core or GLES3)"
+        description_ja: "OpenGL (coreまたはGLES3) で動作中なら true"
+        description_ko: "OpenGL (core 또는 GLES3)에서 실행 중이면 true"
+        sketch: true
+        snippet: "GraphicsBackend::isOpenGL()"
+      - name: "GraphicsBackend::isMetal"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True when running on Apple Metal"
+        description_ja: "Apple Metalで動作中なら true"
+        description_ko: "Apple Metal에서 실행 중이면 true"
+        sketch: true
+        snippet: "GraphicsBackend::isMetal()"
+      - name: "GraphicsBackend::isD3D11"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True when running on Direct3D 11"
+        description_ja: "Direct3D 11で動作中なら true"
+        description_ko: "Direct3D 11에서 실행 중이면 true"
+        sketch: true
+        snippet: "GraphicsBackend::isD3D11()"
+      - name: "GraphicsBackend::isWebGPU"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True when running on WebGPU"
+        description_ja: "WebGPUで動作中なら true"
+        description_ko: "WebGPU에서 실행 중이면 true"
+        sketch: true
+        snippet: "GraphicsBackend::isWebGPU()"
+      - name: "GraphicsBackend::isWebGL2"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True when running on WebGL2 (GLES3 under Emscripten)"
+        description_ja: "WebGL2 (EmscriptenのGLES3) で動作中なら true"
+        description_ko: "WebGL2 (Emscripten의 GLES3)에서 실행 중이면 true"
+        sketch: true
+        snippet: "GraphicsBackend::isWebGL2()"
+      - name: "GraphicsBackend::isVulkan"
+        return: bool
+        signatures:
+          - params: ""
+        description: "True when running on Vulkan"
+        description_ja: "Vulkanで動作中なら true"
+        description_ko: "Vulkan에서 실행 중이면 true"
+        sketch: true
+        snippet: "GraphicsBackend::isVulkan()"
+      - name: "GraphicsBackend::name"
+        return: "const char*"
+        signatures:
+          - params: ""
+        description: "Short backend name: \"opengl\" / \"gles3\" / \"webgl2\" / \"d3d11\" / \"metal\" / \"webgpu\" / \"vulkan\" / \"dummy\" / \"unknown\""
+        description_ja: "短いバックエンド名: \"opengl\" / \"gles3\" / \"webgl2\" / \"d3d11\" / \"metal\" / \"webgpu\" / \"vulkan\" / \"dummy\" / \"unknown\""
+        description_ko: "짧은 백엔드 이름: \"opengl\" / \"gles3\" / \"webgl2\" / \"d3d11\" / \"metal\" / \"webgpu\" / \"vulkan\" / \"dummy\" / \"unknown\""
+        sketch: true
+        snippet: "GraphicsBackend::name()"
+
+  # ==========================================================================
+  # Build Info
+  # ==========================================================================
+  - id: build_info
+    name: "Build Info"
+    name_ja: "ビルド情報"
+    name_ko: "빌드 정보"
+    functions:
+      - name: "BuildInfo::date"
+        return: "const char*"
+        signatures:
+          - params: ""
+        description: "Build date in \"YYYY-MM-DD\" form (local time, CMake configure time)"
+        description_ja: "ビルド日 \"YYYY-MM-DD\" 形式 (ローカル時刻、CMake configure 時点)"
+        description_ko: "빌드 날짜 \"YYYY-MM-DD\" 형식 (로컬 시간, CMake 구성 시점)"
+        sketch: true
+        snippet: "BuildInfo::date()"
+      - name: "BuildInfo::time"
+        return: "const char*"
+        signatures:
+          - params: ""
+        description: "Build time in \"HH:MM:SS\" form (local time)"
+        description_ja: "ビルド時刻 \"HH:MM:SS\" 形式 (ローカル時刻)"
+        description_ko: "빌드 시간 \"HH:MM:SS\" 형식 (로컬 시간)"
+        sketch: true
+        snippet: "BuildInfo::time()"
+      - name: "BuildInfo::dateTime"
+        return: "const char*"
+        signatures:
+          - params: ""
+        description: "Build date-time in \"YYYY-MM-DD HH:MM:SS\" form (local time)"
+        description_ja: "ビルド日時 \"YYYY-MM-DD HH:MM:SS\" 形式 (ローカル時刻)"
+        description_ko: "빌드 날짜와 시간 \"YYYY-MM-DD HH:MM:SS\" 형식 (로컬 시간)"
+        sketch: true
+        snippet: "BuildInfo::dateTime()"
+      - name: "BuildInfo::timestamp"
+        return: int64_t
+        signatures:
+          - params: ""
+        description: "Build timestamp as Unix seconds (UTC)"
+        description_ja: "ビルド時刻のUnix秒 (UTC)"
+        description_ko: "빌드 타임스탬프 Unix 초 (UTC)"
+        sketch: true
+        snippet: "BuildInfo::timestamp()"
+      - name: "BuildInfo::year"
+        return: int
+        signatures:
+          - params: ""
+        description: "Build year (e.g. 2026)"
+        description_ja: "ビルド年 (例: 2026)"
+        description_ko: "빌드 연도 (예: 2026)"
+        sketch: true
+        snippet: "BuildInfo::year()"
+      - name: "BuildInfo::month"
+        return: int
+        signatures:
+          - params: ""
+        description: "Build month (1-12)"
+        description_ja: "ビルド月 (1-12)"
+        description_ko: "빌드 월 (1-12)"
+        sketch: true
+        snippet: "BuildInfo::month()"
+      - name: "BuildInfo::day"
+        return: int
+        signatures:
+          - params: ""
+        description: "Build day of month (1-31)"
+        description_ja: "ビルド日 (1-31)"
+        description_ko: "빌드 일 (1-31)"
+        sketch: true
+        snippet: "BuildInfo::day()"
+      - name: "BuildInfo::hour"
+        return: int
+        signatures:
+          - params: ""
+        description: "Build hour (0-23)"
+        description_ja: "ビルド時 (0-23)"
+        description_ko: "빌드 시 (0-23)"
+        sketch: true
+        snippet: "BuildInfo::hour()"
+      - name: "BuildInfo::minute"
+        return: int
+        signatures:
+          - params: ""
+        description: "Build minute (0-59)"
+        description_ja: "ビルド分 (0-59)"
+        description_ko: "빌드 분 (0-59)"
+        sketch: true
+        snippet: "BuildInfo::minute()"
+      - name: "BuildInfo::second"
+        return: int
+        signatures:
+          - params: ""
+        description: "Build second (0-59)"
+        description_ja: "ビルド秒 (0-59)"
+        description_ko: "빌드 초 (0-59)"
+        sketch: true
+        snippet: "BuildInfo::second()"
+
+  # ==========================================================================
   # Time - Elapsed
   # ==========================================================================
   - id: time_elapsed
@@ -5255,9 +5525,15 @@ categories:
             params_simple: "slot, c"
           - params: "int slot, const vector<float>& v"
             params_simple: "slot, v"
-        description: "Set uniform variable by slot"
-        description_ja: "スロット番号でUniform変数を設定"
-        description_ko: "슬롯별로 유니폼 변수를 설정"
+          - params: "int slot, const vector<Vec2>& v"
+            params_simple: "slot, v"
+          - params: "int slot, const vector<Vec3>& v"
+            params_simple: "slot, v"
+          - params: "int slot, const vector<Vec4>& v"
+            params_simple: "slot, v"
+        description: "Set uniform variable by slot (vector overloads send arrays; Vec3 array is padded to Vec4 per std140)"
+        description_ja: "スロット番号でUniform変数を設定 (vector版は配列送信、Vec3配列はstd140に合わせて内部でVec4にパディング)"
+        description_ko: "슬롯별로 유니폼 변수를 설정 (vector 오버로드는 배열 전송, Vec3 배열은 std140에 맞춰 내부적으로 Vec4로 패딩)"
         sketch: false
 
       - name: setTexture
@@ -10161,3 +10437,240 @@ types:
     of_equivalent: "ofEasyCam"
     of_type_category: "camera-types"
     sketch: false
+
+  - name: Platform
+    description: "Compile-time OS detection. All methods are constexpr and resolve at compile time based on the target platform."
+    description_ja: "コンパイル時のOS判定。全メソッドはconstexprで、ターゲットプラットフォームに応じてコンパイル時に解決される"
+    description_ko: "컴파일 타임 OS 감지. 모든 메서드는 constexpr이며 대상 플랫폼에 따라 컴파일 타임에 결정됨"
+    sketch: true
+    static_methods:
+      - name: isWeb
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on Web (Emscripten / WASM)"
+        description_ja: "Web (Emscripten / WASM) で true"
+        description_ko: "Web (Emscripten / WASM)에서 true"
+        snippet: "Platform::isWeb()"
+      - name: isMacOS
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on macOS"
+        description_ja: "macOSで true"
+        description_ko: "macOS에서 true"
+        snippet: "Platform::isMacOS()"
+      - name: isIOS
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on iOS"
+        description_ja: "iOSで true"
+        description_ko: "iOS에서 true"
+        snippet: "Platform::isIOS()"
+      - name: isWindows
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on Windows"
+        description_ja: "Windowsで true"
+        description_ko: "Windows에서 true"
+        snippet: "Platform::isWindows()"
+      - name: isAndroid
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on Android"
+        description_ja: "Androidで true"
+        description_ko: "Android에서 true"
+        snippet: "Platform::isAndroid()"
+      - name: isLinux
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on Linux (desktop, excludes Android)"
+        description_ja: "Linux (デスクトップ、Android除く) で true"
+        description_ko: "Linux (데스크톱, Android 제외)에서 true"
+        snippet: "Platform::isLinux()"
+      - name: isApple
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on any Apple platform (macOS or iOS)"
+        description_ja: "Apple系 (macOS または iOS) で true"
+        description_ko: "Apple 플랫폼 (macOS 또는 iOS)에서 true"
+        snippet: "Platform::isApple()"
+      - name: isMobile
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on mobile (iOS or Android)"
+        description_ja: "モバイル (iOS または Android) で true"
+        description_ko: "모바일 (iOS 또는 Android)에서 true"
+        snippet: "Platform::isMobile()"
+      - name: isDesktop
+        return: bool
+        signatures:
+          - params: ""
+        description: "True on desktop (macOS, Windows, or Linux)"
+        description_ja: "デスクトップ (macOS, Windows, Linux) で true"
+        description_ko: "데스크톱 (macOS, Windows, Linux)에서 true"
+        snippet: "Platform::isDesktop()"
+      - name: name
+        return: "const char*"
+        signatures:
+          - params: ""
+        description: "Short platform name: \"web\" / \"macos\" / \"ios\" / \"windows\" / \"android\" / \"linux\" / \"unknown\""
+        description_ja: "短いプラットフォーム名: \"web\" / \"macos\" / \"ios\" / \"windows\" / \"android\" / \"linux\" / \"unknown\""
+        description_ko: "짧은 플랫폼 이름: \"web\" / \"macos\" / \"ios\" / \"windows\" / \"android\" / \"linux\" / \"unknown\""
+        snippet: "Platform::name()"
+
+  - name: GraphicsBackend
+    description: "Runtime sokol_gfx backend query. Values are meaningful only after sg_setup() has completed (i.e. after the first setup() call)."
+    description_ja: "sokol_gfxのバックエンドを実行時に判定。値はsg_setup()完了後 (最初のsetup()以降) のみ有効"
+    description_ko: "sokol_gfx 백엔드의 런타임 쿼리. 값은 sg_setup() 완료 후 (첫 setup() 이후) 에만 유효"
+    sketch: true
+    static_methods:
+      - name: isOpenGL
+        return: bool
+        signatures:
+          - params: ""
+        description: "True when running on OpenGL (core or GLES3)"
+        description_ja: "OpenGL (coreまたはGLES3) で動作中なら true"
+        description_ko: "OpenGL (core 또는 GLES3)에서 실행 중이면 true"
+        snippet: "GraphicsBackend::isOpenGL()"
+      - name: isMetal
+        return: bool
+        signatures:
+          - params: ""
+        description: "True when running on Apple Metal"
+        description_ja: "Apple Metalで動作中なら true"
+        description_ko: "Apple Metal에서 실행 중이면 true"
+        snippet: "GraphicsBackend::isMetal()"
+      - name: isD3D11
+        return: bool
+        signatures:
+          - params: ""
+        description: "True when running on Direct3D 11"
+        description_ja: "Direct3D 11で動作中なら true"
+        description_ko: "Direct3D 11에서 실행 중이면 true"
+        snippet: "GraphicsBackend::isD3D11()"
+      - name: isWebGPU
+        return: bool
+        signatures:
+          - params: ""
+        description: "True when running on WebGPU"
+        description_ja: "WebGPUで動作中なら true"
+        description_ko: "WebGPU에서 실행 중이면 true"
+        snippet: "GraphicsBackend::isWebGPU()"
+      - name: isWebGL2
+        return: bool
+        signatures:
+          - params: ""
+        description: "True when running on WebGL2 (GLES3 under Emscripten)"
+        description_ja: "WebGL2 (EmscriptenのGLES3) で動作中なら true"
+        description_ko: "WebGL2 (Emscripten의 GLES3)에서 실행 중이면 true"
+        snippet: "GraphicsBackend::isWebGL2()"
+      - name: isVulkan
+        return: bool
+        signatures:
+          - params: ""
+        description: "True when running on Vulkan"
+        description_ja: "Vulkanで動作中なら true"
+        description_ko: "Vulkan에서 실행 중이면 true"
+        snippet: "GraphicsBackend::isVulkan()"
+      - name: name
+        return: "const char*"
+        signatures:
+          - params: ""
+        description: "Short backend name: \"opengl\" / \"gles3\" / \"webgl2\" / \"d3d11\" / \"metal\" / \"webgpu\" / \"vulkan\" / \"dummy\" / \"unknown\""
+        description_ja: "短いバックエンド名: \"opengl\" / \"gles3\" / \"webgl2\" / \"d3d11\" / \"metal\" / \"webgpu\" / \"vulkan\" / \"dummy\" / \"unknown\""
+        description_ko: "짧은 백엔드 이름: \"opengl\" / \"gles3\" / \"webgl2\" / \"d3d11\" / \"metal\" / \"webgpu\" / \"vulkan\" / \"dummy\" / \"unknown\""
+        snippet: "GraphicsBackend::name()"
+
+  - name: BuildInfo
+    description: "Build timestamp info injected as compile definitions by trussc_app() at CMake configure time. Refreshes when cmake reconfigures. Date/time fields are local time; timestamp is UTC Unix seconds."
+    description_ja: "trussc_app() がCMake configure 時にコンパイル定義として注入するビルド時刻情報。cmake 再実行で更新される。date/time系フィールドは configure マシンのローカル時刻、timestamp は UTC Unix秒"
+    description_ko: "trussc_app()이 CMake 구성 시점에 컴파일 정의로 주입하는 빌드 타임스탬프. cmake 재구성 시 갱신됨. date/time 필드는 로컬 시간, timestamp는 UTC Unix 초"
+    sketch: true
+    static_methods:
+      - name: date
+        return: "const char*"
+        signatures:
+          - params: ""
+        description: "Build date in \"YYYY-MM-DD\" form (local time)"
+        description_ja: "ビルド日 \"YYYY-MM-DD\" 形式 (ローカル時刻)"
+        description_ko: "빌드 날짜 \"YYYY-MM-DD\" 형식 (로컬 시간)"
+        snippet: "BuildInfo::date()"
+      - name: time
+        return: "const char*"
+        signatures:
+          - params: ""
+        description: "Build time in \"HH:MM:SS\" form (local time)"
+        description_ja: "ビルド時刻 \"HH:MM:SS\" 形式 (ローカル時刻)"
+        description_ko: "빌드 시간 \"HH:MM:SS\" 형식 (로컬 시간)"
+        snippet: "BuildInfo::time()"
+      - name: dateTime
+        return: "const char*"
+        signatures:
+          - params: ""
+        description: "Build date-time in \"YYYY-MM-DD HH:MM:SS\" form (local time)"
+        description_ja: "ビルド日時 \"YYYY-MM-DD HH:MM:SS\" 形式 (ローカル時刻)"
+        description_ko: "빌드 날짜와 시간 \"YYYY-MM-DD HH:MM:SS\" 형식 (로컬 시간)"
+        snippet: "BuildInfo::dateTime()"
+      - name: timestamp
+        return: int64_t
+        signatures:
+          - params: ""
+        description: "Build timestamp as Unix seconds (UTC)"
+        description_ja: "ビルド時刻のUnix秒 (UTC)"
+        description_ko: "빌드 타임스탬프 Unix 초 (UTC)"
+        snippet: "BuildInfo::timestamp()"
+      - name: year
+        return: int
+        signatures:
+          - params: ""
+        description: "Build year (e.g. 2026)"
+        description_ja: "ビルド年 (例: 2026)"
+        description_ko: "빌드 연도 (예: 2026)"
+        snippet: "BuildInfo::year()"
+      - name: month
+        return: int
+        signatures:
+          - params: ""
+        description: "Build month (1-12)"
+        description_ja: "ビルド月 (1-12)"
+        description_ko: "빌드 월 (1-12)"
+        snippet: "BuildInfo::month()"
+      - name: day
+        return: int
+        signatures:
+          - params: ""
+        description: "Build day of month (1-31)"
+        description_ja: "ビルド日 (1-31)"
+        description_ko: "빌드 일 (1-31)"
+        snippet: "BuildInfo::day()"
+      - name: hour
+        return: int
+        signatures:
+          - params: ""
+        description: "Build hour (0-23)"
+        description_ja: "ビルド時 (0-23)"
+        description_ko: "빌드 시 (0-23)"
+        snippet: "BuildInfo::hour()"
+      - name: minute
+        return: int
+        signatures:
+          - params: ""
+        description: "Build minute (0-59)"
+        description_ja: "ビルド分 (0-59)"
+        description_ko: "빌드 분 (0-59)"
+        snippet: "BuildInfo::minute()"
+      - name: second
+        return: int
+        signatures:
+          - params: ""
+        description: "Build second (0-59)"
+        description_ja: "ビルド秒 (0-59)"
+        description_ko: "빌드 초 (0-59)"
+        snippet: "BuildInfo::second()"

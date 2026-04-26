@@ -649,7 +649,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         [](Shader& f, int s, const Color& v){ return f.setUniform(s, v); },
         [](Shader& f, int s, const std::vector<float>& v){ return f.setUniform(s, v); },
         [](Shader& f, int s, const std::vector<Vec2>& v){ return f.setUniform(s, v); },
-        // [](Shader& f, int s, const std::vector<Vec3>& v){ return f.setUniform(s, v); }, // not exist: https://github.com/TrussC-org/TrussC/issues/51
+        [](Shader& f, int s, const std::vector<Vec3>& v){ return f.setUniform(s, v); },
         [](Shader& f, int s, const std::vector<Vec4>& v){ return f.setUniform(s, v); },
         [](Shader& f, int s, const void* data, size_t size){ return f.setUniform(s, data, size); }
     );
