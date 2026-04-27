@@ -1,6 +1,7 @@
 #include "TrussC.h"
 #include "tcApp.h"
 #include "ProjectGenerator.h"
+#include "VsDetector.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -195,8 +196,8 @@ struct CaptureResult { int exitCode; string output; };
 #ifdef _WIN32
 #define tc_popen  _popen
 #define tc_pclose _pclose
-// _popen() は cmd.exe 経由で実行される。cmd.exe では /dev/null が存在しないため
-// 2>/dev/null は使えない。代わりに NUL を使う。
+// _popen() runs commands via cmd.exe on Windows. /dev/null does not exist
+// in cmd.exe, so use NUL instead.
 #define TC_DEV_NULL "NUL"
 #define TC_WHICH "where"
 #else
@@ -294,10 +295,21 @@ static CheckResult checkCompiler() {
         r.detail = "(g++)";
     }
 #elif defined(_WIN32)
-    auto [code, out] = captureCommand("cl 2>&1");
-    r.detail = code == 0 ? "(MSVC)" : "not found";
-    if (code != 0) {
+    // Detect MSVC via vswhere instead of running cl.exe directly,
+    // because cl.exe is only in PATH inside a Developer Command Prompt.
+    auto vsVersions = VsDetector::detectInstalledVersions();
+    // Filter out the dummy fallback entry (no vcToolsVersion means not actually found)
+    bool found = false;
+    for (const auto& vs : vsVersions) {
+        if (!vs.vcToolsVersion.empty()) {
+            r.detail = vs.displayName + " (MSVC " + vs.vcToolsVersion + ")";
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
         r.status = CheckStatus::Error;
+        r.detail = "not found";
         r.hint = "Install Visual Studio with C++ workload";
     }
 #endif
