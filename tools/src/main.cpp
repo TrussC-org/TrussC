@@ -195,9 +195,15 @@ struct CaptureResult { int exitCode; string output; };
 #ifdef _WIN32
 #define tc_popen  _popen
 #define tc_pclose _pclose
+// _popen() は cmd.exe 経由で実行される。cmd.exe では /dev/null が存在しないため
+// 2>/dev/null は使えない。代わりに NUL を使う。
+#define TC_DEV_NULL "NUL"
+#define TC_WHICH "where"
 #else
 #define tc_popen  popen
 #define tc_pclose pclose
+#define TC_DEV_NULL "/dev/null"
+#define TC_WHICH "which"
 #endif
 
 static CaptureResult captureCommand(const string& cmd) {
@@ -226,7 +232,7 @@ struct CheckResult {
 
 static CheckResult checkCMake() {
     CheckResult r{"CMake", CheckStatus::OK, "", "", true};
-    auto [code, out] = captureCommand("cmake --version 2>/dev/null");
+    auto [code, out] = captureCommand("cmake --version 2>" TC_DEV_NULL);
     if (code != 0 || out.empty()) {
         r.status = CheckStatus::Error;
         r.detail = "not found";
@@ -347,7 +353,7 @@ static CheckResult checkPlatformSDK() {
 
 static CheckResult checkEmscripten() {
     CheckResult r{"Emscripten", CheckStatus::OK, "", ""};
-    auto [code, out] = captureCommand("emcc --version 2>/dev/null");
+    auto [code, out] = captureCommand("emcc --version 2>" TC_DEV_NULL);
     if (code != 0 || out.empty()) {
         r.status = CheckStatus::Error;
         r.detail = "not found";
@@ -379,7 +385,7 @@ static CheckResult checkAndroidNDK() {
 
 static CheckResult checkNinja() {
     CheckResult r{"Ninja", CheckStatus::OK, "", ""};
-    auto [code, out] = captureCommand("ninja --version 2>/dev/null");
+    auto [code, out] = captureCommand("ninja --version 2>" TC_DEV_NULL);
     if (code != 0 || out.empty()) {
         r.status = CheckStatus::Warning;
         r.detail = "not found (optional — cmake uses make as fallback)";
@@ -397,7 +403,7 @@ static CheckResult checkNinja() {
 
 static CheckResult checkGit() {
     CheckResult r{"Git", CheckStatus::OK, "", ""};
-    auto [code, out] = captureCommand("git --version 2>/dev/null");
+    auto [code, out] = captureCommand("git --version 2>" TC_DEV_NULL);
     if (code != 0 || out.empty()) {
         r.status = CheckStatus::Warning;
         r.detail = "not found";
@@ -699,7 +705,7 @@ static bool isSkippedInCp(const string& name) {
 
 // Returns true if `path` sits inside a git work tree.
 static bool isGitWorkTree(const fs::path& path) {
-    string cmd = "git -C \"" + path.string() + "\" rev-parse --is-inside-work-tree 2>/dev/null";
+    string cmd = "git -C \"" + path.string() + "\" rev-parse --is-inside-work-tree 2>" TC_DEV_NULL;
     auto [code, out] = captureCommand(cmd);
     if (code != 0) return false;
     // Expect "true\n"
@@ -715,7 +721,7 @@ static bool isGitWorkTree(const fs::path& path) {
 static vector<string> gitListFiles(const fs::path& srcRoot) {
     // -c: cached (tracked), -o: others (untracked), --exclude-standard: honor .gitignore
     string cmd = "git -C \"" + srcRoot.string() +
-                 "\" ls-files -co --exclude-standard 2>/dev/null";
+                 "\" ls-files -co --exclude-standard 2>" TC_DEV_NULL;
     auto [code, out] = captureCommand(cmd);
     vector<string> files;
     if (code != 0) return files;
@@ -2642,7 +2648,7 @@ static int cmdRun(const vector<string>& args) {
         }
         cout << "Launching web server for " << htmlPath << " ...\n";
         // Try emrun first (Emscripten's built-in server)
-        auto [emrunCode, emrunOut] = captureCommand("which emrun 2>/dev/null");
+        auto [emrunCode, emrunOut] = captureCommand(TC_WHICH " emrun 2>" TC_DEV_NULL);
         if (emrunCode == 0 && !emrunOut.empty()) {
             return runProcess({"emrun", htmlPath});
         }
