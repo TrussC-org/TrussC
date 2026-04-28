@@ -1,6 +1,7 @@
 #include "TrussC.h"
 #include "tcApp.h"
 #include "ProjectGenerator.h"
+#include "VsDetector.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -195,9 +196,15 @@ struct CaptureResult { int exitCode; string output; };
 #ifdef _WIN32
 #define tc_popen  _popen
 #define tc_pclose _pclose
+// _popen() runs commands via cmd.exe on Windows. /dev/null does not exist
+// in cmd.exe, so use NUL instead.
+#define TC_DEV_NULL "NUL"
+#define TC_WHICH "where"
 #else
 #define tc_popen  popen
 #define tc_pclose pclose
+#define TC_DEV_NULL "/dev/null"
+#define TC_WHICH "which"
 #endif
 
 static CaptureResult captureCommand(const string& cmd) {
@@ -226,7 +233,7 @@ struct CheckResult {
 
 static CheckResult checkCMake() {
     CheckResult r{"CMake", CheckStatus::OK, "", "", true};
-    auto [code, out] = captureCommand("cmake --version 2>/dev/null");
+    auto [code, out] = captureCommand("cmake --version 2>" TC_DEV_NULL);
     if (code != 0 || out.empty()) {
         r.status = CheckStatus::Error;
         r.detail = "not found";
@@ -288,10 +295,21 @@ static CheckResult checkCompiler() {
         r.detail = "(g++)";
     }
 #elif defined(_WIN32)
-    auto [code, out] = captureCommand("cl 2>&1");
-    r.detail = code == 0 ? "(MSVC)" : "not found";
-    if (code != 0) {
+    // Detect MSVC via vswhere instead of running cl.exe directly,
+    // because cl.exe is only in PATH inside a Developer Command Prompt.
+    auto vsVersions = VsDetector::detectInstalledVersions();
+    // Filter out the dummy fallback entry (no vcToolsVersion means not actually found)
+    bool found = false;
+    for (const auto& vs : vsVersions) {
+        if (!vs.vcToolsVersion.empty()) {
+            r.detail = vs.displayName + " (MSVC " + vs.vcToolsVersion + ")";
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
         r.status = CheckStatus::Error;
+        r.detail = "not found";
         r.hint = "Install Visual Studio with C++ workload";
     }
 #endif
@@ -347,7 +365,7 @@ static CheckResult checkPlatformSDK() {
 
 static CheckResult checkEmscripten() {
     CheckResult r{"Emscripten", CheckStatus::OK, "", ""};
-    auto [code, out] = captureCommand("emcc --version 2>/dev/null");
+    auto [code, out] = captureCommand("emcc --version 2>" TC_DEV_NULL);
     if (code != 0 || out.empty()) {
         r.status = CheckStatus::Error;
         r.detail = "not found";
@@ -379,7 +397,7 @@ static CheckResult checkAndroidNDK() {
 
 static CheckResult checkNinja() {
     CheckResult r{"Ninja", CheckStatus::OK, "", ""};
-    auto [code, out] = captureCommand("ninja --version 2>/dev/null");
+    auto [code, out] = captureCommand("ninja --version 2>" TC_DEV_NULL);
     if (code != 0 || out.empty()) {
         r.status = CheckStatus::Warning;
         r.detail = "not found (optional — cmake uses make as fallback)";
@@ -397,7 +415,7 @@ static CheckResult checkNinja() {
 
 static CheckResult checkGit() {
     CheckResult r{"Git", CheckStatus::OK, "", ""};
-    auto [code, out] = captureCommand("git --version 2>/dev/null");
+    auto [code, out] = captureCommand("git --version 2>" TC_DEV_NULL);
     if (code != 0 || out.empty()) {
         r.status = CheckStatus::Warning;
         r.detail = "not found";
@@ -699,7 +717,7 @@ static bool isSkippedInCp(const string& name) {
 
 // Returns true if `path` sits inside a git work tree.
 static bool isGitWorkTree(const fs::path& path) {
-    string cmd = "git -C \"" + path.string() + "\" rev-parse --is-inside-work-tree 2>/dev/null";
+    string cmd = "git -C \"" + path.string() + "\" rev-parse --is-inside-work-tree 2>" TC_DEV_NULL;
     auto [code, out] = captureCommand(cmd);
     if (code != 0) return false;
     // Expect "true\n"
@@ -715,7 +733,7 @@ static bool isGitWorkTree(const fs::path& path) {
 static vector<string> gitListFiles(const fs::path& srcRoot) {
     // -c: cached (tracked), -o: others (untracked), --exclude-standard: honor .gitignore
     string cmd = "git -C \"" + srcRoot.string() +
-                 "\" ls-files -co --exclude-standard 2>/dev/null";
+                 "\" ls-files -co --exclude-standard 2>" TC_DEV_NULL;
     auto [code, out] = captureCommand(cmd);
     vector<string> files;
     if (code != 0) return files;
@@ -2642,7 +2660,7 @@ static int cmdRun(const vector<string>& args) {
         }
         cout << "Launching web server for " << htmlPath << " ...\n";
         // Try emrun first (Emscripten's built-in server)
-        auto [emrunCode, emrunOut] = captureCommand("which emrun 2>/dev/null");
+        auto [emrunCode, emrunOut] = captureCommand(TC_WHICH " emrun 2>" TC_DEV_NULL);
         if (emrunCode == 0 && !emrunOut.empty()) {
             return runProcess({"emrun", htmlPath});
         }

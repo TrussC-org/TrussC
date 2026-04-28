@@ -16,6 +16,10 @@ include(${TRUSSC_DIR}/cmake/trussc_app.cmake)
 # as "TrussC Project Generator" in Finder / Dock so the GUI mode still reads
 # naturally. NAME is required because the folder is "tools" — without it
 # trussc_app() would derive the binary name from the folder.
+# trusscli is a CLI tool — always keep the console visible so stdout/stderr
+# work properly in CMD, PowerShell, and terminal emulators.
+add_compile_definitions(TRUSSC_SHOW_CONSOLE)
+
 trussc_app(
     NAME trusscli
     DISPLAY_NAME "TrussC Project Generator"
