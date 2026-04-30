@@ -1458,10 +1458,12 @@ inline Orientation operator&(Orientation a, Orientation b) {
     return static_cast<Orientation>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
 }
 
-// Set supported orientations (iOS only)
-inline void setOrientation(Orientation mask) {
-    sapp_ios_set_supported_orientations(static_cast<uint32_t>(mask));
-}
+// Set supported orientations.
+// iOS:     UIInterfaceOrientationMask via sokol_app
+// Android: Activity.setRequestedOrientation via JNI
+// Desktop / Web: no-op
+// (Implementation lives in core/platform/<plat>/tcPlatform_<plat>.{cpp,mm})
+void setOrientation(Orientation mask);
 
 // ---------------------------------------------------------------------------
 // Window information (size corresponding to coordinate system)

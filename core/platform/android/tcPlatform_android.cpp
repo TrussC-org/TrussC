@@ -66,6 +66,58 @@ bool getKeepScreenOn() {
     return keepScreenOn_;
 }
 
+// ---------------------------------------------------------------------------
+// Orientation: maps Orientation flags to ActivityInfo.SCREEN_ORIENTATION_* and
+// calls Activity.setRequestedOrientation via JNI.
+// ---------------------------------------------------------------------------
+void setOrientation(Orientation mask) {
+    auto* activity = (ANativeActivity*)sapp_android_get_native_activity();
+    if (!activity) return;
+
+    uint32_t m = (uint32_t)mask;
+    bool portrait        = m & (uint32_t)Orientation::Portrait;
+    bool portraitFlipped = m & (uint32_t)Orientation::PortraitUpsideDown;
+    bool landscapeLeft   = m & (uint32_t)Orientation::LandscapeLeft;
+    bool landscapeRight  = m & (uint32_t)Orientation::LandscapeRight;
+
+    int orientation;
+    if (portrait && portraitFlipped && landscapeLeft && landscapeRight) {
+        orientation = 10; // SCREEN_ORIENTATION_FULL_SENSOR
+    } else if (portrait && landscapeLeft && landscapeRight) {
+        orientation = 13; // SCREEN_ORIENTATION_USER (no upside-down)
+    } else if (portrait && portraitFlipped) {
+        orientation = 7;  // SCREEN_ORIENTATION_SENSOR_PORTRAIT
+    } else if (landscapeLeft && landscapeRight) {
+        orientation = 6;  // SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    } else if (portrait) {
+        orientation = 1;  // SCREEN_ORIENTATION_PORTRAIT
+    } else if (portraitFlipped) {
+        orientation = 9;  // SCREEN_ORIENTATION_REVERSE_PORTRAIT
+    } else if (landscapeLeft) {
+        orientation = 0;  // SCREEN_ORIENTATION_LANDSCAPE
+    } else if (landscapeRight) {
+        orientation = 8;  // SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+    } else {
+        orientation = -1; // SCREEN_ORIENTATION_UNSPECIFIED
+    }
+
+    JNIEnv* env;
+    bool attached = false;
+    if (activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        activity->vm->AttachCurrentThread(&env, nullptr);
+        attached = true;
+    }
+
+    jclass actCls = env->GetObjectClass(activity->clazz);
+    jmethodID setReq = env->GetMethodID(actCls, "setRequestedOrientation", "(I)V");
+    if (setReq) {
+        env->CallVoidMethod(activity->clazz, setReq, orientation);
+    }
+    env->DeleteLocalRef(actCls);
+
+    if (attached) activity->vm->DetachCurrentThread();
+}
+
 IVec2 getWindowPosition() {
     logWarning("Platform") << "getWindowPosition() is not supported on Android";
     return IVec2(-1, -1);
@@ -387,18 +439,45 @@ float getBatteryLevel() {
 }
 
 bool isBatteryCharging() {
+    // BatteryManager.isCharging() is unreliable: it can return false while
+    // plugged in (USB-data mode, full battery, etc). The robust pattern is
+    // to read the sticky ACTION_BATTERY_CHANGED intent and look at
+    // EXTRA_PLUGGED — non-zero means a charger is attached.
     JniScope jni;
     if (!jni) return false;
 
-    jobject bm = jni.getSystemService("batterymanager");
-    if (!bm) return false;
+    jclass intentFilterCls = jni.env->FindClass("android/content/IntentFilter");
+    jmethodID ifCtor = jni.env->GetMethodID(intentFilterCls, "<init>",
+        "(Ljava/lang/String;)V");
+    jstring batteryChangedAction = jni.env->NewStringUTF(
+        "android.intent.action.BATTERY_CHANGED");
+    jobject filter = jni.env->NewObject(intentFilterCls, ifCtor,
+        batteryChangedAction);
 
-    jclass bmClass = jni.env->GetObjectClass(bm);
-    jmethodID isCharging = jni.env->GetMethodID(bmClass, "isCharging", "()Z");
-    jboolean charging = jni.env->CallBooleanMethod(bm, isCharging);
+    jclass ctxCls = jni.env->FindClass("android/content/Context");
+    jmethodID registerReceiver = jni.env->GetMethodID(ctxCls, "registerReceiver",
+        "(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;)"
+        "Landroid/content/Intent;");
+    jobject intent = jni.env->CallObjectMethod(jni.activity(),
+        registerReceiver, nullptr, filter);
 
-    jni.env->DeleteLocalRef(bmClass);
-    jni.env->DeleteLocalRef(bm);
+    bool charging = false;
+    if (intent) {
+        jclass intentCls = jni.env->GetObjectClass(intent);
+        jmethodID getIntExtra = jni.env->GetMethodID(intentCls, "getIntExtra",
+            "(Ljava/lang/String;I)I");
+        jstring pluggedKey = jni.env->NewStringUTF("plugged");
+        jint plugged = jni.env->CallIntMethod(intent, getIntExtra, pluggedKey, 0);
+        charging = (plugged != 0);
+        jni.env->DeleteLocalRef(pluggedKey);
+        jni.env->DeleteLocalRef(intentCls);
+        jni.env->DeleteLocalRef(intent);
+    }
+
+    jni.env->DeleteLocalRef(ctxCls);
+    jni.env->DeleteLocalRef(filter);
+    jni.env->DeleteLocalRef(batteryChangedAction);
+    jni.env->DeleteLocalRef(intentFilterCls);
 
     return charging;
 }

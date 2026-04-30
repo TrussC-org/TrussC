@@ -54,6 +54,9 @@ float getDisplayScaleFactor() {
 void setImmersiveMode(bool enabled) { (void)enabled; }
 bool getImmersiveMode() { return false; }
 
+// Orientation (no-op on desktop)
+void setOrientation(Orientation mask) { (void)mask; }
+
 // Keep screen on (IOPMAssertion)
 static bool keepScreenOn_ = false;
 static IOPMAssertionID keepScreenOnAssertion_ = kIOPMNullAssertionID;

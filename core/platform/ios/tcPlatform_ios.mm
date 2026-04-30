@@ -388,6 +388,13 @@ void setKeepScreenOn(bool enabled) {
 
 bool getKeepScreenOn() { return keepScreenOn_; }
 
+// ---------------------------------------------------------------------------
+// Orientation
+// ---------------------------------------------------------------------------
+void setOrientation(Orientation mask) {
+    sapp_ios_set_supported_orientations(static_cast<uint32_t>(mask));
+}
+
 void bringWindowToFront() {
     // no-op: iOS apps are always foreground when running
 }
