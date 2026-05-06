@@ -355,6 +355,21 @@ struct Host {
             return false;
         }
 
+        // Seed the new App's size from the current window. The normal launch
+        // path does this once after appSetupFunc (see runApp / runHotReloadApp
+        // bootstrapping in TrussC.h), but sokol won't fire a windowResized
+        // event during reload because the actual window dimensions haven't
+        // changed — without this, App::setup() runs while getWidth()==0 and
+        // every child gets squished into a zero-sized rect.
+        {
+            int w = sapp_width();
+            int h = sapp_height();
+            float dpiScale = sapp_dpi_scale();
+            float scale = internal::pixelPerfectMode ? 1.0f : (1.0f / dpiScale);
+            newApp->handleWindowResized(static_cast<int>(w * scale),
+                                        static_cast<int>(h * scale));
+        }
+
         reloadCount++;
         watcher.markBuilt();
         watcher.rescan(srcDir);

@@ -281,6 +281,11 @@ endif()
         else()
             target_compile_options(guest PRIVATE -O0)
         endif()
+
+        # Guest: precompile TrussC.h. The header is the dominant cost when
+        # parsing each guest .cpp (~2s for ~2700 lines), so caching it once
+        # per build dramatically shortens reload turnaround.
+        target_precompile_headers(guest PRIVATE <TrussC.h>)
         # Guest: resolve TrussC symbols at runtime from the Host process.
         # macOS/Linux use flat namespace lookup; Windows uses import library.
         if(APPLE)
