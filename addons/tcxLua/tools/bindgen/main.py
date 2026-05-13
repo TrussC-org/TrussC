@@ -72,6 +72,9 @@ ignore_functions = {
 ignore_namespaces = {
     "TrussC.h": [
         "trussc::internal"
+    ],
+    "tcMath.h": [
+        "trussc::internal"
     ]
 }
 

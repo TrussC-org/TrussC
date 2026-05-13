@@ -53,8 +53,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua){
     lua->set_function("angleDifference", [](float angle1, float angle2){ return trussc::angleDifference(angle1, angle2); });
     // tcMath.h, LINE 1060
     lua->set_function("angleDifferenceDeg", [](float deg1, float deg2){ return trussc::angleDifferenceDeg(deg1, deg2); });
-    // tcMath.h, LINE 1073
-    lua->set_function("getRandomEngine", [](){ return trussc::internal::getRandomEngine(); });
     // tcMath.h, LINE 1080
     // tcMath.h, LINE 1086
     // tcMath.h, LINE 1092
@@ -400,7 +398,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua){
     // TrussC.h, LINE 1364
     lua->set_function("getCursor", [](){ return trussc::getCursor(); });
     // TrussC.h, LINE 1370
-    // TrussC.h, LINE 2524
+    // TrussC.h, LINE 2526
     lua->set_function("bindCursorImage", sol::overload(
         [](Cursor cursor, int width, int height, const unsigned char * pixels, int hotspotX, int hotspotY){  trussc::bindCursorImage(cursor, width, height, pixels, hotspotX, hotspotY); },
         [](Cursor cursor, const Image & image, int hotspotX, int hotspotY){  trussc::bindCursorImage(cursor, image, hotspotX, hotspotY); }
@@ -419,89 +417,89 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua){
     lua->set_function("isFullscreen", [](){ return trussc::isFullscreen(); });
     // TrussC.h, LINE 1436
     lua->set_function("toggleFullscreen", [](){  trussc::toggleFullscreen(); });
-    // TrussC.h, LINE 1462
+    // TrussC.h, LINE 1466
     lua->set_function("setOrientation", [](Orientation mask){  trussc::setOrientation(mask); });
-    // TrussC.h, LINE 1471
+    // TrussC.h, LINE 1473
     lua->set_function("getWindowWidth", [](){ return trussc::getWindowWidth(); });
-    // TrussC.h, LINE 1479
+    // TrussC.h, LINE 1481
     lua->set_function("getWindowHeight", [](){ return trussc::getWindowHeight(); });
-    // TrussC.h, LINE 1487
+    // TrussC.h, LINE 1489
     lua->set_function("getWindowSize", [](){ return trussc::getWindowSize(); });
-    // TrussC.h, LINE 1492
+    // TrussC.h, LINE 1494
     lua->set_function("getAspectRatio", [](){ return trussc::getAspectRatio(); });
-    // TrussC.h, LINE 1500
+    // TrussC.h, LINE 1502
     lua->set_function("getElapsedTime", [](){ return trussc::getElapsedTime(); });
-    // TrussC.h, LINE 1513
+    // TrussC.h, LINE 1515
     lua->set_function("getUpdateCount", [](){ return trussc::getUpdateCount(); });
-    // TrussC.h, LINE 1518
+    // TrussC.h, LINE 1520
     lua->set_function("getDrawCount", [](){ return trussc::getDrawCount(); });
-    // TrussC.h, LINE 1523
+    // TrussC.h, LINE 1525
     lua->set_function("getFrameCount", [](){ return trussc::getFrameCount(); });
-    // TrussC.h, LINE 1527
+    // TrussC.h, LINE 1529
     lua->set_function("getDeltaTime", [](){ return trussc::getDeltaTime(); });
-    // TrussC.h, LINE 1532
+    // TrussC.h, LINE 1534
     lua->set_function("getFrameRate", [](){ return trussc::getFrameRate(); });
-    // TrussC.h, LINE 1559
+    // TrussC.h, LINE 1561
     lua->set_function("getSokolMemoryBytes", [](){ return trussc::getSokolMemoryBytes(); });
-    // TrussC.h, LINE 1562
+    // TrussC.h, LINE 1564
     lua->set_function("getSokolMemoryAllocs", [](){ return trussc::getSokolMemoryAllocs(); });
-    // TrussC.h, LINE 1567
+    // TrussC.h, LINE 1569
     lua->set_function("releaseSglBuffers", [](){  trussc::releaseSglBuffers(); });
-    // TrussC.h, LINE 1576
+    // TrussC.h, LINE 1578
     lua->set_function("getGlobalMouseX", [](){ return trussc::getGlobalMouseX(); });
-    // TrussC.h, LINE 1581
+    // TrussC.h, LINE 1583
     lua->set_function("getGlobalMouseY", [](){ return trussc::getGlobalMouseY(); });
-    // TrussC.h, LINE 1586
+    // TrussC.h, LINE 1588
     lua->set_function("getGlobalPMouseX", [](){ return trussc::getGlobalPMouseX(); });
-    // TrussC.h, LINE 1591
+    // TrussC.h, LINE 1593
     lua->set_function("getGlobalPMouseY", [](){ return trussc::getGlobalPMouseY(); });
-    // TrussC.h, LINE 1596
+    // TrussC.h, LINE 1598
     lua->set_function("isMousePressed", [](){ return trussc::isMousePressed(); });
-    // TrussC.h, LINE 1601
+    // TrussC.h, LINE 1603
     lua->set_function("getMouseButton", [](){ return trussc::getMouseButton(); });
-    // TrussC.h, LINE 1606
+    // TrussC.h, LINE 1608
     lua->set_function("isKeyPressed", [](int key){ return trussc::isKeyPressed(key); });
-    // TrussC.h, LINE 1611
-    lua->set_function("getMouseX", [](){ return trussc::getMouseX(); });
-    // TrussC.h, LINE 1612
-    lua->set_function("getMouseY", [](){ return trussc::getMouseY(); });
     // TrussC.h, LINE 1613
-    lua->set_function("getMousePos", [](){ return trussc::getMousePos(); });
+    lua->set_function("getMouseX", [](){ return trussc::getMouseX(); });
     // TrussC.h, LINE 1614
+    lua->set_function("getMouseY", [](){ return trussc::getMouseY(); });
+    // TrussC.h, LINE 1615
+    lua->set_function("getMousePos", [](){ return trussc::getMousePos(); });
+    // TrussC.h, LINE 1616
     lua->set_function("getGlobalMousePos", [](){ return trussc::getGlobalMousePos(); });
-    // TrussC.h, LINE 1622
+    // TrussC.h, LINE 1624
     lua->set_function("setTouchAsMouse", [](bool enabled){  trussc::setTouchAsMouse(enabled); });
-    // TrussC.h, LINE 1623
+    // TrussC.h, LINE 1625
     lua->set_function("getTouchAsMouse", [](){ return trussc::getTouchAsMouse(); });
-    // TrussC.h, LINE 1630
+    // TrussC.h, LINE 1632
     lua->set_function("getBackendName", [](){ return trussc::getBackendName(); });
-    // TrussC.h, LINE 1644
+    // TrussC.h, LINE 1646
     lua->set_function("getMemoryUsage", [](){ return trussc::getMemoryUsage(); });
-    // TrussC.h, LINE 1684
-    lua->set_function("getNodeCount", [](){ return trussc::getNodeCount(); });
-    // TrussC.h, LINE 1685
-    lua->set_function("getTextureCount", [](){ return trussc::getTextureCount(); });
     // TrussC.h, LINE 1686
+    lua->set_function("getNodeCount", [](){ return trussc::getNodeCount(); });
+    // TrussC.h, LINE 1687
+    lua->set_function("getTextureCount", [](){ return trussc::getTextureCount(); });
+    // TrussC.h, LINE 1688
     lua->set_function("getFboCount", [](){ return trussc::getFboCount(); });
-    // TrussC.h, LINE 1710
+    // TrussC.h, LINE 1712
     lua->set_function("setFps", [](float fps){  trussc::setFps(fps); });
-    // TrussC.h, LINE 1720
+    // TrussC.h, LINE 1722
     lua->set_function("setIndependentFps", [](float updateFps, float drawFps){  trussc::setIndependentFps(updateFps, drawFps); });
-    // TrussC.h, LINE 1729
+    // TrussC.h, LINE 1731
     lua->set_function("getFpsSettings", [](){ return trussc::getFpsSettings(); });
-    // TrussC.h, LINE 1749
+    // TrussC.h, LINE 1751
     lua->set_function("getFps", [](){ return trussc::getFps(); });
-    // TrussC.h, LINE 1755
+    // TrussC.h, LINE 1757
     lua->set_function("redraw", [](int count){  trussc::redraw(count); });
-    // TrussC.h, LINE 1763
+    // TrussC.h, LINE 1765
     lua->set_function("requestExitApp", [](){  trussc::requestExitApp(); });
-    // TrussC.h, LINE 1769
+    // TrussC.h, LINE 1771
     lua->set_function("exitApp", [](){  trussc::exitApp(); });
-    // TrussC.h, LINE 1779
+    // TrussC.h, LINE 1781
     lua->set_function("grabScreen", [](Pixels & outPixels){ return trussc::grabScreen(outPixels); });
-    // TrussC.h, LINE 1918
+    // TrussC.h, LINE 1920
     lua->set_function("registerInspectionTools", [](){  trussc::mcp::registerInspectionTools(); });
-    // TrussC.h, LINE 1919
+    // TrussC.h, LINE 1921
     lua->set_function("registerDebuggerTools", [](){  trussc::mcp::registerDebuggerTools(); });
     // tcPrimitives.h, LINE 11
     lua->set_function("createPlane", [](float width, float height, int cols, int rows){ return trussc::createPlane(width, height, cols, rows); });
@@ -521,12 +519,12 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua){
     lua->set_function("createIcoSphere", [](float radius, int subdivisions){ return trussc::createIcoSphere(radius, subdivisions); });
     // tcPrimitives.h, LINE 430
     lua->set_function("createTorus", [](float radius, float tubeRadius, int sides, int rings){ return trussc::createTorus(radius, tubeRadius, sides, rings); });
-    // TrussC.h, LINE 2568
-    // TrussC.h, LINE 2577
-    // TrussC.h, LINE 2581
-    // TrussC.h, LINE 2588
-    // TrussC.h, LINE 2592
-    // TrussC.h, LINE 2596
+    // TrussC.h, LINE 2570
+    // TrussC.h, LINE 2579
+    // TrussC.h, LINE 2583
+    // TrussC.h, LINE 2590
+    // TrussC.h, LINE 2594
+    // TrussC.h, LINE 2598
     lua->set_function("drawBox", sol::overload(
         [](float w, float h, float d){  trussc::drawBox(w, h, d); },
         [](float size){  trussc::drawBox(size); },
@@ -535,17 +533,17 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua){
         [](Vec3 pos, float size){  trussc::drawBox(pos, size); },
         [](float x, float y, float z, float size){  trussc::drawBox(x, y, z, size); }
     ));
-    // TrussC.h, LINE 2600
-    // TrussC.h, LINE 2609
-    // TrussC.h, LINE 2616
+    // TrussC.h, LINE 2602
+    // TrussC.h, LINE 2611
+    // TrussC.h, LINE 2618
     lua->set_function("drawSphere", sol::overload(
         [](float radius, int resolution){  trussc::drawSphere(radius, resolution); },
         [](Vec3 pos, float radius, int resolution){  trussc::drawSphere(pos, radius, resolution); },
         [](float x, float y, float z, float radius, int resolution){  trussc::drawSphere(x, y, z, radius, resolution); }
     ));
-    // TrussC.h, LINE 2620
-    // TrussC.h, LINE 2629
-    // TrussC.h, LINE 2636
+    // TrussC.h, LINE 2622
+    // TrussC.h, LINE 2631
+    // TrussC.h, LINE 2638
     lua->set_function("drawCone", sol::overload(
         [](float radius, float height, int resolution){  trussc::drawCone(radius, height, resolution); },
         [](Vec3 pos, float radius, float height, int resolution){  trussc::drawCone(pos, radius, height, resolution); },
