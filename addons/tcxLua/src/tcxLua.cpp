@@ -658,6 +658,16 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     pix_format_type["U8"] = sol::var(PixelFormat::U8);
     pix_format_type["F32"] = sol::var(PixelFormat::F32);
 
+    lua->new_usertype<BlendMode>("BlendMode",
+        sol::meta_function::equal_to, [](BlendMode a, BlendMode b){ return a == b; },
+        "Alpha", sol::var(BlendMode::Alpha),
+        "Add", sol::var(BlendMode::Add),
+        "Multiply", sol::var(BlendMode::Multiply),
+        "Screen", sol::var(BlendMode::Screen),
+        "Subtract", sol::var(BlendMode::Subtract),
+        "Disabled", sol::var(BlendMode::Disabled)
+    );
+
     sol::usertype<Shader> shader_type = lua->new_usertype<Shader>("Shader",
         sol::constructors<Shader()>() // FIXME: move constructor?
     );
