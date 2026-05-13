@@ -665,7 +665,20 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         string(REGEX REPLACE "^([^a-zA-Z])" "app\\1" _TC_SAFE_NAME "${PROJECT_NAME}")
         set(TC_APP_PACKAGE "com.trussc.${_TC_SAFE_NAME}")
         set(TC_APP_LIB_NAME "${PROJECT_NAME}")
-        set(_TC_MANIFEST_TEMPLATE "${TRUSSC_DIR}/resources/android/AndroidManifest.xml.in")
+        # Allow projects to ship their own manifest under android/. If
+        # AndroidManifest.xml.in is present, it's run through configure_file
+        # (so @TC_APP_PACKAGE@ / @TC_APP_LIB_NAME@ still expand); a plain
+        # AndroidManifest.xml is copied as-is. Falls back to the framework
+        # default, which carries every permission the core APIs might need.
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/android/AndroidManifest.xml.in")
+            set(_TC_MANIFEST_TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/android/AndroidManifest.xml.in")
+            message(STATUS "[${PROJECT_NAME}] Using project-local android/AndroidManifest.xml.in")
+        elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/android/AndroidManifest.xml")
+            set(_TC_MANIFEST_TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/android/AndroidManifest.xml")
+            message(STATUS "[${PROJECT_NAME}] Using project-local android/AndroidManifest.xml")
+        else()
+            set(_TC_MANIFEST_TEMPLATE "${TRUSSC_DIR}/resources/android/AndroidManifest.xml.in")
+        endif()
         set(_TC_MANIFEST_OUT "${CMAKE_CURRENT_BINARY_DIR}/AndroidManifest.xml")
         configure_file("${_TC_MANIFEST_TEMPLATE}" "${_TC_MANIFEST_OUT}" @ONLY)
 
