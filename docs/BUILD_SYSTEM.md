@@ -109,6 +109,27 @@ Notes:
 - Data files: Use `adb push` to transfer assets to the app's internal storage.
 - **If `cmake --preset android` fails after trusscli update**, try running the command manually from the terminal.
 
+**Custom AndroidManifest.xml:**
+
+By default the build uses TrussC's bundled manifest, which declares every
+permission the core APIs (`acquireWifiLock`, `acquireMulticastLock`,
+`vibrate`, etc.) might need. This is convenient for local development but
+not ideal for store-published apps or MDM-managed devices, where requesting
+unused permissions can cause review pushback or policy rejection.
+
+To override, drop your own manifest into the project at one of:
+
+- `android/AndroidManifest.xml.in` — run through `configure_file` so
+  `@TC_APP_PACKAGE@` and `@TC_APP_LIB_NAME@` still expand. Recommended.
+- `android/AndroidManifest.xml` — copied verbatim (you fill in the
+  `package` and `lib_name` yourself).
+
+If neither file exists, the bundled "everything" manifest at
+`core/resources/android/AndroidManifest.xml.in` is used unchanged.
+
+Suggested workflow: copy the bundled manifest into `android/` and strip
+out the `<uses-permission>` lines you don't actually need.
+
 **iOS Build (beta):**
 
 Requires:

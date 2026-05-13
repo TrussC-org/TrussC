@@ -30,15 +30,85 @@ void setImmersiveMode(bool enabled) {
     auto* activity = (ANativeActivity*)sapp_android_get_native_activity();
     if (!activity) return;
 
-    // ANativeActivity_setWindowFlags is thread-safe (posts to UI thread internally).
-    // FLAG_FULLSCREEN (0x0400) hides the status bar.
-    // Navigation bar hiding requires View.setSystemUiVisibility on UI thread (JNI + Runnable),
-    // which is complex from pure NDK. For now, hide status bar only.
+    // Status bar: FLAG_FULLSCREEN (0x0400). ANativeActivity_setWindowFlags
+    // is thread-safe (the framework posts it to the UI thread internally).
     if (enabled) {
-        ANativeActivity_setWindowFlags(activity, 0x00000400 /*FLAG_FULLSCREEN*/, 0);
+        ANativeActivity_setWindowFlags(activity, 0x00000400, 0);
     } else {
-        ANativeActivity_setWindowFlags(activity, 0, 0x00000400 /*FLAG_FULLSCREEN*/);
+        ANativeActivity_setWindowFlags(activity, 0, 0x00000400);
     }
+
+    // Navigation bar: WindowInsetsController (API 30+). The older
+    // View.setSystemUiVisibility() flags are deprecated as of API 30 and
+    // were observed to be effectively no-ops on API 36 (Android 16) — the
+    // bar stayed visible even with IMMERSIVE_STICKY set. We target API 30+
+    // here; earlier devices keep the status-bar-only behavior above.
+    //
+    // BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE = 2: hidden bars temporarily
+    // re-appear when the user swipes from the edge and auto-hide again
+    // after a moment, so a kiosk operator can't accidentally trigger Back
+    // by brushing the bottom of the screen.
+    //
+    // Type bitmask values (WindowInsets.Type):
+    //   statusBars()     = 0x1
+    //   navigationBars() = 0x2
+    //   captionBar()     = 0x4   (kept in mask for cleanliness)
+    JNIEnv* env;
+    bool attached = false;
+    if (activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        activity->vm->AttachCurrentThread(&env, nullptr);
+        attached = true;
+    }
+
+    jclass actCls = env->GetObjectClass(activity->clazz);
+    jmethodID getWindow = env->GetMethodID(actCls, "getWindow",
+        "()Landroid/view/Window;");
+    jobject window = env->CallObjectMethod(activity->clazz, getWindow);
+    if (window) {
+        jclass winCls = env->GetObjectClass(window);
+
+        // Window.setDecorFitsSystemWindows(false) is the API 30+ pre-req
+        // for letting the app draw under the system bars at all.
+        jmethodID setDecorFits = env->GetMethodID(winCls,
+            "setDecorFitsSystemWindows", "(Z)V");
+        if (setDecorFits) {
+            env->CallVoidMethod(window, setDecorFits, enabled ? JNI_FALSE : JNI_TRUE);
+            if (env->ExceptionCheck()) env->ExceptionClear();
+        }
+
+        jmethodID getController = env->GetMethodID(winCls,
+            "getInsetsController", "()Landroid/view/WindowInsetsController;");
+        if (getController) {
+            jobject ctrl = env->CallObjectMethod(window, getController);
+            if (ctrl) {
+                jclass ctrlCls = env->GetObjectClass(ctrl);
+                jmethodID setBehavior = env->GetMethodID(ctrlCls,
+                    "setSystemBarsBehavior", "(I)V");
+                if (setBehavior) {
+                    env->CallVoidMethod(ctrl, setBehavior, 2);
+                    if (env->ExceptionCheck()) env->ExceptionClear();
+                }
+
+                jmethodID hide = env->GetMethodID(ctrlCls, "hide", "(I)V");
+                jmethodID show = env->GetMethodID(ctrlCls, "show", "(I)V");
+                jint types = 0x1 | 0x2 | 0x4;
+                if (enabled && hide) {
+                    env->CallVoidMethod(ctrl, hide, types);
+                } else if (!enabled && show) {
+                    env->CallVoidMethod(ctrl, show, types);
+                }
+                if (env->ExceptionCheck()) env->ExceptionClear();
+
+                env->DeleteLocalRef(ctrlCls);
+                env->DeleteLocalRef(ctrl);
+            }
+        }
+        env->DeleteLocalRef(winCls);
+        env->DeleteLocalRef(window);
+    }
+    env->DeleteLocalRef(actCls);
+
+    if (attached) activity->vm->DetachCurrentThread();
 }
 
 bool getImmersiveMode() {
