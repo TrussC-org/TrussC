@@ -182,4 +182,35 @@ inline void vertex(const Vec3& v) {
     vertex(v.x, v.y, v.z);
 }
 
+// ===========================================================================
+// Curve appenders (shape buffer)
+//
+// Push a curved sequence of vertices into the active beginShape() /
+// beginStroke() / beginLines() buffer using the current CurveStyle. All
+// `append*` functions are pure conveniences — calling vertex() in a loop
+// gives the same result.
+// ===========================================================================
+
+// Append an arc spanning [angleBegin, angleEnd] radians around `(cx, cy)`.
+// Includes BOTH endpoints. If the previous shape vertex coincides with the
+// arc start, the duplicate is benign (degenerate triangle in the fan).
+inline void appendArc(float cx, float cy, float radius,
+                      float angleBegin, float angleEnd) {
+    if (radius <= 0.0f) return;
+    float span = angleEnd - angleBegin;
+    if (span == 0.0f) return;
+    auto& ctx = getDefaultContext();
+    int segs = ctx.decideArcSegments(radius, std::abs(span));
+    if (segs < 2) segs = 2;
+    for (int i = 0; i <= segs; i++) {
+        float a = angleBegin + span * ((float)i / (float)segs);
+        vertex(cx + std::cos(a) * radius, cy + std::sin(a) * radius);
+    }
+}
+
+inline void appendArc(const Vec2& center, float radius,
+                      float angleBegin, float angleEnd) {
+    appendArc(center.x, center.y, radius, angleBegin, angleEnd);
+}
+
 } // namespace trussc

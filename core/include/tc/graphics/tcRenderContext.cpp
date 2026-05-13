@@ -11,95 +11,48 @@ namespace trussc {
 // Rounded Rectangle (circular arc corners)
 // ---------------------------------------------------------------------------
 void RenderContext::drawRectRounded(Vec3 pos, Vec2 size, float radius) {
-    float x = pos.x, y = pos.y, z = pos.z;
+    float x = pos.x, y = pos.y;
     float w = size.x, h = size.y;
+    (void)pos.z;  // Outline built via beginShape; z=0 plane.
 
-    // Clamp radius to half of smaller dimension
+    // Clamp radius to half of smaller dimension; fall through to a plain
+    // rect when there's nothing to round.
     radius = std::min(radius, std::min(w, h) * 0.5f);
     if (radius <= 0) {
         drawRect(pos, size);
         return;
     }
 
-    auto& writer = internal::getActiveWriter();
-    // Each corner is a quarter arc — use the curve-style segment count
-    // for QUARTER_TAU at this radius. Floor at 2 so the corner is still
-    // visibly curved even at minimal tolerance / resolution.
-    int segs = std::max(2, decideArcSegments(radius, QUARTER_TAU));
-    int halfSegs = segs / 2;
+    // Build the closed outline as one polyline via beginShape + appendArc,
+    // sweeping clockwise (visually) around the rect. Y grows downward in
+    // TrussC, so each corner's arc spans QUARTER_TAU but the angle ranges
+    // start where the previous edge ends — the duplicate vertex at each
+    // corner is harmless (degenerate triangle in the fan).
+    //
+    // Angle conventions (cos, sin in y-down screen):
+    //   angle =          0 -> right         (cos=1, sin=0)
+    //   angle =  QUARTER_TAU -> bottom      (cos=0, sin=+1)  [y grows down]
+    //   angle =     HALF_TAU -> left        (cos=-1, sin=0)
+    //   angle =  3*QTR_TAU  -> top          (cos=0, sin=-1)
+    constexpr float Q  = QUARTER_TAU;
+    constexpr float H  = HALF_TAU;
+    constexpr float Q3 = 3.0f * Q;          // top of corner circle
 
-    // Pre-compute circular arc offsets for 1/8 circle (0 to 45 degrees only)
-    std::vector<Vec2> offsets(halfSegs + 1);
-    for (int i = 0; i <= halfSegs; i++) {
-        float angle = (float)i / segs * QUARTER_TAU;  // 0 to 45 degrees
-        offsets[i] = Vec2(std::cos(angle) * radius, std::sin(angle) * radius);
-    }
-
-    // Get offset for 0-90 degrees using symmetry at 45 degrees
-    auto getOffset = [&](int i) -> Vec2 {
-        if (i <= halfSegs) {
-            return offsets[i];
-        } else {
-            // Mirror: swap x,y for 45-90 degrees
-            Vec2 o = offsets[segs - i];
-            return Vec2(o.y, o.x);
-        }
-    };
-
-    // Corner centers
-    float tlX = x + radius, tlY = y + radius;
-    float trX = x + w - radius, trY = y + radius;
-    float brX = x + w - radius, brY = y + h - radius;
-    float blX = x + radius, blY = y + h - radius;
-
-    // Helper to get vertex for each corner
-    auto cornerVert = [&](int corner, int i) -> Vec2 {
-        Vec2 o = getOffset(i);
-        switch (corner) {
-            case 0: return Vec2(tlX - o.x, tlY - o.y);  // top-left
-            case 1: return Vec2(trX + o.y, trY - o.x);  // top-right
-            case 2: return Vec2(brX + o.x, brY + o.y);  // bottom-right
-            case 3: return Vec2(blX - o.y, blY + o.x);  // bottom-left
-            default: return Vec2(0, 0);
-        }
-    };
-
-    if (fillEnabled_) {
-        float cx = x + w * 0.5f, cy = y + h * 0.5f;
-        writer.begin(PrimitiveType::TriangleStrip);
-        writer.color(currentR_, currentG_, currentB_, currentA_);
-
-        for (int corner = 0; corner < 4; corner++) {
-            for (int i = 0; i <= segs; i++) {
-                Vec2 v = cornerVert(corner, i);
-                writer.vertex(cx, cy, z);
-                writer.vertex(v.x, v.y, z);
-            }
-        }
-        // Close
-        Vec2 v = cornerVert(0, 0);
-        writer.vertex(cx, cy, z);
-        writer.vertex(v.x, v.y, z);
-
-        writer.end();
-    }
-
-    if (strokeEnabled_) {
-        writer.begin(PrimitiveType::LineStrip);
-        writer.color(currentR_, currentG_, currentB_, currentA_);
-
-        for (int corner = 0; corner < 4; corner++) {
-            for (int i = 0; i <= segs; i++) {
-                Vec2 v = cornerVert(corner, i);
-                writer.vertex(v.x, v.y, z);
-            }
-        }
-        // Close
-        Vec2 v = cornerVert(0, 0);
-        writer.vertex(v.x, v.y, z);
-
-        writer.end();
-    }
+    beginShape();
+    // Top edge
+    vertex(x + radius,         y);
+    vertex(x + w - radius,     y);
+    appendArc(x + w - radius,  y + radius,        radius,  Q3,    Q3 + Q); // top-right (Q3 -> 0)
+    // Right edge
+    vertex(x + w,              y + h - radius);
+    appendArc(x + w - radius,  y + h - radius,    radius,   0,    Q);      // bottom-right
+    // Bottom edge
+    vertex(x + radius,         y + h);
+    appendArc(x + radius,      y + h - radius,    radius,   Q,    H);      // bottom-left
+    // Left edge
+    vertex(x,                  y + radius);
+    appendArc(x + radius,      y + radius,        radius,   H,    Q3);     // top-left
+    endShape(true);
 }
 
 // ---------------------------------------------------------------------------
