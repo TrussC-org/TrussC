@@ -2,5 +2,11 @@
   "description": "TLS/SSL support (mbedTLS)",
   "author": "tettou771",
   "license": "MIT",
-  "keywords": ["tls", "ssl", "security", "network"]
+  "category": "network",
+  "keywords": [
+    "tls",
+    "ssl",
+    "security",
+    "network"
+  ]
 }
