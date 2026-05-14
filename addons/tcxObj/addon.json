@@ -1,0 +1,13 @@
+{
+  "description": "Wavefront OBJ model import/export",
+  "author": "tettou771",
+  "license": "MIT",
+  "category": "3d",
+  "keywords": [
+    "obj",
+    "wavefront",
+    "3d",
+    "model",
+    "mesh"
+  ]
+}

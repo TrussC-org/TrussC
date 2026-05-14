@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <sstream>
+#include <set>
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -1452,35 +1454,163 @@ static int cmdRemove(const vector<string>& args) {
 static const char* kRegistryURL =
     "https://raw.githubusercontent.com/TrussC-org/trussc-addons/gh-pages/registry.json";
 
+// A single dependency entry from an addon.json. The ref is one of tag/branch/commit
+// (mutually exclusive; commit wins if more than one is set, with a warning).
+struct AddonDep {
+    string name;
+    string url;     // optional: lets a dep point at a non-registry repo
+    string ref;     // tag, branch, or commit hash
+    string refKind; // "tag" | "branch" | "commit" | "" (default branch)
+};
+
 struct AddonInfo {
     string name;
-    string url;        // git clone URL
+    string owner;          // empty for bundled
+    string url;            // git clone URL (bundled = informational link, not cloneable)
+    bool bundled = false;
     string version;
     string description;
     string author;
+    string license;
+    vector<string> platforms;
+    string demoUrl;
+    vector<AddonDep> dependencies;
 };
 
+// Format an addon for display:
+//   bundled         -> "tcxFoo"
+//   third-party     -> "owner/tcxFoo"
+static string displayName(const AddonInfo& a) {
+    if (a.bundled || a.owner.empty()) return a.name;
+    return a.owner + "/" + a.name;
+}
+
+// Parse dependencies array — entries may be plain strings or objects.
+static vector<AddonDep> parseDependencies(const Json& deps) {
+    vector<AddonDep> result;
+    if (!deps.is_array()) return result;
+    for (const auto& d : deps) {
+        AddonDep entry;
+        if (d.is_string()) {
+            entry.name = d.get<string>();
+        } else if (d.is_object()) {
+            entry.name = d.value("name", "");
+            entry.url  = d.value("url", "");
+            // commit > tag > branch (warn on multiple)
+            if (d.contains("commit")) {
+                entry.ref = d.value("commit", "");
+                entry.refKind = "commit";
+            } else if (d.contains("tag")) {
+                entry.ref = d.value("tag", "");
+                entry.refKind = "tag";
+            } else if (d.contains("branch")) {
+                entry.ref = d.value("branch", "");
+                entry.refKind = "branch";
+            }
+        }
+        if (!entry.name.empty()) result.push_back(entry);
+    }
+    return result;
+}
+
+// Path for the registry cache. Used by completion to avoid a network roundtrip
+// on every Tab press. Returns empty string if no usable home directory is found.
+static string registryCachePath() {
+#ifdef _WIN32
+    const char* base = getenv("LOCALAPPDATA");
+    if (!base || !*base) base = getenv("USERPROFILE");
+    if (!base || !*base) return "";
+    return string(base) + "\\trusscli\\registry.json";
+#else
+    const char* xdg = getenv("XDG_CACHE_HOME");
+    if (xdg && *xdg) return string(xdg) + "/trusscli/registry.json";
+    const char* home = getenv("HOME");
+    if (!home || !*home) return "";
+    return string(home) + "/.cache/trusscli/registry.json";
+#endif
+}
+
+static void writeRegistryCache(const string& jsonText) {
+    string path = registryCachePath();
+    if (path.empty()) return;
+    try {
+        fs::create_directories(fs::path(path).parent_path());
+        ofstream f(path, ios::binary);
+        f.write(jsonText.data(), static_cast<streamsize>(jsonText.size()));
+    } catch (...) {
+        // Best-effort; cache is optional.
+    }
+}
+
+// Read cache file, ignoring age. Used by --cached path.
+static string readRegistryCache() {
+    string path = registryCachePath();
+    if (path.empty() || !fs::exists(path)) return "";
+    try {
+        ifstream f(path, ios::binary);
+        stringstream ss;
+        ss << f.rdbuf();
+        return ss.str();
+    } catch (...) {
+        return "";
+    }
+}
+
 // Fetch the addon registry from GitHub. Returns empty vector on network error.
-static vector<AddonInfo> fetchRegistry() {
-    cout << "Fetching addon registry ...\n";
-    auto [code, out] = captureCommand("curl -sf \"" + string(kRegistryURL) + "\"");
-    if (code != 0 || out.empty()) {
-        cerr << "Error: could not fetch addon registry.\n"
-             << "URL: " << kRegistryURL << "\n"
-             << "Check your network connection.\n";
+// If allowStaleCache is true, falls back to (and prefers) the on-disk cache
+// without hitting the network — used by shell completion for low latency.
+static vector<AddonInfo> fetchRegistry(bool allowStaleCache = false) {
+    string out;
+    int code = 0;
+
+    if (allowStaleCache) {
+        out = readRegistryCache();
+        if (out.empty()) {
+            // Cache miss: fall through to network fetch.
+            auto [c, o] = captureCommand("curl -sfL \"" + string(kRegistryURL) + "\"");
+            code = c;
+            out  = o;
+            if (code == 0 && !out.empty()) writeRegistryCache(out);
+        }
+    } else {
+        cerr << "Fetching addon registry ...\n";
+        auto [c, o] = captureCommand("curl -sfL \"" + string(kRegistryURL) + "\"");
+        code = c;
+        out  = o;
+        if (code == 0 && !out.empty()) writeRegistryCache(out);
+    }
+
+    if (out.empty()) {
+        if (!allowStaleCache) {
+            cerr << "Error: could not fetch addon registry.\n"
+                 << "URL: " << kRegistryURL << "\n"
+                 << "Check your network connection.\n";
+        }
         return {};
     }
     try {
         Json data = Json::parse(out);
         vector<AddonInfo> result;
         for (const auto& a : data["addons"]) {
-            result.push_back({
-                a.value("name", ""),
-                a.value("url", ""),
-                a.value("version", "unknown"),
-                a.value("description", ""),
-                a.value("author", "")
-            });
+            AddonInfo info;
+            info.name        = a.value("name", "");
+            info.owner       = a.value("owner", "");
+            info.url         = a.value("url", "");
+            info.bundled     = a.value("bundled", false);
+            info.version     = a.value("version", "unknown");
+            info.description = a.value("description", "");
+            info.author      = a.value("author", "");
+            info.license     = a.value("license", "");
+            info.demoUrl     = a.value("demo_url", "");
+            if (a.contains("platforms") && a["platforms"].is_array()) {
+                for (const auto& p : a["platforms"]) {
+                    if (p.is_string()) info.platforms.push_back(p.get<string>());
+                }
+            }
+            if (a.contains("dependencies")) {
+                info.dependencies = parseDependencies(a["dependencies"]);
+            }
+            result.push_back(std::move(info));
         }
         return result;
     } catch (...) {
@@ -1495,6 +1625,8 @@ static vector<AddonInfo> fetchRegistry() {
 
 static int cmdAddonList(const vector<string>& args) {
     bool showRemote = false;
+    bool namesOnly = false;
+    bool useCached = false;
     string explicitPath;
     string tcRoot;
 
@@ -1509,12 +1641,21 @@ static int cmdAddonList(const vector<string>& args) {
                  << "\n"
                  << "Options:\n"
                  << "      --remote               Include addons from the online registry\n"
+                 << "      --names                Output only names, one per line\n"
+                 << "                             (for shell completion; non-bundled\n"
+                 << "                             entries appear as bare 'name' and\n"
+                 << "                             'owner/name' for prefix matching)\n"
+                 << "      --cached               Prefer the on-disk registry cache;\n"
+                 << "                             avoids a network roundtrip\n"
+                 << "                             (used by shell completion)\n"
                  << "  -p, --path <path>          Project path (for installed check)\n"
                  << "      --tc-root <path>       TrussC root directory\n"
                  << "  -h, --help                 Show this help\n";
             return 0;
         }
         else if (a == "--remote") showRemote = true;
+        else if (a == "--names") namesOnly = true;
+        else if (a == "--cached") useCached = true;
         else if (a == "-p" || a == "--path") {
             if (++i >= args.size()) { cerr << "Error: " << a << " requires a value\n"; return 1; }
             explicitPath = args[i];
@@ -1527,8 +1668,32 @@ static int cmdAddonList(const vector<string>& args) {
 
     if (tcRoot.empty()) tcRoot = autoDetectTcRoot();
     if (tcRoot.empty()) {
+        if (namesOnly) return 0;  // silent for completion path
         cerr << "Error: could not detect TrussC root.\n";
         return 1;
+    }
+
+    // --names: minimal output for shell completion.
+    if (namesOnly) {
+        vector<string> local;
+        scanAddons(tcRoot, local);
+        set<string> emitted;
+        for (const auto& n : local) {
+            if (emitted.insert(n).second) cout << n << "\n";
+        }
+        if (showRemote) {
+            // fetchRegistry writes its progress to cerr (when fetching), so
+            // cout stays clean for completion consumers.
+            auto registry = fetchRegistry(useCached);
+            for (const auto& a : registry) {
+                if (emitted.insert(a.name).second) cout << a.name << "\n";
+                if (!a.bundled && !a.owner.empty()) {
+                    string q = a.owner + "/" + a.name;
+                    if (emitted.insert(q).second) cout << q << "\n";
+                }
+            }
+        }
+        return 0;
     }
 
     // Scan local addons
@@ -1563,25 +1728,34 @@ static int cmdAddonList(const vector<string>& args) {
         auto registry = fetchRegistry();
         if (registry.empty()) return 1;
 
+        // Index community addons by name to detect name collisions with
+        // bundled entries (which we don't want to hide in --remote view).
         bool hasRemote = false;
         for (const auto& addon : registry) {
-            if (!isLocal(addon.name)) {
-                if (!hasRemote) {
-                    cout << "\n  Remote (use 'trusscli addon clone <name>' to download):\n";
-                    hasRemote = true;
-                }
-                cout << "  [remote]      " << addon.name;
-                if (!addon.version.empty() && addon.version != "unknown") {
-                    cout << "  " << addon.version;
-                }
-                if (!addon.description.empty()) {
-                    cout << "  " << addon.description;
-                }
-                cout << "\n";
+            // Skip bundled (already shown above as local).
+            if (addon.bundled) continue;
+
+            if (!hasRemote) {
+                cout << "\n  Remote (use 'trusscli addon clone <name>' to download):\n";
+                hasRemote = true;
             }
+            // Mark as [installed] only when a local addon shares the exact
+            // displayName — bare names collide with bundled (different addons,
+            // both want the same dir), so we still surface the option.
+            const char* tag = isLocal(addon.name) ? "[conflict] " : "[remote]   ";
+            cout << "  " << tag << "  " << displayName(addon);
+            if (!addon.version.empty() && addon.version != "unknown") {
+                cout << "  " << addon.version;
+            }
+            const string& lic = addon.license.empty() ? "Unknown" : addon.license;
+            cout << "  [" << lic << "]";
+            if (!addon.description.empty()) {
+                cout << "  " << addon.description;
+            }
+            cout << "\n";
         }
         if (!hasRemote) {
-            cout << "\n  All registry addons are already available locally.\n";
+            cout << "\n  (no community addons in registry)\n";
         }
     }
 
@@ -1592,9 +1766,167 @@ static int cmdAddonList(const vector<string>& args) {
 // Subcommand: addon clone
 // =============================================================================
 
+// Parse "owner/name" or "name". Returns true if a slash was present.
+static bool parseOwnerName(const string& s, string& owner, string& name) {
+    auto pos = s.find('/');
+    if (pos == string::npos) {
+        owner.clear();
+        name = s;
+        return false;
+    }
+    owner = s.substr(0, pos);
+    name  = s.substr(pos + 1);
+    return true;
+}
+
+// Find registry entries matching a query.
+//   "owner/name" → exact match (at most 1)
+//   "name"       → all entries with that name (bundled + community)
+static vector<const AddonInfo*> findCandidates(
+    const vector<AddonInfo>& registry, const string& query) {
+    string owner, name;
+    bool qualified = parseOwnerName(query, owner, name);
+    vector<const AddonInfo*> result;
+    for (const auto& a : registry) {
+        if (a.name != name) continue;
+        if (qualified) {
+            if (a.owner == owner) result.push_back(&a);
+        } else {
+            result.push_back(&a);
+        }
+    }
+    return result;
+}
+
+static bool promptYesNo(const string& msg, bool defaultYes) {
+    cout << msg << (defaultYes ? " [Y/n] " : " [y/N] ") << flush;
+    string line;
+    if (!getline(cin, line)) return defaultYes;
+    if (line.empty()) return defaultYes;
+    char c = static_cast<char>(tolower(static_cast<unsigned char>(line[0])));
+    return c == 'y';
+}
+
+static string promptString(const string& msg) {
+    cout << msg << flush;
+    string line;
+    getline(cin, line);
+    return line;
+}
+
+// Run git clone with optional ref pinning.
+//   refKind=branch/tag → `git clone -b <ref> ...`
+//   refKind=commit     → clone, then `git checkout <ref>`
+//   refKind=""         → plain clone (default branch)
+static int gitCloneWithRef(const string& url, const string& ref,
+                            const string& refKind, const string& targetDir) {
+    if ((refKind == "branch" || refKind == "tag") && !ref.empty()) {
+        return runProcess({"git", "clone", "-b", ref, url, targetDir});
+    }
+    int rc = runProcess({"git", "clone", url, targetDir});
+    if (rc != 0) return rc;
+    if (refKind == "commit" && !ref.empty()) {
+        return runProcess({"git", "-C", targetDir, "checkout", ref});
+    }
+    return 0;
+}
+
+// Read and parse addon.json from a cloned addon directory.
+static Json readAddonJson(const string& addonDir) {
+    string path = addonDir + "/addon.json";
+    if (!fs::exists(path)) return Json::object();
+    try {
+        ifstream f(path);
+        stringstream ss;
+        ss << f.rdbuf();
+        return Json::parse(ss.str());
+    } catch (...) {
+        return Json::object();
+    }
+}
+
+// Recursively process an addon's dependencies after it was cloned.
+// Prompts the user (y/n) for each dep. Already-processed deps are skipped.
+static void processDependencies(
+    const string& addonDir,
+    const vector<AddonInfo>& registry,
+    const string& tcRoot,
+    set<string>& processed,
+    bool noInteractive) {
+    Json meta = readAddonJson(addonDir);
+    if (!meta.contains("dependencies")) return;
+    auto deps = parseDependencies(meta["dependencies"]);
+    if (deps.empty()) return;
+
+    cout << "\nDependencies declared:\n";
+    for (const auto& d : deps) {
+        cout << "  - " << d.name;
+        if (!d.refKind.empty()) cout << " (" << d.refKind << ": " << d.ref << ")";
+        cout << "\n";
+    }
+
+    for (const auto& dep : deps) {
+        if (processed.count(dep.name)) continue;
+
+        // Resolve URL: explicit dep.url wins, else registry lookup.
+        string depUrl   = dep.url;
+        string depLabel = dep.name;
+
+        if (depUrl.empty()) {
+            auto cands = findCandidates(registry, dep.name);
+            // If a bundled match exists, the dep is already installed in core.
+            bool bundledHit = false;
+            const AddonInfo* picked = nullptr;
+            for (auto* c : cands) {
+                if (c->bundled) { bundledHit = true; break; }
+                if (!picked) picked = c;
+            }
+            if (bundledHit) {
+                cout << "  (bundled, already in TrussC) " << dep.name << "\n";
+                processed.insert(dep.name);
+                continue;
+            }
+            if (!picked) {
+                cerr << "  Warning: dep '" << dep.name
+                     << "' not found in registry, skipping\n";
+                continue;
+            }
+            depUrl   = picked->url;
+            depLabel = displayName(*picked);
+        }
+
+        string targetDir = tcRoot + "/addons/" + dep.name;
+        if (fs::exists(targetDir)) {
+            cout << "  (already exists) " << dep.name << "\n";
+            processed.insert(dep.name);
+            continue;
+        }
+
+        bool ok = noInteractive
+                  ? true
+                  : promptYesNo("  Clone dependency '" + depLabel + "'?", true);
+        if (!ok) {
+            cout << "  Skipped " << dep.name << "\n";
+            continue;
+        }
+
+        cout << "  Cloning " << depLabel << " ...\n";
+        int rc = gitCloneWithRef(depUrl, dep.ref, dep.refKind, targetDir);
+        if (rc != 0) {
+            cerr << "  Error: git clone failed for " << dep.name << "\n";
+            continue;
+        }
+        processed.insert(dep.name);
+
+        // Recurse.
+        processDependencies(targetDir, registry, tcRoot, processed, noInteractive);
+    }
+}
+
 static int cmdAddonClone(const vector<string>& args) {
-    vector<string> addonNames;
+    vector<string> queries;
     string tcRoot;
+    bool noInteractive = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
         const string& a = args[i];
@@ -1602,13 +1934,22 @@ static int cmdAddonClone(const vector<string>& args) {
             cout << "Usage: trusscli addon clone <addon> [<addon>...]\n"
                  << "\n"
                  << "Clone addon(s) from the registry into the TrussC addons/ folder.\n"
-                 << "After cloning, use 'trusscli addon add <addon>' to add it to a project.\n"
+                 << "Accepted addon forms:\n"
+                 << "  tcxFoo                 — registry lookup (asks if not found)\n"
+                 << "  owner/tcxFoo           — exact GitHub repo\n"
+                 << "  https://host/user/repo — direct HTTPS clone URL\n"
+                 << "  git@host:user/repo     — direct SSH clone URL\n"
+                 << "\n"
+                 << "After cloning, dependencies declared in the addon's addon.json\n"
+                 << "are offered for installation (y/n).\n"
                  << "\n"
                  << "Options:\n"
+                 << "      --no-interactive       Accept dep prompts, fail unknown names\n"
                  << "      --tc-root <path>       TrussC root directory\n"
                  << "  -h, --help                 Show this help\n";
             return 0;
         }
+        else if (a == "--no-interactive") noInteractive = true;
         else if (a == "--tc-root") {
             if (++i >= args.size()) { cerr << "Error: --tc-root requires a value\n"; return 1; }
             tcRoot = args[i];
@@ -1617,11 +1958,11 @@ static int cmdAddonClone(const vector<string>& args) {
             cerr << "Error: unknown option '" << a << "'\n"; return 1;
         }
         else {
-            addonNames.push_back(a);
+            queries.push_back(a);
         }
     }
 
-    if (addonNames.empty()) {
+    if (queries.empty()) {
         cerr << "Error: 'addon clone' requires at least one addon name\n"
              << "Usage: trusscli addon clone <addon> [<addon>...]\n";
         return 1;
@@ -1637,33 +1978,122 @@ static int cmdAddonClone(const vector<string>& args) {
     if (registry.empty()) return 1;
 
     int failures = 0;
-    for (const string& name : addonNames) {
-        // Find in registry
-        const AddonInfo* found = nullptr;
-        for (const auto& a : registry) {
-            if (a.name == name) { found = &a; break; }
+    set<string> processed;
+
+    for (const string& query : queries) {
+        // Case A: explicit URL → clone directly. Accepts both forms:
+        //   https://github.com/user/repo[.git]
+        //   git@github.com:user/repo[.git]   (and any other git-compatible URL)
+        bool isHttpUrl = query.find("://") != string::npos;
+        bool isSshUrl  = query.compare(0, 4, "git@") == 0
+                         && query.find(':') != string::npos;
+        if (isHttpUrl || isSshUrl) {
+            // Target name = last path component, stripping .git.
+            string repo = query;
+            auto slash = repo.find_last_of('/');
+            if (slash != string::npos) repo = repo.substr(slash + 1);
+            if (repo.size() > 4 && repo.substr(repo.size() - 4) == ".git") {
+                repo = repo.substr(0, repo.size() - 4);
+            }
+            if (repo.empty()) {
+                cerr << "Error: cannot derive addon name from URL: " << query << "\n";
+                failures++;
+                continue;
+            }
+            string targetDir = tcRoot + "/addons/" + repo;
+            if (fs::exists(targetDir)) {
+                cout << "  (already exists) " << repo << "\n";
+                processed.insert(repo);
+            } else {
+                cout << "Cloning " << query << " ...\n";
+                int rc = runProcess({"git", "clone", query, targetDir});
+                if (rc != 0) {
+                    cerr << "Error: git clone failed for " << query << "\n";
+                    failures++;
+                    continue;
+                }
+                cout << "  Cloned " << repo << " → " << targetDir << "\n";
+                processed.insert(repo);
+            }
+            processDependencies(targetDir, registry, tcRoot, processed, noInteractive);
+            continue;
         }
-        if (!found) {
-            cerr << "Error: '" << name << "' not found in registry.\n"
-                 << "Run 'trusscli addon list --remote' to see available addons.\n";
+
+        auto candidates = findCandidates(registry, query);
+
+        // Case B: multiple matches → ambiguity.
+        if (candidates.size() > 1) {
+            cerr << "Error: '" << query << "' is ambiguous. Multiple matches:\n";
+            for (auto* c : candidates) {
+                cerr << "  - " << displayName(*c)
+                     << " (" << (c->bundled ? "bundled" : "community") << ")\n";
+            }
+            cerr << "Specify with 'owner/name' form.\n";
             failures++;
             continue;
         }
 
-        string targetDir = tcRoot + "/addons/" + name;
-        if (fs::exists(targetDir)) {
-            cout << "  (already exists) " << name << " → " << targetDir << "\n";
-            continue;
-        }
+        const AddonInfo* picked = candidates.empty() ? nullptr : candidates[0];
+        string cloneUrl, targetName;
 
-        cout << "Cloning " << name << " ...\n";
-        int rc = runProcess({"git", "clone", found->url, targetDir});
-        if (rc != 0) {
-            cerr << "Error: git clone failed for " << name << "\n";
-            failures++;
+        if (picked) {
+            // Case C: single registry match.
+            if (picked->bundled) {
+                cout << "  (bundled, already part of TrussC) " << picked->name << "\n";
+                processed.insert(picked->name);
+                continue;
+            }
+            cloneUrl   = picked->url;
+            targetName = picked->name;
         } else {
-            cout << "  Cloned " << name << " → " << targetDir << "\n";
+            // Case D: not in registry.
+            string qOwner, qName;
+            bool qualified = parseOwnerName(query, qOwner, qName);
+
+            if (qualified) {
+                // owner/name form → guess GitHub URL.
+                cloneUrl   = "https://github.com/" + qOwner + "/" + qName + ".git";
+                targetName = qName;
+                cout << "'" << query << "' not in registry. Trying " << cloneUrl << " ...\n";
+            } else if (noInteractive) {
+                cerr << "Error: '" << query << "' not found in registry "
+                     << "(use owner/name or URL, or drop --no-interactive)\n";
+                failures++;
+                continue;
+            } else {
+                cout << "'" << query << "' is not in the registry.\n";
+                string answer = promptString(
+                    "Enter GitHub username or full URL (empty to skip): ");
+                if (answer.empty()) {
+                    cout << "Skipped " << query << "\n";
+                    continue;
+                }
+                if (answer.find("://") != string::npos) {
+                    cloneUrl = answer;
+                } else {
+                    cloneUrl = "https://github.com/" + answer + "/" + query + ".git";
+                }
+                targetName = query;
+            }
         }
+
+        string targetDir = tcRoot + "/addons/" + targetName;
+        if (fs::exists(targetDir)) {
+            cout << "  (already exists) " << targetName << " → " << targetDir << "\n";
+            processed.insert(targetName);
+        } else {
+            cout << "Cloning " << (picked ? displayName(*picked) : cloneUrl) << " ...\n";
+            int rc = runProcess({"git", "clone", cloneUrl, targetDir});
+            if (rc != 0) {
+                cerr << "Error: git clone failed for " << targetName << "\n";
+                failures++;
+                continue;
+            }
+            cout << "  Cloned " << targetName << " → " << targetDir << "\n";
+            processed.insert(targetName);
+        }
+
+        processDependencies(targetDir, registry, tcRoot, processed, noInteractive);
     }
 
     return failures > 0 ? 1 : 0;
@@ -1819,11 +2249,22 @@ static int cmdAddonSearch(const vector<string>& args) {
 
     cout << matches.size() << " addon(s) matching '" << query << "':\n\n";
     for (const auto* a : matches) {
-        cout << "  " << a->name;
+        cout << "  " << displayName(*a);
         if (!a->version.empty() && a->version != "unknown") cout << "  " << a->version;
+        const string& lic = a->license.empty() ? "Unknown" : a->license;
+        cout << "  [" << lic << "]";
+        if (a->bundled) cout << "  (bundled)";
         cout << "\n";
         if (!a->description.empty()) cout << "    " << a->description << "\n";
         if (!a->author.empty()) cout << "    by " << a->author << "\n";
+        if (!a->platforms.empty()) {
+            cout << "    platforms: ";
+            for (size_t i = 0; i < a->platforms.size(); ++i) {
+                if (i) cout << ", ";
+                cout << a->platforms[i];
+            }
+            cout << "\n";
+        }
         cout << "    " << a->url << "\n\n";
     }
 
@@ -2840,7 +3281,14 @@ _trusscli() {
                         fi
                         ;;
                     clone|search)
-                        # No completion for these (require registry or free text)
+                        # Names come from the registry (and bundled list).
+                        # --cached uses the on-disk registry cache for fast Tab
+                        # response; first-time use seeds the cache via network.
+                        local -a registry_names
+                        registry_names=(${(f)"$(trusscli addon list --names --remote --cached 2>/dev/null)"})
+                        if [[ -n "$registry_names" ]]; then
+                            _describe 'addon' registry_names
+                        fi
                         ;;
                 esac
             fi
@@ -2908,6 +3356,10 @@ _trusscli() {
                     add|remove)
                         local addons=$(ls -d addons/tcx* 2>/dev/null | xargs -n1 basename 2>/dev/null)
                         COMPREPLY=($(compgen -W "$addons" -- "$cur"))
+                        ;;
+                    clone|search)
+                        local names=$(trusscli addon list --names --remote --cached 2>/dev/null)
+                        COMPREPLY=($(compgen -W "$names" -- "$cur"))
                         ;;
                 esac
             fi

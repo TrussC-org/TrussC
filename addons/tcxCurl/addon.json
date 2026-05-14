@@ -2,5 +2,11 @@
   "description": "HTTPS client (libcurl)",
   "author": "tettou771",
   "license": "MIT",
-  "keywords": ["http", "https", "ssl", "network"]
+  "category": "network",
+  "keywords": [
+    "http",
+    "https",
+    "ssl",
+    "network"
+  ]
 }

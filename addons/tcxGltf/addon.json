@@ -1,0 +1,13 @@
+{
+  "description": "glTF 2.0 / GLB model loader (cgltf)",
+  "author": "tettou771",
+  "license": "MIT",
+  "category": "3d",
+  "keywords": [
+    "gltf",
+    "glb",
+    "3d",
+    "model",
+    "pbr"
+  ]
+}

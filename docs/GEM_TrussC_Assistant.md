@@ -452,23 +452,58 @@ All projects use `TC_RUN_APP(tcApp, settings)` in `main.cpp` by default. This ma
 
 ## Addons
 
-Addons add optional features. To use: run `trusscli add <addon>` (or check the addon in the GUI), then `#include` the addon header.
+Addons add optional features. To use: run `trusscli addon add <addon>` (or check the addon in the GUI), then `#include` the addon header.
 
 ```cpp
 #include <tcxBox2d.h>
 using namespace tcx::box2d;
 ```
 
-### Official Addons
-| Addon | Description |
-|-------|-------------|
-| tcxBox2d | 2D physics engine (Box2D) |
-| tcxHap | HAP/HAPQ video codec (GPU-compressed, macOS) |
-| tcxLut | 3D LUT color grading (.cube format) |
-| tcxOsc | Open Sound Control (OSC) protocol |
-| tcxQuadWarp | Quad warping for projection mapping |
-| tcxTls | TLS/SSL secure sockets (mbedTLS) |
-| tcxWebSocket | WebSocket client (native + Web) |
+### Bundled Addons (ship with TrussC)
+| Addon | Category | Description |
+|-------|----------|-------------|
+| tcxBox2d | physics | 2D physics engine (Box2D) |
+| tcxCurl | network | HTTPS client (libcurl) |
+| tcxGltf | 3d | glTF 2.0 / GLB model loader (cgltf) |
+| tcxHap | video | HAP/HAPQ video codec (GPU-compressed) |
+| tcxImGui | gui | Dear ImGui integration |
+| tcxLua | bridges | Lua scripting binding |
+| tcxLut | graphics | 3D LUT color grading (.cube format) |
+| tcxObj | 3d | Wavefront OBJ model import/export |
+| tcxOsc | network | Open Sound Control (OSC) protocol |
+| tcxQuadWarp | graphics | Quad warping for projection mapping |
+| tcxTls | network | TLS/SSL secure sockets (mbedTLS) |
+| tcxWebSocket | network | WebSocket client (native + Web) |
+
+### Community Addons
+
+Beyond the bundled set, community addons are discovered automatically through a GitHub topic-based registry. Use `trusscli`:
+
+```bash
+trusscli addon list --remote          # browse available addons
+trusscli addon search <query>          # search by name/description/keyword
+trusscli addon clone <name>            # clone into addons/
+trusscli addon clone <owner>/<name>    # exact GitHub repo
+trusscli addon clone <git-url>         # any HTTPS or SSH URL
+```
+
+Ambiguous names (e.g. a bundled `tcxLua` colliding with `funatsufumiya/tcxLua`) require `owner/name` disambiguation.
+
+### Browsing
+
+A live, filterable browser is at **https://trussc.org/addons/** — categories, platforms, license badges, screenshots. It reads the same registry consumed by `trusscli`:
+`https://raw.githubusercontent.com/TrussC-org/trussc-addons/gh-pages/registry.json` (refreshed daily).
+
+### Creating an Addon
+
+To make a repo discoverable by the registry, the GitHub repo needs:
+
+1. Topic `trussc-addon`
+2. Name matching `tcx[A-Z]...`
+3. An `addon.json` at the root (even `{}` is enough to opt in)
+4. Public, not archived
+
+`addon.json` fields (all optional but recommended): `description`, `author`, `license`, `category`, `keywords`, `platforms`, `screenshot`, `demo_url`, `trussc_version`, `dependencies`. Categories are picked from a fixed set: `3d`, `ai`, `algorithms`, `animation`, `bridges`, `computer-vision`, `game`, `graphics`, `gui`, `hardware`, `machine-learning`, `network`, `physics`, `sound`, `typography`, `utilities`, `video`, `web`, `misc`. See [docs/ADDONS.md](ADDONS.md) for the full spec.
 
 ## Window & Input
 ```cpp

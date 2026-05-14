@@ -12,7 +12,9 @@ TrussC can be extended with an addon system, similar to openFrameworks' ofxAddon
 4. [Creating Addons](#creating-addons)
 5. [Naming Conventions](#naming-conventions)
 6. [Dependencies](#dependencies)
-7. [Bundled Addon Details](#bundled-addon-details)
+7. [addon.json Specification](#addonjson-specification)
+8. [Registry & Distribution](#registry--distribution)
+9. [Bundled Addon Details](#bundled-addon-details)
 
 ---
 
@@ -337,6 +339,190 @@ FetchContent_MakeAvailable(somelib)
 
 target_link_libraries(${ADDON_NAME} PUBLIC somelib)
 ```
+
+---
+
+## addon.json Specification
+
+Every addon repository should contain an `addon.json` file at the root. The file declares metadata used by the registry crawler, the TrussC website, and `trusscli`.
+
+All fields are optional — an empty `{}` is valid and signals "this is a TrussC addon". Filling in fields like `license` and `description` improves how the addon appears in listings.
+
+### Example
+
+```jsonc
+{
+  "name":           "tcxFoo",
+  "description":    "Short one-line summary",
+  "version":        "0.1.0",
+  "author":         "Your Name <you@example.com>",
+  "license":        "MIT",
+  "trussc_version": ">=0.5.0",
+  "category":       "physics",
+  "screenshot":     "docs/preview.png",
+  "demo_url":       "https://trussc.org/sketch/?example=tcxFoo",
+  "platforms":      ["macos", "win", "linux", "web"],
+  "keywords":       ["2d", "collision"],
+
+  "dependencies": [
+    "tcxCurl",
+    { "name": "tcxBox2d", "tag":    "v0.2.0" },
+    { "name": "tcxOsc",   "branch": "main" },
+    { "name": "tcxBaz",   "commit": "a1b2c3d" },
+    { "name": "tcxBar",   "url":    "https://github.com/user/tcxBar" }
+  ]
+}
+```
+
+### Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Addon name. Should match the repository name. If omitted, the registry uses the repo name. |
+| `description` | string | One-line summary. Used in registry listings and `trusscli addon list`. |
+| `version` | string | Self-reported version (e.g., `"0.1.0"`). If empty, the crawler falls back to the latest git tag. |
+| `author` | string | Author name, optionally with email (`"Name <email>"`). |
+| `license` | string | SPDX identifier (e.g., `"MIT"`, `"GPL-3.0"`). Missing values display as `"Unknown"`. |
+| `trussc_version` | string | TrussC version range this addon targets (e.g., `">=0.5.0"`). |
+| `category` | string | Top-level grouping. See [Categories](#categories). Unknown or omitted values fall back to `"misc"`. |
+| `screenshot` | string | Relative path or absolute URL to a preview image. Relative paths are resolved against the repo's default branch. |
+| `demo_url` | string | Link to a live demo (e.g., a TrussSketch page or a web build). |
+| `platforms` | string[] | Supported platforms. Allowed values: `"macos"`, `"win"`, `"linux"`, `"web"`, `"android"`, `"ios"`. Omit the field if untested — empty array means "no supported platforms". |
+| `keywords` | string[] | Free-form tags for fine-grained filtering inside a category (e.g., a `graphics` addon may use `"shader"`, `"glitch"`, `"color-grading"`). |
+| `dependencies` | (string \| object)[] | Other addons this addon depends on. See below. |
+
+### Categories
+
+`category` is a single string from the fixed set below. The set is intentionally small so addons stay easy to browse; use `keywords` for sub-classification within a category (e.g., `category: "graphics"` + `keywords: ["shader", "post-fx"]`).
+
+| Value | Covers |
+|-------|--------|
+| `3d` | 3D models, geometry, mesh utilities, scene graph |
+| `ai` | LLM clients, generative AI, prompt tooling |
+| `algorithms` | General algorithms (sorting, graph, search, etc.) |
+| `animation` | Keyframes, tweening, easing, motion |
+| `bridges` | Other-language/runtime interop (Lua, Julia, Python) |
+| `computer-vision` | OpenCV wrappers, marker / face / pose detection |
+| `game` | Game-specific systems (ECS, entity AI) |
+| `graphics` | Drawing, shaders, post-effects, color grading, image filters / format I/O |
+| `gui` | UI widgets, IME, ImGui-style integration |
+| `hardware` | Arduino, MIDI, sensors, IMU, embedded I/O |
+| `machine-learning` | Classical ML, on-device inference engines |
+| `network` | TCP/UDP/OSC/MQTT/NDI and other transport-layer protocols |
+| `physics` | Rigid body, soft body, fluid simulation |
+| `sound` | Audio synthesis, playback, DSP |
+| `typography` | Font loading, text shaping/rendering |
+| `utilities` | File I/O, settings, logging, generic helpers |
+| `video` | Video playback, capture, codecs |
+| `web` | HTTP, WebView, JS bridge (Emscripten), OAuth flows |
+| `misc` | Fallback only — the crawler maps unknown / omitted categories here. Do not declare `"misc"` explicitly. |
+
+Pick the single best fit. If two seem equally valid, prefer the category that matches the addon's primary functionality (what users would search for first).
+
+### Dependencies
+
+Each entry is either a plain string (addon name only, resolved through the registry at its default branch) or an object with optional pinning:
+
+```jsonc
+{ "name": "tcxBox2d", "tag":    "v0.2.0" }   // pinned to a tag
+{ "name": "tcxOsc",   "branch": "main"   }   // pinned to a branch
+{ "name": "tcxFoo",   "commit": "a1b2c3d" }  // pinned to a commit
+{ "name": "tcxBar",   "url":    "https://github.com/user/tcxBar" }  // off-registry
+```
+
+Rules:
+
+- `tag`, `branch`, and `commit` are mutually exclusive. If more than one is set, `commit` wins (with a warning).
+- `url` is optional; it lets you depend on addons that are not in the registry (including non-GitHub hosts).
+- When `trusscli addon clone` resolves dependencies, it walks the graph recursively. Circular dependencies are detected and aborted.
+
+### Notes on Optional Fields
+
+- An addon.json with only `{}` is enough to be picked up by the crawler. Filling in `license`, `description`, and `screenshot` is strongly recommended for discoverability.
+- `name` is informational only — the registry always uses the repository name as the canonical identifier.
+
+---
+
+## Registry & Distribution
+
+Addons are discovered automatically through GitHub topics. The official registry lives at:
+
+**Repository:** [`TrussC-org/trussc-addons`](https://github.com/TrussC-org/trussc-addons)
+**Registry JSON:** Published on the `gh-pages` branch via GitHub Pages.
+
+### Discovery Conditions
+
+A repository is included in the registry when **all** of the following are true:
+
+1. It has the GitHub topic `trussc-addon`.
+2. Its name matches `tcx[A-Z]...` (e.g., `tcxFoo`).
+3. It contains an `addon.json` file at the root (empty `{}` is acceptable).
+4. It is not `private` and not `archive`d.
+
+GitHub topics are **not** inherited by forks, so forks only appear in the registry if the forker explicitly adds the topic. This means the upstream original is referenced by default, and intentional forks can coexist.
+
+### Crawler
+
+A GitHub Actions workflow on `trussc-addons` runs on a daily cron (and on demand) to:
+
+1. Search GitHub for `topic:trussc-addon`.
+2. Filter results by the conditions above.
+3. Fetch each repo's `addon.json` (and the latest git tag as a `version` fallback).
+4. Emit `registry.json` and publish it to `gh-pages`.
+
+The published `registry.json` is consumed by:
+
+- `trusscli` (`addon list`, `addon search`, `addon clone`)
+- The TrussC website
+- Third-party tools
+
+> **Note on rate limits:** Direct topic searches by every user would hit GitHub API rate limits. Using a precomputed `registry.json` over GitHub Pages gives everyone a free, fast endpoint.
+
+### Registry Entry Schema
+
+Each addon entry in `registry.json` looks like:
+
+```jsonc
+{
+  "name": "tcxLua",
+  "owner": "funatsufumiya",            // GitHub user/org. Empty for bundled.
+  "url": "https://github.com/funatsufumiya/tcxLua.git",
+  "bundled": false,                    // true if shipped inside TrussC core
+  "version": "0.1.0",
+  "latest_tag": "v0.1.0",
+  "description": "...",
+  "author": "...",
+  "license": "MIT",
+  "trussc_version": ">=0.5.0",
+  "screenshot": "https://github.com/.../raw/HEAD/docs/preview.png",
+  "demo_url": "https://...",
+  "platforms": ["macos", "win", "linux", "web"],
+  "keywords": ["..."],
+  "dependencies": [...]
+}
+```
+
+### Display Convention for Name Collisions
+
+Two different repos can produce addons with the same `name` (for example, a bundled `tcxLua` and a community `funatsufumiya/tcxLua`). The registry intentionally keeps both. Consumers (trusscli, the website) should display them as:
+
+- `bundled: true` → plain `tcxLua`
+- `bundled: false` → `owner/name` (e.g. `funatsufumiya/tcxLua`)
+
+`trusscli addon clone <name>` should accept both forms; a bare `<name>` that maps to multiple entries should prompt the user to disambiguate with `<owner>/<name>`.
+
+### Discovery Safety
+
+The crawler refuses to commit an empty or catastrophically reduced (>50%) `addons_list.json` to guard against transient GitHub Search indexing lag wiping the registry. When this safety floor triggers, the existing list is preserved until the next successful run.
+
+### Addon Author Checklist
+
+To make your addon discoverable:
+
+1. Name it `tcxXxx` (camelCase after `tcx`).
+2. Add `addon.json` at the repo root (even `{}` works to opt in).
+3. Add the `trussc-addon` topic on the GitHub repo settings page.
+4. Make sure the repo is public and not archived.
 
 ---
 

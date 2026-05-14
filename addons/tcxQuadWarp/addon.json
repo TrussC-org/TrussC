@@ -2,5 +2,10 @@
   "description": "Quad warp / projection mapping",
   "author": "tettou771",
   "license": "MIT",
-  "keywords": ["projection", "mapping", "warp"]
+  "category": "graphics",
+  "keywords": [
+    "projection",
+    "mapping",
+    "warp"
+  ]
 }
