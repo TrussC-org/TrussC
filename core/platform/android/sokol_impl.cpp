@@ -11,12 +11,23 @@
 
 #define SOKOL_IMPL
 
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wunused-variable"
+#  pragma GCC diagnostic ignored "-Wunused-function"
+#  pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+
 #include "sokol_log.h"
 #include "sokol_app.h"
 #include "sokol_gfx.h"
 #include "sokol_glue.h"
 #include "util/sokol_gl_tc.h"
 #include "util/sokol_memtrack.h"
+
+#if defined(__GNUC__) || defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif
 
 // ---------------------------------------------------------------------------
 // Android entry point bridge
