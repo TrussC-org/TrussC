@@ -358,10 +358,11 @@ All fields are optional — an empty `{}` is valid and signals "this is a TrussC
   "author":         "Your Name <you@example.com>",
   "license":        "MIT",
   "trussc_version": ">=0.5.0",
+  "category":       "physics",
   "screenshot":     "docs/preview.png",
   "demo_url":       "https://trussc.org/sketch/?example=tcxFoo",
   "platforms":      ["macos", "win", "linux", "web"],
-  "keywords":       ["physics", "2d"],
+  "keywords":       ["2d", "collision"],
 
   "dependencies": [
     "tcxCurl",
@@ -383,11 +384,40 @@ All fields are optional — an empty `{}` is valid and signals "this is a TrussC
 | `author` | string | Author name, optionally with email (`"Name <email>"`). |
 | `license` | string | SPDX identifier (e.g., `"MIT"`, `"GPL-3.0"`). Missing values display as `"Unknown"`. |
 | `trussc_version` | string | TrussC version range this addon targets (e.g., `">=0.5.0"`). |
+| `category` | string | Top-level grouping. See [Categories](#categories). Unknown or omitted values fall back to `"misc"`. |
 | `screenshot` | string | Relative path or absolute URL to a preview image. Relative paths are resolved against the repo's default branch. |
 | `demo_url` | string | Link to a live demo (e.g., a TrussSketch page or a web build). |
 | `platforms` | string[] | Supported platforms. Allowed values: `"macos"`, `"win"`, `"linux"`, `"web"`, `"android"`, `"ios"`. Omit the field if untested — empty array means "no supported platforms". |
-| `keywords` | string[] | Tags for search and categorization. |
+| `keywords` | string[] | Free-form tags for fine-grained filtering inside a category (e.g., a `graphics` addon may use `"shader"`, `"glitch"`, `"color-grading"`). |
 | `dependencies` | (string \| object)[] | Other addons this addon depends on. See below. |
+
+### Categories
+
+`category` is a single string from the fixed set below. The set is intentionally small so addons stay easy to browse; use `keywords` for sub-classification within a category (e.g., `category: "graphics"` + `keywords: ["shader", "post-fx"]`).
+
+| Value | Covers |
+|-------|--------|
+| `3d` | 3D models, geometry, mesh utilities, scene graph |
+| `ai` | LLM clients, generative AI, prompt tooling |
+| `algorithms` | General algorithms (sorting, graph, search, etc.) |
+| `animation` | Keyframes, tweening, easing, motion |
+| `bridges` | Other-language/runtime interop (Lua, Julia, Python) |
+| `computer-vision` | OpenCV wrappers, marker / face / pose detection |
+| `game` | Game-specific systems (ECS, entity AI) |
+| `graphics` | Drawing, shaders, post-effects, color grading, image filters / format I/O |
+| `gui` | UI widgets, IME, ImGui-style integration |
+| `hardware` | Arduino, MIDI, sensors, IMU, embedded I/O |
+| `machine-learning` | Classical ML, on-device inference engines |
+| `network` | TCP/UDP/OSC/MQTT/NDI and other transport-layer protocols |
+| `physics` | Rigid body, soft body, fluid simulation |
+| `sound` | Audio synthesis, playback, DSP |
+| `typography` | Font loading, text shaping/rendering |
+| `utilities` | File I/O, settings, logging, generic helpers |
+| `video` | Video playback, capture, codecs |
+| `web` | HTTP, WebView, JS bridge (Emscripten), OAuth flows |
+| `misc` | Fallback only — the crawler maps unknown / omitted categories here. Do not declare `"misc"` explicitly. |
+
+Pick the single best fit. If two seem equally valid, prefer the category that matches the addon's primary functionality (what users would search for first).
 
 ### Dependencies
 

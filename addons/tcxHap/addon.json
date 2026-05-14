@@ -2,5 +2,11 @@
   "description": "Hap video codec for fast GPU playback",
   "author": "tettou771",
   "license": "MIT",
-  "keywords": ["video", "codec", "gpu", "hap"]
+  "category": "video",
+  "keywords": [
+    "video",
+    "codec",
+    "gpu",
+    "hap"
+  ]
 }

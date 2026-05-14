@@ -2,5 +2,11 @@
   "description": "3D LUT color grading",
   "author": "tettou771",
   "license": "MIT",
-  "keywords": ["color", "lut", "grading", "shader"]
+  "category": "graphics",
+  "keywords": [
+    "color",
+    "lut",
+    "grading",
+    "shader"
+  ]
 }

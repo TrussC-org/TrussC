@@ -2,5 +2,11 @@
   "description": "Dear ImGui integration",
   "author": "tettou771",
   "license": "MIT",
-  "keywords": ["gui", "imgui", "ui", "debug"]
+  "category": "gui",
+  "keywords": [
+    "gui",
+    "imgui",
+    "ui",
+    "debug"
+  ]
 }
