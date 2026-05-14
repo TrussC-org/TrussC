@@ -420,7 +420,6 @@ void present() {
     sgl_error_t err = sgl_error();
     if (err.vertices_full || err.commands_full) {
         int newVerts = internal::sglMaxVertices * 4;
-        int newCmds = internal::sglMaxCommands * 4;
         if (newVerts > internal::sglPendingResize) {
             internal::sglPendingResize = newVerts;
             logNotice("sokol_gl") << "Vertex buffer overflow detected ("

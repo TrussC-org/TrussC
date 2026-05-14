@@ -1134,11 +1134,13 @@ inline CurveStyle::Mode getCurveMode() {
 
 // Legacy alias. Forwards to setCurveResolution to avoid double-warning;
 // the deprecation marker fires at the user's call site.
-[[deprecated("Use setCurveResolution(int), or setCurveTolerance(float) for adaptive quality.")]]
+// Will be removed in v1.0.0
+[[deprecated("Use setCurveResolution(int), or setCurveTolerance(float) for adaptive quality. Will be removed in v1.0.0")]]
 inline void setCircleResolution(int res) {
     getDefaultContext().setCurveResolution(res);
 }
 
+[[deprecated("Use getCurveResolution() instead. Will be removed in v1.0.0")]]
 inline int getCircleResolution() {
     return getDefaultContext().getCircleResolution();
 }

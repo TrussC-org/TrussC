@@ -47,7 +47,7 @@ struct ChipSoundNote {
     ChipSoundNote() = default;
 
     ChipSoundNote(Wave w, float freq, float dur, float vol = 0.5f)
-        : wave(w), hz(freq), duration(dur), volume(vol) {}
+        : wave(w), hz(freq), volume(vol), duration(dur) {}
 
     // Build Sound from parameters
     Sound build() const {

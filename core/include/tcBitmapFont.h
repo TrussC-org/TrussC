@@ -251,8 +251,6 @@ inline unsigned char* generateAtlasPixels() {
 
     // Place each character (ASCII 32-126) in atlas
     for (int charIndex = 0; charIndex < 95; charIndex++) {
-        int c = charIndex + 32;  // ASCII code
-
         // Position in atlas
         int atlasCol = charIndex % CHARS_PER_ROW;
         int atlasRow = charIndex / CHARS_PER_ROW;
