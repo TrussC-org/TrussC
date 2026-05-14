@@ -681,6 +681,65 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         "MirroredRepeat", sol::var(TextureWrap::MirroredRepeat)
     );
 
+    lua->new_usertype<StrokeJoin>("StrokeJoin",
+        sol::meta_function::equal_to, [](StrokeJoin a, StrokeJoin b){ return a == b; },
+        "Miter", sol::var(StrokeJoin::Miter),
+        "Round", sol::var(StrokeJoin::Round),
+        "Bevel", sol::var(StrokeJoin::Bevel)
+    );
+
+    lua->new_usertype<Direction>("Direction",
+        sol::meta_function::equal_to, [](Direction a, Direction b){ return a == b; },
+        "Left", sol::var(Direction::Left),
+        "Center", sol::var(Direction::Center),
+        "Right", sol::var(Direction::Right),
+        "Top", sol::var(Direction::Top),
+        "Bottom", sol::var(Direction::Bottom),
+        "Baseline", sol::var(Direction::Baseline)
+    );
+
+    lua->new_usertype<Cursor>("Cursor",
+        sol::meta_function::equal_to, [](Cursor a, Cursor b){ return a == b; },
+        "Default", sol::var(Cursor::Default),
+        "Arrow", sol::var(Cursor::Arrow),
+        "IBeam", sol::var(Cursor::IBeam),
+        "Crosshair", sol::var(Cursor::Crosshair),
+        "Hand", sol::var(Cursor::Hand),
+        "ResizeEW", sol::var(Cursor::ResizeEW),
+        "ResizeNS", sol::var(Cursor::ResizeNS),
+        "ResizeNWSE", sol::var(Cursor::ResizeNWSE),
+        "ResizeNESW", sol::var(Cursor::ResizeNESW),
+        "ResizeAll", sol::var(Cursor::ResizeAll),
+        "NotAllowed", sol::var(Cursor::NotAllowed),
+        "Custom0", sol::var(Cursor::Custom0),
+        "Custom1", sol::var(Cursor::Custom1),
+        "Custom2", sol::var(Cursor::Custom2),
+        "Custom3", sol::var(Cursor::Custom3),
+        "Custom4", sol::var(Cursor::Custom4),
+        "Custom5", sol::var(Cursor::Custom5),
+        "Custom6", sol::var(Cursor::Custom6),
+        "Custom7", sol::var(Cursor::Custom7),
+        "Custom8", sol::var(Cursor::Custom8),
+        "Custom9", sol::var(Cursor::Custom9),
+        "Custom10", sol::var(Cursor::Custom10),
+        "Custom11", sol::var(Cursor::Custom11),
+        "Custom12", sol::var(Cursor::Custom12),
+        "Custom13", sol::var(Cursor::Custom13),
+        "Custom14", sol::var(Cursor::Custom14),
+        "Custom15", sol::var(Cursor::Custom15)
+    );
+
+    lua->new_usertype<Orientation>("Orientation",
+        sol::meta_function::equal_to, [](Orientation a, Orientation b){ return a == b; },
+        "Portrait", sol::var(Orientation::Portrait),
+        "PortraitUpsideDown", sol::var(Orientation::PortraitUpsideDown),
+        "LandscapeLeft", sol::var(Orientation::LandscapeLeft),
+        "LandscapeRight", sol::var(Orientation::LandscapeRight),
+        "Landscape", sol::var(Orientation::Landscape),
+        "All", sol::var(Orientation::All),
+        "AllButUpsideDown", sol::var(Orientation::AllButUpsideDown)
+    );
+
     sol::usertype<Shader> shader_type = lua->new_usertype<Shader>("Shader",
         sol::constructors<Shader()>() // FIXME: move constructor?
     );
