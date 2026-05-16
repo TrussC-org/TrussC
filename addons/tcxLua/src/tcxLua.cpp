@@ -1186,6 +1186,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
             [](XmlAttribute& x, float s){ return (x = s); },
             [](XmlAttribute& x, long s){ return (x = s); }
         ),
+        "name", &XmlAttribute::name,
         "value", &XmlAttribute::value
     );
 
@@ -1230,6 +1231,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
             [](XmlNode& x, const pugi::char_t* n){ return x.child(n); }
         ),
         "text", &XmlNode::text,
+        "name", &XmlNode::name,
         "first_child", &XmlNode::first_child,
         "last_child", &XmlNode::last_child,
         "first_attribute", &XmlNode::first_attribute,
