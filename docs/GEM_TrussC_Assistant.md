@@ -77,6 +77,7 @@ drawRect(x, y, w, h)
 drawRectRounded(x, y, w, h, radius)
 drawCircle(x, y, radius)
 drawEllipse(x, y, rx, ry)
+drawArc(x, y, radius, angleBegin, angleEnd)   // Angles in radians, TAU = 2*PI
 drawLine(x1, y1, x2, y2)         // Always 1px, lightweight
 drawStroke(x1, y1, x2, y2)       // Thick line (respects setStrokeWeight). Heavier than drawLine
 drawTriangle(x1, y1, x2, y2, x3, y3)
@@ -91,6 +92,79 @@ endStroke(true);         // Closed path
 setStrokeCap(StrokeCap::Round);    // Round / Butt / Square
 setStrokeJoin(StrokeJoin::Round);  // Round / Miter / Bevel
 ```
+
+### Bezier & Curves
+```cpp
+// Bezier — control points define the curve, endpoints are p0 and the last point.
+drawBezier(p0, p1, p2, p3);          // Cubic (4 control points)
+drawBezier(p0, p1, p2);              // Quadratic (3 control points)
+drawBezier(controlPoints);           // N-th order, vector<Vec3>
+
+// Catmull-Rom — the curve passes THROUGH the interior points.
+drawCurve(p0, p1, p2, p3);           // 4-point form draws the p1 -> p2 segment
+drawCurve(points);                   // Chained: passes through all interior points
+drawCurve(points, true);             // Closed loop (wraps around smoothly)
+```
+
+Use `drawBezier` when you want Illustrator-style control-handle behavior.
+Use `drawCurve` when you have a list of points the curve should hit (mouse
+trails, organic blobs).
+
+### Shape Builder (free-form polygons with curved segments)
+Build a closed outline by streaming vertices and curve appenders into a
+single `beginShape` / `endShape` pair.
+```cpp
+beginShape();
+vertex(0, 0);
+appendArc(cx, cy, r, angleBegin, angleEnd);   // Arc vertices
+appendCurve(controlPoints, false);            // Catmull-Rom segment (>=4 points)
+endShape(true);                               // close the outline
+```
+`appendArc` and `appendCurve` also work inside `beginStroke` / `beginLines`.
+
+### Path (accumulator class)
+`Path` collects vertices over multiple calls and can be drawn later,
+optionally many times. Methods chain naturally:
+```cpp
+Path p;
+p.moveTo(50, 50);
+p.lineTo(150, 50);
+p.bezierTo(cp1, cp2, end);              // Cubic
+p.quadBezierTo(cp, end);                // Quadratic
+p.curveTo(point);                       // Catmull-Rom (needs 4+ consecutive calls)
+p.arc(center, radius, angleBegin, angleEnd);
+p.close();
+
+p.draw();          // Fill (if fill enabled) and/or a 1px outline (if stroke enabled)
+p.drawStroke();    // Thick stroke via StrokeMesh, respects strokeWeight/Cap/Join
+```
+`p.draw()` is consistent with `drawCircle` / `drawRect` etc — its stroke
+mode is always a 1px line strip. Call `p.drawStroke()` when you want a
+weighted stroke with cap/join handling.
+
+### Curve Quality (Tolerance / Resolution)
+Curve tessellation has two modes, selected per-style:
+```cpp
+// Adaptive — target a screen-space pixel error. Scale-aware: tc::scale()
+// auto-adds segments, so the curve stays smooth at any zoom level.
+setCurveTolerance(0.1f);     // Default mode. 0.1 px is the default value.
+float t = getCurveTolerance();
+
+// Fixed — explicit segment count. Use for retro / chunky looks or when
+// you need a deterministic vertex count.
+setCurveResolution(32);
+int n = getCurveResolution();
+```
+The mode is part of the current style stack, so `pushStyle()` / `popStyle()`
+scopes a local override:
+```cpp
+pushStyle();
+setCurveResolution(6);
+drawCircle(x, y, 50);    // hexagon
+popStyle();              // back to whatever was active outside
+```
+NOTE: `setCircleResolution()` is a deprecated alias for
+`setCurveResolution()` and will be removed in v1.0.0.
 
 ### Fill & Stroke
 ```cpp
