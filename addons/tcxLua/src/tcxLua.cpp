@@ -1401,6 +1401,93 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     defineTween<Tween<Vec2>, Vec2>(lua, "TweenVec2");
     defineTween<Tween<Vec3>, Vec3>(lua, "TweenVec3");
     defineTween<Tween<Color>, Color>(lua, "TweenColor");
+
+    lua->new_usertype<PlayingSound>("PlayingSound",
+        sol::constructors<PlayingSound()>(),
+        "buffer", &PlayingSound::buffer,
+        "volume", &PlayingSound::volume,
+        "pan", &PlayingSound::pan,
+        "speed", &PlayingSound::speed,
+        "loop", &PlayingSound::loop,
+        "playing", &PlayingSound::playing,
+        "paused", &PlayingSound::paused,
+        "positionF", &PlayingSound::positionF,
+        "rateRatio", &PlayingSound::rateRatio
+    );
+
+    lua->new_usertype<SoundBuffer>("SoundBuffer",
+        sol::constructors<SoundBuffer(),
+            SoundBuffer(const SoundBuffer&), SoundBuffer(SoundBuffer&&)>(),
+        "loadOgg", &SoundBuffer::loadOgg,
+        "loadWav", &SoundBuffer::loadWav,
+        "loadMp3", &SoundBuffer::loadMp3,
+        "loadMp3FromMemory", &SoundBuffer::loadMp3FromMemory,
+        "loadAac", &SoundBuffer::loadAac,
+        "loadAacFromMemory", &SoundBuffer::loadAacFromMemory,
+        "getAdtsSampleRateIndex", sol::var(&SoundBuffer::getAdtsSampleRateIndex),
+        "createAdtsHeader", sol::var(&SoundBuffer::createAdtsHeader),
+        "loadPcmFromMemory", &SoundBuffer::loadPcmFromMemory,
+        "getDuration", &SoundBuffer::getDuration,
+        "generateSineWave", &SoundBuffer::generateSineWave,
+        "generateSquareWave", &SoundBuffer::generateSquareWave,
+        "generateTriangleWave", &SoundBuffer::generateTriangleWave,
+        "generateSawtoothWave", &SoundBuffer::generateSawtoothWave,
+        "generateNoise", &SoundBuffer::generateNoise,
+        "generatePinkNoise", &SoundBuffer::generatePinkNoise,
+        "generateSilence", &SoundBuffer::generateSilence,
+        "applyADSR", &SoundBuffer::applyADSR,
+        "mixFrom", &SoundBuffer::mixFrom,
+        "clip", &SoundBuffer::clip
+    );
+
+    lua->new_usertype<AudioEngine>("AudioEngine",
+        "getInstance", sol::var(&AudioEngine::getInstance),
+        "init", &AudioEngine::init,
+        "shutdown", &AudioEngine::shutdown,
+        "getAnalysisBuffer", &AudioEngine::getAnalysisBuffer,
+        "play", &AudioEngine::play,
+        "mixAudio", &AudioEngine::mixAudio
+    );
+
+    lua->new_usertype<Sound>("Sound",
+        sol::constructors<Sound(),
+            Sound(const Sound&), Sound(Sound&&)>(),
+        "load", &Sound::load,
+        "loadTestTone", &Sound::loadTestTone,
+        "loadFromBuffer", sol::overload(
+            [](Sound& s, const SoundBuffer& b){ s.loadFromBuffer(b); },
+            [](Sound& s, std::shared_ptr<SoundBuffer> b){ s.loadFromBuffer(b); }
+        ),
+        "isLoaded", &Sound::isLoaded,
+        "play", &Sound::play,
+        "stop", &Sound::stop,
+        "pause", &Sound::pause,
+        "resume", &Sound::resume,
+        "setVolume", &Sound::setVolume,
+        "getVolume", &Sound::getVolume,
+        "setLoop", &Sound::setLoop,
+        "isLoop", &Sound::isLoop,
+        "setPan", &Sound::setPan,
+        "getPan", &Sound::getPan,
+        "setSpeed", &Sound::setSpeed,
+        "getSpeed", &Sound::getSpeed,
+        "isPlaying", &Sound::isPlaying,
+        "isPaused", &Sound::isPaused,
+        "getPosition", &Sound::getPosition,
+        "setPosition", &Sound::setPosition,
+        "getDuration", &Sound::getDuration
+    );
+
+    lua->new_usertype<MicInput>("MicInput",
+        sol::constructors<MicInput>(),
+            // MicInput(const MicInput&), MicInput(MicInput&&)>(),
+        "start", &MicInput::start,
+        "stop", &MicInput::stop,
+        "getBuffer", &MicInput::getBuffer,
+        "isRunning", &MicInput::isRunning,
+        "getSampleRate", &MicInput::getSampleRate,
+        "onAudioData", &MicInput::onAudioData
+    );
 }
 
 struct Colors{};
