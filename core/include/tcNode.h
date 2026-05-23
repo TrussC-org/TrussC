@@ -452,9 +452,14 @@ private:
             mod->update();
         }
 
-        // Automatically update child nodes
-        for (auto& child : children_) {
-            child->updateTree();
+        // Iterate over a snapshot — a child's update() may add, remove, or
+        // reorder siblings (via addChild / removeChild / moveToFront / etc.),
+        // and we want those edits to take effect on the *next* frame rather
+        // than corrupt the in-flight iteration. The snapshot is a shallow
+        // shared_ptr copy so it's cheap and keeps the targets alive.
+        auto childrenSnapshot = children_;
+        for (auto& child : childrenSnapshot) {
+            if (!child->isDead()) child->updateTree();
         }
     }
 
@@ -679,8 +684,10 @@ private:
             return true;  // Consumed
         }
 
-        // Dispatch to child nodes
-        for (auto& child : children_) {
+        // Snapshot — handlers may mutate the tree.
+        auto childrenSnapshot = children_;
+        for (auto& child : childrenSnapshot) {
+            if (child->isDead()) continue;
             if (child->dispatchKeyPressRecursive(key)) {
                 return true;
             }
@@ -696,7 +703,9 @@ private:
             return true;
         }
 
-        for (auto& child : children_) {
+        auto childrenSnapshot = children_;
+        for (auto& child : childrenSnapshot) {
+            if (child->isDead()) continue;
             if (child->dispatchKeyReleaseRecursive(key)) {
                 return true;
             }
@@ -760,8 +769,10 @@ protected:
     // -------------------------------------------------------------------------
 
     virtual void drawChildren() {
-        for (auto& child : children_) {
-            child->drawTree();
+        // Snapshot — see updateTree() for rationale.
+        auto childrenSnapshot = children_;
+        for (auto& child : childrenSnapshot) {
+            if (!child->isDead()) child->drawTree();
         }
     }
 
