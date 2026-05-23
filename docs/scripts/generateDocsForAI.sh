@@ -15,9 +15,9 @@ TIMESTAMP=$(date +"%Y-%m%d-%H%M")
 DATE_STR=$(LANG=C date +"%Y-%m-%d %H:%M:%S")
 
 # Output files (with timestamp prefix)
-DOCS_FILE="$SCRIPT_DIR/${TIMESTAMP}_trussc_docs.md"
-EXAMPLES_FILE="$SCRIPT_DIR/${TIMESTAMP}_trussc_examples.md"
-API_FILE="$SCRIPT_DIR/${TIMESTAMP}_trussc_api.md"
+DOCS_FILE="$SCRIPT_DIR/${TIMESTAMP}_trussc_docs.txt"
+EXAMPLES_FILE="$SCRIPT_DIR/${TIMESTAMP}_trussc_examples.txt"
+API_FILE="$SCRIPT_DIR/${TIMESTAMP}_trussc_api.txt"
 
 # Function to add a file with path and code block
 add_file() {
