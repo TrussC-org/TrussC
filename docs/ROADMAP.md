@@ -17,6 +17,7 @@
 | Area lights | Rectangle / disc / line area light sources | High |
 | Cascaded shadow maps | CSM for directional lights (large outdoor scenes) | High |
 | Unified `LoadResult` API | Replace `bool` return of `Image::load` / `SoundBuffer::load` / `Video::load` / `Font::load` / `Shader::load` with a shared `trussc::LoadResult` carrying `LoadError` enum + message + raw code. Use `explicit operator bool()` so existing `if (x.load(...))` keeps working. Needs an audit of error taxonomy first (file-not-found / invalid-format / permission-denied / decoder-failure / etc.) and a per-domain inventory of what error sources exist (stb_image, AVFoundation, mbedTLS, miniaudio, etc.). | High |
+| Real-time audio stream API | Expose the audio callback so user code can synthesize / process samples per buffer (typical 256–512 frames at 96 kHz). oF-style listener pattern: `App` gets an overridable `audioOut(float* out, size_t frames, int channels)` (and `audioIn(const float* in, ...)`); plus a free-function or `SoundStream` class for non-App-bound code. Currently the only way to produce sound is pre-baked `SoundBuffer` + `Sound::play()`, which can't handle dynamic synthesis (sine generators with live parameter changes, granular synthesis, software synths, audio effects, etc.). Output runs at engine native rate (96 kHz, no rateRatio path) — document that. | High |
 
 ### Medium Priority
 
@@ -26,6 +27,7 @@
 | macOS deprecated API migration | Replace `tracksWithMediaType:` / `copyCGImageAtTime:` with async equivalents (deprecated in macOS 15.0) | Medium |
 | `SG_VERTEXFORMAT_INT10_N2` adoption | sokol_gfx (2026-05) added a 10-10-10-2 normalized int vertex format. Adopt for `tcMesh` normal / tangent attributes — 3x smaller than FLOAT3 with effectively no visual loss (Unity / Unreal default). D3D11 backend not yet supported upstream, so verify Windows path before committing. | Medium |
 | Configurable 10-bit color output | TrussC currently forces RGB10A2 swap-chain in sokol_app patches. Make it opt-in via WindowSettings once upstream sokol adds a `SAPP_PIXELFORMAT_RGB10A2` (currently not in upstream — track [floooh/sokol](https://github.com/floooh/sokol)). | Low |
+| Dear ImGui 1.92.6 → latest | Currently on 1.92.6 WIP. 1.92.8 (2026-05-12) introduced a notable breaking change: `AddRect()` / `AddPolyline()` / `PathStroke()` swapped their `flags` and `thickness` arg positions. TrussC core does not touch these, but user code that does will need updates. Inline redirection keeps source compatible unless `IMGUI_DISABLE_OBSOLETE_FUNCTIONS` is on. Plan a single bump to the latest 1.92.x. | Low |
 
 
 ---
