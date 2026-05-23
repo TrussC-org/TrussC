@@ -5,7 +5,7 @@ When updating from upstream, these changes need to be re-applied.
 
 Search for `tettou771` or `Modified by` or `[TrussC` to find all modified sections.
 
-**Upstream base:** https://github.com/floooh/sokol commit `672dea0` (2026-04-03)
+**Upstream base:** https://github.com/floooh/sokol commit `082152c` (2026-05-21)
 
 ---
 
@@ -13,7 +13,7 @@ Search for `tettou771` or `Modified by` or `[TrussC` to find all modified sectio
 
 ```
 sokol/
-├── sokol_app.h          # Modified (9 patches)
+├── sokol_app.h          # Modified (10 patches)
 ├── sokol_gfx.h          # Untouched (direct copy from upstream)
 ├── sokol_glue.h         # Modified (1 patch)
 ├── sokol_log.h          # Untouched
@@ -113,6 +113,13 @@ Matches upstream directory layout: core headers at root, utility headers in `uti
 - Added `#include <android/configuration.h>`
 - In Android `_sapp_android_update_dimensions()`: query `AConfiguration_getDensity()` and compute scale from actual density, falling back to fb/win ratio if unavailable
 
+### 14. CGBitmapInfo Enum Cast (Silence C++20 Warning)
+
+**Purpose:** Silence `-Wdeprecated-enum-enum-conversion` introduced by C++20 in the macOS dock-tile image setup. The original code OR-ed two CoreGraphics constants of different enum types (`CGImageAlphaInfo` and `CGImageByteOrderInfo`).
+
+**Changes:**
+- In `_sapp_macos_set_dock_tile()` CGImage creation: explicitly cast both operands to `CGBitmapInfo` (the destination type, a `uint32_t` typedef) before the bitwise OR. No behavioral change.
+
 ---
 
 ## sokol_glue.h
@@ -187,15 +194,43 @@ These functions do NOT exist in upstream sokol_gl. They are TrussC additions.
 
 ## How to Update Sokol
 
-1. Download new headers from https://github.com/floooh/sokol
-2. **sokol_gfx.h** -- overwrite directly (no modifications)
-3. **sokol_app.h** -- overwrite, then re-apply patches #1--#8 (search `tettou771` or `[TrussC`)
-4. **sokol_glue.h** -- overwrite, then re-apply patch #9
-5. **util/sokol_gl_tc.h** -- copy upstream `util/sokol_gl.h`, rename, then re-apply patches #10--#13 (search `[TrussC`)
-6. **addons/tcxImGui/src/sokol_imgui.h** -- overwrite directly from upstream `util/sokol_imgui.h` (moved from trussc core to tcxImGui addon)
-7. **Other headers** (sokol_log.h, etc.) -- overwrite directly
-8. Update the **Upstream base** commit hash at the top of this file
-9. Test on all platforms (macOS, Windows D3D11, Emscripten Web)
+For files with TrussC patches (sokol_app.h, sokol_glue.h, util/sokol_gl_tc.h),
+**use `git merge-file` as a 3-way merge** instead of overwriting and manually
+re-applying patches. This avoids slip bugs from manual patch transcription.
+
+### Recommended: 3-way merge for patched files
+
+```bash
+# Stage three versions in /tmp:
+#   BASE   — upstream sokol at the commit recorded above (pre-patch)
+#   OURS   — current TrussC copy with all patches
+#   THEIRS — new upstream master we want to update to
+(cd <sokol-clone>; git show <base-sha>:sokol_app.h) > /tmp/BASE.h
+cp <sokol-clone>/sokol_app.h /tmp/THEIRS.h
+cp core/include/sokol/sokol_app.h /tmp/OURS.h
+
+# Run merge; conflicts (if any) end up as <<<<<<< / ======= / >>>>>>> blocks
+cp /tmp/OURS.h /tmp/MERGED.h
+git merge-file --diff-algorithm=histogram -p /tmp/OURS.h /tmp/BASE.h /tmp/THEIRS.h > /tmp/MERGED.h
+
+# Resolve conflicts in /tmp/MERGED.h, then copy back
+cp /tmp/MERGED.h core/include/sokol/sokol_app.h
+```
+
+Repeat for `sokol_glue.h` and `util/sokol_gl_tc.h` (use upstream `util/sokol_gl.h`
+as both BASE and THEIRS, since sokol_gl_tc.h is the renamed fork).
+
+### Direct overwrite (for files without TrussC patches)
+
+1. **sokol_gfx.h** -- overwrite directly (no modifications)
+2. **addons/tcxImGui/src/sokol_imgui.h** -- overwrite directly from upstream `util/sokol_imgui.h`
+3. **Other headers** (sokol_log.h, etc.) -- overwrite directly
+
+### After updating
+
+4. Update the **Upstream base** commit hash at the top of this file
+5. Verify by searching for patch markers: `grep -rn "tettou771\|\[TrussC" core/include/sokol/` — the count should match what's documented per file
+6. Test on all platforms (macOS, Windows D3D11, Emscripten Web, Linux, iOS, Android)
 
 ## Removed Patches
 
