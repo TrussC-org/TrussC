@@ -160,25 +160,61 @@ bool captureWindow(Pixels& outPixels) {
         return false;
     }
 
-    id<MTLTexture> texture = drawable.texture;
-    if (!texture) {
+    id<MTLTexture> srcTexture = drawable.texture;
+    if (!srcTexture) {
         logError() << "[Screenshot] Metal テクスチャが取得できません";
         return false;
     }
 
-    NSUInteger width = texture.width;
-    NSUInteger height = texture.height;
-    MTLPixelFormat pixelFormat = texture.pixelFormat;
+    NSUInteger width = srcTexture.width;
+    NSUInteger height = srcTexture.height;
+    MTLPixelFormat pixelFormat = srcTexture.pixelFormat;
 
-    // Read raw pixel data from Metal texture
+    // sokol が CAMetalLayer に framebufferOnly=YES をセットしているため、
+    // drawable.texture から直接 getBytes するとアサートする (Metal validation 有効時)。
+    // shared-storage の staging texture に blit してから読み出す。
+    id<MTLDevice> device = srcTexture.device;
+    MTLTextureDescriptor* desc =
+        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixelFormat
+                                                           width:width
+                                                          height:height
+                                                       mipmapped:NO];
+    desc.usage = MTLTextureUsageShaderRead;
+    desc.storageMode = MTLStorageModeShared;
+    id<MTLTexture> stagingTexture = [device newTextureWithDescriptor:desc];
+    if (!stagingTexture) {
+        logError() << "[Screenshot] staging texture の作成に失敗しました";
+        return false;
+    }
+
+    static id<MTLCommandQueue> s_blitQueue = nil;
+    if (!s_blitQueue || s_blitQueue.device != device) {
+        s_blitQueue = [device newCommandQueue];
+    }
+
+    id<MTLCommandBuffer>      cmdBuf  = [s_blitQueue commandBuffer];
+    id<MTLBlitCommandEncoder> blitEnc = [cmdBuf blitCommandEncoder];
+    [blitEnc copyFromTexture:srcTexture
+                 sourceSlice:0
+                 sourceLevel:0
+                sourceOrigin:MTLOriginMake(0, 0, 0)
+                  sourceSize:MTLSizeMake(width, height, 1)
+                   toTexture:stagingTexture
+            destinationSlice:0
+            destinationLevel:0
+           destinationOrigin:MTLOriginMake(0, 0, 0)];
+    [blitEnc endEncoding];
+    [cmdBuf commit];
+    [cmdBuf waitUntilCompleted];
+
     MTLRegion region = MTLRegionMake2D(0, 0, width, height);
     NSUInteger bytesPerRow = width * 4;
     std::vector<uint8_t> rawData(bytesPerRow * height);
 
-    [texture getBytes:rawData.data()
-          bytesPerRow:bytesPerRow
-           fromRegion:region
-          mipmapLevel:0];
+    [stagingTexture getBytes:rawData.data()
+                 bytesPerRow:bytesPerRow
+                  fromRegion:region
+                 mipmapLevel:0];
 
     // Allocate output pixels (always RGBA8)
     outPixels.allocate((int)width, (int)height, 4);
