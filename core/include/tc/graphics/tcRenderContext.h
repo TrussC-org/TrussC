@@ -500,8 +500,17 @@ public:
     // -----------------------------------------------------------------------
     // Arc — circular arc spanning [angleBegin, angleEnd] radians.
     //
-    // Stroke: just the arc curve.
-    // Fill:   pie sector — fan from center to arc, like p5.js / Processing.
+    // Stroke: just the arc curve (open).
+    // Fill:   pie sector — closes to the center as a fan, like p5.js /
+    //         Processing. This is the one place where fill and stroke do
+    //         not share the same boundary (other primitives do). It's a
+    //         deliberate convenience: filling a partial arc almost always
+    //         means "I want a pie slice."
+    //
+    // If you need a different closure (chord / open fill / custom shape),
+    // build it from the low-level primitive `appendArc()` inside
+    // beginShape()/endShape(), which emits rim points only and never
+    // injects a center vertex.
     //
     // Angles in **radians**, going counter-clockwise (mathematical
     // convention). For a quick semicircle: drawArc(x, y, r, 0, HALF_TAU).

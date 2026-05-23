@@ -532,6 +532,11 @@ private:
 
         pd.colors[0].pixel_format = SG_PIXELFORMAT_R32F;
         pd.index_type = SG_INDEXTYPE_UINT32;
+        // Shadow map is single-sampled; pin the pipeline to match. Leaving this
+        // at 0 makes sokol inherit the swapchain MSAA count (e.g. 4), which GL/
+        // Metal tolerate but WebGPU rejects ("attachment state not compatible"
+        // → shadow pass fails → black screen).
+        pd.sample_count = 1;
         pd.label = "tc_shadow_depth_pipeline";
 
         shadowPipeline_ = sg_make_pipeline(&pd);

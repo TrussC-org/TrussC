@@ -441,6 +441,19 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
     # Link TrussC
     target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC)
 
+    # Silence the macOS ld-prime "ignoring duplicate libraries" warning. It
+    # fires on the legitimate diamond dependency (app -> TrussC and
+    # app -> addon -> TrussC), where libTrussC.a appears twice in the link
+    # line. The flag only exists on the new linker, so probe before adding —
+    # classic ld would fail the check and we skip it.
+    if(APPLE)
+        include(CheckLinkerFlag)
+        check_linker_flag(CXX "-Wl,-no_warn_duplicate_libraries" _TC_HAS_NO_WARN_DUP_LIBS)
+        if(_TC_HAS_NO_WARN_DUP_LIBS)
+            target_link_options(${PROJECT_NAME} PRIVATE -Wl,-no_warn_duplicate_libraries)
+        endif()
+    endif()
+
     # Build info — injected as compile definitions, read back through
     # tc::BuildInfo (see core/include/tcBuildInfo.h). Timestamps reflect the
     # moment CMake configured the project, so `cmake ..` refreshes them.
@@ -679,6 +692,17 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         else()
             set(_TC_MANIFEST_TEMPLATE "${TRUSSC_DIR}/resources/android/AndroidManifest.xml.in")
         endif()
+        # Opt-in Java/.dex packaging. Set hasCode based on whether the
+        # project ships any Java sources (DeviceAdminReceiver and similar
+        # things that need real Java classes in the APK). NativeActivity-
+        # only projects keep hasCode="false" and the existing build path.
+        set(_TC_JAVA_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android/java")
+        set(_TC_RES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android/res")
+        if(EXISTS "${_TC_JAVA_SRC_DIR}")
+            set(TC_APP_HAS_CODE "true")
+        else()
+            set(TC_APP_HAS_CODE "false")
+        endif()
         set(_TC_MANIFEST_OUT "${CMAKE_CURRENT_BINARY_DIR}/AndroidManifest.xml")
         configure_file("${_TC_MANIFEST_TEMPLATE}" "${_TC_MANIFEST_OUT}" @ONLY)
 
@@ -738,10 +762,58 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
             set(_TC_ALIGNED "${CMAKE_CURRENT_BINARY_DIR}/aligned.apk")
             set(_TC_APK_OUT "${_TC_APK_DIR}/${PROJECT_NAME}.apk")
 
+            # Optional Java + res integration (DeviceAdminReceiver etc.)
+            # Only kicks in when the project ships android/java/.
+            set(_TC_PRE_CMDS)
+            set(_TC_AAPT_EXTRA_ARGS)
+            if(EXISTS "${_TC_JAVA_SRC_DIR}")
+                find_program(_TC_JAVAC javac)
+                find_program(_TC_D8 d8 HINTS "${ANDROID_BUILD_TOOLS_DIR}")
+                if(NOT _TC_JAVAC OR "${_TC_JAVAC}" MATCHES "NOTFOUND$")
+                    message(FATAL_ERROR "[${PROJECT_NAME}] javac not found but android/java/ exists")
+                endif()
+                if(NOT _TC_D8 OR "${_TC_D8}" MATCHES "NOTFOUND$")
+                    message(FATAL_ERROR "[${PROJECT_NAME}] d8 not found in ${ANDROID_BUILD_TOOLS_DIR} but android/java/ exists")
+                endif()
+
+                find_program(_TC_JAR jar)
+                if(NOT _TC_JAR OR "${_TC_JAR}" MATCHES "NOTFOUND$")
+                    message(FATAL_ERROR "[${PROJECT_NAME}] jar (from JDK) not found")
+                endif()
+
+                file(GLOB_RECURSE _TC_JAVA_SRCS "${_TC_JAVA_SRC_DIR}/*.java")
+                set(_TC_CLASSES_DIR "${CMAKE_CURRENT_BINARY_DIR}/java_classes")
+                set(_TC_CLASSES_JAR "${CMAKE_CURRENT_BINARY_DIR}/classes.jar")
+                # classes.dex is dropped at the apk_staging root — aapt will
+                # then bundle it into the APK alongside lib/arm64-v8a/*.so.
+                list(APPEND _TC_PRE_CMDS
+                    COMMAND ${CMAKE_COMMAND} -E rm -rf "${_TC_CLASSES_DIR}"
+                    COMMAND ${CMAKE_COMMAND} -E make_directory "${_TC_CLASSES_DIR}"
+                    COMMAND ${_TC_JAVAC}
+                        -d "${_TC_CLASSES_DIR}"
+                        -classpath "${_TC_ANDROID_JAR}"
+                        -source 1.8 -target 1.8
+                        ${_TC_JAVA_SRCS}
+                    COMMAND ${_TC_JAR} cf "${_TC_CLASSES_JAR}" -C "${_TC_CLASSES_DIR}" .
+                    COMMAND ${_TC_D8}
+                        --output "${_TC_APK_STAGING}"
+                        --lib "${_TC_ANDROID_JAR}"
+                        --no-desugaring
+                        "${_TC_CLASSES_JAR}"
+                )
+                message(STATUS "[${PROJECT_NAME}] Java compile enabled (${_TC_JAVA_SRC_DIR})")
+            endif()
+            if(EXISTS "${_TC_RES_DIR}")
+                list(APPEND _TC_AAPT_EXTRA_ARGS -S "${_TC_RES_DIR}")
+                message(STATUS "[${PROJECT_NAME}] Android res dir enabled (${_TC_RES_DIR})")
+            endif()
+
             add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                ${_TC_PRE_CMDS}
                 COMMAND ${_TC_AAPT} package -f
                     -M "${_TC_MANIFEST_OUT}"
                     -I "${_TC_ANDROID_JAR}"
+                    ${_TC_AAPT_EXTRA_ARGS}
                     -F "${_TC_UNSIGNED}"
                     "${_TC_APK_STAGING}"
                 COMMAND ${_TC_ZIPALIGN} -f 4 "${_TC_UNSIGNED}" "${_TC_ALIGNED}"

@@ -19,6 +19,8 @@
 #include <signal.h>
 #else
 #include <process.h>
+#include <io.h>
+#include <windows.h>
 #endif
 
 using namespace std;
@@ -1475,7 +1477,44 @@ struct AddonInfo {
     vector<string> platforms;
     string demoUrl;
     vector<AddonDep> dependencies;
+    int stars = 0;         // GitHub stargazers (0 for bundled / unknown)
 };
+
+// True when stdout is an interactive terminal (not a pipe / redirect).
+static bool stdoutIsTty() {
+#ifdef _WIN32
+    return _isatty(_fileno(stdout)) != 0;
+#else
+    return isatty(STDOUT_FILENO) != 0;
+#endif
+}
+
+// Whether the console can safely render the ★ glyph. POSIX terminals are
+// UTF-8 in practice; on Windows we only trust it when the output codepage is
+// UTF-8, otherwise ★ mojibakes (legacy cp932/cp437 consoles).
+static bool consoleSupportsUnicode() {
+#ifdef _WIN32
+    return GetConsoleOutputCP() == CP_UTF8;
+#else
+    return true;
+#endif
+}
+
+// Render a star count for the console. Empty when stars <= 0 so bundled /
+// unstarred addons stay clean (matches the website pill). On an interactive
+// terminal: a yellow ★ (U+2605 — a single-width BMP glyph that is reliable in
+// monospace, unlike the ⭐ emoji whose width is ambiguous and which mojibakes
+// on legacy Windows consoles). Falls back to a plain "*N" for pipes,
+// redirects, NO_COLOR, or non-UTF-8 consoles.
+static string formatStars(int stars) {
+    if (stars <= 0) return "";
+    bool tty = stdoutIsTty();
+    bool color = tty && !getenv("NO_COLOR");
+    string glyph = (tty && consoleSupportsUnicode()) ? "★" : "*";
+    string sep = (glyph == "*") ? "" : " ";
+    if (color) return "\033[33m" + glyph + "\033[0m" + sep + to_string(stars);
+    return glyph + sep + to_string(stars);
+}
 
 // Format an addon for display:
 //   bundled         -> "tcxFoo"
@@ -1602,6 +1641,7 @@ static vector<AddonInfo> fetchRegistry(bool allowStaleCache = false) {
             info.author      = a.value("author", "");
             info.license     = a.value("license", "");
             info.demoUrl     = a.value("demo_url", "");
+            info.stars       = a.value("stars", 0);
             if (a.contains("platforms") && a["platforms"].is_array()) {
                 for (const auto& p : a["platforms"]) {
                     if (p.is_string()) info.platforms.push_back(p.get<string>());
@@ -1749,6 +1789,8 @@ static int cmdAddonList(const vector<string>& args) {
             }
             const string& lic = addon.license.empty() ? "Unknown" : addon.license;
             cout << "  [" << lic << "]";
+            string starStr = formatStars(addon.stars);
+            if (!starStr.empty()) cout << "  " << starStr;
             if (!addon.description.empty()) {
                 cout << "  " << addon.description;
             }
@@ -2253,6 +2295,8 @@ static int cmdAddonSearch(const vector<string>& args) {
         if (!a->version.empty() && a->version != "unknown") cout << "  " << a->version;
         const string& lic = a->license.empty() ? "Unknown" : a->license;
         cout << "  [" << lic << "]";
+        string starStr = formatStars(a->stars);
+        if (!starStr.empty()) cout << "  " << starStr;
         if (a->bundled) cout << "  (bundled)";
         cout << "\n";
         if (!a->description.empty()) cout << "    " << a->description << "\n";
