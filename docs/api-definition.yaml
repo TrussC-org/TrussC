@@ -3350,9 +3350,9 @@ categories:
         signatures:
           - params: "const string& path"
             params_simple: "path"
-        description: "Load sound file"
-        description_ja: "サウンドファイルを読み込む"
-        description_ko: "사운드 파일을 로드"
+        description: "Load sound file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a"
+        description_ja: "サウンドファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a"
+        description_ko: "사운드 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a"
         sketch: true
         snippet: "load(${1:\"sound.wav\"})"
 
@@ -4335,6 +4335,28 @@ categories:
         description_ko: "자식 노드를 추가 (C++ 전용)"
         sketch: false
         snippet: "addChild(${1:child})"
+
+      - name: moveToFront
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Move this node to the end of its parent's child list — drawn last, on top of siblings. No-op if no parent or already last (C++ only)"
+        description_ja: "親の子リストの末尾へ移動。最後に描画され、兄弟の最前面に表示される。親がない / すでに末尾の場合は何もしない（C++のみ）"
+        description_ko: "이 노드를 부모의 자식 리스트 끝으로 이동 — 마지막에 그려지므로 형제들 위에 표시됨. 부모가 없거나 이미 마지막이면 동작 안 함 (C++ 전용)"
+        sketch: false
+        snippet: "moveToFront()"
+
+      - name: moveToBack
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Move this node to the beginning of its parent's child list — drawn first, beneath siblings. No-op if no parent or already first (C++ only)"
+        description_ja: "親の子リストの先頭へ移動。最初に描画され、兄弟の最背面に表示される。親がない / すでに先頭の場合は何もしない（C++のみ）"
+        description_ko: "이 노드를 부모의 자식 리스트 처음으로 이동 — 먼저 그려지므로 형제들 아래에 표시됨. 부모가 없거나 이미 처음이면 동작 안 함 (C++ 전용)"
+        sketch: false
+        snippet: "moveToBack()"
 
       - name: destroy
         return: "void"
@@ -9318,9 +9340,9 @@ types:
         return: bool
         signatures:
           - params: "string path"
-        description: "Load audio file"
-        description_ja: "音声ファイルを読み込む"
-        description_ko: "오디오 파일을 로드"
+        description: "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a"
+        description_ja: "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a"
+        description_ko: "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a"
         snippet: "load(${1:\"path\"})"
       - name: play
         return: "void"
