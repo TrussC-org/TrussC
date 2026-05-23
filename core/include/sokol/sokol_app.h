@@ -5830,7 +5830,7 @@ _SOKOL_PRIVATE void _sapp_macos_set_icon(const sapp_icon_desc* icon_desc, int nu
         32,                         // bitsPerPixel
         (size_t)img_desc->width * 4,// bytesPerRow
         cg_color_space,             // space
-        kCGImageAlphaLast | kCGImageByteOrderDefault,  // bitmapInfo
+        (CGBitmapInfo)kCGImageAlphaLast | (CGBitmapInfo)kCGImageByteOrderDefault,  // bitmapInfo — Modified by tettou771 for TrussC: silence enum-enum-conversion warning under C++20
         cg_data_provider,           // provider
         NULL,                       // decode
         false,                      // shouldInterpolate
