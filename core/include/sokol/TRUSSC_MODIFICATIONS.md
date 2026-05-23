@@ -17,11 +17,13 @@ sokol/
 ├── sokol_gfx.h          # Untouched (direct copy from upstream)
 ├── sokol_glue.h         # Modified (1 patch)
 ├── sokol_log.h          # Untouched
-├── sokol_audio.h        # Untouched
 ├── TRUSSC_MODIFICATIONS.md
 └── util/
     └── sokol_gl_tc.h    # Forked from upstream util/sokol_gl.h + TrussC modifications
 ```
+
+**Note:** `sokol_audio.h` is intentionally not included. TrussC's audio backend is
+miniaudio (see `tc/sound/tcAudio_impl.cpp` for the rationale).
 
 Matches upstream directory layout: core headers at root, utility headers in `util/`.
 

@@ -17,7 +17,6 @@
 #include "sokol_gfx.h"
 #include "sokol_glue.h"
 #include "util/sokol_gl_tc.h"
-#include "sokol_audio.h"
 #include "util/sokol_memtrack.h"
 
 #if defined(__GNUC__) || defined(__clang__)
