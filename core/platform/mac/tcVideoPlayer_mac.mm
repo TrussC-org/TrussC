@@ -8,6 +8,32 @@
 
 #include "TrussC.h"
 
+// AVAsset's synchronous `tracksWithMediaType:` and AVAssetImageGenerator's
+// `copyCGImageAtTime:` are deprecated in macOS 15.0 in favor of async
+// completion-handler variants. Migrating the codebase to the async APIs is
+// tracked on the roadmap ("macOS deprecated API migration"); until that lands
+// the sync call sites need to keep compiling cleanly across our supported
+// macOS versions (which include pre-15 systems where the async APIs are
+// either unavailable or require additional gating). Funnel both calls through
+// a single helper so the suppression sits in one place and the rest of the
+// file stays free of pragma noise.
+NS_INLINE NSArray<AVAssetTrack*>* tcv_tracks_with_media_type(AVAsset* asset, NSString* mediaType) {
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return [asset tracksWithMediaType:mediaType];
+    #pragma clang diagnostic pop
+}
+
+NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
+                                              CMTime requestTime,
+                                              CMTime* actualTime,
+                                              NSError** error) CF_RETURNS_RETAINED {
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return [gen copyCGImageAtTime:requestTime actualTime:actualTime error:error];
+    #pragma clang diagnostic pop
+}
+
 // =============================================================================
 // Internal Objective-C class for AVFoundation handling
 // =============================================================================
@@ -145,7 +171,7 @@
     }
 
     // Get video track info
-    NSArray* videoTracks = [self.asset tracksWithMediaType:AVMediaTypeVideo];
+    NSArray* videoTracks = tcv_tracks_with_media_type(self.asset, AVMediaTypeVideo);
     if (videoTracks.count == 0) {
         NSLog(@"TCVideoPlayer: No video tracks found");
         self.asset = nil;
@@ -177,7 +203,7 @@
           (long)_videoWidth, (long)_videoHeight, _frameRate, _duration);
 
     // Get audio track info
-    NSArray* audioTracks = [self.asset tracksWithMediaType:AVMediaTypeAudio];
+    NSArray* audioTracks = tcv_tracks_with_media_type(self.asset, AVMediaTypeAudio);
     if (audioTracks.count > 0) {
         AVAssetTrack* audioTrack = audioTracks[0];
         _hasAudioTrack = YES;
@@ -500,7 +526,7 @@ static void createADTSHeader(uint8_t* header, int frameLength, int sampleRate, i
         return nil;
     }
 
-    NSArray* audioTracks = [self.asset tracksWithMediaType:AVMediaTypeAudio];
+    NSArray* audioTracks = tcv_tracks_with_media_type(self.asset, AVMediaTypeAudio);
     if (audioTracks.count == 0) {
         return nil;
     }
@@ -859,7 +885,7 @@ bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixel
         if (timeSec < 0) timeSec = 0;
 
         // Check video track exists
-        NSArray* videoTracks = [asset tracksWithMediaType:AVMediaTypeVideo];
+        NSArray* videoTracks = tcv_tracks_with_media_type(asset, AVMediaTypeVideo);
         if (videoTracks.count == 0) return false;
 
         AVAssetImageGenerator* generator = [AVAssetImageGenerator assetImageGeneratorWithAsset:asset];
@@ -869,7 +895,7 @@ bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixel
 
         CMTime requestTime = CMTimeMakeWithSeconds(timeSec, NSEC_PER_SEC);
         NSError* error = nil;
-        CGImageRef cgImage = [generator copyCGImageAtTime:requestTime actualTime:NULL error:&error];
+        CGImageRef cgImage = tcv_copy_cgimage_at_time(generator, requestTime, NULL, &error);
         if (!cgImage) {
             if (error) {
                 NSLog(@"TCVideoPlayer::extractFrame error: %@", error);

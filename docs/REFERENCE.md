@@ -50,6 +50,8 @@ void drawRectSquircle(float x, float y, float w, float h, float radius) // Draw 
 void drawRectSquircle(Vec3 pos, Vec2 size, float radius) // Draw squircle rectangle (curvature-continuous corners, iOS-style)
 void drawCircle(float x, float y, float radius) // Draw circle
 void drawCircle(Vec3 center, float radius) // Draw circle
+void drawArc(float x, float y, float radius, float angleBegin, float angleEnd) // Draw arc (partial circle, angles in radians)
+void drawArc(Vec3 center, float radius, float angleBegin, float angleEnd) // Draw arc (partial circle, angles in radians)
 void drawEllipse(float x, float y, float w, float h) // Draw ellipse
 void drawEllipse(Vec3 center, float rx, float ry) // Draw ellipse
 void drawEllipse(Vec3 center, Vec2 radii) // Draw ellipse
@@ -58,6 +60,12 @@ void drawPoint(Vec3 pos)                 // Draw a single point
 void drawLine(float x1, float y1, float x2, float y2) // Draw line (2D or 3D)
 void drawLine(float x1, float y1, float z1, float x2, float y2, float z2) // Draw line (2D or 3D)
 void drawLine(Vec3 p1, Vec3 p2)          // Draw line (2D or 3D)
+void drawBezier(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) // Draw bezier curve (cubic with 4 points, quadratic with 3, or N-th order via vector)
+void drawBezier(Vec3 p0, Vec3 p1, Vec3 p2) // Draw bezier curve (cubic with 4 points, quadratic with 3, or N-th order via vector)
+void drawBezier(const vector<Vec3>& controlPoints) // Draw bezier curve (cubic with 4 points, quadratic with 3, or N-th order via vector)
+void drawCurve(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) // Draw Catmull-Rom curve (4 control points draw p1->p2; vector chains segments passing through interior points; closed=true wraps around)
+void drawCurve(const vector<Vec3>& points) // Draw Catmull-Rom curve (4 control points draw p1->p2; vector chains segments passing through interior points; closed=true wraps around)
+void drawCurve(const vector<Vec3>& points, bool closed) // Draw Catmull-Rom curve (4 control points draw p1->p2; vector chains segments passing through interior points; closed=true wraps around)
 void drawTriangle(float x1, float y1, float x2, float y2, float x3, float y3) // Draw triangle
 void drawTriangle(Vec3 p1, Vec3 p2, Vec3 p3) // Draw triangle
 void drawBox(float size)                 // Draw 3D box (respects fill/noFill)
@@ -78,6 +86,10 @@ void vertex(float x, float y, float z)   // Add a vertex
 void vertex(const Vec2& v)               // Add a vertex
 void vertex(const Vec3& v)               // Add a vertex
 void endShape(bool close = false)        // End drawing a shape
+void appendArc(float cx, float cy, float radius, float angleBegin, float angleEnd) // Append arc vertices to the current shape (use between beginShape/endShape)
+void appendArc(const Vec2& center, float radius, float angleBegin, float angleEnd) // Append arc vertices to the current shape (use between beginShape/endShape)
+void appendCurve(const vector<Vec3>& points) // Append Catmull-Rom curve vertices to the current shape (use between beginShape/endShape; needs >=4 points, closed=true wraps around)
+void appendCurve(const vector<Vec3>& points, bool closed) // Append Catmull-Rom curve vertices to the current shape (use between beginShape/endShape; needs >=4 points, closed=true wraps around)
 void beginStroke()                       // Begin drawing a stroke (uses StrokeMesh internally)
 void endStroke(bool close = false)       // End drawing a stroke
 void beginLines()                        // Begin batch line drawing. Add vertex pairs with vertex(), then call endLines(). Each pair of vertices draws one independent line segment. Use setColor() between vertices for per-line colors.
@@ -111,8 +123,10 @@ void setStrokeJoin(StrokeJoin join)      // Set stroke join style (Miter, Round,
 StrokeJoin getStrokeJoin()               // Get current stroke join style
 bool isFillEnabled()                     // Check if fill mode is enabled
 bool isStrokeEnabled()                   // Check if stroke mode is enabled
-void setCircleResolution(int resolution) // Set circle segment count
-int getCircleResolution()                // Get circle segment count
+void setCurveTolerance(float pixels)     // Set adaptive curve tessellation tolerance in pixels (smaller = smoother, scale-aware)
+float getCurveTolerance()                // Get current curve tessellation tolerance (in pixels)
+void setCurveResolution(int n)           // Set fixed curve segment count (switches off adaptive tolerance mode)
+int getCurveResolution()                 // Get current curve resolution
 void pushStyle()                         // Save current style state (color, stroke, fill)
 void popStyle()                          // Restore previous style state
 void resetStyle()                        // Reset style to default values (white color, fill enabled, stroke disabled)
@@ -376,7 +390,7 @@ FileReader@ createFileReader()           // Create a file reader (TrussSketch fa
 
 ```cpp
 Sound@ createSound()                     // Create a sound player (TrussSketch factory)
-bool load(const string& path)            // Load sound file
+bool load(const string& path)            // Load sound file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
 void play()                              // Play sound
 void stop()                              // Stop sound
 void setVolume(float vol)                // Set volume (0.0-1.0)

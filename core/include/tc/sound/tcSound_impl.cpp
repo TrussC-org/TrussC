@@ -14,8 +14,18 @@
 #include <utility>
 
 // stb_vorbis - OGG Vorbis decoder
+//
+// The header has an overflow-detection branch ("stream_start + loc < stream_start")
+// that modern Clang flags as `-Wtautological-compare` because pointer arithmetic
+// past the end of an object is UB and the compiler may elide the check anyway.
+// The semantics are an upstream concern; suppress the noise locally so the
+// build stays clean. Keep the suppression as tight as possible around just
+// the third-party include.
 extern "C" {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wtautological-compare"
 #include "stb_vorbis.c"
+#pragma clang diagnostic pop
 }
 
 // miniaudio is included for ma_decoder. The implementation itself lives in

@@ -306,7 +306,6 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofFill` | `fill()` |  |
 | `ofNoFill` | `noFill()` |  |
 | `ofSetLineWidth` | `setStrokeWeight(weight)` |  |
-| `ofSetCircleResolution` | `setCircleResolution(resolution)` |  |
 | `ofPushStyle` | `pushStyle()` |  |
 | `ofPopStyle` | `popStyle()` |  |
 | `ofEnableBlendMode` | `setBlendMode(mode)` |  |
