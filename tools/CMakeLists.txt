@@ -20,6 +20,24 @@ include(${TRUSSC_DIR}/cmake/trussc_app.cmake)
 # work properly in CMD, PowerShell, and terminal emulators.
 add_compile_definitions(TRUSSC_SHOW_CONSOLE)
 
+# Bake version info from the trusscli source repo (also the TrussC repo,
+# since trusscli is part of the TrussC monorepo)
+execute_process(
+    COMMAND git describe --tags --always --dirty --match "v[0-9]*"
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+    OUTPUT_VARIABLE TRUSSCLI_VERSION_STR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT TRUSSCLI_VERSION_STR)
+    set(TRUSSCLI_VERSION_STR "unknown")
+endif()
+string(TIMESTAMP TRUSSCLI_BUILD_DATE_STR "%Y-%m-%d")
+add_compile_definitions(
+    TRUSSCLI_VERSION="${TRUSSCLI_VERSION_STR}"
+    TRUSSCLI_BUILD_DATE="${TRUSSCLI_BUILD_DATE_STR}"
+)
+
 trussc_app(
     NAME trusscli
     DISPLAY_NAME "TrussC Project Generator"

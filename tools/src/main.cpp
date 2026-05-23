@@ -431,6 +431,90 @@ static CheckResult checkGit() {
     return r;
 }
 
+// -----------------------------------------------------------------------------
+// Version helpers (used by --version and doctor)
+// -----------------------------------------------------------------------------
+
+struct SemverParts {
+    int major = -1, minor = -1, patch = -1;
+    bool ok = false;
+};
+
+static SemverParts parseSemver(const string& s) {
+    SemverParts p;
+    if (sscanf(s.c_str(), "v%d.%d.%d", &p.major, &p.minor, &p.patch) >= 2) {
+        p.ok = true;
+    }
+    return p;
+}
+
+// Run `git describe` against a TrussC root. Empty string on failure.
+static string queryTrussCVersion(const string& tcRoot) {
+    if (tcRoot.empty()) return "";
+    // Match only proper version tags (v1.2.3) to avoid stray tags
+    auto [code, out] = captureCommand(
+        "git -C \"" + tcRoot + "\" describe --tags --always --dirty --match \"v[0-9]*\" 2>"
+        TC_DEV_NULL);
+    if (code != 0) return "";
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
+    return out;
+}
+
+static CheckResult checkVersionMismatch(const string& tcRoot) {
+    CheckResult r{"Version sync", CheckStatus::OK, "", "", true};
+    const string built = TRUSSCLI_VERSION;
+    const string current = queryTrussCVersion(tcRoot);
+
+    if (current.empty()) {
+        r.status = CheckStatus::Warning;
+        r.detail = "could not query TrussC version";
+        return r;
+    }
+    if (built == current) {
+        r.detail = "trusscli " + built + " == TrussC " + current;
+        return r;
+    }
+
+    auto a = parseSemver(built);
+    auto b = parseSemver(current);
+
+    // Major or minor drift → hard error (ABI / API may have changed)
+    if (a.ok && b.ok && (a.major != b.major || a.minor != b.minor)) {
+        r.status = CheckStatus::Error;
+        r.detail = "trusscli " + built + " vs TrussC " + current;
+        r.hint = "Rebuild trusscli (cd tools && ./build_<platform>.{sh,command,bat})";
+        return r;
+    }
+
+    // Patch / commit drift only → soft warning
+    r.status = CheckStatus::Warning;
+    r.detail = "trusscli " + built + " vs TrussC " + current;
+    r.hint = "Rebuild trusscli to sync with the current TrussC";
+    return r;
+}
+
+static void printVersion() {
+    const string built = TRUSSCLI_VERSION;
+    cout << "trusscli " << built
+         << " (built " << TRUSSCLI_BUILD_DATE << ")\n";
+
+    const string tcRoot = autoDetectTcRoot();
+    if (tcRoot.empty()) {
+        cout << "TrussC   (not found)\n";
+        return;
+    }
+    const string current = queryTrussCVersion(tcRoot);
+    if (current.empty()) {
+        cout << "TrussC   (version unknown) at " << tcRoot << "\n";
+        return;
+    }
+    cout << "TrussC   " << current << " at " << tcRoot << "\n";
+    if (current != built) {
+        cout << "  note: TrussC has changed since trusscli was built — "
+             << "rebuild trusscli to sync\n";
+    }
+}
+
 // =============================================================================
 // Common helpers for project-based subcommands
 // =============================================================================
@@ -2732,6 +2816,7 @@ static int cmdDoctor(const vector<string>& args) {
     results.push_back(checkCMake());
     results.push_back(checkCompiler());
     results.push_back(checkTrussCCore(resolvedTcRoot));
+    results.push_back(checkVersionMismatch(resolvedTcRoot));
     results.push_back(checkPlatformSDK());
 
     // Cross-compile checks: only run if the project targets them
@@ -3328,6 +3413,7 @@ _trusscli() {
         'clean:Delete build directories'
         'build:Build the project'
         'run:Build and launch the project'
+        'version:Show version (trusscli + current TrussC)'
         'completion:Generate shell completion script'
     )
     addon_commands=(
@@ -3420,7 +3506,7 @@ _trusscli() {
     }
 
     if [[ $cword -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "new cp update upgrade addon info doctor clean build run completion" -- "$cur"))
+        COMPREPLY=($(compgen -W "new cp update upgrade addon info doctor clean build run version completion" -- "$cur"))
         return
     fi
 
@@ -3540,11 +3626,13 @@ static void printTopHelp() {
          << "  clean                          Delete build directories\n"
          << "  build                          Build the project\n"
          << "  run                            Build and launch the project\n"
+         << "  version                        Show version (trusscli + current TrussC)\n"
          << "\n"
          << "Common options (per subcommand):\n"
          << "  -p, --path <path>              Operate on a specific project path\n"
          << "      --tc-root <path>           Path to TrussC root directory\n"
          << "  -h, --help                     Show command-specific help\n"
+         << "  -v, --version                  Show version (trusscli + current TrussC)\n"
          << "\n"
          << "Examples:\n"
          << "  trusscli new myApp                        Create ./myApp\n"
@@ -3589,6 +3677,10 @@ int main(int argc, char* argv[]) {
     const string& first = args[0];
     if (first == "-h" || first == "--help" || first == "help") {
         printTopHelp();
+        return 0;
+    }
+    if (first == "-v" || first == "--version" || first == "version") {
+        printVersion();
         return 0;
     }
 
