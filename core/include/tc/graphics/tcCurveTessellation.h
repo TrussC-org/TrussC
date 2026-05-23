@@ -17,6 +17,7 @@
 // =============================================================================
 
 #include "tcMath.h"   // TAU, HALF_TAU
+#include "../utils/tcLog.h"
 #include <algorithm>
 #include <cmath>
 
@@ -79,6 +80,26 @@ inline int segmentsForArc(float radius, float angleSpan, float tolerance) {
 // =============================================================================
 
 inline constexpr int kBezierMaxDepth = 16;
+
+// Hard cap on the order (point count) accepted by the N-th order Bezier
+// tessellator. Each split inside subdivideBezierN does an O(N^2) in-place
+// de Casteljau reduction (level k touches N-k pairs of points, summing
+// to N*(N-1)/2 lerps per node). Multiplied by the binary recursion tree
+// — capped at depth 16, so up to ~2^16 leaves on pathological control
+// polygons — total work grows as O(N^2 * 2^depth). Empirically a closed
+// loop at N=2000 takes ~80 seconds on a single core, frozen-tab territory.
+//
+// In practice N>=5 Bezier curves are vanishingly rare: SVG, fonts, and
+// every desktop vector tool chain cubic segments together rather than
+// raise the order. N=64 is well above any legitimate use we've seen and
+// keeps the worst case in the low-hundreds-of-ms range.
+//
+// If you genuinely need higher-order Bezier (N>10 or so), the bundled
+// implementation is intentionally naive — at that point you want a
+// purpose-built tessellator with cached factorials / vectorised inner
+// loops / GPU dispatch. Roll your own and call the underlying primitives
+// from there, or chain cubics.
+inline constexpr int kBezierMaxOrder = 64;
 
 namespace detail {
 
@@ -214,6 +235,14 @@ void tessellateBezierN(const std::vector<Vec3>& pts, float tolerance, Out& out) 
     if (pts.empty()) return;
     out.push_back(pts.front());
     if (pts.size() < 2) return;
+    if ((int)pts.size() > kBezierMaxOrder) {
+        // Refuse rather than freeze. See kBezierMaxOrder for the rationale.
+        logWarning() << "tessellateBezierN: refusing N=" << pts.size()
+                     << " control points (cap " << kBezierMaxOrder
+                     << "). Chain cubics for legitimate curves, or write a"
+                     << " purpose-built high-order tessellator.";
+        return;
+    }
     if (tolerance <= 0.0f) tolerance = 0.1f;
     detail::subdivideBezierN(pts, tolerance * tolerance, 0, out);
 }

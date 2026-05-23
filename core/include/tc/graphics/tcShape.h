@@ -245,11 +245,28 @@ inline void appendCatmullRomSegment_(const Vec3& p0, const Vec3& p1,
 }
 } // namespace internal
 
+// Hard cap on the number of points accepted by appendCurve. Catmull-Rom
+// chains expand each segment into a cubic Bezier and tessellate it
+// adaptively (up to ~131k recursive nodes at the depth cap, ~1-100ms per
+// segment depending on geometry). N segments → linear DoS surface; at
+// N=1e6 a single appendCurve call could spend hours of CPU.
+//
+// 100k is generous — a hand-drawn pen-tool path tops out in the low
+// thousands. If you really need more, your art tool is doing something
+// the framework wasn't designed for; split into multiple appendCurve
+// calls, or batch-tessellate yourself.
+inline constexpr int kAppendCurveMaxPoints = 100000;
+
 // Append a chained Catmull-Rom curve through `points`. Emits (N-3)
 // segments; needs N >= 4. Tangent points (first and last) are NOT
 // pushed as vertices — only the visible interior is appended.
 inline void appendCurve(const std::vector<Vec3>& points) {
     if (points.size() < 4) return;
+    if ((int)points.size() > kAppendCurveMaxPoints) {
+        logWarning() << "appendCurve: refusing N=" << points.size()
+                     << " points (cap " << kAppendCurveMaxPoints << ").";
+        return;
+    }
     for (size_t i = 0; i + 3 < points.size(); i++) {
         internal::appendCatmullRomSegment_(points[i], points[i+1],
                                            points[i+2], points[i+3]);
@@ -262,6 +279,11 @@ inline void appendCurve(const std::vector<Vec3>& points, bool closed) {
     if (!closed) { appendCurve(points); return; }
     const int n = (int)points.size();
     if (n < 3) return;
+    if (n > kAppendCurveMaxPoints) {
+        logWarning() << "appendCurve (closed): refusing N=" << n
+                     << " points (cap " << kAppendCurveMaxPoints << ").";
+        return;
+    }
     for (int i = 0; i < n; i++) {
         internal::appendCatmullRomSegment_(points[(i - 1 + n) % n],
                                            points[i],

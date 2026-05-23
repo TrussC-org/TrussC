@@ -1856,16 +1856,39 @@ static string promptString(const string& msg) {
     return line;
 }
 
+// Reject strings git would parse as an option. URLs, refs, branch
+// names, etc. legitimately never start with '-'. A registry entry
+// or addon.json dependency claiming url="--upload-pack=..." would
+// otherwise be passed to git verbatim and run as a flag.
+static bool isSafeGitArg(const string& s) {
+    return !s.empty() && s.front() != '-';
+}
+
 // Run git clone with optional ref pinning.
-//   refKind=branch/tag → `git clone -b <ref> ...`
-//   refKind=commit     → clone, then `git checkout <ref>`
+//   refKind=branch/tag → `git clone -b <ref> -- <url> <dir>`
+//   refKind=commit     → clone, then `git checkout <ref>`  (ref validated)
 //   refKind=""         → plain clone (default branch)
+//
+// All forms use `--` to terminate options before the positional URL so
+// that a registry-supplied URL starting with '-' cannot be smuggled in
+// as a git flag (e.g., --upload-pack=cmd → arbitrary command exec).
+// Refs are validated up front since `git checkout` interprets `--` as
+// a pathspec separator, not an end-of-options marker, so we cannot use
+// the same trick there.
 static int gitCloneWithRef(const string& url, const string& ref,
                             const string& refKind, const string& targetDir) {
-    if ((refKind == "branch" || refKind == "tag") && !ref.empty()) {
-        return runProcess({"git", "clone", "-b", ref, url, targetDir});
+    if (!isSafeGitArg(url)) {
+        cerr << "Error: refusing git clone with unsafe URL: " << url << "\n";
+        return 1;
     }
-    int rc = runProcess({"git", "clone", url, targetDir});
+    if (!ref.empty() && !isSafeGitArg(ref)) {
+        cerr << "Error: refusing git operation with unsafe ref: " << ref << "\n";
+        return 1;
+    }
+    if ((refKind == "branch" || refKind == "tag") && !ref.empty()) {
+        return runProcess({"git", "clone", "-b", ref, "--", url, targetDir});
+    }
+    int rc = runProcess({"git", "clone", "--", url, targetDir});
     if (rc != 0) return rc;
     if (refKind == "commit" && !ref.empty()) {
         return runProcess({"git", "-C", targetDir, "checkout", ref});
@@ -2047,8 +2070,13 @@ static int cmdAddonClone(const vector<string>& args) {
                 cout << "  (already exists) " << repo << "\n";
                 processed.insert(repo);
             } else {
+                if (!isSafeGitArg(query)) {
+                    cerr << "Error: refusing git clone with unsafe URL: " << query << "\n";
+                    failures++;
+                    continue;
+                }
                 cout << "Cloning " << query << " ...\n";
-                int rc = runProcess({"git", "clone", query, targetDir});
+                int rc = runProcess({"git", "clone", "--", query, targetDir});
                 if (rc != 0) {
                     cerr << "Error: git clone failed for " << query << "\n";
                     failures++;
@@ -2124,8 +2152,13 @@ static int cmdAddonClone(const vector<string>& args) {
             cout << "  (already exists) " << targetName << " → " << targetDir << "\n";
             processed.insert(targetName);
         } else {
+            if (!isSafeGitArg(cloneUrl)) {
+                cerr << "Error: refusing git clone with unsafe URL: " << cloneUrl << "\n";
+                failures++;
+                continue;
+            }
             cout << "Cloning " << (picked ? displayName(*picked) : cloneUrl) << " ...\n";
-            int rc = runProcess({"git", "clone", cloneUrl, targetDir});
+            int rc = runProcess({"git", "clone", "--", cloneUrl, targetDir});
             if (rc != 0) {
                 cerr << "Error: git clone failed for " << targetName << "\n";
                 failures++;

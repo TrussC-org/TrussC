@@ -35,6 +35,14 @@ extern const char* bundledCaPem();
 extern const char* bundledCaBundleDate();
 } // namespace tls_internal
 
+// Upper bound on CA PEM file size. Real-world OS trust stores are well
+// under 1 MB (typically ~250 KB; the embedded Mozilla bundle is ~360 KB).
+// 16 MB is generous and guards against runaway reads if the path is
+// unexpectedly large — e.g. a sysadmin symlinked /etc/ssl/cert.pem to
+// the wrong target, or someone passed a non-PEM file to
+// setCACertificateFile() by mistake.
+inline constexpr std::streamsize kMaxCaPemBytes = 16 * 1024 * 1024;
+
 namespace {
 size_t countCerts(const mbedtls_x509_crt* chain) {
     size_t n = 0;
@@ -156,11 +164,25 @@ bool TlsClient::setCACertificate(const std::string& pemData) {
 }
 
 bool TlsClient::setCACertificateFile(const std::string& path) {
-    std::ifstream file(path);
+    // Open at end (ate) to get size via tellg without a separate stat()
+    // call — works portably on POSIX and Windows.
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) {
         tcLogError() << "TlsClient: Failed to open CA certificate file: " << path;
         return false;
     }
+    std::streamsize size = file.tellg();
+    if (size < 0) {
+        tcLogError() << "TlsClient: Failed to size CA certificate file: " << path;
+        return false;
+    }
+    if (size > kMaxCaPemBytes) {
+        tcLogError() << "TlsClient: CA certificate file too large ("
+                     << size << " bytes, limit " << kMaxCaPemBytes
+                     << "): " << path;
+        return false;
+    }
+    file.seekg(0);
 
     std::stringstream buffer;
     buffer << file.rdbuf();
@@ -215,6 +237,12 @@ void TlsClient::ensureDefaultCAsLoaded() {
     for (const char** p = kPaths; *p != nullptr; ++p) {
         struct stat st;
         if (stat(*p, &st) != 0) continue;
+        if (st.st_size > kMaxCaPemBytes) {
+            tcLogWarning() << "TlsClient: skipping " << *p
+                           << " (size " << st.st_size
+                           << " > limit " << kMaxCaPemBytes << ")";
+            continue;
+        }
         std::ifstream f(*p);
         if (!f) continue;
         std::stringstream buf;
