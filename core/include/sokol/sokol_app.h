@@ -5190,7 +5190,7 @@ _SOKOL_PRIVATE void _sapp_macos_mtl_init(void) {
     _sapp.macos.mtl.layer.magnificationFilter = kCAFilterNearest;
     _sapp.macos.mtl.layer.opaque = true;
     _sapp.macos.mtl.layer.pixelFormat = MTLPixelFormatRGB10A2Unorm  /* Modified by tettou771 for TrussC: 10-bit color */;
-    _sapp.macos.mtl.layer.framebufferOnly = true;
+    _sapp.macos.mtl.layer.framebufferOnly = false  /* Modified for TrussC: enable captureWindow() reads (issue #56) */;
     //NOTE: default is 3: _sapp.macos.mtl.layer.maximumDrawableCount = 2;
     // FIXME: _sapp.macos.mtl.layer.colorspace = ...;
     _sapp.macos.view = [[_sapp_macos_view alloc] init];
@@ -6458,7 +6458,7 @@ _SOKOL_PRIVATE void _sapp_ios_mtl_init(UIWindowScene* windowScene) {
     _sapp.ios.mtl.layer = [CAMetalLayer layer];
     _sapp.ios.mtl.layer.device = _sapp.ios.mtl.device;
     _sapp.ios.mtl.layer.opaque = true;
-    _sapp.ios.mtl.layer.framebufferOnly = true;
+    _sapp.ios.mtl.layer.framebufferOnly = false  /* Modified for TrussC: enable captureWindow() reads (issue #56) */;
     _sapp.ios.mtl.layer.pixelFormat = MTLPixelFormatRGB10A2Unorm  /* Modified by tettou771 for TrussC: 10-bit color */;
     _sapp.ios.mtl.layer.frame = _sapp.ios.view.layer.frame;
 
