@@ -953,25 +953,41 @@ protected:
     inline static uint64_t nextTimerId_ = 1;
 
     // Process timers (called within updateRecursive)
+    //
+    // Reentrancy-safe: a callback may invoke callAfter / callEvery / cancelTimer
+    // / cancelAllTimers on this same node. We snapshot the ready-timer IDs up
+    // front, then look each one up by ID before firing, copying out the
+    // callback and metadata so vector reallocation during the callback can't
+    // dangle the in-flight reference.
     void processTimers() {
         double currentTime = getElapsedTime();
-        std::vector<Timer> toRemove;
 
-        for (auto& timer : timers_) {
-            if (currentTime >= timer.triggerTime) {
-                timer.callback();
-
-                if (timer.repeating) {
-                    timer.triggerTime = currentTime + timer.interval;
-                } else {
-                    toRemove.push_back(timer);
-                }
+        std::vector<uint64_t> readyIds;
+        readyIds.reserve(timers_.size());
+        for (const auto& t : timers_) {
+            if (currentTime >= t.triggerTime) {
+                readyIds.push_back(t.id);
             }
         }
 
-        // Remove completed non-repeating timers
-        for (const auto& t : toRemove) {
-            cancelTimer(t.id);
+        for (uint64_t id : readyIds) {
+            auto it = std::find_if(timers_.begin(), timers_.end(),
+                [id](const Timer& t) { return t.id == id; });
+            if (it == timers_.end()) continue;  // cancelled by an earlier callback in this batch
+
+            std::function<void()> callback = it->callback;
+            bool   repeating = it->repeating;
+            double interval  = it->interval;
+
+            if (repeating) {
+                it->triggerTime = currentTime + interval;
+                callback();  // safe: we already captured what we need from `it`
+            } else {
+                // Remove before firing so the timer is gone even if the
+                // callback throws or registers a new timer that reallocates.
+                cancelTimer(id);
+                callback();
+            }
         }
     }
 };
