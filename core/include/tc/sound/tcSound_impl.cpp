@@ -1,30 +1,120 @@
 // =============================================================================
 // tcSound module implementation
-// - Embeds the implementations of stb_vorbis, dr_wav, dr_mp3
-// - Defines the file/memory decoder methods of SoundBuffer (declared in tcSound.h)
+// - Embeds stb_vorbis (used for OGG; miniaudio does not bundle a Vorbis decoder)
+// - Defines SoundBuffer file/memory decoder methods (declared in tcSound.h)
+//   WAV / MP3 / FLAC go through ma_decoder; OGG goes through stb_vorbis directly
 // =============================================================================
 
 #define TC_SOUND_IMPL
 
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 // stb_vorbis - OGG Vorbis decoder
 extern "C" {
 #include "stb_vorbis.c"
 }
 
-// dr_wav - WAV decoder
-#define DR_WAV_IMPLEMENTATION
-#include "dr_wav.h"
-
-// dr_mp3 - MP3 decoder
-#define DR_MP3_IMPLEMENTATION
-#include "dr_mp3.h"
+// miniaudio is included for ma_decoder. The implementation itself lives in
+// tcAudio_impl.cpp (the only TU that defines MINIAUDIO_IMPLEMENTATION).
+#include "miniaudio.h"
 
 #include "tc/sound/tcSound.h"
 
 namespace trussc {
+
+namespace {
+
+// Decode the entire stream of an initialized ma_decoder into a SoundBuffer.
+// On success, fills samples / channels / sampleRate / numSamples and uninits
+// the decoder. On failure, uninits the decoder and returns false.
+bool drainDecoder(ma_decoder& decoder, SoundBuffer& out, const char* sourceLabel) {
+    ma_uint64 frameCount = 0;
+    ma_result result = ma_decoder_get_length_in_pcm_frames(&decoder, &frameCount);
+    if (result != MA_SUCCESS || frameCount == 0) {
+        printf("SoundBuffer: failed to query length for %s (result=%d)\n",
+               sourceLabel, (int)result);
+        ma_decoder_uninit(&decoder);
+        return false;
+    }
+
+    const int ch = (int)decoder.outputChannels;
+    const int sr = (int)decoder.outputSampleRate;
+
+    std::vector<float> buf((size_t)frameCount * (size_t)ch);
+    ma_uint64 framesRead = 0;
+    result = ma_decoder_read_pcm_frames(&decoder, buf.data(), frameCount, &framesRead);
+    ma_decoder_uninit(&decoder);
+
+    if (result != MA_SUCCESS || framesRead == 0) {
+        printf("SoundBuffer: failed to decode %s (result=%d, framesRead=%llu)\n",
+               sourceLabel, (int)result, (unsigned long long)framesRead);
+        return false;
+    }
+
+    if (framesRead != frameCount) {
+        // Trim to actually-decoded length (rare, but possible with streams
+        // whose declared length differs from what the decoder yields).
+        buf.resize((size_t)framesRead * (size_t)ch);
+    }
+
+    out.channels = ch;
+    out.sampleRate = sr;
+    out.numSamples = (size_t)framesRead;
+    out.samples = std::move(buf);
+    return true;
+}
+
+// Build a ma_decoder_config that asks miniaudio for float32 output, keeping
+// the source channel count and sample rate.
+ma_decoder_config makeFloat32Config(ma_encoding_format hint) {
+    ma_decoder_config cfg = ma_decoder_config_init(ma_format_f32, 0, 0);
+    cfg.encodingFormat = hint;
+    return cfg;
+}
+
+bool decodeFileWithMiniaudio(const std::string& path,
+                             ma_encoding_format hint,
+                             const char* label,
+                             SoundBuffer& out) {
+    ma_decoder decoder;
+    ma_decoder_config cfg = makeFloat32Config(hint);
+    ma_result result = ma_decoder_init_file(path.c_str(), &cfg, &decoder);
+    if (result != MA_SUCCESS) {
+        printf("SoundBuffer: failed to open %s %s (result=%d)\n",
+               label, path.c_str(), (int)result);
+        return false;
+    }
+    if (!drainDecoder(decoder, out, path.c_str())) return false;
+    printf("SoundBuffer: loaded %s %s (%d ch, %d Hz, %zu samples)\n",
+           label, path.c_str(), out.channels, out.sampleRate, out.numSamples);
+    return true;
+}
+
+bool decodeMemoryWithMiniaudio(const void* data, size_t dataSize,
+                               ma_encoding_format hint,
+                               const char* label,
+                               SoundBuffer& out) {
+    ma_decoder decoder;
+    ma_decoder_config cfg = makeFloat32Config(hint);
+    ma_result result = ma_decoder_init_memory(data, dataSize, &cfg, &decoder);
+    if (result != MA_SUCCESS) {
+        printf("SoundBuffer: failed to decode %s from memory (result=%d)\n",
+               label, (int)result);
+        return false;
+    }
+    if (!drainDecoder(decoder, out, "memory")) return false;
+    printf("SoundBuffer: decoded %s from memory (%d ch, %d Hz, %zu samples)\n",
+           label, out.channels, out.sampleRate, out.numSamples);
+    return true;
+}
+
+} // namespace
+
+// -----------------------------------------------------------------------------
+// OGG Vorbis: stb_vorbis (miniaudio does not bundle a Vorbis decoder)
+// -----------------------------------------------------------------------------
 
 bool SoundBuffer::loadOgg(const std::string& path) {
     int error = 0;
@@ -52,85 +142,24 @@ bool SoundBuffer::loadOgg(const std::string& path) {
     return decoded > 0;
 }
 
+// -----------------------------------------------------------------------------
+// WAV / MP3 / FLAC: routed through ma_decoder
+// -----------------------------------------------------------------------------
+
 bool SoundBuffer::loadWav(const std::string& path) {
-    unsigned int ch, sr;
-    drwav_uint64 frameCount;
-
-    float* data = drwav_open_file_and_read_pcm_frames_f32(
-        path.c_str(), &ch, &sr, &frameCount, nullptr);
-
-    if (!data) {
-        printf("SoundBuffer: failed to open WAV %s\n", path.c_str());
-        return false;
-    }
-
-    channels = ch;
-    sampleRate = sr;
-    numSamples = frameCount;
-
-    samples.resize(numSamples * channels);
-    std::memcpy(samples.data(), data, samples.size() * sizeof(float));
-
-    drwav_free(data, nullptr);
-
-    printf("SoundBuffer: loaded WAV %s (%d ch, %d Hz, %zu samples)\n",
-           path.c_str(), channels, sampleRate, numSamples);
-
-    return true;
+    return decodeFileWithMiniaudio(path, ma_encoding_format_wav, "WAV", *this);
 }
 
 bool SoundBuffer::loadMp3(const std::string& path) {
-    drmp3_config config = {0, 0};
-    drmp3_uint64 frameCount = 0;
+    return decodeFileWithMiniaudio(path, ma_encoding_format_mp3, "MP3", *this);
+}
 
-    float* data = drmp3_open_file_and_read_pcm_frames_f32(
-        path.c_str(), &config, &frameCount, nullptr);
-
-    if (!data) {
-        printf("SoundBuffer: failed to open MP3 %s\n", path.c_str());
-        return false;
-    }
-
-    channels = config.channels;
-    sampleRate = config.sampleRate;
-    numSamples = frameCount;
-
-    samples.resize(numSamples * channels);
-    std::memcpy(samples.data(), data, samples.size() * sizeof(float));
-
-    drmp3_free(data, nullptr);
-
-    printf("SoundBuffer: loaded MP3 %s (%d ch, %d Hz, %zu samples)\n",
-           path.c_str(), channels, sampleRate, numSamples);
-
-    return true;
+bool SoundBuffer::loadFlac(const std::string& path) {
+    return decodeFileWithMiniaudio(path, ma_encoding_format_flac, "FLAC", *this);
 }
 
 bool SoundBuffer::loadMp3FromMemory(const void* data, size_t dataSize) {
-    drmp3_config config = {0, 0};
-    drmp3_uint64 frameCount = 0;
-
-    float* decoded = drmp3_open_memory_and_read_pcm_frames_f32(
-        data, dataSize, &config, &frameCount, nullptr);
-
-    if (!decoded) {
-        printf("SoundBuffer: failed to decode MP3 from memory\n");
-        return false;
-    }
-
-    channels = config.channels;
-    sampleRate = config.sampleRate;
-    numSamples = frameCount;
-
-    samples.resize(numSamples * channels);
-    std::memcpy(samples.data(), decoded, samples.size() * sizeof(float));
-
-    drmp3_free(decoded, nullptr);
-
-    printf("SoundBuffer: decoded MP3 from memory (%d ch, %d Hz, %zu samples)\n",
-           channels, sampleRate, numSamples);
-
-    return true;
+    return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_mp3, "MP3", *this);
 }
 
 } // namespace trussc

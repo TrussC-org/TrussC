@@ -43,10 +43,13 @@ public:
     int sampleRate = 0;
     size_t numSamples = 0;       // Samples per channel
 
-    // File-based decoders (implemented in tcSound_impl.cpp)
+    // File-based decoders (implemented in tcSound_impl.cpp).
+    // WAV / MP3 / FLAC go through ma_decoder (miniaudio); OGG goes through
+    // stb_vorbis directly because miniaudio does not bundle a Vorbis decoder.
     bool loadOgg(const std::string& path);
     bool loadWav(const std::string& path);
     bool loadMp3(const std::string& path);
+    bool loadFlac(const std::string& path);
 
     // Memory-based decoders
     bool loadMp3FromMemory(const void* data, size_t dataSize);

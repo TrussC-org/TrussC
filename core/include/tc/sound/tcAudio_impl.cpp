@@ -1,6 +1,6 @@
 // =============================================================================
 // tcAudio implementation
-// Sound playback and microphone input using miniaudio
+// Sound playback, microphone input, and file decoding via miniaudio
 //
 // Why miniaudio instead of sokol_audio:
 // - sokol_audio is playback-only (no microphone/capture support)
@@ -8,11 +8,17 @@
 //   while sokol_audio's minimal AAudio init can fail to produce audible output
 // - miniaudio provides device enumeration and format conversion
 //
-// Note: MA_NO_DECODING is set — codec handling is done per-platform
-// (AudioToolbox on macOS, GStreamer on Linux, MediaCodec on Android)
+// Decoder configuration:
+// - MA_NO_DECODING is intentionally NOT set: ma_decoder (WAV/MP3/FLAC) is used
+//   by tcSound_impl.cpp to decode static asset files
+// - MA_NO_ENCODING: we don't write audio files
+// - MA_NO_GENERATION: TrussC has its own generators (sine/square/noise/etc)
+//
+// AAC remains platform-specific (AudioToolbox / GStreamer / MediaCodec) for
+// best platform-native quality; OGG Vorbis stays on stb_vorbis because
+// miniaudio does not bundle a Vorbis decoder.
 // =============================================================================
 
-#define MA_NO_DECODING
 #define MA_NO_ENCODING
 #define MA_NO_GENERATION
 #define MINIAUDIO_IMPLEMENTATION
