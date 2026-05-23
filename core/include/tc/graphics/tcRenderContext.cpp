@@ -15,11 +15,20 @@ void RenderContext::drawRectRounded(Vec3 pos, Vec2 size, float radius) {
     float w = size.x, h = size.y;
     (void)pos.z;  // Outline built via beginShape; z=0 plane.
 
+    // Normalize negative dimensions so the rest of this function can assume
+    // positive w/h. Plain drawRect works with negative dims (the GPU just
+    // flips the quad), but our radius clamp and arc geometry below need
+    // positive values — without this, a negative w/h made `min(w,h)*0.5`
+    // negative, which collapsed the radius clamp to <=0 and silently fell
+    // through to drawRect, dropping the corners.
+    if (w < 0) { x += w; w = -w; }
+    if (h < 0) { y += h; h = -h; }
+
     // Clamp radius to half of smaller dimension; fall through to a plain
     // rect when there's nothing to round.
     radius = std::min(radius, std::min(w, h) * 0.5f);
     if (radius <= 0) {
-        drawRect(pos, size);
+        drawRect(Vec3(x, y, pos.z), Vec2(w, h));
         return;
     }
 
@@ -62,9 +71,13 @@ void RenderContext::drawRectSquircle(Vec3 pos, Vec2 size, float radius) {
     float x = pos.x, y = pos.y, z = pos.z;
     float w = size.x, h = size.y;
 
+    // Normalize negative dimensions; see drawRectRounded for rationale.
+    if (w < 0) { x += w; w = -w; }
+    if (h < 0) { y += h; h = -h; }
+
     radius = std::min(radius, std::min(w, h) * 0.5f);
     if (radius <= 0) {
-        drawRect(pos, size);
+        drawRect(Vec3(x, y, z), Vec2(w, h));
         return;
     }
 
