@@ -170,6 +170,36 @@ public:
         return children_.size();
     }
 
+    // Reorder this node within its parent's child list.
+    //
+    // Children are drawn in vector order: the first child is drawn first
+    // (visually behind), the last child is drawn last (visually in front).
+    // moveToFront() puts this node at the end so it draws on top of its
+    // siblings; moveToBack() puts it at the beginning so it draws underneath.
+    //
+    // Both use std::rotate, so they don't change the vector's size and don't
+    // trigger reallocation. No-op if the node has no parent or is already at
+    // the requested position.
+    void moveToFront() {
+        auto p = getParent();
+        if (!p) return;
+        auto self = shared_from_this();
+        auto& sib = p->children_;
+        auto it = std::find(sib.begin(), sib.end(), self);
+        if (it == sib.end() || it + 1 == sib.end()) return;
+        std::rotate(it, it + 1, sib.end());
+    }
+
+    void moveToBack() {
+        auto p = getParent();
+        if (!p) return;
+        auto self = shared_from_this();
+        auto& sib = p->children_;
+        auto it = std::find(sib.begin(), sib.end(), self);
+        if (it == sib.end() || it == sib.begin()) return;
+        std::rotate(sib.begin(), it, it + 1);
+    }
+
     // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
