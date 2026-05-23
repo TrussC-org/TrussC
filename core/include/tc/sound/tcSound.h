@@ -586,6 +586,8 @@ public:
             success = buffer_->loadWav(path);
         } else if (ext == "mp3" || ext == "MP3") {
             success = buffer_->loadMp3(path);
+        } else if (ext == "flac" || ext == "FLAC") {
+            success = buffer_->loadFlac(path);
         } else if (ext == "aac" || ext == "AAC" || ext == "m4a" || ext == "M4A") {
             success = buffer_->loadAac(path);
         } else {
