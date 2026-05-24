@@ -34,13 +34,48 @@ namespace trussc {
 
 
 // ---------------------------------------------------------------------------
-// Sound Buffer (decoded data)
+// SoundSource — abstract base for anything Sound::play() can consume.
+//
+// Two concrete subclasses:
+//   - SoundBuffer (eager): full decoded PCM in memory.
+//   - SoundStream (streaming): file kept open, decoded on demand by a
+//     worker thread into a per-instance ring buffer.
+//
+// The `kind_` enum lets the audio mixer dispatch on type without a
+// virtual call per frame. Per-block work (channels / sampleRate /
+// getDuration) is fine with virtuals.
 // ---------------------------------------------------------------------------
-class SoundBuffer {
+class SoundSource {
 public:
-    std::vector<float> samples;  // Interleaved samples
+    enum Kind { Eager, Stream };
+
     int channels = 0;
     int sampleRate = 0;
+
+    SoundSource() = default;
+    explicit SoundSource(Kind k) : kind_(k) {}
+    virtual ~SoundSource() = default;
+
+    Kind kind() const { return kind_; }
+
+    // Duration in seconds. For streams this is the decoded file's
+    // duration (queried from ma_decoder at loadStream time); for buffers
+    // it's `numSamples / sampleRate`.
+    virtual float getDuration() const = 0;
+
+protected:
+    Kind kind_ = Eager;
+};
+
+
+// ---------------------------------------------------------------------------
+// Sound Buffer (decoded data)
+// ---------------------------------------------------------------------------
+class SoundBuffer : public SoundSource {
+public:
+    SoundBuffer() : SoundSource(SoundSource::Eager) {}
+    std::vector<float> samples;  // Interleaved samples
+    // channels and sampleRate are inherited from SoundSource.
     size_t numSamples = 0;       // Samples per channel
 
     // File-based decoders (implemented in tcSound_impl.cpp).
@@ -154,7 +189,7 @@ public:
         return true;
     }
 
-    float getDuration() const {
+    float getDuration() const override {
         if (sampleRate == 0) return 0;
         return (float)numSamples / sampleRate;
     }
@@ -337,10 +372,75 @@ public:
 };
 
 // ---------------------------------------------------------------------------
+// SoundStream — streaming source. File stays open; samples are decoded on
+// demand by the engine's StreamWorker thread into a per-PlayingSound ring
+// buffer. Use when the file is too large to decode into RAM up front
+// (multi-minute BGM, podcasts) — a few-hundred-KB working set per voice
+// instead of full PCM.
+//
+// One SoundStream describes the source; per-voice decoder + ring buffer
+// state lives in StreamInstance (declared in tcAudio_impl.cpp because it
+// includes miniaudio types). maxPolyphony controls how many concurrent
+// `play()` instances are allowed before the engine recycles the slot.
+//
+// Constraints (vs eager SoundBuffer):
+//   - setSpeed() is treated as 1.0 (no resampling on the fly — decoder
+//     outputs engine-rate frames).
+//   - setPosition() seeks the decoder and re-fills the ring buffer
+//     (~10 ms blackout, similar tradeoff to other engines).
+//   - Each polyphony slot costs one open file handle + one decoder +
+//     one ring buffer (default ~16 KB).
+// ---------------------------------------------------------------------------
+class SoundStream : public SoundSource {
+public:
+    SoundStream() : SoundSource(SoundSource::Stream) {}
+    ~SoundStream() override = default;
+
+    // Open the file, validate format, populate channels / sampleRate /
+    // duration. Decoders for individual voices are opened later by the
+    // engine when play() is called. Returns false if the file can't be
+    // opened or the format is unsupported. Format is detected from
+    // extension (.wav .mp3 .flac .ogg — same as SoundBuffer::load).
+    bool loadStream(const std::string& path, int maxPolyphony = 1);
+
+    float getDuration() const override { return duration_; }
+
+    const std::string& getPath() const { return path_; }
+    int getMaxPolyphony() const { return maxPolyphony_; }
+
+private:
+    std::string path_;
+    int maxPolyphony_ = 1;
+    int encodingFormatHint_ = 0;  // ma_encoding_format value, stored as int
+                                  // to avoid pulling miniaudio.h into the header.
+    float duration_ = 0.0f;
+
+    friend struct StreamInstance;
+    friend class AudioEngine;
+};
+
+// ---------------------------------------------------------------------------
+// Per-PlayingSound stream state. Owns a miniaudio decoder and a ring
+// buffer fed by StreamWorker. Mixer reads from `ring`. Declared as a
+// forward declaration here; full definition is in tcAudio_impl.cpp
+// where miniaudio's headers are visible.
+// ---------------------------------------------------------------------------
+struct StreamInstance;
+
+// ---------------------------------------------------------------------------
 // Playing Sound Instance
 // ---------------------------------------------------------------------------
 struct PlayingSound {
-    std::shared_ptr<SoundBuffer> buffer;
+    // Polymorphic — either SoundBuffer (eager) or SoundStream (streaming).
+    // Dispatch in the mixer is by kind() to avoid a vtable lookup per
+    // frame. Field name kept as `buffer` for backward compatibility with
+    // tcxLua bindings; the type is now the wider SoundSource.
+    std::shared_ptr<SoundSource> buffer;
+
+    // Per-instance streaming state. Null for eager voices; allocated by
+    // AudioEngine::play() when buffer->kind() == Stream.
+    std::shared_ptr<StreamInstance> stream;
+
     std::atomic<float> volume{1.0f};
     std::atomic<float> pan{0.0f};        // -1.0 (left) ~ 0.0 (center) ~ 1.0 (right)
     std::atomic<float> speed{1.0f};      // 0.5 (half speed) ~ 1.0 (normal) ~ 2.0 (double speed)
@@ -399,37 +499,18 @@ public:
         return numSamples;
     }
 
-    // Add new playback instance
+    // Add new playback instance. Accepts any SoundSource — eager
+    // SoundBuffer or streaming SoundStream. For streams, also allocates a
+    // StreamInstance (decoder + ring buffer) and registers it with the
+    // StreamWorker. Implementation lives in tcAudio_impl.cpp so the
+    // streaming branch can see miniaudio types.
+    std::shared_ptr<PlayingSound> play(std::shared_ptr<SoundSource> source);
+
+    // Backward-compat overload — most callers pass shared_ptr<SoundBuffer>
+    // directly, and we don't want to force them through an explicit
+    // upcast.
     std::shared_ptr<PlayingSound> play(std::shared_ptr<SoundBuffer> buffer) {
-        if (!initialized_ || !buffer) return nullptr;
-
-        std::lock_guard<std::mutex> lock(mutex_);
-
-        // Find empty slot
-        for (auto& slot : playingSounds_) {
-            if (!slot || !slot->playing) {
-                slot = std::make_shared<PlayingSound>();
-                slot->buffer = buffer;
-                slot->positionF = 0.0;
-                slot->volume = 1.0f;
-                slot->pan = 0.0f;
-                slot->speed = 1.0f;
-                slot->loop = false;
-                slot->playing = true;
-                slot->paused = false;
-                // Cache the resample ratio so the mixer can play buffers
-                // at the right pitch regardless of the engine's output
-                // sample rate. Falls back to 1.0 for buffers that didn't
-                // record a sample rate.
-                slot->rateRatio = (buffer->sampleRate > 0)
-                    ? ((float)buffer->sampleRate / (float)SAMPLE_RATE)
-                    : 1.0f;
-                return slot;
-            }
-        }
-
-        printf("AudioEngine: max playing sounds reached\n");
-        return nullptr;
+        return play(std::static_pointer_cast<SoundSource>(buffer));
     }
 
     // Called from audio callback (internal use)
@@ -445,6 +526,74 @@ private:
         shutdown();
     }
 
+    // Eager mix path: linear interpolation over a fully-decoded SoundBuffer.
+    // Lifted verbatim from the pre-refactor mixer to keep the perf-sensitive
+    // hot path byte-identical for the common case.
+    static void mixEagerVoice(PlayingSound& sound, const SoundBuffer& src,
+                              float* buffer, int num_frames, int num_channels) {
+        double posF = sound.positionF;
+        float vol = sound.volume;
+        float pan = sound.pan;
+        float speed = sound.speed;
+
+        // pan = -1: full left, 0: center, +1: full right
+        float panL = (pan <= 0.0f) ? 1.0f : (1.0f - pan);
+        float panR = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
+
+        for (int frame = 0; frame < num_frames; frame++) {
+            size_t pos0 = (size_t)posF;
+            size_t pos1 = pos0 + 1;
+            float frac = (float)(posF - pos0);
+
+            if (pos0 >= src.numSamples) {
+                if (sound.loop) {
+                    posF = 0.0;
+                    pos0 = 0;
+                    pos1 = 1;
+                    frac = 0.0f;
+                } else {
+                    sound.playing = false;
+                    break;
+                }
+            }
+
+            if (pos1 >= src.numSamples) {
+                pos1 = sound.loop ? 0 : pos0;
+            }
+
+            float left0, right0, left1, right1;
+            if (src.channels == 1) {
+                left0 = right0 = src.samples[pos0];
+                left1 = right1 = src.samples[pos1];
+            } else {
+                left0 = src.samples[pos0 * 2];
+                right0 = src.samples[pos0 * 2 + 1];
+                left1 = src.samples[pos1 * 2];
+                right1 = src.samples[pos1 * 2 + 1];
+            }
+
+            float left = left0 + (left1 - left0) * frac;
+            float right = right0 + (right1 - right0) * frac;
+            left *= vol * panL;
+            right *= vol * panR;
+
+            buffer[frame * num_channels] += left;
+            if (num_channels > 1) {
+                buffer[frame * num_channels + 1] += right;
+            }
+
+            posF += (double)speed * (double)sound.rateRatio;
+        }
+
+        sound.positionF = posF;
+    }
+
+    // Streaming mix path: full implementation in tcAudio_impl.cpp where
+    // StreamInstance / ma_decoder types are visible. Declared here, body
+    // is out-of-line.
+    static void mixStreamVoice(PlayingSound& sound, SoundStream& src,
+                               float* buffer, int num_frames, int num_channels);
+
     void mixAudioInternal(float* buffer, int num_frames, int num_channels) {
         // Clear buffer
         std::memset(buffer, 0, num_frames * num_channels * sizeof(float));
@@ -453,79 +602,19 @@ private:
 
         for (auto& sound : playingSounds_) {
             if (!sound || !sound->playing || sound->paused) continue;
+            if (!sound->buffer) continue;
 
-            auto& src = sound->buffer;
-            double posF = sound->positionF;
-            float vol = sound->volume;
-            float pan = sound->pan;
-            float speed = sound->speed;
-
-            // Calculate left/right volume from pan
-            // pan = -1.0: left 100%, right 0%
-            // pan =  0.0: left 100%, right 100%
-            // pan =  1.0: left 0%,   right 100%
-            float panL = (pan <= 0.0f) ? 1.0f : (1.0f - pan);
-            float panR = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
-
-            for (int frame = 0; frame < num_frames; frame++) {
-                size_t pos0 = (size_t)posF;
-                size_t pos1 = pos0 + 1;
-                float frac = (float)(posF - pos0);
-
-                // Loop handling
-                if (pos0 >= src->numSamples) {
-                    if (sound->loop) {
-                        posF = 0.0;
-                        pos0 = 0;
-                        pos1 = 1;
-                        frac = 0.0f;
-                    } else {
-                        sound->playing = false;
-                        break;
-                    }
-                }
-
-                // Boundary check (when pos1 is out of range)
-                if (pos1 >= src->numSamples) {
-                    pos1 = sound->loop ? 0 : pos0;
-                }
-
-                // Get samples (linear interpolation)
-                float left0, right0, left1, right1;
-                if (src->channels == 1) {
-                    // Mono
-                    left0 = right0 = src->samples[pos0];
-                    left1 = right1 = src->samples[pos1];
-                } else {
-                    // Stereo
-                    left0 = src->samples[pos0 * 2];
-                    right0 = src->samples[pos0 * 2 + 1];
-                    left1 = src->samples[pos1 * 2];
-                    right1 = src->samples[pos1 * 2 + 1];
-                }
-
-                // Linear interpolation
-                float left = left0 + (left1 - left0) * frac;
-                float right = right0 + (right1 - right0) * frac;
-
-                // Apply volume and pan
-                left *= vol * panL;
-                right *= vol * panR;
-
-                // Mix
-                buffer[frame * num_channels] += left;
-                if (num_channels > 1) {
-                    buffer[frame * num_channels + 1] += right;
-                }
-
-                // Advance by speed (user-facing playback rate) × rateRatio
-                // (buffer-vs-engine sample-rate compensation). With rate
-                // ratio applied here, ChipSound-generated 44.1k buffers
-                // and 96k wav assets both play at correct pitch.
-                posF += (double)speed * (double)sound->rateRatio;
+            // Dispatch on source kind. Eager path is the common case and
+            // stays inline-friendly; streaming path lives in the impl TU.
+            if (sound->buffer->kind() == SoundSource::Eager) {
+                mixEagerVoice(*sound,
+                              *static_cast<SoundBuffer*>(sound->buffer.get()),
+                              buffer, num_frames, num_channels);
+            } else {
+                mixStreamVoice(*sound,
+                               *static_cast<SoundStream*>(sound->buffer.get()),
+                               buffer, num_frames, num_channels);
             }
-
-            sound->positionF = posF;
         }
 
         // Clipping
@@ -578,26 +667,41 @@ public:
     // -------------------------------------------------------------------------
     // Loading
     // -------------------------------------------------------------------------
+    //
+    // load(path)              — eager: decode the full file into RAM.
+    //                            Best for short SFX and cases that need
+    //                            zero-latency play / seek / multi-instance.
+    //
+    // loadStream(path, n=1)   — streaming: keep the file open and decode
+    //                            on demand into a small ring buffer.
+    //                            Best for long files (BGM, podcasts) where
+    //                            full PCM in RAM is wasteful (multi-MB+).
+    //                            `n` (maxPolyphony) reserves N decoder
+    //                            slots so up to N concurrent play() calls
+    //                            can overlap. Default 1 = single-instance
+    //                            (typical BGM); raise for cross-fade or
+    //                            layered ambient tracks.
     bool load(const std::string& path) {
         // Initialize AudioEngine (only once)
         AudioEngine::getInstance().init();
 
-        buffer_ = std::make_shared<SoundBuffer>();
+        // Decode into a SoundBuffer, then store as the polymorphic source.
+        auto buf = std::make_shared<SoundBuffer>();
 
         // Determine format by extension
         std::string ext = path.substr(path.find_last_of('.') + 1);
         bool success = false;
 
         if (ext == "ogg" || ext == "OGG") {
-            success = buffer_->loadOgg(path);
+            success = buf->loadOgg(path);
         } else if (ext == "wav" || ext == "WAV") {
-            success = buffer_->loadWav(path);
+            success = buf->loadWav(path);
         } else if (ext == "mp3" || ext == "MP3") {
-            success = buffer_->loadMp3(path);
+            success = buf->loadMp3(path);
         } else if (ext == "flac" || ext == "FLAC") {
-            success = buffer_->loadFlac(path);
+            success = buf->loadFlac(path);
         } else if (ext == "aac" || ext == "AAC" || ext == "m4a" || ext == "M4A") {
-            success = buffer_->loadAac(path);
+            success = buf->loadAac(path);
         } else {
             printf("Sound: unsupported format: %s\n", ext.c_str());
         }
@@ -606,14 +710,34 @@ public:
             buffer_.reset();
             return false;
         }
+        buffer_ = std::move(buf);
+        return true;
+    }
+
+    // Stream the file from disk instead of loading it all into RAM.
+    // maxPolyphony >= 1 reserves that many concurrent voices. See class
+    // doc comment above for when to prefer this over load().
+    //
+    // Limitations vs eager load():
+    //   - setSpeed() is ignored (decoder outputs engine-rate frames).
+    //   - setPosition() incurs a seek + ring-buffer refill (~10 ms).
+    bool loadStream(const std::string& path, int maxPolyphony = 1) {
+        AudioEngine::getInstance().init();
+        auto stream = std::make_shared<SoundStream>();
+        if (!stream->loadStream(path, maxPolyphony)) {
+            buffer_.reset();
+            return false;
+        }
+        buffer_ = std::move(stream);
         return true;
     }
 
     // For testing: Generate sine wave
     void loadTestTone(float frequency = 440.0f, float duration = 1.0f) {
         AudioEngine::getInstance().init();
-        buffer_ = std::make_shared<SoundBuffer>();
-        buffer_->generateSineWave(frequency, duration, 0.5f);
+        auto buf = std::make_shared<SoundBuffer>();
+        buf->generateSineWave(frequency, duration, 0.5f);
+        buffer_ = std::move(buf);
     }
 
     // Load from pre-generated SoundBuffer
@@ -624,10 +748,15 @@ public:
 
     void loadFromBuffer(std::shared_ptr<SoundBuffer> buf) {
         AudioEngine::getInstance().init();
-        buffer_ = buf;
+        buffer_ = buf;  // upcast SoundBuffer -> SoundSource via shared_ptr conversion
     }
 
     bool isLoaded() const { return buffer_ != nullptr; }
+
+    // True for streams loaded via loadStream(); false for eager loads.
+    bool isStreaming() const {
+        return buffer_ && buffer_->kind() == SoundSource::Stream;
+    }
 
     // -------------------------------------------------------------------------
     // Playback Control
@@ -636,9 +765,15 @@ public:
         if (!buffer_) return;
 
 #ifdef __EMSCRIPTEN__
-        // Web platform: complete deferred AAC loading if needed
-        if (buffer_->hasDeferredAac()) {
-            buffer_->ensureAacLoaded();
+        // Web platform: complete deferred AAC loading if needed.
+        // Only eager SoundBuffer can have a deferred AAC payload —
+        // SoundStream is decoded incrementally at play time and doesn't
+        // use the deferred-load mechanism.
+        if (buffer_->kind() == SoundSource::Eager) {
+            auto* eager = static_cast<SoundBuffer*>(buffer_.get());
+            if (eager->hasDeferredAac()) {
+                eager->ensureAacLoaded();
+            }
         }
 #endif
 
@@ -727,15 +862,24 @@ public:
 
     float getPosition() const {
         if (!playing_ || !buffer_) return 0;
+        // For both eager and stream sources positionF is in source-rate
+        // frames so the division yields seconds either way.
         return (float)playing_->positionF / buffer_->sampleRate;
     }
 
     void setPosition(float seconds) {
         if (!playing_ || !buffer_) return;
         double pos = seconds * buffer_->sampleRate;
-        // Clamp to valid range
         if (pos < 0) pos = 0;
-        if (pos >= buffer_->numSamples) pos = buffer_->numSamples - 1;
+        // For eager: clamp to numSamples. For streams: clamp to duration
+        // (decoder seek happens lazily in the stream mixer).
+        if (buffer_->kind() == SoundSource::Eager) {
+            auto* eager = static_cast<const SoundBuffer*>(buffer_.get());
+            if (pos >= (double)eager->numSamples) pos = (double)eager->numSamples - 1;
+        } else {
+            double maxPos = (double)buffer_->getDuration() * buffer_->sampleRate;
+            if (pos >= maxPos) pos = maxPos - 1;
+        }
         playing_->positionF = pos;
     }
 
@@ -744,7 +888,7 @@ public:
     }
 
 private:
-    std::shared_ptr<SoundBuffer> buffer_;
+    std::shared_ptr<SoundSource> buffer_;
     std::shared_ptr<PlayingSound> playing_;
     float volume_ = 1.0f;
     float pan_ = 0.0f;

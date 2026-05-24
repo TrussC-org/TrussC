@@ -1402,8 +1402,27 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     defineTween<Tween<Vec3>, Vec3>(lua, "TweenVec3");
     defineTween<Tween<Color>, Color>(lua, "TweenColor");
 
+    // SoundSource — abstract base for SoundBuffer (eager) and SoundStream
+    // (streaming). Lua-callable methods are the polymorphic ones (channels,
+    // sampleRate, getDuration); to access SoundBuffer-specific methods,
+    // pull a fresh SoundBuffer (Lua can construct one and call its load*
+    // methods directly).
+    lua->new_usertype<SoundSource>("SoundSource",
+        sol::no_constructor,
+        "channels", &SoundSource::channels,
+        "sampleRate", &SoundSource::sampleRate,
+        "getDuration", &SoundSource::getDuration,
+        "kind", &SoundSource::kind
+    );
+
+    // SoundBuffer is registered below as a child of SoundSource via the
+    // sol::bases<> hint so that shared_ptr<SoundSource> -> SoundBuffer
+    // downcast works in Lua when needed.
     lua->new_usertype<PlayingSound>("PlayingSound",
         sol::constructors<PlayingSound()>(),
+        // Polymorphic source — eager buffer or stream. Use :kind() to
+        // distinguish if needed. Field name kept as `buffer` for
+        // backward compatibility with pre-streaming Lua scripts.
         "buffer", &PlayingSound::buffer,
         "volume", &PlayingSound::volume,
         "pan", &PlayingSound::pan,
@@ -1418,6 +1437,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     lua->new_usertype<SoundBuffer>("SoundBuffer",
         sol::constructors<SoundBuffer(),
             SoundBuffer(const SoundBuffer&), SoundBuffer(SoundBuffer&&)>(),
+        sol::base_classes, sol::bases<SoundSource>(),
         "loadOgg", &SoundBuffer::loadOgg,
         "loadWav", &SoundBuffer::loadWav,
         "loadMp3", &SoundBuffer::loadMp3,
@@ -1445,20 +1465,41 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         "init", &AudioEngine::init,
         "shutdown", &AudioEngine::shutdown,
         "getAnalysisBuffer", &AudioEngine::getAnalysisBuffer,
-        "play", &AudioEngine::play,
+        // play() now has two overloads (SoundSource and SoundBuffer);
+        // resolve to the SoundSource one explicitly. The SoundBuffer
+        // overload is reachable transparently by upcast in C++ but Lua
+        // would error on "ambiguous member binding".
+        "play", static_cast<std::shared_ptr<PlayingSound>(AudioEngine::*)(std::shared_ptr<SoundSource>)>(&AudioEngine::play),
         "mixAudio", &AudioEngine::mixAudio
+    );
+
+    // SoundStream — streaming source for long files. See SoundBuffer for
+    // the eager counterpart used by short SFX.
+    lua->new_usertype<SoundStream>("SoundStream",
+        sol::constructors<SoundStream()>(),
+        sol::base_classes, sol::bases<SoundSource>(),
+        "loadStream", &SoundStream::loadStream,
+        "getPath", &SoundStream::getPath,
+        "getMaxPolyphony", &SoundStream::getMaxPolyphony
     );
 
     lua->new_usertype<Sound>("Sound",
         sol::constructors<Sound(),
             Sound(const Sound&), Sound(Sound&&)>(),
         "load", &Sound::load,
+        // loadStream(path) — single-instance streaming. For overlapping
+        // playback (cross-fade BGM etc.) pass maxPolyphony > 1.
+        "loadStream", sol::overload(
+            [](Sound& s, const std::string& p){ return s.loadStream(p); },
+            [](Sound& s, const std::string& p, int n){ return s.loadStream(p, n); }
+        ),
         "loadTestTone", &Sound::loadTestTone,
         "loadFromBuffer", sol::overload(
             [](Sound& s, const SoundBuffer& b){ s.loadFromBuffer(b); },
             [](Sound& s, std::shared_ptr<SoundBuffer> b){ s.loadFromBuffer(b); }
         ),
         "isLoaded", &Sound::isLoaded,
+        "isStreaming", &Sound::isStreaming,
         "play", &Sound::play,
         "stop", &Sound::stop,
         "pause", &Sound::pause,
