@@ -262,6 +262,14 @@ bool SoundStream::loadStream(const std::string& path, int maxPolyphony) {
     else if (ext == "mp3")  fmt = ma_encoding_format_mp3;
     else if (ext == "flac") fmt = ma_encoding_format_flac;
     else {
+        // TODO(streaming): OGG Vorbis is reachable via stb_vorbis (already
+        // bundled at core/include/stb_vorbis.c and used by SoundBuffer's
+        // eager loader). To enable OGG streaming, register stb_vorbis as
+        // a custom ma_decoder backend through ma_decoding_backend_vtable
+        // (miniaudio provides reference impls in extras/miniaudio_libvorbis.h).
+        // Roughly half a day of work; tracked separately from this refactor.
+        // AAC is platform-specific (AudioToolbox / MediaFoundation / GStreamer)
+        // and streaming would need per-platform plumbing — lower priority.
         printf("SoundStream: unsupported extension for streaming '.%s' (use load() for full decode)\n",
                ext.c_str());
         return false;
@@ -440,8 +448,20 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
     // Track positionF for getPosition()/setPosition() bookkeeping. Stream
     // doesn't use posF for sample indexing (sequential read), but exposing
     // the played frame count keeps getPosition()/getDuration() consistent.
+    //
+    // When looping, wrap positionF by the file's total engine-rate frame
+    // count so getPosition() cycles like the eager path does. Without this
+    // the progress bar grows unboundedly because the decoder thread loops
+    // silently in the ring buffer, and the mixer just sees a continuous
+    // stream of frames with no end marker.
     if (produced > 0) {
         sound.positionF += (double)produced;
+        if (sound.loop.load() && stream->totalFramesInFile > 0) {
+            double total = (double)stream->totalFramesInFile;
+            if (sound.positionF >= total) {
+                sound.positionF = std::fmod(sound.positionF, total);
+            }
+        }
     }
 }
 

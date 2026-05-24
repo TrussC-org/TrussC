@@ -721,8 +721,22 @@ public:
     // Limitations vs eager load():
     //   - setSpeed() is ignored (decoder outputs engine-rate frames).
     //   - setPosition() incurs a seek + ring-buffer refill (~10 ms).
+    //
+    // Web (Emscripten): streaming relies on std::thread + on-disk file I/O,
+    // neither of which is available in the default browser build. To keep
+    // user apps portable we fall back to eager load() and log a warning so
+    // the developer can branch explicitly with isStreaming() / #ifdef
+    // __EMSCRIPTEN__ if they need to know.
     bool loadStream(const std::string& path, int maxPolyphony = 1) {
         AudioEngine::getInstance().init();
+#ifdef __EMSCRIPTEN__
+        (void)maxPolyphony;
+        logWarning("Sound") << "loadStream() is not supported on Web — "
+                               "falling back to eager load() for '" << path << "'. "
+                               "Branch on isStreaming() or __EMSCRIPTEN__ if you need "
+                               "to handle this explicitly.";
+        return load(path);
+#else
         auto stream = std::make_shared<SoundStream>();
         if (!stream->loadStream(path, maxPolyphony)) {
             buffer_.reset();
@@ -730,6 +744,7 @@ public:
         }
         buffer_ = std::move(stream);
         return true;
+#endif
     }
 
     // For testing: Generate sine wave
