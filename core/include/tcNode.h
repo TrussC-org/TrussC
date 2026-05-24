@@ -134,19 +134,27 @@ public:
 
         auto it = std::find(children_.begin(), children_.end(), child);
         if (it != children_.end()) {
-            onChildRemoved(child);  // Notify before removal
-            (*it)->parent_.reset();
+            // Mutate first, then notify. onChildRemoved overrides may call
+            // addChild / removeChild on this node; firing the callback after
+            // the erase keeps children_ consistent and avoids invalidating
+            // the local iterator before we use it.
             children_.erase(it);
+            child->parent_.reset();
+            onChildRemoved(child);
         }
     }
 
     // Remove all child nodes
     void removeAllChildren() {
-        for (auto& child : children_) {
-            onChildRemoved(child);  // Notify for each child
+        // Mutate first (single vector move), then notify. onChildRemoved
+        // overrides may call addChild on this node; firing the callbacks
+        // after the move lets them see an empty children_.
+        auto cleared = std::move(children_);
+        children_.clear();   // moved-from vector is "valid but unspecified"
+        for (auto& child : cleared) {
             child->parent_.reset();
+            onChildRemoved(child);
         }
-        children_.clear();
     }
 
     // Callback when child is added (overridable)
@@ -469,17 +477,32 @@ private:
             setup();
         }
 
-        // Mod early update (before Node::update)
-        for (auto& [type, mod] : mods_) {
-            mod->earlyUpdate();
+        // Mod early update (before Node::update). Snapshot type indices —
+        // a mod's earlyUpdate() may call addMod / removeMod on this node,
+        // and `mods_` is an unordered_map whose iterators would otherwise
+        // invalidate. New mods added during dispatch are picked up next frame.
+        {
+            std::vector<std::type_index> modTypes;
+            modTypes.reserve(mods_.size());
+            for (auto& [t, m] : mods_) modTypes.push_back(t);
+            for (auto& t : modTypes) {
+                auto it = mods_.find(t);
+                if (it != mods_.end()) it->second->earlyUpdate();
+            }
         }
 
         processTimers();
         update();  // User code
 
-        // Mod update (after Node::update)
-        for (auto& [type, mod] : mods_) {
-            mod->update();
+        // Mod update (after Node::update) — same snapshot rationale as above.
+        {
+            std::vector<std::type_index> modTypes;
+            modTypes.reserve(mods_.size());
+            for (auto& [t, m] : mods_) modTypes.push_back(t);
+            for (auto& t : modTypes) {
+                auto it = mods_.find(t);
+                if (it != mods_.end()) it->second->update();
+            }
         }
 
         // Iterate over a snapshot — a child's update() may add, remove, or
@@ -493,25 +516,39 @@ private:
         }
     }
 
-    // Remove dead children and call cleanup on their subtrees
+    // Remove dead children and call cleanup on their subtrees.
+    //
+    // Two-phase: collect dead children, mutate children_, THEN fire user
+    // callbacks (cleanupTree / onChildRemoved). User code inside those
+    // callbacks may call addChild / removeChild on this node — running them
+    // after the erase guarantees a consistent children_ during dispatch.
     void sweepDeadChildren() {
-        auto it = std::remove_if(children_.begin(), children_.end(),
-            [this](const Ptr& child) {
-                if (child->isDead()) {
-                    child->cleanupTree();
-                    onChildRemoved(child);
-                    child->parent_.reset();
-                    return true;
-                }
-                return false;
-            });
-        children_.erase(it, children_.end());
+        std::vector<Ptr> dead;
+        for (auto& c : children_) {
+            if (c->isDead()) dead.push_back(c);
+        }
+        if (dead.empty()) return;
+
+        children_.erase(
+            std::remove_if(children_.begin(), children_.end(),
+                [](const Ptr& c) { return c->isDead(); }),
+            children_.end());
+
+        for (auto& c : dead) {
+            c->cleanupTree();
+            onChildRemoved(c);
+            c->parent_.reset();
+        }
     }
 
     // Recursively call cleanup() on this node and all descendants
     void cleanupTree() {
-        // Cleanup children first (depth-first, like destructors)
-        for (auto& child : children_) {
+        // Cleanup children first (depth-first, like destructors). Snapshot
+        // because a child's cleanup() may reach back and mutate this node's
+        // children_ (uncommon but legal — e.g. a child that unregisters
+        // siblings from its parent on destruction).
+        auto snapshot = children_;
+        for (auto& child : snapshot) {
             child->cleanupTree();
         }
 
@@ -759,8 +796,11 @@ protected:
 
         HitResult bestResult{};
 
-        // Traverse child nodes from back (reverse draw order)
-        for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
+        // Traverse child nodes from back (reverse draw order). Snapshot in
+        // case a hitTest() override mutates the tree — hitTest is contractually
+        // a pure geometric predicate, but the snapshot is cheap insurance.
+        auto snapshot = children_;
+        for (auto it = snapshot.rbegin(); it != snapshot.rend(); ++it) {
             HitResult childResult = (*it)->findHitNodeRecursive(globalRay, globalInverse);
             if (childResult.hit()) {
                 // Use child's result (later in draw order = front)
