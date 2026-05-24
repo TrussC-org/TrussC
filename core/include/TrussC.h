@@ -1666,6 +1666,16 @@ inline bool isKeyPressed(int key) {
     return internal::keysPressed.count(key) > 0;
 }
 
+// "Either-side" modifier checks. Return true while either the left or
+// right variant is held. Safe to call from setup / update / draw / any
+// event handler — they just read the global key-state set.
+// (Uses raw SAPP_KEYCODE_* here because the KEY_LEFT_SHIFT et al aliases
+// are defined further down in this header.)
+inline bool isShiftPressed()   { return isKeyPressed(SAPP_KEYCODE_LEFT_SHIFT)   || isKeyPressed(SAPP_KEYCODE_RIGHT_SHIFT); }
+inline bool isControlPressed() { return isKeyPressed(SAPP_KEYCODE_LEFT_CONTROL) || isKeyPressed(SAPP_KEYCODE_RIGHT_CONTROL); }
+inline bool isAltPressed()     { return isKeyPressed(SAPP_KEYCODE_LEFT_ALT)     || isKeyPressed(SAPP_KEYCODE_RIGHT_ALT); }
+inline bool isSuperPressed()   { return isKeyPressed(SAPP_KEYCODE_LEFT_SUPER)   || isKeyPressed(SAPP_KEYCODE_RIGHT_SUPER); }
+
 // Alias for getGlobalMouseX/Y (for tcDebugInput)
 inline float getMouseX() { return internal::mouseX; }
 inline float getMouseY() { return internal::mouseY; }
@@ -1872,6 +1882,10 @@ constexpr int KEY_LEFT_ALT = SAPP_KEYCODE_LEFT_ALT;
 constexpr int KEY_RIGHT_ALT = SAPP_KEYCODE_RIGHT_ALT;
 constexpr int KEY_LEFT_SUPER = SAPP_KEYCODE_LEFT_SUPER;
 constexpr int KEY_RIGHT_SUPER = SAPP_KEYCODE_RIGHT_SUPER;
+
+// "Either-side" modifier checks live as free functions (see below);
+// no KEY_SHIFT / KEY_CONTROL sentinel constants on purpose — those would
+// silently no-op if passed to isKeyPressed(). Use isShiftPressed() etc.
 
 // Function keys
 constexpr int KEY_F1 = SAPP_KEYCODE_F1;
