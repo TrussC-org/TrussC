@@ -293,7 +293,7 @@ struct Host {
 
         // Detect the build directory — try preset-style names first, fall back to build/
 #ifdef __APPLE__
-        const char* presetDirs[] = {"build-macos", "build"};
+        const char* presetDirs[] = {"build-macos", "xcode", "build"};
 #elif defined(_WIN32)
         const char* presetDirs[] = {"build-windows", "build"};
 #else
@@ -317,23 +317,38 @@ struct Host {
             return false;
         }
 
-        // Guest library path
-        // Ninja: buildDir直下に出力。VS generator: Release/等のサブディレクトリ。
+        // Guest library path: search known locations for the built dylib.
+        // Single-config (Ninja/Make): buildDir直下。
+        // Multi-config (Xcode/VS): <config>/ サブディレクトリ。
+        // Files are searched in priority order; whichever exists wins.
 #ifdef __APPLE__
-        guestLibPath = buildDir + "/libguest.dylib";
+        const string guestName = "libguest.dylib";
 #elif defined(_WIN32)
-        // Ninja (CMakePresets.json) ではサブディレクトリなし。
-        // Visual Studio multi-config generator は Release/ や Debug/ を作る。
-        if (fs::exists(buildDir + "/guest.dll")) {
-            guestLibPath = buildDir + "/guest.dll";
-        } else if (fs::exists(buildDir + "/Debug/guest.dll")) {
-            guestLibPath = buildDir + "/Debug/guest.dll";
-        } else {
-            guestLibPath = buildDir + "/Release/guest.dll";
-        }
+        const string guestName = "guest.dll";
 #else
-        guestLibPath = buildDir + "/libguest.so";
+        const string guestName = "libguest.so";
 #endif
+        const char* configs[] = {"Debug", "Release", "RelWithDebInfo", "MinSizeRel"};
+        guestLibPath = "";
+        if (fs::exists(buildDir + "/" + guestName)) {
+            guestLibPath = buildDir + "/" + guestName;
+        } else {
+            for (const char* c : configs) {
+                string candidate = buildDir + "/" + c + "/" + guestName;
+                if (fs::exists(candidate)) { guestLibPath = candidate; break; }
+            }
+        }
+        // Nothing yet — the initial rebuildGuest() below will create it. Pick
+        // a sensible default destination so the post-rebuild load() finds it.
+        // If any config subdir exists, we're in a multi-config tree → Debug/.
+        if (guestLibPath.empty()) {
+            bool multiConfig = false;
+            for (const char* c : configs) {
+                if (fs::exists(buildDir + "/" + c)) { multiConfig = true; break; }
+            }
+            guestLibPath = multiConfig ? (buildDir + "/Debug/" + guestName)
+                                       : (buildDir + "/" + guestName);
+        }
 
         // Initial build of the Guest
         if (!rebuildGuest()) {
@@ -368,6 +383,9 @@ struct Host {
         // Only rebuild the guest target — fast incremental build.
         // argv is passed directly to posix_spawnp / _spawnvp — no shell
         // is involved, so $(...), ``, ; etc. in buildDir cannot run.
+        // For multi-config generators (Xcode, Visual Studio), cmake picks the
+        // generator's default config (Debug) when --config is omitted — which
+        // matches the layout the rest of init() expects (Debug/libguest.dylib).
         int rc = runBuildCommand({cmake, "--build", buildDir,
                                   "--target", "guest", "--parallel"});
         if (rc != 0) {
