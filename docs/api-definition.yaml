@@ -1545,6 +1545,50 @@ categories:
         sketch: true
         snippet: "isKeyPressed(${1:key})"
 
+      - name: isShiftPressed
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "True while either Shift key (left or right) is held"
+        description_ja: "Shift キー (左右どちらでも) が押されているか"
+        description_ko: "Shift 키 (좌우 어느 쪽이든) 가 눌려 있는지"
+        sketch: true
+        snippet: "isShiftPressed()"
+
+      - name: isControlPressed
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "True while either Control key (left or right) is held"
+        description_ja: "Control キー (左右どちらでも) が押されているか"
+        description_ko: "Control 키 (좌우 어느 쪽이든) 가 눌려 있는지"
+        sketch: true
+        snippet: "isControlPressed()"
+
+      - name: isAltPressed
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "True while either Alt / Option key (left or right) is held"
+        description_ja: "Alt / Option キー (左右どちらでも) が押されているか"
+        description_ko: "Alt / Option 키 (좌우 어느 쪽이든) 가 눌려 있는지"
+        sketch: true
+        snippet: "isAltPressed()"
+
+      - name: isSuperPressed
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "True while either Super / Cmd / Win key (left or right) is held"
+        description_ja: "Super / Cmd / Win キー (左右どちらでも) が押されているか"
+        description_ko: "Super / Cmd / Win 키 (좌우 어느 쪽이든) 가 눌려 있는지"
+        sketch: true
+        snippet: "isSuperPressed()"
+
       # --- Cursor ---
 
       - name: showCursor

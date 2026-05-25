@@ -172,6 +172,10 @@ Vec2 getMousePos()                       // Get mouse position as Vec2
 Vec2 getGlobalMousePos()                 // Get global mouse position as Vec2
 bool isMousePressed()                    // Is mouse button pressed
 bool isKeyPressed(int key)               // Is specific key currently pressed
+bool isShiftPressed()                    // True while either Shift key (left or right) is held
+bool isControlPressed()                  // True while either Control key (left or right) is held
+bool isAltPressed()                      // True while either Alt / Option key (left or right) is held
+bool isSuperPressed()                    // True while either Super / Cmd / Win key (left or right) is held
 void showCursor()                        // Show the mouse cursor (default)
 void hideCursor()                        // Hide the mouse cursor
 void setCursor(Cursor cursor)            // Set the mouse cursor shape

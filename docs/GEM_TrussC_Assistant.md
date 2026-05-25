@@ -584,7 +584,9 @@ To make a repo discoverable by the registry, the GitHub repo needs:
 getWindowWidth() / getWindowHeight()
 getGlobalMouseX() / getGlobalMouseY()
 isMousePressed()
-isKeyPressed(SAPP_KEYCODE_SPACE)
+isKeyPressed(SAPP_KEYCODE_SPACE)         // exact key, left/right shift are different
+isShiftPressed() / isControlPressed()    // "either side" modifier checks
+isAltPressed()   / isSuperPressed()
 getElapsedTime() / getDeltaTime() / getFrameRate()
 ```
 
