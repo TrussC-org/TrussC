@@ -22,10 +22,14 @@
 // build stays clean. Keep the suppression as tight as possible around just
 // the third-party include.
 extern "C" {
+#if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wtautological-compare"
+#endif
 #include "stb_vorbis.c"
+#if defined(__clang__)
 #pragma clang diagnostic pop
+#endif
 }
 
 // miniaudio is included for ma_decoder. The implementation itself lives in

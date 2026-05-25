@@ -283,7 +283,11 @@ endif()
         endif()
         # Windows: デバッグ情報を.objに埋め込み（/Z7）、PDBを生成しない。
         # デバッガがguest.pdbをロックするとホットリロード時のリビルドが失敗するため。
+        # CMakeデフォルトの/Ziを/Z7に置換してD9025 warningを防ぐ。
         if(MSVC)
+            foreach(_cfg DEBUG RELWITHDEBINFO)
+                string(REGEX REPLACE "/Z[iI]" "/Z7" CMAKE_CXX_FLAGS_${_cfg} "${CMAKE_CXX_FLAGS_${_cfg}}")
+            endforeach()
             target_compile_options(guest PRIVATE /Z7)
             set_target_properties(guest PROPERTIES LINK_FLAGS "/DEBUG /PDBALTPATH:none")
         endif()
