@@ -28,22 +28,61 @@ bool tcxLua::canUseLuaJITFromSol2(){
     #endif // TCXLUA_USE_LUAJIT
 }
 
-std::shared_ptr<sol::state> tcxLua::getLuaState(){
+std::shared_ptr<sol::state> tcxLua::getLuaState(tcxLua::LuaModulePreferences module_preference){
     std::shared_ptr<sol::state> lua = std::make_shared<sol::state>();
 
     #ifdef TCXLUA_USE_LUAJIT
     lua->open_libraries(sol::lib::jit);
     #endif // TCXLUA_USE_LUAJIT
 
-    lua->open_libraries(
-        sol::lib::base,
-        sol::lib::math,
-        sol::lib::string,
-        sol::lib::table,
-        sol::lib::package,
-        sol::lib::coroutine,
-        sol::lib::io
-    );
+    // lua->open_libraries(
+    //     sol::lib::base,
+    //     sol::lib::math,
+    //     sol::lib::string,
+    //     sol::lib::table,
+    //     sol::lib::package,
+    //     sol::lib::coroutine,
+    //     sol::lib::io
+    // );
+
+    auto&& mp = module_preference;
+
+    if(mp.base){
+        lua->open_libraries(sol::lib::base);
+    }
+    if(mp.math){
+        lua->open_libraries(sol::lib::math);
+    }
+    if(mp.string){
+        lua->open_libraries(sol::lib::string);
+    }
+    if(mp.table){
+        lua->open_libraries(sol::lib::table);
+    }
+    if(mp.package){
+        lua->open_libraries(sol::lib::package);
+    }
+    if(mp.coroutine){
+        lua->open_libraries(sol::lib::coroutine);
+    }
+    if(mp.io){
+        lua->open_libraries(sol::lib::io);
+    }
+    if(mp.os){
+        lua->open_libraries(sol::lib::os);
+    }
+    if(mp.debug){
+        lua->open_libraries(sol::lib::debug);
+    }
+    if(mp.bit32){
+        lua->open_libraries(sol::lib::bit32);
+    }
+    if(mp.ffi){
+        lua->open_libraries(sol::lib::ffi);
+    }
+    if(mp.utf8){
+        lua->open_libraries(sol::lib::utf8);
+    }
 
     setBindings(lua);
 

@@ -7,7 +7,22 @@
 
 class tcxLua {
 public:
-    std::shared_ptr<sol::state> getLuaState();
+    struct LuaModulePreferences {
+        bool base = true;
+        bool math = true;
+        bool string = true;
+        bool table = true;
+        bool coroutine = true;
+        bool io = true;
+        bool package = true;
+        bool os = false;
+        bool debug = false;
+        bool bit32 = false;
+        bool ffi = false;
+        bool utf8 = false;
+    };
+
+    std::shared_ptr<sol::state> getLuaState(LuaModulePreferences module_preference = LuaModulePreferences());
     void setBindings(const std::shared_ptr<sol::state>& lua);
 
     /// @brief Get Estimated Lua version by checking Lua feature from Lua code side
