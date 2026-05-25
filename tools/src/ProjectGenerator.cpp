@@ -857,10 +857,18 @@ void ProjectGenerator::generateVisualStudioProject(const string& path) {
         }
     }
 
+    // Pass TRUSSC_DIR so cmake finds core/ even when the project lives
+    // outside the TrussC repo tree (the CMakeLists.txt fallback is relative)
+    string trusscDir = getTrusscDirValue(path);
+    string trusscDirArg;
+    if (!trusscDir.empty()) {
+        trusscDirArg = " -DTRUSSC_DIR=\"" + trusscDir + "\"";
+    }
+
 #ifdef _WIN32
-    string cmd = "cd /d \"" + vsPath + "\" && " + cmakeBin + " -G \"" + generator + "\" ..";
+    string cmd = "cd /d \"" + vsPath + "\" && " + cmakeBin + " -G \"" + generator + "\"" + trusscDirArg + " ..";
 #else
-    string cmd = "cd \"" + vsPath + "\" && " + getCmakePath() + " -G \"" + generator + "\" ..";
+    string cmd = "cd \"" + vsPath + "\" && " + getCmakePath() + " -G \"" + generator + "\"" + trusscDirArg + " ..";
 #endif
     log("Running: " + cmakeBin + " -G \"" + generator + "\"");
 
