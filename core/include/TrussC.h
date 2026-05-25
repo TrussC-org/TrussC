@@ -1556,59 +1556,13 @@ inline float getAspectRatio() {
 // Time
 // ---------------------------------------------------------------------------
 
-inline double getElapsedTime() {
-    auto now = std::chrono::high_resolution_clock::now();
-    if (!internal::startTimeInitialized) {
-        internal::startTime = now;
-        internal::startTimeInitialized = true;
-        return 0.0;
-    }
-    auto duration = std::chrono::duration<double>(now - internal::startTime);
-    return duration.count();
-}
-
-// Number of update calls
-// In decoupled mode, may be called more frequently than draw
-inline uint64_t getUpdateCount() {
-    return internal::updateFrameCount;
-}
-
-// Draw frame count (sokol's frame_count)
-inline uint64_t getDrawCount() {
-    return sapp_frame_count();
-}
-
-// Alias for getUpdateCount (for general use)
-inline uint64_t getFrameCount() {
-    return internal::updateFrameCount;
-}
-
-inline double getDeltaTime() {
-    return internal::updateDeltaTime;
-}
-
-// Get frame rate (10-frame moving average, based on update delta time)
-inline double getFrameRate() {
-    // Add current update delta time to buffer
-    double dt = internal::updateDeltaTime;
-    if (dt <= 0.0) return 0.0;
-    internal::frameTimeBuffer[internal::frameTimeIndex] = dt;
-    internal::frameTimeIndex = (internal::frameTimeIndex + 1) % 10;
-    if (internal::frameTimeIndex == 0) {
-        internal::frameTimeBufferFilled = true;
-    }
-
-    // Calculate average
-    int count = internal::frameTimeBufferFilled ? 10 : internal::frameTimeIndex;
-    if (count == 0) return 0.0;
-
-    double sum = 0.0;
-    for (int i = 0; i < count; i++) {
-        sum += internal::frameTimeBuffer[i];
-    }
-    double avgDt = sum / count;
-    return avgDt > 0.0 ? 1.0 / avgDt : 0.0;
-}
+// Non-inline: Host/Guest share the same state on Windows hot-reload
+double getElapsedTime();
+uint64_t getUpdateCount();
+uint64_t getDrawCount();
+uint64_t getFrameCount();
+double getDeltaTime();
+double getFrameRate();
 
 // ---------------------------------------------------------------------------
 // Sokol memory tracking

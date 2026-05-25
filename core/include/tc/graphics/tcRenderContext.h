@@ -947,10 +947,9 @@ private:
 
 // ---------------------------------------------------------------------------
 // Default context (singleton)
+// Non-inline so that Host and Guest (hot-reload DLL) share the same
+// static instance — inline would give each module its own copy on Windows.
 // ---------------------------------------------------------------------------
-inline RenderContext& getDefaultContext() {
-    static RenderContext instance;
-    return instance;
-}
+RenderContext& getDefaultContext();
 
 } // namespace trussc

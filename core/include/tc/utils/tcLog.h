@@ -200,10 +200,8 @@ private:
 // ---------------------------------------------------------------------------
 // Global logger
 // ---------------------------------------------------------------------------
-inline Logger& tcGetLogger() {
-    static Logger logger;
-    return logger;
-}
+// Non-inline: Host/Guest share the same logger on Windows hot-reload
+Logger& tcGetLogger();
 
 // ---------------------------------------------------------------------------
 // Convenience functions

@@ -10,7 +10,7 @@
 namespace trussc {
 
 // Forward declaration
-inline double getDeltaTime();
+double getDeltaTime();
 
 // Tween class for animating values with easing
 // Works with any type that supports lerp (float, Vec2, Vec3, Vec4, Color, etc.)

@@ -447,4 +447,12 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y,
     }
 }
 
+// ---------------------------------------------------------------------------
+// Default context singleton (non-inline — see tcRenderContext.h comment)
+// ---------------------------------------------------------------------------
+RenderContext& getDefaultContext() {
+    static RenderContext instance;
+    return instance;
+}
+
 } // namespace trussc

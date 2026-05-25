@@ -55,11 +55,8 @@ public:
 };
 
 // ---------------------------------------------------------------------------
-// Global accessor
+// Global accessor (non-inline: Host/Guest share the same instance on Windows)
 // ---------------------------------------------------------------------------
-inline CoreEvents& events() {
-    static CoreEvents instance;
-    return instance;
-}
+CoreEvents& events();
 
 } // namespace trussc

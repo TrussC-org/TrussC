@@ -51,10 +51,8 @@ private:
     std::chrono::steady_clock::time_point startTime_;
 };
 
-inline ElapsedTimeClock& getElapsedClock() {
-    static ElapsedTimeClock clock;
-    return clock;
-}
+// Non-inline: Host/Guest share the same clock on Windows hot-reload
+ElapsedTimeClock& getElapsedClock();
 
 // String replacement (for getTimestampString)
 inline void stringReplace(std::string& input, const std::string& searchStr, const std::string& replaceStr) {

@@ -458,4 +458,72 @@ void resumeSwapchainPass() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Non-inline singletons / accessors (Hot Reload: Host/Guest share state)
+// ---------------------------------------------------------------------------
+
+CoreEvents& events() {
+    static CoreEvents instance;
+    return instance;
+}
+
+double getElapsedTime() {
+    auto now = std::chrono::high_resolution_clock::now();
+    if (!internal::startTimeInitialized) {
+        internal::startTime = now;
+        internal::startTimeInitialized = true;
+        return 0.0;
+    }
+    auto duration = std::chrono::duration<double>(now - internal::startTime);
+    return duration.count();
+}
+
+uint64_t getUpdateCount() {
+    return internal::updateFrameCount;
+}
+
+uint64_t getDrawCount() {
+    return sapp_frame_count();
+}
+
+uint64_t getFrameCount() {
+    return internal::updateFrameCount;
+}
+
+double getDeltaTime() {
+    return internal::updateDeltaTime;
+}
+
+double getFrameRate() {
+    double dt = internal::updateDeltaTime;
+    if (dt <= 0.0) return 0.0;
+    internal::frameTimeBuffer[internal::frameTimeIndex] = dt;
+    internal::frameTimeIndex = (internal::frameTimeIndex + 1) % 10;
+    if (internal::frameTimeIndex == 0) {
+        internal::frameTimeBufferFilled = true;
+    }
+
+    int count = internal::frameTimeBufferFilled ? 10 : internal::frameTimeIndex;
+    if (count == 0) return 0.0;
+
+    double sum = 0.0;
+    for (int i = 0; i < count; i++) {
+        sum += internal::frameTimeBuffer[i];
+    }
+    double avgDt = sum / count;
+    return avgDt > 0.0 ? 1.0 / avgDt : 0.0;
+}
+
+namespace internal {
+ElapsedTimeClock& getElapsedClock() {
+    static ElapsedTimeClock clock;
+    return clock;
+}
+} // namespace internal
+
+Logger& tcGetLogger() {
+    static Logger logger;
+    return logger;
+}
+
 } // namespace trussc
