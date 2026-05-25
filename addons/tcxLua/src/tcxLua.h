@@ -20,6 +20,8 @@ public:
         bool bit32 = false;
         bool ffi = false;
         bool utf8 = false;
+
+        LuaModulePreferences() {}
     };
 
     std::shared_ptr<sol::state> getLuaState(LuaModulePreferences module_preference = LuaModulePreferences());
