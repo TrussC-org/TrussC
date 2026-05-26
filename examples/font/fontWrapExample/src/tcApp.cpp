@@ -60,30 +60,31 @@ void tcApp::draw() {
                              hY + hH + 6, Center, Top);
     };
 
-    // (A) No wrap — overflows
-    Font fH_no = fontH;
-    drawHPanel(0, "No wrap (overflows)", fH_no, longJa);
-
-    // (B) Wrap basic — Kinsoku Off (no 行頭禁則)
+    // (A) Wrap basic — Kinsoku Off (no 行頭禁則)
     Font fH_b = fontH;
     fH_b.enableWrap(true);
     fH_b.setMaxLineLength(wrapAt);
-    drawHPanel(1, "Wrap (kinsoku off)", fH_b, longJa);
+    drawHPanel(0, "Wrap (kinsoku off)", fH_b, longJa);
 
-    // (C) Wrap + kinsoku punctuation-only
+    // (B) Wrap + kinsoku punctuation-only
     Font fH_kp = fontH;
     fH_kp.enableWrap(true);
     fH_kp.setMaxLineLength(wrapAt);
     fH_kp.setKinsoku(KinsokuLevel::PunctuationOnly);
     fH_kp.setHangingPunctuation(true);
-    drawHPanel(2, "Kinsoku PunctOnly + hang", fH_kp, longJa);
+    drawHPanel(1, "Kinsoku PunctOnly + hang", fH_kp, longJa);
 
-    // (D) English hyphenation
+    // (C) English hyphenation
     Font fH_en = fontHen;
     fH_en.enableWrap(true);
     fH_en.setMaxLineLength(wrapAt);
     fH_en.setLatinHyphenation(true);
-    drawHPanel(3, "EN wrap + hyphenation", fH_en, longEn);
+    drawHPanel(2, "EN wrap + hyphenation", fH_en, longEn);
+
+    // (D) No wrap — overflows. Placed last so it spills into empty space at
+    // the right of the window instead of obscuring the wrapped samples.
+    Font fH_no = fontH;
+    drawHPanel(3, "No wrap (overflows)", fH_no, longJa);
 
     // ====================================================
     //  Vertical wrap row — 3 panels
@@ -94,8 +95,8 @@ void tcApp::draw() {
     const float colBudget = vH - 36;
 
     const string longJaV =
-        "縦書きでもwrap APIはそのまま使える。列の長さがmaxLineLengthを"
-        "超えたら自動で次の列に送られる、句読点や閉じ括弧も適切に扱う。";
+        "日本発、「縦書き」可能なフレームワーク。\n"
+        "《商用利用》可能（MITライセンス）。";
 
     auto drawVPanel = [&](int idx, const char* label, Font& f, const string& txt) {
         float px = 40 + vPanelW * idx;
