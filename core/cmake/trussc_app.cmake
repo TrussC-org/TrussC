@@ -306,6 +306,20 @@ endif()
         # parsing each guest .cpp (~2s for ~2700 lines), so caching it once
         # per build dramatically shortens reload turnaround.
         target_precompile_headers(guest PRIVATE <TrussC.h>)
+        # Linux/GCC: disable STB_GNU_UNIQUE bindings for the Guest. GCC's
+        # default -fgnu-unique-symbols marks Meyer's singletons (inline
+        # function static locals like `static Foo& instance(){ static Foo f; }`)
+        # as STB_GNU_UNIQUE, which glibc's loader treats as unloadable —
+        # dlclose() does not destroy them and a subsequent dlopen() reuses
+        # the same memory. On hot reload this leaves stale, "already
+        # initialized" state behind in the new Guest, e.g. tcxImGui's
+        # ImGuiManager singleton keeps initialized_=true so simgui_setup()
+        # short-circuits and ImGui::CreateContext() never runs — the next
+        # ImGui::GetIO() then dereferences a NULL GImGui and crashes.
+        # macOS/Windows use different binding rules and aren't affected.
+        if(NOT APPLE AND NOT WIN32)
+            target_compile_options(guest PRIVATE -fno-gnu-unique)
+        endif()
         # Guest: resolve TrussC symbols at runtime from the Host process.
         # macOS/Linux use flat namespace lookup; Windows uses import library.
         if(APPLE)
