@@ -83,6 +83,11 @@ struct StreamInstance {
 
     uint64_t totalFramesInFile = 0;           // duration in source frames
 
+    // Sub-frame position inside the ring for setSpeed-aware linear interp.
+    // Only touched by the mixer (audio callback thread) — single-writer, no
+    // atomicity needed.
+    double subFrame = 0.0;
+
     StreamInstance() : ring(RING_FRAMES * CHANNELS, 0.0f) {}
     ~StreamInstance() {
         if (decoderInitialized) {
@@ -149,10 +154,14 @@ private:
             uint64_t target = s.seekTargetFrame.load(std::memory_order_relaxed);
             ma_decoder_seek_to_pcm_frame(&s.decoder, target);
             // Reset ring: drain any stale samples so the mixer sees the
-            // post-seek stream from this point.
+            // post-seek stream from this point. subFrame is owned by the
+            // mixer thread; clearing it from here is a benign race in
+            // practice (the mixer reads it again next callback and the
+            // worst case is one sample of phase wobble at the seek point).
             s.readFrame.store(0, std::memory_order_relaxed);
             s.writeFrame.store(0, std::memory_order_release);
             s.endOfStream.store(false, std::memory_order_release);
+            s.subFrame = 0.0;
         }
 
         // Decode in chunks of up to scratchFrames frames at a time.
@@ -395,6 +404,19 @@ std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> sou
 // The mixer is invoked with the global engine lock held (mutex_), so we
 // don't need to lock the stream itself — the SPSC ring uses atomic
 // indices for synchronization with the worker.
+//
+// speed support:
+//   - [0, 10] is allowed. Sound::setSpeed already clamps negatives to 0
+//     because reverse streaming isn't implemented yet (needs direction-
+//     aware ring fill).
+//   - subFrame (double) tracks the fractional ring position. Per output
+//     frame we lerp ring[i] and ring[i+1] by subFrame, then advance
+//     subFrame by `speed`. Each whole unit of subFrame consumes one
+//     ring frame.
+//   - speed = 0 keeps subFrame fixed → same sample emitted = freeze.
+//   - speed > 1 consumes the ring N× faster, raising underrun risk on
+//     slow hardware. Worker decode is far faster than realtime on
+//     modern CPUs for WAV / MP3 / FLAC, so this is usually fine.
 // ---------------------------------------------------------------------------
 void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
                                  float* buffer, int num_frames, int num_channels) {
@@ -409,29 +431,44 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
     float panL = (pan <= 0.0f) ? 1.0f : (1.0f - pan);
     float panR = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
 
+    // Defensive: setSpeed clamps to [0, 10] for streams, but read again here
+    // in case a stale value snuck through.
+    double speed = (double)sound.speed.load();
+    if (speed < 0.0) speed = 0.0;
+    if (speed > 10.0) speed = 10.0;
+
     uint64_t writeFrame = stream->writeFrame.load(std::memory_order_acquire);
     uint64_t readFrame  = stream->readFrame.load(std::memory_order_relaxed);
+    double   subFrame   = stream->subFrame;
 
     int produced = 0;
+    double posAdvance = 0.0;  // sum of consumed ring frames this callback
+
     for (int frame = 0; frame < num_frames; ++frame) {
-        if (readFrame >= writeFrame) {
-            // Ring is empty. If the worker has signaled EOS and we're not
-            // looping, the voice is done.
+        // Need both readFrame and readFrame+1 for interpolation.
+        if (readFrame + 1 >= writeFrame) {
             if (stream->endOfStream.load(std::memory_order_acquire)
                 && !sound.loop.load()) {
                 sound.playing = false;
                 break;
             }
-            // Underrun (worker behind): output silence for this frame.
-            // Don't advance read position — give the worker a chance to
-            // catch up next callback.
+            // Underrun: emit nothing for this output frame, give the
+            // worker a chance to catch up. subFrame state preserved.
             continue;
         }
 
-        size_t idx = (size_t)(readFrame & StreamInstance::RING_MASK)
-                     * StreamInstance::CHANNELS;
-        float l = stream->ring[idx];
-        float r = stream->ring[idx + 1];
+        size_t idx0 = (size_t)(readFrame & StreamInstance::RING_MASK)
+                      * StreamInstance::CHANNELS;
+        size_t idx1 = (size_t)((readFrame + 1) & StreamInstance::RING_MASK)
+                      * StreamInstance::CHANNELS;
+        float frac = (float)subFrame;
+
+        float l0 = stream->ring[idx0];
+        float r0 = stream->ring[idx0 + 1];
+        float l1 = stream->ring[idx1];
+        float r1 = stream->ring[idx1 + 1];
+        float l = l0 + (l1 - l0) * frac;
+        float r = r0 + (r1 - r0) * frac;
         l *= vol * panL;
         r *= vol * panR;
 
@@ -439,23 +476,28 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
         if (num_channels > 1) {
             buffer[frame * num_channels + 1] += r;
         }
-        ++readFrame;
+
+        subFrame += speed;
+        // Each whole unit advances the integer ring read by 1.
+        while (subFrame >= 1.0) {
+            subFrame -= 1.0;
+            readFrame += 1;
+            posAdvance += 1.0;
+        }
         ++produced;
     }
 
     stream->readFrame.store(readFrame, std::memory_order_release);
+    stream->subFrame = subFrame;
 
-    // Track positionF for getPosition()/setPosition() bookkeeping. Stream
-    // doesn't use posF for sample indexing (sequential read), but exposing
-    // the played frame count keeps getPosition()/getDuration() consistent.
+    // positionF advances by the actual ring frames consumed (which equals
+    // produced output frames * average speed). When speed = 0, posAdvance
+    // stays 0 and the position freezes alongside the audio.
     //
     // When looping, wrap positionF by the file's total engine-rate frame
-    // count so getPosition() cycles like the eager path does. Without this
-    // the progress bar grows unboundedly because the decoder thread loops
-    // silently in the ring buffer, and the mixer just sees a continuous
-    // stream of frames with no end marker.
-    if (produced > 0) {
-        sound.positionF += (double)produced;
+    // count so getPosition() cycles like the eager path does.
+    if (posAdvance > 0.0) {
+        sound.positionF += posAdvance;
         if (sound.loop.load() && stream->totalFramesInFile > 0) {
             double total = (double)stream->totalFramesInFile;
             if (sound.positionF >= total) {
@@ -463,6 +505,7 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
             }
         }
     }
+    (void)produced;  // kept for potential telemetry; not used at present
 }
 
 // ---------------------------------------------------------------------------

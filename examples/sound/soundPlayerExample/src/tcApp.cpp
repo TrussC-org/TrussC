@@ -39,7 +39,8 @@ void tcApp::setup() {
     logNotice("tcApp") << "S: Play sound effect";
     logNotice("tcApp") << "UP/DOWN: Volume control";
     logNotice("tcApp") << "LEFT/RIGHT: Pan control";
-    logNotice("tcApp") << "+/-: Speed control";
+    logNotice("tcApp") << "+/-: Speed control (-10 ~ +10, 0 = freeze, negative = reverse)";
+    logNotice("tcApp") << "0: Reset speed to 1.0";
     logNotice("tcApp") << "================";
 }
 
@@ -67,7 +68,9 @@ void tcApp::draw() {
     y += 20;
     drawBitmapString("  LEFT/RIGHT - Pan control", 50, y);
     y += 20;
-    drawBitmapString("  +/- - Speed control", 50, y);
+    drawBitmapString("  +/- - Speed (-10 ~ +10, 0 = freeze, negative = reverse)", 50, y);
+    y += 20;
+    drawBitmapString("  0   - Reset speed to 1.0", 50, y);
     y += 40;
 
     // Music status
@@ -189,15 +192,19 @@ void tcApp::keyPressed(int key) {
         logNotice("tcApp") << "Pan: " << music.getPan();
     }
     else if (key == '+' || key == '=' || key == SAPP_KEYCODE_KP_ADD) {
-        // Speed up
-        float speed = music.getSpeed() + 0.1f;
-        music.setSpeed(speed);
+        // Speed up (0.5 step — covers the [-10, +10] range without too
+        // much keymashing)
+        music.setSpeed(music.getSpeed() + 0.5f);
         logNotice("tcApp") << "Speed: " << music.getSpeed() << "x";
     }
     else if (key == '-' || key == SAPP_KEYCODE_KP_SUBTRACT) {
-        // Speed down
-        float speed = music.getSpeed() - 0.1f;
-        music.setSpeed(speed);
+        // Speed down — goes negative for reverse playback on eager voices
+        music.setSpeed(music.getSpeed() - 0.5f);
         logNotice("tcApp") << "Speed: " << music.getSpeed() << "x";
+    }
+    else if (key == '0') {
+        // Reset speed to 1.0 (quick recovery if you reverse off into a corner)
+        music.setSpeed(1.0f);
+        logNotice("tcApp") << "Speed reset to 1.0x";
     }
 }

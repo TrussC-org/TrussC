@@ -527,35 +527,53 @@ private:
     }
 
     // Eager mix path: linear interpolation over a fully-decoded SoundBuffer.
-    // Lifted verbatim from the pre-refactor mixer to keep the perf-sensitive
-    // hot path byte-identical for the common case.
+    //
+    // Supports the full setSpeed range (currently [-10, 10]):
+    //   - speed > 0: forward playback (1.0 = natural pitch at engine rate).
+    //   - speed = 0: posF stays put, same sample emitted = freeze.
+    //   - speed < 0: reverse playback, posF decreases toward 0 / wraps.
+    //
+    // Bounds are resolved at the top of each iteration so posF never reaches
+    // the indexing step with a negative or out-of-range value (size_t cast
+    // of a negative double is UB).
     static void mixEagerVoice(PlayingSound& sound, const SoundBuffer& src,
                               float* buffer, int num_frames, int num_channels) {
         double posF = sound.positionF;
         float vol = sound.volume;
         float pan = sound.pan;
         float speed = sound.speed;
+        double posStep = (double)speed * (double)sound.rateRatio;
+        double srcLen = (double)src.numSamples;
 
         // pan = -1: full left, 0: center, +1: full right
         float panL = (pan <= 0.0f) ? 1.0f : (1.0f - pan);
         float panR = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
 
         for (int frame = 0; frame < num_frames; frame++) {
-            size_t pos0 = (size_t)posF;
-            size_t pos1 = pos0 + 1;
-            float frac = (float)(posF - pos0);
-
-            if (pos0 >= src.numSamples) {
+            // Resolve bounds for both directions BEFORE indexing.
+            if (posF < 0.0) {
                 if (sound.loop) {
-                    posF = 0.0;
-                    pos0 = 0;
-                    pos1 = 1;
-                    frac = 0.0f;
+                    posF += srcLen;
+                    // Defensive: very large negative step could still be < 0.
+                    if (posF < 0.0) posF = std::fmod(posF, srcLen) + srcLen;
                 } else {
                     sound.playing = false;
                     break;
                 }
             }
+            if (posF >= srcLen) {
+                if (sound.loop) {
+                    posF -= srcLen;
+                    if (posF >= srcLen) posF = std::fmod(posF, srcLen);
+                } else {
+                    sound.playing = false;
+                    break;
+                }
+            }
+
+            size_t pos0 = (size_t)posF;
+            size_t pos1 = pos0 + 1;
+            float frac = (float)(posF - (double)pos0);
 
             if (pos1 >= src.numSamples) {
                 pos1 = sound.loop ? 0 : pos0;
@@ -582,7 +600,7 @@ private:
                 buffer[frame * num_channels + 1] += right;
             }
 
-            posF += (double)speed * (double)sound.rateRatio;
+            posF += posStep;
         }
 
         sound.positionF = posF;
@@ -854,25 +872,29 @@ public:
 
     float getPan() const { return pan_; }
 
+    // Set playback speed.
+    //
+    // Range:
+    //   - Eager voices: [-10, 10]. Negative = reverse playback. Zero = freeze
+    //     (same sample emitted, no advance). Tiny positive values down to 0.0
+    //     are accepted with no floor — caller is responsible for "0 means
+    //     frozen but still alive".
+    //   - Streaming voices: [0, 10]. Negative is currently clamped to 0
+    //     because reverse streaming would need direction-aware ring fill +
+    //     per-chunk reverse, not yet implemented. Zero = freeze.
+    //
+    // Values outside [-10, 10] are clamped.
     void setSpeed(float speed) {
-        // Clamp to 0.1 ~ 4.0 range (prevent extreme values)
-        speed_ = (speed < 0.1f) ? 0.1f : (speed > 4.0f) ? 4.0f : speed;
+        if (speed < -10.0f) speed = -10.0f;
+        if (speed >  10.0f) speed =  10.0f;
+        // Streams don't support reverse yet — clamp away the negative half.
+        if (buffer_ && buffer_->kind() == SoundSource::Stream && speed < 0.0f) {
+            speed = 0.0f;
+        }
+        speed_ = speed;
         if (playing_) {
             playing_->speed = speed_;
         }
-        // TODO(speed): widen the clamp.
-        //   - Eager: allow negative values (reverse playback) and tiny
-        //     positive values down to 0.0 with no special floor — caller
-        //     is responsible for "0 means frozen". mixEagerVoice needs a
-        //     lower-bound wrap (posF < 0 → loop ? posF + numSamples :
-        //     stop) before the existing upper-bound branch.
-        //   - Streaming: support [0, 10] with 0 = freeze (still emits
-        //     silence but doesn't underrun). Worker thread needs a
-        //     decode-rate scaler so the ring fills faster at high speed
-        //     to avoid underrun; mixer reads with linear interp like
-        //     mixEagerVoice. Reverse (negative speed) on streams stays
-        //     deferred — needs direction-aware ring fill + per-chunk
-        //     reverse, much heavier than positive-only speed.
     }
 
     float getSpeed() const { return speed_; }

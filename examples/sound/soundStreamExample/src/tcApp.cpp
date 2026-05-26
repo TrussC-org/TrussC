@@ -55,6 +55,8 @@ void tcApp::setup() {
     logNotice("tcApp") << "UP/DOWN: Volume control";
     logNotice("tcApp") << "LEFT/RIGHT: Pan control";
     logNotice("tcApp") << "[ / ]: Seek -5s / +5s";
+    logNotice("tcApp") << "+/-: Speed (0 ~ 10 on streams, 0 = freeze)";
+    logNotice("tcApp") << "0: Reset speed to 1.0";
     logNotice("tcApp") << "================";
 }
 
@@ -81,6 +83,10 @@ void tcApp::draw() {
     drawBitmapString("  LEFT/RIGHT - Pan", 50, y);
     y += 20;
     drawBitmapString("  [ / ] - Seek -5s / +5s", 50, y);
+    y += 20;
+    drawBitmapString("  +/- - Speed (0 ~ 10 on streams, 0 = freeze)", 50, y);
+    y += 20;
+    drawBitmapString("  0   - Reset speed to 1.0", 50, y);
     y += 40;
 
     setColor(colors::white);
@@ -104,6 +110,9 @@ void tcApp::draw() {
         y += 20;
 
         drawBitmapString(format("Volume: {:.0f}%", music.getVolume() * 100), 50, y);
+        y += 20;
+
+        drawBitmapString(format("Speed: {:.1f}x", music.getSpeed()), 50, y);
         y += 20;
 
         drawBitmapString(format("Pan: {:.1f} ({})", music.getPan(),
@@ -205,5 +214,18 @@ void tcApp::keyPressed(int key) {
         if (newPos > music.getDuration()) newPos = music.getDuration() - 0.1f;
         music.setPosition(newPos);
         logNotice("tcApp") << "Seek to " << newPos << "s";
+    }
+    else if (key == '+' || key == '=' || key == SAPP_KEYCODE_KP_ADD) {
+        // Streams clamp negative to 0 internally — UI just feeds the value.
+        music.setSpeed(music.getSpeed() + 0.5f);
+        logNotice("tcApp") << "Speed: " << music.getSpeed() << "x";
+    }
+    else if (key == '-' || key == SAPP_KEYCODE_KP_SUBTRACT) {
+        music.setSpeed(music.getSpeed() - 0.5f);
+        logNotice("tcApp") << "Speed: " << music.getSpeed() << "x";
+    }
+    else if (key == '0') {
+        music.setSpeed(1.0f);
+        logNotice("tcApp") << "Speed reset to 1.0x";
     }
 }
