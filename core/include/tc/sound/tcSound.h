@@ -860,6 +860,19 @@ public:
         if (playing_) {
             playing_->speed = speed_;
         }
+        // TODO(speed): widen the clamp.
+        //   - Eager: allow negative values (reverse playback) and tiny
+        //     positive values down to 0.0 with no special floor — caller
+        //     is responsible for "0 means frozen". mixEagerVoice needs a
+        //     lower-bound wrap (posF < 0 → loop ? posF + numSamples :
+        //     stop) before the existing upper-bound branch.
+        //   - Streaming: support [0, 10] with 0 = freeze (still emits
+        //     silence but doesn't underrun). Worker thread needs a
+        //     decode-rate scaler so the ring fills faster at high speed
+        //     to avoid underrun; mixer reads with linear interp like
+        //     mixEagerVoice. Reverse (negative speed) on streams stays
+        //     deferred — needs direction-aware ring fill + per-chunk
+        //     reverse, much heavier than positive-only speed.
     }
 
     float getSpeed() const { return speed_; }
