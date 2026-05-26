@@ -80,13 +80,13 @@ void tcApp::draw() {
     };
 
     drawPanel(0, "CJK + brackets/punct", fontV,
-              "「縦書き」が、できた。\n『本当に』嬉しい！");
+              "日本発、「縦書き」可能なフレームワーク（プログラミングの基盤となる技術）。開発者は著書『TrussCをはじめよう』を《MITライセンス》で公開。");
 
     drawPanel(1, "Latin = Rotate (default)", fontV,
               "TrussCで縦書きAPIを実装中、2026年5月。");
 
     drawPanel(2, "TCY Combine (digits<=2)", fontVcombineDigit,
-              "平成31年4月30日に出版された150ページの本");
+              "令和9年6月28日に出版された150ページの本");
 
     drawPanel(3, "Upright Latin/digits", fontVupright,
               "ABCあいう\n123かきく");
