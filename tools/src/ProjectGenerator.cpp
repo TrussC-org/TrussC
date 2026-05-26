@@ -307,17 +307,12 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     macosBuildPreset["jobs"] = 4;
     presets["buildPresets"].push_back(macosBuildPreset);
 
-    // Xcode preset
-    Json xcodePreset;
-    xcodePreset["name"] = "xcode";
-    xcodePreset["displayName"] = "Xcode";
-    xcodePreset["binaryDir"] = "${sourceDir}/xcode";
-    xcodePreset["generator"] = "Xcode";
-    xcodePreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "14.0";
-    if (!trusscDir.empty()) {
-        xcodePreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
-    }
-    presets["configurePresets"].push_back(xcodePreset);
+    // NOTE: Xcode project is generated via direct `cmake -G Xcode` invocation
+    // (see generateXcodeProject), not through a preset. This keeps macOS users
+    // with only one configurePreset ("macos"), so VSCode/Cursor's CMake Tools
+    // auto-selects it instead of showing a "macos vs xcode" quick pick on
+    // every workspace open. Same pattern as the Visual Studio generator on
+    // Windows — both are IDE project generators driven by trusscli directly.
 
 #elif defined(_WIN32)
     // Windows preset with ninja path and environment
@@ -809,8 +804,21 @@ void ProjectGenerator::generateXcodeProject(const string& path) {
         fs::remove_all(xcodePath);
     }
 
-    string cmd = "cd \"" + path + "\" && " + getCmakePath() + " --preset xcode";
-    log("Running: cmake --preset xcode");
+    // Pass TRUSSC_DIR so cmake finds core/ when the project lives outside the
+    // TrussC repo tree (the CMakeLists.txt fallback is relative). Mirrors the
+    // VS generator path — same reasoning, same code shape.
+    string trusscDir = getTrusscDirValue(path);
+    string trusscDirArg;
+    if (!trusscDir.empty()) {
+        trusscDirArg = " -DTRUSSC_DIR=\"" + trusscDir + "\"";
+    }
+
+    // Direct -G Xcode invocation (no preset). See writeCMakePresets() for why
+    // we don't emit an "xcode" preset on macOS.
+    string cmd = "cd \"" + path + "\" && " + getCmakePath()
+        + " -G Xcode -B xcode -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0"
+        + trusscDirArg;
+    log("Running: cmake -G Xcode -B xcode");
 
     auto [result, output] = executeCommand(cmd);
     if (!output.empty()) {
