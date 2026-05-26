@@ -453,8 +453,8 @@ struct PlayingSound {
     double positionF{0.0};
 
     // Buffer-to-engine sample-rate ratio, set when the sound is queued for
-    // playback (buffer->sampleRate / AudioEngine::SAMPLE_RATE). Each
-    // output frame advances positionF by `speed * rateRatio` so a buffer
+    // playback (buffer->sampleRate / AudioEngine::getInstance().getSampleRate()).
+    // Each output frame advances positionF by `speed * rateRatio` so a buffer
     // recorded at a different rate than the engine plays at the correct
     // pitch. The user-facing `speed` field stays semantically "1.0 =
     // natural pitch", independent of the engine rate.
@@ -528,26 +528,16 @@ struct AudioInBuffer {
 // ---------------------------------------------------------------------------
 class AudioEngine {
 public:
-    // Default engine configuration. These keep their historical names so
-    // callers that hard-coded `AudioEngine::SAMPLE_RATE` still compile, but
-    // they now represent the *default*, not the *current*, configuration.
-    // For the currently-running engine value, use getSampleRate() etc.
-    //
-    // Deprecated in favor of getSampleRate() / getChannels() / getMaxPolyphony()
-    // — these names look like compile-time constants but the engine value
-    // can now be reconfigured via AudioSettings.
-    [[deprecated("use getSampleRate() — engine sample rate is now runtime-configurable")]]
-    static constexpr int SAMPLE_RATE = 96000;
-    [[deprecated("use getChannels() — engine channel count is now runtime-configurable")]]
-    static constexpr int NUM_CHANNELS = 2;
-    [[deprecated("use getMaxPolyphony() — engine polyphony is now runtime-configurable")]]
-    static constexpr int MAX_PLAYING_SOUNDS = 32;
     // FFT analysis buffer is internal-only and unaffected by AudioSettings.
     static constexpr int ANALYSIS_BUFFER_SIZE = 4096;
 
     // Default values used when init() is called without an explicit
-    // AudioSettings, and as initial values for the runtime fields below.
-    static constexpr int DEFAULT_SAMPLE_RATE = 96000;
+    // AudioSettings, and as initial values for the runtime fields. 48 kHz
+    // is the de-facto pro/video/web standard (DAWs, Web Audio, modern OS
+    // mixers, game engines all default to 48k), and avoids extra resampling
+    // on the way out of the engine. Use init({.sampleRate = 96000}) to opt
+    // into a higher rate when needed.
+    static constexpr int DEFAULT_SAMPLE_RATE = 48000;
     static constexpr int DEFAULT_CHANNELS = 2;
     static constexpr int DEFAULT_MAX_PLAYING_SOUNDS = 32;
     static constexpr int DEFAULT_BUFFER_SIZE = 0;  // 0 = let miniaudio choose
