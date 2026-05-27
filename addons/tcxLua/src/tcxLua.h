@@ -13,8 +13,8 @@ public:
         bool string = true;
         bool table = true;
         bool coroutine = true;
-        bool io = true;
-        bool package = true;
+        bool io = false;
+        bool package = false;
         bool os = false;
         bool debug = false;
         bool bit32 = false;
