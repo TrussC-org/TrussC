@@ -101,25 +101,36 @@ void tcApp::setup() {
     logNotice("tcApp") << "  - W: Toggle wireframe";
     logNotice("tcApp") << "  - ESC: Exit";
     
-    // Create checkerboard texture
+    // Create checkerboard texture.
+    //
+    // The fourth argument to Image::allocate enables a full mipmap chain.
+    // Without it, the texture is sampled from its base 256x256 image at
+    // every scale; when a primitive is rotated or pushed deep into the
+    // scene and its projected size shrinks below ~64 px the high-contrast
+    // checker pattern aliases visibly (shimmering / moiré). With mipmaps
+    // the GPU automatically picks a pre-downsampled level that matches the
+    // projected size, so the texture stays smooth at every distance and
+    // orientation. Cost: ~+33% texture memory and one CPU box-average pass
+    // per `update()` to (re)build the chain.
     const int texSize = 256;
     const int checkerSize = 32;
-    checkerTexture_.allocate(texSize, texSize, 4);
-    
+    checkerTexture_.allocate(texSize, texSize, 4, /*mipmaps*/ true);
+
     for (int y = 0; y < texSize; y++) {
         for (int x = 0; x < texSize; x++) {
             int checkerX = x / checkerSize;
             int checkerY = y / checkerSize;
             bool isWhite = (checkerX + checkerY) % 2 == 0;
-            Color color = isWhite ? Color(1.0f, 1.0f, 1.0f, 1.0f) 
+            Color color = isWhite ? Color(1.0f, 1.0f, 1.0f, 1.0f)
                                   : Color(0.0f, 0.0f, 0.0f, 1.0f);
             checkerTexture_.setColor(x, y, color);
         }
     }
     // Note: update() will be called in draw() to ensure it's within a render pass
-    
-    // Create gradient texture
-    gradientTexture_.allocate(texSize, texSize, 4);
+
+    // Create gradient texture (same mipmap rationale — smooth gradients
+    // alias less than checkers, but still benefit visibly when minified).
+    gradientTexture_.allocate(texSize, texSize, 4, /*mipmaps*/ true);
     for (int y = 0; y < texSize; y++) {
         for (int x = 0; x < texSize; x++) {
             float u = (float)x / texSize;

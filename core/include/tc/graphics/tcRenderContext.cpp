@@ -170,14 +170,15 @@ void RenderContext::drawRectSquircle(Vec3 pos, Vec2 size, float radius) {
 // Bitmap string drawing (base version)
 // ---------------------------------------------------------------------------
 void RenderContext::drawBitmapString(const std::string& text, float x, float y, bool screenFixed) {
-    if (text.empty() || !internal::fontInitialized) return;
+    if (text.empty()) return;
+    ensureFontAtlasForText(text);
+    if (!internal::fontAtlasInitialized) return;
 
     // Calculate offset based on current alignment settings
     Vec2 offset = calcBitmapAlignOffset(text, textAlignH_, textAlignV_);
 
     if (screenFixed) {
         // Transform local position to world coordinates using current matrix
-        // Mat4 is row-major: X' = m[0]*x + m[1]*y + m[3], Y' = m[4]*x + m[5]*y + m[7]
         Mat4 currentMat = getCurrentMatrix();
         float localX = x + offset.x;
         float localY = y + offset.y;
@@ -202,27 +203,31 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
         sgl_begin_quads();
         sgl_c4f(currentR_, currentG_, currentB_, currentA_);
 
-        const float charW = bitmapfont::CHAR_TEX_WIDTH;
         const float charH = bitmapfont::CHAR_TEX_HEIGHT;
+        const float tabW  = bitmapfont::CHAR_TEX_WIDTH * 8.0f;
         float cursorX = 0;
         float cursorY = 0;
 
-        for (char c : text) {
-            if (c == '\n') { cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
-            if (c == '\t') { cursorX += charW * 8; continue; }
-            if (c < 32) continue;
+        const char* p  = text.data();
+        const char* pe = p + text.size();
+        while (p < pe) {
+            unsigned char b0 = (unsigned char)*p;
+            if (b0 == '\n') { ++p; cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
+            if (b0 == '\t') { ++p; cursorX += tabW; continue; }
+            if (b0 < 32)    { ++p; continue; }
+            uint32_t cp = bitmapfont::utf8Decode(p, pe);
+            if (cp == 0) break;
 
-            float u, v;
-            bitmapfont::getCharTexCoord(c, u, v);
-            float u2 = u + bitmapfont::TEX_CHAR_WIDTH;
-            float v2 = v + bitmapfont::TEX_CHAR_HEIGHT;
+            float u, v, u2, v2;
+            bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, v, u2, v2);
+            float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
             sgl_v2f_t2f(cursorX, cursorY, u, v);
-            sgl_v2f_t2f(cursorX + charW, cursorY, u2, v);
-            sgl_v2f_t2f(cursorX + charW, cursorY + charH, u2, v2);
+            sgl_v2f_t2f(cursorX + gw, cursorY, u2, v);
+            sgl_v2f_t2f(cursorX + gw, cursorY + charH, u2, v2);
             sgl_v2f_t2f(cursorX, cursorY + charH, u, v2);
 
-            cursorX += charW;
+            cursorX += gw;
         }
 
         sgl_end();
@@ -245,27 +250,31 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
         sgl_begin_quads();
         sgl_c4f(currentR_, currentG_, currentB_, currentA_);
 
-        const float charW = bitmapfont::CHAR_TEX_WIDTH;
         const float charH = bitmapfont::CHAR_TEX_HEIGHT;
+        const float tabW  = bitmapfont::CHAR_TEX_WIDTH * 8.0f;
         float cursorX = 0;
         float cursorY = 0;
 
-        for (char c : text) {
-            if (c == '\n') { cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
-            if (c == '\t') { cursorX += charW * 8; continue; }
-            if (c < 32) continue;
+        const char* p  = text.data();
+        const char* pe = p + text.size();
+        while (p < pe) {
+            unsigned char b0 = (unsigned char)*p;
+            if (b0 == '\n') { ++p; cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
+            if (b0 == '\t') { ++p; cursorX += tabW; continue; }
+            if (b0 < 32)    { ++p; continue; }
+            uint32_t cp = bitmapfont::utf8Decode(p, pe);
+            if (cp == 0) break;
 
-            float u, v;
-            bitmapfont::getCharTexCoord(c, u, v);
-            float u2 = u + bitmapfont::TEX_CHAR_WIDTH;
-            float v2 = v + bitmapfont::TEX_CHAR_HEIGHT;
+            float u, v, u2, v2;
+            bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, v, u2, v2);
+            float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
             sgl_v2f_t2f(cursorX, cursorY, u, v);
-            sgl_v2f_t2f(cursorX + charW, cursorY, u2, v);
-            sgl_v2f_t2f(cursorX + charW, cursorY + charH, u2, v2);
+            sgl_v2f_t2f(cursorX + gw, cursorY, u2, v);
+            sgl_v2f_t2f(cursorX + gw, cursorY + charH, u2, v2);
             sgl_v2f_t2f(cursorX, cursorY + charH, u, v2);
 
-            cursorX += charW;
+            cursorX += gw;
         }
 
         sgl_end();
@@ -280,7 +289,9 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
 // Bitmap string drawing (scale version)
 // ---------------------------------------------------------------------------
 void RenderContext::drawBitmapString(const std::string& text, float x, float y, float scale) {
-    if (text.empty() || !internal::fontInitialized) return;
+    if (text.empty()) return;
+    ensureFontAtlasForText(text);
+    if (!internal::fontAtlasInitialized) return;
 
     // Calculate offset based on current alignment settings
     Vec2 offset = calcBitmapAlignOffset(text, textAlignH_, textAlignV_);
@@ -296,37 +307,31 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
     sgl_begin_quads();
     sgl_c4f(currentR_, currentG_, currentB_, currentA_);
 
-    const float charW = bitmapfont::CHAR_TEX_WIDTH;
     const float charH = bitmapfont::CHAR_TEX_HEIGHT;
+    const float tabW  = bitmapfont::CHAR_TEX_WIDTH * 8.0f;
     float cursorX = 0;
     float cursorY = 0;  // Top-aligned
 
-    for (char c : text) {
-        if (c == '\n') {
-            cursorX = 0;
-            cursorY += style_.bitmapLineHeight;
-            continue;
-        }
-        if (c == '\t') {
-            cursorX += charW * 8;
-            continue;
-        }
-        if (c < 32) continue;
+    const char* p  = text.data();
+    const char* pe = p + text.size();
+    while (p < pe) {
+        unsigned char b0 = (unsigned char)*p;
+        if (b0 == '\n') { ++p; cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
+        if (b0 == '\t') { ++p; cursorX += tabW; continue; }
+        if (b0 < 32)    { ++p; continue; }
+        uint32_t cp = bitmapfont::utf8Decode(p, pe);
+        if (cp == 0) break;
 
-        float u, v;
-        bitmapfont::getCharTexCoord(c, u, v);
-        float u2 = u + bitmapfont::TEX_CHAR_WIDTH;
-        float v2 = v + bitmapfont::TEX_CHAR_HEIGHT;
+        float u, v, u2, v2;
+        bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, v, u2, v2);
+        float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
-        float px = cursorX;
-        float py = cursorY;
+        sgl_v2f_t2f(cursorX, cursorY, u, v);
+        sgl_v2f_t2f(cursorX + gw, cursorY, u2, v);
+        sgl_v2f_t2f(cursorX + gw, cursorY + charH, u2, v2);
+        sgl_v2f_t2f(cursorX, cursorY + charH, u, v2);
 
-        sgl_v2f_t2f(px, py, u, v);
-        sgl_v2f_t2f(px + charW, py, u2, v);
-        sgl_v2f_t2f(px + charW, py + charH, u2, v2);
-        sgl_v2f_t2f(px, py + charH, u, v2);
-
-        cursorX += charW;
+        cursorX += gw;
     }
 
     sgl_end();
@@ -341,20 +346,19 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
 // ---------------------------------------------------------------------------
 void RenderContext::drawBitmapString(const std::string& text, float x, float y,
                                       Direction h, Direction v, bool screenFixed) {
-    if (text.empty() || !internal::fontInitialized) return;
+    if (text.empty()) return;
+    ensureFontAtlasForText(text);
+    if (!internal::fontAtlasInitialized) return;
 
-    // Calculate offset
     Vec2 offset = calcBitmapAlignOffset(text, h, v);
 
     if (screenFixed) {
-        // Transform local position to world coordinates using current matrix
         Mat4 currentMat = getCurrentMatrix();
         float localX = x + offset.x;
         float localY = y + offset.y;
         float worldX = currentMat.m[0]*localX + currentMat.m[1]*localY + currentMat.m[3];
         float worldY = currentMat.m[4]*localX + currentMat.m[5]*localY + currentMat.m[7];
 
-        // Switch to ortho projection for screen-fixed 2D drawing
         sgl_matrix_mode_projection();
         sgl_push_matrix();
         sgl_load_identity();
@@ -372,40 +376,42 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y,
         sgl_begin_quads();
         sgl_c4f(currentR_, currentG_, currentB_, currentA_);
 
-        const float charW = bitmapfont::CHAR_TEX_WIDTH;
         const float charH = bitmapfont::CHAR_TEX_HEIGHT;
+        const float tabW  = bitmapfont::CHAR_TEX_WIDTH * 8.0f;
         float cursorX = 0;
         float cursorY = 0;
 
-        for (char c : text) {
-            if (c == '\n') { cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
-            if (c == '\t') { cursorX += charW * 8; continue; }
-            if (c < 32) continue;
+        const char* p  = text.data();
+        const char* pe = p + text.size();
+        while (p < pe) {
+            unsigned char b0 = (unsigned char)*p;
+            if (b0 == '\n') { ++p; cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
+            if (b0 == '\t') { ++p; cursorX += tabW; continue; }
+            if (b0 < 32)    { ++p; continue; }
+            uint32_t cp = bitmapfont::utf8Decode(p, pe);
+            if (cp == 0) break;
 
-            float u, v_;
-            bitmapfont::getCharTexCoord(c, u, v_);
-            float u2 = u + bitmapfont::TEX_CHAR_WIDTH;
-            float v2 = v_ + bitmapfont::TEX_CHAR_HEIGHT;
+            float u, v_, u2, v2;
+            bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, v_, u2, v2);
+            float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
             sgl_v2f_t2f(cursorX, cursorY, u, v_);
-            sgl_v2f_t2f(cursorX + charW, cursorY, u2, v_);
-            sgl_v2f_t2f(cursorX + charW, cursorY + charH, u2, v2);
+            sgl_v2f_t2f(cursorX + gw, cursorY, u2, v_);
+            sgl_v2f_t2f(cursorX + gw, cursorY + charH, u2, v2);
             sgl_v2f_t2f(cursorX, cursorY + charH, u, v2);
 
-            cursorX += charW;
+            cursorX += gw;
         }
 
         sgl_end();
         sgl_disable_texture();
         internal::restoreCurrentPipeline();
 
-        // Restore matrices
-        sgl_pop_matrix();  // modelview
+        sgl_pop_matrix();
         sgl_matrix_mode_projection();
         sgl_pop_matrix();
         sgl_matrix_mode_modelview();
     } else {
-        // Non-screenFixed: use current transformation
         pushMatrix();
         translate(x + offset.x, y + offset.y);
 
@@ -416,27 +422,31 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y,
         sgl_begin_quads();
         sgl_c4f(currentR_, currentG_, currentB_, currentA_);
 
-        const float charW = bitmapfont::CHAR_TEX_WIDTH;
         const float charH = bitmapfont::CHAR_TEX_HEIGHT;
+        const float tabW  = bitmapfont::CHAR_TEX_WIDTH * 8.0f;
         float cursorX = 0;
         float cursorY = 0;
 
-        for (char c : text) {
-            if (c == '\n') { cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
-            if (c == '\t') { cursorX += charW * 8; continue; }
-            if (c < 32) continue;
+        const char* p  = text.data();
+        const char* pe = p + text.size();
+        while (p < pe) {
+            unsigned char b0 = (unsigned char)*p;
+            if (b0 == '\n') { ++p; cursorX = 0; cursorY += style_.bitmapLineHeight; continue; }
+            if (b0 == '\t') { ++p; cursorX += tabW; continue; }
+            if (b0 < 32)    { ++p; continue; }
+            uint32_t cp = bitmapfont::utf8Decode(p, pe);
+            if (cp == 0) break;
 
-            float u, v_;
-            bitmapfont::getCharTexCoord(c, u, v_);
-            float u2 = u + bitmapfont::TEX_CHAR_WIDTH;
-            float v2 = v_ + bitmapfont::TEX_CHAR_HEIGHT;
+            float u, v_, u2, v2;
+            bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, v_, u2, v2);
+            float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
             sgl_v2f_t2f(cursorX, cursorY, u, v_);
-            sgl_v2f_t2f(cursorX + charW, cursorY, u2, v_);
-            sgl_v2f_t2f(cursorX + charW, cursorY + charH, u2, v2);
+            sgl_v2f_t2f(cursorX + gw, cursorY, u2, v_);
+            sgl_v2f_t2f(cursorX + gw, cursorY + charH, u2, v2);
             sgl_v2f_t2f(cursorX, cursorY + charH, u, v2);
 
-            cursorX += charW;
+            cursorX += gw;
         }
 
         sgl_end();

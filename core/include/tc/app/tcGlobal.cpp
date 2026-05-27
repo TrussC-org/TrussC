@@ -50,26 +50,12 @@ void setup() {
     sgldesc.allocator.free_fn = smemtrack_free;
     sgl_setup(&sgldesc);
 
-    // Initialize bitmap font texture
+    // Initialize bitmap font sampler + pipeline. The atlas TEXTURE itself is
+    // allocated lazily on first drawBitmapString call (see ensureFontAtlas in
+    // TrussC.h) and grown tier-by-tier as new codepoint ranges are used.
+    // Headless apps that never call drawBitmapString pay 0 KB for the atlas.
     if (!internal::fontInitialized) {
-        // Generate texture atlas pixel data
-        unsigned char* pixels = bitmapfont::generateAtlasPixels();
-
-        // Create texture
-        sg_image_desc img_desc = {};
-        img_desc.width = bitmapfont::ATLAS_WIDTH;
-        img_desc.height = bitmapfont::ATLAS_HEIGHT;
-        img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        img_desc.data.mip_levels[0].ptr = pixels;
-        img_desc.data.mip_levels[0].size = bitmapfont::ATLAS_WIDTH * bitmapfont::ATLAS_HEIGHT * 4;
-        internal::fontTexture = sg_make_image(&img_desc);
-
-        // Create texture view
-        sg_view_desc view_desc = {};
-        view_desc.texture.image = internal::fontTexture;
-        internal::fontView = sg_make_view(&view_desc);
-
-        // Create sampler (nearest neighbor, pixel perfect)
+        // Sampler (nearest neighbor, pixel perfect)
         sg_sampler_desc smp_desc = {};
         smp_desc.min_filter = SG_FILTER_NEAREST;
         smp_desc.mag_filter = SG_FILTER_NEAREST;
@@ -77,9 +63,7 @@ void setup() {
         smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
         internal::fontSampler = sg_make_sampler(&smp_desc);
 
-        // Create pipeline for alpha blending
-        // RGB: standard alpha blend
-        // Alpha: overwrite (to prevent FBO from becoming semi-transparent when drawing to FBO)
+        // Pipeline (alpha blend; alpha-channel overwrite to keep FBO opaque)
         sg_pipeline_desc pip_desc = {};
         pip_desc.colors[0].blend.enabled = true;
         pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
@@ -88,7 +72,6 @@ void setup() {
         pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ZERO;
         internal::fontPipeline = sgl_make_pipeline(&pip_desc);
 
-        delete[] pixels;
         internal::fontInitialized = true;
     }
 
@@ -215,8 +198,12 @@ void cleanup() {
     if (internal::fontInitialized) {
         sgl_destroy_pipeline(internal::fontPipeline);
         sg_destroy_sampler(internal::fontSampler);
-        sg_destroy_view(internal::fontView);
-        sg_destroy_image(internal::fontTexture);
+        if (internal::fontAtlasInitialized) {
+            sg_destroy_view(internal::fontView);
+            sg_destroy_image(internal::fontTexture);
+            internal::fontAtlasInitialized = false;
+            internal::fontAtlasRows = 0;
+        }
         internal::fontInitialized = false;
     }
     sgl_shutdown();

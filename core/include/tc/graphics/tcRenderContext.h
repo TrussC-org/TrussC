@@ -836,21 +836,19 @@ public:
     float getBitmapStringWidth(const std::string& text) const {
         float width = 0;
         float maxWidth = 0;
-        const float charW = bitmapfont::CHAR_TEX_WIDTH;
+        const float charW = bitmapfont::CHAR_TEX_WIDTH;  // halfwidth advance
 
-        for (char c : text) {
-            if (c == '\n') {
-                if (width > maxWidth) maxWidth = width;
-                width = 0;
-                continue;
-            }
-            if (c == '\t') {
-                width += charW * 8;
-                continue;
-            }
-            if (c >= 32) {
-                width += charW;
-            }
+        const char* p   = text.data();
+        const char* end = p + text.size();
+        while (p < end) {
+            // Peek raw byte first for newline / tab fast-path
+            unsigned char b0 = (unsigned char)*p;
+            if (b0 == '\n') { ++p; if (width > maxWidth) maxWidth = width; width = 0; continue; }
+            if (b0 == '\t') { ++p; width += charW * 8; continue; }
+            if (b0 < 32)    { ++p; continue; }
+            uint32_t cp = bitmapfont::utf8Decode(p, end);
+            if (cp == 0) break;
+            width += (float)bitmapfont::codepointPixelWidth(cp);
         }
 
         return (width > maxWidth) ? width : maxWidth;
@@ -861,7 +859,8 @@ public:
         for (char c : text) {
             if (c == '\n') lines++;
         }
-        // First line uses CHAR_TEX_HEIGHT, subsequent lines use bitmapLineHeight
+        // Newline byte isn't a UTF-8 continuation byte (always 0x0A),
+        // so a raw byte scan is safe.
         return bitmapfont::CHAR_TEX_HEIGHT + (lines - 1) * style_.bitmapLineHeight;
     }
 

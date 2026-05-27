@@ -8408,17 +8408,19 @@ types:
         return: bool
         signatures:
           - params: "string path"
-        description: "Load image from file"
-        description_ja: "ファイルから画像を読み込む"
-        description_ko: "파일에서 이미지를 로드"
+          - params: "string path, bool mipmaps"
+        description: "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface)."
+        description_ja: "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)"
+        description_ko: "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장)"
         snippet: "load(${1:\"path\"})"
       - name: loadFromMemory
         return: bool
         signatures:
           - params: "const uint8_t* buffer, int len"
-        description: "Load image from memory"
-        description_ja: "メモリから画像を読み込む"
-        description_ko: "메모리에서 이미지를 로드"
+          - params: "const uint8_t* buffer, int len, bool mipmaps"
+        description: "Load image from memory. `mipmaps=true` builds a mip chain."
+        description_ja: "メモリから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築"
+        description_ko: "메모리에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성"
         sketch: false
         snippet: "loadFromMemory(${1:buffer}, ${2:len})"
       - name: save
@@ -8434,9 +8436,10 @@ types:
         signatures:
           - params: "int width, int height"
           - params: "int width, int height, int channels"
-        description: "Allocate empty image for dynamic updates"
-        description_ja: "動的更新用に空の画像を確保"
-        description_ko: "동적 업데이트용 빈 이미지를 할당"
+          - params: "int width, int height, int channels, bool mipmaps"
+        description: "Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update()."
+        description_ja: "動的更新用に空の画像を確保。`mipmaps=true` で update() ごとに連鎖が再生成される"
+        description_ko: "동적 업데이트용 빈 이미지를 할당. `mipmaps=true` 시 update()마다 체인이 갱신됨"
         snippet: "allocate(${1:width}, ${2:height})"
       - name: clear
         return: "void"
@@ -8779,9 +8782,12 @@ types:
         return: "void"
         signatures:
           - params: "int width, int height"
-        description: "Allocate framebuffer"
-        description_ja: "フレームバッファを確保"
-        description_ko: "프레임버퍼를 할당"
+          - params: "int width, int height, int sampleCount"
+          - params: "int width, int height, int sampleCount, TextureFormat format"
+          - params: "int width, int height, int sampleCount, TextureFormat format, bool mipmaps"
+        description: "Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end()."
+        description_ja: "フレームバッファを確保。`mipmaps=true` でミップマップ連鎖が end() で自動更新される"
+        description_ko: "프레임버퍼를 할당. `mipmaps=true` 시 end()마다 밉맵 체인이 자동 갱신됨"
         snippet: "allocate(${1:width}, ${2:height})"
       - name: begin
         return: "void"

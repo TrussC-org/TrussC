@@ -138,7 +138,15 @@ namespace internal {
     inline sg_view fontView = {};
     inline sg_sampler fontSampler = {};
     inline sgl_pipeline fontPipeline = {};
+    // True once the sampler + pipeline are created (cheap, done at startup).
     inline bool fontInitialized = false;
+    // Atlas texture state — allocated lazily on first drawBitmapString call,
+    // grown row-by-row as new codepoint ranges are encountered, and rebuilt
+    // whenever the registry changes (via registerGlyph / updateGlyph).
+    inline bool     fontAtlasInitialized = false;
+    inline int      fontAtlasRows        = 0;   // height of current atlas in cell rows
+    inline uint64_t fontAtlasVersion     = 0;   // last bitmapfont::registryVersion baked in
+    inline uint64_t fontAtlasUploadFrame = UINT64_MAX; // frame of last sg_update_image
     inline sgl_pipeline pipeline3d = {};
     inline bool pipeline3dInitialized = false;
     inline bool pixelPerfectMode = false;
@@ -1158,27 +1166,120 @@ inline bool isStrokeEnabled() {
 // Bitmap string drawing (delegated to RenderContext)
 // ---------------------------------------------------------------------------
 
-// Calculate text bounding box
+// Calculate text bounding box (UTF-8 + fullwidth aware)
 inline void getBitmapStringBounds(const std::string& text, float& width, float& height) {
     float maxWidth = 0;
     float cursorX = 0;
     int lines = 1;
 
-    for (char c : text) {
-        if (c == '\n') {
-            if (cursorX > maxWidth) maxWidth = cursorX;
-            cursorX = 0;
-            lines++;
-        } else if (c == '\t') {
-            cursorX += bitmapfont::GLYPH_WIDTH * 8;
-        } else {
-            cursorX += bitmapfont::GLYPH_WIDTH;
-        }
+    const char* p  = text.data();
+    const char* pe = p + text.size();
+    while (p < pe) {
+        unsigned char b0 = (unsigned char)*p;
+        if (b0 == '\n') { ++p; if (cursorX > maxWidth) maxWidth = cursorX; cursorX = 0; ++lines; continue; }
+        if (b0 == '\t') { ++p; cursorX += bitmapfont::CHAR_TEX_WIDTH * 8; continue; }
+        if (b0 < 32)    { ++p; continue; }
+        uint32_t cp = bitmapfont::utf8Decode(p, pe);
+        if (cp == 0) break;
+        cursorX += (float)bitmapfont::codepointPixelWidth(cp);
     }
     if (cursorX > maxWidth) maxWidth = cursorX;
 
-    width = maxWidth;
+    width  = maxWidth;
     height = lines * bitmapfont::CHAR_TEX_HEIGHT;
+}
+
+// ---------------------------------------------------------------------------
+// Lazy font atlas allocation
+// ---------------------------------------------------------------------------
+// Ensures the bitmap font atlas exists and is at least `rows` cell-rows tall.
+//
+// Two paths:
+//   - Size grew (tier promotion) or first allocation:
+//     create a fresh sg_image. The old one is destroyed first, which is
+//     safe because tier growth happens at most a handful of times per app.
+//   - Same size, contents changed (registerGlyph / updateGlyph):
+//     reuse the image via sg_update_image(). No destroy → no dangling
+//     references in sokol_gl's deferred command queue. This makes per-frame
+//     glyph updates (e.g. animated walker) practical.
+//
+// The image is created with `usage.dynamic_update = true` so sg_update_image
+// is allowed.
+uint64_t getFrameCount();  // forward decl — defined in Time section below
+inline void ensureFontAtlas(int rows) {
+    if (rows <= 0) return;
+    if (!internal::fontInitialized) return;  // pipeline/sampler not ready yet
+    const uint64_t curRegistry = bitmapfont::internal::registryVersion;
+    const bool sizeOk = internal::fontAtlasInitialized
+                     && internal::fontAtlasRows >= rows;
+    const bool versionOk = internal::fontAtlasVersion == curRegistry;
+    if (sizeOk && versionOk) return;
+    if (!sg_isvalid()) return;
+
+    // Same-frame upload guard. sokol allows at most one sg_update_image per
+    // image per frame (VALIDATE_UPDIMG_ONCE). If we already uploaded this
+    // frame and the atlas size hasn't changed, defer to next frame — the
+    // stale fontAtlasVersion makes us try again on the next call.
+    // (When size changes we destroy + create a brand-new image below, so the
+    // guard only applies to the same-dimensions in-place path.)
+    if (sizeOk && internal::fontAtlasUploadFrame == getFrameCount()) return;
+
+    // Regenerate pixel buffer. Use the LARGER of `rows` and the currently
+    // allocated rows so a same-size in-place update stays the same size.
+    int effRows = sizeOk ? internal::fontAtlasRows : rows;
+    int height  = effRows * bitmapfont::CELL_H;
+    unsigned char* pixels = bitmapfont::generateAtlasPixels(effRows);
+    int dataBytes = bitmapfont::ATLAS_WIDTH * height * 4;
+
+    if (sizeOk) {
+        // Same dimensions — upload via sg_update_image. The image identity
+        // (sg_image handle) and view stay the same, so any queued sokol_gl
+        // commands referencing them keep working.
+        sg_image_data data = {};
+        data.mip_levels[0].ptr  = pixels;
+        data.mip_levels[0].size = dataBytes;
+        sg_update_image(internal::fontTexture, &data);
+        internal::fontAtlasUploadFrame = getFrameCount();
+    } else {
+        // Size changed (or first allocation). Recreate the image.
+        if (internal::fontAtlasInitialized) {
+            sg_destroy_view(internal::fontView);
+            sg_destroy_image(internal::fontTexture);
+            internal::fontAtlasInitialized = false;
+        }
+
+        sg_image_desc img_desc = {};
+        img_desc.width  = bitmapfont::ATLAS_WIDTH;
+        img_desc.height = height;
+        img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        img_desc.usage.dynamic_update = true;   // enable sg_update_image()
+        // (intentionally no initial data — sg expects an update call instead
+        //  for non-immutable images)
+        internal::fontTexture = sg_make_image(&img_desc);
+
+        sg_image_data data = {};
+        data.mip_levels[0].ptr  = pixels;
+        data.mip_levels[0].size = dataBytes;
+        sg_update_image(internal::fontTexture, &data);
+        internal::fontAtlasUploadFrame = getFrameCount();
+
+        sg_view_desc view_desc = {};
+        view_desc.texture.image = internal::fontTexture;
+        internal::fontView = sg_make_view(&view_desc);
+
+        internal::fontAtlasRows        = effRows;
+        internal::fontAtlasInitialized = true;
+    }
+
+    delete[] pixels;
+    internal::fontAtlasVersion = curRegistry;
+}
+
+// Grow the atlas to fit every glyph used by `text`. No-op if already large
+// enough. Called automatically by drawBitmapString implementations.
+inline void ensureFontAtlasForText(const std::string& text) {
+    int needed = bitmapfont::textRequiredRows(text.data(), text.data() + text.size());
+    if (needed > 0) ensureFontAtlas(needed);
 }
 
 // Draw bitmap string
@@ -1261,6 +1362,8 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
                                        const Color& background = Color(0, 0, 0),
                                        const Color& foreground = Color(1, 1, 1)) {
     if (text.empty()) return;
+    ensureFontAtlasForText(text);
+    if (!internal::fontAtlasInitialized) return;
 
     // Calculate text size
     float textWidth, textHeight;
@@ -1319,27 +1422,33 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
 
     sgl_begin_quads();
     sgl_c4f(foreground.r, foreground.g, foreground.b, foreground.a);
-    const float charW = bitmapfont::CHAR_TEX_WIDTH;
     const float charH = bitmapfont::CHAR_TEX_HEIGHT;
+    const float tabW  = bitmapfont::CHAR_TEX_WIDTH * 8.0f;
     float cursorX = worldX;
     float cursorY = worldY;
 
-    for (char c : text) {
-        if (c == '\n') { cursorX = worldX; cursorY += lineHeight; continue; }
-        if (c == '\t') { cursorX += charW * 8; continue; }
-        if (c < 32) continue;
+    {
+        const char* p  = text.data();
+        const char* pe = p + text.size();
+        while (p < pe) {
+            unsigned char b0 = (unsigned char)*p;
+            if (b0 == '\n') { ++p; cursorX = worldX; cursorY += lineHeight; continue; }
+            if (b0 == '\t') { ++p; cursorX += tabW; continue; }
+            if (b0 < 32)    { ++p; continue; }
+            uint32_t cp = bitmapfont::utf8Decode(p, pe);
+            if (cp == 0) break;
 
-        float u, v;
-        bitmapfont::getCharTexCoord(c, u, v);
-        float u2 = u + bitmapfont::TEX_CHAR_WIDTH;
-        float v2 = v + bitmapfont::TEX_CHAR_HEIGHT;
+            float u, v, u2, v2;
+            bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, v, u2, v2);
+            float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
-        sgl_v2f_t2f(cursorX, cursorY, u, v);
-        sgl_v2f_t2f(cursorX + charW, cursorY, u2, v);
-        sgl_v2f_t2f(cursorX + charW, cursorY + charH, u2, v2);
-        sgl_v2f_t2f(cursorX, cursorY + charH, u, v2);
+            sgl_v2f_t2f(cursorX, cursorY, u, v);
+            sgl_v2f_t2f(cursorX + gw, cursorY, u2, v);
+            sgl_v2f_t2f(cursorX + gw, cursorY + charH, u2, v2);
+            sgl_v2f_t2f(cursorX, cursorY + charH, u, v2);
 
-        cursorX += charW;
+            cursorX += gw;
+        }
     }
     sgl_end();
     sgl_disable_texture();

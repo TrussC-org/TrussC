@@ -8,6 +8,8 @@
 // Requires access to sokol and internal namespace variables
 // Texture and HasTexture must be included first
 
+#include "tc/gpu/shaders/fboMipDownsample.glsl.h"
+
 namespace trussc {
 
 // Forward declaration
@@ -41,11 +43,19 @@ public:
         return *this;
     }
 
-    // Allocate FBO (MSAA supported, custom pixel format)
-    // sampleCount: 1, 2, 4, 8, etc. (1 = no MSAA)
-    // format: pixel format (default RGBA8 for backward compatibility)
+    // Allocate FBO (MSAA supported, custom pixel format).
+    //
+    // - `sampleCount`: 1, 2, 4, 8, etc. (1 = no MSAA)
+    // - `format`: pixel format (default RGBA8 for backward compatibility)
+    // - `mipmaps`: when true, the color texture is allocated with a full mip
+    //   chain (floor(log2(max(w,h))) + 1 levels) and `end()` automatically
+    //   downsamples mip 0 into the remaining levels with a 2x2 box filter.
+    //   Use this when the FBO will be sampled at varying scales (e.g. mapped
+    //   onto a 3D surface that moves toward/away from the camera) to avoid
+    //   aliasing/moiré. When false the FBO behaves exactly as before.
     void allocate(int w, int h, int sampleCount = 1,
-                  TextureFormat format = TextureFormat::RGBA8) {
+                  TextureFormat format = TextureFormat::RGBA8,
+                  bool mipmaps = false) {
         // Skip in headless mode (no graphics context)
         if (headless::isActive()) return;
 
@@ -55,6 +65,12 @@ public:
         height_ = h;
         sampleCount_ = sampleCount;
         format_ = format;
+        mipmaps_ = mipmaps;
+        // Compute the full mip chain length when requested. floor(log2(max)) + 1
+        // matches the standard convention (e.g. 512 → 10 levels, 1×1 the last).
+        numMipLevels_ = mipmaps_
+            ? 1 + (int)std::floor(std::log2((float)std::max(w, h)))
+            : 1;
         sg_pixel_format sgFormat = toSokolFormat(format);
 
         // MSAA case
@@ -74,7 +90,7 @@ public:
             msaaColorAttView_ = sg_make_view(&msaa_att_desc);
 
             // Resolve color texture (non-MSAA, for reading/display)
-            colorTexture_.allocate(w, h, format, TextureUsage::RenderTarget, 1);
+            colorTexture_.allocate(w, h, format, TextureUsage::RenderTarget, 1, numMipLevels_);
 
             // Resolve view (must be created as resolve_attachment)
             sg_view_desc resolve_view_desc = {};
@@ -91,7 +107,12 @@ public:
             depthImage_ = sg_make_image(&depth_desc);
         } else {
             // Non-MSAA case
-            colorTexture_.allocate(w, h, format, TextureUsage::RenderTarget, 1);
+            colorTexture_.allocate(w, h, format, TextureUsage::RenderTarget, 1, numMipLevels_);
+
+            // Scratch texture for mipmap generation (same specs as color)
+            if (mipmaps_) {
+                mipScratchTexture_.allocate(w, h, format, TextureUsage::RenderTarget, 1, numMipLevels_);
+            }
 
             // Depth buffer
             sg_image_desc depth_desc = {};
@@ -131,6 +152,7 @@ public:
             }
 
             colorTexture_.clear();
+            mipScratchTexture_.clear();
             allocated_ = false;
         }
         width_ = 0;
@@ -138,6 +160,8 @@ public:
         sampleCount_ = 1;
         format_ = TextureFormat::RGBA8;
         active_ = false;
+        mipmaps_ = false;
+        numMipLevels_ = 1;
         msaaColorImage_ = {};
         msaaColorAttView_ = {};
         resolveAttView_ = {};
@@ -203,6 +227,14 @@ public:
         // Draw FBO context contents
         sgl_context_draw(shared.context);
         sg_end_pass();
+
+        // If mipmaps were requested, downsample mip 0 into the remaining
+        // levels NOW (between the FBO pass ending and the swapchain resuming).
+        // Skipped entirely when mipmaps_ is false, so the non-mipmap path is
+        // unchanged.
+        if (mipmaps_) {
+            generateMipmaps_();
+        }
 
         // Reset counters so the next FBO using this shared context starts clean.
         // Buffers stay allocated at their current (possibly grown) size — no
@@ -320,9 +352,14 @@ private:
     bool allocated_ = false;
     bool active_ = false;
     bool wasInSwapchainPass_ = false;  // Was in swapchain pass when begin() called
+    bool mipmaps_ = false;
+    int  numMipLevels_ = 1;
 
     // Non-MSAA texture (always used, resolve target for MSAA)
     Texture colorTexture_;
+    // Scratch texture for mipmap generation (avoids sokol validation error
+    // when sampling and writing to different mips of the same image).
+    Texture mipScratchTexture_;
 
     // MSAA resources (only used when sampleCount > 1)
     sg_image msaaColorImage_ = {};
@@ -407,6 +444,144 @@ private:
         s.initialized = true;
     }
 
+    // -------------------------------------------------------------------------
+    // Shared mip-downsample resources (keyed by color format).
+    // Independent of the sgl_context / sampleCount of SharedResources because
+    // mip generation always runs on the resolved (non-MSAA) color texture
+    // with a tiny custom pipeline, not through sokol_gl.
+    // -------------------------------------------------------------------------
+    struct SharedMipResources {
+        sg_shader shader = {};
+        sg_pipeline pipeline = {};
+        sg_shader blitShader = {};
+        sg_pipeline blitPipeline = {};
+        sg_buffer vbuf = {};
+        sg_sampler sampler = {};
+        bool initialized = false;
+    };
+
+    static std::unordered_map<uint64_t, SharedMipResources>& sharedMipMap() {
+        static std::unordered_map<uint64_t, SharedMipResources> map;
+        return map;
+    }
+
+    static SharedMipResources& getSharedMip(TextureFormat format) {
+        return sharedMipMap()[(uint64_t)format];
+    }
+
+    static void ensureSharedMip(TextureFormat format) {
+        auto& s = getSharedMip(format);
+        if (s.initialized) return;
+
+        sg_pixel_format sgFormat = toSokolFormat(format);
+
+        // Fullscreen quad (triangle strip). UV 0..1 across the quad so a
+        // bilinear sample of the previous mip is enough to produce a 2x2
+        // box-filtered destination level. textureLod() in the shader pins
+        // the source level, so a single pipeline handles every level.
+        static const float quadVerts[] = {
+            // x,     y,    u,    v
+            -1.0f, -1.0f, 0.0f, 0.0f,
+             1.0f, -1.0f, 1.0f, 0.0f,
+            -1.0f,  1.0f, 0.0f, 1.0f,
+             1.0f,  1.0f, 1.0f, 1.0f,
+        };
+        sg_buffer_desc vbuf_desc = {};
+        vbuf_desc.usage.vertex_buffer = true;
+        vbuf_desc.data.ptr = quadVerts;
+        vbuf_desc.data.size = sizeof(quadVerts);
+        s.vbuf = sg_make_buffer(&vbuf_desc);
+
+        sg_sampler_desc smp_desc = {};
+        smp_desc.min_filter = SG_FILTER_LINEAR;
+        smp_desc.mag_filter = SG_FILTER_LINEAR;
+        smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
+        smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+        s.sampler = sg_make_sampler(&smp_desc);
+
+        s.shader = sg_make_shader(tc_fbomip_downsample_shader_desc(sg_query_backend()));
+
+        sg_pipeline_desc pip_desc = {};
+        pip_desc.shader = s.shader;
+        pip_desc.layout.attrs[ATTR_tc_fbomip_downsample_position].format = SG_VERTEXFORMAT_FLOAT2;
+        pip_desc.layout.attrs[ATTR_tc_fbomip_downsample_texcoord0].format = SG_VERTEXFORMAT_FLOAT2;
+        pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP;
+        pip_desc.colors[0].pixel_format = sgFormat;
+        pip_desc.colors[0].blend.enabled = false;
+        pip_desc.depth.pixel_format = SG_PIXELFORMAT_NONE;
+        pip_desc.sample_count = 1;
+        s.pipeline = sg_make_pipeline(&pip_desc);
+
+        // 1:1 blit pipeline for copying scratch mip → main mip
+        s.blitShader = sg_make_shader(tc_fbomip_blit_shader_desc(sg_query_backend()));
+        sg_pipeline_desc blit_pip_desc = {};
+        blit_pip_desc.shader = s.blitShader;
+        blit_pip_desc.layout.attrs[ATTR_tc_fbomip_blit_position].format = SG_VERTEXFORMAT_FLOAT2;
+        blit_pip_desc.layout.attrs[ATTR_tc_fbomip_blit_texcoord0].format = SG_VERTEXFORMAT_FLOAT2;
+        blit_pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP;
+        blit_pip_desc.colors[0].pixel_format = sgFormat;
+        blit_pip_desc.colors[0].blend.enabled = false;
+        blit_pip_desc.depth.pixel_format = SG_PIXELFORMAT_NONE;
+        blit_pip_desc.sample_count = 1;
+        s.blitPipeline = sg_make_pipeline(&blit_pip_desc);
+
+        s.initialized = true;
+    }
+
+    // Downsample mip 0 into mips 1..N-1. Called from end() when the FBO was
+    // allocated with mipmaps = true.
+    //
+    // sokol forbids sampling from an image that has a mip level bound as a
+    // color attachment in the same pass (even if different mip levels are
+    // involved). We work around this with a two-pass-per-level approach:
+    //   Pass 1 (downsample): main[level-1] → scratch[level]
+    //   Pass 2 (blit):       scratch[level] → main[level]
+    void generateMipmaps_() {
+        if (!mipmaps_ || numMipLevels_ <= 1) return;
+        ensureSharedMip(format_);
+        auto& s = getSharedMip(format_);
+
+        for (int level = 1; level < numMipLevels_; level++) {
+            // Pass 1: downsample main[level-1] → scratch[level]
+            {
+                sg_pass pass = {};
+                pass.attachments.colors[0] = mipScratchTexture_.getAttachmentViewForMip(level);
+                pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+                sg_begin_pass(&pass);
+
+                sg_apply_pipeline(s.pipeline);
+
+                sg_bindings bind = {};
+                bind.vertex_buffers[0] = s.vbuf;
+                bind.views[VIEW_tc_fbomip_srcTex] = colorTexture_.getViewForMip(level - 1);
+                bind.samplers[SMP_tc_fbomip_srcSmp] = s.sampler;
+                sg_apply_bindings(&bind);
+
+                sg_draw(0, 4, 1);
+                sg_end_pass();
+            }
+
+            // Pass 2: blit scratch[level] → main[level]
+            {
+                sg_pass pass = {};
+                pass.attachments.colors[0] = colorTexture_.getAttachmentViewForMip(level);
+                pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+                sg_begin_pass(&pass);
+
+                sg_apply_pipeline(s.blitPipeline);
+
+                sg_bindings bind = {};
+                bind.vertex_buffers[0] = s.vbuf;
+                bind.views[VIEW_tc_fbomip_srcTex] = mipScratchTexture_.getViewForMip(level);
+                bind.samplers[SMP_tc_fbomip_srcSmp] = s.sampler;
+                sg_apply_bindings(&bind);
+
+                sg_draw(0, 4, 1);
+                sg_end_pass();
+            }
+        }
+    }
+
     void beginInternal(float r, float g, float b, float a, bool doClear) {
         if (!allocated_) return;
 
@@ -482,6 +657,8 @@ private:
         allocated_ = other.allocated_;
         active_ = other.active_;
         wasInSwapchainPass_ = other.wasInSwapchainPass_;
+        mipmaps_ = other.mipmaps_;
+        numMipLevels_ = other.numMipLevels_;
         colorTexture_ = std::move(other.colorTexture_);
         msaaColorImage_ = other.msaaColorImage_;
         msaaColorAttView_ = other.msaaColorAttView_;
@@ -492,6 +669,8 @@ private:
         other.allocated_ = false;
         other.active_ = false;
         other.wasInSwapchainPass_ = false;
+        other.mipmaps_ = false;
+        other.numMipLevels_ = 1;
         other.width_ = 0;
         other.height_ = 0;
         other.sampleCount_ = 1;
