@@ -696,10 +696,17 @@ private:
                 left0 = right0 = src.samples[pos0];
                 left1 = right1 = src.samples[pos1];
             } else {
-                left0 = src.samples[pos0 * 2];
-                right0 = src.samples[pos0 * 2 + 1];
-                left1 = src.samples[pos1 * 2];
-                right1 = src.samples[pos1 * 2 + 1];
+                // Multi-channel sources stride by src.channels per frame.
+                // Take the first two channels as L/R; higher channels are
+                // ignored on this code path (multichannel routing will be
+                // handled by the upcoming setChannelMap API). Using `* 2`
+                // here was wrong for any source with channels != 1, 2 —
+                // it read from the wrong frame for 3+ ch WAVs.
+                const size_t stride = (size_t)src.channels;
+                left0  = src.samples[pos0 * stride];
+                right0 = src.samples[pos0 * stride + 1];
+                left1  = src.samples[pos1 * stride];
+                right1 = src.samples[pos1 * stride + 1];
             }
 
             float left = left0 + (left1 - left0) * frac;
