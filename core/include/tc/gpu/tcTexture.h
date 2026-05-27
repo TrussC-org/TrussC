@@ -306,8 +306,13 @@ public:
         return pixelFormat_ >= SG_PIXELFORMAT_BC1_RGBA;
     }
 
-    // Allocate texture from Pixels (auto-detects F32 → RGBA32F)
-    // mipmaps: generate mip chain for smooth downscaling (Immutable only)
+    // Allocate texture from Pixels (auto-detects F32 → RGBA32F).
+    //
+    // `mipmaps=true` builds a full mip chain. Supported for Immutable
+    // (chain is generated from initial pixels at allocation) and Dynamic
+    // (chain is regenerated each time `loadData(pixels)` is called).
+    // Stream usage keeps mipmaps off — the per-frame upload cost would
+    // dominate any sampling benefit.
     void allocate(const Pixels& pixels, TextureUsage usage = TextureUsage::Immutable,
                   bool mipmaps = false) {
         clear();
@@ -316,7 +321,16 @@ public:
         height_ = pixels.getHeight();
         channels_ = pixels.getChannels();
         usage_ = usage;
-        mipmapped_ = (mipmaps && usage == TextureUsage::Immutable);
+        const bool mipmapSupported = (usage == TextureUsage::Immutable ||
+                                      usage == TextureUsage::Dynamic);
+        mipmapped_ = mipmaps && mipmapSupported;
+        if (mipmapped_) {
+            numMipLevels_ = 1 + (int)std::floor(std::log2((float)std::max(width_, height_)));
+            if (numMipLevels_ > SG_MAX_MIPMAPS) numMipLevels_ = SG_MAX_MIPMAPS;
+            if (numMipLevels_ < 1) numMipLevels_ = 1;
+        } else {
+            numMipLevels_ = 1;
+        }
 
         if (pixels.isFloat()) {
             pixelFormat_ = SG_PIXELFORMAT_RGBA32F;
@@ -378,6 +392,49 @@ public:
     // === Data update (except Immutable) ===
 
     void loadData(const Pixels& pixels) {
+        // When the texture has a mipmap chain (Dynamic + mipmaps), upload
+        // every level in a single sg_update_image call. The mip data is
+        // generated CPU-side from the new pixels with a 2x2 box average
+        // (`generateMipLevel`), which is fine for the use cases Dynamic
+        // mipmap textures target (UI textures, procedural pixel art etc.)
+        // and avoids the per-frame GPU pass cost of an FBO-style regen.
+        if (mipmapped_ && allocated_ && usage_ != TextureUsage::Immutable) {
+            if (pixels.getWidth() != width_ ||
+                pixels.getHeight() != height_ ||
+                pixels.getChannels() != channels_) return;
+
+            uint64_t currentFrame = sapp_frame_count();
+            if (lastUpdateFrame_ == currentFrame) {
+                logWarning() << "[Texture] loadData() called twice in same frame, skipped";
+                return;
+            }
+            lastUpdateFrame_ = currentFrame;
+
+            const bool isFloat = pixels.isFloat();
+            const size_t bpp = computeBytesPerPixel();
+
+            // Buffers for levels 1..N-1 (level 0 reuses caller's pixels).
+            std::vector<std::vector<uint8_t>> mipStorage(numMipLevels_ > 1 ? numMipLevels_ - 1 : 0);
+
+            sg_image_data img_data = {};
+            img_data.mip_levels[0].ptr = pixels.getDataVoid();
+            img_data.mip_levels[0].size = (size_t)width_ * height_ * bpp;
+
+            const void* prevData = pixels.getDataVoid();
+            int mipW = width_;
+            int mipH = height_;
+            for (int level = 1; level < numMipLevels_; level++) {
+                mipStorage[level - 1] = generateMipLevel(prevData, mipW, mipH, channels_, isFloat);
+                mipW = std::max(mipW / 2, 1);
+                mipH = std::max(mipH / 2, 1);
+                img_data.mip_levels[level].ptr = mipStorage[level - 1].data();
+                img_data.mip_levels[level].size = mipStorage[level - 1].size();
+                prevData = mipStorage[level - 1].data();
+            }
+
+            sg_update_image(image_, &img_data);
+            return;
+        }
         loadData(pixels.getDataVoid(), pixels.getWidth(), pixels.getHeight(), pixels.getChannels());
     }
 
@@ -675,6 +732,9 @@ private:
                 break;
             case TextureUsage::Dynamic:
                 img_desc.usage.dynamic_update = true;
+                // Dynamic + mipmaps: chain is allocated here, each
+                // loadData(pixels) call re-uploads every level.
+                img_desc.num_mipmaps = numMipLevels_;
                 break;
             case TextureUsage::Stream:
                 img_desc.usage.stream_update = true;

@@ -52,8 +52,14 @@ public:
 
     // === File I/O ===
 
-    // Load image from file (relative paths resolved via getDataPath)
-    bool load(const fs::path& path) {
+    // Load image from file (relative paths resolved via getDataPath).
+    //
+    // `mipmaps=true` builds a full mip chain at load time. Recommended when
+    // the image will be sampled at varying scales (most commonly mapped
+    // onto a 3D surface that moves toward/away from the camera) — without
+    // mipmaps, small projected sizes shimmer/moiré. Costs about +33% GPU
+    // memory and a one-time CPU box-average to build the chain.
+    bool load(const fs::path& path, bool mipmaps = false) {
         clear();
 
         fs::path resolved = path.is_absolute() ? path : fs::path(getDataPath(path.string()));
@@ -61,20 +67,19 @@ public:
             return false;
         }
 
-        // Create immutable texture
-        texture_.allocate(pixels_, TextureUsage::Immutable);
+        texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
         return true;
     }
 
     // Load image from memory
-    bool loadFromMemory(const unsigned char* buffer, int len) {
+    bool loadFromMemory(const unsigned char* buffer, int len, bool mipmaps = false) {
         clear();
 
         if (!pixels_.loadFromMemory(buffer, len)) {
             return false;
         }
 
-        texture_.allocate(pixels_, TextureUsage::Immutable);
+        texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
         return true;
     }
 
@@ -86,12 +91,19 @@ public:
 
     // === Allocation / Deallocation ===
 
-    // Allocate empty image (for dynamic updates)
-    void allocate(int width, int height, int channels = 4) {
+    // Allocate empty image (for dynamic updates via setColor + update()).
+    //
+    // `mipmaps=true` builds a mip chain alongside the Dynamic texture; each
+    // subsequent `update()` regenerates the chain CPU-side (2x2 box average)
+    // and re-uploads every level. Costs a per-update CPU pass roughly equal
+    // to ~1/3 the base level size. Worth it when the image is sampled at
+    // varying scales (3D texture mapping, UI scaling) — otherwise leave off.
+    void allocate(int width, int height, int channels = 4, bool mipmaps = false) {
         clear();
         pixels_.allocate(width, height, channels);
-        // Create dynamic texture (can be updated later)
-        texture_.allocate(pixels_, TextureUsage::Dynamic);
+        // Dynamic so the texture can be re-uploaded with update(). When
+        // mipmaps=true, the underlying texture also carries a mip chain.
+        texture_.allocate(pixels_, TextureUsage::Dynamic, mipmaps);
     }
 
     // Release resources
