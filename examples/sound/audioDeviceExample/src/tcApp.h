@@ -16,6 +16,7 @@ class tcApp : public App {
 public:
     void setup() override;
     void draw() override;
+    void cleanup() override;
 
     // Real-time sine synth — runs on the audio thread.
     void audioOut(AudioOutBuffer& buf) override;

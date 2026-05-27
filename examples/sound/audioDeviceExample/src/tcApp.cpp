@@ -54,6 +54,14 @@ void tcApp::setup() {
     }
 }
 
+void tcApp::cleanup() {
+    // ImGui must be torn down before sokol_gfx shuts down, otherwise
+    // ImGui's GPU resources get freed in the wrong order and the MSVC
+    // runtime aborts on Windows. App's cleanup() runs before the static
+    // teardown that calls sg_shutdown, so this is the safe spot.
+    imguiShutdown();
+}
+
 void tcApp::audioOut(AudioOutBuffer& buf) {
     const float freq = frequency.load();
     const float amp  = amplitude.load();
