@@ -724,6 +724,16 @@ private:
     static void mixStreamVoice(PlayingSound& sound, SoundStream& src,
                                float* buffer, int num_frames, int num_channels);
 
+    // Re-init helper: rate-adjust active voices so they keep playing from
+    // the same point in time after the engine restarts at a new sample
+    // rate. Eager voices just recompute rateRatio. Streaming voices need
+    // their per-voice decoder rebuilt at the new rate + seeked to the
+    // current playback position; the ring is cleared so the worker
+    // refills it with samples at the new rate. Implementation lives in
+    // tcAudio_impl.cpp (miniaudio types). Called with mutex_ NOT held —
+    // the device is already stopped, so no audio callback can race.
+    void migrateVoicesToNewRate(int oldRate, int newRate);
+
     void mixAudioInternal(float* buffer, int num_frames, int num_channels) {
         // Clear buffer
         std::memset(buffer, 0, num_frames * num_channels * sizeof(float));
@@ -791,7 +801,10 @@ private:
         }
     }
 
-    void* device_ = nullptr;  // ma_device*
+    void* device_ = nullptr;   // ma_device*
+    void* context_ = nullptr;  // ma_context* — persistent across re-inits so
+                               // CoreAudio internal state stays consistent
+                               // when devices are torn down + recreated.
     bool initialized_ = false;
     std::vector<std::shared_ptr<PlayingSound>> playingSounds_;
     std::mutex mutex_;

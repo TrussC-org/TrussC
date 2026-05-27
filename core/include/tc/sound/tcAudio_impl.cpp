@@ -539,19 +539,35 @@ bool AudioEngine::init() {
 }
 
 bool AudioEngine::init(const AudioSettings& settings) {
-    if (initialized_) {
-        // Re-init while a device is running would tear down playing voices
-        // and is rarely what the user actually wants. Log + ignore.
-        printf("AudioEngine: init(settings) called after engine already "
-               "running — settings ignored (current: %d Hz, %d ch). "
-               "Call shutdown() first to reconfigure.\n",
-               sampleRate_, channels_);
-        return true;
+    const bool reinit = initialized_;
+    const int  oldRate = sampleRate_;
+
+    if (reinit) {
+        // Live re-init: stop the device, swap settings, migrate voices to
+        // the new rate, then start a fresh device. The device-down window
+        // is the source of a short audible gap (~30-100 ms) but voices
+        // preserve their playback position.
+        printf("AudioEngine: re-initializing (%d Hz, %d ch -> %d Hz, %d ch, dev='%s')\n",
+               sampleRate_, channels_,
+               settings.sampleRate, settings.channels,
+               settings.deviceName.c_str());
+
+        if (device_) {
+            ma_device* device = static_cast<ma_device*>(device_);
+            // ma_device_uninit handles stopping internally and is more
+            // reliable than the explicit stop+uninit dance on CoreAudio.
+            // The second ma_device_stop in a tight re-init cycle hangs on
+            // macOS waiting for the audio thread to join; uninit alone
+            // releases everything in one shot.
+            ma_device_uninit(device);
+            delete device;
+            device_ = nullptr;
+        }
+        initialized_ = false;
     }
 
-    // Commit settings to runtime fields BEFORE device init so the values
-    // are visible to anyone reading getSampleRate() during init (e.g. video
-    // resampler setup that happens to race with audio startup).
+    // Commit settings to runtime fields BEFORE migration / device init so
+    // anyone reading getSampleRate() during this window sees the new value.
     sampleRate_ = settings.sampleRate > 0 ? settings.sampleRate : DEFAULT_SAMPLE_RATE;
     channels_   = settings.channels   > 0 ? settings.channels   : DEFAULT_CHANNELS;
     bufferSize_ = settings.bufferSize  > 0 ? settings.bufferSize : DEFAULT_BUFFER_SIZE;
@@ -560,33 +576,54 @@ bool AudioEngine::init(const AudioSettings& settings) {
                   ? settings.maxPolyphony
                   : DEFAULT_MAX_PLAYING_SOUNDS;
     if ((int)playingSounds_.size() != polyphony) {
-        playingSounds_.assign(polyphony, nullptr);
+        // Preserve existing slots up to the new size; truncating drops the
+        // oldest extra voices (which is the same policy as play() reusing
+        // dead slots — losing them is unavoidable if the user shrinks the
+        // pool while voices are active).
+        playingSounds_.resize(polyphony);
     }
 
-    // Device selection — if the caller specified a deviceName, enumerate
-    // and find the matching ID. Empty string = system default.
-    ma_context context;
+    // Re-init only: migrate active voices so they continue from the same
+    // playback position at the new engine rate. The device is currently
+    // stopped, so the audio thread can't observe partial migration state.
+    if (reinit) {
+        migrateVoicesToNewRate(oldRate, sampleRate_);
+    }
+
+    // Lazily create a persistent ma_context. Sharing one context across
+    // every device init/uninit cycle keeps CoreAudio's internal state
+    // consistent on macOS — without it, the second ma_device_uninit in a
+    // tight cycle hangs waiting for the audio thread to join.
+    if (!context_) {
+        ma_context* ctx = new ma_context();
+        if (ma_context_init(NULL, 0, NULL, ctx) != MA_SUCCESS) {
+            printf("AudioEngine: ma_context_init failed\n");
+            delete ctx;
+            return false;
+        }
+        context_ = ctx;
+    }
+    ma_context* ctxArg = static_cast<ma_context*>(context_);
+
+    // Device selection — if the caller specified a deviceName, look it up
+    // via the persistent context. Empty string = system default.
     ma_device_id  selectedDeviceID;
     ma_device_id* deviceIDPtr = nullptr;
-    bool contextOwned = false;
     if (!settings.deviceName.empty()) {
-        if (ma_context_init(NULL, 0, NULL, &context) == MA_SUCCESS) {
-            contextOwned = true;
-            ma_device_info* infos = nullptr;
-            ma_uint32 count = 0;
-            if (ma_context_get_devices(&context, &infos, &count, NULL, NULL) == MA_SUCCESS) {
-                for (ma_uint32 i = 0; i < count; ++i) {
-                    if (settings.deviceName == infos[i].name) {
-                        selectedDeviceID = infos[i].id;
-                        deviceIDPtr = &selectedDeviceID;
-                        break;
-                    }
+        ma_device_info* infos = nullptr;
+        ma_uint32 count = 0;
+        if (ma_context_get_devices(ctxArg, &infos, &count, NULL, NULL) == MA_SUCCESS) {
+            for (ma_uint32 i = 0; i < count; ++i) {
+                if (settings.deviceName == infos[i].name) {
+                    selectedDeviceID = infos[i].id;
+                    deviceIDPtr = &selectedDeviceID;
+                    break;
                 }
             }
-            if (!deviceIDPtr) {
-                printf("AudioEngine: device '%s' not found, using system default\n",
-                       settings.deviceName.c_str());
-            }
+        }
+        if (!deviceIDPtr) {
+            printf("AudioEngine: device '%s' not found, using system default\n",
+                   settings.deviceName.c_str());
         }
     }
 
@@ -603,12 +640,10 @@ bool AudioEngine::init(const AudioSettings& settings) {
         config.periodSizeInFrames = bufferSize_;
     }
 
-    ma_context* ctxArg = contextOwned ? &context : nullptr;
     ma_result result = ma_device_init(ctxArg, &config, device);
     if (result != MA_SUCCESS) {
         printf("AudioEngine: failed to initialize device (error=%d)\n", result);
         delete device;
-        if (contextOwned) ma_context_uninit(&context);
         return false;
     }
 
@@ -617,16 +652,11 @@ bool AudioEngine::init(const AudioSettings& settings) {
         printf("AudioEngine: failed to start device (error=%d)\n", result);
         ma_device_uninit(device);
         delete device;
-        if (contextOwned) ma_context_uninit(&context);
         return false;
     }
 
     device_ = device;
     initialized_ = true;
-
-    // The context can be released once ma_device_init has copied what it
-    // needs from it (the device keeps its own internal context state).
-    if (contextOwned) ma_context_uninit(&context);
 
     printf("AudioEngine: initialized (%d Hz, %d ch, %d voices) [miniaudio]\n",
            sampleRate_, channels_, (int)playingSounds_.size());
@@ -658,15 +688,96 @@ std::vector<AudioDeviceInfo> AudioEngine::listDevices() {
     return result;
 }
 
-void AudioEngine::shutdown() {
-    if (!initialized_) return;
+// ---------------------------------------------------------------------------
+// migrateVoicesToNewRate — keep active voices alive across an engine
+// sample-rate change.
+//
+// Eager voices: positionF tracks source-rate frames, so it's unaffected
+// by an engine rate change. We just recompute rateRatio = source_rate /
+// new_engine_rate so each output frame advances posF by the right amount.
+//
+// Streaming voices: the per-voice ma_decoder was configured to OUTPUT at
+// the old engine rate, and the ring holds samples at that rate. Both are
+// stale. We rebuild the StreamInstance from scratch (new decoder
+// configured at newRate), seek it to the same wall-clock playback time,
+// and rejoin the StreamWorker. The old StreamInstance is dropped — its
+// destructor uninits the old decoder. Worker's weak_ptr to it stops
+// locking and the entry self-evicts on the next iteration.
+//
+// Called with the device stopped, so no audio callback can race.
+// ---------------------------------------------------------------------------
+void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
+    if (oldRate == newRate || oldRate <= 0 || newRate <= 0) return;
 
+    for (auto& slot : playingSounds_) {
+        if (!slot || !slot->buffer) continue;
+        if (!slot->playing && !slot->paused) continue;
+
+        if (slot->buffer->kind() == SoundSource::Eager) {
+            // Pitch-preserving rate change. positionF is source-rate frames.
+            slot->rateRatio = (slot->buffer->sampleRate > 0)
+                ? ((float)slot->buffer->sampleRate / (float)newRate)
+                : 1.0f;
+        } else {
+            // Streaming voice — rebuild the per-voice decoder.
+            auto* src = static_cast<SoundStream*>(slot->buffer.get());
+
+            // Current playback time in seconds, derived from the old engine rate.
+            double tSec = slot->positionF / (double)oldRate;
+            if (tSec < 0.0) tSec = 0.0;
+
+            // Build a fresh StreamInstance + decoder at the new rate.
+            auto newStream = std::make_shared<StreamInstance>();
+            ma_decoder_config cfg = ma_decoder_config_init(
+                ma_format_f32, StreamInstance::CHANNELS, newRate);
+            cfg.encodingFormat = (ma_encoding_format)src->encodingFormatHint_;
+            ma_result r = ma_decoder_init_file(src->getPath().c_str(), &cfg, &newStream->decoder);
+            if (r != MA_SUCCESS) {
+                printf("AudioEngine: stream voice migration failed for %s (result=%d) — stopping voice\n",
+                       src->getPath().c_str(), (int)r);
+                slot->playing = false;
+                // Drop the stale stream so its old decoder is destroyed.
+                slot->stream.reset();
+                continue;
+            }
+            newStream->decoderInitialized = true;
+
+            // Seek to the same wall-clock time in the new decoder's output frames.
+            ma_uint64 seekFrames = (ma_uint64)(tSec * (double)newRate);
+            ma_decoder_seek_to_pcm_frame(&newStream->decoder, seekFrames);
+
+            ma_uint64 total = 0;
+            ma_decoder_get_length_in_pcm_frames(&newStream->decoder, &total);
+            newStream->totalFramesInFile = (uint64_t)total;
+            newStream->subFrame = 0.0;
+            // writeFrame / readFrame default to 0; ring will be filled fresh by worker.
+
+            // Swap in the new stream. The old StreamInstance's shared_ptr
+            // refcount drops; if the worker still holds it locally via
+            // refillOne's `sp`, it survives until that call returns, then
+            // ~StreamInstance kills the old decoder.
+            slot->stream = newStream;
+            StreamWorker::getInstance().registerStream(newStream);
+
+            // Re-express positionF in new engine-rate frames so the
+            // existing loop-modulo logic in mixStreamVoice keeps working.
+            slot->positionF = tSec * (double)newRate;
+        }
+    }
+}
+
+void AudioEngine::shutdown() {
     if (device_) {
         ma_device* device = static_cast<ma_device*>(device_);
-        ma_device_stop(device);
         ma_device_uninit(device);
         delete device;
         device_ = nullptr;
+    }
+    if (context_) {
+        ma_context* ctx = static_cast<ma_context*>(context_);
+        ma_context_uninit(ctx);
+        delete ctx;
+        context_ = nullptr;
     }
 
     initialized_ = false;
