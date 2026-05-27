@@ -146,6 +146,7 @@ namespace internal {
     inline bool     fontAtlasInitialized = false;
     inline int      fontAtlasRows        = 0;   // height of current atlas in cell rows
     inline uint64_t fontAtlasVersion     = 0;   // last bitmapfont::registryVersion baked in
+    inline uint64_t fontAtlasUploadFrame = UINT64_MAX; // frame of last sg_update_image
     inline sgl_pipeline pipeline3d = {};
     inline bool pipeline3dInitialized = false;
     inline bool pixelPerfectMode = false;
@@ -1204,6 +1205,7 @@ inline void getBitmapStringBounds(const std::string& text, float& width, float& 
 //
 // The image is created with `usage.dynamic_update = true` so sg_update_image
 // is allowed.
+uint64_t getFrameCount();  // forward decl — defined in Time section below
 inline void ensureFontAtlas(int rows) {
     if (rows <= 0) return;
     if (!internal::fontInitialized) return;  // pipeline/sampler not ready yet
@@ -1225,10 +1227,18 @@ inline void ensureFontAtlas(int rows) {
         // Same dimensions — upload via sg_update_image. The image identity
         // (sg_image handle) and view stay the same, so any queued sokol_gl
         // commands referencing them keep working.
+        // sokol allows at most one sg_update_image per image per frame.
+        // If we already uploaded this frame, defer to the next frame.
+        uint64_t curFrame = getFrameCount();
+        if (internal::fontAtlasUploadFrame == curFrame) {
+            delete[] pixels;
+            return;
+        }
         sg_image_data data = {};
         data.mip_levels[0].ptr  = pixels;
         data.mip_levels[0].size = dataBytes;
         sg_update_image(internal::fontTexture, &data);
+        internal::fontAtlasUploadFrame = curFrame;
     } else {
         // Size changed (or first allocation). Recreate the image.
         if (internal::fontAtlasInitialized) {
@@ -1250,6 +1260,7 @@ inline void ensureFontAtlas(int rows) {
         data.mip_levels[0].ptr  = pixels;
         data.mip_levels[0].size = dataBytes;
         sg_update_image(internal::fontTexture, &data);
+        internal::fontAtlasUploadFrame = getFrameCount();
 
         sg_view_desc view_desc = {};
         view_desc.texture.image = internal::fontTexture;
