@@ -395,10 +395,26 @@ FileReader@ createFileReader()           // Create a file reader (TrussSketch fa
 ```cpp
 Sound@ createSound()                     // Create a sound player (TrussSketch factory)
 bool load(const string& path)            // Load sound file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
+bool loadStream(const string& path, int maxPolyphony = 1) // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
+bool isStreaming()                       // True if this Sound was loaded via loadStream() (vs eager load())
 void play()                              // Play sound
 void stop()                              // Stop sound
+void pause()                             // Pause playback (resume() to continue)
+void resume()                            // Resume paused playback
+bool isPlaying()                         // True while playing (false if stopped, paused, or never played)
+bool isPaused()                          // True while paused
+bool isLoaded()                          // True after a successful load() / loadStream() / loadTestTone()
+float getPosition()                      // Get current playback position in seconds
+void setPosition(float seconds)          // Seek to a specific time in seconds. On streams, costs ~10 ms blackout while the ring refills.
+float getDuration()                      // Get total duration of the loaded sound in seconds
 void setVolume(float vol)                // Set volume (0.0-1.0)
+float getVolume()                        // Get current volume
+void setPan(float pan)                   // Set stereo balance (-1.0 left ~ 0 center ~ +1.0 right). On multi-ch devices only affects ch0/ch1.
+float getPan()                           // Get current pan value
+void setSpeed(float speed)               // Playback speed [-10, 10]. Negative = reverse (eager only). Streams clamp to [0, 10]. 0 = freeze.
+float getSpeed()                         // Get current playback speed
 void setLoop(bool loop)                  // Enable/disable looping
+bool isLoop()                            // True if looping is enabled
 ```
 
 ## ChipSound
@@ -427,6 +443,7 @@ Font@ createFont()                       // Create a TrueType font
 bool load(const string& path, int size)  // Load TTF font file
 bool isLoaded()                          // Check if font is loaded
 void drawString(const string& text, float x, float y) // Draw text at position
+Path getStringPath(const string& text, float x, float y) // Get text outline as a Path (one subpath per contour). Stays crisp under scale / rotation; use drawStroke / drawFill (holes auto-detected for e, a, O, 日, etc.).
 float getWidth(const string& text)       // Get text width in pixels
 float getHeight(const string& text)      // Get text height in pixels
 float getLineHeight()                    // Get line height
@@ -740,9 +757,16 @@ StrokeCap::Square            // 2 (Square line cap (extends by half stroke width
 StrokeJoin::Miter            // 0 (Sharp corner join)
 StrokeJoin::Round            // 1 (Rounded corner join)
 StrokeJoin::Bevel            // 2 (Beveled corner join)
+WritingMode::Horizontal      // 0 (Left-to-right horizontal text (default))
+WritingMode::VerticalRL      // 1 (Top-to-bottom columns, columns flow right-to-left (Japanese tategaki))
+TcyMode::Rotate              // 0 (Rotate the whole Latin / digit run 90 degrees CW so it reads top-to-bottom)
+TcyMode::Upright             // 1 (Each glyph upright, one per CJK-sized cell (一文字ずつ正立))
+TcyMode::Combine             // 2 (Squeeze a Latin / digit run into a single CJK cell (true 縦中横))
 FONT_SANS                    // string (System sans-serif font path (CDN URL on Web))
 FONT_SERIF                   // string (System serif font path (CDN URL on Web))
 FONT_MONO                    // string (System monospace font path (CDN URL on Web))
+FONT_SANS_JA                 // string (Japanese sans-serif font (Hiragino Sans on macOS, Yu Gothic on Win, Noto Sans CJK JP on Linux/Android, Google Fonts CDN URL on Web))
+FONT_SERIF_JA                // string (Japanese serif font (Hiragino Mincho on macOS, Yu Mincho on Win, Noto Serif CJK JP on Linux/Android, Google Fonts CDN URL on Web))
 Wave::Sin                    // 0 (Sine wave (smooth, pure tone))
 Wave::Square                 // 1 (Square wave (harsh, 8-bit style))
 Wave::Triangle               // 2 (Triangle wave (softer than square))
