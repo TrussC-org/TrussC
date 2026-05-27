@@ -439,6 +439,16 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
     if (speed < 0.0) speed = 0.0;
     if (speed > 10.0) speed = 10.0;
 
+    // Snapshot routing state for this callback. Stream ring is always 2ch
+    // (the per-voice decoder is configured to output stereo), so routing
+    // operates on src.channels = StreamInstance::CHANNELS.
+    auto map = std::atomic_load(&sound.channelMap);
+    auto gains = std::atomic_load(&sound.channelGains);
+    int mm = sound.mixMode.load(std::memory_order_acquire);
+    const int srcCh = StreamInstance::CHANNELS;
+    const int mapSize = map ? (int)map->size() : 0;
+    const int gainsSize = gains ? (int)gains->size() : 0;
+
     uint64_t writeFrame = stream->writeFrame.load(std::memory_order_acquire);
     uint64_t readFrame  = stream->readFrame.load(std::memory_order_relaxed);
     double   subFrame   = stream->subFrame;
@@ -465,18 +475,34 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
                       * StreamInstance::CHANNELS;
         float frac = (float)subFrame;
 
-        float l0 = stream->ring[idx0];
-        float r0 = stream->ring[idx0 + 1];
-        float l1 = stream->ring[idx1];
-        float r1 = stream->ring[idx1 + 1];
-        float l = l0 + (l1 - l0) * frac;
-        float r = r0 + (r1 - r0) * frac;
-        l *= vol * panL;
-        r *= vol * panR;
+        // Pull interpolated sample for ring channel s (0 = L, 1 = R).
+        auto srcAt = [&](int s) -> float {
+            if (s < 0 || s >= srcCh) return 0.0f;
+            float a = stream->ring[idx0 + (size_t)s];
+            float b = stream->ring[idx1 + (size_t)s];
+            return a + (b - a) * frac;
+        };
 
-        buffer[frame * num_channels] += l;
-        if (num_channels > 1) {
-            buffer[frame * num_channels + 1] += r;
+        // Per-output-channel routing (same shape as mixEagerVoice).
+        for (int c = 0; c < num_channels; c++) {
+            float sample = 0.0f;
+
+            if (mapSize > 0) {
+                if (c < mapSize) {
+                    for (int s : (*map)[c]) sample += srcAt(s);
+                }
+            } else if (mm == (int)MixMode::DownmixMono) {
+                for (int s = 0; s < srcCh; s++) sample += srcAt(s);
+                sample /= (float)srcCh;
+            } else {
+                // Auto: ring is always stereo, so multi-ch rules apply.
+                sample = (c < srcCh) ? srcAt(c) : 0.0f;
+            }
+
+            float gain = (c < gainsSize) ? (*gains)[c] : 1.0f;
+            float panMul = (c == 0) ? panL : ((c == 1) ? panR : 1.0f);
+
+            buffer[frame * num_channels + c] += sample * gain * panMul * vol;
         }
 
         subFrame += speed;

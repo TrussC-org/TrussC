@@ -429,6 +429,29 @@ private:
 struct StreamInstance;
 
 // ---------------------------------------------------------------------------
+// MixMode — high-level routing preset for how a Sound's source channels
+// fan out to the device's output channels. Set per-Sound via
+// Sound::setMixMode(). Default = Auto.
+//
+//   Auto         — mono source broadcasts to all device channels;
+//                  multi-channel source routes 1:1 to matching device
+//                  channels with truncation (extra device channels stay
+//                  silent, extra source channels are dropped).
+//   DownmixMono  — sum all source channels / N → broadcast to every
+//                  device channel. Useful for previewing a multichannel
+//                  file on a stereo speaker, or for "play this through
+//                  every speaker" notification sounds.
+//
+// Sound::setChannelMap() overrides MixMode if the map is non-empty —
+// the map is the source of truth for routing. setChannelGains() is
+// orthogonal (per-output-channel multiplier).
+// ---------------------------------------------------------------------------
+enum class MixMode {
+    Auto = 0,
+    DownmixMono = 1,
+};
+
+// ---------------------------------------------------------------------------
 // Playing Sound Instance
 // ---------------------------------------------------------------------------
 struct PlayingSound {
@@ -448,6 +471,21 @@ struct PlayingSound {
     std::atomic<bool> loop{false};
     std::atomic<bool> playing{false};
     std::atomic<bool> paused{false};
+
+    // Routing. mixMode is a plain atomic int (enum value). channelMap /
+    // channelGains are shared_ptr-to-immutable-vector; the UI thread
+    // installs new versions via std::atomic_store and the audio thread
+    // reads them via std::atomic_load each callback (C++20 deprecated the
+    // free functions but they're still standard and lock-free for
+    // shared_ptr on common platforms — the C++20 atomic<shared_ptr<T>>
+    // specialization is not yet in Apple's libc++).
+    //
+    // null map  → use mixMode rules
+    // non-null  → map is the source of truth
+    // gains entries beyond .size() default to 1.0
+    std::atomic<int> mixMode{(int)MixMode::Auto};
+    std::shared_ptr<const std::vector<std::vector<int>>> channelMap;
+    std::shared_ptr<const std::vector<float>>            channelGains;
 
     // Playback position (floating-point for speed adjustment)
     double positionF{0.0};
@@ -676,6 +714,17 @@ private:
     //   - speed = 0: posF stays put, same sample emitted = freeze.
     //   - speed < 0: reverse playback, posF decreases toward 0 / wraps.
     //
+    // Channel routing:
+    //   - sound.channelMap   non-null/non-empty: out[c] = sum of src[s]
+    //                        for s in channelMap[c]. c >= map.size() = silent.
+    //   - sound.channelMap   null/empty + mixMode == DownmixMono: average
+    //                        all src ch → broadcast to all output ch.
+    //   - sound.channelMap   null/empty + mixMode == Auto: mono src
+    //                        broadcasts; multi-ch src routes 1:1 to
+    //                        matching output ch with truncation.
+    //   - sound.channelGains entries scale per-output-ch (default 1.0).
+    //   - pan multiplier applies to ch0/ch1 only (legacy stereo balance).
+    //
     // Bounds are resolved at the top of each iteration so posF never reaches
     // the indexing step with a negative or out-of-range value (size_t cast
     // of a negative double is UB).
@@ -691,6 +740,16 @@ private:
         // pan = -1: full left, 0: center, +1: full right
         float panL = (pan <= 0.0f) ? 1.0f : (1.0f - pan);
         float panR = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
+
+        // Snapshot routing state once at the top of the callback. Audio
+        // thread reads via atomic_load so the UI thread's setChannelMap
+        // store sees a happens-before edge.
+        auto map = std::atomic_load(&sound.channelMap);
+        auto gains = std::atomic_load(&sound.channelGains);
+        int mm = sound.mixMode.load(std::memory_order_acquire);
+        const int srcCh = src.channels;
+        const int mapSize = map ? (int)map->size() : 0;
+        const int gainsSize = gains ? (int)gains->size() : 0;
 
         for (int frame = 0; frame < num_frames; frame++) {
             // Resolve bounds for both directions BEFORE indexing.
@@ -722,32 +781,42 @@ private:
                 pos1 = sound.loop ? 0 : pos0;
             }
 
-            float left0, right0, left1, right1;
-            if (src.channels == 1) {
-                left0 = right0 = src.samples[pos0];
-                left1 = right1 = src.samples[pos1];
-            } else {
-                // Multi-channel sources stride by src.channels per frame.
-                // Take the first two channels as L/R; higher channels are
-                // ignored on this code path (multichannel routing will be
-                // handled by the upcoming setChannelMap API). Using `* 2`
-                // here was wrong for any source with channels != 1, 2 —
-                // it read from the wrong frame for 3+ ch WAVs.
-                const size_t stride = (size_t)src.channels;
-                left0  = src.samples[pos0 * stride];
-                right0 = src.samples[pos0 * stride + 1];
-                left1  = src.samples[pos1 * stride];
-                right1 = src.samples[pos1 * stride + 1];
-            }
+            // Pull an interpolated sample for source channel s. Handles
+            // mono / multi-ch indexing uniformly via stride = srcCh.
+            auto srcAt = [&](int s) -> float {
+                if (s < 0 || s >= srcCh) return 0.0f;
+                float a = src.samples[pos0 * (size_t)srcCh + (size_t)s];
+                float b = src.samples[pos1 * (size_t)srcCh + (size_t)s];
+                return a + (b - a) * frac;
+            };
 
-            float left = left0 + (left1 - left0) * frac;
-            float right = right0 + (right1 - right0) * frac;
-            left *= vol * panL;
-            right *= vol * panR;
+            // Per-output-channel routing.
+            for (int c = 0; c < num_channels; c++) {
+                float sample = 0.0f;
 
-            buffer[frame * num_channels] += left;
-            if (num_channels > 1) {
-                buffer[frame * num_channels + 1] += right;
+                if (mapSize > 0) {
+                    // Explicit map wins. c beyond map.size() = silent.
+                    if (c < mapSize) {
+                        for (int s : (*map)[c]) sample += srcAt(s);
+                    }
+                } else if (mm == (int)MixMode::DownmixMono) {
+                    // Sum all source channels, then average. Broadcasts
+                    // identical mono content to every output channel.
+                    for (int s = 0; s < srcCh; s++) sample += srcAt(s);
+                    if (srcCh > 0) sample /= (float)srcCh;
+                } else {
+                    // Auto: mono broadcasts, multi-ch 1:1 with truncation.
+                    if (srcCh == 1) {
+                        sample = srcAt(0);
+                    } else {
+                        sample = (c < srcCh) ? srcAt(c) : 0.0f;
+                    }
+                }
+
+                float gain = (c < gainsSize) ? (*gains)[c] : 1.0f;
+                float panMul = (c == 0) ? panL : ((c == 1) ? panR : 1.0f);
+
+                buffer[frame * num_channels + c] += sample * gain * panMul * vol;
             }
 
             posF += posStep;
@@ -1019,6 +1088,9 @@ public:
             playing_->pan = pan_;
             playing_->speed = speed_;
             playing_->loop = loop_;
+            playing_->mixMode.store((int)mixMode_, std::memory_order_release);
+            std::atomic_store(&playing_->channelMap,   channelMap_);
+            std::atomic_store(&playing_->channelGains, channelGains_);
         }
     }
 
@@ -1100,6 +1172,95 @@ public:
     float getSpeed() const { return speed_; }
 
     // -------------------------------------------------------------------------
+    // Channel routing
+    // -------------------------------------------------------------------------
+    //
+    // Three orthogonal knobs control how this Sound's source channels
+    // (N) end up on the audio device's output channels (M):
+    //
+    //   setMixMode(MixMode)              — Auto / DownmixMono presets
+    //   setChannelMap(vector<int>)       — 1:1 routing per output ch
+    //   setChannelMap(vector<vector<int>>) — multi-source-per-output (sum)
+    //   setChannelGains(vector<float>)   — per-output-channel multiplier
+    //
+    // Composition at mix time:
+    //   sample[c] = (sum of mapped src channels) * channelGains[c]
+    //             * pan_multiplier[c] * volume
+    //
+    //   - channelMap.empty() / null → mixMode rules apply
+    //     * Auto: mono src broadcasts to all output ch;
+    //             multi-ch src → out[c] = src[c] (c<N), else 0
+    //     * DownmixMono: sum all src ch / N → broadcast to all out ch
+    //   - channelMap non-empty → that wins
+    //     * out[c] = sum of src[s] for s in channelMap[c]
+    //     * c >= channelMap.size() → silent
+    //   - channelGains[c] defaults to 1.0 for entries beyond .size()
+    //   - pan is the existing setPan(float) for stereo balance (ch0+ch1
+    //     only); ignored on ch >= 2.
+    //
+    // All setters are safe to call while the sound is playing.
+
+    void setMixMode(MixMode m) {
+        mixMode_ = m;
+        if (playing_) {
+            playing_->mixMode.store((int)m, std::memory_order_release);
+        }
+    }
+
+    MixMode getMixMode() const { return mixMode_; }
+
+    // 1:1 channel map. Each entry is a source channel index (-1 = silent).
+    // map.size() determines how many output channels we write; outputs
+    // beyond that stay silent. Empty map = fall back to mixMode rules.
+    void setChannelMap(const std::vector<int>& map) {
+        std::vector<std::vector<int>> m2d;
+        m2d.reserve(map.size());
+        for (int s : map) {
+            if (s >= 0) m2d.push_back({s});
+            else        m2d.emplace_back();  // empty = silent on this output
+        }
+        setChannelMap(std::move(m2d));
+    }
+
+    // Multi-source-per-output channel map. Each entry lists source channel
+    // indices that sum into that output channel. Empty inner vector =
+    // silent on that output. Empty outer vector clears any previous map.
+    void setChannelMap(std::vector<std::vector<int>> map) {
+        auto sp = map.empty()
+                ? std::shared_ptr<const std::vector<std::vector<int>>>{}
+                : std::make_shared<const std::vector<std::vector<int>>>(std::move(map));
+        channelMap_ = sp;
+        if (playing_) {
+            std::atomic_store(&playing_->channelMap, sp);
+        }
+    }
+
+    // Get the current channel map. Returns the underlying shared_ptr;
+    // empty/null means "no explicit map, mixMode rules apply".
+    std::shared_ptr<const std::vector<std::vector<int>>> getChannelMap() const {
+        return channelMap_;
+    }
+
+    // Per-output-channel gain. Entries beyond .size() default to 1.0.
+    // Empty vector clears any previous gains (back to uniform 1.0).
+    void setChannelGains(const std::vector<float>& gains) {
+        auto sp = gains.empty()
+                ? std::shared_ptr<const std::vector<float>>{}
+                : std::make_shared<const std::vector<float>>(gains);
+        channelGains_ = sp;
+        if (playing_) {
+            std::atomic_store(&playing_->channelGains, sp);
+        }
+    }
+
+    std::shared_ptr<const std::vector<float>> getChannelGains() const {
+        return channelGains_;
+    }
+
+    void clearChannelMap()   { setChannelMap(std::vector<std::vector<int>>{}); }
+    void clearChannelGains() { setChannelGains(std::vector<float>{}); }
+
+    // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
     bool isPlaying() const {
@@ -1140,10 +1301,13 @@ public:
 private:
     std::shared_ptr<SoundSource> buffer_;
     std::shared_ptr<PlayingSound> playing_;
-    float volume_ = 1.0f;
-    float pan_ = 0.0f;
-    float speed_ = 1.0f;
-    bool loop_ = false;
+    float   volume_  = 1.0f;
+    float   pan_     = 0.0f;
+    float   speed_   = 1.0f;
+    bool    loop_    = false;
+    MixMode mixMode_ = MixMode::Auto;
+    std::shared_ptr<const std::vector<std::vector<int>>> channelMap_;
+    std::shared_ptr<const std::vector<float>>            channelGains_;
 };
 
 // ---------------------------------------------------------------------------
