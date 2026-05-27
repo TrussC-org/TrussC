@@ -392,12 +392,11 @@ public:
     // === Data update (except Immutable) ===
 
     void loadData(const Pixels& pixels) {
-        // When the texture has a mipmap chain (Dynamic + mipmaps), upload
-        // every level in a single sg_update_image call. The mip data is
-        // generated CPU-side from the new pixels with a 2x2 box average
-        // (`generateMipLevel`), which is fine for the use cases Dynamic
-        // mipmap textures target (UI textures, procedural pixel art etc.)
-        // and avoids the per-frame GPU pass cost of an FBO-style regen.
+        // Dynamic + mipmaps: D3D11 only allows a single mip level on
+        // DYNAMIC-usage textures, so we can't use sg_update_image with a
+        // full mip chain. Instead we destroy the current image and recreate
+        // it as immutable with all mip levels baked in from CPU data.
+        // The view and sampler are also rebuilt so handles stay consistent.
         if (mipmapped_ && allocated_ && usage_ != TextureUsage::Immutable) {
             if (pixels.getWidth() != width_ ||
                 pixels.getHeight() != height_ ||
@@ -413,12 +412,18 @@ public:
             const bool isFloat = pixels.isFloat();
             const size_t bpp = computeBytesPerPixel();
 
-            // Buffers for levels 1..N-1 (level 0 reuses caller's pixels).
             std::vector<std::vector<uint8_t>> mipStorage(numMipLevels_ > 1 ? numMipLevels_ - 1 : 0);
 
-            sg_image_data img_data = {};
-            img_data.mip_levels[0].ptr = pixels.getDataVoid();
-            img_data.mip_levels[0].size = (size_t)width_ * height_ * bpp;
+            sg_image_desc img_desc = {};
+            img_desc.width  = width_;
+            img_desc.height = height_;
+            img_desc.pixel_format = (pixelFormat_ != SG_PIXELFORMAT_NONE)
+                                  ? pixelFormat_
+                                  : ((channels_ == 4) ? SG_PIXELFORMAT_RGBA8 : SG_PIXELFORMAT_R8);
+            img_desc.num_mipmaps  = numMipLevels_;
+
+            img_desc.data.mip_levels[0].ptr  = pixels.getDataVoid();
+            img_desc.data.mip_levels[0].size = (size_t)width_ * height_ * bpp;
 
             const void* prevData = pixels.getDataVoid();
             int mipW = width_;
@@ -427,12 +432,20 @@ public:
                 mipStorage[level - 1] = generateMipLevel(prevData, mipW, mipH, channels_, isFloat);
                 mipW = std::max(mipW / 2, 1);
                 mipH = std::max(mipH / 2, 1);
-                img_data.mip_levels[level].ptr = mipStorage[level - 1].data();
-                img_data.mip_levels[level].size = mipStorage[level - 1].size();
+                img_desc.data.mip_levels[level].ptr  = mipStorage[level - 1].data();
+                img_desc.data.mip_levels[level].size = mipStorage[level - 1].size();
                 prevData = mipStorage[level - 1].data();
             }
 
-            sg_update_image(image_, &img_data);
+            // Tear down old GPU resources and rebuild.
+            sg_destroy_view(view_);
+            sg_destroy_image(image_);
+
+            image_ = sg_make_image(&img_desc);
+
+            sg_view_desc view_desc = {};
+            view_desc.texture.image = image_;
+            view_ = sg_make_view(&view_desc);
             return;
         }
         loadData(pixels.getDataVoid(), pixels.getWidth(), pixels.getHeight(), pixels.getChannels());
@@ -731,10 +744,12 @@ private:
                 }
                 break;
             case TextureUsage::Dynamic:
+                // D3D11's DYNAMIC usage only supports a single mip level.
+                // When mipmaps are requested we still allocate the base
+                // image as a plain dynamic texture (1 mip); the full mip
+                // chain is built on each loadData() call by recreating the
+                // image as immutable with all levels baked in.
                 img_desc.usage.dynamic_update = true;
-                // Dynamic + mipmaps: chain is allocated here, each
-                // loadData(pixels) call re-uploads every level.
-                img_desc.num_mipmaps = numMipLevels_;
                 break;
             case TextureUsage::Stream:
                 img_desc.usage.stream_update = true;
