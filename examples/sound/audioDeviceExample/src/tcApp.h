@@ -7,10 +7,14 @@ using namespace std;
 using namespace tc;
 using namespace tcx;
 
+// Live audio device + sample rate switching demo. A sine wave plays
+// continuously through App::audioOut(); the ImGui panel lets the user
+// pick the playback device and sample rate, applying immediately via
+// AudioEngine::init({...}). The sine survives each re-init (short
+// audible gap during the device cycle).
 class tcApp : public App {
 public:
     void setup() override;
-    void update() override;
     void draw() override;
 
     // Real-time sine synth — runs on the audio thread.
@@ -24,7 +28,7 @@ private:
     // Phase — audio-thread-only.
     double phase = 0.0;
 
-    // Devices snapshot (refreshed periodically + after each re-init).
+    // Devices snapshot (refreshed after every audioDeviceChanged event).
     std::vector<AudioDeviceInfo> devices;
     int selectedDeviceIdx = 0;       // index into `devices`
     int selectedSampleRateIdx = 0;   // index into kSampleRates
@@ -34,21 +38,12 @@ private:
 
     // Last init status (shown in UI).
     std::string lastInitMessage;
-
-    // Listener for AudioEngine::audioDeviceChanged — fires on initial
-    // init AND every successful re-init. Used here to log the new
-    // device info into the UI.
-    EventListener audioDeviceListener;
-    std::string lastDeviceEventMessage;
     bool lastInitOk = true;
 
-    // Auto-stress mode: randomly switch settings every N seconds to verify
-    // no combination crashes the engine.
-    bool stressMode = false;
-    float stressIntervalSec = 1.0f;
-    float stressTimer = 0.0f;
-    int   stressIterations = 0;
-    int   stressFailures = 0;
+    // Listener for AudioEngine::audioDeviceChanged. Fires on initial
+    // init AND every successful re-init.
+    EventListener audioDeviceListener;
+    std::string lastDeviceEventMessage;
 
     // Refresh devices list and reset selected index based on current engine.
     void refreshDevices();

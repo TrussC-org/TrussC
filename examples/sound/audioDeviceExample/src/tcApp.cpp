@@ -7,9 +7,10 @@
 // the new settings. Active voices preserve their playback position across
 // the swap (the sine just keeps phasing on).
 //
-// "Stress" mode randomly picks a different (device, rate) combo every
-// `stressIntervalSec` seconds. Letting it run for a minute or two is a
-// good way to confirm no combination crashes the engine.
+// The audioDeviceChanged event fires after each successful init() — the
+// panel shows the latest event payload so you can see the resolved
+// device name (which may differ from the requested one if a fallback
+// happened) and whether it's the system default.
 // =============================================================================
 
 #include "tcApp.h"
@@ -18,9 +19,7 @@
 constexpr int tcApp::kSampleRates[3];
 
 void tcApp::setup() {
-    // Forced 60 fps (not VSYNC) so stress-test timing is reliable even
-    // when the window isn't focused.
-    setFps(60);
+    setFps(VSYNC);
 
     // Hook the engine's device-changed event BEFORE init() so we also
     // observe the initial init's fire (not just subsequent re-inits).
@@ -33,19 +32,18 @@ void tcApp::setup() {
             logNotice("audioDeviceChanged") << lastDeviceEventMessage;
         });
 
-    // Start with system defaults — gives us a known-good initial state.
+    // Start with system defaults — known-good initial state.
     AudioEngine::getInstance().init();
 
     imguiSetup();
     refreshDevices();
 
-    // For automated stress testing: launch with TC_STRESS_AUDIO=1 to start
-    // randomly switching device + rate every stressIntervalSec seconds.
-    if (std::getenv("TC_STRESS_AUDIO")) {
-        stressMode = true;
-        randomSeed((unsigned int)getUnixTime());
-        logNotice("tcApp") << "TC_STRESS_AUDIO set — starting in stress mode";
-    }
+    // Enable MCP debugger + ImGui tools so this example can be driven
+    // automatically (e.g. for stress testing via mcp:imgui_click).
+    // Only active when TRUSSC_MCP=1 is set in the environment.
+    mcp::enableDebugger();
+    mcp::registerDebuggerTools();
+    imgui_tools::registerImGuiTools();
 
     logNotice("tcApp") << "Engine: "
         << AudioEngine::getInstance().getSampleRate() << " Hz, "
@@ -71,38 +69,10 @@ void tcApp::audioOut(AudioOutBuffer& buf) {
     }
 }
 
-void tcApp::update() {
-    if (!stressMode) return;
-
-    // Use elapsed time so the timer doesn't drift on framerate hiccups.
-    static float lastT = 0.0f;
-    float now = getElapsedTimef();
-    float dt  = now - lastT;
-    lastT = now;
-    stressTimer += dt;
-    if (stressTimer < stressIntervalSec) return;
-    stressTimer = 0.0f;
-
-    if (devices.empty()) return;
-
-    // Stress: only randomize the sample rate; keep the currently-selected
-    // device. macOS gates some virtual playback devices behind microphone
-    // permission, and switching rapidly through them blocks ma_device_init
-    // / ma_device_stop on the permission infrastructure (beach ball). The
-    // sample-rate path is the most invasive part of re-init anyway (it's
-    // what migrates voices), so randomizing that gives the best stress
-    // coverage without the OS permission landmine.
-    selectedSampleRateIdx = randomInt(0, 2);
-
-    stressIterations++;
-    applyCurrentSelection();
-    if (!lastInitOk) stressFailures++;
-}
-
 void tcApp::refreshDevices() {
     devices = AudioEngine::listDevices();
 
-    // Try to keep the previously-selected device focused if it's still around.
+    // Keep the previously-selected device if it's still present.
     int defaultIdx = 0;
     for (int i = 0; i < (int)devices.size(); ++i) {
         if (devices[i].isDefault) { defaultIdx = i; break; }
@@ -111,8 +81,7 @@ void tcApp::refreshDevices() {
         selectedDeviceIdx = defaultIdx;
     }
 
-    // Snap the rate picker to the engine's current rate if it matches one
-    // of the presets; otherwise leave the previous selection.
+    // Snap the rate picker to the engine's current rate if it matches a preset.
     int curRate = AudioEngine::getInstance().getSampleRate();
     for (int i = 0; i < 3; ++i) {
         if (kSampleRates[i] == curRate) { selectedSampleRateIdx = i; break; }
@@ -140,8 +109,7 @@ void tcApp::applyCurrentSelection() {
 void tcApp::draw() {
     clear(0.12f);
 
-    // Plain TrussC text just so the window has something to look at when
-    // ImGui is closed.
+    // Plain text so the window still has something to look at when ImGui is hidden.
     setColor(colors::white);
     drawBitmapString(format("Engine: {} Hz, {} ch",
         AudioEngine::getInstance().getSampleRate(),
@@ -151,15 +119,11 @@ void tcApp::draw() {
     drawBitmapString(format("Sine: {:.0f} Hz @ amp {:.2f}",
         frequency.load(), amplitude.load()), 40, 62);
 
-    setColor(0.4f);
-    drawBitmapString(format("Stress iters: {} (failures: {})",
-        stressIterations, stressFailures), 40, 84);
-
     // ----- ImGui panel -----
     imguiBegin();
 
-    ImGui::SetNextWindowPos(ImVec2(10, 120), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(420, 460), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(10, 100), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(420, 440), ImGuiCond_FirstUseEver);
     ImGui::Begin("Audio Device Switcher");
 
     // Synth controls
@@ -203,14 +167,6 @@ void tcApp::draw() {
         }
     }
     ImGui::EndChild();
-
-    ImGui::Separator();
-
-    // Stress mode
-    ImGui::Checkbox("Auto-stress (random switch)", &stressMode);
-    ImGui::SameLine();
-    ImGui::SliderFloat("interval (s)", &stressIntervalSec, 0.2f, 5.0f, "%.1f");
-    ImGui::Text("Iterations: %d   Failures: %d", stressIterations, stressFailures);
 
     ImGui::Separator();
     ImGui::TextColored(lastInitOk ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f)
