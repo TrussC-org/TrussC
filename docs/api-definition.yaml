@@ -8768,9 +8768,12 @@ types:
         return: "void"
         signatures:
           - params: "int width, int height"
-        description: "Allocate framebuffer"
-        description_ja: "フレームバッファを確保"
-        description_ko: "프레임버퍼를 할당"
+          - params: "int width, int height, int sampleCount"
+          - params: "int width, int height, int sampleCount, TextureFormat format"
+          - params: "int width, int height, int sampleCount, TextureFormat format, bool mipmaps"
+        description: "Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end()."
+        description_ja: "フレームバッファを確保。`mipmaps=true` でミップマップ連鎖が end() で自動更新される"
+        description_ko: "프레임버퍼를 할당. `mipmaps=true` 시 end()마다 밉맵 체인이 자동 갱신됨"
         snippet: "allocate(${1:width}, ${2:height})"
       - name: begin
         return: "void"

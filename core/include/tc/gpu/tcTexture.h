@@ -131,10 +131,16 @@ public:
         createResources(nullptr);
     }
 
-    // Allocate empty texture with explicit pixel format
+    // Allocate empty texture with explicit pixel format.
+    //
+    // `mipLevels` > 1 allocates a mip chain. With usage = RenderTarget this
+    // lets each mip level be used as a render attachment (see
+    // `getAttachmentViewForMip(level)`); the sampler is automatically set to
+    // trilinear filtering. mipLevels = 1 keeps the historical behavior.
     void allocate(int width, int height, TextureFormat format,
                   TextureUsage usage = TextureUsage::Immutable,
-                  int sampleCount = 1) {
+                  int sampleCount = 1,
+                  int mipLevels = 1) {
         clear();
 
         width_ = width;
@@ -142,6 +148,8 @@ public:
         channels_ = channelCount(format);
         usage_ = usage;
         sampleCount_ = sampleCount;
+        numMipLevels_ = mipLevels < 1 ? 1 : mipLevels;
+        mipmapped_ = numMipLevels_ > 1;
         pixelFormat_ = toSokolFormat(format);
 
         createResources(nullptr);
@@ -333,6 +341,14 @@ public:
                 if (v.id != 0) sg_destroy_view(v);
             }
             cubeFaceAttachmentViews_.clear();
+            for (sg_view v : mipAttachmentViews_) {
+                if (v.id != 0) sg_destroy_view(v);
+            }
+            mipAttachmentViews_.clear();
+            for (sg_view v : mipSamplingViews_) {
+                if (v.id != 0) sg_destroy_view(v);
+            }
+            mipSamplingViews_.clear();
             sg_destroy_image(image_);
             allocated_ = false;
         }
@@ -507,6 +523,26 @@ public:
     // For RenderTarget: attachment view (used as render target in FBO)
     sg_view getAttachmentView() const { return attachmentView_; }
 
+    // Per-mip color attachment view (only populated when allocated with
+    // mipLevels > 1 and usage = RenderTarget). For mipLevels == 1 the
+    // single `attachmentView_` is returned regardless of `level`.
+    sg_view getAttachmentViewForMip(int level) const {
+        if ((int)mipAttachmentViews_.size() > level && level >= 0) {
+            return mipAttachmentViews_[level];
+        }
+        return attachmentView_;
+    }
+
+    // Per-mip texture view for sampling a single mip level. Needed when
+    // another mip of the same image is bound as a color attachment — using
+    // the full-chain view would trigger a validation error on D3D11/WebGPU.
+    sg_view getViewForMip(int level) const {
+        if ((int)mipSamplingViews_.size() > level && level >= 0) {
+            return mipSamplingViews_[level];
+        }
+        return view_;
+    }
+
 private:
     sg_image image_ = {};
     sg_view view_ = {};              // Texture view (for sampling)
@@ -533,6 +569,13 @@ private:
     bool isCubemap_ = false;
     int numMipLevels_ = 1;
     std::vector<sg_view> cubeFaceAttachmentViews_;
+    // Per-mip color attachment views for 2D RenderTarget with mipLevels > 1.
+    // Empty for mipLevels == 1 (use `attachmentView_` directly).
+    std::vector<sg_view> mipAttachmentViews_;
+    // Per-mip sampling views (single-level texture views). Used by Fbo
+    // mipmap generation to avoid binding the full-chain view while another
+    // mip of the same image is a color attachment.
+    std::vector<sg_view> mipSamplingViews_;
 
     static int mipDim(int base, int mip) {
         int d = base >> mip;
@@ -640,6 +683,7 @@ private:
                 img_desc.usage.color_attachment = true;
                 img_desc.usage.resolve_attachment = true;  // Can also be used as MSAA resolve target
                 img_desc.sample_count = sampleCount_;
+                img_desc.num_mipmaps = numMipLevels_;
                 break;
         }
 
@@ -650,11 +694,36 @@ private:
         view_desc.texture.image = image_;
         view_ = sg_make_view(&view_desc);
 
-        // Create attachment view for RenderTarget
+        // Create attachment view for RenderTarget. `attachmentView_` always
+        // targets mip 0 (preserves the existing single-attachment API).
+        // For mipLevels > 1, also build a per-mip attachment view list so
+        // callers can render into each level individually (see
+        // `getAttachmentViewForMip()`), used by Fbo to generate mipmaps.
         if (usage_ == TextureUsage::RenderTarget) {
             sg_view_desc att_desc = {};
             att_desc.color_attachment.image = image_;
             attachmentView_ = sg_make_view(&att_desc);
+            if (numMipLevels_ > 1) {
+                // Independent views per mip level (mip 0 is also a fresh view,
+                // not aliased to `attachmentView_`, so clear() can destroy
+                // both without a double-free).
+                mipAttachmentViews_.resize(numMipLevels_);
+                for (int level = 0; level < numMipLevels_; level++) {
+                    sg_view_desc mip_att_desc = {};
+                    mip_att_desc.color_attachment.image = image_;
+                    mip_att_desc.color_attachment.mip_level = level;
+                    mipAttachmentViews_[level] = sg_make_view(&mip_att_desc);
+                }
+                // Single-level sampling views for mipmap generation passes
+                mipSamplingViews_.resize(numMipLevels_);
+                for (int level = 0; level < numMipLevels_; level++) {
+                    sg_view_desc mip_tex_desc = {};
+                    mip_tex_desc.texture.image = image_;
+                    mip_tex_desc.texture.mip_levels.base = level;
+                    mip_tex_desc.texture.mip_levels.count = 1;
+                    mipSamplingViews_[level] = sg_make_view(&mip_tex_desc);
+                }
+            }
         }
 
         // Create sampler
@@ -821,6 +890,8 @@ private:
         sampleCount_ = other.sampleCount_;
         allocated_ = other.allocated_;
         mipmapped_ = other.mipmapped_;
+        numMipLevels_ = other.numMipLevels_;
+        mipAttachmentViews_ = std::move(other.mipAttachmentViews_);
         usage_ = other.usage_;
         lastUpdateFrame_ = other.lastUpdateFrame_;
         pixelFormat_ = other.pixelFormat_;
@@ -840,6 +911,8 @@ private:
         other.sampleCount_ = 1;
         other.allocated_ = false;
         other.mipmapped_ = false;
+        other.numMipLevels_ = 1;
+        other.mipAttachmentViews_.clear();
         other.pixelFormat_ = SG_PIXELFORMAT_NONE;
     }
 };
