@@ -84,7 +84,10 @@ void tcApp::draw() {
     const float vY = hY + hH + 50;
     const float vH = H - vY - 40;
     const float vPanelW = (W - 80) / 3.f;
-    const float colBudget = vH - 36;
+    // Tight column budget so wrap points land on kinsoku-sensitive chars
+    // (、 。 」 ）). Without this, breaks fall on regular characters and the
+    // off / on panels render identically.
+    const float colBudget = 8.f * 22.f;  // ~8 cells at fontV's 22pt size
 
     const string longJaV =
         "日本発、「縦書き」可能なフレームワーク。\n"

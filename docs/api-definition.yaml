@@ -3732,6 +3732,17 @@ categories:
         sketch: true
         snippet: "drawString(${1:\"Hello\"}, ${2:100}, ${3:100})"
 
+      - name: getStringPath
+        return: "vector<Path>"
+        signatures:
+          - params: "const string& text, float x, float y"
+            params_simple: "text, x, y"
+        description: "Get text outline as vector paths. Stays crisp under scale / rotation; uses same layout as drawString."
+        description_ja: "テキストの輪郭をベクターパスで取得。拡大・回転に強く、drawString と同じレイアウト。"
+        description_ko: "텍스트 윤곽을 벡터 패스로 가져오기. 확대 / 회전에 강하고 drawString과 동일한 레이아웃."
+        sketch: true
+        snippet: "getStringPath(${1:\"Hello\"}, ${2:100}, ${3:100})"
+
       - name: getWidth
         return: "float"
         signatures:
@@ -9695,6 +9706,23 @@ types:
         description_ja: "テキストを描画"
         description_ko: "텍스트를 그림"
         snippet: "drawString(${1:\"text\"}, ${2:x}, ${3:y})"
+      - name: getGlyphPath
+        return: "vector<Path>"
+        signatures:
+          - params: "uint32_t codepoint"
+        description: "Vector outline of a single glyph. Em-normalized (1.0 = em), screen Y-down, baseline at y=0, pen at x=0. One Path per contour."
+        description_ja: "単一グリフの輪郭パス。em 正規化 (1.0 = em)、画面 Y-down、ベースラインが y=0、ペン位置が x=0。輪郭ごとに 1 Path。"
+        description_ko: "단일 글리프 윤곽선 패스. em 정규화 (1.0 = em), 화면 Y-down, 기준선 y=0, 펜 위치 x=0. 윤곽선마다 1 Path."
+        snippet: "getGlyphPath(${1:codepoint})"
+      - name: getStringPath
+        return: "vector<Path>"
+        signatures:
+          - params: "string text, float x, float y"
+          - params: "string text, float x, float y, Direction h, Direction v"
+        description: "Vector outline of the whole string at (x, y). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Paths are in logical pixels — drawStroke / fill / further transform freely."
+        description_ja: "文字列全体の輪郭パスを (x, y) に配置して返す。drawString と同じレイアウトパイプライン (書字方向 / 揃え / 折返し / 禁則 / 縦中横) を経由。座標は論理ピクセル — drawStroke / fill / 変形を自由に。"
+        description_ko: "(x, y) 위치의 전체 문자열 윤곽선 패스. drawString과 동일한 레이아웃 파이프라인 (쓰기 모드, 정렬, 줄바꿈, 금칙, 다테추요코) 사용. 좌표는 논리 픽셀."
+        snippet: "getStringPath(${1:\"text\"}, ${2:x}, ${3:y})"
       - name: getWidth
         return: float
         signatures:
