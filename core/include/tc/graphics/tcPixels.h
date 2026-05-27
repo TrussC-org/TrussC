@@ -297,6 +297,49 @@ public:
     // Save to file (implemented in tcPixels.cpp for dataPath support)
     bool save(const fs::path& path) const;
 
+    // === Image operations ===
+    //
+    // All of these mutate the buffer in place. For U8 pixels the math is
+    // done in linear light (sRGB-decoded → average / interpolate → sRGB
+    // re-encoded), which matches the physically-correct "mid-grey of black
+    // and white = ~0.73 sRGB" convention used elsewhere in the pipeline.
+    // F32 pixels are assumed to already be linear and are processed
+    // directly. Alpha and any non-RGB channels (1- or 2-channel buffers)
+    // are treated as linear too — only the R/G/B channels of a 3- or
+    // 4-channel buffer go through the sRGB curve.
+
+    // Replace the buffer with its 2x2 box-averaged half (gamma-correct).
+    // Resulting size is max(width/2, 1) x max(height/2, 1). Used as the
+    // building block of mipmap chain generation; also exposed directly
+    // for quick 1/2 downscaling.
+    void halve();
+
+    // Replace the buffer with a quality-first resampled (newW x newH)
+    // version. Each axis is independently downscaled (BoxArea — every
+    // source texel contributes, anti-aliased) or upscaled (Catmull-Rom
+    // bicubic — 4-tap sharp interpolation, no ringing on natural input).
+    // The implementation is separable 2-pass; mixed downscale-on-one-axis
+    // / upscale-on-the-other is fine.
+    //
+    // This is the quality path, not the fast path. If you need cheap
+    // resizing, render the source as a texture into an Fbo at the
+    // target size with mipmaps enabled — that uses the GPU sampler.
+    void resize(int newW, int newH);
+
+    // Replace the buffer with a (w x h) region starting at (x, y).
+    // When the requested region extends outside the source, missing
+    // pixels are filled with the nearest in-bounds pixel
+    // (clamp-to-edge), so the destination size is always exactly
+    // (w, h) regardless of source bounds.
+    void crop(int x, int y, int w, int h);
+
+    // Flip the buffer in place. `horizontal=true` mirrors left↔right,
+    // `vertical=true` mirrors top↔bottom. Both true is a 180° rotation.
+    // `mirrorH()` and `mirrorV()` are convenience wrappers.
+    void mirror(bool horizontal, bool vertical);
+    void mirrorH() { mirror(true, false); }
+    void mirrorV() { mirror(false, true); }
+
 private:
     void* data_ = nullptr;
     int width_ = 0;

@@ -8345,6 +8345,54 @@ types:
         description_ja: "指定位置のピクセル色を設定"
         description_ko: "지정 위치의 픽셀 색상을 설정"
         snippet: "setColor(${1:x}, ${2:y}, ${3:color})"
+      - name: halve
+        return: "void"
+        signatures:
+          - params: ""
+        description: "Replace with 2x2 box-averaged half. Gamma-correct for U8."
+        description_ja: "2x2 ボックス平均で半分に縮小 (U8 はガンマ補正)"
+        description_ko: "2x2 박스 평균으로 절반 크기로 축소 (U8은 감마 보정)"
+        snippet: "halve()"
+      - name: resize
+        return: "void"
+        signatures:
+          - params: "int newWidth, int newHeight"
+        description: "Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8."
+        description_ja: "高品質リサイズ (縮小=BoxArea / 拡大=Catmull-Rom bicubic、 U8はガンマ補正)"
+        description_ko: "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom 바이큐빅, U8 감마 보정)"
+        snippet: "resize(${1:newWidth}, ${2:newHeight})"
+      - name: crop
+        return: "void"
+        signatures:
+          - params: "int x, int y, int w, int h"
+        description: "Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge."
+        description_ja: "(x, y) から (w x h) を切り出し。 範囲外は最近房 (clamp-to-edge)"
+        description_ko: "(x, y)에서 (w x h) 영역 자르기. 범위 밖은 클램프-투-엣지"
+        snippet: "crop(${1:x}, ${2:y}, ${3:w}, ${4:h})"
+      - name: mirror
+        return: "void"
+        signatures:
+          - params: "bool horizontal, bool vertical"
+        description: "Flip in place. Both true is 180°."
+        description_ja: "in-place 反転。 両方 true で 180度回転"
+        description_ko: "in-place 뒤집기. 둘 다 true는 180도 회전"
+        snippet: "mirror(${1:horizontal}, ${2:vertical})"
+      - name: mirrorH
+        return: "void"
+        signatures:
+          - params: ""
+        description: "Mirror horizontally (alias for mirror(true, false))"
+        description_ja: "水平反転 (mirror(true, false) のエイリアス)"
+        description_ko: "수평 뒤집기 (mirror(true, false) 별칭)"
+        snippet: "mirrorH()"
+      - name: mirrorV
+        return: "void"
+        signatures:
+          - params: ""
+        description: "Mirror vertically (alias for mirror(false, true))"
+        description_ja: "垂直反転 (mirror(false, true) のエイリアス)"
+        description_ko: "수직 뒤집기 (mirror(false, true) 별칭)"
+        snippet: "mirrorV()"
       - name: load
         return: bool
         signatures:
@@ -8512,6 +8560,54 @@ types:
         description_ja: "画像リソースを解放"
         description_ko: "이미지 리소스를 해제"
         snippet: "clear()"
+      - name: halve
+        return: "void"
+        signatures:
+          - params: ""
+        description: "Replace with 2x2 box-averaged half. Gamma-correct for U8."
+        description_ja: "2x2 ボックス平均で半分に縮小 (U8 はガンマ補正)"
+        description_ko: "2x2 박스 평균으로 절반 크기로 축소 (U8은 감마 보정)"
+        snippet: "halve()"
+      - name: resize
+        return: "void"
+        signatures:
+          - params: "int newWidth, int newHeight"
+        description: "Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths."
+        description_ja: "高品質リサイズ (縮小=BoxArea / 拡大=Catmull-Rom bicubic、 U8はガンマ補正)。 高速版が必要なら FBO 経由で"
+        description_ko: "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom 바이큐빅, U8 감마 보정). 빠른 경로는 FBO 활용"
+        snippet: "resize(${1:newWidth}, ${2:newHeight})"
+      - name: crop
+        return: "void"
+        signatures:
+          - params: "int x, int y, int w, int h"
+        description: "Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge."
+        description_ja: "(x, y) から (w x h) を切り出し。 範囲外は最近房 (clamp-to-edge) で埋める"
+        description_ko: "(x, y)에서 (w x h) 영역 자르기. 범위 밖은 클램프-투-엣지로 채움"
+        snippet: "crop(${1:x}, ${2:y}, ${3:w}, ${4:h})"
+      - name: mirror
+        return: "void"
+        signatures:
+          - params: "bool horizontal, bool vertical"
+        description: "Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°."
+        description_ja: "画像を反転。 horizontal=true で左右、 vertical=true で上下、 両方 true で 180度回転"
+        description_ko: "이미지 뒤집기. horizontal=true 좌우, vertical=true 상하, 둘 다 true는 180도 회전"
+        snippet: "mirror(${1:horizontal}, ${2:vertical})"
+      - name: mirrorH
+        return: "void"
+        signatures:
+          - params: ""
+        description: "Mirror horizontally (alias for mirror(true, false))"
+        description_ja: "水平反転 (mirror(true, false) のエイリアス)"
+        description_ko: "수평 뒤집기 (mirror(true, false) 별칭)"
+        snippet: "mirrorH()"
+      - name: mirrorV
+        return: "void"
+        signatures:
+          - params: ""
+        description: "Mirror vertically (alias for mirror(false, true))"
+        description_ja: "垂直反転 (mirror(false, true) のエイリアス)"
+        description_ko: "수직 뒤집기 (mirror(false, true) 별칭)"
+        snippet: "mirrorV()"
       - name: isAllocated
         return: bool
         signatures:

@@ -43,7 +43,6 @@ Features available in openFrameworks but missing in TrussC.
 
 | Category | Method | Description | Priority |
 |:---------|:-------|:------------|:---------|
-| Image | `crop` / `resize` / `mirror` | Basic image manipulation | Medium |
 | System | `launchBrowser` | Open URL in default browser | Medium |
 
 ---

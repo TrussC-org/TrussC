@@ -409,10 +409,7 @@ public:
             }
             lastUpdateFrame_ = currentFrame;
 
-            const bool isFloat = pixels.isFloat();
             const size_t bpp = computeBytesPerPixel();
-
-            std::vector<std::vector<uint8_t>> mipStorage(numMipLevels_ > 1 ? numMipLevels_ - 1 : 0);
 
             sg_image_desc img_desc = {};
             img_desc.width  = width_;
@@ -425,16 +422,20 @@ public:
             img_desc.data.mip_levels[0].ptr  = pixels.getDataVoid();
             img_desc.data.mip_levels[0].size = (size_t)width_ * height_ * bpp;
 
-            const void* prevData = pixels.getDataVoid();
-            int mipW = width_;
-            int mipH = height_;
+            // Lower mip levels: chain Pixels::halve() starting from a clone of
+            // the source. halve() is gamma-correct for U8 buffers (matches the
+            // FBO mipmap convention); F32 buffers are averaged directly.
+            // mipChain entries keep the data alive for the sg_make_image call
+            // below — the pointers we hand to sg_image_data must remain valid
+            // until sg_make_image returns.
+            std::vector<Pixels> mipChain;
+            mipChain.reserve(numMipLevels_ > 1 ? numMipLevels_ - 1 : 0);
+            Pixels current = pixels.clone();
             for (int level = 1; level < numMipLevels_; level++) {
-                mipStorage[level - 1] = generateMipLevel(prevData, mipW, mipH, channels_, isFloat);
-                mipW = std::max(mipW / 2, 1);
-                mipH = std::max(mipH / 2, 1);
-                img_desc.data.mip_levels[level].ptr  = mipStorage[level - 1].data();
-                img_desc.data.mip_levels[level].size = mipStorage[level - 1].size();
-                prevData = mipStorage[level - 1].data();
+                current.halve();
+                mipChain.emplace_back(current.clone());
+                img_desc.data.mip_levels[level].ptr  = mipChain.back().getDataVoid();
+                img_desc.data.mip_levels[level].size = mipChain.back().getTotalBytes();
             }
 
             // Tear down old GPU resources and rebuild.
@@ -709,8 +710,9 @@ private:
         bool isFloat = (pixelFormat_ == SG_PIXELFORMAT_RGBA32F);
         size_t dataSize = (size_t)width_ * height_ * bpp;
 
-        // Storage for mip chain data (kept alive until sg_make_image copies them)
-        std::vector<std::vector<uint8_t>> mipStorage;
+        // Storage for mip chain Pixels (kept alive until sg_make_image
+        // copies them). Used by the Immutable + auto-mipmap path below.
+        std::vector<Pixels> mipChain;
 
         switch (usage_) {
             case TextureUsage::Immutable:
@@ -718,27 +720,31 @@ private:
                     img_desc.data.mip_levels[0].ptr = initialData;
                     img_desc.data.mip_levels[0].size = dataSize;
 
-                    // Generate mip chain
+                    // Generate mip chain via chained Pixels::halve().
+                    // Pixels::halve is gamma-correct for U8 (matches the FBO
+                    // mipmap downsample) and direct-average for F32 (assumed
+                    // already linear). Restricted to channels_ == 4 same as
+                    // before, since Pixels currently only handles 4-channel
+                    // RGBA / RGBAF32 here.
                     if (mipmapped_ && channels_ == 4) {
                         int numLevels = 1 + (int)std::floor(std::log2((float)std::max(width_, height_)));
                         if (numLevels > SG_MAX_MIPMAPS) numLevels = SG_MAX_MIPMAPS;
                         img_desc.num_mipmaps = numLevels;
 
-                        const void* prevData = initialData;
-                        int mipW = width_;
-                        int mipH = height_;
-                        mipStorage.resize(numLevels - 1);
-
+                        Pixels current;
+                        if (isFloat) {
+                            current.setFromFloats(static_cast<const float*>(initialData),
+                                                  width_, height_, channels_);
+                        } else {
+                            current.setFromPixels(static_cast<const unsigned char*>(initialData),
+                                                  width_, height_, channels_);
+                        }
+                        mipChain.reserve(numLevels - 1);
                         for (int level = 1; level < numLevels; level++) {
-                            mipStorage[level - 1] = generateMipLevel(prevData, mipW, mipH, channels_, isFloat);
-                            mipW = std::max(mipW / 2, 1);
-                            mipH = std::max(mipH / 2, 1);
-
-                            size_t mipSize = mipStorage[level - 1].size();
-                            img_desc.data.mip_levels[level].ptr = mipStorage[level - 1].data();
-                            img_desc.data.mip_levels[level].size = mipSize;
-
-                            prevData = mipStorage[level - 1].data();
+                            current.halve();
+                            mipChain.emplace_back(current.clone());
+                            img_desc.data.mip_levels[level].ptr  = mipChain.back().getDataVoid();
+                            img_desc.data.mip_levels[level].size = mipChain.back().getTotalBytes();
                         }
                     }
                 }
@@ -910,49 +916,9 @@ private:
         internal::restoreCurrentPipeline();
     }
 
-    // Box filter: downsample by 2x in each dimension
-    // Supports RGBA8 (isFloat=false) and RGBA32F (isFloat=true)
-    static std::vector<uint8_t> generateMipLevel(
-            const void* src, int srcW, int srcH, int channels, bool isFloat) {
-        int dstW = std::max(srcW / 2, 1);
-        int dstH = std::max(srcH / 2, 1);
-        size_t bytesPerPixel = channels * (isFloat ? sizeof(float) : 1);
-        std::vector<uint8_t> dst(dstW * dstH * bytesPerPixel);
-
-        for (int y = 0; y < dstH; y++) {
-            for (int x = 0; x < dstW; x++) {
-                int sx = x * 2;
-                int sy = y * 2;
-                // Clamp to source bounds for odd dimensions
-                int sx1 = std::min(sx + 1, srcW - 1);
-                int sy1 = std::min(sy + 1, srcH - 1);
-
-                if (isFloat) {
-                    const float* s = static_cast<const float*>(src);
-                    float* d = reinterpret_cast<float*>(dst.data());
-                    int dIdx = (y * dstW + x) * channels;
-                    for (int c = 0; c < channels; c++) {
-                        float v00 = s[(sy  * srcW + sx ) * channels + c];
-                        float v10 = s[(sy  * srcW + sx1) * channels + c];
-                        float v01 = s[(sy1 * srcW + sx ) * channels + c];
-                        float v11 = s[(sy1 * srcW + sx1) * channels + c];
-                        d[dIdx + c] = (v00 + v10 + v01 + v11) * 0.25f;
-                    }
-                } else {
-                    const uint8_t* s = static_cast<const uint8_t*>(src);
-                    int dIdx = (y * dstW + x) * channels;
-                    for (int c = 0; c < channels; c++) {
-                        int v00 = s[(sy  * srcW + sx ) * channels + c];
-                        int v10 = s[(sy  * srcW + sx1) * channels + c];
-                        int v01 = s[(sy1 * srcW + sx ) * channels + c];
-                        int v11 = s[(sy1 * srcW + sx1) * channels + c];
-                        dst[dIdx + c] = (uint8_t)((v00 + v10 + v01 + v11 + 2) / 4);
-                    }
-                }
-            }
-        }
-        return dst;
-    }
+    // Mipmap chain generation lives in Pixels::halve (gamma-correct for U8,
+    // direct-average for F32). The old static generateMipLevel() helper that
+    // used to live here has been folded into that single implementation.
 
     void moveFrom(Texture&& other) {
         image_ = other.image_;
