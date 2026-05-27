@@ -692,6 +692,69 @@ categories:
         sketch: true
         snippet: "getBitmapStringBBox(${1:\"text\"}, ${2:x}, ${3:y})"
 
+      # ---------------------------------------------------------------------
+      # Bitmap font extension API (tc::bitmapfont:: namespace)
+      # ---------------------------------------------------------------------
+      # Addons / app code can register their own glyphs for any Unicode
+      # codepoint. drawBitmapString picks them up automatically. ASCII
+      # (U+0020-U+007E) is built in; codepoints with no glyph registered
+      # fall back to a TOFU □ marker.
+
+      - name: bitmapfont::registerGlyph
+        return: "void"
+        signatures:
+          - params: "const bitmapfont::Glyph& g"
+            params_simple: "glyph"
+        description: "Register a bitmap glyph for a Unicode codepoint (extends drawBitmapString)"
+        description_ja: "Unicode コードポイントにビットマップグリフを登録 (drawBitmapString を拡張)"
+        description_ko: "유니코드 코드포인트에 비트맵 글리프 등록 (drawBitmapString 확장)"
+        sketch: false
+        snippet: "bitmapfont::registerGlyph({${1:cp}, ${2:data}, bitmapfont::Width::${3:Fullwidth}})"
+
+      - name: bitmapfont::registerGlyphs
+        return: "void"
+        signatures:
+          - params: "const bitmapfont::Glyph (&glyphs)[N]"
+            params_simple: "glyphs[]"
+        description: "Register a batch of bitmap glyphs at once"
+        description_ja: "複数のビットマップグリフを一括登録"
+        description_ko: "여러 비트맵 글리프를 한 번에 등록"
+        sketch: false
+        snippet: "bitmapfont::registerGlyphs(${1:GLYPHS})"
+
+      - name: bitmapfont::updateGlyph
+        return: "void"
+        signatures:
+          - params: "uint32_t cp, const uint8_t* newData"
+            params_simple: "codepoint, data"
+        description: "Swap an already-registered glyph's pixel data (atlas cell unchanged). Useful for per-frame animation."
+        description_ja: "登録済みグリフのピクセルデータだけ差し替え（アトラス位置は維持）。フレームごとのアニメーションに便利"
+        description_ko: "이미 등록된 글리프의 픽셀 데이터만 교체 (아틀라스 위치 유지). 프레임 애니메이션에 유용"
+        sketch: false
+        snippet: "bitmapfont::updateGlyph(${1:0xE000}, ${2:newData})"
+
+      - name: bitmapfont::compile8x13
+        return: "std::array<uint8_t, 13>"
+        signatures:
+          - params: "const char* const (&rows)[13]"
+            params_simple: "rows"
+        description: "Compile-time ASCII art -> packed halfwidth (8x13) glyph bytes. '#' = lit, '.' = empty."
+        description_ja: "ASCII アートをコンパイル時に半角 (8x13) パックバイトに変換。'#' = 描画、'.' = 透明"
+        description_ko: "ASCII 아트를 컴파일 타임에 반각 (8x13) 패킹된 바이트로 변환. '#' = 채움, '.' = 빈 칸"
+        sketch: false
+        snippet: "bitmapfont::compile8x13({${1:rows}})"
+
+      - name: bitmapfont::compile16x13
+        return: "std::array<uint8_t, 26>"
+        signatures:
+          - params: "const char* const (&rows)[13]"
+            params_simple: "rows"
+        description: "Compile-time ASCII art -> packed fullwidth (16x13) glyph bytes. '#' = lit, '.' = empty."
+        description_ja: "ASCII アートをコンパイル時に全角 (16x13) パックバイトに変換。'#' = 描画、'.' = 透明"
+        description_ko: "ASCII 아트를 컴파일 타임에 전각 (16x13) 패킹된 바이트로 변환. '#' = 채움, '.' = 빈 칸"
+        sketch: false
+        snippet: "bitmapfont::compile16x13({${1:rows}})"
+
       - name: setBitmapLineHeight
         return: "void"
         signatures:

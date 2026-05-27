@@ -175,13 +175,58 @@ setStrokeWeight(2.0f); // Affects drawStroke / beginStroke
 
 ### Text
 ```cpp
-drawBitmapString("Hello", x, y);              // Built-in bitmap font
+drawBitmapString("Hello", x, y);              // Built-in bitmap font (ASCII)
 drawBitmapString("Hello", x, y, 2.0f);        // Scaled
+// drawBitmapString takes UTF-8 and mixes halfwidth (8x13) + fullwidth
+// (16x13) glyphs. Codepoints with no glyph registered render as TOFU □.
 
 Font font;
 font.load("myfont.ttf", 24);                  // TrueType font
 font.drawString("Hello", x, y);
 ```
+
+#### Extending drawBitmapString
+ASCII is built in. Apps / addons register additional glyphs for any
+Unicode codepoint via `tc::bitmapfont::`. The atlas is allocated **lazily**
+and grows tier-by-tier — headless apps and apps that never call
+`drawBitmapString` pay 0 KB of GPU memory.
+
+```cpp
+using namespace bitmapfont;
+
+constexpr auto HEART = compile16x13({
+    "................",
+    ".##.##.##.##....",
+    ".###############",
+    "..############..",
+    "...##########...",
+    "....########....",
+    ".....######.....",
+    "......####......",
+    ".......##.......",
+    "................",
+    "................",
+    "................",
+    "................",
+});
+
+void setup() {
+    static constexpr Glyph GLYPHS[] = {
+        { 0x2665, HEART.data(), Width::Fullwidth },  // ♥
+    };
+    registerGlyphs(GLYPHS);
+}
+```
+
+Key API:
+- `registerGlyph(Glyph)` / `registerGlyphs(Glyph[])`
+- `updateGlyph(cp, newData)` — swap a registered glyph's data (animation)
+- `compile8x13(rows)` / `compile16x13(rows)` — constexpr ASCII-art builders
+- `Width::Halfwidth` (8x13) / `Width::Fullwidth` (16x13)
+
+PUA (U+E000–U+F8FF) is the convention for custom logos / icons / animation
+frames. Bulk packs (e.g. kana) live in separate addons — see
+`tcxBitmapStringKana` for the pattern.
 
 ### Color
 ```cpp
