@@ -6959,6 +6959,43 @@ constants:
     sketch: true
 
   # Font path constants
+  # WritingMode constants — Font::setWritingMode
+  - name: "WritingMode::Horizontal"
+    value: "0"
+    description: "Left-to-right horizontal text (default)"
+    description_ja: "左から右の横書き（デフォルト）"
+    description_ko: "왼쪽에서 오른쪽 가로쓰기 (기본값)"
+    sketch: true
+
+  - name: "WritingMode::VerticalRL"
+    value: "1"
+    description: "Top-to-bottom columns, columns flow right-to-left (Japanese tategaki)"
+    description_ja: "上から下に列、列は右から左へ流れる（縦書き）"
+    description_ko: "위에서 아래로 열, 열은 오른쪽에서 왼쪽으로 (일본어 세로쓰기)"
+    sketch: true
+
+  # TcyMode constants — Font::setTcyDigits / setTcyLatin (tate-chu-yoko)
+  - name: "TcyMode::Rotate"
+    value: "0"
+    description: "Rotate the whole Latin / digit run 90 degrees CW so it reads top-to-bottom"
+    description_ja: "Latin / 数字の連続を 90度 CW 回転して上から下に流す"
+    description_ko: "라틴 / 숫자 연속을 90도 시계방향 회전"
+    sketch: true
+
+  - name: "TcyMode::Upright"
+    value: "1"
+    description: "Each glyph upright, one per CJK-sized cell (一文字ずつ正立)"
+    description_ja: "1文字ずつ正立で縦に並べる"
+    description_ko: "각 글리프를 한 셀씩 정립으로 배치"
+    sketch: true
+
+  - name: "TcyMode::Combine"
+    value: "2"
+    description: "Squeeze a Latin / digit run into a single CJK cell (true 縦中横)"
+    description_ja: "Latin / 数字の連続を 1セルに圧縮して縦書きの中に埋め込む (縦中横)"
+    description_ko: "라틴 / 숫자 연속을 한 셀에 압축 (다테추요코)"
+    sketch: true
+
   - name: FONT_SANS
     value: "string"
     description: "System sans-serif font path (CDN URL on Web)"
@@ -9621,6 +9658,42 @@ types:
         description_ko: "아틀라스 페이지 수를 얻음"
         sketch: true
         snippet: "getAtlasCount()"
+      - name: setWritingMode
+        return: void
+        signatures:
+          - params: "WritingMode mode"
+        description: "Switch between horizontal and vertical (tategaki) writing. Default is Horizontal (existing behavior unchanged)."
+        description_ja: "横書き / 縦書きを切り替え。デフォルトは Horizontal (既存挙動と同じ)"
+        description_ko: "가로쓰기 / 세로쓰기 전환. 기본값은 Horizontal"
+        sketch: true
+        snippet: "setWritingMode(${1:WritingMode::VerticalRL})"
+      - name: getWritingMode
+        return: WritingMode
+        signatures:
+          - params: ""
+        description: "Current writing mode"
+        description_ja: "現在の書字方向を取得"
+        description_ko: "현재 쓰기 방향을 얻음"
+        sketch: true
+        snippet: "getWritingMode()"
+      - name: setTcyDigits
+        return: void
+        signatures:
+          - params: "int maxDigits, TcyMode inMode, TcyMode overflowMode"
+        description: "Tate-chu-yoko config for ASCII digit runs in vertical text. Runs with <= maxDigits use inMode (typically Combine — squeezed into one cell); longer runs fall back to overflowMode (typically Rotate)."
+        description_ja: "縦書きで連続する ASCII 数字の縦中横設定。maxDigits 桁以内なら inMode (通常 Combine = 1セルに圧縮)、超えたら overflowMode (通常 Rotate)"
+        description_ko: "세로쓰기에서 연속된 ASCII 숫자의 다테추요코 설정"
+        sketch: true
+        snippet: "setTcyDigits(${1:2}, ${2:TcyMode::Combine}, ${3:TcyMode::Rotate})"
+      - name: setTcyLatin
+        return: void
+        signatures:
+          - params: "TcyMode mode"
+        description: "Tate-chu-yoko mode for Latin letter runs in vertical text. Default is Rotate (whole run rotated 90 CW)."
+        description_ja: "縦書きで連続する Latin 文字の表示方式。デフォルトは Rotate (連続を 90度 CW 回転)"
+        description_ko: "세로쓰기에서 연속된 라틴 문자의 표시 방식"
+        sketch: true
+        snippet: "setTcyLatin(${1:TcyMode::Rotate})"
 
   - name: FileWriter
     description: "Streaming file writer with immediate flush"

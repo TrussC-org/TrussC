@@ -1,16 +1,6 @@
 #include "tcApp.h"
 #include "TrussC.h"
 
-// macOS Japanese font (Hiragino Sans W3) — has full CJK + vertical-form glyphs
-// (U+FE10–FE4F) needed to show tategaki punctuation/brackets nicely.
-#if defined(__APPLE__)
-    #define TC_FONT_JP "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"
-#elif defined(_WIN32)
-    #define TC_FONT_JP "C:/Windows/Fonts/YuGothM.ttc"
-#else
-    #define TC_FONT_JP "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-#endif
-
 void tcApp::setup() {
     setFps(VSYNC);
 

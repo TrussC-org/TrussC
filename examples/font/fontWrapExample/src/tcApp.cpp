@@ -1,14 +1,6 @@
 #include "tcApp.h"
 #include "TrussC.h"
 
-#if defined(__APPLE__)
-    #define TC_FONT_JP "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"
-#elif defined(_WIN32)
-    #define TC_FONT_JP "C:/Windows/Fonts/YuGothM.ttc"
-#else
-    #define TC_FONT_JP "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-#endif
-
 void tcApp::setup() {
     setFps(VSYNC);
     fontH.load(TC_FONT_JP, 20);

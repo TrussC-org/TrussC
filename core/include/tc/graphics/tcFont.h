@@ -51,26 +51,31 @@
     #define TC_FONT_SANS  "https://cdn.jsdelivr.net/fontsource/fonts/noto-sans@latest/latin-400-normal.ttf"
     #define TC_FONT_SERIF "https://cdn.jsdelivr.net/fontsource/fonts/noto-serif@latest/latin-400-normal.ttf"
     #define TC_FONT_MONO  "https://cdn.jsdelivr.net/fontsource/fonts/noto-sans-mono@latest/latin-400-normal.ttf"
+    #define TC_FONT_JP    "https://cdn.jsdelivr.net/fontsource/fonts/noto-sans-jp@latest/japanese-400-normal.ttf"
 #elif defined(_WIN32)
     // Windows
     #define TC_FONT_SANS  "C:/Windows/Fonts/segoeui.ttf"
     #define TC_FONT_SERIF "C:/Windows/Fonts/times.ttf"
     #define TC_FONT_MONO  "C:/Windows/Fonts/consola.ttf"
+    #define TC_FONT_JP    "C:/Windows/Fonts/YuGothM.ttc"
 #elif defined(__APPLE__)
     // macOS
     #define TC_FONT_SANS  "/System/Library/Fonts/Helvetica.ttc"
     #define TC_FONT_SERIF "/System/Library/Fonts/Times.ttc"
     #define TC_FONT_MONO  "/System/Library/Fonts/Menlo.ttc"
+    #define TC_FONT_JP    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"
 #elif defined(__ANDROID__)
     // Android system fonts (accessible from NDK without permissions)
     #define TC_FONT_SANS  "/system/fonts/Roboto-Regular.ttf"
     #define TC_FONT_SERIF "/system/fonts/NotoSerif-Regular.ttf"
     #define TC_FONT_MONO  "/system/fonts/DroidSansMono.ttf"
+    #define TC_FONT_JP    "/system/fonts/NotoSansCJK-Regular.ttc"
 #else
     // Linux
     #define TC_FONT_SANS  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
     #define TC_FONT_SERIF "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
     #define TC_FONT_MONO  "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
+    #define TC_FONT_JP    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 #endif
 
 namespace trussc {
