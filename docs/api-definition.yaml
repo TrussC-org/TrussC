@@ -3507,6 +3507,94 @@ categories:
         sketch: true
         snippet: "stop()"
 
+      - name: pause
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Pause playback (resume() to continue)"
+        description_ja: "再生を一時停止 (resume() で再開)"
+        description_ko: "재생을 일시 정지 (resume()로 재개)"
+        sketch: true
+        snippet: "pause()"
+
+      - name: resume
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Resume paused playback"
+        description_ja: "一時停止していた再生を再開"
+        description_ko: "일시 정지된 재생을 재개"
+        sketch: true
+        snippet: "resume()"
+
+      - name: isPlaying
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "True while playing (false if stopped, paused, or never played)"
+        description_ja: "再生中なら true (停止/一時停止/未再生なら false)"
+        description_ko: "재생 중이면 true (정지/일시정지/미재생이면 false)"
+        sketch: true
+        snippet: "isPlaying()"
+
+      - name: isPaused
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "True while paused"
+        description_ja: "一時停止中なら true"
+        description_ko: "일시 정지 중이면 true"
+        sketch: true
+        snippet: "isPaused()"
+
+      - name: isLoaded
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "True after a successful load() / loadStream() / loadTestTone()"
+        description_ja: "load() / loadStream() / loadTestTone() に成功していれば true"
+        description_ko: "load() / loadStream() / loadTestTone()이 성공했으면 true"
+        sketch: true
+        snippet: "isLoaded()"
+
+      - name: getPosition
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get current playback position in seconds"
+        description_ja: "現在の再生位置を秒で取得"
+        description_ko: "현재 재생 위치를 초로 가져옴"
+        sketch: true
+        snippet: "getPosition()"
+
+      - name: setPosition
+        return: "void"
+        signatures:
+          - params: "float seconds"
+            params_simple: "seconds"
+        description: "Seek to a specific time in seconds. On streams, costs ~10 ms blackout while the ring refills."
+        description_ja: "指定秒数にシーク。ストリームでは ring 補充に ~10ms 無音"
+        description_ko: "지정 시간(초)으로 시크. 스트림은 링 재충전에 ~10ms 무음"
+        sketch: true
+        snippet: "setPosition(${1:5.0})"
+
+      - name: getDuration
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get total duration of the loaded sound in seconds"
+        description_ja: "読み込まれたサウンドの全体長を秒で取得"
+        description_ko: "로드된 사운드의 전체 길이를 초로 가져옴"
+        sketch: true
+        snippet: "getDuration()"
+
       - name: setVolume
         return: "void"
         signatures:
@@ -3518,6 +3606,61 @@ categories:
         sketch: true
         snippet: "setVolume(${1:0.8})"
 
+      - name: getVolume
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get current volume"
+        description_ja: "現在の音量を取得"
+        description_ko: "현재 음량을 가져옴"
+        sketch: true
+        snippet: "getVolume()"
+
+      - name: setPan
+        return: "void"
+        signatures:
+          - params: "float pan"
+            params_simple: "pan"
+        description: "Set stereo balance (-1.0 left ~ 0 center ~ +1.0 right). On multi-ch devices only affects ch0/ch1."
+        description_ja: "ステレオバランス (-1.0=L, 0=中央, +1.0=R) を設定。多 ch デバイスでは ch0/ch1 のみに作用"
+        description_ko: "스테레오 밸런스 (-1.0=좌, 0=중앙, +1.0=우) 설정. 다채널 장치는 ch0/ch1만 적용"
+        sketch: true
+        snippet: "setPan(${1:0.0})"
+
+      - name: getPan
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get current pan value"
+        description_ja: "現在の pan を取得"
+        description_ko: "현재 pan을 가져옴"
+        sketch: true
+        snippet: "getPan()"
+
+      - name: setSpeed
+        return: "void"
+        signatures:
+          - params: "float speed"
+            params_simple: "speed"
+        description: "Playback speed [-10, 10]. Negative = reverse (eager only). Streams clamp to [0, 10]. 0 = freeze."
+        description_ja: "再生速度 [-10, 10]。負=逆再生 (eager のみ)。stream は [0, 10] にクランプ。0=フリーズ"
+        description_ko: "재생 속도 [-10, 10]. 음수=역재생 (eager만). 스트림은 [0, 10]으로 클램프. 0=프리즈"
+        sketch: true
+        snippet: "setSpeed(${1:1.0})"
+
+      - name: getSpeed
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get current playback speed"
+        description_ja: "現在の再生速度を取得"
+        description_ko: "현재 재생 속도를 가져옴"
+        sketch: true
+        snippet: "getSpeed()"
+
       - name: setLoop
         return: "void"
         signatures:
@@ -3528,6 +3671,17 @@ categories:
         description_ko: "반복 재생을 활성/비활성"
         sketch: true
         snippet: "setLoop(${1:true})"
+
+      - name: isLoop
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "True if looping is enabled"
+        description_ja: "ループ再生が有効なら true"
+        description_ko: "반복 재생이 활성화되어 있으면 true"
+        sketch: true
+        snippet: "isLoop()"
 
       - name: setMixMode
         return: "void"
@@ -3585,6 +3739,148 @@ categories:
         description_ko: "채널 게인을 해제하고 uniform 1.0으로 복귀"
         sketch: false
         snippet: "clearChannelGains()"
+
+  # ==========================================================================
+  # AudioEngine
+  # ==========================================================================
+  - id: audioengine
+    name: "AudioEngine"
+    name_ja: "オーディオエンジン"
+    name_ko: "오디오 엔진"
+    functions:
+      - name: getInstance
+        return: "AudioEngine&"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get the global AudioEngine singleton"
+        description_ja: "AudioEngine シングルトンを取得"
+        description_ko: "AudioEngine 싱글톤을 가져옴"
+        sketch: false
+        snippet: "AudioEngine::getInstance()"
+
+      - name: init
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+          - params: "const AudioSettings& settings"
+            params_simple: "settings"
+        description: "Initialize / re-initialize audio engine. Re-entrant: calling on a running engine stops the device, migrates active voices to new settings, restarts. ~30-100 ms gap; voices keep playback position."
+        description_ja: "オーディオエンジンを初期化 / 再初期化。再 init で active な voice を移行しつつデバイス再起動 (~30-100ms 無音)"
+        description_ko: "오디오 엔진 초기화 / 재초기화. 재 init 시 활성 voice를 이전하며 장치 재시작 (~30-100ms 무음)"
+        sketch: false
+        snippet: "AudioEngine::getInstance().init()"
+
+      - name: shutdown
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Shut down the audio device. Usually called automatically at program exit."
+        description_ja: "オーディオデバイスを停止。通常はプログラム終了時に自動呼出"
+        description_ko: "오디오 장치를 종료. 일반적으로 프로그램 종료 시 자동 호출"
+        sketch: false
+        snippet: "AudioEngine::getInstance().shutdown()"
+
+      - name: listDevices
+        return: "vector<AudioDeviceInfo>"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Enumerate available playback devices. Returns name + isDefault for each."
+        description_ja: "利用可能な再生デバイスを列挙。各 device の name + isDefault を返す"
+        description_ko: "사용 가능한 재생 장치 열거. 각 장치의 name + isDefault 반환"
+        sketch: false
+        snippet: "AudioEngine::listDevices()"
+
+      - name: getSampleRate
+        return: "int"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Current engine sample rate (Hz). Returns default (48000) if not yet initialized."
+        description_ja: "現在のエンジン sample rate (Hz)。未 init なら default (48000)"
+        description_ko: "현재 엔진 sample rate (Hz). 미 init이면 default (48000)"
+        sketch: false
+        snippet: "AudioEngine::getInstance().getSampleRate()"
+
+      - name: getChannels
+        return: "int"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Current engine output channel count"
+        description_ja: "現在のエンジン出力 ch 数"
+        description_ko: "현재 엔진 출력 채널 수"
+        sketch: false
+        snippet: "AudioEngine::getInstance().getChannels()"
+
+      - name: getMaxPolyphony
+        return: "int"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Max simultaneously-playing Sound voices"
+        description_ja: "同時再生可能な Sound voice 数"
+        description_ko: "동시 재생 가능한 Sound voice 수"
+        sketch: false
+        snippet: "AudioEngine::getInstance().getMaxPolyphony()"
+
+      - name: getBufferSize
+        return: "int"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Current device buffer size in frames (0 = miniaudio default)"
+        description_ja: "現在のデバイス buffer サイズ (frames)、0 は miniaudio おまかせ"
+        description_ko: "현재 장치 버퍼 크기 (frames), 0은 miniaudio 기본값"
+        sketch: false
+        snippet: "AudioEngine::getInstance().getBufferSize()"
+
+      - name: isInitialized
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "True after a successful init()"
+        description_ja: "init() に成功していれば true"
+        description_ko: "init()이 성공했으면 true"
+        sketch: false
+        snippet: "AudioEngine::getInstance().isInitialized()"
+
+      - name: audioOut
+        return: "Event<AudioOutBuffer>"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Real-time playback callback event. listen() to add a synthesis / processing listener. Fires per audio buffer on the audio thread; keep RT-safe."
+        description_ja: "リアルタイム再生コールバック event。listen() でシンセ / 処理用 listener を追加。各バッファごとに audio thread で発火、RT-safe を維持"
+        description_ko: "실시간 재생 콜백 이벤트. listen()으로 신스 / 처리 리스너 추가. 버퍼별로 오디오 스레드에서 발화, RT-safe 유지"
+        sketch: false
+        snippet: "AudioEngine::getInstance().audioOut.listen([](AudioOutBuffer& buf){ /* ... */ })"
+
+      - name: audioIn
+        return: "Event<AudioInBuffer>"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Real-time capture callback event (microphone input). RT-safe same as audioOut."
+        description_ja: "リアルタイム入力コールバック event (マイク入力)。RT-safe 要件は audioOut と同様"
+        description_ko: "실시간 캡처 콜백 이벤트 (마이크 입력). RT-safe 요건은 audioOut과 동일"
+        sketch: false
+        snippet: "AudioEngine::getInstance().audioIn.listen([](AudioInBuffer& buf){ /* ... */ })"
+
+      - name: audioDeviceChanged
+        return: "Event<AudioDeviceChangedArgs>"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Fires after every successful init() (initial AND re-init). Args carry the resolved device's real name, isDefaultDevice flag, sampleRate, channels, bufferSize, maxPolyphony. Listener runs on the thread that called init() (main), not the audio thread."
+        description_ja: "成功した init() (初回 / 再 init) 後に発火。args は解決済みデバイス名、isDefaultDevice、sampleRate、channels、bufferSize、maxPolyphony。listener は init() を呼んだスレッド (通常 main) で実行"
+        description_ko: "성공한 init() (초기 / 재 init) 후 발화. args는 해결된 장치명, isDefaultDevice, sampleRate, channels, bufferSize, maxPolyphony. listener는 init()을 호출한 스레드 (보통 main)에서 실행"
+        sketch: false
+        snippet: "AudioEngine::getInstance().audioDeviceChanged.listen([](AudioDeviceChangedArgs& a){ /* ... */ })"
 
   # ==========================================================================
   # ChipSound
