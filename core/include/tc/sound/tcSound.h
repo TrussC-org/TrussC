@@ -452,6 +452,83 @@ enum class MixMode {
 };
 
 // ---------------------------------------------------------------------------
+// Atomic shared_ptr shim
+//
+// PlayingSound stores routing snapshots (channelMap / channelGains) as
+// shared_ptr that the UI thread updates and the audio thread reads. We'd
+// like to use the C++20 std::atomic<std::shared_ptr<T>> specialization,
+// but Apple libc++ doesn't ship it yet (verified 2026-05). We fall back
+// to the (C++20-deprecated) std::atomic_load / std::atomic_store free
+// functions, suppressing the deprecation warning locally — when the
+// specialization lands the storage type and accessors auto-switch.
+// ---------------------------------------------------------------------------
+namespace tcsound_detail {
+
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
+    // Native C++20 specialization path — lock-free where supported,
+    // no deprecation warnings.
+    template<class T>
+    using AtomicSharedPtr = std::atomic<std::shared_ptr<T>>;
+
+    template<class T>
+    inline std::shared_ptr<T> sharedLoad(const AtomicSharedPtr<T>& p) {
+        return p.load(std::memory_order_acquire);
+    }
+    template<class T>
+    inline void sharedStore(AtomicSharedPtr<T>& p, std::shared_ptr<T> v) {
+        p.store(std::move(v), std::memory_order_release);
+    }
+#else
+    // Fallback: a plain shared_ptr accessed via the deprecated free-
+    // function atomic API. Still lock-free for shared_ptr on common
+    // platforms; the deprecation is for ergonomics only.
+    template<class T>
+    using AtomicSharedPtr = std::shared_ptr<T>;
+
+    // Use the *_explicit forms with matching acquire/release ordering so
+    // this path is symmetric with the C++20 specialization branch above
+    // — without the explicit, the free functions default to seq_cst and
+    // we'd silently take a stronger fence on Apple while GCC / MSVC ran
+    // with the weaker order. Identical observable behavior for our 1
+    // producer (UI) / 1 consumer (audio) usage, but keeps the two
+    // branches honest.
+    template<class T>
+    inline std::shared_ptr<T> sharedLoad(const std::shared_ptr<T>& p) {
+#       if defined(__clang__) || defined(__GNUC__)
+#           pragma GCC diagnostic push
+#           pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#       elif defined(_MSC_VER)
+#           pragma warning(push)
+#           pragma warning(disable: 4996)
+#       endif
+        return std::atomic_load_explicit(&p, std::memory_order_acquire);
+#       if defined(__clang__) || defined(__GNUC__)
+#           pragma GCC diagnostic pop
+#       elif defined(_MSC_VER)
+#           pragma warning(pop)
+#       endif
+    }
+    template<class T>
+    inline void sharedStore(std::shared_ptr<T>& p, std::shared_ptr<T> v) {
+#       if defined(__clang__) || defined(__GNUC__)
+#           pragma GCC diagnostic push
+#           pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#       elif defined(_MSC_VER)
+#           pragma warning(push)
+#           pragma warning(disable: 4996)
+#       endif
+        std::atomic_store_explicit(&p, std::move(v), std::memory_order_release);
+#       if defined(__clang__) || defined(__GNUC__)
+#           pragma GCC diagnostic pop
+#       elif defined(_MSC_VER)
+#           pragma warning(pop)
+#       endif
+    }
+#endif
+
+} // namespace tcsound_detail
+
+// ---------------------------------------------------------------------------
 // Playing Sound Instance
 // ---------------------------------------------------------------------------
 struct PlayingSound {
@@ -473,19 +550,19 @@ struct PlayingSound {
     std::atomic<bool> paused{false};
 
     // Routing. mixMode is a plain atomic int (enum value). channelMap /
-    // channelGains are shared_ptr-to-immutable-vector; the UI thread
-    // installs new versions via std::atomic_store and the audio thread
-    // reads them via std::atomic_load each callback (C++20 deprecated the
-    // free functions but they're still standard and lock-free for
-    // shared_ptr on common platforms — the C++20 atomic<shared_ptr<T>>
-    // specialization is not yet in Apple's libc++).
+    // channelGains are atomically-updatable shared_ptr — the UI thread
+    // installs new versions via tcsound_detail::sharedStore and the
+    // audio thread reads via tcsound_detail::sharedLoad each callback.
+    // The shim type auto-switches between C++20
+    // std::atomic<std::shared_ptr<T>> and the deprecated free-function
+    // atomic API based on __cpp_lib_atomic_shared_ptr.
     //
     // null map  → use mixMode rules
     // non-null  → map is the source of truth
     // gains entries beyond .size() default to 1.0
     std::atomic<int> mixMode{(int)MixMode::Auto};
-    std::shared_ptr<const std::vector<std::vector<int>>> channelMap;
-    std::shared_ptr<const std::vector<float>>            channelGains;
+    tcsound_detail::AtomicSharedPtr<const std::vector<std::vector<int>>> channelMap;
+    tcsound_detail::AtomicSharedPtr<const std::vector<float>>            channelGains;
 
     // Playback position (floating-point for speed adjustment)
     double positionF{0.0};
@@ -742,10 +819,10 @@ private:
         float panR = (pan >= 0.0f) ? 1.0f : (1.0f + pan);
 
         // Snapshot routing state once at the top of the callback. Audio
-        // thread reads via atomic_load so the UI thread's setChannelMap
-        // store sees a happens-before edge.
-        auto map = std::atomic_load(&sound.channelMap);
-        auto gains = std::atomic_load(&sound.channelGains);
+        // thread reads atomically so the UI thread's setChannelMap store
+        // sees a happens-before edge.
+        auto map = tcsound_detail::sharedLoad(sound.channelMap);
+        auto gains = tcsound_detail::sharedLoad(sound.channelGains);
         int mm = sound.mixMode.load(std::memory_order_acquire);
         const int srcCh = src.channels;
         const int mapSize = map ? (int)map->size() : 0;
@@ -1089,8 +1166,8 @@ public:
             playing_->speed = speed_;
             playing_->loop = loop_;
             playing_->mixMode.store((int)mixMode_, std::memory_order_release);
-            std::atomic_store(&playing_->channelMap,   channelMap_);
-            std::atomic_store(&playing_->channelGains, channelGains_);
+            tcsound_detail::sharedStore(playing_->channelMap,   channelMap_);
+            tcsound_detail::sharedStore(playing_->channelGains, channelGains_);
         }
     }
 
@@ -1231,7 +1308,7 @@ public:
                 : std::make_shared<const std::vector<std::vector<int>>>(std::move(map));
         channelMap_ = sp;
         if (playing_) {
-            std::atomic_store(&playing_->channelMap, sp);
+            tcsound_detail::sharedStore(playing_->channelMap, sp);
         }
     }
 
@@ -1249,7 +1326,7 @@ public:
                 : std::make_shared<const std::vector<float>>(gains);
         channelGains_ = sp;
         if (playing_) {
-            std::atomic_store(&playing_->channelGains, sp);
+            tcsound_detail::sharedStore(playing_->channelGains, sp);
         }
     }
 

@@ -442,8 +442,8 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
     // Snapshot routing state for this callback. Stream ring is always 2ch
     // (the per-voice decoder is configured to output stereo), so routing
     // operates on src.channels = StreamInstance::CHANNELS.
-    auto map = std::atomic_load(&sound.channelMap);
-    auto gains = std::atomic_load(&sound.channelGains);
+    auto map = tcsound_detail::sharedLoad(sound.channelMap);
+    auto gains = tcsound_detail::sharedLoad(sound.channelGains);
     int mm = sound.mixMode.load(std::memory_order_acquire);
     const int srcCh = StreamInstance::CHANNELS;
     const int mapSize = map ? (int)map->size() : 0;
