@@ -3400,6 +3400,28 @@ categories:
         sketch: true
         snippet: "load(${1:\"sound.wav\"})"
 
+      - name: loadStream
+        return: "bool"
+        signatures:
+          - params: "const string& path, int maxPolyphony = 1"
+            params_simple: "path, maxPolyphony"
+        description: "Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count."
+        description_ja: "ディスクからストリーミング再生 (WAV/MP3/FLAC)。長尺ファイル向け、メモリ節約。maxPolyphony は同時再生数"
+        description_ko: "디스크에서 스트리밍 재생 (WAV/MP3/FLAC). 긴 파일 적합, 메모리 절약. maxPolyphony는 동시 재생 수"
+        sketch: true
+        snippet: "loadStream(${1:\"music.wav\"})"
+
+      - name: isStreaming
+        return: "bool"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "True if this Sound was loaded via loadStream() (vs eager load())"
+        description_ja: "loadStream() で読み込んでいれば true"
+        description_ko: "loadStream()으로 로드되었으면 true"
+        sketch: true
+        snippet: "isStreaming()"
+
       - name: play
         return: "void"
         signatures:
@@ -3443,6 +3465,63 @@ categories:
         description_ko: "반복 재생을 활성/비활성"
         sketch: true
         snippet: "setLoop(${1:true})"
+
+      - name: setMixMode
+        return: "void"
+        signatures:
+          - params: "MixMode m"
+            params_simple: "mode"
+        description: "Channel routing preset. Auto (default) = mono broadcasts / multi 1:1. DownmixMono = average src to all out ch."
+        description_ja: "チャンネルルーティング preset。Auto (デフォ)=mono は broadcast / multi は 1:1、DownmixMono=全 src を平均して全 out ch に同じ音"
+        description_ko: "채널 라우팅 프리셋. Auto=mono는 broadcast / multi는 1:1, DownmixMono=모든 소스를 평균하여 모든 출력 채널로"
+        sketch: false
+        snippet: "setMixMode(MixMode::DownmixMono)"
+
+      - name: setChannelMap
+        return: "void"
+        signatures:
+          - params: "const vector<int>& map"
+            params_simple: "map"
+          - params: "vector<vector<int>> map"
+            params_simple: "map"
+        description: "Per-output-channel routing. 1D: each entry is a src ch index (-1 = silent). 2D: each entry lists src ch indices that sum into that output."
+        description_ja: "出力 ch ごとのルーティング。1D 版は各要素が src ch index (-1=無音)、2D 版は各要素が sum 対象の src ch リスト"
+        description_ko: "출력 채널별 라우팅. 1D는 각 항목이 src ch 인덱스 (-1=무음), 2D는 각 항목이 합산할 src ch 리스트"
+        sketch: false
+        snippet: "setChannelMap({0, 1})"
+
+      - name: setChannelGains
+        return: "void"
+        signatures:
+          - params: "const vector<float>& gains"
+            params_simple: "gains"
+        description: "Per-output-channel gain multiplier. Entries beyond .size() default to 1.0. No internal normalization (setVolume is the overall gain)."
+        description_ja: "出力 ch ごとのゲイン倍率。.size() を超える ch は 1.0、内部正規化なし (setVolume が全体ゲイン)"
+        description_ko: "출력 채널별 게인 배율. .size()를 넘는 채널은 1.0, 내부 정규화 없음 (setVolume이 전체 게인)"
+        sketch: false
+        snippet: "setChannelGains({1.0, 1.0})"
+
+      - name: clearChannelMap
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Clear the explicit channel map; routing falls back to setMixMode rules."
+        description_ja: "ChannelMap を解除して MixMode ルールに戻す"
+        description_ko: "채널 맵을 해제하고 MixMode 규칙으로 복귀"
+        sketch: false
+        snippet: "clearChannelMap()"
+
+      - name: clearChannelGains
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Clear per-channel gains (back to uniform 1.0)."
+        description_ja: "ChannelGains を解除して uniform 1.0 に戻す"
+        description_ko: "채널 게인을 해제하고 uniform 1.0으로 복귀"
+        sketch: false
+        snippet: "clearChannelGains()"
 
   # ==========================================================================
   # ChipSound
