@@ -228,6 +228,38 @@ PUA (U+E000–U+F8FF) is the convention for custom logos / icons / animation
 frames. Bulk packs (e.g. kana) live in separate addons — see
 `tcxBitmapStringKana` for the pattern.
 
+#### Vertical writing (tategaki) / wrap / kinsoku
+```cpp
+font.setWritingMode(WritingMode::VerticalRL);   // top→bottom, cols right→left
+font.enableWrap(true);
+font.setMaxLineLength(380);                     // px — column height in vertical
+font.setKinsoku(KinsokuLevel::Standard);        // 行頭/行末禁則
+font.setHangingPunctuation(true);               // ぶら下げ
+font.setTcyDigits(2, TcyMode::Combine, TcyMode::Rotate);  // 縦中横 — digits
+font.setTcyLatin(TcyMode::Rotate);              // Latin runs in vertical text
+```
+Default is horizontal — existing `drawString` calls are unchanged. Vertical
+mode handles Unicode vertical-form glyphs (U+FE10–FE4F) when present and
+falls back to rotating the upright glyph 90° CW otherwise. Latin /
+hyphenation work in horizontal wrap; kinsoku covers `、。」』）` and friends.
+
+#### Vector glyph paths
+For animation / scaling / rotation / hit-testing / stroke effects, get the
+glyph outline directly as `tc::Path` — crisp at any scale, atlas-free.
+```cpp
+auto paths = font.getStringPath("Hello", 100, 200);  // logical pixels
+setStrokeWeight(2);
+for (const auto& p : paths) p.drawStroke();
+
+auto contours = font.getGlyphPath(U'あ');            // em-normalized
+// contours[i].getVertices() — Vec3 in em units (1.0 = em), Y-down,
+// baseline at y=0, pen at x=0. Multiple contours for glyphs with holes.
+```
+`getStringPath` routes through the same layout pipeline as `drawString`
+— writing mode, alignment, wrap, kinsoku, TCY all apply transparently.
+For filled glyphs with holes (`O`, `日`, `あ`) a concave / even-odd
+tessellator is needed; stroke and convex fill work out of the box.
+
 ### Color
 ```cpp
 clear();                              // Transparent black (0,0,0,0)

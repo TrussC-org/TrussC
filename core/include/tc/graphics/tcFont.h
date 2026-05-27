@@ -43,6 +43,7 @@
 #include "../types/tcRectangle.h"
 #include "../../tcMath.h"  // Vec2
 #include "tcFontVertical.h"
+#include "tcPath.h"
 
 // ---------------------------------------------------------------------------
 // System font paths - use these for cross-platform font loading
@@ -313,6 +314,94 @@ public:
     bool fontHasGlyph(uint32_t codepoint) const {
         if (!loaded_) return false;
         return stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint) != 0;
+    }
+
+    // -------------------------------------------------------------------------
+    // Vector glyph outline (em-normalized, screen Y-down).
+    //
+    // Returns one Path per contour. Coordinates are in em units (1.0 = em),
+    // so a glyph above the baseline has Y < 0. Each Path is closed (last
+    // segment returns to first vertex). For glyphs with no outline (e.g. the
+    // space character) returns an empty vector without logging.
+    // -------------------------------------------------------------------------
+    std::vector<Path> getGlyphPath(uint32_t codepoint) const {
+        std::vector<Path> result;
+        if (!loaded_) return result;
+
+        int glyphIndex = stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint);
+        if (glyphIndex == 0) {
+            logWarning() << "FontAtlasManager: no glyph for U+" << std::hex
+                         << codepoint << std::dec;
+            return result;
+        }
+
+        stbtt_vertex* vertices = nullptr;
+        const int numVerts = stbtt_GetGlyphShape(&fontInfo_, glyphIndex, &vertices);
+        if (numVerts <= 0 || !vertices) {
+            if (vertices) stbtt_FreeShape(&fontInfo_, vertices);
+            return result;  // valid but empty outline (space etc.)
+        }
+
+        // stbtt returns vertex coords in font design units, Y-up.
+        // Multiply by emScale to get em units (1.0 = em); negate Y for screen Y-down.
+        const float emScale = stbtt_ScaleForMappingEmToPixels(&fontInfo_, 1.0f);
+
+        Path current;
+        auto flush = [&]() {
+            if (!current.empty()) {
+                current.close();
+                result.push_back(std::move(current));
+                current = Path{};
+            }
+        };
+
+        for (int i = 0; i < numVerts; i++) {
+            const stbtt_vertex& v = vertices[i];
+            const float x = (float)v.x * emScale;
+            const float y = -(float)v.y * emScale;
+            switch (v.type) {
+                case STBTT_vmove:
+                    flush();
+                    current.lineTo(x, y);  // first vertex of new contour
+                    break;
+                case STBTT_vline:
+                    current.lineTo(x, y);
+                    break;
+                case STBTT_vcurve: {
+                    // Explicit resolution: Path's adaptive tessellation uses an
+                    // absolute tolerance, but our coords are em-normalized
+                    // (~1.0 max), so without an explicit count curves collapse
+                    // to straight chords. 12 segments is plenty for glyph quads.
+                    const float cx = (float)v.cx * emScale;
+                    const float cy = -(float)v.cy * emScale;
+                    current.quadBezierTo(Vec2{cx, cy}, Vec2{x, y}, 12);
+                    break;
+                }
+                case STBTT_vcubic: {
+                    const float cx  = (float)v.cx  * emScale;
+                    const float cy  = -(float)v.cy * emScale;
+                    const float cx1 = (float)v.cx1 * emScale;
+                    const float cy1 = -(float)v.cy1 * emScale;
+                    current.bezierTo(Vec3{cx, cy, 0.f}, Vec3{cx1, cy1, 0.f}, Vec3{x, y, 0.f}, 16);
+                    break;
+                }
+            }
+        }
+        flush();
+
+        stbtt_FreeShape(&fontInfo_, vertices);
+        return result;
+    }
+
+    // Em-normalized horizontal advance for this codepoint (1.0 = em).
+    float getGlyphAdvanceEm(uint32_t codepoint) const {
+        if (!loaded_) return 0.f;
+        int glyphIndex = stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint);
+        if (glyphIndex == 0) return 0.f;
+        int advanceWidth = 0, lsb = 0;
+        stbtt_GetGlyphHMetrics(&fontInfo_, glyphIndex, &advanceWidth, &lsb);
+        const float emScale = stbtt_ScaleForMappingEmToPixels(&fontInfo_, 1.0f);
+        return (float)advanceWidth * emScale;
     }
 
     // -------------------------------------------------------------------------
@@ -962,6 +1051,69 @@ public:
     }
 
     // -------------------------------------------------------------------------
+    // Vector glyph outlines (rotation / scaling / animation use cases).
+    //
+    // getGlyphPath returns the contours of a single glyph in em-normalized
+    // coordinates (1.0 = em, screen Y-down, baseline at y=0, pen at x=0).
+    // One Path per contour — glyphs like 'O' or '日' produce multiple.
+    //
+    // getStringPath returns contours for the whole string, positioned with
+    // the same layout pipeline as drawString — writing mode, alignment, wrap,
+    // kinsoku, TCY all apply. Each Path is in logical pixel coordinates
+    // relative to (x, y).
+    // -------------------------------------------------------------------------
+    std::vector<Path> getGlyphPath(uint32_t codepoint) const {
+        if (!atlasManager_) return {};
+        return atlasManager_->getGlyphPath(codepoint);
+    }
+
+    std::vector<Path> getStringPath(const std::string& text, float x, float y,
+                                    Direction h, Direction v) const {
+        std::vector<Path> result;
+        if (!atlasManager_ || text.empty()) return result;
+
+        const float em = (float)logicalSize_;
+
+        forEachGlyph(text, x, y, h, v, [&](const PlacedGlyph& pg) {
+            std::vector<Path> contours = atlasManager_->getGlyphPath(pg.codepoint);
+            if (contours.empty()) return;
+
+            const float c  = std::cos(pg.rotationCw);
+            const float si = std::sin(pg.rotationCw);
+            const bool  rotated = (pg.rotationCw != 0.f);
+
+            for (Path& p : contours) {
+                for (Vec3& vert : p.getVertices()) {
+                    // em-normalized → logical pixels, with horizontal scale.
+                    float fx = vert.x * em * pg.scaleX;
+                    float fy = vert.y * em;
+                    // Translate to pen position.
+                    fx += pg.drawX;
+                    fy += pg.baselineY;
+                    // Rotate around pivot (matches emitPlacedGlyphsToAtlas math).
+                    if (rotated) {
+                        const float dx = fx - pg.pivotX;
+                        const float dy = fy - pg.pivotY;
+                        fx = pg.pivotX + c * dx - si * dy;
+                        fy = pg.pivotY + si * dx + c * dy;
+                    }
+                    vert.x = fx;
+                    vert.y = fy;
+                }
+                result.push_back(std::move(p));
+            }
+        });
+
+        return result;
+    }
+
+    std::vector<Path> getStringPath(const std::string& text, float x, float y) const {
+        Direction h = getDefaultContext().getTextAlignH();
+        Direction v = getDefaultContext().getTextAlignV();
+        return getStringPath(text, x, y, h, v);
+    }
+
+    // -------------------------------------------------------------------------
     // Writing mode (default: Horizontal — existing behavior unchanged)
     // -------------------------------------------------------------------------
     void setWritingMode(WritingMode mode) { writingMode_ = mode; }
@@ -1015,29 +1167,74 @@ public:
     KinsokuLevel getKinsoku() const             { return kinsokuLevel_; }
 
     // -------------------------------------------------------------------------
+    // Layout abstraction: PlacedGlyph + forEachGlyph*
+    //
+    // forEachGlyph computes glyph positions for the current writingMode/wrap/
+    // kinsoku/TCY settings and invokes visitor once per glyph. The visitor is
+    // backend-agnostic — atlas-quad emit, vector Path emit, hit testing, etc.
+    // share the same layout pass.
+    //
+    // PlacedGlyph fields:
+    //   codepoint  — final codepoint after vertical-form mapping (e.g. FE10-FE4F)
+    //   drawX/Y    — pen position; glyph xoff/yoff are added on top
+    //   rotationCw — 0 (upright) or TAU/4 (90° CW) in radians
+    //   pivotX/Y   — rotation center (used only when rotationCw != 0)
+    //   scaleX     — horizontal scale (1.0 normally, <1 for TCY Combine)
+    // -------------------------------------------------------------------------
+public:
+    struct PlacedGlyph {
+        uint32_t codepoint;
+        float    drawX;
+        float    baselineY;
+        float    rotationCw;
+        float    pivotX;
+        float    pivotY;
+        float    scaleX;
+    };
+    using GlyphVisitor = std::function<void(const PlacedGlyph&)>;
+
+    // Dispatches to horizontal/vertical layout based on writingMode_.
+    // Applies wrap preprocessing internally.
+    void forEachGlyph(const std::string& text, float x, float y,
+                      Direction h, Direction v,
+                      const GlyphVisitor& visitor) const {
+        const std::string wrapped = wrapTextIfEnabled(text);
+        if (writingMode_ == WritingMode::VerticalRL) {
+            forEachGlyphVertical(wrapped, x, y, h, v, visitor);
+        } else {
+            forEachGlyphHorizontal(wrapped, x, y, h, v, visitor);
+        }
+    }
+
+    // Convenience overload using current alignment settings.
+    void forEachGlyph(const std::string& text, float x, float y,
+                      const GlyphVisitor& visitor) const {
+        Direction h = getDefaultContext().getTextAlignH();
+        Direction v = getDefaultContext().getTextAlignV();
+        forEachGlyph(text, x, y, h, v, visitor);
+    }
+
+    // -------------------------------------------------------------------------
     // Internal drawing implementation
     // -------------------------------------------------------------------------
 protected:
-    void drawStringInternal(const std::string& text, float x, float y,
-                            Direction h, Direction v) const {
+    // Layout pass for horizontal writing mode. Text is assumed pre-wrapped.
+    void forEachGlyphHorizontal(const std::string& text, float x, float y,
+                                Direction h, Direction v,
+                                const GlyphVisitor& visitor) const {
         if (!atlasManager_ || text.empty()) return;
 
-        // Load required glyphs
+        // Preload required glyphs (atlas-side); cheap if already cached.
         for (size_t i = 0; i < text.size(); ) {
-            uint32_t codepoint = decodeUTF8(text, i);
-            if (codepoint != '\n' && codepoint != '\t') {
-                atlasManager_->getOrLoadGlyph(codepoint);
+            uint32_t cp = decodeUTF8(text, i);
+            if (cp != '\n' && cp != '\t') {
+                atlasManager_->getOrLoadGlyph(cp);
             }
         }
 
-        // Update textures
-        atlasManager_->ensureTexturesUpdated();
-
-        // DPI scale factor: atlas is rendered at physical pixels,
-        // but drawing uses logical coordinates
         const float s = 1.0f / dpiScale_;
 
-        // Pre-compute per-line widths for horizontal alignment
+        // Pre-compute per-line widths for horizontal alignment.
         std::vector<float> lineWidths;
         {
             float w = 0;
@@ -1056,7 +1253,6 @@ protected:
             lineWidths.push_back(w);
         }
 
-        // Per-line horizontal offset
         auto lineOffsetX = [&](int lineIdx) -> float {
             float lw = (lineIdx < (int)lineWidths.size()) ? lineWidths[lineIdx] : 0;
             switch (h) {
@@ -1066,11 +1262,9 @@ protected:
             }
         };
 
-        // Vertical offset (multi-line aware)
         float offsetY = 0;
         float totalTextH = getLineHeight() * lineWidths.size();
         float ascent = atlasManager_->getAscent() * s;
-
         switch (v) {
             case Direction::Top:      offsetY = 0; break;
             case Direction::Baseline: offsetY = -ascent; break;
@@ -1079,15 +1273,47 @@ protected:
             default: break;
         }
 
-        // Draw per atlas
-        size_t atlasCount = atlasManager_->getAtlasCount();
-        for (size_t atlasIdx = 0; atlasIdx < atlasCount; atlasIdx++) {
+        int currentLine = 0;
+        float cursorX = x + lineOffsetX(0);
+        float cursorY = y + offsetY + ascent;
+
+        for (size_t i = 0; i < text.size(); ) {
+            uint32_t cp = decodeUTF8(text, i);
+            if (cp == '\n') {
+                currentLine++;
+                cursorX = x + lineOffsetX(currentLine);
+                cursorY += getLineHeight();
+                continue;
+            }
+            if (cp == '\t') {
+                cursorX += atlasManager_->getSpaceAdvance() * s * 4;
+                continue;
+            }
+            const GlyphInfo* g = atlasManager_->getOrLoadGlyph(cp);
+            if (!g || !g->isValid()) continue;
+
+            visitor(PlacedGlyph{cp, cursorX, cursorY, 0.f, 0.f, 0.f, 1.f});
+
+            cursorX += g->getAdvance() * s;
+        }
+    }
+
+    // Unified atlas-quad emit for both horizontal and vertical layouts.
+    // Consumes PlacedGlyph stream produced by forEachGlyph*.
+    void emitPlacedGlyphsToAtlas(const std::vector<PlacedGlyph>& placed) const {
+        if (!atlasManager_ || placed.empty()) return;
+
+        atlasManager_->ensureTexturesUpdated();
+
+        const float s = 1.0f / dpiScale_;
+        const size_t atlasCount = atlasManager_->getAtlasCount();
+
+        for (size_t atlasIdx = 0; atlasIdx < atlasCount; ++atlasIdx) {
             const AtlasState& atlas = atlasManager_->getAtlas(atlasIdx);
             if (!atlas.isTextureValid()) continue;
 
             // Use FBO blend pipeline when inside FBO pass (font pipeline has
-            // dst_factor_alpha=ZERO which destroys the background alpha, causing
-            // color fringing when the FBO texture is composited to screen)
+            // dst_factor_alpha=ZERO which destroys background alpha).
             if (internal::inFboPass && internal::currentFboBlendPipeline.id != 0) {
                 sgl_load_pipeline(internal::currentFboBlendPipeline);
             } else {
@@ -1101,49 +1327,62 @@ protected:
 
             sgl_begin_quads();
 
-            int currentLine = 0;
-            float cursorX = x + lineOffsetX(0);
-            float cursorY = y + offsetY + ascent;
+            for (const PlacedGlyph& pg : placed) {
+                const GlyphInfo* g = atlasManager_->getOrLoadGlyph(pg.codepoint);
+                if (!g || !g->isValid() || g->getAtlasIndex() != atlasIdx) continue;
+                if (g->getWidth() <= 0 || g->getHeight() <= 0) continue;
 
-            for (size_t i = 0; i < text.size(); ) {
-                uint32_t codepoint = decodeUTF8(text, i);
+                float gx = pg.drawX + g->getXoff() * s * pg.scaleX;
+                float gy = pg.baselineY + g->getYoff() * s;
+                float gw = g->getWidth() * s * pg.scaleX;
+                float gh = g->getHeight() * s;
 
-                if (codepoint == '\n') {
-                    currentLine++;
-                    cursorX = x + lineOffsetX(currentLine);
-                    cursorY += getLineHeight();
-                    continue;
-                }
-                if (codepoint == '\t') {
-                    cursorX += atlasManager_->getSpaceAdvance() * s * 4;
-                    continue;
-                }
-
-                const GlyphInfo* g = atlasManager_->getOrLoadGlyph(codepoint);
-                if (!g || !g->isValid() || g->getAtlasIndex() != atlasIdx) {
-                    if (g) cursorX += g->getAdvance() * s;
-                    continue;
-                }
-
-                if (g->getWidth() > 0 && g->getHeight() > 0) {
-                    float gx = cursorX + g->getXoff() * s;
-                    float gy = cursorY + g->getYoff() * s;
-                    float gw = g->getWidth() * s;
-                    float gh = g->getHeight() * s;
-
-                    sgl_v2f_t2f(gx, gy, g->getU0(), g->getV0());
-                    sgl_v2f_t2f(gx + gw, gy, g->getU1(), g->getV0());
+                if (pg.rotationCw == 0.f) {
+                    sgl_v2f_t2f(gx,      gy,      g->getU0(), g->getV0());
+                    sgl_v2f_t2f(gx + gw, gy,      g->getU1(), g->getV0());
                     sgl_v2f_t2f(gx + gw, gy + gh, g->getU1(), g->getV1());
-                    sgl_v2f_t2f(gx, gy + gh, g->getU0(), g->getV1());
+                    sgl_v2f_t2f(gx,      gy + gh, g->getU0(), g->getV1());
+                } else {
+                    // Rotate around pivot. Screen Y-down: positive rotationCw
+                    // rotates clockwise visually. Specialized for θ=π/2 this
+                    // is (px,py) → (cx-(py-cy), cy+(px-cx)) — matches the
+                    // original vertical-text emitRotated path.
+                    const float c = std::cos(pg.rotationCw);
+                    const float si = std::sin(pg.rotationCw);
+                    auto rot = [&](float px, float py, float& ox, float& oy) {
+                        float dx = px - pg.pivotX;
+                        float dy = py - pg.pivotY;
+                        ox = pg.pivotX + c * dx - si * dy;
+                        oy = pg.pivotY + si * dx + c * dy;
+                    };
+                    float v0x, v0y, v1x, v1y, v2x, v2y, v3x, v3y;
+                    rot(gx,      gy,      v0x, v0y);
+                    rot(gx + gw, gy,      v1x, v1y);
+                    rot(gx + gw, gy + gh, v2x, v2y);
+                    rot(gx,      gy + gh, v3x, v3y);
+                    sgl_v2f_t2f(v0x, v0y, g->getU0(), g->getV0());
+                    sgl_v2f_t2f(v1x, v1y, g->getU1(), g->getV0());
+                    sgl_v2f_t2f(v2x, v2y, g->getU1(), g->getV1());
+                    sgl_v2f_t2f(v3x, v3y, g->getU0(), g->getV1());
                 }
-
-                cursorX += g->getAdvance() * s;
             }
 
             sgl_end();
             sgl_disable_texture();
             internal::restoreCurrentPipeline();
         }
+    }
+
+    void drawStringInternal(const std::string& text, float x, float y,
+                            Direction h, Direction v) const {
+        if (!atlasManager_ || text.empty()) return;
+
+        std::vector<PlacedGlyph> placed;
+        placed.reserve(text.size());
+        forEachGlyphHorizontal(text, x, y, h, v,
+            [&](const PlacedGlyph& pg) { placed.push_back(pg); });
+
+        emitPlacedGlyphsToAtlas(placed);
     }
 
     // -------------------------------------------------------------------------
@@ -1160,8 +1399,10 @@ protected:
         uint32_t cp = 0;            // for Single
     };
 
-    void drawStringVerticalInternal(const std::string& text, float x, float y,
-                                    Direction h, Direction v) const {
+    // Layout pass for vertical writing mode. Text is assumed pre-wrapped.
+    void forEachGlyphVertical(const std::string& text, float x, float y,
+                              Direction h, Direction v,
+                              const GlyphVisitor& visitor) const {
         if (!atlasManager_ || text.empty()) return;
 
         const float s   = 1.0f / dpiScale_;
@@ -1202,7 +1443,6 @@ protected:
                 for (uint32_t cp : t.cps) atlasManager_->getOrLoadGlyph(cp);
             }
         }
-        atlasManager_->ensureTexturesUpdated();
 
         // -------- TCY mode selection per token --------
         auto pickTcy = [&](const VTok_& t) -> TcyMode {
@@ -1275,178 +1515,119 @@ protected:
             }
         };
 
-        // -------- Render per atlas --------
-        const size_t atlasCount = atlasManager_->getAtlasCount();
-        for (size_t atlasIdx = 0; atlasIdx < atlasCount; ++atlasIdx) {
-            const AtlasState& atlas = atlasManager_->getAtlas(atlasIdx);
-            if (!atlas.isTextureValid()) continue;
+        // -------- Layout pass: emit PlacedGlyph per glyph via visitor --------
+        size_t colIdx = 0;
+        float  colX        = colX0;
+        float  colCenterX  = colX - em / 2.f;
+        float  colY        = colYStart(0);
 
-            if (internal::inFboPass && internal::currentFboBlendPipeline.id != 0) {
-                sgl_load_pipeline(internal::currentFboBlendPipeline);
-            } else {
-                sgl_load_pipeline(pipeline_);
+        for (const auto& t : toks) {
+            if (t.kind == VTokKind_::Newline) {
+                colIdx++;
+                colX       -= colSpacing;
+                colCenterX  = colX - em / 2.f;
+                colY        = colYStart(colIdx);
+                continue;
             }
-            sgl_enable_texture();
-            sgl_texture(atlas.getView(), sampler_);
-            Color col = getDefaultContext().getColor();
-            sgl_c4f(col.r, col.g, col.b, col.a);
-            sgl_begin_quads();
 
-            // Upright glyph quad (no rotation, no scaling).
-            auto emitUpright = [&](const GlyphInfo* g, float drawX, float baselineY) {
-                if (!g || !g->isValid()) return;
-                if (g->getAtlasIndex() != atlasIdx) return;
-                if (g->getWidth() <= 0 || g->getHeight() <= 0) return;
-                float gx = drawX + g->getXoff() * s;
-                float gy = baselineY + g->getYoff() * s;
-                float gw = g->getWidth() * s;
-                float gh = g->getHeight() * s;
-                sgl_v2f_t2f(gx,        gy,        g->getU0(), g->getV0());
-                sgl_v2f_t2f(gx + gw,   gy,        g->getU1(), g->getV0());
-                sgl_v2f_t2f(gx + gw,   gy + gh,   g->getU1(), g->getV1());
-                sgl_v2f_t2f(gx,        gy + gh,   g->getU0(), g->getV1());
-            };
+            if (t.kind == VTokKind_::Single) {
+                const uint32_t cp = t.cp;
+                const VertOrient vo = getVerticalOrientation(cp);
+                const uint32_t vcp = getVerticalCodepoint(cp);
+                const bool hasVert = (vcp != 0 && atlasManager_->fontHasGlyph(vcp));
 
-            // Rotate 90° CW around (cx, cy): (px,py) → (cx + (cy-py), cy + (px-cx)).
-            auto emitRotated = [&](const GlyphInfo* g, float drawX, float baselineY,
-                                   float cx, float cy) {
-                if (!g || !g->isValid()) return;
-                if (g->getAtlasIndex() != atlasIdx) return;
-                if (g->getWidth() <= 0 || g->getHeight() <= 0) return;
-                float gx = drawX + g->getXoff() * s;
-                float gy = baselineY + g->getYoff() * s;
-                float gw = g->getWidth() * s;
-                float gh = g->getHeight() * s;
-                auto rot = [&](float px, float py, float& ox, float& oy) {
-                    ox = cx + (cy - py);
-                    oy = cy + (px - cx);
-                };
-                float v0x, v0y, v1x, v1y, v2x, v2y, v3x, v3y;
-                rot(gx,      gy,      v0x, v0y);
-                rot(gx + gw, gy,      v1x, v1y);
-                rot(gx + gw, gy + gh, v2x, v2y);
-                rot(gx,      gy + gh, v3x, v3y);
-                sgl_v2f_t2f(v0x, v0y, g->getU0(), g->getV0());
-                sgl_v2f_t2f(v1x, v1y, g->getU1(), g->getV0());
-                sgl_v2f_t2f(v2x, v2y, g->getU1(), g->getV1());
-                sgl_v2f_t2f(v3x, v3y, g->getU0(), g->getV1());
-            };
-
-            size_t colIdx = 0;
-            float  colX        = colX0;
-            float  colCenterX  = colX - em / 2.f;
-            float  colY        = colYStart(0);
-
-            for (const auto& t : toks) {
-                if (t.kind == VTokKind_::Newline) {
-                    colIdx++;
-                    colX       -= colSpacing;
-                    colCenterX  = colX - em / 2.f;
-                    colY        = colYStart(colIdx);
-                    continue;
+                if (vo == VertOrient::U
+                    || (vo == VertOrient::Tu)
+                    || (vo == VertOrient::Tr && hasVert)) {
+                    // Upright path.
+                    const uint32_t useCp = hasVert ? vcp : cp;
+                    const GlyphInfo* g = atlasManager_->getOrLoadGlyph(useCp);
+                    if (g && g->isValid()) {
+                        float drawX = colCenterX - g->getAdvance() * s / 2.f;
+                        float baselineY = colY + asc;
+                        // Fallback offset for Tu without vertical form.
+                        if (vo == VertOrient::Tu && !hasVert) {
+                            VertOffset off = getVerticalPunctOffset(cp);
+                            drawX     += off.dx * em;
+                            baselineY += off.dy * em;
+                        }
+                        visitor(PlacedGlyph{useCp, drawX, baselineY, 0.f, 0.f, 0.f, 1.f});
+                    }
+                } else {
+                    // Rotate 90° CW around cell center.
+                    const GlyphInfo* g = atlasManager_->getOrLoadGlyph(cp);
+                    if (g && g->isValid()) {
+                        float cx = colCenterX;
+                        float cy = colY + cellH / 2.f;
+                        float drawX = cx - g->getAdvance() * s / 2.f;
+                        float baselineY = cy - em / 2.f + asc;
+                        visitor(PlacedGlyph{cp, drawX, baselineY, QUARTER_TAU, cx, cy, 1.f});
+                    }
                 }
+                colY += cellH;
+                continue;
+            }
 
-                if (t.kind == VTokKind_::Single) {
-                    const uint32_t cp = t.cp;
-                    const VertOrient vo = getVerticalOrientation(cp);
-                    const uint32_t vcp = getVerticalCodepoint(cp);
-                    const bool hasVert = (vcp != 0 && atlasManager_->fontHasGlyph(vcp));
-
-                    if (vo == VertOrient::U
-                        || (vo == VertOrient::Tu)
-                        || (vo == VertOrient::Tr && hasVert)) {
-                        // Upright path.
-                        const uint32_t useCp = hasVert ? vcp : cp;
-                        const GlyphInfo* g = atlasManager_->getOrLoadGlyph(useCp);
+            // ---- LatinRun / DigitRun ----
+            const TcyMode m = pickTcy(t);
+            const float rw = runHorizWidth(t);
+            switch (m) {
+                case TcyMode::Rotate: {
+                    float cx = colCenterX;
+                    float cy = colY + rw / 2.f;
+                    float cursorX   = cx - rw / 2.f;
+                    float baselineY = cy - em / 2.f + asc;
+                    for (uint32_t cp : t.cps) {
+                        const GlyphInfo* g = atlasManager_->getOrLoadGlyph(cp);
+                        if (!g || !g->isValid()) continue;
+                        visitor(PlacedGlyph{cp, cursorX, baselineY, QUARTER_TAU, cx, cy, 1.f});
+                        cursorX += g->getAdvance() * s;
+                    }
+                    colY += rw;
+                    break;
+                }
+                case TcyMode::Upright: {
+                    for (uint32_t cp : t.cps) {
+                        const GlyphInfo* g = atlasManager_->getOrLoadGlyph(cp);
                         if (g && g->isValid()) {
                             float drawX = colCenterX - g->getAdvance() * s / 2.f;
                             float baselineY = colY + asc;
-                            // Fallback offset for Tu without vertical form.
-                            if (vo == VertOrient::Tu && !hasVert) {
-                                VertOffset off = getVerticalPunctOffset(cp);
-                                drawX     += off.dx * em;
-                                baselineY += off.dy * em;
-                            }
-                            emitUpright(g, drawX, baselineY);
-                        }
-                    } else {
-                        // Rotate 90° CW around cell center.
-                        const GlyphInfo* g = atlasManager_->getOrLoadGlyph(cp);
-                        if (g && g->isValid()) {
-                            float cx = colCenterX;
-                            float cy = colY + cellH / 2.f;
-                            float drawX = cx - g->getAdvance() * s / 2.f;
-                            float baselineY = cy - em / 2.f + asc;
-                            emitRotated(g, drawX, baselineY, cx, cy);
-                        }
-                    }
-                    colY += cellH;
-                    continue;
-                }
-
-                // ---- LatinRun / DigitRun ----
-                const TcyMode m = pickTcy(t);
-                const float rw = runHorizWidth(t);
-                switch (m) {
-                    case TcyMode::Rotate: {
-                        float cx = colCenterX;
-                        float cy = colY + rw / 2.f;
-                        float cursorX   = cx - rw / 2.f;
-                        float baselineY = cy - em / 2.f + asc;
-                        for (uint32_t cp : t.cps) {
-                            const GlyphInfo* g = atlasManager_->getOrLoadGlyph(cp);
-                            if (!g || !g->isValid()) continue;
-                            emitRotated(g, cursorX, baselineY, cx, cy);
-                            cursorX += g->getAdvance() * s;
-                        }
-                        colY += rw;
-                        break;
-                    }
-                    case TcyMode::Upright: {
-                        for (uint32_t cp : t.cps) {
-                            const GlyphInfo* g = atlasManager_->getOrLoadGlyph(cp);
-                            if (g && g->isValid()) {
-                                float drawX = colCenterX - g->getAdvance() * s / 2.f;
-                                float baselineY = colY + asc;
-                                emitUpright(g, drawX, baselineY);
-                            }
-                            colY += cellH;
-                        }
-                        break;
-                    }
-                    case TcyMode::Combine: {
-                        // Fit run horizontally into one em cell with x-scale only.
-                        const float xscale = (rw > em) ? em / rw : 1.f;
-                        const float scaledW = rw * xscale;
-                        const float cellLeft = colCenterX - em / 2.f;
-                        float cursorX = cellLeft + (em - scaledW) / 2.f;
-                        float baselineY = colY + asc;
-                        for (uint32_t cp : t.cps) {
-                            const GlyphInfo* g = atlasManager_->getOrLoadGlyph(cp);
-                            if (!g || !g->isValid()) continue;
-                            if (g->getAtlasIndex() == atlasIdx
-                                && g->getWidth() > 0 && g->getHeight() > 0) {
-                                float gx = cursorX + g->getXoff() * s * xscale;
-                                float gy = baselineY + g->getYoff() * s;
-                                float gw = g->getWidth() * s * xscale;
-                                float gh = g->getHeight() * s;
-                                sgl_v2f_t2f(gx,      gy,      g->getU0(), g->getV0());
-                                sgl_v2f_t2f(gx + gw, gy,      g->getU1(), g->getV0());
-                                sgl_v2f_t2f(gx + gw, gy + gh, g->getU1(), g->getV1());
-                                sgl_v2f_t2f(gx,      gy + gh, g->getU0(), g->getV1());
-                            }
-                            cursorX += g->getAdvance() * s * xscale;
+                            visitor(PlacedGlyph{cp, drawX, baselineY, 0.f, 0.f, 0.f, 1.f});
                         }
                         colY += cellH;
-                        break;
                     }
+                    break;
+                }
+                case TcyMode::Combine: {
+                    // Fit run horizontally into one em cell with x-scale only.
+                    const float xscale = (rw > em) ? em / rw : 1.f;
+                    const float scaledW = rw * xscale;
+                    const float cellLeft = colCenterX - em / 2.f;
+                    float cursorX = cellLeft + (em - scaledW) / 2.f;
+                    float baselineY = colY + asc;
+                    for (uint32_t cp : t.cps) {
+                        const GlyphInfo* g = atlasManager_->getOrLoadGlyph(cp);
+                        if (!g || !g->isValid()) continue;
+                        visitor(PlacedGlyph{cp, cursorX, baselineY, 0.f, 0.f, 0.f, xscale});
+                        cursorX += g->getAdvance() * s * xscale;
+                    }
+                    colY += cellH;
+                    break;
                 }
             }
-
-            sgl_end();
-            sgl_disable_texture();
-            internal::restoreCurrentPipeline();
         }
+    }
+
+    void drawStringVerticalInternal(const std::string& text, float x, float y,
+                                    Direction h, Direction v) const {
+        if (!atlasManager_ || text.empty()) return;
+
+        std::vector<PlacedGlyph> placed;
+        placed.reserve(text.size());
+        forEachGlyphVertical(text, x, y, h, v,
+            [&](const PlacedGlyph& pg) { placed.push_back(pg); });
+
+        emitPlacedGlyphsToAtlas(placed);
     }
 
     // -------------------------------------------------------------------------
@@ -1553,12 +1734,20 @@ protected:
                 }
                 const float nextW = width + cps[i].advance;
                 if (nextW > maxLineLength_ && i > lineStart) {
-                    // Kinsoku hanging: a 行頭禁則 char at the break point rides on
-                    // the current line even though it overflows.
+                    // Kinsoku hanging: 行頭禁則 chars at the break point ride on
+                    // the current line even though they overflow. Sweep across
+                    // runs (e.g. ）。 or 」」) so consecutive prohibited chars
+                    // hang together — otherwise the second one wraps alone.
                     if (hangingPunctuation_ && kinsokuLineStart(cps[i].cp)) {
-                        emitRange(lineStart, i + 1, out);
-                        if (i + 1 < cps.size()) out += '\n';
-                        lineStart = i + 1;
+                        size_t hangEnd = i + 1;
+                        while (hangEnd < cps.size()
+                               && cps[hangEnd].cp != '\n'
+                               && kinsokuLineStart(cps[hangEnd].cp)) {
+                            ++hangEnd;
+                        }
+                        emitRange(lineStart, hangEnd, out);
+                        if (hangEnd < cps.size()) out += '\n';
+                        lineStart = hangEnd;
                         wrapped = true;
                         break;
                     }
@@ -1725,9 +1914,17 @@ protected:
                     if (hangingPunctuation_
                         && toks[i].kind == TK::Single
                         && kinsokuLineStart(firstCp(toks[i]))) {
-                        emitTokRange(colStart, i + 1, out);
-                        if (i + 1 < toks.size()) out += '\n';
-                        colStart = i + 1;
+                        // Sweep over consecutive 行頭禁則 chars so e.g. ）。
+                        // stays together at the column edge.
+                        size_t hangEnd = i + 1;
+                        while (hangEnd < toks.size()
+                               && toks[hangEnd].kind == TK::Single
+                               && kinsokuLineStart(firstCp(toks[hangEnd]))) {
+                            ++hangEnd;
+                        }
+                        emitTokRange(colStart, hangEnd, out);
+                        if (hangEnd < toks.size()) out += '\n';
+                        colStart = hangEnd;
                         wrapped = true;
                         break;
                     }
