@@ -123,14 +123,30 @@ public:
     }
 
 private:
+    struct Entry {
+        uint64_t id;
+        int priority;
+        Callback callback;
+    };
+
+    using EntryList = std::vector<Entry>;
+    using ConstEntryListPtr = std::shared_ptr<const EntryList>;
+
     void listenImpl(EventListener& listener, Callback callback,
                     int priority) {
         uint64_t id;
         {
             TC_LOCK_GUARD(mutex_);
             id = nextId_++;
-            entries_.push_back({id, priority, std::move(callback)});
-            sortEntries();
+            ConstEntryListPtr cur = std::atomic_load(&entries_);
+            auto next = cur ? std::make_shared<EntryList>(*cur)
+                            : std::make_shared<EntryList>();
+            next->push_back({id, priority, std::move(callback)});
+            std::stable_sort(next->begin(), next->end(),
+                [](const Entry& a, const Entry& b) {
+                    return a.priority < b.priority;
+                });
+            std::atomic_store(&entries_, ConstEntryListPtr(next));
         }
         // Set EventListener outside lock (removeListener() may be called when disconnecting existing)
         // Capture weak_ptr to check if Event is still alive before removing
@@ -146,15 +162,12 @@ private:
 
 public:
 
-    // Fire event
+    // Fire event. Hot path: a single atomic_load (no allocation, no mutex)
+    // — safe to call from the audio thread.
     void notify(T& arg) {
-        std::vector<Entry> entriesCopy;
-        {
-            TC_LOCK_GUARD(mutex_);
-            entriesCopy = entries_;
-        }
-        // Execute outside lock (prevent deadlock)
-        for (auto& entry : entriesCopy) {
+        ConstEntryListPtr snapshot = std::atomic_load(&entries_);
+        if (!snapshot) return;
+        for (const auto& entry : *snapshot) {
             if (entry.callback) {
                 entry.callback(arg);
             }
@@ -163,42 +176,33 @@ public:
 
     // Get listener count
     size_t listenerCount() const {
-        TC_LOCK_GUARD(mutex_);
-        return entries_.size();
+        ConstEntryListPtr snapshot = std::atomic_load(&entries_);
+        return snapshot ? snapshot->size() : 0;
     }
 
     // Remove all listeners
     void clear() {
         TC_LOCK_GUARD(mutex_);
-        entries_.clear();
+        std::atomic_store(&entries_, ConstEntryListPtr{});
     }
 
 private:
-    struct Entry {
-        uint64_t id;
-        int priority;
-        Callback callback;
-    };
-
     void removeListener(uint64_t id) {
         TC_LOCK_GUARD(mutex_);
-        entries_.erase(
-            std::remove_if(entries_.begin(), entries_.end(),
+        ConstEntryListPtr cur = std::atomic_load(&entries_);
+        if (!cur) return;
+        auto next = std::make_shared<EntryList>(*cur);
+        next->erase(
+            std::remove_if(next->begin(), next->end(),
                 [id](const Entry& e) { return e.id == id; }),
-            entries_.end()
+            next->end()
         );
-    }
-
-    void sortEntries() {
-        std::stable_sort(entries_.begin(), entries_.end(),
-            [](const Entry& a, const Entry& b) {
-                return a.priority < b.priority;
-            });
+        std::atomic_store(&entries_, ConstEntryListPtr(next));
     }
 
     std::shared_ptr<bool> alive_;
-    mutable TC_MUTEX mutex_;
-    std::vector<Entry> entries_;
+    mutable TC_MUTEX mutex_;            // serializes listen / remove / clear
+    ConstEntryListPtr entries_;          // RCU snapshot, atomic_load/store
     uint64_t nextId_ = 0;
 };
 
@@ -254,14 +258,30 @@ public:
     }
 
 private:
+    struct Entry {
+        uint64_t id;
+        int priority;
+        Callback callback;
+    };
+
+    using EntryList = std::vector<Entry>;
+    using ConstEntryListPtr = std::shared_ptr<const EntryList>;
+
     void listenImpl(EventListener& listener, Callback callback,
                     int priority) {
         uint64_t id;
         {
             TC_LOCK_GUARD(mutex_);
             id = nextId_++;
-            entries_.push_back({id, priority, std::move(callback)});
-            sortEntries();
+            ConstEntryListPtr cur = std::atomic_load(&entries_);
+            auto next = cur ? std::make_shared<EntryList>(*cur)
+                            : std::make_shared<EntryList>();
+            next->push_back({id, priority, std::move(callback)});
+            std::stable_sort(next->begin(), next->end(),
+                [](const Entry& a, const Entry& b) {
+                    return a.priority < b.priority;
+                });
+            std::atomic_store(&entries_, ConstEntryListPtr(next));
         }
         // Set EventListener outside lock (removeListener() may be called when disconnecting existing)
         // Capture weak_ptr to check if Event is still alive before removing
@@ -276,14 +296,11 @@ private:
     }
 
 public:
-    // Fire event
+    // Fire event. Hot path: a single atomic_load, no allocation, no mutex.
     void notify() {
-        std::vector<Entry> entriesCopy;
-        {
-            TC_LOCK_GUARD(mutex_);
-            entriesCopy = entries_;
-        }
-        for (auto& entry : entriesCopy) {
+        ConstEntryListPtr snapshot = std::atomic_load(&entries_);
+        if (!snapshot) return;
+        for (const auto& entry : *snapshot) {
             if (entry.callback) {
                 entry.callback();
             }
@@ -291,41 +308,32 @@ public:
     }
 
     size_t listenerCount() const {
-        TC_LOCK_GUARD(mutex_);
-        return entries_.size();
+        ConstEntryListPtr snapshot = std::atomic_load(&entries_);
+        return snapshot ? snapshot->size() : 0;
     }
 
     void clear() {
         TC_LOCK_GUARD(mutex_);
-        entries_.clear();
+        std::atomic_store(&entries_, ConstEntryListPtr{});
     }
 
 private:
-    struct Entry {
-        uint64_t id;
-        int priority;
-        Callback callback;
-    };
-
     void removeListener(uint64_t id) {
         TC_LOCK_GUARD(mutex_);
-        entries_.erase(
-            std::remove_if(entries_.begin(), entries_.end(),
+        ConstEntryListPtr cur = std::atomic_load(&entries_);
+        if (!cur) return;
+        auto next = std::make_shared<EntryList>(*cur);
+        next->erase(
+            std::remove_if(next->begin(), next->end(),
                 [id](const Entry& e) { return e.id == id; }),
-            entries_.end()
+            next->end()
         );
-    }
-
-    void sortEntries() {
-        std::stable_sort(entries_.begin(), entries_.end(),
-            [](const Entry& a, const Entry& b) {
-                return a.priority < b.priority;
-            });
+        std::atomic_store(&entries_, ConstEntryListPtr(next));
     }
 
     std::shared_ptr<bool> alive_;
-    mutable TC_MUTEX mutex_;
-    std::vector<Entry> entries_;
+    mutable TC_MUTEX mutex_;            // serializes listen / remove / clear
+    ConstEntryListPtr entries_;          // RCU snapshot, atomic_load/store
     uint64_t nextId_ = 0;
 };
 
