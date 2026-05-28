@@ -1501,7 +1501,12 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
 
     lua->new_usertype<AudioEngine>("AudioEngine",
         "getInstance", sol::var(&AudioEngine::getInstance),
-        "init", &AudioEngine::init,
+        // init() is overloaded — no-arg uses defaults, AudioSettings-arg
+        // configures the engine. Resolve both for Lua.
+        "init", sol::overload(
+            static_cast<bool (AudioEngine::*)()>(&AudioEngine::init),
+            static_cast<bool (AudioEngine::*)(const AudioSettings&)>(&AudioEngine::init)
+        ),
         "shutdown", &AudioEngine::shutdown,
         "getAnalysisBuffer", &AudioEngine::getAnalysisBuffer,
         // play() now has two overloads (SoundSource and SoundBuffer);
