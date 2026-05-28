@@ -1,8 +1,106 @@
 import argparse
 import json
 import os
+import platform
+import subprocess
 
 from clang.cindex import CursorKind, Index, TokenKind
+
+
+# libclang only sees standard headers (and therefore can only resolve
+# `std::string` and friends) if we pass it the same sysroot / resource-dir
+# / include paths that the system compiler would use. Without these, the
+# parser silently falls back to `int` for any unresolved type — which
+# results in trussc_generated.cpp binding `const int & path` instead of
+# `const std::string & path`. See issue: bindgen had been silently broken.
+def discoverCompileArgs():
+    args = ["-x", "c++", "-std=c++20"]
+
+    system = platform.system()
+    if system == "Darwin":
+        try:
+            sdk = subprocess.check_output(
+                ["xcrun", "--show-sdk-path"], text=True
+            ).strip()
+            clangxx = subprocess.check_output(
+                ["xcrun", "-find", "clang++"], text=True
+            ).strip()
+            res = subprocess.check_output(
+                [clangxx, "-print-resource-dir"], text=True
+            ).strip()
+            args += [
+                "-isysroot", sdk,
+                "-resource-dir", res,
+                "-I", f"{sdk}/usr/include/c++/v1",
+                "-I", f"{res}/include",
+            ]
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            print(f"WARN: failed to probe Xcode toolchain: {e}")
+    elif system == "Linux":
+        # Best-effort. CI / contributors may need to set CPLUS_INCLUDE_PATH.
+        try:
+            res = subprocess.check_output(
+                ["clang++", "-print-resource-dir"], text=True
+            ).strip()
+            args += ["-resource-dir", res, "-I", f"{res}/include"]
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
+    return args
+
+
+# libclang 18 occasionally fails to resolve template-instantiated parameter
+# types (e.g. `const std::vector<Vec3>&`) when the inline body calls into a
+# class whose definition needs newer C++ stdlib features. When that happens
+# `param.type.spelling` silently returns `"const int &"`, which would corrupt
+# the generated lambda signatures. Fall back to extracting the type from the
+# raw source tokens, which libclang always exposes correctly.
+def _extractParamTypeFromTokens(param):
+    tokens = list(param.get_tokens())
+    if not tokens:
+        return None
+    spellings = [t.spelling for t in tokens]
+    name = param.spelling
+    if name and spellings and spellings[-1] == name:
+        spellings = spellings[:-1]
+    # Drop default-value clauses ("= 1.0f", "= nullptr"). Anything from
+    # the first '=' onward isn't part of the type.
+    if "=" in spellings:
+        spellings = spellings[: spellings.index("=")]
+    if not spellings:
+        return None
+
+    # Reassemble C++ type spelling with minimal spacing. The default
+    # `" ".join` produces `const std :: vector < Vec3 > &` which compiles
+    # but looks noisy and inflates the diff every regen.
+    out = []
+    no_space_after = {"::", "<", "&", "*"}
+    no_space_before = {"::", ">", ",", "&", "*"}
+    for i, tok in enumerate(spellings):
+        if i == 0:
+            out.append(tok)
+            continue
+        prev = spellings[i - 1]
+        if prev in no_space_after or tok in no_space_before:
+            out.append(tok)
+        else:
+            out.append(" " + tok)
+    return "".join(out).strip()
+
+
+def getParamType(param):
+    spelled = param.type.spelling
+    token_type = _extractParamTypeFromTokens(param)
+    if token_type is None:
+        return spelled
+    # If libclang gave us `int` (or `const int &`, etc.) but the source
+    # tokens contain `::` or angle brackets, the libclang type is wrong.
+    looks_resolved = ("::" in token_type) or ("<" in token_type)
+    if looks_resolved and "int" in spelled:
+        return token_type
+    # Prefer the spelled type when it looks sensible (it correctly handles
+    # cv-qualifiers, references, decayed arrays, etc).
+    return spelled
 
 genfile = "trussc_generated.cpp"
 
@@ -107,9 +205,20 @@ additional_overloads = {
 functions_map = {}
 
 def visitNode(node, ns="", clazz=""):
-    if node.kind.name == 'FUNCTION_DECL':
+    # libclang 18 + clang 21 system headers occasionally yields CursorKind
+    # ids it doesn't recognise (e.g. 437 inside C++20 stdlib templates).
+    # Skip the offending subtree instead of crashing the whole run.
+    try:
+        node_kind_name = node.kind.name
+    except ValueError:
+        return
+
+    if node_kind_name == 'FUNCTION_DECL':
         is_ignore = False
 
+        # The translation unit's own root cursor has no location.file.
+        if node.location.file is None:
+            return
         filepath = node.location.file.name
         filename = os.path.basename(filepath)
         if not (filename in target_filenames):
@@ -122,7 +231,7 @@ def visitNode(node, ns="", clazz=""):
         params = []
         for param in node.get_arguments():
             param_name = param.spelling
-            param_type = param.type.spelling
+            param_type = getParamType(param)
 
             params.append({
                 "name": param_name,
@@ -177,17 +286,17 @@ def visitNode(node, ns="", clazz=""):
             else:
                 functions_map[id][line_number] = obj
 
-    elif node.kind.name == 'NAMESPACE':
+    elif node_kind_name =='NAMESPACE':
         if ns == "":
             ns = node.spelling
         else:
             ns = ns + "::" + node.spelling
-    elif node.kind.name == 'CALL_EXPR':
+    elif node_kind_name =='CALL_EXPR':
         # print(declared_function_name, node.location.line)
         pass
-    elif node.kind.name == 'CLASS_TEMPLATE':
+    elif node_kind_name =='CLASS_TEMPLATE':
         pass
-    elif node.kind.name == 'CLASS_DECL':
+    elif node_kind_name =='CLASS_DECL':
         if clazz == "":
             clazz = node.spelling
         else:
@@ -196,7 +305,11 @@ def visitNode(node, ns="", clazz=""):
         # print("kind_name:", node.kind.name)
         pass
 
-    for c in node.get_children():
+    try:
+        children = list(node.get_children())
+    except ValueError:
+        return
+    for c in children:
         visitNode(c, ns, clazz)
 
 
@@ -309,8 +422,32 @@ def main():
 
     input_filename = os.path.basename(args.filename)
 
+    # Also add the TrussC core include dirs so files like #include "tc/..."
+    # resolve, otherwise types declared in headers next to TrussC.h
+    # (Vec2, Color, Sound, etc.) appear unresolved.
+    truss_root = os.path.abspath(
+        os.path.dirname(args.filename)  # e.g. core/include/
+    )
+    compile_args = discoverCompileArgs() + [
+        "-I", truss_root,
+        "-I", os.path.join(truss_root, "sokol"),
+    ]
+
     index = Index.create()
-    tree = index.parse(args.filename, args=["-x", "c++"])
+    tree = index.parse(args.filename, args=compile_args)
+
+    # Surface any fatal parse errors so silent type-fallbacks (e.g. unresolved
+    # `std::string` becoming `int`) get noticed instead of silently corrupting
+    # the generated bindings.
+    fatal = [d for d in tree.diagnostics if d.severity >= 3]  # 3 = error
+    if fatal:
+        print(f"WARN: libclang reported {len(fatal)} error(s) while parsing:")
+        for d in fatal[:5]:
+            print(f"  {d.spelling} at {d.location}")
+        if len(fatal) > 5:
+            print(f"  ... and {len(fatal) - 5} more")
+        print("Continuing — generation may still be correct if errors are "
+              "inside stdlib template internals, but verify the output.")
 
     visitNode(tree.cursor)
 
