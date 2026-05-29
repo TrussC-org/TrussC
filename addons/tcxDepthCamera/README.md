@@ -146,6 +146,24 @@ public:
 };
 ```
 
+## No hardware? `SyntheticDepthCamera`
+
+The addon ships a software-only `DepthCamera` that generates an animated scene
+(a rippling wall with a bobbing sphere) plus a depth-keyed color image — no
+device required:
+
+```cpp
+shared_ptr<DepthCamera> cam = make_shared<SyntheticDepthCamera>(640, 480);
+cam->setup();
+cam->update();
+cam->toMesh({.colors = true}).draw();
+```
+
+Use it to develop and test against the interface on any platform (it powers the
+examples and CI), to run point-cloud demos on machines without a camera, and as
+a reference implementation. It animates by an internal frame counter (so it's
+deterministic) and relies on the base's default deprojection / `toMesh()`.
+
 ## Threaded, thread-safe implementations
 
 For the common pull-based SDK, inherit `ThreadedDepthCameraBase<Frame>` instead
@@ -180,6 +198,15 @@ callback-driven-SDK case can still implement raw `DepthCamera` directly.
 
 ## Roadmap
 
+- **Virtual source family.** Because `DepthCamera` is a narrow per-frame
+  contract (depth + intrinsics + optional color/IR), the data source is
+  swappable. `SyntheticDepthCamera` is the first non-hardware source; the same
+  idea gives, for free, **playback** (a recording replayed *as* a `DepthCamera`)
+  and **network** (a remote camera received as a `DepthCamera`), plus the sink
+  side — a recorder / sender that consumes *any* `DepthCamera`. Doing this well
+  means defining a common serialized `DepthFrame` format (with compression —
+  depth+color+IR is heavy, ~150 MB/s uncompressed at 30 fps), so it's deferred
+  until the live-capture path is proven.
 - **Device registry / factory.** Once there are ≥2 backends, a
   `DepthCameraRegistry` (each implementation self-registers an enumerator +
   factory) will provide cross-backend `listDevices()` and a `create(info)`

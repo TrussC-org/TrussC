@@ -33,6 +33,7 @@
 //   tcxDepthCapabilities.h - IColorStream, IInfraredStream, IStereoRaw, ...
 //   tcxDepthCameraBase.h   - DepthCamera (the shared contract)
 //   tcxThreadedDepthCamera.h - ThreadedDepthCameraBase<Frame> (thread-safe base)
+//   tcxSyntheticDepthCamera.h - SyntheticDepthCamera (software-generated source)
 //   tcxDepthCast.h         - as<>() / is<>() / isStereoCam() capability queries
 //
 // =============================================================================
@@ -41,4 +42,5 @@
 #include "tcxDepthCapabilities.h"
 #include "tcxDepthCameraBase.h"
 #include "tcxThreadedDepthCamera.h"
+#include "tcxSyntheticDepthCamera.h"
 #include "tcxDepthCast.h"
