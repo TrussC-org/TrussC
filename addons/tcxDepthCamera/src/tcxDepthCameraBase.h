@@ -158,7 +158,10 @@ public:
 
     // 3D camera-space coordinate at (x, y) in meters (+X right, +Y down, +Z
     // away). Uses the frame's precomputed world cloud when present (e.g. an
-    // SDK's accurate, distortion-aware transform), else the pinhole formula.
+    // SDK's accurate transform); otherwise deprojects from intrinsics. When the
+    // intrinsics carry Brown-Conrady distortion coefficients they are removed by
+    // iterative undistortion, so a recording can store just the intrinsics and
+    // recompute world on playback (rather than storing the whole world image).
     // Returns the origin for invalid depth.
     Vec3 getWorldCoordinateAt(int x, int y) const {
         const DepthFrame& f = *front_;
@@ -169,11 +172,29 @@ public:
         if (d <= 0.0f) return Vec3{0, 0, 0};
         const DepthIntrinsics& in = f.intrinsics;
         if (in.fx == 0.0f || in.fy == 0.0f) return Vec3{0, 0, d};
-        return Vec3{
-            (static_cast<float>(x) - in.cx) * d / in.fx,
-            (static_cast<float>(y) - in.cy) * d / in.fy,
-            d
-        };
+
+        // Observed (possibly distorted) normalized image coordinates.
+        float xn = (static_cast<float>(x) - in.cx) / in.fx;
+        float yn = (static_cast<float>(y) - in.cy) / in.fy;
+
+        // Undistort (Brown-Conrady) only when coefficients are present - a plain
+        // pinhole camera (all coeffs 0, e.g. SyntheticDepthCamera) skips this.
+        if (in.k1 != 0.0f || in.k2 != 0.0f || in.k3 != 0.0f ||
+            in.p1 != 0.0f || in.p2 != 0.0f) {
+            float ux = xn, uy = yn;
+            for (int it = 0; it < 5; ++it) {  // fixed-point iteration
+                const float r2 = ux * ux + uy * uy;
+                const float radial = 1.0f + in.k1 * r2 + in.k2 * r2 * r2 +
+                                            in.k3 * r2 * r2 * r2;
+                const float dx = 2.0f * in.p1 * ux * uy + in.p2 * (r2 + 2.0f * ux * ux);
+                const float dy = in.p1 * (r2 + 2.0f * uy * uy) + 2.0f * in.p2 * ux * uy;
+                ux = (xn - dx) / radial;
+                uy = (yn - dy) / radial;
+            }
+            xn = ux;
+            yn = uy;
+        }
+        return Vec3{xn * d, yn * d, d};
     }
 
     // -------------------------------------------------------------------------
