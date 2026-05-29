@@ -1,114 +1,153 @@
 #pragma once
 
 // =============================================================================
-// tcxDepthCameraBase.h - Unified interface for depth / point-cloud cameras
+// tcxDepthCameraBase.h - Unified, thread-safe base for depth / point cloud cameras
 // =============================================================================
 //
-// DepthCamera is the common contract shared by every depth sensor, regardless
-// of how it produces depth (structured light, stereo, ToF, LiDAR). Drive any
-// device through this one interface:
+// DepthCamera is the one common type for every depth sensor (structured light,
+// stereo, ToF, LiDAR). It is a CONCRETE base that owns a canonical, triple-
+// buffered DepthFrame and provides everything built on top of it - distance,
+// world coordinates, color, meshing, threading. An implementation only has to:
+//
+//   1. open / close the device   (openDevice / closeDevice)
+//   2. fill a DepthFrame          (captureInto)
+//
+// It never writes getters, a mutex, or buffer juggling. Drive any camera:
 //
 //   shared_ptr<DepthCamera> cam = make_shared<Orbbec>(serial);
+//   cam->setThreaded(true);
 //   cam->setup();
 //   ...
 //   cam->update();
-//   if (cam->isFrameNew()) {
-//       Mesh cloud = cam->toMesh();                       // points only
-//       Mesh tex   = cam->toMesh({.texCoords = true});    // + UVs for color tex
-//   }
+//   if (cam->isFrameNew()) cam->toMesh({.colors = true}).draw();
 //
-// Design notes:
-//   - The depth array natively holds DISTANCE only; turning it into 3D points
-//     or color is a separate, on-demand calculation. So the per-pixel getters
-//     (getDistanceAt / getWorldCoordinateAt) are the primitives, and toMesh()
-//     is the convenience layer that runs the full conversion in one pass.
-//   - Units are float meters everywhere in this abstract API (1.0 == 1m, like
-//     glTF / Unity). The raw uint16-mm buffer, when a device exposes it, is a
-//     device-specific fast path, deliberately NOT part of this interface - that
-//     keeps the API future-proof for LiDAR ranges that overflow uint16 mm.
-//   - Optional streams (color, IR, stereo raw, confidence) are capability
-//     interfaces (tcxDepthCapabilities.h), composed via multiple inheritance
-//     and discovered with as<>() / is<>() (tcxDepthCast.h).
+// Threading model (triple buffer): the worker fills the CAPTURE frame, then
+// briefly locks to promote it to BACK; update() briefly locks to swap BACK ->
+// FRONT; getters read FRONT (mutated only inside update() on the calling
+// thread). So getters need no locking - the mutex is held only for two O(1)
+// pointer swaps, never during device I/O or per-pixel reads. setThreaded(false)
+// captures inline.
+//
+// Units: getDistanceAt() / getWorldCoordinateAt() return meters. Internally
+// depth is uint16 * depthScale (see DepthFrame).
 //
 // =============================================================================
 
-#include "tcxDepthCapabilities.h"
+#include "tcxDepthTypes.h"
+#include <mutex>
+#include <utility>
 
 namespace tcx {
 
 using namespace tc;
 
-class DepthCamera {
+class DepthCamera : protected tc::Thread {
 public:
-    virtual ~DepthCamera() = default;
+    DepthCamera()
+        : front_(&buffers_[0]), back_(&buffers_[1]), capture_(&buffers_[2]) {}
+
+    ~DepthCamera() override {
+        if (isThreadRunning()) {
+            stopThread();
+            waitForThread(false);
+        }
+    }
+
+    DepthCamera(const DepthCamera&) = delete;
+    DepthCamera& operator=(const DepthCamera&) = delete;
 
     // -------------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------------
 
-    // Open the device and start streaming. Returns false on failure.
-    virtual bool setup() = 0;
+    // Open the device and (if threaded) start the grabber. Returns false on
+    // failure. Call setThreaded() beforehand to choose the mode.
+    bool setup() {
+        if (!openDevice()) return false;
+        if (threaded_) startThread();
+        return true;
+    }
 
-    // Pull the latest frame from the device. Call once per app frame.
-    virtual void update() = 0;
+    // Stop the grabber and release the device.
+    void close() {
+        if (isThreadRunning()) {
+            stopThread();
+            waitForThread(false);
+        }
+        closeDevice();
+    }
 
-    // Stop streaming and release the device.
-    virtual void close() = 0;
-
-    // True only on frames where update() brought in a new DEPTH image. This is
-    // the primary, every-camera freshness signal. Other streams arrive
-    // asynchronously and report their own freshness on their capability
-    // interface (IColorStream::isColorFrameNew(), etc.).
-    virtual bool isFrameNew() const = 0;
+    // Publish the latest frame. Call once per app frame.
+    void update() {
+        if (isThreadRunning()) {
+            std::lock_guard<std::mutex> lk(mutex_);
+            if (backReady_) {
+                std::swap(back_, front_);
+                freshness_ = pending_;
+                pending_.clear();
+                backReady_ = false;
+            } else {
+                freshness_.clear();  // nothing new this tick
+            }
+        } else {
+            StreamFreshness f = captureInto(*back_);
+            if (f.any()) std::swap(back_, front_);
+            freshness_ = f;
+        }
+    }
 
     // -------------------------------------------------------------------------
-    // Threading (optional behaviour switch)
+    // Freshness (per stream, since streams may arrive at different rates)
     // -------------------------------------------------------------------------
-    //
-    // When threaded, the implementation grabs frames on a background thread and
-    // update() just publishes the most recent one - non-blocking, double
-    // buffered, at the cost of up to one frame of latency. When not threaded,
-    // update() acquires the frame inline (lowest latency, but can stall the
-    // app loop on slow USB / device I/O).
-    //
-    // Call before setup(). Not every SDK supports toggling this (some are
-    // inherently callback-driven); isThreaded() reports the effective mode.
-    // The base only stores the requested flag - honoring it is up to the
-    // implementation. Default: not threaded.
-    virtual void setThreaded(bool threaded) { threaded_ = threaded; }
-    virtual bool isThreaded() const { return threaded_; }
+    bool isFrameNew()         const { return freshness_.depth; }
+    bool isColorFrameNew()    const { return freshness_.color; }
+    bool isInfraredFrameNew() const { return freshness_.infrared; }
+    bool isStreamNew(Stream s) const { return freshness_.get(s); }
 
     // -------------------------------------------------------------------------
-    // Depth stream
+    // Threading
     // -------------------------------------------------------------------------
+    void setThreaded(bool threaded) { threaded_ = threaded; }  // call before setup()
+    bool isThreaded() const { return threaded_; }
 
-    virtual int getWidth()  const = 0;
-    virtual int getHeight() const = 0;
-
-    // Distance along the optical axis at depth pixel (x, y), in meters.
-    // Returns <= 0 for invalid / missing depth (the universal "no data" value).
-    virtual float getDistanceAt(int x, int y) const = 0;
-
-    // Pinhole intrinsics of the depth stream (drives the default deprojection).
-    virtual DepthIntrinsics getDepthIntrinsics() const = 0;
-
-    // Informational sensor kind. Defaults to Unknown; override to report it.
+    // -------------------------------------------------------------------------
+    // Sensor info (a device property, not frame data)
+    // -------------------------------------------------------------------------
     virtual DepthSensorType getSensorType() const { return DepthSensorType::Unknown; }
 
     // -------------------------------------------------------------------------
-    // Deprojection (point cloud building blocks)
+    // Frame access
     // -------------------------------------------------------------------------
 
-    // 3D position of depth pixel (x, y) in camera space, meters. Returns the
-    // origin for invalid depth. Default implementation is the textbook pinhole
-    // deprojection using getDepthIntrinsics(); override with the SDK's own
-    // (often bulk / SIMD) routine when one exists.
-    //
-    // Convention: +X right, +Y down (image axes), +Z away from the camera.
-    virtual Vec3 getWorldCoordinateAt(int x, int y) const {
-        float d = getDistanceAt(x, y);
+    // The current readable frame - this is the thing you use a depth camera for.
+    // Read freely on the thread that calls update(); no locking required.
+    const DepthFrame& currentFrame() const { return *front_; }
+
+    int    getWidth()  const { return front_->w; }
+    int    getHeight() const { return front_->h; }
+    double getTimestamp() const { return front_->timestamp; }
+    DepthIntrinsics getDepthIntrinsics() const { return front_->intrinsics; }
+
+    // Distance along the optical axis at (x, y) in meters. 0 = invalid / no data.
+    float getDistanceAt(int x, int y) const {
+        const DepthFrame& f = *front_;
+        if (x < 0 || y < 0 || x >= f.w || y >= f.h) return 0.0f;
+        const size_t i = static_cast<size_t>(y) * f.w + x;
+        return i < f.depth.size() ? f.depth[i] * f.depthScale : 0.0f;
+    }
+
+    // 3D camera-space coordinate at (x, y) in meters (+X right, +Y down, +Z
+    // away). Uses the frame's precomputed world cloud when present (e.g. an
+    // SDK's accurate, distortion-aware transform), else the pinhole formula.
+    // Returns the origin for invalid depth.
+    Vec3 getWorldCoordinateAt(int x, int y) const {
+        const DepthFrame& f = *front_;
+        if (x < 0 || y < 0 || x >= f.w || y >= f.h) return Vec3{0, 0, 0};
+        const size_t i = static_cast<size_t>(y) * f.w + x;
+        if (i < f.world.size()) return f.world[i];
+        const float d = (i < f.depth.size()) ? f.depth[i] * f.depthScale : 0.0f;
         if (d <= 0.0f) return Vec3{0, 0, 0};
-        DepthIntrinsics in = getDepthIntrinsics();
+        const DepthIntrinsics& in = f.intrinsics;
         if (in.fx == 0.0f || in.fy == 0.0f) return Vec3{0, 0, d};
         return Vec3{
             (static_cast<float>(x) - in.cx) * d / in.fx,
@@ -118,54 +157,100 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // Mesh / point cloud (convenience layer)
+    // Color / IR (optional; registered to the depth resolution)
+    // -------------------------------------------------------------------------
+    bool          hasColor()       const { return front_->hasColor(); }
+    const Pixels& getColorPixels() const { return front_->color; }
+
+    // Normalized UV into the color image for depth pixel (x, y). Color is
+    // registered to depth, so it is simply the normalized depth coordinate.
+    Vec2 getColorTexCoordAt(int x, int y) const {
+        const DepthFrame& f = *front_;
+        if (f.w <= 0 || f.h <= 0) return Vec2{0, 0};
+        return Vec2{(x + 0.5f) / f.w, (y + 0.5f) / f.h};
+    }
+    Color getColorAt(int x, int y) const {
+        const Pixels& c = front_->color;
+        if (!c.isAllocated()) return Color{0, 0, 0, 1};
+        if (x < 0 || y < 0 || x >= c.getWidth() || y >= c.getHeight()) {
+            return Color{0, 0, 0, 1};
+        }
+        return c.getColor(x, y);
+    }
+
+    bool          hasInfrared()       const { return front_->hasInfrared(); }
+    const Pixels& getInfraredPixels() const { return front_->ir; }
+
+    // -------------------------------------------------------------------------
+    // Mesh / point cloud
     // -------------------------------------------------------------------------
 
-    // Build a point-cloud Mesh (PrimitiveMode::Points) from the current frame.
-    // Invalid points are skipped, so optional attributes stay aligned with the
-    // kept vertices - that's why we build everything in one pass here rather
-    // than decorating a mesh after the fact (post-decoration loses the depth
-    // pixel mapping once invalid points are dropped).
-    //
-    // Override this when the device offers a faster bulk conversion; the
-    // default is a correct, portable reference implementation.
+    // Build a point-cloud Mesh (Points) from the current frame in one pass:
+    // invalid points (depth 0) are skipped, and the optional attributes stay
+    // aligned with the kept vertices. Reads the frame directly (no per-pixel
+    // virtual dispatch). Virtual so an implementation can override with a bulk /
+    // GPU path; the default is a correct, portable reference.
     virtual Mesh toMesh(DepthMeshOptions opt = {}) const {
+        const DepthFrame& f = *front_;
         Mesh m;
         m.setMode(PrimitiveMode::Points);
 
         const int step = (opt.step < 1) ? 1 : opt.step;
-        const int w = getWidth();
-        const int h = getHeight();
+        const bool useColor = (opt.colors || opt.texCoords) && f.hasColor();
 
-        // Color attributes need a registered color stream; degrade gracefully
-        // (the mesh is still built, just without the requested color/UVs).
-        const IColorStream* color = (opt.texCoords || opt.colors)
-            ? dynamic_cast<const IColorStream*>(this)
-            : nullptr;
-        if ((opt.texCoords || opt.colors) && !color) {
-            static bool warned = false;
-            if (!warned) {
-                warned = true;
-                logWarning("tcxDepthCamera")
-                    << "toMesh() requested color/texCoords but this camera has "
-                       "no IColorStream; building geometry without them.";
-            }
-        }
-
-        for (int y = 0; y < h; y += step) {
-            for (int x = 0; x < w; x += step) {
-                if (getDistanceAt(x, y) <= 0.0f) continue;  // skip invalid
+        for (int y = 0; y < f.h; y += step) {
+            for (int x = 0; x < f.w; x += step) {
+                const size_t i = static_cast<size_t>(y) * f.w + x;
+                if (i >= f.depth.size() || f.depth[i] == 0) continue;  // invalid
                 m.addVertex(getWorldCoordinateAt(x, y));
-                if (color && opt.texCoords) m.addTexCoord(color->getColorTexCoordAt(x, y));
-                if (color && opt.colors)    m.addColor(color->getColorAt(x, y));
+                if (useColor && opt.texCoords) m.addTexCoord(getColorTexCoordAt(x, y));
+                if (useColor && opt.colors)    m.addColor(getColorAt(x, y));
             }
         }
         return m;
     }
 
 protected:
-    // Requested threading mode (see setThreaded). Implementations read this in
-    // setup() to decide whether to spin up a background grabber.
+    // -------------------------------------------------------------------------
+    // Implementation hooks
+    // -------------------------------------------------------------------------
+
+    // Open / close the underlying device or source (file, network, ...).
+    virtual bool openDevice() = 0;
+    virtual void closeDevice() = 0;
+
+    // Fill dst with one frame and report which streams it refreshed. In threaded
+    // mode this runs on the background grabber; otherwise inline in update().
+    //
+    // IMPORTANT: produce a COMPLETE frame. If a stream did not refresh this tick
+    // (e.g. color runs slower than depth, or vice versa), carry its latest data
+    // forward into dst - the buffers rotate, so dst will NOT retain last tick's
+    // contents. Keep the latest of each stream as a member if your SDK delivers
+    // streams independently; SDKs configured for synchronized capture give both
+    // every time, so this is automatic. The returned StreamFreshness reports
+    // what actually changed (drives isFrameNew / isColorFrameNew).
+    virtual StreamFreshness captureInto(DepthFrame& dst) = 0;
+
+private:
+    void threadedFunction() override {
+        while (isThreadRunning()) {
+            StreamFreshness f = captureInto(*capture_);
+            std::lock_guard<std::mutex> lk(mutex_);
+            std::swap(capture_, back_);
+            pending_ |= f;
+            backReady_ = true;
+        }
+    }
+
+    DepthFrame buffers_[3];
+    DepthFrame* front_;
+    DepthFrame* back_;
+    DepthFrame* capture_;
+
+    std::mutex mutex_;
+    StreamFreshness pending_{};    // accumulated by worker, guarded by mutex_
+    StreamFreshness freshness_{};  // current frame's flags, main thread only
+    bool backReady_ = false;       // guarded by mutex_
     bool threaded_ = false;
 };
 

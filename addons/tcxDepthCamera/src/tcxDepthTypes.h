@@ -4,63 +4,50 @@
 // tcxDepthTypes.h - Common value types for depth cameras
 // =============================================================================
 //
-// These are plain data structs shared by the DepthCamera interface and all
-// device implementations. Keeping per-device differences (resolution, optics,
-// sensor kind) as DATA rather than as separate class shapes is what lets a
-// single DepthCamera interface span structured-light / stereo / ToF / LiDAR
-// without an awkward inheritance tree.
+// Plain data structs shared by the DepthCamera base and all implementations.
+// The centrepiece is DepthFrame: the canonical, device-independent
+// representation of one frame. The whole point of a depth camera is to get at
+// this frame; everything else (deprojection, meshing, recording) is built on
+// top of it by the base, so implementations only have to FILL a DepthFrame.
 //
 // =============================================================================
 
 #include <TrussC.h>
+#include <cstdint>
+#include <vector>
 
 namespace tcx {
 
 using namespace tc;
 
 // What kind of sensor produced the depth. Informational only - never branch on
-// this to decide which methods exist; use capability interfaces + as<>() for
-// that (see tcxDepthCast.h). This is for UI, logging and debugging.
+// this to decide which methods/data exist; use hasColor()/hasInfrared() on the
+// frame and capability interfaces + as<>() for that. This is for UI / logging.
 enum class DepthSensorType {
     Unknown,
-    StructuredLight,  // e.g. Kinect v1, Orbbec Astra
+    StructuredLight,  // e.g. Kinect v1, Orbbec Astra, Xtion
     Stereo,           // e.g. Orbbec Gemini, RealSense D4xx
-    ToF,              // e.g. Kinect Azure, Orbbec Femto
+    ToF,              // e.g. Azure Kinect, Orbbec Femto
     LiDAR,            // scanning / solid-state LiDAR
 };
 
-// Pinhole intrinsics of the depth stream, in pixel units.
-//
-// World coordinates are derived from a depth sample d (meters) at pixel (x, y):
-//   X = (x - cx) * d / fx
-//   Y = (y - cy) * d / fy
-//   Z = d
-//
-// Distortion coefficients follow the Brown-Conrady (plumb-bob) model and are
-// optional; leave them at 0 for an ideal pinhole. Most depth SDKs already hand
-// back undistorted depth, so they are usually unused here.
+// Pinhole intrinsics of the depth stream, in pixel units. World coordinates of
+// a depth sample d (meters) at pixel (x, y):
+//   X = (x - cx) * d / fx,  Y = (y - cy) * d / fy,  Z = d
+// Distortion (Brown-Conrady) is optional; most SDKs hand back undistorted depth.
 struct DepthIntrinsics {
     int   width  = 0;
     int   height = 0;
-    float fx = 0.0f;
-    float fy = 0.0f;
-    float cx = 0.0f;
-    float cy = 0.0f;
-    float k1 = 0.0f, k2 = 0.0f, k3 = 0.0f;  // radial distortion
-    float p1 = 0.0f, p2 = 0.0f;             // tangential distortion
+    float fx = 0.0f, fy = 0.0f;
+    float cx = 0.0f, cy = 0.0f;
+    float k1 = 0.0f, k2 = 0.0f, k3 = 0.0f;  // radial
+    float p1 = 0.0f, p2 = 0.0f;             // tangential
 };
 
 // Identifies a stream for per-stream freshness queries.
-enum class Stream {
-    Depth,
-    Color,
-    Infrared,
-    Confidence,
-};
+enum class Stream { Depth, Color, Infrared, Confidence };
 
-// Which streams were refreshed by a single frame capture. Used by
-// ThreadedDepthCameraBase to drive isFrameNew() / isColorFrameNew() / etc. so
-// implementations never have to track or reset freshness flags themselves.
+// Which streams a single frame capture refreshed (streams arrive async).
 struct StreamFreshness {
     bool depth      = false;
     bool color      = false;
@@ -69,18 +56,12 @@ struct StreamFreshness {
 
     void clear() { depth = color = infrared = confidence = false; }
 
-    // Accumulate (OR) - lets a background grabber fold several captures that
-    // happened between two update() calls into a single "something new" result.
     StreamFreshness& operator|=(const StreamFreshness& o) {
-        depth      |= o.depth;
-        color      |= o.color;
-        infrared   |= o.infrared;
-        confidence |= o.confidence;
+        depth |= o.depth; color |= o.color;
+        infrared |= o.infrared; confidence |= o.confidence;
         return *this;
     }
-
     bool any() const { return depth || color || infrared || confidence; }
-
     bool get(Stream s) const {
         switch (s) {
             case Stream::Depth:      return depth;
@@ -92,25 +73,46 @@ struct StreamFreshness {
     }
 };
 
-// Options for DepthCamera::toMesh(). All attributes are built in a single pass
-// over the depth image, so invalid points are simply skipped and the optional
-// attributes (texCoords / colors) stay aligned with the kept vertices.
+// =============================================================================
+// DepthFrame - the canonical, device-independent frame
+// =============================================================================
 //
-// texCoords / colors require the camera to also implement IColorStream
-// (see tcxDepthCapabilities.h); they are silently ignored otherwise.
+// Owned and triple-buffered by the DepthCamera base. An implementation fills it
+// in captureInto(); everything the base offers (distance, world coordinates,
+// meshing, recording) reads from it. Color and IR live here too (registered to
+// the depth resolution) since they are common to essentially every RGBD camera;
+// genuinely device-specific data (raw stereo pair, confidence) stays on
+// capability interfaces.
+//
+// Depth is stored as uint16 + depthScale (meters per unit). RGBD cameras are
+// natively uint16 mm (depthScale = 0.001), which keeps frames compact (great
+// for recording); long-range LiDAR can use a coarser scale (e.g. 0.01 = cm,
+// reaching ~655 m) without changing the meters-based API.
+struct DepthFrame {
+    int   w = 0;
+    int   h = 0;
+    float depthScale = 0.001f;          // meters per depth unit (mm by default)
+
+    std::vector<uint16_t> depth;        // w*h, 0 = invalid / no data
+    std::vector<Vec3>     world;        // optional precomputed world (m); empty -> deproject
+    Pixels color;                       // optional RGBA, registered to depth (w x h)
+    Pixels ir;                          // optional single-channel active brightness
+
+    DepthIntrinsics intrinsics;
+    double timestamp = 0.0;             // seconds (capture time)
+
+    bool hasColor()    const { return color.isAllocated(); }
+    bool hasInfrared() const { return ir.isAllocated(); }
+    bool hasWorld()    const { return !world.empty(); }
+};
+
+// Options for DepthCamera::toMesh(). Everything is built in a single pass over
+// the depth image, so invalid points are skipped and the optional attributes
+// stay aligned with the kept vertices. Color attributes require frame.hasColor().
 struct DepthMeshOptions {
-    // Add UVs into the color image. Cheap (the device already knows the
-    // depth->color mapping). Render the resulting POINTS mesh with the color
-    // texture bound. This does NOT bake color into the vertices.
-    bool texCoords = false;
-
-    // Sample and bake an RGB color per vertex. More expensive, but the mesh is
-    // self-contained (no texture needed) - handy for obj/gltf export.
-    bool colors = false;
-
-    // Decimation: keep every Nth pixel on each axis (1 = full resolution).
-    // A cheap way to thin a ~300k-point cloud down for preview / perf.
-    int step = 1;
+    bool texCoords = false;  // add UVs into the (depth-registered) color image
+    bool colors    = false;  // bake per-vertex RGB (self-contained mesh)
+    int  step      = 1;      // decimation: keep every Nth pixel per axis
 };
 
 } // namespace tcx

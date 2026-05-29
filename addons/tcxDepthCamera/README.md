@@ -3,218 +3,197 @@
 A **unified interface** for depth / point-cloud cameras in TrussC — Orbbec,
 Kinect, Xtion, RealSense, LiDAR, and so on.
 
-> 🚧 **Pre-1.0.** This is an official addon, but the interface may still change
-> until it has been validated against a real backend (`tcxOrbbec`). Pin a commit
-> if you depend on it before then.
+> 🚧 **Pre-1.0.** Official addon, but the interface may still change until it has
+> been validated against a real backend (`tcxOrbbec`). Pin a commit if you depend
+> on it before then.
 
-> ⚠️ **This addon is interface-only.** It ships *no* device drivers and links
-> *no* vendor SDKs. On its own it does nothing. Its job is to define one common
-> contract so that application code can drive any depth camera through a single
-> base type, and so that concrete camera addons (e.g. `tcxOrbbec`) only have to
-> fill in the device-specific bits.
-
-## Why
-
-Depth cameras are wildly different under the hood — structured light, stereo,
-time-of-flight, LiDAR — and expose different extras (RGB, IR, raw stereo pair,
-confidence maps, different optics). But the thing you usually *want* is the
-same: `update()` and get a point cloud. `tcxDepthCamera` captures exactly that
-common part as an interface, and pushes the differences out to small optional
-"capability" interfaces, so device variety doesn't leak into your app loop.
+The thing you actually use a depth camera for is its **depth frame**. So that is
+the centre of this addon: a canonical, device-independent `DepthFrame` that the
+`DepthCamera` base owns and hands you. Once you can touch that frame, everything
+else — deprojection, point clouds, color mapping, threading, (later) recording —
+is the part you wanted abstracted away, and the base does it for you.
 
 ```cpp
 #include <tcxDepthCamera.h>
 using namespace tcx;
 
 shared_ptr<DepthCamera> cam = make_shared<Orbbec>(serial);   // from tcxOrbbec
+cam->setThreaded(true);
 cam->setup();
 // ...
 cam->update();
 if (cam->isFrameNew()) {
-    Mesh cloud = cam->toMesh({.colors = true});
+    const DepthFrame& f = cam->currentFrame();   // the raw frame, if you want it
+    Mesh cloud = cam->toMesh({.colors = true});  // ...or the convenience layer
     cloud.draw();
 }
 ```
 
-Swap `Orbbec` for any other implementation and the rest of your code is
-unchanged.
+Swap `Orbbec` for any other backend and the rest of your code is unchanged.
+
+## The canonical `DepthFrame`
+
+Every backend, whatever its underlying tech, produces the same frame:
+
+```cpp
+struct DepthFrame {
+    int   w, h;
+    float depthScale;            // meters per depth unit (RGBD: 0.001 = mm)
+    vector<uint16_t> depth;      // w*h, 0 = invalid
+    vector<Vec3>     world;      // optional precomputed world (m); empty -> deproject
+    Pixels color;                // optional RGBA, registered to depth
+    Pixels ir;                   // optional active brightness
+    DepthIntrinsics intrinsics;
+    double timestamp;
+};
+```
+
+- **Depth is `uint16` + `depthScale`.** RGBD cameras are natively uint16 mm
+  (`depthScale = 0.001`), which keeps frames compact (good for recording). The
+  meter-based API is unchanged: `getDistanceAt()` returns `depth[i] * depthScale`.
+  Long-range LiDAR can use a coarser scale (e.g. `0.01` = cm, ~655 m).
+- **Color and IR live in the frame** (registered to the depth resolution), since
+  essentially every RGBD camera has them. Query with `hasColor()` /
+  `hasInfrared()`. Truly device-specific data (raw stereo pair, confidence) stays
+  on capability interfaces.
+- **`world` is optional.** If a backend has an accurate, distortion-aware
+  point-cloud transform (e.g. Azure Kinect's), it fills `world` and the base uses
+  it; otherwise the base deprojects from `intrinsics`.
 
 ## Architecture
 
 ```
-DepthCamera (base contract)          <- everyone implements this
-  ├─ setup / update / close / isFrameNew
-  ├─ getDistanceAt(x,y)        -> float meters
-  ├─ getWorldCoordinateAt(x,y) -> Vec3 meters   (default: pinhole deprojection)
-  ├─ getDepthIntrinsics()      -> DepthIntrinsics
-  ├─ toMesh(DepthMeshOptions)  -> Mesh           (default: single-pass builder)
-  └─ setThreaded / isThreaded
+DepthCamera (concrete base)
+  ├─ owns a triple-buffered DepthFrame
+  ├─ setup / update / close / isFrameNew / isColorFrameNew / setThreaded
+  ├─ getDistanceAt / getWorldCoordinateAt / getColorPixels / getColorAt
+  ├─ currentFrame()        <- the raw canonical frame
+  └─ toMesh(DepthMeshOptions)
 
-Capability interfaces (optional, composed via multiple inheritance):
-  IColorStream      RGB(A) color registered to the depth (UVs / per-vertex color)
-  IInfraredStream   a single IR / amplitude image
-  IStereoRaw        raw left/right IR pair + baseline
-  IConfidenceMap    per-pixel confidence / amplitude (typical of ToF)
+Backend implements only:
+  bool openDevice();  void closeDevice();  StreamFreshness captureInto(DepthFrame&);
+
+Capability interfaces (optional, device-specific, composed via inheritance):
+  IStereoRaw       raw left/right IR pair + baseline
+  IConfidenceMap   per-pixel confidence / amplitude (ToF)
 ```
+
+### Threading is built in
+
+The base owns a background grabber thread, a mutex, and the triple-buffer
+hand-off, so a backend never writes any of that. The worker fills the *capture*
+frame, `update()` promotes it to *front*, and the getters read *front* — which is
+mutated only inside `update()` on the calling thread, so **getters need no
+locking**; the mutex is held only for two O(1) pointer swaps, never during device
+I/O or per-pixel reads. `setThreaded(false)` captures inline. Call before `setup()`.
 
 ### Design decisions
 
-- **Units are float meters** (`1.0 == 1m`, like glTF / Unity) across the whole
-  abstract API. A raw `uint16`-mm depth buffer, when a device exposes one, is a
-  device-specific fast path and is deliberately **not** in this interface — that
-  keeps it future-proof for LiDAR ranges that would overflow `uint16` mm.
-- **Depth is just distance.** Turning it into 3D points or color is a separate,
-  on-demand calculation. So the per-pixel getters are the primitives, and
-  `toMesh()` is the convenience layer that runs the full conversion in one pass.
-- **`toMesh()` builds in a single pass.** Invalid points are skipped *and* the
-  optional attributes (texCoords / colors) are attached in the same loop, so
-  they stay aligned with the kept vertices. (Decorating a mesh *after* building
-  it would lose the depth-pixel mapping once invalid points are dropped.)
-- **Capabilities don't inherit `DepthCamera`.** A device multiply-inherits the
-  one stateful base plus the pure-interface capabilities it supports, so there
-  is no diamond — it behaves like `implements` of several interfaces.
-- **Sensor kind is informational only** (`getSensorType()`), never a branch for
-  "which methods exist" — use capability queries for that.
+- **The base owns the frame.** A depth map is the native primitive of every RGBD
+  camera, so the base holds a canonical one rather than making each backend
+  reimplement getters. This makes `toMesh()` read the frame directly (no
+  per-pixel virtual dispatch), keeps backends tiny, and makes recording trivial.
+- **Units: float meters** at the API surface (`getDistanceAt` /
+  `getWorldCoordinateAt`), uint16 + scale in storage.
+- **Capabilities don't inherit `DepthCamera`** → composed via multiple
+  inheritance with no diamond. Discover with `as<>()` / `is<>()`.
+- **Sensor kind (`getSensorType()`) is informational**, never a branch for "which
+  data exists" — use `hasColor()` / `as<Cap>()` for that.
+- **Per-stream freshness**: `isFrameNew()` (depth) and `isColorFrameNew()` can
+  differ, since streams may arrive at different rates.
 
 ## Point clouds: `toMesh()`
 
-`toMesh()` returns a `Mesh` in `PrimitiveMode::Points`.
-
 ```cpp
-Mesh a = cam->toMesh();                              // positions only (cheap)
+Mesh a = cam->toMesh();                              // positions only
 Mesh b = cam->toMesh({.texCoords = true});           // + UVs into the color image
 Mesh c = cam->toMesh({.colors = true});              // + baked per-vertex RGB
-Mesh d = cam->toMesh({.colors = true, .step = 2});   // decimated (every 2nd px)
+Mesh d = cam->toMesh({.colors = true, .step = 2});   // decimated
 ```
 
-- `texCoords` is cheap (the device already knows the depth→color mapping); draw
-  the mesh with the color texture bound. It does **not** bake color in.
-- `colors` samples and bakes an RGB per vertex — heavier, but self-contained
-  (no texture needed), handy for obj/gltf export.
-- `step` thins the cloud for preview / performance.
-
-`texCoords` / `colors` require the camera to also implement `IColorStream`; if
-it doesn't, the geometry is still built (a one-time warning is logged).
-
-## Capability discovery
-
-Optional features are queried at runtime, not encoded in the static type:
-
-```cpp
-// as<>() does the check AND hands back the usable pointer in one cast:
-if (auto* s = as<IStereoRaw>(*cam)) {
-    auto& left = s->getLeftInfrared();
-    float b    = s->getBaseline();
-}
-
-// bool-only forms + readable named wrappers:
-if (isStereoCam(*cam)) { ... }
-if (hasColor(*cam))    { ... }
-if (isToF(*cam))       { ... }   // via getSensorType()
-```
-
-`as<>()` / `is<>()` accept a reference, a raw pointer, or a `shared_ptr`.
-
-## Implementing a concrete camera
-
-A new device addon depends on `tcxDepthCamera`, inherits `DepthCamera`, and adds
-whatever capability interfaces it supports. At minimum you implement the
-lifecycle, the depth accessors and the intrinsics — `getWorldCoordinateAt()` and
-`toMesh()` then work for free (override them if the SDK has a faster bulk path):
-
-```cpp
-class Orbbec : public DepthCamera, public IColorStream {
-public:
-    bool  setup() override;
-    void  update() override;
-    void  close() override;
-    bool  isFrameNew() const override;
-    int   getWidth()  const override;
-    int   getHeight() const override;
-    float getDistanceAt(int x, int y) const override;        // meters
-    DepthIntrinsics getDepthIntrinsics() const override;
-    DepthSensorType getSensorType() const override { return DepthSensorType::Stereo; }
-
-    // IColorStream
-    bool isColorFrameNew() const override;   // color is async from depth
-    int getColorWidth()  const override;
-    int getColorHeight() const override;
-    const Pixels& getColorPixels() const override;
-    Vec2 getColorTexCoordAt(int dx, int dy) const override;  // 0-1 UV
-    // getColorAt() has a default (samples getColorPixels at the UV); override
-    // it if the SDK exposes an already-registered color frame.
-};
-```
+`Points` mode, invalid points skipped, attributes built in one pass so they stay
+aligned. `texCoords`/`colors` need `hasColor()`. Override `toMesh()` in a backend
+for a bulk / GPU path if needed.
 
 ## No hardware? `SyntheticDepthCamera`
 
-The addon ships a software-only `DepthCamera` that generates an animated scene
-(a rippling wall with a bobbing sphere) plus a depth-keyed color image — no
-device required:
+Ships a software-only `DepthCamera` that fills the frame with an animated scene
+(a rippling wall + bobbing sphere) and a depth-keyed color image — no device:
 
 ```cpp
-shared_ptr<DepthCamera> cam = make_shared<SyntheticDepthCamera>(640, 480);
+auto cam = make_shared<SyntheticDepthCamera>(640, 480);
 cam->setup();
 cam->update();
 cam->toMesh({.colors = true}).draw();
 ```
 
-Use it to develop and test against the interface on any platform (it powers the
-examples and CI), to run point-cloud demos on machines without a camera, and as
-a reference implementation. It animates by an internal frame counter (so it's
-deterministic) and relies on the base's default deprojection / `toMesh()`.
+Use it to develop/test on any platform (it powers the examples and CI), run
+point-cloud demos on camera-less machines, and as a reference backend. See
+`example-synthetic/`.
 
-## Threaded, thread-safe implementations
+## Implementing a backend
 
-For the common pull-based SDK, inherit `ThreadedDepthCameraBase<Frame>` instead
-of `DepthCamera`. It implements the background grabber thread, the mutex, the
-triple-buffer hand-off, and the frame-new flags **once**, so an implementation
-never writes that (forgettable, race-prone) code:
+A backend depends on `tcxDepthCamera`, inherits `DepthCamera`, and fills the
+frame. That's it — no getters to write:
 
 ```cpp
-struct OrbbecFrame { std::vector<uint16_t> depth; Pixels color; /* ... */ };
-
-class Orbbec : public ThreadedDepthCameraBase<OrbbecFrame>, public IColorStream {
+class Orbbec : public DepthCamera {
 protected:
-    bool openDevice() override;                       // open the SDK device
+    bool openDevice() override;   // open the SDK device
     void closeDevice() override;
-    StreamFreshness captureInto(OrbbecFrame& f) override;  // grab one frame
-public:
-    // getters just read front() — no locking needed:
-    float getDistanceAt(int x, int y) const override {
-        return front().depth[y * getWidth() + x] * 0.001f;
+    StreamFreshness captureInto(DepthFrame& f) override {
+        // f.w/h, f.depthScale, f.depth (mm), f.color (registered), f.intrinsics, f.timestamp
+        // return which streams refreshed
     }
-    bool isColorFrameNew() const override { return isStreamNew(Stream::Color); }
-    // ...
+    DepthSensorType getSensorType() const override { return DepthSensorType::Stereo; }
 };
 ```
 
-`setup()` / `update()` / `close()` / `isFrameNew()` are provided (`final`).
-Getters read `front()`, which is only mutated inside `update()` on the calling
-thread, so they need no locking — the mutex is held only for two O(1) pointer
-swaps, never during device I/O or per-pixel reads. Call `setThreaded()` before
-`setup()`; `setThreaded(false)` captures inline (no thread). The
-callback-driven-SDK case can still implement raw `DepthCamera` directly.
+Add capability interfaces for device-specific extras:
+
+```cpp
+class Gemini : public DepthCamera, public IStereoRaw { ... };
+```
+
+**Produce a complete frame:** if a stream did not refresh this tick (e.g. color
+runs slower than depth), carry its latest data forward into the frame — the
+buffers rotate, so the destination does not retain last tick's contents. SDKs
+configured for synchronized capture deliver both every time, so this is
+automatic; otherwise keep the latest of each stream as a member.
+
+## Capability discovery
+
+```cpp
+if (auto* s = as<IStereoRaw>(*cam)) {
+    auto& left = s->getLeftInfrared();
+    float b    = s->getBaseline();
+}
+if (isStereoCam(*cam)) { ... }
+if (isToF(*cam))       { ... }
+```
+
+`as<>()` / `is<>()` accept a reference, raw pointer, or `shared_ptr`. (Common
+streams — color, IR — are not capabilities; use `hasColor()` / `hasInfrared()`.)
 
 ## Roadmap
 
-- **Virtual source family.** Because `DepthCamera` is a narrow per-frame
-  contract (depth + intrinsics + optional color/IR), the data source is
+- **Virtual source family.** Because the frame is the contract, the source is
   swappable. `SyntheticDepthCamera` is the first non-hardware source; the same
-  idea gives, for free, **playback** (a recording replayed *as* a `DepthCamera`)
-  and **network** (a remote camera received as a `DepthCamera`), plus the sink
-  side — a recorder / sender that consumes *any* `DepthCamera`. Doing this well
-  means defining a common serialized `DepthFrame` format (with compression —
-  depth+color+IR is heavy, ~150 MB/s uncompressed at 30 fps), so it's deferred
-  until the live-capture path is proven.
+  shape gives **playback** (a recording replayed *as* a `DepthCamera` — its
+  `captureInto` deserializes frames) and **network** (a remote camera received as
+  one), plus the sink side — a recorder/sender that consumes any `DepthCamera`
+  via `currentFrame()`. Since the base already owns a serialization-ready
+  `DepthFrame`, the recorder is camera-agnostic; the win over vendor recorders is
+  our own codec (RVL / zstd for depth, jpeg/h264 for color) and storing only
+  depth+color+intrinsics. Needs a serialized `DepthFrame` format; deferred until
+  live capture is proven.
 - **Device registry / factory.** Once there are ≥2 backends, a
-  `DepthCameraRegistry` (each implementation self-registers an enumerator +
-  factory) will provide cross-backend `listDevices()` and a `create(info)`
-  factory — so you can list every connected camera and construct one without
-  knowing its concrete type. Kept out for now: with a single backend it adds
-  coupling for no benefit, and a per-implementation `Camera::listDevices()` is
-  enough.
+  `DepthCameraRegistry` (backends self-register an enumerator + factory) for
+  cross-backend `listDevices()` and `create(info)`.
+- **GPU point-cloud path.** For high-res live clouds, deproject in a shader from
+  a depth texture (no CPU mesh). The endgame for `toMesh`-level performance.
 
 ## License
 
-MIT. Interface-only — bundles no third-party code. See `LICENSES.md`.
+MIT. Interface-only (plus the hardware-free `SyntheticDepthCamera`); bundles no
+third-party code. See `LICENSES.md`.

@@ -4,43 +4,46 @@
 // tcxDepthCamera.h - Unified depth-camera interface for TrussC (umbrella header)
 // =============================================================================
 //
-// tcxDepthCamera is an INTERFACE-ONLY addon: it defines the common contract for
-// depth / point-cloud sensors (Orbbec, Kinect, Xtion, RealSense, LiDAR, ...) so
-// that an application can drive any of them through a single base type:
+// tcxDepthCamera defines a common base for depth / point-cloud sensors (Orbbec,
+// Kinect, Xtion, RealSense, LiDAR, ...) so an application can drive any of them
+// through one type:
 //
 //   #include <tcxDepthCamera.h>
 //   using namespace tcx;
 //
 //   shared_ptr<DepthCamera> cam = make_shared<Orbbec>(serial);  // from tcxOrbbec
+//   cam->setThreaded(true);
 //   cam->setup();
 //   ...
 //   cam->update();
 //   if (cam->isFrameNew()) {
-//       Mesh cloud = cam->toMesh({.colors = true});
+//       const DepthFrame& f = cam->currentFrame();  // the raw thing you want
+//       Mesh cloud = cam->toMesh({.colors = true}); // ... and the convenience
 //       cloud.draw();
 //   }
 //
-//   // Optional features are discovered at runtime, not baked into the type:
-//   if (auto* s = as<IStereoRaw>(*cam)) { auto& left = s->getLeftInfrared(); }
-//   if (isStereoCam(*cam)) { ... }
+// The DepthCamera base OWNS a canonical, triple-buffered DepthFrame (depth +
+// optional color/IR/world + intrinsics) and provides everything built on it -
+// distance, world coordinates, meshing, threading. A backend only fills a
+// DepthFrame in captureInto(). Device-specific extras (raw stereo pair,
+// confidence) are capability interfaces discovered with as<>() / is<>().
 //
-// This addon contains no device drivers. Concrete cameras live in their own
-// addons (e.g. tcxOrbbec) that depend on this one and inherit DepthCamera plus
-// whatever capability interfaces they support.
+// This addon ships no device drivers (except the hardware-free
+// SyntheticDepthCamera). Concrete cameras live in their own addons (tcxOrbbec,
+// tcxAzureKinect, ...) that depend on this one.
 //
 // Headers:
-//   tcxDepthTypes.h        - DepthSensorType, DepthIntrinsics, DepthMeshOptions
-//   tcxDepthCapabilities.h - IColorStream, IInfraredStream, IStereoRaw, ...
-//   tcxDepthCameraBase.h   - DepthCamera (the shared contract)
-//   tcxThreadedDepthCamera.h - ThreadedDepthCameraBase<Frame> (thread-safe base)
+//   tcxDepthTypes.h           - DepthSensorType, DepthIntrinsics, DepthFrame,
+//                               StreamFreshness, DepthMeshOptions
+//   tcxDepthCameraBase.h      - DepthCamera (the concrete, thread-safe base)
+//   tcxDepthCapabilities.h    - IStereoRaw, IConfidenceMap (device-specific)
+//   tcxDepthCast.h            - as<>() / is<>() / isStereoCam() capability queries
 //   tcxSyntheticDepthCamera.h - SyntheticDepthCamera (software-generated source)
-//   tcxDepthCast.h         - as<>() / is<>() / isStereoCam() capability queries
 //
 // =============================================================================
 
 #include "tcxDepthTypes.h"
-#include "tcxDepthCapabilities.h"
 #include "tcxDepthCameraBase.h"
-#include "tcxThreadedDepthCamera.h"
-#include "tcxSyntheticDepthCamera.h"
+#include "tcxDepthCapabilities.h"
 #include "tcxDepthCast.h"
+#include "tcxSyntheticDepthCamera.h"
