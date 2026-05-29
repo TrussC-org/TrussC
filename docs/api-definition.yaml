@@ -3067,6 +3067,28 @@ categories:
         sketch: true
         snippet: "logNotice(${1:\"message\"})"
 
+      - name: compress
+        return: "bool"
+        signatures:
+          - params: "const void* src, size_t nbytes, vector<uint8_t>& out, Codec codec"
+            params_simple: "src, nbytes, out, codec"
+        description: "Compress a byte buffer into out with the given codec (Codec::None or Codec::LZ4). Returns false on failure"
+        description_ja: "バイト列を指定コーデック（Codec::None / Codec::LZ4）で out に圧縮する。失敗時 false"
+        description_ko: "지정한 코덱(Codec::None / Codec::LZ4)으로 바이트 버퍼를 out에 압축. 실패 시 false"
+        sketch: false
+        snippet: "compress(${1:src}, ${2:nbytes}, ${3:out}, ${4:Codec::LZ4})"
+
+      - name: decompress
+        return: "bool"
+        signatures:
+          - params: "const void* src, size_t nbytes, vector<uint8_t>& out, size_t decompressedSize, Codec codec"
+            params_simple: "src, nbytes, out, decompressedSize, codec"
+        description: "Decompress a byte buffer into out; decompressedSize is the known original (decompressed) byte count. Returns false on failure"
+        description_ja: "バイト列を out に展開する。decompressedSize は元の（展開後）バイト数。失敗時 false"
+        description_ko: "바이트 버퍼를 out으로 해제. decompressedSize는 원본(해제 후) 바이트 수. 실패 시 false"
+        sketch: false
+        snippet: "decompress(${1:src}, ${2:nbytes}, ${3:out}, ${4:decompressedSize}, ${5:Codec::LZ4})"
+
       - name: toString
         return: "string"
         signatures:
