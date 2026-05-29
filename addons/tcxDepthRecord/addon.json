@@ -1,0 +1,17 @@
+{
+  "description": "Record & replay depth recordings (.tcdc) for any tcxDepthCamera",
+  "author": "tettou771",
+  "license": "MIT",
+  "category": "3d",
+  "keywords": [
+    "depth",
+    "depthcamera",
+    "recording",
+    "playback",
+    "pointcloud",
+    "tcdc"
+  ],
+  "dependencies": [
+    "tcxDepthCamera"
+  ]
+}
