@@ -81,6 +81,7 @@
 #include "tc/utils/tcUtils.h"
 #include "tc/utils/tcTime.h"
 #include "tc/utils/tcLog.h"
+#include "tc/utils/tcCompress.h"
 
 // TrussC file dialogs
 #include "tc/utils/tcFileDialog.h"

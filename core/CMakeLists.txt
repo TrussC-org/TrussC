@@ -84,6 +84,9 @@ file(GLOB TC_APP_SOURCES      ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/app/*.cpp)
 file(GLOB TC_GRAPHICS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/graphics/*.cpp)
 file(GLOB TC_NETWORK_SOURCES  ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/network/*.cpp)
 file(GLOB TC_SOUND_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/sound/*.cpp)
+file(GLOB TC_UTILS_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/utils/*.cpp)
+# Vendored single-file libs (e.g. lz4 for tc::compress)
+file(GLOB TC_VENDOR_SOURCES   ${CMAKE_CURRENT_SOURCE_DIR}/include/lz4/*.c)
 
 # プラットフォーム固有ソースファイル
 if(TC_PLATFORM_EMSCRIPTEN)
@@ -110,6 +113,8 @@ set(TC_ALL_SOURCES
     ${TC_GRAPHICS_SOURCES}
     ${TC_NETWORK_SOURCES}
     ${TC_SOUND_SOURCES}
+    ${TC_UTILS_SOURCES}
+    ${TC_VENDOR_SOURCES}
     ${TC_PLATFORM_SOURCES}
 )
 
