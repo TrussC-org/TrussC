@@ -41,7 +41,9 @@ struct DepthFrame {
     float depthScale;            // meters per depth unit (RGBD: 0.001 = mm)
     vector<uint16_t> depth;      // w*h, 0 = invalid
     vector<Vec3>     world;      // optional precomputed world (m); empty -> deproject
-    Pixels color;                // optional RGBA, registered to depth
+    Pixels color;                // optional RGBA, NATIVE full resolution
+    DepthIntrinsics colorIntrinsics;   // color camera intrinsics
+    Mat4 depthToColor;                 // depth-cam space -> color-cam space
     Pixels ir;                   // optional active brightness
     DepthIntrinsics intrinsics;
     double timestamp;
@@ -52,7 +54,13 @@ struct DepthFrame {
   (`depthScale = 0.001`), which keeps frames compact (good for recording). The
   meter-based API is unchanged: `getDistanceAt()` returns `depth[i] * depthScale`.
   Long-range LiDAR can use a coarser scale (e.g. `0.01` = cm, ~655 m).
-- **Color and IR live in the frame** (registered to the depth resolution), since
+- **Color is kept at NATIVE full resolution** (not downsampled to depth). The
+  depth->color mapping is computed on demand from `colorIntrinsics` +
+  `depthToColor` (a depth pixel deprojects to 3D, transforms into color-camera
+  space, then projects into the color image) — see `getColorTexCoordAt()`.
+  Nothing is registered automatically; `registerColorToDepth()` is an opt-in
+  helper that builds a depth-aligned image. `colorUV` may hold a precomputed map.
+- **Color and IR live in the frame**, since
   essentially every RGBD camera has them. Query with `hasColor()` /
   `hasInfrared()`. Truly device-specific data (raw stereo pair, confidence) stays
   on capability interfaces.
