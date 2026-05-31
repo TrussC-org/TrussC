@@ -1,0 +1,16 @@
+{
+  "name": "tcxMidi",
+  "description": "MIDI input/output (libremidi backend). Event + polling APIs, virtual ports, and full channel-voice + sysex sending. Works with controllers like the Novation Launchpad.",
+  "author": "tettou771",
+  "license": "MIT",
+  "category": "sound",
+  "keywords": [
+    "midi",
+    "sound",
+    "controller",
+    "launchpad",
+    "libremidi",
+    "input",
+    "output"
+  ]
+}

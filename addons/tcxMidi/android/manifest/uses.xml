@@ -1,0 +1,19 @@
+<!-- =============================================================================
+     tcxMidi - Android manifest snippet (MIDI / USB / BLE)
+     =============================================================================
+     These lines are NOT injected automatically. TrussC collects them into
+     build-android/REQUIRED_MANIFEST_SNIPPET.xml and prints a NOTICE; paste the
+     parts you actually need into your app's AndroidManifest.xml.
+
+     uses-feature entries are required="false" on purpose, so the APK still
+     installs on devices without MIDI / USB-host / BLE hardware. BLUETOOTH_SCAN
+     and BLUETOOTH_CONNECT are runtime permissions (request them at runtime on
+     API 31+) and are only needed for BLE MIDI.
+     ============================================================================= -->
+<uses-feature android:name="android.software.midi" android:required="false"/>
+<uses-feature android:name="android.hardware.usb.host" android:required="false"/>
+<uses-feature android:name="android.hardware.bluetooth_le" android:required="false"/>
+
+<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
