@@ -20,6 +20,8 @@ enum class TextureFormat {
     RG8,         // 2ch, 8-bit/ch
     RG16F,       // 2ch, 16-bit float/ch
     RG32F,       // 2ch, 32-bit float/ch
+    BGRA8,       // 4ch, 8-bit/ch, B-G-R-A byte order (swapchain / Syphon / video interop)
+    RGBA16,      // 4ch, 16-bit unorm/ch (high-precision integer; texture-sharing interop)
 };
 
 // Convert TextureFormat to sokol format
@@ -34,6 +36,8 @@ inline sg_pixel_format toSokolFormat(TextureFormat fmt) {
         case TextureFormat::RG8:     return SG_PIXELFORMAT_RG8;
         case TextureFormat::RG16F:   return SG_PIXELFORMAT_RG16F;
         case TextureFormat::RG32F:   return SG_PIXELFORMAT_RG32F;
+        case TextureFormat::BGRA8:   return SG_PIXELFORMAT_BGRA8;
+        case TextureFormat::RGBA16:  return SG_PIXELFORMAT_RGBA16;
         default:                   return SG_PIXELFORMAT_RGBA8;
     }
 }
@@ -47,6 +51,8 @@ inline int channelCount(TextureFormat fmt) {
         case TextureFormat::RG8:
         case TextureFormat::RG16F:
         case TextureFormat::RG32F:   return 2;
+        case TextureFormat::BGRA8:   return 4;
+        case TextureFormat::RGBA16:  return 4;
         default:                   return 4;
     }
 }
@@ -63,6 +69,8 @@ inline int bytesPerPixel(TextureFormat fmt) {
         case TextureFormat::R32F:    return 4;
         case TextureFormat::RG32F:   return 8;
         case TextureFormat::RGBA32F: return 16;
+        case TextureFormat::BGRA8:   return 4;
+        case TextureFormat::RGBA16:  return 8;
         default:                   return 4;
     }
 }
