@@ -166,3 +166,28 @@ macro(apply_addons TARGET_NAME)
         endforeach()
     endif()
 endmacro()
+
+# =============================================================================
+# tc_addon_bundle_file - addon が必要とするランタイムファイルをアプリに同梱する
+# =============================================================================
+# アドオンの CMakeLists.txt から呼び出すと、指定ファイルを最終的なアプリの出力に
+# 同梱する。プラットフォームごとに適切な場所へコピーされる:
+#   - macOS : App.app/Contents/<MACOS_DEST>  (既定: Resources)
+#   - Windows / Linux : 実行ファイルと同じディレクトリ (DLL/so の隣置き用)
+#
+# 実体のコピーは trussc_app() 側（アプリターゲットと同じスコープ）で行うため、
+# ここでは GLOBAL プロパティに登録するだけにしておき、cross-directory の
+# ターゲット変更を避ける。
+#
+# 使い方（アドオンの CMakeLists.txt 内）:
+#   tc_addon_bundle_file(${CMAKE_CURRENT_BINARY_DIR}/default.metallib MACOS_DEST Resources)
+#   tc_addon_bundle_file(${CMAKE_CURRENT_SOURCE_DIR}/libs/sensor/sensor.dll)
+function(tc_addon_bundle_file _FILE)
+    cmake_parse_arguments(_TCB "" "MACOS_DEST" "" ${ARGN})
+    if(NOT _TCB_MACOS_DEST)
+        set(_TCB_MACOS_DEST "Resources")
+    endif()
+    get_filename_component(_TCB_ABS "${_FILE}" ABSOLUTE)
+    # "<macos-dest>|<absolute-path>" の形で蓄積する（パスに | は来ない想定）
+    set_property(GLOBAL APPEND PROPERTY TC_ADDON_BUNDLE_FILES "${_TCB_MACOS_DEST}|${_TCB_ABS}")
+endfunction()

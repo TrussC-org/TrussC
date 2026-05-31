@@ -220,6 +220,29 @@ target_include_directories(${ADDON_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(${ADDON_NAME} PUBLIC box2d TrussC)
 ```
 
+### Shipping a runtime file with the app (`tc_addon_bundle_file`)
+
+When an addon needs a file beside the final executable at **runtime** — a
+Windows sensor-SDK `.dll`, a macOS `.dylib`/framework or `.metallib`, a data
+blob — register it from the addon's `CMakeLists.txt`:
+
+```cmake
+# tc_addon_bundle_file(<path> [MACOS_DEST <subdir>])
+
+# Windows DLL beside the .exe:
+if(WIN32)
+    tc_addon_bundle_file("${CMAKE_CURRENT_SOURCE_DIR}/libs/sensor/sensor.dll")
+endif()
+
+# Generated Metal library into the app bundle's Resources (see tcxSyphon):
+tc_addon_bundle_file("${CMAKE_CURRENT_BINARY_DIR}/default.metallib" MACOS_DEST Resources)
+```
+
+TrussC copies the file into whatever app consumes the addon — `.app/Contents/<MACOS_DEST>`
+(default `Resources`) on macOS, next to the executable on Windows/Linux — with
+no need to know the app target's name. For generated files, `add_dependencies()`
+your addon target on the generator so the file exists before the copy runs.
+
 ### Main Header (tcxMyAddon.h)
 
 ```cpp

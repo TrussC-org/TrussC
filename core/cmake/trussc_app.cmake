@@ -1036,5 +1036,42 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         trussc_setup_icon(${PROJECT_NAME})
     endif()
 
+    # =========================================================================
+    # Addon-contributed runtime files (registered via tc_addon_bundle_file).
+    # apply_addons() above runs in this same scope, so addons have already
+    # appended to the GLOBAL property by now. We do the actual copy here, in the
+    # app target's own directory, to avoid cross-directory target mutation.
+    #   - macOS : copied into App.app/Contents/<dest> (e.g. Resources/default.metallib)
+    #   - Win/Linux : copied next to the executable (DLL / .so co-location)
+    # =========================================================================
+    get_property(_TC_BUNDLE_FILES GLOBAL PROPERTY TC_ADDON_BUNDLE_FILES)
+    if(_TC_BUNDLE_FILES)
+        foreach(_TC_ENTRY IN LISTS _TC_BUNDLE_FILES)
+            string(FIND "${_TC_ENTRY}" "|" _TC_SEP)
+            string(SUBSTRING "${_TC_ENTRY}" 0 ${_TC_SEP} _TC_DEST)
+            math(EXPR _TC_AFTER "${_TC_SEP} + 1")
+            string(SUBSTRING "${_TC_ENTRY}" ${_TC_AFTER} -1 _TC_PATH)
+            get_filename_component(_TC_FNAME "${_TC_PATH}" NAME)
+            if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR EMSCRIPTEN OR ANDROID)
+                # Not handled on these targets for now.
+            elseif(APPLE)
+                add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E make_directory
+                        "$<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/${_TC_DEST}"
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_TC_PATH}"
+                        "$<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/${_TC_DEST}/${_TC_FNAME}"
+                    COMMENT "[${PROJECT_NAME}] Bundling addon runtime file: ${_TC_FNAME} -> Contents/${_TC_DEST}"
+                    VERBATIM)
+            elseif(WIN32 OR (UNIX AND NOT APPLE))
+                add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_TC_PATH}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/${_TC_FNAME}"
+                    COMMENT "[${PROJECT_NAME}] Copying addon runtime file: ${_TC_FNAME}"
+                    VERBATIM)
+            endif()
+        endforeach()
+    endif()
+
     message(STATUS "[${PROJECT_NAME}] TrussC app configured")
 endmacro()
