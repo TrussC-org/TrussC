@@ -33,40 +33,134 @@ struct KeyEventArgs {
 };
 
 // ---------------------------------------------------------------------------
-// Mouse event arguments (pressed / released / moved / dragged)
+// Mouse event arguments
 // ---------------------------------------------------------------------------
-// Coordinate convention:
+// There is one struct per event kind so that no field is ever meaningless
+// (a move carries no button, a press carries no delta, etc.).
+//
+// Coordinate convention (the rich Vec2 fields):
 //   - `pos`       : position in the receiving node's LOCAL space.
 //   - `globalPos` : position in SCREEN space.
 //   When handled at app level (events().mouseXxx or App::mouseXxx) there is no
 //   node transform, so `pos == globalPos`. Inside a Node's onMouseXxx the two
 //   differ by that node's transform.
 //   - `delta`/`globalDelta` follow the same local/screen split (movement since
-//   the previous event). `button` is None during a plain move.
+//   the previous event).
+//
+// Legacy scalar fields (`x`/`y`/`deltaX`/`deltaY`/`scrollX`/`scrollY` and the
+// int `button`) mirror the Vec2 fields and are kept for source compatibility
+// with pre-rich code. They are synced from the canonical Vec2 fields via
+// syncLegacy(). These mirrors are scheduled to be removed at v1.0 (a migration
+// guide will accompany the cut); new code should prefer the Vec2 forms.
+// `button` stays an int (compare with MOUSE_BUTTON_*, consistent with KEY_*);
+// the MouseButton enum is the type-safe source of those constants.
+
+// Mouse pressed / released
 struct MouseEventArgs {
-    Vec2 pos;                 // Local position (== globalPos at app level)
-    Vec2 globalPos;           // Screen position
-    Vec2 delta;               // Movement since last event, local space
-    Vec2 globalDelta;         // Movement since last event, screen space
-    MouseButton button = MouseButton::None;
+    // Legacy mirrors (source-compat; removed at v1.0)
+    float x = 0.0f;           // == pos.x
+    float y = 0.0f;           // == pos.y
+    int button = 0;           // MOUSE_BUTTON_* (left/right/middle)
     bool shift = false;
     bool ctrl = false;
     bool alt = false;
     bool super = false;
+    // Rich (canonical)
+    Vec2 pos;                 // Local position (== globalPos at app level)
+    Vec2 globalPos;           // Screen position
+    // Note: press/release carry no movement; `delta`/`globalDelta` exist only
+    // because this struct doubles as the internal dispatch carrier and are
+    // always (0,0) on a press/release.
+    Vec2 delta;
+    Vec2 globalDelta;
+
+    // Sync legacy scalar mirrors from the canonical Vec2 fields.
+    void syncLegacy() { x = pos.x; y = pos.y; }
+};
+
+// Mouse moved (no button)
+struct MouseMoveEventArgs {
+    // Legacy mirrors (source-compat; removed at v1.0)
+    float x = 0.0f;           // == pos.x
+    float y = 0.0f;           // == pos.y
+    float deltaX = 0.0f;      // == delta.x
+    float deltaY = 0.0f;      // == delta.y
+    bool shift = false;
+    bool ctrl = false;
+    bool alt = false;
+    bool super = false;
+    // Rich (canonical)
+    Vec2 pos;
+    Vec2 globalPos;
+    Vec2 delta;               // Movement since last event, local space
+    Vec2 globalDelta;         // Movement since last event, screen space
+
+    void syncLegacy() { x = pos.x; y = pos.y; deltaX = delta.x; deltaY = delta.y; }
+};
+
+// Mouse dragged (move with a button held)
+struct MouseDragEventArgs {
+    // Legacy mirrors (source-compat; removed at v1.0)
+    float x = 0.0f;           // == pos.x
+    float y = 0.0f;           // == pos.y
+    float deltaX = 0.0f;      // == delta.x
+    float deltaY = 0.0f;      // == delta.y
+    int button = 0;           // MOUSE_BUTTON_* being dragged
+    bool shift = false;
+    bool ctrl = false;
+    bool alt = false;
+    bool super = false;
+    // Rich (canonical)
+    Vec2 pos;
+    Vec2 globalPos;
+    Vec2 delta;
+    Vec2 globalDelta;
+
+    void syncLegacy() { x = pos.x; y = pos.y; deltaX = delta.x; deltaY = delta.y; }
 };
 
 // ---------------------------------------------------------------------------
 // Mouse scroll event arguments
 // ---------------------------------------------------------------------------
 struct ScrollEventArgs {
-    Vec2 pos;                 // Local position of the cursor (== globalPos at app level)
-    Vec2 globalPos;           // Screen position of the cursor
-    Vec2 scroll;              // Scroll amount (x: horizontal, y: vertical)
+    // Legacy mirrors (source-compat; removed at v1.0)
+    float scrollX = 0.0f;     // == scroll.x
+    float scrollY = 0.0f;     // == scroll.y
     bool shift = false;
     bool ctrl = false;
     bool alt = false;
     bool super = false;
+    // Rich (canonical)
+    Vec2 pos;                 // Local position of the cursor (== globalPos at app level)
+    Vec2 globalPos;           // Screen position of the cursor
+    Vec2 scroll;              // Scroll amount (x: horizontal, y: vertical)
+
+    void syncLegacy() { scrollX = scroll.x; scrollY = scroll.y; }
 };
+
+// ---------------------------------------------------------------------------
+// Carrier -> per-event converters
+// ---------------------------------------------------------------------------
+// The dispatch plumbing flows a single rich MouseEventArgs "carrier"; the
+// move/drag public boundaries build their specific type from it here.
+inline MouseMoveEventArgs toMoveArgs(const MouseEventArgs& m) {
+    MouseMoveEventArgs a;
+    a.pos = m.pos; a.globalPos = m.globalPos;
+    a.delta = m.delta; a.globalDelta = m.globalDelta;
+    a.shift = m.shift; a.ctrl = m.ctrl; a.alt = m.alt; a.super = m.super;
+    a.syncLegacy();
+    return a;
+}
+
+inline MouseDragEventArgs toDragArgs(const MouseEventArgs& m) {
+    MouseDragEventArgs a;
+    a.pos = m.pos; a.globalPos = m.globalPos;
+    a.delta = m.delta; a.globalDelta = m.globalDelta;
+    a.button = m.button;
+    a.shift = m.shift; a.ctrl = m.ctrl; a.alt = m.alt; a.super = m.super;
+    a.syncLegacy();
+    return a;
+}
 
 // ---------------------------------------------------------------------------
 // Window resize event arguments

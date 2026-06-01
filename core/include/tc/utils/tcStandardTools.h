@@ -88,16 +88,19 @@ inline void registerDebuggerTools() {
             if (button >= 0) {
                 MouseEventArgs args;
                 args.pos = args.globalPos = Vec2(x, y);
-                args.button = static_cast<MouseButton>(button);
-                events().mouseDragged.notify(args);
+                args.button = button;
+                args.syncLegacy();
+                MouseDragEventArgs dragArgs = toDragArgs(args);
+                events().mouseDragged.notify(dragArgs);
 
                 if (::trussc::internal::appMouseDraggedFunc)
                     ::trussc::internal::appMouseDraggedFunc(args);
             } else {
                 MouseEventArgs args;
                 args.pos = args.globalPos = Vec2(x, y);
-                args.button = MouseButton::None;
-                events().mouseMoved.notify(args);
+                args.syncLegacy();
+                MouseMoveEventArgs moveArgs = toMoveArgs(args);
+                events().mouseMoved.notify(moveArgs);
 
                 if (::trussc::internal::appMouseMovedFunc)
                     ::trussc::internal::appMouseMovedFunc(args);
@@ -118,7 +121,8 @@ inline void registerDebuggerTools() {
             // Press
             MouseEventArgs args;
             args.pos = args.globalPos = Vec2(x, y);
-            args.button = static_cast<MouseButton>(button);
+            args.button = button;
+            args.syncLegacy();
             events().mousePressed.notify(args);
             if (::trussc::internal::appMousePressedFunc)
                 ::trussc::internal::appMousePressedFunc(args);
@@ -138,6 +142,7 @@ inline void registerDebuggerTools() {
             ScrollEventArgs args;
             args.pos = args.globalPos = Vec2(::trussc::internal::mouseX, ::trussc::internal::mouseY);
             args.scroll = Vec2(dx, dy);
+            args.syncLegacy();
             events().mouseScrolled.notify(args);
             if (::trussc::internal::appMouseScrolledFunc)
                 ::trussc::internal::appMouseScrolledFunc(args);

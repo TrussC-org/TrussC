@@ -105,7 +105,7 @@ void QuadWarp::setInputEnabled(bool enabled) {
     }
 }
 
-void QuadWarp::onMouseMoved(tc::MouseEventArgs& e) {
+void QuadWarp::onMouseMoved(tc::MouseMoveEventArgs& e) {
     hoverIndex_ = -1;
     float minDist = anchorSize_;
 
@@ -141,7 +141,7 @@ void QuadWarp::onMousePressed(tc::MouseEventArgs& e) {
     selectedIndex_ = newSelection;
 }
 
-void QuadWarp::onMouseDragged(tc::MouseEventArgs& e) {
+void QuadWarp::onMouseDragged(tc::MouseDragEventArgs& e) {
     if (selectedIndex_ == -1) return;
 
     dstPoints[selectedIndex_].set(e.pos.x, e.pos.y);

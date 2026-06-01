@@ -15,7 +15,7 @@ public:
     void update() override;
     void draw() override;
 
-    void mouseDragged(const MouseEventArgs& e) override;
+    void mouseDragged(const MouseDragEventArgs& e) override;
     void mousePressed(const MouseEventArgs& e) override;
     void mouseReleased(const MouseEventArgs& e) override;
 

@@ -14,22 +14,22 @@ public:
 
     void mousePressed(const MouseEventArgs& e) override;
     void mouseReleased(const MouseEventArgs& e) override;
-    void mouseMoved(const MouseEventArgs& e) override;
-    void mouseDragged(const MouseEventArgs& e) override;
+    void mouseMoved(const MouseMoveEventArgs& e) override;
+    void mouseDragged(const MouseDragEventArgs& e) override;
     void mouseScrolled(const ScrollEventArgs& e) override;
 
 private:
     // Drag trail
     struct DragPoint {
         float x, y;
-        MouseButton button;
+        int button;
     };
     std::vector<DragPoint> dragTrail;
 
     // Click positions
     struct ClickPoint {
         float x, y;
-        MouseButton button;
+        int button;
         float alpha;  // For fade out
     };
     std::vector<ClickPoint> clickPoints;

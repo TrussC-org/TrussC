@@ -103,7 +103,7 @@ public:
 
     void keyPressed(int key) override;
     void mousePressed(const MouseEventArgs& e) override;
-    void mouseDragged(const MouseEventArgs& e) override;
+    void mouseDragged(const MouseDragEventArgs& e) override;
 
 private:
     // Nodes

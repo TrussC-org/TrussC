@@ -2312,11 +2312,12 @@ namespace internal {
                 // App-level args: no node transform, so pos == globalPos.
                 MouseEventArgs args;
                 args.pos = args.globalPos = Vec2(mouseX, mouseY);
-                args.button = static_cast<MouseButton>(ev->mouse_button);
+                args.button = ev->mouse_button;
                 args.shift = hasModShift;
                 args.ctrl = hasModCtrl;
                 args.alt = hasModAlt;
                 args.super = hasModSuper;
+                args.syncLegacy();
                 events().mousePressed.notify(args);
 
                 if (appMousePressedFunc) appMousePressedFunc(args);
@@ -2331,11 +2332,12 @@ namespace internal {
 
                 MouseEventArgs args;
                 args.pos = args.globalPos = Vec2(mouseX, mouseY);
-                args.button = static_cast<MouseButton>(ev->mouse_button);
+                args.button = ev->mouse_button;
                 args.shift = hasModShift;
                 args.ctrl = hasModCtrl;
                 args.alt = hasModAlt;
                 args.super = hasModSuper;
+                args.syncLegacy();
                 events().mouseReleased.notify(args);
 
                 if (appMouseReleasedFunc) appMouseReleasedFunc(args);
@@ -2347,6 +2349,8 @@ namespace internal {
                 mouseX = ev->mouse_x * scale;
                 mouseY = ev->mouse_y * scale;
 
+                // Rich carrier (MouseEventArgs); the per-kind public type is
+                // built from it at the boundary (toDragArgs / toMoveArgs).
                 MouseEventArgs args;
                 args.pos = args.globalPos = Vec2(mouseX, mouseY);
                 args.delta = args.globalDelta = Vec2(mouseX - prevX, mouseY - prevY);
@@ -2354,14 +2358,16 @@ namespace internal {
                 args.ctrl = hasModCtrl;
                 args.alt = hasModAlt;
                 args.super = hasModSuper;
+                args.syncLegacy();
 
                 if (currentMouseButton >= 0) {
-                    args.button = static_cast<MouseButton>(currentMouseButton);
-                    events().mouseDragged.notify(args);
+                    args.button = currentMouseButton;
+                    MouseDragEventArgs dragArgs = toDragArgs(args);
+                    events().mouseDragged.notify(dragArgs);
                     if (appMouseDraggedFunc) appMouseDraggedFunc(args);
                 } else {
-                    args.button = MouseButton::None;
-                    events().mouseMoved.notify(args);
+                    MouseMoveEventArgs moveArgs = toMoveArgs(args);
+                    events().mouseMoved.notify(moveArgs);
                     if (appMouseMovedFunc) appMouseMovedFunc(args);
                 }
                 break;
@@ -2374,6 +2380,7 @@ namespace internal {
                 args.ctrl = hasModCtrl;
                 args.alt = hasModAlt;
                 args.super = hasModSuper;
+                args.syncLegacy();
                 events().mouseScrolled.notify(args);
 
                 if (appMouseScrolledFunc) appMouseScrolledFunc(args);
@@ -2419,7 +2426,8 @@ namespace internal {
 
                         MouseEventArgs margs;
                         margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.button = MouseButton::Left;
+                        margs.button = MOUSE_BUTTON_LEFT;
+                        margs.syncLegacy();
                         events().mousePressed.notify(margs);
                         if (appMousePressedFunc) appMousePressedFunc(margs);
                     } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
@@ -2429,8 +2437,10 @@ namespace internal {
                         MouseEventArgs margs;
                         margs.pos = margs.globalPos = Vec2(tx, ty);
                         margs.delta = margs.globalDelta = Vec2(tx - prevX, ty - prevY);
-                        margs.button = MouseButton::Left;
-                        events().mouseDragged.notify(margs);
+                        margs.button = MOUSE_BUTTON_LEFT;
+                        margs.syncLegacy();
+                        MouseDragEventArgs dragArgs = toDragArgs(margs);
+                        events().mouseDragged.notify(dragArgs);
                         if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
                     } else {
                         currentMouseButton = -1;
@@ -2440,7 +2450,8 @@ namespace internal {
 
                         MouseEventArgs margs;
                         margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.button = MouseButton::Left;
+                        margs.button = MOUSE_BUTTON_LEFT;
+                        margs.syncLegacy();
                         events().mouseReleased.notify(margs);
                         if (appMouseReleasedFunc) appMouseReleasedFunc(margs);
                     }

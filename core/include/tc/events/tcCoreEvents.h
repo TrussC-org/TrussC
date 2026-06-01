@@ -29,11 +29,11 @@ public:
     Event<KeyEventArgs> keyPressed;
     Event<KeyEventArgs> keyReleased;
 
-    // Mouse (all share MouseEventArgs; button == None during a plain move)
+    // Mouse (one struct per kind so no field is ever meaningless)
     Event<MouseEventArgs> mousePressed;
     Event<MouseEventArgs> mouseReleased;
-    Event<MouseEventArgs> mouseMoved;
-    Event<MouseEventArgs> mouseDragged;
+    Event<MouseMoveEventArgs> mouseMoved;
+    Event<MouseDragEventArgs> mouseDragged;
     Event<ScrollEventArgs> mouseScrolled;
 
     // Window

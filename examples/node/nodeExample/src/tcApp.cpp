@@ -132,6 +132,6 @@ void tcApp::mousePressed(const MouseEventArgs& e) {
                        << ", " << follower2_->getMouseY();
 }
 
-void tcApp::mouseDragged(const MouseEventArgs& e) {
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
     (void)e;
 }

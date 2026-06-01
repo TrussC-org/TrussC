@@ -15,8 +15,8 @@ public:
 
     void mousePressed(const MouseEventArgs& e) override;
     void mouseReleased(const MouseEventArgs& e) override;
-    void mouseMoved(const MouseEventArgs& e) override;
-    void mouseDragged(const MouseEventArgs& e) override;
+    void mouseMoved(const MouseMoveEventArgs& e) override;
+    void mouseDragged(const MouseDragEventArgs& e) override;
     void mouseScrolled(const ScrollEventArgs& e) override;
 
     void windowResized(int width, int height) override;

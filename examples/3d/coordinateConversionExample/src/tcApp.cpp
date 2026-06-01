@@ -70,7 +70,7 @@ void tcApp::keyPressed(int key) {
 
 void tcApp::mousePressed(const MouseEventArgs& e) {
     // Record click for screenToWorld demo (cam handles its own input)
-    if (e.button == MouseButton::Left) {
+    if (e.button == MOUSE_BUTTON_LEFT) {
         clickScreenPos = e.pos;
         pendingClick = true;
     }

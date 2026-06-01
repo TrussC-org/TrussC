@@ -621,6 +621,7 @@ private:
                                          s.globalPos.y - s.globalDelta.y, 0));
         a.pos = Vec2(lp.x, lp.y);
         a.delta = Vec2(lp.x - lpPrev.x, lp.y - lpPrev.y);
+        a.syncLegacy();
         return a;
     }
 
@@ -628,6 +629,7 @@ private:
         ScrollEventArgs a = s;
         Vec3 lp = globalToLocal(Vec3(s.globalPos.x, s.globalPos.y, 0));
         a.pos = Vec2(lp.x, lp.y);
+        a.syncLegacy();
         return a;
     }
 
@@ -643,7 +645,7 @@ private:
             if (result.node->onMousePress(local)) {
                 // Set grabbed node for drag tracking
                 internal::grabbedNode = result.node.get();
-                internal::grabbedButton = static_cast<int>(e.button);
+                internal::grabbedButton = e.button;
                 return result.node;
             }
         }
@@ -653,7 +655,7 @@ private:
 
     Ptr dispatchMouseRelease(const MouseEventArgs& e) {
         // Send release to grabbed node if it exists
-        if (internal::grabbedNode && internal::grabbedButton == static_cast<int>(e.button)) {
+        if (internal::grabbedNode && internal::grabbedButton == e.button) {
             MouseEventArgs local = internal::grabbedNode->localizeMouse(e);
             internal::grabbedNode->onMouseRelease(local);
 
@@ -685,8 +687,8 @@ private:
         // Send drag event to grabbed node
         if (internal::grabbedNode) {
             MouseEventArgs local = internal::grabbedNode->localizeMouse(e);
-            local.button = static_cast<MouseButton>(internal::grabbedButton);
-            internal::grabbedNode->onMouseDrag(local);
+            local.button = internal::grabbedButton;
+            internal::grabbedNode->onMouseDrag(toDragArgs(local));
         }
 
         // Also send move event to hit node (for hover, etc.)
@@ -695,7 +697,7 @@ private:
 
         if (result.hit()) {
             MouseEventArgs local = result.node->localizeMouse(e);
-            if (result.node->onMouseMove(local)) {
+            if (result.node->onMouseMove(toMoveArgs(local))) {
                 return result.node;
             }
         }
@@ -887,30 +889,24 @@ protected:
 
     // Mouse events. `e` is localized to this node (e.pos in local space,
     // e.globalPos in screen space). Return true to consume (stops propagation).
-    virtual bool onMousePress(const MouseEventArgs& e) {
-        (void)e;
-        return false;
-    }
+    //
+    // Each has a rich form (canonical, carries globalPos / delta / modifiers)
+    // and a simple form (convenience, oF-style local pos + int button). The
+    // default rich impl forwards to the simple one — override either.
+    virtual bool onMousePress(const MouseEventArgs& e) { return onMousePress(e.pos, e.button); }
+    virtual bool onMousePress(Vec2 local, int button) { (void)local; (void)button; return false; }
 
-    virtual bool onMouseRelease(const MouseEventArgs& e) {
-        (void)e;
-        return false;
-    }
+    virtual bool onMouseRelease(const MouseEventArgs& e) { return onMouseRelease(e.pos, e.button); }
+    virtual bool onMouseRelease(Vec2 local, int button) { (void)local; (void)button; return false; }
 
-    virtual bool onMouseMove(const MouseEventArgs& e) {
-        (void)e;
-        return false;
-    }
+    virtual bool onMouseMove(const MouseMoveEventArgs& e) { return onMouseMove(e.pos); }
+    virtual bool onMouseMove(Vec2 local) { (void)local; return false; }
 
-    virtual bool onMouseDrag(const MouseEventArgs& e) {
-        (void)e;
-        return false;
-    }
+    virtual bool onMouseDrag(const MouseDragEventArgs& e) { return onMouseDrag(e.pos, e.button); }
+    virtual bool onMouseDrag(Vec2 local, int button) { (void)local; (void)button; return false; }
 
-    virtual bool onMouseScroll(const ScrollEventArgs& e) {
-        (void)e;
-        return false;
-    }
+    virtual bool onMouseScroll(const ScrollEventArgs& e) { return onMouseScroll(e.pos, e.scroll); }
+    virtual bool onMouseScroll(Vec2 local, Vec2 scroll) { (void)local; (void)scroll; return false; }
 
     // Key events (broadcast to all nodes). The rich form (canonical) carries
     // modifiers + isRepeat; the simple int form is a convenience the default

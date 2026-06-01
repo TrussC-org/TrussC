@@ -90,16 +90,16 @@ public:
     // Rich form (canonical) + simple form (convenience, oF-style). The default
     // rich impl forwards to the simple one — override either. The simple form
     // gets screen-space pos (== e.pos at app level) and an int button.
-    virtual void mousePressed(const MouseEventArgs& e) { mousePressed(e.pos, (int)e.button); }
+    virtual void mousePressed(const MouseEventArgs& e) { mousePressed(e.pos, e.button); }
     virtual void mousePressed(Vec2 pos, int button) { (void)pos; (void)button; }
 
-    virtual void mouseReleased(const MouseEventArgs& e) { mouseReleased(e.pos, (int)e.button); }
+    virtual void mouseReleased(const MouseEventArgs& e) { mouseReleased(e.pos, e.button); }
     virtual void mouseReleased(Vec2 pos, int button) { (void)pos; (void)button; }
 
-    virtual void mouseMoved(const MouseEventArgs& e) { mouseMoved(e.pos); }
+    virtual void mouseMoved(const MouseMoveEventArgs& e) { mouseMoved(e.pos); }
     virtual void mouseMoved(Vec2 pos) { (void)pos; }
 
-    virtual void mouseDragged(const MouseEventArgs& e) { mouseDragged(e.pos, (int)e.button); }
+    virtual void mouseDragged(const MouseDragEventArgs& e) { mouseDragged(e.pos, e.button); }
     virtual void mouseDragged(Vec2 pos, int button) { (void)pos; (void)button; }
 
     virtual void mouseScrolled(const ScrollEventArgs& e) { mouseScrolled(e.scroll); }
@@ -186,12 +186,12 @@ public:
     }
 
     void handleMouseMoved(const MouseEventArgs& e) {
-        mouseMoved(e);
+        mouseMoved(toMoveArgs(e));
         dispatchMouseMove(e);
     }
 
     void handleMouseDragged(const MouseEventArgs& e) {
-        mouseDragged(e);
+        mouseDragged(toDragArgs(e));
         dispatchMouseMove(e);  // drag + hover share the node-tree move dispatch
     }
 

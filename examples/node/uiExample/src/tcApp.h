@@ -103,7 +103,7 @@ protected:
         return true;
     }
 
-    bool onMouseDrag(const MouseEventArgs& e) override {
+    bool onMouseDrag(const MouseDragEventArgs& e) override {
         if (isDragging_) updateValue(e.pos.x);
         return true;
     }

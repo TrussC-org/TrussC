@@ -19,7 +19,7 @@ public:
     // -------------------------------------------------------------------------
     Event<MouseEventArgs> mousePressed;
     Event<MouseEventArgs> mouseReleased;
-    Event<MouseEventArgs> mouseDragged;
+    Event<MouseDragEventArgs> mouseDragged;
     Event<ScrollEventArgs> mouseScrolled;
 
     // -------------------------------------------------------------------------
@@ -192,31 +192,44 @@ protected:
     // Mouse events (fire events)
     // -------------------------------------------------------------------------
 
+    // These override the rich form and fire the corresponding Event. They also
+    // forward to the simple (Vec2,int) virtual so that a subclass which overrode
+    // the legacy simple form (pre-rich, oF-style) still gets called.
     bool onMousePress(const MouseEventArgs& e) override {
         MouseEventArgs args = e;  // already localized to this node
         mousePressed.notify(args);
+        onMousePress(e.pos, e.button);  // legacy subclass hook
         return true;  // Consume event
     }
 
     bool onMouseRelease(const MouseEventArgs& e) override {
         MouseEventArgs args = e;
         mouseReleased.notify(args);
+        onMouseRelease(e.pos, e.button);  // legacy subclass hook
         return true;
     }
 
-    bool onMouseDrag(const MouseEventArgs& e) override {
-        MouseEventArgs args = e;
+    bool onMouseDrag(const MouseDragEventArgs& e) override {
+        MouseDragEventArgs args = e;
         mouseDragged.notify(args);
+        onMouseDrag(e.pos, e.button);  // legacy subclass hook
         return true;
     }
 
     bool onMouseScroll(const ScrollEventArgs& e) override {
         ScrollEventArgs args = e;
         mouseScrolled.notify(args);
-        // Return false to allow bubbling to parent (e.g., ScrollContainer)
-        // Override and return true to consume the event
-        return false;
+        // Return false to allow bubbling to parent (e.g., ScrollContainer).
+        // The legacy hook may return true to consume.
+        return onMouseScroll(e.pos, e.scroll);
     }
+
+    // Bring the simple-form overloads into scope so the same-named rich
+    // overrides above don't hide them (name hiding across overload sets).
+    using Node::onMousePress;
+    using Node::onMouseRelease;
+    using Node::onMouseDrag;
+    using Node::onMouseScroll;
 
     // -------------------------------------------------------------------------
     // Drawing helpers

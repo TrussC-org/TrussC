@@ -197,7 +197,7 @@ protected:
     // -------------------------------------------------------------------------
 
     bool onMousePress(const MouseEventArgs& e) override {
-        if (e.button != MouseButton::Left || !container_) return false;
+        if (e.button != MOUSE_BUTTON_LEFT || !container_) return false;
 
         isDragging_ = true;
         // Store offset from bar origin to click position
@@ -206,13 +206,13 @@ protected:
     }
 
     bool onMouseRelease(const MouseEventArgs& e) override {
-        if (e.button == MouseButton::Left) {
+        if (e.button == MOUSE_BUTTON_LEFT) {
             isDragging_ = false;
         }
         return true;
     }
 
-    bool onMouseDrag(const MouseEventArgs& e) override {
+    bool onMouseDrag(const MouseDragEventArgs& e) override {
         if (!isDragging_ || !container_) return false;
 
         if (direction_ == Vertical) {

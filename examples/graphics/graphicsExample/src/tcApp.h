@@ -19,7 +19,7 @@ public:
     // Input events (override only what you need)
     void keyPressed(int key) override;
     void mousePressed(const MouseEventArgs& e) override;
-    void mouseDragged(const MouseEventArgs& e) override;
+    void mouseDragged(const MouseDragEventArgs& e) override;
 
 private:
     Path wave;  // For testing

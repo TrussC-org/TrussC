@@ -33,9 +33,9 @@ void tcApp::draw() {
             auto& p1 = dragTrail[i];
 
             // Change color by button
-            if (p1.button == MouseButton::Left) {
+            if (p1.button == MOUSE_BUTTON_LEFT) {
                 setColor(colors::red);
-            } else if (p1.button == MouseButton::Middle) {
+            } else if (p1.button == MOUSE_BUTTON_MIDDLE) {
                 setColor(colors::green);
             } else {
                 setColor(colors::blue);
@@ -46,9 +46,9 @@ void tcApp::draw() {
 
     // Draw click positions (with fade out)
     for (auto& cp : clickPoints) {
-        if (cp.button == MouseButton::Left) {
+        if (cp.button == MOUSE_BUTTON_LEFT) {
             setColor(1.0f, 0.4f, 0.4f, cp.alpha);
-        } else if (cp.button == MouseButton::Middle) {
+        } else if (cp.button == MOUSE_BUTTON_MIDDLE) {
             setColor(0.4f, 1.0f, 0.4f, cp.alpha);
         } else {
             setColor(0.4f, 0.4f, 1.0f, cp.alpha);
@@ -133,12 +133,12 @@ void tcApp::mouseReleased(const MouseEventArgs& e) {
     currentButton = -1;
 }
 
-void tcApp::mouseMoved(const MouseEventArgs& e) {
+void tcApp::mouseMoved(const MouseMoveEventArgs& e) {
     (void)e;
     // Nothing to do on move
 }
 
-void tcApp::mouseDragged(const MouseEventArgs& e) {
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
     if (isDragging) {
         dragTrail.push_back({e.pos.x, e.pos.y, e.button});
 

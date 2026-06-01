@@ -56,7 +56,7 @@ void tcApp::draw() {
     drawBitmapString(info, 10, 20);
 }
 
-void tcApp::mouseMoved(const MouseEventArgs& e) {
+void tcApp::mouseMoved(const MouseMoveEventArgs& e) {
     history.push_back(e.pos);
     if (history.size() > maxHistory) {
         history.erase(history.begin());

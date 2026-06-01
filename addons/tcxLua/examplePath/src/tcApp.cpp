@@ -81,8 +81,8 @@ void tcApp::keyReleased(int key) {}
 
 void tcApp::mousePressed(const MouseEventArgs& e) {}
 void tcApp::mouseReleased(const MouseEventArgs& e) {}
-void tcApp::mouseMoved(const MouseEventArgs& e) {}
-void tcApp::mouseDragged(const MouseEventArgs& e) {}
+void tcApp::mouseMoved(const MouseMoveEventArgs& e) {}
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {}
 void tcApp::mouseScrolled(const ScrollEventArgs& e) {}
 
 void tcApp::windowResized(int width, int height) {}

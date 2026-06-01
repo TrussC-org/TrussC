@@ -7,7 +7,7 @@ class tcApp : public App {
 public:
     void setup() override;
     void draw() override;
-    void mouseMoved(const MouseEventArgs& e) override;
+    void mouseMoved(const MouseMoveEventArgs& e) override;
     void mousePressed(const MouseEventArgs& e) override;
     void keyPressed(int key) override;
 

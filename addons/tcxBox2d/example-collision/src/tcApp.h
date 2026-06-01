@@ -41,7 +41,7 @@ public:
     void draw() override;
 
     void mousePressed(const MouseEventArgs& e) override;
-    void mouseDragged(const MouseEventArgs& e) override;
+    void mouseDragged(const MouseDragEventArgs& e) override;
     void mouseReleased(const MouseEventArgs& e) override;
     void keyPressed(int key) override;
 
