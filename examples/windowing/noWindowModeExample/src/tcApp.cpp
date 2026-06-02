@@ -13,7 +13,7 @@
 // Available features in headless mode:
 //   - Serial communication (tc::Serial)
 //   - Network: TCP/UDP sockets (tc::TcpClient, TcpServer, UdpSocket)
-//   - OSC: Open Sound Control (tc::OscSender, OscReceiver)
+//   - OSC: Open Sound Control (tcx::OscSender, tcx::OscReceiver)
 //   - File I/O: read/write files (tc::loadFile, saveFile, etc.)
 //   - JSON/XML parsing (tc::Json, tc::Xml)
 //   - Math utilities (tc::Vec2, Vec3, Mat4, noise, etc.)

@@ -1,7 +1,7 @@
 #include "tcxOscMessage.h"
 #include <sstream>
 
-namespace trussc {
+namespace tcx {
 
 using namespace osc_internal;
 
@@ -186,4 +186,4 @@ std::string OscMessage::toString() const {
     return oss.str();
 }
 
-}  // namespace trussc
+}  // namespace tcx

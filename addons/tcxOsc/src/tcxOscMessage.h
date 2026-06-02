@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <cstring>
 
-namespace trussc {
+namespace tcx {
 
 // =============================================================================
 // Endian conversion utilities
@@ -185,4 +185,15 @@ private:
     std::vector<ArgVariant> args_;
 };
 
+}  // namespace tcx
+
+// -----------------------------------------------------------------------------
+// Backward compatibility: tcxOsc historically lived in `trussc` (tc).
+// The canonical namespace is now `tcx`; this alias keeps existing
+// `tc::OscMessage` code compiling. DEPRECATED — will be removed in v1.0.0.
+// (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
+//  warn on idiomatic unqualified use too. See tcxOsc README for migration.)
+// -----------------------------------------------------------------------------
+namespace trussc {
+using tcx::OscMessage;
 }  // namespace trussc

@@ -304,7 +304,7 @@ namespace tcx::addonname {
 |-------|-----------|
 | tcxBox2d | `tcx::box2d` |
 | tcxGui | `tcx::gui` |
-| tcxOsc | `tcx::osc` |
+| tcxOsc | `tcx` (classes are `Osc`-prefixed: `OscSender`, `OscMessage`, …) |
 
 **Note:** TrussC core uses `tc::`. Addons use `tcx::`.
 

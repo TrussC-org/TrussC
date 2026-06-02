@@ -35,8 +35,8 @@ public:
 
     // Addon instances to verify linking
     tcx::box2d::World box2d;
-    tc::OscSender oscSender;
-    tc::OscReceiver oscReceiver;
+    tcx::OscSender oscSender;
+    tcx::OscReceiver oscReceiver;
 
     // LUT addon
     tcx::lut::Lut3D lut;

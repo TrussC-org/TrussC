@@ -9,7 +9,7 @@
 #include <mutex>
 #include <atomic>
 
-namespace trussc {
+namespace tcx {
 
 // =============================================================================
 // OscReceiver - OSC receiver class
@@ -17,9 +17,9 @@ namespace trussc {
 class OscReceiver {
 public:
     // Events
-    Event<OscMessage> onMessageReceived;   // Message received
-    Event<OscBundle> onBundleReceived;     // Bundle received
-    Event<std::string> onParseError;       // Parse error (for robustness)
+    tc::Event<OscMessage> onMessageReceived;   // Message received
+    tc::Event<OscBundle> onBundleReceived;     // Bundle received
+    tc::Event<std::string> onParseError;       // Parse error (for robustness)
 
     OscReceiver() = default;
     ~OscReceiver() { close(); }
@@ -37,11 +37,11 @@ public:
         port_ = port;
 
         // Set receive event handler
-        receiveListener_ = socket_.onReceive.listen([this](UdpReceiveEventArgs& args) {
+        receiveListener_ = socket_.onReceive.listen([this](tc::UdpReceiveEventArgs& args) {
             handleReceive(args);
         });
 
-        errorListener_ = socket_.onError.listen([this](UdpErrorEventArgs& args) {
+        errorListener_ = socket_.onError.listen([this](tc::UdpErrorEventArgs& args) {
             std::string msg = "Socket error: " + args.message;
             onParseError.notify(msg);
         });
@@ -101,7 +101,7 @@ public:
     size_t getBufferSize() const { return bufferMax_; }
 
 private:
-    void handleReceive(UdpReceiveEventArgs& args) {
+    void handleReceive(tc::UdpReceiveEventArgs& args) {
         if (args.data.empty()) return;
 
         const uint8_t* data = reinterpret_cast<const uint8_t*>(args.data.data());
@@ -175,10 +175,10 @@ private:
         }
     }
 
-    UdpSocket socket_;
+    tc::UdpSocket socket_;
     int port_ = 0;
-    EventListener receiveListener_;
-    EventListener errorListener_;
+    tc::EventListener receiveListener_;
+    tc::EventListener errorListener_;
 
     // Polling buffer
     std::queue<OscMessage> messageQueue_;
@@ -187,4 +187,11 @@ private:
     size_t bufferMax_ = 100;
 };
 
+}  // namespace tcx
+
+// -----------------------------------------------------------------------------
+// Backward compatibility: see tcxOscMessage.h. DEPRECATED — removed in v1.0.0.
+// -----------------------------------------------------------------------------
+namespace trussc {
+using tcx::OscReceiver;
 }  // namespace trussc

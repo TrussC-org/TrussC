@@ -6,7 +6,7 @@
 #include <vector>
 #include <algorithm>
 
-namespace trussc {
+namespace tcx {
 
 // =============================================================================
 // OscSender - OSC sender class (multi-destination, sendTo-based)
@@ -130,8 +130,15 @@ public:
     bool isConnected() const { return !destinations_.empty(); }
 
 private:
-    UdpSocket socket_;
+    tc::UdpSocket socket_;
     std::vector<Destination> destinations_;
 };
 
+}  // namespace tcx
+
+// -----------------------------------------------------------------------------
+// Backward compatibility: see tcxOscMessage.h. DEPRECATED — removed in v1.0.0.
+// -----------------------------------------------------------------------------
+namespace trussc {
+using tcx::OscSender;
 }  // namespace trussc
