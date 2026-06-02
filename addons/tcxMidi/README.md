@@ -12,14 +12,14 @@ libremidi is fetched automatically at configure time via CMake `FetchContent`
 
 Per-platform system requirements:
 
-| Platform | Backend  | Extra install / notes |
-|----------|----------|-----------------------|
-| macOS    | CoreMIDI | none (bundled with the OS) |
-| iOS      | CoreMIDI | none (auto-enabled; BLE MIDI needs a Bluetooth usage description) |
-| Windows  | WinMM    | none |
-| Linux    | ALSA     | `libasound2-dev` |
-| Web      | WebMIDI  | Chromium + https, input only, **no sysex** |
-| Android  | AMidi    | **API level 31+** + manifest entries — see the Android section |
+| Platform | Backend  | Status | Extra install / notes |
+|----------|----------|--------|-----------------------|
+| macOS    | CoreMIDI | ✅ tested (in/out on a real device) | none (bundled with the OS) |
+| Web      | WebMIDI  | ✅ tested in Chrome (input; **no sysex**) | Chromium + https |
+| Windows  | WinMM    | ⚠️ untested (expected to work) | none |
+| Linux    | ALSA     | ⚠️ untested (expected to work) | `libasound2-dev` |
+| iOS      | CoreMIDI | ⚠️ untested (auto-enabled; BLE MIDI needs a Bluetooth usage description) | none |
+| Android  | AMidi    | 🧪 experimental — enumerates but open is broken (see Android note) | **API 31+** + manifest entries |
 
 JACK / PipeWire / network backends are disabled by default to keep the
 dependency footprint small (toggle the `LIBREMIDI_NO_*` options in

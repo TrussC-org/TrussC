@@ -31,6 +31,11 @@ set(LIBREMIDI_TESTS        OFF CACHE BOOL "" FORCE)
 # URL (release tarball) instead of GIT_REPOSITORY: works even without git
 # installed, and the archive caches/extracts faster than a clone. URL_HASH
 # guards against a corrupted or tampered download.
+#
+# Pinned to the v5.4.3 release. Our WebMIDI fixes are upstreamed
+# (celtera/libremidi PR #216) but not yet in a tagged release, so we keep the
+# small export workaround below. (Pinning master directly is not viable yet -
+# its emscripten backend currently fails to compile, unrelated to our PR.)
 FetchContent_Declare(
     libremidi
     URL      https://github.com/celtera/libremidi/archive/refs/tags/v5.4.3.tar.gz
@@ -38,12 +43,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(libremidi)
 
-# libremidi's WebMIDI (Emscripten) backend calls Module._malloc / _free / HEAPU8
-# / UTF8ToString / stringToUTF8 / lengthBytesUTF8 from JS, but its own CMake only
+# v5.4.3's WebMIDI (Emscripten) backend calls Module._malloc / _free / HEAPU8 /
+# UTF8ToString / stringToUTF8 / lengthBytesUTF8 from JS, but its own CMake only
 # exports _free (forgetting _malloc) and no runtime methods - so receiving a MIDI
 # message throws "Module._malloc is not a function". Re-declare a complete export
-# list on the libremidi target (the last -sEXPORTED_FUNCTIONS wins) so the web
-# build actually works at runtime.
+# list on the libremidi target (the last -sEXPORTED_FUNCTIONS wins). Fixed
+# upstream in PR #216; remove this once we move to a release that includes it.
 if(EMSCRIPTEN)
     target_link_options(libremidi PUBLIC
         "SHELL:-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_libremidi_devices_poll,_libremidi_devices_input"
