@@ -118,6 +118,10 @@ private:
     };
 
     bool decodeQuarterFrame(const std::vector<unsigned char>& message) {
+        // A well-formed MTC quarter frame is 0xF1 + 1 data byte. Reject a bare
+        // 0xF1 (or anything shorter) so we never read message[1] out of bounds.
+        if (message.size() < 2) return false;
+
         bool complete = false;
         unsigned char dataByte = message[1];
         unsigned char msgType = dataByte & 0xF0;
