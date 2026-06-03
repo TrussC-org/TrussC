@@ -2,6 +2,7 @@
 
 #include "TrussC.h"
 #include "tc/types/tcMod.h"
+#include "tc/utils/tcAsyncScheduler.h"
 #include <memory>
 #include <vector>
 #include <functional>
@@ -43,7 +44,10 @@ public:
     using WeakPtr = std::weak_ptr<Node>;
 
     Node() { internal::nodeCount++; }
-    virtual ~Node() { internal::nodeCount--; }
+    virtual ~Node() {
+        cancelAllAsyncTimers();  // stop + await any in-flight async callbacks
+        internal::nodeCount--;
+    }
 
     // -------------------------------------------------------------------------
     // Lifecycle (overridable)
@@ -959,7 +963,41 @@ protected:
         timers_.clear();
     }
 
+    // -------------------------------------------------------------------------
+    // Async timers (off-thread, precise)
+    // -------------------------------------------------------------------------
+    // Like callAfter / callEvery, but fired by a background scheduler thread at
+    // precise times instead of the frame-quantized update loop - use these when
+    // timing jitter matters (sequencer clocks, LED/MIDI output, ...).
+    //
+    // The callback runs ON THE SCHEDULER THREAD: guard state shared with
+    // update()/draw() behind a mutex, never draw from it (AudioEngine::play is
+    // fine). Cancel them before the members the callback touches are destroyed
+    // (e.g. in cleanup() / on mode change); ~Node cancels any leftovers and
+    // waits for an in-flight callback to finish.
+    uint64_t callAfterAsync(double delay, std::function<void()> callback) {
+        return AsyncScheduler::get().after(asyncOwner(), delay, std::move(callback));
+    }
+
+    uint64_t callEveryAsync(double interval, std::function<void()> callback) {
+        return AsyncScheduler::get().every(asyncOwner(), interval, std::move(callback));
+    }
+
+    void cancelAsyncTimer(uint64_t id) {
+        AsyncScheduler::get().cancel(id);
+    }
+
+    void cancelAllAsyncTimers() {
+        if (asyncOwner_) AsyncScheduler::get().cancelOwner(asyncOwner_);
+    }
+
 private:
+    uint64_t asyncOwner_ = 0;   // lazily assigned scheduler owner token
+    uint64_t asyncOwner() {
+        if (!asyncOwner_) asyncOwner_ = AsyncScheduler::newOwner();
+        return asyncOwner_;
+    }
+
     bool setupCalled_ = false;    // Ensures setup() is called only once
     bool dead_ = false;           // Marked for removal by destroy()
     WeakPtr parent_;
