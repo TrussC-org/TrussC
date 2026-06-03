@@ -2943,6 +2943,32 @@ static string findCMake() {
     return "cmake";
 }
 
+// Ensure a `cmake` executable is resolvable on this process's PATH.
+//
+// On Windows the Azure Kinect-style situation is common: cmake.exe ships
+// *inside* the Visual Studio install (Common7\IDE\CommonExtensions\...\CMake),
+// not on the system PATH. The GUI/configure path runs cmake through a VS
+// developer prompt (vcvarsall) so it is found there, but `trusscli
+// build`/`run`/`upgrade` spawn `cmake` directly — and `doctor` probes it via
+// the shell — so without cmake on PATH those all fail ("CMake not found" /
+// build exit -1). When cmake is not already resolvable, prepend the newest
+// installed VS's cmake bin dir to this process's PATH (inherited by every
+// child we spawn). No-op when cmake is already on PATH, so existing,
+// properly-configured setups are completely unaffected.
+static void ensureCMakeOnPath() {
+#ifdef _WIN32
+    if (captureCommand("where cmake 2>NUL").exitCode == 0) return;  // already on PATH
+    for (const auto& vs : VsDetector::detectInstalledVersions()) {
+        if (vs.cmakePath.empty() || !fs::exists(vs.cmakePath)) continue;
+        string binDir = fs::path(vs.cmakePath).parent_path().string();
+        const char* cur = getenv("PATH");
+        string newPath = binDir + ";" + (cur ? cur : "");
+        _putenv_s("PATH", newPath.c_str());
+        return;
+    }
+#endif
+}
+
 static void printBuildHelp() {
     cout << "Usage: trusscli build [options]\n"
          << "\n"
@@ -3683,6 +3709,10 @@ int main(int argc, char* argv[]) {
         printVersion();
         return 0;
     }
+
+    // On Windows, make sure `cmake` is resolvable before any subcommand that
+    // spawns or probes it (build/run/upgrade/doctor). No-op if already on PATH.
+    ensureCMakeOnPath();
 
     // Dispatch
     vector<string> subArgs(args.begin() + 1, args.end());
