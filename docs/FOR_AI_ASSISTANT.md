@@ -1237,10 +1237,26 @@ void tcApp::setup() {
 - Verify: `cmake --version`
 - If not installed:
   - macOS: `brew install cmake` or download from cmake.org
-  - Windows: Download from cmake.org, check "Add to PATH" during install
+  - Windows: `winget install Kitware.CMake` (or download from cmake.org, check "Add to PATH")
   - Linux: `sudo apt install cmake`
 - CMake installation is a common stumbling block — provide careful support here
 - Confirm cmake is working before proceeding to next step
+- **Windows — keep recommending the install, but don't be surprised if it builds
+  without one:** Still tell the user to install CMake as above (without it the
+  build can fail in some cases). It is *not* strictly required, though. How it
+  works: the CMake MSI ships *inside* the Visual Studio install, not on `PATH`.
+  When `cmake` isn't on `PATH`, trusscli locates that bundled cmake — it queries
+  `vswhere` for installed VS/Build Tools (with the "C++ CMake tools" component),
+  takes the newest one's `...\CommonExtensions\Microsoft\CMake\...\cmake.exe`, and
+  prepends its folder to **its own process `PATH`**, which the cmake/ninja/compiler
+  it spawns then inherit. Two consequences to remember:
+    - This is *process-local*: it does **not** add cmake to the user's shell
+      `PATH`, so a bare `cmake` typed in the terminal (or a raw `cmake --preset`)
+      still won't resolve — only `trusscli`-driven builds benefit.
+    - So `cmake --version` in a plain shell may say "not found" while
+      `trusscli build`/`run` succeed. Treat **`trusscli doctor`** (it reports the
+      cmake trusscli will actually use) as the source of truth on Windows, not a
+      bare `cmake --version`.
 
 ### Getting Started
 - If user says they already have cmake + compiler, skip to building trusscli

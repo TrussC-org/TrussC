@@ -32,7 +32,10 @@ vector<VsVersionInfo> VsDetector::detectInstalledVersions() {
         vswherePath = "vswhere.exe";
     }
 
-    string vswhereCmd = "\"" + vswherePath + "\" -all -format json";
+    // -products * so standalone "Build Tools for Visual Studio" (no IDE) is
+    // enumerated too, not just Community/Professional/Enterprise. cmd.exe does
+    // not glob-expand the '*', so it reaches vswhere literally ("all products").
+    string vswhereCmd = "\"" + vswherePath + "\" -all -products * -format json";
 
     FILE* pipe = _popen(vswhereCmd.c_str(), "r");
     if (pipe) {
