@@ -27,7 +27,7 @@ C++20 + sokol で構築されており、シンプルに書けてクロスプラ
 | Windows | Visual Studio 2022 |
 | Linux | GCC 10+ または Clang 10+ |
 
-**CMake** も必要です:
+**CMake** も必要です。インストールしてください（入れない場合、ビルドが通らないことがあります）:
 ```bash
 # macOS
 brew install cmake
@@ -38,6 +38,12 @@ winget install Kitware.CMake
 # Linux
 sudo apt install cmake
 ```
+
+> **Windows での補足:** Visual Studio を「C++ によるデスクトップ開発」ワークロード
+> （「C++ CMake tools」コンポーネントを含む）でインストールしている場合、TrussC は
+> Visual Studio 同梱の CMake を自動的に見つけるため、上記の `winget` を入れなくても
+> ビルドが通ることがあります。とはいえ確実なフォールバックとして入れておくことを推奨
+> します。どの CMake が検出されているかは `trusscli doctor` で確認できます。
 
 ### Linux の依存パッケージ
 

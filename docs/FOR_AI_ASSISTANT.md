@@ -1237,10 +1237,18 @@ void tcApp::setup() {
 - Verify: `cmake --version`
 - If not installed:
   - macOS: `brew install cmake` or download from cmake.org
-  - Windows: Download from cmake.org, check "Add to PATH" during install
+  - Windows: `winget install Kitware.CMake` (or download from cmake.org, check "Add to PATH")
   - Linux: `sudo apt install cmake`
 - CMake installation is a common stumbling block — provide careful support here
 - Confirm cmake is working before proceeding to next step
+- **Windows — keep recommending the install, but don't be surprised if it builds
+  without one:** Still tell the user to install CMake as above (without it the
+  build can fail in some cases). It is *not* strictly required, though: if Visual
+  Studio was installed with the "C++ CMake tools" component, trusscli auto-detects
+  the CMake bundled with VS and adds it to PATH for the build. So `cmake --version`
+  in a plain shell may say "not found" while `trusscli build`/`run` still succeed.
+  On Windows, treat **`trusscli doctor`** (which reports the CMake trusscli will
+  actually use) as the source of truth rather than a bare `cmake --version`.
 
 ### Getting Started
 - If user says they already have cmake + compiler, skip to building trusscli

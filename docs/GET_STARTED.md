@@ -27,7 +27,8 @@ Built on C++20 + sokol, it's simple to write and runs cross-platform.
 | Windows | Visual Studio 2022 |
 | Linux | GCC 10+ or Clang 10+ |
 
-**CMake** is also required:
+**CMake** is also required. Please install it — without it the build may fail
+in some cases:
 ```bash
 # macOS
 brew install cmake
@@ -38,6 +39,13 @@ winget install Kitware.CMake
 # Linux
 sudo apt install cmake
 ```
+
+> **Windows note:** If you installed Visual Studio with the "C++ CMake tools"
+> component (part of the "Desktop development with C++" workload), TrussC
+> automatically picks up the CMake bundled with Visual Studio, so the build may
+> succeed even without the `winget` install above. Installing it anyway is still
+> recommended as a reliable fallback. Run `trusscli doctor` to see which CMake
+> is detected.
 
 ### Linux Dependencies
 

@@ -56,6 +56,17 @@ trusscli new path/to/myNewApp
 
 TrussC uses **CMake Presets** to ensure consistent build configurations across platforms (macOS, Windows, Linux, Web).
 
+> **CMake on Windows.** Installing CMake is recommended (`winget install
+> Kitware.CMake`) — without it the build may fail in some cases. It is not
+> strictly required, though: the CMake MSI ships with Visual Studio *inside* the
+> VS install (not on `PATH`), and `trusscli` (`build`/`run`/`upgrade`/`doctor`)
+> auto-detects the CMake bundled with the newest installed Visual Studio (or
+> Build Tools) that has the "C++ CMake tools" component, prepending it to `PATH`
+> for the build. So a `trusscli build` can succeed even when `cmake --version`
+> reports "not found" in a plain shell. Raw `cmake --preset` invocations (below)
+> still need cmake on `PATH` yourself. Run `trusscli doctor` to see which CMake
+> is detected.
+
 ### Using VSCode (Recommended)
 1. Install **CMake Tools** extension.
 2. Open the project folder.
