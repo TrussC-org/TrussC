@@ -16,7 +16,7 @@ Per-platform system requirements:
 |----------|----------|--------|-----------------------|
 | macOS    | CoreMIDI | ✅ tested (in/out on a real device) | none (bundled with the OS) |
 | Web      | WebMIDI  | ✅ tested in Chrome (input; **no sysex**) | Chromium + https |
-| Windows  | WinMM    | ⚠️ untested (expected to work) | none |
+| Windows  | WinMM    | ✅ tested (in/out + sysex on a real device) | none |
 | Linux    | ALSA     | ⚠️ untested (expected to work) | `libasound2-dev` |
 | iOS      | CoreMIDI | ⚠️ untested (auto-enabled; BLE MIDI needs a Bluetooth usage description) | none |
 | Android  | AMidi    | 🧪 experimental — enumerates but open is broken (see Android note) | **API 31+** + manifest entries |
@@ -108,6 +108,17 @@ Channel numbers are **1-16** throughout.
 `MidiIn::onMessage` is invoked on libremidi's input thread, **not** the main
 (update/draw) thread. Guard any shared data with a mutex, or use the polling
 API and drain `getNextMessage()` from `update()` (what the examples do).
+
+## Windows note
+
+The backend is **WinMM**. A USB device that exposes several MIDI ports (e.g. the
+Launchpad Mini Mk3's *DAW* + *MIDI* ports) appears as one port per jack, and
+WinMM renames every port after the first to `MIDIIN2 (<name>)` /
+`MIDIOUT2 (<name>)`. The index and parentheses are added by **Windows, not the
+device**, and the original jack labels (e.g. "DAW" / "MIDI") are lost — so
+`openPort(name)` matching that works on macOS/Linux may need a different string
+on Windows. WinMM also truncates port names to **31 characters**. When in doubt,
+print `listDevices()` and match on what you actually see.
 
 ## Web (Emscripten) note
 
