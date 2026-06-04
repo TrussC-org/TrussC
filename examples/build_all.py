@@ -107,6 +107,29 @@ def find_examples(root_dir):
 
     return sorted(list(set(example_paths)))
 
+def find_addon_tests(root_dir):
+    # Behavioral test harnesses bundled with monorepo addons: addons/*/tests/
+    # (a console TrussC project whose main() returns non-zero on failure). Same
+    # convention as standalone addon repos (ci-actions runs tests/ if present).
+    addons_dir = os.path.join(root_dir, "addons")
+    test_paths = []
+    if os.path.exists(addons_dir):
+        for addon in sorted(os.listdir(addons_dir)):
+            tdir = os.path.join(addons_dir, addon, "tests")
+            if os.path.isdir(tdir) and os.path.exists(os.path.join(tdir, "src")):
+                test_paths.append(tdir)
+    return test_paths
+
+def find_test_binary(test_dir, platform_info):
+    # trusscli names the binary after the dir (tests). On macOS a TrussC app is
+    # tests.app/Contents/MacOS/tests; on Windows tests.exe. Search the project tree.
+    names = ["tests.exe"] if platform_info["os"] == "windows" else ["tests", "tests_debug"]
+    for name in names:
+        for p in glob.glob(os.path.join(test_dir, "**", name), recursive=True):
+            if os.path.isfile(p) and (platform_info["os"] == "windows" or os.access(p, os.X_OK)):
+                return p
+    return None
+
 def run_command(cmd, cwd, verbose=False):
     try:
         if verbose:
@@ -120,6 +143,37 @@ def run_command(cmd, cwd, verbose=False):
                 print(e.stdout.decode('utf-8', errors='replace'))
         return False
 
+def build_and_run_test(test_dir, pg_bin, platform_info, args):
+    # Build a native console test project, then RUN it (non-zero exit = failure).
+    # Returns (ok, stage) where stage names what failed for the summary.
+    pg_cmd = [str(pg_bin), "update", "-p", test_dir, "--tc-root", ROOT_DIR, "--ide", "cmake"]
+    if not run_command(pg_cmd, cwd=ROOT_DIR, verbose=args.verbose):
+        return False, "update"
+
+    build_dir_name = platform_info["build_dir"]
+    cmd_config = ["cmake", "-S", ".", "-B", build_dir_name]
+    if platform_info["cmake_generator"]:
+        cmd_config.extend(["-G", platform_info["cmake_generator"]])
+    if not run_command(cmd_config, cwd=test_dir, verbose=args.verbose):
+        return False, "configure"
+
+    cmd_build = ["cmake", "--build", build_dir_name, "--config", "Release"]
+    if "Visual Studio" not in (platform_info["cmake_generator"] or ""):
+        import multiprocessing
+        cmd_build.extend(["-j", str(multiprocessing.cpu_count())])
+    if not run_command(cmd_build, cwd=test_dir, verbose=args.verbose):
+        return False, "build"
+
+    binary = find_test_binary(test_dir, platform_info)
+    if not binary:
+        Colors.print("  Test binary 'tests' not found after build!", Colors.RED)
+        return False, "binary-missing"
+
+    Colors.print(f"  Running {os.path.relpath(binary, test_dir)} ...", Colors.YELLOW)
+    if not run_command([binary], cwd=test_dir, verbose=True):  # always stream test output
+        return False, "run"
+    return True, None
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -131,6 +185,7 @@ def main():
     parser.add_argument('--web-only', action='store_true', help="Build for WebAssembly only (skip native build)")
     parser.add_argument('--test-only', action='store_true', help="Build ONLY AllFeaturesExample for quick CI check")
     parser.add_argument('--test-hot-reload', action='store_true', help="Build ONLY HotReloadExample (exercises the host/guest split + addon includes)")
+    parser.add_argument('--addon-tests-only', action='store_true', help="Build AND RUN every addons/*/tests/ harness (console, non-zero exit fails). No-op if none exist.")
     parser.add_argument('--verbose', action='store_true', help="Show detailed build output")
     args = parser.parse_args()
 
@@ -149,7 +204,41 @@ def main():
         Colors.print("Mode: AllFeaturesExample Only", Colors.YELLOW)
     if args.test_hot_reload:
         Colors.print("Mode: HotReloadExample Only", Colors.YELLOW)
+    if args.addon_tests_only:
+        Colors.print("Mode: Addon tests (build + run)", Colors.YELLOW)
     print("")
+
+    # Addon test harnesses (addons/*/tests/): build AND run each. A cheap,
+    # behavioral gate meant to run on every CI, separate from the [full]-gated
+    # example builds. No-op (exit 0) when no addon ships a tests/ dir.
+    if args.addon_tests_only:
+        tests = find_addon_tests(ROOT_DIR)
+        if not tests:
+            Colors.print("No addon tests found (addons/*/tests/); nothing to do.", Colors.YELLOW)
+            sys.exit(0)
+        Colors.print(f"Found {len(tests)} addon test harness(es)", Colors.YELLOW)
+        print("")
+        failed = []
+        for i, tdir in enumerate(tests):
+            name = os.path.relpath(tdir, ROOT_DIR)
+            Colors.print(f"[{i+1}/{len(tests)}] Building & running: {name}", Colors.YELLOW)
+            ok, stage = build_and_run_test(tdir, pg_bin, platform_info, args)
+            if ok:
+                Colors.print("  Passed!", Colors.GREEN)
+            else:
+                Colors.print(f"  FAILED ({stage})", Colors.RED)
+                failed.append(f"{name} ({stage})")
+        print("")
+        Colors.print("=== Addon Test Summary ===", Colors.BLUE)
+        print(f"Total:  {len(tests)}")
+        Colors.print(f"Passed: {len(tests) - len(failed)}", Colors.GREEN)
+        if failed:
+            Colors.print(f"Failed: {len(failed)}", Colors.RED)
+            for f in failed:
+                print(f"  - {f}")
+            sys.exit(1)
+        Colors.print("All addon tests passed!", Colors.GREEN)
+        sys.exit(0)
 
     if args.test_only:
         test_example = os.path.join(ROOT_DIR, "examples", "tests", "AllFeaturesExample")

@@ -7379,6 +7379,102 @@ categories:
         description_ko: "LUT를 적용하여 부분을 그림"
         sketch: false
 
+  # ==========================================================================
+  # Timers (Node methods)
+  # ==========================================================================
+  - id: timers
+    name: "Timers"
+    name_ja: "タイマー"
+    name_ko: "타이머"
+    functions:
+      - name: callAfter
+        return: "uint64_t"
+        signatures:
+          - params: "double delay, std::function<void()> callback"
+            params_simple: "delay, callback"
+        description: "Run callback once after delay seconds. Fired from the update loop (frame-quantized). Returns a timer id."
+        description_ja: "delay秒後にcallbackを1回実行。更新ループから発火（フレーム単位）。タイマーidを返す"
+        description_ko: "delay초 후 callback을 한 번 실행. 업데이트 루프에서 발생(프레임 단위). 타이머 id를 반환"
+        sketch: false
+        snippet: "callAfter(1.0, [this]() {\n\t$0\n});"
+
+      - name: callEvery
+        return: "uint64_t"
+        signatures:
+          - params: "double interval, std::function<void()> callback"
+            params_simple: "interval, callback"
+        description: "Run callback repeatedly every interval seconds. Fired from the update loop (frame-quantized). Returns a timer id."
+        description_ja: "interval秒ごとにcallbackを繰り返し実行。更新ループから発火（フレーム単位）。タイマーidを返す"
+        description_ko: "interval초마다 callback을 반복 실행. 업데이트 루프에서 발생(프레임 단위). 타이머 id를 반환"
+        sketch: false
+        snippet: "callEvery(0.5, [this]() {\n\t$0\n});"
+
+      - name: callAfterAsync
+        return: "uint64_t"
+        signatures:
+          - params: "double delay, std::function<void()> callback"
+            params_simple: "delay, callback"
+        description: "Like callAfter, but fired by a precise background scheduler thread (no frame jitter). The callback runs OFF the main thread: guard shared state with a mutex, never draw from it, and don't cancel while holding that mutex. Native only (uses a real thread). Returns a timer id."
+        description_ja: "callAfterの精密版。バックグラウンドのスケジューラスレッドが正確な時刻に発火（フレームジッタなし）。コールバックはメインスレッド外で走る：共有状態はmutexで保護、描画は禁止、そのmutexを保持したままcancelしない。ネイティブ専用（実スレッド使用）。タイマーidを返す"
+        description_ko: "callAfter의 정밀 버전. 백그라운드 스케줄러 스레드가 정확한 시각에 실행(프레임 지터 없음). 콜백은 메인 스레드 밖에서 실행됨: 공유 상태는 mutex로 보호, 그리기 금지, 해당 mutex를 들고 cancel하지 말 것. 네이티브 전용(실제 스레드 사용). 타이머 id를 반환"
+        sketch: false
+        snippet: "callAfterAsync(1.0, [this]() {\n\t$0\n});"
+
+      - name: callEveryAsync
+        return: "uint64_t"
+        signatures:
+          - params: "double interval, std::function<void()> callback"
+            params_simple: "interval, callback"
+        description: "Like callEvery, but fired by a precise background scheduler thread with no drift (reschedules at absolute times). Ideal for sequencer clocks and LED/MIDI output timing. Same threading rules as callAfterAsync. Native only. Returns a timer id."
+        description_ja: "callEveryの精密版。バックグラウンドのスケジューラスレッドがドリフトなく発火（絶対時刻で再スケジュール）。シーケンサのクロックやLED/MIDI出力のタイミングに最適。スレッドの注意点はcallAfterAsyncと同じ。ネイティブ専用。タイマーidを返す"
+        description_ko: "callEvery의 정밀 버전. 백그라운드 스케줄러 스레드가 드리프트 없이 실행(절대 시각으로 재예약). 시퀀서 클럭이나 LED/MIDI 출력 타이밍에 적합. 스레드 주의사항은 callAfterAsync와 동일. 네이티브 전용. 타이머 id를 반환"
+        sketch: false
+        snippet: "callEveryAsync(0.5, [this]() {\n\t$0\n});"
+
+      - name: cancelTimer
+        return: "void"
+        signatures:
+          - params: "uint64_t id"
+            params_simple: "id"
+        description: "Cancel a frame timer (callAfter/callEvery) by id."
+        description_ja: "id指定でフレームタイマー（callAfter/callEvery）をキャンセル"
+        description_ko: "id로 프레임 타이머(callAfter/callEvery)를 취소"
+        sketch: false
+        snippet: "cancelTimer(id);"
+
+      - name: cancelAllTimers
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Cancel all frame timers on this node."
+        description_ja: "このノードのフレームタイマーを全てキャンセル"
+        description_ko: "이 노드의 모든 프레임 타이머를 취소"
+        sketch: false
+        snippet: "cancelAllTimers();"
+
+      - name: cancelAsyncTimer
+        return: "void"
+        signatures:
+          - params: "uint64_t id"
+            params_simple: "id"
+        description: "Cancel an async timer by id. Blocks until its callback finishes if it is running now (unless called from inside the callback). Do not call while holding the mutex the callback uses."
+        description_ja: "id指定で非同期タイマーをキャンセル。実行中なら完了を待つ（コールバック内から呼ぶ場合を除く）。コールバックが使うmutexを保持したまま呼ばないこと"
+        description_ko: "id로 비동기 타이머를 취소. 실행 중이면 완료를 기다림(콜백 내부에서 호출하는 경우 제외). 콜백이 쓰는 mutex를 들고 호출하지 말 것"
+        sketch: false
+        snippet: "cancelAsyncTimer(id);"
+
+      - name: cancelAllAsyncTimers
+        return: "void"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Cancel all async timers on this node (e.g. on mode change). Waits out any in-flight callback. Call it WITHOUT holding the callback's mutex to avoid a deadlock."
+        description_ja: "このノードの非同期タイマーを全てキャンセル（モード変更時など）。実行中のコールバックの完了を待つ。デッドロック回避のため、コールバックのmutexを保持せずに呼ぶこと"
+        description_ko: "이 노드의 모든 비동기 타이머를 취소(모드 전환 등). 실행 중인 콜백의 완료를 기다림. 데드락 방지를 위해 콜백의 mutex를 들지 않고 호출할 것"
+        sketch: false
+        snippet: "cancelAllAsyncTimers();"
+
 # ==========================================================================
 # Constants
 # ==========================================================================

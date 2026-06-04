@@ -443,6 +443,37 @@ There is one struct per event kind so no field is ever meaningless. Fields:
 > kept for source compatibility and slated for removal at v1.0 — prefer the
 > Vec2 fields in new code.
 
+### Timers
+Any Node (the App is one) can schedule callbacks. Two flavours:
+
+```cpp
+// Frame-driven: fired from the update loop. Simple, main-thread, but quantized
+// to the frame rate (~16 ms) and slightly drifty. Good for most UI/gameplay.
+uint64_t id = callEvery(0.5, [this]() { spawnEnemy(); });
+callAfter(2.0, [this]() { fadeOut(); });
+cancelTimer(id);
+cancelAllTimers();
+```
+
+```cpp
+// Async: fired by a precise background scheduler thread - no frame jitter,
+// no drift. Use when timing matters: sequencer clocks, LED/MIDI output, etc.
+uint64_t id = callEveryAsync(0.14, [this]() { sequencerStep(); });
+callAfterAsync(1.0, [this]() { done(); });
+cancelAsyncTimer(id);
+cancelAllAsyncTimers();          // e.g. on mode change
+```
+
+**The async callback runs on the scheduler thread, not update/draw.** So:
+- Guard any state shared with update()/draw() behind a `std::mutex`.
+- **Never draw or touch GPU resources** from the callback (state only).
+- `AudioEngine::play()` is thread-safe; serialize MIDI/other output.
+- **Call `cancelAsyncTimer`/`cancelAllAsyncTimers` WITHOUT holding that mutex** —
+  cancel waits for an in-flight callback, which itself needs the mutex, so
+  holding it deadlocks. Cancel before the members the callback touches are
+  destroyed (e.g. in `cleanup()` / on mode change); `~Node` cancels leftovers.
+- Native only — it uses a real thread (not for the single-threaded web build).
+
 ## GPU Resources
 
 ### Image

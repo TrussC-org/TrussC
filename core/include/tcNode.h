@@ -2,6 +2,7 @@
 
 #include "TrussC.h"
 #include "tc/types/tcMod.h"
+#include "tc/utils/tcAsyncScheduler.h"
 #include <memory>
 #include <vector>
 #include <functional>
@@ -43,7 +44,10 @@ public:
     using WeakPtr = std::weak_ptr<Node>;
 
     Node() { internal::nodeCount++; }
-    virtual ~Node() { internal::nodeCount--; }
+    virtual ~Node() {
+        cancelAllAsyncTimers();  // stop + await any in-flight async callbacks
+        internal::nodeCount--;
+    }
 
     // -------------------------------------------------------------------------
     // Lifecycle (overridable)
@@ -612,16 +616,24 @@ private:
     // Event dispatch (called by App only via friend access)
     // -------------------------------------------------------------------------
 
-    // Build a copy of `s` with pos / delta expressed in THIS node's local space.
-    // globalPos / globalDelta / button / modifiers are preserved.
+    // Press/release: lean args carry no movement, so only pos is localized.
     MouseEventArgs localizeMouse(const MouseEventArgs& s) {
         MouseEventArgs a = s;
+        Vec3 lp = globalToLocal(Vec3(s.globalPos.x, s.globalPos.y, 0));
+        a.pos = Vec2(lp.x, lp.y);
+        a.syncLegacy();
+        return a;
+    }
+
+    // Move/drag carrier: localize pos AND the movement delta into this node's
+    // local space. globalPos / globalDelta / button / modifiers are preserved.
+    MouseEventRaw localizeMouse(const MouseEventRaw& s) {
+        MouseEventRaw a = s;
         Vec3 lp = globalToLocal(Vec3(s.globalPos.x, s.globalPos.y, 0));
         Vec3 lpPrev = globalToLocal(Vec3(s.globalPos.x - s.globalDelta.x,
                                          s.globalPos.y - s.globalDelta.y, 0));
         a.pos = Vec2(lp.x, lp.y);
         a.delta = Vec2(lp.x - lpPrev.x, lp.y - lpPrev.y);
-        a.syncLegacy();
         return a;
     }
 
@@ -683,10 +695,10 @@ private:
         return nullptr;
     }
 
-    Ptr dispatchMouseMove(const MouseEventArgs& e) {
+    Ptr dispatchMouseMove(const MouseEventRaw& e) {
         // Send drag event to grabbed node
         if (internal::grabbedNode) {
-            MouseEventArgs local = internal::grabbedNode->localizeMouse(e);
+            MouseEventRaw local = internal::grabbedNode->localizeMouse(e);
             local.button = internal::grabbedButton;
             internal::grabbedNode->onMouseDrag(toDragArgs(local));
         }
@@ -696,7 +708,7 @@ private:
         HitResult result = findHitNode(globalRay);
 
         if (result.hit()) {
-            MouseEventArgs local = result.node->localizeMouse(e);
+            MouseEventRaw local = result.node->localizeMouse(e);
             if (result.node->onMouseMove(toMoveArgs(local))) {
                 return result.node;
             }
@@ -959,7 +971,41 @@ protected:
         timers_.clear();
     }
 
+    // -------------------------------------------------------------------------
+    // Async timers (off-thread, precise)
+    // -------------------------------------------------------------------------
+    // Like callAfter / callEvery, but fired by a background scheduler thread at
+    // precise times instead of the frame-quantized update loop - use these when
+    // timing jitter matters (sequencer clocks, LED/MIDI output, ...).
+    //
+    // The callback runs ON THE SCHEDULER THREAD: guard state shared with
+    // update()/draw() behind a mutex, never draw from it (AudioEngine::play is
+    // fine). Cancel them before the members the callback touches are destroyed
+    // (e.g. in cleanup() / on mode change); ~Node cancels any leftovers and
+    // waits for an in-flight callback to finish.
+    uint64_t callAfterAsync(double delay, std::function<void()> callback) {
+        return AsyncScheduler::get().after(asyncOwner(), delay, std::move(callback));
+    }
+
+    uint64_t callEveryAsync(double interval, std::function<void()> callback) {
+        return AsyncScheduler::get().every(asyncOwner(), interval, std::move(callback));
+    }
+
+    void cancelAsyncTimer(uint64_t id) {
+        AsyncScheduler::get().cancel(id);
+    }
+
+    void cancelAllAsyncTimers() {
+        if (asyncOwner_) AsyncScheduler::get().cancelOwner(asyncOwner_);
+    }
+
 private:
+    uint64_t asyncOwner_ = 0;   // lazily assigned scheduler owner token
+    uint64_t asyncOwner() {
+        if (!asyncOwner_) asyncOwner_ = AsyncScheduler::newOwner();
+        return asyncOwner_;
+    }
+
     bool setupCalled_ = false;    // Ensures setup() is called only once
     bool dead_ = false;           // Marked for removal by destroy()
     WeakPtr parent_;

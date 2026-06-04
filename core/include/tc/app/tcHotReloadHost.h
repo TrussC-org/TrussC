@@ -588,11 +588,11 @@ inline int runHotReloadApp(const WindowSettings& settings) {
         App* app = g_host.getApp();
         if (app) app->handleMouseReleased(e);
     };
-    internal::appMouseMovedFunc = [](const MouseEventArgs& e) {
+    internal::appMouseMovedFunc = [](const MouseEventRaw& e) {
         App* app = g_host.getApp();
         if (app) app->handleMouseMoved(e);
     };
-    internal::appMouseDraggedFunc = [](const MouseEventArgs& e) {
+    internal::appMouseDraggedFunc = [](const MouseEventRaw& e) {
         App* app = g_host.getApp();
         if (app) app->handleMouseDragged(e);
     };

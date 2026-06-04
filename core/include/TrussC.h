@@ -2046,8 +2046,8 @@ namespace internal {
     inline void (*appKeyReleasedFunc)(const KeyEventArgs&) = nullptr;
     inline void (*appMousePressedFunc)(const MouseEventArgs&) = nullptr;
     inline void (*appMouseReleasedFunc)(const MouseEventArgs&) = nullptr;
-    inline void (*appMouseMovedFunc)(const MouseEventArgs&) = nullptr;
-    inline void (*appMouseDraggedFunc)(const MouseEventArgs&) = nullptr;
+    inline void (*appMouseMovedFunc)(const MouseEventRaw&) = nullptr;
+    inline void (*appMouseDraggedFunc)(const MouseEventRaw&) = nullptr;
     inline void (*appMouseScrolledFunc)(const ScrollEventArgs&) = nullptr;
     inline void (*appWindowResizedFunc)(int, int) = nullptr;
     inline void (*appFilesDroppedFunc)(const std::vector<std::string>&) = nullptr;
@@ -2349,16 +2349,15 @@ namespace internal {
                 mouseX = ev->mouse_x * scale;
                 mouseY = ev->mouse_y * scale;
 
-                // Rich carrier (MouseEventArgs); the per-kind public type is
+                // Rich carrier (MouseEventRaw); the per-kind public type is
                 // built from it at the boundary (toDragArgs / toMoveArgs).
-                MouseEventArgs args;
+                MouseEventRaw args;
                 args.pos = args.globalPos = Vec2(mouseX, mouseY);
                 args.delta = args.globalDelta = Vec2(mouseX - prevX, mouseY - prevY);
                 args.shift = hasModShift;
                 args.ctrl = hasModCtrl;
                 args.alt = hasModAlt;
                 args.super = hasModSuper;
-                args.syncLegacy();
 
                 if (currentMouseButton >= 0) {
                     args.button = currentMouseButton;
@@ -2434,11 +2433,10 @@ namespace internal {
                         float prevX = mouseX, prevY = mouseY;
                         mouseX = tx; mouseY = ty;
 
-                        MouseEventArgs margs;
+                        MouseEventRaw margs;
                         margs.pos = margs.globalPos = Vec2(tx, ty);
                         margs.delta = margs.globalDelta = Vec2(tx - prevX, ty - prevY);
                         margs.button = MOUSE_BUTTON_LEFT;
-                        margs.syncLegacy();
                         MouseDragEventArgs dragArgs = toDragArgs(margs);
                         events().mouseDragged.notify(dragArgs);
                         if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
@@ -2565,10 +2563,10 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     internal::appMouseReleasedFunc = [](const MouseEventArgs& e) {
         if (app) app->handleMouseReleased(e);
     };
-    internal::appMouseMovedFunc = [](const MouseEventArgs& e) {
+    internal::appMouseMovedFunc = [](const MouseEventRaw& e) {
         if (app) app->handleMouseMoved(e);
     };
-    internal::appMouseDraggedFunc = [](const MouseEventArgs& e) {
+    internal::appMouseDraggedFunc = [](const MouseEventRaw& e) {
         if (app) app->handleMouseDragged(e);
     };
     internal::appMouseScrolledFunc = [](const ScrollEventArgs& e) {

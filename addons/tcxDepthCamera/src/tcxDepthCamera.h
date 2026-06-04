@@ -35,6 +35,7 @@
 // Headers:
 //   tcxDepthTypes.h           - DepthSensorType, DepthIntrinsics, DepthFrame,
 //                               StreamFreshness, DepthMeshOptions
+//   tcxDepthImage.h           - colorToImage/depthToImage/irToImage converters
 //   tcxDepthCameraBase.h      - DepthCamera (the concrete, thread-safe base)
 //   tcxDepthCapabilities.h    - IStereoRaw, IConfidenceMap (device-specific)
 //   tcxDepthCast.h            - as<>() / is<>() / isStereoCam() capability queries
@@ -43,6 +44,7 @@
 // =============================================================================
 
 #include "tcxDepthTypes.h"
+#include "tcxDepthImage.h"
 #include "tcxDepthCameraBase.h"
 #include "tcxDepthCapabilities.h"
 #include "tcxDepthCast.h"

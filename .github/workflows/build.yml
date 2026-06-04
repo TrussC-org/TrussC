@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build:
-    timeout-minutes: 120
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -83,6 +83,13 @@ jobs:
              echo "Running quick build (AllFeaturesExample only)..."
              ./examples/build_all.py --test-only --verbose
           fi
+
+      # Behavioral test harnesses bundled with monorepo addons (addons/*/tests/):
+      # built AND run (non-zero exit fails the job). Runs on every build, not just
+      # [full] - the tests are small console projects. No-op when none exist.
+      - name: Build & run addon tests
+        shell: bash
+        run: ./examples/build_all.py --addon-tests-only --verbose
 
       - name: Build HotReloadExample (host/guest split smoke test)
         shell: bash

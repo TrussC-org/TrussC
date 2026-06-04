@@ -68,11 +68,9 @@ struct MouseEventArgs {
     // Rich (canonical)
     Vec2 pos;                 // Local position (== globalPos at app level)
     Vec2 globalPos;           // Screen position
-    // Note: press/release carry no movement; `delta`/`globalDelta` exist only
-    // because this struct doubles as the internal dispatch carrier and are
-    // always (0,0) on a press/release.
-    Vec2 delta;
-    Vec2 globalDelta;
+    // No delta here: a press/release has no movement of its own (the cursor's
+    // travel is delivered by the preceding mouseMoved/mouseDragged). Movement
+    // lives on MouseMoveEventArgs / MouseDragEventArgs.
 
     // Sync legacy scalar mirrors from the canonical Vec2 fields.
     void syncLegacy() { x = pos.x; y = pos.y; }
@@ -139,11 +137,28 @@ struct ScrollEventArgs {
 };
 
 // ---------------------------------------------------------------------------
+// Internal mouse-move carrier
+// ---------------------------------------------------------------------------
+// move/drag dispatch flows a single rich carrier through the plumbing (OS ->
+// App -> node tree); the public move/drag boundary builds the specific type
+// from it. This is internal: press/release never carry movement, so they use
+// the lean public MouseEventArgs directly and never touch this type.
+struct MouseEventRaw {
+    Vec2 pos;                 // Local position (== globalPos at app level)
+    Vec2 globalPos;           // Screen position
+    Vec2 delta;               // Movement since last event, local space
+    Vec2 globalDelta;         // Movement since last event, screen space
+    int button = 0;           // MOUSE_BUTTON_* held during a drag (0 on a move)
+    bool shift = false;
+    bool ctrl = false;
+    bool alt = false;
+    bool super = false;
+};
+
+// ---------------------------------------------------------------------------
 // Carrier -> per-event converters
 // ---------------------------------------------------------------------------
-// The dispatch plumbing flows a single rich MouseEventArgs "carrier"; the
-// move/drag public boundaries build their specific type from it here.
-inline MouseMoveEventArgs toMoveArgs(const MouseEventArgs& m) {
+inline MouseMoveEventArgs toMoveArgs(const MouseEventRaw& m) {
     MouseMoveEventArgs a;
     a.pos = m.pos; a.globalPos = m.globalPos;
     a.delta = m.delta; a.globalDelta = m.globalDelta;
@@ -152,7 +167,7 @@ inline MouseMoveEventArgs toMoveArgs(const MouseEventArgs& m) {
     return a;
 }
 
-inline MouseDragEventArgs toDragArgs(const MouseEventArgs& m) {
+inline MouseDragEventArgs toDragArgs(const MouseEventRaw& m) {
     MouseDragEventArgs a;
     a.pos = m.pos; a.globalPos = m.globalPos;
     a.delta = m.delta; a.globalDelta = m.globalDelta;

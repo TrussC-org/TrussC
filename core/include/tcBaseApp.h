@@ -185,12 +185,12 @@ public:
         dispatchMouseRelease(e);
     }
 
-    void handleMouseMoved(const MouseEventArgs& e) {
+    void handleMouseMoved(const MouseEventRaw& e) {
         mouseMoved(toMoveArgs(e));
         dispatchMouseMove(e);
     }
 
-    void handleMouseDragged(const MouseEventArgs& e) {
+    void handleMouseDragged(const MouseEventRaw& e) {
         mouseDragged(toDragArgs(e));
         dispatchMouseMove(e);  // drag + hover share the node-tree move dispatch
     }

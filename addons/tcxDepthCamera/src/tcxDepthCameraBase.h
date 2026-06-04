@@ -34,6 +34,7 @@
 // =============================================================================
 
 #include "tcxDepthTypes.h"
+#include "tcxDepthImage.h"
 #include <mutex>
 #include <utility>
 
@@ -94,6 +95,10 @@ public:
             if (f.any()) std::swap(back_, front_);
             freshness_ = f;
         }
+        // Mark preview Images for re-upload on the next getXxxImage() call.
+        if (freshness_.color)    colorImageDirty_    = true;
+        if (freshness_.depth)    depthImageDirty_    = true;
+        if (freshness_.infrared) irImageDirty_       = true;
     }
 
     // -------------------------------------------------------------------------
@@ -267,6 +272,36 @@ public:
     }
 
     // -------------------------------------------------------------------------
+    // Preview Images (cached, uploaded once per new frame)
+    // -------------------------------------------------------------------------
+    // Convenience wrappers over the tcxDepthImage.h converters: a ready-to-draw
+    // Image of each stream, cached and re-uploaded only when that stream gets a
+    // new frame. For the common "just show it" case - no per-app boilerplate:
+    //
+    //   if (cam->hasColor()) cam->getColorImage().draw(0, 0);
+    //   cam->getDepthImage({.nearM = 0.3f, .farM = 4.0f}).draw(0, 0);
+    //
+    // The returned Image is non-const (draw() needs the texture); it stays valid
+    // until the next call. If you own the Image yourself (e.g. a DepthFrame from
+    // playback), use the free colorToImage()/depthToImage()/irToImage() instead.
+    Image& getColorImage() {
+        if (colorImageDirty_) { colorToImage(front_->color, colorImage_); colorImageDirty_ = false; }
+        return colorImage_;
+    }
+    Image& getDepthImage(const DepthImageView& view = {}) {
+        if (depthImageDirty_ || view != depthImageLastView_) {
+            depthToImage(*front_, depthImage_, view);
+            depthImageLastView_ = view;
+            depthImageDirty_ = false;
+        }
+        return depthImage_;
+    }
+    Image& getInfraredImage() {
+        if (irImageDirty_) { irToImage(front_->ir, irImage_); irImageDirty_ = false; }
+        return irImage_;
+    }
+
+    // -------------------------------------------------------------------------
     // Mesh / point cloud
     // -------------------------------------------------------------------------
 
@@ -354,6 +389,11 @@ private:
     mutable bool warnedDepth_ = false;
     mutable bool warnedColor_ = false;
     mutable bool warnedInfrared_ = false;
+
+    // Cached preview Images (uploaded lazily, once per new frame; see getXxxImage()).
+    Image colorImage_, depthImage_, irImage_;
+    bool colorImageDirty_ = false, depthImageDirty_ = false, irImageDirty_ = false;
+    DepthImageView depthImageLastView_{};
 };
 
 } // namespace tcx
