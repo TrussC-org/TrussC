@@ -46,11 +46,29 @@ public:
             onParseError.notify(msg);
         });
 
-        // Allow multiple receivers on the same port
+        // Allow multiple receivers on the same port (SO_REUSEADDR + SO_REUSEPORT).
+        // setReusePort matters for multicast: several apps commonly share one
+        // multicast port, and macOS/BSD need SO_REUSEPORT (not just REUSEADDR).
         socket_.create();
         socket_.setReuseAddress(true);
+        socket_.setReusePort(true);
 
         return socket_.bind(port, true);  // Auto-start receive thread
+    }
+
+    // -------------------------------------------------------------------------
+    // Multicast (IPv4)
+    // -------------------------------------------------------------------------
+    // OSC is usually unicast, but some setups multicast it (one sender, many
+    // listeners on a fixed group). Call AFTER setup() so the socket is bound,
+    // then the receiver also gets datagrams for `group` (e.g. "239.0.0.1").
+    // `iface` selects the NIC (""/"0.0.0.0" = default route).
+
+    bool joinMulticast(const std::string& group, const std::string& iface = "") {
+        return socket_.joinMulticastGroup(group, iface);
+    }
+    bool leaveMulticast(const std::string& group, const std::string& iface = "") {
+        return socket_.leaveMulticastGroup(group, iface);
     }
 
     // Close

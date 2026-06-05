@@ -69,6 +69,26 @@ public:
         return connect(host, port);
     }
 
+    // -------------------------------------------------------------------------
+    // Multicast (IPv4) — optional tuning
+    // -------------------------------------------------------------------------
+    // Sending OSC to a multicast group (e.g. "239.0.0.1") needs no special
+    // setup — just connect()/sendTo() the group address. These only tune it:
+    // TTL caps how many router hops the datagram crosses (default 1 = local
+    // subnet); loopback controls whether local listeners on this host see it
+    // (default on). Both create the socket if needed.
+
+    OscSender& setMulticastTTL(int ttl) {
+        if (!socket_.isValid()) socket_.create();
+        socket_.setMulticastTTL(ttl);
+        return *this;
+    }
+    OscSender& setMulticastLoopback(bool enable) {
+        if (!socket_.isValid()) socket_.create();
+        socket_.setMulticastLoopback(enable);
+        return *this;
+    }
+
     // Close socket and clear destinations
     void close() {
         socket_.close();
