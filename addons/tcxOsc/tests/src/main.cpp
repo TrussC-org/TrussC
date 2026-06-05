@@ -11,8 +11,7 @@
 // setMulticastLoopback / setReusePort) that OscReceiver/OscSender now use:
 //   - unicast loopback still works
 //   - a receiver that JOINED a group receives multicast sent to it
-//   - a receiver on the same port that did NOT join does NOT receive it
-//   - traffic for a different group does NOT leak to a joined receiver
+//   - traffic for a group NOBODY joined is not received (multicast is join-gated)
 // =============================================================================
 
 #include <tcxOsc.h>
@@ -73,7 +72,6 @@ int main() {
     const std::string GROUP_B = "239.77.0.2";
     const int PORT_UNI  = 57110;
     const int PORT_MC   = 57111;  // joined receiver
-    const int PORT_NONE = 57112;  // non-member receiver
 
     // Outgoing multicast interface. macOS CI runners have no multicast route on
     // the default NIC (send -> EHOSTUNREACH), but lo0 is multicast-capable, so
@@ -128,19 +126,17 @@ int main() {
             check("multicast: address == /mc", r == Recv::Received && got.getAddress() == "/mc");
             check("multicast: arg == 7", r == Recv::Received && got.getArgCount() == 1 && got.getArgAsInt(0) == 7);
 
-            // 3. scoping by GROUP: traffic for group B must not reach a B-less receiver.
+            // 3. scoping: traffic for a group NOBODY joined must not arrive — this
+            // is what proves multicast is join-gated. (We deliberately do NOT test
+            // "a non-member socket on another port" here: IPv4 membership is an
+            // interface-level IGMP concept, so once ANY socket on the host joins a
+            // group, the kernel may deliver that group's datagrams to other sockets
+            // bound to the matching port too — true on Linux. So the robust
+            // invariant is per-GROUP, tested with a group that has no members.)
             OscMessage mb("/other");
             mb.addInt(99);
-            check("scoping: group-B traffic does not leak to group-A receiver",
+            check("scoping: unjoined group's traffic does not reach the receiver",
                   sendAndExpectNone(rx, tx, GROUP_B, PORT_MC, mb) == Recv::NotReceived);
-
-            // 4. scoping by MEMBERSHIP: same group, a receiver that did NOT join.
-            OscReceiver rxNone;
-            check("membership: receiver bound (no join)", rxNone.setup(PORT_NONE));
-            sleepMs(100);
-            check("scoping: non-member receives nothing (join required)",
-                  sendAndExpectNone(rxNone, tx, GROUP_A, PORT_NONE, m) == Recv::NotReceived);
-            rxNone.close();
         }
         rx.close();
     }
