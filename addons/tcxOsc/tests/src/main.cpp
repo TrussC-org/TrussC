@@ -33,32 +33,39 @@ static void check(const char* name, bool ok) {
     ok ? ++g_pass : ++g_fail;
 }
 
+// Outcome of a send+poll round. Unroutable = every send failed (the host can't
+// route this group at all — e.g. macOS CI runners have no multicast route on the
+// default NIC), which we treat as "skip", not "fail".
+enum class Recv { Received, NotReceived, Unroutable };
+
 // Send `msg` repeatedly (loopback can drop the first datagram before the receive
 // thread is fully on the group) and return the first message the receiver buffers.
-static bool sendAndRecv(OscReceiver& rx, OscSender& tx,
+static Recv sendAndRecv(OscReceiver& rx, OscSender& tx,
                         const std::string& host, int port,
                         const OscMessage& msg, OscMessage& out) {
     rx.hasNewMessage();  // first call enables the polling buffer
+    bool anySent = false;
     for (int i = 0; i < 40; ++i) {
-        tx.sendTo(host, port, msg);
+        if (tx.sendTo(host, port, msg)) anySent = true;
         sleepMs(25);
-        if (rx.getNextMessage(out)) return true;
+        if (rx.getNextMessage(out)) return Recv::Received;
     }
-    return false;
+    return anySent ? Recv::NotReceived : Recv::Unroutable;
 }
 
-// Assert the receiver gets NOTHING for ~1s of repeated sends (a scoping check).
-static bool sendAndExpectNone(OscReceiver& rx, OscSender& tx,
+// Check the receiver gets NOTHING for ~1s of repeated sends (a scoping check).
+static Recv sendAndExpectNone(OscReceiver& rx, OscSender& tx,
                               const std::string& host, int port,
                               const OscMessage& msg) {
     rx.hasNewMessage();  // enable buffer so a leak would be caught
     OscMessage scratch;
+    bool anySent = false;
     for (int i = 0; i < 40; ++i) {
-        tx.sendTo(host, port, msg);
+        if (tx.sendTo(host, port, msg)) anySent = true;
         sleepMs(25);
-        if (rx.getNextMessage(scratch)) return false;  // leaked!
+        if (rx.getNextMessage(scratch)) return Recv::Received;  // leaked!
     }
-    return true;
+    return anySent ? Recv::NotReceived : Recv::Unroutable;
 }
 
 int main() {
@@ -68,9 +75,20 @@ int main() {
     const int PORT_MC   = 57111;  // joined receiver
     const int PORT_NONE = 57112;  // non-member receiver
 
+    // Outgoing multicast interface. macOS CI runners have no multicast route on
+    // the default NIC (send -> EHOSTUNREACH), but lo0 is multicast-capable, so
+    // route the test over loopback there. Linux/Windows route fine by default
+    // (and Linux's lo is not multicast-capable), so leave them on the default.
+#if defined(__APPLE__)
+    const std::string MIF = "127.0.0.1";
+#else
+    const std::string MIF = "";  // default route
+#endif
+
     OscSender tx;
-    tx.setMulticastTTL(1);          // stay on local subnet
-    tx.setMulticastLoopback(true);  // deliver to local listeners on this host
+    tx.setMulticastTTL(1);            // stay on local subnet
+    tx.setMulticastLoopback(true);    // deliver to local listeners on this host
+    tx.setMulticastInterface(MIF);
 
     // ----- 1. unicast loopback (baseline) ------------------------------------
     {
@@ -81,7 +99,7 @@ int main() {
         OscMessage m("/uni");
         m.addInt(42);
         OscMessage got;
-        bool ok = sendAndRecv(rx, tx, "127.0.0.1", PORT_UNI, m, got);
+        bool ok = sendAndRecv(rx, tx, "127.0.0.1", PORT_UNI, m, got) == Recv::Received;
         check("unicast: message received", ok);
         check("unicast: address == /uni", ok && got.getAddress() == "/uni");
         check("unicast: arg == 42", ok && got.getArgCount() == 1 && got.getArgAsInt(0) == 42);
@@ -89,38 +107,41 @@ int main() {
     }
 
     // ----- 2. multicast delivery to a joined group ---------------------------
+    // If the host can't route multicast at all (Recv::Unroutable), skip the
+    // multicast assertions rather than fail — but still run them everywhere it
+    // IS routable (Linux/Windows CI, local macOS), which is the real coverage.
     {
         OscReceiver rx;
         check("multicast: receiver bound", rx.setup(PORT_MC));
-        check("multicast: joinMulticast(A)", rx.joinMulticast(GROUP_A));
+        check("multicast: joinMulticast(A)", rx.joinMulticast(GROUP_A, MIF));
         sleepMs(100);  // let the join settle
 
         OscMessage m("/mc");
         m.addInt(7);
         OscMessage got;
-        bool ok = sendAndRecv(rx, tx, GROUP_A, PORT_MC, m, got);
-        check("multicast: joined receiver got it", ok);
-        check("multicast: address == /mc", ok && got.getAddress() == "/mc");
-        check("multicast: arg == 7", ok && got.getArgCount() == 1 && got.getArgAsInt(0) == 7);
+        Recv r = sendAndRecv(rx, tx, GROUP_A, PORT_MC, m, got);
+        if (r == Recv::Unroutable) {
+            std::printf("%-56s %s\n", "multicast: SKIPPED (no multicast route on this host)", "SKIP");
+            std::fflush(stdout);
+        } else {
+            check("multicast: joined receiver got it", r == Recv::Received);
+            check("multicast: address == /mc", r == Recv::Received && got.getAddress() == "/mc");
+            check("multicast: arg == 7", r == Recv::Received && got.getArgCount() == 1 && got.getArgAsInt(0) == 7);
 
-        // 3. scoping by GROUP: traffic for group B must not reach a B-less receiver.
-        OscMessage mb("/other");
-        mb.addInt(99);
-        bool noLeak = sendAndExpectNone(rx, tx, GROUP_B, PORT_MC, mb);
-        check("scoping: group-B traffic does not leak to group-A receiver", noLeak);
-        rx.close();
-    }
+            // 3. scoping by GROUP: traffic for group B must not reach a B-less receiver.
+            OscMessage mb("/other");
+            mb.addInt(99);
+            check("scoping: group-B traffic does not leak to group-A receiver",
+                  sendAndExpectNone(rx, tx, GROUP_B, PORT_MC, mb) == Recv::NotReceived);
 
-    // ----- 4. scoping by MEMBERSHIP: same group, receiver did NOT join --------
-    {
-        OscReceiver rx;
-        check("membership: receiver bound (no join)", rx.setup(PORT_NONE));
-        sleepMs(100);
-
-        OscMessage m("/mc");
-        m.addInt(7);
-        bool noLeak = sendAndExpectNone(rx, tx, GROUP_A, PORT_NONE, m);
-        check("scoping: non-member receives nothing (join required)", noLeak);
+            // 4. scoping by MEMBERSHIP: same group, a receiver that did NOT join.
+            OscReceiver rxNone;
+            check("membership: receiver bound (no join)", rxNone.setup(PORT_NONE));
+            sleepMs(100);
+            check("scoping: non-member receives nothing (join required)",
+                  sendAndExpectNone(rxNone, tx, GROUP_A, PORT_NONE, m) == Recv::NotReceived);
+            rxNone.close();
+        }
         rx.close();
     }
 

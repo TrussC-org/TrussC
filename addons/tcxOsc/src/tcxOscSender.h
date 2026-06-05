@@ -88,6 +88,14 @@ public:
         socket_.setMulticastLoopback(enable);
         return *this;
     }
+    // Choose the NIC used for outgoing multicast (""/"0.0.0.0" = default route).
+    // Useful when the default route can't reach the group (some hosts need an
+    // explicit interface for multicast to be routable at all).
+    OscSender& setMulticastInterface(const std::string& iface) {
+        if (!socket_.isValid()) socket_.create();
+        socket_.setMulticastInterface(iface);
+        return *this;
+    }
 
     // Close socket and clear destinations
     void close() {
