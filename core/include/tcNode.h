@@ -3,7 +3,10 @@
 #include "TrussC.h"
 #include "tc/types/tcMod.h"
 #include "tc/utils/tcAsyncScheduler.h"
+#include "tc/utils/tcTypeName.h"
 #include <memory>
+#include <string>
+#include <atomic>
 #include <vector>
 #include <functional>
 #include <algorithm>
@@ -43,7 +46,7 @@ public:
     using Ptr = std::shared_ptr<Node>;
     using WeakPtr = std::weak_ptr<Node>;
 
-    Node() { internal::nodeCount++; }
+    Node() : instanceId_(nextInstanceId_++) { internal::nodeCount++; }
     virtual ~Node() {
         cancelAllAsyncTimers();  // stop + await any in-flight async callbacks
         internal::nodeCount--;
@@ -182,6 +185,21 @@ public:
         return children_.size();
     }
 
+    // Index of the given child among this node's children (-1 if not a child)
+    int indexOfChild(const Node* child) const {
+        for (size_t i = 0; i < children_.size(); ++i) {
+            if (children_[i].get() == child) return static_cast<int>(i);
+        }
+        return -1;
+    }
+
+    // This node's index among its parent's children (-1 if it has no parent).
+    // A sibling-order counterpart to getParent().
+    int getChildIndex() const {
+        auto p = getParent();
+        return p ? p->indexOfChild(this) : -1;
+    }
+
     // Reorder this node within its parent's child list.
     //
     // Children are drawn in vector order: the first child is drawn first
@@ -259,6 +277,37 @@ public:
 
     // Whether mouse is over this node (auto-updated each frame, O(1))
     bool isMouseOver() const { return internal::hoveredNode == this; }
+
+    // -------------------------------------------------------------------------
+    // Identity / Name
+    // -------------------------------------------------------------------------
+    //
+    // Distinct notions:
+    //   - getName()       : optional instance name, set by the user (may be empty)
+    //   - getTypeName()   : the C++ class name from RTTI (always available, free)
+    //   - getDisplayName(): type name, with the instance name in parens if set
+    //                       ("RectNode" or "RectNode (play)") — type-anchored so
+    //                       a tree/inspector column stays consistent.
+    //   - getInstanceId() : per-process unique id, fixed at construction.
+
+    // Optional instance name. Empty unless setName() was called.
+    Node& setName(const std::string& name) { name_ = name; return *this; }
+    const std::string& getName() const { return name_; }
+    bool hasName() const { return !name_.empty(); }
+
+    // C++ class name (dynamic / most-derived type) via RTTI. Cached per type,
+    // so this is cheap to call even for many nodes. E.g. "trussc::RectNode".
+    const std::string& getTypeName() const { return typeName(typeid(*this)); }
+
+    // Type-anchored label for trees / inspectors / logs. Always non-empty.
+    // "RectNode" when unnamed, "RectNode (play)" when named.
+    std::string getDisplayName() const {
+        return hasName() ? getTypeName() + " (" + name_ + ")" : getTypeName();
+    }
+
+    // Per-process unique id, assigned once at construction and never changed
+    // (stable across reparenting). Read-only — there is no setter.
+    uint64_t getInstanceId() const { return instanceId_; }
 
     // -------------------------------------------------------------------------
     // Transform - Position
@@ -1008,6 +1057,9 @@ private:
 
     bool setupCalled_ = false;    // Ensures setup() is called only once
     bool dead_ = false;           // Marked for removal by destroy()
+    std::string name_;            // Optional instance name (see getName())
+    const uint64_t instanceId_;   // Per-process unique id, fixed at construction
+    inline static std::atomic<uint64_t> nextInstanceId_{0};  // id source
     WeakPtr parent_;
     std::vector<Ptr> children_;
     bool eventsEnabled_ = false;  // Enabled via enableEvents()
