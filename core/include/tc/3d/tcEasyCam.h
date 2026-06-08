@@ -128,6 +128,31 @@ public:
         return distance_;
     }
 
+    // ---------------------------------------------------------------------------
+    // Orbit angles
+    // ---------------------------------------------------------------------------
+    // The camera orbits the target on a sphere, placed by two angles:
+    //   azimuth   - horizontal angle (yaw): which side you view from, spinning
+    //               around the up axis. 0 looks along the forward axis.
+    //   elevation - vertical angle (pitch): how high above the target you look
+    //               down from. 0 = level (side-on); positive looks downward.
+    // Both in radians. Set them to frame an oblique 3/4 view at startup instead
+    // of the default head-on side view. (These are exactly what mouse-drag moves;
+    // elevation is clamped to ~±80° like the drag handler.)
+    void setAzimuth(float radians) {
+        rotationY_ = radians;
+    }
+
+    void setElevation(float radians) {
+        const float maxAngle = 80.0f * 3.14159265358979f / 180.0f;
+        if (radians >  maxAngle) radians =  maxAngle;
+        if (radians < -maxAngle) radians = -maxAngle;
+        rotationX_ = radians;
+    }
+
+    float getAzimuth() const   { return rotationY_; }
+    float getElevation() const { return rotationX_; }
+
     // Set field of view (FOV) in radians
     void setFov(float fov) {
         fov_ = fov;

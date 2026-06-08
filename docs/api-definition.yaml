@@ -5353,6 +5353,50 @@ categories:
         sketch: true
         snippet: "getDistance()"
 
+      - name: setAzimuth
+        return: "void"
+        signatures:
+          - params: "float radians"
+            params_simple: "radians"
+        description: "Set orbit azimuth (horizontal angle, radians)"
+        description_ja: "周回の方位角（水平角・ラジアン）を設定"
+        description_ko: "궤도 방위각(수평각, 라디안)을 설정"
+        sketch: true
+        snippet: "setAzimuth(${1:0.7})"
+
+      - name: getAzimuth
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get orbit azimuth (horizontal angle, radians)"
+        description_ja: "周回の方位角（水平角・ラジアン）を取得"
+        description_ko: "궤도 방위각(수평각, 라디안)을 얻음"
+        sketch: true
+        snippet: "getAzimuth()"
+
+      - name: setElevation
+        return: "void"
+        signatures:
+          - params: "float radians"
+            params_simple: "radians"
+        description: "Set orbit elevation (vertical angle, radians; clamped to ~±80°)"
+        description_ja: "周回の仰角（垂直角・ラジアン、約±80°でクランプ）を設定"
+        description_ko: "궤도 고도각(수직각, 라디안; 약 ±80°로 제한)을 설정"
+        sketch: true
+        snippet: "setElevation(${1:0.5})"
+
+      - name: getElevation
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get orbit elevation (vertical angle, radians)"
+        description_ja: "周回の仰角（垂直角・ラジアン）を取得"
+        description_ko: "궤도 고도각(수직각, 라디안)을 얻음"
+        sketch: true
+        snippet: "getElevation()"
+
       - name: setFov
         return: "void"
         signatures:
