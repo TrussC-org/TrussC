@@ -674,7 +674,7 @@ void draw() override {
 **Key concepts:**
 - `Light`: Directional, Point, or Spot (with cone falloff). Also supports projector texture and IES profiles
 - `Material`: PBR properties — `setBaseColor()`, `setMetallic()`, `setRoughness()`, `setNormalMap()`, etc.
-- `Environment`: IBL (Image-Based Lighting) for ambient reflections. `loadProcedural()` or `loadFromHDR()`
+- `Environment`: IBL (Image-Based Lighting) for ambient reflections. `loadProcedural()` or `loadFromHDR()`. **Auto-skipped on iOS/iPadOS Safari (wasm)** — cube-face render targets break the canvas there, so PBR falls back to flat ambient + direct lights (works on native, desktop web, Android). Don't rely on IBL reflections if you target iOS web.
 - `setMaterial()` activates PBR for all subsequent `mesh.draw()` calls until `clearMaterial()`
 
 **Shadow mapping:**

@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      full:
+        description: "Full build: every example on every platform (not just AllFeaturesExample). Same as putting [full] in a commit message."
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -74,10 +79,11 @@ jobs:
         shell: bash
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
+          FULL_INPUT: ${{ github.event.inputs.full }}
         run: |
           chmod +x examples/build_all.py
-          if [[ "$COMMIT_MSG" == *"[full]"* ]]; then
-             echo "Running full build (triggered by [full] in commit message)..."
+          if [[ "$COMMIT_MSG" == *"[full]"* || "$FULL_INPUT" == "true" ]]; then
+             echo "Running full build ([full] in commit message or manual full=true)..."
              ./examples/build_all.py --verbose
           else
              echo "Running quick build (AllFeaturesExample only)..."
@@ -196,10 +202,11 @@ jobs:
       - name: Build examples (Web)
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
+          FULL_INPUT: ${{ github.event.inputs.full }}
         run: |
           chmod +x examples/build_all.py
-          if [[ "$COMMIT_MSG" == *"[full]"* ]]; then
-             echo "Running full build (triggered by [full] in commit message)..."
+          if [[ "$COMMIT_MSG" == *"[full]"* || "$FULL_INPUT" == "true" ]]; then
+             echo "Running full build ([full] in commit message or manual full=true)..."
              ./examples/build_all.py --web-only --verbose
           else
              echo "Running quick build (AllFeaturesExample only)..."

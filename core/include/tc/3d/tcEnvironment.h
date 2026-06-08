@@ -34,6 +34,10 @@
 #include <cstring>
 #include <string>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include "tc/gpu/shaders/iblBake.glsl.h"
 
 namespace trussc {
@@ -172,6 +176,22 @@ private:
     Texture brdfLut_;
     bool loaded_ = false;
 
+    // True on iOS/iPadOS Safari (the WebKit GPU backend that breaks on cube-face
+    // render targets). iPad reports as Mac, so also check touch points. Cached.
+    static bool isIosWeb() {
+#ifdef __EMSCRIPTEN__
+        static int cached = -1;
+        if (cached < 0) {
+            cached = emscripten_run_script_int(
+                "((/iPhone|iPad|iPod/.test(navigator.userAgent)||"
+                "(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1))?1:0)");
+        }
+        return cached == 1;
+#else
+        return false;
+#endif
+    }
+
     // -------------------------------------------------------------------------
     // Shared baking resources (pipelines, quad buffer). Lazy-initialized on
     // the first bake call.
@@ -261,7 +281,11 @@ private:
                                   const void* uniformData, size_t uniformSize) {
         sg_pass pass = {};
         pass.attachments.colors[0] = colorAttachment;
-        pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+        // Must CLEAR, not DONTCARE: on Apple TBDR GPUs (Apple Silicon Macs and
+        // Safari) a DONTCARE offscreen pass leaves tile/texture memory
+        // uninitialized, so the baked IBL cubemap/mips come back as garbage.
+        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+        pass.action.colors[0].clear_value = { 0.0f, 0.0f, 0.0f, 1.0f };
         sg_begin_pass(&pass);
         sg_apply_viewport(0, 0, viewportW, viewportH, true);
         sg_apply_pipeline(pipe);
@@ -280,6 +304,27 @@ private:
     // Irradiance and prefilter shaders sample the equirectangular 2D source
     // directly (not an intermediate cubemap) to avoid face-boundary seams.
     bool bakeFromEquirectTexture(const Texture& equirect) {
+#ifdef __EMSCRIPTEN__
+        // Cube-face render targets break the canvas swapchain on iOS/iPadOS
+        // Safari (all iOS browsers share the WebKit GPU backend); the page renders
+        // one frame then freezes/blacks out. A plain 2D FBO is fine, so this is
+        // specific to cube-face attachments. Desktop web, Android web and native
+        // all bake fine — so skip the bake ONLY on iOS. meshPbr then falls back to
+        // a flat hemisphere ambient (direct lights still work, looks fine).
+        // IBL is opt-in via setEnvironment(), so this only affects apps that use
+        // it; they degrade gracefully on iOS instead of breaking.
+        if (isIosWeb()) {
+            static bool warned = false;
+            if (!warned) {
+                warned = true;
+                logWarning("Environment")
+                    << "IBL bake skipped on iOS Safari (cube-face render targets "
+                       "break the canvas there). Using flat ambient + direct lights.";
+            }
+            loaded_ = false;
+            return false;
+        }
+#endif
         ensureBakeResources();
         BakeResources& r = bake();
 

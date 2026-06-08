@@ -274,14 +274,10 @@ namespace internal {
     inline bool mousePressed = false;
 
     // Touch-as-mouse mapping
-    // Mobile (Android/iOS): default ON — existing mouse-based code works on touch screens.
-    // Desktop/Web: default OFF — touch and mouse are separate.
-    // Override with setTouchAsMouse(true/false) in setup().
-#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+    // Default ON everywhere — the first touch synthesizes mouse press/drag, so
+    // mouse-based code (incl. the web build on iPad/phones) just works. Apps that
+    // want raw touch separate from mouse call setTouchAsMouse(false) in setup().
     inline bool touchAsMouse = true;
-#else
-    inline bool touchAsMouse = false;
-#endif
 
     // Touch event listeners (must persist to keep subscriptions alive)
     inline EventListener touchPressedListener;
@@ -1750,7 +1746,7 @@ inline Vec2 getGlobalMousePos() { return Vec2(getGlobalMouseX(), getGlobalMouseY
 // Touch-as-mouse mapping
 // When enabled, the first touch point is also delivered as mouse events.
 // Useful for running desktop apps (that use mousePressed) on mobile unchanged.
-// Default: OFF. Call setTouchAsMouse(true) in setup() for mobile apps.
+// Default: ON everywhere. Call setTouchAsMouse(false) in setup() to opt out.
 // ---------------------------------------------------------------------------
 inline void setTouchAsMouse(bool enabled) { internal::touchAsMouse = enabled; }
 inline bool getTouchAsMouse() { return internal::touchAsMouse; }

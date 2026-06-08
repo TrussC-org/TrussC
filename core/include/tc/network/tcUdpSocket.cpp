@@ -537,6 +537,94 @@ bool UdpSocket::setReuseAddress(bool enable) {
                       reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
 }
 
+// ---------------------------------------------------------------------------
+// Multicast (IPv4)
+// ---------------------------------------------------------------------------
+namespace {
+// Fill an ip_mreq from a group address and an optional interface address.
+// Returns false if either address fails to parse.
+bool buildMreq(const std::string& groupAddr, const std::string& interfaceAddr, ip_mreq& mreq) {
+    mreq = ip_mreq{};
+    if (inet_pton(AF_INET, groupAddr.c_str(), &mreq.imr_multiaddr) != 1) {
+        return false;
+    }
+    if (interfaceAddr.empty()) {
+        mreq.imr_interface.s_addr = INADDR_ANY;  // default route
+    } else if (inet_pton(AF_INET, interfaceAddr.c_str(), &mreq.imr_interface) != 1) {
+        return false;
+    }
+    return true;
+}
+} // namespace
+
+bool UdpSocket::joinMulticastGroup(const std::string& groupAddr, const std::string& interfaceAddr) {
+    if (!ensureSocket()) return false;
+    ip_mreq mreq;
+    if (!buildMreq(groupAddr, interfaceAddr, mreq)) {
+        notifyError("Invalid multicast/interface address: " + groupAddr, 0);
+        return false;
+    }
+    if (setsockopt(socket_, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                   reinterpret_cast<const char*>(&mreq), sizeof(mreq)) != 0) {
+        notifyError("Failed to join multicast group " + groupAddr, SOCKET_ERROR_CODE);
+        return false;
+    }
+    return true;
+}
+
+bool UdpSocket::leaveMulticastGroup(const std::string& groupAddr, const std::string& interfaceAddr) {
+    if (socket_ == INVALID_SOCKET_HANDLE) return false;
+    ip_mreq mreq;
+    if (!buildMreq(groupAddr, interfaceAddr, mreq)) {
+        notifyError("Invalid multicast/interface address: " + groupAddr, 0);
+        return false;
+    }
+    return setsockopt(socket_, IPPROTO_IP, IP_DROP_MEMBERSHIP,
+                      reinterpret_cast<const char*>(&mreq), sizeof(mreq)) == 0;
+}
+
+bool UdpSocket::setMulticastTTL(int ttl) {
+    if (!ensureSocket()) return false;
+    // IP_MULTICAST_TTL expects an unsigned char payload on POSIX; Winsock takes
+    // an int. A single byte satisfies both (TTL is 0..255 anyway).
+    unsigned char val = static_cast<unsigned char>(ttl);
+    return setsockopt(socket_, IPPROTO_IP, IP_MULTICAST_TTL,
+                      reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
+}
+
+bool UdpSocket::setMulticastLoopback(bool enable) {
+    if (!ensureSocket()) return false;
+    unsigned char val = enable ? 1 : 0;
+    return setsockopt(socket_, IPPROTO_IP, IP_MULTICAST_LOOP,
+                      reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
+}
+
+bool UdpSocket::setMulticastInterface(const std::string& interfaceAddr) {
+    if (!ensureSocket()) return false;
+    struct in_addr ifaddr{};
+    if (interfaceAddr.empty()) {
+        ifaddr.s_addr = INADDR_ANY;
+    } else if (inet_pton(AF_INET, interfaceAddr.c_str(), &ifaddr) != 1) {
+        notifyError("Invalid multicast interface address: " + interfaceAddr, 0);
+        return false;
+    }
+    return setsockopt(socket_, IPPROTO_IP, IP_MULTICAST_IF,
+                      reinterpret_cast<const char*>(&ifaddr), sizeof(ifaddr)) == 0;
+}
+
+bool UdpSocket::setReusePort(bool enable) {
+    if (!ensureSocket()) return false;
+    int val = enable ? 1 : 0;
+#ifdef _WIN32
+    // Windows has no SO_REUSEPORT; SO_REUSEADDR already permits multiple binds.
+    return setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR,
+                      reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
+#else
+    return setsockopt(socket_, SOL_SOCKET, SO_REUSEPORT,
+                      reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
+#endif
+}
+
 bool UdpSocket::setReceiveBufferSize(int size) {
     if (socket_ == INVALID_SOCKET_HANDLE) return false;
     return setsockopt(socket_, SOL_SOCKET, SO_RCVBUF,

@@ -124,6 +124,41 @@ public:
     // Allow reuse (set before bind)
     bool setReuseAddress(bool enable);
 
+    // Allow several sockets to bind the SAME port (set before bind). Needed when
+    // multiple listeners share one multicast port — e.g. sACN/E1.31 on UDP 5568,
+    // where another app (a console, QLC+) may also be bound. Maps to SO_REUSEPORT
+    // on POSIX; on Windows SO_REUSEADDR already grants this, so it maps to that.
+    bool setReusePort(bool enable);
+
+    // -------------------------------------------------------------------------
+    // Multicast (IPv4)
+    // -------------------------------------------------------------------------
+    // Multicast addresses live in 224.0.0.0/4 (e.g. sACN/E1.31 uses
+    // 239.255.x.x). SENDING to a group needs no membership — just sendTo() the
+    // group address (optionally pick the outgoing NIC with
+    // setMulticastInterface() / cap the hop count with setMulticastTTL()).
+    // RECEIVING multicast requires joining the group AFTER bind() so the OS
+    // delivers that group's datagrams to this socket.
+
+    // Join a multicast group so this socket receives its datagrams. Call after
+    // bind(). interfaceAddr selects which NIC to receive on (""/"0.0.0.0" =
+    // default route). Joining the same group on several interfaces is allowed.
+    bool joinMulticastGroup(const std::string& groupAddr, const std::string& interfaceAddr = "");
+
+    // Stop receiving a previously joined group (sockets auto-leave on close()).
+    bool leaveMulticastGroup(const std::string& groupAddr, const std::string& interfaceAddr = "");
+
+    // Hop limit for OUTGOING multicast. Default 1 = stay on the local subnet
+    // (the usual lighting-network case). Raise to cross routers.
+    bool setMulticastTTL(int ttl);
+
+    // Whether OUTGOING multicast loops back to local listeners on this host.
+    // Default on (lets a sender + receiver in the same process see each other).
+    bool setMulticastLoopback(bool enable);
+
+    // Pick the NIC used for OUTGOING multicast (""/"0.0.0.0" = default route).
+    bool setMulticastInterface(const std::string& interfaceAddr);
+
     // Set receive buffer size
     bool setReceiveBufferSize(int size);
 

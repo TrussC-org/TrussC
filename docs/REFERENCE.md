@@ -575,6 +575,10 @@ void clearMaterial()                     // Clear material (return to default re
 void setCameraPosition(const Vec3& pos)  // Set camera position for specular calculation
 void setCameraPosition(float x, float y, float z) // Set camera position for specular calculation
 void setEnvironment(Environment& env)    // Set IBL environment for PBR ambient lighting
+                                         //   NOTE: IBL is auto-skipped on iOS/iPadOS Safari (wasm) —
+                                         //   cube-face render targets break the canvas there, so PBR
+                                         //   falls back to flat ambient + direct lights. Works on
+                                         //   native, desktop web, and Android web.
 void clearEnvironment()                  // Clear IBL environment
 void beginShadowPass(Light& light)       // Begin shadow depth pass from the light's point of view
 void endShadowPass()                     // End shadow depth pass
