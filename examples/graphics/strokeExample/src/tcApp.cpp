@@ -56,11 +56,20 @@ void tcApp::draw() {
     drawBitmapString(info, 10, 20);
 }
 
-void tcApp::mouseMoved(const MouseMoveEventArgs& e) {
-    history.push_back(e.pos);
+void tcApp::addPoint(Vec2 pos) {
+    history.push_back(pos);
     if (history.size() > maxHistory) {
         history.erase(history.begin());
     }
+}
+
+// Hover (desktop) and drag (touch / mouse drag) both extend the line
+void tcApp::mouseMoved(const MouseMoveEventArgs& e) {
+    addPoint(e.pos);
+}
+
+void tcApp::mouseDragged(const MouseDragEventArgs& e) {
+    addPoint(e.pos);
 }
 
 void tcApp::mousePressed(const MouseEventArgs& e) {
