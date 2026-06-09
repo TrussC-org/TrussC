@@ -5939,6 +5939,17 @@ categories:
         sketch: true
         snippet: "createSphere(${1:radius})"
 
+      - name: createCapsule
+        return: "Mesh"
+        signatures:
+          - params: "float radius, float cylinderHeight, int res = 16"
+            params_simple: "radius, cylinderHeight, res"
+        description: "Create a capsule mesh (Y-up: cylinder capped by two hemispheres)"
+        description_ja: "カプセルメッシュを作成（Y軸、円柱の両端を半球で閉じた形）"
+        description_ko: "캡슐 메쉬를 생성 (Y축, 원기둥 양 끝을 반구로 막은 형태)"
+        sketch: true
+        snippet: "createCapsule(${1:radius}, ${2:cylinderHeight})"
+
       - name: drawTexture
         return: "void"
         signatures:

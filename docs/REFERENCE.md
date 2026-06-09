@@ -614,6 +614,7 @@ void drawPolyline(Polyline polyline)     // Draw a polyline
 Mesh createBox(float size)               // Create a box mesh
 Mesh createBox(float w, float h, float d) // Create a box mesh
 Mesh createSphere(float radius, int res = 20) // Create a sphere mesh
+Mesh createCapsule(float radius, float cylinderHeight, int res = 16) // Create a capsule mesh (Y-up: cylinder capped by two hemispheres)
 void drawTexture(const Texture& tex, float x, float y) // Draw a texture
 void drawTexture(const Texture& tex, float x, float y, float w, float h) // Draw a texture
 ```
