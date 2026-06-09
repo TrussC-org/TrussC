@@ -128,6 +128,24 @@ void setWindowPosition(int x, int y) {
     SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
+void setWindowDecorated(bool decorated) {
+    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+    if (!hwnd) return;
+
+    // Toggle the caption/border/system-menu bits. Keyboard focus and the quit
+    // path (PostQuitMessage) are unaffected by this on Windows.
+    const LONG_PTR chrome = WS_CAPTION | WS_THICKFRAME |
+                            WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU;
+    LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    if (decorated) style |= chrome;
+    else           style &= ~chrome;
+    SetWindowLongPtr(hwnd, GWL_STYLE, style);
+
+    // SWP_FRAMECHANGED makes the new (non-)client frame take effect.
+    SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+}
+
 void setWindowSizeLogical(int width, int height) {
     HWND hwnd = (HWND)sapp_win32_get_hwnd();
     if (!hwnd) {

@@ -170,6 +170,12 @@ public:
         for (const auto& entry : *snapshot) {
             if (entry.callback) {
                 entry.callback(arg);
+                // Stop propagation once a listener marks the event consumed.
+                // Only arg types that carry a `consumed` flag (input events)
+                // participate; all others ignore this branch at compile time.
+                if constexpr (requires { arg.consumed; }) {
+                    if (arg.consumed) break;
+                }
             }
         }
     }

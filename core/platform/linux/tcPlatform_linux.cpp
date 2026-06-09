@@ -79,6 +79,29 @@ void setWindowPosition(int x, int y) {
     (void)x; (void)y;
 }
 
+void setWindowDecorated(bool decorated) {
+    Display* display = XOpenDisplay(nullptr);
+    if (!display) return;
+    Window window = (Window)(uintptr_t)sapp_x11_get_window();
+    if (window) {
+        // Motif WM hints: clear the decorations flag to drop the WM-drawn frame.
+        struct {
+            unsigned long flags;
+            unsigned long functions;
+            unsigned long decorations;
+            long          input_mode;
+            unsigned long status;
+        } hints = {0};
+        hints.flags = (1L << 1);                 // MWM_HINTS_DECORATIONS
+        hints.decorations = decorated ? 1 : 0;   // 1 = all, 0 = none
+        Atom prop = XInternAtom(display, "_MOTIF_WM_HINTS", False);
+        XChangeProperty(display, window, prop, prop, 32, PropModeReplace,
+                        (unsigned char*)&hints, 5);
+        XFlush(display);
+    }
+    XCloseDisplay(display);
+}
+
 void setWindowSizeLogical(int width, int height) {
     // TODO: Implement using X11
     // sokol_app handles window creation, so we need to access the X11 window

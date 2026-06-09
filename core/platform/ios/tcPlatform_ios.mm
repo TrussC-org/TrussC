@@ -107,6 +107,11 @@ void setWindowPosition(int x, int y) {
     (void)x; (void)y;
 }
 
+void setWindowDecorated(bool decorated) {
+    // No window decorations to toggle on iOS.
+    (void)decorated;
+}
+
 void setWindowSizeLogical(int width, int height) {
     // no-op on iOS (window size is fixed to screen size)
     (void)width;

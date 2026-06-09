@@ -1980,6 +1980,7 @@ struct WindowSettings {
     bool pixelPerfect = false;  // true: coords = framebuffer size, false: coords = logical size
     int sampleCount = 4;  // MSAA (default 4x, 8x not supported on some devices)
     bool fullscreen = false;
+    bool decorated = true;  // false: borderless/chromeless window (no title bar)
     int clipboardSize = 65536;  // Clipboard buffer size (default 64KB)
     int swapInterval = 1;  // VSync: 1 = on (default), 0 = off
     // bool headless = false;  // For future use
@@ -2018,6 +2019,13 @@ struct WindowSettings {
         return *this;
     }
 
+    // false = borderless/chromeless window (no title bar, no buttons) that can
+    // still take keyboard focus and be closed programmatically (exitApp()).
+    WindowSettings& setDecorated(bool enabled) {
+        decorated = enabled;
+        return *this;
+    }
+
     WindowSettings& setClipboardSize(int size) {
         clipboardSize = size;
         return *this;
@@ -2032,6 +2040,10 @@ namespace internal {
     // App instance (held as void*)
     inline void* appInstance = nullptr;
     inline int currentMouseButton = -1;
+
+    // Window decoration requested via WindowSettings; applied in _setup_cb once
+    // the platform window exists (sokol has no decoration flag in sapp_desc).
+    inline bool windowDecorated = true;
 
     // Callback function pointers
     inline void (*appSetupFunc)() = nullptr;
@@ -2097,6 +2109,12 @@ namespace internal {
         // Install the standard application menu on macOS so Cmd+Q etc. work
         // out of the box. No-op on other platforms.
         internal::installAppMenu();
+
+        // Apply borderless/chromeless decoration if requested (the window now
+        // exists). Kept key-focusable and closable so exitApp() still works.
+        if (!internal::windowDecorated) {
+            setWindowDecorated(false);
+        }
 
         // Bring window to front on startup
         bringWindowToFront();
@@ -2515,6 +2533,9 @@ template<typename AppClass>
 sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
     // Set pixel perfect mode
     internal::pixelPerfectMode = settings.pixelPerfect;
+
+    // Remember the requested decoration; applied after the window is created.
+    internal::windowDecorated = settings.decorated;
 
     // Create app instance (shared_ptrで管理してNodeのweak_from_thisを有効にする)
     static std::shared_ptr<AppClass> app = nullptr;

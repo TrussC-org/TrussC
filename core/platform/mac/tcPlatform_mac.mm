@@ -108,6 +108,50 @@ void setWindowPosition(int x, int y) {
     [window setFrameOrigin:origin];
 }
 
+void setWindowDecorated(bool decorated) {
+    NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
+    if (!window) return;
+
+    const NSWindowStyleMask base = NSWindowStyleMaskTitled |
+                                   NSWindowStyleMaskClosable |
+                                   NSWindowStyleMaskMiniaturizable |
+                                   NSWindowStyleMaskResizable;
+
+    if (decorated) {
+        window.styleMask = base;
+        window.titlebarAppearsTransparent = NO;
+        window.titleVisibility = NSWindowTitleVisible;
+        window.movableByWindowBackground = NO;
+        window.hasShadow = YES;
+        [[window standardWindowButton:NSWindowCloseButton]       setHidden:NO];
+        [[window standardWindowButton:NSWindowMiniaturizeButton] setHidden:NO];
+        [[window standardWindowButton:NSWindowZoomButton]        setHidden:NO];
+    } else {
+        // Keep the window *titled* (so it can become key AND stays closable —
+        // sokol's quit path calls performClose:, which no-ops on a borderless
+        // window) but hide all chrome with a transparent, full-size-content
+        // title bar. The result looks borderless yet keyboard + exitApp() work.
+        window.styleMask = base | NSWindowStyleMaskFullSizeContentView;
+        window.titlebarAppearsTransparent = YES;
+        window.titleVisibility = NSWindowTitleHidden;
+        window.movableByWindowBackground = YES;
+        [[window standardWindowButton:NSWindowCloseButton]       setHidden:YES];
+        [[window standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
+        [[window standardWindowButton:NSWindowZoomButton]        setHidden:YES];
+
+        // macOS (Tahoe+) auto-rounds window corners; the Metal layer is square,
+        // so paint the backdrop black and drop the shadow to avoid a glowing
+        // corner/edge highlight.
+        window.backgroundColor = [NSColor blackColor];
+        window.opaque = YES;
+        window.hasShadow = NO;
+    }
+
+    // Re-assert key + first responder so mouse and keyboard keep flowing.
+    [window makeKeyAndOrderFront:nil];
+    [window makeFirstResponder:window.contentView];
+}
+
 void setWindowSizeLogical(int width, int height) {
     // メインウィンドウを取得
     NSWindow* window = [[NSApplication sharedApplication] mainWindow];

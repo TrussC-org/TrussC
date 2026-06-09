@@ -250,6 +250,95 @@ inline Mesh createCylinder(float radius, float height, int resolution = 16) {
 }
 
 // ---------------------------------------------------------------------------
+// Capsule (Y-up, centered): a cylinder of `cylinderHeight` capped by two
+// hemispheres of `radius`. Total height = cylinderHeight + 2*radius. The
+// convention matches Jolt's CapsuleShape, so this draws what addCapsule(radius,
+// cylinderHeight) simulates.
+// ---------------------------------------------------------------------------
+inline Mesh createCapsule(float radius, float cylinderHeight, int resolution = 16) {
+    Mesh mesh;
+    mesh.setMode(PrimitiveMode::Triangles);
+
+    const float halfCyl = cylinderHeight * 0.5f;
+    const float halfPi  = HALF_TAU * 0.5f;          // PI/2
+    const int sectors   = resolution;
+    int hemiRings = resolution / 2;                  // rings per hemisphere
+    if (hemiRings < 2) hemiRings = 2;
+
+    // --- cylindrical side (radial normals) ---
+    int sideBase = mesh.getNumVertices();
+    for (int i = 0; i <= sectors; i++) {
+        float u = (float)i / sectors;
+        float angle = TAU * i / sectors;
+        float nx = cos(angle);
+        float nz = sin(angle);
+        mesh.addVertex(nx * radius, -halfCyl, nz * radius);   // bottom of cylinder
+        mesh.addNormal(nx, 0, nz);
+        mesh.addTexCoord(u, 0.66f);
+        mesh.addTangent(-sin(angle), 0.0f, cos(angle), 1.0f);
+
+        mesh.addVertex(nx * radius,  halfCyl, nz * radius);   // top of cylinder
+        mesh.addNormal(nx, 0, nz);
+        mesh.addTexCoord(u, 0.34f);
+        mesh.addTangent(-sin(angle), 0.0f, cos(angle), 1.0f);
+    }
+    for (int i = 0; i < sectors; i++) {
+        int i0 = sideBase + i * 2;
+        int i1 = i0 + 1, i2 = i0 + 2, i3 = i0 + 3;
+        mesh.addTriangle(i0, i2, i1);
+        mesh.addTriangle(i1, i2, i3);
+    }
+
+    // --- top hemisphere (phi 0=pole .. PI/2=equator, centre at +halfCyl) ---
+    int topBase = mesh.getNumVertices();
+    for (int r = 0; r <= hemiRings; r++) {
+        float phi = (float)r / hemiRings * halfPi;
+        float cphi = cos(phi), sphi = sin(phi);
+        for (int s = 0; s <= sectors; s++) {
+            float theta = TAU * s / sectors;
+            float nx = sphi * cos(theta), ny = cphi, nz = sphi * sin(theta);
+            mesh.addVertex(nx * radius, halfCyl + cphi * radius, nz * radius);
+            mesh.addNormal(nx, ny, nz);
+            mesh.addTexCoord((float)s / sectors, 0.34f - 0.34f * (float)r / hemiRings);
+            mesh.addTangent(-sin(theta), 0.0f, cos(theta), 1.0f);
+        }
+    }
+    for (int r = 0; r < hemiRings; r++) {
+        for (int s = 0; s < sectors; s++) {
+            int i0 = topBase + r * (sectors + 1) + s;
+            int i1 = i0 + 1, i2 = i0 + (sectors + 1), i3 = i2 + 1;
+            if (r != 0) mesh.addTriangle(i0, i2, i1);   // skip degenerate at pole
+            mesh.addTriangle(i1, i2, i3);
+        }
+    }
+
+    // --- bottom hemisphere (phi PI/2=equator .. PI=pole, centre at -halfCyl) ---
+    int botBase = mesh.getNumVertices();
+    for (int r = 0; r <= hemiRings; r++) {
+        float phi = halfPi + (float)r / hemiRings * halfPi;
+        float cphi = cos(phi), sphi = sin(phi);       // cphi: 0 -> -1, sphi: 1 -> 0
+        for (int s = 0; s <= sectors; s++) {
+            float theta = TAU * s / sectors;
+            float nx = sphi * cos(theta), ny = cphi, nz = sphi * sin(theta);
+            mesh.addVertex(nx * radius, -halfCyl + cphi * radius, nz * radius);
+            mesh.addNormal(nx, ny, nz);
+            mesh.addTexCoord((float)s / sectors, 0.66f + 0.34f * (float)r / hemiRings);
+            mesh.addTangent(-sin(theta), 0.0f, cos(theta), 1.0f);
+        }
+    }
+    for (int r = 0; r < hemiRings; r++) {
+        for (int s = 0; s < sectors; s++) {
+            int i0 = botBase + r * (sectors + 1) + s;
+            int i1 = i0 + 1, i2 = i0 + (sectors + 1), i3 = i2 + 1;
+            mesh.addTriangle(i0, i2, i1);
+            if (r != hemiRings - 1) mesh.addTriangle(i1, i2, i3);   // skip degenerate at pole
+        }
+    }
+
+    return mesh;
+}
+
+// ---------------------------------------------------------------------------
 // Cone
 // ---------------------------------------------------------------------------
 inline Mesh createCone(float radius, float height, int resolution = 16) {

@@ -9,6 +9,8 @@
 #include "sokol_imgui.h"
 #include "tcImGuiHooks.h"
 #include "tcImGuiTools.h"
+#include <cstdlib>
+#include <string>
 
 namespace tcx {
 
@@ -95,6 +97,11 @@ private:
 
 inline void imguiSetup() {
     ImGuiManager::instance().setup();
+    // Auto-register the ImGui MCP tools when MCP is enabled, so ImGui-based
+    // UIs are AI-drivable without an explicit registerImGuiTools() call.
+    if (const char* m = std::getenv("TRUSSC_MCP"); m && std::string(m) == "1") {
+        trussc::imgui_tools::registerImGuiTools();
+    }
 }
 
 inline void imguiShutdown() {

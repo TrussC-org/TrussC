@@ -36,6 +36,11 @@ void setWindowPosition(int x, int y) {
     (void)x; (void)y;
 }
 
+void setWindowDecorated(bool decorated) {
+    // No window decorations to toggle on Web.
+    (void)decorated;
+}
+
 void setWindowSizeLogical(int width, int height) {
     // Emscripten では canvas サイズを変更
     // sokol_app が使用する canvas ID を指定

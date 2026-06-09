@@ -3,7 +3,11 @@
 #include "TrussC.h"
 #include "tc/types/tcMod.h"
 #include "tc/utils/tcAsyncScheduler.h"
+#include "tc/utils/tcTypeName.h"
+#include "tc/utils/tcReflect.h"
 #include <memory>
+#include <string>
+#include <atomic>
 #include <vector>
 #include <functional>
 #include <algorithm>
@@ -43,9 +47,10 @@ public:
     using Ptr = std::shared_ptr<Node>;
     using WeakPtr = std::weak_ptr<Node>;
 
-    Node() { internal::nodeCount++; }
+    Node() : instanceId_(nextInstanceId_++) { internal::nodeCount++; }
     virtual ~Node() {
         cancelAllAsyncTimers();  // stop + await any in-flight async callbacks
+        for (auto& [t, m] : mods_) m->onDestroy();  // mod cleanup on node destruction
         internal::nodeCount--;
     }
 
@@ -182,6 +187,21 @@ public:
         return children_.size();
     }
 
+    // Index of the given child among this node's children (-1 if not a child)
+    int indexOfChild(const Node* child) const {
+        for (size_t i = 0; i < children_.size(); ++i) {
+            if (children_[i].get() == child) return static_cast<int>(i);
+        }
+        return -1;
+    }
+
+    // This node's index among its parent's children (-1 if it has no parent).
+    // A sibling-order counterpart to getParent().
+    int getChildIndex() const {
+        auto p = getParent();
+        return p ? p->indexOfChild(this) : -1;
+    }
+
     // Reorder this node within its parent's child list.
     //
     // Children are drawn in vector order: the first child is drawn first
@@ -259,6 +279,56 @@ public:
 
     // Whether mouse is over this node (auto-updated each frame, O(1))
     bool isMouseOver() const { return internal::hoveredNode == this; }
+
+    // -------------------------------------------------------------------------
+    // Identity / Name
+    // -------------------------------------------------------------------------
+    //
+    // Distinct notions:
+    //   - getName()       : optional instance name, set by the user (may be empty)
+    //   - getTypeName()   : the C++ class name from RTTI (always available, free)
+    //   - getDisplayName(): short type name, with the instance name in parens
+    //                       if set ("RectNode" or "RectNode (play)") — uses the
+    //                       unqualified class name (no "trussc::") for readable
+    //                       trees; getTypeName() keeps the full qualified name.
+    //   - getInstanceId() : per-process unique id, fixed at construction.
+
+    // Optional instance name. Empty unless setName() was called.
+    Node& setName(const std::string& name) { name_ = name; return *this; }
+    const std::string& getName() const { return name_; }
+    bool hasName() const { return !name_.empty(); }
+
+    // C++ class name (dynamic / most-derived type) via RTTI. Cached per type,
+    // so this is cheap to call even for many nodes. E.g. "trussc::RectNode".
+    const std::string& getTypeName() const { return typeName(typeid(*this)); }
+
+    // Type-anchored label for trees / inspectors / logs. Always non-empty.
+    // Uses the short (unqualified) type name: "RectNode" when unnamed,
+    // "RectNode (play)" when named. For the full "trussc::RectNode", use
+    // getTypeName().
+    std::string getDisplayName() const {
+        const std::string& type = shortTypeName(typeid(*this));
+        return hasName() ? type + " (" + name_ + ")" : type;
+    }
+
+    // Per-process unique id, assigned once at construction and never changed
+    // (stable across reparenting). Read-only — there is no setter.
+    uint64_t getInstanceId() const { return instanceId_; }
+
+    // -------------------------------------------------------------------------
+    // Reflection (TC_REFLECT)
+    // -------------------------------------------------------------------------
+    // Exposes a curated set of editable properties (not the raw private fields).
+    // Transform values go through their setters so the matrix cache / change
+    // events stay correct. Subclasses extend via `using Super = Node;` + their
+    // own TC_REFLECT block.
+    TC_REFLECT_ROOT(Node)
+        TC_PROPERTY(pos,      getPos,    setPos)
+        TC_PROPERTY(rotation, getRotDeg, setRotDeg)
+        TC_PROPERTY(scale,    getScale,  setScale)
+        TC_PROPERTY(visible,  isVisible, setVisible)
+        TC_PROPERTY(active,   isActive,  setActive)
+    TC_REFLECT_END
 
     // -------------------------------------------------------------------------
     // Transform - Position
@@ -447,6 +517,12 @@ public:
         return nullptr;
     }
 
+    // Whether a mod of type T is attached
+    template<typename T>
+    bool hasMod() const {
+        return mods_.count(std::type_index(typeid(T))) > 0;
+    }
+
     // Add a mod to this node (returns pointer for chaining)
     template<typename T, typename... Args>
     T* addMod(Args&&... args) {
@@ -454,16 +530,103 @@ public:
         T* ptr = mod.get();
         mod->owner_ = this;
         mods_[std::type_index(typeid(T))] = std::move(mod);
+        // setup() runs after owner_ is set and the mod is in mods_, so it can
+        // safely call getMod / addChild / etc. on its owner.
+        ptr->setup();
         return ptr;
     }
 
-    // Remove a mod by type
+    // Remove a mod by type. onDestroy() is called, then the mod is freed. If a
+    // mod removes itself (or another) during a dispatch/update, destruction is
+    // deferred until iteration finishes so the in-flight call can't dangle.
+    // (A mod can remove itself without naming its type via Mod::removeSelf().)
     template<typename T>
     void removeMod() {
-        mods_.erase(std::type_index(typeid(T)));
+        removeModByType(std::type_index(typeid(T)));
     }
 
 private:
+    // -------------------------------------------------------------------------
+    // Mod dispatch helpers
+    // -------------------------------------------------------------------------
+
+    // Remove a mod by runtime type (shared by removeMod<T>() and
+    // Mod::removeSelf()). Deferred-safe during iteration; calls onDestroy().
+    void removeModByType(std::type_index key) {
+        auto it = mods_.find(key);
+        if (it == mods_.end()) return;
+        if (modDispatchDepth_ > 0) {
+            modsPendingDestroy_.push_back(std::move(it->second));
+            mods_.erase(it);  // gone from lookups now; destroyed after iteration
+        } else {
+            it->second->onDestroy();
+            mods_.erase(it);
+        }
+    }
+
+    // Visit each attached mod. Iterates a snapshot of type indices (so a
+    // handler may add mods — picked up next round — or remove other mods).
+    // A mod that removes itself stays alive until this returns: removeMod()
+    // defers destruction while modDispatchDepth_ > 0, and we sweep the
+    // pending list (calling onDestroy) once the outermost visit finishes.
+    template<typename F>
+    void forEachMod(F&& f) {
+        ++modDispatchDepth_;
+        std::vector<std::type_index> types;
+        types.reserve(mods_.size());
+        for (auto& [t, m] : mods_) types.push_back(t);
+        for (auto& t : types) {
+            auto it = mods_.find(t);
+            if (it != mods_.end()) f(it->second.get());
+        }
+        if (--modDispatchDepth_ == 0 && !modsPendingDestroy_.empty()) {
+            auto pending = std::move(modsPendingDestroy_);
+            modsPendingDestroy_.clear();
+            for (auto& m : pending) m->onDestroy();
+            // pending mods are freed here, after all in-flight calls returned
+        }
+    }
+
+    // Fire an input event to this node's own handler AND its mods; consumed if
+    // either consumes. Mouse events go to the hit/grabbed node, keys broadcast.
+    bool fireMousePress(const MouseEventArgs& e) {
+        bool consumed = onMousePress(e);
+        forEachMod([&](Mod* m) { if (m->onMousePress(e)) consumed = true; });
+        return consumed;
+    }
+    bool fireMouseRelease(const MouseEventArgs& e) {
+        bool consumed = onMouseRelease(e);
+        forEachMod([&](Mod* m) { if (m->onMouseRelease(e)) consumed = true; });
+        return consumed;
+    }
+    bool fireMouseMove(const MouseMoveEventArgs& e) {
+        bool consumed = onMouseMove(e);
+        forEachMod([&](Mod* m) { if (m->onMouseMove(e)) consumed = true; });
+        return consumed;
+    }
+    bool fireMouseDrag(const MouseDragEventArgs& e) {
+        bool consumed = onMouseDrag(e);
+        forEachMod([&](Mod* m) { if (m->onMouseDrag(e)) consumed = true; });
+        return consumed;
+    }
+    bool fireMouseScroll(const ScrollEventArgs& e) {
+        bool consumed = onMouseScroll(e);
+        forEachMod([&](Mod* m) { if (m->onMouseScroll(e)) consumed = true; });
+        return consumed;
+    }
+    bool fireKeyPress(const KeyEventArgs& e) {
+        bool consumed = onKeyPress(e);
+        forEachMod([&](Mod* m) { if (m->onKeyPress(e)) consumed = true; });
+        return consumed;
+    }
+    bool fireKeyRelease(const KeyEventArgs& e) {
+        bool consumed = onKeyRelease(e);
+        forEachMod([&](Mod* m) { if (m->onKeyRelease(e)) consumed = true; });
+        return consumed;
+    }
+    void fireMouseEnter() { onMouseEnter(); forEachMod([](Mod* m) { m->onMouseEnter(); }); }
+    void fireMouseLeave() { onMouseLeave(); forEachMod([](Mod* m) { m->onMouseLeave(); }); }
+
     // -------------------------------------------------------------------------
     // Recursive update/draw (called by App via friend access)
     // -------------------------------------------------------------------------
@@ -481,33 +644,15 @@ private:
             setup();
         }
 
-        // Mod early update (before Node::update). Snapshot type indices —
-        // a mod's earlyUpdate() may call addMod / removeMod on this node,
-        // and `mods_` is an unordered_map whose iterators would otherwise
-        // invalidate. New mods added during dispatch are picked up next frame.
-        {
-            std::vector<std::type_index> modTypes;
-            modTypes.reserve(mods_.size());
-            for (auto& [t, m] : mods_) modTypes.push_back(t);
-            for (auto& t : modTypes) {
-                auto it = mods_.find(t);
-                if (it != mods_.end()) it->second->earlyUpdate();
-            }
-        }
+        // Mod early update (before Node::update). forEachMod snapshots types
+        // and defers self-removal, so a mod may add/remove mods safely here.
+        forEachMod([](Mod* m) { m->earlyUpdate(); });
 
         processTimers();
         update();  // User code
 
-        // Mod update (after Node::update) — same snapshot rationale as above.
-        {
-            std::vector<std::type_index> modTypes;
-            modTypes.reserve(mods_.size());
-            for (auto& [t, m] : mods_) modTypes.push_back(t);
-            for (auto& t : modTypes) {
-                auto it = mods_.find(t);
-                if (it != mods_.end()) it->second->update();
-            }
-        }
+        // Mod update (after Node::update).
+        forEachMod([](Mod* m) { m->update(); });
 
         // Iterate over a snapshot — a child's update() may add, remove, or
         // reorder siblings (via addChild / removeChild / moveToFront / etc.),
@@ -596,10 +741,12 @@ private:
         // Begin draw hook (for clipping, etc.)
         beginDraw();
 
-        // User drawing
+        // User drawing, then mod draw (mods draw in the node's local space,
+        // after the node's own draw()).
         if (isVisible_) {
             resetStyle();
             draw();
+            forEachMod([](Mod* m) { m->draw(); });
         }
 
         // Draw child nodes (overridable for clipping, etc.)
@@ -654,7 +801,7 @@ private:
 
         if (result.hit()) {
             MouseEventArgs local = result.node->localizeMouse(e);
-            if (result.node->onMousePress(local)) {
+            if (result.node->fireMousePress(local)) {
                 // Set grabbed node for drag tracking
                 internal::grabbedNode = result.node.get();
                 internal::grabbedButton = e.button;
@@ -669,7 +816,7 @@ private:
         // Send release to grabbed node if it exists
         if (internal::grabbedNode && internal::grabbedButton == e.button) {
             MouseEventArgs local = internal::grabbedNode->localizeMouse(e);
-            internal::grabbedNode->onMouseRelease(local);
+            internal::grabbedNode->fireMouseRelease(local);
 
             Ptr result = std::dynamic_pointer_cast<Node>(
                 internal::grabbedNode->shared_from_this());
@@ -687,7 +834,7 @@ private:
 
         if (result.hit()) {
             MouseEventArgs local = result.node->localizeMouse(e);
-            if (result.node->onMouseRelease(local)) {
+            if (result.node->fireMouseRelease(local)) {
                 return result.node;
             }
         }
@@ -700,7 +847,7 @@ private:
         if (internal::grabbedNode) {
             MouseEventRaw local = internal::grabbedNode->localizeMouse(e);
             local.button = internal::grabbedButton;
-            internal::grabbedNode->onMouseDrag(toDragArgs(local));
+            internal::grabbedNode->fireMouseDrag(toDragArgs(local));
         }
 
         // Also send move event to hit node (for hover, etc.)
@@ -709,7 +856,7 @@ private:
 
         if (result.hit()) {
             MouseEventRaw local = result.node->localizeMouse(e);
-            if (result.node->onMouseMove(toMoveArgs(local))) {
+            if (result.node->fireMouseMove(toMoveArgs(local))) {
                 return result.node;
             }
         }
@@ -726,7 +873,7 @@ private:
             Node* current = result.node.get();
             while (current) {
                 ScrollEventArgs local = current->localizeScroll(e);
-                if (current->onMouseScroll(local)) {
+                if (current->fireMouseScroll(local)) {
                     // Event consumed
                     return std::dynamic_pointer_cast<Node>(
                         current->shared_from_this());
@@ -763,10 +910,10 @@ private:
         // Fire Enter/Leave events
         if (internal::prevHoveredNode != internal::hoveredNode) {
             if (internal::prevHoveredNode) {
-                internal::prevHoveredNode->onMouseLeave();
+                internal::prevHoveredNode->fireMouseLeave();
             }
             if (internal::hoveredNode) {
-                internal::hoveredNode->onMouseEnter();
+                internal::hoveredNode->fireMouseEnter();
             }
         }
     }
@@ -776,7 +923,7 @@ private:
         if (!isActive_) return false;
 
         // Process self
-        if (onKeyPress(e)) {
+        if (fireKeyPress(e)) {
             return true;  // Consumed
         }
 
@@ -795,7 +942,7 @@ private:
     bool dispatchKeyReleaseRecursive(const KeyEventArgs& e) {
         if (!isActive_) return false;
 
-        if (onKeyRelease(e)) {
+        if (fireKeyRelease(e)) {
             return true;
         }
 
@@ -838,10 +985,15 @@ protected:
             }
         }
 
-        // If no child hit, check self
+        // If no child hit, check self: the node's own hitTest OR any mod's
+        // hitTest (mouse picking). First true wins (mods short-circuit once hit).
         if (!bestResult.hit()) {
             float distance;
-            if (hitTest(localRay, distance)) {
+            bool hit = hitTest(localRay, distance);
+            if (!hit) {
+                forEachMod([&](Mod* m) { if (!hit && m->hitTest(localRay, distance)) hit = true; });
+            }
+            if (hit) {
                 bestResult.node = std::dynamic_pointer_cast<Node>(shared_from_this());
                 bestResult.distance = distance;
                 bestResult.localPoint = localRay.at(distance);
@@ -1008,6 +1160,9 @@ private:
 
     bool setupCalled_ = false;    // Ensures setup() is called only once
     bool dead_ = false;           // Marked for removal by destroy()
+    std::string name_;            // Optional instance name (see getName())
+    const uint64_t instanceId_;   // Per-process unique id, fixed at construction
+    inline static std::atomic<uint64_t> nextInstanceId_{0};  // id source
     WeakPtr parent_;
     std::vector<Ptr> children_;
     bool eventsEnabled_ = false;  // Enabled via enableEvents()
@@ -1016,6 +1171,8 @@ private:
 
     // Mod system
     std::unordered_map<std::type_index, std::unique_ptr<Mod>> mods_;
+    int modDispatchDepth_ = 0;   // >0 while iterating mods (forEachMod)
+    std::vector<std::unique_ptr<Mod>> modsPendingDestroy_;  // removed mid-iteration
 
     // -------------------------------------------------------------------------
     // Transform data (private)
@@ -1123,5 +1280,11 @@ protected:
         }
     }
 };
+
+// Mod::removeSelf — defined here now that Node is complete. Uses the mod's
+// dynamic type so it removes the right entry without the mod naming its type.
+inline void Mod::removeSelf() {
+    if (owner_) owner_->removeModByType(std::type_index(typeid(*this)));
+}
 
 } // namespace trussc

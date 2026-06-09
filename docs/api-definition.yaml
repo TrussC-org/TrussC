@@ -5353,6 +5353,50 @@ categories:
         sketch: true
         snippet: "getDistance()"
 
+      - name: setAzimuth
+        return: "void"
+        signatures:
+          - params: "float radians"
+            params_simple: "radians"
+        description: "Set orbit azimuth (horizontal angle, radians)"
+        description_ja: "周回の方位角（水平角・ラジアン）を設定"
+        description_ko: "궤도 방위각(수평각, 라디안)을 설정"
+        sketch: true
+        snippet: "setAzimuth(${1:0.7})"
+
+      - name: getAzimuth
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get orbit azimuth (horizontal angle, radians)"
+        description_ja: "周回の方位角（水平角・ラジアン）を取得"
+        description_ko: "궤도 방위각(수평각, 라디안)을 얻음"
+        sketch: true
+        snippet: "getAzimuth()"
+
+      - name: setElevation
+        return: "void"
+        signatures:
+          - params: "float radians"
+            params_simple: "radians"
+        description: "Set orbit elevation (vertical angle, radians; clamped to ~±80°)"
+        description_ja: "周回の仰角（垂直角・ラジアン、約±80°でクランプ）を設定"
+        description_ko: "궤도 고도각(수직각, 라디안; 약 ±80°로 제한)을 설정"
+        sketch: true
+        snippet: "setElevation(${1:0.5})"
+
+      - name: getElevation
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Get orbit elevation (vertical angle, radians)"
+        description_ja: "周回の仰角（垂直角・ラジアン）を取得"
+        description_ko: "궤도 고도각(수직각, 라디안)을 얻음"
+        sketch: true
+        snippet: "getElevation()"
+
       - name: setFov
         return: "void"
         signatures:
@@ -5894,6 +5938,17 @@ categories:
         description_ko: "구 메쉬를 생성"
         sketch: true
         snippet: "createSphere(${1:radius})"
+
+      - name: createCapsule
+        return: "Mesh"
+        signatures:
+          - params: "float radius, float cylinderHeight, int res = 16"
+            params_simple: "radius, cylinderHeight, res"
+        description: "Create a capsule mesh (Y-up: cylinder capped by two hemispheres)"
+        description_ja: "カプセルメッシュを作成（Y軸、円柱の両端を半球で閉じた形）"
+        description_ko: "캡슐 메쉬를 생성 (Y축, 원기둥 양 끝을 반구로 막은 형태)"
+        sketch: true
+        snippet: "createCapsule(${1:radius}, ${2:cylinderHeight})"
 
       - name: drawTexture
         return: "void"

@@ -198,6 +198,11 @@ void setWindowPosition(int x, int y) {
     (void)x; (void)y;
 }
 
+void setWindowDecorated(bool decorated) {
+    // No window decorations to toggle on Android.
+    (void)decorated;
+}
+
 void setWindowSizeLogical(int width, int height) {
     // Android apps are fullscreen — window size is determined by the device
     (void)width;

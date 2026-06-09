@@ -30,6 +30,9 @@ struct KeyEventArgs {
     bool ctrl = false;        // Ctrl key
     bool alt = false;         // Alt key
     bool super = false;       // Super/Command key
+    // Set by a listener to stop propagation to lower-priority listeners
+    // (Event<T>::notify breaks once this is true). See tcEvent.h.
+    bool consumed = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -71,6 +74,7 @@ struct MouseEventArgs {
     // No delta here: a press/release has no movement of its own (the cursor's
     // travel is delivered by the preceding mouseMoved/mouseDragged). Movement
     // lives on MouseMoveEventArgs / MouseDragEventArgs.
+    bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
 
     // Sync legacy scalar mirrors from the canonical Vec2 fields.
     void syncLegacy() { x = pos.x; y = pos.y; }
@@ -92,6 +96,7 @@ struct MouseMoveEventArgs {
     Vec2 globalPos;
     Vec2 delta;               // Movement since last event, local space
     Vec2 globalDelta;         // Movement since last event, screen space
+    bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
 
     void syncLegacy() { x = pos.x; y = pos.y; deltaX = delta.x; deltaY = delta.y; }
 };
@@ -113,6 +118,7 @@ struct MouseDragEventArgs {
     Vec2 globalPos;
     Vec2 delta;
     Vec2 globalDelta;
+    bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
 
     void syncLegacy() { x = pos.x; y = pos.y; deltaX = delta.x; deltaY = delta.y; }
 };
@@ -132,6 +138,7 @@ struct ScrollEventArgs {
     Vec2 pos;                 // Local position of the cursor (== globalPos at app level)
     Vec2 globalPos;           // Screen position of the cursor
     Vec2 scroll;              // Scroll amount (x: horizontal, y: vertical)
+    bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
 
     void syncLegacy() { scrollX = scroll.x; scrollY = scroll.y; }
 };
@@ -153,6 +160,7 @@ struct MouseEventRaw {
     bool ctrl = false;
     bool alt = false;
     bool super = false;
+    bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
 };
 
 // ---------------------------------------------------------------------------

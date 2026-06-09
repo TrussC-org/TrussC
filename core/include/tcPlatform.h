@@ -123,6 +123,13 @@ IVec2 getWindowPosition();
 // Linux/Mobile/Web: no-op (stub)
 void setWindowPosition(int x, int y);
 
+// Set whether the window shows standard decorations (title bar, borders,
+// buttons). false = borderless/chromeless, but the window stays key-focusable
+// (keyboard works) and closable (exitApp() works). Usually driven once at
+// startup by WindowSettings::setDecorated(), but can be toggled at runtime.
+// Desktop only; no-op on mobile/web.
+void setWindowDecorated(bool decorated);
+
 // Change window size (specified in logical size)
 // macOS: Uses NSWindow
 void setWindowSizeLogical(int width, int height);

@@ -546,6 +546,10 @@ void setTarget(const Vec3 &in target)    // Set camera look-at target
 Vec3 getTarget()                         // Get camera look-at target
 void setDistance(float distance)         // Set distance from target
 float getDistance()                      // Get distance from target
+void setAzimuth(float radians)           // Set orbit azimuth (horizontal angle, radians)
+float getAzimuth()                       // Get orbit azimuth (horizontal angle, radians)
+void setElevation(float radians)         // Set orbit elevation (vertical angle, radians; clamped to ~±80°)
+float getElevation()                     // Get orbit elevation (vertical angle, radians)
 void setFov(float radians)               // Set field of view in radians
 float getFov()                           // Get field of view in radians
 void setFovDeg(float degrees)            // Set field of view in degrees
@@ -575,10 +579,6 @@ void clearMaterial()                     // Clear material (return to default re
 void setCameraPosition(const Vec3& pos)  // Set camera position for specular calculation
 void setCameraPosition(float x, float y, float z) // Set camera position for specular calculation
 void setEnvironment(Environment& env)    // Set IBL environment for PBR ambient lighting
-                                         //   NOTE: IBL is auto-skipped on iOS/iPadOS Safari (wasm) —
-                                         //   cube-face render targets break the canvas there, so PBR
-                                         //   falls back to flat ambient + direct lights. Works on
-                                         //   native, desktop web, and Android web.
 void clearEnvironment()                  // Clear IBL environment
 void beginShadowPass(Light& light)       // Begin shadow depth pass from the light's point of view
 void endShadowPass()                     // End shadow depth pass
@@ -614,6 +614,7 @@ void drawPolyline(Polyline polyline)     // Draw a polyline
 Mesh createBox(float size)               // Create a box mesh
 Mesh createBox(float w, float h, float d) // Create a box mesh
 Mesh createSphere(float radius, int res = 20) // Create a sphere mesh
+Mesh createCapsule(float radius, float cylinderHeight, int res = 16) // Create a capsule mesh (Y-up: cylinder capped by two hemispheres)
 void drawTexture(const Texture& tex, float x, float y) // Draw a texture
 void drawTexture(const Texture& tex, float x, float y, float w, float h) // Draw a texture
 ```

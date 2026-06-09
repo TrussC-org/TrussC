@@ -115,6 +115,11 @@ inline std::string classifyWidget(ImGuiItemStatusFlags flags) {
 inline void registerImGuiTools() {
     using json = nlohmann::json;
 
+    // Idempotent: safe to call from imguiSetup() and/or the app.
+    static bool registered = false;
+    if (registered) return;
+    registered = true;
+
     // Activate collection
     enableCollection();
 
