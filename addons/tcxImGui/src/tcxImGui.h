@@ -42,6 +42,39 @@ public:
             simgui_handle_event(&ev);
         }, tc::EventPriority::BeforeApp);
 
+        // Overlay capture queries — tell the framework when imgui owns the
+        // pointer / keyboard so node-tree hover is suppressed under panels and
+        // user code can guard raw input (isOverlayHovered/isOverlayFocused).
+        tc::internal::overlayHoveredQuery = []() { return ImGui::GetIO().WantCaptureMouse; };
+        tc::internal::overlayFocusedQuery = []() { return ImGui::GetIO().WantCaptureKeyboard; };
+
+        // Consume input before it reaches the node tree (BeforeApp). Pointer
+        // capture follows the press: a gesture imgui claims on press stays
+        // imgui's until release, so a drag begun on the canvas is never stolen
+        // mid-way, and a press over a panel owns the whole gesture. Move/scroll
+        // and keys are stateless — consumed whenever imgui wants them.
+        mousePressConsume_ = tc::events().mousePressed.listen([this](tc::MouseEventArgs& e) {
+            if (ImGui::GetIO().WantCaptureMouse) { pointerCaptured_ = true; e.consumed = true; }
+        }, tc::EventPriority::BeforeApp);
+        mouseReleaseConsume_ = tc::events().mouseReleased.listen([this](tc::MouseEventArgs& e) {
+            if (pointerCaptured_) { e.consumed = true; pointerCaptured_ = false; }
+        }, tc::EventPriority::BeforeApp);
+        mouseDragConsume_ = tc::events().mouseDragged.listen([this](tc::MouseDragEventArgs& e) {
+            if (pointerCaptured_) e.consumed = true;
+        }, tc::EventPriority::BeforeApp);
+        mouseMoveConsume_ = tc::events().mouseMoved.listen([](tc::MouseMoveEventArgs& e) {
+            if (ImGui::GetIO().WantCaptureMouse) e.consumed = true;
+        }, tc::EventPriority::BeforeApp);
+        mouseScrollConsume_ = tc::events().mouseScrolled.listen([](tc::ScrollEventArgs& e) {
+            if (ImGui::GetIO().WantCaptureMouse) e.consumed = true;
+        }, tc::EventPriority::BeforeApp);
+        keyPressConsume_ = tc::events().keyPressed.listen([](tc::KeyEventArgs& e) {
+            if (ImGui::GetIO().WantCaptureKeyboard) e.consumed = true;
+        }, tc::EventPriority::BeforeApp);
+        keyReleaseConsume_ = tc::events().keyReleased.listen([](tc::KeyEventArgs& e) {
+            if (ImGui::GetIO().WantCaptureKeyboard) e.consumed = true;
+        }, tc::EventPriority::BeforeApp);
+
         tc::logVerbose() << "ImGui initialized";
     }
 
@@ -50,6 +83,16 @@ public:
         if (!initialized_) return;
         renderListener_ = {};
         eventListener_ = {};
+        mousePressConsume_ = {};
+        mouseReleaseConsume_ = {};
+        mouseDragConsume_ = {};
+        mouseMoveConsume_ = {};
+        mouseScrollConsume_ = {};
+        keyPressConsume_ = {};
+        keyReleaseConsume_ = {};
+        tc::internal::overlayHoveredQuery = nullptr;
+        tc::internal::overlayFocusedQuery = nullptr;
+        pointerCaptured_ = false;
         simgui_shutdown();
         initialized_ = false;
         tc::logVerbose() << "ImGui shutdown";
@@ -89,6 +132,16 @@ private:
     bool renderPending_ = false;
     tc::EventListener renderListener_;
     tc::EventListener eventListener_;
+
+    // Input arbitration: consume listeners (BeforeApp) + pointer-gesture capture.
+    bool pointerCaptured_ = false;  // imgui owns the current press→release gesture
+    tc::EventListener mousePressConsume_;
+    tc::EventListener mouseReleaseConsume_;
+    tc::EventListener mouseDragConsume_;
+    tc::EventListener mouseMoveConsume_;
+    tc::EventListener mouseScrollConsume_;
+    tc::EventListener keyPressConsume_;
+    tc::EventListener keyReleaseConsume_;
 };
 
 // ---------------------------------------------------------------------------
