@@ -65,4 +65,28 @@ inline const std::string& typeName() {
     return typeName(typeid(T));
 }
 
+// Strip the namespace qualifier from a (possibly templated) type name:
+//   "trussc::RectNode"  -> "RectNode"
+//   "GroupNode"         -> "GroupNode"
+//   "ns::Outer<a::B>"   -> "Outer<a::B>"   (only the outer type is stripped)
+inline std::string unqualifiedTypeName(const std::string& full) {
+    // Look for the namespace separator only before any template arguments,
+    // so we never cut inside "<...>".
+    size_t searchEnd = full.find('<');
+    if (searchEnd == std::string::npos) searchEnd = full.size();
+    size_t sep = full.rfind("::", searchEnd);
+    return sep == std::string::npos ? full : full.substr(sep + 2);
+}
+
+// Short (unqualified) type name, cached per type like typeName().
+inline const std::string& shortTypeName(const std::type_info& ti) {
+    static std::unordered_map<std::type_index, std::string> cache;
+    static std::mutex mutex;
+    std::lock_guard<std::mutex> lock(mutex);
+    std::type_index key(ti);
+    auto it = cache.find(key);
+    if (it != cache.end()) return it->second;
+    return cache.emplace(key, unqualifiedTypeName(typeName(ti))).first->second;
+}
+
 } // namespace trussc
