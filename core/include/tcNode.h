@@ -32,6 +32,7 @@ namespace internal {
     inline Node* prevHoveredNode = nullptr;  // Previously hovered node
     inline Node* grabbedNode = nullptr;      // Node grabbed by mouse press
     inline int grabbedButton = -1;           // Mouse button that caused the grab
+    inline Node* selectedNode = nullptr;     // Last node clicked (selection)
 }
 
 // =============================================================================
@@ -708,6 +709,7 @@ private:
             internal::grabbedNode = nullptr;
             internal::grabbedButton = -1;
         }
+        if (internal::selectedNode == this) internal::selectedNode = nullptr;
 
         dead_ = true;
         cleanup();
@@ -798,6 +800,9 @@ private:
     Ptr dispatchMousePress(const MouseEventArgs& e) {
         Ray globalRay = Ray::fromScreenPoint2D(e.globalPos.x, e.globalPos.y);
         HitResult result = findHitNode(globalRay);
+
+        // Selection: clicking a node selects it; clicking empty space clears it.
+        internal::selectedNode = result.hit() ? result.node.get() : nullptr;
 
         if (result.hit()) {
             MouseEventArgs local = result.node->localizeMouse(e);
@@ -1286,5 +1291,11 @@ protected:
 inline void Mod::removeSelf() {
     if (owner_) owner_->removeModByType(std::type_index(typeid(*this)));
 }
+
+// Selection — the last-clicked node, held by the Node system (set in
+// dispatchMousePress, cleared when the node is destroyed). A tool such as an
+// inspector can both read it and drive it via setSelectedNode().
+inline Node* getSelectedNode() { return internal::selectedNode; }
+inline void setSelectedNode(Node* n) { internal::selectedNode = n; }
 
 } // namespace trussc
