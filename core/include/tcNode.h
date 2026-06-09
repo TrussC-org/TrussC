@@ -33,7 +33,20 @@ namespace internal {
     inline Node* grabbedNode = nullptr;      // Node grabbed by mouse press
     inline int grabbedButton = -1;           // Mouse button that caused the grab
     inline Node* selectedNode = nullptr;     // Last node clicked (selection)
+
+    // Overlay (e.g. tcxImGui) capture queries. An overlay registers these so the
+    // framework knows when the pointer is over it / it owns keyboard focus. Null
+    // when no overlay is present, so plain apps are unaffected.
+    inline std::function<bool()> overlayHoveredQuery;
+    inline std::function<bool()> overlayFocusedQuery;
 }
+
+// True when an overlay currently has the pointer over it (e.g. cursor is over a
+// tcxImGui panel) / owns keyboard focus (e.g. an InputText is active). The node
+// tree's hover honors isOverlayHovered() automatically; guard raw input in user
+// code with these (e.g. `if (isOverlayFocused()) return;` in a key handler).
+inline bool isOverlayHovered() { return internal::overlayHoveredQuery && internal::overlayHoveredQuery(); }
+inline bool isOverlayFocused() { return internal::overlayFocusedQuery && internal::overlayFocusedQuery(); }
 
 // =============================================================================
 // Node - Scene graph base class
@@ -907,10 +920,17 @@ private:
         // Save previous frame's hovered node
         internal::prevHoveredNode = internal::hoveredNode;
 
-        // Search for new hovered node
-        Ray globalRay = Ray::fromScreenPoint2D(screenX, screenY);
-        HitResult result = findHitNode(globalRay);
-        internal::hoveredNode = result.hit() ? result.node.get() : nullptr;
+        // Search for new hovered node. When an overlay (e.g. a tcxImGui panel)
+        // has the pointer, the tree hovers nothing — so a node under the panel
+        // is not highlighted, and a previously-hovered node still gets its
+        // Leave below (this is a per-frame recompute, so no stale hover).
+        Node* hit = nullptr;
+        if (!isOverlayHovered()) {
+            Ray globalRay = Ray::fromScreenPoint2D(screenX, screenY);
+            HitResult result = findHitNode(globalRay);
+            hit = result.hit() ? result.node.get() : nullptr;
+        }
+        internal::hoveredNode = hit;
 
         // Fire Enter/Leave events
         if (internal::prevHoveredNode != internal::hoveredNode) {
@@ -924,42 +944,37 @@ private:
     }
 
     // Recursive dispatch of key events
+    // Key dispatch mirrors findHitNodeRecursive: deepest / front-most node gets
+    // the key first (children in reverse draw order), then self last. The first
+    // node to consume (fireKeyXxx returns true) short-circuits the rest.
     bool dispatchKeyPressRecursive(const KeyEventArgs& e) {
         if (!isActive_) return false;
 
-        // Process self
-        if (fireKeyPress(e)) {
-            return true;  // Consumed
-        }
-
-        // Snapshot — handlers may mutate the tree.
+        // Children first, reverse draw order (snapshot — handlers may mutate the tree)
         auto childrenSnapshot = children_;
-        for (auto& child : childrenSnapshot) {
-            if (child->isDead()) continue;
-            if (child->dispatchKeyPressRecursive(e)) {
+        for (auto it = childrenSnapshot.rbegin(); it != childrenSnapshot.rend(); ++it) {
+            if ((*it)->isDead()) continue;
+            if ((*it)->dispatchKeyPressRecursive(e)) {
                 return true;
             }
         }
 
-        return false;
+        // Self last
+        return fireKeyPress(e);
     }
 
     bool dispatchKeyReleaseRecursive(const KeyEventArgs& e) {
         if (!isActive_) return false;
 
-        if (fireKeyRelease(e)) {
-            return true;
-        }
-
         auto childrenSnapshot = children_;
-        for (auto& child : childrenSnapshot) {
-            if (child->isDead()) continue;
-            if (child->dispatchKeyReleaseRecursive(e)) {
+        for (auto it = childrenSnapshot.rbegin(); it != childrenSnapshot.rend(); ++it) {
+            if ((*it)->isDead()) continue;
+            if ((*it)->dispatchKeyReleaseRecursive(e)) {
                 return true;
             }
         }
 
-        return false;
+        return fireKeyRelease(e);
     }
 
 protected:
