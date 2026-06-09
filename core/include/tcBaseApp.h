@@ -165,39 +165,45 @@ public:
     // Event handlers (called by TrussC.h, dispatches to scene graph)
     // -------------------------------------------------------------------------
 
+    // Each handler fires the user-facing App virtual unconditionally (so the
+    // raw App::mouseXxx/keyXxx override stays an always-on escape hatch), then
+    // dispatches to the node tree ONLY if the event was not already consumed.
+    // A higher-priority consumer (e.g. tcxImGui, a BeforeApp listener) sets
+    // `consumed` during events().xxx.notify() to claim the event before it
+    // reaches the tree. See _event_cb in TrussC.h.
     void handleKeyPressed(const KeyEventArgs& e) {
         keyPressed(e);
-        dispatchKeyPress(e);
+        if (!e.consumed) dispatchKeyPress(e);
     }
 
     void handleKeyReleased(const KeyEventArgs& e) {
         keyReleased(e);
-        dispatchKeyRelease(e);
+        if (!e.consumed) dispatchKeyRelease(e);
     }
 
     void handleMousePressed(const MouseEventArgs& e) {
         mousePressed(e);
-        dispatchMousePress(e);
+        if (!e.consumed) dispatchMousePress(e);
     }
 
     void handleMouseReleased(const MouseEventArgs& e) {
         mouseReleased(e);
-        dispatchMouseRelease(e);
+        if (!e.consumed) dispatchMouseRelease(e);
     }
 
     void handleMouseMoved(const MouseEventRaw& e) {
         mouseMoved(toMoveArgs(e));
-        dispatchMouseMove(e);
+        if (!e.consumed) dispatchMouseMove(e);
     }
 
     void handleMouseDragged(const MouseEventRaw& e) {
         mouseDragged(toDragArgs(e));
-        dispatchMouseMove(e);  // drag + hover share the node-tree move dispatch
+        if (!e.consumed) dispatchMouseMove(e);  // drag + hover share the node-tree move dispatch
     }
 
     void handleMouseScrolled(const ScrollEventArgs& e) {
         mouseScrolled(e);
-        dispatchMouseScroll(e);
+        if (!e.consumed) dispatchMouseScroll(e);
     }
 
     void handleWindowResized(int width, int height) {

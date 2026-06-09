@@ -2377,10 +2377,14 @@ namespace internal {
                     args.button = currentMouseButton;
                     MouseDragEventArgs dragArgs = toDragArgs(args);
                     events().mouseDragged.notify(dragArgs);
+                    // The public typed arg carries `consumed`; copy it back to the
+                    // raw carrier so handleMouseDragged can gate the tree dispatch.
+                    args.consumed = dragArgs.consumed;
                     if (appMouseDraggedFunc) appMouseDraggedFunc(args);
                 } else {
                     MouseMoveEventArgs moveArgs = toMoveArgs(args);
                     events().mouseMoved.notify(moveArgs);
+                    args.consumed = moveArgs.consumed;
                     if (appMouseMovedFunc) appMouseMovedFunc(args);
                 }
                 break;
@@ -2453,6 +2457,7 @@ namespace internal {
                         margs.button = MOUSE_BUTTON_LEFT;
                         MouseDragEventArgs dragArgs = toDragArgs(margs);
                         events().mouseDragged.notify(dragArgs);
+                        margs.consumed = dragArgs.consumed;
                         if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
                     } else {
                         currentMouseButton = -1;
