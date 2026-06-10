@@ -34,9 +34,15 @@ public:
             [this](AudioOutBuffer& b) { audioOut(b); });
         audioInListener_  = AudioEngine::getInstance().audioIn.listen(
             [this](AudioInBuffer& b) { audioIn(b); });
+
+        // The App is the scene-graph root; expose it via getRootNode() so
+        // tools (e.g. the MCP node tools) can walk the tree.
+        internal::rootNode = this;
     }
 
-    virtual ~App() = default;
+    virtual ~App() {
+        if (internal::rootNode == this) internal::rootNode = nullptr;
+    }
 
     // -------------------------------------------------------------------------
     // Size (synchronized with window)

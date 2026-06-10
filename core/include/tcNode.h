@@ -33,6 +33,7 @@ namespace internal {
     inline Node* grabbedNode = nullptr;      // Node grabbed by mouse press
     inline int grabbedButton = -1;           // Mouse button that caused the grab
     inline Node* selectedNode = nullptr;     // Last node clicked (selection)
+    inline Node* rootNode = nullptr;         // The running App (set by the framework)
 
     // Overlay (e.g. tcxImGui) capture queries. An overlay registers these so the
     // framework knows when the pointer is over it / it owns keyboard focus. Null
@@ -329,6 +330,16 @@ public:
     // (stable across reparenting). Read-only — there is no setter.
     uint64_t getInstanceId() const { return instanceId_; }
 
+    // Find a node in this subtree (self included) by instance id. Depth-first;
+    // returns nullptr if the id is not in this subtree.
+    Node* findByInstanceId(uint64_t id) {
+        if (instanceId_ == id) return this;
+        for (auto& c : children_) {
+            if (Node* n = c->findByInstanceId(id)) return n;
+        }
+        return nullptr;
+    }
+
     // -------------------------------------------------------------------------
     // Reflection (TC_REFLECT)
     // -------------------------------------------------------------------------
@@ -595,6 +606,17 @@ public:
     template<typename T>
     void removeMod() {
         removeModByType(std::type_index(typeid(T)));
+    }
+
+    // Short (unqualified) type names of the attached mods, for trees / dumps.
+    std::vector<std::string> getModTypeNames() const {
+        std::vector<std::string> names;
+        names.reserve(mods_.size());
+        for (auto& [t, m] : mods_) {
+            const Mod& mod = *m;
+            names.push_back(shortTypeName(typeid(mod)));
+        }
+        return names;
     }
 
 private:
@@ -1373,5 +1395,10 @@ inline void Mod::removeSelf() {
 // inspector can both read it and drive it via setSelectedNode().
 inline Node* getSelectedNode() { return internal::selectedNode; }
 inline void setSelectedNode(Node* n) { internal::selectedNode = n; }
+
+// The running App as the root of the node tree (set by the framework while the
+// app is alive, null otherwise). Lets tools — e.g. the MCP node tools — walk
+// the whole tree without the app passing itself around.
+inline Node* getRootNode() { return internal::rootNode; }
 
 } // namespace trussc

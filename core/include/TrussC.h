@@ -91,6 +91,7 @@
 
 // TrussC JSON/XML
 #include "tc/utils/tcJson.h"
+#include "tc/utils/tcJsonReflect.h"
 #include "tc/utils/tcXml.h"
 
 // TrussC file utilities

@@ -6,6 +6,7 @@
 
 #include "tcMCP.h"
 #include "tcUtils.h"
+#include "tcJsonReflect.h"
 #include "../events/tcCoreEvents.h"
 #include "stb/stb_image_write.h"
 #include "../graphics/tcPixels.h"
@@ -15,6 +16,41 @@
 extern "C" unsigned char *stbi_write_png_to_mem(const unsigned char *pixels, int stride_bytes, int x, int y, int n, int *out_len);
 
 namespace trussc {
+
+// ---------------------------------------------------------------------------
+// Node -> JSON (serialize-only; the reverse needs a type factory and is out
+// of scope — apply values to existing nodes with reflectFromJson instead)
+// ---------------------------------------------------------------------------
+
+// One node as JSON: type, optional instance name, instance id, reflected
+// members (same encoding as JsonWriteReflector), mod type names, and the
+// children in draw order. maxDepth limits recursion (-1 = unlimited, 0 = this
+// node only); where children are cut off, "childCount" says how many were
+// omitted so a caller can drill in with another get_node_tree(id) call.
+inline Json nodeToJson(Node& node, int maxDepth = -1) {
+    Json j = Json::object();
+    j["type"] = node.getTypeName();
+    if (node.hasName()) j["name"] = node.getName();
+    j["id"] = node.getInstanceId();
+    j["members"] = reflectToJson(node);
+    auto mods = node.getModTypeNames();
+    if (!mods.empty()) j["mods"] = std::move(mods);
+    if (node.getChildCount() > 0) {
+        if (maxDepth == 0) {
+            j["childCount"] = node.getChildCount();
+        } else {
+            Json children = Json::array();
+            for (auto& c : node.getChildren()) {
+                children.push_back(nodeToJson(*c, maxDepth < 0 ? -1 : maxDepth - 1));
+            }
+            // Move — an lvalue assignment would deep-copy the whole subtree
+            // JSON at every tree level (O(n^2) on deep chains).
+            j["children"] = std::move(children);
+        }
+    }
+    return j;
+}
+
 namespace mcp {
 
 // ---------------------------------------------------------------------------
@@ -68,6 +104,39 @@ inline void registerInspectionTools() {
         .bind(std::function<json()>([]() -> json {
             sapp_request_quit();
             return json{{"status", "ok"}};
+        }));
+
+    // --- Node tree tools ---
+
+    tool("get_node_tree", "Dump the node tree as JSON: per node {type, name, id, members (reflected, rotation in degrees, colors 0-1), mods, children}. Where depth cuts children off, childCount marks how many were omitted — drill in with another call passing that node's id")
+        .arg<int>("id", "Subtree root instance id (omit for the whole tree)", false)
+        .arg<int>("depth", "Max child depth (omit for unlimited, 0 = the node only)", false)
+        .bind([](const json& args) -> json {
+            Node* root = getRootNode();
+            if (!root) {
+                return json{{"status", "error"}, {"message", "App is not running"}};
+            }
+            if (args.contains("id") && !args.at("id").is_null()) {
+                uint64_t id = args.at("id").get<uint64_t>();
+                root = root->findByInstanceId(id);
+                if (!root) {
+                    return json{{"status", "error"}, {"message", "No node with id " + std::to_string(id)}};
+                }
+            }
+            int depth = -1;
+            if (args.contains("depth") && args.at("depth").is_number()) {
+                depth = args.at("depth").get<int>();
+            }
+            return json{{"status", "ok"}, {"tree", nodeToJson(*root, depth)}};
+        });
+
+    tool("get_selected_node", "Get the currently selected node (type, name, id, reflected members), or null if nothing is selected")
+        .bind(std::function<json()>([]() -> json {
+            Node* n = getSelectedNode();
+            if (!n) {
+                return json{{"status", "ok"}, {"selected", nullptr}};
+            }
+            return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0)}};
         }));
 }
 
@@ -169,6 +238,47 @@ inline void registerDebuggerTools() {
             if (::trussc::internal::appKeyReleasedFunc)
                 ::trussc::internal::appKeyReleasedFunc(args);
             return json{{"status", "ok"}};
+        });
+
+    // --- Node Tools ---
+
+    tool("select_node", "Select a node by instance id (0 clears the selection); drives the same selection an inspector shows")
+        .arg<int>("id", "Instance id from get_node_tree (0 to clear)")
+        .bind<int>([](int id) {
+            if (id == 0) {
+                setSelectedNode(nullptr);
+                return json{{"status", "ok"}, {"selected", nullptr}};
+            }
+            Node* root = getRootNode();
+            Node* n = root ? root->findByInstanceId(static_cast<uint64_t>(id)) : nullptr;
+            if (!n) {
+                return json{{"status", "error"}, {"message", "No node with id " + std::to_string(id)}};
+            }
+            setSelectedNode(n);
+            return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0)}};
+        });
+
+    tool("set_node_members", "Set reflected members of a node from a JSON object (same encoding as get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in degrees)")
+        .arg<int>("id", "Instance id from get_node_tree")
+        .arg<json>("members", "Member values to apply, e.g. {\"pos\":[10,20,0],\"visible\":true}")
+        .bind([](const json& args) -> json {
+            Node* root = getRootNode();
+            uint64_t id = args.at("id").get<uint64_t>();
+            Node* n = root ? root->findByInstanceId(id) : nullptr;
+            if (!n) {
+                return json{{"status", "error"}, {"message", "No node with id " + std::to_string(id)}};
+            }
+            JsonReadReflector r(args.at("members"));
+            n->reflectMembers(r);
+            json result{
+                {"status", "ok"},
+                {"applied", r.applied},
+                {"members", reflectToJson(*n)}
+            };
+            if (!r.skipped.empty()) result["skipped"] = r.skipped;
+            auto unknown = r.unknownKeys();
+            if (!unknown.empty()) result["unknown"] = unknown;
+            return result;
         });
 
 }

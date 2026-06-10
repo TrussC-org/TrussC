@@ -46,6 +46,8 @@ TrussC uses **HTTP transport** for MCP. All JSON-RPC messages are sent as HTTP P
 | `get_screenshot` | (none) | Get current screen as Base64 PNG image |
 | `save_screenshot` | `path` | Save screenshot to file |
 | `quit` | (none) | Quit the application gracefully |
+| `get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
+| `get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |
 
 ### Debugger Tools (opt-in via `mcp::enableDebugger()`)
 | Tool | Arguments | Description |
@@ -55,6 +57,13 @@ TrussC uses **HTTP transport** for MCP. All JSON-RPC messages are sent as HTTP P
 | `mouse_scroll` | `dx`, `dy` | Scroll mouse wheel |
 | `key_press` | `key` | Press a key (sokol_app keycode) |
 | `key_release` | `key` | Release a key |
+| `select_node` | `id` | Select a node by instance id (0 clears); drives the same selection an inspector shows |
+| `set_node_members` | `id`, `members` | Set reflected members from a JSON object (same encoding as `get_node_tree`). Reports `applied` / `skipped` (type mismatch) / `unknown` (no such member) keys |
+
+The node tools make a scene **round-trippable for agents**: arrange things in a
+GUI (e.g. with the `tcxNodeInspector` addon's gizmo), then `get_node_tree` to
+read the exact values back and bake them into code — or drive the scene the
+other way with `set_node_members`.
 
 To enable debugger tools, call `mcp::enableDebugger()` in your `setup()`:
 
@@ -197,8 +206,8 @@ Configure your MCP client with the HTTP URL:
 
 | Category | Tools | Enabled by |
 |----------|-------|------------|
-| Inspection (read-only) | `get_screenshot`, `save_screenshot` | Automatic when MCP is enabled |
-| Debugger (input injection) | `mouse_click`, `key_press`, `mouse_move`, `mouse_scroll`, `key_release` | `mcp::enableDebugger()` + `mcp::registerDebuggerTools()` |
+| Inspection (read-only) | `get_screenshot`, `save_screenshot`, `get_node_tree`, `get_selected_node` | Automatic when MCP is enabled |
+| Debugger (input injection / scene mutation) | `mouse_click`, `key_press`, `mouse_move`, `mouse_scroll`, `key_release`, `select_node`, `set_node_members` | `mcp::enableDebugger()` + `mcp::registerDebuggerTools()` |
 | ImGui (widget interaction) | `imgui_get_widgets`, `imgui_click`, `imgui_input`, `imgui_checkbox` | Requires tcxImGui addon + `mcp::registerDebuggerTools()` |
 | Custom | `mcp::tool(...)` | Your code |
 
