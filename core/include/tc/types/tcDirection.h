@@ -6,6 +6,8 @@
 // Used for text alignment, layout specification, etc.
 // Type-safe with enum class, yet can be written concisely like tc::Left
 
+#include "../utils/tcReflect.h"
+
 namespace trussc {
 
 // Direction/position specification (generic)
@@ -17,6 +19,7 @@ enum class Direction {
     Bottom,
     Baseline  // Text-specific: character baseline
 };
+TC_ENUM_LABELS(Direction, "Left", "Center", "Right", "Top", "Bottom", "Baseline")
 
 // Expand to namespace (can be written concisely like tc::Left)
 inline constexpr Direction Left = Direction::Left;

@@ -119,6 +119,7 @@ enum class BlendMode {
     Subtract,   // Subtractive blending
     Disabled    // No blending (overwrite)
 };
+TC_ENUM_LABELS(BlendMode, "Alpha", "Add", "Multiply", "Screen", "Subtract", "Disabled")
 
 // ---------------------------------------------------------------------------
 // Texture filter

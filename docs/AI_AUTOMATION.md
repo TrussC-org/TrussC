@@ -46,7 +46,7 @@ TrussC uses **HTTP transport** for MCP. All JSON-RPC messages are sent as HTTP P
 | `get_screenshot` | (none) | Get current screen as Base64 PNG image |
 | `save_screenshot` | `path` | Save screenshot to file |
 | `quit` | (none) | Quit the application gracefully |
-| `get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
+| `get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
 | `get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |
 
 ### Debugger Tools (opt-in via `mcp::enableDebugger()`)
@@ -58,7 +58,7 @@ TrussC uses **HTTP transport** for MCP. All JSON-RPC messages are sent as HTTP P
 | `key_press` | `key` | Press a key (sokol_app keycode) |
 | `key_release` | `key` | Release a key |
 | `select_node` | `id` | Select a node by instance id (0 clears); drives the same selection an inspector shows |
-| `set_node_members` | `id`, `members` | Set reflected members from a JSON object (same encoding as `get_node_tree`). Reports `applied` / `skipped` (type mismatch) / `unknown` (no such member) keys |
+| `set_node_members` | `id`, `members`, `mod` (optional) | Set reflected members from a JSON object (same encoding as `get_node_tree`; enums accept label string or int). Pass `mod` (a Mod's short type name, e.g. `"LayoutMod"`) to target a mod attached to the node instead of the node itself. Reports `applied` / `skipped` (type mismatch) / `readOnly` / `unknown` keys |
 
 The node tools make a scene **round-trippable for agents**: arrange things in a
 GUI (e.g. with the `tcxNodeInspector` addon's gizmo), then `get_node_tree` to

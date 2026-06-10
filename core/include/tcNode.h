@@ -621,6 +621,26 @@ public:
         return names;
     }
 
+    // All attached mods (for tools that iterate without knowing the types —
+    // inspectors, serializers). Pointers stay owned by this node.
+    std::vector<Mod*> getMods() const {
+        std::vector<Mod*> out;
+        out.reserve(mods_.size());
+        for (auto& [t, m] : mods_) out.push_back(m.get());
+        return out;
+    }
+
+    // Find an attached mod by its short (unqualified) type name, e.g.
+    // "LayoutMod". The string counterpart of getMod<T>() for tools that only
+    // have a name (MCP, scripts). Returns nullptr if not attached.
+    Mod* getModByTypeName(const std::string& name) const {
+        for (auto& [t, m] : mods_) {
+            const Mod& mod = *m;
+            if (shortTypeName(typeid(mod)) == name) return m.get();
+        }
+        return nullptr;
+    }
+
 private:
     // -------------------------------------------------------------------------
     // Mod dispatch helpers

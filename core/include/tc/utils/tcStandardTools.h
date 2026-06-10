@@ -23,18 +23,29 @@ namespace trussc {
 // ---------------------------------------------------------------------------
 
 // One node as JSON: type, optional instance name, instance id, reflected
-// members (same encoding as JsonWriteReflector), mod type names, and the
-// children in draw order. maxDepth limits recursion (-1 = unlimited, 0 = this
-// node only); where children are cut off, "childCount" says how many were
-// omitted so a caller can drill in with another get_node_tree(id) call.
+// members (same encoding as JsonWriteReflector), mods ({type, members} each),
+// and the children in draw order. maxDepth limits recursion (-1 = unlimited,
+// 0 = this node only); where children are cut off, "childCount" says how many
+// were omitted so a caller can drill in with another get_node_tree(id) call.
 inline Json nodeToJson(Node& node, int maxDepth = -1) {
     Json j = Json::object();
     j["type"] = node.getTypeName();
     if (node.hasName()) j["name"] = node.getName();
     j["id"] = node.getInstanceId();
     j["members"] = reflectToJson(node);
-    auto mods = node.getModTypeNames();
-    if (!mods.empty()) j["mods"] = std::move(mods);
+    auto mods = node.getMods();
+    if (!mods.empty()) {
+        Json jmods = Json::array();
+        for (Mod* m : mods) {
+            Json jm = Json::object();
+            Mod& mod = *m;
+            jm["type"] = shortTypeName(typeid(mod));
+            Json members = reflectToJson(mod);
+            if (!members.empty()) jm["members"] = std::move(members);
+            jmods.push_back(std::move(jm));
+        }
+        j["mods"] = std::move(jmods);
+    }
     if (node.getChildCount() > 0) {
         if (maxDepth == 0) {
             j["childCount"] = node.getChildCount();
@@ -258,9 +269,10 @@ inline void registerDebuggerTools() {
             return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0)}};
         });
 
-    tool("set_node_members", "Set reflected members of a node from a JSON object (same encoding as get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in degrees)")
+    tool("set_node_members", "Set reflected members of a node — or one of its mods — from a JSON object (same encoding as get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in degrees, enums by label string)")
         .arg<int>("id", "Instance id from get_node_tree")
         .arg<json>("members", "Member values to apply, e.g. {\"pos\":[10,20,0],\"visible\":true}")
+        .arg<std::string>("mod", "Mod short type name (e.g. \"LayoutMod\") to target a mod attached to the node instead of the node itself", false)
         .bind([](const json& args) -> json {
             Node* root = getRootNode();
             uint64_t id = args.at("id").get<uint64_t>();
@@ -268,14 +280,30 @@ inline void registerDebuggerTools() {
             if (!n) {
                 return json{{"status", "error"}, {"message", "No node with id " + std::to_string(id)}};
             }
+
             JsonReadReflector r(args.at("members"));
-            n->reflectMembers(r);
+            json after;
+            if (args.contains("mod") && args.at("mod").is_string()) {
+                std::string modName = args.at("mod").get<std::string>();
+                Mod* mod = n->getModByTypeName(modName);
+                if (!mod) {
+                    return json{{"status", "error"},
+                                {"message", "No mod \"" + modName + "\" on node " + std::to_string(id)}};
+                }
+                mod->reflectMembers(r);
+                after = reflectToJson(*mod);
+            } else {
+                n->reflectMembers(r);
+                after = reflectToJson(*n);
+            }
+
             json result{
                 {"status", "ok"},
                 {"applied", r.applied},
-                {"members", reflectToJson(*n)}
+                {"members", std::move(after)}
             };
             if (!r.skipped.empty()) result["skipped"] = r.skipped;
+            if (!r.readOnly.empty()) result["readOnly"] = r.readOnly;
             auto unknown = r.unknownKeys();
             if (!unknown.empty()) result["unknown"] = unknown;
             return result;

@@ -12,6 +12,7 @@ enum class LayoutDirection {
     Vertical,    // VStack: top to bottom
     Horizontal   // HStack: left to right
 };
+TC_ENUM_LABELS(LayoutDirection, "Vertical", "Horizontal")
 
 // =============================================================================
 // Axis sizing mode
@@ -21,6 +22,7 @@ enum class AxisMode {
     Fill,      // Stretch children to fill parent
     Content    // Resize parent to fit children
 };
+TC_ENUM_LABELS(AxisMode, "None", "Fill", "Content")
 
 // =============================================================================
 // LayoutMod - Automatic layout for child nodes
@@ -113,6 +115,27 @@ public:
         updateLayout();
         return *this;
     }
+
+    LayoutMod& setPaddingLeft(float v) { paddingLeft_ = v; updateLayout(); return *this; }
+    LayoutMod& setPaddingTop(float v) { paddingTop_ = v; updateLayout(); return *this; }
+    LayoutMod& setPaddingRight(float v) { paddingRight_ = v; updateLayout(); return *this; }
+    LayoutMod& setPaddingBottom(float v) { paddingBottom_ = v; updateLayout(); return *this; }
+
+    // -------------------------------------------------------------------------
+    // Reflection
+    // -------------------------------------------------------------------------
+    // Every property re-runs the layout through its setter on edit.
+    using Super = Mod;
+    TC_REFLECT(LayoutMod)
+        TC_ENUM_PROPERTY(direction, getDirection, setDirection)
+        TC_PROPERTY(spacing, getSpacing, setSpacing)
+        TC_ENUM_PROPERTY(crossAxis, getCrossAxis, setCrossAxis)
+        TC_ENUM_PROPERTY(mainAxis, getMainAxis, setMainAxis)
+        TC_PROPERTY(paddingLeft, getPaddingLeft, setPaddingLeft)
+        TC_PROPERTY(paddingTop, getPaddingTop, setPaddingTop)
+        TC_PROPERTY(paddingRight, getPaddingRight, setPaddingRight)
+        TC_PROPERTY(paddingBottom, getPaddingBottom, setPaddingBottom)
+    TC_REFLECT_END
 
     // -------------------------------------------------------------------------
     // Manual layout trigger

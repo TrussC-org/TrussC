@@ -267,6 +267,33 @@ public:
         if (duration_ <= 0.0f) return 1.0f;
         return std::max(0.0f, std::min(elapsed_ / duration_, 1.0f));
     }
+    float getDuration() const { return duration_; }
+    float getDelay() const { return delay_; }
+    EaseType getEaseType() const { return easeType_; }
+    EaseMode getEaseMode() const { return easeMode_; }
+
+    // -------------------------------------------------------------------------
+    // Reflection
+    // -------------------------------------------------------------------------
+    // Timing + easing are editable (even mid-tween); playback state is shown
+    // read-only. Targets are not reflected — they only mean something together
+    // with their enabled/relative flags, i.e. through the builder calls.
+    using Super = Mod;
+    TC_REFLECT(TweenMod)
+        TC_PROPERTY(duration, getDuration, duration)
+        TC_PROPERTY(delay, getDelay, delay)
+        TC_ENUM_PROPERTY(easeType, getEaseType, setEaseType)
+        TC_ENUM_PROPERTY(easeMode, getEaseMode, setEaseMode)
+        TC_PROPERTY_RO(playing, isPlaying)
+        TC_PROPERTY_RO(progress, getProgress)
+    TC_REFLECT_END
+
+private:
+    // Single-value setters for reflection (ease() sets both at once).
+    void setEaseType(EaseType t) { easeType_ = t; }
+    void setEaseMode(EaseMode m) { easeMode_ = m; }
+
+public:
 
 protected:
     // -------------------------------------------------------------------------

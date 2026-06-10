@@ -5,6 +5,7 @@
 #include <algorithm>
 #include "../events/tcEventArgs.h"
 #include "../math/tcRay.h"
+#include "../utils/tcReflect.h"
 
 namespace trussc {
 
@@ -37,6 +38,15 @@ public:
     // Get owner node
     Node* getOwner() { return owner_; }
     const Node* getOwner() const { return owner_; }
+
+    // -------------------------------------------------------------------------
+    // Reflection (TC_REFLECT)
+    // -------------------------------------------------------------------------
+    // Mod is its own reflection root (parallel to Node's). Subclasses expose
+    // members with `using Super = Mod;` + their own TC_REFLECT block; they then
+    // show up in inspectors and in the MCP node tree dump.
+    TC_REFLECT_ROOT(Mod)
+    TC_REFLECT_END
 
 protected:
     // Remove this mod from its owner (no need to name its own type). Safe to

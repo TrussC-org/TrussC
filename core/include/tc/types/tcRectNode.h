@@ -56,11 +56,24 @@ public:
         setSize(size, size);
     }
 
+    void setSize(const Vec2& s) {
+        setSize(s.x, s.y);
+    }
+
     // Set position and size at once
     void setRect(float x, float y, float w, float h) {
         setPos(x, y);
         setSize(w, h);
     }
+
+    // -------------------------------------------------------------------------
+    // Reflection
+    // -------------------------------------------------------------------------
+    using Super = Node;
+    TC_REFLECT(RectNode)
+        TC_PROPERTY(size, getSize, setSize)
+        TC_PROPERTY(clipping, isClipping, setClipping)
+    TC_REFLECT_END
 
     // -------------------------------------------------------------------------
     // Clipping settings

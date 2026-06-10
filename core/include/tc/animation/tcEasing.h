@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include "../../tcMath.h"
+#include "../utils/tcReflect.h"
 
 namespace trussc {
 
@@ -19,6 +20,8 @@ enum class EaseType {
     Elastic,  // Elastic spring
     Bounce    // Bouncing
 };
+TC_ENUM_LABELS(EaseType, "Linear", "Quad", "Cubic", "Quart", "Quint", "Sine",
+               "Expo", "Circ", "Back", "Elastic", "Bounce")
 
 // Easing mode - defines acceleration/deceleration
 enum class EaseMode {
@@ -26,6 +29,7 @@ enum class EaseMode {
     Out,     // Decelerate
     InOut    // Accelerate then decelerate
 };
+TC_ENUM_LABELS(EaseMode, "In", "Out", "InOut")
 
 namespace internal {
 
