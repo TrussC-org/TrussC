@@ -1,0 +1,9 @@
+{
+  "description": "Runtime hierarchy tree + reflected property inspector for the Node graph (ImGui)",
+  "author": "tettou771 <tettou771@gmail.com>",
+  "license": "MIT",
+  "category": "gui",
+  "keywords": ["inspector", "hierarchy", "imgui", "debug", "reflection", "editor"],
+  "dependencies": ["tcxImGui"],
+  "platforms": ["macos", "windows", "linux"]
+}
