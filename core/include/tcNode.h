@@ -770,18 +770,14 @@ private:
 
         pushMatrix();
 
-        // Apply transforms using cached matrix
-        translate(position_.x, position_.y, position_.z);
-        if (rotation_ != Quaternion::identity()) {
-            // Apply rotation via Euler angles for now (sokol uses axis-angle or euler)
-            Vec3 euler = rotation_.toEuler();
-            if (euler.x != 0.0f) rotateX(euler.x);
-            if (euler.y != 0.0f) rotateY(euler.y);
-            if (euler.z != 0.0f) rotateZ(euler.z);
-        }
-        if (scale_.x != 1.0f || scale_.y != 1.0f || scale_.z != 1.0f) {
-            scale(scale_.x, scale_.y, scale_.z);
-        }
+        // Apply the node's local transform with the SAME cached matrix the
+        // picking / coordinate-conversion path uses (translate * rotation *
+        // scale), so the rendered pose and hit-testing / gizmos can never
+        // disagree. The old path decomposed the quaternion into euler angles
+        // and re-applied them as rotateX/Y/Z in call order — a different
+        // composition order than the euler convention, which garbled every
+        // compound rotation (single-axis rotations happened to survive).
+        setMatrix(getLocalMatrix());
 
         // Begin draw hook (for clipping, etc.)
         beginDraw();
