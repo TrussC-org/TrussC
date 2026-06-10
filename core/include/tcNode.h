@@ -594,8 +594,10 @@ public:
         mod->owner_ = this;
         mods_[std::type_index(typeid(T))] = std::move(mod);
         // setup() runs after owner_ is set and the mod is in mods_, so it can
-        // safely call getMod / addChild / etc. on its owner.
-        ptr->setup();
+        // safely call getMod / addChild / etc. on its owner. Call through the
+        // base pointer: Node is a friend of Mod, but friendship isn't
+        // inherited, so a subclass's protected setup() isn't accessible via T*.
+        static_cast<Mod*>(ptr)->setup();
         return ptr;
     }
 
