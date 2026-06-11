@@ -7,16 +7,15 @@ using namespace tc;
 
 // =============================================================================
 // Demo node types. Node is the reflection root (it reflects pos / rotation /
-// scale / visible / active), so a subclass only adds `using Super = Node;` plus
-// its own TC_FIELDs. Each VisualNode is also clickable on the canvas: it
-// enables events and provides a circle hit-test, so a canvas click selects it —
-// the same selection the inspector tree drives.
+// scale / visible / active), so a subclass just opens a TC_REFLECT block that
+// lists its direct base and its own TC_VALUEs. Each VisualNode is also
+// clickable on the canvas: it enables events and provides a circle hit-test,
+// so a canvas click selects it — the same selection the inspector tree drives.
 // =============================================================================
 
 // A circle. Reflects a color, a radius and a filled flag (on top of Node's
 // transform), and picks via a circle hit shape.
 struct VisualNode : public Node {
-    using Super = Node;
     Color color{0.35f, 0.62f, 0.92f, 1.0f};
     float radius = 30.0f;
     bool  filled = true;
@@ -36,16 +35,15 @@ struct VisualNode : public Node {
         return false;
     }
 
-    TC_REFLECT(VisualNode)         // pos / rotation / scale / ... come from Node
-        TC_FIELD(color)
-        TC_FIELD(radius)
-        TC_FIELD(filled)
-    TC_REFLECT_END
+    TC_REFLECT(VisualNode, Node) {         // pos / rotation / scale / ... come from Node
+        TC_VALUE(color)
+        TC_VALUE(radius)
+        TC_VALUE(filled)
+    }
 };
 
 // Two levels deep: inherits Node + VisualNode members, adds a string + int.
 struct LabeledNode : public VisualNode {
-    using Super = VisualNode;
     string text = "label";
     int    fontSize = 12;
 
@@ -56,19 +54,15 @@ struct LabeledNode : public VisualNode {
         drawBitmapString(text, 0, 0);
     }
 
-    TC_REFLECT(LabeledNode)
-        TC_FIELD(text)
-        TC_FIELD(fontSize)
-    TC_REFLECT_END
+    TC_REFLECT(LabeledNode, VisualNode) {
+        TC_VALUE(text)
+        TC_VALUE(fontSize)
+    }
 };
 
-// Plain group (no extra fields) — still reflects Node's transform, and shows up
-// in the tree as a parent you can collapse / expand.
-struct GroupNode : public Node {
-    using Super = Node;
-    TC_REFLECT(GroupNode)
-    TC_REFLECT_END
-};
+// Plain group (no extra values) — no TC_REFLECT block needed: it inherits
+// Node's, so the inspector still shows the transform.
+struct GroupNode : public Node {};
 
 // =============================================================================
 // 3D space: a camera-scope node. Children are drawn between cam.begin()/end(),
@@ -79,7 +73,6 @@ struct GroupNode : public Node {
 // shift+drag never also selects a node.
 // =============================================================================
 struct Space3D : public Node {
-    using Super = Node;
     EasyCam cam;
 
     void setup() override {
@@ -106,15 +99,12 @@ struct Space3D : public Node {
         }
     }
 
-    TC_REFLECT(Space3D)
-    TC_REFLECT_END
 };
 
 // A cube standing on the floor. Exact ray-vs-box picking (slab test) in local
 // space — the incoming ray was already unprojected through the EasyCam and
 // transformed by this node's matrix, so the test itself stays simple.
 struct CubeNode : public Node {
-    using Super = Node;
     Color color{0.8f, 0.8f, 0.8f, 1.0f};
     float size = 80.0f;
 
@@ -148,18 +138,18 @@ struct CubeNode : public Node {
         return true;
     }
 
-    TC_REFLECT(CubeNode)
-        TC_FIELD(color)
-        TC_FIELD(size)
-    TC_REFLECT_END
+    TC_REFLECT(CubeNode, Node) {
+        TC_VALUE(color)
+        TC_VALUE(size)
+    }
 };
 
 // A demo Mod: draws a ring around its owner (mod draw), and reacts to keys when
 // its owner is selected (mod input). Press X to remove the mod from itself.
-// Its members are reflected (using Super = Mod;), so the inspector shows an
-// "OutlineMod" section under the owner's members and the MCP dump carries them.
+// Its values are reflected (TC_REFLECT with Mod as the base), so the inspector
+// shows an "OutlineMod" section under the owner's members and the MCP dump
+// carries them.
 struct OutlineMod : public Mod {
-    using Super = Mod;
     Color color{1.0f, 0.85f, 0.2f, 1.0f};
     float gap = 6.0f;
 
@@ -175,17 +165,16 @@ struct OutlineMod : public Mod {
         return false;
     }
 
-    TC_REFLECT(OutlineMod)
-        TC_FIELD(color)
-        TC_FIELD(gap)
-    TC_REFLECT_END
+    TC_REFLECT(OutlineMod, Mod) {
+        TC_VALUE(color)
+        TC_VALUE(gap)
+    }
 };
 
 // A flat colored rectangle. Size comes reflected from RectNode; rect-based hit
 // testing makes overlapping rects pick FRONTMOST-first, which is what makes
 // the inspector's "To front" / "To back" operations meaningful to play with.
 struct ColorRect : public RectNode {
-    using Super = RectNode;
     Color color{0.5f, 0.5f, 0.5f, 1.0f};
 
     ColorRect() {
@@ -199,9 +188,9 @@ struct ColorRect : public RectNode {
         drawRect(0, 0, getWidth(), getHeight());
     }
 
-    TC_REFLECT(ColorRect)
-        TC_FIELD(color)
-    TC_REFLECT_END
+    TC_REFLECT(ColorRect, RectNode) {
+        TC_VALUE(color)
+    }
 };
 
 // =============================================================================

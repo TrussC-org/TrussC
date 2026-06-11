@@ -124,18 +124,17 @@ public:
     // -------------------------------------------------------------------------
     // Reflection
     // -------------------------------------------------------------------------
-    // Every property re-runs the layout through its setter on edit.
-    using Super = Mod;
-    TC_REFLECT(LayoutMod)
-        TC_ENUM_PROPERTY(direction, getDirection, setDirection)
-        TC_PROPERTY(spacing, getSpacing, setSpacing)
-        TC_ENUM_PROPERTY(crossAxis, getCrossAxis, setCrossAxis)
-        TC_ENUM_PROPERTY(mainAxis, getMainAxis, setMainAxis)
-        TC_PROPERTY(paddingLeft, getPaddingLeft, setPaddingLeft)
-        TC_PROPERTY(paddingTop, getPaddingTop, setPaddingTop)
-        TC_PROPERTY(paddingRight, getPaddingRight, setPaddingRight)
-        TC_PROPERTY(paddingBottom, getPaddingBottom, setPaddingBottom)
-    TC_REFLECT_END
+    // Every value re-runs the layout through its setter on edit.
+    TC_REFLECT(LayoutMod, Mod) {
+        TC_VALUE(direction, getDirection, setDirection)
+        TC_VALUE(spacing, getSpacing, setSpacing)
+        TC_VALUE(crossAxis, getCrossAxis, setCrossAxis)
+        TC_VALUE(mainAxis, getMainAxis, setMainAxis)
+        TC_VALUE(paddingLeft, getPaddingLeft, setPaddingLeft)
+        TC_VALUE(paddingTop, getPaddingTop, setPaddingTop)
+        TC_VALUE(paddingRight, getPaddingRight, setPaddingRight)
+        TC_VALUE(paddingBottom, getPaddingBottom, setPaddingBottom)
+    }
 
     // -------------------------------------------------------------------------
     // Manual layout trigger
