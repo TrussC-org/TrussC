@@ -55,7 +55,6 @@ clicking them on the canvas.
 
 ```cpp
 struct Sprite : Node {
-    using Super = Node;             // inherit Node's pos/rotation/scale/... fields
     Color color{1, 1, 1, 1};
     float radius = 30;
 
@@ -68,22 +67,25 @@ struct Sprite : Node {
         return false;
     }
 
-    TC_REFLECT(Sprite)
-        TC_FIELD(color)
-        TC_FIELD(radius)
-    TC_REFLECT_END
+    TC_REFLECT(Sprite, Node) {      // list the direct base: Node's pos/rotation/... chain in
+        TC_VALUE(color)
+        TC_VALUE(radius)
+        TC_VALUE(alive, isAlive)              // getter only = read-only (greyed out)
+        TC_VALUE(speed, getSpeed, setSpeed)   // getter + setter = editable
+    }
 };
 ```
 
 The Inspector renders each reflected type with the matching ImGui widget
-(`float`/`int`/`bool`/`Vec2`/`Vec3`/`Color`/`string`). Enum members declared with
-`TC_ENUM` render as a combo of their labels (`TC_ENUM_LABELS`), and getter-only
-properties (`TC_PROPERTY_RO`) render greyed out. Want a custom widget for a
-type? Subclass `tcx::ImGuiReflector` and override the relevant `visit()`.
+(`float`/`int`/`bool`/`Vec2`/`Vec3`/`Color`/`string`). Enum values render as a
+combo of their labels when the enum declares them (`TC_ENUM_LABELS`, optional —
+without labels an enum edits as a plain int), and getter-only values render
+greyed out. Want a custom widget for a type? Subclass `tcx::ImGuiReflector`
+and override the relevant `visit()`.
 
 ## Mods
 
-Mods reflect too (`using Super = Mod;` + a `TC_REFLECT` block) — the Inspector
+Mods reflect too (a `TC_REFLECT` block with `Mod` as the base) — the Inspector
 shows one section per attached mod under the node's members, edited through the
 same reflector. Core's `LayoutMod` and `TweenMod` ship reflected, so e.g.
 flipping a LayoutMod's `direction` combo re-stacks its children live, while a

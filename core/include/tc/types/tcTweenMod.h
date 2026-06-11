@@ -278,15 +278,14 @@ public:
     // Timing + easing are editable (even mid-tween); playback state is shown
     // read-only. Targets are not reflected — they only mean something together
     // with their enabled/relative flags, i.e. through the builder calls.
-    using Super = Mod;
-    TC_REFLECT(TweenMod)
-        TC_PROPERTY(duration, getDuration, duration)
-        TC_PROPERTY(delay, getDelay, delay)
-        TC_ENUM_PROPERTY(easeType, getEaseType, setEaseType)
-        TC_ENUM_PROPERTY(easeMode, getEaseMode, setEaseMode)
-        TC_PROPERTY_RO(playing, isPlaying)
-        TC_PROPERTY_RO(progress, getProgress)
-    TC_REFLECT_END
+    TC_REFLECT(TweenMod, Mod) {
+        TC_VALUE(duration, getDuration, duration)
+        TC_VALUE(delay, getDelay, delay)
+        TC_VALUE(easeType, getEaseType, setEaseType)
+        TC_VALUE(easeMode, getEaseMode, setEaseMode)
+        TC_VALUE(playing, isPlaying)            // no setter = read-only
+        TC_VALUE(progress, getProgress)         // no setter = read-only
+    }
 
 private:
     // Single-value setters for reflection (ease() sets both at once).

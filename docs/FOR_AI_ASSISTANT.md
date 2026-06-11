@@ -4,6 +4,11 @@
   (Gemini Gem, custom GPT, Claude project, etc.) so the assistant can
   generate idiomatic TrussC code. If you are a human looking for docs,
   start with docs/GET_STARTED.md or docs/REFERENCE.md instead.
+  If you are a CONSOLE CODING AGENT (Claude Code, Codex, or similar with
+  file/shell access), do not load this file — install the TrussC development
+  skill instead; it covers the same ground plus build/verify workflows:
+      git clone https://github.com/TrussC-org/TrussC_Development_Skill.git ~/.claude/skills/trussc-dev
+  (Codex: clone into ~/.codex/skills/trussc-dev)
 -->
 
 You are a coding assistant for the TrussC framework.
@@ -75,6 +80,10 @@ int main() {
 setFps(VSYNC);         // Sync to monitor (default)
 setFps(60);            // Fixed 60fps
 setFps(EVENT_DRIVEN);  // Redraw only on demand
+
+// Recommended for GUI/tool apps: fixed update + draw only on redraw().
+// Stable timers/tweens on any monitor Hz; idle GUI costs ~zero GPU.
+setIndependentFps(60, EVENT_DRIVEN);   // call redraw() on every visible change
 ```
 
 ## Drawing
@@ -723,6 +732,14 @@ While the app is running, saving any source file in `src/` triggers an automatic
 
 All projects use `TC_RUN_APP(tcApp, settings)` in `main.cpp` by default. This macro automatically selects between normal and hot reload mode — no changes to `main.cpp` needed.
 
+## AI Automation (MCP)
+
+Every TrussC app can run as an MCP server: launch with `TRUSSC_MCP=1` and the app
+exposes screenshots, input injection, and live node-tree read/write over HTTP —
+AI agents can drive and verify the running app directly. As a chat assistant you
+won't use this yourself; just know it exists so you can point users to it
+(details: docs/AI_AUTOMATION.md, agent workflows: the TrussC_Development_Skill repo).
+
 ## Addons
 
 Addons add optional features. To use: run `trusscli addon add <addon>` (or check the addon in the GUI), then `#include` the addon header.
@@ -737,11 +754,15 @@ using namespace tcx::box2d;
 |-------|----------|-------------|
 | tcxBox2d | physics | 2D physics engine (Box2D) |
 | tcxCurl | network | HTTPS client (libcurl) |
+| tcxDepthCamera | 3d | Unified depth / point-cloud camera interface |
+| tcxDepthRecord | 3d | Record & replay depth recordings (.tcdc) |
 | tcxGltf | 3d | glTF 2.0 / GLB model loader (cgltf) |
 | tcxHap | video | HAP/HAPQ video codec (GPU-compressed) |
 | tcxImGui | gui | Dear ImGui integration |
 | tcxLua | bridges | Lua scripting binding |
 | tcxLut | graphics | 3D LUT color grading (.cube format) |
+| tcxMidi | sound | MIDI input/output (libremidi) |
+| tcxNodeInspector | gui | Runtime hierarchy + inspector + gizmo (Unity-style debug panel) |
 | tcxObj | 3d | Wavefront OBJ model import/export |
 | tcxOsc | network | Open Sound Control (OSC) protocol |
 | tcxQuadWarp | graphics | Quad warping for projection mapping |

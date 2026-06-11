@@ -343,18 +343,18 @@ public:
     // -------------------------------------------------------------------------
     // Reflection (TC_REFLECT)
     // -------------------------------------------------------------------------
-    // Exposes a curated set of editable properties (not the raw private fields).
+    // Exposes a curated set of editable values (not the raw private fields).
     // Transform values go through their setters so the matrix cache / change
-    // events stay correct. Subclasses extend via `using Super = Node;` + their
-    // own TC_REFLECT block.
-    TC_REFLECT_ROOT(Node)
-        TC_PROPERTY(pos,       getPos,       setPos)
-        TC_PROPERTY(globalPos, getGlobalPos, setGlobalPos)
-        TC_PROPERTY(rotation,  getEulerDeg,  setEulerDeg)   // euler X/Y/Z, degrees
-        TC_PROPERTY(scale,     getScale,     setScale)
-        TC_PROPERTY(visible,   isVisible,    setVisible)
-        TC_PROPERTY(active,    isActive,     setActive)
-    TC_REFLECT_END
+    // events stay correct. Subclasses extend with their own block, listing
+    // their direct base: TC_REFLECT(Sprite, Node) { TC_VALUE(...) }
+    TC_REFLECT_ROOT(Node) {
+        TC_VALUE(pos,       getPos,       setPos)
+        TC_VALUE(globalPos, getGlobalPos, setGlobalPos)
+        TC_VALUE(rotation,  getEulerDeg,  setEulerDeg)   // euler X/Y/Z, degrees
+        TC_VALUE(scale,     getScale,     setScale)
+        TC_VALUE(visible,   isVisible,    setVisible)
+        TC_VALUE(active,    isActive,     setActive)
+    }
 
     // -------------------------------------------------------------------------
     // Transform - Position

@@ -32,7 +32,7 @@ namespace tcx {
 
 // Renders each reflected member as the matching ImGui widget. Public so an app
 // can subclass and override a visit() to customize how a given type is edited.
-// Read-only properties (TC_PROPERTY_RO) render greyed out; enums (TC_ENUM)
+// Read-only values (getter-only TC_VALUE) render greyed out; enums
 // render as a combo of their labels.
 struct ImGuiReflector : ::trussc::Reflector {
     bool visit(const char* n, float& v) override       { return edit([&] { return ImGui::DragFloat(n, &v, 0.5f); }); }

@@ -69,11 +69,10 @@ public:
     // -------------------------------------------------------------------------
     // Reflection
     // -------------------------------------------------------------------------
-    using Super = Node;
-    TC_REFLECT(RectNode)
-        TC_PROPERTY(size, getSize, setSize)
-        TC_PROPERTY(clipping, isClipping, setClipping)
-    TC_REFLECT_END
+    TC_REFLECT(RectNode, Node) {
+        TC_VALUE(size, getSize, setSize)
+        TC_VALUE(clipping, isClipping, setClipping)
+    }
 
     // -------------------------------------------------------------------------
     // Clipping settings

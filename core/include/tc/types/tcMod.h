@@ -43,10 +43,9 @@ public:
     // Reflection (TC_REFLECT)
     // -------------------------------------------------------------------------
     // Mod is its own reflection root (parallel to Node's). Subclasses expose
-    // members with `using Super = Mod;` + their own TC_REFLECT block; they then
-    // show up in inspectors and in the MCP node tree dump.
-    TC_REFLECT_ROOT(Mod)
-    TC_REFLECT_END
+    // values with TC_REFLECT(MyMod, Mod) { TC_VALUE(...) }; they then show up
+    // in inspectors and in the MCP node tree dump.
+    TC_REFLECT_ROOT(Mod) {}
 
 protected:
     // Remove this mod from its owner (no need to name its own type). Safe to
