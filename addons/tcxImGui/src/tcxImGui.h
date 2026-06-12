@@ -75,12 +75,18 @@ public:
             if (ImGui::GetIO().WantCaptureKeyboard) e.consumed = true;
         }, tc::EventPriority::BeforeApp);
 
+        // Auto-teardown at the framework's exit event, while sokol_gfx and the
+        // event system are still alive. Apps don't need to call imguiShutdown()
+        // themselves (calling it stays harmless — shutdown() is idempotent).
+        exitListener_ = tc::events().exit.listen([this]() { shutdown(); });
+
         tc::logVerbose() << "ImGui initialized";
     }
 
     // Shutdown
     void shutdown() {
         if (!initialized_) return;
+        exitListener_ = {};
         renderListener_ = {};
         eventListener_ = {};
         mousePressConsume_ = {};
@@ -93,7 +99,11 @@ public:
         tc::internal::overlayHoveredQuery = nullptr;
         tc::internal::overlayFocusedQuery = nullptr;
         pointerCaptured_ = false;
-        simgui_shutdown();
+        // GPU teardown only while sokol_gfx is alive. If shutdown runs from the
+        // static destructor during exit() (e.g. an abnormal teardown path where
+        // the exit event never fired), sokol_gfx is already gone and its objects
+        // with it — skipping is the correct cleanup, touching them would crash.
+        if (sg_isvalid()) simgui_shutdown();
         initialized_ = false;
         tc::logVerbose() << "ImGui shutdown";
     }
@@ -130,6 +140,7 @@ private:
 
     bool initialized_ = false;
     bool renderPending_ = false;
+    tc::EventListener exitListener_;
     tc::EventListener renderListener_;
     tc::EventListener eventListener_;
 
