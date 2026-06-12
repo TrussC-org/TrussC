@@ -7,7 +7,7 @@
   If you are a CONSOLE CODING AGENT (Claude Code, Codex, or similar with
   file/shell access), do not load this file — install the TrussC development
   skill instead; it covers the same ground plus build/verify workflows:
-      git clone https://github.com/TrussC-org/TrussC_Development_Skill.git ~/.claude/skills/trussc-dev
+      git clone https://github.com/TrussC-org/trussc-dev-skill.git ~/.claude/skills/trussc-dev
   (Codex: clone into ~/.codex/skills/trussc-dev)
 -->
 
@@ -738,7 +738,7 @@ Every TrussC app can run as an MCP server: launch with `TRUSSC_MCP=1` and the ap
 exposes screenshots, input injection, and live node-tree read/write over HTTP —
 AI agents can drive and verify the running app directly. As a chat assistant you
 won't use this yourself; just know it exists so you can point users to it
-(details: docs/AI_AUTOMATION.md, agent workflows: the TrussC_Development_Skill repo).
+(details: docs/AI_AUTOMATION.md, agent workflows: the trussc-dev-skill repo).
 
 ## Addons
 
