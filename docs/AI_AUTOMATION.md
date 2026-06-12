@@ -52,7 +52,9 @@ TrussC uses **HTTP transport** for MCP. All JSON-RPC messages are sent as HTTP P
 ### Debugger Tools (opt-in via `mcp::enableDebugger()`)
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `mouse_move` | `x`, `y`, `button` | Move mouse cursor (and optionally drag) |
+| `mouse_move` | `x`, `y`, `button` (optional) | Move cursor; with `button` held, emits a drag |
+| `mouse_press` | `x`, `y`, `button` | Press and hold — start of a drag gesture |
+| `mouse_release` | `x`, `y`, `button` | Release — end of a drag gesture |
 | `mouse_click` | `x`, `y`, `button`, `shift`/`ctrl`/`alt`/`super` (optional) | Click mouse button (0:left, 1:right), optionally with modifier keys held — e.g. `super: true` Cmd+clicks |
 | `mouse_scroll` | `dx`, `dy` | Scroll mouse wheel |
 | `key_press` | `key` | Press a key (sokol_app keycode) |
@@ -207,7 +209,7 @@ Configure your MCP client with the HTTP URL:
 | Category | Tools | Enabled by |
 |----------|-------|------------|
 | Inspection (read-only) | `get_screenshot`, `save_screenshot`, `get_node_tree`, `get_selected_node` | Automatic when MCP is enabled |
-| Debugger (input injection / scene mutation) | `mouse_click`, `key_press`, `mouse_move`, `mouse_scroll`, `key_release`, `select_node`, `set_node_members` | `mcp::enableDebugger()` + `mcp::registerDebuggerTools()` |
+| Debugger (input injection / scene mutation) | `mouse_click`, `mouse_press`, `mouse_release`, `key_press`, `mouse_move`, `mouse_scroll`, `key_release`, `select_node`, `set_node_members` | `mcp::enableDebugger()` + `mcp::registerDebuggerTools()` |
 | ImGui (widget interaction) | `imgui_get_widgets`, `imgui_click`, `imgui_input`, `imgui_checkbox` | Requires tcxImGui addon + `mcp::registerDebuggerTools()` |
 | Custom | `mcp::tool(...)` | Your code |
 
