@@ -240,22 +240,38 @@ void NodeInspector::drawInspector() {
 
 namespace {
 
-// World units spanned by ONE screen pixel in the view plane at `worldPos`
-// (two cursor rays one pixel apart, intersected with the plane through the
-// point facing the camera). This is the gizmo's single size basis: it does
-// not depend on any axis direction, so handle sizes are stable while the
-// node rotates, and there is no per-direction solve to misbehave on
+// World units spanned by ONE screen pixel at `worldPos`, on the
+// constant-depth plane through the point. This is the gizmo's single size
+// basis: it does not depend on any axis direction, so handle sizes are stable
+// while the node rotates, and there is no per-direction solve to misbehave on
 // view-aligned axes — those simply foreshorten naturally on screen and hide
 // below the length threshold (Unity behaves the same way).
-float worldPerPixelAt(const CameraContext& ctx, const Vec3& worldPos, const Vec2& screenPos) {
-    Ray r0 = ctx.screenPointToRay(screenPos.x, screenPos.y);
-    Ray r1 = ctx.screenPointToRay(screenPos.x + 1.0f, screenPos.y);
-    const Vec3& n = r0.direction;
-    float d1 = r1.direction.dot(n);
-    if (std::abs(d1) < 1e-6f) return 0.0f;
-    float t0 = (worldPos - r0.origin).dot(n);                 // r0.direction.dot(n) == 1
-    float t1 = (worldPos - r1.origin).dot(n) / d1;
-    return (r1.at(t1) - r0.at(t0)).length();
+//
+// Measured by FORWARD projection only (worldToScreen finite difference along
+// the camera-right axis). Never through screenPointToRay: the inverse-ray
+// construction unprojects two clip-space points only `near` apart, and with
+// an extreme near/far (EasyCam defaults to 0.1/10000) float cancellation puts
+// ~1% noise on the ray direction — extrapolated to the node's depth that made
+// the whole gizmo flicker ±15% frame to frame. The forward path has no
+// cancellation. Sampling along camera-right also keeps the measurement on the
+// constant-depth plane (a uniform scale under perspective), so the result is
+// independent of where the node sits on screen — no pulse while it orbits.
+float worldPerPixelAt(const CameraContext& ctx, const Vec3& worldPos, const Vec2& /*screenPos*/) {
+    Vec4 r4 = ctx.view.inverted() * Vec4(1.0f, 0.0f, 0.0f, 0.0f);   // camera right in world
+    Vec3 right = Vec3(r4.x, r4.y, r4.z).normalized();
+    Vec3 s0 = ctx.worldToScreen(worldPos);
+    // Two passes: measure with a 1-unit step, then re-aim the step to ~4 px
+    // so the finite difference is local but well above float screen noise.
+    float step = 1.0f;
+    for (int pass = 0; pass < 2; ++pass) {
+        Vec3 s1 = ctx.worldToScreen(worldPos + right * step);
+        if (s1.z < 0.0f) return 0.0f;
+        float px = Vec2(s1.x - s0.x, s1.y - s0.y).length();
+        if (px < 1e-6f) return 0.0f;
+        if (pass == 1) return step / px;
+        step *= 4.0f / px;
+    }
+    return 0.0f;
 }
 
 } // namespace
@@ -385,18 +401,25 @@ NodeInspector::GizmoGeom NodeInspector::computeGizmoGeomFrame(
         g.axis[i].dir = dir;
 
         if (mode == GizmoMode::Translate) {
-            Vec3 tip = origin + dir * worldLen;
             Vec2 p1;
             if (ctx) {
-                Vec3 s2 = ctx->worldToScreen(tip);
-                if (s2.z < 0.0f || s2.z > 1.0f) continue;     // tip behind the camera
-                p1 = Vec2(s2.x, s2.y);
+                // Linearized projection: project a SMALL step along the axis
+                // and scale up (the projection derivative at the origin).
+                // Projecting the full-length tip would re-apply the
+                // perspective divide at the tip's own depth, so an axis
+                // leaning toward the camera grows past its nominal length and
+                // a rotating node makes the handles pulse. The derivative
+                // keeps only the natural cos-theta foreshortening.
+                const float EPS = 0.05f;
+                Vec3 s2 = ctx->worldToScreen(origin + dir * (worldLen * EPS));
+                if (s2.z < 0.0f || s2.z > 1.0f) continue;     // behind the camera
+                p1 = so + (Vec2(s2.x, s2.y) - so) * (1.0f / EPS);
             } else {
                 p1 = so + Vec2(dir.x, dir.y) * worldLen;
             }
             // View-aligned axes foreshorten; below this they are neither
             // readable nor meaningfully draggable.
-            if ((p1 - so).length() < handlePx * 0.3f) continue;
+            if ((p1 - so).length() < handlePx * 0.2f) continue;
 
             g.axis[i].valid = true;
             g.axis[i].p0 = so;
