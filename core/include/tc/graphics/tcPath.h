@@ -421,11 +421,25 @@ public:
     }
 
     // Fill the path as a concave polygon with holes (earcut tessellation).
-    // Subpaths are grouped by spatial containment: each subpath at even
-    // nesting depth is treated as the outer ring of a polygon, and direct
-    // children at the next odd depth become its holes. Grandchildren (depth
-    // +2) become their own outers — i.e. an island inside a hole renders as
-    // a separate filled region, matching SVG / PostScript even-odd fill.
+    //
+    // Subpaths are grouped following the non-zero winding rule — the default
+    // fill rule of SVG / PostScript and the rule TrueType / CFF rasterizers
+    // use. Subpaths wound in the path's dominant direction are outer rings;
+    // subpaths wound the opposite way are holes. The dominant direction is
+    // taken from the largest subpath by |signed area|: a hole is always
+    // strictly contained in some outer ring (which is therefore larger), so
+    // the largest ring can never be a hole. This self-normalizes across the
+    // opposite winding conventions of TrueType-flavored (CW outers) and
+    // CFF-flavored (CCW outers) fonts, in either Y-axis orientation.
+    //
+    // Same-direction subpaths never punch holes in each other, so glyphs
+    // built from several overlapping contours (e.g. serif caps overlapping
+    // the main stem in Noto Serif JP's 'W') fill correctly as their union.
+    // Each hole attaches to the smallest outer ring containing it; holes
+    // with no enclosing outer ring are drawn as independent polygons.
+    //
+    // To cut a hole in a hand-built Path, wind the inner subpath opposite
+    // to the outer one (same as SVG's nonzero fill rule).
     // Use draw() with `fill` enabled for the fast convex-only fan path.
     void drawFill() const {
         if (vertices_.empty()) return;
@@ -436,13 +450,16 @@ public:
         struct SubInfo {
             size_t s, e;
             float minX, minY, maxX, maxY;
+            float area;   // signed shoelace area; sign = winding direction
             int parent = -1;
-            int depth  = 0;
         };
         std::vector<SubInfo> info(N);
+        float outerSign  = 0.f;   // sign of the largest ring = outer direction
+        float maxAbsArea = 0.f;
         for (size_t i = 0; i < N; ++i) {
             auto [s, e] = getSubpathRange(i);
             info[i].s = s; info[i].e = e;
+            info[i].area = 0.f;
             if (e - s == 0) {
                 info[i].minX = info[i].minY = 0;
                 info[i].maxX = info[i].maxY = 0;
@@ -450,17 +467,28 @@ public:
             }
             float mnX = vertices_[s].x, mxX = mnX;
             float mnY = vertices_[s].y, mxY = mnY;
-            for (size_t k = s + 1; k < e; ++k) {
+            float area = 0.f;
+            for (size_t k = s, j = e - 1; k < e; j = k++) {
                 mnX = std::min(mnX, vertices_[k].x);
                 mxX = std::max(mxX, vertices_[k].x);
                 mnY = std::min(mnY, vertices_[k].y);
                 mxY = std::max(mxY, vertices_[k].y);
+                area += vertices_[j].x * vertices_[k].y
+                      - vertices_[k].x * vertices_[j].y;
             }
             info[i].minX = mnX; info[i].maxX = mxX;
             info[i].minY = mnY; info[i].maxY = mxY;
+            info[i].area = area * 0.5f;
+            if (std::abs(info[i].area) > maxAbsArea) {
+                maxAbsArea = std::abs(info[i].area);
+                outerSign  = (info[i].area >= 0.f) ? 1.f : -1.f;
+            }
         }
 
-        // Point-in-polygon (ray casting) — used to detect subpath containment.
+        // Wound opposite to the dominant direction → hole candidate.
+        // (outerSign == 0 means all rings are degenerate; nothing is a hole.)
+        auto isHole = [&](size_t i) { return info[i].area * outerSign < 0.f; };
+
         auto pointInRing = [&](float px, float py, const SubInfo& r) -> bool {
             if (px < r.minX || px > r.maxX || py < r.minY || py > r.maxY) return false;
             bool inside = false;
@@ -475,30 +503,37 @@ public:
             return inside;
         };
 
-        // For each subpath, find its smallest enclosing subpath. We pick the
-        // candidate parent with the smallest bbox area (cheap proxy that's
-        // correct as long as the rings aren't pathologically interleaved —
-        // good enough for font glyphs).
+        // For each hole, find the smallest enclosing outer ring. Containment
+        // is decided by majority vote over 3 spread-out vertices of the hole —
+        // robust to a single vertex touching the candidate's boundary. Holes
+        // never cross outer rings in valid outlines, so vertex parity is
+        // well-defined here (unlike same-direction rings, which may overlap
+        // each other and are never containment-tested at all).
         for (size_t i = 0; i < N; ++i) {
             if (info[i].e - info[i].s < 3) continue;
-            const float px = vertices_[info[i].s].x;
-            const float py = vertices_[info[i].s].y;
+            if (!isHole(i)) continue;
+
+            const size_t n = info[i].e - info[i].s;
+            const size_t sample[3] = {
+                info[i].s,
+                info[i].s + n / 3,
+                info[i].s + (2 * n) / 3,
+            };
+
             float bestBboxArea = std::numeric_limits<float>::infinity();
             for (size_t j = 0; j < N; ++j) {
                 if (j == i || info[j].e - info[j].s < 3) continue;
-                if (!pointInRing(px, py, info[j])) continue;
+                if (isHole(j)) continue;  // only outer rings can be parents
+                int votes = 0;
+                for (int t = 0; t < 3; ++t) {
+                    if (pointInRing(vertices_[sample[t]].x,
+                                    vertices_[sample[t]].y, info[j])) ++votes;
+                }
+                if (votes < 2) continue;
                 const float a = (info[j].maxX - info[j].minX) *
                                 (info[j].maxY - info[j].minY);
                 if (a < bestBboxArea) { bestBboxArea = a; info[i].parent = (int)j; }
             }
-        }
-
-        // Resolve depth iteratively (parent chain length).
-        for (size_t i = 0; i < N; ++i) {
-            int d = 0;
-            int p = info[i].parent;
-            while (p >= 0) { ++d; p = info[p].parent; }
-            info[i].depth = d;
         }
 
         using Point   = std::array<float, 2>;
@@ -508,8 +543,10 @@ public:
         sgl_begin_triangles();
         sgl_c4f(col.r, col.g, col.b, col.a);
         for (size_t i = 0; i < N; ++i) {
-            if (info[i].depth % 2 != 0) continue;        // skip holes
             if (info[i].e - info[i].s < 3) continue;
+            // Draw outer rings and orphan holes; holes that found a parent
+            // are added to that parent's polygon below.
+            if (isHole(i) && info[i].parent >= 0) continue;
 
             Polygon poly;
             poly.emplace_back();
@@ -517,10 +554,9 @@ public:
                 poly.back().push_back({vertices_[k].x, vertices_[k].y});
             }
 
-            // Direct-child holes.
+            // Attach direct-child holes.
             for (size_t j = 0; j < N; ++j) {
                 if (info[j].parent != (int)i) continue;
-                if (info[j].depth != info[i].depth + 1) continue;
                 if (info[j].e - info[j].s < 3) continue;
                 poly.emplace_back();
                 for (size_t k = info[j].s; k < info[j].e; ++k) {
