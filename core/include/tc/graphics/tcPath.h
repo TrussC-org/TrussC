@@ -462,40 +462,144 @@ public:
     // To cut a hole in a hand-built Path, wind the inner subpath opposite to
     // the outer one (see reverseWinding()). Zero-winding subpaths with no
     // enclosing filled ring are drawn as independent polygons (fallback).
+    //
+    // Self-intersecting subpaths are split at each crossing into simple
+    // rings before tessellation. Machine-converted fonts (e.g. CFF →
+    // TrueType builds of Noto) often carry tiny self-crossing loops at
+    // stroke joins; rasterizers never notice (non-zero winding scanning is
+    // immune) but ear clipping requires simple polygons. After splitting,
+    // an inverted micro-loop gets winding 0 and vanishes as a sub-pixel
+    // hole, and a genuine figure-8 fills both lobes — both matching what a
+    // real non-zero winding rasterizer produces.
     // Use draw() with `fill` enabled for the fast convex-only fan path.
     void drawFill() const {
         if (vertices_.empty()) return;
-        const size_t N = subpathStarts_.size();
         auto& ctx = getDefaultContext();
         Color col = ctx.getColor();
 
-        struct SubInfo {
-            size_t s, e;
+        using Point   = std::array<float, 2>;
+        using Ring    = std::vector<Point>;
+        using Polygon = std::vector<Ring>;
+
+        // ---- Collect subpaths into working rings (fill is 2D; z dropped).
+        // Consecutive duplicates and the closing vertex (== start) are
+        // removed so zero-length edges can't confuse the geometry below.
+        std::vector<Ring> rings;
+        rings.reserve(subpathStarts_.size());
+        for (size_t si = 0; si < subpathStarts_.size(); ++si) {
+            auto [s, e] = getSubpathRange(si);
+            if (e - s < 3) continue;
+            Ring r;
+            r.reserve(e - s);
+            for (size_t k = s; k < e; ++k) {
+                const Point p{vertices_[k].x, vertices_[k].y};
+                if (!r.empty() && r.back() == p) continue;
+                r.push_back(p);
+            }
+            while (r.size() >= 2 && r.front() == r.back()) r.pop_back();
+            if (r.size() >= 3) rings.push_back(std::move(r));
+        }
+        if (rings.empty()) return;
+
+        // ---- Split self-intersecting rings into simple rings. Each proper
+        // crossing X of two edges splits the ring into two rings touching at
+        // X; every split strictly reduces the remaining crossing count, so
+        // this terminates (guard cap for float pathologies). Piece edges are
+        // subsets of the original edges, so no new crossings appear.
+        {
+            auto cleanRing = [](Ring& r) {
+                Ring out;
+                out.reserve(r.size());
+                for (const Point& p : r) {
+                    if (out.empty() || out.back() != p) out.push_back(p);
+                }
+                while (out.size() >= 2 && out.front() == out.back()) out.pop_back();
+                r = std::move(out);
+            };
+
+            int guard = 1024;
+            for (size_t ri = 0; ri < rings.size() && guard > 0; ) {
+                const size_t n = rings[ri].size();
+                bool didSplit = false;
+                for (size_t i = 0; i < n && !didSplit; ++i) {
+                    const size_t i2 = (i + 1) % n;
+                    for (size_t j = i + 1; j < n && !didSplit; ++j) {
+                        const size_t j2 = (j + 1) % n;
+                        if (i2 == j || j2 == i) continue;  // adjacent edges share a vertex
+                        const Point& A = rings[ri][i];
+                        const Point& B = rings[ri][i2];
+                        const Point& C = rings[ri][j];
+                        const Point& D = rings[ri][j2];
+                        // bbox reject
+                        if (std::max(A[0], B[0]) < std::min(C[0], D[0]) ||
+                            std::max(C[0], D[0]) < std::min(A[0], B[0]) ||
+                            std::max(A[1], B[1]) < std::min(C[1], D[1]) ||
+                            std::max(C[1], D[1]) < std::min(A[1], B[1])) continue;
+                        // strict proper crossing (touching endpoints excluded —
+                        // touching rings are handled fine by the parity vote)
+                        const double abx = (double)B[0] - A[0], aby = (double)B[1] - A[1];
+                        const double cdx = (double)D[0] - C[0], cdy = (double)D[1] - C[1];
+                        const double denom = abx * cdy - aby * cdx;
+                        if (denom == 0.0) continue;
+                        const double acx = (double)C[0] - A[0], acy = (double)C[1] - A[1];
+                        const double t = (acx * cdy - acy * cdx) / denom;  // along AB
+                        const double u = (acx * aby - acy * abx) / denom;  // along CD
+                        if (t <= 0.0 || t >= 1.0 || u <= 0.0 || u >= 1.0) continue;
+
+                        const Point X{(float)(A[0] + t * abx), (float)(A[1] + t * aby)};
+                        Ring r1, r2;
+                        r1.push_back(X);
+                        for (size_t k = i2; ; k = (k + 1) % n) {
+                            r1.push_back(rings[ri][k]);
+                            if (k == j) break;
+                        }
+                        r2.push_back(X);
+                        for (size_t k = j2; ; k = (k + 1) % n) {
+                            r2.push_back(rings[ri][k]);
+                            if (k == i) break;
+                        }
+                        cleanRing(r1);
+                        cleanRing(r2);
+                        // Replace the ring with the valid pieces (a piece that
+                        // collapsed below 3 verts was a zero-area sliver).
+                        if (r1.size() >= 3 && r2.size() >= 3) {
+                            rings[ri] = std::move(r1);
+                            rings.push_back(std::move(r2));
+                        } else if (r1.size() >= 3) {
+                            rings[ri] = std::move(r1);
+                        } else if (r2.size() >= 3) {
+                            rings[ri] = std::move(r2);
+                        } else {
+                            rings.erase(rings.begin() + (ptrdiff_t)ri);
+                        }
+                        didSplit = true;
+                        --guard;
+                    }
+                }
+                if (!didSplit) ++ri;  // ring is simple; re-scan same index after a split
+            }
+        }
+        if (rings.empty()) return;
+
+        const size_t N = rings.size();
+        struct RingInfo {
             float minX, minY, maxX, maxY;
             float area;       // signed shoelace area; sign = winding direction
             int   winding = 0;
             int   parent  = -1;
         };
-        std::vector<SubInfo> info(N);
+        std::vector<RingInfo> info(N);
         for (size_t i = 0; i < N; ++i) {
-            auto [s, e] = getSubpathRange(i);
-            info[i].s = s; info[i].e = e;
-            info[i].area = 0.f;
-            if (e - s == 0) {
-                info[i].minX = info[i].minY = 0;
-                info[i].maxX = info[i].maxY = 0;
-                continue;
-            }
-            float mnX = vertices_[s].x, mxX = mnX;
-            float mnY = vertices_[s].y, mxY = mnY;
+            const Ring& r = rings[i];
+            float mnX = r[0][0], mxX = mnX;
+            float mnY = r[0][1], mxY = mnY;
             float area = 0.f;
-            for (size_t k = s, j = e - 1; k < e; j = k++) {
-                mnX = std::min(mnX, vertices_[k].x);
-                mxX = std::max(mxX, vertices_[k].x);
-                mnY = std::min(mnY, vertices_[k].y);
-                mxY = std::max(mxY, vertices_[k].y);
-                area += vertices_[j].x * vertices_[k].y
-                      - vertices_[k].x * vertices_[j].y;
+            for (size_t k = 0, j = r.size() - 1; k < r.size(); j = k++) {
+                mnX = std::min(mnX, r[k][0]);
+                mxX = std::max(mxX, r[k][0]);
+                mnY = std::min(mnY, r[k][1]);
+                mxY = std::max(mxY, r[k][1]);
+                area += r[j][0] * r[k][1] - r[k][0] * r[j][1];
             }
             info[i].minX = mnX; info[i].maxX = mxX;
             info[i].minY = mnY; info[i].maxY = mxY;
@@ -504,15 +608,16 @@ public:
 
         auto ringSign = [&](size_t i) { return info[i].area >= 0.f ? 1 : -1; };
 
-        auto pointInRing = [&](float px, float py, const SubInfo& r) -> bool {
-            if (px < r.minX || px > r.maxX || py < r.minY || py > r.maxY) return false;
+        auto pointInRing = [&](float px, float py, size_t j) -> bool {
+            const RingInfo& ji = info[j];
+            if (px < ji.minX || px > ji.maxX || py < ji.minY || py > ji.maxY) return false;
+            const Ring& r = rings[j];
             bool inside = false;
-            const size_t n = r.e - r.s;
-            for (size_t k = 0, j = n - 1; k < n; j = k++) {
-                const Vec3& a = vertices_[r.s + k];
-                const Vec3& b = vertices_[r.s + j];
-                const bool cross = ((a.y > py) != (b.y > py)) &&
-                                   (px < (b.x - a.x) * (py - a.y) / (b.y - a.y) + a.x);
+            for (size_t k = 0, j2 = r.size() - 1; k < r.size(); j2 = k++) {
+                const Point& a = r[k];
+                const Point& b = r[j2];
+                const bool cross = ((a[1] > py) != (b[1] > py)) &&
+                                   (px < (b[0] - a[0]) * (py - a[1]) / (b[1] - a[1]) + a[0]);
                 if (cross) inside = !inside;
             }
             return inside;
@@ -520,20 +625,16 @@ public:
 
         // Ring-in-ring containment by majority vote over 3 spread-out
         // vertices — robust to a single vertex touching the candidate's
-        // boundary (bridged contours). Holes never cross their enclosing
-        // rings in valid outlines, so parity is well-defined where the
-        // answer matters.
+        // boundary (bridged contours, split points). Holes never cross
+        // their enclosing rings once self-intersections are resolved, so
+        // parity is well-defined where the answer matters.
         auto containedIn = [&](size_t i, size_t j) -> bool {
-            const size_t n = info[i].e - info[i].s;
-            const size_t sample[3] = {
-                info[i].s,
-                info[i].s + n / 3,
-                info[i].s + (2 * n) / 3,
-            };
+            const size_t n = rings[i].size();
+            const size_t sample[3] = {0, n / 3, (2 * n) / 3};
             int votes = 0;
             for (int t = 0; t < 3; ++t) {
-                if (pointInRing(vertices_[sample[t]].x,
-                                vertices_[sample[t]].y, info[j])) ++votes;
+                const Point& p = rings[i][sample[t]];
+                if (pointInRing(p[0], p[1], j)) ++votes;
             }
             return votes >= 2;
         };
@@ -541,10 +642,9 @@ public:
         // Containment matrix + winding number per ring.
         std::vector<uint8_t> cont(N * N, 0);
         for (size_t i = 0; i < N; ++i) {
-            if (info[i].e - info[i].s < 3) continue;
             int w = ringSign(i);
             for (size_t j = 0; j < N; ++j) {
-                if (j == i || info[j].e - info[j].s < 3) continue;
+                if (j == i) continue;
                 if (containedIn(i, j)) {
                     cont[i * N + j] = 1;
                     w += ringSign(j);
@@ -555,7 +655,6 @@ public:
 
         // Attach each hole (winding 0) to the smallest enclosing filled ring.
         for (size_t i = 0; i < N; ++i) {
-            if (info[i].e - info[i].s < 3) continue;
             if (info[i].winding != 0) continue;
             float bestBboxArea = std::numeric_limits<float>::infinity();
             for (size_t j = 0; j < N; ++j) {
@@ -566,32 +665,20 @@ public:
             }
         }
 
-        using Point   = std::array<float, 2>;
-        using Ring    = std::vector<Point>;
-        using Polygon = std::vector<Ring>;
-
         sgl_begin_triangles();
         sgl_c4f(col.r, col.g, col.b, col.a);
         for (size_t i = 0; i < N; ++i) {
-            if (info[i].e - info[i].s < 3) continue;
             // Draw filled rings and orphan holes; holes that found a parent
             // are added to that parent's polygon below.
             if (info[i].winding == 0 && info[i].parent >= 0) continue;
 
             Polygon poly;
-            poly.emplace_back();
-            for (size_t k = info[i].s; k < info[i].e; ++k) {
-                poly.back().push_back({vertices_[k].x, vertices_[k].y});
-            }
+            poly.push_back(rings[i]);
 
             // Attach direct-child holes.
             for (size_t j = 0; j < N; ++j) {
                 if (info[j].parent != (int)i) continue;
-                if (info[j].e - info[j].s < 3) continue;
-                poly.emplace_back();
-                for (size_t k = info[j].s; k < info[j].e; ++k) {
-                    poly.back().push_back({vertices_[k].x, vertices_[k].y});
-                }
+                poly.push_back(rings[j]);
             }
 
             // Tessellate. Earcut returns indices into the flat (outer + holes)
