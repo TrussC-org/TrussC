@@ -9759,6 +9759,15 @@ types:
         description_ja: "パスが閉じているか確認"
         description_ko: "경로가 닫혀 있는지 확인"
         snippet: "isClosed()"
+      - name: reverseWinding
+        return: "Path&"
+        signatures:
+          - params: ""
+          - params: "size_t subpath"
+        description: "Reverse the winding direction (vertex order) of all subpaths, or of one subpath. Under drawFill's non-zero winding rule, reversing a subpath toggles it between filling and cutting — e.g. build a circle contour, then reverseWinding(i) it into a hole punch. Reversing ALL subpaths leaves the render unchanged (only relative direction matters) — handy for imported outlines using the opposite convention."
+        description_ja: "subpath の巻き方向 (頂点順) を反転。引数なしで全 subpath、index 指定で 1 つだけ。drawFill の non-zero winding rule では反転で塗り ↔ 穴が切り替わる — 円の contour を作って reverseWinding(i) すれば穴パンチになる。全部反転しても描画結果は不変 (相対方向のみ意味を持つ) なので、逆巻き慣習のインポートデータの修正にも使える。"
+        description_ko: "subpath의 감김 방향 (정점 순서)을 반전. 인수 없이 전체, index 지정으로 하나만. drawFill의 non-zero winding rule에서는 반전으로 채움 ↔ 구멍이 전환됨. 전체 반전은 렌더 결과 불변 (상대 방향만 의미) — 반대 규약의 임포트 데이터 수정에도 사용."
+        snippet: "reverseWinding(${1:1})"
       - name: draw
         return: "void"
         signatures:
@@ -9771,9 +9780,9 @@ types:
         return: "void"
         signatures:
           - params: ""
-        description: "Fill the path as a concave polygon with holes (earcut tessellation). Subpaths are grouped by spatial containment — outer ring + direct children become holes, grandchildren become separate filled islands. Use this for glyphs with holes (e, a, O, 日 ...) and any shape that drawString-style fill can't handle."
-        description_ja: "穴付き凹多角形として塗りつぶし (earcut)。subpath は包含関係でグループ化 — 外枠 + 直下の子が穴、孫は別の塗り島。穴付きグリフ (e, a, O, 日 等) や凹形状に使う。"
-        description_ko: "구멍 있는 오목 다각형 채우기 (earcut). subpath는 공간적 포함 관계로 그룹화 — 외곽선 + 직접 자식이 구멍, 손자는 별도 채우기 섬. 구멍 있는 글리프 (e, a, O, 日 등)와 오목한 형태에 사용."
+        description: "Fill the path as a concave polygon with holes (earcut tessellation). Subpaths follow the non-zero winding rule (SVG / PostScript default): a subpath wound opposite to its enclosing ring becomes a hole; same-direction subpaths union (never punch holes). Handles glyphs with holes (e, a, O, 日 ...), overlapping contours, and both TrueType / CFF winding conventions. To cut a hole in a hand-built Path, wind the inner subpath opposite (see reverseWinding)."
+        description_ja: "穴付き凹多角形として塗りつぶし (earcut)。subpath は non-zero winding rule (SVG / PostScript のデフォルト) に従う — 外側のリングと逆巻きの subpath が穴になり、同方向は union (穴を開けない)。穴付きグリフ (e, a, O, 日 等)、重なった contour、TrueType / CFF 両方の巻き方向慣習に対応。手書き Path で穴を開けるには内側を逆巻きにする (reverseWinding 参照)。"
+        description_ko: "구멍 있는 오목 다각형 채우기 (earcut). subpath는 non-zero winding rule (SVG / PostScript 기본값)을 따름 — 바깥 링과 반대로 감긴 subpath가 구멍이 되고, 같은 방향은 union. 구멍 있는 글리프 (e, a, O, 日 등), 겹친 contour, TrueType / CFF 양쪽 규약 지원. 수제 Path에 구멍을 내려면 안쪽을 반대로 감음 (reverseWinding 참조)."
         snippet: "drawFill()"
       - name: drawStroke
         return: "void"

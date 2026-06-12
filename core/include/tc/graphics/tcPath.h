@@ -384,6 +384,23 @@ public:
     void setClosed(bool closed)   { subpathClosed_.back() = closed; }
     bool isClosed() const         { return subpathClosed_.back(); }
 
+    // Reverse the winding direction (vertex order) of one subpath, or of
+    // every subpath. Under drawFill()'s non-zero winding rule, reversing a
+    // subpath toggles it between filling and cutting — e.g. build a circle
+    // with the same helper you use for outlines, then reverseWinding() it
+    // into a hole punch. Reversing ALL subpaths leaves the rendered result
+    // unchanged (only relative direction matters), which also makes this
+    // the fix for imported outlines that use the opposite convention.
+    Path& reverseWinding(size_t i) {
+        auto [s, e] = getSubpathRange(i);
+        std::reverse(vertices_.begin() + s, vertices_.begin() + e);
+        return *this;
+    }
+    Path& reverseWinding() {
+        for (size_t i = 0; i < subpathStarts_.size(); ++i) reverseWinding(i);
+        return *this;
+    }
+
     // Draw — fill (per-subpath triangle fan) + 1px stroke (per-subpath line
     // strip). Fill is convex-only; for concave / holed shapes call drawFill().
     void draw() const {
@@ -424,22 +441,27 @@ public:
     //
     // Subpaths are grouped following the non-zero winding rule — the default
     // fill rule of SVG / PostScript and the rule TrueType / CFF rasterizers
-    // use. Subpaths wound in the path's dominant direction are outer rings;
-    // subpaths wound the opposite way are holes. The dominant direction is
-    // taken from the largest subpath by |signed area|: a hole is always
-    // strictly contained in some outer ring (which is therefore larger), so
-    // the largest ring can never be a hole. This self-normalizes across the
-    // opposite winding conventions of TrueType-flavored (CW outers) and
-    // CFF-flavored (CCW outers) fonts, in either Y-axis orientation.
+    // use. For each subpath we compute the winding number of the region just
+    // inside it: its own direction (sign of the shoelace area) plus the
+    // directions of every subpath containing it. Winding 0 → hole boundary,
+    // attached to the smallest enclosing filled subpath; non-zero → filled.
     //
-    // Same-direction subpaths never punch holes in each other, so glyphs
-    // built from several overlapping contours (e.g. serif caps overlapping
-    // the main stem in Noto Serif JP's 'W') fill correctly as their union.
-    // Each hole attaches to the smallest outer ring containing it; holes
-    // with no enclosing outer ring are drawn as independent polygons.
+    // Because only the RELATIVE direction of a ring and its container
+    // matters, this handles TrueType-flavored (CW outers) and CFF-flavored
+    // (CCW outers) fonts, either Y-axis orientation, and even paths that mix
+    // both conventions (e.g. glyph paths from two fonts merged into one
+    // Path) — exactly like a real non-zero winding rasterizer.
     //
-    // To cut a hole in a hand-built Path, wind the inner subpath opposite
-    // to the outer one (same as SVG's nonzero fill rule).
+    // Same-direction subpaths never punch holes in each other (winding adds
+    // up, never cancels), so glyphs built from several overlapping contours
+    // (e.g. serif caps overlapping the main stem in Noto Serif JP's 'W')
+    // fill correctly as their union. Containment between such overlapping
+    // same-direction rings is geometrically ambiguous, but harmless: it only
+    // moves the winding between +1 and +2, never to 0.
+    //
+    // To cut a hole in a hand-built Path, wind the inner subpath opposite to
+    // the outer one (see reverseWinding()). Zero-winding subpaths with no
+    // enclosing filled ring are drawn as independent polygons (fallback).
     // Use draw() with `fill` enabled for the fast convex-only fan path.
     void drawFill() const {
         if (vertices_.empty()) return;
@@ -450,12 +472,11 @@ public:
         struct SubInfo {
             size_t s, e;
             float minX, minY, maxX, maxY;
-            float area;   // signed shoelace area; sign = winding direction
-            int parent = -1;
+            float area;       // signed shoelace area; sign = winding direction
+            int   winding = 0;
+            int   parent  = -1;
         };
         std::vector<SubInfo> info(N);
-        float outerSign  = 0.f;   // sign of the largest ring = outer direction
-        float maxAbsArea = 0.f;
         for (size_t i = 0; i < N; ++i) {
             auto [s, e] = getSubpathRange(i);
             info[i].s = s; info[i].e = e;
@@ -479,15 +500,9 @@ public:
             info[i].minX = mnX; info[i].maxX = mxX;
             info[i].minY = mnY; info[i].maxY = mxY;
             info[i].area = area * 0.5f;
-            if (std::abs(info[i].area) > maxAbsArea) {
-                maxAbsArea = std::abs(info[i].area);
-                outerSign  = (info[i].area >= 0.f) ? 1.f : -1.f;
-            }
         }
 
-        // Wound opposite to the dominant direction → hole candidate.
-        // (outerSign == 0 means all rings are degenerate; nothing is a hole.)
-        auto isHole = [&](size_t i) { return info[i].area * outerSign < 0.f; };
+        auto ringSign = [&](size_t i) { return info[i].area >= 0.f ? 1 : -1; };
 
         auto pointInRing = [&](float px, float py, const SubInfo& r) -> bool {
             if (px < r.minX || px > r.maxX || py < r.minY || py > r.maxY) return false;
@@ -503,33 +518,48 @@ public:
             return inside;
         };
 
-        // For each hole, find the smallest enclosing outer ring. Containment
-        // is decided by majority vote over 3 spread-out vertices of the hole —
-        // robust to a single vertex touching the candidate's boundary. Holes
-        // never cross outer rings in valid outlines, so vertex parity is
-        // well-defined here (unlike same-direction rings, which may overlap
-        // each other and are never containment-tested at all).
-        for (size_t i = 0; i < N; ++i) {
-            if (info[i].e - info[i].s < 3) continue;
-            if (!isHole(i)) continue;
-
+        // Ring-in-ring containment by majority vote over 3 spread-out
+        // vertices — robust to a single vertex touching the candidate's
+        // boundary (bridged contours). Holes never cross their enclosing
+        // rings in valid outlines, so parity is well-defined where the
+        // answer matters.
+        auto containedIn = [&](size_t i, size_t j) -> bool {
             const size_t n = info[i].e - info[i].s;
             const size_t sample[3] = {
                 info[i].s,
                 info[i].s + n / 3,
                 info[i].s + (2 * n) / 3,
             };
+            int votes = 0;
+            for (int t = 0; t < 3; ++t) {
+                if (pointInRing(vertices_[sample[t]].x,
+                                vertices_[sample[t]].y, info[j])) ++votes;
+            }
+            return votes >= 2;
+        };
 
-            float bestBboxArea = std::numeric_limits<float>::infinity();
+        // Containment matrix + winding number per ring.
+        std::vector<uint8_t> cont(N * N, 0);
+        for (size_t i = 0; i < N; ++i) {
+            if (info[i].e - info[i].s < 3) continue;
+            int w = ringSign(i);
             for (size_t j = 0; j < N; ++j) {
                 if (j == i || info[j].e - info[j].s < 3) continue;
-                if (isHole(j)) continue;  // only outer rings can be parents
-                int votes = 0;
-                for (int t = 0; t < 3; ++t) {
-                    if (pointInRing(vertices_[sample[t]].x,
-                                    vertices_[sample[t]].y, info[j])) ++votes;
+                if (containedIn(i, j)) {
+                    cont[i * N + j] = 1;
+                    w += ringSign(j);
                 }
-                if (votes < 2) continue;
+            }
+            info[i].winding = w;
+        }
+
+        // Attach each hole (winding 0) to the smallest enclosing filled ring.
+        for (size_t i = 0; i < N; ++i) {
+            if (info[i].e - info[i].s < 3) continue;
+            if (info[i].winding != 0) continue;
+            float bestBboxArea = std::numeric_limits<float>::infinity();
+            for (size_t j = 0; j < N; ++j) {
+                if (!cont[i * N + j] || info[j].winding == 0) continue;
                 const float a = (info[j].maxX - info[j].minX) *
                                 (info[j].maxY - info[j].minY);
                 if (a < bestBboxArea) { bestBboxArea = a; info[i].parent = (int)j; }
@@ -544,9 +574,9 @@ public:
         sgl_c4f(col.r, col.g, col.b, col.a);
         for (size_t i = 0; i < N; ++i) {
             if (info[i].e - info[i].s < 3) continue;
-            // Draw outer rings and orphan holes; holes that found a parent
+            // Draw filled rings and orphan holes; holes that found a parent
             // are added to that parent's polygon below.
-            if (isHole(i) && info[i].parent >= 0) continue;
+            if (info[i].winding == 0 && info[i].parent >= 0) continue;
 
             Polygon poly;
             poly.emplace_back();
