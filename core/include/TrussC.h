@@ -1376,6 +1376,12 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     ensureFontAtlasForText(text);
     if (!internal::fontAtlasInitialized) return;
 
+    // Isolate style: the highlight always wants a solid background and its own
+    // colors. Without this an external noFill() would leave only the rect
+    // outline, and the setColor(background) below would leak to the caller.
+    pushStyle();
+    fill();
+
     // Calculate text size
     float textWidth, textHeight;
     getBitmapStringBounds(text, textWidth, textHeight);
@@ -1476,6 +1482,9 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     sgl_matrix_mode_projection();
     sgl_pop_matrix();
     sgl_matrix_mode_modelview();
+
+    // Restore caller's style (color, fill/stroke, etc.)
+    popStyle();
 }
 
 // ---------------------------------------------------------------------------
