@@ -159,11 +159,16 @@ inline void registerDebuggerTools() {
 
     // --- Mouse Tools ---
 
-    tool("mouse_move", "Move mouse cursor")
+    tool("mouse_move", "Move mouse cursor (with a button held, emits a drag)")
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
-        .arg<int>("button", "Button state (0:left, 1:right, 2:middle, -1:none)", false)
-        .bind<float, float, int>([](float x, float y, int button) {
+        .arg<int>("button", "Button held during the move (0:left, 1:right, 2:middle; omit or -1 for a plain move)", false)
+        .bind([](const json& a) -> json {
+            // json bind, not the typed one — the typed bind requires every
+            // declared arg, which contradicted "button" being optional.
+            float x = a.at("x").get<float>();
+            float y = a.at("y").get<float>();
+            int button = a.value("button", -1);
             // If button is pressed, treat as drag
             if (button >= 0) {
                 MouseEventRaw args;
@@ -187,6 +192,50 @@ inline void registerDebuggerTools() {
             // Update global mouse state
             ::trussc::internal::mouseX = x;
             ::trussc::internal::mouseY = y;
+
+            return json{{"status", "ok"}};
+        });
+
+    // Split press/release. A drag gesture is press → mouse_move(button) × N →
+    // release; mouse_click fires press+release back-to-back, so drag consumers
+    // (e.g. EasyCam orbit) never see an open gesture. Anchoring the global
+    // mouse position at press keeps the first drag delta sane.
+    tool("mouse_press", "Press and hold a mouse button (start of a drag; pair with mouse_move + mouse_release)")
+        .arg<float>("x", "X coordinate")
+        .arg<float>("y", "Y coordinate")
+        .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
+        .bind([](const json& a) -> json {
+            MouseEventArgs args;
+            args.pos = args.globalPos = Vec2(a.at("x").get<float>(), a.at("y").get<float>());
+            args.button = a.value("button", 0);
+            args.syncLegacy();
+
+            ::trussc::internal::mouseX = args.pos.x;
+            ::trussc::internal::mouseY = args.pos.y;
+
+            events().mousePressed.notify(args);
+            if (::trussc::internal::appMousePressedFunc)
+                ::trussc::internal::appMousePressedFunc(args);
+
+            return json{{"status", "ok"}};
+        });
+
+    tool("mouse_release", "Release a mouse button (end of a drag)")
+        .arg<float>("x", "X coordinate")
+        .arg<float>("y", "Y coordinate")
+        .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
+        .bind([](const json& a) -> json {
+            MouseEventArgs args;
+            args.pos = args.globalPos = Vec2(a.at("x").get<float>(), a.at("y").get<float>());
+            args.button = a.value("button", 0);
+            args.syncLegacy();
+
+            ::trussc::internal::mouseX = args.pos.x;
+            ::trussc::internal::mouseY = args.pos.y;
+
+            events().mouseReleased.notify(args);
+            if (::trussc::internal::appMouseReleasedFunc)
+                ::trussc::internal::appMouseReleasedFunc(args);
 
             return json{{"status", "ok"}};
         });

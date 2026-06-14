@@ -72,7 +72,3 @@ void tcApp::draw() {
     imguiEnd();
 }
 
-void tcApp::cleanup() {
-    // Shutdown ImGui
-    imguiShutdown();
-}

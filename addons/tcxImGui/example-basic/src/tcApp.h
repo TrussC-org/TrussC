@@ -12,7 +12,6 @@ class tcApp : public App {
 public:
     void setup() override;
     void draw() override;
-    void cleanup() override;
 
 private:
     // Variables for demo

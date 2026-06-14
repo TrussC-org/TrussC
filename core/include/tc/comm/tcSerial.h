@@ -5,6 +5,8 @@
 // Cross-platform serial communication class
 // - Windows: Win32 API (CreateFile, SetCommState, etc.)
 // - macOS/Linux: POSIX API (termios)
+// - Android: USB Host API (CDC-ACM devices only), JNI + usbfs.
+//   See platform/android/tcSerial_android.cpp for details and caveats.
 // =============================================================================
 
 #include <string>
@@ -21,6 +23,9 @@
     #define NOMINMAX
     #endif
     #include <windows.h>
+#elif defined(__ANDROID__)
+    // Android: no platform headers needed here; the backend lives in
+    // platform/android/tcSerial_android.cpp (USB Host CDC-ACM via JNI + usbfs).
 #else
     // POSIX (macOS, Linux)
     #include <fcntl.h>
@@ -49,6 +54,32 @@ struct SerialDeviceInfo {
     const std::string& getDeviceName() const { return deviceName; }
 };
 
+#if defined(__ANDROID__)
+// ---------------------------------------------------------------------------
+// Android backend (USB Host, CDC-ACM class devices).
+// Implemented in platform/android/tcSerial_android.cpp.
+//
+// Behavior difference vs desktop: opening a USB device requires a one-time
+// user permission dialog. setup() returns false while the dialog is pending
+// and the connection completes asynchronously; isInitialized() flips to true
+// once the user grants access. Calling setup() again for the same device
+// while pending is a cheap no-op (safe to call from a reconnect loop).
+// ---------------------------------------------------------------------------
+namespace androidserial {
+    struct Impl;
+    Impl* create();
+    void destroy(Impl* impl);
+    std::vector<SerialDeviceInfo> listDevices();
+    bool setup(Impl* impl, const std::string& devicePath, int baudRate);
+    void close(Impl* impl);
+    bool isConnected(const Impl* impl);
+    int available(const Impl* impl);
+    int readBytes(Impl* impl, void* buffer, int length);
+    int writeBytes(Impl* impl, const void* buffer, int length);
+    void flushInput(Impl* impl);
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // Serial Communication Class
 // ---------------------------------------------------------------------------
@@ -57,12 +88,18 @@ class Serial {
 public:
 #if defined(_WIN32)
     Serial() : handle_(INVALID_HANDLE_VALUE), initialized_(false) {}
+#elif defined(__ANDROID__)
+    Serial() : aimpl_(androidserial::create()), initialized_(false) {}
 #else
     Serial() : fd_(-1), initialized_(false) {}
 #endif
 
     ~Serial() {
         close();
+#if defined(__ANDROID__)
+        androidserial::destroy(aimpl_);
+        aimpl_ = nullptr;
+#endif
     }
 
     // Non-copyable
@@ -74,6 +111,9 @@ public:
 #if defined(_WIN32)
         : handle_(other.handle_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)) {
         other.handle_ = INVALID_HANDLE_VALUE;
+#elif defined(__ANDROID__)
+        : aimpl_(other.aimpl_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)) {
+        other.aimpl_ = nullptr;
 #else
         : fd_(other.fd_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)) {
         other.fd_ = -1;
@@ -87,6 +127,10 @@ public:
 #if defined(_WIN32)
             handle_ = other.handle_;
             other.handle_ = INVALID_HANDLE_VALUE;
+#elif defined(__ANDROID__)
+            androidserial::destroy(aimpl_);
+            aimpl_ = other.aimpl_;
+            other.aimpl_ = nullptr;
 #else
             fd_ = other.fd_;
             other.fd_ = -1;
@@ -157,6 +201,10 @@ public:
             }
             closedir(dir);
         }
+#elif defined(__ANDROID__)
+        // Android: enumerate CDC-ACM capable devices via USB Host API.
+        // devicePath is the usbfs node (e.g. /dev/bus/usb/001/002).
+        devices = androidserial::listDevices();
 #elif defined(__linux__)
         // Linux: Enumerate /dev/ttyUSB*, /dev/ttyACM*
         DIR* dir = opendir("/dev");
@@ -191,7 +239,17 @@ public:
 
     // Connect by specifying device path
     bool setup(const std::string& portName, int baudRate) {
+#if defined(__ANDROID__)
+        // Do NOT close() first here: androidserial::setup() keeps a pending
+        // permission request alive when called again for the same device
+        // (reconnect loops must not re-trigger the permission dialog).
+        if (!aimpl_) aimpl_ = androidserial::create();
+        devicePath_ = portName;
+        initialized_ = androidserial::setup(aimpl_, portName, baudRate);
+        return initialized_;
+#else
         close();
+#endif
 
 #if defined(_WIN32)
         // Windows: Open COM port
@@ -267,7 +325,7 @@ public:
         logNotice() << "Serial: connected to " << portName << " at " << baudRate << " baud";
         return true;
 
-#else
+#elif !defined(__ANDROID__)
         // POSIX (macOS, Linux)
         // Open device (non-blocking)
         fd_ = open(portName.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
@@ -356,6 +414,8 @@ public:
             handle_ = INVALID_HANDLE_VALUE;
             logVerbose() << "Serial: disconnected from " << devicePath_;
         }
+#elif defined(__ANDROID__)
+        if (aimpl_) androidserial::close(aimpl_);
 #else
         if (fd_ != -1) {
             ::close(fd_);
@@ -371,9 +431,13 @@ public:
     // ---------------------------------------------------------------------------
 
     // Check if connected
+    // Android: may flip to true AFTER setup() returned false, once the user
+    // grants USB permission (see androidserial note above).
     bool isInitialized() const {
 #if defined(_WIN32)
         return initialized_ && handle_ != INVALID_HANDLE_VALUE;
+#elif defined(__ANDROID__)
+        return aimpl_ && androidserial::isConnected(aimpl_);
 #else
         return initialized_ && fd_ != -1;
 #endif
@@ -395,6 +459,8 @@ public:
             return (int)comStat.cbInQue;
         }
         return 0;
+#elif defined(__ANDROID__)
+        return androidserial::available(aimpl_);
 #else
         int bytesAvailable = 0;
         if (ioctl(fd_, FIONREAD, &bytesAvailable) == -1) {
@@ -420,6 +486,8 @@ public:
             return -1;
         }
         return (int)bytesRead;
+#elif defined(__ANDROID__)
+        return androidserial::readBytes(aimpl_, buffer, length);
 #else
         ssize_t result = read(fd_, buffer, length);
         if (result == -1) {
@@ -458,6 +526,11 @@ public:
             return byte;
         }
         return -1;  // No data
+#elif defined(__ANDROID__)
+        int result = androidserial::readBytes(aimpl_, &byte, 1);
+        if (result == 1) return byte;
+        if (result == 0) return -1;  // No data
+        return -2;  // Error
 #else
         ssize_t result = read(fd_, &byte, 1);
         if (result == 1) {
@@ -485,6 +558,8 @@ public:
             return -1;
         }
         return (int)bytesWritten;
+#elif defined(__ANDROID__)
+        return androidserial::writeBytes(aimpl_, buffer, length);
 #else
         ssize_t result = write(fd_, buffer, length);
         if (result == -1) {
@@ -513,6 +588,8 @@ public:
         if (!isInitialized()) return;
 #if defined(_WIN32)
         PurgeComm(handle_, PURGE_RXCLEAR);
+#elif defined(__ANDROID__)
+        androidserial::flushInput(aimpl_);
 #else
         tcflush(fd_, TCIFLUSH);
 #endif
@@ -523,6 +600,8 @@ public:
         if (!isInitialized()) return;
 #if defined(_WIN32)
         PurgeComm(handle_, PURGE_TXCLEAR);
+#elif defined(__ANDROID__)
+        // No-op: Android writes are synchronous bulk transfers
 #else
         tcflush(fd_, TCOFLUSH);
 #endif
@@ -533,6 +612,8 @@ public:
         if (!isInitialized()) return;
 #if defined(_WIN32)
         PurgeComm(handle_, PURGE_RXCLEAR | PURGE_TXCLEAR);
+#elif defined(__ANDROID__)
+        androidserial::flushInput(aimpl_);
 #else
         tcflush(fd_, TCIOFLUSH);
 #endif
@@ -543,6 +624,8 @@ public:
         if (!isInitialized()) return;
 #if defined(_WIN32)
         FlushFileBuffers(handle_);
+#elif defined(__ANDROID__)
+        // No-op: Android writes are synchronous bulk transfers
 #else
         tcdrain(fd_);
 #endif
@@ -551,13 +634,15 @@ public:
 private:
 #if defined(_WIN32)
     HANDLE handle_;        // Windows handle
+#elif defined(__ANDROID__)
+    androidserial::Impl* aimpl_;  // Android backend state
 #else
     int fd_;               // File descriptor (POSIX)
 #endif
     bool initialized_;     // Connection state
     std::string devicePath_; // Current device path
 
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__ANDROID__)
     // Convert baud rate to speed_t (POSIX only)
     speed_t baudRateToSpeed(int baudRate) {
         switch (baudRate) {
