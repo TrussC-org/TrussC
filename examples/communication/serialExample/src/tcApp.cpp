@@ -116,7 +116,7 @@ void tcApp::draw() {
     drawBitmapString(deviceStr, 50, 60);
 
     // Message to send
-    std::string msgStr = "Type to send message\n";
+    std::string msgStr = "Type to send message (or click/tap to send \"hello\")\n";
     if (!messageToSend.empty()) {
         msgStr += messageToSend;
     }
@@ -137,6 +137,15 @@ void tcApp::draw() {
         drawBitmapString(receivedMessages[i], 550, posY, 2.0f);
         posY += 42;
     }
+}
+
+// =============================================================================
+// mousePressed - click/tap sends a test message
+// (mainly for Android and other targets without a hardware keyboard)
+// =============================================================================
+void tcApp::mousePressed(Vec2 pos, int button) {
+    messageToSend = "hello";
+    bSendSerialMessage = true;
 }
 
 // =============================================================================
