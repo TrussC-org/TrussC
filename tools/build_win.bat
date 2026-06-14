@@ -30,9 +30,14 @@ REM Setup Visual Studio environment
 for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VS_PATH=%%i
 if defined VS_PATH call "%VS_PATH%\VC\Auxiliary\Build\vcvarsall.bat" x64
 
-REM CMake configuration
+REM CMake configuration. Force the Ninja generator: without -G, CMake defaults
+REM to the Visual Studio generator on Windows, which fails when the installed
+REM CMake doesn't recognize a newer VS (e.g. VS2026 / "Visual Studio 18"). The
+REM vcvarsall call above puts cl.exe and VS-bundled ninja on PATH, so Ninja
+REM builds work across VS versions. Single-config generator -> set the build
+REM type here (the --build --config flag is multi-config only).
 echo Running CMake...
-cmake ..
+cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
 if %ERRORLEVEL% neq 0 (
     echo.
     echo ERROR: CMake configuration failed!
@@ -45,7 +50,7 @@ if %ERRORLEVEL% neq 0 (
 REM Build
 echo.
 echo Building...
-cmake --build . --config Release --parallel
+cmake --build . --parallel
 if %ERRORLEVEL% neq 0 (
     echo.
     echo ERROR: Build failed!
