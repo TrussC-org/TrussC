@@ -41,9 +41,9 @@ jobs:
           path: |
             core/build-${{ matrix.preset }}
             tools/build
-          key: ${{ runner.os }}-build-v3-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
+          key: ${{ runner.os }}-build-v4-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
           restore-keys: |
-            ${{ runner.os }}-build-v3-
+            ${{ runner.os }}-build-v4-
 
       # Linux: Install dependencies using shared script
       - name: Install Linux dependencies
