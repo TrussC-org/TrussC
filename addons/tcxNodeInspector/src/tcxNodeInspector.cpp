@@ -768,4 +768,106 @@ void NodeInspector::drawGizmo() {
     }
 }
 
+// =============================================================================
+// Autonomous mode — the inspector draws itself every frame with no per-frame
+// calls. Static API drives the singleton; the work lives in private helpers.
+// =============================================================================
+
+NodeInspector& NodeInspector::attach() {
+    NodeInspector& s = instance();
+    s.attachRoot_ = nullptr;
+    s.doAttach();
+    return s;
+}
+
+NodeInspector& NodeInspector::attach(Node& root) {
+    NodeInspector& s = instance();
+    s.attachRoot_ = &root;
+    s.doAttach();
+    return s;
+}
+
+NodeInspector& NodeInspector::attach(int toggleKey) {
+    setToggleKey(toggleKey);
+    return attach();
+}
+
+NodeInspector& NodeInspector::attach(Node& root, int toggleKey) {
+    setToggleKey(toggleKey);
+    return attach(root);
+}
+
+void NodeInspector::detach() {
+    instance().doDetach();
+}
+
+NodeInspector& NodeInspector::setToggleKey(int key) {
+    NodeInspector& s = instance();
+    s.toggleKeys_ = {key};
+    s.ensureToggleKeyListener();
+    return s;
+}
+
+NodeInspector& NodeInspector::addToggleKey(int key) {
+    NodeInspector& s = instance();
+    s.toggleKeys_.push_back(key);
+    s.ensureToggleKeyListener();
+    return s;
+}
+
+NodeInspector& NodeInspector::clearToggleKeys() {
+    instance().toggleKeys_.clear();         // listener stays; nothing matches
+    return instance();
+}
+
+// --- private helpers ---------------------------------------------------------
+
+void NodeInspector::doAttach() {
+    imguiSetup();                           // idempotent — safe if already set up
+    ensureExitGuard();
+
+    // onRender fires after the scene has drawn (so camera contexts are current
+    // for the gizmo) and before tcxImGui's render listener (priority 1000).
+    // Building the frame at the default priority lands it in the same pass, on
+    // top of the scene. Re-attaching just replaces the previous listener.
+    autoDraw_ = events().onRender.listen([this] {
+        Node* r = attachRoot_ ? attachRoot_ : getRootNode();
+        if (!r) return;
+        imguiBegin();
+        draw(*r);
+        imguiEnd();
+    });
+}
+
+void NodeInspector::doDetach() {
+    autoDraw_ = {};
+}
+
+// Installed once and kept for the app's lifetime; set/add/clear only edit
+// toggleKeys_, so a cleared set simply never matches.
+void NodeInspector::ensureToggleKeyListener() {
+    if (toggleKeyListener_) return;
+    ensureExitGuard();
+    toggleKeyListener_ = events().keyPressed.listen([this](KeyEventArgs& e) {
+        if (e.consumed) return;             // e.g. typing in the inspector's name field
+        for (int k : toggleKeys_) {
+            if (e.key == k) { toggle(); break; }
+        }
+    });
+}
+
+// The singleton outlives the framework, so its listeners would otherwise be
+// torn down at static-destruction time — after events() may already be gone.
+// Drop them at the exit event instead, while everything is still alive (the
+// same pattern tcxImGui's ImGuiManager uses). Removing exitListener_ from
+// inside its own callback is fine: the dispatch list is snapshotted.
+void NodeInspector::ensureExitGuard() {
+    if (exitListener_) return;
+    exitListener_ = events().exit.listen([this] {
+        autoDraw_ = {};
+        toggleKeyListener_ = {};
+        exitListener_ = {};
+    });
+}
+
 } // namespace tcx

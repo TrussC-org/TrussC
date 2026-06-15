@@ -75,8 +75,23 @@ protected:
     }
 };
 
+// A single debug overlay per app — NodeInspector is a singleton, not something
+// you instantiate. The init / autonomous API is static (attach / toggle keys);
+// everything else (style, selection, manual draw) hangs off instance(). Drop it
+// in with one line in setup() and no member:
+//
+//     NodeInspector::attach(KEY_F1);                 // autonomous, F1 toggles
+//     NodeInspector::attach(KEY_F1).setAccent(...);  // static call chains into instance
+//
 class NodeInspector {
 public:
+    // The one inspector. Constructed on first use (Meyers singleton). Use this
+    // to reach the instance-level API (style, selection, manual draw).
+    static NodeInspector& instance() {
+        static NodeInspector inst;
+        return inst;
+    }
+
     // Look & feel. Inspectors get cramped fast, so the defaults are compact and
     // the panel background is semi-transparent. The accent recolors the title
     // bars / selection so an inspector reads as visually distinct from an app's
@@ -129,6 +144,35 @@ public:
     bool isGizmoDragging() const { return dragAxis_ >= 0; }
 
     // -------------------------------------------------------------------------
+    // Autonomous mode (static — drives the singleton)
+    // -------------------------------------------------------------------------
+    // attach() makes the inspector draw itself every frame — call it once in
+    // setup() and write nothing in your app's draw(). It ensures imgui is
+    // initialized (imguiSetup) and then drives imguiBegin()/draw(root)/imguiEnd()
+    // from an onRender listener — after the scene is drawn, so the gizmo's camera
+    // projection is current-frame, and before tcxImGui's render. Root defaults to
+    // getRootNode() (the running App); pass one to inspect a subtree instead.
+    // Each returns the singleton, so a call chains into the instance API
+    // (e.g. NodeInspector::attach(KEY_F1).setAccent(...)).
+    //
+    // attach() OWNS the imgui frame. If your app also drives imgui itself, don't
+    // attach() — call instance().draw(root) inside your own imguiBegin()/imguiEnd().
+    static NodeInspector& attach();
+    static NodeInspector& attach(::tc::Node& root);
+    static NodeInspector& attach(int toggleKey);                  // attach() + setToggleKey
+    static NodeInspector& attach(::tc::Node& root, int toggleKey);
+    static void detach();                                         // stop drawing itself
+    static bool isAttached() { return static_cast<bool>(instance().autoDraw_); }
+
+    // Toggle key(s): pressing any registered key flips the inspector on/off
+    // (toggle()). The key listener is installed on the first set/add and stays
+    // for the app's lifetime; these just edit the key set, so a cleared set
+    // simply never matches. Works with or without attach().
+    static NodeInspector& setToggleKey(int key);     // replace the set with one key
+    static NodeInspector& addToggleKey(int key);     // add one key
+    static NodeInspector& clearToggleKeys();         // forget all keys (listener stays)
+
+    // -------------------------------------------------------------------------
     // Multi-selection
     // -------------------------------------------------------------------------
     // Lives in the inspector, NOT in core: core's selection stays the single
@@ -154,8 +198,24 @@ private:
     char     nameBuf_[128] = "";
     uint64_t nameBufFor_   = 0;
 
+    // Singleton: no user-constructed instances (use instance() / the static API).
+    NodeInspector() = default;
+    NodeInspector(const NodeInspector&) = delete;
+    NodeInspector& operator=(const NodeInspector&) = delete;
+
     void drawTreeNode(const ::tc::Node::Ptr& node);
     void syncNameBuf(::tc::Node* node);
+
+    // --- autonomous mode -----------------------------------------------------
+    void doAttach();                          // imguiSetup + onRender listener
+    void doDetach();                          // drop the frame driver
+    void ensureToggleKeyListener();
+    void ensureExitGuard();                   // drop listeners at exit (before teardown)
+    ::tc::EventListener autoDraw_;             // onRender frame driver (attach)
+    ::tc::Node*         attachRoot_ = nullptr; // null => getRootNode() each frame
+    std::vector<int>    toggleKeys_;
+    ::tc::EventListener toggleKeyListener_;    // installed once, then lives on
+    ::tc::EventListener exitListener_;         // clears the above while events() is alive
 
     // --- gizmo ---------------------------------------------------------------
     enum class GizmoMode { Translate, Rotate };

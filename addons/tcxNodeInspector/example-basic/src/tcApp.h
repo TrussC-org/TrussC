@@ -13,10 +13,7 @@ public:
     void setup() override;
     void update() override;
     void draw() override;
-    void keyPressed(const KeyEventArgs& e) override;
-    void cleanup() override;
 
 private:
     RectNode::Ptr sceneRoot_;
-    NodeInspector inspector_;
 };
