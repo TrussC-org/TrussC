@@ -50,6 +50,29 @@ trusscli update -p path/to/myProject --tc-root path/to/TrussC
 trusscli new path/to/myNewApp
 ```
 
+### Keeping `trusscli` in sync
+
+`trusscli` is a compiled binary. When you update TrussC by pulling the latest
+source (`git pull`), the binary you already have is **not** rebuilt automatically,
+so it can fall out of step with the framework.
+
+```bash
+# Pull + rebuild trusscli in one step (recommended)
+trusscli upgrade
+```
+
+If you pull manually instead, rebuild `trusscli` afterwards
+(`tools/build_mac.command` / `build_win.bat` / `build_linux.sh`). `trusscli`
+detects this drift and prints a reminder on startup when the source has changed
+since the binary was built:
+
+```
+Note: TrussC has changed since trusscli was built (trusscli v0.6.1 vs TrussC v0.7.0).
+      Run 'trusscli upgrade' to rebuild trusscli in sync.
+```
+
+`trusscli doctor` reports the same version-sync status in detail.
+
 ---
 
 ## 2. Building Projects
