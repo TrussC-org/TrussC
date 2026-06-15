@@ -6,6 +6,9 @@
 #include "ProjectGenerator.h"
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+#include <set>
+#include <map>
 #include <thread>
 
 namespace fs = std::filesystem;
@@ -363,7 +366,25 @@ void tcApp::draw() {
         for (size_t i = 0; i < addons.size(); i++) {
             bool selected = addonSelected[i] != 0;
             if (ImGui::Checkbox(addons[i].c_str(), &selected)) {
-                addonSelected[i] = selected ? 1 : 0;
+                if (selected) {
+                    // Checking an addon auto-selects its dependencies so they
+                    // are recorded in addons.make (no implicit/hidden deps).
+                    selectAddonWithDeps(i);
+                } else {
+                    addonSelected[i] = 0;
+                }
+            }
+            // Show declared dependencies as a hint next to the checkbox.
+            auto depIt = addonDeps.find(addons[i]);
+            if (depIt != addonDeps.end() && !depIt->second.empty()) {
+                string hint = "(needs ";
+                for (size_t d = 0; d < depIt->second.size(); d++) {
+                    if (d > 0) hint += ", ";
+                    hint += depIt->second[d];
+                }
+                hint += ")";
+                ImGui::SameLine();
+                ImGui::TextDisabled("%s", hint.c_str());
             }
         }
     }
@@ -658,6 +679,7 @@ void tcApp::saveConfig() {
 void tcApp::scanAddons() {
     addons.clear();
     addonSelected.clear();
+    addonDeps.clear();
 
     if (tcRoot.empty()) return;
 
@@ -671,12 +693,56 @@ void tcApp::scanAddons() {
             if (name.substr(0, 3) == "tcx") {
                 addons.push_back(name);
                 addonSelected.push_back(0);
+
+                // Read declared dependencies from addon.json (entries may be
+                // plain strings or objects with a "name" key).
+                string jsonPath = entry.path().string() + "/addon.json";
+                if (fs::exists(jsonPath)) {
+                    try {
+                        ifstream f(jsonPath);
+                        stringstream ss;
+                        ss << f.rdbuf();
+                        Json meta = Json::parse(ss.str());
+                        if (meta.contains("dependencies") && meta["dependencies"].is_array()) {
+                            for (const auto& d : meta["dependencies"]) {
+                                string dep;
+                                if (d.is_string()) dep = d.get<string>();
+                                else if (d.is_object()) dep = d.value("name", "");
+                                if (!dep.empty()) addonDeps[name].push_back(dep);
+                            }
+                        }
+                    } catch (...) {
+                        // Ignore malformed addon.json — treat as no dependencies.
+                    }
+                }
             }
         }
     }
 
     // Sort
     sort(addons.begin(), addons.end());
+}
+
+void tcApp::selectAddonWithDeps(size_t index) {
+    if (index >= addons.size()) return;
+    addonSelected[index] = 1;
+
+    // Walk the dependency graph, selecting each dep that exists locally.
+    vector<string> stack = addonDeps[addons[index]];
+    set<string> seen;
+    while (!stack.empty()) {
+        string dep = stack.back();
+        stack.pop_back();
+        if (seen.count(dep)) continue;
+        seen.insert(dep);
+        for (size_t i = 0; i < addons.size(); i++) {
+            if (addons[i] == dep) {
+                addonSelected[i] = 1;
+                for (const string& sub : addonDeps[dep]) stack.push_back(sub);
+                break;
+            }
+        }
+    }
 }
 
 string tcApp::getTemplatePath() {
