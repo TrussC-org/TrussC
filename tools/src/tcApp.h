@@ -43,6 +43,7 @@ private:
     string importedProjectPath;         // Full path for Import mode
     vector<string> addons;              // Available addons
     vector<int> addonSelected;          // Addon selection state (0/1)
+    map<string, vector<string>> addonDeps;  // addon name -> declared dependency names
     IdeType ideType = IdeType::VSCode;  // Default is VSCode
     bool generateWebBuild = false;      // Generate Web (Emscripten) build
     bool generateAndroidBuild = false;  // Generate Android build
@@ -89,6 +90,8 @@ private:
     void loadConfig();
     void saveConfig();
     void scanAddons();
+    // Select an addon (by index) and auto-select its transitive dependencies.
+    void selectAddonWithDeps(size_t index);
     void importProject(const string& path);
     string getTemplatePath();
     void setStatus(const string& msg, bool isError = false);

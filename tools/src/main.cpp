@@ -515,6 +515,23 @@ static void printVersion() {
     }
 }
 
+// Print a one-line nudge to stderr when the running trusscli was built from a
+// different TrussC revision than the source tree it now points at (e.g. after a
+// manual `git pull`). Non-fatal — it only reminds the user to `trusscli upgrade`
+// so the binary is rebuilt in sync. Silent when the version can't be determined
+// (no git, "unknown" build, etc.) so it never nags where the check is moot.
+static void warnIfVersionDrift(const string& tcRoot) {
+    if (tcRoot.empty()) return;
+    const string built = TRUSSCLI_VERSION;
+    if (built == "unknown") return;
+    const string current = queryTrussCVersion(tcRoot);
+    if (current.empty() || current == built) return;
+
+    cerr << "Note: TrussC has changed since trusscli was built "
+         << "(trusscli " << built << " vs TrussC " << current << ").\n"
+         << "      Run 'trusscli upgrade' to rebuild trusscli in sync.\n";
+}
+
 // =============================================================================
 // Common helpers for project-based subcommands
 // =============================================================================
@@ -1299,6 +1316,38 @@ static void printAddHelp() {
          << "  trusscli addon add tcxOsc tcxImGui tcxBox2d    Add multiple addons at once\n";
 }
 
+// Collect the transitive dependency names of a locally-installed addon by
+// reading its addon.json `dependencies` field (entries may be plain strings or
+// objects with a "name" key). Only names are gathered here — the caller checks
+// availability and selects them. `seen` guards against cycles and duplicates;
+// pre-seed it with the already-requested addons so they are not re-listed.
+static void collectAddonDependencies(const string& tcRoot,
+                                     const string& addonName,
+                                     set<string>& seen,
+                                     vector<string>& out) {
+    string jsonPath = tcRoot + "/addons/" + addonName + "/addon.json";
+    if (!fs::exists(jsonPath)) return;
+    Json meta;
+    try {
+        ifstream f(jsonPath);
+        stringstream ss;
+        ss << f.rdbuf();
+        meta = Json::parse(ss.str());
+    } catch (...) {
+        return;
+    }
+    if (!meta.contains("dependencies") || !meta["dependencies"].is_array()) return;
+    for (const auto& d : meta["dependencies"]) {
+        string dep;
+        if (d.is_string()) dep = d.get<string>();
+        else if (d.is_object()) dep = d.value("name", "");
+        if (dep.empty() || seen.count(dep)) continue;
+        seen.insert(dep);
+        out.push_back(dep);
+        collectAddonDependencies(tcRoot, dep, seen, out);  // transitive
+    }
+}
+
 static int cmdAdd(const vector<string>& args) {
     vector<string> requestedAddons;
     string explicitPath;
@@ -1356,12 +1405,33 @@ static int cmdAdd(const vector<string>& args) {
         }
     }
 
-    // Read current selection, add the requested addons (idempotent — duplicates warn)
+    // Expand with transitive dependencies so addons.make records everything the
+    // build needs — no addon gets pulled in implicitly without appearing here.
+    vector<string> depAddons;
+    {
+        set<string> seen(requestedAddons.begin(), requestedAddons.end());
+        for (const string& want : requestedAddons) {
+            collectAddonDependencies(resolvedTcRoot, want, seen, depAddons);
+        }
+    }
+    for (const string& dep : depAddons) {
+        if (find(availableAddons.begin(), availableAddons.end(), dep) == availableAddons.end()) {
+            cerr << "Error: dependency '" << dep << "' is required but not available locally.\n"
+                 << "Clone it first:  trusscli addon clone " << dep << "\n";
+            return 1;
+        }
+    }
+
+    // Read current selection, add requested + dependency addons (idempotent).
     vector<int> addonSelected;
     parseAddonsMake(projectPath, availableAddons, addonSelected);
 
+    vector<string> toAdd = requestedAddons;
+    toAdd.insert(toAdd.end(), depAddons.begin(), depAddons.end());
+    set<string> depSet(depAddons.begin(), depAddons.end());
+
     vector<string> addedNow;
-    for (const string& want : requestedAddons) {
+    for (const string& want : toAdd) {
         for (size_t i = 0; i < availableAddons.size(); ++i) {
             if (availableAddons[i] == want) {
                 if (addonSelected[i]) {
@@ -1369,6 +1439,9 @@ static int cmdAdd(const vector<string>& args) {
                 } else {
                     addonSelected[i] = 1;
                     addedNow.push_back(want);
+                    if (depSet.count(want)) {
+                        cout << "  + dependency " << want << "\n";
+                    }
                 }
                 break;
             }
@@ -3692,6 +3765,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         #endif
+        warnIfVersionDrift(autoDetectTcRoot());
         WindowSettings settings;
         settings.title = "TrussC Project Generator";
         settings.width = 500;
@@ -3708,6 +3782,14 @@ int main(int argc, char* argv[]) {
     if (first == "-v" || first == "--version" || first == "version") {
         printVersion();
         return 0;
+    }
+
+    // Nudge the user to re-sync when the TrussC source drifted from the revision
+    // trusscli was built from. Skipped for commands that either report this
+    // themselves (doctor), act on it (upgrade), or must keep output machine-clean
+    // (completion).
+    if (first != "upgrade" && first != "doctor" && first != "completion") {
+        warnIfVersionDrift(autoDetectTcRoot());
     }
 
     // On Windows, make sure `cmake` is resolvable before any subcommand that
