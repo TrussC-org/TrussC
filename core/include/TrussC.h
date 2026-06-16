@@ -1903,6 +1903,16 @@ struct WindowSettings {
         clipboardSize = size;
         return *this;
     }
+
+    // VSync / present interval. 1 = sync to display refresh (default), 0 = off.
+    // N > 1 presents every Nth refresh: on a 120Hz display, 2 -> 60fps, 4 -> 30.
+    // On Apple this also drives the display-link rate (true sub-refresh fps,
+    // not just frame skipping). Only integer divisors of the refresh are
+    // expressible this way; for arbitrary rates use setFps().
+    WindowSettings& setSwapInterval(int interval) {
+        swapInterval = interval;
+        return *this;
+    }
 };
 
 // ---------------------------------------------------------------------------
