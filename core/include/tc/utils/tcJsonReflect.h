@@ -43,24 +43,39 @@ namespace trussc {
 struct JsonWriteReflector : Reflector {
     Json members = Json::object();
 
-    bool visit(const char* name, float& v) override { members[name] = v; return false; }
-    bool visit(const char* name, int& v) override { members[name] = v; return false; }
-    bool visit(const char* name, bool& v) override { members[name] = v; return false; }
-    bool visit(const char* name, std::string& v) override { members[name] = v; return false; }
-    bool visit(const char* name, Vec2& v) override { members[name] = Json::array({v.x, v.y}); return false; }
-    bool visit(const char* name, Vec3& v) override { members[name] = Json::array({v.x, v.y, v.z}); return false; }
-    bool visit(const char* name, Color& v) override { members[name] = Json::array({v.r, v.g, v.b, v.a}); return false; }
+    bool visit(const char* name, float& v) override { cur()[name] = v; return false; }
+    bool visit(const char* name, int& v) override { cur()[name] = v; return false; }
+    bool visit(const char* name, bool& v) override { cur()[name] = v; return false; }
+    bool visit(const char* name, std::string& v) override { cur()[name] = v; return false; }
+    bool visit(const char* name, Vec2& v) override { cur()[name] = Json::array({v.x, v.y}); return false; }
+    bool visit(const char* name, Vec3& v) override { cur()[name] = Json::array({v.x, v.y, v.z}); return false; }
+    bool visit(const char* name, Color& v) override { cur()[name] = Json::array({v.r, v.g, v.b, v.a}); return false; }
 
     // Enums encode as their label string (readable dumps); out-of-range values
     // fall back to the raw int.
     bool visit(const char* name, int& v, const EnumLabelSpan& labels) override {
         if (labels.labels && v >= 0 && v < labels.count) {
-            members[name] = labels.labels[v];
+            cur()[name] = labels.labels[v];
         } else {
-            members[name] = v;
+            cur()[name] = v;
         }
         return false;
     }
+
+    // A composite member nests into its own object. Subsequent visits land in
+    // the child until endGroup(). We only ever add keys to the deepest open
+    // object, so the parent pointers on the stack stay valid.
+    void beginGroup(const char* name) override {
+        Json& child = (cur()[name] = Json::object());
+        stack_.push_back(&child);
+    }
+    void endGroup() override {
+        if (!stack_.empty()) stack_.pop_back();
+    }
+
+private:
+    std::vector<Json*> stack_;
+    Json& cur() { return stack_.empty() ? members : *stack_.back(); }
 };
 
 // ---------------------------------------------------------------------------
@@ -177,15 +192,36 @@ public:
         return skip(name);
     }
 
+    // A composite member reads from its nested object. If the key is absent or
+    // not an object, the child is null and its members simply find nothing.
+    void beginGroup(const char* name) override {
+        const Json* s = curSrc();
+        const Json* child = nullptr;
+        if (s && s->is_object()) {
+            auto it = s->find(name);
+            if (it != s->end() && it->is_object()) child = &*it;
+        }
+        srcStack_.push_back(child);
+    }
+    void endGroup() override {
+        if (!srcStack_.empty()) srcStack_.pop_back();
+    }
+
 private:
     Json src_;
-    std::set<std::string> seen_;   // member names encountered while reflecting
+    std::set<std::string> seen_;          // top-level member names encountered
+    std::vector<const Json*> srcStack_;   // nested source objects (null = absent)
+
+    const Json* curSrc() const {
+        return srcStack_.empty() ? &src_ : srcStack_.back();
+    }
 
     const Json* find(const char* name) {
-        seen_.insert(name);
-        if (!src_.is_object()) return nullptr;
-        auto it = src_.find(name);
-        return it == src_.end() ? nullptr : &*it;
+        if (srcStack_.empty()) seen_.insert(name);  // unknownKeys is top-level
+        const Json* s = curSrc();
+        if (!s || !s->is_object()) return nullptr;
+        auto it = s->find(name);
+        return it == s->end() ? nullptr : &*it;
     }
 
     static bool isNumberArray(const Json& j, size_t minSize) {

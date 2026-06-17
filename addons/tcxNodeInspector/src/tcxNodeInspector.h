@@ -63,16 +63,45 @@ struct ImGuiReflector : ::trussc::Reflector {
         });
     }
 
+    // A composite member (nested type / TC_REFLECT_FREE) renders as a
+    // collapsible, indented tree node. When a group is collapsed we suppress
+    // its whole subtree so the reflected children draw nothing.
+    void beginGroup(const char* name) override {
+        depth_++;
+        if (suppressDepth_ > 0) { groupState_.push_back(0); return; }
+        bool open = ImGui::TreeNodeEx(
+            name, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth);
+        if (open) {
+            groupState_.push_back(1);   // open -> needs TreePop
+        } else {
+            groupState_.push_back(2);   // collapsed -> suppress contents, no TreePop
+            suppressDepth_ = depth_;
+        }
+    }
+    void endGroup() override {
+        int state = groupState_.back();
+        groupState_.pop_back();
+        if (state == 1) ImGui::TreePop();
+        if (suppressDepth_ == depth_) suppressDepth_ = 0;
+        depth_--;
+    }
+
 protected:
-    // Run a widget; in a read-only scope, grey it out and discard edits.
+    // Run a widget; suppress inside a collapsed group, grey out when read-only.
     template <class F>
     bool edit(F&& widget) {
+        if (suppressDepth_ > 0) return false;
         if (!isReadOnly()) return widget();
         ImGui::BeginDisabled(true);
         widget();
         ImGui::EndDisabled();
         return false;
     }
+
+private:
+    int depth_ = 0;                  // current group nesting depth
+    int suppressDepth_ = 0;          // >0: suppress until we exit this depth
+    std::vector<int> groupState_;    // per open group: 0 suppressed, 1 open, 2 collapsed
 };
 
 // A single debug overlay per app — NodeInspector is a singleton, not something

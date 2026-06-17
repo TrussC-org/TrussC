@@ -48,8 +48,26 @@
 // namespace. The default enum visit() falls back to the plain int visit, so
 // backends that don't know about enums keep working unchanged.
 //
+// A non-member / external type (a plain struct, or a third-party type you
+// can't add a TC_REFLECT block to) reflects through TC_REFLECT_FREE at
+// namespace scope, decomposing into supported types. The same TC_VALUE spelling
+// works inside:
+//
+//     struct Spring { float k = 1; float damp = 0.1f; Vec2 anchor; };
+//     TC_REFLECT_FREE(Spring) {
+//         TC_VALUE(k)
+//         TC_VALUE(damp)
+//         TC_VALUE(anchor)
+//     }
+//
+// Such a type can then be a TC_VALUE field of another reflected type; it is
+// visited as a nested group. Member-reflected types (TC_REFLECT) nest the same
+// way automatically.
+//
 // Backends implement Reflector (one typed visit() per supported type) — e.g.
-// an ImGui inspector, a JSON writer, a binary codec.
+// an ImGui inspector, a JSON writer, a binary codec. Nested values bracket
+// their members with beginGroup()/endGroup() (no-op by default, so flat
+// backends keep working).
 // =============================================================================
 
 #include <string>
@@ -95,6 +113,14 @@ struct Reflector {
     void pushReadOnly() { ++readOnlyDepth_; }
     void popReadOnly() { if (readOnlyDepth_ > 0) --readOnlyDepth_; }
 
+    // Composite scope — a value that decomposes into sub-values (a nested
+    // reflectable type, or a TC_REFLECT_FREE type) brackets its members with
+    // beginGroup(name)/endGroup(). The default is a no-op: backends that don't
+    // care about nesting see a flat list (the sub-values appear inline).
+    // Backends override to render a collapsible section / emit a nested object.
+    virtual void beginGroup(const char* name) { (void)name; }
+    virtual void endGroup() {}
+
 private:
     int readOnlyDepth_ = 0;
 };
@@ -129,8 +155,26 @@ inline bool reflectValue(Reflector& r, const char* name, T& v) {
         }
         if (edited) v = static_cast<T>(i);
         return edited;
-    } else {
+    } else if constexpr (requires { r.visit(name, v); }) {
+        // A primitive the Reflector knows directly.
         return r.visit(name, v);
+    } else if constexpr (requires { v.reflectMembers(r); }) {
+        // A member-reflected type (TC_REFLECT) used as a field: nest it.
+        // Edits land in place through the nested setters, so nothing to report.
+        r.beginGroup(name);
+        v.reflectMembers(r);
+        r.endGroup();
+        return false;
+    } else if constexpr (requires { tcReflectAdl(r, name, v); }) {
+        // A type that decomposes itself via ADL (TC_REFLECT_FREE or a
+        // hand-written tcReflectAdl), found in the type's own namespace.
+        return tcReflectAdl(r, name, v);
+    } else {
+        static_assert(sizeof(T) == 0,
+            "TC_VALUE: this type is not a reflectable primitive, is not "
+            "TC_REFLECT'd, and has no tcReflectAdl(Reflector&, const char*, T&) "
+            "found by ADL. Define one next to the type, or use TC_REFLECT_FREE.");
+        return false;
     }
 }
 
@@ -145,35 +189,70 @@ inline bool reflectValue(Reflector& r, const char* name, T& v) {
         return { labels_, static_cast<int>(sizeof(labels_) / sizeof(labels_[0])) }; \
     }
 
-// Open a reflect block. Both expand to reflectMembers() (chains the bases,
-// then this class's own values) plus the declaration of reflectOwnMembers();
-// the block braces the user writes right after become its body:
+// Open a reflect block. The braces the user writes right after become the body
+// of a hidden-friend tcReflectFields_(Reflector&, Self&, bool&); the virtual
+// reflectMembers() chains the bases, then forwards to it. Because member types
+// AND free types (TC_REFLECT_FREE) both funnel through a function that takes
+// the object as a `_tc_self` parameter, the SAME TC_VALUE spelling works in
+// either — member access is `_tc_self.x`, never bare or `this->`.
 //
 //     TC_REFLECT(Self, DirectBases...) { TC_VALUE(...) ... }
 //     TC_REFLECT_ROOT(Self)            { TC_VALUE(...) ... }   // declares the virtual
+//     TC_REFLECT_FREE(FreeType)        { TC_VALUE(...) ... }   // non-member / external type
 //
+// The friend is found by ADL on the object (the operator<< idiom), so the
+// macro must sit inside the class; TC_REFLECT_FREE sits at namespace scope, in
+// the type's own namespace (or in `trussc` for a third-party type you can't
+// touch — Reflector is an argument, so trussc is always an associated ns).
 #define TC_REFLECT_ROOT(Self) \
-    virtual void reflectMembers(::trussc::Reflector& r) { reflectOwnMembers(r); } \
-    void reflectOwnMembers(::trussc::Reflector& r)
+    virtual void reflectMembers(::trussc::Reflector& r) { \
+        bool _tc_edited = false; \
+        tcReflectFields_(r, *this, _tc_edited); \
+    } \
+    friend void tcReflectFields_([[maybe_unused]] ::trussc::Reflector& r, \
+                                 [[maybe_unused]] Self& _tc_self, \
+                                 [[maybe_unused]] bool& _tc_edited)
 
 #define TC_REFLECT(Self, ...) \
     void reflectMembers(::trussc::Reflector& r) override { \
         ::trussc::reflectBases<__VA_ARGS__>(this, r); \
-        reflectOwnMembers(r); \
+        bool _tc_edited = false; \
+        tcReflectFields_(r, *this, _tc_edited); \
     } \
-    void reflectOwnMembers(::trussc::Reflector& r)
+    friend void tcReflectFields_([[maybe_unused]] ::trussc::Reflector& r, \
+                                 [[maybe_unused]] Self& _tc_self, \
+                                 [[maybe_unused]] bool& _tc_edited)
+
+// Reflect a non-member / external type. Generates the ADL entry point
+// (tcReflectAdl, wrapping the fields in a beginGroup/endGroup) and the same
+// tcReflectFields_ body the member macros use, so TC_VALUE is identical inside.
+#define TC_REFLECT_FREE(Type) \
+    inline void tcReflectFields_(::trussc::Reflector&, Type&, bool&); \
+    inline bool tcReflectAdl(::trussc::Reflector& r, const char* name, Type& _tc_self) { \
+        r.beginGroup(name); \
+        bool _tc_edited = false; \
+        tcReflectFields_(r, _tc_self, _tc_edited); \
+        r.endGroup(); \
+        return _tc_edited; \
+    } \
+    inline void tcReflectFields_([[maybe_unused]] ::trussc::Reflector& r, \
+                                 [[maybe_unused]] Type& _tc_self, \
+                                 [[maybe_unused]] bool& _tc_edited)
 
 // One reflected value (see the header comment for the arity rule). A trailing
-// semicolon after the macro is harmless.
-#define TC_VALUE_1_(member) ::trussc::reflectValue(r, #member, member);
+// semicolon after the macro is harmless. Member access goes through _tc_self,
+// edits accumulate into _tc_edited (used as the return value for free/nested
+// composites; harmlessly discarded at the top level).
+#define TC_VALUE_1_(member) \
+    _tc_edited |= ::trussc::reflectValue(r, #member, _tc_self.member);
 #define TC_VALUE_2_(name, getter) \
-    do { auto _tcv = getter(); \
+    do { auto _tcv = _tc_self.getter(); \
          r.pushReadOnly(); \
          ::trussc::reflectValue(r, #name, _tcv); \
          r.popReadOnly(); } while (0);
 #define TC_VALUE_3_(name, getter, setter) \
-    do { auto _tcv = getter(); \
-         if (::trussc::reflectValue(r, #name, _tcv)) setter(_tcv); } while (0);
+    do { auto _tcv = _tc_self.getter(); \
+         if (::trussc::reflectValue(r, #name, _tcv)) { _tc_self.setter(_tcv); _tc_edited = true; } } while (0);
 
 // Arity dispatch (the extra expansion keeps MSVC's traditional preprocessor
 // from passing __VA_ARGS__ through as a single token).
