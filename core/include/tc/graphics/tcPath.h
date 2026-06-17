@@ -17,6 +17,8 @@
 
 namespace trussc {
 
+class Mesh;   // for Path::toFillMesh() (defined in tcMesh.h, after Mesh is complete)
+
 // Path — vertex container with optional curve generation. Supports multiple
 // **subpaths**: a single Path can contain several disjoint contours separated
 // by `moveTo()` (think SVG `<path>` with `M ... M ...`). Each subpath has its
@@ -472,10 +474,13 @@ public:
     // hole, and a genuine figure-8 fills both lobes — both matching what a
     // real non-zero winding rasterizer produces.
     // Use draw() with `fill` enabled for the fast convex-only fan path.
-    void drawFill() const {
-        if (vertices_.empty()) return;
-        auto& ctx = getDefaultContext();
-        Color col = ctx.getColor();
+    // Tessellate the fill into a flat triangle list (every 3 points = one
+    // triangle; 2D, z dropped) using the non-zero winding rule + self-
+    // intersection splitting documented above. Shared by drawFill() (2D) and
+    // toFillMesh() (3D/lit), so both stay in sync.
+    std::vector<std::array<float, 2>> buildFillTriangles() const {
+        std::vector<std::array<float, 2>> out;
+        if (vertices_.empty()) return out;
 
         using Point   = std::array<float, 2>;
         using Ring    = std::vector<Point>;
@@ -499,7 +504,7 @@ public:
             while (r.size() >= 2 && r.front() == r.back()) r.pop_back();
             if (r.size() >= 3) rings.push_back(std::move(r));
         }
-        if (rings.empty()) return;
+        if (rings.empty()) return out;
 
         // ---- Split self-intersecting rings into simple rings. Each proper
         // crossing X of two edges splits the ring into two rings touching at
@@ -579,7 +584,7 @@ public:
                 if (!didSplit) ++ri;  // ring is simple; re-scan same index after a split
             }
         }
-        if (rings.empty()) return;
+        if (rings.empty()) return out;
 
         const size_t N = rings.size();
         struct RingInfo {
@@ -665,10 +670,8 @@ public:
             }
         }
 
-        sgl_begin_triangles();
-        sgl_c4f(col.r, col.g, col.b, col.a);
         for (size_t i = 0; i < N; ++i) {
-            // Draw filled rings and orphan holes; holes that found a parent
+            // Emit filled rings and orphan holes; holes that found a parent
             // are added to that parent's polygon below.
             if (info[i].winding == 0 && info[i].parent >= 0) continue;
 
@@ -683,22 +686,37 @@ public:
 
             // Tessellate. Earcut returns indices into the flat (outer + holes)
             // vertex list in `poly` traversal order.
-            std::vector<uint32_t> tris = mapbox::earcut<uint32_t>(poly);
+            std::vector<uint32_t> tri = mapbox::earcut<uint32_t>(poly);
             std::vector<Point> flat;
-            flat.reserve(tris.size());  // upper bound
+            flat.reserve(tri.size());  // upper bound
             for (const Ring& r : poly) for (const Point& p : r) flat.push_back(p);
 
-            for (size_t t = 0; t + 2 < tris.size(); t += 3) {
-                const Point& a = flat[tris[t]];
-                const Point& b = flat[tris[t + 1]];
-                const Point& c = flat[tris[t + 2]];
-                sgl_v2f(a[0], a[1]);
-                sgl_v2f(b[0], b[1]);
-                sgl_v2f(c[0], c[1]);
+            for (size_t t = 0; t + 2 < tri.size(); t += 3) {
+                out.push_back(flat[tri[t]]);
+                out.push_back(flat[tri[t + 1]]);
+                out.push_back(flat[tri[t + 2]]);
             }
         }
+        return out;
+    }
+
+    // Fill the path as a concave polygon with holes (earcut tessellation), 2D.
+    // See buildFillTriangles() for the winding / hole / self-intersection rules.
+    void drawFill() const {
+        const std::vector<std::array<float, 2>> tris = buildFillTriangles();
+        if (tris.empty()) return;
+        const Color col = getDefaultContext().getColor();
+        sgl_begin_triangles();
+        sgl_c4f(col.r, col.g, col.b, col.a);
+        for (const auto& p : tris) sgl_v2f(p[0], p[1]);
         sgl_end();
     }
+
+    // Build a filled Mesh (positions + +Z normals + zero UVs, Triangles) from the
+    // path's fill — the cacheable 3D/lit counterpart of drawFill(). Tessellated
+    // once via buildFillTriangles(); draw it many times cheaply (unlike drawFill,
+    // which re-tessellates every call). Defined in tcMesh.h, after Mesh is known.
+    Mesh toFillMesh() const;
 
     // Draw the path as a thick stroke (StrokeMesh, respects strokeWeight /
     // strokeCap / strokeJoin). Use draw() for 1-pixel line rendering.
