@@ -6,6 +6,7 @@
 // =============================================================================
 
 #include "tcHeadlessState.h"
+#include "../utils/tcMainThread.h"   // getMainThreadId / drainMainThreadQueue
 
 #include <chrono>
 #include <thread>
@@ -95,6 +96,10 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // Install signal handlers
     headless::installSignalHandlers();
 
+    // Record the main thread id (this runner owns the app/update loop), so
+    // isMainThread() / runOnMainThread() behave the same as in the windowed app.
+    getMainThreadId();
+
     // Reset state
     headless::active = true;
     headless::running = true;
@@ -118,6 +123,10 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         lastTime = now;
 
         accumulator += elapsed;
+
+        // Run work marshalled from worker threads (runOnMainThread, Event
+        // Deliver::Main) on the main thread, mirroring the windowed _frame_cb.
+        drainMainThreadQueue();
 
         // Fixed timestep update
         while (accumulator >= targetDelta) {
