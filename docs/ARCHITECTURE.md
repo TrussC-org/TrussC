@@ -359,10 +359,78 @@ tc::popStyle();
 
 ### E. Threading
 
-Based on C++ standard features:
+**The Node tree and all GPU/draw state are owned by the main thread.** `setup()`,
+`update()`, `draw()`, and input callbacks all run there. Touching the tree
+(`addChild` / `removeChild` / `setPosition` / `setColor` / `addMod` / …) or GPU
+resources (`Texture`, `Fbo`, drawing) from another thread is a **data race** — it
+corrupts `children_` and crashes (not "usually fine": a worker churning the tree
+against the per-frame traversal segfaults within seconds).
 
-- Use `std::mutex` and `std::lock_guard` for synchronization
-- `tc::Thread` class wraps `std::thread` for lifecycle management
+Several things legitimately run **off** the main thread, and it is easy to reach
+for the tree from inside them:
+
+| Runs on a worker thread | Where |
+| --- | --- |
+| `TcpClient` / `UdpSocket` / `TcpServer` `onReceive` | fired directly on the receive thread |
+| `Node::callAfterAsync` / `callEveryAsync` callbacks | the async scheduler thread |
+| `AudioEngine` `audioOut` / `audioIn` (incl. `App::audioOut`) | the audio device thread |
+| your own `tc::Thread` subclasses | their own thread |
+
+(Console input and MCP requests also arrive on worker threads, but the framework
+already marshals those to the main thread for you.)
+
+#### The safe path: `runOnMainThread`
+
+From any thread, hand the work to the main thread instead of doing it inline. It
+runs at the start of the next frame, when no traversal is in flight (it runs
+immediately if you are already on the main thread):
+
+```cpp
+tcp.onReceive.listen([&](TcpMessageArgs& msg) {     // <-- worker thread!
+    auto pos = parsePos(msg);                       // ok: local work
+    runOnMainThread([this, pos] {
+        scene->addChild(makeEnemy(pos));            // ok: runs on the main thread
+    });
+});
+```
+
+In **debug builds**, the structural Node mutators assert they are on the main
+thread (`TC_ASSERT_MAIN_THREAD`) so this mistake is caught at its source; in
+release the assert compiles to nothing. The assert is a development tripwire, not
+a release safety net — the actual fix is `runOnMainThread`.
+
+#### Typed convenience: `Event<T>` `Deliver::Main`
+
+A listener can declare that it must run on the main thread, so you don't write
+the `runOnMainThread` wrapper yourself. When `notify()` is fired from a worker
+thread, the payload is copied and the listener is marshalled:
+
+```cpp
+tcp.onReceive.listen([this](TcpMessageArgs& msg) {
+    scene->addChild(makeEnemy(parsePos(msg)));      // delivered on the main thread
+}, Deliver::Main);
+```
+
+Default delivery is `Deliver::Inline` (runs on whichever thread called `notify()`
+— the existing hot-path behaviour). Notes for `Deliver::Main`: the payload `T`
+must be copy-constructible (it is captured for next-frame delivery), and the
+marshalled copy cannot write back to `arg` or participate in `consumed`
+propagation — fine for reactive events like `onReceive` (input events that use
+`consumed` already fire on the main thread, where `Main` is a no-op anyway).
+
+#### The exception: `destroy()`
+
+`Node::destroy()` is safe to call from **any** thread. It only flips an atomic
+flag; the actual unlink from `children_` is deferred to the main thread's
+`sweepDeadChildren()`. So a worker can mark a node for removal directly — it just
+can't add/move/reparent one.
+
+#### Primitives
+
+- `std::mutex` + `std::lock_guard` for your own shared state.
+- `tc::Thread` wraps `std::thread` with lifecycle management.
+- `tc::ThreadChannel<T>` is a thread-safe FIFO (the queue `runOnMainThread` is
+  built on); use it directly for other producer/consumer hand-offs.
 
 ### F. Console & AI Automation (MCP)
 

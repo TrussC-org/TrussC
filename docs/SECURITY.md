@@ -141,6 +141,19 @@ the note in `docs/ROADMAP.md`.
 
 ---
 
+## Threading & memory safety
+
+Not adversarial-input related, but a memory-safety pitfall worth knowing: the
+**Node tree and GPU state are owned by the main thread**. Touching them from a
+worker thread — most commonly inside a network `onReceive` handler, which fires
+on the receive thread — is a data race that crashes. Use `runOnMainThread(...)`
+or an `Event` listener registered with `Deliver::Main`. See
+[ARCHITECTURE.md → 5.E Threading](ARCHITECTURE.md#e-threading) for the full
+contract (which callbacks run off the main thread, the safe patterns, and the
+debug-only main-thread assert).
+
+---
+
 ## Reporting
 
 Security issues should be reported privately via GitHub Security Advisories on
