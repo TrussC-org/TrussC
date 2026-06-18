@@ -120,10 +120,25 @@ def find_addon_tests(root_dir):
                 test_paths.append(tdir)
     return test_paths
 
+def find_core_tests(root_dir):
+    # Headless behavioral regression tests for the core: core/tests/*/ (each a
+    # console TrussC project whose main() returns non-zero on failure). Same
+    # convention as addon tests, but owned by core.
+    tests_dir = os.path.join(root_dir, "core", "tests")
+    test_paths = []
+    if os.path.exists(tests_dir):
+        for name in sorted(os.listdir(tests_dir)):
+            tdir = os.path.join(tests_dir, name)
+            if os.path.isdir(tdir) and os.path.exists(os.path.join(tdir, "src")):
+                test_paths.append(tdir)
+    return test_paths
+
 def find_test_binary(test_dir, platform_info):
-    # trusscli names the binary after the dir (tests). On macOS a TrussC app is
-    # tests.app/Contents/MacOS/tests; on Windows tests.exe. Search the project tree.
-    names = ["tests.exe"] if platform_info["os"] == "windows" else ["tests", "tests_debug"]
+    # trusscli names the binary after the project dir. addons/*/tests -> "tests";
+    # core/tests/<name> -> "<name>". On macOS a TrussC app is
+    # <name>.app/Contents/MacOS/<name>; on Windows <name>.exe. Search the tree.
+    base = os.path.basename(os.path.normpath(test_dir))
+    names = [base + ".exe"] if platform_info["os"] == "windows" else [base, base + "_debug"]
     for name in names:
         for p in glob.glob(os.path.join(test_dir, "**", name), recursive=True):
             if os.path.isfile(p) and (platform_info["os"] == "windows" or os.access(p, os.X_OK)):
@@ -166,13 +181,40 @@ def build_and_run_test(test_dir, pg_bin, platform_info, args):
 
     binary = find_test_binary(test_dir, platform_info)
     if not binary:
-        Colors.print("  Test binary 'tests' not found after build!", Colors.RED)
+        Colors.print("  Test binary not found after build!", Colors.RED)
         return False, "binary-missing"
 
     Colors.print(f"  Running {os.path.relpath(binary, test_dir)} ...", Colors.YELLOW)
     if not run_command([binary], cwd=test_dir, verbose=True):  # always stream test output
         return False, "run"
     return True, None
+
+def run_test_suite(tests, label, pg_bin, platform_info, args):
+    # Build AND run a set of console test projects (addon or core). Streams each
+    # test's output; returns 0 if all pass, 1 if any fails.
+    Colors.print(f"Found {len(tests)} {label} test harness(es)", Colors.YELLOW)
+    print("")
+    failed = []
+    for i, tdir in enumerate(tests):
+        name = os.path.relpath(tdir, ROOT_DIR)
+        Colors.print(f"[{i+1}/{len(tests)}] Building & running: {name}", Colors.YELLOW)
+        ok, stage = build_and_run_test(tdir, pg_bin, platform_info, args)
+        if ok:
+            Colors.print("  Passed!", Colors.GREEN)
+        else:
+            Colors.print(f"  FAILED ({stage})", Colors.RED)
+            failed.append(f"{name} ({stage})")
+    print("")
+    Colors.print(f"=== {label.capitalize()} Test Summary ===", Colors.BLUE)
+    print(f"Total:  {len(tests)}")
+    Colors.print(f"Passed: {len(tests) - len(failed)}", Colors.GREEN)
+    if failed:
+        Colors.print(f"Failed: {len(failed)}", Colors.RED)
+        for f in failed:
+            print(f"  - {f}")
+        return 1
+    Colors.print(f"All {label} tests passed!", Colors.GREEN)
+    return 0
 
 # =============================================================================
 # Main
@@ -186,6 +228,7 @@ def main():
     parser.add_argument('--test-only', action='store_true', help="Build ONLY AllFeaturesExample for quick CI check")
     parser.add_argument('--test-hot-reload', action='store_true', help="Build ONLY HotReloadExample (exercises the host/guest split + addon includes)")
     parser.add_argument('--addon-tests-only', action='store_true', help="Build AND RUN every addons/*/tests/ harness (console, non-zero exit fails). No-op if none exist.")
+    parser.add_argument('--core-tests-only', action='store_true', help="Build AND RUN every core/tests/*/ harness (console, non-zero exit fails). No-op if none exist.")
     parser.add_argument('--verbose', action='store_true', help="Show detailed build output")
     args = parser.parse_args()
 
@@ -206,6 +249,8 @@ def main():
         Colors.print("Mode: HotReloadExample Only", Colors.YELLOW)
     if args.addon_tests_only:
         Colors.print("Mode: Addon tests (build + run)", Colors.YELLOW)
+    if args.core_tests_only:
+        Colors.print("Mode: Core tests (build + run)", Colors.YELLOW)
     print("")
 
     # Addon test harnesses (addons/*/tests/): build AND run each. A cheap,
@@ -216,29 +261,15 @@ def main():
         if not tests:
             Colors.print("No addon tests found (addons/*/tests/); nothing to do.", Colors.YELLOW)
             sys.exit(0)
-        Colors.print(f"Found {len(tests)} addon test harness(es)", Colors.YELLOW)
-        print("")
-        failed = []
-        for i, tdir in enumerate(tests):
-            name = os.path.relpath(tdir, ROOT_DIR)
-            Colors.print(f"[{i+1}/{len(tests)}] Building & running: {name}", Colors.YELLOW)
-            ok, stage = build_and_run_test(tdir, pg_bin, platform_info, args)
-            if ok:
-                Colors.print("  Passed!", Colors.GREEN)
-            else:
-                Colors.print(f"  FAILED ({stage})", Colors.RED)
-                failed.append(f"{name} ({stage})")
-        print("")
-        Colors.print("=== Addon Test Summary ===", Colors.BLUE)
-        print(f"Total:  {len(tests)}")
-        Colors.print(f"Passed: {len(tests) - len(failed)}", Colors.GREEN)
-        if failed:
-            Colors.print(f"Failed: {len(failed)}", Colors.RED)
-            for f in failed:
-                print(f"  - {f}")
-            sys.exit(1)
-        Colors.print("All addon tests passed!", Colors.GREEN)
-        sys.exit(0)
+        sys.exit(run_test_suite(tests, "addon", pg_bin, platform_info, args))
+
+    # Core behavioral tests (core/tests/*/): same build+run gate, owned by core.
+    if args.core_tests_only:
+        tests = find_core_tests(ROOT_DIR)
+        if not tests:
+            Colors.print("No core tests found (core/tests/*/); nothing to do.", Colors.YELLOW)
+            sys.exit(0)
+        sys.exit(run_test_suite(tests, "core", pg_bin, platform_info, args))
 
     if args.test_only:
         test_example = os.path.join(ROOT_DIR, "examples", "tests", "AllFeaturesExample")

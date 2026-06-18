@@ -101,6 +101,12 @@ jobs:
         shell: bash
         run: ./examples/build_all.py --addon-tests-only --verbose
 
+      # Behavioral regression tests for the core (core/tests/*/): built AND run
+      # on every build (small headless console projects, non-zero exit fails).
+      - name: Build & run core tests
+        shell: bash
+        run: ./examples/build_all.py --core-tests-only --verbose
+
       - name: Build HotReloadExample (host/guest split smoke test)
         shell: bash
         run: ./examples/build_all.py --test-hot-reload --verbose
