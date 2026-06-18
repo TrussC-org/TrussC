@@ -232,7 +232,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
 
         sgl_end();
         sgl_disable_texture();
-        if (internal::blendPipelinesInitialized) sgl_load_pipeline(internal::blendPipelines[static_cast<int>(internal::currentBlendMode)]);
+        internal::restoreCurrentPipeline();   // FBO-aware (matches the scaled/highlight paths below)
 
         // Restore matrices
         sgl_pop_matrix();
@@ -279,7 +279,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
 
         sgl_end();
         sgl_disable_texture();
-        if (internal::blendPipelinesInitialized) sgl_load_pipeline(internal::blendPipelines[static_cast<int>(internal::currentBlendMode)]);
+        internal::restoreCurrentPipeline();   // FBO-aware (matches the scaled/highlight paths below)
 
         popMatrix();
     }

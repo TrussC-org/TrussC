@@ -4,6 +4,7 @@
 // Note: tcTexture.h and tcImage.h must be included before this file
 
 #include <vector>
+#include "tcPath.h"   // for the out-of-line Path::toFillMesh() definition below
 
 namespace trussc {
 
@@ -1065,5 +1066,26 @@ private:
     mutable int gpuIndexCount_{0};
     mutable bool gpuDirty_{true};
 };
+
+// Out-of-line: needs the complete Mesh type. Builds a flat (z=0) filled mesh from
+// the path contours using the same tessellation as Path::drawFill() (non-zero
+// winding, holes, self-intersection splitting). Normals face +Z and UVs are zero,
+// so it drops straight into the unlit or PBR-lit mesh draw paths.
+inline Mesh Path::toFillMesh() const {
+    Mesh mesh;
+    mesh.setMode(PrimitiveMode::Triangles);
+    const std::vector<std::array<float, 2>> tris = buildFillTriangles();
+    unsigned int base = 0;
+    for (size_t i = 0; i + 2 < tris.size(); i += 3) {
+        for (int k = 0; k < 3; ++k) {
+            mesh.addVertex(tris[i + k][0], tris[i + k][1], 0.0f);
+            mesh.addNormal(0.0f, 0.0f, 1.0f);
+            mesh.addTexCoord(0.0f, 0.0f);
+        }
+        mesh.addTriangle(base, base + 1, base + 2);
+        base += 3;
+    }
+    return mesh;
+}
 
 } // namespace trussc

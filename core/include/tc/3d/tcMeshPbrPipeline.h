@@ -50,6 +50,15 @@ struct PbrDrawCommand {
 struct DeferredPbrDraw { int layerId; PbrDrawCommand cmd; };
 inline std::vector<DeferredPbrDraw> deferredPbrDraws;
 
+// PBR draws deferred WITHIN an FBO pass. Flushed at Fbo::end()/clearColor() via
+// flushFboDeferredPbr(), which interleaves them with the FBO context's sokol_gl
+// layers using sgl_context_draw_layer() — each layer drawn once (O(N)). This
+// replaces the old per-mesh sgl_draw() in the FBO path, which redrew the whole
+// FBO context on every mesh (O(N^2)) and overflowed the per-frame uniform buffer
+// once enough meshes were in flight.
+inline std::vector<DeferredPbrDraw> fboPbrDraws;
+inline int fboLayerNext = 0;
+
 class PbrPipeline {
 public:
     // Lazily create shader on first use. Safe to call every frame.
@@ -357,8 +366,12 @@ public:
         PbrDrawCommand cmd{ pip, bind, vsp, fsp,
                             mesh.getGpuIndexCount(), mesh.getGpuVertexCount() };
         if (internal::inFboPass) {
-            sgl_draw();   // keep prior sokol_gl beneath this mesh in the FBO pass
-            executePbrDraw(cmd);
+            // Defer (like the swapchain path) into the per-FBO list; flushed
+            // per-layer in Fbo::end(). Bump the FBO layer so 2D drawn after this
+            // mesh composites on top of it, matching the swapchain ordering.
+            internal::fboPbrDraws.push_back({ internal::fboLayerNext, cmd });
+            internal::fboLayerNext++;
+            sgl_layer(internal::fboLayerNext);
         } else {
             internal::deferredPbrDraws.push_back({ internal::sglLayerNext, cmd });
             internal::sglLayerNext++;
@@ -667,6 +680,21 @@ private:
 inline PbrPipeline& getPbrPipeline() {
     static PbrPipeline instance;
     return instance;
+}
+
+// Flush the PBR draws deferred during an FBO pass, interleaved per-layer with the
+// FBO context's sokol_gl 2D content (mirror of flushDeferredShaderDraws but for a
+// single FBO context). Called by Fbo::end()/clearColor() while the FBO pass is
+// still active. Each sgl layer is drawn exactly once (O(N)).
+inline void flushFboDeferredPbr(sgl_context ctx) {
+    for (int layer = 0; layer <= fboLayerNext; layer++) {
+        sgl_context_draw_layer(ctx, layer);
+        for (auto& d : fboPbrDraws) {
+            if (d.layerId == layer) getPbrPipeline().executePbrDraw(d.cmd);
+        }
+    }
+    fboPbrDraws.clear();
+    fboLayerNext = 0;
 }
 
 } // namespace internal

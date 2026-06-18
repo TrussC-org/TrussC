@@ -100,6 +100,10 @@ public:
             if (pipeline.id) sg_destroy_pipeline(pipeline);
             if (shader.id) sg_destroy_shader(shader);
         }
+        for (auto& [key, pip] : targetPipelines_) {
+            if (pip.id) sg_destroy_pipeline(pip);
+        }
+        targetPipelines_.clear();
         shader = {};
         pipeline = {};
         vertexBuffer = {};
@@ -256,8 +260,10 @@ public:
     void executeDeferredDraw(const std::vector<ShaderVertex>& vertices, PrimitiveType type) {
         if (vertices.empty()) return;
 
-        // Ensure pipeline and uniforms are applied
-        sg_apply_pipeline(pipeline);
+        // Ensure pipeline and uniforms are applied (FBO-aware: deferred draws run
+        // at present time on the swapchain, but route through the same helper so
+        // the path stays correct if a draw is ever executed inside an FBO pass).
+        sg_apply_pipeline(pipelineForCurrentTarget());
         applyUniforms();
 
         // Append to vertex buffer
@@ -346,10 +352,17 @@ public:
 protected:
     // Sokol resources
     sg_shader shader = {};
-    sg_pipeline pipeline = {};
+    sg_pipeline pipeline = {};   // targets the swapchain (created at load())
     sg_buffer vertexBuffer = {};
     sg_buffer indexBuffer = {};
     bool loaded = false;
+
+    // Render-target-specific pipeline variants, keyed by (color format, sample
+    // count). `pipeline` above matches the swapchain; an FBO pass has a different
+    // color format / sample count / depth, so a matching pipeline is built lazily
+    // on first draw into each distinct FBO target. Using a mismatched pipeline
+    // (e.g. a swapchain BGRA8 pipeline inside an RGBA8 FBO) corrupts the output.
+    std::unordered_map<uint64_t, sg_pipeline> targetPipelines_;
 
     // Pending texture bindings
     struct TextureBinding {
@@ -416,6 +429,26 @@ protected:
     virtual void onEnd() {}
     virtual void setupBindings(sg_bindings& bind) {}
 
+    // Pipeline matching the current render target. The swapchain uses the
+    // load()-time `pipeline`; an FBO pass needs a pipeline whose color format,
+    // sample count and depth match the FBO, so one is built lazily (from the same
+    // createPipelineDesc()) and cached per distinct (format, sampleCount) target.
+    sg_pipeline pipelineForCurrentTarget() {
+        if (!internal::inFboPass) return pipeline;
+        uint64_t key = ((uint64_t)internal::currentFboColorFormat << 8)
+                     | (uint64_t)(internal::currentFboSampleCount & 0xff);
+        auto it = targetPipelines_.find(key);
+        if (it != targetPipelines_.end()) return it->second;
+        sg_pipeline_desc desc = createPipelineDesc();
+        desc.shader = shader;
+        desc.colors[0].pixel_format = internal::currentFboColorFormat;
+        desc.sample_count           = internal::currentFboSampleCount;
+        desc.depth.pixel_format     = SG_PIXELFORMAT_DEPTH_STENCIL;  // Fbo always allocates depth-stencil
+        sg_pipeline pip = sg_make_pipeline(&desc);
+        targetPipelines_[key] = pip;
+        return pip;
+    }
+
 private:
     void moveFrom(Shader&& other) {
         shader = other.shader;
@@ -425,9 +458,11 @@ private:
         loaded = other.loaded;
         pendingTextures = std::move(other.pendingTextures);
         pendingViews = std::move(other.pendingViews);
+        targetPipelines_ = std::move(other.targetPipelines_);
 
         other.shader = {};
         other.pipeline = {};
+        other.targetPipelines_.clear();
         other.vertexBuffer = {};
         other.indexBuffer = {};
         other.loaded = false;
@@ -540,11 +575,18 @@ public:
         // Flush sokol_gl so it draws before the fullscreen quad
         sgl_draw();
 
-        sg_apply_pipeline(pipeline);
+        // Match the pipeline to the current target (swapchain vs FBO format).
+        sg_apply_pipeline(pipelineForCurrentTarget());
 
         sg_bindings bind = {};
         bind.vertex_buffers[0] = vertexBuffer;
         bind.index_buffer = indexBuffer;
+        // Apply inputs set via setTexture(slot, view, sampler), so a plain
+        // FullscreenShader can sample a source without a setupBindings() override.
+        for (auto& [slot, v] : pendingViews) {
+            bind.views[slot] = v.view;
+            bind.samplers[slot] = v.sampler;
+        }
         setupBindings(bind);
         sg_apply_bindings(&bind);
 
@@ -573,10 +615,12 @@ protected:
         desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;  // position
         desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;  // texcoord
 
-        // Default alpha blending
-        desc.colors[0].blend.enabled = true;
-        desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-        desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        // A fullscreen pass covers the whole target, so OVERWRITE by default (no
+        // blend). Blending would composite over existing content — and for a
+        // premultiplied-alpha source (e.g. blurring an FBO) it re-premultiplies
+        // every pass, darkening/desaturating the result. Subclasses that need to
+        // composite can override this to enable blending.
+        desc.colors[0].blend.enabled = false;
 
         // Index buffer for quad
         desc.index_type = SG_INDEXTYPE_UINT16;
