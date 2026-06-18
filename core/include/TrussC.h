@@ -82,6 +82,7 @@
 
 // TrussC utilities
 #include "tc/utils/tcUtils.h"
+#include "tc/utils/tcMainThread.h"  // runOnMainThread / drainMainThreadQueue
 #include "tc/utils/tcTime.h"
 #include "tc/utils/tcLog.h"
 #include "tc/utils/tcCompress.h"
@@ -1952,6 +1953,11 @@ namespace mcp {
 namespace internal {
 
     inline void _setup_cb() {
+        // Record the main thread id while we are guaranteed to be on it.
+        // isMainThread() / runOnMainThread() / the Node main-thread asserts all
+        // key off this. (sokol's init_cb runs on the main thread.)
+        getMainThreadId();
+
         setup();
 
         // For macOS bundles, set default data path
@@ -2032,6 +2038,11 @@ namespace internal {
             lastDrawTime = now;
             lastDrawTimeInitialized = true;
         }
+
+        // Run work marshalled from worker threads (runOnMainThread, Event
+        // Deliver::Main). Done before update/draw so queued tree edits land
+        // while no traversal is in flight.
+        drainMainThreadQueue();
 
         // Process console input (fire events)
         console::processQueue();

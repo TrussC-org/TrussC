@@ -22,7 +22,9 @@
 #include "tc/utils/tcAsyncScheduler.h"
 #include "tc/utils/tcTypeName.h"
 #include "tc/utils/tcReflect.h"
+#include "tc/utils/tcMainThread.h"           // isMainThread / runOnMainThread
 #include <memory>
+#include <cassert>
 #include <string>
 #include <atomic>
 #include <vector>
@@ -31,6 +33,25 @@
 #include <cstdint>
 #include <typeindex>
 #include <unordered_map>
+
+// ---------------------------------------------------------------------------
+// Main-thread guard (debug only)
+// ---------------------------------------------------------------------------
+// The Node tree is owned by the main thread; mutating its structure from another
+// thread is a data race on children_ (it crashes — see runOnMainThread() and the
+// threading section of SECURITY.md). In debug builds the structural mutators
+// assert they run on the main thread, so the bug is caught at its source. In
+// release (NDEBUG) this compiles to nothing — zero cost. destroy() is exempt: it
+// only flips an atomic flag and is deliberately safe from any thread.
+#if defined(NDEBUG)
+    #define TC_ASSERT_MAIN_THREAD(op) ((void)0)
+#else
+    #define TC_ASSERT_MAIN_THREAD(op)                                          \
+        assert(::trussc::isMainThread() &&                                     \
+            "TrussC: " op " must run on the main thread. From a network "      \
+            "onReceive / async timer / audio / tc::Thread callback, wrap the "  \
+            "tree edit in runOnMainThread([...]{ ... }).")
+#endif
 
 // =============================================================================
 // trussc namespace
@@ -102,6 +123,7 @@ public:
     // Add child node
     // keepGlobalPosition: if true, preserves child's global position
     void addChild(Ptr child, bool keepGlobalPosition = false) {
+        TC_ASSERT_MAIN_THREAD("addChild()");
         if (!child || child.get() == this) return;
 
         // Catch accidental addChild() in constructor where weak_from_this() is empty
@@ -134,6 +156,7 @@ public:
 
     // Insert child node at specific index
     void insertChild(size_t index, Ptr child, bool keepGlobalPosition = false) {
+        TC_ASSERT_MAIN_THREAD("insertChild()");
         if (!child || child.get() == this) return;
 
         // Catch accidental insertChild() in constructor where weak_from_this() is empty
@@ -171,6 +194,7 @@ public:
 
     // Remove child node
     void removeChild(Ptr child) {
+        TC_ASSERT_MAIN_THREAD("removeChild()");
         if (!child) return;
 
         auto it = std::find(children_.begin(), children_.end(), child);
@@ -187,6 +211,7 @@ public:
 
     // Remove all child nodes
     void removeAllChildren() {
+        TC_ASSERT_MAIN_THREAD("removeAllChildren()");
         // Mutate first (single vector move), then notify. onChildRemoved
         // overrides may call addChild on this node; firing the callbacks
         // after the move lets them see an empty children_.
@@ -245,6 +270,7 @@ public:
     // trigger reallocation. No-op if the node has no parent or is already at
     // the requested position.
     void moveToFront() {
+        TC_ASSERT_MAIN_THREAD("moveToFront()");
         auto p = getParent();
         if (!p) return;
         auto self = shared_from_this();
@@ -255,6 +281,7 @@ public:
     }
 
     void moveToBack() {
+        TC_ASSERT_MAIN_THREAD("moveToBack()");
         auto p = getParent();
         if (!p) return;
         auto self = shared_from_this();
@@ -297,12 +324,14 @@ public:
     void setIsVisible(bool visible) { setVisible(visible); }
 
     // Destroy node (marks as dead, removed from tree on next update cycle)
-    // Safe to call during update() — actual removal is deferred
+    // Safe to call during update() — actual removal is deferred to the main
+    // thread's sweepDeadChildren(). dead_ is atomic, so unlike the structural
+    // mutators, destroy() is safe to call from ANY thread (network / async /
+    // audio callbacks): it only requests removal, it never touches children_.
     void destroy() {
-        if (dead_) return;
-        dead_ = true;
+        dead_.store(true, std::memory_order_relaxed);
     }
-    bool isDead() const { return dead_; }
+    bool isDead() const { return dead_.load(std::memory_order_relaxed); }
 
     // Event enabling (only nodes that called enableEvents() are hit test targets)
     void enableEvents() { eventsEnabled_ = true; }
@@ -606,6 +635,7 @@ public:
     // Add a mod to this node (returns pointer for chaining)
     template<typename T, typename... Args>
     T* addMod(Args&&... args) {
+        TC_ASSERT_MAIN_THREAD("addMod()");
         auto mod = std::make_unique<T>(std::forward<Args>(args)...);
         T* ptr = mod.get();
         mod->owner_ = this;
@@ -1297,7 +1327,7 @@ private:
     }
 
     bool setupCalled_ = false;    // Ensures setup() is called only once
-    bool dead_ = false;           // Marked for removal by destroy()
+    std::atomic<bool> dead_{false};  // Marked for removal by destroy() (atomic: destroy() is thread-safe)
     std::string name_;            // Optional instance name (see getName())
     const uint64_t instanceId_;   // Per-process unique id, fixed at construction
     inline static std::atomic<uint64_t> nextInstanceId_{0};  // id source

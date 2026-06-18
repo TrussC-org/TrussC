@@ -9,7 +9,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <type_traits>
 #include "tcEventListener.h"
+#include "../utils/tcMainThread.h"  // runOnMainThread (for Deliver::Main)
 
 // ---------------------------------------------------------------------------
 // Mutex configuration for thread safety
@@ -71,6 +73,33 @@ namespace priority {
 }
 
 // ---------------------------------------------------------------------------
+// Delivery thread for a listener
+// ---------------------------------------------------------------------------
+// Events may be fired (notify) from any thread — network onReceive runs on a
+// worker thread, audioOut on the audio thread, etc. A listener that touches the
+// Node tree / GPU must run on the main thread. Deliver controls this per
+// listener:
+//
+//   Inline (default) : run on whatever thread called notify() — the existing
+//                      behaviour. Hot path, no allocation.
+//   Main             : run on the main thread. If notify() is already on the
+//                      main thread it runs immediately; otherwise the payload
+//                      is copied and the call is marshalled via runOnMainThread
+//                      (runs at the start of the next frame).
+//
+// Notes for Deliver::Main:
+//   - The payload T is COPIED (the original `arg` reference is gone by next
+//     frame), so the listener cannot write back to `arg` and does not
+//     participate in `consumed` propagation. Fine for reactive events
+//     (onReceive); input events that use `consumed` already fire on the main
+//     thread, where Main is a no-op anyway.
+//   - Requires T to be copy-constructible (enforced by static_assert).
+//
+// Scoped enum on purpose: it does NOT convert to int, so listen(fn, Deliver)
+// and the existing listen(fn, int priority) overloads never collide.
+enum class Deliver { Inline, Main };
+
+// ---------------------------------------------------------------------------
 // Event<T> - Event with arguments
 // ---------------------------------------------------------------------------
 template<typename T>
@@ -92,7 +121,16 @@ public:
     [[nodiscard]] EventListener listen(Callback callback,
                                        int priority = EventPriority::App) {
         EventListener listener;
-        listenImpl(listener, std::move(callback), priority);
+        listenImpl(listener, std::move(callback), Deliver::Inline, priority);
+        return listener;
+    }
+
+    // Same, but declare the delivery thread. listen(fn, Deliver::Main) runs the
+    // listener on the main thread regardless of which thread fires notify().
+    [[nodiscard]] EventListener listen(Callback callback, Deliver deliver,
+                                       int priority = EventPriority::App) {
+        EventListener listener;
+        listenImpl(listener, std::move(callback), deliver, priority);
         return listener;
     }
 
@@ -105,11 +143,21 @@ public:
         }, priority);
     }
 
+    // Same, with explicit delivery thread.
+    template<typename Obj>
+    [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(T&),
+                                       Deliver deliver,
+                                       int priority = EventPriority::App) {
+        return listen([obj, method](T& arg) {
+            (obj->*method)(arg);
+        }, deliver, priority);
+    }
+
     // Deprecated: use `listener = event.listen(callback)` instead
     [[deprecated("Use 'listener = event.listen(callback)' instead")]]
     void listen(EventListener& listener, Callback callback,
                 int priority = EventPriority::App) {
-        listenImpl(listener, std::move(callback), priority);
+        listenImpl(listener, std::move(callback), Deliver::Inline, priority);
     }
 
     // Deprecated: use `listener = event.listen(obj, &Class::method)` instead
@@ -119,13 +167,14 @@ public:
                 int priority = EventPriority::App) {
         listenImpl(listener, [obj, method](T& arg) {
             (obj->*method)(arg);
-        }, priority);
+        }, Deliver::Inline, priority);
     }
 
 private:
     struct Entry {
         uint64_t id;
         int priority;
+        Deliver deliver;
         Callback callback;
     };
 
@@ -133,7 +182,7 @@ private:
     using ConstEntryListPtr = std::shared_ptr<const EntryList>;
 
     void listenImpl(EventListener& listener, Callback callback,
-                    int priority) {
+                    Deliver deliver, int priority) {
         uint64_t id;
         {
             TC_LOCK_GUARD(mutex_);
@@ -141,7 +190,7 @@ private:
             ConstEntryListPtr cur = std::atomic_load(&entries_);
             auto next = cur ? std::make_shared<EntryList>(*cur)
                             : std::make_shared<EntryList>();
-            next->push_back({id, priority, std::move(callback)});
+            next->push_back({id, priority, deliver, std::move(callback)});
             std::stable_sort(next->begin(), next->end(),
                 [](const Entry& a, const Entry& b) {
                     return a.priority < b.priority;
@@ -168,14 +217,32 @@ public:
         ConstEntryListPtr snapshot = std::atomic_load(&entries_);
         if (!snapshot) return;
         for (const auto& entry : *snapshot) {
-            if (entry.callback) {
-                entry.callback(arg);
-                // Stop propagation once a listener marks the event consumed.
-                // Only arg types that carry a `consumed` flag (input events)
-                // participate; all others ignore this branch at compile time.
-                if constexpr (requires { arg.consumed; }) {
-                    if (arg.consumed) break;
+            if (!entry.callback) continue;
+
+            // Deliver::Main from a worker thread: copy the payload and run the
+            // listener on the main thread next frame. Already-main (or Inline)
+            // takes the hot path below unchanged.
+            if (entry.deliver == Deliver::Main && !isMainThread()) {
+                if constexpr (std::is_copy_constructible_v<T>) {
+                    T copy = arg;
+                    runOnMainThread([cb = entry.callback, copy]() mutable {
+                        cb(copy);
+                    });
+                    continue;
                 }
+                // Non-copyable payload can't be marshalled — fall through and
+                // run inline (documented limitation of Deliver::Main).
+            }
+
+            entry.callback(arg);
+            // Stop propagation once a listener marks the event consumed.
+            // Only arg types that carry a `consumed` flag (input events)
+            // participate; all others ignore this branch at compile time.
+            // (Marshalled Main listeners run on a copy and never reach here,
+            // so they don't take part in consume — input events fire on the
+            // main thread anyway, where Main is inline.)
+            if constexpr (requires { arg.consumed; }) {
+                if (arg.consumed) break;
             }
         }
     }
@@ -233,7 +300,15 @@ public:
     [[nodiscard]] EventListener listen(Callback callback,
                                        int priority = EventPriority::App) {
         EventListener listener;
-        listenImpl(listener, std::move(callback), priority);
+        listenImpl(listener, std::move(callback), Deliver::Inline, priority);
+        return listener;
+    }
+
+    // Same, but declare the delivery thread (Deliver::Main runs on the main thread).
+    [[nodiscard]] EventListener listen(Callback callback, Deliver deliver,
+                                       int priority = EventPriority::App) {
+        EventListener listener;
+        listenImpl(listener, std::move(callback), deliver, priority);
         return listener;
     }
 
@@ -246,11 +321,21 @@ public:
         }, priority);
     }
 
+    // Same, with explicit delivery thread.
+    template<typename Obj>
+    [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(),
+                                       Deliver deliver,
+                                       int priority = EventPriority::App) {
+        return listen([obj, method]() {
+            (obj->*method)();
+        }, deliver, priority);
+    }
+
     // Deprecated: use `listener = event.listen(callback)` instead
     [[deprecated("Use 'listener = event.listen(callback)' instead")]]
     void listen(EventListener& listener, Callback callback,
                 int priority = EventPriority::App) {
-        listenImpl(listener, std::move(callback), priority);
+        listenImpl(listener, std::move(callback), Deliver::Inline, priority);
     }
 
     // Deprecated: use `listener = event.listen(obj, &Class::method)` instead
@@ -260,13 +345,14 @@ public:
                 int priority = EventPriority::App) {
         listenImpl(listener, [obj, method]() {
             (obj->*method)();
-        }, priority);
+        }, Deliver::Inline, priority);
     }
 
 private:
     struct Entry {
         uint64_t id;
         int priority;
+        Deliver deliver;
         Callback callback;
     };
 
@@ -274,7 +360,7 @@ private:
     using ConstEntryListPtr = std::shared_ptr<const EntryList>;
 
     void listenImpl(EventListener& listener, Callback callback,
-                    int priority) {
+                    Deliver deliver, int priority) {
         uint64_t id;
         {
             TC_LOCK_GUARD(mutex_);
@@ -282,7 +368,7 @@ private:
             ConstEntryListPtr cur = std::atomic_load(&entries_);
             auto next = cur ? std::make_shared<EntryList>(*cur)
                             : std::make_shared<EntryList>();
-            next->push_back({id, priority, std::move(callback)});
+            next->push_back({id, priority, deliver, std::move(callback)});
             std::stable_sort(next->begin(), next->end(),
                 [](const Entry& a, const Entry& b) {
                     return a.priority < b.priority;
@@ -307,7 +393,14 @@ public:
         ConstEntryListPtr snapshot = std::atomic_load(&entries_);
         if (!snapshot) return;
         for (const auto& entry : *snapshot) {
-            if (entry.callback) {
+            if (!entry.callback) continue;
+            // Deliver::Main from a worker thread: run on the main thread next
+            // frame (no payload to copy for Event<void>).
+            if (entry.deliver == Deliver::Main && !isMainThread()) {
+                runOnMainThread(entry.callback);
+                continue;
+            }
+            {
                 entry.callback();
             }
         }
