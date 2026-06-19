@@ -4,9 +4,16 @@
 //
 // Mirrors the macOS AVFoundation / Linux GStreamer backends: it implements the
 // three platform hooks declared in tc/video/tcVideoRecorder.h
-//   - openPlatform()   : create an H.264 sink writer and begin writing
+//   - openPlatform()   : create an H.264/HEVC sink writer and begin writing
 //   - appendPlatform() : encode one RGBA8 (top-down) frame
-//   - closePlatform()  : finalize and flush the .mp4
+//   - closePlatform()  : finalize and flush the file
+//
+// Codecs: H.264 and HEVC (both mux into .mp4). Bitrate comes from
+// VideoRecordSettings. ProRes is a macOS-only mastering codec and is rejected.
+// keyframeInterval is applied via MF_MT_MAX_KEYFRAME_SPACING but is best-effort:
+// the Microsoft/NVENC encoders in this offline SinkWriter configuration treat it
+// as a hint (a short clip may stay a single GOP). This matches the Linux
+// backend's "best-effort where the encoder honors it" stance.
 //
 // The encoder input type is RGB32 (BGRA in memory). The SinkWriter inserts the
 // color-converter MFT automatically to reach the encoder's native NV12, so no
@@ -16,14 +23,16 @@
 //
 // Hardware -> software encoder fallback (mirrors the Linux backend's intent):
 // the SinkWriter is opened first with MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
-// which lets MF pick a hardware H.264 MFT (NVENC / Intel QuickSync / AMD VCE)
+// which lets MF pick a hardware encoder MFT (NVENC / Intel QuickSync / AMD VCE)
 // when one is present and usable. Unlike GStreamer's deferred element creation,
 // MF activates and negotiates the encoder MFT synchronously inside BeginWriting
 // -- the realistic point of hardware-encoder failure (missing/limited driver,
 // unsupported size). So if the hardware-enabled open fails at any step we tear
 // it down and reopen with hardware transforms disabled (pure software MFT),
-// which always works where the OS H.264 encoder is available. We then query the
+// which always works where the OS encoder is available. We then query the
 // resolved encoder MFT to report whether hardware or software was actually used.
+// (HEVC has no guaranteed software encoder on Windows, so HEVC can still fail on
+// a machine without a hardware H.265 encoder -- this is reported, not silent.)
 // =============================================================================
 
 #if defined(_WIN32)
@@ -55,7 +64,7 @@
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// Platform state (IMFSinkWriter holds the H.264 encoder + mp4 file sink)
+// Platform state (IMFSinkWriter holds the encoder + mp4 file sink)
 // ---------------------------------------------------------------------------
 struct VideoWriterPlatformData {
     IMFSinkWriter* writer = nullptr;
@@ -84,17 +93,20 @@ void fpsToRatio(double fps, UINT32& num, UINT32& den) {
     }
 }
 
-// Add the H.264 output + RGB32 input streams and begin writing. Returns the
-// stream index. Failure here (notably for a hardware encoder that can't
+// Add the compressed output + RGB32 input streams and begin writing. Returns
+// the stream index. Failure here (notably for a hardware encoder that can't
 // negotiate on this machine) is what drives the software fallback in open().
 HRESULT configureWriter(IMFSinkWriter* writer, int w, int h,
                         UINT32 fpsNum, UINT32 fpsDen, int br,
+                        VideoCodec codec, int keyframeInterval,
                         DWORD& streamIndex) {
-    // --- Output media type: H.264 ---
+    // --- Output media type: H.264 or HEVC (both mux into .mp4) ---
+    const GUID subtype = (codec == VideoCodec::HEVC) ? MFVideoFormat_HEVC
+                                                     : MFVideoFormat_H264;
     IMFMediaType* outType = nullptr;
     HRESULT hr = MFCreateMediaType(&outType);
     if (SUCCEEDED(hr)) hr = outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    if (SUCCEEDED(hr)) hr = outType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
+    if (SUCCEEDED(hr)) hr = outType->SetGUID(MF_MT_SUBTYPE, subtype);
     if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AVG_BITRATE, (UINT32)br);
     if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_INTERLACE_MODE,
                                                MFVideoInterlace_Progressive);
@@ -103,6 +115,12 @@ HRESULT configureWriter(IMFSinkWriter* writer, int w, int h,
                                                 fpsNum, fpsDen);
     if (SUCCEEDED(hr)) hr = MFSetAttributeRatio(outType, MF_MT_PIXEL_ASPECT_RATIO,
                                                 1, 1);
+    // Keyframe cadence (GOP length). Best-effort: honored by encoders that
+    // respect it; 0 leaves the encoder's default.
+    if (SUCCEEDED(hr) && keyframeInterval > 0) {
+        hr = outType->SetUINT32(MF_MT_MAX_KEYFRAME_SPACING,
+                                (UINT32)keyframeInterval);
+    }
     if (SUCCEEDED(hr)) hr = writer->AddStream(outType, &streamIndex);
     if (outType) outType->Release();
     if (FAILED(hr)) return hr;
@@ -151,11 +169,12 @@ bool streamUsesHardwareEncoder(IMFSinkWriter* writer, DWORD streamIndex) {
     return isHw;
 }
 
-// Create a sink writer for `wpath`, configure the H.264/RGB32 streams and begin
-// writing, with hardware encoder MFTs enabled or disabled. On success the
+// Create a sink writer for `wpath`, configure the compressed/RGB32 streams and
+// begin writing, with hardware encoder MFTs enabled or disabled. On success the
 // caller owns *outWriter; *outHardware reports the encoder actually resolved.
 HRESULT openWriter(const std::wstring& wpath, int w, int h,
-                   UINT32 fpsNum, UINT32 fpsDen, int br, bool hwEnabled,
+                   UINT32 fpsNum, UINT32 fpsDen, int br,
+                   VideoCodec codec, int keyframeInterval, bool hwEnabled,
                    IMFSinkWriter** outWriter, DWORD* outStream,
                    bool* outHardware) {
     *outWriter = nullptr;
@@ -181,7 +200,8 @@ HRESULT openWriter(const std::wstring& wpath, int w, int h,
     }
 
     DWORD streamIndex = 0;
-    hr = configureWriter(writer, w, h, fpsNum, fpsDen, br, streamIndex);
+    hr = configureWriter(writer, w, h, fpsNum, fpsDen, br,
+                         codec, keyframeInterval, streamIndex);
     if (FAILED(hr)) {
         writer->Release();
         return hr;
@@ -196,15 +216,15 @@ HRESULT openWriter(const std::wstring& wpath, int w, int h,
 } // namespace
 
 // ---------------------------------------------------------------------------
-// openPlatform - create the H.264 sink writer and begin a writing session
+// openPlatform - create the encoder sink writer and begin a writing session
 // ---------------------------------------------------------------------------
 bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
                                float fps, const VideoRecordSettings& settings) {
-    // This backend currently encodes H.264 only. Reject other codecs clearly
-    // rather than silently writing a different format than requested.
-    if (settings.codec != VideoCodec::H264) {
+    // This backend encodes H.264 and HEVC (both into .mp4). ProRes is a macOS-
+    // only mastering codec; reject it clearly rather than silently substituting.
+    if (settings.codec != VideoCodec::H264 && settings.codec != VideoCodec::HEVC) {
         logError("VideoWriter") << "codec " << videoCodecName(settings.codec)
-                                << " not supported on Windows yet (H.264 only)";
+                                << " not supported on Windows (use H.264 or HEVC)";
         return false;
     }
 
@@ -244,27 +264,31 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     DWORD streamIndex = 0;
     bool  isHw = false;
 
+    const VideoCodec codec = settings.codec;
+    const int kf = settings.keyframeInterval;
+
     // Hardware first (auto-prefer the efficient path). Overwrite any existing
     // file each attempt (the writer otherwise locks/appends).
     DeleteFileW(wpath.c_str());
-    hr = openWriter(wpath, w, h, fpsNum, fpsDen, br,
+    hr = openWriter(wpath, w, h, fpsNum, fpsDen, br, codec, kf,
                     /*hwEnabled*/ true, &writer, &streamIndex, &isHw);
 
     // Software fallback: only the hardware path can fail here, so a failed open
     // means "hardware encoder unusable on this machine" -> retry pure software.
     if (FAILED(hr) || !writer) {
         logWarning("VideoWriter")
-            << "hardware H.264 encoder path unavailable (hr=0x"
+            << "hardware " << videoCodecName(codec)
+            << " encoder path unavailable (hr=0x"
             << std::hex << (unsigned)hr << "); falling back to software";
         DeleteFileW(wpath.c_str());
-        hr = openWriter(wpath, w, h, fpsNum, fpsDen, br,
+        hr = openWriter(wpath, w, h, fpsNum, fpsDen, br, codec, kf,
                         /*hwEnabled*/ false, &writer, &streamIndex, &isHw);
     }
 
     if (FAILED(hr) || !writer) {
         logError("VideoWriter")
-            << "failed to open H.264 sink writer (hr=0x"
-            << std::hex << (unsigned)hr << ")";
+            << "failed to open " << videoCodecName(codec)
+            << " sink writer (hr=0x" << std::hex << (unsigned)hr << ")";
         MFShutdown();
         delete pd;
         return false;
@@ -276,7 +300,7 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     platform_ = pd;
 
     logNotice("VideoWriter")
-        << "Media Foundation H.264 encoder: "
+        << "Media Foundation " << videoCodecName(codec) << " encoder: "
         << (isHw ? "hardware" : "software");
     return true;
 }
