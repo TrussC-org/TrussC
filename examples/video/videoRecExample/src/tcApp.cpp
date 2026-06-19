@@ -2,7 +2,8 @@
 // videoRecExample - Native video recording sample
 // =============================================================================
 // Renders an animated scene into an offscreen Fbo, draws it to the window, and
-// records video with TrussC's native encoder (AVFoundation on macOS, no ffmpeg).
+// records it with TrussC's native VideoRecorder (H.264 -> .mp4): AVFoundation
+// on macOS, Media Foundation on Windows, GStreamer on Linux. No ffmpeg.
 //
 //   r : start / stop recording
 //   m : switch source between the clean Fbo and the whole window (idle only)
@@ -10,6 +11,12 @@
 // Recording uses VideoRecorder::start(): once started it auto-captures every
 // frame via the afterFrame hook (the same fully-composited image get_screenshot
 // returns) until close() — no per-frame addFrame() call needed.
+//
+// Encoder selection (Linux): the recorder picks a hardware H.264 encoder when
+// one actually works (NVENC, then VA-API), and transparently falls back to
+// software x264 otherwise — so this same code "just records" on any machine,
+// GPU or not. The full selection order, the GStreamer plugins each backend
+// needs, and troubleshooting live in this example's README.md.
 //
 // Output files land in bin/data (getDataPath):
 //   videoRec_clean.mp4   - the Fbo only, no on-screen text
