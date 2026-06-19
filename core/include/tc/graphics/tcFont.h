@@ -1313,13 +1313,9 @@ protected:
             const AtlasState& atlas = atlasManager_->getAtlas(atlasIdx);
             if (!atlas.isTextureValid()) continue;
 
-            // Use FBO blend pipeline when inside FBO pass (font pipeline has
-            // dst_factor_alpha=ZERO which destroys background alpha).
-            if (internal::inFboPass && internal::currentFboBlendPipeline.id != 0) {
-                sgl_load_pipeline(internal::currentFboBlendPipeline);
-            } else {
-                sgl_load_pipeline(pipeline_);
-            }
+            // Accumulating Fill2D for the active target (swapchain or FBO). Unifies
+            // the old font pipeline (dst_factor_alpha=ZERO destroyed dst alpha).
+            internal::loadPipeline(internal::activeFill2D());
             sgl_enable_texture();
             sgl_texture(atlas.getView(), sampler_);
 

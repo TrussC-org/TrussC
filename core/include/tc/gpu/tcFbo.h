@@ -487,7 +487,10 @@ private:
             s.pipeline3d = sgl_context_make_pipeline(s.context, &pip_desc);
         }
 
-        // RenderTarget for this FBO context (lazy role->pipeline cache).
+        // RenderTarget for this FBO context (lazy role->pipeline cache; FBO pipelines
+        // create fine on first use inside a pass — unlike the swapchain path, which is
+        // pre-warmed in tcGlobal because mid-frame creation in setupScreenFov corrupts
+        // the frame).
         s.target.context = s.context;
         s.target.isFbo = true;
 

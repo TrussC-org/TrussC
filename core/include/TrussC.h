@@ -600,7 +600,7 @@ inline void setBlendMode(BlendMode mode) {
     // Skip in FBO - FBO uses its own pipeline
     if (internal::inFboPass) return;
     internal::currentBlendMode = mode;
-    sgl_load_pipeline(internal::blendPipelines[static_cast<int>(mode)]);
+    internal::loadPipeline(internal::active2D(mode));
 }
 
 // Get current blend mode
@@ -615,9 +615,7 @@ inline void resetBlendMode() {
 
 // Restore current blend mode pipeline (use after temporary pipeline changes)
 inline void restoreBlendPipeline() {
-    if (internal::blendPipelinesInitialized) {
-        sgl_load_pipeline(internal::blendPipelines[static_cast<int>(internal::currentBlendMode)]);
-    }
+    internal::loadPipeline(internal::active2D(internal::currentBlendMode));
 }
 
 // ---------------------------------------------------------------------------
@@ -681,10 +679,8 @@ namespace internal {
         if (fovDeg <= 0.0f) {
             // Orthographic projection (2D mode)
             sgl_defaults();
-            // Load alpha blend pipeline for 2D (skip in FBO - FBO loads its own pipeline)
-            if (blendPipelinesInitialized && !inFboPass) {
-                sgl_load_pipeline(blendPipelines[static_cast<int>(BlendMode::Alpha)]);
-            }
+            // 2D alpha pipeline for the active target (swapchain or FBO).
+            loadPipeline(activeFill2D());
             sgl_matrix_mode_projection();
             // Ortho volume CENTERED on the camera: the lookat below moves the
             // world center to the view origin, so the volume must span
@@ -1304,12 +1300,12 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     sgl_load_identity();
 
     // Draw background rect (before text, same ortho coordinate system)
-    sgl_load_pipeline((internal::inFboPass && internal::currentFboBlendPipeline.id != 0) ? internal::currentFboBlendPipeline : internal::fontPipeline);
+    internal::loadPipeline(internal::activeFill2D());
     setColor(background);
     drawRect(worldX - paddingH, worldY, textWidth + paddingH * 2, exactHeight);
 
     // Draw text in foreground color
-    sgl_load_pipeline((internal::inFboPass && internal::currentFboBlendPipeline.id != 0) ? internal::currentFboBlendPipeline : internal::fontPipeline);
+    internal::loadPipeline(internal::activeFill2D());
     sgl_enable_texture();
     sgl_texture(internal::fontView, internal::fontSampler);
 
@@ -1346,12 +1342,10 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     sgl_end();
     sgl_disable_texture();
 
-    // Restore current blend pipeline (not default, which has blend disabled)
-    if (internal::inFboPass && internal::currentFboBlendPipeline.id != 0) {
-        sgl_load_pipeline(internal::currentFboBlendPipeline);
-    } else if (internal::blendPipelinesInitialized) {
-        sgl_load_pipeline(internal::blendPipelines[static_cast<int>(internal::currentBlendMode)]);
-    }
+    // Restore current blend pipeline (not default, which has blend disabled).
+    // FBO uses its accumulating Fill2D; swapchain honors the current blend mode.
+    internal::loadPipeline(internal::inFboPass ? internal::activeFill2D()
+                                               : internal::active2D(internal::currentBlendMode));
 
     // Restore matrices
     sgl_pop_matrix();

@@ -177,6 +177,19 @@ void setup() {
         internal::premultipliedBlendPipeline = sgl_make_pipeline(&pip_desc);
         internal::premultipliedBlendPipelineInitialized = true;
     }
+
+    // Pre-warm the swapchain RenderTarget pipeline cache so active2D/Premult/Clear/3D
+    // never create an sgl pipeline mid-frame (lazy creation inside setupScreenFov
+    // corrupted the frame; pre-creating here also avoids first-frame hitches).
+    internal::active2D(BlendMode::Alpha);
+    internal::active2D(BlendMode::Add);
+    internal::active2D(BlendMode::Multiply);
+    internal::active2D(BlendMode::Screen);
+    internal::active2D(BlendMode::Subtract);
+    internal::active2D(BlendMode::Disabled);
+    internal::activePremult();
+    internal::activeClear();
+    internal::active3D();
 }
 
 // ---------------------------------------------------------------------------
