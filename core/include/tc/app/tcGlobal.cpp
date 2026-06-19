@@ -51,6 +51,11 @@ void setup() {
     sgldesc.allocator.free_fn = smemtrack_free;
     sgl_setup(&sgldesc);
 
+    // RenderTarget: the swapchain target uses the default sgl context (carries the
+    // swapchain color/depth format + sample count). Pipelines build lazily on first use.
+    internal::swapchainTarget.context = sgl_default_context();
+    internal::swapchainTarget.isFbo = false;
+
     // Initialize bitmap font sampler + pipeline. The atlas TEXTURE itself is
     // allocated lazily on first drawBitmapString call (see ensureFontAtlas in
     // TrussC.h) and grown tier-by-tier as new codepoint ranges are used.

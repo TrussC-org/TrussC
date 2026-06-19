@@ -214,6 +214,10 @@ namespace trussc { namespace internal {
     }
 }}
 
+// RenderTarget: single source of truth for sgl pipeline selection (swapchain/FBO).
+// Added in parallel with the globals above; call sites migrate incrementally.
+#include "tc/graphics/tcRenderTarget.h"
+
 // VertexWriter abstraction (for shader integration)
 #include "tc/graphics/tcVertexWriter.h"
 
@@ -624,25 +628,14 @@ inline void restoreBlendPipeline() {
 // Deprecated: 3D is now enabled by default with setupScreenFov
 [[deprecated("3D is now enabled by default. Use setupScreenPerspective() to change FOV.")]]
 inline void enable3D() {
-    // FBO-aware (same as setupScreenPerspective / EasyCam): the swapchain
-    // pipeline3d mismatches an FBO's format/sample count.
-    if (internal::inFboPass && internal::currentFboPipeline3d.id != 0) {
-        sgl_load_pipeline(internal::currentFboPipeline3d);
-    } else if (internal::pipeline3dInitialized) {
-        sgl_load_pipeline(internal::pipeline3d);
-    }
+    internal::loadPipeline(internal::active3D());   // format-correct 3D for the active target
 }
 
 // Enable 3D drawing mode (perspective)
 // Deprecated: use setupScreenPerspective() or setupScreenFov() instead
 [[deprecated("Use setupScreenPerspective(fovDeg) or setupScreenFov(fovDeg) instead. Note: FOV is now in degrees, not radians.")]]
 inline void enable3DPerspective(float fovY = 0.785f, float nearZ = 0.1f, float farZ = 1000.0f) {
-    // FBO-aware (see enable3D): avoid the swapchain pipeline3d inside an FBO.
-    if (internal::inFboPass && internal::currentFboPipeline3d.id != 0) {
-        sgl_load_pipeline(internal::currentFboPipeline3d);
-    } else if (internal::pipeline3dInitialized) {
-        sgl_load_pipeline(internal::pipeline3d);
-    }
+    internal::loadPipeline(internal::active3D());   // format-correct 3D for the active target
     // Set perspective projection
     sgl_matrix_mode_projection();
     sgl_load_identity();
@@ -715,14 +708,8 @@ namespace internal {
                 Vec3(0.0f, 1.0f, 0.0f)
             );
         } else {
-            // Perspective projection (3D mode)
-            // Inside an FBO, use the FBO-context 3D pipeline (depth + premultiplied
-            // alpha for this format); otherwise the swapchain 3D pipeline.
-            if (inFboPass && currentFboPipeline3d.id != 0) {
-                sgl_load_pipeline(currentFboPipeline3d);
-            } else if (pipeline3dInitialized && !inFboPass) {
-                sgl_load_pipeline(pipeline3d);
-            }
+            // Perspective projection (3D mode) — format-correct 3D for the active target.
+            loadPipeline(active3D());
 
             float aspect = viewW / viewH;
 

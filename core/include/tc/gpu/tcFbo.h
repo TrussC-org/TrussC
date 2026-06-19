@@ -252,6 +252,7 @@ public:
         internal::currentFbo = nullptr;
         internal::currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
         internal::currentFboSampleCount = 1;
+        internal::currentTarget = &internal::swapchainTarget;   // RenderTarget: back to swapchain
         internal::fboClearColorFunc = nullptr;
 
         // Restore the screen camera state saved in beginInternal() so
@@ -407,6 +408,7 @@ private:
         sgl_pipeline pipelineBlend = {};
         sgl_pipeline pipelineClear = {};
         sgl_pipeline pipeline3d = {};   // depth-tested 3D (mirrors internal::pipeline3d, this format)
+        internal::RenderTarget target;  // role->pipeline cache for this FBO context
         bool initialized = false;
     };
 
@@ -484,6 +486,10 @@ private:
             pip_desc.colors[0].write_mask = SG_COLORMASK_RGBA;
             s.pipeline3d = sgl_context_make_pipeline(s.context, &pip_desc);
         }
+
+        // RenderTarget for this FBO context (lazy role->pipeline cache).
+        s.target.context = s.context;
+        s.target.isFbo = true;
 
         s.initialized = true;
     }
@@ -709,6 +715,7 @@ private:
         internal::currentFbo = this;
         internal::currentFboColorFormat = toSokolFormat(format_);
         internal::currentFboSampleCount = sampleCount_;
+        internal::currentTarget = &shared.target;   // RenderTarget: retarget to this FBO
         internal::fboClearColorFunc = _fboClearColorHelper;
     }
 
