@@ -72,6 +72,33 @@ public:
         } else {
             projection = Mat4::perspective(fov_, aspect, nearClip_, farClip_);
         }
+
+        // EasyCam builds its own projection Mat4 (used for both rendering and
+        // worldToScreen), bypassing sgl_ortho/sgl_perspective which normally
+        // adapt to the backend's clip-space convention. Mat4::ortho/perspective
+        // emit the GL convention (NDC z in [-1, 1]); D3D11/Metal/WebGPU expect
+        // [0, 1]. Without remapping, ortho geometry near the target plane lands
+        // in the clipped near half on D3D11 and disappears (perspective only
+        // survives because its non-linear depth keeps far geometry inside [0,1]).
+        switch (sg_query_backend()) {
+            case SG_BACKEND_D3D11:
+            case SG_BACKEND_METAL_IOS:
+            case SG_BACKEND_METAL_MACOS:
+            case SG_BACKEND_METAL_SIMULATOR:
+            case SG_BACKEND_WGPU: {
+                // Remap clip-space z from [-1, 1] to [0, 1]: z' = 0.5*z + 0.5*w.
+                const Mat4 zeroToOne(
+                    1, 0, 0,    0,
+                    0, 1, 0,    0,
+                    0, 0, 0.5f, 0.5f,
+                    0, 0, 0,    1
+                );
+                projection = zeroToOne * projection;
+                break;
+            }
+            default: break;  // GLCORE / GLES3 already use [-1, 1]
+        }
+
         // camUp is orthogonal to the view direction by construction, so lookAt
         // never degenerates (even looking straight down the world up axis).
         Mat4 view = Mat4::lookAt(eye, target_, camUp);

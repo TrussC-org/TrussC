@@ -82,6 +82,23 @@ if %ERRORLEVEL% neq 0 (
     copy /Y "%SOURCE_DIR%\bin\trusscli.exe" "%SCRIPT_DIR%\"
 )
 
+REM Add trusscli to the user PATH so it's callable globally from any directory.
+REM This mirrors the /usr/local/bin symlink step in the macOS/Linux scripts —
+REM the SCRIPT_DIR symlink above is only a local convenience and is NOT on PATH.
+REM No admin needed: this writes the *user* PATH (HKCU\Environment). We use the
+REM .NET Environment API via PowerShell instead of setx, because setx silently
+REM truncates PATH to 1024 chars.
+echo.
+set "BIN_DIR=%SOURCE_DIR%\bin"
+set /p "INSTALL_PATH=Add trusscli to your PATH (so 'trusscli' works anywhere)? [y/N]: "
+if /i not "%INSTALL_PATH%"=="y" goto skip_path
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$bin = $env:BIN_DIR; $userPath = [Environment]::GetEnvironmentVariable('Path','User'); if (($userPath -split ';') -contains $bin) { Write-Host '  trusscli is already on your PATH.' } else { $newPath = if ([string]::IsNullOrEmpty($userPath)) { $bin } else { $userPath.TrimEnd(';') + ';' + $bin }; [Environment]::SetEnvironmentVariable('Path', $newPath, 'User'); Write-Host ('  Added to user PATH: ' + $bin); Write-Host '  Open a NEW terminal for the change to take effect.' }"
+goto path_done
+:skip_path
+echo Skipped PATH installation. To add it later, put this on your PATH:
+echo   %BIN_DIR%
+:path_done
+
 echo.
 echo ==========================================
 echo   Build completed successfully!
