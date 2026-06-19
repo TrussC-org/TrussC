@@ -1,14 +1,19 @@
 # videoRecExample
 
 Records a rendered scene to an H.264 `.mp4` using TrussC's **native**
-`VideoRecorder` — no ffmpeg binary, no extra dependency. Each platform uses its
-own media stack:
+`ScreenRecorder` (live capture, built on `VideoWriter`) — no ffmpeg binary, no
+extra dependency. Each platform uses its own media stack:
 
-| Platform | Backend |
-|----------|---------|
-| macOS    | AVFoundation (`AVAssetWriter`) |
-| Windows  | Media Foundation (`IMFSinkWriter`) |
-| Linux    | GStreamer (`appsrc → encoder → mp4mux`) |
+| Platform | Backend | Codecs |
+|----------|---------|--------|
+| macOS    | AVFoundation (`AVAssetWriter`) | H.264, HEVC, ProRes 422/4444 |
+| Windows  | Media Foundation (`IMFSinkWriter`) | H.264 |
+| Linux    | GStreamer (`appsrc → encoder → mp4mux`) | H.264, HEVC |
+
+Pick the codec via `VideoRecordSettings`, e.g.
+`startRecording("out.mp4", { .codec = VideoCodec::HEVC })`. **ProRes is
+macOS-only** (AVFoundation) — requesting it on Linux/Windows fails cleanly
+rather than writing a different format.
 
 ## Controls
 
@@ -20,8 +25,10 @@ Two output files are written to `bin/data/`:
 - `videoRec_clean.mp4` — the offscreen Fbo only (no on-screen text)
 - `videoRec_screen.mp4` — the whole window, overlay included
 
-`VideoRecorder::start()` auto-captures every frame via the `afterFrame` hook
-until `close()`, so there is no per-frame `addFrame()` call in the sample.
+`ScreenRecorder::start()` auto-captures every frame via the `afterFrame` hook
+until `stop()`, so there is no per-frame `addFrame()` call in the sample. (For
+deterministic offline export — feed frames yourself at a fixed rate — use the
+lower-level `VideoWriter`; see `videoWriterExample`.)
 
 ## Linux: automatic encoder selection & fallback
 
@@ -32,7 +39,9 @@ never fail where software encoding is possible.
 
 ### Selection order
 
-Candidates are tried **hardware-first**, software last:
+For the requested codec, candidates are tried **hardware-first**, software last.
+HEVC uses the same order with the matching `*h265enc` elements (and no
+`openh264enc` equivalent — its software fallback is `x265enc`):
 
 1. `nvh264enc` — **NVIDIA NVENC** (dedicated encode ASIC; preferred when present)
 2. `vah264lpenc` / `vah264enc` — **Intel/AMD VA-API** (modern `va` plugin)
@@ -62,10 +71,10 @@ The chosen encoder is logged, e.g.:
 > encoders) reject frames below a minimum size, so a fixed tiny probe would
 > falsely reject a working encoder.
 
-All backends emit **H.264 4:2:0** (`profile=main`/`high`). The pipeline forces
-`I420` before the software encoders, because x264enc would otherwise negotiate
-`high-4:4:4` straight from RGBA — which many players, browser `<video>` tags and
-hardware decoders can't decode.
+All backends emit **4:2:0** (H.264 `profile=main`/`high`, HEVC `Main`). The
+pipeline forces `I420` before the software encoders, because x264enc/x265enc
+would otherwise negotiate `4:4:4` straight from RGBA — which many players,
+browser `<video>` tags and hardware decoders can't decode.
 
 ### Required GStreamer plugins
 
@@ -79,6 +88,7 @@ live in optional plugin packages — install the ones matching your hardware:
 | `nvh264enc` (NVIDIA) | `gstreamer1.0-plugins-bad` + NVIDIA driver | `gst-plugins-bad` + `nvidia-utils` |
 | `vah264lpenc` / `vaapih264enc` (Intel/AMD) | `gstreamer1.0-vaapi` | `gstreamer-vaapi` |
 | `v4l2h264enc` (Raspberry Pi) | `gstreamer1.0-plugins-good` | — |
+| `x265enc` / `nvh265enc` / `vah265lpenc` (HEVC) | same packages as the H.264 rows | same |
 
 `tools/install_dependencies_linux.sh` installs the software default
 (`plugins-ugly`) plus `-good`/`-bad`; add the VA-API/NVIDIA packages above for
