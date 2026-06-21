@@ -18,8 +18,22 @@
 // =============================================================================
 #include <unordered_map>
 #include <cstdint>
+#ifndef NDEBUG
+#include <cassert>
+#endif
 
 namespace trussc { namespace internal {
+
+#ifndef NDEBUG
+// Debug safety net: remember which sgl context each pipeline we build belongs to,
+// so loadPipeline() can assert the pipeline matches the active target. This is the
+// runtime guard against the "wrong pipeline for this target" bug class that this
+// whole RenderTarget refactor exists to prevent (every recent FBO glitch was one).
+inline std::unordered_map<uint32_t, uint32_t>& pipelineOwnerCtx() {
+    static std::unordered_map<uint32_t, uint32_t> m;
+    return m;
+}
+#endif
 
 // --- Role blend/depth specs (the blend tables formerly duplicated in tcGlobal.cpp).
 // Pixel format / sample count / depth format are left at defaults on purpose: sgl
@@ -99,6 +113,9 @@ struct RenderTarget {
         sg_pipeline_desc d = desc;   // sgl fills pixel_format/sample_count/depth from the context
         sgl_pipeline p = sgl_context_make_pipeline(context, &d);
         cache.emplace(key, p);
+#ifndef NDEBUG
+        pipelineOwnerCtx()[p.id] = context.id;
+#endif
         return p;
     }
 };
@@ -114,8 +131,19 @@ inline sgl_pipeline activeClear()         { return currentTarget->pipeline(0x200
 inline sgl_pipeline active3D()            { return currentTarget->pipeline(0x300u, pipeDesc3D()); }
 
 // Single chokepoint for loading an sgl pipeline by role. No-op if the target isn't
-// ready (id 0). Future: assert here that the pipeline matches the active target's
-// format (debug safety net against the "wrong pipeline for this target" bug class).
-inline void loadPipeline(sgl_pipeline p) { if (p.id != 0) sgl_load_pipeline(p); }
+// ready (id 0). In debug builds it asserts the pipeline was built for the active
+// target's context — the runtime safety net against loading a pipeline meant for a
+// different target (the bug class this refactor removes).
+inline void loadPipeline(sgl_pipeline p) {
+    if (p.id == 0) return;
+#ifndef NDEBUG
+    auto& owner = pipelineOwnerCtx();
+    auto it = owner.find(p.id);
+    // Only check pipelines WE built (others, e.g. sgl's built-in default, are unknown).
+    assert((it == owner.end() || it->second == currentTarget->context.id)
+           && "loadPipeline: sgl pipeline built for a different render target than the active one");
+#endif
+    sgl_load_pipeline(p);
+}
 
 }} // namespace trussc::internal
