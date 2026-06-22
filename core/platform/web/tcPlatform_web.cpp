@@ -61,7 +61,7 @@ bool captureWindow(Pixels& outPixels) {
     return false;
 }
 
-bool saveScreenshot(const std::filesystem::path& path) {
+bool internal::captureWindowToFile(const std::filesystem::path& path) {
     // TODO: ダウンロードとして保存
     logWarning() << "[Screenshot] Emscripten では未実装";
     return false;

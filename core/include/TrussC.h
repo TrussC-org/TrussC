@@ -1755,9 +1755,55 @@ inline void exitApp() {
 // ---------------------------------------------------------------------------
 
 
-// Capture screen to Pixels
+// Capture screen to Pixels.
+// NOTE: immediate readback — call this OUTSIDE draw() (e.g. at the end of
+// update() or from an events().afterFrame listener). During draw() nothing has
+// been rendered yet (drawing is deferred to present()), so on Linux you'd read
+// a blank framebuffer. If you just want a file of the current frame, prefer
+// saveScreenshot() which captures at the correct point automatically.
 inline bool grabScreen(Pixels& outPixels) {
     return captureWindow(outPixels);
+}
+
+namespace internal {
+    // Resolved absolute paths queued by saveScreenshot(), drained right after
+    // present() (see the afterFrame listener installed in _setup_cb).
+    inline std::vector<std::filesystem::path> pendingScreenshotPaths;
+    // Keeps the afterFrame drain subscription alive for the app's lifetime.
+    inline EventListener screenshotAfterFrameListener;
+}
+
+// Save a screenshot of the current frame to a file. Safe to call from anywhere
+// (setup/update/draw/event handlers): the actual capture is deferred to just
+// after present(), so it always grabs the fully-rendered frame — no black
+// captures on Linux when called inside draw().
+//
+// Returns true if the destination was prepared and the capture was queued;
+// false if the parent directory could not be created (e.g. no write
+// permission). The rare failure of the deferred write itself (permission/disk
+// after the directory check) is reported via logError("Screenshot").
+// Relative paths resolve against the data path. Supported formats: png/jpg/bmp.
+inline bool saveScreenshot(const std::filesystem::path& path) {
+    // Resolve relative paths up front so the deferred worker gets an absolute one.
+    std::filesystem::path resolved =
+        path.is_relative() ? std::filesystem::path(getDataPath(path.string())) : path;
+
+    // Auto-create the parent directory (mirrors VideoRecorder). This is the
+    // failure users want to catch synchronously (missing/unwritable folder).
+    std::error_code ec;
+    std::filesystem::path parent = resolved.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+            logError("Screenshot") << "Cannot prepare destination directory: "
+                                   << parent << " (" << ec.message() << ")";
+            return false;
+        }
+    }
+
+    internal::pendingScreenshotPaths.push_back(std::move(resolved));
+    redraw();  // guarantee a present() (and thus afterFrame) even when paused
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1972,6 +2018,21 @@ namespace internal {
         }
         #endif
 
+        // Drain deferred screenshot/MCP captures right after present(), where the
+        // swapchain is committed and we are outside any pass — the only safe
+        // readback point (see grabScreen()/saveScreenshot()).
+        internal::screenshotAfterFrameListener = events().afterFrame.listen([]() {
+            if (!internal::pendingScreenshotPaths.empty()) {
+                for (const auto& p : internal::pendingScreenshotPaths) {
+                    internal::captureWindowToFile(p);  // failures log via logError
+                }
+                internal::pendingScreenshotPaths.clear();
+            }
+            #ifndef __EMSCRIPTEN__
+            mcp::drainDeferredResponses();
+            #endif
+        });
+
         // Install the standard application menu on macOS so Cmd+Q etc. work
         // out of the box. No-op on other platforms.
         internal::installAppMenu();
@@ -2089,6 +2150,18 @@ namespace internal {
         } else {
             // EVENT_DRIVEN (0): draw only on redraw()
             shouldDraw = (redrawCount > 0);
+        }
+
+        // Force a frame when a capture is pending so present()/afterFrame runs
+        // and the deferred screenshot (or MCP get_screenshot) actually fires —
+        // otherwise a request arriving in a paused/event-driven app would never
+        // be served and a blocked MCP HTTP worker would hang.
+        if (!pendingScreenshotPaths.empty()
+            #ifndef __EMSCRIPTEN__
+            || mcp::hasDeferredResponses()
+            #endif
+        ) {
+            shouldDraw = true;
         }
 
         if (shouldDraw) {

@@ -171,9 +171,9 @@ bool captureWindow(Pixels& outPixels) {
     return true;
 }
 
-bool saveScreenshot(const std::filesystem::path& path) {
+bool internal::captureWindowToFile(const std::filesystem::path& path) {
     if (path.is_relative()) {
-        return saveScreenshot(getDataPath(path.string()));
+        return internal::captureWindowToFile(getDataPath(path.string()));
     }
     Pixels pixels;
     if (!captureWindow(pixels)) {

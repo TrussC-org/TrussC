@@ -362,9 +362,9 @@ bool captureWindow(Pixels& outPixels) {
 // ---------------------------------------------------------------------------
 // saveScreenshot - スクリーンショットをファイルに保存
 // ---------------------------------------------------------------------------
-bool saveScreenshot(const std::filesystem::path& path) {
+bool internal::captureWindowToFile(const std::filesystem::path& path) {
     if (path.is_relative()) {
-        return saveScreenshot(getDataPath(path.string()));
+        return internal::captureWindowToFile(getDataPath(path.string()));
     }
     // Capture to Pixels
     Pixels pixels;

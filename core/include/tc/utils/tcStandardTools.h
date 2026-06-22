@@ -72,33 +72,41 @@ inline void registerInspectionTools() {
 
     tool("get_screenshot", "Get screenshot as Base64 PNG")
         .bind(std::function<json()>([]() -> json {
-            // Capture screen to pixels
-            Pixels pixels;
-            if (!grabScreen(pixels)) {
-                return json{{"status", "error"}, {"message", "Failed to grab screen"}};
-            }
+            // Defer the actual capture+encode to just after present(): during a
+            // frame nothing has been rendered yet (drawing is deferred), so a
+            // readback here would be blank (black on Linux). The producer below
+            // runs at the afterFrame safe point and its result is what the MCP
+            // client receives.
+            mcp::deferToolResultUntilAfterFrame([]() -> json {
+                // Capture screen to pixels
+                Pixels pixels;
+                if (!grabScreen(pixels)) {
+                    return json{{"status", "error"}, {"message", "Failed to grab screen"}};
+                }
 
-            // Encode to PNG in memory
-            int pngSize = 0;
-            unsigned char* pngData = stbi_write_png_to_mem(
-                pixels.getData(), 0,
-                pixels.getWidth(), pixels.getHeight(), pixels.getChannels(),
-                &pngSize);
+                // Encode to PNG in memory
+                int pngSize = 0;
+                unsigned char* pngData = stbi_write_png_to_mem(
+                    pixels.getData(), 0,
+                    pixels.getWidth(), pixels.getHeight(), pixels.getChannels(),
+                    &pngSize);
 
-            if (!pngData) {
-                return json{{"status", "error"}, {"message", "Failed to encode PNG"}};
-            }
+                if (!pngData) {
+                    return json{{"status", "error"}, {"message", "Failed to encode PNG"}};
+                }
 
-            // Convert to Base64
-            std::string b64 = toBase64(pngData, pngSize);
+                // Convert to Base64
+                std::string b64 = toBase64(pngData, pngSize);
 
-            // Free PNG data
-            std::free(pngData);
+                // Free PNG data
+                std::free(pngData);
 
-            return json{
-                {"mimeType", "image/png"},
-                {"data", b64}
-            };
+                return json{
+                    {"mimeType", "image/png"},
+                    {"data", b64}
+                };
+            });
+            return json(nullptr);  // ignored — deferred result is sent instead
         }));
 
     tool("save_screenshot", "Save screenshot to file")
