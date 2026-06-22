@@ -144,8 +144,9 @@ namespace internal {
     inline sg_image fontTexture = {};
     inline sg_view fontView = {};
     inline sg_sampler fontSampler = {};
-    inline sgl_pipeline fontPipeline = {};
-    // True once the sampler + pipeline are created (cheap, done at startup).
+    // True once the bitmap-font sampler is created (cheap, done at startup).
+    // Bitmap text draws through the active RenderTarget's Fill2D pipeline now,
+    // so there is no dedicated font pipeline.
     inline bool fontInitialized = false;
     // Atlas texture state — allocated lazily on first drawBitmapString call,
     // grown row-by-row as new codepoint ranges are encountered, and rebuilt
@@ -154,8 +155,6 @@ namespace internal {
     inline int      fontAtlasRows        = 0;   // height of current atlas in cell rows
     inline uint64_t fontAtlasVersion     = 0;   // last bitmapfont::registryVersion baked in
     inline uint64_t fontAtlasUploadFrame = UINT64_MAX; // frame of last sg_update_image
-    inline sgl_pipeline pipeline3d = {};
-    inline bool pipeline3dInitialized = false;
     inline bool pixelPerfectMode = false;
 
     // Default screen FOV (45 = perspective ~28mm equivalent, 0 = ortho)
@@ -181,36 +180,25 @@ namespace internal {
     inline void setupScreenFov(float fovDeg, float nearDist = 0.0f, float farDist = 0.0f);
 
 
-    // Blend mode pipelines
-    inline sgl_pipeline blendPipelines[6] = {};
-    inline bool blendPipelinesInitialized = false;
+    // Current 2D blend mode (the "role"). The actual sgl pipeline for it lives in
+    // the active RenderTarget's lazy cache — see tcRenderTarget.h active2D().
     inline BlendMode currentBlendMode = BlendMode::Alpha;
-
-    // Premultiplied alpha blend pipeline (for FBO texture compositing)
-    inline sgl_pipeline premultipliedBlendPipeline = {};
-    inline bool premultipliedBlendPipelineInitialized = false;
 }
 
 } // namespace trussc (temporarily closed)
 
+// RenderTarget: single source of truth for sgl pipeline selection (swapchain/FBO).
+// Included before restoreCurrentPipeline so it can use the active*() helpers.
+#include "tc/graphics/tcRenderTarget.h"
+
 // Forward declarations for FBO pipeline switching (used in tcRenderContext.h)
 namespace trussc { namespace internal {
     inline bool inFboPass = false;
-    inline sgl_pipeline currentFboBlendPipeline = {};
-    // 3D pipeline (depth test + premultiplied alpha blend) created in the current
-    // FBO's context/format. Loaded instead of the swapchain-context `pipeline3d`
-    // when drawing 3D inside an FBO pass (the swapchain pipeline mismatches the
-    // FBO's format/sample count and corrupts the rendered color/alpha).
-    inline sgl_pipeline currentFboPipeline3d = {};
 
-    // Restore current blend pipeline after temporary pipeline changes
-    // Handles both FBO and main context
+    // Restore the current blend pipeline after temporary pipeline changes.
+    // FBO uses its accumulating Fill2D; swapchain honors the current blend mode.
     inline void restoreCurrentPipeline() {
-        if (inFboPass && currentFboBlendPipeline.id != 0) {
-            sgl_load_pipeline(currentFboBlendPipeline);
-        } else if (blendPipelinesInitialized) {
-            sgl_load_pipeline(blendPipelines[static_cast<int>(currentBlendMode)]);
-        }
+        loadPipeline(inFboPass ? activeFill2D() : active2D(currentBlendMode));
     }
 }}
 
@@ -327,10 +315,7 @@ namespace internal {
     // Saved clear color for resume after FBO suspend (set by clear())
     inline sg_color swapchainClearValue = { 0.0f, 0.0f, 0.0f, 1.0f };
 
-    // inFboPass and currentFboBlendPipeline are declared earlier (before tcRenderContext.h)
-
-    // Current active FBO pipeline (used from clear())
-    inline sgl_pipeline currentFboClearPipeline = {};
+    // inFboPass is declared earlier (before tcRenderContext.h)
 
     // FBO clearColor function pointer (set in tcFbo.h)
     inline void (*fboClearColorFunc)(float, float, float, float) = nullptr;
@@ -592,11 +577,11 @@ inline void popScissor() {
 // Set blend mode
 // Alpha channel is additive in all modes (to prevent transparency when drawing to FBO)
 inline void setBlendMode(BlendMode mode) {
-    if (!internal::blendPipelinesInitialized) return;
+    if (internal::swapchainTarget.context.id == 0) return;  // renderer not set up yet
     // Skip in FBO - FBO uses its own pipeline
     if (internal::inFboPass) return;
     internal::currentBlendMode = mode;
-    sgl_load_pipeline(internal::blendPipelines[static_cast<int>(mode)]);
+    internal::loadPipeline(internal::active2D(mode));
 }
 
 // Get current blend mode
@@ -611,9 +596,7 @@ inline void resetBlendMode() {
 
 // Restore current blend mode pipeline (use after temporary pipeline changes)
 inline void restoreBlendPipeline() {
-    if (internal::blendPipelinesInitialized) {
-        sgl_load_pipeline(internal::blendPipelines[static_cast<int>(internal::currentBlendMode)]);
-    }
+    internal::loadPipeline(internal::active2D(internal::currentBlendMode));
 }
 
 // ---------------------------------------------------------------------------
@@ -624,25 +607,14 @@ inline void restoreBlendPipeline() {
 // Deprecated: 3D is now enabled by default with setupScreenFov
 [[deprecated("3D is now enabled by default. Use setupScreenPerspective() to change FOV.")]]
 inline void enable3D() {
-    // FBO-aware (same as setupScreenPerspective / EasyCam): the swapchain
-    // pipeline3d mismatches an FBO's format/sample count.
-    if (internal::inFboPass && internal::currentFboPipeline3d.id != 0) {
-        sgl_load_pipeline(internal::currentFboPipeline3d);
-    } else if (internal::pipeline3dInitialized) {
-        sgl_load_pipeline(internal::pipeline3d);
-    }
+    internal::loadPipeline(internal::active3D());   // format-correct 3D for the active target
 }
 
 // Enable 3D drawing mode (perspective)
 // Deprecated: use setupScreenPerspective() or setupScreenFov() instead
 [[deprecated("Use setupScreenPerspective(fovDeg) or setupScreenFov(fovDeg) instead. Note: FOV is now in degrees, not radians.")]]
 inline void enable3DPerspective(float fovY = 0.785f, float nearZ = 0.1f, float farZ = 1000.0f) {
-    // FBO-aware (see enable3D): avoid the swapchain pipeline3d inside an FBO.
-    if (internal::inFboPass && internal::currentFboPipeline3d.id != 0) {
-        sgl_load_pipeline(internal::currentFboPipeline3d);
-    } else if (internal::pipeline3dInitialized) {
-        sgl_load_pipeline(internal::pipeline3d);
-    }
+    internal::loadPipeline(internal::active3D());   // format-correct 3D for the active target
     // Set perspective projection
     sgl_matrix_mode_projection();
     sgl_load_identity();
@@ -688,10 +660,8 @@ namespace internal {
         if (fovDeg <= 0.0f) {
             // Orthographic projection (2D mode)
             sgl_defaults();
-            // Load alpha blend pipeline for 2D (skip in FBO - FBO loads its own pipeline)
-            if (blendPipelinesInitialized && !inFboPass) {
-                sgl_load_pipeline(blendPipelines[static_cast<int>(BlendMode::Alpha)]);
-            }
+            // 2D alpha pipeline for the active target (swapchain or FBO).
+            loadPipeline(activeFill2D());
             sgl_matrix_mode_projection();
             // Ortho volume CENTERED on the camera: the lookat below moves the
             // world center to the view origin, so the volume must span
@@ -715,14 +685,8 @@ namespace internal {
                 Vec3(0.0f, 1.0f, 0.0f)
             );
         } else {
-            // Perspective projection (3D mode)
-            // Inside an FBO, use the FBO-context 3D pipeline (depth + premultiplied
-            // alpha for this format); otherwise the swapchain 3D pipeline.
-            if (inFboPass && currentFboPipeline3d.id != 0) {
-                sgl_load_pipeline(currentFboPipeline3d);
-            } else if (pipeline3dInitialized && !inFboPass) {
-                sgl_load_pipeline(pipeline3d);
-            }
+            // Perspective projection (3D mode) — format-correct 3D for the active target.
+            loadPipeline(active3D());
 
             float aspect = viewW / viewH;
 
@@ -1317,12 +1281,12 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     sgl_load_identity();
 
     // Draw background rect (before text, same ortho coordinate system)
-    sgl_load_pipeline((internal::inFboPass && internal::currentFboBlendPipeline.id != 0) ? internal::currentFboBlendPipeline : internal::fontPipeline);
+    internal::loadPipeline(internal::activeFill2D());
     setColor(background);
     drawRect(worldX - paddingH, worldY, textWidth + paddingH * 2, exactHeight);
 
     // Draw text in foreground color
-    sgl_load_pipeline((internal::inFboPass && internal::currentFboBlendPipeline.id != 0) ? internal::currentFboBlendPipeline : internal::fontPipeline);
+    internal::loadPipeline(internal::activeFill2D());
     sgl_enable_texture();
     sgl_texture(internal::fontView, internal::fontSampler);
 
@@ -1359,12 +1323,10 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     sgl_end();
     sgl_disable_texture();
 
-    // Restore current blend pipeline (not default, which has blend disabled)
-    if (internal::inFboPass && internal::currentFboBlendPipeline.id != 0) {
-        sgl_load_pipeline(internal::currentFboBlendPipeline);
-    } else if (internal::blendPipelinesInitialized) {
-        sgl_load_pipeline(internal::blendPipelines[static_cast<int>(internal::currentBlendMode)]);
-    }
+    // Restore current blend pipeline (not default, which has blend disabled).
+    // FBO uses its accumulating Fill2D; swapchain honors the current blend mode.
+    internal::loadPipeline(internal::inFboPass ? internal::activeFill2D()
+                                               : internal::active2D(internal::currentBlendMode));
 
     // Restore matrices
     sgl_pop_matrix();
