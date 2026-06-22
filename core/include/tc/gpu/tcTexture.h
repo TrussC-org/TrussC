@@ -898,13 +898,14 @@ private:
 
     void drawInternal(float x, float y, float w, float h,
                       float u0, float v0, float u1, float v1) const {
-        // Use appropriate blend pipeline
-        if (internal::inFboPass && internal::currentFboBlendPipeline.id != 0) {
-            sgl_load_pipeline(internal::currentFboBlendPipeline);
-        } else if (premultipliedAlpha_ && internal::premultipliedBlendPipelineInitialized) {
-            sgl_load_pipeline(internal::premultipliedBlendPipeline);
+        // Blend pipeline for the active target (behavior preserved: FBO uses Fill2D
+        // even for premultiplied sources, as before).
+        if (internal::inFboPass) {
+            internal::loadPipeline(internal::activeFill2D());
+        } else if (premultipliedAlpha_) {
+            internal::loadPipeline(internal::activePremult());
         } else {
-            sgl_load_pipeline(internal::fontPipeline);
+            internal::loadPipeline(internal::activeFill2D());
         }
         sgl_enable_texture();
         sgl_texture(view_, sampler_);

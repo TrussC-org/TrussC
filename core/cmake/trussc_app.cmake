@@ -259,8 +259,9 @@ endif()
         )
         target_compile_features(guest PRIVATE cxx_std_20)
         target_compile_definitions(guest PRIVATE TC_HOT_RELOAD_BUILD TRUSSC_SHOW_CONSOLE)
-        # GuestはTrussCにリンクしない（シンボルはHostから実行時解決）が、
-        # TrussCのPUBLICコンパイル設定（/utf-8, Windows SDK include, SOKOL_D3D11等）は必要。
+        # Guest does NOT link to TrussC (symbols are resolved from the Host at
+        # runtime), but it still needs TrussC's PUBLIC compile settings
+        # (/utf-8, Windows SDK includes, SOKOL_D3D11, etc.).
         get_target_property(_TC_PUB_OPTS TrussC INTERFACE_COMPILE_OPTIONS)
         if(_TC_PUB_OPTS)
             target_compile_options(guest PRIVATE ${_TC_PUB_OPTS})
@@ -281,9 +282,9 @@ endif()
         if(_TC_PUB_LINK_DIRS)
             target_link_directories(guest PRIVATE ${_TC_PUB_LINK_DIRS})
         endif()
-        # Windows: デバッグ情報を.objに埋め込み（/Z7）、PDBを生成しない。
-        # デバッガがguest.pdbをロックするとホットリロード時のリビルドが失敗するため。
-        # CMakeデフォルトの/Ziを/Z7に置換してD9025 warningを防ぐ。
+        # Windows: embed debug info into the .obj (/Z7), don't generate a PDB.
+        # If the debugger locks guest.pdb, the rebuild on hot reload fails.
+        # Replace CMake's default /Zi with /Z7 to avoid a D9025 warning.
         if(MSVC)
             foreach(_cfg DEBUG RELWITHDEBINFO)
                 string(REGEX REPLACE "/Z[iI]" "/Z7" CMAKE_CXX_FLAGS_${_cfg} "${CMAKE_CXX_FLAGS_${_cfg}}")
@@ -354,13 +355,13 @@ endif()
                 -Wl,-export_dynamic)
         elseif(WIN32)
             # Windows Hot Reload:
-            # TrussC.libの全シンボルをHostからエクスポートし、GuestのDLLがリンクできるようにする。
-            # WINDOWS_EXPORT_ALL_SYMBOLS は static lib のシンボルをスキャンしないため、
-            # dumpbin で TrussC.lib からシンボルを抽出し .def ファイルを生成する。
+            # Export all symbols from TrussC.lib out of the Host so the Guest DLL can link them.
+            # WINDOWS_EXPORT_ALL_SYMBOLS does not scan symbols in a static lib, so
+            # extract the symbols from TrussC.lib with dumpbin and generate a .def file.
             set(_TC_DEF_SCRIPT "${CMAKE_BINARY_DIR}/_tc_gen_exports.cmake")
             set(_TC_DEF_FILE "${CMAKE_BINARY_DIR}/trussc_exports.def")
             file(WRITE "${_TC_DEF_SCRIPT}"
-"# TrussC.lib から全エクスポートシンボルを抽出して .def を生成する
+"# Extract all exported symbols from TrussC.lib and generate the .def
 set(LIB_FILE \"\${LIB_FILE}\")
 set(DEF_FILE \"\${DEF_FILE}\")
 set(DUMPBIN \"\${DUMPBIN}\")
@@ -372,29 +373,29 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-# public symbols セクションからシンボル名を抽出
-# 実際のシンボル行は「  XXXXXX シンボル名」の形式（6桁以上のhexアドレス）
+# Extract symbol names from the public symbols section
+# An actual symbol line looks like \"  XXXXXX symbol-name\" (a hex address of 6+ digits)
 set(SYMBOLS \"\")
 string(REGEX MATCHALL \"[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]+ [?_@A-Za-z][^ \\n]*\" ENTRIES \"\${DUMP_OUT}\")
 foreach(ENTRY \${ENTRIES})
     string(REGEX MATCH \"^[0-9A-Fa-f]+ (.+)\" _ \"\${ENTRY}\")
     if(CMAKE_MATCH_1)
         set(SYM \"\${CMAKE_MATCH_1}\")
-        # フィルタ: エクスポート不可能なシンボルをスキップ
+        # Filter: skip symbols that cannot be exported
         if(SYM MATCHES \"^__imp_\")
-            # インポートサンク
+            # Import thunk
         elseif(SYM MATCHES \"^[.]\")
-            # セクション名 (.CRT$XCU, .rdata 等)
+            # Section name (.CRT$XCU, .rdata, etc.)
         elseif(SYM MATCHES \"/\")
-            # dumpbinヘッダーのメタデータ (time/date 等)
+            # dumpbin header metadata (time/date, etc.)
         elseif(SYM MATCHES \"^__NULL_IMPORT\")
-            # NULLインポート記述子
+            # NULL import descriptor
         elseif(SYM MATCHES \"^__IMPORT_DESCRIPTOR\")
-            # インポート記述子
+            # Import descriptor
         elseif(SYM MATCHES \"_NULL_THUNK_DATA$\")
-            # NULLサンクデータ
+            # NULL thunk data
         elseif(SYM MATCHES \"^_RTC_\")
-            # ランタイムチェック用内部シンボル
+            # Internal symbol for runtime checks
         else()
             list(APPEND SYMBOLS \"\${SYM}\")
         endif()
@@ -403,7 +404,7 @@ endforeach()
 
 list(REMOVE_DUPLICATES SYMBOLS)
 
-# .def ファイル書き出し
+# Write out the .def file
 file(WRITE \"\${DEF_FILE}\" \"EXPORTS\\n\")
 foreach(SYM \${SYMBOLS})
     file(APPEND \"\${DEF_FILE}\" \"    \${SYM}\\n\")
@@ -412,7 +413,7 @@ endforeach()
 list(LENGTH SYMBOLS SYM_COUNT)
 message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
 ")
-            # dumpbin.exe のパスを検出
+            # Detect the path to dumpbin.exe
             get_filename_component(_TC_MSVC_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
             find_program(_TC_DUMPBIN dumpbin HINTS "${_TC_MSVC_BIN_DIR}")
             if(NOT _TC_DUMPBIN)
@@ -423,7 +424,7 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
                     "Prompt or run vcvarsall.bat before configuring.")
             endif()
 
-            # TrussC.lib ビルド後に .def を生成
+            # Generate the .def after TrussC.lib is built
             add_custom_command(
                 OUTPUT "${_TC_DEF_FILE}"
                 COMMAND ${CMAKE_COMMAND}
@@ -438,7 +439,7 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
             add_custom_target(_tc_gen_exports DEPENDS "${_TC_DEF_FILE}")
             add_dependencies(${PROJECT_NAME} _tc_gen_exports)
 
-            # Host に /DEF: と /WHOLEARCHIVE を渡す
+            # Pass /DEF: and /WHOLEARCHIVE to the Host
             target_link_options(${PROJECT_NAME} PRIVATE
                 /DEF:${_TC_DEF_FILE}
                 /WHOLEARCHIVE:$<TARGET_FILE:TrussC>
@@ -467,6 +468,21 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
 
     # Link TrussC
     target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC)
+
+    # Opt-in compiler warnings on the USER's own sources (`trusscli build
+    # --warnings` passes -DTRUSSC_WARNINGS=ON). TrussC / sokol / stb headers are
+    # SYSTEM includes (see core/CMakeLists.txt), so only the app's code is
+    # flagged. No -Werror here — warnings must not break a user's build.
+    if(TRUSSC_WARNINGS)
+        set(_TC_WARN_FLAGS
+            $<$<CXX_COMPILER_ID:MSVC>:/W4>
+            $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>
+            $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>)
+        target_compile_options(${PROJECT_NAME} PRIVATE ${_TC_WARN_FLAGS})
+        if(TARGET guest)
+            target_compile_options(guest PRIVATE ${_TC_WARN_FLAGS})
+        endif()
+    endif()
 
     # Silence the macOS ld-prime "ignoring duplicate libraries" warning. It
     # fires on the legitimate diamond dependency (app -> TrussC and

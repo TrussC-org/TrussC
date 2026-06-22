@@ -196,7 +196,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
         sgl_load_identity();
         sgl_translate(worldX, worldY, 0.0f);
 
-        sgl_load_pipeline((internal::inFboPass && internal::currentFboBlendPipeline.id != 0) ? internal::currentFboBlendPipeline : internal::fontPipeline);
+        internal::loadPipeline(internal::activeFill2D());
         sgl_enable_texture();
         sgl_texture(internal::fontView, internal::fontSampler);
 
@@ -243,7 +243,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
         pushMatrix();
         translate(x + offset.x, y + offset.y);
 
-        sgl_load_pipeline((internal::inFboPass && internal::currentFboBlendPipeline.id != 0) ? internal::currentFboBlendPipeline : internal::fontPipeline);
+        internal::loadPipeline(internal::activeFill2D());
         sgl_enable_texture();
         sgl_texture(internal::fontView, internal::fontSampler);
 
@@ -300,7 +300,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
     translate(x + offset.x * scale, y + offset.y * scale);
     sgl_scale(scale, scale, 1.0f);
 
-    sgl_load_pipeline((internal::inFboPass && internal::currentFboBlendPipeline.id != 0) ? internal::currentFboBlendPipeline : internal::fontPipeline);
+    internal::loadPipeline(internal::activeFill2D());
     sgl_enable_texture();
     sgl_texture(internal::fontView, internal::fontSampler);
 
@@ -369,7 +369,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y,
         sgl_load_identity();
         sgl_translate(worldX, worldY, 0.0f);
 
-        sgl_load_pipeline((internal::inFboPass && internal::currentFboBlendPipeline.id != 0) ? internal::currentFboBlendPipeline : internal::fontPipeline);
+        internal::loadPipeline(internal::activeFill2D());
         sgl_enable_texture();
         sgl_texture(internal::fontView, internal::fontSampler);
 
@@ -415,7 +415,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y,
         pushMatrix();
         translate(x + offset.x, y + offset.y);
 
-        sgl_load_pipeline((internal::inFboPass && internal::currentFboBlendPipeline.id != 0) ? internal::currentFboBlendPipeline : internal::fontPipeline);
+        internal::loadPipeline(internal::activeFill2D());
         sgl_enable_texture();
         sgl_texture(internal::fontView, internal::fontSampler);
 

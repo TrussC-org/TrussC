@@ -39,14 +39,9 @@ public:
 
     // Start camera mode (set 3D perspective + view matrix)
     void begin() {
-        // Enable 3D pipeline. Inside an FBO pass, use the FBO-context 3D pipeline
-        // (the swapchain `pipeline3d` mismatches the FBO format/sample count and
-        // corrupts color/alpha — same FBO-awareness as setupScreenPerspective).
-        if (internal::inFboPass && internal::currentFboPipeline3d.id != 0) {
-            sgl_load_pipeline(internal::currentFboPipeline3d);
-        } else if (internal::pipeline3dInitialized) {
-            sgl_load_pipeline(internal::pipeline3d);
-        }
+        // 3D pipeline for the active target (swapchain or FBO) — RenderTarget picks
+        // the format-correct one; no per-site swapchain/FBO branch.
+        internal::loadPipeline(internal::active3D());
 
         float dpiScale = sapp_dpi_scale();
         float w = (float)sapp_width() / dpiScale;
