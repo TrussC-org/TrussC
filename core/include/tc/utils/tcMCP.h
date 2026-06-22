@@ -34,6 +34,66 @@ namespace trussc {
 namespace mcp {
 
 // ---------------------------------------------------------------------------
+// Deferred tool responses
+// ---------------------------------------------------------------------------
+// Some tools (e.g. get_screenshot) need state that only exists AFTER present()
+// — during the frame, drawing is still deferred and a readback would be blank.
+// Such a handler calls deferToolResultUntilAfterFrame(): processHttpQueue()
+// stashes the request instead of answering it, and drainDeferredResponses()
+// (invoked from an afterFrame listener) runs the producer at the safe readback
+// point and unblocks the waiting HTTP worker. All state below is touched only
+// on the main thread inside processHttpQueue()/handleToolsCall().
+
+namespace detail {
+
+struct DeferredResponse {
+    std::shared_ptr<std::promise<std::string>> response;  // unblocks the HTTP worker
+    std::function<std::string()> makeEnvelope;            // builds the JSON-RPC reply
+};
+
+struct DeferralState {
+    bool requested = false;                  // set by deferToolResultUntilAfterFrame()
+    std::function<json()> produce;           // tool content producer
+    bool hasEnvelope = false;                // set by handleToolsCall(), read by processHttpQueue()
+    std::function<std::string()> envelope;   // full JSON-RPC reply builder
+};
+inline DeferralState& deferralState() { static DeferralState s; return s; }
+
+inline std::vector<DeferredResponse>& deferredResponses() {
+    static std::vector<DeferredResponse> v;
+    return v;
+}
+
+} // namespace detail
+
+// Call inside a tool handler to defer its result until just after the next
+// present(). `produce` returns the tool's content json (same shape a normal
+// handler would return) and runs at that safe readback point.
+inline void deferToolResultUntilAfterFrame(std::function<json()> produce) {
+    detail::deferralState().requested = true;
+    detail::deferralState().produce = std::move(produce);
+}
+
+// Run all deferred tool producers and unblock their HTTP workers. Call from an
+// events().afterFrame listener (i.e. after present()).
+inline void drainDeferredResponses() {
+    auto& list = detail::deferredResponses();
+    if (list.empty()) return;
+    for (auto& d : list) {
+        std::string envelope;
+        try {
+            envelope = d.makeEnvelope();
+        } catch (const std::exception& e) {
+            envelope = std::string("{\"error\":\"deferred response failed: ") + e.what() + "\"}";
+        }
+        d.response->set_value(envelope);
+    }
+    list.clear();
+}
+
+inline bool hasDeferredResponses() { return !detail::deferredResponses().empty(); }
+
+// ---------------------------------------------------------------------------
 // Types & Interfaces
 // ---------------------------------------------------------------------------
 
@@ -191,21 +251,39 @@ private:
             return makeError(id, -32601, "Tool not found: " + name);
         }
 
-        try {
-            // Execute tool handler
-            json content = tools_[name].handler(args);
-
-            // Format result according to MCP spec
+        // Wrap a tool's content json into a full JSON-RPC result string.
+        auto formatResult = [this, id](const json& content) -> std::string {
             json result;
             if (content.is_array() && content.size() > 0 && content[0].contains("type")) {
-                 result = {{"content", content}};
+                result = {{"content", content}};
             } else {
-                 result = {{"content", {{
-                     {"type", "text"},
-                     {"text", content.dump()}
-                 }}}};
+                result = {{"content", {{
+                    {"type", "text"},
+                    {"text", content.dump()}
+                }}}};
             }
             return makeResult(id, result);
+        };
+
+        try {
+            auto& ds = detail::deferralState();
+            ds.requested = false;
+
+            // Execute tool handler (may call deferToolResultUntilAfterFrame())
+            json content = tools_[name].handler(args);
+
+            // Handler asked to produce its result after the next present().
+            if (ds.requested) {
+                auto produce = std::move(ds.produce);
+                ds.requested = false;
+                ds.hasEnvelope = true;
+                ds.envelope = [formatResult, produce]() -> std::string {
+                    return formatResult(produce());
+                };
+                return std::string();  // processHttpQueue() stashes the reply
+            }
+
+            return formatResult(content);
 
         } catch (const std::exception& e) {
             return makeError(id, -32000, std::string("Tool execution error: ") + e.what());
@@ -385,6 +463,17 @@ inline void startHttpServer(int port = 0) {
 
 // Stop HTTP server
 inline void stopHttpServer() {
+    // Unblock any HTTP workers still waiting on a deferred reply — no more frames
+    // will be presented, so their producers would never run (and a blocked
+    // worker would stall the server shutdown below).
+    {
+        auto& list = detail::deferredResponses();
+        for (auto& d : list) {
+            d.response->set_value("{\"error\":\"server shutting down\"}");
+        }
+        list.clear();
+    }
+
     auto& svr = detail::getHttpServer();
     if (svr) {
         svr->stop();
@@ -404,7 +493,17 @@ inline void stopHttpServer() {
 inline void processHttpQueue() {
     McpRequest req;
     while (detail::getHttpChannel().tryReceive(req)) {
+        auto& ds = detail::deferralState();
+        ds.hasEnvelope = false;
         std::string result = Server::instance().processMessage(req.body);
+        if (ds.hasEnvelope) {
+            // Tool deferred its reply until after present(): stash the promise
+            // and answer it from drainDeferredResponses(). The HTTP worker stays
+            // blocked on its future a few ms longer (correct, not a hang).
+            detail::deferredResponses().push_back({ req.response, std::move(ds.envelope) });
+            ds.hasEnvelope = false;
+            continue;
+        }
         if (result.empty()) {
             // Return empty JSON-RPC response for notifications
             result = "{}";

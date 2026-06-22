@@ -3054,6 +3054,7 @@ static void printBuildHelp() {
          << "      --ios                  Build for iOS\n"
          << "      --release              Build in Release configuration\n"
          << "      --clean                Clean before building (--clean-first)\n"
+         << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n";
 }
@@ -3136,6 +3137,7 @@ static int cmdBuild(const vector<string>& args) {
     string targetPreset;
     bool release = false;
     bool clean = false;
+    bool warnings = false;
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
         if (i + 1 >= args.size()) {
@@ -3154,6 +3156,7 @@ static int cmdBuild(const vector<string>& args) {
         else if (a == "--ios")     targetPreset = "ios";
         else if (a == "--release") release = true;
         else if (a == "--clean")   clean = true;
+        else if (a == "--warnings") warnings = true;
         else if (a == "-p" || a == "--path") {
             if (!needValue(i, a, explicitPath)) return 1;
         }
@@ -3246,7 +3249,18 @@ static int cmdBuild(const vector<string>& args) {
     // Run from the project directory
     string savedCwd = fs::current_path().string();
     fs::current_path(projectPath);
-    int rc = runProcess(cmd);
+
+    int rc = 0;
+    // --warnings: reconfigure the cache so trussc_app.cmake turns on -Wall/-Wextra
+    // for the app's own sources. `cmake --build` can't pass -D, so configure first.
+    // The cache var is sticky: it stays on for later builds until a configure
+    // without --warnings (or `trusscli update`) resets it.
+    if (warnings) {
+        cout << "[warnings] Enabling -Wall -Wextra for this project's sources...\n";
+        vector<string> cfg = {cmake, "--preset", targetPreset, "-DTRUSSC_WARNINGS=ON"};
+        rc = runProcess(cfg);
+    }
+    if (rc == 0) rc = runProcess(cmd);
     fs::current_path(savedCwd);
 
     if (rc != 0) {
@@ -3273,6 +3287,7 @@ static void printRunHelp() {
          << "      --session <backend>    Launch inside a display session (Linux, no desktop).\n"
          << "                             Backends: labwc, x11. Example: --session labwc\n"
          << "      --release              Build in Release configuration\n"
+         << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n";
 }
@@ -3282,6 +3297,7 @@ static int cmdRun(const vector<string>& args) {
     string target; // "", "web", "android", "ios"
     string session; // display session backend: "labwc", "x11", ""
     bool release = false;
+    bool warnings = false;
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
         if (i + 1 >= args.size()) {
@@ -3307,6 +3323,7 @@ static int cmdRun(const vector<string>& args) {
             }
         }
         else if (a == "--release")  release = true;
+        else if (a == "--warnings") warnings = true;
         else if (a == "-p" || a == "--path") {
             if (!needValue(i, a, explicitPath)) return 1;
         }
@@ -3344,6 +3361,7 @@ static int cmdRun(const vector<string>& args) {
     vector<string> buildArgs;
     if (!target.empty()) buildArgs.push_back("--" + target);
     if (release) buildArgs.push_back("--release");
+    if (warnings) buildArgs.push_back("--warnings");
     if (!explicitPath.empty()) { buildArgs.push_back("-p"); buildArgs.push_back(explicitPath); }
 
     int buildRc = cmdBuild(buildArgs);
@@ -3570,8 +3588,8 @@ _trusscli() {
             local -a opts
             case "$words[2]" in
                 update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
-                build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--release:Release config' '--clean:Clean first' '-p:Project path' '--path:Project path') ;;
-                run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--release:Release' '-p:Project path' '--path:Project path') ;;
+                build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--release:Release config' '--clean:Clean first' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
+                run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--release:Release' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
                 clean)  opts=('--all:Delete all build dirs' '-p:Project path' '--path:Project path') ;;
             esac
             _describe 'option' opts
@@ -3657,8 +3675,8 @@ _trusscli() {
             esac
             case "${COMP_WORDS[1]}" in
                 update) COMPREPLY=($(compgen -W "-p --path --web --android --ios --ide --tc-root" -- "$cur")) ;;
-                build)  COMPREPLY=($(compgen -W "--web --android --ios --release --clean -p --path" -- "$cur")) ;;
-                run)    COMPREPLY=($(compgen -W "--web --android --ios --session --release -p --path" -- "$cur")) ;;
+                build)  COMPREPLY=($(compgen -W "--web --android --ios --release --clean --warnings -p --path" -- "$cur")) ;;
+                run)    COMPREPLY=($(compgen -W "--web --android --ios --session --release --warnings -p --path" -- "$cur")) ;;
                 clean)  COMPREPLY=($(compgen -W "--all -p --path" -- "$cur")) ;;
             esac
             ;;

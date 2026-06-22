@@ -168,12 +168,15 @@ bool getKeepScreenOn();
 // Returns true on success, false on failure
 bool captureWindow(Pixels& outPixels);
 
-// Capture current window and save to file
-// Returns true on success, false on failure
-// Save screenshot (uses OS window capture feature)
-// Relative paths are resolved relative to executable directory + data path
+// Internal: synchronous capture + file write (the actual worker behind the
+// public deferred saveScreenshot()). Must run at a safe readback point, i.e.
+// AFTER present() (see the afterFrame drain in TrussC.h). Callers pass an
+// already-resolved absolute path; the parent directory is assumed to exist.
+// Returns true on success, false on failure.
 // Supported formats: .png, .jpg/.jpeg, .tiff/.tif, .bmp
-bool saveScreenshot(const std::filesystem::path& path);
+namespace internal {
+bool captureWindowToFile(const std::filesystem::path& path);
+}
 
 // ---------------------------------------------------------------------------
 // System volume (0.0 - 1.0)

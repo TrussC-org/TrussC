@@ -51,6 +51,11 @@ void setup() {
     sgldesc.allocator.free_fn = smemtrack_free;
     sgl_setup(&sgldesc);
 
+    // RenderTarget: the swapchain target uses the default sgl context (carries the
+    // swapchain color/depth format + sample count). Pipelines build lazily on first use.
+    internal::swapchainTarget.context = sgl_default_context();
+    internal::swapchainTarget.isFbo = false;
+
     // Initialize bitmap font sampler + pipeline. The atlas TEXTURE itself is
     // allocated lazily on first drawBitmapString call (see ensureFontAtlas in
     // TrussC.h) and grown tier-by-tier as new codepoint ranges are used.
@@ -64,140 +69,38 @@ void setup() {
         smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
         internal::fontSampler = sg_make_sampler(&smp_desc);
 
-        // Pipeline (alpha blend; alpha-channel overwrite to keep FBO opaque)
-        sg_pipeline_desc pip_desc = {};
-        pip_desc.colors[0].blend.enabled = true;
-        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ZERO;
-        internal::fontPipeline = sgl_make_pipeline(&pip_desc);
-
         internal::fontInitialized = true;
     }
 
-    // Create pipeline for 3D drawing (depth test + alpha blend)
-    if (!internal::pipeline3dInitialized) {
-        sg_pipeline_desc pip_desc = {};
-        pip_desc.cull_mode = SG_CULLMODE_NONE;  // No culling
-        pip_desc.depth.write_enabled = true;
-        pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
-        pip_desc.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-        // Enable alpha blending
-        pip_desc.colors[0].blend.enabled = true;
-        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        internal::pipeline3d = sgl_make_pipeline(&pip_desc);
-        internal::pipeline3dInitialized = true;
-    }
+    // The 3D / blend-mode / premultiplied / clear pipelines are no longer created
+    // here: they are built lazily (and pre-warmed below) by the swapchain
+    // RenderTarget, and per-format by each FBO's RenderTarget. See tcRenderTarget.h.
 
-    // Create blend mode pipelines
-    // Alpha channel is additive in all modes (does not reduce existing alpha)
-    if (!internal::blendPipelinesInitialized) {
-        // Alpha - normal alpha blending
-        {
-            sg_pipeline_desc pip_desc = {};
-            pip_desc.colors[0].blend.enabled = true;
-            pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-            pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-            pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-            pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-            internal::blendPipelines[static_cast<int>(BlendMode::Alpha)] = sgl_make_pipeline(&pip_desc);
-        }
-        // Add - additive blending
-        {
-            sg_pipeline_desc pip_desc = {};
-            pip_desc.colors[0].blend.enabled = true;
-            pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-            pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
-            pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-            pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
-            internal::blendPipelines[static_cast<int>(BlendMode::Add)] = sgl_make_pipeline(&pip_desc);
-        }
-        // Multiply - multiply blending
-        // Pure multiplication: result = src × dst
-        // Semi-transparency expressed by color darkness (assumes srcAlpha is premultiplied into RGB)
-        {
-            sg_pipeline_desc pip_desc = {};
-            pip_desc.colors[0].blend.enabled = true;
-            pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_DST_COLOR;
-            pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ZERO;
-            pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-            pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
-            internal::blendPipelines[static_cast<int>(BlendMode::Multiply)] = sgl_make_pipeline(&pip_desc);
-        }
-        // Screen - screen blending
-        {
-            sg_pipeline_desc pip_desc = {};
-            pip_desc.colors[0].blend.enabled = true;
-            pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
-            pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
-            pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-            pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
-            internal::blendPipelines[static_cast<int>(BlendMode::Screen)] = sgl_make_pipeline(&pip_desc);
-        }
-        // Subtract - subtractive blending
-        {
-            sg_pipeline_desc pip_desc = {};
-            pip_desc.colors[0].blend.enabled = true;
-            pip_desc.colors[0].blend.op_rgb = SG_BLENDOP_REVERSE_SUBTRACT;
-            pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-            pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
-            pip_desc.colors[0].blend.op_alpha = SG_BLENDOP_ADD;  // Alpha remains additive
-            pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-            pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
-            internal::blendPipelines[static_cast<int>(BlendMode::Subtract)] = sgl_make_pipeline(&pip_desc);
-        }
-        // Disabled - no blending (overwrite)
-        {
-            sg_pipeline_desc pip_desc = {};
-            pip_desc.colors[0].blend.enabled = false;
-            internal::blendPipelines[static_cast<int>(BlendMode::Disabled)] = sgl_make_pipeline(&pip_desc);
-        }
-
-        internal::blendPipelinesInitialized = true;
-        internal::currentBlendMode = BlendMode::Alpha;
-    }
-
-    // Premultiplied alpha blend pipeline (for compositing FBO textures to screen)
-    if (!internal::premultipliedBlendPipelineInitialized) {
-        sg_pipeline_desc pip_desc = {};
-        pip_desc.colors[0].blend.enabled = true;
-        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
-        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        internal::premultipliedBlendPipeline = sgl_make_pipeline(&pip_desc);
-        internal::premultipliedBlendPipelineInitialized = true;
-    }
+    // Pre-warm the swapchain RenderTarget pipeline cache so active2D/Premult/Clear/3D
+    // never create an sgl pipeline mid-frame (lazy creation inside setupScreenFov
+    // corrupted the frame; pre-creating here also avoids first-frame hitches).
+    internal::active2D(BlendMode::Alpha);
+    internal::active2D(BlendMode::Add);
+    internal::active2D(BlendMode::Multiply);
+    internal::active2D(BlendMode::Screen);
+    internal::active2D(BlendMode::Subtract);
+    internal::active2D(BlendMode::Disabled);
+    internal::activePremult();
+    internal::activeClear();
+    internal::active3D();
 }
 
 // ---------------------------------------------------------------------------
 // Cleanup (shutdown)
 // ---------------------------------------------------------------------------
 void cleanup() {
-    // Release premultiplied blend pipeline
-    if (internal::premultipliedBlendPipelineInitialized) {
-        sgl_destroy_pipeline(internal::premultipliedBlendPipeline);
-        internal::premultipliedBlendPipelineInitialized = false;
-    }
-    // Release blend mode pipelines
-    if (internal::blendPipelinesInitialized) {
-        for (int i = 0; i < 6; i++) {
-            sgl_destroy_pipeline(internal::blendPipelines[i]);
-        }
-        internal::blendPipelinesInitialized = false;
-    }
-    // Release 3D pipeline
-    if (internal::pipeline3dInitialized) {
-        sgl_destroy_pipeline(internal::pipeline3d);
-        internal::pipeline3dInitialized = false;
-    }
+    // The 2D blend / 3D / premultiplied / clear sgl pipelines now live in the
+    // swapchain and per-FBO RenderTarget caches; sgl_shutdown() below frees them
+    // all (it destroys every pipeline in every sgl context), so there is nothing
+    // to release individually here.
+
     // Release font resources
     if (internal::fontInitialized) {
-        sgl_destroy_pipeline(internal::fontPipeline);
         sg_destroy_sampler(internal::fontSampler);
         if (internal::fontAtlasInitialized) {
             sg_destroy_view(internal::fontView);
@@ -221,24 +124,10 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
         << " -> " << newMaxVertices << ", commands " << sglMaxCommands
         << " -> " << newMaxCommands;
 
-    // 1. Destroy all sgl pipelines (they become invalid after sgl_shutdown)
-    if (premultipliedBlendPipelineInitialized) {
-        sgl_destroy_pipeline(premultipliedBlendPipeline);
-    }
-    if (blendPipelinesInitialized) {
-        for (int i = 0; i < 6; i++) {
-            sgl_destroy_pipeline(blendPipelines[i]);
-        }
-    }
-    if (pipeline3dInitialized) {
-        sgl_destroy_pipeline(pipeline3d);
-    }
-    if (fontInitialized) {
-        sgl_destroy_pipeline(fontPipeline);
-        // Note: font texture/sampler/view are sg resources — they survive sgl_shutdown
-    }
-
-    // 2. Shutdown and re-init sokol_gl with larger buffers
+    // 1. Shutdown and re-init sokol_gl with larger buffers. sgl_shutdown()
+    //    destroys every pipeline in every sgl context (including the swapchain &
+    //    FBO RenderTarget caches), so there is nothing to destroy by hand first.
+    //    Font texture/sampler/view are sg resources — they survive sgl_shutdown.
     sgl_shutdown();
 
     sglMaxVertices = newMaxVertices;
@@ -253,96 +142,29 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     sgldesc.allocator.free_fn = smemtrack_free;
     sgl_setup(&sgldesc);
 
-    // 3. Recreate all sgl pipelines
-    if (fontInitialized) {
-        sg_pipeline_desc pip_desc = {};
-        pip_desc.colors[0].blend.enabled = true;
-        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ZERO;
-        fontPipeline = sgl_make_pipeline(&pip_desc);
-    }
-
-    if (pipeline3dInitialized) {
-        sg_pipeline_desc pip_desc = {};
-        pip_desc.cull_mode = SG_CULLMODE_NONE;
-        pip_desc.depth.write_enabled = true;
-        pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
-        pip_desc.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-        pip_desc.colors[0].blend.enabled = true;
-        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        pipeline3d = sgl_make_pipeline(&pip_desc);
-    }
-
-    if (blendPipelinesInitialized) {
-        {
-            sg_pipeline_desc p = {};
-            p.colors[0].blend.enabled = true;
-            p.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-            p.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-            p.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-            p.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-            blendPipelines[static_cast<int>(BlendMode::Alpha)] = sgl_make_pipeline(&p);
-        }
-        {
-            sg_pipeline_desc p = {};
-            p.colors[0].blend.enabled = true;
-            p.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-            p.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
-            p.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-            p.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
-            blendPipelines[static_cast<int>(BlendMode::Add)] = sgl_make_pipeline(&p);
-        }
-        {
-            sg_pipeline_desc p = {};
-            p.colors[0].blend.enabled = true;
-            p.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_DST_COLOR;
-            p.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ZERO;
-            p.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-            p.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
-            blendPipelines[static_cast<int>(BlendMode::Multiply)] = sgl_make_pipeline(&p);
-        }
-        {
-            sg_pipeline_desc p = {};
-            p.colors[0].blend.enabled = true;
-            p.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
-            p.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
-            p.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-            p.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
-            blendPipelines[static_cast<int>(BlendMode::Screen)] = sgl_make_pipeline(&p);
-        }
-        {
-            sg_pipeline_desc p = {};
-            p.colors[0].blend.enabled = true;
-            p.colors[0].blend.op_rgb = SG_BLENDOP_REVERSE_SUBTRACT;
-            p.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-            p.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
-            p.colors[0].blend.op_alpha = SG_BLENDOP_ADD;
-            p.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-            p.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
-            blendPipelines[static_cast<int>(BlendMode::Subtract)] = sgl_make_pipeline(&p);
-        }
-        {
-            sg_pipeline_desc p = {};
-            p.colors[0].blend.enabled = false;
-            blendPipelines[static_cast<int>(BlendMode::Disabled)] = sgl_make_pipeline(&p);
-        }
-        currentBlendMode = BlendMode::Alpha;
-    }
-
-    if (premultipliedBlendPipelineInitialized) {
-        sg_pipeline_desc p = {};
-        p.colors[0].blend.enabled = true;
-        p.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
-        p.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        p.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-        p.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        premultipliedBlendPipeline = sgl_make_pipeline(&p);
-    }
+    // 2. The swapchain RenderTarget's cached pipelines are now stale (their context
+    //    was torn down). Drop them and re-warm — the next frame's setupScreenFov
+    //    runs every frame and would otherwise create a pipeline mid-frame, which
+    //    corrupts the frame (the same reason we pre-warm at setup). Warm against the
+    //    swapchain target explicitly in case a resize ever fires outside a swapchain
+    //    context.
+    swapchainTarget.context = sgl_default_context();
+    swapchainTarget.cache.clear();
+    RenderTarget* prevTarget = currentTarget;
+    currentTarget = &swapchainTarget;
+    active2D(BlendMode::Alpha);
+    active2D(BlendMode::Add);
+    active2D(BlendMode::Multiply);
+    active2D(BlendMode::Screen);
+    active2D(BlendMode::Subtract);
+    active2D(BlendMode::Disabled);
+    activePremult();
+    activeClear();
+    active3D();
+    currentTarget = prevTarget;
+    // NOTE: each FBO's RenderTarget cache (and its sgl context) is also invalidated
+    // by sgl_shutdown but is NOT rebuilt here — FBOs surviving an sgl buffer resize
+    // is a pre-existing limitation, out of scope for this refactor.
 
     sglPendingResize = 0;
 }
@@ -372,7 +194,7 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
         sgl_matrix_mode_modelview();
         sgl_load_identity();
 
-        sgl_load_pipeline(internal::blendPipelines[static_cast<int>(BlendMode::Disabled)]);
+        internal::loadPipeline(internal::activeClear());
         sgl_disable_texture();
         sgl_begin_quads();
         sgl_c4f(r, g, b, a);
@@ -387,7 +209,7 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
         sgl_matrix_mode_modelview();
         sgl_pop_matrix();
 
-        sgl_load_pipeline(internal::blendPipelines[static_cast<int>(prevBlendMode)]);
+        internal::loadPipeline(internal::active2D(prevBlendMode));
     } else {
         // Outside pass: defer swapchain pass start to present().
         // Save clear color — the pass will start in present() with this value.

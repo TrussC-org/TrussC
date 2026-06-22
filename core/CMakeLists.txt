@@ -1,5 +1,5 @@
 # TrussC v0.0.1
-# クロスプラットフォーム対応のクリエイティブコーディングフレームワーク
+# A cross-platform creative coding framework
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -10,19 +10,19 @@ if(APPLE AND NOT ANDROID)
     enable_language(OBJC OBJCXX)
 endif()
 
-# C++20 を使用
+# Use C++20
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# TC_ROOT（core と addons を含むルートディレクトリ）
+# TC_ROOT (root directory containing core and addons)
 get_filename_component(TC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 set(TC_ROOT "${TC_ROOT}" CACHE PATH "TrussC root directory" FORCE)
 
 # =============================================================================
-# プラットフォーム検出
+# Platform detection
 # =============================================================================
 if(EMSCRIPTEN)
-    # Emscripten は UNIX=TRUE を設定するので、UNIX より前にチェック
+    # Emscripten sets UNIX=TRUE, so check it before UNIX
     set(TC_PLATFORM_EMSCRIPTEN TRUE)
     # Web backend: WGPU (default) or GLES3 (WebGL2)
     if(NOT DEFINED TC_WEB_BACKEND)
@@ -70,15 +70,15 @@ elseif(UNIX)
 endif()
 
 # =============================================================================
-# ライブラリ定義 (STATIC)
+# Library definition (STATIC)
 # =============================================================================
-# 全てのヘッダーファイル（IDE でディレクトリ構造を表示するため）
+# All header files (so the IDE can display the directory structure)
 file(GLOB_RECURSE TC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp
 )
 
-# 共通ソースファイル（プラットフォーム非依存）
+# Common source files (platform-independent)
 file(GLOB TC_IMPL_SOURCES     ${CMAKE_CURRENT_SOURCE_DIR}/include/impl/*.cpp)
 file(GLOB TC_APP_SOURCES      ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/app/*.cpp)
 file(GLOB TC_GRAPHICS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/graphics/*.cpp)
@@ -88,7 +88,7 @@ file(GLOB TC_UTILS_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/utils/*.cpp
 # Vendored single-file libs (e.g. lz4 for tc::compress)
 file(GLOB TC_VENDOR_SOURCES   ${CMAKE_CURRENT_SOURCE_DIR}/include/lz4/*.c)
 
-# プラットフォーム固有ソースファイル
+# Platform-specific source files
 if(TC_PLATFORM_EMSCRIPTEN)
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/web/*.cpp)
 elseif(TC_PLATFORM_IOS)
@@ -105,7 +105,7 @@ else()
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
 endif()
 
-# 全ソースをまとめる
+# Combine all sources
 set(TC_ALL_SOURCES
     ${TC_HEADERS}
     ${TC_IMPL_SOURCES}
@@ -118,7 +118,7 @@ set(TC_ALL_SOURCES
     ${TC_PLATFORM_SOURCES}
 )
 
-# Xcode / Visual Studio でディレクトリ構造を維持
+# Preserve the directory structure in Xcode / Visual Studio
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${TC_ALL_SOURCES})
 
 add_library(TrussC STATIC ${TC_ALL_SOURCES})
@@ -131,14 +131,18 @@ if(TC_PLATFORM_IOS AND TC_SOUND_SOURCES)
     set_source_files_properties(${TC_SOUND_SOURCES} PROPERTIES LANGUAGE OBJCXX)
 endif()
 
-# インクルードパス
-target_include_directories(TrussC PUBLIC
+# Include paths.
+# SYSTEM: TrussC/sokol/stb are header-only and pulled into every consumer TU.
+# Marking them as system includes keeps -Wall/-Wextra in user apps (the opt-in
+# TRUSSC_WARNINGS / `trusscli build --warnings`) from drowning in framework /
+# third-party header warnings — only the user's own code is flagged.
+target_include_directories(TrussC SYSTEM PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include/sokol
 )
 
 # =============================================================================
-# プラットフォーム固有の設定
+# Platform-specific configuration
 # =============================================================================
 if(TC_PLATFORM_EMSCRIPTEN)
     if(TC_GRAPHICS_BACKEND STREQUAL "WGPU")
@@ -147,7 +151,7 @@ if(TC_PLATFORM_EMSCRIPTEN)
     else()
         target_compile_definitions(TrussC PUBLIC SOKOL_GLES3)
     endif()
-    # Emscripten リンクオプションはアプリ側で設定（trussc_app.cmake）
+    # Emscripten link options are set on the app side (trussc_app.cmake)
 
 elseif(TC_PLATFORM_IOS)
     target_compile_definitions(TrussC PUBLIC SOKOL_METAL)
@@ -189,17 +193,17 @@ elseif(TC_PLATFORM_MACOS)
     target_compile_options(TrussC PRIVATE -fobjc-arc)
 
 elseif(TC_PLATFORM_WINDOWS)
-    # WIN32_LEAN_AND_MEAN: windows.h の読み込みを軽量化
-    # NOMINMAX: std::min / std::max との衝突を回避
+    # WIN32_LEAN_AND_MEAN: reduce the weight of including windows.h
+    # NOMINMAX: avoid conflicts with std::min / std::max
     target_compile_definitions(TrussC PUBLIC
         SOKOL_D3D11
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _USE_MATH_DEFINES
     )
-    # configure時のINCLUDE/LIB環境変数パスをビルドシステムに焼き込む。
-    # Ninja+MSVC環境では、cmake --build <dir>（preset経由でない）実行時に
-    # 環境変数が未設定になりヘッダやライブラリが見つからないエラーが起きるため。
+    # Bake the INCLUDE/LIB environment variable paths from configure time into the build system.
+    # In a Ninja+MSVC environment, running cmake --build <dir> (not via a preset) leaves
+    # the environment variables unset, causing errors where headers and libraries cannot be found.
     if(DEFINED ENV{INCLUDE})
         target_include_directories(TrussC SYSTEM PUBLIC $ENV{INCLUDE})
     endif()
@@ -221,8 +225,8 @@ elseif(TC_PLATFORM_WINDOWS)
         # DirectWrite for system font name resolution (tc::systemFontPath)
         dwrite
     )
-    # MSVC: ソースファイルをUTF-8として扱う
-    # /wd4244, /wd4267: int/float, size_t/int 変換警告を無効化
+    # MSVC: treat source files as UTF-8
+    # /wd4244, /wd4267: disable int/float and size_t/int conversion warnings
     target_compile_options(TrussC PUBLIC /utf-8 /wd4244 /wd4267)
 
 elseif(TC_PLATFORM_LINUX)
@@ -296,16 +300,16 @@ elseif(TC_PLATFORM_RASPBIAN)
 endif()
 
 # =============================================================================
-# アイコン設定ヘルパー関数（クロスプラットフォーム対応）
+# Icon setup helper functions (cross-platform)
 # =============================================================================
 # trussc_setup_icon(<target>)
-# - プロジェクトの icon/ フォルダを探す
-# - プラットフォーム用のフォーマットがあればそれを使用
-# - なければデフォルトアイコンを使用
+# - Look for the project's icon/ folder
+# - Use a platform-specific format if one is available
+# - Otherwise use the default icon
 #
-# 対応フォーマット:
-#   macOS: .icns, .icon (macOS 26 Tahoe+, actool 必要)
-#   Windows: .ico (または .png から自動変換)
+# Supported formats:
+#   macOS: .icns, .icon (macOS 26 Tahoe+, requires actool)
+#   Windows: .ico (or auto-converted from .png)
 # =============================================================================
 
 function(trussc_setup_icon TARGET_NAME)
@@ -377,12 +381,12 @@ function(_trussc_setup_icon_ios TARGET_NAME ICON_DIR DEFAULT_DIR)
 endfunction()
 
 # -----------------------------------------------------------------------------
-# macOS アイコン設定
+# macOS icon setup
 # -----------------------------------------------------------------------------
 function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
     set(FOUND_ANY FALSE)
 
-    # 1. .icns を探す（複数あっても最初の1つを使用）
+    # 1. Look for .icns (use the first one if there are multiple)
     file(GLOB ICNS_FILES "${ICON_DIR}/*.icns")
     if(ICNS_FILES)
         list(GET ICNS_FILES 0 ICNS_FILE)
@@ -392,7 +396,7 @@ function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
         set(FOUND_ANY TRUE)
     endif()
 
-    # 2. .icon フォルダを探す（macOS 26 Tahoe 用）
+    # 2. Look for an .icon folder (for macOS 26 Tahoe)
     file(GLOB ICON_FOLDERS "${ICON_DIR}/*.icon")
     if(ICON_FOLDERS)
         list(GET ICON_FOLDERS 0 ICON_FOLDER)
@@ -404,14 +408,14 @@ function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
         endif()
     endif()
 
-    # 3. 何も見つからなければデフォルトを使用
+    # 3. If nothing was found, use the default
     if(NOT FOUND_ANY)
         message(STATUS "[${TARGET_NAME}] Using default TrussC icon")
-        # デフォルト .icns
+        # Default .icns
         if(EXISTS "${DEFAULT_DIR}/default.icns")
             _trussc_apply_macos_icns(${TARGET_NAME} "${DEFAULT_DIR}/default.icns")
         endif()
-        # デフォルト .icon (Tahoe 用)
+        # Default .icon (for Tahoe)
         if(EXISTS "${DEFAULT_DIR}/default.icon")
             _trussc_apply_macos_icon_folder(${TARGET_NAME} "${DEFAULT_DIR}/default.icon" _DEFAULT_ICON_SUCCESS)
             if(_DEFAULT_ICON_SUCCESS)
@@ -420,14 +424,14 @@ function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
         endif()
     endif()
 
-    # quarantine 属性を削除（最後に1回だけ）
+    # Remove the quarantine attribute (only once, at the end)
     add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
         COMMAND xattr -cr "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>"
         COMMENT "Removing quarantine attribute from ${TARGET_NAME}.app"
     )
 endfunction()
 
-# macOS .icns アイコン適用
+# Apply a macOS .icns icon
 function(_trussc_apply_macos_icns TARGET_NAME ICNS_FILE)
     get_filename_component(ICNS_FILENAME "${ICNS_FILE}" NAME)
 
@@ -441,7 +445,7 @@ function(_trussc_apply_macos_icns TARGET_NAME ICNS_FILE)
     target_sources(${TARGET_NAME} PRIVATE "${ICNS_FILE}")
 endfunction()
 
-# macOS .icon フォルダ適用 (macOS 26 Tahoe+, actool でコンパイル)
+# Apply a macOS .icon folder (macOS 26 Tahoe+, compiled with actool)
 function(_trussc_apply_macos_icon_folder TARGET_NAME ICON_FOLDER OUT_SUCCESS)
     set(${OUT_SUCCESS} FALSE PARENT_SCOPE)
 
@@ -472,7 +476,7 @@ function(_trussc_apply_macos_icon_folder TARGET_NAME ICON_FOLDER OUT_SUCCESS)
     set(OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/icon_assets")
     set(ASSETS_CAR "${OUTPUT_DIR}/Assets.car")
 
-    # actool で Assets.car にコンパイル
+    # Compile to Assets.car with actool
     file(MAKE_DIRECTORY "${OUTPUT_DIR}")
     set(PARTIAL_PLIST "${OUTPUT_DIR}/partial-info.plist")
     execute_process(
@@ -495,13 +499,13 @@ function(_trussc_apply_macos_icon_folder TARGET_NAME ICON_FOLDER OUT_SUCCESS)
         return()
     endif()
 
-    # Assets.car を Resources に追加
+    # Add Assets.car to Resources
     set_source_files_properties("${ASSETS_CAR}" PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources"
     )
     target_sources(${TARGET_NAME} PRIVATE "${ASSETS_CAR}")
 
-    # Info.plist に CFBundleIconName を追加 (PlistBuddy で post-build)
+    # Add CFBundleIconName to Info.plist (post-build with PlistBuddy)
     add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
         COMMAND /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>/Contents/Info.plist" 2>/dev/null || true
         COMMAND /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string ${ICON_NAME}" "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>/Contents/Info.plist"
@@ -512,10 +516,10 @@ function(_trussc_apply_macos_icon_folder TARGET_NAME ICON_FOLDER OUT_SUCCESS)
 endfunction()
 
 # -----------------------------------------------------------------------------
-# Windows アイコン設定
+# Windows icon setup
 # -----------------------------------------------------------------------------
 function(_trussc_setup_icon_windows TARGET_NAME ICON_DIR DEFAULT_DIR)
-    # 1. .ico を探す
+    # 1. Look for .ico
     file(GLOB ICO_FILES "${ICON_DIR}/*.ico")
     if(ICO_FILES)
         list(GET ICO_FILES 0 ICON_FILE)
@@ -525,7 +529,7 @@ function(_trussc_setup_icon_windows TARGET_NAME ICON_DIR DEFAULT_DIR)
         return()
     endif()
 
-    # 2. .png から変換を試みる
+    # 2. Try converting from .png
     file(GLOB PNG_FILES "${ICON_DIR}/*.png")
     if(PNG_FILES)
         list(GET PNG_FILES 0 PNG_FILE)
@@ -540,14 +544,14 @@ function(_trussc_setup_icon_windows TARGET_NAME ICON_DIR DEFAULT_DIR)
         endif()
     endif()
 
-    # 3. デフォルトを使用
+    # 3. Use the default
     message(STATUS "[${TARGET_NAME}] Using default TrussC icon")
     _trussc_apply_windows_icon(${TARGET_NAME} "${DEFAULT_DIR}/default.ico")
 endfunction()
 
-# Windows アイコン適用 (.rc ファイル経由)
+# Apply a Windows icon (via an .rc file)
 function(_trussc_apply_windows_icon TARGET_NAME ICON_FILE)
-    # .rc ファイルを生成
+    # Generate the .rc file
     get_filename_component(ICON_FILENAME "${ICON_FILE}" NAME)
     set(RC_FILE "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}_icon.rc")
 
@@ -556,11 +560,11 @@ function(_trussc_apply_windows_icon TARGET_NAME ICON_FILE)
     target_sources(${TARGET_NAME} PRIVATE "${RC_FILE}")
 endfunction()
 
-# PNG → ICO 変換 (ImageMagick 使用)
+# PNG -> ICO conversion (using ImageMagick)
 function(_trussc_convert_png_to_ico PNG_FILE OUTPUT_ICO OUT_SUCCESS)
     set(${OUT_SUCCESS} FALSE PARENT_SCOPE)
 
-    # ImageMagick (magick または convert) が必要
+    # Requires ImageMagick (magick or convert)
     find_program(MAGICK_EXECUTABLE magick)
     if(NOT MAGICK_EXECUTABLE)
         find_program(MAGICK_EXECUTABLE convert)
@@ -581,7 +585,7 @@ function(_trussc_convert_png_to_ico PNG_FILE OUTPUT_ICO OUT_SUCCESS)
 endfunction()
 
 # =============================================================================
-# アドオンマクロを自動インクルード（use_addon が使えるようになる）
+# Automatically include the addon macros (makes use_addon available)
 # =============================================================================
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/use_addon.cmake)
 

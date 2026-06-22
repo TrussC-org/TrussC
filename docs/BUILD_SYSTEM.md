@@ -104,6 +104,21 @@ cmake --preset <os>   # e.g., macos, linux, windows
 cmake --build --preset <os> --parallel
 ```
 
+**Compiler warnings (opt-in):**
+
+`trusscli build --warnings` (also `trusscli run --warnings`) enables `-Wall -Wextra`
+(MSVC: `/W4`) on **your own** source files. TrussC, sokol/stb, and addon headers are
+treated as system includes, so only your code is flagged — not framework internals.
+There is **no `-Werror`**: warnings never break the build.
+
+```bash
+trusscli build --warnings
+trusscli run --warnings
+```
+
+The flag is sticky in the CMake cache: once you build with `--warnings`, later builds
+keep it on until you reconfigure without it (e.g. `trusscli update`).
+
 **Web Build (WASM):**
 The Project Generator creates a helper script (`build-web.command`, `build-web.bat`, or `build-web.sh`) in your project folder. This script automatically handles Emscripten environment setup.
 

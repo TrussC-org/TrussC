@@ -48,10 +48,7 @@ enum class StrokeJoin {
 namespace internal {
     extern sg_view fontView;
     extern sg_sampler fontSampler;
-    extern sgl_pipeline fontPipeline;
     extern bool fontInitialized;
-    extern sgl_pipeline pipeline3d;
-    extern bool pipeline3dInitialized;
     extern bool pixelPerfectMode;
     // Current screen setup state (for 2D drawing in perspective mode)
     extern float currentScreenFov;
