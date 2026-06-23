@@ -64,7 +64,21 @@ inline std::vector<DeferredResponse>& deferredResponses() {
     return v;
 }
 
+// Set by registerDebuggerTools() (which is web-available), so this flag must
+// live outside the server-only #ifndef block below.
+inline std::atomic<bool>& isDebuggerEnabled() {
+    static std::atomic<bool> enabled{false};
+    return enabled;
+}
+
 } // namespace detail
+
+// Check if debugger tools are registered (input injection / scene mutation).
+// The flag is set by registerDebuggerTools() — registering IS the opt-in, so
+// apps/addons can query this to tell whether the debugger surface is exposed.
+inline bool isDebuggerEnabled() {
+    return detail::isDebuggerEnabled().load();
+}
 
 // Call inside a tool handler to defer its result until just after the next
 // present(). `produce` returns the tool's content json (same shape a normal
@@ -381,11 +395,6 @@ inline std::atomic<int>& getHttpPort() {
     return port;
 }
 
-inline std::atomic<bool>& isDebuggerEnabled() {
-    static std::atomic<bool> enabled{false};
-    return enabled;
-}
-
 // Bearer token required on /mcp requests. Empty = no auth (localhost default).
 inline std::string& mcpAuthToken() {
     static std::string token;
@@ -547,13 +556,6 @@ inline int getHttpPort() {
 // isDebuggerEnabled() flag). This shim is a no-op kept for source compatibility.
 [[deprecated("registerDebuggerTools() now opts in by itself; remove this call. Will be removed in v1.0.0")]]
 inline void enableDebugger() {}
-
-// Check if debugger tools are registered (input injection / scene mutation).
-// The flag is set by registerDebuggerTools() — registering IS the opt-in, so
-// apps/addons can query this to tell whether the debugger surface is exposed.
-inline bool isDebuggerEnabled() {
-    return detail::isDebuggerEnabled().load();
-}
 
 #endif // __EMSCRIPTEN__
 
