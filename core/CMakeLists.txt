@@ -267,6 +267,7 @@ elseif(TC_PLATFORM_ANDROID)
         EGL
         log
         android
+        mediandk      # NDK MediaCodec/MediaMuxer for VideoWriter
     )
 
 elseif(TC_PLATFORM_RASPBIAN)

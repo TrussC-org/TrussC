@@ -141,31 +141,80 @@ bool captureWindow(Pixels& outPixels) {
         return false;
     }
 
-    id<MTLTexture> texture = drawable.texture;
-    if (!texture) {
+    id<MTLTexture> srcTexture = drawable.texture;
+    if (!srcTexture) {
         logError() << "[Screenshot] Failed to get Metal texture";
         return false;
     }
 
-    NSUInteger width = texture.width;
-    NSUInteger height = texture.height;
+    NSUInteger width = srcTexture.width;
+    NSUInteger height = srcTexture.height;
+    MTLPixelFormat pixelFormat = srcTexture.pixelFormat;
 
-    outPixels.allocate((int)width, (int)height, 4);
+    // sokol sets framebufferOnly=YES on the CAMetalLayer, so reading the
+    // drawable texture directly asserts under Metal validation. Blit into a
+    // shared-storage staging texture, then read that (mirrors the mac path).
+    id<MTLDevice> device = srcTexture.device;
+    MTLTextureDescriptor* desc =
+        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixelFormat
+                                                           width:width
+                                                          height:height
+                                                       mipmapped:NO];
+    desc.usage = MTLTextureUsageShaderRead;
+    desc.storageMode = MTLStorageModeShared;
+    id<MTLTexture> stagingTexture = [device newTextureWithDescriptor:desc];
+    if (!stagingTexture) {
+        logError() << "[Screenshot] failed to create staging texture";
+        return false;
+    }
+
+    static id<MTLCommandQueue> s_blitQueue = nil;
+    if (!s_blitQueue || s_blitQueue.device != device) {
+        s_blitQueue = [device newCommandQueue];
+    }
+    id<MTLCommandBuffer>      cmdBuf  = [s_blitQueue commandBuffer];
+    id<MTLBlitCommandEncoder> blitEnc = [cmdBuf blitCommandEncoder];
+    [blitEnc copyFromTexture:srcTexture
+                 sourceSlice:0 sourceLevel:0
+                sourceOrigin:MTLOriginMake(0, 0, 0)
+                  sourceSize:MTLSizeMake(width, height, 1)
+                   toTexture:stagingTexture
+            destinationSlice:0 destinationLevel:0
+           destinationOrigin:MTLOriginMake(0, 0, 0)];
+    [blitEnc endEncoding];
+    [cmdBuf commit];
+    [cmdBuf waitUntilCompleted];
 
     MTLRegion region = MTLRegionMake2D(0, 0, width, height);
     NSUInteger bytesPerRow = width * 4;
+    std::vector<uint8_t> rawData(bytesPerRow * height);
+    [stagingTexture getBytes:rawData.data()
+                 bytesPerRow:bytesPerRow
+                  fromRegion:region
+                 mipmapLevel:0];
 
-    [texture getBytes:outPixels.getData()
-          bytesPerRow:bytesPerRow
-           fromRegion:region
-          mipmapLevel:0];
+    outPixels.allocate((int)width, (int)height, 4);
+    unsigned char* dst = outPixels.getData();
 
-    // BGRA -> RGBA conversion
-    unsigned char* data = outPixels.getData();
-    for (NSUInteger i = 0; i < width * height; i++) {
-        unsigned char temp = data[i * 4 + 0];
-        data[i * 4 + 0] = data[i * 4 + 2];
-        data[i * 4 + 2] = temp;
+    if (pixelFormat == MTLPixelFormatRGB10A2Unorm) {
+        // Modern iPhones use a 10-bit wide-color drawable. Unpack to RGBA8.
+        // Layout: [A:2 (31-30)][B:10 (29-20)][G:10 (19-10)][R:10 (9-0)]
+        const uint32_t* src = (const uint32_t*)rawData.data();
+        for (NSUInteger i = 0; i < width * height; i++) {
+            uint32_t pixel = src[i];
+            dst[i * 4 + 0] = (uint8_t)(((pixel >>  0) & 0x3FF) >> 2);  // R
+            dst[i * 4 + 1] = (uint8_t)(((pixel >> 10) & 0x3FF) >> 2);  // G
+            dst[i * 4 + 2] = (uint8_t)(((pixel >> 20) & 0x3FF) >> 2);  // B
+            dst[i * 4 + 3] = (uint8_t)(((pixel >> 30) & 0x3) * 85);    // A
+        }
+    } else {
+        // BGRA8 fallback -> RGBA8
+        memcpy(dst, rawData.data(), bytesPerRow * height);
+        for (NSUInteger i = 0; i < width * height; i++) {
+            unsigned char temp = dst[i * 4 + 0];
+            dst[i * 4 + 0] = dst[i * 4 + 2];
+            dst[i * 4 + 2] = temp;
+        }
     }
 
     return true;

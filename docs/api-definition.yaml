@@ -3012,6 +3012,17 @@ categories:
         sketch: false
         snippet: "grabScreen(${1:pixels})"
 
+      - name: saveScreenshot
+        return: "bool"
+        signatures:
+          - params: "const std::filesystem::path& path"
+            params_simple: "path"
+        description: "Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written."
+        description_ja: "描画済みフレームのスクショを保存（png/jpg/bmp）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない"
+        description_ko: "렌더링된 프레임의 스크린샷 저장(png/jpg/bmp). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님"
+        sketch: false
+        snippet: "saveScreenshot(${1:\"shot.png\"})"
+
       - name: startRecording
         return: "bool"
         signatures:
@@ -3044,6 +3055,28 @@ categories:
         description_ko: "녹화 중인지 확인"
         sketch: false
         snippet: "isRecording()"
+
+      - name: recordingFrameCount
+        return: "int"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Number of frames captured so far in the current recording"
+        description_ja: "現在の録画でこれまでにキャプチャしたフレーム数"
+        description_ko: "현재 녹화에서 지금까지 캡처한 프레임 수"
+        sketch: false
+        snippet: "recordingFrameCount()"
+
+      - name: recordingPath
+        return: "const string&"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Output file path of the current recording"
+        description_ja: "現在の録画の出力ファイルパス"
+        description_ko: "현재 녹화의 출력 파일 경로"
+        sketch: false
+        snippet: "recordingPath()"
 
       - name: isFullscreen
         return: "bool"
@@ -8093,6 +8126,32 @@ constants:
     description_ja: "中央マウスボタン"
     description_ko: "가운데 마우스 버튼"
     sketch: true
+
+  # VideoCodec constants (for VideoRecordSettings.codec)
+  - name: "VideoCodec::H264"
+    value: "0"
+    description: "H.264 / AVC — broad compatibility (default)"
+    description_ja: "H.264 / AVC — 互換性が広い（デフォルト）"
+    description_ko: "H.264 / AVC — 폭넓은 호환성 (기본값)"
+    sketch: false
+  - name: "VideoCodec::HEVC"
+    value: "1"
+    description: "H.265 / HEVC — smaller files, hardware-encoded"
+    description_ja: "H.265 / HEVC — ファイルが小さい、ハードウェアエンコード"
+    description_ko: "H.265 / HEVC — 더 작은 파일, 하드웨어 인코딩"
+    sketch: false
+  - name: "VideoCodec::ProRes422"
+    value: "2"
+    description: "Apple ProRes 422 — editing-grade, macOS/iOS only (.mov)"
+    description_ja: "Apple ProRes 422 — 編集向け高品質、macOS/iOSのみ（.mov）"
+    description_ko: "Apple ProRes 422 — 편집용 고품질, macOS/iOS 전용 (.mov)"
+    sketch: false
+  - name: "VideoCodec::ProRes4444"
+    value: "3"
+    description: "Apple ProRes 4444 — highest quality + alpha, macOS/iOS only (.mov)"
+    description_ja: "Apple ProRes 4444 — 最高品質＋アルファ、macOS/iOSのみ（.mov）"
+    description_ko: "Apple ProRes 4444 — 최고 품질 + 알파, macOS/iOS 전용 (.mov)"
+    sketch: false
 
 # ==========================================================================
 # Keywords (for TrussSketch syntax highlighting - AngelScript)
