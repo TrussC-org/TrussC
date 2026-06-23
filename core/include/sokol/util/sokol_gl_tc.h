@@ -2589,6 +2589,16 @@ typedef struct {
     int pending_grow_vertices;  /* [TrussC fork] deferred grow: if >0, grow buffer at start of next _sgl_draw */
     sg_buffer retired_bufs[4];  /* [TrussC fork] retire list: old GPU buffers awaiting destruction */
     int retired_count;
+    /* [TrussC fork] per-frame single-upload cache. All layer draws within one
+       frame share ONE GPU vertex upload: the first _sgl_draw() appends the full
+       vertex set and records (frame, count, base_offset, vbuf); subsequent layer
+       draws reuse that base_offset instead of re-appending every vertex. Without
+       this, flushing N layers re-uploads V vertices N times (O(N*V)), which grows
+       the GPU buffer until allocation fails (id:52 / METAL_CREATE_BUFFER_FAILED). */
+    uint32_t upload_frame_id;
+    int      upload_vertex_count;
+    int      upload_base_offset;
+    uint32_t upload_vbuf_id;
     sgl_pipeline def_pip;
     sg_bindings bind;
 
@@ -3730,41 +3740,65 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
         uint32_t cur_smp_id = SG_INVALID_ID;
         int cur_uniform_index = -1;
 
-        /* [TrussC fork] append ALL vertex data (commands reference absolute base_vertex) */
-        const size_t data_size = (size_t)ctx->vertices.next * sizeof(_sgl_vertex_t);
-        const sg_range range = { ctx->vertices.ptr, data_size };
+        /* [TrussC fork] Single upload per frame, shared across layer draws.
+           The vertex set is identical for every layer draw in a frame, so we
+           append it to the GPU buffer exactly once and reuse the returned base
+           offset. Re-appending per layer is what blew the buffer up to O(N*V).
+           The cache is keyed on (frame_id, vertex count, vbuf id): a new frame,
+           newly recorded vertices (suspend/resume), or a recreated/grown buffer
+           all force a fresh upload. */
+        int base_offset;
+        bool reuse_upload = (ctx->vbuf.id != SG_INVALID_ID)
+                         && (ctx->upload_vbuf_id == ctx->vbuf.id)
+                         && (ctx->upload_frame_id == ctx->frame_id)
+                         && (ctx->upload_vertex_count == ctx->vertices.next);
+        if (reuse_upload) {
+            base_offset = ctx->upload_base_offset;
+        } else {
+            /* [TrussC fork] append ALL vertex data (commands reference absolute base_vertex) */
+            const size_t data_size = (size_t)ctx->vertices.next * sizeof(_sgl_vertex_t);
+            const sg_range range = { ctx->vertices.ptr, data_size };
 
-        /* [TrussC fork] pre-check buffer capacity before append to avoid validation panic */
-        if (data_size > 0 && sg_query_buffer_state(ctx->vbuf) == SG_RESOURCESTATE_VALID) {
-            sg_buffer_desc buf_desc = sg_query_buffer_desc(ctx->vbuf);
-            size_t append_pos = (size_t)sg_query_buffer_info(ctx->vbuf).append_pos;
-            if (buf_desc.size < append_pos + data_size) {
-                int needed = (int)((buf_desc.size + data_size) / sizeof(_sgl_vertex_t)) + 1;
-                /* [TrussC fork] 旧バッファは retire リストに退避されるので
-                   D3D11 でも即座に grow + 再アップロードが可能 */
+            /* [TrussC fork] pre-check buffer capacity before append to avoid validation panic */
+            if (data_size > 0 && sg_query_buffer_state(ctx->vbuf) == SG_RESOURCESTATE_VALID) {
+                sg_buffer_desc buf_desc = sg_query_buffer_desc(ctx->vbuf);
+                size_t append_pos = (size_t)sg_query_buffer_info(ctx->vbuf).append_pos;
+                if (buf_desc.size < append_pos + data_size) {
+                    /* grow target is the actual cursor (append_pos), not the whole
+                       buffer size — buf_desc.size double-counts already-uploaded data. */
+                    int needed = (int)((append_pos + data_size) / sizeof(_sgl_vertex_t)) + 1;
+                    /* [TrussC fork] 旧バッファは retire リストに退避されるので
+                       D3D11 でも即座に grow + 再アップロードが可能 */
+                    if (!_sgl_grow_gpu_buffer(ctx, needed)) {
+                        sg_pop_debug_group();
+                        return;
+                    }
+                }
+            }
+
+            base_offset = sg_append_buffer(ctx->vbuf, &range);
+            if (sg_query_buffer_overflow(ctx->vbuf)) {
+                /* [TrussC fork] GPU buffer too small — grow and retry */
+                size_t append_pos = (size_t)sg_query_buffer_info(ctx->vbuf).append_pos;
+                int needed = (int)((append_pos + data_size) / sizeof(_sgl_vertex_t)) + 1;
                 if (!_sgl_grow_gpu_buffer(ctx, needed)) {
                     sg_pop_debug_group();
                     return;
                 }
+                base_offset = sg_append_buffer(ctx->vbuf, &range);
+                if (sg_query_buffer_overflow(ctx->vbuf)) {
+                    sg_pop_debug_group();
+                    return;
+                }
             }
-        }
 
-        int base_offset = sg_append_buffer(ctx->vbuf, &range);
-        if (sg_query_buffer_overflow(ctx->vbuf)) {
-            /* [TrussC fork] GPU buffer too small — grow and retry */
-            int needed = (int)(sg_query_buffer_desc(ctx->vbuf).size / sizeof(_sgl_vertex_t) + (size_t)ctx->vertices.next);
-            if (!_sgl_grow_gpu_buffer(ctx, needed)) {
-                sg_pop_debug_group();
-                return;
-            }
-            base_offset = sg_append_buffer(ctx->vbuf, &range);
-            if (sg_query_buffer_overflow(ctx->vbuf)) {
-                sg_pop_debug_group();
-                return;
-            }
+            /* [TrussC fork] remember this upload so the remaining layer draws of
+               this frame reuse it instead of re-appending the same vertices. */
+            ctx->upload_frame_id     = ctx->frame_id;
+            ctx->upload_vertex_count = ctx->vertices.next;
+            ctx->upload_base_offset  = base_offset;
+            ctx->upload_vbuf_id      = ctx->vbuf.id;
         }
-        /* convert byte offset to vertex offset */
-        const int vtx_offset = base_offset / (int)sizeof(_sgl_vertex_t);
 
         /* Render commands from cmd_start onwards (skip already-drawn commands) */
         for (int i = cmd_start; i < ctx->commands.next; i++) {
@@ -4754,6 +4788,10 @@ static void _sgl_reset_buffers(_sgl_context_t* ctx) {
     ctx->base_vertex = 0;
     ctx->draw_base_cmd = 0;
     ctx->draw_base_vertex = 0;
+    /* [TrussC fork] invalidate the single-upload cache: a reset starts a brand
+       new vertex set within the SAME frame, so a future draw whose vertex count
+       coincides with the cached one must NOT reuse the stale base offset. */
+    ctx->upload_vbuf_id = SG_INVALID_ID;
     ctx->matrix_dirty = true;
 }
 

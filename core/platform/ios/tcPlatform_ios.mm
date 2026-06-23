@@ -134,8 +134,13 @@ std::string getExecutableDir() {
 // ---------------------------------------------------------------------------
 
 bool captureWindow(Pixels& outPixels) {
-    sapp_swapchain sc = sapp_get_swapchain();
-    id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)sc.metal.current_drawable;
+    // Read back the drawable this frame ACTUALLY rendered into (recorded by the
+    // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
+    // unrendered drawable, scrambling captures on GPU-heavy frames. Fall back
+    // only if no pass ran yet. (Mirrors the macOS fix.)
+    const void* drawablePtr = internal::lastSwapchainDrawable;
+    if (!drawablePtr) drawablePtr = sapp_get_swapchain().metal.current_drawable;
+    id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)drawablePtr;
     if (!drawable) {
         logError() << "[Screenshot] Failed to get Metal drawable";
         return false;

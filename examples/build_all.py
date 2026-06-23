@@ -133,6 +133,25 @@ def find_core_tests(root_dir):
                 test_paths.append(tdir)
     return test_paths
 
+def find_core_unit_tests(root_dir):
+    # Standalone headless unit tests for the core: core/tests/*/ dirs that ship
+    # their OWN committed CMakeLists.txt (built with plain cmake, NOT trusscli).
+    # Used for tests that must compile sokol/etc. directly (e.g. with the dummy
+    # backend) and therefore cannot link libTrussC. Distinguished from trusscli
+    # project tests (which have a src/ dir and a generated, gitignored CMakeLists).
+    tests_dir = os.path.join(root_dir, "core", "tests")
+    test_paths = []
+    if os.path.exists(tests_dir):
+        for name in sorted(os.listdir(tests_dir)):
+            tdir = os.path.join(tests_dir, name)
+            # Standalone == committed CMakeLists.txt and no src/ (trusscli project
+            # tests have src/ and only a generated, gitignored CMakeLists.txt).
+            if (os.path.isdir(tdir)
+                    and os.path.exists(os.path.join(tdir, "CMakeLists.txt"))
+                    and not os.path.exists(os.path.join(tdir, "src"))):
+                test_paths.append(tdir)
+    return test_paths
+
 def find_test_binary(test_dir, platform_info):
     # trusscli names the binary after the project dir. addons/*/tests -> "tests";
     # core/tests/<name> -> "<name>". On macOS a TrussC app is
@@ -189,7 +208,34 @@ def build_and_run_test(test_dir, pg_bin, platform_info, args):
         return False, "run"
     return True, None
 
-def run_test_suite(tests, label, pg_bin, platform_info, args):
+def build_and_run_unit_test(test_dir, pg_bin, platform_info, args):
+    # Build a standalone CMake test (its own committed CMakeLists.txt, no
+    # trusscli), then RUN it (non-zero exit = failure). pg_bin is unused.
+    build_dir_name = platform_info["build_dir"]
+    cmd_config = ["cmake", "-S", ".", "-B", build_dir_name]
+    if platform_info["cmake_generator"]:
+        cmd_config.extend(["-G", platform_info["cmake_generator"]])
+    if not run_command(cmd_config, cwd=test_dir, verbose=args.verbose):
+        return False, "configure"
+
+    cmd_build = ["cmake", "--build", build_dir_name, "--config", "Release"]
+    if "Visual Studio" not in (platform_info["cmake_generator"] or ""):
+        import multiprocessing
+        cmd_build.extend(["-j", str(multiprocessing.cpu_count())])
+    if not run_command(cmd_build, cwd=test_dir, verbose=args.verbose):
+        return False, "build"
+
+    binary = find_test_binary(test_dir, platform_info)
+    if not binary:
+        Colors.print("  Test binary not found after build!", Colors.RED)
+        return False, "binary-missing"
+
+    Colors.print(f"  Running {os.path.relpath(binary, test_dir)} ...", Colors.YELLOW)
+    if not run_command([binary], cwd=test_dir, verbose=True):  # always stream test output
+        return False, "run"
+    return True, None
+
+def run_test_suite(tests, label, pg_bin, platform_info, args, builder=build_and_run_test):
     # Build AND run a set of console test projects (addon or core). Streams each
     # test's output; returns 0 if all pass, 1 if any fails.
     Colors.print(f"Found {len(tests)} {label} test harness(es)", Colors.YELLOW)
@@ -198,7 +244,7 @@ def run_test_suite(tests, label, pg_bin, platform_info, args):
     for i, tdir in enumerate(tests):
         name = os.path.relpath(tdir, ROOT_DIR)
         Colors.print(f"[{i+1}/{len(tests)}] Building & running: {name}", Colors.YELLOW)
-        ok, stage = build_and_run_test(tdir, pg_bin, platform_info, args)
+        ok, stage = builder(tdir, pg_bin, platform_info, args)
         if ok:
             Colors.print("  Passed!", Colors.GREEN)
         else:
@@ -264,12 +310,22 @@ def main():
         sys.exit(run_test_suite(tests, "addon", pg_bin, platform_info, args))
 
     # Core behavioral tests (core/tests/*/): same build+run gate, owned by core.
+    # Two flavours: trusscli project tests (src/, link libTrussC) and standalone
+    # CMake unit tests (committed CMakeLists.txt, no libTrussC link — e.g. sokol
+    # dummy-backend tests). Both run; the job fails if either has a failure.
     if args.core_tests_only:
         tests = find_core_tests(ROOT_DIR)
-        if not tests:
+        unit_tests = find_core_unit_tests(ROOT_DIR)
+        if not tests and not unit_tests:
             Colors.print("No core tests found (core/tests/*/); nothing to do.", Colors.YELLOW)
             sys.exit(0)
-        sys.exit(run_test_suite(tests, "core", pg_bin, platform_info, args))
+        rc = 0
+        if tests:
+            rc |= run_test_suite(tests, "core", pg_bin, platform_info, args)
+        if unit_tests:
+            rc |= run_test_suite(unit_tests, "core unit", pg_bin, platform_info, args,
+                                 builder=build_and_run_unit_test)
+        sys.exit(rc)
 
     if args.test_only:
         test_example = os.path.join(ROOT_DIR, "examples", "tests", "AllFeaturesExample")
