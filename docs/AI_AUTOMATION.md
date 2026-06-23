@@ -216,4 +216,20 @@ Configure your MCP client with the HTTP URL:
 | ImGui (widget interaction) | `imgui_get_widgets`, `imgui_click`, `imgui_input`, `imgui_checkbox` | Requires tcxImGui addon + `mcp::registerDebuggerTools()` |
 | Custom | `mcp::tool(...)` | Your code |
 
-MCP communicates over localhost only. For remote access, use SSH tunneling or similar.
+### Network exposure
+
+By default the MCP server binds to **localhost only** and sends no CORS headers,
+so it is reachable only by native MCP clients on the same machine (a wildcard
+CORS origin would otherwise let any web page in your browser drive it). For
+remote access, SSH tunnelling is the simplest safe option.
+
+To expose it directly instead, set both:
+
+| Variable | Effect |
+|----------|--------|
+| `TRUSSC_MCP_HOST` | Bind address — e.g. `0.0.0.0` for all interfaces (default `localhost`) |
+| `TRUSSC_MCP_TOKEN` | Bearer token required on every `/mcp` request (`Authorization: Bearer <token>`) |
+
+Binding a non-loopback host **without** `TRUSSC_MCP_TOKEN` is refused
+(fail-closed) — the MCP surface can inject input and mutate the scene, so it is
+never silently exposed to the network.

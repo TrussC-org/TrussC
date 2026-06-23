@@ -2049,8 +2049,16 @@ namespace internal {
                 mcpPort = std::atoi(envPort);
             }
 
+            // Host defaults to localhost (loopback-only). Set TRUSSC_MCP_HOST
+            // (e.g. 0.0.0.0) to expose externally — requires TRUSSC_MCP_TOKEN,
+            // otherwise startHttpServer refuses to bind (fail-closed).
+            const char* envHost = std::getenv("TRUSSC_MCP_HOST");
+            std::string mcpHost = envHost ? envHost : "localhost";
+            const char* envToken = std::getenv("TRUSSC_MCP_TOKEN");
+            std::string mcpToken = envToken ? envToken : "";
+
             // Start HTTP server for MCP transport
-            mcp::startHttpServer(mcpPort);
+            mcp::startHttpServer(mcpPort, mcpHost, mcpToken);
 
             logNotice("System") << "MCP HTTP server started";
         }

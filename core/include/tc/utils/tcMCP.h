@@ -386,18 +386,52 @@ inline std::atomic<bool>& isDebuggerEnabled() {
     return enabled;
 }
 
+// Bearer token required on /mcp requests. Empty = no auth (localhost default).
+inline std::string& mcpAuthToken() {
+    static std::string token;
+    return token;
+}
+
 } // namespace detail
 
-// Start HTTP server on specified port (0 = OS auto-assign)
-inline void startHttpServer(int port = 0) {
+// Start HTTP server.
+//   port  : 0 = OS auto-assign, else fixed port
+//   host  : "localhost" (default) keeps it loopback-only; pass "0.0.0.0" to
+//           expose on all interfaces.
+//   token : bearer token required on /mcp. MUST be non-empty when host is not
+//           a loopback address — binding non-local without a token is refused
+//           (fail-closed) so input injection is never silently network-exposed.
+inline void startHttpServer(int port = 0, const std::string& host = "localhost",
+                            const std::string& token = "") {
     auto& svr = detail::getHttpServer();
     if (svr) return; // Already running
 
+    const bool isLoopback = (host == "localhost" || host == "127.0.0.1" || host == "::1");
+    if (!isLoopback && token.empty()) {
+        trussc::logError("MCP")
+            << "Refusing to bind MCP server to non-local host '" << host
+            << "' without a token. Set TRUSSC_MCP_TOKEN to expose it (the MCP "
+               "surface can inject input and mutate the scene).";
+        return;
+    }
+    detail::mcpAuthToken() = token;
+
     svr = std::make_unique<httplib::Server>();
 
-    // POST /mcp — JSON-RPC requests
+    // POST /mcp — JSON-RPC requests. No CORS header: MCP clients are native and
+    // ignore CORS, while a wildcard origin would let any web page in the user's
+    // browser drive the local server. (OPTIONS preflight handler dropped too.)
     svr->Post("/mcp", [](const httplib::Request& req, httplib::Response& res) {
-        res.set_header("Access-Control-Allow-Origin", "*");
+        // Bearer auth when a token is configured (always so for non-loopback).
+        const std::string& tok = detail::mcpAuthToken();
+        if (!tok.empty()) {
+            auto it = req.headers.find("Authorization");
+            if (it == req.headers.end() || it->second != ("Bearer " + tok)) {
+                res.status = 401;
+                res.set_content("{\"error\":\"unauthorized\"}", "application/json");
+                return;
+            }
+        }
 
         auto p = std::make_shared<std::promise<std::string>>();
         auto f = p->get_future();
@@ -414,14 +448,6 @@ inline void startHttpServer(int port = 0) {
         res.set_content(result, "application/json");
     });
 
-    // OPTIONS /mcp — CORS preflight
-    svr->Options("/mcp", [](const httplib::Request&, httplib::Response& res) {
-        res.set_header("Access-Control-Allow-Origin", "*");
-        res.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type");
-        res.status = 204;
-    });
-
     // GET / — Server info
     svr->Get("/", [](const httplib::Request&, httplib::Response& res) {
         json info = {
@@ -432,29 +458,29 @@ inline void startHttpServer(int port = 0) {
         res.set_content(info.dump(), "application/json");
     });
 
-    detail::getHttpThread() = std::make_unique<std::thread>([port]() {
+    detail::getHttpThread() = std::make_unique<std::thread>([port, host]() {
         auto& svr = detail::getHttpServer();
         if (!svr) return;
 
         int actualPort = 0;
         if (port > 0) {
             // Bind to specific port
-            if (!svr->bind_to_port("localhost", port)) {
-                trussc::logError("MCP") << "Failed to bind HTTP server to port " << port;
+            if (!svr->bind_to_port(host.c_str(), port)) {
+                trussc::logError("MCP") << "Failed to bind HTTP server to " << host << ":" << port;
                 return;
             }
             actualPort = port;
         } else {
             // Let OS assign a free port
-            actualPort = svr->bind_to_any_port("localhost");
+            actualPort = svr->bind_to_any_port(host.c_str());
             if (actualPort < 0) {
-                trussc::logError("MCP") << "Failed to bind HTTP server to any port";
+                trussc::logError("MCP") << "Failed to bind HTTP server to any port on " << host;
                 return;
             }
         }
         detail::getHttpPort().store(actualPort);
 
-        std::cerr << "[MCP] HTTP server listening on http://localhost:"
+        std::cerr << "[MCP] HTTP server listening on http://" << host << ":"
                   << actualPort << "/mcp" << std::endl;
 
         svr->listen_after_bind();
