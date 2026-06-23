@@ -328,7 +328,8 @@ private:
         source_ = src;
         fbo_ = fbo;
         startElapsed_ = getElapsedTimef();
-        lastCaptureElapsed_ = -1.0f;
+        nextCaptureTime_ = -1.0f;
+        lastFrameTime_ = -1.0f;
         afterFrameListener_ = events().afterFrame.listen([this]() { onAfterFrame(); });
         exitListener_ = events().exit.listen([this]() { stop(); });
         return true;
@@ -337,13 +338,26 @@ private:
     void onAfterFrame() {
         if (!writer_.isOpen()) return;
         float now = getElapsedTimef();
-        float fps = writer_.getFps();
-        // Throttle to the target fps (drop frames that arrive too soon).
-        if (lastCaptureElapsed_ >= 0.0f &&
-            (now - lastCaptureElapsed_) < (1.0f / fps) * 0.999f) {
-            return;
+        float interval = 1.0f / writer_.getFps();
+
+        // Decimate the (often higher-rate) frame stream to the target fps by
+        // capturing the frame NEAREST each target slot. nextCaptureTime_ advances
+        // by exactly one interval (drift-free); we capture once the slot falls
+        // within half a frame of now, so a frame landing a hair before its slot
+        // (e.g. every-other frame on a 120Hz display, where 16.67ms sat right on
+        // the old threshold) still counts instead of aliasing the rate down. The
+        // half-frame tolerance is the source frame time dt, not a fudge constant,
+        // so it stays correct for any source:target ratio (120->60, 120->30,
+        // 144->60, or a source slower than the target).
+        float dt = (lastFrameTime_ >= 0.0f) ? (now - lastFrameTime_) : interval;
+        lastFrameTime_ = now;
+        if (nextCaptureTime_ >= 0.0f && (now + 0.5f * dt) < nextCaptureTime_) {
+            return;   // this frame isn't the closest one to the next slot yet
         }
-        lastCaptureElapsed_ = now;
+        nextCaptureTime_ = (nextCaptureTime_ < 0.0f ? now : nextCaptureTime_) + interval;
+        if (nextCaptureTime_ <= now) {
+            nextCaptureTime_ = now + interval;   // source slower than target: resync
+        }
         double t = (double)(now - startElapsed_);   // wall-clock PTS
         if (source_ == Source::Fbo && fbo_) {
             writer_.addFrameAt(*fbo_, t);
@@ -381,7 +395,8 @@ private:
     Source source_ = Source::None;
     const Fbo* fbo_ = nullptr;
     float startElapsed_ = 0.0f;
-    float lastCaptureElapsed_ = -1.0f;
+    float nextCaptureTime_ = -1.0f;   // scheduled time of the next frame to capture
+    float lastFrameTime_ = -1.0f;     // previous afterFrame time (for source dt)
     EventListener afterFrameListener_;
     EventListener exitListener_;
     std::mutex writerMutex_;          // serializes encoder access (completion threads + stop)
