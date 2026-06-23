@@ -27,6 +27,7 @@
 #include <vector>
 #include <chrono>
 #include <atomic>
+#include <functional>
 #include <fstream>
 #include <unordered_set>
 
@@ -314,6 +315,15 @@ namespace internal {
 
     // Saved clear color for resume after FBO suspend (set by clear())
     inline sg_color swapchainClearValue = { 0.0f, 0.0f, 0.0f, 1.0f };
+
+    // The Metal CAMetalDrawable acquired for THIS frame's swapchain pass. sokol's
+    // sapp_get_swapchain() advances to the next drawable on every call (it must be
+    // called exactly once per frame), so end-of-frame capture must NOT call it
+    // again — it would grab a different, unrendered drawable. Instead the swapchain
+    // pass setup records the drawable it actually rendered into here, and
+    // captureWindow() reads back from this one. (Metal-only; on D3D11/GL the
+    // swapchain handle is a stable backbuffer/FBO so this stays null and is unused.)
+    inline const void* lastSwapchainDrawable = nullptr;
 
     // inFboPass is declared earlier (before tcRenderContext.h)
 
@@ -1754,6 +1764,34 @@ inline void exitApp() {
 // Screenshot
 // ---------------------------------------------------------------------------
 
+namespace internal {
+#if defined(__APPLE__)
+    // A completed GPU readback the consumer copies into ITS OWN destination,
+    // with a single getBytes and no intermediate buffer. Lets the screen recorder
+    // read straight into the encoder's CVPixelBuffer (BGRA, no swap) and
+    // screenshots read into a Pixels buffer (RGBA). `staging` is the bridged
+    // id<MTLTexture>, valid only for the duration of the completion callback.
+    struct CaptureReadback {
+        void* staging = nullptr;   // id<MTLTexture> (bridged, not retained here)
+        int   width = 0;
+        int   height = 0;
+        bool  isRGB10A2 = false;
+        // Copy the readback into dst (dstStride bytes per row). wantRGBA=false
+        // keeps native BGRA8 order (matches the encoder's CVPixelBuffer);
+        // wantRGBA=true yields RGBA8 (for Pixels / screenshots).
+        void readInto(unsigned char* dst, int dstStride, bool wantRGBA) const;
+    };
+
+    // macOS: asynchronous window capture. Issues the GPU readback blit and
+    // returns immediately; `completion` runs later (on a Metal background thread)
+    // with a CaptureReadback once the GPU finishes — no per-frame
+    // waitUntilCompleted stall. Returns false if there is no frame to capture.
+    // (Implemented in platform/mac/tcPlatform_mac.mm; captureWindow() is just
+    // this plus an inline wait.)
+    bool captureWindowAsync(
+        const std::function<void(const CaptureReadback&)>& completion);
+#endif
+}
 
 // Capture screen to Pixels.
 // NOTE: immediate readback — call this OUTSIDE draw() (e.g. at the end of

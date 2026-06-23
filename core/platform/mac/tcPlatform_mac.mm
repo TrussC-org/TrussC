@@ -195,101 +195,163 @@ std::string getExecutableDir() {
 // スクリーンショット機能（Metal API を使用）
 // ---------------------------------------------------------------------------
 
+// Copy a completed staging readback into the caller's destination buffer with a
+// single getBytes (no intermediate buffer for the common BGRA8 case). For BGRA8
+// + wantRGBA=false (the recorder feeding a BGRA CVPixelBuffer) this is one copy,
+// zero swizzle. Runs on whatever thread the consumer is on.
+void internal::CaptureReadback::readInto(unsigned char* dst, int dstStride,
+                                         bool wantRGBA) const {
+    id<MTLTexture> tex = (__bridge id<MTLTexture>)staging;
+    const NSUInteger w = (NSUInteger)width;
+    const NSUInteger h = (NSUInteger)height;
+
+    if (isRGB10A2) {
+        // 10-bit packed: must unpack via a temp. Layout per 32-bit pixel:
+        // [A:2 (31-30)][B:10 (29-20)][G:10 (19-10)][R:10 (9-0)].
+        std::vector<uint8_t> raw((size_t)w * 4 * h);
+        [tex getBytes:raw.data()
+          bytesPerRow:w * 4
+           fromRegion:MTLRegionMake2D(0, 0, w, h)
+          mipmapLevel:0];
+        const uint32_t* src = (const uint32_t*)raw.data();
+        for (NSUInteger y = 0; y < h; y++) {
+            uint8_t* drow = dst + (size_t)y * dstStride;
+            for (NSUInteger x = 0; x < w; x++) {
+                uint32_t p = src[y * w + x];
+                uint8_t r = (uint8_t)(((p >>  0) & 0x3FF) >> 2);
+                uint8_t g = (uint8_t)(((p >> 10) & 0x3FF) >> 2);
+                uint8_t b = (uint8_t)(((p >> 20) & 0x3FF) >> 2);
+                uint8_t a = (uint8_t)(((p >> 30) & 0x3) * 85);
+                if (wantRGBA) { drow[x*4+0]=r; drow[x*4+1]=g; drow[x*4+2]=b; drow[x*4+3]=a; }
+                else          { drow[x*4+0]=b; drow[x*4+1]=g; drow[x*4+2]=r; drow[x*4+3]=a; }
+            }
+        }
+        return;
+    }
+
+    // BGRA8: getBytes straight into dst (respecting the destination row stride).
+    [tex getBytes:dst
+      bytesPerRow:dstStride
+       fromRegion:MTLRegionMake2D(0, 0, w, h)
+      mipmapLevel:0];
+    if (wantRGBA) {
+        // In-place B<->R swap (no extra buffer).
+        for (NSUInteger y = 0; y < h; y++) {
+            uint8_t* drow = dst + (size_t)y * dstStride;
+            for (NSUInteger x = 0; x < w; x++) {
+                uint8_t b = drow[x*4+0];
+                drow[x*4+0] = drow[x*4+2];
+                drow[x*4+2] = b;
+            }
+        }
+    }
+}
+
+bool internal::captureWindowAsync(
+    const std::function<void(const internal::CaptureReadback&)>& completion) {
+    // Read back the drawable this frame ACTUALLY rendered into (recorded by the
+    // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
+    // unrendered drawable. Fall back only if no pass ran yet.
+    const void* drawablePtr = internal::lastSwapchainDrawable;
+    if (!drawablePtr) drawablePtr = sapp_get_swapchain().metal.current_drawable;
+    id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)drawablePtr;
+    if (!drawable) return false;
+    id<MTLTexture> srcTexture = drawable.texture;
+    if (!srcTexture) return false;
+
+    NSUInteger width  = srcTexture.width;
+    NSUInteger height = srcTexture.height;
+    MTLPixelFormat pixelFormat = srcTexture.pixelFormat;
+    id<MTLDevice> device = srcTexture.device;
+
+    // sokol sets framebufferOnly=YES on the layer, so getBytes on the drawable
+    // asserts — blit into a shared-storage staging texture first. Use a small
+    // ring so an in-flight async readback isn't clobbered by the next frame's
+    // blit (recording keeps a couple captures in flight). Issued only from the
+    // main thread (afterFrame), so the static ring needs no locking.
+    static const int kRing = 3;
+    static id<MTLTexture> s_ring[kRing] = { nil, nil, nil };
+    static int s_ringIdx = 0;
+    int slot = s_ringIdx;
+    s_ringIdx = (s_ringIdx + 1) % kRing;
+    id<MTLTexture> staging = s_ring[slot];
+    if (!staging || staging.device != device
+        || staging.width != width || staging.height != height
+        || staging.pixelFormat != pixelFormat) {
+        MTLTextureDescriptor* desc =
+            [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixelFormat
+                                                               width:width
+                                                              height:height
+                                                           mipmapped:NO];
+        desc.usage = MTLTextureUsageShaderRead;
+        desc.storageMode = MTLStorageModeShared;
+        staging = [device newTextureWithDescriptor:desc];
+        s_ring[slot] = staging;
+    }
+    if (!staging) return false;
+
+    // Blit on sokol's own queue so it is ordered AFTER the frame's render (a
+    // single MTLCommandQueue executes command buffers in commit order). A private
+    // queue raced ahead of the render and copied stale drawable contents.
+    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)sg_mtl_command_queue();
+    static id<MTLCommandQueue> s_fallbackQueue = nil;
+    if (!queue) {
+        if (!s_fallbackQueue || s_fallbackQueue.device != device) {
+            s_fallbackQueue = [device newCommandQueue];
+        }
+        queue = s_fallbackQueue;
+    }
+
+    id<MTLCommandBuffer>      cmdBuf  = [queue commandBuffer];
+    id<MTLBlitCommandEncoder> blitEnc = [cmdBuf blitCommandEncoder];
+    [blitEnc copyFromTexture:srcTexture
+                 sourceSlice:0 sourceLevel:0
+                sourceOrigin:MTLOriginMake(0, 0, 0)
+                  sourceSize:MTLSizeMake(width, height, 1)
+                   toTexture:staging
+            destinationSlice:0 destinationLevel:0
+           destinationOrigin:MTLOriginMake(0, 0, 0)];
+    [blitEnc endEncoding];
+
+    // Deliver a readback handle when the GPU finishes — no main-thread
+    // waitUntilCompleted stall. The block retains `staging` and copies
+    // `completion`, so both outlive this function until the handler runs. The
+    // consumer reads the staging straight into its own destination buffer.
+    std::function<void(const internal::CaptureReadback&)> comp = completion;
+    NSUInteger w = width, h = height;
+    bool isRGB10A2 = (pixelFormat == MTLPixelFormatRGB10A2Unorm);
+    [cmdBuf addCompletedHandler:^(id<MTLCommandBuffer> cb) {
+        (void)cb;
+        internal::CaptureReadback rb;
+        rb.staging   = (__bridge void*)staging;   // valid: block retains `staging`
+        rb.width     = (int)w;
+        rb.height    = (int)h;
+        rb.isRGB10A2 = isRGB10A2;
+        comp(rb);
+    }];
+    [cmdBuf commit];
+    return true;
+}
+
 bool captureWindow(Pixels& outPixels) {
-    // sokol_app から現在の swapchain を取得
-    sapp_swapchain sc = sapp_get_swapchain();
-    id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)sc.metal.current_drawable;
-    if (!drawable) {
+    // Synchronous wrapper over the async primitive: issue the capture and block
+    // until the pixels land. Screenshots / MCP / exit use this — they need the
+    // bytes before returning (so the file is written / the response is ready).
+    bool ok = false;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    bool started = internal::captureWindowAsync(
+        [&outPixels, &ok, sem](const internal::CaptureReadback& rb) {
+            outPixels.allocate(rb.width, rb.height, 4);
+            rb.readInto(outPixels.getData(), rb.width * 4, /*wantRGBA=*/true);
+            ok = true;
+            dispatch_semaphore_signal(sem);
+        });
+    if (!started) {
         logError() << "[Screenshot] Metal drawable が取得できません";
         return false;
     }
-
-    id<MTLTexture> srcTexture = drawable.texture;
-    if (!srcTexture) {
-        logError() << "[Screenshot] Metal テクスチャが取得できません";
-        return false;
-    }
-
-    NSUInteger width = srcTexture.width;
-    NSUInteger height = srcTexture.height;
-    MTLPixelFormat pixelFormat = srcTexture.pixelFormat;
-
-    // sokol が CAMetalLayer に framebufferOnly=YES をセットしているため、
-    // drawable.texture から直接 getBytes するとアサートする (Metal validation 有効時)。
-    // shared-storage の staging texture に blit してから読み出す。
-    id<MTLDevice> device = srcTexture.device;
-    MTLTextureDescriptor* desc =
-        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixelFormat
-                                                           width:width
-                                                          height:height
-                                                       mipmapped:NO];
-    desc.usage = MTLTextureUsageShaderRead;
-    desc.storageMode = MTLStorageModeShared;
-    id<MTLTexture> stagingTexture = [device newTextureWithDescriptor:desc];
-    if (!stagingTexture) {
-        logError() << "[Screenshot] staging texture の作成に失敗しました";
-        return false;
-    }
-
-    static id<MTLCommandQueue> s_blitQueue = nil;
-    if (!s_blitQueue || s_blitQueue.device != device) {
-        s_blitQueue = [device newCommandQueue];
-    }
-
-    id<MTLCommandBuffer>      cmdBuf  = [s_blitQueue commandBuffer];
-    id<MTLBlitCommandEncoder> blitEnc = [cmdBuf blitCommandEncoder];
-    [blitEnc copyFromTexture:srcTexture
-                 sourceSlice:0
-                 sourceLevel:0
-                sourceOrigin:MTLOriginMake(0, 0, 0)
-                  sourceSize:MTLSizeMake(width, height, 1)
-                   toTexture:stagingTexture
-            destinationSlice:0
-            destinationLevel:0
-           destinationOrigin:MTLOriginMake(0, 0, 0)];
-    [blitEnc endEncoding];
-    [cmdBuf commit];
-    [cmdBuf waitUntilCompleted];
-
-    MTLRegion region = MTLRegionMake2D(0, 0, width, height);
-    NSUInteger bytesPerRow = width * 4;
-    std::vector<uint8_t> rawData(bytesPerRow * height);
-
-    [stagingTexture getBytes:rawData.data()
-                 bytesPerRow:bytesPerRow
-                  fromRegion:region
-                 mipmapLevel:0];
-
-    // Allocate output pixels (always RGBA8)
-    outPixels.allocate((int)width, (int)height, 4);
-    unsigned char* dst = outPixels.getData();
-
-    if (pixelFormat == MTLPixelFormatRGB10A2Unorm) {
-        // RGB10A2 bit layout: [A:2 (31-30)][B:10 (29-20)][G:10 (19-10)][R:10 (9-0)]
-        const uint32_t* src = (const uint32_t*)rawData.data();
-        for (NSUInteger i = 0; i < width * height; i++) {
-            uint32_t pixel = src[i];
-            uint32_t r10 = (pixel >>  0) & 0x3FF;  // bits 0-9
-            uint32_t g10 = (pixel >> 10) & 0x3FF;  // bits 10-19
-            uint32_t b10 = (pixel >> 20) & 0x3FF;  // bits 20-29
-            uint32_t a2  = (pixel >> 30) & 0x3;    // bits 30-31
-            // Convert 10-bit (0-1023) to 8-bit, 2-bit (0-3) to 8-bit
-            dst[i * 4 + 0] = (uint8_t)(r10 >> 2);
-            dst[i * 4 + 1] = (uint8_t)(g10 >> 2);
-            dst[i * 4 + 2] = (uint8_t)(b10 >> 2);
-            dst[i * 4 + 3] = (uint8_t)(a2 * 85);   // 0→0, 1→85, 2→170, 3→255
-        }
-    } else {
-        // BGRA8 fallback
-        memcpy(dst, rawData.data(), bytesPerRow * height);
-        for (NSUInteger i = 0; i < width * height; i++) {
-            unsigned char temp = dst[i * 4 + 0];  // B
-            dst[i * 4 + 0] = dst[i * 4 + 2];     // R
-            dst[i * 4 + 2] = temp;                // B
-        }
-    }
-
-    return true;
+    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+    return ok;
 }
 
 bool internal::captureWindowToFile(const std::filesystem::path& path) {

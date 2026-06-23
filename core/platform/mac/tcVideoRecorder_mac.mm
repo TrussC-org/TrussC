@@ -30,6 +30,7 @@ struct VideoWriterPlatformData {
     double fps = 30.0;
     int64_t frameIndex = 0;
     bool failed = false;
+    CVPixelBufferRef pendingPB = NULL;   // locked buffer between lockFrame/submitFrame
 };
 
 // ---------------------------------------------------------------------------
@@ -224,6 +225,81 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
         return true;
     }
 }
+
+#if TC_ASYNC_SCREEN_CAPTURE
+// ---------------------------------------------------------------------------
+// lockFramePlatform / submitFramePlatform - zero-intermediate capture path.
+// The recorder reads the GPU capture straight into the encoder's CVPixelBuffer
+// (BGRA), so there is no temporary Pixels buffer to copy through. Called on the
+// capture completion thread, serialized by the recorder's writer mutex.
+// ---------------------------------------------------------------------------
+unsigned char* VideoWriter::lockFramePlatform(int& strideOut) {
+    VideoWriterPlatformData* pd = platform_;
+    if (!pd || !pd->writer || pd->failed || pd->pendingPB) return nullptr;
+
+    // Briefly wait for the encoder input to accept more data.
+    int spins = 0;
+    while (!pd->input.readyForMoreMediaData && spins < 5000) {
+        [NSThread sleepForTimeInterval:0.001];
+        ++spins;
+    }
+    if (!pd->input.readyForMoreMediaData) {
+        logError("VideoWriter") << "input not ready (timeout)";
+        pd->failed = true;
+        return nullptr;
+    }
+
+    CVPixelBufferRef pb = NULL;
+    if (pd->adaptor.pixelBufferPool) {
+        CVPixelBufferPoolCreatePixelBuffer(NULL, pd->adaptor.pixelBufferPool, &pb);
+    }
+    if (!pb) {
+        NSDictionary* attrs = @{
+            (NSString*)kCVPixelBufferCGImageCompatibilityKey: @YES,
+            (NSString*)kCVPixelBufferCGBitmapContextCompatibilityKey: @YES,
+            (NSString*)kCVPixelBufferIOSurfacePropertiesKey: @{},
+        };
+        CVPixelBufferCreate(kCFAllocatorDefault, pd->width, pd->height,
+                            kCVPixelFormatType_32BGRA,
+                            (__bridge CFDictionaryRef)attrs, &pb);
+    }
+    if (!pb) {
+        logError("VideoWriter") << "could not create pixel buffer";
+        pd->failed = true;
+        return nullptr;
+    }
+
+    CVPixelBufferLockBaseAddress(pb, 0);
+    pd->pendingPB = pb;
+    strideOut = (int)CVPixelBufferGetBytesPerRow(pb);
+    return (unsigned char*)CVPixelBufferGetBaseAddress(pb);
+}
+
+bool VideoWriter::submitFramePlatform(double timeSec) {
+    VideoWriterPlatformData* pd = platform_;
+    if (!pd || !pd->pendingPB) return false;
+
+    CVPixelBufferRef pb = pd->pendingPB;
+    pd->pendingPB = NULL;
+    CVPixelBufferUnlockBaseAddress(pb, 0);
+
+    CMTime t = CMTimeMakeWithSeconds(timeSec, 600);
+    BOOL ok = [pd->adaptor appendPixelBuffer:pb withPresentationTime:t];
+    CVPixelBufferRelease(pb);
+
+    if (!ok) {
+        logError("VideoWriter")
+            << "appendPixelBuffer failed: "
+            << (pd->writer.error
+                    ? pd->writer.error.localizedDescription.UTF8String
+                    : "unknown");
+        pd->failed = true;
+        return false;
+    }
+    ++pd->frameIndex;
+    return true;
+}
+#endif // TC_ASYNC_SCREEN_CAPTURE
 
 // ---------------------------------------------------------------------------
 // closePlatform - mark finished and flush the file synchronously

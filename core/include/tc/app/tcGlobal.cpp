@@ -230,6 +230,9 @@ void ensureSwapchainPass() {
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         pass.action.depth.clear_value = 1.0f;
         pass.swapchain = sglue_swapchain();
+        // Record the drawable we render into so end-of-frame capture reads back
+        // THIS one (sapp_get_swapchain() advances the Metal drawable per call).
+        internal::lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
         sg_begin_pass(&pass);
         internal::inSwapchainPass = true;
     }
@@ -280,6 +283,7 @@ void resumeSwapchainPass() {
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         pass.action.depth.clear_value = 1.0f;
         pass.swapchain = sglue_swapchain();
+        internal::lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
         sg_begin_pass(&pass);
         internal::inSwapchainPass = true;
     }
