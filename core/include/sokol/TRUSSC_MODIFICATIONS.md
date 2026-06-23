@@ -144,6 +144,15 @@ TrussC-specific public functions use the `sgl_tc_` prefix to distinguish from up
 - `_sgl_draw()`: uses `sg_append_buffer` instead of `sg_update_buffer`
 - Vertex buffer offsets tracked per draw call via `base_vertex`
 - GPU buffer recreated on overflow if released
+- **Single upload per frame (shared across layer draws):** `_sgl_draw()` appends
+  the full vertex set to the GPU buffer only on the FIRST call of a frame and
+  reuses the returned base offset for the remaining layer draws (cache keyed on
+  `frame_id` / vertex count / `vbuf.id`, fields `upload_*`; invalidated by
+  `sgl_tc_context_reset`). Without this, flushing N layers (e.g. one per deferred
+  PBR/shader draw, see `flushDeferredShaderDraws`) re-appended V vertices N times,
+  so `append_pos` reached N×V and `_sgl_grow_gpu_buffer` doubled the GPU buffer
+  until allocation failed (Metal `id:52` / `METAL_CREATE_BUFFER_FAILED`), killing
+  all sgl rendering. Regression test: `core/tests/sglLayerUpload` (dummy backend).
 
 ### 11. Auto-grow Buffers
 
