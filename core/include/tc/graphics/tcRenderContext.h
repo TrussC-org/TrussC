@@ -253,6 +253,9 @@ public:
     // -----------------------------------------------------------------------
 
     void pushStyle() {
+        // Capture the live blend mode (it lives in internal::currentBlendMode, not in
+        // style_) so it is saved/restored alongside color/fill/stroke.
+        style_.blend = internal::currentBlendMode;
         styleStack_.push_back(style_);
     }
 
@@ -260,13 +263,28 @@ public:
         if (!styleStack_.empty()) {
             style_ = styleStack_.back();
             styleStack_.pop_back();
+            applyBlend(style_.blend);
         }
     }
 
     // Reset style to default values (white color, fill enabled, etc.)
     void resetStyle() {
         style_ = Style();
+        applyBlend(style_.blend);
     }
+
+private:
+    // Restore the 2D blend pipeline only when the mode actually changed (a redundant
+    // load is otherwise a no-op that sokol_gl batches away, but we skip it anyway).
+    // No-op inside an FBO pass, which uses its own accumulating pipeline.
+    void applyBlend(BlendMode mode) {
+        if (mode == internal::currentBlendMode) return;
+        internal::currentBlendMode = mode;
+        if (!internal::inFboPass) {
+            internal::loadPipeline(internal::active2D(mode));
+        }
+    }
+public:
 
     // Main implementation (Vec3)
     void translate(Vec3 pos) {
@@ -881,6 +899,10 @@ private:
         Direction textAlignH = Direction::Left;
         Direction textAlignV = Direction::Top;
         float bitmapLineHeight = bitmapfont::CHAR_TEX_HEIGHT;
+        // Mirror of internal::currentBlendMode. blend state itself lives outside the
+        // RenderContext (it maps to an sgl pipeline), so push/popStyle capture and
+        // restore it explicitly rather than via this field's value alone.
+        BlendMode blend = BlendMode::Alpha;
     };
 
     // Current style
