@@ -97,7 +97,7 @@ void tcApp::draw() {
     }
 
     setColor(0.4f);
-    drawBitmapString("FPS: " + to_string((int)getFrameRate()), 40, getWindowHeight() - 30);
+    drawBitmapString("FPS: " + to_string((int)getFrameRate()), 40, getHeight() - 30);
 }
 
 void tcApp::keyPressed(int key) {

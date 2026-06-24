@@ -184,6 +184,6 @@ void tcApp::draw() {
     char fps[64];
     std::snprintf(fps, sizeof(fps), "%.1f fps", getFps());
     setTextAlign(Direction::Right, Direction::Bottom);
-    drawBitmapString(fps, (float)getWindowWidth() - 12, (float)getWindowHeight() - 8);
+    drawBitmapString(fps, (float)getWidth() - 12, (float)getHeight() - 8);
     setTextAlign(Direction::Left, Direction::Top);
 }

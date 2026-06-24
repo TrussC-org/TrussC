@@ -18,8 +18,8 @@ void tcApp::update() {
 
 void tcApp::draw() {
     clear(0.06f, 0.07f, 0.09f);
-    const float W = getWindowWidth();
-    const float H = getWindowHeight();
+    const float W = getWidth();
+    const float H = getHeight();
 
     setColor(0.85f);
     fontLabel.drawString("Vector glyph paths — Font::getStringPath", 24, 22, Left, Top);

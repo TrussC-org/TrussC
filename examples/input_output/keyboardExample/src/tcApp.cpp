@@ -64,8 +64,8 @@ void tcApp::draw() {
     if (pressedKeys.count(KEY_DOWN)) boxY += boxSpeed;
 
     // Constrain box to screen
-    int w = getWindowWidth();
-    int h = getWindowHeight();
+    int w = getWidth();
+    int h = getHeight();
     if (boxX < 25) boxX = 25;
     if (boxX > w - 25) boxX = w - 25;
     if (boxY < 25) boxY = 25;

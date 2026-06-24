@@ -17,8 +17,8 @@ void tcApp::setup() {
 void tcApp::draw() {
     clear(colors::white);
 
-    float w = getWindowWidth();
-    float h = getWindowHeight();
+    float w = getWidth();
+    float h = getHeight();
 
     // =========================================================================
     // TTF Alignment demo

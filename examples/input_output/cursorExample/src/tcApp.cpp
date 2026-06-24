@@ -60,7 +60,7 @@ void tcApp::draw() {
     float rowH = 30;
     float startY = 45;
     float boxW = 300;
-    float startX = (getWindowWidth() - boxW) / 2;
+    float startX = (getWidth() - boxW) / 2;
 
     // Title
     setColor(1.0f);

@@ -51,12 +51,12 @@ void tcApp::draw() {
 
     if (video_.isLoaded()) {
         // Draw video centered
-        float scale = std::min(getWindowWidth() / video_.getWidth(),
-                               getWindowHeight() / video_.getHeight());
+        float scale = std::min(getWidth() / video_.getWidth(),
+                               getHeight() / video_.getHeight());
         float w = video_.getWidth() * scale;
         float h = video_.getHeight() * scale;
-        float x = (getWindowWidth() - w) / 2;
-        float y = (getWindowHeight() - h) / 2;
+        float x = (getWidth() - w) / 2;
+        float y = (getHeight() - h) / 2;
 
         video_.draw(x, y, w, h);
 
@@ -65,16 +65,16 @@ void tcApp::draw() {
 
         // Progress bar
         float barHeight = 10;
-        float barY = getWindowHeight() - barHeight;
+        float barY = getHeight() - barHeight;
         float progress = video_.getPosition();
 
         // Background
         setColor(0.2f);
-        drawRect(20, barY, getWindowWidth() - 40, barHeight);
+        drawRect(20, barY, getWidth() - 40, barHeight);
 
         // Progress
         setColor(0.4f, 0.78f, 0.4f);
-        drawRect(20, barY, (getWindowWidth() - 40) * progress, barHeight);
+        drawRect(20, barY, (getWidth() - 40) * progress, barHeight);
 
         // Info display
         if (showInfo_) {
@@ -96,10 +96,10 @@ void tcApp::draw() {
             string state = video_.isPlaying() ? "Playing" :
                            video_.isPaused() ? "Paused" : "Stopped";
             setTextAlign(Center, Baseline);
-            drawBitmapString("State: " + state, getWindowWidth() / 2, 20);
+            drawBitmapString("State: " + state, getWidth() / 2, 20);
 
             setTextAlign(Right, Baseline);
-            drawBitmapString("Volume: " + to_string((int)(video_.getVolume() * 100)) + "%", getWindowWidth() - 20, 20);
+            drawBitmapString("Volume: " + to_string((int)(video_.getVolume() * 100)) + "%", getWidth() - 20, 20);
 
             popStyle();
         }
@@ -109,15 +109,15 @@ void tcApp::draw() {
         setColor(1.0f);
 
         setTextAlign(Center, Baseline);
-        drawBitmapString("Press Space to play", getWindowWidth() / 2, getWindowHeight() / 2 - 20);
-        drawBitmapString("Big Buck Bunny (CC BY 3.0)", getWindowWidth() / 2, getWindowHeight() / 2);
+        drawBitmapString("Press Space to play", getWidth() / 2, getHeight() / 2 - 20);
+        drawBitmapString("Big Buck Bunny (CC BY 3.0)", getWidth() / 2, getHeight() / 2);
         popStyle();
     }
 
     // Controls help
     setColor(0.78f);
     drawBitmapString("Space: Play/Pause | R: Restart | Arrows: Seek/Volume | I: Info",
-                    20, getWindowHeight() - 30);
+                    20, getHeight() - 30);
 }
 
 string tcApp::formatTime(float seconds) {

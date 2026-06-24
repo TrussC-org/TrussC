@@ -15,8 +15,8 @@ void tcApp::setup() {
 void tcApp::draw() {
     clear(0.16f);
 
-    int w = getWindowWidth();
-    int h = getWindowHeight();
+    int w = getWidth();
+    int h = getHeight();
 
     // Title
     setColor(1.0f);

@@ -56,7 +56,7 @@ void tcApp::cleanup() {
 void tcApp::drawGui() {
     // Fixed position and size for GUI panel
     ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(260, getWindowHeight() - 40), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(260, getHeight() - 40), ImGuiCond_Always);
 
     ImGui::Begin("Color Settings", nullptr,
         ImGuiWindowFlags_NoResize |
@@ -112,12 +112,12 @@ void tcApp::drawLerpComparison() {
     float margin = 20;
     float guiWidth = 280;  // GUI panel width + margin
     float startX = guiWidth + margin;
-    float endX = getWindowWidth() - margin;
+    float endX = getWidth() - margin;
     float barHeight = 45;
 
     // Vertically center the content
     float totalHeight = 5 * barHeight + 4 * 40;  // 5 bars + 4 gaps (including labels)
-    float y = (getWindowHeight() - totalHeight) / 2;
+    float y = (getHeight() - totalHeight) / 2;
     float gap = 80;
     int steps = 256;
 
@@ -164,11 +164,11 @@ void tcApp::drawHueWheel() {
     // Layout (avoid GUI panel on left)
     float margin = 20;
     float guiWidth = 280;
-    float availWidth = getWindowWidth() - guiWidth - margin * 2;
+    float availWidth = getWidth() - guiWidth - margin * 2;
     float centerX1 = guiWidth + margin + availWidth * 0.25f;
     float centerX2 = guiWidth + margin + availWidth * 0.75f;
-    float centerY = getWindowHeight() / 2;
-    float radius = std::min(availWidth * 0.22f, (getWindowHeight() - margin * 4) * 0.42f);
+    float centerY = getHeight() / 2;
+    float radius = std::min(availWidth * 0.22f, (getHeight() - margin * 4) * 0.42f);
     int segments = 360;
 
     // HSB hue wheel
@@ -221,7 +221,7 @@ void tcApp::drawLightnessDemo() {
     float margin = 20;
     float guiWidth = 280;
     float startX = guiWidth + margin;
-    float barWidth = getWindowWidth() - startX - margin;
+    float barWidth = getWidth() - startX - margin;
     float barHeight = 45;
     int segments = 360;
     float segmentWidth = barWidth / segments;
@@ -229,7 +229,7 @@ void tcApp::drawLightnessDemo() {
     // Vertically center the 4 bars with more padding
     float gap = 70;
     float totalHeight = 4 * barHeight + 3 * gap;
-    float baseY = (getWindowHeight() - totalHeight) / 2 + 10;
+    float baseY = (getHeight() - totalHeight) / 2 + 10;
 
     // HSB: Same brightness (B=1) but perceptual lightness varies
     float y1 = baseY;
@@ -302,7 +302,7 @@ void tcApp::drawGradientDemo() {
     // Layout (avoid GUI panel on left)
     float margin = 20;
     float guiWidth = 280;
-    float availWidth = getWindowWidth() - guiWidth - margin * 2;
+    float availWidth = getWidth() - guiWidth - margin * 2;
     float startX = guiWidth + margin;
     float barWidth = availWidth * 0.45f;
     float barHeight = 18;
@@ -313,7 +313,7 @@ void tcApp::drawGradientDemo() {
     float pairGap = 30;  // Gap between two bars in a pair
     float groupGap = 55; // Gap between pairs
     float totalHeight = 4 * (barHeight * 2 + pairGap) + 3 * groupGap;
-    float y = (getWindowHeight() - totalHeight) / 2 + 15;
+    float y = (getHeight() - totalHeight) / 2 + 15;
     float colGap = availWidth * 0.5f;
 
     for (int p = 0; p < 4; p++) {

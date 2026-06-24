@@ -66,5 +66,5 @@ void tcApp::draw() {
 
     // Display ball count
     setColor(1.0f);
-    drawBitmapString("Balls: " + to_string(balls_.size()), 20, getWindowHeight() - 30);
+    drawBitmapString("Balls: " + to_string(balls_.size()), 20, getHeight() - 30);
 }

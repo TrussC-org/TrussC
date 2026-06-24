@@ -26,7 +26,7 @@ void tcApp::draw() {
 
     // Rotating box
     noFill();
-    translate(getWindowWidth() / 2, getWindowHeight() / 2);
+    translate(getWidth() / 2, getHeight() / 2);
     rotate(getElapsedTimef() *0.1f, getElapsedTimef() *0.15f, 0);
     drawBox(200.0f);
 }

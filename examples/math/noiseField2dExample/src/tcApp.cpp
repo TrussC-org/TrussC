@@ -8,8 +8,8 @@ void tcApp::setup() {
 
 void tcApp::resetParticles() {
     particles.clear();
-    int w = getWindowWidth();
-    int h = getWindowHeight();
+    int w = getWidth();
+    int h = getHeight();
 
     for (int i = 0; i < 2000; i++) {
         Particle p;
@@ -26,8 +26,8 @@ void tcApp::update() {
 
     // Update particles when in flow field mode
     if (mode == 2) {
-        int w = getWindowWidth();
-        int h = getWindowHeight();
+        int w = getWidth();
+        int h = getHeight();
 
         for (auto& p : particles) {
             p.prevX = p.x;
@@ -80,8 +80,8 @@ void tcApp::draw() {
 }
 
 void tcApp::updateNoiseImage(bool useFbm) {
-    int w = getWindowWidth();
-    int h = getWindowHeight();
+    int w = getWidth();
+    int h = getHeight();
 
     // Reallocate if size changed
     if (w != lastWidth || h != lastHeight) {
@@ -113,8 +113,8 @@ void tcApp::drawNoiseTexture() {
 }
 
 void tcApp::drawFlowField() {
-    int w = getWindowWidth();
-    int h = getWindowHeight();
+    int w = getWidth();
+    int h = getHeight();
     int step = 20;
 
     for (int y = step; y < h; y += step) {

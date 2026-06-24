@@ -162,8 +162,8 @@ void tcApp::drawMouseDrawing() {
 }
 
 void tcApp::drawAnimatedCurve() {
-    int w = getWindowWidth();
-    int h = getWindowHeight();
+    int w = getWidth();
+    int h = getHeight();
     float cy = h / 2.0f + 30;
 
     // Animated flower-like shape (left side, 1.5x size)

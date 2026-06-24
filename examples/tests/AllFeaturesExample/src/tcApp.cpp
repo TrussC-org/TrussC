@@ -149,7 +149,7 @@ void tcApp::draw() {
     // Rotating box (Core graphics test)
     noFill();
     setColor(colors::white);
-    translate(getWindowWidth() / 2.0f, getWindowHeight() / 2.0f);
+    translate(getWidth() / 2.0f, getHeight() / 2.0f);
     rotate(getElapsedTimef() * 0.5f);
     drawBox(200.0f);
 

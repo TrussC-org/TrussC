@@ -98,8 +98,8 @@ void tcApp::draw() {
     clear(0.15f);
 
     float time = getElapsedTimef();
-    float winW = (float)getWindowWidth();
-    float winH = (float)getWindowHeight();
+    float winW = (float)getWidth();
+    float winH = (float)getHeight();
 
     // Set shader uniforms
     vs_params_t vsParams = {};

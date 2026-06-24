@@ -37,8 +37,8 @@ void tcApp::setup() {
 
 void tcApp::update() {
     params.time = getElapsedTime();
-    params.resolution[0] = (float)getWindowWidth();
-    params.resolution[1] = (float)getWindowHeight();
+    params.resolution[0] = (float)getWidth();
+    params.resolution[1] = (float)getHeight();
     params.mouse[0] = (float)getGlobalMouseX();
     params.mouse[1] = (float)getGlobalMouseY();
 }

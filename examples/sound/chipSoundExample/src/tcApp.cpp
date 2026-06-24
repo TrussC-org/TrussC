@@ -295,5 +295,5 @@ void tcApp::draw() {
 
     // Instructions
     setColor(0.5f);
-    drawBitmapString("Click buttons to play sounds. Melodies toggle on/off.", margin, getWindowHeight() - 25);
+    drawBitmapString("Click buttons to play sounds. Melodies toggle on/off.", margin, getHeight() - 25);
 }

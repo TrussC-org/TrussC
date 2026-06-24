@@ -147,7 +147,7 @@ void tcApp::draw() {
     drawBitmapString("Status: " + sfxStatus, 50, y);
 
     setColor(0.4f);
-    drawBitmapString("FPS: " + std::to_string((int)getFrameRate()), 50, getWindowHeight() - 40);
+    drawBitmapString("FPS: " + std::to_string((int)getFrameRate()), 50, getHeight() - 40);
 }
 
 void tcApp::keyPressed(int key) {

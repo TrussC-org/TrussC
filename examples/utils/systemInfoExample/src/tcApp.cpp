@@ -12,7 +12,7 @@ void tcApp::draw() {
 
     float x = 20;
     float y = 30;
-    float w = getWindowWidth() - 40;
+    float w = getWidth() - 40;
     float barH = 18;
     float lineH = 24;
 

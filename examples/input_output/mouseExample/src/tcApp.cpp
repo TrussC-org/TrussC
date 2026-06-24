@@ -9,8 +9,8 @@ void tcApp::setup() {
 void tcApp::draw() {
     clear(0.12f);
 
-    int w = getWindowWidth();
-    int h = getWindowHeight();
+    int w = getWidth();
+    int h = getHeight();
 
     // Draw circle that changes with scroll
     float scrollSize = 50 + scrollY * 2;  // Size changes with scroll

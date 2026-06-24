@@ -29,8 +29,8 @@ void tcApp::setup() {
 void tcApp::draw() {
     clear(colors::white);
 
-    const float W = getWindowWidth();
-    const float H = getWindowHeight();
+    const float W = getWidth();
+    const float H = getHeight();
 
     // ---- Title ----
     setColor(0.18f);

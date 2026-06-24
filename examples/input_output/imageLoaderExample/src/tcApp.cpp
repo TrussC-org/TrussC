@@ -37,15 +37,15 @@ void tcApp::draw() {
 
     // Draw tower centered
     if (tower.isAllocated()) {
-        float x = (getWindowWidth() - tower.getWidth()) / 2;
-        float y = (getWindowHeight() - tower.getHeight()) / 2;
+        float x = (getWidth() - tower.getWidth()) / 2;
+        float y = (getHeight() - tower.getHeight()) / 2;
         tower.draw(x, y);
     }
 
     // Draw transparency image swaying left/right
     if (transparency.isAllocated()) {
         float wave = sin(getElapsedTime() * 2) * 50;
-        float x = (getWindowWidth() - transparency.getWidth()) / 2 + wave;
+        float x = (getWidth() - transparency.getWidth()) / 2 + wave;
         float y = 20;
         transparency.draw(x, y);
     }

@@ -146,7 +146,7 @@ public:
 
         // Draw instructions
         setColor(0.5f);
-        drawBitmapString("Click: Restart  |  1:In 2:Out 3:InOut  |  4:Loop(3) 5:Yoyo 6:Off", 30, getWindowHeight() - 30);
+        drawBitmapString("Click: Restart  |  1:In 2:Out 3:InOut  |  4:Loop(3) 5:Yoyo 6:Off", 30, getHeight() - 30);
     }
 
     void drawMiniGraph(float x, float y, float w, float h, EaseType type, const Color& color) {

@@ -12,8 +12,8 @@ void tcApp::setup() {
 
 void tcApp::draw() {
     clear(colors::white);
-    const float W = getWindowWidth();
-    const float H = getWindowHeight();
+    const float W = getWidth();
+    const float H = getHeight();
 
     setColor(0.18f);
     fontH.drawString("Line-wrap demo", 24, 24, Left, Top);

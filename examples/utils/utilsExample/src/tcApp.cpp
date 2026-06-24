@@ -148,5 +148,5 @@ void tcApp::draw() {
     string frameInfo = "FPS: " + toString(getFrameRate(), 1) +
                        "  |  Update: " + to_string(getUpdateCount()) +
                        "  |  Draw: " + to_string(getDrawCount());
-    drawBitmapString(frameInfo, 10, getWindowHeight() - 20);
+    drawBitmapString(frameInfo, 10, getHeight() - 20);
 }

@@ -57,8 +57,8 @@ void tcApp::draw() {
             y += 25;
 
             // Display image at appropriate size
-            float maxW = getWindowWidth() - 80;
-            float maxH = getWindowHeight() - y - 40;
+            float maxW = getWidth() - 80;
+            float maxH = getHeight() - y - 40;
             float imgW = loadedImage.getWidth();
             float imgH = loadedImage.getHeight();
             float scale = std::min<float>(maxW / imgW, maxH / imgH);

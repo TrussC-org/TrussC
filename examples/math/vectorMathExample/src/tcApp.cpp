@@ -63,14 +63,14 @@ void tcApp::draw() {
 
     // Instructions at the bottom of the screen
     setColor(0.5f, 0.5f, 0.5f);
-    drawBitmapString("[SPACE] next mode  [Click] spawn particles (mode 3)  [ESC] quit", 20, getWindowHeight() - 20);
+    drawBitmapString("[SPACE] next mode  [Click] spawn particles (mode 3)  [ESC] quit", 20, getHeight() - 20);
 }
 
 // ---------------------------------------------------------------------------
 // Vec2 basic operations demo
 // ---------------------------------------------------------------------------
 void tcApp::drawVec2Demo() {
-    Vec2 center(getWindowWidth() / 2.f, getWindowHeight() / 2.f);
+    Vec2 center(getWidth() / 2.f, getHeight() / 2.f);
     Vec2 mouse(getGlobalMouseX(), getGlobalMouseY());
 
     // Vector to mouse
@@ -146,7 +146,7 @@ void tcApp::drawVec2Demo() {
 // ---------------------------------------------------------------------------
 void tcApp::drawRotationDemo() {
     double t = getElapsedTime();
-    Vec2 center(getWindowWidth() / 2.f, getWindowHeight() / 2.f);
+    Vec2 center(getWidth() / 2.f, getHeight() / 2.f);
 
     // Rotating point cloud
     int numPoints = 12;
@@ -204,7 +204,7 @@ void tcApp::drawLerpDemo() {
     // Multiple points follow the mouse using lerp
     static vector<Vec2> followers;
     if (followers.empty()) {
-        Vec2 start(getWindowWidth() / 2.f, getWindowHeight() / 2.f);
+        Vec2 start(getWidth() / 2.f, getHeight() / 2.f);
         for (int i = 0; i < 20; i++) {
             followers.push_back(start);
         }
@@ -253,8 +253,8 @@ void tcApp::drawParticleDemo() {
     // Auto-spawn particles
     double t = getElapsedTime();
     if (fmod(t, 0.05) < getDeltaTime()) {
-        float cx = getWindowWidth() / 2.f;
-        float cy = getWindowHeight() / 2.f;
+        float cx = getWidth() / 2.f;
+        float cy = getHeight() / 2.f;
         float x = cx + cos(t * 2) * 150;
         float y = cy + sin(t * 3) * 100;
         spawnParticle(x, y);

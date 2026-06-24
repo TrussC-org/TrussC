@@ -41,7 +41,7 @@ void tcApp::draw() {
     // Rotating rectangle (for animation verification)
     float angle = getElapsedTime();
     pushMatrix();
-    translate(getWindowWidth() / 2, getWindowHeight() / 2);
+    translate(getWidth() / 2, getHeight() / 2);
     rotate(angle);
     setColor(1.0f, 1.0f, 1.0f);
     drawRect(-200, -40, 400, 80);

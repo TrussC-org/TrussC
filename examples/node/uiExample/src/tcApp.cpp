@@ -86,7 +86,7 @@ void tcApp::draw() {
     drawBitmapString(format("Background: R={:.2f} G={:.2f}", bgColor_.r, bgColor_.g), 50, 350);
 
     setColor(0.5f, 0.5f, 0.5f);
-    drawBitmapString(format("FPS: {:.1f}", getFrameRate()), getWindowWidth() - 100, 30);
+    drawBitmapString(format("FPS: {:.1f}", getFrameRate()), getWidth() - 100, 30);
 }
 
 void tcApp::keyPressed(int key) {

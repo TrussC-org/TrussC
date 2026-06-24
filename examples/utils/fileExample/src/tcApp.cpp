@@ -141,7 +141,7 @@ void tcApp::draw() {
     // ==========================================================================
     setColor(colors::white);
     drawBitmapString("SPACE: Write log | R: Read log | C: Create logs dir",
-        10, getWindowHeight() - 20);
+        10, getHeight() - 20);
 }
 
 void tcApp::keyPressed(int key) {

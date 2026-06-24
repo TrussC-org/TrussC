@@ -25,8 +25,8 @@ void tcApp::update() {
 void tcApp::draw() {
     clear(0.1f);
 
-    float w = getWindowWidth();
-    float h = getWindowHeight();
+    float w = getWidth();
+    float h = getHeight();
 
     // Title and status
     setColor(1.0f);

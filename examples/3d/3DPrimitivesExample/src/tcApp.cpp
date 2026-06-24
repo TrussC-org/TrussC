@@ -103,7 +103,7 @@ void tcApp::draw() {
     };
 
     // Grid spacing based on window size (with padding for visibility)
-    float baseSize = min(getWindowWidth(), getWindowHeight());
+    float baseSize = min(getWidth(), getHeight());
     float spacingX = baseSize * 0.4f;   // Horizontal spacing
     float spacingY = baseSize * 0.4f;   // Vertical spacing
 
@@ -119,8 +119,8 @@ void tcApp::draw() {
     };
 
     // Center of screen
-    float cx = getWindowWidth() / 2.0f;
-    float cy = getWindowHeight() / 2.0f;
+    float cx = getWidth() / 2.0f;
+    float cy = getHeight() / 2.0f;
 
     // Lighting settings
     if (bLighting) {

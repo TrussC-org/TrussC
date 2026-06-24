@@ -79,8 +79,8 @@ void tcApp::draw() {
 
         if (hasImage && loadedImage.isAllocated()) {
             setColor(1.0f);
-            float maxW = getWindowWidth() - 80;
-            float maxH = getWindowHeight() - infoY - 40;
+            float maxW = getWidth() - 80;
+            float maxH = getHeight() - infoY - 40;
             float imgW = loadedImage.getWidth();
             float imgH = loadedImage.getHeight();
             float scale = min(maxW / imgW, maxH / imgH);

@@ -73,11 +73,11 @@ void tcApp::draw() {
     // Mouse position
     setColor(1.0f, 1.0f, 0.5f);
     drawBitmapString(format("Mouse: {:.0f}, {:.0f}", getGlobalMouseX(), getGlobalMouseY()),
-        20, getWindowHeight() - 40);
+        20, getHeight() - 40);
 
     // Controls description
     setColor(0.5f, 0.5f, 0.5f);
-    drawBitmapString("[SPACE] pause/resume  [ESC] quit", 20, getWindowHeight() - 20);
+    drawBitmapString("[SPACE] pause/resume  [ESC] quit", 20, getHeight() - 20);
 
     // Panel status
     setColor(0.8f, 0.8f, 0.8f);
