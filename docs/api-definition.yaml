@@ -22,6 +22,9 @@ categories:
     name_ko: "라이프사이클"
     functions:
       - name: setup
+        related:
+          - runApp
+          - events
         keywords: ["init","start","begin","load","onload","create"]
         return: "void"
         signatures:
@@ -37,6 +40,9 @@ categories:
         related:
           - updateGlyph
           - updateLayout
+          - draw
+          - getDeltaTime
+          - getFrameCount
         keywords: ["tick","step","logic","frame","process","advance"]
         return: "void"
         signatures:
@@ -49,6 +55,11 @@ categories:
         snippet: "void update() {\n\t$0\n}"
 
       - name: draw
+        related:
+          - drawMesh
+          - update
+          - clear
+          - getFrameRate
         keywords: ["render","paint","display","show","frame"]
         return: "void"
         signatures:
@@ -61,6 +72,9 @@ categories:
         snippet: "void draw() {\n\t$0\n}"
 
       - name: cleanup
+        related:
+          - requestExitApp
+          - destroy
         keywords: ["exit","shutdown","destroy","dispose","teardown","quit"]
         return: "void"
         signatures:
@@ -75,6 +89,8 @@ categories:
       - name: runApp
         related:
           - WindowSettings
+          - runHeadlessApp
+          - events
         keywords: ["main","start","launch","run","boot","entry"]
         return: "int"
         signatures:
@@ -95,6 +111,11 @@ categories:
     name_ko: "이벤트"
     functions:
       - name: mousePressed
+        related:
+          - mouseReleased
+          - getMousePos
+          - getMouseButton
+          - isMousePressed
         keywords: ["click","press","mousedown","tap","touch","down"]
         examples:
           - mouseExample
@@ -109,6 +130,9 @@ categories:
         snippet: "void mousePressed(float x, float y, int button) {\n\t$0\n}"
 
       - name: mouseReleased
+        related:
+          - mousePressed
+          - getMouseButton
         keywords: ["release","mouseup","click","up","lift"]
         examples:
           - mouseExample
@@ -123,6 +147,9 @@ categories:
         snippet: "void mouseReleased(float x, float y, int button) {\n\t$0\n}"
 
       - name: mouseMoved
+        related:
+          - mouseDragged
+          - getMousePos
         keywords: ["move","hover","motion","pointer","cursor"]
         examples:
           - mouseExample
@@ -137,6 +164,9 @@ categories:
         snippet: "void mouseMoved(float x, float y) {\n\t$0\n}"
 
       - name: mouseDragged
+        related:
+          - mouseMoved
+          - isMousePressed
         keywords: ["drag","swipe","move","pan","pointer"]
         examples:
           - mouseExample
@@ -151,6 +181,10 @@ categories:
         snippet: "void mouseDragged(float x, float y, int button) {\n\t$0\n}"
 
       - name: keyPressed
+        related:
+          - keyReleased
+          - isKeyPressed
+          - isShiftPressed
         keywords: ["key","keydown","keyboard","type","input","press"]
         examples:
           - keyboardExample
@@ -165,6 +199,9 @@ categories:
         snippet: "void keyPressed(int key) {\n\t$0\n}"
 
       - name: keyReleased
+        related:
+          - keyPressed
+          - isKeyPressed
         keywords: ["key","keyup","keyboard","release","up"]
         examples:
           - keyboardExample
@@ -179,6 +216,9 @@ categories:
         snippet: "void keyReleased(int key) {\n\t$0\n}"
 
       - name: windowResized
+        related:
+          - getWindowSize
+          - setWindowSize
         keywords: ["resize","resized","size","reshape","window"]
         return: "void"
         signatures:
@@ -202,6 +242,8 @@ categories:
         related:
           - ChipSoundBundle
           - StrokeMesh
+          - setColor
+          - setBlendMode
         keywords: ["reset","empty","remove","delete"]
         return: "void"
         signatures:
@@ -226,6 +268,9 @@ categories:
           - setColorHSB
           - setColorOKLCH
           - setColorOKLab
+          - fill
+          - clear
+          - pushStyle
         keywords: ["color","tint","rgba","fill"]
         examples:
           - graphicsExample
@@ -247,6 +292,9 @@ categories:
         snippet: "setColor(${1:1.0}, ${2:1.0}, ${3:1.0})"
 
       - name: setColorHSB
+        related:
+          - ColorHSB
+          - colorFromHSB
         keywords: ["hsb", "hsv", "hue", "saturation", "brightness", "color"]
         return: "void"
         signatures:
@@ -259,6 +307,8 @@ categories:
         snippet: "setColorHSB(${1:0.0}, ${2:1.0}, ${3:1.0})"
 
       - name: setColorOKLCH
+        related:
+          - ColorOKLCH
         keywords: ["oklch","perceptual","lightness","chroma","hue"]
         return: "void"
         signatures:
@@ -271,6 +321,8 @@ categories:
         snippet: "setColorOKLCH(${1:0.7}, ${2:0.15}, ${3:0.0})"
 
       - name: setColorOKLab
+        related:
+          - ColorOKLab
         keywords: ["oklab","perceptual","lab","lightness"]
         return: "void"
         signatures:
@@ -286,6 +338,8 @@ categories:
   # Graphics - Shapes
   # ==========================================================================
       - name: srgbToLinear
+        related:
+          - setGammaCorrection
         keywords: ["gamma","linear","color space","convert"]
         return: "float"
         signatures:
@@ -297,6 +351,8 @@ categories:
         sketch: false
         snippet: "srgbToLinear(${1:x})"
       - name: linearToSrgb
+        related:
+          - setGammaCorrection
         keywords: ["gamma","linear","color space","convert"]
         return: "float"
         signatures:
@@ -313,6 +369,10 @@ categories:
     name_ko: "그래픽 - 도형"
     functions:
       - name: drawRect
+        related:
+          - drawRectRounded
+          - drawRectSquircle
+          - Rect
         keywords: ["rectangle","box","square","quad","ofrect"]
         examples:
           - graphicsExample
@@ -339,14 +399,13 @@ categories:
           現在の fill / noFill モードと描画色に従う。
           Vec3 で位置を渡すと 3D モードで z が使われる。
           角を丸くしたい場合は drawRectRounded, drawRectSquircle を参照。
-        related:
-          - drawRectRounded
-          - drawRectSquircle
         of_equivalent: "ofDrawRectangle"
         sketch: true
         snippet: "drawRect(${1:x}, ${2:y}, ${3:w}, ${4:h})"
 
       - name: drawRectRounded
+        related:
+          - drawRectSquircle
         keywords: ["rounded","corner","radius","pill","rounded box"]
         return: "void"
         signatures:
@@ -376,6 +435,9 @@ categories:
         snippet: "drawRectSquircle(${1:x}, ${2:y}, ${3:w}, ${4:h}, ${5:radius})"
 
       - name: drawCircle
+        related:
+          - drawEllipse
+          - drawArc
         examples:
           - graphicsExample
         keywords: ["circle", "round", "ellipse", "ball", "dot"]
@@ -393,6 +455,8 @@ categories:
         snippet: "drawCircle(${1:x}, ${2:y}, ${3:radius})"
 
       - name: drawArc
+        related:
+          - appendArc
         keywords: ["pie","wedge","sector","partial circle","segment"]
         return: "void"
         signatures:
@@ -407,6 +471,8 @@ categories:
         snippet: "drawArc(${1:x}, ${2:y}, ${3:radius}, ${4:0}, ${5:TAU})"
 
       - name: drawEllipse
+        related:
+          - drawCircle
         keywords: ["circle","oval","round","ball","ofellipse"]
         return: "void"
         signatures:
@@ -438,6 +504,10 @@ categories:
         snippet: "drawPoint(${1:x}, ${2:y})"
 
       - name: drawLine
+        related:
+          - drawStroke
+          - drawPolyline
+          - beginLines
         keywords: ["segment","edge","stroke","ofline"]
         examples:
           - graphicsExample
@@ -457,6 +527,11 @@ categories:
         snippet: "drawLine(${1:x1}, ${2:y1}, ${3:x2}, ${4:y2})"
 
       - name: drawBezier
+        related:
+          - drawCurve
+          - bezierTo
+          - setCurveResolution
+          - setCurveTolerance
         keywords: ["curve","spline","cubic","quadratic","path"]
         return: "void"
         signatures:
@@ -473,6 +548,10 @@ categories:
         snippet: "drawBezier(${1:p0}, ${2:p1}, ${3:p2}, ${4:p3})"
 
       - name: drawCurve
+        related:
+          - drawBezier
+          - appendCurve
+          - setCurveResolution
         keywords: ["catmull-rom","spline","smooth","interpolate","path"]
         return: "void"
         signatures:
@@ -504,6 +583,9 @@ categories:
         snippet: "drawTriangle(${1:x1}, ${2:y1}, ${3:x2}, ${4:y2}, ${5:x3}, ${6:y3})"
 
       - name: drawBox
+        related:
+          - createBox
+          - setMaterial
         keywords: ["cube", "box", "rectangle", "cuboid", "3d"]
         return: "void"
         signatures:
@@ -527,6 +609,9 @@ categories:
         snippet: "drawBox(${1:size})"
 
       - name: drawSphere
+        related:
+          - createSphere
+          - setMaterial
         keywords: ["ball","globe","orb","3d circle","ball"]
         return: "void"
         signatures:
@@ -544,6 +629,8 @@ categories:
         snippet: "drawSphere(${1:radius})"
 
       - name: drawCone
+        related:
+          - createCone
         keywords: ["cone","pyramid","funnel","3d"]
         return: "void"
         signatures:
@@ -563,6 +650,9 @@ categories:
       - name: beginShape
         related:
           - endShape
+          - beginStroke
+          - beginLines
+          - createPath
         keywords: ["polygon","path","custom shape","outline","ofbeginshape"]
         return: "void"
         signatures:
@@ -576,6 +666,9 @@ categories:
         snippet: "beginShape()"
 
       - name: vertex
+        related:
+          - appendArc
+          - appendCurve
         keywords: ["point","node","corner","addvertex"]
         return: "void"
         signatures:
@@ -597,6 +690,8 @@ categories:
       - name: endShape
         related:
           - beginShape
+          - fill
+          - noFill
         keywords: ["close","finish shape","polygon","ofendshape"]
         return: "void"
         signatures:
@@ -610,6 +705,8 @@ categories:
         snippet: "endShape()"
 
       - name: appendArc
+        related:
+          - drawArc
         keywords: ["arc","curve","shape","add arc"]
         return: "void"
         signatures:
@@ -624,6 +721,8 @@ categories:
         snippet: "appendArc(${1:cx}, ${2:cy}, ${3:radius}, ${4:0}, ${5:TAU})"
 
       - name: appendCurve
+        related:
+          - drawCurve
         keywords: ["catmull-rom","spline","shape","add curve"]
         return: "void"
         signatures:
@@ -640,6 +739,10 @@ categories:
       - name: beginStroke
         related:
           - endStroke
+          - beginShape
+          - setStrokeWeight
+          - setStrokeCap
+          - setStrokeJoin
         keywords: ["thick line","polyline","outline","path"]
         return: "void"
         signatures:
@@ -668,6 +771,8 @@ categories:
       - name: beginLines
         related:
           - endLines
+          - drawLine
+          - setColor
         keywords: ["batch","segments","line list","multiple lines"]
         return: "void"
         signatures:
@@ -694,6 +799,11 @@ categories:
         snippet: "endLines()"
 
       - name: drawStroke
+        related:
+          - setStrokeWeight
+          - setStrokeCap
+          - setStrokeJoin
+          - drawLine
         keywords: ["thick line","cap","join","polyline"]
         return: "void"
         signatures:
@@ -710,6 +820,8 @@ categories:
       - name: drawBitmapString
         related:
           - drawBitmapStringHighlight
+          - drawString
+          - setTextAlign
         keywords: ["text","string","label","print","ofdrawbitmapstring"]
         examples:
           - fontExample
@@ -751,6 +863,9 @@ categories:
         snippet: "getBitmapStringBounds(${1:\"text\"}, ${2:w}, ${3:h})"
 
       - name: setTextAlign
+        related:
+          - drawBitmapString
+          - getBitmapStringBounds
         keywords: ["alignment","justify","center","anchor"]
         return: "void"
         signatures:
@@ -960,6 +1075,9 @@ categories:
     name_ko: "그래픽 - 스타일"
     functions:
       - name: fill
+        related:
+          - setColor
+          - endShape
         keywords: ["solid","filled","ofFill"]
         return: "void"
         signatures:
@@ -973,6 +1091,8 @@ categories:
         snippet: "fill()"
 
       - name: noFill
+        related:
+          - setStrokeWeight
         keywords: ["outline","stroke only","hollow","wireframe","ofnofill"]
         examples:
           - graphicsExample
@@ -990,6 +1110,8 @@ categories:
       - name: setStrokeWeight
         related:
           - getStrokeWeight
+          - fill
+          - drawLine
         keywords: ["line width","thickness","weight","ofsetlinewidth"]
         return: "void"
         signatures:
@@ -1020,6 +1142,8 @@ categories:
         related:
           - StrokeCap
           - getStrokeCap
+          - beginStroke
+          - drawStroke
         keywords: ["line cap","end cap","butt","round","square"]
         return: "void"
         signatures:
@@ -1050,6 +1174,9 @@ categories:
         related:
           - StrokeJoin
           - getStrokeJoin
+          - beginStroke
+          - drawStroke
+          - setMiterLimit
         keywords: ["line join","corner","miter","bevel","round"]
         return: "void"
         signatures:
@@ -1103,6 +1230,9 @@ categories:
       - name: setCurveTolerance
         related:
           - getCurveTolerance
+          - setCurveResolution
+          - drawBezier
+          - drawCurve
         keywords: ["smoothness","tessellation","resolution","quality"]
         return: "void"
         signatures:
@@ -1131,6 +1261,7 @@ categories:
       - name: setCurveResolution
         related:
           - getCurveResolution
+          - setCurveTolerance
         keywords: ["segments","subdivisions","smoothness","detail"]
         return: "void"
         signatures:
@@ -1159,6 +1290,7 @@ categories:
       - name: pushStyle
         related:
           - popStyle
+          - pushMatrix
         keywords: ["save","state","stack","ofpushstyle"]
         return: "void"
         signatures:
@@ -1174,6 +1306,7 @@ categories:
       - name: popStyle
         related:
           - pushStyle
+          - popMatrix
         keywords: ["restore","state","stack","ofpopstyle"]
         return: "void"
         signatures:
@@ -1201,6 +1334,7 @@ categories:
       - name: getColor
         related:
           - setColor
+          - Color
         keywords: ["pixel","read","sample","rgba","at"]
         return: "Color"
         signatures:
@@ -1215,6 +1349,9 @@ categories:
       # --- Scissor ---
 
       - name: setScissor
+        related:
+          - setClipping
+          - pushScissor
         keywords: ["clip","clipping","mask","crop","region"]
         return: "void"
         signatures:
@@ -1272,6 +1409,7 @@ categories:
         related:
           - BlendMode
           - getBlendMode
+          - clear
         keywords: ["blend","additive","multiply","transparency","compositing","ofenableblendmode"]
         return: "void"
         signatures:
@@ -1371,6 +1509,10 @@ categories:
     name_ko: "변환"
     functions:
       - name: translate
+        related:
+          - rotate
+          - scale
+          - pushMatrix
         keywords: ["move","offset","position","shift","oftranslate"]
         examples:
           - easyCamExample
@@ -1514,6 +1656,9 @@ categories:
         snippet: "rotateZDeg(${1:degrees})"
 
       - name: scale
+        related:
+          - translate
+          - rotate
         keywords: ["zoom","resize","grow","shrink","ofscale"]
         return: "void"
         signatures:
@@ -1531,6 +1676,8 @@ categories:
       - name: pushMatrix
         related:
           - popMatrix
+          - pushStyle
+          - translate
         keywords: ["save","transform","stack","ofpushmatrix"]
         examples:
           - easyCamExample
@@ -1550,6 +1697,7 @@ categories:
       - name: popMatrix
         related:
           - pushMatrix
+          - popStyle
         keywords: ["restore","transform","stack","ofpopmatrix"]
         examples:
           - easyCamExample
@@ -1569,6 +1717,7 @@ categories:
       - name: getCurrentMatrix
         related:
           - Mat4
+          - worldToScreen
         keywords: ["transform","matrix","modelview","current"]
         return: "Mat4"
         signatures:
@@ -1581,6 +1730,8 @@ categories:
         snippet: "getCurrentMatrix()"
 
       - name: resetMatrix
+        related:
+          - setMatrix
         keywords: ["identity","reset","clear transform"]
         return: "void"
         signatures:
@@ -1595,6 +1746,7 @@ categories:
       - name: setMatrix
         related:
           - Mat4
+          - resetMatrix
         keywords: ["transform","matrix","modelview","load"]
         return: "void"
         signatures:
@@ -1615,6 +1767,9 @@ categories:
     name_ko: "윈도우 & 입력"
     functions:
       - name: getWindowWidth
+        related:
+          - getFramebufferWidth
+          - getAspectRatio
         keywords: ["width","canvas","size","screen","viewport"]
         return: "int"
         signatures:
@@ -1628,6 +1783,9 @@ categories:
         snippet: "getWindowWidth()"
 
       - name: getWindowHeight
+        related:
+          - getFramebufferHeight
+          - getAspectRatio
         keywords: ["height","canvas","size","screen","viewport"]
         return: "int"
         signatures:
@@ -1643,6 +1801,8 @@ categories:
       - name: getWindowSize
         related:
           - setWindowSize
+          - getFramebufferWidth
+          - getAspectRatio
         keywords: ["size","dimensions","canvas","screen","resolution"]
         return: "Vec2"
         signatures:
@@ -1656,6 +1816,9 @@ categories:
         snippet: "getWindowSize()"
 
       - name: requestExitApp
+        related:
+          - exitApp
+          - events
         keywords: ["quit","close","exit","terminate","shutdown","cancelable"]
         return: "void"
         signatures:
@@ -1668,6 +1831,8 @@ categories:
         sketch: false
 
       - name: exitApp
+        related:
+          - requestExitApp
         keywords: ["quit","close","exit","terminate","shutdown","kill"]
         return: "void"
         signatures:
@@ -1682,6 +1847,8 @@ categories:
         related:
           - FileDialogResult
           - loadDialogAsync
+          - saveDialog
+          - loadTextFile
         keywords: ["open","file","picker","browse","dialog","chooser"]
         platforms: [macos, windows, linux]
         platformNote: "Sync file/folder open. iOS no-ops (use loadDialogAsync); Android returns empty result (no JNI Intent yet); Web/WASM logs a warning and returns empty."
@@ -1700,6 +1867,8 @@ categories:
         related:
           - FileDialogResult
           - saveDialogAsync
+          - loadDialog
+          - saveTextFile
         keywords: ["save","file","picker","browse","dialog","export"]
         platforms: [macos, windows, linux]
         platformNote: "Sync file save. iOS no-ops (use saveDialogAsync); Android returns empty result (no JNI Intent yet); Web/WASM logs a warning and returns empty."
@@ -1717,6 +1886,7 @@ categories:
       - name: alertDialog
         related:
           - alertDialogAsync
+          - confirmDialog
         keywords: ["alert","message","popup","warning","modal","notify"]
         platforms: [macos, windows, linux, wasm]
         platformNote: "Sync alert. iOS logs an error and no-ops (use alertDialogAsync); Android only prints to logcat, no UI dialog."
@@ -1734,6 +1904,7 @@ categories:
       - name: confirmDialog
         related:
           - confirmDialogAsync
+          - alertDialog
         keywords: ["confirm","yesno","prompt","ask","dialog","modal"]
         platforms: [macos, windows, linux, wasm]
         platformNote: "Sync confirm. iOS logs an error and returns false (use confirmDialogAsync); Android logs to logcat and always returns false."
@@ -1750,6 +1921,8 @@ categories:
       - name: loadDialogAsync
         related:
           - FileDialogResult
+          - saveDialogAsync
+          - loadDialog
         keywords: ["open","file","picker","async","callback","dialog"]
         platforms: [macos, windows, linux, ios]
         platformNote: "Async file/folder open. Real on iOS via UIDocumentPickerViewController. Android calls back with empty result (no JNI Intent); Web/WASM calls back with empty (warning logged)."
@@ -1766,6 +1939,8 @@ categories:
       - name: saveDialogAsync
         related:
           - FileDialogResult
+          - loadDialogAsync
+          - saveDialog
         keywords: ["save","file","picker","async","callback","dialog"]
         platforms: [macos, windows, linux, ios]
         platformNote: "Async file save. Real on iOS via UIDocumentPickerViewController export. Android calls back with empty result (no JNI Intent); Web/WASM calls back with empty (warning logged)."
@@ -1780,6 +1955,9 @@ categories:
         sketch: false
 
       - name: alertDialogAsync
+        related:
+          - confirmDialogAsync
+          - alertDialog
         keywords: ["alert","message","popup","async","callback","notify"]
         platforms: [macos, windows, linux, ios, wasm]
         platformNote: "Async alert. Real on iOS via UIAlertController. Android only prints to logcat then fires the callback (no UI dialog)."
@@ -1794,6 +1972,9 @@ categories:
         sketch: false
 
       - name: confirmDialogAsync
+        related:
+          - alertDialogAsync
+          - confirmDialog
         keywords: ["confirm","yesno","prompt","async","callback","ask"]
         platforms: [macos, windows, linux, ios, wasm]
         platformNote: "Async confirm. Real on iOS via UIAlertController Yes/No. Android immediately calls back with false (no dialog)."
@@ -1808,6 +1989,9 @@ categories:
         sketch: false
 
       - name: getMouseX
+        related:
+          - getMouseY
+          - getMousePos
         keywords: ["mouse","cursor","pointer","position","horizontal"]
         return: "float"
         signatures:
@@ -1821,6 +2005,9 @@ categories:
         snippet: "getMouseX()"
 
       - name: getMouseY
+        related:
+          - getMouseX
+          - getMousePos
         keywords: ["mouse","cursor","pointer","position","vertical"]
         return: "float"
         signatures:
@@ -1834,6 +2021,10 @@ categories:
         snippet: "getMouseY()"
 
       - name: getMousePos
+        related:
+          - getGlobalMousePos
+          - getMouseButton
+          - isMousePressed
         keywords: ["mouse","cursor","pointer","position","coordinates"]
         return: "Vec2"
         signatures:
@@ -1846,6 +2037,10 @@ categories:
         snippet: "getMousePos()"
 
       - name: getGlobalMousePos
+        related:
+          - getMousePos
+          - getGlobalMouseX
+          - getGlobalMouseY
         keywords: ["mouse","screen","global","pointer","position","absolute"]
         return: "Vec2"
         signatures:
@@ -1858,6 +2053,10 @@ categories:
         snippet: "getGlobalMousePos()"
 
       - name: getGlobalMouseX
+        related:
+          - getGlobalMouseY
+          - getGlobalPMouseX
+          - getMouseX
         keywords: ["mouse","screen","global","absolute","horizontal"]
         return: "float"
         signatures:
@@ -1870,6 +2069,10 @@ categories:
         snippet: "getGlobalMouseX()"
 
       - name: getGlobalMouseY
+        related:
+          - getGlobalMouseX
+          - getGlobalPMouseY
+          - getMouseY
         keywords: ["mouse","screen","global","absolute","vertical"]
         return: "float"
         signatures:
@@ -1882,6 +2085,9 @@ categories:
         snippet: "getGlobalMouseY()"
 
       - name: getGlobalPMouseX
+        related:
+          - getGlobalPMouseY
+          - getGlobalMouseX
         keywords: ["mouse","previous","last","global","horizontal"]
         return: "float"
         signatures:
@@ -1894,6 +2100,9 @@ categories:
         snippet: "getGlobalPMouseX()"
 
       - name: getGlobalPMouseY
+        related:
+          - getGlobalPMouseX
+          - getGlobalMouseY
         keywords: ["mouse","previous","last","global","vertical"]
         return: "float"
         signatures:
@@ -1906,6 +2115,9 @@ categories:
         snippet: "getGlobalPMouseY()"
 
       - name: getMouseButton
+        related:
+          - isMousePressed
+          - getMousePos
         keywords: ["mouse","button","click","pressed","left","right"]
         return: "int"
         signatures:
@@ -1946,6 +2158,9 @@ categories:
         snippet: "getTouchAsMouse()"
 
       - name: isMousePressed
+        related:
+          - getMouseButton
+          - isKeyPressed
         keywords: ["mouse","click","pressed","down","held","button"]
         return: "bool"
         signatures:
@@ -1959,6 +2174,10 @@ categories:
         snippet: "isMousePressed()"
 
       - name: isKeyPressed
+        related:
+          - isMousePressed
+          - isShiftPressed
+          - isControlPressed
         keywords: ["key","keyboard","pressed","held","down","input"]
         return: "bool"
         signatures:
@@ -1972,6 +2191,10 @@ categories:
         snippet: "isKeyPressed(${1:key})"
 
       - name: isShiftPressed
+        related:
+          - isControlPressed
+          - isAltPressed
+          - isSuperPressed
         keywords: ["shift","modifier","key","held","keyboard"]
         return: "bool"
         signatures:
@@ -1984,6 +2207,10 @@ categories:
         snippet: "isShiftPressed()"
 
       - name: isControlPressed
+        related:
+          - isShiftPressed
+          - isAltPressed
+          - isSuperPressed
         keywords: ["control","ctrl","modifier","key","held","keyboard"]
         return: "bool"
         signatures:
@@ -1996,6 +2223,10 @@ categories:
         snippet: "isControlPressed()"
 
       - name: isAltPressed
+        related:
+          - isShiftPressed
+          - isControlPressed
+          - isSuperPressed
         keywords: ["alt","option","modifier","key","held","keyboard"]
         return: "bool"
         signatures:
@@ -2008,6 +2239,10 @@ categories:
         snippet: "isAltPressed()"
 
       - name: isSuperPressed
+        related:
+          - isShiftPressed
+          - isControlPressed
+          - isAltPressed
         keywords: ["super","cmd","command","win","meta","modifier"]
         return: "bool"
         signatures:
@@ -2024,6 +2259,7 @@ categories:
       - name: showCursor
         related:
           - hideCursor
+          - setCursor
         keywords: ["cursor","mouse","pointer","show","visible","unhide"]
         return: "void"
         signatures:
@@ -2039,6 +2275,7 @@ categories:
       - name: hideCursor
         related:
           - showCursor
+          - setCursor
         keywords: ["cursor","mouse","pointer","hide","invisible","conceal"]
         return: "void"
         signatures:
@@ -2055,6 +2292,8 @@ categories:
         related:
           - Cursor
           - getCursor
+          - bindCursorImage
+          - showCursor
         keywords: ["cursor","mouse","pointer","shape","icon","arrow"]
         return: "void"
         signatures:
@@ -2085,6 +2324,8 @@ categories:
         related:
           - Cursor
           - Image
+          - unbindCursorImage
+          - setCursor
         keywords: ["cursor","custom","image","icon","pointer","bitmap"]
         return: "void"
         signatures:
@@ -2101,6 +2342,8 @@ categories:
       - name: unbindCursorImage
         related:
           - Cursor
+          - bindCursorImage
+          - setCursor
         keywords: ["cursor","custom","image","reset","default","restore"]
         return: "void"
         signatures:
@@ -2118,6 +2361,9 @@ categories:
       - name: events
         related:
           - CoreEvents
+          - setup
+          - audioOut
+          - audioIn
         keywords: ["event","callback","listener","hub","subscribe","hook"]
         return: "CoreEvents&"
         signatures:
@@ -2130,6 +2376,9 @@ categories:
         snippet: "events()"
 
       - name: isOverlayHovered
+        related:
+          - isOverlayFocused
+          - isMousePressed
         keywords: ["overlay","ui","imgui","hover","panel","gui"]
         return: "bool"
         signatures:
@@ -2142,6 +2391,9 @@ categories:
         snippet: "isOverlayHovered()"
 
       - name: isOverlayFocused
+        related:
+          - isOverlayHovered
+          - isKeyPressed
         keywords: ["overlay","ui","imgui","focus","input","gui"]
         return: "bool"
         signatures:
@@ -2277,6 +2529,9 @@ categories:
     name_ko: "메모리"
     functions:
       - name: getSokolMemoryBytes
+        related:
+          - getSokolMemoryAllocs
+          - getMemoryUsage
         keywords: ["ram","allocation","heap","usage","footprint"]
         return: "int"
         signatures:
@@ -2288,6 +2543,9 @@ categories:
         snippet: "getSokolMemoryBytes()"
 
       - name: getSokolMemoryAllocs
+        related:
+          - getSokolMemoryBytes
+          - getMemoryUsage
         keywords: ["allocation","count","ram","heap","objects"]
         return: "int"
         signatures:
@@ -2299,6 +2557,8 @@ categories:
         snippet: "getSokolMemoryAllocs()"
 
       - name: releaseSglBuffers
+        related:
+          - getSokolMemoryBytes
         keywords: ["free","vertex buffer","gpu","cleanup","reclaim"]
         return: "void"
         signatures:
@@ -2310,6 +2570,9 @@ categories:
         snippet: "releaseSglBuffers()"
 
       - name: getMemoryUsage
+        related:
+          - getSokolMemoryBytes
+          - getThermalState
         keywords: ["ram","rss","footprint","heap","process"]
         return: "size_t"
         signatures:
@@ -2322,6 +2585,9 @@ categories:
         snippet: "getMemoryUsage()"
 
       - name: getFboCount
+        related:
+          - getTextureCount
+          - getNodeCount
         keywords: ["framebuffer","render target","count","leak","resources"]
         return: "size_t"
         signatures:
@@ -2334,6 +2600,9 @@ categories:
         snippet: "getFboCount()"
 
       - name: getTextureCount
+        related:
+          - getFboCount
+          - getNodeCount
         keywords: ["texture","image","count","leak","gpu"]
         return: "size_t"
         signatures:
@@ -2346,6 +2615,9 @@ categories:
         snippet: "getTextureCount()"
 
       - name: getNodeCount
+        related:
+          - getFboCount
+          - getTextureCount
         keywords: ["scene graph","objects","count","tree","entities"]
         return: "size_t"
         signatures:
@@ -2366,6 +2638,9 @@ categories:
     name_ko: "플랫폼"
     functions:
       - name: "Platform::isWeb"
+        related:
+          - Platform::name
+          - GraphicsBackend::isWebGPU
         keywords: ["browser","wasm","emscripten","html5","webgl"]
         return: bool
         signatures:
@@ -2376,6 +2651,9 @@ categories:
         sketch: true
         snippet: "Platform::isWeb()"
       - name: "Platform::isMacOS"
+        related:
+          - Platform::isApple
+          - Platform::isDesktop
         keywords: ["mac","osx","apple","darwin","desktop"]
         return: bool
         signatures:
@@ -2386,6 +2664,9 @@ categories:
         sketch: true
         snippet: "Platform::isMacOS()"
       - name: "Platform::isIOS"
+        related:
+          - Platform::isApple
+          - Platform::isMobile
         keywords: ["iphone","ipad","apple","mobile","tablet"]
         return: bool
         signatures:
@@ -2396,6 +2677,9 @@ categories:
         sketch: true
         snippet: "Platform::isIOS()"
       - name: "Platform::isWindows"
+        related:
+          - Platform::isDesktop
+          - Platform::name
         keywords: ["pc","win32","microsoft","desktop"]
         return: bool
         signatures:
@@ -2406,6 +2690,9 @@ categories:
         sketch: true
         snippet: "Platform::isWindows()"
       - name: "Platform::isAndroid"
+        related:
+          - Platform::isMobile
+          - Platform::name
         keywords: ["mobile","phone","google","tablet","apk"]
         return: bool
         signatures:
@@ -2416,6 +2703,9 @@ categories:
         sketch: true
         snippet: "Platform::isAndroid()"
       - name: "Platform::isLinux"
+        related:
+          - Platform::isDesktop
+          - Platform::name
         keywords: ["desktop","unix","gnu","ubuntu"]
         return: bool
         signatures:
@@ -2426,6 +2716,9 @@ categories:
         sketch: true
         snippet: "Platform::isLinux()"
       - name: "Platform::isApple"
+        related:
+          - Platform::isMacOS
+          - Platform::isIOS
         keywords: ["mac","ios","macos","iphone","darwin"]
         return: bool
         signatures:
@@ -2436,6 +2729,9 @@ categories:
         sketch: true
         snippet: "Platform::isApple()"
       - name: "Platform::isMobile"
+        related:
+          - Platform::isDesktop
+          - setImmersiveMode
         keywords: ["phone","ios","android","tablet","handheld"]
         return: bool
         signatures:
@@ -2446,6 +2742,9 @@ categories:
         sketch: true
         snippet: "Platform::isMobile()"
       - name: "Platform::isDesktop"
+        related:
+          - Platform::isMobile
+          - Platform::name
         keywords: ["pc","mac","windows","linux","computer"]
         return: bool
         signatures:
@@ -2456,6 +2755,9 @@ categories:
         sketch: true
         snippet: "Platform::isDesktop()"
       - name: "Platform::name"
+        related:
+          - GraphicsBackend::name
+          - getBackendName
         keywords: ["os","system","device","target","operating system"]
         return: "const char*"
         signatures:
@@ -2472,6 +2774,8 @@ categories:
       - name: setImmersiveMode
         related:
           - getImmersiveMode
+          - setKeepScreenOn
+          - toggleFullscreen
         keywords: ["fullscreen","hide ui","status bar","kiosk","edge to edge"]
         platforms: [ios, android]
         platformNote: "Mobile-only. No-op on macOS, Windows, Linux and Web."
@@ -2504,6 +2808,8 @@ categories:
       - name: captureWindow
         related:
           - Pixels
+          - grabScreen
+          - saveScreenshot
         keywords: ["screenshot","grab","snapshot","pixels","framebuffer"]
         platforms: [macos, windows, linux, ios, android]
         platformNote: "Web is unimplemented (logs warning, returns false). All native backends read back the framebuffer."
@@ -2520,6 +2826,7 @@ categories:
       - name: getSystemVolume
         related:
           - setSystemVolume
+          - setBeepVolume
         keywords: ["sound","audio","loudness","speaker"]
         platforms: [macos, ios, android]
         platformNote: "Returns -1 on Windows, Linux and Web (no implementation)."
@@ -2552,6 +2859,7 @@ categories:
       - name: getSystemBrightness
         related:
           - setSystemBrightness
+          - setKeepScreenOn
         keywords: ["screen","display","backlight","luminance"]
         platforms: [macos, ios, android]
         platformNote: "Returns -1 on Windows, Linux and Web. macOS uses a private CoreDisplay API."
@@ -2584,6 +2892,8 @@ categories:
       - name: getThermalState
         related:
           - ThermalState
+          - getThermalTemperature
+          - getBatteryLevel
         keywords: ["heat","temperature","overheat","throttle"]
         platforms: [macos, ios, android]
         platformNote: "Returns ThermalState::Nominal stub on Windows, Linux and Web; Android needs NDK API 30+."
@@ -2598,6 +2908,8 @@ categories:
         sketch: false
         snippet: "getThermalState()"
       - name: getThermalTemperature
+        related:
+          - getThermalState
         keywords: ["heat","celsius","degrees","overheat","sensor"]
         platforms: []
         platformNote: "Stub on ALL platforms — always returns -1 (no OS exposes a raw temperature value)."
@@ -2612,6 +2924,9 @@ categories:
         sketch: false
         snippet: "getThermalTemperature()"
       - name: getBatteryLevel
+        related:
+          - isBatteryCharging
+          - getThermalState
         keywords: ["battery","power","charge","energy","percent"]
         platforms: [macos, ios, android]
         platformNote: "Returns -1 on Windows, Linux and Web (no implementation)."
@@ -2626,6 +2941,8 @@ categories:
         sketch: false
         snippet: "getBatteryLevel()"
       - name: isBatteryCharging
+        related:
+          - getBatteryLevel
         keywords: ["battery","power","charging","plugged","ac"]
         platforms: [macos, ios, android]
         platformNote: "Returns false on Windows, Linux and Web (no implementation)."
@@ -2640,6 +2957,9 @@ categories:
         sketch: false
         snippet: "isBatteryCharging()"
       - name: getAccelerometer
+        related:
+          - getGyroscope
+          - getDeviceOrientation
         keywords: ["motion","gravity","tilt","imu","gforce"]
         platforms: [ios, android]
         platformNote: "Mobile-only. Returns Vec3(0,0,0) on macOS, Windows, Linux and Web."
@@ -2654,6 +2974,9 @@ categories:
         sketch: false
         snippet: "getAccelerometer()"
       - name: getGyroscope
+        related:
+          - getAccelerometer
+          - getDeviceOrientation
         keywords: ["rotation","angular","spin","imu","motion"]
         platforms: [ios, android]
         platformNote: "Mobile-only. Returns Vec3(0,0,0) on macOS, Windows, Linux and Web."
@@ -2670,6 +2993,9 @@ categories:
       - name: getDeviceOrientation
         related:
           - Quaternion
+          - getAccelerometer
+          - getGyroscope
+          - getCompassHeading
         keywords: ["attitude","tilt","imu","quaternion","pose"]
         platforms: [ios, android]
         platformNote: "Mobile-only. Returns identity Quaternion(1,0,0,0) on macOS, Windows, Linux and Web."
@@ -2684,6 +3010,9 @@ categories:
         sketch: false
         snippet: "getDeviceOrientation()"
       - name: getCompassHeading
+        related:
+          - getDeviceOrientation
+          - getLocation
         keywords: ["magnetometer","north","bearing","direction","azimuth"]
         platforms: [ios, android]
         platformNote: "Mobile-only. Returns 0 on macOS, Windows, Linux and Web."
@@ -2698,6 +3027,8 @@ categories:
         sketch: false
         snippet: "getCompassHeading()"
       - name: isProximityClose
+        related:
+          - getAccelerometer
         keywords: ["proximity","near","sensor","ear","distance"]
         platforms: [ios, android]
         platformNote: "Mobile-only. Returns false on macOS, Windows, Linux and Web."
@@ -2714,6 +3045,7 @@ categories:
       - name: getLocation
         related:
           - Location
+          - getCompassHeading
         keywords: ["gps","geolocation","coordinates","position","latitude"]
         platforms: [macos, ios]
         platformNote: "CoreLocation only. Android is a stub (returns empty Location, needs runtime permission); Windows, Linux and Web return empty."
@@ -2733,6 +3065,9 @@ categories:
     name_ko: "그래픽스 백엔드"
     functions:
       - name: "GraphicsBackend::isOpenGL"
+        related:
+          - GraphicsBackend::name
+          - GraphicsBackend::isWebGL2
         keywords: ["gl","gles","renderer","driver"]
         return: bool
         signatures:
@@ -2743,6 +3078,9 @@ categories:
         sketch: true
         snippet: "GraphicsBackend::isOpenGL()"
       - name: "GraphicsBackend::isMetal"
+        related:
+          - GraphicsBackend::name
+          - Platform::isApple
         keywords: ["apple","mtl","renderer","mac","driver"]
         return: bool
         signatures:
@@ -2753,6 +3091,9 @@ categories:
         sketch: true
         snippet: "GraphicsBackend::isMetal()"
       - name: "GraphicsBackend::isD3D11"
+        related:
+          - GraphicsBackend::name
+          - Platform::isWindows
         keywords: ["directx","direct3d","windows","renderer","driver"]
         return: bool
         signatures:
@@ -2763,6 +3104,9 @@ categories:
         sketch: true
         snippet: "GraphicsBackend::isD3D11()"
       - name: "GraphicsBackend::isWebGPU"
+        related:
+          - GraphicsBackend::name
+          - Platform::isWeb
         keywords: ["wgpu","browser","web","renderer","driver"]
         return: bool
         signatures:
@@ -2773,6 +3117,9 @@ categories:
         sketch: true
         snippet: "GraphicsBackend::isWebGPU()"
       - name: "GraphicsBackend::isWebGL2"
+        related:
+          - GraphicsBackend::isOpenGL
+          - Platform::isWeb
         keywords: ["gles3","browser","web","renderer","driver"]
         return: bool
         signatures:
@@ -2783,6 +3130,8 @@ categories:
         sketch: true
         snippet: "GraphicsBackend::isWebGL2()"
       - name: "GraphicsBackend::isVulkan"
+        related:
+          - GraphicsBackend::name
         keywords: ["vk","renderer","driver","low level"]
         return: bool
         signatures:
@@ -2793,6 +3142,9 @@ categories:
         sketch: true
         snippet: "GraphicsBackend::isVulkan()"
       - name: "GraphicsBackend::name"
+        related:
+          - getBackendName
+          - Platform::name
         keywords: ["renderer","driver","api","gpu","graphics"]
         return: "const char*"
         signatures:
@@ -2814,6 +3166,7 @@ categories:
       - name: "BuildInfo::date"
         related:
           - BuildInfo::dateTime
+          - BuildInfo::timestamp
         keywords: ["compile","build","version","timestamp","when built"]
         return: "const char*"
         signatures:
@@ -2824,6 +3177,9 @@ categories:
         sketch: true
         snippet: "BuildInfo::date()"
       - name: "BuildInfo::time"
+        related:
+          - BuildInfo::dateTime
+          - BuildInfo::date
         keywords: ["compile","build","clock","timestamp","when built"]
         return: "const char*"
         signatures:
@@ -2834,6 +3190,10 @@ categories:
         sketch: true
         snippet: "BuildInfo::time()"
       - name: "BuildInfo::dateTime"
+        related:
+          - BuildInfo::date
+          - BuildInfo::time
+          - BuildInfo::timestamp
         keywords: ["compile","build","timestamp","version","datetime"]
         return: "const char*"
         signatures:
@@ -2844,6 +3204,9 @@ categories:
         sketch: true
         snippet: "BuildInfo::dateTime()"
       - name: "BuildInfo::timestamp"
+        related:
+          - BuildInfo::dateTime
+          - getUnixTime
         keywords: ["compile","build","unix","epoch","seconds"]
         return: int64_t
         signatures:
@@ -2854,6 +3217,10 @@ categories:
         sketch: true
         snippet: "BuildInfo::timestamp()"
       - name: "BuildInfo::year"
+        related:
+          - BuildInfo::month
+          - BuildInfo::day
+          - getYear
         keywords: ["compile","build","version","date"]
         return: int
         signatures:
@@ -2864,6 +3231,9 @@ categories:
         sketch: true
         snippet: "BuildInfo::year()"
       - name: "BuildInfo::month"
+        related:
+          - BuildInfo::year
+          - BuildInfo::day
         keywords: ["compile","build","date"]
         return: int
         signatures:
@@ -2874,6 +3244,9 @@ categories:
         sketch: true
         snippet: "BuildInfo::month()"
       - name: "BuildInfo::day"
+        related:
+          - BuildInfo::month
+          - BuildInfo::year
         keywords: ["compile","build","date","day of month"]
         return: int
         signatures:
@@ -2884,6 +3257,9 @@ categories:
         sketch: true
         snippet: "BuildInfo::day()"
       - name: "BuildInfo::hour"
+        related:
+          - BuildInfo::minute
+          - BuildInfo::second
         keywords: ["compile","build","time","clock"]
         return: int
         signatures:
@@ -2894,6 +3270,9 @@ categories:
         sketch: true
         snippet: "BuildInfo::hour()"
       - name: "BuildInfo::minute"
+        related:
+          - BuildInfo::hour
+          - BuildInfo::second
         keywords: ["compile","build","time","clock"]
         return: int
         signatures:
@@ -2904,6 +3283,9 @@ categories:
         sketch: true
         snippet: "BuildInfo::minute()"
       - name: "BuildInfo::second"
+        related:
+          - BuildInfo::minute
+          - BuildInfo::hour
         keywords: ["compile","build","time","clock"]
         return: int
         signatures:
@@ -3160,6 +3542,7 @@ categories:
         related:
           - randomInt
           - randomSeed
+          - noise
         keywords: ["rand","rng","noise","chance","dice"]
         return: "float"
         signatures:
@@ -3177,6 +3560,9 @@ categories:
         snippet: "random()"
 
       - name: randomInt
+        related:
+          - random
+          - randomSeed
         keywords: ["rand","rng","integer","whole","dice"]
         return: "int"
         signatures:
@@ -3191,6 +3577,9 @@ categories:
         snippet: "randomInt(${1:max})"
 
       - name: randomSeed
+        related:
+          - random
+          - noise
         keywords: ["seed","rng","deterministic","reproducible"]
         return: "void"
         signatures:
@@ -3204,6 +3593,10 @@ categories:
         snippet: "randomSeed(${1:seed})"
 
       - name: noise
+        related:
+          - signedNoise
+          - fbm
+          - random
         keywords: ["perlin", "simplex", "random", "noise", "procedural"]
         return: "float"
         signatures:
@@ -3221,6 +3614,9 @@ categories:
         snippet: "noise(${1:x})"
 
       - name: signedNoise
+        related:
+          - noise
+          - fbm
         keywords: ["perlin","simplex","smooth","procedural","gradient"]
         return: "float"
         signatures:
@@ -3240,6 +3636,9 @@ categories:
         snippet: "signedNoise(${1:x})"
 
       - name: fbm
+        related:
+          - noise
+          - signedNoise
         keywords: ["fractal","perlin","brownian","octaves","turbulence","terrain"]
         return: "float"
         signatures:
@@ -3265,6 +3664,10 @@ categories:
         related:
           - ColorHSB
           - ColorOKLCH
+          - remap
+          - clamp
+          - ease
+          - Quaternion_slerp
         keywords: ["interpolate","mix","blend","tween","linear","between"]
         return: "float"
         signatures:
@@ -3280,6 +3683,10 @@ categories:
         snippet: "lerp(${1:a}, ${2:b}, ${3:t})"
 
       - name: clamp
+        related:
+          - lerp
+          - remap
+          - wrap
         keywords: ["limit","constrain","bound","saturate","min max"]
         return: "float"
         signatures:
@@ -3293,6 +3700,10 @@ categories:
         snippet: "clamp(${1:v}, ${2:min}, ${3:max})"
 
       - name: remap
+        related:
+          - lerp
+          - clamp
+          - wrap
         keywords: ["map","rescale","normalize","range","scale","convert"]
         return: "float"
         signatures:
@@ -3314,6 +3725,11 @@ categories:
     name_ko: "수학 - 삼각함수"
     functions:
       - name: sin
+        related:
+          - cos
+          - tan
+          - atan2
+          - fbm
         keywords: ["sine","wave","oscillate","trig","circular"]
         examples:
           - vectorMathExample
@@ -3328,6 +3744,10 @@ categories:
         snippet: "sin(${1:x})"
 
       - name: cos
+        related:
+          - sin
+          - tan
+          - atan2
         keywords: ["cosine","wave","oscillate","trig","circular"]
         return: "float"
         signatures:
@@ -3340,6 +3760,10 @@ categories:
         snippet: "cos(${1:x})"
 
       - name: tan
+        related:
+          - sin
+          - cos
+          - atan2
         keywords: ["tangent","slope","trig"]
         return: "float"
         signatures:
@@ -3352,6 +3776,9 @@ categories:
         snippet: "tan(${1:x})"
 
       - name: asin
+        related:
+          - acos
+          - atan2
         keywords: ["arcsine","inverse sine","trig"]
         return: "float"
         signatures:
@@ -3364,6 +3791,9 @@ categories:
         snippet: "asin(${1:x})"
 
       - name: acos
+        related:
+          - asin
+          - atan2
         keywords: ["arccosine","inverse cosine","trig"]
         return: "float"
         signatures:
@@ -3376,6 +3806,9 @@ categories:
         snippet: "acos(${1:x})"
 
       - name: atan
+        related:
+          - atan2
+          - tan
         keywords: ["arctangent","inverse tangent","trig"]
         return: "float"
         signatures:
@@ -3388,6 +3821,10 @@ categories:
         snippet: "atan(${1:x})"
 
       - name: atan2
+        related:
+          - atan
+          - Vec2_fromAngle
+          - angleDifference
         keywords: ["arctangent","angle","heading","direction","trig"]
         return: "float"
         signatures:
@@ -3400,6 +3837,9 @@ categories:
         snippet: "atan2(${1:y}, ${2:x})"
 
       - name: deg2rad
+        related:
+          - rad2deg
+          - rotateDeg
         keywords: ["degrees","radians","convert","angle"]
         return: "float"
         signatures:
@@ -3413,6 +3853,9 @@ categories:
         snippet: "deg2rad(${1:degrees})"
 
       - name: rad2deg
+        related:
+          - deg2rad
+          - rotate
         keywords: ["radians","degrees","convert","angle"]
         return: "float"
         signatures:
@@ -3434,6 +3877,9 @@ categories:
     name_ko: "수학 - 일반"
     functions:
       - name: abs
+        related:
+          - sign
+          - fmod
         keywords: ["absolute","magnitude","positive","fabs"]
         return: "float"
         signatures:
@@ -3446,6 +3892,10 @@ categories:
         snippet: "abs(${1:x})"
 
       - name: sqrt
+        related:
+          - sq
+          - pow
+          - dist
         keywords: ["square root","radical","root"]
         return: "float"
         signatures:
@@ -3458,6 +3908,10 @@ categories:
         snippet: "sqrt(${1:x})"
 
       - name: sq
+        related:
+          - sqrt
+          - pow
+          - distSquared
         keywords: ["square","squared","power"]
         return: "float"
         signatures:
@@ -3470,6 +3924,10 @@ categories:
         snippet: "sq(${1:x})"
 
       - name: pow
+        related:
+          - sqrt
+          - sq
+          - exp
         keywords: ["power","exponent","raise"]
         return: "float"
         signatures:
@@ -3482,6 +3940,9 @@ categories:
         snippet: "pow(${1:x}, ${2:y})"
 
       - name: log
+        related:
+          - exp
+          - pow
         keywords: ["logarithm","ln","natural log"]
         return: "float"
         signatures:
@@ -3494,6 +3955,9 @@ categories:
         snippet: "log(${1:x})"
 
       - name: exp
+        related:
+          - log
+          - pow
         keywords: ["exponential","euler","e power"]
         return: "float"
         signatures:
@@ -3506,6 +3970,9 @@ categories:
         snippet: "exp(${1:x})"
 
       - name: min
+        related:
+          - max
+          - clamp
         keywords: ["minimum","smallest","lower","least"]
         return: "float"
         signatures:
@@ -3518,6 +3985,9 @@ categories:
         snippet: "min(${1:a}, ${2:b})"
 
       - name: max
+        related:
+          - min
+          - clamp
         keywords: ["maximum","largest","upper","greatest"]
         return: "float"
         signatures:
@@ -3530,6 +4000,10 @@ categories:
         snippet: "max(${1:a}, ${2:b})"
 
       - name: floor
+        related:
+          - ceil
+          - round
+          - fract
         keywords: ["round down","truncate","integer"]
         return: "float"
         signatures:
@@ -3542,6 +4016,9 @@ categories:
         snippet: "floor(${1:x})"
 
       - name: ceil
+        related:
+          - floor
+          - round
         keywords: ["ceiling","round up","integer"]
         return: "float"
         signatures:
@@ -3554,6 +4031,9 @@ categories:
         snippet: "ceil(${1:x})"
 
       - name: round
+        related:
+          - floor
+          - ceil
         keywords: ["nearest","rounding","integer"]
         return: "float"
         signatures:
@@ -3566,6 +4046,10 @@ categories:
         snippet: "round(${1:x})"
 
       - name: fmod
+        related:
+          - wrap
+          - fract
+          - abs
         keywords: ["modulo","remainder","modulus","mod"]
         return: "float"
         signatures:
@@ -3578,6 +4062,8 @@ categories:
         snippet: "fmod(${1:x}, ${2:y})"
 
       - name: sign
+        related:
+          - abs
         keywords: ["signum","negative","positive","direction"]
         return: "float"
         signatures:
@@ -3591,6 +4077,10 @@ categories:
         snippet: "sign(${1:x})"
 
       - name: fract
+        related:
+          - floor
+          - fmod
+          - wrap
         keywords: ["fractional","decimal","frac","remainder"]
         return: "float"
         signatures:
@@ -3603,6 +4093,10 @@ categories:
         snippet: "fract(${1:x})"
 
       - name: wrap
+        related:
+          - fmod
+          - clamp
+          - angleDifference
         keywords: ["modulo","loop","cycle","repeat","range"]
         return: "float"
         signatures:
@@ -3618,6 +4112,8 @@ categories:
       - name: angleDifference
         related:
           - angleDifferenceDeg
+          - wrap
+          - atan2
         keywords: ["angle","shortest","delta","radians","rotation"]
         return: "float"
         signatures:
@@ -3631,6 +4127,9 @@ categories:
         snippet: "angleDifference(${1:angle1}, ${2:angle2})"
 
       - name: angleDifferenceDeg
+        related:
+          - angleDifference
+          - rad2deg
         keywords: ["angle","shortest","delta","degrees","rotation"]
         return: "float"
         signatures:
@@ -3831,6 +4330,9 @@ categories:
     name_ko: "수학 - 기하학"
     functions:
       - name: dist
+        related:
+          - distSquared
+          - sqrt
         keywords: ["distance","length","between","hypotenuse","gap"]
         return: "float"
         signatures:
@@ -3844,6 +4346,9 @@ categories:
         snippet: "dist(${1:x1}, ${2:y1}, ${3:x2}, ${4:y2})"
 
       - name: distSquared
+        related:
+          - dist
+          - sq
         keywords: ["distance","squared","length","fast","compare"]
         return: "float"
         signatures:
@@ -3865,6 +4370,9 @@ categories:
     name_ko: "윈도우 & 시스템"
     functions:
       - name: setWindowTitle
+        related:
+          - setWindowSize
+          - setWindowPosition
         keywords: ["caption","name","titlebar","label"]
         return: "void"
         signatures:
@@ -3880,6 +4388,7 @@ categories:
         related:
           - getWindowSize
           - setWindowSizeLogical
+          - setWindowPosition
         keywords: ["resize","dimensions","width height","resolution"]
         return: "void"
         signatures:
@@ -3894,6 +4403,7 @@ categories:
       - name: getWindowPosition
         related:
           - setWindowPosition
+          - getDisplayScaleFactor
         keywords: ["location","screen","coordinates","offset","x y"]
         platforms: [macos, windows]
         platformNote: "Stub returning (-1,-1) on Linux (not yet implemented), iOS, Android and Web."
@@ -3911,6 +4421,7 @@ categories:
       - name: setWindowPosition
         related:
           - getWindowPosition
+          - bringWindowToFront
         keywords: ["move","location","screen","coordinates","place"]
         platforms: [macos, windows]
         platformNote: "No-op (warns) on Linux (not yet implemented), iOS, Android and Web."
@@ -3926,6 +4437,10 @@ categories:
         snippet: "setWindowPosition(${1:100}, ${2:100})"
 
       - name: toggleFullscreen
+        related:
+          - setFullscreen
+          - isFullscreen
+          - setImmersiveMode
         keywords: ["fullscreen","maximize","borderless","screen"]
         return: "void"
         signatures:
@@ -3966,6 +4481,9 @@ categories:
         snippet: "getClipboardString()"
 
       - name: getDpiScale
+        related:
+          - getFramebufferWidth
+          - getDisplayScaleFactor
         keywords: ["retina","hidpi","density","pixel ratio","scale"]
         return: "float"
         signatures:
@@ -3978,6 +4496,10 @@ categories:
         snippet: "getDpiScale()"
 
       - name: getFramebufferWidth
+        related:
+          - getFramebufferHeight
+          - getWindowWidth
+          - getDpiScale
         keywords: ["pixels","retina","resolution","backbuffer","drawable"]
         return: "int"
         signatures:
@@ -3990,6 +4512,10 @@ categories:
         snippet: "getFramebufferWidth()"
 
       - name: getFramebufferHeight
+        related:
+          - getFramebufferWidth
+          - getWindowHeight
+          - getDpiScale
         keywords: ["pixels","retina","resolution","backbuffer","drawable"]
         return: "int"
         signatures:
@@ -4002,6 +4528,9 @@ categories:
         snippet: "getFramebufferHeight()"
 
       - name: getAspectRatio
+        related:
+          - getWindowSize
+          - getWindowWidth
         keywords: ["ratio","proportion","widescreen","16:9"]
         return: "float"
         signatures:
@@ -4016,6 +4545,8 @@ categories:
       - name: setOrientation
         related:
           - Orientation
+          - setImmersiveMode
+          - getDeviceOrientation
         keywords: ["portrait","landscape","rotation","mobile","screen"]
         platforms: [ios, android]
         platformNote: "Mobile-only. No-op on macOS, Windows, Linux and Web."
@@ -4033,6 +4564,7 @@ categories:
       - name: setKeepScreenOn
         related:
           - getKeepScreenOn
+          - setImmersiveMode
         keywords: ["wake lock","no sleep","stay awake","prevent lock","screensaver"]
         platforms: [macos, windows, ios, android]
         platformNote: "No-op on Linux and Web (TODO: xdg-screensaver / Wake Lock API)."
@@ -4065,6 +4597,9 @@ categories:
         snippet: "getKeepScreenOn()"
 
       - name: setIndependentFps
+        related:
+          - setFps
+          - getFpsSettings
         keywords: ["framerate","update rate","decouple","tick rate"]
         return: "void"
         signatures:
@@ -4079,6 +4614,8 @@ categories:
       - name: grabScreen
         related:
           - Pixels
+          - saveScreenshot
+          - captureWindow
         keywords: ["screenshot","capture","snapshot","pixels","readback"]
         return: "bool"
         signatures:
@@ -4091,6 +4628,10 @@ categories:
         snippet: "grabScreen(${1:pixels})"
 
       - name: saveScreenshot
+        related:
+          - grabScreen
+          - startRecording
+          - captureWindow
         keywords: ["screenshot","capture","png","export","save image"]
         return: "bool"
         signatures:
@@ -4105,6 +4646,9 @@ categories:
       - name: startRecording
         related:
           - VideoRecordSettings
+          - stopRecording
+          - isRecording
+          - saveScreenshot
         keywords: ["record","video","capture","movie","mp4"]
         platforms: [macos, windows, linux, ios, android]
         platformNote: "Global convenience over the singleton ScreenRecorder; non-functional on web for the same reason (VideoWriter stub returns false)."
@@ -4120,6 +4664,10 @@ categories:
         snippet: "startRecording(${1:\"out.mp4\"})"
 
       - name: stopRecording
+        related:
+          - startRecording
+          - isRecording
+          - recordingPath
         keywords: ["record","video","finish","movie","stop"]
         return: "void"
         signatures:
@@ -4132,6 +4680,10 @@ categories:
         snippet: "stopRecording()"
 
       - name: isRecording
+        related:
+          - startRecording
+          - recordingFrameCount
+          - recordingPath
         keywords: ["record","video","capturing","status"]
         return: "bool"
         signatures:
@@ -4144,6 +4696,10 @@ categories:
         snippet: "isRecording()"
 
       - name: recordingFrameCount
+        related:
+          - isRecording
+          - recordingPath
+          - getFrameCount
         keywords: ["record","frames","video","count"]
         return: "int"
         signatures:
@@ -4156,6 +4712,9 @@ categories:
         snippet: "recordingFrameCount()"
 
       - name: recordingPath
+        related:
+          - isRecording
+          - recordingFrameCount
         keywords: ["record","file","video","output","path"]
         return: "const string&"
         signatures:
@@ -4168,6 +4727,9 @@ categories:
         snippet: "recordingPath()"
 
       - name: isFullscreen
+        related:
+          - setFullscreen
+          - toggleFullscreen
         keywords: ["fullscreen","maximized","borderless","status"]
         return: "bool"
         signatures:
@@ -4181,6 +4743,9 @@ categories:
         snippet: "isFullscreen()"
 
       - name: setFullscreen
+        related:
+          - isFullscreen
+          - toggleFullscreen
         keywords: ["fullscreen","maximize","borderless","windowed"]
         return: "void"
         signatures:
@@ -4194,6 +4759,8 @@ categories:
         snippet: "setFullscreen(${1:true})"
 
       - name: redraw
+        related:
+          - setFps
         keywords: ["repaint","refresh","invalidate","render","update"]
         return: "void"
         signatures:
@@ -4209,6 +4776,9 @@ categories:
   # Utility
   # ==========================================================================
       - name: getBackendName
+        related:
+          - GraphicsBackend::name
+          - Platform::name
         keywords: ["renderer","graphics","metal","d3d11","opengl"]
         return: "string"
         signatures:
@@ -4220,6 +4790,9 @@ categories:
         sketch: false
         snippet: "getBackendName()"
       - name: bringWindowToFront
+        related:
+          - setWindowPosition
+          - setFullscreen
         keywords: ["focus","raise","activate","foreground","topmost"]
         platforms: [macos, windows, linux]
         platformNote: "Desktop-only. No-op on iOS, Android and Web (always foreground / no window mgmt)."
@@ -4234,6 +4807,9 @@ categories:
         sketch: false
         snippet: "bringWindowToFront()"
       - name: getDisplayScaleFactor
+        related:
+          - getDpiScale
+          - getWindowPosition
         keywords: ["retina","hidpi","density","scale","monitor"]
         return: "float"
         signatures:
@@ -4245,6 +4821,9 @@ categories:
         sketch: false
         snippet: "getDisplayScaleFactor()"
       - name: setWindowDecorated
+        related:
+          - setFullscreen
+          - setWindowSize
         keywords: ["borderless","titlebar","chrome","frame","decoration"]
         platforms: [macos, windows, linux]
         platformNote: "Desktop-only (toggles WM frame). No-op on iOS, Android and Web."
@@ -4259,6 +4838,9 @@ categories:
         sketch: false
         snippet: "setWindowDecorated(${1:true})"
       - name: setWindowSizeLogical
+        related:
+          - setWindowSize
+          - getDpiScale
         keywords: ["resize","logical pixels","points","dimensions"]
         platforms: [macos, windows, wasm]
         platformNote: "No-op on Linux (not yet implemented), iOS and Android (fixed fullscreen). Web resizes the canvas."
@@ -4275,6 +4857,7 @@ categories:
       - name: runHeadlessApp
         related:
           - HeadlessSettings
+          - runApp
         keywords: ["headless","no window","offscreen","cli","server"]
         return: "int"
         signatures:
@@ -4291,6 +4874,10 @@ categories:
     name_ko: "유틸리티"
     functions:
       - name: logNotice
+        related:
+          - logWarning
+          - logError
+          - setConsoleLogLevel
         keywords: ["log","print","console","debug","output"]
         return: "void"
         signatures:
@@ -4307,6 +4894,8 @@ categories:
         related:
           - Codec
           - compressBound
+          - decompress
+          - toBase64
         keywords: ["zip","lz4","deflate","pack","shrink"]
         return: "bool"
         signatures:
@@ -4323,6 +4912,8 @@ categories:
       - name: decompress
         related:
           - Codec
+          - compress
+          - compressBound
         keywords: ["unzip","lz4","inflate","unpack","extract"]
         return: "bool"
         signatures:
@@ -4337,6 +4928,10 @@ categories:
         snippet: "decompress(${1:src}, ${2:nbytes}, ${3:out}, ${4:decompressedSize}, ${5:Codec::LZ4})"
 
       - name: toString
+        related:
+          - toInt
+          - toFloat
+          - joinString
         keywords: ["stringify","format","convert","str"]
         return: "string"
         signatures:
@@ -4350,6 +4945,9 @@ categories:
         snippet: "toString(${1:value})"
 
       - name: beep
+        related:
+          - setBeepVolume
+          - getBeepVolume
         keywords: ["sound","alert","tone","ping","bell"]
         return: "void"
         signatures:
@@ -4364,6 +4962,10 @@ categories:
         snippet: "beep()"
 
       - name: toInt
+        related:
+          - toFloat
+          - toInt64
+          - toString
         keywords: ["parse","integer","atoi","convert","number"]
         return: "int"
         signatures:
@@ -4377,6 +4979,10 @@ categories:
         snippet: "toInt(${1:str})"
 
       - name: toFloat
+        related:
+          - toInt
+          - toDouble
+          - toString
         keywords: ["parse","atof","convert","decimal","number"]
         return: "float"
         signatures:
@@ -4390,6 +4996,10 @@ categories:
         snippet: "toFloat(${1:str})"
 
       - name: splitString
+        related:
+          - joinString
+          - trim
+          - stringReplace
         keywords: ["tokenize","explode","separator","delimiter","split"]
         return: "vector<string>"
         signatures:
@@ -4403,6 +5013,9 @@ categories:
         snippet: "splitString(${1:str}, ${2:delimiter})"
 
       - name: joinString
+        related:
+          - splitString
+          - toString
         keywords: ["concat","implode","merge","combine","delimiter"]
         return: "string"
         signatures:
@@ -4416,6 +5029,10 @@ categories:
         snippet: "joinString(${1:elements}, ${2:delimiter})"
 
       - name: stringReplace
+        related:
+          - splitString
+          - isStringInString
+          - trim
         keywords: ["substitute","find replace","swap","sub"]
         return: "void"
         signatures:
@@ -4429,6 +5046,9 @@ categories:
         snippet: "stringReplace(${1:str}, ${2:search}, ${3:replace})"
 
       - name: toLower
+        related:
+          - toUpper
+          - trim
         keywords: ["lowercase","downcase","case"]
         return: "string"
         signatures:
@@ -4442,6 +5062,9 @@ categories:
         snippet: "toLower(${1:str})"
 
       - name: toUpper
+        related:
+          - toLower
+          - trim
         keywords: ["uppercase","upcase","caps","case"]
         return: "string"
         signatures:
@@ -4455,6 +5078,9 @@ categories:
         snippet: "toUpper(${1:str})"
 
       - name: intersectRect
+        related:
+          - intersects
+          - contains
         keywords: ["overlap","rectangle","bounds","clip","collision"]
         return: "void"
         signatures:
@@ -4467,6 +5093,10 @@ categories:
         snippet: "intersectRect(${1:x1}, ${2:y1}, ${3:w1}, ${4:h1}, ${5:x2}, ${6:y2}, ${7:w2}, ${8:h2}, ${9:ox}, ${10:oy}, ${11:ow}, ${12:oh})"
 
       - name: "mcp::registerDebuggerTools"
+        related:
+          - getSelectedNode
+          - setSelectedNode
+          - getRootNode
         keywords: ["mcp","ai","agent","automation","debugger","tools"]
         return: "void"
         signatures:
@@ -4484,6 +5114,9 @@ categories:
 # Logging — canonical non-prefixed names (logNotice already exists). tc-prefixed
 # variants are deprecated and intentionally NOT documented.
       - name: logVerbose
+        related:
+          - logNotice
+          - setConsoleLogLevel
         keywords: ["log","verbose","trace","debug","print"]
         return: "LogStream"
         signatures:
@@ -4496,6 +5129,10 @@ categories:
         snippet: "logVerbose() << ${1:value}"
 
       - name: logWarning
+        related:
+          - logNotice
+          - logError
+          - logFatal
         keywords: ["log","warn","warning","print"]
         return: "LogStream"
         signatures:
@@ -4508,6 +5145,10 @@ categories:
         snippet: "logWarning() << ${1:value}"
 
       - name: logError
+        related:
+          - logWarning
+          - logFatal
+          - logNotice
         keywords: ["log","error","err","print"]
         return: "LogStream"
         signatures:
@@ -4520,6 +5161,9 @@ categories:
         snippet: "logError() << ${1:value}"
 
       - name: logFatal
+        related:
+          - logError
+          - logWarning
         keywords: ["log","fatal","crash","critical","print"]
         return: "LogStream"
         signatures:
@@ -4534,6 +5178,8 @@ categories:
       - name: logAt
         related:
           - LogLevel
+          - getLogger
+          - setConsoleLogLevel
         keywords: ["log","level","print","severity"]
         return: "LogStream"
         signatures:
@@ -4548,6 +5194,9 @@ categories:
       - name: getLogger
         related:
           - Logger
+          - setConsoleLogLevel
+          - setLogFile
+          - logAt
         keywords: ["log","logger","logging"]
         return: "Logger&"
         signatures:
@@ -4562,6 +5211,9 @@ categories:
       - name: setConsoleLogLevel
         related:
           - LogLevel
+          - setFileLogLevel
+          - getLogger
+          - logNotice
         keywords: ["log","level","console","verbosity","filter"]
         return: "void"
         signatures:
@@ -4576,6 +5228,8 @@ categories:
       - name: setFileLogLevel
         related:
           - LogLevel
+          - setConsoleLogLevel
+          - setLogFile
         keywords: ["log","level","file","verbosity","filter"]
         return: "void"
         signatures:
@@ -4588,6 +5242,9 @@ categories:
         snippet: "setFileLogLevel(${1:LogLevel::Notice})"
 
       - name: setLogFile
+        related:
+          - closeLogFile
+          - setFileLogLevel
         keywords: ["log","file","output","write","path"]
         return: "bool"
         signatures:
@@ -4600,6 +5257,8 @@ categories:
         snippet: "setLogFile(${1:\"log.txt\"})"
 
       - name: closeLogFile
+        related:
+          - setLogFile
         keywords: ["log","file","close","flush"]
         return: "void"
         signatures:
@@ -4614,6 +5273,8 @@ categories:
       - name: compressBound
         related:
           - Codec
+          - compress
+          - decompress
         keywords: ["size","buffer","estimate","capacity","compress"]
         return: "size_t"
         signatures:
@@ -4626,6 +5287,9 @@ categories:
         snippet: "compressBound(${1:nbytes}, ${2:Codec::LZ4})"
 
       - name: toInt64
+        related:
+          - toInt
+          - hexToInt
         keywords: ["parse","long","integer","convert","number"]
         return: "int64_t"
         signatures:
@@ -4638,6 +5302,9 @@ categories:
         snippet: "toInt64(${1:str})"
 
       - name: toDouble
+        related:
+          - toFloat
+          - toString
         keywords: ["parse","convert","decimal","number","float"]
         return: "double"
         signatures:
@@ -4650,6 +5317,9 @@ categories:
         snippet: "toDouble(${1:str})"
 
       - name: toBool
+        related:
+          - toInt
+          - toString
         keywords: ["parse","boolean","true false","convert"]
         return: "bool"
         signatures:
@@ -4662,6 +5332,9 @@ categories:
         snippet: "toBool(${1:str})"
 
       - name: toBinary
+        related:
+          - hexToInt
+          - toBase64
         keywords: ["binary","bits","base2","convert"]
         return: "string"
         signatures:
@@ -4674,6 +5347,10 @@ categories:
         snippet: "toBinary(${1:value})"
 
       - name: hexToInt
+        related:
+          - hexToUInt
+          - toInt
+          - toBinary
         keywords: ["hex","hexadecimal","parse","base16","convert"]
         return: "int"
         signatures:
@@ -4686,6 +5363,9 @@ categories:
         snippet: "hexToInt(${1:hexStr})"
 
       - name: hexToUInt
+        related:
+          - hexToInt
+          - toInt
         keywords: ["hex","hexadecimal","unsigned","base16","parse"]
         return: "unsigned int"
         signatures:
@@ -4698,6 +5378,9 @@ categories:
         snippet: "hexToUInt(${1:hexStr})"
 
       - name: toBase64
+        related:
+          - compress
+          - toBinary
         keywords: ["base64","encode","encoding","bytes"]
         return: "string"
         signatures:
@@ -4710,6 +5393,9 @@ categories:
         snippet: "toBase64(${1:bytes}, ${2:len})"
 
       - name: isStringInString
+        related:
+          - stringTimesInString
+          - stringReplace
         keywords: ["contains","find","search","substring","includes"]
         return: "bool"
         signatures:
@@ -4722,6 +5408,9 @@ categories:
         snippet: "isStringInString(${1:haystack}, ${2:needle})"
 
       - name: stringTimesInString
+        related:
+          - isStringInString
+          - splitString
         keywords: ["count","occurrences","frequency","tally","substring"]
         return: "size_t"
         signatures:
@@ -4734,6 +5423,10 @@ categories:
         snippet: "stringTimesInString(${1:haystack}, ${2:needle})"
 
       - name: trim
+        related:
+          - trimFront
+          - trimBack
+          - splitString
         keywords: ["strip","whitespace","clean","trim"]
         return: "string"
         signatures:
@@ -4746,6 +5439,9 @@ categories:
         snippet: "trim(${1:src})"
 
       - name: trimFront
+        related:
+          - trimBack
+          - trim
         keywords: ["strip","leading","left","ltrim","whitespace"]
         return: "string"
         signatures:
@@ -4758,6 +5454,9 @@ categories:
         snippet: "trimFront(${1:src})"
 
       - name: trimBack
+        related:
+          - trimFront
+          - trim
         keywords: ["strip","trailing","right","rtrim","whitespace"]
         return: "string"
         signatures:
@@ -4772,6 +5471,8 @@ categories:
       - name: parseJson
         related:
           - Json
+          - toJsonString
+          - loadJson
         keywords: ["json","parse","deserialize","decode"]
         return: "Json"
         signatures:
@@ -4785,6 +5486,8 @@ categories:
       - name: toJsonString
         related:
           - Json
+          - parseJson
+          - saveJson
         keywords: ["json","serialize","stringify","encode","dump"]
         return: "string"
         signatures:
@@ -4798,6 +5501,7 @@ categories:
       - name: parseXml
         related:
           - Xml
+          - loadXml
         keywords: ["xml","parse","deserialize","decode"]
         return: "Xml"
         signatures:
@@ -4812,6 +5516,8 @@ categories:
       - name: reflectToJson
         related:
           - Json
+          - reflectFromJson
+          - toJsonString
         keywords: ["serialize","reflection","dump","members","json"]
         return: "Json"
         signatures:
@@ -4825,6 +5531,8 @@ categories:
       - name: reflectFromJson
         related:
           - Json
+          - reflectToJson
+          - parseJson
         keywords: ["deserialize","reflection","apply","load","json"]
         return: "JsonReadReflector"
         signatures:
@@ -4836,6 +5544,8 @@ categories:
         sketch: false
         snippet: "reflectFromJson(${1:obj}, ${2:json})"
       - name: isMainThread
+        related:
+          - getMainThreadId
         keywords: ["thread","main","concurrency","ui thread"]
         return: "bool"
         signatures:
@@ -4847,6 +5557,8 @@ categories:
         sketch: false
         snippet: "isMainThread()"
       - name: getMainThreadId
+        related:
+          - isMainThread
         keywords: ["thread","main","id","concurrency"]
         return: "thread::id"
         signatures:
@@ -4865,6 +5577,8 @@ categories:
       - name: getDataPath
         related:
           - getDataPathRoot
+          - getAbsolutePath
+          - joinPath
         keywords: ["data","resource","asset","resolve","path"]
         return: "string"
         signatures:
@@ -4878,6 +5592,9 @@ categories:
         snippet: "getDataPath(${1:path})"
 
       - name: getAbsolutePath
+        related:
+          - getDataPath
+          - getExecutablePath
         keywords: ["absolute","full path","resolve","canonical"]
         return: "string"
         signatures:
@@ -4892,6 +5609,10 @@ categories:
 
       # Path utilities
       - name: getFileName
+        related:
+          - getBaseName
+          - getFileExtension
+          - getParentDirectory
         keywords: ["basename","filename","name","path"]
         return: "string"
         signatures:
@@ -4905,6 +5626,9 @@ categories:
         snippet: "getFileName(${1:path})"
 
       - name: getBaseName
+        related:
+          - getFileName
+          - getFileExtension
         keywords: ["stem","name","no extension","filename"]
         return: "string"
         signatures:
@@ -4918,6 +5642,9 @@ categories:
         snippet: "getBaseName(${1:path})"
 
       - name: getFileExtension
+        related:
+          - getBaseName
+          - getFileName
         keywords: ["extension","ext","suffix","type","format"]
         return: "string"
         signatures:
@@ -4931,6 +5658,9 @@ categories:
         snippet: "getFileExtension(${1:path})"
 
       - name: getParentDirectory
+        related:
+          - getFileName
+          - joinPath
         keywords: ["parent","dirname","folder","directory","up"]
         return: "string"
         signatures:
@@ -4944,6 +5674,9 @@ categories:
         snippet: "getParentDirectory(${1:path})"
 
       - name: joinPath
+        related:
+          - getDataPath
+          - getParentDirectory
         keywords: ["combine","concat","path","append","merge"]
         return: "string"
         signatures:
@@ -4971,6 +5704,10 @@ categories:
 
       # File system operations
       - name: fileExists
+        related:
+          - directoryExists
+          - getFileSize
+          - removeFile
         keywords: ["exists","check","found","file"]
         return: "bool"
         signatures:
@@ -4984,6 +5721,10 @@ categories:
         snippet: "fileExists(${1:path})"
 
       - name: directoryExists
+        related:
+          - fileExists
+          - createDirectory
+          - listDirectory
         keywords: ["exists","folder","dir","check","directory"]
         return: "bool"
         signatures:
@@ -4997,6 +5738,9 @@ categories:
         snippet: "directoryExists(${1:path})"
 
       - name: createDirectory
+        related:
+          - directoryExists
+          - listDirectory
         keywords: ["mkdir","make folder","create","directory"]
         return: "bool"
         signatures:
@@ -5010,6 +5754,9 @@ categories:
         snippet: "createDirectory(${1:path})"
 
       - name: listDirectory
+        related:
+          - directoryExists
+          - getFileName
         keywords: ["ls","readdir","files","scan","browse"]
         return: "vector<string>"
         signatures:
@@ -5023,6 +5770,8 @@ categories:
         snippet: "listDirectory(${1:path})"
 
       - name: removeFile
+        related:
+          - fileExists
         keywords: ["delete","rm","unlink","erase","file"]
         return: "bool"
         signatures:
@@ -5036,6 +5785,9 @@ categories:
         snippet: "removeFile(${1:path})"
 
       - name: getFileSize
+        related:
+          - fileExists
+          - loadTextFile
         keywords: ["size","bytes","length","file"]
         return: "int64_t"
         signatures:
@@ -5049,6 +5801,10 @@ categories:
 
       # Simple file I/O
       - name: loadTextFile
+        related:
+          - saveTextFile
+          - loadJson
+          - getFileSize
         keywords: ["read","open","text","file","load"]
         return: "string"
         signatures:
@@ -5062,6 +5818,10 @@ categories:
         snippet: "loadTextFile(${1:path})"
 
       - name: saveTextFile
+        related:
+          - loadTextFile
+          - appendToFile
+          - saveJson
         keywords: ["write","save","text","file","store"]
         return: "bool"
         signatures:
@@ -5075,6 +5835,8 @@ categories:
         snippet: "saveTextFile(${1:path}, ${2:content})"
 
       - name: appendToFile
+        related:
+          - saveTextFile
         keywords: ["append","write","add","file","concat"]
         return: "bool"
         signatures:
@@ -5089,6 +5851,8 @@ categories:
       - name: createFileWriter
         related:
           - FileWriter
+          - createFileReader
+          - saveTextFile
         keywords: ["write","stream","output","file","writer"]
         return: "FileWriter@"
         signatures:
@@ -5103,6 +5867,8 @@ categories:
       - name: createFileReader
         related:
           - FileReader
+          - createFileWriter
+          - loadTextFile
         keywords: ["read","stream","input","file","reader"]
         return: "FileReader@"
         signatures:
@@ -5120,6 +5886,9 @@ categories:
       - name: loadJson
         related:
           - Json
+          - saveJson
+          - parseJson
+          - loadTextFile
         keywords: ["json","read","open","load","parse"]
         return: "Json"
         signatures:
@@ -5133,6 +5902,9 @@ categories:
       - name: saveJson
         related:
           - Json
+          - loadJson
+          - toJsonString
+          - saveTextFile
         keywords: ["json","write","save","store","serialize"]
         return: "bool"
         signatures:
@@ -5146,6 +5918,7 @@ categories:
       - name: loadXml
         related:
           - Xml
+          - parseXml
         keywords: ["xml","read","open","load","parse"]
         return: "Xml"
         signatures:
@@ -5159,6 +5932,8 @@ categories:
       - name: setDataPathRoot
         related:
           - getDataPathRoot
+          - setDataPathToResources
+          - getDataPath
         keywords: ["data","root","resource","directory","base"]
         return: "void"
         signatures:
@@ -5172,6 +5947,7 @@ categories:
       - name: getDataPathRoot
         related:
           - setDataPathRoot
+          - getDataPath
         keywords: ["data","root","resource","directory","base"]
         return: "string"
         signatures:
@@ -5183,6 +5959,9 @@ categories:
         sketch: false
         snippet: "getDataPathRoot()"
       - name: setDataPathToResources
+        related:
+          - setDataPathRoot
+          - getExecutableDir
         keywords: ["bundle","resources","macos","app","data"]
         return: "void"
         signatures:
@@ -5194,6 +5973,9 @@ categories:
         sketch: false
         snippet: "setDataPathToResources()"
       - name: getExecutablePath
+        related:
+          - getExecutableDir
+          - getAbsolutePath
         keywords: ["exe","executable","binary","app path","self"]
         platforms: [macos, windows, linux, ios]
         platformNote: "Android returns \"\" (assets via AAssetManager); Web returns hardcoded \"/\"."
@@ -5208,6 +5990,9 @@ categories:
         sketch: false
         snippet: "getExecutablePath()"
       - name: getExecutableDir
+        related:
+          - getExecutablePath
+          - setDataPathToResources
         keywords: ["exe","executable","binary","app folder","directory"]
         platforms: [macos, windows, linux, ios, android]
         platformNote: "Real directory on all native platforms (android = internalDataPath). Web returns hardcoded \"/\"."
@@ -5227,6 +6012,11 @@ categories:
     name_ko: "사운드"
     functions:
       - name: Sound
+        related:
+          - createSound
+          - ChipSoundNote
+          - VideoPlayer
+          - beep
         keywords: ["audio","player","sample","sfx","music","clip"]
         return: ""
         signatures:
@@ -5241,6 +6031,7 @@ categories:
       - name: createSound
         related:
           - Sound
+          - createChipBundle
         keywords: ["audio","player","factory","new","instantiate"]
         return: "Sound@"
         signatures:
@@ -5265,6 +6056,8 @@ categories:
         snippet: "load(${1:\"sound.wav\"})"
 
       - name: loadStream
+        related:
+          - isStreaming
         keywords: ["streaming","disk","memory","long","music","buffer"]
         platforms: [windows, macos, linux, ios, android]
         platformNote: "Streaming audio (Sound::loadStream / SoundStream). On wasm it is unsupported (needs std::thread + on-disk file I/O, neither available in the default browser build); Sound::loadStream() logs a warning and silently falls back to eager load(). So you always get a Sound, but it is never actually streamed on web — branch on isStreaming() / __EMSCRIPTEN__ if it matters."
@@ -5292,6 +6085,9 @@ categories:
         snippet: "isStreaming()"
 
       - name: play
+        related:
+          - createSound
+          - ChipSoundNote
         keywords: ["start","resume","go","playback"]
         return: "void"
         signatures:
@@ -5531,6 +6327,8 @@ categories:
       - name: setMixMode
         related:
           - MixMode
+          - setChannelMap
+          - getChannels
         keywords: ["routing","downmix","mono","channel","mapping"]
         return: "void"
         signatures:
@@ -5543,6 +6341,9 @@ categories:
         snippet: "setMixMode(MixMode::DownmixMono)"
 
       - name: setChannelMap
+        related:
+          - setChannelGains
+          - getChannels
         keywords: ["routing","channel","output","mapping","surround"]
         return: "void"
         signatures:
@@ -5557,6 +6358,8 @@ categories:
         snippet: "setChannelMap({0, 1})"
 
       - name: setChannelGains
+        related:
+          - setChannelMap
         keywords: ["channel","gain","volume","level","per channel"]
         return: "void"
         signatures:
@@ -5599,6 +6402,7 @@ categories:
       - name: setBeepVolume
         related:
           - getBeepVolume
+          - beep
         keywords: ["beep","loudness","gain","level","alert"]
         return: "void"
         signatures:
@@ -5613,6 +6417,7 @@ categories:
       - name: getBeepVolume
         related:
           - setBeepVolume
+          - beep
         keywords: ["beep","loudness","gain","level"]
         return: "float"
         signatures:
@@ -5631,6 +6436,8 @@ categories:
       - name: getInstance
         related:
           - AudioEngine
+          - initAudio
+          - listDevices
         keywords: ["singleton","global","engine","instance","access"]
         return: "AudioEngine&"
         signatures:
@@ -5645,6 +6452,9 @@ categories:
       - name: init
         related:
           - AudioSettings
+          - audioDeviceChanged
+          - listDevices
+          - getSampleRate
         keywords: ["initialize","start","open","device","setup"]
         return: "bool"
         signatures:
@@ -5750,6 +6560,9 @@ categories:
         related:
           - Event
           - AudioOutBuffer
+          - audioIn
+          - getAudioAnalysisBuffer
+          - Wave
         keywords: ["playback","synthesis","callback","dsp","render","buffer"]
         return: "Event<AudioOutBuffer>"
         signatures:
@@ -5765,6 +6578,9 @@ categories:
         related:
           - Event
           - AudioInBuffer
+          - audioOut
+          - getMicInput
+          - getMicAnalysisBuffer
         keywords: ["microphone","mic","capture","input","record","callback"]
         return: "Event<AudioInBuffer>"
         signatures:
@@ -5796,6 +6612,10 @@ categories:
   # ==========================================================================
 # Paste under category id "audioengine" -> functions:
       - name: initAudio
+        related:
+          - getInstance
+          - shutdownAudio
+          - audioOut
         keywords: ["initialize","start","engine","setup","open"]
         return: "void"
         signatures:
@@ -5808,6 +6628,8 @@ categories:
         snippet: "initAudio()"
 
       - name: shutdownAudio
+        related:
+          - initAudio
         keywords: ["close","stop","engine","release","deinit"]
         return: "void"
         signatures:
@@ -5820,6 +6642,10 @@ categories:
         snippet: "shutdownAudio()"
 
       - name: getAudioAnalysisBuffer
+        related:
+          - fftReal
+          - fftMagnitude
+          - applyWindow
         keywords: ["fft","spectrum","samples","waveform","visualization","analysis"]
         return: "size_t"
         signatures:
@@ -5834,6 +6660,8 @@ categories:
       - name: getMicInput
         related:
           - MicInput
+          - getMicAnalysisBuffer
+          - audioIn
         keywords: ["microphone","mic","capture","input","record"]
         return: "MicInput&"
         signatures:
@@ -5846,6 +6674,10 @@ categories:
         snippet: "getMicInput()"
 
       - name: getMicAnalysisBuffer
+        related:
+          - getMicInput
+          - fftReal
+          - fftMagnitude
         keywords: ["microphone","mic","samples","fft","waveform","analysis"]
         return: "size_t"
         signatures:
@@ -5862,6 +6694,10 @@ categories:
     name_ko: "칩사운드"
     functions:
       - name: ChipSoundNote
+        related:
+          - createChipBundle
+          - Sound
+          - Wave
         keywords: ["chiptune","8bit","synth","note","retro","tone"]
         return: ""
         signatures:
@@ -5876,6 +6712,8 @@ categories:
       - name: wave
         related:
           - Wave
+          - hz
+          - adsr
         keywords: ["waveform","oscillator","square","sine","noise","shape"]
         return: "ChipSoundNote&"
         signatures:
@@ -5976,6 +6814,11 @@ categories:
         snippet: "release(${1:0.2})"
 
       - name: adsr
+        related:
+          - attack
+          - decay
+          - sustain
+          - release
         keywords: ["envelope","attack","decay","sustain","shape"]
         return: "ChipSoundNote&"
         signatures:
@@ -5990,6 +6833,7 @@ categories:
       - name: build
         related:
           - Sound
+          - play
         keywords: ["create","make","generate","render","compile"]
         return: "Sound@"
         signatures:
@@ -6004,6 +6848,8 @@ categories:
       - name: createChipBundle
         related:
           - ChipSoundBundle
+          - ChipSoundNote
+          - Sound
         keywords: ["sequence","song","track","notes","chiptune","melody"]
         return: "ChipSoundBundle@"
         signatures:
@@ -6018,6 +6864,8 @@ categories:
       - name: add
         related:
           - ChipSoundBundle
+          - createChipBundle
+          - ChipSoundNote
         keywords: ["append","insert","note","sequence","schedule"]
         return: "ChipSoundBundle&"
         signatures:
@@ -6064,6 +6912,8 @@ categories:
       - name: createFont
         related:
           - Font
+          - drawString
+          - drawBitmapString
         keywords: ["truetype","ttf","typeface","text","new"]
         return: "Font@"
         signatures:
@@ -6100,6 +6950,10 @@ categories:
         snippet: "isLoaded()"
 
       - name: drawString
+        related:
+          - drawBitmapString
+          - getStringPath
+          - getWidth
         keywords: ["text","render","print","label","write","type"]
         return: "void"
         signatures:
@@ -6114,6 +6968,8 @@ categories:
       - name: getStringPath
         related:
           - Path
+          - drawStroke
+          - drawString
         keywords: ["outline","vector","contour","path","shape","glyph"]
         return: "Path"
         signatures:
@@ -6128,6 +6984,8 @@ categories:
       - name: getWidth
         related:
           - setWidth
+          - getStringPath
+          - getLineHeight
         keywords: ["resolution","size","pixels","dimension"]
         return: "float"
         signatures:
@@ -6178,6 +7036,9 @@ categories:
         snippet: "getSize()"
 
       - name: systemFontPath
+        related:
+          - listSystemFonts
+          - createFont
         keywords: ["resolve","lookup","find","os font","path"]
         platforms: [macos, windows, linux, ios]
         platformNote: "Resolve a font name to a file path. Stub on Android and Web/WASM (always returns \"\")."
@@ -6193,6 +7054,8 @@ categories:
         snippet: "systemFontPath(${1:\"HiraginoSans-W3\"})"
 
       - name: listSystemFonts
+        related:
+          - systemFontPath
         keywords: ["enumerate","available","os fonts","installed","list"]
         platforms: [macos, windows, linux, ios]
         platformNote: "Enumerate installed font names. Stub on Android and Web/WASM (always returns empty vector)."
@@ -6213,6 +7076,9 @@ categories:
       - name: registerGlyph
         related:
           - Glyph
+          - drawBitmapString
+          - registerGlyphs
+          - updateGlyph
         keywords: ["bitmap","glyph","codepoint","custom char","atlas"]
         return: "void"
         signatures:
@@ -6258,6 +7124,9 @@ categories:
           - EaseType
           - EaseMode
           - Tween
+          - lerp
+          - remap
+          - createTween
         keywords: ["easing","interpolation","tween","smooth","curve"]
         return: "float"
         signatures:
@@ -6273,6 +7142,8 @@ categories:
         related:
           - EaseType
           - easeInOut
+          - easeOut
+          - ease
         keywords: ["easing","accelerate","ramp up","interpolation","smooth"]
         return: "float"
         signatures:
@@ -6287,6 +7158,9 @@ categories:
       - name: easeOut
         related:
           - EaseType
+          - easeIn
+          - easeInOut
+          - ease
         keywords: ["easing","decelerate","ramp down","interpolation","smooth"]
         return: "float"
         signatures:
@@ -6301,6 +7175,9 @@ categories:
       - name: easeInOut
         related:
           - EaseType
+          - easeIn
+          - easeOut
+          - ease
         keywords: ["easing","smoothstep","accelerate decelerate","interpolation"]
         return: "float"
         signatures:
@@ -6316,6 +7193,10 @@ categories:
       - name: createTween
         related:
           - Tween
+          - TweenMod
+          - ease
+          - lerp
+          - getDeltaTime
         keywords: ["tween","animate","interpolate","motion","transition"]
         return: "Tween@"
         signatures:
@@ -6330,6 +7211,9 @@ categories:
       - name: from
         related:
           - Tween
+          - to
+          - duration
+          - start
         keywords: ["start","begin","origin","source","initial"]
         return: "Tween@"
         signatures:
@@ -6344,6 +7228,9 @@ categories:
       - name: to
         related:
           - Tween
+          - from
+          - duration
+          - start
         keywords: ["end","target","destination","final","goal"]
         return: "Tween@"
         signatures:
@@ -6450,6 +7337,8 @@ categories:
       - name: loop
         related:
           - Tween
+          - yoyo
+          - getLoopCount
         keywords: ["repeat","cycle","iterate","infinite","again"]
         return: "Tween@"
         signatures:
@@ -6464,6 +7353,7 @@ categories:
       - name: yoyo
         related:
           - Tween
+          - loop
         keywords: ["reverse","pingpong","bounce","back forth","alternate"]
         return: "Tween@"
         signatures:
@@ -6476,6 +7366,9 @@ categories:
         snippet: "yoyo()"
 
       - name: getValue
+        related:
+          - getProgress
+          - lerp
         keywords: ["current","output","result","tween value"]
         return: "float"
         signatures:
@@ -6488,6 +7381,9 @@ categories:
         snippet: "getValue()"
 
       - name: getProgress
+        related:
+          - getValue
+          - getElapsed
         keywords: ["percent","fraction","ratio","completion","normalized"]
         return: "float"
         signatures:
@@ -6597,6 +7493,11 @@ categories:
     name_ko: "타입 - Vec2"
     functions:
       - name: Vec2
+        related:
+          - Vec3
+          - Vec2_fromAngle
+          - IVec2
+          - dist
         keywords: ["vector","point","2d","xy","coordinate","position"]
         sketch: false
         return: ""
@@ -6627,6 +7528,10 @@ categories:
         snippet: "set(${1:x}, ${2:y})"
 
       - name: Vec2_fromAngle
+        related:
+          - Vec2
+          - atan2
+          - cos
         keywords: ["vector","angle","direction","polar","heading","unit"]
         return: "Vec2"
         signatures:
@@ -6649,6 +7554,11 @@ categories:
     name_ko: "타입 - Vec3"
     functions:
       - name: Vec3
+        related:
+          - Vec2
+          - Vec4
+          - IVec3
+          - Quaternion
         keywords: ["vector","point","3d","xyz","coordinate","position"]
         sketch: false
         return: ""
@@ -6687,6 +7597,12 @@ categories:
     name_ko: "타입 - Color"
     functions:
       - name: Color
+        related:
+          - ColorHSB
+          - ColorOKLCH
+          - ColorLinear
+          - setColor
+          - Color_fromHSB
         keywords: ["rgb","rgba","colour","paint","tint"]
         sketch: false
         return: ""
@@ -6723,6 +7639,9 @@ categories:
       - name: toHSB
         related:
           - ColorHSB
+          - toOKLCH
+          - toOKLab
+          - toRGB
         keywords: ["hsv","hue","saturation","brightness","convert"]
         return: "ColorHSB"
         signatures:
@@ -6737,6 +7656,9 @@ categories:
       - name: toOKLab
         related:
           - ColorOKLab
+          - toOKLCH
+          - toHSB
+          - linearToSrgb
         keywords: ["perceptual","lab","convert","colorspace","uniform"]
         return: "ColorOKLab"
         signatures:
@@ -6751,6 +7673,9 @@ categories:
       - name: toOKLCH
         related:
           - ColorOKLCH
+          - toHSB
+          - toOKLab
+          - toRGB
         keywords: ["lch","perceptual","convert","colorspace","chroma"]
         return: "ColorOKLCH"
         signatures:
@@ -6763,6 +7688,10 @@ categories:
         snippet: "toOKLCH()"
 
       - name: Color_fromHSB
+        related:
+          - Color_fromOKLCH
+          - Color_fromOKLab
+          - setColorHSB
         keywords: ["hsv","hue","saturation","brightness","make"]
         return: "Color"
         signatures:
@@ -6827,6 +7756,11 @@ categories:
     name_ko: "타입 - ColorHSB"
     functions:
       - name: ColorHSB
+        related:
+          - Color
+          - ColorOKLCH
+          - ColorOKLab
+          - setColorHSB
         keywords: ["hsv","hue","saturation","brightness","colour"]
         return: ""
         signatures:
@@ -6841,6 +7775,10 @@ categories:
         snippet: "ColorHSB(${1:h}, ${2:s}, ${3:b})"
 
       - name: toRGB
+        related:
+          - Color
+          - toHSB
+          - toOKLCH
         keywords: ["rgb","rgba","convert","color","rgbcolor"]
         return: "Color"
         signatures:
@@ -6873,6 +7811,12 @@ categories:
     name_ko: "타입 - ColorOKLCH"
     functions:
       - name: ColorOKLCH
+        related:
+          - Color
+          - ColorHSB
+          - ColorOKLab
+          - setColorOKLCH
+          - ColorLinear
         keywords: ["lch","perceptual","chroma","hue","uniform"]
         return: ""
         signatures:
@@ -6919,6 +7863,11 @@ categories:
     name_ko: "타입 - Rect"
     functions:
       - name: Rect
+        related:
+          - RectNode
+          - contains
+          - intersects
+          - intersectRect
         keywords: ["rectangle","box","bounds","region","area"]
         sketch: false
         return: ""
@@ -6947,6 +7896,9 @@ categories:
         snippet: "set(${1:x}, ${2:y}, ${3:w}, ${4:h})"
 
       - name: contains
+        related:
+          - intersects
+          - intersectRect
         keywords: ["inside","hit","point","test","within"]
         sketch: false
         return: "bool"
@@ -6959,6 +7911,9 @@ categories:
         snippet: "contains(${1:x}, ${2:y})"
 
       - name: intersects
+        related:
+          - contains
+          - intersectRect
         keywords: ["overlap","collide","touch","cross","hit"]
         sketch: false
         return: "bool"
@@ -6979,6 +7934,11 @@ categories:
     name_ko: "씬 그래프"
     functions:
       - name: Node
+        related:
+          - addChild
+          - RectNode
+          - getRootNode
+          - Mod
         keywords: ["scene graph","object","entity","transform","hierarchy"]
         return: ""
         signatures:
@@ -6991,6 +7951,11 @@ categories:
         snippet: "Node()"
 
       - name: addChild
+        related:
+          - moveToFront
+          - moveToBack
+          - updateLayout
+          - LayoutMod
         keywords: ["parent","attach","append","hierarchy","tree"]
         return: "void"
         signatures:
@@ -7027,6 +7992,9 @@ categories:
         snippet: "moveToBack()"
 
       - name: destroy
+        related:
+          - isDead
+          - getNodeCount
         keywords: ["delete","remove","kill","free","dispose"]
         return: "void"
         signatures:
@@ -7065,6 +8033,11 @@ categories:
         snippet: "setPosition(${1:x}, ${2:y})"
 
       - name: RectNode
+        related:
+          - setSize
+          - setClipping
+          - ScrollContainer
+          - LayoutMod
         keywords: ["rectangle","panel","box","ui","widget"]
         return: ""
         signatures:
@@ -7091,6 +8064,9 @@ categories:
         snippet: "setSize(${1:w}, ${2:h})"
 
       - name: setClipping
+        related:
+          - setScissor
+          - ScrollContainer
         keywords: ["clip","scissor","mask","crop","bounds"]
         return: "void"
         signatures:
@@ -7103,6 +8079,9 @@ categories:
         snippet: "setClipping(${1:true})"
 
       - name: enableEvents
+        related:
+          - isOverlayHovered
+          - getMousePos
         keywords: ["interactive","clickable","mouse","input","events"]
         return: "void"
         signatures:
@@ -7115,6 +8094,11 @@ categories:
         snippet: "enableEvents()"
 
       - name: ScrollContainer
+        related:
+          - setContent
+          - setScrollY
+          - ScrollBar
+          - setClipping
         keywords: ["scroll","scrollable","viewport","panel","overflow"]
         return: ""
         signatures:
@@ -7167,6 +8151,8 @@ categories:
       - name: LayoutMod
         related:
           - LayoutDirection
+          - updateLayout
+          - addChild
         keywords: ["layout","arrange","flex","stack","align"]
         return: ""
         signatures:
@@ -7191,6 +8177,11 @@ categories:
         snippet: "updateLayout()"
 
       - name: TweenMod
+        related:
+          - createTween
+          - moveTo
+          - ease
+          - EaseType
         keywords: ["animate","tween","motion","transition","easing"]
         return: ""
         signatures:
@@ -7206,6 +8197,11 @@ categories:
         related:
           - moveToFront
           - moveToBack
+          - moveBy
+          - scaleTo
+          - rotateTo
+          - ease
+          - duration
         keywords: ["animate position","translate","go to","tween move"]
         return: "TweenMod&"
         signatures:
@@ -7220,6 +8216,8 @@ categories:
         snippet: "moveTo(${1:x}, ${2:y})"
 
       - name: moveBy
+        related:
+          - moveTo
         keywords: ["animate offset","translate","relative move","shift"]
         return: "TweenMod&"
         signatures:
@@ -7232,6 +8230,10 @@ categories:
         snippet: "moveBy(${1:dx}, ${2:dy})"
 
       - name: scaleTo
+        related:
+          - scaleBy
+          - moveTo
+          - rotateTo
         keywords: ["animate scale","resize","grow","shrink","zoom"]
         return: "TweenMod&"
         signatures:
@@ -7260,6 +8262,9 @@ categories:
       - name: rotateTo
         related:
           - Quaternion
+          - rotateBy
+          - moveTo
+          - scaleTo
         keywords: ["animate rotation","spin","turn","orient","angle"]
         return: "TweenMod&"
         signatures:
@@ -7327,6 +8332,8 @@ categories:
       - name: getSelectedNode
         related:
           - setSelectedNode
+          - getRootNode
+          - enableEvents
         keywords: ["selection","active","clicked","current","inspector"]
         return: "Node*"
         signatures:
@@ -7351,6 +8358,9 @@ categories:
         sketch: false
         snippet: "setSelectedNode(${1:n})"
       - name: getRootNode
+        related:
+          - getSelectedNode
+          - Node
         keywords: ["root","tree","app","top","hierarchy"]
         return: "Node*"
         signatures:
@@ -7367,6 +8377,10 @@ categories:
     name_ko: "3D 셋업"
     functions:
       - name: setupScreenPerspective
+        related:
+          - createEasyCam
+          - setupScreenFov
+          - Mat4_perspective
         keywords: ["perspective","projection","3d mode","frustum","ofSetupScreenPerspective","fov"]
         return: "void"
         signatures:
@@ -7384,6 +8398,9 @@ categories:
         snippet: "setupScreenPerspective()"
 
       - name: setupScreenOrtho
+        related:
+          - setupScreenFov
+          - Mat4_ortho
         keywords: ["orthographic","projection","2d mode","flat","ofSetupScreenOrtho","no perspective"]
         return: "void"
         signatures:
@@ -7397,6 +8414,9 @@ categories:
         snippet: "setupScreenOrtho()"
 
       - name: setupScreenFov
+        related:
+          - setDefaultScreenFov
+          - setFov
         keywords: ["fov","field of view","projection","perspective","ortho","screen setup"]
         return: "void"
         signatures:
@@ -7439,6 +8459,9 @@ categories:
         snippet: "getDefaultScreenFov()"
 
       - name: worldToScreen
+        related:
+          - getCurrentMatrix
+          - Mat4_perspective
         keywords: ["project","world to screen","unproject","depth","coordinate","ofWorldToScreen"]
         return: "Vec3"
         signatures:
@@ -7451,6 +8474,10 @@ categories:
         snippet: "worldToScreen(${1:worldPos})"
 
       - name: screenToWorld
+        related:
+          - worldToScreen
+          - Ray
+          - HitResult
         keywords: ["unproject","screen to world","pick","raycast","coordinate","ofScreenToWorld"]
         return: "Vec3"
         signatures:
@@ -7475,6 +8502,9 @@ categories:
       - name: createEasyCam
         related:
           - EasyCam
+          - setupScreenPerspective
+          - begin
+          - enableMouseInput
         keywords: ["camera","orbit","easycam","ofEasyCam","navigate","viewport"]
         return: "EasyCam@"
         signatures:
@@ -7487,6 +8517,9 @@ categories:
         snippet: "createEasyCam()"
 
       - name: begin
+        related:
+          - setupScreenPerspective
+          - pushMatrix
         keywords: ["start","bind","enter","render to"]
         return: "void"
         signatures:
@@ -7499,6 +8532,8 @@ categories:
         snippet: "begin()"
 
       - name: end
+        related:
+          - popMatrix
         keywords: ["finish","stop","unbind","exit"]
         return: "void"
         signatures:
@@ -7525,6 +8560,7 @@ categories:
       - name: setTarget
         related:
           - getTarget
+          - Mat4_lookAt
         keywords: ["look at","focus","center","aim","pivot","target"]
         return: "void"
         signatures:
@@ -7640,6 +8676,8 @@ categories:
         related:
           - getFov
           - setFovDeg
+          - setupScreenFov
+          - Mat4_perspective
         keywords: ["field of view","zoom","lens","angle","perspective","fov"]
         return: "void"
         signatures:
@@ -7736,6 +8774,8 @@ categories:
       - name: enableMouseInput
         related:
           - disableMouseInput
+          - mouseScrolled
+          - setSensitivity
         keywords: ["mouse control","interactive","drag","orbit","navigate","input"]
         return: "void"
         signatures:
@@ -7875,6 +8915,7 @@ categories:
       - name: getCameraPosition
         related:
           - setCameraPosition
+          - setMaterial
         keywords: ["camera position","eye","view vector","specular","viewpoint","query"]
         return: "const Vec3&"
         signatures:
@@ -7893,6 +8934,9 @@ categories:
       - name: addLight
         related:
           - Light
+          - LightType
+          - setMaterial
+          - setEnvironment
         keywords: ["light","lamp","illuminate","directional","point light","ofLight"]
         return: "void"
         signatures:
@@ -7933,6 +8977,9 @@ categories:
       - name: setMaterial
         related:
           - Material
+          - addLight
+          - drawMesh
+          - setEnvironment
         keywords: ["material","pbr","surface","shading","ofMaterial","roughness"]
         return: "void"
         signatures:
@@ -7945,6 +8992,8 @@ categories:
         snippet: "setMaterial(${1:material})"
 
       - name: clearMaterial
+        related:
+          - setMaterial
         keywords: ["material","reset","default","unset","no material"]
         return: "void"
         signatures:
@@ -7959,6 +9008,7 @@ categories:
       - name: setCameraPosition
         related:
           - getCameraPosition
+          - getPosition
         keywords: ["camera position","eye","specular","view vector","viewpoint"]
         return: "void"
         signatures:
@@ -7976,6 +9026,8 @@ categories:
         related:
           - Environment
           - getEnvironment
+          - addLight
+          - setMaterial
         keywords: ["ibl","environment","skybox","hdri","ambient","image based lighting"]
         return: "void"
         signatures:
@@ -8003,6 +9055,8 @@ categories:
         related:
           - Light
           - endShadowPass
+          - shadowDraw
+          - addLight
         keywords: ["shadow","depth pass","shadow map","begin","light view"]
         return: "void"
         signatures:
@@ -8031,6 +9085,7 @@ categories:
       - name: shadowDraw
         related:
           - Mesh
+          - drawMesh
         keywords: ["shadow","depth","shadow map","render shadow","caster"]
         return: "void"
         signatures:
@@ -8073,6 +9128,8 @@ categories:
       - name: calculateLighting
         related:
           - Material
+          - Light
+          - addLight
         keywords: ["lighting","cpu","shade","compute light","illumination","normal"]
         return: "Color"
         signatures:
@@ -8180,6 +9237,8 @@ categories:
       - name: Mat4_lookAt
         related:
           - Mat4
+          - setTarget
+          - Mat4_perspective
         keywords: ["view","camera","matrix","look","eye target"]
         sketch: true
         return: "Mat4"
@@ -8194,6 +9253,7 @@ categories:
       - name: Mat4_ortho
         related:
           - Mat4
+          - setupScreenOrtho
         keywords: ["orthographic","projection","matrix","2d","flat"]
         sketch: true
         return: "Mat4"
@@ -8208,6 +9268,9 @@ categories:
       - name: Mat4_perspective
         related:
           - Mat4
+          - setupScreenPerspective
+          - Mat4_lookAt
+          - setFov
         keywords: ["perspective","projection","matrix","frustum","fov","camera"]
         sketch: true
         return: "Mat4"
@@ -8237,6 +9300,8 @@ categories:
       - name: Quaternion_fromAxisAngle
         related:
           - Quaternion
+          - rotate
+          - Mat4_rotateX
         keywords: ["quaternion","axis angle","rotation","quat","spin"]
         sketch: true
         return: "Quaternion"
@@ -8251,6 +9316,7 @@ categories:
       - name: Quaternion_fromEuler
         related:
           - Quaternion
+          - rotate
         keywords: ["quaternion","euler","rotation","pitch yaw roll","quat"]
         sketch: true
         return: "Quaternion"
@@ -8267,6 +9333,8 @@ categories:
       - name: Quaternion_slerp
         related:
           - Quaternion
+          - lerp
+          - rotateTo
         keywords: ["slerp","interpolate","quaternion","rotation","blend","smooth"]
         sketch: true
         return: "Quaternion"
@@ -8289,6 +9357,10 @@ categories:
       - name: drawMesh
         related:
           - Mesh
+          - createMesh
+          - setMaterial
+          - createBox
+          - createSphere
         keywords: ["mesh","model","geometry","render","ofMesh","vertices"]
         return: "void"
         signatures:
@@ -8301,6 +9373,10 @@ categories:
         snippet: "drawMesh(${1:mesh})"
 
       - name: drawPolyline
+        related:
+          - Path
+          - drawCurve
+          - beginShape
         keywords: ["polyline","line strip","path","curve","ofPolyline","outline"]
         return: "void"
         signatures:
@@ -8315,6 +9391,8 @@ categories:
       - name: createBox
         related:
           - Mesh
+          - drawBox
+          - drawMesh
         keywords: ["box","cube","rectangular","block","ofBoxPrimitive","primitive"]
         return: "Mesh"
         signatures:
@@ -8331,6 +9409,7 @@ categories:
       - name: createPlane
         related:
           - Mesh
+          - drawMesh
         keywords: ["plane","quad","flat","grid","ofPlanePrimitive","subdivided"]
         return: "Mesh"
         signatures:
@@ -8345,6 +9424,7 @@ categories:
       - name: createCylinder
         related:
           - Mesh
+          - drawMesh
         keywords: ["cylinder","tube","pipe","ofCylinderPrimitive","primitive"]
         return: "Mesh"
         signatures:
@@ -8359,6 +9439,8 @@ categories:
       - name: createCone
         related:
           - Mesh
+          - drawCone
+          - drawMesh
         keywords: ["cone","pyramid","spike","ofConePrimitive","primitive"]
         return: "Mesh"
         signatures:
@@ -8373,6 +9455,8 @@ categories:
       - name: createIcoSphere
         related:
           - Mesh
+          - createSphere
+          - createCapsule
         keywords: ["icosphere","geodesic","ball","sphere","uniform sphere","ofIcoSpherePrimitive"]
         return: "Mesh"
         signatures:
@@ -8387,6 +9471,7 @@ categories:
       - name: createTorus
         related:
           - Mesh
+          - drawMesh
         keywords: ["torus","donut","ring","doughnut","primitive"]
         return: "Mesh"
         signatures:
@@ -8401,6 +9486,9 @@ categories:
       - name: createSphere
         related:
           - Mesh
+          - drawSphere
+          - createIcoSphere
+          - drawMesh
         keywords: ["sphere","ball","globe","round","ofSpherePrimitive","primitive"]
         return: "Mesh"
         signatures:
@@ -8415,6 +9503,8 @@ categories:
       - name: createCapsule
         related:
           - Mesh
+          - createCylinder
+          - createSphere
         keywords: ["capsule","pill","stadium","rounded cylinder","primitive"]
         return: "Mesh"
         signatures:
@@ -8429,6 +9519,9 @@ categories:
       - name: drawTexture
         related:
           - Texture
+          - createTexture
+          - Image
+          - drawSubsection
         keywords: ["texture","image","blit","draw image","ofTexture","quad"]
         return: "void"
         signatures:
@@ -8451,6 +9544,12 @@ categories:
     name_ko: "그래픽 - 텍스처 & GPU"
     functions:
       - name: Texture
+        related:
+          - Image
+          - Fbo
+          - Pixels
+          - drawTexture
+          - setTexture
         keywords: ["image","bitmap","gpu","surface","sampler"]
         return: ""
         signatures:
@@ -8465,6 +9564,8 @@ categories:
       - name: createTexture
         related:
           - Texture
+          - createFbo
+          - createPixels
         keywords: ["image","make","new","gpu","factory"]
         return: "Texture@"
         signatures:
@@ -8491,6 +9592,8 @@ categories:
       - name: loadFromPixels
         related:
           - Pixels
+          - readToPixels
+          - Image
         keywords: ["upload","buffer","data","raw","memory"]
         return: "bool"
         signatures:
@@ -8503,6 +9606,9 @@ categories:
         snippet: "loadFromPixels(${1:pixels})"
 
       - name: bind
+        related:
+          - setTexture
+          - Shader
         keywords: ["attach","activate","use","select"]
         return: "void"
         signatures:
@@ -8555,6 +9661,7 @@ categories:
       - name: channelCount
         related:
           - TextureFormat
+          - PixelFormat
         keywords: ["channels","components","rgba","format","count"]
         return: "int"
         signatures:
@@ -8568,6 +9675,7 @@ categories:
       - name: bytesPerPixel
         related:
           - TextureFormat
+          - PixelFormat
         keywords: ["bpp","stride","size","format","byte"]
         return: "int"
         signatures:
@@ -8597,6 +9705,11 @@ categories:
     name_ko: "그래픽 - FBO"
     functions:
       - name: Fbo
+        related:
+          - Texture
+          - Shader
+          - beginShadowPass
+          - saveScreenshot
         keywords: ["framebuffer","rendertarget","offscreen","buffer","rendertexture"]
         return: ""
         signatures:
@@ -8611,6 +9724,7 @@ categories:
       - name: createFbo
         related:
           - Fbo
+          - createTexture
         keywords: ["framebuffer","rendertarget","offscreen","make","factory"]
         return: "Fbo@"
         signatures:
@@ -8623,6 +9737,9 @@ categories:
         snippet: "Fbo@ fbo = createFbo();"
 
       - name: allocate
+        related:
+          - isAllocated
+          - TextureFormat
         keywords: ["alloc","create","init","reserve","size"]
         return: "void"
         signatures:
@@ -8665,6 +9782,8 @@ categories:
           - Texture
           - setTexture
           - getTextureCount
+          - drawTexture
+          - drawMesh
         keywords: ["image","result","output","surface"]
         return: "Texture&"
         signatures:
@@ -8679,6 +9798,9 @@ categories:
       - name: readToPixels
         related:
           - Pixels
+          - captureWindow
+          - grabScreen
+          - loadFromPixels
         keywords: ["readback","download","cpu","grab","capture"]
         return: "void"
         signatures:
@@ -8696,6 +9818,12 @@ categories:
     name_ko: "그래픽 - 셰이더"
     functions:
       - name: Shader
+        related:
+          - FullscreenShader
+          - setUniform
+          - setTexture
+          - pushShader
+          - Fbo
         keywords: ["glsl","program","material","effect","fragment"]
         return: ""
         signatures:
@@ -8753,6 +9881,8 @@ categories:
       - name: pushShader
         related:
           - popShader
+          - pushStyle
+          - pushMatrix
         keywords: ["bind","stack","apply","use"]
         return: "void"
         signatures:
@@ -8777,6 +9907,10 @@ categories:
         sketch: false
 
       - name: setUniform
+        related:
+          - setTexture
+          - Mat4
+          - Vec3
         keywords: ["parameter","variable","value","param","input"]
         return: "void"
         signatures:
@@ -8806,6 +9940,12 @@ categories:
       - name: setTexture
         related:
           - getTexture
+          - setLut
+          - setBlend
+          - Texture
+          - Fbo
+          - setUniform
+          - bind
         keywords: ["sampler","image","bind","slot","input"]
         return: "void"
         signatures:
@@ -8822,6 +9962,12 @@ categories:
     name_ko: "타입 - Pixels"
     functions:
       - name: Pixels
+        related:
+          - Image
+          - Texture
+          - loadFromPixels
+          - grabScreen
+          - captureWindow
         keywords: ["bitmap","buffer","raw","imagedata","memory"]
         return: ""
         signatures:
@@ -8836,6 +9982,7 @@ categories:
       - name: createPixels
         related:
           - Pixels
+          - createTexture
         keywords: ["bitmap","buffer","make","factory","raw"]
         return: "Pixels@"
         signatures:
@@ -8863,6 +10010,8 @@ categories:
         related:
           - getDataPath
           - getDataPathRoot
+          - getColor
+          - loadFromPixels
         keywords: ["pointer","raw","buffer","bytes","memory"]
         return: "uint8_t*"
         signatures:
@@ -8919,6 +10068,10 @@ categories:
       - name: createMesh
         related:
           - Mesh
+          - drawMesh
+          - createBox
+          - createSphere
+          - beginShape
         keywords: ["geometry","model","vbo","vertices","factory"]
         return: "Mesh@"
         signatures:
@@ -8931,6 +10084,12 @@ categories:
         snippet: "Mesh@ mesh = createMesh();"
 
       - name: Mesh
+        related:
+          - StrokeMesh
+          - Path
+          - drawMesh
+          - Material
+          - PrimitiveMode
         keywords: ["geometry","model","vbo","vertices","primitive","ofmesh"]
         return: ""
         signatures:
@@ -8943,6 +10102,9 @@ categories:
         snippet: "Mesh()"
 
       - name: setMode
+        related:
+          - PrimitiveMode
+          - PrimitiveType
         keywords: ["primitive","triangles","lines","points","topology"]
         return: "void"
         signatures:
@@ -8958,6 +10120,11 @@ categories:
         related:
           - StrokeMesh
           - addVertexWithWidth
+          - addColor
+          - addNormal
+          - addTexCoord
+          - addIndex
+          - vertex
         keywords: ["point","vert","position","append","push"]
         return: "void"
         signatures:
@@ -8972,6 +10139,9 @@ categories:
         snippet: "addVertex(${1:x}, ${2:y}, ${3:0})"
 
       - name: addColor
+        related:
+          - addVertex
+          - setColor
         keywords: ["vertex color","rgba","tint","per vertex"]
         return: "void"
         signatures:
@@ -8986,6 +10156,9 @@ categories:
         snippet: "addColor(${1:1}, ${2:1}, ${3:1}, ${4:1})"
 
       - name: addTexCoord
+        related:
+          - addVertex
+          - setTexture
         keywords: ["uv","texture","mapping","st"]
         return: "void"
         signatures:
@@ -8998,6 +10171,9 @@ categories:
         snippet: "addTexCoord(${1:u}, ${2:v})"
 
       - name: addNormal
+        related:
+          - addVertex
+          - calculateLighting
         keywords: ["normal","lighting","surface","shading"]
         return: "void"
         signatures:
@@ -9010,6 +10186,9 @@ categories:
         snippet: "addNormal(${1:x}, ${2:y}, ${3:z})"
 
       - name: addIndex
+        related:
+          - addTriangle
+          - addVertex
         keywords: ["index","element","ibo","face","topology"]
         return: "void"
         signatures:
@@ -9022,6 +10201,9 @@ categories:
         snippet: "addIndex(${1:index})"
 
       - name: addTriangle
+        related:
+          - addIndex
+          - addVertex
         keywords: ["triangle","face","tri","indices"]
         return: "void"
         signatures:
@@ -9068,6 +10250,8 @@ categories:
       - name: createPath
         related:
           - Path
+          - createStrokeMesh
+          - beginShape
         keywords: ["shape","outline","contour","factory","vector"]
         return: "Path@"
         signatures:
@@ -9080,6 +10264,12 @@ categories:
         snippet: "Path@ path = createPath();"
 
       - name: Path
+        related:
+          - StrokeMesh
+          - Mesh
+          - getStringPath
+          - drawStroke
+          - beginShape
         keywords: ["shape","outline","contour","vector","ofpath","polyline"]
         return: ""
         signatures:
@@ -9104,6 +10294,11 @@ categories:
         snippet: "addVertex(${1:x}, ${2:y})"
 
       - name: lineTo
+        related:
+          - bezierTo
+          - curveTo
+          - arc
+          - moveTo
         keywords: ["line","segment","straight","draw to"]
         return: "void"
         signatures:
@@ -9116,6 +10311,11 @@ categories:
         snippet: "lineTo(${1:x}, ${2:y})"
 
       - name: bezierTo
+        related:
+          - quadBezierTo
+          - curveTo
+          - lineTo
+          - drawBezier
         keywords: ["bezier","cubic","curve","spline"]
         return: "void"
         signatures:
@@ -9128,6 +10328,9 @@ categories:
         snippet: "bezierTo(${1:cx1}, ${2:cy1}, ${3:cx2}, ${4:cy2}, ${5:x}, ${6:y})"
 
       - name: quadBezierTo
+        related:
+          - bezierTo
+          - drawBezier
         keywords: ["bezier","quadratic","curve","spline"]
         return: "void"
         signatures:
@@ -9140,6 +10343,10 @@ categories:
         snippet: "quadBezierTo(${1:cx}, ${2:cy}, ${3:x}, ${4:y})"
 
       - name: curveTo
+        related:
+          - bezierTo
+          - lineTo
+          - drawCurve
         keywords: ["catmull","spline","smooth","curve"]
         return: "void"
         signatures:
@@ -9152,6 +10359,10 @@ categories:
         snippet: "curveTo(${1:x}, ${2:y})"
 
       - name: arc
+        related:
+          - drawArc
+          - appendArc
+          - lineTo
         keywords: ["circle","round","sweep","angle"]
         return: "void"
         signatures:
@@ -9164,6 +10375,9 @@ categories:
         snippet: "arc(${1:x}, ${2:y}, ${3:rX}, ${4:rY}, ${5:0}, ${6:360})"
 
       - name: close
+        related:
+          - setClosed
+          - beginShape
         keywords: ["close","loop","join","finish"]
         return: "void"
         signatures:
@@ -9186,6 +10400,9 @@ categories:
       - name: createStrokeMesh
         related:
           - StrokeMesh
+          - beginStroke
+          - Path
+          - drawStroke
         keywords: ["stroke","thick line","outline","factory","polyline"]
         return: "StrokeMesh@"
         signatures:
@@ -9201,6 +10418,8 @@ categories:
         related:
           - StrokeMesh
           - getWidth
+          - setStrokeWeight
+          - addVertexWithWidth
         keywords: ["thickness","weight","size","line width"]
         return: "StrokeMesh&"
         signatures:
@@ -9227,6 +10446,8 @@ categories:
       - name: setCapType
         related:
           - StrokeMesh
+          - setStrokeCap
+          - StrokeCap
         keywords: ["cap","endcap","butt","round","square"]
         return: "StrokeMesh&"
         signatures:
@@ -9241,6 +10462,9 @@ categories:
       - name: setJoinType
         related:
           - StrokeMesh
+          - setStrokeJoin
+          - StrokeJoin
+          - setMiterLimit
         keywords: ["join","corner","miter","bevel","round"]
         return: "StrokeMesh&"
         signatures:
@@ -9255,6 +10479,8 @@ categories:
       - name: setMiterLimit
         related:
           - StrokeMesh
+          - setJoinType
+          - StrokeJoin
         keywords: ["miter","corner","sharp","limit"]
         return: "StrokeMesh&"
         signatures:
@@ -9287,6 +10513,8 @@ categories:
       - name: addVertexWithWidth
         related:
           - StrokeMesh
+          - addVertex
+          - setWidth
         keywords: ["variable width","taper","point","thickness"]
         return: "StrokeMesh&"
         signatures:
@@ -9302,6 +10530,7 @@ categories:
         related:
           - StrokeMesh
           - Path
+          - setClosed
         keywords: ["path","outline","geometry","from path"]
         return: "StrokeMesh&"
         signatures:
@@ -9316,6 +10545,8 @@ categories:
       - name: setClosed
         related:
           - StrokeMesh
+          - setShape
+          - close
         keywords: ["closed","loop","open","join"]
         return: "StrokeMesh&"
         signatures:
@@ -9372,6 +10603,10 @@ categories:
     name_ko: "비디오"
     functions:
       - name: VideoPlayer
+        related:
+          - createVideoPlayer
+          - Texture
+          - Sound
         keywords: ["movie","video","playback","ofvideoplayer","film"]
         platforms: [macos, windows, linux, ios, wasm]
         platformNote: "Video playback is a stub on Android: loadPlatform() logs \"Not yet implemented on Android\" and returns false; every platform hook is no-op (MediaCodec NDK TODO). Real backends: macOS/iOS AVFoundation, Windows Media Foundation, Linux FFmpeg, web HTML5 <video>."
@@ -9387,6 +10622,9 @@ categories:
         snippet: "VideoPlayer()"
 
       - name: createVideoPlayer
+        related:
+          - VideoPlayer
+          - getTexture
         keywords: ["movie","video","factory","playback"]
         return: "VideoPlayer@"
         signatures:
@@ -9519,6 +10757,9 @@ categories:
         snippet: "isPaused()"
 
       - name: isFrameNew
+        related:
+          - getTexture
+          - update
         keywords: ["new frame","fresh","updated","changed"]
         return: "bool"
         signatures:
@@ -9921,6 +11162,7 @@ categories:
       - name: extractFrame
         related:
           - Pixels
+          - VideoPlayer
         keywords: ["thumbnail","snapshot","grab","single frame","poster"]
         platforms: [macos]
         platformNote: "Static single-frame extraction is fully implemented only on macOS (AVAssetImageGenerator). Windows/Linux/Android stub it (`return false`, TODO); iOS and web have no extractFramePlatform() definition at all."
@@ -9936,6 +11178,10 @@ categories:
         snippet: "VideoPlayer::extractFrame(${1:\"video.mp4\"}, pixels, ${2:0.0})"
 
       - name: ScreenRecorder
+        related:
+          - VideoWriter
+          - startRecording
+          - Fbo
         keywords: ["capture","record","screencast","grab","mp4"]
         platforms: [macos, windows, linux, ios, android]
         platformNote: "Built on VideoWriter, so it is non-functional on web (writer.open() fails). Works on all native platforms. macOS additionally uses an async zero-copy swapchain capture path (TC_ASYNC_SCREEN_CAPTURE / lockFrame+submitFrame); others fall back to synchronous grabScreen()."
@@ -9977,6 +11223,9 @@ categories:
         snippet: "stop()"
 
       - name: VideoWriter
+        related:
+          - ScreenRecorder
+          - videoCodecName
         keywords: ["encode","export","render","offline","mp4"]
         platforms: [macos, windows, linux, ios, android]
         platformNote: "Video encoding is a stub on web: openPlatform() logs 'not implemented on web yet' and returns false (WebGPU can't sync-read pixels; a future JS MediaRecorder backend is noted). Real backends: macOS/iOS AVAssetWriter, Windows IMFSinkWriter, Linux GStreamer, Android MediaCodec."
@@ -10010,6 +11259,7 @@ categories:
           - Fbo
           - Pixels
           - addFrameAt
+          - open
         keywords: ["append","write","encode","feed"]
         return: "bool"
         signatures:
@@ -10058,6 +11308,7 @@ categories:
       - name: videoCodecName
         related:
           - VideoCodec
+          - VideoWriter
         keywords: ["codec","h264","hevc","prores","format"]
         return: "const char *"
         signatures:
@@ -10074,6 +11325,11 @@ categories:
     name_ko: "애드온: tcxLut (컬러 그레이딩)"
     functions:
       - name: tcx::lut::Lut3D
+        related:
+          - tcx::lut::LutShader
+          - tcx::lut::createIdentity
+          - tcx::lut::createCinematic
+          - Texture
         keywords: ["lut","color grading","cube","color lookup","grade"]
         return: ""
         signatures:
@@ -10129,6 +11385,10 @@ categories:
         sketch: false
 
       - name: tcx::lut::createIdentity
+        related:
+          - tcx::lut::createVintage
+          - tcx::lut::createCinematic
+          - tcx::lut::Lut3D
         keywords: ["identity","neutral","passthrough","no change","lut"]
         return: "Lut3D"
         signatures:
@@ -10140,6 +11400,10 @@ categories:
         sketch: false
 
       - name: tcx::lut::createVintage
+        related:
+          - tcx::lut::createWarm
+          - tcx::lut::createPastel
+          - tcx::lut::Lut3D
         keywords: ["vintage","faded","retro","old film","lut"]
         return: "Lut3D"
         signatures:
@@ -10151,6 +11415,10 @@ categories:
         sketch: false
 
       - name: tcx::lut::createCinematic
+        related:
+          - tcx::lut::createCyberpunk
+          - tcx::lut::createWarm
+          - tcx::lut::Lut3D
         keywords: ["cinematic","orange teal","film","movie look","lut"]
         return: "Lut3D"
         signatures:
@@ -10162,6 +11430,9 @@ categories:
         sketch: false
 
       - name: tcx::lut::createFilmNoir
+        related:
+          - tcx::lut::createVintage
+          - tcx::lut::createCool
         keywords: ["noir","black white","monochrome","contrast","lut"]
         return: "Lut3D"
         signatures:
@@ -10173,6 +11444,9 @@ categories:
         sketch: false
 
       - name: tcx::lut::createWarm
+        related:
+          - tcx::lut::createCool
+          - tcx::lut::createVintage
         keywords: ["warm","orange","sunset","color shift","lut"]
         return: "Lut3D"
         signatures:
@@ -10184,6 +11458,9 @@ categories:
         sketch: false
 
       - name: tcx::lut::createCool
+        related:
+          - tcx::lut::createWarm
+          - tcx::lut::createCyberpunk
         keywords: ["cool","blue","cold","color shift","lut"]
         return: "Lut3D"
         signatures:
@@ -10195,6 +11472,9 @@ categories:
         sketch: false
 
       - name: tcx::lut::createCyberpunk
+        related:
+          - tcx::lut::createCinematic
+          - tcx::lut::createCool
         keywords: ["cyberpunk","neon","pink cyan","synthwave","lut"]
         return: "Lut3D"
         signatures:
@@ -10206,6 +11486,9 @@ categories:
         sketch: false
 
       - name: tcx::lut::createPastel
+        related:
+          - tcx::lut::createVintage
+          - tcx::lut::createWarm
         keywords: ["pastel","soft","muted","light colors","lut"]
         return: "Lut3D"
         signatures:
@@ -10217,6 +11500,12 @@ categories:
         sketch: false
 
       - name: tcx::lut::LutShader
+        related:
+          - tcx::lut::Lut3D
+          - setTexture
+          - setLut
+          - Shader
+          - Fbo
         keywords: ["lut shader","color grading","grade","filter","effect"]
         return: ""
         signatures:
@@ -10239,6 +11528,10 @@ categories:
         sketch: false
 
       - name: setLut
+        related:
+          - setTexture
+          - setBlend
+          - tcx::lut::Lut3D
         keywords: ["lut","apply lut","lookup","grade","color"]
         return: "void"
         signatures:
@@ -10252,6 +11545,7 @@ categories:
       - name: setBlend
         related:
           - setBlendMode
+          - setLut
         keywords: ["blend","mix","amount","opacity","strength"]
         return: "void"
         signatures:
@@ -10297,6 +11591,8 @@ categories:
       - name: callAfter
         related:
           - callAfterAsync
+          - callEvery
+          - cancelTimer
         keywords: ["timer","delay","timeout","schedule","later"]
         return: "uint64_t"
         signatures:
@@ -10311,6 +11607,8 @@ categories:
       - name: callEvery
         related:
           - callEveryAsync
+          - callAfter
+          - cancelTimer
         keywords: ["timer","interval","repeat","schedule","periodic"]
         return: "uint64_t"
         signatures:
@@ -10323,6 +11621,10 @@ categories:
         snippet: "callEvery(0.5, [this]() {\n\t$0\n});"
 
       - name: callAfterAsync
+        related:
+          - callEveryAsync
+          - cancelAsyncTimer
+          - callAfter
         keywords: ["timer","delay","thread","precise","background"]
         return: "uint64_t"
         signatures:
@@ -10335,6 +11637,10 @@ categories:
         snippet: "callAfterAsync(1.0, [this]() {\n\t$0\n});"
 
       - name: callEveryAsync
+        related:
+          - callAfterAsync
+          - cancelAsyncTimer
+          - callEvery
         keywords: ["timer","interval","clock","scheduler","background"]
         return: "uint64_t"
         signatures:
@@ -10347,6 +11653,10 @@ categories:
         snippet: "callEveryAsync(0.5, [this]() {\n\t$0\n});"
 
       - name: cancelTimer
+        related:
+          - cancelAllTimers
+          - callAfter
+          - callEvery
         keywords: ["timer","stop","clear","remove","cancel"]
         return: "void"
         signatures:
@@ -10359,6 +11669,9 @@ categories:
         snippet: "cancelTimer(id);"
 
       - name: cancelAllTimers
+        related:
+          - cancelTimer
+          - cancelAllAsyncTimers
         keywords: ["timer","stop","clear","remove","cancel"]
         return: "void"
         signatures:
@@ -10371,6 +11684,10 @@ categories:
         snippet: "cancelAllTimers();"
 
       - name: cancelAsyncTimer
+        related:
+          - cancelAllAsyncTimers
+          - callAfterAsync
+          - callEveryAsync
         keywords: ["timer","stop","async","clear","cancel"]
         return: "void"
         signatures:
@@ -10383,6 +11700,9 @@ categories:
         snippet: "cancelAsyncTimer(id);"
 
       - name: cancelAllAsyncTimers
+        related:
+          - cancelAsyncTimer
+          - cancelAllTimers
         keywords: ["timer","stop","async","clear","cancel"]
         return: "void"
         signatures:
@@ -10405,6 +11725,9 @@ categories:
       - name: listNetworkInterfaces
         related:
           - NetworkInterface
+          - printNetworkInterfaces
+          - getLocalIp
+          - getLocalIps
         keywords: ["network","interface","ip","adapter","nic"]
         platforms: [windows, macos, linux, ios, android]
         platformNote: "Enumerate NICs (IP/MAC/netmask/up/loopback). Windows uses GetAdaptersAddresses; macOS/iOS/Linux/Android use getifaddrs (+ AF_LINK on Apple, AF_PACKET elsewhere). On wasm it is an explicit stub: logs 'listNetworkInterfaces() is not available on the web backend' and returns {}. Its consumers getLocalIp() / getLocalIps() / printNetworkInterfaces() therefore also yield nothing on wasm."
@@ -10420,6 +11743,9 @@ categories:
         snippet: "listNetworkInterfaces()"
 
       - name: printNetworkInterfaces
+        related:
+          - listNetworkInterfaces
+          - getLocalIps
         keywords: ["network","interface","log","print","ip"]
         return: "void"
         signatures:
@@ -10432,6 +11758,10 @@ categories:
         snippet: "printNetworkInterfaces()"
 
       - name: getLocalIp
+        related:
+          - getLocalIps
+          - listNetworkInterfaces
+          - isPrivate
         keywords: ["ip","address","lan","local","host"]
         return: "std::string"
         signatures:
@@ -10444,6 +11774,9 @@ categories:
         snippet: "getLocalIp()"
 
       - name: getLocalIps
+        related:
+          - getLocalIp
+          - listNetworkInterfaces
         keywords: ["ip","address","lan","local","list"]
         return: "std::vector<std::string>"
         signatures:
@@ -10456,6 +11789,9 @@ categories:
         snippet: "getLocalIps()"
 
       - name: isLoopback
+        related:
+          - isPrivate
+          - isLinkLocal
         keywords: ["loopback","localhost","127.0.0.1","ip"]
         return: "bool"
         signatures:
@@ -10468,6 +11804,10 @@ categories:
         snippet: "isLoopback(${1:addr})"
 
       - name: isPrivate
+        related:
+          - isLoopback
+          - isLinkLocal
+          - sameSubnet
         keywords: ["private","lan","rfc1918","internal","ip"]
         return: "bool"
         signatures:
@@ -10480,6 +11820,9 @@ categories:
         snippet: "isPrivate(${1:addr})"
 
       - name: isLinkLocal
+        related:
+          - isLoopback
+          - isPrivate
         keywords: ["link local","apipa","169.254","ip"]
         return: "bool"
         signatures:
@@ -10492,6 +11835,9 @@ categories:
         snippet: "isLinkLocal(${1:addr})"
 
       - name: sameSubnet
+        related:
+          - isPrivate
+          - getLocalIp
         keywords: ["subnet","netmask","network","same lan","match"]
         return: "bool"
         signatures:
@@ -10504,6 +11850,8 @@ categories:
         snippet: "sameSubnet(${1:a}, ${2:b}, ${3:netmask})"
 
       - name: getOui
+        related:
+          - isLocallyAdministered
         keywords: ["mac","oui","vendor","manufacturer","address"]
         return: "std::string"
         signatures:
@@ -10516,6 +11864,8 @@ categories:
         snippet: "getOui(${1:mac})"
 
       - name: isLocallyAdministered
+        related:
+          - getOui
         keywords: ["mac","random","virtual","laa","address"]
         return: "bool"
         signatures:
@@ -10561,6 +11911,9 @@ enums:
         description: "No blending (overwrite)"
 
   - name: TextureFilter
+    related:
+      - TextureWrap
+      - Texture
     keywords: ["filter","nearest","linear","bilinear","smoothing","interpolation","sampling"]
     description: ""
     description_ja: ""
@@ -10575,6 +11928,9 @@ enums:
         description: "Bilinear interpolation (default)"
 
   - name: TextureWrap
+    related:
+      - TextureFilter
+      - Texture
     keywords: ["wrap","repeat","clamp","tile","mirror","edge","uv"]
     description: ""
     description_ja: ""
@@ -10704,6 +12060,9 @@ enums:
         value: 26
 
   - name: Modifier
+    related:
+      - isShiftPressed
+      - KeyEventArgs
     keywords: ["shift","ctrl","alt","cmd","meta","key","hotkey"]
     description: ""
     description_ja: ""
@@ -10722,6 +12081,9 @@ enums:
         value: 4
 
   - name: LightType
+    related:
+      - Light
+      - addLight
     keywords: ["lighting","directional","point","spot","lamp","illumination","shading"]
     description: ""
     description_ja: ""
@@ -10744,6 +12106,8 @@ enums:
       - easeIn
       - easeOut
       - easeInOut
+      - EaseMode
+      - Tween
     keywords: ["easing","tween","curve","interpolation","animation","bounce","elastic"]
     description: ""
     description_ja: ""
@@ -10787,6 +12151,7 @@ enums:
   - name: EaseMode
     related:
       - ease
+      - EaseType
     keywords: ["easing","in","out","inout","direction","tween","animation"]
     description: ""
     description_ja: ""
@@ -10804,6 +12169,9 @@ enums:
         description: "Accelerate then decelerate"
 
   - name: Deliver
+    related:
+      - Event
+      - events
     keywords: ["dispatch","event","thread","queue","delivery","async","main thread"]
     description: ""
     description_ja: ""
@@ -10816,6 +12184,9 @@ enums:
         value: 1
 
   - name: MouseButton
+    related:
+      - getMouseButton
+      - MouseEventArgs
     keywords: ["mouse","button","click","left","right","middle"]
     description: ""
     description_ja: ""
@@ -10840,6 +12211,9 @@ enums:
       - channelCount
       - bytesPerPixel
       - isFloatFormat
+      - Texture
+      - TextureUsage
+      - PixelFormat
     keywords: ["format","pixel","rgba","bgra","channel","bit depth","encoding"]
     description: ""
     description_ja: ""
@@ -10881,6 +12255,9 @@ enums:
         description: "4ch, 16-bit unorm/ch (high-precision integer; texture-sharing interop)"
 
   - name: TextureUsage
+    related:
+      - Texture
+      - TextureFormat
     keywords: ["usage","gpu","render target","immutable","dynamic","stream","buffer"]
     description: ""
     description_ja: ""
@@ -10901,6 +12278,9 @@ enums:
         description: "For FBO color attachment"
 
   - name: WritingMode
+    related:
+      - TcyMode
+      - KinsokuLevel
     keywords: ["text","vertical","horizontal","tategaki","writing","direction","layout"]
     description: ""
     description_ja: ""
@@ -10919,6 +12299,9 @@ enums:
         description_ko: "위에서 아래로 열, 열은 오른쪽에서 왼쪽으로 (일본어 세로쓰기)"
 
   - name: ImageType
+    related:
+      - Image
+      - saveScreenshot
     keywords: ["image","format","grayscale","rgb","rgba","channels","color"]
     description: ""
     description_ja: ""
@@ -10933,6 +12316,10 @@ enums:
         description: "Grayscale"
 
   - name: PrimitiveMode
+    related:
+      - Mesh
+      - PrimitiveType
+      - drawMesh
     keywords: ["primitive","triangles","lines","points","strip","topology","draw mode"]
     description: ""
     description_ja: ""
@@ -10955,6 +12342,9 @@ enums:
         value: 6
 
   - name: PixelFormat
+    related:
+      - Pixels
+      - TextureFormat
     keywords: ["pixel","format","rgba","channel","bit depth","color","encoding"]
     description: ""
     description_ja: ""
@@ -10970,6 +12360,8 @@ enums:
     related:
       - setStrokeCap
       - getStrokeCap
+      - StrokeJoin
+      - StrokeMesh
     keywords: ["cap","stroke","line end","butt","round","square","outline"]
     description: ""
     description_ja: ""
@@ -10996,6 +12388,8 @@ enums:
     related:
       - setStrokeJoin
       - getStrokeJoin
+      - StrokeCap
+      - StrokeMesh
     keywords: ["join","stroke","corner","miter","round","bevel","line"]
     description: ""
     description_ja: ""
@@ -11019,6 +12413,9 @@ enums:
         description_ko: "베벨 모서리 조인"
 
   - name: PrimitiveType
+    related:
+      - PrimitiveMode
+      - Mesh
     keywords: ["primitive","triangle","line","point","topology","geometry","mesh"]
     description: ""
     description_ja: ""
@@ -11043,6 +12440,7 @@ enums:
       - applyWindow
       - fftReal
       - windowFunction
+      - WindowSettings
     keywords: ["window","fullscreen","borderless","decorated","mode","style"]
     description: ""
     description_ja: ""
@@ -11065,6 +12463,8 @@ enums:
   - name: Wave
     related:
       - wave
+      - ChipSound
+      - ChipSoundNote
     keywords: ["waveform","oscillator","sine","square","triangle","sawtooth","noise"]
     description: ""
     description_ja: ""
@@ -11110,6 +12510,7 @@ enums:
   - name: MixMode
     related:
       - setMixMode
+      - Sound
     keywords: ["mix","channel","routing","downmix","mono","audio","stereo"]
     description: ""
     description_ja: ""
@@ -11124,6 +12525,8 @@ enums:
   - name: Direction
     related:
       - ScrollBar
+      - LayoutDirection
+      - AxisMode
     keywords: ["direction","horizontal","vertical","axis","orientation","row","column"]
     description: ""
     description_ja: ""
@@ -11147,6 +12550,7 @@ enums:
   - name: LayoutDirection
     related:
       - LayoutMod
+      - Direction
     keywords: ["layout","flow","horizontal","vertical","row","column","stack"]
     description: ""
     description_ja: ""
@@ -11161,6 +12565,9 @@ enums:
         description: "HStack: left to right"
 
   - name: AxisMode
+    related:
+      - Direction
+      - LayoutMod
     keywords: ["axis","x","y","z","constraint","lock","free"]
     description: ""
     description_ja: ""
@@ -11200,6 +12607,8 @@ enums:
       - logAt
       - setConsoleLogLevel
       - setFileLogLevel
+      - Logger
+      - logNotice
     keywords: ["log","verbose","warning","error","severity","debug","level"]
     description: ""
     description_ja: ""
@@ -11226,6 +12635,8 @@ enums:
         description: "No output (for filtering)"
 
   - name: Beep
+    related:
+      - beep
     keywords: ["beep","sound","alert","tone","notification","sound effect"]
     description: ""
     description_ja: ""
@@ -11269,6 +12680,8 @@ enums:
   - name: VideoCodec
     related:
       - videoCodecName
+      - VideoRecordSettings
+      - startRecording
     keywords: ["video","codec","encoding","h264","compression","format","recording"]
     description: ""
     description_ja: ""
@@ -11313,6 +12726,7 @@ enums:
   - name: ThermalState
     related:
       - getThermalState
+      - getThermalTemperature
     keywords: ["thermal","temperature","heat","overheating","nominal","throttle","cpu"]
     description: ""
     description_ja: ""
@@ -11333,6 +12747,9 @@ enums:
         description: "Thermal throttling active, risk of shutdown"
 
   - name: TcyMode
+    related:
+      - WritingMode
+      - KinsokuLevel
     keywords: ["tcy","tate chu yoko","vertical text","digits","latin","rotation","japanese"]
     description: "Tate-chu-yoko: how Latin / digit runs are laid out within vertical text"
     description_ja: "縦中横: 縦書き内の Latin / 数字の連続の配置方法"
@@ -11356,6 +12773,9 @@ enums:
         description_ko: "라틴 / 숫자 연속을 한 셀에 압축 (다테추요코)"
 
   - name: KinsokuLevel
+    related:
+      - WritingMode
+      - TcyMode
     keywords: ["kinsoku","line break","wrapping","japanese","strictness","punctuation","vertical text"]
     description: "Line-breaking (kinsoku) strictness for vertical / Japanese text"
     description_ja: "縦書き / 日本語の禁則処理レベル"
@@ -11760,6 +13180,10 @@ keywords:
 # ==========================================================================
 types:
   - name: Vec2
+    related:
+      - Vec3
+      - Vec2_fromAngle
+      - Mat3
     keywords: ["vector","point","xy","2d","coordinate","glm vec2"]
     description: "2D vector (x, y)"
     description_ja: "2Dベクトル (x, y)"
@@ -11927,6 +13351,10 @@ types:
         snippet: "Vec2_fromAngle(${1:radians})"
 
   - name: Vec3
+    related:
+      - Vec2
+      - Vec4
+      - Quaternion
     keywords: ["vector","point","xyz","3d","coordinate","glm vec3"]
     description: "3D vector (x, y, z)"
     description_ja: "3Dベクトル (x, y, z)"
@@ -12064,6 +13492,9 @@ types:
         snippet: "xy()"
 
   - name: IVec2
+    related:
+      - Vec2
+      - IVec3
     keywords: ["integer vector","int point","pixel coord","grid","2d int"]
     description: "2D integer vector (x, y)"
     description_ja: "2D整数ベクトル (x, y)"
@@ -12098,6 +13529,9 @@ types:
         snippet: "toVec2()"
 
   - name: IVec3
+    related:
+      - Vec3
+      - IVec2
     keywords: ["integer vector","int point","voxel","grid","3d int"]
     description: "3D integer vector (x, y, z)"
     description_ja: "3D整数ベクトル (x, y, z)"
@@ -12146,6 +13580,9 @@ types:
         snippet: "xy()"
 
   - name: IVec2
+    related:
+      - Vec2
+      - IVec3
     keywords: ["integer vector","int point","pixel coord","grid","2d int"]
     description: "2D integer vector (x, y)"
     description_ja: "2D整数ベクトル (x, y)"
@@ -12176,6 +13613,9 @@ types:
         snippet: "toVec2()"
 
   - name: IVec3
+    related:
+      - Vec3
+      - IVec2
     keywords: ["integer vector","int point","voxel","grid","3d int"]
     description: "3D integer vector (x, y, z)"
     description_ja: "3D整数ベクトル (x, y, z)"
@@ -12218,6 +13658,11 @@ types:
         snippet: "xy()"
 
   - name: Color
+    related:
+      - ColorHSB
+      - ColorOKLCH
+      - setColor
+      - Color_fromHSB
     keywords: ["rgba","rgb","tint","paint","swatch","of color"]
     examples:
       - graphicsExample
@@ -12422,6 +13867,10 @@ types:
         snippet: "Color_fromBytes(${1:r}, ${2:g}, ${3:b})"
 
   - name: Rect
+    related:
+      - RectNode
+      - intersectRect
+      - drawRect
     keywords: ["rectangle","bounds","box","region","aabb","ofrectangle"]
     description: "Rectangle (x, y, width, height)"
     description_ja: "矩形 (x, y, width, height)"
@@ -12561,6 +14010,7 @@ types:
       - Quaternion_fromAxisAngle
       - Quaternion_fromEuler
       - Quaternion_slerp
+      - Mat4
     keywords: ["rotation","orientation","quat","slerp","spin"]
     description: "Unit quaternion for 3D rotations"
     description_ja: "3D回転用単位クォータニオン"
@@ -12846,6 +14296,10 @@ types:
   - name: Image
     related:
       - bindCursorImage
+      - Texture
+      - Pixels
+      - drawTexture
+      - loadFromPixels
     keywords: ["picture","photo","bitmap","sprite","of image"]
     description: "Image with CPU pixels and GPU texture"
     description_ja: "CPUピクセルとGPUテクスチャを持つ画像"
@@ -13065,6 +14519,8 @@ types:
       - drawTexture
       - createTexture
       - getTexture
+      - Image
+      - Fbo
     keywords: ["gpu image","sampler","tex","of texture","surface"]
     description: "GPU texture for rendering"
     description_ja: "レンダリング用GPUテクスチャ"
@@ -13285,6 +14741,9 @@ types:
       - createFbo
       - addFrame
       - addFrameAt
+      - Texture
+      - FullscreenShader
+      - Shader
     keywords: ["framebuffer","render target","offscreen","render texture","of fbo"]
     description: "Framebuffer object for offscreen rendering"
     description_ja: "オフスクリーンレンダリング用FBO"
@@ -13417,6 +14876,9 @@ types:
       - getStringPath
       - createPath
       - setShape
+      - StrokeMesh
+      - drawStroke
+      - Mesh
     keywords: ["polyline","shape","contour","outline","vector path","of path"]
     description: "Path/Polyline for lines and curves"
     description_ja: "線と曲線のパス/ポリライン"
@@ -13632,7 +15094,6 @@ types:
       - createCylinder
       - createCone
       - createIcoSphere
-      - createTorus
     keywords: ["geometry","model","vertices","triangles","vbo","of mesh"]
     description: "3D mesh with vertices, colors, normals, indices"
     description_ja: "頂点・色・法線・インデックスを持つ3Dメッシュ"
@@ -14041,6 +15502,10 @@ types:
     related:
       - createSound
       - build
+      - ChipSound
+      - play
+      - AudioEngine
+      - SoundBuffer
     keywords: ["audio","player","sfx","music","of sound player"]
     description: "Audio playback"
     description_ja: "オーディオ再生"
@@ -14193,6 +15658,9 @@ types:
   - name: Font
     related:
       - createFont
+      - drawString
+      - Glyph
+      - getStringPath
     keywords: ["typeface","ttf","truetype","text","glyph","of true type font"]
     description: "TrueType font for text rendering"
     description_ja: "テキストレンダリング用TrueTypeフォント"
@@ -14354,6 +15822,8 @@ types:
   - name: FileWriter
     related:
       - createFileWriter
+      - FileReader
+      - saveTextFile
     keywords: ["write file","output stream","save","log writer","ofstream"]
     description: "Streaming file writer with immediate flush"
     description_ja: "即時フラッシュ付きストリーミングファイルライター"
@@ -14421,6 +15891,8 @@ types:
   - name: FileReader
     related:
       - createFileReader
+      - FileWriter
+      - loadTextFile
     keywords: ["read file","input stream","load","ifstream","parse file"]
     description: "Streaming file reader for large files"
     description_ja: "大きなファイル用ストリーミングファイルリーダー"
@@ -14518,6 +15990,10 @@ types:
     related:
       - lerp
       - toHSB
+      - Color
+      - ColorOKLCH
+      - setColorHSB
+      - colorFromHSB
     keywords: ["hsv","hue","saturation","brightness","color space"]
     description: "HSB color space (H/S/B: 0-1)"
     description_ja: "HSB色空間 (H/S/B: 0-1)"
@@ -14529,6 +16005,10 @@ types:
     related:
       - lerp
       - toOKLCH
+      - Color
+      - ColorHSB
+      - ColorOKLab
+      - setColorOKLCH
     keywords: ["oklch","perceptual","lightness","chroma","color space"]
     description: "Perceptually uniform OKLCH color"
     description_ja: "知覚均一なOKLCHカラー"
@@ -14537,6 +16017,11 @@ types:
     sketch: false
 
   - name: ChipSound
+    related:
+      - ChipSoundNote
+      - ChipSoundBundle
+      - Sound
+      - Wave
     keywords: ["chiptune","8bit","synth","retro audio","nes sound"]
     description: "Chip/synthesized sound generation"
     description_ja: "チップ/合成サウンド生成"
@@ -14549,6 +16034,9 @@ types:
       - addLight
       - removeLight
       - beginShadowPass
+      - Material
+      - LightType
+      - Environment
     keywords: ["lamp","lighting","directional","point","spot","illumination"]
     description: "Light source for 3D PBR rendering (directional, point, or spot)"
     description_ja: "3D PBR用light（directional, point, spot）"
@@ -14892,6 +16380,9 @@ types:
     related:
       - setMaterial
       - calculateLighting
+      - Light
+      - Mesh
+      - Environment
     keywords: ["pbr","shader surface","metallic","roughness","gltf"]
     description: "PBR material (metallic-roughness workflow, glTF 2.0 compatible)"
     description_ja: "PBR material（metallic-roughness、glTF 2.0互換）"
@@ -15205,6 +16696,9 @@ types:
         snippet: "Material::fromPhong(${1:diffuse}, ${2:specular}, ${3:32.0f})"
 
   - name: IesProfile
+    related:
+      - Light
+      - setMaterial
     keywords: ["ies","photometric","light distribution","luminaire","intensity profile"]
     description: "IESNA LM-63 photometric profile for angular light intensity"
     description_ja: "IESNA LM-63配光profile（角度別の光強度分布）"
@@ -15269,6 +16763,9 @@ types:
     related:
       - setEnvironment
       - getEnvironment
+      - Light
+      - Material
+      - Fbo
     keywords: ["ibl","skybox","cubemap","ambient","hdr","reflection"]
     description: "IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT)"
     description_ja: "PBR ambient用IBL environment map（irradiance + prefilter + BRDF LUT）"
@@ -15348,6 +16845,9 @@ types:
   - name: EasyCam
     related:
       - createEasyCam
+      - setupScreenPerspective
+      - worldToScreen
+      - Ray
     keywords: ["camera","orbit","trackball","viewport","of easycam"]
     description: "3D camera with mouse control"
     description_ja: "マウス操作対応3Dカメラ"
@@ -15357,6 +16857,9 @@ types:
     sketch: false
 
   - name: Platform
+    related:
+      - GraphicsBackend
+      - BuildInfo
     keywords: ["os","operating system","target","compile time","device check"]
     description: "Compile-time OS detection. All methods are constexpr and resolve at compile time based on the target platform."
     description_ja: "コンパイル時のOS判定。全メソッドはconstexprで、ターゲットプラットフォームに応じてコンパイル時に解決される"
@@ -15445,6 +16948,9 @@ types:
         snippet: "Platform::name()"
 
   - name: GraphicsBackend
+    related:
+      - Platform
+      - getBackendName
     keywords: ["renderer","metal","opengl","d3d11","webgpu","gpu api"]
     description: "Runtime sokol_gfx backend query. Values are meaningful only after sg_setup() has completed (i.e. after the first setup() call)."
     description_ja: "sokol_gfxのバックエンドを実行時に判定。値はsg_setup()完了後 (最初のsetup()以降) のみ有効"
@@ -15509,6 +17015,8 @@ types:
         snippet: "GraphicsBackend::name()"
 
   - name: BuildInfo
+    related:
+      - Platform
     keywords: ["build date","version","timestamp","compile time","metadata"]
     description: "Build timestamp info injected as compile definitions by trussc_app() at CMake configure time. Refreshes when cmake reconfigures. Date/time fields are local time; timestamp is UTC Unix seconds."
     description_ja: "trussc_app() がCMake configure 時にコンパイル定義として注入するビルド時刻情報。cmake 再実行で更新される。date/time系フィールドは configure マシンのローカル時刻、timestamp は UTC Unix秒"
@@ -15602,6 +17110,8 @@ types:
   - name: NetworkInterface
     related:
       - listNetworkInterfaces
+      - UdpSocket
+      - TcpClient
     keywords: ["nic","adapter","ip address","interface","network card"]
     description: "One address entry of a network interface (returned by listNetworkInterfaces)"
     description_ja: "ネットワークインターフェースの1アドレスエントリ（listNetworkInterfacesが返す）"
@@ -15704,6 +17214,10 @@ types:
         snippet: "getIsUp()"
 
   - name: UdpSocket
+    related:
+      - TcpClient
+      - TcpServer
+      - UdpReceiveEventArgs
     keywords: ["udp","datagram","broadcast","multicast","socket"]
     platforms: [windows, macos, linux, ios, android]
     platformNote: "UDP via raw BSD/Winsock sockets — full support on the 5 native platforms (send/recv, broadcast, multicast join/leave/TTL/loopback/interface, reuse-addr/port). The .cpp DOES compile for wasm and the API exists, but raw UDP is not functional in a browser: Emscripten only emulates sockets tunneled over a WebSocket proxy server, and there is no native UDP datagram path. Additionally on wasm threading is disabled (useThread_ forced false; the receive loop must run via processNetwork() on the update event, and setUseThread(true) warns + no-ops). Treat UdpSocket as native-only in practice."
@@ -15951,6 +17465,9 @@ types:
         snippet: "getConnectedPort()"
 
   - name: UdpReceiveEventArgs
+    related:
+      - UdpSocket
+      - UdpErrorEventArgs
     keywords: ["udp receive","datagram event","incoming packet","recv args"]
     description: "Event args for UdpSocket::onReceive"
     description_ja: "UdpSocket::onReceiveのイベント引数"
@@ -15976,6 +17493,9 @@ types:
         description_ko: "출발지 포트"
 
   - name: UdpErrorEventArgs
+    related:
+      - UdpSocket
+      - UdpReceiveEventArgs
     keywords: ["udp error","socket failure","error args"]
     description: "Event args for UdpSocket::onError"
     description_ja: "UdpSocket::onErrorのイベント引数"
@@ -15996,6 +17516,11 @@ types:
         description_ko: "오류 코드"
 
   - name: TcpClient
+    related:
+      - TcpServer
+      - UdpSocket
+      - TcpReceiveEventArgs
+      - TcpConnectEventArgs
     keywords: ["tcp","socket client","stream","connection","network client"]
     platforms: [windows, macos, linux, ios, android]
     platformNote: "TCP client via raw BSD/Winsock sockets (connect/connectAsync/send/receive, sync or threaded). Fully functional on the 5 native platforms. Compiles for wasm but raw TCP only works tunneled over Emscripten's WebSocket socket emulation (a proxy server), not as a native browser socket. On wasm threading is disabled (useThread_ forced false), so connectAsync() degrades to a non-blocking connect driven by processNetwork() instead of a background thread."
@@ -16124,6 +17649,10 @@ types:
         snippet: "getRemotePort()"
 
   - name: TcpConnectEventArgs
+    related:
+      - TcpClient
+      - TcpDisconnectEventArgs
+      - TcpReceiveEventArgs
     keywords: ["connect event","tcp connect","on connect args"]
     description: "Event args for TcpClient::onConnect"
     description_ja: "TcpClient::onConnectのイベント引数"
@@ -16144,6 +17673,9 @@ types:
         description_ko: "연결 메시지"
 
   - name: TcpReceiveEventArgs
+    related:
+      - TcpClient
+      - TcpConnectEventArgs
     keywords: ["tcp receive","incoming data","recv args"]
     description: "Event args for TcpClient::onReceive"
     description_ja: "TcpClient::onReceiveのイベント引数"
@@ -16159,6 +17691,9 @@ types:
         description_ko: "수신 데이터"
 
   - name: TcpDisconnectEventArgs
+    related:
+      - TcpClient
+      - TcpConnectEventArgs
     keywords: ["disconnect event","tcp close","on disconnect args"]
     description: "Event args for TcpClient::onDisconnect"
     description_ja: "TcpClient::onDisconnectのイベント引数"
@@ -16179,6 +17714,9 @@ types:
         description_ko: "정상적인 연결 해제였는지"
 
   - name: TcpErrorEventArgs
+    related:
+      - TcpClient
+      - TcpReceiveEventArgs
     keywords: ["tcp error","socket failure","error args"]
     description: "Event args for TcpClient::onError"
     description_ja: "TcpClient::onErrorのイベント引数"
@@ -16199,6 +17737,11 @@ types:
         description_ko: "오류 코드"
 
   - name: TcpServer
+    related:
+      - TcpClient
+      - TcpServerClient
+      - TcpServerReceiveEventArgs
+      - TcpClientConnectEventArgs
     keywords: ["tcp listener","server socket","accept","host","network server"]
     platforms: [windows, macos, linux, ios, android]
     platformNote: "TCP server (socket/bind/listen/accept on a background accept thread). Real on the 5 native platforms. Effectively unavailable on wasm: a browser cannot listen()/accept() incoming connections, and the accept thread needs std::thread which the default web build lacks. Not documented in api-definition.yaml."
@@ -16337,6 +17880,9 @@ types:
         snippet: "getPort()"
 
   - name: TcpServerClient
+    related:
+      - TcpServer
+      - TcpClient
     keywords: ["connected client","peer","remote socket","client handle"]
     description: "A client connected to a TcpServer (read-only handle)"
     description_ja: "TcpServerに接続したクライアント（読み取り専用ハンドル）"
@@ -16371,6 +17917,10 @@ types:
         snippet: "getPort()"
 
   - name: TcpClientConnectEventArgs
+    related:
+      - TcpServer
+      - TcpServerReceiveEventArgs
+      - TcpClientDisconnectEventArgs
     keywords: ["client connect","new client","accept args"]
     description: "Event args for TcpServer::onClientConnect"
     description_ja: "TcpServer::onClientConnectのイベント引数"
@@ -16396,6 +17946,9 @@ types:
         description_ko: "클라이언트 포트"
 
   - name: TcpServerReceiveEventArgs
+    related:
+      - TcpServer
+      - TcpClientConnectEventArgs
     keywords: ["server receive","incoming data","recv args"]
     description: "Event args for TcpServer::onReceive"
     description_ja: "TcpServer::onReceiveのイベント引数"
@@ -16416,6 +17969,9 @@ types:
         description_ko: "수신 데이터"
 
   - name: TcpClientDisconnectEventArgs
+    related:
+      - TcpServer
+      - TcpClientConnectEventArgs
     keywords: ["client disconnect","client leave","close args"]
     description: "Event args for TcpServer::onClientDisconnect"
     description_ja: "TcpServer::onClientDisconnectのイベント引数"
@@ -16441,6 +17997,9 @@ types:
         description_ko: "정상적인 연결 해제였는지"
 
   - name: TcpServerErrorEventArgs
+    related:
+      - TcpServer
+      - TcpServerReceiveEventArgs
     keywords: ["server error","socket failure","error args"]
     description: "Event args for TcpServer::onError"
     description_ja: "TcpServer::onErrorのイベント引数"
@@ -16469,6 +18028,10 @@ types:
   # Serial types
   # ==========================================================================
   - name: Serial
+    related:
+      - SerialDeviceInfo
+      - listDevices
+      - TcpClient
     keywords: ["com port","uart","usb serial","rs232","arduino","tty"]
     platforms: [windows, macos, linux, android]
     platformNote: "Real backends only on Windows (Win32 COM), macOS/Linux (POSIX termios), and Android (USB Host CDC-ACM via JNI+usbfs, CDC-ACM class devices only, first connect needs an async USB permission dialog). No serial on iOS (sandbox has no /dev/tty access — the macOS __APPLE__ enumeration branch compiles but never lists/opens a device) or wasm (Emscripten has no serial device; setup() falls into the POSIX open()/termios path against the virtual FS and fails)."
@@ -16610,6 +18173,9 @@ types:
         snippet: "Serial::printDevices()"
 
   - name: SerialDeviceInfo
+    related:
+      - Serial
+      - listDevices
     keywords: ["com port info","serial device","port list","tty info"]
     description: "Info for one serial device (from Serial::listDevices)"
     description_ja: "1シリアルデバイスの情報（Serial::listDevicesが返す）"
@@ -16660,6 +18226,10 @@ types:
         snippet: "getDeviceName()"
 
   - name: SoundSource
+    related:
+      - SoundBuffer
+      - SoundStream
+      - Sound
     keywords: ["audio source","pcm","sample data","playable","base sound"]
     description: "Abstract base for anything Sound::play() can consume. Two concrete subclasses: SoundBuffer (eager, full PCM in RAM) and SoundStream (decoded on demand from disk). Holds the shared channels / sampleRate fields and the kind() / getDuration() interface."
     description_ja: ""
@@ -16695,6 +18265,11 @@ types:
         snippet: "getDuration()"
 
   - name: SoundBuffer
+    related:
+      - SoundStream
+      - SoundSource
+      - Sound
+      - Wave
     keywords: ["audio buffer","pcm ram","sfx","waveform","procedural audio"]
     description: "Eager sound source: the full file decoded into interleaved float PCM held in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Also provides waveform generators, an ADSR envelope, and mixing helpers, so it doubles as a procedural-audio scratch buffer. Best for short SFX and zero-latency play / seek / multi-instance."
     description_ja: ""
@@ -16925,6 +18500,10 @@ types:
         snippet: "SoundBuffer::createAdtsHeader(${1:header}, ${2:frameLength}, ${3:sampleRate}, ${4:channels})"
 
   - name: SoundStream
+    related:
+      - SoundBuffer
+      - SoundSource
+      - loadStream
     keywords: ["streaming audio","bgm","music stream","disk audio","on demand"]
     description: "Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a ~10 ms refill, and each polyphony slot costs one open file handle + decoder + ring buffer."
     description_ja: ""
@@ -16974,6 +18553,10 @@ types:
   - name: AudioEngine
     related:
       - getInstance
+      - Sound
+      - MicInput
+      - AudioSettings
+      - initAudio
     keywords: ["mixer","audio device","miniaudio","sound engine","output"]
     description: "Singleton miniaudio-based mixer engine. Owns the output device, mixes all playing Sound voices, exposes real-time audioOut / audioIn / audioDeviceChanged events, and an FFT analysis ring buffer. Access via AudioEngine::getInstance(); most apps drive it indirectly through the Sound class and the global initAudio() / shutdownAudio() helpers."
     description_ja: ""
@@ -17066,6 +18649,8 @@ types:
   - name: MicInput
     related:
       - getMicInput
+      - AudioEngine
+      - getMicAnalysisBuffer
     keywords: ["microphone","mic","audio input","capture","recording input"]
     description: "Microphone capture (miniaudio). Opens an input device and exposes the latest samples through a ring buffer. Use the global getMicInput() to access the shared instance, then start() it; getMicAnalysisBuffer() is a convenience wrapper over getBuffer()."
     description_ja: ""
@@ -17120,6 +18705,8 @@ types:
   - name: AudioSettings
     related:
       - init
+      - AudioEngine
+      - AudioDeviceInfo
     keywords: ["audio config","sample rate","buffer size","channels","init options"]
     description: "Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device."
     description_ja: ""
@@ -17155,6 +18742,8 @@ types:
   - name: AudioDeviceInfo
     related:
       - listDevices
+      - AudioEngine
+      - AudioSettings
     keywords: ["audio","device","soundcard","output","playback"]
     description: "One entry in the list returned by AudioEngine::listDevices()."
     description_ja: ""
@@ -17175,6 +18764,7 @@ types:
   - name: AudioDeviceChangedArgs
     related:
       - audioDeviceChanged
+      - AudioEngine
     keywords: ["audio","device","changed","switch","reinit"]
     description: "Argument type for the AudioEngine::audioDeviceChanged event, fired after every successful init() (initial and re-init). Reports the resolved device's real name (never empty)."
     description_ja: ""
@@ -17215,6 +18805,8 @@ types:
   - name: AudioOutBuffer
     related:
       - audioOut
+      - AudioEngine
+      - AudioInBuffer
     keywords: ["audio","output","synthesis","buffer","dsp","callback"]
     description: "Argument type for the AudioEngine::audioOut event. Holds the interleaved mutable output buffer for a single audio callback. Listeners should ADD their contribution to data (voices are already mixed in); do not call engine APIs from here."
     description_ja: ""
@@ -17250,6 +18842,8 @@ types:
   - name: AudioInBuffer
     related:
       - audioIn
+      - MicInput
+      - AudioOutBuffer
     keywords: ["audio","microphone","mic","input","capture","buffer"]
     description: "Argument type for the AudioEngine::audioIn event. Holds the interleaved read-only microphone input for a single capture callback. Process and return quickly; do not call engine APIs from here."
     description_ja: ""
@@ -17287,6 +18881,9 @@ types:
       - clear
       - createChipBundle
       - add
+      - ChipSoundNote
+      - ChipSound
+      - build
     keywords: ["chiptune","8bit","sequence","timeline","notes","chip"]
     description: "A timeline of chiptune notes (ChipSoundNote + start time) that builds into a single mixed Sound. Add notes at times, then call build() to render the mix with ADSR and clipping applied."
     description_ja: ""
@@ -17345,6 +18942,9 @@ types:
   - name: Logger
     related:
       - getLogger
+      - LogLevel
+      - LogEventArgs
+      - logNotice
     keywords: ["log","logging","console","debug","output","trace"]
     description: "Logging core with console and file output and an onLog event; access the global instance via getLogger()"
     description_ja: ""
@@ -17427,6 +19027,8 @@ types:
   - name: CoreEvents
     related:
       - events
+      - Event
+      - EventListener
     keywords: ["events","callbacks","hub","listeners","signals"]
     description: "Hub of all framework core events. Each member is an Event you subscribe to with .listen(callback); access the global instance via events()"
     description_ja: ""
@@ -17549,6 +19151,9 @@ types:
       - audioOut
       - audioIn
       - audioDeviceChanged
+      - EventListener
+      - CoreEvents
+      - Deliver
     keywords: ["signal","callback","listener","subscribe","notify","delegate"]
     description: "Generic event you subscribe to with listen(callback) and fire with notify(arg). The template parameter is the argument type passed to listeners by reference; Event<void> is the no-argument specialization (callbacks and notify take no argument). listen() returns an EventListener RAII token that disconnects when destroyed"
     description_ja: ""
@@ -17595,6 +19200,9 @@ types:
         snippet: "clear()"
 
   - name: EventListener
+    related:
+      - Event
+      - CoreEvents
     keywords: ["listener","subscription","raii","token","disconnect","handle"]
     description: "RAII token returned by Event::listen(); the listener is automatically disconnected when this token is destroyed or reassigned. Move-only"
     description_ja: ""
@@ -17621,6 +19229,10 @@ types:
         snippet: "isConnected()"
 
   - name: KeyEventArgs
+    related:
+      - keyPressed
+      - keyReleased
+      - MouseEventArgs
     keywords: ["keyboard","key","keypress","input","args"]
     description: "Arguments for keyPressed / keyReleased events"
     description_ja: ""
@@ -17664,6 +19276,11 @@ types:
         description_ko: ""
 
   - name: MouseEventArgs
+    related:
+      - mousePressed
+      - MouseMoveEventArgs
+      - MouseDragEventArgs
+      - MouseButton
     keywords: ["mouse","click","button","press","pointer"]
     description: "Arguments for mousePressed / mouseReleased events. pos is local space, globalPos is screen space (equal at app level)"
     description_ja: ""
@@ -17722,6 +19339,10 @@ types:
         description_ko: ""
 
   - name: MouseMoveEventArgs
+    related:
+      - mouseMoved
+      - MouseDragEventArgs
+      - MouseEventArgs
     keywords: ["mouse","move","hover","cursor","pointer"]
     description: "Arguments for mouseMoved (cursor moving with no button held)"
     description_ja: ""
@@ -17795,6 +19416,10 @@ types:
         description_ko: ""
 
   - name: MouseDragEventArgs
+    related:
+      - mouseDragged
+      - MouseMoveEventArgs
+      - MouseEventArgs
     keywords: ["mouse","drag","move","cursor","pointer"]
     description: "Arguments for mouseDragged (cursor moving with a button held)"
     description_ja: ""
@@ -17873,6 +19498,9 @@ types:
         description_ko: ""
 
   - name: ScrollEventArgs
+    related:
+      - mouseScrolled
+      - MouseEventArgs
     keywords: ["scroll","wheel","mouse","zoom","trackpad"]
     description: "Arguments for mouseScrolled events"
     description_ja: ""
@@ -17931,6 +19559,8 @@ types:
         description_ko: ""
 
   - name: ResizeEventArgs
+    related:
+      - windowResized
     keywords: ["resize","window","size","viewport"]
     description: "Arguments for windowResized events"
     description_ja: ""
@@ -17949,6 +19579,8 @@ types:
         description_ko: ""
 
   - name: DragDropEventArgs
+    related:
+      - ClipboardPastedEventArgs
     keywords: ["drag","drop","files","dropped","import"]
     description: "Arguments for filesDropped events"
     description_ja: ""
@@ -17972,6 +19604,9 @@ types:
         description_ko: ""
 
   - name: ClipboardPastedEventArgs
+    related:
+      - getClipboardString
+      - DragDropEventArgs
     keywords: ["clipboard","paste","copy","text"]
     description: "Arguments for clipboardPasted events; the only reliable way to read the clipboard on the Web platform"
     description_ja: ""
@@ -17985,6 +19620,8 @@ types:
         description_ko: ""
 
   - name: TouchPoint
+    related:
+      - TouchEventArgs
     keywords: ["touch","finger","tap","multitouch","gesture"]
     description: "A single finger within a TouchEventArgs"
     description_ja: ""
@@ -18018,6 +19655,9 @@ types:
         description_ko: ""
 
   - name: TouchEventArgs
+    related:
+      - TouchPoint
+      - setTouchAsMouse
     keywords: ["touch","finger","tap","multitouch","gesture","mobile"]
     description: "Arguments for touchPressed / touchMoved / touchReleased events (multi-touch, Android/iOS)"
     description_ja: ""
@@ -18041,6 +19681,9 @@ types:
         description_ko: ""
 
   - name: ExitRequestEventArgs
+    related:
+      - requestExitApp
+      - events
     keywords: ["exit","quit","close","shutdown"]
     description: "Arguments for the exitRequested event"
     description_ja: ""
@@ -18054,6 +19697,10 @@ types:
         description_ko: ""
 
   - name: LogEventArgs
+    related:
+      - Logger
+      - LogLevel
+      - logNotice
     keywords: ["log","message","level","console","onlog"]
     description: "Arguments delivered for each log message (level, text, and timestamp)"
     description_ja: ""
@@ -18077,6 +19724,8 @@ types:
         description_ko: ""
 
   - name: ConsoleEventArgs
+    related:
+      - events
     keywords: ["console","command","stdin","terminal","input"]
     description: "Arguments for the console event (a command line received from stdin)"
     description_ja: ""
@@ -18095,6 +19744,10 @@ types:
         description_ko: ""
 
   - name: FullscreenShader
+    related:
+      - Shader
+      - Fbo
+      - setUniform
     keywords: ["shader","postprocess","fullscreen","effect","quad","filter"]
     description: "Shader specialization for fullscreen post-processing effects (position + texcoord quad). Set uniforms via setParams, then call draw to render a fullscreen quad."
     description_ja: ""
@@ -18124,6 +19777,10 @@ types:
         snippet: "draw()"
 
   - name: Ray
+    related:
+      - HitResult
+      - EasyCam
+      - screenToWorld
     keywords: ["ray","raycast","pick","hittest","line","direction"]
     description: "A ray with an origin and a normalized direction, used for unified hit testing and picking"
     description_ja: ""
@@ -18142,6 +19799,10 @@ types:
         description_ko: ""
 
   - name: ColorLinear
+    related:
+      - Color
+      - ColorOKLab
+      - srgbToLinear
     keywords: ["color","linear","rgb","lineargamma","colorspace"]
     description: "A color in linear RGB space (no gamma encoding), 0.0-1.0 float per channel"
     description_ja: ""
@@ -18172,6 +19833,9 @@ types:
   - name: ColorOKLab
     related:
       - toOKLab
+      - ColorOKLCH
+      - Color
+      - ColorLinear
     keywords: ["color","oklab","perceptual","colorspace","lab"]
     description: "A color in the OKLab perceptual color space (lightness + two opponent axes)"
     description_ja: ""
@@ -18207,6 +19871,7 @@ types:
       - reflectFromJson
       - loadJson
       - saveJson
+      - Xml
     keywords: ["json","data","parse","object","nlohmann","serialize"]
     description: "Alias for nlohmann::json (using Json = nlohmann::json). Used as the in-memory JSON value type by loadJson, saveJson, parseJson and toJsonString. See the nlohmann/json documentation for its full API."
     description_ja: ""
@@ -18216,6 +19881,8 @@ types:
     related:
       - parseXml
       - loadXml
+      - XmlNode
+      - Json
     keywords: ["xml","document","parse","pugixml","markup"]
     description: "XML document wrapper around pugixml. Loads, saves and queries XML; node-level access is via XmlNode returned from root() and child()."
     description_ja: ""
@@ -18317,24 +19984,37 @@ types:
         description_ko: ""
         snippet: "addDeclaration()"
   - name: XmlDocument
+    related:
+      - Xml
+      - XmlNode
     keywords: ["xml","document","pugixml","root","tree"]
     description: "Alias for pugi::xml_document. The owning XML document type underlying the Xml wrapper; see the pugixml documentation for its full API."
     description_ja: ""
     description_ko: ""
     sketch: false
   - name: XmlNode
+    related:
+      - Xml
+      - XmlAttribute
+      - XmlDocument
     keywords: ["xml","node","element","pugixml","tag"]
     description: "Alias for pugi::xml_node. A single element/node within an XML document, returned by Xml::root() and Xml::child(); see the pugixml documentation for node query and manipulation methods."
     description_ja: ""
     description_ko: ""
     sketch: false
   - name: XmlAttribute
+    related:
+      - XmlNode
+      - Xml
     keywords: ["xml","attribute","property","pugixml","name value"]
     description: "Alias for pugi::xml_attribute. A name/value attribute on an XmlNode; see the pugixml documentation for its API."
     description_ja: ""
     description_ko: ""
     sketch: false
   - name: XmlParseResult
+    related:
+      - Xml
+      - parseXml
     keywords: ["xml","parse","result","error","status"]
     description: "Alias for pugi::xml_parse_result. Result of an XML parse operation, carrying success status, error description and offset."
     description_ja: ""
@@ -18342,6 +20022,11 @@ types:
     sketch: false
 
   - name: Mod
+    related:
+      - Node
+      - LayoutMod
+      - TweenMod
+      - addChild
     keywords: ["component","behavior","module","addmod","attach","plugin"]
     description: "Attachable behavior base class for Node. Subclass it, override the lifecycle and input hooks, and attach with node->addMod<T>(). Lifecycle: setup() on attach, then each frame earlyUpdate() -> Node::update() -> update() -> draw(), and onDestroy() on removal. Override isExclusive() to allow only one instance per Node, and canAttachTo() to restrict attachment."
     description_ja: ""
@@ -18502,6 +20187,10 @@ types:
         snippet: "canAttachTo(${1:node})"
 
   - name: RectNodeButton
+    related:
+      - RectNode
+      - Node
+      - mousePressed
     keywords: ["button","click","ui","widget","press","control"]
     description: "Simple clickable button node (a RectNode subclass). Set normalColor/hoverColor/pressColor and label; it draws a filled rect that changes color on hover/press and a centered label. Events are enabled on construction. Listen on its inherited mousePressed/mouseReleased events for clicks."
     description_ja: ""
@@ -18551,6 +20240,9 @@ types:
         snippet: "draw()"
 
   - name: Thread
+    related:
+      - ThreadChannel
+      - isMainThread
     keywords: ["thread","background","worker","async","concurrent","ofthread"]
     description: "Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data."
     description_ja: ""
@@ -18644,6 +20336,8 @@ types:
         snippet: "Thread::getMainThreadId()"
 
   - name: ThreadChannel
+    related:
+      - Thread
     keywords: ["thread","queue","channel","fifo","producer consumer","pipe"]
     description: "Thread-safe FIFO queue for one-way inter-thread communication (ofThreadChannel compatible), template<typename T>. Producer-Consumer pattern: a worker thread send()s values and another thread receive()s them. Use two channels for bidirectional communication."
     description_ja: ""
@@ -18722,6 +20416,9 @@ types:
         snippet: "isClosed()"
 
   - name: HitResult
+    related:
+      - Ray
+      - Node
     keywords: ["hit","pick","raycast","collision","test","select"]
     description: "Result of a node hit test (this is Node::HitResult). Returned by Node::findHitNode() / findHitNodeFromScreen(); call hit() to check whether anything was hit."
     description_ja: ""
@@ -18754,6 +20451,9 @@ types:
         snippet: "hit()"
 
   - name: NodeWeakPtr
+    related:
+      - Node
+      - getRootNode
     keywords: ["weak","pointer","reference","weakptr","node","nonowning"]
     description: "Alias for weak_ptr<Node> (using NodeWeakPtr = weak_ptr<Node>). A non-owning weak reference to a Node; lock() it to obtain a NodePtr if the node still exists."
     description_ja: ""
@@ -18793,6 +20493,8 @@ types:
   - name: FpsSettings
     related:
       - getFpsSettings
+      - setFps
+      - setIndependentFps
     keywords: ["fps","framerate","vsync","timing","refresh"]
     description: "FPS configuration returned by getFpsSettings(). Rates use VSYNC (-1) and EVENT_DRIVEN (0) sentinels, or a fixed fps"
     description_ja: ""
@@ -18823,6 +20525,9 @@ types:
   - name: WindowSettings
     related:
       - runApp
+      - setWindowSize
+      - setWindowTitle
+      - HeadlessSettings
     keywords: ["window","config","size","title","fullscreen","startup"]
     description: "Window configuration passed to the app at startup (size, title, DPI, MSAA, fullscreen, decoration, VSync). Setters chain"
     description_ja: ""
@@ -18956,6 +20661,7 @@ types:
   - name: HeadlessSettings
     related:
       - runHeadlessApp
+      - WindowSettings
     keywords: ["headless","nowindow","offscreen","server","config"]
     description: "Settings for runHeadlessApp() (no window / graphics). Currently just the target update rate"
     description_ja: ""
@@ -19006,6 +20712,10 @@ types:
         description_ko: ""
 
   - name: Vec4
+    related:
+      - Vec3
+      - Vec2
+      - Color
     keywords: ["vector","vec4","rgba","quaternion","homogeneous","xyzw"]
     description: "4D vector (x, y, z, w). Used for homogeneous coordinates and RGBA-style data"
     description_ja: ""
@@ -19116,6 +20826,9 @@ types:
         snippet: "xyz()"
 
   - name: Mat3
+    related:
+      - Mat4
+      - Vec2
     keywords: ["matrix","mat3","transform","homography","affine","2d"]
     description: "3x3 matrix for 2D affine / homography transforms (row-major). Includes static factories and a homography solver"
     description_ja: ""
@@ -19205,6 +20918,11 @@ types:
         snippet: "Mat3::getHomography(${1:src}, ${2:dst})"
 
   - name: VideoGrabber
+    related:
+      - VideoDeviceInfo
+      - Texture
+      - createVideoPlayer
+      - getTexture
     keywords: ["webcam","camera","capture","video","grabber","live"]
     platforms: [macos, windows, linux, ios, wasm]
     platformNote: "Webcam capture is a stub on Android: setupPlatform() logs \"Not yet implemented on Android\" and returns false (Camera2 NDK TODO). Real backends: macOS/iOS AVFoundation, Windows Media Foundation, Linux V4L2, web getUserMedia."
@@ -19580,6 +21298,9 @@ types:
         snippet: "getLoopCount()"
 
   - name: VideoDeviceInfo
+    related:
+      - VideoGrabber
+      - listDevices
     keywords: ["camera","device","webcam","video","info"]
     description: "Information about an available camera device, returned by VideoGrabber::listDevices()"
     description_ja: ""
@@ -19607,6 +21328,8 @@ types:
       - startRecording
       - start
       - open
+      - VideoCodec
+      - ScreenRecorder
     keywords: ["video","record","encoder","settings","codec","export"]
     description: "Encoder settings passed to VideoWriter::open(), ScreenRecorder::start(), and startRecording()"
     description_ja: ""
@@ -19640,6 +21363,8 @@ types:
       - bitmapfont::registerGlyphs
       - registerGlyph
       - registerGlyphs
+      - Font
+      - PlacedGlyph
     keywords: ["glyph","bitmap","font","character","pixels","codepoint"]
     description: "A bitmap glyph to register via registerGlyph(): a codepoint plus packed 1-bit pixel rows. The data pointer must outlive every drawBitmapString call"
     description_ja: ""
@@ -19663,6 +21388,10 @@ types:
         description_ko: ""
 
   - name: PlacedGlyph
+    related:
+      - GlyphVisitor
+      - Font
+      - getStringPath
     keywords: ["glyph","layout","font","position","character","typeset"]
     description: "One laid-out glyph emitted by Font::forEachGlyph (nested as Font::PlacedGlyph). Carries the final codepoint and pen position so visitors can render quads, build vector paths, or hit-test independently of the layout pass"
     description_ja: ""
@@ -19706,6 +21435,9 @@ types:
         description_ko: ""
 
   - name: GlyphVisitor
+    related:
+      - PlacedGlyph
+      - Font
     keywords: ["glyph","callback","visitor","font","iterate"]
     description: "Alias for function<void(const Font::PlacedGlyph&)> (nested as Font::GlyphVisitor). The per-glyph callback type accepted by Font::forEachGlyph"
     description_ja: ""
