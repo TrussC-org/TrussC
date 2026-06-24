@@ -254,9 +254,24 @@ categories:
             params_simple: "pos, w, h"
           - params: "Vec3 pos, Vec2 size"
             params_simple: "pos, size"
+            description: "Size given as a Vec2 (width, height)."
+            description_ja: "サイズを Vec2（幅・高さ）で指定。"
         description: "Draw rectangle"
         description_ja: "矩形を描画"
         description_ko: "사각형 그리기"
+        details: |
+          Draws an axis-aligned rectangle from the top-left corner.
+          Respects the current fill / noFill mode and draw color.
+          With a Vec3 position, z is used for placement in 3D mode.
+          For rounded corners, see drawRectRounded and drawRectSquircle.
+        details_ja: |
+          左上を原点に軸並行の矩形を描画する。
+          現在の fill / noFill モードと描画色に従う。
+          Vec3 で位置を渡すと 3D モードで z が使われる。
+          角を丸くしたい場合は drawRectRounded, drawRectSquircle を参照。
+        related:
+          - drawRectRounded
+          - drawRectSquircle
         of_equivalent: "ofDrawRectangle"
         sketch: true
         snippet: "drawRect(${1:x}, ${2:y}, ${3:w}, ${4:h})"

@@ -218,6 +218,24 @@ function generateTrussCApiJS(api, lang) {
                     entry.desc_ja = fn.description_ja || '';
                     entry.desc_ko = fn.description_ko || '';
                 }
+                // Optional per-signature description (only when an overload differs).
+                if (sig.description) {
+                    entry.sigDesc = lang ? pickLang(sig.description, sig.description_ja, sig.description_ko, lang) : sig.description;
+                    if (!lang) {
+                        if (sig.description_ja) entry.sigDesc_ja = sig.description_ja;
+                        if (sig.description_ko) entry.sigDesc_ko = sig.description_ko;
+                    }
+                }
+                // Optional related symbols (language-independent list of names).
+                if (Array.isArray(fn.related) && fn.related.length) entry.related = fn.related;
+                // Optional symbol-level long-form details (en-first; ja/ko fall back to en).
+                if (fn.details) {
+                    entry.details = lang ? pickLang(fn.details, fn.details_ja, fn.details_ko, lang) : fn.details;
+                    if (!lang) {
+                        if (fn.details_ja) entry.details_ja = fn.details_ja;
+                        if (fn.details_ko) entry.details_ko = fn.details_ko;
+                    }
+                }
                 functions.push(entry);
             }
         }
