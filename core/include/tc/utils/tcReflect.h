@@ -71,7 +71,23 @@
 // =============================================================================
 
 #include <string>
+#include <string_view>
+#include <array>
+#include <utility>
 #include <type_traits>
+
+// Value window scanned by the compile-time enum reflection below. Only valid
+// enumerators in this range are recovered (out-of-range probes are constexpr
+// and discarded — they do not reach the binary). Negative min covers -1-style
+// sentinels; widen globally for enums with larger values:
+//   #define TC_ENUM_AUTOLABEL_MAX 1000   (before including TrussC)
+// or declare TC_ENUM_LABELS(E, ...) for that enum as a per-enum escape hatch.
+#ifndef TC_ENUM_AUTOLABEL_MIN
+#define TC_ENUM_AUTOLABEL_MIN (-128)
+#endif
+#ifndef TC_ENUM_AUTOLABEL_MAX
+#define TC_ENUM_AUTOLABEL_MAX 128
+#endif
 
 namespace trussc {
 
@@ -85,6 +101,196 @@ struct EnumLabelSpan {
     const char* const* labels = nullptr;
     int count = 0;
 };
+
+// ---------------------------------------------------------------------------
+// Compile-time enum reflection
+//
+// A plain `enum class` needs no extra declaration: the enumerator names are
+// recovered at compile time from the compiler's signature string over the
+// [TC_ENUM_AUTOLABEL_MIN, TC_ENUM_AUTOLABEL_MAX] window. enumLabel() also
+// honours a TC_ENUM_LABELS override when present (custom display strings, or
+// enums whose values fall outside the window).
+// ---------------------------------------------------------------------------
+namespace internal {
+
+// The current function's signature, with the enum value V baked into it.
+template <auto V>
+constexpr std::string_view enumRawSig() {
+#if defined(_MSC_VER) && !defined(__clang__)
+    return __FUNCSIG__;
+#else
+    return __PRETTY_FUNCTION__;
+#endif
+}
+
+// The bare enumerator name parsed out of the signature, or {} if V is not a
+// named enumerator (compilers print a cast like "(Enum)7" in that case).
+template <auto V>
+constexpr std::string_view enumParseName() {
+    std::string_view s = enumRawSig<V>();
+#if defined(_MSC_VER) && !defined(__clang__)
+    constexpr std::string_view head = "enumRawSig<";
+    std::size_t a = s.find(head);
+    if (a == std::string_view::npos) return {};
+    a += head.size();
+    std::size_t b = s.find(">(", a);
+    s = s.substr(a, b - a);
+#else
+    constexpr std::string_view head = "V = ";
+    std::size_t a = s.find(head);
+    if (a == std::string_view::npos) return {};
+    a += head.size();
+    std::size_t b = s.find_first_of(";]", a);
+    s = s.substr(a, b - a);
+#endif
+    if (s.empty() || s.front() == '(') return {};       // cast form => not a member
+    std::size_t scope = s.rfind("::");
+    if (scope != std::string_view::npos) s = s.substr(scope + 2);
+    if (s.empty()) return {};
+    char c = s.front();
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_')) return {};
+    return s;
+}
+
+template <class E> constexpr int        enumWinMin()  { return TC_ENUM_AUTOLABEL_MIN; }
+template <class E> constexpr int        enumWinMax()  { return TC_ENUM_AUTOLABEL_MAX; }
+template <class E> constexpr std::size_t enumWinSize() {
+    return (std::size_t)(enumWinMax<E>() - enumWinMin<E>() + 1);
+}
+
+template <class E, std::size_t... I>
+constexpr auto enumRawNames(std::index_sequence<I...>) {
+    return std::array<std::string_view, sizeof...(I)>{
+        enumParseName<static_cast<E>(enumWinMin<E>() + (int)I)>()... };
+}
+
+template <class E>
+constexpr std::size_t enumValidCount() {
+    auto raw = enumRawNames<E>(std::make_index_sequence<enumWinSize<E>()>{});
+    std::size_t n = 0;
+    for (auto& s : raw) if (!s.empty()) ++n;
+    return n;
+}
+
+template <class E>
+constexpr auto enumNamesImpl() {
+    constexpr std::size_t N = enumValidCount<E>();
+    auto raw = enumRawNames<E>(std::make_index_sequence<enumWinSize<E>()>{});
+    std::array<std::string_view, N> out{};
+    std::size_t j = 0;
+    for (std::size_t i = 0; i < raw.size(); ++i)
+        if (!raw[i].empty()) out[j++] = raw[i];
+    return out;
+}
+
+template <class E>
+constexpr auto enumValuesImpl() {
+    constexpr std::size_t N = enumValidCount<E>();
+    auto raw = enumRawNames<E>(std::make_index_sequence<enumWinSize<E>()>{});
+    std::array<E, N> out{};
+    std::size_t j = 0;
+    for (std::size_t i = 0; i < raw.size(); ++i)
+        if (!raw[i].empty()) out[j++] = static_cast<E>(enumWinMin<E>() + (int)i);
+    return out;
+}
+
+// Compact, null-terminated storage for the names (the reflected string_views
+// point into per-value signature literals, which are not null-terminated and
+// would bloat the binary; copy the bare names into one buffer instead).
+template <class E>
+constexpr std::size_t enumCharsLen() {
+    auto names = enumNamesImpl<E>();
+    std::size_t t = 0;
+    for (auto& s : names) t += s.size() + 1;
+    return t ? t : 1;
+}
+
+template <class E>
+constexpr auto enumCharBuf() {
+    constexpr std::size_t T = enumCharsLen<E>();
+    auto names = enumNamesImpl<E>();
+    std::array<char, T> buf{};
+    std::size_t p = 0;
+    for (auto& s : names) { for (char c : s) buf[p++] = c; buf[p++] = '\0'; }
+    return buf;
+}
+
+template <class E>
+constexpr auto enumOffsets() {
+    constexpr std::size_t N = enumValidCount<E>();
+    auto names = enumNamesImpl<E>();
+    std::array<std::size_t, N ? N : 1> off{};
+    std::size_t p = 0, j = 0;
+    for (auto& s : names) { off[j++] = p; p += s.size() + 1; }
+    return off;
+}
+
+// True iff the enumerators are exactly 0,1,...,N-1 (so labels[value] is valid).
+template <class E>
+constexpr bool enumIsContiguousZeroBased() {
+    auto vals = enumValuesImpl<E>();
+    if (vals.size() == 0) return false;
+    for (std::size_t i = 0; i < vals.size(); ++i)
+        if (static_cast<int>(vals[i]) != static_cast<int>(i)) return false;
+    return true;
+}
+
+// Null-terminated name pointers, parallel to enumValues<E>().
+template <class E>
+inline const char* const* enumCNames() {
+    static constexpr auto buf = enumCharBuf<E>();
+    static constexpr auto off = enumOffsets<E>();
+    static const auto ptrs = [] {
+        std::array<const char*, enumValidCount<E>()> p{};
+        for (std::size_t i = 0; i < p.size(); ++i) p[i] = buf.data() + off[i];
+        return p;
+    }();
+    return ptrs.data();
+}
+
+} // namespace internal
+
+// All valid enumerator names of E (reflected, compile-time).
+template <class E>
+inline const std::array<std::string_view, internal::enumValidCount<E>()>& enumNames() {
+    static constexpr auto names = internal::enumNamesImpl<E>();
+    return names;
+}
+
+// All valid enumerator values of E, parallel to enumNames<E>().
+template <class E>
+inline const std::array<E, internal::enumValidCount<E>()>& enumValues() {
+    static constexpr auto values = internal::enumValuesImpl<E>();
+    return values;
+}
+
+// An EnumLabelSpan synthesized from reflection — labels[value] is the name.
+// Valid only for contiguous zero-based enums (value == index); used to drive a
+// combo box for enums that have no explicit TC_ENUM_LABELS.
+template <class E>
+inline EnumLabelSpan enumReflectedSpan() {
+    return { internal::enumCNames<E>(), static_cast<int>(enumValues<E>().size()) };
+}
+
+// Display string (null-terminated) for a single enum value. A TC_ENUM_LABELS
+// declaration (if any) overrides reflection; otherwise the reflected enumerator
+// name is returned. Returns "?" for a value outside the labeled / window range.
+template <class E>
+inline const char* enumLabel(E value) {
+    static_assert(std::is_enum_v<E>, "enumLabel<E> requires an enum type.");
+    if constexpr (requires { tcEnumLabelsAdl(E{}); }) {
+        const EnumLabelSpan span = tcEnumLabelsAdl(E{});
+        const int i = static_cast<int>(value);
+        if (i >= 0 && i < span.count && span.labels[i]) return span.labels[i];
+        return "?";
+    } else {
+        const auto& values = enumValues<E>();
+        const char* const* names = internal::enumCNames<E>();
+        for (std::size_t i = 0; i < values.size(); ++i)
+            if (values[i] == value) return names[i];
+        return "?";
+    }
+}
 
 // Visitor over a type's values. One overload per supported type; each returns
 // true if the value was edited this call.
@@ -150,6 +356,10 @@ inline bool reflectValue(Reflector& r, const char* name, T& v) {
         bool edited;
         if constexpr (requires { tcEnumLabelsAdl(T{}); }) {
             edited = r.visit(name, i, tcEnumLabelsAdl(T{}));
+        } else if constexpr (internal::enumIsContiguousZeroBased<T>()) {
+            // No explicit labels: synthesize them from compile-time reflection
+            // so the enum still renders as a combo of its enumerator names.
+            edited = r.visit(name, i, enumReflectedSpan<T>());
         } else {
             edited = r.visit(name, i);
         }

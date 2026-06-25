@@ -16,16 +16,25 @@ using namespace tc;
 // A circle. Reflects a color, a radius and a filled flag (on top of Node's
 // transform), and picks via a circle hit shape.
 struct VisualNode : public Node {
+    // A label-less enum: the inspector renders it as a combo of its enumerator
+    // names automatically (compile-time enum reflection — no TC_ENUM_LABELS).
+    enum class Shape { Circle, Ring, Square };
+
     Color color{0.35f, 0.62f, 0.92f, 1.0f};
     float radius = 30.0f;
     bool  filled = true;
+    Shape shape  = Shape::Circle;
 
     VisualNode() { enableEvents(); }
 
     void draw() override {
         setColor(color);
         if (filled) fill(); else noFill();
-        drawCircle(0, 0, radius);
+        switch (shape) {
+            case Shape::Circle: drawCircle(0, 0, radius); break;
+            case Shape::Ring:   noFill(); drawCircle(0, 0, radius); break;
+            case Shape::Square: drawRect(-radius, -radius, radius * 2, radius * 2); break;
+        }
     }
 
     bool hitTest(const Ray& localRay, float& outDistance) override {
@@ -39,6 +48,7 @@ struct VisualNode : public Node {
         TC_VALUE(color)
         TC_VALUE(radius)
         TC_VALUE(filled)
+        TC_VALUE(shape)                    // label-less enum -> auto combo box
     }
 };
 
