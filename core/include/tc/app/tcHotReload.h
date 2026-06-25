@@ -36,7 +36,7 @@
 
 namespace trussc {
     // Forward declaration — implemented in tcHotReloadHost.h
-    int runHotReloadApp(const WindowSettings& settings);
+    namespace internal { int runHotReloadApp(const WindowSettings& settings); }
 }
 
 // ---------------------------------------------------------------------------
@@ -109,7 +109,7 @@ namespace trussc {
 // ---------------------------------------------------------------------------
 #ifdef TC_HOT_RELOAD_BUILD
 #define TC_RUN_APP(AppClass, settings)   \
-    trussc::runHotReloadApp(settings)
+    trussc::internal::runHotReloadApp(settings)
 #else
 #define TC_RUN_APP(AppClass, settings)   \
     trussc::runApp<AppClass>(settings)

@@ -526,6 +526,8 @@ inline Host g_host;
 // runHotReloadApp — entry point for hot reload mode
 // ---------------------------------------------------------------------------
 
+namespace internal {
+
 inline int runHotReloadApp(const WindowSettings& settings) {
     using namespace hot_reload;
 
@@ -641,6 +643,8 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     sapp_run(&desc);
     return 0;
 }
+
+} // namespace internal
 
 } // namespace trussc
 
