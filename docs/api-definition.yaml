@@ -812,7 +812,7 @@ categories:
           - bitmapStringExtendedExample
         return: "void"
         signatures:
-          - params: "const string& text, float x, float y"
+          - params: "const string& text, float x, float y, bool screenFixed = true"
             params_simple: "text, x, y"
         description: "Draw text"
         description_ja: "テキストを描画"
@@ -16168,9 +16168,9 @@ types:
         self: FileWriter
         return: "FileWriter&"
         signatures:
-          - params: "string text"
+          - params: "const std::string& text"
           - params: "char c"
-          - params: "void* data, size_t size"
+          - params: "const void* data, size_t size"
         description: "Write data to file"
         description_ja: "データを書き込む"
         description_ko: "파일에 데이터를 씀"
