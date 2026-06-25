@@ -12,6 +12,20 @@
 #   keywords: [..]   # search aliases for fuzzy/keyword lookup on the web reference
 #   index: false     # exclude this symbol from the FOR_AI_ASSISTANT.md C++ API index
 
+# Coverage-audit configuration (consumed by docs/scripts/coverage-audit.js).
+# The public contract is everything directly in trussc:: ; anything intentionally
+# non-public MUST live under one of these namespaces. The C++->yaml coverage
+# check enumerates the real public API via the clang AST and excludes any symbol
+# whose namespace path contains one of these segments — declarative, so a whole
+# subsystem of internals drops out with one line instead of per-symbol flags.
+coverage:
+  excluded_namespaces:
+    - internal      # framework internals (the one canonical hidden namespace)
+    - mcp           # MCP automation transport
+    - headless      # headless-mode runtime
+    - hot_reload    # hot-reload host plumbing
+    - console       # console / debug helpers
+
 categories:
   # ==========================================================================
   # Lifecycle
