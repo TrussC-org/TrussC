@@ -764,10 +764,10 @@ int runApp(const WindowSettings& settings = WindowSettings())  // Start the appl
 ### Events
 
 ```cpp
-void mousePressed(float x, float y, int button)  // Mouse button pressed
-void mouseReleased(float x, float y, int button)  // Mouse button released
-void mouseMoved(float x, float y)  // Mouse moved
-void mouseDragged(float x, float y, int button)  // Mouse dragged
+void mousePressed(Vec2 pos, int button)  // Mouse button pressed
+void mouseReleased(Vec2 pos, int button)  // Mouse button released
+void mouseMoved(Vec2 pos)  // Mouse moved
+void mouseDragged(Vec2 pos, int button)  // Mouse dragged
 void keyPressed(int key)  // Key pressed. Use KEY_* constants for special keys, or uppercase char literals for printable keys (e.g. key == 'A', key == '1')
 void keyReleased(int key)  // Key released
 void windowResized(int width, int height)  // Window resized
@@ -776,15 +776,15 @@ void windowResized(int width, int height)  // Window resized
 ### Graphics - Color
 
 ```cpp
-void clear()  // Clear screen. No args = transparent black (0,0,0,0)
-void clear(float gray)  // Clear screen. No args = transparent black (0,0,0,0)
-void clear(float r, float g, float b)  // Clear screen. No args = transparent black (0,0,0,0)
-void setColor(float gray)  // Set drawing color (0.0-1.0)
-void setColor(float r, float g, float b)  // Set drawing color (0.0-1.0)
+ChipSoundBundle& clear()  // Clear screen. No args = transparent black (0,0,0,0)
+ChipSoundBundle& clear(float gray, float a = 1.0f)  // Clear screen. No args = transparent black (0,0,0,0)
+ChipSoundBundle& clear(float r, float g, float b, float a = 1.0f)  // Clear screen. No args = transparent black (0,0,0,0)
+void setColor(float gray, float a = 1.0f)  // Set drawing color (0.0-1.0)
+void setColor(float r, float g, float b, float a = 1.0f)  // Set drawing color (0.0-1.0)
 void setColor(float r, float g, float b, float a)  // Set drawing color (0.0-1.0)
-void setColorHSB(float h, float s, float b)  // Set color from HSB (H: 0-1)
-void setColorOKLCH(float L, float C, float H)  // Set color from OKLCH
-void setColorOKLab(float L, float a, float b)  // Set color from OKLab
+void setColorHSB(float h, float s, float b, float a = 1.0f)  // Set color from HSB (H: 0-1)
+void setColorOKLCH(float L, float C, float H, float alpha = 1.0f)  // Set color from OKLCH
+void setColorOKLab(float L, float a_lab, float b_lab, float alpha = 1.0f)  // Set color from OKLab
 float srgbToLinear(float x)  // Convert a single sRGB channel value to linear RGB
 float linearToSrgb(float x)  // Convert a single linear RGB channel value to sRGB
 ```
@@ -825,12 +825,12 @@ void drawBox(float x, float y, float z, float size)  // Draw 3D box (respects fi
 void drawBox(float x, float y, float z, float w, float h, float d)  // Draw 3D box (respects fill/noFill)
 void drawBox(Vec3 pos, float size)  // Draw 3D box (respects fill/noFill)
 void drawBox(Vec3 pos, float w, float h, float d)  // Draw 3D box (respects fill/noFill)
-void drawSphere(float radius)  // Draw 3D sphere (respects fill/noFill)
-void drawSphere(float x, float y, float z, float radius)  // Draw 3D sphere (respects fill/noFill)
-void drawSphere(Vec3 pos, float radius)  // Draw 3D sphere (respects fill/noFill)
-void drawCone(float radius, float height)  // Draw 3D cone (respects fill/noFill)
-void drawCone(float x, float y, float z, float radius, float height)  // Draw 3D cone (respects fill/noFill)
-void drawCone(Vec3 pos, float radius, float height)  // Draw 3D cone (respects fill/noFill)
+void drawSphere(float radius, int resolution = 16)  // Draw 3D sphere (respects fill/noFill)
+void drawSphere(float x, float y, float z, float radius, int resolution = 16)  // Draw 3D sphere (respects fill/noFill)
+void drawSphere(Vec3 pos, float radius, int resolution = 16)  // Draw 3D sphere (respects fill/noFill)
+void drawCone(float radius, float height, int resolution = 16)  // Draw 3D cone (respects fill/noFill)
+void drawCone(float x, float y, float z, float radius, float height, int resolution = 16)  // Draw 3D cone (respects fill/noFill)
+void drawCone(Vec3 pos, float radius, float height, int resolution = 16)  // Draw 3D cone (respects fill/noFill)
 void beginShape()  // Begin drawing a shape
 void vertex(float x, float y)  // Add a vertex
 void vertex(float x, float y, float z)  // Add a vertex
@@ -850,14 +850,14 @@ void drawStroke(const Vec2& p1, const Vec2& p2)  // Draw a single stroke segment
 void drawBitmapString(const string& text, float x, float y)  // Draw text
 void drawBitmapStringHighlight(const string& text, float x, float y, const Color& background = Color(0,0,0), const Color& foreground = Color(1,1,1))  // Draw text with background highlight
 void getBitmapStringBounds(const string& text, float& width, float& height)  // Get bitmap string bounding box size
-void setTextAlign(TextAlign horizontal)  // Set text alignment
-void setTextAlign(TextAlign horizontal, TextAlign vertical)  // Set text alignment
+void setTextAlign(Direction h, Direction v)  // Set text alignment
+void setTextAlign(Direction h, Direction v)  // Set text alignment
 TextAlign getTextAlignH()  // Get horizontal text alignment
 TextAlign getTextAlignV()  // Get vertical text alignment
 float getBitmapFontHeight()  // Get bitmap font height
 float getBitmapStringWidth(const string& text)  // Get text width
 float getBitmapStringHeight(const string& text)  // Get text height
-Rect getBitmapStringBBox(const string& text, float x, float y)  // Get text bounding box
+Rect getBitmapStringBBox(const std::string & text)  // Get text bounding box
 void bitmapfont::registerGlyph(const bitmapfont::Glyph& g)  // Register a bitmap glyph for a Unicode codepoint (extends drawBitmapString)
 void bitmapfont::registerGlyphs(const bitmapfont::Glyph (&glyphs)[N])  // Register a batch of bitmap glyphs at once
 void bitmapfont::updateGlyph(uint32_t cp, const uint8_t* newData)  // Swap an already-registered glyph's pixel data (atlas cell unchanged). Useful for per-frame animation.
@@ -909,11 +909,11 @@ void translate(float x, float y)  // Move origin
 void translate(float x, float y, float z)  // Move origin
 void rotate(float radians)  // Rotate by radians (single axis, euler angles, or quaternion)
 void rotate(float x, float y, float z)  // Rotate by radians (single axis, euler angles, or quaternion)
-void rotate(Vec3 euler)  // Rotate by radians (single axis, euler angles, or quaternion)
-void rotate(Quaternion quat)  // Rotate by radians (single axis, euler angles, or quaternion)
+void rotate(float x, float y, float z)  // Rotate by radians (single axis, euler angles, or quaternion)
+void rotate(const Quaternion& quat)  // Rotate by radians (single axis, euler angles, or quaternion)
 void rotateDeg(float degrees)  // Rotate by degrees
 void rotateDeg(float x, float y, float z)  // Rotate by degrees
-void rotateDeg(Vec3 euler)  // Rotate by degrees
+void rotateDeg(float x, float y, float z)  // Rotate by degrees
 void rotateX(float radians)  // Rotate around X axis
 void rotateY(float radians)  // Rotate around Y axis
 void rotateZ(float radians)  // Rotate around Z axis
@@ -1063,7 +1063,7 @@ int BuildInfo::second()  // Build second (0-59)
 
 ```cpp
 float getElapsedTimef()  // Elapsed seconds (float)
-float getElapsedTime()  // Elapsed seconds (alias for getElapsedTimef)
+double getElapsedTime()  // Elapsed seconds (alias for getElapsedTimef)
 uint64_t getElapsedTimeMillis()  // Elapsed milliseconds (int64)
 uint64_t getElapsedTimeMicros()  // Elapsed microseconds (int64)
 void resetElapsedTimeCounter()  // Reset elapsed time
@@ -1217,7 +1217,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings())  // Ru
 ### Utility
 
 ```cpp
-void logNotice(const string& message)  // Print to console
+LogStream logNotice(const std::string & module = "")  // Print to console
 bool compress(const void* src, size_t nbytes, vector<uint8_t>& out, Codec codec)  // Compress a byte buffer with the given codec (Codec::None or Codec::LZ4). The vector form resizes out and returns bool; the raw form writes into dst (capacity dstCapacity) and returns the number of bytes written (or -1), useful for compressing into a region of a buffer / parallel chunks
 bool compress(const void* src, size_t nbytes, void* dst, size_t dstCapacity, Codec codec)  // Compress a byte buffer with the given codec (Codec::None or Codec::LZ4). The vector form resizes out and returns bool; the raw form writes into dst (capacity dstCapacity) and returns the number of bytes written (or -1), useful for compressing into a region of a buffer / parallel chunks
 bool decompress(const void* src, size_t nbytes, vector<uint8_t>& out, size_t decompressedSize, Codec codec)  // Decompress a byte buffer; decompressedSize is the known original byte count. The vector form resizes out and returns bool; the raw form writes into dst (capacity dstCapacity) and returns bytes written (or -1) - it can write into a region of an existing buffer (dst + offset), enabling parallel per-chunk decompression
@@ -1227,7 +1227,7 @@ void beep()  // Play a beep sound
 void beep(float frequency)  // Play a beep sound
 int toInt(const string& str)  // Convert string to int
 float toFloat(const string& str)  // Convert string to float
-vector<string> splitString(const string& source, const string& delimiter)  // Split string by delimiter
+std::vector<std::string> splitString(const std::string & source, const std::string & delimiter, bool ignoreEmpty = false, bool trim = false)  // Split string by delimiter
 string joinString(const vector<string>& elements, const string& delimiter)  // Join strings with delimiter
 void stringReplace(string& input, const string& searchStr, const string& replaceStr)  // Replace substring in place
 string toLower(const string& src)  // Convert to lower case
@@ -1345,7 +1345,7 @@ int getMaxPolyphony()  // Max simultaneously-playing Sound voices
 int getBufferSize()  // Current device buffer size in frames (0 = miniaudio default)
 bool isInitialized()  // True after a successful init()
 Event<AudioOutBuffer> audioOut()  // Real-time playback callback event. listen() to add a synthesis / processing listener. Fires per audio buffer on the audio thread; keep RT-safe.
-Event<AudioInBuffer> audioIn()  // Real-time capture callback event (microphone input). RT-safe same as audioOut.
+void audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut.
 Event<AudioDeviceChangedArgs> audioDeviceChanged()  // Fires after every successful init() (initial AND re-init). Args carry the resolved device's real name, isDefaultDevice flag, sampleRate, channels, bufferSize, maxPolyphony. Listener runs on the thread that called init() (main), not the audio thread.
 void initAudio()  // Initialize the global AudioEngine. Called automatically by Sound::load() / play(), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener).
 void shutdownAudio()  // Shut down the global AudioEngine and close the audio device. Usually unnecessary (runs at program exit).
@@ -1385,7 +1385,7 @@ float getLineHeight()  // Get line height
 int getSize()  // Get font size
 string systemFontPath(const string& name)  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub.
 vector<string> listSystemFonts()  // Enumerate names of all fonts known to the OS
-void registerGlyph(const Glyph &g)  // Register one bitmap glyph so drawBitmapString can render its codepoint. Replaces any glyph already registered at the same codepoint and marks the atlas dirty for re-upload
+void registerGlyph(const bitmapfont::Glyph &)  // Register one bitmap glyph so drawBitmapString can render its codepoint. Replaces any glyph already registered at the same codepoint and marks the atlas dirty for re-upload
 void registerGlyphs(const Glyph (&glyphs)[N])  // Register a fixed-size array of bitmap glyphs in one call (template over the array size)
 void updateGlyph(uint32_t cp, const uint8_t *newData)  // Swap the pixel data of an already-registered glyph without changing its atlas position. Useful for animating a glyph by updating its data each frame
 ```
@@ -1415,8 +1415,8 @@ int getLoopCount()  // Get number of completed loop iterations
  Vec2(float x, float y)  // Create 2D vector (type constructor)
  Vec2(float v)  // Create 2D vector (type constructor)
 Vec2& set(float x, float y)  // Set vector components (type method)
-Vec2& set(Vec2 v)  // Set vector components (type method)
-Vec2 Vec2_fromAngle(float radians)  // Create Vec2 from angle
+Vec2& set(float x_, float y_)  // Set vector components (type method)
+Vec2 Vec2_fromAngle(float, float)  // Create Vec2 from angle
 Vec2 Vec2_fromAngle(float radians, float length)  // Create Vec2 from angle
 ```
 
@@ -1427,7 +1427,7 @@ Vec2 Vec2_fromAngle(float radians, float length)  // Create Vec2 from angle
  Vec3(float x, float y, float z)  // Create 3D vector (type constructor)
  Vec3(float v)  // Create 3D vector (type constructor)
 Vec3& set(float x, float y, float z)  // Set vector components (type method)
-Vec3& set(Vec3 v)  // Set vector components (type method)
+Vec3& set(float x_, float y_, float z_)  // Set vector components (type method)
 ```
 
 ### Types - Color
@@ -1436,20 +1436,20 @@ Vec3& set(Vec3 v)  // Set vector components (type method)
  Color()  // Create color (type constructor)
  Color(float r, float g, float b)  // Create color (type constructor)
  Color(float r, float g, float b, float a)  // Create color (type constructor)
-Color& set(float r, float g, float b)  // Set color components (type method)
+Color& set(float r_, float g_, float b_, float a_ = 1.0f)  // Set color components (type method)
 Color& set(float r, float g, float b, float a)  // Set color components (type method)
-Color& set(float gray)  // Set color components (type method)
-Color& set(Color c)  // Set color components (type method)
+Color& set(float gray, float a_ = 1.0f)  // Set color components (type method)
+Color& set(const Color& c)  // Set color components (type method)
 ColorHSB toHSB()  // Convert to HSB color space (H: 0-1, S: 0-1, B: 0-1)
 ColorOKLab toOKLab()  // Convert to OKLab color space (perceptually uniform)
 ColorOKLCH toOKLCH()  // Convert to OKLCH color space (L: 0-1, C: 0-0.4, H: 0-1)
-Color Color_fromHSB(float h, float s, float b)  // Create Color from HSB (H: 0-1, S: 0-1, B: 0-1)
+Color Color_fromHSB(float, float, float, float)  // Create Color from HSB (H: 0-1, S: 0-1, B: 0-1)
 Color Color_fromHSB(float h, float s, float b, float a)  // Create Color from HSB (H: 0-1, S: 0-1, B: 0-1)
-Color colorFromHSB(float h, float s, float b)  // Create Color from HSB (alias for Color_fromHSB)
+Color colorFromHSB(float h, float s, float b, float a = 1.0f)  // Create Color from HSB (alias for Color_fromHSB)
 Color colorFromHSB(float h, float s, float b, float a)  // Create Color from HSB (alias for Color_fromHSB)
-Color Color_fromOKLCH(float L, float C, float H)  // Create Color from OKLCH
+Color Color_fromOKLCH(float, float, float, float)  // Create Color from OKLCH
 Color Color_fromOKLCH(float L, float C, float H, float a)  // Create Color from OKLCH
-Color Color_fromOKLab(float L, float a, float b)  // Create Color from OKLab
+Color Color_fromOKLab(float, float, float, float)  // Create Color from OKLab
 Color Color_fromOKLab(float L, float a, float b, float alpha)  // Create Color from OKLab
 ```
 
@@ -1459,7 +1459,7 @@ Color Color_fromOKLab(float L, float a, float b, float alpha)  // Create Color f
  ColorHSB(float h, float s, float b)  // HSB color type (H: 0-1, S: 0-1, B: 0-1). Use toRGB() to convert to Color
  ColorHSB(float h, float s, float b, float a)  // HSB color type (H: 0-1, S: 0-1, B: 0-1). Use toRGB() to convert to Color
 Color toRGB()  // Convert ColorHSB to Color (RGB)
-ColorHSB lerp(ColorHSB target, float t)  // Interpolate in HSB space (shortest hue path)
+ColorHSB lerp(const ColorHSB & target, float t, bool shortestPath = true)  // Interpolate in HSB space (shortest hue path)
 ```
 
 ### Types - ColorOKLCH
@@ -1468,7 +1468,7 @@ ColorHSB lerp(ColorHSB target, float t)  // Interpolate in HSB space (shortest h
  ColorOKLCH(float L, float C, float H)  // OKLCH color type (L: 0-1, C: 0-0.4, H: 0-1). Perceptually uniform
  ColorOKLCH(float L, float C, float H, float a)  // OKLCH color type (L: 0-1, C: 0-0.4, H: 0-1). Perceptually uniform
 Color toRGB()  // Convert ColorOKLCH to Color (RGB)
-ColorOKLCH lerp(ColorOKLCH target, float t)  // Interpolate in OKLCH space (shortest hue path, perceptually uniform)
+ColorOKLCH lerp(const ColorOKLCH & target, float t, bool shortestPath = true)  // Interpolate in OKLCH space (shortest hue path, perceptually uniform)
 ```
 
 ### Types - Rect
@@ -1477,16 +1477,16 @@ ColorOKLCH lerp(ColorOKLCH target, float t)  // Interpolate in OKLCH space (shor
  Rect()  // Create a rectangle (type constructor)
  Rect(float x, float y, float w, float h)  // Create a rectangle (type constructor)
 Rect& set(float x, float y, float w, float h)  // Set rectangle properties (type method)
-Rect& set(Vec2 pos, float w, float h)  // Set rectangle properties (type method)
+Rect& set(float x_, float y_, float w_, float h_)  // Set rectangle properties (type method)
 bool contains(float x, float y)  // Check if point is inside (type method)
-bool intersects(Rect other)  // Check intersection (type method)
+bool intersects(const Rect &)  // Check intersection (type method)
 ```
 
 ### Scene Graph
 
 ```cpp
  Node()  // Create a base scene node (C++ only - uses shared_ptr)
-void addChild(shared_ptr<Node> child)  // Add a child node (C++ only)
+void addChild(Node::Ptr, bool)  // Add a child node (C++ only)
 void moveToFront()  // Move this node to the end of its parent's child list — drawn last, on top of siblings. No-op if no parent or already last (C++ only)
 void moveToBack()  // Move this node to the beginning of its parent's child list — drawn first, beneath siblings. No-op if no parent or already first (C++ only)
 void destroy()  // Mark node for deferred removal from scene graph (C++ only)
@@ -1498,20 +1498,20 @@ void setSize(float w, float h)  // Set size (C++ only)
 void setClipping(bool enabled)  // Enable/disable scissor clipping for RectNode (C++ only)
 void enableEvents()  // Enable mouse/key events for this node (C++ only)
  ScrollContainer()  // Scrollable container node with clipping (C++ only)
-void setContent(shared_ptr<RectNode> content)  // Set content node for ScrollContainer (C++ only)
+void setContent(Node::Ptr newContent)  // Set content node for ScrollContainer (C++ only)
 void setScrollY(float y)  // Set vertical scroll position (C++ only)
  ScrollBar(ScrollContainer* container, Direction dir = Vertical)  // Visual scroll indicator for ScrollContainer (C++ only)
  LayoutMod(LayoutDirection dir, float spacing = 0)  // Layout modifier for automatic child arrangement (C++ only)
 void updateLayout()  // Recalculate layout (call after adding/removing children) (C++ only)
  TweenMod()  // Animation modifier for Node properties (position, scale, rotation) with easing (C++ only)
-TweenMod& moveTo(float x, float y)  // Animate position to target (TweenMod method) (C++ only)
-TweenMod& moveTo(Vec3 pos)  // Animate position to target (TweenMod method) (C++ only)
-TweenMod& moveBy(float dx, float dy)  // Animate position by relative amount (TweenMod method) (C++ only)
+TweenMod& moveTo(float x, float y, float z = 0.0f)  // Animate position to target (TweenMod method) (C++ only)
+TweenMod& moveTo(const Vec3& pos)  // Animate position to target (TweenMod method) (C++ only)
+TweenMod& moveBy(float dx, float dy, float dz = 0.0f)  // Animate position by relative amount (TweenMod method) (C++ only)
 TweenMod& scaleTo(float uniform)  // Animate scale to target (TweenMod method) (C++ only)
 TweenMod& scaleTo(float sx, float sy, float sz = 1)  // Animate scale to target (TweenMod method) (C++ only)
 TweenMod& scaleBy(float factor)  // Animate scale by relative multiplier (TweenMod method) (C++ only)
 TweenMod& rotateTo(float radians)  // Animate rotation to target angle or quaternion (TweenMod method) (C++ only)
-TweenMod& rotateTo(Quaternion q)  // Animate rotation to target angle or quaternion (TweenMod method) (C++ only)
+TweenMod& rotateTo(const Quaternion& q)  // Animate rotation to target angle or quaternion (TweenMod method) (C++ only)
 TweenMod& rotateBy(float radians)  // Animate rotation by relative angle (TweenMod method) (C++ only)
 TweenMod& duration(float seconds)  // Set animation duration (TweenMod method) (C++ only)
 TweenMod& ease(EaseType type, EaseMode mode = InOut)  // Set easing function (TweenMod method). Types: Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce. Modes: In, Out, InOut (C++ only)
@@ -1524,16 +1524,16 @@ Node* getRootNode()  // Get the running App as the root of the node tree (set by
 ### 3D Setup
 
 ```cpp
-void setupScreenPerspective()  // Set up perspective projection (oF-style default 3D)
-void setupScreenPerspective(float fovDeg)  // Set up perspective projection (oF-style default 3D)
+void setupScreenPerspective(float fovDeg = 45.0f, float nearDist = 0.0f, float farDist = 0.0f)  // Set up perspective projection (oF-style default 3D)
+void setupScreenPerspective(float fovDeg = 45.0f, float nearDist = 0.0f, float farDist = 0.0f)  // Set up perspective projection (oF-style default 3D)
 void setupScreenPerspective(float fovDeg, float nearDist, float farDist)  // Set up perspective projection (oF-style default 3D)
 void setupScreenOrtho()  // Set up orthographic projection (2D mode)
-void setupScreenFov(float fovDeg)  // Set up screen projection with specified FOV (0 = ortho, >0 = perspective)
+void setupScreenFov(float fovDeg, float nearDist = 0.0f, float farDist = 0.0f)  // Set up screen projection with specified FOV (0 = ortho, >0 = perspective)
 void setupScreenFov(float fovDeg, float nearDist, float farDist)  // Set up screen projection with specified FOV (0 = ortho, >0 = perspective)
 void setDefaultScreenFov(float fovDeg)  // Set default screen FOV (applied at frame start)
 float getDefaultScreenFov()  // Get current default screen FOV
 Vec3 worldToScreen(const Vec3& worldPos)  // Convert world coordinate to screen coordinate (x, y = screen pos, z = depth 0-1)
-Vec3 screenToWorld(const Vec2& screenPos)  // Convert screen coordinate to world coordinate on Z plane
+Vec3 screenToWorld(const Vec2 & screenPos, float worldZ = 0.0f)  // Convert screen coordinate to world coordinate on Z plane
 Vec3 screenToWorld(const Vec2& screenPos, float worldZ)  // Convert screen coordinate to world coordinate on Z plane
 ```
 
@@ -1544,6 +1544,7 @@ void begin()  // Apply camera transform (start 3D mode)
 void end()  // Restore previous transform (end 3D mode)
 void reset()  // Reset camera to default position
 void setTarget(float x, float y, float z)  // Set camera look-at target
+void setTarget(const Vec3 &target)  // Set camera look-at target
 Vec3 getTarget()  // Get camera look-at target
 void setDistance(float distance)  // Set distance from target
 float getDistance()  // Get distance from target
@@ -1603,20 +1604,20 @@ Mat4 Mat4_rotateY(float radians)  // Create Y-axis rotation matrix
 Mat4 Mat4_rotateZ(float radians)  // Create Z-axis rotation matrix
 Mat4 Mat4_scale(float s)  // Create a scaling matrix
 Mat4 Mat4_scale(float sx, float sy, float sz)  // Create a scaling matrix
-Mat4 Mat4_lookAt(Vec3 eye, Vec3 target, Vec3 up)  // Create a view matrix
+Mat4 Mat4_lookAt(const Vec3 &, const Vec3 &, const Vec3 &)  // Create a view matrix
 Mat4 Mat4_ortho(float left, float right, float bottom, float top, float nearPlane, float farPlane)  // Create an orthographic projection matrix
 Mat4 Mat4_perspective(float fovY, float aspect, float nearPlane, float farPlane)  // Create a perspective projection matrix
 Quaternion Quaternion_identity()  // Create an identity quaternion
-Quaternion Quaternion_fromAxisAngle(Vec3 axis, float radians)  // Create quaternion from axis-angle
+Quaternion Quaternion_fromAxisAngle(const Vec3 &, float)  // Create quaternion from axis-angle
 Quaternion Quaternion_fromEuler(float pitch, float yaw, float roll)  // Create quaternion from Euler angles
 Quaternion Quaternion_fromEuler(Vec3 euler)  // Create quaternion from Euler angles
-Quaternion Quaternion_slerp(Quaternion a, Quaternion b, float t)  // Spherical linear interpolation
+Quaternion Quaternion_slerp(const Quaternion &, const Quaternion &, float)  // Spherical linear interpolation
 ```
 
 ### Graphics - Advanced
 
 ```cpp
-void drawMesh(Mesh mesh)  // Draw a mesh
+void drawMesh(const Mesh & mesh)  // Draw a mesh
 void drawPolyline(Polyline polyline)  // Draw a polyline
 Mesh createBox(float size)  // Create a box mesh
 Mesh createBox(float w, float h, float d)  // Create a box mesh
@@ -1635,10 +1636,10 @@ void drawTexture(const Texture& tex, float x, float y, float w, float h)  // Dra
 
 ```cpp
  Texture()  // Create a texture
-bool load(const string& path)  // Load image from file
+bool load(const std::filesystem::path &, bool)  // Load image from file
 bool loadFromPixels(const Pixels& pixels)  // Load from pixel data
-void bind(int slot = 0)  // Bind texture
-void unbind(int slot = 0)  // Unbind texture
+void bind()  // Bind texture
+void unbind()  // Unbind texture
 int getWidth()  // Get width
 int getHeight()  // Get height
 int channelCount(TextureFormat fmt)  // Number of color channels for a TextureFormat (1, 2, or 4)
@@ -1650,7 +1651,7 @@ bool isFloatFormat(TextureFormat fmt)  // Whether a TextureFormat uses floating-
 
 ```cpp
  Fbo()  // Create an FBO
-void allocate(int w, int h)  // Allocate buffer
+void allocate(int, int, int, TextureFormat, bool)  // Allocate buffer
 void begin()  // Begin drawing to FBO. No args = preserve previous content. With args = clear with specified color
 void begin(float r, float g, float b, float a = 1.0)  // Begin drawing to FBO. No args = preserve previous content. With args = clear with specified color
 void end()  // End drawing to FBO
@@ -1684,26 +1685,26 @@ void setTexture(int slot, sg_view view, sg_sampler sampler)  // Bind texture to 
 
 ```cpp
  Pixels()  // Create pixel buffer
-void allocate(int w, int h, int channels)  // Allocate memory
+void allocate(int, int, int, PixelFormat)  // Allocate memory
 uint8_t* getData()  // Get raw data pointer
 Color getColor(int x, int y)  // Get color at pixel
 void setColor(int x, int y, const Color& c)  // Set color at pixel
-bool save(const string& path)  // Save to file
+bool save(const std::filesystem::path &)  // Save to file
 ```
 
 ### Types - Mesh
 
 ```cpp
  Mesh()  // Create a new Mesh (constructor)
-void setMode(int mode)  // Set primitive mode (MESH_TRIANGLES, etc.)
+void setMode(PrimitiveMode)  // Set primitive mode (MESH_TRIANGLES, etc.)
 void addVertex(float x, float y, float z)  // Add a vertex
-void addVertex(Vec3 v)  // Add a vertex
+void addVertex(const Vec3& v)  // Add a vertex
 void addColor(float r, float g, float b, float a)  // Add a color for the vertex
-void addColor(Color c)  // Add a color for the vertex
+void addColor(const Color& c)  // Add a color for the vertex
 void addTexCoord(float u, float v)  // Add a texture coordinate
 void addNormal(float x, float y, float z)  // Add a normal vector
-void addIndex(int index)  // Add an index
-void addTriangle(int i1, int i2, int i3)  // Add a triangle (3 indices)
+void addIndex(unsigned int)  // Add an index
+void addTriangle(unsigned int, unsigned int, unsigned int)  // Add a triangle (3 indices)
 void clear()  // Clear all data
 void draw()  // Draw the mesh
 ```
@@ -1713,26 +1714,30 @@ void draw()  // Draw the mesh
 ```cpp
  Path()  // Create a new Path (constructor)
 void addVertex(float x, float y)  // Add a vertex
-void lineTo(float x, float y)  // Add a line segment to point
-void bezierTo(float cx1, float cy1, float cx2, float cy2, float x, float y)  // Add a cubic bezier curve
-void quadBezierTo(float cx, float cy, float x, float y)  // Add a quadratic bezier curve
-void curveTo(float x, float y)  // Add a Catmull-Rom curve segment
-void arc(float x, float y, float rX, float rY, float angleBegin, float angleEnd)  // Add an arc
+void lineTo(float x, float y, float z = 0)  // Add a line segment to point
+void bezierTo(float cx1, float cy1, float cx2, float cy2, float x, float y, int resolution = -1)  // Add a cubic bezier curve
+void quadBezierTo(float cx, float cy, float x, float y, int resolution = -1)  // Add a quadratic bezier curve
+void curveTo(float x, float y, float z = 0, int resolution = -1)  // Add a Catmull-Rom curve segment
+void arc(float x, float y, float radiusX, float radiusY, float angleBegin, float angleEnd, int circleResolution = 20)  // Add an arc
 void close()  // Close the shape
 ```
 
 ### Types - StrokeMesh
 
 ```cpp
-StrokeMesh& setWidth(float width)  // Set stroke width (method chaining)
-StrokeMesh& setCapType(int type)  // Set cap type: Butt, Round, Square (method chaining)
-StrokeMesh& setJoinType(int type)  // Set join type: Miter, Round, Bevel (method chaining)
-StrokeMesh& setMiterLimit(float limit)  // Set miter limit for sharp corners (method chaining)
-StrokeMesh& addVertex(float x, float y)  // Add a vertex (method chaining)
-StrokeMesh& addVertex(float x, float y, float z)  // Add a vertex (method chaining)
-StrokeMesh& addVertexWithWidth(float x, float y, float width)  // Add a vertex with variable width (method chaining)
-StrokeMesh& setClosed(bool closed)  // Set whether the stroke is closed (method chaining)
-StrokeMesh& clear()  // Clear all vertices (method chaining)
+void setWidth(float width)  // Set stroke width (method chaining)
+void setColor(const Color &color)  // Set stroke color (method chaining)
+void setCapType(StrokeMesh::CapType)  // Set cap type: Butt, Round, Square (method chaining)
+void setJoinType(StrokeMesh::JoinType)  // Set join type: Miter, Round, Bevel (method chaining)
+void setMiterLimit(float limit)  // Set miter limit for sharp corners (method chaining)
+void addVertex(float x, float y, float z = 0)  // Add a vertex (method chaining)
+void addVertex(const Vec3& p)  // Add a vertex (method chaining)
+void addVertex(float x, float y, float z = 0)  // Add a vertex (method chaining)
+void addVertex(const Vec3& p)  // Add a vertex (method chaining)
+void addVertexWithWidth(float x, float y, float width)  // Add a vertex with variable width (method chaining)
+void setShape(const Path &)  // Set shape from Path (method chaining)
+void setClosed(bool closed)  // Set whether the stroke is closed (method chaining)
+void clear()  // Clear all vertices (method chaining)
 void update()  // Update the internal mesh (required before draw)
 void draw()  // Draw the stroke mesh
 ```
@@ -1783,7 +1788,7 @@ string getHwAccelName()  // Get the name of the active decode backend. Returns '
 void setResyncThreshold(float seconds)  // Set the maximum video/audio drift before hard re-sync. When drift exceeds this threshold, video seeks to match audio position instead of catching up frame-by-frame. Set to 0 to disable. Default: 0.5s. Primarily affects Linux (FFmpeg) backend.
 float getResyncThreshold()  // Get the current resync threshold in seconds
 bool hasAudio()  // Check if the loaded video has an audio track
-bool extractFrame(const string& path, Pixels& outPixels, float timeSec)  // Extract a single frame from a video file without loading the full video. Useful for thumbnails
+bool extractFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0f, float * outDuration = nullptr)  // Extract a single frame from a video file without loading the full video. Useful for thumbnails
  ScreenRecorder()  // Live screen recorder: captures the window (or an Fbo) every frame to a video file (native encoder, no ffmpeg)
 bool start(const string& path, const VideoRecordSettings& settings = {})  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically
 bool start(const Fbo& fbo, const string& path, const VideoRecordSettings& settings = {})  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically
@@ -1862,23 +1867,23 @@ Vec2(float v)
 float x  // X component
 float y  // Y component
 Vec2& set(float x, float y)  // Set vector components
-Vec2& set(Vec2 v)  // Set vector components
+Vec2& set(float x_, float y_)  // Set vector components
 float length()  // Get vector length
 float lengthSquared()  // Get squared length (faster, no sqrt)
 Vec2 normalized()  // Get normalized copy
 Vec2& normalize()  // Normalize in place
 Vec2& limit(float max)  // Limit length to max
-float dot(Vec2 v)  // Dot product
-float cross(Vec2 v)  // Cross product (z component)
-float distance(Vec2 v)  // Distance to another vector
-float distanceSquared(Vec2 v)  // Squared distance (faster)
+float dot(const Vec2 & v)  // Dot product
+float cross(const Vec2 & v)  // Cross product (z component)
+float distance(const Vec2 & v)  // Distance to another vector
+float distanceSquared(const Vec2 & v)  // Squared distance (faster)
 float angle()  // Angle in radians
-float angle(Vec2 v)  // Angle in radians
+float angle(const Vec2& v)  // Angle in radians
 Vec2 rotated(float radians)  // Get rotated copy
 Vec2& rotate(float radians)  // Rotate in place
-Vec2 lerp(Vec2 target, float t)  // Linear interpolation
+Vec2 lerp(const Vec2 & v, float t)  // Linear interpolation
 Vec2 perpendicular()  // Get perpendicular vector
-Vec2 reflected(Vec2 normal)  // Get reflected vector
+Vec2 reflected(const Vec2 & normal)  // Get reflected vector
 Vec2 Vec2_fromAngle(float radians)  // Create Vec2 from angle
 Vec2 Vec2_fromAngle(float radians, float length)  // Create Vec2 from angle
 ```
@@ -1893,18 +1898,18 @@ float x  // X component
 float y  // Y component
 float z  // Z component
 Vec3& set(float x, float y, float z)  // Set vector components
-Vec3& set(Vec3 v)  // Set vector components
+Vec3& set(float x_, float y_, float z_)  // Set vector components
 float length()  // Get vector length
 float lengthSquared()  // Get squared length
 Vec3 normalized()  // Get normalized copy
 Vec3& normalize()  // Normalize in place
 Vec3& limit(float max)  // Limit length to max
-float dot(Vec3 v)  // Dot product
-Vec3 cross(Vec3 v)  // Cross product
-float distance(Vec3 v)  // Distance to another vector
-float distanceSquared(Vec3 v)  // Squared distance
-Vec3 lerp(Vec3 target, float t)  // Linear interpolation
-Vec3 reflected(Vec3 normal)  // Get reflected vector
+float dot(const Vec3 & v)  // Dot product
+Vec3 cross(const Vec3 & v)  // Cross product
+float distance(const Vec3 & v)  // Distance to another vector
+float distanceSquared(const Vec3 & v)  // Squared distance
+Vec3 lerp(const Vec3 & v, float t)  // Linear interpolation
+Vec3 reflected(const Vec3 & normal)  // Get reflected vector
 Vec2 xy()  // Get XY components as Vec2
 ```
 
@@ -1970,22 +1975,22 @@ float r  // Red component (0.0-1.0)
 float g  // Green component (0.0-1.0)
 float b  // Blue component (0.0-1.0)
 float a  // Alpha component (0.0-1.0)
-Color& set(float r, float g, float b)  // Set color components
+Color& set(float r_, float g_, float b_, float a_ = 1.0f)  // Set color components
 Color& set(float r, float g, float b, float a)  // Set color components
-Color& set(float gray)  // Set color components
-uint32_t toHex()  // Convert to hex value
+Color& set(float gray, float a_ = 1.0f)  // Set color components
+uint32_t toHex(bool includeAlpha = false)  // Convert to hex value
 uint32_t toHex(bool includeAlpha)  // Convert to hex value
-Color lerp(Color target, float t)  // Interpolate in OKLab space
-Color lerpRGB(Color target, float t)  // Interpolate in RGB space
+Color lerp(const Color & target, float t)  // Interpolate in OKLab space
+Color lerpRGB(const Color & target, float t)  // Interpolate in RGB space
 Color clamped()  // Get clamped copy (0.0-1.0)
 ColorLinear toLinear()  // Convert to linear RGB color space
 ColorHSB toHSB()  // Convert to HSB (H: 0-1, S: 0-1, B: 0-1)
 ColorOKLab toOKLab()  // Convert to OKLab (perceptually uniform)
 ColorOKLCH toOKLCH()  // Convert to OKLCH (L: 0-1, C: 0-0.4, H: 0-1)
-Color lerpLinear(Color target, float t)  // Interpolate in linear RGB space
-Color lerpHSB(Color target, float t)  // Interpolate in HSB space
-Color lerpOKLab(Color target, float t)  // Interpolate in OKLab space (perceptually uniform)
-Color lerpOKLCH(Color target, float t)  // Interpolate in OKLCH space (shortest hue path)
+Color lerpLinear(const Color & target, float t)  // Interpolate in linear RGB space
+Color lerpHSB(const Color & target, float t)  // Interpolate in HSB space
+Color lerpOKLab(const Color & target, float t)  // Interpolate in OKLab space (perceptually uniform)
+Color lerpOKLCH(const Color & target, float t)  // Interpolate in OKLCH space (shortest hue path)
 Color Color_fromHex(uint hex)  // Create from hex value
 Color Color_fromHex(uint hex, bool hasAlpha)  // Create from hex value
 Color Color_fromHSB(float h, float s, float b)  // Create from HSB (H: 0-1)
@@ -2015,7 +2020,7 @@ float getBottom()  // Get bottom edge (y + height)
 float getCenterX()  // Get center X
 float getCenterY()  // Get center Y
 bool contains(float px, float py)  // Check if point is inside
-bool intersects(Rect other)  // Check if intersects with another rect
+bool intersects(const Rect & other)  // Check if intersects with another rect
 ```
 
 #### Mat4 — 4x4 matrix for 3D transformations
@@ -2035,7 +2040,7 @@ float w  // W component
 float x  // X component
 float y  // Y component
 float z  // Z component
-Vec3 rotate(Vec3 v)  // Rotate a vector
+Vec3 rotate(const Vec3 & v)  // Rotate a vector
 Vec3 toEuler()  // Convert to Euler angles
 Mat4 toMatrix()  // Convert to rotation matrix
 Quaternion normalized()  // Get normalized quaternion
@@ -2047,24 +2052,24 @@ Quaternion conjugate()  // Get conjugate quaternion
 
 ```cpp
 Pixels()
-void allocate(int width, int height)  // Allocate pixel buffer
-void allocate(int width, int height, int channels)  // Allocate pixel buffer
+void allocate(int width, int height, int channels = 4, PixelFormat format = PixelFormat::U8)  // Allocate pixel buffer
+void allocate(int width, int height, int channels = 4, PixelFormat format = PixelFormat::U8)  // Allocate pixel buffer
 Color getColor(int x, int y)  // Get pixel color at position
-void setColor(int x, int y, Color color)  // Set pixel color at position
+void setColor(int x, int y, const Color & c)  // Set pixel color at position
 void halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 void resize(int newWidth, int newHeight)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8.
 void crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge.
 void mirror(bool horizontal, bool vertical)  // Flip in place. Both true is 180°.
 void mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void mirrorV()  // Mirror vertically (alias for mirror(false, true))
-bool load(string path)  // Load image from file
-bool save(string path)  // Save image to file
+bool load(const std::filesystem::path &)  // Load image from file
+bool save(const std::filesystem::path &)  // Save image to file
 int getWidth()  // Get width
 int getHeight()  // Get height
 bool isAllocated()  // Check if allocated
 void clear()  // Release pixel buffer
 int getChannels()  // Get number of channels
-int getTotalBytes()  // Get total byte size
+size_t getTotalBytes()  // Get total byte size
 uint8_t* getData()  // Get raw data pointer
 bool loadFromMemory(const uint8_t* buffer, int len)  // Load image from memory
 void setFromPixels(const uint8_t* data, int width, int height, int channels)  // Copy from external pixel data
@@ -2074,13 +2079,13 @@ void copyTo(uint8_t* dst)  // Copy to external buffer
 #### Image — Image with CPU pixels and GPU texture
 
 ```cpp
-bool load(string path)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
-bool load(string path, bool mipmaps)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
-bool loadFromMemory(const uint8_t* buffer, int len)  // Load image from memory. `mipmaps=true` builds a mip chain.
+bool load(const std::filesystem::path &, bool)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
+bool load(const std::filesystem::path &, bool)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
+bool loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain.
 bool loadFromMemory(const uint8_t* buffer, int len, bool mipmaps)  // Load image from memory. `mipmaps=true` builds a mip chain.
-bool save(string path)  // Save image to file
-void allocate(int width, int height)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
-void allocate(int width, int height, int channels)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
+bool save(const std::filesystem::path &)  // Save image to file
+void allocate(int width, int height, int channels = 4, bool mipmaps = false)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
+void allocate(int width, int height, int channels = 4, bool mipmaps = false)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
 void allocate(int width, int height, int channels, bool mipmaps)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
 void clear()  // Release image resources
 void halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
@@ -2096,7 +2101,7 @@ int getChannels()  // Get number of channels
 Pixels& getPixels()  // Get pixels reference for direct manipulation
 uint8_t* getPixelsData()  // Get raw pixel data pointer
 Color getColor(int x, int y)  // Get pixel color at position
-void setColor(int x, int y, Color color)  // Set pixel color at position (marks image as dirty)
+void setColor(int x, int y, const Color & c)  // Set pixel color at position (marks image as dirty)
 void update()  // Apply pixel changes to GPU texture
 void setDirty()  // Mark image as needing update
 Texture& getTexture()  // Get internal texture
@@ -2109,9 +2114,9 @@ void draw(float x, float y, float w, float h)  // Draw image
 
 ```cpp
 Texture()
-void allocate(int width, int height)  // Allocate texture
-void allocate(Pixels pixels)  // Allocate texture
-void loadData(Pixels pixels)  // Load pixel data to texture
+void allocate(int width, int height, int channels = 4, TextureUsage usage = TextureUsage::Immutable, int sampleCount = 1)  // Allocate texture
+void allocate(const Pixels& pixels, TextureUsage usage = TextureUsage::Immutable, bool mipmaps = false)  // Allocate texture
+void loadData(const Pixels& pixels)  // Load pixel data to texture
 void bind()  // Bind texture for rendering
 void unbind()  // Unbind texture
 int getWidth()  // Get width
@@ -2140,14 +2145,14 @@ TextureWrap getWrapV()  // Get vertical wrap mode
 
 ```cpp
 Fbo()
-void allocate(int width, int height)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
-void allocate(int width, int height, int sampleCount)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
-void allocate(int width, int height, int sampleCount, TextureFormat format)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
+void allocate(int w, int h, int sampleCount = 1, TextureFormat format = TextureFormat::RGBA8, bool mipmaps = false)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
+void allocate(int w, int h, int sampleCount = 1, TextureFormat format = TextureFormat::RGBA8, bool mipmaps = false)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
+void allocate(int w, int h, int sampleCount = 1, TextureFormat format = TextureFormat::RGBA8, bool mipmaps = false)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
 void allocate(int width, int height, int sampleCount, TextureFormat format, bool mipmaps)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
 void begin()  // Begin rendering to FBO
 void begin(float r, float g, float b, float a)  // Begin rendering to FBO
 void end()  // End rendering to FBO
-Texture getTexture()  // Get FBO texture
+const Texture& getTexture()  // Get FBO texture
 int getWidth()  // Get width
 int getHeight()  // Get height
 bool isAllocated()  // Check if allocated
@@ -2156,8 +2161,8 @@ void draw(float x, float y, float w, float h)  // Draw FBO contents
 int getSampleCount()  // Get MSAA sample count
 bool isActive()  // Check if currently rendering to FBO
 void clear()  // Release FBO resources
-bool save(string path)  // Save FBO contents to file
-bool copyTo(Image image)  // Copy FBO contents to Image
+bool save(const std::filesystem::path &)  // Save FBO contents to file
+bool copyTo(Image & image)  // Copy FBO contents to Image
 ```
 
 #### Path — Path/Polyline for lines and curves
@@ -2168,32 +2173,32 @@ Path(vector<Vec2> verts)
 Path(vector<Vec3> verts)
 void addVertex(float x, float y)  // Add a vertex
 void addVertex(float x, float y, float z)  // Add a vertex
-void addVertex(Vec2 v)  // Add a vertex
-void addVertex(Vec3 v)  // Add a vertex
-vector<Vec3> getVertices()  // Get all vertices
+void addVertex(float x, float y)  // Add a vertex
+void addVertex(float x, float y, float z)  // Add a vertex
+const std::vector<Vec3>& getVertices()  // Get all vertices
 int size()  // Get vertex count
 bool empty()  // Check if polyline is empty
 void clear()  // Clear all vertices
-void moveTo(float x, float y)  // Start a new subpath at (x, y). A single Path can hold multiple disjoint contours (think SVG `<path>` with `M ... M ...`) — used by Font::getGlyphPath to keep an outer ring and its holes in one Path so drawFill can detect holes.
+void moveTo(float x, float y, float z = 0)  // Start a new subpath at (x, y). A single Path can hold multiple disjoint contours (think SVG `<path>` with `M ... M ...`) — used by Font::getGlyphPath to keep an outer ring and its holes in one Path so drawFill can detect holes.
 void moveTo(float x, float y, float z)  // Start a new subpath at (x, y). A single Path can hold multiple disjoint contours (think SVG `<path>` with `M ... M ...`) — used by Font::getGlyphPath to keep an outer ring and its holes in one Path so drawFill can detect holes.
-void moveTo(Vec2 p)  // Start a new subpath at (x, y). A single Path can hold multiple disjoint contours (think SVG `<path>` with `M ... M ...`) — used by Font::getGlyphPath to keep an outer ring and its holes in one Path so drawFill can detect holes.
-void moveTo(Vec3 p)  // Start a new subpath at (x, y). A single Path can hold multiple disjoint contours (think SVG `<path>` with `M ... M ...`) — used by Font::getGlyphPath to keep an outer ring and its holes in one Path so drawFill can detect holes.
-void lineTo(float x, float y)  // Add line segment to point
+void moveTo(float x, float y, float z = 0)  // Start a new subpath at (x, y). A single Path can hold multiple disjoint contours (think SVG `<path>` with `M ... M ...`) — used by Font::getGlyphPath to keep an outer ring and its holes in one Path so drawFill can detect holes.
+void moveTo(const Vec3& p)  // Start a new subpath at (x, y). A single Path can hold multiple disjoint contours (think SVG `<path>` with `M ... M ...`) — used by Font::getGlyphPath to keep an outer ring and its holes in one Path so drawFill can detect holes.
+void lineTo(float x, float y, float z = 0)  // Add line segment to point
 void lineTo(float x, float y, float z)  // Add line segment to point
-void lineTo(Vec2 p)  // Add line segment to point
-void lineTo(Vec3 p)  // Add line segment to point
+void lineTo(float x, float y, float z = 0)  // Add line segment to point
+void lineTo(const Vec3& p)  // Add line segment to point
 void bezierTo(float cx1, float cy1, float cx2, float cy2, float x, float y, int resolution = -1)  // Add cubic bezier curve (resolution=-1 uses current curve style)
-void bezierTo(Vec2 cp1, Vec2 cp2, Vec2 to, int resolution = -1)  // Add cubic bezier curve (resolution=-1 uses current curve style)
-void bezierTo(Vec3 cp1, Vec3 cp2, Vec3 to, int resolution = -1)  // Add cubic bezier curve (resolution=-1 uses current curve style)
+void bezierTo(float cx1, float cy1, float cx2, float cy2, float x, float y, int resolution = -1)  // Add cubic bezier curve (resolution=-1 uses current curve style)
+void bezierTo(const Vec3& cp1, const Vec3& cp2, const Vec3& to, int resolution = -1)  // Add cubic bezier curve (resolution=-1 uses current curve style)
 void quadBezierTo(float cx, float cy, float x, float y, int resolution = -1)  // Add quadratic bezier curve (resolution=-1 uses current curve style)
-void quadBezierTo(Vec2 cp, Vec2 to, int resolution = -1)  // Add quadratic bezier curve (resolution=-1 uses current curve style)
-void quadBezierTo(Vec3 cp, Vec3 to, int resolution = -1)  // Add quadratic bezier curve (resolution=-1 uses current curve style)
+void quadBezierTo(float cx, float cy, float x, float y, int resolution = -1)  // Add quadratic bezier curve (resolution=-1 uses current curve style)
+void quadBezierTo(const Vec3& cp, const Vec3& to, int resolution = -1)  // Add quadratic bezier curve (resolution=-1 uses current curve style)
 void curveTo(float x, float y, float z = 0, int resolution = -1)  // Add Catmull-Rom curve segment (needs >=4 consecutive calls; resolution=-1 uses current curve style)
-void curveTo(Vec2 to, int resolution = -1)  // Add Catmull-Rom curve segment (needs >=4 consecutive calls; resolution=-1 uses current curve style)
-void curveTo(Vec3 to, int resolution = -1)  // Add Catmull-Rom curve segment (needs >=4 consecutive calls; resolution=-1 uses current curve style)
+void curveTo(const Vec2& to, int resolution = -1)  // Add Catmull-Rom curve segment (needs >=4 consecutive calls; resolution=-1 uses current curve style)
+void curveTo(float x, float y, float z = 0, int resolution = -1)  // Add Catmull-Rom curve segment (needs >=4 consecutive calls; resolution=-1 uses current curve style)
 void arc(float x, float y, float radius, float angleBegin, float angleEnd, bool clockwise = true)  // Add an arc (angles in radians)
-void arc(Vec2 center, float radius, float angleBegin, float angleEnd, bool clockwise = true)  // Add an arc (angles in radians)
-void arc(Vec3 center, float radius, float angleBegin, float angleEnd, bool clockwise = true)  // Add an arc (angles in radians)
+void arc(float x, float y, float radius, float angleBegin, float angleEnd, bool clockwise = true)  // Add an arc (angles in radians)
+void arc(const Vec3& center, float radius, float angleBegin, float angleEnd, bool clockwise = true)  // Add an arc (angles in radians)
 void close()  // Close the path
 void setClosed(bool closed)  // Set closed state
 bool isClosed()  // Check if path is closed
@@ -2213,30 +2218,35 @@ Mesh()
 void setMode(PrimitiveMode mode)  // Set primitive mode (Triangles, Lines, Points, etc.)
 PrimitiveMode getMode()  // Get current primitive mode
 void addVertex(float x, float y, float z)  // Add a vertex
-void addVertex(Vec2 v)  // Add a vertex
-void addVertex(Vec3 v)  // Add a vertex
-vector<Vec3> getVertices()  // Get all vertices
+void addVertex(float x, float y, float z = 0.0f)  // Add a vertex
+void addVertex(const Vec3& v)  // Add a vertex
+Mesh& addVertices(const std::vector<Vec3> & verts)  // Add multiple vertices
+Mesh& addVertices(const std::vector<Vec3> & verts)  // Add multiple vertices
+const std::vector<Vec3>& getVertices()  // Get all vertices
 int getNumVertices()  // Get vertex count
-void addColor(Color c)  // Add a vertex color
-void addColor(float r, float g, float b, float a)  // Add a vertex color
-vector<Color> getColors()  // Get all vertex colors
+void addColor(const Color& c)  // Add a vertex color
+void addColor(float r, float g, float b, float a = 1.0f)  // Add a vertex color
+Mesh& addColors(const std::vector<Color> & cols)  // Add multiple vertex colors
+const std::vector<Color>& getColors()  // Get all vertex colors
 int getNumColors()  // Get vertex color count
 bool hasColors()  // Check if mesh has vertex colors
-void addIndex(int index)  // Add an index
-void addTriangle(int i0, int i1, int i2)  // Add a triangle (3 indices)
-vector<int> getIndices()  // Get all indices
+void addIndex(unsigned int index)  // Add an index
+Mesh& addIndices(const std::vector<unsigned int> & inds)  // Add multiple indices
+void addTriangle(unsigned int i0, unsigned int i1, unsigned int i2)  // Add a triangle (3 indices)
+const std::vector<unsigned int>& getIndices()  // Get all indices
 int getNumIndices()  // Get index count
 bool hasIndices()  // Check if mesh has indices
 void addNormal(float nx, float ny, float nz)  // Add a normal vector
-void addNormal(Vec3 n)  // Add a normal vector
-void setNormal(int index, Vec3 n)  // Set normal at index
-Vec3 getNormal(int index)  // Get normal at index
-vector<Vec3> getNormals()  // Get all normals
+void addNormal(float nx, float ny, float nz)  // Add a normal vector
+Mesh& addNormals(const std::vector<Vec3> & norms)  // Add multiple normals
+void setNormal(size_t index, const Vec3 & n)  // Set normal at index
+Vec3 getNormal(size_t index)  // Get normal at index
+const std::vector<Vec3>& getNormals()  // Get all normals
 int getNumNormals()  // Get normal count
 bool hasNormals()  // Check if mesh has normals
 void addTexCoord(float u, float v)  // Add a texture coordinate
-void addTexCoord(Vec2 t)  // Add a texture coordinate
-vector<Vec2> getTexCoords()  // Get all texture coordinates
+void addTexCoord(float u, float v)  // Add a texture coordinate
+const std::vector<Vec2>& getTexCoords()  // Get all texture coordinates
 int getNumTexCoords()  // Get texture coordinate count
 bool hasTexCoords()  // Check if mesh has texture coordinates
 bool hasValidTexCoords()  // Check if texture coordinates match vertex count
@@ -2246,11 +2256,18 @@ void clearColors()  // Clear colors only
 void clearIndices()  // Clear indices only
 void clearNormals()  // Clear normals only
 void clearTexCoords()  // Clear texture coordinates only
-void transform(Mat4 matrix)  // Apply transformation matrix
-void append(Mesh other)  // Append another mesh
+Mesh& translate(float x, float y, float z)  // Translate all vertices
+Mesh& translate(float x, float y, float z)  // Translate all vertices
+Mesh& rotateX(float radians)  // Rotate mesh around X axis
+Mesh& rotateY(float radians)  // Rotate mesh around Y axis
+Mesh& rotateZ(float radians)  // Rotate mesh around Z axis
+Mesh& scale(float s)  // Scale mesh
+Mesh& scale(float x, float y, float z)  // Scale mesh
+void transform(const Mat4 & m)  // Apply transformation matrix
+void append(const Mesh & other)  // Append another mesh
 void draw()  // Draw the mesh
-void draw(Texture texture)  // Draw the mesh
-void draw(Image image)  // Draw the mesh
+void draw(const Texture& texture)  // Draw the mesh
+void draw(const Image& image)  // Draw the mesh
 void drawWireframe()  // Draw mesh as wireframe
 void drawGpuPbr()  // Draw the mesh through the GPU PBR pipeline (uploads to GPU buffers as needed, then renders using active lights, material and environment)
 ```
@@ -2259,7 +2276,7 @@ void drawGpuPbr()  // Draw the mesh through the GPU PBR pipeline (uploads to GPU
 
 ```cpp
 Sound()
-bool load(string path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
+bool load(const std::string & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
 void play()  // Play audio
 void stop()  // Stop audio
 bool isLoaded()  // Check if loaded
@@ -2282,14 +2299,14 @@ float getDuration()  // Get total duration in seconds
 
 ```cpp
 Font()
-bool load(string path, int size)  // Load font file
+bool load(const std::string & nameOrPath, int size)  // Load font file
 bool isLoaded()  // Check if loaded
 void drawString(string text, float x, float y)  // Draw text
 Path getGlyphPath(uint32_t codepoint)  // Vector outline of a single glyph as one Path with one subpath per contour. Em-normalized (1.0 = em), screen Y-down, baseline at y=0, pen at x=0. Use Path::drawFill() for filled rendering — holes (e, a, O, 日 ...) are auto-detected via earcut.
 Path getStringPath(string text, float x, float y)  // Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely.
 Path getStringPath(string text, float x, float y, Direction h, Direction v)  // Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely.
-float getWidth(string text)  // Get text width
-float getHeight(string text)  // Get text height
+float getWidth(const std::string & text)  // Get text width
+float getHeight(const std::string & text)  // Get text height
 float getLineHeight()  // Get line height
 int getSize()  // Get font size
 void clearAtlas()  // Clear font atlas (GPU memory freed, glyphs re-rasterized on next draw)
@@ -2306,15 +2323,15 @@ void setTcyLatin(TcyMode mode)  // Tate-chu-yoko mode for Latin letter runs in v
 
 ```cpp
 FileWriter()
-bool open(string path)  // Open file for writing
-bool open(string path, bool append)  // Open file for writing
+bool open(const std::string & path, bool append = false)  // Open file for writing
+bool open(const std::string & path, bool append = false)  // Open file for writing
 void close()  // Close file
 bool isOpen()  // Check if file is open
 FileWriter& write(string text)  // Write data to file
 FileWriter& write(char c)  // Write data to file
 FileWriter& write(void* data, size_t size)  // Write data to file
-FileWriter& writeLine()  // Write line with newline
-FileWriter& writeLine(string text)  // Write line with newline
+FileWriter & writeLine(const std::string & text = "")  // Write line with newline
+FileWriter & writeLine(const std::string & text = "")  // Write line with newline
 void flush()  // Flush buffer to disk
 ```
 
@@ -2322,7 +2339,7 @@ void flush()  // Flush buffer to disk
 
 ```cpp
 FileReader()
-bool open(string path)  // Open file for reading
+bool open(const std::string & path)  // Open file for reading
 void close()  // Close file
 bool isOpen()  // Check if file is open
 bool eof()  // Check if at end of file
@@ -3382,20 +3399,20 @@ float scaleX  // Horizontal scale (1.0 normally, less than 1 for TCY combine)
 ```cpp
 StrokeMesh()
 StrokeMesh(const Path& polyline)
-void setWidth(float width)  // Set the stroke width
-void setColor(const Color& color)  // Set the stroke color
-void setCapType(CapType type)  // Set the line cap shape (StrokeMesh::CapType: Butt, Round, Square)
-void setJoinType(JoinType type)  // Set the line join shape (StrokeMesh::JoinType: Miter, Round, Bevel)
-void setMiterLimit(float limit)  // Set the miter limit for sharp corners
-void addVertex(float x, float y, float z = 0)  // Append a vertex to the stroke path
-void addVertex(const Vec2& p)  // Append a vertex to the stroke path
-void addVertex(const Vec3& p)  // Append a vertex to the stroke path
-void addVertexWithWidth(float x, float y, float width)  // Append a vertex with a per-vertex width
-void addVertexWithWidth(const Vec3& p, float width)  // Append a vertex with a per-vertex width
+StrokeMesh& setWidth(float w)  // Set the stroke width
+StrokeMesh& setColor(const Color& c)  // Set the stroke color
+StrokeMesh& setCapType(StrokeMesh::CapType type)  // Set the line cap shape (StrokeMesh::CapType: Butt, Round, Square)
+StrokeMesh& setJoinType(StrokeMesh::JoinType type)  // Set the line join shape (StrokeMesh::JoinType: Miter, Round, Bevel)
+StrokeMesh& setMiterLimit(float limit)  // Set the miter limit for sharp corners
+StrokeMesh& addVertex(float x, float y, float z = 0)  // Append a vertex to the stroke path
+StrokeMesh& addVertex(const Vec2& v)  // Append a vertex to the stroke path
+StrokeMesh& addVertex(const Vec3& v)  // Append a vertex to the stroke path
+StrokeMesh& addVertexWithWidth(float x, float y, float width)  // Append a vertex with a per-vertex width
+StrokeMesh& addVertexWithWidth(const Vec3& p, float width)  // Append a vertex with a per-vertex width
 void setWidths(const vector<float>& w)  // Set per-vertex widths from a list
-void setShape(const Path& polyline)  // Set the stroke shape from a Path
-void setClosed(bool closed)  // Set whether the stroke forms a closed loop
-void clear()  // Remove all vertices
+StrokeMesh& setShape(const Path& polyline)  // Set the stroke shape from a Path
+StrokeMesh& setClosed(bool closed)  // Set whether the stroke forms a closed loop
+StrokeMesh& clear()  // Remove all vertices
 void update()  // Rebuild the internal triangle mesh (call before draw after edits)
 void draw()  // Draw the stroke mesh
 ```

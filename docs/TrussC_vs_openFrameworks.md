@@ -287,7 +287,7 @@ Reference for oF users finding equivalent features in TrussC.
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
 | `ofClear / ofBackground` | `clear()` |  |
-| `ofSetColor` | `setColor(gray)` | Range 0-1 instead of 0-255 |
+| `ofSetColor` | `setColor(gray, [a])` | Range 0-1 instead of 0-255 |
 | `ofDrawRectangle` | `drawRect(x, y, w, h)` |  |
 | `ofDrawRectRounded` | `drawRectRounded(x, y, w, h, radius)` |  |
 | `ofDrawCircle` | `drawCircle(x, y, radius)` |  |
@@ -295,8 +295,8 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofDrawLine` | `drawLine(x1, y1, x2, y2)` |  |
 | `ofDrawTriangle` | `drawTriangle(x1, y1, x2, y2, x3, y3)` |  |
 | `ofDrawBox` | `drawBox(size)` |  |
-| `ofDrawSphere` | `drawSphere(radius)` |  |
-| `ofDrawCone` | `drawCone(radius, height)` |  |
+| `ofDrawSphere` | `drawSphere(radius, [resolution])` |  |
+| `ofDrawCone` | `drawCone(radius, height, [resolution])` |  |
 | `ofBeginShape` | `beginShape()` |  |
 | `ofVertex` | `vertex(x, y)` |  |
 | `ofEndShape` | `endShape(close)` |  |
@@ -355,7 +355,7 @@ Reference for oF users finding equivalent features in TrussC.
 
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
-| `ofSetupScreenPerspective` | `setupScreenPerspective()` |  |
+| `ofSetupScreenPerspective` | `setupScreenPerspective([fovDeg], [nearDist], [farDist])` |  |
 | `ofSetupScreenOrtho` | `setupScreenOrtho()` |  |
 
 ### **Video**
@@ -393,11 +393,11 @@ Reference for oF users finding equivalent features in TrussC.
 
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
-| `ofLog` | `logNotice(message)` |  |
+| `ofLog` | `logNotice([module])` |  |
 | `ofToString` | `toString(value)` |  |
 | `ofToInt` | `toInt(str)` |  |
 | `ofToFloat` | `toFloat(str)` |  |
-| `ofSplitString` | `splitString(source, delimiter)` |  |
+| `ofSplitString` | `splitString(source, delimiter, [ignoreEmpty], [trim])` |  |
 | `ofJoinString` | `joinString(elements, delimiter)` |  |
 | `ofStringReplace` | `stringReplace(input, search, replace)` |  |
 | `ofToLower` | `toLower(src)` |  |
