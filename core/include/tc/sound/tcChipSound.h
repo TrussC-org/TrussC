@@ -109,18 +109,21 @@ struct ChipSoundBundle {
     float volume = 1.0f;  // Master volume multiplier
 
     // Add a note at specified time
-    void add(const ChipSoundNote& note, float time) {
+    ChipSoundBundle& add(const ChipSoundNote& note, float time) {
         entries.push_back({note, time});
+        return *this;
     }
 
     // Convenience: add with inline parameters
-    void add(ChipSoundNote::Wave wave, float hz, float duration, float time, float vol = 0.5f) {
+    ChipSoundBundle& add(ChipSoundNote::Wave wave, float hz, float duration, float time, float vol = 0.5f) {
         entries.push_back({ChipSoundNote(wave, hz, duration, vol), time});
+        return *this;
     }
 
     // Clear all entries
-    void clear() {
+    ChipSoundBundle& clear() {
         entries.clear();
+        return *this;
     }
 
     // Get total duration (auto-calculated from last note end)

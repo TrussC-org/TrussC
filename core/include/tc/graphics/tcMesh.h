@@ -97,8 +97,9 @@ public:
     }
 
     // Mode settings
-    void setMode(PrimitiveMode mode) {
+    Mesh& setMode(PrimitiveMode mode) {
         mode_ = mode;
+        return *this;
     }
 
     PrimitiveMode getMode() const {
@@ -108,22 +109,26 @@ public:
     // ---------------------------------------------------------------------------
     // Vertices
     // ---------------------------------------------------------------------------
-    void addVertex(float x, float y, float z = 0.0f) {
+    Mesh& addVertex(float x, float y, float z = 0.0f) {
         vertices_.push_back(Vec3{x, y, z});
+        return *this;
     }
 
-    void addVertex(const Vec2& v) {
+    Mesh& addVertex(const Vec2& v) {
         vertices_.push_back(Vec3{v.x, v.y, 0.0f});
+        return *this;
     }
 
-    void addVertex(const Vec3& v) {
+    Mesh& addVertex(const Vec3& v) {
         vertices_.push_back(v);
+        return *this;
     }
 
-    void addVertices(const std::vector<Vec3>& verts) {
+    Mesh& addVertices(const std::vector<Vec3>& verts) {
         for (const auto& v : verts) {
             vertices_.push_back(v);
         }
+        return *this;
     }
 
     std::vector<Vec3>& getVertices() { return vertices_; }
@@ -133,18 +138,21 @@ public:
     // ---------------------------------------------------------------------------
     // Colors (vertex colors)
     // ---------------------------------------------------------------------------
-    void addColor(const Color& c) {
+    Mesh& addColor(const Color& c) {
         colors_.push_back(c);
+        return *this;
     }
 
-    void addColor(float r, float g, float b, float a = 1.0f) {
+    Mesh& addColor(float r, float g, float b, float a = 1.0f) {
         colors_.push_back(Color{r, g, b, a});
+        return *this;
     }
 
-    void addColors(const std::vector<Color>& cols) {
+    Mesh& addColors(const std::vector<Color>& cols) {
         for (const auto& c : cols) {
             colors_.push_back(c);
         }
+        return *this;
     }
 
     std::vector<Color>& getColors() { return colors_; }
@@ -155,21 +163,24 @@ public:
     // ---------------------------------------------------------------------------
     // Indices
     // ---------------------------------------------------------------------------
-    void addIndex(unsigned int index) {
+    Mesh& addIndex(unsigned int index) {
         indices_.push_back(index);
+        return *this;
     }
 
-    void addIndices(const std::vector<unsigned int>& inds) {
+    Mesh& addIndices(const std::vector<unsigned int>& inds) {
         for (auto i : inds) {
             indices_.push_back(i);
         }
+        return *this;
     }
 
     // Add triangle (3 indices)
-    void addTriangle(unsigned int i0, unsigned int i1, unsigned int i2) {
+    Mesh& addTriangle(unsigned int i0, unsigned int i1, unsigned int i2) {
         indices_.push_back(i0);
         indices_.push_back(i1);
         indices_.push_back(i2);
+        return *this;
     }
 
     std::vector<unsigned int>& getIndices() { return indices_; }
@@ -180,24 +191,28 @@ public:
     // ---------------------------------------------------------------------------
     // Normals (for lighting)
     // ---------------------------------------------------------------------------
-    void addNormal(float nx, float ny, float nz) {
+    Mesh& addNormal(float nx, float ny, float nz) {
         normals_.push_back(Vec3{nx, ny, nz});
+        return *this;
     }
 
-    void addNormal(const Vec3& n) {
+    Mesh& addNormal(const Vec3& n) {
         normals_.push_back(n);
+        return *this;
     }
 
-    void addNormals(const std::vector<Vec3>& norms) {
+    Mesh& addNormals(const std::vector<Vec3>& norms) {
         for (const auto& n : norms) {
             normals_.push_back(n);
         }
+        return *this;
     }
 
-    void setNormal(size_t index, const Vec3& n) {
+    Mesh& setNormal(size_t index, const Vec3& n) {
         if (index < normals_.size()) {
             normals_[index] = n;
         }
+        return *this;
     }
 
     Vec3 getNormal(size_t index) const {
@@ -215,12 +230,14 @@ public:
     // ---------------------------------------------------------------------------
     // Texture coordinates
     // ---------------------------------------------------------------------------
-    void addTexCoord(float u, float v) {
+    Mesh& addTexCoord(float u, float v) {
         texCoords_.push_back(Vec2{u, v});
+        return *this;
     }
 
-    void addTexCoord(const Vec2& t) {
+    Mesh& addTexCoord(const Vec2& t) {
         texCoords_.push_back(t);
+        return *this;
     }
 
     std::vector<Vec2>& getTexCoords() { return texCoords_; }
@@ -236,16 +253,19 @@ public:
     // Vec4: xyz = tangent direction along texture U axis,
     //       w   = bitangent sign (+1 or -1) for handedness.
     // Bitangent is reconstructed in the shader: B = cross(N, T.xyz) * T.w
-    void addTangent(float tx, float ty, float tz, float tw = 1.0f) {
+    Mesh& addTangent(float tx, float ty, float tz, float tw = 1.0f) {
         tangents_.push_back(Vec4{tx, ty, tz, tw});
+        return *this;
     }
 
-    void addTangent(const Vec4& t) {
+    Mesh& addTangent(const Vec4& t) {
         tangents_.push_back(t);
+        return *this;
     }
 
-    void addTangent(const Vec3& t, float w = 1.0f) {
+    Mesh& addTangent(const Vec3& t, float w = 1.0f) {
         tangents_.push_back(Vec4{t.x, t.y, t.z, w});
+        return *this;
     }
 
     std::vector<Vec4>& getTangents() { return tangents_; }
@@ -256,41 +276,44 @@ public:
     // ---------------------------------------------------------------------------
     // Clear
     // ---------------------------------------------------------------------------
-    void clear() {
+    Mesh& clear() {
         vertices_.clear();
         normals_.clear();
         colors_.clear();
         indices_.clear();
         texCoords_.clear();
         tangents_.clear();
+        return *this;
     }
 
-    void clearVertices() { vertices_.clear(); }
-    void clearNormals() { normals_.clear(); }
-    void clearColors() { colors_.clear(); }
-    void clearIndices() { indices_.clear(); }
-    void clearTexCoords() { texCoords_.clear(); }
-    void clearTangents() { tangents_.clear(); }
+    Mesh& clearVertices() { vertices_.clear(); return *this; }
+    Mesh& clearNormals() { normals_.clear(); return *this; }
+    Mesh& clearColors() { colors_.clear(); return *this; }
+    Mesh& clearIndices() { indices_.clear(); return *this; }
+    Mesh& clearTexCoords() { texCoords_.clear(); return *this; }
+    Mesh& clearTangents() { tangents_.clear(); return *this; }
 
     // ---------------------------------------------------------------------------
     // Transform
     // ---------------------------------------------------------------------------
 
     /// Translate all vertices
-    void translate(float x, float y, float z) {
+    Mesh& translate(float x, float y, float z) {
         for (auto& v : vertices_) {
             v.x += x;
             v.y += y;
             v.z += z;
         }
+        return *this;
     }
 
-    void translate(const Vec3& offset) {
+    Mesh& translate(const Vec3& offset) {
         translate(offset.x, offset.y, offset.z);
+        return *this;
     }
 
     /// Rotate around X axis (radians)
-    void rotateX(float radians) {
+    Mesh& rotateX(float radians) {
         float c = std::cos(radians);
         float s = std::sin(radians);
         for (auto& v : vertices_) {
@@ -305,10 +328,11 @@ public:
             n.y = y;
             n.z = z;
         }
+        return *this;
     }
 
     /// Rotate around Y axis (radians)
-    void rotateY(float radians) {
+    Mesh& rotateY(float radians) {
         float c = std::cos(radians);
         float s = std::sin(radians);
         for (auto& v : vertices_) {
@@ -323,10 +347,11 @@ public:
             n.x = x;
             n.z = z;
         }
+        return *this;
     }
 
     /// Rotate around Z axis (radians)
-    void rotateZ(float radians) {
+    Mesh& rotateZ(float radians) {
         float c = std::cos(radians);
         float s = std::sin(radians);
         for (auto& v : vertices_) {
@@ -341,10 +366,11 @@ public:
             n.x = x;
             n.y = y;
         }
+        return *this;
     }
 
     /// Scale all vertices
-    void scale(float x, float y, float z) {
+    Mesh& scale(float x, float y, float z) {
         for (auto& v : vertices_) {
             v.x *= x;
             v.y *= y;
@@ -364,14 +390,21 @@ public:
                 }
             }
         }
+        return *this;
     }
 
-    void scale(float s) {
+    Mesh& scale(float s) {
         scale(s, s, s);
+        return *this;
+    }
+
+    Mesh& scale(const Vec3& s) {
+        scale(s.x, s.y, s.z);
+        return *this;
     }
 
     /// Apply transformation matrix to all vertices and normals
-    void transform(const Mat4& m) {
+    Mesh& transform(const Mat4& m) {
         for (auto& v : vertices_) {
             v = m * v;
         }
@@ -391,6 +424,7 @@ public:
                 n.z = transformed.z / len;
             }
         }
+        return *this;
     }
 
     // ---------------------------------------------------------------------------
@@ -398,8 +432,8 @@ public:
     // ---------------------------------------------------------------------------
 
     /// Append another mesh to this mesh
-    void append(const Mesh& other) {
-        if (other.vertices_.empty()) return;
+    Mesh& append(const Mesh& other) {
+        if (other.vertices_.empty()) return *this;
 
         unsigned int baseIndex = static_cast<unsigned int>(vertices_.size());
 
@@ -432,6 +466,7 @@ public:
         for (auto idx : other.indices_) {
             indices_.push_back(idx + baseIndex);
         }
+        return *this;
     }
 
     // ---------------------------------------------------------------------------
