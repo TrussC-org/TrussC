@@ -137,6 +137,9 @@ tools/build/
 # Tools like sokol-shdc are auto-downloaded on first build
 core/tools/
 docs/node_modules/
+# signature-probe.js --keep scratch artifacts
+docs/tests/tc_signature_probe.cpp
+docs/tests/tc_signature_probe.map.json
 
 # =============================================================================
 # Project Generator Auto-generated Files
