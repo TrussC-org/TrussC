@@ -8840,7 +8840,7 @@ categories:
         signatures:
           - params: "float x, float y, float z"
             params_simple: "x, y, z"
-          - params: "Vec3 v"
+          - params: "const Vec3& v"
             params_simple: "v"
         description: "Create a translation matrix"
         description_ja: "平行移動行列を作成"
@@ -9014,7 +9014,7 @@ categories:
         signatures:
           - params: "float pitch, float yaw, float roll"
             params_simple: "pitch, yaw, roll"
-          - params: "Vec3 euler"
+          - params: "const Vec3& euler"
             params_simple: "euler"
         description: "Create quaternion from Euler angles"
         description_ja: "オイラー角からクォータニオンを作成"
@@ -9756,7 +9756,7 @@ categories:
           - addIndex
           - vertex
         keywords: ["point","vert","position","append","push"]
-        return: void
+        return: "Mesh&"
         signatures:
           - params: "float x, float y, float z"
             params_simple: "x, y, z"
@@ -9773,7 +9773,7 @@ categories:
           - addVertex
           - setColor
         keywords: ["vertex color","rgba","tint","per vertex"]
-        return: void
+        return: "Mesh&"
         signatures:
           - params: "float r, float g, float b, float a"
             params_simple: "r, g, b, a"
@@ -9790,7 +9790,7 @@ categories:
           - addVertex
           - setTexture
         keywords: ["uv","texture","mapping","st"]
-        return: "void"
+        return: "Mesh&"
         signatures:
           - params: "float u, float v"
             params_simple: "u, v"
@@ -9805,7 +9805,7 @@ categories:
           - addVertex
           - calculateLighting
         keywords: ["normal","lighting","surface","shading"]
-        return: "void"
+        return: "Mesh&"
         signatures:
           - params: "float x, float y, float z"
             params_simple: "x, y, z"
@@ -10092,7 +10092,7 @@ categories:
       - name: addVertex
         self: StrokeMesh
         keywords: ["point","vert","position","append","push"]
-        return: void
+        return: "StrokeMesh&"
         signatures:
           - params: "float x, float y, float z = 0"
             params_simple: "x, y"
@@ -10114,7 +10114,7 @@ categories:
           - addVertex
           - setWidth
         keywords: ["variable width","taper","point","thickness"]
-        return: void
+        return: "StrokeMesh&"
         signatures:
           - params: "float x, float y, float width"
             params_simple: "x, y, width"
@@ -15362,7 +15362,7 @@ types:
         description_ko: "현재 프리미티브 모드를 얻음"
       - name: addVertex
         self: Mesh
-        return: void
+        return: "Mesh&"
         signatures:
           - params: "float x, float y, float z"
           - params: "float x, float y, float z = 0.0f"
@@ -15404,7 +15404,7 @@ types:
         description_ko: "정점 개수를 얻음"
       - name: addColor
         self: Mesh
-        return: void
+        return: "Mesh&"
         signatures:
           - params: "const Color& c"
             params_simple: "c"
@@ -15507,7 +15507,7 @@ types:
         description_ko: "메쉬에 인덱스가 있는지 확인"
       - name: addNormal
         self: Mesh
-        return: void
+        return: "Mesh&"
         signatures:
           - params: "float nx, float ny, float nz"
           - params: "float nx, float ny, float nz"
@@ -15575,7 +15575,7 @@ types:
         description_ko: "메쉬에 법선이 있는지 확인"
       - name: addTexCoord
         self: Mesh
-        return: void
+        return: "Mesh&"
         signatures:
           - params: "float u, float v"
           - params: "float u, float v"
@@ -15977,9 +15977,10 @@ types:
         description_ko: "로드되었는지 확인"
       - name: drawString
         self: Font
+        const: true
         return: "void"
         signatures:
-          - params: "string text, float x, float y"
+          - params: "const string& text, float x, float y"
         description: "Draw text"
         description_ja: "テキストを描画"
         description_ko: "텍스트를 그림"
@@ -15994,10 +15995,11 @@ types:
         description_ko: "단일 글리프 윤곽선 (1 contour = 1 subpath의 Path). em 정규화 (1.0 = em), 화면 Y-down, 기준선 y=0, 펜 위치 x=0. drawFill()로 채움 — 구멍 자동 검출."
       - name: getStringPath
         self: Font
+        const: true
         return: "Path"
         signatures:
-          - params: "string text, float x, float y"
-          - params: "string text, float x, float y, Direction h, Direction v"
+          - params: "const string& text, float x, float y"
+          - params: "const string& text, float x, float y, Direction h, Direction v"
         description: "Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely."
         description_ja: "文字列全体の輪郭を 1 個の Path として返す (全グリフの contour が subpath として連結)。drawString と同じレイアウトパイプライン (書字方向 / 揃え / 折返し / 禁則 / 縦中横) 経由。座標は論理ピクセル — drawStroke / drawFill / 変形自由。"
         description_ko: "(x, y) 위치의 전체 문자열 윤곽선을 단일 Path로 (모든 글리프 contour가 subpath로 연결). drawString과 동일한 레이아웃 파이프라인 사용. 좌표는 논리 픽셀."
@@ -19361,7 +19363,7 @@ types:
     methods:
       - name: add
         self: ChipSoundBundle
-        return: "void"
+        return: "ChipSoundBundle&"
         signatures:
           - params: "const ChipSoundNote& note, float time"
             params_simple: "note, time"
