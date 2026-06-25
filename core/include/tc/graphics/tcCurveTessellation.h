@@ -101,7 +101,7 @@ inline constexpr int kBezierMaxDepth = 16;
 // from there, or chain cubics.
 inline constexpr int kBezierMaxOrder = 64;
 
-namespace detail {
+namespace internal {
 
 // Squared perpendicular distance from `p` to the line through `a` and `b`
 // (works in 3D — the cross product gives the parallelogram area; divided
@@ -205,7 +205,7 @@ void subdivideBezierN(std::vector<Vec3> pts, float tolSq, int depth, Out& out) {
     subdivideBezierN(std::move(right), tolSq, depth + 1, out);
 }
 
-} // namespace detail
+} // namespace internal
 
 // Tessellate a cubic Bezier into a polyline. The caller passes a writer
 // that supports `push_back(Vec3)` (e.g. a std::vector<Vec3>). Includes
@@ -216,7 +216,7 @@ void tessellateCubicBezier(const Vec3& p0, const Vec3& p1,
                            float tolerance, Out& out) {
     out.push_back(p0);
     if (tolerance <= 0.0f) tolerance = 0.1f;
-    detail::subdivideCubic(p0, p1, p2, p3, tolerance * tolerance, 0, out);
+    internal::subdivideCubic(p0, p1, p2, p3, tolerance * tolerance, 0, out);
 }
 
 template <class Out>
@@ -224,7 +224,7 @@ void tessellateQuadBezier(const Vec3& p0, const Vec3& p1, const Vec3& p2,
                           float tolerance, Out& out) {
     out.push_back(p0);
     if (tolerance <= 0.0f) tolerance = 0.1f;
-    detail::subdivideQuad(p0, p1, p2, tolerance * tolerance, 0, out);
+    internal::subdivideQuad(p0, p1, p2, tolerance * tolerance, 0, out);
 }
 
 // N-th order. `pts.size()` is the order + 1 (so 4 points = cubic). For
@@ -244,7 +244,7 @@ void tessellateBezierN(const std::vector<Vec3>& pts, float tolerance, Out& out) 
         return;
     }
     if (tolerance <= 0.0f) tolerance = 0.1f;
-    detail::subdivideBezierN(pts, tolerance * tolerance, 0, out);
+    internal::subdivideBezierN(pts, tolerance * tolerance, 0, out);
 }
 
 } // namespace trussc

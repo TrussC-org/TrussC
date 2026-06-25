@@ -504,7 +504,7 @@ enum class Beep {
     sweep       // Screen transition whoosh
 };
 
-namespace beep_internal {
+namespace internal {
 
 // Cache key for preset sounds (negative to avoid collision with frequencies)
 inline int presetToKey(Beep type) {
@@ -714,36 +714,36 @@ inline BeepManager& getManager() {
     return manager;
 }
 
-} // namespace beep_internal
+} // namespace internal
 
 // Play default beep (ping)
 inline void beep() {
-    beep_internal::getManager().playPreset(Beep::ping);
+    internal::getManager().playPreset(Beep::ping);
 }
 
 // Play preset sound
 inline void beep(Beep type) {
-    beep_internal::getManager().playPreset(type);
+    internal::getManager().playPreset(type);
 }
 
 // Play custom frequency
 inline void beep(float frequency) {
-    beep_internal::getManager().playFrequency(frequency);
+    internal::getManager().playFrequency(frequency);
 }
 
 // Play custom frequency (int overload)
 inline void beep(int frequency) {
-    beep_internal::getManager().playFrequency(static_cast<float>(frequency));
+    internal::getManager().playFrequency(static_cast<float>(frequency));
 }
 
 // Set beep volume (0.0-1.0)
 inline void setBeepVolume(float vol) {
-    beep_internal::getManager().setVolume(vol);
+    internal::getManager().setVolume(vol);
 }
 
 // Get current beep volume
 inline float getBeepVolume() {
-    return beep_internal::getManager().volume;
+    return internal::getManager().volume;
 }
 
 } // namespace trussc
