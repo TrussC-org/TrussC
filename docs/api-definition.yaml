@@ -507,7 +507,6 @@ categories:
       - name: drawLine
         related:
           - drawStroke
-          - drawPolyline
           - beginLines
         keywords: ["segment","edge","stroke","ofline"]
         examples:
@@ -9036,7 +9035,6 @@ categories:
           - Image
           - Fbo
           - Pixels
-          - drawTexture
           - setTexture
         keywords: ["image","bitmap","gpu","surface","sampler"]
         return: ""
@@ -9224,7 +9222,6 @@ categories:
           - Texture
           - setTexture
           - getTextureCount
-          - drawTexture
           - drawMesh
         keywords: ["image","result","output","surface"]
         return: "Texture&"
@@ -9398,7 +9395,6 @@ categories:
         related:
           - Image
           - Texture
-          - loadFromPixels
           - grabScreen
           - captureWindow
         keywords: ["bitmap","buffer","raw","imagedata","memory"]
@@ -9429,7 +9425,6 @@ categories:
           - getDataPath
           - getDataPathRoot
           - getColor
-          - loadFromPixels
         keywords: ["pointer","raw","buffer","bytes","memory"]
         return: "uint8_t*"
         signatures:
@@ -14013,8 +14008,6 @@ types:
     related:
       - captureWindow
       - grabScreen
-      - loadFromPixels
-      - readToPixels
       - createPixels
       - extractFrame
       - addFrame
@@ -14223,8 +14216,6 @@ types:
       - bindCursorImage
       - Texture
       - Pixels
-      - drawTexture
-      - loadFromPixels
     keywords: ["picture","photo","bitmap","sprite","of image"]
     description: "Image with CPU pixels and GPU texture"
     description_ja: "CPUピクセルとGPUテクスチャを持つ画像"
@@ -14441,7 +14432,6 @@ types:
 
   - name: Texture
     related:
-      - drawTexture
       - createTexture
       - getTexture
       - Image
