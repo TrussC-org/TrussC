@@ -128,8 +128,25 @@ Driven by C++ namespace, not by the sidecar:
 - `private` members → excluded; `protected` → kept.
 
 The sidecar never controls visibility — it only adds prose to symbols that are
-already public. (A future `[[clang::annotate("TC_INTERNAL")]]` can hide an
-otherwise-public symbol; not wired yet.)
+already public.
+
+### Source-coupled annotations (`TC_*`)
+
+Some metadata can't be derived from a signature and is too source-local for a
+sidecar. `core/include/tc/utils/tcAnnotations.h` provides macros that the
+generator reads back from the AST:
+
+| macro | effect |
+|-------|--------|
+| `TC_INTERNAL` | hide an otherwise-public symbol from the reference |
+| `TC_PLATFORMS("macos,windows,…")` | record the platforms a symbol exists on (`platforms` field) |
+| `TC_LUA_BIND("float,Vec2,…")` | template instantiations to bind for Lua (`lua_bind` field) |
+
+They expand to `[[clang::annotate("tc:…")]]` under Clang and to nothing
+otherwise (zero ABI/runtime effect). **Implementation note:** Clang's JSON AST
+omits the annotate string, so `structure.js` recovers it from each
+`AnnotateAttr`'s source range (`offset`, or `expansionLoc.offset` for the macro
+form) — keep the macro on the same declaration it annotates.
 
 ## Status
 

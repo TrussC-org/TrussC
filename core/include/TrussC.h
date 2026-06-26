@@ -31,6 +31,9 @@
 #include <fstream>
 #include <unordered_set>
 
+// Reference-generator annotation macros (no-op except under Clang)
+#include "tc/utils/tcAnnotations.h"
+
 // Headless mode state (must be included early for graphics skip checks)
 #include "tc/app/tcHeadlessState.h"
 

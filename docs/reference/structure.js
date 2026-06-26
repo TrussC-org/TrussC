@@ -80,12 +80,35 @@ const paramsOf = (node) => (node.inner || [])
 function enumMembersOf(en) {
     return (en.inner || []).filter(x => x.kind === 'EnumConstantDecl' && x.name).map(x => x.name);
 }
+
+// TC_* annotations on a decl. Clang's JSON AST omits the annotate STRING, so we
+// recover it from the source via each AnnotateAttr's range. (file = the decl's
+// source file; same file as the attribute, which sits just before the decl.)
+const _srcCache = {};
+const _readSrc = (f) => { try { return f in _srcCache ? _srcCache[f] : (_srcCache[f] = fs.readFileSync(f, 'utf8')); } catch (e) { return (_srcCache[f] = ''); } };
+const _csv = (s) => s.split(',').map(x => x.trim()).filter(Boolean);
+function annotationsOf(node, file) {
+    const out = {};
+    if (!file) return out;
+    for (const a of (node.inner || [])) {
+        if (a.kind !== 'AnnotateAttr' || !a.range || !a.range.begin) continue;
+        const beg = a.range.begin;                               // direct offset (raw attr) OR expansionLoc (macro use)
+        const off = beg.offset != null ? beg.offset : (beg.expansionLoc && beg.expansionLoc.offset);
+        if (off == null) continue;
+        const win = _readSrc(file).slice(off, off + 240);        // read the source spelling forward
+        let m;
+        if (/^\s*TC_INTERNAL\b/.test(win) || /annotate\(\s*"tc:internal"/.test(win)) out.internal = true;
+        else if (m = win.match(/^\s*TC_PLATFORMS\(\s*"([^"]*)"/) || win.match(/annotate\(\s*"tc:platforms:([^"]*)"/)) out.platforms = _csv(m[1]);
+        else if (m = win.match(/^\s*TC_LUA_BIND\(\s*"([^"]*)"/) || win.match(/annotate\(\s*"tc:lua_bind:([^"]*)"/)) out.lua_bind = _csv(m[1]);
+    }
+    return out;
+}
 function enumerate(objs) {
     const syms = []; let sticky = '(unknown)';
     const fileOf = (node) => { if (node.loc && node.loc.file) sticky = node.loc.file; return sticky; };
     function walkRecord(rec, nsPath, extraFlags, tps) {
         const recFile = fileOf(rec);
-        syms.push({ kind: 'type', ns: nsPath, owner: null, name: rec.name, file: recFile, flags: [...(extraFlags || [])], tparams: tps, deprecated: deprecatedOf(rec) });
+        syms.push({ kind: 'type', ns: nsPath, owner: null, name: rec.name, file: recFile, flags: [...(extraFlags || [])], tparams: tps, ann: annotationsOf(rec, recFile), deprecated: deprecatedOf(rec) });
         let access = rec.tagUsed === 'class' ? 'private' : 'public';
         for (const m of (rec.inner || [])) {
             fileOf(m);
@@ -93,7 +116,7 @@ function enumerate(objs) {
             if (m.kind === 'CXXMethodDecl') {
                 const flags = [/operator/.test(m.name || '') ? 'operator' : null, m.storageClass === 'static' ? 'static' : null,
                     m.isImplicit ? 'implicit' : null, m.explicitlyDeleted ? 'deleted' : null, m.explicitlyDefaulted ? 'defaulted' : null].filter(Boolean);
-                syms.push({ kind: 'method', ns: nsPath, owner: rec.name, name: m.name, sig: m.type && m.type.qualType, params: paramsOf(m), file: fileOf(m), access, flags: [...(extraFlags || []), ...flags], deprecated: deprecatedOf(m) });
+                syms.push({ kind: 'method', ns: nsPath, owner: rec.name, name: m.name, sig: m.type && m.type.qualType, params: paramsOf(m), file: fileOf(m), access, flags: [...(extraFlags || []), ...flags], ann: annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
             } else if (m.kind === 'FieldDecl') {
                 syms.push({ kind: 'field', ns: nsPath, owner: rec.name, name: m.name, file: fileOf(m), access, flags: [], deprecated: deprecatedOf(m) });
             } else if (m.kind === 'EnumDecl' && m.name) {
@@ -111,7 +134,7 @@ function enumerate(objs) {
             if (c.kind === 'NamespaceDecl') { walkNamespace(c, p); continue; }
             if (c.kind === 'FunctionDecl') {
                 syms.push({ kind: 'func', ns: p, owner: null, name: c.name, sig: c.type && c.type.qualType, params: paramsOf(c), file: fileOf(c),
-                    flags: [/operator/.test(c.name || '') ? 'operator' : null].filter(Boolean), deprecated: deprecatedOf(c) });
+                    flags: [/operator/.test(c.name || '') ? 'operator' : null].filter(Boolean), ann: annotationsOf(c, fileOf(c)), deprecated: deprecatedOf(c) });
             } else if (c.kind === 'CXXRecordDecl' && c.name) { walkRecord(c, p);
             } else if (c.kind === 'EnumDecl' && c.name) { syms.push({ kind: 'enum', ns: p, owner: null, name: c.name, file: fileOf(c), flags: [], members: enumMembersOf(c), deprecated: deprecatedOf(c) });
             } else if (c.kind === 'ClassTemplateDecl' && c.name) {
@@ -132,7 +155,7 @@ function enumerate(objs) {
 // --- 3. visibility + symbol-id grammar --------------------------------------
 const HIDDEN = ['internal', 'mcp', 'headless', 'hot_reload', 'console'];
 const nsSegs = (ns) => (ns || '').split('::').filter(x => x && x !== 'trussc' && x !== '(anon)');
-const isHidden = (s) => nsSegs(s.ns).some(seg => HIDDEN.includes(seg));
+const isHidden = (s) => (s.ann && s.ann.internal) || nsSegs(s.ns).some(seg => HIDDEN.includes(seg));   // TC_INTERNAL or hidden namespace
 const nsPrefix = (s) => nsSegs(s.ns).join('::');
 const isTc = (f) => /core\/include\/(tc\/|tc[A-Z]\w*\.h|TrussC\.h)/.test(f || '');
 const noise = (s) => (s.flags || []).some(f => ['implicit', 'defaulted', 'deleted'].includes(f))
@@ -164,7 +187,7 @@ const pub = syms.filter(s => isTc(s.file) && !isHidden(s) && !noise(s) && symbol
 const structure = Object.create(null);                          // null proto: ids like "toString"/"constructor" are safe keys
 for (const s of pub) {
     const id = symbolId(s);
-    if (!structure[id]) structure[id] = { id, kind: s.kind, owner: s.owner || undefined, name: s.name, ns: nsPrefix(s) || undefined, signatures: [], static: false, members: s.members && s.members.length ? s.members : undefined, deprecated: s.deprecated || undefined, tparams: s.tparams && s.tparams.length ? s.tparams : undefined };
+    if (!structure[id]) structure[id] = { id, kind: s.kind, owner: s.owner || undefined, name: s.name, ns: nsPrefix(s) || undefined, signatures: [], static: false, members: s.members && s.members.length ? s.members : undefined, platforms: s.ann && s.ann.platforms, lua_bind: s.ann && s.ann.lua_bind, deprecated: s.deprecated || undefined, tparams: s.tparams && s.tparams.length ? s.tparams : undefined };
     const e = structure[id];
     if ((s.flags || []).includes('static')) e.static = true;
     if (s.deprecated && !e.deprecated) e.deprecated = s.deprecated;
