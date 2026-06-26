@@ -1656,18 +1656,33 @@ categories:
         of_equivalent: "ofPopMatrix"
         sketch: true
 
-      - name: getCurrentMatrix
+      - name: getMatrix
         related:
           - Mat4
+          - setMatrix
           - worldToScreen
         keywords: ["transform","matrix","modelview","current"]
         return: "Mat4"
         signatures:
           - params: ""
             params_simple: ""
-        description: "Get current transformation matrix"
+        description: "Get the current transformation matrix"
         description_ja: "現在の変換行列を取得"
         description_ko: "현재 변환 행렬을 얻음"
+        sketch: true
+
+      - name: getScale
+        related:
+          - getMatrix
+          - scale
+        keywords: ["transform","scale","matrix","zoom"]
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Effective uniform scale of the current matrix (max of x/y basis lengths)"
+        description_ja: "現在の行列の実効スケール（x/y基底長の最大）"
+        description_ko: "현재 행렬의 유효 스케일 (x/y 기저 길이의 최댓값)"
         sketch: true
 
       - name: resetMatrix
@@ -1683,19 +1698,83 @@ categories:
         description_ko: "변환 행렬을 단위 행렬로 초기화"
         sketch: true
 
-      - name: setMatrix
+      - name: multMatrix
         related:
           - Mat4
-          - resetMatrix
-        keywords: ["transform","matrix","modelview","load"]
+          - setMatrix
+          - translate
+        keywords: ["transform","matrix","multiply","apply","modelview"]
         return: "void"
         signatures:
           - params: "const Mat4& mat"
             params_simple: "mat"
-        description: "Set transformation matrix directly"
-        description_ja: "変換行列を直接設定"
-        description_ko: "변환 행렬을 직접 설정"
+        description: "Multiply the current matrix by mat (relative transform, like translate/rotate)"
+        description_ja: "現在の行列に mat を掛ける（translate/rotate のような相対変換）"
+        description_ko: "현재 행렬에 mat를 곱함 (translate/rotate 같은 상대 변환)"
         sketch: true
+
+      - name: setMatrix
+        related:
+          - Mat4
+          - multMatrix
+          - resetMatrix
+        keywords: ["transform","matrix","modelview","replace","load"]
+        return: "void"
+        signatures:
+          - params: "const Mat4& mat"
+            params_simple: "mat"
+        description: "Replace the current matrix with mat (absolute - use with caution, may break camera setup)"
+        description_ja: "現在の行列を mat で置き換える（絶対・カメラ設定を壊す可能性があるので注意）"
+        description_ko: "현재 행렬을 mat로 대체 (절대 - 카메라 설정을 깨뜨릴 수 있으므로 주의)"
+        sketch: true
+
+      - name: getCurrentMatrix
+        deprecated:
+          reason: "Renamed to getMatrix(). Will be removed in v1.0.0."
+          replacement: getMatrix
+        related:
+          - getMatrix
+        keywords: ["transform","matrix","modelview","current","deprecated"]
+        return: "Mat4"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Deprecated alias for getMatrix()"
+        description_ja: "getMatrix() の非推奨エイリアス"
+        description_ko: "getMatrix()의 deprecated 별칭"
+        sketch: false
+
+      - name: loadMatrix
+        deprecated:
+          reason: "Renamed to setMatrix() (it replaces the current matrix). Will be removed in v1.0.0."
+          replacement: setMatrix
+        related:
+          - setMatrix
+        keywords: ["transform","matrix","load","replace","deprecated"]
+        return: "void"
+        signatures:
+          - params: "const Mat4& mat"
+            params_simple: "mat"
+        description: "Deprecated alias for setMatrix()"
+        description_ja: "setMatrix() の非推奨エイリアス"
+        description_ko: "setMatrix()의 deprecated 별칭"
+        sketch: false
+
+      - name: getCurrentScale
+        deprecated:
+          reason: "Renamed to getScale(). Will be removed in v1.0.0."
+          replacement: getScale
+        related:
+          - getScale
+        keywords: ["transform","scale","deprecated"]
+        return: "float"
+        signatures:
+          - params: ""
+            params_simple: ""
+        description: "Deprecated alias for getScale()"
+        description_ja: "getScale() の非推奨エイリアス"
+        description_ko: "getScale()의 deprecated 별칭"
+        sketch: false
 
   # ==========================================================================
   # Window & Input

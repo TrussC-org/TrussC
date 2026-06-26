@@ -163,5 +163,13 @@ inline void multMatrix(const Mat4& mat) {
 inline void setMatrix(const Mat4& mat) {
     getDefaultContext().setMatrix(mat);
 }
+[[deprecated("Renamed to setMatrix() (it replaces the current matrix). Will be removed in v1.0.0")]]
+inline void loadMatrix(const Mat4& mat) {
+    getDefaultContext().setMatrix(mat);
+}
+[[deprecated("Use getScale() instead. Will be removed in v1.0.0")]]
+inline float getCurrentScale() {
+    return getDefaultContext().getScale();
+}
 
 } // namespace trussc

@@ -338,6 +338,8 @@ function generateTrussCApiJS(api, lang, examplesMap = {}) {
                 }
                 // Optional related symbols (language-independent list of names).
                 if (Array.isArray(fn.related) && fn.related.length) entry.related = fn.related;
+                // Optional deprecation marker ({reason, replacement?, url?}).
+                if (fn.deprecated) entry.deprecated = fn.deprecated;
                 // Optional symbol-level long-form details (en-first; ja/ko fall back to en).
                 if (fn.details) {
                     entry.details = lang ? pickLang(fn.details, fn.details_ja, fn.details_ko, lang) : fn.details;
@@ -403,7 +405,8 @@ function generateTrussCApiJS(api, lang, examplesMap = {}) {
                     return: m.return,
                     signatures: m.signatures.map(s => s.params || ''),
                     desc: lang ? pickLang(m.description, m.description_ja, m.description_ko, lang) : m.description,
-                    snippet: m.snippet
+                    snippet: m.snippet,
+                    ...(m.deprecated ? { deprecated: m.deprecated } : {})
                 }, m, lang));
             }
 

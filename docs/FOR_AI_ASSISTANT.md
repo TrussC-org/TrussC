@@ -924,9 +924,14 @@ void scale(float s)  // Scale
 void scale(float sx, float sy)  // Scale
 void pushMatrix()  // Save transform state
 void popMatrix()  // Restore transform state
-Mat4 getCurrentMatrix()  // Get current transformation matrix
+Mat4 getMatrix()  // Get the current transformation matrix
+float getScale()  // Effective uniform scale of the current matrix (max of x/y basis lengths)
 void resetMatrix()  // Reset transformation matrix to identity
-void setMatrix(const Mat4& mat)  // Set transformation matrix directly
+void multMatrix(const Mat4& mat)  // Multiply the current matrix by mat (relative transform, like translate/rotate)
+void setMatrix(const Mat4& mat)  // Replace the current matrix with mat (absolute - use with caution, may break camera setup)
+Mat4 getCurrentMatrix()  // Deprecated alias for getMatrix()
+void loadMatrix(const Mat4& mat)  // Deprecated alias for setMatrix()
+float getCurrentScale()  // Deprecated alias for getScale()
 ```
 
 ### Window & Input

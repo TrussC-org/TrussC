@@ -205,7 +205,10 @@ const probeCpp = lines.join('\n') + '\n';
 function defaultFlags() {
     return ['-DSOKOL_METAL', '-DTRUSSC_BUILD_DATE="probe"',
             '-I', INCLUDE, '-I', path.join(INCLUDE, 'sokol'),
-            '-std=gnu++20', '-arch', 'arm64', '-mmacosx-version-min=14.0'];
+            '-std=gnu++20', '-arch', 'arm64', '-mmacosx-version-min=14.0',
+            // probing a documented-but-[[deprecated]] alias takes its address,
+            // which is a legitimate warning we don't want as probe noise.
+            '-Wno-deprecated-declarations'];
 }
 const cxx = process.env.CXX || 'c++';
 const extra = process.env.TC_PROBE_CXXFLAGS ? process.env.TC_PROBE_CXXFLAGS.split(/\s+/).filter(Boolean) : defaultFlags();
