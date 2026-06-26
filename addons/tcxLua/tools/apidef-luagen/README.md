@@ -20,8 +20,13 @@ node apidef-luagen.js ../../../../docs/api-definition.yaml > ../../src/generated
 
 ## How it handles the YAML
 - Free function = `categories[].functions[]` entry **without** `self:`.
-- Lambda params: typed list (`params`) paired with names (`params_simple`);
-  `[opt]` brackets stripped; trailing default args expanded into arity overloads.
+- **`lua:`** gates bindability — ABSENT means `true` (most symbols); only an
+  explicit `lua: false` excludes.
+- Lambda params come from **`params` alone** (`params_simple` is not used /
+  obsolete): the arg name is the trailing identifier when present, otherwise it
+  is synthesized (`a0`, `a1`, …) — so type-only params like `"float"` work too.
+  Trailing default args expand into arity overloads (so Lua gets the optional-arg
+  behavior; Sol2 does not read C++ defaults on its own).
 - Calls are emitted **unqualified** under `using namespace trussc; using namespace std;`
   so both TrussC funcs (`drawRect`) and std math (`sin`) resolve.
 
