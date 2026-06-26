@@ -2718,6 +2718,9 @@ inline void bindCursorImage(Cursor cursor, const Image& image,
 // TrussC FBO (offscreen rendering)
 #include "tc/gpu/tcFbo.h"
 
+// GPU instanced point-cloud renderer (needs Mesh + Fbo + render context above)
+#include "tc/3d/tcPointCloudRenderer.h"
+
 // TrussC custom shader
 #include "tc/gpu/tcShader.h"
 
