@@ -776,9 +776,9 @@ void windowResized(int width, int height)  // Window resized
 ### Graphics - Color
 
 ```cpp
-ChipSoundBundle& clear()  // Clear screen. No args = transparent black (0,0,0,0)
-ChipSoundBundle& clear(float gray, float a = 1.0f)  // Clear screen. No args = transparent black (0,0,0,0)
-ChipSoundBundle& clear(float r, float g, float b, float a = 1.0f)  // Clear screen. No args = transparent black (0,0,0,0)
+void clear()  // Clear screen. No args = transparent black (0,0,0,0)
+void clear(float gray, float a = 1.0f)  // Clear screen. No args = transparent black (0,0,0,0)
+void clear(float r, float g, float b, float a = 1.0f)  // Clear screen. No args = transparent black (0,0,0,0)
 void setColor(float gray, float a = 1.0f)  // Set drawing color (0.0-1.0)
 void setColor(float r, float g, float b, float a = 1.0f)  // Set drawing color (0.0-1.0)
 void setColor(float r, float g, float b, float a)  // Set drawing color (0.0-1.0)
@@ -847,22 +847,21 @@ void beginLines()  // Begin batch line drawing. Add vertex pairs with vertex(), 
 void endLines()  // End batch line drawing and render all accumulated line segments
 void drawStroke(float x1, float y1, float x2, float y2)  // Draw a single stroke segment (thick line with cap/join)
 void drawStroke(const Vec2& p1, const Vec2& p2)  // Draw a single stroke segment (thick line with cap/join)
-void drawBitmapString(const string& text, float x, float y)  // Draw text
+void drawBitmapString(const string& text, float x, float y, bool screenFixed = true)  // Draw text
 void drawBitmapStringHighlight(const string& text, float x, float y, const Color& background = Color(0,0,0), const Color& foreground = Color(1,1,1))  // Draw text with background highlight
 void getBitmapStringBounds(const string& text, float& width, float& height)  // Get bitmap string bounding box size
 void setTextAlign(Direction h, Direction v)  // Set text alignment
-void setTextAlign(Direction h, Direction v)  // Set text alignment
-TextAlign getTextAlignH()  // Get horizontal text alignment
-TextAlign getTextAlignV()  // Get vertical text alignment
+Direction getTextAlignH()  // Get horizontal text alignment
+Direction getTextAlignV()  // Get vertical text alignment
 float getBitmapFontHeight()  // Get bitmap font height
 float getBitmapStringWidth(const string& text)  // Get text width
 float getBitmapStringHeight(const string& text)  // Get text height
 Rect getBitmapStringBBox(const std::string & text)  // Get text bounding box
 void bitmapfont::registerGlyph(const bitmapfont::Glyph& g)  // Register a bitmap glyph for a Unicode codepoint (extends drawBitmapString)
-void bitmapfont::registerGlyphs(const bitmapfont::Glyph (&glyphs)[N])  // Register a batch of bitmap glyphs at once
+void bitmapfont::registerGlyphs(const bitmapfont::Glyph (&glyphs)[N] glyphs[])  // Register a batch of bitmap glyphs at once
 void bitmapfont::updateGlyph(uint32_t cp, const uint8_t* newData)  // Swap an already-registered glyph's pixel data (atlas cell unchanged). Useful for per-frame animation.
-std::array<uint8_t, 13> bitmapfont::compile8x13(const char* const (&rows)[13])  // Compile-time ASCII art -> packed halfwidth (8x13) glyph bytes. '#' = lit, '.' = empty.
-std::array<uint8_t, 26> bitmapfont::compile16x13(const char* const (&rows)[13])  // Compile-time ASCII art -> packed fullwidth (16x13) glyph bytes. '#' = lit, '.' = empty.
+std::array<uint8_t, 13> bitmapfont::compile8x13(const char* const (&rows)[13] rows)  // Compile-time ASCII art -> packed halfwidth (8x13) glyph bytes. '#' = lit, '.' = empty.
+std::array<uint8_t, 26> bitmapfont::compile16x13(const char* const (&rows)[13] rows)  // Compile-time ASCII art -> packed fullwidth (16x13) glyph bytes. '#' = lit, '.' = empty.
 void setBitmapLineHeight(float height)  // Set line height for bitmap string newlines (default: 16)
 float getBitmapLineHeight()  // Get line height for bitmap string newlines
 void setFps(float fps)  // Set target frame rate (VSYNC = -1.0)
@@ -885,8 +884,6 @@ void setCurveTolerance(float pixels)  // Set adaptive curve tessellation toleran
 float getCurveTolerance()  // Get current curve tessellation tolerance (in pixels)
 void setCurveResolution(int n)  // Set fixed curve segment count (switches off adaptive tolerance mode)
 int getCurveResolution()  // Get current curve resolution
-void pushStyle()  // Save current style state (color, stroke, fill)
-void popStyle()  // Restore previous style state
 void resetStyle()  // Reset style to default values (white color, fill enabled, stroke disabled)
 Color getColor()  // Get current fill color
 void setScissor(float x, float y, float w, float h)  // Set scissor clipping rectangle. Also available via RectNode::setClipping(true)
@@ -898,7 +895,6 @@ BlendMode getBlendMode()  // Get current blend mode
 void resetBlendMode()  // Reset blend mode to Alpha (default)
 void pushStyle()  // Push current style (color, fill, stroke, blend) onto stack
 void popStyle()  // Pop style from stack, restoring previous state
-void resetStyle()  // Reset all style settings to defaults
 CurveStyle::Mode getCurveMode()  // Current curve tessellation mode (fixed segment count vs. adaptive tolerance)
 ```
 
@@ -924,9 +920,14 @@ void scale(float s)  // Scale
 void scale(float sx, float sy)  // Scale
 void pushMatrix()  // Save transform state
 void popMatrix()  // Restore transform state
-Mat4 getCurrentMatrix()  // Get current transformation matrix
+Mat4 getMatrix()  // Get the current transformation matrix
+float getScale()  // Effective uniform scale of the current matrix (max of x/y basis lengths)
 void resetMatrix()  // Reset transformation matrix to identity
-void setMatrix(const Mat4& mat)  // Set transformation matrix directly
+void multMatrix(const Mat4& mat)  // Multiply the current matrix by mat (relative transform, like translate/rotate)
+void setMatrix(const Mat4& mat)  // Replace the current matrix with mat (absolute - use with caution, may break camera setup)
+Mat4 getCurrentMatrix()  // Deprecated alias for getMatrix()
+void loadMatrix(const Mat4& mat)  // Deprecated alias for setMatrix()
+float getCurrentScale()  // Deprecated alias for getScale()
 ```
 
 ### Window & Input
@@ -1218,11 +1219,9 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings())  // Ru
 
 ```cpp
 LogStream logNotice(const std::string & module = "")  // Print to console
-bool compress(const void* src, size_t nbytes, vector<uint8_t>& out, Codec codec)  // Compress a byte buffer with the given codec (Codec::None or Codec::LZ4). The vector form resizes out and returns bool; the raw form writes into dst (capacity dstCapacity) and returns the number of bytes written (or -1), useful for compressing into a region of a buffer / parallel chunks
-bool compress(const void* src, size_t nbytes, void* dst, size_t dstCapacity, Codec codec)  // Compress a byte buffer with the given codec (Codec::None or Codec::LZ4). The vector form resizes out and returns bool; the raw form writes into dst (capacity dstCapacity) and returns the number of bytes written (or -1), useful for compressing into a region of a buffer / parallel chunks
-bool decompress(const void* src, size_t nbytes, vector<uint8_t>& out, size_t decompressedSize, Codec codec)  // Decompress a byte buffer; decompressedSize is the known original byte count. The vector form resizes out and returns bool; the raw form writes into dst (capacity dstCapacity) and returns bytes written (or -1) - it can write into a region of an existing buffer (dst + offset), enabling parallel per-chunk decompression
-bool decompress(const void* src, size_t nbytes, void* dst, size_t dstCapacity, Codec codec)  // Decompress a byte buffer; decompressedSize is the known original byte count. The vector form resizes out and returns bool; the raw form writes into dst (capacity dstCapacity) and returns bytes written (or -1) - it can write into a region of an existing buffer (dst + offset), enabling parallel per-chunk decompression
-string toString(value)  // Convert to string
+bool compress(const void* src, size_t nbytes, vector<uint8_t>& out, Codec codec)  // Compress a byte buffer with the given codec (Codec::None or Codec::LZ4). Resizes out and returns true on success.
+bool decompress(const void* src, size_t nbytes, vector<uint8_t>& out, size_t decompressedSize, Codec codec)  // Decompress a byte buffer; decompressedSize is the known original byte count. Resizes out and returns true on success (false / cleared out on size mismatch or failure).
+string toString(value value)  // Convert to string
 void beep()  // Play a beep sound
 void beep(float frequency)  // Play a beep sound
 int toInt(const string& str)  // Convert string to int
@@ -1276,7 +1275,6 @@ string getBaseName(const string& path)  // Get filename without extension
 string getFileExtension(const string& path)  // Get file extension without dot
 string getParentDirectory(const string& path)  // Get parent directory
 string joinPath(const string& dir, const string& file)  // Join directory and filename
-string getAbsolutePath(const string& path)  // Get absolute path
 bool fileExists(const string& path)  // Check if file exists
 bool directoryExists(const string& path)  // Check if directory exists
 bool createDirectory(const string& path)  // Create directory (and parents)
@@ -1344,9 +1342,7 @@ int getChannels()  // Current engine output channel count
 int getMaxPolyphony()  // Max simultaneously-playing Sound voices
 int getBufferSize()  // Current device buffer size in frames (0 = miniaudio default)
 bool isInitialized()  // True after a successful init()
-Event<AudioOutBuffer> audioOut()  // Real-time playback callback event. listen() to add a synthesis / processing listener. Fires per audio buffer on the audio thread; keep RT-safe.
 void audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut.
-Event<AudioDeviceChangedArgs> audioDeviceChanged()  // Fires after every successful init() (initial AND re-init). Args carry the resolved device's real name, isDefaultDevice flag, sampleRate, channels, bufferSize, maxPolyphony. Listener runs on the thread that called init() (main), not the audio thread.
 void initAudio()  // Initialize the global AudioEngine. Called automatically by Sound::load() / play(), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener).
 void shutdownAudio()  // Shut down the global AudioEngine and close the audio device. Usually unnecessary (runs at program exit).
 size_t getAudioAnalysisBuffer(float* outBuffer, size_t numSamples)  // Copy the latest mixed output samples (mono, L+R average) into outBuffer for FFT / visualization. numSamples is capped at the analysis buffer size (4096). Returns the number of samples written.
@@ -1358,15 +1354,6 @@ size_t getMicAnalysisBuffer(float* outBuffer, size_t numSamples)  // Copy the la
 
 ```cpp
  ChipSoundNote()  // Create a chip sound note (8-bit style sound)
-ChipSoundNote& wave(Wave type)  // Set wave type (Sin, Square, Triangle, Sawtooth, Noise, PinkNoise)
-ChipSoundNote& hz(float frequency)  // Set frequency in Hz
-ChipSoundNote& duration(float seconds)  // Set note duration in seconds
-ChipSoundNote& volume(float vol)  // Set volume (0.0-1.0)
-ChipSoundNote& attack(float seconds)  // Set attack time (ADSR envelope)
-ChipSoundNote& decay(float seconds)  // Set decay time (ADSR envelope)
-ChipSoundNote& sustain(float level)  // Set sustain level (0.0-1.0)
-ChipSoundNote& release(float seconds)  // Set release time (ADSR envelope)
-ChipSoundNote& adsr(float a, float d, float s, float r)  // Set ADSR envelope (attack, decay, sustain, release)
 ChipSoundBundle& add(const ChipSoundNote& note, float time)  // Add a note at specified time (seconds)
 ChipSoundBundle& clear()  // Clear all notes from bundle
 float getDuration()  // Get the total duration of the bundle
@@ -1385,8 +1372,8 @@ float getLineHeight()  // Get line height
 int getSize()  // Get font size
 string systemFontPath(const string& name)  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub.
 vector<string> listSystemFonts()  // Enumerate names of all fonts known to the OS
-void registerGlyph(const bitmapfont::Glyph &)  // Register one bitmap glyph so drawBitmapString can render its codepoint. Replaces any glyph already registered at the same codepoint and marks the atlas dirty for re-upload
-void registerGlyphs(const Glyph (&glyphs)[N])  // Register a fixed-size array of bitmap glyphs in one call (template over the array size)
+void registerGlyph(const bitmapfont::Glyph & g)  // Register one bitmap glyph so drawBitmapString can render its codepoint. Replaces any glyph already registered at the same codepoint and marks the atlas dirty for re-upload
+void registerGlyphs(const Glyph (&glyphs)[N] glyphs)  // Register a fixed-size array of bitmap glyphs in one call (template over the array size)
 void updateGlyph(uint32_t cp, const uint8_t *newData)  // Swap the pixel data of an already-registered glyph without changing its atlas position. Useful for animating a glyph by updating its data each frame
 ```
 
@@ -1416,7 +1403,7 @@ int getLoopCount()  // Get number of completed loop iterations
  Vec2(float v)  // Create 2D vector (type constructor)
 Vec2& set(float x, float y)  // Set vector components (type method)
 Vec2& set(float x_, float y_)  // Set vector components (type method)
-Vec2 Vec2_fromAngle(float, float)  // Create Vec2 from angle
+Vec2 Vec2_fromAngle(float radians, float length = 1.0f)  // Create Vec2 from angle
 Vec2 Vec2_fromAngle(float radians, float length)  // Create Vec2 from angle
 ```
 
@@ -1443,13 +1430,13 @@ Color& set(const Color& c)  // Set color components (type method)
 ColorHSB toHSB()  // Convert to HSB color space (H: 0-1, S: 0-1, B: 0-1)
 ColorOKLab toOKLab()  // Convert to OKLab color space (perceptually uniform)
 ColorOKLCH toOKLCH()  // Convert to OKLCH color space (L: 0-1, C: 0-0.4, H: 0-1)
-Color Color_fromHSB(float, float, float, float)  // Create Color from HSB (H: 0-1, S: 0-1, B: 0-1)
+Color Color_fromHSB(float h, float s, float b, float a = 1.0f)  // Create Color from HSB (H: 0-1, S: 0-1, B: 0-1)
 Color Color_fromHSB(float h, float s, float b, float a)  // Create Color from HSB (H: 0-1, S: 0-1, B: 0-1)
 Color colorFromHSB(float h, float s, float b, float a = 1.0f)  // Create Color from HSB (alias for Color_fromHSB)
 Color colorFromHSB(float h, float s, float b, float a)  // Create Color from HSB (alias for Color_fromHSB)
-Color Color_fromOKLCH(float, float, float, float)  // Create Color from OKLCH
+Color Color_fromOKLCH(float L, float C, float H, float a = 1.0f)  // Create Color from OKLCH
 Color Color_fromOKLCH(float L, float C, float H, float a)  // Create Color from OKLCH
-Color Color_fromOKLab(float, float, float, float)  // Create Color from OKLab
+Color Color_fromOKLab(float L, float a_lab, float b_lab, float alpha = 1.0f)  // Create Color from OKLab
 Color Color_fromOKLab(float L, float a, float b, float alpha)  // Create Color from OKLab
 ```
 
@@ -1479,20 +1466,18 @@ ColorOKLCH lerp(const ColorOKLCH & target, float t, bool shortestPath = true)  /
 Rect& set(float x, float y, float w, float h)  // Set rectangle properties (type method)
 Rect& set(float x_, float y_, float w_, float h_)  // Set rectangle properties (type method)
 bool contains(float x, float y)  // Check if point is inside (type method)
-bool intersects(const Rect &)  // Check intersection (type method)
+bool intersects(const Rect & other)  // Check intersection (type method)
 ```
 
 ### Scene Graph
 
 ```cpp
  Node()  // Create a base scene node (C++ only - uses shared_ptr)
-void addChild(Node::Ptr, bool)  // Add a child node (C++ only)
+void addChild(Node::Ptr child, bool keepGlobalPosition = false)  // Add a child node (C++ only)
 void moveToFront()  // Move this node to the end of its parent's child list — drawn last, on top of siblings. No-op if no parent or already last (C++ only)
 void moveToBack()  // Move this node to the beginning of its parent's child list — drawn first, beneath siblings. No-op if no parent or already first (C++ only)
 void destroy()  // Mark node for deferred removal from scene graph (C++ only)
 bool isDead()  // Check if node is marked for destruction (C++ only)
-void setPosition(float x, float y)  // Set position (C++ only)
-void setPosition(Vec3 pos)  // Set position (C++ only)
  RectNode()  // Create a 2D rectangle node (C++ only - uses shared_ptr)
 void setSize(float w, float h)  // Set size (C++ only)
 void setClipping(bool enabled)  // Enable/disable scissor clipping for RectNode (C++ only)
@@ -1598,27 +1583,26 @@ Color calculateLighting(const Vec3& worldPos, const Vec3& worldNormal, const Mat
 ```cpp
 Mat4 Mat4_identity()  // Create an identity matrix
 Mat4 Mat4_translate(float x, float y, float z)  // Create a translation matrix
-Mat4 Mat4_translate(Vec3 v)  // Create a translation matrix
+Mat4 Mat4_translate(const Vec3& v)  // Create a translation matrix
 Mat4 Mat4_rotateX(float radians)  // Create X-axis rotation matrix
 Mat4 Mat4_rotateY(float radians)  // Create Y-axis rotation matrix
 Mat4 Mat4_rotateZ(float radians)  // Create Z-axis rotation matrix
 Mat4 Mat4_scale(float s)  // Create a scaling matrix
 Mat4 Mat4_scale(float sx, float sy, float sz)  // Create a scaling matrix
-Mat4 Mat4_lookAt(const Vec3 &, const Vec3 &, const Vec3 &)  // Create a view matrix
+Mat4 Mat4_lookAt(const Vec3 & eye, const Vec3 & target, const Vec3 & up)  // Create a view matrix
 Mat4 Mat4_ortho(float left, float right, float bottom, float top, float nearPlane, float farPlane)  // Create an orthographic projection matrix
 Mat4 Mat4_perspective(float fovY, float aspect, float nearPlane, float farPlane)  // Create a perspective projection matrix
 Quaternion Quaternion_identity()  // Create an identity quaternion
-Quaternion Quaternion_fromAxisAngle(const Vec3 &, float)  // Create quaternion from axis-angle
+Quaternion Quaternion_fromAxisAngle(const Vec3 & axis, float radians)  // Create quaternion from axis-angle
 Quaternion Quaternion_fromEuler(float pitch, float yaw, float roll)  // Create quaternion from Euler angles
-Quaternion Quaternion_fromEuler(Vec3 euler)  // Create quaternion from Euler angles
-Quaternion Quaternion_slerp(const Quaternion &, const Quaternion &, float)  // Spherical linear interpolation
+Quaternion Quaternion_fromEuler(const Vec3& euler)  // Create quaternion from Euler angles
+Quaternion Quaternion_slerp(const Quaternion & a, const Quaternion & b, float t)  // Spherical linear interpolation
 ```
 
 ### Graphics - Advanced
 
 ```cpp
 void drawMesh(const Mesh & mesh)  // Draw a mesh
-void drawPolyline(Polyline polyline)  // Draw a polyline
 Mesh createBox(float size)  // Create a box mesh
 Mesh createBox(float w, float h, float d)  // Create a box mesh
 Mesh createPlane(float width, float height, int cols = 2, int rows = 2)  // Create a plane mesh (subdivided quad on the XY plane)
@@ -1628,16 +1612,13 @@ Mesh createIcoSphere(float radius, int subdivisions = 2)  // Create an icosphere
 Mesh createTorus(float radius, float tubeRadius, int sides = 24, int rings = 16)  // Create a torus (donut) mesh
 Mesh createSphere(float radius, int res = 20)  // Create a sphere mesh
 Mesh createCapsule(float radius, float cylinderHeight, int res = 16)  // Create a capsule mesh (Y-up: cylinder capped by two hemispheres)
-void drawTexture(const Texture& tex, float x, float y)  // Draw a texture
-void drawTexture(const Texture& tex, float x, float y, float w, float h)  // Draw a texture
 ```
 
 ### Graphics - Texture & GPU
 
 ```cpp
  Texture()  // Create a texture
-bool load(const std::filesystem::path &, bool)  // Load image from file
-bool loadFromPixels(const Pixels& pixels)  // Load from pixel data
+bool load(const std::filesystem::path & path, bool mipmaps = false)  // Load image from file
 void bind()  // Bind texture
 void unbind()  // Unbind texture
 int getWidth()  // Get width
@@ -1651,19 +1632,18 @@ bool isFloatFormat(TextureFormat fmt)  // Whether a TextureFormat uses floating-
 
 ```cpp
  Fbo()  // Create an FBO
-void allocate(int, int, int, TextureFormat, bool)  // Allocate buffer
+void allocate(int w, int h, int sampleCount = 1, TextureFormat format = TextureFormat::RGBA8, bool mipmaps = false)  // Allocate buffer
 void begin()  // Begin drawing to FBO. No args = preserve previous content. With args = clear with specified color
 void begin(float r, float g, float b, float a = 1.0)  // Begin drawing to FBO. No args = preserve previous content. With args = clear with specified color
 void end()  // End drawing to FBO
 Texture& getTexture()  // Get internal texture
-void readToPixels(Pixels& pixels)  // Read pixels to CPU memory
 ```
 
 ### Graphics - Shader
 
 ```cpp
  Shader()  // Create a shader (base class, inheritable)
-bool load(const sg_shader_desc* (*descFn)(sg_backend))  // Load from sokol-shdc generated function
+bool load(const sg_shader_desc* (*descFn)(sg_backend) descFn)  // Load from sokol-shdc generated function
 bool isLoaded()  // Check if shader is loaded
 void begin()  // Begin shader (pushes to stack)
 void end()  // End shader (pops from stack)
@@ -1685,27 +1665,27 @@ void setTexture(int slot, sg_view view, sg_sampler sampler)  // Bind texture to 
 
 ```cpp
  Pixels()  // Create pixel buffer
-void allocate(int, int, int, PixelFormat)  // Allocate memory
+void allocate(int width, int height, int channels = 4, PixelFormat format = PixelFormat::U8)  // Allocate memory
 uint8_t* getData()  // Get raw data pointer
 Color getColor(int x, int y)  // Get color at pixel
 void setColor(int x, int y, const Color& c)  // Set color at pixel
-bool save(const std::filesystem::path &)  // Save to file
+bool save(const std::filesystem::path & path)  // Save to file
 ```
 
 ### Types - Mesh
 
 ```cpp
  Mesh()  // Create a new Mesh (constructor)
-void setMode(PrimitiveMode)  // Set primitive mode (MESH_TRIANGLES, etc.)
-void addVertex(float x, float y, float z)  // Add a vertex
-void addVertex(const Vec3& v)  // Add a vertex
-void addColor(float r, float g, float b, float a)  // Add a color for the vertex
-void addColor(const Color& c)  // Add a color for the vertex
-void addTexCoord(float u, float v)  // Add a texture coordinate
-void addNormal(float x, float y, float z)  // Add a normal vector
-void addIndex(unsigned int)  // Add an index
-void addTriangle(unsigned int, unsigned int, unsigned int)  // Add a triangle (3 indices)
-void clear()  // Clear all data
+Mesh& setMode(PrimitiveMode mode)  // Set primitive mode (MESH_TRIANGLES, etc.)
+Mesh& addVertex(float x, float y, float z)  // Add a vertex
+Mesh& addVertex(const Vec3& v)  // Add a vertex
+Mesh& addColor(float r, float g, float b, float a)  // Add a color for the vertex
+Mesh& addColor(const Color& c)  // Add a color for the vertex
+Mesh& addTexCoord(float u, float v)  // Add a texture coordinate
+Mesh& addNormal(float x, float y, float z)  // Add a normal vector
+Mesh& addIndex(unsigned int)  // Add an index
+Mesh& addTriangle(unsigned int, unsigned int, unsigned int)  // Add a triangle (3 indices)
+Mesh& clear()  // Clear all data
 void draw()  // Draw the mesh
 ```
 
@@ -1725,19 +1705,19 @@ void close()  // Close the shape
 ### Types - StrokeMesh
 
 ```cpp
-void setWidth(float width)  // Set stroke width (method chaining)
-void setColor(const Color &color)  // Set stroke color (method chaining)
-void setCapType(StrokeMesh::CapType)  // Set cap type: Butt, Round, Square (method chaining)
-void setJoinType(StrokeMesh::JoinType)  // Set join type: Miter, Round, Bevel (method chaining)
-void setMiterLimit(float limit)  // Set miter limit for sharp corners (method chaining)
-void addVertex(float x, float y, float z = 0)  // Add a vertex (method chaining)
-void addVertex(const Vec3& p)  // Add a vertex (method chaining)
-void addVertex(float x, float y, float z = 0)  // Add a vertex (method chaining)
-void addVertex(const Vec3& p)  // Add a vertex (method chaining)
-void addVertexWithWidth(float x, float y, float width)  // Add a vertex with variable width (method chaining)
-void setShape(const Path &)  // Set shape from Path (method chaining)
-void setClosed(bool closed)  // Set whether the stroke is closed (method chaining)
-void clear()  // Clear all vertices (method chaining)
+StrokeMesh& setWidth(float width)  // Set stroke width (method chaining)
+StrokeMesh& setColor(const Color &color)  // Set stroke color (method chaining)
+StrokeMesh& setCapType(StrokeMesh::CapType type)  // Set cap type: Butt, Round, Square (method chaining)
+StrokeMesh& setJoinType(StrokeMesh::JoinType type)  // Set join type: Miter, Round, Bevel (method chaining)
+StrokeMesh& setMiterLimit(float limit)  // Set miter limit for sharp corners (method chaining)
+StrokeMesh& addVertex(float x, float y, float z = 0)  // Add a vertex (method chaining)
+StrokeMesh& addVertex(const Vec3& p)  // Add a vertex (method chaining)
+StrokeMesh& addVertex(float x, float y, float z = 0)  // Add a vertex (method chaining)
+StrokeMesh& addVertex(const Vec3& p)  // Add a vertex (method chaining)
+StrokeMesh& addVertexWithWidth(float x, float y, float width)  // Add a vertex with variable width (method chaining)
+StrokeMesh& setShape(const Path & path)  // Set shape from Path (method chaining)
+StrokeMesh& setClosed(bool closed)  // Set whether the stroke is closed (method chaining)
+StrokeMesh& clear()  // Clear all vertices (method chaining)
 void update()  // Update the internal mesh (required before draw)
 void draw()  // Draw the stroke mesh
 ```
@@ -1817,7 +1797,6 @@ Lut3D tcx::lut::createCinematic(int size = 32)  // Create cinematic orange/teal 
 Lut3D tcx::lut::createFilmNoir(int size = 32)  // Create film noir high-contrast B&W LUT
 Lut3D tcx::lut::createWarm(int size = 32)  // Create warm color shift LUT
 Lut3D tcx::lut::createCool(int size = 32)  // Create cool color shift LUT
-Lut3D tcx::lut::createCyberpunk(int size = 32)  // Create cyberpunk neon pink/cyan LUT
 Lut3D tcx::lut::createPastel(int size = 32)  // Create soft pastel LUT
  tcx::lut::LutShader()  // Create a LUT shader for color grading
 void setTexture(const T& tex)  // Set source texture (VideoGrabber, Texture, Fbo, etc.)
@@ -1992,31 +1971,6 @@ bool operator!=(const IVec3&) const  // Inequality comparison
 friend IVec3 operator*(int, const IVec3&)  // Component-wise multiplication
 ```
 
-#### IVec2 — 2D integer vector (x, y)
-
-```cpp
-IVec2()
-IVec2(int x, int y)
-IVec2(int v)
-int x  // X component
-int y  // Y component
-Vec2 toVec2()  // Convert to Vec2 (float)
-```
-
-#### IVec3 — 3D integer vector (x, y, z)
-
-```cpp
-IVec3()
-IVec3(int x, int y, int z)
-IVec3(int v)
-IVec3(IVec2 v, int z)
-int x  // X component
-int y  // Y component
-int z  // Z component
-Vec3 toVec3()  // Convert to Vec3 (float)
-IVec2 xy()  // Get XY components as IVec2
-```
-
 #### Color — RGBA color (0.0-1.0 range)
 
 ```cpp
@@ -2128,8 +2082,8 @@ void crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x,
 void mirror(bool horizontal, bool vertical)  // Flip in place. Both true is 180°.
 void mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void mirrorV()  // Mirror vertically (alias for mirror(false, true))
-bool load(const std::filesystem::path &)  // Load image from file
-bool save(const std::filesystem::path &)  // Save image to file
+bool load(const std::filesystem::path & path)  // Load image from file
+bool save(const std::filesystem::path & path)  // Save image to file
 int getWidth()  // Get width
 int getHeight()  // Get height
 bool isAllocated()  // Check if allocated
@@ -2145,11 +2099,11 @@ void copyTo(uint8_t* dst)  // Copy to external buffer
 #### Image — Image with CPU pixels and GPU texture
 
 ```cpp
-bool load(const std::filesystem::path &, bool)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
-bool load(const std::filesystem::path &, bool)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
+bool load(const std::filesystem::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
+bool load(const std::filesystem::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
 bool loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain.
 bool loadFromMemory(const uint8_t* buffer, int len, bool mipmaps)  // Load image from memory. `mipmaps=true` builds a mip chain.
-bool save(const std::filesystem::path &)  // Save image to file
+bool save(const std::filesystem::path & path)  // Save image to file
 void allocate(int width, int height, int channels = 4, bool mipmaps = false)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
 void allocate(int width, int height, int channels = 4, bool mipmaps = false)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
 void allocate(int width, int height, int channels, bool mipmaps)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
@@ -2171,7 +2125,6 @@ void setColor(int x, int y, const Color & c)  // Set pixel color at position (ma
 void update()  // Apply pixel changes to GPU texture
 void setDirty()  // Mark image as needing update
 Texture& getTexture()  // Get internal texture
-void draw()  // Draw image
 void draw(float x, float y)  // Draw image
 void draw(float x, float y, float w, float h)  // Draw image
 ```
@@ -2227,7 +2180,7 @@ void draw(float x, float y, float w, float h)  // Draw FBO contents
 int getSampleCount()  // Get MSAA sample count
 bool isActive()  // Check if currently rendering to FBO
 void clear()  // Release FBO resources
-bool save(const std::filesystem::path &)  // Save FBO contents to file
+bool save(const std::filesystem::path & path)  // Save FBO contents to file
 bool copyTo(Image & image)  // Copy FBO contents to Image
 ```
 
@@ -2241,6 +2194,8 @@ void addVertex(float x, float y)  // Add a vertex
 void addVertex(float x, float y, float z)  // Add a vertex
 void addVertex(float x, float y)  // Add a vertex
 void addVertex(float x, float y, float z)  // Add a vertex
+void addVertices(const std::vector<Vec3>& verts)  // Add multiple vertices
+void addVertices(const std::vector<Vec2>& verts)  // Add multiple vertices
 const std::vector<Vec3>& getVertices()  // Get all vertices
 int size()  // Get vertex count
 bool empty()  // Check if polyline is empty
@@ -2282,47 +2237,47 @@ Vec3& operator[](int)  // Component access by index
 
 ```cpp
 Mesh()
-void setMode(PrimitiveMode mode)  // Set primitive mode (Triangles, Lines, Points, etc.)
+Mesh& setMode(PrimitiveMode mode)  // Set primitive mode (Triangles, Lines, Points, etc.)
 PrimitiveMode getMode()  // Get current primitive mode
-void addVertex(float x, float y, float z)  // Add a vertex
-void addVertex(float x, float y, float z = 0.0f)  // Add a vertex
-void addVertex(const Vec3& v)  // Add a vertex
+Mesh& addVertex(float x, float y, float z)  // Add a vertex
+Mesh& addVertex(float x, float y, float z = 0.0f)  // Add a vertex
+Mesh& addVertex(const Vec3& v)  // Add a vertex
 Mesh& addVertices(const std::vector<Vec3> & verts)  // Add multiple vertices
 Mesh& addVertices(const std::vector<Vec3> & verts)  // Add multiple vertices
 const std::vector<Vec3>& getVertices()  // Get all vertices
 int getNumVertices()  // Get vertex count
-void addColor(const Color& c)  // Add a vertex color
-void addColor(float r, float g, float b, float a = 1.0f)  // Add a vertex color
+Mesh& addColor(const Color& c)  // Add a vertex color
+Mesh& addColor(float r, float g, float b, float a = 1.0f)  // Add a vertex color
 Mesh& addColors(const std::vector<Color> & cols)  // Add multiple vertex colors
 const std::vector<Color>& getColors()  // Get all vertex colors
 int getNumColors()  // Get vertex color count
 bool hasColors()  // Check if mesh has vertex colors
-void addIndex(unsigned int index)  // Add an index
+Mesh& addIndex(unsigned int index)  // Add an index
 Mesh& addIndices(const std::vector<unsigned int> & inds)  // Add multiple indices
-void addTriangle(unsigned int i0, unsigned int i1, unsigned int i2)  // Add a triangle (3 indices)
+Mesh& addTriangle(unsigned int i0, unsigned int i1, unsigned int i2)  // Add a triangle (3 indices)
 const std::vector<unsigned int>& getIndices()  // Get all indices
 int getNumIndices()  // Get index count
 bool hasIndices()  // Check if mesh has indices
-void addNormal(float nx, float ny, float nz)  // Add a normal vector
-void addNormal(float nx, float ny, float nz)  // Add a normal vector
+Mesh& addNormal(float nx, float ny, float nz)  // Add a normal vector
+Mesh& addNormal(float nx, float ny, float nz)  // Add a normal vector
 Mesh& addNormals(const std::vector<Vec3> & norms)  // Add multiple normals
-void setNormal(size_t index, const Vec3 & n)  // Set normal at index
+Mesh& setNormal(size_t index, const Vec3 & n)  // Set normal at index
 Vec3 getNormal(size_t index)  // Get normal at index
 const std::vector<Vec3>& getNormals()  // Get all normals
 int getNumNormals()  // Get normal count
 bool hasNormals()  // Check if mesh has normals
-void addTexCoord(float u, float v)  // Add a texture coordinate
-void addTexCoord(float u, float v)  // Add a texture coordinate
+Mesh& addTexCoord(float u, float v)  // Add a texture coordinate
+Mesh& addTexCoord(float u, float v)  // Add a texture coordinate
 const std::vector<Vec2>& getTexCoords()  // Get all texture coordinates
 int getNumTexCoords()  // Get texture coordinate count
 bool hasTexCoords()  // Check if mesh has texture coordinates
 bool hasValidTexCoords()  // Check if texture coordinates match vertex count
-void clear()  // Clear all mesh data
-void clearVertices()  // Clear vertices only
-void clearColors()  // Clear colors only
-void clearIndices()  // Clear indices only
-void clearNormals()  // Clear normals only
-void clearTexCoords()  // Clear texture coordinates only
+Mesh& clear()  // Clear all mesh data
+Mesh& clearVertices()  // Clear vertices only
+Mesh& clearColors()  // Clear colors only
+Mesh& clearIndices()  // Clear indices only
+Mesh& clearNormals()  // Clear normals only
+Mesh& clearTexCoords()  // Clear texture coordinates only
 Mesh& translate(float x, float y, float z)  // Translate all vertices
 Mesh& translate(float x, float y, float z)  // Translate all vertices
 Mesh& rotateX(float radians)  // Rotate mesh around X axis
@@ -2330,8 +2285,8 @@ Mesh& rotateY(float radians)  // Rotate mesh around Y axis
 Mesh& rotateZ(float radians)  // Rotate mesh around Z axis
 Mesh& scale(float s)  // Scale mesh
 Mesh& scale(float x, float y, float z)  // Scale mesh
-void transform(const Mat4 & m)  // Apply transformation matrix
-void append(const Mesh & other)  // Append another mesh
+Mesh& transform(const Mat4 & m)  // Apply transformation matrix
+Mesh& append(const Mesh & other)  // Append another mesh
 void draw()  // Draw the mesh
 void draw(const Texture& texture)  // Draw the mesh
 void draw(const Image& image)  // Draw the mesh
@@ -2368,10 +2323,10 @@ float getDuration()  // Get total duration in seconds
 Font()
 bool load(const std::string & nameOrPath, int size)  // Load font file
 bool isLoaded()  // Check if loaded
-void drawString(string text, float x, float y)  // Draw text
+void drawString(const string& text, float x, float y)  // Draw text
 Path getGlyphPath(uint32_t codepoint)  // Vector outline of a single glyph as one Path with one subpath per contour. Em-normalized (1.0 = em), screen Y-down, baseline at y=0, pen at x=0. Use Path::drawFill() for filled rendering — holes (e, a, O, 日 ...) are auto-detected via earcut.
-Path getStringPath(string text, float x, float y)  // Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely.
-Path getStringPath(string text, float x, float y, Direction h, Direction v)  // Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely.
+Path getStringPath(const string& text, float x, float y)  // Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely.
+Path getStringPath(const string& text, float x, float y, Direction h, Direction v)  // Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely.
 float getWidth(const std::string & text)  // Get text width
 float getHeight(const std::string & text)  // Get text height
 float getLineHeight()  // Get line height
@@ -2394,9 +2349,9 @@ bool open(const std::string & path, bool append = false)  // Open file for writi
 bool open(const std::string & path, bool append = false)  // Open file for writing
 void close()  // Close file
 bool isOpen()  // Check if file is open
-FileWriter& write(string text)  // Write data to file
+FileWriter& write(const std::string& text)  // Write data to file
 FileWriter& write(char c)  // Write data to file
-FileWriter& write(void* data, size_t size)  // Write data to file
+FileWriter& write(const void* data, size_t size)  // Write data to file
 FileWriter & writeLine(const std::string & text = "")  // Write line with newline
 FileWriter & writeLine(const std::string & text = "")  // Write line with newline
 void flush()  // Flush buffer to disk
@@ -2860,6 +2815,9 @@ int getMaxPolyphony()  // Number of concurrent decoder slots reserved at loadStr
 #### AudioEngine — Singleton miniaudio-based mixer engine. Owns the output device, mixes all playing Sound voices, exposes real-time audioOut / audioIn / audioDeviceChanged events, and an FFT analysis ring buffer. Access via AudioEngine::getInstance(); most apps drive it indirectly through the Sound class and the global initAudio() / shutdownAudio() helpers.
 
 ```cpp
+Event<AudioOutBuffer> audioOut  // Real-time playback callback event. listen() to add a synthesis / processing listener. Fires per audio buffer on the audio thread; keep RT-safe.
+Event<AudioInBuffer> audioIn  // Real-time capture callback event (microphone input). listen() to add an input-processing listener. Fires per audio buffer on the audio thread; keep RT-safe.
+Event<AudioDeviceChangedArgs> audioDeviceChanged  // Fires after every successful init() (initial AND re-init). Args carry the resolved device's real name, isDefaultDevice flag, sampleRate, channels, bufferSize, maxPolyphony. Listener runs on the thread that called init() (main), not the audio thread.
 bool init()  // Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success.
 bool init(const AudioSettings& settings)  // Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success.
 void shutdown()  // Stop and close the audio device.
@@ -2932,15 +2890,31 @@ int sampleRate  // Input sample rate in Hz
 uint64_t framePosition  // Monotonic count of input frames received since capture start
 ```
 
+#### ChipSoundNote — One 8-bit-style note: a plain aggregate of public fields (wave, hz, volume, duration, and the ADSR envelope attack/decay/sustain/release). Set fields directly via designated initializers ({ .wave = Wave::Square, .hz = 440, .duration = 0.2f }) or the constructor, then build() it into a Sound (or add() it to a ChipSoundBundle).
+
+```cpp
+ChipSoundNote()
+ChipSoundNote(Wave w, float freq, float dur, float vol = 0.5f)
+Wave wave  // Waveform (Sin, Square, Triangle, Sawtooth, Noise, PinkNoise, Silent)
+float hz  // Frequency in Hz (ignored for Noise / Silent)
+float volume  // Volume (0.0-1.0)
+float duration  // Note duration in seconds
+float attack  // ADSR attack time in seconds
+float decay  // ADSR decay time in seconds
+float sustain  // ADSR sustain level (0.0-1.0)
+float release  // ADSR release time in seconds
+Sound build()  // Render this note (with its ADSR envelope) into a playable Sound
+```
+
 #### ChipSoundBundle — A timeline of chiptune notes (ChipSoundNote + start time) that builds into a single mixed Sound. Add notes at times, then call build() to render the mix with ADSR and clipping applied.
 
 ```cpp
 ChipSoundBundle()
 vector<ChipSoundBundle::Entry> entries  // The scheduled notes (each Entry pairs a ChipSoundNote with its start time in seconds)
 float volume  // Master volume multiplier applied when mixing (default 1.0)
-void add(const ChipSoundNote& note, float time)  // Schedule a note to start at the given time (seconds). The second overload constructs the note inline from wave / frequency / duration.
-void add(ChipSoundNote::Wave wave, float hz, float duration, float time, float vol = 0.5f)  // Schedule a note to start at the given time (seconds). The second overload constructs the note inline from wave / frequency / duration.
-void clear()  // Remove all scheduled notes.
+ChipSoundBundle& add(const ChipSoundNote& note, float time)  // Schedule a note to start at the given time (seconds). The second overload constructs the note inline from wave / frequency / duration.
+ChipSoundBundle& add(ChipSoundNote::Wave wave, float hz, float duration, float time, float vol = 0.5f)  // Schedule a note to start at the given time (seconds). The second overload constructs the note inline from wave / frequency / duration.
+ChipSoundBundle& clear()  // Remove all scheduled notes.
 float getDuration()  // Total duration in seconds, auto-computed from the last note's end.
 Sound build()  // Render all scheduled notes into a single mixed, clipped Sound ready to play.
 ```
@@ -3499,7 +3473,7 @@ StrokeMesh& addVertex(const Vec2& v)  // Append a vertex to the stroke path
 StrokeMesh& addVertex(const Vec3& v)  // Append a vertex to the stroke path
 StrokeMesh& addVertexWithWidth(float x, float y, float width)  // Append a vertex with a per-vertex width
 StrokeMesh& addVertexWithWidth(const Vec3& p, float width)  // Append a vertex with a per-vertex width
-void setWidths(const vector<float>& w)  // Set per-vertex widths from a list
+StrokeMesh& setWidths(const vector<float>& w)  // Set per-vertex widths from a list
 StrokeMesh& setShape(const Path& polyline)  // Set the stroke shape from a Path
 StrokeMesh& setClosed(bool closed)  // Set whether the stroke forms a closed loop
 StrokeMesh& clear()  // Remove all vertices

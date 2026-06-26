@@ -193,7 +193,7 @@ public:
             if (ctx.getCurveMode() == CurveStyle::Mode::Tolerance) {
                 std::vector<Vec3> tmp;
                 tessellateCubicBezier(p0, cp1, cp2, to,
-                                      ctx.getCurveTolerance() / ctx.getCurrentScale(),
+                                      ctx.getCurveTolerance() / ctx.getScale(),
                                       tmp);
                 // tmp[0] == p0 — already at vertices_.back(), skip it.
                 for (size_t i = 1; i < tmp.size(); i++) vertices_.push_back(tmp[i]);
@@ -229,7 +229,7 @@ public:
             if (ctx.getCurveMode() == CurveStyle::Mode::Tolerance) {
                 std::vector<Vec3> tmp;
                 tessellateQuadBezier(p0, cp, to,
-                                     ctx.getCurveTolerance() / ctx.getCurrentScale(),
+                                     ctx.getCurveTolerance() / ctx.getScale(),
                                      tmp);
                 for (size_t i = 1; i < tmp.size(); i++) vertices_.push_back(tmp[i]);
                 return;
@@ -290,7 +290,7 @@ public:
                         p2.z - (p3.z - p1.z) / 6.0f};
                 std::vector<Vec3> tmp;
                 tessellateCubicBezier(p1, b1, b2, p2,
-                                      ctx.getCurveTolerance() / ctx.getCurrentScale(),
+                                      ctx.getCurveTolerance() / ctx.getScale(),
                                       tmp);
                 for (size_t i = 1; i < tmp.size(); i++) vertices_.push_back(tmp[i]);
                 return;

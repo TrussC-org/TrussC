@@ -10,7 +10,7 @@ namespace trussc {
 // ---------------------------------------------------------------------------
 // Rounded Rectangle (circular arc corners)
 // ---------------------------------------------------------------------------
-void RenderContext::drawRectRounded(Vec3 pos, Vec2 size, float radius) {
+void internal::RenderContext::drawRectRounded(Vec3 pos, Vec2 size, float radius) {
     float x = pos.x, y = pos.y;
     float w = size.x, h = size.y;
     (void)pos.z;  // Outline built via beginShape; z=0 plane.
@@ -67,7 +67,7 @@ void RenderContext::drawRectRounded(Vec3 pos, Vec2 size, float radius) {
 // ---------------------------------------------------------------------------
 // Squircle Rectangle (superellipse corners, curvature continuous)
 // ---------------------------------------------------------------------------
-void RenderContext::drawRectSquircle(Vec3 pos, Vec2 size, float radius) {
+void internal::RenderContext::drawRectSquircle(Vec3 pos, Vec2 size, float radius) {
     float x = pos.x, y = pos.y, z = pos.z;
     float w = size.x, h = size.y;
 
@@ -169,7 +169,7 @@ void RenderContext::drawRectSquircle(Vec3 pos, Vec2 size, float radius) {
 // ---------------------------------------------------------------------------
 // Bitmap string drawing (base version)
 // ---------------------------------------------------------------------------
-void RenderContext::drawBitmapString(const std::string& text, float x, float y, bool screenFixed) {
+void internal::RenderContext::drawBitmapString(const std::string& text, float x, float y, bool screenFixed) {
     if (text.empty()) return;
     ensureFontAtlasForText(text);
     if (!internal::fontAtlasInitialized) return;
@@ -179,7 +179,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
 
     if (screenFixed) {
         // Transform local position to world coordinates using current matrix
-        Mat4 currentMat = getCurrentMatrix();
+        Mat4 currentMat = getMatrix();
         float localX = x + offset.x;
         float localY = y + offset.y;
         float worldX = currentMat.m[0]*localX + currentMat.m[1]*localY + currentMat.m[3];
@@ -288,7 +288,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
 // ---------------------------------------------------------------------------
 // Bitmap string drawing (scale version)
 // ---------------------------------------------------------------------------
-void RenderContext::drawBitmapString(const std::string& text, float x, float y, float scale) {
+void internal::RenderContext::drawBitmapString(const std::string& text, float x, float y, float scale) {
     if (text.empty()) return;
     ensureFontAtlasForText(text);
     if (!internal::fontAtlasInitialized) return;
@@ -344,7 +344,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y, 
 // ---------------------------------------------------------------------------
 // Bitmap string drawing (Direction version)
 // ---------------------------------------------------------------------------
-void RenderContext::drawBitmapString(const std::string& text, float x, float y,
+void internal::RenderContext::drawBitmapString(const std::string& text, float x, float y,
                                       Direction h, Direction v, bool screenFixed) {
     if (text.empty()) return;
     ensureFontAtlasForText(text);
@@ -353,7 +353,7 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y,
     Vec2 offset = calcBitmapAlignOffset(text, h, v);
 
     if (screenFixed) {
-        Mat4 currentMat = getCurrentMatrix();
+        Mat4 currentMat = getMatrix();
         float localX = x + offset.x;
         float localY = y + offset.y;
         float worldX = currentMat.m[0]*localX + currentMat.m[1]*localY + currentMat.m[3];
@@ -460,9 +460,11 @@ void RenderContext::drawBitmapString(const std::string& text, float x, float y,
 // ---------------------------------------------------------------------------
 // Default context singleton (non-inline — see tcRenderContext.h comment)
 // ---------------------------------------------------------------------------
+namespace internal {
 RenderContext& getDefaultContext() {
     static RenderContext instance;
     return instance;
 }
+} // namespace internal
 
 } // namespace trussc

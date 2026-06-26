@@ -71,7 +71,7 @@ public:
         numMipLevels_ = mipmaps_
             ? 1 + (int)std::floor(std::log2((float)std::max(w, h)))
             : 1;
-        sg_pixel_format sgFormat = internal::toSokolFormat(format);
+        sg_pixel_format sgFormat = toSokolFormat(format);
 
         // MSAA case
         if (sampleCount_ > 1) {
@@ -425,7 +425,7 @@ private:
         auto& s = getShared(sampleCount, format);
         if (s.initialized) return;
 
-        sg_pixel_format sgFormat = internal::toSokolFormat(format);
+        sg_pixel_format sgFormat = toSokolFormat(format);
 
         // Create sgl context (match main context buffer sizes)
         sgl_context_desc_t ctx_desc = {};
@@ -475,7 +475,7 @@ private:
         auto& s = getSharedMip(format);
         if (s.initialized) return;
 
-        sg_pixel_format sgFormat = internal::toSokolFormat(format);
+        sg_pixel_format sgFormat = toSokolFormat(format);
 
         // Fullscreen quad (triangle strip). UV 0..1 across the quad so a
         // bilinear sample of the previous mip is enough to produce a 2x2
@@ -667,7 +667,7 @@ private:
         internal::loadPipeline(internal::activeFill2D());
 
         internal::currentFbo = this;
-        internal::currentFboColorFormat = internal::toSokolFormat(format_);
+        internal::currentFboColorFormat = toSokolFormat(format_);
         internal::currentFboSampleCount = sampleCount_;
         internal::fboClearColorFunc = internal::_fboClearColorHelper;
     }

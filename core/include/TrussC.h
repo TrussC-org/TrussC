@@ -1277,7 +1277,7 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     }
 
     // Convert local coordinates to world coordinates (including offset)
-    Mat4 currentMat = getCurrentMatrix();
+    Mat4 currentMat = getMatrix();
     float worldX = currentMat.m[0]*(x + offsetX) + currentMat.m[1]*(y + offsetY) + currentMat.m[3];
     float worldY = currentMat.m[4]*(x + offsetX) + currentMat.m[5]*(y + offsetY) + currentMat.m[7];
 

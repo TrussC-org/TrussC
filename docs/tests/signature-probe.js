@@ -90,16 +90,11 @@ function isTemplated(owner, ret, params) {
 // ---------------------------------------------------------------------------
 // 2. emit the probe .cpp + a line -> yaml-entry map
 // ---------------------------------------------------------------------------
-const lines = ['#include <TrussC.h>', 'using namespace std;', 'using namespace tc;', ''];
-const map = {};   // emitted line number (1-based) -> meta
+const probes = [];   // {meta, code} collected during traversal, assembled below
 const stat = { free: 0, method: 0, static: 0, typeMethod: 0, op: 0, freeOp: 0,
                skipAddon: 0, skipTpl: 0, skipNoRet: 0, skipParse: 0 };
 
-function emit(meta, code) {
-    const ln = lines.length + 1;            // 1-based line number of the code line
-    lines.push(`void p${ln}(){ ${code} } //@ ${meta.tag}`);
-    map[ln] = meta;
-}
+function emit(meta, code) { probes.push({ meta, code }); }
 
 function emitCallable(entry, owner, isStatic, isConst, symbolName, sec) {
     const ret = cleanRet(entry.return);
@@ -169,6 +164,39 @@ for (const t of (doc.types || [])) {
 }
 for (const e of (doc.enums || [])) emitOps(e, e.name);
 
+// Assemble the .cpp. Non-member probes (free functions, statics) are plain
+// functions. Non-static MEMBER probes (methods + member operators) are grouped
+// per owner inside `struct Probe_<Owner> : Owner { static void run(){…} }` and
+// reference `&Probe_<Owner>::name` — forming a pointer to a *protected* base
+// member is only allowed inside a derived class's own member, so this lets the
+// probe verify protected hooks (Mod::update, Node::callAfter, …) instead of
+// skipping them. The cast target still names the base type (Owner::*), which is
+// the real type of an inherited member pointer.
+const lines = ['#include <TrussC.h>', 'using namespace std;', 'using namespace tc;', ''];
+const map = {};
+const safe = (o) => o.replace(/\W/g, '_');
+const isMember = (p) => p.meta.member && !p.meta.isStatic;
+
+const memberByOwner = {};
+for (const p of probes) {
+    if (isMember(p)) (memberByOwner[p.meta.owner] ??= []).push(p);
+    else {
+        const ln = lines.length + 1;
+        lines.push(`void p${ln}(){ ${p.code} } //@ ${p.meta.tag}`);
+        map[ln] = p.meta;
+    }
+}
+for (const owner of Object.keys(memberByOwner)) {
+    const sn = safe(owner);
+    const re = new RegExp('&' + owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '::');
+    lines.push(`struct Probe_${sn} : ${owner} {`, `  static void run(){`);
+    for (const p of memberByOwner[owner]) {
+        const ln = lines.length + 1;
+        lines.push(`    { ${p.code.replace(re, `&Probe_${sn}::`)} } //@ ${p.meta.tag}`);
+        map[ln] = p.meta;
+    }
+    lines.push(`  }`, `};`);
+}
 const probeCpp = lines.join('\n') + '\n';
 
 // ---------------------------------------------------------------------------
@@ -177,7 +205,10 @@ const probeCpp = lines.join('\n') + '\n';
 function defaultFlags() {
     return ['-DSOKOL_METAL', '-DTRUSSC_BUILD_DATE="probe"',
             '-I', INCLUDE, '-I', path.join(INCLUDE, 'sokol'),
-            '-std=gnu++20', '-arch', 'arm64', '-mmacosx-version-min=14.0'];
+            '-std=gnu++20', '-arch', 'arm64', '-mmacosx-version-min=14.0',
+            // probing a documented-but-[[deprecated]] alias takes its address,
+            // which is a legitimate warning we don't want as probe noise.
+            '-Wno-deprecated-declarations'];
 }
 const cxx = process.env.CXX || 'c++';
 const extra = process.env.TC_PROBE_CXXFLAGS ? process.env.TC_PROBE_CXXFLAGS.split(/\s+/).filter(Boolean) : defaultFlags();

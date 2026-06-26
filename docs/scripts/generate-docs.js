@@ -61,12 +61,46 @@ function loadAPI() {
     return yaml.load(content);
 }
 
+// --- migration helpers --------------------------------------------------------
+// `params_simple` is retired: call-arg names are derived from the typed `params`.
+// The `sketch` flag is retired: TrussSketch availability = web-compatible && Lua-bindable.
+function splitParams(s) {
+    const o = []; let d = 0, c = '';
+    for (const ch of String(s || '')) {
+        if ('<(['.includes(ch)) d++; else if (')]>'.includes(ch)) d--;
+        if (ch === ',' && d === 0) { o.push(c); c = ''; } else c += ch;
+    }
+    if (c.trim()) o.push(c);
+    return o.map(x => x.trim()).filter(Boolean);
+}
+// "float x, const Vec2& v, int n = 4" -> "x, v, n"
+function simpleParams(params) {
+    return splitParams(params).map(p => {
+        p = p.replace(/=.*$/, '').trim();
+        if (p === 'void' || p === '') return null;
+        let m = p.match(/([A-Za-z_]\w*)\s*\[[^\]]*\]\s*$/);   // Type name[N]
+        if (m) return m[1];
+        m = p.match(/([A-Za-z_]\w*)\s*$/);                    // trailing identifier = the name
+        return m ? m[1] : null;
+    }).filter(Boolean).join(', ');
+}
+// web-compatible: no platform restriction (universal), or wasm explicitly listed.
+function isWeb(entry) {
+    const p = entry && entry.platforms;
+    if (!Array.isArray(p) || p.length === 0) return true;
+    return p.includes('wasm');
+}
+// TrussSketch availability = web-compatible AND Lua-bindable (`sketch` flag retired).
+function isSketchable(entry) {
+    return isWeb(entry) && (entry.lua !== false);
+}
+
 // Generate trusssketch-api.js
 function generateSketchAPI(api) {
     const categories = [];
 
     for (const cat of api.categories) {
-        const sketchFunctions = cat.functions.filter(fn => fn.sketch);
+        const sketchFunctions = cat.functions.filter(fn => isSketchable(fn));
         if (sketchFunctions.length === 0) continue;
 
         const functions = [];
@@ -76,7 +110,7 @@ function generateSketchAPI(api) {
                                     for (const sig of fn.signatures) {
                                         functions.push({
                                             name: fn.name,
-                                            params: sig.params_simple,
+                                            params: simpleParams(sig.params),
                                             params_typed: sig.params,
                                             return_type: fn.return !== undefined ? fn.return : null,
                                             desc: fn.description,
@@ -91,7 +125,7 @@ function generateSketchAPI(api) {
                 }
             
                 const constants = api.constants
-                    .filter(c => c.sketch)
+                    .filter(c => isSketchable(c))
                     .map(c => ({
                         name: c.name,
                         value: c.value,
@@ -102,7 +136,7 @@ function generateSketchAPI(api) {
                 const types = [];
                 if (api.types) {
                     for (const type of api.types) {
-                        if (!type.sketch) continue;
+                        if (!isSketchable(type)) continue;
 
                         const typeData = {
                             name: type.name,
@@ -317,7 +351,7 @@ function generateTrussCApiJS(api, lang, examplesMap = {}) {
             for (const sig of fn.signatures) {
                 const entry = {
                     name: fn.name,
-                    params: sig.params_simple || sig.params || '',
+                    params: simpleParams(sig.params),
                     params_typed: sig.params || '',
                     return_type: fn.return !== undefined ? fn.return : null,
                     desc: lang ? pickLang(fn.description, fn.description_ja, fn.description_ko, lang) : fn.description,
@@ -338,6 +372,8 @@ function generateTrussCApiJS(api, lang, examplesMap = {}) {
                 }
                 // Optional related symbols (language-independent list of names).
                 if (Array.isArray(fn.related) && fn.related.length) entry.related = fn.related;
+                // Optional deprecation marker ({reason, replacement?, url?}).
+                if (fn.deprecated) entry.deprecated = fn.deprecated;
                 // Optional symbol-level long-form details (en-first; ja/ko fall back to en).
                 if (fn.details) {
                     entry.details = lang ? pickLang(fn.details, fn.details_ja, fn.details_ko, lang) : fn.details;
@@ -403,7 +439,8 @@ function generateTrussCApiJS(api, lang, examplesMap = {}) {
                     return: m.return,
                     signatures: m.signatures.map(s => s.params || ''),
                     desc: lang ? pickLang(m.description, m.description_ja, m.description_ko, lang) : m.description,
-                    snippet: m.snippet
+                    snippet: m.snippet,
+                    ...(m.deprecated ? { deprecated: m.deprecated } : {})
                 }, m, lang));
             }
 
@@ -460,7 +497,10 @@ function generateTrussCApiJS(api, lang, examplesMap = {}) {
         keywords: api.keywords,
         types: types,
         enums: enums,
-        macros: macros
+        macros: macros,
+        // Named color palette (grouped). Language-independent; rendered as
+        // swatches by reference.js (not a flat constant list).
+        ...(api.colors ? { colors: api.colors } : {})
     };
 
     let js = `// TrussC API Definition${lang ? ` (${lang})` : ''}
@@ -507,7 +547,7 @@ function generateOfMappingJson(api) {
                 // Use of_signature_index to pick which overload to display (default: 0)
                 const sigIdx = fn.of_signature_index || 0;
                 const sig = fn.signatures[sigIdx] || fn.signatures[0];
-                const params = sig.params_simple || '';
+                const params = simpleParams(sig.params);
                 categoryGroups[displayId].mappings.push({
                     of: fn.of_equivalent,
                     tc: fn.name + (params ? `(${params})` : '()'),
@@ -606,7 +646,7 @@ function generateOfMarkdownSection(api) {
 
         for (const fn of cat.functions) {
             if (fn.of_equivalent) {
-                const params = fn.signatures[0]?.params_simple || '';
+                const params = simpleParams(fn.signatures[0] && fn.signatures[0].params);
                 categoryGroups[displayId].mappings.push({
                     of: fn.of_equivalent,
                     tc: fn.name + (params ? `(${params})` : '()'),
@@ -844,7 +884,7 @@ void draw() {
 
     // Generate API by category
     for (const cat of api.categories) {
-        const sketchFunctions = cat.functions.filter(fn => fn.sketch);
+        const sketchFunctions = cat.functions.filter(fn => isSketchable(fn));
         if (sketchFunctions.length === 0) continue;
 
         // Skip "Types - X" categories (handled in Types section)
@@ -880,7 +920,7 @@ void draw() {
 
     if (api.types) {
         for (const type of api.types) {
-            if (!type.sketch) continue;
+            if (!isSketchable(type)) continue;
 
             md += `### ${type.name}\n\n`;
             md += `${type.description}\n\n`;
@@ -943,7 +983,7 @@ void draw() {
 ## 7. Constants
 
 `;
-    for (const c of api.constants.filter(c => c.sketch)) {
+    for (const c of api.constants.filter(c => isSketchable(c))) {
         md += `- \`${c.name}\` = ${c.value} (${c.description})\n`;
     }
 

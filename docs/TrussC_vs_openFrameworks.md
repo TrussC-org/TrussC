@@ -287,7 +287,7 @@ Reference for oF users finding equivalent features in TrussC.
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
 | `ofClear / ofBackground` | `clear()` |  |
-| `ofSetColor` | `setColor(gray, [a])` | Range 0-1 instead of 0-255 |
+| `ofSetColor` | `setColor(gray, a)` | Range 0-1 instead of 0-255 |
 | `ofDrawRectangle` | `drawRect(x, y, w, h)` |  |
 | `ofDrawRectRounded` | `drawRectRounded(x, y, w, h, radius)` |  |
 | `ofDrawCircle` | `drawCircle(x, y, radius)` |  |
@@ -295,19 +295,17 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofDrawLine` | `drawLine(x1, y1, x2, y2)` |  |
 | `ofDrawTriangle` | `drawTriangle(x1, y1, x2, y2, x3, y3)` |  |
 | `ofDrawBox` | `drawBox(size)` |  |
-| `ofDrawSphere` | `drawSphere(radius, [resolution])` |  |
-| `ofDrawCone` | `drawCone(radius, height, [resolution])` |  |
+| `ofDrawSphere` | `drawSphere(radius, resolution)` |  |
+| `ofDrawCone` | `drawCone(radius, height, resolution)` |  |
 | `ofBeginShape` | `beginShape()` |  |
 | `ofVertex` | `vertex(x, y)` |  |
 | `ofEndShape` | `endShape(close)` |  |
-| `ofDrawBitmapString` | `drawBitmapString(text, x, y)` |  |
+| `ofDrawBitmapString` | `drawBitmapString(text, x, y, screenFixed)` |  |
 | `ofDrawBitmapStringHighlight` | `drawBitmapStringHighlight(text, x, y, background, foreground)` |  |
 | `ofSetFrameRate` | `setFps(fps)` |  |
 | `ofFill` | `fill()` |  |
 | `ofNoFill` | `noFill()` |  |
 | `ofSetLineWidth` | `setStrokeWeight(weight)` |  |
-| `ofPushStyle` | `pushStyle()` |  |
-| `ofPopStyle` | `popStyle()` |  |
 | `ofEnableBlendMode` | `setBlendMode(mode)` |  |
 | `ofPushStyle` | `pushStyle()` |  |
 | `ofPopStyle` | `popStyle()` |  |
@@ -355,7 +353,7 @@ Reference for oF users finding equivalent features in TrussC.
 
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
-| `ofSetupScreenPerspective` | `setupScreenPerspective([fovDeg], [nearDist], [farDist])` |  |
+| `ofSetupScreenPerspective` | `setupScreenPerspective(fovDeg, nearDist, farDist)` |  |
 | `ofSetupScreenOrtho` | `setupScreenOrtho()` |  |
 
 ### **Video**
@@ -393,13 +391,13 @@ Reference for oF users finding equivalent features in TrussC.
 
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
-| `ofLog` | `logNotice([module])` |  |
+| `ofLog` | `logNotice(module)` |  |
 | `ofToString` | `toString(value)` |  |
 | `ofToInt` | `toInt(str)` |  |
 | `ofToFloat` | `toFloat(str)` |  |
-| `ofSplitString` | `splitString(source, delimiter, [ignoreEmpty], [trim])` |  |
+| `ofSplitString` | `splitString(source, delimiter, ignoreEmpty, trim)` |  |
 | `ofJoinString` | `joinString(elements, delimiter)` |  |
-| `ofStringReplace` | `stringReplace(input, search, replace)` |  |
+| `ofStringReplace` | `stringReplace(input, searchStr, replaceStr)` |  |
 | `ofToLower` | `toLower(src)` |  |
 | `ofToUpper` | `toUpper(src)` |  |
 

@@ -227,7 +227,7 @@ inline void appendCatmullRomSegment_(const Vec3& p0, const Vec3& p1,
     if (ctx.getCurveMode() == CurveStyle::Mode::Tolerance) {
         std::vector<Vec3> tmp;
         tessellateCubicBezier(p1, b1, b2, p2,
-                              ctx.getCurveTolerance() / ctx.getCurrentScale(),
+                              ctx.getCurveTolerance() / ctx.getScale(),
                               tmp);
         for (auto& q : tmp) vertex(q.x, q.y, q.z);
     } else {

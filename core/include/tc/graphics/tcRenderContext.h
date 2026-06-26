@@ -64,6 +64,11 @@ namespace internal {
 // ---------------------------------------------------------------------------
 // RenderContext class
 // ---------------------------------------------------------------------------
+// RenderContext (and getDefaultContext) live in internal:: — the public drawing
+// API is the free functions that wrap them. A compat `using` below keeps the
+// names reachable from trussc:: for those wrappers and advanced users.
+namespace internal {
+
 class RenderContext {
 public:
     // -----------------------------------------------------------------------
@@ -160,7 +165,7 @@ public:
     //   Tolerance (default): pick segment count adaptively so the chord
     //     stays within `pixels` of the true curve, in screen space. Set
     //     once with setCurveTolerance(); zoom & scale() are accounted for
-    //     via getCurrentScale().
+    //     via getScale().
     //
     //   Resolution: use a fixed segment count regardless of radius. Useful
     //     for intentionally chunky styling, or to bound vertex cost on
@@ -189,7 +194,7 @@ public:
     // creative-coding use most rendering is 2D or orthographic, and
     // accounting for perspective would require per-pixel jacobian inversion
     // at every curve point (overkill).
-    float getCurrentScale() const {
+    float getScale() const {
         const auto& m = currentMatrix_.m;
         // Column 0 / column 1 lengths = effective x / y scale of the basis.
         float sx = std::sqrt(m[0]*m[0] + m[4]*m[4] + m[8]*m[8]);
@@ -197,6 +202,8 @@ public:
         float s = std::max(sx, sy);
         return s > 0.0f ? s : 1.0f;
     }
+    [[deprecated("Use getScale() instead. Will be removed in v1.0.0")]]
+    float getCurrentScale() const { return getScale(); }
 
     // Segment-count helpers. Used by drawCircle / drawEllipse / Path::arc /
     // drawRectRounded / drawArc — single source of truth so a future
@@ -206,7 +213,7 @@ public:
         if (style_.curve.mode == CurveStyle::Mode::Resolution) {
             return std::max(3, style_.curve.resolution);
         }
-        float effTol = style_.curve.tolerance / getCurrentScale();
+        float effTol = style_.curve.tolerance / getScale();
         return internal::segmentsForCircle(radius, effTol);
     }
     int decideArcSegments(float radius, float angleSpan) const {
@@ -215,7 +222,7 @@ public:
             int n = (int)std::ceil(full * std::abs(angleSpan) / TAU);
             return std::max(2, n);
         }
-        float effTol = style_.curve.tolerance / getCurrentScale();
+        float effTol = style_.curve.tolerance / getScale();
         return internal::segmentsForArc(radius, angleSpan, effTol);
     }
 
@@ -348,7 +355,10 @@ public:
         sgl_scale(sx, sy, sz);
     }
 
-    Mat4 getCurrentMatrix() const { return currentMatrix_; }
+    // Current accumulated model matrix.
+    Mat4 getMatrix() const { return currentMatrix_; }
+    [[deprecated("Use getMatrix() instead. Will be removed in v1.0.0")]]
+    Mat4 getCurrentMatrix() const { return getMatrix(); }
 
     void resetMatrix() {
         currentMatrix_ = Mat4::identity();
@@ -359,20 +369,23 @@ public:
         sgl_load_matrix(t.m);
     }
 
-    // Apply transformation matrix (multiplies with current matrix, like translate/rotate)
-    void setMatrix(const Mat4& mat) {
+    // Multiply the current matrix by `mat` (relative transform, like translate/rotate).
+    // NOTE: this was previously misnamed setMatrix(); that name now REPLACES.
+    void multMatrix(const Mat4& mat) {
         currentMatrix_ = currentMatrix_ * mat;
         // sokol_gl expects column-major, but Mat4 is row-major
         Mat4 t = mat.transposed();
         sgl_mult_matrix(t.m);
     }
 
-    // Load matrix directly (replaces current matrix - use with caution, may break camera setup)
-    void loadMatrix(const Mat4& mat) {
+    // Replace the current matrix with `mat` (absolute - use with caution, may break camera setup).
+    void setMatrix(const Mat4& mat) {
         currentMatrix_ = mat;
         Mat4 t = mat.transposed();
         sgl_load_matrix(t.m);
     }
+    [[deprecated("Use setMatrix() instead. Will be removed in v1.0.0")]]
+    void loadMatrix(const Mat4& mat) { setMatrix(mat); }
 
     // -----------------------------------------------------------------------
     // Basic shape drawing (uses VertexWriter for shader support)
@@ -632,7 +645,7 @@ public:
         std::vector<Vec3> pts;
         if (style_.curve.mode == CurveStyle::Mode::Tolerance) {
             tessellateCubicBezier(p0, p1, p2, p3,
-                                  style_.curve.tolerance / getCurrentScale(), pts);
+                                  style_.curve.tolerance / getScale(), pts);
         } else {
             sampleCubicUniform_(p0, p1, p2, p3,
                                 std::max(2, style_.curve.resolution), pts);
@@ -644,7 +657,7 @@ public:
         std::vector<Vec3> pts;
         if (style_.curve.mode == CurveStyle::Mode::Tolerance) {
             tessellateQuadBezier(p0, p1, p2,
-                                 style_.curve.tolerance / getCurrentScale(), pts);
+                                 style_.curve.tolerance / getScale(), pts);
         } else {
             sampleQuadUniform_(p0, p1, p2,
                                std::max(2, style_.curve.resolution), pts);
@@ -673,7 +686,7 @@ public:
         std::vector<Vec3> pts;
         if (style_.curve.mode == CurveStyle::Mode::Tolerance) {
             tessellateBezierN(controlPoints,
-                              style_.curve.tolerance / getCurrentScale(), pts);
+                              style_.curve.tolerance / getScale(), pts);
         } else {
             // Uniform t via repeated de Casteljau evaluation.
             int n = std::max(2, style_.curve.resolution);
@@ -969,5 +982,15 @@ private:
 // static instance — inline would give each module its own copy on Windows.
 // ---------------------------------------------------------------------------
 RenderContext& getDefaultContext();
+
+} // namespace internal
+
+// Compat: keep RenderContext / getDefaultContext reachable from trussc:: so the
+// free drawing wrappers (and any advanced user reaching for the context) keep
+// working; the canonical home is internal::. The RenderContext alias is
+// [[deprecated]] — the public drawing API is the free functions; reach the
+// context via internal::getDefaultContext() only if you truly need it.
+using RenderContext [[deprecated("RenderContext is internal; use the free drawing functions (setColor/drawRect/...). Reach the context via internal::getDefaultContext() if you really need it. Will be removed in v1.0.0")]] = internal::RenderContext;
+using internal::getDefaultContext;
 
 } // namespace trussc

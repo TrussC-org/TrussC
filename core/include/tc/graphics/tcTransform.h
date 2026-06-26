@@ -135,9 +135,18 @@ inline void scale(float sx, float sy, float sz) {
     getDefaultContext().scale(sx, sy, sz);
 }
 
-// Get current transformation matrix
+// Get the current transformation matrix
+inline Mat4 getMatrix() {
+    return getDefaultContext().getMatrix();
+}
+[[deprecated("Use getMatrix() instead. Will be removed in v1.0.0")]]
 inline Mat4 getCurrentMatrix() {
-    return getDefaultContext().getCurrentMatrix();
+    return getMatrix();
+}
+
+// Effective uniform scale of the current matrix (max of x/y basis lengths)
+inline float getScale() {
+    return getDefaultContext().getScale();
 }
 
 // Reset transformation matrix
@@ -145,9 +154,22 @@ inline void resetMatrix() {
     getDefaultContext().resetMatrix();
 }
 
-// Set transformation matrix directly
+// Multiply the current matrix by `mat` (relative transform, like translate/rotate)
+inline void multMatrix(const Mat4& mat) {
+    getDefaultContext().multMatrix(mat);
+}
+
+// Replace the current matrix with `mat` (absolute - use with caution, may break camera setup)
 inline void setMatrix(const Mat4& mat) {
     getDefaultContext().setMatrix(mat);
+}
+[[deprecated("Renamed to setMatrix() (it replaces the current matrix). Will be removed in v1.0.0")]]
+inline void loadMatrix(const Mat4& mat) {
+    getDefaultContext().setMatrix(mat);
+}
+[[deprecated("Use getScale() instead. Will be removed in v1.0.0")]]
+inline float getCurrentScale() {
+    return getDefaultContext().getScale();
 }
 
 } // namespace trussc

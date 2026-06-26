@@ -222,3 +222,29 @@ jobs:
              echo "Running quick build (AllFeaturesExample only)..."
              ./examples/build_all.py --web-only --test-only --verbose
           fi
+
+  # Verify docs/api-definition.yaml (the documented-API source of truth) against
+  # the real C++ headers. signature-probe (yaml -> C++) pointer-casts every
+  # documented symbol to its documented signature and -fsyntax-only compiles it,
+  # so the compiler checks exact params / return / const-ness; --strict fails the
+  # job on any mismatch. macOS runner: clang + Metal SDK match the probe's default
+  # compile flags. Fast (one syntax-only TU; no full build). coverage-audit
+  # (C++ -> yaml) runs report-only — its residual is a triage list, not a gate.
+  api-contract:
+    timeout-minutes: 20
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Install doc tooling deps
+        run: cd docs && npm ci
+
+      - name: signature-probe (yaml -> C++, strict)
+        run: node docs/tests/signature-probe.js --strict
+
+      - name: coverage-audit (C++ -> yaml, report-only)
+        run: node docs/tests/coverage-audit.js || true

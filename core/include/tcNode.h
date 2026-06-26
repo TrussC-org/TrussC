@@ -882,7 +882,7 @@ private:
         // and re-applied them as rotateX/Y/Z in call order — a different
         // composition order than the euler convention, which garbled every
         // compound rotation (single-axis rotations happened to survive).
-        setMatrix(getLocalMatrix());
+        multMatrix(getLocalMatrix());
 
         // Begin draw hook (for clipping, etc.)
         beginDraw();

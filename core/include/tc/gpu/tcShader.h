@@ -476,7 +476,7 @@ inline void internal::ShaderWriter::end() {
     Shader* shader = internal::getCurrentShader();
     if (shader && !vertices.empty()) {
         // Apply current transformation matrix to vertices
-        Mat4 mat = getCurrentMatrix();
+        Mat4 mat = getMatrix();
         for (auto& v : vertices) {
             Vec3 transformed = mat * Vec3(v.x, v.y, v.z);
             v.x = transformed.x;

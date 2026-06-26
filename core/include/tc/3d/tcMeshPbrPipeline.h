@@ -232,7 +232,7 @@ public:
         tc_pbr_vs_params_t vsp = {};
         // TrussC Mat4 is row-major; GLSL mat4 is column-major. Transpose the
         // storage before upload so shader can use the conventional `model * v`.
-        Mat4 modelT = getDefaultContext().getCurrentMatrix().transposed();
+        Mat4 modelT = getDefaultContext().getMatrix().transposed();
         Mat4 viewProj = internal::currentProjectionMatrix * internal::currentViewMatrix;
         Mat4 viewProjT = viewProj.transposed();
         // For now, normal matrix is just the model matrix. This is correct for
@@ -528,7 +528,7 @@ public:
 
         // Shadow VS uniforms: model + lightViewProj
         tc_shadow_shadow_vs_params_t svp = {};
-        Mat4 modelT = getDefaultContext().getCurrentMatrix().transposed();
+        Mat4 modelT = getDefaultContext().getMatrix().transposed();
         Mat4 lightVPT = shadowViewProj_.transposed();
         std::memcpy(svp.model, modelT.m, sizeof(svp.model));
         std::memcpy(svp.lightViewProj, lightVPT.m, sizeof(svp.lightViewProj));

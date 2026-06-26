@@ -79,7 +79,7 @@ tc::Mat4 QuadWarp::getMatrix() const {
     // Calculate 3x3 homography matrix
     tc::Mat3 h = tc::Mat3::getHomography(srcPoints, dstPoints);
 
-    // Convert to 4x4 (row-major, setMatrix handles column-major conversion)
+    // Convert to 4x4 (row-major, multMatrix handles column-major conversion)
     return tc::Mat4::fromHomography(h);
 }
 

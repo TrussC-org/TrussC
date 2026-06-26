@@ -46,7 +46,7 @@ void tcApp::draw() {
 
     // 1. Draw something warped
     pushMatrix();
-    setMatrix(warper_.getMatrix());
+    multMatrix(warper_.getMatrix());
 
     // Draw the FBO
     setColor(1.0f);

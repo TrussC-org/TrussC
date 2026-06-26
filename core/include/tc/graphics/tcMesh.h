@@ -242,6 +242,7 @@ public:
 
     std::vector<Vec2>& getTexCoords() { return texCoords_; }
     const std::vector<Vec2>& getTexCoords() const { return texCoords_; }
+    int getNumTexCoords() const { return static_cast<int>(texCoords_.size()); }
     bool hasTexCoords() const { return !texCoords_.empty(); }
     bool hasValidTexCoords() const {
         return hasTexCoords() && texCoords_.size() >= vertices_.size();
@@ -572,7 +573,7 @@ public:
         }
 
         // Get current transformation matrix
-        Mat4 modelMatrix = getDefaultContext().getCurrentMatrix();
+        Mat4 modelMatrix = getDefaultContext().getMatrix();
 
         const Material& baseMaterial = *internal::currentMaterial;
         bool useVertexColors = hasColors() && colors_.size() >= vertices_.size();
