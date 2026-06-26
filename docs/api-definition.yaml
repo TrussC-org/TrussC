@@ -470,7 +470,6 @@ categories:
         sketch: true
 
       - name: drawArc
-        self: RenderContext
         related:
           - appendArc
         keywords: ["pie","wedge","sector","partial circle","segment"]
@@ -1179,7 +1178,6 @@ categories:
         sketch: true
 
       - name: isFillEnabled
-        self: RenderContext
         const: true
         keywords: ["fill","solid","check fill"]
         return: "bool"
@@ -1203,7 +1201,6 @@ categories:
         sketch: true
 
       - name: setCurveTolerance
-        self: RenderContext
         related:
           - getCurveTolerance
           - setCurveResolution
@@ -1425,7 +1422,6 @@ categories:
         sketch: false
 
       - name: popStyle
-        self: RenderContext
         keywords: ["restore","state","stack","ofpopstyle"]
         return: "void"
         signatures:
@@ -1467,7 +1463,6 @@ categories:
     name_ko: "변환"
     functions:
       - name: translate
-        self: RenderContext
         related:
           - rotate
           - scale
@@ -1547,7 +1542,6 @@ categories:
         sketch: true
 
       - name: rotateY
-        self: RenderContext
         related:
           - rotateYDeg
         keywords: ["spin","yaw","y axis","rotation"]
@@ -1607,7 +1601,6 @@ categories:
         sketch: true
 
       - name: scale
-        self: RenderContext
         related:
           - translate
           - rotate
@@ -1678,7 +1671,6 @@ categories:
         sketch: true
 
       - name: resetMatrix
-        self: RenderContext
         related:
           - setMatrix
         keywords: ["identity","reset","clear transform"]
