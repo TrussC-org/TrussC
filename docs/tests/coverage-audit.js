@@ -185,6 +185,40 @@ const inExcludedType = (s) =>
     excludedTypeNames.has(s.owner) ||
     ((s.kind === 'type' || s.kind === 'typedef') && excludedTypeNames.has(s.name));
 
+// Individual FREE functions intentionally kept out of the curated reference
+// (e.g. ADL customization-point overloads). A map {funcName: reason} or a plain
+// list. Matches free functions / free vars by bare name (covers all overloads).
+const EXCLUDED_FUNCS_CFG = (api.coverage && api.coverage.excluded_funcs) || {};
+const excludedFuncNames = new Set(Array.isArray(EXCLUDED_FUNCS_CFG) ? EXCLUDED_FUNCS_CFG : Object.keys(EXCLUDED_FUNCS_CFG));
+const inExcludedFunc = (s) =>
+    !s.owner && (s.kind === 'func' || s.kind === 'var') && excludedFuncNames.has(s.name);
+
+// Functions/methods whose RETURN type starts with one of these prefixes are
+// raw interop surfaces (e.g. sokol sg_* handles) kept out of the curated user
+// reference. The return type is the part of the AST sig before the first '('.
+const EXCLUDED_RET_PREFIXES = (api.coverage && api.coverage.excluded_return_prefixes) || [];
+const sigReturn = (sig) => { const s = (sig || '').trim(); const i = s.indexOf('('); return (i < 0 ? s : s.slice(0, i)).trim(); };
+const inExcludedReturn = (s) =>
+    (s.kind === 'method' || s.kind === 'func') &&
+    EXCLUDED_RET_PREFIXES.some((p) => sigReturn(s.sig).startsWith(p));
+
+// Individual TYPE MEMBERS (methods/fields) of an otherwise-documented type that
+// are intentionally internal. A map {"Owner::name": reason}. Matches every
+// overload of that member name.
+const EXCLUDED_METHODS_CFG = (api.coverage && api.coverage.excluded_methods) || {};
+const excludedMemberKeys = new Set(Array.isArray(EXCLUDED_METHODS_CFG) ? EXCLUDED_METHODS_CFG : Object.keys(EXCLUDED_METHODS_CFG));
+const inExcludedMethod = (s) =>
+    (s.kind === 'method' || s.kind === 'field') && excludedMemberKeys.has((s.owner || '') + '::' + s.name);
+
+// A method/func whose signature references an excluded_type is itself an
+// internal surface (it can only be used by passing/receiving that internal
+// type), so exclude it too.
+const excludedTypeRefRe = excludedTypeNames.size
+    ? new RegExp('\\b(' + [...excludedTypeNames].join('|') + ')\\b')
+    : null;
+const inExcludedTypeRef = (s) =>
+    (s.kind === 'method' || s.kind === 'func') && !!s.sig && !!excludedTypeRefRe && excludedTypeRefRe.test(s.sig);
+
 const docFree = new Set();          // free function names
 const docMethod = new Set();        // "Owner::name"
 const docType = new Set();          // type / enum names
@@ -226,6 +260,8 @@ function isNoise(s) {
     if (s.kind === 'ctor' || s.kind === 'dtor') return true;
     if ((s.name || '').endsWith('_')) return true;          // trailing-underscore convention
     if (s.access && s.access !== 'public') return true;     // non-public members
+    if (s.name === 'reflectMembers') return true;           // TC_REFLECT-generated reflection visitor (not called directly)
+    if (/\binternal::/.test(s.sig || '')) return true;       // signature references an internal:: type => internal-facing API
     if (/tcReflect\.h|tcJsonReflect\.h/.test(s.file || '')) return true;  // reflection machinery
     return false;
 }
@@ -256,7 +292,7 @@ function documented(s) {
 const objs = splitTopLevel(astText);
 const all = enumerate(objs);
 const tc = all.filter((s) => isTc(s.file));
-const afterNs = tc.filter((s) => !inExcludedNs(s.ns) && !inExcludedType(s));
+const afterNs = tc.filter((s) => !inExcludedNs(s.ns) && !inExcludedType(s) && !inExcludedFunc(s) && !inExcludedReturn(s) && !inExcludedMethod(s) && !inExcludedTypeRef(s));
 const removedByNs = tc.length - afterNs.length;
 const candidates = afterNs.filter((s) => !isNoise(s));
 const residual = candidates.filter((s) => !documented(s));

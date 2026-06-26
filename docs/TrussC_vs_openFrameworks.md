@@ -355,6 +355,7 @@ Reference for oF users finding equivalent features in TrussC.
 |:---|:---|:---|
 | `ofSetupScreenPerspective` | `setupScreenPerspective(fovDeg, nearDist, farDist)` |  |
 | `ofSetupScreenOrtho` | `setupScreenOrtho()` |  |
+| `ofWorldToScreen` | `worldToScreen(worldPos)` |  |
 
 ### **Video**
 
