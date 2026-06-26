@@ -33,9 +33,13 @@ const warnings = [];
 // (Long-term this should be a `bindable: false` / lua-exclude flag in the YAML.)
 const DENYLIST = new Set([
     'runApp', 'runHeadlessApp',            // template entry points
-    // Sound is being restructured into types (ChipSoundNote props / AudioEngine
-    // events) upstream; these stale free-function entries move to Phase 2 then.
-    'audioOut', 'wave', 'hz', 'duration', 'volume', 'attack', 'decay', 'sustain', 'release', 'adsr',
+    // bitmapfont:: namespaced free functions — yaml records the bare name, so the
+    // unqualified call can't resolve. Proper fix: `lua: false` (or a namespace
+    // field) in the YAML; transitional skip until then.
+    'updateGlyph', 'registerGlyph', 'registerGlyphs', 'compile8x13', 'compile16x13',
+    // Type constructors mislabeled as free functions (Sol2 can't construct them
+    // this way) — should be a `types:` entry / `lua: false` in the YAML.
+    'RectNode',
 ]);
 
 // Names that exist in BOTH trussc:: and std:: — `using`-directives make them
@@ -67,7 +71,9 @@ const TYPE_WORDS = new Set([
 // is the trailing identifier (unless it's a bare type word like "unsigned int").
 function splitTypeName(token) {
     const t = token.trim();
-    const m = t.match(/^(.*\S)\s+([A-Za-z_]\w*)$/);
+    // Trailing identifier is the arg name; the type is everything before it. The
+    // boundary can be whitespace OR a pointer/ref glyph (e.g. "const uint8_t *newData").
+    const m = t.match(/^(.*?[^A-Za-z0-9_])([A-Za-z_]\w*)$/);
     if (m && !TYPE_WORDS.has(m[2])) return { type: m[1].trim(), name: m[2] };
     return { type: t, name: null };
 }
@@ -89,6 +95,11 @@ function buildLambdaVariants(paramsTyped) {
             tok = tok.slice(0, tok.indexOf('=')).trim();
         }
         const { type, name } = splitTypeName(tok);
+        // Sol2 can't bind a non-const lvalue reference (output param like `float&`):
+        // Lua args are values, so a temporary can't bind to `T&`. Skip the whole sig.
+        if (/&/.test(type) && !/&&/.test(type) && !/\bconst\b/.test(type)) {
+            return { error: `non-const reference (output) param: "${tok}"` };
+        }
         const argName = name || `a${i}`;            // synthesize when type-only
         callNames.push(argName);
         decls.push(name ? tok : `${type} ${argName}`);
