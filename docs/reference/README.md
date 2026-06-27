@@ -40,11 +40,13 @@ api-reference.toml  ──────────►  prose      (symbol-id →
 |-----------------|--------|
 | `emit-forai.js` | injects the C++ API index into `../FOR_AI_ASSISTANT.md` (documented-only, overloads collapsed, enum values, category-grouped). |
 | `emit-of.js`    | the openFrameworks↔TrussC migration guide → `trussc.org/generated/of-mapping.json` + `../TrussC_vs_openFrameworks.md` §5. Grouping/notes from `of-mapping-config.js`. |
+| `../scripts/emit-web.js` | the web reference data → `trussc.org/generated/trussc-api.js` (full public surface, same shape the site consumes). Still reads `api-definition.yaml` as a sidecar for aux data (macros / colors / operators / constructors / enum-value numbers). |
 
-The legacy `scripts/generate-docs.js` is being retired: FOR_AI + oF generation
-moved to the emitters above; it now only produces the two web-player JS files
-(`trussc-api.js`, `trusssketch-api.js`), pending the website consuming
-`reference-data.json` directly.
+The legacy `scripts/generate-docs.js` is **retired** (deleted): its FOR_AI / oF /
+of-mapping outputs moved to the emitters above, and `emit-web.js` replaced its
+`trussc-api.js`. `trusssketch-api.js` is no longer generated. The remaining goal
+is to move `emit-web.js`'s yaml sidecar data onto `reference-data.json` + small
+dedicated sources, so `api-definition.yaml` can be deleted.
 
 `api-reference.toml` is the **only** file humans edit. `reference-data.json` is
 **auto-generated — never edit it by hand** (gitignored). Regenerate:

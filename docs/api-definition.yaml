@@ -10,10 +10,12 @@
 # notes into docs/reference/api-reference.toml, keyed by symbol-id. The canonical
 # artifact is docs/reference/reference-data.json (structure from the C++ AST +
 # that prose). See docs/reference/README.md.
-#   - FOR_AI_ASSISTANT.md / of-mapping.json / TrussC_vs_openFrameworks.md are now
-#     emitted from reference-data.json (reference/emit-forai.js, emit-of.js).
-#   - generate-docs.js still builds only the two web-player JS files from here
-#     (trussc-api.js, trusssketch-api.js), pending the website's migration.
+#   - FOR_AI_ASSISTANT.md / of-mapping.json / TrussC_vs_openFrameworks.md and the
+#     web trussc-api.js are emitted from reference-data.json (reference/emit-*.js).
+#   - generate-docs.js is RETIRED. What still reads this file: emit-web.js (aux
+#     data — macros / colors / operators / constructors / enum-value numbers),
+#     mine.js (prose re-mining), gen-colors.js (writes the colors: section). The
+#     goal is to move those off too and delete this file.
 #   - CI gate: docs/reference/check.js (the signature-probe is retired — the AST
 #     is the structure now, so signatures can't drift).
 #
