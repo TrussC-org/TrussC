@@ -6605,6 +6605,11 @@ description.en = "Hard-clip all samples into the -1.0 .. 1.0 range."
 description.ja = "全サンプルを-1.0 .. 1.0の範囲にhard-clipする"
 description.ko = "모든 샘플을 -1.0 .. 1.0 범위로 hard-clip"
 
+["SoundBuffer::createAdtsHeader"]
+description.en = "Write a 7-byte ADTS header for one raw AAC frame into header (AAC-in-MOV container helper)."
+description.ja = "1つの生AACフレーム用に7バイトのADTSヘッダをheaderに書き込む(AAC-in-MOVコンテナ用ヘルパー)"
+description.ko = "하나의 raw AAC 프레임용 7바이트 ADTS 헤더를 header에 기록(AAC-in-MOV 컨테이너 헬퍼)"
+
 ["SoundBuffer::generateNoise"]
 description.en = "Fill the buffer with mono white noise."
 description.ja = "モノwhite noiseでバッファを埋める"
@@ -6639,6 +6644,11 @@ description.ko = "모노 square 파형으로 버퍼를 채움"
 description.en = "Fill the buffer with a mono triangle wave."
 description.ja = "モノtriangle波でバッファを埋める"
 description.ko = "모노 triangle 파형으로 버퍼를 채움"
+
+["SoundBuffer::getAdtsSampleRateIndex"]
+description.en = "ADTS sample-rate index for the given rate (AAC-in-MOV container helper)."
+description.ja = "指定レートに対するADTSサンプルレートインデックス(AAC-in-MOVコンテナ用ヘルパー)"
+description.ko = "지정 레이트에 대한 ADTS 샘플레이트 인덱스(AAC-in-MOV 컨테이너 헬퍼)"
 
 ["SoundBuffer::getDuration"]
 description.en = "Duration in seconds (numSamples / sampleRate)."

@@ -21009,7 +21009,7 @@ types:
         description_ja: "全サンプルを-1.0 .. 1.0の範囲にhard-clipする"
         description_ko: "모든 샘플을 -1.0 .. 1.0 범위로 hard-clip"
     static_methods:
-      - name: SoundBuffer_getAdtsSampleRateIndex
+      - name: getAdtsSampleRateIndex
         self: SoundBuffer
         return: "int"
         signatures:
@@ -21017,7 +21017,7 @@ types:
         description: "ADTS sample-rate index for the given rate (AAC-in-MOV container helper)."
         description_ja: "指定レートに対するADTSサンプルレートインデックス(AAC-in-MOVコンテナ用ヘルパー)"
         description_ko: "지정 레이트에 대한 ADTS 샘플레이트 인덱스(AAC-in-MOV 컨테이너 헬퍼)"
-      - name: SoundBuffer_createAdtsHeader
+      - name: createAdtsHeader
         self: SoundBuffer
         return: "void"
         signatures:

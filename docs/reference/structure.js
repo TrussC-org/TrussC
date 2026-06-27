@@ -120,7 +120,7 @@ function enumerate(objs) {
             } else if (m.kind === 'FieldDecl') {
                 syms.push({ kind: 'field', ns: nsPath, owner: rec.name, name: m.name, file: fileOf(m), access, flags: [], deprecated: deprecatedOf(m) });
             } else if (m.kind === 'EnumDecl' && m.name) {
-                syms.push({ kind: 'enum', ns: nsPath, owner: rec.name, name: m.name, file: fileOf(m), access, flags: ['nested'], members: enumMembersOf(m), deprecated: deprecatedOf(m) });
+                syms.push({ kind: 'enum', ns: nsPath, owner: rec.name, name: m.name, file: fileOf(m), access, flags: ['nested'], members: enumMembersOf(m), ann: annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
             } else if (m.kind === 'CXXRecordDecl' && m.name && access === 'public') {
                 walkRecord(m, nsPath, extraFlags);              // nested public type (e.g. Node::HitResult) — keyed by its bare name
             }
@@ -136,7 +136,7 @@ function enumerate(objs) {
                 syms.push({ kind: 'func', ns: p, owner: null, name: c.name, sig: c.type && c.type.qualType, params: paramsOf(c), file: fileOf(c),
                     flags: [/operator/.test(c.name || '') ? 'operator' : null].filter(Boolean), ann: annotationsOf(c, fileOf(c)), deprecated: deprecatedOf(c) });
             } else if (c.kind === 'CXXRecordDecl' && c.name) { walkRecord(c, p);
-            } else if (c.kind === 'EnumDecl' && c.name) { syms.push({ kind: 'enum', ns: p, owner: null, name: c.name, file: fileOf(c), flags: [], members: enumMembersOf(c), deprecated: deprecatedOf(c) });
+            } else if (c.kind === 'EnumDecl' && c.name) { syms.push({ kind: 'enum', ns: p, owner: null, name: c.name, file: fileOf(c), flags: [], members: enumMembersOf(c), ann: annotationsOf(c, fileOf(c)), deprecated: deprecatedOf(c) });
             } else if (c.kind === 'ClassTemplateDecl' && c.name) {
                 const rec = (c.inner || []).find(x => x.kind === 'CXXRecordDecl');
                 if (rec) { rec.name = c.name; walkRecord(rec, p, ['template'], tparamsOf(c)); }
