@@ -176,14 +176,18 @@ function mapOperators(src, owner) {
     }));
 }
 
-// Optional platform-support annotation, copied from the yaml entry.
-function attachPlatforms(entry, src) {
-    if (!src || !Array.isArray(src.platforms) || !src.platforms.length) return entry;
-    entry.platforms = src.platforms;
-    if (src.platformNote) {
-        entry.platformNote = src.platformNote;
-        if (src.platformNote_ja) entry.platformNote_ja = src.platformNote_ja;
-        if (src.platformNote_ko) entry.platformNote_ko = src.platformNote_ko;
+// Optional platform-support annotation: the platform LIST comes from the C++
+// source (TC_PLATFORMS, carried in reference-data.json as `ref.platforms`); any
+// authored note still comes from the yaml sidecar.
+function attachPlatforms(entry, ref, ym) {
+    // C++ TC_PLATFORMS (reference-data) wins; fall back to any legacy yaml platforms.
+    const plats = (ref && Array.isArray(ref.platforms) && ref.platforms.length) ? ref.platforms
+        : (ym && Array.isArray(ym.platforms) && ym.platforms.length ? ym.platforms : null);
+    if (plats) entry.platforms = plats;
+    if (ym && ym.platformNote) {
+        entry.platformNote = ym.platformNote;
+        if (ym.platformNote_ja) entry.platformNote_ja = ym.platformNote_ja;
+        if (ym.platformNote_ko) entry.platformNote_ko = ym.platformNote_ko;
     }
     return entry;
 }
@@ -319,7 +323,7 @@ function build(examplesMap) {
                     if (ym && ym.details_ko) entry.details_ko = ym.details_ko;
                 }
                 if (examplesMap[sym.name]) entry.examples = examplesMap[sym.name];
-                attachPlatforms(entry, ym);
+                attachPlatforms(entry, sym, ym);
                 functions.push(entry);
             }
         }
@@ -376,7 +380,7 @@ function build(examplesMap) {
         };
         const dep = mergeDeprecated(refId, ym);
         if (dep) out.deprecated = dep;
-        return attachPlatforms(out, ym);
+        return attachPlatforms(out, sym, ym);
     };
 
     const types = [];
@@ -388,7 +392,7 @@ function build(examplesMap) {
         const typeData = { name: typeName, desc, keywords: refKeywords(sym.id, ym), desc_ja, desc_ko };
         if (examplesMap['type:' + typeName]) typeData.examples = examplesMap['type:' + typeName];
         if (ym && Array.isArray(ym.related) && ym.related.length) typeData.related = ym.related;
-        attachPlatforms(typeData, ym);
+        attachPlatforms(typeData, sym, ym);
 
         // constructor: yaml-only (reference-data does not model constructors).
         if (ym && ym.constructor && ym.constructor.signatures) {
