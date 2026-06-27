@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
 // tcVideoGrabber.h - Webcam input
@@ -30,7 +31,7 @@ struct VideoDeviceInfo {
 // ---------------------------------------------------------------------------
 // VideoGrabber - Webcam input class (inherits HasTexture)
 // ---------------------------------------------------------------------------
-class VideoGrabber : public HasTexture {
+class TC_PLATFORMS("macos,windows,linux,ios,web") VideoGrabber : public HasTexture {
 public:
     VideoGrabber() = default;
     ~VideoGrabber() { close(); }

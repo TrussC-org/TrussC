@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 // tcNode.h declares its direct dependencies, included in dependency order
 // (foundation types first, then the headers that build on them) instead of
@@ -1303,19 +1304,19 @@ protected:
     // fine). Cancel them before the members the callback touches are destroyed
     // (e.g. in cleanup() / on mode change); ~Node cancels any leftovers and
     // waits for an in-flight callback to finish.
-    uint64_t callAfterAsync(double delay, std::function<void()> callback) {
+    TC_PLATFORMS("macos,windows,linux,android,ios") uint64_t callAfterAsync(double delay, std::function<void()> callback) {
         return internal::AsyncScheduler::get().after(asyncOwner(), delay, std::move(callback));
     }
 
-    uint64_t callEveryAsync(double interval, std::function<void()> callback) {
+    TC_PLATFORMS("macos,windows,linux,android,ios") uint64_t callEveryAsync(double interval, std::function<void()> callback) {
         return internal::AsyncScheduler::get().every(asyncOwner(), interval, std::move(callback));
     }
 
-    void cancelAsyncTimer(uint64_t id) {
+    TC_PLATFORMS("macos,windows,linux,android,ios") void cancelAsyncTimer(uint64_t id) {
         internal::AsyncScheduler::get().cancel(id);
     }
 
-    void cancelAllAsyncTimers() {
+    TC_PLATFORMS("macos,windows,linux,android,ios") void cancelAllAsyncTimers() {
         if (asyncOwner_) internal::AsyncScheduler::get().cancelOwner(asyncOwner_);
     }
 

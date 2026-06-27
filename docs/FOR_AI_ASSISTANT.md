@@ -748,7 +748,7 @@ whether a function / class exists before answering "does TrussC have X".
 
 <!-- API-INDEX-START -->
 
-_Auto-generated C++ API index from `reference-data.json` (structure from the C++ AST, prose from `api-reference.toml`). Documented symbols only — undocumented APIs are findable via the interactive reference: https://trussc.org/reference/. Overloads collapsed; `[+N]` = N more overloads; `[std]` = provided by std:: (available via `using namespace std`)._
+_Auto-generated C++ API index from `reference-data.json` (structure from the C++ AST, prose from `api-reference.toml`). Documented symbols only — undocumented APIs are findable via the interactive reference: https://trussc.org/reference/. Overloads collapsed; `[+N]` = N more overloads; `[std]` = provided by std:: (available via `using namespace std`); `[macos,ios,…]` = available only on those platforms (no marker = all platforms)._
 
 ### Lifecycle
 
@@ -876,10 +876,10 @@ void translate(Vec3 pos) [+2]  // Move origin
 ### Window & Input
 
 ```cpp
-void alertDialog(const std::string & title, const std::string & message)  // Show alert dialog with OK button
+void alertDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Show alert dialog with OK button
 void alertDialogAsync(const std::string & title, const std::string & message, std::function<void ()> callback = …)  // Show alert dialog asynchronously. Callback is called when dismissed
 void bindCursorImage(Cursor cursor, int width, int height, const unsigned char * pixels, int hotspotX = …, int hotspotY = …) [+1]  // Bind a custom image to a cursor slot (RGBA pixels or Image)
-bool confirmDialog(const std::string & title, const std::string & message)  // Show Yes/No confirmation dialog. Returns true if Yes clicked
+bool confirmDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Show Yes/No confirmation dialog. Returns true if Yes clicked
 void confirmDialogAsync(const std::string & title, const std::string & message, std::function<void (bool)> callback)  // Show Yes/No dialog asynchronously. Callback receives true if Yes clicked
 CoreEvents & events()  // Get the global CoreEvents hub holding all framework events (setup, update, draw, keyPressed, mousePressed, etc.); use events().eventName.listen(callback) to subscribe
 void exitApp()  // Immediately exit the application (cannot be cancelled)
@@ -906,10 +906,10 @@ bool isOverlayFocused()  // True when an overlay currently owns keyboard focus (
 bool isOverlayHovered()  // True when an overlay currently has the pointer over it (e.g. cursor over a tcxImGui panel); guard raw mouse input so clicks on UI panels are not also handled by the app
 bool isShiftPressed()  // True while either Shift key (left or right) is held
 bool isSuperPressed()  // True while either Super / Cmd / Win key (left or right) is held
-FileDialogResult loadDialog(const std::string & title = …, const std::string & message = …, const std::string & defaultPath = …, bool folderSelection = …)  // Show file open dialog. Returns FileDialogResult with filePath, fileName, success
+FileDialogResult loadDialog(const std::string & title = …, const std::string & message = …, const std::string & defaultPath = …, bool folderSelection = …) [macos,windows,linux,android]  // Show file open dialog. Returns FileDialogResult with filePath, fileName, success
 void loadDialogAsync(const std::string & title, const std::string & message, const std::string & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback)  // Show file open dialog asynchronously. Callback receives FileDialogResult
 void requestExitApp()  // Request application exit. Can be cancelled by listening to events().exitRequested and setting args.cancel = true
-FileDialogResult saveDialog(const std::string & title = …, const std::string & message = …, const std::string & defaultPath = …, const std::string & defaultName = …)  // Show file save dialog. Returns FileDialogResult with filePath, fileName, success
+FileDialogResult saveDialog(const std::string & title = …, const std::string & message = …, const std::string & defaultPath = …, const std::string & defaultName = …) [macos,windows,linux,android]  // Show file save dialog. Returns FileDialogResult with filePath, fileName, success
 void saveDialogAsync(const std::string & title, const std::string & message, const std::string & defaultPath, const std::string & defaultName, std::function<void (const FileDialogResult &)> callback)  // Show file save dialog asynchronously. Callback receives FileDialogResult
 void setCursor(Cursor cursor)  // Set the mouse cursor shape
 void setTouchAsMouse(bool enabled)  // Enable/disable touch events firing as mouse events (for Android/iOS)
@@ -946,22 +946,22 @@ void releaseSglBuffers()  // Release sokol_gl vertex/command buffers (auto re-al
 ### Platform
 
 ```cpp
-bool captureWindow(Pixels & outPixels)  // Capture the current window contents into a Pixels object. Returns true on success
-Vec3 getAccelerometer()  // Get accelerometer reading in g-force (1.0 = Earth gravity). Mobile only; desktop returns zero
-float getBatteryLevel()  // Get battery charge level (0.0-1.0), or -1 if unavailable (e.g. desktop without a battery)
-float getCompassHeading()  // Get compass heading in radians (0 = north, clockwise). Mobile only
-Quaternion getDeviceOrientation()  // Get the fused device attitude (accelerometer + gyroscope + magnetometer) as a quaternion. Mobile only
-Vec3 getGyroscope()  // Get gyroscope angular velocity in rad/s. Mobile only; desktop returns zero
-bool getImmersiveMode()  // Return whether immersive mode is currently enabled
-Location getLocation()  // Get the most recent GPS / WiFi location fix. Starts location updates on the first call
-float getSystemBrightness()  // Get screen brightness (0.0-1.0). iOS: linear. Android: gamma-corrected (perceptual). Desktop: returns -1 (not supported)
+bool captureWindow(Pixels & outPixels) [macos,windows,linux,ios,android]  // Capture the current window contents into a Pixels object. Returns true on success
+Vec3 getAccelerometer() [android,ios]  // Get accelerometer reading in g-force (1.0 = Earth gravity). Mobile only; desktop returns zero
+float getBatteryLevel() [macos,android,ios]  // Get battery charge level (0.0-1.0), or -1 if unavailable (e.g. desktop without a battery)
+float getCompassHeading() [android,ios]  // Get compass heading in radians (0 = north, clockwise). Mobile only
+Quaternion getDeviceOrientation() [android,ios]  // Get the fused device attitude (accelerometer + gyroscope + magnetometer) as a quaternion. Mobile only
+Vec3 getGyroscope() [android,ios]  // Get gyroscope angular velocity in rad/s. Mobile only; desktop returns zero
+bool getImmersiveMode() [android,ios]  // Return whether immersive mode is currently enabled
+Location getLocation() [macos,android,ios]  // Get the most recent GPS / WiFi location fix. Starts location updates on the first call
+float getSystemBrightness() [macos,android,ios]  // Get screen brightness (0.0-1.0). iOS: linear. Android: gamma-corrected (perceptual). Desktop: returns -1 (not supported)
 float getSystemVolume()  // Get system output volume (0.0-1.0)
-ThermalState getThermalState()  // Get the coarse-grained device thermal state (Nominal / Fair / Serious / Critical)
-float getThermalTemperature()  // Get device temperature in Celsius, or -1 if unavailable
-bool isBatteryCharging()  // Return true if the battery is currently charging
-bool isProximityClose()  // Return true when the proximity sensor detects a nearby object (e.g. phone held to the ear)
-void setImmersiveMode(bool enabled)  // Hide system UI for immersive fullscreen. Android: sticky immersive (status + navigation bars). iOS: hides status bar + home indicator. Desktop: no-op
-void setSystemBrightness(float brightness)  // Set screen brightness (0.0-1.0). Meaning of the value differs by platform (iOS linear, Android perceptual). Desktop: not supported
+ThermalState getThermalState() [macos,ios,android]  // Get the coarse-grained device thermal state (Nominal / Fair / Serious / Critical)
+float getThermalTemperature() [ios]  // Get device temperature in Celsius, or -1 if unavailable
+bool isBatteryCharging() [macos,android,ios]  // Return true if the battery is currently charging
+bool isProximityClose() [android,ios]  // Return true when the proximity sensor detects a nearby object (e.g. phone held to the ear)
+void setImmersiveMode(bool enabled) [android,ios]  // Hide system UI for immersive fullscreen. Android: sticky immersive (status + navigation bars). iOS: hides status bar + home indicator. Desktop: no-op
+void setSystemBrightness(float brightness) [macos,android,ios]  // Set screen brightness (0.0-1.0). Meaning of the value differs by platform (iOS linear, Android perceptual). Desktop: not supported
 void setSystemVolume(float volume)  // Set system output volume (0.0-1.0). iOS: not supported by the OS (logs a warning)
 ```
 
@@ -1090,8 +1090,8 @@ float getDisplayScaleFactor()  // Get the DPI scale of the main display (availab
 float getDpiScale()  // Get display DPI scale factor (e.g. 2.0 for Retina)
 int getFramebufferHeight()  // Get framebuffer height in pixels (window height * DPI scale)
 int getFramebufferWidth()  // Get framebuffer width in pixels (window width * DPI scale)
-bool getKeepScreenOn()  // Check whether keep-screen-on is currently enabled
-IVec2 getWindowPosition()  // Get window position in screen coordinates (top-left origin). macOS/Windows only; other platforms return (-1, -1)
+bool getKeepScreenOn() [macos,windows,android,ios]  // Check whether keep-screen-on is currently enabled
+IVec2 getWindowPosition() [macos,windows]  // Get window position in screen coordinates (top-left origin). macOS/Windows only; other platforms return (-1, -1)
 bool grabScreen(Pixels & outPixels)  // Capture current screen to Pixels
 bool isFullscreen()  // Check if window is fullscreen
 bool isRecording()  // Check whether a recording is in progress
@@ -1103,14 +1103,14 @@ bool saveScreenshot(const std::filesystem::path & path)  // Save a screenshot of
 void setClipboardString(const std::string & text)  // Copy text to clipboard
 void setFullscreen(bool full)  // Set fullscreen mode
 void setIndependentFps(float updateFps, float drawFps)  // Set independent update and draw frame rates
-void setKeepScreenOn(bool enabled)  // Prevent display sleep / auto-lock while the app is running. Supported: Android, iOS, macOS, Windows. Linux / Web: no-op
-void setOrientation(Orientation mask)  // Set allowed screen orientations (mobile). Values: Orientation::Portrait, Landscape, All
+void setKeepScreenOn(bool enabled) [macos,windows,android,ios]  // Prevent display sleep / auto-lock while the app is running. Supported: Android, iOS, macOS, Windows. Linux / Web: no-op
+void setOrientation(Orientation mask) [android,ios]  // Set allowed screen orientations (mobile). Values: Orientation::Portrait, Landscape, All
 void setWindowDecorated(bool decorated)  // Toggle the window's standard decorations (title bar, borders, buttons). false = borderless but still focusable and closable. Desktop only
-void setWindowPosition(int x, int y)  // Set window position in screen coordinates (top-left origin). macOS/Windows only; no-op on other platforms
+void setWindowPosition(int x, int y) [macos,windows]  // Set window position in screen coordinates (top-left origin). macOS/Windows only; no-op on other platforms
 void setWindowSize(int width, int height)  // Set window size
 void setWindowSizeLogical(int width, int height)  // Resize the window to the given logical size (logical pixels)
 void setWindowTitle(const std::string & title)  // Set window title
-bool startRecording(const std::string & path, const VideoRecordSettings & settings = …)  // Start recording the window to a video file (native encoder, no ffmpeg)
+bool startRecording(const std::string & path, const VideoRecordSettings & settings = …) [macos,windows,linux,android,ios]  // Start recording the window to a video file (native encoder, no ffmpeg)
 void stopRecording()  // Stop the current recording and finalize the file
 void toggleFullscreen()  // Toggle fullscreen mode
 ```
@@ -1206,7 +1206,7 @@ bool removeFile(const std::string & path)  // Remove file
 bool saveJson(const Json & j, const std::string & path, int indent = …)  // Write a Json object to a file. Relative paths are resolved via getDataPath. indent sets the pretty-print width (negative for compact). Returns true on success.
 bool saveTextFile(const std::string & path, const std::string & content)  // Save string to text file
 void setDataPathRoot(const std::string & path)  // Set the root directory used to resolve relative data paths. A relative path is resolved against the executable directory; an absolute path (starting with /) is used as-is. A trailing slash is added automatically.
-void setDataPathToResources()  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms.
+void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms.
 ```
 
 ### Sound
@@ -1229,8 +1229,8 @@ void shutdownAudio()  // Shut down the global AudioEngine and close the audio de
 ### Font
 
 ```cpp
-std::vector<std::string> listSystemFonts()  // Enumerate names of all fonts known to the OS
-std::string systemFontPath(const std::string & name)  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub.
+std::vector<std::string> listSystemFonts() [macos,windows,linux,ios]  // Enumerate names of all fonts known to the OS
+std::string systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub.
 ```
 
 ### Animation
@@ -1340,15 +1340,15 @@ const char * videoCodecName(VideoCodec c)  // Return a human-readable name for a
 ### Network
 
 ```cpp
-std::string getLocalIp()  // The most likely LAN address (skips loopback/down, IPv4 preferred). "" if none 
-std::vector<std::string> getLocalIps()  // Every non-loopback address (one per interface entry)
+std::string getLocalIp() [macos,windows,linux,android,ios]  // The most likely LAN address (skips loopback/down, IPv4 preferred). "" if none 
+std::vector<std::string> getLocalIps() [macos,windows,linux,android,ios]  // Every non-loopback address (one per interface entry)
 std::string getOui(const std::string & mac)  // The OUI (first 3 bytes) of a MAC, uppercase "A4:83:E7". "" if unparseable 
 bool isLinkLocal(const std::string & addr)  // True if addr is link-local (169.254/16 or fe80::/10)
 bool isLocallyAdministered(const std::string & mac)  // True if the MAC's locally-administered bit is set (randomized/virtual MAC)
 bool isLoopback(const std::string & addr)  // True if addr is a loopback address (127.0.0.0/8 or ::1)
 bool isPrivate(const std::string & addr)  // True if addr is a private IPv4 (10/8, 172.16/12, 192.168/16)
-std::vector<NetworkInterface> listNetworkInterfaces()  // List all network interface address entries (IPv4/IPv6, loopback, up or down)
-void printNetworkInterfaces()  // Log the interface list (one line per entry)
+std::vector<NetworkInterface> listNetworkInterfaces() [macos,windows,linux,android,ios]  // List all network interface address entries (IPv4/IPv6, loopback, up or down)
+void printNetworkInterfaces() [macos,windows,linux,android,ios]  // Log the interface list (one line per entry)
 bool sameSubnet(const std::string & a, const std::string & b, const std::string & netmask)  // True if IPv4 a and b are on the same subnet under netmask
 ```
 
@@ -1699,8 +1699,8 @@ TextureFormat Fbo::getTextureFormat() const  // Get the FBO's color texture form
 int Fbo::getWidth() const  // Get width
 bool Fbo::isActive() const  // Check if currently rendering to FBO
 bool Fbo::isAllocated() const  // Check if allocated
-bool Fbo::readPixels(unsigned char * pixels) const  // Read FBO contents into a CPU buffer (8-bit per channel)
-bool Fbo::readPixelsFloat(float * pixels) const  // Read FBO contents into a CPU buffer (32-bit float per channel)
+bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android]  // Read FBO contents into a CPU buffer (8-bit per channel)
+bool Fbo::readPixelsFloat(float * pixels) const [macos,windows,linux,android]  // Read FBO contents into a CPU buffer (32-bit float per channel)
 bool Fbo::save(const fs::path & path) const  // Save FBO contents to file
 ```
 
@@ -2183,12 +2183,12 @@ const std::string & NetworkInterface::getNetmask() const  // Subnet mask
 ```cpp
 void Node::addChild(Ptr child, bool keepGlobalPosition = …)  // Add a child node (C++ only)
 uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Run callback once after delay seconds. Fired from the update loop (frame-quantized). Returns a timer id.
-uint64_t Node::callAfterAsync(double delay, std::function<void ()> callback)  // Like callAfter, but fired by a precise background scheduler thread (no frame jitter). The callback runs OFF the main thread: guard shared state with a mutex, never draw from it, and don't cancel while holding that mutex. Native only (uses a real thread). Returns a timer id.
+uint64_t Node::callAfterAsync(double delay, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callAfter, but fired by a precise background scheduler thread (no frame jitter). The callback runs OFF the main thread: guard shared state with a mutex, never draw from it, and don't cancel while holding that mutex. Native only (uses a real thread). Returns a timer id.
 uint64_t Node::callEvery(double interval, std::function<void ()> callback)  // Run callback repeatedly every interval seconds. Fired from the update loop (frame-quantized). Returns a timer id.
-uint64_t Node::callEveryAsync(double interval, std::function<void ()> callback)  // Like callEvery, but fired by a precise background scheduler thread with no drift (reschedules at absolute times). Ideal for sequencer clocks and LED/MIDI output timing. Same threading rules as callAfterAsync. Native only. Returns a timer id.
-void Node::cancelAllAsyncTimers()  // Cancel all async timers on this node (e.g. on mode change). Waits out any in-flight callback. Call it WITHOUT holding the callback's mutex to avoid a deadlock.
+uint64_t Node::callEveryAsync(double interval, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callEvery, but fired by a precise background scheduler thread with no drift (reschedules at absolute times). Ideal for sequencer clocks and LED/MIDI output timing. Same threading rules as callAfterAsync. Native only. Returns a timer id.
+void Node::cancelAllAsyncTimers() [macos,windows,linux,android,ios]  // Cancel all async timers on this node (e.g. on mode change). Waits out any in-flight callback. Call it WITHOUT holding the callback's mutex to avoid a deadlock.
 void Node::cancelAllTimers()  // Cancel all frame timers on this node.
-void Node::cancelAsyncTimer(uint64_t id)  // Cancel an async timer by id. Blocks until its callback finishes if it is running now (unless called from inside the callback). Do not call while holding the mutex the callback uses.
+void Node::cancelAsyncTimer(uint64_t id) [macos,windows,linux,android,ios]  // Cancel an async timer by id. Blocks until its callback finishes if it is running now (unless called from inside the callback). Do not call while holding the mutex the callback uses.
 void Node::cancelTimer(uint64_t id)  // Cancel a frame timer (callAfter/callEvery) by id.
 void Node::cleanup()  // Called once before exit (optional user callback for cleanup)
 void Node::destroy()  // Mark node for deferred removal from scene graph (C++ only)
@@ -2546,7 +2546,7 @@ bool Sound::isPlaying() const  // True while playing (false if stopped, paused, 
 bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
 bool Sound::load(const std::string & path)  // Load sound file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
 void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
-bool Sound::loadStream(const std::string & path, int maxPolyphony = …)  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
+bool Sound::loadStream(const std::string & path, int maxPolyphony = …) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
 void Sound::loadTestTone(float frequency = …, float duration = …)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.
 void Sound::pause()  // Pause playback (resume() to continue)
 void Sound::play()  // Play sound
@@ -2567,6 +2567,7 @@ void Sound::stop()  // Stop sound
 ```cpp
 void SoundBuffer::applyADSR(float attack, float decay, float sustainLevel, float release)  // Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1).
 void SoundBuffer::clip()  // Hard-clip all samples into the -1.0 .. 1.0 range.
+void SoundBuffer::createAdtsHeader(uint8_t * header, int frameLength, int sampleRate, int channels, int profile = …)  // Write a 7-byte ADTS header for one raw AAC frame into header (AAC-in-MOV container helper).
 void SoundBuffer::generateNoise(float duration, float volume = …, int sr = …)  // Fill the buffer with mono white noise.
 void SoundBuffer::generatePinkNoise(float duration, float volume = …, int sr = …)  // Fill the buffer with mono pink noise (1/f spectrum, Paul Kellet's method).
 void SoundBuffer::generateSawtoothWave(float frequency, float duration, float volume = …, int sr = …)  // Fill the buffer with a mono sawtooth wave.
@@ -2574,10 +2575,11 @@ void SoundBuffer::generateSilence(float duration, int sr = …)  // Fill the buf
 void SoundBuffer::generateSineWave(float frequency, float duration, float volume = …, int sr = …)  // Fill the buffer with a mono sine wave of the given frequency (Hz) and duration (seconds).
 void SoundBuffer::generateSquareWave(float frequency, float duration, float volume = …, int sr = …)  // Fill the buffer with a mono square wave.
 void SoundBuffer::generateTriangleWave(float frequency, float duration, float volume = …, int sr = …)  // Fill the buffer with a mono triangle wave.
+int SoundBuffer::getAdtsSampleRateIndex(int sampleRate)  // ADTS sample-rate index for the given rate (AAC-in-MOV container helper).
 float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sampleRate).
 bool SoundBuffer::load(const std::string & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
-bool SoundBuffer::loadAac(const std::string & path)  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
-bool SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize)  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
+bool SoundBuffer::loadAac(const std::string & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
+bool SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios,web]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
 bool SoundBuffer::loadFlac(const std::string & path)  // Decode a FLAC file into PCM.
 bool SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
 bool SoundBuffer::loadMp3(const std::string & path)  // Decode an MP3 file into PCM.
@@ -2984,10 +2986,10 @@ void VideoGrabber::update()  // Poll for a new frame and upload it to the textur
 void VideoPlayer::close()  // Close the video and release resources
 void VideoPlayer::draw(float x, float y) const [+1]  // Draw the current video frame at (x, y), optionally scaled to w x h
 bool VideoPlayer::extractFrame(const std::string & path, Pixels & outPixels, float timeSec = …, float * outDuration = …)  // Extract a single frame from a video file without loading the full video. Useful for thumbnails
-int VideoPlayer::getAudioChannels() const  // Number of audio channels (0 if no audio)
-uint32_t VideoPlayer::getAudioCodec() const  // FourCC of the audio codec in the loaded video (0 if none)
-std::vector<uint8_t> VideoPlayer::getAudioData() const  // Raw decoded audio data for the loaded video
-int VideoPlayer::getAudioSampleRate() const  // Audio sample rate in Hz (0 if no audio)
+int VideoPlayer::getAudioChannels() const [macos,windows,linux,ios]  // Number of audio channels (0 if no audio)
+uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC of the audio codec in the loaded video (0 if none)
+std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video
+int VideoPlayer::getAudioSampleRate() const [macos,windows,linux,ios]  // Audio sample rate in Hz (0 if no audio)
 int VideoPlayer::getCurrentFrame() const  // Get current frame number
 float VideoPlayer::getDuration() const  // Get total duration in seconds
 float VideoPlayer::getGammaCorrection() const  // Get current gamma correction value

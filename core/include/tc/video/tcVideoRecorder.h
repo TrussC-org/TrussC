@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
 // tcVideoRecorder.h - Native video recording (H.264 / HEVC / ProRes -> file)
@@ -89,7 +90,7 @@ struct VideoRecordSettings {
 // ---------------------------------------------------------------------------
 // VideoWriter - low-level encoder you feed frames to.
 // ---------------------------------------------------------------------------
-class VideoWriter {
+class TC_PLATFORMS("macos,windows,linux,android,ios") VideoWriter {
 public:
     VideoWriter() = default;
     ~VideoWriter() { close(); }
@@ -270,7 +271,7 @@ private:
 // ---------------------------------------------------------------------------
 // ScreenRecorder - live capture of the window (or an Fbo) at wall-clock speed.
 // ---------------------------------------------------------------------------
-class ScreenRecorder {
+class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
 public:
     ScreenRecorder() = default;
     ~ScreenRecorder() { stop(); }
@@ -415,7 +416,7 @@ namespace internal {
 
 // Start recording the whole window to a video file. `path` is required;
 // relative paths resolve via getDataPath(). Auto-finalizes on app exit.
-inline bool startRecording(const std::string& path,
+TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const std::string& path,
                            const VideoRecordSettings& settings = {}) {
     return internal::globalScreenRecorder().start(path, settings);
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
 // tcNetworkInterface.h - Network interface enumeration
@@ -52,19 +53,19 @@ struct NetworkInterface {
 
 // All address entries of all interfaces (IPv4 + IPv6 + loopback, up or down).
 // Filter with the struct flags / the helpers below for a specific need.
-std::vector<NetworkInterface> listNetworkInterfaces();
+TC_PLATFORMS("macos,windows,linux,android,ios") std::vector<NetworkInterface> listNetworkInterfaces();
 
 // Log the interface list via logNotice() (one line per entry).
-void printNetworkInterfaces();
+TC_PLATFORMS("macos,windows,linux,android,ios") void printNetworkInterfaces();
 
 // --- Convenience ---
 
 // The single "most likely LAN address": skips loopback / down, IPv4 preferred,
 // private ranges preferred. Returns "" if nothing suitable was found.
-std::string getLocalIp();
+TC_PLATFORMS("macos,windows,linux,android,ios") std::string getLocalIp();
 
 // Every non-loopback address (one per NIC entry). Useful on multi-homed hosts.
-std::vector<std::string> getLocalIps();
+TC_PLATFORMS("macos,windows,linux,android,ios") std::vector<std::string> getLocalIps();
 
 // --- Address classification helpers (string in, no socket required) ---
 

@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 #include <string>
 #include <sstream>
@@ -79,7 +80,7 @@ inline std::string getDataPath(const std::string& filename) {
 // For macOS bundle distribution: Set data path to Resources folder
 // Will reference xxx.app/Contents/Resources/data/
 // No-op on non-macOS platforms
-inline void setDataPathToResources() {
+TC_PLATFORMS("macos,ios") inline void setDataPathToResources() {
     #ifdef __APPLE__
     setDataPathRoot("../Resources/data/");
     #endif

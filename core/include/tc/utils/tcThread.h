@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 #include <thread>
 #include <mutex>
@@ -34,7 +35,7 @@ namespace trussc {
 //
 // ---------------------------------------------------------------------------
 
-class Thread {
+class TC_PLATFORMS("macos,windows,linux,android,ios") Thread {
 public:
     Thread() : threadRunning_(false) {}
 

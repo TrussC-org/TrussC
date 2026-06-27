@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
 // tcVideoPlayer.h - Video playback
@@ -30,7 +31,7 @@ namespace internal { class VideoPlayerPlatformAccess; }  // friend, defined belo
 // ---------------------------------------------------------------------------
 // VideoPlayer - Standard video playback (RGBA output)
 // ---------------------------------------------------------------------------
-class VideoPlayer : public VideoPlayerBase {
+class TC_PLATFORMS("macos,windows,linux,ios,web") VideoPlayer : public VideoPlayerBase {
 public:
     VideoPlayer() = default;
     ~VideoPlayer() { close(); }
@@ -259,10 +260,10 @@ public:
     // =========================================================================
 
     bool hasAudio() const override { return hasAudioPlatform(); }
-    uint32_t getAudioCodec() const override { return getAudioCodecPlatform(); }
-    std::vector<uint8_t> getAudioData() const override { return getAudioDataPlatform(); }
-    int getAudioSampleRate() const override { return getAudioSampleRatePlatform(); }
-    int getAudioChannels() const override { return getAudioChannelsPlatform(); }
+    TC_PLATFORMS("macos,windows,linux,ios") uint32_t getAudioCodec() const override { return getAudioCodecPlatform(); }
+    TC_PLATFORMS("macos,windows,linux,ios") std::vector<uint8_t> getAudioData() const override { return getAudioDataPlatform(); }
+    TC_PLATFORMS("macos,windows,linux,ios") int getAudioSampleRate() const override { return getAudioSampleRatePlatform(); }
+    TC_PLATFORMS("macos,windows,linux,ios") int getAudioChannels() const override { return getAudioChannelsPlatform(); }
 
     // =========================================================================
     // Hardware acceleration info

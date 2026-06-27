@@ -2,6 +2,7 @@
 // tcTcpClient.h - TCP client socket
 // =============================================================================
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 #include <string>
 #include <vector>
@@ -69,7 +70,7 @@ struct TcpErrorEventArgs {
 // =============================================================================
 // TcpClient class (base class - parent of TlsClient)
 // =============================================================================
-class TcpClient {
+class TC_PLATFORMS("macos,windows,linux,android,ios") TcpClient {
 public:
     // -------------------------------------------------------------------------
     // Events

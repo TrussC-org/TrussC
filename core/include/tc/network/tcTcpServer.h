@@ -2,6 +2,7 @@
 // tcTcpServer.h - TCP server socket
 // =============================================================================
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 #include <string>
 #include <vector>
@@ -86,7 +87,7 @@ struct TcpServerErrorEventArgs {
 // =============================================================================
 // TcpServer class
 // =============================================================================
-class TcpServer {
+class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
 public:
     // -------------------------------------------------------------------------
     // Events

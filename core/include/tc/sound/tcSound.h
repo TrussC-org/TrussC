@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
 // TrussC Sound
@@ -101,11 +102,11 @@ public:
 
     // Load AAC/M4A file (platform-specific implementation)
     // Returns false on unsupported platforms
-    bool loadAac(const std::string& path);
+    TC_PLATFORMS("macos,windows,linux,ios,web") bool loadAac(const std::string& path);
 
     // Load AAC data from memory (platform-specific implementation)
     // Returns false on unsupported platforms
-    bool loadAacFromMemory(const void* data, size_t dataSize);
+    TC_PLATFORMS("macos,windows,linux,ios,web") bool loadAacFromMemory(const void* data, size_t dataSize);
 
     // -------------------------------------------------------------------------
     // ADTS header utilities (for raw AAC from MOV containers)
@@ -1096,7 +1097,7 @@ public:
     // user apps portable we fall back to eager load() and log a warning so
     // the developer can branch explicitly with isStreaming() / #ifdef
     // __EMSCRIPTEN__ if they need to know.
-    bool loadStream(const std::string& path, int maxPolyphony = 1) {
+    TC_PLATFORMS("macos,windows,linux,android,ios") bool loadStream(const std::string& path, int maxPolyphony = 1) {
         AudioEngine::getInstance().init();
 #ifdef __EMSCRIPTEN__
         (void)maxPolyphony;

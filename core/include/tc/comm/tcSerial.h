@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
 // TrussC Serial Communication
@@ -84,7 +85,7 @@ namespace androidserial {
 // Serial Communication Class
 // ---------------------------------------------------------------------------
 
-class Serial {
+class TC_PLATFORMS("macos,windows,linux,android") Serial {
 public:
 #if defined(_WIN32)
     Serial() : handle_(INVALID_HANDLE_VALUE), initialized_(false) {}

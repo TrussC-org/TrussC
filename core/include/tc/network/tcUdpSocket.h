@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
 // tcUdpSocket.h - UDP socket
@@ -47,7 +48,7 @@ struct UdpErrorEventArgs {
 // ---------------------------------------------------------------------------
 // UdpSocket - UDP socket class
 // ---------------------------------------------------------------------------
-class UdpSocket {
+class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
 public:
     // Events
     Event<UdpReceiveEventArgs> onReceive;   // On data receive

@@ -84,22 +84,34 @@ function enumMembersOf(en) {
 // TC_* annotations on a decl. Clang's JSON AST omits the annotate STRING, so we
 // recover it from the source via each AnnotateAttr's range. (file = the decl's
 // source file; same file as the attribute, which sits just before the decl.)
-const _srcCache = {};
-const _readSrc = (f) => { try { return f in _srcCache ? _srcCache[f] : (_srcCache[f] = fs.readFileSync(f, 'utf8')); } catch (e) { return (_srcCache[f] = ''); } };
+const _lineCache = {};
+const _lines = (f) => { try { return f in _lineCache ? _lineCache[f] : (_lineCache[f] = fs.readFileSync(f, 'utf8').split('\n')); } catch (e) { return (_lineCache[f] = []); } };
 const _csv = (s) => s.split(',').map(x => x.trim()).filter(Boolean);
 function annotationsOf(node, file) {
     const out = {};
     if (!file) return out;
+    const lines = _lines(file);
     for (const a of (node.inner || [])) {
         if (a.kind !== 'AnnotateAttr' || !a.range || !a.range.begin) continue;
-        const beg = a.range.begin;                               // direct offset (raw attr) OR expansionLoc (macro use)
-        const off = beg.offset != null ? beg.offset : (beg.expansionLoc && beg.expansionLoc.offset);
-        if (off == null) continue;
-        const win = _readSrc(file).slice(off, off + 240);        // read the source spelling forward
-        let m;
-        if (/^\s*TC_INTERNAL\b/.test(win) || /annotate\(\s*"tc:internal"/.test(win)) out.internal = true;
-        else if (m = win.match(/^\s*TC_PLATFORMS\(\s*"([^"]*)"/) || win.match(/annotate\(\s*"tc:platforms:([^"]*)"/)) out.platforms = _csv(m[1]);
-        else if (m = win.match(/^\s*TC_LUA_BIND\(\s*"([^"]*)"/) || win.match(/annotate\(\s*"tc:lua_bind:([^"]*)"/)) out.lua_bind = _csv(m[1]);
+        // clang's JSON AST omits the annotate string AND its offset is unreliable
+        // (lands anywhere in the macro token), so recover the spelling by LINE:
+        // expansionLoc.line is the line the TC_* macro was written on.
+        const beg = a.range.begin;
+        const loc = beg.expansionLoc || beg;
+        const ln = loc.line;
+        if (!ln) continue;
+        const text = (lines[ln - 1] || '') + ' ' + (lines[ln] || '');   // macro line (+next, in case the decl wraps)
+        let m = text.match(/\bTC_(INTERNAL|PLATFORMS|LUA_BIND)\b(?:\(\s*"([^"]*)")?/);
+        if (m) {
+            if (m[1] === 'INTERNAL') out.internal = true;
+            else if (m[1] === 'PLATFORMS') out.platforms = _csv(m[2] || '');
+            else if (m[1] === 'LUA_BIND') out.lua_bind = _csv(m[2] || '');
+        } else if ((m = text.match(/clang::annotate\(\s*"tc:([^"]*)"/))) {
+            const s = m[1];
+            if (s === 'internal') out.internal = true;
+            else if (s.startsWith('platforms:')) out.platforms = _csv(s.slice(10));
+            else if (s.startsWith('lua_bind:')) out.lua_bind = _csv(s.slice(9));
+        }
     }
     return out;
 }

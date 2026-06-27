@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
 // File dialog
@@ -42,7 +43,7 @@ struct FileDialogResult {
 // message: Body text
 // -----------------------------------------------------------------------------
 TC_SYNC_DIALOG_UNAVAILABLE
-void alertDialog(const std::string& title, const std::string& message);
+TC_PLATFORMS("macos,windows,linux,android,web") void alertDialog(const std::string& title, const std::string& message);
 
 void alertDialogAsync(const std::string& title,
                       const std::string& message,
@@ -53,7 +54,7 @@ void alertDialogAsync(const std::string& title,
 // Returns true if user clicked Yes
 // -----------------------------------------------------------------------------
 TC_SYNC_DIALOG_UNAVAILABLE
-bool confirmDialog(const std::string& title, const std::string& message);
+TC_PLATFORMS("macos,windows,linux,android,web") bool confirmDialog(const std::string& title, const std::string& message);
 
 void confirmDialogAsync(const std::string& title,
                         const std::string& message,
@@ -64,7 +65,7 @@ void confirmDialogAsync(const std::string& title,
 // folderSelection: true for folder selection mode
 // -----------------------------------------------------------------------------
 TC_SYNC_DIALOG_UNAVAILABLE
-FileDialogResult loadDialog(const std::string& title = "",
+TC_PLATFORMS("macos,windows,linux,android") FileDialogResult loadDialog(const std::string& title = "",
                             const std::string& message = "",
                             const std::string& defaultPath = "",
                             bool folderSelection = false);
@@ -80,7 +81,7 @@ void loadDialogAsync(const std::string& title,
 // defaultName: Initial filename
 // -----------------------------------------------------------------------------
 TC_SYNC_DIALOG_UNAVAILABLE
-FileDialogResult saveDialog(const std::string& title = "",
+TC_PLATFORMS("macos,windows,linux,android") FileDialogResult saveDialog(const std::string& title = "",
                             const std::string& message = "",
                             const std::string& defaultPath = "",
                             const std::string& defaultName = "");

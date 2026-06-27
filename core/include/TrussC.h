@@ -1490,7 +1490,7 @@ inline void toggleFullscreen() {
 // ---------------------------------------------------------------------------
 // Orientation control (iOS only, no-op on other platforms)
 // ---------------------------------------------------------------------------
-enum class Orientation : uint32_t {
+enum class TC_PLATFORMS("android,ios") Orientation : uint32_t {
     Portrait            = (1 << 1),  // UIInterfaceOrientationMaskPortrait
     PortraitUpsideDown  = (1 << 2),  // UIInterfaceOrientationMaskPortraitUpsideDown
     LandscapeLeft       = (1 << 4),  // UIInterfaceOrientationMaskLandscapeLeft
@@ -1513,7 +1513,7 @@ inline Orientation operator&(Orientation a, Orientation b) {
 // Android: Activity.setRequestedOrientation via JNI
 // Desktop / Web: no-op
 // (Implementation lives in core/platform/<plat>/tcPlatform_<plat>.{cpp,mm})
-void setOrientation(Orientation mask);
+TC_PLATFORMS("android,ios") void setOrientation(Orientation mask);
 
 // ---------------------------------------------------------------------------
 // Window information (size corresponding to coordinate system)

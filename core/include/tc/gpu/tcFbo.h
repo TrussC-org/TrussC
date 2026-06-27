@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
 // tcFbo.h - Framebuffer Object (off-screen rendering)
@@ -274,7 +275,7 @@ public:
     // Read pixel data (RGBA8 only, for backward compatibility)
     // Note: Call after rendering is complete (after end())
     // For MSAA, reads from resolved texture
-    bool readPixels(unsigned char* pixels) const {
+    TC_PLATFORMS("macos,windows,linux,ios,android") bool readPixels(unsigned char* pixels) const {
         if (!allocated_ || !pixels) return false;
 
         // sokol_gfx doesn't have direct pixel reading API
@@ -285,7 +286,7 @@ public:
 
     // Read pixel data as float (for float pixel formats: R16F, R32F, RGBA16F, RGBA32F, etc.)
     // Buffer must be large enough: width * height * channelCount(format) floats
-    bool readPixelsFloat(float* pixels) const {
+    TC_PLATFORMS("macos,windows,linux,android") bool readPixelsFloat(float* pixels) const {
         if (!allocated_ || !pixels) return false;
         return readPixelsFloatPlatform(pixels);
     }
