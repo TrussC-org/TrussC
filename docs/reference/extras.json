@@ -1,0 +1,194 @@
+{
+  "macros": [
+    {
+      "name": "TC_RUN_APP",
+      "signature": "TC_RUN_APP(AppClass, settings)",
+      "description": "Application entry-point macro. Expands to main() and runs AppClass. Required to enable hot reload.",
+      "description_ja": "アプリのエントリポイントマクロ。main() を展開し AppClass を実行する。ホットリロードを使うには必須。",
+      "description_ko": ""
+    },
+    {
+      "name": "TC_HOT_RELOAD",
+      "signature": "TC_HOT_RELOAD(AppClass)",
+      "description": "Opt the app into hot reload. Place in the app's .cpp; triggers a CMake reconfigure on next build.",
+      "description_ja": "アプリをホットリロード対応にする。アプリの .cpp に置く。次回ビルドで CMake が再構成される。",
+      "description_ko": ""
+    },
+    {
+      "name": "TC_REFLECT",
+      "signature": "TC_REFLECT(Self, ...Bases) { TC_VALUE(...) ... }",
+      "description": "Declare reflected members inside a class (exposed to the inspector, serialization, and MCP). Bases are the direct base classes.",
+      "description_ja": "クラス内で反映メンバーを宣言する（インスペクタ・シリアライズ・MCP に公開）。Bases は直接の基底クラス。",
+      "description_ko": ""
+    },
+    {
+      "name": "TC_REFLECT_ROOT",
+      "signature": "TC_REFLECT_ROOT(Self) { TC_VALUE(...) ... }",
+      "description": "Like TC_REFLECT but for a root type with no reflected base classes.",
+      "description_ja": "TC_REFLECT と同じだが、反映する基底クラスを持たないルート型向け。",
+      "description_ko": ""
+    },
+    {
+      "name": "TC_REFLECT_FREE",
+      "signature": "TC_REFLECT_FREE(Type) { TC_VALUE(...) ... }",
+      "description": "Reflect a non-member / external type at namespace scope (for types you can't add TC_REFLECT inside).",
+      "description_ja": "メンバー外・外部の型を名前空間スコープで反映する（TC_REFLECT をクラス内に書けない型向け）。",
+      "description_ko": ""
+    },
+    {
+      "name": "TC_VALUE",
+      "signature": "TC_VALUE(member) | TC_VALUE(name, getter) | TC_VALUE(name, getter, setter)",
+      "description": "Declare one reflected member inside a TC_REFLECT body. 1 arg = in-place, 2 = read-only, 3 = getter/setter.",
+      "description_ja": "TC_REFLECT 本体内で反映メンバーを1つ宣言する。引数1=直接、2=読み取り専用、3=getter/setter。",
+      "description_ko": ""
+    },
+    {
+      "name": "TC_ENUM_LABELS",
+      "signature": "TC_ENUM_LABELS(EnumType, \"Label0\", \"Label1\", ...)",
+      "description": "Declare string labels for an enum (labels[(int)value] == name), used by the inspector and serialization.",
+      "description_ja": "enum の文字列ラベルを宣言する（labels[(int)value] == name）。インスペクタやシリアライズで使われる。",
+      "description_ko": ""
+    }
+  ],
+  "keywords": [
+    "void",
+    "int",
+    "float",
+    "bool",
+    "string",
+    "if",
+    "else",
+    "for",
+    "while",
+    "return",
+    "break",
+    "continue",
+    "true",
+    "false",
+    "null",
+    "const"
+  ],
+  "constants": {
+    "TAU": "6.283...",
+    "HALF_TAU": "3.141...",
+    "QUARTER_TAU": "1.570...",
+    "PI": "3.141...",
+    "VERSION_MAJOR": "0",
+    "VERSION_MINOR": "0",
+    "VERSION_PATCH": "1",
+    "VSYNC": "-1.0",
+    "EVENT_DRIVEN": "0.0",
+    "Left": "Direction::Left",
+    "Center": "Direction::Center",
+    "Right": "Direction::Right",
+    "Top": "Direction::Top",
+    "Bottom": "Direction::Bottom",
+    "Baseline": "Direction::Baseline",
+    "BeforeApp": "0",
+    "App": "100",
+    "AfterApp": "200",
+    "Generator": "100",
+    "Effect": "500",
+    "Monitor": "900",
+    "FONT_SANS": "string",
+    "FONT_SERIF": "string",
+    "FONT_MONO": "string",
+    "FONT_SANS_JA": "string",
+    "FONT_SERIF_JA": "string",
+    "KEY_SPACE": "32",
+    "KEY_ESCAPE": "256",
+    "KEY_ENTER": "257",
+    "KEY_TAB": "258",
+    "KEY_BACKSPACE": "259",
+    "KEY_DELETE": "261",
+    "KEY_RIGHT": "262",
+    "KEY_LEFT": "263",
+    "KEY_DOWN": "264",
+    "KEY_UP": "265",
+    "KEY_LEFT_SHIFT": "340",
+    "KEY_RIGHT_SHIFT": "344",
+    "KEY_LEFT_CONTROL": "341",
+    "KEY_RIGHT_CONTROL": "345",
+    "KEY_LEFT_ALT": "342",
+    "KEY_RIGHT_ALT": "346",
+    "KEY_LEFT_SUPER": "343",
+    "KEY_RIGHT_SUPER": "347",
+    "KEY_F1": "290",
+    "KEY_F2": "291",
+    "KEY_F3": "292",
+    "KEY_F4": "293",
+    "KEY_F5": "294",
+    "KEY_F6": "295",
+    "KEY_F7": "296",
+    "KEY_F8": "297",
+    "KEY_F9": "298",
+    "KEY_F10": "299",
+    "KEY_F11": "300",
+    "KEY_F12": "301",
+    "MOUSE_BUTTON_LEFT": "0",
+    "MOUSE_BUTTON_RIGHT": "1",
+    "MOUSE_BUTTON_MIDDLE": "2"
+  },
+  "examples_manual": {
+    "mousePressed": [
+      "mouseExample"
+    ],
+    "mouseReleased": [
+      "mouseExample"
+    ],
+    "mouseMoved": [
+      "mouseExample"
+    ],
+    "mouseDragged": [
+      "mouseExample"
+    ],
+    "keyPressed": [
+      "keyboardExample"
+    ],
+    "keyReleased": [
+      "keyboardExample"
+    ],
+    "setColor": [
+      "graphicsExample",
+      "3DPrimitivesExample"
+    ],
+    "drawRect": [
+      "graphicsExample"
+    ],
+    "drawCircle": [
+      "graphicsExample"
+    ],
+    "drawLine": [
+      "graphicsExample"
+    ],
+    "drawBitmapString": [
+      "fontExample",
+      "bitmapStringExtendedExample"
+    ],
+    "noFill": [
+      "graphicsExample"
+    ],
+    "translate": [
+      "easyCamExample",
+      "meshAppendExample",
+      "3DPrimitivesExample"
+    ],
+    "pushMatrix": [
+      "easyCamExample",
+      "meshAppendExample",
+      "3DPrimitivesExample"
+    ],
+    "popMatrix": [
+      "easyCamExample",
+      "meshAppendExample",
+      "3DPrimitivesExample"
+    ],
+    "sin": [
+      "vectorMathExample"
+    ],
+    "type:Color": [
+      "graphicsExample",
+      "colorExample"
+    ]
+  }
+}

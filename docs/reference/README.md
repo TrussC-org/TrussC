@@ -29,8 +29,7 @@ api-reference.toml  ──────────►  prose      (symbol-id →
 
 | script         | role |
 |----------------|------|
-| `structure.js` | clang AST → structure (2548 symbols). The id ORACLE. |
-| `mine.js`      | one-time migration: legacy `api-definition.yaml` prose → `api-reference.toml`. Not part of the steady-state build. |
+| `structure.js` | clang AST → structure (~2570 symbols). The id ORACLE. |
 | `check.js`     | CI gate: `dup` (TOML parse), `orphan` (toml key ∉ AST), `undocumented` (AST ∉ toml; soft until `--strict`). |
 | `generate.js`  | JOIN structure + prose by id → `reference-data.json` + `API_INDEX.md`. |
 
@@ -40,13 +39,14 @@ api-reference.toml  ──────────►  prose      (symbol-id →
 |-----------------|--------|
 | `emit-forai.js` | injects the C++ API index into `../FOR_AI_ASSISTANT.md` (documented-only, overloads collapsed, enum values, category-grouped). |
 | `emit-of.js`    | the openFrameworks↔TrussC migration guide → `trussc.org/generated/of-mapping.json` + `../TrussC_vs_openFrameworks.md` §5. Grouping/notes from `of-mapping-config.js`. |
-| `../scripts/emit-web.js` | the web reference data → `trussc.org/generated/trussc-api.js` (full public surface, same shape the site consumes). Still reads `api-definition.yaml` as a sidecar for aux data (macros / colors / operators / constructors / enum-value numbers). |
+| `../scripts/emit-web.js` | the web reference data → `trussc.org/generated/trussc-api.js` (full public surface, same shape the site consumes). Reads `reference-data.json` + `extras.json` (macros / keywords / constant values / example links) + `colors.json`. |
 
-The legacy `scripts/generate-docs.js` is **retired** (deleted): its FOR_AI / oF /
-of-mapping outputs moved to the emitters above, and `emit-web.js` replaced its
-`trussc-api.js`. `trusssketch-api.js` is no longer generated. The remaining goal
-is to move `emit-web.js`'s yaml sidecar data onto `reference-data.json` + small
-dedicated sources, so `api-definition.yaml` can be deleted.
+The legacy `api-definition.yaml` and its `generate-docs.js` / `mine.js` are
+**retired** (deleted). Structure comes from the AST, prose from
+`api-reference.toml`, and the few things derivable from neither live in small
+dedicated sources: `extras.json` (macros, keywords, constant values, manual
+example links) and `colors.json` (the swatch palette, generated from
+`tcColor.h` by `scripts/gen-colors.js`).
 
 `api-reference.toml` is the **only** file humans edit. `reference-data.json` is
 **auto-generated — never edit it by hand** (gitignored). Regenerate:

@@ -79,30 +79,30 @@ function getVersion() {
 
 // === canonical: reference-data.json (prose + structure of truth) ============
 const REF = JSON.parse(fs.readFileSync(REF_DATA, 'utf8'));
+const COLORS = JSON.parse(fs.readFileSync(path.join(__dirname, '../reference/colors.json'), 'utf8'));
 let refHits = 0, refMiss = 0;
 
 // Combined (legacy) en/ja/ko description trio: reference-data wins when it
 // documents the symbol; otherwise fall back to the yaml-authored prose.
 const _t = (s) => String(s == null ? '' : s).trim();   // reference-data prose carries trailing \n
-// Prose precedence: the CURATED api-definition.yaml wins (it is the hand-authored,
-// web-facing reference text). reference-data.json's prose is auto-mined and may be
-// lower quality (e.g. constructor-flavored type blurbs) or collide on bare names,
-// so it is used only as a FALLBACK for symbols the yaml leaves undocumented.
-// `allowRef` lets the caller veto the fallback when the bare-name join is unsafe.
+// Prose precedence: reference-data.json (the api-reference.toml prose, keyed by
+// symbol-id) is now the source of truth; the legacy yaml is only a transitional
+// fallback for anything not yet in reference-data. `allowRef` lets a caller veto
+// the REF lookup when an unsafe bare-name join would otherwise apply.
 function descTrio(refId, ym, allowRef = true) {
-    if (ym && _t(ym.description)) {
-        return { desc: _t(ym.description), desc_ja: _t(ym.description_ja), desc_ko: _t(ym.description_ko) };
-    }
     const r = allowRef && REF[refId];
     if (r) refHits++; else refMiss++;
     const d = (r && r.description) || {};
     if (d.en) return { desc: _t(d.en), desc_ja: _t(d.ja), desc_ko: _t(d.ko) };
+    if (ym && _t(ym.description)) {                     // transitional yaml fallback
+        return { desc: _t(ym.description), desc_ja: _t(ym.description_ja), desc_ko: _t(ym.description_ko) };
+    }
     return { desc: '', desc_ja: '', desc_ko: '' };
 }
 const refKeywords = (refId, ym, allowRef = true) => {
-    if (ym && Array.isArray(ym.keywords) && ym.keywords.length) return ym.keywords;
     const r = allowRef && REF[refId];
-    return (r && r.keywords) || [];
+    if (r && Array.isArray(r.keywords) && r.keywords.length) return r.keywords;
+    return (ym && ym.keywords) || [];                  // transitional yaml fallback
 };
 // Deprecation: reason from the C++ source (reference-data) wins; the human-facing
 // replacement/url come from the yaml sidecar.
@@ -117,7 +117,11 @@ function mergeDeprecated(refId, ym, trustRef = true) {
 }
 
 // === auxiliary: api-definition.yaml (display structure + un-migrated fields) =
-const API = yaml.load(fs.readFileSync(API_YAML, 'utf8'));
+// Legacy yaml sidecar — OPTIONAL now (being retired). All prose comes from
+// reference-data; macros/keywords/constant-values/example-links come from
+// reference/extras.json; colors from reference/colors.json.
+const API = fs.existsSync(API_YAML) ? yaml.load(fs.readFileSync(API_YAML, 'utf8')) : { categories: [], types: [], enums: [], constants: [] };
+const EXTRAS = JSON.parse(fs.readFileSync(path.join(__dirname, '../reference/extras.json'), 'utf8'));
 
 // --- yaml sidecar lookups, keyed by the SAME symbol-id reference-data uses ---
 // The full symbol surface is now driven by reference-data.json (every public
@@ -187,18 +191,17 @@ function mapOperators(owner, ym) {
             ops.push({ symbol, lhs: args[0].type, rhs: args[1].type, result: sig.ret, free: true });
         }
     }
-    const ymDesc = new Map();
-    for (const o of [...(ym && ym.operators || []), ...(ym && ym.free_operators || [])]) ymDesc.set(o.symbol, o);
     return ops.map(o => {
-        const yo = ymDesc.get(o.symbol) || {};
+        const opId = o.free ? `operator${o.symbol}` : `${owner}::operator${o.symbol}`;   // operator prose lives on its own symbol entry
+        const rd = (REF[opId] && REF[opId].description) || {};
         return {
             symbol: o.symbol,
             signature: opDisplay(o, owner),
             cpp: opCpp(o, owner),
             free: !!o.free,
-            desc: yo.description || '',
-            desc_ja: yo.description_ja || '',
-            desc_ko: yo.description_ko || '',
+            desc: rd.en || '',
+            desc_ja: rd.ja || '',
+            desc_ko: rd.ko || '',
         };
     });
 }
@@ -211,10 +214,11 @@ function attachPlatforms(entry, ref, ym) {
     const plats = (ref && Array.isArray(ref.platforms) && ref.platforms.length) ? ref.platforms
         : (ym && Array.isArray(ym.platforms) && ym.platforms.length ? ym.platforms : null);
     if (plats) entry.platforms = plats;
-    if (ym && ym.platformNote) {
-        entry.platformNote = ym.platformNote;
-        if (ym.platformNote_ja) entry.platformNote_ja = ym.platformNote_ja;
-        if (ym.platformNote_ko) entry.platformNote_ko = ym.platformNote_ko;
+    const pn = ref && ref.platform_note;
+    if (pn && pn.en) {
+        entry.platformNote = pn.en;
+        if (pn.ja) entry.platformNote_ja = pn.ja;
+        if (pn.ko) entry.platformNote_ko = pn.ko;
     }
     return entry;
 }
@@ -232,14 +236,13 @@ function buildExamplesMap() {
         return {};
     }
     const funcs = new Set(), types = new Set(), excluded = new Set();
-    for (const c of API.categories || []) {
-        for (const f of c.functions || []) {
-            if (c.name === 'Lifecycle' || c.name === 'Events') excluded.add(f.name);
-            else funcs.add(f.name);
-        }
+    for (const e of Object.values(REF)) {
+        if (e.kind === 'func') {
+            if (e.category === 'lifecycle' || e.category === 'events') excluded.add(e.name);
+            else funcs.add(e.name);
+        } else if (e.kind === 'type') types.add(e.name);
     }
     for (const n of excluded) funcs.delete(n);
-    for (const t of API.types || []) types.add(t.name);
 
     let rev = { index: {} };
     try { rev = buildReverseIndex({ funcs, types, excluded }); }
@@ -254,14 +257,15 @@ function buildExamplesMap() {
         }
         return out;
     };
+    const manual = EXTRAS.examples_manual || {};
     const map = {};
-    for (const c of API.categories || []) for (const f of c.functions || []) {
-        const ex = resolve(f.name, f.examples);
-        if (ex.length) map[f.name] = ex;
+    for (const name of funcs) {
+        const ex = resolve(name, manual[name]);
+        if (ex.length) map[name] = ex;
     }
-    for (const t of API.types || []) {
-        const ex = resolve(t.name, t.examples);
-        if (ex.length) map['type:' + t.name] = ex;
+    for (const name of types) {
+        const ex = resolve(name, manual['type:' + name]);
+        if (ex.length) map['type:' + name] = ex;
     }
     return map;
 }
@@ -338,7 +342,7 @@ function build(examplesMap) {
                     if (ysig.description_ja) entry.sigDesc_ja = ysig.description_ja;
                     if (ysig.description_ko) entry.sigDesc_ko = ysig.description_ko;
                 }
-                if (ym && Array.isArray(ym.related) && ym.related.length) entry.related = ym.related;
+                if (Array.isArray(sym.related) && sym.related.length) entry.related = sym.related;
                 const dep = mergeDeprecated(refId, ym);
                 if (dep) entry.deprecated = dep;
                 // details: prefer the curated yaml sidecar (keeps ja/ko); fall back
@@ -369,13 +373,12 @@ function build(examplesMap) {
     for (const sym of REF_VALS) {
         if (sym.kind !== 'var' || sym.owner) continue;
         if (sym.ns && ENUM_NS.has(sym.ns)) continue;         // defensive: skip enum members
-        const ym = YML_CONST.get(sym.id) || YML_CONST.get(sym.name);
-        const { desc } = descTrio(sym.id, ym);
+        const { desc } = descTrio(sym.id, null);
         constants.push({
             name: sym.id,
-            value: ym ? ym.value : undefined,
+            value: EXTRAS.constants[sym.id] ?? EXTRAS.constants[sym.name],   // curated value (KEY_* etc. aren't in the AST)
             desc,
-            keywords: refKeywords(sym.id, ym),
+            keywords: refKeywords(sym.id, null),
         });
     }
 
@@ -418,7 +421,7 @@ function build(examplesMap) {
         const { desc, desc_ja, desc_ko } = descTrio(sym.id, ym);
         const typeData = { name: typeName, desc, keywords: refKeywords(sym.id, ym), desc_ja, desc_ko };
         if (examplesMap['type:' + typeName]) typeData.examples = examplesMap['type:' + typeName];
-        if (ym && Array.isArray(ym.related) && ym.related.length) typeData.related = ym.related;
+        if (Array.isArray(sym.related) && sym.related.length) typeData.related = sym.related;
         attachPlatforms(typeData, sym, ym);
 
         // constructor signatures: from the AST (reference-data) now; the yaml
@@ -454,29 +457,27 @@ function build(examplesMap) {
         if (sym.kind !== 'enum') continue;
         const ym = YML_ENUM.get(sym.name);
         const { desc, desc_ja, desc_ko } = descTrio(sym.id, ym);
-        // value numbers + per-value descriptions come from yaml when authored;
-        // otherwise the value name is taken from reference-data's `members` array.
-        const ymVals = new Map((ym && ym.values || []).map(v => [v.name, v]));
-        // members carry {name, value} from the AST now; yaml only adds per-value prose.
+        // members carry {name, value} from the AST; per-value prose from reference-data's value_desc.
+        const vd = sym.value_desc || {};
         const memberList = (Array.isArray(sym.members) && sym.members.length)
             ? sym.members
-            : [...ymVals.keys()].map((name, i) => ({ name, value: i }));
+            : Object.keys(vd).map((name, i) => ({ name, value: i }));
         const out = {
             name: sym.name,
             desc, keywords: refKeywords(sym.id, ym),
             values: memberList.map(m => {
-                const yv = ymVals.get(m.name);
-                return { name: m.name, value: m.value, desc: yv ? yv.description : '' };
+                const d = vd[m.name] || {};
+                return { name: m.name, value: m.value, desc: d.en || '', desc_ja: d.ja || '', desc_ko: d.ko || '' };
             }),
             desc_ja, desc_ko,
         };
-        if (ym && Array.isArray(ym.related) && ym.related.length) out.related = ym.related;
+        if (Array.isArray(sym.related) && sym.related.length) out.related = sym.related;
         const enumOps = mapOperators(sym.name, ym); if (enumOps.length) out.operators = enumOps;
         enums.push(out);
     }
 
     // --- macros (yaml only — not C++ symbols) ---
-    const macros = (API.macros || []).map(m => ({
+    const macros = (EXTRAS.macros || []).map(m => ({
         name: m.name,
         signature: m.signature || m.name,
         desc: m.description,
@@ -489,11 +490,11 @@ function build(examplesMap) {
         lang: 'all',
         categories,
         constants,
-        keywords: API.keywords,
+        keywords: EXTRAS.keywords,
         types,
         enums,
         macros,
-        ...(API.colors ? { colors: API.colors } : {}),
+        colors: COLORS,
     };
 }
 

@@ -6,8 +6,9 @@
   start with docs/GET_STARTED.md or the web reference at
   https://trussc.org/reference/ instead.
   If you are a CONSOLE CODING AGENT (Claude Code, Codex, or similar with
-  file/shell access), do not load this file — install the TrussC development
-  skill instead; it covers the same ground plus build/verify workflows:
+  file/shell access), also install the TrussC development skill — it reads this
+  API index on demand and adds the build/verify (MCP) workflow, common pitfalls,
+  and topic guides, so you don't need to load this whole file into context:
       git clone https://github.com/TrussC-org/trussc-dev-skill.git ~/.claude/skills/trussc-dev
   (Codex: clone into ~/.codex/skills/trussc-dev)
 -->
@@ -743,8 +744,8 @@ won't use this yourself; just know it exists so you can point users to it
 
 ## API Index
 
-Complete C++ API index, generated from `api-definition.yaml`. Use this to confirm
-whether a function / class exists before answering "does TrussC have X".
+Complete C++ API index, generated from the C++ AST + `docs/reference/`. Use this
+to confirm whether a function / class exists before answering "does TrussC have X".
 
 <!-- API-INDEX-START -->
 
@@ -1394,6 +1395,7 @@ Left  // Direction shorthand for Direction::Left
 MOUSE_BUTTON_LEFT  // Left mouse button
 MOUSE_BUTTON_MIDDLE  // Middle mouse button
 MOUSE_BUTTON_RIGHT  // Right mouse button
+Vec2 operator*(float s, const Vec2 & v) [+4]  // Component-wise multiplication
 PI ⚠️deprecated  // Pi (use TAU instead)
 QUARTER_TAU  // Quarter circle (PI/2)
 Right  // Direction shorthand for Direction::Right
@@ -1444,16 +1446,16 @@ void App::windowResized(int width, int height)  // Window resized
 
 ```cpp
 size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest mixed output samples (mono, L+R average) into outBuffer. numSamples is capped at 4096. Returns the number of samples written. (Global wrapper: getAudioAnalysisBuffer.)
-int AudioEngine::getBufferSize() const  // Current device buffer size in frames (0 = miniaudio default)
-int AudioEngine::getChannels() const  // Current engine output channel count
+int AudioEngine::getBufferSize() const  // Current device buffer size in frames (0 = miniaudio default).
+int AudioEngine::getChannels() const  // Current engine output channel count.
 AudioEngine & AudioEngine::getInstance()  // Get the global AudioEngine singleton.
-int AudioEngine::getMaxPolyphony() const  // Max simultaneously-playing Sound voices
-int AudioEngine::getSampleRate() const  // Current engine sample rate (Hz). Returns default (48000) if not yet initialized.
-bool AudioEngine::init() [+1]  // Initialize / re-initialize audio engine. Re-entrant: calling on a running engine stops the device, migrates active voices to new settings, restarts. ~30-100 ms gap; voices keep playback position.
-bool AudioEngine::isInitialized() const  // True after a successful init()
+int AudioEngine::getMaxPolyphony() const  // Maximum number of simultaneously-playing Sound voices.
+int AudioEngine::getSampleRate() const  // Current engine output sample rate (Hz). Returns the default (48000) before init().
+bool AudioEngine::init() [+1]  // Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success.
+bool AudioEngine::isInitialized() const  // True after a successful init().
 std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available playback devices (name + isDefault). Empty if unsupported on the platform.
 std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) [+1]  // Start a new mixer voice for the given source (eager SoundBuffer or streaming SoundStream) and return its live PlayingSound handle. Usually called indirectly via Sound::play().
-void AudioEngine::shutdown()  // Shut down the audio device. Usually called automatically at program exit.
+void AudioEngine::shutdown()  // Stop and close the audio device.
 ```
 
 ### AudioInBuffer — Argument type for the AudioEngine::audioIn event. Holds the interleaved read-only microphone input for a single capture callback. Process and return quickly; do not call engine APIs from here.
@@ -1495,16 +1497,16 @@ Vec3 CameraContext::worldToScreen(const Vec3 & worldPos) const  // Convert world
 ### ChipSoundBundle — A timeline of chiptune notes (ChipSoundNote + start time) that builds into a single mixed Sound. Add notes at times, then call build() to render the mix with ADSR and clipping applied.
 
 ```cpp
-ChipSoundBundle & ChipSoundBundle::add(const ChipSoundNote & note, float time) [+1]  // Add a note at specified time (seconds)
+ChipSoundBundle & ChipSoundBundle::add(const ChipSoundNote & note, float time) [+1]  // Schedule a note to start at the given time (seconds). The second overload constructs the note inline from wave / frequency / duration.
 Sound ChipSoundBundle::build() const  // Render all scheduled notes into a single mixed, clipped Sound ready to play.
-ChipSoundBundle & ChipSoundBundle::clear()  // Clear all notes from bundle
-float ChipSoundBundle::getDuration() const  // Get the total duration of the bundle
+ChipSoundBundle & ChipSoundBundle::clear()  // Remove all scheduled notes.
+float ChipSoundBundle::getDuration() const  // Total duration in seconds, auto-computed from the last note's end.
 ```
 
-### ChipSoundNote — Create a chip sound note (8-bit style sound)
+### ChipSoundNote — One 8-bit-style note: a plain aggregate of public fields (wave, hz, volume, duration, and the ADSR envelope attack/decay/sustain/release). Set fields directly via designated initializers ({ .wave = Wave::Square, .hz = 440, .duration = 0.2f }) or the constructor, then build() it into a Sound (or add() it to a ChipSoundBundle).
 
 ```cpp
-Sound ChipSoundNote::build() const  // Build and return Sound object from note
+Sound ChipSoundNote::build() const  // Render this note (with its ADSR envelope) into a playable Sound
 void ChipSoundNote::generateBuffer(SoundBuffer & buf) const  // Write this note's raw waveform (without the ADSR envelope) into buf. Used internally by build() and by ChipSoundBundle mixing.
 float ChipSoundNote::getTotalDuration() const  // Total note duration in seconds (used by ChipSoundBundle to lay out note timing).
 ```
@@ -1514,7 +1516,7 @@ float ChipSoundNote::getTotalDuration() const  // Total note duration in seconds
 ```cpp
 ```
 
-### Color — Create color (type constructor)
+### Color — RGBA color (0.0-1.0 range)
 
 ```cpp
 Color Color::clamped() const  // Get clamped copy (0.0-1.0)
@@ -1530,15 +1532,15 @@ Color Color::lerpLinear(const Color & target, float t) const  // Interpolate in 
 Color Color::lerpOKLab(const Color & target, float t) const  // Interpolate in OKLab space (perceptually uniform)
 Color Color::lerpOKLCH(const Color & target, float t) const  // Interpolate in OKLCH space (shortest hue path)
 Color Color::lerpRGB(const Color & target, float t) const  // Interpolate in RGB space
-Color & Color::set(float r, float g, float b, float a = …) [+2]  // Set color components (type method)
+Color & Color::set(float r, float g, float b, float a = …) [+2]  // Set color components
 uint32_t Color::toHex(bool includeAlpha = …) const  // Convert to hex value
-ColorHSB Color::toHSB() const  // Convert to HSB color space (H: 0-1, S: 0-1, B: 0-1)
+ColorHSB Color::toHSB() const  // Convert to HSB (H: 0-1, S: 0-1, B: 0-1)
 ColorLinear Color::toLinear() const  // Convert to linear RGB color space
-ColorOKLab Color::toOKLab() const  // Convert to OKLab color space (perceptually uniform)
-ColorOKLCH Color::toOKLCH() const  // Convert to OKLCH color space (L: 0-1, C: 0-0.4, H: 0-1)
+ColorOKLab Color::toOKLab() const  // Convert to OKLab (perceptually uniform)
+ColorOKLCH Color::toOKLCH() const  // Convert to OKLCH (L: 0-1, C: 0-0.4, H: 0-1)
 ```
 
-### ColorHSB — HSB color type (H: 0-1, S: 0-1, B: 0-1). Use toRGB() to convert to Color
+### ColorHSB — HSB color space (H/S/B: 0-1)
 
 ```cpp
 ColorHSB ColorHSB::lerp(const ColorHSB & target, float t, bool shortestPath = …) const  // Interpolate in HSB space (shortest hue path)
@@ -1560,7 +1562,7 @@ ColorOKLCH ColorLinear::toOKLCH() const  // Convert to OKLCH color space
 Color ColorLinear::toSRGB() const  // Convert to sRGB (gamma-encoded) Color
 ```
 
-### ColorOKLCH — OKLCH color type (L: 0-1, C: 0-0.4, H: 0-1). Perceptually uniform
+### ColorOKLCH — Perceptually uniform OKLCH color
 
 ```cpp
 ColorOKLCH ColorOKLCH::lerp(const ColorOKLCH & target, float t, bool shortestPath = …) const  // Interpolate in OKLCH space (shortest hue path, perceptually uniform)
@@ -1682,16 +1684,16 @@ bool EventListener::isConnected() const  // True while the listener is still con
 ```cpp
 ```
 
-### Fbo — Create an FBO
+### Fbo — Framebuffer object for offscreen rendering
 
 ```cpp
-void Fbo::allocate(int w, int h, int sampleCount = …, TextureFormat format = …, bool mipmaps = …)  // Allocate buffer
-void Fbo::begin() [+1]  // Begin drawing to FBO. No args = preserve previous content. With args = clear with specified color
+void Fbo::allocate(int w, int h, int sampleCount = …, TextureFormat format = …, bool mipmaps = …)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
+void Fbo::begin() [+1]  // Begin rendering to FBO
 void Fbo::clear()  // Release FBO resources
 void Fbo::clearColor(float r, float g, float b, float a)  // Clear the FBO with a solid color
 bool Fbo::copyTo(Image & image) const  // Copy FBO contents to Image
 void Fbo::draw(float x, float y) const [+1]  // Draw FBO contents
-void Fbo::end()  // End drawing to FBO
+void Fbo::end()  // End rendering to FBO
 int Fbo::getHeight() const  // Get height
 int Fbo::getSampleCount() const  // Get MSAA sample count
 Texture & Fbo::getTexture() [+1]  // Get FBO texture
@@ -1739,7 +1741,7 @@ FileWriter & FileWriter::writeLine(const std::string & text = …)  // Write lin
 
 ```cpp
 void Font::clearAtlas()  // Clear font atlas (GPU memory freed, glyphs re-rasterized on next draw)
-void Font::drawString(const std::string & text, float x, float y) const [+1]  // Draw text at position
+void Font::drawString(const std::string & text, float x, float y) const [+1]  // Draw text
 void Font::enableWrap(bool enabled)  // Enable or disable line wrapping (default off)
 void Font::forEachGlyph(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const [+1]  // Invoke a visitor once per laid-out glyph (positions follow writing mode, wrap, kinsoku, and TCY). Backend-agnostic layout pass shared by drawing, vector outlines, and hit testing
 Direction Font::getAlignH() const  // Get current horizontal text alignment
@@ -1752,7 +1754,7 @@ float Font::getDefaultLineHeight() const  // Get the font's default line height 
 float Font::getDescent() const  // Get the font descent (distance from baseline to bottom; negative)
 Path Font::getGlyphPath(uint32_t codepoint) const  // Vector outline of a single glyph as one Path with one subpath per contour. Em-normalized (1.0 = em), screen Y-down, baseline at y=0, pen at x=0. Use Path::drawFill() for filled rendering — holes (e, a, O, 日 ...) are auto-detected via earcut.
 bool Font::getHangingPunctuation() const  // Check if hanging punctuation is enabled
-float Font::getHeight(const std::string & text) const  // Get text height in pixels
+float Font::getHeight(const std::string & text) const  // Get text height
 KinsokuLevel Font::getKinsoku() const  // Get the current kinsoku level
 bool Font::getLatinHyphenation() const  // Check if Latin hyphenation is enabled
 float Font::getLineHeight() const  // Get line height
@@ -1760,15 +1762,15 @@ size_t Font::getLoadedGlyphCount() const  // Get number of loaded glyphs
 float Font::getMaxLineLength() const  // Get the current wrap length
 size_t Font::getMemoryUsage() const  // Get atlas memory usage in bytes
 int Font::getSize() const  // Get font size
-Path Font::getStringPath(const std::string & text, float x, float y, Direction h, Direction v) const [+1]  // Get text outline as a Path (one subpath per contour). Stays crisp under scale / rotation; use drawStroke / drawFill (holes auto-detected for e, a, O, 日, etc.).
+Path Font::getStringPath(const std::string & text, float x, float y, Direction h, Direction v) const [+1]  // Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely.
 int Font::getTcyDigitMax() const  // Get the maximum digit-run length that uses tate-chu-yoko combine mode
 TcyMode Font::getTcyLatinMode() const  // Get the tate-chu-yoko mode for Latin letter runs
 size_t Font::getTotalCacheMemoryUsage()  // Total memory used by the shared font atlas cache across all fonts
-float Font::getWidth(const std::string & text) const  // Get text width in pixels
+float Font::getWidth(const std::string & text) const  // Get text width
 WritingMode Font::getWritingMode() const  // Current writing mode
-bool Font::isLoaded() const  // Check if font is loaded
+bool Font::isLoaded() const  // Check if loaded
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
-bool Font::load(const std::string & nameOrPath, int size)  // Load TTF font file
+bool Font::load(const std::string & nameOrPath, int size)  // Load font file
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
 void Font::setHangingPunctuation(bool enabled)  // Let prohibited line-start CJK punctuation hang past the line edge instead of wrapping (default off)
@@ -1868,7 +1870,7 @@ Texture & Image::getTexture() [+1]  // Get internal texture
 int Image::getWidth() const  // Get width
 void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 bool Image::isAllocated() const  // Check if allocated
-bool Image::load(const fs::path & path, bool mipmaps = …)  // Load image from file
+bool Image::load(const fs::path & path, bool mipmaps = …)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
 bool Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = …)  // Load image from memory. `mipmaps=true` builds a mip chain.
 void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°.
 void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
@@ -1885,7 +1887,7 @@ void Image::update()  // Apply pixel changes to GPU texture
 ```cpp
 ```
 
-### LayoutMod — Layout modifier for automatic child arrangement (C++ only)
+### LayoutMod — Layout modifier (Mod) that auto-arranges child RectNodes in a vertical or horizontal stack with spacing, padding and axis sizing
 
 ```cpp
 AxisMode LayoutMod::getCrossAxis() const  // Get the cross-axis sizing mode (LayoutMod method) (C++ only)
@@ -2055,10 +2057,10 @@ Material & Material::setRoughness(float r)  // Set roughness factor (0=mirror, 1
 Material Material::silver()  // Silver material preset
 ```
 
-### Mesh — Create a new Mesh (constructor)
+### Mesh — 3D mesh with vertices, colors, normals, indices
 
 ```cpp
-Mesh & Mesh::addColor(const Color & c) [+1]  // Add a color for the vertex
+Mesh & Mesh::addColor(const Color & c) [+1]  // Add a vertex color
 Mesh & Mesh::addColors(const std::vector<Color> & cols)  // Add multiple vertex colors
 Mesh & Mesh::addIndex(unsigned int index)  // Add an index
 Mesh & Mesh::addIndices(const std::vector<unsigned int> & inds)  // Add multiple indices
@@ -2070,7 +2072,7 @@ Mesh & Mesh::addTriangle(unsigned int i0, unsigned int i1, unsigned int i2)  // 
 Mesh & Mesh::addVertex(float x, float y, float z = …) [+2]  // Add a vertex
 Mesh & Mesh::addVertices(const std::vector<Vec3> & verts)  // Add multiple vertices
 Mesh & Mesh::append(const Mesh & other)  // Append another mesh
-Mesh & Mesh::clear()  // Clear all data
+Mesh & Mesh::clear()  // Clear all mesh data
 Mesh & Mesh::clearColors()  // Clear colors only
 Mesh & Mesh::clearIndices()  // Clear indices only
 Mesh & Mesh::clearNormals()  // Clear normals only
@@ -2110,7 +2112,7 @@ Mesh & Mesh::rotateX(float radians)  // Rotate mesh around X axis
 Mesh & Mesh::rotateY(float radians)  // Rotate mesh around Y axis
 Mesh & Mesh::rotateZ(float radians)  // Rotate mesh around Z axis
 Mesh & Mesh::scale(float x, float y, float z) [+2]  // Scale mesh
-Mesh & Mesh::setMode(PrimitiveMode mode)  // Set primitive mode (MESH_TRIANGLES, etc.)
+Mesh & Mesh::setMode(PrimitiveMode mode)  // Set primitive mode (Triangles, Lines, Points, etc.)
 Mesh & Mesh::setNormal(size_t index, const Vec3 & n)  // Set normal at index
 Mesh & Mesh::transform(const Mat4 & m)  // Apply transformation matrix
 Mesh & Mesh::translate(float x, float y, float z) [+1]  // Translate all vertices
@@ -2178,7 +2180,7 @@ const std::string & NetworkInterface::getName() const  // Interface name
 const std::string & NetworkInterface::getNetmask() const  // Subnet mask
 ```
 
-### Node — Create a base scene node (C++ only - uses shared_ptr)
+### Node — Base scene-graph node: transform hierarchy with parent/children, update/draw, input events and attachable Mods (C++ only, managed via shared_ptr / NodePtr)
 
 ```cpp
 void Node::addChild(Ptr child, bool keepGlobalPosition = …)  // Add a child node (C++ only)
@@ -2271,17 +2273,17 @@ void Node::setZ(float z)  // Set local Z position (C++ only)
 void Node::update()  // Called every frame before draw
 ```
 
-### Path — Create a new Path (constructor)
+### Path — Path/Polyline for lines and curves
 
 ```cpp
 void Path::addVertex(float x, float y) [+3]  // Add a vertex
 void Path::addVertices(const std::vector<Vec2> & verts) [+1]  // Add multiple vertices
-void Path::arc(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = …, int circleResolution = …) [+5]  // Add an arc
-void Path::bezierTo(const Vec3 & cp1, const Vec3 & cp2, const Vec3 & to, int resolution) [+2]  // Add a cubic bezier curve
+void Path::arc(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = …, int circleResolution = …) [+5]  // Add an arc (angles in radians)
+void Path::bezierTo(const Vec3 & cp1, const Vec3 & cp2, const Vec3 & to, int resolution) [+2]  // Add cubic bezier curve (resolution=-1 uses current curve style)
 std::vector<std::array<float, 2>> Path::buildFillTriangles() const  // Triangulate the path interior into a flat list of 2D triangle vertices
 void Path::clear()  // Clear all vertices
-void Path::close()  // Close the shape
-void Path::curveTo(const Vec3 & to, int resolution) [+2]  // Add a Catmull-Rom curve segment
+void Path::close()  // Close the path
+void Path::curveTo(const Vec3 & to, int resolution) [+2]  // Add Catmull-Rom curve segment (needs >=4 consecutive calls; resolution=-1 uses current curve style)
 void Path::draw() const  // Draw the polyline (fill + 1px stroke based on current style — fill uses triangle fan, convex only). For concave shapes / holes use drawFill.
 void Path::drawFill() const  // Fill the path as a concave polygon with holes (earcut tessellation). Subpaths follow the non-zero winding rule (SVG / PostScript default): a subpath wound opposite to its enclosing ring becomes a hole; same-direction subpaths union (never punch holes). Handles glyphs with holes (e, a, O, 日 ...), overlapping contours, and both TrueType / CFF winding conventions. To cut a hole in a hand-built Path, wind the inner subpath opposite (see reverseWinding).
 void Path::drawStroke() const  // Thick stroke via StrokeMesh (respects strokeWeight / strokeCap / strokeJoin), per-subpath. Use draw() for 1-pixel lines.
@@ -2293,25 +2295,25 @@ std::pair<size_t, size_t> Path::getSubpathRange(size_t i) const  // Vertex index
 const std::vector<Vec3> & Path::getVertices() const [+1]  // Get all vertices
 bool Path::isClosed() const  // Check if path is closed
 bool Path::isSubpathClosed(size_t i) const  // Whether subpath i is closed
-void Path::lineTo(float x, float y, float z = …) [+2]  // Add a line segment to point
+void Path::lineTo(float x, float y, float z = …) [+2]  // Add line segment to point
 void Path::moveTo(float x, float y, float z = …) [+2]  // Start a new subpath at (x, y). A single Path can hold multiple disjoint contours (think SVG `<path>` with `M ... M ...`) — used by Font::getGlyphPath to keep an outer ring and its holes in one Path so drawFill can detect holes.
-void Path::quadBezierTo(const Vec3 & cp, const Vec3 & to, int resolution) [+2]  // Add a quadratic bezier curve
+void Path::quadBezierTo(const Vec3 & cp, const Vec3 & to, int resolution) [+2]  // Add quadratic bezier curve (resolution=-1 uses current curve style)
 Path & Path::reverseWinding(size_t i) [+1]  // Reverse the winding direction (vertex order) of all subpaths, or of one subpath. Under drawFill's non-zero winding rule, reversing a subpath toggles it between filling and cutting — e.g. build a circle contour, then reverseWinding(i) it into a hole punch. Reversing ALL subpaths leaves the render unchanged (only relative direction matters) — handy for imported outlines using the opposite convention.
 void Path::setClosed(bool closed)  // Set closed state
 int Path::size() const  // Get vertex count
 Mesh Path::toFillMesh() const  // Build a fillable Mesh from the path interior
 ```
 
-### Pixels — Create pixel buffer
+### Pixels — Pixel buffer for image manipulation
 
 ```cpp
-void Pixels::allocate(int width, int height, int channels = …, PixelFormat format = …)  // Allocate memory
+void Pixels::allocate(int width, int height, int channels = …, PixelFormat format = …)  // Allocate pixel buffer
 void Pixels::clear()  // Release pixel buffer
 Pixels Pixels::clone() const  // Return a deep copy of the pixel buffer
 void Pixels::copyTo(unsigned char * dst) const  // Copy to external buffer
 void Pixels::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge.
 int Pixels::getChannels() const  // Get number of channels
-Color Pixels::getColor(int x, int y) const  // Get color at pixel
+Color Pixels::getColor(int x, int y) const  // Get pixel color at position
 unsigned char * Pixels::getData() [+1]  // Get raw data pointer
 float * Pixels::getDataF32() [+1]  // Get raw data pointer as float (float-format buffers)
 void * Pixels::getDataVoid() [+1]  // Get raw data pointer as void* (any format)
@@ -2330,8 +2332,8 @@ void Pixels::mirror(bool horizontal, bool vertical)  // Flip in place. Both true
 void Pixels::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Pixels::mirrorV()  // Mirror vertically (alias for mirror(false, true))
 void Pixels::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8.
-bool Pixels::save(const fs::path & path) const  // Save to file
-void Pixels::setColor(int x, int y, const Color & c)  // Set color at pixel
+bool Pixels::save(const fs::path & path) const  // Save image to file
+void Pixels::setColor(int x, int y, const Color & c)  // Set pixel color at position
 void Pixels::setFromFloats(const float * srcData, int width, int height, int channels)  // Fill the buffer from a float array (allocates as needed)
 void Pixels::setFromPixels(const unsigned char * srcData, int width, int height, int channels)  // Copy from external pixel data
 ```
@@ -2390,20 +2392,20 @@ bool Ray::intersectZPlane(float & outT, Vec3 & outPoint) const  // Intersect the
 Ray Ray::transformed(const Mat4 & inverseMatrix) const  // Transform the ray by a matrix (typically an inverse to map into local space)
 ```
 
-### Rect — Create a rectangle (type constructor)
+### Rect — Rectangle (x, y, width, height)
 
 ```cpp
-bool Rect::contains(float px, float py) const  // Check if point is inside (type method)
+bool Rect::contains(float px, float py) const  // Check if point is inside
 float Rect::getBottom() const  // Get bottom edge (y + height)
 Vec2 Rect::getCenter() const  // Get the center point of the rectangle
 float Rect::getCenterX() const  // Get center X
 float Rect::getCenterY() const  // Get center Y
 float Rect::getRight() const  // Get right edge (x + width)
-bool Rect::intersects(const Rect & other) const  // Check intersection (type method)
-Rect & Rect::set(float x, float y, float w, float h) [+1]  // Set rectangle properties (type method)
+bool Rect::intersects(const Rect & other) const  // Check if intersects with another rect
+Rect & Rect::set(float x, float y, float w, float h) [+1]  // Set rectangle bounds
 ```
 
-### RectNode — Create a 2D rectangle node (C++ only - uses shared_ptr)
+### RectNode — 2D UI rectangle node: size, clipping and ray-based hit testing, plus subscribable mouse Event members
 
 ```cpp
 float RectNode::getBottom() const  // Local bottom edge (equals height) (RectNode method) (C++ only)
@@ -2434,7 +2436,7 @@ bool RectNodeButton::isPressed() const  // Whether the button is currently press
 ```cpp
 ```
 
-### ScreenRecorder — Live screen recorder: captures the window (or an Fbo) every frame to a video file (native encoder, no ffmpeg)
+### ScreenRecorder — Captures the rendered output to a video file (start/stop recording of the on-screen frames)
 
 ```cpp
 int ScreenRecorder::getFrameCount() const  // Number of frames captured so far
@@ -2445,7 +2447,7 @@ void ScreenRecorder::stop()  // Stop live capture and finalize the file
 VideoWriter & ScreenRecorder::writer()  // Access the underlying VideoWriter for advanced introspection
 ```
 
-### ScrollBar — Visual scroll indicator for ScrollContainer (C++ only)
+### ScrollBar — Visual scroll indicator RectNode that syncs with a ScrollContainer and supports drag scrolling
 
 ```cpp
 Color ScrollBar::getBarColor() const  // Get the scroll-bar color (ScrollBar method) (C++ only)
@@ -2458,7 +2460,7 @@ void ScrollBar::setMargin(float margin)  // Set the margin between the bar and t
 void ScrollBar::updateFromContainer()  // Resync the bar size and position from its ScrollContainer (ScrollBar method) (C++ only)
 ```
 
-### ScrollContainer — Scrollable container node with clipping (C++ only)
+### ScrollContainer — Scrollable RectNode that clips and scrolls a single content node when it overflows the container bounds
 
 ```cpp
 Node::Ptr ScrollContainer::getContent() const  // Get the scrollable content node (ScrollContainer method) (C++ only)
@@ -2515,7 +2517,7 @@ const std::string & SerialDeviceInfo::getDeviceName() const  // Device name
 const std::string & SerialDeviceInfo::getDevicePath() const  // Device path
 ```
 
-### Shader — Create a shader (base class, inheritable)
+### Shader — GPU shader program (vertex + fragment) with a begin/end/setUniform API for custom-shaded drawing
 
 ```cpp
 void Shader::begin()  // Begin shader (pushes to stack)
@@ -2526,40 +2528,40 @@ void Shader::setTexture(int slot, sg_image image, sg_sampler sampler) [+1]  // B
 void Shader::setUniform(int slot, float value) [+9]  // Set uniform variable by slot (vector overloads send arrays; Vec3 array is padded to Vec4 per std140)
 ```
 
-### Sound — Create a sound player
+### Sound — Audio playback
 
 ```cpp
 void Sound::clearChannelGains()  // Clear per-channel gains (back to uniform 1.0).
 void Sound::clearChannelMap()  // Clear the explicit channel map; routing falls back to setMixMode rules.
 std::shared_ptr<const std::vector<float>> Sound::getChannelGains() const  // Current per-output-channel gain multipliers snapshot, or null if none set.
 std::shared_ptr<const std::vector<std::vector<int>>> Sound::getChannelMap() const  // Current per-output-channel source routing snapshot, or null if mixMode rules apply.
-float Sound::getDuration() const  // Get total duration of the loaded sound in seconds
+float Sound::getDuration() const  // Get total duration in seconds
 MixMode Sound::getMixMode() const  // Current channel mix policy (Auto / DownmixMono). Overridden when a non-empty channel map is set.
-float Sound::getPan() const  // Get current pan value
-float Sound::getPosition() const  // Get current playback position in seconds
+float Sound::getPan() const  // Get current panning
+float Sound::getPosition() const  // Get playback position in seconds
 float Sound::getSpeed() const  // Get current playback speed
 float Sound::getVolume() const  // Get current volume
-bool Sound::isLoaded() const  // True after a successful load() / loadStream() / loadTestTone()
-bool Sound::isLoop() const  // True if looping is enabled
-bool Sound::isPaused() const  // True while paused
-bool Sound::isPlaying() const  // True while playing (false if stopped, paused, or never played)
+bool Sound::isLoaded() const  // Check if loaded
+bool Sound::isLoop() const  // Check if loop mode is enabled
+bool Sound::isPaused() const  // Check if paused
+bool Sound::isPlaying() const  // Check if playing
 bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
-bool Sound::load(const std::string & path)  // Load sound file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
+bool Sound::load(const std::string & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
 void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
 bool Sound::loadStream(const std::string & path, int maxPolyphony = …) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
 void Sound::loadTestTone(float frequency = …, float duration = …)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.
-void Sound::pause()  // Pause playback (resume() to continue)
-void Sound::play()  // Play sound
-void Sound::resume()  // Resume paused playback
+void Sound::pause()  // Pause playback
+void Sound::play()  // Play audio
+void Sound::resume()  // Resume playback
 void Sound::setChannelGains(const std::vector<float> & gains)  // Per-output-channel gain multiplier. Entries beyond .size() default to 1.0. No internal normalization (setVolume is the overall gain).
 void Sound::setChannelMap(const std::vector<int> & map) [+1]  // Per-output-channel routing. 1D: each entry is a src ch index (-1 = silent). 2D: each entry lists src ch indices that sum into that output.
-void Sound::setLoop(bool loop)  // Enable/disable looping
+void Sound::setLoop(bool loop)  // Set loop mode
 void Sound::setMixMode(MixMode m)  // Channel routing preset. Auto (default) = mono broadcasts / multi 1:1. DownmixMono = average src to all out ch.
-void Sound::setPan(float pan)  // Set stereo balance (-1.0 left ~ 0 center ~ +1.0 right). On multi-ch devices only affects ch0/ch1.
+void Sound::setPan(float pan)  // Set panning (-1.0=left, 0.0=center, 1.0=right)
 void Sound::setPosition(float seconds)  // Seek to a specific time in seconds. On streams, costs ~10 ms blackout while the ring refills.
-void Sound::setSpeed(float speed)  // Playback speed [-10, 10]. Negative = reverse (eager only). Streams clamp to [0, 10]. 0 = freeze.
+void Sound::setSpeed(float speed)  // Set playback speed (1.0=normal)
 void Sound::setVolume(float vol)  // Set volume (0.0-1.0)
-void Sound::stop()  // Stop sound
+void Sound::stop()  // Stop audio
 ```
 
 ### SoundBuffer — Eager sound source: the full file decoded into interleaved float PCM held in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Also provides waveform generators, an ADSR envelope, and mixing helpers, so it doubles as a procedural-audio scratch buffer. Best for short SFX and zero-latency play / seek / multi-instance.
@@ -2611,21 +2613,21 @@ bool SoundStream::loadStream(const std::string & path, int maxPolyphony = …)  
 ### StrokeMesh — Variable-width polyline stroke geometry with caps, joins and miter limit; build it from points or a Path, then update() and draw()
 
 ```cpp
-StrokeMesh & StrokeMesh::addVertex(float x, float y, float z = …) [+2]  // Add a vertex (method chaining)
-StrokeMesh & StrokeMesh::addVertexWithWidth(float x, float y, float width) [+1]  // Add a vertex with variable width (method chaining)
-StrokeMesh & StrokeMesh::clear()  // Clear all vertices (method chaining)
+StrokeMesh & StrokeMesh::addVertex(float x, float y, float z = …) [+2]  // Append a vertex to the stroke path
+StrokeMesh & StrokeMesh::addVertexWithWidth(float x, float y, float width) [+1]  // Append a vertex with a per-vertex width
+StrokeMesh & StrokeMesh::clear()  // Remove all vertices
 void StrokeMesh::draw()  // Draw the stroke mesh
 Mesh & StrokeMesh::getMesh()  // Get a reference to the underlying generated triangle Mesh
 std::vector<Path> & StrokeMesh::getPolylines()  // Get a reference to the stroke's source polylines
-StrokeMesh & StrokeMesh::setCapType(CapType type)  // Set cap type: Butt, Round, Square (method chaining)
-StrokeMesh & StrokeMesh::setClosed(bool closed)  // Set whether the stroke is closed (method chaining)
-StrokeMesh & StrokeMesh::setColor(const Color & color)  // Set stroke color (method chaining)
-StrokeMesh & StrokeMesh::setJoinType(JoinType type)  // Set join type: Miter, Round, Bevel (method chaining)
-StrokeMesh & StrokeMesh::setMiterLimit(float limit)  // Set miter limit for sharp corners (method chaining)
-StrokeMesh & StrokeMesh::setShape(const Path & polyline)  // Set shape from Path (method chaining)
-StrokeMesh & StrokeMesh::setWidth(float width)  // Set stroke width (method chaining)
+StrokeMesh & StrokeMesh::setCapType(CapType type)  // Set the line cap shape (StrokeMesh::CapType: Butt, Round, Square)
+StrokeMesh & StrokeMesh::setClosed(bool closed)  // Set whether the stroke forms a closed loop
+StrokeMesh & StrokeMesh::setColor(const Color & color)  // Set the stroke color
+StrokeMesh & StrokeMesh::setJoinType(JoinType type)  // Set the line join shape (StrokeMesh::JoinType: Miter, Round, Bevel)
+StrokeMesh & StrokeMesh::setMiterLimit(float limit)  // Set the miter limit for sharp corners
+StrokeMesh & StrokeMesh::setShape(const Path & polyline)  // Set the stroke shape from a Path
+StrokeMesh & StrokeMesh::setWidth(float width)  // Set the stroke width
 StrokeMesh & StrokeMesh::setWidths(const std::vector<float> & w)  // Set per-vertex widths from a list
-void StrokeMesh::update()  // Update the internal mesh (required before draw)
+void StrokeMesh::update()  // Rebuild the internal triangle mesh (call before draw after edits)
 ```
 
 ### TcpClient — TCP client connection (connect, send/receive a stream)
@@ -2709,16 +2711,16 @@ int TcpServerClient::getPort() const  // Client port
 ```cpp
 ```
 
-### Texture — Create a texture
+### Texture — GPU texture for rendering
 
 ```cpp
 void Texture::allocate(int width, int height, int channels = …, TextureUsage usage = …, int sampleCount = …) [+2]  // Allocate texture
 void Texture::allocateCubemap(int sideSize, TextureFormat format, TextureUsage usage = …, int mipLevels = …)  // Allocate a cubemap texture without initial data
-void Texture::bind() const  // Bind texture
+void Texture::bind() const  // Bind texture for rendering
 void Texture::clear()  // Release texture resources
 void Texture::draw(float x, float y) const [+1]  // Draw texture
 void Texture::drawFlippedY(float x, float y, float w, float h) const  // Draw the texture vertically flipped
-void Texture::drawSubsection(float x, float y, float w, float h, float sx, float sy, float sw, float sh) const  // Draw subsection with LUT applied
+void Texture::drawSubsection(float x, float y, float w, float h, float sx, float sy, float sw, float sh) const  // Draw subsection of texture
 int Texture::getChannels() const  // Get number of channels
 int Texture::getHeight() const  // Get height
 TextureFilter Texture::getMagFilter() const  // Get magnification filter
@@ -2792,29 +2794,29 @@ float TouchEventArgs::y() const  // Convenience: Y position of the first touch p
 
 ```cpp
 Tween<T> & Tween::delay(float seconds)  // Delay before the animation starts, in seconds (chainable)
-Tween<T> & Tween::duration(float seconds)  // Set animation duration
-Tween<T> & Tween::ease(EaseType type, EaseMode mode = …) [+1]  // Set easing type
-Tween<T> & Tween::finish()  // Jump to end (chainable)
-Tween<T> & Tween::from(T value)  // Set start value
-float Tween::getDuration() const  // Get duration
-float Tween::getElapsed() const  // Get elapsed time
-T Tween::getEnd() const  // Get end value
-int Tween::getLoopCount() const  // Get number of completed loop iterations
-float Tween::getProgress() const  // Get progress (0-1)
-T Tween::getStart() const  // Get start value
-T Tween::getValue() const  // Get current tween value
-bool Tween::isComplete() const  // Check if complete
-bool Tween::isPlaying() const  // Check if playing
-Tween<T> & Tween::loop(int count)  // Set loop count (-1=infinite, 0=none, N=repeat N times)
-Tween<T> & Tween::pause()  // Pause animation (chainable)
-Tween<T> & Tween::reset()  // Reset animation (chainable)
-Tween<T> & Tween::resume()  // Resume animation (chainable)
-Tween<T> & Tween::start()  // Start animation (chainable)
-Tween<T> & Tween::to(T value)  // Set end value
-Tween<T> & Tween::yoyo(bool enable = …)  // Enable yoyo (reverse direction each loop)
+Tween<T> & Tween::duration(float seconds)  // Set the animation duration in seconds (chainable)
+Tween<T> & Tween::ease(EaseType type, EaseMode mode = …) [+1]  // Set the easing curve; the two-type overload uses an asymmetric ease (one curve in, another out)
+Tween<T> & Tween::finish()  // Jump immediately to the end value and fire the complete event
+Tween<T> & Tween::from(T value)  // Set the start value (chainable)
+float Tween::getDuration() const  // Return the configured duration in seconds
+float Tween::getElapsed() const  // Return elapsed time in seconds within the current iteration
+T Tween::getEnd() const  // Return the end value
+int Tween::getLoopCount() const  // Return how many loop iterations have completed so far
+float Tween::getProgress() const  // Return normalized progress through the current iteration (0.0-1.0)
+T Tween::getStart() const  // Return the start value
+T Tween::getValue() const  // Return the current eased value
+bool Tween::isComplete() const  // Return true once the animation (all loops) has finished
+bool Tween::isPlaying() const  // Return true while the animation is actively playing
+Tween<T> & Tween::loop(int count)  // Repeat the animation: -1 = infinite, 0 = no loop, N = repeat N times (chainable)
+Tween<T> & Tween::pause()  // Pause the animation, keeping its current progress
+Tween<T> & Tween::reset()  // Stop the animation and reset progress to the start
+Tween<T> & Tween::resume()  // Resume a paused animation
+Tween<T> & Tween::start()  // Start (or restart) the animation and begin auto-updating each frame
+Tween<T> & Tween::to(T value)  // Set the end value (chainable)
+Tween<T> & Tween::yoyo(bool enable = …)  // Reverse direction on each loop iteration (chainable)
 ```
 
-### TweenMod — Animation modifier for Node properties (position, scale, rotation) with easing (C++ only)
+### TweenMod — Animation modifier (Mod) that tweens a Node's position, scale and rotation with easing; exposes a complete Event
 
 ```cpp
 TweenMod & TweenMod::delay(float seconds)  // Set delay before animation starts (TweenMod method) (C++ only)
@@ -2892,7 +2894,7 @@ void UdpSocket::startReceiving()  // Start the receive thread (auto-called after
 void UdpSocket::stopReceiving()  // Stop the receive thread
 ```
 
-### Vec2 — Create 2D vector (type constructor)
+### Vec2 — 2D vector (x, y)
 
 ```cpp
 float Vec2::angle() const [+1]  // Angle in radians
@@ -2911,10 +2913,10 @@ Vec2 Vec2::perpendicular() const  // Get perpendicular vector
 Vec2 Vec2::reflected(const Vec2 & normal) const  // Get reflected vector
 Vec2 & Vec2::rotate(float radians)  // Rotate in place
 Vec2 Vec2::rotated(float radians) const  // Get rotated copy
-Vec2 & Vec2::set(float x, float y) [+1]  // Set vector components (type method)
+Vec2 & Vec2::set(float x, float y) [+1]  // Set vector components
 ```
 
-### Vec3 — Create 3D vector (type constructor)
+### Vec3 — 3D vector (x, y, z)
 
 ```cpp
 Vec3 Vec3::cross(const Vec3 & v) const  // Cross product
@@ -2928,7 +2930,7 @@ Vec3 & Vec3::limit(float max)  // Limit length to max
 Vec3 & Vec3::normalize()  // Normalize in place
 Vec3 Vec3::normalized() const  // Get normalized copy
 Vec3 Vec3::reflected(const Vec3 & normal) const  // Get reflected vector
-Vec3 & Vec3::set(float x, float y, float z) [+1]  // Set vector components (type method)
+Vec3 & Vec3::set(float x, float y, float z) [+1]  // Set vector components
 Vec2 Vec3::xy() const  // Get XY components as Vec2
 ```
 
@@ -2967,7 +2969,7 @@ int VideoGrabber::getHeight() const  // Return the captured frame height in pixe
 unsigned char * VideoGrabber::getPixels() [+1]  // Return a pointer to the current RGBA pixel buffer
 Texture & VideoGrabber::getTexture() [+1]  // Return the texture holding the live camera frame (HasTexture override)
 int VideoGrabber::getWidth() const  // Return the captured frame width in pixels
-bool VideoGrabber::isFrameNew() const  // Check if a new frame is available since last update
+bool VideoGrabber::isFrameNew() const  // Return true if a new frame arrived during the most recent update()
 bool VideoGrabber::isInitialized() const  // Return true once the camera is set up and capturing
 bool VideoGrabber::isPendingPermission() const  // Return true while waiting for camera permission to be granted
 bool VideoGrabber::isVerbose() const  // Return whether verbose logging is enabled
@@ -2980,7 +2982,7 @@ void VideoGrabber::setVerbose(bool verbose)  // Enable or disable verbose loggin
 void VideoGrabber::update()  // Poll for a new frame and upload it to the texture. Call every frame; also completes a setup() that was waiting on permission
 ```
 
-### VideoPlayer — Create a video player
+### VideoPlayer — Plays a video file: load/play/stop, per-frame update, and a texture you can draw each frame
 
 ```cpp
 void VideoPlayer::close()  // Close the video and release resources
@@ -3044,7 +3046,7 @@ void VideoPlayerBase::togglePause()  // Toggle pause state
 ```cpp
 ```
 
-### VideoWriter — Low-level video encoder: you feed it frames (deterministic, fixed-rate offline render)
+### VideoWriter — Encodes frames to a video file: open a path, write frames, then close to finalize the file
 
 ```cpp
 bool VideoWriter::addFrame(const Fbo & fbo) [+1]  // Append one frame at the fixed-rate clock (frameIndex/fps)

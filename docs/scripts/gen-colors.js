@@ -1,10 +1,8 @@
-// Generate the `colors:` section of api-definition.yaml from tcColor.h's
-// `namespace colors` block. Textual insert (no js-yaml dump — preserve the
-// curated file's formatting/comments).
+// Generate docs/reference/colors.json (the grouped swatch palette consumed by
+// the web reference) from tcColor.h's `namespace colors` block.
 const fs = require('fs');
 const TR = '/Users/toru/Nextcloud/Make/TrussC/trussc';
 const HEADER = TR + '/core/include/tcColor.h';
-const YAML = TR + '/docs/api-definition.yaml';
 
 // --- parse the namespace colors block ---
 const lines = fs.readFileSync(HEADER, 'utf8').split('\n');
@@ -31,43 +29,15 @@ for (const ln of lines) {
 
 const h2 = (v) => Math.round(v * 255).toString(16).toUpperCase().padStart(2, '0');
 const hex = (r, g, b) => `#${h2(r)}${h2(g)}${h2(b)}`;
-const num = (v) => (Number.isInteger(v) ? v.toFixed(1) : String(v));   // 1 -> "1.0"
+const r3 = (v) => Math.round(v * 1000) / 1000;        // keep rgba tidy
 
-// --- emit the yaml section ---
-let out = [];
-out.push('# ==========================================================================');
-out.push('# Colors (named color constants in the trussc::colors namespace)');
-out.push('# GENERATED from core/include/tcColor.h by scratchpad/gen-colors.js.');
-out.push('# Grouped palette (see docs: rendered as swatches, not a flat constant list).');
-out.push('# ==========================================================================');
-out.push('colors:');
-let total = 0;
-for (const g of groups) {
-    out.push(`  - group: "${g.group}"`);
-    out.push('    items:');
-    for (const c of g.items) {
-        const [r, gg, b, a] = c.rgba;
-        out.push(`      - { name: ${c.name}, hex: "${hex(r, gg, b)}", rgba: [${num(r)}, ${num(gg)}, ${num(b)}, ${num(a)}] }`);
-        total++;
-    }
-}
-out.push('');
-const section = out.join('\n') + '\n';
-
-// --- insert before the Keywords comment header (idempotent: strip an existing
-//     generated colors section first, so re-running after a tcColor.h change
-//     refreshes rather than duplicates) ---
-let yaml = fs.readFileSync(YAML, 'utf8');
-const colorsHdr = '# ==========================================================================\n# Colors (named color';
-const kwHdr = '# ==========================================================================\n# Keywords';
-const cIdx = yaml.indexOf(colorsHdr);
-if (cIdx >= 0) {
-    const kIdx = yaml.indexOf(kwHdr, cIdx);
-    yaml = yaml.slice(0, cIdx) + yaml.slice(kIdx);   // remove old colors section
-}
-const idx = yaml.indexOf(kwHdr);
-if (idx < 0) { console.error('keywords marker not found'); process.exit(1); }
-const next = yaml.slice(0, idx) + section + '\n' + yaml.slice(idx);
-fs.writeFileSync(YAML, next);
-console.log(`inserted colors: ${groups.length} groups, ${total} colors`);
-console.log('groups:', groups.map(g => `${g.group}(${g.items.length})`).join(', '));
+// --- emit reference/colors.json (the grouped swatch palette) ---
+const OUT = TR + '/docs/reference/colors.json';
+const palette = groups.map(g => ({
+    group: g.group,
+    items: g.items.map(c => ({ name: c.name, hex: hex(c.rgba[0], c.rgba[1], c.rgba[2]), rgba: c.rgba.map(r3) })),
+}));
+fs.writeFileSync(OUT, JSON.stringify(palette, null, 2) + '\n');
+const total = palette.reduce((n, g) => n + g.items.length, 0);
+console.log(`wrote ${OUT}: ${palette.length} groups, ${total} colors`);
+console.log('groups:', palette.map(g => `${g.group}(${g.items.length})`).join(', '));

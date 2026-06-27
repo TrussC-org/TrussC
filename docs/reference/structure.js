@@ -33,7 +33,22 @@ function dumpAst() {
     const args = ['-std=c++20', '-DNDEBUG', '-I', INCLUDE, '-Xclang', '-ast-dump=json',
         '-Xclang', '-ast-dump-filter=trussc', '-fsyntax-only', ...extra, tmp];
     process.stderr.write('structure: running clang AST dump (~280 MB, a few seconds)…\n');
-    return execSync(`${CXX} ${args.map(a => `'${a}'`).join(' ')}`, { maxBuffer: 1024 * 1024 * 1024 }).toString();
+    try {
+        return execSync(`${CXX} ${args.map(a => `'${a}'`).join(' ')}`, { maxBuffer: 1024 * 1024 * 1024 }).toString();
+    } catch (e) {
+        // clang -ast-dump emits the AST to stdout even when it exits non-zero
+        // (e.g. a stray diagnostic after the trussc namespace was already
+        // dumped). If we got a real AST, use it — only the trussc filter matters.
+        const out = (e.stdout || '').toString();
+        const err = (e.stderr || '').toString();
+        if (out.length > 100000) {
+            process.stderr.write('structure: clang exited non-zero but produced an AST; using it. First diagnostics:\n'
+                + err.split('\n').slice(0, 8).join('\n') + '\n');
+            return out;
+        }
+        process.stderr.write('structure: clang AST dump FAILED (no usable output). clang stderr:\n' + err + '\n');
+        throw e;
+    }
 }
 const cached = argVal('--ast');
 let astText = cached ? fs.readFileSync(cached, 'utf8') : dumpAst();

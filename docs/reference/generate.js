@@ -52,6 +52,8 @@ for (const id in structure) {
         of_category: p.of_category, of_notes: p.of_notes,   // oF mapping prose
         description: p.description,                          // {en,ja,ko}
         details: p.details, snippet: p.snippet,             // snippet = authorable example code
+        related: p.related, platform_note: p.platform_note, // related symbols, platform behaviour note
+        value_desc: p.value_desc,                           // enum: per-value descriptions {Member:{en,ja,ko}}
         documented: !!(p.description && p.description.en),
     };
 }
