@@ -20,12 +20,29 @@ const data = JSON.parse(fs.readFileSync(path, 'utf8'));
 const skip = { member: 0, ns: 0, template: 0, unbindable: 0, noargs: 0 };
 const noargsFns = [];   // signatures missing structured args[] (structure.js gap)
 
-// An arg is bindable unless it's an output ref / raw pointer / C array.
-// (shared_ptr<T> is a type, not isPointer, so it stays bindable.)
+// Primitive/scalar type words — a non-const ref to one of these is a true
+// out-param Sol2 can't bind (can't bind a temporary to `float&`). A non-const
+// ref to a USERTYPE (Light&, Pixels&) IS bindable (Lua object passed by ref).
+const PRIM = new Set([
+    'void', 'bool', 'char', 'short', 'int', 'long', 'float', 'double',
+    'unsigned', 'signed', 'size_t', 'wchar_t', 'char16_t', 'char32_t',
+    'int8_t', 'int16_t', 'int32_t', 'int64_t', 'uint8_t', 'uint16_t', 'uint32_t', 'uint64_t',
+]);
+
+// An arg is bindable unless it's a raw pointer, a C array, or a non-const
+// reference to a primitive (a real out-param). (shared_ptr<T> isn't isPointer.)
 function argBindable(a) {
     if (a.isArray) return false;
-    if (a.isPointer) return false;                                  // raw pointer
-    if (a.isRef && !a.isConst && !/&&/.test(a.type)) return false;  // non-const lvalue ref (out-param)
+    if (a.isPointer) return false;
+    if (a.isRef && !a.isConst && !/&&/.test(a.type)) {
+        // A non-const ref is a bindable in/out only for a USERTYPE (TrussC class,
+        // passed by ref). For a value Sol2 converts (primitive or std type) it's a
+        // true out-param it can't bind. Keep only non-primitive, non-std bases.
+        const base = a.type.replace(/[&*]/g, '').replace(/\bconst\b/g, '').trim();
+        const allPrim = base.split(/\s+/).every(w => PRIM.has(w));
+        const stdValue = base.includes('std::') || /\b(string|basic_string|vector|map|set|pair|tuple|function)\b/.test(base);
+        if (allPrim || stdValue) return false;   // out-param Sol2 can't bind
+    }
     return true;
 }
 
