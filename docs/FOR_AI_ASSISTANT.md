@@ -1356,10 +1356,12 @@ bool sameSubnet(const std::string & a, const std::string & b, const std::string 
 ### Other
 
 ```cpp
+float atanh(float x) [std]  // Inverse hyperbolic tangent
 Baseline  // Direction shorthand for Direction::Baseline (text baseline)
 Bottom  // Direction shorthand for Direction::Bottom
 Center  // Direction shorthand for Direction::Center
 EVENT_DRIVEN  // Frame-rate sentinel: only redraw on demand (event-driven)
+float exp2(float x) [std]  // Base-2 exponential (2^x)
 HALF_TAU  // Half circle (PI)
 KEY_BACKSPACE  // Backspace key
 KEY_DELETE  // Delete key
@@ -1392,15 +1394,20 @@ KEY_SPACE  // Space key
 KEY_TAB  // Tab key
 KEY_UP  // Up arrow key
 Left  // Direction shorthand for Direction::Left
+float log10(float x) [std]  // Base-10 (common) logarithm
+float log2(float x) [std]  // Base-2 logarithm
 MOUSE_BUTTON_LEFT  // Left mouse button
 MOUSE_BUTTON_MIDDLE  // Middle mouse button
 MOUSE_BUTTON_RIGHT  // Right mouse button
 Vec2 operator*(float s, const Vec2 & v) [+4]  // Component-wise multiplication
 PI ⚠️deprecated  // Pi (use TAU instead)
 QUARTER_TAU  // Quarter circle (PI/2)
+float remainder(float x, float y) [std]  // IEEE floating-point remainder of x/y
 Right  // Direction shorthand for Direction::Right
+float tanh(float x) [std]  // Hyperbolic tangent
 TAU  // Full circle (2*PI)
 Top  // Direction shorthand for Direction::Top
+float trunc(float x) [std]  // Truncate toward zero (drop the fractional part)
 VERSION_MAJOR  // TrussC major version number
 VERSION_MINOR  // TrussC minor version number
 VERSION_PATCH  // TrussC patch version number

@@ -14106,3 +14106,40 @@ description.en = "Wrap value within range [min, max)"
 description.ja = "値を範囲内にラップ [min, max)"
 description.ko = "값을 [min, max) 범위 안으로 랩핑"
 related = ["fmod", "clamp", "angleDifference"]
+
+# --- additional std:: math (curated, provider:std; see std-symbols.js) ---
+
+["atanh"]
+description.en = "Inverse hyperbolic tangent"
+description.ja = "逆双曲線正接"
+description.ko = "역쌍곡탄젠트"
+
+["tanh"]
+description.en = "Hyperbolic tangent"
+description.ja = "双曲線正接"
+description.ko = "쌍곡탄젠트"
+
+["exp2"]
+description.en = "Base-2 exponential (2^x)"
+description.ja = "2 の累乗 (2^x)"
+description.ko = "2의 거듭제곱 (2^x)"
+
+["log2"]
+description.en = "Base-2 logarithm"
+description.ja = "底 2 の対数"
+description.ko = "밑이 2인 로그"
+
+["log10"]
+description.en = "Base-10 (common) logarithm"
+description.ja = "常用対数 (底 10)"
+description.ko = "상용로그 (밑 10)"
+
+["trunc"]
+description.en = "Truncate toward zero (drop the fractional part)"
+description.ja = "ゼロ方向に切り捨て (小数部を捨てる)"
+description.ko = "0 방향으로 절삭 (소수부 버림)"
+
+["remainder"]
+description.en = "IEEE floating-point remainder of x/y"
+description.ja = "x/y の IEEE 浮動小数点剰余"
+description.ko = "x/y의 IEEE 부동소수점 나머지"
