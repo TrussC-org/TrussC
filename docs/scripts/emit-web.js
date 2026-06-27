@@ -79,6 +79,7 @@ function getVersion() {
 
 // === canonical: reference-data.json (prose + structure of truth) ============
 const REF = JSON.parse(fs.readFileSync(REF_DATA, 'utf8'));
+const COLORS = JSON.parse(fs.readFileSync(path.join(__dirname, '../reference/colors.json'), 'utf8'));
 let refHits = 0, refMiss = 0;
 
 // Combined (legacy) en/ja/ko description trio: reference-data wins when it
@@ -490,7 +491,7 @@ function build(examplesMap) {
         types,
         enums,
         macros,
-        ...(API.colors ? { colors: API.colors } : {}),
+        colors: COLORS,
     };
 }
 
