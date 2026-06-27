@@ -20,6 +20,27 @@ const data = JSON.parse(fs.readFileSync(path, 'utf8'));
 const skip = { member: 0, ns: 0, template: 0, unbindable: 0, noargs: 0 };
 const noargsFns = [];   // signatures missing structured args[] (structure.js gap)
 
+// Set of top-level TrussC type/enum names. Lambda param types must qualify these
+// with trussc:: — otherwise e.g. the enum `Beep` collides with Win32 `Beep()`
+// (windows.h) and fails to compile on Windows (C2872 ambiguous).
+const TRUSSC_TYPES = (() => {
+    const out = [];
+    for (const id in data) {
+        const e = data[id];
+        if ((e.kind === 'type' || e.kind === 'enum') && !e.owner && !e.ns) out.push(e.name);
+    }
+    return out;
+})();
+function qualifyType(t) {
+    let out = t;
+    for (const name of TRUSSC_TYPES) {
+        // qualify a bare occurrence (not already preceded by ':' or a word char),
+        // incl. inside templates (std::vector<Vec3> -> std::vector<trussc::Vec3>).
+        out = out.replace(new RegExp('(^|[^:\\w])(' + name + ')(?![\\w])', 'g'), '$1trussc::$2');
+    }
+    return out;
+}
+
 // Primitive/scalar type words — a non-const ref to one of these is a true
 // out-param Sol2 can't bind (can't bind a temporary to `float&`). A non-const
 // ref to a USERTYPE (Light&, Pixels&) IS bindable (Lua object passed by ref).
@@ -55,7 +76,7 @@ function variantsOf(args) {
     args.forEach((a, i) => {
         if (a.hasDefault && firstDefault === args.length) firstDefault = i;
         const nm = a.name || `a${i}`;
-        decls.push(`${a.type} ${nm}`.replace(/\s+/g, ' ').trim());
+        decls.push(`${qualifyType(a.type)} ${nm}`.replace(/\s+/g, ' ').trim());
         calls.push(nm);
     });
     const out = [];
