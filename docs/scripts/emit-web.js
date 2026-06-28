@@ -121,8 +121,14 @@ function mergeDeprecated(refId, ym, trustRef = true) {
     const r = trustRef && REF[refId] && REF[refId].deprecated;
     const y = ym && ym.deprecated;
     if (!r && !y) return undefined;
-    const out = { reason: (r && r.reason) || (y && y.reason) || '' };
-    if (y && y.replacement) out.replacement = y.replacement;
+    const reason = (r && r.reason) || (y && y.reason) || '';
+    const out = { reason };
+    let replacement = y && y.replacement;
+    if (!replacement && reason) {                          // parse "Use/call/Renamed to `X()`" out of the reason -> clickable link
+        const m = reason.match(/(?:Use|call|Renamed to)\s+`?([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)`?\s*\(/);
+        if (m) replacement = m[1];
+    }
+    if (replacement) out.replacement = replacement;
     if (y && y.url) out.url = y.url;
     return out;
 }
