@@ -7,6 +7,8 @@
 // This file is included from TrussC.h
 // to access sokol and internal namespace variables
 
+#include "../utils/tcAnnotations.h"
+
 namespace trussc {
 
 // Pixel format for Texture/FBO allocation
@@ -27,7 +29,7 @@ enum class TextureFormat {
 // Convert TextureFormat to sokol format.
 // Public: app code interfacing with sokol/shaders legitimately needs this
 // (e.g. setColorFormat); it is NOT a framework-private helper.
-inline sg_pixel_format toSokolFormat(TextureFormat fmt) {
+TC_INTERNAL inline sg_pixel_format toSokolFormat(TextureFormat fmt) {
     switch (fmt) {
         case TextureFormat::RGBA8:   return SG_PIXELFORMAT_RGBA8;
         case TextureFormat::RGBA16F: return SG_PIXELFORMAT_RGBA16F;

@@ -18,6 +18,7 @@
 
 #include "tcMath.h"   // TAU, HALF_TAU
 #include "../utils/tcLog.h"
+#include "../utils/tcAnnotations.h"
 #include <algorithm>
 #include <cmath>
 
@@ -215,7 +216,7 @@ void subdivideBezierN(std::vector<Vec3> pts, float tolSq, int depth, Out& out) {
 // that supports `push_back(Vec3)` (e.g. a std::vector<Vec3>). Includes
 // both endpoints; emits at least two points even for a degenerate curve.
 template <class Out>
-void tessellateCubicBezier(const Vec3& p0, const Vec3& p1,
+TC_INTERNAL void tessellateCubicBezier(const Vec3& p0, const Vec3& p1,
                            const Vec3& p2, const Vec3& p3,
                            float tolerance, Out& out) {
     out.push_back(p0);
@@ -224,7 +225,7 @@ void tessellateCubicBezier(const Vec3& p0, const Vec3& p1,
 }
 
 template <class Out>
-void tessellateQuadBezier(const Vec3& p0, const Vec3& p1, const Vec3& p2,
+TC_INTERNAL void tessellateQuadBezier(const Vec3& p0, const Vec3& p1, const Vec3& p2,
                           float tolerance, Out& out) {
     out.push_back(p0);
     if (tolerance <= 0.0f) tolerance = 0.1f;
@@ -235,7 +236,7 @@ void tessellateQuadBezier(const Vec3& p0, const Vec3& p1, const Vec3& p2,
 // n == 3 or n == 4 the dedicated quad/cubic versions above are faster
 // and produce identical results — prefer them when the order is fixed.
 template <class Out>
-void tessellateBezierN(const std::vector<Vec3>& pts, float tolerance, Out& out) {
+TC_INTERNAL void tessellateBezierN(const std::vector<Vec3>& pts, float tolerance, Out& out) {
     if (pts.empty()) return;
     out.push_back(pts.front());
     if (pts.size() < 2) return;

@@ -75,6 +75,7 @@
 #include <array>
 #include <utility>
 #include <type_traits>
+#include "../utils/tcAnnotations.h"
 
 // Value window scanned by the compile-time enum reflection below. Only valid
 // enumerators in this range are recovered (out-of-range probes are constexpr
@@ -336,11 +337,11 @@ private:
 // through the vtable). The single-base helper exists because clang refuses a
 // pack used as the nested-name-specifier of a member access inside a fold.
 template <class Base, class T>
-inline void reflectOneBase(T* self, Reflector& r) {
+TC_INTERNAL inline void reflectOneBase(T* self, Reflector& r) {
     self->Base::reflectMembers(r);
 }
 template <class... Bases, class T>
-inline void reflectBases(T* self, Reflector& r) {
+TC_INTERNAL inline void reflectBases(T* self, Reflector& r) {
     (reflectOneBase<Bases>(self, r), ...);
 }
 
@@ -350,7 +351,7 @@ inline void reflectBases(T* self, Reflector& r) {
 // by ADL), as a plain int otherwise. Being a template matters: if constexpr
 // discards the non-matching branch without type-checking it.
 template <class T>
-inline bool reflectValue(Reflector& r, const char* name, T& v) {
+TC_INTERNAL inline bool reflectValue(Reflector& r, const char* name, T& v) {
     if constexpr (std::is_enum_v<T>) {
         int i = static_cast<int>(v);
         bool edited;
@@ -394,7 +395,7 @@ inline bool reflectValue(Reflector& r, const char* name, T& v) {
 // enum's own namespace (found by ADL from TC_VALUE). Labels are listed in
 // declaration order: labels[(int)value] == name.
 #define TC_ENUM_LABELS(EnumType, ...) \
-    inline ::trussc::EnumLabelSpan tcEnumLabelsAdl(EnumType) { \
+    TC_INTERNAL inline ::trussc::EnumLabelSpan tcEnumLabelsAdl(EnumType) { \
         static constexpr const char* labels_[] = {__VA_ARGS__}; \
         return { labels_, static_cast<int>(sizeof(labels_) / sizeof(labels_[0])) }; \
     }
