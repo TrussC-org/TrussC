@@ -1490,7 +1490,7 @@ int64_t BuildInfo::timestamp()  // Build timestamp as Unix seconds (UTC)
 int BuildInfo::year()  // Build year (e.g. 2026)
 ```
 
-### CameraContext
+### CameraContext — A snapshot of the camera (view / projection / viewport) that a part of the scene was drawn under. One is registered per camera scope (screen setup, EasyCam::begin, Fbo::begin) and stamped on each node at draw time, so mouse picking unprojects the cursor through the same camera the node was rendered with.
 
 ```cpp
 Vec3 CameraContext::worldToScreen(const Vec3 & worldPos) const  // Convert world coordinate to screen coordinate (x, y = screen pos, z = depth 0-1)
@@ -1810,7 +1810,7 @@ bool GraphicsBackend::isWebGPU()  // True when running on WebGPU
 const char * GraphicsBackend::name()  // Short backend name: "opengl" / "gles3" / "webgl2" / "d3d11" / "metal" / "webgpu" / "vulkan" / "dummy" / "unknown" 
 ```
 
-### HasTexture
+### HasTexture — Base class for objects that own a texture (e.g. Image, Fbo, VideoPlayer); exposes getTexture().
 
 ```cpp
 Texture & HasTexture::getTexture() [+1]  // Get internal texture
@@ -1959,6 +1959,11 @@ void Light::setSpot(const Vec3 & position, const Vec3 & direction, float innerHa
 ```
 
 ### LogEventArgs — Arguments delivered for each log message (level, text, and timestamp)
+
+```cpp
+```
+
+### LogStream — Stream-based log output — the object returned by logNotice() / logWarning() / logError(), accepting values via operator<<.
 
 ```cpp
 ```
@@ -2530,6 +2535,11 @@ void Shader::setTexture(int slot, sg_image image, sg_sampler sampler) [+1]  // B
 void Shader::setUniform(int slot, float value) [+9]  // Set uniform variable by slot (vector overloads send arrays; Vec3 array is padded to Vec4 per std140)
 ```
 
+### ShaderVertex — Standard vertex format for shader drawing (position, normal, texcoord, color).
+
+```cpp
+```
+
 ### Sound — Audio playback
 
 ```cpp
@@ -3015,7 +3025,7 @@ void VideoPlayer::setUseHwAccel(bool enable)  // Enable/disable hardware decodin
 void VideoPlayer::update()  // Update the video frame. Call once per frame in update()
 ```
 
-### VideoPlayerBase
+### VideoPlayerBase — Abstract base class for video playback. Use VideoPlayer for the concrete implementation.
 
 ```cpp
 void VideoPlayerBase::firstFrame()  // Go to the first frame
@@ -3098,44 +3108,44 @@ std::string Xml::toString(const std::string & indent = std::string("  ")) const 
 ## Enums
 
 ```cpp
-enum AxisMode { None, Fill, Content }
-enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }
-enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled }
+enum AxisMode { None, Fill, Content }  // Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children).
+enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Built-in system beep sounds (ping, success, error, …) for beep().
+enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled }  // Color blend mode: Alpha, Add, Multiply, Screen, Subtract, Disabled.
 enum ChipSoundNote::Wave { Sin, Square, Triangle, Sawtooth, Noise, PinkNoise, Silent }
-enum Codec { None, LZ4 }
-enum Cursor { Default, Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Custom0, Custom1, Custom2, Custom3, Custom4, Custom5, Custom6, Custom7, Custom8, Custom9, Custom10, Custom11, Custom12, Custom13, Custom14, Custom15 }
+enum Codec { None, LZ4 }  // Compression codec: None (raw) or LZ4.
+enum Cursor { Default, Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Custom0, Custom1, Custom2, Custom3, Custom4, Custom5, Custom6, Custom7, Custom8, Custom9, Custom10, Custom11, Custom12, Custom13, Custom14, Custom15 }  // Mouse cursor shape (Default, Arrow, IBeam, Crosshair, Hand, resize cursors, …).
 enum CurveStyle::Mode { Tolerance, Resolution }  // Curve tessellation mode: adaptive tolerance or fixed resolution
-enum Deliver { Inline, Main }
-enum Direction { Left, Center, Right, Top, Bottom, Baseline }
-enum EaseMode { In, Out, InOut }
-enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce }
+enum Deliver { Inline, Main }  // Event delivery timing: Inline fires synchronously on the calling thread; Main queues the event to the main thread.
+enum Direction { Left, Center, Right, Top, Bottom, Baseline }  // Alignment / direction: Left, Center, Right, Top, Bottom, Baseline.
+enum EaseMode { In, Out, InOut }  // Easing direction: In, Out, or InOut.
+enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce }  // Easing function family (Linear, Quad, Cubic, Sine, Expo, …) for tweens.
 enum EasyCam::Modifier { None, Shift, Ctrl, Alt, Super }
-enum ImageType { Color, Grayscale }
+enum ImageType { Color, Grayscale }  // Image type: Color or Grayscale.
 enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku) strictness for vertical / Japanese text
-enum LayoutDirection { Vertical, Horizontal }
-enum LightType { Directional, Point, Spot }
-enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }
-enum MixMode { Auto, DownmixMono }
-enum MouseButton { Left, Right, Middle, None }
+enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.
+enum LightType { Directional, Point, Spot }  // Light type: Directional, Point, or Spot.
+enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Log severity, from Verbose (most detailed) to Fatal; Silent disables logging.
+enum MixMode { Auto, DownmixMono }  // Sound channel mixing: Auto (match the output) or DownmixMono.
+enum MouseButton { Left, Right, Middle, None }  // Mouse button: Left, Right, Middle, or None.
 enum Orientation { Portrait, PortraitUpsideDown, LandscapeLeft, LandscapeRight, Landscape, All, AllButUpsideDown }  // Screen orientation mask passed to setOrientation (iOS/Android); values are bit flags and can be combined with |
-enum PixelFormat { U8, F32 }
-enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }
-enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }
+enum PixelFormat { U8, F32 }  // CPU pixel data format: U8 (8-bit) or F32 (float).
+enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Draw primitive mode: Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points.
+enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Geometry primitive type: Points, Lines, LineStrip, Triangles, TriangleStrip, Quads.
 enum ScrollBar::Direction { Vertical, Horizontal }
 enum SoundSource::Kind { Eager, Stream }  // Source kind tag on SoundSource, letting the mixer dispatch without a per-frame virtual call: Eager (SoundBuffer, full PCM in RAM) vs Stream (SoundStream, decoded on demand).
-enum StrokeCap { Butt, Round, Square }
-enum StrokeJoin { Miter, Round, Bevel }
+enum StrokeCap { Butt, Round, Square }  // Line cap style for strokes: Butt, Round, Square.
+enum StrokeJoin { Miter, Round, Bevel }  // Line join style for strokes: Miter, Round, Bevel.
 enum StrokeMesh::CapType { CAP_BUTT, CAP_ROUND, CAP_SQUARE }  // Line cap shape for the ends of an open stroke
 enum StrokeMesh::JoinType { JOIN_MITER, JOIN_ROUND, JOIN_BEVEL }  // Line join shape at the corners of a stroke
 enum TcyMode { Rotate, Upright, Combine }  // Tate-chu-yoko: how Latin / digit runs are laid out within vertical text
-enum TextureFilter { Nearest, Linear }
-enum TextureFormat { RGBA8, RGBA16F, RGBA32F, R8, R16F, R32F, RG8, RG16F, RG32F, BGRA8, RGBA16 }
-enum TextureUsage { Immutable, Dynamic, Stream, RenderTarget }
-enum TextureWrap { Repeat, ClampToEdge, MirroredRepeat }
-enum ThermalState { Nominal, Fair, Serious, Critical }
-enum VideoCodec { H264, HEVC, ProRes422, ProRes4444 }
-enum WindowType { Rect, Hanning, Hamming, Blackman }
-enum WritingMode { Horizontal, VerticalRL }
+enum TextureFilter { Nearest, Linear }  // Texture sampling filter: Nearest or Linear.
+enum TextureFormat { RGBA8, RGBA16F, RGBA32F, R8, R16F, R32F, RG8, RG16F, RG32F, BGRA8, RGBA16 }  // GPU texture format (RGBA8, RGBA16F, R8, …) — channel layout and bit depth.
+enum TextureUsage { Immutable, Dynamic, Stream, RenderTarget }  // Texture update pattern: Immutable, Dynamic, Stream, or RenderTarget.
+enum TextureWrap { Repeat, ClampToEdge, MirroredRepeat }  // Texture wrap mode: Repeat, ClampToEdge, MirroredRepeat.
+enum ThermalState { Nominal, Fair, Serious, Critical }  // Device thermal state, from Nominal to Critical.
+enum VideoCodec { H264, HEVC, ProRes422, ProRes4444 }  // Video codec: H264, HEVC, ProRes422, ProRes4444.
+enum WindowType { Rect, Hanning, Hamming, Blackman }  // FFT window function: Rect, Hanning, Hamming, Blackman.
+enum WritingMode { Horizontal, VerticalRL }  // Text writing mode: Horizontal or VerticalRL (vertical, right-to-left).
 ```
 
 ## Type aliases
