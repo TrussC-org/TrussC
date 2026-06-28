@@ -13,7 +13,7 @@ keywords = ["microphone", "mic", "capture", "input", "record", "callback"]
 description.en = "Real-time capture callback event (microphone input). RT-safe same as audioOut."
 description.ja = "リアルタイム入力コールバック event (マイク入力)。RT-safe 要件は audioOut と同様"
 description.ko = "실시간 캡처 콜백 이벤트 (마이크 입력). RT-safe 요건은 audioOut과 동일"
-related = ["Event", "AudioInBuffer", "audioOut", "getMicInput", "getMicAnalysisBuffer"]
+related = ["Event<T>", "AudioInBuffer", "getMicInput", "getMicAnalysisBuffer"]
 
 ["App::audioOut"]
 category = "events"
@@ -29,7 +29,7 @@ keywords = ["exit", "quit", "cleanup", "shutdown", "teardown"]
 description.en = "App exit callback (override for cleanup before shutdown)"
 description.ja = "アプリ終了コールバック(終了前のクリーンアップにオーバーライド)"
 description.ko = "앱 종료 콜백(종료 전 정리를 위해 오버라이드)"
-related = ["requestExit"]
+related = ["App::requestExit"]
 
 ["App::filesDropped"]
 category = "events"
@@ -37,7 +37,6 @@ keywords = ["drop", "drag and drop", "files", "dropped"]
 description.en = "Files were dropped onto the window"
 description.ja = "ウィンドウにファイルがドロップされた"
 description.ko = "윈도우에 파일이 드롭됨"
-related = ["filesDropped"]
 
 ["App::isExitRequested"]
 category = "events"
@@ -45,7 +44,7 @@ keywords = ["exit", "quit", "close", "query", "requested"]
 description.en = "Whether an exit has been requested"
 description.ja = "終了が要求されているかどうか"
 description.ko = "종료가 요청되었는지 여부"
-related = ["requestExit"]
+related = ["App::requestExit"]
 
 ["App::keyPressed"]
 category = "events"
@@ -53,7 +52,7 @@ keywords = ["key", "keydown", "keyboard", "type", "input", "press"]
 description.en = "Key pressed. Use KEY_* constants for special keys, or uppercase char literals for printable keys (e.g. key == 'A', key == '1')"
 description.ja = "キーが押された。特殊キーはKEY_*定数、印字可能キーは大文字リテラル（例: key == 'A', key == '1'）で比較"
 description.ko = "키가 눌렸을 때. 특수 키는 KEY_* 상수, 출력 가능한 키는 대문자 리터럴(예: key == 'A', key == '1')로 비교"
-related = ["keyReleased", "isKeyPressed", "isShiftPressed"]
+related = ["isKeyPressed", "isShiftPressed"]
 
 ["App::keyReleased"]
 category = "events"
@@ -61,7 +60,7 @@ keywords = ["key", "keyup", "keyboard", "release", "up"]
 description.en = "Key released"
 description.ja = "キーが離された"
 description.ko = "키가 떼졌을 때"
-related = ["keyPressed", "isKeyPressed"]
+related = ["isKeyPressed"]
 
 ["App::mouseDragged"]
 category = "events"
@@ -69,7 +68,7 @@ keywords = ["drag", "swipe", "move", "pan", "pointer"]
 description.en = "Mouse dragged"
 description.ja = "マウスがドラッグされた"
 description.ko = "마우스가 드래그되었을 때"
-related = ["mouseMoved", "isMousePressed"]
+related = ["isMousePressed"]
 
 ["App::mouseMoved"]
 category = "events"
@@ -77,7 +76,7 @@ keywords = ["move", "hover", "motion", "pointer", "cursor"]
 description.en = "Mouse moved"
 description.ja = "マウスが移動した"
 description.ko = "마우스가 움직였을 때"
-related = ["mouseDragged", "getMousePos"]
+related = ["getMousePos"]
 
 ["App::mousePressed"]
 category = "events"
@@ -85,7 +84,7 @@ keywords = ["click", "press", "mousedown", "tap", "touch", "down"]
 description.en = "Mouse button pressed"
 description.ja = "マウスボタンが押された"
 description.ko = "마우스 버튼이 눌렸을 때"
-related = ["mouseReleased", "getMousePos", "getMouseButton", "isMousePressed"]
+related = ["getMousePos", "getMouseButton", "isMousePressed"]
 
 ["App::mouseReleased"]
 category = "events"
@@ -93,7 +92,7 @@ keywords = ["release", "mouseup", "click", "up", "lift"]
 description.en = "Mouse button released"
 description.ja = "マウスボタンが離された"
 description.ko = "마우스 버튼이 떼졌을 때"
-related = ["mousePressed", "getMouseButton"]
+related = ["getMouseButton"]
 
 ["App::mouseScrolled"]
 category = "events"
@@ -101,7 +100,6 @@ keywords = ["scroll", "wheel", "zoom", "trackpad", "dolly"]
 description.en = "Mouse wheel / trackpad scrolled"
 description.ja = "マウスホイール / トラックパッドがスクロールされた"
 description.ko = "마우스 휠 / 트랙패드가 스크롤되었을 때"
-related = ["mouseMoved", "mouseDragged"]
 
 ["App::requestExit"]
 category = "events"
@@ -109,7 +107,7 @@ keywords = ["exit", "quit", "close", "shutdown", "request"]
 description.en = "Request the app to exit"
 description.ja = "アプリの終了を要求"
 description.ko = "앱 종료를 요청"
-related = ["isExitRequested", "exit"]
+related = ["App::isExitRequested"]
 
 ["App::setSize"]
 category = "events"
@@ -125,7 +123,6 @@ keywords = ["touch", "finger", "drag", "move", "mobile", "ios", "android"]
 description.en = "Touch moved (Android/iOS, multi-touch)"
 description.ja = "タッチが移動した(Android/iOS、マルチタッチ)"
 description.ko = "터치가 이동함(Android/iOS, 멀티터치)"
-related = ["touchPressed", "touchReleased"]
 
 ["App::touchPressed"]
 category = "events"
@@ -133,7 +130,6 @@ keywords = ["touch", "finger", "tap", "down", "mobile", "ios", "android"]
 description.en = "Touch began (Android/iOS, multi-touch)"
 description.ja = "タッチが開始した(Android/iOS、マルチタッチ)"
 description.ko = "터치가 시작됨(Android/iOS, 멀티터치)"
-related = ["touchMoved", "touchReleased"]
 
 ["App::touchReleased"]
 category = "events"
@@ -141,7 +137,6 @@ keywords = ["touch", "finger", "release", "up", "mobile", "ios", "android"]
 description.en = "Touch ended or was cancelled (check touch.cancelled)"
 description.ja = "タッチが終了またはキャンセルされた(touch.cancelled を確認)"
 description.ko = "터치가 끝나거나 취소됨(touch.cancelled 확인)"
-related = ["touchPressed", "touchMoved"]
 
 ["App::windowResized"]
 category = "events"
@@ -156,7 +151,7 @@ keywords = ["audio", "device", "changed", "switch", "reinit"]
 description.en = "Argument type for the AudioEngine::audioDeviceChanged event, fired after every successful init() (initial and re-init). Reports the resolved device's real name (never empty)."
 description.ja = "AudioEngine::audioDeviceChanged イベントの引数型。init() 成功ごと (初回・再初期化とも) に発火する。解決されたデバイスの実名を報告する (空にはならない)"
 description.ko = "AudioEngine::audioDeviceChanged 이벤트의 인자 타입. init() 성공 시마다 (최초·재초기화 모두) 발생. 해석된 디바이스의 실제 이름을 보고 (비지 않음)"
-related = ["audioDeviceChanged", "AudioEngine"]
+related = ["AudioEngine::audioDeviceChanged", "AudioEngine"]
 
 ["AudioDeviceChangedArgs::bufferSize"]
 description.en = "Active device buffer size in frames"
@@ -193,7 +188,7 @@ keywords = ["audio", "device", "soundcard", "output", "playback"]
 description.en = "One entry in the list returned by AudioEngine::listDevices()."
 description.ja = "AudioEngine::listDevices() が返すリストの 1 エントリ"
 description.ko = "AudioEngine::listDevices() 가 반환하는 목록의 한 항목"
-related = ["listDevices", "AudioEngine", "AudioSettings"]
+related = ["AudioEngine", "AudioSettings"]
 
 ["AudioDeviceInfo::isDefault"]
 description.en = "True if this is the system default playback device"
@@ -210,7 +205,7 @@ keywords = ["mixer", "audio device", "miniaudio", "sound engine", "output"]
 description.en = "Singleton miniaudio-based mixer engine. Owns the output device, mixes all playing Sound voices, exposes real-time audioOut / audioIn / audioDeviceChanged events, and an FFT analysis ring buffer. Access via AudioEngine::getInstance(); most apps drive it indirectly through the Sound class and the global initAudio() / shutdownAudio() helpers."
 description.ja = "miniaudio ベースのシングルトンミキサーエンジン。出力デバイスを所有し、再生中の全 Sound ボイスをミックスし、リアルタイムの audioOut / audioIn / audioDeviceChanged イベントと FFT 解析リングバッファを公開する。AudioEngine::getInstance() でアクセス。多くのアプリは Sound クラスとグローバルの initAudio() / shutdownAudio() ヘルパー経由で間接的に利用する"
 description.ko = "miniaudio 기반 싱글톤 믹서 엔진. 출력 디바이스를 소유하고, 재생 중인 모든 Sound 보이스를 믹스하며, 실시간 audioOut / audioIn / audioDeviceChanged 이벤트와 FFT 분석 링 버퍼를 노출한다. AudioEngine::getInstance() 로 접근. 대부분의 앱은 Sound 클래스와 전역 initAudio() / shutdownAudio() 헬퍼를 통해 간접적으로 사용한다"
-related = ["getInstance", "Sound", "MicInput", "AudioSettings", "initAudio"]
+related = ["AudioEngine::getInstance", "Sound", "MicInput", "AudioSettings", "initAudio"]
 
 ["AudioEngine::audioDeviceChanged"]
 description.en = "Fires after every successful init() (initial AND re-init). Args carry the resolved device's real name, isDefaultDevice flag, sampleRate, channels, bufferSize, maxPolyphony. Listener runs on the thread that called init() (main), not the audio thread."
@@ -251,7 +246,7 @@ keywords = ["singleton", "global", "engine", "instance", "access"]
 description.en = "Get the global AudioEngine singleton."
 description.ja = "グローバルな AudioEngine シングルトンを取得"
 description.ko = "전역 AudioEngine 싱글톤을 얻음"
-related = ["AudioEngine", "initAudio", "listDevices"]
+related = ["AudioEngine", "initAudio"]
 
 ["AudioEngine::getMaxPolyphony"]
 category = "audioengine"
@@ -273,7 +268,7 @@ keywords = ["initialize", "start", "open", "device", "setup"]
 description.en = "Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success."
 description.ja = "デフォルト、または AudioSettings の上書きでエンジンを初期化。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。成功時 true を返す"
 description.ko = "기본값 또는 AudioSettings 오버라이드로 엔진을 초기화. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. 성공 시 true 반환"
-related = ["AudioSettings", "audioDeviceChanged", "listDevices", "getSampleRate"]
+related = ["AudioSettings", "AudioEngine::audioDeviceChanged"]
 
 ["AudioEngine::isInitialized"]
 category = "audioengine"
@@ -307,7 +302,7 @@ keywords = ["audio", "microphone", "mic", "input", "capture", "buffer"]
 description.en = "Argument type for the AudioEngine::audioIn event. Holds the interleaved read-only microphone input for a single capture callback. Process and return quickly; do not call engine APIs from here."
 description.ja = "AudioEngine::audioIn イベントの引数型。1 回のキャプチャコールバック分のインターリーブされた読み取り専用マイク入力を保持する。処理は素早く済ませて返すこと。ここからエンジン API を呼ばないこと"
 description.ko = "AudioEngine::audioIn 이벤트의 인자 타입. 한 번의 캡처 콜백 분량의 인터리브된 읽기 전용 마이크 입력을 보유. 처리를 빠르게 끝내고 반환할 것. 여기서 엔진 API 를 호출하지 말 것"
-related = ["audioIn", "MicInput", "AudioOutBuffer"]
+related = ["MicInput", "AudioOutBuffer"]
 
 ["AudioInBuffer::channels"]
 description.en = "Channel count (floats per frame)"
@@ -339,7 +334,7 @@ keywords = ["audio", "output", "synthesis", "buffer", "dsp", "callback"]
 description.en = "Argument type for the AudioEngine::audioOut event. Holds the interleaved mutable output buffer for a single audio callback. Listeners should ADD their contribution to data (voices are already mixed in); do not call engine APIs from here."
 description.ja = "AudioEngine::audioOut イベントの引数型。1 回のオーディオコールバック分のインターリーブされた可変出力バッファを保持する。リスナーは data に自分の寄与を加算すること (ボイスは既にミックス済み)。ここからエンジン API を呼ばないこと"
 description.ko = "AudioEngine::audioOut 이벤트의 인자 타입. 한 번의 오디오 콜백 분량의 인터리브된 가변 출력 버퍼를 보유. 리스너는 data 에 자신의 기여분을 더해야 함 (보이스는 이미 믹스됨). 여기서 엔진 API 를 호출하지 말 것"
-related = ["audioOut", "AudioEngine", "AudioInBuffer"]
+related = ["AudioEngine", "AudioInBuffer"]
 
 ["AudioOutBuffer::channels"]
 description.en = "Channel count (floats per frame)"
@@ -371,7 +366,7 @@ keywords = ["audio config", "sample rate", "buffer size", "channels", "init opti
 description.en = "Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device."
 description.ja = "AudioEngine::init() に渡してエンジンのデフォルト (サンプルレート、チャンネル、バッファサイズ、ポリフォニー、デバイス) を上書きする設定。deviceName が空ならシステム既定の再生デバイスを選択する"
 description.ko = "AudioEngine::init() 에 전달하여 엔진 기본값 (샘플레이트, 채널, 버퍼 크기, 폴리포니, 디바이스) 을 오버라이드하는 설정. deviceName 이 비어 있으면 시스템 기본 재생 디바이스를 선택"
-related = ["init", "AudioEngine", "AudioDeviceInfo"]
+related = ["AudioEngine::init", "AudioEngine", "AudioDeviceInfo"]
 
 ["AudioSettings::bufferSize"]
 description.en = "Requested device buffer size in frames; 0 = let miniaudio choose"
@@ -460,7 +455,7 @@ description.ja = '''
 description.ko = '''
 빌드 날짜 "YYYY-MM-DD" 형식 (로컬 시간)
 '''
-related = ["dateTime", "timestamp"]
+related = ["BuildInfo::dateTime"]
 
 ["BuildInfo::dateTime"]
 keywords = ["compile", "build", "timestamp", "version", "datetime"]
@@ -473,42 +468,42 @@ description.ja = '''
 description.ko = '''
 빌드 날짜와 시간 "YYYY-MM-DD HH:MM:SS" 형식 (로컬 시간)
 '''
-related = ["date", "time", "timestamp"]
+related = ["BuildInfo::date"]
 
 ["BuildInfo::day"]
 keywords = ["compile", "build", "date", "day of month"]
 description.en = "Build day of month (1-31)"
 description.ja = "ビルド日 (1-31)"
 description.ko = "빌드 일 (1-31)"
-related = ["month", "year"]
+related = ["BuildInfo::month", "BuildInfo::year"]
 
 ["BuildInfo::hour"]
 keywords = ["compile", "build", "time", "clock"]
 description.en = "Build hour (0-23)"
 description.ja = "ビルド時 (0-23)"
 description.ko = "빌드 시 (0-23)"
-related = ["minute", "second"]
+related = ["BuildInfo::minute", "BuildInfo::second"]
 
 ["BuildInfo::minute"]
 keywords = ["compile", "build", "time", "clock"]
 description.en = "Build minute (0-59)"
 description.ja = "ビルド分 (0-59)"
 description.ko = "빌드 분 (0-59)"
-related = ["hour", "second"]
+related = ["BuildInfo::hour", "BuildInfo::second"]
 
 ["BuildInfo::month"]
 keywords = ["compile", "build", "date"]
 description.en = "Build month (1-12)"
 description.ja = "ビルド月 (1-12)"
 description.ko = "빌드 월 (1-12)"
-related = ["year", "day"]
+related = ["BuildInfo::year", "BuildInfo::day"]
 
 ["BuildInfo::second"]
 keywords = ["compile", "build", "time", "clock"]
 description.en = "Build second (0-59)"
 description.ja = "ビルド秒 (0-59)"
 description.ko = "빌드 초 (0-59)"
-related = ["minute", "hour"]
+related = ["BuildInfo::minute", "BuildInfo::hour"]
 
 ["BuildInfo::time"]
 keywords = ["compile", "build", "clock", "timestamp", "when built"]
@@ -521,21 +516,21 @@ description.ja = '''
 description.ko = '''
 빌드 시간 "HH:MM:SS" 형식 (로컬 시간)
 '''
-related = ["dateTime", "date"]
+related = ["BuildInfo::dateTime", "BuildInfo::date"]
 
 ["BuildInfo::timestamp"]
 keywords = ["compile", "build", "unix", "epoch", "seconds"]
 description.en = "Build timestamp as Unix seconds (UTC)"
 description.ja = "ビルド時刻のUnix秒 (UTC)"
 description.ko = "빌드 타임스탬프 Unix 초 (UTC)"
-related = ["dateTime", "getUnixTime"]
+related = ["BuildInfo::dateTime", "getUnixTime"]
 
 ["BuildInfo::year"]
 keywords = ["compile", "build", "version", "date"]
 description.en = "Build year (e.g. 2026)"
 description.ja = "ビルド年 (例: 2026)"
 description.ko = "빌드 연도 (예: 2026)"
-related = ["month", "day", "getYear"]
+related = ["BuildInfo::month", "BuildInfo::day", "getYear"]
 
 ["CameraContext::worldToScreen"]
 category = "graphics_3d_setup"
@@ -543,7 +538,7 @@ keywords = ["project", "world to screen", "unproject", "depth", "coordinate", "o
 description.en = "Convert world coordinate to screen coordinate (x, y = screen pos, z = depth 0-1)"
 description.ja = "ワールド座標をスクリーン座標に変換（x, y = 画面位置, z = 深度 0-1）"
 description.ko = "월드 좌표를 스크린 좌표로 변환 (x, y = 스크린 위치, z = 깊이 0-1)"
-related = ["getCurrentMatrix", "perspective"]
+related = ["getCurrentMatrix", "Mat4::perspective"]
 
 ["Center"]
 keywords = ["direction", "align", "center", "middle"]
@@ -556,7 +551,7 @@ keywords = ["chiptune", "8bit", "sequence", "timeline", "notes", "chip"]
 description.en = "A timeline of chiptune notes (ChipSoundNote + start time) that builds into a single mixed Sound. Add notes at times, then call build() to render the mix with ADSR and clipping applied."
 description.ja = "チップチューンノート (ChipSoundNote + 開始時刻) のタイムラインで、1 つのミックス済み Sound にビルドする。時刻ごとにノートを追加し、build() を呼んで ADSR とクリッピングを適用したミックスをレンダリングする"
 description.ko = "칩튠 노트 (ChipSoundNote + 시작 시각) 의 타임라인으로, 하나의 믹스된 Sound 로 빌드한다. 시각마다 노트를 추가한 뒤 build() 를 호출해 ADSR 과 클리핑을 적용한 믹스를 렌더링한다"
-related = ["clear", "createChipBundle", "add", "ChipSoundNote", "ChipSound", "build"]
+related = ["clear", "ChipSoundBundle::add", "ChipSoundNote"]
 
 ["ChipSoundBundle::add"]
 category = "chipsound"
@@ -564,7 +559,7 @@ keywords = ["append", "insert", "note", "sequence", "schedule"]
 description.en = "Schedule a note to start at the given time (seconds). The second overload constructs the note inline from wave / frequency / duration."
 description.ja = "指定時刻 (秒) に開始するノートをスケジュール。2 番目のオーバーロードは wave / frequency / duration からノートをインラインで構築する"
 description.ko = "지정한 시각 (초) 에 시작하는 노트를 스케줄. 두 번째 오버로드는 wave / frequency / duration 으로 노트를 인라인 생성한다"
-related = ["ChipSoundBundle", "createChipBundle", "ChipSoundNote"]
+related = ["ChipSoundBundle", "ChipSoundNote"]
 
 ["ChipSoundBundle::build"]
 description.en = "Render all scheduled notes into a single mixed, clipped Sound ready to play."
@@ -601,7 +596,7 @@ keywords = ["chiptune", "8bit", "synth", "note", "retro", "tone", "adsr", "envel
 description.en = "One 8-bit-style note: a plain aggregate of public fields (wave, hz, volume, duration, and the ADSR envelope attack/decay/sustain/release). Set fields directly via designated initializers ({ .wave = Wave::Square, .hz = 440, .duration = 0.2f }) or the constructor, then build() it into a Sound (or add() it to a ChipSoundBundle)."
 description.ja = "8bit スタイルの 1 音。public フィールド (wave, hz, volume, duration, ADSR の attack/decay/sustain/release) の素の集約体。指定初期化子 ({ .wave = Wave::Square, .hz = 440, .duration = 0.2f }) かコンストラクタで直接設定し、build() で Sound 化 (または ChipSoundBundle に add())"
 description.ko = "8비트 스타일 한 음. public 필드(wave, hz, volume, duration, ADSR의 attack/decay/sustain/release)의 단순 집합체. 지정 초기화자({ .wave = Wave::Square, .hz = 440, .duration = 0.2f })나 생성자로 직접 설정한 뒤 build()로 Sound화(또는 ChipSoundBundle에 add())"
-related = ["ChipSoundBundle", "Sound", "Wave", "createChipBundle"]
+related = ["ChipSoundBundle", "Sound", "Wave"]
 
 ["ChipSoundNote::attack"]
 description.en = "ADSR attack time in seconds"
@@ -614,7 +609,7 @@ keywords = ["create", "make", "generate", "render", "compile"]
 description.en = "Render this note (with its ADSR envelope) into a playable Sound"
 description.ja = "この音 (ADSR エンベロープ込み) を再生可能な Sound にレンダリング"
 description.ko = "이 음(ADSR 엔벨로프 포함)을 재생 가능한 Sound로 렌더링"
-related = ["Sound", "play"]
+related = ["Sound"]
 
 ["ChipSoundNote::decay"]
 description.en = "ADSR decay time in seconds"
@@ -689,7 +684,7 @@ description.en = "RGBA color (0.0-1.0 range)"
 description.ja = "RGBAカラー (0.0-1.0範囲)"
 description.ko = "RGBA 색상 (0.0-1.0 범위)"
 of_category = "color-types"
-related = ["ColorHSB", "ColorOKLCH", "setColor", "fromHSB"]
+related = ["ColorHSB", "ColorOKLCH", "setColor", "Color::fromHSB"]
 
 ["Color::a"]
 description.en = "Alpha component (0.0-1.0)"
@@ -716,7 +711,7 @@ keywords = ["hsv", "hue", "saturation", "brightness", "make"]
 description.en = "Create from HSB (H: 0-1)"
 description.ja = "HSBから作成 (H: 0-1)"
 description.ko = "HSB에서 생성 (H: 0-1)"
-related = ["fromOKLCH", "fromOKLab", "setColorHSB"]
+related = ["Color::fromOKLCH", "Color::fromOKLab", "setColorHSB"]
 
 ["Color::fromHex"]
 description.en = "Create from hex value"
@@ -823,7 +818,7 @@ keywords = ["hsv", "hue", "saturation", "brightness", "convert"]
 description.en = "Convert to HSB (H: 0-1, S: 0-1, B: 0-1)"
 description.ja = "HSBに変換 (H: 0-1, S: 0-1, B: 0-1)"
 description.ko = "HSB로 변환 (H: 0-1, S: 0-1, B: 0-1)"
-related = ["ColorHSB", "toOKLCH", "toOKLab", "toRGB"]
+related = ["ColorHSB"]
 
 ["Color::toHex"]
 description.en = "Convert to hex value"
@@ -841,7 +836,7 @@ keywords = ["lch", "perceptual", "convert", "colorspace", "chroma"]
 description.en = "Convert to OKLCH (L: 0-1, C: 0-0.4, H: 0-1)"
 description.ja = "OKLCHに変換 (L: 0-1, C: 0-0.4, H: 0-1)"
 description.ko = "OKLCH로 변환 (L: 0-1, C: 0-0.4, H: 0-1)"
-related = ["ColorOKLCH", "toHSB", "toOKLab", "toRGB"]
+related = ["ColorOKLCH"]
 
 ["Color::toOKLab"]
 category = "types_color"
@@ -849,7 +844,7 @@ keywords = ["perceptual", "lab", "convert", "colorspace", "uniform"]
 description.en = "Convert to OKLab (perceptually uniform)"
 description.ja = "OKLabに変換（知覚的に均一）"
 description.ko = "OKLab으로 변환 (지각적으로 균일)"
-related = ["ColorOKLab", "toOKLCH", "toHSB", "linearToSrgb"]
+related = ["ColorOKLab", "linearToSrgb"]
 
 ["ColorHSB"]
 category = "types_colorhsb"
@@ -858,7 +853,7 @@ description.en = "HSB color space (H/S/B: 0-1)"
 description.ja = "HSB色空間 (H/S/B: 0-1)"
 description.ko = "HSB 색공간 (H/S/B: 0-1)"
 of_category = "color-types"
-related = ["lerp", "toHSB", "Color", "ColorOKLCH", "setColorHSB", "colorFromHSB"]
+related = ["lerp", "Color", "ColorOKLCH", "setColorHSB", "colorFromHSB"]
 
 ["ColorHSB::a"]
 description.en = "Alpha component (0.0-1.0)"
@@ -908,7 +903,7 @@ keywords = ["rgb", "rgba", "convert", "color", "rgbcolor"]
 description.en = "Convert ColorHSB to Color (RGB)"
 description.ja = "ColorHSBをColor (RGB) に変換"
 description.ko = "ColorHSB를 Color (RGB)로 변환"
-related = ["Color", "toHSB", "toOKLCH"]
+related = ["Color"]
 
 ["ColorLinear"]
 keywords = ["color", "linear", "rgb", "lineargamma", "colorspace"]
@@ -1009,7 +1004,7 @@ description.en = "Perceptually uniform OKLCH color"
 description.ja = "知覚均一なOKLCHカラー"
 description.ko = "지각적 균일 OKLCH 색상"
 of_category = "color-types"
-related = ["lerp", "toOKLCH", "Color", "ColorHSB", "ColorOKLab", "setColorOKLCH"]
+related = ["lerp", "Color", "ColorHSB", "ColorOKLab", "setColorOKLCH"]
 
 ["ColorOKLCH::C"]
 description.en = "Chroma (0.0 - ~0.4)"
@@ -1065,7 +1060,7 @@ keywords = ["color", "oklab", "perceptual", "colorspace", "lab"]
 description.en = "A color in the OKLab perceptual color space (lightness + two opponent axes)"
 description.ja = "OKLab知覚色空間の色（明度＋2つの反対色軸）"
 description.ko = "OKLab 지각 색공간의 색상(명도 + 두 개의 반대색 축)"
-related = ["toOKLab", "ColorOKLCH", "Color", "ColorLinear"]
+related = ["ColorOKLCH", "Color", "ColorLinear"]
 
 ["ColorOKLab::L"]
 description.en = "Lightness (0.0-1.0)"
@@ -1146,7 +1141,7 @@ keywords = ["events", "callbacks", "hub", "listeners", "signals"]
 description.en = "Hub of all framework core events. Each member is an Event you subscribe to with .listen(callback); access the global instance via events()"
 description.ja = "フレームワークの全コアイベントのハブ。各メンバーは .listen(callback) で購読する Event。グローバルインスタンスは events() でアクセス"
 description.ko = "프레임워크의 모든 코어 이벤트 허브. 각 멤버는 .listen(callback) 으로 구독하는 Event. 전역 인스턴스는 events() 로 접근"
-related = ["events", "Event", "EventListener"]
+related = ["events", "Event<T>", "EventListener"]
 
 ["CoreEvents::afterFrame"]
 description.en = "Fired after present() (swapchain committed, outside any pass)"
@@ -1338,7 +1333,7 @@ description.ko = "화면 픽셀 단위 현-곡선 최대 오차(Tolerance 모드
 
 ["Deliver"]
 keywords = ["dispatch", "event", "thread", "queue", "delivery", "async", "main thread"]
-related = ["Event", "events"]
+related = ["Event<T>", "events"]
 
 ["Direction"]
 keywords = ["direction", "horizontal", "vertical", "axis", "orientation", "row", "column"]
@@ -1382,7 +1377,7 @@ value_desc.InOut.en = "Accelerate then decelerate"
 
 ["EaseType"]
 keywords = ["easing", "tween", "curve", "interpolation", "animation", "bounce", "elastic"]
-related = ["ease", "easeIn", "easeOut", "easeInOut", "EaseMode", "Tween"]
+related = ["ease", "easeIn", "easeOut", "easeInOut", "EaseMode", "Tween<T>"]
 value_desc.Linear.en = "No easing"
 value_desc.Quad.en = "Quadratic (t^2)"
 value_desc.Cubic.en = "Cubic (t^3)"
@@ -1402,7 +1397,7 @@ description.en = "3D camera with mouse control"
 description.ja = "マウス操作対応3Dカメラ"
 description.ko = "마우스 조작 가능한 3D 카메라"
 of_category = "camera-types"
-related = ["createEasyCam", "setupScreenPerspective", "worldToScreen", "Ray"]
+related = ["setupScreenPerspective", "worldToScreen", "Ray"]
 
 ["EasyCam::Modifier"]
 keywords = ["shift", "ctrl", "alt", "cmd", "meta", "key", "hotkey"]
@@ -1429,7 +1424,7 @@ keywords = ["mouse control", "lock", "freeze", "disable input", "no drag"]
 description.en = "Disable mouse input for camera control"
 description.ja = "マウス入力によるカメラ操作を無効化"
 description.ko = "카메라 조작을 위한 마우스 입력 비활성화"
-related = ["enableMouseInput"]
+related = ["EasyCam::enableMouseInput"]
 
 ["EasyCam::disableOrtho"]
 category = "graphics_camera"
@@ -1444,7 +1439,7 @@ keywords = ["mouse control", "interactive", "drag", "orbit", "navigate", "input"
 description.en = "Enable mouse input for camera control"
 description.ja = "マウス入力によるカメラ操作を有効化"
 description.ko = "카메라 조작을 위한 마우스 입력 활성화"
-related = ["disableMouseInput", "mouseScrolled", "setSensitivity"]
+related = ["EasyCam::disableMouseInput", "EasyCam::setSensitivity"]
 
 ["EasyCam::enableOrtho"]
 category = "graphics_camera"
@@ -1467,7 +1462,7 @@ keywords = ["orbit", "horizontal angle", "yaw", "longitude", "query"]
 description.en = "Get orbit azimuth (horizontal angle, radians)"
 description.ja = "周回の方位角（水平角・ラジアン）を取得"
 description.ko = "궤도 방위각(수평각, 라디안)을 얻음"
-related = ["setAzimuth"]
+related = ["EasyCam::setAzimuth"]
 
 ["EasyCam::getDistance"]
 category = "graphics_camera"
@@ -1475,7 +1470,7 @@ keywords = ["zoom", "distance", "radius", "range", "query"]
 description.en = "Get distance from target"
 description.ja = "注視点からの距離を取得"
 description.ko = "타겟으로부터의 거리를 얻음"
-related = ["setDistance"]
+related = ["EasyCam::setDistance"]
 
 ["EasyCam::getDragModifier"]
 category = "graphics_camera"
@@ -1490,7 +1485,7 @@ keywords = ["orbit", "vertical angle", "pitch", "tilt", "latitude", "query"]
 description.en = "Get orbit elevation (vertical angle, radians)"
 description.ja = "周回の仰角（垂直角・ラジアン）を取得"
 description.ko = "궤도 고도각(수직각, 라디안)을 얻음"
-related = ["setElevation"]
+related = ["EasyCam::setElevation"]
 
 ["EasyCam::getFov"]
 category = "graphics_camera"
@@ -1498,7 +1493,7 @@ keywords = ["field of view", "lens", "angle", "perspective", "query"]
 description.en = "Get field of view in radians"
 description.ja = "視野角をラジアンで取得"
 description.ko = "시야각을 라디안으로 얻음"
-related = ["setFov"]
+related = ["EasyCam::setFov"]
 
 ["EasyCam::getOrbitButton"]
 category = "graphics_camera"
@@ -1541,7 +1536,7 @@ keywords = ["look at", "focus", "center", "aim", "pivot", "query"]
 description.en = "Get camera look-at target"
 description.ja = "カメラの注視点を取得"
 description.ko = "카메라의 look-at 타겟을 얻음"
-related = ["setTarget"]
+related = ["EasyCam::setTarget"]
 
 ["EasyCam::getUpAxis"]
 category = "graphics_camera"
@@ -1598,7 +1593,7 @@ keywords = ["orbit", "horizontal angle", "yaw", "pan angle", "longitude", "rotat
 description.en = "Set orbit azimuth (horizontal angle, radians)"
 description.ja = "周回の方位角（水平角・ラジアン）を設定"
 description.ko = "궤도 방위각(수평각, 라디안)을 설정"
-related = ["getAzimuth"]
+related = ["EasyCam::getAzimuth"]
 
 ["EasyCam::setControlArea"]
 category = "graphics_camera"
@@ -1613,7 +1608,7 @@ keywords = ["zoom", "distance", "radius", "dolly", "range"]
 description.en = "Set distance from target"
 description.ja = "注視点からの距離を設定"
 description.ko = "타겟으로부터의 거리를 설정"
-related = ["getDistance"]
+related = ["EasyCam::getDistance"]
 
 ["EasyCam::setDragModifier"]
 category = "graphics_camera"
@@ -1628,7 +1623,7 @@ keywords = ["orbit", "vertical angle", "pitch", "tilt", "latitude", "rotation"]
 description.en = "Set orbit elevation (vertical angle, radians; clamped to ~±80°)"
 description.ja = "周回の仰角（垂直角・ラジアン、約±80°でクランプ）を設定"
 description.ko = "궤도 고도각(수직각, 라디안; 약 ±80°로 제한)을 설정"
-related = ["getElevation"]
+related = ["EasyCam::getElevation"]
 
 ["EasyCam::setFarClip"]
 category = "graphics_camera"
@@ -1644,7 +1639,7 @@ keywords = ["field of view", "zoom", "lens", "angle", "perspective", "fov"]
 description.en = "Set field of view in radians"
 description.ja = "視野角をラジアンで設定"
 description.ko = "시야각을 라디안으로 설정"
-related = ["getFov", "setFovDeg", "setupScreenFov", "perspective"]
+related = ["EasyCam::getFov", "EasyCam::setFovDeg", "setupScreenFov", "Mat4::perspective"]
 
 ["EasyCam::setFovDeg"]
 category = "graphics_camera"
@@ -1709,7 +1704,7 @@ keywords = ["look at", "focus", "center", "aim", "pivot", "target"]
 description.en = "Set camera look-at target"
 description.ja = "カメラの注視点を設定"
 description.ko = "카메라의 look-at 타겟을 설정"
-related = ["getTarget", "lookAt"]
+related = ["EasyCam::getTarget", "Mat4::lookAt"]
 
 ["EasyCam::setUpAxis"]
 category = "graphics_camera"
@@ -1798,14 +1793,14 @@ keywords = ["signal", "callback", "listener", "subscribe", "notify", "delegate"]
 description.en = "Generic event you subscribe to with listen(callback) and fire with notify(arg). The template parameter is the argument type passed to listeners by reference; Event<void> is the no-argument specialization (callbacks and notify take no argument). listen() returns an EventListener RAII token that disconnects when destroyed"
 description.ja = "listen(callback) で購読し notify(arg) で発火する汎用イベント。テンプレートパラメータはリスナーに参照で渡される引数の型。Event<void> は引数なしの特殊化(callback も notify も引数なし)。listen() は破棄時に切断する EventListener RAII トークンを返す"
 description.ko = "listen(callback)으로 구독하고 notify(arg)로 발생시키는 범용 이벤트. 템플릿 파라미터는 리스너에 참조로 전달되는 인자 타입. Event<void>는 인자 없는 특수화(callback과 notify 모두 인자 없음). listen()은 파괴 시 연결을 끊는 EventListener RAII 토큰을 반환"
-related = ["audioOut", "audioIn", "audioDeviceChanged", "EventListener", "CoreEvents", "Deliver"]
+related = ["AudioEngine::audioDeviceChanged", "EventListener", "CoreEvents", "Deliver"]
 
 ["EventListener"]
 keywords = ["listener", "subscription", "raii", "token", "disconnect", "handle"]
 description.en = "RAII token returned by Event::listen(); the listener is automatically disconnected when this token is destroyed or reassigned. Move-only"
 description.ja = "Event::listen() が返す RAII トークン。このトークンが破棄または再代入されるとリスナーは自動的に切断される。ムーブのみ可"
 description.ko = "Event::listen()이 반환하는 RAII 토큰. 이 토큰이 파괴되거나 재할당되면 리스너는 자동으로 연결이 끊김. 이동 전용"
-related = ["Event", "CoreEvents"]
+related = ["Event<T>", "CoreEvents"]
 
 ["EventListener::disconnect"]
 description.en = "Explicitly disconnect the listener now (otherwise happens automatically on destruction)"
@@ -1849,7 +1844,7 @@ description.en = "Framebuffer object for offscreen rendering"
 description.ja = "オフスクリーンレンダリング用FBO"
 description.ko = "오프스크린 렌더링용 프레임버퍼 객체"
 of_category = "image-texture-types"
-related = ["start", "createFbo", "addFrame", "addFrameAt", "Texture", "FullscreenShader", "Shader"]
+related = ["VideoWriter::addFrame", "VideoWriter::addFrameAt", "Texture", "FullscreenShader", "Shader"]
 
 ["Fbo::allocate"]
 category = "graphics_fbo"
@@ -1857,7 +1852,7 @@ keywords = ["alloc", "create", "init", "reserve", "size"]
 description.en = "Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end()."
 description.ja = "フレームバッファを確保。`mipmaps=true` でミップマップ連鎖が end() で自動更新される"
 description.ko = "프레임버퍼를 할당. `mipmaps=true` 시 end()마다 밉맵 체인이 자동 갱신됨"
-related = ["isAllocated", "TextureFormat"]
+related = ["TextureFormat"]
 
 ["Fbo::begin"]
 category = "graphics_fbo"
@@ -1877,7 +1872,6 @@ keywords = ["clear", "fill", "color", "background"]
 description.en = "Clear the FBO with a solid color"
 description.ja = "FBOを単色でクリア"
 description.ko = "FBO를 단색으로 클리어"
-related = ["begin"]
 
 ["Fbo::copyTo"]
 description.en = "Copy FBO contents to Image"
@@ -1917,7 +1911,7 @@ keywords = ["format", "pixel", "type", "query"]
 description.en = "Get the FBO's color texture format"
 description.ja = "FBOのカラーテクスチャフォーマットを取得"
 description.ko = "FBO의 컬러 텍스처 포맷을 얻음"
-related = ["allocate", "TextureFormat"]
+related = ["TextureFormat"]
 
 ["Fbo::getWidth"]
 description.en = "Get width"
@@ -1940,7 +1934,7 @@ keywords = ["read", "download", "cpu", "pixels"]
 description.en = "Read FBO contents into a CPU buffer (8-bit per channel)"
 description.ja = "FBOの内容をCPUバッファに読み出す（チャンネルあたり8ビット）"
 description.ko = "FBO 내용을 CPU 버퍼로 읽음 (채널당 8비트)"
-related = ["readPixelsFloat", "Pixels"]
+related = ["Fbo::readPixelsFloat", "Pixels"]
 
 ["Fbo::readPixelsFloat"]
 category = "graphics_fbo"
@@ -1948,7 +1942,7 @@ keywords = ["read", "download", "cpu", "float"]
 description.en = "Read FBO contents into a CPU buffer (32-bit float per channel)"
 description.ja = "FBOの内容をCPUバッファに読み出す（チャンネルあたり32ビット浮動小数点）"
 description.ko = "FBO 내용을 CPU 버퍼로 읽음 (채널당 32비트 부동소수점)"
-related = ["readPixels"]
+related = ["Fbo::readPixels"]
 
 ["Fbo::save"]
 description.en = "Save FBO contents to file"
@@ -1983,7 +1977,7 @@ description.en = "Streaming file reader for large files"
 description.ja = "大きなファイル用ストリーミングファイルリーダー"
 description.ko = "대용량 파일용 스트리밍 파일 리더"
 of_category = "file-io-types"
-related = ["createFileReader", "FileWriter", "loadTextFile"]
+related = ["FileWriter", "loadTextFile"]
 
 ["FileReader::close"]
 description.en = "Close file"
@@ -2041,7 +2035,7 @@ description.en = "Streaming file writer with immediate flush"
 description.ja = "即時フラッシュ付きストリーミングファイルライター"
 description.ko = "즉시 플러시되는 스트리밍 파일 라이터"
 of_category = "file-io-types"
-related = ["createFileWriter", "FileReader", "saveTextFile"]
+related = ["FileReader", "saveTextFile"]
 
 ["FileWriter::close"]
 description.en = "Close file"
@@ -2080,7 +2074,7 @@ description.en = "TrueType font for text rendering"
 description.ja = "テキストレンダリング用TrueTypeフォント"
 description.ko = "텍스트 렌더링용 트루타입 폰트"
 of_category = "text-types"
-related = ["createFont", "drawString", "Glyph", "getStringPath"]
+related = ["Font::drawString", "Font::getStringPath"]
 
 ["Font::clearAtlas"]
 description.en = "Clear font atlas (GPU memory freed, glyphs re-rasterized on next draw)"
@@ -2093,7 +2087,7 @@ keywords = ["text", "render", "print", "label", "write", "type"]
 description.en = "Draw text"
 description.ja = "テキストを描画"
 description.ko = "텍스트를 그림"
-related = ["drawBitmapString", "getStringPath", "getWidth"]
+related = ["drawBitmapString", "Font::getStringPath"]
 
 ["Font::enableWrap"]
 keywords = ["wrap", "line break", "fold", "text"]
@@ -2213,7 +2207,6 @@ keywords = ["pointsize", "scale", "font size", "px"]
 description.en = "Get font size"
 description.ja = "フォントサイズを取得"
 description.ko = "폰트 크기를 얻음"
-related = ["setSize"]
 
 ["Font::getStringPath"]
 category = "font"
@@ -2221,7 +2214,7 @@ keywords = ["outline", "vector", "contour", "path", "shape", "glyph"]
 description.en = "Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely."
 description.ja = "文字列全体の輪郭を 1 個の Path として返す (全グリフの contour が subpath として連結)。drawString と同じレイアウトパイプライン (書字方向 / 揃え / 折返し / 禁則 / 縦中横) 経由。座標は論理ピクセル — drawStroke / drawFill / 変形自由。"
 description.ko = "(x, y) 위치의 전체 문자열 윤곽선을 단일 Path로 (모든 글리프 contour가 subpath로 연결). drawString과 동일한 레이아웃 파이프라인 사용. 좌표는 논리 픽셀."
-related = ["Path", "drawStroke", "drawString"]
+related = ["Path", "drawStroke", "Font::drawString"]
 
 ["Font::getTcyDigitMax"]
 keywords = ["tcy", "tate-chu-yoko", "digits", "vertical"]
@@ -2247,7 +2240,7 @@ keywords = ["resolution", "size", "pixels", "dimension"]
 description.en = "Get text width"
 description.ja = "テキストの幅を取得"
 description.ko = "텍스트 너비를 얻음"
-related = ["setWidth", "getStringPath", "getLineHeight"]
+related = ["Font::getStringPath", "Font::getLineHeight"]
 
 ["Font::getWritingMode"]
 description.en = "Current writing mode"
@@ -2375,7 +2368,7 @@ keywords = ["shader", "postprocess", "fullscreen", "effect", "quad", "filter"]
 description.en = "Shader specialization for fullscreen post-processing effects (position + texcoord quad). Set uniforms via setParams, then call draw to render a fullscreen quad."
 description.ja = "フルスクリーンのポストプロセスエフェクト用 Shader 特殊化(position + texcoord クアッド)。setParams で uniform を設定し、draw でフルスクリーンクアッドを描画"
 description.ko = "전체 화면 포스트 프로세싱 효과용 Shader 특수화(position + texcoord 쿼드). setParams로 uniform을 설정한 뒤 draw로 전체 화면 쿼드를 렌더링"
-related = ["Shader", "Fbo", "setUniform"]
+related = ["Shader", "Fbo", "Shader::setUniform"]
 
 ["FullscreenShader::draw"]
 description.en = "Draw a fullscreen quad with this shader applied"
@@ -2394,42 +2387,41 @@ keywords = ["directx", "direct3d", "windows", "renderer", "driver"]
 description.en = "True when running on Direct3D 11"
 description.ja = "Direct3D 11で動作中なら true"
 description.ko = "Direct3D 11에서 실행 중이면 true"
-related = ["name", "isWindows"]
+related = ["Platform::isWindows"]
 
 ["GraphicsBackend::isMetal"]
 keywords = ["apple", "mtl", "renderer", "mac", "driver"]
 description.en = "True when running on Apple Metal"
 description.ja = "Apple Metalで動作中なら true"
 description.ko = "Apple Metal에서 실행 중이면 true"
-related = ["name", "isApple"]
+related = ["Platform::isApple"]
 
 ["GraphicsBackend::isOpenGL"]
 keywords = ["gl", "gles", "renderer", "driver"]
 description.en = "True when running on OpenGL (core or GLES3)"
 description.ja = "OpenGL (coreまたはGLES3) で動作中なら true"
 description.ko = "OpenGL (core 또는 GLES3)에서 실행 중이면 true"
-related = ["name", "isWebGL2"]
+related = ["GraphicsBackend::isWebGL2"]
 
 ["GraphicsBackend::isVulkan"]
 keywords = ["vk", "renderer", "driver", "low level"]
 description.en = "True when running on Vulkan"
 description.ja = "Vulkanで動作中なら true"
 description.ko = "Vulkan에서 실행 중이면 true"
-related = ["name"]
 
 ["GraphicsBackend::isWebGL2"]
 keywords = ["gles3", "browser", "web", "renderer", "driver"]
 description.en = "True when running on WebGL2 (GLES3 under Emscripten)"
 description.ja = "WebGL2 (EmscriptenのGLES3) で動作中なら true"
 description.ko = "WebGL2 (Emscripten의 GLES3)에서 실행 중이면 true"
-related = ["isOpenGL", "isWeb"]
+related = ["GraphicsBackend::isOpenGL", "Platform::isWeb"]
 
 ["GraphicsBackend::isWebGPU"]
 keywords = ["wgpu", "browser", "web", "renderer", "driver"]
 description.en = "True when running on WebGPU"
 description.ja = "WebGPUで動作中なら true"
 description.ko = "WebGPU에서 실행 중이면 true"
-related = ["name", "isWeb"]
+related = ["Platform::isWeb"]
 
 ["GraphicsBackend::name"]
 keywords = ["renderer", "driver", "api", "gpu", "graphics"]
@@ -2442,7 +2434,7 @@ description.ja = '''
 description.ko = '''
 짧은 백엔드 이름: "opengl" / "gles3" / "webgl2" / "d3d11" / "metal" / "webgpu" / "vulkan" / "dummy" / "unknown"
 '''
-related = ["getBackendName", "name"]
+related = ["getBackendName"]
 
 ["HALF_TAU"]
 keywords = ["pi", "half circle", "180 degrees", "radians", "semicircle"]
@@ -2456,7 +2448,7 @@ keywords = ["image", "result", "output", "surface"]
 description.en = "Get internal texture"
 description.ja = "内部テクスチャを取得"
 description.ko = "내부 텍스처를 얻음"
-related = ["Texture", "setTexture", "getTextureCount", "drawMesh"]
+related = ["Texture", "Shader::setTexture", "getTextureCount"]
 
 ["HeadlessSettings"]
 keywords = ["headless", "nowindow", "offscreen", "server", "config"]
@@ -2995,7 +2987,7 @@ keywords = ["keyboard", "key", "keypress", "input", "args"]
 description.en = "Arguments for keyPressed / keyReleased events"
 description.ja = "keyPressed / keyReleased イベントの引数"
 description.ko = "keyPressed / keyReleased 이벤트의 인자"
-related = ["keyPressed", "keyReleased", "MouseEventArgs"]
+related = ["MouseEventArgs"]
 
 ["KeyEventArgs::alt"]
 description.en = "Alt modifier held"
@@ -3057,7 +3049,7 @@ keywords = ["layout", "arrange", "flex", "stack", "align"]
 description.en = "Layout modifier (Mod) that auto-arranges child RectNodes in a vertical or horizontal stack with spacing, padding and axis sizing"
 description.ja = "子RectNodeを縦/横スタックに自動配置するMod。間隔・パディング・軸サイズモードを持つ"
 description.ko = "자식 RectNode를 수직/수평 스택으로 자동 배치하는 Mod. 간격・패딩・축 크기 모드를 가짐"
-related = ["LayoutDirection", "updateLayout", "addChild"]
+related = ["LayoutDirection", "LayoutMod::updateLayout", "Node::addChild"]
 
 ["LayoutMod::getCrossAxis"]
 category = "scene_graph"
@@ -3065,7 +3057,7 @@ keywords = ["cross axis", "sizing", "fill", "content"]
 description.en = "Get the cross-axis sizing mode (LayoutMod method) (C++ only)"
 description.ja = "クロス軸のサイズモードを取得（LayoutModメソッド）（C++のみ）"
 description.ko = "크로스 축 크기 모드를 얻음 (LayoutMod 메서드) (C++ 전용)"
-related = ["AxisMode", "setCrossAxis"]
+related = ["AxisMode", "LayoutMod::setCrossAxis"]
 
 ["LayoutMod::getDirection"]
 category = "scene_graph"
@@ -3073,7 +3065,7 @@ keywords = ["direction", "vertical", "horizontal", "stack"]
 description.en = "Get the layout direction (Vertical/Horizontal) (LayoutMod method) (C++ only)"
 description.ja = "レイアウト方向（Vertical/Horizontal）を取得（LayoutModメソッド）（C++のみ）"
 description.ko = "레이아웃 방향(Vertical/Horizontal)을 얻음 (LayoutMod 메서드) (C++ 전용)"
-related = ["LayoutDirection", "setDirection"]
+related = ["LayoutDirection", "LayoutMod::setDirection"]
 
 ["LayoutMod::getMainAxis"]
 category = "scene_graph"
@@ -3081,7 +3073,7 @@ keywords = ["main axis", "sizing", "fill", "content"]
 description.en = "Get the main-axis sizing mode (LayoutMod method) (C++ only)"
 description.ja = "メイン軸のサイズモードを取得（LayoutModメソッド）（C++のみ）"
 description.ko = "메인 축 크기 모드를 얻음 (LayoutMod 메서드) (C++ 전용)"
-related = ["AxisMode", "setMainAxis"]
+related = ["AxisMode", "LayoutMod::setMainAxis"]
 
 ["LayoutMod::getPaddingBottom"]
 category = "scene_graph"
@@ -3117,7 +3109,7 @@ keywords = ["spacing", "gap", "margin", "between"]
 description.en = "Get the spacing between children (LayoutMod method) (C++ only)"
 description.ja = "子要素間の間隔を取得（LayoutModメソッド）（C++のみ）"
 description.ko = "자식 요소 간 간격을 얻음 (LayoutMod 메서드) (C++ 전용)"
-related = ["setSpacing"]
+related = ["LayoutMod::setSpacing"]
 
 ["LayoutMod::setCrossAxis"]
 category = "scene_graph"
@@ -3125,7 +3117,7 @@ keywords = ["cross axis", "sizing", "fill", "content"]
 description.en = "Set the cross-axis sizing mode and re-layout (LayoutMod method) (C++ only)"
 description.ja = "クロス軸のサイズモードを設定して再配置（LayoutModメソッド）（C++のみ）"
 description.ko = "크로스 축 크기 모드를 설정하고 재배치 (LayoutMod 메서드) (C++ 전용)"
-related = ["AxisMode", "getCrossAxis"]
+related = ["AxisMode", "LayoutMod::getCrossAxis"]
 
 ["LayoutMod::setDirection"]
 category = "scene_graph"
@@ -3133,7 +3125,7 @@ keywords = ["direction", "vertical", "horizontal", "stack"]
 description.en = "Set the layout direction and re-layout (LayoutMod method) (C++ only)"
 description.ja = "レイアウト方向を設定して再配置（LayoutModメソッド）（C++のみ）"
 description.ko = "레이아웃 방향을 설정하고 재배치 (LayoutMod 메서드) (C++ 전용)"
-related = ["LayoutDirection", "getDirection"]
+related = ["LayoutDirection"]
 
 ["LayoutMod::setMainAxis"]
 category = "scene_graph"
@@ -3141,7 +3133,7 @@ keywords = ["main axis", "sizing", "fill", "content"]
 description.en = "Set the main-axis sizing mode and re-layout (LayoutMod method) (C++ only)"
 description.ja = "メイン軸のサイズモードを設定して再配置（LayoutModメソッド）（C++のみ）"
 description.ko = "메인 축 크기 모드를 설정하고 재배치 (LayoutMod 메서드) (C++ 전용)"
-related = ["AxisMode", "getMainAxis"]
+related = ["AxisMode", "LayoutMod::getMainAxis"]
 
 ["LayoutMod::setPadding"]
 category = "scene_graph"
@@ -3149,7 +3141,7 @@ keywords = ["padding", "inset", "margin", "spacing"]
 description.en = "Set padding (uniform, vertical/horizontal, or per-side) and re-layout (LayoutMod method) (C++ only)"
 description.ja = "パディング（一律、縦横、または各辺）を設定して再配置（LayoutModメソッド）（C++のみ）"
 description.ko = "패딩(균일, 수직/수평, 또는 변별)을 설정하고 재배치 (LayoutMod 메서드) (C++ 전용)"
-related = ["setPaddingLeft"]
+related = ["LayoutMod::setPaddingLeft"]
 
 ["LayoutMod::setPaddingBottom"]
 category = "scene_graph"
@@ -3157,7 +3149,7 @@ keywords = ["padding", "bottom", "inset", "margin"]
 description.en = "Set the bottom padding and re-layout (LayoutMod method) (C++ only)"
 description.ja = "下パディングを設定して再配置（LayoutModメソッド）（C++のみ）"
 description.ko = "아래쪽 패딩을 설정하고 재배치 (LayoutMod 메서드) (C++ 전용)"
-related = ["setPadding"]
+related = ["LayoutMod::setPadding"]
 
 ["LayoutMod::setPaddingLeft"]
 category = "scene_graph"
@@ -3165,7 +3157,7 @@ keywords = ["padding", "left", "inset", "margin"]
 description.en = "Set the left padding and re-layout (LayoutMod method) (C++ only)"
 description.ja = "左パディングを設定して再配置（LayoutModメソッド）（C++のみ）"
 description.ko = "왼쪽 패딩을 설정하고 재배치 (LayoutMod 메서드) (C++ 전용)"
-related = ["setPadding"]
+related = ["LayoutMod::setPadding"]
 
 ["LayoutMod::setPaddingRight"]
 category = "scene_graph"
@@ -3173,7 +3165,7 @@ keywords = ["padding", "right", "inset", "margin"]
 description.en = "Set the right padding and re-layout (LayoutMod method) (C++ only)"
 description.ja = "右パディングを設定して再配置（LayoutModメソッド）（C++のみ）"
 description.ko = "오른쪽 패딩을 설정하고 재배치 (LayoutMod 메서드) (C++ 전용)"
-related = ["setPadding"]
+related = ["LayoutMod::setPadding"]
 
 ["LayoutMod::setPaddingTop"]
 category = "scene_graph"
@@ -3181,7 +3173,7 @@ keywords = ["padding", "top", "inset", "margin"]
 description.en = "Set the top padding and re-layout (LayoutMod method) (C++ only)"
 description.ja = "上パディングを設定して再配置（LayoutModメソッド）（C++のみ）"
 description.ko = "위쪽 패딩을 설정하고 재배치 (LayoutMod 메서드) (C++ 전용)"
-related = ["setPadding"]
+related = ["LayoutMod::setPadding"]
 
 ["LayoutMod::setSpacing"]
 category = "scene_graph"
@@ -3189,7 +3181,7 @@ keywords = ["spacing", "gap", "margin", "between"]
 description.en = "Set the spacing between children and re-layout (LayoutMod method) (C++ only)"
 description.ja = "子要素間の間隔を設定して再配置（LayoutModメソッド）（C++のみ）"
 description.ko = "자식 요소 간 간격을 설정하고 재배치 (LayoutMod 메서드) (C++ 전용)"
-related = ["getSpacing"]
+related = ["LayoutMod::getSpacing"]
 
 ["LayoutMod::updateLayout"]
 category = "scene_graph"
@@ -3633,7 +3625,7 @@ description.en = "4x4 matrix for 3D transformations"
 description.ja = "3D変換用4x4行列"
 description.ko = "3D 변환용 4x4 행렬"
 of_category = "math-vector"
-related = ["getCurrentMatrix", "setMatrix", "identity", "translate", "rotateX", "rotateY", "rotateZ", "scale"]
+related = ["getCurrentMatrix", "setMatrix", "translate", "rotateX", "rotateY", "rotateZ", "scale"]
 
 ["Mat4::at"]
 description.en = "Access the element at (row, col)"
@@ -3652,7 +3644,7 @@ keywords = ["frustum", "projection", "matrix", "asymmetric", "perspective"]
 description.en = "Create an asymmetric perspective (frustum) projection matrix"
 description.ja = "非対称な透視投影 (frustum) 行列を作成"
 description.ko = "비대칭 원근 투영(frustum) 행렬을 생성"
-related = ["Mat4", "perspective"]
+related = ["Mat4", "Mat4::perspective"]
 
 ["Mat4::identity"]
 keywords = ["matrix", "identity", "4x4", "transform", "reset"]
@@ -3671,7 +3663,7 @@ keywords = ["view", "camera", "matrix", "look", "eye target"]
 description.en = "Create a view matrix"
 description.ja = "ビュー行列を作成"
 description.ko = "뷰 행렬을 생성"
-related = ["Mat4", "setTarget", "perspective"]
+related = ["Mat4", "EasyCam::setTarget", "Mat4::perspective"]
 
 ["Mat4::m"]
 description.en = "Raw row-major element storage (16 floats)"
@@ -3695,7 +3687,7 @@ keywords = ["perspective", "projection", "matrix", "frustum", "fov", "camera"]
 description.en = "Create a perspective projection matrix"
 description.ja = "透視投影行列を作成"
 description.ko = "원근 투영 행렬을 생성"
-related = ["Mat4", "setupScreenPerspective", "lookAt", "setFov"]
+related = ["Mat4", "setupScreenPerspective", "Mat4::lookAt", "EasyCam::setFov"]
 
 ["Mat4::rotate"]
 keywords = ["matrix", "rotation", "axis", "arbitrary", "transform"]
@@ -3946,7 +3938,7 @@ description.en = "3D mesh with vertices, colors, normals, indices"
 description.ja = "頂点・色・法線・インデックスを持つ3Dメッシュ"
 description.ko = "정점, 색상, 노멀, 인덱스를 가진 3D 메쉬"
 of_category = "geometry-types"
-related = ["createMesh", "shadowDraw", "drawMesh", "createBox", "createPlane", "createCylinder", "createCone", "createIcoSphere"]
+related = ["shadowDraw", "createBox", "createPlane", "createCylinder", "createCone", "createIcoSphere"]
 
 ["Mesh::addColor"]
 category = "types_mesh"
@@ -3954,7 +3946,7 @@ keywords = ["vertex color", "rgba", "tint", "per vertex"]
 description.en = "Add a vertex color"
 description.ja = "頂点カラーを追加"
 description.ko = "정점 색상을 추가"
-related = ["addVertex", "setColor"]
+related = ["setColor"]
 
 ["Mesh::addColors"]
 description.en = "Add multiple vertex colors"
@@ -3967,7 +3959,7 @@ keywords = ["index", "element", "ibo", "face", "topology"]
 description.en = "Add an index"
 description.ja = "インデックスを追加"
 description.ko = "인덱스를 추가"
-related = ["addTriangle", "addVertex"]
+related = ["Mesh::addTriangle"]
 
 ["Mesh::addIndices"]
 description.en = "Add multiple indices"
@@ -3980,7 +3972,7 @@ keywords = ["normal", "lighting", "surface", "shading"]
 description.en = "Add a normal vector"
 description.ja = "法線ベクトルを追加"
 description.ko = "법선 벡터를 추가"
-related = ["addVertex", "calculateLighting"]
+related = ["calculateLighting"]
 
 ["Mesh::addNormals"]
 description.en = "Add multiple normals"
@@ -3993,7 +3985,7 @@ keywords = ["tangent", "normalmap", "bitangent", "pbr"]
 description.en = "Add a tangent vector (xyz direction + w handedness)"
 description.ja = "接線ベクトルを追加（xyz方向 + w利き手）"
 description.ko = "탄젠트 벡터를 추가 (xyz 방향 + w 핸디드니스)"
-related = ["addNormal", "hasTangents"]
+related = ["Mesh::addNormal", "Mesh::hasTangents"]
 
 ["Mesh::addTexCoord"]
 category = "types_mesh"
@@ -4001,7 +3993,7 @@ keywords = ["uv", "texture", "mapping", "st"]
 description.en = "Add a texture coordinate"
 description.ja = "テクスチャ座標を追加"
 description.ko = "텍스처 좌표를 추가"
-related = ["addVertex", "setTexture"]
+related = ["Shader::setTexture"]
 
 ["Mesh::addTriangle"]
 category = "types_mesh"
@@ -4009,7 +4001,7 @@ keywords = ["triangle", "face", "tri", "indices"]
 description.en = "Add a triangle (3 indices)"
 description.ja = "三角形を追加（インデックス3つ）"
 description.ko = "삼각형을 추가 (인덱스 3개)"
-related = ["addIndex", "addVertex"]
+related = ["Mesh::addIndex"]
 
 ["Mesh::addVertex"]
 category = "types_mesh"
@@ -4017,7 +4009,7 @@ keywords = ["point", "vert", "position", "append", "push"]
 description.en = "Add a vertex"
 description.ja = "頂点を追加"
 description.ko = "정점을 추가"
-related = ["StrokeMesh", "addVertexWithWidth", "addColor", "addNormal", "addTexCoord", "addIndex", "vertex"]
+related = ["StrokeMesh", "StrokeMesh::addVertexWithWidth", "Mesh::addColor", "Mesh::addNormal", "Mesh::addTexCoord", "Mesh::addIndex", "vertex"]
 
 ["Mesh::addVertices"]
 description.en = "Add multiple vertices"
@@ -4057,7 +4049,7 @@ keywords = ["tangent", "clear", "reset", "remove"]
 description.en = "Remove all tangents"
 description.ja = "すべての接線を削除"
 description.ko = "모든 탄젠트를 제거"
-related = ["addTangent", "clear"]
+related = ["Mesh::addTangent", "clear"]
 
 ["Mesh::clearTexCoords"]
 description.en = "Clear texture coordinates only"
@@ -4087,7 +4079,7 @@ keywords = ["draw", "unlit", "flat", "nolight"]
 description.en = "Draw the mesh without lighting"
 description.ja = "ライティングなしでメッシュを描画"
 description.ko = "조명 없이 메쉬를 그림"
-related = ["draw", "drawWithLighting"]
+related = ["Mesh::drawWithLighting"]
 
 ["Mesh::drawNoLightingWithTexture"]
 category = "types_mesh"
@@ -4095,7 +4087,7 @@ keywords = ["draw", "texture", "unlit", "textured"]
 description.en = "Draw the mesh textured without lighting"
 description.ja = "ライティングなしでテクスチャ付きメッシュを描画"
 description.ko = "조명 없이 텍스처를 입혀 메쉬를 그림"
-related = ["drawNoLighting", "Texture"]
+related = ["Mesh::drawNoLighting", "Texture"]
 
 ["Mesh::drawWireframe"]
 description.en = "Draw mesh as wireframe"
@@ -4108,7 +4100,7 @@ keywords = ["draw", "lit", "lighting", "shade"]
 description.en = "Draw the mesh with lighting"
 description.ja = "ライティングありでメッシュを描画"
 description.ko = "조명을 적용하여 메쉬를 그림"
-related = ["draw", "drawNoLighting"]
+related = ["Mesh::drawNoLighting"]
 
 ["Mesh::getColors"]
 description.en = "Get all vertex colors"
@@ -4121,7 +4113,7 @@ keywords = ["gpu", "index", "count", "buffer"]
 description.en = "Number of indices currently uploaded to the GPU"
 description.ja = "現在GPUにアップロードされているインデックス数"
 description.ko = "현재 GPU에 업로드된 인덱스 수"
-related = ["uploadToGpu", "getGpuVertexCount"]
+related = ["Mesh::uploadToGpu", "Mesh::getGpuVertexCount"]
 
 ["Mesh::getGpuVertexCount"]
 category = "types_mesh"
@@ -4129,7 +4121,7 @@ keywords = ["gpu", "vertex", "count", "buffer"]
 description.en = "Number of vertices currently uploaded to the GPU"
 description.ja = "現在GPUにアップロードされている頂点数"
 description.ko = "현재 GPU에 업로드된 정점 수"
-related = ["uploadToGpu", "getGpuIndexCount"]
+related = ["Mesh::uploadToGpu", "Mesh::getGpuIndexCount"]
 
 ["Mesh::getIndices"]
 description.en = "Get all indices"
@@ -4172,7 +4164,7 @@ keywords = ["tangent", "count", "size", "number"]
 description.en = "Number of tangents"
 description.ja = "接線の数"
 description.ko = "탄젠트 수"
-related = ["getTangents", "hasTangents"]
+related = ["Mesh::getTangents", "Mesh::hasTangents"]
 
 ["Mesh::getNumTexCoords"]
 description.en = "Get texture coordinate count"
@@ -4190,7 +4182,7 @@ keywords = ["tangent", "array", "access", "vector"]
 description.en = "Get the tangent array (mutable)"
 description.ja = "接線配列を取得（変更可能）"
 description.ko = "탄젠트 배열을 얻음 (변경 가능)"
-related = ["addTangent", "getNumTangents"]
+related = ["Mesh::addTangent", "Mesh::getNumTangents"]
 
 ["Mesh::getTexCoords"]
 description.en = "Get all texture coordinates"
@@ -4223,7 +4215,7 @@ keywords = ["tangent", "check", "query", "empty"]
 description.en = "Whether the mesh has tangents"
 description.ja = "メッシュが接線を持つかどうか"
 description.ko = "메쉬가 탄젠트를 가지는지 여부"
-related = ["addTangent", "getNumTangents"]
+related = ["Mesh::addTangent", "Mesh::getNumTangents"]
 
 ["Mesh::hasTexCoords"]
 description.en = "Check if mesh has texture coordinates"
@@ -4241,7 +4233,7 @@ keywords = ["gpu", "dirty", "upload", "invalidate"]
 description.en = "Mark GPU buffers stale after editing data in place"
 description.ja = "データを直接編集した後にGPUバッファを古い扱いにする"
 description.ko = "데이터를 직접 수정한 후 GPU 버퍼를 오래된 것으로 표시"
-related = ["uploadToGpu", "getVertices"]
+related = ["Mesh::uploadToGpu"]
 
 ["Mesh::rotateX"]
 description.en = "Rotate mesh around X axis"
@@ -4292,7 +4284,7 @@ keywords = ["gpu", "upload", "sync", "buffer"]
 description.en = "Upload mesh data to GPU buffers now"
 description.ja = "メッシュデータを今すぐGPUバッファにアップロード"
 description.ko = "메쉬 데이터를 지금 GPU 버퍼에 업로드"
-related = ["markGpuDirty"]
+related = ["Mesh::markGpuDirty"]
 
 ["MicInput"]
 keywords = ["microphone", "mic", "audio input", "capture", "recording input"]
@@ -4328,14 +4320,14 @@ description.ko = "캡처를 정지하고 마이크 디바이스를 닫음"
 
 ["MixMode"]
 keywords = ["mix", "channel", "routing", "downmix", "mono", "audio", "stereo"]
-related = ["setMixMode", "Sound"]
+related = ["Sound::setMixMode", "Sound"]
 
 ["Mod"]
 keywords = ["component", "behavior", "module", "addmod", "attach", "plugin"]
 description.en = "Attachable behavior base class for Node. Subclass it, override the lifecycle and input hooks, and attach with node->addMod<T>(). Lifecycle: setup() on attach, then each frame earlyUpdate() -> Node::update() -> update() -> draw(), and onDestroy() on removal. Override isExclusive() to allow only one instance per Node, and canAttachTo() to restrict attachment."
 description.ja = "Node にアタッチできる振る舞いの基底クラス。サブクラス化してライフサイクルと入力フックをオーバーライドし、node->addMod<T>() でアタッチする。ライフサイクル: アタッチ時に setup()、以降毎フレーム earlyUpdate() -> Node::update() -> update() -> draw()、削除時に onDestroy()。isExclusive() をオーバーライドすると Node ごとに1インスタンスのみ許可、canAttachTo() でアタッチ先を制限できる"
 description.ko = "Node에 부착 가능한 동작 기반 클래스. 서브클래싱하여 라이프사이클과 입력 훅을 오버라이드하고 node->addMod<T>()로 부착. 라이프사이클: 부착 시 setup(), 이후 매 프레임 earlyUpdate() -> Node::update() -> update() -> draw(), 제거 시 onDestroy(). isExclusive()를 오버라이드하면 Node당 한 인스턴스만 허용, canAttachTo()로 부착 대상을 제한"
-related = ["Node", "LayoutMod", "TweenMod", "addChild"]
+related = ["Node", "LayoutMod", "TweenMod", "Node::addChild"]
 
 ["Mod::canAttachTo"]
 description.en = "Override to restrict which Node types this Mod can attach to. Return false to reject attachment. Default true. (protected, virtual)"
@@ -4445,7 +4437,7 @@ keywords = ["mouse", "drag", "move", "cursor", "pointer"]
 description.en = "Arguments for mouseDragged (cursor moving with a button held)"
 description.ja = "mouseDragged の引数(ボタンを押しながらカーソルが移動)"
 description.ko = "mouseDragged의 인자(버튼을 누른 채 커서가 이동)"
-related = ["mouseDragged", "MouseMoveEventArgs", "MouseEventArgs"]
+related = ["MouseMoveEventArgs", "MouseEventArgs"]
 
 ["MouseDragEventArgs::alt"]
 description.en = "Alt modifier held"
@@ -4522,7 +4514,7 @@ keywords = ["mouse", "click", "button", "press", "pointer"]
 description.en = "Arguments for mousePressed / mouseReleased events. pos is local space, globalPos is screen space (equal at app level)"
 description.ja = "mousePressed / mouseReleased イベントの引数。pos はローカル空間、globalPos はスクリーン空間(アプリレベルでは一致)"
 description.ko = "mousePressed / mouseReleased 이벤트의 인자. pos는 로컬 공간, globalPos는 스크린 공간(앱 레벨에서는 동일)"
-related = ["mousePressed", "MouseMoveEventArgs", "MouseDragEventArgs", "MouseButton"]
+related = ["MouseMoveEventArgs", "MouseDragEventArgs", "MouseButton"]
 
 ["MouseEventArgs::alt"]
 description.en = "Alt modifier held"
@@ -4579,7 +4571,7 @@ keywords = ["mouse", "move", "hover", "cursor", "pointer"]
 description.en = "Arguments for mouseMoved (cursor moving with no button held)"
 description.ja = "mouseMoved の引数(ボタンを押さずにカーソルが移動)"
 description.ko = "mouseMoved의 인자(버튼을 누르지 않고 커서가 이동)"
-related = ["mouseMoved", "MouseDragEventArgs", "MouseEventArgs"]
+related = ["MouseDragEventArgs", "MouseEventArgs"]
 
 ["MouseMoveEventArgs::alt"]
 description.en = "Alt modifier held"
@@ -4731,7 +4723,7 @@ keywords = ["scene graph", "object", "entity", "transform", "hierarchy"]
 description.en = "Base scene-graph node: transform hierarchy with parent/children, update/draw, input events and attachable Mods (C++ only, managed via shared_ptr / NodePtr)"
 description.ja = "シーングラフの基底ノード。親子の変換階層、update/draw、入力イベント、アタッチ可能な Mod を持つ（C++専用、shared_ptr / NodePtr で管理）"
 description.ko = "씬 그래프 기반 노드: 부모/자식 변환 계층, update/draw, 입력 이벤트, 부착 가능한 Mod를 가짐(C++ 전용, shared_ptr / NodePtr로 관리)"
-related = ["addChild", "RectNode", "getRootNode", "Mod"]
+related = ["Node::addChild", "RectNode", "getRootNode", "Mod"]
 
 ["Node::addChild"]
 category = "scene_graph"
@@ -4739,7 +4731,7 @@ keywords = ["parent", "attach", "append", "hierarchy", "tree"]
 description.en = "Add a child node (C++ only)"
 description.ja = "子ノードを追加（C++のみ）"
 description.ko = "자식 노드를 추가 (C++ 전용)"
-related = ["moveToFront", "moveToBack", "updateLayout", "LayoutMod"]
+related = ["Node::moveToFront", "Node::moveToBack", "LayoutMod::updateLayout", "LayoutMod"]
 
 ["Node::callAfter"]
 category = "timers"
@@ -4747,7 +4739,7 @@ keywords = ["timer", "delay", "timeout", "schedule", "later"]
 description.en = "Run callback once after delay seconds. Fired from the update loop (frame-quantized). Returns a timer id."
 description.ja = "delay秒後にcallbackを1回実行。更新ループから発火（フレーム単位）。タイマーidを返す"
 description.ko = "delay초 후 callback을 한 번 실행. 업데이트 루프에서 발생(프레임 단위). 타이머 id를 반환"
-related = ["callAfterAsync", "callEvery", "cancelTimer"]
+related = ["Node::callAfterAsync", "Node::callEvery", "Node::cancelTimer"]
 
 ["Node::callAfterAsync"]
 category = "timers"
@@ -4755,7 +4747,7 @@ keywords = ["timer", "delay", "thread", "precise", "background"]
 description.en = "Like callAfter, but fired by a precise background scheduler thread (no frame jitter). The callback runs OFF the main thread: guard shared state with a mutex, never draw from it, and don't cancel while holding that mutex. Native only (uses a real thread). Returns a timer id."
 description.ja = "callAfterの精密版。バックグラウンドのスケジューラスレッドが正確な時刻に発火（フレームジッタなし）。コールバックはメインスレッド外で走る：共有状態はmutexで保護、描画は禁止、そのmutexを保持したままcancelしない。ネイティブ専用（実スレッド使用）。タイマーidを返す"
 description.ko = "callAfter의 정밀 버전. 백그라운드 스케줄러 스레드가 정확한 시각에 실행(프레임 지터 없음). 콜백은 메인 스레드 밖에서 실행됨: 공유 상태는 mutex로 보호, 그리기 금지, 해당 mutex를 들고 cancel하지 말 것. 네이티브 전용(실제 스레드 사용). 타이머 id를 반환"
-related = ["callEveryAsync", "cancelAsyncTimer", "callAfter"]
+related = ["Node::callEveryAsync", "Node::cancelAsyncTimer", "Node::callAfter"]
 
 ["Node::callEvery"]
 category = "timers"
@@ -4763,7 +4755,7 @@ keywords = ["timer", "interval", "repeat", "schedule", "periodic"]
 description.en = "Run callback repeatedly every interval seconds. Fired from the update loop (frame-quantized). Returns a timer id."
 description.ja = "interval秒ごとにcallbackを繰り返し実行。更新ループから発火（フレーム単位）。タイマーidを返す"
 description.ko = "interval초마다 callback을 반복 실행. 업데이트 루프에서 발생(프레임 단위). 타이머 id를 반환"
-related = ["callEveryAsync", "callAfter", "cancelTimer"]
+related = ["Node::callEveryAsync", "Node::callAfter", "Node::cancelTimer"]
 
 ["Node::callEveryAsync"]
 category = "timers"
@@ -4771,7 +4763,7 @@ keywords = ["timer", "interval", "clock", "scheduler", "background"]
 description.en = "Like callEvery, but fired by a precise background scheduler thread with no drift (reschedules at absolute times). Ideal for sequencer clocks and LED/MIDI output timing. Same threading rules as callAfterAsync. Native only. Returns a timer id."
 description.ja = "callEveryの精密版。バックグラウンドのスケジューラスレッドがドリフトなく発火（絶対時刻で再スケジュール）。シーケンサのクロックやLED/MIDI出力のタイミングに最適。スレッドの注意点はcallAfterAsyncと同じ。ネイティブ専用。タイマーidを返す"
 description.ko = "callEvery의 정밀 버전. 백그라운드 스케줄러 스레드가 드리프트 없이 실행(절대 시각으로 재예약). 시퀀서 클럭이나 LED/MIDI 출력 타이밍에 적합. 스레드 주의사항은 callAfterAsync와 동일. 네이티브 전용. 타이머 id를 반환"
-related = ["callAfterAsync", "cancelAsyncTimer", "callEvery"]
+related = ["Node::callAfterAsync", "Node::cancelAsyncTimer", "Node::callEvery"]
 
 ["Node::cancelAllAsyncTimers"]
 category = "timers"
@@ -4779,7 +4771,7 @@ keywords = ["timer", "stop", "async", "clear", "cancel"]
 description.en = "Cancel all async timers on this node (e.g. on mode change). Waits out any in-flight callback. Call it WITHOUT holding the callback's mutex to avoid a deadlock."
 description.ja = "このノードの非同期タイマーを全てキャンセル（モード変更時など）。実行中のコールバックの完了を待つ。デッドロック回避のため、コールバックのmutexを保持せずに呼ぶこと"
 description.ko = "이 노드의 모든 비동기 타이머를 취소(모드 전환 등). 실행 중인 콜백의 완료를 기다림. 데드락 방지를 위해 콜백의 mutex를 들지 않고 호출할 것"
-related = ["cancelAsyncTimer", "cancelAllTimers"]
+related = ["Node::cancelAsyncTimer", "Node::cancelAllTimers"]
 
 ["Node::cancelAllTimers"]
 category = "timers"
@@ -4787,7 +4779,7 @@ keywords = ["timer", "stop", "clear", "remove", "cancel"]
 description.en = "Cancel all frame timers on this node."
 description.ja = "このノードのフレームタイマーを全てキャンセル"
 description.ko = "이 노드의 모든 프레임 타이머를 취소"
-related = ["cancelTimer", "cancelAllAsyncTimers"]
+related = ["Node::cancelTimer", "Node::cancelAllAsyncTimers"]
 
 ["Node::cancelAsyncTimer"]
 category = "timers"
@@ -4795,7 +4787,7 @@ keywords = ["timer", "stop", "async", "clear", "cancel"]
 description.en = "Cancel an async timer by id. Blocks until its callback finishes if it is running now (unless called from inside the callback). Do not call while holding the mutex the callback uses."
 description.ja = "id指定で非同期タイマーをキャンセル。実行中なら完了を待つ（コールバック内から呼ぶ場合を除く）。コールバックが使うmutexを保持したまま呼ばないこと"
 description.ko = "id로 비동기 타이머를 취소. 실행 중이면 완료를 기다림(콜백 내부에서 호출하는 경우 제외). 콜백이 쓰는 mutex를 들고 호출하지 말 것"
-related = ["cancelAllAsyncTimers", "callAfterAsync", "callEveryAsync"]
+related = ["Node::cancelAllAsyncTimers", "Node::callAfterAsync", "Node::callEveryAsync"]
 
 ["Node::cancelTimer"]
 category = "timers"
@@ -4803,7 +4795,7 @@ keywords = ["timer", "stop", "clear", "remove", "cancel"]
 description.en = "Cancel a frame timer (callAfter/callEvery) by id."
 description.ja = "id指定でフレームタイマー（callAfter/callEvery）をキャンセル"
 description.ko = "id로 프레임 타이머(callAfter/callEvery)를 취소"
-related = ["cancelAllTimers", "callAfter", "callEvery"]
+related = ["Node::cancelAllTimers", "Node::callAfter", "Node::callEvery"]
 
 ["Node::cleanup"]
 category = "lifecycle"
@@ -4811,7 +4803,7 @@ keywords = ["exit", "shutdown", "destroy", "dispose", "teardown", "quit"]
 description.en = "Called once before exit (optional user callback for cleanup)"
 description.ja = "終了前に一度呼ばれる（オプショナルなクリーンアップコールバック）"
 description.ko = "종료 직전 한 번 호출됨 (선택적 정리용 콜백)"
-related = ["requestExitApp", "destroy"]
+related = ["requestExitApp", "Node::destroy"]
 
 ["Node::destroy"]
 category = "scene_graph"
@@ -4819,7 +4811,7 @@ keywords = ["delete", "remove", "kill", "free", "dispose"]
 description.en = "Mark node for deferred removal from scene graph (C++ only)"
 description.ja = "ノードを削除予約する（次のupdate時にツリーから除去、C++のみ）"
 description.ko = "노드를 지연 제거 대상으로 표시 (다음 update에서 트리에서 제거, C++ 전용)"
-related = ["isDead", "getNodeCount"]
+related = ["Node::isDead", "getNodeCount"]
 
 ["Node::disableEvents"]
 category = "scene_graph"
@@ -4827,7 +4819,7 @@ keywords = ["events", "disable", "input", "hit test"]
 description.en = "Disable mouse/key events for this node (C++ only)"
 description.ja = "このノードのマウス/キーイベントを無効化（C++のみ）"
 description.ko = "이 노드의 마우스/키 이벤트를 비활성화 (C++ 전용)"
-related = ["enableEvents", "isEventsEnabled"]
+related = ["Node::enableEvents", "Node::isEventsEnabled"]
 
 ["Node::draw"]
 category = "lifecycle"
@@ -4835,7 +4827,7 @@ keywords = ["render", "paint", "display", "show", "frame"]
 description.en = "Called every frame after update"
 description.ja = "毎フレーム、updateの後に呼ばれる"
 description.ko = "매 프레임 update 이후에 호출됨"
-related = ["drawMesh", "update", "clear", "getFrameRate"]
+related = ["clear", "getFrameRate"]
 
 ["Node::enableEvents"]
 category = "scene_graph"
@@ -4851,7 +4843,7 @@ keywords = ["find", "instance id", "search", "subtree"]
 description.en = "Find a node in this subtree (self included) by instance id, depth-first (null if not found) (C++ only)"
 description.ja = "このサブツリー（自身を含む）からインスタンスIDでノードを深さ優先で検索（なければnull）（C++のみ）"
 description.ko = "이 서브트리(자신 포함)에서 인스턴스 ID로 노드를 깊이 우선 탐색 (없으면 null) (C++ 전용)"
-related = ["getInstanceId", "getRootNode"]
+related = ["Node::getInstanceId", "getRootNode"]
 
 ["Node::findHitNode"]
 category = "scene_graph"
@@ -4859,7 +4851,7 @@ keywords = ["pick", "raycast", "hit test", "ray"]
 description.en = "Hit test the whole tree with a global ray, returning the frontmost node (C++ only)"
 description.ja = "グローバルRayでツリー全体をヒットテストし、最前面のノードを返す（C++のみ）"
 description.ko = "글로벌 Ray로 트리 전체를 히트 테스트하여 가장 앞쪽 노드를 반환 (C++ 전용)"
-related = ["findHitNodeFromScreen", "HitResult", "Ray"]
+related = ["Node::findHitNodeFromScreen", "HitResult", "Ray"]
 
 ["Node::findHitNodeFromScreen"]
 category = "scene_graph"
@@ -4867,7 +4859,7 @@ keywords = ["pick", "screen", "hit test", "camera"]
 description.en = "Hit test the whole tree from a screen point, using each node's own camera context (C++ only)"
 description.ja = "スクリーン座標からツリー全体をヒットテスト（各ノード自身のカメラコンテキストを使用）（C++のみ）"
 description.ko = "스크린 좌표에서 트리 전체를 히트 테스트 (각 노드 자신의 카메라 컨텍스트 사용) (C++ 전용)"
-related = ["findHitNode", "HitResult"]
+related = ["Node::findHitNode", "HitResult"]
 
 ["Node::getActive"]
 category = "scene_graph"
@@ -4876,7 +4868,6 @@ description.en = "Deprecated alias for isActive()"
 description.ja = "isActive() の非推奨エイリアス"
 description.ko = "isActive()의 deprecated 별칭"
 details = "Renamed to `isActive()`; new code should call that (same behavior). Scheduled for removal in v1.0.0."
-related = ["isActive"]
 
 ["Node::getChildCount"]
 category = "scene_graph"
@@ -4884,7 +4875,7 @@ keywords = ["count", "size", "children", "number"]
 description.en = "Get the number of child nodes (C++ only)"
 description.ja = "子ノードの数を取得（C++のみ）"
 description.ko = "자식 노드의 수를 얻음 (C++ 전용)"
-related = ["getChildren"]
+related = ["Node::getChildren"]
 
 ["Node::getChildIndex"]
 category = "scene_graph"
@@ -4892,7 +4883,7 @@ keywords = ["index", "sibling", "order", "position"]
 description.en = "This node's index among its parent's children (-1 if no parent) (C++ only)"
 description.ja = "親の子の中でのこのノードのインデックス（親がなければ-1）（C++のみ）"
 description.ko = "부모의 자식 중 이 노드의 인덱스(부모가 없으면 -1) (C++ 전용)"
-related = ["indexOfChild", "getParent"]
+related = ["Node::indexOfChild", "Node::getParent"]
 
 ["Node::getChildren"]
 category = "scene_graph"
@@ -4900,7 +4891,7 @@ keywords = ["children", "list", "tree", "hierarchy"]
 description.en = "Get a copy of the child node list (safe to iterate while modifying) (C++ only)"
 description.ja = "子ノードのリスト（コピー、走査中の変更に安全）を取得（C++のみ）"
 description.ko = "자식 노드 리스트의 복사본을 얻음 (순회 중 변경에 안전) (C++ 전용)"
-related = ["getChildCount", "addChild"]
+related = ["Node::getChildCount", "Node::addChild"]
 
 ["Node::getDisplayName"]
 category = "scene_graph"
@@ -4914,7 +4905,7 @@ description.ja = '''
 description.ko = '''
 트리/인스펙터용 짧은 타입 기반 라벨. 예 "RectNode" 또는 "RectNode (play)" (C++ 전용)
 '''
-related = ["getTypeName", "getName"]
+related = ["Node::getTypeName"]
 
 ["Node::getEuler"]
 category = "scene_graph"
@@ -4922,7 +4913,7 @@ keywords = ["rotation", "euler", "radians", "query"]
 description.en = "Get rotation as Euler angles in radians (pitch=X, yaw=Y, roll=Z) (C++ only)"
 description.ja = "回転をオイラー角（ラジアン、pitch=X/yaw=Y/roll=Z）で取得（C++のみ）"
 description.ko = "회전을 오일러 각(라디안, pitch=X/yaw=Y/roll=Z)으로 얻음 (C++ 전용)"
-related = ["setEuler", "getEulerDeg"]
+related = ["Node::setEuler", "Node::getEulerDeg"]
 
 ["Node::getEulerDeg"]
 category = "scene_graph"
@@ -4930,7 +4921,7 @@ keywords = ["rotation", "euler", "degrees", "query"]
 description.en = "Get rotation as Euler angles in degrees (C++ only)"
 description.ja = "回転をオイラー角（度数）で取得（C++のみ）"
 description.ko = "회전을 오일러 각(도)으로 얻음 (C++ 전용)"
-related = ["setEulerDeg", "getEuler"]
+related = ["Node::setEulerDeg", "Node::getEuler"]
 
 ["Node::getGlobalMatrix"]
 category = "scene_graph"
@@ -4938,7 +4929,7 @@ keywords = ["matrix", "global", "world", "transform"]
 description.en = "Get this node's global transform matrix, including parent transforms (cached) (C++ only)"
 description.ja = "親変換を含むこのノードのグローバル変換行列を取得（キャッシュ済み）（C++のみ）"
 description.ko = "부모 변환을 포함한 이 노드의 글로벌 변환 행렬을 얻음 (캐시됨) (C++ 전용)"
-related = ["getLocalMatrix", "getGlobalMatrixInverse"]
+related = ["Node::getLocalMatrix", "Node::getGlobalMatrixInverse"]
 
 ["Node::getGlobalMatrixInverse"]
 category = "scene_graph"
@@ -4946,7 +4937,7 @@ keywords = ["matrix", "inverse", "global", "world"]
 description.en = "Get the inverse of the global transform matrix (C++ only)"
 description.ja = "グローバル変換行列の逆行列を取得（C++のみ）"
 description.ko = "글로벌 변환 행렬의 역행렬을 얻음 (C++ 전용)"
-related = ["getGlobalMatrix", "globalToLocal"]
+related = ["Node::getGlobalMatrix", "Node::globalToLocal"]
 
 ["Node::getGlobalPos"]
 category = "scene_graph"
@@ -4954,7 +4945,7 @@ keywords = ["position", "global", "world", "query"]
 description.en = "Get the node's origin in global (world) space (C++ only)"
 description.ja = "ノードの原点をグローバル（ワールド）空間で取得（C++のみ）"
 description.ko = "노드의 원점을 글로벌(월드) 공간에서 얻음 (C++ 전용)"
-related = ["setGlobalPos", "getPos"]
+related = ["Node::setGlobalPos", "Node::getPos"]
 
 ["Node::getInstanceId"]
 category = "scene_graph"
@@ -4962,7 +4953,7 @@ keywords = ["instance id", "unique", "identity", "handle"]
 description.en = "Per-process unique id, assigned once at construction and stable across reparenting (C++ only)"
 description.ja = "プロセス内で一意のID。生成時に一度割り当てられ、再ペアレント後も変わらない（C++のみ）"
 description.ko = "프로세스 내 고유 ID. 생성 시 한 번 할당되며 재부모화 후에도 유지됨 (C++ 전용)"
-related = ["findByInstanceId"]
+related = ["Node::findByInstanceId"]
 
 ["Node::getLocalMatrix"]
 category = "scene_graph"
@@ -4970,7 +4961,7 @@ keywords = ["matrix", "local", "transform", "cached"]
 description.en = "Get this node's local transform matrix (cached) (C++ only)"
 description.ja = "このノードのローカル変換行列を取得（キャッシュ済み）（C++のみ）"
 description.ko = "이 노드의 로컬 변환 행렬을 얻음 (캐시됨) (C++ 전용)"
-related = ["getGlobalMatrix"]
+related = ["Node::getGlobalMatrix"]
 
 ["Node::getModByTypeName"]
 category = "scene_graph"
@@ -4984,7 +4975,7 @@ description.ja = '''
 description.ko = '''
 짧은 타입 이름(예 "LayoutMod")으로 부착된 모드를 검색 (없으면 null) (C++ 전용)
 '''
-related = ["getMods", "getModTypeNames"]
+related = ["Node::getMods", "Node::getModTypeNames"]
 
 ["Node::getModTypeNames"]
 category = "scene_graph"
@@ -4992,7 +4983,7 @@ keywords = ["mods", "type names", "list", "components"]
 description.en = "Get the short (unqualified) type names of the attached mods (C++ only)"
 description.ja = "アタッチされたModの短い（非修飾）型名を取得（C++のみ）"
 description.ko = "부착된 모드의 짧은(비수식) 타입 이름을 얻음 (C++ 전용)"
-related = ["getMods", "getModByTypeName"]
+related = ["Node::getMods", "Node::getModByTypeName"]
 
 ["Node::getMods"]
 category = "scene_graph"
@@ -5000,7 +4991,7 @@ keywords = ["mods", "behaviors", "list", "components"]
 description.en = "Get all attached mods (pointers stay owned by this node) (C++ only)"
 description.ja = "アタッチされた全Modを取得（ポインタの所有権はこのノードのまま）（C++のみ）"
 description.ko = "부착된 모든 모드를 얻음 (포인터 소유권은 이 노드에 유지) (C++ 전용)"
-related = ["getModTypeNames", "getModByTypeName"]
+related = ["Node::getModTypeNames", "Node::getModByTypeName"]
 
 ["Node::getMouseX"]
 category = "scene_graph"
@@ -5008,7 +4999,7 @@ keywords = ["mouse", "cursor", "local", "x"]
 description.en = "Get mouse X in this node's local coordinate system (C++ only)"
 description.ja = "このノードのローカル座標系でのマウスX座標を取得（C++のみ）"
 description.ko = "이 노드의 로컬 좌표계에서 마우스 X를 얻음 (C++ 전용)"
-related = ["getMouseY", "getPMouseX"]
+related = ["getMouseY", "Node::getPMouseX"]
 
 ["Node::getMouseY"]
 category = "scene_graph"
@@ -5016,7 +5007,7 @@ keywords = ["mouse", "cursor", "local", "y"]
 description.en = "Get mouse Y in this node's local coordinate system (C++ only)"
 description.ja = "このノードのローカル座標系でのマウスY座標を取得（C++のみ）"
 description.ko = "이 노드의 로컬 좌표계에서 마우스 Y를 얻음 (C++ 전용)"
-related = ["getMouseX", "getPMouseY"]
+related = ["getMouseX", "Node::getPMouseY"]
 
 ["Node::getName"]
 category = "scene_graph"
@@ -5024,7 +5015,7 @@ keywords = ["name", "label", "identity", "query"]
 description.en = "Get the optional instance name (empty unless setName() was called) (C++ only)"
 description.ja = "任意のインスタンス名を取得（setName()未呼び出しなら空）（C++のみ）"
 description.ko = "선택적 인스턴스 이름을 얻음 (setName() 미호출 시 빈 문자열) (C++ 전용)"
-related = ["setName", "getTypeName", "getDisplayName"]
+related = ["Node::setName", "Node::getTypeName", "Node::getDisplayName"]
 
 ["Node::getPMouseX"]
 category = "scene_graph"
@@ -5032,7 +5023,7 @@ keywords = ["mouse", "previous", "local", "x"]
 description.en = "Get previous-frame mouse X in this node's local coordinate system (C++ only)"
 description.ja = "このノードのローカル座標系での前フレームのマウスX座標を取得（C++のみ）"
 description.ko = "이 노드의 로컬 좌표계에서 이전 프레임 마우스 X를 얻음 (C++ 전용)"
-related = ["getMouseX", "getPMouseY"]
+related = ["getMouseX", "Node::getPMouseY"]
 
 ["Node::getPMouseY"]
 category = "scene_graph"
@@ -5040,7 +5031,7 @@ keywords = ["mouse", "previous", "local", "y"]
 description.en = "Get previous-frame mouse Y in this node's local coordinate system (C++ only)"
 description.ja = "このノードのローカル座標系での前フレームのマウスY座標を取得（C++のみ）"
 description.ko = "이 노드의 로컬 좌표계에서 이전 프레임 마우스 Y를 얻음 (C++ 전용)"
-related = ["getMouseY", "getPMouseX"]
+related = ["getMouseY", "Node::getPMouseX"]
 
 ["Node::getParent"]
 category = "scene_graph"
@@ -5048,7 +5039,7 @@ keywords = ["parent", "ancestor", "tree", "hierarchy"]
 description.en = "Get the parent node (null if none) (C++ only)"
 description.ja = "親ノードを取得（なければnull）（C++のみ）"
 description.ko = "부모 노드를 얻음 (없으면 null) (C++ 전용)"
-related = ["getChildren", "getChildIndex"]
+related = ["Node::getChildren", "Node::getChildIndex"]
 
 ["Node::getPos"]
 category = "scene_graph"
@@ -5056,7 +5047,7 @@ keywords = ["position", "location", "transform", "query"]
 description.en = "Get local position (C++ only)"
 description.ja = "ローカル位置を取得（C++のみ）"
 description.ko = "로컬 위치를 얻음 (C++ 전용)"
-related = ["setPos", "getGlobalPos"]
+related = ["Node::setPos", "Node::getGlobalPos"]
 
 ["Node::getQuaternion"]
 category = "scene_graph"
@@ -5064,7 +5055,7 @@ keywords = ["rotation", "quaternion", "orientation", "query"]
 description.en = "Get rotation as a quaternion (C++ only)"
 description.ja = "回転をクォータニオンで取得（C++のみ）"
 description.ko = "회전을 쿼터니언으로 얻음 (C++ 전용)"
-related = ["setQuaternion", "getEuler"]
+related = ["Node::setQuaternion", "Node::getEuler"]
 
 ["Node::getRot"]
 category = "scene_graph"
@@ -5072,7 +5063,7 @@ keywords = ["rotation", "2d", "z axis", "radians"]
 description.en = "Get 2D Z-axis rotation in radians (C++ only)"
 description.ja = "2DのZ軸回転をラジアンで取得（C++のみ）"
 description.ko = "2D Z축 회전을 라디안으로 얻음 (C++ 전용)"
-related = ["setRot", "getRotDeg"]
+related = ["Node::setRot", "Node::getRotDeg"]
 
 ["Node::getRotDeg"]
 category = "scene_graph"
@@ -5080,7 +5071,7 @@ keywords = ["rotation", "2d", "z axis", "degrees"]
 description.en = "Get 2D Z-axis rotation in degrees (C++ only)"
 description.ja = "2DのZ軸回転を度数で取得（C++のみ）"
 description.ko = "2D Z축 회전을 도로 얻음 (C++ 전용)"
-related = ["setRotDeg", "getRot"]
+related = ["Node::setRotDeg", "Node::getRot"]
 
 ["Node::getScale"]
 category = "scene_graph"
@@ -5088,7 +5079,7 @@ keywords = ["scale", "size", "zoom", "query"]
 description.en = "Get local scale (C++ only)"
 description.ja = "ローカルスケールを取得（C++のみ）"
 description.ko = "로컬 스케일을 얻음 (C++ 전용)"
-related = ["setScale", "getScaleX"]
+related = ["Node::setScale", "Node::getScaleX"]
 
 ["Node::getScaleX"]
 category = "scene_graph"
@@ -5096,7 +5087,7 @@ keywords = ["scale", "x", "zoom", "query"]
 description.en = "Get local X scale (C++ only)"
 description.ja = "ローカルXスケールを取得（C++のみ）"
 description.ko = "로컬 X 스케일을 얻음 (C++ 전용)"
-related = ["getScale", "setScaleX"]
+related = ["getScale", "Node::setScaleX"]
 
 ["Node::getScaleY"]
 category = "scene_graph"
@@ -5104,7 +5095,7 @@ keywords = ["scale", "y", "zoom", "query"]
 description.en = "Get local Y scale (C++ only)"
 description.ja = "ローカルYスケールを取得（C++のみ）"
 description.ko = "로컬 Y 스케일을 얻음 (C++ 전용)"
-related = ["getScale", "setScaleY"]
+related = ["getScale", "Node::setScaleY"]
 
 ["Node::getScaleZ"]
 category = "scene_graph"
@@ -5112,7 +5103,7 @@ keywords = ["scale", "z", "zoom", "query"]
 description.en = "Get local Z scale (C++ only)"
 description.ja = "ローカルZスケールを取得（C++のみ）"
 description.ko = "로컬 Z 스케일을 얻음 (C++ 전용)"
-related = ["getScale", "setScaleZ"]
+related = ["getScale", "Node::setScaleZ"]
 
 ["Node::getTypeName"]
 category = "scene_graph"
@@ -5126,7 +5117,7 @@ RTTIによるC++クラス名（最派生型）。例 "trussc::RectNode"（キャ
 description.ko = '''
 RTTI를 통한 C++ 클래스 이름(최파생 타입). 예 "trussc::RectNode" (캐시됨) (C++ 전용)
 '''
-related = ["getDisplayName", "getName"]
+related = ["Node::getDisplayName"]
 
 ["Node::getVisible"]
 category = "scene_graph"
@@ -5135,7 +5126,7 @@ description.en = "Deprecated alias for isVisible()"
 description.ja = "isVisible() の非推奨エイリアス"
 description.ko = "isVisible()의 deprecated 별칭"
 details = "Renamed to `isVisible()`; new code should call that (same behavior). Scheduled for removal in v1.0.0."
-related = ["isVisible"]
+related = ["Node::isVisible"]
 
 ["Node::getX"]
 category = "scene_graph"
@@ -5143,7 +5134,7 @@ keywords = ["position", "x", "horizontal", "query"]
 description.en = "Get local X position (C++ only)"
 description.ja = "ローカルX座標を取得（C++のみ）"
 description.ko = "로컬 X 위치를 얻음 (C++ 전용)"
-related = ["getY", "getZ", "setX"]
+related = ["Node::getY", "Node::getZ", "Node::setX"]
 
 ["Node::getY"]
 category = "scene_graph"
@@ -5151,7 +5142,7 @@ keywords = ["position", "y", "vertical", "query"]
 description.en = "Get local Y position (C++ only)"
 description.ja = "ローカルY座標を取得（C++のみ）"
 description.ko = "로컬 Y 위치를 얻음 (C++ 전용)"
-related = ["getX", "getZ", "setY"]
+related = ["Node::getX", "Node::getZ", "Node::setY"]
 
 ["Node::getZ"]
 category = "scene_graph"
@@ -5159,7 +5150,7 @@ keywords = ["position", "z", "depth", "query"]
 description.en = "Get local Z position (C++ only)"
 description.ja = "ローカルZ座標を取得（C++のみ）"
 description.ko = "로컬 Z 위치를 얻음 (C++ 전용)"
-related = ["getX", "getY", "setZ"]
+related = ["Node::getX", "Node::getY", "Node::setZ"]
 
 ["Node::globalToLocal"]
 category = "scene_graph"
@@ -5168,7 +5159,7 @@ description.en = "Convert a global coordinate to this node's local space (C++ on
 description.ja = "グローバル座標をこのノードのローカル空間に変換（C++のみ）"
 description.ko = "글로벌 좌표를 이 노드의 로컬 공간으로 변환 (C++ 전용)"
 details = "The out-parameter overload; new code should use `globalToLocal(Vec3)`. Scheduled for removal in v1.0.0."
-related = ["localToGlobal", "getGlobalMatrixInverse"]
+related = ["Node::localToGlobal", "Node::getGlobalMatrixInverse"]
 
 ["Node::hasName"]
 category = "scene_graph"
@@ -5176,7 +5167,7 @@ keywords = ["name", "named", "identity", "query"]
 description.en = "Whether an instance name has been set (C++ only)"
 description.ja = "インスタンス名が設定されているか（C++のみ）"
 description.ko = "인스턴스 이름이 설정되었는지 (C++ 전용)"
-related = ["getName", "setName"]
+related = ["Node::setName"]
 
 ["Node::indexOfChild"]
 category = "scene_graph"
@@ -5184,7 +5175,7 @@ keywords = ["index", "find child", "position", "tree"]
 description.en = "Index of the given child among this node's children (-1 if not a child) (C++ only)"
 description.ja = "指定した子の、このノードの子の中でのインデックス（子でなければ-1）（C++のみ）"
 description.ko = "지정한 자식의 인덱스(이 노드의 자식 중, 자식이 아니면 -1) (C++ 전용)"
-related = ["getChildIndex", "getChildren"]
+related = ["Node::getChildIndex", "Node::getChildren"]
 
 ["Node::insertChild"]
 category = "scene_graph"
@@ -5192,7 +5183,7 @@ keywords = ["insert", "child", "index", "tree"]
 description.en = "Insert a child node at a specific index (C++ only)"
 description.ja = "指定インデックスに子ノードを挿入（C++のみ）"
 description.ko = "지정한 인덱스에 자식 노드를 삽입 (C++ 전용)"
-related = ["addChild", "removeChild"]
+related = ["Node::addChild", "Node::removeChild"]
 
 ["Node::isActive"]
 category = "scene_graph"
@@ -5200,7 +5191,7 @@ keywords = ["active", "enabled", "update", "state"]
 description.en = "Whether the node is active (inactive: update and draw are skipped) (C++ only)"
 description.ja = "ノードがアクティブか（非アクティブ時はupdate/drawがスキップされる）（C++のみ）"
 description.ko = "노드가 활성 상태인지 (비활성 시 update/draw가 건너뜀) (C++ 전용)"
-related = ["setActive", "isVisible"]
+related = ["Node::setActive", "Node::isVisible"]
 
 ["Node::isDead"]
 category = "scene_graph"
@@ -5215,7 +5206,7 @@ keywords = ["events", "enabled", "input", "query"]
 description.en = "Whether events are enabled (only such nodes are hit-test targets) (C++ only)"
 description.ja = "イベントが有効か（有効なノードのみヒットテスト対象）（C++のみ）"
 description.ko = "이벤트가 활성화되었는지 (활성 노드만 히트 테스트 대상) (C++ 전용)"
-related = ["enableEvents", "disableEvents"]
+related = ["Node::enableEvents", "Node::disableEvents"]
 
 ["Node::isMouseOver"]
 category = "scene_graph"
@@ -5231,7 +5222,7 @@ keywords = ["visible", "shown", "draw", "state"]
 description.en = "Whether the node is visible (invisible: only draw is skipped) (C++ only)"
 description.ja = "ノードが表示状態か（非表示時はdrawのみスキップされる）（C++のみ）"
 description.ko = "노드가 보이는 상태인지 (비표시 시 draw만 건너뜀) (C++ 전용)"
-related = ["setVisible", "isActive"]
+related = ["Node::setVisible"]
 
 ["Node::localToGlobal"]
 category = "scene_graph"
@@ -5240,7 +5231,7 @@ description.en = "Convert a local coordinate to global space (C++ only)"
 description.ja = "ローカル座標をグローバル空間に変換（C++のみ）"
 description.ko = "로컬 좌표를 글로벌 공간으로 변환 (C++ 전용)"
 details = "The out-parameter overload; new code should use `localToGlobal(Vec3)`. Scheduled for removal in v1.0.0."
-related = ["globalToLocal", "getGlobalMatrix"]
+related = ["Node::globalToLocal", "Node::getGlobalMatrix"]
 
 ["Node::moveToBack"]
 category = "scene_graph"
@@ -5262,7 +5253,7 @@ keywords = ["callback", "child added", "hook", "override"]
 description.en = "Callback fired when a child is added (overridable) (C++ only)"
 description.ja = "子が追加されたときに呼ばれるコールバック（オーバーライド可能）（C++のみ）"
 description.ko = "자식이 추가될 때 호출되는 콜백 (오버라이드 가능) (C++ 전용)"
-related = ["addChild", "onChildRemoved"]
+related = ["Node::addChild", "Node::onChildRemoved"]
 
 ["Node::onChildRemoved"]
 category = "scene_graph"
@@ -5270,7 +5261,7 @@ keywords = ["callback", "child removed", "hook", "override"]
 description.en = "Callback fired when a child is removed (overridable) (C++ only)"
 description.ja = "子が削除されたときに呼ばれるコールバック（オーバーライド可能）（C++のみ）"
 description.ko = "자식이 제거될 때 호출되는 콜백 (오버라이드 가능) (C++ 전용)"
-related = ["removeChild", "onChildAdded"]
+related = ["Node::removeChild", "Node::onChildAdded"]
 
 ["Node::removeAllChildren"]
 category = "scene_graph"
@@ -5278,7 +5269,7 @@ keywords = ["clear", "remove all", "children", "tree"]
 description.en = "Remove all child nodes (C++ only)"
 description.ja = "すべての子ノードを削除（C++のみ）"
 description.ko = "모든 자식 노드를 제거 (C++ 전용)"
-related = ["removeChild"]
+related = ["Node::removeChild"]
 
 ["Node::removeChild"]
 category = "scene_graph"
@@ -5286,7 +5277,7 @@ keywords = ["remove", "detach", "child", "tree"]
 description.en = "Remove a child node (C++ only)"
 description.ja = "子ノードを削除（C++のみ）"
 description.ko = "자식 노드를 제거 (C++ 전용)"
-related = ["addChild", "removeAllChildren"]
+related = ["Node::addChild", "Node::removeAllChildren"]
 
 ["Node::setActive"]
 category = "scene_graph"
@@ -5294,7 +5285,7 @@ keywords = ["active", "enable", "disable", "state"]
 description.en = "Set the active state (inactive: update and draw are skipped) (C++ only)"
 description.ja = "アクティブ状態を設定（非アクティブ時はupdate/drawがスキップされる）（C++のみ）"
 description.ko = "활성 상태를 설정 (비활성 시 update/draw가 건너뜀) (C++ 전용)"
-related = ["isActive", "setVisible"]
+related = ["Node::setVisible"]
 
 ["Node::setEuler"]
 category = "scene_graph"
@@ -5302,7 +5293,7 @@ keywords = ["rotation", "euler", "radians", "set"]
 description.en = "Set rotation from Euler angles in radians (pitch=X, yaw=Y, roll=Z) (C++ only)"
 description.ja = "回転をオイラー角（ラジアン、pitch=X/yaw=Y/roll=Z）で設定（C++のみ）"
 description.ko = "회전을 오일러 각(라디안, pitch=X/yaw=Y/roll=Z)으로 설정 (C++ 전용)"
-related = ["getEuler", "setEulerDeg"]
+related = ["Node::getEuler", "Node::setEulerDeg"]
 
 ["Node::setEulerDeg"]
 category = "scene_graph"
@@ -5310,7 +5301,7 @@ keywords = ["rotation", "euler", "degrees", "set"]
 description.en = "Set rotation from Euler angles in degrees (C++ only)"
 description.ja = "回転をオイラー角（度数）で設定（C++のみ）"
 description.ko = "회전을 오일러 각(도)으로 설정 (C++ 전용)"
-related = ["getEulerDeg", "setEuler"]
+related = ["Node::getEulerDeg", "Node::setEuler"]
 
 ["Node::setGlobalPos"]
 category = "scene_graph"
@@ -5318,7 +5309,7 @@ keywords = ["position", "global", "world", "set"]
 description.en = "Set the node's position in global (world) space (C++ only)"
 description.ja = "ノードの位置をグローバル（ワールド）空間で設定（C++のみ）"
 description.ko = "노드의 위치를 글로벌(월드) 공간에서 설정 (C++ 전용)"
-related = ["getGlobalPos", "setPos"]
+related = ["Node::getGlobalPos", "Node::setPos"]
 
 ["Node::setIsActive"]
 category = "scene_graph"
@@ -5327,7 +5318,7 @@ description.en = "Deprecated alias for setActive()"
 description.ja = "setActive() の非推奨エイリアス"
 description.ko = "setActive()의 deprecated 별칭"
 details = "Renamed to `setActive()`; new code should call that (same behavior). Scheduled for removal in v1.0.0."
-related = ["setActive"]
+related = ["Node::setActive"]
 
 ["Node::setIsVisible"]
 category = "scene_graph"
@@ -5336,7 +5327,7 @@ description.en = "Deprecated alias for setVisible()"
 description.ja = "setVisible() の非推奨エイリアス"
 description.ko = "setVisible()의 deprecated 별칭"
 details = "Renamed to `setVisible()`; new code should call that (same behavior). Scheduled for removal in v1.0.0."
-related = ["setVisible"]
+related = ["Node::setVisible"]
 
 ["Node::setName"]
 category = "scene_graph"
@@ -5344,7 +5335,7 @@ keywords = ["name", "label", "identity", "set"]
 description.en = "Set an optional instance name (chainable) (C++ only)"
 description.ja = "任意のインスタンス名を設定（メソッドチェーン可能）（C++のみ）"
 description.ko = "선택적 인스턴스 이름을 설정 (메서드 체인 가능) (C++ 전용)"
-related = ["getName", "hasName"]
+related = ["Node::hasName"]
 
 ["Node::setPos"]
 category = "scene_graph"
@@ -5352,7 +5343,7 @@ keywords = ["position", "move", "translate", "place"]
 description.en = "Set local position (C++ only)"
 description.ja = "ローカル位置を設定（C++のみ）"
 description.ko = "로컬 위치를 설정 (C++ 전용)"
-related = ["getPos", "setGlobalPos"]
+related = ["Node::getPos", "Node::setGlobalPos"]
 
 ["Node::setQuaternion"]
 category = "scene_graph"
@@ -5360,7 +5351,7 @@ keywords = ["rotation", "quaternion", "orientation", "set"]
 description.en = "Set rotation from a quaternion (C++ only)"
 description.ja = "回転をクォータニオンで設定（C++のみ）"
 description.ko = "회전을 쿼터니언으로 설정 (C++ 전용)"
-related = ["getQuaternion", "setEuler"]
+related = ["Node::getQuaternion", "Node::setEuler"]
 
 ["Node::setRot"]
 category = "scene_graph"
@@ -5368,7 +5359,7 @@ keywords = ["rotation", "2d", "z axis", "radians"]
 description.en = "Set 2D Z-axis rotation in radians (C++ only)"
 description.ja = "2DのZ軸回転をラジアンで設定（C++のみ）"
 description.ko = "2D Z축 회전을 라디안으로 설정 (C++ 전용)"
-related = ["getRot", "setRotDeg"]
+related = ["Node::getRot", "Node::setRotDeg"]
 
 ["Node::setRotDeg"]
 category = "scene_graph"
@@ -5376,7 +5367,7 @@ keywords = ["rotation", "2d", "z axis", "degrees"]
 description.en = "Set 2D Z-axis rotation in degrees (C++ only)"
 description.ja = "2DのZ軸回転を度数で設定（C++のみ）"
 description.ko = "2D Z축 회전을 도로 설정 (C++ 전용)"
-related = ["getRotDeg", "setRot"]
+related = ["Node::getRotDeg", "Node::setRot"]
 
 ["Node::setScale"]
 category = "scene_graph"
@@ -5384,7 +5375,7 @@ keywords = ["scale", "resize", "zoom", "set"]
 description.en = "Set local scale (vector, uniform, or per-axis) (C++ only)"
 description.ja = "ローカルスケールを設定（ベクトル/一様/軸別）（C++のみ）"
 description.ko = "로컬 스케일을 설정 (벡터/균일/축별) (C++ 전용)"
-related = ["getScale", "setScaleX"]
+related = ["getScale", "Node::setScaleX"]
 
 ["Node::setScaleX"]
 category = "scene_graph"
@@ -5392,7 +5383,7 @@ keywords = ["scale", "x", "zoom", "set"]
 description.en = "Set local X scale (C++ only)"
 description.ja = "ローカルXスケールを設定（C++のみ）"
 description.ko = "로컬 X 스케일을 설정 (C++ 전용)"
-related = ["getScaleX", "setScale"]
+related = ["Node::getScaleX", "Node::setScale"]
 
 ["Node::setScaleY"]
 category = "scene_graph"
@@ -5400,7 +5391,7 @@ keywords = ["scale", "y", "zoom", "set"]
 description.en = "Set local Y scale (C++ only)"
 description.ja = "ローカルYスケールを設定（C++のみ）"
 description.ko = "로컬 Y 스케일을 설정 (C++ 전용)"
-related = ["getScaleY", "setScale"]
+related = ["Node::getScaleY", "Node::setScale"]
 
 ["Node::setScaleZ"]
 category = "scene_graph"
@@ -5408,7 +5399,7 @@ keywords = ["scale", "z", "zoom", "set"]
 description.en = "Set local Z scale (C++ only)"
 description.ja = "ローカルZスケールを設定（C++のみ）"
 description.ko = "로컬 Z 스케일을 설정 (C++ 전용)"
-related = ["getScaleZ", "setScale"]
+related = ["Node::getScaleZ", "Node::setScale"]
 
 ["Node::setVisible"]
 category = "scene_graph"
@@ -5416,7 +5407,7 @@ keywords = ["visible", "show", "hide", "state"]
 description.en = "Set the visible state (invisible: only draw is skipped) (C++ only)"
 description.ja = "表示状態を設定（非表示時はdrawのみスキップされる）（C++のみ）"
 description.ko = "보이는 상태를 설정 (비표시 시 draw만 건너뜀) (C++ 전용)"
-related = ["isVisible", "setActive"]
+related = ["Node::isVisible", "Node::setActive"]
 
 ["Node::setX"]
 category = "scene_graph"
@@ -5424,7 +5415,7 @@ keywords = ["position", "x", "move", "horizontal"]
 description.en = "Set local X position (C++ only)"
 description.ja = "ローカルX座標を設定（C++のみ）"
 description.ko = "로컬 X 위치를 설정 (C++ 전용)"
-related = ["getX", "setPos"]
+related = ["Node::getX", "Node::setPos"]
 
 ["Node::setY"]
 category = "scene_graph"
@@ -5432,7 +5423,7 @@ keywords = ["position", "y", "move", "vertical"]
 description.en = "Set local Y position (C++ only)"
 description.ja = "ローカルY座標を設定（C++のみ）"
 description.ko = "로컬 Y 위치를 설정 (C++ 전용)"
-related = ["getY", "setPos"]
+related = ["Node::getY", "Node::setPos"]
 
 ["Node::setZ"]
 category = "scene_graph"
@@ -5440,7 +5431,7 @@ keywords = ["position", "z", "move", "depth"]
 description.en = "Set local Z position (C++ only)"
 description.ja = "ローカルZ座標を設定（C++のみ）"
 description.ko = "로컬 Z 위치를 설정 (C++ 전용)"
-related = ["getZ", "setPos"]
+related = ["Node::getZ", "Node::setPos"]
 
 ["Node::setup"]
 category = "lifecycle"
@@ -5456,7 +5447,7 @@ keywords = ["tick", "step", "logic", "frame", "process", "advance"]
 description.en = "Called every frame before draw"
 description.ja = "毎フレーム、drawの前に呼ばれる"
 description.ko = "매 프레임 draw 이전에 호출됨"
-related = ["updateGlyph", "updateLayout", "draw", "getDeltaTime", "getFrameCount"]
+related = ["LayoutMod::updateLayout", "getDeltaTime", "getFrameCount"]
 
 ["NodePtr"]
 description.en = "Shared pointer to a Node (std::shared_ptr<Node>); the standard way to hold and pass scene nodes"
@@ -5492,7 +5483,7 @@ description.en = "Path/Polyline for lines and curves"
 description.ja = "線と曲線のパス/ポリライン"
 description.ko = "선과 곡선을 위한 경로/폴리라인"
 of_category = "geometry-types"
-related = ["getStringPath", "createPath", "setShape", "StrokeMesh", "drawStroke", "Mesh"]
+related = ["Font::getStringPath", "StrokeMesh::setShape", "StrokeMesh", "drawStroke", "Mesh"]
 
 ["Path::addVertex"]
 category = "types_path"
@@ -5512,7 +5503,7 @@ keywords = ["circle", "round", "sweep", "angle"]
 description.en = "Add an arc (angles in radians)"
 description.ja = "円弧を追加（角度はradian）"
 description.ko = "호를 추가 (각도는 radian)"
-related = ["drawArc", "appendArc", "lineTo"]
+related = ["drawArc", "appendArc", "Path::lineTo"]
 
 ["Path::bezierTo"]
 category = "types_path"
@@ -5520,7 +5511,7 @@ keywords = ["bezier", "cubic", "curve", "spline"]
 description.en = "Add cubic bezier curve (resolution=-1 uses current curve style)"
 description.ja = "3次ベジェ曲線を追加（resolution=-1で現在のcurve styleを使用）"
 description.ko = "3차 베지어 곡선을 추가 (resolution=-1은 현재 곡선 스타일 사용)"
-related = ["quadBezierTo", "curveTo", "lineTo", "drawBezier"]
+related = ["Path::quadBezierTo", "Path::curveTo", "Path::lineTo", "drawBezier"]
 
 ["Path::buildFillTriangles"]
 category = "types_path"
@@ -5528,7 +5519,7 @@ keywords = ["fill", "triangulate", "earcut", "tessellate"]
 description.en = "Triangulate the path interior into a flat list of 2D triangle vertices"
 description.ja = "パス内部を三角形分割し、2D三角形頂点のフラットなリストにする"
 description.ko = "경로 내부를 삼각분할하여 2D 삼각형 정점의 평면 목록으로 만듦"
-related = ["toFillMesh", "drawFill"]
+related = ["Path::toFillMesh", "Path::drawFill"]
 
 ["Path::clear"]
 description.en = "Clear all vertices"
@@ -5541,7 +5532,7 @@ keywords = ["close", "loop", "join", "finish"]
 description.en = "Close the path"
 description.ja = "パスを閉じる"
 description.ko = "경로를 닫음"
-related = ["setClosed", "beginShape"]
+related = ["beginShape"]
 
 ["Path::curveTo"]
 category = "types_path"
@@ -5549,7 +5540,7 @@ keywords = ["catmull", "spline", "smooth", "curve"]
 description.en = "Add Catmull-Rom curve segment (needs >=4 consecutive calls; resolution=-1 uses current curve style)"
 description.ja = "Catmull-Rom曲線を追加（4回以上の連続呼び出しが必要、resolution=-1で現在のcurve styleを使用）"
 description.ko = "Catmull-Rom 곡선 구간을 추가 (4회 이상의 연속 호출 필요, resolution=-1은 현재 곡선 스타일 사용)"
-related = ["bezierTo", "lineTo", "drawCurve"]
+related = ["Path::bezierTo", "Path::lineTo", "drawCurve"]
 
 ["Path::draw"]
 description.en = "Draw the polyline (fill + 1px stroke based on current style — fill uses triangle fan, convex only). For concave shapes / holes use drawFill."
@@ -5582,7 +5573,7 @@ keywords = ["subpath", "count", "contour", "number"]
 description.en = "Number of subpaths (contours)"
 description.ja = "サブパス（輪郭）の数"
 description.ko = "서브패스(윤곽선) 수"
-related = ["getSubpathRange", "isSubpathClosed"]
+related = ["Path::getSubpathRange", "Path::isSubpathClosed"]
 
 ["Path::getPerimeter"]
 description.en = "Get total path length"
@@ -5595,7 +5586,7 @@ keywords = ["subpath", "range", "indices", "contour"]
 description.en = "Vertex index range [begin, end) of subpath i"
 description.ja = "サブパスiの頂点インデックス範囲 [begin, end)"
 description.ko = "서브패스 i의 정점 인덱스 범위 [begin, end)"
-related = ["getNumSubpaths", "getVertices"]
+related = ["Path::getNumSubpaths"]
 
 ["Path::getVertices"]
 description.en = "Get all vertices"
@@ -5613,7 +5604,7 @@ keywords = ["subpath", "closed", "contour", "loop"]
 description.en = "Whether subpath i is closed"
 description.ja = "サブパスiが閉じているかどうか"
 description.ko = "서브패스 i가 닫혀 있는지 여부"
-related = ["getNumSubpaths", "isClosed"]
+related = ["Path::getNumSubpaths"]
 
 ["Path::lineTo"]
 category = "types_path"
@@ -5621,7 +5612,7 @@ keywords = ["line", "segment", "straight", "draw to"]
 description.en = "Add line segment to point"
 description.ja = "点まで線を追加"
 description.ko = "특정 점까지 선분을 추가"
-related = ["bezierTo", "curveTo", "arc", "moveTo"]
+related = ["Path::bezierTo", "Path::curveTo", "Path::arc"]
 
 ["Path::moveTo"]
 description.en = "Start a new subpath at (x, y). A single Path can hold multiple disjoint contours (think SVG `<path>` with `M ... M ...`) — used by Font::getGlyphPath to keep an outer ring and its holes in one Path so drawFill can detect holes."
@@ -5639,7 +5630,7 @@ keywords = ["bezier", "quadratic", "curve", "spline"]
 description.en = "Add quadratic bezier curve (resolution=-1 uses current curve style)"
 description.ja = "2次ベジェ曲線を追加（resolution=-1で現在のcurve styleを使用）"
 description.ko = "2차 베지어 곡선을 추가 (resolution=-1은 현재 곡선 스타일 사용)"
-related = ["bezierTo", "drawBezier"]
+related = ["Path::bezierTo", "drawBezier"]
 
 ["Path::reverseWinding"]
 description.en = "Reverse the winding direction (vertex order) of all subpaths, or of one subpath. Under drawFill's non-zero winding rule, reversing a subpath toggles it between filling and cutting — e.g. build a circle contour, then reverseWinding(i) it into a hole punch. Reversing ALL subpaths leaves the render unchanged (only relative direction matters) — handy for imported outlines using the opposite convention."
@@ -5662,7 +5653,7 @@ keywords = ["fill", "mesh", "triangulate", "convert"]
 description.en = "Build a fillable Mesh from the path interior"
 description.ja = "パス内部から塗りつぶし可能なMeshを生成"
 description.ko = "경로 내부로부터 채울 수 있는 Mesh를 생성"
-related = ["buildFillTriangles", "Mesh", "drawFill"]
+related = ["Path::buildFillTriangles", "Mesh", "Path::drawFill"]
 
 ["PixelFormat"]
 keywords = ["pixel", "format", "rgba", "channel", "bit depth", "color", "encoding"]
@@ -5676,7 +5667,7 @@ description.en = "Pixel buffer for image manipulation"
 description.ja = "画像操作用ピクセルバッファ"
 description.ko = "이미지 조작용 픽셀 버퍼"
 of_category = "image-texture-types"
-related = ["captureWindow", "grabScreen", "createPixels", "extractFrame", "addFrame", "addFrameAt"]
+related = ["captureWindow", "grabScreen", "VideoPlayer::extractFrame", "VideoWriter::addFrame", "VideoWriter::addFrameAt"]
 
 ["Pixels::allocate"]
 category = "graphics_pixels"
@@ -5696,7 +5687,6 @@ keywords = ["copy", "duplicate", "clone", "deep"]
 description.en = "Return a deep copy of the pixel buffer"
 description.ja = "ピクセルバッファのディープコピーを返す"
 description.ko = "픽셀 버퍼의 깊은 복사본을 반환"
-related = ["allocate"]
 
 ["Pixels::copyTo"]
 description.en = "Copy to external buffer"
@@ -5734,7 +5724,7 @@ keywords = ["float", "pointer", "raw", "f32"]
 description.en = "Get raw data pointer as float (float-format buffers)"
 description.ja = "生データポインタをfloatとして取得（float形式バッファ）"
 description.ko = "원본 데이터 포인터를 float로 얻음 (float 형식 버퍼)"
-related = ["getData", "isFloat"]
+related = ["Pixels::getData", "Pixels::isFloat"]
 
 ["Pixels::getDataVoid"]
 category = "graphics_pixels"
@@ -5742,7 +5732,7 @@ keywords = ["pointer", "raw", "void", "memory"]
 description.en = "Get raw data pointer as void* (any format)"
 description.ja = "生データポインタをvoid*として取得（任意の形式）"
 description.ko = "원본 데이터 포인터를 void*로 얻음 (모든 형식)"
-related = ["getData", "getDataF32"]
+related = ["Pixels::getData", "Pixels::getDataF32"]
 
 ["Pixels::getFormat"]
 category = "graphics_pixels"
@@ -5750,7 +5740,7 @@ keywords = ["format", "pixel", "type", "query"]
 description.en = "Get the pixel format"
 description.ja = "ピクセルフォーマットを取得"
 description.ko = "픽셀 포맷을 얻음"
-related = ["isFloat", "PixelFormat"]
+related = ["Pixels::isFloat", "PixelFormat"]
 
 ["Pixels::getHeight"]
 description.en = "Get height"
@@ -5783,7 +5773,7 @@ keywords = ["float", "hdr", "precision", "f32"]
 description.en = "Whether the pixel data uses 32-bit floats"
 description.ja = "ピクセルデータが32ビット浮動小数点かどうか"
 description.ko = "픽셀 데이터가 32비트 부동소수점인지 여부"
-related = ["getFormat", "getDataF32"]
+related = ["Pixels::getFormat", "Pixels::getDataF32"]
 
 ["Pixels::load"]
 description.en = "Load image from file"
@@ -5801,7 +5791,7 @@ keywords = ["hdr", "load", "float", "radiance"]
 description.en = "Load an HDR (.hdr) image into a float pixel buffer"
 description.ja = "HDR(.hdr)画像をfloatピクセルバッファに読み込む"
 description.ko = "HDR(.hdr) 이미지를 float 픽셀 버퍼로 로드"
-related = ["loadPlatform", "isFloat"]
+related = ["Pixels::loadPlatform", "Pixels::isFloat"]
 
 ["Pixels::loadPlatform"]
 category = "graphics_pixels"
@@ -5809,7 +5799,7 @@ keywords = ["load", "platform", "decode", "image"]
 description.en = "Load an image using the platform image decoder"
 description.ja = "プラットフォーム画像デコーダで画像を読み込む"
 description.ko = "플랫폼 이미지 디코더로 이미지를 로드"
-related = ["loadHDR"]
+related = ["Pixels::loadHDR"]
 
 ["Pixels::mirror"]
 description.en = "Flip in place. Both true is 180°."
@@ -5851,7 +5841,7 @@ keywords = ["float", "copy", "upload", "hdr"]
 description.en = "Fill the buffer from a float array (allocates as needed)"
 description.ja = "float配列からバッファを埋める（必要に応じて確保）"
 description.ko = "float 배열로 버퍼를 채움 (필요시 할당)"
-related = ["getDataF32", "allocate"]
+related = ["Pixels::getDataF32"]
 
 ["Pixels::setFromPixels"]
 description.en = "Copy from external pixel data"
@@ -5863,7 +5853,7 @@ keywords = ["glyph", "layout", "font", "position", "character", "typeset"]
 description.en = "One laid-out glyph emitted by Font::forEachGlyph (nested as Font::PlacedGlyph). Carries the final codepoint and pen position so visitors can render quads, build vector paths, or hit-test independently of the layout pass"
 description.ja = "Font::forEachGlyph が出力するレイアウト済みグリフ 1 個（Font::PlacedGlyph としてネスト）。最終的な codepoint とペン位置を持ち、ビジターがレイアウトパスとは独立に quad 描画・ベクターパス生成・ヒットテストを行える"
 description.ko = "Font::forEachGlyph가 출력하는 배치 완료된 글리프 하나(Font::PlacedGlyph로 중첩). 최종 codepoint와 펜 위치를 담아, 비지터가 레이아웃 패스와 독립적으로 quad 렌더링, 벡터 경로 생성, 히트 테스트를 수행 가능"
-related = ["GlyphVisitor", "Font", "getStringPath"]
+related = ["Font", "Font::getStringPath"]
 
 ["PlacedGlyph::baselineY"]
 description.en = "Baseline Y position; the glyph's own yoffset is added on top"
@@ -5912,63 +5902,63 @@ keywords = ["mobile", "phone", "google", "tablet", "apk"]
 description.en = "True on Android"
 description.ja = "Androidで true"
 description.ko = "Android에서 true"
-related = ["isMobile", "name"]
+related = ["Platform::isMobile"]
 
 ["Platform::isApple"]
 keywords = ["mac", "ios", "macos", "iphone", "darwin"]
 description.en = "True on any Apple platform (macOS or iOS)"
 description.ja = "Apple系 (macOS または iOS) で true"
 description.ko = "Apple 플랫폼 (macOS 또는 iOS)에서 true"
-related = ["isMacOS", "isIOS"]
+related = ["Platform::isMacOS", "Platform::isIOS"]
 
 ["Platform::isDesktop"]
 keywords = ["pc", "mac", "windows", "linux", "computer"]
 description.en = "True on desktop (macOS, Windows, or Linux)"
 description.ja = "デスクトップ (macOS, Windows, Linux) で true"
 description.ko = "데스크톱 (macOS, Windows, Linux)에서 true"
-related = ["isMobile", "name"]
+related = ["Platform::isMobile"]
 
 ["Platform::isIOS"]
 keywords = ["iphone", "ipad", "apple", "mobile", "tablet"]
 description.en = "True on iOS"
 description.ja = "iOSで true"
 description.ko = "iOS에서 true"
-related = ["isApple", "isMobile"]
+related = ["Platform::isApple", "Platform::isMobile"]
 
 ["Platform::isLinux"]
 keywords = ["desktop", "unix", "gnu", "ubuntu"]
 description.en = "True on Linux (desktop, excludes Android)"
 description.ja = "Linux (デスクトップ、Android除く) で true"
 description.ko = "Linux (데스크톱, Android 제외)에서 true"
-related = ["isDesktop", "name"]
+related = ["Platform::isDesktop"]
 
 ["Platform::isMacOS"]
 keywords = ["mac", "osx", "apple", "darwin", "desktop"]
 description.en = "True on macOS"
 description.ja = "macOSで true"
 description.ko = "macOS에서 true"
-related = ["isApple", "isDesktop"]
+related = ["Platform::isApple", "Platform::isDesktop"]
 
 ["Platform::isMobile"]
 keywords = ["phone", "ios", "android", "tablet", "handheld"]
 description.en = "True on mobile (iOS or Android)"
 description.ja = "モバイル (iOS または Android) で true"
 description.ko = "모바일 (iOS 또는 Android)에서 true"
-related = ["isDesktop", "setImmersiveMode"]
+related = ["Platform::isDesktop", "setImmersiveMode"]
 
 ["Platform::isWeb"]
 keywords = ["browser", "wasm", "emscripten", "html5", "webgl"]
 description.en = "True on Web (Emscripten / WASM)"
 description.ja = "Web (Emscripten / WASM) で true"
 description.ko = "Web (Emscripten / WASM)에서 true"
-related = ["name", "isWebGPU"]
+related = ["GraphicsBackend::isWebGPU"]
 
 ["Platform::isWindows"]
 keywords = ["pc", "win32", "microsoft", "desktop"]
 description.en = "True on Windows"
 description.ja = "Windowsで true"
 description.ko = "Windows에서 true"
-related = ["isDesktop", "name"]
+related = ["Platform::isDesktop"]
 
 ["Platform::name"]
 keywords = ["os", "system", "device", "target", "operating system"]
@@ -5981,14 +5971,14 @@ description.ja = '''
 description.ko = '''
 짧은 플랫폼 이름: "web" / "macos" / "ios" / "windows" / "android" / "linux" / "unknown"
 '''
-related = ["name", "getBackendName"]
+related = ["getBackendName"]
 
 ["PlayingSound"]
 keywords = ["voice", "playback handle", "mixer voice", "instance", "sound instance"]
 description.en = "A single live mixer voice returned by AudioEngine::play(). Its fields are the real-time playback state the audio thread reads each callback (volume / pan / speed / loop / playing / paused / mixMode / position) plus the channel routing snapshots. Most fields are atomics so the UI thread can mutate them while the audio thread plays; set them directly."
 description.ja = "AudioEngine::play() が返す 1 本のライブミキサーボイス。フィールドは audio thread が各コールバックで読む再生状態 (volume / pan / speed / loop / playing / paused / mixMode / 位置) とチャンネルルーティングのスナップショット。大半は atomic なので UI thread から再生中に書き換えられる。直接設定する"
 description.ko = "AudioEngine::play()가 반환하는 하나의 라이브 믹서 보이스. 필드는 오디오 스레드가 콜백마다 읽는 재생 상태 (volume / pan / speed / loop / playing / paused / mixMode / 위치) 와 채널 라우팅 스냅샷. 대부분 atomic이라 UI 스레드에서 재생 중에 변경 가능. 직접 설정한다"
-related = ["play", "AudioEngine", "SoundSource", "MixMode"]
+related = ["AudioEngine", "SoundSource", "MixMode"]
 
 ["PlayingSound::channelGains"]
 description.en = "Atomically-swappable per-output-channel gain multipliers. Entries beyond .size() default to 1.0. Orthogonal to channelMap / mixMode."
@@ -6047,7 +6037,7 @@ description.ko = "재생 음량 (0.0-1.0). atomic 저장이라 재생 중 UI 스
 
 ["PrimitiveMode"]
 keywords = ["primitive", "triangles", "lines", "points", "strip", "topology", "draw mode"]
-related = ["Mesh", "PrimitiveType", "drawMesh"]
+related = ["Mesh", "PrimitiveType"]
 
 ["PrimitiveType"]
 keywords = ["primitive", "triangle", "line", "point", "topology", "geometry", "mesh"]
@@ -6066,7 +6056,7 @@ description.en = "Unit quaternion for 3D rotations"
 description.ja = "3D回転用単位クォータニオン"
 description.ko = "3D 회전용 단위 쿼터니언"
 of_category = "math-vector"
-related = ["rotate", "getDeviceOrientation", "rotateTo", "identity", "fromAxisAngle", "fromEuler", "slerp", "Mat4"]
+related = ["rotate", "getDeviceOrientation", "TweenMod::rotateTo", "Quaternion::fromAxisAngle", "Quaternion::fromEuler", "Quaternion::slerp", "Mat4"]
 
 ["Quaternion::conjugate"]
 description.en = "Get conjugate quaternion"
@@ -6139,7 +6129,7 @@ keywords = ["slerp", "interpolate", "quaternion", "rotation", "blend", "smooth"]
 description.en = "Spherical linear interpolation"
 description.ja = "球面線形補間"
 description.ko = "구면 선형 보간"
-related = ["Quaternion", "lerp", "rotateTo"]
+related = ["Quaternion", "lerp", "TweenMod::rotateTo"]
 
 ["Quaternion::toEuler"]
 description.en = "Convert to Euler angles"
@@ -6239,7 +6229,7 @@ keywords = ["inside", "hit", "point", "test", "within"]
 description.en = "Check if point is inside"
 description.ja = "点が内部にあるか判定"
 description.ko = "점이 내부에 있는지 확인"
-related = ["intersects", "intersectRect"]
+related = ["Rect::intersects", "intersectRect"]
 
 ["Rect::getBottom"]
 description.en = "Get bottom edge (y + height)"
@@ -6277,7 +6267,7 @@ keywords = ["overlap", "collide", "touch", "cross", "hit"]
 description.en = "Check if intersects with another rect"
 description.ja = "別の矩形と交差するか判定"
 description.ko = "다른 사각형과 교차하는지 확인"
-related = ["contains", "intersectRect"]
+related = ["Rect::contains", "intersectRect"]
 
 ["Rect::set"]
 category = "types_rect"
@@ -6307,7 +6297,7 @@ keywords = ["rectangle", "panel", "box", "ui", "widget"]
 description.en = "2D UI rectangle node: size, clipping and ray-based hit testing, plus subscribable mouse Event members"
 description.ja = "2D UI矩形ノード。サイズ、クリッピング、レイベースのヒットテスト、購読可能なマウスイベントメンバーを持つ"
 description.ko = "2D UI 사각형 노드: 크기, 클리핑, 레이 기반 히트 테스트와 구독 가능한 마우스 이벤트 멤버"
-related = ["setSize", "setClipping", "ScrollContainer", "LayoutMod"]
+related = ["RectNode::setClipping", "ScrollContainer", "LayoutMod"]
 
 ["RectNode::getBottom"]
 category = "scene_graph"
@@ -6315,7 +6305,7 @@ keywords = ["bottom", "edge", "bounds", "local"]
 description.en = "Local bottom edge (equals height) (RectNode method) (C++ only)"
 description.ja = "ローカルの下端（高さに等しい）（RectNodeメソッド）（C++のみ）"
 description.ko = "로컬 아래쪽 끝 (높이와 동일) (RectNode 메서드) (C++ 전용)"
-related = ["getTop"]
+related = ["RectNode::getTop"]
 
 ["RectNode::getHeight"]
 category = "scene_graph"
@@ -6323,7 +6313,7 @@ keywords = ["height", "size", "dimensions", "bounds"]
 description.en = "Get the node height (RectNode method) (C++ only)"
 description.ja = "ノードの高さを取得（RectNodeメソッド）（C++のみ）"
 description.ko = "노드의 높이를 얻음 (RectNode 메서드) (C++ 전용)"
-related = ["getSize", "setHeight"]
+related = ["RectNode::setHeight"]
 
 ["RectNode::getLeft"]
 category = "scene_graph"
@@ -6331,7 +6321,6 @@ keywords = ["left", "edge", "bounds", "local"]
 description.en = "Local left edge (always 0) (RectNode method) (C++ only)"
 description.ja = "ローカルの左端（常に0）（RectNodeメソッド）（C++のみ）"
 description.ko = "로컬 왼쪽 끝 (항상 0) (RectNode 메서드) (C++ 전용)"
-related = ["getRight"]
 
 ["RectNode::getRight"]
 category = "scene_graph"
@@ -6339,7 +6328,7 @@ keywords = ["right", "edge", "bounds", "local"]
 description.en = "Local right edge (equals width) (RectNode method) (C++ only)"
 description.ja = "ローカルの右端（幅に等しい）（RectNodeメソッド）（C++のみ）"
 description.ko = "로컬 오른쪽 끝 (너비와 동일) (RectNode 메서드) (C++ 전용)"
-related = ["getLeft"]
+related = ["RectNode::getLeft"]
 
 ["RectNode::getSize"]
 category = "scene_graph"
@@ -6347,7 +6336,6 @@ keywords = ["size", "dimensions", "width height", "bounds"]
 description.en = "Get the node size as a Vec2 (RectNode method) (C++ only)"
 description.ja = "ノードのサイズをVec2で取得（RectNodeメソッド）（C++のみ）"
 description.ko = "노드의 크기를 Vec2로 얻음 (RectNode 메서드) (C++ 전용)"
-related = ["setSize", "getWidth"]
 
 ["RectNode::getTop"]
 category = "scene_graph"
@@ -6355,7 +6343,6 @@ keywords = ["top", "edge", "bounds", "local"]
 description.en = "Local top edge (always 0) (RectNode method) (C++ only)"
 description.ja = "ローカルの上端（常に0）（RectNodeメソッド）（C++のみ）"
 description.ko = "로컬 위쪽 끝 (항상 0) (RectNode 메서드) (C++ 전용)"
-related = ["getBottom"]
 
 ["RectNode::getWidth"]
 category = "scene_graph"
@@ -6363,7 +6350,6 @@ keywords = ["width", "size", "dimensions", "bounds"]
 description.en = "Get the node width (RectNode method) (C++ only)"
 description.ja = "ノードの幅を取得（RectNodeメソッド）（C++のみ）"
 description.ko = "노드의 너비를 얻음 (RectNode 메서드) (C++ 전용)"
-related = ["getSize", "setWidth"]
 
 ["RectNode::hitTest"]
 category = "scene_graph"
@@ -6371,7 +6357,7 @@ keywords = ["hit test", "pick", "ray", "intersect"]
 description.en = "Hit-test the rectangle against a ray (with out distance) or a 2D point (RectNode method) (C++ only)"
 description.ja = "矩形をレイ（距離を出力）または2D点に対してヒットテスト（RectNodeメソッド）（C++のみ）"
 description.ko = "사각형을 레이(거리 출력) 또는 2D 점에 대해 히트 테스트 (RectNode 메서드) (C++ 전용)"
-related = ["enableEvents"]
+related = ["Node::enableEvents"]
 
 ["RectNode::isClipping"]
 category = "scene_graph"
@@ -6379,7 +6365,7 @@ keywords = ["clip", "scissor", "mask", "bounds"]
 description.en = "Whether scissor clipping is enabled (RectNode method) (C++ only)"
 description.ja = "シザークリッピングが有効かどうか（RectNodeメソッド）（C++のみ）"
 description.ko = "시저 클리핑이 활성화되어 있는지 여부 (RectNode 메서드) (C++ 전용)"
-related = ["setClipping"]
+related = ["RectNode::setClipping"]
 
 ["RectNode::mouseDragged"]
 description.en = "Fired when the mouse is dragged on this node (localized args)"
@@ -6415,7 +6401,6 @@ keywords = ["height", "resize", "dimensions", "bounds"]
 description.en = "Set the node height (RectNode method) (C++ only)"
 description.ja = "ノードの高さを設定（RectNodeメソッド）（C++のみ）"
 description.ko = "노드의 높이를 설정 (RectNode 메서드) (C++ 전용)"
-related = ["setSize", "getHeight"]
 
 ["RectNode::setRect"]
 category = "scene_graph"
@@ -6423,7 +6408,7 @@ keywords = ["rect", "position size", "bounds", "frame"]
 description.en = "Set position and size at once (RectNode method) (C++ only)"
 description.ja = "位置とサイズを一度に設定（RectNodeメソッド）（C++のみ）"
 description.ko = "위치와 크기를 한 번에 설정 (RectNode 메서드) (C++ 전용)"
-related = ["setSize", "setPos"]
+related = ["Node::setPos"]
 
 ["RectNode::setSize"]
 category = "scene_graph"
@@ -6431,7 +6416,6 @@ keywords = ["dimensions", "width height", "resize", "bounds"]
 description.en = "Set size (C++ only)"
 description.ja = "サイズを設定（C++のみ）"
 description.ko = "크기를 설정 (C++ 전용)"
-related = ["getSize"]
 
 ["RectNode::setWidth"]
 category = "scene_graph"
@@ -6439,14 +6423,13 @@ keywords = ["width", "resize", "dimensions", "bounds"]
 description.en = "Set the node width (RectNode method) (C++ only)"
 description.ja = "ノードの幅を設定（RectNodeメソッド）（C++のみ）"
 description.ko = "노드의 너비를 설정 (RectNode 메서드) (C++ 전용)"
-related = ["setSize", "getWidth"]
 
 ["RectNodeButton"]
 keywords = ["button", "click", "ui", "widget", "press", "control"]
 description.en = "Simple clickable button node (a RectNode subclass). Set normalColor/hoverColor/pressColor and label; it draws a filled rect that changes color on hover/press and a centered label. Events are enabled on construction. Listen on its inherited mousePressed/mouseReleased events for clicks."
 description.ja = "シンプルなクリック可能ボタンノード（RectNode のサブクラス）。normalColor/hoverColor/pressColor と label を設定すると、ホバー/押下で色が変わる塗りつぶし矩形と中央寄せのラベルを描画する。イベントは生成時に有効化される。クリックは継承した mousePressed/mouseReleased イベントで受け取る"
 description.ko = "간단한 클릭 가능 버튼 노드(RectNode 서브클래스). normalColor/hoverColor/pressColor와 label을 설정하면 호버/누름 시 색이 바뀌는 채워진 사각형과 가운데 정렬 라벨을 그림. 이벤트는 생성 시 활성화됨. 클릭은 상속된 mousePressed/mouseReleased 이벤트로 수신"
-related = ["RectNode", "Node", "mousePressed"]
+related = ["RectNode", "Node"]
 
 ["RectNodeButton::draw"]
 description.en = "Draw the button: fills the rect with the state-dependent color and draws the centered label. (override)"
@@ -6483,7 +6466,6 @@ keywords = ["resize", "window", "size", "viewport"]
 description.en = "Arguments for windowResized events"
 description.ja = "windowResized イベントの引数"
 description.ko = "windowResized 이벤트의 인자"
-related = ["windowResized"]
 
 ["ResizeEventArgs::height"]
 description.en = "New window height in pixels"
@@ -6568,7 +6550,7 @@ keywords = ["color", "bar", "appearance", "tint"]
 description.en = "Get the scroll-bar color (ScrollBar method) (C++ only)"
 description.ja = "スクロールバーの色を取得（ScrollBarメソッド）（C++のみ）"
 description.ko = "스크롤바 색상을 얻음 (ScrollBar 메서드) (C++ 전용)"
-related = ["setBarColor"]
+related = ["ScrollBar::setBarColor"]
 
 ["ScrollBar::getBarWidth"]
 category = "scene_graph"
@@ -6576,7 +6558,7 @@ keywords = ["width", "bar", "thickness", "appearance"]
 description.en = "Get the scroll-bar thickness (ScrollBar method) (C++ only)"
 description.ja = "スクロールバーの太さを取得（ScrollBarメソッド）（C++のみ）"
 description.ko = "스크롤바 두께를 얻음 (ScrollBar 메서드) (C++ 전용)"
-related = ["setBarWidth"]
+related = ["ScrollBar::setBarWidth"]
 
 ["ScrollBar::getMargin"]
 category = "scene_graph"
@@ -6584,7 +6566,7 @@ keywords = ["margin", "inset", "spacing", "appearance"]
 description.en = "Get the margin between the bar and the container edge (ScrollBar method) (C++ only)"
 description.ja = "バーとコンテナ端の間のマージンを取得（ScrollBarメソッド）（C++のみ）"
 description.ko = "바와 컨테이너 끝 사이의 여백을 얻음 (ScrollBar 메서드) (C++ 전용)"
-related = ["setMargin"]
+related = ["ScrollBar::setMargin"]
 
 ["ScrollBar::getOffset"]
 category = "scene_graph"
@@ -6599,7 +6581,7 @@ keywords = ["color", "bar", "appearance", "tint"]
 description.en = "Set the scroll-bar color (ScrollBar method) (C++ only)"
 description.ja = "スクロールバーの色を設定（ScrollBarメソッド）（C++のみ）"
 description.ko = "스크롤바 색상을 설정 (ScrollBar 메서드) (C++ 전용)"
-related = ["getBarColor"]
+related = ["ScrollBar::getBarColor"]
 
 ["ScrollBar::setBarWidth"]
 category = "scene_graph"
@@ -6607,7 +6589,7 @@ keywords = ["width", "bar", "thickness", "appearance"]
 description.en = "Set the scroll-bar thickness (ScrollBar method) (C++ only)"
 description.ja = "スクロールバーの太さを設定（ScrollBarメソッド）（C++のみ）"
 description.ko = "스크롤바 두께를 설정 (ScrollBar 메서드) (C++ 전용)"
-related = ["getBarWidth"]
+related = ["ScrollBar::getBarWidth"]
 
 ["ScrollBar::setMargin"]
 category = "scene_graph"
@@ -6615,7 +6597,7 @@ keywords = ["margin", "inset", "spacing", "appearance"]
 description.en = "Set the margin between the bar and the container edge (ScrollBar method) (C++ only)"
 description.ja = "バーとコンテナ端の間のマージンを設定（ScrollBarメソッド）（C++のみ）"
 description.ko = "바와 컨테이너 끝 사이의 여백을 설정 (ScrollBar 메서드) (C++ 전용)"
-related = ["getMargin"]
+related = ["ScrollBar::getMargin"]
 
 ["ScrollBar::updateFromContainer"]
 category = "scene_graph"
@@ -6623,7 +6605,7 @@ keywords = ["sync", "update", "scroll", "refresh"]
 description.en = "Resync the bar size and position from its ScrollContainer (ScrollBar method) (C++ only)"
 description.ja = "ScrollContainerからバーのサイズと位置を再同期（ScrollBarメソッド）（C++のみ）"
 description.ko = "ScrollContainer로부터 바의 크기와 위치를 재동기화 (ScrollBar 메서드) (C++ 전용)"
-related = ["updateScrollBounds"]
+related = ["ScrollContainer::updateScrollBounds"]
 
 ["ScrollContainer"]
 category = "scene_graph"
@@ -6631,7 +6613,7 @@ keywords = ["scroll", "scrollable", "viewport", "panel", "overflow"]
 description.en = "Scrollable RectNode that clips and scrolls a single content node when it overflows the container bounds"
 description.ja = "コンテンツがコンテナ境界を超えたときにクリップしてスクロールするRectNode"
 description.ko = "콘텐츠가 컨테이너 경계를 넘으면 클리핑하고 스크롤하는 RectNode"
-related = ["setContent", "setScrollY", "ScrollBar", "setClipping"]
+related = ["ScrollContainer::setContent", "ScrollContainer::setScrollY", "ScrollBar", "RectNode::setClipping"]
 
 ["ScrollContainer::getContent"]
 category = "scene_graph"
@@ -6639,7 +6621,7 @@ keywords = ["content", "child", "inner", "scroll"]
 description.en = "Get the scrollable content node (ScrollContainer method) (C++ only)"
 description.ja = "スクロール対象のコンテンツノードを取得（ScrollContainerメソッド）（C++のみ）"
 description.ko = "스크롤 대상 콘텐츠 노드를 얻음 (ScrollContainer 메서드) (C++ 전용)"
-related = ["setContent", "getContentRect"]
+related = ["ScrollContainer::setContent", "ScrollContainer::getContentRect"]
 
 ["ScrollContainer::getContentRect"]
 category = "scene_graph"
@@ -6647,7 +6629,7 @@ keywords = ["content", "rectnode", "inner", "scroll"]
 description.en = "Get the content node cast to RectNode (null if not a RectNode) (ScrollContainer method) (C++ only)"
 description.ja = "コンテンツノードをRectNodeとして取得（RectNodeでなければnull）（ScrollContainerメソッド）（C++のみ）"
 description.ko = "콘텐츠 노드를 RectNode로 얻음 (RectNode가 아니면 null) (ScrollContainer 메서드) (C++ 전용)"
-related = ["getContent"]
+related = ["ScrollContainer::getContent"]
 
 ["ScrollContainer::getMaxScrollX"]
 category = "scene_graph"
@@ -6655,7 +6637,7 @@ keywords = ["scroll", "max", "range", "horizontal"]
 description.en = "Get the maximum horizontal scroll (ScrollContainer method) (C++ only)"
 description.ja = "横スクロールの最大値を取得（ScrollContainerメソッド）（C++のみ）"
 description.ko = "수평 스크롤 최대값을 얻음 (ScrollContainer 메서드) (C++ 전용)"
-related = ["updateScrollBounds"]
+related = ["ScrollContainer::updateScrollBounds"]
 
 ["ScrollContainer::getMaxScrollY"]
 category = "scene_graph"
@@ -6663,7 +6645,7 @@ keywords = ["scroll", "max", "range", "vertical"]
 description.en = "Get the maximum vertical scroll (ScrollContainer method) (C++ only)"
 description.ja = "縦スクロールの最大値を取得（ScrollContainerメソッド）（C++のみ）"
 description.ko = "수직 스크롤 최대값을 얻음 (ScrollContainer 메서드) (C++ 전용)"
-related = ["updateScrollBounds"]
+related = ["ScrollContainer::updateScrollBounds"]
 
 ["ScrollContainer::getScroll"]
 category = "scene_graph"
@@ -6671,7 +6653,7 @@ keywords = ["scroll", "offset", "position", "vec2"]
 description.en = "Get the scroll position as a Vec2 (ScrollContainer method) (C++ only)"
 description.ja = "スクロール位置をVec2で取得（ScrollContainerメソッド）（C++のみ）"
 description.ko = "스크롤 위치를 Vec2로 얻음 (ScrollContainer 메서드) (C++ 전용)"
-related = ["setScroll"]
+related = ["ScrollContainer::setScroll"]
 
 ["ScrollContainer::getScrollSpeed"]
 category = "scene_graph"
@@ -6679,7 +6661,7 @@ keywords = ["scroll", "speed", "sensitivity", "wheel"]
 description.en = "Get the scroll speed (wheel/trackpad sensitivity) (ScrollContainer method) (C++ only)"
 description.ja = "スクロール速度（ホイール/トラックパッド感度）を取得（ScrollContainerメソッド）（C++のみ）"
 description.ko = "스크롤 속도(휠/트랙패드 감도)를 얻음 (ScrollContainer 메서드) (C++ 전용)"
-related = ["setScrollSpeed"]
+related = ["ScrollContainer::setScrollSpeed"]
 
 ["ScrollContainer::getScrollX"]
 category = "scene_graph"
@@ -6687,7 +6669,7 @@ keywords = ["scroll", "horizontal", "offset", "position"]
 description.en = "Get the horizontal scroll position (ScrollContainer method) (C++ only)"
 description.ja = "横スクロール位置を取得（ScrollContainerメソッド）（C++のみ）"
 description.ko = "수평 스크롤 위치를 얻음 (ScrollContainer 메서드) (C++ 전용)"
-related = ["setScrollX", "getScroll"]
+related = ["ScrollContainer::setScrollX", "ScrollContainer::getScroll"]
 
 ["ScrollContainer::getScrollY"]
 category = "scene_graph"
@@ -6695,7 +6677,7 @@ keywords = ["scroll", "vertical", "offset", "position"]
 description.en = "Get the vertical scroll position (ScrollContainer method) (C++ only)"
 description.ja = "縦スクロール位置を取得（ScrollContainerメソッド）（C++のみ）"
 description.ko = "수직 스크롤 위치를 얻음 (ScrollContainer 메서드) (C++ 전용)"
-related = ["setScrollY", "getScroll"]
+related = ["ScrollContainer::setScrollY", "ScrollContainer::getScroll"]
 
 ["ScrollContainer::isHorizontalScrollEnabled"]
 category = "scene_graph"
@@ -6703,7 +6685,7 @@ keywords = ["scroll", "horizontal", "enabled", "setting"]
 description.en = "Whether horizontal scrolling is enabled (ScrollContainer method) (C++ only)"
 description.ja = "横スクロールが有効かどうか（ScrollContainerメソッド）（C++のみ）"
 description.ko = "수평 스크롤이 활성화되어 있는지 여부 (ScrollContainer 메서드) (C++ 전용)"
-related = ["setHorizontalScrollEnabled"]
+related = ["ScrollContainer::setHorizontalScrollEnabled"]
 
 ["ScrollContainer::isVerticalScrollEnabled"]
 category = "scene_graph"
@@ -6711,7 +6693,7 @@ keywords = ["scroll", "vertical", "enabled", "setting"]
 description.en = "Whether vertical scrolling is enabled (ScrollContainer method) (C++ only)"
 description.ja = "縦スクロールが有効かどうか（ScrollContainerメソッド）（C++のみ）"
 description.ko = "수직 스크롤이 활성화되어 있는지 여부 (ScrollContainer 메서드) (C++ 전용)"
-related = ["setVerticalScrollEnabled"]
+related = ["ScrollContainer::setVerticalScrollEnabled"]
 
 ["ScrollContainer::setContent"]
 category = "scene_graph"
@@ -6726,7 +6708,7 @@ keywords = ["scroll", "horizontal", "enable", "setting"]
 description.en = "Enable or disable horizontal scrolling (ScrollContainer method) (C++ only)"
 description.ja = "横スクロールを有効/無効化（ScrollContainerメソッド）（C++のみ）"
 description.ko = "수평 스크롤을 활성/비활성화 (ScrollContainer 메서드) (C++ 전용)"
-related = ["isHorizontalScrollEnabled"]
+related = ["ScrollContainer::isHorizontalScrollEnabled"]
 
 ["ScrollContainer::setScroll"]
 category = "scene_graph"
@@ -6734,7 +6716,7 @@ keywords = ["scroll", "offset", "position", "vec2"]
 description.en = "Set the scroll position from x/y or a Vec2 (clamped) (ScrollContainer method) (C++ only)"
 description.ja = "スクロール位置をx/yまたはVec2で設定（クランプあり）（ScrollContainerメソッド）（C++のみ）"
 description.ko = "스크롤 위치를 x/y 또는 Vec2로 설정 (클램프됨) (ScrollContainer 메서드) (C++ 전용)"
-related = ["getScroll", "setScrollX"]
+related = ["ScrollContainer::getScroll", "ScrollContainer::setScrollX"]
 
 ["ScrollContainer::setScrollSpeed"]
 category = "scene_graph"
@@ -6742,7 +6724,7 @@ keywords = ["scroll", "speed", "sensitivity", "wheel"]
 description.en = "Set the scroll speed (wheel/trackpad sensitivity) (ScrollContainer method) (C++ only)"
 description.ja = "スクロール速度（ホイール/トラックパッド感度）を設定（ScrollContainerメソッド）（C++のみ）"
 description.ko = "스크롤 속도(휠/트랙패드 감도)를 설정 (ScrollContainer 메서드) (C++ 전용)"
-related = ["getScrollSpeed"]
+related = ["ScrollContainer::getScrollSpeed"]
 
 ["ScrollContainer::setScrollX"]
 category = "scene_graph"
@@ -6750,7 +6732,7 @@ keywords = ["scroll", "horizontal", "offset", "position"]
 description.en = "Set the horizontal scroll position (clamped) (ScrollContainer method) (C++ only)"
 description.ja = "横スクロール位置を設定（クランプあり）（ScrollContainerメソッド）（C++のみ）"
 description.ko = "수평 스크롤 위치를 설정 (클램프됨) (ScrollContainer 메서드) (C++ 전용)"
-related = ["getScrollX", "setScroll"]
+related = ["ScrollContainer::getScrollX", "ScrollContainer::setScroll"]
 
 ["ScrollContainer::setScrollY"]
 category = "scene_graph"
@@ -6765,7 +6747,7 @@ keywords = ["scroll", "vertical", "enable", "setting"]
 description.en = "Enable or disable vertical scrolling (ScrollContainer method) (C++ only)"
 description.ja = "縦スクロールを有効/無効化（ScrollContainerメソッド）（C++のみ）"
 description.ko = "수직 스크롤을 활성/비활성화 (ScrollContainer 메서드) (C++ 전용)"
-related = ["isVerticalScrollEnabled"]
+related = ["ScrollContainer::isVerticalScrollEnabled"]
 
 ["ScrollContainer::updateScrollBounds"]
 category = "scene_graph"
@@ -6773,14 +6755,14 @@ keywords = ["scroll", "bounds", "recalculate", "content"]
 description.en = "Recalculate scroll bounds from the content size (ScrollContainer method) (C++ only)"
 description.ja = "コンテンツサイズからスクロール範囲を再計算（ScrollContainerメソッド）（C++のみ）"
 description.ko = "콘텐츠 크기로부터 스크롤 범위를 재계산 (ScrollContainer 메서드) (C++ 전용)"
-related = ["getMaxScrollY"]
+related = ["ScrollContainer::getMaxScrollY"]
 
 ["ScrollEventArgs"]
 keywords = ["scroll", "wheel", "mouse", "zoom", "trackpad"]
 description.en = "Arguments for mouseScrolled events"
 description.ja = "mouseScrolled イベントの引数"
 description.ko = "mouseScrolled 이벤트의 인자"
-related = ["mouseScrolled", "MouseEventArgs"]
+related = ["MouseEventArgs"]
 
 ["ScrollEventArgs::alt"]
 description.en = "Alt modifier held"
@@ -6839,7 +6821,7 @@ description.en = "Cross-platform serial port (USB/COM): connect, read/write byte
 description.ja = "クロスプラットフォームのシリアルポート（USB/COM）：接続・バイト読み書き"
 description.ko = "크로스플랫폼 시리얼 포트 (USB/COM): 연결, 바이트 읽기/쓰기"
 of_category = "serial-types"
-related = ["SerialDeviceInfo", "listDevices", "TcpClient"]
+related = ["SerialDeviceInfo", "TcpClient"]
 platform_note.en = "Real backends only on Windows (Win32 COM), macOS/Linux (POSIX termios), and Android (USB Host CDC-ACM via JNI+usbfs, CDC-ACM class devices only, first connect needs an async USB permission dialog). No serial on iOS (sandbox has no /dev/tty access — the macOS __APPLE__ enumeration branch compiles but never lists/opens a device) or wasm (Emscripten has no serial device; setup() falls into the POSIX open()/termios path against the virtual FS and fails)."
 platform_note.ja = "実バックエンドは Windows (Win32 COM)、macOS/Linux (POSIX termios)、Android (USB Host CDC-ACM、JNI+usbfs、CDC-ACMクラス機器のみ、初回接続は非同期のUSB許可ダイアログが必要) のみ。iOS はサンドボックスで /dev/tty にアクセスできず実質不可 (__APPLE__ の列挙分岐はコンパイルされるが機器を列挙/オープンできない)、wasm はシリアルデバイスが存在せず setup() が POSIX open()/termios 経路に落ちて失敗。"
 
@@ -6879,7 +6861,6 @@ description.en = "Deprecated alias for listDevices()"
 description.ja = "listDevices() の非推奨エイリアス"
 description.ko = "listDevices()의 deprecated 별칭"
 details = "Kept as a backward-compatible alias; new code should call `listDevices()` (same behavior). Scheduled for removal in v1.0.0."
-related = ["listDevices"]
 
 ["Serial::getDevicePath"]
 description.en = "Current device path"
@@ -6933,7 +6914,7 @@ description.en = "Info for one serial device (from Serial::listDevices)"
 description.ja = "1シリアルデバイスの情報（Serial::listDevicesが返す）"
 description.ko = "시리얼 장치 하나의 정보 (Serial::listDevices가 반환)"
 of_category = "serial-types"
-related = ["Serial", "listDevices"]
+related = ["Serial"]
 
 ["SerialDeviceInfo::deviceId"]
 description.en = "Device index"
@@ -6971,7 +6952,7 @@ keywords = ["glsl", "program", "material", "effect", "fragment"]
 description.en = "GPU shader program (vertex + fragment) with a begin/end/setUniform API for custom-shaded drawing"
 description.ja = "GPU シェーダープログラム（頂点＋フラグメント）。begin/end/setUniform API でカスタムシェーダー描画を行う"
 description.ko = "GPU 셰이더 프로그램(버텍스 + 프래그먼트); begin/end/setUniform API로 커스텀 셰이딩 그리기를 수행"
-related = ["FullscreenShader", "setUniform", "setTexture", "pushShader", "Fbo"]
+related = ["FullscreenShader", "Shader::setUniform", "Shader::setTexture", "pushShader", "Fbo"]
 
 ["Shader::begin"]
 category = "graphics_shader"
@@ -7007,7 +6988,7 @@ keywords = ["sampler", "image", "bind", "slot", "input"]
 description.en = "Bind texture to slot"
 description.ja = "スロットにテクスチャをバインド"
 description.ko = "슬롯에 텍스처를 바인딩"
-related = ["getTexture", "setLut", "setBlend", "Texture", "Fbo", "setUniform", "bind"]
+related = ["Texture", "Fbo", "Shader::setUniform"]
 
 ["Shader::setUniform"]
 category = "graphics_shader"
@@ -7015,7 +6996,7 @@ keywords = ["parameter", "variable", "value", "param", "input"]
 description.en = "Set uniform variable by slot (vector overloads send arrays; Vec3 array is padded to Vec4 per std140)"
 description.ja = "スロット番号でUniform変数を設定 (vector版は配列送信、Vec3配列はstd140に合わせて内部でVec4にパディング)"
 description.ko = "슬롯별로 유니폼 변수를 설정 (vector 오버로드는 배열 전송, Vec3 배열은 std140에 맞춰 내부적으로 Vec4로 패딩)"
-related = ["setTexture", "Mat4", "Vec3"]
+related = ["Shader::setTexture", "Mat4", "Vec3"]
 
 ["Sound"]
 category = "sound"
@@ -7025,7 +7006,7 @@ description.en = "Audio playback"
 description.ja = "オーディオ再生"
 description.ko = "오디오 재생"
 of_category = "audio-types"
-related = ["createSound", "build", "ChipSound", "play", "AudioEngine", "SoundBuffer"]
+related = ["AudioEngine", "SoundBuffer"]
 
 ["Sound::clearChannelGains"]
 category = "sound"
@@ -7069,7 +7050,6 @@ keywords = ["stereo", "balance", "left right", "audio"]
 description.en = "Get current panning"
 description.ja = "現在のパンを取得"
 description.ko = "현재 패닝을 얻음"
-related = ["setPan"]
 
 ["Sound::getPosition"]
 category = "sound"
@@ -7077,7 +7057,6 @@ keywords = ["progress", "playhead", "normalized", "seek"]
 description.en = "Get playback position in seconds"
 description.ja = "再生位置を取得（秒）"
 description.ko = "재생 위치를 초 단위로 얻음"
-related = ["setPosition"]
 
 ["Sound::getSpeed"]
 category = "sound"
@@ -7085,7 +7064,6 @@ keywords = ["rate", "tempo", "playback rate"]
 description.en = "Get current playback speed"
 description.ja = "現在の再生速度を取得"
 description.ko = "현재 재생 속도를 얻음"
-related = ["setSpeed"]
 
 ["Sound::getVolume"]
 category = "sound"
@@ -7093,7 +7071,6 @@ keywords = ["audio", "loudness", "gain", "level"]
 description.en = "Get current volume"
 description.ja = "現在の音量を取得"
 description.ko = "현재 음량을 가져옴"
-related = ["setVolume"]
 
 ["Sound::isLoaded"]
 category = "sound"
@@ -7148,7 +7125,7 @@ keywords = ["streaming", "disk", "memory", "long", "music", "buffer"]
 description.en = "Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count."
 description.ja = "ディスクからストリーミング再生 (WAV/MP3/FLAC)。長尺ファイル向け、メモリ節約。maxPolyphony は同時再生数"
 description.ko = "디스크에서 스트리밍 재생 (WAV/MP3/FLAC). 긴 파일 적합, 메모리 절약. maxPolyphony는 동시 재생 수"
-related = ["isStreaming"]
+related = ["Sound::isStreaming"]
 platform_note.en = "Streaming audio (Sound::loadStream / SoundStream). On wasm it is unsupported (needs std::thread + on-disk file I/O, neither available in the default browser build); Sound::loadStream() logs a warning and silently falls back to eager load(). So you always get a Sound, but it is never actually streamed on web — branch on isStreaming() / __EMSCRIPTEN__ if it matters."
 platform_note.ja = "ストリーミング再生 (Sound::loadStream / SoundStream)。wasm では非対応 (std::thread + ディスクI/O が必要、ブラウザの既定ビルドにはどちらも無い)。Sound::loadStream() は警告を出して eager load() に静かにフォールバックする。Sound 自体は得られるが web では決してストリームされない — 必要なら isStreaming() / __EMSCRIPTEN__ で分岐する。"
 
@@ -7163,7 +7140,7 @@ keywords = ["hold", "suspend", "freeze"]
 description.en = "Pause playback"
 description.ja = "一時停止"
 description.ko = "재생을 일시정지"
-related = ["Tween"]
+related = ["Tween<T>"]
 
 ["Sound::play"]
 category = "sound"
@@ -7171,7 +7148,7 @@ keywords = ["start", "resume", "go", "playback"]
 description.en = "Play audio"
 description.ja = "音声を再生"
 description.ko = "오디오 재생"
-related = ["createSound", "ChipSoundNote"]
+related = ["ChipSoundNote"]
 
 ["Sound::resume"]
 category = "sound"
@@ -7179,7 +7156,7 @@ keywords = ["continue", "unpause", "restart"]
 description.en = "Resume playback"
 description.ja = "再生を再開"
 description.ko = "재생을 재개"
-related = ["Tween"]
+related = ["Tween<T>"]
 
 ["Sound::setChannelGains"]
 category = "sound"
@@ -7187,7 +7164,7 @@ keywords = ["channel", "gain", "volume", "level", "per channel"]
 description.en = "Per-output-channel gain multiplier. Entries beyond .size() default to 1.0. No internal normalization (setVolume is the overall gain)."
 description.ja = "出力 ch ごとのゲイン倍率。.size() を超える ch は 1.0、内部正規化なし (setVolume が全体ゲイン)"
 description.ko = "출력 채널별 게인 배율. .size()를 넘는 채널은 1.0, 내부 정규화 없음 (setVolume이 전체 게인)"
-related = ["setChannelMap"]
+related = ["Sound::setChannelMap"]
 
 ["Sound::setChannelMap"]
 category = "sound"
@@ -7195,7 +7172,7 @@ keywords = ["routing", "channel", "output", "mapping", "surround"]
 description.en = "Per-output-channel routing. 1D: each entry is a src ch index (-1 = silent). 2D: each entry lists src ch indices that sum into that output."
 description.ja = "出力 ch ごとのルーティング。1D 版は各要素が src ch index (-1=無音)、2D 版は各要素が sum 対象の src ch リスト"
 description.ko = "출력 채널별 라우팅. 1D는 각 항목이 src ch 인덱스 (-1=무음), 2D는 각 항목이 합산할 src ch 리스트"
-related = ["setChannelGains", "getChannels"]
+related = ["Sound::setChannelGains"]
 
 ["Sound::setLoop"]
 category = "sound"
@@ -7210,7 +7187,7 @@ keywords = ["routing", "downmix", "mono", "channel", "mapping"]
 description.en = "Channel routing preset. Auto (default) = mono broadcasts / multi 1:1. DownmixMono = average src to all out ch."
 description.ja = "チャンネルルーティング preset。Auto (デフォ)=mono は broadcast / multi は 1:1、DownmixMono=全 src を平均して全 out ch に同じ音"
 description.ko = "채널 라우팅 프리셋. Auto=mono는 broadcast / multi는 1:1, DownmixMono=모든 소스를 평균하여 모든 출력 채널로"
-related = ["MixMode", "setChannelMap", "getChannels"]
+related = ["MixMode", "Sound::setChannelMap"]
 
 ["Sound::setPan"]
 category = "sound"
@@ -7218,7 +7195,7 @@ keywords = ["stereo", "balance", "left right", "audio"]
 description.en = "Set panning (-1.0=left, 0.0=center, 1.0=right)"
 description.ja = "パンを設定 (-1.0=左, 0.0=中央, 1.0=右)"
 description.ko = "패닝 설정 (-1.0=왼쪽, 0.0=중앙, 1.0=오른쪽)"
-related = ["getPan", "setPanSensitivity"]
+related = ["EasyCam::setPanSensitivity"]
 
 ["Sound::setPosition"]
 category = "sound"
@@ -7226,7 +7203,6 @@ keywords = ["seek", "jump", "scrub", "playhead", "normalized"]
 description.en = "Seek to a specific time in seconds. On streams, costs ~10 ms blackout while the ring refills."
 description.ja = "指定秒数にシーク。ストリームでは ring 補充に ~10ms 無音"
 description.ko = "지정 시간(초)으로 시크. 스트림은 링 재충전에 ~10ms 무음"
-related = ["getPosition"]
 
 ["Sound::setSpeed"]
 category = "sound"
@@ -7234,7 +7210,6 @@ keywords = ["rate", "tempo", "fast", "slow", "playback rate"]
 description.en = "Set playback speed (1.0=normal)"
 description.ja = "再生速度を設定 (1.0=標準)"
 description.ko = "재생 속도를 설정 (1.0=일반)"
-related = ["getSpeed"]
 
 ["Sound::setVolume"]
 category = "sound"
@@ -7242,7 +7217,6 @@ keywords = ["audio", "loudness", "gain", "level"]
 description.en = "Set volume (0.0-1.0)"
 description.ja = "音量を設定 (0.0-1.0)"
 description.ko = "음량을 설정 (0.0-1.0)"
-related = ["getVolume"]
 
 ["Sound::stop"]
 category = "sound"
@@ -7442,7 +7416,7 @@ keywords = ["streaming audio", "bgm", "music stream", "disk audio", "on demand"]
 description.en = "Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a ~10 ms refill, and each polyphony slot costs one open file handle + decoder + ring buffer."
 description.ja = "ストリーミングなサウンドソース: ファイルを開いたままにし、全PCMをRAMに置く代わりにvoiceごとの小さなring bufferへオンデマンドにデコードする。SoundSourceから派生(channels / sampleRate / kind() / getDuration()を継承)。長尺ファイル(BGM、ポッドキャスト)に最適。SoundBufferとのトレードオフ: setSpeed()は1.0として扱われ、setPosition()は約10 msのrefillでseekし、polyphonyスロットごとにopenファイルハンドル+デコーダ+ring bufferのコストがかかる"
 description.ko = "스트리밍 사운드 소스: 파일을 열어둔 채로, 전체 PCM을 RAM에 두는 대신 voice별 작은 ring buffer로 on-demand 디코딩. SoundSource에서 파생(channels / sampleRate / kind() / getDuration() 상속). 긴 파일(BGM, 팟캐스트)에 최적. SoundBuffer 대비 트레이드오프: setSpeed()는 1.0으로 처리되고, setPosition()은 약 10 ms의 refill로 seek하며, polyphony 슬롯마다 open 파일 핸들 + 디코더 + ring buffer 비용이 듦"
-related = ["SoundBuffer", "SoundSource", "loadStream"]
+related = ["SoundBuffer", "SoundSource"]
 
 ["SoundStream::getDuration"]
 description.en = "Decoded file duration in seconds."
@@ -7497,14 +7471,14 @@ keywords = ["stroke", "polyline", "line", "thick", "caps", "joins"]
 description.en = "Variable-width polyline stroke geometry with caps, joins and miter limit; build it from points or a Path, then update() and draw()"
 description.ja = "キャップ・ジョイン・マイターリミットを持つ可変幅ポリラインのストロークジオメトリ。点列または Path から構築し、update() と draw() を行う"
 description.ko = "캡, 조인, 마이터 리미트를 가진 가변 폭 폴리라인 스트로크 지오메트리. 점들 또는 Path로 구축한 뒤 update()와 draw() 수행"
-related = ["clear", "setColor", "addVertex", "createStrokeMesh", "setWidth", "setCapType", "setJoinType", "setMiterLimit"]
+related = ["clear", "setColor", "StrokeMesh::setCapType", "StrokeMesh::setJoinType", "StrokeMesh::setMiterLimit"]
 
 ["StrokeMesh::CapType"]
 keywords = ["stroke", "cap", "line end", "butt", "round", "square"]
 description.en = "Line cap shape for the ends of an open stroke"
 description.ja = "開いたストロークの端のラインキャップ形状"
 description.ko = "열린 스트로크 끝의 라인 캡 모양"
-related = ["StrokeMesh", "setCapType", "setStrokeCap"]
+related = ["StrokeMesh", "StrokeMesh::setCapType", "setStrokeCap"]
 value_desc.CAP_BUTT.en = "Butt cap (cut flat at the endpoint)"
 value_desc.CAP_ROUND.en = "Round cap (semicircle)"
 value_desc.CAP_SQUARE.en = "Square cap (extend by half the width)"
@@ -7514,7 +7488,7 @@ keywords = ["stroke", "join", "corner", "miter", "round", "bevel"]
 description.en = "Line join shape at the corners of a stroke"
 description.ja = "ストロークのコーナーのラインジョイン形状"
 description.ko = "스트로크 모서리의 라인 조인 모양"
-related = ["StrokeMesh", "setJoinType", "setMiterLimit"]
+related = ["StrokeMesh", "StrokeMesh::setJoinType", "StrokeMesh::setMiterLimit"]
 value_desc.JOIN_MITER.en = "Miter join (sharp pointed corners)"
 value_desc.JOIN_ROUND.en = "Round join (rounded corners)"
 value_desc.JOIN_BEVEL.en = "Bevel join (flat cut corners)"
@@ -7532,7 +7506,7 @@ keywords = ["variable width", "taper", "point", "thickness"]
 description.en = "Append a vertex with a per-vertex width"
 description.ja = "頂点ごとの幅付きで頂点を追加"
 description.ko = "정점별 너비와 함께 정점을 추가"
-related = ["StrokeMesh", "addVertex", "setWidth"]
+related = ["StrokeMesh"]
 
 ["StrokeMesh::clear"]
 category = "types_strokemesh"
@@ -7572,7 +7546,7 @@ keywords = ["closed", "loop", "open", "join"]
 description.en = "Set whether the stroke forms a closed loop"
 description.ja = "ストロークが閉ループを形成するかを設定"
 description.ko = "스트로크가 닫힌 루프를 형성하는지 설정"
-related = ["StrokeMesh", "setShape", "close"]
+related = ["StrokeMesh", "StrokeMesh::setShape"]
 
 ["StrokeMesh::setColor"]
 category = "types_strokemesh"
@@ -7587,7 +7561,7 @@ keywords = ["join", "corner", "miter", "bevel", "round"]
 description.en = "Set the line join shape (StrokeMesh::JoinType: Miter, Round, Bevel)"
 description.ja = "ラインジョイン形状を設定（StrokeMesh::JoinType: Miter, Round, Bevel）"
 description.ko = "라인 조인 모양을 설정(StrokeMesh::JoinType: Miter, Round, Bevel)"
-related = ["StrokeMesh", "setStrokeJoin", "StrokeJoin", "setMiterLimit"]
+related = ["StrokeMesh", "setStrokeJoin", "StrokeJoin", "StrokeMesh::setMiterLimit"]
 
 ["StrokeMesh::setMiterLimit"]
 category = "types_strokemesh"
@@ -7595,7 +7569,7 @@ keywords = ["miter", "corner", "sharp", "limit"]
 description.en = "Set the miter limit for sharp corners"
 description.ja = "鋭角コーナーのマイターリミットを設定"
 description.ko = "날카로운 모서리의 마이터 리미트를 설정"
-related = ["StrokeMesh", "setJoinType", "StrokeJoin"]
+related = ["StrokeMesh", "StrokeMesh::setJoinType", "StrokeJoin"]
 
 ["StrokeMesh::setShape"]
 category = "types_strokemesh"
@@ -7603,7 +7577,7 @@ keywords = ["path", "outline", "geometry", "from path"]
 description.en = "Set the stroke shape from a Path"
 description.ja = "Path からストローク形状を設定"
 description.ko = "Path로부터 스트로크 모양을 설정"
-related = ["StrokeMesh", "Path", "setClosed"]
+related = ["StrokeMesh", "Path"]
 
 ["StrokeMesh::setWidth"]
 category = "types_strokemesh"
@@ -7611,7 +7585,7 @@ keywords = ["thickness", "weight", "size", "line width"]
 description.en = "Set the stroke width"
 description.ja = "ストローク幅を設定"
 description.ko = "스트로크 너비를 설정"
-related = ["StrokeMesh", "getWidth", "setStrokeWeight", "addVertexWithWidth"]
+related = ["StrokeMesh", "setStrokeWeight", "StrokeMesh::addVertexWithWidth"]
 
 ["StrokeMesh::setWidths"]
 description.en = "Set per-vertex widths from a list"
@@ -8012,7 +7986,7 @@ description.en = "GPU texture for rendering"
 description.ja = "レンダリング用GPUテクスチャ"
 description.ko = "렌더링용 GPU 텍스처"
 of_category = "image-texture-types"
-related = ["createTexture", "getTexture", "Image", "Fbo"]
+related = ["Image", "Fbo"]
 
 ["Texture::allocate"]
 description.en = "Allocate texture"
@@ -8025,7 +7999,7 @@ keywords = ["cubemap", "skybox", "environment", "ibl"]
 description.en = "Allocate a cubemap texture without initial data"
 description.ja = "初期データなしでキューブマップテクスチャを確保"
 description.ko = "초기 데이터 없이 큐브맵 텍스처를 할당"
-related = ["uploadCubemapFace", "uploadCubemapMip", "isCubemap"]
+related = ["Texture::uploadCubemapFace", "Texture::uploadCubemapMip", "Texture::isCubemap"]
 
 ["Texture::bind"]
 category = "graphics_texture"
@@ -8033,7 +8007,7 @@ keywords = ["attach", "activate", "use", "select"]
 description.en = "Bind texture for rendering"
 description.ja = "レンダリング用にテクスチャをバインド"
 description.ko = "렌더링용으로 텍스처를 바인딩"
-related = ["setTexture", "Shader"]
+related = ["Shader::setTexture", "Shader"]
 
 ["Texture::clear"]
 description.en = "Release texture resources"
@@ -8051,7 +8025,6 @@ keywords = ["draw", "flip", "vertical", "upside"]
 description.en = "Draw the texture vertically flipped"
 description.ja = "テクスチャを上下反転して描画"
 description.ko = "텍스처를 상하 반전하여 그림"
-related = ["bind"]
 
 ["Texture::drawSubsection"]
 category = "addon_tcxlut"
@@ -8127,7 +8100,7 @@ keywords = ["compressed", "format", "etc", "bc"]
 description.en = "Whether this texture uses a compressed pixel format"
 description.ja = "このテクスチャが圧縮ピクセルフォーマットを使うかどうか"
 description.ko = "이 텍스처가 압축 픽셀 포맷을 사용하는지 여부"
-related = ["updateCompressed"]
+related = ["Texture::updateCompressed"]
 
 ["Texture::isCubemap"]
 category = "graphics_texture"
@@ -8142,7 +8115,7 @@ keywords = ["premultiplied", "alpha", "blend", "format"]
 description.en = "Whether the texture color is premultiplied by alpha"
 description.ja = "テクスチャの色がアルファで乗算済みかどうか"
 description.ko = "텍스처 색상이 알파로 미리 곱해졌는지 여부"
-related = ["setPremultipliedAlpha"]
+related = ["Texture::setPremultipliedAlpha"]
 
 ["Texture::loadData"]
 description.en = "Load pixel data to texture"
@@ -8170,7 +8143,7 @@ keywords = ["premultiplied", "alpha", "blend", "flag"]
 description.en = "Set whether the texture color is premultiplied by alpha"
 description.ja = "テクスチャの色をアルファ乗算済みとして扱うかを設定"
 description.ko = "텍스처 색상을 알파로 미리 곱한 것으로 취급할지 설정"
-related = ["isPremultipliedAlpha"]
+related = ["Texture::isPremultipliedAlpha"]
 
 ["Texture::setWrap"]
 description.en = "Set both wrap modes"
@@ -8201,7 +8174,7 @@ keywords = ["compressed", "update", "upload", "data"]
 description.en = "Upload compressed pixel data to an already-allocated texture"
 description.ja = "確保済みテクスチャに圧縮ピクセルデータをアップロード"
 description.ko = "이미 할당된 텍스처에 압축 픽셀 데이터를 업로드"
-related = ["isCompressed"]
+related = ["Texture::isCompressed"]
 
 ["Texture::uploadCubemapFace"]
 category = "graphics_texture"
@@ -8209,7 +8182,7 @@ keywords = ["cubemap", "face", "upload", "data"]
 description.en = "Upload pixel data for one cubemap face at one mip level"
 description.ja = "1つのミップレベルのキューブマップ1面にピクセルデータをアップロード"
 description.ko = "한 밉 레벨의 큐브맵 한 면에 픽셀 데이터를 업로드"
-related = ["allocateCubemap", "uploadCubemapMip"]
+related = ["Texture::allocateCubemap", "Texture::uploadCubemapMip"]
 
 ["Texture::uploadCubemapMip"]
 category = "graphics_texture"
@@ -8217,7 +8190,7 @@ keywords = ["cubemap", "mip", "upload", "data"]
 description.en = "Upload pixel data for all six faces of one cubemap mip level"
 description.ja = "キューブマップの1ミップレベルの6面すべてにピクセルデータをアップロード"
 description.ko = "큐브맵 한 밉 레벨의 6면 전체에 픽셀 데이터를 업로드"
-related = ["allocateCubemap", "uploadCubemapFace"]
+related = ["Texture::allocateCubemap", "Texture::uploadCubemapFace"]
 
 ["TextureFilter"]
 keywords = ["filter", "nearest", "linear", "bilinear", "smoothing", "interpolation", "sampling"]
@@ -8268,7 +8241,7 @@ keywords = ["thread", "background", "worker", "async", "concurrent", "ofthread"]
 description.en = "Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data."
 description.ja = "バックグラウンドスレッドの基底クラス（ofThread 互換）。サブクラス化して protected の純粋仮想 threadedFunction() を while (isThreadRunning()) { ... } ループでオーバーライドし、startThread()/stopThread()/waitForThread() で制御する。データ共有用に protected の mutex dataMutex_ が利用できる"
 description.ko = "백그라운드 스레드의 기반 클래스(ofThread 호환). 서브클래싱하여 protected 순수 가상 threadedFunction()을 while (isThreadRunning()) { ... } 루프로 오버라이드한 뒤 startThread()/stopThread()/waitForThread()로 제어. 데이터 공유용 protected mutex dataMutex_가 제공됨"
-related = ["ThreadChannel", "isMainThread"]
+related = ["ThreadChannel<T>", "isMainThread"]
 
 ["Thread::getMainThreadId"]
 description.en = "Get the main thread ID, recording the current thread's ID on the first call."
@@ -8472,7 +8445,7 @@ keywords = ["complete", "end", "skip", "jump", "done"]
 description.en = "Jump immediately to the end value and fire the complete event"
 description.ja = "即座に終了値へジャンプし complete イベントを発火"
 description.ko = "즉시 종료 값으로 점프하고 complete 이벤트 발생"
-related = ["Tween"]
+related = ["Tween<T>"]
 
 ["Tween::from"]
 category = "animation"
@@ -8480,7 +8453,7 @@ keywords = ["start", "begin", "origin", "source", "initial"]
 description.en = "Set the start value (chainable)"
 description.ja = "開始値を設定（チェイン可能）"
 description.ko = "시작 값을 설정(체이닝 가능)"
-related = ["Tween", "to", "duration", "start"]
+related = ["Tween<T>", "Tween::to"]
 
 ["Tween::getDuration"]
 category = "animation"
@@ -8517,7 +8490,7 @@ keywords = ["percent", "fraction", "ratio", "completion", "normalized"]
 description.en = "Return normalized progress through the current iteration (0.0-1.0)"
 description.ja = "現在の反復における正規化された進行度を返す（0.0-1.0）"
 description.ko = "현재 반복의 정규화된 진행도를 반환(0.0-1.0)"
-related = ["getValue", "getElapsed"]
+related = ["Tween::getValue", "Tween::getElapsed"]
 
 ["Tween::getStart"]
 category = "animation"
@@ -8532,7 +8505,7 @@ keywords = ["current", "output", "result", "tween value"]
 description.en = "Return the current eased value"
 description.ja = "現在のイージング後の値を返す"
 description.ko = "현재 이징이 적용된 값을 반환"
-related = ["getProgress", "lerp"]
+related = ["lerp"]
 
 ["Tween::isComplete"]
 category = "animation"
@@ -8554,7 +8527,7 @@ keywords = ["repeat", "cycle", "iterate", "infinite", "again"]
 description.en = "Repeat the animation: -1 = infinite, 0 = no loop, N = repeat N times (chainable)"
 description.ja = "アニメーションを繰り返す: -1 = 無限、0 = ループなし、N = N 回繰り返し（チェイン可能）"
 description.ko = "애니메이션을 반복: -1 = 무한, 0 = 루프 없음, N = N회 반복(체이닝 가능)"
-related = ["Tween", "yoyo", "getLoopCount"]
+related = ["Tween<T>", "Tween::yoyo", "Tween::getLoopCount"]
 
 ["Tween::pause"]
 category = "animation"
@@ -8569,7 +8542,7 @@ keywords = ["restart", "rewind", "clear", "zero"]
 description.en = "Stop the animation and reset progress to the start"
 description.ja = "アニメーションを停止し進行を最初にリセット"
 description.ko = "애니메이션을 정지하고 진행을 처음으로 리셋"
-related = ["Tween"]
+related = ["Tween<T>"]
 
 ["Tween::resume"]
 category = "animation"
@@ -8584,7 +8557,7 @@ keywords = ["begin", "record", "capture", "go"]
 description.en = "Start (or restart) the animation and begin auto-updating each frame"
 description.ja = "アニメーションを開始（または再開）し毎フレームの自動更新を始める"
 description.ko = "애니메이션을 시작(또는 재시작)하고 매 프레임 자동 갱신 시작"
-related = ["Tween", "VideoRecordSettings", "Fbo"]
+related = ["Tween<T>", "VideoRecordSettings", "Fbo"]
 
 ["Tween::to"]
 category = "animation"
@@ -8592,7 +8565,7 @@ keywords = ["end", "target", "destination", "final", "goal"]
 description.en = "Set the end value (chainable)"
 description.ja = "終了値を設定（チェイン可能）"
 description.ko = "종료 값을 설정(체이닝 가능)"
-related = ["Tween", "from", "duration", "start"]
+related = ["Tween<T>", "Tween::from"]
 
 ["Tween::yoyo"]
 category = "animation"
@@ -8600,14 +8573,14 @@ keywords = ["reverse", "pingpong", "bounce", "back forth", "alternate"]
 description.en = "Reverse direction on each loop iteration (chainable)"
 description.ja = "ループのたびに方向を反転（チェイン可能）"
 description.ko = "루프 반복마다 방향을 반전(체이닝 가능)"
-related = ["Tween", "loop"]
+related = ["Tween<T>"]
 
 ["Tween<T>"]
 keywords = ["tween", "animate", "easing", "interpolate", "transition", "motion"]
 description.en = "Animates a value of type T with easing. Templated over any lerp-able type (float, Vec2, Vec3, Vec4, Color, etc.). Auto-updates each frame via events().update once start() is called; chainable setters configure it"
 description.ja = "型 T の値をイージング付きでアニメーション。lerp 可能な任意の型（float, Vec2, Vec3, Vec4, Color など）にテンプレート化。start() を呼ぶと events().update で毎フレーム自動更新。チェイン可能なセッターで設定する"
 description.ko = "T 타입 값을 이징과 함께 애니메이션. lerp 가능한 임의 타입(float, Vec2, Vec3, Vec4, Color 등)으로 템플릿화. start() 호출 시 events().update로 매 프레임 자동 갱신. 체이닝 가능한 세터로 설정"
-related = ["pause", "resume", "duration", "ease", "createTween", "from", "to", "start"]
+related = ["ease", "Tween::from", "Tween::to"]
 
 ["TweenMod"]
 category = "scene_graph"
@@ -8615,7 +8588,7 @@ keywords = ["animate", "tween", "motion", "transition", "easing"]
 description.en = "Animation modifier (Mod) that tweens a Node's position, scale and rotation with easing; exposes a complete Event"
 description.ja = "Nodeの位置・スケール・回転をイージングでアニメーションするMod。complete イベントを公開"
 description.ko = "Node의 위치・스케일・회전을 이징으로 애니메이션하는 Mod. complete 이벤트를 노출"
-related = ["createTween", "moveTo", "ease", "EaseType"]
+related = ["ease", "EaseType"]
 
 ["TweenMod::complete"]
 description.en = "Fired once when all tweens finish; subscribe with complete.listen(callback)"
@@ -8700,7 +8673,6 @@ keywords = ["animate offset", "translate", "relative move", "shift"]
 description.en = "Animate position by relative amount (TweenMod method) (C++ only)"
 description.ja = "位置を相対量だけアニメーション（TweenModメソッド）（C++のみ）"
 description.ko = "위치를 상대적인 양만큼 애니메이션 (TweenMod 메서드) (C++ 전용)"
-related = ["moveTo"]
 
 ["TweenMod::moveFrom"]
 category = "scene_graph"
@@ -8715,7 +8687,7 @@ keywords = ["animate position", "translate", "go to", "tween move"]
 description.en = "Animate position to target (TweenMod method) (C++ only)"
 description.ja = "位置を目標値へアニメーション（TweenModメソッド）（C++のみ）"
 description.ko = "위치를 목표값으로 애니메이션 (TweenMod 메서드) (C++ 전용)"
-related = ["moveToFront", "moveToBack", "moveBy", "scaleTo", "rotateTo", "ease", "duration"]
+related = ["Node::moveToFront", "Node::moveToBack", "TweenMod::moveBy", "TweenMod::scaleTo", "TweenMod::rotateTo", "ease"]
 
 ["TweenMod::pause"]
 category = "scene_graph"
@@ -8723,7 +8695,6 @@ keywords = ["stop", "hold", "freeze", "animate"]
 description.en = "Pause playback, keeping the current progress (TweenMod method) (C++ only)"
 description.ja = "現在の進行度を保ったまま再生を一時停止（TweenModメソッド）（C++のみ）"
 description.ko = "현재 진행도를 유지한 채 재생을 일시정지 (TweenMod 메서드) (C++ 전용)"
-related = ["resume", "start"]
 
 ["TweenMod::reset"]
 category = "scene_graph"
@@ -8731,7 +8702,6 @@ keywords = ["rewind", "restart", "clear", "animate"]
 description.en = "Reset progress to the start and stop playback (TweenMod method) (C++ only)"
 description.ja = "進行度を最初に戻して再生を停止（TweenModメソッド）（C++のみ）"
 description.ko = "진행도를 처음으로 되돌리고 재생을 정지 (TweenMod 메서드) (C++ 전용)"
-related = ["start"]
 
 ["TweenMod::resume"]
 category = "scene_graph"
@@ -8739,7 +8709,6 @@ keywords = ["continue", "unpause", "play", "animate"]
 description.en = "Resume a paused tween (TweenMod method) (C++ only)"
 description.ja = "一時停止したアニメーションを再開（TweenModメソッド）（C++のみ）"
 description.ko = "일시정지된 애니메이션을 재개 (TweenMod 메서드) (C++ 전용)"
-related = ["pause"]
 
 ["TweenMod::rotateBy"]
 category = "scene_graph"
@@ -8761,7 +8730,7 @@ keywords = ["animate rotation", "spin", "turn", "orient", "angle"]
 description.en = "Animate rotation to target angle or quaternion (TweenMod method) (C++ only)"
 description.ja = "回転を目標角度またはクォータニオンへアニメーション（TweenModメソッド）（C++のみ）"
 description.ko = "회전을 목표 각도 또는 쿼터니언으로 애니메이션 (TweenMod 메서드) (C++ 전용)"
-related = ["Quaternion", "rotateBy", "moveTo", "scaleTo"]
+related = ["Quaternion", "TweenMod::rotateBy", "TweenMod::scaleTo"]
 
 ["TweenMod::rotateXBy"]
 category = "scene_graph"
@@ -8839,7 +8808,7 @@ keywords = ["animate scale", "resize", "grow", "shrink", "zoom"]
 description.en = "Animate scale to target (TweenMod method) (C++ only)"
 description.ja = "スケールを目標値へアニメーション（TweenModメソッド）（C++のみ）"
 description.ko = "스케일을 목표값으로 애니메이션 (TweenMod 메서드) (C++ 전용)"
-related = ["scaleBy", "moveTo", "rotateTo"]
+related = ["TweenMod::scaleBy", "TweenMod::rotateTo"]
 
 ["TweenMod::start"]
 category = "scene_graph"
@@ -8847,7 +8816,6 @@ keywords = ["play", "begin", "run", "animate"]
 description.en = "Start (or restart) the tween from its configured values (TweenMod method) (C++ only)"
 description.ja = "設定された値からアニメーションを開始（再開）（TweenModメソッド）（C++のみ）"
 description.ko = "설정된 값으로 애니메이션을 시작(재시작) (TweenMod 메서드) (C++ 전용)"
-related = ["pause", "reset"]
 
 ["UdpErrorEventArgs"]
 keywords = ["udp error", "socket failure", "error args"]
@@ -9092,7 +9060,7 @@ description.en = "2D vector (x, y)"
 description.ja = "2Dベクトル (x, y)"
 description.ko = "2D 벡터 (x, y)"
 of_category = "math-vector"
-related = ["Vec3", "fromAngle", "Mat3"]
+related = ["Vec3", "Vec2::fromAngle", "Mat3"]
 
 ["Vec2::angle"]
 description.en = "Angle in radians"
@@ -9543,7 +9511,7 @@ keywords = ["camera", "device", "webcam", "video", "info"]
 description.en = "Information about an available camera device, returned by VideoGrabber::listDevices()"
 description.ja = "利用可能なカメラデバイスの情報。VideoGrabber::listDevices() が返す"
 description.ko = "사용 가능한 카메라 디바이스 정보. VideoGrabber::listDevices()가 반환"
-related = ["VideoGrabber", "listDevices"]
+related = ["VideoGrabber"]
 
 ["VideoDeviceInfo::deviceId"]
 description.en = "Numeric device ID (pass to setDeviceID); -1 if unknown"
@@ -9583,7 +9551,7 @@ keywords = ["webcam", "camera", "capture", "video", "grabber", "live"]
 description.en = "Webcam capture source. Call setup() once, then update() every frame; getTexture() (via HasTexture) gives the live frame. Move-only. Camera permission is requested automatically on macOS"
 description.ja = "Webカメラのキャプチャソース。setup() を一度呼び、毎フレーム update()。getTexture() (HasTexture 経由) でライブフレームを取得。ムーブのみ。macOS ではカメラ権限を自動でリクエスト"
 description.ko = "웹캠 캡처 소스. setup()을 한 번 호출하고 매 프레임 update(). getTexture() (HasTexture 경유)로 라이브 프레임을 얻음. 이동 전용. macOS에서는 카메라 권한을 자동으로 요청"
-related = ["VideoDeviceInfo", "Texture", "createVideoPlayer", "getTexture"]
+related = ["VideoDeviceInfo", "Texture"]
 platform_note.en = '''
 Webcam capture is a stub on Android: setupPlatform() logs "Not yet implemented on Android" and returns false (Camera2 NDK TODO). Real backends: macOS/iOS AVFoundation, Windows Media Foundation, Linux V4L2, web getUserMedia.
 '''
@@ -9645,7 +9613,6 @@ keywords = ["new frame", "fresh", "updated", "changed"]
 description.en = "Return true if a new frame arrived during the most recent update()"
 description.ja = "直近の update() で新しいフレームが届いた場合 true を返す"
 description.ko = "가장 최근 update()에서 새 프레임이 도착했으면 true 반환"
-related = ["getTexture", "update"]
 
 ["VideoGrabber::isInitialized"]
 description.en = "Return true once the camera is set up and capturing"
@@ -9703,7 +9670,7 @@ keywords = ["movie", "video", "playback", "ofvideoplayer", "film"]
 description.en = "Plays a video file: load/play/stop, per-frame update, and a texture you can draw each frame"
 description.ja = "動画ファイルを再生する。load/play/stop、フレームごとの update、毎フレーム描画できるテクスチャを提供"
 description.ko = "비디오 파일을 재생: load/play/stop, 프레임별 update, 매 프레임 그릴 수 있는 텍스처를 제공"
-related = ["createVideoPlayer", "Texture", "Sound"]
+related = ["Texture", "Sound"]
 platform_note.en = '''
 Video playback is a stub on Android: loadPlatform() logs "Not yet implemented on Android" and returns false; every platform hook is no-op (MediaCodec NDK TODO). Real backends: macOS/iOS AVFoundation, Windows Media Foundation, Linux FFmpeg, web HTML5 <video>.
 '''
@@ -9738,7 +9705,6 @@ keywords = ["audio", "channels", "stereo", "mono"]
 description.en = "Number of audio channels (0 if no audio)"
 description.ja = "音声のチャンネル数（音声がなければ 0）"
 description.ko = "오디오 채널 수 (오디오가 없으면 0)"
-related = ["getAudioSampleRate", "getAudioData"]
 
 ["VideoPlayer::getAudioCodec"]
 category = "video"
@@ -9746,7 +9712,6 @@ keywords = ["audio", "codec", "fourcc", "format"]
 description.en = "FourCC of the audio codec in the loaded video (0 if none)"
 description.ja = "読み込んだビデオの音声コーデックの FourCC（なければ 0）"
 description.ko = "로드된 비디오의 오디오 코덱 FourCC (없으면 0)"
-related = ["hasAudio", "getAudioData"]
 
 ["VideoPlayer::getAudioData"]
 category = "video"
@@ -9754,7 +9719,6 @@ keywords = ["audio", "samples", "pcm", "buffer"]
 description.en = "Raw decoded audio data for the loaded video"
 description.ja = "読み込んだビデオのデコード済み音声データ（生バイト）"
 description.ko = "로드된 비디오의 디코딩된 오디오 데이터 (원시 바이트)"
-related = ["getAudioCodec", "getAudioSampleRate"]
 
 ["VideoPlayer::getAudioSampleRate"]
 category = "video"
@@ -9762,7 +9726,6 @@ keywords = ["audio", "sample rate", "hz", "khz"]
 description.en = "Audio sample rate in Hz (0 if no audio)"
 description.ja = "音声のサンプルレート（Hz、音声がなければ 0）"
 description.ko = "오디오 샘플 레이트 (Hz, 오디오가 없으면 0)"
-related = ["getAudioChannels", "getAudioData"]
 
 ["VideoPlayer::getCurrentFrame"]
 category = "video"
@@ -9784,7 +9747,7 @@ keywords = ["gamma", "brightness", "tone", "color correction"]
 description.en = "Get current gamma correction value"
 description.ja = "現在のガンマ補正値を取得"
 description.ko = "현재 감마 보정 값을 가져옴"
-related = ["setGammaCorrection"]
+related = ["VideoPlayer::setGammaCorrection"]
 
 ["VideoPlayer::getHwAccelName"]
 category = "video"
@@ -9799,7 +9762,7 @@ keywords = ["pixels", "rgba", "buffer", "raw"]
 description.en = "Pointer to the current RGBA pixel buffer (mutable)"
 description.ja = "現在の RGBA ピクセルバッファへのポインタ（書き換え可能）"
 description.ko = "현재 RGBA 픽셀 버퍼에 대한 포인터 (변경 가능)"
-related = ["getPixelsY", "getPixelsUV"]
+related = ["VideoPlayer::getPixelsY", "VideoPlayer::getPixelsUV"]
 
 ["VideoPlayer::getPixelsUV"]
 category = "video"
@@ -9807,7 +9770,7 @@ keywords = ["pixels", "chroma", "yuv", "nv12"]
 description.en = "Pointer to the interleaved UV (chroma) plane when decoding NV12; null otherwise"
 description.ja = "NV12 デコード時のインターリーブ UV（色差）プレーンへのポインタ。それ以外は null"
 description.ko = "NV12 디코딩 시 인터리브 UV(색차) 평면에 대한 포인터. 그 외에는 null"
-related = ["getPixelsY", "getPixels"]
+related = ["VideoPlayer::getPixelsY"]
 
 ["VideoPlayer::getPixelsY"]
 category = "video"
@@ -9815,7 +9778,7 @@ keywords = ["pixels", "luma", "yuv", "nv12"]
 description.en = "Pointer to the Y (luma) plane when decoding NV12/YUV; null otherwise"
 description.ja = "NV12/YUV デコード時の Y（輝度）プレーンへのポインタ。それ以外は null"
 description.ko = "NV12/YUV 디코딩 시 Y(휘도) 평면에 대한 포인터. 그 외에는 null"
-related = ["getPixelsUV", "getPixels"]
+related = ["VideoPlayer::getPixelsUV"]
 
 ["VideoPlayer::getPosition"]
 category = "video"
@@ -9837,7 +9800,7 @@ keywords = ["hardware", "gpu decode", "acceleration", "preference"]
 description.en = "Get HW accel preference (not the actual backend — use isUsingHwAccel() for that)"
 description.ja = "HWアクセル設定を取得（実際のバックエンドはisUsingHwAccel()で確認）"
 description.ko = "HW 가속 설정을 가져옴 (실제 백엔드는 isUsingHwAccel()로 확인)"
-related = ["setUseHwAccel"]
+related = ["VideoPlayer::setUseHwAccel"]
 
 ["VideoPlayer::hasAudio"]
 category = "video"
@@ -9887,7 +9850,7 @@ keywords = ["gamma", "brightness", "tone", "color correction"]
 description.en = "Set gamma correction (1.0 = none). Use ~0.45 to brighten on platforms with dark output (e.g. macOS AVFoundation)"
 description.ja = "ガンマ補正を設定（1.0=補正なし）。macOS等で暗くなる場合に~0.45で明るくする"
 description.ko = "감마 보정을 설정 (1.0=보정 없음). macOS 등에서 어둡게 나오면 ~0.45로 밝게"
-related = ["getGammaCorrection"]
+related = ["VideoPlayer::getGammaCorrection"]
 
 ["VideoPlayer::setUseHwAccel"]
 category = "video"
@@ -9895,7 +9858,7 @@ keywords = ["hardware", "gpu decode", "vaapi", "cuda", "acceleration"]
 description.en = "Enable/disable hardware decoding. Must be called before load(). Default: true. When enabled, the player probes available HW backends (VAAPI, V4L2M2M, CUDA, etc.) and falls back to software if none are available. Currently affects the Linux backend only."
 description.ja = "ハードウェアデコードの有効/無効。load()の前に呼ぶ。デフォルト: true。有効時はHWバックエンド（VAAPI, V4L2M2M, CUDA等）を自動検出し、なければソフトウェアにフォールバック。現在Linuxのみ対応"
 description.ko = "하드웨어 디코딩 활성/비활성. load() 전에 호출. 기본값: true. 활성화 시 HW 백엔드(VAAPI, V4L2M2M, CUDA 등)를 자동 탐색하고, 없으면 소프트웨어로 폴백. 현재 Linux만 지원"
-related = ["getUseHwAccel"]
+related = ["VideoPlayer::getUseHwAccel"]
 
 ["VideoPlayer::update"]
 category = "video"
@@ -9917,7 +9880,7 @@ keywords = ["playhead", "elapsed", "seconds", "time"]
 description.en = "Get current playback time in seconds"
 description.ja = "現在の再生時間を秒単位で取得"
 description.ko = "현재 재생 시간을 초 단위로 가져옴"
-related = ["setCurrentTime"]
+related = ["VideoPlayerBase::setCurrentTime"]
 
 ["VideoPlayerBase::getHeight"]
 category = "video"
@@ -9939,7 +9902,7 @@ keywords = ["sync", "drift", "av sync", "lag"]
 description.en = "Get the current resync threshold in seconds"
 description.ja = "現在のリシンク閾値を秒単位で取得"
 description.ko = "현재 리싱크 임계값을 초 단위로 가져옴"
-related = ["setResyncThreshold"]
+related = ["VideoPlayerBase::setResyncThreshold"]
 
 ["VideoPlayerBase::getSpeed"]
 category = "video"
@@ -10010,7 +9973,7 @@ keywords = ["seek", "jump", "scrub", "time", "seconds"]
 description.en = "Seek to a specific time in seconds"
 description.ja = "指定した秒数にシーク"
 description.ko = "지정된 시간(초)으로 이동"
-related = ["getCurrentTime"]
+related = ["VideoPlayerBase::getCurrentTime"]
 
 ["VideoPlayerBase::setLoop"]
 category = "video"
@@ -10039,7 +10002,7 @@ keywords = ["sync", "drift", "av sync", "lag"]
 description.en = "Set the maximum video/audio drift before hard re-sync. When drift exceeds this threshold, video seeks to match audio position instead of catching up frame-by-frame. Set to 0 to disable. Default: 0.5s. Primarily affects Linux (FFmpeg) backend."
 description.ja = "映像/音声のズレが許容値を超えた場合にハードリシンクする閾値を設定。ズレがこの値を超えるとフレーム送りではなくシークで同期。0で無効。デフォルト: 0.5秒。主にLinux(FFmpeg)で有効"
 description.ko = "비디오/오디오 드리프트가 임계값을 초과하면 하드 리싱크하는 값을 설정. 드리프트가 이 값을 초과하면 프레임 추적 대신 시크로 동기화. 0이면 비활성. 기본값: 0.5초. 주로 Linux(FFmpeg)에서 유효"
-related = ["getResyncThreshold"]
+related = ["VideoPlayerBase::getResyncThreshold"]
 
 ["VideoPlayerBase::setSpeed"]
 category = "video"
@@ -10074,7 +10037,7 @@ keywords = ["video", "record", "encoder", "settings", "codec", "export"]
 description.en = "Encoder settings passed to VideoWriter::open(), ScreenRecorder::start(), and startRecording()"
 description.ja = "VideoWriter::open()、ScreenRecorder::start()、startRecording() に渡すエンコーダ設定"
 description.ko = "VideoWriter::open(), ScreenRecorder::start(), startRecording()에 전달하는 인코더 설정"
-related = ["startRecording", "start", "open", "VideoCodec", "ScreenRecorder"]
+related = ["startRecording", "VideoCodec", "ScreenRecorder"]
 
 ["VideoRecordSettings::bitrate"]
 description.en = "Target bits/sec for H.264/HEVC; 0 = auto. Ignored by ProRes"
@@ -10112,7 +10075,7 @@ keywords = ["append", "write", "encode", "feed"]
 description.en = "Append one frame at the fixed-rate clock (frameIndex/fps)"
 description.ja = "1フレームを固定レート（frameIndex/fps）で追加"
 description.ko = "한 프레임을 고정 레이트(frameIndex/fps)로 추가"
-related = ["Fbo", "Pixels", "addFrameAt", "open"]
+related = ["Fbo", "Pixels", "VideoWriter::addFrameAt"]
 
 ["VideoWriter::addFrameAt"]
 category = "video"
@@ -10185,7 +10148,7 @@ keywords = ["frame", "buffer", "zero-copy", "lock"]
 description.en = "Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame"
 description.ja = "ゼロコピー書き込み用にエンコーダのフレームバッファをロックして返す。strideOut に行ストライドが入る。submitFrame と対で使う"
 description.ko = "제로카피 채우기를 위해 인코더의 프레임 버퍼를 잠그고 반환. strideOut에 행 스트라이드가 들어감. submitFrame과 짝으로 사용"
-related = ["submitFrame"]
+related = ["VideoWriter::submitFrame"]
 
 ["VideoWriter::open"]
 category = "video"
@@ -10201,11 +10164,11 @@ keywords = ["frame", "submit", "encode", "timestamp"]
 description.en = "Append the previously locked frame at the given presentation time (seconds)"
 description.ja = "直前にロックしたフレームを指定の表示時刻（秒）で追加"
 description.ko = "직전에 잠근 프레임을 지정된 표시 시각(초)으로 추가"
-related = ["lockFrame"]
+related = ["VideoWriter::lockFrame"]
 
 ["Wave"]
 keywords = ["waveform", "oscillator", "sine", "square", "triangle", "sawtooth", "noise"]
-related = ["wave", "ChipSound", "ChipSoundNote"]
+related = ["ChipSoundNote::wave", "ChipSoundNote"]
 value_desc.Sin.en = "Sine wave (smooth, pure tone)"
 value_desc.Sin.ja = "サイン波（滑らかな純音）"
 value_desc.Sin.ko = "사인파 (부드럽고 순수한 음색)"
@@ -10556,7 +10519,7 @@ keywords = ["arctangent", "angle", "heading", "direction", "trig"]
 description.en = "Arc tangent of y/x"
 description.ja = "y/xの逆正接"
 description.ko = "y/x의 역-탄젠트"
-related = ["atan", "fromAngle", "angleDifference"]
+related = ["atan", "Vec2::fromAngle", "angleDifference"]
 
 ["audio::priority::Effect"]
 keywords = ["audio", "priority", "effect", "reverb", "filter", "audioOut"]
@@ -10607,7 +10570,7 @@ of = ["ofBeginShape"]
 description.en = "Begin drawing a shape"
 description.ja = "図形の描画を開始"
 description.ko = "도형 그리기 시작"
-related = ["endShape", "beginStroke", "beginLines", "createPath"]
+related = ["endShape", "beginStroke", "beginLines"]
 
 ["beginStroke"]
 category = "graphics_shapes"
@@ -10825,7 +10788,7 @@ keywords = ["box", "cube", "rectangular", "block", "ofBoxPrimitive", "primitive"
 description.en = "Create a box mesh"
 description.ja = "ボックスメッシュを作成"
 description.ko = "박스 메쉬를 생성"
-related = ["Mesh", "drawBox", "drawMesh"]
+related = ["Mesh", "drawBox"]
 
 ["createCapsule"]
 category = "graphics_advanced"
@@ -10841,7 +10804,7 @@ keywords = ["cone", "pyramid", "spike", "ofConePrimitive", "primitive"]
 description.en = "Create a cone mesh"
 description.ja = "円錐メッシュを作成"
 description.ko = "원뿔 메쉬를 생성"
-related = ["Mesh", "drawCone", "drawMesh"]
+related = ["Mesh", "drawCone"]
 
 ["createCylinder"]
 category = "graphics_advanced"
@@ -10849,7 +10812,7 @@ keywords = ["cylinder", "tube", "pipe", "ofCylinderPrimitive", "primitive"]
 description.en = "Create a cylinder mesh"
 description.ja = "円柱メッシュを作成"
 description.ko = "원기둥 메쉬를 생성"
-related = ["Mesh", "drawMesh"]
+related = ["Mesh"]
 
 ["createDirectory"]
 category = "file"
@@ -10874,7 +10837,7 @@ keywords = ["plane", "quad", "flat", "grid", "ofPlanePrimitive", "subdivided"]
 description.en = "Create a plane mesh (subdivided quad on the XY plane)"
 description.ja = "平面メッシュを作成（XY平面上の分割された四角形）"
 description.ko = "평면 메쉬를 생성 (XY 평면의 분할된 사각형)"
-related = ["Mesh", "drawMesh"]
+related = ["Mesh"]
 
 ["createSphere"]
 category = "graphics_advanced"
@@ -10882,7 +10845,7 @@ keywords = ["sphere", "ball", "globe", "round", "ofSpherePrimitive", "primitive"
 description.en = "Create a sphere mesh"
 description.ja = "球体メッシュを作成"
 description.ko = "구 메쉬를 생성"
-related = ["Mesh", "drawSphere", "createIcoSphere", "drawMesh"]
+related = ["Mesh", "drawSphere", "createIcoSphere"]
 
 ["createTorus"]
 category = "graphics_advanced"
@@ -10890,7 +10853,7 @@ keywords = ["torus", "donut", "ring", "doughnut", "primitive"]
 description.en = "Create a torus (donut) mesh"
 description.ja = "トーラス（ドーナツ）メッシュを作成"
 description.ko = "토러스(도넛) 메쉬를 생성"
-related = ["Mesh", "drawMesh"]
+related = ["Mesh"]
 
 ["decompress"]
 category = "utility"
@@ -10959,7 +10922,7 @@ keywords = ["curve", "spline", "cubic", "quadratic", "path"]
 description.en = "Draw bezier curve (cubic with 4 points, quadratic with 3, or N-th order via vector)"
 description.ja = "ベジェ曲線を描画（4点で3次、3点で2次、vectorでN次）"
 description.ko = "베지어 곡선 그리기 (4점은 3차, 3점은 2차, vector는 N차)"
-related = ["drawCurve", "bezierTo", "setCurveResolution", "setCurveTolerance"]
+related = ["drawCurve", "Path::bezierTo", "setCurveResolution", "setCurveTolerance"]
 
 ["drawBitmapString"]
 category = "graphics_shapes"
@@ -10968,7 +10931,7 @@ of = ["ofDrawBitmapString"]
 description.en = "Draw text"
 description.ja = "テキストを描画"
 description.ko = "비트맵 텍스트 그리기"
-related = ["drawBitmapStringHighlight", "drawString", "setTextAlign"]
+related = ["drawBitmapStringHighlight", "Font::drawString", "setTextAlign"]
 
 ["drawBitmapStringHighlight"]
 category = "graphics_shapes"
@@ -11101,7 +11064,7 @@ keywords = ["easing", "interpolation", "tween", "smooth", "curve"]
 description.en = "Apply easing to value (0-1)"
 description.ja = "イージングを適用 (0-1)"
 description.ko = "값에 easing 적용 (0-1)"
-related = ["EaseType", "EaseMode", "Tween", "lerp", "remap", "createTween"]
+related = ["EaseType", "EaseMode", "Tween<T>", "lerp", "remap"]
 
 ["easeIn"]
 category = "animation"
@@ -11184,7 +11147,7 @@ keywords = ["event", "callback", "listener", "hub", "subscribe", "hook"]
 description.en = "Get the global CoreEvents hub holding all framework events (setup, update, draw, keyPressed, mousePressed, etc.); use events().eventName.listen(callback) to subscribe"
 description.ja = "全フレームワークイベント（setup, update, draw, keyPressed, mousePressed など）を保持するグローバルなCoreEventsハブを取得。events().eventName.listen(callback) で購読"
 description.ko = "모든 프레임워크 이벤트(setup, update, draw, keyPressed, mousePressed 등)를 보유하는 전역 CoreEvents 허브를 얻음. events().eventName.listen(callback) 으로 구독"
-related = ["CoreEvents", "setup", "audioOut", "audioIn"]
+related = ["CoreEvents", "setup"]
 
 ["exitApp"]
 category = "window_input"
@@ -11910,7 +11873,7 @@ keywords = ["microphone", "mic", "capture", "input", "record"]
 description.en = "Get the global MicInput singleton (microphone capture). Call start() on it to open the device."
 description.ja = "グローバルなMicInputシングルトン(マイク入力)を取得。start()を呼ぶとデバイスを開く"
 description.ko = "전역 MicInput 싱글턴(마이크 캡처)을 얻음. start()를 호출하면 장치를 엶"
-related = ["MicInput", "getMicAnalysisBuffer", "audioIn"]
+related = ["MicInput", "getMicAnalysisBuffer"]
 
 ["getMinutes"]
 category = "time_current"
@@ -12038,7 +12001,7 @@ keywords = ["selection", "active", "clicked", "current", "inspector"]
 description.en = "Get the currently selected node (the last-clicked node, held by the Node system; null if none). A tool such as an inspector can read it and drive it via setSelectedNode()."
 description.ja = "現在選択中のノード(最後にクリックされたノード、Nodeシステムが保持。なければnull)を取得。inspectorなどのツールがこれを読み取り、setSelectedNode()で操作できる"
 description.ko = "현재 선택된 노드(마지막으로 클릭된 노드, Node 시스템이 보유. 없으면 null)를 얻음. inspector 같은 도구가 이를 읽고 setSelectedNode()로 조작 가능"
-related = ["setSelectedNode", "getRootNode", "enableEvents"]
+related = ["setSelectedNode", "getRootNode", "Node::enableEvents"]
 
 ["getSokolMemoryAllocs"]
 category = "memory"
@@ -12286,7 +12249,7 @@ keywords = ["initialize", "start", "engine", "setup", "open"]
 description.en = "Initialize the global AudioEngine. Called automatically by Sound::load() / play(), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener)."
 description.ja = "グローバルなAudioEngineを初期化。Sound::load() / play()から自動的に呼ばれるため、手動使用はオーディオを早期に開始したい場合(例: audioOut合成リスナーの前)のみ必要"
 description.ko = "전역 AudioEngine을 초기화. Sound::load() / play()에서 자동 호출되므로, 수동 사용은 오디오를 일찍 시작하려는 경우(예: audioOut 합성 리스너 이전)에만 필요"
-related = ["getInstance", "shutdownAudio", "audioOut"]
+related = ["AudioEngine::getInstance", "shutdownAudio"]
 
 ["intersectRect"]
 category = "utility"
@@ -12294,7 +12257,7 @@ keywords = ["overlap", "rectangle", "bounds", "clip", "collision"]
 description.en = "Compute intersection of two rectangles"
 description.ja = "2つの矩形の交差部分を計算"
 description.ko = "두 사각형의 교차 영역을 계산"
-related = ["intersects", "contains"]
+related = ["Rect::intersects", "Rect::contains"]
 
 ["isAltPressed"]
 category = "window_input"
@@ -12503,7 +12466,7 @@ description.ja = "線形補間"
 description.ko = "선형 보간"
 of_notes.en = "std::lerp (C++20)"
 of_notes.ja = "std::lerp (C++20)"
-related = ["ColorHSB", "ColorOKLCH", "remap", "clamp", "ease", "slerp"]
+related = ["ColorHSB", "ColorOKLCH", "remap", "clamp", "ease", "Quaternion::slerp"]
 
 ["linearToSrgb"]
 category = "graphics_color"
@@ -12511,7 +12474,7 @@ keywords = ["gamma", "linear", "color space", "convert"]
 description.en = "Convert a single linear RGB channel value to sRGB"
 description.ja = "単一のリニアRGBチャンネル値をsRGBに変換"
 description.ko = "단일 linear RGB 채널 값을 sRGB로 변환"
-related = ["setGammaCorrection"]
+related = ["VideoPlayer::setGammaCorrection"]
 
 ["listDirectory"]
 category = "file"
@@ -12714,7 +12677,7 @@ keywords = ["node", "json", "serialize", "reflect", "tree", "dump"]
 description.en = "Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection"
 description.ja = "ノード（および maxDepth までのサブツリー、-1 = 無制限）をリフレクションで JSON にシリアライズ"
 description.ko = "노드(및 maxDepth까지의 서브트리, -1 = 무제한)를 리플렉션으로 JSON으로 직렬화"
-related = ["getRootNode", "findByInstanceId"]
+related = ["getRootNode", "Node::findByInstanceId"]
 
 ["noise"]
 category = "math_random"
@@ -13078,7 +13041,7 @@ keywords = ["thread", "main thread", "marshal", "queue", "dispatch", "sync"]
 description.en = "Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame"
 description.ja = "コールバックをメイン（シーン）スレッドで実行。既にメインなら即時、そうでなければ次フレームにキュー"
 description.ko = "콜백을 메인(씬) 스레드에서 실행. 이미 메인이면 즉시, 아니면 다음 프레임으로 큐잉"
-related = ["isMainThread", "callAfterAsync"]
+related = ["isMainThread", "Node::callAfterAsync"]
 
 ["sameSubnet"]
 category = "network"
@@ -13182,7 +13145,7 @@ keywords = ["camera position", "eye", "specular", "view vector", "viewpoint"]
 description.en = "Set camera position for specular calculation"
 description.ja = "specular計算用のcamera位置を設定"
 description.ko = "스페큘러 계산을 위한 카메라 위치를 설정"
-related = ["getCameraPosition", "getPosition"]
+related = ["getCameraPosition"]
 
 ["setCircleResolution"]
 category = "graphics_style"
@@ -13375,7 +13338,7 @@ keywords = ["material", "pbr", "surface", "shading", "ofMaterial", "roughness"]
 description.en = "Set material for subsequent mesh draws (activates PBR)"
 description.ja = "以降のmesh描画に使うmaterialを設定（PBR有効化）"
 description.ko = "이후 메쉬 렌더링에 사용할 재질을 설정 (PBR 활성화)"
-related = ["Material", "addLight", "drawMesh", "setEnvironment"]
+related = ["Material", "addLight", "setEnvironment"]
 
 ["setMatrix"]
 category = "transform"
@@ -13409,7 +13372,7 @@ keywords = ["clip", "clipping", "mask", "crop", "region"]
 description.en = "Set scissor clipping rectangle. Also available via RectNode::setClipping(true)"
 description.ja = "シザー（クリッピング）矩形を設定。RectNode::setClipping(true)でも使用可"
 description.ko = "시저(클리핑) 사각형을 설정. RectNode::setClipping(true)로도 사용 가능"
-related = ["setClipping", "pushScissor"]
+related = ["RectNode::setClipping", "pushScissor"]
 
 ["setSelectedNode"]
 category = "scene_graph"
@@ -13433,7 +13396,7 @@ keywords = ["line join", "corner", "miter", "bevel", "round"]
 description.en = "Set stroke join style (Miter, Round, Bevel)"
 description.ja = "ストローク結合部のスタイルを設定"
 description.ko = "stroke 결합부 스타일을 설정 (Miter, Round, Bevel)"
-related = ["StrokeJoin", "getStrokeJoin", "beginStroke", "drawStroke", "setMiterLimit"]
+related = ["StrokeJoin", "getStrokeJoin", "beginStroke", "drawStroke", "StrokeMesh::setMiterLimit"]
 
 ["setStrokeWeight"]
 category = "graphics_style"
@@ -13540,7 +13503,7 @@ keywords = ["fov", "field of view", "projection", "perspective", "ortho", "scree
 description.en = "Set up screen projection with specified FOV (0 = ortho, >0 = perspective)"
 description.ja = "指定したFOVで画面投影を設定（0 = 正投影、0より大 = パースペクティブ）"
 description.ko = "지정한 FOV로 화면 투영을 설정 (0 = 정사영, 0보다 크면 원근)"
-related = ["setDefaultScreenFov", "setFov"]
+related = ["setDefaultScreenFov", "EasyCam::setFov"]
 
 ["setupScreenOrtho"]
 category = "graphics_3d_setup"
@@ -13549,7 +13512,7 @@ of = ["ofSetupScreenOrtho"]
 description.en = "Set up orthographic projection (2D mode)"
 description.ja = "正投影を設定（2Dモード）"
 description.ko = "정사영 투영을 설정 (2D 모드)"
-related = ["setupScreenFov", "ortho"]
+related = ["setupScreenFov", "Mat4::ortho"]
 
 ["setupScreenPerspective"]
 category = "graphics_3d_setup"
@@ -13558,7 +13521,7 @@ of = ["ofSetupScreenPerspective"]
 description.en = "Set up perspective projection (oF-style default 3D)"
 description.ja = "パースペクティブ投影を設定（oF風デフォルト3D）"
 description.ko = "원근 투영을 설정 (oF 스타일 기본 3D)"
-related = ["createEasyCam", "setupScreenFov", "perspective"]
+related = ["setupScreenFov", "Mat4::perspective"]
 
 ["shadowDraw"]
 category = "graphics_lighting"
@@ -13566,7 +13529,7 @@ keywords = ["shadow", "depth", "shadow map", "render shadow", "caster"]
 description.en = "Draw a mesh into the shadow depth pass (depth only)"
 description.ja = "shadow depth passにmeshを描画（depthのみ）"
 description.ko = "섀도우 뎁스 패스에 메쉬를 렌더링 (뎁스 전용)"
-related = ["Mesh", "drawMesh"]
+related = ["Mesh"]
 
 ["shortTypeName"]
 category = "utility"
@@ -13664,7 +13627,7 @@ keywords = ["gamma", "linear", "color space", "convert"]
 description.en = "Convert a single sRGB channel value to linear RGB"
 description.ja = "単一のsRGBチャンネル値をリニアRGBに変換"
 description.ko = "단일 sRGB 채널 값을 linear RGB로 변환"
-related = ["setGammaCorrection"]
+related = ["VideoPlayer::setGammaCorrection"]
 
 ["startRecording"]
 category = "window_system"
@@ -13707,7 +13670,7 @@ keywords = ["resolve", "lookup", "find", "os font", "path"]
 description.en = "Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub."
 description.ja = "システムフォント名（PostScript 名や family 名）をファイルパスに解決。見つからなければ空文字を返す。macOS は CoreText、Linux/Win は現状スタブ"
 description.ko = "시스템 폰트 이름을 파일 경로로 변환"
-related = ["listSystemFonts", "createFont"]
+related = ["listSystemFonts"]
 platform_note.en = '''
 Resolve a font name to a file path. Stub on Android and Web/WASM (always returns "").
 '''
@@ -14025,7 +13988,7 @@ of = ["ofWorldToScreen"]
 description.en = "Convert a world coordinate to screen coordinate (x, y = screen pixels, z = depth 0-1)"
 description.ja = "ワールド座標をスクリーン座標に変換（x, y = 画面ピクセル, z = 深度 0-1）"
 description.ko = "월드 좌표를 스크린 좌표로 변환 (x, y = 스크린 픽셀, z = 깊이 0-1)"
-related = ["screenToWorld", "screenPointToRay"]
+related = ["screenToWorld", "CameraContext::screenPointToRay"]
 
 ["wrap"]
 category = "math_general"
