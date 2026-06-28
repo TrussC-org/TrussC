@@ -46,6 +46,16 @@ function argBindable(a) {
     return true;
 }
 
+// Qualify a bare user-defined type (PascalCase, not primitive / std / already
+// qualified) with `trussc::`, so a lambda param like `Beep` can't be ambiguous
+// with a global/Win32 symbol of the same name (windows.h declares ::Beep).
+function qualifyType(type) {
+    const base = type.replace(/[&*]/g, '').replace(/\bconst\b/g, '').trim();
+    if (!base || /\s/.test(base) || base.includes('::') || PRIM.has(base)) return type;
+    if (!/^[A-Z]/.test(base)) return type;          // trussc value types/enums are PascalCase
+    return type.replace(new RegExp(`\\b${base}\\b`), `trussc::${base}`);
+}
+
 // One {decl, call} per callable arity (trailing defaults expand into overloads),
 // or null if any arg is unbindable.
 function variantsOf(args) {
@@ -55,7 +65,7 @@ function variantsOf(args) {
     args.forEach((a, i) => {
         if (a.hasDefault && firstDefault === args.length) firstDefault = i;
         const nm = a.name || `a${i}`;
-        decls.push(`${a.type} ${nm}`.replace(/\s+/g, ' ').trim());
+        decls.push(`${qualifyType(a.type)} ${nm}`.replace(/\s+/g, ' ').trim());
         calls.push(nm);
     });
     const out = [];
