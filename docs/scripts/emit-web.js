@@ -85,6 +85,17 @@ let refHits = 0, refMiss = 0;
 // Combined (legacy) en/ja/ko description trio: reference-data wins when it
 // documents the symbol; otherwise fall back to the yaml-authored prose.
 const _t = (s) => String(s == null ? '' : s).trim();   // reference-data prose carries trailing \n
+// details may be a {en,ja,ko} object (long-form prose) or a legacy en-only string
+const detailsOf = (det) => {
+    if (!det) return {};
+    if (typeof det === 'object') {
+        const o = {}; if (_t(det.en)) o.details = _t(det.en);
+        if (_t(det.ja)) o.details_ja = _t(det.ja);
+        if (_t(det.ko)) o.details_ko = _t(det.ko);
+        return o;
+    }
+    return { details: _t(det) };
+};
 // Prose precedence: reference-data.json (the api-reference.toml prose, keyed by
 // symbol-id) is now the source of truth; the legacy yaml is only a transitional
 // fallback for anything not yet in reference-data. `allowRef` lets a caller veto
@@ -348,10 +359,12 @@ function build(examplesMap) {
                 // details: prefer the curated yaml sidecar (keeps ja/ko); fall back
                 // to reference-data's en-only string (trimmed).
                 const refDetails = REF[refId] && REF[refId].details;
-                if ((ym && ym.details) || refDetails) {
-                    entry.details = (ym && ym.details) || _t(refDetails);
-                    if (ym && ym.details_ja) entry.details_ja = ym.details_ja;
-                    if (ym && ym.details_ko) entry.details_ko = ym.details_ko;
+                if (ym && ym.details) {
+                    entry.details = ym.details;
+                    if (ym.details_ja) entry.details_ja = ym.details_ja;
+                    if (ym.details_ko) entry.details_ko = ym.details_ko;
+                } else if (refDetails) {
+                    Object.assign(entry, detailsOf(refDetails));
                 }
                 if (examplesMap[sym.name]) entry.examples = examplesMap[sym.name];
                 attachPlatforms(entry, sym, ym);
@@ -374,13 +387,17 @@ function build(examplesMap) {
         if (sym.kind !== 'var' || sym.owner) continue;
         if (sym.ns && ENUM_NS.has(sym.ns)) continue;         // defensive: skip enum members
         if (sym.ns === 'colors') continue;                   // named colors are emitted in the `colors` palette, not as flat constants
-        const { desc } = descTrio(sym.id, null);
-        constants.push({
+        const { desc, desc_ja, desc_ko } = descTrio(sym.id, null);
+        const ref = REF[sym.id];
+        const c = {
             name: sym.id,
             value: EXTRAS.constants[sym.id] ?? EXTRAS.constants[sym.name],   // curated value (KEY_* etc. aren't in the AST)
-            desc,
+            desc, desc_ja, desc_ko,
             keywords: refKeywords(sym.id, null),
-        });
+        };
+        Object.assign(c, detailsOf(ref && ref.details));
+        if (ref && Array.isArray(ref.related) && ref.related.length) c.related = ref.related;
+        constants.push(c);
     }
 
     // --- types (kind=="type") with methods / fields owned by each ---
@@ -388,6 +405,7 @@ function build(examplesMap) {
     const methodsByOwner = new Map();   // owner -> [method symbol, …]
     const fieldsByOwner = new Map();    // owner -> [field symbol, …]
     for (const sym of REF_VALS) {
+        if (sym.access === 'protected') continue;            // protected members are kept in the data but hidden from the public web reference
         if (sym.kind === 'method' && sym.owner) {
             if (isOperator(sym)) continue;                   // operators render via yaml schema
             if (!methodsByOwner.has(sym.owner)) methodsByOwner.set(sym.owner, []);

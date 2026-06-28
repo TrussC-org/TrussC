@@ -777,11 +777,6 @@ void appendCurve(const std::vector<Vec3> & points) [+1]  // Append Catmull-Rom c
 void beginLines()  // Begin batch line drawing. Add vertex pairs with vertex(), then call endLines(). Each pair of vertices draws one independent line segment. Use setColor() between vertices for per-line colors.
 void beginShape()  // Begin drawing a shape
 void beginStroke()  // Begin drawing a stroke (uses StrokeMesh internally)
-std::array<uint8_t, 26> bitmapfont::compile16x13(const char *const (&)[13] rows)  // Compile-time ASCII art -> packed fullwidth (16x13) glyph bytes. '#' = lit, '.' = empty.
-std::array<uint8_t, 13> bitmapfont::compile8x13(const char *const (&)[13] rows)  // Compile-time ASCII art -> packed halfwidth (8x13) glyph bytes. '#' = lit, '.' = empty.
-void bitmapfont::registerGlyph(const Glyph & g)  // Register a bitmap glyph for a Unicode codepoint (extends drawBitmapString)
-void bitmapfont::registerGlyphs(const Glyph (&)[N] glyphs)  // Register a batch of bitmap glyphs at once
-void bitmapfont::updateGlyph(uint32_t cp, const uint8_t * newData)  // Swap an already-registered glyph's pixel data (atlas cell unchanged). Useful for per-frame animation.
 void drawArc(Vec3 center, float radius, float angleBegin, float angleEnd) [+1]  // Draw arc (partial circle, angles in radians)
 void drawBezier(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw bezier curve (cubic with 4 points, quadratic with 3, or N-th order via vector)
 void drawBitmapString(const std::string & text, Vec3 pos, bool screenFixed = …) [+5]  // Draw text
@@ -1400,12 +1395,12 @@ MOUSE_BUTTON_LEFT  // Left mouse button
 MOUSE_BUTTON_MIDDLE  // Middle mouse button
 MOUSE_BUTTON_RIGHT  // Right mouse button
 Vec2 operator*(float s, const Vec2 & v) [+4]  // Component-wise multiplication
-PI ⚠️deprecated  // Pi (use TAU instead)
+PI ⚠️deprecated  // Ratio of circumference to diameter. ≈ 3.14159. Prefer HALF_TAU for half a turn.
 QUARTER_TAU  // Quarter circle (PI/2)
 float remainder(float x, float y) [std]  // IEEE floating-point remainder of x/y
 Right  // Direction shorthand for Direction::Right
 float tanh(float x) [std]  // Hyperbolic tangent
-TAU  // Full circle (2*PI)
+TAU  // Ratio of circumference to radius; the radian measure of one full turn. ≈ 6.28318.
 Top  // Direction shorthand for Direction::Top
 float trunc(float x) [std]  // Truncate toward zero (drop the fractional part)
 VERSION_MAJOR  // TrussC major version number
@@ -1801,11 +1796,6 @@ float Font::stringWidth(const std::string & text) const  // Pixel width of the t
 
 ```cpp
 void FullscreenShader::draw()  // Draw a fullscreen quad with this shader applied
-```
-
-### Glyph — A bitmap glyph to register via registerGlyph(): a codepoint plus packed 1-bit pixel rows. The data pointer must outlive every drawBitmapString call
-
-```cpp
 ```
 
 ### GraphicsBackend — Runtime sokol_gfx backend query. Values are meaningful only after sg_setup() has completed (i.e. after the first setup() call).
@@ -3105,7 +3095,6 @@ std::string Xml::toString(const std::string & indent = …) const  // Serialize 
 ```cpp
 enum AxisMode { None, Fill, Content }
 enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }
-enum bitmapfont::Width { Halfwidth, Fullwidth }
 enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled }
 enum ChipSoundNote::Wave { Sin, Square, Triangle, Sawtooth, Noise, PinkNoise, Silent }
 enum Codec { None, LZ4 }

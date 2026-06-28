@@ -214,13 +214,13 @@ function enumerate(objs) {
 }
 
 // --- 3. visibility + symbol-id grammar --------------------------------------
-const HIDDEN = ['internal', 'mcp', 'headless', 'hot_reload', 'console'];
+const HIDDEN = ['internal', 'mcp', 'headless', 'hot_reload', 'console', 'bitmapfont'];
 const nsSegs = (ns) => (ns || '').split('::').filter(x => x && x !== 'trussc' && x !== '(anon)');
 const isHidden = (s) => (s.ann && s.ann.internal) || nsSegs(s.ns).some(seg => HIDDEN.includes(seg));   // TC_INTERNAL or hidden namespace
 const nsPrefix = (s) => nsSegs(s.ns).join('::');
 const isTc = (f) => /core\/include\/(tc\/|tc[A-Z]\w*\.h|TrussC\.h)/.test(f || '');
 const noise = (s) => (s.flags || []).some(f => ['implicit', 'defaulted', 'deleted'].includes(f))
-    || (s.name || '').endsWith('_') || s.access === 'private'   // protected = part of the subclass/override contract (Mod hooks, Node::callAfter), kept
+    || (s.name || '').endsWith('_') || s.access === 'private'   // protected kept in the data (carries access; the web emitter hides it, prose preserved for later re-surfacing)
     || s.kind === 'ctor' || s.kind === 'dtor' || s.name === 'reflectMembers';
 function symbolId(s) {
     const pre = nsPrefix(s); const q = (n) => pre ? pre + '::' + n : n;
@@ -248,7 +248,7 @@ const pub = syms.filter(s => isTc(s.file) && !isHidden(s) && !noise(s) && symbol
 const structure = Object.create(null);                          // null proto: ids like "toString"/"constructor" are safe keys
 for (const s of pub) {
     const id = symbolId(s);
-    if (!structure[id]) structure[id] = { id, kind: s.kind, owner: s.owner || undefined, name: s.name, ns: nsPrefix(s) || undefined, signatures: [], static: false, members: s.members && s.members.length ? s.members : undefined, constructors: s.ctors && s.ctors.length ? s.ctors : undefined, platforms: s.ann && s.ann.platforms, lua_bind: s.ann && s.ann.lua_bind, deprecated: s.deprecated || undefined, tparams: s.tparams && s.tparams.length ? s.tparams : undefined };
+    if (!structure[id]) structure[id] = { id, kind: s.kind, owner: s.owner || undefined, name: s.name, ns: nsPrefix(s) || undefined, signatures: [], static: false, access: s.access && s.access !== 'public' ? s.access : undefined, members: s.members && s.members.length ? s.members : undefined, constructors: s.ctors && s.ctors.length ? s.ctors : undefined, platforms: s.ann && s.ann.platforms, lua_bind: s.ann && s.ann.lua_bind, deprecated: s.deprecated || undefined, tparams: s.tparams && s.tparams.length ? s.tparams : undefined };
     const e = structure[id];
     if ((s.flags || []).includes('static')) e.static = true;
     if (s.deprecated && !e.deprecated) e.deprecated = s.deprecated;

@@ -2382,21 +2382,6 @@ description.en = "Draw a fullscreen quad with this shader applied"
 description.ja = "この Shader を適用してフルスクリーンクアッドを描画"
 description.ko = "이 Shader를 적용하여 전체 화면 쿼드를 그리기"
 
-["Glyph::codepoint"]
-description.en = "Unicode codepoint this glyph renders"
-description.ja = "このグリフが描画する Unicode codepoint"
-description.ko = "이 글리프가 렌더링하는 Unicode codepoint"
-
-["Glyph::data"]
-description.en = "Packed bitmap rows (MSB first); must outlive all draw calls"
-description.ja = "パックされたビットマップ行（MSB 先頭）。すべての draw 呼び出しより長く生存する必要がある"
-description.ko = "패킹된 비트맵 행(MSB 우선). 모든 draw 호출보다 오래 살아 있어야 함"
-
-["Glyph::width"]
-description.en = "Glyph width: Halfwidth (8x13) or Fullwidth (16x13)"
-description.ja = "グリフ幅: Halfwidth（8x13）または Fullwidth（16x13）"
-description.ko = "글리프 너비: Halfwidth(8x13) 또는 Fullwidth(16x13)"
-
 ["GraphicsBackend"]
 keywords = ["renderer", "metal", "opengl", "d3d11", "webgpu", "gpu api"]
 description.en = "Runtime sokol_gfx backend query. Values are meaningful only after sg_setup() has completed (i.e. after the first setup() call)."
@@ -5499,12 +5484,6 @@ value_desc.Landscape.en = "Either landscape orientation"
 value_desc.All.en = "All four orientations"
 value_desc.AllButUpsideDown.en = "All orientations except portrait-upside-down"
 
-["PI"]
-keywords = ["pi", "3.14", "circle", "radians", "half tau"]
-description.en = "Pi (use TAU instead)"
-description.ja = "円周率（TAUを推奨）"
-description.ko = "Pi (대신 TAU 사용 권장)"
-
 ["Path"]
 category = "types_path"
 keywords = ["polyline", "shape", "contour", "outline", "vector path", "of path"]
@@ -7645,12 +7624,6 @@ keywords = ["tick", "step", "logic", "frame", "process", "advance"]
 description.en = "Rebuild the internal triangle mesh (call before draw after edits)"
 description.ja = "内部の三角形メッシュを再構築（編集後、draw の前に呼ぶ）"
 description.ko = "내부 삼각형 메시를 재구축(편집 후 draw 전에 호출)"
-
-["TAU"]
-keywords = ["tau", "two pi", "circle", "radians", "full turn", "6.28"]
-description.en = "Full circle (2*PI)"
-description.ja = "一周 (2*PI)"
-description.ko = "완전한 원 (2*PI)"
 
 ["TcpClient"]
 keywords = ["tcp", "socket client", "stream", "connection", "network client"]
@@ -10658,50 +10631,6 @@ description.en = "Bind a custom image to a cursor slot (RGBA pixels or Image)"
 description.ja = "カスタム画像をカーソルスロットにバインド（RGBAピクセルまたはImage）"
 description.ko = "커서 슬롯에 커스텀 이미지를 바인딩 (RGBA 픽셀 또는 Image)"
 related = ["Cursor", "Image", "unbindCursorImage", "setCursor"]
-
-["bitmapfont::Glyph"]
-keywords = ["glyph", "bitmap", "font", "character", "pixels", "codepoint"]
-description.en = "A bitmap glyph to register via registerGlyph(): a codepoint plus packed 1-bit pixel rows. The data pointer must outlive every drawBitmapString call"
-description.ja = "registerGlyph() で登録するビットマップグリフ。codepoint とパックされた 1-bit ピクセル行。data ポインタはすべての drawBitmapString 呼び出しより長く生存する必要がある"
-description.ko = "registerGlyph()로 등록하는 비트맵 글리프. codepoint와 패킹된 1-bit 픽셀 행. data 포인터는 모든 drawBitmapString 호출보다 오래 살아 있어야 함"
-related = ["bitmapfont::registerGlyph", "bitmapfont::registerGlyphs", "registerGlyph", "registerGlyphs", "Font", "PlacedGlyph"]
-
-["bitmapfont::compile16x13"]
-category = "graphics_shapes"
-keywords = ["ascii art", "glyph", "fullwidth", "pixel font", "16x13"]
-description.en = "Compile-time ASCII art -> packed fullwidth (16x13) glyph bytes. '#' = lit, '.' = empty."
-description.ja = "ASCII アートをコンパイル時に全角 (16x13) パックバイトに変換。'#' = 描画、'.' = 透明"
-description.ko = "ASCII 아트를 컴파일 타임에 전각 (16x13) 패킹된 바이트로 변환. '#' = 채움, '.' = 빈 칸"
-
-["bitmapfont::compile8x13"]
-category = "graphics_shapes"
-keywords = ["ascii art", "glyph", "halfwidth", "pixel font", "8x13"]
-description.en = "Compile-time ASCII art -> packed halfwidth (8x13) glyph bytes. '#' = lit, '.' = empty."
-description.ja = "ASCII アートをコンパイル時に半角 (8x13) パックバイトに変換。'#' = 描画、'.' = 透明"
-description.ko = "ASCII 아트를 컴파일 타임에 반각 (8x13) 패킹된 바이트로 변환. '#' = 채움, '.' = 빈 칸"
-
-["bitmapfont::registerGlyph"]
-category = "graphics_shapes"
-keywords = ["glyph", "character", "custom font", "unicode", "codepoint"]
-description.en = "Register a bitmap glyph for a Unicode codepoint (extends drawBitmapString)"
-description.ja = "Unicode コードポイントにビットマップグリフを登録 (drawBitmapString を拡張)"
-description.ko = "유니코드 코드포인트에 비트맵 글리프 등록 (drawBitmapString 확장)"
-related = ["Glyph"]
-
-["bitmapfont::registerGlyphs"]
-category = "graphics_shapes"
-keywords = ["glyphs", "characters", "batch", "custom font"]
-description.en = "Register a batch of bitmap glyphs at once"
-description.ja = "複数のビットマップグリフを一括登録"
-description.ko = "여러 비트맵 글리프를 한 번에 등록"
-related = ["Glyph"]
-
-["bitmapfont::updateGlyph"]
-category = "graphics_shapes"
-keywords = ["glyph", "animate", "swap", "pixel data"]
-description.en = "Swap an already-registered glyph's pixel data (atlas cell unchanged). Useful for per-frame animation."
-description.ja = "登録済みグリフのピクセルデータだけ差し替え（アトラス位置は維持）。フレームごとのアニメーションに便利"
-description.ko = "이미 등록된 글리프의 픽셀 데이터만 교체 (아틀라스 위치 유지). 프레임 애니메이션에 유용"
 
 ["bringWindowToFront"]
 category = "window_system"
@@ -14143,3 +14072,71 @@ description.ko = "0 방향으로 절삭 (소수부 버림)"
 description.en = "IEEE floating-point remainder of x/y"
 description.ja = "x/y の IEEE 浮動小数点剰余"
 description.ko = "x/y의 IEEE 부동소수점 나머지"
+
+["TAU"]
+keywords = ["tau", "two pi", "circle", "radians", "full turn", "6.28"]
+description.en = "Ratio of circumference to radius; the radian measure of one full turn. ≈ 6.28318."
+description.ja = "円周と半径の比。一周（full turn）に対応する radian。約 6.28318。"
+description.ko = "원주와 반지름의 비. 한 바퀴(full turn)에 해당하는 라디안. 약 6.28318."
+details.en = """
+`TAU` (τ) equals `2π`, but reading it as merely "π doubled" sells it short. τ is the circle constant that falls out naturally when you define a circle from its radius — the constant a circle should have had all along.
+
+A circle is defined by distance from its center: the radius `r`. Write the circumference from the radius and you get `circumference = τ · r` — the stray `2` of `2π` disappears, leaving just `τr`. That is the circle in its plain form.
+
+τ shines for angles. It denotes exactly one full turn, so a fraction of a turn is the angle directly: one turn = `TAU` (360°), half = `TAU/2` (180°), a quarter = `TAU/4` (90°). `TAU/4` reads as "a quarter turn" with no arithmetic — the code matches your intuition.
+
+Even the equation often called the most beautiful is more symmetric in τ: `e^(iτ) = 1` ("go around once, return to where you started") speaks to the essence of rotation more directly than Euler's `e^(iπ) = -1`, which flips at a half turn.
+
+Defining the circle by its diameter (PI) was a great achievement but an unfortunate design choice. TrussC inherits that lesson and builds every rotation and angle API around `TAU`."""
+details.ja = """
+`TAU` (τ) は `2π` に等しい。ただ「π を 2 倍したもの」と捉えるのはもったいない。τ は、円を半径から素直に定義しなおしたときに現れる、本来あるべき円の定数だ。
+
+円の本質は中心からの距離、つまり半径 `r` にある。半径を基準に円周を書くと `円周 = τ · r`。`2π` の `2` が消えて、ただ `τr`。これが円の素の姿だ。
+
+τ の真価は角度で発揮される。τ は「ちょうど一周」を表すので、周回の割合がそのまま角度になる。一周 = `TAU`（360°）、半周 = `TAU/2`（180°）、1/4 周 = `TAU/4`（90°）。`TAU/4` を見れば計算せずとも「一周の 4 分の 1」と分かり、コードが直感と一致する。
+
+世界で一番美しいと言われる式も、τ で書く方が対称性が高い：`e^(iτ) = 1`（一周まわると元に戻る）。Euler の等式 `e^(iπ) = -1`（半周で裏返る）よりも回転の本質を直接語っている。
+
+円を直径で定義した PI は人類の偉大な発明だったが、設計判断としては惜しかった。TrussC はその反省を引き継いで、回転と角度の API すべてを `TAU` 基準で組んでいる。"""
+details.ko = """
+`TAU` (τ)는 `2π`와 같지만, 단순히 "π의 두 배"로만 보는 것은 아깝다. τ는 원을 반지름에서 자연스럽게 다시 정의할 때 나타나는, 원이 본래 가졌어야 할 상수다.
+
+원의 본질은 중심으로부터의 거리, 즉 반지름 `r`에 있다. 반지름을 기준으로 원주를 쓰면 `원주 = τ · r` — `2π`의 `2`가 사라지고 그냥 `τr`만 남는다. 이것이 원의 본래 모습이다.
+
+τ의 진가는 각도에서 드러난다. τ는 정확히 한 바퀴를 나타내므로 회전의 비율이 곧 각도가 된다. 한 바퀴 = `TAU`(360°), 반 바퀴 = `TAU/2`(180°), 1/4 바퀴 = `TAU/4`(90°). `TAU/4`를 보면 계산 없이도 "한 바퀴의 1/4"임을 알 수 있어 코드가 직관과 일치한다.
+
+가장 아름답다고 일컬어지는 식도 τ로 쓰면 더 대칭적이다: `e^(iτ) = 1`("한 바퀴 돌면 제자리로"). 반 바퀴에서 뒤집히는 오일러의 `e^(iπ) = -1`보다 회전의 본질을 더 직접적으로 말해준다.
+
+원을 지름으로 정의한 PI는 위대한 발명이었지만 설계 판단으로는 아쉬웠다. TrussC는 그 교훈을 이어받아 회전과 각도 API 전부를 `TAU` 기준으로 구성한다."""
+related = ["PI", "HALF_TAU", "QUARTER_TAU", "rotate", "sin", "cos"]
+
+["PI"]
+keywords = ["pi", "3.14", "circle", "radians", "half tau"]
+description.en = "Ratio of circumference to diameter. ≈ 3.14159. Prefer HALF_TAU for half a turn."
+description.ja = "円周と直径の比。約 3.14159。半周には HALF_TAU を推奨。"
+description.ko = "원주와 지름의 비. 약 3.14159. 반 바퀴에는 HALF_TAU 권장."
+details.en = """
+π is one of the greatest constants humankind has ever found. Tracing back to Archimedes in the 3rd century BC, geometry, analysis, and physics have been built on this single letter for nearly two thousand years — an unquestionable achievement.
+
+But one early design choice was unfortunate: defining the circle by its *diameter*. A circle is the set of points equidistant from a center; that equal distance — the radius — is what defines a circle, and the diameter is merely a by-product. Yet π was defined as `circumference / diameter`.
+
+That one mismatch scatters a stray factor of `2π` across the formulas that follow. Circumference is `2πr`; one turn is `2π` radians, a half turn `π`, a quarter `π/2`. Fourier transforms, the normal distribution, rotation — `2π` shows up almost everywhere. You write a quarter turn as `π/2` and pause each time to ask "where did this 2 come from?" — a small smudge on something that should be clean.
+
+The good news: it is not too late. So TrussC, with full respect for π, moves past it — the rotation and angle APIs treat TAU (= 2π) as the first-class constant. π was not wrong; choosing the diameter was the unfortunate part."""
+details.ja = """
+π は人類が手にした最も偉大な定数のひとつだ。紀元前 3 世紀のアルキメデスに端を発し、約 2000 年にわたって幾何学・解析学・物理学がこの一文字の上に積み上げられてきた。疑いようのない偉業だ。
+
+ただ一つだけ、最初の設計判断が惜しかった——円を「直径」基準で定義してしまったこと。円の本質は中心から等距離にある点の集合であり、その「等距離」＝半径こそが円を定義する量で、直径はその副産物にすぎない。にもかかわらず π は `円周 / 直径` として定義された。
+
+このボタンの掛け違いが、後の数式に `2π` という余分な係数をばらまく。円周は `2πr`、1 回転は `2π` radian、半回転で `π`、1/4 回転で `π/2`。Fourier 変換にも正規分布にも回転にも、ほぼ必ず `2π` が顔を出す。「1/4 回転」を `π/2` と書き、「この 2 はどこから？」と毎回一瞬考える——美しさに一点の曇りを与えている。
+
+幸い、まだ間に合う。だから TrussC は π への敬意を払ったうえでその先へ進み、回転と角度の API は TAU (= 2π) を第一級の定数として扱う。π が間違っていたのではない。直径を選んだことが惜しかっただけだ。"""
+details.ko = """
+π는 인류가 손에 넣은 가장 위대한 상수 중 하나다. 기원전 3세기 아르키메데스에서 비롯되어, 거의 2000년에 걸쳐 기하학·해석학·물리학이 이 한 글자 위에 쌓여 왔다. 의심할 여지 없는 위업이다.
+
+다만 한 가지, 최초의 설계 판단이 아쉬웠다 — 원을 "지름" 기준으로 정의한 것. 원의 본질은 중심에서 같은 거리에 있는 점들의 집합이며, 그 "같은 거리"=반지름이야말로 원을 정의하는 양이고 지름은 그 부산물에 불과하다. 그럼에도 π는 `원주 / 지름`으로 정의되었다.
+
+이 한 번의 엇갈림이 이후의 수식에 `2π`라는 군더더기 계수를 흩뿌린다. 원주는 `2πr`, 한 바퀴는 `2π` 라디안, 반 바퀴는 `π`, 1/4 바퀴는 `π/2`. 푸리에 변환에도 정규분포에도 회전에도 거의 반드시 `2π`가 등장한다. 1/4 회전을 `π/2`로 쓰고 "이 2는 어디서?"라고 매번 잠시 멈추게 된다 — 깔끔해야 할 것에 한 점의 흐림을 더한다.
+
+다행히 아직 늦지 않았다. 그래서 TrussC는 π에 충분한 경의를 표하면서 그다음으로 나아간다 — 회전과 각도 API는 TAU (= 2π)를 일급 상수로 다룬다. π가 틀린 것이 아니다. 지름을 고른 것이 아쉬웠을 뿐이다."""
+related = ["TAU", "HALF_TAU", "rotate"]
