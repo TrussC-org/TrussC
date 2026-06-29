@@ -1755,6 +1755,13 @@ description.ja = "PBR ambient用IBL environment map（irradiance + prefilter + B
 description.ko = "PBR 앰비언트용 IBL 환경맵 (이래디언스 + 프리필터 + BRDF LUT)"
 of_category = "light-types"
 related = ["setEnvironment", "getEnvironment", "Light", "Material", "Fbo"]
+details = '''
+On iOS/iPadOS Safari (WebKit, wasm), IBL baking is skipped automatically: cube-face
+render targets freeze the canvas there. loadFromHDR()/loadProcedural() return false and
+the scene falls back to flat ambient (~3% of albedo on non-metals) + direct lights.
+Direct lighting, shadows, and all PBR material parameters still work on every platform.
+Don't rely on IBL reflections when targeting iOS web.
+'''
 
 ["Environment::getBrdfLut"]
 description.en = "Get BRDF integration lookup texture"
