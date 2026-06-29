@@ -995,6 +995,13 @@ bool ProjectGenerator::runCrossCompilePresets(const string& path) {
     if (settings_.generateIosBuild) presets.push_back("ios");
 #endif
     if (settings_.generateAndroidBuild) presets.push_back("android");
+    // Web is a cross-compile target too: configure its build dir here so that
+    // `trusscli build --web` (and IDE tooling) has a ready build-web. Without
+    // this, update only configures the native preset and `cmake --build
+    // --preset web` fails with "build-web is not a directory". The web preset
+    // carries the Emscripten toolchainFile, so a plain `cmake --preset web`
+    // configures correctly without needing `emcmake`.
+    if (settings_.generateWebBuild) presets.push_back("web");
 
     // Map preset name to build directory
     auto getBuildDir = [](const string& preset) -> string {
