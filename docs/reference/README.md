@@ -151,9 +151,17 @@ generator reads back from the AST:
 
 | macro | effect |
 |-------|--------|
-| `TC_INTERNAL` | hide an otherwise-public symbol from the reference |
 | `TC_PLATFORMS("macos,windows,…")` | record the platforms a symbol exists on (`platforms` field) |
 | `TC_LUA_BIND("float,Vec2,…")` | template instantiations to bind for Lua (`lua_bind` field) |
+
+**Hiding a symbol** (public C++ but not user API — internal plumbing) is done
+**doc-side**, not with a source macro: add `hide = true` to its `api-reference.toml`
+entry. The symbol stays in the AST and `reference-data.json` (so CI validation and
+the Lua binding generator still see it) but is excluded from every rendered surface
+(web reference, FOR_AI index, oF guide). Prefer `internal::` namespace (free
+functions) or `private`/`protected` (members) where they apply — `hide` is for the
+residual "must be public but isn't API" cases (e.g. `App::handleDraw`, called by the
+runtime).
 
 They expand to `[[clang::annotate("tc:…")]]` under Clang and to nothing
 otherwise (zero ABI/runtime effect). **Implementation note:** Clang's JSON AST

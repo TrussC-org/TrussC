@@ -3,51 +3,92 @@
     {
       "name": "TC_RUN_APP",
       "signature": "TC_RUN_APP(AppClass, settings)",
-      "description": "Application entry-point macro. Expands to main() and runs AppClass. Required to enable hot reload.",
-      "description_ja": "アプリのエントリポイントマクロ。main() を展開し AppClass を実行する。ホットリロードを使うには必須。",
-      "description_ko": ""
+      "description": "Application entry point. Generates main(), runs your App subclass, and enables hot reload.",
+      "description_ja": "アプリのエントリポイント。main() を生成し App サブクラスを実行、ホットリロードも有効化する。",
+      "description_ko": "앱 진입점. main()을 생성하고 App 서브클래스를 실행하며 핫 리로드도 활성화한다.",
+      "details": "The single line that boots a TrussC app. `TC_RUN_APP(MyApp, settings)` generates a `main()` that constructs your `App` subclass, applies the given `WindowSettings`, and runs the loop. It is also the hook that enables hot reload (with `TC_HOT_RELOAD`): the generated entry point knows how to reload your app's translation unit. Put it once, in your app's main `.cpp`, after the `App` subclass is defined.",
+      "details_ja": "TrussC アプリを起動する 1 行。`TC_RUN_APP(MyApp, settings)` は `main()` を生成し、`App` サブクラスを構築して指定の `WindowSettings` を適用、ループを回す。`TC_HOT_RELOAD` と組むとホットリロードの起点にもなる（生成された main がアプリの翻訳単位を再読込できる）。アプリの主 `.cpp` に、`App` サブクラス定義の後で 1 回だけ置く。",
+      "details_ko": "TrussC 앱을 부팅하는 한 줄. `TC_RUN_APP(MyApp, settings)`는 `main()`을 생성해 `App` 서브클래스를 만들고 주어진 `WindowSettings`를 적용한 뒤 루프를 돌린다. `TC_HOT_RELOAD`와 함께 쓰면 핫 리로드의 시작점이 된다. 앱의 메인 `.cpp`에, `App` 서브클래스 정의 뒤에 한 번만 둔다."
     },
     {
       "name": "TC_HOT_RELOAD",
       "signature": "TC_HOT_RELOAD(AppClass)",
-      "description": "Opt the app into hot reload. Place in the app's .cpp; triggers a CMake reconfigure on next build.",
-      "description_ja": "アプリをホットリロード対応にする。アプリの .cpp に置く。次回ビルドで CMake が再構成される。",
-      "description_ko": ""
+      "description": "Opt the app into hot reload — edit and recompile the running app without restarting.",
+      "description_ja": "アプリをホットリロードに対応させる。再起動せず編集・再コンパイルを反映。",
+      "description_ko": "앱을 핫 리로드에 적용. 재시작 없이 편집·재컴파일을 반영.",
+      "details": "Opts the app into hot reload: edit your app's `.cpp` while it runs and the change is recompiled and swapped in without a restart. Place it in the app's `.cpp`; it triggers a CMake reconfigure on the next build so the reload harness is wired up. Requires `TC_RUN_APP`. State stored in your `App` subclass survives a reload; global/static state does not.",
+      "details_ja": "アプリをホットリロードに対応させる：実行中に `.cpp` を編集すると、再起動せず再コンパイルして差し替わる。アプリの `.cpp` に置くと、次のビルドで CMake 再構成が走りリロード機構が組み込まれる。`TC_RUN_APP` が前提。`App` サブクラスが持つ状態はリロードを跨いで残るが、グローバル/static 状態は残らない。",
+      "details_ko": "앱을 핫 리로드에 적용한다: 실행 중에 `.cpp`를 편집하면 재시작 없이 재컴파일되어 교체된다. 앱의 `.cpp`에 두면 다음 빌드에서 CMake 재구성이 일어나 리로드 장치가 연결된다. `TC_RUN_APP`가 필요하다. `App` 서브클래스가 가진 상태는 리로드를 넘어 유지되지만 전역/정적 상태는 유지되지 않는다."
     },
     {
       "name": "TC_REFLECT",
       "signature": "TC_REFLECT(Self, ...Bases) { TC_VALUE(...) ... }",
-      "description": "Declare reflected members inside a class (exposed to the inspector, serialization, and MCP). Bases are the direct base classes.",
-      "description_ja": "クラス内で反映メンバーを宣言する（インスペクタ・シリアライズ・MCP に公開）。Bases は直接の基底クラス。",
-      "description_ko": ""
+      "description": "Declare a class's reflected members — exposed to the inspector, serialization, and MCP — with no hand-written plumbing.",
+      "description_ja": "クラスの反映メンバを宣言。インスペクタ・シリアライズ・MCP に手書きなしで公開。",
+      "description_ko": "클래스의 리플렉트 멤버를 선언. 인스펙터·직렬화·MCP에 수작업 없이 노출.",
+      "details": "Declares which members of a class are 'reflected' — visible to the node inspector, JSON serialization, and the MCP tooling — without hand-writing any of that. Inside the body you list members with `TC_VALUE(...)`. `Self` is the class itself; the variadic `Bases` are its DIRECT reflected base classes, so the reflector walks the inheritance chain. Use `TC_REFLECT_ROOT` when there is no reflected base, `TC_REFLECT_FREE` for a type you can't edit.\n\nExample:\n\n    TC_REFLECT(MyNode, Node) {\n        TC_VALUE(speed);\n        TC_VALUE(color);\n    }",
+      "details_ja": "クラスのどのメンバを「反映」するか（ノードインスペクタ・JSON シリアライズ・MCP から見えるように）を、配管を手書きせずに宣言する。本体で `TC_VALUE(...)` を並べる。`Self` はそのクラス自身、可変長の `Bases` は **直接の反映済み基底クラス**で、これにより継承チェーン全体を辿る。反映済み基底が無ければ `TC_REFLECT_ROOT`、編集できない型には `TC_REFLECT_FREE` を使う。\n\n例:\n\n    TC_REFLECT(MyNode, Node) {\n        TC_VALUE(speed);\n        TC_VALUE(color);\n    }",
+      "details_ko": "클래스의 어떤 멤버를 '리플렉트'할지(노드 인스펙터·JSON 직렬화·MCP에서 보이도록)를 배관 코드 없이 선언한다. 본문에서 `TC_VALUE(...)`로 멤버를 나열한다. `Self`는 클래스 자신, 가변 인자 `Bases`는 **직접적인 리플렉트 기반 클래스**로, 상속 사슬 전체를 따라간다. 리플렉트 기반이 없으면 `TC_REFLECT_ROOT`, 편집할 수 없는 타입에는 `TC_REFLECT_FREE`를 쓴다.\n\n예:\n\n    TC_REFLECT(MyNode, Node) {\n        TC_VALUE(speed);\n        TC_VALUE(color);\n    }"
     },
     {
       "name": "TC_REFLECT_ROOT",
       "signature": "TC_REFLECT_ROOT(Self) { TC_VALUE(...) ... }",
-      "description": "Like TC_REFLECT but for a root type with no reflected base classes.",
-      "description_ja": "TC_REFLECT と同じだが、反映する基底クラスを持たないルート型向け。",
-      "description_ko": ""
+      "description": "Like TC_REFLECT, for a type at the root of a hierarchy (no reflected base classes).",
+      "description_ja": "TC_REFLECT の、反映済み基底を持たないルート型向け版。",
+      "description_ko": "TC_REFLECT의, 리플렉트 기반이 없는 루트 타입용 버전.",
+      "details": "Same as `TC_REFLECT` but for a type at the root of a reflected hierarchy — there are no reflected base classes to chain into. Use it on a base class that itself derives from nothing reflected; derived classes then use `TC_REFLECT(Derived, ThatBase)` to continue the chain.",
+      "details_ja": "`TC_REFLECT` と同じだが、反映階層のルートにある型向け（辿るべき反映済み基底が無い）。何も反映していない基底クラスに使い、派生側は `TC_REFLECT(Derived, ThatBase)` でチェーンを継ぐ。",
+      "details_ko": "`TC_REFLECT`와 같지만 리플렉트 계층의 루트에 있는 타입용(이어갈 리플렉트 기반이 없음). 아무것도 리플렉트하지 않은 기반 클래스에 쓰고, 파생 쪽은 `TC_REFLECT(Derived, ThatBase)`로 사슬을 잇는다."
     },
     {
       "name": "TC_REFLECT_FREE",
       "signature": "TC_REFLECT_FREE(Type) { TC_VALUE(...) ... }",
-      "description": "Reflect a non-member / external type at namespace scope (for types you can't add TC_REFLECT inside).",
-      "description_ja": "メンバー外・外部の型を名前空間スコープで反映する（TC_REFLECT をクラス内に書けない型向け）。",
-      "description_ko": ""
+      "description": "Reflect an external type you can't edit, declared at namespace scope.",
+      "description_ja": "編集できない外部型を、名前空間スコープで反映する。",
+      "description_ko": "편집할 수 없는 외부 타입을 네임스페이스 스코프에서 리플렉트.",
+      "details": "Reflects a type you can't put `TC_REFLECT` inside — a third-party or built-in type — by declaring the reflection at namespace scope instead of in the class body. The `TC_VALUE(...)` body is the same; it just lives outside the type. Handy for math/vendor structs you want in the inspector or serialized.",
+      "details_ja": "`TC_REFLECT` を中に入れられない型（サードパーティや組み込み型）を、クラス本体ではなく名前空間スコープで反映する。`TC_VALUE(...)` の書き方は同じで、型の外に置くだけ。インスペクタやシリアライズに載せたい数学/ベンダ製の struct に便利。",
+      "details_ko": "`TC_REFLECT`를 안에 넣을 수 없는 타입(서드파티나 내장 타입)을 클래스 본문이 아닌 네임스페이스 스코프에서 리플렉트한다. `TC_VALUE(...)` 본문은 동일하며 타입 밖에 둘 뿐이다. 인스펙터나 직렬화에 올리고 싶은 수학/벤더 struct에 유용하다."
     },
     {
       "name": "TC_VALUE",
       "signature": "TC_VALUE(member) | TC_VALUE(name, getter) | TC_VALUE(name, getter, setter)",
-      "description": "Declare one reflected member inside a TC_REFLECT body. 1 arg = in-place, 2 = read-only, 3 = getter/setter.",
-      "description_ja": "TC_REFLECT 本体内で反映メンバーを1つ宣言する。引数1=直接、2=読み取り専用、3=getter/setter。",
-      "description_ko": ""
+      "description": "Declare one reflected member; arity picks access (1=in-place, 2=read-only, 3=getter/setter).",
+      "description_ja": "反映メンバを1つ宣言。引数数でアクセスが決まる（1=直接, 2=読取専用, 3=getter/setter）。",
+      "description_ko": "리플렉트 멤버 하나를 선언. 인자 수로 접근이 정해진다(1=직접, 2=읽기 전용, 3=getter/setter).",
+      "details": "Declares one reflected member inside a `TC_REFLECT` body. The arity picks the access mode:\n\n- **1 arg** `TC_VALUE(x)` — reflect the field `x` in place (read/write).\n- **2 args** `TC_VALUE(\"name\", getter)` — read-only (a computed or derived value).\n- **3 args** `TC_VALUE(\"name\", getter, setter)` — a property exposed through a getter/setter pair.\n\nThe reflected name becomes the inspector label and the JSON key. Enums reflected this way render as a labelled dropdown (see `TC_ENUM_LABELS`).",
+      "details_ja": "`TC_REFLECT` 本体の中で反映メンバを 1 つ宣言する。引数の数でアクセスモードが決まる：\n\n- **1 引数** `TC_VALUE(x)` — フィールド `x` を直接反映（読み書き）。\n- **2 引数** `TC_VALUE(\"name\", getter)` — 読み取り専用（計算/派生値）。\n- **3 引数** `TC_VALUE(\"name\", getter, setter)` — getter/setter ペアで公開するプロパティ。\n\n反映名はインスペクタのラベルと JSON キーになる。こうして反映した enum はラベル付きドロップダウンで表示される（`TC_ENUM_LABELS` 参照）。",
+      "details_ko": "`TC_REFLECT` 본문 안에서 리플렉트 멤버 하나를 선언한다. 인자 수로 접근 모드가 정해진다:\n\n- **1 인자** `TC_VALUE(x)` — 필드 `x`를 직접 리플렉트(읽기/쓰기).\n- **2 인자** `TC_VALUE(\"name\", getter)` — 읽기 전용(계산/파생 값).\n- **3 인자** `TC_VALUE(\"name\", getter, setter)` — getter/setter 쌍으로 노출하는 속성.\n\n리플렉트 이름은 인스펙터 라벨과 JSON 키가 된다. 이렇게 리플렉트한 enum은 라벨 드롭다운으로 표시된다(`TC_ENUM_LABELS` 참고)."
     },
     {
       "name": "TC_ENUM_LABELS",
       "signature": "TC_ENUM_LABELS(EnumType, \"Label0\", \"Label1\", ...)",
-      "description": "Declare string labels for an enum (labels[(int)value] == name), used by the inspector and serialization.",
-      "description_ja": "enum の文字列ラベルを宣言する（labels[(int)value] == name）。インスペクタやシリアライズで使われる。",
-      "description_ko": ""
+      "description": "Give an enum string labels (labels[(int)value]==name), used by the inspector and serialization.",
+      "description_ja": "enum に文字列ラベルを付与（labels[(int)value]==name）。インスペクタ・シリアライズで使用。",
+      "description_ko": "enum에 문자열 라벨을 부여(labels[(int)value]==name). 인스펙터·직렬화에서 사용.",
+      "details": "Gives an enum human-readable string labels, positionally: `labels[(int)value]` is the name. The inspector renders a dropdown of these, and serialization writes the label instead of a raw integer. List the labels in enum-declaration order. Plain enums also auto-stringify via compile-time reflection, so use `TC_ENUM_LABELS` only when you want explicit or custom labels.",
+      "details_ja": "enum に人間可読の文字列ラベルを位置順で与える：`labels[(int)value]` が名前。インスペクタはこれをドロップダウンで描画し、シリアライズは生の整数でなくラベルを書き出す。ラベルは enum の宣言順に並べる。素の enum はコンパイル時リフレクションで自動的に文字列化されるので、`TC_ENUM_LABELS` は明示的/カスタムなラベルが欲しい時だけ使う。",
+      "details_ko": "enum에 사람이 읽을 수 있는 문자열 라벨을 위치 순으로 부여한다: `labels[(int)value]`가 이름이다. 인스펙터는 이를 드롭다운으로 그리고, 직렬화는 정수 대신 라벨을 쓴다. 라벨은 enum 선언 순서대로 나열한다. 평범한 enum은 컴파일 타임 리플렉션으로 자동 문자열화되므로, `TC_ENUM_LABELS`는 명시적/커스텀 라벨이 필요할 때만 쓴다."
+    },
+    {
+      "name": "TC_PLATFORMS",
+      "signature": "TC_PLATFORMS(\"macos,windows,linux,web,android,ios\") <decl>",
+      "description": "Annotate a symbol as available only on the listed platforms (reference metadata).",
+      "description_ja": "シンボルを「指定プラットフォームのみで利用可」と注釈する（リファレンス用 metadata）。",
+      "description_ko": "심볼을 '지정한 플랫폼에서만 사용 가능'으로 주석한다(레퍼런스 메타데이터).",
+      "details": "A source annotation read by the reference generator (not runtime code). It records which platforms a function/type exists on, so the reference can badge it (e.g. \"iOS only\"). Comma-separated from `macos, windows, linux, web, android, ios`; an empty list means \"supported nowhere\" (a stub that always fails). It expands to `[[clang::annotate(...)]]` under Clang and to nothing on other compilers — zero runtime, ABI, or codegen cost. Mainly for core/addon authors annotating platform-gated API; place it immediately before the declaration.",
+      "details_ja": "リファレンス生成器が読む **ソース注釈**（実行コードではない）。関数/型がどのプラットフォームに存在するかを記録し、リファレンスがバッジ表示できるようにする（例「iOS のみ」）。`macos, windows, linux, web, android, ios` からカンマ区切り。空リストは「どこでも非対応」（常に失敗する stub）の意味。Clang では `[[clang::annotate(...)]]` に、他コンパイラでは何も無しに展開＝実行時/ABI/コード生成コストゼロ。主にプラットフォーム限定 API を注釈するコア/アドオン作者向け。宣言の直前に置く。",
+      "details_ko": "레퍼런스 생성기가 읽는 **소스 주석**(런타임 코드 아님). 함수/타입이 어떤 플랫폼에 존재하는지 기록해 레퍼런스가 배지를 달 수 있게 한다(예 \"iOS 전용\"). `macos, windows, linux, web, android, ios`에서 쉼표로 구분. 빈 목록은 \"어디서도 미지원\"(항상 실패하는 stub)을 뜻한다. Clang에서는 `[[clang::annotate(...)]]`, 다른 컴파일러에서는 아무것도 아닌 것으로 확장 — 런타임/ABI/코드 생성 비용 0. 주로 플랫폼 한정 API를 주석하는 코어/애드온 작성자용. 선언 바로 앞에 둔다."
+    },
+    {
+      "name": "TC_LUA_BIND",
+      "signature": "TC_LUA_BIND(\"float,Vec2,Vec3,Color\") <template decl>",
+      "description": "Declare which template instantiations the Lua binding generator should bind (reference metadata).",
+      "description_ja": "Lua バインド生成器が実体化・バインドすべきテンプレート型を宣言する（リファレンス用 metadata）。",
+      "description_ko": "Lua 바인딩 생성기가 인스턴스화·바인딩할 템플릿 타입을 선언한다(레퍼런스 메타데이터).",
+      "details": "A source annotation that tells the Lua binding generator which concrete instantiations of a template to bind. For example `TC_LUA_BIND(\"float,Vec2,Vec3\")` on `Tween<T>` makes the generator emit `Tween_float`, `Tween_Vec2`, `Tween_Vec3`. Without it a template can't be bound — the generator has no way to know which `T` to use. Give a comma-separated type list and place it on the class (after the `class` keyword). Like `TC_PLATFORMS`, it expands to `[[clang::annotate(...)]]` under Clang and nothing otherwise — pure metadata, no runtime effect.",
+      "details_ja": "Lua バインド生成器に、テンプレートのどの具体的な実体をバインドするかを伝える **ソース注釈**。例えば `Tween<T>` に `TC_LUA_BIND(\"float,Vec2,Vec3\")` を付けると、生成器は `Tween_float`・`Tween_Vec2`・`Tween_Vec3` を出す。これが無いとテンプレートはバインドできない（どの `T` を使うか分からない）。カンマ区切りの型リストを与え、クラスに（`class` キーワードの後に）置く。`TC_PLATFORMS` と同様、Clang では `[[clang::annotate(...)]]`、他では何も無しに展開＝純粋な metadata で実行時影響なし。",
+      "details_ko": "Lua 바인딩 생성기에 템플릿의 어떤 구체적 인스턴스를 바인딩할지 알려주는 **소스 주석**. 예를 들어 `Tween<T>`에 `TC_LUA_BIND(\"float,Vec2,Vec3\")`를 붙이면 생성기가 `Tween_float`·`Tween_Vec2`·`Tween_Vec3`를 만든다. 없으면 템플릿을 바인딩할 수 없다(어떤 `T`를 쓸지 알 수 없으므로). 쉼표로 구분한 타입 목록을 주고 클래스에(`class` 키워드 뒤에) 둔다. `TC_PLATFORMS`처럼 Clang에서는 `[[clang::annotate(...)]]`, 그 외에는 아무것도 아닌 것으로 확장 — 순수 메타데이터로 런타임 영향 없음."
     }
   ],
   "keywords": [

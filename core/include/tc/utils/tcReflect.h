@@ -75,6 +75,7 @@
 #include <array>
 #include <utility>
 #include <type_traits>
+#include "../utils/tcAnnotations.h"
 
 // Value window scanned by the compile-time enum reflection below. Only valid
 // enumerators in this range are recovered (out-of-range probes are constexpr

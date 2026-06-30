@@ -243,5 +243,5 @@ jobs:
       - name: Install doc tooling deps
         run: cd docs && npm ci
 
-      - name: reference check (dup / orphan gate; undocumented soft)
-        run: node docs/reference/check.js
+      - name: reference check (dup / orphan / 100% documented gate)
+        run: node docs/reference/check.js --strict

@@ -85,6 +85,17 @@ let refHits = 0, refMiss = 0;
 // Combined (legacy) en/ja/ko description trio: reference-data wins when it
 // documents the symbol; otherwise fall back to the yaml-authored prose.
 const _t = (s) => String(s == null ? '' : s).trim();   // reference-data prose carries trailing \n
+// details may be a {en,ja,ko} object (long-form prose) or a legacy en-only string
+const detailsOf = (det) => {
+    if (!det) return {};
+    if (typeof det === 'object') {
+        const o = {}; if (_t(det.en)) o.details = _t(det.en);
+        if (_t(det.ja)) o.details_ja = _t(det.ja);
+        if (_t(det.ko)) o.details_ko = _t(det.ko);
+        return o;
+    }
+    return { details: _t(det) };
+};
 // Prose precedence: reference-data.json (the api-reference.toml prose, keyed by
 // symbol-id) is now the source of truth; the legacy yaml is only a transitional
 // fallback for anything not yet in reference-data. `allowRef` lets a caller veto
@@ -110,8 +121,14 @@ function mergeDeprecated(refId, ym, trustRef = true) {
     const r = trustRef && REF[refId] && REF[refId].deprecated;
     const y = ym && ym.deprecated;
     if (!r && !y) return undefined;
-    const out = { reason: (r && r.reason) || (y && y.reason) || '' };
-    if (y && y.replacement) out.replacement = y.replacement;
+    const reason = (r && r.reason) || (y && y.reason) || '';
+    const out = { reason };
+    let replacement = y && y.replacement;
+    if (!replacement && reason) {                          // parse "Use/call/Renamed to `X()`" out of the reason -> clickable link
+        const m = reason.match(/(?:Use|call|Renamed to)\s+`?([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)`?\s*\(/);
+        if (m) replacement = m[1];
+    }
+    if (replacement) out.replacement = replacement;
     if (y && y.url) out.url = y.url;
     return out;
 }
@@ -173,7 +190,7 @@ function opCpp(op, owner) {
 // yaml sidecar (matched by symbol) until prose moves to the toml.
 function mapOperators(owner, ym) {
     const ops = [];
-    for (const e of Object.values(REF)) {
+    for (const e of Object.values(REF).filter(x => !x.hidden)) {
         const sig = e.signatures && e.signatures[0];
         if (!sig) continue;
         const isMember = e.kind === 'method' && e.owner === owner && /^operator/.test(e.name || '');
@@ -236,7 +253,7 @@ function buildExamplesMap() {
         return {};
     }
     const funcs = new Set(), types = new Set(), excluded = new Set();
-    for (const e of Object.values(REF)) {
+    for (const e of Object.values(REF).filter(x => !x.hidden)) {
         if (e.kind === 'func') {
             if (e.category === 'lifecycle' || e.category === 'events') excluded.add(e.name);
             else funcs.add(e.name);
@@ -281,7 +298,7 @@ function buildExamplesMap() {
 // language keywords and the color palette. The output JSON shape is unchanged.
 function build(examplesMap) {
     const version = getVersion();
-    const REF_VALS = Object.values(REF);
+    const REF_VALS = Object.values(REF).filter(e => !e.hidden);   // `hide = true` symbols: in the data for CI/luagen, never in the public reference
 
     // operator member/free fns are rendered via the yaml operator schema (under
     // their owning type/enum), never as plain function/method entries.
@@ -335,6 +352,7 @@ function build(examplesMap) {
                     desc_ja,
                     desc_ko,
                 };
+                if (sym.provider === 'std') entry.std = true;   // provided by std:: (available via `using namespace std`), no TrussC wrapper
                 // authored per-signature prose, matched positionally against yaml
                 const ysig = ym && ym.signatures && ym.signatures[i];
                 if (ysig && ysig.description) {
@@ -348,10 +366,12 @@ function build(examplesMap) {
                 // details: prefer the curated yaml sidecar (keeps ja/ko); fall back
                 // to reference-data's en-only string (trimmed).
                 const refDetails = REF[refId] && REF[refId].details;
-                if ((ym && ym.details) || refDetails) {
-                    entry.details = (ym && ym.details) || _t(refDetails);
-                    if (ym && ym.details_ja) entry.details_ja = ym.details_ja;
-                    if (ym && ym.details_ko) entry.details_ko = ym.details_ko;
+                if (ym && ym.details) {
+                    entry.details = ym.details;
+                    if (ym.details_ja) entry.details_ja = ym.details_ja;
+                    if (ym.details_ko) entry.details_ko = ym.details_ko;
+                } else if (refDetails) {
+                    Object.assign(entry, detailsOf(refDetails));
                 }
                 if (examplesMap[sym.name]) entry.examples = examplesMap[sym.name];
                 attachPlatforms(entry, sym, ym);
@@ -373,22 +393,30 @@ function build(examplesMap) {
     for (const sym of REF_VALS) {
         if (sym.kind !== 'var' || sym.owner) continue;
         if (sym.ns && ENUM_NS.has(sym.ns)) continue;         // defensive: skip enum members
-        const { desc } = descTrio(sym.id, null);
-        constants.push({
+        if (sym.ns === 'colors') continue;                   // named colors are emitted in the `colors` palette, not as flat constants
+        const { desc, desc_ja, desc_ko } = descTrio(sym.id, null);
+        const ref = REF[sym.id];
+        const c = {
             name: sym.id,
             value: EXTRAS.constants[sym.id] ?? EXTRAS.constants[sym.name],   // curated value (KEY_* etc. aren't in the AST)
-            desc,
+            desc, desc_ja, desc_ko,
             keywords: refKeywords(sym.id, null),
-        });
+        };
+        Object.assign(c, detailsOf(ref && ref.details));
+        if (ref && Array.isArray(ref.related) && ref.related.length) c.related = ref.related;
+        constants.push(c);
     }
 
     // --- types (kind=="type") with methods / fields owned by each ---
     // Index members by owner once.
     const methodsByOwner = new Map();   // owner -> [method symbol, …]
     const fieldsByOwner = new Map();    // owner -> [field symbol, …]
+    const takesInternal = (s) => (s.signatures || []).some(sig => /\binternal::/.test(sig.params || ''));
     for (const sym of REF_VALS) {
+        if (sym.access === 'protected') continue;            // protected members are kept in the data but hidden from the public web reference
         if (sym.kind === 'method' && sym.owner) {
             if (isOperator(sym)) continue;                   // operators render via yaml schema
+            if (takesInternal(sym)) continue;                // methods taking internal:: args (handle*, findHitNodeRecursive) aren't user-callable
             if (!methodsByOwner.has(sym.owner)) methodsByOwner.set(sym.owner, []);
             methodsByOwner.get(sym.owner).push(sym);
         } else if (sym.kind === 'field' && sym.owner) {
@@ -416,6 +444,7 @@ function build(examplesMap) {
     const types = [];
     for (const sym of REF_VALS) {
         if (sym.kind !== 'type') continue;
+        if (sym.owner) continue;                             // nested types (ChipSoundBundle::Entry, Font::PlacedGlyph) belong to their owner, not the flat type list
         const typeName = sym.name;
         const ym = YML_TYPE.get(typeName);
         const { desc, desc_ja, desc_ko } = descTrio(sym.id, ym);
@@ -432,12 +461,12 @@ function build(examplesMap) {
                 snippet: ym && ym.constructor && ym.constructor.snippet,
             };
         }
-        // properties (data members). Type comes from the yaml sidecar when known.
+        // properties (data members). Type comes from the C++ AST (reference-data).
         const fields = fieldsByOwner.get(typeName);
         if (fields && fields.length) {
             typeData.properties = fields.map(f => {
-                const yp = YML_PROP.get(f.id);
-                return { name: f.name, type: yp ? yp.type : '', desc: descTrio(f.id, yp).desc };
+                const d = descTrio(f.id, null);
+                return { name: f.name, type: f.type || '', desc: d.desc, desc_ja: d.desc_ja, desc_ko: d.desc_ko };
             });
         }
         // methods: reference-data members, split into instance vs static.
@@ -455,6 +484,7 @@ function build(examplesMap) {
     const enums = [];
     for (const sym of REF_VALS) {
         if (sym.kind !== 'enum') continue;
+        if (sym.owner) continue;                             // nested enums (ScrollBar::Direction, CurveStyle::Mode, …) collide with bare names in the flat list; they belong to their owning type
         const ym = YML_ENUM.get(sym.name);
         const { desc, desc_ja, desc_ko } = descTrio(sym.id, ym);
         // members carry {name, value} from the AST; per-value prose from reference-data's value_desc.
@@ -477,13 +507,17 @@ function build(examplesMap) {
     }
 
     // --- macros (yaml only — not C++ symbols) ---
-    const macros = (EXTRAS.macros || []).map(m => ({
-        name: m.name,
-        signature: m.signature || m.name,
-        desc: m.description,
-        desc_ja: m.description_ja || '',
-        desc_ko: m.description_ko || '',
-    }));
+    const macros = (EXTRAS.macros || []).map(m => {
+        const e = {
+            name: m.name,
+            signature: m.signature || m.name,
+            desc: m.description,
+            desc_ja: m.description_ja || '',
+            desc_ko: m.description_ko || '',
+        };
+        if (m.details) { e.details = m.details; e.details_ja = m.details_ja || ''; e.details_ko = m.details_ko || ''; }
+        return e;
+    });
 
     return {
         version,

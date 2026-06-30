@@ -418,5 +418,150 @@ module.exports = [
         ]
       }
     ]
+  },
+  {
+    "id": "atanh",
+    "kind": "func",
+    "name": "atanh",
+    "provider": "std",
+    "signatures": [
+      {
+        "ret": "float",
+        "params": "float x",
+        "const": false,
+        "args": [
+          {
+            "type": "float",
+            "name": "x",
+            "hasDefault": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "tanh",
+    "kind": "func",
+    "name": "tanh",
+    "provider": "std",
+    "signatures": [
+      {
+        "ret": "float",
+        "params": "float x",
+        "const": false,
+        "args": [
+          {
+            "type": "float",
+            "name": "x",
+            "hasDefault": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "exp2",
+    "kind": "func",
+    "name": "exp2",
+    "provider": "std",
+    "signatures": [
+      {
+        "ret": "float",
+        "params": "float x",
+        "const": false,
+        "args": [
+          {
+            "type": "float",
+            "name": "x",
+            "hasDefault": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "log2",
+    "kind": "func",
+    "name": "log2",
+    "provider": "std",
+    "signatures": [
+      {
+        "ret": "float",
+        "params": "float x",
+        "const": false,
+        "args": [
+          {
+            "type": "float",
+            "name": "x",
+            "hasDefault": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "log10",
+    "kind": "func",
+    "name": "log10",
+    "provider": "std",
+    "signatures": [
+      {
+        "ret": "float",
+        "params": "float x",
+        "const": false,
+        "args": [
+          {
+            "type": "float",
+            "name": "x",
+            "hasDefault": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "trunc",
+    "kind": "func",
+    "name": "trunc",
+    "provider": "std",
+    "signatures": [
+      {
+        "ret": "float",
+        "params": "float x",
+        "const": false,
+        "args": [
+          {
+            "type": "float",
+            "name": "x",
+            "hasDefault": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "remainder",
+    "kind": "func",
+    "name": "remainder",
+    "provider": "std",
+    "signatures": [
+      {
+        "ret": "float",
+        "params": "float x, float y",
+        "const": false,
+        "args": [
+          {
+            "type": "float",
+            "name": "x",
+            "hasDefault": false
+          },
+          {
+            "type": "float",
+            "name": "y",
+            "hasDefault": false
+          }
+        ]
+      }
+    ]
   }
 ];

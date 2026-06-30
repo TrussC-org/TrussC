@@ -42,6 +42,9 @@ for (const id in structure) {
     joined[id] = {
         id, kind: s.kind, owner: s.owner, name: s.name, ns: s.ns,
         signatures: s.signatures, static: s.static || undefined, tparams: s.tparams,
+        type: s.type,                                      // field/property C++ type (e.g. "float")
+        access: s.access,                                  // 'protected' (public omitted); web emitter hides protected
+        hidden: p.hide ? true : undefined,                 // `hide = true` in the toml: public C++ but not API — kept in the data (CI/luagen still see it), excluded from the docs
         members: s.members,                                // enum values (enums only)
         constructors: s.constructors,                      // public ctor signatures (types only)
         provider: s.provider,                              // 'std' for curated std:: symbols
@@ -86,8 +89,10 @@ for (const g of Object.keys(groups).sort()) {
 }
 fs.writeFileSync(OUT_MD, md);
 
-const documented = Object.values(joined).filter(e => e.documented).length;
+const visible = Object.values(joined).filter(e => !e.hidden);       // hidden = public-but-not-API, excluded from the doc surface
+const documented = visible.filter(e => e.documented).length;
+const hiddenCount = Object.keys(joined).length - visible.length;
 console.log('=== generate (join structure + prose) ===');
-console.log(`symbols joined : ${Object.keys(joined).length}`);
-console.log(`documented     : ${documented}  (${(documented / Object.keys(joined).length * 100).toFixed(0)}%)`);
+console.log(`symbols joined : ${Object.keys(joined).length} (${hiddenCount} hidden)`);
+console.log(`documented     : ${documented} / ${visible.length}  (${(documented / visible.length * 100).toFixed(0)}%)`);
 console.log(`wrote ${path.relative(process.cwd(), OUT_JSON)} + ${path.relative(process.cwd(), OUT_MD)}`);

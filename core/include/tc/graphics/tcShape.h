@@ -4,6 +4,7 @@
 // To access variables in internal namespace
 
 #include <vector>
+#include "../utils/tcAnnotations.h"
 
 namespace trussc {
 

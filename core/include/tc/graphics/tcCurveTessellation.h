@@ -18,6 +18,7 @@
 
 #include "tcMath.h"   // TAU, HALF_TAU
 #include "../utils/tcLog.h"
+#include "../utils/tcAnnotations.h"
 #include <algorithm>
 #include <cmath>
 

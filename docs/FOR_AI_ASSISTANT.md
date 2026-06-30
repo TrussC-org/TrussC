@@ -641,9 +641,9 @@ void draw() override {
 
 EasyCam provides orbit controls automatically (drag to rotate, scroll to zoom, right-drag to pan).
 
-### 3D Lighting & PBR
+### How do I light and shade 3D objects? (PBR: Light + Material)
 
-TrussC uses GPU-based PBR (Physically Based Rendering) with metallic-roughness workflow.
+TrussC uses GPU-based PBR (Physically Based Rendering) with metallic-roughness workflow (glTF 2.0 compatible). Flow: add lights → activate a material → draw meshes.
 
 ```cpp
 Light light;
@@ -684,8 +684,7 @@ void draw() override {
 
 **Key concepts:**
 - `Light`: Directional, Point, or Spot (with cone falloff). Also supports projector texture and IES profiles
-- `Material`: PBR properties — `setBaseColor()`, `setMetallic()`, `setRoughness()`, `setNormalMap()`, etc.
-- `Environment`: IBL (Image-Based Lighting) for ambient reflections. `loadProcedural()` or `loadFromHDR()`. **Auto-skipped on iOS/iPadOS Safari (wasm)** — cube-face render targets break the canvas there, so PBR falls back to flat ambient + direct lights (works on native, desktop web, Android). Don't rely on IBL reflections if you target iOS web.
+- `Material`: presets (`Material::gold()`, silver, copper, iron, bronze, emerald, ruby; `plastic(color, roughness)`, `rubber(color)`) or custom via `setBaseColor()` / `setMetallic()` (0–1) / `setRoughness()` (0.045–1) / `setNormalMap()`. Colors are 0–1. Up to 8 lights.
 - `setMaterial()` activates PBR for all subsequent `mesh.draw()` calls until `clearMaterial()`
 
 **Shadow mapping:**
@@ -716,6 +715,22 @@ light.setLensShift(0.0f, 1.0f);                            // Projector lens shi
 light.setIesProfile(&iesProfile);                           // Photometric profile
 ```
 
+### How do I use IBL (environment lighting / reflections)?
+
+Environment-based lighting — metal reflections and ambient — uses IBL. Load an `Environment` and call `setEnvironment()`:
+
+```cpp
+Environment env;
+env.loadProcedural();          // simple sky + sun + ground (or env.loadFromHDR("x.hdr"))
+setEnvironment(env);
+```
+
+Internally it bakes irradiance (diffuse) + prefilter (specular) + a BRDF LUT and applies them via split-sum. Metal materials need IBL (or an environment) to reflect. Clear with `clearEnvironment()`.
+
+### Why doesn't IBL work on iOS / iPadOS Safari? (Apple-wasm caveat)
+
+Known bug: on iOS/iPadOS Safari (WebKit) wasm builds, **IBL baking is skipped automatically** — cube-face render targets freeze the WebKit canvas (one frame, then black). The `Environment` load returns false and the scene falls back to **flat ambient (~3% of albedo on non-metals) + direct lights**. Direct lighting, shadows, and all material parameters (metallic / roughness / normal map) still work. This is iOS-Safari only (detected via UserAgent + maxTouchPoints); desktop web, Android web, and native are unaffected. **Don't rely on IBL reflections when targeting iOS web.**
+
 ## Hot Reload
 
 TrussC supports live code reloading during development. Add one line to your app's `.cpp` file:
@@ -742,6 +757,442 @@ AI agents can drive and verify the running app directly. As a chat assistant you
 won't use this yourself; just know it exists so you can point users to it
 (details: docs/AI_AUTOMATION.md, agent workflows: the trussc-dev-skill repo).
 
+## Why TrussC & Licensing
+
+### Can I use TrussC commercially / in client work?
+
+Yes. The core is **MIT-licensed**, and every dependency and every official bundled addon is permissive (MIT / zlib / BSD / Apache-2.0 / Public Domain) — **no GPL or LGPL anywhere in the dependency tree**. So projects with a "no GPL" delivery clause are fine. Ship distributed apps, one-off installations, server-side apps, or WebAssembly builds — the delivery form doesn't matter.
+
+### What are the dependency licenses? Any GPL?
+
+No GPL, no LGPL. Breakdown:
+- **core**: MIT
+- **sokol**: zlib
+- **stb / dr_libs / miniaudio**: Public Domain or MIT-0
+- **Dear ImGui / nlohmann-json / pugixml / cpp-httplib**: MIT
+- **official bundled addons (16)**: all MIT / BSD / Apache-2.0 / zlib / Public Domain
+- **mbedTLS (tcxTls) only** is dual Apache-2.0 / GPL → the **Apache-2.0 option is chosen**, so no contamination.
+
+Sample assets are CC0 etc. Full inventory: `docs/LICENSE.md`.
+
+### Do external addons change the licensing?
+
+If you add an addon that is **not** one of the official bundled ones, **check its license individually**. Addons that wrap a vendor SDK (commercial depth cameras, video-transport SDKs, …) may carry a different or proprietary license. Such SDKs are not bundled into TrussC — they are fetched separately at build time. For anything legal, read each library's / SDK's own license text.
+
+### What can I ship made with TrussC?
+
+License-wise, effectively any form: distributed desktop/mobile apps, one-off installations and digital content, server-side apps, WebAssembly (web) builds. It's also a good fit for education. The bar is not "MIT purism" but **"can I use it at work as-is"** — that's why a mix of MIT core, zlib libraries and CC0 assets is consistent: all are permissive and never block distribution.
+
+### What's the one guiding principle behind TrussC?
+
+The thread through everything is: **nothing should ever block you from shipping a deliverable.** Permissive-only licensing, coverage across native / mobile / web, and thinness (performance + portability) all point at that single goal. When a design decision is unclear, the test is "can this be used at work as-is, and does it avoid blocking distribution?"
+
+### Can I read and modify TrussC's internals? (all-source escape hatch)
+
+Yes — **all of TrussC's source is visible** (no binary-only libraries in the foundation; core and its dependencies are header/source you can read). So behavior is easy to trace, and when needed you can **patch it yourself or override via inheritance**. Unlike a proprietary dev environment, this works well as an "escape hatch" when you get stuck. Core itself does this — it ships `sokol_gl_tc.h`, a fork of `sokol_gl.h`. (The exception is a few addons that wrap a vendor SDK and depend on its binary.)
+
+### Is the API stable before 1.0?
+
+Be aware: **while the version is below 1.0**, the API is still stabilizing — additions, and occasionally removals, can happen. Methods marked `[[deprecated]]` are **scheduled for removal at v1.0.0**, so when you see a deprecation warning at build time, migrate to the new API early.
+
+## Built on sokol
+
+### Why sokol instead of OpenGL?
+
+OpenGL is winding down — Apple in particular has long signaled dropping it — so betting on it gives no guarantee that what you build keeps running commercially. TrussC instead runs on whatever native API each OS pushes, abstracting several backends thinly via **sokol (sokol_gfx)**. The backend is chosen automatically per platform: **Metal** on macOS/iOS, **Direct3D 11** on Windows, **OpenGL (GLCORE)** on Linux, **GLES3** on Android / Raspberry Pi, **WebGPU** on web (GLES3 fallback). The point is not being locked to one API — Metal on Apple, D3D11 on Windows, and OpenGL/GLES only where it's still the right choice. (Vulkan is not used yet; possible future support.) Result: apps survive platform shifts and ship to the web (WebAssembly) as-is.
+
+### Why sokol over bgfx / wgpu / others?
+
+The constraints were "C++ + thin + header-only." TrussC's own layer aims for an openFrameworks-like feel, and underneath it wanted a library that **does backend abstraction and not much else**. Comparing candidates, sokol fit best. The clincher is **sokol-shdc** — it compiles one GLSL source into each backend's shader form (Metal MSL / D3D11 HLSL / GLSL / WGSL), which is excellent and a strong reason to stay on sokol.
+
+### What do you gain (and give up) with header-only sokol?
+
+Being header-only gives high portability (a nice side benefit for TrussC's generality), and — bigger — **you can fix the foundation yourself**. The trade-off is that sokol isn't fully battle-tested; but TrussC itself is even newer, so that's acceptable, and header-only means "fixable" beats "mature." In practice TrussC keeps `sokol_gl_tc.h`, a modified `sokol_gl.h`, with its own fixes and added features.
+
+### Can TrussC open multiple windows?
+
+Not directly, by default. The foundation, sokol (sokol_app), assumes "one process = one window," so TrussC can't open multiple windows directly. This is something given up by adopting sokol (it's wanted but hard to implement). Workaround: **share a texture / output to a second app and run a separate process for the second window.** Depending on the need, use **tcxSyphon** (macOS), **tcxNDI** (cross-platform video transport), **tcxNozzle** (GPU texture sharing), or **tcxVirtualCam** (virtual camera output). (Windows' Spout equivalent exists as a concept, but there's no dedicated addon yet.)
+
+### How does one C++ codebase run on every platform?
+
+One C++ codebase builds for macOS / Windows / Linux / iOS / Android / web (WebAssembly). The foundation is two layers: **sokol_app** abstracts window creation and input across platforms, and **sokol_gfx** maps drawing to each OS's native graphics API (backend auto-selected: macOS/iOS=Metal, Windows=Direct3D 11, Linux=OpenGL, Android/RPi=GLES3, web=WebGPU). OS-specific code lives in `core/platform/{mac,ios,win,linux,android,web}/` (`.mm` Objective-C++ on mac/ios, `.cpp` elsewhere). CMake detects the platform at configure time and links the right sources / backend defines / frameworks, so your app code is platform-agnostic.
+
+### How do shaders work across all backends? (sokol-shdc)
+
+Write a shader once in GLSL; at build time **sokol-shdc** translates it to each backend's form: Metal=MSL, Direct3D 11=HLSL, OpenGL=GLSL, WebGPU=WGSL. So one shader source covers every platform. Put `.glsl` files in `src/shaders/` and compile them to a C header.
+
+## Coming from openFrameworks
+
+### Coming from openFrameworks — what's different first?
+
+The surface (`setup`/`update`/`draw`, `drawCircle`-style calls) resembles oF, but the foundation differs. First things to know:
+- **Colors are 0–1.0** (not 0–255). **Angles are radians + `TAU`** by default (degrees via `rotateDeg()`).
+- Function names mostly **drop `of` and lowercase the first letter** (`ofDrawRectangle` → `drawRect`).
+- **A scene graph (`Node`) is standard** — parent/child transforms are automatic (vs oF's flat + manual ofNode).
+- **Memory is `shared_ptr`** (manual new/delete rarely needed). Concurrency starts with **`callAfter`/`callEvery` (main thread)**, not raw ofThread.
+- The foundation is **sokol (not OpenGL)**, the build is **trusscli + CMake**, and addons use a **`tcx` prefix**.
+
+### What do oF functions / types map to?
+
+Mostly "drop `of`, lowercase the first letter." Common ones:
+- Drawing: `ofDrawRectangle`→`drawRect`, `ofDrawCircle`→`drawCircle`, `ofSetColor`→`setColor` (**0–1**), `ofSetLineWidth`→`setStrokeWeight`
+- Transform: `ofPushMatrix`/`ofPopMatrix`→`pushMatrix`/`popMatrix`, `ofTranslate`→`translate`, `ofRotateDeg`→`rotateDeg` (default is `rotate(radians)`)
+- Math: `ofMap`→`remap`, `ofLerp`→`lerp`, `ofRandom`→`random`, `ofNoise`→`noise`
+- Queries: `ofGetWidth`/`ofGetHeight`→`getWindowWidth`/`getWindowHeight`, `ofGetMouseX`/`Y`→`getMouseX`/`getMouseY`
+- Types: `ofVec2f`/`ofVec3f`→`Vec2`/`Vec3`, `ofColor`→`Color`, `ofMesh`→`Mesh`, `ofImage`→`Image`, `ofTexture`→`Texture`, `ofFbo`→`Fbo`, `ofTrueTypeFont`→`Font`, `ofSoundPlayer`→`Sound`, `ofMatrix4x4`→`Mat4`, `ofQuaternion`→`Quaternion`
+
+(Full table at the web reference; ~90 oF→TrussC mappings exist.)
+
+### Are setup / update / draw the same as oF?
+
+The lifecycle is **the same** — `setup()` / `update()` / `draw()` (all `void`, no args, override). Input callbacks come in two forms: an **oF-compatible simple form `mousePressed(Vec2 pos, int button)`** and a **rich form `mousePressed(const MouseEventArgs& e)`** with modifiers — override either (the rich default forwards to the simple one). Mind only the 0–1 colors and radians, and drawing code ports over almost directly.
+
+### Equivalents of ofParameter / ofxGui?
+
+- **ofParameter / ofParameterGroup: no direct equivalent.** Its save/restore role can be covered by reflection (`TC_REFLECT`) + JSON, but that's an **advanced feature** — not something everyone will wield easily (don't treat it as a drop-in ofParameter replacement).
+- **For GUI (ofxGui), use `tcxImGui`** — the full Dear ImGui API, a bundled addon; bind values straight to sliders etc. For scene inspection/editing, `tcxNodeInspector` (hierarchy + reflected member editing) is handy too.
+
+### What happens to oF's new/delete / ofPtr / ofThread?
+
+TrussC uses **`shared_ptr` / `weak_ptr` throughout**. Create nodes with `make_shared<>()` and `addChild` them; **when a parent goes away, its children are freed automatically** — you rarely think about delete. Instead of raw `ofThread`, reach first for **`callAfter` / `callEvery` (safe, main-thread)**; if you genuinely need concurrency, `Thread` / `ThreadChannel` (ofThread / ofThreadChannel compatible) exist. `ofEvent` maps to `Event<T>`, `ofNode` to `Node`.
+
+### How do addons (ofxXxx) and addons.make compare?
+
+Very similar. The prefix is **`ofx` → `tcx`**, the namespace is **`tcx::`** (e.g. `tcxBox2d` contains `tcx::box2d::World`). You add one **addon name per line in `addons.make`** (as in oF), or `trusscli addon add tcxOsc`. The big difference is **automatic dependency resolution** — if `tcxA` depends on `tcxB`, just list `tcxA` and `tcxB` links automatically (oF needed manual ordering in addons.make). The projectGenerator becomes `trusscli` (GUI included).
+
+### What's the equivalent of oF's projectGenerator? (trusscli GUI)
+
+It exists. Launching `trusscli` **with no arguments (double-clicking the executable) opens the GUI "TrussC Project Generator."** Like oF's projectGenerator, it creates projects, adds addons, enables platforms, and generates IDE files. CLI fans can do the same with `trusscli new` / `trusscli update`. To run a sample, drag the sample folder (the one containing `src`) onto the GUI.
+
+## Building & the toolchain
+
+### How do I build for Android?
+
+Beta. Needs Android SDK (`ANDROID_HOME`) / NDK (`ANDROID_NDK_HOME`) / Java (`JAVA_HOME`, for APK signing).
+```bash
+trusscli update -p path/to/myProject --android   # adds the android preset
+cmake --preset android
+cmake --build --preset android                    # → bin/android/<project>.apk
+```
+Backend is GLES3. APK signing uses `~/.android/debug.keystore` (without it, only the `.so` is built). Use `adb install -r ...` to deploy, `adb push` for data files. Permissions: the bundled manifest is all-inclusive, so for store builds drop an `android/AndroidManifest.xml.in` and strip the permissions you don't use.
+
+### How do I build for iOS?
+
+Beta. Needs a full Xcode install + (for on-device) an Apple Developer account.
+```bash
+trusscli update -p path/to/myProject --ios   # adds the ios preset
+cmake --preset ios                            # generates xcode-ios/*.xcodeproj
+open xcode-ios/*.xcodeproj
+```
+In Xcode: pick a device/simulator → **set a Development Team under Signing & Capabilities (required; build fails without it)** → ⌘R. Backend is Metal. First launch may show a black screen for up to ~30s during Metal/GPU init (known). Sensors are available via `getAccelerometer()` etc.
+
+### How does the build system work? (trusscli + CMake)
+
+Two layers. The core is built once as `libTrussC.a` and shared across all projects; apps only recompile their own delta (fast). `trusscli` (the project generator) handles create / update / IDE-file generation / per-platform enabling. `CMakeLists.txt` and `CMakePresets.json` are auto-generated, so **don't hand-edit them** — put addons in `addons.make` and project-specific CMake in `local.cmake`. Build with `trusscli build` (auto-selects native), or `cmake --preset <os>` + `cmake --build --preset <os>` (os = macos / windows / linux / web / android / ios).
+
+### trusscli command reference
+
+`trusscli` with no args launches the GUI (TrussC Project Generator). Main commands:
+```
+trusscli new <path>            Create a project (--web / --android / --ios to enable builds, -a <addon> to include addons)
+trusscli cp <src> <dst>        Copy an existing project
+trusscli update                Regenerate build files for the project in CWD (-p <path> to target another)
+trusscli upgrade               Upgrade TrussC (git pull + rebuild trusscli)
+trusscli addon add|remove <a>  Add / remove addons (also clone / list / search / pull — see `trusscli addon --help`)
+trusscli info [section]        Project / framework info
+trusscli doctor                Check the dev environment
+trusscli clean                 Delete build directories
+trusscli build                 Build (auto-selects native)
+trusscli run                   Build and launch
+trusscli version               Show version (trusscli + current TrussC)
+```
+Common options: `-p, --path <path>`, `--tc-root <path>`, `-h, --help` (per-command help).
+Examples: `trusscli new myApp -a tcxOsc -a tcxIME` / `trusscli new ./apps/myApp --web` / `trusscli update -p ./apps/myApp`.
+
+### VSCode / Cursor won't build (no preset selected)
+
+With the CMake Tools extension in VSCode / Cursor, **you can't build until you select a Configure Preset.** Open the command palette → **"CMake: Select Configure Preset"** → pick the preset for your OS (**macos / windows / linux**). **Don't pick the `xcode` / `vs` (Visual Studio) presets** — those are for generating IDE projects, not for building inside VSCode / Cursor. After selecting the right preset, F5 (or build) works.
+
+## Performance & Power
+
+### What makes TrussC fast and lightweight?
+
+The foundation — a thin wrapper over each OS's native API + C++ — gives a **high performance ceiling, and lets you reach down into the native layer when needed** (high optimization freedom). Commercial frameworks with license fees or OS limits tend to hit a ceiling on optimization; TrussC leaves that open. At the same time you can **deliberately build low-memory apps** — again, thanks to being low-level. Defaults lean toward a small footprint (e.g. the bitmap-font atlas is lazily allocated — 0KB GPU if you never call `drawBitmapString`; IBL/PBR allocate only when used), and you can lower the draw rate with `setFps` / `EVENT_DRIVEN` / `setIndependentFps` (which also saves power and extends runtime). "Thinness" feeds all of this: optimization freedom, low memory, and portability.
+
+### Can I make a console / headless app (no draw)?
+
+Yes. You can run `update()` only without ever calling `draw()`, or use the window-less `runHeadlessApp()`. Good for server-side, CI, and headless tests. It's similar to oF's nowindow mode, but **most graphics-focused frameworks lack such a mode** — TrussC manages update and draw independently, so this falls out naturally (see event-driven).
+
+### Do heavy features bloat build time / the core?
+
+Heavy dependencies are **split into addons.** Even official features that are heavy (physics, various SDK wrappers, …) live in addons rather than core, so if you don't use them they're neither linked nor built — **shorter build times and a smaller binary.** Core is built once and shared across projects. The plan is to keep moving heavy dependencies into addons.
+
+### Are physics / many objects too heavy?
+
+Heavy compute lives in addons and leans on C++ speed. For example **tcxPhysics** (Jolt Physics) is fast even on the CPU because it's C++, and **handles hundreds of objects on wasm (web) without falling over.** Avoiding "web is slow" is possible because of the thin native layer + C++ foundation.
+
+### Can I run for hours / keep power low on mobile? (FPS control)
+
+TrussC keeps resource use small, so power draw is low — lightness helps battery, not just frame rate. Lowering draw frequency helps most:
+- `setFps(60)` for a fixed rate; `setFps(EVENT_DRIVEN)` for "draw only when `redraw()` is called."
+- `setIndependentFps(updateFps, drawFps)` separates update and draw rates. e.g. `setIndependentFps(60, EVENT_DRIVEN)` runs logic/timers steadily at 60fps but draws only when the screen changes via `redraw()` — an idle UI barely touches the GPU.
+- Sentinels: `VSYNC` (-1, monitor sync = default) and `EVENT_DRIVEN` (0). `redraw(count = 1)` requests a draw; `getFpsSettings()` reads the current rate.
+A barely-redrawing UI can run for many hours on mobile.
+
+### Screen won't update in event-driven mode? (forgot redraw)
+
+The top power-saving recommendation is **event-driven** (`setFps(EVENT_DRIVEN)` or `setIndependentFps(update, EVENT_DRIVEN)`). The catch: in this mode `draw()` only runs **when you call `redraw()`.** So if you change UI state but forget `redraw()`, the screen won't change and you'll go "huh, nothing happened" (a common trap). Make it a habit to **call `redraw()` on every change that affects appearance.** Do that consistently and an idle UI uses near-zero GPU.
+
+### Optimizing / reusing shaders? (sokol-shdc)
+
+Offloading heavy work to the GPU is the standard move. Thanks to **sokol-shdc**, writing and **reusing shaders is very easy** — one GLSL source runs on every backend, so effects compose into reusable parts. For instance a LUT color-grader (something like `tcxLut`) is simple to build yourself.
+
+### Optimizations possible because it's low-level?
+
+Because TrussC is header-only and all-source, **you can optimize the foundation itself.** Real examples: changing the (deferred) draw buffer from a fixed size to **dynamic growth**, and adding a **10-bit color** render target. Such sokol-derived modifications are collected in `sokol_gl_tc.h` (a fork of sokol_gl). These are parts you can't touch in a proprietary environment — TrussC's escape-hatch strength.
+
+### How low-end can it run? (target floor + power evidence)
+
+The floor target is the **Raspberry Pi Zero** (defaults like small draw buffers are tuned for it). On Raspberry Pi, **native-API video playback** works too. For always-on UI tools, event-driven brings idle power to near zero — e.g. TrussC's own "TrussC Project Generator" (the trusscli GUI) barely uses battery when left running. Always-on display apps on a 2025-era phone, and wearable-tracking-style apps, have run for nearly a day / ~10 hours on mid-range devices. Low-level + C++ + small defaults is what makes it "scale down."
+
+## Node & Mod patterns
+
+### What's the overall architecture?
+
+App itself is the scene-graph root Node. The basic loop is `setup()` (once) → `update()` → `draw()` each frame. Nodes form a parent/child transform hierarchy; input is dispatched depth-first and stops propagating once `consumed` (children receive events in their parent's local coordinates). Drawing is sokol_gl-based — a procedural, "immediate-mode-style" API (`setColor()` → `drawRect()`), but internally deferred (vertices accumulate into buffers and are submitted later, so nothing is drawn the instant you call it). Each Node's `draw()` starts from a clean default style (white, fill, no stroke — parent style does not cascade, favoring predictability). Behavior can be added by subclassing or by attaching `Mod`s (`addMod<T>()`). The tree and GPU resources (Texture / Fbo) are main-thread-owned; hand work from other threads via `runOnMainThread()`.
+
+### Subclass a Node, or attach a Mod?
+
+TrussC's app structure is openFrameworks-like on the surface but **Unity-like** in intent — Node subclasses (≈ GameObjects, owning their own state/draw/input) with Mods (≈ Components, cross-cutting behavior) attached. The rule:
+- **"What it *is*" (identity) → subclass Node.** Buttons, enemies, panels.
+- **"What it *can also do*" (capability) → Mod.** Animation, layout, drag-to-move — especially if unrelated node types want it.
+If you start copy-pasting the same block into two nodes' `update()`, that block wants to be a Mod. `addMod<T>()` runs `setup()` synchronously and returns `T*` (chainable: `node->addMod<LayoutMod>()->setPadding(5)`). Look up with `getMod<T>()`, detach with `removeMod<T>()`.
+
+### Constructor vs setup() in a Node? (common trap)
+
+Put **plain state only** in the constructor. Calling `addChild()` / `addMod()` / `callEvery()` in the constructor crashes (`weak_from_this()` isn't ready yet). Do tree work in `setup()` — it's auto-deferred to just before the node's first update/draw (safe even when added mid-frame). Always create nodes with `make_shared<>()` (otherwise `addChild()` fails). Draw in **local coordinates** around (0,0) and move via `setPos / setRot / setScale` — never compute "where am I on screen"; children inherit the parent transform automatically.
+
+### How do I structure a whole scene?
+
+App itself is the scene-graph root (App inherits RectNode and is window-sized). Make each element a Node subclass, compose with `addChild()`, and write almost nothing in `tcApp::update()` (the tree updates itself recursively). **Draw order = sibling order.** For scene switching, keep scenes as siblings and toggle `setActive(false)` (an inactive subtree costs nothing and gets no events). Remove nodes with `destroy()` (sets a flag, removed safely outside update/draw; `isDead()` is true immediately after). To see the structure while building, use the bundled **tcxNodeInspector** (one line in `setup()` → hierarchy + inspector + gizmo).
+
+### Disable / hide / remove a node? (setActive / setVisible / destroy)
+
+Three different things:
+- **`setActive(false)`**: **stops** the node entirely (disable) — neither `update()` nor `draw()` runs, no mouse events. **Children stop too** (an inactive subtree costs nothing). For pausing or scene switching. Resume with `setActive(true)`.
+- **`setVisible(false)`**: **hides the visuals only.** `draw()` is skipped but `update()` and events still run.
+- **`destroy()`**: actually **removes** the node. It is generally **thread-safe and callable any time**, setting a flag so removal is **deferred** to outside update/draw — safe to call mid-traversal. `isDead()` is true right after.
+So: setActive / setVisible to temporarily stop/hide, destroy when you're done with it.
+
+### Delayed / repeated calls? (callAfter/callEvery vs async)
+
+`callAfter(sec, fn)` / `callEvery(sec, fn)` are Node features, and **since App is a Node you can use them directly inside `update()`** etc. They run **synchronously on the main thread** — same flow as update/draw — so state collisions are unlikely and they're easy to use (no mutex). When you truly need async (frame-independent precise timing), `callAfterAsync` / `callEveryAsync` run on a background thread: guard shared state with a mutex (and never touch GPU/drawing). Reach for the sync versions first.
+
+### Custom-looking button — is click handling provided?
+
+You don't write event handling from scratch. **RectNode has subscribable mouse events built in**, so you only custom-draw the look. RectNode exposes public Event members `mousePressed` / `mouseReleased` / `mouseDragged` / `mouseScrolled` (`Event<MouseEventArgs>` etc.), uses rectangle hit-testing, and **has `enableEvents()` already called in its constructor (events on by default).** Two ways to use it:
+- **Subscribe from outside (no subclass)**: `listener_ = button->mousePressed.listen([this](MouseEventArgs& e){ ... });` (keep the returned `EventListener` as a member).
+- **Subclass and override**: `bool onMousePress(const MouseEventArgs& e) override { ...; return true; }`.
+Draw freely in local coordinates around (0,0) — rounded corners, image, shader, fully your own. (A plain `Node`, not a RectNode, needs `enableEvents()`. For a ready-made look, `RectNodeButton` — a simple color-on-press button — is built in.)
+
+## Events (loose coupling)
+
+### How do I keep components loosely coupled? (Event<T>)
+
+The rule is "**dependencies point downward only**" — a parent knows its children; a child never knows its parent's type or its siblings. Anything a child needs to tell the outside goes out through a public `Event<T>` member, and whoever cares calls `listen()`.
+```cpp
+class PauseButton : public RectNode {
+public:
+    Event<void> pressed;                  // public event
+    bool onMousePress(const MouseEventArgs& e) override { pressed.notify(); return true; }
+};
+// listener side:
+EventListener pauseListener_;             // keep as a member (auto-disconnects on destruction)
+pauseListener_ = btn->pressed.listen([this]() { /* ... */ });
+```
+**Always store the `EventListener` returned by `listen()` as a member** (it disconnects the moment it goes out of scope). Safer than raw `function<>` callbacks — auto-disconnect, multiple listeners, thread-safe, and safe to remove during notify. Don't call parent methods from a child.
+
+### Bubble events up, don't broadcast?
+
+Yes. Each layer **listens to its children's events and re-fires a semantically coarser event of its own** (`PauseButton::pressed` → `Hud::pauseRequested` → the app pauses the scene). That keeps every layer swappable. The framework itself works the same way (`RectNode::mousePressed`, `TweenMod::complete`, etc. are all `Event<T>`), so app wiring and framework wiring read identically.
+
+### App-wide events and shared state? (AppEvents)
+
+Signals that many unrelated listeners across the app need belong in a Meyers-singleton struct (e.g. an `AppEvents`) holding `Event<T>` members. **That header becomes the app's interaction map** (comment each event with who fires it and who reacts). Rule: **events are the write path, flags are the read path** — if state lives on the bus, sync it via a self-listener in the constructor, and have code fire the event rather than assign the flag directly. Don't put local events (a button's `pressed` belongs to the button) on the bus — the bus is only for signals with multiple unrelated listeners. (TrussC's own `events()` uses the Meyers-singleton pattern, so it's a good one to copy.)
+
+## Addons
+
+### What is an addon and how do I use one?
+
+An addon is a reusable module (`tcx` + PascalCase: headers + sources + examples) placed under `addons/`. Its namespace is `tcx::` (core is `tc::`). To use one, just list its name, one per line, in your project's `addons.make`:
+```
+tcxBox2d
+tcxOsc
+```
+CMake's `trussc_app()` reads `addons.make` and auto-links each addon (`use_addon.cmake` propagates sources and include paths from `src/`・`libs/`; addon headers are treated as system includes so `-Wall` only warns on your code). You don't hand-write `CMakeLists.txt` — `trusscli addon add tcxBox2d` works too.
+
+### What's the minimal addon?
+
+To just make it work, **`src/` is all you need.** Put `src/tcxMyAddon.h` (and `.cpp` if needed) under `addons/tcxMyAddon/`, list `tcxMyAddon` in the consuming project's `addons.make`, and it works. **You don't write build config (`CMakeLists.txt`)** — TrussC auto-collects `src/`・`libs/*/`, wires include paths, and links against TrussC (a header-only addon with no sources becomes an `INTERFACE` target). Class in `namespace tcx::myaddon { ... }`, files named `tcxXxx.h / .cpp`. You only add your own `CMakeLists.txt` for what auto-collection can't do: FetchContent, special flags, codegen, platform-specific linking. To ship a runtime DLL / dylib / metallib, use `tc_addon_bundle_file(<path>)`.
+
+### How do I publish/distribute my addon?
+
+To publish so others can `trusscli addon clone / add` it, add to the working `src/`: a root **`addon.json`** (at minimum description / author / license / category / keywords — an empty `{}` is still discoverable), a **`LICENSES.md`** inventory, a runnable **`example-basic/`**, and a README. Then on GitHub make it **public**, name the repo **`tcx…`**, and add the topic **`trussc-addon`** — a daily crawl lists it in the registry within ~a day (`git tag v0.1.0` sets the version). Starting from `addons/tcxTemplate` via "Use this template" is fastest (it ships a CI workflow that goes green after a rename by building the example).
+
+### Which addons are bundled (official)?
+
+The official addons shipped in the TrussC repo (bundled) are defined by the `.gitignore` whitelist — currently these 16:
+**tcxBox2d** (2D physics) / **tcxMidi** / **tcxCurl** (HTTPS) / **tcxImGui** / **tcxNodeInspector** / **tcxHap** (video codec) / **tcxLua** / **tcxLut** / **tcxOsc** / **tcxQuadWarp** (projection mapping) / **tcxTls** (TLS) / **tcxWebSocket** / **tcxGltf** / **tcxObj** / **tcxDepthCamera** / **tcxDepthRecord**.
+These + core are all permissive-licensed. Anything else (even if it sits under `addons/`, it's gitignored) is an external addon and needs an individual license check.
+
+### How do I publish my addon to the registry? (crawl conditions)
+
+No PR needed — discovery is by GitHub topic. Three conditions: ① the repo has the GitHub topic **`trussc-addon`**, ② it's **public** (not archived), ③ it has a readable **`addon.json`** at the root (empty `{}` is fine). The repo name is `tcx…`. A GitHub Actions crawl on `TrussC-org/trussc-addons` regenerates the registry daily, so it appears in `trusscli addon search` / `addon list --remote` within ~a day. Forks don't inherit topics, so a fork only shows up if its owner adds the topic.
+
+## Media & data
+
+### What's good about TrussC's font support? (dynamic atlas / vertical / paths)
+
+`Font` builds its glyph atlas **dynamically (lazily)**, so **memory stays small** — only the glyphs you use are loaded, and it's 0KB of GPU if you never call `drawBitmapString`. It supports **vertical writing (tategaki, `WritingMode::VerticalRL`)** with fairly rich Japanese typesetting (kinsoku, hanging punctuation, tate-chu-yoko / TCY). You can also extract strings or glyphs as **vector paths (`tc::Path`)** (`getStringPath` / `getGlyphPath`) for animation, scaling, stroke/fill, and hit-testing. And `load()` accepts a system font name directly (no need to bundle a `.ttf`).
+
+### How do I list / select audio devices?
+
+`AudioEngine` handles devices. `AudioEngine::listDevices()` returns the available devices (`vector<AudioDeviceInfo>`). Select the output device by passing `AudioSettings` (with `deviceName`, sample rate, etc.) to `AudioEngine::getInstance().init(settings)`. An empty `deviceName` selects the system default playback device.
+
+### Per-buffer synthesis / processing? (audioIn / audioOut)
+
+Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. Listening to `audioIn` gives mic input (`AudioInBuffer`, read-only). The callback runs on the audio thread, so avoid heavy work or engine-API calls and return quickly.
+
+### Output channel mapping? (setChannelMap)
+
+`Sound` can route to output channels:
+- `setChannelMap(const vector<int>& map)` — 1:1 routing per output channel.
+- `setChannelMap(vector<vector<int>> map)` — sum multiple sources into one output channel.
+Use it for multichannel output (multi-speaker, installations). `clearChannelMap()` to reset.
+
+### Ordering audioOut: generator → effect → monitor?
+
+Pass a **priority** to `audioOut.listen(...)` and listeners compose in a fixed order regardless of instantiation order. `audio::priority::Generator` (100, default) / `Effect` (500) / `Monitor` (900):
+- **Generator** (oscillators / synths) adds audio into the buffer,
+- **Effect** (reverb / filter / EQ) reads + writes to process it,
+- **Monitor** (scope / FFT / record) **reads last** — it sees the finished buffer, so it's **ideal for visualization.**
+Adding a Generator later never moves it behind Effect / Monitor — order is fixed by priority.
+
+### Abstract anything drawable with HasTexture?
+
+`Image` / `Fbo` / `VideoPlayer` / `VideoGrabber` all **inherit `HasTexture`** and have `getTexture()`. So you can **abstract "owns a texture = drawable"** behind a `HasTexture` (pointer/reference) and draw images, video, or FBOs with the same code. **Note: `Pixels` is NOT a HasTexture** — it's a CPU-side pixel buffer (no GPU texture), so it doesn't fit this abstraction. (Often surprising, so worth flagging.)
+
+### Use depth cameras without device lock-in? (tcxDepthCamera)
+
+**tcxDepthCamera** abstracts depth cameras. The abstraction line is "a camera that provides **depth image, point cloud, RGB image, IR image**" — against the `DepthCamera` base you use a common API (`getDepthImage()` / `getColorImage()` / point cloud, etc.). Current implementation addons are **tcxAzureKinect** and **tcxOrbbec** (more expected). With **tcxDepthRecord** you can record and replay them as a **virtual device** (handy for debugging). **Note: device-specific features like bone tracking are outside the abstraction** — for those, use the device addon's class directly (query capabilities via `as<>()` / `is<>()`).
+
+### Why is a point cloud just a Mesh?
+
+A point cloud isn't a dedicated class — it uses **`tc::Mesh` directly.** The reasons: a point cloud renders fine in **points mode**, and unused attributes like normals add no overhead if you simply don't put them in the Mesh. "A Mesh as a point cloud" may seem surprising, but that's the rationale. In fact PLY I/O (**tcxPly**) reads/writes point clouds as Mesh too.
+
+### How do I record video? (startRecording / VideoWriter)
+
+Two ways:
+- **Screen recording (easy)**: `startRecording("out.mp4")` to start, `stopRecording()` to stop, `isRecording()` for status. Records the on-screen output directly.
+- **Write arbitrary frames**: use `VideoWriter` — `open(path, w, h, settings)` → `addFrame(fbo)` / `addFrame(pixels)` (timestamped via `addFrameAt(frame, timeSec)`) → `close()`. For writing offscreen (FBO) content at a steady rate.
+Encoder settings: `VideoRecordSettings`. Platforms: macOS / Windows / Linux / Android / iOS.
+
+## Networking
+
+### TCP / UDP networking? (brief)
+
+Core has `TcpClient` / `TcpServer` / `UdpSocket`. It's event-driven — `listen()` to `onReceive` / `onConnect` / `onDisconnect` / `onError` (`Event<T>`), and `connect` / `send` to transmit.
+- TCP: `client.connectAsync(host, port)` → `client.send("...")`. Server: `server.start(port)`, `broadcast(...)` to all clients.
+- UDP: `udp.bind(port)` (receive thread auto-starts) → `udp.sendTo(host, port, data)`. Broadcast (`setBroadcast`) and multicast (`joinMulticastGroup` / `setMulticastTTL`) supported.
+
+### Send/receive OSC? (tcxOsc: polling vs callback)
+
+The **tcxOsc** addon. To send, `OscSender::connect(host, port)` and send messages built via chaining:
+```cpp
+OscMessage m("/fader"); m.addInt(1).addFloat(0.75f);
+sender.send(m);                 // to registered destinations (sendTo(host, port, m) for a specific one)
+```
+Two receive patterns, pick by use:
+- **Polling (sync)**: in `update()`, `while (receiver.hasNewMessage()) { OscMessage msg; receiver.getNextMessage(msg); ... }`. **Main thread, no mutex needed** — easy to use.
+- **Callback (async)**: `listener_ = receiver.onMessageReceived.listen([this](OscMessage& m){ ... });`. This **fires on the receive thread**, so guard shared data with a mutex.
+
+(Not knowing these two options makes OSC hard to use well.)
+
+### Does OSC/UDP work on wasm? (async caveat)
+
+Yes. But wasm (Emscripten) has **no background threads**, so the "async" callback (`onMessageReceived` etc.) actually **fires on the main thread during the update loop** (the socket is polled non-blockingly each frame). It is **not broken** — the same code as native runs, and no mutex is needed on wasm. Only where the work happens (which thread) differs.
+
+### Stand up an HTTP server (settings/log panel from a phone)?
+
+TrussC has no dedicated HTTP-server class, but **cpp-httplib (`httplib.h`) is bundled**, so you can stand up a server with it directly. A common use is **serving a settings or log page and viewing/operating it from a phone on the same LAN.** (The MCP automation server also embeds an HTTP/JSON-RPC server, but that's for agents — a different purpose.)
+
+## Pitfalls & troubleshooting
+
+### My 2D drawing disappears behind 3D? (default is 3D space)
+
+TrussC is "2D-looking but actually 3D space" by default (same philosophy as oF). The screen is a perspective 3D projection, and 2D drawing also sits on the z=0 plane under depth testing. So **drawing 2D after 3D can put the 2D behind a 3D object** (depending on its z) and make it disappear. It often happens when you draw 3D with `EasyCam` and then draw 2D (HUD, text) after `cam.end()`. If your HUD vanishes, suspect this. The default FOV is set by **`setupScreenPerspective(fovDeg)` (default 45°)**, and for fully-2D situations use **`setupScreenOrtho()`**.
+
+### Centering bitmap text? (default is left / baseline)
+
+Text alignment defaults to **left / baseline**, shared by `Font` and `drawBitmapString`. So to center, you don't need to compute an offset by hand — call **`setTextAlign(Direction::Center, Direction::Center)`** before drawing (it applies to bitmap text too).
+
+### Why doesn't fill work on a stroke? (fill/noFill apply to beginShape only)
+
+`fill()` / `noFill()` **apply to `beginShape`** (and its shapes) but **not to `beginStroke`.** A stroke is a line (StrokeMesh) with no notion of fill, so `fill` / `noFill` are ignored there. Use `beginShape` or `Path::drawFill()` for filled shapes, and `beginStroke` / `drawStroke()` for thick lines — split by role.
+
+### How do I quit the app? (exitApp vs requestExitApp)
+
+Two options:
+- **`requestExitApp()`**: *requests* exit. Listen to `events().exitRequested` (`Event<ExitRequestEventArgs>`) and set `args.cancel = true` to **cancel** it (for a "save before quit?" prompt). Equivalent to oF's `ofExit`.
+- **`exitApp()`**: exits immediately (not cancellable).
+```cpp
+listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
+    if (hasUnsavedChanges) e.cancel = true;   // stops the exit
+});
+```
+
+## "I want to X" — which API?
+
+### "I want to save / load / communicate" → which API?
+
+- Save an image: `Image::save(path)` / FBO contents: `Fbo::save(path)`
+- Save a screenshot: `saveScreenshot(path)` (raw pixels: `grabScreen(Pixels&)`)
+- Record video: `startRecording(path)` / `stopRecording()`
+- JSON read/write: `loadJson(path)` / `saveJson(j, path)` / `parseJson(str)` / `toJsonString(j)` (the type `Json` = nlohmann/json)
+- XML read/write: `Xml` (pugixml wrapper)
+- Save/restore settings: JSON + reflection (`TC_REFLECT`)
+- HTTP request: addon **tcxCurl** / OSC: addon **tcxOsc** / serial: `Serial`
+- File picker dialog: `loadDialog()` / `saveDialog()` (→ `FileDialogResult`)
+- Receive dropped files: `events().filesDropped` (`DragDropEventArgs`)
+- Clipboard: `setClipboardString(text)` (paste arrives via the `clipboardPasted` event)
+
+### "Window / media / basics" → which API?
+
+- Window: `setWindowTitle()` / `setWindowSize()` / `setFullscreen(bool)` / `toggleFullscreen()`
+- Quit: `requestExitApp()` (cancellable) / `exitApp()` (immediate)
+- Play a sound: `Sound` (a quick blip: `beep()`) / mic input: `MicInput`
+- Play video: `VideoPlayer` / webcam: `VideoGrabber` (both unsupported on Android)
+- Draw text: `Font` (TTF / system fonts) / `drawBitmapString` (built-in bitmap)
+- Random / noise: `random()` / `noise()` / `signedNoise()`
+- Time (elapsed seconds): `getElapsedTime()` (double) / frame rate: `getFrameRate()`
+- Delay / repeat: `callAfter()` / `callEvery()` (main-thread, synchronous)
+
+## AI-native (MCP)
+
+### What makes TrussC "AI-native"?
+
+Every TrussC app can become an **MCP server.** Launch with `TRUSSC_MCP=1` and the app exposes screenshots, input injection, and **live read/write of the Node tree** over HTTP / JSON-RPC. An AI agent can both **drive and verify** a running app (the app screenshots itself, so no X11 or screen-recording permission is needed). The key is that state comes out as **queryable numbers** (pos / rotation / color …), not pixels. This is built into the design from the start, not bolted on.
+
+### How does an AI tune/verify a running app over MCP?
+
+A rebuild-free loop: launch (`TRUSSC_MCP=1`) → `get_screenshot` to see the current state → `get_node_tree` to read pos / rotation (degrees) / color as numbers → `set_node_members` to nudge them directly → screenshot to check → repeat → finally bake the values into C++ source. Main tools: `get_node_tree` / `get_selected_node` / `select_node` / `set_node_members`. Mouse/key injection is opt-in via `mcp::registerDebuggerTools()` in `setup()`. Drive ImGui UIs with dedicated tools (`imgui_get_widgets` / `imgui_click` / `imgui_input` / `imgui_checkbox`) — raw `mouse_click` doesn't reach ImGui. Expose your own state with `TC_REFLECT`, or return JSON via `mcp::tool` / `mcp::resource`. This enables a closed AI development loop, so you can hand off long, autonomous development sessions.
+
+## Community & support
+
+### Where do I ask questions / report issues?
+
+TrussC **welcomes community participation.** For questions, sharing work, and chat, **Discord** is fastest (invite: https://discord.gg/7MRRny56VQ ). For bug reports, feature requests, and fixes, **open an Issue / PR on GitHub at `TrussC-org/TrussC`** without hesitation — the author, tettou771, makes an effort to respond actively. "It doesn't work like this" and "I'd like this API" are welcome too.
+
 ## API Index
 
 Complete C++ API index, generated from the C++ AST + `docs/reference/`. Use this
@@ -754,18 +1205,18 @@ _Auto-generated C++ API index from `reference-data.json` (structure from the C++
 ### Lifecycle
 
 ```cpp
-int runApp(const WindowSettings & settings = …)  // Start the application main loop. Called from main()
+int runApp(const WindowSettings & settings = WindowSettings())  // Start the application main loop with your App subclass. Templated on the app type — call TC_RUN_APP(MyApp) (or runApp<MyApp>()) from main().
 ```
 
 ### Graphics - Color
 
 ```cpp
-void clear(float r, float g, float b, float a = …) [+3]  // Clear screen. No args = transparent black (0,0,0,0)
+void clear(float r, float g, float b, float a = 1.0) [+3]  // Clear screen. No args = transparent black (0,0,0,0)
 float linearToSrgb(float x)  // Convert a single linear RGB channel value to sRGB
-void setColor(float r, float g, float b, float a = …) [+2]  // Set drawing color (0.0-1.0)
-void setColorHSB(float h, float s, float b, float a = …)  // Set color from HSB (H: 0-1)
-void setColorOKLab(float L, float a_lab, float b_lab, float alpha = …)  // Set color from OKLab
-void setColorOKLCH(float L, float C, float H, float alpha = …)  // Set color from OKLCH
+void setColor(float r, float g, float b, float a = 1.0) [+2]  // Set drawing color (0.0-1.0)
+void setColorHSB(float h, float s, float b, float a = 1.0)  // Set color from HSB (H: 0-1)
+void setColorOKLab(float L, float a_lab, float b_lab, float alpha = 1.0)  // Set color from OKLab
+void setColorOKLCH(float L, float C, float H, float alpha = 1.0)  // Set color from OKLCH
 float srgbToLinear(float x)  // Convert a single sRGB channel value to linear RGB
 ```
 
@@ -777,18 +1228,13 @@ void appendCurve(const std::vector<Vec3> & points) [+1]  // Append Catmull-Rom c
 void beginLines()  // Begin batch line drawing. Add vertex pairs with vertex(), then call endLines(). Each pair of vertices draws one independent line segment. Use setColor() between vertices for per-line colors.
 void beginShape()  // Begin drawing a shape
 void beginStroke()  // Begin drawing a stroke (uses StrokeMesh internally)
-std::array<uint8_t, 26> bitmapfont::compile16x13(const char *const (&)[13] rows)  // Compile-time ASCII art -> packed fullwidth (16x13) glyph bytes. '#' = lit, '.' = empty.
-std::array<uint8_t, 13> bitmapfont::compile8x13(const char *const (&)[13] rows)  // Compile-time ASCII art -> packed halfwidth (8x13) glyph bytes. '#' = lit, '.' = empty.
-void bitmapfont::registerGlyph(const Glyph & g)  // Register a bitmap glyph for a Unicode codepoint (extends drawBitmapString)
-void bitmapfont::registerGlyphs(const Glyph (&)[N] glyphs)  // Register a batch of bitmap glyphs at once
-void bitmapfont::updateGlyph(uint32_t cp, const uint8_t * newData)  // Swap an already-registered glyph's pixel data (atlas cell unchanged). Useful for per-frame animation.
 void drawArc(Vec3 center, float radius, float angleBegin, float angleEnd) [+1]  // Draw arc (partial circle, angles in radians)
 void drawBezier(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw bezier curve (cubic with 4 points, quadratic with 3, or N-th order via vector)
-void drawBitmapString(const std::string & text, Vec3 pos, bool screenFixed = …) [+5]  // Draw text
-void drawBitmapStringHighlight(const std::string & text, float x, float y, const Color & background = …, const Color & foreground = …)  // Draw text with background highlight
+void drawBitmapString(const std::string & text, Vec3 pos, bool screenFixed = true) [+5]  // Draw text
+void drawBitmapStringHighlight(const std::string & text, float x, float y, const Color & background = Color(0, 0, 0), const Color & foreground = Color(1, 1, 1))  // Draw text with background highlight
 void drawBox(float w, float h, float d) [+5]  // Draw 3D box (respects fill/noFill)
 void drawCircle(Vec3 center, float radius) [+1]  // Draw circle
-void drawCone(float radius, float height, int resolution = …) [+2]  // Draw 3D cone (respects fill/noFill)
+void drawCone(float radius, float height, int resolution = 16) [+2]  // Draw 3D cone (respects fill/noFill)
 void drawCurve(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw Catmull-Rom curve (4 control points draw p1->p2; vector chains segments passing through interior points; closed=true wraps around)
 void drawEllipse(Vec3 center, Vec2 radii) [+2]  // Draw ellipse
 void drawLine(Vec3 p1, Vec3 p2) [+2]  // Draw line (2D or 3D)
@@ -796,12 +1242,12 @@ void drawPoint(Vec3 pos) [+1]  // Draw a single point
 void drawRect(Vec3 pos, Vec2 size) [+2]  // Draw rectangle
 void drawRectRounded(Vec3 pos, Vec2 size, float radius) [+1]  // Draw rounded rectangle (circular arc corners)
 void drawRectSquircle(Vec3 pos, Vec2 size, float radius) [+1]  // Draw squircle rectangle (curvature-continuous corners, iOS-style)
-void drawSphere(float radius, int resolution = …) [+2]  // Draw 3D sphere (respects fill/noFill)
+void drawSphere(float radius, int resolution = 16) [+2]  // Draw 3D sphere (respects fill/noFill)
 void drawStroke(float x1, float y1, float x2, float y2) [+1]  // Draw a single stroke segment (thick line with cap/join)
 void drawTriangle(Vec3 p1, Vec3 p2, Vec3 p3) [+1]  // Draw triangle
 void endLines()  // End batch line drawing and render all accumulated line segments
-void endShape(bool close = …)  // End drawing a shape
-void endStroke(bool close = …)  // End drawing a stroke
+void endShape(bool close = false)  // End drawing a shape
+void endStroke(bool close = false)  // End drawing a stroke
 float getBitmapFontHeight()  // Get bitmap font height
 float getBitmapLineHeight()  // Get line height for bitmap string newlines
 Rect getBitmapStringBBox(const std::string & text)  // Get text bounding box
@@ -878,8 +1324,8 @@ void translate(Vec3 pos) [+2]  // Move origin
 
 ```cpp
 void alertDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Show alert dialog with OK button
-void alertDialogAsync(const std::string & title, const std::string & message, std::function<void ()> callback = …)  // Show alert dialog asynchronously. Callback is called when dismissed
-void bindCursorImage(Cursor cursor, int width, int height, const unsigned char * pixels, int hotspotX = …, int hotspotY = …) [+1]  // Bind a custom image to a cursor slot (RGBA pixels or Image)
+void alertDialogAsync(const std::string & title, const std::string & message, std::function<void ()> callback = std::function<void ()>(nullptr))  // Show alert dialog asynchronously. Callback is called when dismissed
+void bindCursorImage(Cursor cursor, int width, int height, const unsigned char * pixels, int hotspotX = 0, int hotspotY = 0) [+1]  // Bind a custom image to a cursor slot (RGBA pixels or Image)
 bool confirmDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Show Yes/No confirmation dialog. Returns true if Yes clicked
 void confirmDialogAsync(const std::string & title, const std::string & message, std::function<void (bool)> callback)  // Show Yes/No dialog asynchronously. Callback receives true if Yes clicked
 CoreEvents & events()  // Get the global CoreEvents hub holding all framework events (setup, update, draw, keyPressed, mousePressed, etc.); use events().eventName.listen(callback) to subscribe
@@ -907,10 +1353,10 @@ bool isOverlayFocused()  // True when an overlay currently owns keyboard focus (
 bool isOverlayHovered()  // True when an overlay currently has the pointer over it (e.g. cursor over a tcxImGui panel); guard raw mouse input so clicks on UI panels are not also handled by the app
 bool isShiftPressed()  // True while either Shift key (left or right) is held
 bool isSuperPressed()  // True while either Super / Cmd / Win key (left or right) is held
-FileDialogResult loadDialog(const std::string & title = …, const std::string & message = …, const std::string & defaultPath = …, bool folderSelection = …) [macos,windows,linux,android]  // Show file open dialog. Returns FileDialogResult with filePath, fileName, success
+FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const std::string & defaultPath = std::string(""), bool folderSelection = false) [macos,windows,linux,android]  // Show file open dialog. Returns FileDialogResult with filePath, fileName, success
 void loadDialogAsync(const std::string & title, const std::string & message, const std::string & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback)  // Show file open dialog asynchronously. Callback receives FileDialogResult
 void requestExitApp()  // Request application exit. Can be cancelled by listening to events().exitRequested and setting args.cancel = true
-FileDialogResult saveDialog(const std::string & title = …, const std::string & message = …, const std::string & defaultPath = …, const std::string & defaultName = …) [macos,windows,linux,android]  // Show file save dialog. Returns FileDialogResult with filePath, fileName, success
+FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const std::string & defaultPath = std::string(""), const std::string & defaultName = std::string("")) [macos,windows,linux,android]  // Show file save dialog. Returns FileDialogResult with filePath, fileName, success
 void saveDialogAsync(const std::string & title, const std::string & message, const std::string & defaultPath, const std::string & defaultName, std::function<void (const FileDialogResult &)> callback)  // Show file save dialog asynchronously. Callback receives FileDialogResult
 void setCursor(Cursor cursor)  // Set the mouse cursor shape
 void setTouchAsMouse(bool enabled)  // Enable/disable touch events firing as mouse events (for Android/iOS)
@@ -958,7 +1404,7 @@ Location getLocation() [macos,android,ios]  // Get the most recent GPS / WiFi lo
 float getSystemBrightness() [macos,android,ios]  // Get screen brightness (0.0-1.0). iOS: linear. Android: gamma-corrected (perceptual). Desktop: returns -1 (not supported)
 float getSystemVolume()  // Get system output volume (0.0-1.0)
 ThermalState getThermalState() [macos,ios,android]  // Get the coarse-grained device thermal state (Nominal / Fair / Serious / Critical)
-float getThermalTemperature() [ios]  // Get device temperature in Celsius, or -1 if unavailable
+float getThermalTemperature() []  // Get device temperature in Celsius, or -1 if unavailable
 bool isBatteryCharging() [macos,android,ios]  // Return true if the battery is currently charging
 bool isProximityClose() [android,ios]  // Return true when the proximity sensor detects a nearby object (e.g. phone held to the ear)
 void setImmersiveMode(bool enabled) [android,ios]  // Hide system UI for immersive fullscreen. Android: sticky immersive (status + navigation bars). iOS: hides status bar + home indicator. Desktop: no-op
@@ -976,7 +1422,7 @@ void setup()  // Initialize sokol_gfx + sokol_gl (called for you by the app loop
 ### Time - Elapsed
 
 ```cpp
-double getElapsedTime()  // Elapsed seconds (alias for getElapsedTimef)
+double getElapsedTime()  // Elapsed seconds (double) since program start. A separate clock from getElapsedTimef(); it is NOT reset by resetElapsedTimeCounter().
 float getElapsedTimef()  // Elapsed seconds (float)
 uint64_t getElapsedTimeMicros()  // Elapsed microseconds (int64)
 uint64_t getElapsedTimeMillis()  // Elapsed milliseconds (int64)
@@ -1007,10 +1453,10 @@ int getYear()  // Current year
 ### Math - Random & Noise
 
 ```cpp
-float fbm(float x, float y, int octaves = …, float lacunarity = …, float gain = …) [+1]  // Fractal Brownian Motion noise
+float fbm(float x, float y, int octaves = 4, float lacunarity = 2.0, float gain = 0.5) [+1]  // Fractal Brownian Motion noise
 float noise(float x) [+6]  // Perlin noise
 float random() [+2]  // Random number
-int randomInt(int max) [+1]  // Random integer
+int randomInt(int max) [+1]  // Random integer. randomInt(max) returns 0 to max-1 (max exclusive); randomInt(min, max) returns min to max (inclusive).
 void randomSeed(unsigned int seed)  // Set random seed
 float signedNoise(float x) [+6]  // Perlin noise (-1.0 to 1.0)
 ```
@@ -1098,8 +1544,8 @@ bool isFullscreen()  // Check if window is fullscreen
 bool isRecording()  // Check whether a recording is in progress
 int recordingFrameCount()  // Number of frames captured so far in the current recording
 const std::string & recordingPath()  // Output file path of the current recording
-void redraw(int count = …)  // Request extra redraws (useful for event-driven rendering)
-int runHeadlessApp(const HeadlessSettings & settings = …)  // Run an app class without a window or graphics context (update loop only). Template on the app type; returns the process exit code
+void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
+int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Template on the app type; returns the process exit code
 bool saveScreenshot(const std::filesystem::path & path)  // Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
 void setClipboardString(const std::string & text)  // Copy text to clipboard
 void setFullscreen(bool full)  // Set fullscreen mode
@@ -1111,7 +1557,7 @@ void setWindowPosition(int x, int y) [macos,windows]  // Set window position in 
 void setWindowSize(int width, int height)  // Set window size
 void setWindowSizeLogical(int width, int height)  // Resize the window to the given logical size (logical pixels)
 void setWindowTitle(const std::string & title)  // Set window title
-bool startRecording(const std::string & path, const VideoRecordSettings & settings = …) [macos,windows,linux,android,ios]  // Start recording the window to a video file (native encoder, no ffmpeg)
+bool startRecording(const std::string & path, const VideoRecordSettings & settings = {}) [macos,windows,linux,android,ios]  // Start recording the window to a video file (native encoder, no ffmpeg)
 void stopRecording()  // Stop the current recording and finalize the file
 void toggleFullscreen()  // Toggle fullscreen mode
 ```
@@ -1121,9 +1567,9 @@ void toggleFullscreen()  // Toggle fullscreen mode
 ```cpp
 void beep() [+3]  // Play a beep sound
 void closeLogFile()  // Close the current log file
-bool compress(const void * src, std::size_t nbytes, std::vector<std::uint8_t> & out, Codec codec) [+1]  // Compress a byte buffer with the given codec (Codec::None or Codec::LZ4). Resizes out and returns true on success.
+bool compress(const void * src, std::size_t nbytes, std::vector<std::uint8_t> & out, Codec codec) [+1]  // Compress a byte buffer with the given codec (Codec::None or Codec::LZ4). The vector overload resizes out and returns true on success; the raw (dst pointer) overload returns the number of bytes written, or -1 on failure (no resizing).
 std::size_t compressBound(std::size_t nbytes, Codec codec)  // Worst-case compressed size, for sizing a destination buffer
-bool decompress(const void * src, std::size_t nbytes, std::vector<std::uint8_t> & out, std::size_t decompressedSize, Codec codec) [+1]  // Decompress a byte buffer; decompressedSize is the known original byte count. Resizes out and returns true on success (false / cleared out on size mismatch or failure).
+bool decompress(const void * src, std::size_t nbytes, std::vector<std::uint8_t> & out, std::size_t decompressedSize, Codec codec) [+1]  // Decompress a byte buffer; decompressedSize is the known original byte count. The vector overload resizes out and returns true on success (false / cleared out on mismatch or failure); the raw (dst pointer) overload returns the number of bytes written, or -1 on failure.
 Logger & getLogger()  // Access the global logger instance
 std::thread::id getMainThreadId()  // Get the main thread ID. Records the current thread's ID on the first call, so it must first be called from the main thread.
 int hexToInt(const std::string & hexStr)  // Parse a hex string into a signed int
@@ -1132,13 +1578,13 @@ void intersectRect(float x1, float y1, float w1, float h1, float x2, float y2, f
 bool isMainThread()  // Whether the calling thread is the main (scene) thread. The main thread ID is recorded on the first call to getMainThreadId().
 bool isStringInString(const std::string & haystack, const std::string & needle)  // Check whether one string contains another
 std::string joinString(const std::vector<std::string> & stringElements, const std::string & delimiter)  // Join strings with delimiter
-LogStream logAt(LogLevel level = …)  // Stream-based log output at a runtime-selected level
-LogStream logError(const std::string & module = …)  // Stream-based error-level log output
-LogStream logFatal(const std::string & module = …)  // Stream-based fatal-level log output
+LogStream logAt(LogLevel level = Notice)  // Stream-based log output at a runtime-selected level
+LogStream logError(const std::string & module = std::string(""))  // Stream-based error-level log output
+LogStream logFatal(const std::string & module = std::string(""))  // Stream-based fatal-level log output
 const char * logLevelToString(LogLevel level)  // Return the uppercase name of a log level (e.g. "NOTICE", "WARNING") 
-LogStream logNotice(const std::string & module = …)  // Print to console
-LogStream logVerbose(const std::string & module = …)  // Stream-based verbose-level log output
-LogStream logWarning(const std::string & module = …)  // Stream-based warning-level log output
+LogStream logNotice(const std::string & module = std::string(""))  // Print to console
+LogStream logVerbose(const std::string & module = std::string(""))  // Stream-based verbose-level log output
+LogStream logWarning(const std::string & module = std::string(""))  // Stream-based warning-level log output
 Json nodeToJson(Node & node, int maxDepth)  // Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection
 Json parseJson(const std::string & str)  // Parse a JSON string into a Json object; returns an empty Json on parse error.
 Xml parseXml(const std::string & str)  // Parse an XML string into an Xml object.
@@ -1149,17 +1595,17 @@ void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
 bool setLogFile(const std::string & path)  // Open a file to receive log output
 const std::string & shortTypeName(const std::type_info & ti)  // Short (unqualified) readable name for a type, cached per type
-std::vector<std::string> splitString(const std::string & source, const std::string & delimiter, bool ignoreEmpty = …, bool trim = …)  // Split string by delimiter
+std::vector<std::string> splitString(const std::string & source, const std::string & delimiter, bool ignoreEmpty = false, bool trim = false)  // Split string by delimiter
 void stringReplace(std::string & input, const std::string & searchStr, const std::string & replaceStr)  // Replace substring in place
 std::size_t stringTimesInString(const std::string & haystack, const std::string & needle)  // Count occurrences of a substring in a string
 void tcCloseLogFile() ⚠️deprecated  // Deprecated alias for closeLogFile()
 Logger & tcGetLogger() ⚠️deprecated  // Deprecated alias for getLogger()
-LogStream tcLog(LogLevel level = …) ⚠️deprecated  // Deprecated alias for logAt()
-LogStream tcLogError(const std::string & module = …) ⚠️deprecated  // Deprecated alias for logError()
-LogStream tcLogFatal(const std::string & module = …) ⚠️deprecated  // Deprecated alias for logFatal()
-LogStream tcLogNotice(const std::string & module = …) ⚠️deprecated  // Deprecated alias for logNotice()
-LogStream tcLogVerbose(const std::string & module = …) ⚠️deprecated  // Deprecated alias for logVerbose()
-LogStream tcLogWarning(const std::string & module = …) ⚠️deprecated  // Deprecated alias for logWarning()
+LogStream tcLog(LogLevel level = Notice) ⚠️deprecated  // Deprecated alias for logAt()
+LogStream tcLogError(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logError()
+LogStream tcLogFatal(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logFatal()
+LogStream tcLogNotice(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logNotice()
+LogStream tcLogVerbose(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logVerbose()
+LogStream tcLogWarning(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logWarning()
 void tcSetConsoleLogLevel(LogLevel level) ⚠️deprecated  // Deprecated alias for setConsoleLogLevel()
 void tcSetFileLogLevel(LogLevel level) ⚠️deprecated  // Deprecated alias for setFileLogLevel()
 bool tcSetLogFile(const std::string & path) ⚠️deprecated  // Deprecated alias for setLogFile()
@@ -1171,7 +1617,7 @@ float toFloat(const std::string & str)  // Convert string to float
 std::string toHex(const T & value) [+2]  // Convert an integer (zero-padded to width) or string bytes to a hexadecimal string
 int toInt(const std::string & str)  // Convert string to int
 int64_t toInt64(const std::string & str)  // Parse a string into a 64-bit integer
-std::string toJsonString(const Json & j, int indent = …)  // Serialize a Json object to a string. indent sets the pretty-print width (negative for compact).
+std::string toJsonString(const Json & j, int indent = 2)  // Serialize a Json object to a string. indent sets the pretty-print width (negative for compact).
 std::string toLower(const std::string & src)  // Convert to lower case
 std::string toString(const T & value) [+4]  // Convert to string
 std::string toUpper(const std::string & src)  // Convert to upper case
@@ -1204,7 +1650,7 @@ Json loadJson(const std::string & path)  // Load a JSON file and return it as a 
 std::string loadTextFile(const std::string & path)  // Load entire text file
 Xml loadXml(const std::string & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
 bool removeFile(const std::string & path)  // Remove file
-bool saveJson(const Json & j, const std::string & path, int indent = …)  // Write a Json object to a file. Relative paths are resolved via getDataPath. indent sets the pretty-print width (negative for compact). Returns true on success.
+bool saveJson(const Json & j, const std::string & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath. indent sets the pretty-print width (negative for compact). Returns true on success.
 bool saveTextFile(const std::string & path, const std::string & content)  // Save string to text file
 void setDataPathRoot(const std::string & path)  // Set the root directory used to resolve relative data paths. A relative path is resolved against the executable directory; an absolute path (starting with /) is used as-is. A trailing slash is added automatically.
 void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms.
@@ -1246,10 +1692,10 @@ float easeOut(float t, EaseType type)  // Apply ease-out to value (0-1)
 ### Types - Color
 
 ```cpp
-Color colorFromHSB(float h, float s, float b, float a = …) ⚠️deprecated  // Create Color from HSB (alias for Color::fromHSB)
-Color colorFromLinear(float r, float g, float b, float a = …) ⚠️deprecated  // Deprecated alias for Color::fromLinear()
-Color colorFromOKLab(float L, float a_lab, float b_lab, float alpha = …) ⚠️deprecated  // Deprecated alias for Color::fromOKLab()
-Color colorFromOKLCH(float L, float C, float H, float a = …) ⚠️deprecated  // Deprecated alias for Color::fromOKLCH()
+Color colorFromHSB(float h, float s, float b, float a = 1.0) ⚠️deprecated  // Create Color from HSB (alias for Color::fromHSB)
+Color colorFromLinear(float r, float g, float b, float a = 1.0) ⚠️deprecated  // Deprecated alias for Color::fromLinear()
+Color colorFromOKLab(float L, float a_lab, float b_lab, float alpha = 1.0) ⚠️deprecated  // Deprecated alias for Color::fromOKLab()
+Color colorFromOKLCH(float L, float C, float H, float a = 1.0) ⚠️deprecated  // Deprecated alias for Color::fromOKLCH()
 ```
 
 ### Scene Graph
@@ -1265,15 +1711,15 @@ void setSelectedNode(Node * n)  // Set the currently selected node. Pass nullptr
 ```cpp
 void disable3D() ⚠️deprecated  // Deprecated alias for setupScreenOrtho()
 void enable3D() ⚠️deprecated  // Deprecated alias for setupScreenPerspective()
-void enable3DPerspective(float fovY = …, float nearZ = …, float farZ = …) ⚠️deprecated  // Deprecated alias for setupScreenPerspective()
+void enable3DPerspective(float fovY = 0.785000026, float nearZ = 0.100000001, float farZ = 1000.0) ⚠️deprecated  // Deprecated alias for setupScreenPerspective()
 float getDefaultScreenFov()  // Get current default screen FOV
-Vec3 screenToWorld(const Vec2 & screenPos, float worldZ = …)  // Convert screen coordinate to world coordinate on Z plane
+Vec3 screenToWorld(const Vec2 & screenPos, float worldZ = 0.0)  // Convert screen coordinate to world coordinate on Z plane
 void setDefaultScreenFov(float fovDeg)  // Set default screen FOV (applied at frame start)
 void setFarClip(float farDist)  // Set the default-screen far clipping plane (0 = auto-calculate)
 void setNearClip(float nearDist)  // Set the default-screen near clipping plane (0 = auto-calculate)
-void setupScreenFov(float fovDeg, float nearDist = …, float farDist = …)  // Set up screen projection with specified FOV (0 = ortho, >0 = perspective)
+void setupScreenFov(float fovDeg, float nearDist = 0.0, float farDist = 0.0)  // Set up screen projection with specified FOV (0 = ortho, >0 = perspective)
 void setupScreenOrtho()  // Set up orthographic projection (2D mode)
-void setupScreenPerspective(float fovDeg = …, float nearDist = …, float farDist = …)  // Set up perspective projection (oF-style default 3D)
+void setupScreenPerspective(float fovDeg = 45.0, float nearDist = 0.0, float farDist = 0.0)  // Set up perspective projection (oF-style default 3D)
 Vec3 worldToScreen(const Vec3 & worldPos)  // Convert a world coordinate to screen coordinate (x, y = screen pixels, z = depth 0-1)
 ```
 
@@ -1281,8 +1727,8 @@ Vec3 worldToScreen(const Vec3 & worldPos)  // Convert a world coordinate to scre
 
 ```cpp
 const Vec3 & getCameraPosition()  // Current camera position used for specular/PBR view vector
-float getFarClip()  // Get far clipping plane distance
-float getNearClip()  // Get near clipping plane distance
+float getFarClip()  // Get the far-clip override (0 = auto-calculate from the camera distance).
+float getNearClip()  // Get the near-clip override (0 = auto-calculate from the camera distance).
 ```
 
 ### Lighting & PBR
@@ -1308,13 +1754,13 @@ void shadowDraw(const Mesh & mesh)  // Draw a mesh into the shadow depth pass (d
 
 ```cpp
 Mesh createBox(float width, float height, float depth) [+1]  // Create a box mesh
-Mesh createCapsule(float radius, float cylinderHeight, int resolution = …)  // Create a capsule mesh (Y-up: cylinder capped by two hemispheres)
-Mesh createCone(float radius, float height, int resolution = …)  // Create a cone mesh
-Mesh createCylinder(float radius, float height, int resolution = …)  // Create a cylinder mesh
-Mesh createIcoSphere(float radius, int subdivisions = …)  // Create an icosphere mesh (geodesic sphere with uniform triangles)
-Mesh createPlane(float width, float height, int cols = …, int rows = …)  // Create a plane mesh (subdivided quad on the XY plane)
-Mesh createSphere(float radius, int resolution = …)  // Create a sphere mesh
-Mesh createTorus(float radius, float tubeRadius, int sides = …, int rings = …)  // Create a torus (donut) mesh
+Mesh createCapsule(float radius, float cylinderHeight, int resolution = 16)  // Create a capsule mesh (Y-up: cylinder capped by two hemispheres)
+Mesh createCone(float radius, float height, int resolution = 16)  // Create a cone mesh
+Mesh createCylinder(float radius, float height, int resolution = 16)  // Create a cylinder mesh
+Mesh createIcoSphere(float radius, int subdivisions = 2)  // Create an icosphere mesh (geodesic sphere with uniform triangles)
+Mesh createPlane(float width, float height, int cols = 2, int rows = 2)  // Create a plane mesh (subdivided quad on the XY plane)
+Mesh createSphere(float radius, int resolution = 16)  // Create a sphere mesh
+Mesh createTorus(float radius, float tubeRadius, int sides = 24, int rings = 16)  // Create a torus (donut) mesh
 ```
 
 ### Graphics - Texture & GPU
@@ -1356,10 +1802,16 @@ bool sameSubnet(const std::string & a, const std::string & b, const std::string 
 ### Other
 
 ```cpp
+float atanh(float x) [std]  // Inverse hyperbolic tangent
 Baseline  // Direction shorthand for Direction::Baseline (text baseline)
 Bottom  // Direction shorthand for Direction::Bottom
 Center  // Direction shorthand for Direction::Center
+const char * enumLabel(E value)  // Return the display string for one enum value (TC_ENUM_LABELS override, else reflected name).
+const std::array<std::string_view, internal::enumValidCount<E> enumNames()  // Return a compile-time array of all valid enumerator names of E.
+EnumLabelSpan enumReflectedSpan()  // Return an EnumLabelSpan synthesized from reflection (valid for contiguous zero-based enums).
+const std::array<E, internal::enumValidCount<E> enumValues()  // Return a compile-time array of all valid enumerator values of E, parallel to enumNames.
 EVENT_DRIVEN  // Frame-rate sentinel: only redraw on demand (event-driven)
+float exp2(float x) [std]  // Base-2 exponential (2^x)
 HALF_TAU  // Half circle (PI)
 KEY_BACKSPACE  // Backspace key
 KEY_DELETE  // Delete key
@@ -1392,15 +1844,20 @@ KEY_SPACE  // Space key
 KEY_TAB  // Tab key
 KEY_UP  // Up arrow key
 Left  // Direction shorthand for Direction::Left
+float log10(float x) [std]  // Base-10 (common) logarithm
+float log2(float x) [std]  // Base-2 logarithm
 MOUSE_BUTTON_LEFT  // Left mouse button
 MOUSE_BUTTON_MIDDLE  // Middle mouse button
 MOUSE_BUTTON_RIGHT  // Right mouse button
 Vec2 operator*(float s, const Vec2 & v) [+4]  // Component-wise multiplication
-PI ⚠️deprecated  // Pi (use TAU instead)
+PI ⚠️deprecated  // Ratio of circumference to diameter. ≈ 3.14159. Prefer HALF_TAU for half a turn.
 QUARTER_TAU  // Quarter circle (PI/2)
+float remainder(float x, float y) [std]  // IEEE floating-point remainder of x/y
 Right  // Direction shorthand for Direction::Right
-TAU  // Full circle (2*PI)
+float tanh(float x) [std]  // Hyperbolic tangent
+TAU  // Ratio of circumference to radius; the radian measure of one full turn. ≈ 6.28318.
 Top  // Direction shorthand for Direction::Top
+float trunc(float x) [std]  // Truncate toward zero (drop the fractional part)
 VERSION_MAJOR  // TrussC major version number
 VERSION_MINOR  // TrussC minor version number
 VERSION_PATCH  // TrussC patch version number
@@ -1454,6 +1911,7 @@ int AudioEngine::getSampleRate() const  // Current engine output sample rate (Hz
 bool AudioEngine::init() [+1]  // Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success.
 bool AudioEngine::isInitialized() const  // True after a successful init().
 std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available playback devices (name + isDefault). Empty if unsupported on the platform.
+void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Audio output callback: mix all playing sounds into the buffer (internal, called from the audio thread).
 std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) [+1]  // Start a new mixer voice for the given source (eager SoundBuffer or streaming SoundStream) and return its live PlayingSound handle. Usually called indirectly via Sound::play().
 void AudioEngine::shutdown()  // Stop and close the audio device.
 ```
@@ -1488,9 +1946,10 @@ int64_t BuildInfo::timestamp()  // Build timestamp as Unix seconds (UTC)
 int BuildInfo::year()  // Build year (e.g. 2026)
 ```
 
-### CameraContext
+### CameraContext — A snapshot of the camera (view / projection / viewport) that a part of the scene was drawn under. One is registered per camera scope (screen setup, EasyCam::begin, Fbo::begin) and stamped on each node at draw time, so mouse picking unprojects the cursor through the same camera the node was rendered with.
 
 ```cpp
+Ray CameraContext::screenPointToRay(float screenX, float screenY) const  // Unproject a screen point (pixels, top-left origin) into a world-space ray.
 Vec3 CameraContext::worldToScreen(const Vec3 & worldPos) const  // Convert world coordinate to screen coordinate (x, y = screen pos, z = depth 0-1)
 ```
 
@@ -1520,20 +1979,20 @@ float ChipSoundNote::getTotalDuration() const  // Total note duration in seconds
 
 ```cpp
 Color Color::clamped() const  // Get clamped copy (0.0-1.0)
-Color Color::fromBytes(int r, int g, int b, int a = …)  // Create from 0-255 values
-Color Color::fromHex(uint32_t hex, bool hasAlpha = …)  // Create from hex value
-Color Color::fromHSB(float h, float s, float b, float a = …)  // Create from HSB (H: 0-1)
-Color Color::fromLinear(float r, float g, float b, float a = …)  // Create from linear RGB
-Color Color::fromOKLab(float L, float a_lab, float b_lab, float alpha = …)  // Create from OKLab (L: 0-1, a: ~-0.4-0.4, b: ~-0.4-0.4)
-Color Color::fromOKLCH(float L, float C, float H, float a = …)  // Create from OKLCH (L: 0-1, C: 0-0.4, H: 0-1)
+Color Color::fromBytes(int r, int g, int b, int a = 255)  // Create from 0-255 values
+Color Color::fromHex(uint32_t hex, bool hasAlpha = false)  // Create from hex value
+Color Color::fromHSB(float h, float s, float b, float a = 1.0)  // Create from HSB (H: 0-1)
+Color Color::fromLinear(float r, float g, float b, float a = 1.0)  // Create from linear RGB
+Color Color::fromOKLab(float L, float a_lab, float b_lab, float alpha = 1.0)  // Create from OKLab (L: 0-1, a: ~-0.4-0.4, b: ~-0.4-0.4)
+Color Color::fromOKLCH(float L, float C, float H, float a = 1.0)  // Create from OKLCH (L: 0-1, C: 0-0.4, H: 0-1)
 Color Color::lerp(const Color & target, float t) const  // Interpolate in OKLab space
 Color Color::lerpHSB(const Color & target, float t) const  // Interpolate in HSB space
 Color Color::lerpLinear(const Color & target, float t) const  // Interpolate in linear RGB space
 Color Color::lerpOKLab(const Color & target, float t) const  // Interpolate in OKLab space (perceptually uniform)
 Color Color::lerpOKLCH(const Color & target, float t) const  // Interpolate in OKLCH space (shortest hue path)
 Color Color::lerpRGB(const Color & target, float t) const  // Interpolate in RGB space
-Color & Color::set(float r, float g, float b, float a = …) [+2]  // Set color components
-uint32_t Color::toHex(bool includeAlpha = …) const  // Convert to hex value
+Color & Color::set(float r, float g, float b, float a = 1.0) [+2]  // Set color components
+uint32_t Color::toHex(bool includeAlpha = false) const  // Convert to hex value
 ColorHSB Color::toHSB() const  // Convert to HSB (H: 0-1, S: 0-1, B: 0-1)
 ColorLinear Color::toLinear() const  // Convert to linear RGB color space
 ColorOKLab Color::toOKLab() const  // Convert to OKLab (perceptually uniform)
@@ -1543,7 +2002,7 @@ ColorOKLCH Color::toOKLCH() const  // Convert to OKLCH (L: 0-1, C: 0-0.4, H: 0-1
 ### ColorHSB — HSB color space (H/S/B: 0-1)
 
 ```cpp
-ColorHSB ColorHSB::lerp(const ColorHSB & target, float t, bool shortestPath = …) const  // Interpolate in HSB space (shortest hue path)
+ColorHSB ColorHSB::lerp(const ColorHSB & target, float t, bool shortestPath = true) const  // Interpolate in HSB space (shortest hue path)
 ColorLinear ColorHSB::toLinear() const  // Convert to linear RGB color space
 ColorOKLab ColorHSB::toOKLab() const  // Convert to OKLab color space
 ColorOKLCH ColorHSB::toOKLCH() const  // Convert to OKLCH color space
@@ -1565,7 +2024,7 @@ Color ColorLinear::toSRGB() const  // Convert to sRGB (gamma-encoded) Color
 ### ColorOKLCH — Perceptually uniform OKLCH color
 
 ```cpp
-ColorOKLCH ColorOKLCH::lerp(const ColorOKLCH & target, float t, bool shortestPath = …) const  // Interpolate in OKLCH space (shortest hue path, perceptually uniform)
+ColorOKLCH ColorOKLCH::lerp(const ColorOKLCH & target, float t, bool shortestPath = true) const  // Interpolate in OKLCH space (shortest hue path, perceptually uniform)
 ColorHSB ColorOKLCH::toHSB() const  // Convert to HSB color space
 ColorLinear ColorOKLCH::toLinear() const  // Convert to linear RGB color space
 ColorOKLab ColorOKLCH::toOKLab() const  // Convert to OKLab color space
@@ -1650,6 +2109,11 @@ void EasyCam::setUpAxis(const Vec3 & up) [+1]  // Set the camera up axis (defaul
 void EasyCam::setZoomSensitivity(float s)  // Set zoom sensitivity
 ```
 
+### EnumLabelSpan — Label table for one enum type: a view over its human-readable enumerator names.
+
+```cpp
+```
+
 ### Environment — IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT)
 
 ```cpp
@@ -1667,7 +2131,7 @@ void Environment::release()  // Release GPU resources
 
 ```cpp
 void Event::clear()  // Remove all listeners
-EventListener Event::listen(Callback callback, int priority = …) [+2] ⚠️deprecated  // Register a listener callback and return an EventListener token; lower priority runs first, and Deliver::Main runs the callback on the main thread
+EventListener Event::listen(Callback callback, int priority = App) [+2] ⚠️deprecated  // Register a listener callback and return an EventListener token; lower priority runs first, and Deliver::Main runs the callback on the main thread
 size_t Event::listenerCount() const  // Number of currently registered listeners
 void Event::notify(T & arg)  // Fire the event, calling all listeners in priority order (no argument for Event<void>); stops early if a listener marks an input arg consumed
 ```
@@ -1687,17 +2151,20 @@ bool EventListener::isConnected() const  // True while the listener is still con
 ### Fbo — Framebuffer object for offscreen rendering
 
 ```cpp
-void Fbo::allocate(int w, int h, int sampleCount = …, TextureFormat format = …, bool mipmaps = …)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
+void Fbo::allocate(int w, int h, int sampleCount = 1, TextureFormat format = RGBA8, bool mipmaps = false)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
 void Fbo::begin() [+1]  // Begin rendering to FBO
 void Fbo::clear()  // Release FBO resources
 void Fbo::clearColor(float r, float g, float b, float a)  // Clear the FBO with a solid color
 bool Fbo::copyTo(Image & image) const  // Copy FBO contents to Image
 void Fbo::draw(float x, float y) const [+1]  // Draw FBO contents
 void Fbo::end()  // End rendering to FBO
+sg_image Fbo::getColorImage() const  // Return the underlying sokol-gfx color image handle (advanced interop).
 int Fbo::getHeight() const  // Get height
 int Fbo::getSampleCount() const  // Get MSAA sample count
+sg_sampler Fbo::getSampler() const  // Return the underlying sokol-gfx sampler handle (advanced interop).
 Texture & Fbo::getTexture() [+1]  // Get FBO texture
 TextureFormat Fbo::getTextureFormat() const  // Get the FBO's color texture format
+sg_view Fbo::getTextureView() const  // Return the underlying sokol-gfx color texture view handle (advanced interop).
 int Fbo::getWidth() const  // Get width
 bool Fbo::isActive() const  // Check if currently rendering to FBO
 bool Fbo::isAllocated() const  // Check if allocated
@@ -1732,21 +2199,28 @@ size_t FileReader::tell()  // Get current position
 void FileWriter::close()  // Close file
 void FileWriter::flush()  // Flush buffer to disk
 bool FileWriter::isOpen() const  // Check if file is open
-bool FileWriter::open(const std::string & path, bool append = …)  // Open file for writing
+bool FileWriter::open(const std::string & path, bool append = false)  // Open file for writing
 FileWriter & FileWriter::write(const std::string & text) [+2]  // Write data to file
-FileWriter & FileWriter::writeLine(const std::string & text = …)  // Write line with newline
+FileWriter & FileWriter::writeLine(const std::string & text = std::string(""))  // Write line with newline
 ```
 
 ### Font — TrueType font for text rendering
 
 ```cpp
+Vec2 Font::calcAlignOffset(const std::string & text, Direction h, Direction v) const  // Compute the alignment offset for text given horizontal and vertical alignment.
 void Font::clearAtlas()  // Clear font atlas (GPU memory freed, glyphs re-rasterized on next draw)
 void Font::drawString(const std::string & text, float x, float y) const [+1]  // Draw text
+void Font::drawStringInternal(const std::string & text, float x, float y, Direction h, Direction v) const  // Draw pre-wrapped text in horizontal writing mode (internal layout + atlas emit).
+void Font::drawStringVerticalInternal(const std::string & text, float x, float y, Direction h, Direction v) const  // Draw pre-wrapped text in vertical writing mode (internal layout + atlas emit).
+void Font::emitPlacedGlyphsToAtlas(const std::vector<PlacedGlyph> & placed) const  // Emit atlas quads for a stream of placed glyphs (shared by horizontal and vertical layout).
 void Font::enableWrap(bool enabled)  // Enable or disable line wrapping (default off)
 void Font::forEachGlyph(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const [+1]  // Invoke a visitor once per laid-out glyph (positions follow writing mode, wrap, kinsoku, and TCY). Backend-agnostic layout pass shared by drawing, vector outlines, and hit testing
+void Font::forEachGlyphHorizontal(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const  // Run the horizontal-writing layout pass over pre-wrapped text, invoking the visitor per placed glyph.
+void Font::forEachGlyphVertical(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const  // Run the vertical-writing layout pass over pre-wrapped text, invoking the visitor per placed glyph.
 Direction Font::getAlignH() const  // Get current horizontal text alignment
 Direction Font::getAlignV() const  // Get current vertical text alignment
 float Font::getAscent() const  // Get the font ascent (distance from baseline to top)
+const internal::AtlasState * Font::getAtlas(size_t index) const  // Return the atlas page at the given index for debug visualization, or nullptr if out of range.
 size_t Font::getAtlasCount() const  // Get number of atlas pages
 size_t Font::getAtlasMemoryUsage() const  // Get atlas memory usage in bytes (alias of getMemoryUsage)
 Rect Font::getBBox(const std::string & text) const  // Get the bounding box of the text (top-left origin)
@@ -1761,6 +2235,7 @@ float Font::getLineHeight() const  // Get line height
 size_t Font::getLoadedGlyphCount() const  // Get number of loaded glyphs
 float Font::getMaxLineLength() const  // Get the current wrap length
 size_t Font::getMemoryUsage() const  // Get atlas memory usage in bytes
+sg_sampler Font::getSampler()  // Return the shared sokol-gfx sampler used for atlas rendering (advanced interop).
 int Font::getSize() const  // Get font size
 Path Font::getStringPath(const std::string & text, float x, float y, Direction h, Direction v) const [+1]  // Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely.
 int Font::getTcyDigitMax() const  // Get the maximum digit-run length that uses tate-chu-yoko combine mode
@@ -1770,6 +2245,8 @@ float Font::getWidth(const std::string & text) const  // Get text width
 WritingMode Font::getWritingMode() const  // Current writing mode
 bool Font::isLoaded() const  // Check if loaded
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
+bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
+bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is forbidden at the start of a line (kinsoku rule).
 bool Font::load(const std::string & nameOrPath, int size)  // Load font file
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
@@ -1783,6 +2260,9 @@ void Font::setTcyDigits(int maxDigits, TcyMode inMode, TcyMode overflowMode)  //
 void Font::setTcyLatin(TcyMode mode)  // Tate-chu-yoko mode for Latin letter runs in vertical text. Default is Rotate (whole run rotated 90 CW).
 void Font::setWritingMode(WritingMode mode)  // Switch between horizontal and vertical (tategaki) writing. Default is Horizontal (existing behavior unchanged).
 float Font::stringWidth(const std::string & text) const  // Pixel width of the text (alias of getWidth)
+std::string Font::wrapTextHorizontal(const std::string & text) const  // Insert hard newlines into text for horizontal word wrapping at maxLineLength.
+std::string Font::wrapTextIfEnabled(const std::string & text) const  // Wrap text per the current writing mode when wrapping is enabled, else return it unchanged.
+std::string Font::wrapTextVertical(const std::string & text) const  // Insert hard newlines into text for vertical wrapping by column-height budget.
 ```
 
 ### FpsSettings — FPS configuration returned by getFpsSettings(). Rates use VSYNC (-1) and EVENT_DRIVEN (0) sentinels, or a fixed fps
@@ -1793,12 +2273,9 @@ float Font::stringWidth(const std::string & text) const  // Pixel width of the t
 ### FullscreenShader — Shader specialization for fullscreen post-processing effects (position + texcoord quad). Set uniforms via setParams, then call draw to render a fullscreen quad.
 
 ```cpp
+sg_pipeline_desc FullscreenShader::createPipelineDesc()  // Build the fullscreen-quad pipeline descriptor (overrides Shader's).
+void FullscreenShader::createVertexBuffer()  // Create the fullscreen-quad vertex/index buffers (overrides Shader's).
 void FullscreenShader::draw()  // Draw a fullscreen quad with this shader applied
-```
-
-### Glyph — A bitmap glyph to register via registerGlyph(): a codepoint plus packed 1-bit pixel rows. The data pointer must outlive every drawBitmapString call
-
-```cpp
 ```
 
 ### GraphicsBackend — Runtime sokol_gfx backend query. Values are meaningful only after sg_setup() has completed (i.e. after the first setup() call).
@@ -1813,10 +2290,23 @@ bool GraphicsBackend::isWebGPU()  // True when running on WebGPU
 const char * GraphicsBackend::name()  // Short backend name: "opengl" / "gles3" / "webgl2" / "d3d11" / "metal" / "webgpu" / "vulkan" / "dummy" / "unknown" 
 ```
 
-### HasTexture
+### HasTexture — Base class for objects that own a texture (e.g. Image, Fbo, VideoPlayer); exposes getTexture().
 
 ```cpp
+void HasTexture::draw(float x, float y) const [+1]  // Draw the texture at the given position (and optional size).
+TextureFilter HasTexture::getMagFilter() const  // Return the texture magnification filter.
+TextureFilter HasTexture::getMinFilter() const  // Return the texture minification filter.
 Texture & HasTexture::getTexture() [+1]  // Get internal texture
+TextureWrap HasTexture::getWrapU() const  // Return the texture wrap mode on the U axis.
+TextureWrap HasTexture::getWrapV() const  // Return the texture wrap mode on the V axis.
+bool HasTexture::hasTexture() const  // Return true if the underlying texture is allocated.
+bool HasTexture::save(const fs::path & path) const  // Save the texture contents to a file; return true on success.
+void HasTexture::setFilter(TextureFilter filter)  // Set both the minification and magnification filters.
+void HasTexture::setMagFilter(TextureFilter filter)  // Set the texture magnification filter.
+void HasTexture::setMinFilter(TextureFilter filter)  // Set the texture minification filter.
+void HasTexture::setWrap(TextureWrap wrap)  // Set the texture wrap mode on both the U and V axes.
+void HasTexture::setWrapU(TextureWrap wrap)  // Set the texture wrap mode on the U (horizontal) axis.
+void HasTexture::setWrapV(TextureWrap wrap)  // Set the texture wrap mode on the V (vertical) axis.
 ```
 
 ### HeadlessSettings — Settings for runHeadlessApp() (no window / graphics). Currently just the target update rate
@@ -1828,7 +2318,6 @@ HeadlessSettings & HeadlessSettings::setFps(float fps)  // Set the target update
 ### HitResult — Result of a node hit test (this is Node::HitResult). Returned by Node::findHitNode() / findHitNodeFromScreen(); call hit() to check whether anything was hit.
 
 ```cpp
-bool HitResult::hit() const  // Whether a node was hit (node is non-null).
 ```
 
 ### IVec2 — 2D integer vector (x, y)
@@ -1849,7 +2338,9 @@ IVec2 IVec3::xy() const  // Get XY components as IVec2
 ```cpp
 float IesProfile::getMaxCandela() const  // Get maximum candela value in the profile
 float IesProfile::getMaxVerticalAngle() const  // Get maximum vertical angle in the profile (radians)
+sg_sampler IesProfile::getSampler() const  // Return the sokol-gfx sampler of the IES profile for pipeline binding (advanced interop).
 int IesProfile::getTextureWidth() const  // Get width of the generated 1D lookup texture
+sg_view IesProfile::getView() const  // Return the sokol-gfx texture view of the IES profile for pipeline binding (advanced interop).
 bool IesProfile::isLoaded() const  // Check if profile is loaded
 bool IesProfile::load(const std::string & path)  // Load IES profile from file
 bool IesProfile::loadFromString(const std::string & data)  // Load IES profile from inline string data
@@ -1858,7 +2349,7 @@ bool IesProfile::loadFromString(const std::string & data)  // Load IES profile f
 ### Image — Image with CPU pixels and GPU texture
 
 ```cpp
-void Image::allocate(int width, int height, int channels = …, bool mipmaps = …)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
+void Image::allocate(int width, int height, int channels = 4, bool mipmaps = false)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
 void Image::clear()  // Release image resources
 void Image::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge.
 int Image::getChannels() const  // Get number of channels
@@ -1870,8 +2361,8 @@ Texture & Image::getTexture() [+1]  // Get internal texture
 int Image::getWidth() const  // Get width
 void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 bool Image::isAllocated() const  // Check if allocated
-bool Image::load(const fs::path & path, bool mipmaps = …)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
-bool Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = …)  // Load image from memory. `mipmaps=true` builds a mip chain.
+bool Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
+bool Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain.
 void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°.
 void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true))
@@ -1882,6 +2373,23 @@ void Image::setDirty()  // Mark image as needing update
 void Image::update()  // Apply pixel changes to GPU texture
 ```
 
+### JsonReadReflector — Reflector backend that applies a JSON object onto reflected members through their setters.
+
+```cpp
+void JsonReadReflector::beginGroup(const char * name)  // Descend into the nested JSON object for a composite member.
+void JsonReadReflector::endGroup()  // Return from the nested JSON object.
+std::vector<std::string> JsonReadReflector::unknownKeys() const  // Return the source keys that matched no reflected member (typos etc.); valid after reflectMembers runs.
+bool JsonReadReflector::visit(const char * name, float & v) [+7]  // Apply the JSON value for one member through its setter, recording applied/skipped/read-only.
+```
+
+### JsonWriteReflector — Reflector backend that writes reflected members into a JSON object.
+
+```cpp
+void JsonWriteReflector::beginGroup(const char * name)  // Open a nested JSON object for a composite member.
+void JsonWriteReflector::endGroup()  // Close the current nested JSON object.
+bool JsonWriteReflector::visit(const char * name, float & v) [+7]  // Write one reflected member into the output JSON object.
+```
+
 ### KeyEventArgs — Arguments for keyPressed / keyReleased events
 
 ```cpp
@@ -1890,6 +2398,8 @@ void Image::update()  // Apply pixel changes to GPU texture
 ### LayoutMod — Layout modifier (Mod) that auto-arranges child RectNodes in a vertical or horizontal stack with spacing, padding and axis sizing
 
 ```cpp
+bool LayoutMod::canAttachTo(Node * node)  // Restrict attachment to RectNode owners.
+void LayoutMod::earlyUpdate()  // Mod lifecycle: early-update hook (relayout point).
 AxisMode LayoutMod::getCrossAxis() const  // Get the cross-axis sizing mode (LayoutMod method) (C++ only)
 LayoutDirection LayoutMod::getDirection() const  // Get the layout direction (Vertical/Horizontal) (LayoutMod method) (C++ only)
 AxisMode LayoutMod::getMainAxis() const  // Get the main-axis sizing mode (LayoutMod method) (C++ only)
@@ -1898,6 +2408,7 @@ float LayoutMod::getPaddingLeft() const  // Get the left padding (LayoutMod meth
 float LayoutMod::getPaddingRight() const  // Get the right padding (LayoutMod method) (C++ only)
 float LayoutMod::getPaddingTop() const  // Get the top padding (LayoutMod method) (C++ only)
 float LayoutMod::getSpacing() const  // Get the spacing between children (LayoutMod method) (C++ only)
+bool LayoutMod::isExclusive() const  // Return true: only one LayoutMod may attach per node.
 LayoutMod & LayoutMod::setCrossAxis(AxisMode mode)  // Set the cross-axis sizing mode and re-layout (LayoutMod method) (C++ only)
 LayoutMod & LayoutMod::setDirection(LayoutDirection dir)  // Set the layout direction and re-layout (LayoutMod method) (C++ only)
 LayoutMod & LayoutMod::setMainAxis(AxisMode mode)  // Set the main-axis sizing mode and re-layout (LayoutMod method) (C++ only)
@@ -1907,6 +2418,7 @@ LayoutMod & LayoutMod::setPaddingLeft(float v)  // Set the left padding and re-l
 LayoutMod & LayoutMod::setPaddingRight(float v)  // Set the right padding and re-layout (LayoutMod method) (C++ only)
 LayoutMod & LayoutMod::setPaddingTop(float v)  // Set the top padding and re-layout (LayoutMod method) (C++ only)
 LayoutMod & LayoutMod::setSpacing(float spacing)  // Set the spacing between children and re-layout (LayoutMod method) (C++ only)
+void LayoutMod::setup()  // Mod lifecycle: lay out the children once when attached.
 void LayoutMod::updateLayout()  // Recalculate layout (call after adding/removing children) (C++ only)
 ```
 
@@ -1914,11 +2426,11 @@ void LayoutMod::updateLayout()  // Recalculate layout (call after adding/removin
 
 ```cpp
 Color Light::calculate(const Vec3 & worldPos, const Vec3 & worldNormal, const Material & material, const Vec3 & viewPos) const  // Compute the CPU Phong lighting contribution at a world position/normal for a material
-Mat4 Light::computeProjectorViewProj(float nearClip = …, float farClip = …) const  // Build the projector's view-projection matrix from spot params and lens shift
+Mat4 Light::computeProjectorViewProj(float nearClip = 0.100000001, float farClip = 10000.0) const  // Build the projector's view-projection matrix from spot params and lens shift
 void Light::disable()  // Disable this light
 void Light::disableShadow()  // Disable shadow casting
 void Light::enable()  // Enable this light
-void Light::enableShadow(int resolution = …)  // Enable shadow casting (depth map at given resolution)
+void Light::enableShadow(int resolution = 1024)  // Enable shadow casting (depth map at given resolution)
 const Color & Light::getAmbient() const  // Get ambient light color
 float Light::getConstantAttenuation() const  // Get constant attenuation factor
 const Color & Light::getDiffuse() const  // Get diffuse (main) light color
@@ -1954,7 +2466,7 @@ void Light::setProjectionTexture(const Texture * tex)  // Set texture for projec
 void Light::setProjectorAspect(float a)  // Set projector aspect ratio
 void Light::setShadowBias(float bias)  // Set shadow depth bias in world units
 void Light::setSpecular(const Color & c) [+1]  // Set specular light color
-void Light::setSpot(const Vec3 & position, const Vec3 & direction, float innerHalfAngle = …, float outerHalfAngle = …) [+1]  // Set as spot light with cone angles
+void Light::setSpot(const Vec3 & position, const Vec3 & direction, float innerHalfAngle = 0.0, float outerHalfAngle = 0.785399973) [+1]  // Set as spot light with cone angles
 ```
 
 ### Location — GPS / WiFi location fix returned by getLocation()
@@ -1963,6 +2475,11 @@ void Light::setSpot(const Vec3 & position, const Vec3 & direction, float innerHa
 ```
 
 ### LogEventArgs — Arguments delivered for each log message (level, text, and timestamp)
+
+```cpp
+```
+
+### LogStream — Stream-based log output — the object returned by logNotice() / logWarning() / logError(), accepting values via operator<<.
 
 ```cpp
 ```
@@ -2021,7 +2538,7 @@ Mat4 Mat4::transposed() const  // Get transposed matrix
 Material Material::bronze()  // Bronze material preset
 Material Material::copper()  // Copper material preset
 Material Material::emerald()  // Emerald material preset
-Material Material::fromPhong(const Color & diffuse, const Color & specular, float shininess, const Color & emissive = …)  // Convert Phong material parameters to PBR (roughness from shininess, metallic estimated from specular luminance)
+Material Material::fromPhong(const Color & diffuse, const Color & specular, float shininess, const Color & emissive = Color(0, 0, 0))  // Convert Phong material parameters to PBR (roughness from shininess, metallic estimated from specular luminance)
 float Material::getAo() const  // Get ambient occlusion factor
 const Color & Material::getBaseColor() const  // Get base color (albedo)
 const Texture * Material::getBaseColorTexture() const  // Get base color texture
@@ -2040,7 +2557,7 @@ bool Material::hasMetallicRoughnessTexture() const  // Check if a metallic-rough
 bool Material::hasNormalMap() const  // Check if a normal map is set
 bool Material::hasOcclusionTexture() const  // Check if an occlusion texture is set
 Material Material::iron()  // Iron material preset
-Material Material::plastic(const Color & baseColor, float roughness = …)  // Plastic material preset
+Material Material::plastic(const Color & baseColor, float roughness = 0.5)  // Plastic material preset
 Material Material::rubber(const Color & baseColor)  // Rubber material preset
 Material Material::ruby()  // Ruby material preset
 Material & Material::setAo(float ao)  // Set ambient occlusion factor
@@ -2066,10 +2583,10 @@ Mesh & Mesh::addIndex(unsigned int index)  // Add an index
 Mesh & Mesh::addIndices(const std::vector<unsigned int> & inds)  // Add multiple indices
 Mesh & Mesh::addNormal(float nx, float ny, float nz) [+1]  // Add a normal vector
 Mesh & Mesh::addNormals(const std::vector<Vec3> & norms)  // Add multiple normals
-Mesh & Mesh::addTangent(float tx, float ty, float tz, float tw = …) [+2]  // Add a tangent vector (xyz direction + w handedness)
+Mesh & Mesh::addTangent(float tx, float ty, float tz, float tw = 1.0) [+2]  // Add a tangent vector (xyz direction + w handedness)
 Mesh & Mesh::addTexCoord(float u, float v) [+1]  // Add a texture coordinate
 Mesh & Mesh::addTriangle(unsigned int i0, unsigned int i1, unsigned int i2)  // Add a triangle (3 indices)
-Mesh & Mesh::addVertex(float x, float y, float z = …) [+2]  // Add a vertex
+Mesh & Mesh::addVertex(float x, float y, float z = 0.0) [+2]  // Add a vertex
 Mesh & Mesh::addVertices(const std::vector<Vec3> & verts)  // Add multiple vertices
 Mesh & Mesh::append(const Mesh & other)  // Append another mesh
 Mesh & Mesh::clear()  // Clear all mesh data
@@ -2086,7 +2603,9 @@ void Mesh::drawNoLightingWithTexture(const Texture & texture) const  // Draw the
 void Mesh::drawWireframe() const  // Draw mesh as wireframe
 void Mesh::drawWithLighting() const  // Draw the mesh with lighting
 std::vector<Color> & Mesh::getColors() [+1]  // Get all vertex colors
+sg_buffer Mesh::getGpuIndexBuffer() const  // Return the underlying sokol-gfx index buffer handle (advanced interop).
 int Mesh::getGpuIndexCount() const  // Number of indices currently uploaded to the GPU
+sg_buffer Mesh::getGpuVertexBuffer() const  // Return the underlying sokol-gfx vertex buffer handle (advanced interop).
 int Mesh::getGpuVertexCount() const  // Number of vertices currently uploaded to the GPU
 std::vector<unsigned int> & Mesh::getIndices() [+1]  // Get all indices
 PrimitiveMode Mesh::getMode() const  // Get current primitive mode
@@ -2125,7 +2644,8 @@ void Mesh::uploadToGpu() const  // Upload mesh data to GPU buffers now
 size_t MicInput::getBuffer(float * outBuffer, size_t numSamples)  // Copy the latest captured samples into outBuffer. numSamples is capped at the ring buffer size (4096). Returns the number of samples written.
 int MicInput::getSampleRate() const  // Sample rate the microphone was opened at.
 bool MicInput::isRunning() const  // True while the microphone device is open and capturing.
-bool MicInput::start(int sampleRate = …)  // Open the microphone device at the given sample rate and begin capturing. Returns false on failure.
+void MicInput::onAudioData(const float * input, size_t frameCount)  // Mic input callback: receive captured input samples (internal, called from the audio thread).
+bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Open the microphone device at the given sample rate and begin capturing. Returns false on failure.
 void MicInput::stop()  // Stop capture and close the microphone device.
 ```
 
@@ -2156,16 +2676,19 @@ void Mod::update()  // Override: called every frame AFTER Node::update(). Use fo
 ### MouseDragEventArgs — Arguments for mouseDragged (cursor moving with a button held)
 
 ```cpp
+void MouseDragEventArgs::syncLegacy()  // Copy the canonical pos/delta fields into the deprecated x/y/deltaX/deltaY mirror fields (legacy mirrors scheduled for removal in v1.0).
 ```
 
 ### MouseEventArgs — Arguments for mousePressed / mouseReleased events. pos is local space, globalPos is screen space (equal at app level)
 
 ```cpp
+void MouseEventArgs::syncLegacy()  // Copy the canonical pos field into the deprecated x/y mirror fields (legacy mirrors scheduled for removal in v1.0).
 ```
 
 ### MouseMoveEventArgs — Arguments for mouseMoved (cursor moving with no button held)
 
 ```cpp
+void MouseMoveEventArgs::syncLegacy()  // Copy the canonical pos/delta fields into the deprecated x/y/deltaX/deltaY mirror fields (legacy mirrors scheduled for removal in v1.0).
 ```
 
 ### NetworkInterface — One address entry of a network interface (returned by listNetworkInterfaces)
@@ -2183,7 +2706,8 @@ const std::string & NetworkInterface::getNetmask() const  // Subnet mask
 ### Node — Base scene-graph node: transform hierarchy with parent/children, update/draw, input events and attachable Mods (C++ only, managed via shared_ptr / NodePtr)
 
 ```cpp
-void Node::addChild(Ptr child, bool keepGlobalPosition = …)  // Add a child node (C++ only)
+void Node::addChild(Ptr child, bool keepGlobalPosition = false)  // Add a child node (C++ only)
+void Node::beginDraw()  // Hook called before draw() and drawChildren(); override for clipping etc.
 uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Run callback once after delay seconds. Fired from the update loop (frame-quantized). Returns a timer id.
 uint64_t Node::callAfterAsync(double delay, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callAfter, but fired by a precise background scheduler thread (no frame jitter). The callback runs OFF the main thread: guard shared state with a mutex, never draw from it, and don't cancel while holding that mutex. Native only (uses a real thread). Returns a timer id.
 uint64_t Node::callEvery(double interval, std::function<void ()> callback)  // Run callback repeatedly every interval seconds. Fired from the update loop (frame-quantized). Returns a timer id.
@@ -2196,11 +2720,15 @@ void Node::cleanup()  // Called once before exit (optional user callback for cle
 void Node::destroy()  // Mark node for deferred removal from scene graph (C++ only)
 void Node::disableEvents()  // Disable mouse/key events for this node (C++ only)
 void Node::draw()  // Called every frame after update
+void Node::drawChildren()  // Draw the child nodes (overridable, e.g. for clipping).
 void Node::enableEvents()  // Enable mouse/key events for this node (C++ only)
+void Node::endDraw()  // Hook called after draw() and drawChildren().
 Node * Node::findByInstanceId(uint64_t id)  // Find a node in this subtree (self included) by instance id, depth-first (null if not found) (C++ only)
 HitResult Node::findHitNode(const Ray & globalRay)  // Hit test the whole tree with a global ray, returning the frontmost node (C++ only)
 HitResult Node::findHitNodeFromScreen(float screenX, float screenY)  // Hit test the whole tree from a screen point, using each node's own camera context (C++ only)
+HitResult Node::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Recursive hit test in reverse draw order; override for clipping-aware picking.
 bool Node::getActive() const ⚠️deprecated  // Deprecated alias for isActive()
+std::shared_ptr<const CameraContext> Node::getCameraContext() const  // Return the camera context this node was last drawn under (null if never drawn).
 size_t Node::getChildCount() const  // Get the number of child nodes (C++ only)
 int Node::getChildIndex() const  // This node's index among its parent's children (-1 if no parent) (C++ only)
 std::vector<Ptr> Node::getChildren() const  // Get a copy of the child node list (safe to iterate while modifying) (C++ only)
@@ -2236,8 +2764,9 @@ float Node::getY() const  // Get local Y position (C++ only)
 float Node::getZ() const  // Get local Z position (C++ only)
 Vec3 Node::globalToLocal(const Vec3 & global) const [+1] ⚠️deprecated  // Convert a global coordinate to this node's local space (C++ only)
 bool Node::hasName() const  // Whether an instance name has been set (C++ only)
+bool Node::hitTest(const Ray & localRay, float & outDistance) [+1]  // Geometric hit-test predicate in local space; override to make a node pickable.
 int Node::indexOfChild(const Node * child) const  // Index of the given child among this node's children (-1 if not a child) (C++ only)
-void Node::insertChild(size_t index, Ptr child, bool keepGlobalPosition = …)  // Insert a child node at a specific index (C++ only)
+void Node::insertChild(size_t index, Ptr child, bool keepGlobalPosition = false)  // Insert a child node at a specific index (C++ only)
 bool Node::isActive() const  // Whether the node is active (inactive: update and draw are skipped) (C++ only)
 bool Node::isDead() const  // Check if node is marked for destruction (C++ only)
 bool Node::isEventsEnabled() const  // Whether events are enabled (only such nodes are hit-test targets) (C++ only)
@@ -2246,11 +2775,26 @@ bool Node::isVisible() const  // Whether the node is visible (invisible: only dr
 Vec3 Node::localToGlobal(const Vec3 & local) const [+1] ⚠️deprecated  // Convert a local coordinate to global space (C++ only)
 void Node::moveToBack()  // Move this node to the beginning of its parent's child list — drawn first, beneath siblings. No-op if no parent or already first (C++ only)
 void Node::moveToFront()  // Move this node to the end of its parent's child list — drawn last, on top of siblings. No-op if no parent or already last (C++ only)
+void Node::onActiveChanged(bool active)  // Callback invoked when the node's active state changes.
 void Node::onChildAdded(Ptr child)  // Callback fired when a child is added (overridable) (C++ only)
 void Node::onChildRemoved(Ptr child)  // Callback fired when a child is removed (overridable) (C++ only)
+bool Node::onKeyPress(const KeyEventArgs & e) [+1]  // Handle a key press (broadcast to all nodes); return true to consume.
+bool Node::onKeyRelease(const KeyEventArgs & e) [+1]  // Handle a key release (broadcast to all nodes); return true to consume.
+void Node::onLocalMatrixChanged()  // Hook for custom behavior when the local matrix changes.
+bool Node::onMouseDrag(const MouseDragEventArgs & e) [+1]  // Handle a mouse drag (event localized to this node); return true to consume.
+void Node::onMouseEnter()  // Hook called when the pointer enters this node (hover begins).
+void Node::onMouseLeave()  // Hook called when the pointer leaves this node (hover ends).
+bool Node::onMouseMove(const MouseMoveEventArgs & e) [+1]  // Handle mouse movement (event localized to this node); return true to consume.
+bool Node::onMousePress(const MouseEventArgs & e) [+1]  // Handle a mouse press (event localized to this node); return true to consume.
+bool Node::onMouseRelease(const MouseEventArgs & e) [+1]  // Handle a mouse release (event localized to this node); return true to consume.
+bool Node::onMouseScroll(const ScrollEventArgs & e) [+1]  // Handle a scroll event (event localized to this node); return true to consume.
+void Node::onVisibleChanged(bool visible)  // Callback invoked when the node's visible state changes.
+void Node::processTimers()  // Process due timers (callAfter / callEvery), invoked within the update pass.
 void Node::removeAllChildren()  // Remove all child nodes (C++ only)
 void Node::removeChild(Ptr child)  // Remove a child node (C++ only)
+std::pair<const CameraContext *, Ray> Node::resolvePickRay(internal::PickRaySource & pick, const CameraContext * inheritedCtx, const Ray & globalRay) const  // Resolve this node's effective camera context and the global ray to hit-test it with.
 void Node::setActive(bool active)  // Set the active state (inactive: update and draw are skipped) (C++ only)
+void Node::setCameraContext(std::shared_ptr<const CameraContext> ctx)  // Set the camera context for a manually-managed node (normally set automatically by drawTree).
 void Node::setEuler(const Vec3 & euler) [+1]  // Set rotation from Euler angles in radians (pitch=X, yaw=Y, roll=Z) (C++ only)
 void Node::setEulerDeg(const Vec3 & deg)  // Set rotation from Euler angles in degrees (C++ only)
 void Node::setGlobalPos(const Vec3 & global) [+1]  // Set the node's position in global (world) space (C++ only)
@@ -2273,12 +2817,18 @@ void Node::setZ(float z)  // Set local Z position (C++ only)
 void Node::update()  // Called every frame before draw
 ```
 
+### Node::HitResult
+
+```cpp
+bool Node::HitResult::hit() const  // Whether a node was hit (node is non-null).
+```
+
 ### Path — Path/Polyline for lines and curves
 
 ```cpp
 void Path::addVertex(float x, float y) [+3]  // Add a vertex
 void Path::addVertices(const std::vector<Vec2> & verts) [+1]  // Add multiple vertices
-void Path::arc(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = …, int circleResolution = …) [+5]  // Add an arc (angles in radians)
+void Path::arc(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) [+5]  // Add an arc (angles in radians)
 void Path::bezierTo(const Vec3 & cp1, const Vec3 & cp2, const Vec3 & to, int resolution) [+2]  // Add cubic bezier curve (resolution=-1 uses current curve style)
 std::vector<std::array<float, 2>> Path::buildFillTriangles() const  // Triangulate the path interior into a flat list of 2D triangle vertices
 void Path::clear()  // Clear all vertices
@@ -2295,8 +2845,8 @@ std::pair<size_t, size_t> Path::getSubpathRange(size_t i) const  // Vertex index
 const std::vector<Vec3> & Path::getVertices() const [+1]  // Get all vertices
 bool Path::isClosed() const  // Check if path is closed
 bool Path::isSubpathClosed(size_t i) const  // Whether subpath i is closed
-void Path::lineTo(float x, float y, float z = …) [+2]  // Add line segment to point
-void Path::moveTo(float x, float y, float z = …) [+2]  // Start a new subpath at (x, y). A single Path can hold multiple disjoint contours (think SVG `<path>` with `M ... M ...`) — used by Font::getGlyphPath to keep an outer ring and its holes in one Path so drawFill can detect holes.
+void Path::lineTo(float x, float y, float z = 0) [+2]  // Add line segment to point
+void Path::moveTo(float x, float y, float z = 0) [+2]  // Start a new subpath at (x, y). A single Path can hold multiple disjoint contours (think SVG `<path>` with `M ... M ...`) — used by Font::getGlyphPath to keep an outer ring and its holes in one Path so drawFill can detect holes.
 void Path::quadBezierTo(const Vec3 & cp, const Vec3 & to, int resolution) [+2]  // Add quadratic bezier curve (resolution=-1 uses current curve style)
 Path & Path::reverseWinding(size_t i) [+1]  // Reverse the winding direction (vertex order) of all subpaths, or of one subpath. Under drawFill's non-zero winding rule, reversing a subpath toggles it between filling and cutting — e.g. build a circle contour, then reverseWinding(i) it into a hole punch. Reversing ALL subpaths leaves the render unchanged (only relative direction matters) — handy for imported outlines using the opposite convention.
 void Path::setClosed(bool closed)  // Set closed state
@@ -2307,7 +2857,7 @@ Mesh Path::toFillMesh() const  // Build a fillable Mesh from the path interior
 ### Pixels — Pixel buffer for image manipulation
 
 ```cpp
-void Pixels::allocate(int width, int height, int channels = …, PixelFormat format = …)  // Allocate pixel buffer
+void Pixels::allocate(int width, int height, int channels = 4, PixelFormat format = U8)  // Allocate pixel buffer
 void Pixels::clear()  // Release pixel buffer
 Pixels Pixels::clone() const  // Return a deep copy of the pixel buffer
 void Pixels::copyTo(unsigned char * dst) const  // Copy to external buffer
@@ -2384,7 +2934,7 @@ Mat4 Quaternion::toMatrix() const  // Convert to rotation matrix
 
 ```cpp
 Vec3 Ray::at(float t) const  // Get the point along the ray at distance t: origin + direction * t
-Ray Ray::fromScreenPoint2D(float screenX, float screenY, float startZ = …)  // Build an orthographic Z-parallel ray from a 2D screen point
+Ray Ray::fromScreenPoint2D(float screenX, float screenY, float startZ = 1000.0)  // Build an orthographic Z-parallel ray from a 2D screen point
 bool Ray::intersectAABB(const Vec3 & boxMin, const Vec3 & boxMax, float & outT) const  // Intersect an axis-aligned bounding box; writes distance, returns whether it hit
 bool Ray::intersectPlane(const Vec3 & planeNormal, float planeD, float & outT, Vec3 & outPoint) const  // Intersect an arbitrary plane; writes distance and hit point, returns whether it hit
 bool Ray::intersectSphere(float radius, float & outT) const  // Intersect a sphere centered at the origin; writes distance, returns whether it hit
@@ -2408,6 +2958,13 @@ Rect & Rect::set(float x, float y, float w, float h) [+1]  // Set rectangle boun
 ### RectNode — 2D UI rectangle node: size, clipping and ray-based hit testing, plus subscribable mouse Event members
 
 ```cpp
+void RectNode::beginDraw()  // Begin the draw scope, pushing the rect's clip region.
+void RectNode::draw()  // Draw the rectangle node; override in derived classes (draws nothing by default).
+void RectNode::drawRectFill()  // Helper that draws the rectangle filled.
+void RectNode::drawRectFillAndStroke()  // Helper that draws the rectangle with both fill and stroke.
+void RectNode::drawRectStroke()  // Helper that draws the rectangle outline.
+void RectNode::endDraw()  // End the draw scope, popping the clip region.
+HitResult RectNode::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Clipping-aware recursive hit test (overrides Node's to respect the rect bounds).
 float RectNode::getBottom() const  // Local bottom edge (equals height) (RectNode method) (C++ only)
 float RectNode::getHeight() const  // Get the node height (RectNode method) (C++ only)
 float RectNode::getLeft() const  // Local left edge (always 0) (RectNode method) (C++ only)
@@ -2417,6 +2974,11 @@ float RectNode::getTop() const  // Local top edge (always 0) (RectNode method) (
 float RectNode::getWidth() const  // Get the node width (RectNode method) (C++ only)
 bool RectNode::hitTest(const Ray & localRay, float & outDistance) [+1]  // Hit-test the rectangle against a ray (with out distance) or a 2D point (RectNode method) (C++ only)
 bool RectNode::isClipping() const  // Whether scissor clipping is enabled (RectNode method) (C++ only)
+bool RectNode::onMouseDrag(const MouseDragEventArgs & e)  // Fire the mouseDragged event and forward to the legacy simple-form hook.
+bool RectNode::onMousePress(const MouseEventArgs & e)  // Fire the mousePressed event and forward to the legacy simple-form hook.
+bool RectNode::onMouseRelease(const MouseEventArgs & e)  // Fire the mouseReleased event and forward to the legacy simple-form hook.
+bool RectNode::onMouseScroll(const ScrollEventArgs & e)  // Fire the scroll event; returns false to allow bubbling to a parent (e.g. ScrollContainer).
+void RectNode::onSizeChanged()  // Callback invoked when the rect's size changes.
 void RectNode::setClipping(bool enabled)  // Enable/disable scissor clipping for RectNode (C++ only)
 void RectNode::setHeight(float h)  // Set the node height (RectNode method) (C++ only)
 void RectNode::setRect(float x, float y, float w, float h)  // Set position and size at once (RectNode method) (C++ only)
@@ -2429,6 +2991,19 @@ void RectNode::setWidth(float w)  // Set the node width (RectNode method) (C++ o
 ```cpp
 void RectNodeButton::draw()  // Draw the button: fills the rect with the state-dependent color and draws the centered label. (override)
 bool RectNodeButton::isPressed() const  // Whether the button is currently pressed.
+bool RectNodeButton::onMousePress(const MouseEventArgs & e)  // Set the pressed state, then fire the base RectNode press handling.
+bool RectNodeButton::onMouseRelease(const MouseEventArgs & e)  // Clear the pressed state, then fire the base RectNode release handling.
+```
+
+### Reflector — Visitor base for the TC_REFLECT reflection system; backends (inspector, JSON, codec) subclass it with one visit() per supported type.
+
+```cpp
+void Reflector::beginGroup(const char * name)  // Enter a nested composite group of reflected members (no-op for flat backends).
+void Reflector::endGroup()  // Leave the current nested group.
+bool Reflector::isReadOnly() const  // Return true if the current reflection scope is read-only.
+void Reflector::popReadOnly()  // Leave the current read-only scope.
+void Reflector::pushReadOnly()  // Enter a read-only scope (members visited inside cannot be written).
+bool Reflector::visit(const char * name, float & v) [+7]  // Handle one reflected member by name and value; return true if it was edited.
 ```
 
 ### ResizeEventArgs — Arguments for windowResized events
@@ -2442,7 +3017,7 @@ bool RectNodeButton::isPressed() const  // Whether the button is currently press
 int ScreenRecorder::getFrameCount() const  // Number of frames captured so far
 const std::string & ScreenRecorder::getPath() const  // Output file path of the current recording
 bool ScreenRecorder::isRecording() const  // Check if the screen recorder is currently capturing
-bool ScreenRecorder::start(const std::string & path, const VideoRecordSettings & settings = …) [+1]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically
+bool ScreenRecorder::start(const std::string & path, const VideoRecordSettings & settings = {}) [+1]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically
 void ScreenRecorder::stop()  // Stop live capture and finalize the file
 VideoWriter & ScreenRecorder::writer()  // Access the underlying VideoWriter for advanced introspection
 ```
@@ -2450,14 +3025,22 @@ VideoWriter & ScreenRecorder::writer()  // Access the underlying VideoWriter for
 ### ScrollBar — Visual scroll indicator RectNode that syncs with a ScrollContainer and supports drag scrolling
 
 ```cpp
+void ScrollBar::draw()  // Draw the scrollbar as a rounded-cap stroked slot.
 Color ScrollBar::getBarColor() const  // Get the scroll-bar color (ScrollBar method) (C++ only)
 float ScrollBar::getBarWidth() const  // Get the scroll-bar thickness (ScrollBar method) (C++ only)
 float ScrollBar::getMargin() const  // Get the margin between the bar and the container edge (ScrollBar method) (C++ only)
 float ScrollBar::getOffset() const  // Get the rounded-cap draw offset (round(barWidth/2)) (ScrollBar method) (C++ only)
+void ScrollBar::handleHorizontalDrag(float localX)  // Map a horizontal drag position to the container's scrollX.
+void ScrollBar::handleVerticalDrag(float localY)  // Map a vertical drag position to the container's scrollY.
+bool ScrollBar::onMouseDrag(const MouseDragEventArgs & e)  // Translate a drag into a scroll position via the vertical or horizontal handler.
+bool ScrollBar::onMousePress(const MouseEventArgs & e)  // Begin dragging the bar, recording the grab offset.
+bool ScrollBar::onMouseRelease(const MouseEventArgs & e)  // End dragging the bar.
 void ScrollBar::setBarColor(const Color & color)  // Set the scroll-bar color (ScrollBar method) (C++ only)
 void ScrollBar::setBarWidth(float width)  // Set the scroll-bar thickness (ScrollBar method) (C++ only)
 void ScrollBar::setMargin(float margin)  // Set the margin between the bar and the container edge (ScrollBar method) (C++ only)
 void ScrollBar::updateFromContainer()  // Resync the bar size and position from its ScrollContainer (ScrollBar method) (C++ only)
+void ScrollBar::updateHorizontal()  // Size and position the bar for a horizontal scroll container (or hide it).
+void ScrollBar::updateVertical()  // Size and position the bar for a vertical scroll container (or hide it).
 ```
 
 ### ScrollContainer — Scrollable RectNode that clips and scrolls a single content node when it overflows the container bounds
@@ -2473,6 +3056,8 @@ float ScrollContainer::getScrollX() const  // Get the horizontal scroll position
 float ScrollContainer::getScrollY() const  // Get the vertical scroll position (ScrollContainer method) (C++ only)
 bool ScrollContainer::isHorizontalScrollEnabled() const  // Whether horizontal scrolling is enabled (ScrollContainer method) (C++ only)
 bool ScrollContainer::isVerticalScrollEnabled() const  // Whether vertical scrolling is enabled (ScrollContainer method) (C++ only)
+bool ScrollContainer::onMouseScroll(const ScrollEventArgs & e)  // Accumulate the scroll delta for processing in update(); consume if scrollable.
+void ScrollContainer::onSizeChanged()  // Recompute scroll bounds when the container's size changes.
 void ScrollContainer::setContent(Node::Ptr newContent)  // Set content node for ScrollContainer (C++ only)
 void ScrollContainer::setHorizontalScrollEnabled(bool enabled)  // Enable or disable horizontal scrolling (ScrollContainer method) (C++ only)
 void ScrollContainer::setScroll(float x, float y) [+1]  // Set the scroll position from x/y or a Vec2 (clamped) (ScrollContainer method) (C++ only)
@@ -2480,12 +3065,14 @@ void ScrollContainer::setScrollSpeed(float speed)  // Set the scroll speed (whee
 void ScrollContainer::setScrollX(float x)  // Set the horizontal scroll position (clamped) (ScrollContainer method) (C++ only)
 void ScrollContainer::setScrollY(float y)  // Set vertical scroll position (C++ only)
 void ScrollContainer::setVerticalScrollEnabled(bool enabled)  // Enable or disable vertical scrolling (ScrollContainer method) (C++ only)
+void ScrollContainer::update()  // Apply accumulated scroll deltas to the content position.
 void ScrollContainer::updateScrollBounds()  // Recalculate scroll bounds from the content size (ScrollContainer method) (C++ only)
 ```
 
 ### ScrollEventArgs — Arguments for mouseScrolled events
 
 ```cpp
+void ScrollEventArgs::syncLegacy()  // Copy the canonical scroll field into the deprecated scrollX/scrollY mirror fields (legacy mirrors scheduled for removal in v1.0).
 ```
 
 ### Serial — Cross-platform serial port (USB/COM): connect, read/write bytes
@@ -2520,12 +3107,27 @@ const std::string & SerialDeviceInfo::getDevicePath() const  // Device path
 ### Shader — GPU shader program (vertex + fragment) with a begin/end/setUniform API for custom-shaded drawing
 
 ```cpp
+void Shader::applyUniforms()  // Apply all stored uniforms to the bound shader.
 void Shader::begin()  // Begin shader (pushes to stack)
+void Shader::clear()  // Destroy the shader's GPU resources and reset it to the unloaded state.
+sg_pipeline_desc Shader::createPipelineDesc()  // Build the pipeline descriptor (standard vertex layout); overridable by subclasses.
+void Shader::createVertexBuffer()  // Create the dynamic vertex/index buffers; overridable by subclasses.
 void Shader::end()  // End shader (pops from stack)
 bool Shader::isLoaded() const  // Check if shader is loaded
 bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Load from sokol-shdc generated function
+void Shader::onBegin()  // Hook called when the shader scope begins; override to set up bindings.
+void Shader::onEnd()  // Hook called when the shader scope ends.
+sg_pipeline Shader::pipelineForCurrentTarget()  // Return the pipeline matching the current render target, building and caching one per (format, sampleCount).
 void Shader::setTexture(int slot, sg_image image, sg_sampler sampler) [+1]  // Bind texture to slot
 void Shader::setUniform(int slot, float value) [+9]  // Set uniform variable by slot (vector overloads send arrays; Vec3 array is padded to Vec4 per std140)
+void Shader::setupBindings(sg_bindings & bind)  // Hook to populate the sg_bindings before a draw; override for custom inputs.
+void Shader::storeUniform(int slot, const void * data, size_t size)  // Store raw uniform bytes for the given slot, to be applied at draw time.
+void Shader::submitVertices(const ShaderVertex * data, int count, PrimitiveType type)  // Submit a batch of vertices for deferred drawing with this shader (lines are unsupported).
+```
+
+### ShaderVertex — Standard vertex format for shader drawing (position, normal, texcoord, color).
+
+```cpp
 ```
 
 ### Sound — Audio playback
@@ -2548,8 +3150,8 @@ bool Sound::isPlaying() const  // Check if playing
 bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
 bool Sound::load(const std::string & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
 void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
-bool Sound::loadStream(const std::string & path, int maxPolyphony = …) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
-void Sound::loadTestTone(float frequency = …, float duration = …)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.
+bool Sound::loadStream(const std::string & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
+void Sound::loadTestTone(float frequency = 440.0, float duration = 1.0)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.
 void Sound::pause()  // Pause playback
 void Sound::play()  // Play audio
 void Sound::resume()  // Resume playback
@@ -2569,14 +3171,14 @@ void Sound::stop()  // Stop audio
 ```cpp
 void SoundBuffer::applyADSR(float attack, float decay, float sustainLevel, float release)  // Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1).
 void SoundBuffer::clip()  // Hard-clip all samples into the -1.0 .. 1.0 range.
-void SoundBuffer::createAdtsHeader(uint8_t * header, int frameLength, int sampleRate, int channels, int profile = …)  // Write a 7-byte ADTS header for one raw AAC frame into header (AAC-in-MOV container helper).
-void SoundBuffer::generateNoise(float duration, float volume = …, int sr = …)  // Fill the buffer with mono white noise.
-void SoundBuffer::generatePinkNoise(float duration, float volume = …, int sr = …)  // Fill the buffer with mono pink noise (1/f spectrum, Paul Kellet's method).
-void SoundBuffer::generateSawtoothWave(float frequency, float duration, float volume = …, int sr = …)  // Fill the buffer with a mono sawtooth wave.
-void SoundBuffer::generateSilence(float duration, int sr = …)  // Fill the buffer with silence of the given duration (useful as a base for mixFrom).
-void SoundBuffer::generateSineWave(float frequency, float duration, float volume = …, int sr = …)  // Fill the buffer with a mono sine wave of the given frequency (Hz) and duration (seconds).
-void SoundBuffer::generateSquareWave(float frequency, float duration, float volume = …, int sr = …)  // Fill the buffer with a mono square wave.
-void SoundBuffer::generateTriangleWave(float frequency, float duration, float volume = …, int sr = …)  // Fill the buffer with a mono triangle wave.
+void SoundBuffer::createAdtsHeader(uint8_t * header, int frameLength, int sampleRate, int channels, int profile = 2)  // Write a 7-byte ADTS header for one raw AAC frame into header (AAC-in-MOV container helper).
+void SoundBuffer::generateNoise(float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with mono white noise.
+void SoundBuffer::generatePinkNoise(float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with mono pink noise (1/f spectrum, Paul Kellet's method).
+void SoundBuffer::generateSawtoothWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono sawtooth wave.
+void SoundBuffer::generateSilence(float duration, int sr = 44100)  // Fill the buffer with silence of the given duration (useful as a base for mixFrom).
+void SoundBuffer::generateSineWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono sine wave of the given frequency (Hz) and duration (seconds).
+void SoundBuffer::generateSquareWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono square wave.
+void SoundBuffer::generateTriangleWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono triangle wave.
 int SoundBuffer::getAdtsSampleRateIndex(int sampleRate)  // ADTS sample-rate index for the given rate (AAC-in-MOV container helper).
 float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sampleRate).
 bool SoundBuffer::load(const std::string & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
@@ -2588,10 +3190,10 @@ bool SoundBuffer::loadMp3(const std::string & path)  // Decode an MP3 file into 
 bool SoundBuffer::loadMp3FromMemory(const void * data, size_t dataSize)  // Decode MP3 data from a memory buffer.
 bool SoundBuffer::loadOgg(const std::string & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis).
 bool SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  // Decode OGG Vorbis data from a memory buffer.
-bool SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = …, bool bigEndian = …)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths.
+bool SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths.
 bool SoundBuffer::loadWav(const std::string & path)  // Decode a WAV file into PCM.
 bool SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from a memory buffer.
-void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = …)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed.
+void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed.
 ```
 
 ### SoundSource — Abstract base for anything Sound::play() can consume. Two concrete subclasses: SoundBuffer (eager, full PCM in RAM) and SoundStream (decoded on demand from disk). Holds the shared channels / sampleRate fields and the kind() / getDuration() interface.
@@ -2607,13 +3209,13 @@ Kind SoundSource::kind() const  // Source kind (Eager for SoundBuffer, Stream fo
 float SoundStream::getDuration() const  // Decoded file duration in seconds.
 int SoundStream::getMaxPolyphony() const  // Number of concurrent decoder slots reserved at loadStream().
 const std::string & SoundStream::getPath() const  // Path the stream was opened from.
-bool SoundStream::loadStream(const std::string & path, int maxPolyphony = …)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported.
+bool SoundStream::loadStream(const std::string & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported.
 ```
 
 ### StrokeMesh — Variable-width polyline stroke geometry with caps, joins and miter limit; build it from points or a Path, then update() and draw()
 
 ```cpp
-StrokeMesh & StrokeMesh::addVertex(float x, float y, float z = …) [+2]  // Append a vertex to the stroke path
+StrokeMesh & StrokeMesh::addVertex(float x, float y, float z = 0) [+2]  // Append a vertex to the stroke path
 StrokeMesh & StrokeMesh::addVertexWithWidth(float x, float y, float width) [+1]  // Append a vertex with a per-vertex width
 StrokeMesh & StrokeMesh::clear()  // Remove all vertices
 void StrokeMesh::draw()  // Draw the stroke mesh
@@ -2640,6 +3242,8 @@ std::string TcpClient::getRemoteHost() const  // Remote host name
 int TcpClient::getRemotePort() const  // Remote port
 bool TcpClient::isConnected() const  // Whether currently connected
 bool TcpClient::isUsingThread() const  // Whether threading is in use
+void TcpClient::notifyError(const std::string & msg, int code = 0)  // Report an error (message + code) from a derived class.
+void TcpClient::processNetwork()  // Pump pending TCP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
 bool TcpClient::send(const void * data, size_t size) [+2]  // Send data to the server
 void TcpClient::setBlocking(bool blocking)  // Set blocking mode
 void TcpClient::setReceiveBufferSize(size_t size)  // Set the receive buffer size
@@ -2689,7 +3293,7 @@ int TcpServer::getPort() const  // The listening port
 bool TcpServer::isRunning() const  // Whether the server is running
 bool TcpServer::send(int clientId, const void * data, size_t size) [+2]  // Send data to a specific client
 void TcpServer::setReceiveBufferSize(size_t size)  // Set the receive buffer size
-bool TcpServer::start(int port, int maxClients = …)  // Start listening on a port
+bool TcpServer::start(int port, int maxClients = 10)  // Start listening on a port
 void TcpServer::stop()  // Stop the server
 ```
 
@@ -2714,20 +3318,29 @@ int TcpServerClient::getPort() const  // Client port
 ### Texture — GPU texture for rendering
 
 ```cpp
-void Texture::allocate(int width, int height, int channels = …, TextureUsage usage = …, int sampleCount = …) [+2]  // Allocate texture
-void Texture::allocateCubemap(int sideSize, TextureFormat format, TextureUsage usage = …, int mipLevels = …)  // Allocate a cubemap texture without initial data
+void Texture::allocate(int width, int height, int channels = 4, TextureUsage usage = Immutable, int sampleCount = 1) [+2]  // Allocate texture
+void Texture::allocateCompressed(int width, int height, sg_pixel_format format, const void * data, size_t dataSize)  // Allocate an immutable compressed texture (BC1/BC3/BC7 etc.) from the given data.
+void Texture::allocateCubemap(int sideSize, TextureFormat format, TextureUsage usage = RenderTarget, int mipLevels = 1)  // Allocate a cubemap texture without initial data
 void Texture::bind() const  // Bind texture for rendering
 void Texture::clear()  // Release texture resources
 void Texture::draw(float x, float y) const [+1]  // Draw texture
 void Texture::drawFlippedY(float x, float y, float w, float h) const  // Draw the texture vertically flipped
 void Texture::drawSubsection(float x, float y, float w, float h, float sx, float sy, float sw, float sh) const  // Draw subsection of texture
+sg_view Texture::getAttachmentView() const  // Return the sokol-gfx color attachment view used to render into this RenderTarget (advanced interop).
+sg_view Texture::getAttachmentViewForMip(int level) const  // Return the sokol-gfx color attachment view for the given mip level (advanced interop).
 int Texture::getChannels() const  // Get number of channels
+sg_view Texture::getCubemapFaceAttachmentView(int face, int mipLevel)  // Return (lazily creating) the sokol-gfx attachment view for one (face, mip) of this cubemap (advanced interop).
 int Texture::getHeight() const  // Get height
+sg_image Texture::getImage() const  // Return the underlying sokol-gfx image handle (advanced interop).
 TextureFilter Texture::getMagFilter() const  // Get magnification filter
 TextureFilter Texture::getMinFilter() const  // Get minification filter
 int Texture::getNumMipLevels() const  // Number of mip levels
+sg_pixel_format Texture::getPixelFormat() const  // Return the texture's sokol-gfx pixel format.
 int Texture::getSampleCount() const  // Get MSAA sample count
+sg_sampler Texture::getSampler() const  // Return the underlying sokol-gfx sampler handle (advanced interop).
 TextureUsage Texture::getUsage() const  // Get texture usage mode
+sg_view Texture::getView() const  // Return the underlying sokol-gfx texture view handle (advanced interop).
+sg_view Texture::getViewForMip(int level) const  // Return the sokol-gfx texture view for sampling a single mip level (advanced interop).
 int Texture::getWidth() const  // Get width
 TextureWrap Texture::getWrapU() const  // Get horizontal wrap mode
 TextureWrap Texture::getWrapV() const  // Get vertical wrap mode
@@ -2760,7 +3373,7 @@ void Thread::sleep(unsigned long milliseconds)  // Pause the current thread for 
 void Thread::startThread()  // Start the background thread (runs threadedFunction). No-op if already running.
 void Thread::stopThread()  // Send the stop signal: isThreadRunning() returns false inside threadedFunction so a while-loop can exit. Does not block.
 void Thread::threadedFunction()  // Override this with the work to run on the thread; recommended pattern is while (isThreadRunning()) { ... }. (protected, pure virtual)
-void Thread::waitForThread(bool callStopThread = …)  // Wait (join) for the thread to finish. If callStopThread is true (default), calls stopThread() first.
+void Thread::waitForThread(bool callStopThread = true)  // Wait (join) for the thread to finish. If callStopThread is true (default), calls stopThread() first.
 void Thread::yield()  // Yield execution to other threads.
 ```
 
@@ -2795,7 +3408,7 @@ float TouchEventArgs::y() const  // Convenience: Y position of the first touch p
 ```cpp
 Tween<T> & Tween::delay(float seconds)  // Delay before the animation starts, in seconds (chainable)
 Tween<T> & Tween::duration(float seconds)  // Set the animation duration in seconds (chainable)
-Tween<T> & Tween::ease(EaseType type, EaseMode mode = …) [+1]  // Set the easing curve; the two-type overload uses an asymmetric ease (one curve in, another out)
+Tween<T> & Tween::ease(EaseType type, EaseMode mode = InOut) [+1]  // Set the easing curve; the two-type overload uses an asymmetric ease (one curve in, another out)
 Tween<T> & Tween::finish()  // Jump immediately to the end value and fire the complete event
 Tween<T> & Tween::from(T value)  // Set the start value (chainable)
 float Tween::getDuration() const  // Return the configured duration in seconds
@@ -2813,7 +3426,7 @@ Tween<T> & Tween::reset()  // Stop the animation and reset progress to the start
 Tween<T> & Tween::resume()  // Resume a paused animation
 Tween<T> & Tween::start()  // Start (or restart) the animation and begin auto-updating each frame
 Tween<T> & Tween::to(T value)  // Set the end value (chainable)
-Tween<T> & Tween::yoyo(bool enable = …)  // Reverse direction on each loop iteration (chainable)
+Tween<T> & Tween::yoyo(bool enable = true)  // Reverse direction on each loop iteration (chainable)
 ```
 
 ### TweenMod — Animation modifier (Mod) that tweens a Node's position, scale and rotation with easing; exposes a complete Event
@@ -2821,7 +3434,8 @@ Tween<T> & Tween::yoyo(bool enable = …)  // Reverse direction on each loop ite
 ```cpp
 TweenMod & TweenMod::delay(float seconds)  // Set delay before animation starts (TweenMod method) (C++ only)
 TweenMod & TweenMod::duration(float seconds)  // Set animation duration (TweenMod method) (C++ only)
-TweenMod & TweenMod::ease(EaseType type, EaseMode mode = …)  // Set easing function (TweenMod method). Types: Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce. Modes: In, Out, InOut (C++ only)
+void TweenMod::earlyUpdate()  // Mod lifecycle: advance the tween each frame in the early-update phase.
+TweenMod & TweenMod::ease(EaseType type, EaseMode mode = InOut)  // Set easing function (TweenMod method). Types: Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce. Modes: In, Out, InOut (C++ only)
 float TweenMod::getDelay() const  // Get the start delay in seconds (TweenMod method) (C++ only)
 float TweenMod::getDuration() const  // Get the animation duration in seconds (TweenMod method) (C++ only)
 EaseMode TweenMod::getEaseMode() const  // Get the current easing mode (In/Out/InOut) (TweenMod method) (C++ only)
@@ -2829,9 +3443,9 @@ EaseType TweenMod::getEaseType() const  // Get the current easing type (TweenMod
 float TweenMod::getProgress() const  // Current progress in 0..1 (TweenMod method) (C++ only)
 bool TweenMod::isComplete() const  // Whether the tween has finished (TweenMod method) (C++ only)
 bool TweenMod::isPlaying() const  // Whether the tween is currently playing (TweenMod method) (C++ only)
-TweenMod & TweenMod::moveBy(float dx, float dy, float dz = …) [+2]  // Animate position by relative amount (TweenMod method) (C++ only)
-TweenMod & TweenMod::moveFrom(float x, float y, float z = …) [+1]  // Set an explicit start position for the position tween (TweenMod method) (C++ only)
-TweenMod & TweenMod::moveTo(float x, float y, float z = …) [+2]  // Animate position to target (TweenMod method) (C++ only)
+TweenMod & TweenMod::moveBy(float dx, float dy, float dz = 0.0) [+2]  // Animate position by relative amount (TweenMod method) (C++ only)
+TweenMod & TweenMod::moveFrom(float x, float y, float z = 0.0) [+1]  // Set an explicit start position for the position tween (TweenMod method) (C++ only)
+TweenMod & TweenMod::moveTo(float x, float y, float z = 0.0) [+2]  // Animate position to target (TweenMod method) (C++ only)
 TweenMod & TweenMod::pause()  // Pause playback, keeping the current progress (TweenMod method) (C++ only)
 TweenMod & TweenMod::reset()  // Reset progress to the start and stop playback (TweenMod method) (C++ only)
 TweenMod & TweenMod::resume()  // Resume a paused tween (TweenMod method) (C++ only)
@@ -2865,7 +3479,7 @@ TweenMod & TweenMod::start()  // Start (or restart) the tween from its configure
 ### UdpSocket — UDP socket (send/receive datagrams, broadcast, multicast)
 
 ```cpp
-bool UdpSocket::bind(int port, bool startReceiving = …)  // Bind a port for receiving (startReceiving auto-starts the receive thread)
+bool UdpSocket::bind(int port, bool startReceiving = true)  // Bind a port for receiving (startReceiving auto-starts the receive thread)
 void UdpSocket::close()  // Close the socket
 bool UdpSocket::connect(const std::string & host, int port)  // Set the destination for send()
 bool UdpSocket::create()  // Create the socket explicitly (usually auto-created by bind/connect)
@@ -2874,8 +3488,9 @@ int UdpSocket::getConnectedPort() const  // Destination port from connect()
 int UdpSocket::getLocalPort() const  // The bound local port
 bool UdpSocket::isReceiving() const  // Whether the receive thread is active
 bool UdpSocket::isValid() const  // Whether the socket is valid
-bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = …)  // Join a multicast group for receiving (call after bind; "" = default route) 
-bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = …)  // Leave a previously joined multicast group
+bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string(""))  // Join a multicast group for receiving (call after bind; "" = default route) 
+bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string(""))  // Leave a previously joined multicast group
+void UdpSocket::processNetwork()  // Pump pending UDP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
 int UdpSocket::receive(void * buffer, size_t bufferSize) [+1]  // Blocking receive (for non-event use); returns byte count or -1
 bool UdpSocket::send(const void * data, size_t size) [+1]  // Send to the destination set by connect()
 bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1]  // Send data to a specific host and port
@@ -2902,7 +3517,7 @@ float Vec2::cross(const Vec2 & v) const  // Cross product (z component)
 float Vec2::distance(const Vec2 & v) const  // Distance to another vector
 float Vec2::distanceSquared(const Vec2 & v) const  // Squared distance (faster)
 float Vec2::dot(const Vec2 & v) const  // Dot product
-Vec2 Vec2::fromAngle(float radians, float length = …)  // Create Vec2 from angle
+Vec2 Vec2::fromAngle(float radians, float length = 1.0)  // Create Vec2 from angle
 float Vec2::length() const  // Get vector length
 float Vec2::lengthSquared() const  // Get squared length (faster, no sqrt)
 Vec2 Vec2::lerp(const Vec2 & v, float t) const  // Linear interpolation
@@ -2977,7 +3592,7 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevices()  // Return the list of 
 void VideoGrabber::requestCameraPermission()  // Request camera access asynchronously (macOS)
 void VideoGrabber::setDesiredFrameRate(int fps)  // Request a capture frame rate; call before setup()
 void VideoGrabber::setDeviceID(int deviceId)  // Select which camera to use; call before setup()
-bool VideoGrabber::setup(int width = …, int height = …)  // Start the camera at the requested size. Returns false if permission is not yet granted (it is requested asynchronously); keep calling update() and capture begins once granted
+bool VideoGrabber::setup(int width = 640, int height = 480)  // Start the camera at the requested size. Returns false if permission is not yet granted (it is requested asynchronously); keep calling update() and capture begins once granted
 void VideoGrabber::setVerbose(bool verbose)  // Enable or disable verbose logging
 void VideoGrabber::update()  // Poll for a new frame and upload it to the texture. Call every frame; also completes a setup() that was waiting on permission
 ```
@@ -2987,7 +3602,7 @@ void VideoGrabber::update()  // Poll for a new frame and upload it to the textur
 ```cpp
 void VideoPlayer::close()  // Close the video and release resources
 void VideoPlayer::draw(float x, float y) const [+1]  // Draw the current video frame at (x, y), optionally scaled to w x h
-bool VideoPlayer::extractFrame(const std::string & path, Pixels & outPixels, float timeSec = …, float * outDuration = …)  // Extract a single frame from a video file without loading the full video. Useful for thumbnails
+bool VideoPlayer::extractFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr)  // Extract a single frame from a video file without loading the full video. Useful for thumbnails
 int VideoPlayer::getAudioChannels() const [macos,windows,linux,ios]  // Number of audio channels (0 if no audio)
 uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC of the audio codec in the loaded video (0 if none)
 std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video
@@ -3006,39 +3621,78 @@ bool VideoPlayer::hasAudio() const  // Check if the loaded video has an audio tr
 bool VideoPlayer::isUsingHwAccel() const  // Check if hardware decoding is currently active (after load)
 bool VideoPlayer::load(const std::string & path)  // Load a video file
 void VideoPlayer::nextFrame()  // Advance to the next frame
+void VideoPlayer::playImpl()  // Backend implementation of playImpl for this platform's video player.
 void VideoPlayer::previousFrame()  // Go back to the previous frame
 void VideoPlayer::setFrame(int frame)  // Seek to a specific frame number
 void VideoPlayer::setGammaCorrection(float gamma)  // Set gamma correction (1.0 = none). Use ~0.45 to brighten on platforms with dark output (e.g. macOS AVFoundation)
+void VideoPlayer::setLoopImpl(bool loop)  // Backend implementation of setLoopImpl for this platform's video player.
+void VideoPlayer::setPanImpl(float pan)  // Backend implementation of setPanImpl for this platform's video player.
+void VideoPlayer::setPausedImpl(bool paused)  // Backend implementation of setPausedImpl for this platform's video player.
+void VideoPlayer::setPositionImpl(float pct)  // Backend implementation of setPositionImpl for this platform's video player.
+void VideoPlayer::setSpeedImpl(float speed)  // Backend implementation of setSpeedImpl for this platform's video player.
 void VideoPlayer::setUseHwAccel(bool enable)  // Enable/disable hardware decoding. Must be called before load(). Default: true. When enabled, the player probes available HW backends (VAAPI, V4L2M2M, CUDA, etc.) and falls back to software if none are available. Currently affects the Linux backend only.
+void VideoPlayer::setVolumeImpl(float vol)  // Backend implementation of setVolumeImpl for this platform's video player.
+void VideoPlayer::stopImpl()  // Backend implementation of stopImpl for this platform's video player.
 void VideoPlayer::update()  // Update the video frame. Call once per frame in update()
 ```
 
-### VideoPlayerBase
+### VideoPlayerBase — Abstract base class for video playback. Use VideoPlayer for the concrete implementation.
 
 ```cpp
+void VideoPlayerBase::close()  // Close the video and release its resources.
 void VideoPlayerBase::firstFrame()  // Go to the first frame
+int VideoPlayerBase::getAudioChannels() const  // Return the number of audio channels, or 0 if no audio.
+uint32_t VideoPlayerBase::getAudioCodec() const  // Return the audio codec as a FourCC ('aac ', 'mp3 ', ...), or 0 if no audio.
+std::vector<uint8_t> VideoPlayerBase::getAudioData() const  // Return the raw (undecoded) audio data, or an empty vector if no audio.
+int VideoPlayerBase::getAudioSampleRate() const  // Return the audio sample rate in Hz, or 0 if no audio.
+int VideoPlayerBase::getCurrentFrame() const  // Return the index of the current frame.
 float VideoPlayerBase::getCurrentTime() const  // Get current playback time in seconds
+float VideoPlayerBase::getDuration() const  // Return the video duration in seconds.
 float VideoPlayerBase::getHeight() const  // Get video height in pixels
+std::string VideoPlayerBase::getHwAccelName() const  // Return the name of the active decode backend (e.g. "videotoolbox", "software", "none").
 float VideoPlayerBase::getPan() const  // Get current stereo pan
+unsigned char * VideoPlayerBase::getPixels() [+1]  // Return raw RGBA pixel data of the current frame, or nullptr if none decoded yet.
+float VideoPlayerBase::getPosition() const  // Return the current playback position as a fraction (0-1).
 float VideoPlayerBase::getResyncThreshold() const  // Get the current resync threshold in seconds
 float VideoPlayerBase::getSpeed() const  // Get current playback speed
+Texture & VideoPlayerBase::getTexture() [+1]  // Return the texture holding the current video frame.
+int VideoPlayerBase::getTotalFrames() const  // Return the total number of frames in the video.
 float VideoPlayerBase::getVolume() const  // Get current volume
 float VideoPlayerBase::getWidth() const  // Get video width in pixels
+bool VideoPlayerBase::hasAudio() const  // Return true if the video has an audio track.
 bool VideoPlayerBase::isDone() const  // Check if playback has reached the end
+bool VideoPlayerBase::isFrameNew() const  // Return true if a new frame was decoded since the last update.
 bool VideoPlayerBase::isLoaded() const  // Check if a video is loaded
 bool VideoPlayerBase::isLoop() const  // Check if looping is enabled
 bool VideoPlayerBase::isPaused() const  // Check if video is paused
 bool VideoPlayerBase::isPlaying() const  // Check if video is currently playing (not paused)
+bool VideoPlayerBase::isUsingHwAccel() const  // Return true if hardware-accelerated decoding is currently active.
+bool VideoPlayerBase::load(const std::string & path)  // Load a video from the given file path; return true on success.
+void VideoPlayerBase::markDone()  // Mark playback as done, clearing playing unless looping.
+void VideoPlayerBase::markFrameNew()  // Mark that a new frame has arrived (sets frameNew and firstFrameReceived).
+void VideoPlayerBase::nextFrame()  // Advance to the next frame.
 void VideoPlayerBase::play()  // Start or resume playback
+void VideoPlayerBase::playImpl()  // Platform hook: start playback. Pure virtual, implemented per backend.
+void VideoPlayerBase::previousFrame()  // Step back to the previous frame.
 void VideoPlayerBase::setCurrentTime(float seconds)  // Seek to a specific time in seconds
+void VideoPlayerBase::setFrame(int frame)  // Seek to the given frame index.
 void VideoPlayerBase::setLoop(bool loop)  // Enable/disable looping
+void VideoPlayerBase::setLoopImpl(bool loop)  // Platform hook: set looping. Pure virtual, implemented per backend.
 void VideoPlayerBase::setPan(float pan)  // Set stereo pan (-1.0 left, 0.0 center, 1.0 right)
+void VideoPlayerBase::setPanImpl(float pan)  // Platform hook: set stereo pan. Pure virtual, implemented per backend.
 void VideoPlayerBase::setPaused(bool paused)  // Pause or resume playback
+void VideoPlayerBase::setPausedImpl(bool paused)  // Platform hook: set paused state. Pure virtual, implemented per backend.
+void VideoPlayerBase::setPosition(float pct)  // Seek to a playback position given as a fraction (0-1).
+void VideoPlayerBase::setPositionImpl(float pct)  // Platform hook: seek to a normalized position. Pure virtual, implemented per backend.
 void VideoPlayerBase::setResyncThreshold(float seconds)  // Set the maximum video/audio drift before hard re-sync. When drift exceeds this threshold, video seeks to match audio position instead of catching up frame-by-frame. Set to 0 to disable. Default: 0.5s. Primarily affects Linux (FFmpeg) backend.
 void VideoPlayerBase::setSpeed(float speed)  // Set playback speed (1.0 = normal, 2.0 = double speed)
+void VideoPlayerBase::setSpeedImpl(float speed)  // Platform hook: set playback speed. Pure virtual, implemented per backend.
 void VideoPlayerBase::setVolume(float vol)  // Set audio volume (0.0 to 1.0)
+void VideoPlayerBase::setVolumeImpl(float vol)  // Platform hook: set volume. Pure virtual, implemented per backend.
 void VideoPlayerBase::stop()  // Stop playback and reset to beginning
+void VideoPlayerBase::stopImpl()  // Platform hook: stop playback. Pure virtual, implemented per backend.
 void VideoPlayerBase::togglePause()  // Toggle pause state
+void VideoPlayerBase::update()  // Decode the next frame and refresh internal state; call once per frame.
 ```
 
 ### VideoRecordSettings — Encoder settings passed to VideoWriter::open(), ScreenRecorder::start(), and startRecording()
@@ -3060,7 +3714,7 @@ const VideoRecordSettings & VideoWriter::getSettings() const  // Encoder setting
 int VideoWriter::getWidth() const  // Encoder output width in pixels
 bool VideoWriter::isOpen() const  // Check if the encoder is open and accepting frames
 unsigned char * VideoWriter::lockFrame(int & strideOut)  // Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame
-bool VideoWriter::open(const std::string & path, int width, int height, const VideoRecordSettings & settings = …)  // Open the encoder at the given size (path resolved via getDataPath)
+bool VideoWriter::open(const std::string & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the encoder at the given size (path resolved via getDataPath)
 bool VideoWriter::submitFrame(double timeSec)  // Append the previously locked frame at the given presentation time (seconds)
 ```
 
@@ -3081,7 +3735,7 @@ WindowSettings & WindowSettings::setTitle(const std::string & t)  // Set window 
 ### Xml — XML document wrapper around pugixml. Loads, saves and queries XML; node-level access is via XmlNode returned from root() and child().
 
 ```cpp
-void Xml::addDeclaration(const std::string & version = …, const std::string & encoding = …)  // Prepend an XML declaration (<?xml ...?>) with the given version and encoding.
+void Xml::addDeclaration(const std::string & version = std::string("1.0"), const std::string & encoding = std::string("UTF-8"))  // Prepend an XML declaration (<?xml ...?>) with the given version and encoding.
 XmlNode Xml::addRoot(const std::string & name)  // Append a new root element with the given name and return it.
 XmlNode Xml::child(const std::string & name)  // Find a direct child node of the document by name.
 XmlDocument & Xml::document() [+1]  // Access the underlying pugixml document for advanced operations.
@@ -3089,52 +3743,48 @@ bool Xml::empty() const  // Return true if the document has no content.
 bool Xml::load(const std::string & path)  // Load an XML document from a file. Relative paths are resolved via getDataPath. Returns true on success.
 bool Xml::parse(const std::string & str)  // Parse an XML document from a string. Returns true on success.
 XmlNode Xml::root() [+1]  // Get the document's root element node.
-bool Xml::save(const std::string & path, const std::string & indent = …) const  // Save the document to a file. Relative paths are resolved via getDataPath. indent sets the per-level indentation string. Returns true on success.
-std::string Xml::toString(const std::string & indent = …) const  // Serialize the document to an XML string. indent sets the per-level indentation string.
+bool Xml::save(const std::string & path, const std::string & indent = std::string("  ")) const  // Save the document to a file. Relative paths are resolved via getDataPath. indent sets the per-level indentation string. Returns true on success.
+std::string Xml::toString(const std::string & indent = std::string("  ")) const  // Serialize the document to an XML string. indent sets the per-level indentation string.
 ```
 
 ## Enums
 
 ```cpp
-enum AxisMode { None, Fill, Content }
-enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }
-enum bitmapfont::Width { Halfwidth, Fullwidth }
-enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled }
-enum ChipSoundNote::Wave { Sin, Square, Triangle, Sawtooth, Noise, PinkNoise, Silent }
-enum Codec { None, LZ4 }
-enum Cursor { Default, Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Custom0, Custom1, Custom2, Custom3, Custom4, Custom5, Custom6, Custom7, Custom8, Custom9, Custom10, Custom11, Custom12, Custom13, Custom14, Custom15 }
+enum AxisMode { None, Fill, Content }  // Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children).
+enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Built-in system beep sounds (ping, success, error, …) for beep().
+enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled }  // Color blend mode: Alpha, Add, Multiply, Screen, Subtract, Disabled.
+enum Codec { None, LZ4 }  // Compression codec: None (raw) or LZ4.
+enum Cursor { Default, Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Custom0, Custom1, Custom2, Custom3, Custom4, Custom5, Custom6, Custom7, Custom8, Custom9, Custom10, Custom11, Custom12, Custom13, Custom14, Custom15 }  // Mouse cursor shape (Default, Arrow, IBeam, Crosshair, Hand, resize cursors, …).
 enum CurveStyle::Mode { Tolerance, Resolution }  // Curve tessellation mode: adaptive tolerance or fixed resolution
-enum Deliver { Inline, Main }
-enum Direction { Left, Center, Right, Top, Bottom, Baseline }
-enum EaseMode { In, Out, InOut }
-enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce }
-enum EasyCam::Modifier { None, Shift, Ctrl, Alt, Super }
-enum ImageType { Color, Grayscale }
+enum Deliver { Inline, Main }  // Event delivery timing: Inline fires synchronously on the calling thread; Main queues the event to the main thread.
+enum Direction { Left, Center, Right, Top, Bottom, Baseline }  // Alignment / direction: Left, Center, Right, Top, Bottom, Baseline.
+enum EaseMode { In, Out, InOut }  // Easing direction: In, Out, or InOut.
+enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce }  // Easing function family (Linear, Quad, Cubic, Sine, Expo, …) for tweens.
+enum ImageType { Color, Grayscale }  // Image type: Color or Grayscale.
 enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku) strictness for vertical / Japanese text
-enum LayoutDirection { Vertical, Horizontal }
-enum LightType { Directional, Point, Spot }
-enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }
-enum MixMode { Auto, DownmixMono }
-enum MouseButton { Left, Right, Middle, None }
+enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.
+enum LightType { Directional, Point, Spot }  // Light type: Directional, Point, or Spot.
+enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Log severity, from Verbose (most detailed) to Fatal; Silent disables logging.
+enum MixMode { Auto, DownmixMono }  // Sound channel mixing: Auto (match the output) or DownmixMono.
+enum MouseButton { Left, Right, Middle, None }  // Mouse button: Left, Right, Middle, or None.
 enum Orientation { Portrait, PortraitUpsideDown, LandscapeLeft, LandscapeRight, Landscape, All, AllButUpsideDown }  // Screen orientation mask passed to setOrientation (iOS/Android); values are bit flags and can be combined with |
-enum PixelFormat { U8, F32 }
-enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }
-enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }
-enum ScrollBar::Direction { Vertical, Horizontal }
+enum PixelFormat { U8, F32 }  // CPU pixel data format: U8 (8-bit) or F32 (float).
+enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Draw primitive mode: Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points.
+enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Geometry primitive type: Points, Lines, LineStrip, Triangles, TriangleStrip, Quads.
 enum SoundSource::Kind { Eager, Stream }  // Source kind tag on SoundSource, letting the mixer dispatch without a per-frame virtual call: Eager (SoundBuffer, full PCM in RAM) vs Stream (SoundStream, decoded on demand).
-enum StrokeCap { Butt, Round, Square }
-enum StrokeJoin { Miter, Round, Bevel }
+enum StrokeCap { Butt, Round, Square }  // Line cap style for strokes: Butt, Round, Square.
+enum StrokeJoin { Miter, Round, Bevel }  // Line join style for strokes: Miter, Round, Bevel.
 enum StrokeMesh::CapType { CAP_BUTT, CAP_ROUND, CAP_SQUARE }  // Line cap shape for the ends of an open stroke
 enum StrokeMesh::JoinType { JOIN_MITER, JOIN_ROUND, JOIN_BEVEL }  // Line join shape at the corners of a stroke
 enum TcyMode { Rotate, Upright, Combine }  // Tate-chu-yoko: how Latin / digit runs are laid out within vertical text
-enum TextureFilter { Nearest, Linear }
-enum TextureFormat { RGBA8, RGBA16F, RGBA32F, R8, R16F, R32F, RG8, RG16F, RG32F, BGRA8, RGBA16 }
-enum TextureUsage { Immutable, Dynamic, Stream, RenderTarget }
-enum TextureWrap { Repeat, ClampToEdge, MirroredRepeat }
-enum ThermalState { Nominal, Fair, Serious, Critical }
-enum VideoCodec { H264, HEVC, ProRes422, ProRes4444 }
-enum WindowType { Rect, Hanning, Hamming, Blackman }
-enum WritingMode { Horizontal, VerticalRL }
+enum TextureFilter { Nearest, Linear }  // Texture sampling filter: Nearest or Linear.
+enum TextureFormat { RGBA8, RGBA16F, RGBA32F, R8, R16F, R32F, RG8, RG16F, RG32F, BGRA8, RGBA16 }  // GPU texture format (RGBA8, RGBA16F, R8, …) — channel layout and bit depth.
+enum TextureUsage { Immutable, Dynamic, Stream, RenderTarget }  // Texture update pattern: Immutable, Dynamic, Stream, or RenderTarget.
+enum TextureWrap { Repeat, ClampToEdge, MirroredRepeat }  // Texture wrap mode: Repeat, ClampToEdge, MirroredRepeat.
+enum ThermalState { Nominal, Fair, Serious, Critical }  // Device thermal state, from Nominal to Critical.
+enum VideoCodec { H264, HEVC, ProRes422, ProRes4444 }  // Video codec: H264, HEVC, ProRes422, ProRes4444.
+enum WindowType { Rect, Hanning, Hamming, Blackman }  // FFT window function: Rect, Hanning, Hamming, Blackman.
+enum WritingMode { Horizontal, VerticalRL }  // Text writing mode: Horizontal or VerticalRL (vertical, right-to-left).
 ```
 
 ## Type aliases
@@ -3143,6 +3793,8 @@ enum WritingMode { Horizontal, VerticalRL }
 using Json  // Alias for nlohmann::json (using Json = nlohmann::json). Used as the in-memory JSON value type by loadJson, saveJson, parseJson and toJsonString. See the nlohmann/json documentation for its full API.
 using NodePtr  // Shared pointer to a Node (std::shared_ptr<Node>); the standard way to hold and pass scene nodes
 using NodeWeakPtr  // Alias for weak_ptr<Node> (using NodeWeakPtr = weak_ptr<Node>). A non-owning weak reference to a Node; lock() it to obtain a NodePtr if the node still exists.
+using RenderContext ⚠️deprecated  // Deprecated alias for internal::RenderContext; use the free drawing functions instead.
+using Wave  // Alias for ChipSoundNote::Wave, the chip-synth waveform type (Sin, Square, Triangle, ...).
 using XmlAttribute  // Alias for pugi::xml_attribute. A name/value attribute on an XmlNode; see the pugixml documentation for its API.
 using XmlDocument  // Alias for pugi::xml_document. The owning XML document type underlying the Xml wrapper; see the pugixml documentation for its full API.
 using XmlNode  // Alias for pugi::xml_node. A single element/node within an XML document, returned by Xml::root() and Xml::child(); see the pugixml documentation for node query and manipulation methods.

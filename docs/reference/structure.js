@@ -83,22 +83,61 @@ const tparamsOf = (node) => (node.inner || [])
 // param names come from ParmVarDecl children (the qualType carries types only).
 // "const Vec2 &" + name "v" -> "const Vec2 & v"; a ParmVarDecl with a default
 // expr child gets a trailing " = …" marker (value not reconstructed).
-const _hasDefault = (x) => (x.inner || []).some(c => /Expr|Literal|InitListExpr/.test(c.kind || ''));
+const _defExprKind = (k) => /Expr|Literal|InitListExpr/.test(k || '');
+const _hasDefault = (x) => (x.inner || []).some(c => _defExprKind(c.kind));
+// Reconstruct a parameter's default-argument value from the AST when it is a
+// simple constant (literal / enum ref / default-ctor / brace-init); returns null
+// for expressions we can't render faithfully, so paramsOf falls back to "= …".
+const _fmtFloat = (v) => { const f = parseFloat(v); if (!isFinite(f)) return v; return Number.isInteger(f) ? f.toFixed(1) : String(f); };
+const _bareType = (t) => (t || '').replace(/^const\s+/, '').replace(/\s*[&*]+\s*$/, '').trim();
+function _evalExpr(e) {
+    if (!e) return null;
+    const inner1 = () => _evalExpr((e.inner || []).find(c => _defExprKind(c.kind)));
+    switch (e.kind) {
+        case 'IntegerLiteral': return e.value;
+        case 'FloatingLiteral': return _fmtFloat(e.value);
+        case 'CXXBoolLiteralExpr': return String(e.value);
+        case 'StringLiteral': return e.value;
+        case 'CXXNullPtrLiteralExpr': case 'GNUNullExpr': return 'nullptr';
+        case 'DeclRefExpr': return (e.referencedDecl && e.referencedDecl.name) || null;
+        case 'UnaryOperator': { const v = inner1(); return v != null ? (e.opcode || '') + v : null; }
+        case 'CXXConstructExpr': case 'CXXTemporaryObjectExpr': {   // Type() / Type(args) temporaries (WindowSettings(), Color(...))
+            const args = (e.inner || []).filter(c => _defExprKind(c.kind) && c.kind !== 'CXXDefaultInitExpr' && c.kind !== 'CXXDefaultArgExpr');
+            const tn = _bareType(e.type && e.type.qualType);
+            if (!args.length) return tn ? tn + '()' : null;
+            const vs = args.map(_evalExpr); return vs.every(v => v != null) ? `${tn}(${vs.join(', ')})` : null;
+        }
+        case 'InitListExpr': {   // brace init; all-defaulted members (= {}) render as "{}"
+            const items = (e.inner || []).filter(c => _defExprKind(c.kind) && c.kind !== 'CXXDefaultInitExpr');
+            if (!items.length) return '{}';
+            const vs = items.map(_evalExpr); return vs.every(v => v != null) ? `{${vs.join(', ')}}` : null;
+        }
+        case 'ImplicitCastExpr': case 'CXXStaticCastExpr': case 'ConstantExpr':
+        case 'CXXFunctionalCastExpr': case 'MaterializeTemporaryExpr':
+        case 'CXXBindTemporaryExpr': case 'ExprWithCleanups': case 'ParenExpr':
+        case 'ImplicitValueInitExpr': return inner1();
+        default: return null;
+    }
+}
+const _defaultOf = (x) => { const e = (x.inner || []).find(c => _defExprKind(c.kind)); return e ? _evalExpr(e) : null; };
 const paramsOf = (node) => (node.inner || [])
     .filter(x => x.kind === 'ParmVarDecl')
     .map(x => {
         const t = (x.type && x.type.qualType) || 'auto';
-        return (x.name ? `${t} ${x.name}` : t) + (_hasDefault(x) ? ' = …' : '');
+        const base = x.name ? `${t} ${x.name}` : t;
+        if (!_hasDefault(x)) return base;
+        const dv = _defaultOf(x);
+        return base + (dv != null ? ` = ${dv}` : ' = …');
     }).join(', ');
 
-// structured args for a signature — parsed {type,name,hasDefault} (+ cheap flags
-// from the spelled type) for downstream binding generators (tcxLua). The default
-// EXPRESSION is still not reconstructed (hasDefault only).
+// structured args for a signature — {type,name,hasDefault,default?} (+ cheap flags
+// from the spelled type) for downstream binding generators (tcxLua).
 const argsOf = (node) => (node.inner || [])
     .filter(x => x.kind === 'ParmVarDecl')
     .map(x => {
         const type = (x.type && x.type.qualType) || 'auto';
         const a = { type, name: x.name || '', hasDefault: _hasDefault(x) };
+        if (a.hasDefault) { const dv = _defaultOf(x); if (dv != null) a.default = dv; }
         if (/&\s*$/.test(type)) a.isRef = true;            // lvalue or rvalue reference
         if (/\bconst\b/.test(type)) a.isConst = true;
         if (/\*\s*$/.test(type)) a.isPointer = true;
@@ -141,15 +180,13 @@ function annotationsOf(node, file) {
         const ln = loc.line;
         if (!ln) continue;
         const text = (lines[ln - 1] || '') + ' ' + (lines[ln] || '');   // macro line (+next, in case the decl wraps)
-        let m = text.match(/\bTC_(INTERNAL|PLATFORMS|LUA_BIND)\b(?:\(\s*"([^"]*)")?/);
+        let m = text.match(/\bTC_(PLATFORMS|LUA_BIND)\b(?:\(\s*"([^"]*)")?/);
         if (m) {
-            if (m[1] === 'INTERNAL') out.internal = true;
-            else if (m[1] === 'PLATFORMS') out.platforms = _csv(m[2] || '');
+            if (m[1] === 'PLATFORMS') out.platforms = _csv(m[2] || '');
             else if (m[1] === 'LUA_BIND') out.lua_bind = _csv(m[2] || '');
         } else if ((m = text.match(/clang::annotate\(\s*"tc:([^"]*)"/))) {
             const s = m[1];
-            if (s === 'internal') out.internal = true;
-            else if (s.startsWith('platforms:')) out.platforms = _csv(s.slice(10));
+            if (s.startsWith('platforms:')) out.platforms = _csv(s.slice(10));
             else if (s.startsWith('lua_bind:')) out.lua_bind = _csv(s.slice(9));
         }
     }
@@ -158,9 +195,15 @@ function annotationsOf(node, file) {
 function enumerate(objs) {
     const syms = []; let sticky = '(unknown)';
     const fileOf = (node) => { if (node.loc && node.loc.file) sticky = node.loc.file; return sticky; };
-    function walkRecord(rec, nsPath, extraFlags, tps) {
+    function walkRecord(rec, nsPath, extraFlags, tps, enclosing) {
+        // skip forward declarations (`struct Color;`) — only the complete
+        // definition carries members/constructors. Without this, a forward decl
+        // seen before the definition wins the "first id" race and loses the ctors.
+        if (rec.completeDefinition !== true) return;
         const recFile = fileOf(rec);
-        const typeSym = { kind: 'type', ns: nsPath, owner: null, name: rec.name, file: recFile, flags: [...(extraFlags || [])], tparams: tps, ann: annotationsOf(rec, recFile), deprecated: deprecatedOf(rec) };
+        // qualified owner for members + nested types (Entry -> ChipSoundBundle::Entry)
+        const qn = enclosing ? enclosing + '::' + rec.name : rec.name;
+        const typeSym = { kind: 'type', ns: nsPath, owner: enclosing || null, name: rec.name, file: recFile, flags: [...(extraFlags || [])], tparams: tps, ann: annotationsOf(rec, recFile), deprecated: deprecatedOf(rec) };
         syms.push(typeSym);
         let access = rec.tagUsed === 'class' ? 'private' : 'public';
         for (const m of (rec.inner || [])) {
@@ -176,13 +219,13 @@ function enumerate(objs) {
             if (m.kind === 'CXXMethodDecl') {
                 const flags = [/operator/.test(m.name || '') ? 'operator' : null, m.storageClass === 'static' ? 'static' : null,
                     m.isImplicit ? 'implicit' : null, m.explicitlyDeleted ? 'deleted' : null, m.explicitlyDefaulted ? 'defaulted' : null].filter(Boolean);
-                syms.push({ kind: 'method', ns: nsPath, owner: rec.name, name: m.name, sig: m.type && m.type.qualType, params: paramsOf(m), args: argsOf(m), file: fileOf(m), access, flags: [...(extraFlags || []), ...flags], ann: annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
+                syms.push({ kind: 'method', ns: nsPath, owner: qn, name: m.name, sig: m.type && m.type.qualType, params: paramsOf(m), args: argsOf(m), file: fileOf(m), access, flags: [...(extraFlags || []), ...flags], ann: annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
             } else if (m.kind === 'FieldDecl') {
-                syms.push({ kind: 'field', ns: nsPath, owner: rec.name, name: m.name, file: fileOf(m), access, flags: [], deprecated: deprecatedOf(m) });
+                syms.push({ kind: 'field', ns: nsPath, owner: qn, name: m.name, ftype: m.type && m.type.qualType, file: fileOf(m), access, flags: [], deprecated: deprecatedOf(m) });
             } else if (m.kind === 'EnumDecl' && m.name) {
-                syms.push({ kind: 'enum', ns: nsPath, owner: rec.name, name: m.name, file: fileOf(m), access, flags: ['nested'], members: enumMembersOf(m), ann: annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
+                syms.push({ kind: 'enum', ns: nsPath, owner: qn, name: m.name, file: fileOf(m), access, flags: ['nested'], members: enumMembersOf(m), ann: annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
             } else if (m.kind === 'CXXRecordDecl' && m.name && access === 'public') {
-                walkRecord(m, nsPath, extraFlags);              // nested public type (e.g. Node::HitResult) — keyed by its bare name
+                walkRecord(m, nsPath, extraFlags, undefined, qn);   // nested public type -> keyed Owner::Name (Ray::HitResult, ChipSoundBundle::Entry)
             }
         }
     }
@@ -202,9 +245,10 @@ function enumerate(objs) {
                 if (rec) { rec.name = c.name; walkRecord(rec, p, ['template'], tparamsOf(c)); }
             } else if (c.kind === 'FunctionTemplateDecl' && c.name) {
                 const fn = (c.inner || []).find(x => x.kind === 'FunctionDecl');
-                syms.push({ kind: 'func', ns: p, owner: null, name: c.name, sig: fn && fn.type && fn.type.qualType, params: fn ? paramsOf(fn) : '', args: fn ? argsOf(fn) : [], file: fileOf(c), flags: ['template'], tparams: tparamsOf(c), deprecated: deprecatedOf(c) });
+                // the AnnotateAttr (TC_INTERNAL/…) lives on the inner FunctionDecl, not the template decl
+                syms.push({ kind: 'func', ns: p, owner: null, name: c.name, sig: fn && fn.type && fn.type.qualType, params: fn ? paramsOf(fn) : '', args: fn ? argsOf(fn) : [], file: fileOf(c), flags: ['template'], tparams: tparamsOf(c), ann: fn ? annotationsOf(fn, fileOf(c)) : undefined, deprecated: deprecatedOf(c) });
             } else if (c.kind === 'TypedefDecl' || c.kind === 'TypeAliasDecl') { syms.push({ kind: 'typedef', ns: p, owner: null, name: c.name, file: fileOf(c), flags: [], deprecated: deprecatedOf(c) });
-            } else if (c.kind === 'VarDecl') { syms.push({ kind: 'var', ns: p, owner: null, name: c.name, file: fileOf(c), flags: [], deprecated: deprecatedOf(c) });
+            } else if (c.kind === 'VarDecl') { syms.push({ kind: 'var', ns: p, owner: null, name: c.name, file: fileOf(c), flags: [], ann: annotationsOf(c, fileOf(c)), deprecated: deprecatedOf(c) });
             }
         }
     }
@@ -213,20 +257,20 @@ function enumerate(objs) {
 }
 
 // --- 3. visibility + symbol-id grammar --------------------------------------
-const HIDDEN = ['internal', 'mcp', 'headless', 'hot_reload', 'console'];
+const HIDDEN = ['internal', 'mcp', 'headless', 'hot_reload', 'console', 'bitmapfont', 'colors'];   // colors:: is rendered as the swatch palette, not the flat symbol list
 const nsSegs = (ns) => (ns || '').split('::').filter(x => x && x !== 'trussc' && x !== '(anon)');
-const isHidden = (s) => (s.ann && s.ann.internal) || nsSegs(s.ns).some(seg => HIDDEN.includes(seg));   // TC_INTERNAL or hidden namespace
+const isHidden = (s) => nsSegs(s.ns).some(seg => HIDDEN.includes(seg));   // hidden namespace (internal::, mcp::, …); per-symbol hide is doc-side (`hide = true`)
 const nsPrefix = (s) => nsSegs(s.ns).join('::');
 const isTc = (f) => /core\/include\/(tc\/|tc[A-Z]\w*\.h|TrussC\.h)/.test(f || '');
 const noise = (s) => (s.flags || []).some(f => ['implicit', 'defaulted', 'deleted'].includes(f))
-    || (s.name || '').endsWith('_') || s.access === 'private'   // protected = part of the subclass/override contract (Mod hooks, Node::callAfter), kept
+    || (s.name || '').endsWith('_') || s.access === 'private'   // protected kept in the data (carries access; the web emitter hides it, prose preserved for later re-surfacing)
     || s.kind === 'ctor' || s.kind === 'dtor' || s.name === 'reflectMembers';
 function symbolId(s) {
     const pre = nsPrefix(s); const q = (n) => pre ? pre + '::' + n : n;
     switch (s.kind) {
         case 'method': case 'field': return s.owner + '::' + s.name;
         case 'enum': return s.owner ? s.owner + '::' + s.name : q(s.name);
-        case 'type': { const b = q(s.name); return s.tparams && s.tparams.length ? `${b}<${s.tparams.join(', ')}>` : b; }
+        case 'type': { const b = s.owner ? s.owner + '::' + s.name : q(s.name); return s.tparams && s.tparams.length ? `${b}<${s.tparams.join(', ')}>` : b; }
         case 'func': case 'var': case 'typedef': return q(s.name);
         default: return null;
     }
@@ -247,7 +291,7 @@ const pub = syms.filter(s => isTc(s.file) && !isHidden(s) && !noise(s) && symbol
 const structure = Object.create(null);                          // null proto: ids like "toString"/"constructor" are safe keys
 for (const s of pub) {
     const id = symbolId(s);
-    if (!structure[id]) structure[id] = { id, kind: s.kind, owner: s.owner || undefined, name: s.name, ns: nsPrefix(s) || undefined, signatures: [], static: false, members: s.members && s.members.length ? s.members : undefined, constructors: s.ctors && s.ctors.length ? s.ctors : undefined, platforms: s.ann && s.ann.platforms, lua_bind: s.ann && s.ann.lua_bind, deprecated: s.deprecated || undefined, tparams: s.tparams && s.tparams.length ? s.tparams : undefined };
+    if (!structure[id]) structure[id] = { id, kind: s.kind, owner: s.owner || undefined, name: s.name, ns: nsPrefix(s) || undefined, signatures: [], static: false, type: s.ftype || undefined, access: s.access && s.access !== 'public' ? s.access : undefined, members: s.members && s.members.length ? s.members : undefined, constructors: s.ctors && s.ctors.length ? s.ctors : undefined, platforms: s.ann && s.ann.platforms, lua_bind: s.ann && s.ann.lua_bind, deprecated: s.deprecated || undefined, tparams: s.tparams && s.tparams.length ? s.tparams : undefined };
     const e = structure[id];
     if ((s.flags || []).includes('static')) e.static = true;
     if (s.deprecated && !e.deprecated) e.deprecated = s.deprecated;

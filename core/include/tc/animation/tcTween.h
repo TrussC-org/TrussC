@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../utils/tcAnnotations.h"
 #include "tcEasing.h"
 #include "../events/tcEvent.h"
 #include "../events/tcEventListener.h"
@@ -16,7 +17,7 @@ double getDeltaTime();
 // Works with any type that supports lerp (float, Vec2, Vec3, Vec4, Color, etc.)
 // Automatically updates via events().update — no manual update() call needed.
 template<typename T>
-class Tween {
+class TC_LUA_BIND("float,Vec2,Vec3") Tween {
 public:
     // Completion event - fired when animation finishes (all loops done)
     // Stored as unique_ptr to allow move semantics (Event itself stays at stable address)

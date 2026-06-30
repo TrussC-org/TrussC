@@ -1258,8 +1258,9 @@ protected:
     virtual void onActiveChanged(bool active) { (void)active; }
     virtual void onVisibleChanged(bool visible) { (void)visible; }
 
+public:
     // -------------------------------------------------------------------------
-    // Timers
+    // Timers — public API: schedule callbacks on a node (call from anywhere)
     // -------------------------------------------------------------------------
 
     // Execute callback once after specified delay in seconds

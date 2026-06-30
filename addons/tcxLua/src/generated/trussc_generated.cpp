@@ -48,14 +48,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](int min, int max) { return trussc::randomInt(min, max); }
     ));
     lua->set_function("randomSeed", [](unsigned int seed) { return trussc::randomSeed(seed); });
-    lua->set_function("tcEnumLabelsAdl", sol::overload(
-        [](trussc::Direction a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::BlendMode a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::EaseType a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::EaseMode a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::LayoutDirection a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::AxisMode a0) { return trussc::tcEnumLabelsAdl(a0); }
-    ));
     lua->set_function("signedNoise", sol::overload(
         [](float x) { return trussc::signedNoise(x); },
         [](float x, float y) { return trussc::signedNoise(x, y); },
@@ -287,7 +279,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const std::string & title, const std::string & message, const std::string & defaultPath) { return trussc::loadDialog(title, message, defaultPath); },
         [](const std::string & title, const std::string & message, const std::string & defaultPath, bool folderSelection) { return trussc::loadDialog(title, message, defaultPath, folderSelection); }
     ));
-    lua->set_function("loadDialogAsync", [](const std::string & title, const std::string & message, const std::string & defaultPath, bool folderSelection, std::function<void (const trussc::FileDialogResult &)> callback) { return trussc::loadDialogAsync(title, message, defaultPath, folderSelection, callback); });
+    lua->set_function("loadDialogAsync", [](const std::string & title, const std::string & message, const std::string & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback) { return trussc::loadDialogAsync(title, message, defaultPath, folderSelection, callback); });
     lua->set_function("saveDialog", sol::overload(
         []() { return trussc::saveDialog(); },
         [](const std::string & title) { return trussc::saveDialog(title); },
@@ -295,16 +287,16 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const std::string & title, const std::string & message, const std::string & defaultPath) { return trussc::saveDialog(title, message, defaultPath); },
         [](const std::string & title, const std::string & message, const std::string & defaultPath, const std::string & defaultName) { return trussc::saveDialog(title, message, defaultPath, defaultName); }
     ));
-    lua->set_function("saveDialogAsync", [](const std::string & title, const std::string & message, const std::string & defaultPath, const std::string & defaultName, std::function<void (const trussc::FileDialogResult &)> callback) { return trussc::saveDialogAsync(title, message, defaultPath, defaultName, callback); });
+    lua->set_function("saveDialogAsync", [](const std::string & title, const std::string & message, const std::string & defaultPath, const std::string & defaultName, std::function<void (const FileDialogResult &)> callback) { return trussc::saveDialogAsync(title, message, defaultPath, defaultName, callback); });
     lua->set_function("loadJson", [](const std::string & path) { return trussc::loadJson(path); });
     lua->set_function("saveJson", sol::overload(
-        [](const Json & j, const std::string & path) { return trussc::saveJson(j, path); },
-        [](const Json & j, const std::string & path, int indent) { return trussc::saveJson(j, path, indent); }
+        [](const trussc::Json & j, const std::string & path) { return trussc::saveJson(j, path); },
+        [](const trussc::Json & j, const std::string & path, int indent) { return trussc::saveJson(j, path, indent); }
     ));
     lua->set_function("parseJson", [](const std::string & str) { return trussc::parseJson(str); });
     lua->set_function("toJsonString", sol::overload(
-        [](const Json & j) { return trussc::toJsonString(j); },
-        [](const Json & j, int indent) { return trussc::toJsonString(j, indent); }
+        [](const trussc::Json & j) { return trussc::toJsonString(j); },
+        [](const trussc::Json & j, int indent) { return trussc::toJsonString(j, indent); }
     ));
     lua->set_function("loadXml", [](const std::string & path) { return trussc::loadXml(path); });
     lua->set_function("parseXml", [](const std::string & str) { return trussc::parseXml(str); });
@@ -376,7 +368,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getDpiScale", []() { return trussc::getDpiScale(); });
     lua->set_function("getFramebufferWidth", []() { return trussc::getFramebufferWidth(); });
     lua->set_function("getFramebufferHeight", []() { return trussc::getFramebufferHeight(); });
-    lua->set_function("beginFrame", []() { return trussc::beginFrame(); });
     lua->set_function("clear", sol::overload(
         [](float r, float g, float b) { return trussc::clear(r, g, b); },
         [](float r, float g, float b, float a) { return trussc::clear(r, g, b, a); },
@@ -385,11 +376,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](float gray, float a) { return trussc::clear(gray, a); },
         [](const trussc::Color & c) { return trussc::clear(c); }
     ));
-    lua->set_function("ensureSwapchainPass", []() { return trussc::ensureSwapchainPass(); });
-    lua->set_function("present", []() { return trussc::present(); });
-    lua->set_function("isInSwapchainPass", []() { return trussc::isInSwapchainPass(); });
-    lua->set_function("suspendSwapchainPass", []() { return trussc::suspendSwapchainPass(); });
-    lua->set_function("resumeSwapchainPass", []() { return trussc::resumeSwapchainPass(); });
     lua->set_function("setColor", sol::overload(
         [](float r, float g, float b) { return trussc::setColor(r, g, b); },
         [](float r, float g, float b, float a) { return trussc::setColor(r, g, b, a); },
@@ -428,7 +414,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("setBlendMode", [](trussc::BlendMode mode) { return trussc::setBlendMode(mode); });
     lua->set_function("getBlendMode", []() { return trussc::getBlendMode(); });
     lua->set_function("resetBlendMode", []() { return trussc::resetBlendMode(); });
-    lua->set_function("restoreBlendPipeline", []() { return trussc::restoreBlendPipeline(); });
     lua->set_function("enable3D", []() { return trussc::enable3D(); });
     lua->set_function("enable3DPerspective", sol::overload(
         []() { return trussc::enable3DPerspective(); },
@@ -489,12 +474,12 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("drawBezier", sol::overload(
         [](trussc::Vec3 p0, trussc::Vec3 p1, trussc::Vec3 p2, trussc::Vec3 p3) { return trussc::drawBezier(p0, p1, p2, p3); },
         [](trussc::Vec3 p0, trussc::Vec3 p1, trussc::Vec3 p2) { return trussc::drawBezier(p0, p1, p2); },
-        [](const std::vector<trussc::Vec3> & controlPoints) { return trussc::drawBezier(controlPoints); }
+        [](const std::vector<Vec3> & controlPoints) { return trussc::drawBezier(controlPoints); }
     ));
     lua->set_function("drawCurve", sol::overload(
         [](trussc::Vec3 p0, trussc::Vec3 p1, trussc::Vec3 p2, trussc::Vec3 p3) { return trussc::drawCurve(p0, p1, p2, p3); },
-        [](const std::vector<trussc::Vec3> & points) { return trussc::drawCurve(points); },
-        [](const std::vector<trussc::Vec3> & points, bool closed) { return trussc::drawCurve(points, closed); }
+        [](const std::vector<Vec3> & points) { return trussc::drawCurve(points); },
+        [](const std::vector<Vec3> & points, bool closed) { return trussc::drawCurve(points, closed); }
     ));
     lua->set_function("drawLine", sol::overload(
         [](trussc::Vec3 p1, trussc::Vec3 p2) { return trussc::drawLine(p1, p2); },
@@ -519,8 +504,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("isFillEnabled", []() { return trussc::isFillEnabled(); });
     lua->set_function("isStrokeEnabled", []() { return trussc::isStrokeEnabled(); });
     lua->set_function("getFrameCount", []() { return trussc::getFrameCount(); });
-    lua->set_function("ensureFontAtlas", [](int rows) { return trussc::ensureFontAtlas(rows); });
-    lua->set_function("ensureFontAtlasForText", [](const std::string & text) { return trussc::ensureFontAtlasForText(text); });
     lua->set_function("drawBitmapString", sol::overload(
         [](const std::string & text, trussc::Vec3 pos) { return trussc::drawBitmapString(text, pos); },
         [](const std::string & text, trussc::Vec3 pos, bool screenFixed) { return trussc::drawBitmapString(text, pos, screenFixed); },
@@ -626,11 +609,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const trussc::Vec2 & center, float radius, float angleBegin, float angleEnd) { return trussc::appendArc(center, radius, angleBegin, angleEnd); }
     ));
     lua->set_function("appendCurve", sol::overload(
-        [](const std::vector<trussc::Vec3> & points) { return trussc::appendCurve(points); },
-        [](const std::vector<trussc::Vec3> & points, bool closed) { return trussc::appendCurve(points, closed); }
+        [](const std::vector<Vec3> & points) { return trussc::appendCurve(points); },
+        [](const std::vector<Vec3> & points, bool closed) { return trussc::appendCurve(points, closed); }
     ));
     lua->set_function("calculateLighting", [](const trussc::Vec3 & worldPos, const trussc::Vec3 & worldNormal, const trussc::Material & material) { return trussc::calculateLighting(worldPos, worldNormal, material); });
-    lua->set_function("toSokolFormat", [](trussc::TextureFormat fmt) { return trussc::toSokolFormat(fmt); });
     lua->set_function("channelCount", [](trussc::TextureFormat fmt) { return trussc::channelCount(fmt); });
     lua->set_function("bytesPerPixel", [](trussc::TextureFormat fmt) { return trussc::bytesPerPixel(fmt); });
     lua->set_function("isFloatFormat", [](trussc::TextureFormat fmt) { return trussc::isFloatFormat(fmt); });
@@ -769,6 +751,13 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("ceil", [](float x) { return std::ceil(x); });
     lua->set_function("round", [](float x) { return std::round(x); });
     lua->set_function("fmod", [](float x, float y) { return std::fmod(x, y); });
+    lua->set_function("atanh", [](float x) { return std::atanh(x); });
+    lua->set_function("tanh", [](float x) { return std::tanh(x); });
+    lua->set_function("exp2", [](float x) { return std::exp2(x); });
+    lua->set_function("log2", [](float x) { return std::log2(x); });
+    lua->set_function("log10", [](float x) { return std::log10(x); });
+    lua->set_function("trunc", [](float x) { return std::trunc(x); });
+    lua->set_function("remainder", [](float x, float y) { return std::remainder(x, y); });
 }
 
 #ifndef _MSC_VER

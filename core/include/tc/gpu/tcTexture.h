@@ -7,6 +7,8 @@
 // This file is included from TrussC.h
 // to access sokol and internal namespace variables
 
+#include "../utils/tcAnnotations.h"
+
 namespace trussc {
 
 // Pixel format for Texture/FBO allocation

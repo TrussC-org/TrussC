@@ -46,7 +46,15 @@ if (structFile) {
 
 // --- 3. orphan + undocumented ------------------------------------------------
 const orphans = keys.filter(k => !ids.has(k));
-const undocumented = [...ids].filter(id => !keys.has?.(id) && !prose[id]);
+// undocumented = a symbol that belongs on the doc surface but has no description.
+// Exempt: operators (rendered in their own section) and `hide = true` symbols
+// (public C++ but not API). A bare keyword-only entry still counts as undocumented.
+const undocumented = [...ids].filter(id => {
+    if (/operator/.test(id)) return false;
+    const p = prose[id];
+    if (p && p.hide) return false;
+    return !(p && p.description && p.description.en);
+});
 
 console.log('=== reference check ===');
 console.log(`sidecar entries : ${keys.length}`);

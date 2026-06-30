@@ -201,7 +201,7 @@ TC_PLATFORMS("macos,android,ios") void setSystemBrightness(float brightness);
 // Thermal monitoring
 // ---------------------------------------------------------------------------
 TC_PLATFORMS("macos,ios,android") ThermalState getThermalState();
-TC_PLATFORMS("ios") float getThermalTemperature();  // Celsius, -1 if unavailable
+TC_PLATFORMS("") float getThermalTemperature();  // stub on all platforms — always returns -1 (no OS exposes raw CPU temperature)
 
 // ---------------------------------------------------------------------------
 // Battery

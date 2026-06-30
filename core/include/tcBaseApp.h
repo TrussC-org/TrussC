@@ -13,6 +13,7 @@
 #include "tc/types/tcTweenMod.h"
 #include "tc/sound/tcSound.h"      // AudioEngine + AudioOutBuffer / AudioInBuffer
 #include "tc/events/tcEventListener.h"
+#include "tc/utils/tcAnnotations.h"
 #include <vector>
 #include <string>
 

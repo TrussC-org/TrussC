@@ -20,27 +20,6 @@ const data = JSON.parse(fs.readFileSync(path, 'utf8'));
 const skip = { member: 0, ns: 0, template: 0, unbindable: 0, noargs: 0 };
 const noargsFns = [];   // signatures missing structured args[] (structure.js gap)
 
-// Set of top-level TrussC type/enum names. Lambda param types must qualify these
-// with trussc:: — otherwise e.g. the enum `Beep` collides with Win32 `Beep()`
-// (windows.h) and fails to compile on Windows (C2872 ambiguous).
-const TRUSSC_TYPES = (() => {
-    const out = [];
-    for (const id in data) {
-        const e = data[id];
-        if ((e.kind === 'type' || e.kind === 'enum') && !e.owner && !e.ns) out.push(e.name);
-    }
-    return out;
-})();
-function qualifyType(t) {
-    let out = t;
-    for (const name of TRUSSC_TYPES) {
-        // qualify a bare occurrence (not already preceded by ':' or a word char),
-        // incl. inside templates (std::vector<Vec3> -> std::vector<trussc::Vec3>).
-        out = out.replace(new RegExp('(^|[^:\\w])(' + name + ')(?![\\w])', 'g'), '$1trussc::$2');
-    }
-    return out;
-}
-
 // Primitive/scalar type words — a non-const ref to one of these is a true
 // out-param Sol2 can't bind (can't bind a temporary to `float&`). A non-const
 // ref to a USERTYPE (Light&, Pixels&) IS bindable (Lua object passed by ref).
@@ -65,6 +44,16 @@ function argBindable(a) {
         if (allPrim || stdValue) return false;   // out-param Sol2 can't bind
     }
     return true;
+}
+
+// Qualify a bare user-defined type (PascalCase, not primitive / std / already
+// qualified) with `trussc::`, so a lambda param like `Beep` can't be ambiguous
+// with a global/Win32 symbol of the same name (windows.h declares ::Beep).
+function qualifyType(type) {
+    const base = type.replace(/[&*]/g, '').replace(/\bconst\b/g, '').trim();
+    if (!base || /\s/.test(base) || base.includes('::') || PRIM.has(base)) return type;
+    if (!/^[A-Z]/.test(base)) return type;          // trussc value types/enums are PascalCase
+    return type.replace(new RegExp(`\\b${base}\\b`), `trussc::${base}`);
 }
 
 // One {decl, call} per callable arity (trailing defaults expand into overloads),
@@ -116,6 +105,7 @@ let body = '', count = 0;
 for (const id of Object.keys(data)) {
     const e = data[id];
     if (e.kind !== 'func') continue;
+    if (e.hidden) { skip.hidden = (skip.hidden || 0) + 1; continue; }   // `hide = true`: public C++ but not API, don't bind
     if (e.owner) { skip.member++; continue; }    // type member -> Phase 2
     if (e.ns) { skip.ns++; continue; }           // sub-namespaced -> Phase 2 (Lua tables)
     const s = emit(e);
