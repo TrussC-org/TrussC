@@ -509,6 +509,24 @@ inline StrokeJoin getStrokeJoin() {
     return getDefaultContext().getStrokeJoin();
 }
 
+// Point drawing state (size in logical pixels, like strokeWeight). Drives the
+// GPU splat path of a Mesh drawn in PrimitiveMode::Points.
+inline void setPointSize(float px) {
+    getDefaultContext().setPointSize(px);
+}
+
+inline float getPointSize() {
+    return getDefaultContext().getPointSize();
+}
+
+inline void setPointStyle(PointStyle s) {
+    getDefaultContext().setPointStyle(s);
+}
+
+inline PointStyle getPointStyle() {
+    return getDefaultContext().getPointStyle();
+}
+
 // ---------------------------------------------------------------------------
 // Scissor Clipping (drawing region restriction)
 // ---------------------------------------------------------------------------
@@ -2710,6 +2728,11 @@ inline void bindCursorImage(Cursor cursor, const Image& image,
 // TrussC image-based lighting environment (must come before the pipeline
 // so PbrPipeline::drawMesh() can call Environment methods by value)
 #include "tc/3d/tcEnvironment.h"
+
+// TrussC GPU point-splat pipeline (defines Mesh::drawGpuPoints() out-of-class).
+// Must come before the PBR pipeline: flushFboDeferredPbr() replays the deferred
+// point draws within the shared FBO layer walk.
+#include "tc/3d/tcMeshPointPipeline.h"
 
 // TrussC PBR mesh pipeline (defines Mesh::drawGpuPbr() out-of-class)
 #include "tc/3d/tcMeshPbrPipeline.h"

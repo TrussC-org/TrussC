@@ -44,6 +44,15 @@ enum class StrokeJoin {
     Bevel    // Flat cut corners
 };
 
+// How points are rasterized (drawPoint() and Mesh in PrimitiveMode::Points).
+// Square/Round go through the GPU instanced splat (size-controllable, retained
+// VBO for a Mesh); Pixel is the classic 1px immediate point (like drawLine).
+enum class PointStyle {
+    Square,  // solid billboarded quad — lightest, default
+    Round,   // anti-aliased disc (alpha-to-coverage)
+    Pixel    // true 1px point (sokol_gl immediate; ignores pointSize)
+};
+
 // Forward declarations
 namespace internal {
     extern sg_view fontView;
@@ -150,11 +159,17 @@ public:
     void setStrokeCap(StrokeCap cap) { style_.strokeCap = cap; }
     void setStrokeJoin(StrokeJoin join) { style_.strokeJoin = join; }
 
+    // Point drawing state (size in logical pixels, matching strokeWeight).
+    void setPointSize(float px) { style_.pointSize = px; }
+    void setPointStyle(PointStyle s) { style_.pointStyle = s; }
+
     bool isFillEnabled() const { return fillEnabled_; }
     bool isStrokeEnabled() const { return strokeEnabled_; }
     float getStrokeWeight() const { return strokeWeight_; }
     StrokeCap getStrokeCap() const { return style_.strokeCap; }
     StrokeJoin getStrokeJoin() const { return style_.strokeJoin; }
+    float getPointSize() const { return style_.pointSize; }
+    PointStyle getPointStyle() const { return style_.pointStyle; }
 
     // -----------------------------------------------------------------------
     // Curve quality (circles, arcs, beziers, rounded rects, squircle)
@@ -905,6 +920,8 @@ private:
         float strokeWeight = 1.0f;
         StrokeCap strokeCap = StrokeCap::Butt;
         StrokeJoin strokeJoin = StrokeJoin::Miter;
+        float pointSize = 1.0f;                    // logical px, like strokeWeight
+        PointStyle pointStyle = PointStyle::Square;
         int circleResolution = 20;     // legacy, will be removed once all
                                        // draw* migrate to curve.resolution
         CurveStyle curve;              // shared by all curved primitives

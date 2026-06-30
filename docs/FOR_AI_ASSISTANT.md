@@ -715,6 +715,23 @@ light.setLensShift(0.0f, 1.0f);                            // Projector lens shi
 light.setIesProfile(&iesProfile);                           // Photometric profile
 ```
 
+### How do I draw a point cloud / lots of points fast?
+
+Put the points in a `Mesh` with `PrimitiveMode::Points` and call `draw()`. A Points-mode mesh is **GPU-resident**: the positions + per-vertex colors are uploaded to a GPU buffer once and drawn with a single draw call, so the per-frame CPU cost is ~constant no matter how many points (millions are fine). Build the cloud once — only rebuild (or `markGpuDirty()`) when the data actually changes, not every frame.
+
+```cpp
+Mesh cloud;
+cloud.setMode(PrimitiveMode::Points);
+for (...) { cloud.addVertex(p); cloud.addColor(c); }   // build once
+
+// in draw():
+setPointSize(8.0f);                 // draw state, logical px (like strokeWeight)
+setPointStyle(PointStyle::Round);   // Square | Round | Pixel
+cloud.draw();                       // GPU-resident, one draw call
+```
+
+`PointStyle` controls the shape only (all are GPU-resident): `Square` and `Round` are billboarded splats sized by `setPointSize()` (`Round` is anti-aliased via alpha-to-coverage); `Pixel` is a true 1px GPU point primitive (ignores size). `setPointSize` / `setPointStyle` are draw state wrapped by `pushStyle`/`popStyle`. Points share the 3D depth buffer, so they occlude and are occluded correctly. See `examples/3d/pointCloudExample`.
+
 ### How do I use IBL (environment lighting / reflections)?
 
 Environment-based lighting — metal reflections and ambient — uses IBL. Load an `Environment` and call `setEnvironment()`:
@@ -1272,6 +1289,8 @@ Color getColor()  // Get current fill color
 CurveStyle::Mode getCurveMode()  // Current curve tessellation mode (fixed segment count vs. adaptive tolerance)
 int getCurveResolution()  // Get current curve resolution
 float getCurveTolerance()  // Get current curve tessellation tolerance (in pixels)
+float getPointSize()  // Get the current point size (logical px).
+PointStyle getPointStyle()  // Get the current point shape (PointStyle).
 StrokeCap getStrokeCap()  // Get current stroke cap style
 StrokeJoin getStrokeJoin()  // Get current stroke join style
 float getStrokeWeight()  // Get current stroke width
@@ -1289,6 +1308,8 @@ void setBlendMode(BlendMode mode)  // Set blend mode. BlendMode::Alpha (default)
 void setCircleResolution(int res) ⚠️deprecated  // Deprecated alias for setCurveResolution()
 void setCurveResolution(int n)  // Set fixed curve segment count (switches off adaptive tolerance mode)
 void setCurveTolerance(float pixels)  // Set adaptive curve tessellation tolerance in pixels (smaller = smoother, scale-aware)
+void setPointSize(float px)  // Set the point size in logical pixels (Square/Round point styles; Pixel is always 1px).
+void setPointStyle(PointStyle s)  // Set the point shape: PointStyle::Square, Round or Pixel.
 void setScissor(float x, float y, float w, float h) [+1]  // Set scissor clipping rectangle. Also available via RectNode::setClipping(true)
 void setStrokeCap(StrokeCap cap)  // Set stroke cap style (Butt, Round, Square)
 void setStrokeJoin(StrokeJoin join)  // Set stroke join style (Miter, Round, Bevel)
@@ -2597,16 +2618,19 @@ Mesh & Mesh::clearTangents()  // Remove all tangents
 Mesh & Mesh::clearTexCoords()  // Clear texture coordinates only
 Mesh & Mesh::clearVertices()  // Clear vertices only
 void Mesh::draw() const [+2]  // Draw the mesh
-void Mesh::drawGpuPbr() const  // Draw the mesh through the GPU PBR pipeline (uploads to GPU buffers as needed, then renders using active lights, material and environment)
+void Mesh::drawGpuPbr() const  // Draw the mesh through the GPU PBR pipeline (retained GPU buffer + active lights, material and environment).
+void Mesh::drawGpuPoints() const  // Draw a Points-mode mesh as a GPU-resident point cloud (Square/Round splats or 1px Pixel points).
 void Mesh::drawNoLighting() const  // Draw the mesh without lighting
 void Mesh::drawNoLightingWithTexture(const Texture & texture) const  // Draw the mesh textured without lighting
 void Mesh::drawWireframe() const  // Draw mesh as wireframe
 void Mesh::drawWithLighting() const  // Draw the mesh with lighting
 std::vector<Color> & Mesh::getColors() [+1]  // Get all vertex colors
-sg_buffer Mesh::getGpuIndexBuffer() const  // Return the underlying sokol-gfx index buffer handle (advanced interop).
-int Mesh::getGpuIndexCount() const  // Number of indices currently uploaded to the GPU
-sg_buffer Mesh::getGpuVertexBuffer() const  // Return the underlying sokol-gfx vertex buffer handle (advanced interop).
-int Mesh::getGpuVertexCount() const  // Number of vertices currently uploaded to the GPU
+sg_buffer Mesh::getGpuIndexBuffer() const  // The sokol-gfx index buffer handle backing the mesh, or an empty handle if non-indexed (advanced interop).
+int Mesh::getGpuIndexCount() const  // Number of indices currently uploaded to the GPU index buffer (0 if the mesh is non-indexed). Pairs with getGpuIndexBuffer for custom rendering.
+sg_buffer Mesh::getGpuPointBuffer() const  // The sokol-gfx buffer handle holding the uploaded point data, position + color per point (advanced interop).
+int Mesh::getGpuPointCount() const  // Number of points currently uploaded to the GPU point buffer (PrimitiveMode::Points). Pairs with getGpuPointBuffer for custom rendering.
+sg_buffer Mesh::getGpuVertexBuffer() const  // The sokol-gfx vertex buffer handle backing the mesh (advanced interop).
+int Mesh::getGpuVertexCount() const  // Number of vertices currently uploaded to the GPU vertex buffer. Pairs with getGpuVertexBuffer (e.g. as the draw count for a custom pipeline).
 std::vector<unsigned int> & Mesh::getIndices() [+1]  // Get all indices
 PrimitiveMode Mesh::getMode() const  // Get current primitive mode
 Vec3 Mesh::getNormal(size_t index) const  // Get normal at index
@@ -2635,7 +2659,8 @@ Mesh & Mesh::setMode(PrimitiveMode mode)  // Set primitive mode (Triangles, Line
 Mesh & Mesh::setNormal(size_t index, const Vec3 & n)  // Set normal at index
 Mesh & Mesh::transform(const Mat4 & m)  // Apply transformation matrix
 Mesh & Mesh::translate(float x, float y, float z) [+1]  // Translate all vertices
-void Mesh::uploadToGpu() const  // Upload mesh data to GPU buffers now
+void Mesh::uploadPointsToGpu() const  // Upload the point cloud (positions + colors) to its GPU buffer now (for the Points / custom-render path).
+void Mesh::uploadToGpu() const  // Upload the mesh's vertex/index data to its GPU buffers now (for the PBR / custom-render path).
 ```
 
 ### MicInput — Microphone capture (miniaudio). Opens an input device and exposes the latest samples through a ring buffer. Use the global getMicInput() to access the shared instance, then start() it; getMicAnalysisBuffer() is a convenience wrapper over getBuffer().
@@ -3769,6 +3794,7 @@ enum MixMode { Auto, DownmixMono }  // Sound channel mixing: Auto (match the out
 enum MouseButton { Left, Right, Middle, None }  // Mouse button: Left, Right, Middle, or None.
 enum Orientation { Portrait, PortraitUpsideDown, LandscapeLeft, LandscapeRight, Landscape, All, AllButUpsideDown }  // Screen orientation mask passed to setOrientation (iOS/Android); values are bit flags and can be combined with |
 enum PixelFormat { U8, F32 }  // CPU pixel data format: U8 (8-bit) or F32 (float).
+enum PointStyle { Square, Round, Pixel }  // Shape used to draw points: Square, Round, Pixel.
 enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Draw primitive mode: Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points.
 enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Geometry primitive type: Points, Lines, LineStrip, Triangles, TriangleStrip, Quads.
 enum SoundSource::Kind { Eager, Stream }  // Source kind tag on SoundSource, letting the mixer dispatch without a per-frame virtual call: Eager (SoundBuffer, full PCM in RAM) vs Stream (SoundStream, decoded on demand).

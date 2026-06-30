@@ -543,11 +543,20 @@ inline void flushDeferredShaderDraws() {
                 internal::getPbrPipeline().executePbrDraw(d.cmd);
             }
         }
+
+        // Deferred point-splat draws (Mesh in PrimitiveMode::Points) — same
+        // per-layer ordering, sharing the swapchain pass + depth buffer.
+        for (auto& d : internal::deferredPointDraws) {
+            if (d.layerId == layer) {
+                internal::executePointDraw(d.cmd);
+            }
+        }
     }
 
     // Clear deferred draws for next frame
     internal::deferredShaderDraws.clear();
     internal::deferredPbrDraws.clear();
+    internal::deferredPointDraws.clear();
 
     // Reset layer for next frame
     internal::sglLayerNext = 0;

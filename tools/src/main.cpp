@@ -3132,6 +3132,23 @@ static int cmdClean(const vector<string>& args) {
 // Subcommand: build
 // =============================================================================
 
+// Read CMAKE_BUILD_TYPE from an existing CMake cache. Returns "" if the cache
+// (or the variable) is absent. Used to decide whether a reconfigure is needed
+// to change the build type on single-config generators.
+static string readCachedBuildType(const string& buildDir) {
+    ifstream cache(buildDir + "/CMakeCache.txt");
+    if (!cache) return "";
+    string line;
+    while (getline(cache, line)) {
+        // Format: CMAKE_BUILD_TYPE:STRING=RelWithDebInfo
+        if (line.rfind("CMAKE_BUILD_TYPE:", 0) == 0) {
+            auto eq = line.find('=');
+            if (eq != string::npos) return line.substr(eq + 1);
+        }
+    }
+    return "";
+}
+
 static int cmdBuild(const vector<string>& args) {
     string explicitPath;
     string targetPreset;
@@ -3243,6 +3260,11 @@ static int cmdBuild(const vector<string>& args) {
 
     // cmake --build --preset <target> --parallel[=N] [--config Release] [--clean-first]
     vector<string> cmd = {cmake, "--build", "--preset", targetPreset, parallelArg};
+    // --config only affects multi-config generators (Xcode, Visual Studio). The
+    // native presets are single-config (Unix Makefiles / Ninja), where --config
+    // is silently ignored; there the build type is fixed at configure time by
+    // CMAKE_BUILD_TYPE, which we pin below. Kept here so --release also works on
+    // any future multi-config native preset.
     if (release) { cmd.push_back("--config"); cmd.push_back("Release"); }
     if (clean) cmd.push_back("--clean-first");
 
@@ -3250,16 +3272,43 @@ static int cmdBuild(const vector<string>& args) {
     string savedCwd = fs::current_path().string();
     fs::current_path(projectPath);
 
-    int rc = 0;
-    // --warnings: reconfigure the cache so trussc_app.cmake turns on -Wall/-Wextra
-    // for the app's own sources. `cmake --build` can't pass -D, so configure first.
-    // The cache var is sticky: it stays on for later builds until a configure
-    // without --warnings (or `trusscli update`) resets it.
+    // `cmake --build` cannot pass -D, so any cache change needs a configure pass
+    // (`cmake --preset`) first. Accumulate the flags and run it only if needed.
+    vector<string> cfg = {cmake, "--preset", targetPreset};
+    bool needConfigure = false;
+
+    // --warnings: turn on -Wall/-Wextra for the app's own sources. The cache var
+    // is sticky: it stays on for later builds until a configure without it (or
+    // `trusscli update`) resets it.
     if (warnings) {
         cout << "[warnings] Enabling -Wall -Wextra for this project's sources...\n";
-        vector<string> cfg = {cmake, "--preset", targetPreset, "-DTRUSSC_WARNINGS=ON"};
-        rc = runProcess(cfg);
+        cfg.push_back("-DTRUSSC_WARNINGS=ON");
+        needConfigure = true;
     }
+
+    // --release on a single-config native preset: the `--config Release` above is
+    // ignored, so pin the build type via CMAKE_BUILD_TYPE at configure time.
+    // Only manage the native preset — web/android bake their own build type
+    // (MinSizeRel / Release) into the preset and must keep it. We touch the cache
+    // only when it actually needs to change, so a plain build stays configure-free
+    // on the common path (no cache, or already the project default).
+    if (kNativePreset && targetPreset == kNativePreset) {
+        string cachedType = readCachedBuildType(string("build-") + targetPreset);
+        if (release && cachedType != "Release") {
+            cout << "[release] Configuring Release build (CMAKE_BUILD_TYPE=Release)...\n";
+            cfg.push_back("-DCMAKE_BUILD_TYPE=Release");
+            needConfigure = true;
+        } else if (!release && cachedType == "Release") {
+            // Undo a sticky Release left by a previous --release build so a plain
+            // build is never silently a Release build.
+            cout << "[release] Reverting to default RelWithDebInfo build...\n";
+            cfg.push_back("-DCMAKE_BUILD_TYPE=RelWithDebInfo");
+            needConfigure = true;
+        }
+    }
+
+    int rc = 0;
+    if (needConfigure) rc = runProcess(cfg);
     if (rc == 0) rc = runProcess(cmd);
     fs::current_path(savedCwd);
 
