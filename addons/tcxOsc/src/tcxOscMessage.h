@@ -194,5 +194,5 @@ private:
 // (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
 //  warn on idiomatic unqualified use too. See tcxOsc README for migration.)
 // -----------------------------------------------------------------------------
-namespace tcx    { using osc::OscMessage; }
-namespace trussc { using tcx::osc::OscMessage; }
+namespace tcx    { using osc::OscMessage; } // deprecated: remove at v1.0.0
+namespace trussc { using tcx::osc::OscMessage; } // deprecated: remove at v1.0.0

@@ -154,4 +154,4 @@ private:
 
 }  // namespace tcx::midi
 
-namespace tcx { using midi::MidiMessage; }
+namespace tcx { using midi::MidiMessage; } // deprecated: remove at v1.0.0

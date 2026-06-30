@@ -149,7 +149,7 @@ private:
 } // namespace tcx::depthrecord
 
 // Backward compatibility: silent flat-`tcx::` aliases (DEPRECATED).
-namespace tcx {
+namespace tcx { // deprecated: remove at v1.0.0
     using depthrecord::RecordStream;
     using depthrecord::REC_DEPTH;
     using depthrecord::REC_COLOR;

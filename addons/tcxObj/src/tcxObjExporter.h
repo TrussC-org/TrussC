@@ -134,5 +134,5 @@ private:
 // (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
 //  warn on idiomatic unqualified use too. See README for migration.)
 // -----------------------------------------------------------------------------
-namespace tcx    { using obj::VertexColorMode; using obj::ObjExportEntry; using obj::ObjExporter; }
-namespace trussc { using tcx::obj::VertexColorMode; using tcx::obj::ObjExportEntry; using tcx::obj::ObjExporter; }
+namespace tcx    { using obj::VertexColorMode; using obj::ObjExportEntry; using obj::ObjExporter; } // deprecated: remove at v1.0.0
+namespace trussc { using tcx::obj::VertexColorMode; using tcx::obj::ObjExportEntry; using tcx::obj::ObjExporter; } // deprecated: remove at v1.0.0

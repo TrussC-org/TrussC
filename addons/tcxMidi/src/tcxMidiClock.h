@@ -83,4 +83,4 @@ private:
 
 }  // namespace tcx::midi
 
-namespace tcx { using midi::MidiClock; }
+namespace tcx { using midi::MidiClock; } // deprecated: remove at v1.0.0

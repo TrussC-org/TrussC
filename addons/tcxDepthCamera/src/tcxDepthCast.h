@@ -61,7 +61,7 @@ inline bool isToF(const DepthCamera& c) { return c.getSensorType() == DepthSenso
 
 // Backward compatibility: canonical is now tcx::depthcamera. Flat tcx:: alias
 // kept until v1.0.0.
-namespace tcx {
+namespace tcx { // deprecated: remove at v1.0.0
     using depthcamera::as;
     using depthcamera::is;
     using depthcamera::isStereoCam;

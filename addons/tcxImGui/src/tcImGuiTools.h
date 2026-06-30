@@ -272,6 +272,6 @@ inline void registerImGuiTools() {
 // `trussc::imgui_tools`. Canonical is now `tcx::imgui`. DEPRECATED — removed in v1.0.0.
 // (No [[deprecated]]: under `using namespace tc;` it would warn on idiomatic use.)
 // -----------------------------------------------------------------------------
-namespace trussc { namespace imgui_tools {
+namespace trussc { namespace imgui_tools { // deprecated: remove at v1.0.0
 using tcx::imgui::registerImGuiTools;   // one per public symbol
 } }  // namespace trussc::imgui_tools

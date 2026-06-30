@@ -198,7 +198,7 @@ inline bool imguiWantsKeyboard() {
 // now `tcx::imgui`. Flat aliases keep existing user code compiling.
 // DEPRECATED — removed in v1.0.0.
 // -----------------------------------------------------------------------------
-namespace tcx {
+namespace tcx { // deprecated: remove at v1.0.0
 using imgui::ImGuiManager;
 using imgui::imguiSetup;
 using imgui::imguiShutdown;

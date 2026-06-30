@@ -136,7 +136,7 @@ struct DepthMeshOptions {
 // removed in v1.0.0. (No [[deprecated]] attribute: under the usual
 // `using namespace tc;` it would warn on idiomatic unqualified use too.)
 // -----------------------------------------------------------------------------
-namespace tcx {
+namespace tcx { // deprecated: remove at v1.0.0
     using depthcamera::DepthSensorType;
     using depthcamera::DepthIntrinsics;
     using depthcamera::Stream;

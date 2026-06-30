@@ -208,4 +208,4 @@ private:
 
 }  // namespace tcx::midi
 
-namespace tcx { using midi::MidiOut; }
+namespace tcx { using midi::MidiOut; } // deprecated: remove at v1.0.0

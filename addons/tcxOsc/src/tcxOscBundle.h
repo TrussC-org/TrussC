@@ -104,5 +104,5 @@ private:
 // -----------------------------------------------------------------------------
 // Backward compatibility: see tcxOscMessage.h. DEPRECATED — removed in v1.0.0.
 // -----------------------------------------------------------------------------
-namespace tcx    { using osc::OscBundle; }
-namespace trussc { using tcx::osc::OscBundle; }
+namespace tcx    { using osc::OscBundle; } // deprecated: remove at v1.0.0
+namespace trussc { using tcx::osc::OscBundle; } // deprecated: remove at v1.0.0

@@ -121,5 +121,5 @@ private:
 // (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
 //  warn on idiomatic unqualified use too. See tcxTls README for migration.)
 // -----------------------------------------------------------------------------
-namespace tcx    { using tls::TlsClient; }
-namespace trussc { using tcx::tls::TlsClient; }
+namespace tcx    { using tls::TlsClient; } // deprecated: remove at v1.0.0
+namespace trussc { using tcx::tls::TlsClient; } // deprecated: remove at v1.0.0

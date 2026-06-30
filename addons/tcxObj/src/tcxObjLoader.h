@@ -70,5 +70,5 @@ private:
 // (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
 //  warn on idiomatic unqualified use too. See README for migration.)
 // -----------------------------------------------------------------------------
-namespace tcx    { using obj::ObjGroup; using obj::ObjLoader; }
-namespace trussc { using tcx::obj::ObjGroup; using tcx::obj::ObjLoader; }
+namespace tcx    { using obj::ObjGroup; using obj::ObjLoader; } // deprecated: remove at v1.0.0
+namespace trussc { using tcx::obj::ObjGroup; using tcx::obj::ObjLoader; } // deprecated: remove at v1.0.0

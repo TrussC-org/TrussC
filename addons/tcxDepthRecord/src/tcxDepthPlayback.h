@@ -162,6 +162,6 @@ private:
 } // namespace tcx::depthrecord
 
 // Backward compatibility: silent flat-`tcx::` alias (DEPRECATED).
-namespace tcx {
+namespace tcx { // deprecated: remove at v1.0.0
     using depthrecord::PlaybackDepthCamera;
 }

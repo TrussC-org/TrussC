@@ -129,7 +129,7 @@ inline const char* toString(MidiStatus s) {
 // attribute: under the usual `using namespace tc;` it would warn on idiomatic
 // unqualified use too. See README for migration.)
 // -----------------------------------------------------------------------------
-namespace tcx {
+namespace tcx { // deprecated: remove at v1.0.0
     using midi::midiReady;
     using midi::MidiDeviceInfo;
     using midi::MidiStatus;

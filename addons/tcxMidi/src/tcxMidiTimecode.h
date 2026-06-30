@@ -256,7 +256,7 @@ inline void MidiTimecodeFrame::fromSeconds(double s, unsigned char r) {
 
 }  // namespace tcx::midi
 
-namespace tcx {
+namespace tcx { // deprecated: remove at v1.0.0
     using midi::MidiTimecodeFrame;
     using midi::MidiTimecode;
 }

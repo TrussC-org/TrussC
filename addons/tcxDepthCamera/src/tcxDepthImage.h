@@ -112,7 +112,7 @@ inline void irToImage(const Pixels& ir, Image& out) {
 
 // Backward compatibility: canonical is now tcx::depthcamera. Flat tcx:: alias
 // kept until v1.0.0.
-namespace tcx {
+namespace tcx { // deprecated: remove at v1.0.0
     using depthcamera::DepthImageView;
     using depthcamera::colorToImage;
     using depthcamera::depthToImage;

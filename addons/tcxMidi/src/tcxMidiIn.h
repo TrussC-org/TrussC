@@ -226,4 +226,4 @@ private:
 
 }  // namespace tcx::midi
 
-namespace tcx { using midi::MidiIn; }
+namespace tcx { using midi::MidiIn; } // deprecated: remove at v1.0.0

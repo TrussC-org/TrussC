@@ -210,7 +210,7 @@ inline void parseColorPayload(std::istream& in, const TcdcHeader& h, DepthFrame&
 // (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
 //  warn on idiomatic unqualified use too. See README for migration.)
 // -----------------------------------------------------------------------------
-namespace tcx {
+namespace tcx { // deprecated: remove at v1.0.0
     using depthrecord::BlockType;
     using depthrecord::BLOCK_DEPTH;
     using depthrecord::BLOCK_COLOR;

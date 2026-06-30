@@ -95,4 +95,4 @@ private:
 // (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
 //  warn on idiomatic unqualified use too. See README for migration.)
 // -----------------------------------------------------------------------------
-namespace tcx { using gltf::GltfModel; }
+namespace tcx { using gltf::GltfModel; } // deprecated: remove at v1.0.0

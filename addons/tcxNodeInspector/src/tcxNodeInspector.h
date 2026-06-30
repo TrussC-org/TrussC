@@ -312,7 +312,7 @@ private:
 // compiling. (No [[deprecated]] attribute: under the usual `using namespace tc;`
 // it would warn on idiomatic unqualified use too. See README for migration.)
 // -----------------------------------------------------------------------------
-namespace tcx {
+namespace tcx { // deprecated: remove at v1.0.0
     using nodeinspector::ImGuiReflector;
     using nodeinspector::NodeInspector;
 }

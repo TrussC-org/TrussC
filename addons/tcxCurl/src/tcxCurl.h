@@ -340,4 +340,4 @@ inline HttpResponse HttpClient::uploadFile(const std::string& path, const std::s
 // `using namespace tc;` it would warn on idiomatic unqualified use too. See
 // README for migration.)
 // -----------------------------------------------------------------------------
-namespace tcx { using curl::HttpResponse; using curl::HttpClient; }
+namespace tcx { using curl::HttpResponse; using curl::HttpClient; } // deprecated: remove at v1.0.0

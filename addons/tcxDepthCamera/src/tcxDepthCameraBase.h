@@ -400,4 +400,4 @@ private:
 
 // Backward compatibility: canonical is now tcx::depthcamera. Flat tcx:: alias
 // kept until v1.0.0.
-namespace tcx { using depthcamera::DepthCamera; }
+namespace tcx { using depthcamera::DepthCamera; } // deprecated: remove at v1.0.0

@@ -54,7 +54,7 @@ public:
 
 // Backward compatibility: canonical is now tcx::depthcamera. Flat tcx:: alias
 // kept until v1.0.0.
-namespace tcx {
+namespace tcx { // deprecated: remove at v1.0.0
     using depthcamera::IStereoRaw;
     using depthcamera::IConfidenceMap;
 }

@@ -118,5 +118,5 @@ private:
 // (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
 //  warn on idiomatic unqualified use too. See tcxWebSocket README for migration.)
 // -----------------------------------------------------------------------------
-namespace tcx    { using websocket::WebSocketEventArgs; using websocket::WebSocketClient; }
-namespace trussc { using tcx::websocket::WebSocketEventArgs; using tcx::websocket::WebSocketClient; }
+namespace tcx    { using websocket::WebSocketEventArgs; using websocket::WebSocketClient; } // deprecated: remove at v1.0.0
+namespace trussc { using tcx::websocket::WebSocketEventArgs; using tcx::websocket::WebSocketClient; } // deprecated: remove at v1.0.0

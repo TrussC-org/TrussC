@@ -832,7 +832,7 @@ private:
 // v1.0.0. (No [[deprecated]] attribute: under the usual `using namespace tc;`
 // it would warn on idiomatic unqualified use too.)
 // -----------------------------------------------------------------------------
-namespace tcx {
+namespace tcx { // deprecated: remove at v1.0.0
     using lut::Lut3D;
     using lut::LutShader;
     using lut::generateIdentity;
