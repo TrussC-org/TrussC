@@ -18,7 +18,7 @@ const report = [];
 
 // ---- shared helpers (same rules as luagen.js) --------------------------
 const TRUSSC_TYPES = [];
-for (const id in data) { const e = data[id]; if ((e.kind === 'type' || e.kind === 'enum') && !e.owner && !e.ns) TRUSSC_TYPES.push(e.name); }
+for (const id in data) { const e = data[id]; if ((e.kind === 'type' || e.kind === 'enum' || e.kind === 'typedef') && !e.owner && !e.ns) TRUSSC_TYPES.push(e.name); }
 function qualifyType(t) {
     let out = t;
     for (const name of TRUSSC_TYPES) out = out.replace(new RegExp('(^|[^:\\w])(' + name + ')(?![\\w])', 'g'), '$1trussc::$2');
@@ -27,6 +27,7 @@ function qualifyType(t) {
 const PRIM = new Set(['void','bool','char','short','int','long','float','double','unsigned','signed','size_t','wchar_t','char16_t','char32_t','int8_t','int16_t','int32_t','int64_t','uint8_t','uint16_t','uint32_t','uint64_t']);
 function argBindable(a) {
     if (a.isArray || a.isPointer) return false;
+    if (/\binternal::/.test(a.type)) return false;   // internal:: types are incomplete / not public API
     if (a.isRef && !a.isConst && !/&&/.test(a.type)) {
         const base = a.type.replace(/[&*]/g, '').replace(/\bconst\b/g, '').trim();
         const allPrim = base.split(/\s+/).every(w => PRIM.has(w));
@@ -55,8 +56,50 @@ function subT(type, T) { return T ? type.replace(/\bT\b/g, T) : type; }
 function emitType(typeEntry, cppType, luaName, T) {
     const owner = typeEntry.id;          // members have owner == this id
     const Q = qualifyType(cppType);      // qualified C++ type for new_usertype<>
+    const bare = typeEntry.name.replace(/<.*>/, '');
+
+    // nested types/enums of this owner (e.g. SoundSource::Kind) — qualify bare refs.
+    const nested = new Set();
+    const oesc = owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const id in data) { const m = id.match(new RegExp('^' + oesc + '::([A-Za-z_]\\w*)$')); if (m && (data[id].kind === 'type' || data[id].kind === 'enum')) nested.add(m[1]); }
+    function qual(type) {
+        let t = qualifyType(subT(type, T));                      // top-level trussc types
+        for (const n of nested) t = t.replace(new RegExp('(^|[^:\\w])(' + n + ')(?![\\w])', 'g'), `$1trussc::${owner}::$2`);
+        // fallback: a still-bare PascalCase token (not yet qualified, not primitive) is
+        // almost certainly a member typedef/nested type of this owner not recorded in
+        // reference-data (e.g. Node::Ptr, Font::GlyphVisitor) — qualify as owner-nested.
+        t = t.replace(/(^|[^:\w])([A-Z]\w*)(?![\w])/g, (full, pre, w) => PRIM.has(w) ? full : `${pre}trussc::${owner}::${w}`);
+        return t;
+    }
+
     const ctorTypes = (typeEntry.constructors || [])
-        .map(c => `${Q}(${typeList((c.args || []).map(a => ({ ...a, type: subT(a.type, T) })))})`);
+        // drop copy/move ctor (single same-type arg) — non-copyable types delete it
+        .filter(c => {
+            const a = c.args || [];
+            if (!a.map(x => ({ ...x, type: subT(x.type, T) })).every(argBindable)) return false;  // unbindable/internal arg
+            if (a.length !== 1) return true;
+            const b = a[0].type.replace(/[&]/g, '').replace(/\bconst\b/g, '').replace(/<.*>/, '').trim();
+            return b !== bare;   // drop copy/move ctor (non-copyable types delete it)
+        })
+        .map(c => `${Q}(${(c.args || []).map(a => qual(a.type)).join(', ')})`);
+
+    // lambdas for a member fn with trailing-default arity expansion (Lua optional args)
+    function memberLambdas(name, sigs, isStatic) {
+        const lams = [];
+        for (const sig of sigs) {
+            const refRet = /&\s*$/.test(sig.ret || '');   // preserve reference (non-copyable / chaining) returns
+            const args = (sig.args || []).map((a, i) => ({ type: qual(a.type), nm: a.name || `a${i}`, hasDefault: a.hasDefault }));
+            let firstDefault = args.length;
+            args.forEach((a, i) => { if (a.hasDefault && firstDefault === args.length) firstDefault = i; });
+            for (let k = firstDefault; k <= args.length; k++) {
+                const slice = args.slice(0, k);
+                const decl = (isStatic ? [] : [`${Q}& self`]).concat(slice.map(a => `${a.type} ${a.nm}`)).join(', ');
+                const call = `${isStatic ? `${Q}::${name}` : `self.${name}`}(${slice.map(a => a.nm).join(', ')})`;
+                lams.push(`[](${decl})${refRet ? ' -> decltype(auto)' : ''} { return ${call}; }`);
+            }
+        }
+        return [...new Set(lams)];
+    }
 
     // collect members owned by this type
     const ops = {};        // meta_function -> [lambda,...]
@@ -64,6 +107,7 @@ function emitType(typeEntry, cppType, luaName, T) {
     for (const id in data) {
         const e = data[id];
         if (e.owner !== owner) continue;
+        if (e.access && e.access !== 'public') { skip.nonpublic = (skip.nonpublic || 0) + 1; continue; }  // protected/private
         if (e.tparams && e.tparams.length) { skip.template++; continue; }
         const opm = e.name.match(/^operator(.+)$/);
         if (opm) {
@@ -75,7 +119,7 @@ function emitType(typeEntry, cppType, luaName, T) {
             if (args.length === 0 && OP_UNARY[sym]) { meta = OP_UNARY[sym]; lam = `[](const ${Q}& a){ return -a; }`; }
             else if (args.length === 1 && OP_BINARY[sym]) {
                 meta = OP_BINARY[sym];
-                const at = qualifyType(args[0].type);
+                const at = qual(args[0].type);
                 const expr = sym === '[]' ? `a[b]` : `a ${sym} b`;
                 lam = `[](${/&/.test(at) ? `const ${Q}&` : `const ${Q}&`} a, ${at} b){ return ${expr}; }`;
             } else { skip.op++; continue; }   // unsupported (+=, <<, =, !=, …)
@@ -88,10 +132,11 @@ function emitType(typeEntry, cppType, luaName, T) {
             if (!sigs.length) continue;
             // bindability: every overload's args must be bindable to use a member ptr;
             // skip individual unbindable overloads when emitting lambdas.
-            const usable = sigs.filter(s => (s.args || []).map(a => ({ ...a, type: subT(a.type, T) })).every(argBindable));
+            const usable = sigs.filter(s => !/\binternal::/.test(s.ret || '')   // skip internal:: (incomplete) returns
+                && (s.args || []).map(a => ({ ...a, type: subT(a.type, T) })).every(argBindable));
             if (!usable.length) { skip.unbindable++; continue; }
             const target = e.static ? statics : methods;
-            target[e.name] = { sigs: usable, ret: subT((usable[0] || {}).ret || 'auto', T) };
+            target[e.name] = { sigs: usable, total: sigs.length };
         }
     }
 
@@ -105,20 +150,13 @@ function emitType(typeEntry, cppType, luaName, T) {
     for (const p of [...new Set(props)]) s += `        t["${p}"] = &${Q}::${p};\n`;
     const emitFns = (map, isStatic) => {
         for (const name in map) {
-            const { sigs } = map[name];
-            if (sigs.length === 1 && sigs[0].args.every(a => true)) {
-                // single overload -> member pointer (clean)
-                s += `        t["${name}"] = &${Q}::${name};\n`;
+            const { sigs, total } = map[name];
+            const hasDefaults = sigs.some(sg => (sg.args || []).some(a => a.hasDefault));
+            if (total === 1 && !hasDefaults) {
+                s += `        t["${name}"] = &${Q}::${name};\n`;   // single C++ overload, no defaults -> member ptr (clean)
             } else {
-                const lams = sigs.map(sig => {
-                    const args = (sig.args || []).map((a, i) => ({ t: qualifyType(subT(a.type, T)), n: a.name || `a${i}` }));
-                    const decl = isStatic ? args.map(a => `${a.t} ${a.n}`).join(', ')
-                        : [`${Q}& self`, ...args.map(a => `${a.t} ${a.n}`)].join(', ');
-                    const call = isStatic ? `${Q}::${name}(${args.map(a => a.n).join(', ')})`
-                        : `self.${name}(${args.map(a => a.n).join(', ')})`;
-                    return `[](${decl}){ return ${call}; }`;
-                });
-                s += `        t["${name}"] = sol::overload(${lams.join(', ')});\n`;
+                const lams = memberLambdas(name, sigs, isStatic);  // defaults -> arity overloads
+                s += `        t["${name}"] = ${lams.length === 1 ? lams[0] : `sol::overload(${lams.join(', ')})`};\n`;
             }
         }
     };
@@ -137,7 +175,13 @@ function emitType(typeEntry, cppType, luaName, T) {
 //  - SoundSource: references nested type SoundSource::Kind (generator only
 //    qualifies top-level types yet).
 //  - FileWriter/FileReader: non-copyable (deleted copy ctor / operator=).
-const EXCLUDE = new Set(['Json', 'Xml', 'Shader', 'Thread', 'SoundSource', 'FileWriter', 'FileReader']);
+const EXCLUDE = new Set([
+    'Json', 'Xml',   // custom Lua glue (get_string / table index) not in reference-data
+    // expose incomplete internal:: types (internal::StreamInstance etc.) via untyped
+    // fields and/or typedef'd returns reference-data doesn't surface — see Obsidian
+    // handoff. Re-include once fields carry a type and internal:: refs are annotated.
+    'Serial', 'Node', 'Thread', 'SoundSource', 'PlayingSound', 'Environment', 'VideoPlayerBase',
+]);
 
 let body = '', count = 0;
 for (const id in data) {

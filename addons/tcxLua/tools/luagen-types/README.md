@@ -8,19 +8,23 @@ static methods, operators) from `docs/reference/reference-data.json`. Pairs with
 node luagen-types.js ../../../../docs/reference/reference-data.json > /tmp/gentypes.cpp
 ```
 
-## Status (WIP) — 96 / 119 types compile clean (isolation syntax-only witness)
+## Status — 109 types compile clean (isolation syntax-only witness), 0 errors
 
-Value/data types (Vec2/Vec3/Color/Rect/Mat/Quaternion/…) generate & compile fully.
-23 types fail on 3 reference-data-side issues — see Obsidian
-"luagen Phase2 usertype 生成 — reference-data への要望":
+Generated from reference-data, verified by compiling against the real headers.
+Derives everything from the data:
+- **constructors** from the type's `constructors[]` (copy/move ctors dropped — non-copyable types)
+- **operators** `+ - * / [] ==` (and `< <=`) → `sol::meta_function`; compound-assign / `=` / `<<` / `!=` skipped (no Lua equivalent)
+- **properties** = fields, **methods** / **static methods** = member fns
+- skips **protected/private** members (reference-data `access`), **template** members,
+  **unbindable** args (out-param / pointer / array), and **`internal::`** incomplete types
+- **trailing-default arity expansion** (Lua optional args), like luagen Phase 1
+- **reference returns** use `-> decltype(auto)` (chaining `*this`, non-copyable refs)
+- qualifies TrussC types (`trussc::Vec2`), nested types (`trussc::SoundSource::Kind`),
+  and falls back to owner-nested for unrecorded member typedefs (`Node::Ptr`)
 
-1. **no access modifier** — protected members can't be filtered (~13 types). Needs
-   `access` on member entries. Highest impact.
-2. **nested types recorded top-level** — `Font::PlacedGlyph` stored as `PlacedGlyph`
-   without enclosing scope (~5 types). Needs `enclosing` / fully-qualified id.
-3. **non-copyable types** — generated copy ctors / value returns hit deleted ctors
-   (~11 types). Needs `copyable:false`, or generator drops copy/move ctors.
+### Excluded (7) — pending reference-data, see Obsidian handoff
+`Serial Node Thread SoundSource PlayingSound Environment VideoPlayerBase` expose
+incomplete `internal::` types through **untyped fields** (reference-data fields carry
+no `type`) and/or typedef'd returns. `Json`/`Xml` keep custom Lua glue (hand-written).
 
-Operators map to `sol::meta_function` (+ - * / [] == < <=); compound-assign/=/<</!=
-are skipped (no Lua equivalent). Custom-glue types (Json/Xml) stay hand-written.
-Not yet integrated into setBindings — blocked on the above.
+Not yet wired into setBindings (adoption = replace the hand value-type usertypes).
