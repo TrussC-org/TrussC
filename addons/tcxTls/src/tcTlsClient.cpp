@@ -27,7 +27,9 @@
     #include <sys/stat.h>
 #endif
 
-namespace trussc {
+using namespace tc;
+
+namespace tcx {
 
 // Forward declarations for the generated bundle (see cmake/tcTlsCaBundle.cpp.in).
 namespace tls_internal {
@@ -466,7 +468,7 @@ bool TlsClient::performHandshake() {
         notifyError(std::string("TLS handshake failed: ") + errBuf, ret);
         disconnect(); // Terminate connection on error
         
-        TcpConnectEventArgs args;
+        tc::TcpConnectEventArgs args;
         args.success = false;
         args.message = std::string("TLS Handshake failed: ") + errBuf;
         onConnect.notify(args);
@@ -510,7 +512,7 @@ void TlsClient::processNetwork() {
             tcLogNotice() << "TLS connected to " << remoteHost_ << ":" << remotePort_
                           << " [" << getTlsVersion() << ", " << getCipherSuite() << "]";
 
-            TcpConnectEventArgs args;
+            tc::TcpConnectEventArgs args;
             args.success = true;
             args.message = "TLS Connected";
             onConnect.notify(args);
@@ -531,7 +533,7 @@ void TlsClient::processNetwork() {
         int ret = mbedtls_ssl_read(&ctx_->ssl, buffer.data(), buffer.size());
 
         if (ret > 0) {
-            TcpReceiveEventArgs args;
+            tc::TcpReceiveEventArgs args;
             args.data.assign(reinterpret_cast<char*>(buffer.data()),
                             reinterpret_cast<char*>(buffer.data()) + ret);
             onReceive.notify(args);
@@ -540,7 +542,7 @@ void TlsClient::processNetwork() {
             // Connection closed
             running_ = false;
             connected_ = false;
-            TcpDisconnectEventArgs args;
+            tc::TcpDisconnectEventArgs args;
             args.reason = "Connection closed by remote";
             args.wasClean = true;
             onDisconnect.notify(args);
@@ -554,7 +556,7 @@ void TlsClient::processNetwork() {
                 connected_ = false;
                 char errBuf[256];
                 mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-                TcpDisconnectEventArgs args;
+                tc::TcpDisconnectEventArgs args;
                 args.reason = std::string("TLS error: ") + errBuf;
                 args.wasClean = false;
                 onDisconnect.notify(args);
@@ -601,7 +603,7 @@ void TlsClient::disconnect() {
 
     if (connected_) {
         connected_ = false;
-        TcpDisconnectEventArgs args;
+        tc::TcpDisconnectEventArgs args;
         args.reason = "Disconnected by client";
         args.wasClean = true;
         onDisconnect.notify(args);
@@ -683,4 +685,4 @@ std::string TlsClient::getTlsVersion() const {
     return ver ? ver : "";
 }
 
-} // namespace trussc
+}  // namespace tcx

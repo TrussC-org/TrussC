@@ -164,7 +164,7 @@ inline void imguiSetup() {
     // Auto-register the ImGui MCP tools when MCP is enabled, so ImGui-based
     // UIs are AI-drivable without an explicit registerImGuiTools() call.
     if (const char* m = std::getenv("TRUSSC_MCP"); m && std::string(m) == "1") {
-        trussc::imgui_tools::registerImGuiTools();
+        tcx::imgui_tools::registerImGuiTools();
     }
 }
 
@@ -174,12 +174,12 @@ inline void imguiShutdown() {
 
 inline void imguiBegin() {
     ImGuiManager::instance().begin();
-    trussc::imgui_tools::beginFrame();
+    tcx::imgui_tools::beginFrame();
 }
 
 inline void imguiEnd() {
     ImGuiManager::instance().end();
-    trussc::imgui_tools::swapFrames();
+    tcx::imgui_tools::swapFrames();
 }
 
 inline bool imguiWantsMouse() {

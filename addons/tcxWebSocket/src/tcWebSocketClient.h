@@ -15,7 +15,7 @@
 using namespace std;
 using namespace tc;
 
-namespace trussc {
+namespace tcx {
 
 // =============================================================================
 // WebSocket Event Args
@@ -109,6 +109,16 @@ private:
 #endif
 };
 
-} // namespace trussc
+}  // namespace tcx
 
-namespace tc = trussc;
+// -----------------------------------------------------------------------------
+// Backward compatibility: tcxWebSocket historically lived in `trussc` (tc).
+// The canonical namespace is now `tcx`; this alias keeps existing
+// `tc::WebSocketClient` code compiling. DEPRECATED — will be removed in v1.0.0.
+// (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
+//  warn on idiomatic unqualified use too. See tcxWebSocket README for migration.)
+// -----------------------------------------------------------------------------
+namespace trussc {
+using tcx::WebSocketEventArgs;
+using tcx::WebSocketClient;
+}  // namespace trussc

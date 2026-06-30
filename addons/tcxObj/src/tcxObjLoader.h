@@ -10,8 +10,9 @@
 #include <vector>
 #include <filesystem>
 
-namespace trussc {
+namespace tcx {
 
+using namespace tc;  // core types (Mesh, Material, Image, Vec3, ...)
 namespace fs = std::filesystem;
 
 // A loaded group/object from OBJ file
@@ -60,4 +61,16 @@ private:
     static void computeNormals(Mesh& mesh);
 };
 
-} // namespace trussc
+}  // namespace tcx
+
+// -----------------------------------------------------------------------------
+// Backward compatibility: tcxObj historically lived in `trussc` (tc).
+// The canonical namespace is now `tcx`; this alias keeps existing
+// `tc::Xxx` code compiling. DEPRECATED — will be removed in v1.0.0.
+// (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
+//  warn on idiomatic unqualified use too. See README for migration.)
+// -----------------------------------------------------------------------------
+namespace trussc {
+using tcx::ObjGroup;
+using tcx::ObjLoader;
+}  // namespace trussc
