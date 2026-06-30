@@ -41,6 +41,7 @@ public:
 
 protected:
     void setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua);
+    void setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua);   // luagen-types (Phase 2 usertypes)
     void setTypeBindings(const std::shared_ptr<sol::state>& lua);
     void setConstBindings(const std::shared_ptr<sol::state>& lua);
     void setColorConstBindings(const std::shared_ptr<sol::state>& lua);

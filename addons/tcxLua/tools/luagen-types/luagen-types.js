@@ -111,19 +111,21 @@ function emitType(typeEntry, cppType, luaName, T) {
         if (e.tparams && e.tparams.length) { skip.template++; continue; }
         const opm = e.name.match(/^operator(.+)$/);
         if (opm) {
-            const sig = (e.signatures || [])[0] || { args: [] };
-            const args = (sig.args || []).map(a => ({ ...a, type: subT(a.type, T) }));
-            if (!args.every(argBindable)) { skip.unbindable++; continue; }
             const sym = opm[1];
-            let meta, lam;
-            if (args.length === 0 && OP_UNARY[sym]) { meta = OP_UNARY[sym]; lam = `[](const ${Q}& a){ return -a; }`; }
-            else if (args.length === 1 && OP_BINARY[sym]) {
-                meta = OP_BINARY[sym];
-                const at = qual(args[0].type);
-                const expr = sym === '[]' ? `a[b]` : `a ${sym} b`;
-                lam = `[](${/&/.test(at) ? `const ${Q}&` : `const ${Q}&`} a, ${at} b){ return ${expr}; }`;
-            } else { skip.op++; continue; }   // unsupported (+=, <<, =, !=, …)
-            (ops[meta] ||= []).push(lam);
+            for (const sig of (e.signatures || [])) {   // an operator can have unary + binary overloads
+                if (sig.tmpl) continue;
+                const args = (sig.args || []).map(a => ({ ...a, type: subT(a.type, T) }));
+                if (!args.every(argBindable)) { skip.unbindable++; continue; }
+                let meta, lam;
+                if (args.length === 0 && OP_UNARY[sym]) { meta = OP_UNARY[sym]; lam = `[](const ${Q}& a){ return -a; }`; }
+                else if (args.length === 1 && OP_BINARY[sym]) {
+                    meta = OP_BINARY[sym];
+                    const at = qual(args[0].type);
+                    const expr = sym === '[]' ? `a[b]` : `a ${sym} b`;
+                    lam = `[](const ${Q}& a, ${at} b){ return ${expr}; }`;
+                } else { skip.op++; continue; }   // unsupported (+=, <<, =, !=, …)
+                (ops[meta] ||= []).push(lam);
+            }
             continue;
         }
         if (e.kind === 'field') {
@@ -184,9 +186,14 @@ function emitType(typeEntry, cppType, luaName, T) {
 const EXCLUDE = new Set([
     'Json', 'Xml',   // custom Lua glue (get_string / table index) not in reference-data
     // sol new_usertype instantiation pulls in the incomplete internal::StreamInstance
-    // through their C++ definition (NOT visible in reference-data signatures) — needs
-    // deeper handling / a hand-written shim. See Obsidian handoff.
+    // through their C++ definition (NOT visible in reference-data signatures). See handoff.
     'Serial', 'Node', 'Thread', 'SoundSource', 'Environment', 'VideoPlayerBase',
+    // --- v1 integration: types already hand-written in setTypeBindings stay hand-written ---
+    // (avoids double-registration / regressions; v2 will migrate the gen⊇hand ones).
+    'AudioEngine', 'Color', 'EasyCam', 'Fbo', 'Font', 'Image', 'IVec2', 'IVec3', 'Light',
+    'Mat3', 'Mat4', 'Material', 'Mesh', 'MicInput', 'Path', 'Pixels', 'PlayingSound',
+    'Quaternion', 'Rect', 'Shader', 'Sound', 'SoundBuffer', 'SoundStream', 'Texture',
+    'Vec2', 'Vec3', 'Vec4',
 ]);
 
 let body = '', count = 0;

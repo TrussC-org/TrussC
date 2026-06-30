@@ -30,4 +30,11 @@ definition (NOT visible in reference-data signatures) — needs deeper handling 
 hand-written shim. `Json`/`Xml` keep custom Lua glue (hand-written). (PlayingSound
 recovered once fields are filtered by `type`.)
 
-Not yet wired into setBindings (adoption = replace the hand value-type usertypes).
+## Integration (v1) — WIRED IN
+`setGeneratedTypeBindings()` (in `src/generated/trussctype_generated.cpp`) is called
+from `setBindings()`. **v1 generates the 83 types that are NOT hand-written** (pure
+coverage gain: EventArgs, color spaces, Tween<float/Vec2/Vec3>, network, etc.) — the
+27 already-hand-written types stay hand-written for now (listed in EXCLUDE) to avoid
+double-registration. **v2** will migrate the 14 hand types whose generated form is a
+verified superset (Vec2/Vec3/Vec4/IVec2/IVec3/Color/Font/Mesh/Path/PlayingSound/
+Quaternion/Rect/Sound/SoundStream) by deleting their hand usertypes.

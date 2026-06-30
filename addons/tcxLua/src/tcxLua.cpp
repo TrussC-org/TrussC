@@ -120,6 +120,7 @@ bool tcxLua::isLuaJITUsedEstimated(const std::shared_ptr<sol::state>& lua){
 
 void tcxLua::setBindings(const std::shared_ptr<sol::state>& lua){
     setTrussCGeneratedBindings(lua);
+    setGeneratedTypeBindings(lua);   // luagen-types: 83 generated usertypes (Phase 2)
     setTypeBindings(lua);
     setConstBindings(lua);
     setColorConstBindings(lua);
