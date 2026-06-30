@@ -126,7 +126,13 @@ function emitType(typeEntry, cppType, luaName, T) {
             (ops[meta] ||= []).push(lam);
             continue;
         }
-        if (e.kind === 'field') { props.push(e.name); continue; }
+        if (e.kind === 'field') {
+            const ft = subT(e.type || '', T);
+            // skip fields of incomplete internal:: types, raw pointers, or C arrays
+            if (!ft || /\binternal::/.test(ft) || /\*/.test(ft) || /\[/.test(ft)) { skip.unbindable++; continue; }
+            props.push(e.name);
+            continue;
+        }
         if (e.kind === 'method') {
             const sigs = (e.signatures || []).filter(s => !s.tmpl);
             if (!sigs.length) continue;
@@ -177,10 +183,10 @@ function emitType(typeEntry, cppType, luaName, T) {
 //  - FileWriter/FileReader: non-copyable (deleted copy ctor / operator=).
 const EXCLUDE = new Set([
     'Json', 'Xml',   // custom Lua glue (get_string / table index) not in reference-data
-    // expose incomplete internal:: types (internal::StreamInstance etc.) via untyped
-    // fields and/or typedef'd returns reference-data doesn't surface — see Obsidian
-    // handoff. Re-include once fields carry a type and internal:: refs are annotated.
-    'Serial', 'Node', 'Thread', 'SoundSource', 'PlayingSound', 'Environment', 'VideoPlayerBase',
+    // sol new_usertype instantiation pulls in the incomplete internal::StreamInstance
+    // through their C++ definition (NOT visible in reference-data signatures) — needs
+    // deeper handling / a hand-written shim. See Obsidian handoff.
+    'Serial', 'Node', 'Thread', 'SoundSource', 'Environment', 'VideoPlayerBase',
 ]);
 
 let body = '', count = 0;
