@@ -10734,7 +10734,73 @@ keywords = ["batch", "segments", "line list", "multiple lines"]
 description.en = "Begin batch line drawing. Add vertex pairs with vertex(), then call endLines(). Each pair of vertices draws one independent line segment. Use setColor() between vertices for per-line colors."
 description.ja = "バッチ線描画を開始。vertex()で頂点ペアを追加し、endLines()で描画。2頂点で1本の独立した線分。setColor()で頂点ごとに色を変更可能"
 description.ko = "배치 선 그리기 시작. vertex()로 정점 쌍을 추가한 뒤 endLines()를 호출. 각 정점 쌍이 독립적인 선분 하나를 그림. 정점 사이에 setColor()로 선마다 색상 지정 가능"
-related = ["endLines", "drawLine", "setColor"]
+related = ["endLines", "drawLine", "setColor", "beginStroke", "beginShape"]
+details.en = '''
+`beginLines()` opens a buffer that draws **independent line segments**. Add
+points with [`vertex`](#vertex); they are consumed **in pairs** — vertices 0–1
+are one segment, 2–3 the next, and so on. Nothing is drawn until
+[`endLines`](#endLines) is called, and a trailing odd vertex is ignored. At
+least two vertices are required.
+
+Each vertex captures the current draw color at the moment its `vertex()` is
+called, so set the color **between** vertices for per-segment (even
+per-endpoint, gradient) colors:
+
+```cpp
+beginLines();
+setColor(colors::red);    vertex(20, 20);
+setColor(colors::blue);   vertex(200, 80);   // segment 1: red → blue
+setColor(colors::lime);   vertex(20, 120);
+setColor(colors::yellow); vertex(200, 180);  // segment 2: lime → yellow
+endLines();
+```
+
+These are thin (1px) lines. For thick lines with caps and joins use
+[`beginStroke`](#beginStroke); for a connected outline (line strip) use
+[`beginShape`](#beginShape) with [`noFill`](#noFill).
+'''
+details.ja = '''
+`beginLines()` は**独立した線分**を描くバッファを開く。[`vertex`](#vertex) で点を
+追加すると **2 つずつペア**で消費される — 頂点 0–1 が 1 本目、2–3 が 2 本目…という
+具合。[`endLines`](#endLines) を呼ぶまで描画されず、余った奇数番目の頂点は無視される。
+最低 2 頂点が必要。
+
+各頂点は `vertex()` を呼んだ時点の描画色を取り込むので、頂点の**間**で色を変えると
+線分ごと（さらには端点ごと＝グラデーション）に色を付けられる:
+
+```cpp
+beginLines();
+setColor(colors::red);    vertex(20, 20);
+setColor(colors::blue);   vertex(200, 80);   // 線分1: red → blue
+setColor(colors::lime);   vertex(20, 120);
+setColor(colors::yellow); vertex(200, 180);  // 線分2: lime → yellow
+endLines();
+```
+
+これは細い（1px）線。太さ・cap・join 付きの線は [`beginStroke`](#beginStroke)、
+連続した輪郭（line strip）は [`beginShape`](#beginShape) ＋ [`noFill`](#noFill) を使う。
+'''
+details.ko = '''
+`beginLines()`는 **독립적인 선분**을 그리는 버퍼를 연다. [`vertex`](#vertex)로 점을
+추가하면 **두 개씩 쌍으로** 소비된다 — 정점 0–1이 첫 선분, 2–3이 다음 선분… 식이다.
+[`endLines`](#endLines)를 호출하기 전에는 그려지지 않으며, 남는 홀수 번째 정점은
+무시된다. 최소 2개의 정점이 필요하다.
+
+각 정점은 `vertex()`를 호출하는 시점의 그리기 색을 담으므로, 정점 **사이에서** 색을
+바꾸면 선분마다(나아가 끝점마다 = 그라데이션) 색을 줄 수 있다:
+
+```cpp
+beginLines();
+setColor(colors::red);    vertex(20, 20);
+setColor(colors::blue);   vertex(200, 80);   // 선분1: red → blue
+setColor(colors::lime);   vertex(20, 120);
+setColor(colors::yellow); vertex(200, 180);  // 선분2: lime → yellow
+endLines();
+```
+
+이것은 가는(1px) 선이다. 두께·cap·join이 있는 선은 [`beginStroke`](#beginStroke),
+연결된 윤곽(line strip)은 [`beginShape`](#beginShape) + [`noFill`](#noFill)를 사용한다.
+'''
 
 ["beginShadowPass"]
 category = "graphics_lighting"
@@ -10774,6 +10840,13 @@ call [`drawFill`](#Path::drawFill) instead. The stroke here is
 a thin (1px) line strip; for thick lines with caps and joins use
 [`beginStroke`](#beginStroke). Curve helpers like [`appendArc`](#appendArc)
 and [`appendCurve`](#appendCurve) push curved runs into the same buffer.
+
+The whole shape is a single color — the current draw color at the moment
+[`endShape`](#endShape) is called; calling [`setColor`](#setColor) between
+[`vertex`](#vertex) calls has no effect. For per-vertex colors or a gradient
+fill, build a [`Mesh`](#Mesh) and set a color per vertex with
+[`Mesh::addColor`](#Mesh::addColor) (or use [`beginLines`](#beginLines) for
+per-segment line colors) instead.
 '''
 details.ja = '''
 `beginShape()` は頂点バッファを開く。[`vertex`](#vertex)（2D / 3D）で角を
@@ -10796,6 +10869,12 @@ endShape(true);   // close = 最後の頂点を最初の頂点に繋ぐ
 cap・join を付けた線が欲しければ [`beginStroke`](#beginStroke) を使う。
 [`appendArc`](#appendArc) や [`appendCurve`](#appendCurve) などの curve
 ヘルパーで、同じバッファに曲線の頂点列を流し込める。
+
+図形全体は単色で塗られる（色は [`endShape`](#endShape) を呼んだ時点の現在の
+描画色）。[`vertex`](#vertex) の間で [`setColor`](#setColor) しても反映されない。
+頂点ごとの色やグラデーション塗りが欲しいときは、[`Mesh`](#Mesh) を作って
+[`Mesh::addColor`](#Mesh::addColor) で頂点ごとに色を付ける（線なら
+[`beginLines`](#beginLines) で線分ごとに色を付けられる）。
 '''
 details.ko = '''
 `beginShape()`는 정점 버퍼를 연다. [`vertex`](#vertex)(2D/3D)로 모서리를
@@ -10818,6 +10897,12 @@ endShape(true);   // close = 마지막 정점을 첫 정점에 연결
 필요하면 [`beginStroke`](#beginStroke)를 사용한다. [`appendArc`](#appendArc),
 [`appendCurve`](#appendCurve) 같은 curve 헬퍼로 같은 버퍼에 곡선 정점열을
 넣을 수 있다.
+
+도형 전체는 단색으로 칠해진다(색은 [`endShape`](#endShape)를 호출하는 시점의
+현재 그리기 색). [`vertex`](#vertex) 사이에서 [`setColor`](#setColor)를 호출해도
+반영되지 않는다. 정점별 색이나 그라데이션 채움이 필요하면 [`Mesh`](#Mesh)를 만들어
+[`Mesh::addColor`](#Mesh::addColor)로 정점마다 색을 지정한다(선이라면
+[`beginLines`](#beginLines)로 선분별 색을 줄 수 있다).
 '''
 
 ["beginStroke"]
@@ -11323,12 +11408,23 @@ of = ["ofDrawRectangle"]
 description.en = "Draw rectangle"
 description.ja = "矩形を描画"
 description.ko = "사각형 그리기"
-details = '''
-Draws an axis-aligned rectangle from the top-left corner.
-Respects the current fill / noFill mode and draw color.
-With a Vec3 position, z is used for placement in 3D mode.
-For rounded corners, see drawRectRounded and drawRectSquircle.
-
+details.en = '''
+Draws an axis-aligned rectangle from the top-left corner. Respects the current
+[`fill`](#fill) / [`noFill`](#noFill) mode and draw color. With a `Vec3`
+position, `z` places it in 3D mode. For rounded corners, see
+[`drawRectRounded`](#drawRectRounded) and [`drawRectSquircle`](#drawRectSquircle).
+'''
+details.ja = '''
+左上を原点に軸並行の矩形を描画する。現在の [`fill`](#fill) / [`noFill`](#noFill)
+モードと描画色に従う。`Vec3` で位置を渡すと `z` が 3D モードでの配置に使われる。
+角を丸めたいときは [`drawRectRounded`](#drawRectRounded) /
+[`drawRectSquircle`](#drawRectSquircle) を参照。
+'''
+details.ko = '''
+좌상단을 원점으로 축에 정렬된 사각형을 그린다. 현재 [`fill`](#fill) /
+[`noFill`](#noFill) 모드와 그리기 색을 따른다. `Vec3`로 위치를 전달하면 `z`가
+3D 모드에서 배치에 사용된다. 둥근 모서리는 [`drawRectRounded`](#drawRectRounded) /
+[`drawRectSquircle`](#drawRectSquircle)를 참조.
 '''
 related = ["drawRectRounded", "drawRectSquircle", "Rect"]
 
