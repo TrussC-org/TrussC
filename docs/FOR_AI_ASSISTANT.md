@@ -875,7 +875,7 @@ TrussC uses **`shared_ptr` / `weak_ptr` throughout**. Create nodes with `make_sh
 
 ### How do addons (ofxXxx) and addons.make compare?
 
-Very similar. The prefix is **`ofx` → `tcx`**, the namespace is **`tcx::`** (e.g. `tcxBox2d` contains `tcx::box2d::World`). You add one **addon name per line in `addons.make`** (as in oF), or `trusscli addon add tcxOsc`. The big difference is **automatic dependency resolution** — if `tcxA` depends on `tcxB`, just list `tcxA` and `tcxB` links automatically (oF needed manual ordering in addons.make). The projectGenerator becomes `trusscli` (GUI included).
+Very similar. The prefix is **`ofx` → `tcx`**, the namespace is **`tcx::<addonname>`** — a sub-namespace per addon (e.g. `tcxBox2d` contains `tcx::box2d::World`), so addon types never clash. Opt in with `using namespace tcx::box2d;` (or `using namespace tcx;` then `box2d::World`). You add one **addon name per line in `addons.make`** (as in oF), or `trusscli addon add tcxOsc`. The big difference is **automatic dependency resolution** — if `tcxA` depends on `tcxB`, just list `tcxA` and `tcxB` links automatically (oF needed manual ordering in addons.make). The projectGenerator becomes `trusscli` (GUI included).
 
 ### What's the equivalent of oF's projectGenerator? (trusscli GUI)
 
@@ -1041,7 +1041,7 @@ Signals that many unrelated listeners across the app need belong in a Meyers-sin
 
 ### What is an addon and how do I use one?
 
-An addon is a reusable module (`tcx` + PascalCase: headers + sources + examples) placed under `addons/`. Its namespace is `tcx::` (core is `tc::`). To use one, just list its name, one per line, in your project's `addons.make`:
+An addon is a reusable module (`tcx` + PascalCase: headers + sources + examples) placed under `addons/`. Its namespace is `tcx::<addonname>` — a sub-namespace per addon (e.g. `tcx::osc`, `tcx::box2d`; core is `tc::`). To use one, just list its name, one per line, in your project's `addons.make`:
 ```
 tcxBox2d
 tcxOsc
@@ -1051,6 +1051,15 @@ CMake's `trussc_app()` reads `addons.make` and auto-links each addon (`use_addon
 ### What's the minimal addon?
 
 To just make it work, **`src/` is all you need.** Put `src/tcxMyAddon.h` (and `.cpp` if needed) under `addons/tcxMyAddon/`, list `tcxMyAddon` in the consuming project's `addons.make`, and it works. **You don't write build config (`CMakeLists.txt`)** — TrussC auto-collects `src/`・`libs/*/`, wires include paths, and links against TrussC (a header-only addon with no sources becomes an `INTERFACE` target). Class in `namespace tcx::myaddon { ... }`, files named `tcxXxx.h / .cpp`. You only add your own `CMakeLists.txt` for what auto-collection can't do: FetchContent, special flags, codegen, platform-specific linking. To ship a runtime DLL / dylib / metallib, use `tc_addon_bundle_file(<path>)`.
+
+### What namespace does an addon live in? (tcx::<addonname>)
+
+Each addon gets its **own sub-namespace** under `tcx`: `tcxOsc` → `tcx::osc`, `tcxBox2d` → `tcx::box2d`. This isolates types, so two addons can each define a `World` / `Client` / `Message` without clashing. Use it either way:
+```cpp
+using namespace tcx;          // then qualify by addon:  osc::Receiver
+using namespace tcx::osc;     // then bare:              Receiver
+```
+(Core stays `tc::`.) Migrating an addon that shipped as flat `tcx::` or legacy `trussc::`? Move the types into `tcx::<addonname>` and add temporary silent compat aliases (`namespace tcx { using osc::Foo; }`) until v1.0.0 — see `tcxOsc` and `addons/tcxTemplate` for the pattern.
 
 ### How do I publish/distribute my addon?
 
@@ -1168,6 +1177,102 @@ listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
 });
 ```
 
+## Enums (compile-time reflection)
+
+TrussC reflects plain `enum class` at compile time (magic_enum-style), so enum-to-string is free — no hand-written `switch`. This powers JSON dumps (enums serialize as their label) and the inspector's labeled combo boxes.
+
+### How do I get the string name of an enum value? (enumLabel)
+
+Call `enumLabel(value)` — it returns the enumerator name as a `const char*`. For a normal contiguous `enum class` you write nothing extra:
+```cpp
+enum class Tool { Brush, Eraser, Fill };
+
+logNotice() << enumLabel(Tool::Eraser);     // "Eraser"
+
+for (auto v : enumValues<Tool>())           // iterate every value (e.g. build a dropdown)
+    logNotice() << enumLabel(v);            // Brush, Eraser, Fill
+```
+`enumNames<E>()` / `enumValues<E>()` give parallel compile-time arrays of all valid enumerators. The auto-scan window is `[-128,128]` (extend with `TC_ENUM_AUTOLABEL_MAX`).
+
+### How do I set custom display labels for an enum? (TC_ENUM_LABELS)
+
+Put `TC_ENUM_LABELS` right after the enum, in the same namespace, to override the strings (e.g. prettier UI text):
+```cpp
+enum class Quality { Low, Medium, High };
+TC_ENUM_LABELS(Quality, "Low (fast)", "Medium", "High (slow)")
+
+logNotice() << enumLabel(Quality::High);    // "High (slow)"
+```
+Without the macro you still get the raw enumerator names, so only add it when you want labels different from the C++ identifiers.
+
+## Strings & numbers
+
+### How do I format a number as a string? (toString, not std::to_string)
+
+Don't reach for `std::to_string` or a `stringstream` — TrussC has **`toString`** (like oF's `ofToString`), with optional precision and padding:
+```cpp
+string fps = toString(getFrameRate(), 1);          // "59.9"  (1 decimal)
+drawBitmapString("FPS: " + toString(getFrameRate(), 1), 10, 10);
+
+toString(6.28318, 2);          // "6.28"   (precision)
+toString(42, 5, '0');          // "00042"  (width, fill)
+toString(vector<int>{1,2,3});  // "{1, 2, 3}"
+```
+Reverse (string → value): `toInt(s)` / `toInt64(s)` / `toFloat(s)` / `toDouble(s)` / `toBool(s)` (`"true"`/`"1"`/`"yes"` → true).
+
+## Logging
+
+Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`.
+
+### How do I write logs to a file? (getLogger + setLogFile)
+
+Get the global logger (it's a reference — use `auto&`), point it at a file, and optionally raise the file level to keep the file small. `getTimestampString()` makes a filename-safe unique name (no colons):
+```cpp
+auto& logger = getLogger();
+logger.setLogFile("app-" + getTimestampString() + ".log");   // unique per run
+logger.setFileLogLevel(LogLevel::Notice);                    // drop Verbose to shrink the file
+logNotice("App") << "started";
+```
+**Watch the volume:** logging every frame (or any hot loop) can grow the file to gigabytes per day and fill the disk. Filter with `setFileLogLevel` and don't log in tight loops.
+
+### How do I hook every log line? (onLog event)
+
+`onLog` is an `Event<LogEventArgs>`, so subscribe with `.listen(...)` (not `+=`), and keep the returned `EventListener`:
+```cpp
+EventListener logTap_ = getLogger().onLog.listen([](LogEventArgs& e) {
+    // e.timestamp / e.level / e.message — e.g. forward to the network
+});
+```
+
+## Window & fullscreen
+
+### How do I go fullscreen / span multiple displays?
+
+Normally `setFullscreen(true)` (or `WindowSettings().setFullscreen(true)`) is all you need. To span several displays you make a **borderless window** and place + size it yourself:
+```cpp
+setWindowDecorated(false);     // borderless (no title bar / frame)
+setWindowPosition(0, 0);       // top-left; macOS / Windows only (no-op elsewhere)
+setWindowSize(spanW, spanH);   // you supply the combined size — see caveats
+```
+Caveats: TrussC has **no display-enumeration API** (`getScreenSize` / `getDisplays` / `Monitor` don't exist; `getFramebufferWidth/Height` is the window, not the whole desktop), so you must know `spanW/spanH` yourself (or combine displays via a GPU/OS utility). `(0,0)` depends on **which display is primary**. On **macOS** you must turn **off** Mission Control's *"Displays have separate Spaces"* or one window can't cover multiple displays.
+
+## Console / CLI apps
+
+### How do I make a console / CLI app (and optionally open a GUI)?
+
+There's no framework arg API — handle raw `argc`/`argv` in `main()`. A common shape (this is how `trusscli` itself works) launches the **GUI when given no arguments** and dispatches subcommands otherwise, returning an exit code:
+```cpp
+int main(int argc, char** argv) {
+    vector<string> args(argv + 1, argv + argc);
+    if (args.empty())
+        return runApp<MyGuiApp>(WindowSettings().setTitle("My Tool"));  // no args → GUI
+    if (args[0] == "build") return cmdBuild(args);                      // subcommand
+    logError() << "unknown command";
+    return 1;                                                            // exit code
+}
+```
+If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp()` (immediate) / `requestExitApp()` (cancellable).
+
 ## "I want to X" — which API?
 
 ### "I want to save / load / communicate" → which API?
@@ -1182,6 +1287,10 @@ listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
 - File picker dialog: `loadDialog()` / `saveDialog()` (→ `FileDialogResult`)
 - Receive dropped files: `events().filesDropped` (`DragDropEventArgs`)
 - Clipboard: `setClipboardString(text)` (paste arrives via the `clipboardPasted` event)
+- Number → string: `toString(value[, precision])` (oF `ofToString`; reverse: `toInt` / `toFloat` / `toBool`)
+- Enum ↔ string: `enumLabel(value)` / iterate with `enumValues<E>()` (custom labels: `TC_ENUM_LABELS`)
+- Log to a file: `getLogger().setLogFile(path)` (unique name: `getTimestampString()`; hook all lines: `onLog.listen`)
+- CLI / console app: handle `argc`/`argv` in `main()` (no framework arg API); no args → `runApp<Gui>()`; headless loop → `runHeadlessApp<App>()`
 
 ### "Window / media / basics" → which API?
 
@@ -1193,6 +1302,7 @@ listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
 - Random / noise: `random()` / `noise()` / `signedNoise()`
 - Time (elapsed seconds): `getElapsedTime()` (double) / frame rate: `getFrameRate()`
 - Delay / repeat: `callAfter()` / `callEvery()` (main-thread, synchronous)
+- Fullscreen / borderless span: `setFullscreen(true)` / `setWindowDecorated(false)`+`setWindowPosition(0,0)`+`setWindowSize(w,h)` (no multi-display enumeration API; macOS: turn off "Displays have separate Spaces")
 
 ## AI-native (MCP)
 
