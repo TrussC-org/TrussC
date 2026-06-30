@@ -72,8 +72,7 @@ function emitType(typeEntry, cppType, luaName, T) {
         return t;
     }
 
-    const ctorTypes = (typeEntry.constructors || [])
-        // drop copy/move ctor (single same-type arg) — non-copyable types delete it
+    const ctorTypes = [...new Set((typeEntry.constructors || [])
         .filter(c => {
             const a = c.args || [];
             if (!a.map(x => ({ ...x, type: subT(x.type, T) })).every(argBindable)) return false;  // unbindable/internal arg
@@ -81,7 +80,16 @@ function emitType(typeEntry, cppType, luaName, T) {
             const b = a[0].type.replace(/[&]/g, '').replace(/\bconst\b/g, '').replace(/<.*>/, '').trim();
             return b !== bare;   // drop copy/move ctor (non-copyable types delete it)
         })
-        .map(c => `${Q}(${(c.args || []).map(a => qual(a.type)).join(', ')})`);
+        // expand trailing-default args into one ctor signature per arity, so e.g.
+        // Color(float,float,float,float a=1) yields BOTH Color(f,f,f) and Color(f,f,f,f).
+        .flatMap(c => {
+            const a = c.args || [];
+            let fd = a.length;
+            a.forEach((x, i) => { if (x.hasDefault && fd === a.length) fd = i; });
+            const out = [];
+            for (let k = fd; k <= a.length; k++) out.push(`${Q}(${a.slice(0, k).map(x => qual(x.type)).join(', ')})`);
+            return out;
+        }))];
 
     // lambdas for a member fn with trailing-default arity expansion (Lua optional args)
     function memberLambdas(name, sigs, isStatic) {
@@ -188,12 +196,11 @@ const EXCLUDE = new Set([
     // sol new_usertype instantiation pulls in the incomplete internal::StreamInstance
     // through their C++ definition (NOT visible in reference-data signatures). See handoff.
     'Serial', 'Node', 'Thread', 'SoundSource', 'Environment', 'VideoPlayerBase',
-    // --- v1 integration: types already hand-written in setTypeBindings stay hand-written ---
-    // (avoids double-registration / regressions; v2 will migrate the gen⊇hand ones).
-    'AudioEngine', 'Color', 'EasyCam', 'Fbo', 'Font', 'Image', 'IVec2', 'IVec3', 'Light',
-    'Mat3', 'Mat4', 'Material', 'Mesh', 'MicInput', 'Path', 'Pixels', 'PlayingSound',
-    'Quaternion', 'Rect', 'Shader', 'Sound', 'SoundBuffer', 'SoundStream', 'Texture',
-    'Vec2', 'Vec3', 'Vec4',
+    // --- still hand-written: these have custom members the generator can't produce
+    // (raw-pointer/out-param marshalling, Lua-keyword renames like end_fbo, texture
+    // setters). v2 migrated the 14 gen⊇hand types (Vec2/Color/Mesh/… now generated).
+    'AudioEngine', 'EasyCam', 'Fbo', 'Image', 'Light', 'Mat3', 'Mat4', 'Material',
+    'MicInput', 'Pixels', 'Shader', 'SoundBuffer', 'Texture',
 ]);
 
 let body = '', count = 0;

@@ -9,6 +9,135 @@ using namespace std;
 #endif
 void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     {
+        sol::usertype<trussc::Vec2> t = lua->new_usertype<trussc::Vec2>("Vec2",
+            sol::constructors<trussc::Vec2(), trussc::Vec2(float, float), trussc::Vec2(float)>(),
+            sol::meta_function::index, [](const trussc::Vec2& a, int b){ return a[b]; },
+            sol::meta_function::addition, [](const trussc::Vec2& a, const trussc::Vec2 & b){ return a + b; },
+            sol::meta_function::subtraction, [](const trussc::Vec2& a, const trussc::Vec2 & b){ return a - b; },
+            sol::meta_function::unary_minus, [](const trussc::Vec2& a){ return -a; },
+            sol::meta_function::multiplication, sol::overload([](const trussc::Vec2& a, float b){ return a * b; }, [](const trussc::Vec2& a, const trussc::Vec2 & b){ return a * b; }),
+            sol::meta_function::division, sol::overload([](const trussc::Vec2& a, float b){ return a / b; }, [](const trussc::Vec2& a, const trussc::Vec2 & b){ return a / b; }),
+            sol::meta_function::equal_to, [](const trussc::Vec2& a, const trussc::Vec2 & b){ return a == b; });
+        t["x"] = &trussc::Vec2::x;
+        t["y"] = &trussc::Vec2::y;
+        t["set"] = sol::overload([](trussc::Vec2& self, float x_, float y_) -> decltype(auto) { return self.set(x_, y_); }, [](trussc::Vec2& self, const trussc::Vec2 & v) -> decltype(auto) { return self.set(v); });
+        t["length"] = &trussc::Vec2::length;
+        t["lengthSquared"] = &trussc::Vec2::lengthSquared;
+        t["normalized"] = &trussc::Vec2::normalized;
+        t["normalize"] = &trussc::Vec2::normalize;
+        t["limit"] = &trussc::Vec2::limit;
+        t["dot"] = &trussc::Vec2::dot;
+        t["cross"] = &trussc::Vec2::cross;
+        t["distance"] = &trussc::Vec2::distance;
+        t["distanceSquared"] = &trussc::Vec2::distanceSquared;
+        t["angle"] = sol::overload([](trussc::Vec2& self) { return self.angle(); }, [](trussc::Vec2& self, const trussc::Vec2 & v) { return self.angle(v); });
+        t["rotated"] = &trussc::Vec2::rotated;
+        t["rotate"] = &trussc::Vec2::rotate;
+        t["lerp"] = &trussc::Vec2::lerp;
+        t["perpendicular"] = &trussc::Vec2::perpendicular;
+        t["reflected"] = &trussc::Vec2::reflected;
+        t["fromAngle"] = sol::overload([](float radians) { return trussc::Vec2::fromAngle(radians); }, [](float radians, float length) { return trussc::Vec2::fromAngle(radians, length); });
+    }
+    {
+        sol::usertype<trussc::Vec3> t = lua->new_usertype<trussc::Vec3>("Vec3",
+            sol::constructors<trussc::Vec3(), trussc::Vec3(float, float, float), trussc::Vec3(float), trussc::Vec3(const trussc::Vec2 &), trussc::Vec3(const trussc::Vec2 &, float)>(),
+            sol::meta_function::index, [](const trussc::Vec3& a, int b){ return a[b]; },
+            sol::meta_function::addition, [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a + b; },
+            sol::meta_function::subtraction, [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a - b; },
+            sol::meta_function::unary_minus, [](const trussc::Vec3& a){ return -a; },
+            sol::meta_function::multiplication, sol::overload([](const trussc::Vec3& a, float b){ return a * b; }, [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a * b; }),
+            sol::meta_function::division, sol::overload([](const trussc::Vec3& a, float b){ return a / b; }, [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a / b; }),
+            sol::meta_function::equal_to, [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a == b; });
+        t["x"] = &trussc::Vec3::x;
+        t["y"] = &trussc::Vec3::y;
+        t["z"] = &trussc::Vec3::z;
+        t["set"] = sol::overload([](trussc::Vec3& self, float x_, float y_, float z_) -> decltype(auto) { return self.set(x_, y_, z_); }, [](trussc::Vec3& self, const trussc::Vec3 & v) -> decltype(auto) { return self.set(v); });
+        t["length"] = &trussc::Vec3::length;
+        t["lengthSquared"] = &trussc::Vec3::lengthSquared;
+        t["normalized"] = &trussc::Vec3::normalized;
+        t["normalize"] = &trussc::Vec3::normalize;
+        t["limit"] = &trussc::Vec3::limit;
+        t["dot"] = &trussc::Vec3::dot;
+        t["cross"] = &trussc::Vec3::cross;
+        t["distance"] = &trussc::Vec3::distance;
+        t["distanceSquared"] = &trussc::Vec3::distanceSquared;
+        t["lerp"] = &trussc::Vec3::lerp;
+        t["reflected"] = &trussc::Vec3::reflected;
+        t["xy"] = &trussc::Vec3::xy;
+    }
+    {
+        sol::usertype<trussc::IVec2> t = lua->new_usertype<trussc::IVec2>("IVec2",
+            sol::constructors<trussc::IVec2(), trussc::IVec2(int, int), trussc::IVec2(int)>(),
+            sol::meta_function::addition, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a + b; },
+            sol::meta_function::subtraction, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a - b; },
+            sol::meta_function::unary_minus, [](const trussc::IVec2& a){ return -a; },
+            sol::meta_function::multiplication, [](const trussc::IVec2& a, int b){ return a * b; },
+            sol::meta_function::equal_to, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a == b; });
+        t["x"] = &trussc::IVec2::x;
+        t["y"] = &trussc::IVec2::y;
+        t["toVec2"] = &trussc::IVec2::toVec2;
+    }
+    {
+        sol::usertype<trussc::IVec3> t = lua->new_usertype<trussc::IVec3>("IVec3",
+            sol::constructors<trussc::IVec3(), trussc::IVec3(int, int, int), trussc::IVec3(int), trussc::IVec3(const trussc::IVec2 &), trussc::IVec3(const trussc::IVec2 &, int)>(),
+            sol::meta_function::addition, [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a + b; },
+            sol::meta_function::subtraction, [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a - b; },
+            sol::meta_function::unary_minus, [](const trussc::IVec3& a){ return -a; },
+            sol::meta_function::multiplication, [](const trussc::IVec3& a, int b){ return a * b; },
+            sol::meta_function::equal_to, [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a == b; });
+        t["x"] = &trussc::IVec3::x;
+        t["y"] = &trussc::IVec3::y;
+        t["z"] = &trussc::IVec3::z;
+        t["toVec3"] = &trussc::IVec3::toVec3;
+        t["xy"] = &trussc::IVec3::xy;
+    }
+    {
+        sol::usertype<trussc::Vec4> t = lua->new_usertype<trussc::Vec4>("Vec4",
+            sol::constructors<trussc::Vec4(), trussc::Vec4(float, float, float, float), trussc::Vec4(float), trussc::Vec4(const trussc::Vec3 &), trussc::Vec4(const trussc::Vec3 &, float), trussc::Vec4(const trussc::Vec2 &), trussc::Vec4(const trussc::Vec2 &, float), trussc::Vec4(const trussc::Vec2 &, float, float)>(),
+            sol::meta_function::index, [](const trussc::Vec4& a, int b){ return a[b]; },
+            sol::meta_function::addition, [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a + b; },
+            sol::meta_function::subtraction, [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a - b; },
+            sol::meta_function::unary_minus, [](const trussc::Vec4& a){ return -a; },
+            sol::meta_function::multiplication, [](const trussc::Vec4& a, float b){ return a * b; },
+            sol::meta_function::division, [](const trussc::Vec4& a, float b){ return a / b; },
+            sol::meta_function::equal_to, [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a == b; });
+        t["x"] = &trussc::Vec4::x;
+        t["y"] = &trussc::Vec4::y;
+        t["z"] = &trussc::Vec4::z;
+        t["w"] = &trussc::Vec4::w;
+        t["set"] = sol::overload([](trussc::Vec4& self, float x_, float y_, float z_, float w_) -> decltype(auto) { return self.set(x_, y_, z_, w_); }, [](trussc::Vec4& self, const trussc::Vec4 & v) -> decltype(auto) { return self.set(v); });
+        t["length"] = &trussc::Vec4::length;
+        t["lengthSquared"] = &trussc::Vec4::lengthSquared;
+        t["normalized"] = &trussc::Vec4::normalized;
+        t["normalize"] = &trussc::Vec4::normalize;
+        t["dot"] = &trussc::Vec4::dot;
+        t["lerp"] = &trussc::Vec4::lerp;
+        t["xy"] = &trussc::Vec4::xy;
+        t["xyz"] = &trussc::Vec4::xyz;
+    }
+    {
+        sol::usertype<trussc::Quaternion> t = lua->new_usertype<trussc::Quaternion>("Quaternion",
+            sol::constructors<trussc::Quaternion(), trussc::Quaternion(float, float, float, float)>(),
+            sol::meta_function::equal_to, [](const trussc::Quaternion& a, const trussc::Quaternion & b){ return a == b; },
+            sol::meta_function::multiplication, [](const trussc::Quaternion& a, const trussc::Quaternion & b){ return a * b; });
+        t["w"] = &trussc::Quaternion::w;
+        t["x"] = &trussc::Quaternion::x;
+        t["y"] = &trussc::Quaternion::y;
+        t["z"] = &trussc::Quaternion::z;
+        t["toEuler"] = &trussc::Quaternion::toEuler;
+        t["toMatrix"] = &trussc::Quaternion::toMatrix;
+        t["length"] = &trussc::Quaternion::length;
+        t["lengthSquared"] = &trussc::Quaternion::lengthSquared;
+        t["normalized"] = &trussc::Quaternion::normalized;
+        t["normalize"] = &trussc::Quaternion::normalize;
+        t["conjugate"] = &trussc::Quaternion::conjugate;
+        t["rotate"] = &trussc::Quaternion::rotate;
+        t["identity"] = &trussc::Quaternion::identity;
+        t["fromAxisAngle"] = &trussc::Quaternion::fromAxisAngle;
+        t["fromEuler"] = sol::overload([](float pitch, float yaw, float roll) { return trussc::Quaternion::fromEuler(pitch, yaw, roll); }, [](const trussc::Vec3 & euler) { return trussc::Quaternion::fromEuler(euler); });
+        t["slerp"] = &trussc::Quaternion::slerp;
+    }
+    {
         sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
         t["count"] = &trussc::EnumLabelSpan::count;
     }
@@ -18,6 +147,22 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
         t["popReadOnly"] = &trussc::Reflector::popReadOnly;
         t["endGroup"] = &trussc::Reflector::endGroup;
+    }
+    {
+        sol::usertype<trussc::Rect> t = lua->new_usertype<trussc::Rect>("Rect",
+            sol::constructors<trussc::Rect(), trussc::Rect(float, float, float, float), trussc::Rect(const trussc::Vec2 &, float, float), trussc::Rect(const trussc::Vec3 &, float, float), trussc::Rect(float, float, float, float, float)>());
+        t["x"] = &trussc::Rect::x;
+        t["y"] = &trussc::Rect::y;
+        t["width"] = &trussc::Rect::width;
+        t["height"] = &trussc::Rect::height;
+        t["set"] = sol::overload([](trussc::Rect& self, float x_, float y_, float w_, float h_) -> decltype(auto) { return self.set(x_, y_, w_, h_); }, [](trussc::Rect& self, const trussc::Vec2 & pos, float w_, float h_) -> decltype(auto) { return self.set(pos, w_, h_); });
+        t["getRight"] = &trussc::Rect::getRight;
+        t["getBottom"] = &trussc::Rect::getBottom;
+        t["getCenter"] = &trussc::Rect::getCenter;
+        t["getCenterX"] = &trussc::Rect::getCenterX;
+        t["getCenterY"] = &trussc::Rect::getCenterY;
+        t["contains"] = &trussc::Rect::contains;
+        t["intersects"] = &trussc::Rect::intersects;
     }
     {
         sol::usertype<trussc::Ray> t = lua->new_usertype<trussc::Ray>("Ray",
@@ -67,11 +212,43 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream",
-            sol::constructors<trussc::LogStream(trussc::LogLevel, const std::string &)>());
+            sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>());
+    }
+    {
+        sol::usertype<trussc::Color> t = lua->new_usertype<trussc::Color>("Color",
+            sol::constructors<trussc::Color(), trussc::Color(float, float, float), trussc::Color(float, float, float, float), trussc::Color(float), trussc::Color(float, float)>(),
+            sol::meta_function::addition, [](const trussc::Color& a, const trussc::Color & b){ return a + b; },
+            sol::meta_function::subtraction, [](const trussc::Color& a, const trussc::Color & b){ return a - b; },
+            sol::meta_function::multiplication, [](const trussc::Color& a, float b){ return a * b; },
+            sol::meta_function::division, [](const trussc::Color& a, float b){ return a / b; },
+            sol::meta_function::equal_to, [](const trussc::Color& a, const trussc::Color & b){ return a == b; });
+        t["r"] = &trussc::Color::r;
+        t["g"] = &trussc::Color::g;
+        t["b"] = &trussc::Color::b;
+        t["a"] = &trussc::Color::a;
+        t["set"] = sol::overload([](trussc::Color& self, float r_, float g_, float b_) -> decltype(auto) { return self.set(r_, g_, b_); }, [](trussc::Color& self, float r_, float g_, float b_, float a_) -> decltype(auto) { return self.set(r_, g_, b_, a_); }, [](trussc::Color& self, float gray) -> decltype(auto) { return self.set(gray); }, [](trussc::Color& self, float gray, float a_) -> decltype(auto) { return self.set(gray, a_); }, [](trussc::Color& self, const trussc::Color & c) -> decltype(auto) { return self.set(c); });
+        t["toHex"] = sol::overload([](trussc::Color& self) { return self.toHex(); }, [](trussc::Color& self, bool includeAlpha) { return self.toHex(includeAlpha); });
+        t["toLinear"] = &trussc::Color::toLinear;
+        t["toHSB"] = &trussc::Color::toHSB;
+        t["toOKLab"] = &trussc::Color::toOKLab;
+        t["toOKLCH"] = &trussc::Color::toOKLCH;
+        t["clamped"] = &trussc::Color::clamped;
+        t["lerpRGB"] = &trussc::Color::lerpRGB;
+        t["lerpLinear"] = &trussc::Color::lerpLinear;
+        t["lerpHSB"] = &trussc::Color::lerpHSB;
+        t["lerpOKLab"] = &trussc::Color::lerpOKLab;
+        t["lerpOKLCH"] = &trussc::Color::lerpOKLCH;
+        t["lerp"] = &trussc::Color::lerp;
+        t["fromBytes"] = sol::overload([](int r, int g, int b) { return trussc::Color::fromBytes(r, g, b); }, [](int r, int g, int b, int a) { return trussc::Color::fromBytes(r, g, b, a); });
+        t["fromHex"] = sol::overload([](uint32_t hex) { return trussc::Color::fromHex(hex); }, [](uint32_t hex, bool hasAlpha) { return trussc::Color::fromHex(hex, hasAlpha); });
+        t["fromHSB"] = sol::overload([](float h, float s, float b) { return trussc::Color::fromHSB(h, s, b); }, [](float h, float s, float b, float a) { return trussc::Color::fromHSB(h, s, b, a); });
+        t["fromOKLCH"] = sol::overload([](float L, float C, float H) { return trussc::Color::fromOKLCH(L, C, H); }, [](float L, float C, float H, float a) { return trussc::Color::fromOKLCH(L, C, H, a); });
+        t["fromOKLab"] = sol::overload([](float L, float a_lab, float b_lab) { return trussc::Color::fromOKLab(L, a_lab, b_lab); }, [](float L, float a_lab, float b_lab, float alpha) { return trussc::Color::fromOKLab(L, a_lab, b_lab, alpha); });
+        t["fromLinear"] = sol::overload([](float r, float g, float b) { return trussc::Color::fromLinear(r, g, b); }, [](float r, float g, float b, float a) { return trussc::Color::fromLinear(r, g, b, a); });
     }
     {
         sol::usertype<trussc::ColorLinear> t = lua->new_usertype<trussc::ColorLinear>("ColorLinear",
-            sol::constructors<trussc::ColorLinear(), trussc::ColorLinear(float, float, float, float), trussc::ColorLinear(float, float)>(),
+            sol::constructors<trussc::ColorLinear(), trussc::ColorLinear(float, float, float), trussc::ColorLinear(float, float, float, float), trussc::ColorLinear(float), trussc::ColorLinear(float, float)>(),
             sol::meta_function::addition, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a + b; },
             sol::meta_function::subtraction, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a - b; },
             sol::meta_function::multiplication, sol::overload([](const trussc::ColorLinear& a, float b){ return a * b; }, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a * b; }),
@@ -91,7 +268,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::ColorHSB> t = lua->new_usertype<trussc::ColorHSB>("ColorHSB",
-            sol::constructors<trussc::ColorHSB(), trussc::ColorHSB(float, float, float, float)>());
+            sol::constructors<trussc::ColorHSB(), trussc::ColorHSB(float, float, float), trussc::ColorHSB(float, float, float, float)>());
         t["h"] = &trussc::ColorHSB::h;
         t["s"] = &trussc::ColorHSB::s;
         t["b"] = &trussc::ColorHSB::b;
@@ -104,7 +281,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab",
-            sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float, float)>());
+            sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>());
         t["L"] = &trussc::ColorOKLab::L;
         t["a"] = &trussc::ColorOKLab::a;
         t["b"] = &trussc::ColorOKLab::b;
@@ -117,7 +294,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::ColorOKLCH> t = lua->new_usertype<trussc::ColorOKLCH>("ColorOKLCH",
-            sol::constructors<trussc::ColorOKLCH(), trussc::ColorOKLCH(float, float, float, float)>());
+            sol::constructors<trussc::ColorOKLCH(), trussc::ColorOKLCH(float, float, float), trussc::ColorOKLCH(float, float, float, float)>());
         t["L"] = &trussc::ColorOKLCH::L;
         t["C"] = &trussc::ColorOKLCH::C;
         t["H"] = &trussc::ColorOKLCH::H;
@@ -310,6 +487,27 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["rawEvent"] = &trussc::CoreEvents::rawEvent;
     }
     {
+        sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream",
+            sol::constructors<trussc::SoundStream()>());
+        t["loadStream"] = sol::overload([](trussc::SoundStream& self, const std::string & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const std::string & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
+        t["getDuration"] = &trussc::SoundStream::getDuration;
+        t["getPath"] = &trussc::SoundStream::getPath;
+        t["getMaxPolyphony"] = &trussc::SoundStream::getMaxPolyphony;
+    }
+    {
+        sol::usertype<trussc::PlayingSound> t = lua->new_usertype<trussc::PlayingSound>("PlayingSound");
+        t["buffer"] = &trussc::PlayingSound::buffer;
+        t["volume"] = &trussc::PlayingSound::volume;
+        t["pan"] = &trussc::PlayingSound::pan;
+        t["speed"] = &trussc::PlayingSound::speed;
+        t["loop"] = &trussc::PlayingSound::loop;
+        t["playing"] = &trussc::PlayingSound::playing;
+        t["paused"] = &trussc::PlayingSound::paused;
+        t["mixMode"] = &trussc::PlayingSound::mixMode;
+        t["positionF"] = &trussc::PlayingSound::positionF;
+        t["rateRatio"] = &trussc::PlayingSound::rateRatio;
+    }
+    {
         sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
         t["sampleRate"] = &trussc::AudioSettings::sampleRate;
         t["channels"] = &trussc::AudioSettings::channels;
@@ -344,6 +542,41 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["channels"] = &trussc::AudioInBuffer::channels;
         t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
         t["framePosition"] = &trussc::AudioInBuffer::framePosition;
+    }
+    {
+        sol::usertype<trussc::Sound> t = lua->new_usertype<trussc::Sound>("Sound",
+            sol::constructors<trussc::Sound()>());
+        t["load"] = &trussc::Sound::load;
+        t["loadStream"] = sol::overload([](trussc::Sound& self, const std::string & path) { return self.loadStream(path); }, [](trussc::Sound& self, const std::string & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
+        t["loadTestTone"] = sol::overload([](trussc::Sound& self) { return self.loadTestTone(); }, [](trussc::Sound& self, float frequency) { return self.loadTestTone(frequency); }, [](trussc::Sound& self, float frequency, float duration) { return self.loadTestTone(frequency, duration); });
+        t["loadFromBuffer"] = sol::overload([](trussc::Sound& self, const trussc::SoundBuffer & buf) { return self.loadFromBuffer(buf); }, [](trussc::Sound& self, std::shared_ptr<trussc::SoundBuffer> buf) { return self.loadFromBuffer(buf); });
+        t["isLoaded"] = &trussc::Sound::isLoaded;
+        t["isStreaming"] = &trussc::Sound::isStreaming;
+        t["play"] = &trussc::Sound::play;
+        t["stop"] = &trussc::Sound::stop;
+        t["pause"] = &trussc::Sound::pause;
+        t["resume"] = &trussc::Sound::resume;
+        t["setVolume"] = &trussc::Sound::setVolume;
+        t["getVolume"] = &trussc::Sound::getVolume;
+        t["setLoop"] = &trussc::Sound::setLoop;
+        t["isLoop"] = &trussc::Sound::isLoop;
+        t["setPan"] = &trussc::Sound::setPan;
+        t["getPan"] = &trussc::Sound::getPan;
+        t["setSpeed"] = &trussc::Sound::setSpeed;
+        t["getSpeed"] = &trussc::Sound::getSpeed;
+        t["setMixMode"] = &trussc::Sound::setMixMode;
+        t["getMixMode"] = &trussc::Sound::getMixMode;
+        t["setChannelMap"] = sol::overload([](trussc::Sound& self, const std::vector<int> & map) { return self.setChannelMap(map); }, [](trussc::Sound& self, std::vector<std::vector<int>> map) { return self.setChannelMap(map); });
+        t["getChannelMap"] = &trussc::Sound::getChannelMap;
+        t["setChannelGains"] = &trussc::Sound::setChannelGains;
+        t["getChannelGains"] = &trussc::Sound::getChannelGains;
+        t["clearChannelMap"] = &trussc::Sound::clearChannelMap;
+        t["clearChannelGains"] = &trussc::Sound::clearChannelGains;
+        t["isPlaying"] = &trussc::Sound::isPlaying;
+        t["isPaused"] = &trussc::Sound::isPaused;
+        t["getPosition"] = &trussc::Sound::getPosition;
+        t["setPosition"] = &trussc::Sound::setPosition;
+        t["getDuration"] = &trussc::Sound::getDuration;
     }
     {
         sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
@@ -436,6 +669,37 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["setSwapInterval"] = &trussc::WindowSettings::setSwapInterval;
     }
     {
+        sol::usertype<trussc::Path> t = lua->new_usertype<trussc::Path>("Path",
+            sol::constructors<trussc::Path(), trussc::Path(const std::vector<trussc::Vec2> &), trussc::Path(const std::vector<trussc::Vec3> &)>(),
+            sol::meta_function::index, [](const trussc::Path& a, int b){ return a[b]; });
+        t["addVertex"] = sol::overload([](trussc::Path& self, float x, float y) { return self.addVertex(x, y); }, [](trussc::Path& self, float x, float y, float z) { return self.addVertex(x, y, z); }, [](trussc::Path& self, const trussc::Vec2 & v) { return self.addVertex(v); }, [](trussc::Path& self, const trussc::Vec3 & v) { return self.addVertex(v); });
+        t["addVertices"] = sol::overload([](trussc::Path& self, const std::vector<trussc::Vec2> & verts) { return self.addVertices(verts); }, [](trussc::Path& self, const std::vector<trussc::Vec3> & verts) { return self.addVertices(verts); });
+        t["getVertices"] = [](trussc::Path& self) -> decltype(auto) { return self.getVertices(); };
+        t["size"] = &trussc::Path::size;
+        t["empty"] = &trussc::Path::empty;
+        t["clear"] = &trussc::Path::clear;
+        t["moveTo"] = sol::overload([](trussc::Path& self, float x, float y) { return self.moveTo(x, y); }, [](trussc::Path& self, float x, float y, float z) { return self.moveTo(x, y, z); }, [](trussc::Path& self, const trussc::Vec2 & p) { return self.moveTo(p); }, [](trussc::Path& self, const trussc::Vec3 & p) { return self.moveTo(p); });
+        t["getNumSubpaths"] = &trussc::Path::getNumSubpaths;
+        t["getSubpathRange"] = &trussc::Path::getSubpathRange;
+        t["isSubpathClosed"] = &trussc::Path::isSubpathClosed;
+        t["lineTo"] = sol::overload([](trussc::Path& self, float x, float y) { return self.lineTo(x, y); }, [](trussc::Path& self, float x, float y, float z) { return self.lineTo(x, y, z); }, [](trussc::Path& self, const trussc::Vec2 & p) { return self.lineTo(p); }, [](trussc::Path& self, const trussc::Vec3 & p) { return self.lineTo(p); });
+        t["bezierTo"] = sol::overload([](trussc::Path& self, const trussc::Vec3 & cp1, const trussc::Vec3 & cp2, const trussc::Vec3 & to, int resolution) { return self.bezierTo(cp1, cp2, to, resolution); }, [](trussc::Path& self, float cx1, float cy1, float cx2, float cy2, float x, float y, int resolution) { return self.bezierTo(cx1, cy1, cx2, cy2, x, y, resolution); }, [](trussc::Path& self, const trussc::Vec2 & cp1, const trussc::Vec2 & cp2, const trussc::Vec2 & to, int resolution) { return self.bezierTo(cp1, cp2, to, resolution); });
+        t["quadBezierTo"] = sol::overload([](trussc::Path& self, const trussc::Vec3 & cp, const trussc::Vec3 & to, int resolution) { return self.quadBezierTo(cp, to, resolution); }, [](trussc::Path& self, float cx, float cy, float x, float y, int resolution) { return self.quadBezierTo(cx, cy, x, y, resolution); }, [](trussc::Path& self, const trussc::Vec2 & cp, const trussc::Vec2 & to, int resolution) { return self.quadBezierTo(cp, to, resolution); });
+        t["curveTo"] = sol::overload([](trussc::Path& self, const trussc::Vec3 & to, int resolution) { return self.curveTo(to, resolution); }, [](trussc::Path& self, float x, float y) { return self.curveTo(x, y); }, [](trussc::Path& self, float x, float y, float z) { return self.curveTo(x, y, z); }, [](trussc::Path& self, float x, float y, float z, int resolution) { return self.curveTo(x, y, z, resolution); }, [](trussc::Path& self, const trussc::Vec2 & to, int resolution) { return self.curveTo(to, resolution); });
+        t["arc"] = sol::overload([](trussc::Path& self, const trussc::Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd) { return self.arc(center, radiusX, radiusY, angleBegin, angleEnd); }, [](trussc::Path& self, const trussc::Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise) { return self.arc(center, radiusX, radiusY, angleBegin, angleEnd, clockwise); }, [](trussc::Path& self, const trussc::Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise, int circleResolution) { return self.arc(center, radiusX, radiusY, angleBegin, angleEnd, clockwise, circleResolution); }, [](trussc::Path& self, float x, float y, float radiusX, float radiusY, float angleBegin, float angleEnd) { return self.arc(x, y, radiusX, radiusY, angleBegin, angleEnd); }, [](trussc::Path& self, float x, float y, float radiusX, float radiusY, float angleBegin, float angleEnd, int circleResolution) { return self.arc(x, y, radiusX, radiusY, angleBegin, angleEnd, circleResolution); }, [](trussc::Path& self, const trussc::Vec2 & center, float radiusX, float radiusY, float angleBegin, float angleEnd) { return self.arc(center, radiusX, radiusY, angleBegin, angleEnd); }, [](trussc::Path& self, const trussc::Vec2 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, int circleResolution) { return self.arc(center, radiusX, radiusY, angleBegin, angleEnd, circleResolution); }, [](trussc::Path& self, const trussc::Vec3 & center, float radius, float angleBegin, float angleEnd) { return self.arc(center, radius, angleBegin, angleEnd); }, [](trussc::Path& self, const trussc::Vec3 & center, float radius, float angleBegin, float angleEnd, bool clockwise) { return self.arc(center, radius, angleBegin, angleEnd, clockwise); }, [](trussc::Path& self, float x, float y, float radius, float angleBegin, float angleEnd) { return self.arc(x, y, radius, angleBegin, angleEnd); }, [](trussc::Path& self, float x, float y, float radius, float angleBegin, float angleEnd, bool clockwise) { return self.arc(x, y, radius, angleBegin, angleEnd, clockwise); }, [](trussc::Path& self, const trussc::Vec2 & center, float radius, float angleBegin, float angleEnd) { return self.arc(center, radius, angleBegin, angleEnd); }, [](trussc::Path& self, const trussc::Vec2 & center, float radius, float angleBegin, float angleEnd, bool clockwise) { return self.arc(center, radius, angleBegin, angleEnd, clockwise); });
+        t["close"] = &trussc::Path::close;
+        t["setClosed"] = &trussc::Path::setClosed;
+        t["isClosed"] = &trussc::Path::isClosed;
+        t["reverseWinding"] = sol::overload([](trussc::Path& self, size_t i) -> decltype(auto) { return self.reverseWinding(i); }, [](trussc::Path& self) -> decltype(auto) { return self.reverseWinding(); });
+        t["draw"] = &trussc::Path::draw;
+        t["buildFillTriangles"] = &trussc::Path::buildFillTriangles;
+        t["drawFill"] = &trussc::Path::drawFill;
+        t["toFillMesh"] = &trussc::Path::toFillMesh;
+        t["drawStroke"] = &trussc::Path::drawStroke;
+        t["getBounds"] = &trussc::Path::getBounds;
+        t["getPerimeter"] = &trussc::Path::getPerimeter;
+    }
+    {
         sol::usertype<trussc::IesProfile> t = lua->new_usertype<trussc::IesProfile>("IesProfile",
             sol::constructors<trussc::IesProfile()>());
         t["load"] = &trussc::IesProfile::load;
@@ -465,6 +729,69 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["save"] = &trussc::HasTexture::save;
     }
     {
+        sol::usertype<trussc::Mesh> t = lua->new_usertype<trussc::Mesh>("Mesh",
+            sol::constructors<trussc::Mesh()>());
+        t["setMode"] = &trussc::Mesh::setMode;
+        t["getMode"] = &trussc::Mesh::getMode;
+        t["addVertex"] = sol::overload([](trussc::Mesh& self, float x, float y) -> decltype(auto) { return self.addVertex(x, y); }, [](trussc::Mesh& self, float x, float y, float z) -> decltype(auto) { return self.addVertex(x, y, z); }, [](trussc::Mesh& self, const trussc::Vec2 & v) -> decltype(auto) { return self.addVertex(v); }, [](trussc::Mesh& self, const trussc::Vec3 & v) -> decltype(auto) { return self.addVertex(v); });
+        t["addVertices"] = &trussc::Mesh::addVertices;
+        t["getVertices"] = [](trussc::Mesh& self) -> decltype(auto) { return self.getVertices(); };
+        t["getNumVertices"] = &trussc::Mesh::getNumVertices;
+        t["addColor"] = sol::overload([](trussc::Mesh& self, const trussc::Color & c) -> decltype(auto) { return self.addColor(c); }, [](trussc::Mesh& self, float r, float g, float b) -> decltype(auto) { return self.addColor(r, g, b); }, [](trussc::Mesh& self, float r, float g, float b, float a) -> decltype(auto) { return self.addColor(r, g, b, a); });
+        t["addColors"] = &trussc::Mesh::addColors;
+        t["getColors"] = [](trussc::Mesh& self) -> decltype(auto) { return self.getColors(); };
+        t["getNumColors"] = &trussc::Mesh::getNumColors;
+        t["hasColors"] = &trussc::Mesh::hasColors;
+        t["addIndex"] = &trussc::Mesh::addIndex;
+        t["addIndices"] = &trussc::Mesh::addIndices;
+        t["addTriangle"] = &trussc::Mesh::addTriangle;
+        t["getIndices"] = [](trussc::Mesh& self) -> decltype(auto) { return self.getIndices(); };
+        t["getNumIndices"] = &trussc::Mesh::getNumIndices;
+        t["hasIndices"] = &trussc::Mesh::hasIndices;
+        t["addNormal"] = sol::overload([](trussc::Mesh& self, float nx, float ny, float nz) -> decltype(auto) { return self.addNormal(nx, ny, nz); }, [](trussc::Mesh& self, const trussc::Vec3 & n) -> decltype(auto) { return self.addNormal(n); });
+        t["addNormals"] = &trussc::Mesh::addNormals;
+        t["setNormal"] = &trussc::Mesh::setNormal;
+        t["getNormal"] = &trussc::Mesh::getNormal;
+        t["getNormals"] = [](trussc::Mesh& self) -> decltype(auto) { return self.getNormals(); };
+        t["getNumNormals"] = &trussc::Mesh::getNumNormals;
+        t["hasNormals"] = &trussc::Mesh::hasNormals;
+        t["addTexCoord"] = sol::overload([](trussc::Mesh& self, float u, float v) -> decltype(auto) { return self.addTexCoord(u, v); }, [](trussc::Mesh& self, const trussc::Vec2 & t) -> decltype(auto) { return self.addTexCoord(t); });
+        t["getTexCoords"] = [](trussc::Mesh& self) -> decltype(auto) { return self.getTexCoords(); };
+        t["getNumTexCoords"] = &trussc::Mesh::getNumTexCoords;
+        t["hasTexCoords"] = &trussc::Mesh::hasTexCoords;
+        t["hasValidTexCoords"] = &trussc::Mesh::hasValidTexCoords;
+        t["addTangent"] = sol::overload([](trussc::Mesh& self, float tx, float ty, float tz) -> decltype(auto) { return self.addTangent(tx, ty, tz); }, [](trussc::Mesh& self, float tx, float ty, float tz, float tw) -> decltype(auto) { return self.addTangent(tx, ty, tz, tw); }, [](trussc::Mesh& self, const trussc::Vec4 & t) -> decltype(auto) { return self.addTangent(t); }, [](trussc::Mesh& self, const trussc::Vec3 & t) -> decltype(auto) { return self.addTangent(t); }, [](trussc::Mesh& self, const trussc::Vec3 & t, float w) -> decltype(auto) { return self.addTangent(t, w); });
+        t["getTangents"] = [](trussc::Mesh& self) -> decltype(auto) { return self.getTangents(); };
+        t["getNumTangents"] = &trussc::Mesh::getNumTangents;
+        t["hasTangents"] = &trussc::Mesh::hasTangents;
+        t["clear"] = &trussc::Mesh::clear;
+        t["clearVertices"] = &trussc::Mesh::clearVertices;
+        t["clearNormals"] = &trussc::Mesh::clearNormals;
+        t["clearColors"] = &trussc::Mesh::clearColors;
+        t["clearIndices"] = &trussc::Mesh::clearIndices;
+        t["clearTexCoords"] = &trussc::Mesh::clearTexCoords;
+        t["clearTangents"] = &trussc::Mesh::clearTangents;
+        t["translate"] = sol::overload([](trussc::Mesh& self, float x, float y, float z) -> decltype(auto) { return self.translate(x, y, z); }, [](trussc::Mesh& self, const trussc::Vec3 & offset) -> decltype(auto) { return self.translate(offset); });
+        t["rotateX"] = &trussc::Mesh::rotateX;
+        t["rotateY"] = &trussc::Mesh::rotateY;
+        t["rotateZ"] = &trussc::Mesh::rotateZ;
+        t["scale"] = sol::overload([](trussc::Mesh& self, float x, float y, float z) -> decltype(auto) { return self.scale(x, y, z); }, [](trussc::Mesh& self, float s) -> decltype(auto) { return self.scale(s); }, [](trussc::Mesh& self, const trussc::Vec3 & s) -> decltype(auto) { return self.scale(s); });
+        t["transform"] = &trussc::Mesh::transform;
+        t["append"] = &trussc::Mesh::append;
+        t["draw"] = sol::overload([](trussc::Mesh& self) { return self.draw(); }, [](trussc::Mesh& self, const trussc::Texture & texture) { return self.draw(texture); }, [](trussc::Mesh& self, const trussc::Image & image) { return self.draw(image); });
+        t["drawNoLighting"] = &trussc::Mesh::drawNoLighting;
+        t["drawWithLighting"] = &trussc::Mesh::drawWithLighting;
+        t["drawNoLightingWithTexture"] = &trussc::Mesh::drawNoLightingWithTexture;
+        t["drawWireframe"] = &trussc::Mesh::drawWireframe;
+        t["markGpuDirty"] = &trussc::Mesh::markGpuDirty;
+        t["uploadToGpu"] = &trussc::Mesh::uploadToGpu;
+        t["drawGpuPbr"] = &trussc::Mesh::drawGpuPbr;
+        t["getGpuVertexBuffer"] = &trussc::Mesh::getGpuVertexBuffer;
+        t["getGpuIndexBuffer"] = &trussc::Mesh::getGpuIndexBuffer;
+        t["getGpuVertexCount"] = &trussc::Mesh::getGpuVertexCount;
+        t["getGpuIndexCount"] = &trussc::Mesh::getGpuIndexCount;
+    }
+    {
         sol::usertype<trussc::StrokeMesh> t = lua->new_usertype<trussc::StrokeMesh>("StrokeMesh",
             sol::constructors<trussc::StrokeMesh(), trussc::StrokeMesh(const trussc::Path &)>());
         t["setWidth"] = &trussc::StrokeMesh::setWidth;
@@ -482,6 +809,54 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["draw"] = &trussc::StrokeMesh::draw;
         t["getMesh"] = &trussc::StrokeMesh::getMesh;
         t["getPolylines"] = &trussc::StrokeMesh::getPolylines;
+    }
+    {
+        sol::usertype<trussc::Font> t = lua->new_usertype<trussc::Font>("Font",
+            sol::constructors<trussc::Font()>());
+        t["load"] = &trussc::Font::load;
+        t["isLoaded"] = &trussc::Font::isLoaded;
+        t["setAlign"] = sol::overload([](trussc::Font& self, trussc::Direction h, trussc::Direction v) { return self.setAlign(h, v); }, [](trussc::Font& self, trussc::Direction h) { return self.setAlign(h); });
+        t["getAlignH"] = &trussc::Font::getAlignH;
+        t["getAlignV"] = &trussc::Font::getAlignV;
+        t["setLineHeight"] = &trussc::Font::setLineHeight;
+        t["setLineHeightEm"] = &trussc::Font::setLineHeightEm;
+        t["resetLineHeight"] = &trussc::Font::resetLineHeight;
+        t["drawString"] = sol::overload([](trussc::Font& self, const std::string & text, float x, float y) { return self.drawString(text, x, y); }, [](trussc::Font& self, const std::string & text, float x, float y, trussc::Direction h, trussc::Direction v) { return self.drawString(text, x, y, h, v); });
+        t["getGlyphPath"] = &trussc::Font::getGlyphPath;
+        t["getStringPath"] = sol::overload([](trussc::Font& self, const std::string & text, float x, float y, trussc::Direction h, trussc::Direction v) { return self.getStringPath(text, x, y, h, v); }, [](trussc::Font& self, const std::string & text, float x, float y) { return self.getStringPath(text, x, y); });
+        t["setWritingMode"] = &trussc::Font::setWritingMode;
+        t["getWritingMode"] = &trussc::Font::getWritingMode;
+        t["setTcyDigits"] = &trussc::Font::setTcyDigits;
+        t["setTcyLatin"] = &trussc::Font::setTcyLatin;
+        t["getTcyLatinMode"] = &trussc::Font::getTcyLatinMode;
+        t["getTcyDigitMax"] = &trussc::Font::getTcyDigitMax;
+        t["enableWrap"] = &trussc::Font::enableWrap;
+        t["isWrapEnabled"] = &trussc::Font::isWrapEnabled;
+        t["setMaxLineLength"] = &trussc::Font::setMaxLineLength;
+        t["getMaxLineLength"] = &trussc::Font::getMaxLineLength;
+        t["setLatinHyphenation"] = &trussc::Font::setLatinHyphenation;
+        t["getLatinHyphenation"] = &trussc::Font::getLatinHyphenation;
+        t["setHangingPunctuation"] = &trussc::Font::setHangingPunctuation;
+        t["getHangingPunctuation"] = &trussc::Font::getHangingPunctuation;
+        t["setKinsoku"] = &trussc::Font::setKinsoku;
+        t["getKinsoku"] = &trussc::Font::getKinsoku;
+        t["forEachGlyph"] = sol::overload([](trussc::Font& self, const std::string & text, float x, float y, trussc::Direction h, trussc::Direction v, const trussc::Font::GlyphVisitor & visitor) { return self.forEachGlyph(text, x, y, h, v, visitor); }, [](trussc::Font& self, const std::string & text, float x, float y, const trussc::Font::GlyphVisitor & visitor) { return self.forEachGlyph(text, x, y, visitor); });
+        t["getWidth"] = &trussc::Font::getWidth;
+        t["stringWidth"] = &trussc::Font::stringWidth;
+        t["getHeight"] = &trussc::Font::getHeight;
+        t["getBBox"] = &trussc::Font::getBBox;
+        t["getLineHeight"] = &trussc::Font::getLineHeight;
+        t["getDefaultLineHeight"] = &trussc::Font::getDefaultLineHeight;
+        t["getAscent"] = &trussc::Font::getAscent;
+        t["getDescent"] = &trussc::Font::getDescent;
+        t["getSize"] = &trussc::Font::getSize;
+        t["getMemoryUsage"] = &trussc::Font::getMemoryUsage;
+        t["getAtlasMemoryUsage"] = &trussc::Font::getAtlasMemoryUsage;
+        t["clearAtlas"] = &trussc::Font::clearAtlas;
+        t["getAtlasCount"] = &trussc::Font::getAtlasCount;
+        t["getSampler"] = &trussc::Font::getSampler;
+        t["getLoadedGlyphCount"] = &trussc::Font::getLoadedGlyphCount;
+        t["getTotalCacheMemoryUsage"] = &trussc::Font::getTotalCacheMemoryUsage;
     }
     {
         sol::usertype<trussc::FullscreenShader> t = lua->new_usertype<trussc::FullscreenShader>("FullscreenShader",
@@ -744,7 +1119,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::ChipSoundNote> t = lua->new_usertype<trussc::ChipSoundNote>("ChipSoundNote",
-            sol::constructors<trussc::ChipSoundNote(), trussc::ChipSoundNote(trussc::Wave, float, float, float)>());
+            sol::constructors<trussc::ChipSoundNote(), trussc::ChipSoundNote(trussc::Wave, float, float), trussc::ChipSoundNote(trussc::Wave, float, float, float)>());
         t["wave"] = &trussc::ChipSoundNote::wave;
         t["hz"] = &trussc::ChipSoundNote::hz;
         t["volume"] = &trussc::ChipSoundNote::volume;
@@ -768,15 +1143,15 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::Tween<float>> t = lua->new_usertype<trussc::Tween<float>>("Tween_float",
-            sol::constructors<trussc::Tween<float>(), trussc::Tween<float>(float, float, float, trussc::EaseType, trussc::EaseMode)>());
+            sol::constructors<trussc::Tween<float>(), trussc::Tween<float>(float, float, float), trussc::Tween<float>(float, float, float, trussc::EaseType), trussc::Tween<float>(float, float, float, trussc::EaseType, trussc::EaseMode)>());
     }
     {
         sol::usertype<trussc::Tween<trussc::Vec2>> t = lua->new_usertype<trussc::Tween<trussc::Vec2>>("Tween_Vec2",
-            sol::constructors<trussc::Tween<trussc::Vec2>(), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType, trussc::EaseMode)>());
+            sol::constructors<trussc::Tween<trussc::Vec2>(), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType, trussc::EaseMode)>());
     }
     {
         sol::usertype<trussc::Tween<trussc::Vec3>> t = lua->new_usertype<trussc::Tween<trussc::Vec3>>("Tween_Vec3",
-            sol::constructors<trussc::Tween<trussc::Vec3>(), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType, trussc::EaseMode)>());
+            sol::constructors<trussc::Tween<trussc::Vec3>(), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType, trussc::EaseMode)>());
     }
     {
         sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
@@ -816,7 +1191,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::LayoutMod> t = lua->new_usertype<trussc::LayoutMod>("LayoutMod",
-            sol::constructors<trussc::LayoutMod(trussc::LayoutDirection, float)>());
+            sol::constructors<trussc::LayoutMod(), trussc::LayoutMod(trussc::LayoutDirection), trussc::LayoutMod(trussc::LayoutDirection, float)>());
         t["getDirection"] = &trussc::LayoutMod::getDirection;
         t["setDirection"] = &trussc::LayoutMod::setDirection;
         t["getSpacing"] = &trussc::LayoutMod::getSpacing;
