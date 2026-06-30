@@ -227,7 +227,10 @@ elseif(TC_PLATFORM_WINDOWS)
     )
     # MSVC: treat source files as UTF-8
     # /wd4244, /wd4267: disable int/float and size_t/int conversion warnings
-    target_compile_options(TrussC PUBLIC /utf-8 /wd4244 /wd4267)
+    # /bigobj: raise the per-object section limit. Heavily templated TUs
+    # (sokol_gl, reflection, addons) can exceed the default 2^16 sections.
+    # PUBLIC so consumer app/addon sources get it too.
+    target_compile_options(TrussC PUBLIC /utf-8 /wd4244 /wd4267 /bigobj)
 
 elseif(TC_PLATFORM_LINUX)
     target_compile_definitions(TrussC PUBLIC SOKOL_GLCORE)
