@@ -193,9 +193,11 @@ function emitType(typeEntry, cppType, luaName, T) {
 //  - FileWriter/FileReader: non-copyable (deleted copy ctor / operator=).
 const EXCLUDE = new Set([
     'Json', 'Xml',   // custom Lua glue (get_string / table index) not in reference-data
-    // sol new_usertype instantiation pulls in the incomplete internal::StreamInstance
-    // through their C++ definition (NOT visible in reference-data signatures). See handoff.
-    'Serial', 'Node', 'Thread', 'SoundSource', 'Environment', 'VideoPlayerBase',
+    // These 4 embed/inherit an incomplete internal:: type (internal::StreamInstance) in
+    // their C++ definition — not visible in reference-data (no private members/bases), so
+    // `new_usertype<T>` fails to instantiate sol's type traits on the incomplete type.
+    // (Serial/Node were earlier mis-excluded via a clang cascade; they compile fine.)
+    'Thread', 'SoundSource', 'Environment', 'VideoPlayerBase',
     // --- still hand-written: these have custom members the generator can't produce
     // (raw-pointer/out-param marshalling, Lua-keyword renames like end_fbo, texture
     // setters). v2 migrated the 14 gen⊇hand types (Vec2/Color/Mesh/… now generated).
