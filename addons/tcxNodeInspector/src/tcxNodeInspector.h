@@ -28,7 +28,7 @@
 #include <memory>
 #include <vector>
 
-namespace tcx {
+namespace tcx::nodeinspector {
 
 // Renders each reflected member as the matching ImGui widget. Public so an app
 // can subclass and override a visit() to customize how a given type is edited.
@@ -304,4 +304,15 @@ private:
     void reconcileSelection();            // prune dead + collapse on external change
 };
 
-} // namespace tcx
+} // namespace tcx::nodeinspector
+
+// -----------------------------------------------------------------------------
+// Backward compatibility. The canonical namespace is now `tcx::nodeinspector`.
+// These silent aliases keep older code that used the flat `tcx::` names
+// compiling. (No [[deprecated]] attribute: under the usual `using namespace tc;`
+// it would warn on idiomatic unqualified use too. See README for migration.)
+// -----------------------------------------------------------------------------
+namespace tcx {
+    using nodeinspector::ImGuiReflector;
+    using nodeinspector::NodeInspector;
+}
