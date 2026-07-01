@@ -786,10 +786,14 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["markGpuDirty"] = &trussc::Mesh::markGpuDirty;
         t["uploadToGpu"] = &trussc::Mesh::uploadToGpu;
         t["drawGpuPbr"] = &trussc::Mesh::drawGpuPbr;
+        t["drawGpuPoints"] = &trussc::Mesh::drawGpuPoints;
+        t["uploadPointsToGpu"] = &trussc::Mesh::uploadPointsToGpu;
         t["getGpuVertexBuffer"] = &trussc::Mesh::getGpuVertexBuffer;
         t["getGpuIndexBuffer"] = &trussc::Mesh::getGpuIndexBuffer;
         t["getGpuVertexCount"] = &trussc::Mesh::getGpuVertexCount;
         t["getGpuIndexCount"] = &trussc::Mesh::getGpuIndexCount;
+        t["getGpuPointBuffer"] = &trussc::Mesh::getGpuPointBuffer;
+        t["getGpuPointCount"] = &trussc::Mesh::getGpuPointCount;
     }
     {
         sol::usertype<trussc::StrokeMesh> t = lua->new_usertype<trussc::StrokeMesh>("StrokeMesh",

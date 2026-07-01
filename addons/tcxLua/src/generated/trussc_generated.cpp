@@ -404,6 +404,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getStrokeCap", []() { return trussc::getStrokeCap(); });
     lua->set_function("setStrokeJoin", [](trussc::StrokeJoin join) { return trussc::setStrokeJoin(join); });
     lua->set_function("getStrokeJoin", []() { return trussc::getStrokeJoin(); });
+    lua->set_function("setPointSize", [](float px) { return trussc::setPointSize(px); });
+    lua->set_function("getPointSize", []() { return trussc::getPointSize(); });
+    lua->set_function("setPointStyle", [](trussc::PointStyle s) { return trussc::setPointStyle(s); });
+    lua->set_function("getPointStyle", []() { return trussc::getPointStyle(); });
     lua->set_function("setScissor", sol::overload(
         [](float x, float y, float w, float h) { return trussc::setScissor(x, y, w, h); },
         [](int x, int y, int w, int h) { return trussc::setScissor(x, y, w, h); }
