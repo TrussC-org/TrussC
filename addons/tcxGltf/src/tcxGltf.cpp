@@ -9,7 +9,7 @@
 using namespace std;
 using namespace tc;
 
-namespace tcx {
+namespace tcx::gltf {
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -300,4 +300,4 @@ void GltfModel::draw() const {
     }
 }
 
-} // namespace tcx
+} // namespace tcx::gltf

@@ -16,7 +16,9 @@
 
 #include <libremidi/libremidi.hpp>
 
-namespace tcx {
+namespace tcx::midi {
+
+using namespace tc;
 
 inline libremidi::API platformMidiApi() {
 #if defined(__EMSCRIPTEN__)
@@ -26,4 +28,4 @@ inline libremidi::API platformMidiApi() {
 #endif
 }
 
-}  // namespace tcx
+}  // namespace tcx::midi

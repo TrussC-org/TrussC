@@ -27,7 +27,7 @@
 #include <string>
 #include <vector>
 
-namespace tcx {
+namespace tcx::depthrecord {
 
 using namespace tc;
 
@@ -146,4 +146,13 @@ private:
     std::uint8_t typeCount_ = 0;
 };
 
-} // namespace tcx
+} // namespace tcx::depthrecord
+
+// Backward compatibility: silent flat-`tcx::` aliases (DEPRECATED).
+namespace tcx { // deprecated: remove at v1.0.0
+    using depthrecord::RecordStream;
+    using depthrecord::REC_DEPTH;
+    using depthrecord::REC_COLOR;
+    using depthrecord::REC_ALL;
+    using depthrecord::DepthRecorder;
+}

@@ -22,7 +22,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace tcx {
+namespace tcx::depthcamera {
 
 using namespace tc;
 
@@ -108,4 +108,13 @@ inline void irToImage(const Pixels& ir, Image& out) {
     out.update();
 }
 
-} // namespace tcx
+} // namespace tcx::depthcamera
+
+// Backward compatibility: canonical is now tcx::depthcamera. Flat tcx:: alias
+// kept until v1.0.0.
+namespace tcx { // deprecated: remove at v1.0.0
+    using depthcamera::DepthImageView;
+    using depthcamera::colorToImage;
+    using depthcamera::depthToImage;
+    using depthcamera::irToImage;
+}

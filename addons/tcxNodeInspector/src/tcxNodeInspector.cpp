@@ -3,7 +3,7 @@
 using namespace std;
 using namespace tc;
 
-namespace tcx {
+namespace tcx::nodeinspector {
 
 namespace {
 
@@ -870,4 +870,4 @@ void NodeInspector::ensureExitGuard() {
     });
 }
 
-} // namespace tcx
+} // namespace tcx::nodeinspector

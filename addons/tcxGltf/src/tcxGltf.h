@@ -30,7 +30,7 @@
 #include <vector>
 #include <memory>
 
-namespace tcx {
+namespace tcx::gltf {
 
 using namespace tc;
 
@@ -86,4 +86,13 @@ private:
     bool loaded_ = false;
 };
 
-} // namespace tcx
+} // namespace tcx::gltf
+
+// -----------------------------------------------------------------------------
+// Backward compatibility. The canonical namespace is now `tcx::gltf`. This
+// silent alias keeps older code compiling: flat `tcx::GltfModel`.
+// DEPRECATED — removed in v1.0.0.
+// (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
+//  warn on idiomatic unqualified use too. See README for migration.)
+// -----------------------------------------------------------------------------
+namespace tcx { using gltf::GltfModel; } // deprecated: remove at v1.0.0

@@ -21,7 +21,9 @@
 #include <string>
 #include <vector>
 
-namespace tcx {
+namespace tcx::midi {
+
+using namespace tc;
 
 class MidiOut {
 public:
@@ -204,4 +206,6 @@ private:
     bool virtual_ = false;
 };
 
-}  // namespace tcx
+}  // namespace tcx::midi
+
+namespace tcx { using midi::MidiOut; } // deprecated: remove at v1.0.0

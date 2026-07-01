@@ -29,8 +29,7 @@
 
 #include "shaders/lut.glsl.h"
 
-namespace tcx {
-namespace lut {
+namespace tcx::lut {
 
 using namespace tc;
 
@@ -826,5 +825,31 @@ private:
     float blend = 1.0f;
 };
 
-} // namespace lut
-} // namespace tcx
+} // namespace tcx::lut
+
+// -----------------------------------------------------------------------------
+// Backward compatibility: canonical is now tcx::lut. Flat tcx:: alias kept until
+// v1.0.0. (No [[deprecated]] attribute: under the usual `using namespace tc;`
+// it would warn on idiomatic unqualified use too.)
+// -----------------------------------------------------------------------------
+namespace tcx { // deprecated: remove at v1.0.0
+    using lut::Lut3D;
+    using lut::LutShader;
+    using lut::generateIdentity;
+    using lut::generateVintage;
+    using lut::generateCinematic;
+    using lut::generateFilmNoir;
+    using lut::generateWarm;
+    using lut::generateCool;
+    using lut::generateCyberpunk;
+    using lut::generatePastel;
+    using lut::saveCube;
+    using lut::createIdentity;
+    using lut::createVintage;
+    using lut::createCinematic;
+    using lut::createFilmNoir;
+    using lut::createWarm;
+    using lut::createCool;
+    using lut::createCyberpunk;
+    using lut::createPastel;
+}

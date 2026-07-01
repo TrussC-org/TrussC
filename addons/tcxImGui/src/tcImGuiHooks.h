@@ -15,8 +15,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace trussc {
-namespace imgui_tools {
+namespace tcx::imgui {
 
 // ---------------------------------------------------------------------------
 // Widget info collected from Test Engine hooks
@@ -74,8 +73,7 @@ inline void disableCollection() {
     detail::collecting = false;
 }
 
-} // namespace imgui_tools
-} // namespace trussc
+} // namespace tcx::imgui
 
 // =============================================================================
 // Test Engine Hook implementations
@@ -84,14 +82,14 @@ inline void disableCollection() {
 // =============================================================================
 
 inline void ImGuiTestEngineHook_ItemAdd(ImGuiContext* ctx, ImGuiID id, const ImRect& bb, const ImGuiLastItemData* item_data) {
-    if (!trussc::imgui_tools::detail::collecting) return;
+    if (!tcx::imgui::detail::collecting) return;
 
     std::string windowName;
     if (ctx->CurrentWindow) {
         windowName = ctx->CurrentWindow->Name;
     }
 
-    trussc::imgui_tools::WidgetInfo info;
+    tcx::imgui::WidgetInfo info;
     info.id = id;
     info.rect = bb;
     info.windowName = std::move(windowName);
@@ -99,8 +97,8 @@ inline void ImGuiTestEngineHook_ItemAdd(ImGuiContext* ctx, ImGuiID id, const ImR
         info.statusFlags = item_data->StatusFlags;
     }
 
-    auto& cur = trussc::imgui_tools::detail::currentFrame;
-    auto& idMap = trussc::imgui_tools::detail::currentIdMap;
+    auto& cur = tcx::imgui::detail::currentFrame;
+    auto& idMap = tcx::imgui::detail::currentIdMap;
 
     size_t idx = cur.size();
     cur.push_back(std::move(info));
@@ -108,14 +106,14 @@ inline void ImGuiTestEngineHook_ItemAdd(ImGuiContext* ctx, ImGuiID id, const ImR
 }
 
 inline void ImGuiTestEngineHook_ItemInfo(ImGuiContext* ctx, ImGuiID id, const char* label, ImGuiItemStatusFlags flags) {
-    if (!trussc::imgui_tools::detail::collecting) return;
+    if (!tcx::imgui::detail::collecting) return;
     (void)ctx;
 
-    auto& idMap = trussc::imgui_tools::detail::currentIdMap;
+    auto& idMap = tcx::imgui::detail::currentIdMap;
     auto it = idMap.find(id);
     if (it == idMap.end()) return;
 
-    auto& widget = trussc::imgui_tools::detail::currentFrame[it->second];
+    auto& widget = tcx::imgui::detail::currentFrame[it->second];
     if (label) widget.label = label;
     widget.statusFlags = flags;
 }
@@ -127,10 +125,10 @@ inline void ImGuiTestEngineHook_Log(ImGuiContext* ctx, const char* fmt, ...) {
 
 inline const char* ImGuiTestEngine_FindItemDebugLabel(ImGuiContext* ctx, ImGuiID id) {
     (void)ctx;
-    auto& idMap = trussc::imgui_tools::detail::currentIdMap;
+    auto& idMap = tcx::imgui::detail::currentIdMap;
     auto it = idMap.find(id);
     if (it != idMap.end()) {
-        auto& w = trussc::imgui_tools::detail::currentFrame[it->second];
+        auto& w = tcx::imgui::detail::currentFrame[it->second];
         if (!w.label.empty()) return w.label.c_str();
     }
     return nullptr;

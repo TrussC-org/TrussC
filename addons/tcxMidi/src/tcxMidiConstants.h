@@ -11,7 +11,9 @@
   #include <emscripten.h>
 #endif
 
-namespace tcx {
+namespace tcx::midi {
+
+using namespace tc;
 
 // ---------------------------------------------------------------------------
 // midiReady() - is the MIDI backend ready to enumerate/open ports?
@@ -119,4 +121,18 @@ inline const char* toString(MidiStatus s) {
     }
 }
 
-}  // namespace tcx
+}  // namespace tcx::midi
+
+// -----------------------------------------------------------------------------
+// Backward compatibility. The canonical namespace is now `tcx::midi`. These
+// silent aliases keep older flat `tcx::Foo` code compiling. (No [[deprecated]]
+// attribute: under the usual `using namespace tc;` it would warn on idiomatic
+// unqualified use too. See README for migration.)
+// -----------------------------------------------------------------------------
+namespace tcx { // deprecated: remove at v1.0.0
+    using midi::midiReady;
+    using midi::MidiDeviceInfo;
+    using midi::MidiStatus;
+    using midi::MIDI_PITCH_BEND_CENTER;
+    using midi::toString;
+}

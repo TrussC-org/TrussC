@@ -9,7 +9,7 @@
 #include <mutex>
 #include <atomic>
 
-namespace tcx {
+namespace tcx::osc {
 
 // =============================================================================
 // OscReceiver - OSC receiver class
@@ -205,11 +205,10 @@ private:
     size_t bufferMax_ = 100;
 };
 
-}  // namespace tcx
+}  // namespace tcx::osc
 
 // -----------------------------------------------------------------------------
 // Backward compatibility: see tcxOscMessage.h. DEPRECATED — removed in v1.0.0.
 // -----------------------------------------------------------------------------
-namespace trussc {
-using tcx::OscReceiver;
-}  // namespace trussc
+namespace tcx    { using osc::OscReceiver; } // deprecated: remove at v1.0.0
+namespace trussc { using tcx::osc::OscReceiver; } // deprecated: remove at v1.0.0

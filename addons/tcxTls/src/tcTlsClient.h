@@ -14,12 +14,14 @@ struct mbedtls_x509_crt;
 struct mbedtls_ctr_drbg_context;
 struct mbedtls_entropy_context;
 
-namespace trussc {
+namespace tcx::tls {
+
+using namespace tc;  // core types (TcpClient, ...)
 
 // =============================================================================
 // TlsClient Class (inherits from TcpClient)
 // =============================================================================
-class TlsClient : public TcpClient {
+class TlsClient : public tc::TcpClient {
 public:
     // -------------------------------------------------------------------------
     // Constructor / Destructor
@@ -110,6 +112,14 @@ private:
     std::thread tlsReceiveThread_;
 };
 
-} // namespace trussc
+}  // namespace tcx::tls
 
-namespace tc = trussc;
+// -----------------------------------------------------------------------------
+// Backward compatibility. The canonical namespace is now `tcx::tls`. These
+// silent aliases keep older code compiling: flat `tcx::TlsClient` and legacy
+// `tc::TlsClient` / `trussc::TlsClient`. DEPRECATED — removed in v1.0.0.
+// (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
+//  warn on idiomatic unqualified use too. See tcxTls README for migration.)
+// -----------------------------------------------------------------------------
+namespace tcx    { using tls::TlsClient; } // deprecated: remove at v1.0.0
+namespace trussc { using tcx::tls::TlsClient; } // deprecated: remove at v1.0.0

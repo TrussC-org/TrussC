@@ -1,6 +1,6 @@
 #include "tcxOscBundle.h"
 
-namespace tcx {
+namespace tcx::osc {
 
 using namespace osc_internal;
 
@@ -102,4 +102,4 @@ OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok) {
     return bundle;
 }
 
-}  // namespace tcx
+}  // namespace tcx::osc

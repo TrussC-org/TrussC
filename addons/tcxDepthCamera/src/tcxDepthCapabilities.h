@@ -21,7 +21,7 @@
 
 #include "tcxDepthTypes.h"
 
-namespace tcx {
+namespace tcx::depthcamera {
 
 using namespace tc;
 
@@ -50,4 +50,11 @@ public:
     virtual float getConfidenceAt(int x, int y) const = 0;  // normalized 0-1
 };
 
-} // namespace tcx
+} // namespace tcx::depthcamera
+
+// Backward compatibility: canonical is now tcx::depthcamera. Flat tcx:: alias
+// kept until v1.0.0.
+namespace tcx { // deprecated: remove at v1.0.0
+    using depthcamera::IStereoRaw;
+    using depthcamera::IConfidenceMap;
+}

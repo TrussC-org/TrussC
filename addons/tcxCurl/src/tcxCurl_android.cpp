@@ -222,7 +222,7 @@ tcx::HttpResponse callJavaRequest(const std::string& method,
 
 } // namespace
 
-namespace tcx {
+namespace tcx::curl {
 
 HttpResponse HttpClient::request(const std::string& method,
                                  const std::string& path,
@@ -254,6 +254,6 @@ HttpResponse HttpClient::uploadFile(const std::string& path, const std::string& 
     return out;
 }
 
-} // namespace tcx
+} // namespace tcx::curl
 
 #endif // TCX_HTTP_ANDROID
