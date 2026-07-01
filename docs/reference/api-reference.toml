@@ -10047,9 +10047,34 @@ keywords = ["thumbnail", "snapshot", "grab", "single frame", "poster"]
 description.en = "Extract a single frame from a video file without loading the full video. Useful for thumbnails"
 description.ja = "ビデオファイルから1フレームを抽出（全体を読み込まずに）。サムネイル生成に便利"
 description.ko = "비디오 파일에서 전체를 로드하지 않고 단일 프레임을 추출. 썸네일 생성에 유용"
-related = ["Pixels", "VideoPlayer"]
-platform_note.en = "Static single-frame extraction is fully implemented only on macOS (AVAssetImageGenerator). Windows/Linux/Android stub it (`return false`, TODO); iOS and web have no extractFramePlatform() definition at all."
-platform_note.ja = "静止フレーム抽出が実装されているのは macOS のみ（AVAssetImageGenerator）。win/linux/android は false を返すスタブ、ios/web は extractFramePlatform() の定義自体が存在しない。"
+related = ["Pixels", "VideoPlayer", "VideoPlayer::load"]
+platform_note.en = "Static single-frame extraction is implemented on macOS (AVAssetImageGenerator), Windows (Media Foundation / IMFSourceReader), and Linux (FFmpeg). Android stubs it (`return false`); iOS and web have no extractFramePlatform() definition and are unsupported."
+platform_note.ja = "静止フレーム抽出は macOS（AVAssetImageGenerator）・Windows（Media Foundation / IMFSourceReader）・Linux（FFmpeg）で実装済み。android は false を返すスタブ、ios/web は extractFramePlatform() の定義自体が無く未対応。"
+details.en = '''
+Static, thread-safe, GPU-free single-frame decoder: opens the file on the calling
+thread with its own decode context (independent of any playing
+[`VideoPlayer`](#VideoPlayer)), seeks to the nearest keyframe at or before
+`timeSec`, and returns one frame as RGBA U8 [`Pixels`](#Pixels). `outDuration`, if
+non-null, receives the clip length in seconds.
+
+A common use is as a **black-flash stopgap**: [`load`](#VideoPlayer::load) /
+[`play`](#VideoPlayer::play) decode asynchronously, so the first on-screen frames
+are black. Extract frame 0 synchronously (`extractFrame(path, px, 0.0f)`), upload
+it to a [`Texture`](#Texture), and draw that still until the live player's
+[`isFrameNew`](#VideoPlayer::isFrameNew) has fired at least once.
+'''
+details.ja = '''
+静止・スレッドセーフ・GPU不要の1フレームデコーダ。呼び出しスレッド上で独自の
+デコードコンテキスト（再生中の [`VideoPlayer`](#VideoPlayer) とは独立）でファイルを
+開き、`timeSec` 以下の最寄りキーフレームへシークして1フレームを RGBA U8 の
+[`Pixels`](#Pixels) で返す。`outDuration` が非 null ならクリップ長（秒）を格納する。
+
+代表的な用途は**黒フレーム対策のつなぎ**。[`load`](#VideoPlayer::load) /
+[`play`](#VideoPlayer::play) は非同期デコードなので再生開始直後の数フレームは黒に
+なる。フレーム0を同期抽出（`extractFrame(path, px, 0.0f)`）して
+[`Texture`](#Texture) に載せ、ライブ側の
+[`isFrameNew`](#VideoPlayer::isFrameNew) が最初に true になるまでその静止画を描く。
+'''
 
 ["VideoPlayer::getAudioChannels"]
 category = "video"
@@ -10174,6 +10199,23 @@ keywords = ["open", "read", "file", "movie"]
 description.en = "Load a video file"
 description.ja = "ビデオファイルを読み込む"
 description.ko = "비디오 파일을 로드"
+related = ["VideoPlayer::play", "VideoPlayer::isFrameNew", "VideoPlayer::extractFrame"]
+details.en = '''
+Decoding is **asynchronous** — the decoder spins up in the background, so for a
+short window after `load()` / [`play`](#VideoPlayer::play) the player has no
+picture yet and draws **black**. To hide that flash, synchronously grab the first
+frame with [`extractFrame`](#VideoPlayer::extractFrame)`(path, px, 0.0f)`, show it
+as a still [`Texture`](#Texture), and switch to the live player once
+[`isFrameNew`](#VideoPlayer::isFrameNew) has returned true at least once.
+'''
+details.ja = '''
+デコードは**非同期**で、デコーダはバックグラウンドで立ち上がる。そのため
+`load()` / [`play`](#VideoPlayer::play) 直後のわずかな間、プレイヤーはまだ絵を
+持たず**黒**を描く。このちらつきを隠すには、
+[`extractFrame`](#VideoPlayer::extractFrame)`(path, px, 0.0f)` で先頭フレームを
+同期取得して静止 [`Texture`](#Texture) として表示し、
+[`isFrameNew`](#VideoPlayer::isFrameNew) が一度 true になったらライブ側へ切り替える。
+'''
 
 ["VideoPlayer::nextFrame"]
 category = "video"

@@ -1123,6 +1123,24 @@ Two ways:
 - **Write arbitrary frames**: use `VideoWriter` — `open(path, w, h, settings)` → `addFrame(fbo)` / `addFrame(pixels)` (timestamped via `addFrameAt(frame, timeSec)`) → `close()`. For writing offscreen (FBO) content at a steady rate.
 Encoder settings: `VideoRecordSettings`. Platforms: macOS / Windows / Linux / Android / iOS.
 
+### How do I avoid a black first frame when a VideoPlayer starts?
+
+`VideoPlayer::load()` / `play()` decode **asynchronously**, so for the first few frames the player has no picture yet and draws **black**. To hide that flash, synchronously extract frame 0 as a still and show it until the live player has a real frame:
+
+```cpp
+Pixels still; Texture stillTex;
+if (VideoPlayer::extractFrame(path, still, 0.0f) && still.getWidth() > 0) {
+    stillTex.allocate(still.getWidth(), still.getHeight(), 4, TextureUsage::Stream);
+    stillTex.loadData(still.getData(), still.getWidth(), still.getHeight(), 4);
+}
+player.load(path); player.play();
+// in draw(): show the live player once player.isFrameNew() has fired at least
+// once, otherwise draw stillTex. In update(): flip a "ready" flag on the first
+// isFrameNew().
+```
+
+`extractFrame(path, outPixels, timeSec=1.0, outDuration=nullptr)` is a **static, thread-safe, GPU-free** single-frame decoder returning RGBA `Pixels`. Implemented on **macOS (AVFoundation), Windows (Media Foundation), Linux (FFmpeg)**; iOS and web are unsupported (returns false). Pass `timeSec = 0` for the first frame; it seeks to the nearest keyframe at or before the requested time.
+
 ## Networking
 
 ### TCP / UDP networking? (brief)

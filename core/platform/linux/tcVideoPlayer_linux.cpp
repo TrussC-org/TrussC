@@ -1414,9 +1414,104 @@ std::string VideoPlayer::getHwAccelNamePlatform() const {
 
 bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
                                        float timeSec, float* outDuration) {
-    // TODO: implement frame extraction on Linux
-    (void)path; (void)outPixels; (void)timeSec; (void)outDuration;
-    return false;
+    // Standalone single-frame decode: own format/codec/scaler contexts, plain
+    // software decode (no HW device), independent of any playback instance.
+    AVFormatContext* fmtCtx = nullptr;
+    if (avformat_open_input(&fmtCtx, path.c_str(), nullptr, nullptr) < 0) return false;
+    if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
+        avformat_close_input(&fmtCtx);
+        return false;
+    }
+
+    // Find the first video stream.
+    int videoIdx = -1;
+    for (unsigned int i = 0; i < fmtCtx->nb_streams; i++) {
+        if (fmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            videoIdx = i;
+            break;
+        }
+    }
+    if (videoIdx < 0) {
+        avformat_close_input(&fmtCtx);
+        return false;
+    }
+    AVStream* videoStream = fmtCtx->streams[videoIdx];
+
+    // Duration (seconds) for the optional out-param + clamping.
+    double duration = 0.0;
+    if (fmtCtx->duration > 0)
+        duration = fmtCtx->duration / (double)AV_TIME_BASE;
+    else if (videoStream->duration > 0)
+        duration = videoStream->duration * av_q2d(videoStream->time_base);
+    if (outDuration) *outDuration = (float)duration;
+
+    // Clamp requested time to valid range (mirrors the macOS behaviour).
+    if (duration > 0.0 && timeSec > duration) timeSec = (float)(duration * 0.1);
+    if (timeSec < 0) timeSec = 0;
+
+    // Open the video decoder (software).
+    AVCodecParameters* par = videoStream->codecpar;
+    const AVCodec* codec = avcodec_find_decoder(par->codec_id);
+    if (!codec) {
+        avformat_close_input(&fmtCtx);
+        return false;
+    }
+    AVCodecContext* codecCtx = avcodec_alloc_context3(codec);
+    avcodec_parameters_to_context(codecCtx, par);
+    if (avcodec_open2(codecCtx, codec, nullptr) < 0) {
+        avcodec_free_context(&codecCtx);
+        avformat_close_input(&fmtCtx);
+        return false;
+    }
+
+    // Seek to the nearest keyframe at or before the requested time.
+    if (timeSec > 0.0f) {
+        int64_t ts = (int64_t)(timeSec / av_q2d(videoStream->time_base));
+        av_seek_frame(fmtCtx, videoIdx, ts, AVSEEK_FLAG_BACKWARD);
+        avcodec_flush_buffers(codecCtx);
+    }
+
+    // Decode until we get the first frame.
+    AVFrame* frame = av_frame_alloc();
+    AVPacket* pkt  = av_packet_alloc();
+    bool got = false;
+    while (!got && av_read_frame(fmtCtx, pkt) >= 0) {
+        if (pkt->stream_index == videoIdx &&
+            avcodec_send_packet(codecCtx, pkt) == 0) {
+            if (avcodec_receive_frame(codecCtx, frame) == 0) got = true;
+        }
+        av_packet_unref(pkt);
+    }
+    // Flush the decoder if nothing came out during the read loop.
+    if (!got) {
+        avcodec_send_packet(codecCtx, nullptr);
+        if (avcodec_receive_frame(codecCtx, frame) == 0) got = true;
+    }
+
+    bool ok = false;
+    if (got && frame->width > 0 && frame->height > 0) {
+        int w = frame->width, h = frame->height;
+        // Convert the decoded frame to RGBA straight into outPixels.
+        SwsContext* sws = sws_getContext(
+            w, h, (AVPixelFormat)frame->format,
+            w, h, AV_PIX_FMT_RGBA,
+            SWS_BILINEAR, nullptr, nullptr, nullptr
+        );
+        if (sws) {
+            outPixels.allocate(w, h, 4);
+            uint8_t* dstData[1]   = { outPixels.getData() };
+            int      dstStride[1] = { w * 4 };
+            sws_scale(sws, frame->data, frame->linesize, 0, h, dstData, dstStride);
+            sws_freeContext(sws);
+            ok = true;
+        }
+    }
+
+    av_frame_free(&frame);
+    av_packet_free(&pkt);
+    avcodec_free_context(&codecCtx);
+    avformat_close_input(&fmtCtx);
+    return ok;
 }
 
 } // namespace trussc
