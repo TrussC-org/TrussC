@@ -15,7 +15,9 @@
 #include <vector>
 #include <cstdint>
 
-namespace tcx {
+namespace tcx::midi {
+
+using namespace tc;
 
 struct MidiMessage {
     std::vector<unsigned char> bytes;  // raw MIDI bytes
@@ -114,7 +116,7 @@ struct MidiMessage {
     // Debug
     // -------------------------------------------------------------------------
     std::string toString() const {
-        std::string out = tcx::toString(getStatus());
+        std::string out = midi::toString(getStatus());
         if (getChannel() > 0) out += " ch" + std::to_string(getChannel());
         switch (getStatus()) {
             case MidiStatus::NoteOn:
@@ -143,11 +145,13 @@ struct MidiMessage {
 
     // Name of a status byte (e.g. for logging). Matches ofxMidi's static helper.
     static std::string getStatusString(MidiStatus status) {
-        return tcx::toString(status);
+        return midi::toString(status);
     }
 
 private:
     int byteAt(size_t i) const { return i < bytes.size() ? bytes[i] : 0; }
 };
 
-}  // namespace tcx
+}  // namespace tcx::midi
+
+namespace tcx { using midi::MidiMessage; } // deprecated: remove at v1.0.0

@@ -23,7 +23,9 @@
 #include <string>
 #include <vector>
 
-namespace tcx {
+namespace tcx::midi {
+
+using namespace tc;
 
 class MidiTimecode;  // fwd for frame helpers
 
@@ -252,4 +254,9 @@ inline void MidiTimecodeFrame::fromSeconds(double s, unsigned char r) {
     rate = r;
 }
 
-}  // namespace tcx
+}  // namespace tcx::midi
+
+namespace tcx { // deprecated: remove at v1.0.0
+    using midi::MidiTimecodeFrame;
+    using midi::MidiTimecode;
+}

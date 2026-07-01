@@ -1,6 +1,6 @@
 #include "tcxQuadWarp.h"
 
-namespace tcx {
+namespace tcx::quadwarp {
 
 QuadWarp::QuadWarp() {
     // Default points
@@ -219,4 +219,4 @@ void QuadWarp::load(const std::string& path) {
     }
 }
 
-} // namespace tcx
+} // namespace tcx::quadwarp

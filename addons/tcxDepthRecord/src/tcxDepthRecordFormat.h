@@ -35,7 +35,7 @@
 #include <fstream>
 #include <vector>
 
-namespace tcx {
+namespace tcx::depthrecord {
 
 using namespace tc;
 
@@ -202,4 +202,23 @@ inline void parseColorPayload(std::istream& in, const TcdcHeader& h, DepthFrame&
 }
 
 } // namespace tcd_detail
-} // namespace tcx
+} // namespace tcx::depthrecord
+
+// -----------------------------------------------------------------------------
+// Backward compatibility. The canonical namespace is now `tcx::depthrecord`.
+// These silent aliases keep older flat `tcx::` code compiling. DEPRECATED.
+// (No [[deprecated]] attribute: under the usual `using namespace tc;` it would
+//  warn on idiomatic unqualified use too. See README for migration.)
+// -----------------------------------------------------------------------------
+namespace tcx { // deprecated: remove at v1.0.0
+    using depthrecord::BlockType;
+    using depthrecord::BLOCK_DEPTH;
+    using depthrecord::BLOCK_COLOR;
+    using depthrecord::BLOCK_INFRARED;
+    using depthrecord::BLOCK_CUSTOM_BASE;
+    using depthrecord::DepthCodecId;
+    using depthrecord::ColorCodecId;
+    using depthrecord::TCDC_VERSION;
+    using depthrecord::TCDC_MAX_STREAM_TYPES;
+    using depthrecord::TcdcHeader;
+}

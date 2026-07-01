@@ -3,7 +3,7 @@
 #include "tcxOscMessage.h"
 #include <variant>
 
-namespace tcx {
+namespace tcx::osc {
 
 // =============================================================================
 // OscBundle - OSC bundle class
@@ -99,11 +99,10 @@ private:
     std::vector<Element> elements_;
 };
 
-}  // namespace tcx
+}  // namespace tcx::osc
 
 // -----------------------------------------------------------------------------
 // Backward compatibility: see tcxOscMessage.h. DEPRECATED — removed in v1.0.0.
 // -----------------------------------------------------------------------------
-namespace trussc {
-using tcx::OscBundle;
-}  // namespace trussc
+namespace tcx    { using osc::OscBundle; } // deprecated: remove at v1.0.0
+namespace trussc { using tcx::osc::OscBundle; } // deprecated: remove at v1.0.0

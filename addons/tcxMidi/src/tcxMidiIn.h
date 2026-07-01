@@ -33,7 +33,9 @@
 #include <string>
 #include <vector>
 
-namespace tcx {
+namespace tcx::midi {
+
+using namespace tc;
 
 class MidiIn {
 public:
@@ -222,4 +224,6 @@ private:
     size_t bufferMax_ = 256;
 };
 
-}  // namespace tcx
+}  // namespace tcx::midi
+
+namespace tcx { using midi::MidiIn; } // deprecated: remove at v1.0.0

@@ -22,7 +22,7 @@
 #include "tcxDepthCapabilities.h"
 #include <memory>
 
-namespace tcx {
+namespace tcx::depthcamera {
 
 using namespace tc;
 
@@ -57,4 +57,14 @@ inline bool hasConfidence(const DepthCamera& c) { return is<IConfidenceMap>(c); 
 // Sensor kind is informational, not a capability - report it from the enum.
 inline bool isToF(const DepthCamera& c) { return c.getSensorType() == DepthSensorType::ToF; }
 
-} // namespace tcx
+} // namespace tcx::depthcamera
+
+// Backward compatibility: canonical is now tcx::depthcamera. Flat tcx:: alias
+// kept until v1.0.0.
+namespace tcx { // deprecated: remove at v1.0.0
+    using depthcamera::as;
+    using depthcamera::is;
+    using depthcamera::isStereoCam;
+    using depthcamera::hasConfidence;
+    using depthcamera::isToF;
+}

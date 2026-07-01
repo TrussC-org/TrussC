@@ -16,7 +16,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace tcx {
+namespace tcx::depthcamera {
 
 using namespace tc;
 
@@ -128,4 +128,19 @@ struct DepthMeshOptions {
     int  step      = 1;      // decimation: keep every Nth pixel per axis
 };
 
-} // namespace tcx
+} // namespace tcx::depthcamera
+
+// -----------------------------------------------------------------------------
+// Backward compatibility. The canonical namespace is now `tcx::depthcamera`.
+// These silent flat aliases keep older `tcx::` code compiling. DEPRECATED —
+// removed in v1.0.0. (No [[deprecated]] attribute: under the usual
+// `using namespace tc;` it would warn on idiomatic unqualified use too.)
+// -----------------------------------------------------------------------------
+namespace tcx { // deprecated: remove at v1.0.0
+    using depthcamera::DepthSensorType;
+    using depthcamera::DepthIntrinsics;
+    using depthcamera::Stream;
+    using depthcamera::StreamFreshness;
+    using depthcamera::DepthFrame;
+    using depthcamera::DepthMeshOptions;
+}

@@ -38,7 +38,7 @@
 #include <mutex>
 #include <utility>
 
-namespace tcx {
+namespace tcx::depthcamera {
 
 using namespace tc;
 
@@ -396,4 +396,8 @@ private:
     DepthImageView depthImageLastView_{};
 };
 
-} // namespace tcx
+} // namespace tcx::depthcamera
+
+// Backward compatibility: canonical is now tcx::depthcamera. Flat tcx:: alias
+// kept until v1.0.0.
+namespace tcx { using depthcamera::DepthCamera; } // deprecated: remove at v1.0.0

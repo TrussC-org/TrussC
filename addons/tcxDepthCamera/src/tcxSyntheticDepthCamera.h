@@ -33,7 +33,7 @@
 #include <cmath>
 #include <thread>
 
-namespace tcx {
+namespace tcx::depthcamera {
 
 using namespace tc;
 
@@ -156,4 +156,8 @@ private:
     uint64_t frame_ = 0;
 };
 
-} // namespace tcx
+} // namespace tcx::depthcamera
+
+// Backward compatibility: canonical is now tcx::depthcamera. Flat tcx:: alias
+// kept until v1.0.0.
+namespace tcx { using depthcamera::SyntheticDepthCamera; } // deprecated: remove at v1.0.0

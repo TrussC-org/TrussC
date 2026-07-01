@@ -304,9 +304,16 @@ namespace tcx::addonname {
 |-------|-----------|
 | tcxBox2d | `tcx::box2d` |
 | tcxGui | `tcx::gui` |
-| tcxOsc | `tcx` (classes are `Osc`-prefixed: `OscSender`, `OscMessage`, …) |
+| tcxOsc | `tcx::osc` |
 
-**Note:** TrussC core uses `tc::`. Addons use `tcx::`.
+Each addon gets its **own sub-namespace** `tcx::<addonname>`, so two addons can each define a `World` / `Client` / `Message` without clashing. Users opt in either way:
+
+```cpp
+using namespace tcx;        // then qualify by addon:  osc::Receiver
+using namespace tcx::osc;   // then bare:              Receiver
+```
+
+**Note:** TrussC core uses `tc::`; addons use `tcx::<addonname>`. Addons still shipping in flat `tcx::` or legacy `trussc::` keep temporary silent compat aliases until v1.0.0 — see `tcxOsc` / `addons/tcxTemplate` for the migration pattern.
 
 ### File Names
 

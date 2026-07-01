@@ -3052,11 +3052,16 @@ static void printBuildHelp() {
          << "      --web                  Build for WebAssembly\n"
          << "      --android              Build for Android\n"
          << "      --ios                  Build for iOS\n"
-         << "      --release              Build in Release configuration\n"
+         << "      --debug                Build type: Debug (-O0 -g)\n"
+         << "      --relwithdebinfo       Build type: RelWithDebInfo (-O2 -g) [default]\n"
+         << "      --release              Build type: Release (-O3, no debug info)\n"
          << "      --clean                Clean before building (--clean-first)\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
-         << "  -h, --help                 Show this help\n";
+         << "  -h, --help                 Show this help\n"
+         << "\n"
+         << "Build type applies to native builds; web/android keep their own\n"
+         << "(MinSizeRel / Release). The three build-type flags are mutually exclusive.\n";
 }
 
 // =============================================================================
@@ -3132,10 +3137,37 @@ static int cmdClean(const vector<string>& args) {
 // Subcommand: build
 // =============================================================================
 
+// Read CMAKE_BUILD_TYPE from an existing CMake cache. Returns "" if the cache
+// (or the variable) is absent. Used to decide whether a reconfigure is needed
+// to change the build type on single-config generators.
+static string readCachedBuildType(const string& buildDir) {
+    ifstream cache(buildDir + "/CMakeCache.txt");
+    if (!cache) return "";
+    string line;
+    while (getline(cache, line)) {
+        // Format: CMAKE_BUILD_TYPE:STRING=RelWithDebInfo
+        if (line.rfind("CMAKE_BUILD_TYPE:", 0) == 0) {
+            auto eq = line.find('=');
+            if (eq != string::npos) return line.substr(eq + 1);
+        }
+    }
+    return "";
+}
+
+// Map a build-type flag to its CMAKE_BUILD_TYPE value, or nullptr if the
+// argument is not one. --debug / --release / --relwithdebinfo are mutually
+// exclusive; the default (no flag) is RelWithDebInfo (see trussc_app.cmake).
+static const char* buildTypeForFlag(const string& a) {
+    if (a == "--debug")          return "Debug";
+    if (a == "--release")        return "Release";
+    if (a == "--relwithdebinfo") return "RelWithDebInfo";
+    return nullptr;
+}
+
 static int cmdBuild(const vector<string>& args) {
     string explicitPath;
     string targetPreset;
-    bool release = false;
+    string buildType;       // "" = default (RelWithDebInfo); else Debug/Release/RelWithDebInfo
     bool clean = false;
     bool warnings = false;
 
@@ -3154,7 +3186,14 @@ static int cmdBuild(const vector<string>& args) {
         else if (a == "--web")     targetPreset = "web";
         else if (a == "--android") targetPreset = "android";
         else if (a == "--ios")     targetPreset = "ios";
-        else if (a == "--release") release = true;
+        else if (const char* bt = buildTypeForFlag(a)) {
+            if (!buildType.empty() && buildType != bt) {
+                cerr << "Error: conflicting build-type flags "
+                        "(--debug / --release / --relwithdebinfo are mutually exclusive)\n";
+                return 1;
+            }
+            buildType = bt;
+        }
         else if (a == "--clean")   clean = true;
         else if (a == "--warnings") warnings = true;
         else if (a == "-p" || a == "--path") {
@@ -3166,6 +3205,10 @@ static int cmdBuild(const vector<string>& args) {
             return 1;
         }
     }
+
+    // Resolve the effective build type. An explicit flag wins; otherwise fall
+    // back to RelWithDebInfo (the project default baked into trussc_app.cmake).
+    string effectiveType = buildType.empty() ? "RelWithDebInfo" : buildType;
 
     string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
     if (projectPath.empty()) {
@@ -3241,25 +3284,63 @@ static int cmdBuild(const vector<string>& args) {
     }
 #endif
 
-    // cmake --build --preset <target> --parallel[=N] [--config Release] [--clean-first]
+    // cmake --build --preset <target> --parallel[=N] --config <type> [--clean-first]
     vector<string> cmd = {cmake, "--build", "--preset", targetPreset, parallelArg};
-    if (release) { cmd.push_back("--config"); cmd.push_back("Release"); }
+    // --config only affects multi-config generators (Xcode, Visual Studio). The
+    // native presets are single-config (Unix Makefiles / Ninja), where --config
+    // is silently ignored; there the build type is fixed at configure time by
+    // CMAKE_BUILD_TYPE, which we pin below. Kept here so the build type also
+    // applies on any future multi-config native preset.
+    cmd.push_back("--config"); cmd.push_back(effectiveType);
     if (clean) cmd.push_back("--clean-first");
 
     // Run from the project directory
     string savedCwd = fs::current_path().string();
     fs::current_path(projectPath);
 
-    int rc = 0;
-    // --warnings: reconfigure the cache so trussc_app.cmake turns on -Wall/-Wextra
-    // for the app's own sources. `cmake --build` can't pass -D, so configure first.
-    // The cache var is sticky: it stays on for later builds until a configure
-    // without --warnings (or `trusscli update`) resets it.
+    // `cmake --build` cannot pass -D, so any cache change needs a configure pass
+    // (`cmake --preset`) first. Accumulate the flags and run it only if needed.
+    vector<string> cfg = {cmake, "--preset", targetPreset};
+    bool needConfigure = false;
+
+    // --warnings: turn on -Wall/-Wextra for the app's own sources. The cache var
+    // is sticky: it stays on for later builds until a configure without it (or
+    // `trusscli update`) resets it.
     if (warnings) {
         cout << "[warnings] Enabling -Wall -Wextra for this project's sources...\n";
-        vector<string> cfg = {cmake, "--preset", targetPreset, "-DTRUSSC_WARNINGS=ON"};
-        rc = runProcess(cfg);
+        cfg.push_back("-DTRUSSC_WARNINGS=ON");
+        needConfigure = true;
     }
+
+    // Build type on a single-config native preset: the `--config` above is
+    // ignored, so pin the build type via CMAKE_BUILD_TYPE at configure time.
+    // Only manage the native preset — web/android bake their own build type
+    // (MinSizeRel / Release) into the preset and must keep it. We touch the cache
+    // only when it actually needs to change, so a steady-state build stays
+    // configure-free on the common path (cache already holds the desired type).
+    if (kNativePreset && targetPreset == kNativePreset) {
+        string cachedType = readCachedBuildType(string("build-") + targetPreset);
+        // Reconfigure to pin CMAKE_BUILD_TYPE when either the cache holds a
+        // different type (switch, or revert to the default after an explicit
+        // build), or there is no cache yet and a non-default type was requested
+        // (pin it before the configure the build triggers). A plain build with
+        // no cache stays configure-free and relies on the trussc_app.cmake default.
+        bool changeType = (!cachedType.empty() && cachedType != effectiveType) ||
+                          (cachedType.empty() && !buildType.empty());
+        if (changeType) {
+            if (cachedType.empty())
+                cout << "[build] Configuring " << effectiveType << " build "
+                        "(CMAKE_BUILD_TYPE=" << effectiveType << ")...\n";
+            else
+                cout << "[build] Switching build type: " << cachedType
+                     << " -> " << effectiveType << " ...\n";
+            cfg.push_back("-DCMAKE_BUILD_TYPE=" + effectiveType);
+            needConfigure = true;
+        }
+    }
+
+    int rc = 0;
+    if (needConfigure) rc = runProcess(cfg);
     if (rc == 0) rc = runProcess(cmd);
     fs::current_path(savedCwd);
 
@@ -3286,7 +3367,9 @@ static void printRunHelp() {
          << "      --ios                  Build and run in iOS Simulator    [not yet implemented]\n"
          << "      --session <backend>    Launch inside a display session (Linux, no desktop).\n"
          << "                             Backends: labwc, x11. Example: --session labwc\n"
-         << "      --release              Build in Release configuration\n"
+         << "      --debug                Build type: Debug (-O0 -g)\n"
+         << "      --relwithdebinfo       Build type: RelWithDebInfo (-O2 -g) [default]\n"
+         << "      --release              Build type: Release (-O3, no debug info)\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n";
@@ -3296,7 +3379,7 @@ static int cmdRun(const vector<string>& args) {
     string explicitPath;
     string target; // "", "web", "android", "ios"
     string session; // display session backend: "labwc", "x11", ""
-    bool release = false;
+    string buildType;  // "" = default; else Debug/Release/RelWithDebInfo
     bool warnings = false;
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -3322,7 +3405,14 @@ static int cmdRun(const vector<string>& args) {
                 return 1;
             }
         }
-        else if (a == "--release")  release = true;
+        else if (const char* bt = buildTypeForFlag(a)) {
+            if (!buildType.empty() && buildType != bt) {
+                cerr << "Error: conflicting build-type flags "
+                        "(--debug / --release / --relwithdebinfo are mutually exclusive)\n";
+                return 1;
+            }
+            buildType = bt;
+        }
         else if (a == "--warnings") warnings = true;
         else if (a == "-p" || a == "--path") {
             if (!needValue(i, a, explicitPath)) return 1;
@@ -3360,7 +3450,12 @@ static int cmdRun(const vector<string>& args) {
     // --- Build phase ---
     vector<string> buildArgs;
     if (!target.empty()) buildArgs.push_back("--" + target);
-    if (release) buildArgs.push_back("--release");
+    if (!buildType.empty()) {
+        // Forward as the matching flag (Debug -> --debug, etc.).
+        string flag = buildType;
+        transform(flag.begin(), flag.end(), flag.begin(), ::tolower);
+        buildArgs.push_back("--" + flag);
+    }
     if (warnings) buildArgs.push_back("--warnings");
     if (!explicitPath.empty()) { buildArgs.push_back("-p"); buildArgs.push_back(explicitPath); }
 
@@ -3588,8 +3683,8 @@ _trusscli() {
             local -a opts
             case "$words[2]" in
                 update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
-                build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--release:Release config' '--clean:Clean first' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
-                run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--release:Release' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
+                build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
+                run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
                 clean)  opts=('--all:Delete all build dirs' '-p:Project path' '--path:Project path') ;;
             esac
             _describe 'option' opts
@@ -3675,8 +3770,8 @@ _trusscli() {
             esac
             case "${COMP_WORDS[1]}" in
                 update) COMPREPLY=($(compgen -W "-p --path --web --android --ios --ide --tc-root" -- "$cur")) ;;
-                build)  COMPREPLY=($(compgen -W "--web --android --ios --release --clean --warnings -p --path" -- "$cur")) ;;
-                run)    COMPREPLY=($(compgen -W "--web --android --ios --session --release --warnings -p --path" -- "$cur")) ;;
+                build)  COMPREPLY=($(compgen -W "--web --android --ios --debug --relwithdebinfo --release --clean --warnings -p --path" -- "$cur")) ;;
+                run)    COMPREPLY=($(compgen -W "--web --android --ios --session --debug --relwithdebinfo --release --warnings -p --path" -- "$cur")) ;;
                 clean)  COMPREPLY=($(compgen -W "--all -p --path" -- "$cur")) ;;
             esac
             ;;

@@ -40,7 +40,7 @@
 #include <curl/curl.h>
 #endif
 
-namespace tcx {
+namespace tcx::curl {
 
 // HTTP response
 struct HttpResponse {
@@ -331,4 +331,13 @@ inline HttpResponse HttpClient::uploadFile(const std::string& path, const std::s
 
 #endif
 
-} // namespace tcx
+} // namespace tcx::curl
+
+// -----------------------------------------------------------------------------
+// Backward compatibility. The canonical namespace is now `tcx::curl`. These
+// silent aliases keep older code compiling under flat `tcx::HttpClient`.
+// DEPRECATED — removed in v1.0.0. (No [[deprecated]] attribute: under the usual
+// `using namespace tc;` it would warn on idiomatic unqualified use too. See
+// README for migration.)
+// -----------------------------------------------------------------------------
+namespace tcx { using curl::HttpResponse; using curl::HttpClient; } // deprecated: remove at v1.0.0

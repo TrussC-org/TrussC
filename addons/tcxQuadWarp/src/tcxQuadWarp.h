@@ -2,7 +2,7 @@
 
 #include <TrussC.h>
 
-namespace tcx {
+namespace tcx::quadwarp {
 
 class QuadWarp {
 public:
@@ -62,4 +62,7 @@ private:
     tc::EventListener keyPressListener_;
 };
 
-} // namespace tcx
+} // namespace tcx::quadwarp
+
+// Backward compatibility: canonical is now tcx::quadwarp. Flat tcx:: alias kept until v1.0.0.
+namespace tcx { using quadwarp::QuadWarp; } // deprecated: remove at v1.0.0

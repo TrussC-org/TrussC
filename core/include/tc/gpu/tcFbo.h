@@ -634,8 +634,10 @@ private:
         sgl_defaults();
 
         // Start this FBO pass's deferred-PBR layer counter fresh (mirrors the
-        // swapchain's sglLayerNext). Meshes drawn now defer into fboPbrDraws.
+        // swapchain's sglLayerNext). Meshes drawn now defer into fboPbrDraws,
+        // point splats into fboPointDraws (both share fboLayerNext).
         internal::fboPbrDraws.clear();
+        internal::fboPointDraws.clear();
         internal::fboLayerNext = 0;
         sgl_layer(0);
 

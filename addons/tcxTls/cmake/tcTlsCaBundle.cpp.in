@@ -4,7 +4,7 @@
 // Embedded as a byte array instead of a string literal — MSVC rejects string
 // literals above 65535 bytes (error C2026) and this bundle is ~226KB.
 
-namespace trussc {
+namespace tcx::tls {
 namespace tls_internal {
 
 extern const char* bundledCaPem();
@@ -23,4 +23,4 @@ const char* bundledCaBundleDate() {
 }
 
 } // namespace tls_internal
-} // namespace trussc
+} // namespace tcx::tls

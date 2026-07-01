@@ -12,7 +12,7 @@
 #include <cstdlib>
 #include <string>
 
-namespace tcx {
+namespace tcx::imgui {
 
 // ---------------------------------------------------------------------------
 // ImGui manager
@@ -164,7 +164,7 @@ inline void imguiSetup() {
     // Auto-register the ImGui MCP tools when MCP is enabled, so ImGui-based
     // UIs are AI-drivable without an explicit registerImGuiTools() call.
     if (const char* m = std::getenv("TRUSSC_MCP"); m && std::string(m) == "1") {
-        trussc::imgui_tools::registerImGuiTools();
+        registerImGuiTools();
     }
 }
 
@@ -174,12 +174,12 @@ inline void imguiShutdown() {
 
 inline void imguiBegin() {
     ImGuiManager::instance().begin();
-    trussc::imgui_tools::beginFrame();
+    beginFrame();
 }
 
 inline void imguiEnd() {
     ImGuiManager::instance().end();
-    trussc::imgui_tools::swapFrames();
+    swapFrames();
 }
 
 inline bool imguiWantsMouse() {
@@ -190,4 +190,20 @@ inline bool imguiWantsKeyboard() {
     return ImGui::GetIO().WantCaptureKeyboard;
 }
 
+} // namespace tcx::imgui
+
+// -----------------------------------------------------------------------------
+// Backward compatibility: tcxImGui's public entry points historically lived
+// directly in `tcx` (e.g. `using namespace tcx; imguiSetup();`). Canonical is
+// now `tcx::imgui`. Flat aliases keep existing user code compiling.
+// DEPRECATED — removed in v1.0.0.
+// -----------------------------------------------------------------------------
+namespace tcx { // deprecated: remove at v1.0.0
+using imgui::ImGuiManager;
+using imgui::imguiSetup;
+using imgui::imguiShutdown;
+using imgui::imguiBegin;
+using imgui::imguiEnd;
+using imgui::imguiWantsMouse;
+using imgui::imguiWantsKeyboard;
 } // namespace tcx

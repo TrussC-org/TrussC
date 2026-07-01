@@ -65,12 +65,18 @@ public:
           ibuf_(other.ibuf_),
           gpuVertexCount_(other.gpuVertexCount_),
           gpuIndexCount_(other.gpuIndexCount_),
-          gpuDirty_(other.gpuDirty_) {
+          gpuDirty_(other.gpuDirty_),
+          pbuf_(other.pbuf_),
+          gpuPointCount_(other.gpuPointCount_),
+          pointGpuDirty_(other.pointGpuDirty_) {
         other.vbuf_ = {};
         other.ibuf_ = {};
         other.gpuVertexCount_ = 0;
         other.gpuIndexCount_ = 0;
         other.gpuDirty_ = true;
+        other.pbuf_ = {};
+        other.gpuPointCount_ = 0;
+        other.pointGpuDirty_ = true;
     }
 
     Mesh& operator=(Mesh&& other) noexcept {
@@ -88,11 +94,17 @@ public:
         gpuVertexCount_ = other.gpuVertexCount_;
         gpuIndexCount_ = other.gpuIndexCount_;
         gpuDirty_ = other.gpuDirty_;
+        pbuf_ = other.pbuf_;
+        gpuPointCount_ = other.gpuPointCount_;
+        pointGpuDirty_ = other.pointGpuDirty_;
         other.vbuf_ = {};
         other.ibuf_ = {};
         other.gpuVertexCount_ = 0;
         other.gpuIndexCount_ = 0;
         other.gpuDirty_ = true;
+        other.pbuf_ = {};
+        other.gpuPointCount_ = 0;
+        other.pointGpuDirty_ = true;
         return *this;
     }
 
@@ -475,6 +487,14 @@ public:
     // ---------------------------------------------------------------------------
     void draw() const {
         if (vertices_.empty()) return;
+
+        // GPU point path: a Points-mode mesh lives in a GPU buffer and is drawn
+        // GPU-resident (see tcMeshPointPipeline.h) — Square/Round as billboarded
+        // splats, Pixel as a true 1px point primitive.
+        if (mode_ == PrimitiveMode::Points) {
+            drawGpuPoints();
+            return;
+        }
 
         // GPU PBR path: requires normals and a Material.
         // Evaluated per-pixel on the GPU via the meshPbr shader.
@@ -986,8 +1006,8 @@ public:
     // (e.g. writing directly into getVertices()[i].x), call markGpuDirty()
     // explicitly before the next draw.
 
-    // Force a re-upload on the next GpuPbr draw.
-    void markGpuDirty() const { gpuDirty_ = true; }
+    // Force a re-upload on the next GpuPbr / GpuPoints draw.
+    void markGpuDirty() const { gpuDirty_ = true; pointGpuDirty_ = true; }
 
     // Upload interleaved (pos, normal, uv) data to a sg_buffer. Lazy; no-op if
     // already clean and sizes match. Called automatically from drawGpuPbr().
@@ -1065,11 +1085,55 @@ public:
     // included after this file by TrussC.h.
     void drawGpuPbr() const;
 
+    // Draw via the GPU point-splat pipeline. Defined in tcMeshPointPipeline.h
+    // (included after this file). Used for PrimitiveMode::Points with a non-Pixel
+    // PointStyle.
+    void drawGpuPoints() const;
+
+    // Upload per-point instance data (pos3 + color4 = 28 bytes) to pbuf_. Lazy;
+    // no-op when clean and the point count is unchanged. Uncolored points get
+    // white so the shader's tint (the current draw color) shows through. Called
+    // from drawGpuPoints().
+    void uploadPointsToGpu() const {
+        if (static_cast<int>(vertices_.size()) != gpuPointCount_) {
+            pointGpuDirty_ = true;
+        }
+        if (!pointGpuDirty_) return;
+        if (vertices_.empty()) return;
+
+        const int n = static_cast<int>(vertices_.size());
+        const bool haveColor = hasColors() && colors_.size() >= vertices_.size();
+        pointPacked_.resize(static_cast<size_t>(n) * 7);
+        for (int i = 0; i < n; ++i) {
+            float* o = &pointPacked_[static_cast<size_t>(i) * 7];
+            o[0] = vertices_[i].x; o[1] = vertices_[i].y; o[2] = vertices_[i].z;
+            if (haveColor) {
+                o[3] = colors_[i].r; o[4] = colors_[i].g;
+                o[5] = colors_[i].b; o[6] = colors_[i].a;
+            } else {
+                o[3] = 1.0f; o[4] = 1.0f; o[5] = 1.0f; o[6] = 1.0f;
+            }
+        }
+
+        if (pbuf_.id != 0) { sg_destroy_buffer(pbuf_); pbuf_ = {}; }
+        sg_buffer_desc pbd = {};
+        pbd.data.ptr  = pointPacked_.data();
+        pbd.data.size = pointPacked_.size() * sizeof(float);
+        pbd.label = "tc_mesh_point_vbuf";
+        pbuf_ = sg_make_buffer(&pbd);
+        gpuPointCount_ = n;
+        pointGpuDirty_ = false;
+    }
+
     // Accessors used by PbrPipeline
     sg_buffer getGpuVertexBuffer() const { return vbuf_; }
     sg_buffer getGpuIndexBuffer() const { return ibuf_; }
     int getGpuVertexCount() const { return gpuVertexCount_; }
     int getGpuIndexCount() const { return gpuIndexCount_; }
+
+    // Accessors used by PointPipeline
+    sg_buffer getGpuPointBuffer() const { return pbuf_; }
+    int getGpuPointCount() const { return gpuPointCount_; }
 
 private:
     void releaseGpuBuffers() const {
@@ -1081,9 +1145,15 @@ private:
             sg_destroy_buffer(ibuf_);
             ibuf_ = {};
         }
+        if (pbuf_.id != 0) {
+            sg_destroy_buffer(pbuf_);
+            pbuf_ = {};
+        }
         gpuVertexCount_ = 0;
         gpuIndexCount_ = 0;
         gpuDirty_ = true;
+        gpuPointCount_ = 0;
+        pointGpuDirty_ = true;
     }
 
     PrimitiveMode mode_;
@@ -1101,6 +1171,13 @@ private:
     mutable int gpuVertexCount_{0};
     mutable int gpuIndexCount_{0};
     mutable bool gpuDirty_{true};
+
+    // GPU instance buffer for the point-splat path (PrimitiveMode::Points).
+    // Packs pos(3) + color(4) per point; independent of the PBR buffers above.
+    mutable sg_buffer pbuf_{};
+    mutable int gpuPointCount_{0};
+    mutable bool pointGpuDirty_{true};
+    mutable std::vector<float> pointPacked_;   // reused scratch for the upload
 };
 
 // Out-of-line: needs the complete Mesh type. Builds a flat (z=0) filled mesh from

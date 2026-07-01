@@ -13,8 +13,7 @@
 #include "tc/utils/tcMCP.h"
 #include "tc/utils/tcLog.h"
 
-namespace trussc {
-namespace imgui_tools {
+namespace tcx::imgui {
 
 // ---------------------------------------------------------------------------
 // Widget lookup helpers
@@ -134,7 +133,7 @@ inline void registerImGuiTools() {
     enableCollection();
 
     // imgui_get_widgets — list all widgets
-    mcp::tool("imgui_get_widgets", "List ImGui widgets with labels, types, and positions")
+    tc::mcp::tool("imgui_get_widgets", "List ImGui widgets with labels, types, and positions")
         .arg<std::string>("window", "Filter by window name (optional, omit for all)", false)
         .bind(std::function<json(const json&)>([](const json& args) -> json {
             std::string window = args.value("window", "");
@@ -177,7 +176,7 @@ inline void registerImGuiTools() {
         }));
 
     // imgui_click — click a widget by label
-    mcp::tool("imgui_click", "Click an ImGui widget by label")
+    tc::mcp::tool("imgui_click", "Click an ImGui widget by label")
         .arg<std::string>("label", "Widget label text")
         .arg<std::string>("window", "Window name (optional, required if label is ambiguous)", false)
         .bind(std::function<json(const json&)>([](const json& args) -> json {
@@ -199,7 +198,7 @@ inline void registerImGuiTools() {
         }));
 
     // imgui_input — set the value of an input/slider/drag widget
-    mcp::tool("imgui_input", "Set the value of an ImGui widget: text inputs, and numeric entry on slider/drag widgets")
+    tc::mcp::tool("imgui_input", "Set the value of an ImGui widget: text inputs, and numeric entry on slider/drag widgets")
         .arg<std::string>("label", "Widget label")
         .arg<std::string>("text", "Replacement text (or numeric value for slider/drag)")
         .arg<std::string>("window", "Window name (optional)", false)
@@ -224,7 +223,7 @@ inline void registerImGuiTools() {
         }));
 
     // imgui_checkbox — toggle or set a checkbox
-    mcp::tool("imgui_checkbox", "Toggle an ImGui checkbox")
+    tc::mcp::tool("imgui_checkbox", "Toggle an ImGui checkbox")
         .arg<std::string>("label", "Checkbox label")
         .arg<bool>("value", "Desired state (true/false)", false)
         .arg<std::string>("window", "Window name (optional)", false)
@@ -263,8 +262,16 @@ inline void registerImGuiTools() {
             };
         }));
 
-    logNotice() << "[MCP] ImGui tools registered (imgui_get_widgets, imgui_click, imgui_input, imgui_checkbox)";
+    tc::logNotice() << "[MCP] ImGui tools registered (imgui_get_widgets, imgui_click, imgui_input, imgui_checkbox)";
 }
 
-} // namespace imgui_tools
-} // namespace trussc
+} // namespace tcx::imgui
+
+// -----------------------------------------------------------------------------
+// Backward compatibility: tcxImGui's integration helpers historically lived in
+// `trussc::imgui_tools`. Canonical is now `tcx::imgui`. DEPRECATED — removed in v1.0.0.
+// (No [[deprecated]]: under `using namespace tc;` it would warn on idiomatic use.)
+// -----------------------------------------------------------------------------
+namespace trussc { namespace imgui_tools { // deprecated: remove at v1.0.0
+using tcx::imgui::registerImGuiTools;   // one per public symbol
+} }  // namespace trussc::imgui_tools

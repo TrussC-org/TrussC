@@ -7,7 +7,7 @@
 
 using namespace std;
 
-namespace trussc {
+namespace tcx::obj {
 
 // =============================================================================
 // Load
@@ -228,4 +228,4 @@ void ObjLoader::computeNormals(Mesh& mesh) {
     }
 }
 
-} // namespace trussc
+} // namespace tcx::obj

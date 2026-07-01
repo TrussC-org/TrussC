@@ -18,7 +18,9 @@
 
 #include <chrono>
 
-namespace tcx {
+namespace tcx::midi {
+
+using namespace tc;
 
 class MidiClock {
 public:
@@ -79,4 +81,6 @@ private:
     std::chrono::steady_clock::time_point timestamp_;  // last tick time
 };
 
-}  // namespace tcx
+}  // namespace tcx::midi
+
+namespace tcx { using midi::MidiClock; } // deprecated: remove at v1.0.0

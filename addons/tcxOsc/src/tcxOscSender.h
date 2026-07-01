@@ -6,7 +6,7 @@
 #include <vector>
 #include <algorithm>
 
-namespace tcx {
+namespace tcx::osc {
 
 // =============================================================================
 // OscSender - OSC sender class (multi-destination, sendTo-based)
@@ -162,11 +162,10 @@ private:
     std::vector<Destination> destinations_;
 };
 
-}  // namespace tcx
+}  // namespace tcx::osc
 
 // -----------------------------------------------------------------------------
 // Backward compatibility: see tcxOscMessage.h. DEPRECATED — removed in v1.0.0.
 // -----------------------------------------------------------------------------
-namespace trussc {
-using tcx::OscSender;
-}  // namespace trussc
+namespace tcx    { using osc::OscSender; } // deprecated: remove at v1.0.0
+namespace trussc { using tcx::osc::OscSender; } // deprecated: remove at v1.0.0

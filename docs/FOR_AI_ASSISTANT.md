@@ -715,6 +715,23 @@ light.setLensShift(0.0f, 1.0f);                            // Projector lens shi
 light.setIesProfile(&iesProfile);                           // Photometric profile
 ```
 
+### How do I draw a point cloud / lots of points fast?
+
+Put the points in a `Mesh` with `PrimitiveMode::Points` and call `draw()`. A Points-mode mesh is **GPU-resident**: the positions + per-vertex colors are uploaded to a GPU buffer once and drawn with a single draw call, so the per-frame CPU cost is ~constant no matter how many points (millions are fine). Build the cloud once — only rebuild (or `markGpuDirty()`) when the data actually changes, not every frame.
+
+```cpp
+Mesh cloud;
+cloud.setMode(PrimitiveMode::Points);
+for (...) { cloud.addVertex(p); cloud.addColor(c); }   // build once
+
+// in draw():
+setPointSize(8.0f);                 // draw state, logical px (like strokeWeight)
+setPointStyle(PointStyle::Round);   // Square | Round | Pixel
+cloud.draw();                       // GPU-resident, one draw call
+```
+
+`PointStyle` controls the shape only (all are GPU-resident): `Square` and `Round` are billboarded splats sized by `setPointSize()` (`Round` is anti-aliased via alpha-to-coverage); `Pixel` is a true 1px GPU point primitive (ignores size). `setPointSize` / `setPointStyle` are draw state wrapped by `pushStyle`/`popStyle`. Points share the 3D depth buffer, so they occlude and are occluded correctly. See `examples/3d/pointCloudExample`.
+
 ### How do I use IBL (environment lighting / reflections)?
 
 Environment-based lighting — metal reflections and ambient — uses IBL. Load an `Environment` and call `setEnvironment()`:
@@ -858,7 +875,7 @@ TrussC uses **`shared_ptr` / `weak_ptr` throughout**. Create nodes with `make_sh
 
 ### How do addons (ofxXxx) and addons.make compare?
 
-Very similar. The prefix is **`ofx` → `tcx`**, the namespace is **`tcx::`** (e.g. `tcxBox2d` contains `tcx::box2d::World`). You add one **addon name per line in `addons.make`** (as in oF), or `trusscli addon add tcxOsc`. The big difference is **automatic dependency resolution** — if `tcxA` depends on `tcxB`, just list `tcxA` and `tcxB` links automatically (oF needed manual ordering in addons.make). The projectGenerator becomes `trusscli` (GUI included).
+Very similar. The prefix is **`ofx` → `tcx`**, the namespace is **`tcx::<addonname>`** — a sub-namespace per addon (e.g. `tcxBox2d` contains `tcx::box2d::World`), so addon types never clash. Opt in with `using namespace tcx::box2d;` (or `using namespace tcx;` then `box2d::World`). You add one **addon name per line in `addons.make`** (as in oF), or `trusscli addon add tcxOsc`. The big difference is **automatic dependency resolution** — if `tcxA` depends on `tcxB`, just list `tcxA` and `tcxB` links automatically (oF needed manual ordering in addons.make). The projectGenerator becomes `trusscli` (GUI included).
 
 ### What's the equivalent of oF's projectGenerator? (trusscli GUI)
 
@@ -1024,7 +1041,7 @@ Signals that many unrelated listeners across the app need belong in a Meyers-sin
 
 ### What is an addon and how do I use one?
 
-An addon is a reusable module (`tcx` + PascalCase: headers + sources + examples) placed under `addons/`. Its namespace is `tcx::` (core is `tc::`). To use one, just list its name, one per line, in your project's `addons.make`:
+An addon is a reusable module (`tcx` + PascalCase: headers + sources + examples) placed under `addons/`. Its namespace is `tcx::<addonname>` — a sub-namespace per addon (e.g. `tcx::osc`, `tcx::box2d`; core is `tc::`). To use one, just list its name, one per line, in your project's `addons.make`:
 ```
 tcxBox2d
 tcxOsc
@@ -1034,6 +1051,15 @@ CMake's `trussc_app()` reads `addons.make` and auto-links each addon (`use_addon
 ### What's the minimal addon?
 
 To just make it work, **`src/` is all you need.** Put `src/tcxMyAddon.h` (and `.cpp` if needed) under `addons/tcxMyAddon/`, list `tcxMyAddon` in the consuming project's `addons.make`, and it works. **You don't write build config (`CMakeLists.txt`)** — TrussC auto-collects `src/`・`libs/*/`, wires include paths, and links against TrussC (a header-only addon with no sources becomes an `INTERFACE` target). Class in `namespace tcx::myaddon { ... }`, files named `tcxXxx.h / .cpp`. You only add your own `CMakeLists.txt` for what auto-collection can't do: FetchContent, special flags, codegen, platform-specific linking. To ship a runtime DLL / dylib / metallib, use `tc_addon_bundle_file(<path>)`.
+
+### What namespace does an addon live in? (tcx::<addonname>)
+
+Each addon gets its **own sub-namespace** under `tcx`: `tcxOsc` → `tcx::osc`, `tcxBox2d` → `tcx::box2d`. This isolates types, so two addons can each define a `World` / `Client` / `Message` without clashing. Use it either way:
+```cpp
+using namespace tcx;          // then qualify by addon:  osc::Receiver
+using namespace tcx::osc;     // then bare:              Receiver
+```
+(Core stays `tc::`.) Migrating an addon that shipped as flat `tcx::` or legacy `trussc::`? Move the types into `tcx::<addonname>` and add temporary silent compat aliases (`namespace tcx { using osc::Foo; }`) until v1.0.0 — see `tcxOsc` and `addons/tcxTemplate` for the pattern.
 
 ### How do I publish/distribute my addon?
 
@@ -1151,6 +1177,102 @@ listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
 });
 ```
 
+## Enums (compile-time reflection)
+
+TrussC reflects plain `enum class` at compile time (magic_enum-style), so enum-to-string is free — no hand-written `switch`. This powers JSON dumps (enums serialize as their label) and the inspector's labeled combo boxes.
+
+### How do I get the string name of an enum value? (enumLabel)
+
+Call `enumLabel(value)` — it returns the enumerator name as a `const char*`. For a normal contiguous `enum class` you write nothing extra:
+```cpp
+enum class Tool { Brush, Eraser, Fill };
+
+logNotice() << enumLabel(Tool::Eraser);     // "Eraser"
+
+for (auto v : enumValues<Tool>())           // iterate every value (e.g. build a dropdown)
+    logNotice() << enumLabel(v);            // Brush, Eraser, Fill
+```
+`enumNames<E>()` / `enumValues<E>()` give parallel compile-time arrays of all valid enumerators. The auto-scan window is `[-128,128]` (extend with `TC_ENUM_AUTOLABEL_MAX`).
+
+### How do I set custom display labels for an enum? (TC_ENUM_LABELS)
+
+Put `TC_ENUM_LABELS` right after the enum, in the same namespace, to override the strings (e.g. prettier UI text):
+```cpp
+enum class Quality { Low, Medium, High };
+TC_ENUM_LABELS(Quality, "Low (fast)", "Medium", "High (slow)")
+
+logNotice() << enumLabel(Quality::High);    // "High (slow)"
+```
+Without the macro you still get the raw enumerator names, so only add it when you want labels different from the C++ identifiers.
+
+## Strings & numbers
+
+### How do I format a number as a string? (toString, not std::to_string)
+
+Don't reach for `std::to_string` or a `stringstream` — TrussC has **`toString`** (like oF's `ofToString`), with optional precision and padding:
+```cpp
+string fps = toString(getFrameRate(), 1);          // "59.9"  (1 decimal)
+drawBitmapString("FPS: " + toString(getFrameRate(), 1), 10, 10);
+
+toString(6.28318, 2);          // "6.28"   (precision)
+toString(42, 5, '0');          // "00042"  (width, fill)
+toString(vector<int>{1,2,3});  // "{1, 2, 3}"
+```
+Reverse (string → value): `toInt(s)` / `toInt64(s)` / `toFloat(s)` / `toDouble(s)` / `toBool(s)` (`"true"`/`"1"`/`"yes"` → true).
+
+## Logging
+
+Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`.
+
+### How do I write logs to a file? (getLogger + setLogFile)
+
+Get the global logger (it's a reference — use `auto&`), point it at a file, and optionally raise the file level to keep the file small. `getTimestampString()` makes a filename-safe unique name (no colons):
+```cpp
+auto& logger = getLogger();
+logger.setLogFile("app-" + getTimestampString() + ".log");   // unique per run
+logger.setFileLogLevel(LogLevel::Notice);                    // drop Verbose to shrink the file
+logNotice("App") << "started";
+```
+**Watch the volume:** logging every frame (or any hot loop) can grow the file to gigabytes per day and fill the disk. Filter with `setFileLogLevel` and don't log in tight loops.
+
+### How do I hook every log line? (onLog event)
+
+`onLog` is an `Event<LogEventArgs>`, so subscribe with `.listen(...)` (not `+=`), and keep the returned `EventListener`:
+```cpp
+EventListener logTap_ = getLogger().onLog.listen([](LogEventArgs& e) {
+    // e.timestamp / e.level / e.message — e.g. forward to the network
+});
+```
+
+## Window & fullscreen
+
+### How do I go fullscreen / span multiple displays?
+
+Normally `setFullscreen(true)` (or `WindowSettings().setFullscreen(true)`) is all you need. To span several displays you make a **borderless window** and place + size it yourself:
+```cpp
+setWindowDecorated(false);     // borderless (no title bar / frame)
+setWindowPosition(0, 0);       // top-left; macOS / Windows only (no-op elsewhere)
+setWindowSize(spanW, spanH);   // you supply the combined size — see caveats
+```
+Caveats: TrussC has **no display-enumeration API** (`getScreenSize` / `getDisplays` / `Monitor` don't exist; `getFramebufferWidth/Height` is the window, not the whole desktop), so you must know `spanW/spanH` yourself (or combine displays via a GPU/OS utility). `(0,0)` depends on **which display is primary**. On **macOS** you must turn **off** Mission Control's *"Displays have separate Spaces"* or one window can't cover multiple displays.
+
+## Console / CLI apps
+
+### How do I make a console / CLI app (and optionally open a GUI)?
+
+There's no framework arg API — handle raw `argc`/`argv` in `main()`. A common shape (this is how `trusscli` itself works) launches the **GUI when given no arguments** and dispatches subcommands otherwise, returning an exit code:
+```cpp
+int main(int argc, char** argv) {
+    vector<string> args(argv + 1, argv + argc);
+    if (args.empty())
+        return runApp<MyGuiApp>(WindowSettings().setTitle("My Tool"));  // no args → GUI
+    if (args[0] == "build") return cmdBuild(args);                      // subcommand
+    logError() << "unknown command";
+    return 1;                                                            // exit code
+}
+```
+If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp()` (immediate) / `requestExitApp()` (cancellable).
+
 ## "I want to X" — which API?
 
 ### "I want to save / load / communicate" → which API?
@@ -1165,6 +1287,10 @@ listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
 - File picker dialog: `loadDialog()` / `saveDialog()` (→ `FileDialogResult`)
 - Receive dropped files: `events().filesDropped` (`DragDropEventArgs`)
 - Clipboard: `setClipboardString(text)` (paste arrives via the `clipboardPasted` event)
+- Number → string: `toString(value[, precision])` (oF `ofToString`; reverse: `toInt` / `toFloat` / `toBool`)
+- Enum ↔ string: `enumLabel(value)` / iterate with `enumValues<E>()` (custom labels: `TC_ENUM_LABELS`)
+- Log to a file: `getLogger().setLogFile(path)` (unique name: `getTimestampString()`; hook all lines: `onLog.listen`)
+- CLI / console app: handle `argc`/`argv` in `main()` (no framework arg API); no args → `runApp<Gui>()`; headless loop → `runHeadlessApp<App>()`
 
 ### "Window / media / basics" → which API?
 
@@ -1176,6 +1302,7 @@ listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
 - Random / noise: `random()` / `noise()` / `signedNoise()`
 - Time (elapsed seconds): `getElapsedTime()` (double) / frame rate: `getFrameRate()`
 - Delay / repeat: `callAfter()` / `callEvery()` (main-thread, synchronous)
+- Fullscreen / borderless span: `setFullscreen(true)` / `setWindowDecorated(false)`+`setWindowPosition(0,0)`+`setWindowSize(w,h)` (no multi-display enumeration API; macOS: turn off "Displays have separate Spaces")
 
 ## AI-native (MCP)
 
@@ -1272,6 +1399,8 @@ Color getColor()  // Get current fill color
 CurveStyle::Mode getCurveMode()  // Current curve tessellation mode (fixed segment count vs. adaptive tolerance)
 int getCurveResolution()  // Get current curve resolution
 float getCurveTolerance()  // Get current curve tessellation tolerance (in pixels)
+float getPointSize()  // Get the current point size (logical px).
+PointStyle getPointStyle()  // Get the current point shape (PointStyle).
 StrokeCap getStrokeCap()  // Get current stroke cap style
 StrokeJoin getStrokeJoin()  // Get current stroke join style
 float getStrokeWeight()  // Get current stroke width
@@ -1289,6 +1418,8 @@ void setBlendMode(BlendMode mode)  // Set blend mode. BlendMode::Alpha (default)
 void setCircleResolution(int res) ⚠️deprecated  // Deprecated alias for setCurveResolution()
 void setCurveResolution(int n)  // Set fixed curve segment count (switches off adaptive tolerance mode)
 void setCurveTolerance(float pixels)  // Set adaptive curve tessellation tolerance in pixels (smaller = smoother, scale-aware)
+void setPointSize(float px)  // Set the point size in logical pixels (Square/Round point styles; Pixel is always 1px).
+void setPointStyle(PointStyle s)  // Set the point shape: PointStyle::Square, Round or Pixel.
 void setScissor(float x, float y, float w, float h) [+1]  // Set scissor clipping rectangle. Also available via RectNode::setClipping(true)
 void setStrokeCap(StrokeCap cap)  // Set stroke cap style (Butt, Round, Square)
 void setStrokeJoin(StrokeJoin join)  // Set stroke join style (Miter, Round, Bevel)
@@ -2597,16 +2728,19 @@ Mesh & Mesh::clearTangents()  // Remove all tangents
 Mesh & Mesh::clearTexCoords()  // Clear texture coordinates only
 Mesh & Mesh::clearVertices()  // Clear vertices only
 void Mesh::draw() const [+2]  // Draw the mesh
-void Mesh::drawGpuPbr() const  // Draw the mesh through the GPU PBR pipeline (uploads to GPU buffers as needed, then renders using active lights, material and environment)
+void Mesh::drawGpuPbr() const  // Draw the mesh through the GPU PBR pipeline (retained GPU buffer + active lights, material and environment).
+void Mesh::drawGpuPoints() const  // Draw a Points-mode mesh as a GPU-resident point cloud (Square/Round splats or 1px Pixel points).
 void Mesh::drawNoLighting() const  // Draw the mesh without lighting
 void Mesh::drawNoLightingWithTexture(const Texture & texture) const  // Draw the mesh textured without lighting
 void Mesh::drawWireframe() const  // Draw mesh as wireframe
 void Mesh::drawWithLighting() const  // Draw the mesh with lighting
 std::vector<Color> & Mesh::getColors() [+1]  // Get all vertex colors
-sg_buffer Mesh::getGpuIndexBuffer() const  // Return the underlying sokol-gfx index buffer handle (advanced interop).
-int Mesh::getGpuIndexCount() const  // Number of indices currently uploaded to the GPU
-sg_buffer Mesh::getGpuVertexBuffer() const  // Return the underlying sokol-gfx vertex buffer handle (advanced interop).
-int Mesh::getGpuVertexCount() const  // Number of vertices currently uploaded to the GPU
+sg_buffer Mesh::getGpuIndexBuffer() const  // The sokol-gfx index buffer handle backing the mesh, or an empty handle if non-indexed (advanced interop).
+int Mesh::getGpuIndexCount() const  // Number of indices currently uploaded to the GPU index buffer (0 if the mesh is non-indexed). Pairs with getGpuIndexBuffer for custom rendering.
+sg_buffer Mesh::getGpuPointBuffer() const  // The sokol-gfx buffer handle holding the uploaded point data, position + color per point (advanced interop).
+int Mesh::getGpuPointCount() const  // Number of points currently uploaded to the GPU point buffer (PrimitiveMode::Points). Pairs with getGpuPointBuffer for custom rendering.
+sg_buffer Mesh::getGpuVertexBuffer() const  // The sokol-gfx vertex buffer handle backing the mesh (advanced interop).
+int Mesh::getGpuVertexCount() const  // Number of vertices currently uploaded to the GPU vertex buffer. Pairs with getGpuVertexBuffer (e.g. as the draw count for a custom pipeline).
 std::vector<unsigned int> & Mesh::getIndices() [+1]  // Get all indices
 PrimitiveMode Mesh::getMode() const  // Get current primitive mode
 Vec3 Mesh::getNormal(size_t index) const  // Get normal at index
@@ -2635,7 +2769,8 @@ Mesh & Mesh::setMode(PrimitiveMode mode)  // Set primitive mode (Triangles, Line
 Mesh & Mesh::setNormal(size_t index, const Vec3 & n)  // Set normal at index
 Mesh & Mesh::transform(const Mat4 & m)  // Apply transformation matrix
 Mesh & Mesh::translate(float x, float y, float z) [+1]  // Translate all vertices
-void Mesh::uploadToGpu() const  // Upload mesh data to GPU buffers now
+void Mesh::uploadPointsToGpu() const  // Upload the point cloud (positions + colors) to its GPU buffer now (for the Points / custom-render path).
+void Mesh::uploadToGpu() const  // Upload the mesh's vertex/index data to its GPU buffers now (for the PBR / custom-render path).
 ```
 
 ### MicInput — Microphone capture (miniaudio). Opens an input device and exposes the latest samples through a ring buffer. Use the global getMicInput() to access the shared instance, then start() it; getMicAnalysisBuffer() is a convenience wrapper over getBuffer().
@@ -3769,6 +3904,7 @@ enum MixMode { Auto, DownmixMono }  // Sound channel mixing: Auto (match the out
 enum MouseButton { Left, Right, Middle, None }  // Mouse button: Left, Right, Middle, or None.
 enum Orientation { Portrait, PortraitUpsideDown, LandscapeLeft, LandscapeRight, Landscape, All, AllButUpsideDown }  // Screen orientation mask passed to setOrientation (iOS/Android); values are bit flags and can be combined with |
 enum PixelFormat { U8, F32 }  // CPU pixel data format: U8 (8-bit) or F32 (float).
+enum PointStyle { Square, Round, Pixel }  // Shape used to draw points: Square, Round, Pixel.
 enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Draw primitive mode: Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points.
 enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Geometry primitive type: Points, Lines, LineStrip, Triangles, TriangleStrip, Quads.
 enum SoundSource::Kind { Eager, Stream }  // Source kind tag on SoundSource, letting the mixer dispatch without a per-frame virtual call: Eager (SoundBuffer, full PCM in RAM) vs Stream (SoundStream, decoded on demand).

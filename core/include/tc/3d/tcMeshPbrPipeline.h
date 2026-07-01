@@ -57,7 +57,8 @@ inline std::vector<DeferredPbrDraw> deferredPbrDraws;
 // FBO context on every mesh (O(N^2)) and overflowed the per-frame uniform buffer
 // once enough meshes were in flight.
 inline std::vector<DeferredPbrDraw> fboPbrDraws;
-inline int fboLayerNext = 0;
+// fboLayerNext (the shared FBO-pass layer counter) is declared in
+// tcMeshPointPipeline.h, which is included before this file.
 
 class PbrPipeline {
 public:
@@ -692,8 +693,14 @@ inline void flushFboDeferredPbr(sgl_context ctx) {
         for (auto& d : fboPbrDraws) {
             if (d.layerId == layer) getPbrPipeline().executePbrDraw(d.cmd);
         }
+        // Point splats share this FBO's layer space (fboLayerNext); replay them
+        // in the same walk so they composite in submission order with PBR + 2D.
+        for (auto& d : fboPointDraws) {
+            if (d.layerId == layer) executePointDraw(d.cmd);
+        }
     }
     fboPbrDraws.clear();
+    fboPointDraws.clear();
     fboLayerNext = 0;
 }
 

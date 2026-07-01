@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-namespace tcx {
+namespace tcx::depthrecord {
 
 using namespace tc;
 
@@ -159,4 +159,9 @@ private:
     std::vector<std::uint8_t> scratch_;
 };
 
-} // namespace tcx
+} // namespace tcx::depthrecord
+
+// Backward compatibility: silent flat-`tcx::` alias (DEPRECATED).
+namespace tcx { // deprecated: remove at v1.0.0
+    using depthrecord::PlaybackDepthCamera;
+}
