@@ -1181,7 +1181,10 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
                             dst[dstIdx + 0] = src[srcIdx + 2]; // R <- B
                             dst[dstIdx + 1] = src[srcIdx + 1]; // G <- G
                             dst[dstIdx + 2] = src[srcIdx + 0]; // B <- R
-                            dst[dstIdx + 3] = src[srcIdx + 3]; // A <- A
+                            // RGB32 from the source reader is BGRX: the 4th byte
+                            // is undefined padding, not alpha. Force opaque so the
+                            // extracted frame isn't fully transparent.
+                            dst[dstIdx + 3] = 255;             // A = opaque
                         }
                         dst += rowBytes;
                     }
