@@ -1412,10 +1412,15 @@ std::string VideoPlayer::getHwAccelNamePlatform() const {
     return "none";
 }
 
-bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
-                                       float timeSec, float* outDuration) {
-    // Standalone single-frame decode: own format/codec/scaler contexts, plain
-    // software decode (no HW device), independent of any playback instance.
+// Standalone single-frame decode: own format/codec/scaler contexts, plain
+// software decode (no HW device), independent of any playback instance.
+//
+// When `exact` is true we seek to the preceding keyframe then decode forward
+// until a frame's pts reaches timeSec (the frame shown at that time). When
+// false we return the first frame after the seek — the nearest keyframe at or
+// before timeSec — which skips the forward decode and is faster.
+static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
+                                    float timeSec, float* outDuration, bool exact) {
     AVFormatContext* fmtCtx = nullptr;
     if (avformat_open_input(&fmtCtx, path.c_str(), nullptr, nullptr) < 0) return false;
     if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
@@ -1471,21 +1476,41 @@ bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixel
         avcodec_flush_buffers(codecCtx);
     }
 
-    // Decode until we get the first frame.
+    // Returns true once `frame` holds the frame we want to keep: for keyframe
+    // mode that is the first decoded frame, for exact mode the first frame at
+    // or after timeSec (frames before it are decoded then overwritten).
+    const double tb = av_q2d(videoStream->time_base);
+    auto isTargetFrame = [&](AVFrame* f) -> bool {
+        if (!exact) return true;
+        int64_t pts = (f->best_effort_timestamp != AV_NOPTS_VALUE)
+                          ? f->best_effort_timestamp
+                          : f->pts;
+        double ftime = (pts == AV_NOPTS_VALUE) ? 0.0 : pts * tb;
+        return ftime >= (double)timeSec;
+    };
+
+    // Decode forward until we reach the target frame (or exhaust the stream).
     AVFrame* frame = av_frame_alloc();
     AVPacket* pkt  = av_packet_alloc();
-    bool got = false;
-    while (!got && av_read_frame(fmtCtx, pkt) >= 0) {
+    bool got = false, reached = false;
+    while (!reached && av_read_frame(fmtCtx, pkt) >= 0) {
         if (pkt->stream_index == videoIdx &&
             avcodec_send_packet(codecCtx, pkt) == 0) {
-            if (avcodec_receive_frame(codecCtx, frame) == 0) got = true;
+            while (avcodec_receive_frame(codecCtx, frame) == 0) {
+                got = true;
+                if (isTargetFrame(frame)) { reached = true; break; }
+            }
         }
         av_packet_unref(pkt);
     }
-    // Flush the decoder if nothing came out during the read loop.
-    if (!got) {
+    // Flush the decoder for any frames still buffered (also covers the case
+    // where the target time lands past the last packet).
+    if (!reached) {
         avcodec_send_packet(codecCtx, nullptr);
-        if (avcodec_receive_frame(codecCtx, frame) == 0) got = true;
+        while (avcodec_receive_frame(codecCtx, frame) == 0) {
+            got = true;
+            if (isTargetFrame(frame)) break;
+        }
     }
 
     bool ok = false;
@@ -1512,6 +1537,20 @@ bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixel
     avcodec_free_context(&codecCtx);
     avformat_close_input(&fmtCtx);
     return ok;
+}
+
+bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
+                                       float timeSec, float* outDuration) {
+    return tcv_extract_frame_linux(path, outPixels, timeSec, outDuration, /*exact=*/true);
+}
+
+bool VideoPlayer::extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
+                                          float timeSec, float* outDuration) {
+    if (tcv_extract_frame_linux(path, outPixels, timeSec, outDuration, /*exact=*/false)) {
+        return true;
+    }
+    // No keyframe reachable — fall back to an exact decode.
+    return tcv_extract_frame_linux(path, outPixels, timeSec, outDuration, /*exact=*/true);
 }
 
 } // namespace trussc

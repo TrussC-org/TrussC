@@ -865,8 +865,12 @@ std::string VideoPlayer::getHwAccelNamePlatform() const {
 // Static frame extraction (thread-safe, no GPU)
 // =============================================================================
 
-bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
-                                       float timeSec, float* outDuration) {
+// Shared implementation for both extract paths. When `exact` is true we ask
+// AVAssetImageGenerator for the frame displayed at the exact time (tolerance
+// zero); when false we allow it to return the nearest keyframe at or before the
+// requested time (tolerance-before = infinity), which is faster.
+static bool tcv_extract_frame_mac(const std::string& path, Pixels& outPixels,
+                                  float timeSec, float* outDuration, bool exact) {
     @autoreleasepool {
         NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
         if (!url) return false;
@@ -890,8 +894,16 @@ bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixel
 
         AVAssetImageGenerator* generator = [AVAssetImageGenerator assetImageGeneratorWithAsset:asset];
         generator.appliesPreferredTrackTransform = YES;
-        generator.requestedTimeToleranceBefore = kCMTimeZero;
-        generator.requestedTimeToleranceAfter  = kCMTimeZero;
+        if (exact) {
+            // Frame-accurate: no tolerance either way.
+            generator.requestedTimeToleranceBefore = kCMTimeZero;
+            generator.requestedTimeToleranceAfter  = kCMTimeZero;
+        } else {
+            // Nearest keyframe at or before timeSec: allow snapping backwards,
+            // never forward. Seek-only, so it is fast but time-approximate.
+            generator.requestedTimeToleranceBefore = kCMTimePositiveInfinity;
+            generator.requestedTimeToleranceAfter  = kCMTimeZero;
+        }
 
         CMTime requestTime = CMTimeMakeWithSeconds(timeSec, NSEC_PER_SEC);
         NSError* error = nil;
@@ -922,6 +934,20 @@ bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixel
 
         return true;
     }
+}
+
+bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
+                                       float timeSec, float* outDuration) {
+    return tcv_extract_frame_mac(path, outPixels, timeSec, outDuration, /*exact=*/true);
+}
+
+bool VideoPlayer::extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
+                                          float timeSec, float* outDuration) {
+    if (tcv_extract_frame_mac(path, outPixels, timeSec, outDuration, /*exact=*/false)) {
+        return true;
+    }
+    // No keyframe reachable — fall back to an exact decode.
+    return tcv_extract_frame_mac(path, outPixels, timeSec, outDuration, /*exact=*/true);
 }
 
 } // namespace trussc

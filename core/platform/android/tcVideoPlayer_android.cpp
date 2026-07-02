@@ -52,6 +52,12 @@ bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixel
     return false;
 }
 
+bool VideoPlayer::extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
+                                          float timeSec, float* outDuration) {
+    (void)path; (void)outPixels; (void)timeSec; (void)outDuration;
+    return false;
+}
+
 } // namespace trussc
 
 #endif // __ANDROID__

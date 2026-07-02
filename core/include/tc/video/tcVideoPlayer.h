@@ -66,6 +66,10 @@ public:
             return false;
         }
 
+        // Remember the resolved path so instance-level frame extraction
+        // (extractFrame / extractKeyFrame with no path arg) and getPath() work.
+        sourcePath_ = resolvedPath;
+
         // Create texture(s) for per-frame updates
         if (width_ > 0 && height_ > 0) {
             if (nv12Mode_) {
@@ -114,6 +118,7 @@ public:
         done_ = false;
         width_ = 0;
         height_ = 0;
+        sourcePath_.clear();
     }
 
     // =========================================================================
@@ -272,6 +277,11 @@ public:
     bool isUsingHwAccel() const override { return isUsingHwAccelPlatform(); }
     std::string getHwAccelName() const override { return getHwAccelNamePlatform(); }
 
+    /// Path of the currently loaded video file (empty string when not loaded).
+    /// This is the resolved path (relative paths passed to load() are resolved
+    /// via getDataPath).
+    const std::string& getPath() const { return sourcePath_; }
+
 protected:
     // -------------------------------------------------------------------------
     // Implementation methods
@@ -333,6 +343,10 @@ private:
     // Platform-specific handle
     void* platformHandle_ = nullptr;
 
+    // Resolved path of the currently loaded video (empty when not loaded).
+    // Used by getPath() and the instance-level frame-extraction overloads.
+    std::string sourcePath_;
+
     // -------------------------------------------------------------------------
     // Internal methods
     // -------------------------------------------------------------------------
@@ -358,6 +372,7 @@ private:
         nv12Mode_        = other.nv12Mode_;
         nv12ShaderHandle_ = other.nv12ShaderHandle_;
         platformHandle_  = other.platformHandle_;
+        sourcePath_      = std::move(other.sourcePath_);
 
         other.pixels_    = nullptr;
         other.pixelsY_   = nullptr;
@@ -418,10 +433,22 @@ private:
     std::string getHwAccelNamePlatform() const;
 
     // =========================================================================
-    // Static utility — frame extraction (thread-safe, no GPU required)
+    // Frame extraction (thread-safe, no GPU required)
+    //
+    // extractFrame    — the EXACT frame displayed at timeSec. Seeks to the
+    //                   preceding keyframe then decodes forward to timeSec.
+    //                   Slightly heavier, but frame-accurate on every platform.
+    // extractKeyFrame — the NEAREST keyframe at or before timeSec. Seek only,
+    //                   no forward decode, so it is faster but time-approximate.
+    //                   Falls back to an exact decode if no keyframe is reachable.
+    //
+    // Both come in a static form (give a path, no load() needed — good for
+    // thumbnails) and an instance form (uses the currently loaded getPath()).
+    // These are single-shot helpers: do NOT use them for continuous playback
+    // (each call opens its own decode context). For playback use load()/play().
     // =========================================================================
 public:
-    /// Extract a single frame as RGBA pixels from a video file.
+    /// Extract the exact frame at a time from a video file (static).
     /// @param path      Video file path
     /// @param outPixels Receives the extracted frame (RGBA U8)
     /// @param timeSec   Time in seconds to extract from (default 1.0)
@@ -432,9 +459,39 @@ public:
         return extractFramePlatform(path, outPixels, timeSec, outDuration);
     }
 
+    /// Extract the nearest keyframe at or before a time (static, faster).
+    /// The returned frame's real time may be earlier than timeSec.
+    /// @param path      Video file path
+    /// @param outPixels Receives the extracted frame (RGBA U8)
+    /// @param timeSec   Upper-bound time in seconds (default 1.0)
+    /// @param outDuration If non-null, receives video duration in seconds
+    /// @return true on success
+    static bool extractKeyFrame(const std::string& path, Pixels& outPixels,
+                                float timeSec = 1.0f, float* outDuration = nullptr) {
+        return extractKeyFramePlatform(path, outPixels, timeSec, outDuration);
+    }
+
+    /// Extract the exact frame at a time from the currently loaded video
+    /// (instance). Returns false if no video is loaded.
+    bool extractFrame(Pixels& outPixels, float timeSec = 1.0f,
+                      float* outDuration = nullptr) const {
+        if (sourcePath_.empty()) return false;
+        return extractFramePlatform(sourcePath_, outPixels, timeSec, outDuration);
+    }
+
+    /// Extract the nearest keyframe at or before a time from the currently
+    /// loaded video (instance, faster). Returns false if no video is loaded.
+    bool extractKeyFrame(Pixels& outPixels, float timeSec = 1.0f,
+                         float* outDuration = nullptr) const {
+        if (sourcePath_.empty()) return false;
+        return extractKeyFramePlatform(sourcePath_, outPixels, timeSec, outDuration);
+    }
+
 private:
     static bool extractFramePlatform(const std::string& path, Pixels& outPixels,
                                      float timeSec, float* outDuration);
+    static bool extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
+                                        float timeSec, float* outDuration);
 
     // Allow platform implementations to access internals
     friend class internal::VideoPlayerPlatformAccess;

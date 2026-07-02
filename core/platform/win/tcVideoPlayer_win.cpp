@@ -1036,10 +1036,15 @@ std::string VideoPlayer::getHwAccelNamePlatform() const {
     return platformHandle_ ? "mediafoundation" : "none";
 }
 
-bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
-                                       float timeSec, float* outDuration) {
-    // Single-frame decode via IMFSourceReader (independent of the playback
-    // IMFMediaEngine path; runs on the calling thread, no GPU/D3D needed).
+// Shared single-frame decode via IMFSourceReader (independent of the playback
+// IMFMediaEngine path; runs on the calling thread, no GPU/D3D needed).
+//
+// When `exact` is true we seek to the preceding keyframe then read forward
+// until the sample timestamp reaches timeSec, yielding the exact frame shown at
+// that time. When false we return the first sample after the seek — the nearest
+// keyframe at or before timeSec — which is faster but time-approximate.
+static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
+                                  float timeSec, float* outDuration, bool exact) {
     if (!InitMediaFoundation()) {
         return false;
     }
@@ -1109,21 +1114,29 @@ bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixel
             PropVariantClear(&pos);
         }
 
-        // Read samples until we get a decoded frame (or hit end-of-stream).
+        // Read samples until we reach the target. In keyframe mode we stop at
+        // the first decoded sample after the seek. In exact mode we keep the
+        // latest decoded sample and read forward until its timestamp reaches
+        // timeSec (the frame actually displayed at that time).
+        const LONGLONG targetTicks = (LONGLONG)(timeSec * 10000000.0);
         ComPtr<IMFSample> sample;
         while (SUCCEEDED(hr)) {
             DWORD flags = 0;
+            LONGLONG llTimestamp = 0;
             ComPtr<IMFSample> s;
             hr = reader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0,
-                                    nullptr, &flags, nullptr, &s);
+                                    nullptr, &flags, &llTimestamp, &s);
             if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) {
-                break;
+                break;  // fall back to the last sample we retained, if any
             }
-            if (s) {
-                sample = s;
-                break;
+            if (!s) {
+                // No sample this iteration (e.g. a stream/format tick) — keep reading.
+                continue;
             }
-            // No sample this iteration (e.g. a stream/format tick) — keep reading.
+            sample = s;
+            if (!exact || llTimestamp >= targetTicks) {
+                break;  // keyframe: first sample; exact: reached the target time
+            }
         }
 
         // Resolve the actual output frame size and stride (may have changed
@@ -1182,6 +1195,20 @@ bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixel
 
     CloseMediaFoundation();
     return ok;
+}
+
+bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
+                                       float timeSec, float* outDuration) {
+    return tcv_extract_frame_win(path, outPixels, timeSec, outDuration, /*exact=*/true);
+}
+
+bool VideoPlayer::extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
+                                          float timeSec, float* outDuration) {
+    if (tcv_extract_frame_win(path, outPixels, timeSec, outDuration, /*exact=*/false)) {
+        return true;
+    }
+    // No keyframe reachable — fall back to an exact decode.
+    return tcv_extract_frame_win(path, outPixels, timeSec, outDuration, /*exact=*/true);
 }
 
 } // namespace trussc

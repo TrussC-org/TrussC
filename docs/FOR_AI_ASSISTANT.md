@@ -1129,7 +1129,7 @@ Encoder settings: `VideoRecordSettings`. Platforms: macOS / Windows / Linux / An
 
 ```cpp
 Pixels still; Texture stillTex;
-if (VideoPlayer::extractFrame(path, still, 0.0f) && still.getWidth() > 0) {
+if (VideoPlayer::extractKeyFrame(path, still, 0.0f) && still.getWidth() > 0) {
     stillTex.allocate(still.getWidth(), still.getHeight(), 4, TextureUsage::Stream);
     stillTex.loadData(still.getData(), still.getWidth(), still.getHeight(), 4);
 }
@@ -1139,7 +1139,25 @@ player.load(path); player.play();
 // isFrameNew().
 ```
 
-`extractFrame(path, outPixels, timeSec=1.0, outDuration=nullptr)` is a **static, thread-safe, GPU-free** single-frame decoder returning RGBA `Pixels`. Implemented on **macOS (AVFoundation), Windows (Media Foundation), Linux (FFmpeg)**; iOS and web are unsupported (returns false). Pass `timeSec = 0` for the first frame; it seeks to the nearest keyframe at or before the requested time.
+Use `extractKeyFrame(path, px, 0.0f)` here rather than `extractFrame`: frame 0 is always a keyframe, so it is the exact first frame *and* the fastest to fetch (seek only, no forward decode). If the player is already loaded you can also use the instance form `player.extractKeyFrame(px, 0.0f)`.
+
+### How do I grab a single frame (thumbnail / poster) from a video?
+
+Two single-shot helpers, both **static, thread-safe, GPU-free**, returning RGBA `Pixels`. Each has a static form (pass a path, no `load()` needed) and an instance form (uses the already-loaded `player.getPath()`):
+
+```cpp
+// exact frame at 3.5s — frame-accurate (seeks to the preceding keyframe, then
+// decodes forward to the requested time). Slightly heavier.
+VideoPlayer::extractFrame(path, px, 3.5f);
+// nearest keyframe at or before 3.5s — faster, but the real time may be earlier.
+VideoPlayer::extractKeyFrame(path, px, 3.5f);
+// instance form (video already loaded):
+video.extractFrame(px, 3.5f);
+```
+
+Pick by need: **`extractFrame` = frame-accurate but heavier; `extractKeyFrame` = fast but time-approximate** (good for coarse thumbnails or scrub previews; falls back to an exact decode if no keyframe is reachable). Both take an optional `float* outDuration` that receives the clip length in seconds. Implemented on **macOS (AVFoundation), Windows (Media Foundation), Linux (FFmpeg)**; Android stubs them and iOS/web are unsupported (return false).
+
+⚠️ These open a fresh decode context per call, so they are for **one-off frame grabs only — never for continuous playback**. To play a video use `load()` + `play()` + `update()` and draw the player each frame.
 
 ## Networking
 

@@ -10043,37 +10043,93 @@ description.ja = "現在のビデオフレームを (x, y) に描画。w x h を
 description.ko = "현재 비디오 프레임을 (x, y)에 그림. w x h를 지정하면 스케일"
 
 ["VideoPlayer::extractFrame"]
-keywords = ["thumbnail", "snapshot", "grab", "single frame", "poster"]
-description.en = "Extract a single frame from a video file without loading the full video. Useful for thumbnails"
-description.ja = "ビデオファイルから1フレームを抽出（全体を読み込まずに）。サムネイル生成に便利"
-description.ko = "비디오 파일에서 전체를 로드하지 않고 단일 프레임을 추출. 썸네일 생성에 유용"
-related = ["Pixels", "VideoPlayer", "VideoPlayer::load"]
-platform_note.en = "Static single-frame extraction is implemented on macOS (AVAssetImageGenerator), Windows (Media Foundation / IMFSourceReader), and Linux (FFmpeg). Android stubs it (`return false`); iOS and web have no extractFramePlatform() definition and are unsupported."
-platform_note.ja = "静止フレーム抽出は macOS（AVAssetImageGenerator）・Windows（Media Foundation / IMFSourceReader）・Linux（FFmpeg）で実装済み。android は false を返すスタブ、ios/web は extractFramePlatform() の定義自体が無く未対応。"
+keywords = ["thumbnail", "snapshot", "grab", "single frame", "poster", "exact frame"]
+description.en = "Extract the exact frame at a given time from a video file. Frame-accurate on every platform"
+description.ja = "ビデオファイルの指定時刻の正確なフレームを抽出。全プラットフォームでフレーム精度"
+description.ko = "비디오 파일에서 지정한 시간의 정확한 프레임을 추출. 모든 플랫폼에서 프레임 정확도"
+related = ["Pixels", "VideoPlayer", "VideoPlayer::load", "VideoPlayer::extractKeyFrame", "VideoPlayer::getPath"]
+platform_note.en = "Implemented on macOS (AVAssetImageGenerator), Windows (Media Foundation / IMFSourceReader), and Linux (FFmpeg). Android stubs it (`return false`); iOS and web have no extractFramePlatform() definition and are unsupported."
+platform_note.ja = "macOS（AVAssetImageGenerator）・Windows（Media Foundation / IMFSourceReader）・Linux（FFmpeg）で実装済み。android は false を返すスタブ、ios/web は extractFramePlatform() の定義自体が無く未対応。"
 details.en = '''
-Static, thread-safe, GPU-free single-frame decoder: opens the file on the calling
-thread with its own decode context (independent of any playing
-[`VideoPlayer`](#VideoPlayer)), seeks to the nearest keyframe at or before
-`timeSec`, and returns one frame as RGBA U8 [`Pixels`](#Pixels). `outDuration`, if
-non-null, receives the clip length in seconds.
+Thread-safe, GPU-free single-frame decoder that returns the **exact frame
+displayed at `timeSec`**: it opens the file on the calling thread with its own
+decode context (independent of any playing [`VideoPlayer`](#VideoPlayer)), seeks
+to the preceding keyframe, decodes forward to `timeSec`, and returns one frame as
+RGBA U8 [`Pixels`](#Pixels). `outDuration`, if non-null, receives the clip length
+in seconds.
 
-A common use is as a **black-flash stopgap**: [`load`](#VideoPlayer::load) /
-[`play`](#VideoPlayer::play) decode asynchronously, so the first on-screen frames
-are black. Extract frame 0 synchronously (`extractFrame(path, px, 0.0f)`), upload
-it to a [`Texture`](#Texture), and draw that still until the live player's
-[`isFrameNew`](#VideoPlayer::isFrameNew) has fired at least once.
+Comes in two forms:
+- **Static** — `VideoPlayer::extractFrame(path, px, timeSec)`. No `load()` needed;
+  good for thumbnails/posters from a file you are not playing.
+- **Instance** — `player.extractFrame(px, timeSec)`. Uses the currently loaded
+  file ([`getPath`](#VideoPlayer::getPath)); returns false if nothing is loaded.
+
+If you only need the nearest keyframe (faster, time-approximate — e.g. a rough
+thumbnail), use [`extractKeyFrame`](#VideoPlayer::extractKeyFrame) instead. These
+are single-shot helpers — do **not** use them for continuous playback (each call
+opens a fresh decode context); for playback use [`load`](#VideoPlayer::load) +
+[`play`](#VideoPlayer::play) + [`update`](#VideoPlayer::update).
 '''
 details.ja = '''
-静止・スレッドセーフ・GPU不要の1フレームデコーダ。呼び出しスレッド上で独自の
-デコードコンテキスト（再生中の [`VideoPlayer`](#VideoPlayer) とは独立）でファイルを
-開き、`timeSec` 以下の最寄りキーフレームへシークして1フレームを RGBA U8 の
+スレッドセーフ・GPU不要の1フレームデコーダで、**`timeSec` に表示される正確な
+フレーム**を返す。呼び出しスレッド上で独自のデコードコンテキスト（再生中の
+[`VideoPlayer`](#VideoPlayer) とは独立）でファイルを開き、直前のキーフレームへ
+シークしてから `timeSec` まで前進デコードし、1フレームを RGBA U8 の
 [`Pixels`](#Pixels) で返す。`outDuration` が非 null ならクリップ長（秒）を格納する。
 
-代表的な用途は**黒フレーム対策のつなぎ**。[`load`](#VideoPlayer::load) /
-[`play`](#VideoPlayer::play) は非同期デコードなので再生開始直後の数フレームは黒に
-なる。フレーム0を同期抽出（`extractFrame(path, px, 0.0f)`）して
-[`Texture`](#Texture) に載せ、ライブ側の
-[`isFrameNew`](#VideoPlayer::isFrameNew) が最初に true になるまでその静止画を描く。
+2 種類ある:
+- **静的** — `VideoPlayer::extractFrame(path, px, timeSec)`。`load()` 不要。再生して
+  いないファイルからサムネイル/ポスターを取るのに向く。
+- **インスタンス** — `player.extractFrame(px, timeSec)`。現在ロード中のファイル
+  （[`getPath`](#VideoPlayer::getPath)）を使う。未ロードなら false。
+
+最寄りキーフレームで十分（速い・時刻は近似、例えばラフなサムネイル）なら
+[`extractKeyFrame`](#VideoPlayer::extractKeyFrame) を使う。これらは単発取得用で、
+連続再生には**使わない**（呼ぶたびにデコードコンテキストを開くため重い）。再生は
+[`load`](#VideoPlayer::load) + [`play`](#VideoPlayer::play) +
+[`update`](#VideoPlayer::update) を使う。
+'''
+
+["VideoPlayer::extractKeyFrame"]
+keywords = ["thumbnail", "snapshot", "keyframe", "fast", "single frame", "poster", "I-frame"]
+description.en = "Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate"
+description.ja = "指定時刻以前の最寄りキーフレームを抽出。extractFrame より速いが時刻は近似"
+description.ko = "지정한 시간 이전의 가장 가까운 키프레임을 추출. extractFrame보다 빠르지만 시간은 근사치"
+related = ["Pixels", "VideoPlayer", "VideoPlayer::load", "VideoPlayer::extractFrame", "VideoPlayer::getPath"]
+platform_note.en = "Implemented on macOS (AVAssetImageGenerator), Windows (Media Foundation / IMFSourceReader), and Linux (FFmpeg). Android stubs it (`return false`); iOS and web are unsupported."
+platform_note.ja = "macOS（AVAssetImageGenerator）・Windows（Media Foundation / IMFSourceReader）・Linux（FFmpeg）で実装済み。android は false を返すスタブ、ios/web は未対応。"
+details.en = '''
+Like [`extractFrame`](#VideoPlayer::extractFrame) but returns the **nearest
+keyframe at or before `timeSec`** — it seeks only, skipping the forward decode, so
+it is faster at the cost of landing on a slightly earlier time. If no keyframe is
+reachable it falls back to an exact decode, so it always returns *a* frame on
+success.
+
+Trade-off: **`extractFrame` = frame-accurate but heavier; `extractKeyFrame` =
+fast but time-approximate.** Prefer this for coarse thumbnails, scrub previews, or
+grabbing frame 0 (the first frame is always a keyframe, so it is exact *and*
+fastest here — handy for the black-flash stopgap).
+
+Same two forms as [`extractFrame`](#VideoPlayer::extractFrame): static
+(`VideoPlayer::extractKeyFrame(path, px, timeSec)`, no `load()` needed) and
+instance (`player.extractKeyFrame(px, timeSec)`, uses the loaded
+[`getPath`](#VideoPlayer::getPath)). Single-shot only — not for playback.
+'''
+details.ja = '''
+[`extractFrame`](#VideoPlayer::extractFrame) と同様だが、**`timeSec` 以下の最寄り
+キーフレーム**を返す。シークのみで前進デコードを省くため速いが、少し手前の時刻に
+なる。キーフレームに到達できない場合は正確デコードにフォールバックするので、成功時は
+必ず何らかのフレームを返す。
+
+トレードオフ: **`extractFrame` は正確だが重い / `extractKeyFrame` は速いが時刻は
+近似**。ラフなサムネイル、スクラブのプレビュー、あるいはフレーム0の取得に向く
+（先頭フレームは必ずキーフレームなので、ここでは正確かつ最速 —— 黒フレーム対策の
+つなぎに便利）。
+
+[`extractFrame`](#VideoPlayer::extractFrame) と同じく 2 種類:静的
+（`VideoPlayer::extractKeyFrame(path, px, timeSec)`、`load()` 不要）とインスタンス
+（`player.extractKeyFrame(px, timeSec)`、ロード中の
+[`getPath`](#VideoPlayer::getPath) を使う）。単発取得用で再生には使わない。
 '''
 
 ["VideoPlayer::getAudioChannels"]
@@ -10132,6 +10188,14 @@ keywords = ["hardware", "backend", "decoder", "videotoolbox", "vaapi"]
 description.en = "Get the name of the active decode backend. Returns 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', or 'none'"
 description.ja = "使用中のデコードバックエンド名を取得。'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', 'none' のいずれか"
 description.ko = "사용 중인 디코드 백엔드 이름을 가져옴. 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', 'none' 중 하나"
+
+["VideoPlayer::getPath"]
+category = "video"
+keywords = ["path", "filename", "source", "url", "loaded file"]
+description.en = "Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded"
+description.ja = "現在ロード中のビデオファイルのパス（getDataPath で解決済み）。未ロードなら空文字列"
+description.ko = "현재 로드된 비디오 파일의 경로(getDataPath로 해석됨). 로드되지 않았으면 빈 문자열"
+related = ["VideoPlayer::load", "VideoPlayer::extractFrame", "VideoPlayer::extractKeyFrame"]
 
 ["VideoPlayer::getPixels"]
 category = "video"
@@ -10199,21 +10263,23 @@ keywords = ["open", "read", "file", "movie"]
 description.en = "Load a video file"
 description.ja = "ビデオファイルを読み込む"
 description.ko = "비디오 파일을 로드"
-related = ["VideoPlayer::play", "VideoPlayer::isFrameNew", "VideoPlayer::extractFrame"]
+related = ["VideoPlayer::play", "VideoPlayer::isFrameNew", "VideoPlayer::extractKeyFrame", "VideoPlayer::getPath"]
 details.en = '''
 Decoding is **asynchronous** — the decoder spins up in the background, so for a
 short window after `load()` / [`play`](#VideoPlayer::play) the player has no
 picture yet and draws **black**. To hide that flash, synchronously grab the first
-frame with [`extractFrame`](#VideoPlayer::extractFrame)`(path, px, 0.0f)`, show it
-as a still [`Texture`](#Texture), and switch to the live player once
+frame with [`extractKeyFrame`](#VideoPlayer::extractKeyFrame)`(path, px, 0.0f)`
+(frame 0 is always a keyframe, so this is the fastest exact way to get it), show
+it as a still [`Texture`](#Texture), and switch to the live player once
 [`isFrameNew`](#VideoPlayer::isFrameNew) has returned true at least once.
 '''
 details.ja = '''
 デコードは**非同期**で、デコーダはバックグラウンドで立ち上がる。そのため
 `load()` / [`play`](#VideoPlayer::play) 直後のわずかな間、プレイヤーはまだ絵を
 持たず**黒**を描く。このちらつきを隠すには、
-[`extractFrame`](#VideoPlayer::extractFrame)`(path, px, 0.0f)` で先頭フレームを
-同期取得して静止 [`Texture`](#Texture) として表示し、
+[`extractKeyFrame`](#VideoPlayer::extractKeyFrame)`(path, px, 0.0f)` で先頭フレームを
+同期取得し（フレーム0は必ずキーフレームなので、これが最速かつ正確に取れる）、静止
+[`Texture`](#Texture) として表示して、
 [`isFrameNew`](#VideoPlayer::isFrameNew) が一度 true になったらライブ側へ切り替える。
 '''
 
