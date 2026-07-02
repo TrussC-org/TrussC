@@ -1036,11 +1036,182 @@ std::string VideoPlayer::getHwAccelNamePlatform() const {
     return platformHandle_ ? "mediafoundation" : "none";
 }
 
+// Shared single-frame decode via IMFSourceReader (independent of the playback
+// IMFMediaEngine path; runs on the calling thread, no GPU/D3D needed).
+//
+// When `exact` is true we seek to the preceding keyframe then read forward
+// until the sample timestamp reaches timeSec, yielding the exact frame shown at
+// that time. When false we return the first sample after the seek — the nearest
+// keyframe at or before timeSec — which is faster but time-approximate.
+static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
+                                  float timeSec, float* outDuration, bool exact) {
+    if (!InitMediaFoundation()) {
+        return false;
+    }
+
+    bool ok = false;
+    {
+        int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+        std::wstring widePath(wideLen, 0);
+        MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, &widePath[0], wideLen);
+
+        // Enable the built-in video processor so we can request RGB32 output
+        // regardless of the source pixel format.
+        ComPtr<IMFAttributes> attrs;
+        HRESULT hr = MFCreateAttributes(&attrs, 1);
+        if (SUCCEEDED(hr)) {
+            attrs->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);
+        }
+
+        ComPtr<IMFSourceReader> reader;
+        if (SUCCEEDED(hr)) {
+            hr = MFCreateSourceReaderFromURL(widePath.c_str(), attrs.Get(), &reader);
+        }
+
+        // Select the first video stream only.
+        if (SUCCEEDED(hr)) {
+            reader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
+            hr = reader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
+        }
+
+        // Ask for uncompressed RGB32 (BGRA in memory).
+        if (SUCCEEDED(hr)) {
+            ComPtr<IMFMediaType> rgbType;
+            hr = MFCreateMediaType(&rgbType);
+            if (SUCCEEDED(hr)) {
+                rgbType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+                rgbType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+                hr = reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+                                                 nullptr, rgbType.Get());
+            }
+        }
+
+        // Duration (100ns units) for the optional out-param + clamping.
+        float duration = 0.0f;
+        if (SUCCEEDED(hr)) {
+            PROPVARIANT var;
+            PropVariantInit(&var);
+            if (SUCCEEDED(reader->GetPresentationAttribute(
+                    MF_SOURCE_READER_MEDIASOURCE, MF_PD_DURATION, &var)) &&
+                var.vt == VT_UI8) {
+                duration = (float)(var.uhVal.QuadPart / 10000000.0);
+            }
+            PropVariantClear(&var);
+        }
+        if (outDuration) *outDuration = duration;
+
+        // Clamp requested time to valid range (mirrors the macOS behaviour).
+        if (duration > 0.0f && timeSec > duration) timeSec = duration * 0.1f;
+        if (timeSec < 0) timeSec = 0;
+
+        // Seek to the requested position (nearest keyframe at or before it).
+        if (SUCCEEDED(hr) && timeSec > 0.0f) {
+            PROPVARIANT pos;
+            PropVariantInit(&pos);
+            pos.vt = VT_I8;
+            pos.hVal.QuadPart = (LONGLONG)(timeSec * 10000000.0);
+            reader->SetCurrentPosition(GUID_NULL, pos);
+            PropVariantClear(&pos);
+        }
+
+        // Read samples until we reach the target. In keyframe mode we stop at
+        // the first decoded sample after the seek. In exact mode we keep the
+        // latest decoded sample and read forward until its timestamp reaches
+        // timeSec (the frame actually displayed at that time).
+        const LONGLONG targetTicks = (LONGLONG)(timeSec * 10000000.0);
+        ComPtr<IMFSample> sample;
+        while (SUCCEEDED(hr)) {
+            DWORD flags = 0;
+            LONGLONG llTimestamp = 0;
+            ComPtr<IMFSample> s;
+            hr = reader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0,
+                                    nullptr, &flags, &llTimestamp, &s);
+            if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) {
+                break;  // fall back to the last sample we retained, if any
+            }
+            if (!s) {
+                // No sample this iteration (e.g. a stream/format tick) — keep reading.
+                continue;
+            }
+            sample = s;
+            if (!exact || llTimestamp >= targetTicks) {
+                break;  // keyframe: first sample; exact: reached the target time
+            }
+        }
+
+        // Resolve the actual output frame size and stride (may have changed
+        // during the read).
+        UINT32 width = 0, height = 0;
+        LONG stride = 0;
+        if (SUCCEEDED(hr) && sample) {
+            ComPtr<IMFMediaType> curType;
+            if (SUCCEEDED(reader->GetCurrentMediaType(
+                    MF_SOURCE_READER_FIRST_VIDEO_STREAM, &curType))) {
+                MFGetAttributeSize(curType.Get(), MF_MT_FRAME_SIZE, &width, &height);
+                UINT32 mfStride = 0;
+                if (SUCCEEDED(curType->GetUINT32(MF_MT_DEFAULT_STRIDE, &mfStride))) {
+                    stride = (LONG)(INT32)mfStride;  // negative => bottom-up
+                } else {
+                    stride = (LONG)width * 4;
+                }
+            }
+        }
+
+        if (SUCCEEDED(hr) && sample && width > 0 && height > 0) {
+            ComPtr<IMFMediaBuffer> buffer;
+            hr = sample->ConvertToContiguousBuffer(&buffer);
+            if (SUCCEEDED(hr)) {
+                BYTE* data = nullptr;
+                DWORD length = 0;
+                hr = buffer->Lock(&data, nullptr, &length);
+                if (SUCCEEDED(hr)) {
+                    LONG absStride = stride < 0 ? -stride : stride;
+                    outPixels.allocate((int)width, (int)height, 4);
+                    unsigned char* dst = outPixels.getData();
+                    int rowBytes = (int)width * 4;
+
+                    for (UINT32 y = 0; y < height; y++) {
+                        // Negative stride means the image is stored bottom-up.
+                        UINT32 srcRow = stride < 0 ? (height - 1 - y) : y;
+                        const BYTE* src = data + (size_t)srcRow * absStride;
+                        // BGRA to RGBA conversion
+                        for (UINT32 x = 0; x < width; x++) {
+                            int srcIdx = x * 4;
+                            int dstIdx = x * 4;
+                            dst[dstIdx + 0] = src[srcIdx + 2]; // R <- B
+                            dst[dstIdx + 1] = src[srcIdx + 1]; // G <- G
+                            dst[dstIdx + 2] = src[srcIdx + 0]; // B <- R
+                            // RGB32 from the source reader is BGRX: the 4th byte
+                            // is undefined padding, not alpha. Force opaque so the
+                            // extracted frame isn't fully transparent.
+                            dst[dstIdx + 3] = 255;             // A = opaque
+                        }
+                        dst += rowBytes;
+                    }
+
+                    buffer->Unlock();
+                    ok = true;
+                }
+            }
+        }
+    }
+
+    CloseMediaFoundation();
+    return ok;
+}
+
 bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
                                        float timeSec, float* outDuration) {
-    // TODO: implement frame extraction on Windows
-    (void)path; (void)outPixels; (void)timeSec; (void)outDuration;
-    return false;
+    return tcv_extract_frame_win(path, outPixels, timeSec, outDuration, /*exact=*/true);
+}
+
+bool VideoPlayer::extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
+                                          float timeSec, float* outDuration) {
+    if (tcv_extract_frame_win(path, outPixels, timeSec, outDuration, /*exact=*/false)) {
+        return true;
+    }
+    // No keyframe reachable — fall back to an exact decode.
+    return tcv_extract_frame_win(path, outPixels, timeSec, outDuration, /*exact=*/true);
 }
 
 } // namespace trussc
