@@ -122,6 +122,11 @@ public:
     // Set request timeout in seconds (default: 30)
     void setTimeout(long seconds) { timeoutSeconds_ = seconds; }
 
+    // Follow 3xx redirects (default off). Needed for e.g. public file shares that
+    // redirect the download to a signed URL. Off by default so existing callers
+    // (which expect the raw response) are unaffected.
+    void setFollowRedirects(bool follow) { followRedirects_ = follow; }
+
     // Enable verbose curl logging to stderr (for debugging)
     void setVerbose(bool v) { verbose_ = v; }
 
@@ -165,6 +170,7 @@ private:
     std::string baseUrl_;
     std::vector<std::pair<std::string, std::string>> headers_;
     long timeoutSeconds_ = 30;
+    bool followRedirects_ = false;
     bool verbose_ = false;
 
     HttpResponse request(const std::string& method, const std::string& path,
@@ -205,6 +211,10 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds_);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    if (followRedirects_) {
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+    }
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, 30L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, 15L);
