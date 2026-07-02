@@ -19,18 +19,21 @@ void tcApp::setup() {
 
     addLog("Press S for Server, C for Client");
 
+    // Network events fire on internal threads; Deliver::Main marshals each
+    // listener onto the main thread, so app state can be touched without locks.
+
     // Server event setup
     clientConnectListener = server.onClientConnect.listen([this](TcpClientConnectEventArgs& e) {
         ostringstream oss;
         oss << "[Server] Client " << e.clientId << " connected from " << e.host << ":" << e.port;
         addLog(oss.str());
-    });
+    }, Deliver::Main);
 
     clientDisconnectListener = server.onClientDisconnect.listen([this](TcpClientDisconnectEventArgs& e) {
         ostringstream oss;
         oss << "[Server] Client " << e.clientId << " disconnected: " << e.reason;
         addLog(oss.str());
-    });
+    }, Deliver::Main);
 
     serverReceiveListener = server.onReceive.listen([this](TcpServerReceiveEventArgs& e) {
         string msg(e.data.begin(), e.data.end());
@@ -41,13 +44,13 @@ void tcApp::setup() {
         // Echo back
         string reply = "Echo: " + msg;
         server.send(e.clientId, reply);
-    });
+    }, Deliver::Main);
 
     serverErrorListener = server.onError.listen([this](TcpServerErrorEventArgs& e) {
         ostringstream oss;
         oss << "[Server] Error: " << e.message;
         addLog(oss.str());
-    });
+    }, Deliver::Main);
 
     // Client event setup
     clientConnectedListener = client.onConnect.listen([this](TcpConnectEventArgs& e) {
@@ -58,20 +61,20 @@ void tcApp::setup() {
             oss << "[Client] Connection failed: " << e.message;
         }
         addLog(oss.str());
-    });
+    }, Deliver::Main);
 
     clientReceiveListener = client.onReceive.listen([this](TcpReceiveEventArgs& e) {
         string msg(e.data.begin(), e.data.end());
         addLog("[Client] Received: " + msg);
-    });
+    }, Deliver::Main);
 
     clientDisconnectListener2 = client.onDisconnect.listen([this](TcpDisconnectEventArgs& e) {
         addLog("[Client] Disconnected: " + e.reason);
-    });
+    }, Deliver::Main);
 
     clientErrorListener = client.onError.listen([this](TcpErrorEventArgs& e) {
         addLog("[Client] Error: " + e.message);
-    });
+    }, Deliver::Main);
 }
 
 void tcApp::update() {
@@ -118,7 +121,6 @@ void tcApp::draw() {
     y += 25;
 
     setColor(0.86f);
-    lock_guard<mutex> lock(logMutex);
     for (const auto& msg : logMessages) {
         drawBitmapString(msg, 50, y);
         y += 18;
@@ -176,11 +178,8 @@ void tcApp::keyPressed(int key) {
             addLog("[Server] Stopped");
         }
     } else if (key == 'X') {
-        {
-            lock_guard<mutex> lock(logMutex);
-            logMessages.clear();
-            messageCount = 0;
-        }
+        logMessages.clear();
+        messageCount = 0;
         addLog("Log cleared");
     }
 }
@@ -193,7 +192,6 @@ void tcApp::cleanup() {
 void tcApp::addLog(const string& msg) {
     logNotice("tcApp") << msg;
 
-    lock_guard<mutex> lock(logMutex);
     logMessages.push_back(msg);
     if (logMessages.size() > 20) {
         logMessages.erase(logMessages.begin());
