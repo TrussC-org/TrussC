@@ -33,7 +33,7 @@ void tcApp::setup() {
 
             // Color variation (change hue with HSB)
             float hue = (cap * 3 + join) * 0.07f;
-            stroke.setColor(colorFromHSB(hue, 0.78f, 1.0f));
+            stroke.setColor(Color::fromHSB(hue, 0.78f, 1.0f));
 
             stroke.update();
             strokes.push_back(stroke);
@@ -59,7 +59,7 @@ void tcApp::setup() {
         stroke.setShape(star);
         stroke.setWidth(strokeWidth);
         stroke.setJoinType((StrokeMesh::JoinType)cap);
-        stroke.setColor(colorFromHSB(0.55f + cap * 0.05f, 0.78f, 1.0f));
+        stroke.setColor(Color::fromHSB(0.55f + cap * 0.05f, 0.78f, 1.0f));
         stroke.update();
 
         closedStrokes.push_back(stroke);

@@ -14,7 +14,7 @@ TimerBall::TimerBall(float x, float y, float radius)
 void TimerBall::setup() {
     // Change color randomly every 0.5 seconds
     callEvery(0.5, [this]() {
-        color_ = colorFromHSB(random(TAU), 0.8f, 1.0f);
+        color_ = Color::fromHSB(random(1.0f), 0.8f, 1.0f);
         colorChangeCount_++;
     });
 }
