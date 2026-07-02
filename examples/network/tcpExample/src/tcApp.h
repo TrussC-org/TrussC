@@ -32,7 +32,6 @@ private:
 
     // Log messages
     std::vector<std::string> logMessages;
-    std::mutex logMutex;
 
     // State
     int messageCount = 0;

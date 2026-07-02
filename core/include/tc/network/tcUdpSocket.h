@@ -51,6 +51,21 @@ struct UdpErrorEventArgs {
 class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
 public:
     // Events
+    //
+    // THREADING: when the receive thread is active (bind() default), onReceive
+    // fires ON THE RECEIVE THREAD, not the main thread. onError fires on
+    // whichever thread the failing call ran on (receive thread for receive
+    // errors, the caller's thread for send/bind/connect errors). A listener
+    // that touches the Node tree, GPU resources, or unguarded app state must
+    // opt into main-thread delivery:
+    //
+    //   listener = socket.onReceive.listen(fn, Deliver::Main);
+    //
+    // Deliver::Main copies the payload and runs the listener at the start of
+    // the next frame (see tcEvent.h). Plain listen(fn) runs inline on the
+    // receive thread — fastest, but you handle the synchronization.
+    // With setUseThread(false) everything runs on the main thread and this
+    // does not apply.
     Event<UdpReceiveEventArgs> onReceive;   // On data receive
     Event<UdpErrorEventArgs> onError;       // On error
 

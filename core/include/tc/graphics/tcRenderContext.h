@@ -9,12 +9,12 @@
 //
 // Usage:
 //   // Global functions (same as before)
-//   setColor(255, 0, 0);
+//   setColor(1.0, 0.0, 0.0);
 //   drawRect(10, 10, 100, 100);
 //
 //   // Explicit context (for future use)
 //   auto& ctx = getDefaultContext();
-//   ctx.setColor(255, 0, 0);
+//   ctx.setColor(1.0, 0.0, 0.0);
 //   ctx.drawRect(10, 10, 100, 100);
 //
 // =============================================================================

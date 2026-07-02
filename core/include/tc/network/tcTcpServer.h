@@ -91,6 +91,17 @@ class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
 public:
     // -------------------------------------------------------------------------
     // Events
+    //
+    // THREADING: TcpServer always runs internal accept/receive threads, so
+    // these events fire on those threads, not the main thread. A listener that
+    // touches the Node tree, GPU resources, or unguarded app state must opt
+    // into main-thread delivery:
+    //
+    //   listener = server.onReceive.listen(fn, Deliver::Main);
+    //
+    // Deliver::Main copies the payload and runs the listener at the start of
+    // the next frame (see tcEvent.h). Plain listen(fn) runs inline on the
+    // firing thread — fastest, but you handle the synchronization.
     // -------------------------------------------------------------------------
     Event<TcpClientConnectEventArgs> onClientConnect;       // On client connect
     Event<TcpServerReceiveEventArgs> onReceive;             // On data receive

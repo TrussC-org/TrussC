@@ -74,6 +74,18 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") TcpClient {
 public:
     // -------------------------------------------------------------------------
     // Events
+    //
+    // THREADING: with threading enabled (default), these events fire on the
+    // internal receive/connect threads, not the main thread. A listener that
+    // touches the Node tree, GPU resources, or unguarded app state must opt
+    // into main-thread delivery:
+    //
+    //   listener = client.onReceive.listen(fn, Deliver::Main);
+    //
+    // Deliver::Main copies the payload and runs the listener at the start of
+    // the next frame (see tcEvent.h). Plain listen(fn) runs inline on the
+    // firing thread. With setUseThread(false) everything runs on the main
+    // thread and this does not apply.
     // -------------------------------------------------------------------------
     Event<TcpConnectEventArgs> onConnect;       // On connection complete
     Event<TcpReceiveEventArgs> onReceive;       // On data receive

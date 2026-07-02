@@ -7,6 +7,7 @@
 #include <functional>
 #include <vector>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <type_traits>
@@ -94,6 +95,13 @@ namespace priority {
 //     (onReceive); input events that use `consumed` already fire on the main
 //     thread, where Main is a no-op anyway.
 //   - Requires T to be copy-constructible (enforced by static_assert).
+//   - Listener lifetime is honored across the marshal boundary: a call queued
+//     for next frame re-checks the listener's liveness token when it runs, so
+//     it is dropped if the EventListener was destroyed (or removeListener /
+//     clear() ran) while it sat in the queue. The RAII guarantee — "after the
+//     listener dies, the callback never runs" — holds for Deliver::Main.
+//     (Raw runOnMainThread(fn) has no such token; there the captured object's
+//     lifetime is the caller's responsibility.)
 //
 // Scoped enum on purpose: it does NOT convert to int, so listen(fn, Deliver)
 // and the existing listen(fn, int priority) overloads never collide.
@@ -176,6 +184,12 @@ private:
         int priority;
         Deliver deliver;
         Callback callback;
+        // Liveness token, shared by every COW snapshot of this entry. A
+        // marshalled Deliver::Main call holds a weak_ptr and re-checks the
+        // VALUE at drain time: removeListener/clear() flip it to false, which
+        // also covers queued calls whose snapshot is still held by an
+        // in-flight notify() on another thread (weak expiry alone would not).
+        std::shared_ptr<std::atomic<bool>> alive;
     };
 
     using EntryList = std::vector<Entry>;
@@ -190,7 +204,8 @@ private:
             ConstEntryListPtr cur = std::atomic_load(&entries_);
             auto next = cur ? std::make_shared<EntryList>(*cur)
                             : std::make_shared<EntryList>();
-            next->push_back({id, priority, deliver, std::move(callback)});
+            next->push_back({id, priority, deliver, std::move(callback),
+                             std::make_shared<std::atomic<bool>>(true)});
             std::stable_sort(next->begin(), next->end(),
                 [](const Entry& a, const Entry& b) {
                     return a.priority < b.priority;
@@ -225,7 +240,12 @@ public:
             if (entry.deliver == Deliver::Main && !isMainThread()) {
                 if constexpr (std::is_copy_constructible_v<T>) {
                     T copy = arg;
-                    runOnMainThread([cb = entry.callback, copy]() mutable {
+                    runOnMainThread([cb = entry.callback, copy,
+                                     w = std::weak_ptr<std::atomic<bool>>(entry.alive)]() mutable {
+                        // Listener died while this call sat in the queue —
+                        // drop it (keeps the EventListener RAII guarantee).
+                        auto alive = w.lock();
+                        if (!alive || !alive->load()) return;
                         cb(copy);
                     });
                     continue;
@@ -256,6 +276,11 @@ public:
     // Remove all listeners
     void clear() {
         TC_LOCK_GUARD(mutex_);
+        ConstEntryListPtr cur = std::atomic_load(&entries_);
+        if (cur) {
+            // Invalidate queued Deliver::Main calls too
+            for (const auto& e : *cur) if (e.alive) e.alive->store(false);
+        }
         std::atomic_store(&entries_, ConstEntryListPtr{});
     }
 
@@ -264,12 +289,16 @@ private:
         TC_LOCK_GUARD(mutex_);
         ConstEntryListPtr cur = std::atomic_load(&entries_);
         if (!cur) return;
-        auto next = std::make_shared<EntryList>(*cur);
-        next->erase(
-            std::remove_if(next->begin(), next->end(),
-                [id](const Entry& e) { return e.id == id; }),
-            next->end()
-        );
+        auto next = std::make_shared<EntryList>();
+        next->reserve(cur->size());
+        for (const auto& e : *cur) {
+            if (e.id == id) {
+                // Invalidate queued Deliver::Main calls too
+                if (e.alive) e.alive->store(false);
+            } else {
+                next->push_back(e);
+            }
+        }
         std::atomic_store(&entries_, ConstEntryListPtr(next));
     }
 
@@ -354,6 +383,8 @@ private:
         int priority;
         Deliver deliver;
         Callback callback;
+        // Liveness token — see Event<T>::Entry::alive
+        std::shared_ptr<std::atomic<bool>> alive;
     };
 
     using EntryList = std::vector<Entry>;
@@ -368,7 +399,8 @@ private:
             ConstEntryListPtr cur = std::atomic_load(&entries_);
             auto next = cur ? std::make_shared<EntryList>(*cur)
                             : std::make_shared<EntryList>();
-            next->push_back({id, priority, deliver, std::move(callback)});
+            next->push_back({id, priority, deliver, std::move(callback),
+                             std::make_shared<std::atomic<bool>>(true)});
             std::stable_sort(next->begin(), next->end(),
                 [](const Entry& a, const Entry& b) {
                     return a.priority < b.priority;
@@ -397,7 +429,13 @@ public:
             // Deliver::Main from a worker thread: run on the main thread next
             // frame (no payload to copy for Event<void>).
             if (entry.deliver == Deliver::Main && !isMainThread()) {
-                runOnMainThread(entry.callback);
+                runOnMainThread([cb = entry.callback,
+                                 w = std::weak_ptr<std::atomic<bool>>(entry.alive)]() {
+                    // Listener died while this call sat in the queue — drop it
+                    auto alive = w.lock();
+                    if (!alive || !alive->load()) return;
+                    cb();
+                });
                 continue;
             }
             {
@@ -413,6 +451,11 @@ public:
 
     void clear() {
         TC_LOCK_GUARD(mutex_);
+        ConstEntryListPtr cur = std::atomic_load(&entries_);
+        if (cur) {
+            // Invalidate queued Deliver::Main calls too
+            for (const auto& e : *cur) if (e.alive) e.alive->store(false);
+        }
         std::atomic_store(&entries_, ConstEntryListPtr{});
     }
 
@@ -421,12 +464,16 @@ private:
         TC_LOCK_GUARD(mutex_);
         ConstEntryListPtr cur = std::atomic_load(&entries_);
         if (!cur) return;
-        auto next = std::make_shared<EntryList>(*cur);
-        next->erase(
-            std::remove_if(next->begin(), next->end(),
-                [id](const Entry& e) { return e.id == id; }),
-            next->end()
-        );
+        auto next = std::make_shared<EntryList>();
+        next->reserve(cur->size());
+        for (const auto& e : *cur) {
+            if (e.id == id) {
+                // Invalidate queued Deliver::Main calls too
+                if (e.alive) e.alive->store(false);
+            } else {
+                next->push_back(e);
+            }
+        }
         std::atomic_store(&entries_, ConstEntryListPtr(next));
     }
 
