@@ -1739,6 +1739,7 @@ std::size_t compressBound(std::size_t nbytes, Codec codec)  // Worst-case compre
 bool decompress(const void * src, std::size_t nbytes, std::vector<std::uint8_t> & out, std::size_t decompressedSize, Codec codec) [+1]  // Decompress a byte buffer; decompressedSize is the known original byte count. The vector overload resizes out and returns true on success (false / cleared out on mismatch or failure); the raw (dst pointer) overload returns the number of bytes written, or -1 on failure.
 Logger & getLogger()  // Access the global logger instance
 std::thread::id getMainThreadId()  // Get the main thread ID. Records the current thread's ID on the first call, so it must first be called from the main thread.
+const char * getVersion()  // TrussC version string from git describe (e.g. "v0.6.2" or "v0.6.2-14-gabc123")
 int hexToInt(const std::string & hexStr)  // Parse a hex string into a signed int
 unsigned int hexToUInt(const std::string & hexStr)  // Parse a hex string into an unsigned int
 void intersectRect(float x1, float y1, float w1, float h1, float x2, float y2, float w2, float h2, float & ox, float & oy, float & ow, float & oh)  // Compute intersection of two rectangles
@@ -2025,9 +2026,6 @@ float tanh(float x) [std]  // Hyperbolic tangent
 TAU  // Ratio of circumference to radius; the radian measure of one full turn. ≈ 6.28318.
 Top  // Direction shorthand for Direction::Top
 float trunc(float x) [std]  // Truncate toward zero (drop the fractional part)
-VERSION_MAJOR  // TrussC major version number
-VERSION_MINOR  // TrussC minor version number
-VERSION_PATCH  // TrussC patch version number
 VSYNC  // Frame-rate sentinel: sync to the monitor refresh rate
 ```
 
@@ -3773,7 +3771,8 @@ void VideoGrabber::update()  // Poll for a new frame and upload it to the textur
 ```cpp
 void VideoPlayer::close()  // Close the video and release resources
 void VideoPlayer::draw(float x, float y) const [+1]  // Draw the current video frame at (x, y), optionally scaled to w x h
-bool VideoPlayer::extractFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr)  // Extract a single frame from a video file without loading the full video. Useful for thumbnails
+bool VideoPlayer::extractFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr) [+1]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
+bool VideoPlayer::extractKeyFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr) [+1]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
 int VideoPlayer::getAudioChannels() const [macos,windows,linux,ios]  // Number of audio channels (0 if no audio)
 uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC of the audio codec in the loaded video (0 if none)
 std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video
@@ -3782,6 +3781,7 @@ int VideoPlayer::getCurrentFrame() const  // Get current frame number
 float VideoPlayer::getDuration() const  // Get total duration in seconds
 float VideoPlayer::getGammaCorrection() const  // Get current gamma correction value
 std::string VideoPlayer::getHwAccelName() const  // Get the name of the active decode backend. Returns 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', or 'none'
+const std::string & VideoPlayer::getPath() const  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
 unsigned char * VideoPlayer::getPixels() [+1]  // Pointer to the current RGBA pixel buffer (mutable)
 unsigned char * VideoPlayer::getPixelsUV()  // Pointer to the interleaved UV (chroma) plane when decoding NV12; null otherwise
 unsigned char * VideoPlayer::getPixelsY()  // Pointer to the Y (luma) plane when decoding NV12/YUV; null otherwise
