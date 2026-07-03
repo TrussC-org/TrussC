@@ -1123,6 +1123,14 @@ Two ways:
 - **Write arbitrary frames**: use `VideoWriter` — `open(path, w, h, settings)` → `addFrame(fbo)` / `addFrame(pixels)` (timestamped via `addFrameAt(frame, timeSec)`) → `close()`. For writing offscreen (FBO) content at a steady rate.
 Encoder settings: `VideoRecordSettings`. Platforms: macOS / Windows / Linux / Android / iOS.
 
+### How do I record a fixed-length clip that stops itself?
+
+Pass the length in seconds: `startRecording("out.mp4", 3.0f)` records exactly 3 seconds, then **auto-stops and finalizes the file itself** (PTS-based cut, output length == the requested length within one frame). Same as setting `VideoRecordSettings.duration` (0 = unlimited = the default). A manual `stopRecording()` **always wins**: call it early and you get a valid shorter file; call it after the auto-stop already fired and it's a harmless no-op. So you never need a timer thread to end a recording.
+
+### Can an AI agent start/stop recording over MCP?
+
+Yes — every TrussC app in MCP mode (`TRUSSC_MCP=1`) exposes `start_recording` and `stop_recording` as standard tools (the video counterpart of `save_screenshot`, always available). `start_recording` takes optional `path` (omit → timestamped file in the data dir), `duration` (fixed-length auto-stop), `fps`, and `codec`, and returns the resolved path; `stop_recording` returns `{path, frames, length}` and is a no-op (not an error) when nothing is recording. See docs/AI_AUTOMATION.md.
+
 ### How do I avoid a black first frame when a VideoPlayer starts?
 
 `VideoPlayer::load()` / `play()` decode **asynchronously**, so for the first few frames the player has no picture yet and draws **black**. To hide that flash, synchronously extract frame 0 as a still and show it until the live player has a real frame:
@@ -1197,6 +1205,14 @@ TrussC is "2D-looking but actually 3D space" by default (same philosophy as oF).
 ### Centering bitmap text? (default is left / baseline)
 
 Text alignment defaults to **left / baseline**, shared by `Font` and `drawBitmapString`. So to center, you don't need to compute an offset by hand — call **`setTextAlign(Direction::Center, Direction::Center)`** before drawing (it applies to bitmap text too).
+
+### How do I draw a text label above a 3D object (billboard)?
+
+Just call `drawBitmapString("name", worldPos)` with a `Vec3` — there is **no need to project with `worldToScreen()` by hand anymore**. The `Vec3` overloads take the position through the current model matrix and the **current camera context** (an `EasyCam`/camera scope, or the ambient default screen) and draw the glyphs as a screen-aligned billboard **on top** of the scene (no depth test), so the label always faces you and stays readable. A point **behind the camera draws nothing**. Two size modes:
+- `screenFixed = true` (default): constant pixel size regardless of distance — good for HUD-style tags.
+- `screenFixed = false`, or the `drawBitmapString(text, pos, scale)` overload: the glyph cell is measured in world units at the label's depth, so it **foreshortens with perspective** (shrinks with distance).
+
+This also works on the **default screen** (no camera scope): `z = 0` is pixel-identical to plain 2D `drawBitmapString(text, x, y)`, while `z != 0` labels the true 3D point. `setTextAlign` positions the label around the projected point.
 
 ### Why doesn't fill work on a stroke? (fill/noFill apply to beginShape only)
 
