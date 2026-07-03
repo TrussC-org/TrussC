@@ -1714,7 +1714,7 @@ bool grabScreen(Pixels & outPixels)  // Capture current screen to Pixels
 bool isFullscreen()  // Check if window is fullscreen
 bool isRecording()  // Check whether a recording is in progress
 int recordingFrameCount()  // Number of frames captured so far in the current recording
-const std::string & recordingPath()  // Output file path of the current recording
+std::string recordingPath()  // Output file path of the current recording
 void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
 int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Template on the app type; returns the process exit code
 bool saveScreenshot(const std::filesystem::path & path)  // Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
@@ -1728,7 +1728,7 @@ void setWindowPosition(int x, int y) [macos,windows]  // Set window position in 
 void setWindowSize(int width, int height)  // Set window size
 void setWindowSizeLogical(int width, int height)  // Resize the window to the given logical size (logical pixels)
 void setWindowTitle(const std::string & title)  // Set window title
-bool startRecording(const std::string & path, const VideoRecordSettings & settings = {}) [macos,windows,linux,android,ios]  // Start recording the window to a video file (native encoder, no ffmpeg)
+bool startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+1] [macos,windows,linux,android,ios]  // Start recording the window to a video file (native encoder, no ffmpeg)
 void stopRecording()  // Stop the current recording and finalize the file
 void toggleFullscreen()  // Toggle fullscreen mode
 ```
@@ -1765,7 +1765,7 @@ Json reflectToJson(T & obj)  // Return all reflected (TC_REFLECT) members of obj
 void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame
 void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
-bool setLogFile(const std::string & path)  // Open a file to receive log output
+bool setLogFile(const fs::path & path)  // Open a file to receive log output
 const std::string & shortTypeName(const std::type_info & ti)  // Short (unqualified) readable name for a type, cached per type
 std::vector<std::string> splitString(const std::string & source, const std::string & delimiter, bool ignoreEmpty = false, bool trim = false)  // Split string by delimiter
 void stringReplace(std::string & input, const std::string & searchStr, const std::string & replaceStr)  // Replace substring in place
@@ -1780,7 +1780,7 @@ LogStream tcLogVerbose(const std::string & module = std::string("")) ⚠️depre
 LogStream tcLogWarning(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logWarning()
 void tcSetConsoleLogLevel(LogLevel level) ⚠️deprecated  // Deprecated alias for setConsoleLogLevel()
 void tcSetFileLogLevel(LogLevel level) ⚠️deprecated  // Deprecated alias for setFileLogLevel()
-bool tcSetLogFile(const std::string & path) ⚠️deprecated  // Deprecated alias for setLogFile()
+bool tcSetLogFile(const fs::path & path) ⚠️deprecated  // Deprecated alias for setLogFile()
 std::string toBase64(const unsigned char * bytes, size_t len) [+2]  // Encode raw bytes as a Base64 string
 std::string toBinary(int value) [+4]  // Convert an integer to a binary string
 bool toBool(const std::string & str)  // Parse a string into a bool
@@ -1802,29 +1802,29 @@ const std::string & typeName(const std::type_info & ti) [+1]  // Readable (deman
 ### File
 
 ```cpp
-bool appendToFile(const std::string & path, const std::string & content)  // Append string to file
-bool createDirectory(const std::string & path)  // Create directory (and parents)
-bool directoryExists(const std::string & path)  // Check if directory exists
-bool fileExists(const std::string & path)  // Check if file exists
-std::string getAbsolutePath(const std::string & path)  // Get absolute path
-std::string getBaseName(const std::string & path)  // Get filename without extension
-std::string getDataPath(const std::string & filename)  // Get full path relative to data directory
-std::string getDataPathRoot()  // Get the current data path root (with trailing slash).
+bool appendToFile(const fs::path & path, const std::string & content)  // Append string to file
+bool createDirectory(const fs::path & path)  // Create directory (and parents)
+bool directoryExists(const fs::path & path)  // Check if directory exists
+bool fileExists(const fs::path & path)  // Check if file exists
+std::string getAbsolutePath(const fs::path & path)  // Get absolute path
+std::string getBaseName(const fs::path & path)  // Get filename without extension
+fs::path getDataPath(const fs::path & filename)  // Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged.
+fs::path getDataPathRoot()  // Get the current data path root as fs::path.
 std::string getExecutableDir()  // Get the directory containing the running executable (with trailing slash).
 std::string getExecutablePath()  // Get the absolute path of the running executable.
-std::string getFileExtension(const std::string & path)  // Get file extension without dot
-std::string getFileName(const std::string & path)  // Get filename from path
-int64_t getFileSize(const std::string & path)  // Get file size in bytes
-std::string getParentDirectory(const std::string & path)  // Get parent directory
-std::string joinPath(const std::string & dir, const std::string & file)  // Join directory and filename
-std::vector<std::string> listDirectory(const std::string & path)  // List files in directory
-Json loadJson(const std::string & path)  // Load a JSON file and return it as a Json object. Relative paths are resolved via getDataPath; returns an empty Json on error.
-std::string loadTextFile(const std::string & path)  // Load entire text file
-Xml loadXml(const std::string & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
-bool removeFile(const std::string & path)  // Remove file
-bool saveJson(const Json & j, const std::string & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath. indent sets the pretty-print width (negative for compact). Returns true on success.
-bool saveTextFile(const std::string & path, const std::string & content)  // Save string to text file
-void setDataPathRoot(const std::string & path)  // Set the root directory used to resolve relative data paths. A relative path is resolved against the executable directory; an absolute path (starting with /) is used as-is. A trailing slash is added automatically.
+std::string getFileExtension(const fs::path & path)  // Get file extension without dot
+std::string getFileName(const fs::path & path)  // Get filename from path
+int64_t getFileSize(const fs::path & path)  // Get file size in bytes
+std::string getParentDirectory(const fs::path & path)  // Get parent directory
+std::string joinPath(const fs::path & dir, const fs::path & file)  // Join directory and filename
+std::vector<std::string> listDirectory(const fs::path & path)  // List files in directory
+Json loadJson(const fs::path & path)  // Load a JSON file and return it as a Json object. Relative paths are resolved via getDataPath; returns an empty Json on error.
+std::string loadTextFile(const fs::path & path)  // Load entire text file
+Xml loadXml(const fs::path & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
+bool removeFile(const fs::path & path)  // Remove file
+bool saveJson(const Json & j, const fs::path & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath. indent sets the pretty-print width (negative for compact). Returns true on success.
+bool saveTextFile(const fs::path & path, const std::string & content)  // Save string to text file
+void setDataPathRoot(const fs::path & path)  // Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is.
 void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms.
 ```
 
@@ -2291,7 +2291,7 @@ const Texture & Environment::getIrradianceMap() const  // Get irradiance cubemap
 const Texture & Environment::getPrefilterMap() const  // Get prefiltered environment cubemap for specular IBL
 int Environment::getPrefilterMipLevels() const  // Get number of mip levels in the prefilter map
 bool Environment::isLoaded() const  // Check if environment is loaded
-bool Environment::loadFromHDR(const std::string & path) [+1]  // Load environment from HDR image file
+bool Environment::loadFromHDR(const fs::path & path) [+1]  // Load environment from HDR image file
 bool Environment::loadProcedural()  // Generate a simple procedural sky environment
 void Environment::release()  // Release GPU resources
 ```
@@ -2353,7 +2353,7 @@ bool Fbo::save(const fs::path & path) const  // Save FBO contents to file
 void FileReader::close()  // Close file
 bool FileReader::eof() const  // Check if at end of file
 bool FileReader::isOpen() const  // Check if file is open
-bool FileReader::open(const std::string & path)  // Open file for reading
+bool FileReader::open(const fs::path & path)  // Open file for reading
 size_t FileReader::read(void * buffer, size_t size)  // Read binary data
 int FileReader::readChar()  // Read one character (-1 at EOF)
 std::string FileReader::readLine() [+1]  // Read one line
@@ -2368,7 +2368,7 @@ size_t FileReader::tell()  // Get current position
 void FileWriter::close()  // Close file
 void FileWriter::flush()  // Flush buffer to disk
 bool FileWriter::isOpen() const  // Check if file is open
-bool FileWriter::open(const std::string & path, bool append = false)  // Open file for writing
+bool FileWriter::open(const fs::path & path, bool append = false)  // Open file for writing
 FileWriter & FileWriter::write(const std::string & text) [+2]  // Write data to file
 FileWriter & FileWriter::writeLine(const std::string & text = std::string(""))  // Write line with newline
 ```
@@ -2416,7 +2416,7 @@ bool Font::isLoaded() const  // Check if loaded
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
 bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
 bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is forbidden at the start of a line (kinsoku rule).
-bool Font::load(const std::string & nameOrPath, int size)  // Load font file
+bool Font::load(const fs::path & nameOrPath, int size)  // Load font file
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
 void Font::setHangingPunctuation(bool enabled)  // Let prohibited line-start CJK punctuation hang past the line edge instead of wrapping (default off)
@@ -2511,7 +2511,7 @@ sg_sampler IesProfile::getSampler() const  // Return the sokol-gfx sampler of th
 int IesProfile::getTextureWidth() const  // Get width of the generated 1D lookup texture
 sg_view IesProfile::getView() const  // Return the sokol-gfx texture view of the IES profile for pipeline binding (advanced interop).
 bool IesProfile::isLoaded() const  // Check if profile is loaded
-bool IesProfile::load(const std::string & path)  // Load IES profile from file
+bool IesProfile::load(const fs::path & path)  // Load IES profile from file
 bool IesProfile::loadFromString(const std::string & data)  // Load IES profile from inline string data
 ```
 
@@ -2664,7 +2664,7 @@ bool Logger::isFileOpen() const  // Check whether a log file is currently open
 void Logger::log(LogLevel level, const std::string & message)  // Emit a log message at the given level
 void Logger::setConsoleLogLevel(LogLevel level)  // Set the minimum console log level
 void Logger::setFileLogLevel(LogLevel level)  // Set the minimum file log level
-bool Logger::setLogFile(const std::string & path)  // Open a file to receive log output
+bool Logger::setLogFile(const fs::path & path)  // Open a file to receive log output
 ```
 
 ### Mat3 — 3x3 matrix for 2D affine / homography transforms (row-major). Includes static factories and a homography solver
@@ -3188,9 +3188,9 @@ bool Reflector::visit(const char * name, float & v) [+7]  // Handle one reflecte
 
 ```cpp
 int ScreenRecorder::getFrameCount() const  // Number of frames captured so far
-const std::string & ScreenRecorder::getPath() const  // Output file path of the current recording
+std::string ScreenRecorder::getPath() const  // Output file path of the current recording
 bool ScreenRecorder::isRecording() const  // Check if the screen recorder is currently capturing
-bool ScreenRecorder::start(const std::string & path, const VideoRecordSettings & settings = {}) [+1]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically
+bool ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically
 void ScreenRecorder::stop()  // Stop live capture and finalize the file
 VideoWriter & ScreenRecorder::writer()  // Access the underlying VideoWriter for advanced introspection
 ```
@@ -3321,9 +3321,9 @@ bool Sound::isLoop() const  // Check if loop mode is enabled
 bool Sound::isPaused() const  // Check if paused
 bool Sound::isPlaying() const  // Check if playing
 bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
-bool Sound::load(const std::string & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
+bool Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
 void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
-bool Sound::loadStream(const std::string & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
+bool Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
 void Sound::loadTestTone(float frequency = 440.0, float duration = 1.0)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.
 void Sound::pause()  // Pause playback
 void Sound::play()  // Play audio
@@ -3354,17 +3354,17 @@ void SoundBuffer::generateSquareWave(float frequency, float duration, float volu
 void SoundBuffer::generateTriangleWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono triangle wave.
 int SoundBuffer::getAdtsSampleRateIndex(int sampleRate)  // ADTS sample-rate index for the given rate (AAC-in-MOV container helper).
 float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sampleRate).
-bool SoundBuffer::load(const std::string & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
-bool SoundBuffer::loadAac(const std::string & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
+bool SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
+bool SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
 bool SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios,web]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
-bool SoundBuffer::loadFlac(const std::string & path)  // Decode a FLAC file into PCM.
+bool SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM.
 bool SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
-bool SoundBuffer::loadMp3(const std::string & path)  // Decode an MP3 file into PCM.
+bool SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM.
 bool SoundBuffer::loadMp3FromMemory(const void * data, size_t dataSize)  // Decode MP3 data from a memory buffer.
-bool SoundBuffer::loadOgg(const std::string & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis).
+bool SoundBuffer::loadOgg(const fs::path & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis).
 bool SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  // Decode OGG Vorbis data from a memory buffer.
 bool SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths.
-bool SoundBuffer::loadWav(const std::string & path)  // Decode a WAV file into PCM.
+bool SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into PCM.
 bool SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from a memory buffer.
 void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed.
 ```
@@ -3381,8 +3381,8 @@ Kind SoundSource::kind() const  // Source kind (Eager for SoundBuffer, Stream fo
 ```cpp
 float SoundStream::getDuration() const  // Decoded file duration in seconds.
 int SoundStream::getMaxPolyphony() const  // Number of concurrent decoder slots reserved at loadStream().
-const std::string & SoundStream::getPath() const  // Path the stream was opened from.
-bool SoundStream::loadStream(const std::string & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported.
+std::string SoundStream::getPath() const  // Path the stream was opened from.
+bool SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported.
 ```
 
 ### StrokeMesh — Variable-width polyline stroke geometry with caps, joins and miter limit; build it from points or a Path, then update() and draw()
@@ -3775,8 +3775,8 @@ void VideoGrabber::update()  // Poll for a new frame and upload it to the textur
 ```cpp
 void VideoPlayer::close()  // Close the video and release resources
 void VideoPlayer::draw(float x, float y) const [+1]  // Draw the current video frame at (x, y), optionally scaled to w x h
-bool VideoPlayer::extractFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr) [+1]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
-bool VideoPlayer::extractKeyFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr) [+1]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
+bool VideoPlayer::extractFrame(const fs::path & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr) [+1]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
+bool VideoPlayer::extractKeyFrame(const fs::path & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr) [+1]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
 int VideoPlayer::getAudioChannels() const [macos,windows,linux,ios]  // Number of audio channels (0 if no audio)
 uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC of the audio codec in the loaded video (0 if none)
 std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video
@@ -3785,7 +3785,7 @@ int VideoPlayer::getCurrentFrame() const  // Get current frame number
 float VideoPlayer::getDuration() const  // Get total duration in seconds
 float VideoPlayer::getGammaCorrection() const  // Get current gamma correction value
 std::string VideoPlayer::getHwAccelName() const  // Get the name of the active decode backend. Returns 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', or 'none'
-const std::string & VideoPlayer::getPath() const  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
+std::string VideoPlayer::getPath() const  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
 unsigned char * VideoPlayer::getPixels() [+1]  // Pointer to the current RGBA pixel buffer (mutable)
 unsigned char * VideoPlayer::getPixelsUV()  // Pointer to the interleaved UV (chroma) plane when decoding NV12; null otherwise
 unsigned char * VideoPlayer::getPixelsY()  // Pointer to the Y (luma) plane when decoding NV12/YUV; null otherwise
@@ -3794,7 +3794,7 @@ int VideoPlayer::getTotalFrames() const  // Get total number of frames
 bool VideoPlayer::getUseHwAccel() const  // Get HW accel preference (not the actual backend — use isUsingHwAccel() for that)
 bool VideoPlayer::hasAudio() const  // Check if the loaded video has an audio track
 bool VideoPlayer::isUsingHwAccel() const  // Check if hardware decoding is currently active (after load)
-bool VideoPlayer::load(const std::string & path)  // Load a video file
+bool VideoPlayer::load(const fs::path & path)  // Load a video file
 void VideoPlayer::nextFrame()  // Advance to the next frame
 void VideoPlayer::playImpl()  // Backend implementation of playImpl for this platform's video player.
 void VideoPlayer::previousFrame()  // Go back to the previous frame
@@ -3842,7 +3842,7 @@ bool VideoPlayerBase::isLoop() const  // Check if looping is enabled
 bool VideoPlayerBase::isPaused() const  // Check if video is paused
 bool VideoPlayerBase::isPlaying() const  // Check if video is currently playing (not paused)
 bool VideoPlayerBase::isUsingHwAccel() const  // Return true if hardware-accelerated decoding is currently active.
-bool VideoPlayerBase::load(const std::string & path)  // Load a video from the given file path; return true on success.
+bool VideoPlayerBase::load(const fs::path & path)  // Load a video from the given file path; return true on success.
 void VideoPlayerBase::markDone()  // Mark playback as done, clearing playing unless looping.
 void VideoPlayerBase::markFrameNew()  // Mark that a new frame has arrived (sets frameNew and firstFrameReceived).
 void VideoPlayerBase::nextFrame()  // Advance to the next frame.
@@ -3884,12 +3884,12 @@ void VideoWriter::close()  // Finalize and flush the video file
 float VideoWriter::getFps() const  // Fixed encoding frame rate
 int VideoWriter::getFrameCount() const  // Number of frames written so far
 int VideoWriter::getHeight() const  // Encoder output height in pixels
-const std::string & VideoWriter::getPath() const  // Resolved output file path
+std::string VideoWriter::getPath() const  // Resolved output file path
 const VideoRecordSettings & VideoWriter::getSettings() const  // Encoder settings the writer was opened with
 int VideoWriter::getWidth() const  // Encoder output width in pixels
 bool VideoWriter::isOpen() const  // Check if the encoder is open and accepting frames
 unsigned char * VideoWriter::lockFrame(int & strideOut)  // Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame
-bool VideoWriter::open(const std::string & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the encoder at the given size (path resolved via getDataPath)
+bool VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the encoder at the given size (path resolved via getDataPath)
 bool VideoWriter::submitFrame(double timeSec)  // Append the previously locked frame at the given presentation time (seconds)
 ```
 
@@ -3915,10 +3915,10 @@ XmlNode Xml::addRoot(const std::string & name)  // Append a new root element wit
 XmlNode Xml::child(const std::string & name)  // Find a direct child node of the document by name.
 XmlDocument & Xml::document() [+1]  // Access the underlying pugixml document for advanced operations.
 bool Xml::empty() const  // Return true if the document has no content.
-bool Xml::load(const std::string & path)  // Load an XML document from a file. Relative paths are resolved via getDataPath. Returns true on success.
+bool Xml::load(const fs::path & path)  // Load an XML document from a file. Relative paths are resolved via getDataPath. Returns true on success.
 bool Xml::parse(const std::string & str)  // Parse an XML document from a string. Returns true on success.
 XmlNode Xml::root() [+1]  // Get the document's root element node.
-bool Xml::save(const std::string & path, const std::string & indent = std::string("  ")) const  // Save the document to a file. Relative paths are resolved via getDataPath. indent sets the per-level indentation string. Returns true on success.
+bool Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Save the document to a file. Relative paths are resolved via getDataPath. indent sets the per-level indentation string. Returns true on success.
 std::string Xml::toString(const std::string & indent = std::string("  ")) const  // Serialize the document to an XML string. indent sets the per-level indentation string.
 ```
 
