@@ -260,7 +260,7 @@ public:
     // Enable/resize the internal frame queue (0 = disable, the default).
     // When full, the oldest frame is dropped. Sizing hint: keep it at least
     // ceil(cameraFps / appFps) + a little headroom; 8-16 is plenty.
-    void setFrameQueueSize(size_t maxFrames) {
+    TC_PLATFORMS("macos,windows,linux") void setFrameQueueSize(size_t maxFrames) {
         frameQueue_->maxFrames.store(maxFrames, std::memory_order_relaxed);
         if (maxFrames == 0) {
             std::lock_guard<std::mutex> lock(frameQueue_->mtx);
@@ -268,14 +268,14 @@ public:
         }
     }
 
-    size_t getFrameQueueSize() const {
+    TC_PLATFORMS("macos,windows,linux") size_t getFrameQueueSize() const {
         return frameQueue_->maxFrames.load(std::memory_order_relaxed);
     }
 
     // Drain all frames captured since the last call (appended to out, oldest
     // first). Returns the number of frames appended. Frames are moved out of
     // the internal queue, so each frame is delivered exactly once.
-    size_t getBufferFrames(std::vector<GrabberFrame>& out) {
+    TC_PLATFORMS("macos,windows,linux") size_t getBufferFrames(std::vector<GrabberFrame>& out) {
         std::lock_guard<std::mutex> lock(frameQueue_->mtx);
         size_t n = frameQueue_->frames.size();
         for (auto& f : frameQueue_->frames) out.push_back(std::move(f));
