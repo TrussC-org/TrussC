@@ -127,18 +127,18 @@ inline void registerInspectionTools() {
 
     // --- Recording tools (native encoder, no ffmpeg) ---
 
-    tool("start_recording", "Start recording the window to a video file (the screenshot's video counterpart)")
-        .arg<std::string>("path", "Output file path (relative paths resolve to the data dir)")
+    tool("start_recording", "Start recording the window to a video file (the screenshot's video counterpart). Omit path for a timestamped file in the data dir; give duration for a fixed-length clip that auto-stops and finalizes itself.")
+        .arg<std::string>("path", "Output file path (relative paths resolve to the data dir). Omit for recording-<timestamp>.mp4/.mov in the data dir.", false)
+        .arg<float>("duration", "Fixed length in seconds; the file auto-stops & finalizes at that length. Omit or 0 = unlimited (stop_recording to end).", false)
         .arg<float>("fps", "Target frame rate (default 60; ProMotion frames are decimated to it)", false)
         .arg<std::string>("codec", "h264 (default) | hevc | prores422 | prores4444 (.mov, macOS)", false)
         .bind([](const json& args) -> json {
-            std::string path = args.value("path", std::string());
-            if (path.empty()) {
-                return json{{"status", "error"}, {"message", "path is required"}};
-            }
             trussc::VideoRecordSettings settings;
             if (args.contains("fps") && args.at("fps").is_number()) {
                 settings.fps = args.at("fps").get<float>();
+            }
+            if (args.contains("duration") && args.at("duration").is_number()) {
+                settings.duration = args.at("duration").get<float>();
             }
             std::string codec = args.value("codec", std::string());
             if      (codec == "hevc")       settings.codec = trussc::VideoCodec::HEVC;
@@ -147,22 +147,41 @@ inline void registerInspectionTools() {
             else if (!codec.empty() && codec != "h264") {
                 return json{{"status", "error"}, {"message", "unknown codec: " + codec}};
             }
+            // Default output: recording-<timestamp> in the data dir. ProRes is a
+            // .mov container; everything else is .mp4. startRecording() resolves
+            // the relative path via getDataPath(); recordingPath() returns it.
+            std::string path = args.value("path", std::string());
+            if (path.empty()) {
+                bool isProRes = settings.codec == trussc::VideoCodec::ProRes422 ||
+                                settings.codec == trussc::VideoCodec::ProRes4444;
+                path = "recording-" + trussc::getTimestampString("%Y-%m-%d-%H-%M-%S")
+                     + (isProRes ? ".mov" : ".mp4");
+            }
             bool ok = trussc::startRecording(path, settings);
-            return json{{"status", ok ? "ok" : "error"},
-                        {"path", trussc::recordingPath()},
-                        {"fps", settings.fps},
-                        {"codec", trussc::videoCodecName(settings.codec)}};
+            json r{{"status", ok ? "ok" : "error"},
+                   {"path", trussc::recordingPath()},
+                   {"fps", settings.fps},
+                   {"codec", trussc::videoCodecName(settings.codec)}};
+            if (settings.duration > 0.0f) r["duration"] = settings.duration;
+            return r;
         });
 
-    tool("stop_recording", "Stop the current recording and finalize the file")
+    tool("stop_recording", "Stop the current recording and finalize the file. Wins over a pending fixed duration (finalizes immediately at the current length); a no-op if nothing is recording.")
         .bind(std::function<json()>([]() -> json {
             if (!trussc::isRecording()) {
-                return json{{"status", "error"}, {"message", "not recording"}};
+                // Harmless no-op (e.g. a fixed-duration recording already
+                // auto-stopped, or nothing was started). Not an error.
+                return json{{"status", "ok"}, {"recording", false},
+                            {"message", "not recording"}};
             }
             std::string path = trussc::recordingPath();
             int frames = trussc::recordingFrameCount();
+            float fps  = trussc::internal::globalScreenRecorder().writer().getFps();
             trussc::stopRecording();
-            return json{{"status", "ok"}, {"path", path}, {"frames", frames}};
+            json r{{"status", "ok"}, {"recording", false},
+                   {"path", path}, {"frames", frames}};
+            if (fps > 0.0f) r["length"] = frames / fps;   // measured output length (s)
+            return r;
         }));
 
     // --- Node tree tools ---
