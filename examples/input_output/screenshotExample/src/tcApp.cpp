@@ -33,7 +33,7 @@ void tcApp::draw() {
 
         // Change hue
         float hue = float(i) / numCircles;
-        Color c = colorFromHSB(hue, 0.8f, 1.0f);
+        Color c = Color::fromHSB(hue, 0.8f, 1.0f);
         setColor(c);
 
         float circleRadius = 30.0f + sin(time * 2.0f + i) * 10.0f;
