@@ -392,6 +392,7 @@ Reference for oF users finding equivalent features in TrussC.
 
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
+| `ofGetVersionInfo` | `getVersion()` |  |
 | `ofJoinString` | `joinString(stringElements, delimiter)` |  |
 | `ofLog` | `logNotice(module)` |  |
 | `ofSplitString` | `splitString(source, delimiter, ignoreEmpty, trim)` |  |

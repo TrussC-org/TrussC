@@ -21,6 +21,7 @@
 #include "TrussC.h"
 
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <thread>
 
@@ -62,6 +63,9 @@ struct VideoGrabberPlatformData {
     unsigned char* targetPixels = nullptr;
     std::atomic<bool>* pixelsDirty = nullptr;
     std::mutex* mainMutex = nullptr;
+
+    // タイムスタンプ付きフレームキュー（setFrameQueueSize で有効化）
+    internal::GrabberFrameQueue* frameQueue = nullptr;
 };
 
 // ---------------------------------------------------------------------------
@@ -104,6 +108,11 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
             if (sample) sample->Release();
             break;
         }
+
+        // Stamp arrival time on the capture thread, before any processing.
+        // Stays accurate even when the app's main loop stalls.
+        uint64_t arrivalUs = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
 
         if (FAILED(hr) || !sample) {
             if (flags & MF_SOURCE_READERF_STREAMTICK) {
@@ -154,6 +163,11 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
 
                     if (data->pixelsDirty) {
                         data->pixelsDirty->store(true);
+                    }
+
+                    // Timestamped frame queue (no-op unless enabled)
+                    if (data->frameQueue) {
+                        data->frameQueue->push(data->backBuffer, w, h, arrivalUs);
                     }
                 }
 
@@ -363,6 +377,7 @@ bool VideoGrabber::setupPlatform() {
     // ターゲット設定（updateDelegatePixels で設定される）
     data->mainMutex = &mutex_;
     data->pixelsDirty = &pixelsDirty_;
+    data->frameQueue = frameQueue_.get();
 
     // キャプチャスレッドを開始
     data->running = true;

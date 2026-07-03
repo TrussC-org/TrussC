@@ -10,6 +10,8 @@
 
 #include "TrussC.h"
 
+#include <chrono>
+
 namespace trussc {
 
 // ---------------------------------------------------------------------------
@@ -45,6 +47,7 @@ struct VideoGrabberPlatformData {
 @property (nonatomic, assign) unsigned char* targetPixels;
 @property (nonatomic, assign) std::atomic<bool>* pixelsDirty;
 @property (nonatomic, assign) std::mutex* mutex;
+@property (nonatomic, assign) trussc::internal::GrabberFrameQueue* frameQueue;
 @end
 
 @implementation TrussCVideoGrabberDelegate
@@ -53,6 +56,11 @@ struct VideoGrabberPlatformData {
 didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
        fromConnection:(AVCaptureConnection*)connection {
     if (!_platformData || !_targetPixels || !_pixelsDirty || !_mutex) return;
+
+    // Stamp arrival time on the capture thread, BEFORE any processing.
+    // This stays accurate even when the app's main loop stalls.
+    uint64_t arrivalUs = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 
     CVImageBufferRef imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
     if (!imageBuffer) return;
@@ -111,6 +119,11 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         }
 
         _pixelsDirty->store(true);
+
+        // Timestamped frame queue (no-op unless enabled via setFrameQueueSize)
+        if (_frameQueue) {
+            _frameQueue->push(_platformData->backBuffer, (int)width, (int)height, arrivalUs);
+        }
     }
 
     CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
@@ -262,6 +275,7 @@ bool VideoGrabber::setupPlatform() {
             float smallestDist = 99999999.0f;
             int bestW = 0, bestH = 0;
             AVCaptureDeviceFormat* bestFormat = nil;
+            bool bestFpsOk = false;
 
             if (verbose_) {
                 NSLog(@"VideoGrabber: Searching for %dx%d in device formats...", requestedWidth_, requestedHeight_);
@@ -278,8 +292,24 @@ bool VideoGrabber::setupPlatform() {
                 int tw = dimensions.width;
                 int th = dimensions.height;
 
-                // 完全一致なら即採用
-                if (tw == requestedWidth_ && th == requestedHeight_) {
+                // Does this format support the desired frame rate? Same
+                // resolution is often listed multiple times with different
+                // fps ranges (e.g. 720p@60 and 720p@90), so fps must be part
+                // of format selection, not just set afterwards.
+                bool fpsOk = true;
+                if (desiredFrameRate_ > 0) {
+                    fpsOk = false;
+                    for (AVFrameRateRange* range in format.videoSupportedFrameRateRanges) {
+                        if (std::floor(range.minFrameRate) <= desiredFrameRate_ &&
+                            std::ceil(range.maxFrameRate) >= desiredFrameRate_) {
+                            fpsOk = true;
+                            break;
+                        }
+                    }
+                }
+
+                // 完全一致（解像度＋fps）なら即採用
+                if (tw == requestedWidth_ && th == requestedHeight_ && fpsOk) {
                     bestW = tw;
                     bestH = th;
                     bestFormat = format;
@@ -289,16 +319,20 @@ bool VideoGrabber::setupPlatform() {
                     break;
                 }
 
-                // ユークリッド距離で最も近いフォーマットを探す
+                // ユークリッド距離で最も近いフォーマットを探す。
+                // 解像度が主、fps対応はタイブレーク（解像度を勝手に落として
+                // まで fps を優先しない）
                 float dx = (float)(tw - requestedWidth_);
                 float dy = (float)(th - requestedHeight_);
                 float dist = sqrtf(dx * dx + dy * dy);
 
-                if (dist < smallestDist) {
+                if (dist < smallestDist ||
+                    (dist == smallestDist && fpsOk && !bestFpsOk)) {
                     smallestDist = dist;
                     bestW = tw;
                     bestH = th;
                     bestFormat = format;
+                    bestFpsOk = fpsOk;
                 }
             }
 
@@ -324,27 +358,49 @@ bool VideoGrabber::setupPlatform() {
                 }
             }
 
-            // フレームレート設定（oF方式）
+            // フレームレート設定
+            // AVFoundation はレンジ内の厳密な CMTime しか受け付けない
+            // （例: BRIO の 60fps レンジは実際には 60.000240fps の離散値で、
+            //  CMTimeMake(1, 60) はレンジ外として NSException を投げる）。
+            // なので必ずレンジ自身の frameDuration を使う。
             if (desiredFrameRate_ > 0) {
-                AVFrameRateRange* desiredRange = nil;
                 NSArray* supportedFrameRates = data->device.activeFormat.videoSupportedFrameRateRanges;
+                AVFrameRateRange* bestRange = nil;
+                float bestClamped = 0.0f;
+                float bestDiff = 1e9f;
 
                 for (AVFrameRateRange* range in supportedFrameRates) {
-                    if (std::floor(range.minFrameRate) <= desiredFrameRate_ &&
-                        std::ceil(range.maxFrameRate) >= desiredFrameRate_) {
-                        desiredRange = range;
-                        break;
+                    // clamp desired into this range, pick the range needing
+                    // the least clamping
+                    float clamped = (float)desiredFrameRate_;
+                    if (clamped > (float)range.maxFrameRate) clamped = (float)range.maxFrameRate;
+                    if (clamped < (float)range.minFrameRate) clamped = (float)range.minFrameRate;
+                    float diff = fabsf(clamped - (float)desiredFrameRate_);
+                    if (diff < bestDiff) {
+                        bestDiff = diff;
+                        bestRange = range;
+                        bestClamped = clamped;
                     }
                 }
 
-                if (desiredRange) {
-                    data->device.activeVideoMinFrameDuration = CMTimeMake(1, desiredFrameRate_);
-                    data->device.activeVideoMaxFrameDuration = CMTimeMake(1, desiredFrameRate_);
-                    if (verbose_) {
+                if (bestRange) {
+                    CMTime duration;
+                    if ((float)desiredFrameRate_ >= (float)bestRange.maxFrameRate) {
+                        duration = bestRange.minFrameDuration;   // fastest the range allows
+                    } else if ((float)desiredFrameRate_ <= (float)bestRange.minFrameRate) {
+                        duration = bestRange.maxFrameDuration;   // slowest the range allows
+                    } else {
+                        // strictly inside a continuous range - the exact value is valid
+                        duration = CMTimeMake(1, desiredFrameRate_);
+                    }
+                    data->device.activeVideoMinFrameDuration = duration;
+                    data->device.activeVideoMaxFrameDuration = duration;
+                    if (bestDiff > 0.5f) {
+                        NSLog(@"VideoGrabber: Requested frame rate %d not supported, using %.1f fps",
+                              desiredFrameRate_, bestClamped);
+                    } else if (verbose_) {
                         NSLog(@"VideoGrabber: Set frame rate to %d fps", desiredFrameRate_);
                     }
-                } else if (verbose_) {
-                    NSLog(@"VideoGrabber: Requested frame rate %d not supported", desiredFrameRate_);
                 }
             }
 
@@ -397,6 +453,7 @@ bool VideoGrabber::setupPlatform() {
         delegate.targetPixels = pixels_;
         delegate.pixelsDirty = &pixelsDirty_;
         delegate.mutex = &mutex_;
+        delegate.frameQueue = frameQueue_.get();
         data->delegate = delegate;
 
         [data->output setSampleBufferDelegate:delegate queue:data->captureQueue];
