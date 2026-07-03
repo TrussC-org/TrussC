@@ -17,7 +17,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Path-based change detector. Emits docs_only=true when EVERY file in the diff
+  # is documentation (any *.md, or anything under docs/ — prose + doc tooling).
+  # The heavy build jobs gate on this so a docs-only change skips the ~20min
+  # compile matrix while the cheap reference-check still runs. Conservative:
+  # anything that isn't clearly a doc (and every non-diff event, e.g.
+  # workflow_dispatch) counts as code and builds everything.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.detect.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          event="${{ github.event_name }}"
+          if [ "$event" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          elif [ "$event" = "push" ]; then
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          else
+            echo "Non-diff event ($event): building everything."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # New branch / unknown base (all-zero SHA or missing object): build all.
+          if [ "$base" = "0000000000000000000000000000000000000000" ] || \
+             ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "Base $base unavailable: building everything."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          files=$(git diff --name-only "${base}...${head}")
+          echo "Changed files:"
+          echo "$files"
+
+          if [ -z "$files" ]; then
+            echo "Empty diff: building everything (conservative)."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          docs_only=true
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              *.md) ;;       # markdown anywhere (README, addon docs, docs/*)
+              docs/*) ;;     # docs tree: prose, images, and doc tooling
+              *)
+                echo "Non-doc change -> full build: $f"
+                docs_only=false
+                break
+                ;;
+            esac
+          done <<< "$files"
+
+          echo "Result: docs_only=$docs_only"
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -157,6 +226,8 @@ jobs:
           fi
 
   build-android:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     timeout-minutes: 60
     runs-on: ubuntu-latest
 
@@ -240,6 +311,8 @@ jobs:
         run: ccache -s || true
 
   build-web:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     timeout-minutes: 120
     runs-on: ubuntu-latest
 
