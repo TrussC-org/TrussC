@@ -1428,7 +1428,7 @@ void beginShape()  // Begin drawing a shape
 void beginStroke()  // Begin drawing a stroke (uses StrokeMesh internally)
 void drawArc(Vec3 center, float radius, float angleBegin, float angleEnd) [+1]  // Draw arc (partial circle, angles in radians)
 void drawBezier(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw bezier curve (cubic with 4 points, quadratic with 3, or N-th order via vector)
-void drawBitmapString(const std::string & text, Vec3 pos, bool screenFixed = true) [+5]  // Draw text
+void drawBitmapString(const std::string & text, Vec3 pos, bool screenFixed = true) [+5]  // Draw text. The Vec3 overloads project through the current camera context — a screen-aligned 3D label; z=0 on the default screen matches plain 2D; behind-camera draws nothing; screenFixed picks fixed-pixel vs perspective size
 void drawBitmapStringHighlight(const std::string & text, float x, float y, const Color & background = Color(0, 0, 0), const Color & foreground = Color(1, 1, 1))  // Draw text with background highlight
 void drawBox(float w, float h, float d) [+5]  // Draw 3D box (respects fill/noFill)
 void drawCircle(Vec3 center, float radius) [+1]  // Draw circle
@@ -1759,7 +1759,7 @@ void setWindowPosition(int x, int y) [macos,windows]  // Set window position in 
 void setWindowSize(int width, int height)  // Set window size
 void setWindowSizeLogical(int width, int height)  // Resize the window to the given logical size (logical pixels)
 void setWindowTitle(const std::string & title)  // Set window title
-bool startRecording(const std::string & path, const VideoRecordSettings & settings = {}) [+1] [macos,windows,linux,android,ios]  // Start recording the window to a video file (native encoder, no ffmpeg)
+bool startRecording(const std::string & path, const VideoRecordSettings & settings = {}) [+1] [macos,windows,linux,android,ios]  // Start recording the window to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited
 void stopRecording()  // Stop the current recording and finalize the file
 void toggleFullscreen()  // Toggle fullscreen mode
 ```
