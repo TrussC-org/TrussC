@@ -9940,8 +9940,8 @@ description.en = "Drain all frames captured since the last call (appended to the
 description.ja = "前回呼び出し以降にキャプチャされた全フレームを取り出す（渡した vector に古い順で追記、件数を返す）。各 GrabberFrame はキャプチャスレッドで打刻された monotonic なタイムスタンプを持つので、メインループが詰まっても時刻は正確なままで、カメラがアプリループより速くてもフレームを取りこぼさない。setFrameQueueSize() > 0 が前提。getPixels()/isFrameNew() には影響しない"
 description.ko = "지난 호출 이후 캡처된 모든 프레임을 꺼냄(전달한 vector에 오래된 순으로 추가, 개수 반환). 각 GrabberFrame은 캡처 스레드에서 기록된 단조 타임스탬프를 가지므로 메인 루프가 멈춰도 시각이 정확하고, 카메라가 앱 루프보다 빨라도 프레임을 잃지 않음. setFrameQueueSize() > 0 필요. getPixels()/isFrameNew()에는 영향 없음"
 related = ["GrabberFrame", "VideoGrabber::setFrameQueueSize", "VideoGrabber::getPixels", "VideoGrabber::isFrameNew"]
-platform_note.en = "Frames are pushed by the platform capture callback. Implemented on macOS (AVFoundation capture queue); Windows/Linux/web backends do not push yet, so the queue stays empty there."
-platform_note.ja = "フレームはプラットフォームのキャプチャコールバックが積む。macOS（AVFoundationキャプチャキュー）で実装済み。win/linux/web バックエンドはまだ積まないため、そこでは常に空。"
+platform_note.en = "Frames are pushed by the platform capture thread: macOS (AVFoundation capture queue), Windows (Media Foundation reader thread), Linux (V4L2 capture thread). web/android do not push (no capture thread), so the queue stays empty there."
+platform_note.ja = "フレームはプラットフォームのキャプチャスレッドが積む。macOS（AVFoundation）・Windows（Media Foundation リーダースレッド）・Linux（V4L2 キャプチャスレッド）で実装済み。web/android はキャプチャスレッドが無いため積まれず、常に空。"
 
 ["VideoGrabber::getDesiredFrameRate"]
 description.en = "Return the requested frame rate (-1 if unspecified)"

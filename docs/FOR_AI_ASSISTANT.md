@@ -1176,7 +1176,7 @@ for (auto& f : frames) {
 }
 ```
 
-Key properties: timestamps are **monotonic (`std::chrono::steady_clock`), not wall-clock**, and are stamped the moment the frame arrives from the driver — they stay truthful even if the main loop freezes for seconds. When the queue is full the oldest frame is dropped (capture never blocks). This is the right tool for syncing camera frames against an external timeline (sensor logs, audio, other clocks); for a plain live preview, `update()` + `draw()` remains simpler. Currently pushed by the **macOS** backend; other platforms keep the queue empty for now.
+Key properties: timestamps are **monotonic (`std::chrono::steady_clock`), not wall-clock**, and are stamped the moment the frame arrives from the driver — they stay truthful even if the main loop freezes for seconds. When the queue is full the oldest frame is dropped (capture never blocks). This is the right tool for syncing camera frames against an external timeline (sensor logs, audio, other clocks); for a plain live preview, `update()` + `draw()` remains simpler. Pushed by the capture threads on **macOS / Windows / Linux**; web and Android have no capture thread and keep the queue empty.
 
 ## Networking
 
