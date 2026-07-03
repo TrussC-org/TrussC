@@ -1159,7 +1159,7 @@ Pick by need: **`extractFrame` = frame-accurate but heavier; `extractKeyFrame` =
 
 ⚠️ These open a fresh decode context per call, so they are for **one-off frame grabs only — never for continuous playback**. To play a video use `load()` + `play()` + `update()` and draw the player each frame.
 
-### How do I get every camera frame with accurate timestamps? (camera faster than the app loop / syncing video to sensor data)
+### How do I get every camera frame with accurate timestamps? (measurement with a camera / camera faster than the app loop / syncing video to sensor data)
 
 `getPixels()`/`isFrameNew()` only ever see the **latest** frame: a 90 fps camera polled by a 60 fps loop silently loses frames, and the "frame time" you'd stamp yourself in `update()` lies whenever the main loop stalls. For frame-exact capture, enable the **timestamped frame queue**:
 
@@ -1176,7 +1176,7 @@ for (auto& f : frames) {
 }
 ```
 
-Key properties: timestamps are **monotonic (`std::chrono::steady_clock`), not wall-clock**, and are stamped the moment the frame arrives from the driver — they stay truthful even if the main loop freezes for seconds. When the queue is full the oldest frame is dropped (capture never blocks). This is the right tool for syncing camera frames against an external timeline (sensor logs, audio, other clocks); for a plain live preview, `update()` + `draw()` remains simpler. Pushed by the capture threads on **macOS / Windows / Linux**; web and Android have no capture thread and keep the queue empty.
+Key properties: timestamps are **monotonic (`std::chrono::steady_clock`), not wall-clock**, and are stamped the moment the frame arrives from the driver — they stay truthful even if the main loop freezes for seconds. When the queue is full the oldest frame is dropped (capture never blocks). This is the right tool for measurement-grade capture — syncing camera frames against an external timeline (sensor logs, audio, other clocks), motion analysis, latency measurement; for a plain live preview, `update()` + `draw()` remains simpler. Pushed by the capture threads on **macOS / Windows / Linux**; web and Android have no capture thread and keep the queue empty.
 
 ## Networking
 
