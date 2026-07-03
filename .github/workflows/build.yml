@@ -25,19 +25,54 @@ jobs:
         include:
           - os: macos-latest
             preset: macos
+            launcher: ccache
           # Pinned to 2022: windows-latest now redirects to a VS2026 runner,
           # where projectGenerator's VS-project generation falls back to the
           # "Visual Studio 17 2022" generator and fails (VS2022 absent). Revert
           # to windows-latest once projectGenerator supports VS2026.
+          #
+          # CI builds examples with the Ninja generator (TRUSSC_CMAKE_GENERATOR)
+          # instead of the Visual Studio generator: the compiler-launcher hook
+          # sccache relies on is ignored by the VS generator, and Ninja + cl.exe
+          # (from vcvars) is version-agnostic anyway. Local dev is unchanged.
           - os: windows-2022
             preset: windows
+            launcher: sccache
+            cmake_gen: Ninja
           - os: ubuntu-latest
             preset: linux
+            launcher: ccache
 
     runs-on: ${{ matrix.os }}
 
+    env:
+      TRUSSC_CMAKE_GENERATOR: ${{ matrix.cmake_gen }}
+
     steps:
       - uses: actions/checkout@v5
+
+      # Compiler cache: ccache on mac/linux, sccache on Windows/MSVC (Release
+      # builds carry no /Zi, so cl objects are cacheable). Wires the compiler
+      # launcher into every cmake invocation (trusscli + all examples/tests) via
+      # the CMAKE_*_COMPILER_LAUNCHER env vars, which CMake reads at configure
+      # time. The action handles install + restore/save + restore-key prefix.
+      - name: Setup compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: ${{ matrix.launcher }}
+          key: ${{ matrix.os }}-build
+          max-size: 800M
+
+      - name: Enable compiler launcher
+        shell: bash
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          # Hash the compiler by content, not mtime: a fresh runner VM installs
+          # the same compiler at a different mtime, which otherwise invalidates
+          # every restored ccache entry (macOS hit this: 8% hits despite a warm
+          # cache). No-op for sccache (ignores CCACHE_*).
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
       - name: Cache build directories
         uses: actions/cache@v5
@@ -111,12 +146,37 @@ jobs:
         shell: bash
         run: ./examples/build_all.py --test-hot-reload --verbose
 
+      - name: Compiler cache stats
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ matrix.launcher }}" = "sccache" ]; then
+            sccache --show-stats || true
+          else
+            ccache -s || true
+          fi
+
   build-android:
     timeout-minutes: 60
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Setup compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: ccache
+          key: android-build
+          max-size: 800M
+
+      - name: Enable compiler launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          # Hash the compiler by content, not mtime, so restored entries survive
+          # a runner-VM swap (see build job for the macOS symptom).
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
       # The NDK shipped with ubuntu-latest runners is too old for sol2's
       # libc++ trait checks (causes "substitution failure" errors when
@@ -175,12 +235,31 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
           cmake --build . -- -j$(nproc)
 
+      - name: Compiler cache stats
+        if: always()
+        run: ccache -s || true
+
   build-web:
     timeout-minutes: 120
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Setup compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: ccache
+          key: web-build
+          max-size: 800M
+
+      - name: Enable compiler launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          # Hash the compiler by content, not mtime, so restored entries survive
+          # a runner-VM swap (see build job for the macOS symptom).
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
       - name: Cache build directories
         uses: actions/cache@v5
@@ -223,6 +302,10 @@ jobs:
              ./examples/build_all.py --web-only --test-only --verbose
           fi
 
+      - name: Compiler cache stats
+        if: always()
+        run: ccache -s || true
+
   # Verify the API reference (docs/reference/) against the real C++ headers.
   # The structure is DERIVED from the clang AST, so signatures can't drift — the
   # old signature-probe is obsolete. check.js instead guards the prose sidecar:
@@ -230,6 +313,7 @@ jobs:
   #   orphan a sidecar key with no such symbol    (renamed/removed; hard)
   #   undocumented a public symbol with no prose  (soft report, not a gate yet)
   # structure.js runs the same clang AST dump the probe used (macOS: clang + SDK).
+  # Cheap job — always runs, including on docs-only changes (not gated).
   reference-check:
     timeout-minutes: 20
     runs-on: macos-latest

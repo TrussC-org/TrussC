@@ -41,10 +41,15 @@ ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 def get_platform_info():
     system = platform.system()
     if system == "Windows":
+        # Default to the VS generator for local dev, but allow CI (or anyone) to
+        # override it via TRUSSC_CMAKE_GENERATOR — e.g. "Ninja", which lets
+        # sccache cache compilation (the compiler-launcher hook is ignored by the
+        # Visual Studio generator). Requires cl.exe/ninja on PATH (vcvars).
+        win_gen = os.environ.get("TRUSSC_CMAKE_GENERATOR") or "Visual Studio 17 2022"
         return {
             "os": "windows",
             "build_dir": "build-windows",
-            "cmake_generator": "Visual Studio 17 2022",
+            "cmake_generator": win_gen,
             "pg_bin_path": ["tools", "bin", "trusscli.exe"]
         }
     elif system == "Darwin":
@@ -177,6 +182,21 @@ def run_command(cmd, cwd, verbose=False):
                 print(e.stdout.decode('utf-8', errors='replace'))
         return False
 
+def cmake_config_cmd(build_dir_name, platform_info):
+    # Assemble the `cmake -S . -B <dir>` configure command for the current
+    # platform/generator. Single-config generators (Ninja, Makefiles) need the
+    # build type pinned at configure time (--config is multi-config only), so
+    # add it when a non-multi-config generator is explicitly selected. The
+    # default (None) path — mac/linux Makefiles — is left untouched.
+    cmd = ["cmake", "-S", ".", "-B", build_dir_name]
+    gen = platform_info["cmake_generator"]
+    if gen:
+        cmd.extend(["-G", gen])
+        if "Visual Studio" not in gen and "Xcode" not in gen:
+            cmd.append("-DCMAKE_BUILD_TYPE=Release")
+    return cmd
+
+
 def build_and_run_test(test_dir, pg_bin, platform_info, args):
     # Build a native console test project, then RUN it (non-zero exit = failure).
     # Returns (ok, stage) where stage names what failed for the summary.
@@ -185,9 +205,7 @@ def build_and_run_test(test_dir, pg_bin, platform_info, args):
         return False, "update"
 
     build_dir_name = platform_info["build_dir"]
-    cmd_config = ["cmake", "-S", ".", "-B", build_dir_name]
-    if platform_info["cmake_generator"]:
-        cmd_config.extend(["-G", platform_info["cmake_generator"]])
+    cmd_config = cmake_config_cmd(build_dir_name, platform_info)
     if not run_command(cmd_config, cwd=test_dir, verbose=args.verbose):
         return False, "configure"
 
@@ -212,9 +230,7 @@ def build_and_run_unit_test(test_dir, pg_bin, platform_info, args):
     # Build a standalone CMake test (its own committed CMakeLists.txt, no
     # trusscli), then RUN it (non-zero exit = failure). pg_bin is unused.
     build_dir_name = platform_info["build_dir"]
-    cmd_config = ["cmake", "-S", ".", "-B", build_dir_name]
-    if platform_info["cmake_generator"]:
-        cmd_config.extend(["-G", platform_info["cmake_generator"]])
+    cmd_config = cmake_config_cmd(build_dir_name, platform_info)
     if not run_command(cmd_config, cwd=test_dir, verbose=args.verbose):
         return False, "configure"
 
@@ -395,10 +411,8 @@ def main():
             if args.clean and os.path.exists(build_dir):
                 shutil.rmtree(build_dir)
 
-            cmd_config = ["cmake", "-S", ".", "-B", build_dir_name]
-            if platform_info["cmake_generator"]:
-                cmd_config.extend(["-G", platform_info["cmake_generator"]])
-            
+            cmd_config = cmake_config_cmd(build_dir_name, platform_info)
+
             if not run_command(cmd_config, cwd=example_dir, verbose=args.verbose):
                 Colors.print(f"  Native Configure failed!", Colors.RED)
                 failed_count += 1
