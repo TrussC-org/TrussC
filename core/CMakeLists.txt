@@ -1,10 +1,10 @@
-# TrussC v0.0.1
+# TrussC
 # A cross-platform creative coding framework
 
 cmake_minimum_required(VERSION 3.20)
 
 # Start with C/CXX only — OBJC/OBJCXX enabled after project() if on macOS
-project(TrussC VERSION 0.0.1 LANGUAGES C CXX)
+project(TrussC LANGUAGES C CXX)
 # Toolchain variables (ANDROID, APPLE) are available after project()
 if(APPLE AND NOT ANDROID)
     enable_language(OBJC OBJCXX)
@@ -17,6 +17,29 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # TC_ROOT (root directory containing core and addons)
 get_filename_component(TC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 set(TC_ROOT "${TC_ROOT}" CACHE PATH "TrussC root directory" FORCE)
+
+# =============================================================================
+# Version — git tags are the single source of truth
+# =============================================================================
+# Fallback chain: git describe → .git_archival.txt (GitHub "Download ZIP",
+# substituted by git archive via export-subst) → "unknown"
+execute_process(
+    COMMAND git describe --tags --always --dirty --match "v[0-9]*"
+    WORKING_DIRECTORY ${TC_ROOT}
+    OUTPUT_VARIABLE TC_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT TC_VERSION AND EXISTS "${TC_ROOT}/.git_archival.txt")
+    file(READ "${TC_ROOT}/.git_archival.txt" _tc_archival)
+    if(NOT _tc_archival MATCHES "Format:")   # still contains Format: = unsubstituted checkout
+        string(REGEX MATCH "describe: ([^\n]+)" _ "${_tc_archival}")
+        set(TC_VERSION "${CMAKE_MATCH_1}")
+    endif()
+endif()
+if(NOT TC_VERSION)
+    set(TC_VERSION "unknown")
+endif()
+message(STATUS "TrussC version: ${TC_VERSION}")
 
 # =============================================================================
 # Platform detection
@@ -124,6 +147,10 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${TC_ALL_SOURCES})
 add_library(TrussC STATIC ${TC_ALL_SOURCES})
 
 add_library(tc::TrussC ALIAS TrussC)
+
+# Bake the git-derived version into tc::getVersion() (tcVersion.h).
+# PUBLIC so user apps and addons see the same value.
+target_compile_definitions(TrussC PUBLIC TC_VERSION_STRING="${TC_VERSION}")
 
 # iOS: sound sources include ObjC headers (AVFoundation) via miniaudio,
 # so they must be compiled as Objective-C++

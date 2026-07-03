@@ -9377,24 +9377,6 @@ description.en = "Stop the receive thread"
 description.ja = "受信スレッドを停止"
 description.ko = "수신 스레드를 정지"
 
-["VERSION_MAJOR"]
-keywords = ["semver", "release"]
-description.en = "TrussC major version number"
-description.ja = "TrussC のメジャーバージョン番号"
-description.ko = "TrussC 메이저 버전 번호"
-
-["VERSION_MINOR"]
-keywords = ["semver", "release"]
-description.en = "TrussC minor version number"
-description.ja = "TrussC のマイナーバージョン番号"
-description.ko = "TrussC 마이너 버전 번호"
-
-["VERSION_PATCH"]
-keywords = ["semver", "release"]
-description.en = "TrussC patch version number"
-description.ja = "TrussC のパッチバージョン番号"
-description.ko = "TrussC 패치 버전 번호"
-
 ["VSYNC"]
 keywords = ["frame rate", "fps", "refresh", "sync"]
 description.en = "Frame-rate sentinel: sync to the monitor refresh rate"
@@ -12885,6 +12867,14 @@ keywords = ["tick", "logic", "number", "total"]
 description.en = "Get the number of update() calls since the app started"
 description.ja = "アプリ開始からの update() 呼び出し回数を取得"
 description.ko = "앱 시작 이후 update() 호출 횟수를 얻음"
+
+["getVersion"]
+category = "utility"
+keywords = ["semver", "release", "git", "tag", "describe"]
+of = ["ofGetVersionInfo"]
+description.en = "TrussC version string from git describe (e.g. \"v0.6.2\" or \"v0.6.2-14-gabc123\")"
+description.ja = "git describe 由来の TrussC バージョン文字列（例: \"v0.6.2\"、\"v0.6.2-14-gabc123\"）"
+description.ko = "git describe 기반 TrussC 버전 문자열 (예: \"v0.6.2\", \"v0.6.2-14-gabc123\")"
 
 ["getWeekday"]
 category = "time_current"

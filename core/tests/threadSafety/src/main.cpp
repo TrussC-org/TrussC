@@ -122,6 +122,75 @@ int main() {
         check("Event Deliver::Main: every listener ran on main", allOnMain.load());
     }
 
+    // --- 3b. Deliver::Main honors listener lifetime across the queue ---
+    // A marshalled call sits in the main-thread queue for up to a frame. If the
+    // EventListener dies in that window, the queued call must be dropped —
+    // otherwise it runs a callback whose captures (typically `this`) dangle.
+    {
+        // Listener destroyed between notify() and drain
+        {
+            Event<int> ev;
+            atomic<int> ran{0};
+            {
+                auto L = ev.listen([&](int&) { ran.fetch_add(1); }, Deliver::Main);
+                thread t([&] { int v = 1; ev.notify(v); });   // queues the call
+                t.join();
+            }   // L destroyed here, queued call still pending
+            internal::drainMainThreadQueue();
+            check("Deliver::Main: queued call dropped after listener death", ran.load() == 0);
+        }
+
+        // clear() between notify() and drain
+        {
+            Event<int> ev;
+            atomic<int> ran{0};
+            auto L = ev.listen([&](int&) { ran.fetch_add(1); }, Deliver::Main);
+            thread t([&] { int v = 1; ev.notify(v); });
+            t.join();
+            ev.clear();
+            internal::drainMainThreadQueue();
+            check("Deliver::Main: queued call dropped after clear()", ran.load() == 0);
+        }
+
+        // Event itself destroyed between notify() and drain
+        {
+            atomic<int> ran{0};
+            EventListener L;
+            {
+                Event<int> ev;
+                L = ev.listen([&](int&) { ran.fetch_add(1); }, Deliver::Main);
+                thread t([&] { int v = 1; ev.notify(v); });
+                t.join();
+            }   // ev destroyed, queued call still pending
+            internal::drainMainThreadQueue();
+            check("Deliver::Main: queued call dropped after Event death", ran.load() == 0);
+        }
+
+        // Event<void>: listener destroyed between notify() and drain
+        {
+            Event<void> ev;
+            atomic<int> ran{0};
+            {
+                auto L = ev.listen([&] { ran.fetch_add(1); }, Deliver::Main);
+                thread t([&] { ev.notify(); });
+                t.join();
+            }
+            internal::drainMainThreadQueue();
+            check("Deliver::Main (void): queued call dropped after listener death", ran.load() == 0);
+        }
+
+        // Positive control: listener still alive at drain → call runs
+        {
+            Event<int> ev;
+            atomic<int> ran{0};
+            auto L = ev.listen([&](int&) { ran.fetch_add(1); }, Deliver::Main);
+            thread t([&] { int v = 1; ev.notify(v); });
+            t.join();
+            internal::drainMainThreadQueue();
+            check("Deliver::Main: queued call runs while listener alive", ran.load() == 1);
+        }
+    }
+
     // --- 4. Headless runtime stress: worker marshals tree edits, no crash ---
     {
         g_stop.store(false);

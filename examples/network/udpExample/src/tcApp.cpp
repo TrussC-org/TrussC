@@ -14,17 +14,18 @@ void tcApp::setup() {
     logNotice("tcApp") << "Press C to clear messages";
     logNotice("tcApp") << "==========================";
 
-    // Listen for receive events
+    // Listen for receive events.
+    // onReceive fires on the receive thread; Deliver::Main marshals the
+    // listener onto the main thread, so app state can be touched without locks.
     receiveListener = receiver.onReceive.listen([this](UdpReceiveEventArgs& e) {
         string msg(e.data.begin(), e.data.end());
         logNotice("UdpReceiver") << "Received from " << e.remoteHost << ":" << e.remotePort << " -> " << msg;
 
-        lock_guard<mutex> lock(messagesMutex);
         receivedMessages.push_back(e.remoteHost + ":" + to_string(e.remotePort) + " -> " + msg);
         if (receivedMessages.size() > 20) {
             receivedMessages.erase(receivedMessages.begin());
         }
-    });
+    }, Deliver::Main);
 
     // Listen for error events
     errorListener = receiver.onError.listen([](UdpErrorEventArgs& e) {
@@ -69,7 +70,6 @@ void tcApp::draw() {
     y += 25;
 
     setColor(0.86f);
-    lock_guard<mutex> lock(messagesMutex);
     for (const auto& msg : receivedMessages) {
         drawBitmapString(msg, 50, y);
         y += 18;
@@ -88,7 +88,6 @@ void tcApp::keyPressed(int key) {
             logNotice("tcApp") << "Sent: " << msg;
         }
     } else if (key == 'C') {
-        lock_guard<mutex> lock(messagesMutex);
         receivedMessages.clear();
         sendCount = 0;
         logNotice("tcApp") << "Messages cleared";

@@ -20,7 +20,6 @@ private:
     EventListener errorListener;
 
     std::vector<std::string> receivedMessages;
-    std::mutex messagesMutex;
 
     int sendCount = 0;
 };

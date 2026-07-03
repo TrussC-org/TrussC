@@ -33,7 +33,7 @@ void tcApp::setup() {
         circle->vy = 1.0f + i * 0.4f;
         circle->boundsWidth = innerBox_->getWidth();
         circle->boundsHeight = innerBox_->getHeight();
-        circle->color = colorFromHSB(i * 0.15f, 0.7f, 0.9f);
+        circle->color = Color::fromHSB(i * 0.15f, 0.7f, 0.9f);
         innerBox_->addChild(circle);
         circles_.push_back(circle);
     }
