@@ -469,6 +469,11 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
     # Link TrussC
     target_link_libraries(${PROJECT_NAME} PRIVATE tc::TrussC)
 
+    # The app's own src/ is an include root, so projects organized into
+    # subfolders can include across them as "subdir/File.h". The hot-reload
+    # guest target already gets this; keep the normal build consistent.
+    target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
     # Opt-in compiler warnings on the USER's own sources (`trusscli build
     # --warnings` passes -DTRUSSC_WARNINGS=ON). TrussC / sokol / stb headers are
     # SYSTEM includes (see core/CMakeLists.txt), so only the app's code is
