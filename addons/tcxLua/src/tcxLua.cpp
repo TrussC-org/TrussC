@@ -142,7 +142,7 @@ void tcxLua::setBindings(const std::shared_ptr<sol::state>& lua){
 void tcxLua::setConstBindings(const std::shared_ptr<sol::state>& lua){
     auto&& l = *lua;
     l["TAU"] = TAU;
-    l["PI"] = PI;
+    l["PI"] = HALF_TAU;   // Lua keeps PI; HALF_TAU avoids the deprecated C++ constant
     l["HALF_TAU"] = HALF_TAU;
     l["QUARTER_TAU"] = QUARTER_TAU;
 }

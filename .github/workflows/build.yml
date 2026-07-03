@@ -16,6 +16,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Uses of [[deprecated]] TrussC API in the repo's own sources
+  # (core/examples/tests, all jobs incl. web/android) fail the build
+  # (GCC/Clang only; see core/CMakeLists.txt + trussc_app.cmake).
+  # User projects never set this.
+  TC_DEPRECATED_ERRORS: 1
+
 jobs:
   # Path-based change detector. Emits docs_only=true when EVERY file in the diff
   # is documentation (any *.md, or anything under docs/ — prose + doc tooling).

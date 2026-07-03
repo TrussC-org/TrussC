@@ -34,10 +34,10 @@ void tcApp::reloadLuaFile(){
                     << result.value().what() << std::endl;
         }
     }else{
-        tcLogError("tcApp") << "Lua file not found at: " << luaScriptPath;
+        logError("tcApp") << "Lua file not found at: " << luaScriptPath;
     }
 #else
-    tcLogWarning("tcApp") << "[file reload] sorry, this platform currently not supported";
+    logWarning("tcApp") << "[file reload] sorry, this platform currently not supported";
 #endif // FILE_RELOAD_SUPPORTED
 }
 

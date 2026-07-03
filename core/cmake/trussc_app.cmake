@@ -489,6 +489,23 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         endif()
     endif()
 
+    # CI gate for the repo's OWN bundled projects (examples/tests): uses of
+    # [[deprecated]] TrussC API become errors so stale API can't ship in
+    # examples. Opt-in via -DTC_DEPRECATED_ERRORS=ON or the
+    # TC_DEPRECATED_ERRORS env var (set in CI); never on for user builds.
+    # GCC/Clang only — MSVC's C4996 also covers CRT "unsafe" warnings.
+    if(NOT DEFINED TC_DEPRECATED_ERRORS AND DEFINED ENV{TC_DEPRECATED_ERRORS})
+        set(TC_DEPRECATED_ERRORS "$ENV{TC_DEPRECATED_ERRORS}")
+    endif()
+    if(TC_DEPRECATED_ERRORS)
+        set(_TC_DEPR_FLAG
+            $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Werror=deprecated-declarations>)
+        target_compile_options(${PROJECT_NAME} PRIVATE ${_TC_DEPR_FLAG})
+        if(TARGET guest)
+            target_compile_options(guest PRIVATE ${_TC_DEPR_FLAG})
+        endif()
+    endif()
+
     # Silence the macOS ld-prime "ignoring duplicate libraries" warning. It
     # fires on the legitimate diamond dependency (app -> TrussC and
     # app -> addon -> TrussC), where libTrussC.a appears twice in the link

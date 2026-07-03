@@ -152,6 +152,20 @@ add_library(tc::TrussC ALIAS TrussC)
 # PUBLIC so user apps and addons see the same value.
 target_compile_definitions(TrussC PUBLIC TC_VERSION_STRING="${TC_VERSION}")
 
+# CI gate: promote uses of [[deprecated]] TrussC API to errors in the
+# framework's OWN sources (core lib TUs here; bundled examples/tests get the
+# same flag via trussc_app.cmake). Opt-in through -DTC_DEPRECATED_ERRORS=ON or
+# the TC_DEPRECATED_ERRORS env var (set in CI) — never on by default, so user
+# builds are unaffected. GCC/Clang only: MSVC folds CRT "unsafe function"
+# warnings into the same C4996, so /we4996 would misfire on fopen etc.
+if(NOT DEFINED TC_DEPRECATED_ERRORS AND DEFINED ENV{TC_DEPRECATED_ERRORS})
+    set(TC_DEPRECATED_ERRORS "$ENV{TC_DEPRECATED_ERRORS}")
+endif()
+if(TC_DEPRECATED_ERRORS)
+    target_compile_options(TrussC PRIVATE
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Werror=deprecated-declarations>)
+endif()
+
 # iOS: sound sources include ObjC headers (AVFoundation) via miniaudio,
 # so they must be compiled as Objective-C++
 if(TC_PLATFORM_IOS AND TC_SOUND_SOURCES)
