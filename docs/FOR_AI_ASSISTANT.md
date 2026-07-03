@@ -1159,6 +1159,25 @@ Pick by need: **`extractFrame` = frame-accurate but heavier; `extractKeyFrame` =
 
 ⚠️ These open a fresh decode context per call, so they are for **one-off frame grabs only — never for continuous playback**. To play a video use `load()` + `play()` + `update()` and draw the player each frame.
 
+### How do I get every camera frame with accurate timestamps? (camera faster than the app loop / syncing video to sensor data)
+
+`getPixels()`/`isFrameNew()` only ever see the **latest** frame: a 90 fps camera polled by a 60 fps loop silently loses frames, and the "frame time" you'd stamp yourself in `update()` lies whenever the main loop stalls. For frame-exact capture, enable the **timestamped frame queue**:
+
+```cpp
+grabber.setFrameQueueSize(16);   // opt-in; 0 (default) = off, zero overhead
+grabber.setup(1280, 720);
+
+// each frame, drain everything captured since the last call:
+vector<GrabberFrame> frames;     // pixels + timestamp travel together (no race)
+grabber.getBufferFrames(frames); // oldest first; each delivered exactly once
+for (auto& f : frames) {
+    // f.pixels (RGBA), f.width, f.height,
+    // f.timestampUs — steady_clock µs, stamped on the CAPTURE thread
+}
+```
+
+Key properties: timestamps are **monotonic (`std::chrono::steady_clock`), not wall-clock**, and are stamped the moment the frame arrives from the driver — they stay truthful even if the main loop freezes for seconds. When the queue is full the oldest frame is dropped (capture never blocks). This is the right tool for syncing camera frames against an external timeline (sensor logs, audio, other clocks); for a plain live preview, `update()` + `draw()` remains simpler. Currently pushed by the **macOS** backend; other platforms keep the queue empty for now.
+
 ## Networking
 
 ### TCP / UDP networking? (brief)
@@ -2441,6 +2460,11 @@ std::string Font::wrapTextVertical(const std::string & text) const  // Insert ha
 sg_pipeline_desc FullscreenShader::createPipelineDesc()  // Build the fullscreen-quad pipeline descriptor (overrides Shader's).
 void FullscreenShader::createVertexBuffer()  // Create the fullscreen-quad vertex/index buffers (overrides Shader's).
 void FullscreenShader::draw()  // Draw a fullscreen quad with this shader applied
+```
+
+### GrabberFrame — One captured camera frame with its capture-time timestamp: RGBA pixels, width/height, and timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getBufferFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time
+
+```cpp
 ```
 
 ### GraphicsBackend — Runtime sokol_gfx backend query. Values are meaningful only after sg_setup() has completed (i.e. after the first setup() call).
@@ -3746,9 +3770,11 @@ const std::string & VideoDeviceInfo::getUniqueId() const  // Get the stable uniq
 bool VideoGrabber::checkCameraPermission()  // Return whether camera access has been granted (macOS 10.14+)
 void VideoGrabber::close()  // Stop the camera and release its resources
 void VideoGrabber::copyToImage(Image & image) const  // Copy the current frame into an Image (allocating/updating it as needed)
+size_t VideoGrabber::getBufferFrames(std::vector<GrabberFrame> & out)  // Drain all frames captured since the last call (appended to the given vector, oldest first; returns the count). Each GrabberFrame carries a monotonic timestamp stamped on the capture thread, so timestamps stay truthful even if the main loop stalls, and no frame is lost when the camera runs faster than the app loop. Requires setFrameQueueSize() > 0; getPixels()/isFrameNew() are unaffected
 int VideoGrabber::getDesiredFrameRate() const  // Return the requested frame rate (-1 if unspecified)
 int VideoGrabber::getDeviceID() const  // Return the selected device ID
 const std::string & VideoGrabber::getDeviceName() const  // Return the name of the active capture device
+size_t VideoGrabber::getFrameQueueSize() const  // Return the frame queue capacity (0 = queueing disabled)
 int VideoGrabber::getHeight() const  // Return the captured frame height in pixels
 unsigned char * VideoGrabber::getPixels() [+1]  // Return a pointer to the current RGBA pixel buffer
 Texture & VideoGrabber::getTexture() [+1]  // Return the texture holding the live camera frame (HasTexture override)
@@ -3761,6 +3787,7 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevices()  // Return the list of 
 void VideoGrabber::requestCameraPermission()  // Request camera access asynchronously (macOS)
 void VideoGrabber::setDesiredFrameRate(int fps)  // Request a capture frame rate; call before setup()
 void VideoGrabber::setDeviceID(int deviceId)  // Select which camera to use; call before setup()
+void VideoGrabber::setFrameQueueSize(size_t maxFrames)  // Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup()
 bool VideoGrabber::setup(int width = 640, int height = 480)  // Start the camera at the requested size. Returns false if permission is not yet granted (it is requested asynchronously); keep calling update() and capture begins once granted
 void VideoGrabber::setVerbose(bool verbose)  // Enable or disable verbose logging
 void VideoGrabber::update()  // Poll for a new frame and upload it to the texture. Call every frame; also completes a setup() that was waiting on permission

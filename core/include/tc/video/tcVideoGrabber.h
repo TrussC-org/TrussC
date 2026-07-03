@@ -12,6 +12,9 @@
 #include <string>
 #include <atomic>
 #include <mutex>
+#include <deque>
+#include <memory>
+#include <cstdint>
 
 namespace trussc {
 
@@ -27,6 +30,50 @@ struct VideoDeviceInfo {
     const std::string& getDeviceName() const { return deviceName; }
     const std::string& getUniqueId() const { return uniqueId; }
 };
+
+// ---------------------------------------------------------------------------
+// GrabberFrame - One captured frame with its capture-time timestamp
+// ---------------------------------------------------------------------------
+// Pixels and timestamp travel together so there is no race between
+// "get the pixels" and "get the time" (the next frame can never slip
+// in between). timestampUs is a monotonic clock (std::chrono::steady_clock)
+// value in microseconds, stamped on the capture thread the moment the frame
+// arrives from the driver - it stays correct even if the app's main loop
+// stalls. It is NOT wall-clock time; use it for interval math only.
+struct GrabberFrame {
+    std::vector<unsigned char> pixels;  // RGBA8
+    int width = 0;
+    int height = 0;
+    uint64_t timestampUs = 0;  // steady_clock, microseconds since epoch of that clock
+};
+
+namespace internal {
+
+// Frame FIFO shared between the capture thread and the main thread.
+// Held by unique_ptr in VideoGrabber so the address stays stable across moves
+// (the capture callback keeps a raw pointer to it).
+struct GrabberFrameQueue {
+    std::mutex mtx;
+    std::deque<GrabberFrame> frames;
+    std::atomic<size_t> maxFrames{0};  // 0 = queueing disabled
+
+    // Called from the capture thread. Drops the oldest frame when full so a
+    // stalled consumer never blocks capture (timestamps stay truthful).
+    void push(const unsigned char* rgba, int w, int h, uint64_t tUs) {
+        size_t cap = maxFrames.load(std::memory_order_relaxed);
+        if (cap == 0 || !rgba || w <= 0 || h <= 0) return;
+        GrabberFrame f;
+        f.width = w;
+        f.height = h;
+        f.timestampUs = tUs;
+        f.pixels.assign(rgba, rgba + (size_t)w * h * 4);
+        std::lock_guard<std::mutex> lock(mtx);
+        while (frames.size() >= cap) frames.pop_front();
+        frames.push_back(std::move(f));
+    }
+};
+
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // VideoGrabber - Webcam input class (inherits HasTexture)
@@ -200,6 +247,42 @@ public:
     unsigned char* getPixels() { return pixels_; }
     const unsigned char* getPixels() const { return pixels_; }
 
+    // =========================================================================
+    // Buffered frames (opt-in, timestamped)
+    // =========================================================================
+    // getPixels()/isFrameNew() only ever see the latest frame: if the camera
+    // runs faster than the app loop (e.g. 90 fps camera, 60 fps app), the
+    // frames in between are lost. Enable the frame queue to receive EVERY
+    // frame, each stamped on the capture thread with a monotonic
+    // (steady_clock) timestamp that stays truthful even when the main loop
+    // stalls.
+
+    // Enable/resize the internal frame queue (0 = disable, the default).
+    // When full, the oldest frame is dropped. Sizing hint: keep it at least
+    // ceil(cameraFps / appFps) + a little headroom; 8-16 is plenty.
+    void setFrameQueueSize(size_t maxFrames) {
+        frameQueue_->maxFrames.store(maxFrames, std::memory_order_relaxed);
+        if (maxFrames == 0) {
+            std::lock_guard<std::mutex> lock(frameQueue_->mtx);
+            frameQueue_->frames.clear();
+        }
+    }
+
+    size_t getFrameQueueSize() const {
+        return frameQueue_->maxFrames.load(std::memory_order_relaxed);
+    }
+
+    // Drain all frames captured since the last call (appended to out, oldest
+    // first). Returns the number of frames appended. Frames are moved out of
+    // the internal queue, so each frame is delivered exactly once.
+    size_t getBufferFrames(std::vector<GrabberFrame>& out) {
+        std::lock_guard<std::mutex> lock(frameQueue_->mtx);
+        size_t n = frameQueue_->frames.size();
+        for (auto& f : frameQueue_->frames) out.push_back(std::move(f));
+        frameQueue_->frames.clear();
+        return n;
+    }
+
     // Copy to Image
     void copyToImage(Image& image) const {
         if (!initialized_ || !pixels_) return;
@@ -253,6 +336,11 @@ private:
     mutable std::mutex mutex_;
     std::atomic<bool> pixelsDirty_{false};
 
+    // Timestamped frame FIFO (see getBufferFrames). unique_ptr keeps the
+    // address stable across moves - the capture callback holds a raw pointer.
+    std::unique_ptr<internal::GrabberFrameQueue> frameQueue_ =
+        std::make_unique<internal::GrabberFrameQueue>();
+
     // Texture (Stream mode)
     Texture texture_;
 
@@ -279,6 +367,8 @@ private:
         pixelsDirty_.store(other.pixelsDirty_.load());
         texture_ = std::move(other.texture_);
         platformHandle_ = other.platformHandle_;
+        frameQueue_ = std::move(other.frameQueue_);
+        other.frameQueue_ = std::make_unique<internal::GrabberFrameQueue>();
 
         // Invalidate source object
         other.pixels_ = nullptr;
