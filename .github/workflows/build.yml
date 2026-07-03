@@ -17,7 +17,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Path-based change detector. Emits docs_only=true when EVERY file in the diff
+  # is documentation (any *.md, or anything under docs/ — prose + doc tooling).
+  # The heavy build jobs gate on this so a docs-only change skips the ~20min
+  # compile matrix while the cheap reference-check still runs. Conservative:
+  # anything that isn't clearly a doc (and every non-diff event, e.g.
+  # workflow_dispatch) counts as code and builds everything.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.detect.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          event="${{ github.event_name }}"
+          if [ "$event" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          elif [ "$event" = "push" ]; then
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          else
+            echo "Non-diff event ($event): building everything."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # New branch / unknown base (all-zero SHA or missing object): build all.
+          if [ "$base" = "0000000000000000000000000000000000000000" ] || \
+             ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "Base $base unavailable: building everything."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          files=$(git diff --name-only "${base}...${head}")
+          echo "Changed files:"
+          echo "$files"
+
+          if [ -z "$files" ]; then
+            echo "Empty diff: building everything (conservative)."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          docs_only=true
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              *.md) ;;       # markdown anywhere (README, addon docs, docs/*)
+              docs/*) ;;     # docs tree: prose, images, and doc tooling
+              *)
+                echo "Non-doc change -> full build: $f"
+                docs_only=false
+                break
+                ;;
+            esac
+          done <<< "$files"
+
+          echo "Result: docs_only=$docs_only"
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -25,19 +94,54 @@ jobs:
         include:
           - os: macos-latest
             preset: macos
+            launcher: ccache
           # Pinned to 2022: windows-latest now redirects to a VS2026 runner,
           # where projectGenerator's VS-project generation falls back to the
           # "Visual Studio 17 2022" generator and fails (VS2022 absent). Revert
           # to windows-latest once projectGenerator supports VS2026.
+          #
+          # CI builds examples with the Ninja generator (TRUSSC_CMAKE_GENERATOR)
+          # instead of the Visual Studio generator: the compiler-launcher hook
+          # sccache relies on is ignored by the VS generator, and Ninja + cl.exe
+          # (from vcvars) is version-agnostic anyway. Local dev is unchanged.
           - os: windows-2022
             preset: windows
+            launcher: sccache
+            cmake_gen: Ninja
           - os: ubuntu-latest
             preset: linux
+            launcher: ccache
 
     runs-on: ${{ matrix.os }}
 
+    env:
+      TRUSSC_CMAKE_GENERATOR: ${{ matrix.cmake_gen }}
+
     steps:
       - uses: actions/checkout@v5
+
+      # Compiler cache: ccache on mac/linux, sccache on Windows/MSVC (Release
+      # builds carry no /Zi, so cl objects are cacheable). Wires the compiler
+      # launcher into every cmake invocation (trusscli + all examples/tests) via
+      # the CMAKE_*_COMPILER_LAUNCHER env vars, which CMake reads at configure
+      # time. The action handles install + restore/save + restore-key prefix.
+      - name: Setup compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: ${{ matrix.launcher }}
+          key: ${{ matrix.os }}-build
+          max-size: 800M
+
+      - name: Enable compiler launcher
+        shell: bash
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          # Hash the compiler by content, not mtime: a fresh runner VM installs
+          # the same compiler at a different mtime, which otherwise invalidates
+          # every restored ccache entry (macOS hit this: 8% hits despite a warm
+          # cache). No-op for sccache (ignores CCACHE_*).
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
       - name: Cache build directories
         uses: actions/cache@v5
@@ -111,12 +215,39 @@ jobs:
         shell: bash
         run: ./examples/build_all.py --test-hot-reload --verbose
 
+      - name: Compiler cache stats
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ matrix.launcher }}" = "sccache" ]; then
+            sccache --show-stats || true
+          else
+            ccache -s || true
+          fi
+
   build-android:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     timeout-minutes: 60
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Setup compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: ccache
+          key: android-build
+          max-size: 800M
+
+      - name: Enable compiler launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          # Hash the compiler by content, not mtime, so restored entries survive
+          # a runner-VM swap (see build job for the macOS symptom).
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
       # The NDK shipped with ubuntu-latest runners is too old for sol2's
       # libc++ trait checks (causes "substitution failure" errors when
@@ -175,12 +306,33 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
           cmake --build . -- -j$(nproc)
 
+      - name: Compiler cache stats
+        if: always()
+        run: ccache -s || true
+
   build-web:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     timeout-minutes: 120
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Setup compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: ccache
+          key: web-build
+          max-size: 800M
+
+      - name: Enable compiler launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          # Hash the compiler by content, not mtime, so restored entries survive
+          # a runner-VM swap (see build job for the macOS symptom).
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
       - name: Cache build directories
         uses: actions/cache@v5
@@ -223,6 +375,10 @@ jobs:
              ./examples/build_all.py --web-only --test-only --verbose
           fi
 
+      - name: Compiler cache stats
+        if: always()
+        run: ccache -s || true
+
   # Verify the API reference (docs/reference/) against the real C++ headers.
   # The structure is DERIVED from the clang AST, so signatures can't drift — the
   # old signature-probe is obsolete. check.js instead guards the prose sidecar:
@@ -230,6 +386,7 @@ jobs:
   #   orphan a sidecar key with no such symbol    (renamed/removed; hard)
   #   undocumented a public symbol with no prose  (soft report, not a gate yet)
   # structure.js runs the same clang AST dump the probe used (macOS: clang + SDK).
+  # Cheap job — always runs, including on docs-only changes (not gated).
   reference-check:
     timeout-minutes: 20
     runs-on: macos-latest
@@ -245,3 +402,44 @@ jobs:
 
       - name: reference check (dup / orphan / 100% documented gate)
         run: node docs/reference/check.js --strict
+
+  # ---------------------------------------------------------------------------
+  # Aggregate gate for branch protection. The ruleset requires ONLY this job,
+  # so matrix/job renames never break required checks. It fails on any failed,
+  # cancelled, or unexpectedly-skipped job; the three heavy build jobs may be
+  # skipped only when the `changes` gate declared the diff docs-only.
+  # ---------------------------------------------------------------------------
+  ci-ok:
+    runs-on: ubuntu-latest
+    needs: [changes, build, build-android, build-web, reference-check]
+    if: always()
+    steps:
+      - name: Verify job results
+        env:
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          R_CHANGES: ${{ needs.changes.result }}
+          R_BUILD: ${{ needs.build.result }}
+          R_ANDROID: ${{ needs.build-android.result }}
+          R_WEB: ${{ needs.build-web.result }}
+          R_REF: ${{ needs.reference-check.result }}
+        run: |
+          ok=1
+          check() { # name result skippable
+            echo "$1: $2"
+            case "$2" in
+              success) ;;
+              skipped) if [ "$3" = "skippable" ] && [ "$DOCS_ONLY" = "true" ]; then
+                         echo "  -> skipped by docs-only gate (OK)"
+                       else
+                         echo "  -> unexpected skip"; ok=0
+                       fi ;;
+              *) ok=0 ;;
+            esac
+          }
+          check "changes"         "$R_CHANGES"
+          check "build"           "$R_BUILD"    skippable
+          check "build-android"   "$R_ANDROID"  skippable
+          check "build-web"       "$R_WEB"      skippable
+          check "reference-check" "$R_REF"
+          [ "$ok" = "1" ] || { echo "ci-ok: FAILING"; exit 1; }
+          echo "ci-ok: all good"

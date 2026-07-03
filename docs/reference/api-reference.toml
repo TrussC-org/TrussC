@@ -9880,6 +9880,33 @@ description.en = "Stable unique identifier for the device"
 description.ja = "デバイスの安定した一意識別子"
 description.ko = "디바이스의 안정적인 고유 식별자"
 
+["GrabberFrame"]
+keywords = ["webcam", "camera", "frame", "timestamp", "queue", "measurement"]
+description.en = "One captured camera frame with its capture-time timestamp: RGBA pixels, width/height, and timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getBufferFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time"
+description.ja = "キャプチャ時刻付きのカメラ1フレーム。RGBAピクセル・width/height・timestampUs（monotonicなsteady_clockのマイクロ秒。キャプチャスレッドで打刻）を持つ。VideoGrabber::getBufferFrames() が返す。ピクセルと時刻が一体なので「ピクセル取得と時刻取得の間に次フレームが割り込む」競合が起きない。カメラを計測/測定に使うときの基本単位"
+description.ko = "캡처 시각이 붙은 카메라 1프레임. RGBA 픽셀, width/height, timestampUs(단조 steady_clock 마이크로초, 캡처 스레드에서 기록)를 가짐. VideoGrabber::getBufferFrames()가 반환. 픽셀과 시각이 한 구조체로 오므로 둘을 따로 읽는 사이에 다음 프레임이 끼어드는 경쟁이 없음"
+related = ["VideoGrabber", "VideoGrabber::getBufferFrames", "VideoGrabber::setFrameQueueSize"]
+
+["GrabberFrame::pixels"]
+description.en = "RGBA8 pixel data (width * height * 4 bytes)"
+description.ja = "RGBA8 のピクセルデータ（width * height * 4 バイト）"
+description.ko = "RGBA8 픽셀 데이터 (width * height * 4 바이트)"
+
+["GrabberFrame::width"]
+description.en = "Frame width in pixels"
+description.ja = "フレームの幅（ピクセル）"
+description.ko = "프레임 너비(픽셀)"
+
+["GrabberFrame::height"]
+description.en = "Frame height in pixels"
+description.ja = "フレームの高さ（ピクセル）"
+description.ko = "프레임 높이(픽셀)"
+
+["GrabberFrame::timestampUs"]
+description.en = "Capture time in microseconds on the monotonic clock (std::chrono::steady_clock), stamped on the capture thread the moment the frame arrived from the driver. Not wall-clock time — use for interval math and cross-source sync only"
+description.ja = "キャプチャ時刻（monotonic クロック = std::chrono::steady_clock のマイクロ秒）。ドライバからフレームが届いた瞬間にキャプチャスレッドで打刻される。壁時計時刻ではないので、区間計算や他ソースとの同期にのみ使う"
+description.ko = "캡처 시각(단조 클록 = std::chrono::steady_clock의 마이크로초). 드라이버에서 프레임이 도착한 순간 캡처 스레드에서 기록됨. 벽시계 시각이 아니므로 구간 계산과 소스 간 동기화에만 사용"
+
 ["VideoGrabber"]
 keywords = ["webcam", "camera", "capture", "live"]
 description.en = "Webcam capture source. Call setup() once, then update() every frame; getTexture() (via HasTexture) gives the live frame. Move-only. Camera permission is requested automatically on macOS"
@@ -9906,6 +9933,16 @@ description.en = "Copy the current frame into an Image (allocating/updating it a
 description.ja = "現在のフレームを Image にコピー（必要に応じて確保・更新する）"
 description.ko = "현재 프레임을 Image로 복사(필요에 따라 할당/갱신)"
 
+["VideoGrabber::getBufferFrames"]
+category = "video"
+keywords = ["frame queue", "timestamp", "drain", "all frames", "high fps", "sync", "measurement", "sensor", "latency", "analysis"]
+description.en = "Drain all frames captured since the last call (appended to the given vector, oldest first; returns the count). Each GrabberFrame carries a monotonic timestamp stamped on the capture thread, so timestamps stay truthful even if the main loop stalls, and no frame is lost when the camera runs faster than the app loop. Requires setFrameQueueSize() > 0; getPixels()/isFrameNew() are unaffected"
+description.ja = "前回呼び出し以降にキャプチャされた全フレームを取り出す（渡した vector に古い順で追記、件数を返す）。各 GrabberFrame はキャプチャスレッドで打刻された monotonic なタイムスタンプを持つので、メインループが詰まっても時刻は正確なままで、カメラがアプリループより速くてもフレームを取りこぼさない。センサーデータとの同期・カメラでの計測/測定・レイテンシ解析向け。setFrameQueueSize() > 0 が前提。getPixels()/isFrameNew() には影響しない"
+description.ko = "지난 호출 이후 캡처된 모든 프레임을 꺼냄(전달한 vector에 오래된 순으로 추가, 개수 반환). 각 GrabberFrame은 캡처 스레드에서 기록된 단조 타임스탬프를 가지므로 메인 루프가 멈춰도 시각이 정확하고, 카메라가 앱 루프보다 빨라도 프레임을 잃지 않음. setFrameQueueSize() > 0 필요. getPixels()/isFrameNew()에는 영향 없음"
+related = ["GrabberFrame", "VideoGrabber::setFrameQueueSize", "VideoGrabber::getPixels", "VideoGrabber::isFrameNew"]
+platform_note.en = "Frames are pushed by the platform capture thread: macOS (AVFoundation capture queue), Windows (Media Foundation reader thread), Linux (V4L2 capture thread). web/android do not push (no capture thread), so the queue stays empty there."
+platform_note.ja = "フレームはプラットフォームのキャプチャスレッドが積む。macOS（AVFoundation）・Windows（Media Foundation リーダースレッド）・Linux（V4L2 キャプチャスレッド）で実装済み。web/android はキャプチャスレッドが無いため積まれず、常に空。"
+
 ["VideoGrabber::getDesiredFrameRate"]
 description.en = "Return the requested frame rate (-1 if unspecified)"
 description.ja = "リクエストされたフレームレートを返す (未指定なら -1)"
@@ -9920,6 +9957,11 @@ description.ko = "선택된 디바이스 ID를 반환"
 description.en = "Return the name of the active capture device"
 description.ja = "アクティブなキャプチャデバイスの名前を返す"
 description.ko = "활성 캡처 디바이스의 이름을 반환"
+
+["VideoGrabber::getFrameQueueSize"]
+description.en = "Return the frame queue capacity (0 = queueing disabled)"
+description.ja = "フレームキューの容量を返す（0 = キュー無効）"
+description.ko = "프레임 큐 용량을 반환 (0 = 큐 비활성)"
 
 ["VideoGrabber::getHeight"]
 description.en = "Return the captured frame height in pixels"
@@ -9982,6 +10024,14 @@ description.ko = "캡처 프레임 레이트를 요청. setup() 이전에 호출
 description.en = "Select which camera to use; call before setup()"
 description.ja = "使用するカメラを選択。setup() の前に呼ぶ"
 description.ko = "사용할 카메라를 선택. setup() 이전에 호출"
+
+["VideoGrabber::setFrameQueueSize"]
+category = "video"
+keywords = ["frame queue", "enable", "capacity", "buffer", "measurement"]
+description.en = "Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup()"
+description.ja = "タイムスタンプ付きフレームキューを有効化し容量を設定（0 = 無効。デフォルトで、オフ時のオーバーヘッドはゼロ）。満杯時は古いフレームから捨てるので、取り出しが遅れてもキャプチャは止まらない。容量目安は ceil(カメラfps / アプリfps) + 余裕で、8〜16 で十分。setup() の前後どちらでも呼べる"
+description.ko = "타임스탬프 프레임 큐를 활성화하고 용량을 설정 (0 = 비활성, 기본값. 꺼져 있으면 오버헤드 없음). 가득 차면 오래된 프레임부터 버려서 소비가 늦어도 캡처가 막히지 않음. 용량은 ceil(카메라fps / 앱fps) + 여유, 8~16이면 충분. setup() 전후 어느 쪽에서도 호출 가능"
+related = ["VideoGrabber::getBufferFrames", "VideoGrabber::getFrameQueueSize", "GrabberFrame"]
 
 ["VideoGrabber::setVerbose"]
 description.en = "Enable or disable verbose logging"
@@ -11603,9 +11653,9 @@ related = ["drawCurve", "Path::bezierTo", "setCurveResolution", "setCurveToleran
 category = "graphics_shapes"
 keywords = ["text", "label", "print", "ofdrawbitmapstring"]
 of = ["ofDrawBitmapString"]
-description.en = "Draw text"
-description.ja = "テキストを描画"
-description.ko = "비트맵 텍스트 그리기"
+description.en = "Draw text. The Vec3 overloads project through the current camera context — a screen-aligned 3D label; z=0 on the default screen matches plain 2D; behind-camera draws nothing; screenFixed picks fixed-pixel vs perspective size"
+description.ja = "テキストを描画。Vec3 オーバーロードは現在のカメラコンテキストで投影し、画面に正対する3Dラベルになる（デフォルト画面の z=0 は通常の2Dと一致、カメラ後方は非描画、screenFixed で固定ピクセル/遠近サイズを選択）"
+description.ko = "비트맵 텍스트 그리기. Vec3 오버로드는 현재 카메라 컨텍스트로 투영해 화면에 정렬된 3D 라벨을 그린다(기본 화면의 z=0은 일반 2D와 동일, 카메라 뒤쪽은 그리지 않음, screenFixed로 고정 픽셀/원근 크기 선택)"
 related = ["drawBitmapStringHighlight", "Font::drawString", "setTextAlign"]
 
 ["drawBitmapStringHighlight"]
@@ -14442,9 +14492,9 @@ related = ["VideoPlayer::setGammaCorrection"]
 ["startRecording"]
 category = "window_system"
 keywords = ["record", "video", "capture", "movie", "mp4"]
-description.en = "Start recording the window to a video file (native encoder, no ffmpeg)"
-description.ja = "ウィンドウを動画ファイルに録画開始（ネイティブエンコーダ、ffmpeg不要）"
-description.ko = "윈도우를 동영상 파일로 녹화 시작 (네이티브 인코더, ffmpeg 불필요)"
+description.en = "Start recording the window to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited"
+description.ja = "ウィンドウを動画ファイルに録画開始（ネイティブエンコーダ、ffmpeg不要）。秒数引数（または VideoRecordSettings.duration）を渡すと、その長さで自動停止・確定する固定長クリップになる（0 = 無制限）"
+description.ko = "윈도우를 동영상 파일로 녹화 시작 (네이티브 인코더, ffmpeg 불필요). 초 인자(또는 VideoRecordSettings.duration)를 넘기면 그 길이에서 자동 정지·마무리되는 고정 길이 클립이 된다(0 = 무제한)"
 related = ["VideoRecordSettings", "stopRecording", "isRecording", "saveScreenshot"]
 platform_note.en = "Global convenience over the singleton ScreenRecorder; non-functional on web for the same reason (VideoWriter stub returns false)."
 platform_note.ja = "シングルトン ScreenRecorder への薄いラッパ。同じ理由で web では機能しない（VideoWriter スタブが false）。"

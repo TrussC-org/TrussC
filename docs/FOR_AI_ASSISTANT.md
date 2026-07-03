@@ -1123,6 +1123,14 @@ Two ways:
 - **Write arbitrary frames**: use `VideoWriter` — `open(path, w, h, settings)` → `addFrame(fbo)` / `addFrame(pixels)` (timestamped via `addFrameAt(frame, timeSec)`) → `close()`. For writing offscreen (FBO) content at a steady rate.
 Encoder settings: `VideoRecordSettings`. Platforms: macOS / Windows / Linux / Android / iOS.
 
+### How do I record a fixed-length clip that stops itself?
+
+Pass the length in seconds: `startRecording("out.mp4", 3.0f)` records exactly 3 seconds, then **auto-stops and finalizes the file itself** (PTS-based cut, output length == the requested length within one frame). Same as setting `VideoRecordSettings.duration` (0 = unlimited = the default). A manual `stopRecording()` **always wins**: call it early and you get a valid shorter file; call it after the auto-stop already fired and it's a harmless no-op. So you never need a timer thread to end a recording.
+
+### Can an AI agent start/stop recording over MCP?
+
+Yes — every TrussC app in MCP mode (`TRUSSC_MCP=1`) exposes `start_recording` and `stop_recording` as standard tools (the video counterpart of `save_screenshot`, always available). `start_recording` takes optional `path` (omit → timestamped file in the data dir), `duration` (fixed-length auto-stop), `fps`, and `codec`, and returns the resolved path; `stop_recording` returns `{path, frames, length}` and is a no-op (not an error) when nothing is recording. See docs/AI_AUTOMATION.md.
+
 ### How do I avoid a black first frame when a VideoPlayer starts?
 
 `VideoPlayer::load()` / `play()` decode **asynchronously**, so for the first few frames the player has no picture yet and draws **black**. To hide that flash, synchronously extract frame 0 as a still and show it until the live player has a real frame:
@@ -1158,6 +1166,25 @@ video.extractFrame(px, 3.5f);
 Pick by need: **`extractFrame` = frame-accurate but heavier; `extractKeyFrame` = fast but time-approximate** (good for coarse thumbnails or scrub previews; falls back to an exact decode if no keyframe is reachable). Both take an optional `float* outDuration` that receives the clip length in seconds. Implemented on **macOS (AVFoundation), Windows (Media Foundation), Linux (FFmpeg)**; Android stubs them and iOS/web are unsupported (return false).
 
 ⚠️ These open a fresh decode context per call, so they are for **one-off frame grabs only — never for continuous playback**. To play a video use `load()` + `play()` + `update()` and draw the player each frame.
+
+### How do I get every camera frame with accurate timestamps? (measurement with a camera / camera faster than the app loop / syncing video to sensor data)
+
+`getPixels()`/`isFrameNew()` only ever see the **latest** frame: a 90 fps camera polled by a 60 fps loop silently loses frames, and the "frame time" you'd stamp yourself in `update()` lies whenever the main loop stalls. For frame-exact capture, enable the **timestamped frame queue**:
+
+```cpp
+grabber.setFrameQueueSize(16);   // opt-in; 0 (default) = off, zero overhead
+grabber.setup(1280, 720);
+
+// each frame, drain everything captured since the last call:
+vector<GrabberFrame> frames;     // pixels + timestamp travel together (no race)
+grabber.getBufferFrames(frames); // oldest first; each delivered exactly once
+for (auto& f : frames) {
+    // f.pixels (RGBA), f.width, f.height,
+    // f.timestampUs — steady_clock µs, stamped on the CAPTURE thread
+}
+```
+
+Key properties: timestamps are **monotonic (`std::chrono::steady_clock`), not wall-clock**, and are stamped the moment the frame arrives from the driver — they stay truthful even if the main loop freezes for seconds. When the queue is full the oldest frame is dropped (capture never blocks). This is the right tool for measurement-grade capture — syncing camera frames against an external timeline (sensor logs, audio, other clocks), motion analysis, latency measurement; for a plain live preview, `update()` + `draw()` remains simpler. Pushed by the capture threads on **macOS / Windows / Linux**; web and Android have no capture thread and keep the queue empty.
 
 ## Networking
 
@@ -1197,6 +1224,14 @@ TrussC is "2D-looking but actually 3D space" by default (same philosophy as oF).
 ### Centering bitmap text? (default is left / baseline)
 
 Text alignment defaults to **left / baseline**, shared by `Font` and `drawBitmapString`. So to center, you don't need to compute an offset by hand — call **`setTextAlign(Direction::Center, Direction::Center)`** before drawing (it applies to bitmap text too).
+
+### How do I draw a text label above a 3D object (billboard)?
+
+Just call `drawBitmapString("name", worldPos)` with a `Vec3` — there is **no need to project with `worldToScreen()` by hand anymore**. The `Vec3` overloads take the position through the current model matrix and the **current camera context** (an `EasyCam`/camera scope, or the ambient default screen) and draw the glyphs as a screen-aligned billboard **on top** of the scene (no depth test), so the label always faces you and stays readable. A point **behind the camera draws nothing**. Two size modes:
+- `screenFixed = true` (default): constant pixel size regardless of distance — good for HUD-style tags.
+- `screenFixed = false`, or the `drawBitmapString(text, pos, scale)` overload: the glyph cell is measured in world units at the label's depth, so it **foreshortens with perspective** (shrinks with distance).
+
+This also works on the **default screen** (no camera scope): `z = 0` is pixel-identical to plain 2D `drawBitmapString(text, x, y)`, while `z != 0` labels the true 3D point. `setTextAlign` positions the label around the projected point.
 
 ### Why doesn't fill work on a stroke? (fill/noFill apply to beginShape only)
 
@@ -1397,7 +1432,7 @@ void beginShape()  // Begin drawing a shape
 void beginStroke()  // Begin drawing a stroke (uses StrokeMesh internally)
 void drawArc(Vec3 center, float radius, float angleBegin, float angleEnd) [+1]  // Draw arc (partial circle, angles in radians)
 void drawBezier(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw bezier curve (cubic with 4 points, quadratic with 3, or N-th order via vector)
-void drawBitmapString(const std::string & text, Vec3 pos, bool screenFixed = true) [+5]  // Draw text
+void drawBitmapString(const std::string & text, Vec3 pos, bool screenFixed = true) [+5]  // Draw text. The Vec3 overloads project through the current camera context — a screen-aligned 3D label; z=0 on the default screen matches plain 2D; behind-camera draws nothing; screenFixed picks fixed-pixel vs perspective size
 void drawBitmapStringHighlight(const std::string & text, float x, float y, const Color & background = Color(0, 0, 0), const Color & foreground = Color(1, 1, 1))  // Draw text with background highlight
 void drawBox(float w, float h, float d) [+5]  // Draw 3D box (respects fill/noFill)
 void drawCircle(Vec3 center, float radius) [+1]  // Draw circle
@@ -1728,7 +1763,7 @@ void setWindowPosition(int x, int y) [macos,windows]  // Set window position in 
 void setWindowSize(int width, int height)  // Set window size
 void setWindowSizeLogical(int width, int height)  // Resize the window to the given logical size (logical pixels)
 void setWindowTitle(const std::string & title)  // Set window title
-bool startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+1] [macos,windows,linux,android,ios]  // Start recording the window to a video file (native encoder, no ffmpeg)
+bool startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+1] [macos,windows,linux,android,ios]  // Start recording the window to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited
 void stopRecording()  // Stop the current recording and finalize the file
 void toggleFullscreen()  // Toggle fullscreen mode
 ```
@@ -2445,6 +2480,11 @@ std::string Font::wrapTextVertical(const std::string & text) const  // Insert ha
 sg_pipeline_desc FullscreenShader::createPipelineDesc()  // Build the fullscreen-quad pipeline descriptor (overrides Shader's).
 void FullscreenShader::createVertexBuffer()  // Create the fullscreen-quad vertex/index buffers (overrides Shader's).
 void FullscreenShader::draw()  // Draw a fullscreen quad with this shader applied
+```
+
+### GrabberFrame — One captured camera frame with its capture-time timestamp: RGBA pixels, width/height, and timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getBufferFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time
+
+```cpp
 ```
 
 ### GraphicsBackend — Runtime sokol_gfx backend query. Values are meaningful only after sg_setup() has completed (i.e. after the first setup() call).
@@ -3750,9 +3790,11 @@ const std::string & VideoDeviceInfo::getUniqueId() const  // Get the stable uniq
 bool VideoGrabber::checkCameraPermission()  // Return whether camera access has been granted (macOS 10.14+)
 void VideoGrabber::close()  // Stop the camera and release its resources
 void VideoGrabber::copyToImage(Image & image) const  // Copy the current frame into an Image (allocating/updating it as needed)
+size_t VideoGrabber::getBufferFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Drain all frames captured since the last call (appended to the given vector, oldest first; returns the count). Each GrabberFrame carries a monotonic timestamp stamped on the capture thread, so timestamps stay truthful even if the main loop stalls, and no frame is lost when the camera runs faster than the app loop. Requires setFrameQueueSize() > 0; getPixels()/isFrameNew() are unaffected
 int VideoGrabber::getDesiredFrameRate() const  // Return the requested frame rate (-1 if unspecified)
 int VideoGrabber::getDeviceID() const  // Return the selected device ID
 const std::string & VideoGrabber::getDeviceName() const  // Return the name of the active capture device
+size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the frame queue capacity (0 = queueing disabled)
 int VideoGrabber::getHeight() const  // Return the captured frame height in pixels
 unsigned char * VideoGrabber::getPixels() [+1]  // Return a pointer to the current RGBA pixel buffer
 Texture & VideoGrabber::getTexture() [+1]  // Return the texture holding the live camera frame (HasTexture override)
@@ -3765,6 +3807,7 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevices()  // Return the list of 
 void VideoGrabber::requestCameraPermission()  // Request camera access asynchronously (macOS)
 void VideoGrabber::setDesiredFrameRate(int fps)  // Request a capture frame rate; call before setup()
 void VideoGrabber::setDeviceID(int deviceId)  // Select which camera to use; call before setup()
+void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup()
 bool VideoGrabber::setup(int width = 640, int height = 480)  // Start the camera at the requested size. Returns false if permission is not yet granted (it is requested asynchronously); keep calling update() and capture begins once granted
 void VideoGrabber::setVerbose(bool verbose)  // Enable or disable verbose logging
 void VideoGrabber::update()  // Poll for a new frame and upload it to the texture. Call every frame; also completes a setup() that was waiting on permission

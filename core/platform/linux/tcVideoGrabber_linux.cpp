@@ -18,6 +18,7 @@
 #include <cstring>
 #include <thread>
 #include <atomic>
+#include <chrono>
 
 // For MJPEG decoding
 #define STB_IMAGE_IMPLEMENTATION_ALREADY_DONE
@@ -61,6 +62,9 @@ struct VideoGrabberPlatformData {
     unsigned char* targetPixels = nullptr;
     std::atomic<bool>* pixelsDirty = nullptr;
     std::mutex* mutex = nullptr;
+
+    // Timestamped frame queue (enabled via setFrameQueueSize)
+    internal::GrabberFrameQueue* frameQueue = nullptr;
 };
 
 // =============================================================================
@@ -165,6 +169,11 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
             break;
         }
 
+        // Stamp arrival time on the capture thread, before any processing.
+        // Stays accurate even when the app's main loop stalls.
+        uint64_t arrivalUs = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+
         // Convert frame to RGBA
         if (data->backBuffer && buf.index < data->bufferCount) {
             const unsigned char* src = (const unsigned char*)data->buffers[buf.index].start;
@@ -185,6 +194,12 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
 
             if (data->pixelsDirty) {
                 data->pixelsDirty->store(true);
+            }
+
+            // Timestamped frame queue (no-op unless enabled)
+            if (data->frameQueue) {
+                data->frameQueue->push(data->backBuffer, data->bufferWidth,
+                                       data->bufferHeight, arrivalUs);
             }
         }
 
@@ -418,6 +433,7 @@ void VideoGrabber::updateDelegatePixels() {
     data->targetPixels = pixels_;
     data->pixelsDirty = &pixelsDirty_;
     data->mutex = &mutex_;
+    data->frameQueue = frameQueue_.get();
 }
 
 std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
