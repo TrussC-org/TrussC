@@ -53,13 +53,13 @@ public:
     // Load / Close
     // =========================================================================
 
-    bool load(const std::string& path) override {
+    bool load(const fs::path& path) override {
         if (initialized_) {
             close();
         }
 
         // Resolve relative paths via getDataPath
-        std::string resolvedPath = getDataPath(path);
+        fs::path resolvedPath = getDataPath(path);
 
         // Platform-specific load
         if (!loadPlatform(resolvedPath)) {
@@ -279,8 +279,8 @@ public:
 
     /// Path of the currently loaded video file (empty string when not loaded).
     /// This is the resolved path (relative paths passed to load() are resolved
-    /// via getDataPath).
-    const std::string& getPath() const { return sourcePath_; }
+    /// via getDataPath), as UTF-8.
+    std::string getPath() const { return internal::pathToUtf8(sourcePath_); }
 
 protected:
     // -------------------------------------------------------------------------
@@ -345,7 +345,7 @@ private:
 
     // Resolved path of the currently loaded video (empty when not loaded).
     // Used by getPath() and the instance-level frame-extraction overloads.
-    std::string sourcePath_;
+    fs::path sourcePath_;
 
     // -------------------------------------------------------------------------
     // Internal methods
@@ -397,7 +397,7 @@ private:
     // -------------------------------------------------------------------------
     // Platform-specific methods (implemented in tcVideoPlayer_mac.mm, etc.)
     // -------------------------------------------------------------------------
-    bool loadPlatform(const std::string& path);
+    bool loadPlatform(const fs::path& path);
     void closePlatform();
     void playPlatform();
     void stopPlatform();
@@ -454,7 +454,7 @@ public:
     /// @param timeSec   Time in seconds to extract from (default 1.0)
     /// @param outDuration If non-null, receives video duration in seconds
     /// @return true on success
-    static bool extractFrame(const std::string& path, Pixels& outPixels,
+    static bool extractFrame(const fs::path& path, Pixels& outPixels,
                              float timeSec = 1.0f, float* outDuration = nullptr) {
         return extractFramePlatform(path, outPixels, timeSec, outDuration);
     }
@@ -466,7 +466,7 @@ public:
     /// @param timeSec   Upper-bound time in seconds (default 1.0)
     /// @param outDuration If non-null, receives video duration in seconds
     /// @return true on success
-    static bool extractKeyFrame(const std::string& path, Pixels& outPixels,
+    static bool extractKeyFrame(const fs::path& path, Pixels& outPixels,
                                 float timeSec = 1.0f, float* outDuration = nullptr) {
         return extractKeyFramePlatform(path, outPixels, timeSec, outDuration);
     }
@@ -488,9 +488,9 @@ public:
     }
 
 private:
-    static bool extractFramePlatform(const std::string& path, Pixels& outPixels,
+    static bool extractFramePlatform(const fs::path& path, Pixels& outPixels,
                                      float timeSec, float* outDuration);
-    static bool extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
+    static bool extractKeyFramePlatform(const fs::path& path, Pixels& outPixels,
                                         float timeSec, float* outDuration);
 
     // Allow platform implementations to access internals

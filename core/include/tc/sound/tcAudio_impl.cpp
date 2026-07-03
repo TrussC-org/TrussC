@@ -39,6 +39,20 @@
 
 namespace trussc {
 
+namespace {
+// Open a ma_decoder from a path. Wide entry point on Windows so non-ASCII
+// paths survive (same helper as tcSound_impl.cpp).
+ma_result maDecoderInitPathA(const fs::path& path,
+                             const ma_decoder_config* cfg, ma_decoder* dec) {
+#ifdef _WIN32
+    return ma_decoder_init_file_w(path.c_str(), cfg, dec);
+#else
+    return ma_decoder_init_file(path.c_str(), cfg, dec);
+#endif
+}
+} // namespace
+
+
 // =============================================================================
 // Streaming audio playback
 //
@@ -260,19 +274,16 @@ private:
 // query duration/channels/sampleRate. Per-voice decoders are opened
 // lazily by AudioEngine::play().
 // ---------------------------------------------------------------------------
-bool SoundStream::loadStream(const std::string& path, int maxPolyphony) {
+bool SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     if (maxPolyphony < 1) maxPolyphony = 1;
 
     // Detect format by extension. We don't go through stb_vorbis here —
     // OGG support for streaming would need a separate code path. WAV /
     // MP3 / FLAC are routed through ma_decoder, which handles all three
     // with the same API.
-    std::string ext;
-    auto dot = path.find_last_of('.');
-    if (dot != std::string::npos) {
-        ext = path.substr(dot + 1);
-        for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
-    }
+    std::string ext = path.extension().string();
+    if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
+    for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
 
     ma_encoding_format fmt = ma_encoding_format_unknown;
     if (ext == "wav")       fmt = ma_encoding_format_wav;
@@ -300,9 +311,10 @@ bool SoundStream::loadStream(const std::string& path, int maxPolyphony) {
                                                     StreamInstance::CHANNELS,
                                                     AudioEngine::getInstance().getSampleRate());
     cfg.encodingFormat = fmt;
-    ma_result r = ma_decoder_init_file(path.c_str(), &cfg, &probe);
+    ma_result r = maDecoderInitPathA(path, &cfg, &probe);
     if (r != MA_SUCCESS) {
-        printf("SoundStream: failed to open %s (result=%d)\n", path.c_str(), (int)r);
+        printf("SoundStream: failed to open %s (result=%d)\n",
+               internal::pathToUtf8(path).c_str(), (int)r);
         return false;
     }
 
@@ -320,7 +332,7 @@ bool SoundStream::loadStream(const std::string& path, int maxPolyphony) {
     encodingFormatHint_ = (int)fmt;
 
     printf("SoundStream: ready %s (%d ch, %d Hz, %.2f s, maxPolyphony=%d)\n",
-           path.c_str(), channels, sampleRate, duration_, maxPolyphony);
+           internal::pathToUtf8(path).c_str(), channels, sampleRate, duration_, maxPolyphony);
     return true;
 }
 
@@ -360,7 +372,7 @@ std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> sou
         ma_decoder_config cfg = ma_decoder_config_init(
             ma_format_f32, StreamInstance::CHANNELS, sampleRate_);
         cfg.encodingFormat = (ma_encoding_format)s->encodingFormatHint_;
-        ma_result r = ma_decoder_init_file(s->getPath().c_str(), &cfg, &stream->decoder);
+        ma_result r = maDecoderInitPathA(s->path_, &cfg, &stream->decoder);
         if (r != MA_SUCCESS) {
             printf("SoundStream: per-voice decoder init failed for %s (result=%d)\n",
                    s->getPath().c_str(), (int)r);
@@ -799,7 +811,7 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
             ma_decoder_config cfg = ma_decoder_config_init(
                 ma_format_f32, StreamInstance::CHANNELS, newRate);
             cfg.encodingFormat = (ma_encoding_format)src->encodingFormatHint_;
-            ma_result r = ma_decoder_init_file(src->getPath().c_str(), &cfg, &newStream->decoder);
+            ma_result r = maDecoderInitPathA(src->path_, &cfg, &newStream->decoder);
             if (r != MA_SUCCESS) {
                 printf("AudioEngine: stream voice migration failed for %s (result=%d) — stopping voice\n",
                        src->getPath().c_str(), (int)r);

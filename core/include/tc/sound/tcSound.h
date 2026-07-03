@@ -1,5 +1,6 @@
 #pragma once
 #include "tc/utils/tcAnnotations.h"
+#include "tc/utils/tcFileIO.h"   // fs alias + path boundary helpers
 
 // =============================================================================
 // TrussC Sound
@@ -84,15 +85,15 @@ public:
     // File-based decoders (implemented in tcSound_impl.cpp).
     // WAV / MP3 / FLAC go through ma_decoder (miniaudio); OGG goes through
     // stb_vorbis directly because miniaudio does not bundle a Vorbis decoder.
-    bool loadOgg(const std::string& path);
-    bool loadWav(const std::string& path);
-    bool loadMp3(const std::string& path);
-    bool loadFlac(const std::string& path);
+    bool loadOgg(const fs::path& path);
+    bool loadWav(const fs::path& path);
+    bool loadMp3(const fs::path& path);
+    bool loadFlac(const fs::path& path);
 
     // Auto-detect entry point. Dispatches to the format-specific loader
     // based on the file's extension (.wav / .mp3 / .ogg / .flac / .aac /
     // .m4a — case-insensitive).
-    bool load(const std::string& path);
+    bool load(const fs::path& path);
 
     // Memory-based decoders. Format must be known (no extension to sniff).
     bool loadWavFromMemory(const void* data, size_t dataSize);
@@ -102,7 +103,7 @@ public:
 
     // Load AAC/M4A file (platform-specific implementation)
     // Returns false on unsupported platforms
-    TC_PLATFORMS("macos,windows,linux,ios,web") bool loadAac(const std::string& path);
+    TC_PLATFORMS("macos,windows,linux,ios,web") bool loadAac(const fs::path& path);
 
     // Load AAC data from memory (platform-specific implementation)
     // Returns false on unsupported platforms
@@ -408,15 +409,15 @@ public:
     // engine when play() is called. Returns false if the file can't be
     // opened or the format is unsupported. Format is detected from
     // extension (.wav .mp3 .flac .ogg — same as SoundBuffer::load).
-    bool loadStream(const std::string& path, int maxPolyphony = 1);
+    bool loadStream(const fs::path& path, int maxPolyphony = 1);
 
     float getDuration() const override { return duration_; }
 
-    const std::string& getPath() const { return path_; }
+    std::string getPath() const { return internal::pathToUtf8(path_); }
     int getMaxPolyphony() const { return maxPolyphony_; }
 
 private:
-    std::string path_;
+    fs::path path_;
     int maxPolyphony_ = 1;
     int encodingFormatHint_ = 0;  // ma_encoding_format value, stored as int
                                   // to avoid pulling miniaudio.h into the header.
@@ -1051,7 +1052,7 @@ public:
     //                            can overlap. Default 1 = single-instance
     //                            (typical BGM); raise for cross-fade or
     //                            layered ambient tracks.
-    bool load(const std::string& path) {
+    bool load(const fs::path& path) {
         // Initialize AudioEngine (only once)
         AudioEngine::getInstance().init();
 
@@ -1059,7 +1060,8 @@ public:
         auto buf = std::make_shared<SoundBuffer>();
 
         // Determine format by extension
-        std::string ext = path.substr(path.find_last_of('.') + 1);
+        std::string ext = path.extension().string();
+        if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
         bool success = false;
 
         if (ext == "ogg" || ext == "OGG") {
@@ -1097,7 +1099,7 @@ public:
     // user apps portable we fall back to eager load() and log a warning so
     // the developer can branch explicitly with isStreaming() / #ifdef
     // __EMSCRIPTEN__ if they need to know.
-    TC_PLATFORMS("macos,windows,linux,android,ios") bool loadStream(const std::string& path, int maxPolyphony = 1) {
+    TC_PLATFORMS("macos,windows,linux,android,ios") bool loadStream(const fs::path& path, int maxPolyphony = 1) {
         AudioEngine::getInstance().init();
 #ifdef __EMSCRIPTEN__
         (void)maxPolyphony;

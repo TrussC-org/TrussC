@@ -8,6 +8,7 @@
 #include <string>
 #include <atomic>
 #include <mutex>
+#include <filesystem>
 #include "tc/gpu/tcHasTexture.h"
 
 namespace trussc {
@@ -28,7 +29,7 @@ public:
     // Load / Close (must be implemented by derived class)
     // =========================================================================
 
-    virtual bool load(const std::string& path) = 0;
+    virtual bool load(const fs::path& path) = 0;
     virtual void close() = 0;
     virtual bool isLoaded() const { return initialized_; }
 

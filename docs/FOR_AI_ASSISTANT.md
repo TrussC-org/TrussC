@@ -1328,6 +1328,10 @@ If you want an app that runs without a window (update loop only, no `draw()`), u
 - Log to a file: `getLogger().setLogFile(path)` (unique name: `getTimestampString()`; hook all lines: `onLog.listen`)
 - CLI / console app: handle `argc`/`argv` in `main()` (no framework arg API); no args → `runApp<Gui>()`; headless loop → `runHeadlessApp<App>()`
 
+### How are file paths handled? Japanese / non-ASCII filenames on Windows?
+
+All file-path parameters take `fs::path` (`std::filesystem::path`) — string literals and `std::string` convert implicitly, so just write `img.load("photo.png")` as always. `getDataPath()` also returns `fs::path`; join paths with `/` (`getDataPath("save") / "shot.png"`), not string concatenation. Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform including Windows: TrussC converts to the OS-native encoding at the C-library boundary internally, so there is nothing to configure. `setDataPathRoot()` accepts absolute roots on Windows (`C:/data`) too. If you need a narrow string from a path, use `path.string()` on macOS/Linux; avoid it for file IO on Windows (pass the `fs::path` through instead).
+
 ### "Window / media / basics" → which API?
 
 - Window: `setWindowTitle()` / `setWindowSize()` / `setFullscreen(bool)` / `toggleFullscreen()`

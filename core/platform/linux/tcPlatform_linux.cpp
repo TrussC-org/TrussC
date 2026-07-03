@@ -164,7 +164,7 @@ bool captureWindow(Pixels& outPixels) {
 
 bool internal::captureWindowToFile(const std::filesystem::path& path) {
     if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path.string()));
+        return internal::captureWindowToFile(getDataPath(path));
     }
     Pixels pixels;
     if (!captureWindow(pixels)) {
@@ -173,7 +173,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
 
     // Use stb_image_write to save
     std::string ext = path.extension().string();
-    std::string pathStr = path.string();
+    std::string pathStr = internal::pathToUtf8(path);   // UTF-8 for stb (STBIW_WINDOWS_UTF8)
 
     int width = pixels.getWidth();
     int height = pixels.getHeight();

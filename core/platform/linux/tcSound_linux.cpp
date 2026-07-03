@@ -251,9 +251,9 @@ private:
     size_t memoryPos_ = 0;
 };
 
-bool SoundBuffer::loadAac(const std::string& path) {
+bool SoundBuffer::loadAac(const fs::path& path) {
     GstAacDecoder decoder;
-    return decoder.decodeFile(path, *this);
+    return decoder.decodeFile(internal::pathToUtf8(path), *this);
 }
 
 bool SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {

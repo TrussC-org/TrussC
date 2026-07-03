@@ -643,11 +643,11 @@ static void createADTSHeader(uint8_t* header, int frameLength, int sampleRate, i
 
 namespace trussc {
 
-bool VideoPlayer::loadPlatform(const std::string& path) {
+bool VideoPlayer::loadPlatform(const fs::path& path) {
     // Create Objective-C implementation
     TCVideoPlayerImpl* impl = [[TCVideoPlayerImpl alloc] init];
 
-    NSString* nsPath = [NSString stringWithUTF8String:path.c_str()];
+    NSString* nsPath = [NSString stringWithUTF8String:internal::pathToUtf8(path).c_str()];
 
     if (![impl loadWithPath:nsPath]) {
         return false;
@@ -936,18 +936,19 @@ static bool tcv_extract_frame_mac(const std::string& path, Pixels& outPixels,
     }
 }
 
-bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
+bool VideoPlayer::extractFramePlatform(const fs::path& path, Pixels& outPixels,
                                        float timeSec, float* outDuration) {
-    return tcv_extract_frame_mac(path, outPixels, timeSec, outDuration, /*exact=*/true);
+    return tcv_extract_frame_mac(internal::pathToUtf8(path), outPixels, timeSec, outDuration, /*exact=*/true);
 }
 
-bool VideoPlayer::extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
+bool VideoPlayer::extractKeyFramePlatform(const fs::path& path, Pixels& outPixels,
                                           float timeSec, float* outDuration) {
-    if (tcv_extract_frame_mac(path, outPixels, timeSec, outDuration, /*exact=*/false)) {
+    std::string p = internal::pathToUtf8(path);
+    if (tcv_extract_frame_mac(p, outPixels, timeSec, outDuration, /*exact=*/false)) {
         return true;
     }
     // No keyframe reachable — fall back to an exact decode.
-    return tcv_extract_frame_mac(path, outPixels, timeSec, outDuration, /*exact=*/true);
+    return tcv_extract_frame_mac(p, outPixels, timeSec, outDuration, /*exact=*/true);
 }
 
 } // namespace trussc

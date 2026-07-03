@@ -132,13 +132,11 @@ namespace {
     }
 }
 
-bool SoundBuffer::loadAac(const std::string& path) {
+bool SoundBuffer::loadAac(const fs::path& path) {
     EnsureMFStartup();
 
-    // Convert path to wide string
-    int size_needed = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), (int)path.size(), NULL, 0);
-    std::wstring wpath(size_needed, 0);
-    MultiByteToWideChar(CP_UTF8, 0, path.c_str(), (int)path.size(), &wpath[0], size_needed);
+    // fs::path is already wide on Windows
+    std::wstring wpath = path.wstring();
 
     IMFSourceReader* pReader = NULL;
     HRESULT hr = MFCreateSourceReaderFromURL(wpath.c_str(), NULL, &pReader);

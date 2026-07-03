@@ -12207,17 +12207,17 @@ related = ["setCurveTolerance"]
 category = "file"
 keywords = ["resource", "asset", "resolve"]
 of = ["ofToDataPath"]
-description.en = "Get full path relative to data directory"
-description.ja = "データディレクトリからの相対パスを取得"
-description.ko = "데이터 디렉토리 기준의 전체 경로를 얻음"
+description.en = "Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged."
+description.ja = "相対パスをデータディレクトリ基準で解決して fs::path で返す。絶対パスはそのまま返る"
+description.ko = "상대 경로를 데이터 디렉터리 기준으로 해석해 fs::path로 반환. 절대 경로는 그대로 반환됨"
 related = ["getDataPathRoot", "getAbsolutePath", "joinPath"]
 
 ["getDataPathRoot"]
 category = "file"
 keywords = ["resource", "directory", "base"]
-description.en = "Get the current data path root (with trailing slash)."
-description.ja = "現在のデータパスルートを取得(末尾スラッシュ付き)"
-description.ko = "현재 데이터 경로 루트를 얻음(끝 슬래시 포함)"
+description.en = "Get the current data path root as fs::path."
+description.ja = "現在のデータパスルートを fs::path で取得"
+description.ko = "현재 데이터 경로 루트를 fs::path로 얻음"
 related = ["setDataPathRoot", "getDataPath"]
 
 ["getDay"]
@@ -13968,9 +13968,9 @@ related = ["getCurveTolerance", "setCurveResolution", "drawBezier", "drawCurve"]
 ["setDataPathRoot"]
 category = "file"
 keywords = ["resource", "directory", "base"]
-description.en = "Set the root directory used to resolve relative data paths. A relative path is resolved against the executable directory; an absolute path (starting with /) is used as-is. A trailing slash is added automatically."
-description.ja = "相対データパスの解決に使うルートディレクトリを設定。相対パスは実行ファイルのディレクトリ基準で解決され、絶対パス(/始まり)はそのまま使われる。末尾のスラッシュは自動で付加される"
-description.ko = "상대 데이터 경로 해석에 사용할 루트 디렉터리를 설정. 상대 경로는 실행 파일 디렉터리 기준으로 해석되고, 절대 경로(/로 시작)는 그대로 사용됨. 끝의 슬래시는 자동으로 추가됨"
+description.en = "Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is."
+description.ja = "相対データパスの解決に使うルートディレクトリを設定。相対ルートは実行ファイルのディレクトリ基準で解決され、絶対ルート(fs::path::is_absolute 判定、Windows の C:/ も可)はそのまま使われる"
+description.ko = "상대 데이터 경로 해석에 사용할 루트 디렉터리를 설정. 상대 루트는 실행 파일 디렉터리 기준으로 해석되고, 절대 루트(fs::path::is_absolute 판정, Windows의 C:/ 포함)는 그대로 사용됨"
 related = ["getDataPathRoot", "setDataPathToResources", "getDataPath"]
 
 ["setDataPathToResources"]

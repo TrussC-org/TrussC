@@ -191,8 +191,9 @@ public:
     bool setup(const std::string& fontPath, int fontSize) {
         cleanup();
 
-        // Load font file
-        std::ifstream file(fontPath, std::ios::binary | std::ios::ate);
+        // Load font file (fontPath is UTF-8 — convert so non-ASCII paths
+        // survive on Windows)
+        std::ifstream file(internal::utf8ToPath(fontPath), std::ios::binary | std::ios::ate);
         if (!file) {
             logError() << "FontAtlasManager: failed to open " << fontPath;
             return false;
@@ -884,7 +885,7 @@ public:
     //   - A system font name (PostScript or family name) — resolved via
     //     tc::systemFontPath when the path doesn't exist on disk. Lets users
     //     write `font.load("HiraginoSans-W3", 24)` cross-platform.
-    bool load(const std::string& nameOrPath, int size) {
+    bool load(const fs::path& nameOrPath, int size) {
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
         dpiScale_ = sapp_dpi_scale();
@@ -896,16 +897,20 @@ public:
             initResources();
         }
 
-        // Resolve input to a concrete path (file / URL).
-        std::string actualPath = nameOrPath;
-        if (!isUrl(nameOrPath)) {
+        // Resolve input to a concrete path (file / URL). A font NAME
+        // ("HiraginoSans-W3") is a valid relative fs::path, so both spellings
+        // arrive here; the UTF-8 string form is what cache keys and the
+        // system-font lookup use.
+        std::string nameStr = internal::pathToUtf8(nameOrPath);
+        std::string actualPath = nameStr;
+        if (!isUrl(nameStr)) {
             std::ifstream test(nameOrPath, std::ios::binary);
             if (!test.good()) {
                 // Not a usable file path — try as a system font name.
-                std::string resolved = systemFontPath(nameOrPath);
+                std::string resolved = systemFontPath(nameStr);
                 if (!resolved.empty()) {
                     actualPath = resolved;
-                    logNotice("Font") << "Resolved \"" << nameOrPath
+                    logNotice("Font") << "Resolved \"" << nameStr
                                       << "\" → " << resolved;
                 }
                 // If resolution failed, fall through with the original input so

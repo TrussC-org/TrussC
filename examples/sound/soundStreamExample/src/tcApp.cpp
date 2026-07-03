@@ -134,7 +134,7 @@ void tcApp::draw() {
         y += 40;
     } else {
         setColor(colors::red);
-        drawBitmapString("Music file not found: " + musicPath, 50, y);
+        drawBitmapString("Music file not found: " + musicPath.string(), 50, y);
         y += 40;
     }
 

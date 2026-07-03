@@ -48,13 +48,14 @@ static SInt64 MemoryAudioFile_GetSizeProc(void* inClientData) {
 // -----------------------------------------------------------------------------
 // SoundBuffer::loadAac - macOS implementation (file-based)
 // -----------------------------------------------------------------------------
-bool SoundBuffer::loadAac(const std::string& path) {
+bool SoundBuffer::loadAac(const fs::path& path) {
     // Convert path to URL
-    NSString* nsPath = [NSString stringWithUTF8String:path.c_str()];
+    std::string pathStr = internal::pathToUtf8(path);
+    NSString* nsPath = [NSString stringWithUTF8String:pathStr.c_str()];
     NSURL* fileURL = [NSURL fileURLWithPath:nsPath];
 
     if (!fileURL) {
-        printf("SoundBuffer: invalid path: %s\n", path.c_str());
+        printf("SoundBuffer: invalid path: %s\n", pathStr.c_str());
         return false;
     }
 

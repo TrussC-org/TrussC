@@ -16,7 +16,8 @@ namespace trussc {
 // VideoPlayer Web implementation
 // ---------------------------------------------------------------------------
 
-bool VideoPlayer::loadPlatform(const std::string& path) {
+bool VideoPlayer::loadPlatform(const fs::path& path) {
+    std::string pathStr = internal::pathToUtf8(path);
     // Create video element in JavaScript
     char script[8192];
     snprintf(script, sizeof(script), R"JS(
@@ -98,7 +99,7 @@ bool VideoPlayer::loadPlatform(const std::string& path) {
 
             return 1;
         })();
-    )JS", path.c_str());
+    )JS", pathStr.c_str());
 
     int result = emscripten_run_script_int(script);
     if (result <= 0) {
@@ -114,7 +115,7 @@ bool VideoPlayer::loadPlatform(const std::string& path) {
     pixels_ = new unsigned char[width_ * height_ * 4];
     std::memset(pixels_, 0, width_ * height_ * 4);
 
-    printf("VideoPlayer: loading '%s' [Web]\n", path.c_str());
+    printf("VideoPlayer: loading '%s' [Web]\n", pathStr.c_str());
     return true;
 }
 

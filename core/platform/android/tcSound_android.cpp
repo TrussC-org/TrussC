@@ -13,7 +13,7 @@
 
 namespace trussc {
 
-bool SoundBuffer::loadAac(const std::string& path) {
+bool SoundBuffer::loadAac(const fs::path& path) {
     logWarning("SoundBuffer") << "AAC loading not yet implemented on Android";
     return false;
 }

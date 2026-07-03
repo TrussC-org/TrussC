@@ -70,7 +70,7 @@ public:
     bool load(const fs::path& path, bool mipmaps = false) {
         clear();
 
-        fs::path resolved = path.is_absolute() ? path : fs::path(getDataPath(path.string()));
+        fs::path resolved = getDataPath(path);   // absolute paths pass through
         if (!pixels_.load(resolved)) {
             return false;
         }

@@ -74,7 +74,7 @@ public:
     // Load / Close
     // =========================================================================
 
-    bool load(const std::string& path) override {
+    bool load(const tc::fs::path& path) override {
         if (initialized_) {
             close();
         }

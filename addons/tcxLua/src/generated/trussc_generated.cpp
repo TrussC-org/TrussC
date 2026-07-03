@@ -210,8 +210,8 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("shutdownAudio", []() { return trussc::shutdownAudio(); });
     lua->set_function("getMicInput", []() -> decltype(auto) { return trussc::getMicInput(); });
     lua->set_function("setDataPathRoot", [](const std::string & path) { return trussc::setDataPathRoot(path); });
-    lua->set_function("getDataPathRoot", []() { return trussc::getDataPathRoot(); });
-    lua->set_function("getDataPath", [](const std::string & filename) { return trussc::getDataPath(filename); });
+    lua->set_function("getDataPathRoot", []() { return trussc::getDataPathRoot().string(); });
+    lua->set_function("getDataPath", [](const std::string & filename) { return trussc::getDataPath(filename).string(); });
     lua->set_function("setDataPathToResources", []() { return trussc::setDataPathToResources(); });
     lua->set_function("toInt", [](const std::string & str) { return trussc::toInt(str); });
     lua->set_function("toInt64", [](const std::string & str) { return trussc::toInt64(str); });

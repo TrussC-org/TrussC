@@ -112,7 +112,9 @@ inline void registerInspectionTools() {
     tool("save_screenshot", "Save screenshot to file")
         .arg<std::string>("path", "File path")
         .bind<std::string>([](std::string path) {
-            if (trussc::saveScreenshot(path)) {
+            // JSON strings are UTF-8 — convert explicitly (fs::path(string)
+            // would interpret them in the ACP on Windows)
+            if (trussc::saveScreenshot(trussc::internal::utf8ToPath(path))) {
                 return json{{"status", "ok"}, {"path", path}};
             } else {
                 return json{{"status", "error"}, {"message", "Failed to save screenshot"}};
@@ -157,7 +159,7 @@ inline void registerInspectionTools() {
                 path = "recording-" + trussc::getTimestampString("%Y-%m-%d-%H-%M-%S")
                      + (isProRes ? ".mov" : ".mp4");
             }
-            bool ok = trussc::startRecording(path, settings);
+            bool ok = trussc::startRecording(trussc::internal::utf8ToPath(path), settings);
             json r{{"status", ok ? "ok" : "error"},
                    {"path", trussc::recordingPath()},
                    {"fps", settings.fps},

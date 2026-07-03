@@ -364,7 +364,7 @@ bool captureWindow(Pixels& outPixels) {
 // ---------------------------------------------------------------------------
 bool internal::captureWindowToFile(const std::filesystem::path& path) {
     if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path.string()));
+        return internal::captureWindowToFile(getDataPath(path));
     }
     // Capture to Pixels
     Pixels pixels;
@@ -385,7 +385,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     }
 
     int result = 0;
-    std::string pathStr = path.string();
+    std::string pathStr = internal::pathToUtf8(path);   // UTF-8 for stb (STBIW_WINDOWS_UTF8)
 
     if (ext == ".png") {
         result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);

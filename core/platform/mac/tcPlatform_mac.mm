@@ -357,7 +357,7 @@ bool captureWindow(Pixels& outPixels) {
 bool internal::captureWindowToFile(const std::filesystem::path& path) {
     // Resolve relative paths
     if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path.string()));
+        return internal::captureWindowToFile(getDataPath(path));
     }
     // Capture to Pixels
     Pixels pixels;

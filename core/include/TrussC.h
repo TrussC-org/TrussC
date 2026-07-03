@@ -84,6 +84,7 @@
 #include "tc/events/tcCoreEvents.h"
 
 // TrussC utilities
+#include "tc/utils/tcFileIO.h"   // fs::path boundary helpers (before all path consumers)
 #include "tc/utils/tcUtils.h"
 #include "tc/utils/tcMainThread.h"  // runOnMainThread / drainMainThreadQueue
 #include "tc/utils/tcTime.h"
@@ -1843,8 +1844,7 @@ namespace internal {
 // Relative paths resolve against the data path. Supported formats: png/jpg/bmp.
 inline bool saveScreenshot(const std::filesystem::path& path) {
     // Resolve relative paths up front so the deferred worker gets an absolute one.
-    std::filesystem::path resolved =
-        path.is_relative() ? std::filesystem::path(getDataPath(path.string())) : path;
+    std::filesystem::path resolved = getDataPath(path);   // absolute passes through
 
     // Auto-create the parent directory (mirrors VideoRecorder). This is the
     // failure users want to catch synchronously (missing/unwritable folder).

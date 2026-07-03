@@ -11,6 +11,7 @@
 #include <cmath>
 #include <memory>
 #include <filesystem>
+#include "tc/utils/tcFileIO.h"   // fs alias + path boundary helpers
 #include "../sound/tcSound.h"
 
 // Forward declaration for tcPlatform.h (avoid circular include)
@@ -30,50 +31,40 @@ namespace internal {
 // ---------------------------------------------------------------------------
 
 namespace internal {
-    // Default is "data/" relative to executable directory
-    // On macOS, executable is in xxx.app/Contents/MacOS/, so "../../../data/" points to bin/data/
+    // Default is "data" relative to executable directory
+    // On macOS, executable is in xxx.app/Contents/MacOS/, so "../../../data" points to bin/data
     #ifdef __APPLE__
-    inline std::string dataPathRoot = "../../../data/";
+    inline fs::path dataPathRoot = "../../../data";
     #else
-    inline std::string dataPathRoot = "data/";
+    inline fs::path dataPathRoot = "data";
     #endif
-    inline bool dataPathRootIsAbsolute = false;
 }
 
 // Set the data path root
-// If relative path, resolved relative to executable directory
-// If absolute path (starts with /), used as-is
-inline void setDataPathRoot(const std::string& path) {
+// If relative, resolved relative to executable directory
+// If absolute, used as-is (fs::path::is_absolute — handles "C:/..." on Windows too)
+inline void setDataPathRoot(const fs::path& path) {
     internal::dataPathRoot = path;
-    // Add trailing slash if missing
-    if (!internal::dataPathRoot.empty() && internal::dataPathRoot.back() != '/') {
-        internal::dataPathRoot += '/';
-    }
-    // Record whether path is absolute
-    internal::dataPathRootIsAbsolute = (!path.empty() && path[0] == '/');
 }
 
 // Get the data path root
-inline std::string getDataPathRoot() {
+inline fs::path getDataPathRoot() {
     return internal::dataPathRoot;
 }
 
 // Get data path for a filename
-// - If filename is absolute, return as-is
+// - If filename is absolute, return as-is (like oF)
 // - Otherwise, resolved relative to executable directory + dataPathRoot
-inline std::string getDataPath(const std::string& filename) {
-    // If filename is absolute, return as-is (like oF)
-    // Uses std::filesystem for cross-platform support (Unix: /path, Windows: C:\path)
-    if (!filename.empty() && std::filesystem::path(filename).is_absolute()) {
+inline fs::path getDataPath(const fs::path& filename) {
+    if (!filename.empty() && filename.is_absolute()) {
         return filename;
     }
 
-    if (internal::dataPathRootIsAbsolute) {
-        // Absolute dataPathRoot: use as-is
-        return internal::dataPathRoot + filename;
+    if (internal::dataPathRoot.is_absolute()) {
+        return internal::dataPathRoot / filename;
     } else {
-        // Relative path: resolve relative to executable directory
-        return getExecutableDir() + internal::dataPathRoot + filename;
+        // Relative root: resolve relative to executable directory
+        return fs::path(getExecutableDir()) / internal::dataPathRoot / filename;
     }
 }
 

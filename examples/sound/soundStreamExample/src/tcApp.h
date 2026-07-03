@@ -16,7 +16,7 @@ private:
     // sfx = eager voice (PCM in RAM) — coexists with the stream in the mixer
     Sound sfx;
 
-    std::string musicPath;
+    std::filesystem::path musicPath;
     bool musicLoaded = false;
     bool sfxLoaded = false;
 };

@@ -618,11 +618,11 @@ static void createADTSHeader(uint8_t* header, int frameLength, int sampleRate, i
 
 namespace trussc {
 
-bool VideoPlayer::loadPlatform(const std::string& path) {
+bool VideoPlayer::loadPlatform(const fs::path& path) {
     // Create Objective-C implementation
     TCVideoPlayerImpl* impl = [[TCVideoPlayerImpl alloc] init];
 
-    NSString* nsPath = [NSString stringWithUTF8String:path.c_str()];
+    NSString* nsPath = [NSString stringWithUTF8String:internal::pathToUtf8(path).c_str()];
 
     if (![impl loadWithPath:nsPath]) {
         return false;

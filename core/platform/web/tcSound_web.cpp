@@ -119,11 +119,11 @@ EM_JS(void, copyAacData, (float* outPtr, int totalSamples), {
 // -----------------------------------------------------------------------------
 // SoundBuffer::loadAac - Web implementation (deferred loading)
 // -----------------------------------------------------------------------------
-bool SoundBuffer::loadAac(const std::string& path) {
+bool SoundBuffer::loadAac(const fs::path& path) {
     printf("SoundBuffer: deferring AAC load: %s [Web]\n", path.c_str());
 
-    // Save path for deferred loading
-    deferredAacPath_ = path;
+    // Save path for deferred loading (web paths are plain UTF-8 strings)
+    deferredAacPath_ = path.string();
 
     // Set placeholder values so the app doesn't crash
     channels = 2;

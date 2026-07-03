@@ -9,6 +9,7 @@
 #include <filesystem>
 #include "stb/stb_image.h"
 #include "stb/stb_image_write.h"
+#include "tc/utils/tcFileIO.h"   // internal::pathToUtf8
 
 namespace trussc {
 
@@ -215,7 +216,7 @@ public:
         clear();
 
         int w, h, channels;
-        unsigned char* loaded = stbi_load(path.string().c_str(), &w, &h, &channels, 4);
+        unsigned char* loaded = stbi_load(internal::pathToUtf8(path).c_str(), &w, &h, &channels, 4);
         if (!loaded) {
             // Fallback to platform-specific loader (ImageIO on macOS)
             return loadPlatform(path);
@@ -242,7 +243,7 @@ public:
         clear();
 
         int w, h, channels;
-        float* loaded = stbi_loadf(path.string().c_str(), &w, &h, &channels, 3);
+        float* loaded = stbi_loadf(internal::pathToUtf8(path).c_str(), &w, &h, &channels, 3);
         if (!loaded) {
             return false;
         }

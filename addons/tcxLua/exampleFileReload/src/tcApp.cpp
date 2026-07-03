@@ -25,10 +25,10 @@ std::string sep = "/";
 void tcApp::reloadLuaFile(){
 #ifdef FILE_RELOAD_SUPPORTED
     std::string luaScriptBaseName = "sketch.lua";
-    std::string luaScriptPath = getDataPath(luaScriptBaseName);
+    fs::path luaScriptPath = getDataPath(luaScriptBaseName);
 
     if(fileExists(luaScriptPath)){
-        sol::optional<sol::error> result = lua->safe_script_file(luaScriptPath);
+        sol::optional<sol::error> result = lua->safe_script_file(luaScriptPath.string());
         if (result.has_value()) {
             std::cerr << "Lua execution failed: "
                     << result.value().what() << std::endl;

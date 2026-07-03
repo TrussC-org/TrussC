@@ -59,8 +59,8 @@ public:
 
     // Load from file path (.ies). Path is resolved via getDataPath()
     // (relative to the project data/ directory).
-    bool load(const std::string& path) {
-        std::string resolved = getDataPath(path);
+    bool load(const fs::path& path) {
+        fs::path resolved = getDataPath(path);
         std::ifstream ifs(resolved);
         if (!ifs.is_open()) {
             logWarning() << "[IesProfile] cannot open: " << resolved;

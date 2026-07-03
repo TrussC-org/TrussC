@@ -207,7 +207,7 @@ inline string findCMake(const string& buildDir = "") {
     // On Windows, PATH may resolve to an older VS cmake that doesn't
     // know the generator used by the current build (e.g. "Visual Studio 18 2026").
     if (!buildDir.empty()) {
-        string cachePath = buildDir + "/CMakeCache.txt";
+        fs::path cachePath = fs::path(buildDir) / "CMakeCache.txt";
         if (fs::exists(cachePath)) {
             ifstream cache(cachePath);
             string line;

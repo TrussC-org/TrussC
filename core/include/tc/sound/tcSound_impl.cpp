@@ -90,21 +90,33 @@ ma_decoder_config makeFloat32Config(ma_encoding_format hint) {
     return cfg;
 }
 
-bool decodeFileWithMiniaudio(const std::string& path,
+// Open a ma_decoder from a path. Uses the wide-path entry point on Windows so
+// non-ASCII paths survive (ma_fopen would take the narrow ACP route).
+ma_result maDecoderInitPath(const fs::path& path,
+                            const ma_decoder_config* cfg, ma_decoder* dec) {
+#ifdef _WIN32
+    return ma_decoder_init_file_w(path.c_str(), cfg, dec);
+#else
+    return ma_decoder_init_file(path.c_str(), cfg, dec);
+#endif
+}
+
+bool decodeFileWithMiniaudio(const fs::path& path,
                              ma_encoding_format hint,
                              const char* label,
                              SoundBuffer& out) {
     ma_decoder decoder;
     ma_decoder_config cfg = makeFloat32Config(hint);
-    ma_result result = ma_decoder_init_file(path.c_str(), &cfg, &decoder);
+    std::string pathStr = internal::pathToUtf8(path);
+    ma_result result = maDecoderInitPath(path, &cfg, &decoder);
     if (result != MA_SUCCESS) {
         printf("SoundBuffer: failed to open %s %s (result=%d)\n",
-               label, path.c_str(), (int)result);
+               label, pathStr.c_str(), (int)result);
         return false;
     }
-    if (!drainDecoder(decoder, out, path.c_str())) return false;
+    if (!drainDecoder(decoder, out, pathStr.c_str())) return false;
     printf("SoundBuffer: loaded %s %s (%d ch, %d Hz, %zu samples)\n",
-           label, path.c_str(), out.channels, out.sampleRate, out.numSamples);
+           label, pathStr.c_str(), out.channels, out.sampleRate, out.numSamples);
     return true;
 }
 
@@ -132,11 +144,20 @@ bool decodeMemoryWithMiniaudio(const void* data, size_t dataSize,
 // OGG Vorbis: stb_vorbis (miniaudio does not bundle a Vorbis decoder)
 // -----------------------------------------------------------------------------
 
-bool SoundBuffer::loadOgg(const std::string& path) {
+bool SoundBuffer::loadOgg(const fs::path& path) {
+    std::string pathStr = internal::pathToUtf8(path);
+    // stb_vorbis has no UTF-8 filename mode on Windows — open the FILE*
+    // ourselves (wide API) and hand it over (close_handle_on_close=TRUE).
+    FILE* f = internal::openFile(path, "rb");
+    if (!f) {
+        printf("SoundBuffer: failed to open %s\n", pathStr.c_str());
+        return false;
+    }
     int error = 0;
-    stb_vorbis* vorbis = stb_vorbis_open_filename(path.c_str(), &error, nullptr);
+    stb_vorbis* vorbis = stb_vorbis_open_file(f, 1, &error, nullptr);
     if (!vorbis) {
-        printf("SoundBuffer: failed to open %s (error=%d)\n", path.c_str(), error);
+        fclose(f);
+        printf("SoundBuffer: failed to open %s (error=%d)\n", pathStr.c_str(), error);
         return false;
     }
 
@@ -153,7 +174,7 @@ bool SoundBuffer::loadOgg(const std::string& path) {
     stb_vorbis_close(vorbis);
 
     printf("SoundBuffer: loaded %s (%d ch, %d Hz, %zu samples)\n",
-           path.c_str(), channels, sampleRate, numSamples);
+           pathStr.c_str(), channels, sampleRate, numSamples);
 
     return decoded > 0;
 }
@@ -162,15 +183,15 @@ bool SoundBuffer::loadOgg(const std::string& path) {
 // WAV / MP3 / FLAC: routed through ma_decoder
 // -----------------------------------------------------------------------------
 
-bool SoundBuffer::loadWav(const std::string& path) {
+bool SoundBuffer::loadWav(const fs::path& path) {
     return decodeFileWithMiniaudio(path, ma_encoding_format_wav, "WAV", *this);
 }
 
-bool SoundBuffer::loadMp3(const std::string& path) {
+bool SoundBuffer::loadMp3(const fs::path& path) {
     return decodeFileWithMiniaudio(path, ma_encoding_format_mp3, "MP3", *this);
 }
 
-bool SoundBuffer::loadFlac(const std::string& path) {
+bool SoundBuffer::loadFlac(const fs::path& path) {
     return decodeFileWithMiniaudio(path, ma_encoding_format_flac, "FLAC", *this);
 }
 
@@ -221,10 +242,10 @@ bool SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
 // can use it directly.
 // -----------------------------------------------------------------------------
 
-bool SoundBuffer::load(const std::string& path) {
+bool SoundBuffer::load(const fs::path& path) {
     // Lowercase the extension once
-    const auto dot = path.find_last_of('.');
-    std::string ext = (dot == std::string::npos) ? "" : path.substr(dot + 1);
+    std::string ext = path.extension().string();
+    if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
     for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
 
     if (ext == "wav")  return loadWav(path);
@@ -234,7 +255,7 @@ bool SoundBuffer::load(const std::string& path) {
     if (ext == "aac" || ext == "m4a") return loadAac(path);
 
     printf("SoundBuffer: unsupported extension '.%s' for %s\n",
-           ext.c_str(), path.c_str());
+           ext.c_str(), internal::pathToUtf8(path).c_str());
     return false;
 }
 
