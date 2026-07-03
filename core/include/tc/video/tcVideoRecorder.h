@@ -16,6 +16,11 @@
 //                       every frame at wall-clock speed until stop().
 //                       start(path) / start(fbo, path) -> stop()
 //                     Size is taken automatically; built on a VideoWriter.
+//                     A fixed length may be requested (settings.duration, or the
+//                       start(path, seconds) overload): recording then auto-stops
+//                       and finalizes the file at exactly that length — no frame
+//                       whose PTS reaches `duration` is written. Default is 0 =
+//                       unlimited (record until stop()).
 //
 //   startRecording()/stopRecording() - global convenience over a singleton
 //                     ScreenRecorder ("just record the whole window").
@@ -85,6 +90,9 @@ struct VideoRecordSettings {
                                 // VideoWriter: the exact output frame rate.
     int bitrate = 0;            // bits/sec for H.264/HEVC; 0 = auto. Ignored by ProRes.
     int keyframeInterval = 0;   // frames between keyframes; 0 = encoder default.
+    float duration = 0.0f;      // ScreenRecorder: auto-stop & finalize after this
+                                // many seconds of output; 0 = unlimited (call
+                                // stop() manually). Ignored by VideoWriter.
 };
 
 // ---------------------------------------------------------------------------
@@ -292,6 +300,20 @@ public:
                            fbo.getWidth(), fbo.getHeight(), path, settings);
     }
 
+    // Fixed-duration convenience: record for `durationSec` seconds, then auto-stop
+    // and finalize the file at exactly that length. Same as filling
+    // settings.duration. (durationSec <= 0 records until stop(), like the default.)
+    bool start(const std::string& path, float durationSec) {
+        VideoRecordSettings s;
+        s.duration = durationSec;
+        return start(path, s);
+    }
+    bool start(const Fbo& fbo, const std::string& path, float durationSec) {
+        VideoRecordSettings s;
+        s.duration = durationSec;
+        return start(fbo, path, s);
+    }
+
     // Stop capturing and finalize the file. Safe to call multiple times.
     void stop() {
         afterFrameListener_ = EventListener{};   // no new captures get queued
@@ -328,6 +350,7 @@ private:
         if (!writer_.open(path, w, h, settings)) return false;
         source_ = src;
         fbo_ = fbo;
+        duration_ = settings.duration;
         startElapsed_ = getElapsedTimef();
         nextCaptureTime_ = -1.0f;
         lastFrameTime_ = -1.0f;
@@ -339,6 +362,25 @@ private:
     void onAfterFrame() {
         if (!writer_.isOpen()) return;
         float now = getElapsedTimef();
+
+        // Fixed-duration cutoff. `t` is the wall-clock PTS this frame would carry;
+        // once it reaches the requested length we finalize and append nothing more,
+        // so the output length == duration (to within one frame slot). The cut is
+        // PTS-based, so any async capture already in flight — its PTS was sampled
+        // below when it was issued, always < duration — can't push the file past
+        // the cutoff; stop() just drains those before closing the writer.
+        //
+        // stop() clears afterFrameListener_ from inside this callback (self-removal
+        // mid-dispatch). That is safe here: Event::notify() iterates an RCU
+        // snapshot of the listener list held alive for the whole loop, so removing
+        // ourselves only swaps in a new list for the NEXT fire; the in-progress
+        // dispatch is unaffected, and removeListener() takes a recursive_mutex that
+        // notify() does not hold (no deadlock). No deferral needed.
+        if (duration_ > 0.0f && (double)(now - startElapsed_) >= (double)duration_) {
+            stop();
+            return;
+        }
+
         float interval = 1.0f / writer_.getFps();
 
         // Decimate the (often higher-rate) frame stream to the target fps by
@@ -396,6 +438,7 @@ private:
     Source source_ = Source::None;
     const Fbo* fbo_ = nullptr;
     float startElapsed_ = 0.0f;
+    float duration_ = 0.0f;           // fixed-length cutoff in seconds (0 = unlimited)
     float nextCaptureTime_ = -1.0f;   // scheduled time of the next frame to capture
     float lastFrameTime_ = -1.0f;     // previous afterFrame time (for source dt)
     EventListener afterFrameListener_;
@@ -419,6 +462,14 @@ namespace internal {
 TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const std::string& path,
                            const VideoRecordSettings& settings = {}) {
     return internal::globalScreenRecorder().start(path, settings);
+}
+
+// Fixed-duration convenience: record the whole window for `durationSec` seconds,
+// then auto-stop and finalize at exactly that length. (durationSec <= 0 behaves
+// like the unlimited overload above — record until stopRecording().)
+TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const std::string& path,
+                           float durationSec) {
+    return internal::globalScreenRecorder().start(path, durationSec);
 }
 
 inline void stopRecording() { internal::globalScreenRecorder().stop(); }

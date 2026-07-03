@@ -10491,6 +10491,11 @@ description.en = "Output codec (default H264)"
 description.ja = "出力コーデック（デフォルト H264）"
 description.ko = "출력 코덱(기본값 H264)"
 
+["VideoRecordSettings::duration"]
+description.en = "Recording length in seconds; 0 = unlimited (stop manually). When set, recording auto-stops and the file is finalized at exactly this length; a manual stop before the cutoff still wins"
+description.ja = "録画の長さ（秒）。0 = 無制限（手動で stop）。指定するとその長さで自動停止しファイルが確定する。時間内の手動 stop は常に優先される"
+description.ko = "녹화 길이(초). 0 = 무제한(수동으로 stop). 지정하면 해당 길이에서 자동 정지되고 파일이 확정된다. 시간 내 수동 stop이 항상 우선"
+
 ["VideoRecordSettings::fps"]
 description.en = "Capture/output frame rate. For ScreenRecorder this is the capture ceiling; for VideoWriter it is the exact output rate (default 60)"
 description.ja = "キャプチャ/出力フレームレート。ScreenRecorder ではキャプチャの上限、VideoWriter では正確な出力レート（デフォルト 60）"
