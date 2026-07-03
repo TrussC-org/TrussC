@@ -16,11 +16,10 @@ private:
     VideoGrabber grabber_;
     vector<GrabberFrame> frames_;  // reused scratch for getBufferFrames()
 
-    // filmstrip of the last kStrip frames (rotating slots)
+    // last kStrip frames; slots are overwritten in turn (head_ wraps around)
     static constexpr int kStrip = 8;
     Texture tex_[kStrip];
     uint64_t tUs_[kStrip] = {};  // capture timestamp per slot
     int head_ = 0;               // next slot to overwrite
-    int count_ = 0;              // valid slots so far
     size_t total_ = 0;
 };

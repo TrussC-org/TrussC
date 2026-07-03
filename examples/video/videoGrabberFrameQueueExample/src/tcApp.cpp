@@ -30,16 +30,20 @@ void tcApp::update() {
     // Each GrabberFrame carries pixels + width/height + timestampUs together.
     frames_.clear();
     grabber_.getBufferFrames(frames_);
-    for (auto& f : frames_) {
-        Texture& t = tex_[head_];  // rotating filmstrip slot
+    total_ += frames_.size();
+    // a burst (e.g. after a stall) can return more frames than slots; only
+    // the last kStrip would survive, so skip the rest (Stream textures also
+    // accept one loadData per frame)
+    for (size_t k = frames_.size() > kStrip ? frames_.size() - kStrip : 0;
+         k < frames_.size(); k++) {
+        GrabberFrame& f = frames_[k];
+        Texture& t = tex_[head_];  // overwrite the next slot, wrap around
         if (t.getWidth() != f.width) {
             t.allocate(f.width, f.height, 4, TextureUsage::Stream);
         }
         t.loadData(f.pixels.data(), f.width, f.height, 4);
         tUs_[head_] = f.timestampUs;
         head_ = (head_ + 1) % kStrip;
-        count_ = min(count_ + 1, (int)kStrip);
-        total_++;
     }
 }
 
@@ -57,22 +61,21 @@ void tcApp::draw() {
     float h = w * grabber_.getHeight() / grabber_.getWidth();
     grabber_.draw(0, 0, w, h);
 
-    // filmstrip: last kStrip frames, oldest -> newest, with the interval
-    // between their CAPTURE timestamps (not draw time)
+    // the slot row: each slot is drawn in place, so you can watch head_
+    // sweep across, overwriting the oldest frame. Labels show the interval
+    // between each slot's CAPTURE timestamp and its left neighbor's.
     float tw = getWidth() / (float)kStrip;
     float th = tw * grabber_.getHeight() / grabber_.getWidth();
-    for (int i = 0; i < count_; i++) {
-        int idx = (head_ + kStrip - count_ + i) % kStrip;
-        int prev = (idx + kStrip - 1) % kStrip;
+    for (int i = 0; i < kStrip; i++) {
         setColor(1.0f);
-        tex_[idx].draw(i * tw, h + 8, tw - 2, th);
-        if (i > 0) {
+        if (tex_[i].isAllocated()) tex_[i].draw(i * tw, h + 8, tw - 2, th);
+        int p = (i + kStrip - 1) % kStrip;  // ring predecessor (wraps at 0)
+        if (i != head_ && tUs_[p]) {  // at head_ the neighbor is the NEWEST frame
             setColor(colors::yellow);
-            drawBitmapString(format("+{:.0f}ms", (tUs_[idx] - tUs_[prev]) / 1000.0),
+            drawBitmapString(format("+{:.0f}ms", (tUs_[i] - tUs_[p]) / 1000.0),
                              i * tw + 2, h + th + 22);
         }
     }
-
     setColor(1.0f);
     drawBitmapString(format("{} frames queued & drained    "
                             "[S] stall main thread 2s - intervals stay at "
