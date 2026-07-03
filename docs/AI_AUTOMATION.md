@@ -49,6 +49,15 @@ TrussC uses **HTTP transport** for MCP. All JSON-RPC messages are sent as HTTP P
 | `get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
 | `get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |
 
+### Recording Tools (always available in MCP mode)
+
+The video counterpart of `save_screenshot` — capture the window to a video file with the native encoder (no ffmpeg). Always registered when MCP is enabled, but unlike the inspection tools these *write* (start/stop a recording), so they are listed separately.
+
+| Tool | Arguments | Description |
+|------|-----------|-------------|
+| `start_recording` | `path`, `duration`, `fps`, `codec` (all optional) | Start recording the window. Omit `path` for a timestamped `recording-<timestamp>.mp4` (`.mov` for ProRes) in the data dir; relative paths resolve under the data dir. `duration` (seconds) makes a fixed-length clip that **auto-stops and finalizes itself** at exactly that length (omit or `0` = unlimited). `fps` is the target frame rate (default 60; ProMotion frames are decimated to it). `codec` is `h264` (default) / `hevc` / `prores422` / `prores4444`. Returns `{status, path (resolved), fps, codec}` plus `duration` when a fixed length was set |
+| `stop_recording` | (none) | Stop the current recording and finalize the file. A manual stop **always wins** over a pending fixed `duration` — it finalizes immediately at the current length. Returns `{status, recording:false, path, frames, length}` (`length` = measured output seconds). Idle is not an error: returns `{status:"ok", recording:false, message:"not recording"}` |
+
 ### Debugger Tools (opt-in via `mcp::registerDebuggerTools()`)
 | Tool | Arguments | Description |
 |------|-----------|-------------|
@@ -164,11 +173,23 @@ curl -X POST http://localhost:8080/mcp \
 curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"mouse_click","arguments":{"x":100,"y":200}}}'
+
+# Record a fixed 3-second clip (auto-stops & finalizes itself); omit "duration"
+# for an unlimited recording you end with stop_recording. Omit "path" for a
+# timestamped file in the data dir; the response carries the resolved path.
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":4,"params":{"name":"start_recording","arguments":{"path":"/tmp/clip.mp4","duration":3}}}'
+
+# Stop early (a manual stop always wins — valid shorter file); no-op if idle
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":5,"params":{"name":"stop_recording","arguments":{}}}'
 ```
 
 ### Taking Screenshots from Shell
 
-**IMPORTANT for AI agents**: Do NOT use macOS `screencapture` or similar OS commands. TrussC apps may render with Metal/OpenGL and the OS cannot capture the screen correctly. Always use the MCP `save_screenshot` tool.
+**IMPORTANT for AI agents**: Do NOT use macOS `screencapture`, OS screen recorders (QuickTime, `ffmpeg`-avfoundation, OBS, etc.), or similar OS commands. TrussC apps may render with Metal/OpenGL and the OS cannot capture the screen correctly. Always use the MCP tools — `save_screenshot` for a still, `start_recording` / `stop_recording` for video.
 
 ```bash
 # Start app, wait, take screenshot, then kill
@@ -212,6 +233,7 @@ Configure your MCP client with the HTTP URL:
 | Category | Tools | Enabled by |
 |----------|-------|------------|
 | Inspection (read-only) | `get_screenshot`, `save_screenshot`, `get_node_tree`, `get_selected_node` | Automatic when MCP is enabled |
+| Recording (window capture to video) | `start_recording`, `stop_recording` | Automatic when MCP is enabled |
 | Debugger (input injection / scene mutation) | `mouse_click`, `mouse_press`, `mouse_release`, `key_press`, `mouse_move`, `mouse_scroll`, `key_release`, `select_node`, `set_node_members` | `mcp::registerDebuggerTools()` |
 | ImGui (widget interaction) | `imgui_get_widgets`, `imgui_click`, `imgui_input`, `imgui_checkbox` | Requires tcxImGui addon + `mcp::registerDebuggerTools()` |
 | Custom | `mcp::tool(...)` | Your code |

@@ -11653,9 +11653,9 @@ related = ["drawCurve", "Path::bezierTo", "setCurveResolution", "setCurveToleran
 category = "graphics_shapes"
 keywords = ["text", "label", "print", "ofdrawbitmapstring"]
 of = ["ofDrawBitmapString"]
-description.en = "Draw text"
-description.ja = "テキストを描画"
-description.ko = "비트맵 텍스트 그리기"
+description.en = "Draw text. The Vec3 overloads project through the current camera context — a screen-aligned 3D label; z=0 on the default screen matches plain 2D; behind-camera draws nothing; screenFixed picks fixed-pixel vs perspective size"
+description.ja = "テキストを描画。Vec3 オーバーロードは現在のカメラコンテキストで投影し、画面に正対する3Dラベルになる（デフォルト画面の z=0 は通常の2Dと一致、カメラ後方は非描画、screenFixed で固定ピクセル/遠近サイズを選択）"
+description.ko = "비트맵 텍스트 그리기. Vec3 오버로드는 현재 카메라 컨텍스트로 투영해 화면에 정렬된 3D 라벨을 그린다(기본 화면의 z=0은 일반 2D와 동일, 카메라 뒤쪽은 그리지 않음, screenFixed로 고정 픽셀/원근 크기 선택)"
 related = ["drawBitmapStringHighlight", "Font::drawString", "setTextAlign"]
 
 ["drawBitmapStringHighlight"]
@@ -14492,9 +14492,9 @@ related = ["VideoPlayer::setGammaCorrection"]
 ["startRecording"]
 category = "window_system"
 keywords = ["record", "video", "capture", "movie", "mp4"]
-description.en = "Start recording the window to a video file (native encoder, no ffmpeg)"
-description.ja = "ウィンドウを動画ファイルに録画開始（ネイティブエンコーダ、ffmpeg不要）"
-description.ko = "윈도우를 동영상 파일로 녹화 시작 (네이티브 인코더, ffmpeg 불필요)"
+description.en = "Start recording the window to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited"
+description.ja = "ウィンドウを動画ファイルに録画開始（ネイティブエンコーダ、ffmpeg不要）。秒数引数（または VideoRecordSettings.duration）を渡すと、その長さで自動停止・確定する固定長クリップになる（0 = 無制限）"
+description.ko = "윈도우를 동영상 파일로 녹화 시작 (네이티브 인코더, ffmpeg 불필요). 초 인자(또는 VideoRecordSettings.duration)를 넘기면 그 길이에서 자동 정지·마무리되는 고정 길이 클립이 된다(0 = 무제한)"
 related = ["VideoRecordSettings", "stopRecording", "isRecording", "saveScreenshot"]
 platform_note.en = "Global convenience over the singleton ScreenRecorder; non-functional on web for the same reason (VideoWriter stub returns false)."
 platform_note.ja = "シングルトン ScreenRecorder への薄いラッパ。同じ理由で web では機能しない（VideoWriter スタブが false）。"
