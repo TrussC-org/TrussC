@@ -832,13 +832,30 @@ public:
 
     void drawBitmapString(const std::string& text, float x, float y, bool screenFixed = true);
 
+    // Vec3 overload. The position is transformed by the current model matrix to
+    // world space and projected through the current camera context — an EasyCam
+    // scope or the ambient default screen alike; the glyphs are then drawn as a
+    // screen-aligned BILLBOARD on top of the scene (no depth test). On the
+    // default screen the z=0 plane maps pixel-identically to 2D coordinates, so
+    // Vec3(x, y, 0) draws exactly where (x, y) does, while z != 0 projects to
+    // the true 3D point. A point behind the camera draws nothing.
+    //   screenFixed=true  (default): constant pixel size regardless of distance.
+    //   screenFixed=false: the glyph cell is measured in world units at the
+    //                      label's depth, so it foreshortens with perspective
+    //                      (shrinks with distance).
     void drawBitmapString(const std::string& text, Vec3 pos, bool screenFixed = true) {
+        if (drawBitmapStringBillboard(text, pos, textAlignH_, textAlignV_, screenFixed, 1.0f)) return;
         drawBitmapString(text, pos.x, pos.y, screenFixed);
     }
 
     void drawBitmapString(const std::string& text, float x, float y, float scale);
 
+    // Vec3 + scale overload. Billboards through the current camera context with
+    // a perspective-scaled glyph cell (like screenFixed=false) multiplied by
+    // `scale`, so the label shrinks with distance. At z=0 on the default screen
+    // the perspective factor is 1, matching the 2D (x, y, scale) overload's size.
     void drawBitmapString(const std::string& text, Vec3 pos, float scale) {
+        if (drawBitmapStringBillboard(text, pos, textAlignH_, textAlignV_, /*screenFixed=*/false, scale)) return;
         drawBitmapString(text, pos.x, pos.y, scale);
     }
 
@@ -862,10 +879,28 @@ public:
     void drawBitmapString(const std::string& text, float x, float y,
                           Direction h, Direction v, bool screenFixed = true);
 
+    // Vec3 + alignment overload. Same billboard rule as the Vec3 overloads
+    // above (see their docs), but with explicit horizontal/vertical alignment
+    // of the label around the projected point.
     void drawBitmapString(const std::string& text, Vec3 pos,
                           Direction h, Direction v, bool screenFixed = true) {
+        if (drawBitmapStringBillboard(text, pos, h, v, screenFixed, 1.0f)) return;
         drawBitmapString(text, pos.x, pos.y, h, v, screenFixed);
     }
+
+    // Billboard a WORLD position through the current camera context (EasyCam
+    // scope or the ambient default screen). Returns true when it handled the
+    // draw — including the behind-camera case where it correctly draws nothing
+    // — and false only when no camera context exists (headless / before any
+    // camera setup) so the Vec3 overloads fall back to plain 2D.
+    // `pos` is transformed by the current model matrix (pushMatrix/translate
+    // apply) then projected. screenFixed=true keeps a constant pixel size;
+    // screenFixed=false measures the glyph cell in world units at the label's
+    // depth so it foreshortens with distance. `extraScale` multiplies the final
+    // glyph size in both modes. Implementation in tcRenderContext.cpp.
+    bool drawBitmapStringBillboard(const std::string& text, Vec3 pos,
+                                   Direction h, Direction v,
+                                   bool screenFixed, float extraScale);
 
     // -----------------------------------------------------------------------
     // Bitmap string metrics
