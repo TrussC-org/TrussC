@@ -2,7 +2,6 @@
 
 // =============================================================================
 // TrussC - Thin, Modern, and Native Creative Coding Framework
-// Version 0.0.1
 // =============================================================================
 
 // Windows: Hide console window (in Release builds)
@@ -104,6 +103,9 @@
 
 // TrussC console input (accept commands from stdin)
 #include "tc/utils/tcConsole.h"
+
+// TrussC version (git-tag derived, see tcVersion.h)
+#include "tc/utils/tcVersion.h"
 
 // TrussC MCP (Model Context Protocol) Server
 #include "tc/utils/tcMCP.h"
@@ -222,10 +224,7 @@ namespace trussc { namespace internal {
 // Reopen namespace
 namespace trussc {
 
-// Version information
-constexpr int VERSION_MAJOR = 0;
-constexpr int VERSION_MINOR = 0;
-constexpr int VERSION_PATCH = 1;
+// Version: git-tag derived — tc::getVersion() in tc/utils/tcVersion.h
 
 // Math constants defined in tcMath.h: TAU, HALF_TAU, QUARTER_TAU, PI
 
