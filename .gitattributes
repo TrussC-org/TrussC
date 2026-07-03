@@ -27,3 +27,7 @@
 *.so binary
 *.a binary
 *.lib binary
+
+# Version stamping for source archives (GitHub "Download ZIP" = git archive):
+# git archive substitutes the $Format:...$ placeholder with the tag name
+.git_archival.txt export-subst

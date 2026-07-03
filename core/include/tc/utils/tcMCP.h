@@ -25,6 +25,7 @@ using json = nlohmann::json;
 
 #include "tcLog.h"
 #include "tcThreadChannel.h"
+#include "tcVersion.h"
 
 #ifndef __EMSCRIPTEN__
 #include "../../impl/httplib.h"
@@ -234,7 +235,7 @@ private:
             {"protocolVersion", "2024-11-05"},
             {"server", {
                 {"name", "TrussC App"},
-                {"version", "0.0.1"}
+                {"version", getVersion()}
             }},
             {"capabilities", {
                 {"tools", {}},
