@@ -9882,25 +9882,15 @@ description.ko = "디바이스의 안정적인 고유 식별자"
 
 ["GrabberFrame"]
 keywords = ["webcam", "camera", "frame", "timestamp", "queue", "measurement"]
-description.en = "One captured camera frame with its capture-time timestamp: RGBA pixels, width/height, and timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getBufferFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time"
-description.ja = "キャプチャ時刻付きのカメラ1フレーム。RGBAピクセル・width/height・timestampUs（monotonicなsteady_clockのマイクロ秒。キャプチャスレッドで打刻）を持つ。VideoGrabber::getBufferFrames() が返す。ピクセルと時刻が一体なので「ピクセル取得と時刻取得の間に次フレームが割り込む」競合が起きない。カメラを計測/測定に使うときの基本単位"
-description.ko = "캡처 시각이 붙은 카메라 1프레임. RGBA 픽셀, width/height, timestampUs(단조 steady_clock 마이크로초, 캡처 스레드에서 기록)를 가짐. VideoGrabber::getBufferFrames()가 반환. 픽셀과 시각이 한 구조체로 오므로 둘을 따로 읽는 사이에 다음 프레임이 끼어드는 경쟁이 없음"
+description.en = "One captured camera frame with its capture-time timestamp: Pixels (RGBA8) plus timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getBufferFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time"
+description.ja = "キャプチャ時刻付きのカメラ1フレーム。Pixels（RGBA8）と timestampUs（monotonicなsteady_clockのマイクロ秒。キャプチャスレッドで打刻）を持つ。VideoGrabber::getBufferFrames() が返す。ピクセルと時刻が一体なので「ピクセル取得と時刻取得の間に次フレームが割り込む」競合が起きない。カメラを計測/測定に使うときの基本単位"
+description.ko = "캡처 시각이 붙은 카메라 1프레임. Pixels(RGBA8)와 timestampUs(단조 steady_clock 마이크로초, 캡처 스레드에서 기록)를 가짐. VideoGrabber::getBufferFrames()가 반환. 픽셀과 시각이 한 구조체로 오므로 둘을 따로 읽는 사이에 다음 프레임이 끼어드는 경쟁이 없음"
 related = ["VideoGrabber", "VideoGrabber::getBufferFrames", "VideoGrabber::setFrameQueueSize"]
 
 ["GrabberFrame::pixels"]
-description.en = "RGBA8 pixel data (width * height * 4 bytes)"
-description.ja = "RGBA8 のピクセルデータ（width * height * 4 バイト）"
-description.ko = "RGBA8 픽셀 데이터 (width * height * 4 바이트)"
-
-["GrabberFrame::width"]
-description.en = "Frame width in pixels"
-description.ja = "フレームの幅（ピクセル）"
-description.ko = "프레임 너비(픽셀)"
-
-["GrabberFrame::height"]
-description.en = "Frame height in pixels"
-description.ja = "フレームの高さ（ピクセル）"
-description.ko = "프레임 높이(픽셀)"
+description.en = "The frame as RGBA8 Pixels (carries its own width/height). Pixels is move-only - use clone() if you need a copy"
+description.ja = "フレーム本体（RGBA8 の Pixels。width/height は Pixels が持つ）。Pixels はムーブ専用なので、コピーが要る時は clone() を使う"
+description.ko = "프레임 본체(RGBA8 Pixels, width/height는 Pixels가 가짐). Pixels는 이동 전용이므로 복사가 필요하면 clone() 사용"
 
 ["GrabberFrame::timestampUs"]
 description.en = "Capture time in microseconds on the monotonic clock (std::chrono::steady_clock), stamped on the capture thread the moment the frame arrived from the driver. Not wall-clock time — use for interval math and cross-source sync only"

@@ -1177,10 +1177,10 @@ grabber.setFrameQueueSize(16);   // opt-in; 0 (default) = off, zero overhead
 grabber.setup(1280, 720);
 
 // each frame, drain everything captured since the last call:
-vector<GrabberFrame> frames;     // pixels + timestamp travel together (no race)
+vector<GrabberFrame> frames;     // Pixels + timestamp travel together (no race)
 grabber.getBufferFrames(frames); // oldest first; each delivered exactly once
 for (auto& f : frames) {
-    // f.pixels (RGBA), f.width, f.height,
+    // f.pixels — RGBA8 Pixels (has its own width/height; move-only, clone() to copy)
     // f.timestampUs — steady_clock µs, stamped on the CAPTURE thread
 }
 ```
@@ -2479,7 +2479,7 @@ void FullscreenShader::createVertexBuffer()  // Create the fullscreen-quad verte
 void FullscreenShader::draw()  // Draw a fullscreen quad with this shader applied
 ```
 
-### GrabberFrame — One captured camera frame with its capture-time timestamp: RGBA pixels, width/height, and timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getBufferFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time
+### GrabberFrame — One captured camera frame with its capture-time timestamp: Pixels (RGBA8) plus timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getBufferFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time
 
 ```cpp
 ```

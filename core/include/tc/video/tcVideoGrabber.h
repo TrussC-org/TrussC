@@ -15,6 +15,7 @@
 #include <deque>
 #include <memory>
 #include <cstdint>
+#include <cstring>
 
 namespace trussc {
 
@@ -41,9 +42,7 @@ struct VideoDeviceInfo {
 // arrives from the driver - it stays correct even if the app's main loop
 // stalls. It is NOT wall-clock time; use it for interval math only.
 struct GrabberFrame {
-    std::vector<unsigned char> pixels;  // RGBA8
-    int width = 0;
-    int height = 0;
+    Pixels pixels;             // RGBA8 (carries its own width/height/channels)
     uint64_t timestampUs = 0;  // steady_clock, microseconds since epoch of that clock
 };
 
@@ -63,10 +62,9 @@ struct GrabberFrameQueue {
         size_t cap = maxFrames.load(std::memory_order_relaxed);
         if (cap == 0 || !rgba || w <= 0 || h <= 0) return;
         GrabberFrame f;
-        f.width = w;
-        f.height = h;
         f.timestampUs = tUs;
-        f.pixels.assign(rgba, rgba + (size_t)w * h * 4);
+        f.pixels.allocate(w, h, 4);
+        std::memcpy(f.pixels.getData(), rgba, (size_t)w * h * 4);
         std::lock_guard<std::mutex> lock(mtx);
         while (frames.size() >= cap) frames.pop_front();
         frames.push_back(std::move(f));

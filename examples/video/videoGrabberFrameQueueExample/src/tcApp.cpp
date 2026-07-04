@@ -27,7 +27,7 @@ void tcApp::update() {
     grabber_.update();  // classic path: live preview texture (unaffected)
 
     // Drain all frames captured since the last call (0..n per update).
-    // Each GrabberFrame carries pixels + width/height + timestampUs together.
+    // Each GrabberFrame carries Pixels + timestampUs together.
     frames_.clear();
     grabber_.getBufferFrames(frames_);
     total_ += frames_.size();
@@ -36,13 +36,13 @@ void tcApp::update() {
     // accept one loadData per frame)
     for (size_t k = frames_.size() > kStrip ? frames_.size() - kStrip : 0;
          k < frames_.size(); k++) {
-        GrabberFrame& f = frames_[k];
+        Pixels& px = frames_[k].pixels;
         Texture& t = tex_[head_];  // overwrite the next slot, wrap around
-        if (t.getWidth() != f.width) {
-            t.allocate(f.width, f.height, 4, TextureUsage::Stream);
+        if (t.getWidth() != px.getWidth()) {
+            t.allocate(px.getWidth(), px.getHeight(), 4, TextureUsage::Stream);
         }
-        t.loadData(f.pixels.data(), f.width, f.height, 4);
-        tUs_[head_] = f.timestampUs;
+        t.loadData(px.getData(), px.getWidth(), px.getHeight(), 4);
+        tUs_[head_] = frames_[k].timestampUs;
         head_ = (head_ + 1) % kStrip;
     }
 }
