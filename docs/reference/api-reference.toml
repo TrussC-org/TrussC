@@ -10079,7 +10079,7 @@ keywords = ["thumbnail", "snapshot", "grab", "single frame", "poster", "exact fr
 description.en = "Extract the exact frame at a given time from a video file. Frame-accurate on every platform"
 description.ja = "ビデオファイルの指定時刻の正確なフレームを抽出。全プラットフォームでフレーム精度"
 description.ko = "비디오 파일에서 지정한 시간의 정확한 프레임을 추출. 모든 플랫폼에서 프레임 정확도"
-related = ["Pixels", "VideoPlayer", "VideoPlayer::load", "VideoPlayer::extractKeyFrame", "VideoPlayer::getPath"]
+related = ["Pixels", "Image", "VideoPlayer", "VideoPlayer::load", "VideoPlayer::extractKeyFrame", "VideoPlayer::getPath"]
 platform_note.en = "Implemented on macOS (AVAssetImageGenerator), Windows (Media Foundation / IMFSourceReader), and Linux (FFmpeg). Android stubs it (`return false`); iOS and web have no extractFramePlatform() definition and are unsupported."
 platform_note.ja = "macOS（AVAssetImageGenerator）・Windows（Media Foundation / IMFSourceReader）・Linux（FFmpeg）で実装済み。android は false を返すスタブ、ios/web は extractFramePlatform() の定義自体が無く未対応。"
 details.en = '''
@@ -10095,6 +10095,12 @@ Comes in two forms:
   good for thumbnails/posters from a file you are not playing.
 - **Instance** — `player.extractFrame(px, timeSec)`. Uses the currently loaded
   file ([`getPath`](#VideoPlayer::getPath)); returns false if nothing is loaded.
+
+Both forms also take an [`Image`](#Image) instead of `Pixels`
+(`extractFrame(path, img, timeSec)` / `player.extractFrame(img, timeSec)`):
+the result lands in a ready-to-draw Image (allocation + texture upload
+included). The upload touches the GPU, so the Image overloads are
+**main-thread only** — for background work use the `Pixels` forms.
 
 If you only need the nearest keyframe (faster, time-approximate — e.g. a rough
 thumbnail), use [`extractKeyFrame`](#VideoPlayer::extractKeyFrame) instead. These
@@ -10115,6 +10121,12 @@ details.ja = '''
 - **インスタンス** — `player.extractFrame(px, timeSec)`。現在ロード中のファイル
   （[`getPath`](#VideoPlayer::getPath)）を使う。未ロードなら false。
 
+どちらの形も `Pixels` の代わりに [`Image`](#Image) を渡せる
+（`extractFrame(path, img, timeSec)` / `player.extractFrame(img, timeSec)`）。
+確保〜テクスチャアップロード込みで、そのまま draw できる Image が返る。
+GPU に触るため Image 版は**メインスレッド限定** — バックグラウンド処理には
+`Pixels` 版を使う。
+
 最寄りキーフレームで十分（速い・時刻は近似、例えばラフなサムネイル）なら
 [`extractKeyFrame`](#VideoPlayer::extractKeyFrame) を使う。これらは単発取得用で、
 連続再生には**使わない**（呼ぶたびにデコードコンテキストを開くため重い）。再生は
@@ -10127,7 +10139,7 @@ keywords = ["thumbnail", "snapshot", "keyframe", "fast", "single frame", "poster
 description.en = "Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate"
 description.ja = "指定時刻以前の最寄りキーフレームを抽出。extractFrame より速いが時刻は近似"
 description.ko = "지정한 시간 이전의 가장 가까운 키프레임을 추출. extractFrame보다 빠르지만 시간은 근사치"
-related = ["Pixels", "VideoPlayer", "VideoPlayer::load", "VideoPlayer::extractFrame", "VideoPlayer::getPath"]
+related = ["Pixels", "Image", "VideoPlayer", "VideoPlayer::load", "VideoPlayer::extractFrame", "VideoPlayer::getPath"]
 platform_note.en = "Implemented on macOS (AVAssetImageGenerator), Windows (Media Foundation / IMFSourceReader), and Linux (FFmpeg). Android stubs it (`return false`); iOS and web are unsupported."
 platform_note.ja = "macOS（AVAssetImageGenerator）・Windows（Media Foundation / IMFSourceReader）・Linux（FFmpeg）で実装済み。android は false を返すスタブ、ios/web は未対応。"
 details.en = '''
@@ -10145,7 +10157,9 @@ fastest here — handy for the black-flash stopgap).
 Same two forms as [`extractFrame`](#VideoPlayer::extractFrame): static
 (`VideoPlayer::extractKeyFrame(path, px, timeSec)`, no `load()` needed) and
 instance (`player.extractKeyFrame(px, timeSec)`, uses the loaded
-[`getPath`](#VideoPlayer::getPath)). Single-shot only — not for playback.
+[`getPath`](#VideoPlayer::getPath)) — plus [`Image`](#Image) overloads of both
+that return a ready-to-draw Image (main-thread only). Single-shot only — not
+for playback.
 '''
 details.ja = '''
 [`extractFrame`](#VideoPlayer::extractFrame) と同様だが、**`timeSec` 以下の最寄り
@@ -10161,7 +10175,9 @@ details.ja = '''
 [`extractFrame`](#VideoPlayer::extractFrame) と同じく 2 種類:静的
 （`VideoPlayer::extractKeyFrame(path, px, timeSec)`、`load()` 不要）とインスタンス
 （`player.extractKeyFrame(px, timeSec)`、ロード中の
-[`getPath`](#VideoPlayer::getPath) を使う）。単発取得用で再生には使わない。
+[`getPath`](#VideoPlayer::getPath) を使う）。さらに両方に [`Image`](#Image) 版が
+あり、そのまま draw できる Image を返す（メインスレッド限定）。単発取得用で再生には
+使わない。
 '''
 
 ["VideoPlayer::getAudioChannels"]

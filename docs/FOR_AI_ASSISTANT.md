@@ -1136,22 +1136,22 @@ Yes — every TrussC app in MCP mode (`TRUSSC_MCP=1`) exposes `start_recording` 
 `VideoPlayer::load()` / `play()` decode **asynchronously**, so for the first few frames the player has no picture yet and draws **black**. To hide that flash, synchronously extract frame 0 as a still and show it until the live player has a real frame:
 
 ```cpp
-Pixels still; Texture stillTex;
-if (VideoPlayer::extractKeyFrame(path, still, 0.0f) && still.getWidth() > 0) {
-    stillTex.allocate(still.getWidth(), still.getHeight(), 4, TextureUsage::Stream);
-    stillTex.loadData(still.getData(), still.getWidth(), still.getHeight(), 4);
-}
+Image still;
+VideoPlayer::extractKeyFrame(path, still, 0.0f);  // frame 0, ready to draw
 player.load(path); player.play();
-// in draw(): show the live player once player.isFrameNew() has fired at least
-// once, otherwise draw stillTex. In update(): flip a "ready" flag on the first
-// isFrameNew().
+// update(): latch a bool on the first player.isFrameNew() - isFrameNew() is
+//           momentary (true only when a NEW frame arrived), so branch on the
+//           latched flag in draw(), never on isFrameNew() itself, or the
+//           still would flicker back whenever the app outpaces the video fps.
+// draw():   ready ? player.draw(...) : still.draw(...)
+// (reloading another video? reset the latch to false.)
 ```
 
-Use `extractKeyFrame(path, px, 0.0f)` here rather than `extractFrame`: frame 0 is always a keyframe, so it is the exact first frame *and* the fastest to fetch (seek only, no forward decode). If the player is already loaded you can also use the instance form `player.extractKeyFrame(px, 0.0f)`.
+Use `extractKeyFrame(path, img, 0.0f)` here rather than `extractFrame`: frame 0 is always a keyframe, so it is the exact first frame *and* the fastest to fetch (seek only, no forward decode). The `Image` overload allocates and uploads for you (main thread only); a `Pixels` overload exists for background work. If the player is already loaded you can also use the instance form `player.extractKeyFrame(img, 0.0f)`.
 
 ### How do I grab a single frame (thumbnail / poster) from a video?
 
-Two single-shot helpers, both **static, thread-safe, GPU-free**, returning RGBA `Pixels`. Each has a static form (pass a path, no `load()` needed) and an instance form (uses the already-loaded `player.getPath()`):
+Two single-shot helpers. Each has a static form (pass a path, no `load()` needed) and an instance form (uses the already-loaded `player.getPath()`), and each accepts either a `Pixels` (**thread-safe, GPU-free** — safe on background threads) or an `Image` (ready to draw, allocation + texture upload included — **main thread only**):
 
 ```cpp
 // exact frame at 3.5s — frame-accurate (seeks to the preceding keyframe, then
@@ -1161,6 +1161,9 @@ VideoPlayer::extractFrame(path, px, 3.5f);
 VideoPlayer::extractKeyFrame(path, px, 3.5f);
 // instance form (video already loaded):
 video.extractFrame(px, 3.5f);
+// Image overload: ready to draw, no manual texture upload (main thread only)
+Image img;
+VideoPlayer::extractFrame(path, img, 3.5f);
 ```
 
 Pick by need: **`extractFrame` = frame-accurate but heavier; `extractKeyFrame` = fast but time-approximate** (good for coarse thumbnails or scrub previews; falls back to an exact decode if no keyframe is reachable). Both take an optional `float* outDuration` that receives the clip length in seconds. Implemented on **macOS (AVFoundation), Windows (Media Foundation), Linux (FFmpeg)**; Android stubs them and iOS/web are unsupported (return false).
@@ -3814,8 +3817,8 @@ void VideoGrabber::update()  // Poll for a new frame and upload it to the textur
 ```cpp
 void VideoPlayer::close()  // Close the video and release resources
 void VideoPlayer::draw(float x, float y) const [+1]  // Draw the current video frame at (x, y), optionally scaled to w x h
-bool VideoPlayer::extractFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr) [+1]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
-bool VideoPlayer::extractKeyFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr) [+1]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
+bool VideoPlayer::extractFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr) [+3]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
+bool VideoPlayer::extractKeyFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr) [+3]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
 int VideoPlayer::getAudioChannels() const [macos,windows,linux,ios]  // Number of audio channels (0 if no audio)
 uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC of the audio codec in the loaded video (0 if none)
 std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video

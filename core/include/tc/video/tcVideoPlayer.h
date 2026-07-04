@@ -487,7 +487,57 @@ public:
         return extractKeyFramePlatform(sourcePath_, outPixels, timeSec, outDuration);
     }
 
+    // -------------------------------------------------------------------------
+    // Image convenience overloads. Same extraction, but the result lands in a
+    // ready-to-draw Image (allocate + texture upload included). GPU upload =>
+    // MAIN THREAD ONLY; use the Pixels overloads for background work.
+    // -------------------------------------------------------------------------
+
+    /// Extract the exact frame at a time into a ready-to-draw Image (static).
+    static bool extractFrame(const std::string& path, Image& outImage,
+                             float timeSec = 1.0f, float* outDuration = nullptr) {
+        Pixels px;
+        if (!extractFramePlatform(path, px, timeSec, outDuration)) return false;
+        pixelsToImage(px, outImage);
+        return true;
+    }
+
+    /// Extract the nearest keyframe at or before a time into a ready-to-draw
+    /// Image (static, faster).
+    static bool extractKeyFrame(const std::string& path, Image& outImage,
+                                float timeSec = 1.0f, float* outDuration = nullptr) {
+        Pixels px;
+        if (!extractKeyFramePlatform(path, px, timeSec, outDuration)) return false;
+        pixelsToImage(px, outImage);
+        return true;
+    }
+
+    /// Extract the exact frame from the currently loaded video into a
+    /// ready-to-draw Image (instance). Returns false if no video is loaded.
+    bool extractFrame(Image& outImage, float timeSec = 1.0f,
+                      float* outDuration = nullptr) const {
+        if (sourcePath_.empty()) return false;
+        return extractFrame(sourcePath_, outImage, timeSec, outDuration);
+    }
+
+    /// Extract the nearest keyframe from the currently loaded video into a
+    /// ready-to-draw Image (instance, faster). Returns false if no video is loaded.
+    bool extractKeyFrame(Image& outImage, float timeSec = 1.0f,
+                         float* outDuration = nullptr) const {
+        if (sourcePath_.empty()) return false;
+        return extractKeyFrame(sourcePath_, outImage, timeSec, outDuration);
+    }
+
 private:
+    // Move extracted pixels into a drawable Image (allocate + upload).
+    static void pixelsToImage(const Pixels& px, Image& img) {
+        img.allocate(px.getWidth(), px.getHeight(), 4);
+        std::memcpy(img.getPixelsData(), px.getData(),
+                    (size_t)px.getWidth() * px.getHeight() * 4);
+        img.setDirty();
+        img.update();
+    }
+
     static bool extractFramePlatform(const std::string& path, Pixels& outPixels,
                                      float timeSec, float* outDuration);
     static bool extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
