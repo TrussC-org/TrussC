@@ -1119,7 +1119,7 @@ A point cloud isn't a dedicated class — it uses **`tc::Mesh` directly.** The r
 ### How do I record video? (startRecording / VideoWriter)
 
 Two ways:
-- **Screen recording (easy)**: `startRecording("out.mp4")` to start, `stopRecording()` to stop, `isRecording()` for status. Records the on-screen output directly.
+- **Screen recording (easy)**: `startRecording("out.mp4")` to start, `stopRecording()` to stop, `isRecording()` for status. Records the on-screen output directly. `startRecording(fbo, "clean.mp4")` records an offscreen Fbo instead (clean, GUI-free; auto-finalizes if the Fbo is destroyed mid-recording). Calling `startRecording` while already recording finalizes the current file first, then starts fresh — same path = the old file is overwritten.
 - **Write arbitrary frames**: use `VideoWriter` — `open(path, w, h, settings)` → `addFrame(fbo)` / `addFrame(pixels)` (timestamped via `addFrameAt(frame, timeSec)`) → `close()`. For writing offscreen (FBO) content at a steady rate.
 Encoder settings: `VideoRecordSettings`. Platforms: macOS / Windows / Linux / Android / iOS.
 
@@ -1143,7 +1143,7 @@ player.load(path); player.play();
 player.isReady() ? player.draw(0, 0) : still.draw(0, 0);
 ```
 
-`isReady()` is exactly the "would this draw black?" test: false after `load()`/`play()`/`stop()` until the first decoded frame lands on the texture; seeking and pausing keep it true (the last frame stays). Don't branch the draw on `isFrameNew()` — that flag is momentary (true only on updates where a NEW frame arrived), so at 60fps app / 30fps video the still would flicker back every other frame.
+`isReady()` is exactly the "would this draw black?" test: false only while the texture is actually empty — after `load()` and after `stop()` (which clears the texture) — until the first decoded frame lands; `play()`, seeking and pausing keep it true (the last picture stays on the texture). Don't branch the draw on `isFrameNew()` — that flag is momentary (true only on updates where a NEW frame arrived), so at 60fps app / 30fps video the still would flicker back every other frame.
 
 Use `extractKeyFrame(path, img, 0.0f)` here rather than `extractFrame`: frame 0 is always a keyframe, so it is the exact first frame *and* the fastest to fetch (seek only, no forward decode). The `Image` overload allocates and uploads for you (main thread only); a `Pixels` overload exists for background work. If the player is already loaded you can also use the instance form `player.extractKeyFrame(img, 0.0f)`.
 
@@ -1178,7 +1178,7 @@ grabber.setup(1280, 720);
 
 // each frame, drain everything captured since the last call:
 vector<GrabberFrame> frames;     // Pixels + timestamp travel together (no race)
-grabber.getBufferFrames(frames); // oldest first; each delivered exactly once
+grabber.getQueuedFrames(frames); // oldest first; each delivered exactly once
 for (auto& f : frames) {
     // f.pixels — RGBA8 Pixels (has its own width/height; move-only, clone() to copy)
     // f.timestampUs — steady_clock µs, stamped on the CAPTURE thread
@@ -1760,7 +1760,7 @@ void setWindowPosition(int x, int y) [macos,windows]  // Set window position in 
 void setWindowSize(int width, int height)  // Set window size
 void setWindowSizeLogical(int width, int height)  // Resize the window to the given logical size (logical pixels)
 void setWindowTitle(const std::string & title)  // Set window title
-bool startRecording(const std::string & path, const VideoRecordSettings & settings = {}) [+1] [macos,windows,linux,android,ios]  // Start recording the window to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited
+bool startRecording(const std::string & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start recording the window — or an Fbo (clean, GUI-free output) — to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited. Calling it again while recording finalizes the current file first, then starts fresh (same path = the old file is overwritten)
 void stopRecording()  // Stop the current recording and finalize the file
 void toggleFullscreen()  // Toggle fullscreen mode
 ```
@@ -2369,6 +2369,7 @@ sg_view Fbo::getTextureView() const  // Return the underlying sokol-gfx color te
 int Fbo::getWidth() const  // Get width
 bool Fbo::isActive() const  // Check if currently rendering to FBO
 bool Fbo::isAllocated() const  // Check if allocated
+std::shared_ptr<void> Fbo::lifetimeToken() const  // Lifetime token for observers holding a raw pointer to this Fbo (e.g. ScreenRecorder auto-stops when the recorded Fbo dies). Per-object: it does not transfer on move
 bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android]  // Read FBO contents into a CPU buffer (8-bit per channel)
 bool Fbo::readPixelsFloat(float * pixels) const [macos,windows,linux,android]  // Read FBO contents into a CPU buffer (32-bit float per channel)
 bool Fbo::save(const fs::path & path) const  // Save FBO contents to file
@@ -2479,7 +2480,7 @@ void FullscreenShader::createVertexBuffer()  // Create the fullscreen-quad verte
 void FullscreenShader::draw()  // Draw a fullscreen quad with this shader applied
 ```
 
-### GrabberFrame — One captured camera frame with its capture-time timestamp: Pixels (RGBA8) plus timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getBufferFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time
+### GrabberFrame — One captured camera frame with its capture-time timestamp: Pixels (RGBA8) plus timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getQueuedFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time
 
 ```cpp
 ```
@@ -3227,7 +3228,7 @@ bool Reflector::visit(const char * name, float & v) [+7]  // Handle one reflecte
 int ScreenRecorder::getFrameCount() const  // Number of frames captured so far
 const std::string & ScreenRecorder::getPath() const  // Output file path of the current recording
 bool ScreenRecorder::isRecording() const  // Check if the screen recorder is currently capturing
-bool ScreenRecorder::start(const std::string & path, const VideoRecordSettings & settings = {}) [+3]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically
+bool ScreenRecorder::start(const std::string & path, const VideoRecordSettings & settings = {}) [+3]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically
 void ScreenRecorder::stop()  // Stop live capture and finalize the file
 VideoWriter & ScreenRecorder::writer()  // Access the underlying VideoWriter for advanced introspection
 ```
@@ -3787,13 +3788,13 @@ const std::string & VideoDeviceInfo::getUniqueId() const  // Get the stable uniq
 bool VideoGrabber::checkCameraPermission()  // Return whether camera access has been granted (macOS 10.14+)
 void VideoGrabber::close()  // Stop the camera and release its resources
 void VideoGrabber::copyToImage(Image & image) const  // Copy the current frame into an Image (allocating/updating it as needed)
-size_t VideoGrabber::getBufferFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Drain all frames captured since the last call (appended to the given vector, oldest first; returns the count). Each GrabberFrame carries a monotonic timestamp stamped on the capture thread, so timestamps stay truthful even if the main loop stalls, and no frame is lost when the camera runs faster than the app loop. Requires setFrameQueueSize() > 0; getPixels()/isFrameNew() are unaffected
 int VideoGrabber::getDesiredFrameRate() const  // Return the requested frame rate (-1 if unspecified)
 int VideoGrabber::getDeviceID() const  // Return the selected device ID
 const std::string & VideoGrabber::getDeviceName() const  // Return the name of the active capture device
 size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the frame queue capacity (0 = queueing disabled)
 int VideoGrabber::getHeight() const  // Return the captured frame height in pixels
 unsigned char * VideoGrabber::getPixels() [+1]  // Return a pointer to the current RGBA pixel buffer
+size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Drain all frames captured since the last call (appended to the given vector, oldest first; returns the count). Each GrabberFrame carries a monotonic timestamp stamped on the capture thread, so timestamps stay truthful even if the main loop stalls, and no frame is lost when the camera runs faster than the app loop. Requires setFrameQueueSize() > 0; getPixels()/isFrameNew() are unaffected
 Texture & VideoGrabber::getTexture() [+1]  // Return the texture holding the live camera frame (HasTexture override)
 int VideoGrabber::getWidth() const  // Return the captured frame width in pixels
 bool VideoGrabber::isFrameNew() const  // Return true if a new frame arrived during the most recent update()
@@ -3815,8 +3816,8 @@ void VideoGrabber::update()  // Poll for a new frame and upload it to the textur
 ```cpp
 void VideoPlayer::close()  // Close the video and release resources
 void VideoPlayer::draw(float x, float y) const [+1]  // Draw the current video frame at (x, y), optionally scaled to w x h
-bool VideoPlayer::extractFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr) [+3]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
-bool VideoPlayer::extractKeyFrame(const std::string & path, Pixels & outPixels, float timeSec = 1.0, float * outDuration = nullptr) [+3]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
+bool VideoPlayer::extractFrame(const std::string & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
+bool VideoPlayer::extractKeyFrame(const std::string & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
 int VideoPlayer::getAudioChannels() const [macos,windows,linux,ios]  // Number of audio channels (0 if no audio)
 uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC of the audio codec in the loaded video (0 if none)
 std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video
@@ -3881,7 +3882,7 @@ bool VideoPlayerBase::isLoaded() const  // Check if a video is loaded
 bool VideoPlayerBase::isLoop() const  // Check if looping is enabled
 bool VideoPlayerBase::isPaused() const  // Check if video is paused
 bool VideoPlayerBase::isPlaying() const  // Check if video is currently playing (not paused)
-bool VideoPlayerBase::isReady() const  // True once the texture holds a real decoded frame for the current playback — i.e. drawing shows actual video, not black
+bool VideoPlayerBase::isReady() const  // True while the texture holds a real decoded frame — i.e. drawing shows actual video, not black. False only while the texture is cleared (after load/stop, before the first frame)
 bool VideoPlayerBase::isUsingHwAccel() const  // Return true if hardware-accelerated decoding is currently active.
 bool VideoPlayerBase::load(const std::string & path)  // Load a video from the given file path; return true on success.
 void VideoPlayerBase::markDone()  // Mark playback as done, clearing playing unless looping.

@@ -1958,6 +1958,11 @@ description.en = "Check if currently rendering to FBO"
 description.ja = "FBOに描画中か確認"
 description.ko = "현재 FBO 렌더링 중인지 확인"
 
+["Fbo::lifetimeToken"]
+description.en = "Lifetime token for observers holding a raw pointer to this Fbo (e.g. ScreenRecorder auto-stops when the recorded Fbo dies). Per-object: it does not transfer on move"
+description.ja = "この Fbo への生ポインタを持つ監視者向けの生存トークン（例: ScreenRecorder は録画中の Fbo が破棄されると自動停止する）。オブジェクト固有で、ムーブしても移らない"
+description.ko = "이 Fbo의 원시 포인터를 가진 관찰자를 위한 수명 토큰(예: ScreenRecorder는 녹화 중인 Fbo가 파괴되면 자동 정지). 객체 고유이며 이동해도 옮겨지지 않음"
+
 ["Fbo::isAllocated"]
 description.en = "Check if allocated"
 description.ja = "確保されているか確認"
@@ -6845,9 +6850,9 @@ description.ko = "화면 녹화가 현재 캡처 중인지 확인"
 ["ScreenRecorder::start"]
 category = "video"
 keywords = ["begin", "record", "capture", "go"]
-description.en = "Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically"
-description.ja = "ライブ録画開始（ウィンドウ、またはGUIなしのクリーン出力はFbo）。サイズは自動取得"
-description.ko = "라이브 녹화 시작 (윈도우, 또는 GUI 없는 클린 출력은 Fbo); 크기는 자동 취득"
+description.en = "Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically"
+description.ja = "ライブ録画開始（ウィンドウ、またはGUIなしのクリーン出力はFbo）。サイズは自動取得。録画中に start を呼ぶと現在のファイルを確定してから新規開始。録画中の Fbo が破棄された場合は自動で停止・確定する"
+description.ko = "라이브 녹화 시작 (윈도우, 또는 GUI 없는 클린 출력은 Fbo); 크기는 자동 취득. 녹화 중에 start를 호출하면 현재 파일을 마무리한 뒤 새로 시작. 녹화 중인 Fbo가 파괴되면 자동으로 정지·마무리"
 
 ["ScreenRecorder::stop"]
 category = "video"
@@ -9882,10 +9887,10 @@ description.ko = "디바이스의 안정적인 고유 식별자"
 
 ["GrabberFrame"]
 keywords = ["webcam", "camera", "frame", "timestamp", "queue", "measurement"]
-description.en = "One captured camera frame with its capture-time timestamp: Pixels (RGBA8) plus timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getBufferFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time"
-description.ja = "キャプチャ時刻付きのカメラ1フレーム。Pixels（RGBA8）と timestampUs（monotonicなsteady_clockのマイクロ秒。キャプチャスレッドで打刻）を持つ。VideoGrabber::getBufferFrames() が返す。ピクセルと時刻が一体なので「ピクセル取得と時刻取得の間に次フレームが割り込む」競合が起きない。カメラを計測/測定に使うときの基本単位"
-description.ko = "캡처 시각이 붙은 카메라 1프레임. Pixels(RGBA8)와 timestampUs(단조 steady_clock 마이크로초, 캡처 스레드에서 기록)를 가짐. VideoGrabber::getBufferFrames()가 반환. 픽셀과 시각이 한 구조체로 오므로 둘을 따로 읽는 사이에 다음 프레임이 끼어드는 경쟁이 없음"
-related = ["VideoGrabber", "VideoGrabber::getBufferFrames", "VideoGrabber::setFrameQueueSize"]
+description.en = "One captured camera frame with its capture-time timestamp: Pixels (RGBA8) plus timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getQueuedFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time"
+description.ja = "キャプチャ時刻付きのカメラ1フレーム。Pixels（RGBA8）と timestampUs（monotonicなsteady_clockのマイクロ秒。キャプチャスレッドで打刻）を持つ。VideoGrabber::getQueuedFrames() が返す。ピクセルと時刻が一体なので「ピクセル取得と時刻取得の間に次フレームが割り込む」競合が起きない。カメラを計測/測定に使うときの基本単位"
+description.ko = "캡처 시각이 붙은 카메라 1프레임. Pixels(RGBA8)와 timestampUs(단조 steady_clock 마이크로초, 캡처 스레드에서 기록)를 가짐. VideoGrabber::getQueuedFrames()가 반환. 픽셀과 시각이 한 구조체로 오므로 둘을 따로 읽는 사이에 다음 프레임이 끼어드는 경쟁이 없음"
+related = ["VideoGrabber", "VideoGrabber::getQueuedFrames", "VideoGrabber::setFrameQueueSize"]
 
 ["GrabberFrame::pixels"]
 description.en = "The frame as RGBA8 Pixels (carries its own width/height). Pixels is move-only - use clone() if you need a copy"
@@ -9923,7 +9928,7 @@ description.en = "Copy the current frame into an Image (allocating/updating it a
 description.ja = "現在のフレームを Image にコピー（必要に応じて確保・更新する）"
 description.ko = "현재 프레임을 Image로 복사(필요에 따라 할당/갱신)"
 
-["VideoGrabber::getBufferFrames"]
+["VideoGrabber::getQueuedFrames"]
 category = "video"
 keywords = ["frame queue", "timestamp", "drain", "all frames", "high fps", "sync", "measurement", "sensor", "latency", "analysis"]
 description.en = "Drain all frames captured since the last call (appended to the given vector, oldest first; returns the count). Each GrabberFrame carries a monotonic timestamp stamped on the capture thread, so timestamps stay truthful even if the main loop stalls, and no frame is lost when the camera runs faster than the app loop. Requires setFrameQueueSize() > 0; getPixels()/isFrameNew() are unaffected"
@@ -10021,7 +10026,7 @@ keywords = ["frame queue", "enable", "capacity", "buffer", "measurement"]
 description.en = "Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup()"
 description.ja = "タイムスタンプ付きフレームキューを有効化し容量を設定（0 = 無効。デフォルトで、オフ時のオーバーヘッドはゼロ）。満杯時は古いフレームから捨てるので、取り出しが遅れてもキャプチャは止まらない。容量目安は ceil(カメラfps / アプリfps) + 余裕で、8〜16 で十分。setup() の前後どちらでも呼べる"
 description.ko = "타임스탬프 프레임 큐를 활성화하고 용량을 설정 (0 = 비활성, 기본값. 꺼져 있으면 오버헤드 없음). 가득 차면 오래된 프레임부터 버려서 소비가 늦어도 캡처가 막히지 않음. 용량은 ceil(카메라fps / 앱fps) + 여유, 8~16이면 충분. setup() 전후 어느 쪽에서도 호출 가능"
-related = ["VideoGrabber::getBufferFrames", "VideoGrabber::getFrameQueueSize", "GrabberFrame"]
+related = ["VideoGrabber::getQueuedFrames", "VideoGrabber::getFrameQueueSize", "GrabberFrame"]
 
 ["VideoGrabber::setVerbose"]
 description.en = "Enable or disable verbose logging"
@@ -10461,17 +10466,18 @@ description.ko = "현재 재생 중인지 확인 (일시정지 시 false)"
 ["VideoPlayerBase::isReady"]
 category = "video"
 keywords = ["ready", "first frame", "black flash", "decoded", "has picture"]
-description.en = "True once the texture holds a real decoded frame for the current playback — i.e. drawing shows actual video, not black"
-description.ja = "現在の再生の実フレームがテクスチャに載っていれば true ＝ 描画すると黒ではなく実映像が出る状態"
-description.ko = "현재 재생의 실제 디코드된 프레임이 텍스처에 있으면 true — 그리면 검은 화면이 아니라 실제 영상이 나오는 상태"
+description.en = "True while the texture holds a real decoded frame — i.e. drawing shows actual video, not black. False only while the texture is cleared (after load/stop, before the first frame)"
+description.ja = "実フレームがテクスチャに載っていれば true ＝ 描画すると黒ではなく実映像が出る状態。false になるのはテクスチャが空の間だけ（load/stop 後〜最初のフレーム到着まで）"
+description.ko = "실제 디코드된 프레임이 텍스처에 있으면 true — 그리면 검은 화면이 아니라 실제 영상이 나오는 상태. 텍스처가 빈 동안(load/stop 후 첫 프레임 전)만 false"
 related = ["VideoPlayerBase::isFrameNew", "VideoPlayerBase::isLoaded", "VideoPlayer::extractKeyFrame"]
 details.en = '''
-`load()`/`play()` decode asynchronously, so right after them the player would
-draw its cleared (black) texture. `isReady()` marks the end of that window: it
-turns true when the first decoded frame of the current playback lands on the
-texture, and resets to false on `load()`, `play()` and `stop()` (stop also
-clears the texture back to black). Seeking and pausing keep it **true** — the
-last frame stays on the texture, so drawing still shows real video.
+`load()`/`play()` decode asynchronously, so right after load the player would
+draw its cleared (black) texture. `isReady()` is exactly the "would this draw
+black?" test: it turns true when the first decoded frame lands on the texture,
+and resets to false only when the texture actually goes empty — on `load()`
+and on `stop()` (which clears the texture back to black). `play()`, seeking
+and pausing keep it **true**: the last picture stays on the texture, so
+drawing still shows real video.
 
 Typical use — avoid the black flash at playback start by bridging with a
 still (see [`extractKeyFrame`](#VideoPlayer::extractKeyFrame)):
@@ -10486,12 +10492,12 @@ be black) and [`isFrameNew`](#VideoPlayerBase::isFrameNew) (momentary
 branch your draw on it directly).
 '''
 details.ja = '''
-`load()`/`play()` は非同期でデコードするため、直後はクリア済みの黒テクスチャが
-描画されてしまう。`isReady()` はその期間の終わりを示す: 現在の再生の最初の
-デコード済みフレームがテクスチャに載った時点で true になり、`load()`・`play()`・
-`stop()` で false に戻る（stop はテクスチャも黒にクリアする）。シークと一時停止
-では **true のまま**（直前のフレームがテクスチャに残っているので、描画すれば
-実映像が出る）。
+`load()`/`play()` は非同期でデコードするため、load 直後はクリア済みの黒
+テクスチャが描画されてしまう。`isReady()` は「描画したら黒か？」の判定そのもの:
+最初のデコード済みフレームがテクスチャに載った時点で true になり、false に戻る
+のは**テクスチャが実際に空になる時だけ** — `load()` と `stop()`（テクスチャを黒に
+クリアする）。`play()`・シーク・一時停止では **true のまま**（直前のフレームが
+テクスチャに残っているので、描画すれば実映像が出る）。
 
 典型的な用途は再生開始時の黒フラッシュ回避（静止画でつなぐ。
 [`extractKeyFrame`](#VideoPlayer::extractKeyFrame) 参照）:
@@ -14546,9 +14552,9 @@ related = ["VideoPlayer::setGammaCorrection"]
 ["startRecording"]
 category = "window_system"
 keywords = ["record", "video", "capture", "movie", "mp4"]
-description.en = "Start recording the window to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited"
-description.ja = "ウィンドウを動画ファイルに録画開始（ネイティブエンコーダ、ffmpeg不要）。秒数引数（または VideoRecordSettings.duration）を渡すと、その長さで自動停止・確定する固定長クリップになる（0 = 無制限）"
-description.ko = "윈도우를 동영상 파일로 녹화 시작 (네이티브 인코더, ffmpeg 불필요). 초 인자(또는 VideoRecordSettings.duration)를 넘기면 그 길이에서 자동 정지·마무리되는 고정 길이 클립이 된다(0 = 무제한)"
+description.en = "Start recording the window — or an Fbo (clean, GUI-free output) — to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited. Calling it again while recording finalizes the current file first, then starts fresh (same path = the old file is overwritten)"
+description.ja = "ウィンドウ — または Fbo（GUI無しのクリーン出力）— を動画ファイルに録画開始（ネイティブエンコーダ、ffmpeg不要）。秒数引数（または VideoRecordSettings.duration）を渡すと、その長さで自動停止・確定する固定長クリップになる（0 = 無制限）。録画中にもう一度呼ぶと現在のファイルを確定してから新規開始（同じパスなら前のファイルは上書き）"
+description.ko = "윈도우 — 또는 Fbo(GUI 없는 클린 출력) — 를 동영상 파일로 녹화 시작 (네이티브 인코더, ffmpeg 불필요). 초 인자(또는 VideoRecordSettings.duration)를 넘기면 그 길이에서 자동 정지·마무리되는 고정 길이 클립이 된다(0 = 무제한). 녹화 중에 다시 호출하면 현재 파일을 마무리한 뒤 새로 시작(같은 경로면 이전 파일 덮어씀)"
 related = ["VideoRecordSettings", "stopRecording", "isRecording", "saveScreenshot"]
 platform_note.en = "Global convenience over the singleton ScreenRecorder; non-functional on web for the same reason (VideoWriter stub returns false)."
 platform_note.ja = "シングルトン ScreenRecorder への薄いラッパ。同じ理由で web では機能しない（VideoWriter スタブが false）。"
