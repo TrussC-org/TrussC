@@ -81,6 +81,12 @@ public:
     bool isPlaying() const { return playing_ && !paused_; }
     bool isPaused() const { return paused_; }
     bool isFrameNew() const { return frameNew_ && firstFrameReceived_; }
+    // True once the texture holds a real decoded frame for the current
+    // playback — i.e. drawing shows actual video, not the cleared texture.
+    // False after load()/play()/stop() until the first frame arrives (the
+    // "would draw black" window). Seeking and pausing keep it true (the
+    // last frame stays on the texture).
+    bool isReady() const { return firstFrameReceived_; }
     bool isDone() const { return done_; }
 
     // =========================================================================

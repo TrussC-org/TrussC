@@ -1139,13 +1139,11 @@ Yes — every TrussC app in MCP mode (`TRUSSC_MCP=1`) exposes `start_recording` 
 Image still;
 VideoPlayer::extractKeyFrame(path, still, 0.0f);  // frame 0, ready to draw
 player.load(path); player.play();
-// update(): latch a bool on the first player.isFrameNew() - isFrameNew() is
-//           momentary (true only when a NEW frame arrived), so branch on the
-//           latched flag in draw(), never on isFrameNew() itself, or the
-//           still would flicker back whenever the app outpaces the video fps.
-// draw():   ready ? player.draw(...) : still.draw(...)
-// (reloading another video? reset the latch to false.)
+// draw():
+player.isReady() ? player.draw(0, 0) : still.draw(0, 0);
 ```
+
+`isReady()` is exactly the "would this draw black?" test: false after `load()`/`play()`/`stop()` until the first decoded frame lands on the texture; seeking and pausing keep it true (the last frame stays). Don't branch the draw on `isFrameNew()` — that flag is momentary (true only on updates where a NEW frame arrived), so at 60fps app / 30fps video the still would flicker back every other frame.
 
 Use `extractKeyFrame(path, img, 0.0f)` here rather than `extractFrame`: frame 0 is always a keyframe, so it is the exact first frame *and* the fastest to fetch (seek only, no forward decode). The `Image` overload allocates and uploads for you (main thread only); a `Pixels` overload exists for background work. If the player is already loaded you can also use the instance form `player.extractKeyFrame(img, 0.0f)`.
 
@@ -3883,6 +3881,7 @@ bool VideoPlayerBase::isLoaded() const  // Check if a video is loaded
 bool VideoPlayerBase::isLoop() const  // Check if looping is enabled
 bool VideoPlayerBase::isPaused() const  // Check if video is paused
 bool VideoPlayerBase::isPlaying() const  // Check if video is currently playing (not paused)
+bool VideoPlayerBase::isReady() const  // True once the texture holds a real decoded frame for the current playback — i.e. drawing shows actual video, not black
 bool VideoPlayerBase::isUsingHwAccel() const  // Return true if hardware-accelerated decoding is currently active.
 bool VideoPlayerBase::load(const std::string & path)  // Load a video from the given file path; return true on success.
 void VideoPlayerBase::markDone()  // Mark playback as done, clearing playing unless looping.

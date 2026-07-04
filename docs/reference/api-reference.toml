@@ -10468,6 +10468,54 @@ description.en = "Check if video is currently playing (not paused)"
 description.ja = "再生中か確認（一時停止中は false）"
 description.ko = "현재 재생 중인지 확인 (일시정지 시 false)"
 
+["VideoPlayerBase::isReady"]
+category = "video"
+keywords = ["ready", "first frame", "black flash", "decoded", "has picture"]
+description.en = "True once the texture holds a real decoded frame for the current playback — i.e. drawing shows actual video, not black"
+description.ja = "現在の再生の実フレームがテクスチャに載っていれば true ＝ 描画すると黒ではなく実映像が出る状態"
+description.ko = "현재 재생의 실제 디코드된 프레임이 텍스처에 있으면 true — 그리면 검은 화면이 아니라 실제 영상이 나오는 상태"
+related = ["VideoPlayerBase::isFrameNew", "VideoPlayerBase::isLoaded", "VideoPlayer::extractKeyFrame"]
+details.en = '''
+`load()`/`play()` decode asynchronously, so right after them the player would
+draw its cleared (black) texture. `isReady()` marks the end of that window: it
+turns true when the first decoded frame of the current playback lands on the
+texture, and resets to false on `load()`, `play()` and `stop()` (stop also
+clears the texture back to black). Seeking and pausing keep it **true** — the
+last frame stays on the texture, so drawing still shows real video.
+
+Typical use — avoid the black flash at playback start by bridging with a
+still (see [`extractKeyFrame`](#VideoPlayer::extractKeyFrame)):
+
+```cpp
+player.isReady() ? player.draw(0, 0) : still.draw(0, 0);
+```
+
+Distinct from [`isLoaded`](#VideoPlayerBase::isLoaded) (file opened, may still
+be black) and [`isFrameNew`](#VideoPlayerBase::isFrameNew) (momentary
+"a new frame arrived during this update()" — flickers at video rate, so never
+branch your draw on it directly).
+'''
+details.ja = '''
+`load()`/`play()` は非同期でデコードするため、直後はクリア済みの黒テクスチャが
+描画されてしまう。`isReady()` はその期間の終わりを示す: 現在の再生の最初の
+デコード済みフレームがテクスチャに載った時点で true になり、`load()`・`play()`・
+`stop()` で false に戻る（stop はテクスチャも黒にクリアする）。シークと一時停止
+では **true のまま**（直前のフレームがテクスチャに残っているので、描画すれば
+実映像が出る）。
+
+典型的な用途は再生開始時の黒フラッシュ回避（静止画でつなぐ。
+[`extractKeyFrame`](#VideoPlayer::extractKeyFrame) 参照）:
+
+```cpp
+player.isReady() ? player.draw(0, 0) : still.draw(0, 0);
+```
+
+[`isLoaded`](#VideoPlayerBase::isLoaded)（ファイルは開けたがまだ黒かもしれない）
+や [`isFrameNew`](#VideoPlayerBase::isFrameNew)（「この update() で新フレームが
+来た」という単発フラグ。動画レートで点滅するので draw の分岐に直接使わない）
+とは別物。
+'''
+
 ["VideoPlayerBase::play"]
 category = "video"
 keywords = ["start", "resume", "go", "playback"]
