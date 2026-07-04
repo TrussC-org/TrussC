@@ -43,9 +43,9 @@ public:
         // the format-correct one; no per-site swapchain/FBO branch.
         internal::loadPipeline(internal::active3D());
 
-        float dpiScale = sapp_dpi_scale();
-        float w = (float)sapp_width() / dpiScale;
-        float h = (float)sapp_height() / dpiScale;
+        float dpiScale = getDpiScale();
+        float w = (float)getFramebufferWidth() / dpiScale;
+        float h = (float)getFramebufferHeight() / dpiScale;
         float aspect = w / h;
 
         // Camera basis from orientation quaternion (no gimbal lock / no pole

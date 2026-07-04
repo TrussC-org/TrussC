@@ -89,7 +89,8 @@ inline bool isOverlayFocused() { return internal::overlayFocusedQuery && interna
 // =============================================================================
 
 class Node : public std::enable_shared_from_this<Node> {
-    friend class App;  // Allow App to call dispatch methods
+    friend class App;     // Allow App to call dispatch methods
+    friend class Window;  // Secondary windows drive their own tree (tcWindow.h)
     friend class Mod;  // Allow Mod to access owner_
 
 public:

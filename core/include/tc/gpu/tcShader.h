@@ -615,7 +615,7 @@ public:
         sg_reset_state_cache();
         sgl_defaults();
         sgl_matrix_mode_projection();
-        sgl_ortho(0.0f, (float)sapp_width(), (float)sapp_height(), 0.0f, -10000.0f, 10000.0f);
+        sgl_ortho(0.0f, (float)getFramebufferWidth(), (float)getFramebufferHeight(), 0.0f, -10000.0f, 10000.0f);
         sgl_matrix_mode_modelview();
         sgl_load_identity();
     }

@@ -311,17 +311,21 @@ void cleanup();
 // ---------------------------------------------------------------------------
 
 // Get DPI scale (e.g., 2.0 for Retina displays)
+// Routed through the active window context (secondary windows keep their own).
 inline float getDpiScale() {
-    return sapp_dpi_scale();
+    auto& ctx = internal::currentWindowContext();
+    return ctx.isMain ? sapp_dpi_scale() : ctx.dpiScale;
 }
 
 // Get actual framebuffer size (in pixels)
 inline int getFramebufferWidth() {
-    return sapp_width();
+    auto& ctx = internal::currentWindowContext();
+    return ctx.isMain ? sapp_width() : ctx.fbWidth;
 }
 
 inline int getFramebufferHeight() {
-    return sapp_height();
+    auto& ctx = internal::currentWindowContext();
+    return ctx.isMain ? sapp_height() : ctx.fbHeight;
 }
 
 // Call at frame start (before clear)
@@ -510,7 +514,7 @@ inline void setScissor(int x, int y, int w, int h) {
 // Reset scissor to entire window
 inline void resetScissor() {
     internal::currentWindowContext().currentScissor.active = false;
-    sgl_scissor_rect(0, 0, sapp_width(), sapp_height(), true);
+    sgl_scissor_rect(0, 0, getFramebufferWidth(), getFramebufferHeight(), true);
 }
 
 // Save scissor to stack and set new range (intersection with current range)
@@ -545,7 +549,7 @@ inline void popScissor() {
         sgl_scissor_rectf(internal::currentWindowContext().currentScissor.x, internal::currentWindowContext().currentScissor.y,
                           internal::currentWindowContext().currentScissor.w, internal::currentWindowContext().currentScissor.h, true);
     } else {
-        sgl_scissor_rect(0, 0, sapp_width(), sapp_height(), true);
+        sgl_scissor_rect(0, 0, getFramebufferWidth(), getFramebufferHeight(), true);
     }
 }
 
@@ -708,9 +712,11 @@ namespace internal {
 
     // Wrapper that uses main screen size
     inline void setupScreenFov(float fovDeg, float nearDist, float farDist) {
-        float dpiScale = sapp_dpi_scale();
-        float viewW = pixelPerfectMode ? (float)sapp_width() : (float)sapp_width() / dpiScale;
-        float viewH = pixelPerfectMode ? (float)sapp_height() : (float)sapp_height() / dpiScale;
+        // Per-window: framebuffer size and dpi come from the ACTIVE window
+        // context (a secondary window on another display has its own scale).
+        float dpiScale = getDpiScale();
+        float viewW = pixelPerfectMode ? (float)getFramebufferWidth() : getFramebufferWidth() / dpiScale;
+        float viewH = pixelPerfectMode ? (float)getFramebufferHeight() : getFramebufferHeight() / dpiScale;
         setupScreenFovWithSize(fovDeg, viewW, viewH, nearDist, farDist);
     }
 } // namespace internal
@@ -1491,17 +1497,17 @@ TC_PLATFORMS("android,ios") void setOrientation(Orientation mask);
 // Get window width (size corresponding to coordinate system)
 inline int getWindowWidth() {
     if (internal::pixelPerfectMode) {
-        return sapp_width();  // Framebuffer size
+        return getFramebufferWidth();  // Framebuffer size
     }
-    return static_cast<int>(sapp_width() / sapp_dpi_scale());  // Logical size
+    return static_cast<int>(getFramebufferWidth() / getDpiScale());  // Logical size
 }
 
 // Get window height (size corresponding to coordinate system)
 inline int getWindowHeight() {
     if (internal::pixelPerfectMode) {
-        return sapp_height();  // Framebuffer size
+        return getFramebufferHeight();  // Framebuffer size
     }
-    return static_cast<int>(sapp_height() / sapp_dpi_scale());  // Logical size
+    return static_cast<int>(getFramebufferHeight() / getDpiScale());  // Logical size
 }
 
 // Get window size as Vec2
@@ -2884,6 +2890,9 @@ namespace tc = trussc;
 // Users should add these in their code:
 //   using namespace std;
 //   using namespace tc;
+
+// Secondary windows (multi-window; needs Node/CoreEvents/WindowSettings above)
+#include "tc/app/tcWindow.h"
 
 // TrussC standard MCP tools (included last to resolve dependencies)
 #include "tc/utils/tcStandardTools.h"

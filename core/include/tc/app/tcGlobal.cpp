@@ -252,12 +252,16 @@ void ensureSwapchainPass() {
         pass.action.colors[0].clear_value = internal::currentWindowContext().swapchainClearValue;
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         pass.action.depth.clear_value = 1.0f;
-        pass.swapchain = sglue_swapchain();
+        auto& ctx = internal::currentWindowContext();
+        // Secondary windows provide their own swapchain (same drawable for the
+        // whole window frame); the main window uses sokol_glue as before.
+        pass.swapchain = ctx.acquireSwapchain ? ctx.acquireSwapchain(ctx.acquireSwapchainUser)
+                                              : sglue_swapchain();
         // Record the drawable we render into so end-of-frame capture reads back
         // THIS one (sapp_get_swapchain() advances the Metal drawable per call).
-        internal::currentWindowContext().lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
+        ctx.lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
         sg_begin_pass(&pass);
-        internal::currentWindowContext().inSwapchainPass = true;
+        ctx.inSwapchainPass = true;
     }
 }
 
@@ -305,10 +309,12 @@ void resumeSwapchainPass() {
         pass.action.colors[0].clear_value = internal::currentWindowContext().swapchainClearValue;
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         pass.action.depth.clear_value = 1.0f;
-        pass.swapchain = sglue_swapchain();
-        internal::currentWindowContext().lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
+        auto& ctx = internal::currentWindowContext();
+        pass.swapchain = ctx.acquireSwapchain ? ctx.acquireSwapchain(ctx.acquireSwapchainUser)
+                                              : sglue_swapchain();
+        ctx.lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
         sg_begin_pass(&pass);
-        internal::currentWindowContext().inSwapchainPass = true;
+        ctx.inSwapchainPass = true;
     }
 }
 

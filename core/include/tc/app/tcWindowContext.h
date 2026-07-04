@@ -81,6 +81,20 @@ struct WindowContext {
     // Current 2D blend mode (the "role"); actual sgl pipeline in currentTarget
     BlendMode currentBlendMode = BlendMode::Alpha;
 
+    // --- window identity / swapchain source (Phase 1 seam) ---
+    // Main window: isMain=true, swapchain comes from sglue_swapchain() and
+    // dimensions from sapp. Secondary windows: the native layer sets isMain
+    // false, keeps fbWidth/fbHeight/dpiScale up to date, and provides the
+    // frame's swapchain through acquireSwapchain (called by
+    // ensureSwapchainPass/resumeSwapchainPass; must return the SAME drawable
+    // for the duration of one window frame).
+    bool isMain = true;
+    int fbWidth = 0;
+    int fbHeight = 0;
+    float dpiScale = 1.0f;
+    sg_swapchain (*acquireSwapchain)(void* user) = nullptr;
+    void* acquireSwapchainUser = nullptr;
+
     // --- misc per-window ---
     int clipboardSize = 65536;   // Clipboard buffer size (for overflow check)
 
