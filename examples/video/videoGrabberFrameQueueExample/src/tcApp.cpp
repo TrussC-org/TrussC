@@ -29,7 +29,7 @@ void tcApp::update() {
     // Drain all frames captured since the last call (0..n per update).
     // Each GrabberFrame carries Pixels + timestampUs together.
     frames_.clear();
-    grabber_.getBufferFrames(frames_);
+    grabber_.getQueuedFrames(frames_);
     total_ += frames_.size();
     // a burst (e.g. after a stall) can return more frames than slots; only
     // the last kStrip would survive, so skip the rest (Stream textures also

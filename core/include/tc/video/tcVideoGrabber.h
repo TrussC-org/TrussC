@@ -273,7 +273,7 @@ public:
     // Drain all frames captured since the last call (appended to out, oldest
     // first). Returns the number of frames appended. Frames are moved out of
     // the internal queue, so each frame is delivered exactly once.
-    TC_PLATFORMS("macos,windows,linux") size_t getBufferFrames(std::vector<GrabberFrame>& out) {
+    TC_PLATFORMS("macos,windows,linux") size_t getQueuedFrames(std::vector<GrabberFrame>& out) {
         std::lock_guard<std::mutex> lock(frameQueue_->mtx);
         size_t n = frameQueue_->frames.size();
         for (auto& f : frameQueue_->frames) out.push_back(std::move(f));
@@ -334,7 +334,7 @@ private:
     mutable std::mutex mutex_;
     std::atomic<bool> pixelsDirty_{false};
 
-    // Timestamped frame FIFO (see getBufferFrames). unique_ptr keeps the
+    // Timestamped frame FIFO (see getQueuedFrames). unique_ptr keeps the
     // address stable across moves - the capture callback holds a raw pointer.
     std::unique_ptr<internal::GrabberFrameQueue> frameQueue_ =
         std::make_unique<internal::GrabberFrameQueue>();
