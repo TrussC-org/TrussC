@@ -2013,6 +2013,7 @@ float atanh(float x) [std]  // Inverse hyperbolic tangent
 Baseline  // Direction shorthand for Direction::Baseline (text baseline)
 Bottom  // Direction shorthand for Direction::Bottom
 Center  // Direction shorthand for Direction::Center
+std::shared_ptr<Window> createWindow(const WindowSettings & settings = {}) [macos]  // Create a secondary window (macOS only for now; returns nullptr elsewhere). It runs on its own display link; closing it leaves the app running
 const char * enumLabel(E value)  // Return the display string for one enum value (TC_ENUM_LABELS override, else reflected name).
 const std::array<std::string_view, internal::enumValidCount<E> enumNames()  // Return a compile-time array of all valid enumerator names of E.
 EnumLabelSpan enumReflectedSpan()  // Return an EnumLabelSpan synthesized from reflection (valid for contiguous zero-based enums).
@@ -3934,6 +3935,20 @@ bool VideoWriter::isOpen() const  // Check if the encoder is open and accepting 
 unsigned char * VideoWriter::lockFrame(int & strideOut)  // Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame
 bool VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the encoder at the given size (path resolved via getDataPath)
 bool VideoWriter::submitFrame(double timeSec)  // Append the previously locked frame at the given presentation time (seconds)
+```
+
+### Window — A secondary application window (macOS only for now). Owns its own Node tree, events, mouse state and render context; ticks at its display's refresh rate. GPU resources are shared with every other window
+
+```cpp
+void Window::close()  // Close the native window; the main window and other windows keep running
+CoreEvents & Window::events()  // This window's own event stream (mousePressed / keyPressed / draw / ...)
+int Window::getHeight() const  // Window height in logical points (matches its coordinate system)
+std::shared_ptr<Node> Window::getRoot() const  // Get the Node tree attached to this window
+int Window::getWidth() const  // Window width in logical points (matches its coordinate system)
+bool Window::isOpen() const  // Whether the native window is still open
+void Window::setClearColor(const Color & c)  // Background clear color for this window
+void Window::setRoot(std::shared_ptr<Node> root)  // Attach the Node tree shown in this window (setup runs on its first frame)
+void Window::setTitle(const std::string & title)  // Set the window title
 ```
 
 ### WindowSettings — Window configuration passed to the app at startup (size, title, DPI, MSAA, fullscreen, decoration, VSync). Setters chain

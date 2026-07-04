@@ -10691,6 +10691,85 @@ value_desc.Silent.en = "Silent (no sound)"
 value_desc.Silent.ja = "無音"
 value_desc.Silent.ko = "무음 (사운드 없음)"
 
+["Window"]
+keywords = ["multi window", "second window", "secondary", "display"]
+description.en = "A secondary application window (macOS only for now). Owns its own Node tree, events, mouse state and render context; ticks at its display's refresh rate. GPU resources are shared with every other window"
+description.ja = "セカンダリウィンドウ (現状macOSのみ)。自分のNodeツリー・イベント・マウス状態・描画コンテキストを持ち、所属ディスプレイのリフレッシュレートで駆動される。GPUリソースは全ウィンドウで共有"
+description.ko = "보조 윈도우 (현재 macOS 전용). 자체 Node 트리·이벤트·마우스 상태·렌더 컨텍스트를 갖고, 소속 디스플레이의 주사율로 구동됨. GPU 리소스는 모든 윈도우와 공유"
+related = ["createWindow", "WindowSettings"]
+
+["Window::setRoot"]
+description.en = "Attach the Node tree shown in this window (setup runs on its first frame)"
+description.ja = "このウィンドウに表示するNodeツリーを設定 (setupは最初のフレームで実行)"
+description.ko = "이 윈도우에 표시할 Node 트리를 설정 (setup은 첫 프레임에 실행)"
+
+["Window::getRoot"]
+description.en = "Get the Node tree attached to this window"
+description.ja = "このウィンドウのNodeツリーを取得"
+description.ko = "이 윈도우의 Node 트리를 얻음"
+
+["Window::events"]
+description.en = "This window's own event stream (mousePressed / keyPressed / draw / ...)"
+description.ja = "このウィンドウ専用のイベントストリーム (mousePressed / keyPressed / draw など)"
+description.ko = "이 윈도우 전용 이벤트 스트림 (mousePressed / keyPressed / draw 등)"
+
+["Window::close"]
+description.en = "Close the native window; the main window and other windows keep running"
+description.ja = "ウィンドウを閉じる。メインウィンドウや他のウィンドウは動き続ける"
+description.ko = "윈도우를 닫음. 메인 윈도우와 다른 윈도우는 계속 실행됨"
+
+["Window::isOpen"]
+description.en = "Whether the native window is still open"
+description.ja = "ウィンドウが開いているか"
+description.ko = "윈도우가 열려 있는지"
+
+["Window::setTitle"]
+description.en = "Set the window title"
+description.ja = "ウィンドウタイトルを設定"
+description.ko = "윈도우 제목을 설정"
+
+["Window::getWidth"]
+description.en = "Window width in logical points (matches its coordinate system)"
+description.ja = "ウィンドウ幅 (論理ポイント、座標系と一致)"
+description.ko = "윈도우 너비 (논리 포인트, 좌표계와 일치)"
+
+["Window::getHeight"]
+description.en = "Window height in logical points (matches its coordinate system)"
+description.ja = "ウィンドウ高さ (論理ポイント、座標系と一致)"
+description.ko = "윈도우 높이 (논리 포인트, 좌표계와 일치)"
+
+["Window::setClearColor"]
+description.en = "Background clear color for this window"
+description.ja = "このウィンドウの背景クリア色"
+description.ko = "이 윈도우의 배경 클리어 색"
+
+["Window::context"]
+hide = true
+keywords = ["internal"]
+
+["Window::dispatchMousePressToTree"]
+hide = true
+keywords = ["internal"]
+
+["Window::dispatchMouseReleaseToTree"]
+hide = true
+keywords = ["internal"]
+
+["Window::tickTree"]
+hide = true
+keywords = ["internal"]
+
+["Window::drawTreeNow"]
+hide = true
+keywords = ["internal"]
+
+["createWindow"]
+keywords = ["multi window", "second window", "open window", "display"]
+description.en = "Create a secondary window (macOS only for now; returns nullptr elsewhere). It runs on its own display link; closing it leaves the app running"
+description.ja = "セカンダリウィンドウを作成 (現状macOSのみ、他プラットフォームはnullptr)。専用のdisplay linkで駆動され、閉じてもアプリは動き続ける"
+description.ko = "보조 윈도우를 생성 (현재 macOS 전용, 다른 플랫폼은 nullptr). 전용 display link로 구동되며 닫아도 앱은 계속 실행됨"
+related = ["Window", "WindowSettings"]
+
 ["WindowSettings"]
 keywords = ["config", "size", "title", "fullscreen", "startup"]
 description.en = "Window configuration passed to the app at startup (size, title, DPI, MSAA, fullscreen, decoration, VSync). Setters chain"
