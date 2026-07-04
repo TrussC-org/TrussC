@@ -103,9 +103,12 @@ void ensureAuxTextures(NativeWindow* nw, int w, int h) {
 
 - (void)updateTrackingAreas {
     for (NSTrackingArea* a in self.trackingAreas) [self removeTrackingArea:a];
+    // ActiveAlways: hover must work while the window is NOT key (the main
+    // window keeps focus; a control-panel window still tracks the pointer).
     NSTrackingArea* area = [[NSTrackingArea alloc] initWithRect:self.bounds
         options:(NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
-                 NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect)
+                 NSTrackingActiveAlways | NSTrackingEnabledDuringMouseDrag |
+                 NSTrackingInVisibleRect)
         owner:self userInfo:nil];
     [self addTrackingArea:area];
     [super updateTrackingAreas];
@@ -167,6 +170,15 @@ void ensureAuxTextures(NativeWindow* nw, int w, int h) {
 }
 - (void)mouseMoved:(NSEvent*)ev   { [self moveWith:ev]; }
 - (void)mouseDragged:(NSEvent*)ev { [self moveWith:ev]; }
+- (void)mouseEntered:(NSEvent*)ev { [self moveWith:ev]; }
+- (void)mouseExited:(NSEvent*)ev {
+    // Park the cursor offscreen so the next tick's updateHoverState clears
+    // this window's hover (hoveredNode lives in ITS WindowContext).
+    if (!self.nw || !self.nw->owner) return;
+    auto& ctx = self.nw->owner->context();
+    ctx.pmouseX = ctx.mouseX; ctx.pmouseY = ctx.mouseY;
+    ctx.mouseX = -1.0f; ctx.mouseY = -1.0f;
+}
 
 - (void)keyEvt:(NSEvent*)ev pressed:(bool)down {
     if (!self.nw || !self.nw->owner) return;
@@ -349,6 +361,7 @@ std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
                                    backing:NSBackingStoreBuffered defer:NO];
     nw->window.title = [NSString stringWithUTF8String:settings.title.c_str()];
     nw->window.releasedWhenClosed = NO;
+    nw->window.acceptsMouseMovedEvents = YES;   // hover without key status
 
     TCWindowView* view = [[TCWindowView alloc] initWithFrame:rect];
     view.nw = nw;
