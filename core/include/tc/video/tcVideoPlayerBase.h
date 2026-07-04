@@ -38,7 +38,10 @@ public:
 
     virtual void play() {
         if (!initialized_) return;
-        firstFrameReceived_ = false;
+        // NOTE: firstFrameReceived_ (isReady) is NOT reset here - the texture
+        // still holds the last picture, so drawing does not show black.
+        // It resets only when the texture actually goes empty/black:
+        // load(), stop() (clears the texture) and close().
         done_ = false;
         playImpl();
         playing_ = true;
@@ -81,11 +84,11 @@ public:
     bool isPlaying() const { return playing_ && !paused_; }
     bool isPaused() const { return paused_; }
     bool isFrameNew() const { return frameNew_ && firstFrameReceived_; }
-    // True once the texture holds a real decoded frame for the current
-    // playback — i.e. drawing shows actual video, not the cleared texture.
-    // False after load()/play()/stop() until the first frame arrives (the
-    // "would draw black" window). Seeking and pausing keep it true (the
-    // last frame stays on the texture).
+    // True while the texture holds a real decoded frame — i.e. drawing shows
+    // actual video, not the cleared (black) texture. False after load() and
+    // stop() (both leave the texture cleared) until the first frame arrives;
+    // play(), seeking and pausing keep it true (the last picture stays on
+    // the texture).
     bool isReady() const { return firstFrameReceived_; }
     bool isDone() const { return done_; }
 
