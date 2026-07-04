@@ -451,11 +451,11 @@ public:
     /// Extract the exact frame at a time from a video file (static).
     /// @param path      Video file path
     /// @param outPixels Receives the extracted frame (RGBA U8)
-    /// @param timeSec   Time in seconds to extract from (default 1.0)
+    /// @param timeSec   Time in seconds to extract from
     /// @param outDuration If non-null, receives video duration in seconds
     /// @return true on success
     static bool extractFrame(const std::string& path, Pixels& outPixels,
-                             float timeSec = 1.0f, float* outDuration = nullptr) {
+                             float timeSec, float* outDuration = nullptr) {
         return extractFramePlatform(path, outPixels, timeSec, outDuration);
     }
 
@@ -463,17 +463,17 @@ public:
     /// The returned frame's real time may be earlier than timeSec.
     /// @param path      Video file path
     /// @param outPixels Receives the extracted frame (RGBA U8)
-    /// @param timeSec   Upper-bound time in seconds (default 1.0)
+    /// @param timeSec   Upper-bound time in seconds
     /// @param outDuration If non-null, receives video duration in seconds
     /// @return true on success
     static bool extractKeyFrame(const std::string& path, Pixels& outPixels,
-                                float timeSec = 1.0f, float* outDuration = nullptr) {
+                                float timeSec, float* outDuration = nullptr) {
         return extractKeyFramePlatform(path, outPixels, timeSec, outDuration);
     }
 
     /// Extract the exact frame at a time from the currently loaded video
     /// (instance). Returns false if no video is loaded.
-    bool extractFrame(Pixels& outPixels, float timeSec = 1.0f,
+    bool extractFrame(Pixels& outPixels, float timeSec,
                       float* outDuration = nullptr) const {
         if (sourcePath_.empty()) return false;
         return extractFramePlatform(sourcePath_, outPixels, timeSec, outDuration);
@@ -481,7 +481,7 @@ public:
 
     /// Extract the nearest keyframe at or before a time from the currently
     /// loaded video (instance, faster). Returns false if no video is loaded.
-    bool extractKeyFrame(Pixels& outPixels, float timeSec = 1.0f,
+    bool extractKeyFrame(Pixels& outPixels, float timeSec,
                          float* outDuration = nullptr) const {
         if (sourcePath_.empty()) return false;
         return extractKeyFramePlatform(sourcePath_, outPixels, timeSec, outDuration);
@@ -495,7 +495,7 @@ public:
 
     /// Extract the exact frame at a time into a ready-to-draw Image (static).
     static bool extractFrame(const std::string& path, Image& outImage,
-                             float timeSec = 1.0f, float* outDuration = nullptr) {
+                             float timeSec, float* outDuration = nullptr) {
         Pixels px;
         if (!extractFramePlatform(path, px, timeSec, outDuration)) return false;
         pixelsToImage(px, outImage);
@@ -505,7 +505,7 @@ public:
     /// Extract the nearest keyframe at or before a time into a ready-to-draw
     /// Image (static, faster).
     static bool extractKeyFrame(const std::string& path, Image& outImage,
-                                float timeSec = 1.0f, float* outDuration = nullptr) {
+                                float timeSec, float* outDuration = nullptr) {
         Pixels px;
         if (!extractKeyFramePlatform(path, px, timeSec, outDuration)) return false;
         pixelsToImage(px, outImage);
@@ -514,7 +514,7 @@ public:
 
     /// Extract the exact frame from the currently loaded video into a
     /// ready-to-draw Image (instance). Returns false if no video is loaded.
-    bool extractFrame(Image& outImage, float timeSec = 1.0f,
+    bool extractFrame(Image& outImage, float timeSec,
                       float* outDuration = nullptr) const {
         if (sourcePath_.empty()) return false;
         return extractFrame(sourcePath_, outImage, timeSec, outDuration);
@@ -522,7 +522,7 @@ public:
 
     /// Extract the nearest keyframe from the currently loaded video into a
     /// ready-to-draw Image (instance, faster). Returns false if no video is loaded.
-    bool extractKeyFrame(Image& outImage, float timeSec = 1.0f,
+    bool extractKeyFrame(Image& outImage, float timeSec,
                          float* outDuration = nullptr) const {
         if (sourcePath_.empty()) return false;
         return extractKeyFrame(sourcePath_, outImage, timeSec, outDuration);
