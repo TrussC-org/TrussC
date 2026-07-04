@@ -171,43 +171,24 @@ namespace internal {
     inline float nearClipOverride = 0.0f;
     inline float farClipOverride = 0.0f;
 
-    // Current screen setup state (for 2D drawing in perspective mode)
-    inline float currentScreenFov = 45.0f;
-    inline float currentViewW = 0.0f;
-    inline float currentViewH = 0.0f;
-    inline float currentCameraDist = 0.0f;  // Distance from camera to Z=0 plane
-
-    // View/Projection matrix tracking (for worldToScreen/screenToWorld)
-    inline Mat4 currentViewMatrix = Mat4::identity();
-    inline Mat4 currentProjectionMatrix = Mat4::identity();
+    // Screen setup / view-projection tracking state (currentScreenFov,
+    // currentViewW/H, currentCameraDist, currentView/ProjectionMatrix) and the
+    // current 2D blend mode moved to WindowContext (tc/app/tcWindowContext.h).
 
     // Forward declaration of setupScreenFov functions (defined later, after TAU is available)
     // `pickable` flows into the registered CameraContext (false for FBO scopes).
     inline void setupScreenFovWithSize(float fovDeg, float viewW, float viewH, float nearDist = 0.0f, float farDist = 0.0f, bool pickable = true);
     inline void setupScreenFov(float fovDeg, float nearDist = 0.0f, float farDist = 0.0f);
-
-
-    // Current 2D blend mode (the "role"). The actual sgl pipeline for it lives in
-    // the active RenderTarget's lazy cache — see tcRenderTarget.h active2D().
-    inline BlendMode currentBlendMode = BlendMode::Alpha;
 }
 
 } // namespace trussc (temporarily closed)
 
 // RenderTarget: single source of truth for sgl pipeline selection (swapchain/FBO).
-// Included before restoreCurrentPipeline so it can use the active*() helpers.
 #include "tc/graphics/tcRenderTarget.h"
 
-// Forward declarations for FBO pipeline switching (used in tcRenderContext.h)
-namespace trussc { namespace internal {
-    inline bool inFboPass = false;
-
-    // Restore the current blend pipeline after temporary pipeline changes.
-    // FBO uses its accumulating Fill2D; swapchain honors the current blend mode.
-    inline void restoreCurrentPipeline() {
-        loadPipeline(inFboPass ? activeFill2D() : active2D(currentBlendMode));
-    }
-}}
+// Per-window state container (input/hover/camera/pass state) + the active*()
+// pipeline helpers and restoreCurrentPipeline() (used in tcRenderContext.h).
+#include "tc/app/tcWindowContext.h"
 
 // VertexWriter abstraction (for shader integration)
 #include "tc/graphics/tcVertexWriter.h"
@@ -234,23 +215,13 @@ namespace trussc {
 // Drawing state has been moved to RenderContext
 // ---------------------------------------------------------------------------
 namespace internal {
-    // Clipboard buffer size (for overflow check)
-    inline int clipboardSize = 65536;
+    // clipboardSize / ScissorRect / scissorStack / currentScissor moved to
+    // WindowContext (tc/app/tcWindowContext.h).
 
     // sokol_gl vertex buffer management (auto-grows on overflow)
     inline int sglMaxVertices = 65536;
     inline int sglMaxCommands = 16384;
     inline int sglPendingResize = 0;  // non-zero = need resize next frame
-
-    // ---------------------------------------------------------------------------
-    // Scissor Clipping stack
-    // ---------------------------------------------------------------------------
-    struct ScissorRect {
-        float x, y, w, h;
-        bool active;  // Whether a valid range exists in the stack
-    };
-    inline std::vector<ScissorRect> scissorStack;
-    inline ScissorRect currentScissor = {0, 0, 0, 0, false};
 
     // ---------------------------------------------------------------------------
     // Loop Architecture (Decoupled Update/Draw)
@@ -276,11 +247,8 @@ namespace internal {
     inline bool lastDrawTimeInitialized = false;
     inline double drawAccumulator = 0.0;
 
-    // Mouse position state (mouseX/Y, pmouseX/Y) + window-space getters now live
-    // in tc/app/tcMouseGlobal.h (included above) so lower-level headers can use
-    // them directly. Button/pressed state stays here.
-    inline int mouseButton = -1;  // Currently pressed button (-1 = none)
-    inline bool mousePressed = false;
+    // Mouse position/button state + keyboard state moved to WindowContext
+    // (tc/app/tcWindowContext.h); window-space getters in tc/app/tcMouseGlobal.h.
 
     // Touch-as-mouse mapping
     // Default ON everywhere — the first touch synthesizes mouse press/drag, so
@@ -292,9 +260,6 @@ namespace internal {
     inline EventListener touchPressedListener;
     inline EventListener touchMovedListener;
     inline EventListener touchReleasedListener;
-
-    // Keyboard state
-    inline std::unordered_set<int> keysPressed;
 
     // Delta time (actual elapsed time since last update call)
     inline double updateDeltaTime = 0.0;
@@ -313,22 +278,8 @@ namespace internal {
     inline std::chrono::high_resolution_clock::time_point startTime;
     inline bool startTimeInitialized = false;
 
-    // Pass state (for suspending swapchain pass for FBO)
-    inline bool inSwapchainPass = false;
-
-    // Saved clear color for resume after FBO suspend (set by clear())
-    inline sg_color swapchainClearValue = { 0.0f, 0.0f, 0.0f, 1.0f };
-
-    // The Metal CAMetalDrawable acquired for THIS frame's swapchain pass. sokol's
-    // sapp_get_swapchain() advances to the next drawable on every call (it must be
-    // called exactly once per frame), so end-of-frame capture must NOT call it
-    // again — it would grab a different, unrendered drawable. Instead the swapchain
-    // pass setup records the drawable it actually rendered into here, and
-    // captureWindow() reads back from this one. (Metal-only; on D3D11/GL the
-    // swapchain handle is a stable backbuffer/FBO so this stays null and is unused.)
-    inline const void* lastSwapchainDrawable = nullptr;
-
-    // inFboPass is declared earlier (before tcRenderContext.h)
+    // Pass state (inSwapchainPass / swapchainClearValue / lastSwapchainDrawable /
+    // inFboPass) moved to WindowContext (tc/app/tcWindowContext.h).
 
     // FBO clearColor function pointer (set in tcFbo.h)
     inline void (*fboClearColorFunc)(float, float, float, float) = nullptr;
@@ -547,7 +498,7 @@ inline void intersectRect(float x1, float y1, float w1, float h1,
 
 // Set scissor rectangle (screen coordinates)
 inline void setScissor(float x, float y, float w, float h) {
-    internal::currentScissor = {x, y, w, h, true};
+    internal::currentWindowContext().currentScissor = {x, y, w, h, true};
     sgl_scissor_rectf(x, y, w, h, true);  // origin_top_left = true
 }
 
@@ -558,20 +509,20 @@ inline void setScissor(int x, int y, int w, int h) {
 
 // Reset scissor to entire window
 inline void resetScissor() {
-    internal::currentScissor.active = false;
+    internal::currentWindowContext().currentScissor.active = false;
     sgl_scissor_rect(0, 0, sapp_width(), sapp_height(), true);
 }
 
 // Save scissor to stack and set new range (intersection with current range)
 inline void pushScissor(float x, float y, float w, float h) {
     // Save current state to stack
-    internal::scissorStack.push_back(internal::currentScissor);
+    internal::currentWindowContext().scissorStack.push_back(internal::currentWindowContext().currentScissor);
 
     // Calculate new range (intersection with current range)
-    if (internal::currentScissor.active) {
+    if (internal::currentWindowContext().currentScissor.active) {
         float nx, ny, nw, nh;
-        intersectRect(internal::currentScissor.x, internal::currentScissor.y,
-                      internal::currentScissor.w, internal::currentScissor.h,
+        intersectRect(internal::currentWindowContext().currentScissor.x, internal::currentWindowContext().currentScissor.y,
+                      internal::currentWindowContext().currentScissor.w, internal::currentWindowContext().currentScissor.h,
                       x, y, w, h,
                       nx, ny, nw, nh);
         setScissor(nx, ny, nw, nh);
@@ -582,17 +533,17 @@ inline void pushScissor(float x, float y, float w, float h) {
 
 // Restore scissor from stack
 inline void popScissor() {
-    if (internal::scissorStack.empty()) {
+    if (internal::currentWindowContext().scissorStack.empty()) {
         resetScissor();
         return;
     }
 
-    internal::currentScissor = internal::scissorStack.back();
-    internal::scissorStack.pop_back();
+    internal::currentWindowContext().currentScissor = internal::currentWindowContext().scissorStack.back();
+    internal::currentWindowContext().scissorStack.pop_back();
 
-    if (internal::currentScissor.active) {
-        sgl_scissor_rectf(internal::currentScissor.x, internal::currentScissor.y,
-                          internal::currentScissor.w, internal::currentScissor.h, true);
+    if (internal::currentWindowContext().currentScissor.active) {
+        sgl_scissor_rectf(internal::currentWindowContext().currentScissor.x, internal::currentWindowContext().currentScissor.y,
+                          internal::currentWindowContext().currentScissor.w, internal::currentWindowContext().currentScissor.h, true);
     } else {
         sgl_scissor_rect(0, 0, sapp_width(), sapp_height(), true);
     }
@@ -608,16 +559,16 @@ inline void popScissor() {
 // Set blend mode
 // Alpha channel is additive in all modes (to prevent transparency when drawing to FBO)
 inline void setBlendMode(BlendMode mode) {
-    if (internal::swapchainTarget.context.id == 0) return;  // renderer not set up yet
+    if (internal::currentWindowContext().swapchainTarget.context.id == 0) return;  // renderer not set up yet
     // Skip in FBO - FBO uses its own pipeline
-    if (internal::inFboPass) return;
-    internal::currentBlendMode = mode;
+    if (internal::currentWindowContext().inFboPass) return;
+    internal::currentWindowContext().currentBlendMode = mode;
     internal::loadPipeline(internal::active2D(mode));
 }
 
 // Get current blend mode
 inline BlendMode getBlendMode() {
-    return internal::currentBlendMode;
+    return internal::currentWindowContext().currentBlendMode;
 }
 
 // Reset to default blend mode (Alpha)
@@ -627,7 +578,7 @@ inline void resetBlendMode() {
 
 // Restore current blend mode pipeline (use after temporary pipeline changes)
 inline void restoreBlendPipeline() {
-    internal::loadPipeline(internal::active2D(internal::currentBlendMode));
+    internal::loadPipeline(internal::active2D(internal::currentWindowContext().currentBlendMode));
 }
 
 // ---------------------------------------------------------------------------
@@ -676,10 +627,10 @@ namespace internal {
         float dist = viewH / (2.0f * theTan);
 
         // Save current screen state for 2D drawing
-        currentScreenFov = fovDeg;
-        currentViewW = viewW;
-        currentViewH = viewH;
-        currentCameraDist = dist;
+        internal::currentWindowContext().currentScreenFov = fovDeg;
+        internal::currentWindowContext().currentViewW = viewW;
+        internal::currentWindowContext().currentViewH = viewH;
+        internal::currentWindowContext().currentCameraDist = dist;
 
         // Apply clip overrides or auto-calculate
         if (nearDist == 0.0f) nearDist = (nearClipOverride > 0.0f) ? nearClipOverride : dist / 10.0f;
@@ -709,8 +660,8 @@ namespace internal {
             );
 
             // Save matrices for worldToScreen/screenToWorld
-            currentProjectionMatrix = Mat4::ortho(-viewW / 2.0f, viewW / 2.0f, viewH / 2.0f, -viewH / 2.0f, -farDist, farDist);
-            currentViewMatrix = Mat4::lookAt(
+            internal::currentWindowContext().currentProjectionMatrix = Mat4::ortho(-viewW / 2.0f, viewW / 2.0f, viewH / 2.0f, -viewH / 2.0f, -farDist, farDist);
+            internal::currentWindowContext().currentViewMatrix = Mat4::lookAt(
                 Vec3(eyeX, eyeY, dist),
                 Vec3(eyeX, eyeY, 0.0f),
                 Vec3(0.0f, 1.0f, 0.0f)
@@ -742,8 +693,8 @@ namespace internal {
             );
 
             // Save matrices for worldToScreen/screenToWorld
-            currentProjectionMatrix = Mat4::frustum(left, right, top, bottom, nearDist, farDist);
-            currentViewMatrix = Mat4::lookAt(
+            internal::currentWindowContext().currentProjectionMatrix = Mat4::frustum(left, right, top, bottom, nearDist, farDist);
+            internal::currentWindowContext().currentViewMatrix = Mat4::lookAt(
                 Vec3(eyeX, eyeY, dist),
                 Vec3(eyeX, eyeY, 0.0f),
                 Vec3(0.0f, 1.0f, 0.0f)
@@ -752,7 +703,7 @@ namespace internal {
 
         // Register this camera scope so nodes drawn from here on stamp it
         // (draw-time stamping → per-context pick rays; see tcCameraContext.h).
-        registerCameraContext(currentViewMatrix, currentProjectionMatrix, viewW, viewH, pickable);
+        registerCameraContext(internal::currentWindowContext().currentViewMatrix, internal::currentWindowContext().currentProjectionMatrix, viewW, viewH, pickable);
     }
 
     // Wrapper that uses main screen size
@@ -817,13 +768,13 @@ inline float getFarClip() {
 /// Returns Vec3: x, y = screen position (pixels from top-left), z = normalized depth [0, 1]
 inline Vec3 worldToScreen(const Vec3& worldPos) {
     // Get current viewport dimensions
-    float viewW = internal::currentViewW;
-    float viewH = internal::currentViewH;
+    float viewW = internal::currentWindowContext().currentViewW;
+    float viewH = internal::currentWindowContext().currentViewH;
     if (viewW == 0) viewW = (float)sapp_width() / sapp_dpi_scale();
     if (viewH == 0) viewH = (float)sapp_height() / sapp_dpi_scale();
 
     // Transform world -> clip space
-    Mat4 mvp = internal::currentProjectionMatrix * internal::currentViewMatrix;
+    Mat4 mvp = internal::currentWindowContext().currentProjectionMatrix * internal::currentWindowContext().currentViewMatrix;
     Vec4 clip = mvp * Vec4(worldPos.x, worldPos.y, worldPos.z, 1.0f);
 
     // Perspective division
@@ -846,8 +797,8 @@ inline Vec3 worldToScreen(const Vec3& worldPos) {
 /// worldZ: target Z plane (default = 0)
 inline Vec3 screenToWorld(const Vec2& screenPos, float worldZ = 0.0f) {
     // Get current viewport dimensions
-    float viewW = internal::currentViewW;
-    float viewH = internal::currentViewH;
+    float viewW = internal::currentWindowContext().currentViewW;
+    float viewH = internal::currentWindowContext().currentViewH;
     if (viewW == 0) viewW = (float)sapp_width() / sapp_dpi_scale();
     if (viewH == 0) viewH = (float)sapp_height() / sapp_dpi_scale();
 
@@ -856,7 +807,7 @@ inline Vec3 screenToWorld(const Vec2& screenPos, float worldZ = 0.0f) {
     float ndcY = 1.0f - (screenPos.y / viewH) * 2.0f;  // Flip Y
 
     // Create inverse MVP matrix
-    Mat4 mvp = internal::currentProjectionMatrix * internal::currentViewMatrix;
+    Mat4 mvp = internal::currentWindowContext().currentProjectionMatrix * internal::currentWindowContext().currentViewMatrix;
     Mat4 invMvp = mvp.inverted();
 
     // Unproject two points: near plane (z=-1) and a middle point (z=0)
@@ -1306,7 +1257,7 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     sgl_matrix_mode_projection();
     sgl_push_matrix();
     sgl_load_identity();
-    sgl_ortho(0.0f, internal::currentViewW, internal::currentViewH, 0.0f, -10000.0f, 10000.0f);
+    sgl_ortho(0.0f, internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH, 0.0f, -10000.0f, 10000.0f);
     sgl_matrix_mode_modelview();
     sgl_push_matrix();
     sgl_load_identity();
@@ -1356,8 +1307,8 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
 
     // Restore current blend pipeline (not default, which has blend disabled).
     // FBO uses its accumulating Fill2D; swapchain honors the current blend mode.
-    internal::loadPipeline(internal::inFboPass ? internal::activeFill2D()
-                                               : internal::active2D(internal::currentBlendMode));
+    internal::loadPipeline(internal::currentWindowContext().inFboPass ? internal::activeFill2D()
+                                               : internal::active2D(internal::currentWindowContext().currentBlendMode));
 
     // Restore matrices
     sgl_pop_matrix();
@@ -1461,9 +1412,9 @@ inline void unbindCursorImage(Cursor cursor) {
 
 // Copy string to clipboard
 inline void setClipboardString(const std::string& text) {
-    if (static_cast<int>(text.size()) >= internal::clipboardSize) {
+    if (static_cast<int>(text.size()) >= internal::currentWindowContext().clipboardSize) {
         logWarning("Clipboard") << "Text truncated (" << text.size() << " bytes > "
-            << internal::clipboardSize << " buffer). Use WindowSettings::setClipboardSize() to increase.";
+            << internal::currentWindowContext().clipboardSize << " buffer). Use WindowSettings::setClipboardSize() to increase.";
     }
     sapp_set_clipboard_string(text.c_str());
 }
@@ -1599,17 +1550,17 @@ inline void releaseSglBuffers() {
 
 // Is mouse button pressed
 inline bool isMousePressed() {
-    return internal::mousePressed;
+    return internal::currentWindowContext().mousePressed;
 }
 
 // Currently pressed mouse button (-1 = none)
 inline int getMouseButton() {
-    return internal::mouseButton;
+    return internal::currentWindowContext().mouseButton;
 }
 
 // Is specific key currently pressed
 inline bool isKeyPressed(int key) {
-    return internal::keysPressed.count(key) > 0;
+    return internal::currentWindowContext().keysPressed.count(key) > 0;
 }
 
 // "Either-side" modifier checks. Return true while either the left or
@@ -2260,8 +2211,8 @@ namespace internal {
         }
 
         // Save previous frame's mouse position
-        pmouseX = mouseX;
-        pmouseY = mouseY;
+        internal::currentWindowContext().pmouseX = internal::currentWindowContext().mouseX;
+        internal::currentWindowContext().pmouseY = internal::currentWindowContext().mouseY;
 
         frameReentryGuard = false;
     }
@@ -2306,7 +2257,7 @@ namespace internal {
 
                 // Track key state (only on first press, not auto-repeat)
                 if (!ev->key_repeat) {
-                    keysPressed.insert(ev->key_code);
+                    internal::currentWindowContext().keysPressed.insert(ev->key_code);
                 }
 
                 // Forward to App / Node tree. Fire on auto-repeat too
@@ -2325,21 +2276,21 @@ namespace internal {
                 events().keyReleased.notify(args);
 
                 // Track key state
-                keysPressed.erase(ev->key_code);
+                internal::currentWindowContext().keysPressed.erase(ev->key_code);
 
                 if (appKeyReleasedFunc) appKeyReleasedFunc(args);
                 break;
             }
             case SAPP_EVENTTYPE_MOUSE_DOWN: {
                 currentMouseButton = ev->mouse_button;
-                mouseX = ev->mouse_x * scale;
-                mouseY = ev->mouse_y * scale;
-                mouseButton = ev->mouse_button;
-                mousePressed = true;
+                internal::currentWindowContext().mouseX = ev->mouse_x * scale;
+                internal::currentWindowContext().mouseY = ev->mouse_y * scale;
+                internal::currentWindowContext().mouseButton = ev->mouse_button;
+                internal::currentWindowContext().mousePressed = true;
 
                 // App-level args: no node transform, so pos == globalPos.
                 MouseEventArgs args;
-                args.pos = args.globalPos = Vec2(mouseX, mouseY);
+                args.pos = args.globalPos = Vec2(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
                 args.button = ev->mouse_button;
                 args.shift = hasModShift;
                 args.ctrl = hasModCtrl;
@@ -2353,13 +2304,13 @@ namespace internal {
             }
             case SAPP_EVENTTYPE_MOUSE_UP: {
                 currentMouseButton = -1;
-                mouseX = ev->mouse_x * scale;
-                mouseY = ev->mouse_y * scale;
-                mouseButton = -1;
-                mousePressed = false;
+                internal::currentWindowContext().mouseX = ev->mouse_x * scale;
+                internal::currentWindowContext().mouseY = ev->mouse_y * scale;
+                internal::currentWindowContext().mouseButton = -1;
+                internal::currentWindowContext().mousePressed = false;
 
                 MouseEventArgs args;
-                args.pos = args.globalPos = Vec2(mouseX, mouseY);
+                args.pos = args.globalPos = Vec2(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
                 args.button = ev->mouse_button;
                 args.shift = hasModShift;
                 args.ctrl = hasModCtrl;
@@ -2372,16 +2323,16 @@ namespace internal {
                 break;
             }
             case SAPP_EVENTTYPE_MOUSE_MOVE: {
-                float prevX = mouseX;
-                float prevY = mouseY;
-                mouseX = ev->mouse_x * scale;
-                mouseY = ev->mouse_y * scale;
+                float prevX = internal::currentWindowContext().mouseX;
+                float prevY = internal::currentWindowContext().mouseY;
+                internal::currentWindowContext().mouseX = ev->mouse_x * scale;
+                internal::currentWindowContext().mouseY = ev->mouse_y * scale;
 
                 // Rich carrier (internal::MouseEventRaw); the per-kind public type is
                 // built from it at the boundary (internal::toDragArgs / internal::toMoveArgs).
                 internal::MouseEventRaw args;
-                args.pos = args.globalPos = Vec2(mouseX, mouseY);
-                args.delta = args.globalDelta = Vec2(mouseX - prevX, mouseY - prevY);
+                args.pos = args.globalPos = Vec2(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
+                args.delta = args.globalDelta = Vec2(internal::currentWindowContext().mouseX - prevX, internal::currentWindowContext().mouseY - prevY);
                 args.shift = hasModShift;
                 args.ctrl = hasModCtrl;
                 args.alt = hasModAlt;
@@ -2405,7 +2356,7 @@ namespace internal {
             }
             case SAPP_EVENTTYPE_MOUSE_SCROLL: {
                 ScrollEventArgs args;
-                args.pos = args.globalPos = Vec2(mouseX, mouseY);
+                args.pos = args.globalPos = Vec2(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
                 args.scroll = Vec2(ev->scroll_x, ev->scroll_y);
                 args.shift = hasModShift;
                 args.ctrl = hasModCtrl;
@@ -2451,9 +2402,9 @@ namespace internal {
 
                     if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
                         currentMouseButton = 0;
-                        mouseX = tx; mouseY = ty;
-                        mouseButton = 0;
-                        mousePressed = true;
+                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                        internal::currentWindowContext().mouseButton = 0;
+                        internal::currentWindowContext().mousePressed = true;
 
                         MouseEventArgs margs;
                         margs.pos = margs.globalPos = Vec2(tx, ty);
@@ -2462,8 +2413,8 @@ namespace internal {
                         events().mousePressed.notify(margs);
                         if (appMousePressedFunc) appMousePressedFunc(margs);
                     } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
-                        float prevX = mouseX, prevY = mouseY;
-                        mouseX = tx; mouseY = ty;
+                        float prevX = internal::currentWindowContext().mouseX, prevY = internal::currentWindowContext().mouseY;
+                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
 
                         internal::MouseEventRaw margs;
                         margs.pos = margs.globalPos = Vec2(tx, ty);
@@ -2475,9 +2426,9 @@ namespace internal {
                         if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
                     } else {
                         currentMouseButton = -1;
-                        mouseX = tx; mouseY = ty;
-                        mouseButton = -1;
-                        mousePressed = false;
+                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                        internal::currentWindowContext().mouseButton = -1;
+                        internal::currentWindowContext().mousePressed = false;
 
                         MouseEventArgs margs;
                         margs.pos = margs.globalPos = Vec2(tx, ty);
@@ -2508,8 +2459,8 @@ namespace internal {
             }
             case SAPP_EVENTTYPE_FILES_DROPPED: {
                 DragDropEventArgs args;
-                args.x = mouseX;  // Last mouse position
-                args.y = mouseY;
+                args.x = internal::currentWindowContext().mouseX;  // Last mouse position
+                args.y = internal::currentWindowContext().mouseY;
                 int numFiles = sapp_get_num_dropped_files();
                 for (int i = 0; i < numFiles; i++) {
                     args.files.push_back(sapp_get_dropped_file_path(i));
@@ -2569,7 +2520,7 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
         internal::updateFrameCount++;  // Update frame count
         events().update.notify();
         if (app) {
-            app->handleUpdate(internal::mouseX, internal::mouseY);
+            app->handleUpdate(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
         }
     };
     internal::appDrawFunc = []() {
@@ -2657,7 +2608,7 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     // Enable clipboard
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;
-    internal::clipboardSize = settings.clipboardSize;
+    internal::currentWindowContext().clipboardSize = settings.clipboardSize;
 
     return desc;
 }

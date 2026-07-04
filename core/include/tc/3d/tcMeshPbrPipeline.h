@@ -111,7 +111,7 @@ public:
         // SG_PIXELFORMAT_NONE (1) は「カラーアタッチメントなし」なので使わない
         sg_pixel_format colorFmt;
         int sampleCount;
-        if (internal::inFboPass) {
+        if (internal::currentWindowContext().inFboPass) {
             colorFmt = internal::currentFboColorFormat;
             sampleCount = internal::currentFboSampleCount;
         } else {
@@ -234,7 +234,7 @@ public:
         // TrussC Mat4 is row-major; GLSL mat4 is column-major. Transpose the
         // storage before upload so shader can use the conventional `model * v`.
         Mat4 modelT = getDefaultContext().getMatrix().transposed();
-        Mat4 viewProj = internal::currentProjectionMatrix * internal::currentViewMatrix;
+        Mat4 viewProj = internal::currentWindowContext().currentProjectionMatrix * internal::currentWindowContext().currentViewMatrix;
         Mat4 viewProjT = viewProj.transposed();
         // For now, normal matrix is just the model matrix. This is correct for
         // rotations and uniform scale; non-uniform scale would need
@@ -366,7 +366,7 @@ public:
         // shaders use). flushDeferredShaderDraws() replays it per layer.
         PbrDrawCommand cmd{ pip, bind, vsp, fsp,
                             mesh.getGpuIndexCount(), mesh.getGpuVertexCount() };
-        if (internal::inFboPass) {
+        if (internal::currentWindowContext().inFboPass) {
             // Defer (like the swapchain path) into the per-FBO list; flushed
             // per-layer in Fbo::end(). Bump the FBO layer so 2D drawn after this
             // mesh composites on top of it, matching the swapchain ordering.
@@ -487,10 +487,10 @@ public:
         ensureShadowTexture(light.getShadowResolution());
 
         // Suspend swapchain pass if active
-        if (internal::inSwapchainPass) {
+        if (internal::currentWindowContext().inSwapchainPass) {
             sgl_draw();
             sg_end_pass();
-            internal::inSwapchainPass = false;
+            internal::currentWindowContext().inSwapchainPass = false;
         }
 
         // Compute light VP matrix (reuse spot projector VP)

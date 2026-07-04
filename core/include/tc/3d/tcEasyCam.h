@@ -99,10 +99,10 @@ public:
         Mat4 view = Mat4::lookAt(eye, target_, camUp);
 
         // Save for worldToScreen/screenToWorld
-        internal::currentProjectionMatrix = projection;
-        internal::currentViewMatrix = view;
-        internal::currentViewW = w;
-        internal::currentViewH = h;
+        internal::currentWindowContext().currentProjectionMatrix = projection;
+        internal::currentWindowContext().currentViewMatrix = view;
+        internal::currentWindowContext().currentViewW = w;
+        internal::currentWindowContext().currentViewH = h;
 
         // Register this camera scope: nodes drawn between begin()/end() stamp
         // it, so mouse picking unprojects through THIS camera for them.

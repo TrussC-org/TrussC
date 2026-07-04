@@ -59,8 +59,8 @@ void setup() {
 
     // RenderTarget: the swapchain target uses the default sgl context (carries the
     // swapchain color/depth format + sample count). Pipelines build lazily on first use.
-    internal::swapchainTarget.context = sgl_default_context();
-    internal::swapchainTarget.isFbo = false;
+    internal::currentWindowContext().swapchainTarget.context = sgl_default_context();
+    internal::currentWindowContext().swapchainTarget.isFbo = false;
 
     // Initialize bitmap font sampler + pipeline. The atlas TEXTURE itself is
     // allocated lazily on first drawBitmapString call (see ensureFontAtlas in
@@ -171,10 +171,10 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     //    corrupts the frame (the same reason we pre-warm at setup). Warm against the
     //    swapchain target explicitly in case a resize ever fires outside a swapchain
     //    context.
-    swapchainTarget.context = sgl_default_context();
-    swapchainTarget.cache.clear();
-    RenderTarget* prevTarget = currentTarget;
-    currentTarget = &swapchainTarget;
+    internal::currentWindowContext().swapchainTarget.context = sgl_default_context();
+    internal::currentWindowContext().swapchainTarget.cache.clear();
+    RenderTarget* prevTarget = internal::currentWindowContext().currentTarget;
+    internal::currentWindowContext().currentTarget = &internal::currentWindowContext().swapchainTarget;
     active2D(BlendMode::Alpha);
     active2D(BlendMode::Add);
     active2D(BlendMode::Multiply);
@@ -184,7 +184,7 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     activePremult();
     activeClear();
     active3D();
-    currentTarget = prevTarget;
+    internal::currentWindowContext().currentTarget = prevTarget;
     // NOTE: each FBO's RenderTarget cache (and its sgl context) is also invalidated
     // by sgl_shutdown but is NOT rebuilt here — FBOs surviving an sgl buffer resize
     // is a pre-existing limitation, out of scope for this refactor.
@@ -201,12 +201,12 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
     // Skip in headless mode (no graphics context)
     if (headless::isActive()) return;
 
-    if (internal::inFboPass && internal::fboClearColorFunc) {
+    if (internal::currentWindowContext().inFboPass && internal::fboClearColorFunc) {
         // During FBO pass, call FBO's clearColor() to restart pass
         internal::fboClearColorFunc(r, g, b, a);
-    } else if (internal::inSwapchainPass) {
+    } else if (internal::currentWindowContext().inSwapchainPass) {
         // During swapchain pass
-        BlendMode prevBlendMode = internal::currentBlendMode;
+        BlendMode prevBlendMode = internal::currentWindowContext().currentBlendMode;
 
         sgl_push_matrix();
         sgl_matrix_mode_projection();
@@ -238,7 +238,7 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
         // Save clear color — the pass will start in present() with this value.
         // sgl commands accumulate without an active pass, so FBOs can render
         // in their own passes without interrupting the swapchain pass.
-        internal::swapchainClearValue = { r, g, b, a };
+        internal::currentWindowContext().swapchainClearValue = { r, g, b, a };
     }
 }
 
@@ -246,18 +246,18 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
 // パス管理関数（non-inline: Hot Reload時にHost/Guest間で同じ状態を参照するため）
 // ---------------------------------------------------------------------------
 void ensureSwapchainPass() {
-    if (!internal::inSwapchainPass && !internal::inFboPass) {
+    if (!internal::currentWindowContext().inSwapchainPass && !internal::currentWindowContext().inFboPass) {
         sg_pass pass = {};
         pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        pass.action.colors[0].clear_value = internal::swapchainClearValue;
+        pass.action.colors[0].clear_value = internal::currentWindowContext().swapchainClearValue;
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         pass.action.depth.clear_value = 1.0f;
         pass.swapchain = sglue_swapchain();
         // Record the drawable we render into so end-of-frame capture reads back
         // THIS one (sapp_get_swapchain() advances the Metal drawable per call).
-        internal::lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
+        internal::currentWindowContext().lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
         sg_begin_pass(&pass);
-        internal::inSwapchainPass = true;
+        internal::currentWindowContext().inSwapchainPass = true;
     }
 }
 
@@ -283,32 +283,32 @@ void present() {
     }
 
     sg_end_pass();
-    internal::inSwapchainPass = false;
+    internal::currentWindowContext().inSwapchainPass = false;
     sg_commit();
 }
 
 bool isInSwapchainPass() {
-    return internal::inSwapchainPass;
+    return internal::currentWindowContext().inSwapchainPass;
 }
 
 void suspendSwapchainPass() {
-    if (internal::inSwapchainPass) {
+    if (internal::currentWindowContext().inSwapchainPass) {
         sg_end_pass();
-        internal::inSwapchainPass = false;
+        internal::currentWindowContext().inSwapchainPass = false;
     }
 }
 
 void resumeSwapchainPass() {
-    if (!internal::inSwapchainPass) {
+    if (!internal::currentWindowContext().inSwapchainPass) {
         sg_pass pass = {};
         pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        pass.action.colors[0].clear_value = internal::swapchainClearValue;
+        pass.action.colors[0].clear_value = internal::currentWindowContext().swapchainClearValue;
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         pass.action.depth.clear_value = 1.0f;
         pass.swapchain = sglue_swapchain();
-        internal::lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
+        internal::currentWindowContext().lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
         sg_begin_pass(&pass);
-        internal::inSwapchainPass = true;
+        internal::currentWindowContext().inSwapchainPass = true;
     }
 }
 
@@ -316,9 +316,25 @@ void resumeSwapchainPass() {
 // Non-inline singletons / accessors (Hot Reload: Host/Guest share state)
 // ---------------------------------------------------------------------------
 
+namespace internal {
+// The main window's state container. Non-inline so a hot-reload guest binds
+// to the host's instance (same pattern as events()/getDefaultContext()).
+WindowContext& mainWindowContext() {
+    static WindowContext ctx;
+    return ctx;
+}
+} // namespace internal
+
 CoreEvents& events() {
-    static CoreEvents instance;
-    return instance;
+    // The CoreEvents instance is owned per window context. The main window's
+    // is wired lazily here (preserving the pre-context construction timing);
+    // Phase 1 pre-wires the pointer when constructing secondary contexts.
+    auto& ctx = internal::currentWindowContext();
+    if (!ctx.coreEvents) {
+        static CoreEvents instance;   // main-window storage
+        ctx.coreEvents = &instance;
+    }
+    return *ctx.coreEvents;
 }
 
 double getElapsedTime() {

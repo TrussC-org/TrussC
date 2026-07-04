@@ -263,8 +263,8 @@ inline void registerDebuggerTools() {
             }
 
             // Update global mouse state
-            ::trussc::internal::mouseX = x;
-            ::trussc::internal::mouseY = y;
+            ::trussc::internal::currentWindowContext().mouseX = x;
+            ::trussc::internal::currentWindowContext().mouseY = y;
 
             return json{{"status", "ok"}};
         });
@@ -283,8 +283,8 @@ inline void registerDebuggerTools() {
             args.button = a.value("button", 0);
             args.syncLegacy();
 
-            ::trussc::internal::mouseX = args.pos.x;
-            ::trussc::internal::mouseY = args.pos.y;
+            ::trussc::internal::currentWindowContext().mouseX = args.pos.x;
+            ::trussc::internal::currentWindowContext().mouseY = args.pos.y;
 
             events().mousePressed.notify(args);
             if (::trussc::internal::appMousePressedFunc)
@@ -303,8 +303,8 @@ inline void registerDebuggerTools() {
             args.button = a.value("button", 0);
             args.syncLegacy();
 
-            ::trussc::internal::mouseX = args.pos.x;
-            ::trussc::internal::mouseY = args.pos.y;
+            ::trussc::internal::currentWindowContext().mouseX = args.pos.x;
+            ::trussc::internal::currentWindowContext().mouseY = args.pos.y;
 
             events().mouseReleased.notify(args);
             if (::trussc::internal::appMouseReleasedFunc)
@@ -351,7 +351,7 @@ inline void registerDebuggerTools() {
         .arg<float>("dy", "Vertical scroll delta")
         .bind<float, float>([](float dx, float dy) {
             ScrollEventArgs args;
-            args.pos = args.globalPos = Vec2(::trussc::internal::mouseX, ::trussc::internal::mouseY);
+            args.pos = args.globalPos = Vec2(::trussc::internal::currentWindowContext().mouseX, ::trussc::internal::currentWindowContext().mouseY);
             args.scroll = Vec2(dx, dy);
             args.syncLegacy();
             events().mouseScrolled.notify(args);

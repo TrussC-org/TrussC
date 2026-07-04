@@ -438,7 +438,7 @@ protected:
     // sample count and depth match the FBO, so one is built lazily (from the same
     // createPipelineDesc()) and cached per distinct (format, sampleCount) target.
     sg_pipeline pipelineForCurrentTarget() {
-        if (!internal::inFboPass) return pipeline;
+        if (!internal::currentWindowContext().inFboPass) return pipeline;
         uint64_t key = ((uint64_t)internal::currentFboColorFormat << 8)
                      | (uint64_t)(internal::currentFboSampleCount & 0xff);
         auto it = targetPipelines_.find(key);

@@ -42,11 +42,11 @@ public:
 
         // The App is the scene-graph root; expose it via getRootNode() so
         // tools (e.g. the MCP node tools) can walk the tree.
-        internal::rootNode = this;
+        internal::currentWindowContext().rootNode = this;
     }
 
     virtual ~App() {
-        if (internal::rootNode == this) internal::rootNode = nullptr;
+        if (internal::currentWindowContext().rootNode == this) internal::currentWindowContext().rootNode = nullptr;
     }
 
     // -------------------------------------------------------------------------

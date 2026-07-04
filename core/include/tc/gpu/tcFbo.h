@@ -247,23 +247,23 @@ public:
         // Switch back to default context
         sgl_set_context(sgl_default_context());
         active_ = false;
-        internal::inFboPass = false;
+        internal::currentWindowContext().inFboPass = false;
         internal::currentFbo = nullptr;
         internal::currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
         internal::currentFboSampleCount = 1;
-        internal::currentTarget = &internal::swapchainTarget;   // RenderTarget: back to swapchain
+        internal::currentWindowContext().currentTarget = &internal::currentWindowContext().swapchainTarget;   // RenderTarget: back to swapchain
         internal::fboClearColorFunc = nullptr;
 
         // Restore the screen camera state saved in beginInternal() so
         // worldToScreen / camera-context stamping after end() see the screen
         // camera again instead of this FBO's projection.
-        internal::currentScreenFov = savedScreenFov_;
-        internal::currentViewW = savedViewW_;
-        internal::currentViewH = savedViewH_;
-        internal::currentCameraDist = savedCameraDist_;
-        internal::currentProjectionMatrix = savedProjectionMatrix_;
-        internal::currentViewMatrix = savedViewMatrix_;
-        internal::currentCameraContext = savedCameraContext_;
+        internal::currentWindowContext().currentScreenFov = savedScreenFov_;
+        internal::currentWindowContext().currentViewW = savedViewW_;
+        internal::currentWindowContext().currentViewH = savedViewH_;
+        internal::currentWindowContext().currentCameraDist = savedCameraDist_;
+        internal::currentWindowContext().currentProjectionMatrix = savedProjectionMatrix_;
+        internal::currentWindowContext().currentViewMatrix = savedViewMatrix_;
+        internal::currentWindowContext().currentCameraContext = savedCameraContext_;
         savedCameraContext_.reset();
 
         // Resume swapchain pass (if we were in one before)
@@ -589,7 +589,7 @@ private:
         if (!allocated_) return;
 
         // Guard: nested FBO begin is not supported
-        if (internal::inFboPass) {
+        if (internal::currentWindowContext().inFboPass) {
             logWarning("Fbo") << "Nested fbo.begin() is not supported. "
                               << "Call end() on the current FBO first.";
             return;
@@ -645,13 +645,13 @@ private:
         // projection setup below overwrites these globals, and anything drawn
         // after end() (worldToScreen, node camera-context stamping) must see
         // the screen camera again, not the FBO's.
-        savedScreenFov_ = internal::currentScreenFov;
-        savedViewW_ = internal::currentViewW;
-        savedViewH_ = internal::currentViewH;
-        savedCameraDist_ = internal::currentCameraDist;
-        savedProjectionMatrix_ = internal::currentProjectionMatrix;
-        savedViewMatrix_ = internal::currentViewMatrix;
-        savedCameraContext_ = internal::currentCameraContext;
+        savedScreenFov_ = internal::currentWindowContext().currentScreenFov;
+        savedViewW_ = internal::currentWindowContext().currentViewW;
+        savedViewH_ = internal::currentWindowContext().currentViewH;
+        savedCameraDist_ = internal::currentWindowContext().currentCameraDist;
+        savedProjectionMatrix_ = internal::currentWindowContext().currentProjectionMatrix;
+        savedViewMatrix_ = internal::currentWindowContext().currentViewMatrix;
+        savedCameraContext_ = internal::currentWindowContext().currentCameraContext;
 
         // Setup screen projection using defaultScreenFov (like main screen).
         // pickable=false: geometry drawn into an offscreen target must not be
@@ -659,11 +659,11 @@ private:
         internal::setupScreenFovWithSize(internal::defaultScreenFov, (float)width_, (float)height_, 0.0f, 0.0f, false);
 
         active_ = true;
-        internal::inFboPass = true;
+        internal::currentWindowContext().inFboPass = true;
         // Retarget to this FBO BEFORE loading its fill pipeline so activeFill2D()
         // resolves in the FBO's context/format (setupScreenFov above still ran on
         // the previous target, as before).
-        internal::currentTarget = &shared.target;
+        internal::currentWindowContext().currentTarget = &shared.target;
 
         // Use the FBO's alpha-blend Fill2D pipeline (Porter-Duff over); the result
         // is stored as premultiplied alpha in the FBO.

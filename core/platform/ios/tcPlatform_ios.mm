@@ -138,7 +138,7 @@ bool captureWindow(Pixels& outPixels) {
     // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
     // unrendered drawable, scrambling captures on GPU-heavy frames. Fall back
     // only if no pass ran yet. (Mirrors the macOS fix.)
-    const void* drawablePtr = internal::lastSwapchainDrawable;
+    const void* drawablePtr = internal::currentWindowContext().lastSwapchainDrawable;
     if (!drawablePtr) drawablePtr = sapp_get_swapchain().metal.current_drawable;
     id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)drawablePtr;
     if (!drawable) {

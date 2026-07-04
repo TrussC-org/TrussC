@@ -252,7 +252,7 @@ bool internal::captureWindowAsync(
     // Read back the drawable this frame ACTUALLY rendered into (recorded by the
     // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
     // unrendered drawable. Fall back only if no pass ran yet.
-    const void* drawablePtr = internal::lastSwapchainDrawable;
+    const void* drawablePtr = internal::currentWindowContext().lastSwapchainDrawable;
     if (!drawablePtr) drawablePtr = sapp_get_swapchain().metal.current_drawable;
     id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)drawablePtr;
     if (!drawable) return false;

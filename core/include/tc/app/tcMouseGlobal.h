@@ -7,20 +7,16 @@
 // TrussC.h so lower-level headers (e.g. tcNode.h, which converts global mouse
 // coords to node-local) can depend on them directly, in dependency order,
 // instead of pulling the whole umbrella. Apps include <TrussC.h>; the framework
-// event loop writes internal::mouseX/Y each frame. This is an internal piece.
+// event loop writes internal::currentWindowContext().mouseX/Y each frame. This is an internal piece.
 // =============================================================================
 
 #include "tcMath.h"   // Vec2
 
 namespace trussc {
 
-namespace internal {
-    // Mouse state (window coordinates), written by the framework event loop.
-    inline float mouseX = 0.0f;
-    inline float mouseY = 0.0f;
-    inline float pmouseX = 0.0f;  // Previous frame mouse position
-    inline float pmouseY = 0.0f;
-}
+// Mouse position state (mouseX/Y, pmouseX/Y) lives in WindowContext
+// (tc/app/tcWindowContext.h, included from TrussC.h before this header);
+// the framework event loop writes the current window's members each frame.
 
 // ---------------------------------------------------------------------------
 // Mouse state (global / window coordinates)
@@ -28,28 +24,28 @@ namespace internal {
 
 // Current mouse X coordinate (window coordinates)
 inline float getGlobalMouseX() {
-    return internal::mouseX;
+    return internal::currentWindowContext().mouseX;
 }
 
 // Current mouse Y coordinate (window coordinates)
 inline float getGlobalMouseY() {
-    return internal::mouseY;
+    return internal::currentWindowContext().mouseY;
 }
 
 // Previous frame mouse X coordinate (window coordinates)
 inline float getGlobalPMouseX() {
-    return internal::pmouseX;
+    return internal::currentWindowContext().pmouseX;
 }
 
 // Previous frame mouse Y coordinate (window coordinates)
 inline float getGlobalPMouseY() {
-    return internal::pmouseY;
+    return internal::currentWindowContext().pmouseY;
 }
 
 // Alias for getGlobalMouseX/Y (for tcDebugInput)
-inline float getMouseX() { return internal::mouseX; }
-inline float getMouseY() { return internal::mouseY; }
-inline Vec2 getMousePos() { return Vec2(internal::mouseX, internal::mouseY); }
+inline float getMouseX() { return getGlobalMouseX(); }
+inline float getMouseY() { return getGlobalMouseY(); }
+inline Vec2 getMousePos() { return Vec2(getGlobalMouseX(), getGlobalMouseY()); }
 inline Vec2 getGlobalMousePos() { return Vec2(getGlobalMouseX(), getGlobalMouseY()); }
 
 } // namespace trussc

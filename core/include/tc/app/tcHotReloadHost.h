@@ -554,7 +554,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
         events().update.notify();
         App* app = g_host.getApp();
         if (app) {
-            app->handleUpdate(internal::mouseX, internal::mouseY);
+            app->handleUpdate(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
         }
     };
 
@@ -638,7 +638,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     desc.max_dropped_file_path_length = 2048;
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;
-    internal::clipboardSize = settings.clipboardSize;
+    internal::currentWindowContext().clipboardSize = settings.clipboardSize;
 
     sapp_run(&desc);
     return 0;

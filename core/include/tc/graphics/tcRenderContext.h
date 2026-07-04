@@ -59,15 +59,8 @@ namespace internal {
     extern sg_sampler fontSampler;
     extern bool fontInitialized;
     extern bool pixelPerfectMode;
-    // Current screen setup state (for 2D drawing in perspective mode)
-    extern float currentScreenFov;
-    extern float currentViewW;
-    extern float currentViewH;
-    extern float currentCameraDist;
-
-    // View/Projection matrix tracking (for worldToScreen/screenToWorld)
-    extern Mat4 currentViewMatrix;
-    extern Mat4 currentProjectionMatrix;
+    // Screen setup / view-projection tracking state lives in WindowContext
+    // (tc/app/tcWindowContext.h, included before this header from TrussC.h).
 }
 
 // ---------------------------------------------------------------------------
@@ -275,9 +268,9 @@ public:
     // -----------------------------------------------------------------------
 
     void pushStyle() {
-        // Capture the live blend mode (it lives in internal::currentBlendMode, not in
+        // Capture the live blend mode (it lives in internal::currentWindowContext().currentBlendMode, not in
         // style_) so it is saved/restored alongside color/fill/stroke.
-        style_.blend = internal::currentBlendMode;
+        style_.blend = internal::currentWindowContext().currentBlendMode;
         styleStack_.push_back(style_);
     }
 
@@ -300,9 +293,9 @@ private:
     // load is otherwise a no-op that sokol_gl batches away, but we skip it anyway).
     // No-op inside an FBO pass, which uses its own accumulating pipeline.
     void applyBlend(BlendMode mode) {
-        if (mode == internal::currentBlendMode) return;
-        internal::currentBlendMode = mode;
-        if (!internal::inFboPass) {
+        if (mode == internal::currentWindowContext().currentBlendMode) return;
+        internal::currentWindowContext().currentBlendMode = mode;
+        if (!internal::currentWindowContext().inFboPass) {
             internal::loadPipeline(internal::active2D(mode));
         }
     }
@@ -380,7 +373,7 @@ public:
         // Restore default view matrix (camera lookat) set by setupScreenFovWithSize
         // This works correctly both in main screen and FBO contexts
         // Note: Mat4 is row-major, sokol_gl expects column-major, so transpose
-        Mat4 t = internal::currentViewMatrix.transposed();
+        Mat4 t = internal::currentWindowContext().currentViewMatrix.transposed();
         sgl_load_matrix(t.m);
     }
 
@@ -964,7 +957,7 @@ private:
         Direction textAlignH = Direction::Left;
         Direction textAlignV = Direction::Top;
         float bitmapLineHeight = bitmapfont::CHAR_TEX_HEIGHT;
-        // Mirror of internal::currentBlendMode. blend state itself lives outside the
+        // Mirror of internal::currentWindowContext().currentBlendMode. blend state itself lives outside the
         // RenderContext (it maps to an sgl pipeline), so push/popStyle capture and
         // restore it explicitly rather than via this field's value alone.
         BlendMode blend = BlendMode::Alpha;

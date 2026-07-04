@@ -65,15 +65,10 @@ class Mod;
 using NodePtr = std::shared_ptr<Node>;
 using NodeWeakPtr = std::weak_ptr<Node>;
 
-// Hover state cache (updated once per frame)
+// Hover state cache (updated once per frame): hoveredNode / prevHoveredNode /
+// grabbedNode / grabbedButton / selectedNode / rootNode moved to WindowContext
+// (tc/app/tcWindowContext.h) — each window's node tree has its own.
 namespace internal {
-    inline Node* hoveredNode = nullptr;      // Currently hovered node
-    inline Node* prevHoveredNode = nullptr;  // Previously hovered node
-    inline Node* grabbedNode = nullptr;      // Node grabbed by mouse press
-    inline int grabbedButton = -1;           // Mouse button that caused the grab
-    inline Node* selectedNode = nullptr;     // Last node clicked (selection)
-    inline Node* rootNode = nullptr;         // The running App (set by the framework)
-
     // Overlay (e.g. tcxImGui) capture queries. An overlay registers these so the
     // framework knows when the pointer is over it / it owns keyboard focus. Null
     // when no overlay is present, so plain apps are unaffected.
@@ -340,7 +335,7 @@ public:
     bool isEventsEnabled() const { return eventsEnabled_; }
 
     // Whether mouse is over this node (auto-updated each frame, O(1))
-    bool isMouseOver() const { return internal::hoveredNode == this; }
+    bool isMouseOver() const { return internal::currentWindowContext().hoveredNode == this; }
 
     // -------------------------------------------------------------------------
     // Identity / Name
@@ -846,13 +841,13 @@ private:
         }
 
         // Clear global references to this node (prevent dangling pointers)
-        if (internal::hoveredNode == this) internal::hoveredNode = nullptr;
-        if (internal::prevHoveredNode == this) internal::prevHoveredNode = nullptr;
-        if (internal::grabbedNode == this) {
-            internal::grabbedNode = nullptr;
-            internal::grabbedButton = -1;
+        if (internal::currentWindowContext().hoveredNode == this) internal::currentWindowContext().hoveredNode = nullptr;
+        if (internal::currentWindowContext().prevHoveredNode == this) internal::currentWindowContext().prevHoveredNode = nullptr;
+        if (internal::currentWindowContext().grabbedNode == this) {
+            internal::currentWindowContext().grabbedNode = nullptr;
+            internal::currentWindowContext().grabbedButton = -1;
         }
-        if (internal::selectedNode == this) internal::selectedNode = nullptr;
+        if (internal::currentWindowContext().selectedNode == this) internal::currentWindowContext().selectedNode = nullptr;
 
         dead_ = true;
         cleanup();
@@ -870,8 +865,8 @@ private:
 
         // Stamp the camera scope this node is being drawn under (pointer
         // compare first — steady state is one assignment skip per frame).
-        if (internal::currentCameraContext && cameraContext_ != internal::currentCameraContext) {
-            cameraContext_ = internal::currentCameraContext;
+        if (internal::currentWindowContext().currentCameraContext && cameraContext_ != internal::currentWindowContext().currentCameraContext) {
+            cameraContext_ = internal::currentWindowContext().currentCameraContext;
         }
 
         pushMatrix();
@@ -946,14 +941,14 @@ private:
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
         // Selection: clicking a node selects it; clicking empty space clears it.
-        internal::selectedNode = result.hit() ? result.node.get() : nullptr;
+        internal::currentWindowContext().selectedNode = result.hit() ? result.node.get() : nullptr;
 
         if (result.hit()) {
             MouseEventArgs local = result.node->localizeMouse(e);
             if (result.node->fireMousePress(local)) {
                 // Set grabbed node for drag tracking
-                internal::grabbedNode = result.node.get();
-                internal::grabbedButton = e.button;
+                internal::currentWindowContext().grabbedNode = result.node.get();
+                internal::currentWindowContext().grabbedButton = e.button;
                 return result.node;
             }
         }
@@ -963,16 +958,16 @@ private:
 
     Ptr dispatchMouseRelease(const MouseEventArgs& e) {
         // Send release to grabbed node if it exists
-        if (internal::grabbedNode && internal::grabbedButton == e.button) {
-            MouseEventArgs local = internal::grabbedNode->localizeMouse(e);
-            internal::grabbedNode->fireMouseRelease(local);
+        if (internal::currentWindowContext().grabbedNode && internal::currentWindowContext().grabbedButton == e.button) {
+            MouseEventArgs local = internal::currentWindowContext().grabbedNode->localizeMouse(e);
+            internal::currentWindowContext().grabbedNode->fireMouseRelease(local);
 
             Ptr result = std::dynamic_pointer_cast<Node>(
-                internal::grabbedNode->shared_from_this());
+                internal::currentWindowContext().grabbedNode->shared_from_this());
 
             // Clear grabbed state
-            internal::grabbedNode = nullptr;
-            internal::grabbedButton = -1;
+            internal::currentWindowContext().grabbedNode = nullptr;
+            internal::currentWindowContext().grabbedButton = -1;
 
             return result;
         }
@@ -992,10 +987,10 @@ private:
 
     Ptr dispatchMouseMove(const internal::MouseEventRaw& e) {
         // Send drag event to grabbed node
-        if (internal::grabbedNode) {
-            internal::MouseEventRaw local = internal::grabbedNode->localizeMouse(e);
-            local.button = internal::grabbedButton;
-            internal::grabbedNode->fireMouseDrag(internal::toDragArgs(local));
+        if (internal::currentWindowContext().grabbedNode) {
+            internal::MouseEventRaw local = internal::currentWindowContext().grabbedNode->localizeMouse(e);
+            local.button = internal::currentWindowContext().grabbedButton;
+            internal::currentWindowContext().grabbedNode->fireMouseDrag(internal::toDragArgs(local));
         }
 
         // Also send move event to hit node (for hover, etc.)
@@ -1046,7 +1041,7 @@ private:
     // Update hover state (call once per frame)
     void updateHoverState(float screenX, float screenY) {
         // Save previous frame's hovered node
-        internal::prevHoveredNode = internal::hoveredNode;
+        internal::currentWindowContext().prevHoveredNode = internal::currentWindowContext().hoveredNode;
 
         // Search for new hovered node. When an overlay (e.g. a tcxImGui panel)
         // has the pointer, the tree hovers nothing — so a node under the panel
@@ -1057,15 +1052,15 @@ private:
             HitResult result = findHitNodeFromScreen(screenX, screenY);
             hit = result.hit() ? result.node.get() : nullptr;
         }
-        internal::hoveredNode = hit;
+        internal::currentWindowContext().hoveredNode = hit;
 
         // Fire Enter/Leave events
-        if (internal::prevHoveredNode != internal::hoveredNode) {
-            if (internal::prevHoveredNode) {
-                internal::prevHoveredNode->fireMouseLeave();
+        if (internal::currentWindowContext().prevHoveredNode != internal::currentWindowContext().hoveredNode) {
+            if (internal::currentWindowContext().prevHoveredNode) {
+                internal::currentWindowContext().prevHoveredNode->fireMouseLeave();
             }
-            if (internal::hoveredNode) {
-                internal::hoveredNode->fireMouseEnter();
+            if (internal::currentWindowContext().hoveredNode) {
+                internal::currentWindowContext().hoveredNode->fireMouseEnter();
             }
         }
     }
@@ -1464,12 +1459,12 @@ inline void Mod::removeSelf() {
 // Selection — the last-clicked node, held by the Node system (set in
 // dispatchMousePress, cleared when the node is destroyed). A tool such as an
 // inspector can both read it and drive it via setSelectedNode().
-inline Node* getSelectedNode() { return internal::selectedNode; }
-inline void setSelectedNode(Node* n) { internal::selectedNode = n; }
+inline Node* getSelectedNode() { return internal::currentWindowContext().selectedNode; }
+inline void setSelectedNode(Node* n) { internal::currentWindowContext().selectedNode = n; }
 
 // The running App as the root of the node tree (set by the framework while the
 // app is alive, null otherwise). Lets tools — e.g. the MCP node tools — walk
 // the whole tree without the app passing itself around.
-inline Node* getRootNode() { return internal::rootNode; }
+inline Node* getRootNode() { return internal::currentWindowContext().rootNode; }
 
 } // namespace trussc
