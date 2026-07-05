@@ -226,6 +226,9 @@ void ensureAuxTextures(NativeWindow* nw, int w, int h) {
         nw->layer.drawableSize = CGSizeMake(fbw, fbh);
     }
     ctx.fbWidth = fbw; ctx.fbHeight = fbh; ctx.dpiScale = (float)scale;
+    // Keep a RectNode root in sync with the window's logical size (same
+    // contract as the main App on SAPP_EVENTTYPE_RESIZED).
+    win.syncRootSize((float)sz.width, (float)sz.height);
     if (!nw->loggedGeometry) {
         nw->loggedGeometry = true;
         logNotice("Window") << "geometry: bounds=" << sz.width << "x" << sz.height

@@ -59,6 +59,17 @@ public:
     void drawTreeNow() {
         if (ctx_.rootNode) ctx_.rootNode->drawTree();
     }
+    // Size-sync convention (mirrors the main App, which is a RectNode kept in
+    // sync with the window): if the root IS a RectNode it is resized to the
+    // window's logical size at attach time and on every resize/display change.
+    // A plain Node root is left untouched.
+    void syncRootSize(float wPts, float hPts) {
+        if (auto* rect = dynamic_cast<RectNode*>(ctx_.rootNode)) {
+            if (rect->getWidth() != wPts || rect->getHeight() != hPts) {
+                rect->setSize(wPts, hPts);
+            }
+        }
+    }
 
     // --- internal (used by the platform glue; not user API) ---
     Window();
