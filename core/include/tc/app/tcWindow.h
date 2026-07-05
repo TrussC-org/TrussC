@@ -7,21 +7,23 @@
 // One App, many windows: the main window keeps the classic implicit lifecycle
 // (runApp / update / draw), a secondary Window owns its own Node tree, events
 // and render state (WindowContext) and is driven by its display's own vsync
-// (macOS: one CADisplayLink per window, delivered on the main run loop).
-// Everything runs synchronously on the main thread; a fully occluded window
-// simply skips drawable acquisition (fps 0), so it can never stall the others.
+// (macOS: one CADisplayLink per window, delivered on the main run loop;
+// Windows: one per-window timer at the monitor refresh rate, delivered through
+// sokol_app's message pump). Everything runs synchronously on the main thread;
+// a fully occluded window simply skips rendering/present, so it can never stall
+// the others.
 //
 // GPU resources (Texture / Fbo / Mesh / Font) live in the single shared
 // sokol_gfx context and can be used freely from any window.
 //
-// Platform support: macOS only for now. On other platforms createWindow()
+// Platform support: macOS and Windows. On other platforms createWindow()
 // logs an error and returns nullptr.
 //
 // This file is included from TrussC.h (after Node / CoreEvents / WindowSettings).
 
 namespace trussc {
 
-class TC_PLATFORMS("macos") Window {
+class TC_PLATFORMS("macos,windows") Window {
 public:
     ~Window();
 
@@ -97,10 +99,10 @@ public:
     Color clearColor_ = Color(0.05f, 0.05f, 0.08f, 1.0f);
 };
 
-// Create a secondary window. macOS only for now (nullptr elsewhere).
+// Create a secondary window. macOS and Windows (nullptr elsewhere).
 // The returned shared_ptr keeps the window alive; closing the window (user or
 // close()) destroys the native side while the handle stays valid (isOpen()).
-TC_PLATFORMS("macos") std::shared_ptr<Window> createWindow(const WindowSettings& settings = {});
+TC_PLATFORMS("macos,windows") std::shared_ptr<Window> createWindow(const WindowSettings& settings = {});
 
 inline Window::Window() {
     ctx_.isMain = false;
@@ -133,10 +135,11 @@ inline void Window::setApp(std::shared_ptr<App> app) {
     ctx_.rootNode = app_.get();
 }
 
-#if !defined(__APPLE__)
-// Non-macOS stubs. The real implementations live in platform/mac/tcWindowMac.mm.
-// (iOS also defines __APPLE__ but has no window glue — iOS is not in the CI
-// build matrix; revisit if an iOS app ever links these symbols.)
+#if !defined(__APPLE__) && !defined(_WIN32)
+// Stubs for platforms without secondary-window glue. The real implementations
+// live in platform/mac/tcWindowMac.mm (macOS) and platform/win/tcWindowWin.cpp
+// (Windows). (iOS also defines __APPLE__ but has no window glue — iOS is not in
+// the CI build matrix; revisit if an iOS app ever links these symbols.)
 inline Window::~Window() {}
 inline void Window::close() {}
 inline void Window::setTitle(const std::string&) {}
