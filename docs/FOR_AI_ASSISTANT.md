@@ -1133,17 +1133,14 @@ Yes — every TrussC app in MCP mode (`TRUSSC_MCP=1`) exposes `start_recording` 
 
 ### How do I avoid a black first frame when a VideoPlayer starts?
 
-`VideoPlayer::load()` / `play()` decode **asynchronously**, so for the first few frames the player has no picture yet and draws **black**. To hide that flash, synchronously extract frame 0 as a still and show it until the live player has a real frame:
+**You don't need to do anything** — the auto poster (default ON) already handles it. `load()` synchronously puts frame 0 on the texture, `stop()` posters frame 0 (matching the rewound position), and `play()` after a seek bridges with the exact frame at the new position. The invariant is "the texture always shows the frame AT the playback position", so `draw()` never shows black or a stale picture, and `isReady()` is true from `load()` on.
 
 ```cpp
-Image still;
-VideoPlayer::extractKeyFrame(path, still, 0.0f);  // frame 0, ready to draw
 player.load(path); player.play();
-// draw():
-player.isReady() ? player.draw(0, 0) : still.draw(0, 0);
+player.draw(0, 0);   // real picture from the very first frame
 ```
 
-`isReady()` is exactly the "would this draw black?" test: false only while the texture is actually empty — after `load()` and after `stop()` (which clears the texture) — until the first decoded frame lands; `play()`, seeking and pausing keep it true (the last picture stays on the texture). Don't branch the draw on `isFrameNew()` — that flag is momentary (true only on updates where a NEW frame arrived), so at 60fps app / 30fps video the still would flicker back every other frame.
+Only if you opt out (`player.setAutoPoster(false)` — e.g. to avoid the one-time synchronous decode at load) do you need the manual bridge: extract a still (`VideoPlayer::extractKeyFrame(path, img, 0.0f)`) and draw it while `!player.isReady()`. On the web the video element preloads its first frame natively; on Android VideoPlayer is not implemented yet. Don't branch the draw on `isFrameNew()` — that flag is momentary (true only on updates where a NEW frame arrived), so at 60fps app / 30fps video the still would flicker back every other frame.
 
 Use `extractKeyFrame(path, img, 0.0f)` here rather than `extractFrame`: frame 0 is always a keyframe, so it is the exact first frame *and* the fastest to fetch (seek only, no forward decode). The `Image` overload allocates and uploads for you (main thread only); a `Pixels` overload exists for background work. If the player is already loaded you can also use the instance form `player.extractKeyFrame(img, 0.0f)`.
 
@@ -3822,6 +3819,7 @@ int VideoPlayer::getAudioChannels() const [macos,windows,linux,ios]  // Number o
 uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC of the audio codec in the loaded video (0 if none)
 std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video
 int VideoPlayer::getAudioSampleRate() const [macos,windows,linux,ios]  // Audio sample rate in Hz (0 if no audio)
+bool VideoPlayer::getAutoPoster() const  // Return whether the auto poster is enabled (default true)
 int VideoPlayer::getCurrentFrame() const  // Get current frame number
 float VideoPlayer::getDuration() const  // Get total duration in seconds
 float VideoPlayer::getGammaCorrection() const  // Get current gamma correction value
@@ -3837,8 +3835,10 @@ bool VideoPlayer::hasAudio() const  // Check if the loaded video has an audio tr
 bool VideoPlayer::isUsingHwAccel() const  // Check if hardware decoding is currently active (after load)
 bool VideoPlayer::load(const std::string & path)  // Load a video file
 void VideoPlayer::nextFrame()  // Advance to the next frame
+void VideoPlayer::play()  // Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture
 void VideoPlayer::playImpl()  // Backend implementation of playImpl for this platform's video player.
 void VideoPlayer::previousFrame()  // Go back to the previous frame
+void VideoPlayer::setAutoPoster(bool on)  // Auto poster (default ON): on load/stop/play the player synchronously puts the frame at the current position on the texture, so drawing never shows black or a stale picture. Turn off to skip the one-time synchronous decode
 void VideoPlayer::setFrame(int frame)  // Seek to a specific frame number
 void VideoPlayer::setGammaCorrection(float gamma)  // Set gamma correction (1.0 = none). Use ~0.45 to brighten on platforms with dark output (e.g. macOS AVFoundation)
 void VideoPlayer::setLoopImpl(bool loop)  // Backend implementation of setLoopImpl for this platform's video player.
@@ -3882,7 +3882,7 @@ bool VideoPlayerBase::isLoaded() const  // Check if a video is loaded
 bool VideoPlayerBase::isLoop() const  // Check if looping is enabled
 bool VideoPlayerBase::isPaused() const  // Check if video is paused
 bool VideoPlayerBase::isPlaying() const  // Check if video is currently playing (not paused)
-bool VideoPlayerBase::isReady() const  // True while the texture holds a real decoded frame — i.e. drawing shows actual video, not black. False only while the texture is cleared (after load/stop, before the first frame)
+bool VideoPlayerBase::isReady() const  // True while the texture holds a real picture — i.e. drawing shows actual video, not black. With the default auto poster this is true from load() on; false only if the poster failed and no frame has arrived yet
 bool VideoPlayerBase::isUsingHwAccel() const  // Return true if hardware-accelerated decoding is currently active.
 bool VideoPlayerBase::load(const std::string & path)  // Load a video from the given file path; return true on success.
 void VideoPlayerBase::markDone()  // Mark playback as done, clearing playing unless looping.

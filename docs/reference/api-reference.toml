@@ -10466,18 +10466,18 @@ description.ko = "현재 재생 중인지 확인 (일시정지 시 false)"
 ["VideoPlayerBase::isReady"]
 category = "video"
 keywords = ["ready", "first frame", "black flash", "decoded", "has picture"]
-description.en = "True while the texture holds a real decoded frame — i.e. drawing shows actual video, not black. False only while the texture is cleared (after load/stop, before the first frame)"
-description.ja = "実フレームがテクスチャに載っていれば true ＝ 描画すると黒ではなく実映像が出る状態。false になるのはテクスチャが空の間だけ（load/stop 後〜最初のフレーム到着まで）"
-description.ko = "실제 디코드된 프레임이 텍스처에 있으면 true — 그리면 검은 화면이 아니라 실제 영상이 나오는 상태. 텍스처가 빈 동안(load/stop 후 첫 프레임 전)만 false"
+description.en = "True while the texture holds a real picture — i.e. drawing shows actual video, not black. With the default auto poster this is true from load() on; false only if the poster failed and no frame has arrived yet"
+description.ja = "実フレームがテクスチャに載っていれば true ＝ 描画すると黒ではなく実映像が出る状態。デフォルトの自動ポスターでは load() 直後から true。false はポスター失敗かつフレーム未到着の間だけ"
+description.ko = "실제 그림이 텍스처에 있으면 true — 그리면 검은 화면이 아니라 실제 영상이 나오는 상태. 기본 자동 포스터에서는 load() 직후부터 true. 포스터 실패 & 프레임 미도착일 때만 false"
 related = ["VideoPlayerBase::isFrameNew", "VideoPlayerBase::isLoaded", "VideoPlayer::extractKeyFrame"]
 details.en = '''
-`load()`/`play()` decode asynchronously, so right after load the player would
-draw its cleared (black) texture. `isReady()` is exactly the "would this draw
-black?" test: it turns true when the first decoded frame lands on the texture,
-and resets to false only when the texture actually goes empty — on `load()`
-and on `stop()` (which clears the texture back to black). `play()`, seeking
-and pausing keep it **true**: the last picture stays on the texture, so
-drawing still shows real video.
+`isReady()` is the "would drawing show a real picture?" test. With the
+default [auto poster](#VideoPlayer::setAutoPoster) it is true from `load()`
+on — the poster puts frame 0 on the texture synchronously — and stays true
+through `play()`, `stop()`, seeking and pausing (the texture always holds a
+real picture). It is false only between `load()` and the first picture when
+the poster is disabled or unavailable (`setAutoPoster(false)`, or platforms
+without frame extraction).
 
 Typical use — avoid the black flash at playback start by bridging with a
 still (see [`extractKeyFrame`](#VideoPlayer::extractKeyFrame)):
@@ -10492,12 +10492,12 @@ be black) and [`isFrameNew`](#VideoPlayerBase::isFrameNew) (momentary
 branch your draw on it directly).
 '''
 details.ja = '''
-`load()`/`play()` は非同期でデコードするため、load 直後はクリア済みの黒
-テクスチャが描画されてしまう。`isReady()` は「描画したら黒か？」の判定そのもの:
-最初のデコード済みフレームがテクスチャに載った時点で true になり、false に戻る
-のは**テクスチャが実際に空になる時だけ** — `load()` と `stop()`（テクスチャを黒に
-クリアする）。`play()`・シーク・一時停止では **true のまま**（直前のフレームが
-テクスチャに残っているので、描画すれば実映像が出る）。
+`isReady()` は「描画したら実映像が出るか？」の判定。デフォルトの
+[自動ポスター](#VideoPlayer::setAutoPoster) が有効なら `load()` 直後から true
+（ポスターが同期的にフレーム0を載せる）で、`play()`・`stop()`・シーク・一時停止を
+通して true のまま（テクスチャには常に実映像が載っている）。false になるのは
+ポスターが無効/利用不可（`setAutoPoster(false)` や抽出未対応プラットフォーム）で、
+load 後まだ最初のフレームが来ていない間だけ。
 
 典型的な用途は再生開始時の黒フラッシュ回避（静止画でつなぐ。
 [`extractKeyFrame`](#VideoPlayer::extractKeyFrame) 参照）:
@@ -10511,6 +10511,63 @@ player.isReady() ? player.draw(0, 0) : still.draw(0, 0);
 来た」という単発フラグ。動画レートで点滅するので draw の分岐に直接使わない）
 とは別物。
 '''
+
+["VideoPlayer::play"]
+category = "video"
+description.en = "Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture"
+description.ja = "再生を開始/再開。自動ポスター（デフォルト）有効時は、停止/一時停止中のシークがあれば新しい位置の正確なフレームを載せてから再生するので、古い絵のまま再生が始まらない"
+description.ko = "재생 시작/재개. 자동 포스터(기본) 활성 시 정지/일시정지 중 시크가 있으면 새 위치의 정확한 프레임을 올린 뒤 재생하므로 오래된 그림으로 시작하지 않음"
+related = ["VideoPlayer::setAutoPoster", "VideoPlayerBase::play"]
+
+["VideoPlayer::setAutoPoster"]
+category = "video"
+keywords = ["poster", "first frame", "black flash", "auto", "preload"]
+description.en = "Auto poster (default ON): on load/stop/play the player synchronously puts the frame at the current position on the texture, so drawing never shows black or a stale picture. Turn off to skip the one-time synchronous decode"
+description.ja = "自動ポスター（デフォルトON）。load/stop/play 時に現在位置のフレームを同期的にテクスチャへ載せるので、描画が黒や古い絵になる瞬間が無い。同期デコード（1回きり）を避けたい場合のみオフにする"
+description.ko = "자동 포스터(기본 ON). load/stop/play 시 현재 위치의 프레임을 동기적으로 텍스처에 올려 검은 화면이나 오래된 그림이 그려지는 순간이 없음. 일회성 동기 디코드를 피하려면 끈다"
+related = ["VideoPlayer::getAutoPoster", "VideoPlayerBase::isReady", "VideoPlayer::extractKeyFrame"]
+details.en = '''
+Maintains the invariant "the texture always shows the frame AT the playback
+position":
+
+- `load()` — extracts frame 0 (always a keyframe: exact and fast) before
+  returning, so [`isReady`](#VideoPlayerBase::isReady) is true immediately and
+  the first `draw()` shows a real picture.
+- `stop()` — rewinds, so the poster becomes frame 0 (picture matches the
+  rewound position).
+- `play()` — if the position moved while stopped/paused (seek), the exact
+  frame at the new position is extracted synchronously before playback, so
+  playback never starts on a stale picture.
+
+The synchronous extraction costs one decode (keyframe-fast at position 0,
+seek+decode elsewhere). `setAutoPoster(false)` restores the previous behavior
+(texture stays black until the first live frame).
+
+Platforms without frame extraction: web bridges natively (the video element
+preloads its first frame), Android has no VideoPlayer yet — both no-op safely.
+'''
+details.ja = '''
+「テクスチャには常に再生位置のフレームが載っている」という不変条件を維持する:
+
+- `load()` — 返る前にフレーム0（必ずキーフレーム＝正確かつ高速）を抽出して
+  載せる。[`isReady`](#VideoPlayerBase::isReady) は即 true になり、最初の
+  `draw()` から実映像が出る。
+- `stop()` — 先頭に巻き戻るので、ポスターもフレーム0になる（絵と位置が一致）。
+- `play()` — 停止/一時停止中にシークで位置が動いていたら、新しい位置の正確な
+  フレームを同期抽出してから再生する。古い絵のまま再生が始まることがない。
+
+同期抽出のコストはデコード1回（位置0はキーフレームで高速、それ以外はシーク+
+デコード）。`setAutoPoster(false)` で従来挙動（最初のライブフレームまで黒）に戻る。
+
+フレーム抽出が無いプラットフォーム: web は video 要素のプリロードで自然に
+カバー、Android は VideoPlayer 自体が未実装。どちらも安全に no-op。
+'''
+
+["VideoPlayer::getAutoPoster"]
+category = "video"
+description.en = "Return whether the auto poster is enabled (default true)"
+description.ja = "自動ポスターが有効かを返す（デフォルト true）"
+description.ko = "자동 포스터가 활성화되어 있는지 반환 (기본 true)"
 
 ["VideoPlayerBase::play"]
 category = "video"

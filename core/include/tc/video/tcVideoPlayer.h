@@ -58,8 +58,10 @@ public:
             close();
         }
 
-        // Resolve relative paths via getDataPath
-        std::string resolvedPath = getDataPath(path);
+        // Resolve relative paths via getDataPath; URLs pass through untouched
+        // (the web backend streams straight from them)
+        bool isUrl = path.rfind("http://", 0) == 0 || path.rfind("https://", 0) == 0;
+        std::string resolvedPath = isUrl ? path : getDataPath(path);
 
         // Platform-specific load
         if (!loadPlatform(resolvedPath)) {
@@ -86,12 +88,20 @@ public:
                 }
             } else {
                 texture_.allocate(width_, height_, 4, TextureUsage::Stream);
-                clearTexture();
             }
         }
 
         initialized_ = true;
         firstFrameReceived_ = false;
+        posterActive_ = false;
+
+        // Auto poster: synchronously put frame 0 on the texture so drawing
+        // never shows black between load() and the first decoded frame.
+        // Frame 0 is always a keyframe, so this is exact AND fast.
+        // Stream textures accept ONE loadData per frame, so the poster and
+        // the black-clear are alternatives, never both.
+        bool postered = autoPoster_ && loadPosterFrame(0.0f);
+        if (!postered) clearTexture();
         return true;
     }
 
@@ -115,6 +125,9 @@ public:
         paused_ = false;
         frameNew_ = false;
         firstFrameReceived_ = false;
+        posterActive_ = false;
+        lastShownTime_ = -1.0f;
+        pendingSeekSec_ = -1.0f;
         done_ = false;
         width_ = 0;
         height_ = 0;
@@ -150,11 +163,50 @@ public:
             }
         }
 
+        // A live frame replaces the poster; free the temporary poster
+        // texture in NV12 mode (the shader path takes over). Track what
+        // moment the picture on the texture belongs to (poster decisions).
+        if (frameNew_) {
+            lastShownTime_ = getCurrentTime();
+            pendingSeekSec_ = -1.0f;  // live playback reflects the position now
+            if (posterActive_) {
+                posterActive_ = false;
+                if (nv12Mode_) texture_.clear();
+            }
+        }
+
         // Check if playback finished
         if (playing_ && !paused_ && isFinishedPlatform()) {
             markDone();
         }
     }
+
+    // =========================================================================
+    // Playback (auto poster on play)
+    // =========================================================================
+
+    void play() override {
+        // Invariant: the texture always shows the frame AT the playback
+        // position. If the position moved while stopped/paused (seek) or the
+        // texture is still empty, bridge with the exact frame synchronously
+        // so playback never starts on black or on a stale picture.
+        if (autoPoster_ && initialized_) {
+            float t = (pendingSeekSec_ >= 0.0f) ? pendingSeekSec_ : getCurrentTime();
+            if (!firstFrameReceived_ || fabsf(t - lastShownTime_) > 0.05f) {
+                loadPosterFrame(t);
+            }
+        }
+        VideoPlayerBase::play();
+    }
+
+    // Auto poster (default ON): on load()/play(), synchronously extract the
+    // frame at the current position and show it until live frames arrive, so
+    // the player never draws its cleared (black) texture. Turn off if the
+    // one-time synchronous decode at load/play is undesirable. No effect on
+    // platforms without frame extraction (Android/web - web bridges via the
+    // <video> element instead).
+    void setAutoPoster(bool on) { autoPoster_ = on; }
+    bool getAutoPoster() const { return autoPoster_; }
 
     // =========================================================================
     // Draw (NV12 path uses shader; RGBA path uses default HasTexture::draw)
@@ -166,7 +218,9 @@ public:
 
     void draw(float x, float y, float w, float h) const override {
 #if defined(__linux__) && !defined(__ANDROID__)
-        if (nv12Mode_ && nv12ShaderHandle_) {
+        // While the poster is up, draw it even in NV12 mode (the poster is an
+        // RGBA texture; the Y/UV planes still hold priming data).
+        if (nv12Mode_ && nv12ShaderHandle_ && !posterActive_) {
             drawNV12Platform(x, y, w, h);
             return;
         }
@@ -293,7 +347,13 @@ protected:
 
     void stopImpl() override {
         stopPlatform();
-        clearTexture();
+        // stop() rewinds to the beginning, so put frame 0 on the texture:
+        // the picture always matches the playback position, and a following
+        // play() starts from an already-correct image (no black, no stale
+        // frame). Platforms without extraction keep the last frame until the
+        // element/decoder surfaces frame 0 itself.
+        pendingSeekSec_ = -1.0f;
+        if (autoPoster_) loadPosterFrame(0.0f);
     }
 
     void setPausedImpl(bool paused) override {
@@ -302,6 +362,10 @@ protected:
 
     void setPositionImpl(float pct) override {
         setPositionPlatform(pct);
+        // Seeks are async on most backends, so getCurrentTime() right after a
+        // seek still returns the OLD position. Remember the target: the
+        // poster logic in play() uses it until a live frame supersedes it.
+        pendingSeekSec_ = pct * getDurationPlatform();
     }
 
     void setVolumeImpl(float vol) override {
@@ -332,6 +396,10 @@ private:
     Texture textureY_;
     Texture textureUV_;
     bool  nv12Mode_       = false;
+    bool  autoPoster_     = true;   // extract-and-show a poster on load/play
+    bool  posterActive_   = false;  // poster currently on texture_ (until live)
+    float lastShownTime_  = -1.0f;  // time (sec) of the picture on the texture
+    float pendingSeekSec_ = -1.0f;  // seek target awaiting playback (-1 = none)
     void* nv12ShaderHandle_ = nullptr;  // NV12VideoShader* on Linux/CUDA
 
     // Gamma correction (1.0 = none)
@@ -370,6 +438,10 @@ private:
         textureY_  = std::move(other.textureY_);
         textureUV_ = std::move(other.textureUV_);
         nv12Mode_        = other.nv12Mode_;
+        autoPoster_      = other.autoPoster_;
+        posterActive_    = other.posterActive_;
+        lastShownTime_   = other.lastShownTime_;
+        pendingSeekSec_  = other.pendingSeekSec_;
         nv12ShaderHandle_ = other.nv12ShaderHandle_;
         platformHandle_  = other.platformHandle_;
         sourcePath_      = std::move(other.sourcePath_);
@@ -386,6 +458,34 @@ private:
     }
 
     // Clear texture to black (prevents old frame from showing)
+    // Extract the frame at timeSec and put it on texture_ as a poster.
+    // timeSec <= 0 uses the keyframe path (frame 0 is a keyframe: exact+fast).
+    // Marks the player ready (isReady) - drawing now shows a real picture.
+    // Returns false when extraction is unavailable/failed (caller clears).
+    bool loadPosterFrame(float timeSec) {
+        if (sourcePath_.empty() || width_ <= 0 || height_ <= 0) return false;
+        Pixels px;
+        bool ok = (timeSec <= 0.001f)
+                      ? extractKeyFramePlatform(sourcePath_, px, 0.0f, nullptr)
+                      : extractFramePlatform(sourcePath_, px, timeSec, nullptr);
+        if (!ok || px.getWidth() != width_ || px.getHeight() != height_) return false;
+        if (!texture_.isAllocated()) {
+            texture_.allocate(width_, height_, 4, TextureUsage::Stream);
+        }
+        {
+            // keep the CPU mirror in sync so getPixels() matches what is shown
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (pixels_) {
+                std::memcpy(pixels_, px.getData(), (size_t)width_ * height_ * 4);
+            }
+        }
+        texture_.loadData(px.getData(), width_, height_, 4);
+        posterActive_ = true;
+        lastShownTime_ = timeSec;    // the picture now belongs to this moment
+        firstFrameReceived_ = true;  // isReady: a real picture is on the texture
+        return true;
+    }
+
     void clearTexture() {
         if (width_ > 0 && height_ > 0 && pixels_) {
             std::lock_guard<std::mutex> lock(mutex_);
