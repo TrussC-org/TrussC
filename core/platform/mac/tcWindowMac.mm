@@ -142,9 +142,11 @@ void ensureAuxTextures(NativeWindow* nw, int w, int h) {
     [self forwardMods:ev shift:&e.shift ctrl:&e.ctrl alt:&e.alt super:&e.super];
     if (down) {
         win.events().mousePressed.notify(e);
+        if (win.app_) win.app_->mousePressed(e);
         win.dispatchMousePressToTree(e);
     } else {
         win.events().mouseReleased.notify(e);
+        if (win.app_) win.app_->mouseReleased(e);
         win.dispatchMouseReleaseToTree(e);
     }
     internal::currentWindowCtx = prev;
@@ -167,6 +169,7 @@ void ensureAuxTextures(NativeWindow* nw, int w, int h) {
     e.deltaX = (float)ev.deltaX; e.deltaY = (float)ev.deltaY;
     [self forwardMods:ev shift:&e.shift ctrl:&e.ctrl alt:&e.alt super:&e.super];
     win.events().mouseMoved.notify(e);
+    if (self.nw->owner->app_) self.nw->owner->app_->mouseMoved(e);
 }
 - (void)mouseMoved:(NSEvent*)ev   { [self moveWith:ev]; }
 - (void)mouseDragged:(NSEvent*)ev { [self moveWith:ev]; }
@@ -193,8 +196,13 @@ void ensureAuxTextures(NativeWindow* nw, int w, int h) {
     KeyEventArgs e;
     e.key = key; e.isRepeat = ev.isARepeat;
     [self forwardMods:ev shift:&e.shift ctrl:&e.ctrl alt:&e.alt super:&e.super];
-    if (down) win.events().keyPressed.notify(e);
-    else      win.events().keyReleased.notify(e);
+    if (down) {
+        win.events().keyPressed.notify(e);
+        if (win.app_) win.app_->keyPressed(e);
+    } else {
+        win.events().keyReleased.notify(e);
+        if (win.app_) win.app_->keyReleased(e);
+    }
 }
 - (void)keyDown:(NSEvent*)ev { [self keyEvt:ev pressed:true]; }
 - (void)keyUp:(NSEvent*)ev   { [self keyEvt:ev pressed:false]; }
@@ -262,11 +270,6 @@ void ensureAuxTextures(NativeWindow* nw, int w, int h) {
 
     beginFrame();
 
-    if (win.root_ && !win.rootSetupDone_) {
-        win.root_->setup();
-        win.rootSetupDone_ = true;
-    }
-
     win.events().update.notify();
     win.tickTree();
 
@@ -327,6 +330,13 @@ void Window::close() {
     }
     nw->owner = nullptr;
     delete nw;
+    if (app_) {
+        app_->exit();
+        app_->cleanup();
+        internal::attachedApps.erase(app_.get());
+        app_.reset();
+        ctx_.rootNode = nullptr;
+    }
 }
 
 void Window::setTitle(const std::string& title) {

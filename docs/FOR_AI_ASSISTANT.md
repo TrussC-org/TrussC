@@ -3942,12 +3942,12 @@ bool VideoWriter::submitFrame(double timeSec)  // Append the previously locked f
 ```cpp
 void Window::close()  // Close the native window; the main window and other windows keep running
 CoreEvents & Window::events()  // This window's own event stream (mousePressed / keyPressed / draw / ...)
+std::shared_ptr<App> Window::getApp() const  // Get the App attached to this window
 int Window::getHeight() const  // Window height in logical points (matches its coordinate system)
-std::shared_ptr<Node> Window::getRoot() const  // Get the Node tree attached to this window
 int Window::getWidth() const  // Window width in logical points (matches its coordinate system)
 bool Window::isOpen() const  // Whether the native window is still open
+void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window
 void Window::setClearColor(const Color & c)  // Background clear color for this window
-void Window::setRoot(std::shared_ptr<Node> root)  // Attach the Node tree shown in this window (setup runs on its first frame)
 void Window::setTitle(const std::string & title)  // Set the window title
 ```
 

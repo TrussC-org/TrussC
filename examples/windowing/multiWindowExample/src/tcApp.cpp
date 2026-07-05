@@ -56,9 +56,9 @@ void tcApp::keyPressed(int key) {
         second = createWindow(ws);
         logNotice("tcApp") << (second ? "second window created" : "createWindow failed");
         if (second) {
-            subScene = make_shared<SubScene>();
-            subScene->sharedFbo = &fbo;
-            second->setRoot(subScene);
+            subApp = make_shared<SubApp>();
+            subApp->sharedFbo = &fbo;
+            second->setApp(subApp);
         }
     }
 }

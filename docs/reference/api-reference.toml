@@ -10698,15 +10698,16 @@ description.ja = "セカンダリウィンドウ (現状macOSのみ)。自分の
 description.ko = "보조 윈도우 (현재 macOS 전용). 자체 Node 트리·이벤트·마우스 상태·렌더 컨텍스트를 갖고, 소속 디스플레이의 주사율로 구동됨. GPU 리소스는 모든 윈도우와 공유"
 related = ["createWindow", "WindowSettings"]
 
-["Window::setRoot"]
-description.en = "Attach the Node tree shown in this window (setup runs on its first frame)"
-description.ja = "このウィンドウに表示するNodeツリーを設定 (setupは最初のフレームで実行)"
-description.ko = "이 윈도우에 표시할 Node 트리를 설정 (setup은 첫 프레임에 실행)"
+["Window::setApp"]
+keywords = ["attach", "lifecycle", "content"]
+description.en = "Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window"
+description.ja = "このウィンドウにAppを設定 (ウィンドウにコンテンツを与える唯一の方法)。Appのライフサイクル一式 (setup/update/draw/キー/マウス/windowResized + RectNodeサイズ同期) がこのウィンドウで動く。1ウィンドウ1App"
+description.ko = "이 윈도우에 App을 연결 (윈도우에 콘텐츠를 주는 유일한 방법). App의 전체 라이프사이클이 이 윈도우에서 실행됨. 윈도우당 App 하나"
 
-["Window::getRoot"]
-description.en = "Get the Node tree attached to this window"
-description.ja = "このウィンドウのNodeツリーを取得"
-description.ko = "이 윈도우의 Node 트리를 얻음"
+["Window::getApp"]
+description.en = "Get the App attached to this window"
+description.ja = "このウィンドウのAppを取得"
+description.ko = "이 윈도우의 App을 얻음"
 
 ["Window::events"]
 description.en = "This window's own event stream (mousePressed / keyPressed / draw / ...)"
@@ -10752,6 +10753,10 @@ hide = true
 keywords = ["internal"]
 
 ["Window::dispatchMouseReleaseToTree"]
+hide = true
+keywords = ["internal"]
+
+["Window::syncRootSize"]
 hide = true
 keywords = ["internal"]
 

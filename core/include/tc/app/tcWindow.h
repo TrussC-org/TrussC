@@ -25,9 +25,21 @@ class TC_PLATFORMS("macos") Window {
 public:
     ~Window();
 
-    // Attach the Node tree shown in this window (setup runs on first tick).
-    void setRoot(std::shared_ptr<Node> root);
-    std::shared_ptr<Node> getRoot() const { return root_; }
+    // Attach an App to this window — the ONLY way to give a window content.
+    // The App gets its familiar lifecycle wired to THIS window: setup() once
+    // on the first tick, update()/draw() on the window's own tick,
+    // keyPressed/mousePressed/... from this window's event stream, and
+    // windowResized() on resize (whose base impl keeps the App's RectNode
+    // size in sync, exactly like the main window). App IS a Node — attach
+    // children as usual for scene content.
+    // One App per window; attaching an App that is already driving another
+    // window (or the main one) is an error.
+    // Caveat (Phase 2): App::setSize / window-control helpers still target
+    // the MAIN window; use this Window handle to control this one.
+    // Note: the App's setup() runs once on the window's first tree update
+    // (standard Node lifecycle), i.e. on the window's first tick.
+    void setApp(std::shared_ptr<App> app);
+    std::shared_ptr<App> getApp() const { return app_; }
 
     // This window's event stream (mousePressed / keyPressed / draw / ...).
     CoreEvents& events() { return events_; }
@@ -64,21 +76,24 @@ public:
     // window's logical size at attach time and on every resize/display change.
     // A plain Node root is left untouched.
     void syncRootSize(float wPts, float hPts) {
-        if (auto* rect = dynamic_cast<RectNode*>(ctx_.rootNode)) {
-            if (rect->getWidth() != wPts || rect->getHeight() != hPts) {
-                rect->setSize(wPts, hPts);
-            }
+        if (!app_) return;
+        // handleWindowResized() = RectNode::setSize (non-virtual; App::setSize
+        // is overridden to resize the OS window) + the windowResized() hook —
+        // the same path the main window uses on SAPP_EVENTTYPE_RESIZED.
+        if (app_->getWidth() != wPts || app_->getHeight() != hPts) {
+            app_->handleWindowResized((int)wPts, (int)hPts);
+            ResizeEventArgs args; args.width = (int)wPts; args.height = (int)hPts;
+            events_.windowResized.notify(args);
         }
     }
 
     // --- internal (used by the platform glue; not user API) ---
     Window();
+    std::shared_ptr<App> app_;               // set via setApp (may be null)
     void* native_ = nullptr;                 // platform-side state
     internal::WindowContext ctx_;
     CoreEvents events_;
     internal::RenderContext render_;
-    std::shared_ptr<Node> root_;
-    bool rootSetupDone_ = false;
     Color clearColor_ = Color(0.05f, 0.05f, 0.08f, 1.0f);
 };
 
@@ -93,10 +108,29 @@ inline Window::Window() {
     ctx_.coreEvents = &events_;
 }
 
-inline void Window::setRoot(std::shared_ptr<Node> root) {
-    root_ = std::move(root);
-    ctx_.rootNode = root_.get();
-    rootSetupDone_ = false;
+namespace internal {
+// Apps currently driving a window (double-attach guard). An inline variable:
+// a hot-reload guest gets its own copy, so the guard is per-binary — fine for
+// a misuse check. (runApp unification — "runApp = create main window +
+// setApp" — is a future refactor; the main App is guarded via rootNode.)
+inline std::unordered_set<const App*> attachedApps;
+}
+
+inline void Window::setApp(std::shared_ptr<App> app) {
+    if (app) {
+        if (app.get() == internal::mainWindowContext().rootNode) {
+            logError("Window") << "setApp(): this App is the running main App";
+            return;
+        }
+        if (internal::attachedApps.count(app.get())) {
+            logError("Window") << "setApp(): this App already drives another window";
+            return;
+        }
+    }
+    if (app_) internal::attachedApps.erase(app_.get());
+    if (app) internal::attachedApps.insert(app.get());
+    app_ = std::move(app);
+    ctx_.rootNode = app_.get();
 }
 
 #if !defined(__APPLE__)
