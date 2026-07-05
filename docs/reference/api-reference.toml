@@ -10693,9 +10693,9 @@ value_desc.Silent.ko = "무음 (사운드 없음)"
 
 ["Window"]
 keywords = ["multi window", "second window", "secondary", "display"]
-description.en = "A secondary application window (macOS only for now). Owns its own Node tree, events, mouse state and render context; ticks at its display's refresh rate. GPU resources are shared with every other window"
-description.ja = "セカンダリウィンドウ (現状macOSのみ)。自分のNodeツリー・イベント・マウス状態・描画コンテキストを持ち、所属ディスプレイのリフレッシュレートで駆動される。GPUリソースは全ウィンドウで共有"
-description.ko = "보조 윈도우 (현재 macOS 전용). 자체 Node 트리·이벤트·마우스 상태·렌더 컨텍스트를 갖고, 소속 디스플레이의 주사율로 구동됨. GPU 리소스는 모든 윈도우와 공유"
+description.en = "A secondary application window (macOS and Windows). Owns its own Node tree, events, mouse state and render context; ticks at its display's refresh rate. GPU resources are shared with every other window"
+description.ja = "セカンダリウィンドウ (macOS / Windows)。自分のNodeツリー・イベント・マウス状態・描画コンテキストを持ち、所属ディスプレイのリフレッシュレートで駆動される。GPUリソースは全ウィンドウで共有"
+description.ko = "보조 윈도우 (macOS / Windows). 자체 Node 트리·이벤트·마우스 상태·렌더 컨텍스트를 갖고, 소속 디스플레이의 주사율로 구동됨. GPU 리소스는 모든 윈도우와 공유"
 related = ["createWindow", "WindowSettings"]
 
 ["Window::setApp"]
@@ -10770,9 +10770,9 @@ keywords = ["internal"]
 
 ["createWindow"]
 keywords = ["multi window", "second window", "open window", "display"]
-description.en = "Create a secondary window (macOS only for now; returns nullptr elsewhere). It runs on its own display link; closing it leaves the app running"
-description.ja = "セカンダリウィンドウを作成 (現状macOSのみ、他プラットフォームはnullptr)。専用のdisplay linkで駆動され、閉じてもアプリは動き続ける"
-description.ko = "보조 윈도우를 생성 (현재 macOS 전용, 다른 플랫폼은 nullptr). 전용 display link로 구동되며 닫아도 앱은 계속 실행됨"
+description.en = "Create a secondary window (macOS and Windows; returns nullptr elsewhere). It runs on its own per-display tick; closing it leaves the app running"
+description.ja = "セカンダリウィンドウを作成 (macOS / Windows、他プラットフォームはnullptr)。専用のディスプレイ単位のtickで駆動され、閉じてもアプリは動き続ける"
+description.ko = "보조 윈도우를 생성 (macOS / Windows, 다른 플랫폼은 nullptr). 디스플레이별 전용 tick으로 구동되며 닫아도 앱은 계속 실행됨"
 related = ["Window", "WindowSettings"]
 
 ["WindowSettings"]
