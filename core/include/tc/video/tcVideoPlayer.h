@@ -126,6 +126,9 @@ public:
         frameNew_ = false;
         firstFrameReceived_ = false;
         posterActive_ = false;
+        posterUploadPending_ = false;
+        posterPx_.clear();
+        texUploadFrame_ = ~0ull;
         lastShownTime_ = -1.0f;
         pendingSeekSec_ = -1.0f;
         done_ = false;
@@ -158,6 +161,7 @@ public:
             } else {
                 if (pixels_ && width_ > 0 && height_ > 0) {
                     texture_.loadData(pixels_, width_, height_, 4);
+                    texUploadFrame_ = sapp_frame_count();
                     markFrameNew();
                 }
             }
@@ -178,6 +182,24 @@ public:
         // Check if playback finished
         if (playing_ && !paused_ && isFinishedPlatform()) {
             markDone();
+        }
+
+        // Deferred poster upload: the poster from stop()/seek+play() could not
+        // use this texture's once-per-frame upload slot when it was requested
+        // (a live frame had it). A live frame arriving now supersedes it;
+        // otherwise the slot is free on this fresh frame - upload for real so
+        // the picture on screen matches the playback position.
+        if (posterUploadPending_) {
+            if (frameNew_) {
+                posterUploadPending_ = false;
+                posterPx_.clear();
+            } else if (posterPx_.isAllocated() && texture_.isAllocated()
+                       && texUploadFrame_ != sapp_frame_count()) {
+                texture_.loadData(posterPx_.getData(), width_, height_, 4);
+                texUploadFrame_ = sapp_frame_count();
+                posterUploadPending_ = false;
+                posterPx_.clear();
+            }
         }
     }
 
@@ -398,6 +420,9 @@ private:
     bool  nv12Mode_       = false;
     bool  autoPoster_     = true;   // extract-and-show a poster on load/play
     bool  posterActive_   = false;  // poster currently on texture_ (until live)
+    Pixels posterPx_;               // poster awaiting upload (deferred one frame)
+    bool  posterUploadPending_ = false;  // upload posterPx_ on the next update()
+    uint64_t texUploadFrame_ = ~0ull;    // sapp frame of the last texture_ upload
     float lastShownTime_  = -1.0f;  // time (sec) of the picture on the texture
     float pendingSeekSec_ = -1.0f;  // seek target awaiting playback (-1 = none)
     void* nv12ShaderHandle_ = nullptr;  // NV12VideoShader* on Linux/CUDA
@@ -440,6 +465,9 @@ private:
         nv12Mode_        = other.nv12Mode_;
         autoPoster_      = other.autoPoster_;
         posterActive_    = other.posterActive_;
+        posterPx_        = std::move(other.posterPx_);
+        posterUploadPending_ = other.posterUploadPending_;
+        texUploadFrame_  = other.texUploadFrame_;
         lastShownTime_   = other.lastShownTime_;
         pendingSeekSec_  = other.pendingSeekSec_;
         nv12ShaderHandle_ = other.nv12ShaderHandle_;
@@ -449,6 +477,8 @@ private:
         other.pixels_    = nullptr;
         other.pixelsY_   = nullptr;
         other.pixelsUV_  = nullptr;
+        other.posterUploadPending_ = false;
+        other.texUploadFrame_      = ~0ull;
         other.nv12Mode_        = false;
         other.nv12ShaderHandle_ = nullptr;
         other.initialized_     = false;
@@ -469,7 +499,8 @@ private:
                       ? extractKeyFramePlatform(sourcePath_, px, 0.0f, nullptr)
                       : extractFramePlatform(sourcePath_, px, timeSec, nullptr);
         if (!ok || px.getWidth() != width_ || px.getHeight() != height_) return false;
-        if (!texture_.isAllocated()) {
+        bool freshTexture = !texture_.isAllocated();
+        if (freshTexture) {
             texture_.allocate(width_, height_, 4, TextureUsage::Stream);
         }
         {
@@ -479,7 +510,20 @@ private:
                 std::memcpy(pixels_, px.getData(), (size_t)width_ * height_ * 4);
             }
         }
-        texture_.loadData(px.getData(), width_, height_, 4);
+        // texture_ accepts ONE loadData per app frame (sokol). During playback
+        // the live frame usually took this frame's slot already, so uploading
+        // now would be silently dropped and the screen would keep the stale
+        // frame. Defer to the next update() in that case (the slot is free
+        // there - or a new live frame supersedes the poster anyway).
+        if (freshTexture || texUploadFrame_ != sapp_frame_count()) {
+            texture_.loadData(px.getData(), width_, height_, 4);
+            texUploadFrame_ = sapp_frame_count();
+            posterUploadPending_ = false;
+            posterPx_.clear();
+        } else {
+            posterPx_ = std::move(px);
+            posterUploadPending_ = true;
+        }
         posterActive_ = true;
         lastShownTime_ = timeSec;    // the picture now belongs to this moment
         firstFrameReceived_ = true;  // isReady: a real picture is on the texture
@@ -491,6 +535,7 @@ private:
             std::lock_guard<std::mutex> lock(mutex_);
             std::memset(pixels_, 0, width_ * height_ * 4);
             texture_.loadData(pixels_, width_, height_, 4);
+            texUploadFrame_ = sapp_frame_count();
         }
     }
 
