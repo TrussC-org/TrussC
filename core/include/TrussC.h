@@ -2041,13 +2041,9 @@ namespace internal {
 
         setup();
 
-        // For macOS bundles, set default data path
-        // Executable: bin/xxx.app/Contents/MacOS/xxx
-        // data: bin/data/
-        // ../../../ = bin/, so ../../../data/ is the correct path
-        #ifdef __APPLE__
-        setDataPathRoot("../../../data/");
-        #endif
+        // The Apple data path root is chosen lazily on first getDataPath() use
+        // (resolveDataPathRootOnce in tcUtils.h) — probing here is too early to
+        // see a valid executable path on iOS.
 
         // Start console input thread (enabled by default)
         // To disable, call console::stop() in setup()
