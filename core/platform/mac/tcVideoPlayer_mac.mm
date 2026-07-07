@@ -918,9 +918,17 @@ static bool tcv_extract_frame_mac(const std::string& path, Pixels& outPixels,
         int w = (int)CGImageGetWidth(cgImage);
         int h = (int)CGImageGetHeight(cgImage);
 
-        // Draw into RGBA bitmap context
+        // Draw into RGBA bitmap context. Use the image's OWN color space so
+        // CoreGraphics performs no color conversion - this matches the playback
+        // path (AVPlayerItemVideoOutput emits BGRA in the video's color space,
+        // unmanaged), so a poster extracted here is pixel-consistent with the
+        // live frames that replace it. DeviceRGB here would color-match to the
+        // display profile and come out ~2% brighter than playback.
         outPixels.allocate(w, h, 4);
-        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+        CGColorSpaceRef srcSpace = CGImageGetColorSpace(cgImage);
+        bool srcUsable = srcSpace && CGColorSpaceGetModel(srcSpace) == kCGColorSpaceModelRGB;
+        CGColorSpaceRef colorSpace =
+            srcUsable ? CGColorSpaceRetain(srcSpace) : CGColorSpaceCreateDeviceRGB();
         CGContextRef ctx = CGBitmapContextCreate(
             outPixels.getData(), w, h, 8, w * 4,
             colorSpace,

@@ -6,6 +6,7 @@
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreVideo/CoreVideo.h>
+#import <CoreGraphics/CoreGraphics.h>
 
 #include "TrussC.h"
 
@@ -28,6 +29,11 @@
 @property (nonatomic, assign) BOOL isFinished;
 @property (nonatomic, assign) BOOL hasNewFrame;
 @property (nonatomic, assign) BOOL loop;
+
+// Desired playback rate. On iOS play must go through
+// playImmediatelyAtRate: (see -play), so the rate is kept here instead of
+// being poked into player.rate directly.
+@property (nonatomic, assign) float playbackRate;
 
 // Pixel buffer for C++ side
 @property (nonatomic, assign) unsigned char* pixelBuffer;
@@ -212,9 +218,13 @@
         return NO;
     }
 
-    // Create video output (BGRA format for macOS)
+    // Create video output (BGRA). On iOS the buffers must be IOSurface-backed
+    // and Metal-compatible, otherwise copyPixelBufferForItemTime can hand back
+    // unusable/uninitialized buffers.
     NSDictionary* pixelBufferAttributes = @{
-        (id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)
+        (id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
+        (id)kCVPixelBufferIOSurfacePropertiesKey: @{},
+        (id)kCVPixelBufferMetalCompatibilityKey: @(YES),
     };
     self.videoOutput = [[AVPlayerItemVideoOutput alloc]
                         initWithPixelBufferAttributes:pixelBufferAttributes];
@@ -240,6 +250,12 @@
         return NO;
     }
 
+    // iOS defaults this to YES; a play() issued before the item reaches
+    // ReadyToPlay then parks the player in "waiting to play" forever
+    // (local files never trigger the un-stall). Disable it: we only play
+    // local files, so stall protection is not needed.
+    self.player.automaticallyWaitsToMinimizeStalling = NO;
+
     // Observe end of playback
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(playerDidFinishPlaying:)
@@ -251,6 +267,7 @@
     _pixelBuffer = new unsigned char[_pixelBufferSize];
     memset(_pixelBuffer, 0, _pixelBufferSize);
 
+    _playbackRate = 1.0f;
     _isReady = YES;
     _isFinished = NO;
 
@@ -296,7 +313,7 @@
         [self.player seekToTime:kCMTimeZero
                 toleranceBefore:kCMTimeZero
                  toleranceAfter:kCMTimeZero];
-        [self.player play];
+        [self.player playImmediatelyAtRate:(_playbackRate > 0.0f ? _playbackRate : 1.0f)];
         _isFinished = NO;
     }
 }
@@ -357,7 +374,9 @@
         _isFinished = NO;
     }
 
-    [self.player play];
+    // playImmediatelyAtRate bypasses the ReadyToPlay wait that a plain
+    // [player play] is subject to on iOS.
+    [self.player playImmediatelyAtRate:(_playbackRate > 0.0f ? _playbackRate : 1.0f)];
 }
 
 - (void)stop {
@@ -376,7 +395,7 @@
     if (paused) {
         [self.player pause];
     } else {
-        [self.player play];
+        [self.player playImmediatelyAtRate:(_playbackRate > 0.0f ? _playbackRate : 1.0f)];
     }
 }
 
@@ -416,7 +435,12 @@
         speed = 0.0f;
     }
 
-    self.player.rate = speed;
+    _playbackRate = speed;
+    // Only apply immediately if currently playing; a paused player keeps the
+    // new rate for the next play (setting player.rate would start playback).
+    if (self.player.rate != 0.0f) {
+        [self.player playImmediatelyAtRate:speed];
+    }
 }
 
 - (int)getCurrentFrame {
@@ -827,6 +851,110 @@ bool VideoPlayer::isUsingHwAccelPlatform() const {
 
 std::string VideoPlayer::getHwAccelNamePlatform() const {
     return platformHandle_ ? "videotoolbox" : "none";
+}
+
+// =============================================================================
+// Static frame extraction (thread-safe, no GPU) — same code as macOS
+// =============================================================================
+
+// Deprecation-wrapped helpers (sync AVAsset APIs; fine for one-shot extraction)
+static NSArray<AVAssetTrack*>* tcv_tracks_with_media_type_ios(AVAsset* asset, NSString* mediaType) {
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return [asset tracksWithMediaType:mediaType];
+    #pragma clang diagnostic pop
+}
+
+static CGImageRef tcv_copy_cgimage_at_time_ios(AVAssetImageGenerator* gen,
+                                               CMTime requestTime,
+                                               CMTime* actualTime,
+                                               NSError** error) CF_RETURNS_RETAINED {
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return [gen copyCGImageAtTime:requestTime actualTime:actualTime error:error];
+    #pragma clang diagnostic pop
+}
+
+// Shared implementation for both extract paths (see mac version for details):
+// exact=true -> zero tolerance (frame-accurate); exact=false -> nearest
+// keyframe at or before the requested time (fast, time-approximate).
+static bool tcv_extract_frame_ios(const std::string& path, Pixels& outPixels,
+                                  float timeSec, float* outDuration, bool exact) {
+    @autoreleasepool {
+        NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
+        if (!url) return false;
+
+        AVURLAsset* asset = [AVURLAsset URLAssetWithURL:url options:@{
+            AVURLAssetPreferPreciseDurationAndTimingKey: @(YES)
+        }];
+        if (!asset) return false;
+
+        float duration = (float)CMTimeGetSeconds(asset.duration);
+        if (outDuration) *outDuration = duration;
+
+        if (timeSec > duration) timeSec = duration * 0.1f;
+        if (timeSec < 0) timeSec = 0;
+
+        NSArray* videoTracks = tcv_tracks_with_media_type_ios(asset, AVMediaTypeVideo);
+        if (videoTracks.count == 0) return false;
+
+        AVAssetImageGenerator* generator = [AVAssetImageGenerator assetImageGeneratorWithAsset:asset];
+        generator.appliesPreferredTrackTransform = YES;
+        if (exact) {
+            generator.requestedTimeToleranceBefore = kCMTimeZero;
+            generator.requestedTimeToleranceAfter  = kCMTimeZero;
+        } else {
+            generator.requestedTimeToleranceBefore = kCMTimePositiveInfinity;
+            generator.requestedTimeToleranceAfter  = kCMTimeZero;
+        }
+
+        CMTime requestTime = CMTimeMakeWithSeconds(timeSec, NSEC_PER_SEC);
+        NSError* error = nil;
+        CGImageRef cgImage = tcv_copy_cgimage_at_time_ios(generator, requestTime, NULL, &error);
+        if (!cgImage) {
+            if (error) {
+                NSLog(@"TCVideoPlayer::extractFrame error: %@", error);
+            }
+            return false;
+        }
+
+        int w = (int)CGImageGetWidth(cgImage);
+        int h = (int)CGImageGetHeight(cgImage);
+
+        // Use the image's own color space: no color conversion, so the poster
+        // is pixel-consistent with live playback frames (see mac version).
+        outPixels.allocate(w, h, 4);
+        CGColorSpaceRef srcSpace = CGImageGetColorSpace(cgImage);
+        bool srcUsable = srcSpace && CGColorSpaceGetModel(srcSpace) == kCGColorSpaceModelRGB;
+        CGColorSpaceRef colorSpace =
+            srcUsable ? CGColorSpaceRetain(srcSpace) : CGColorSpaceCreateDeviceRGB();
+        CGContextRef ctx = CGBitmapContextCreate(
+            outPixels.getData(), w, h, 8, w * 4,
+            colorSpace,
+            (CGBitmapInfo)kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+
+        CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), cgImage);
+
+        CGContextRelease(ctx);
+        CGColorSpaceRelease(colorSpace);
+        CGImageRelease(cgImage);
+
+        return true;
+    }
+}
+
+bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
+                                       float timeSec, float* outDuration) {
+    return tcv_extract_frame_ios(path, outPixels, timeSec, outDuration, /*exact=*/true);
+}
+
+bool VideoPlayer::extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
+                                          float timeSec, float* outDuration) {
+    if (tcv_extract_frame_ios(path, outPixels, timeSec, outDuration, /*exact=*/false)) {
+        return true;
+    }
+    // No keyframe reachable - fall back to an exact decode.
+    return tcv_extract_frame_ios(path, outPixels, timeSec, outDuration, /*exact=*/true);
 }
 
 } // namespace trussc

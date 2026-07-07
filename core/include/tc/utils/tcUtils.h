@@ -30,14 +30,21 @@ namespace internal {
 // ---------------------------------------------------------------------------
 
 namespace internal {
-    // Default is "data/" relative to executable directory
-    // On macOS, executable is in xxx.app/Contents/MacOS/, so "../../../data/" points to bin/data/
+    // Compile-time default. On Apple the true root differs by bundle layout
+    // and is chosen at runtime (see resolveDataPathRootOnce): macOS keeps data
+    // in bin/data/ reached via ../../../ from Contents/MacOS/, while iOS uses a
+    // FLAT bundle with data/ right next to the executable. Existence, not a
+    // preprocessor macro, is the source of truth (TARGET_OS_* proved unreliable
+    // in the iOS build, and the runtime probe also runs too early in _setup_cb
+    // to see a valid executable path — so it happens lazily on first use).
     #ifdef __APPLE__
     inline std::string dataPathRoot = "../../../data/";
     #else
     inline std::string dataPathRoot = "data/";
     #endif
     inline bool dataPathRootIsAbsolute = false;
+    inline bool dataPathRootUserSet = false;  // user called setDataPathRoot()
+    inline bool dataPathRootProbed = false;   // lazy Apple probe done
 }
 
 // Set the data path root
@@ -51,10 +58,37 @@ inline void setDataPathRoot(const std::string& path) {
     }
     // Record whether path is absolute
     internal::dataPathRootIsAbsolute = (!path.empty() && path[0] == '/');
+    internal::dataPathRootUserSet = true;  // explicit choice wins over the probe
 }
+
+namespace internal {
+// One-shot: pick the Apple bundle layout by probing which data/ exists next to
+// the executable. Skipped if the user set the root explicitly. No-op elsewhere.
+inline void resolveDataPathRootOnce() {
+#ifdef __APPLE__
+    if (dataPathRootProbed || dataPathRootUserSet) return;
+    std::string exe = getExecutableDir();
+    // Don't latch until the executable path is actually available — early on
+    // iOS it can be empty/"/", which would resolve the checks against the CWD.
+    if (exe.empty() || exe == "/") return;
+    dataPathRootProbed = true;
+    std::error_code ec;
+    // Check the flat-bundle layout FIRST (unambiguous on iOS: data/ sits right
+    // next to the executable). macOS dev has no Contents/MacOS/data, so it
+    // correctly falls through to the ../../../data (bin/data) layout.
+    if (std::filesystem::exists(exe + "data", ec)) {
+        dataPathRoot = "data/";           // iOS flat bundle / distributed
+    } else if (std::filesystem::exists(exe + "../../../data", ec)) {
+        dataPathRoot = "../../../data/";  // macOS dev / bin layout
+    }
+    // else: keep the compile-time default
+#endif
+}
+} // namespace internal
 
 // Get the data path root
 inline std::string getDataPathRoot() {
+    internal::resolveDataPathRootOnce();
     return internal::dataPathRoot;
 }
 
@@ -62,6 +96,8 @@ inline std::string getDataPathRoot() {
 // - If filename is absolute, return as-is
 // - Otherwise, resolved relative to executable directory + dataPathRoot
 inline std::string getDataPath(const std::string& filename) {
+    internal::resolveDataPathRootOnce();
+
     // If filename is absolute, return as-is (like oF)
     // Uses std::filesystem for cross-platform support (Unix: /path, Windows: C:\path)
     if (!filename.empty() && std::filesystem::path(filename).is_absolute()) {

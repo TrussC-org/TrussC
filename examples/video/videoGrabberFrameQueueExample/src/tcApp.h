@@ -14,7 +14,7 @@ public:
 
 private:
     VideoGrabber grabber_;
-    vector<GrabberFrame> frames_;  // reused scratch for getBufferFrames()
+    vector<GrabberFrame> frames_;  // reused scratch for getQueuedFrames()
 
     // last kStrip frames; slots are overwritten in turn (head_ wraps around)
     static constexpr int kStrip = 8;

@@ -31,6 +31,12 @@ public:
     Fbo(const Fbo&) = delete;
     Fbo& operator=(const Fbo&) = delete;
 
+    // Lifetime token for observers that hold a raw pointer to this Fbo
+    // (e.g. ScreenRecorder auto-stops when the recorded Fbo is destroyed).
+    // Per-object: it deliberately does NOT transfer on move, so an observer
+    // watching a moved-from Fbo expires when that shell is destroyed.
+    std::shared_ptr<void> lifetimeToken() const { return aliveToken_; }
+
     // Move-enabled
     Fbo(Fbo&& other) noexcept {
         moveFrom(std::move(other));
@@ -676,8 +682,10 @@ private:
     }
 
 private:
+    std::shared_ptr<void> aliveToken_ = std::make_shared<char>();
 
     void moveFrom(Fbo&& other) {
+        // aliveToken_ intentionally not moved (see lifetimeToken())
         width_ = other.width_;
         height_ = other.height_;
         sampleCount_ = other.sampleCount_;
