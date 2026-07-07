@@ -61,32 +61,34 @@ inline void setDataPathRoot(const std::string& path) {
     internal::dataPathRootUserSet = true;  // explicit choice wins over the probe
 }
 
+namespace internal {
 // One-shot: pick the Apple bundle layout by probing which data/ exists next to
 // the executable. Skipped if the user set the root explicitly. No-op elsewhere.
 inline void resolveDataPathRootOnce() {
 #ifdef __APPLE__
-    if (internal::dataPathRootProbed || internal::dataPathRootUserSet) return;
+    if (dataPathRootProbed || dataPathRootUserSet) return;
     std::string exe = getExecutableDir();
     // Don't latch until the executable path is actually available — early on
     // iOS it can be empty/"/", which would resolve the checks against the CWD.
     if (exe.empty() || exe == "/") return;
-    internal::dataPathRootProbed = true;
+    dataPathRootProbed = true;
     std::error_code ec;
     // Check the flat-bundle layout FIRST (unambiguous on iOS: data/ sits right
     // next to the executable). macOS dev has no Contents/MacOS/data, so it
     // correctly falls through to the ../../../data (bin/data) layout.
     if (std::filesystem::exists(exe + "data", ec)) {
-        internal::dataPathRoot = "data/";           // iOS flat bundle / distributed
+        dataPathRoot = "data/";           // iOS flat bundle / distributed
     } else if (std::filesystem::exists(exe + "../../../data", ec)) {
-        internal::dataPathRoot = "../../../data/";  // macOS dev / bin layout
+        dataPathRoot = "../../../data/";  // macOS dev / bin layout
     }
     // else: keep the compile-time default
 #endif
 }
+} // namespace internal
 
 // Get the data path root
 inline std::string getDataPathRoot() {
-    resolveDataPathRootOnce();
+    internal::resolveDataPathRootOnce();
     return internal::dataPathRoot;
 }
 
@@ -94,7 +96,7 @@ inline std::string getDataPathRoot() {
 // - If filename is absolute, return as-is
 // - Otherwise, resolved relative to executable directory + dataPathRoot
 inline std::string getDataPath(const std::string& filename) {
-    resolveDataPathRootOnce();
+    internal::resolveDataPathRootOnce();
 
     // If filename is absolute, return as-is (like oF)
     // Uses std::filesystem for cross-platform support (Unix: /path, Windows: C:\path)
