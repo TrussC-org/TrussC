@@ -128,6 +128,25 @@ can feed events manually, so imgui does not chain us to sokol_app.
   CoreEvents). TrussC.h main loop consumes window ticks. Per-window dt.
   Gate: all examples + multiWindowExample + hot-reload run; occlusion gate
   holds; mixed-Hz holds.
+  - **P0a DONE (commit 6d73d9a2):** secondary windows live in the header
+    behind the C API; tcWindowMac.mm is the thin adapter.
+  - **P0b DONE:** the header implements sokol_app.h's public API on macOS
+    (`sapp_run` owns `[NSApp run]`; the main window is window #0 on the
+    same view/delegate/tick machinery). sokol_app.h is included
+    declarations-only on macOS — its mac implementation is no longer
+    compiled. Key decisions: TrussC.h / tcHotReloadHost.h stayed UNTOUCHED
+    (the ~52 sapp_* call sites now resolve to the header's shims); the main
+    window keeps upstream's occlusion model (display link + ~60Hz fallback
+    NSTimer, frame_cb never stops) while secondary windows keep the
+    tick-gate model; drawable acquisition is lazy in sapp_get_swapchain()
+    with per-tick caching (repeated calls per frame are now safe, unlike
+    upstream); quit = upstream's cancellable performClose dance, plus
+    `[NSApp terminate:]` on main-window close so the app exits even with
+    secondary windows open; RGB10A2 + framebufferOnly=false + Cmd-keyup
+    monitor + Cmd+V paste event + cursor table + drag&drop ported per
+    docs/dev/sapp-mac-impl-spec.md (the implementation contract).
+    Deliberate deviation: sapp_dpi_scale() before sapp_run() returns the
+    main screen scale (upstream: 0).
 - **P1 — Windows driver.** Cannibalize feat/multi-window-win (DXGI flip
   swapchain, WndProc, DPI v2 — audited good) + sokol_app's win32 keyboard
   tables; DXGI waitable ticks replace WM_TIMER (kills the 64 Hz cap); main
