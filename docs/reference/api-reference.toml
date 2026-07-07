@@ -10845,6 +10845,11 @@ description.en = "true: coords match framebuffer size; false: coords use logical
 description.ja = "true: 座標が framebuffer サイズに一致、false: 論理サイズを使用 (デフォルト false)"
 description.ko = "true: 좌표가 framebuffer 크기와 일치, false: 논리 크기 사용 (기본값 false)"
 
+["WindowSettings::reserveUniformBuffer"]
+description.en = "Reserve the per-frame GPU uniform buffer in bytes, vector::reserve style; 0 = backend default 4MB ≈ 8k draw calls. Metal/WebGPU/Vulkan only — GL/D3D11 have no such cap (chainable)"
+description.ja = "フレームあたりの GPU ユニフォームバッファを vector::reserve の要領でバイト単位で予約; 0 = バックエンド既定の 4MB ≈ 8千ドローコール。Metal/WebGPU/Vulkan のみ — GL/D3D11 に上限はない (チェイン可能)"
+description.ko = "프레임당 GPU 유니폼 버퍼를 vector::reserve 방식으로 바이트 단위 예약; 0 = 백엔드 기본 4MB ≈ 8천 드로우 콜. Metal/WebGPU/Vulkan 전용 — GL/D3D11에는 상한이 없음 (체인 가능)"
+
 ["WindowSettings::sampleCount"]
 description.en = "MSAA sample count (default 4)"
 description.ja = "MSAA サンプル数 (デフォルト 4)"
@@ -10910,6 +10915,11 @@ description.ja = '''
 description.ko = '''
 윈도우 제목 (기본값 \"TrussC App\")
 '''
+
+["WindowSettings::uniformBufferReserve"]
+description.en = "Per-frame GPU uniform buffer reservation in bytes; 0 = backend default (4MB). Overflow silently corrupts frames in release builds on Metal/WebGPU/Vulkan"
+description.ja = "フレームあたりの GPU ユニフォームバッファの予約量 (バイト); 0 = バックエンド既定 (4MB)。Metal/WebGPU/Vulkan でオーバーフローすると Release ビルドでフレームが静かに壊れる"
+description.ko = "프레임당 GPU 유니폼 버퍼 예약량 (바이트); 0 = 백엔드 기본값 (4MB). Metal/WebGPU/Vulkan에서 오버플로하면 릴리스 빌드에서 프레임이 조용히 손상됨"
 
 ["WindowSettings::width"]
 description.en = "Window width (default 1280)"
