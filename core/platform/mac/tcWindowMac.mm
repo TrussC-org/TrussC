@@ -250,6 +250,23 @@ void ensureAuxTextures(NativeWindow* nw, int w, int h) {
     if (nw->frameDrawable == nil) return;
     ensureAuxTextures(nw, fbw, fbh);
 
+    // Per-window delta time: wall-clock between THIS window's processed ticks,
+    // so getDeltaTime() inside this window's update/draw is correct even when
+    // its display runs at a different refresh rate than the main window's.
+    // Same semantics as the main loop: a long gap (occlusion) yields one large
+    // delta, exactly like an event-driven main window.
+    {
+        auto callNow = std::chrono::high_resolution_clock::now();
+        if (!ctx.lastUpdateCallTimeInitialized) {
+            ctx.lastUpdateCallTimeInitialized = true;
+            // First tick: estimate from the display link's frame interval.
+            ctx.updateDeltaTime = link.targetTimestamp - link.timestamp;
+        } else {
+            ctx.updateDeltaTime = std::chrono::duration<double>(callNow - ctx.lastUpdateCallTime).count();
+        }
+        ctx.lastUpdateCallTime = callNow;
+    }
+
     // --- render this window's tree with its context active ---
     auto* prev = internal::currentWindowCtx;
     internal::currentWindowCtx = &ctx;

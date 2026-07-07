@@ -367,24 +367,27 @@ uint64_t getFrameCount() {
 }
 
 double getDeltaTime() {
-    return internal::updateDeltaTime;
+    // Per-window: inside a secondary window's update/draw this is that
+    // window's own tick delta, not the main window's.
+    return internal::currentWindowContext().updateDeltaTime;
 }
 
 double getFrameRate() {
-    double dt = internal::updateDeltaTime;
+    auto& ctx = internal::currentWindowContext();
+    double dt = ctx.updateDeltaTime;
     if (dt <= 0.0) return 0.0;
-    internal::frameTimeBuffer[internal::frameTimeIndex] = dt;
-    internal::frameTimeIndex = (internal::frameTimeIndex + 1) % 10;
-    if (internal::frameTimeIndex == 0) {
-        internal::frameTimeBufferFilled = true;
+    ctx.frameTimeBuffer[ctx.frameTimeIndex] = dt;
+    ctx.frameTimeIndex = (ctx.frameTimeIndex + 1) % 10;
+    if (ctx.frameTimeIndex == 0) {
+        ctx.frameTimeBufferFilled = true;
     }
 
-    int count = internal::frameTimeBufferFilled ? 10 : internal::frameTimeIndex;
+    int count = ctx.frameTimeBufferFilled ? 10 : ctx.frameTimeIndex;
     if (count == 0) return 0.0;
 
     double sum = 0.0;
     for (int i = 0; i < count; i++) {
-        sum += internal::frameTimeBuffer[i];
+        sum += ctx.frameTimeBuffer[i];
     }
     double avgDt = sum / count;
     return avgDt > 0.0 ? 1.0 / avgDt : 0.0;

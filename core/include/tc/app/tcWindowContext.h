@@ -95,6 +95,18 @@ struct WindowContext {
     sg_swapchain (*acquireSwapchain)(void* user) = nullptr;
     void* acquireSwapchainUser = nullptr;
 
+    // --- frame timing (per window) ---
+    // getDeltaTime()/getFrameRate() resolve through the current context, so a
+    // window ticking at 60 Hz next to a 120 Hz main window sees its own real
+    // per-tick delta (measured wall-clock between THIS window's update calls).
+    double updateDeltaTime = 0.0;
+    std::chrono::high_resolution_clock::time_point lastUpdateCallTime;
+    bool lastUpdateCallTimeInitialized = false;
+    // Frame rate measurement (10-frame moving average)
+    double frameTimeBuffer[10] = {};
+    int frameTimeIndex = 0;
+    bool frameTimeBufferFilled = false;
+
     // --- misc per-window ---
     int clipboardSize = 65536;   // Clipboard buffer size (for overflow check)
 

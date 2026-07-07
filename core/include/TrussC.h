@@ -261,15 +261,7 @@ namespace internal {
     inline EventListener touchMovedListener;
     inline EventListener touchReleasedListener;
 
-    // Delta time (actual elapsed time since last update call)
-    inline double updateDeltaTime = 0.0;
-    inline std::chrono::high_resolution_clock::time_point lastUpdateCallTime;
-    inline bool lastUpdateCallTimeInitialized = false;
-
-    // Frame rate measurement (10-frame moving average)
-    inline double frameTimeBuffer[10] = {};
-    inline int frameTimeIndex = 0;
-    inline bool frameTimeBufferFilled = false;
+    // Delta time / frame-rate state lives in WindowContext (per window).
 
     // Frame count (number of update calls)
     inline uint64_t updateFrameCount = 0;
@@ -2113,16 +2105,19 @@ namespace internal {
         mcp::processHttpQueue();
         #endif
 
-        // Compute update delta time (actual elapsed since last update call)
+        // Compute update delta time (actual elapsed since last update call).
+        // Written into the main window's context; secondary windows measure
+        // their own delta in their tick (tcWindowMac.mm).
         auto computeUpdateDelta = [&]() {
-            if (!lastUpdateCallTimeInitialized) {
-                lastUpdateCallTimeInitialized = true;
-                lastUpdateCallTime = now;
-                updateDeltaTime = sapp_frame_duration(); // first frame: use sokol's estimate
+            auto& wctx = internal::currentWindowContext();
+            if (!wctx.lastUpdateCallTimeInitialized) {
+                wctx.lastUpdateCallTimeInitialized = true;
+                wctx.lastUpdateCallTime = now;
+                wctx.updateDeltaTime = sapp_frame_duration(); // first frame: use sokol's estimate
             } else {
                 auto callNow = std::chrono::high_resolution_clock::now();
-                updateDeltaTime = std::chrono::duration<double>(callNow - lastUpdateCallTime).count();
-                lastUpdateCallTime = callNow;
+                wctx.updateDeltaTime = std::chrono::duration<double>(callNow - wctx.lastUpdateCallTime).count();
+                wctx.lastUpdateCallTime = callNow;
             }
         };
 
