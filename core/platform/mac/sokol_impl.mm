@@ -14,6 +14,8 @@
 
 #include "sokol_log.h"
 #include "sokol_app.h"
+#define SOKOL_APP_TC_IMPL
+#include "sokol_app_tc.h"
 #include "sokol_gfx.h"
 #include "sokol_glue.h"
 #include "util/sokol_gl_tc.h"

@@ -1,273 +1,84 @@
 // =============================================================================
-// tcWindowMac.mm - Secondary window native glue (macOS)
+// tcWindowMac.mm - TrussC adapter for secondary windows (macOS)
 // =============================================================================
-// One NSWindow + CAMetalLayer + CADisplayLink per secondary window. The display
-// link fires on the main run loop at the window's own display rate, so a
-// window on a 60 Hz display ticks at 60 while the main window runs at 120.
-// A fully occluded window skips drawable acquisition entirely (the PoC showed
-// acquiring while occluded blocks ~1s and stalls the main thread).
+// The native windowing layer (NSWindow + CAMetalLayer + per-window
+// CADisplayLink, occlusion-gated ticks, sapp_event conversion with the full
+// sokol_app keycode table) lives in sokol/sokol_app_tc.h and knows nothing
+// about TrussC. This file maps its C API onto TrussC:
+//   tick_cb   -> WindowContext switch + per-window dt + update/draw the tree
+//   event_cb  -> CoreEvents + App hooks + Node-tree dispatch (same keycode
+//                semantics as the main window: key == SAPP_KEYCODE_*)
+//   close_cb  -> Window::close()
 // All rendering shares the one sokol_gfx context; each window gets its own
 // sokol_gl context (same pattern as Fbo).
 
 #include "TrussC.h"
 
 #if defined(__APPLE__)
-#import <Cocoa/Cocoa.h>
-#import <Metal/Metal.h>
-#import <QuartzCore/CAMetalLayer.h>
-#import <QuartzCore/CADisplayLink.h>
+#include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.mm)
 
 using namespace trussc;
 
-// ---------------------------------------------------------------------------
-// Native per-window state
-// ---------------------------------------------------------------------------
-@class TCWindowView;
-@class TCWindowDelegate;
-
 namespace {
 
-struct NativeWindow {
-    Window* owner = nullptr;              // back-pointer (owner outlives native)
-    NSWindow* window = nil;
-    TCWindowView* view = nil;
-    TCWindowDelegate* delegate = nil;
-    CAMetalLayer* layer = nil;
-    CADisplayLink* link = nil;
-    id<MTLTexture> depthTex = nil;        // depth-stencil, drawable-sized
-    id<MTLTexture> msaaTex = nil;         // MSAA color (when sampleCount > 1)
-    int sampleCount = 1;
-    int texW = 0, texH = 0;               // size the aux textures were made for
-    id<CAMetalDrawable> frameDrawable = nil;  // valid during one tick only
-    bool loggedOccluded = false;
-    bool loggedGeometry = false;
+struct AdapterState {
+    sapp_window win{0};
 };
 
-// The swapchain provider handed to WindowContext::acquireSwapchain. Returns
-// the drawable acquired at the top of the current tick (never blocks here).
+// Swapchain provider handed to WindowContext::acquireSwapchain. The drawable
+// was acquired by the native layer at the top of the current tick (it is only
+// ever acquired for a visible window; never blocks here).
 sg_swapchain acquireSecondarySwapchain(void* user) {
-    auto* nw = static_cast<NativeWindow*>(user);
+    auto* st = static_cast<AdapterState*>(user);
     sg_swapchain sc = {};
-    if (!nw || nw->frameDrawable == nil) return sc;
-    sc.width = nw->texW;
-    sc.height = nw->texH;
-    sc.sample_count = nw->sampleCount;
+    if (!st) return sc;
+    const void* drawable = sapp_window_metal_current_drawable(st->win);
+    if (!drawable) return sc;
+    sc.width = sapp_window_framebuffer_width(st->win);
+    sc.height = sapp_window_framebuffer_height(st->win);
+    sc.sample_count = sapp_window_sample_count(st->win);
     sc.color_format = SG_PIXELFORMAT_BGRA8;
     sc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-    sc.metal.current_drawable = (__bridge const void*)nw->frameDrawable;
-    sc.metal.depth_stencil_texture = (__bridge const void*)nw->depthTex;
-    if (nw->sampleCount > 1) {
-        sc.metal.msaa_color_texture = (__bridge const void*)nw->msaaTex;
+    sc.metal.current_drawable = drawable;
+    sc.metal.depth_stencil_texture = sapp_window_metal_depth_stencil_texture(st->win);
+    if (sc.sample_count > 1) {
+        sc.metal.msaa_color_texture = sapp_window_metal_msaa_color_texture(st->win);
     }
     return sc;
 }
 
-void ensureAuxTextures(NativeWindow* nw, int w, int h) {
-    if (nw->texW == w && nw->texH == h && nw->depthTex != nil &&
-        (nw->sampleCount <= 1 || nw->msaaTex != nil)) return;
-    id<MTLDevice> dev = nw->layer.device;
-    MTLTextureDescriptor* dd = [MTLTextureDescriptor
-        texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float_Stencil8
-        width:w height:h mipmapped:NO];
-    dd.usage = MTLTextureUsageRenderTarget;
-    dd.storageMode = MTLStorageModePrivate;
-    dd.sampleCount = nw->sampleCount;
-    dd.textureType = nw->sampleCount > 1 ? MTLTextureType2DMultisample : MTLTextureType2D;
-    nw->depthTex = [dev newTextureWithDescriptor:dd];
-    if (nw->sampleCount > 1) {
-        MTLTextureDescriptor* md = [MTLTextureDescriptor
-            texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
-            width:w height:h mipmapped:NO];
-        md.usage = MTLTextureUsageRenderTarget;
-        md.storageMode = MTLStorageModePrivate;
-        md.sampleCount = nw->sampleCount;
-        md.textureType = MTLTextureType2DMultisample;
-        nw->msaaTex = [dev newTextureWithDescriptor:md];
-    }
-    nw->texW = w; nw->texH = h;
-}
+// --- tick: drive this window's update/draw with its context active ---------
+void windowTick(sapp_window swin, void* user) {
+    Window* win = static_cast<Window*>(user);
+    if (!win) return;
+    auto& ctx = win->context();
 
-} // namespace
-
-// ---------------------------------------------------------------------------
-// Content view: input forwarding into the window's WindowContext / CoreEvents
-// ---------------------------------------------------------------------------
-@interface TCWindowView : NSView
-@property (assign) NativeWindow* nw;
-@end
-
-@implementation TCWindowView
-
-- (BOOL)acceptsFirstResponder { return YES; }
-- (BOOL)isFlipped { return YES; }   // top-left origin, matches TrussC coords
-
-- (void)updateTrackingAreas {
-    for (NSTrackingArea* a in self.trackingAreas) [self removeTrackingArea:a];
-    // ActiveAlways: hover must work while the window is NOT key (the main
-    // window keeps focus; a control-panel window still tracks the pointer).
-    NSTrackingArea* area = [[NSTrackingArea alloc] initWithRect:self.bounds
-        options:(NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
-                 NSTrackingActiveAlways | NSTrackingEnabledDuringMouseDrag |
-                 NSTrackingInVisibleRect)
-        owner:self userInfo:nil];
-    [self addTrackingArea:area];
-    [super updateTrackingAreas];
-}
-
-- (Vec2)localPos:(NSEvent*)ev {
-    NSPoint p = [self convertPoint:ev.locationInWindow fromView:nil];
-    return Vec2((float)p.x, (float)p.y);   // isFlipped => already top-left
-}
-
-- (void)forwardMods:(NSEvent*)ev shift:(bool*)s ctrl:(bool*)c alt:(bool*)a super:(bool*)sp {
-    NSEventModifierFlags f = ev.modifierFlags;
-    *s = (f & NSEventModifierFlagShift) != 0;
-    *c = (f & NSEventModifierFlagControl) != 0;
-    *a = (f & NSEventModifierFlagOption) != 0;
-    *sp = (f & NSEventModifierFlagCommand) != 0;
-}
-
-- (void)mouse:(NSEvent*)ev button:(int)btn pressed:(bool)down {
-    if (!self.nw || !self.nw->owner) return;
-    Window& win = *self.nw->owner;
-    auto& ctx = win.context();
-    Vec2 p = [self localPos:ev];
-    auto* prev = internal::currentWindowCtx;
-    internal::currentWindowCtx = &ctx;
-    ctx.mouseX = p.x; ctx.mouseY = p.y;
-    ctx.mousePressed = down;
-    ctx.mouseButton = down ? btn : -1;
-    MouseEventArgs e;
-    e.x = p.x; e.y = p.y; e.pos = p; e.globalPos = p; e.button = btn;
-    [self forwardMods:ev shift:&e.shift ctrl:&e.ctrl alt:&e.alt super:&e.super];
-    if (down) {
-        win.events().mousePressed.notify(e);
-        if (win.app_) win.app_->mousePressed(e);
-        win.dispatchMousePressToTree(e);
-    } else {
-        win.events().mouseReleased.notify(e);
-        if (win.app_) win.app_->mouseReleased(e);
-        win.dispatchMouseReleaseToTree(e);
-    }
-    internal::currentWindowCtx = prev;
-}
-
-- (void)mouseDown:(NSEvent*)ev  { [self mouse:ev button:0 pressed:true]; }
-- (void)mouseUp:(NSEvent*)ev    { [self mouse:ev button:0 pressed:false]; }
-- (void)rightMouseDown:(NSEvent*)ev { [self mouse:ev button:1 pressed:true]; }
-- (void)rightMouseUp:(NSEvent*)ev   { [self mouse:ev button:1 pressed:false]; }
-
-- (void)moveWith:(NSEvent*)ev {
-    if (!self.nw || !self.nw->owner) return;
-    Window& win = *self.nw->owner;
-    auto& ctx = win.context();
-    Vec2 p = [self localPos:ev];
-    ctx.pmouseX = ctx.mouseX; ctx.pmouseY = ctx.mouseY;
-    ctx.mouseX = p.x; ctx.mouseY = p.y;
-    MouseMoveEventArgs e;
-    e.x = p.x; e.y = p.y;
-    e.deltaX = (float)ev.deltaX; e.deltaY = (float)ev.deltaY;
-    [self forwardMods:ev shift:&e.shift ctrl:&e.ctrl alt:&e.alt super:&e.super];
-    win.events().mouseMoved.notify(e);
-    if (self.nw->owner->app_) self.nw->owner->app_->mouseMoved(e);
-}
-- (void)mouseMoved:(NSEvent*)ev   { [self moveWith:ev]; }
-- (void)mouseDragged:(NSEvent*)ev { [self moveWith:ev]; }
-- (void)mouseEntered:(NSEvent*)ev { [self moveWith:ev]; }
-- (void)mouseExited:(NSEvent*)ev {
-    // Park the cursor offscreen so the next tick's updateHoverState clears
-    // this window's hover (hoveredNode lives in ITS WindowContext).
-    if (!self.nw || !self.nw->owner) return;
-    auto& ctx = self.nw->owner->context();
-    ctx.pmouseX = ctx.mouseX; ctx.pmouseY = ctx.mouseY;
-    ctx.mouseX = -1.0f; ctx.mouseY = -1.0f;
-}
-
-- (void)keyEvt:(NSEvent*)ev pressed:(bool)down {
-    if (!self.nw || !self.nw->owner) return;
-    Window& win = *self.nw->owner;
-    auto& ctx = win.context();
-    // NSEvent keyCode is a hardware code; map letters/digits via characters
-    // for the common case (full keycode table is Phase 2 polish).
-    int key = 0;
-    NSString* chars = ev.charactersIgnoringModifiers;
-    if (chars.length > 0) key = toupper([chars characterAtIndex:0]);
-    if (down) ctx.keysPressed.insert(key); else ctx.keysPressed.erase(key);
-    KeyEventArgs e;
-    e.key = key; e.isRepeat = ev.isARepeat;
-    [self forwardMods:ev shift:&e.shift ctrl:&e.ctrl alt:&e.alt super:&e.super];
-    if (down) {
-        win.events().keyPressed.notify(e);
-        if (win.app_) win.app_->keyPressed(e);
-    } else {
-        win.events().keyReleased.notify(e);
-        if (win.app_) win.app_->keyReleased(e);
-    }
-}
-- (void)keyDown:(NSEvent*)ev { [self keyEvt:ev pressed:true]; }
-- (void)keyUp:(NSEvent*)ev   { [self keyEvt:ev pressed:false]; }
-
-// -- per-frame tick (CADisplayLink target) --
-- (void)tick:(CADisplayLink*)link {
-    NativeWindow* nw = self.nw;
-    if (!nw || !nw->owner) return;
-    Window& win = *nw->owner;
-    auto& ctx = win.context();
-
-    // Occluded => not due. This is what prevents the ~1s nextDrawable stall.
-    if ((nw->window.occlusionState & NSWindowOcclusionStateVisible) == 0) {
-        if (!nw->loggedOccluded) {
-            nw->loggedOccluded = true;
-            logNotice("Window") << "second window occluded - skipping frames (no stall)";
-        }
-        return;
-    }
-    nw->loggedOccluded = false;
-
-    // Keep layer size in sync with the view
-    CGFloat scale = nw->window.backingScaleFactor;
-    NSSize sz = self.bounds.size;
-    int fbw = (int)(sz.width * scale), fbh = (int)(sz.height * scale);
+    const int fbw = sapp_window_framebuffer_width(swin);
+    const int fbh = sapp_window_framebuffer_height(swin);
     if (fbw <= 0 || fbh <= 0) return;
-    if ((int)nw->layer.drawableSize.width != fbw || (int)nw->layer.drawableSize.height != fbh) {
-        nw->layer.contentsScale = scale;
-        nw->layer.drawableSize = CGSizeMake(fbw, fbh);
-    }
-    ctx.fbWidth = fbw; ctx.fbHeight = fbh; ctx.dpiScale = (float)scale;
+    ctx.fbWidth = fbw;
+    ctx.fbHeight = fbh;
+    ctx.dpiScale = sapp_window_dpi_scale(swin);
     // Keep a RectNode root in sync with the window's logical size (same
     // contract as the main App on SAPP_EVENTTYPE_RESIZED).
-    win.syncRootSize((float)sz.width, (float)sz.height);
-    if (!nw->loggedGeometry) {
-        nw->loggedGeometry = true;
-        logNotice("Window") << "geometry: bounds=" << sz.width << "x" << sz.height
-            << " backingScale=" << (float)nw->window.backingScaleFactor
-            << " contentsScale=" << (float)nw->layer.contentsScale
-            << " drawable=" << fbw << "x" << fbh
-            << " screen=" << nw->window.screen.frame.size.width << "x" << nw->window.screen.frame.size.height;
-    }
+    win->syncRootSize((float)sapp_window_width(swin), (float)sapp_window_height(swin));
 
-    nw->frameDrawable = [nw->layer nextDrawable];
-    if (nw->frameDrawable == nil) return;
-    ensureAuxTextures(nw, fbw, fbh);
-
-    // Per-window delta time: wall-clock between THIS window's processed ticks,
-    // so getDeltaTime() inside this window's update/draw is correct even when
-    // its display runs at a different refresh rate than the main window's.
-    // Same semantics as the main loop: a long gap (occlusion) yields one large
-    // delta, exactly like an event-driven main window.
+    // Per-window delta time: wall-clock between THIS window's processed
+    // ticks, so getDeltaTime() inside this window's update/draw is correct
+    // even when its display runs at a different refresh rate than the main
+    // window's. A long gap (occlusion) yields one large delta, exactly like
+    // an event-driven main window.
     {
         auto callNow = std::chrono::high_resolution_clock::now();
         if (!ctx.lastUpdateCallTimeInitialized) {
             ctx.lastUpdateCallTimeInitialized = true;
-            // First tick: estimate from the display link's frame interval.
-            ctx.updateDeltaTime = link.targetTimestamp - link.timestamp;
+            ctx.updateDeltaTime = sapp_window_frame_duration(swin);
         } else {
             ctx.updateDeltaTime = std::chrono::duration<double>(callNow - ctx.lastUpdateCallTime).count();
         }
         ctx.lastUpdateCallTime = callNow;
     }
 
-    // --- render this window's tree with its context active ---
     auto* prev = internal::currentWindowCtx;
     internal::currentWindowCtx = &ctx;
 
@@ -279,7 +90,7 @@ void ensureAuxTextures(NativeWindow* nw, int w, int h) {
         cdesc.max_commands = 16384;
         cdesc.color_format = SG_PIXELFORMAT_BGRA8;
         cdesc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-        cdesc.sample_count = nw->sampleCount;
+        cdesc.sample_count = sapp_window_sample_count(swin);
         ctx.swapchainTarget.context = sgl_make_context(&cdesc);
     }
     sgl_set_context(ctx.swapchainTarget.context);
@@ -287,37 +98,152 @@ void ensureAuxTextures(NativeWindow* nw, int w, int h) {
 
     beginFrame();
 
-    win.events().update.notify();
-    win.tickTree();
+    win->events().update.notify();
+    win->tickTree();
 
-    clear(win.clearColor_.r, win.clearColor_.g, win.clearColor_.b, win.clearColor_.a);
-    win.events().draw.notify();
-    win.drawTreeNow();
+    const Color& cc = win->clearColor_;
+    clear(cc.r, cc.g, cc.b, cc.a);
+    win->events().draw.notify();
+    win->drawTreeNow();
 
     present();
-    win.events().afterFrame.notify();
+    win->events().afterFrame.notify();
 
     sgl_set_context(sgl_default_context());
     internal::currentWindowCtx = prev;
-    nw->frameDrawable = nil;
 }
 
-@end
+// --- events: map sapp_event onto CoreEvents / App hooks / tree dispatch ----
+void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
+    Window* win = static_cast<Window*>(user);
+    if (!win) return;
+    auto& ctx = win->context();
+    auto* prev = internal::currentWindowCtx;
+    internal::currentWindowCtx = &ctx;
 
-// ---------------------------------------------------------------------------
-// Window delegate: user closes the window
-// ---------------------------------------------------------------------------
-@interface TCWindowDelegate : NSObject <NSWindowDelegate>
-@property (assign) NativeWindow* nw;
-@end
+    // Raw event pass-through (same hook addons use on the main window)
+    win->events().rawEvent.notify(*ev);
 
-@implementation TCWindowDelegate
-- (void)windowWillClose:(NSNotification*)n {
-    if (self.nw && self.nw->owner) {
-        self.nw->owner->close();   // tears down link + native state
+    // sapp coords arrive in framebuffer pixels; TrussC windows use logical
+    // points (secondary windows have no pixelPerfect mode for now)
+    const float dpi = sapp_window_dpi_scale(swin);
+    const float scale = (dpi > 0.0f) ? (1.0f / dpi) : 1.0f;
+    const bool hasShift = (ev->modifiers & SAPP_MODIFIER_SHIFT) != 0;
+    const bool hasCtrl  = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
+    const bool hasAlt   = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;
+    const bool hasSuper = (ev->modifiers & SAPP_MODIFIER_SUPER) != 0;
+
+    switch (ev->type) {
+        case SAPP_EVENTTYPE_MOUSE_DOWN: {
+            const float x = ev->mouse_x * scale, y = ev->mouse_y * scale;
+            ctx.mouseX = x; ctx.mouseY = y;
+            ctx.mouseButton = (int)ev->mouse_button;
+            ctx.mousePressed = true;
+            MouseEventArgs e;
+            e.pos = e.globalPos = Vec2(x, y);
+            e.button = (int)ev->mouse_button;
+            e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
+            e.syncLegacy();
+            win->events().mousePressed.notify(e);
+            if (win->getApp()) win->getApp()->mousePressed(e);
+            win->dispatchMousePressToTree(e);
+            break;
+        }
+        case SAPP_EVENTTYPE_MOUSE_UP: {
+            const float x = ev->mouse_x * scale, y = ev->mouse_y * scale;
+            ctx.mouseX = x; ctx.mouseY = y;
+            ctx.mouseButton = -1;
+            ctx.mousePressed = false;
+            MouseEventArgs e;
+            e.pos = e.globalPos = Vec2(x, y);
+            e.button = (int)ev->mouse_button;
+            e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
+            e.syncLegacy();
+            win->events().mouseReleased.notify(e);
+            if (win->getApp()) win->getApp()->mouseReleased(e);
+            win->dispatchMouseReleaseToTree(e);
+            break;
+        }
+        case SAPP_EVENTTYPE_MOUSE_ENTER:
+        case SAPP_EVENTTYPE_MOUSE_MOVE: {
+            const float x = ev->mouse_x * scale, y = ev->mouse_y * scale;
+            ctx.pmouseX = ctx.mouseX; ctx.pmouseY = ctx.mouseY;
+            ctx.mouseX = x; ctx.mouseY = y;
+            internal::MouseEventRaw raw;
+            raw.pos = raw.globalPos = Vec2(x, y);
+            raw.delta = raw.globalDelta = Vec2(ev->mouse_dx * scale, ev->mouse_dy * scale);
+            raw.shift = hasShift; raw.ctrl = hasCtrl; raw.alt = hasAlt; raw.super = hasSuper;
+            if (ctx.mousePressed && ctx.mouseButton >= 0) {
+                raw.button = ctx.mouseButton;
+                MouseDragEventArgs e = internal::toDragArgs(raw);
+                win->events().mouseDragged.notify(e);
+                if (win->getApp()) win->getApp()->mouseDragged(e);
+            } else {
+                MouseMoveEventArgs e = internal::toMoveArgs(raw);
+                win->events().mouseMoved.notify(e);
+                if (win->getApp()) win->getApp()->mouseMoved(e);
+            }
+            break;
+        }
+        case SAPP_EVENTTYPE_MOUSE_LEAVE: {
+            // Park the cursor offscreen so the next tick's updateHoverState
+            // clears this window's hover (hoveredNode lives in ITS context).
+            ctx.pmouseX = ctx.mouseX; ctx.pmouseY = ctx.mouseY;
+            ctx.mouseX = -1.0f; ctx.mouseY = -1.0f;
+            break;
+        }
+        case SAPP_EVENTTYPE_MOUSE_SCROLL: {
+            ScrollEventArgs e;
+            e.pos = e.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
+            e.scroll = Vec2(ev->scroll_x, ev->scroll_y);
+            e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
+            e.syncLegacy();
+            win->events().mouseScrolled.notify(e);
+            if (win->getApp()) win->getApp()->mouseScrolled(e);
+            break;
+        }
+        case SAPP_EVENTTYPE_KEY_DOWN: {
+            KeyEventArgs e;
+            e.key = ev->key_code;   // SAPP_KEYCODE_*, identical to the main window
+            e.isRepeat = ev->key_repeat;
+            e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
+            if (!ev->key_repeat) ctx.keysPressed.insert(e.key);
+            win->events().keyPressed.notify(e);
+            if (win->getApp()) win->getApp()->keyPressed(e);
+            break;
+        }
+        case SAPP_EVENTTYPE_KEY_UP: {
+            KeyEventArgs e;
+            e.key = ev->key_code;
+            e.isRepeat = false;
+            e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
+            ctx.keysPressed.erase(e.key);
+            win->events().keyReleased.notify(e);
+            if (win->getApp()) win->getApp()->keyReleased(e);
+            break;
+        }
+        case SAPP_EVENTTYPE_SUSPENDED:
+            logNotice("Window") << "second window occluded - skipping frames (no stall)";
+            break;
+        case SAPP_EVENTTYPE_RESUMED:
+            logNotice("Window") << "second window visible again - resuming ticks";
+            break;
+        default:
+            // CHAR / RESIZED / FOCUSED / UNFOCUSED: rawEvent carries them;
+            // size sync happens per tick.
+            break;
     }
+
+    internal::currentWindowCtx = prev;
 }
-@end
+
+void windowClosed(sapp_window swin, void* user) {
+    (void)swin;
+    Window* win = static_cast<Window*>(user);
+    if (win) win->close();   // tears down native + app state
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Window methods (macOS implementations)
@@ -327,26 +253,18 @@ namespace trussc {
 Window::~Window() { close(); }
 
 void Window::close() {
-    auto* nw = static_cast<NativeWindow*>(native_);
-    if (!nw) return;
-    native_ = nullptr;             // re-entrancy guard (windowWillClose)
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    native_ = nullptr;             // re-entrancy guard (close_cb)
     ctx_.acquireSwapchain = nullptr;
     ctx_.acquireSwapchainUser = nullptr;
-    if (nw->link) { [nw->link invalidate]; nw->link = nil; }
-    nw->view.nw = nullptr;
-    nw->delegate.nw = nullptr;
-    if (nw->window) {
-        nw->window.delegate = nil;
-        [nw->window orderOut:nil];
-        nw->window = nil;
-    }
+    sapp_destroy_window(st->win);
     if (ctx_.swapchainTarget.context.id != SG_INVALID_ID) {
         sgl_destroy_context(ctx_.swapchainTarget.context);
         ctx_.swapchainTarget.context.id = SG_INVALID_ID;
         ctx_.swapchainTarget.cache.clear();
     }
-    nw->owner = nullptr;
-    delete nw;
+    delete st;
     if (app_) {
         app_->exit();
         app_->cleanup();
@@ -357,20 +275,18 @@ void Window::close() {
 }
 
 void Window::setTitle(const std::string& title) {
-    auto* nw = static_cast<NativeWindow*>(native_);
-    if (nw && nw->window) nw->window.title = [NSString stringWithUTF8String:title.c_str()];
+    auto* st = static_cast<AdapterState*>(native_);
+    if (st) sapp_window_set_title(st->win, title.c_str());
 }
 
 int Window::getWidth() const {
-    auto* nw = static_cast<NativeWindow*>(native_);
-    if (!nw || !nw->view) return 0;
-    return (int)nw->view.bounds.size.width;
+    auto* st = static_cast<AdapterState*>(native_);
+    return st ? sapp_window_width(st->win) : 0;
 }
 
 int Window::getHeight() const {
-    auto* nw = static_cast<NativeWindow*>(native_);
-    if (!nw || !nw->view) return 0;
-    return (int)nw->view.bounds.size.height;
+    auto* st = static_cast<AdapterState*>(native_);
+    return st ? sapp_window_height(st->win) : 0;
 }
 
 std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
@@ -379,48 +295,33 @@ std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
         return nullptr;
     }
     auto win = std::shared_ptr<Window>(new Window());
-    auto* nw = new NativeWindow();
-    nw->owner = win.get();
-    nw->sampleCount = settings.sampleCount;
+    auto* st = new AdapterState();
 
-    NSRect rect = NSMakeRect(120, 120, settings.width, settings.height);
-    NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                              NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
-    if (!settings.decorated) style = NSWindowStyleMaskBorderless;
-    nw->window = [[NSWindow alloc] initWithContentRect:rect styleMask:style
-                                   backing:NSBackingStoreBuffered defer:NO];
-    nw->window.title = [NSString stringWithUTF8String:settings.title.c_str()];
-    nw->window.releasedWhenClosed = NO;
-    nw->window.acceptsMouseMovedEvents = YES;   // hover without key status
-
-    TCWindowView* view = [[TCWindowView alloc] initWithFrame:rect];
-    view.nw = nw;
-    nw->view = view;
-    nw->layer = [CAMetalLayer layer];
+    sapp_window_desc d = {};
+    d.x = -1;
+    d.y = -1;
+    d.width = settings.width;
+    d.height = settings.height;
+    d.title = settings.title.c_str();
+    d.borderless = !settings.decorated;
+    d.no_high_dpi = !settings.highDpi;
+    d.sample_count = settings.sampleCount;
     // Share the device sokol_gfx renders with (sokol_app created it)
-    nw->layer.device = (__bridge id<MTLDevice>)sglue_environment().metal.device;
-    nw->layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-    nw->layer.opaque = YES;
-    view.wantsLayer = YES;
-    view.layer = nw->layer;
-    nw->window.contentView = view;
+    d.mtl_device = sglue_environment().metal.device;
+    d.tick_cb = &windowTick;
+    d.event_cb = &windowEvent;
+    d.close_cb = &windowClosed;
+    d.user_data = win.get();
+    st->win = sapp_create_window(&d);
+    if (st->win.id == 0) {
+        delete st;
+        logError("Window") << "createWindow(): native window creation failed";
+        return nullptr;
+    }
 
-    TCWindowDelegate* del = [TCWindowDelegate new];
-    del.nw = nw;
-    nw->delegate = del;
-    nw->window.delegate = del;
-
-    win->native_ = nw;
+    win->native_ = st;
     win->ctx_.acquireSwapchain = &acquireSecondarySwapchain;
-    win->ctx_.acquireSwapchainUser = nw;
-
-    [nw->window makeKeyAndOrderFront:nil];
-
-    // Per-window display link: fires on the main run loop at THIS window's
-    // display rate (macOS 14+).
-    nw->link = [view displayLinkWithTarget:view selector:@selector(tick:)];
-    [nw->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-
+    win->ctx_.acquireSwapchainUser = st;
     return win;
 }
 
