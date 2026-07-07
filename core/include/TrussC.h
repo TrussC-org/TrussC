@@ -241,6 +241,12 @@ namespace internal {
     inline int sglMaxCommands = 16384;
     inline int sglPendingResize = 0;  // non-zero = need resize next frame
 
+    // Per-frame uniform buffer reservation passed to sg_setup (Metal/WebGPU/Vulkan
+    // ring buffer; GL/D3D11 ignore it). 0 = sokol default (4MB ≈ 8k draw calls per
+    // frame, each apply 256-byte aligned). Set via WindowSettings::
+    // reserveUniformBuffer for scenes with very high draw-call counts.
+    inline int gpuUniformBufferReserve = 0;
+
     // ---------------------------------------------------------------------------
     // Scissor Clipping stack
     // ---------------------------------------------------------------------------
@@ -1938,6 +1944,10 @@ struct WindowSettings {
     bool decorated = true;  // false: borderless/chromeless window (no title bar)
     int clipboardSize = 65536;  // Clipboard buffer size (default 64KB)
     int swapInterval = 1;  // VSync: 1 = on (default), 0 = off
+    int uniformBufferReserve = 0;  // per-frame GPU uniform reservation in bytes;
+                                   // 0 = backend default (4MB ≈ 8k draws). Only
+                                   // Metal/WebGPU/Vulkan use it (ring buffer);
+                                   // GL/D3D11 have no such cap.
     // bool headless = false;  // For future use
 
     WindowSettings& setSize(int w, int h) {
@@ -1993,6 +2003,19 @@ struct WindowSettings {
     // expressible this way; for arbitrary rates use setFps().
     WindowSettings& setSwapInterval(int interval) {
         swapInterval = interval;
+        return *this;
+    }
+
+    // Reserve the per-frame GPU uniform buffer, in bytes (0 = backend default,
+    // 4MB). Like std::vector::reserve: this is the capacity set aside up front
+    // (if the buffer ever becomes auto-growing, a sufficient reservation still
+    // skips the mid-frame grow hitch). Every draw call takes a 256-byte-aligned
+    // slice of this ring buffer, so ~4MB caps out around 8k draw calls per
+    // frame; overflowing it in a release build silently corrupts uniforms
+    // (flipped/black frames). Only the Metal/WebGPU/Vulkan backends allocate it
+    // (x2 in-flight frames); GL/D3D11 ignore it — they have no such cap.
+    WindowSettings& reserveUniformBuffer(int bytes) {
+        uniformBufferReserve = bytes;
         return *this;
     }
 };
@@ -2551,6 +2574,9 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
 
     // Remember the requested decoration; applied after the window is created.
     internal::windowDecorated = settings.decorated;
+
+    // Per-frame uniform reservation for sg_setup (consumed in internal::setup()).
+    internal::gpuUniformBufferReserve = settings.uniformBufferReserve;
 
     // Create app instance (shared_ptrで管理してNodeのweak_from_thisを有効にする)
     static std::shared_ptr<AppClass> app = nullptr;
