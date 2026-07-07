@@ -30,6 +30,11 @@
 @property (nonatomic, assign) BOOL hasNewFrame;
 @property (nonatomic, assign) BOOL loop;
 
+// Desired playback rate. On iOS play must go through
+// playImmediatelyAtRate: (see -play), so the rate is kept here instead of
+// being poked into player.rate directly.
+@property (nonatomic, assign) float playbackRate;
+
 // Pixel buffer for C++ side
 @property (nonatomic, assign) unsigned char* pixelBuffer;
 @property (nonatomic, assign) size_t pixelBufferSize;
@@ -213,9 +218,13 @@
         return NO;
     }
 
-    // Create video output (BGRA format for macOS)
+    // Create video output (BGRA). On iOS the buffers must be IOSurface-backed
+    // and Metal-compatible, otherwise copyPixelBufferForItemTime can hand back
+    // unusable/uninitialized buffers.
     NSDictionary* pixelBufferAttributes = @{
-        (id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)
+        (id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
+        (id)kCVPixelBufferIOSurfacePropertiesKey: @{},
+        (id)kCVPixelBufferMetalCompatibilityKey: @(YES),
     };
     self.videoOutput = [[AVPlayerItemVideoOutput alloc]
                         initWithPixelBufferAttributes:pixelBufferAttributes];
@@ -241,6 +250,12 @@
         return NO;
     }
 
+    // iOS defaults this to YES; a play() issued before the item reaches
+    // ReadyToPlay then parks the player in "waiting to play" forever
+    // (local files never trigger the un-stall). Disable it: we only play
+    // local files, so stall protection is not needed.
+    self.player.automaticallyWaitsToMinimizeStalling = NO;
+
     // Observe end of playback
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(playerDidFinishPlaying:)
@@ -252,6 +267,7 @@
     _pixelBuffer = new unsigned char[_pixelBufferSize];
     memset(_pixelBuffer, 0, _pixelBufferSize);
 
+    _playbackRate = 1.0f;
     _isReady = YES;
     _isFinished = NO;
 
@@ -297,7 +313,7 @@
         [self.player seekToTime:kCMTimeZero
                 toleranceBefore:kCMTimeZero
                  toleranceAfter:kCMTimeZero];
-        [self.player play];
+        [self.player playImmediatelyAtRate:(_playbackRate > 0.0f ? _playbackRate : 1.0f)];
         _isFinished = NO;
     }
 }
@@ -358,7 +374,9 @@
         _isFinished = NO;
     }
 
-    [self.player play];
+    // playImmediatelyAtRate bypasses the ReadyToPlay wait that a plain
+    // [player play] is subject to on iOS.
+    [self.player playImmediatelyAtRate:(_playbackRate > 0.0f ? _playbackRate : 1.0f)];
 }
 
 - (void)stop {
@@ -377,7 +395,7 @@
     if (paused) {
         [self.player pause];
     } else {
-        [self.player play];
+        [self.player playImmediatelyAtRate:(_playbackRate > 0.0f ? _playbackRate : 1.0f)];
     }
 }
 
@@ -417,7 +435,12 @@
         speed = 0.0f;
     }
 
-    self.player.rate = speed;
+    _playbackRate = speed;
+    // Only apply immediately if currently playing; a paused player keeps the
+    // new rate for the next play (setting player.rate would start playback).
+    if (self.player.rate != 0.0f) {
+        [self.player playImmediatelyAtRate:speed];
+    }
 }
 
 - (int)getCurrentFrame {
