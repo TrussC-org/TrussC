@@ -163,6 +163,12 @@ public:
         return request("DELETE", path, "");
     }
 
+    // Generic request with an explicit HTTP/WebDAV method (GET, POST, PUT, DELETE,
+    // MKCOL, PROPFIND, COPY, MOVE, ...). The typed helpers above wrap this.
+    HttpResponse request(const std::string& method, const std::string& path,
+                         const std::string& body = "",
+                         const std::string& contentType = "application/json");
+
     // Upload file via multipart POST
     HttpResponse uploadFile(const std::string& path, const std::string& filePath);
 
@@ -172,10 +178,6 @@ private:
     long timeoutSeconds_ = 30;
     bool followRedirects_ = false;
     bool verbose_ = false;
-
-    HttpResponse request(const std::string& method, const std::string& path,
-                         const std::string& body,
-                         const std::string& contentType = "application/json");
 
 #ifdef TCX_HTTP_CURL
     // libcurl write callback
@@ -235,6 +237,9 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
     } else if (method == "PUT") {
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+    } else if (method != "GET") {
+        // Generic verb (MKCOL, PROPFIND, COPY, MOVE, ...) for WebDAV etc.
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
     }
 
     // Build headers
