@@ -3220,21 +3220,24 @@ static _sgl_vertex_t* _sgl_next_vertex(_sgl_context_t* ctx) {
     return &ctx->vertices.ptr[ctx->vertices.next++];
 }
 
-/* [TrussC fork] Auto-grow CPU uniform buffer when full */
+/* [TrussC fork] Auto-grow CPU uniform buffer when full.
+   NOTE: must NOT use raw realloc() — the original allocation went through
+   _sgl_malloc (user allocator, e.g. TrussC's memory tracker, which offsets the
+   pointer for its header), so libc realloc receives an interior pointer and
+   aborts. Mirror _sgl_next_vertex: _sgl_malloc + memcpy + _sgl_free. */
 static _sgl_uniform_t* _sgl_next_uniform(_sgl_context_t* ctx) {
     if (ctx->uniforms.next >= ctx->uniforms.cap) {
         int new_cap = (ctx->uniforms.cap > 0) ? ctx->uniforms.cap * 2 : _SGL_DEFAULT_MAX_COMMANDS;
-        _sgl_uniform_t* new_ptr;
-        if (ctx->uniforms.ptr) {
-            new_ptr = (_sgl_uniform_t*) realloc(ctx->uniforms.ptr, (size_t)new_cap * sizeof(_sgl_uniform_t));
-        } else {
-            new_ptr = (_sgl_uniform_t*) _sgl_malloc((size_t)new_cap * sizeof(_sgl_uniform_t));
-        }
+        _sgl_uniform_t* new_ptr = (_sgl_uniform_t*) _sgl_malloc((size_t)new_cap * sizeof(_sgl_uniform_t));
         if (!new_ptr) {
             ctx->error.uniforms_full = true;
             ctx->error.any = true;
             return 0;
         }
+        if (ctx->uniforms.ptr && ctx->uniforms.next > 0) {
+            memcpy(new_ptr, ctx->uniforms.ptr, (size_t)ctx->uniforms.next * sizeof(_sgl_uniform_t));
+        }
+        _sgl_free(ctx->uniforms.ptr);
         ctx->uniforms.ptr = new_ptr;
         ctx->uniforms.cap = new_cap;
     }
@@ -3249,21 +3252,21 @@ static _sgl_command_t* _sgl_cur_command(_sgl_context_t* ctx) {
     }
 }
 
-/* [TrussC fork] Auto-grow CPU command buffer when full */
+/* [TrussC fork] Auto-grow CPU command buffer when full.
+   Same rule as _sgl_next_uniform: no raw realloc on user-allocator memory. */
 static _sgl_command_t* _sgl_next_command(_sgl_context_t* ctx) {
     if (ctx->commands.next >= ctx->commands.cap) {
         int new_cap = (ctx->commands.cap > 0) ? ctx->commands.cap * 2 : _SGL_DEFAULT_MAX_COMMANDS;
-        _sgl_command_t* new_ptr;
-        if (ctx->commands.ptr) {
-            new_ptr = (_sgl_command_t*) realloc(ctx->commands.ptr, (size_t)new_cap * sizeof(_sgl_command_t));
-        } else {
-            new_ptr = (_sgl_command_t*) _sgl_malloc((size_t)new_cap * sizeof(_sgl_command_t));
-        }
+        _sgl_command_t* new_ptr = (_sgl_command_t*) _sgl_malloc((size_t)new_cap * sizeof(_sgl_command_t));
         if (!new_ptr) {
             ctx->error.commands_full = true;
             ctx->error.any = true;
             return 0;
         }
+        if (ctx->commands.ptr && ctx->commands.next > 0) {
+            memcpy(new_ptr, ctx->commands.ptr, (size_t)ctx->commands.next * sizeof(_sgl_command_t));
+        }
+        _sgl_free(ctx->commands.ptr);
         ctx->commands.ptr = new_ptr;
         ctx->commands.cap = new_cap;
     }
