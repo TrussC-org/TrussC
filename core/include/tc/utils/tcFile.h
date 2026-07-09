@@ -130,9 +130,11 @@ inline int64_t getFileSize(const fs::path& path) {
 // =============================================================================
 
 // Load entire text file into string
+// (binary mode: the returned string is the file's exact bytes on every
+// platform; Windows text mode would silently fold \r\n into \n)
 inline std::string loadTextFile(const fs::path& path) {
     fs::path fullPath = getDataPath(path);
-    std::ifstream file(fullPath);
+    std::ifstream file(fullPath, std::ios::binary);
     if (!file.is_open()) {
         logError() << "Cannot open file: " << path;
         return "";
@@ -144,9 +146,11 @@ inline std::string loadTextFile(const fs::path& path) {
 }
 
 // Save string to text file
+// (binary mode: what you pass is what lands on disk on every platform;
+// Windows text mode would expand \n to \r\n, changing the file size)
 inline bool saveTextFile(const fs::path& path, const std::string& content) {
     fs::path fullPath = getDataPath(path);
-    std::ofstream file(fullPath);
+    std::ofstream file(fullPath, std::ios::binary);
     if (!file.is_open()) {
         logError() << "Cannot create file: " << path;
         return false;
@@ -159,7 +163,7 @@ inline bool saveTextFile(const fs::path& path, const std::string& content) {
 // Append string to text file
 inline bool appendToFile(const fs::path& path, const std::string& content) {
     fs::path fullPath = getDataPath(path);
-    std::ofstream file(fullPath, std::ios::app);
+    std::ofstream file(fullPath, std::ios::app | std::ios::binary);
     if (!file.is_open()) {
         logError() << "Cannot open file for append: " << path;
         return false;
