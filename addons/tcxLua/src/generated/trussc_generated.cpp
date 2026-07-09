@@ -48,14 +48,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](int min, int max) { return trussc::randomInt(min, max); }
     ));
     lua->set_function("randomSeed", [](unsigned int seed) { return trussc::randomSeed(seed); });
-    lua->set_function("tcEnumLabelsAdl", sol::overload(
-        [](trussc::Direction a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::BlendMode a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::EaseType a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::EaseMode a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::LayoutDirection a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::AxisMode a0) { return trussc::tcEnumLabelsAdl(a0); }
-    ));
     lua->set_function("signedNoise", sol::overload(
         [](float x) { return trussc::signedNoise(x); },
         [](float x, float y) { return trussc::signedNoise(x, y); },
@@ -412,6 +404,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getStrokeCap", []() { return trussc::getStrokeCap(); });
     lua->set_function("setStrokeJoin", [](trussc::StrokeJoin join) { return trussc::setStrokeJoin(join); });
     lua->set_function("getStrokeJoin", []() { return trussc::getStrokeJoin(); });
+    lua->set_function("setPointSize", [](float px) { return trussc::setPointSize(px); });
+    lua->set_function("getPointSize", []() { return trussc::getPointSize(); });
+    lua->set_function("setPointStyle", [](trussc::PointStyle s) { return trussc::setPointStyle(s); });
+    lua->set_function("getPointStyle", []() { return trussc::getPointStyle(); });
     lua->set_function("setScissor", sol::overload(
         [](float x, float y, float w, float h) { return trussc::setScissor(x, y, w, h); },
         [](int x, int y, int w, int h) { return trussc::setScissor(x, y, w, h); }
