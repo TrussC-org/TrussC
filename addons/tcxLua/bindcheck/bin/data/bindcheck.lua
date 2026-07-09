@@ -85,6 +85,12 @@ try("Node present + ctor", function()
     return ok
 end)
 try("Serial present", function() return _G.Serial ~= nil end)
+try("enum value + equality", function()       -- generated enums (usertype + sol::var)
+    return BlendMode.Add == BlendMode.Add and BlendMode.Add ~= nil
+end)
+try("colors constant", function()             -- generated colors table (colors.json)
+    return approx(colors.white.r, 1) and approx(colors.black.r, 0)
+end)
 
 -- Emit machine-parseable summary via print (base lib; goes to stdout).
 print("##BINDCHECK_BEGIN##")

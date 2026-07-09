@@ -3,6 +3,7 @@
 #include "TrussC.h"
 using namespace trussc;
 using namespace std;
+namespace { struct TcxLuaColorsTable {}; }   // tag for the `colors` constant table
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
 #pragma clang diagnostic push
@@ -1485,6 +1486,383 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
         t["targetFps"] = &trussc::HeadlessSettings::targetFps;
         t["setFps"] = &trussc::HeadlessSettings::setFps;
+    }
+    lua->new_usertype<trussc::Direction>("Direction",
+        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
+        "Left", sol::var(trussc::Direction::Left),
+        "Center", sol::var(trussc::Direction::Center),
+        "Right", sol::var(trussc::Direction::Right),
+        "Top", sol::var(trussc::Direction::Top),
+        "Bottom", sol::var(trussc::Direction::Bottom),
+        "Baseline", sol::var(trussc::Direction::Baseline));
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
+    lua->new_usertype<trussc::WindowType>("WindowType",
+        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
+        "Rect", sol::var(trussc::WindowType::Rect),
+        "Hanning", sol::var(trussc::WindowType::Hanning),
+        "Hamming", sol::var(trussc::WindowType::Hamming),
+        "Blackman", sol::var(trussc::WindowType::Blackman));
+    lua->new_usertype<trussc::ThermalState>("ThermalState",
+        sol::meta_function::equal_to, [](trussc::ThermalState a, trussc::ThermalState b){ return a == b; },
+        "Nominal", sol::var(trussc::ThermalState::Nominal),
+        "Fair", sol::var(trussc::ThermalState::Fair),
+        "Serious", sol::var(trussc::ThermalState::Serious),
+        "Critical", sol::var(trussc::ThermalState::Critical));
+    lua->new_usertype<trussc::MouseButton>("MouseButton",
+        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
+        "Left", sol::var(trussc::MouseButton::Left),
+        "Right", sol::var(trussc::MouseButton::Right),
+        "Middle", sol::var(trussc::MouseButton::Middle),
+        "None", sol::var(trussc::MouseButton::None));
+    lua->new_usertype<trussc::MixMode>("MixMode",
+        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
+        "Auto", sol::var(trussc::MixMode::Auto),
+        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
+    lua->new_usertype<trussc::Beep>("Beep",
+        sol::meta_function::equal_to, [](trussc::Beep a, trussc::Beep b){ return a == b; },
+        "ping", sol::var(trussc::Beep::ping),
+        "success", sol::var(trussc::Beep::success),
+        "complete", sol::var(trussc::Beep::complete),
+        "coin", sol::var(trussc::Beep::coin),
+        "error", sol::var(trussc::Beep::error),
+        "warning", sol::var(trussc::Beep::warning),
+        "cancel", sol::var(trussc::Beep::cancel),
+        "click", sol::var(trussc::Beep::click),
+        "typing", sol::var(trussc::Beep::typing),
+        "notify", sol::var(trussc::Beep::notify),
+        "sweep", sol::var(trussc::Beep::sweep));
+    lua->new_usertype<trussc::Codec>("Codec",
+        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
+        "None", sol::var(trussc::Codec::None),
+        "LZ4", sol::var(trussc::Codec::LZ4));
+    lua->new_usertype<trussc::BlendMode>("BlendMode",
+        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
+        "Alpha", sol::var(trussc::BlendMode::Alpha),
+        "Add", sol::var(trussc::BlendMode::Add),
+        "Multiply", sol::var(trussc::BlendMode::Multiply),
+        "Screen", sol::var(trussc::BlendMode::Screen),
+        "Subtract", sol::var(trussc::BlendMode::Subtract),
+        "Disabled", sol::var(trussc::BlendMode::Disabled));
+    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
+        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
+        "Nearest", sol::var(trussc::TextureFilter::Nearest),
+        "Linear", sol::var(trussc::TextureFilter::Linear));
+    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
+        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
+        "Repeat", sol::var(trussc::TextureWrap::Repeat),
+        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
+        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
+    lua->new_usertype<trussc::PrimitiveType>("PrimitiveType",
+        sol::meta_function::equal_to, [](trussc::PrimitiveType a, trussc::PrimitiveType b){ return a == b; },
+        "Points", sol::var(trussc::PrimitiveType::Points),
+        "Lines", sol::var(trussc::PrimitiveType::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveType::LineStrip),
+        "Triangles", sol::var(trussc::PrimitiveType::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
+        "Quads", sol::var(trussc::PrimitiveType::Quads));
+    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
+        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
+        "Butt", sol::var(trussc::StrokeCap::Butt),
+        "Round", sol::var(trussc::StrokeCap::Round),
+        "Square", sol::var(trussc::StrokeCap::Square));
+    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
+        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
+        "Miter", sol::var(trussc::StrokeJoin::Miter),
+        "Round", sol::var(trussc::StrokeJoin::Round),
+        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
+    lua->new_usertype<trussc::PointStyle>("PointStyle",
+        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
+        "Square", sol::var(trussc::PointStyle::Square),
+        "Round", sol::var(trussc::PointStyle::Round),
+        "Pixel", sol::var(trussc::PointStyle::Pixel));
+    lua->new_usertype<trussc::Cursor>("Cursor",
+        sol::meta_function::equal_to, [](trussc::Cursor a, trussc::Cursor b){ return a == b; },
+        "Default", sol::var(trussc::Cursor::Default),
+        "Arrow", sol::var(trussc::Cursor::Arrow),
+        "IBeam", sol::var(trussc::Cursor::IBeam),
+        "Crosshair", sol::var(trussc::Cursor::Crosshair),
+        "Hand", sol::var(trussc::Cursor::Hand),
+        "ResizeEW", sol::var(trussc::Cursor::ResizeEW),
+        "ResizeNS", sol::var(trussc::Cursor::ResizeNS),
+        "ResizeNWSE", sol::var(trussc::Cursor::ResizeNWSE),
+        "ResizeNESW", sol::var(trussc::Cursor::ResizeNESW),
+        "ResizeAll", sol::var(trussc::Cursor::ResizeAll),
+        "NotAllowed", sol::var(trussc::Cursor::NotAllowed),
+        "Custom0", sol::var(trussc::Cursor::Custom0),
+        "Custom1", sol::var(trussc::Cursor::Custom1),
+        "Custom2", sol::var(trussc::Cursor::Custom2),
+        "Custom3", sol::var(trussc::Cursor::Custom3),
+        "Custom4", sol::var(trussc::Cursor::Custom4),
+        "Custom5", sol::var(trussc::Cursor::Custom5),
+        "Custom6", sol::var(trussc::Cursor::Custom6),
+        "Custom7", sol::var(trussc::Cursor::Custom7),
+        "Custom8", sol::var(trussc::Cursor::Custom8),
+        "Custom9", sol::var(trussc::Cursor::Custom9),
+        "Custom10", sol::var(trussc::Cursor::Custom10),
+        "Custom11", sol::var(trussc::Cursor::Custom11),
+        "Custom12", sol::var(trussc::Cursor::Custom12),
+        "Custom13", sol::var(trussc::Cursor::Custom13),
+        "Custom14", sol::var(trussc::Cursor::Custom14),
+        "Custom15", sol::var(trussc::Cursor::Custom15));
+    lua->new_usertype<trussc::Orientation>("Orientation",
+        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
+        "Portrait", sol::var(trussc::Orientation::Portrait),
+        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
+        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
+        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
+        "Landscape", sol::var(trussc::Orientation::Landscape),
+        "All", sol::var(trussc::Orientation::All),
+        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
+    lua->new_usertype<trussc::LightType>("LightType",
+        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
+        "Directional", sol::var(trussc::LightType::Directional),
+        "Point", sol::var(trussc::LightType::Point),
+        "Spot", sol::var(trussc::LightType::Spot));
+    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
+        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
+        "U8", sol::var(trussc::PixelFormat::U8),
+        "F32", sol::var(trussc::PixelFormat::F32));
+    lua->new_usertype<trussc::TextureFormat>("TextureFormat",
+        sol::meta_function::equal_to, [](trussc::TextureFormat a, trussc::TextureFormat b){ return a == b; },
+        "RGBA8", sol::var(trussc::TextureFormat::RGBA8),
+        "RGBA16F", sol::var(trussc::TextureFormat::RGBA16F),
+        "RGBA32F", sol::var(trussc::TextureFormat::RGBA32F),
+        "R8", sol::var(trussc::TextureFormat::R8),
+        "R16F", sol::var(trussc::TextureFormat::R16F),
+        "R32F", sol::var(trussc::TextureFormat::R32F),
+        "RG8", sol::var(trussc::TextureFormat::RG8),
+        "RG16F", sol::var(trussc::TextureFormat::RG16F),
+        "RG32F", sol::var(trussc::TextureFormat::RG32F),
+        "BGRA8", sol::var(trussc::TextureFormat::BGRA8),
+        "RGBA16", sol::var(trussc::TextureFormat::RGBA16));
+    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
+        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
+        "Immutable", sol::var(trussc::TextureUsage::Immutable),
+        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
+        "Stream", sol::var(trussc::TextureUsage::Stream),
+        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
+    lua->new_usertype<trussc::ImageType>("ImageType",
+        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
+        "Color", sol::var(trussc::ImageType::Color),
+        "Grayscale", sol::var(trussc::ImageType::Grayscale));
+    lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
+        sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
+        "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveMode::TriangleStrip),
+        "TriangleFan", sol::var(trussc::PrimitiveMode::TriangleFan),
+        "Lines", sol::var(trussc::PrimitiveMode::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveMode::LineStrip),
+        "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
+        "Points", sol::var(trussc::PrimitiveMode::Points));
+    lua->new_usertype<trussc::WritingMode>("WritingMode",
+        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
+        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
+        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
+    lua->new_usertype<trussc::TcyMode>("TcyMode",
+        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
+        "Rotate", sol::var(trussc::TcyMode::Rotate),
+        "Upright", sol::var(trussc::TcyMode::Upright),
+        "Combine", sol::var(trussc::TcyMode::Combine));
+    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
+        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
+        "Off", sol::var(trussc::KinsokuLevel::Off),
+        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
+        "Standard", sol::var(trussc::KinsokuLevel::Standard));
+    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
+        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
+        "H264", sol::var(trussc::VideoCodec::H264),
+        "HEVC", sol::var(trussc::VideoCodec::HEVC),
+        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
+        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
+    lua->new_usertype<trussc::EaseType>("EaseType",
+        sol::meta_function::equal_to, [](trussc::EaseType a, trussc::EaseType b){ return a == b; },
+        "Linear", sol::var(trussc::EaseType::Linear),
+        "Quad", sol::var(trussc::EaseType::Quad),
+        "Cubic", sol::var(trussc::EaseType::Cubic),
+        "Quart", sol::var(trussc::EaseType::Quart),
+        "Quint", sol::var(trussc::EaseType::Quint),
+        "Sine", sol::var(trussc::EaseType::Sine),
+        "Expo", sol::var(trussc::EaseType::Expo),
+        "Circ", sol::var(trussc::EaseType::Circ),
+        "Back", sol::var(trussc::EaseType::Back),
+        "Elastic", sol::var(trussc::EaseType::Elastic),
+        "Bounce", sol::var(trussc::EaseType::Bounce));
+    lua->new_usertype<trussc::EaseMode>("EaseMode",
+        sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
+        "In", sol::var(trussc::EaseMode::In),
+        "Out", sol::var(trussc::EaseMode::Out),
+        "InOut", sol::var(trussc::EaseMode::InOut));
+    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
+        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
+        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
+        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
+    lua->new_usertype<trussc::AxisMode>("AxisMode",
+        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
+        "None", sol::var(trussc::AxisMode::None),
+        "Fill", sol::var(trussc::AxisMode::Fill),
+        "Content", sol::var(trussc::AxisMode::Content));
+    {
+        sol::usertype<TcxLuaColorsTable> t = lua->new_usertype<TcxLuaColorsTable>("colors");
+        t["white"] = sol::var(trussc::colors::white);
+        t["black"] = sol::var(trussc::colors::black);
+        t["red"] = sol::var(trussc::colors::red);
+        t["green"] = sol::var(trussc::colors::green);
+        t["blue"] = sol::var(trussc::colors::blue);
+        t["yellow"] = sol::var(trussc::colors::yellow);
+        t["cyan"] = sol::var(trussc::colors::cyan);
+        t["magenta"] = sol::var(trussc::colors::magenta);
+        t["transparent"] = sol::var(trussc::colors::transparent);
+        t["gray"] = sol::var(trussc::colors::gray);
+        t["grey"] = sol::var(trussc::colors::grey);
+        t["darkGray"] = sol::var(trussc::colors::darkGray);
+        t["darkGrey"] = sol::var(trussc::colors::darkGrey);
+        t["dimGray"] = sol::var(trussc::colors::dimGray);
+        t["dimGrey"] = sol::var(trussc::colors::dimGrey);
+        t["lightGray"] = sol::var(trussc::colors::lightGray);
+        t["lightGrey"] = sol::var(trussc::colors::lightGrey);
+        t["silver"] = sol::var(trussc::colors::silver);
+        t["gainsboro"] = sol::var(trussc::colors::gainsboro);
+        t["whiteSmoke"] = sol::var(trussc::colors::whiteSmoke);
+        t["darkRed"] = sol::var(trussc::colors::darkRed);
+        t["fireBrick"] = sol::var(trussc::colors::fireBrick);
+        t["crimson"] = sol::var(trussc::colors::crimson);
+        t["indianRed"] = sol::var(trussc::colors::indianRed);
+        t["lightCoral"] = sol::var(trussc::colors::lightCoral);
+        t["salmon"] = sol::var(trussc::colors::salmon);
+        t["darkSalmon"] = sol::var(trussc::colors::darkSalmon);
+        t["lightSalmon"] = sol::var(trussc::colors::lightSalmon);
+        t["orange"] = sol::var(trussc::colors::orange);
+        t["darkOrange"] = sol::var(trussc::colors::darkOrange);
+        t["orangeRed"] = sol::var(trussc::colors::orangeRed);
+        t["tomato"] = sol::var(trussc::colors::tomato);
+        t["coral"] = sol::var(trussc::colors::coral);
+        t["gold"] = sol::var(trussc::colors::gold);
+        t["goldenRod"] = sol::var(trussc::colors::goldenRod);
+        t["darkGoldenRod"] = sol::var(trussc::colors::darkGoldenRod);
+        t["paleGoldenRod"] = sol::var(trussc::colors::paleGoldenRod);
+        t["lightGoldenRodYellow"] = sol::var(trussc::colors::lightGoldenRodYellow);
+        t["khaki"] = sol::var(trussc::colors::khaki);
+        t["darkKhaki"] = sol::var(trussc::colors::darkKhaki);
+        t["lime"] = sol::var(trussc::colors::lime);
+        t["limeGreen"] = sol::var(trussc::colors::limeGreen);
+        t["lightGreen"] = sol::var(trussc::colors::lightGreen);
+        t["paleGreen"] = sol::var(trussc::colors::paleGreen);
+        t["darkGreen"] = sol::var(trussc::colors::darkGreen);
+        t["forestGreen"] = sol::var(trussc::colors::forestGreen);
+        t["seaGreen"] = sol::var(trussc::colors::seaGreen);
+        t["mediumSeaGreen"] = sol::var(trussc::colors::mediumSeaGreen);
+        t["darkSeaGreen"] = sol::var(trussc::colors::darkSeaGreen);
+        t["lightSeaGreen"] = sol::var(trussc::colors::lightSeaGreen);
+        t["springGreen"] = sol::var(trussc::colors::springGreen);
+        t["mediumSpringGreen"] = sol::var(trussc::colors::mediumSpringGreen);
+        t["greenYellow"] = sol::var(trussc::colors::greenYellow);
+        t["yellowGreen"] = sol::var(trussc::colors::yellowGreen);
+        t["chartreuse"] = sol::var(trussc::colors::chartreuse);
+        t["lawnGreen"] = sol::var(trussc::colors::lawnGreen);
+        t["olive"] = sol::var(trussc::colors::olive);
+        t["oliveDrab"] = sol::var(trussc::colors::oliveDrab);
+        t["darkOliveGreen"] = sol::var(trussc::colors::darkOliveGreen);
+        t["aqua"] = sol::var(trussc::colors::aqua);
+        t["aquamarine"] = sol::var(trussc::colors::aquamarine);
+        t["mediumAquaMarine"] = sol::var(trussc::colors::mediumAquaMarine);
+        t["darkCyan"] = sol::var(trussc::colors::darkCyan);
+        t["teal"] = sol::var(trussc::colors::teal);
+        t["lightCyan"] = sol::var(trussc::colors::lightCyan);
+        t["turquoise"] = sol::var(trussc::colors::turquoise);
+        t["mediumTurquoise"] = sol::var(trussc::colors::mediumTurquoise);
+        t["darkTurquoise"] = sol::var(trussc::colors::darkTurquoise);
+        t["paleTurquoise"] = sol::var(trussc::colors::paleTurquoise);
+        t["navy"] = sol::var(trussc::colors::navy);
+        t["darkBlue"] = sol::var(trussc::colors::darkBlue);
+        t["mediumBlue"] = sol::var(trussc::colors::mediumBlue);
+        t["royalBlue"] = sol::var(trussc::colors::royalBlue);
+        t["steelBlue"] = sol::var(trussc::colors::steelBlue);
+        t["blueSteel"] = sol::var(trussc::colors::blueSteel);
+        t["lightSteelBlue"] = sol::var(trussc::colors::lightSteelBlue);
+        t["dodgerBlue"] = sol::var(trussc::colors::dodgerBlue);
+        t["deepSkyBlue"] = sol::var(trussc::colors::deepSkyBlue);
+        t["skyBlue"] = sol::var(trussc::colors::skyBlue);
+        t["lightSkyBlue"] = sol::var(trussc::colors::lightSkyBlue);
+        t["lightBlue"] = sol::var(trussc::colors::lightBlue);
+        t["powderBlue"] = sol::var(trussc::colors::powderBlue);
+        t["cornflowerBlue"] = sol::var(trussc::colors::cornflowerBlue);
+        t["cadetBlue"] = sol::var(trussc::colors::cadetBlue);
+        t["midnightBlue"] = sol::var(trussc::colors::midnightBlue);
+        t["aliceBlue"] = sol::var(trussc::colors::aliceBlue);
+        t["purple"] = sol::var(trussc::colors::purple);
+        t["darkMagenta"] = sol::var(trussc::colors::darkMagenta);
+        t["darkViolet"] = sol::var(trussc::colors::darkViolet);
+        t["blueViolet"] = sol::var(trussc::colors::blueViolet);
+        t["indigo"] = sol::var(trussc::colors::indigo);
+        t["slateBlue"] = sol::var(trussc::colors::slateBlue);
+        t["darkSlateBlue"] = sol::var(trussc::colors::darkSlateBlue);
+        t["mediumSlateBlue"] = sol::var(trussc::colors::mediumSlateBlue);
+        t["mediumPurple"] = sol::var(trussc::colors::mediumPurple);
+        t["darkOrchid"] = sol::var(trussc::colors::darkOrchid);
+        t["mediumOrchid"] = sol::var(trussc::colors::mediumOrchid);
+        t["orchid"] = sol::var(trussc::colors::orchid);
+        t["violet"] = sol::var(trussc::colors::violet);
+        t["plum"] = sol::var(trussc::colors::plum);
+        t["thistle"] = sol::var(trussc::colors::thistle);
+        t["lavender"] = sol::var(trussc::colors::lavender);
+        t["fuchsia"] = sol::var(trussc::colors::fuchsia);
+        t["pink"] = sol::var(trussc::colors::pink);
+        t["lightPink"] = sol::var(trussc::colors::lightPink);
+        t["hotPink"] = sol::var(trussc::colors::hotPink);
+        t["deepPink"] = sol::var(trussc::colors::deepPink);
+        t["mediumVioletRed"] = sol::var(trussc::colors::mediumVioletRed);
+        t["paleVioletRed"] = sol::var(trussc::colors::paleVioletRed);
+        t["brown"] = sol::var(trussc::colors::brown);
+        t["maroon"] = sol::var(trussc::colors::maroon);
+        t["saddleBrown"] = sol::var(trussc::colors::saddleBrown);
+        t["sienna"] = sol::var(trussc::colors::sienna);
+        t["chocolate"] = sol::var(trussc::colors::chocolate);
+        t["peru"] = sol::var(trussc::colors::peru);
+        t["sandyBrown"] = sol::var(trussc::colors::sandyBrown);
+        t["burlyWood"] = sol::var(trussc::colors::burlyWood);
+        t["tan"] = sol::var(trussc::colors::tan);
+        t["rosyBrown"] = sol::var(trussc::colors::rosyBrown);
+        t["snow"] = sol::var(trussc::colors::snow);
+        t["honeyDew"] = sol::var(trussc::colors::honeyDew);
+        t["mintCream"] = sol::var(trussc::colors::mintCream);
+        t["azure"] = sol::var(trussc::colors::azure);
+        t["ghostWhite"] = sol::var(trussc::colors::ghostWhite);
+        t["floralWhite"] = sol::var(trussc::colors::floralWhite);
+        t["ivory"] = sol::var(trussc::colors::ivory);
+        t["antiqueWhite"] = sol::var(trussc::colors::antiqueWhite);
+        t["linen"] = sol::var(trussc::colors::linen);
+        t["lavenderBlush"] = sol::var(trussc::colors::lavenderBlush);
+        t["mistyRose"] = sol::var(trussc::colors::mistyRose);
+        t["oldLace"] = sol::var(trussc::colors::oldLace);
+        t["seaShell"] = sol::var(trussc::colors::seaShell);
+        t["beige"] = sol::var(trussc::colors::beige);
+        t["cornsilk"] = sol::var(trussc::colors::cornsilk);
+        t["lemonChiffon"] = sol::var(trussc::colors::lemonChiffon);
+        t["lightYellow"] = sol::var(trussc::colors::lightYellow);
+        t["wheat"] = sol::var(trussc::colors::wheat);
+        t["moccasin"] = sol::var(trussc::colors::moccasin);
+        t["peachPuff"] = sol::var(trussc::colors::peachPuff);
+        t["papayaWhip"] = sol::var(trussc::colors::papayaWhip);
+        t["blanchedAlmond"] = sol::var(trussc::colors::blanchedAlmond);
+        t["bisque"] = sol::var(trussc::colors::bisque);
+        t["navajoWhite"] = sol::var(trussc::colors::navajoWhite);
+        t["slateGray"] = sol::var(trussc::colors::slateGray);
+        t["slateGrey"] = sol::var(trussc::colors::slateGrey);
+        t["lightSlateGray"] = sol::var(trussc::colors::lightSlateGray);
+        t["lightSlateGrey"] = sol::var(trussc::colors::lightSlateGrey);
+        t["darkSlateGray"] = sol::var(trussc::colors::darkSlateGray);
+        t["darkSlateGrey"] = sol::var(trussc::colors::darkSlateGrey);
     }
 }
 #ifndef _MSC_VER
