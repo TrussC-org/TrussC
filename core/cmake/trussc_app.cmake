@@ -396,6 +396,12 @@ foreach(ENTRY \${ENTRIES})
             # NULL thunk data
         elseif(SYM MATCHES \"^_RTC_\")
             # Internal symbol for runtime checks
+        elseif(SYM MATCHES \"^(size|mode|uid|gid)$\")
+            # Archive member header metadata, not a symbol. The header lines
+            # ('    2A4B8 size', '       0 mode', ...) only match the
+            # hex-address regex once a member grows to a 6-hex-digit size
+            # field (>= 1 MB object file), which is why small libs never hit
+            # this.
         else()
             list(APPEND SYMBOLS \"\${SYM}\")
         endif()
