@@ -228,11 +228,11 @@ public:
     // direct readback (returns its base address + row stride), then submit it at
     // a PTS. The screen recorder reads the GPU capture straight into this buffer
     // instead of into a temporary Pixels/RGBA buffer the encoder then re-copies.
-    unsigned char* lockFrame(int& strideOut) {
+    TC_PLATFORMS("macos") unsigned char* lockFrame(int& strideOut) {
         if (!open_) return nullptr;
         return lockFramePlatform(strideOut);
     }
-    bool submitFrame(double timeSec) {
+    TC_PLATFORMS("macos") bool submitFrame(double timeSec) {
         if (!open_) return false;
         if (!submitFramePlatform(timeSec)) {
             logError("VideoWriter") << "encoder rejected frame " << frameCount_;

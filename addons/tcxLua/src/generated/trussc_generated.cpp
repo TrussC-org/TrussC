@@ -315,6 +315,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("loadTextFile", [](const std::string & path) { return trussc::loadTextFile(path); });
     lua->set_function("saveTextFile", [](const std::string & path, const std::string & content) { return trussc::saveTextFile(path, content); });
     lua->set_function("appendToFile", [](const std::string & path, const std::string & content) { return trussc::appendToFile(path, content); });
+    lua->set_function("getVersion", []() { return trussc::getVersion(); });
     lua->set_function("getGlobalMouseX", []() { return trussc::getGlobalMouseX(); });
     lua->set_function("getGlobalMouseY", []() { return trussc::getGlobalMouseY(); });
     lua->set_function("getGlobalPMouseX", []() { return trussc::getGlobalPMouseX(); });
@@ -634,7 +635,11 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("videoCodecName", [](trussc::VideoCodec c) { return trussc::videoCodecName(c); });
     lua->set_function("startRecording", sol::overload(
         [](const std::string & path) { return trussc::startRecording(path); },
-        [](const std::string & path, const trussc::VideoRecordSettings & settings) { return trussc::startRecording(path, settings); }
+        [](const std::string & path, const trussc::VideoRecordSettings & settings) { return trussc::startRecording(path, settings); },
+        [](const std::string & path, float durationSec) { return trussc::startRecording(path, durationSec); },
+        [](const trussc::Fbo & fbo, const std::string & path) { return trussc::startRecording(fbo, path); },
+        [](const trussc::Fbo & fbo, const std::string & path, const trussc::VideoRecordSettings & settings) { return trussc::startRecording(fbo, path, settings); },
+        [](const trussc::Fbo & fbo, const std::string & path, float durationSec) { return trussc::startRecording(fbo, path, durationSec); }
     ));
     lua->set_function("stopRecording", []() { return trussc::stopRecording(); });
     lua->set_function("isRecording", []() { return trussc::isRecording(); });

@@ -547,7 +547,9 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         sol::usertype<trussc::Sound> t = lua->new_usertype<trussc::Sound>("Sound",
             sol::constructors<trussc::Sound()>());
         t["load"] = &trussc::Sound::load;
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
         t["loadStream"] = sol::overload([](trussc::Sound& self, const std::string & path) { return self.loadStream(path); }, [](trussc::Sound& self, const std::string & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
+#endif
         t["loadTestTone"] = sol::overload([](trussc::Sound& self) { return self.loadTestTone(); }, [](trussc::Sound& self, float frequency) { return self.loadTestTone(frequency); }, [](trussc::Sound& self, float frequency, float duration) { return self.loadTestTone(frequency, duration); });
         t["loadFromBuffer"] = sol::overload([](trussc::Sound& self, const trussc::SoundBuffer & buf) { return self.loadFromBuffer(buf); }, [](trussc::Sound& self, std::shared_ptr<trussc::SoundBuffer> buf) { return self.loadFromBuffer(buf); });
         t["isLoaded"] = &trussc::Sound::isLoaded;
@@ -658,6 +660,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["decorated"] = &trussc::WindowSettings::decorated;
         t["clipboardSize"] = &trussc::WindowSettings::clipboardSize;
         t["swapInterval"] = &trussc::WindowSettings::swapInterval;
+        t["uniformBufferReserve"] = &trussc::WindowSettings::uniformBufferReserve;
         t["setSize"] = &trussc::WindowSettings::setSize;
         t["setTitle"] = &trussc::WindowSettings::setTitle;
         t["setHighDpi"] = &trussc::WindowSettings::setHighDpi;
@@ -667,6 +670,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["setDecorated"] = &trussc::WindowSettings::setDecorated;
         t["setClipboardSize"] = &trussc::WindowSettings::setClipboardSize;
         t["setSwapInterval"] = &trussc::WindowSettings::setSwapInterval;
+        t["reserveUniformBuffer"] = &trussc::WindowSettings::reserveUniformBuffer;
     }
     {
         sol::usertype<trussc::Path> t = lua->new_usertype<trussc::Path>("Path",
@@ -877,6 +881,12 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
     }
     {
+        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
+        t["pixels"] = &trussc::GrabberFrame::pixels;
+        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
+    }
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
+    {
         sol::usertype<trussc::VideoGrabber> t = lua->new_usertype<trussc::VideoGrabber>("VideoGrabber",
             sol::constructors<trussc::VideoGrabber()>());
         t["listDevices"] = &trussc::VideoGrabber::listDevices;
@@ -896,17 +906,28 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["getHeight"] = &trussc::VideoGrabber::getHeight;
         t["getDeviceName"] = &trussc::VideoGrabber::getDeviceName;
         t["getPixels"] = [](trussc::VideoGrabber& self) { return self.getPixels(); };
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+        t["setFrameQueueSize"] = &trussc::VideoGrabber::setFrameQueueSize;
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+        t["getFrameQueueSize"] = &trussc::VideoGrabber::getFrameQueueSize;
+#endif
         t["copyToImage"] = &trussc::VideoGrabber::copyToImage;
         t["getTexture"] = [](trussc::VideoGrabber& self) -> decltype(auto) { return self.getTexture(); };
         t["checkCameraPermission"] = &trussc::VideoGrabber::checkCameraPermission;
         t["requestCameraPermission"] = &trussc::VideoGrabber::requestCameraPermission;
     }
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
     {
         sol::usertype<trussc::VideoPlayer> t = lua->new_usertype<trussc::VideoPlayer>("VideoPlayer",
             sol::constructors<trussc::VideoPlayer()>());
         t["load"] = &trussc::VideoPlayer::load;
         t["close"] = &trussc::VideoPlayer::close;
         t["update"] = &trussc::VideoPlayer::update;
+        t["play"] = &trussc::VideoPlayer::play;
+        t["setAutoPoster"] = &trussc::VideoPlayer::setAutoPoster;
+        t["getAutoPoster"] = &trussc::VideoPlayer::getAutoPoster;
         t["draw"] = sol::overload([](trussc::VideoPlayer& self, float x, float y) { return self.draw(x, y); }, [](trussc::VideoPlayer& self, float x, float y, float w, float h) { return self.draw(x, y, w, h); });
         t["getDuration"] = &trussc::VideoPlayer::getDuration;
         t["getPosition"] = &trussc::VideoPlayer::getPosition;
@@ -923,20 +944,32 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["getPixelsY"] = &trussc::VideoPlayer::getPixelsY;
         t["getPixelsUV"] = &trussc::VideoPlayer::getPixelsUV;
         t["hasAudio"] = &trussc::VideoPlayer::hasAudio;
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
         t["getAudioCodec"] = &trussc::VideoPlayer::getAudioCodec;
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
         t["getAudioData"] = &trussc::VideoPlayer::getAudioData;
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
         t["getAudioSampleRate"] = &trussc::VideoPlayer::getAudioSampleRate;
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
         t["getAudioChannels"] = &trussc::VideoPlayer::getAudioChannels;
+#endif
         t["isUsingHwAccel"] = &trussc::VideoPlayer::isUsingHwAccel;
         t["getHwAccelName"] = &trussc::VideoPlayer::getHwAccelName;
+        t["getPath"] = &trussc::VideoPlayer::getPath;
     }
+#endif
     {
         sol::usertype<trussc::VideoRecordSettings> t = lua->new_usertype<trussc::VideoRecordSettings>("VideoRecordSettings");
         t["codec"] = &trussc::VideoRecordSettings::codec;
         t["fps"] = &trussc::VideoRecordSettings::fps;
         t["bitrate"] = &trussc::VideoRecordSettings::bitrate;
         t["keyframeInterval"] = &trussc::VideoRecordSettings::keyframeInterval;
+        t["duration"] = &trussc::VideoRecordSettings::duration;
     }
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     {
         sol::usertype<trussc::VideoWriter> t = lua->new_usertype<trussc::VideoWriter>("VideoWriter",
             sol::constructors<trussc::VideoWriter()>());
@@ -951,18 +984,23 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["getSettings"] = &trussc::VideoWriter::getSettings;
         t["addFrame"] = sol::overload([](trussc::VideoWriter& self, const trussc::Fbo & fbo) { return self.addFrame(fbo); }, [](trussc::VideoWriter& self, const trussc::Pixels & pixels) { return self.addFrame(pixels); });
         t["addFrameAt"] = sol::overload([](trussc::VideoWriter& self, const trussc::Fbo & fbo, double timeSec) { return self.addFrameAt(fbo, timeSec); }, [](trussc::VideoWriter& self, const trussc::Pixels & pixels, double timeSec) { return self.addFrameAt(pixels, timeSec); });
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE))
         t["submitFrame"] = &trussc::VideoWriter::submitFrame;
+#endif
     }
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     {
         sol::usertype<trussc::ScreenRecorder> t = lua->new_usertype<trussc::ScreenRecorder>("ScreenRecorder",
             sol::constructors<trussc::ScreenRecorder()>());
-        t["start"] = sol::overload([](trussc::ScreenRecorder& self, const std::string & path) { return self.start(path); }, [](trussc::ScreenRecorder& self, const std::string & path, const trussc::VideoRecordSettings & settings) { return self.start(path, settings); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const std::string & path) { return self.start(fbo, path); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const std::string & path, const trussc::VideoRecordSettings & settings) { return self.start(fbo, path, settings); });
+        t["start"] = sol::overload([](trussc::ScreenRecorder& self, const std::string & path) { return self.start(path); }, [](trussc::ScreenRecorder& self, const std::string & path, const trussc::VideoRecordSettings & settings) { return self.start(path, settings); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const std::string & path) { return self.start(fbo, path); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const std::string & path, const trussc::VideoRecordSettings & settings) { return self.start(fbo, path, settings); }, [](trussc::ScreenRecorder& self, const std::string & path, float durationSec) { return self.start(path, durationSec); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const std::string & path, float durationSec) { return self.start(fbo, path, durationSec); });
         t["stop"] = &trussc::ScreenRecorder::stop;
         t["isRecording"] = &trussc::ScreenRecorder::isRecording;
         t["getFrameCount"] = &trussc::ScreenRecorder::getFrameCount;
         t["getPath"] = &trussc::ScreenRecorder::getPath;
         t["writer"] = &trussc::ScreenRecorder::writer;
     }
+#endif
     {
         sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
         t["data"] = &trussc::UdpReceiveEventArgs::data;
@@ -974,6 +1012,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["message"] = &trussc::UdpErrorEventArgs::message;
         t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
     }
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     {
         sol::usertype<trussc::UdpSocket> t = lua->new_usertype<trussc::UdpSocket>("UdpSocket",
             sol::constructors<trussc::UdpSocket()>());
@@ -1007,6 +1046,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["getConnectedHost"] = &trussc::UdpSocket::getConnectedHost;
         t["getConnectedPort"] = &trussc::UdpSocket::getConnectedPort;
     }
+#endif
     {
         sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
         t["success"] = &trussc::TcpConnectEventArgs::success;
@@ -1026,6 +1066,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["message"] = &trussc::TcpErrorEventArgs::message;
         t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
     }
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     {
         sol::usertype<trussc::TcpClient> t = lua->new_usertype<trussc::TcpClient>("TcpClient",
             sol::constructors<trussc::TcpClient()>());
@@ -1046,6 +1087,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["getRemoteHost"] = &trussc::TcpClient::getRemoteHost;
         t["getRemotePort"] = &trussc::TcpClient::getRemotePort;
     }
+#endif
     {
         sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
         t["getId"] = &trussc::TcpServerClient::getId;
@@ -1075,6 +1117,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
         t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
     }
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
     {
         sol::usertype<trussc::TcpServer> t = lua->new_usertype<trussc::TcpServer>("TcpServer",
             sol::constructors<trussc::TcpServer()>());
@@ -1095,6 +1138,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["setReceiveBufferSize"] = &trussc::TcpServer::setReceiveBufferSize;
         t["getPort"] = &trussc::TcpServer::getPort;
     }
+#endif
     {
         sol::usertype<trussc::NetworkInterface> t = lua->new_usertype<trussc::NetworkInterface>("NetworkInterface");
         t["name"] = &trussc::NetworkInterface::name;
@@ -1121,6 +1165,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
         t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
     }
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
     {
         sol::usertype<trussc::Serial> t = lua->new_usertype<trussc::Serial>("Serial",
             sol::constructors<trussc::Serial()>());
@@ -1140,6 +1185,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["printDevices"] = &trussc::Serial::printDevices;
         t["listDevices"] = &trussc::Serial::listDevices;
     }
+#endif
     {
         sol::usertype<trussc::ChipSoundNote> t = lua->new_usertype<trussc::ChipSoundNote>("ChipSoundNote",
             sol::constructors<trussc::ChipSoundNote(), trussc::ChipSoundNote(trussc::Wave, float, float), trussc::ChipSoundNote(trussc::Wave, float, float, float)>());
@@ -1269,10 +1315,18 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["callEvery"] = &trussc::Node::callEvery;
         t["cancelTimer"] = &trussc::Node::cancelTimer;
         t["cancelAllTimers"] = &trussc::Node::cancelAllTimers;
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
         t["callAfterAsync"] = &trussc::Node::callAfterAsync;
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
         t["callEveryAsync"] = &trussc::Node::callEveryAsync;
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
         t["cancelAsyncTimer"] = &trussc::Node::cancelAsyncTimer;
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
         t["cancelAllAsyncTimers"] = &trussc::Node::cancelAllAsyncTimers;
+#endif
     }
     {
         sol::usertype<trussc::RectNode> t = lua->new_usertype<trussc::RectNode>("RectNode");

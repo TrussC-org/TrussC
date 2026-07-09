@@ -49,6 +49,27 @@ const OP_UNARY = { '-': 'unary_minus' };
 // substitute a template param (Tween<T>: T->float) inside a type string
 function subT(type, T) { return T ? type.replace(/\bT\b/g, T) : type; }
 
+// ---- platform guards -----------------------------------------------------
+// A `platforms` annotation (TC_PLATFORMS) restricts where a symbol exists.
+// reference-data is generated on macOS, so members compiled out elsewhere
+// (e.g. VideoWriter::submitFrame under TC_ASYNC_SCREEN_CAPTURE) are recorded —
+// guard their bindings with the matching preprocessor condition.
+const ALL_PLATFORMS = ['macos', 'windows', 'linux', 'android', 'ios', 'web'];
+const PLATFORM_COND = {
+    macos: '(defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE))',
+    ios: '(defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)',
+    windows: 'defined(_WIN32)',
+    linux: '(defined(__linux__) && !defined(__ANDROID__))',
+    android: 'defined(__ANDROID__)',
+    web: 'defined(__EMSCRIPTEN__)',
+};
+// -> condition string, or null when unrestricted (no annotation / covers all)
+function platformGuard(platforms) {
+    if (!platforms || !platforms.length) return null;
+    if (ALL_PLATFORMS.every(p => platforms.includes(p))) return null;
+    return platforms.map(p => PLATFORM_COND[p]).filter(Boolean).join(' || ');
+}
+
 // ---- emit one usertype --------------------------------------------------
 // `cppType` = the C++ type to bind (e.g. "Vec2" or "Tween<float>"),
 // `luaName` = the Lua-facing name ("Vec2" or "Tween_float"),
@@ -119,6 +140,7 @@ function emitType(typeEntry, cppType, luaName, T) {
         if (e.tparams && e.tparams.length) { skip.template++; continue; }
         const opm = e.name.match(/^operator(.+)$/);
         if (opm) {
+            if (platformGuard(e.platforms)) { skip.platform = (skip.platform || 0) + 1; continue; }  // rare; keep the ctor/op expression unguarded
             const sym = opm[1];
             for (const sig of (e.signatures || [])) {   // an operator can have unary + binary overloads
                 if (sig.tmpl) continue;
@@ -140,7 +162,7 @@ function emitType(typeEntry, cppType, luaName, T) {
             const ft = subT(e.type || '', T);
             // skip fields of incomplete internal:: types, raw pointers, or C arrays
             if (!ft || /\binternal::/.test(ft) || /\*/.test(ft) || /\[/.test(ft)) { skip.unbindable++; continue; }
-            props.push(e.name);
+            props.push({ name: e.name, guard: platformGuard(e.platforms) });
             continue;
         }
         if (e.kind === 'method') {
@@ -152,7 +174,7 @@ function emitType(typeEntry, cppType, luaName, T) {
                 && (s.args || []).map(a => ({ ...a, type: subT(a.type, T) })).every(argBindable));
             if (!usable.length) { skip.unbindable++; continue; }
             const target = e.static ? statics : methods;
-            target[e.name] = { sigs: usable, total: sigs.length };
+            target[e.name] = { sigs: usable, total: sigs.length, guard: platformGuard(e.platforms) };
         }
     }
 
@@ -163,17 +185,25 @@ function emitType(typeEntry, cppType, luaName, T) {
         s += `,\n            sol::meta_function::${meta}, ` + (lams.length === 1 ? lams[0] : `sol::overload(${lams.join(', ')})`);
     }
     s += `);\n`;
-    for (const p of [...new Set(props)]) s += `        t["${p}"] = &${Q}::${p};\n`;
+    const seenProps = new Set();
+    for (const p of props) {
+        if (seenProps.has(p.name)) continue;
+        seenProps.add(p.name);
+        const line = `        t["${p.name}"] = &${Q}::${p.name};\n`;
+        s += p.guard ? `#if ${p.guard}\n${line}#endif\n` : line;
+    }
     const emitFns = (map, isStatic) => {
         for (const name in map) {
-            const { sigs, total } = map[name];
+            const { sigs, total, guard } = map[name];
             const hasDefaults = sigs.some(sg => (sg.args || []).some(a => a.hasDefault));
+            let line;
             if (total === 1 && !hasDefaults) {
-                s += `        t["${name}"] = &${Q}::${name};\n`;   // single C++ overload, no defaults -> member ptr (clean)
+                line = `        t["${name}"] = &${Q}::${name};\n`;   // single C++ overload, no defaults -> member ptr (clean)
             } else {
                 const lams = memberLambdas(name, sigs, isStatic);  // defaults -> arity overloads
-                s += `        t["${name}"] = ${lams.length === 1 ? lams[0] : `sol::overload(${lams.join(', ')})`};\n`;
+                line = `        t["${name}"] = ${lams.length === 1 ? lams[0] : `sol::overload(${lams.join(', ')})`};\n`;
             }
+            s += guard ? `#if ${guard}\n${line}#endif\n` : line;
         }
     };
     emitFns(methods, false);
@@ -206,6 +236,11 @@ const EXCLUDE = new Set([
 ]);
 
 let body = '', count = 0;
+// wrap a whole usertype block when the TYPE itself is platform-restricted
+function guardedType(code, e) {
+    const g = platformGuard(e.platforms);
+    return g ? `#if ${g}\n${code}#endif\n` : code;
+}
 for (const id in data) {
     const e = data[id];
     if (e.kind !== 'type' || e.owner || e.ns) continue;
@@ -215,12 +250,12 @@ for (const id in data) {
         if (!e.lua_bind || !e.lua_bind.length) { report.push(`${e.name}: templated, no lua_bind (skipped)`); continue; }
         for (const T of e.lua_bind) {
             const base = e.name.replace(/<.*>/, '');
-            try { body += emitType(e, `${base}<${T}>`, `${base}_${T.replace(/[^A-Za-z0-9]/g, '')}`, T); count++; }
+            try { body += guardedType(emitType(e, `${base}<${T}>`, `${base}_${T.replace(/[^A-Za-z0-9]/g, '')}`, T), e); count++; }
             catch (err) { report.push(`${e.name}<${T}>: ${err.message}`); }
         }
         continue;
     }
-    try { body += emitType(e, e.name, e.name, null); count++; }
+    try { body += guardedType(emitType(e, e.name, e.name, null), e); count++; }
     catch (err) { report.push(`${e.name}: ${err.message}`); }
 }
 
