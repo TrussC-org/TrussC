@@ -151,6 +151,29 @@ can feed events manually, so imgui does not chain us to sokol_app.
   swapchain, WndProc, DPI v2 — audited good) + sokol_app's win32 keyboard
   tables; DXGI waitable ticks replace WM_TIMER (kills the 64 Hz cap); main
   window unified. The win branch is reference source, not merged as-is.
+  - **P1 code COMPLETE (compile-verification via CI):** the header implements
+    the sapp_* API on Windows (win32 + D3D11), mirroring the mac P0b shim
+    strategy — platform/win/sokol_impl.cpp includes sokol_app.h
+    declarations-only, TrussC.h untouched; NEW tcWindowWin.cpp adapter
+    mirrors tcWindowMac.mm (BGRA8 secondary swapchains, persistent D3D11
+    views instead of per-tick drawables). Implementation contract:
+    docs/dev/sapp-win32-impl-spec.md + docs/dev/multi-window-win-audit.md.
+    Key decisions: every swapchain (main RGB10A2, secondary BGRA8) is
+    flip-discard with DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT
+    (flag carried through every ResizeBuffers; RTV-unbind + Flush before
+    resizing); the run loop blocks in MsgWaitForMultipleObjectsEx on the
+    per-window waitables — a tick that ends without a Present (skip_present,
+    occluded, minimized) holds its waitable "credit" and is timer-re-paced
+    until the next real Present, so neither busy-spin nor waitable
+    starvation can occur; resize coalesced per tick (never in WM_SIZE);
+    WM_ENTERSIZEMOVE arms a ~64Hz WM_TIMER that keeps ALL windows ticking
+    through the modal drag; scancode-indexed keytable lifted verbatim
+    (fixes the win branch's key=vk gap) + WM_CHAR with surrogate pairs;
+    quit = WM_CLOSE dance + PostQuitMessage; skip_present HONORED on
+    Present (TrussC flicker patch); per-monitor-v2 DPI with the
+    create-then-resize dance; DXGI_PRESENT_TEST occlusion poll for
+    secondary windows (SUSPENDED/RESUMED). Runtime verification on real
+    Windows hardware still pending.
 - **P2 — Linux driver.** X11 + GLX shared context (multiwindow-glfw
   pattern), timer-paced ticks.
 - **P3 — web driver.** RAF tick, HTML5 event callbacks, WebGL context;
