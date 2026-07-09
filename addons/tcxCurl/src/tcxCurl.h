@@ -163,6 +163,12 @@ public:
         return request("DELETE", path, "");
     }
 
+    // Generic request with an explicit HTTP/WebDAV method (GET, POST, PUT, DELETE,
+    // MKCOL, PROPFIND, COPY, MOVE, ...). The typed helpers above wrap this.
+    HttpResponse request(const std::string& method, const std::string& path,
+                         const std::string& body = "",
+                         const std::string& contentType = "application/json");
+
     // Upload file via multipart POST
     HttpResponse uploadFile(const std::string& path, const std::string& filePath);
 
@@ -172,10 +178,6 @@ private:
     long timeoutSeconds_ = 30;
     bool followRedirects_ = false;
     bool verbose_ = false;
-
-    HttpResponse request(const std::string& method, const std::string& path,
-                         const std::string& body,
-                         const std::string& contentType = "application/json");
 
 #ifdef TCX_HTTP_CURL
     // libcurl write callback
@@ -210,11 +212,17 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds_);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    // No short CURLOPT_CONNECTTIMEOUT: curl's Schannel backend reuses the connect
+    // deadline for mid-transfer TLS *renegotiation*, so a 10s connect timeout made
+    // any request whose first response byte arrives after 10s (e.g. a ~13s OpenAI
+    // image generation, where the server then requests renegotiation) fail with
+    // "SSL/TLS connection timeout". CURLOPT_TIMEOUT already bounds the whole
+    // operation, so the connect phase stays bounded without breaking renegotiation.
 #if defined(_WIN32) && defined(CURLSSLOPT_NATIVE_CA)
-    // Windows: verify TLS certs against the OS cert store. Without this an
-    // OpenSSL-backed libcurl has no CA bundle and every HTTPS request fails with
-    // "SSL connect error".
+    // Windows curl is built against Schannel, which already verifies against the
+    // OS certificate store — so this is a harmless no-op today. Kept as belt-and-
+    // suspenders: if the backend is ever swapped (e.g. an OpenSSL build), it makes
+    // curl use the OS trust store instead of failing with "SSL connect error".
     curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
 #endif
     if (followRedirects_) {
@@ -235,6 +243,9 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
     } else if (method == "PUT") {
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+    } else if (method != "GET") {
+        // Generic verb (MKCOL, PROPFIND, COPY, MOVE, ...) for WebDAV etc.
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
     }
 
     // Build headers

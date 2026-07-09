@@ -43,6 +43,15 @@ void setup() {
     sgdesc.image_pool_size = 10000;
     sgdesc.view_pool_size = 10000;
     sgdesc.sampler_pool_size = 10000;
+    // Per-frame uniform ring buffer (Metal/WebGPU/Vulkan; GL/D3D11 ignore it).
+    // The 4MB sokol default caps out around ~8k draw calls per frame (each apply
+    // is 256-byte aligned); past that, RELEASE builds silently write out of
+    // bounds — garbage uniforms render as flipped or fully black frames. Apps
+    // with very high draw-call counts reserve more up front via WindowSettings::
+    // reserveUniformBuffer (the backend allocates it x2 in-flight frames).
+    if (internal::gpuUniformBufferReserve > 0) {
+        sgdesc.uniform_buffer_size = internal::gpuUniformBufferReserve;
+    }
     sgdesc.allocator.alloc_fn = smemtrack_alloc;
     sgdesc.allocator.free_fn = smemtrack_free;
     sg_setup(&sgdesc);

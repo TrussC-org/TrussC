@@ -10845,6 +10845,76 @@ description.en = "true: coords match framebuffer size; false: coords use logical
 description.ja = "true: 座標が framebuffer サイズに一致、false: 論理サイズを使用 (デフォルト false)"
 description.ko = "true: 좌표가 framebuffer 크기와 일치, false: 논리 크기 사용 (기본값 false)"
 
+["WindowSettings::reserveUniformBuffer"]
+description.en = "Reserve the per-frame GPU uniform buffer in bytes, vector::reserve style; 0 = backend default 4MB ≈ 8k draw calls. Metal/WebGPU/Vulkan only — GL/D3D11 have no such cap (chainable)"
+description.ja = "フレームあたりの GPU ユニフォームバッファを vector::reserve の要領でバイト単位で予約; 0 = バックエンド既定の 4MB ≈ 8千ドローコール。Metal/WebGPU/Vulkan のみ — GL/D3D11 に上限はない (チェイン可能)"
+description.ko = "프레임당 GPU 유니폼 버퍼를 vector::reserve 방식으로 바이트 단위 예약; 0 = 백엔드 기본 4MB ≈ 8천 드로우 콜. Metal/WebGPU/Vulkan 전용 — GL/D3D11에는 상한이 없음 (체인 가능)"
+details.en = '''
+On Metal/WebGPU/Vulkan every draw call's shader constants (matrices, material,
+lights, ...) are copied into one fixed-size per-frame ring buffer, each copy
+rounded up to 256-byte alignment. The buffer is allocated once at startup
+(sokol default 4MB), so a frame can hold roughly **8,000 draw calls** — plenty
+for typical scenes, but exceeded by scenes that issue thousands of individual
+lit-mesh draws (per-glyph text rain, per-object particle meshes, heavy
+instancing-free crowds).
+
+**When it overflows**: debug builds stop on an assert inside
+`_sg_mtl_apply_uniforms`; release builds have no check and silently write past
+the buffer — later draws read garbage constants, which shows up as flipped
+geometry, wrong colors, or an entirely black frame. Lowering the load restores
+the picture, which makes the bug look intermittent and hard to trace.
+
+**What to reserve**: budget ≈ *(draws per frame) × ~512 bytes* (a lit mesh draw
+applies vertex + fragment blocks, each aligned to 256B), then add headroom.
+Example: `reserveUniformBuffer(32 * 1024 * 1024)` covers ~65k draws. The cost
+is plain memory (the value ×2 for the in-flight frame pair) with no per-frame
+overhead, so over-reserving is cheap. Set it before `TC_RUN_APP` — the value is
+consumed once at graphics startup. GL/D3D11 ignore it; uniforms have no
+per-frame cap there.
+'''
+details.ja = '''
+Metal/WebGPU/Vulkan では、全ドローコールのシェーダー定数（行列・マテリアル・
+ライト等）がフレームごとの固定サイズのリングバッファへコピーされ、1回ごとに
+256バイト境界へ切り上げられる。バッファは起動時に一度だけ確保され（sokol 既定
+4MB）、1フレームに収まるのはおよそ **8,000 ドローコール**。通常のシーンには
+十分だが、ライト付きメッシュを1体ずつ数千回描くシーン（グリフ単位のテキスト
+レイン、オブジェクト単位のパーティクル等）では超過する。
+
+**溢れると何が起きるか**: デバッグビルドは `_sg_mtl_apply_uniforms` 内の
+assert で停止する。リリースビルドにはチェックがなく黙って範囲外に書き込み、
+以降のドローがゴミの定数を読む——ジオメトリの反転、色化け、画面全体の
+ブラックアウトとして現れる。負荷を下げると直るため、断続的で追いにくい
+バグに見える。
+
+**いくつ予約するか**: 目安は *(1フレームのドロー数) × 約512バイト*（ライト付き
+ドローは頂点＋フラグメントの2ブロック、各256Bアライン）＋余裕。例:
+`reserveUniformBuffer(32 * 1024 * 1024)` で約6.5万ドロー分。コストは純粋な
+メモリのみ（インフライト2フレーム分で設定値×2）で毎フレームの負荷はゼロ、
+多めに予約しても安価。値は描画系の起動時に一度だけ読まれるため
+`TC_RUN_APP` の前に設定すること。GL/D3D11 はこの値を無視する（そもそも
+フレームあたりの上限がない）。
+'''
+details.ko = '''
+Metal/WebGPU/Vulkan에서는 모든 드로우 콜의 셰이더 상수(행렬·material·light 등)가
+프레임당 고정 크기 링 버퍼로 복사되며, 매 복사는 256바이트 정렬로 올림된다.
+버퍼는 시작 시 한 번만 할당되고(sokol 기본 4MB), 한 프레임에 담기는 것은 약
+**8,000 드로우 콜**. 일반적인 씬에는 충분하지만, 라이트가 적용된 메시를 개별로
+수천 번 그리는 씬(글리프 단위 텍스트 레인, 오브젝트 단위 파티클 등)에서는
+초과한다.
+
+**넘치면 생기는 일**: 디버그 빌드는 `_sg_mtl_apply_uniforms`의 assert에서 멈춘다.
+릴리스 빌드는 검사 없이 조용히 범위 밖에 기록하고, 이후 드로우가 쓰레기 상수를
+읽는다 — 지오메트리 반전, 색 깨짐, 화면 전체 블랙아웃으로 나타난다. 부하를
+낮추면 회복되므로 간헐적이고 추적하기 어려운 버그처럼 보인다.
+
+**얼마나 예약할까**: 기준은 *(프레임당 드로우 수) × 약 512바이트*(라이트 드로우는
+정점+프래그먼트 2블록, 각 256B 정렬) + 여유. 예: `reserveUniformBuffer(32 * 1024
+* 1024)`로 약 6.5만 드로우를 커버한다. 비용은 순수 메모리뿐(인플라이트 2프레임
+분으로 설정값 ×2)이며 프레임당 오버헤드는 없으니 넉넉히 예약해도 저렴하다. 값은
+그래픽 초기화 시 한 번만 읽히므로 `TC_RUN_APP` 전에 설정할 것. GL/D3D11은 이
+값을 무시한다(애초에 프레임당 상한이 없다).
+'''
+
 ["WindowSettings::sampleCount"]
 description.en = "MSAA sample count (default 4)"
 description.ja = "MSAA サンプル数 (デフォルト 4)"
@@ -10909,6 +10979,25 @@ description.ja = '''
 '''
 description.ko = '''
 윈도우 제목 (기본값 \"TrussC App\")
+'''
+
+["WindowSettings::uniformBufferReserve"]
+description.en = "Per-frame GPU uniform buffer reservation in bytes; 0 = backend default (4MB). Overflow silently corrupts frames in release builds on Metal/WebGPU/Vulkan"
+description.ja = "フレームあたりの GPU ユニフォームバッファの予約量 (バイト); 0 = バックエンド既定 (4MB)。Metal/WebGPU/Vulkan でオーバーフローすると Release ビルドでフレームが静かに壊れる"
+description.ko = "프레임당 GPU 유니폼 버퍼 예약량 (바이트); 0 = 백엔드 기본값 (4MB). Metal/WebGPU/Vulkan에서 오버플로하면 릴리스 빌드에서 프레임이 조용히 손상됨"
+related = ["WindowSettings::reserveUniformBuffer"]
+details.en = '''
+The backing field for [`reserveUniformBuffer`](#WindowSettings::reserveUniformBuffer)
+— see that entry for when the reservation is needed, what an overflow looks
+like, and how to size it.
+'''
+details.ja = '''
+[`reserveUniformBuffer`](#WindowSettings::reserveUniformBuffer) の実体フィールド。
+どんな時に予約が必要か・溢れると何が起きるか・値の見積もり方はそちらを参照。
+'''
+details.ko = '''
+[`reserveUniformBuffer`](#WindowSettings::reserveUniformBuffer)의 실제 필드.
+언제 예약이 필요한지·넘치면 어떻게 되는지·값 산정 방법은 해당 항목 참조.
 '''
 
 ["WindowSettings::width"]
