@@ -281,6 +281,18 @@ for (const id in data) {
 }
 if (nestedEnums.length) report.push(`nested enums (not yet emitted): ${nestedEnums.join(', ')}`);
 
+// ---- constants (kind:var) --------------------------------------------------
+// Top-level non-hidden constants (TAU, KEY_*, MOUSE_BUTTON_*, VSYNC, Direction
+// shorthands Left/Center/...). Plain assignments; sol converts values as usual.
+let constCount = 0;
+body += `    // constants\n`;
+for (const id in data) {
+    const e = data[id];
+    if (e.kind !== 'var' || e.owner || e.ns || e.hidden) continue;
+    body += `    (*lua)["${e.name}"] = trussc::${e.name};\n`;
+    constCount++;
+}
+
 // ---- colors ---------------------------------------------------------------
 // colors.json is the canonical color list (docs/reference/). Emit the same
 // `colors` table the hand binding used: colors.white etc. as sol::var constants.
@@ -313,5 +325,5 @@ ${body}}
 #pragma clang diagnostic pop
 #endif
 `);
-console.error(`[luagen-types] usertypes: ${count} | enums: ${enumCount} | colors: ${colorCount} | skipped members: template ${skip.template}, unbindable ${skip.unbindable}, unsupported-op ${skip.op}`);
+console.error(`[luagen-types] usertypes: ${count} | enums: ${enumCount} | colors: ${colorCount} | consts: ${constCount} | skipped members: template ${skip.template}, unbindable ${skip.unbindable}, unsupported-op ${skip.op}`);
 for (const r of report) console.error('  ' + r);

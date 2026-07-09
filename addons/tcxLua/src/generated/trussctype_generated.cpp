@@ -1712,6 +1712,52 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         "None", sol::var(trussc::AxisMode::None),
         "Fill", sol::var(trussc::AxisMode::Fill),
         "Content", sol::var(trussc::AxisMode::Content));
+    // constants
+    (*lua)["TAU"] = trussc::TAU;
+    (*lua)["HALF_TAU"] = trussc::HALF_TAU;
+    (*lua)["QUARTER_TAU"] = trussc::QUARTER_TAU;
+    (*lua)["PI"] = trussc::PI;
+    (*lua)["Left"] = trussc::Left;
+    (*lua)["Center"] = trussc::Center;
+    (*lua)["Right"] = trussc::Right;
+    (*lua)["Top"] = trussc::Top;
+    (*lua)["Bottom"] = trussc::Bottom;
+    (*lua)["Baseline"] = trussc::Baseline;
+    (*lua)["VSYNC"] = trussc::VSYNC;
+    (*lua)["EVENT_DRIVEN"] = trussc::EVENT_DRIVEN;
+    (*lua)["KEY_SPACE"] = trussc::KEY_SPACE;
+    (*lua)["KEY_ESCAPE"] = trussc::KEY_ESCAPE;
+    (*lua)["KEY_ENTER"] = trussc::KEY_ENTER;
+    (*lua)["KEY_TAB"] = trussc::KEY_TAB;
+    (*lua)["KEY_BACKSPACE"] = trussc::KEY_BACKSPACE;
+    (*lua)["KEY_DELETE"] = trussc::KEY_DELETE;
+    (*lua)["KEY_RIGHT"] = trussc::KEY_RIGHT;
+    (*lua)["KEY_LEFT"] = trussc::KEY_LEFT;
+    (*lua)["KEY_DOWN"] = trussc::KEY_DOWN;
+    (*lua)["KEY_UP"] = trussc::KEY_UP;
+    (*lua)["KEY_LEFT_SHIFT"] = trussc::KEY_LEFT_SHIFT;
+    (*lua)["KEY_RIGHT_SHIFT"] = trussc::KEY_RIGHT_SHIFT;
+    (*lua)["KEY_LEFT_CONTROL"] = trussc::KEY_LEFT_CONTROL;
+    (*lua)["KEY_RIGHT_CONTROL"] = trussc::KEY_RIGHT_CONTROL;
+    (*lua)["KEY_LEFT_ALT"] = trussc::KEY_LEFT_ALT;
+    (*lua)["KEY_RIGHT_ALT"] = trussc::KEY_RIGHT_ALT;
+    (*lua)["KEY_LEFT_SUPER"] = trussc::KEY_LEFT_SUPER;
+    (*lua)["KEY_RIGHT_SUPER"] = trussc::KEY_RIGHT_SUPER;
+    (*lua)["KEY_F1"] = trussc::KEY_F1;
+    (*lua)["KEY_F2"] = trussc::KEY_F2;
+    (*lua)["KEY_F3"] = trussc::KEY_F3;
+    (*lua)["KEY_F4"] = trussc::KEY_F4;
+    (*lua)["KEY_F5"] = trussc::KEY_F5;
+    (*lua)["KEY_F6"] = trussc::KEY_F6;
+    (*lua)["KEY_F7"] = trussc::KEY_F7;
+    (*lua)["KEY_F8"] = trussc::KEY_F8;
+    (*lua)["KEY_F9"] = trussc::KEY_F9;
+    (*lua)["KEY_F10"] = trussc::KEY_F10;
+    (*lua)["KEY_F11"] = trussc::KEY_F11;
+    (*lua)["KEY_F12"] = trussc::KEY_F12;
+    (*lua)["MOUSE_BUTTON_LEFT"] = trussc::MOUSE_BUTTON_LEFT;
+    (*lua)["MOUSE_BUTTON_RIGHT"] = trussc::MOUSE_BUTTON_RIGHT;
+    (*lua)["MOUSE_BUTTON_MIDDLE"] = trussc::MOUSE_BUTTON_MIDDLE;
     {
         sol::usertype<TcxLuaColorsTable> t = lua->new_usertype<TcxLuaColorsTable>("colors");
         t["white"] = sol::var(trussc::colors::white);

@@ -91,6 +91,9 @@ end)
 try("colors constant", function()             -- generated colors table (colors.json)
     return approx(colors.white.r, 1) and approx(colors.black.r, 0)
 end)
+try("generated constants", function()         -- kind:var constants (TAU, KEY_*, ...)
+    return math.abs(TAU - 6.2831) < 0.001 and _G.KEY_SPACE ~= nil and _G.VSYNC ~= nil
+end)
 
 -- Emit machine-parseable summary via print (base lib; goes to stdout).
 print("##BINDCHECK_BEGIN##")
