@@ -27,8 +27,15 @@ node luagen.js ../../../../docs/reference/reference-data.json > ../../src/genera
   - signatures flagged `tmpl:true` (template-derived phantom overloads) are skipped
 
 ## Status
-**Witness green** — 410 free functions generated from reference-data.json compile
-clean against the real headers (`cmake --build … --target tcxLua`). Skipped:
-type members (Phase 2), sub-namespaced fns (`ns` → Lua tables, Phase 2),
-templates, and unbindable args (out-params / raw pointers / C arrays). Zero
-heuristics, zero denylist — every decision is read from the data.
+**In production** — ~420 free functions generated from reference-data.json, adopted
+as the real bindings (`src/generated/trussc_generated.cpp`, called from
+`setBindings()`). Skipped: type members (→ `tools/luagen-types`), sub-namespaced
+fns, templates, unbindable args (out-params / raw pointers / C arrays), and
+`hidden` symbols. Zero heuristics, zero denylist — every decision is read from
+the data.
+
+## Verify after regenerating
+1. Compile witness: build any tcxLua app/example (compiling the generated file IS
+   the structural check).
+2. Runtime check: `cd ../../bindcheck && ./run_bindcheck.sh --regen` — asserts every
+   binding is reachable from Lua and key calls work. See `bindcheck/README.md`.

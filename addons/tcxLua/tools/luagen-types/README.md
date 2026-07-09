@@ -30,11 +30,19 @@ definition (NOT visible in reference-data signatures) — needs deeper handling 
 hand-written shim. `Json`/`Xml` keep custom Lua glue (hand-written). (PlayingSound
 recovered once fields are filtered by `type`.)
 
-## Integration (v1) — WIRED IN
+## Integration — IN PRODUCTION
 `setGeneratedTypeBindings()` (in `src/generated/trussctype_generated.cpp`) is called
-from `setBindings()`. **v1 generates the 83 types that are NOT hand-written** (pure
-coverage gain: EventArgs, color spaces, Tween<float/Vec2/Vec3>, network, etc.) — the
-27 already-hand-written types stay hand-written for now (listed in EXCLUDE) to avoid
-double-registration. **v2** will migrate the 14 hand types whose generated form is a
-verified superset (Vec2/Vec3/Vec4/IVec2/IVec3/Color/Font/Mesh/Path/PlayingSound/
-Quaternion/Rect/Sound/SoundStream) by deleting their hand usertypes.
+from `setBindings()` and registers **99 generated usertypes**, including the core
+value types (Vec2/Vec3/Vec4/IVec2/IVec3/Color/Font/Mesh/Path/PlayingSound/Quaternion/
+Rect/Sound/SoundStream — their hand-written versions were removed). Still hand-written
+in `tcxLua.cpp`: 13 types with custom members (raw-pointer marshalling, `end_*`
+Lua-keyword renames, texture setters), enums/constants, and Json/Xml glue.
+Excluded from generation: Thread/SoundSource/Environment/VideoPlayerBase (their C++
+definition embeds the incomplete `internal::StreamInstance`, so `new_usertype<T>`
+can't instantiate sol's traits) — plus Json/Xml (custom glue).
+
+## Verify after regenerating
+`cd ../../bindcheck && ./run_bindcheck.sh --regen` (existence + call asserts, incl.
+regression checks for ctor default-arity and unary minus), then `./sweep_examples.sh`
+for constructor/overload changes — a past ctor-arity bug passed the existence check
+but crashed `Color.new(1,0,0)` at runtime. See `bindcheck/README.md`.
