@@ -214,9 +214,10 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds_);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
 #if defined(_WIN32) && defined(CURLSSLOPT_NATIVE_CA)
-    // Windows: verify TLS certs against the OS cert store. Without this an
-    // OpenSSL-backed libcurl has no CA bundle and every HTTPS request fails with
-    // "SSL connect error".
+    // Windows curl is built against Schannel, which already verifies against the
+    // OS certificate store — so this is a harmless no-op today. Kept as belt-and-
+    // suspenders: if the backend is ever swapped (e.g. an OpenSSL build), it makes
+    // curl use the OS trust store instead of failing with "SSL connect error".
     curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
 #endif
     if (followRedirects_) {
