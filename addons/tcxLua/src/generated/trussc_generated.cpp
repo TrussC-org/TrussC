@@ -48,14 +48,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](int min, int max) { return trussc::randomInt(min, max); }
     ));
     lua->set_function("randomSeed", [](unsigned int seed) { return trussc::randomSeed(seed); });
-    lua->set_function("tcEnumLabelsAdl", sol::overload(
-        [](trussc::Direction a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::BlendMode a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::EaseType a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::EaseMode a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::LayoutDirection a0) { return trussc::tcEnumLabelsAdl(a0); },
-        [](trussc::AxisMode a0) { return trussc::tcEnumLabelsAdl(a0); }
-    ));
     lua->set_function("signedNoise", sol::overload(
         [](float x) { return trussc::signedNoise(x); },
         [](float x, float y) { return trussc::signedNoise(x, y); },
@@ -323,6 +315,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("loadTextFile", [](const std::string & path) { return trussc::loadTextFile(path); });
     lua->set_function("saveTextFile", [](const std::string & path, const std::string & content) { return trussc::saveTextFile(path, content); });
     lua->set_function("appendToFile", [](const std::string & path, const std::string & content) { return trussc::appendToFile(path, content); });
+    lua->set_function("getVersion", []() { return trussc::getVersion(); });
     lua->set_function("getGlobalMouseX", []() { return trussc::getGlobalMouseX(); });
     lua->set_function("getGlobalMouseY", []() { return trussc::getGlobalMouseY(); });
     lua->set_function("getGlobalPMouseX", []() { return trussc::getGlobalPMouseX(); });
@@ -412,6 +405,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getStrokeCap", []() { return trussc::getStrokeCap(); });
     lua->set_function("setStrokeJoin", [](trussc::StrokeJoin join) { return trussc::setStrokeJoin(join); });
     lua->set_function("getStrokeJoin", []() { return trussc::getStrokeJoin(); });
+    lua->set_function("setPointSize", [](float px) { return trussc::setPointSize(px); });
+    lua->set_function("getPointSize", []() { return trussc::getPointSize(); });
+    lua->set_function("setPointStyle", [](trussc::PointStyle s) { return trussc::setPointStyle(s); });
+    lua->set_function("getPointStyle", []() { return trussc::getPointStyle(); });
     lua->set_function("setScissor", sol::overload(
         [](float x, float y, float w, float h) { return trussc::setScissor(x, y, w, h); },
         [](int x, int y, int w, int h) { return trussc::setScissor(x, y, w, h); }
@@ -638,7 +635,11 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("videoCodecName", [](trussc::VideoCodec c) { return trussc::videoCodecName(c); });
     lua->set_function("startRecording", sol::overload(
         [](const std::string & path) { return trussc::startRecording(path); },
-        [](const std::string & path, const trussc::VideoRecordSettings & settings) { return trussc::startRecording(path, settings); }
+        [](const std::string & path, const trussc::VideoRecordSettings & settings) { return trussc::startRecording(path, settings); },
+        [](const std::string & path, float durationSec) { return trussc::startRecording(path, durationSec); },
+        [](const trussc::Fbo & fbo, const std::string & path) { return trussc::startRecording(fbo, path); },
+        [](const trussc::Fbo & fbo, const std::string & path, const trussc::VideoRecordSettings & settings) { return trussc::startRecording(fbo, path, settings); },
+        [](const trussc::Fbo & fbo, const std::string & path, float durationSec) { return trussc::startRecording(fbo, path, durationSec); }
     ));
     lua->set_function("stopRecording", []() { return trussc::stopRecording(); });
     lua->set_function("isRecording", []() { return trussc::isRecording(); });

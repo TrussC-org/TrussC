@@ -649,14 +649,28 @@ if(TC_SHADER_SOURCES)
     set(_TC_SOKOL_SHDC_URL "${_TC_SOKOL_SHDC_BASE_URL}/${_TC_SOKOL_SHDC_DIR}/sokol-shdc${_TC_SOKOL_SHDC_EXT}")
     set(_TC_SOKOL_SHDC "${CMAKE_CURRENT_SOURCE_DIR}/tools/sokol-shdc/sokol-shdc${_TC_SOKOL_SHDC_EXT}")
 
-    # Download sokol-shdc if not present
+    # Download sokol-shdc if not present.
+    # raw.githubusercontent.com rate-limits anonymous requests (HTTP 429),
+    # especially from shared CI runner IPs, so retry with a pause before
+    # giving up. A failed file(DOWNLOAD) leaves a 0-byte file behind, which
+    # would satisfy the EXISTS guard on the next configure — remove it.
     if(NOT EXISTS "${_TC_SOKOL_SHDC}")
         message(STATUS "[TrussC] Downloading sokol-shdc...")
         file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools/sokol-shdc")
-        file(DOWNLOAD "${_TC_SOKOL_SHDC_URL}" "${_TC_SOKOL_SHDC}"
-            SHOW_PROGRESS
-            STATUS _TC_DOWNLOAD_STATUS)
-        list(GET _TC_DOWNLOAD_STATUS 0 _TC_DOWNLOAD_ERROR)
+        foreach(_TC_ATTEMPT RANGE 1 3)
+            file(DOWNLOAD "${_TC_SOKOL_SHDC_URL}" "${_TC_SOKOL_SHDC}"
+                SHOW_PROGRESS
+                STATUS _TC_DOWNLOAD_STATUS)
+            list(GET _TC_DOWNLOAD_STATUS 0 _TC_DOWNLOAD_ERROR)
+            if(NOT _TC_DOWNLOAD_ERROR)
+                break()
+            endif()
+            file(REMOVE "${_TC_SOKOL_SHDC}")
+            if(_TC_ATTEMPT LESS 3)
+                message(STATUS "[TrussC] sokol-shdc download failed (${_TC_DOWNLOAD_STATUS}), retrying in 5s (attempt ${_TC_ATTEMPT}/3)...")
+                execute_process(COMMAND ${CMAKE_COMMAND} -E sleep 5)
+            endif()
+        endforeach()
         if(_TC_DOWNLOAD_ERROR)
             message(FATAL_ERROR "Failed to download sokol-shdc: ${_TC_DOWNLOAD_STATUS}")
         endif()

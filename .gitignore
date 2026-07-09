@@ -117,9 +117,6 @@ addons/*
 !addons/tcxDepthCamera
 !addons/tcxDepthRecord
 
-# tcxLua binding-check harness — throwaway dev tool, not shipped (see its README)
-addons/tcxLua/_bindcheck/
-
 # =============================================================================
 # trusscli / Project Generator (built binary + build artifacts in tools/)
 # =============================================================================
