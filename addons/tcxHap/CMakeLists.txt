@@ -24,6 +24,13 @@ set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 set(SNAPPY_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(snappy)
+if(EMSCRIPTEN)
+    # snappy compiles itself with -Werror on Clang; its '#pragma clang loop'
+    # vectorization hints cannot be honored under wasm, and the resulting
+    # -Wpass-failed diagnostic would fail the build. Silence it on the
+    # dependency target only.
+    target_compile_options(snappy PRIVATE -Wno-pass-failed)
+endif()
 
 # -----------------------------------------------------------------------------
 # HAP reference decoder (BSD 2-Clause)
