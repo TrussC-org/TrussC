@@ -20,7 +20,8 @@ namespace trussc {
 void bringWindowToFront() {
     Display* display = XOpenDisplay(nullptr);
     if (!display) return;
-    Window window = (Window)(uintptr_t)sapp_x11_get_window();
+    // ::Window = the X11 window id type (trussc::Window shadows it in this ns)
+    ::Window window = (::Window)(uintptr_t)sapp_x11_get_window();
     if (window) {
         XRaiseWindow(display, window);
         XSetInputFocus(display, window, RevertToParent, CurrentTime);
@@ -82,7 +83,8 @@ void setWindowPosition(int x, int y) {
 void setWindowDecorated(bool decorated) {
     Display* display = XOpenDisplay(nullptr);
     if (!display) return;
-    Window window = (Window)(uintptr_t)sapp_x11_get_window();
+    // ::Window = the X11 window id type (trussc::Window shadows it in this ns)
+    ::Window window = (::Window)(uintptr_t)sapp_x11_get_window();
     if (window) {
         // Motif WM hints: clear the decorations flag to drop the WM-drawn frame.
         struct {
