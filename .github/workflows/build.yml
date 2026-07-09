@@ -153,6 +153,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-build-v4-
 
+      # sokol-shdc (shader compiler) is downloaded by core CMake from
+      # raw.githubusercontent.com, which 429s anonymous CI traffic. Cache the
+      # binary under a static key so runs stop re-downloading it (this also
+      # pins the tool — bump the key to pick up a newer upstream build).
+      - name: Cache sokol-shdc
+        uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
       # Linux: Install dependencies using shared script
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -276,6 +286,13 @@ jobs:
           key: android-build-v4-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
           restore-keys: android-build-v4-
 
+      # See the build job: avoid the 429-prone sokol-shdc download.
+      - name: Cache sokol-shdc
+        uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
       - name: Install Linux dependencies (for trusscli)
         run: |
           chmod +x tools/install_dependencies_linux.sh
@@ -344,6 +361,13 @@ jobs:
           restore-keys: |
             web-build-v3-
 
+      # See the build job: avoid the 429-prone sokol-shdc download.
+      - name: Cache sokol-shdc
+        uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
@@ -396,6 +420,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      # See the build job: avoid the 429-prone sokol-shdc download.
+      - name: Cache sokol-shdc
+        uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
 
       - name: Build videoPlayerExample (iOS device SDK, unsigned)
         run: |
