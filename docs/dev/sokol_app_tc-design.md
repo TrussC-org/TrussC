@@ -151,7 +151,9 @@ can feed events manually, so imgui does not chain us to sokol_app.
   swapchain, WndProc, DPI v2 — audited good) + sokol_app's win32 keyboard
   tables; DXGI waitable ticks replace WM_TIMER (kills the 64 Hz cap); main
   window unified. The win branch is reference source, not merged as-is.
-  - **P1 code COMPLETE (compile-verification via CI):** the header implements
+  - **P1 code COMPLETE — full CI green on all platforms (mac/win/linux/
+    web/android incl. 108 example builds, addon tests, core tests 3/3 and
+    the HotReload smoke test on Windows):** the header implements
     the sapp_* API on Windows (win32 + D3D11), mirroring the mac P0b shim
     strategy — platform/win/sokol_impl.cpp includes sokol_app.h
     declarations-only, TrussC.h untouched; NEW tcWindowWin.cpp adapter
