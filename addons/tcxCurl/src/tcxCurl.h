@@ -212,7 +212,12 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds_);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    // No short CURLOPT_CONNECTTIMEOUT: curl's Schannel backend reuses the connect
+    // deadline for mid-transfer TLS *renegotiation*, so a 10s connect timeout made
+    // any request whose first response byte arrives after 10s (e.g. a ~13s OpenAI
+    // image generation, where the server then requests renegotiation) fail with
+    // "SSL/TLS connection timeout". CURLOPT_TIMEOUT already bounds the whole
+    // operation, so the connect phase stays bounded without breaking renegotiation.
 #if defined(_WIN32) && defined(CURLSSLOPT_NATIVE_CA)
     // Windows curl is built against Schannel, which already verifies against the
     // OS certificate store — so this is a harmless no-op today. Kept as belt-and-
