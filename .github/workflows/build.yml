@@ -379,6 +379,33 @@ jobs:
         if: always()
         run: ccache -s || true
 
+  # Compile-only iOS gate: build one addon-free example against the device SDK
+  # with code signing disabled. Catches iOS platform-layer rot at compile time
+  # (the tcFileDialog attribute-order break sat undetected for weeks because
+  # nothing in CI compiled against the iOS SDK). Runtime behavior is still
+  # verified on a real device by hand.
+  # videoPlayerExample, not AllFeaturesExample: tcxLua's generated bindings
+  # reference the sync dialogs (unavailable on iOS) — the binding generator
+  # needs platform awareness before the full example can compile here.
+  # No ccache: the Xcode generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER.
+  build-ios:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    timeout-minutes: 60
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build videoPlayerExample (iOS device SDK, unsigned)
+        run: |
+          cd examples/video/videoPlayerExample
+          cmake -B build-ios -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+          cmake --build build-ios --config Release -- \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
   # Verify the API reference (docs/reference/) against the real C++ headers.
   # The structure is DERIVED from the clang AST, so signatures can't drift — the
   # old signature-probe is obsolete. check.js instead guards the prose sidecar:
@@ -406,12 +433,12 @@ jobs:
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,
   # so matrix/job renames never break required checks. It fails on any failed,
-  # cancelled, or unexpectedly-skipped job; the three heavy build jobs may be
+  # cancelled, or unexpectedly-skipped job; the four heavy build jobs may be
   # skipped only when the `changes` gate declared the diff docs-only.
   # ---------------------------------------------------------------------------
   ci-ok:
     runs-on: ubuntu-latest
-    needs: [changes, build, build-android, build-web, reference-check]
+    needs: [changes, build, build-android, build-web, build-ios, reference-check]
     if: always()
     steps:
       - name: Verify job results
@@ -421,6 +448,7 @@ jobs:
           R_BUILD: ${{ needs.build.result }}
           R_ANDROID: ${{ needs.build-android.result }}
           R_WEB: ${{ needs.build-web.result }}
+          R_IOS: ${{ needs.build-ios.result }}
           R_REF: ${{ needs.reference-check.result }}
         run: |
           ok=1
@@ -440,6 +468,7 @@ jobs:
           check "build"           "$R_BUILD"    skippable
           check "build-android"   "$R_ANDROID"  skippable
           check "build-web"       "$R_WEB"      skippable
+          check "build-ios"       "$R_IOS"      skippable
           check "reference-check" "$R_REF"
           [ "$ok" = "1" ] || { echo "ci-ok: FAILING"; exit 1; }
           echo "ci-ok: all good"
