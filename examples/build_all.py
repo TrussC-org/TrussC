@@ -169,6 +169,24 @@ def find_test_binary(test_dir, platform_info):
                 return p
     return None
 
+def run_test_binary(binary, cwd):
+    # Run a test executable, CAPTURE its output and echo it through our own
+    # (flushed) stdout. Inherited-handle child output gets lost or reordered
+    # on the Windows CI runners, which made failing tests undiagnosable.
+    try:
+        r = subprocess.run([binary], cwd=cwd, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, timeout=600)
+    except subprocess.TimeoutExpired as e:
+        if e.stdout:
+            print(e.stdout.decode('utf-8', errors='replace'), flush=True)
+        print("  (test timed out after 600s)", flush=True)
+        return False
+    if r.stdout:
+        print(r.stdout.decode('utf-8', errors='replace'), flush=True)
+    if r.returncode != 0:
+        print(f"  (exit code {r.returncode} / 0x{r.returncode & 0xFFFFFFFF:08X})", flush=True)
+    return r.returncode == 0
+
 def run_command(cmd, cwd, verbose=False):
     try:
         if verbose:
@@ -222,7 +240,7 @@ def build_and_run_test(test_dir, pg_bin, platform_info, args):
         return False, "binary-missing"
 
     Colors.print(f"  Running {os.path.relpath(binary, test_dir)} ...", Colors.YELLOW)
-    if not run_command([binary], cwd=test_dir, verbose=True):  # always stream test output
+    if not run_test_binary(binary, cwd=test_dir):   # captured + echoed (see run_test_binary)
         return False, "run"
     return True, None
 
@@ -247,7 +265,7 @@ def build_and_run_unit_test(test_dir, pg_bin, platform_info, args):
         return False, "binary-missing"
 
     Colors.print(f"  Running {os.path.relpath(binary, test_dir)} ...", Colors.YELLOW)
-    if not run_command([binary], cwd=test_dir, verbose=True):  # always stream test output
+    if not run_test_binary(binary, cwd=test_dir):   # captured + echoed (see run_test_binary)
         return False, "run"
     return True, None
 
