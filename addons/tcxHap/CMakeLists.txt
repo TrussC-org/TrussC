@@ -25,6 +25,13 @@ set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 set(SNAPPY_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(snappy)
 
+# Snappy adds -Werror for Clang builds; its `#pragma clang loop` hints can fail
+# on backends that can't vectorize them (e.g. wasm/em++), turning the
+# -Wpass-failed diagnostic into a hard error. Suppress just that diagnostic.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(snappy PRIVATE -Wno-pass-failed)
+endif()
+
 # -----------------------------------------------------------------------------
 # HAP reference decoder (BSD 2-Clause)
 # Note: Not a CMake project, so we fetch and compile source directly
