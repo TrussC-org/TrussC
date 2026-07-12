@@ -25,9 +25,10 @@
 struct lua_State;
 
 struct LuaLintIssue {
-    std::string chunk;  // chunk (file) name the read occurs in
-    int line;           // 1-based line of the read
-    std::string name;   // the undefined global being read
+    std::string chunk;       // chunk (file) name the read occurs in
+    int line;                // 1-based line of the read
+    std::string name;        // the undefined global being read
+    std::string suggestion;  // nearest known name (empty = no good match)
 };
 
 // Lint the given (chunkName, code) list against lua's current globals
