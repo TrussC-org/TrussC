@@ -12,6 +12,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     {
         sol::usertype<trussc::Vec2> t = lua->new_usertype<trussc::Vec2>("Vec2",
             sol::constructors<trussc::Vec2(), trussc::Vec2(float, float), trussc::Vec2(float)>(),
+            sol::call_constructor, sol::constructors<trussc::Vec2(), trussc::Vec2(float, float), trussc::Vec2(float)>(),
             sol::meta_function::index, [](const trussc::Vec2& a, int b){ return a[b]; },
             sol::meta_function::addition, [](const trussc::Vec2& a, const trussc::Vec2 & b){ return a + b; },
             sol::meta_function::subtraction, [](const trussc::Vec2& a, const trussc::Vec2 & b){ return a - b; },
@@ -42,6 +43,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     {
         sol::usertype<trussc::Vec3> t = lua->new_usertype<trussc::Vec3>("Vec3",
             sol::constructors<trussc::Vec3(), trussc::Vec3(float, float, float), trussc::Vec3(float), trussc::Vec3(const trussc::Vec2 &), trussc::Vec3(const trussc::Vec2 &, float)>(),
+            sol::call_constructor, sol::constructors<trussc::Vec3(), trussc::Vec3(float, float, float), trussc::Vec3(float), trussc::Vec3(const trussc::Vec2 &), trussc::Vec3(const trussc::Vec2 &, float)>(),
             sol::meta_function::index, [](const trussc::Vec3& a, int b){ return a[b]; },
             sol::meta_function::addition, [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a + b; },
             sol::meta_function::subtraction, [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a - b; },
@@ -69,6 +71,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     {
         sol::usertype<trussc::IVec2> t = lua->new_usertype<trussc::IVec2>("IVec2",
             sol::constructors<trussc::IVec2(), trussc::IVec2(int, int), trussc::IVec2(int)>(),
+            sol::call_constructor, sol::constructors<trussc::IVec2(), trussc::IVec2(int, int), trussc::IVec2(int)>(),
             sol::meta_function::addition, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a + b; },
             sol::meta_function::subtraction, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a - b; },
             sol::meta_function::unary_minus, [](const trussc::IVec2& a){ return -a; },
@@ -81,6 +84,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     {
         sol::usertype<trussc::IVec3> t = lua->new_usertype<trussc::IVec3>("IVec3",
             sol::constructors<trussc::IVec3(), trussc::IVec3(int, int, int), trussc::IVec3(int), trussc::IVec3(const trussc::IVec2 &), trussc::IVec3(const trussc::IVec2 &, int)>(),
+            sol::call_constructor, sol::constructors<trussc::IVec3(), trussc::IVec3(int, int, int), trussc::IVec3(int), trussc::IVec3(const trussc::IVec2 &), trussc::IVec3(const trussc::IVec2 &, int)>(),
             sol::meta_function::addition, [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a + b; },
             sol::meta_function::subtraction, [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a - b; },
             sol::meta_function::unary_minus, [](const trussc::IVec3& a){ return -a; },
@@ -95,6 +99,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     {
         sol::usertype<trussc::Vec4> t = lua->new_usertype<trussc::Vec4>("Vec4",
             sol::constructors<trussc::Vec4(), trussc::Vec4(float, float, float, float), trussc::Vec4(float), trussc::Vec4(const trussc::Vec3 &), trussc::Vec4(const trussc::Vec3 &, float), trussc::Vec4(const trussc::Vec2 &), trussc::Vec4(const trussc::Vec2 &, float), trussc::Vec4(const trussc::Vec2 &, float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::Vec4(), trussc::Vec4(float, float, float, float), trussc::Vec4(float), trussc::Vec4(const trussc::Vec3 &), trussc::Vec4(const trussc::Vec3 &, float), trussc::Vec4(const trussc::Vec2 &), trussc::Vec4(const trussc::Vec2 &, float), trussc::Vec4(const trussc::Vec2 &, float, float)>(),
             sol::meta_function::index, [](const trussc::Vec4& a, int b){ return a[b]; },
             sol::meta_function::addition, [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a + b; },
             sol::meta_function::subtraction, [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a - b; },
@@ -119,6 +124,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     {
         sol::usertype<trussc::Quaternion> t = lua->new_usertype<trussc::Quaternion>("Quaternion",
             sol::constructors<trussc::Quaternion(), trussc::Quaternion(float, float, float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::Quaternion(), trussc::Quaternion(float, float, float, float)>(),
             sol::meta_function::equal_to, [](const trussc::Quaternion& a, const trussc::Quaternion & b){ return a == b; },
             sol::meta_function::multiplication, [](const trussc::Quaternion& a, const trussc::Quaternion & b){ return a * b; });
         t["w"] = &trussc::Quaternion::w;
@@ -151,7 +157,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::Rect> t = lua->new_usertype<trussc::Rect>("Rect",
-            sol::constructors<trussc::Rect(), trussc::Rect(float, float, float, float), trussc::Rect(const trussc::Vec2 &, float, float), trussc::Rect(const trussc::Vec3 &, float, float), trussc::Rect(float, float, float, float, float)>());
+            sol::constructors<trussc::Rect(), trussc::Rect(float, float, float, float), trussc::Rect(const trussc::Vec2 &, float, float), trussc::Rect(const trussc::Vec3 &, float, float), trussc::Rect(float, float, float, float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::Rect(), trussc::Rect(float, float, float, float), trussc::Rect(const trussc::Vec2 &, float, float), trussc::Rect(const trussc::Vec3 &, float, float), trussc::Rect(float, float, float, float, float)>());
         t["x"] = &trussc::Rect::x;
         t["y"] = &trussc::Rect::y;
         t["width"] = &trussc::Rect::width;
@@ -167,7 +174,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::Ray> t = lua->new_usertype<trussc::Ray>("Ray",
-            sol::constructors<trussc::Ray(), trussc::Ray(const trussc::Vec3 &, const trussc::Vec3 &)>());
+            sol::constructors<trussc::Ray(), trussc::Ray(const trussc::Vec3 &, const trussc::Vec3 &)>(),
+            sol::call_constructor, sol::constructors<trussc::Ray(), trussc::Ray(const trussc::Vec3 &, const trussc::Vec3 &)>());
         t["origin"] = &trussc::Ray::origin;
         t["direction"] = &trussc::Ray::direction;
         t["at"] = &trussc::Ray::at;
@@ -186,20 +194,23 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener",
-            sol::constructors<trussc::EventListener()>());
+            sol::constructors<trussc::EventListener()>(),
+            sol::call_constructor, sol::constructors<trussc::EventListener()>());
         t["disconnect"] = &trussc::EventListener::disconnect;
         t["isConnected"] = &trussc::EventListener::isConnected;
     }
     {
         sol::usertype<trussc::LogEventArgs> t = lua->new_usertype<trussc::LogEventArgs>("LogEventArgs",
-            sol::constructors<trussc::LogEventArgs(trussc::LogLevel, const std::string &)>());
+            sol::constructors<trussc::LogEventArgs(trussc::LogLevel, const std::string &)>(),
+            sol::call_constructor, sol::constructors<trussc::LogEventArgs(trussc::LogLevel, const std::string &)>());
         t["level"] = &trussc::LogEventArgs::level;
         t["message"] = &trussc::LogEventArgs::message;
         t["timestamp"] = &trussc::LogEventArgs::timestamp;
     }
     {
         sol::usertype<trussc::Logger> t = lua->new_usertype<trussc::Logger>("Logger",
-            sol::constructors<trussc::Logger()>());
+            sol::constructors<trussc::Logger()>(),
+            sol::call_constructor, sol::constructors<trussc::Logger()>());
         t["onLog"] = &trussc::Logger::onLog;
         t["log"] = &trussc::Logger::log;
         t["setConsoleLogLevel"] = &trussc::Logger::setConsoleLogLevel;
@@ -213,11 +224,13 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream",
-            sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>());
+            sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>(),
+            sol::call_constructor, sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>());
     }
     {
         sol::usertype<trussc::Color> t = lua->new_usertype<trussc::Color>("Color",
             sol::constructors<trussc::Color(), trussc::Color(float, float, float), trussc::Color(float, float, float, float), trussc::Color(float), trussc::Color(float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::Color(), trussc::Color(float, float, float), trussc::Color(float, float, float, float), trussc::Color(float), trussc::Color(float, float)>(),
             sol::meta_function::addition, [](const trussc::Color& a, const trussc::Color & b){ return a + b; },
             sol::meta_function::subtraction, [](const trussc::Color& a, const trussc::Color & b){ return a - b; },
             sol::meta_function::multiplication, [](const trussc::Color& a, float b){ return a * b; },
@@ -250,6 +263,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     {
         sol::usertype<trussc::ColorLinear> t = lua->new_usertype<trussc::ColorLinear>("ColorLinear",
             sol::constructors<trussc::ColorLinear(), trussc::ColorLinear(float, float, float), trussc::ColorLinear(float, float, float, float), trussc::ColorLinear(float), trussc::ColorLinear(float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::ColorLinear(), trussc::ColorLinear(float, float, float), trussc::ColorLinear(float, float, float, float), trussc::ColorLinear(float), trussc::ColorLinear(float, float)>(),
             sol::meta_function::addition, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a + b; },
             sol::meta_function::subtraction, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a - b; },
             sol::meta_function::multiplication, sol::overload([](const trussc::ColorLinear& a, float b){ return a * b; }, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a * b; }),
@@ -269,7 +283,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::ColorHSB> t = lua->new_usertype<trussc::ColorHSB>("ColorHSB",
-            sol::constructors<trussc::ColorHSB(), trussc::ColorHSB(float, float, float), trussc::ColorHSB(float, float, float, float)>());
+            sol::constructors<trussc::ColorHSB(), trussc::ColorHSB(float, float, float), trussc::ColorHSB(float, float, float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::ColorHSB(), trussc::ColorHSB(float, float, float), trussc::ColorHSB(float, float, float, float)>());
         t["h"] = &trussc::ColorHSB::h;
         t["s"] = &trussc::ColorHSB::s;
         t["b"] = &trussc::ColorHSB::b;
@@ -282,7 +297,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab",
-            sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>());
+            sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>());
         t["L"] = &trussc::ColorOKLab::L;
         t["a"] = &trussc::ColorOKLab::a;
         t["b"] = &trussc::ColorOKLab::b;
@@ -295,7 +311,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::ColorOKLCH> t = lua->new_usertype<trussc::ColorOKLCH>("ColorOKLCH",
-            sol::constructors<trussc::ColorOKLCH(), trussc::ColorOKLCH(float, float, float), trussc::ColorOKLCH(float, float, float, float)>());
+            sol::constructors<trussc::ColorOKLCH(), trussc::ColorOKLCH(float, float, float), trussc::ColorOKLCH(float, float, float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::ColorOKLCH(), trussc::ColorOKLCH(float, float, float), trussc::ColorOKLCH(float, float, float, float)>());
         t["L"] = &trussc::ColorOKLCH::L;
         t["C"] = &trussc::ColorOKLCH::C;
         t["H"] = &trussc::ColorOKLCH::H;
@@ -489,7 +506,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream",
-            sol::constructors<trussc::SoundStream()>());
+            sol::constructors<trussc::SoundStream()>(),
+            sol::call_constructor, sol::constructors<trussc::SoundStream()>());
         t["loadStream"] = sol::overload([](trussc::SoundStream& self, const std::string & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const std::string & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
         t["getDuration"] = &trussc::SoundStream::getDuration;
         t["getPath"] = &trussc::SoundStream::getPath;
@@ -546,7 +564,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::Sound> t = lua->new_usertype<trussc::Sound>("Sound",
-            sol::constructors<trussc::Sound()>());
+            sol::constructors<trussc::Sound()>(),
+            sol::call_constructor, sol::constructors<trussc::Sound()>());
         t["load"] = &trussc::Sound::load;
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
         t["loadStream"] = sol::overload([](trussc::Sound& self, const std::string & path) { return self.loadStream(path); }, [](trussc::Sound& self, const std::string & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
@@ -594,7 +613,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector",
-            sol::constructors<trussc::JsonReadReflector(trussc::Json)>());
+            sol::constructors<trussc::JsonReadReflector(trussc::Json)>(),
+            sol::call_constructor, sol::constructors<trussc::JsonReadReflector(trussc::Json)>());
         t["applied"] = &trussc::JsonReadReflector::applied;
         t["skipped"] = &trussc::JsonReadReflector::skipped;
         t["readOnly"] = &trussc::JsonReadReflector::readOnly;
@@ -603,7 +623,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::FileWriter> t = lua->new_usertype<trussc::FileWriter>("FileWriter",
-            sol::constructors<trussc::FileWriter()>());
+            sol::constructors<trussc::FileWriter()>(),
+            sol::call_constructor, sol::constructors<trussc::FileWriter()>());
         t["open"] = sol::overload([](trussc::FileWriter& self, const std::string & path) { return self.open(path); }, [](trussc::FileWriter& self, const std::string & path, bool append) { return self.open(path, append); });
         t["close"] = &trussc::FileWriter::close;
         t["isOpen"] = &trussc::FileWriter::isOpen;
@@ -613,7 +634,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader",
-            sol::constructors<trussc::FileReader()>());
+            sol::constructors<trussc::FileReader()>(),
+            sol::call_constructor, sol::constructors<trussc::FileReader()>());
         t["open"] = &trussc::FileReader::open;
         t["close"] = &trussc::FileReader::close;
         t["isOpen"] = &trussc::FileReader::isOpen;
@@ -676,6 +698,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     {
         sol::usertype<trussc::Path> t = lua->new_usertype<trussc::Path>("Path",
             sol::constructors<trussc::Path(), trussc::Path(const std::vector<trussc::Vec2> &), trussc::Path(const std::vector<trussc::Vec3> &)>(),
+            sol::call_constructor, sol::constructors<trussc::Path(), trussc::Path(const std::vector<trussc::Vec2> &), trussc::Path(const std::vector<trussc::Vec3> &)>(),
             sol::meta_function::index, [](const trussc::Path& a, int b){ return a[b]; });
         t["addVertex"] = sol::overload([](trussc::Path& self, float x, float y) { return self.addVertex(x, y); }, [](trussc::Path& self, float x, float y, float z) { return self.addVertex(x, y, z); }, [](trussc::Path& self, const trussc::Vec2 & v) { return self.addVertex(v); }, [](trussc::Path& self, const trussc::Vec3 & v) { return self.addVertex(v); });
         t["addVertices"] = sol::overload([](trussc::Path& self, const std::vector<trussc::Vec2> & verts) { return self.addVertices(verts); }, [](trussc::Path& self, const std::vector<trussc::Vec3> & verts) { return self.addVertices(verts); });
@@ -706,7 +729,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::IesProfile> t = lua->new_usertype<trussc::IesProfile>("IesProfile",
-            sol::constructors<trussc::IesProfile()>());
+            sol::constructors<trussc::IesProfile()>(),
+            sol::call_constructor, sol::constructors<trussc::IesProfile()>());
         t["load"] = &trussc::IesProfile::load;
         t["loadFromString"] = &trussc::IesProfile::loadFromString;
         t["isLoaded"] = &trussc::IesProfile::isLoaded;
@@ -735,7 +759,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::Mesh> t = lua->new_usertype<trussc::Mesh>("Mesh",
-            sol::constructors<trussc::Mesh()>());
+            sol::constructors<trussc::Mesh()>(),
+            sol::call_constructor, sol::constructors<trussc::Mesh()>());
         t["setMode"] = &trussc::Mesh::setMode;
         t["getMode"] = &trussc::Mesh::getMode;
         t["addVertex"] = sol::overload([](trussc::Mesh& self, float x, float y) -> decltype(auto) { return self.addVertex(x, y); }, [](trussc::Mesh& self, float x, float y, float z) -> decltype(auto) { return self.addVertex(x, y, z); }, [](trussc::Mesh& self, const trussc::Vec2 & v) -> decltype(auto) { return self.addVertex(v); }, [](trussc::Mesh& self, const trussc::Vec3 & v) -> decltype(auto) { return self.addVertex(v); });
@@ -802,7 +827,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::StrokeMesh> t = lua->new_usertype<trussc::StrokeMesh>("StrokeMesh",
-            sol::constructors<trussc::StrokeMesh(), trussc::StrokeMesh(const trussc::Path &)>());
+            sol::constructors<trussc::StrokeMesh(), trussc::StrokeMesh(const trussc::Path &)>(),
+            sol::call_constructor, sol::constructors<trussc::StrokeMesh(), trussc::StrokeMesh(const trussc::Path &)>());
         t["setWidth"] = &trussc::StrokeMesh::setWidth;
         t["setColor"] = &trussc::StrokeMesh::setColor;
         t["setCapType"] = &trussc::StrokeMesh::setCapType;
@@ -821,7 +847,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::Font> t = lua->new_usertype<trussc::Font>("Font",
-            sol::constructors<trussc::Font()>());
+            sol::constructors<trussc::Font()>(),
+            sol::call_constructor, sol::constructors<trussc::Font()>());
         t["load"] = &trussc::Font::load;
         t["isLoaded"] = &trussc::Font::isLoaded;
         t["setAlign"] = sol::overload([](trussc::Font& self, trussc::Direction h, trussc::Direction v) { return self.setAlign(h, v); }, [](trussc::Font& self, trussc::Direction h) { return self.setAlign(h); });
@@ -869,7 +896,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::FullscreenShader> t = lua->new_usertype<trussc::FullscreenShader>("FullscreenShader",
-            sol::constructors<trussc::FullscreenShader()>());
+            sol::constructors<trussc::FullscreenShader()>(),
+            sol::call_constructor, sol::constructors<trussc::FullscreenShader()>());
         t["draw"] = &trussc::FullscreenShader::draw;
     }
     {
@@ -889,7 +917,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
     {
         sol::usertype<trussc::VideoGrabber> t = lua->new_usertype<trussc::VideoGrabber>("VideoGrabber",
-            sol::constructors<trussc::VideoGrabber()>());
+            sol::constructors<trussc::VideoGrabber()>(),
+            sol::call_constructor, sol::constructors<trussc::VideoGrabber()>());
         t["listDevices"] = &trussc::VideoGrabber::listDevices;
         t["setDeviceID"] = &trussc::VideoGrabber::setDeviceID;
         t["getDeviceID"] = &trussc::VideoGrabber::getDeviceID;
@@ -922,7 +951,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
     {
         sol::usertype<trussc::VideoPlayer> t = lua->new_usertype<trussc::VideoPlayer>("VideoPlayer",
-            sol::constructors<trussc::VideoPlayer()>());
+            sol::constructors<trussc::VideoPlayer()>(),
+            sol::call_constructor, sol::constructors<trussc::VideoPlayer()>());
         t["load"] = &trussc::VideoPlayer::load;
         t["close"] = &trussc::VideoPlayer::close;
         t["update"] = &trussc::VideoPlayer::update;
@@ -973,7 +1003,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     {
         sol::usertype<trussc::VideoWriter> t = lua->new_usertype<trussc::VideoWriter>("VideoWriter",
-            sol::constructors<trussc::VideoWriter()>());
+            sol::constructors<trussc::VideoWriter()>(),
+            sol::call_constructor, sol::constructors<trussc::VideoWriter()>());
         t["open"] = sol::overload([](trussc::VideoWriter& self, const std::string & path, int width, int height) { return self.open(path, width, height); }, [](trussc::VideoWriter& self, const std::string & path, int width, int height, const trussc::VideoRecordSettings & settings) { return self.open(path, width, height, settings); });
         t["close"] = &trussc::VideoWriter::close;
         t["isOpen"] = &trussc::VideoWriter::isOpen;
@@ -993,7 +1024,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     {
         sol::usertype<trussc::ScreenRecorder> t = lua->new_usertype<trussc::ScreenRecorder>("ScreenRecorder",
-            sol::constructors<trussc::ScreenRecorder()>());
+            sol::constructors<trussc::ScreenRecorder()>(),
+            sol::call_constructor, sol::constructors<trussc::ScreenRecorder()>());
         t["start"] = sol::overload([](trussc::ScreenRecorder& self, const std::string & path) { return self.start(path); }, [](trussc::ScreenRecorder& self, const std::string & path, const trussc::VideoRecordSettings & settings) { return self.start(path, settings); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const std::string & path) { return self.start(fbo, path); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const std::string & path, const trussc::VideoRecordSettings & settings) { return self.start(fbo, path, settings); }, [](trussc::ScreenRecorder& self, const std::string & path, float durationSec) { return self.start(path, durationSec); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const std::string & path, float durationSec) { return self.start(fbo, path, durationSec); });
         t["stop"] = &trussc::ScreenRecorder::stop;
         t["isRecording"] = &trussc::ScreenRecorder::isRecording;
@@ -1016,7 +1048,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     {
         sol::usertype<trussc::UdpSocket> t = lua->new_usertype<trussc::UdpSocket>("UdpSocket",
-            sol::constructors<trussc::UdpSocket()>());
+            sol::constructors<trussc::UdpSocket()>(),
+            sol::call_constructor, sol::constructors<trussc::UdpSocket()>());
         t["onReceive"] = &trussc::UdpSocket::onReceive;
         t["onError"] = &trussc::UdpSocket::onError;
         t["create"] = &trussc::UdpSocket::create;
@@ -1070,7 +1103,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     {
         sol::usertype<trussc::TcpClient> t = lua->new_usertype<trussc::TcpClient>("TcpClient",
-            sol::constructors<trussc::TcpClient()>());
+            sol::constructors<trussc::TcpClient()>(),
+            sol::call_constructor, sol::constructors<trussc::TcpClient()>());
         t["onConnect"] = &trussc::TcpClient::onConnect;
         t["onReceive"] = &trussc::TcpClient::onReceive;
         t["onDisconnect"] = &trussc::TcpClient::onDisconnect;
@@ -1121,7 +1155,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
     {
         sol::usertype<trussc::TcpServer> t = lua->new_usertype<trussc::TcpServer>("TcpServer",
-            sol::constructors<trussc::TcpServer()>());
+            sol::constructors<trussc::TcpServer()>(),
+            sol::call_constructor, sol::constructors<trussc::TcpServer()>());
         t["onClientConnect"] = &trussc::TcpServer::onClientConnect;
         t["onReceive"] = &trussc::TcpServer::onReceive;
         t["onClientDisconnect"] = &trussc::TcpServer::onClientDisconnect;
@@ -1169,7 +1204,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
     {
         sol::usertype<trussc::Serial> t = lua->new_usertype<trussc::Serial>("Serial",
-            sol::constructors<trussc::Serial()>());
+            sol::constructors<trussc::Serial()>(),
+            sol::call_constructor, sol::constructors<trussc::Serial()>());
         t["getDeviceList"] = &trussc::Serial::getDeviceList;
         t["setup"] = sol::overload([](trussc::Serial& self, const std::string & portName, int baudRate) { return self.setup(portName, baudRate); }, [](trussc::Serial& self, int deviceIndex, int baudRate) { return self.setup(deviceIndex, baudRate); });
         t["close"] = &trussc::Serial::close;
@@ -1189,7 +1225,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
 #endif
     {
         sol::usertype<trussc::ChipSoundNote> t = lua->new_usertype<trussc::ChipSoundNote>("ChipSoundNote",
-            sol::constructors<trussc::ChipSoundNote(), trussc::ChipSoundNote(trussc::Wave, float, float), trussc::ChipSoundNote(trussc::Wave, float, float, float)>());
+            sol::constructors<trussc::ChipSoundNote(), trussc::ChipSoundNote(trussc::Wave, float, float), trussc::ChipSoundNote(trussc::Wave, float, float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::ChipSoundNote(), trussc::ChipSoundNote(trussc::Wave, float, float), trussc::ChipSoundNote(trussc::Wave, float, float, float)>());
         t["wave"] = &trussc::ChipSoundNote::wave;
         t["hz"] = &trussc::ChipSoundNote::hz;
         t["volume"] = &trussc::ChipSoundNote::volume;
@@ -1213,15 +1250,18 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::Tween<float>> t = lua->new_usertype<trussc::Tween<float>>("Tween_float",
-            sol::constructors<trussc::Tween<float>(), trussc::Tween<float>(float, float, float), trussc::Tween<float>(float, float, float, trussc::EaseType), trussc::Tween<float>(float, float, float, trussc::EaseType, trussc::EaseMode)>());
+            sol::constructors<trussc::Tween<float>(), trussc::Tween<float>(float, float, float), trussc::Tween<float>(float, float, float, trussc::EaseType), trussc::Tween<float>(float, float, float, trussc::EaseType, trussc::EaseMode)>(),
+            sol::call_constructor, sol::constructors<trussc::Tween<float>(), trussc::Tween<float>(float, float, float), trussc::Tween<float>(float, float, float, trussc::EaseType), trussc::Tween<float>(float, float, float, trussc::EaseType, trussc::EaseMode)>());
     }
     {
         sol::usertype<trussc::Tween<trussc::Vec2>> t = lua->new_usertype<trussc::Tween<trussc::Vec2>>("Tween_Vec2",
-            sol::constructors<trussc::Tween<trussc::Vec2>(), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType, trussc::EaseMode)>());
+            sol::constructors<trussc::Tween<trussc::Vec2>(), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType, trussc::EaseMode)>(),
+            sol::call_constructor, sol::constructors<trussc::Tween<trussc::Vec2>(), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType, trussc::EaseMode)>());
     }
     {
         sol::usertype<trussc::Tween<trussc::Vec3>> t = lua->new_usertype<trussc::Tween<trussc::Vec3>>("Tween_Vec3",
-            sol::constructors<trussc::Tween<trussc::Vec3>(), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType, trussc::EaseMode)>());
+            sol::constructors<trussc::Tween<trussc::Vec3>(), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType, trussc::EaseMode)>(),
+            sol::call_constructor, sol::constructors<trussc::Tween<trussc::Vec3>(), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType, trussc::EaseMode)>());
     }
     {
         sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
@@ -1229,7 +1269,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::Node> t = lua->new_usertype<trussc::Node>("Node",
-            sol::constructors<trussc::Node()>());
+            sol::constructors<trussc::Node()>(),
+            sol::call_constructor, sol::constructors<trussc::Node()>());
         t["localMatrixChanged"] = &trussc::Node::localMatrixChanged;
         t["setup"] = &trussc::Node::setup;
         t["update"] = &trussc::Node::update;
@@ -1353,7 +1394,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::RectNodeButton> t = lua->new_usertype<trussc::RectNodeButton>("RectNodeButton",
-            sol::constructors<trussc::RectNodeButton()>());
+            sol::constructors<trussc::RectNodeButton()>(),
+            sol::call_constructor, sol::constructors<trussc::RectNodeButton()>());
         t["normalColor"] = &trussc::RectNodeButton::normalColor;
         t["hoverColor"] = &trussc::RectNodeButton::hoverColor;
         t["pressColor"] = &trussc::RectNodeButton::pressColor;
@@ -1363,7 +1405,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::LayoutMod> t = lua->new_usertype<trussc::LayoutMod>("LayoutMod",
-            sol::constructors<trussc::LayoutMod(), trussc::LayoutMod(trussc::LayoutDirection), trussc::LayoutMod(trussc::LayoutDirection, float)>());
+            sol::constructors<trussc::LayoutMod(), trussc::LayoutMod(trussc::LayoutDirection), trussc::LayoutMod(trussc::LayoutDirection, float)>(),
+            sol::call_constructor, sol::constructors<trussc::LayoutMod(), trussc::LayoutMod(trussc::LayoutDirection), trussc::LayoutMod(trussc::LayoutDirection, float)>());
         t["getDirection"] = &trussc::LayoutMod::getDirection;
         t["setDirection"] = &trussc::LayoutMod::setDirection;
         t["getSpacing"] = &trussc::LayoutMod::getSpacing;
@@ -1385,7 +1428,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::ScrollContainer> t = lua->new_usertype<trussc::ScrollContainer>("ScrollContainer",
-            sol::constructors<trussc::ScrollContainer()>());
+            sol::constructors<trussc::ScrollContainer()>(),
+            sol::call_constructor, sol::constructors<trussc::ScrollContainer()>());
         t["setContent"] = &trussc::ScrollContainer::setContent;
         t["getContent"] = &trussc::ScrollContainer::getContent;
         t["getContentRect"] = &trussc::ScrollContainer::getContentRect;
@@ -1418,7 +1462,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::TweenMod> t = lua->new_usertype<trussc::TweenMod>("TweenMod",
-            sol::constructors<trussc::TweenMod()>());
+            sol::constructors<trussc::TweenMod()>(),
+            sol::call_constructor, sol::constructors<trussc::TweenMod()>());
         t["complete"] = &trussc::TweenMod::complete;
         t["moveTo"] = sol::overload([](trussc::TweenMod& self, float x, float y) -> decltype(auto) { return self.moveTo(x, y); }, [](trussc::TweenMod& self, float x, float y, float z) -> decltype(auto) { return self.moveTo(x, y, z); }, [](trussc::TweenMod& self, const trussc::Vec3 & pos) -> decltype(auto) { return self.moveTo(pos); }, [](trussc::TweenMod& self, const trussc::Vec2 & pos) -> decltype(auto) { return self.moveTo(pos); });
         t["moveBy"] = sol::overload([](trussc::TweenMod& self, float dx, float dy) -> decltype(auto) { return self.moveBy(dx, dy); }, [](trussc::TweenMod& self, float dx, float dy, float dz) -> decltype(auto) { return self.moveBy(dx, dy, dz); }, [](trussc::TweenMod& self, const trussc::Vec3 & delta) -> decltype(auto) { return self.moveBy(delta); }, [](trussc::TweenMod& self, const trussc::Vec2 & delta) -> decltype(auto) { return self.moveBy(delta); });
@@ -1454,7 +1499,8 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     }
     {
         sol::usertype<trussc::App> t = lua->new_usertype<trussc::App>("App",
-            sol::constructors<trussc::App()>());
+            sol::constructors<trussc::App()>(),
+            sol::call_constructor, sol::constructors<trussc::App()>());
         t["setSize"] = &trussc::App::setSize;
         t["requestExit"] = &trussc::App::requestExit;
         t["isExitRequested"] = &trussc::App::isExitRequested;

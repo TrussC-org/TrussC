@@ -181,7 +181,14 @@ function emitType(typeEntry, cppType, luaName, T) {
     }
 
     let s = `    {\n        sol::usertype<${Q}> t = lua->new_usertype<${Q}>("${luaName}"`;
-    if (ctorTypes.length) s += `,\n            sol::constructors<${ctorTypes.join(', ')}>()`;
+    // Positional constructors provide Type.new(...); sol::call_constructor
+    // additionally enables the Type(...) call form (without it the usertype
+    // table has no __call and e.g. `Vec3(1, 2, 3)` fails with "attempt to
+    // call a table value").
+    if (ctorTypes.length) {
+        s += `,\n            sol::constructors<${ctorTypes.join(', ')}>()`;
+        s += `,\n            sol::call_constructor, sol::constructors<${ctorTypes.join(', ')}>()`;
+    }
     for (const meta in ops) {
         const lams = [...new Set(ops[meta])];
         s += `,\n            sol::meta_function::${meta}, ` + (lams.length === 1 ? lams[0] : `sol::overload(${lams.join(', ')})`);
