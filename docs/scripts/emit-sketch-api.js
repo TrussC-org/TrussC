@@ -28,6 +28,16 @@ const OUT = path.join(__dirname, '../../../trussc.org/generated/trusssketch-api.
 const data = JSON.parse(fs.readFileSync(RDJ, 'utf8'));
 const colorsData = JSON.parse(fs.readFileSync(COLORS, 'utf8'));
 
+// Actual Lua binding surface of the HAND-WRITTEN tcxLua usertypes (see the lib
+// header): bound member names (end_fbo not end), no unbound members, plus the
+// four value-typed Tween instances. Hand types are advertised from this instead
+// of the raw C++ AST so completions never suggest unusable/unbound members.
+const { getLuaBoundSurface, LUA_RESERVED, TWEEN_CTOR_PARAMS, TWEEN_METHOD_META } =
+    require('./lib/lua-bound-surface.js');
+const SURFACE = getLuaBoundSurface();
+const HAND = SURFACE.types;
+const dedup = a => [...new Set(a)];
+
 // ---- mirrors of the luagen bindability rules (advertise only what's bound) --
 const PRIM = new Set(['void','bool','char','short','int','long','float','double','unsigned','signed','size_t','int8_t','int16_t','int32_t','int64_t','uint8_t','uint16_t','uint32_t','uint64_t']);
 function argBindable(a) {
@@ -83,40 +93,92 @@ for (const id in data) {
     const e = data[id];
     if (e.kind !== 'type' || e.owner || e.ns || e.hidden) continue;
     if (UNBOUND_TYPES.has(e.name)) continue;
+    // Tween template: emitted as four value-typed instances below.
+    if (e.name === 'Tween') continue;
     if (e.tparams && e.tparams.length && !(e.lua_bind && e.lua_bind.length)) continue;
 
     const t = { name: e.name, desc: en(e.description) };
-    // constructor: the richest ctor, callable as Type(...) (sol __call)
-    const ctors = (e.constructors || []).filter(c => (c.args || []).every(argBindable))
+    // bindable ctors (for named params), excluding the copy ctor.
+    const bindCtors = (e.constructors || []).filter(c => (c.args || []).every(argBindable))
         .filter(c => { const a = c.args || []; return !(a.length === 1 && a[0].type.replace(/[&]/g, '').replace(/\bconst\b/g, '').trim() === e.name); });
-    if (ctors.length) {
-        const best = ctors.reduce((x, y) => ((y.args || []).length > (x.args || []).length ? y : x));
-        t.constructor = { snippet: snippetOf(e.name, best.args || []) };
-    }
     const properties = [], methods = [], statics = [];
-    for (const mid in data) {
-        const m = data[mid];
-        if (m.owner !== e.id) continue;
-        if (m.access && m.access !== 'public') continue;
-        if (m.hidden || m.deprecated) continue;
-        if (/^operator/.test(m.name)) continue;
-        if (m.kind === 'field') {
-            const ft = m.type || '';
-            if (!ft || /\binternal::/.test(ft) || /\*/.test(ft) || /\[/.test(ft)) continue;
-            properties.push({ name: m.name, type: ft, desc: en(m.description) });
-        } else if (m.kind === 'method') {
-            const fb = firstBindableSig(m);
-            if (!fb) continue;
-            (m.static ? statics : methods).push({
-                name: m.name, snippet: snippetOf(m.name, fb.args),
-                return: fb.sig.ret || 'void', desc: en(m.description),
+
+    if (HAND.has(e.name)) {
+        // Hand-written usertype — advertise ONLY the bound Lua surface.
+        const surf = HAND.get(e.name);
+        const cppMembers = new Map();
+        for (const mid in data) { const m = data[mid]; if (m.owner === e.id) cppMembers.set(m.name, m); }
+
+        // constructor snippet: the richest bound ctor, named via reference-data.
+        if (surf.ctors.length) {
+            const best = surf.ctors.reduce((x, y) => (y.count > x.count ? y : x));
+            const rc = bindCtors.find(c => (c.args || []).length === best.count);
+            const args = rc ? rc.args : Array.from({ length: best.count }, (_, i) => ({ name: 'a' + i }));
+            t.constructor = { snippet: snippetOf(e.name, args) };
+        }
+
+        for (const mem of surf.members) {
+            if (LUA_RESERVED.has(mem.lua)) continue;   // unusable Lua spelling; alias kept
+            const m = mem.cpp ? cppMembers.get(mem.cpp) : null;
+            if (m && m.kind === 'field') {
+                properties.push({ name: mem.lua, type: m.type || '', desc: en(m.description) });
+                continue;
+            }
+            const isStatic = !!(m && m.static);
+            const fb = m ? firstBindableSig(m) : null;
+            (isStatic ? statics : methods).push({
+                name: mem.lua, snippet: snippetOf(mem.lua, fb ? fb.args : []),
+                return: fb ? (fb.sig.ret || 'void') : '', desc: m ? en(m.description) : '',
             });
+        }
+    } else {
+        // Generated usertype — reference-data IS the binding source.
+        if (bindCtors.length) {
+            const best = bindCtors.reduce((x, y) => ((y.args || []).length > (x.args || []).length ? y : x));
+            t.constructor = { snippet: snippetOf(e.name, best.args || []) };
+        }
+        for (const mid in data) {
+            const m = data[mid];
+            if (m.owner !== e.id) continue;
+            if (m.access && m.access !== 'public') continue;
+            if (m.hidden || m.deprecated) continue;
+            if (/^operator/.test(m.name)) continue;
+            if (m.kind === 'field') {
+                const ft = m.type || '';
+                if (!ft || /\binternal::/.test(ft) || /\*/.test(ft) || /\[/.test(ft)) continue;
+                properties.push({ name: m.name, type: ft, desc: en(m.description) });
+            } else if (m.kind === 'method') {
+                const fb = firstBindableSig(m);
+                if (!fb) continue;
+                (m.static ? statics : methods).push({
+                    name: m.name, snippet: snippetOf(m.name, fb.args),
+                    return: fb.sig.ret || 'void', desc: en(m.description),
+                });
+            }
         }
     }
     if (properties.length) t.properties = properties;
     if (methods.length) t.methods = methods;
     if (statics.length) t.static_methods = statics;
     types.push(t);
+}
+
+// ---- Tween: one usertype per value type (TweenFloat/Vec2/Vec3/Color) ----------
+{
+    const tw = SURFACE.tween;
+    const tref = Object.values(data).find(x => x && x.kind === 'type' && x.name === 'Tween' && !x.owner && !x.ns) || {};
+    // richest ctor snippet: Name(from, to, duration)
+    const maxAr = Math.min(3, Math.max(0, ...tw.ctorArities));
+    for (const vt of tw.valueTypes) {
+        const tt = { name: vt.name, desc: en(tref.description) };
+        tt.constructor = { snippet: snippetOf(vt.name, TWEEN_CTOR_PARAMS.slice(0, maxAr).map(n => ({ name: n }))) };
+        tt.methods = tw.memberNames.map(nm => {
+            const meta = TWEEN_METHOD_META[nm] || { params: [], ret: '' };
+            const ret = meta.ret === 'self' ? vt.name : meta.ret === 'value' ? vt.value : (meta.ret || '');
+            return { name: nm, snippet: snippetOf(nm, meta.params.map(p => ({ name: p }))), return: ret, desc: '' };
+        });
+        types.push(tt);
+    }
 }
 
 // ---- enums as types (values via static access: BlendMode.Add) ----------------

@@ -38,6 +38,15 @@ const COLORS = path.join(__dirname, '../reference/colors.json');
 const EXTRAS = path.join(__dirname, '../reference/extras.json');
 const OUT = path.join(__dirname, '../../../trussc.org/generated/trusssketch-ref.js');
 
+// Actual Lua binding surface of the HAND-WRITTEN tcxLua usertypes (see the lib
+// header). Hand types are advertised from THIS (bound member names, reserved-
+// word aliases like end_fbo, no unbound members) instead of the raw C++ AST.
+const { getLuaBoundSurface, LUA_RESERVED, TWEEN_CTOR_PARAMS, TWEEN_METHOD_META } =
+    require('./lib/lua-bound-surface.js');
+const SURFACE = getLuaBoundSurface();
+const HAND = SURFACE.types;                 // luaTypeName -> { cppType, ctors, members }
+const dedup = a => [...new Set(a)];
+
 const REF = JSON.parse(fs.readFileSync(REF_DATA, 'utf8'));
 const CATS = JSON.parse(fs.readFileSync(CATEGORIES, 'utf8'));
 const CAT_BY_ID = new Map(CATS.map(c => [c.id, c]));
@@ -224,6 +233,9 @@ for (const id in REF) {
     const e = REF[id];
     if (e.kind !== 'type' || e.owner || e.ns || e.hidden) continue;
     if (UNBOUND_TYPES.has(e.name)) continue;
+    // Tween is a template: reference-data holds prose only. Its four value-typed
+    // Lua instances are emitted separately (below) from the defineTween surface.
+    if (e.name === 'Tween') continue;
     if (e.tparams && e.tparams.length && !(e.lua_bind && e.lua_bind.length)) continue;
 
     const typeName = e.name;
@@ -237,52 +249,112 @@ for (const id in REF) {
     };
     if (Array.isArray(e.related) && e.related.length) t.related = e.related;
 
-    // constructor: every bindable ctor except the copy ctor (single self-typed arg).
-    const ctors = (e.constructors || []).filter(c => (c.args || []).every(argBindable))
+    // bindable ctors from reference-data (used for named params), excluding the
+    // copy ctor (single self-typed arg).
+    const bindCtors = (e.constructors || []).filter(c => (c.args || []).every(argBindable))
         .filter(c => { const a = c.args || []; return !(a.length === 1 && a[0].type.replace(/[&]/g, '').replace(/\bconst\b/g, '').trim() === typeName); });
-    if (ctors.length) {
-        // Type(...) call form (sol __call). Render every signature.
-        t.constructor = { signatures: ctors.map(c => luaParams(c.args)) };
-    }
 
     const properties = [], methods = [], statics = [];
-    for (const mid in REF) {
-        const m = REF[mid];
-        if (m.owner !== e.id) continue;
-        if (m.access && m.access !== 'public') continue;
-        if (m.hidden || m.deprecated) continue;
-        if (/^operator/.test(m.name)) continue;
-        if (m.kind === 'field') {
-            const ft = m.type || '';
-            if (!ft || /\binternal::/.test(ft) || /\*/.test(ft) || /\[/.test(ft)) continue;
-            // fields accessed with dot syntax on an instance: `vec2.x`
-            properties.push({
-                name: `${recv}.${m.name}`,
-                type: mapType(ft),
-                desc: en(m.description),
-                desc_ja: ja(m.description),
-                desc_ko: ko(m.description),
-            });
-        } else if (m.kind === 'method') {
-            const bindSigs = (m.signatures || []).filter(sigBindable);
-            if (!bindSigs.length) continue;
-            const isStatic = !!m.static;
-            // instance -> colon syntax `recv:method`; static -> dot syntax `Type.method`
-            const dispName = isStatic ? `${typeName}.${m.name}` : `${recv}:${m.name}`;
+
+    if (HAND.has(typeName)) {
+        // Hand-written usertype — advertise ONLY the bound Lua surface.
+        const surf = HAND.get(typeName);
+        const cppMembers = new Map();   // C++ member name -> reference-data entry
+        for (const mid in REF) { const m = REF[mid]; if (m.owner === e.id) cppMembers.set(m.name, m); }
+
+        // constructors: the bound ctor list; params named via reference-data
+        // where the arg count matches, else generic (a0, a1, …).
+        const sigs = dedup(surf.ctors.map(bc => {
+            const rc = bindCtors.find(c => (c.args || []).length === bc.count);
+            return rc ? luaParams(rc.args) : Array.from({ length: bc.count }, (_, i) => 'a' + i).join(', ');
+        }));
+        if (sigs.length) t.constructor = { signatures: sigs };
+
+        for (const mem of surf.members) {
+            if (LUA_RESERVED.has(mem.lua)) continue;   // unusable Lua spelling; alias kept
+            const m = mem.cpp ? cppMembers.get(mem.cpp) : null;
+            if (m && m.kind === 'field') {
+                properties.push({
+                    name: `${recv}.${mem.lua}`, type: mapType(m.type),
+                    desc: en(m.description), desc_ja: ja(m.description), desc_ko: ko(m.description),
+                });
+                continue;
+            }
+            const isStatic = !!(m && m.static);
+            let msigs = m ? (m.signatures || []).filter(sigBindable) : [];
+            if (m && !msigs.length) msigs = (m.signatures || []).filter(s => !s.tmpl);
+            const dispName = isStatic ? `${typeName}.${mem.lua}` : `${recv}:${mem.lua}`;
             (isStatic ? statics : methods).push({
                 name: dispName,
-                return: mapType(bindSigs[0].ret),
-                signatures: bindSigs.map(s => luaParams(s.args)),
-                desc: en(m.description),
-                desc_ja: ja(m.description),
-                desc_ko: ko(m.description),
+                return: msigs.length ? mapType(msigs[0].ret) : '',
+                signatures: msigs.length ? msigs.map(s => luaParams(s.args)) : [''],
+                desc: m ? en(m.description) : '', desc_ja: m ? ja(m.description) : '', desc_ko: m ? ko(m.description) : '',
             });
         }
+    } else {
+        // Generated usertype — reference-data IS the binding source (luagen-types).
+        if (bindCtors.length) t.constructor = { signatures: bindCtors.map(c => luaParams(c.args)) };
+        for (const mid in REF) {
+            const m = REF[mid];
+            if (m.owner !== e.id) continue;
+            if (m.access && m.access !== 'public') continue;
+            if (m.hidden || m.deprecated) continue;
+            if (/^operator/.test(m.name)) continue;
+            if (m.kind === 'field') {
+                const ft = m.type || '';
+                if (!ft || /\binternal::/.test(ft) || /\*/.test(ft) || /\[/.test(ft)) continue;
+                // fields accessed with dot syntax on an instance: `vec2.x`
+                properties.push({
+                    name: `${recv}.${m.name}`,
+                    type: mapType(ft),
+                    desc: en(m.description),
+                    desc_ja: ja(m.description),
+                    desc_ko: ko(m.description),
+                });
+            } else if (m.kind === 'method') {
+                const bindSigs = (m.signatures || []).filter(sigBindable);
+                if (!bindSigs.length) continue;
+                const isStatic = !!m.static;
+                // instance -> colon syntax `recv:method`; static -> dot syntax `Type.method`
+                const dispName = isStatic ? `${typeName}.${m.name}` : `${recv}:${m.name}`;
+                (isStatic ? statics : methods).push({
+                    name: dispName,
+                    return: mapType(bindSigs[0].ret),
+                    signatures: bindSigs.map(s => luaParams(s.args)),
+                    desc: en(m.description),
+                    desc_ja: ja(m.description),
+                    desc_ko: ko(m.description),
+                });
+            }
+        }
     }
+
     if (properties.length) t.properties = properties;
     if (methods.length) t.methods = methods;
     if (statics.length) t.static_methods = statics;
     types.push(t);
+}
+
+// Tween — one usertype per value type (TweenFloat/Vec2/Vec3/Color). Prose from
+// reference-data's `Tween`; ctor/method signatures from the defineTween surface.
+{
+    const tw = SURFACE.tween;
+    const tref = Object.values(REF).find(x => x && x.kind === 'type' && x.name === 'Tween' && !x.owner && !x.ns) || {};
+    for (const vt of tw.valueTypes) {
+        const rv = recvName(vt.name);
+        const tt = {
+            name: vt.name,
+            desc: en(tref.description), keywords: Array.isArray(tref.keywords) ? tref.keywords : [],
+            desc_ja: ja(tref.description), desc_ko: ko(tref.description),
+        };
+        tt.constructor = { signatures: dedup(tw.ctorArities.map(n => TWEEN_CTOR_PARAMS.slice(0, n).join(', '))) };
+        tt.methods = tw.memberNames.map(nm => {
+            const meta = TWEEN_METHOD_META[nm] || { params: [], ret: '' };
+            const ret = meta.ret === 'self' ? vt.name : meta.ret === 'value' ? vt.value : (meta.ret || '');
+            return { name: `${rv}:${nm}`, return: ret, signatures: [meta.params.join(', ')], desc: '', desc_ja: '', desc_ko: '' };
+        });
+        types.push(tt);
+    }
 }
 types.sort((a, b) => a.name.localeCompare(b.name));
 
