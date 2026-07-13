@@ -254,8 +254,10 @@ can feed events manually, so imgui does not chain us to sokol_app.
     -fsyntax-only, which is a usable pre-CI smoke check on the mac).
 - **P3 — web driver.** RAF tick, HTML5 event callbacks, WebGL context;
   port the canvas-keyboard patch natively.
-  - **DONE — implemented + runtime-verified in Chrome 2026-07-13** (both
-    backends: SOKOL_WGPU default and SOKOL_GLES3/WebGL2). Implementation
+  - **DONE — implemented + runtime-verified in Chrome 2026-07-13, full CI
+    green 2026-07-14 (run 29259516968: mac/win/linux/web/android + core
+    tests + HotReload + ci-ok)** (both backends: SOKOL_WGPU default and
+    SOKOL_GLES3/WebGL2). Implementation
     contract: docs/dev/sapp-web-impl-spec.md (opus-extracted). The
     emscripten section is the most verbatim of the four ports: upstream's
     web backend was lifted nearly whole (EM_JS shims, code-string keymap,
