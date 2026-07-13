@@ -1,11 +1,15 @@
 # luagen-types (Phase 2 — usertype generation)
 
 Generates tcxLua Sol2 **usertype** bindings (constructors, properties, methods,
-static methods, operators) from `docs/reference/reference-data.json`. Pairs with
-`luagen/` (Phase 1 = free functions).
+static methods, operators), **enums** (32, same usertype+`sol::var` style as the
+old hand bindings), and the **`colors` constant table** (from `colors.json`, 149
+colors) — all from `docs/reference/`. Pairs with `luagen/` (Phase 1 = free fns).
+Members/types with a `platforms` annotation are wrapped in preprocessor guards.
 
 ```bash
-node luagen-types.js ../../../../docs/reference/reference-data.json > /tmp/gentypes.cpp
+node luagen-types.js ../../../../docs/reference/reference-data.json \
+                     ../../../../docs/reference/colors.json \
+    > ../../src/generated/trussctype_generated.cpp
 ```
 
 ## Status — 110 types compile clean (isolation syntax-only witness), 0 errors

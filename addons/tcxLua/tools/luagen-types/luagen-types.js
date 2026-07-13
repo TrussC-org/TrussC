@@ -10,8 +10,10 @@
 
 const fs = require('fs');
 const path = process.argv[2];
-if (!path) { console.error('usage: node luagen-types.js <reference-data.json>'); process.exit(1); }
+if (!path) { console.error('usage: node luagen-types.js <reference-data.json> [colors.json]'); process.exit(1); }
 const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+const colorsPath = process.argv[3];
+const colorsData = colorsPath ? JSON.parse(fs.readFileSync(colorsPath, 'utf8')) : null;
 
 const skip = { template: 0, unbindable: 0, op: 0 };
 const report = [];
@@ -259,11 +261,59 @@ for (const id in data) {
     catch (err) { report.push(`${e.name}: ${err.message}`); }
 }
 
+// ---- enums ----------------------------------------------------------------
+// Same style as the previous hand bindings (usertype + equal_to + sol::var per
+// value) so semantics don't change: values are usertype instances, == works via
+// the metamethod, and C++ enum returns compare equal to the constants.
+// Enums are constants declared on every platform -> no platform guards.
+let enumCount = 0, nestedEnums = [];
+for (const id in data) {
+    const e = data[id];
+    if (e.kind !== 'enum' || e.ns) continue;
+    if (e.owner) { nestedEnums.push(id); continue; }   // nested (SoundSource::Kind) — future
+    if (!e.members || !e.members.length) { report.push(`${e.name}: enum without members (skipped)`); continue; }
+    const Q = `trussc::${e.name}`;
+    let s2 = `    lua->new_usertype<${Q}>("${e.name}",\n`;
+    s2 += `        sol::meta_function::equal_to, [](${Q} a, ${Q} b){ return a == b; }`;
+    for (const m of e.members) s2 += `,\n        "${m.name}", sol::var(${Q}::${m.name})`;
+    s2 += `);\n`;
+    body += s2; enumCount++;
+}
+if (nestedEnums.length) report.push(`nested enums (not yet emitted): ${nestedEnums.join(', ')}`);
+
+// ---- constants (kind:var) --------------------------------------------------
+// Top-level non-hidden constants (TAU, KEY_*, MOUSE_BUTTON_*, VSYNC, Direction
+// shorthands Left/Center/...). Plain assignments; sol converts values as usual.
+let constCount = 0;
+body += `    // constants\n`;
+for (const id in data) {
+    const e = data[id];
+    if (e.kind !== 'var' || e.owner || e.ns || e.hidden) continue;
+    body += `    (*lua)["${e.name}"] = trussc::${e.name};\n`;
+    constCount++;
+}
+
+// ---- colors ---------------------------------------------------------------
+// colors.json is the canonical color list (docs/reference/). Emit the same
+// `colors` table the hand binding used: colors.white etc. as sol::var constants.
+let colorCount = 0;
+if (colorsData) {
+    // `colors` is just a named table; use a file-local tag struct (emitted in the
+    // prelude below) as the usertype key — there is no trussc::Colors.
+    body += `    {\n        sol::usertype<TcxLuaColorsTable> t = lua->new_usertype<TcxLuaColorsTable>("colors");\n`;
+    for (const group of colorsData) for (const item of group.items) {
+        body += `        t["${item.name}"] = sol::var(trussc::colors::${item.name});\n`;
+        colorCount++;
+    }
+    body += `    }\n`;
+}
+
 process.stdout.write(`// AUTO-GENERATED usertype bindings from reference-data.json by luagen-types.js
 #include "tcxLua.h"
 #include "TrussC.h"
 using namespace trussc;
 using namespace std;
+namespace { struct TcxLuaColorsTable {}; }   // tag for the \`colors\` constant table
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
 #pragma clang diagnostic push
@@ -275,5 +325,5 @@ ${body}}
 #pragma clang diagnostic pop
 #endif
 `);
-console.error(`[luagen-types] usertypes: ${count} | skipped members: template ${skip.template}, unbindable ${skip.unbindable}, unsupported-op ${skip.op}`);
+console.error(`[luagen-types] usertypes: ${count} | enums: ${enumCount} | colors: ${colorCount} | consts: ${constCount} | skipped members: template ${skip.template}, unbindable ${skip.unbindable}, unsupported-op ${skip.op}`);
 for (const r of report) console.error('  ' + r);

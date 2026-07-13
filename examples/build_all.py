@@ -288,6 +288,7 @@ def main():
     parser.add_argument('--web', action='store_true', help="Also build for WebAssembly")
     parser.add_argument('--web-only', action='store_true', help="Build for WebAssembly only (skip native build)")
     parser.add_argument('--test-only', action='store_true', help="Build ONLY AllFeaturesExample for quick CI check")
+    parser.add_argument('--one-per-addon', action='store_true', help="Build the first example-* of each bundled addon (per-addon dependency compile coverage)")
     parser.add_argument('--test-hot-reload', action='store_true', help="Build ONLY HotReloadExample (exercises the host/guest split + addon includes)")
     parser.add_argument('--addon-tests-only', action='store_true', help="Build AND RUN every addons/*/tests/ harness (console, non-zero exit fails). No-op if none exist.")
     parser.add_argument('--core-tests-only', action='store_true', help="Build AND RUN every core/tests/*/ harness (console, non-zero exit fails). No-op if none exist.")
@@ -307,6 +308,8 @@ def main():
         Colors.print("Mode: Web Only", Colors.YELLOW)
     if args.test_only:
         Colors.print("Mode: AllFeaturesExample Only", Colors.YELLOW)
+    if args.one_per_addon:
+        Colors.print("Mode: One example per addon", Colors.YELLOW)
     if args.test_hot_reload:
         Colors.print("Mode: HotReloadExample Only", Colors.YELLOW)
     if args.addon_tests_only:
@@ -316,8 +319,8 @@ def main():
     print("")
 
     # Addon test harnesses (addons/*/tests/): build AND run each. A cheap,
-    # behavioral gate meant to run on every CI, separate from the [full]-gated
-    # example builds. No-op (exit 0) when no addon ships a tests/ dir.
+    # behavioral gate meant to run on every CI, separate from the example
+    # builds. No-op (exit 0) when no addon ships a tests/ dir.
     if args.addon_tests_only:
         tests = find_addon_tests(ROOT_DIR)
         if not tests:
@@ -357,9 +360,23 @@ def main():
         else:
             Colors.print(f"HotReloadExample not found at: {hr_example}", Colors.RED)
             sys.exit(1)
+    elif args.one_per_addon:
+        # Dependency compile coverage: one example is enough to prove an addon
+        # (and its fetched third-party deps) still compiles on this platform.
+        # find_examples() is sorted, so this picks each addon's first example.
+        addons_dir = os.path.join(ROOT_DIR, "addons")
+        seen = set()
+        example_dirs = []
+        for path in find_examples(ROOT_DIR):
+            if not path.startswith(addons_dir + os.sep):
+                continue
+            addon = os.path.relpath(path, addons_dir).split(os.sep)[0]
+            if addon not in seen:
+                seen.add(addon)
+                example_dirs.append(path)
     else:
         example_dirs = find_examples(ROOT_DIR)
-    
+
     if not example_dirs:
         Colors.print("No example directories found!", Colors.RED)
         sys.exit(1)

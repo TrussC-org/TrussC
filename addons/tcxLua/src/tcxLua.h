@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sol/sol.hpp"
+#include "tcxLuaPathAdapter.h"  // sol2 <-> std::filesystem::path (Lua string) conversion; must precede any path binding TU
 #include "TrussC.h"
 
 // namespace tcx::lua {
