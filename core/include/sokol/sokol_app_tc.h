@@ -1777,6 +1777,10 @@ typedef struct _sapp_tc_window_t {
     IDXGISwapChain1* swap_chain;
     HANDLE frame_wait;          /* frame latency waitable (NULL: timer-paced fallback) */
     bool credit_held;           /* a waitable credit was consumed without a Present yet */
+    bool waitable_ready;        /* the run-loop's MsgWait consumed this window's frame
+                                   latency waitable signal (auto-reset): the due-check
+                                   must NOT re-wait the same handle (it would miss the
+                                   already-consumed signal and stall forever) */
     ID3D11Texture2D* rt;        /* swapchain backbuffer */
     ID3D11RenderTargetView* rtv;
     ID3D11Texture2D* msaa_rt;   /* MSAA color (sample_count > 1; flip model can't MSAA the backbuffer) */
@@ -2654,8 +2658,13 @@ static void _sapp_tc_win32_pace(_sapp_tc_window_t* w, double seconds) {
 static bool _sapp_tc_win32_window_due(_sapp_tc_window_t* w) {
     if (!w || !w->swap_chain || w->in_tick) return false;
     if (w->earliest_next > _sapp_tc_now()) return false;
+    /* Waitable pacing: the frame latency waitable is an auto-reset object that
+       the run-loop's MsgWaitForMultipleObjectsEx already waits on. That wait
+       CONSUMES the signal, so we must NOT re-wait the handle here (doing so
+       missed the consumed signal and stalled the render loop after frame 1).
+       Instead the run-loop records the consumed signal in waitable_ready. */
     if (w->frame_wait && !w->credit_held) {
-        if (WaitForSingleObject(w->frame_wait, 0) != WAIT_OBJECT_0) return false;
+        if (!w->waitable_ready) return false;
     }
     return true;
 }
@@ -2663,8 +2672,10 @@ static bool _sapp_tc_win32_window_due(_sapp_tc_window_t* w) {
 static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
     if (w->in_tick || !w->swap_chain) return;
     /* the due-check just consumed a waitable credit (unless one was already
-       held); hold it until a real Present returns it through the swapchain */
-    if (w->frame_wait) w->credit_held = true;
+       held); hold it until a real Present returns it through the swapchain.
+       Clear waitable_ready: this signal is now spent (the next one comes from
+       the run-loop's MsgWait after this frame is presented). */
+    if (w->frame_wait) { w->credit_held = true; w->waitable_ready = false; }
     _sapp_tc_timing_update(&w->timing);
     w->frame_duration = w->timing.smooth_dt;
     const int swap_interval = (_sapp_tc.app.desc.swap_interval > 0) ? _sapp_tc.app.desc.swap_interval : 1;
@@ -2941,6 +2952,15 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             if (wParam == _SAPP_TC_MODAL_TIMER) {
                 for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
                     _sapp_tc_window_t* tw = _sapp_tc.windows[i];
+                    if (!tw) continue;
+                    /* the outer run-loop (which records the waitable signal in
+                       waitable_ready) is blocked in this modal size/move loop, so
+                       poll the frame latency waitable here instead -- otherwise the
+                       due-check never sees a credit and drag/resize stops rendering */
+                    if (tw->frame_wait && !tw->credit_held && !tw->waitable_ready &&
+                        WaitForSingleObject(tw->frame_wait, 0) == WAIT_OBJECT_0) {
+                        tw->waitable_ready = true;
+                    }
                     if (_sapp_tc_win32_window_due(tw)) {
                         _sapp_tc_win32_tick(tw, true);
                     }
@@ -3098,6 +3118,7 @@ static void _sapp_tc_win32_run_loop(void) {
     bool done = false;
     while (!done && !_sapp_tc.app.quit_ordered) {
         HANDLE handles[_SAPP_TC_MAX_WINDOWS];
+        _sapp_tc_window_t* handle_owner[_SAPP_TC_MAX_WINDOWS];
         DWORD num_handles = 0;
         const double now = _sapp_tc_now();
         double wake_at = now + 0.1;     /* robustness cap; messages wake us anyway */
@@ -3106,16 +3127,24 @@ static void _sapp_tc_win32_run_loop(void) {
             if (!w || !w->swap_chain || w->in_tick) continue;
             if (w->earliest_next > now) {
                 if (w->earliest_next < wake_at) wake_at = w->earliest_next;
-            } else if (w->frame_wait && !w->credit_held) {
+            } else if (w->frame_wait && !w->credit_held && !w->waitable_ready) {
+                handle_owner[num_handles] = w;
                 handles[num_handles++] = w->frame_wait;
             } else {
-                wake_at = now;          /* due immediately (timer-paced / credit held) */
+                wake_at = now;          /* due immediately (timer-paced / credit or signal held) */
             }
         }
         double timeout_s = wake_at - now;
         if (timeout_s < 0.0) timeout_s = 0.0;
-        MsgWaitForMultipleObjectsEx(num_handles, handles,
+        DWORD wr = MsgWaitForMultipleObjectsEx(num_handles, handles,
             (DWORD)(timeout_s * 1000.0), QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        /* If a frame latency waitable satisfied the wait, it was auto-reset here.
+           Record it so the due-check consumes THIS signal instead of re-waiting
+           the (now-unsignaled) handle. Only one handle is reported per wait; the
+           rest stay signaled and are caught on the next loop. */
+        if (wr >= WAIT_OBJECT_0 && wr < WAIT_OBJECT_0 + num_handles) {
+            handle_owner[wr - WAIT_OBJECT_0]->waitable_ready = true;
+        }
         MSG msg;
         while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
             if (WM_QUIT == msg.message) {
