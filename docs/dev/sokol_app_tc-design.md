@@ -167,15 +167,28 @@ can feed events manually, so imgui does not chain us to sokol_app.
     per-window waitables — a tick that ends without a Present (skip_present,
     occluded, minimized) holds its waitable "credit" and is timer-re-paced
     until the next real Present, so neither busy-spin nor waitable
-    starvation can occur; resize coalesced per tick (never in WM_SIZE);
+    starvation can occur. The waitable is an AUTO-RESET object with exactly
+    ONE consumer: the run loop's MsgWait consumes the signal and records it
+    in the window's `waitable_ready` flag (handle→window map; MsgWait
+    resets only the one satisfied handle), and the due-check reads that
+    flag — never re-wait the handle (the original code did, stalling
+    rendering after the first frame; caught on real hardware, cb28ad56 —
+    CI is compile+headless only, the render loop needs a machine). During
+    a modal size/move loop the blocked run loop's role passes to the
+    WM_TIMER handler, which polls the waitable itself. Win11 DWM note:
+    Present never returns DXGI_STATUS_OCCLUDED there, so the SUSPENDED/
+    RESUMED occlusion path is dormant on modern Windows (hidden windows
+    pause naturally when their waitable goes quiet); kept for other
+    configs; resize coalesced per tick (never in WM_SIZE);
     WM_ENTERSIZEMOVE arms a ~64Hz WM_TIMER that keeps ALL windows ticking
     through the modal drag; scancode-indexed keytable lifted verbatim
     (fixes the win branch's key=vk gap) + WM_CHAR with surrogate pairs;
     quit = WM_CLOSE dance + PostQuitMessage; skip_present HONORED on
     Present (TrussC flicker patch); per-monitor-v2 DPI with the
     create-then-resize dance; DXGI_PRESENT_TEST occlusion poll for
-    secondary windows (SUSPENDED/RESUMED). Runtime verification on real
-    Windows hardware still pending.
+    secondary windows (SUSPENDED/RESUMED). Runtime VERIFIED on real Win11
+    hardware 2026-07-13: ~60fps, CPU <1%, resize/fullscreen/minimize/
+    second-window/clean-exit/drag-render all pass.
 - **P2 — Linux driver.** X11 + GLX shared context (multiwindow-glfw
   pattern), timer-paced ticks.
 - **P3 — web driver.** RAF tick, HTML5 event callbacks, WebGL context;
