@@ -254,6 +254,38 @@ can feed events manually, so imgui does not chain us to sokol_app.
     -fsyntax-only, which is a usable pre-CI smoke check on the mac).
 - **P3 — web driver.** RAF tick, HTML5 event callbacks, WebGL context;
   port the canvas-keyboard patch natively.
+  - **DONE — implemented + runtime-verified in Chrome 2026-07-13** (both
+    backends: SOKOL_WGPU default and SOKOL_GLES3/WebGL2). Implementation
+    contract: docs/dev/sapp-web-impl-spec.md (opus-extracted). The
+    emscripten section is the most verbatim of the four ports: upstream's
+    web backend was lifted nearly whole (EM_JS shims, code-string keymap,
+    WGPU async adapter/device chain, event callbacks, plus the shared
+    helpers the other tc sections re-implemented natively — timing EMA,
+    state init, drop buffer, image validate) and renamed `_sapp_tc_*` /
+    `_sapp_tc_js_*`, with a web-sized `_sapp_tc_t` state struct that keeps
+    upstream's member names so the lifted code reads unchanged. The
+    single adaptation of substance: no default-icon generator
+    (sapp_set_icon(sokol_default) is a no-op; favicon from real images
+    kept). web/sokol_impl.cpp switched to the same declarations-only shim
+    as mac/win/linux. Web is strictly single-window: sapp_create_window()
+    returns the invalid handle + logs; TrussC's createWindow() web stub
+    already errors before reaching it. The keyboard-on-canvas TrussC
+    patch is native default behavior (needs the shell's canvas tabindex +
+    click-to-focus, which shell.html provides). No owned loop: sapp_run()
+    registers the rAF callback and returns; quit tears down inside the
+    callback (EM_FALSE). Runtime-verified with AllFeaturesExample +
+    multiWindowExample served locally: WGPU async init → render, rAF
+    animation, mouse tracking (dpi_scale 2, framebuffer coords), W-key →
+    createWindow platform-gap log (canvas-focus keyboard proven), CSS
+    resize tracking (element size × devicePixelRatio → backing store +
+    RESIZED), GLES3 render + input, zero driver console errors.
+    ENVIRONMENT FINDING (pre-existing, not P3): emscripten 6.0.2 defaults
+    `GROWABLE_ARRAYBUFFERS=1`, and Chrome (current stable here) rejects
+    views over resizable ArrayBuffers in TextDecoder / WebGL2 tex uploads
+    — ANY TrussC web build made with emsdk 6.x dies at runtime on such
+    browsers (WGPU: TextDecoder inside emdawnwebgpu bindings; GLES3:
+    texSubImage2D). Local verification used `-sGROWABLE_ARRAYBUFFERS=0`;
+    a permanent trussc_app.cmake fix is a separate concern (flagged).
 - **P4 — iOS driver.** UIWindow + CAMetalLayer + CADisplayLink + touch.
 - **P5 — Android driver.** NativeActivity + ALooper + Choreographer + EGL
   surface lifecycle. Last on purpose; needs a real-device verification
