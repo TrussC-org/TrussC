@@ -191,6 +191,32 @@ can feed events manually, so imgui does not chain us to sokol_app.
     second-window/clean-exit/drag-render all pass.
 - **P2 — Linux driver.** X11 + GLX shared context (multiwindow-glfw
   pattern), timer-paced ticks.
+  - **KICKOFF READY — implementation contract: docs/dev/sapp-x11-impl-spec.md**
+    (opus-extracted). Two original design assumptions were WRONG and the
+    plan is corrected as follows:
+    1. Upstream has NO timer/RandR pacing to lift — it paces purely by
+       blocking inside a vsync'd glXSwapBuffers. And GLX DOES have
+       per-drawable swap intervals (glXSwapIntervalEXT), just no vsync
+       callback. Corrected tick model: the MAIN window keeps upstream
+       parity (blocking vsync'd swap = the loop's pacing source);
+       SECONDARY windows use swap interval 0 + timer due-checks inside
+       the same loop (RandR-queried refresh as the period). Never vsync
+       more than one drawable — N blocking swaps per iteration would
+       serialize to refresh/N fps. Mixed-Hz fidelity is therefore coarser
+       than mac/win (secondary jitter ≤ one main-frame); accepted,
+       documented.
+    2. There is NO XIM/XIC upstream: CHAR events are XLookupString + a
+       static keysym→unicode table, no compose/dead keys/IME. Port as-is
+       (parity), IME stays tcxIME territory.
+    Other load-bearing facts: GL swapchain is RGBA8 (the 10-bit patch does
+    not apply on GLX); resize is polled per frame via XGetWindowAttributes
+    (no ConfigureNotify handler) — poll per window per tick; keytable uses
+    XKB physical key names (XkbGetNames) with software repeat tracking that
+    REQUIRES XkbSetDetectableAutoRepeat at startup; keep the public
+    sapp_x11_get_window()/sapp_x11_get_display() getters (tcPlatform_linux
+    applies Motif decoration hints itself); shared GLXContext + per-window
+    GLXWindow/Colormap, glXMakeCurrent(display, drawable, ctx) before each
+    window's render.
 - **P3 — web driver.** RAF tick, HTML5 event callbacks, WebGL context;
   port the canvas-keyboard patch natively.
 - **P4 — iOS driver.** UIWindow + CAMetalLayer + CADisplayLink + touch.
