@@ -192,9 +192,19 @@ can feed events manually, so imgui does not chain us to sokol_app.
 - **P2 — Linux driver.** X11 + GLX shared context (multiwindow-glfw
   pattern).
   - **DONE — implemented 2026-07-13 (dd874ffa + d6c3d0cd), full CI green
-    (run 29242819960 incl. core tests + HotReload on Linux); real-hardware
-    runtime verification delegated to the linux-server agent (relay topic
-    multiwindow, physical X11 session, mesa/Intel + NVIDIA PRIME).**
+    (run 29242819960 incl. core tests + HotReload on Linux), runtime
+    VERIFIED on real hardware 2026-07-13 (linux-server: Ubuntu 24.04,
+    Xorg+mutter, mesa Intel UHD730 + NVIDIA PRIME 580): 60.00fps stable,
+    CPU 4-5% of one core, second window + independent events + shared FBO,
+    resize both windows, WM_DELETE secondary → main survives, minimize →
+    swap stops but update keeps running at 1-3% CPU, clean exit 0 ×6, and
+    with vblank_mode=0 (vsync forced off) the self-healing timer pacing
+    holds 57fps at 3% CPU instead of busy-spinning. Known cosmetic quirk:
+    ~1s of fps overshoot (≤81fps) right after destroying a secondary
+    window while the refresh-estimate EMA re-settles. Keyboard keycodes
+    are physical-position based on ALL platforms (mac virtual-keycode /
+    win scancode / linux XKB name tables — sokol upstream semantics);
+    layout-dependent characters ride the CHAR event.**
     Implementation contract: docs/dev/sapp-x11-impl-spec.md
     (opus-extracted). Desktop Linux only — platform/linux/sokol_impl.cpp
     switches on SOKOL_GLCORE; Raspberry Pi (SOKOL_GLES3/EGL) stays on
