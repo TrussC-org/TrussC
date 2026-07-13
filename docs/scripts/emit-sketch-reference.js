@@ -334,7 +334,7 @@ constants.sort((a, b) => a.name.localeCompare(b.name));
 // =============================================================================
 const output = {
     version: getVersion() + ' (Lua)',
-    lang: 'all',
+    lang: 'lua',   // renderer switches scope separator ('.' not '::') on this
     categories,
     constants,
     keywords: extras.keywords,
