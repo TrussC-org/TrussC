@@ -190,33 +190,58 @@ can feed events manually, so imgui does not chain us to sokol_app.
     hardware 2026-07-13: ~60fps, CPU <1%, resize/fullscreen/minimize/
     second-window/clean-exit/drag-render all pass.
 - **P2 — Linux driver.** X11 + GLX shared context (multiwindow-glfw
-  pattern), timer-paced ticks.
-  - **KICKOFF READY — implementation contract: docs/dev/sapp-x11-impl-spec.md**
-    (opus-extracted). Two original design assumptions were WRONG and the
-    plan is corrected as follows:
+  pattern).
+  - **DONE — implemented 2026-07-13 (dd874ffa + d6c3d0cd), full CI green
+    (run 29242819960 incl. core tests + HotReload on Linux); real-hardware
+    runtime verification delegated to the linux-server agent (relay topic
+    multiwindow, physical X11 session, mesa/Intel + NVIDIA PRIME).**
+    Implementation contract: docs/dev/sapp-x11-impl-spec.md
+    (opus-extracted). Desktop Linux only — platform/linux/sokol_impl.cpp
+    switches on SOKOL_GLCORE; Raspberry Pi (SOKOL_GLES3/EGL) stays on
+    upstream sokol_app.h. TrussC adapter: platform/linux/tcWindowLinux.cpp
+    (mirror of tcWindowWin.cpp; GL swapchain = default framebuffer, RGBA8).
+    Two original design assumptions were WRONG; as-built model:
     1. Upstream has NO timer/RandR pacing to lift — it paces purely by
        blocking inside a vsync'd glXSwapBuffers. And GLX DOES have
        per-drawable swap intervals (glXSwapIntervalEXT), just no vsync
-       callback. Corrected tick model: the MAIN window keeps upstream
-       parity (blocking vsync'd swap = the loop's pacing source);
-       SECONDARY windows use swap interval 0 + timer due-checks inside
-       the same loop (RandR-queried refresh as the period). Never vsync
-       more than one drawable — N blocking swaps per iteration would
-       serialize to refresh/N fps. Mixed-Hz fidelity is therefore coarser
-       than mac/win (secondary jitter ≤ one main-frame); accepted,
-       documented.
+       callback. As-built tick model: the MAIN window keeps upstream
+       parity (blocking vsync'd swap = the loop's pacing source), with a
+       self-healing guard — if the swap returns in <2ms (iconified,
+       skip_present, MESA context-wide interval-0 fallback, unredirected
+       window) the tick falls back to timer pacing, so busy-spin is
+       impossible; SECONDARY windows use swap interval 0 + absolute-
+       schedule timer due-checks inside the same loop. The period is NOT
+       RandR (unlinked lib) but a refresh estimate EMA-measured from the
+       main window's blocking presents (1/60 fallback, clamped to
+       [1/240, 1/30]). Never vsync more than one drawable — N blocking
+       swaps per iteration would serialize to refresh/N fps. When nothing
+       is due the loop sleeps in poll() on the X connection fd. Mixed-Hz
+       fidelity is therefore coarser than mac/win (secondary jitter ≤ one
+       main-frame); accepted, documented.
     2. There is NO XIM/XIC upstream: CHAR events are XLookupString + a
-       static keysym→unicode table, no compose/dead keys/IME. Port as-is
+       static keysym→unicode table, no compose/dead keys/IME. Ported as-is
        (parity), IME stays tcxIME territory.
-    Other load-bearing facts: GL swapchain is RGBA8 (the 10-bit patch does
-    not apply on GLX); resize is polled per frame via XGetWindowAttributes
-    (no ConfigureNotify handler) — poll per window per tick; keytable uses
-    XKB physical key names (XkbGetNames) with software repeat tracking that
-    REQUIRES XkbSetDetectableAutoRepeat at startup; keep the public
-    sapp_x11_get_window()/sapp_x11_get_display() getters (tcPlatform_linux
-    applies Motif decoration hints itself); shared GLXContext + per-window
-    GLXWindow/Colormap, glXMakeCurrent(display, drawable, ctx) before each
-    window's render.
+    Other as-built facts: GL swapchain is RGBA8 (the 10-bit patch does
+    not apply on GLX); one fbconfig for the whole app — secondary windows
+    inherit the main's MSAA sample count (shared-context visual
+    compatibility); resize is polled per window per tick via
+    XGetWindowAttributes (no ConfigureNotify handler, upstream parity);
+    keytable uses XKB physical key names (XkbGetNames) with per-window
+    software repeat tracking + XkbSetDetectableAutoRepeat at startup;
+    public sapp_x11_get_window()/sapp_x11_get_display() getters kept
+    (tcPlatform_linux applies Motif decoration hints itself), plus new
+    cross-platform sapp_window_gl_framebuffer() and
+    sapp_window_x11_get_window(); shared GLXContext + per-window
+    GLXWindow/Colormap, glXMakeCurrent(display, drawable, ctx) before
+    each window's render; GLX entry points called directly (libGL always
+    linked on Linux; only extensions via glXGetProcAddressARB — no
+    dlopen); XDND v5 advertised on every window with the drop target
+    resolved per-window; quit = WM_DELETE → loop-tail cancellable dance.
+    Port gotcha for P3+: GL_GLEXT_PROTOTYPES must be defined before the
+    FIRST <GL/gl.h> include in the TU — glext.h is include-guarded, so
+    sokol_gfx.h's own define comes too late (first CI round failed on
+    exactly this; caught locally beforehand via XQuartz pseudo-Linux
+    -fsyntax-only, which is a usable pre-CI smoke check on the mac).
 - **P3 — web driver.** RAF tick, HTML5 event callbacks, WebGL context;
   port the canvas-keyboard patch natively.
 - **P4 — iOS driver.** UIWindow + CAMetalLayer + CADisplayLink + touch.
