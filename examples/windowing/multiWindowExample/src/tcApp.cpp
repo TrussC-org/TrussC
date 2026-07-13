@@ -1,11 +1,11 @@
 // =============================================================================
 // tcApp.cpp - Multi-window example
 // =============================================================================
-// Press W to open a second window. It runs on its own display link (its
+// Press W to open a second window. It runs on its own vsync tick (its
 // display's refresh rate), has its own Node tree, events and mouse, and can
 // draw GPU resources from the main window directly (shared sokol_gfx context).
 // Closing the second window leaves the main window running.
-// Secondary windows are macOS-only for now; on other platforms W logs an error.
+// Secondary windows: macOS / Windows / Linux; elsewhere W logs an error.
 
 #include "tcApp.h"
 
