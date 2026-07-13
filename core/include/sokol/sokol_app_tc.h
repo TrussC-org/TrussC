@@ -3730,6 +3730,13 @@ sapp_swapchain sapp_get_swapchain(void) {
 #include <X11/keysym.h>
 #include <X11/cursorfont.h>
 #include <X11/Xcursor/Xcursor.h>
+/* GL_GLEXT_PROTOTYPES must be defined before the FIRST include of <GL/gl.h>
+   in the TU: glext.h is include-guarded, so sokol_gfx.h's own define comes
+   too late once this header has pulled the GL headers in (upstream
+   sokol_app.h's Linux impl defines it the same way) */
+#ifndef GL_GLEXT_PROTOTYPES
+#define GL_GLEXT_PROTOTYPES
+#endif
 #include <GL/gl.h>
 #include <GL/glx.h>
 #include <time.h>
