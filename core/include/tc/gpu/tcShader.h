@@ -611,13 +611,30 @@ public:
 
         sg_draw(0, 6, 1);
 
-        // Restore sokol_gl state
+        // Restore sokol_gl state to what the rest of the frame expects.
+        //
+        // Inside an Fbo pass that is the corner-origin ortho Fbo::begin set up.
+        // On the SWAPCHAIN the screen convention is NOT a corner ortho — it is
+        // the screen camera from setupScreenFovWithSize (a CENTERED projection
+        // plus a lookat modelview; perspective when defaultScreenFov > 0). A
+        // plain ortho here leaves a mixed state: as soon as the engine
+        // re-applies the camera modelview, later 2D draws land shifted by
+        // (-W/2, -H/2) at the wrong scale. (Historic bug: this used
+        // sapp_width(), physical px, which additionally halved everything on
+        // retina.) Re-run the real setup with the CURRENT view params instead.
         sg_reset_state_cache();
-        sgl_defaults();
-        sgl_matrix_mode_projection();
-        sgl_ortho(0.0f, (float)sapp_width(), (float)sapp_height(), 0.0f, -10000.0f, 10000.0f);
-        sgl_matrix_mode_modelview();
-        sgl_load_identity();
+        if (internal::inFboPass) {
+            sgl_defaults();
+            internal::loadPipeline(internal::activeFill2D());
+            sgl_matrix_mode_projection();
+            sgl_ortho(0.0f, internal::currentViewW, internal::currentViewH, 0.0f, -10000.0f, 10000.0f);
+            sgl_matrix_mode_modelview();
+            sgl_load_identity();
+        } else {
+            internal::setupScreenFovWithSize(internal::currentScreenFov,
+                                             internal::currentViewW, internal::currentViewH,
+                                             0.0f, 0.0f);
+        }
     }
 
 protected:
