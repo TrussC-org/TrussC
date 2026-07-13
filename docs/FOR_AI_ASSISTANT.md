@@ -1007,10 +1007,10 @@ So: setActive / setVisible to temporarily stop/hide, destroy when you're done wi
 
 ### Custom-looking button — is click handling provided?
 
-You don't write event handling from scratch. **RectNode has subscribable mouse events built in**, so you only custom-draw the look. RectNode exposes public Event members `mousePressed` / `mouseReleased` / `mouseDragged` / `mouseScrolled` (`Event<MouseEventArgs>` etc.), uses rectangle hit-testing, and **has `enableEvents()` already called in its constructor (events on by default).** Two ways to use it:
+You don't write event handling from scratch. **RectNode has subscribable mouse events built in**, so you only custom-draw the look. RectNode exposes public Event members `mousePressed` / `mouseReleased` / `mouseDragged` / `mouseScrolled` (`Event<MouseEventArgs>` etc.) and uses rectangle hit-testing. **One required step: call `enableEvents()`** — a plain RectNode does NOT receive events by default (only ready-made widgets like `RectNodeButton` and `ScrollContainer` enable it in their constructors); forget it and the node silently never gets a click. Two ways to use it:
 - **Subscribe from outside (no subclass)**: `listener_ = button->mousePressed.listen([this](MouseEventArgs& e){ ... });` (keep the returned `EventListener` as a member).
 - **Subclass and override**: `bool onMousePress(const MouseEventArgs& e) override { ...; return true; }`.
-Draw freely in local coordinates around (0,0) — rounded corners, image, shader, fully your own. (A plain `Node`, not a RectNode, needs `enableEvents()`. For a ready-made look, `RectNodeButton` — a simple color-on-press button — is built in.)
+Draw freely in local coordinates around (0,0) — rounded corners, image, shader, fully your own. (For a ready-made look, `RectNodeButton` — a simple color-on-press button with events pre-enabled — is built in.)
 
 ## Events (loose coupling)
 
@@ -3930,14 +3930,15 @@ const std::string & VideoWriter::getPath() const  // Resolved output file path
 const VideoRecordSettings & VideoWriter::getSettings() const  // Encoder settings the writer was opened with
 int VideoWriter::getWidth() const  // Encoder output width in pixels
 bool VideoWriter::isOpen() const  // Check if the encoder is open and accepting frames
-unsigned char * VideoWriter::lockFrame(int & strideOut)  // Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame
+unsigned char * VideoWriter::lockFrame(int & strideOut) [macos]  // Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame
 bool VideoWriter::open(const std::string & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the encoder at the given size (path resolved via getDataPath)
-bool VideoWriter::submitFrame(double timeSec)  // Append the previously locked frame at the given presentation time (seconds)
+bool VideoWriter::submitFrame(double timeSec) [macos]  // Append the previously locked frame at the given presentation time (seconds)
 ```
 
 ### WindowSettings — Window configuration passed to the app at startup (size, title, DPI, MSAA, fullscreen, decoration, VSync). Setters chain
 
 ```cpp
+WindowSettings & WindowSettings::reserveUniformBuffer(int bytes)  // Reserve the per-frame GPU uniform buffer in bytes, vector::reserve style; 0 = backend default 4MB ≈ 8k draw calls. Metal/WebGPU/Vulkan only — GL/D3D11 have no such cap (chainable)
 WindowSettings & WindowSettings::setClipboardSize(int size)  // Set clipboard buffer size in bytes (chainable)
 WindowSettings & WindowSettings::setDecorated(bool enabled)  // false = borderless/chromeless window that can still take focus and be closed programmatically (chainable)
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Enable/disable fullscreen at startup (chainable)
