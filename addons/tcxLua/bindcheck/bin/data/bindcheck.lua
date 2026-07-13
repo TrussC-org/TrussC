@@ -94,6 +94,17 @@ end)
 try("generated constants", function()         -- kind:var constants (TAU, KEY_*, ...)
     return math.abs(TAU - 6.2831) < 0.001 and _G.KEY_SPACE ~= nil and _G.VSYNC ~= nil
 end)
+try("fs::path from Lua string", function()    -- tcxLuaPathAdapter: string -> path getter
+    -- saveScreenshot takes const fs::path&; before the adapter a Lua string
+    -- here was a SIGSEGV (null userdata deref). Result value doesn't matter,
+    -- surviving the call does.
+    saveScreenshot('/tmp/bindcheck_path_probe.png')
+    return true
+end)
+try("fs::path to Lua string", function()      -- tcxLuaPathAdapter: path -> string pusher
+    local p = getDataPath('bindcheck_probe.txt')
+    return type(p) == 'string' and #p > 0
+end)
 
 -- Emit machine-parseable summary via print (base lib; goes to stdout).
 print("##BINDCHECK_BEGIN##")
