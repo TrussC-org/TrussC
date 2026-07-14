@@ -342,6 +342,29 @@ can feed events manually, so imgui does not chain us to sokol_app.
 - **P5 — Android driver.** NativeActivity + ALooper + Choreographer + EGL
   surface lifecycle. Last on purpose; needs a real-device verification
   plan (rotation, pause/resume, surface recreate).
+  - **IMPLEMENTED + compile/link-verified 2026-07-14; device pass
+    pending** (user will prepare Android hardware; checklist =
+    sapp-android-impl-spec.md §12d). Implementation contract:
+    docs/dev/sapp-android-impl-spec.md (opus-extracted, sixth sibling).
+    Same verbatim-lift as web/iOS: android backend body (sokol_app.h
+    10319–11038) + state structs + posix CLOCK_MONOTONIC clock renamed
+    _sapp_tc_*; shared-helper + >>public blocks reused verbatim (their
+    _SAPP_ANDROID branches — egl getters, show_keyboard,
+    android_get_native_activity — light up unchanged). All four TrussC
+    patches preserved by construction: Choreographer vsync frame loop +
+    poll fallback (compiled out at the current android-26 API floor,
+    poll loop is the live path), BACK-key no-shutdown (kiosk/lock-task),
+    AConfiguration density DPI, skip_present. Entry point is INVERTED:
+    the android section EXPORTS ANativeActivity_onCreate (SOKOL_NO_ENTRY
+    is a compile error); android/sokol_impl.cpp keeps TrussC's
+    sokol_main → main() → g_androidDesc bridge on top of the
+    declarations-only shim. Single-window stubs like web/iOS. Thread
+    model documented as hazard #1: sokol_main/runApp run on the UI
+    thread, all app callbacks on the spawned app thread (unchanged from
+    upstream — lifted verbatim). Verified: core + AllFeaturesExample
+    NDK r29 arm64-v8a android-26 build, ANativeActivity_onCreate +
+    sokol_main exported in the final .so dynamic table, zero rename
+    leftovers; mac + iOS-sim regression rebuilds green.
 - **P6 — delete sokol_app.h**, update TRUSSC_MODIFICATIONS.md, retire the
   fork patches.
 

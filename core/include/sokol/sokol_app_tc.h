@@ -8914,6 +8914,2098 @@ sapp_swapchain sapp_get_swapchain(void) {
 }
 
 } /* extern "C" */
+#elif defined(__ANDROID__)
+/*== Android (GLES3 / NativeActivity) =======================================
+    Implements the public sokol_app.h API on Android plus the multi-window
+    API (as stubs -- the activity owns exactly ONE ANativeWindow, so a
+    second window is not representable; sapp_create_window() returns the
+    invalid handle and logs).
+
+    The entry point is INVERTED relative to every other platform: this
+    section EXPORTS ANativeActivity_onCreate() (NativeActivity dlopens the
+    app .so and calls it on Android's UI thread), which spawns a dedicated
+    APP THREAD and returns. The app thread owns the ALooper, the EGL
+    display/context/surface, the frame loop and every TrussC callback
+    (init/frame/event/cleanup); the UI thread only forwards lifecycle
+    callbacks through a message pipe + mutex/cond handshake. sapp_run()
+    is NOT supported (SOKOL_NO_ENTRY is a compile error); sokol_main()
+    is defined by TrussC's platform/android/sokol_impl.cpp bridge.
+
+    The EGL surface has an independent lifecycle: it is destroyed on
+    background and recreated on foreground (APP_CMD state machine); frames
+    only run while has_resumed && has_focus && a surface exists.
+
+    Structure mirrors sokol_app.h's Android backend including all TrussC
+    patches: the Choreographer vsync-paced frame loop with ALooper poll
+    fallback (compiled in at __ANDROID_API__ >= 29), the BACK-key
+    no-shutdown fix (kiosk/screen-pinning survival -- BACK is consumed,
+    never tears down EGL), DPI scale from AConfiguration_getDensity()/160
+    with fb/win-ratio fallback, and the skip_present early-return. Input
+    is multi-touch + the BACK key; orientation and immersive mode are
+    TrussC-side JNI (tcPlatform_android.cpp), not sokol's business. */
+#define _SAPP_ANDROID (1)
+#if !defined(SOKOL_GLES3)
+#error "sokol_app_tc.h: unknown 3D API selected for Android, must be SOKOL_GLES3"
+#endif
+#if defined(SOKOL_NO_ENTRY)
+#error "sokol_app_tc.h: SOKOL_NO_ENTRY is not supported on Android"
+#endif
+/* GLES3 always -> the lifted code's GL forks are live */
+#define _SAPP_ANY_GL (1)
+
+#include <pthread.h>
+#include <unistd.h>
+#include <time.h>
+#include <android/native_activity.h>
+#include <android/configuration.h>  /* [TrussC] AConfiguration for display density */
+#include <android/looper.h>
+#if __ANDROID_API__ >= 29
+    #include <android/choreographer.h>
+#endif
+#include <EGL/egl.h>
+#include <GLES3/gl3.h>
+#include <stdio.h>
+
+#if defined(SOKOL_APP_IMPL_INCLUDED)
+#error "sokol_app_tc.h owns the Android implementation of the sapp_* API; include sokol_app.h WITHOUT an implementation define in this TU"
+#endif
+
+#ifndef SOKOL_ASSERT
+#include <assert.h>
+#define SOKOL_ASSERT(c) assert(c)
+#endif
+#ifndef _SOKOL_PRIVATE
+#define _SOKOL_PRIVATE static
+#endif
+#ifndef _SOKOL_UNUSED
+#define _SOKOL_UNUSED(x) (void)(x)
+#endif
+#ifndef SOKOL_API_IMPL
+#define SOKOL_API_IMPL
+#endif
+#ifndef SOKOL_UNREACHABLE
+#define SOKOL_UNREACHABLE SOKOL_ASSERT(false)
+#endif
+
+#define _SAPP_MAX_TITLE_LENGTH (128)
+#define _SAPP_FALLBACK_DEFAULT_WINDOW_WIDTH (640)
+#define _SAPP_FALLBACK_DEFAULT_WINDOW_HEIGHT (480)
+#define _sapp_tc_def(val, def) (((val) == 0) ? (def) : (val))
+#if defined(__cplusplus)
+#define _SAPP_STRUCT(TYPE, NAME) TYPE NAME = {}
+#define _SAPP_CLEAR_ARC_STRUCT(type, item) { item = type(); }
+#else
+#define _SAPP_STRUCT(TYPE, NAME) TYPE NAME = {0}
+#define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_tc_clear(&item, sizeof(item)); }
+#endif
+
+/* controlled failure instead of sokol_app.h's log-item machinery */
+#define _SAPP_PANIC(code) do { fprintf(stderr, "sokol_app_tc.h: panic: " #code "\n"); abort(); } while (0)
+#define _SAPP_ERROR(code) fprintf(stderr, "sokol_app_tc.h: error: " #code "\n")
+#define _SAPP_ERROR_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: error: " #code ": %s\n", msg)
+#define _SAPP_WARN_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: warn: " #code ": %s\n", msg)
+#define _SAPP_INFO_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: info: " #code ": %s\n", msg)
+#define _SAPP_INFO(code) fprintf(stderr, "sokol_app_tc.h: info: " #code "\n")
+#define _SAPP_WARN(code) fprintf(stderr, "sokol_app_tc.h: warn: " #code "\n")
+typedef struct {
+    #if defined(_SAPP_APPLE)
+        struct {
+            mach_timebase_info_data_t timebase;
+            uint64_t start;
+        } mach;
+    #elif defined(_SAPP_EMSCRIPTEN)
+        int _dummy;
+    #elif defined(_SAPP_WIN32)
+        struct {
+            LARGE_INTEGER freq;
+            LARGE_INTEGER start;
+        } win;
+    #else // Linux, Android, ...
+        #ifdef CLOCK_MONOTONIC
+        #define _SAPP_CLOCK_MONOTONIC CLOCK_MONOTONIC
+        #else
+        // on some embedded platforms, CLOCK_MONOTONIC isn't defined
+        #define _SAPP_CLOCK_MONOTONIC (1)
+        #endif
+        struct {
+            uint64_t start;
+        } posix;
+    #endif
+} _sapp_tc_timestamp_t;
+
+_SOKOL_PRIVATE int64_t _sapp_tc_int64_muldiv(int64_t value, int64_t numer, int64_t denom) {
+    int64_t q = value / denom;
+    int64_t r = value % denom;
+    return q * numer + r * numer / denom;
+}
+
+_SOKOL_PRIVATE void _sapp_tc_timestamp_init(_sapp_tc_timestamp_t* ts) {
+    #if defined(_SAPP_APPLE)
+        mach_timebase_info(&ts->mach.timebase);
+        ts->mach.start = mach_absolute_time();
+    #elif defined(_SAPP_EMSCRIPTEN)
+        (void)ts;
+    #elif defined(_SAPP_WIN32)
+        QueryPerformanceFrequency(&ts->win.freq);
+        QueryPerformanceCounter(&ts->win.start);
+    #else
+        struct timespec tspec;
+        clock_gettime(_SAPP_CLOCK_MONOTONIC, &tspec);
+        ts->posix.start = (uint64_t)tspec.tv_sec*1000000000 + (uint64_t)tspec.tv_nsec;
+    #endif
+}
+
+_SOKOL_PRIVATE double _sapp_tc_timestamp_now(_sapp_tc_timestamp_t* ts) {
+    #if defined(_SAPP_APPLE)
+        const uint64_t traw = mach_absolute_time() - ts->mach.start;
+        const uint64_t now = (uint64_t) _sapp_tc_int64_muldiv((int64_t)traw, (int64_t)ts->mach.timebase.numer, (int64_t)ts->mach.timebase.denom);
+        return (double)now / 1000000000.0;
+    #elif defined(_SAPP_EMSCRIPTEN)
+        (void)ts;
+        SOKOL_ASSERT(false);
+        return 0.0;
+    #elif defined(_SAPP_WIN32)
+        LARGE_INTEGER qpc;
+        QueryPerformanceCounter(&qpc);
+        const uint64_t now = (uint64_t)_sapp_tc_int64_muldiv(qpc.QuadPart - ts->win.start.QuadPart, 1000000000, ts->win.freq.QuadPart);
+        return (double)now / 1000000000.0;
+    #else
+        struct timespec tspec;
+        clock_gettime(_SAPP_CLOCK_MONOTONIC, &tspec);
+        const uint64_t now = ((uint64_t)tspec.tv_sec*1000000000 + (uint64_t)tspec.tv_nsec) - ts->posix.start;
+        return (double)now / 1000000000.0;
+    #endif
+}
+
+typedef struct {
+    _sapp_tc_timestamp_t timestamp;
+    double dt_min;          // config: min clamp value for unfiltered time delta (seconds)
+    double dt_max;          // config: max clamp value for unfiltered time delta (seconds)
+    double dt_threshold;    // config: threshold time delta for 'resetting' filtering (default: 0.004s, 4ms)
+    double alpha;           // config: smoothing constant, lower values smoother, higher values faster response
+    double last;        // last absolute time in seconds
+    double dt;          // unfiltered frame delta in seconds, clamped to dt_min/dt_max
+    double ema;         // intermediate ema-filter result
+    double smooth_dt;   // smoothed frame delta in seconds
+} _sapp_tc_timing_t;
+
+_SOKOL_PRIVATE void _sapp_tc_timing_init(_sapp_tc_timing_t* t) {
+    _sapp_tc_timestamp_init(&t->timestamp);
+    t->dt_min = 0.000001;       // 1 us
+    t->dt_max = 0.1;            // 100 ms
+    t->dt_threshold = 0.004;    // 4ms
+    t->alpha = 0.025;
+    t->dt = 1.0 / 60.0;         // a 'likely' non-null value
+    t->ema = t->dt;
+    t->smooth_dt = t->dt;
+}
+
+_SOKOL_PRIVATE double _sapp_tc_timing_clamp(_sapp_tc_timing_t* t, double dt) {
+    SOKOL_ASSERT((t->dt_min > 0.0) && (t->dt_max > 0.0) && (t->dt_max >= t->dt_min));
+    if (dt < t->dt_min) {
+        return t->dt_min;
+    } else if (dt > t->dt_max) {
+        return t->dt_max;
+    } else {
+        return dt;
+    }
+}
+
+_SOKOL_PRIVATE void _sapp_tc_timing_delta(_sapp_tc_timing_t* t, double dt) {
+    // first clamp raw dt against min/max (min avoid division by zero, max
+    // may avoids glitches and 'death-spirals' during debugging
+    dt = _sapp_tc_timing_clamp(t, dt);
+    t->dt = dt;
+    const double error = fabs(dt - t->smooth_dt);
+    if (error > t->dt_threshold) {
+        // 'reset' filter when new delta is outside threshold
+        t->ema = dt;
+        t->smooth_dt = dt;
+    } else {
+        // simple ema-filter with fixed alpha
+        t->ema = t->ema + t->alpha * (dt - t->ema);
+        t->smooth_dt = _sapp_tc_timing_clamp(t, t->ema);
+    }
+}
+
+_SOKOL_PRIVATE void _sapp_tc_timing_update(_sapp_tc_timing_t* t, double external_now) {
+    double now;
+    if (external_now == 0.0) {
+        now = _sapp_tc_timestamp_now(&t->timestamp);
+    } else {
+        now = external_now;
+    }
+    if (t->last > 0.0) {
+        double dt = now - t->last;
+        _sapp_tc_timing_delta(t, dt);
+    }
+    t->last = now;
+
+}
+
+_SOKOL_PRIVATE double _sapp_tc_timing_get(_sapp_tc_timing_t* t) {
+    return t->smooth_dt;
+}
+
+#if defined(_SAPP_ANDROID)
+typedef enum {
+    _SOKOL_ANDROID_MSG_CREATE,
+    _SOKOL_ANDROID_MSG_RESUME,
+    _SOKOL_ANDROID_MSG_PAUSE,
+    _SOKOL_ANDROID_MSG_FOCUS,
+    _SOKOL_ANDROID_MSG_NO_FOCUS,
+    _SOKOL_ANDROID_MSG_SET_NATIVE_WINDOW,
+    _SOKOL_ANDROID_MSG_SET_INPUT_QUEUE,
+    _SOKOL_ANDROID_MSG_DESTROY,
+} _sapp_tc_android_msg_t;
+
+typedef struct {
+    pthread_t thread;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int read_from_main_fd;
+    int write_from_main_fd;
+} _sapp_tc_android_pt_t;
+
+typedef struct {
+    ANativeWindow* window;
+    AInputQueue* input;
+} _sapp_tc_android_resources_t;
+
+typedef struct {
+    ANativeActivity* activity;
+    _sapp_tc_android_pt_t pt;
+    _sapp_tc_android_resources_t pending;
+    _sapp_tc_android_resources_t current;
+    ALooper* looper;
+    bool is_thread_started;
+    bool is_thread_stopping;
+    bool is_thread_stopped;
+    bool has_created;
+    bool has_resumed;
+    bool has_focus;
+    EGLConfig config;
+    EGLDisplay display;
+    EGLContext context;
+    EGLSurface surface;
+    #if __ANDROID_API__ >= 29
+    AChoreographer* choreographer;
+    bool frame_callback_in_flight;
+    #endif
+} _sapp_tc_android_t;
+
+#endif // _SAPP_ANDROID
+
+typedef struct {
+    bool enabled;
+    int buf_size;
+    char* buffer;
+} _sapp_tc_clipboard_t;
+
+typedef struct {
+    bool enabled;
+    int max_files;
+    int max_path_length;
+    int num_files;
+    int buf_size;
+    char* buffer;
+} _sapp_tc_drop_t;
+
+typedef struct {
+    float x, y;
+    float dx, dy;
+    bool shown;
+    bool locked;
+    bool pos_valid;
+    sapp_mouse_cursor current_cursor;
+} _sapp_tc_mouse_t;
+
+typedef struct {
+    uint32_t framebuffer;
+} _sapp_tc_gl_t;
+
+/* per-app state -- an Android-sized subset of sokol_app.h's _sapp_t with the
+   same member names, so the lifted implementation code reads unchanged.
+   mouse / clipboard / drop / html5 / cursor members are inert on Android
+   (touch-only, no OS clipboard or dnd surface) but kept so the shared lifted
+   helpers and the lifted public API compile verbatim. */
+typedef struct {
+    sapp_desc desc;
+    bool valid;
+    bool fullscreen;            /* inert: Android is inherently fullscreen */
+    bool first_frame;
+    bool init_called;
+    bool cleanup_called;
+    bool quit_requested;        /* inert: lifecycle is activity-driven */
+    bool quit_ordered;
+    bool event_consumed;
+    bool html5_ask_leave_site;  /* inert */
+    bool onscreen_keyboard_shown;   /* never set on Android (pre-existing quirk) */
+    bool skip_present;
+    int window_width;
+    int window_height;
+    int framebuffer_width;
+    int framebuffer_height;
+    int sample_count;
+    int swap_interval;
+    float dpi_scale;
+    uint64_t frame_count;
+    sapp_event event;
+    _sapp_tc_mouse_t mouse;
+    _sapp_tc_clipboard_t clipboard;
+    _sapp_tc_drop_t drop;
+    _sapp_tc_timing_t timing;
+    _sapp_tc_android_t android;
+    _sapp_tc_gl_t gl;
+    char html5_canvas_selector[_SAPP_MAX_TITLE_LENGTH];
+    char window_title[_SAPP_MAX_TITLE_LENGTH];
+    bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM];
+} _sapp_tc_t;
+static _sapp_tc_t _sapp_tc;
+_SOKOL_PRIVATE void _sapp_tc_clear(void* ptr, size_t size) {
+    SOKOL_ASSERT(ptr && (size > 0));
+    memset(ptr, 0, size);
+}
+
+_SOKOL_PRIVATE void* _sapp_tc_malloc(size_t size) {
+    SOKOL_ASSERT(size > 0);
+    void* ptr;
+    if (_sapp_tc.desc.allocator.alloc_fn) {
+        ptr = _sapp_tc.desc.allocator.alloc_fn(size, _sapp_tc.desc.allocator.user_data);
+    } else {
+        ptr = malloc(size);
+    }
+    if (0 == ptr) {
+        _SAPP_PANIC(MALLOC_FAILED);
+    }
+    return ptr;
+}
+
+_SOKOL_PRIVATE void* _sapp_tc_malloc_clear(size_t size) {
+    void* ptr = _sapp_tc_malloc(size);
+    _sapp_tc_clear(ptr, size);
+    return ptr;
+}
+
+_SOKOL_PRIVATE void _sapp_tc_free(void* ptr) {
+    if (_sapp_tc.desc.allocator.free_fn) {
+        _sapp_tc.desc.allocator.free_fn(ptr, _sapp_tc.desc.allocator.user_data);
+    } else {
+        free(ptr);
+    }
+}
+
+// ██   ██ ███████ ██      ██████  ███████ ██████  ███████
+// ██   ██ ██      ██      ██   ██ ██      ██   ██ ██
+// ███████ █████   ██      ██████  █████   ██████  ███████
+// ██   ██ ██      ██      ██      ██      ██   ██      ██
+// ██   ██ ███████ ███████ ██      ███████ ██   ██ ███████
+//
+// >>helpers
+
+// round float to int and at least 1
+_SOKOL_PRIVATE int _sapp_tc_roundf_gzero(float f) {
+    int val = (int)roundf(f);
+    if (val <= 0) {
+        val = 1;
+    }
+    return val;
+}
+
+_SOKOL_PRIVATE void _sapp_tc_call_init(void) {
+    if (_sapp_tc.desc.init_cb) {
+        _sapp_tc.desc.init_cb();
+    } else if (_sapp_tc.desc.init_userdata_cb) {
+        _sapp_tc.desc.init_userdata_cb(_sapp_tc.desc.user_data);
+    }
+    _sapp_tc.init_called = true;
+}
+
+_SOKOL_PRIVATE void _sapp_tc_call_frame(void) {
+    if (_sapp_tc.init_called && !_sapp_tc.cleanup_called) {
+        if (_sapp_tc.desc.frame_cb) {
+            _sapp_tc.desc.frame_cb();
+        } else if (_sapp_tc.desc.frame_userdata_cb) {
+            _sapp_tc.desc.frame_userdata_cb(_sapp_tc.desc.user_data);
+        }
+    }
+}
+
+_SOKOL_PRIVATE void _sapp_tc_call_cleanup(void) {
+    if (!_sapp_tc.cleanup_called) {
+        if (_sapp_tc.desc.cleanup_cb) {
+            _sapp_tc.desc.cleanup_cb();
+        } else if (_sapp_tc.desc.cleanup_userdata_cb) {
+            _sapp_tc.desc.cleanup_userdata_cb(_sapp_tc.desc.user_data);
+        }
+        _sapp_tc.cleanup_called = true;
+    }
+}
+
+_SOKOL_PRIVATE bool _sapp_tc_call_event(const sapp_event* e) {
+    if (!_sapp_tc.cleanup_called) {
+        if (_sapp_tc.desc.event_cb) {
+            _sapp_tc.desc.event_cb(e);
+        } else if (_sapp_tc.desc.event_userdata_cb) {
+            _sapp_tc.desc.event_userdata_cb(e, _sapp_tc.desc.user_data);
+        }
+    }
+    if (_sapp_tc.event_consumed) {
+        _sapp_tc.event_consumed = false;
+        return true;
+    } else {
+        return false;
+    }
+}
+
+
+_SOKOL_PRIVATE char* _sapp_tc_dropped_file_path_ptr(int index) {
+    SOKOL_ASSERT(_sapp_tc.drop.buffer);
+    SOKOL_ASSERT((index >= 0) && (index <= _sapp_tc.drop.max_files));
+    int offset = index * _sapp_tc.drop.max_path_length;
+    SOKOL_ASSERT(offset < _sapp_tc.drop.buf_size);
+    return &_sapp_tc.drop.buffer[offset];
+}
+
+/* Copy a string (either zero-terminated or with explicit length)
+   into a fixed size buffer with guaranteed zero-termination.
+
+   Return false if the string didn't fit into the buffer and had to be clamped.
+
+   FIXME: Currently UTF-8 strings might become invalid if the string
+   is clamped, because the last zero-byte might be written into
+   the middle of a multi-byte sequence.
+*/
+_SOKOL_PRIVATE bool _sapp_tc_strcpy_range(const char* src, size_t src_len, char* dst, size_t dst_buf_len) {
+    SOKOL_ASSERT(src && dst && (dst_buf_len > 0));
+    if (0 == src_len) {
+        src_len = dst_buf_len;
+    }
+    char* const end = &(dst[dst_buf_len-1]);
+    char c = 0;
+    for (size_t i = 0; i < dst_buf_len; i++) {
+        c = *src;
+        if (i >= src_len) {
+            c = 0;
+        }
+        if (c != 0) {
+            src++;
+        }
+        *dst++ = c;
+    }
+    // truncated?
+    if (c != 0) {
+        *end = 0;
+        return false;
+    } else {
+        return true;
+    }
+}
+
+_SOKOL_PRIVATE bool _sapp_tc_strcpy(const char* src, char* dst, size_t dst_buf_len) {
+    return _sapp_tc_strcpy_range(src, 0, dst, dst_buf_len);
+}
+
+_SOKOL_PRIVATE sapp_desc _sapp_tc_desc_defaults(const sapp_desc* desc) {
+    SOKOL_ASSERT((desc->allocator.alloc_fn && desc->allocator.free_fn) || (!desc->allocator.alloc_fn && !desc->allocator.free_fn));
+    sapp_desc res = *desc;
+    res.sample_count = _sapp_tc_def(res.sample_count, 1);
+    res.swap_interval = _sapp_tc_def(res.swap_interval, 1);
+    if (0 == res.gl.major_version) {
+        #if defined(SOKOL_GLCORE)
+            res.gl.major_version = 4;
+            #if defined(_SAPP_APPLE)
+                res.gl.minor_version = 1;
+            #else
+                res.gl.minor_version = 3;
+            #endif
+        #elif defined(SOKOL_GLES3)
+            res.gl.major_version = 3;
+            #if defined(_SAPP_ANDROID) || defined(_SAPP_LINUX)
+                res.gl.minor_version = 1;
+            #else
+                res.gl.minor_version = 0;
+            #endif
+        #endif
+    }
+    res.html5.canvas_selector = _sapp_tc_def(res.html5.canvas_selector, "#canvas");
+    res.clipboard_size = _sapp_tc_def(res.clipboard_size, 8192);
+    res.max_dropped_files = _sapp_tc_def(res.max_dropped_files, 1);
+    res.max_dropped_file_path_length = _sapp_tc_def(res.max_dropped_file_path_length, 2048);
+    res.window_title = _sapp_tc_def(res.window_title, "sokol");
+    return res;
+}
+
+_SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
+    SOKOL_ASSERT(desc);
+    SOKOL_ASSERT(desc->width >= 0);
+    SOKOL_ASSERT(desc->height >= 0);
+    SOKOL_ASSERT(desc->sample_count >= 0);
+    SOKOL_ASSERT(desc->swap_interval >= 0);
+    SOKOL_ASSERT(desc->clipboard_size >= 0);
+    SOKOL_ASSERT(desc->max_dropped_files >= 0);
+    SOKOL_ASSERT(desc->max_dropped_file_path_length >= 0);
+    _SAPP_CLEAR_ARC_STRUCT(_sapp_tc_t, _sapp_tc);
+    _sapp_tc.desc = _sapp_tc_desc_defaults(desc);
+    _sapp_tc.first_frame = true;
+    // NOTE: _sapp_tc.desc.width/height may be 0! Platform backends need to deal with this
+    _sapp_tc.window_width = _sapp_tc.desc.width;
+    _sapp_tc.window_height = _sapp_tc.desc.height;
+    _sapp_tc.framebuffer_width = _sapp_tc.window_width;
+    _sapp_tc.framebuffer_height = _sapp_tc.window_height;
+    _sapp_tc.sample_count = _sapp_tc.desc.sample_count;
+    _sapp_tc.swap_interval = _sapp_tc.desc.swap_interval;
+    _sapp_tc_strcpy(_sapp_tc.desc.html5.canvas_selector, _sapp_tc.html5_canvas_selector, sizeof(_sapp_tc.html5_canvas_selector));
+    _sapp_tc.desc.html5.canvas_selector = _sapp_tc.html5_canvas_selector;
+    _sapp_tc.html5_ask_leave_site = _sapp_tc.desc.html5.ask_leave_site;
+    _sapp_tc.clipboard.enabled = _sapp_tc.desc.enable_clipboard;
+    if (_sapp_tc.clipboard.enabled) {
+        _sapp_tc.clipboard.buf_size = _sapp_tc.desc.clipboard_size;
+        _sapp_tc.clipboard.buffer = (char*) _sapp_tc_malloc_clear((size_t)_sapp_tc.clipboard.buf_size);
+    }
+    _sapp_tc.drop.enabled = _sapp_tc.desc.enable_dragndrop;
+    if (_sapp_tc.drop.enabled) {
+        _sapp_tc.drop.max_files = _sapp_tc.desc.max_dropped_files;
+        _sapp_tc.drop.max_path_length = _sapp_tc.desc.max_dropped_file_path_length;
+        _sapp_tc.drop.buf_size = _sapp_tc.drop.max_files * _sapp_tc.drop.max_path_length;
+        _sapp_tc.drop.buffer = (char*) _sapp_tc_malloc_clear((size_t)_sapp_tc.drop.buf_size);
+    }
+    _sapp_tc_strcpy(_sapp_tc.desc.window_title, _sapp_tc.window_title, sizeof(_sapp_tc.window_title));
+    _sapp_tc.desc.window_title = _sapp_tc.window_title;
+    _sapp_tc.dpi_scale = 1.0f;
+    _sapp_tc.fullscreen = _sapp_tc.desc.fullscreen;
+    _sapp_tc.mouse.shown = true;
+    _sapp_tc_timing_init(&_sapp_tc.timing);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_discard_state(void) {
+    if (_sapp_tc.clipboard.enabled) {
+        SOKOL_ASSERT(_sapp_tc.clipboard.buffer);
+        _sapp_tc_free((void*)_sapp_tc.clipboard.buffer);
+    }
+    if (_sapp_tc.drop.enabled) {
+        SOKOL_ASSERT(_sapp_tc.drop.buffer);
+        _sapp_tc_free((void*)_sapp_tc.drop.buffer);
+    }
+    for (int i = 0; i < _SAPP_MOUSECURSOR_NUM; i++) {
+        sapp_unbind_mouse_cursor_image((sapp_mouse_cursor) i);
+    }
+    _SAPP_CLEAR_ARC_STRUCT(_sapp_tc_t, _sapp_tc);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_init_event(sapp_event_type type) {
+    _sapp_tc_clear(&_sapp_tc.event, sizeof(_sapp_tc.event));
+    _sapp_tc.event.type = type;
+    _sapp_tc.event.frame_count = _sapp_tc.frame_count;
+    _sapp_tc.event.mouse_button = SAPP_MOUSEBUTTON_INVALID;
+    _sapp_tc.event.window_width = _sapp_tc.window_width;
+    _sapp_tc.event.window_height = _sapp_tc.window_height;
+    _sapp_tc.event.framebuffer_width = _sapp_tc.framebuffer_width;
+    _sapp_tc.event.framebuffer_height = _sapp_tc.framebuffer_height;
+    _sapp_tc.event.mouse_x = _sapp_tc.mouse.x;
+    _sapp_tc.event.mouse_y = _sapp_tc.mouse.y;
+    _sapp_tc.event.mouse_dx = _sapp_tc.mouse.dx;
+    _sapp_tc.event.mouse_dy = _sapp_tc.mouse.dy;
+}
+
+_SOKOL_PRIVATE bool _sapp_tc_events_enabled(void) {
+    /* only send events when an event callback is set, and the init function was called */
+    return (_sapp_tc.desc.event_cb || _sapp_tc.desc.event_userdata_cb) && _sapp_tc.init_called;
+}
+
+_SOKOL_PRIVATE void _sapp_tc_clear_drop_buffer(void) {
+    if (_sapp_tc.drop.enabled) {
+        SOKOL_ASSERT(_sapp_tc.drop.buffer);
+        _sapp_tc_clear(_sapp_tc.drop.buffer, (size_t)_sapp_tc.drop.buf_size);
+    }
+}
+
+_SOKOL_PRIVATE void _sapp_tc_frame(void) {
+    if (_sapp_tc.first_frame) {
+        _sapp_tc.first_frame = false;
+        _sapp_tc_call_init();
+    }
+    _sapp_tc_call_frame();
+    _sapp_tc.frame_count++;
+}
+
+_SOKOL_PRIVATE bool _sapp_tc_image_validate(const sapp_image_desc* desc) {
+    SOKOL_ASSERT(desc->width > 0);
+    SOKOL_ASSERT(desc->height > 0);
+    SOKOL_ASSERT(desc->pixels.ptr != 0);
+    SOKOL_ASSERT(desc->pixels.size > 0);
+    const size_t wh_size = (size_t)(desc->width * desc->height) * sizeof(uint32_t);
+    if (wh_size != desc->pixels.size) {
+        _SAPP_ERROR(IMAGE_DATA_SIZE_MISMATCH);
+        return false;
+    }
+    return true;
+}
+
+_SOKOL_PRIVATE int _sapp_tc_image_bestmatch(const sapp_image_desc image_descs[], int num_images, int width, int height) {
+    int least_diff = 0x7FFFFFFF;
+    int least_index = 0;
+    for (int i = 0; i < num_images; i++) {
+        int diff = (image_descs[i].width * image_descs[i].height) - (width * height);
+        if (diff < 0) {
+            diff = -diff;
+        }
+        if (diff < least_diff) {
+            least_diff = diff;
+            least_index = i;
+        }
+    }
+    return least_index;
+}
+
+_SOKOL_PRIVATE int _sapp_tc_icon_num_images(const sapp_icon_desc* desc) {
+    int index = 0;
+    for (; index < SAPP_MAX_ICONIMAGES; index++) {
+        if (0 == desc->images[index].pixels.ptr) {
+            break;
+        }
+    }
+    return index;
+}
+
+_SOKOL_PRIVATE bool _sapp_tc_validate_icon_desc(const sapp_icon_desc* desc, int num_images) {
+    SOKOL_ASSERT(num_images <= SAPP_MAX_ICONIMAGES);
+    for (int i = 0; i < num_images; i++) {
+        const sapp_image_desc* img_desc = &desc->images[i];
+        if (!_sapp_tc_image_validate(img_desc)) {
+            return false;
+        }
+    }
+    return true;
+}
+#if defined(_SAPP_ANDROID)
+
+/* android loop thread */
+_SOKOL_PRIVATE bool _sapp_tc_android_init_egl(void) {
+    SOKOL_ASSERT(_sapp_tc.android.display == EGL_NO_DISPLAY);
+    SOKOL_ASSERT(_sapp_tc.android.context == EGL_NO_CONTEXT);
+
+    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if (display == EGL_NO_DISPLAY) {
+        return false;
+    }
+    if (eglInitialize(display, NULL, NULL) == EGL_FALSE) {
+        return false;
+    }
+    EGLint alpha_size = _sapp_tc.desc.alpha ? 8 : 0;
+    const EGLint cfg_attributes[] = {
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+        EGL_RED_SIZE, 8,
+        EGL_GREEN_SIZE, 8,
+        EGL_BLUE_SIZE, 8,
+        EGL_ALPHA_SIZE, alpha_size,
+        EGL_DEPTH_SIZE, 16,
+        EGL_STENCIL_SIZE, 0,
+        EGL_NONE,
+    };
+    EGLConfig available_cfgs[32];
+    EGLint cfg_count;
+    eglChooseConfig(display, cfg_attributes, available_cfgs, 32, &cfg_count);
+    SOKOL_ASSERT(cfg_count > 0);
+    SOKOL_ASSERT(cfg_count <= 32);
+
+    /* find config with 8-bit rgb buffer if available, ndk sample does not trust egl spec */
+    EGLConfig config;
+    bool exact_cfg_found = false;
+    for (int i = 0; i < cfg_count; ++i) {
+        EGLConfig c = available_cfgs[i];
+        EGLint r, g, b, a, d;
+        if (eglGetConfigAttrib(display, c, EGL_RED_SIZE, &r) == EGL_TRUE &&
+            eglGetConfigAttrib(display, c, EGL_GREEN_SIZE, &g) == EGL_TRUE &&
+            eglGetConfigAttrib(display, c, EGL_BLUE_SIZE, &b) == EGL_TRUE &&
+            eglGetConfigAttrib(display, c, EGL_ALPHA_SIZE, &a) == EGL_TRUE &&
+            eglGetConfigAttrib(display, c, EGL_DEPTH_SIZE, &d) == EGL_TRUE &&
+            r == 8 && g == 8 && b == 8 && (alpha_size == 0 || a == alpha_size) && d == 16) {
+            exact_cfg_found = true;
+            config = c;
+            break;
+        }
+    }
+    if (!exact_cfg_found) {
+        config = available_cfgs[0];
+    }
+
+    EGLint ctx_attributes[] = {
+        EGL_CONTEXT_MAJOR_VERSION, _sapp_tc.desc.gl.major_version,
+        EGL_CONTEXT_MINOR_VERSION, _sapp_tc.desc.gl.minor_version,
+        EGL_NONE,
+    };
+    EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, ctx_attributes);
+    if (context == EGL_NO_CONTEXT) {
+        return false;
+    }
+
+    _sapp_tc.android.config = config;
+    _sapp_tc.android.display = display;
+    _sapp_tc.android.context = context;
+    return true;
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_cleanup_egl(void) {
+    if (_sapp_tc.android.display != EGL_NO_DISPLAY) {
+        eglMakeCurrent(_sapp_tc.android.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        if (_sapp_tc.android.surface != EGL_NO_SURFACE) {
+            eglDestroySurface(_sapp_tc.android.display, _sapp_tc.android.surface);
+            _sapp_tc.android.surface = EGL_NO_SURFACE;
+        }
+        if (_sapp_tc.android.context != EGL_NO_CONTEXT) {
+            eglDestroyContext(_sapp_tc.android.display, _sapp_tc.android.context);
+            _sapp_tc.android.context = EGL_NO_CONTEXT;
+        }
+        eglTerminate(_sapp_tc.android.display);
+        _sapp_tc.android.display = EGL_NO_DISPLAY;
+    }
+}
+
+_SOKOL_PRIVATE bool _sapp_tc_android_init_egl_surface(ANativeWindow* window) {
+    SOKOL_ASSERT(_sapp_tc.android.display != EGL_NO_DISPLAY);
+    SOKOL_ASSERT(_sapp_tc.android.context != EGL_NO_CONTEXT);
+    SOKOL_ASSERT(_sapp_tc.android.surface == EGL_NO_SURFACE);
+    SOKOL_ASSERT(window);
+
+    /* TODO: set window flags */
+    /* ANativeActivity_setWindowFlags(activity, AWINDOW_FLAG_KEEP_SCREEN_ON, 0); */
+
+    /* create egl surface and make it current */
+    EGLSurface surface = eglCreateWindowSurface(_sapp_tc.android.display, _sapp_tc.android.config, window, NULL);
+    if (surface == EGL_NO_SURFACE) {
+        return false;
+    }
+    if (eglMakeCurrent(_sapp_tc.android.display, surface, surface, _sapp_tc.android.context) == EGL_FALSE) {
+        return false;
+    }
+    _sapp_tc.android.surface = surface;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, (GLint*)&_sapp_tc.gl.framebuffer);
+    return true;
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_cleanup_egl_surface(void) {
+    if (_sapp_tc.android.display == EGL_NO_DISPLAY) {
+        return;
+    }
+    eglMakeCurrent(_sapp_tc.android.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    if (_sapp_tc.android.surface != EGL_NO_SURFACE) {
+        eglDestroySurface(_sapp_tc.android.display, _sapp_tc.android.surface);
+        _sapp_tc.android.surface = EGL_NO_SURFACE;
+    }
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_app_event(sapp_event_type type) {
+    if (_sapp_tc_events_enabled()) {
+        _sapp_tc_init_event(type);
+        _sapp_tc_call_event(&_sapp_tc.event);
+    }
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_update_dimensions(ANativeWindow* window, bool force_update) {
+    SOKOL_ASSERT(_sapp_tc.android.display != EGL_NO_DISPLAY);
+    SOKOL_ASSERT(_sapp_tc.android.context != EGL_NO_CONTEXT);
+    SOKOL_ASSERT(_sapp_tc.android.surface != EGL_NO_SURFACE);
+    SOKOL_ASSERT(window);
+
+    const int32_t win_w = ANativeWindow_getWidth(window);
+    const int32_t win_h = ANativeWindow_getHeight(window);
+    SOKOL_ASSERT(win_w >= 0 && win_h >= 0);
+    const bool win_changed = (win_w != _sapp_tc.window_width) || (win_h != _sapp_tc.window_height);
+    _sapp_tc.window_width = win_w;
+    _sapp_tc.window_height = win_h;
+    if (win_changed || force_update) {
+        if (!_sapp_tc.desc.high_dpi) {
+            const int32_t buf_w = win_w / 2;
+            const int32_t buf_h = win_h / 2;
+            EGLint format;
+            EGLBoolean egl_result = eglGetConfigAttrib(_sapp_tc.android.display, _sapp_tc.android.config, EGL_NATIVE_VISUAL_ID, &format);
+            SOKOL_ASSERT(egl_result == EGL_TRUE); _SOKOL_UNUSED(egl_result);
+            /* NOTE: calling ANativeWindow_setBuffersGeometry() with the same dimensions
+                as the ANativeWindow size results in weird display artefacts, that's
+                why it's only called when the buffer geometry is different from
+                the window size
+            */
+            int32_t result = ANativeWindow_setBuffersGeometry(window, buf_w, buf_h, format);
+            SOKOL_ASSERT(result == 0); _SOKOL_UNUSED(result);
+        }
+    }
+
+    /* query surface size */
+    EGLint fb_w, fb_h;
+    EGLBoolean egl_result_w = eglQuerySurface(_sapp_tc.android.display, _sapp_tc.android.surface, EGL_WIDTH, &fb_w);
+    EGLBoolean egl_result_h = eglQuerySurface(_sapp_tc.android.display, _sapp_tc.android.surface, EGL_HEIGHT, &fb_h);
+    SOKOL_ASSERT(egl_result_w == EGL_TRUE); _SOKOL_UNUSED(egl_result_w);
+    SOKOL_ASSERT(egl_result_h == EGL_TRUE); _SOKOL_UNUSED(egl_result_h);
+    const bool fb_changed = (fb_w != _sapp_tc.framebuffer_width) || (fb_h != _sapp_tc.framebuffer_height);
+    _sapp_tc.framebuffer_width = fb_w;
+    _sapp_tc.framebuffer_height = fb_h;
+    /* [TrussC] Use actual display density for dpi_scale instead of fb/win ratio.
+       Android baseline is 160dpi (mdpi), so dpi_scale = density / 160.
+       This makes sapp_dpi_scale() behave consistently with macOS/Windows. */
+    if (_sapp_tc.android.activity) {
+        AConfiguration* config = AConfiguration_new();
+        AConfiguration_fromAssetManager(config, _sapp_tc.android.activity->assetManager);
+        int32_t density = AConfiguration_getDensity(config);
+        AConfiguration_delete(config);
+        if (density > 0) {
+            _sapp_tc.dpi_scale = (float)density / 160.0f;
+        } else {
+            _sapp_tc.dpi_scale = (float)fb_w / (float)win_w;
+        }
+    } else {
+        _sapp_tc.dpi_scale = (float)fb_w / (float)win_w;
+    }
+    if (win_changed || fb_changed || force_update) {
+        if (!_sapp_tc.first_frame) {
+            _sapp_tc_android_app_event(SAPP_EVENTTYPE_RESIZED);
+        }
+    }
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_cleanup(void) {
+    if (_sapp_tc.android.surface != EGL_NO_SURFACE) {
+        /* egl context is bound, cleanup gracefully */
+        if (_sapp_tc.init_called && !_sapp_tc.cleanup_called) {
+            _sapp_tc_call_cleanup();
+        }
+    }
+    /* always try to cleanup by destroying egl context */
+    _sapp_tc_android_cleanup_egl();
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_shutdown(void) {
+    /* try to cleanup while we still have a surface and can call cleanup_cb() */
+    _sapp_tc_android_cleanup();
+    /* request exit */
+    ANativeActivity_finish(_sapp_tc.android.activity);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_frame(double external_now) {
+    SOKOL_ASSERT(_sapp_tc.android.display != EGL_NO_DISPLAY);
+    SOKOL_ASSERT(_sapp_tc.android.context != EGL_NO_CONTEXT);
+    SOKOL_ASSERT(_sapp_tc.android.surface != EGL_NO_SURFACE);
+    _sapp_tc_timing_update(&_sapp_tc.timing, external_now);
+    _sapp_tc_android_update_dimensions(_sapp_tc.android.current.window, false);
+    _sapp_tc_frame();
+    // Modified by tettou771 for TrussC: skip present support
+    if (_sapp_tc.skip_present) { _sapp_tc.skip_present = false; return; }
+    eglSwapBuffers(_sapp_tc.android.display, _sapp_tc.android.surface);
+}
+
+_SOKOL_PRIVATE bool _sapp_tc_android_touch_event(const AInputEvent* e) {
+    if (AInputEvent_getType(e) != AINPUT_EVENT_TYPE_MOTION) {
+        return false;
+    }
+    if (!_sapp_tc_events_enabled()) {
+        return false;
+    }
+    int32_t action_idx = AMotionEvent_getAction(e);
+    int32_t action = action_idx & AMOTION_EVENT_ACTION_MASK;
+    sapp_event_type type = SAPP_EVENTTYPE_INVALID;
+    switch (action) {
+        case AMOTION_EVENT_ACTION_DOWN:
+        case AMOTION_EVENT_ACTION_POINTER_DOWN:
+            type = SAPP_EVENTTYPE_TOUCHES_BEGAN;
+            break;
+        case AMOTION_EVENT_ACTION_MOVE:
+            type = SAPP_EVENTTYPE_TOUCHES_MOVED;
+            break;
+        case AMOTION_EVENT_ACTION_UP:
+        case AMOTION_EVENT_ACTION_POINTER_UP:
+            type = SAPP_EVENTTYPE_TOUCHES_ENDED;
+            break;
+        case AMOTION_EVENT_ACTION_CANCEL:
+            type = SAPP_EVENTTYPE_TOUCHES_CANCELLED;
+            break;
+        default:
+            break;
+    }
+    if (type == SAPP_EVENTTYPE_INVALID) {
+        return false;
+    }
+    int32_t idx = action_idx >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
+    _sapp_tc_init_event(type);
+    _sapp_tc.event.num_touches = (int)AMotionEvent_getPointerCount(e);
+    if (_sapp_tc.event.num_touches > SAPP_MAX_TOUCHPOINTS) {
+        _sapp_tc.event.num_touches = SAPP_MAX_TOUCHPOINTS;
+    }
+    for (int32_t i = 0; i < _sapp_tc.event.num_touches; i++) {
+        sapp_touchpoint* dst = &_sapp_tc.event.touches[i];
+        dst->identifier = (uintptr_t)AMotionEvent_getPointerId(e, (size_t)i);
+        dst->pos_x = (AMotionEvent_getX(e, (size_t)i) / _sapp_tc.window_width) * _sapp_tc.framebuffer_width;
+        dst->pos_y = (AMotionEvent_getY(e, (size_t)i) / _sapp_tc.window_height) * _sapp_tc.framebuffer_height;
+        dst->android_tooltype = (sapp_android_tooltype) AMotionEvent_getToolType(e, (size_t)i);
+        if (action == AMOTION_EVENT_ACTION_POINTER_DOWN ||
+            action == AMOTION_EVENT_ACTION_POINTER_UP) {
+            dst->changed = (i == idx);
+        } else {
+            dst->changed = true;
+        }
+    }
+    _sapp_tc_call_event(&_sapp_tc.event);
+    return true;
+}
+
+_SOKOL_PRIVATE bool _sapp_tc_android_key_event(const AInputEvent* e) {
+    if (AInputEvent_getType(e) != AINPUT_EVENT_TYPE_KEY) {
+        return false;
+    }
+    if (AKeyEvent_getKeyCode(e) == AKEYCODE_BACK) {
+        /* [TrussC tettou771] Patched: BACK key no longer triggers shutdown.
+           Upstream calls _sapp_tc_android_shutdown() here, which destroys the
+           EGL surface and invokes cleanup_cb. Under screen pinning, the OS
+           blocks ANativeActivity_finish(), so the process keeps running but
+           the EGL context is gone — the app appears frozen. Consume the
+           event without shutdown. Long-term fix: implement
+           SAPP_EVENTTYPE_QUIT_REQUESTED for Android (already supported on
+           macOS/Windows/Linux). */
+        return true;
+    }
+    return false;
+}
+
+_SOKOL_PRIVATE int _sapp_tc_android_input_cb(int fd, int events, void* data) {
+    _SOKOL_UNUSED(fd);
+    _SOKOL_UNUSED(data);
+    if ((events & ALOOPER_EVENT_INPUT) == 0) {
+        _SAPP_ERROR(ANDROID_UNSUPPORTED_INPUT_EVENT_INPUT_CB);
+        return 1;
+    }
+    SOKOL_ASSERT(_sapp_tc.android.current.input);
+    AInputEvent* event = NULL;
+    while (AInputQueue_getEvent(_sapp_tc.android.current.input, &event) >= 0) {
+        if (AInputQueue_preDispatchEvent(_sapp_tc.android.current.input, event) != 0) {
+            continue;
+        }
+        int32_t handled = 0;
+        if (_sapp_tc_android_touch_event(event) || _sapp_tc_android_key_event(event)) {
+            handled = 1;
+        }
+        AInputQueue_finishEvent(_sapp_tc.android.current.input, event, handled);
+    }
+    return 1;
+}
+
+_SOKOL_PRIVATE int _sapp_tc_android_main_cb(int fd, int events, void* data) {
+    _SOKOL_UNUSED(data);
+    if ((events & ALOOPER_EVENT_INPUT) == 0) {
+        _SAPP_ERROR(ANDROID_UNSUPPORTED_INPUT_EVENT_MAIN_CB);
+        return 1;
+    }
+
+    _sapp_tc_android_msg_t msg;
+    if (read(fd, &msg, sizeof(msg)) != sizeof(msg)) {
+        _SAPP_ERROR(ANDROID_READ_MSG_FAILED);
+        return 1;
+    }
+
+    pthread_mutex_lock(&_sapp_tc.android.pt.mutex);
+    switch (msg) {
+        case _SOKOL_ANDROID_MSG_CREATE:
+            {
+                _SAPP_INFO(ANDROID_MSG_CREATE);
+                SOKOL_ASSERT(!_sapp_tc.valid);
+                bool result = _sapp_tc_android_init_egl();
+                SOKOL_ASSERT(result); _SOKOL_UNUSED(result);
+                _sapp_tc.valid = true;
+                _sapp_tc.android.has_created = true;
+            }
+            break;
+        case _SOKOL_ANDROID_MSG_RESUME:
+            _SAPP_INFO(ANDROID_MSG_RESUME);
+            _sapp_tc.android.has_resumed = true;
+            _sapp_tc_android_app_event(SAPP_EVENTTYPE_RESUMED);
+            break;
+        case _SOKOL_ANDROID_MSG_PAUSE:
+            _SAPP_INFO(ANDROID_MSG_PAUSE);
+            _sapp_tc.android.has_resumed = false;
+            _sapp_tc_android_app_event(SAPP_EVENTTYPE_SUSPENDED);
+            break;
+        case _SOKOL_ANDROID_MSG_FOCUS:
+            _SAPP_INFO(ANDROID_MSG_FOCUS);
+            _sapp_tc.android.has_focus = true;
+            break;
+        case _SOKOL_ANDROID_MSG_NO_FOCUS:
+            _SAPP_INFO(ANDROID_MSG_NO_FOCUS);
+            _sapp_tc.android.has_focus = false;
+            break;
+        case _SOKOL_ANDROID_MSG_SET_NATIVE_WINDOW:
+            _SAPP_INFO(ANDROID_MSG_SET_NATIVE_WINDOW);
+            if (_sapp_tc.android.current.window != _sapp_tc.android.pending.window) {
+                if (_sapp_tc.android.current.window != NULL) {
+                    _sapp_tc_android_cleanup_egl_surface();
+                }
+                if (_sapp_tc.android.pending.window != NULL) {
+                    if (_sapp_tc_android_init_egl_surface(_sapp_tc.android.pending.window)) {
+                        _sapp_tc_android_update_dimensions(_sapp_tc.android.pending.window, true);
+                    } else {
+                        _sapp_tc_android_shutdown();
+                    }
+                }
+            }
+            _sapp_tc.android.current.window = _sapp_tc.android.pending.window;
+            break;
+        case _SOKOL_ANDROID_MSG_SET_INPUT_QUEUE:
+            _SAPP_INFO(ANDROID_MSG_SET_INPUT_QUEUE);
+            if (_sapp_tc.android.current.input != _sapp_tc.android.pending.input) {
+                if (_sapp_tc.android.current.input != NULL) {
+                    AInputQueue_detachLooper(_sapp_tc.android.current.input);
+                }
+                if (_sapp_tc.android.pending.input != NULL) {
+                    AInputQueue_attachLooper(
+                        _sapp_tc.android.pending.input,
+                        _sapp_tc.android.looper,
+                        ALOOPER_POLL_CALLBACK,
+                        _sapp_tc_android_input_cb,
+                        NULL); /* data */
+                }
+            }
+            _sapp_tc.android.current.input = _sapp_tc.android.pending.input;
+            break;
+        case _SOKOL_ANDROID_MSG_DESTROY:
+            _SAPP_INFO(ANDROID_MSG_DESTROY);
+            _sapp_tc_android_cleanup();
+            _sapp_tc.valid = false;
+            _sapp_tc.android.is_thread_stopping = true;
+            break;
+        default:
+            _SAPP_WARN(ANDROID_UNKNOWN_MSG);
+            break;
+    }
+    pthread_cond_broadcast(&_sapp_tc.android.pt.cond); /* signal "received" */
+    pthread_mutex_unlock(&_sapp_tc.android.pt.mutex);
+    return 1;
+}
+
+_SOKOL_PRIVATE bool _sapp_tc_android_should_update(void) {
+    bool is_in_front = _sapp_tc.android.has_resumed && _sapp_tc.android.has_focus;
+    bool has_surface = _sapp_tc.android.surface != EGL_NO_SURFACE;
+    return is_in_front && has_surface;
+}
+
+#if __ANDROID_API__ >= 29
+_SOKOL_PRIVATE void _sapp_tc_android_frame_callback(int64_t frame_time_nanos, void* data) {
+    _SOKOL_UNUSED(data);
+    _sapp_tc.android.frame_callback_in_flight = false;
+    if (_sapp_tc.android.is_thread_stopping) {
+        return;
+    }
+    if (_sapp_tc_android_should_update()) {
+        // Post the next frame callback. We do this here rather than later so the runnable can be
+        // queued early in the looper.
+        AChoreographer_postFrameCallback64(_sapp_tc.android.choreographer, _sapp_tc_android_frame_callback, NULL);
+        _sapp_tc.android.frame_callback_in_flight = true;
+        _sapp_tc_android_frame((double)frame_time_nanos / 1.0e9);
+    }
+}
+#endif
+
+_SOKOL_PRIVATE void _sapp_tc_android_show_keyboard(bool shown) {
+    SOKOL_ASSERT(_sapp_tc.valid);
+    /* This seems to be broken in the NDK, but there is (a very cumbersome) workaround... */
+    if (shown) {
+        ANativeActivity_showSoftInput(_sapp_tc.android.activity, ANATIVEACTIVITY_SHOW_SOFT_INPUT_FORCED);
+    } else {
+        ANativeActivity_hideSoftInput(_sapp_tc.android.activity, ANATIVEACTIVITY_HIDE_SOFT_INPUT_NOT_ALWAYS);
+    }
+}
+
+_SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
+    _SOKOL_UNUSED(arg);
+    _SAPP_INFO(ANDROID_LOOP_THREAD_STARTED);
+
+    _sapp_tc.android.looper = ALooper_prepare(0 /* or ALOOPER_PREPARE_ALLOW_NON_CALLBACKS*/);
+    ALooper_addFd(_sapp_tc.android.looper,
+        _sapp_tc.android.pt.read_from_main_fd,
+        ALOOPER_POLL_CALLBACK,
+        ALOOPER_EVENT_INPUT,
+        _sapp_tc_android_main_cb,
+        NULL); /* data */
+
+    #if __ANDROID_API__ >= 29
+        _sapp_tc.android.choreographer = AChoreographer_getInstance();
+        if (_sapp_tc.android.choreographer != NULL) {
+            _SAPP_INFO(ANDROID_CHOREOGRAPHER_ENABLED);
+        } else {
+            _SAPP_INFO(ANDROID_CHOREOGRAPHER_UNAVAILABLE);
+        }
+    #else
+        _SAPP_INFO(ANDROID_CHOREOGRAPHER_UNAVAILABLE);
+    #endif
+
+    /* signal start to main thread */
+    pthread_mutex_lock(&_sapp_tc.android.pt.mutex);
+    _sapp_tc.android.is_thread_started = true;
+    pthread_cond_broadcast(&_sapp_tc.android.pt.cond);
+    pthread_mutex_unlock(&_sapp_tc.android.pt.mutex);
+
+    /* main loop */
+    while (!_sapp_tc.android.is_thread_stopping) {
+        #if __ANDROID_API__ >= 29
+            if (_sapp_tc.android.choreographer != NULL) {
+                // Posts _sapp_tc_android_frame_callback with the choreographer to start our frame
+                // loop (for example, on first run or when resuming). When we have a choreographer,
+                // we'll get frame callbacks via _sapp_tc_android_frame_callback.
+                if (!_sapp_tc.android.frame_callback_in_flight && _sapp_tc_android_should_update()) {
+                    AChoreographer_postFrameCallback64(_sapp_tc.android.choreographer, _sapp_tc_android_frame_callback, NULL);
+                    _sapp_tc.android.frame_callback_in_flight = true;
+                }
+                // Blocks until the next event. We don't need a while loop here because we're
+                // already being driven by the outer while loop.
+                ALooper_pollOnce(-1, NULL, NULL, NULL);
+                continue;
+            }
+        #endif
+        // sokol frame -- fallback if not updating frames from choreographer callbacks
+        if (_sapp_tc_android_should_update()) {
+            _sapp_tc_android_frame(0.0);
+        }
+
+        /* process all events (or stop early if app is requested to quit) */
+        bool process_events = true;
+        while (process_events && !_sapp_tc.android.is_thread_stopping) {
+            bool block_until_event = !_sapp_tc.android.is_thread_stopping && !_sapp_tc_android_should_update();
+            process_events = ALooper_pollOnce(block_until_event ? -1 : 0, NULL, NULL, NULL) == ALOOPER_POLL_CALLBACK;
+        }
+    }
+
+    /* cleanup thread */
+    if (_sapp_tc.android.current.input != NULL) {
+        AInputQueue_detachLooper(_sapp_tc.android.current.input);
+    }
+
+    /* the following causes heap corruption on exit, why??
+    ALooper_removeFd(_sapp_tc.android.looper, _sapp_tc.android.pt.read_from_main_fd);
+    ALooper_release(_sapp_tc.android.looper);*/
+
+    /* signal "destroyed" */
+    pthread_mutex_lock(&_sapp_tc.android.pt.mutex);
+    _sapp_tc.android.is_thread_stopped = true;
+    pthread_cond_broadcast(&_sapp_tc.android.pt.cond);
+    pthread_mutex_unlock(&_sapp_tc.android.pt.mutex);
+
+    _SAPP_INFO(ANDROID_LOOP_THREAD_DONE);
+    return NULL;
+}
+
+/* android main/ui thread */
+_SOKOL_PRIVATE void _sapp_tc_android_msg(_sapp_tc_android_msg_t msg) {
+    if (write(_sapp_tc.android.pt.write_from_main_fd, &msg, sizeof(msg)) != sizeof(msg)) {
+        _SAPP_ERROR(ANDROID_WRITE_MSG_FAILED);
+    }
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_on_start(ANativeActivity* activity) {
+    _SOKOL_UNUSED(activity);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONSTART);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_on_resume(ANativeActivity* activity) {
+    _SOKOL_UNUSED(activity);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONRESUME);
+    _sapp_tc_android_msg(_SOKOL_ANDROID_MSG_RESUME);
+}
+
+_SOKOL_PRIVATE void* _sapp_tc_android_on_save_instance_state(ANativeActivity* activity, size_t* out_size) {
+    _SOKOL_UNUSED(activity);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONSAVEINSTANCESTATE);
+    *out_size = 0;
+    return NULL;
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_on_window_focus_changed(ANativeActivity* activity, int has_focus) {
+    _SOKOL_UNUSED(activity);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONWINDOWFOCUSCHANGED);
+    if (has_focus) {
+        _sapp_tc_android_msg(_SOKOL_ANDROID_MSG_FOCUS);
+    } else {
+        _sapp_tc_android_msg(_SOKOL_ANDROID_MSG_NO_FOCUS);
+    }
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_on_pause(ANativeActivity* activity) {
+    _SOKOL_UNUSED(activity);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONPAUSE);
+    _sapp_tc_android_msg(_SOKOL_ANDROID_MSG_PAUSE);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_on_stop(ANativeActivity* activity) {
+    _SOKOL_UNUSED(activity);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONSTOP);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_msg_set_native_window(ANativeWindow* window) {
+    pthread_mutex_lock(&_sapp_tc.android.pt.mutex);
+    _sapp_tc.android.pending.window = window;
+    _sapp_tc_android_msg(_SOKOL_ANDROID_MSG_SET_NATIVE_WINDOW);
+    while (_sapp_tc.android.current.window != window) {
+        pthread_cond_wait(&_sapp_tc.android.pt.cond, &_sapp_tc.android.pt.mutex);
+    }
+    pthread_mutex_unlock(&_sapp_tc.android.pt.mutex);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_on_native_window_created(ANativeActivity* activity, ANativeWindow* window) {
+    _SOKOL_UNUSED(activity);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONNATIVEWINDOWCREATED);
+    _sapp_tc_android_msg_set_native_window(window);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_on_native_window_destroyed(ANativeActivity* activity, ANativeWindow* window) {
+    _SOKOL_UNUSED(activity);
+    _SOKOL_UNUSED(window);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONNATIVEWINDOWDESTROYED);
+    _sapp_tc_android_msg_set_native_window(NULL);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_msg_set_input_queue(AInputQueue* input) {
+    pthread_mutex_lock(&_sapp_tc.android.pt.mutex);
+    _sapp_tc.android.pending.input = input;
+    _sapp_tc_android_msg(_SOKOL_ANDROID_MSG_SET_INPUT_QUEUE);
+    while (_sapp_tc.android.current.input != input) {
+        pthread_cond_wait(&_sapp_tc.android.pt.cond, &_sapp_tc.android.pt.mutex);
+    }
+    pthread_mutex_unlock(&_sapp_tc.android.pt.mutex);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_on_input_queue_created(ANativeActivity* activity, AInputQueue* queue) {
+    _SOKOL_UNUSED(activity);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONINPUTQUEUECREATED);
+    _sapp_tc_android_msg_set_input_queue(queue);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_on_input_queue_destroyed(ANativeActivity* activity, AInputQueue* queue) {
+    _SOKOL_UNUSED(activity);
+    _SOKOL_UNUSED(queue);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONINPUTQUEUEDESTROYED);
+    _sapp_tc_android_msg_set_input_queue(NULL);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_on_config_changed(ANativeActivity* activity) {
+    _SOKOL_UNUSED(activity);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONCONFIGURATIONCHANGED);
+    /* see android:configChanges in manifest */
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_on_low_memory(ANativeActivity* activity) {
+    _SOKOL_UNUSED(activity);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONLOWMEMORY);
+}
+
+_SOKOL_PRIVATE void _sapp_tc_android_on_destroy(ANativeActivity* activity) {
+    /*
+     * For some reason even an empty app using nativeactivity.h will crash (WIN DEATH)
+     * on my device (Moto X 2nd gen) when the app is removed from the task view
+     * (TaskStackView: onTaskViewDismissed).
+     *
+     * However, if ANativeActivity_finish() is explicitly called from for example
+     * _sapp_tc_android_on_stop(), the crash disappears. Is this a bug in NativeActivity?
+     */
+    _SOKOL_UNUSED(activity);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONDESTROY);
+
+    /* send destroy msg */
+    pthread_mutex_lock(&_sapp_tc.android.pt.mutex);
+    _sapp_tc_android_msg(_SOKOL_ANDROID_MSG_DESTROY);
+    while (!_sapp_tc.android.is_thread_stopped) {
+        pthread_cond_wait(&_sapp_tc.android.pt.cond, &_sapp_tc.android.pt.mutex);
+    }
+    pthread_mutex_unlock(&_sapp_tc.android.pt.mutex);
+
+    /* clean up main thread */
+    pthread_cond_destroy(&_sapp_tc.android.pt.cond);
+    pthread_mutex_destroy(&_sapp_tc.android.pt.mutex);
+
+    close(_sapp_tc.android.pt.read_from_main_fd);
+    close(_sapp_tc.android.pt.write_from_main_fd);
+
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_DONE);
+
+    /* this is a bit naughty, but causes a clean restart of the app (static globals are reset) */
+    exit(0);
+}
+
+JNIEXPORT
+void ANativeActivity_onCreate(ANativeActivity* activity, void* saved_state, size_t saved_state_size) {
+    _SOKOL_UNUSED(saved_state);
+    _SOKOL_UNUSED(saved_state_size);
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_ONCREATE);
+
+    // the NativeActity pointer needs to be available inside sokol_main()
+    // (see https://github.com/floooh/sokol/issues/708), however _sapp_tc_init_state()
+    // will clear the global _sapp_tc_t struct, so we need to initialize the native
+    // activity pointer twice, once before sokol_main() and once after _sapp_tc_init_state()
+    _sapp_tc_clear(&_sapp_tc, sizeof(_sapp_tc));
+    _sapp_tc.android.activity = activity;
+    sapp_desc desc = sokol_main(0, NULL);
+    _sapp_tc_init_state(&desc);
+    _sapp_tc.android.activity = activity;
+
+    int pipe_fd[2];
+    if (pipe(pipe_fd) != 0) {
+        _SAPP_ERROR(ANDROID_CREATE_THREAD_PIPE_FAILED);
+        return;
+    }
+    _sapp_tc.android.pt.read_from_main_fd = pipe_fd[0];
+    _sapp_tc.android.pt.write_from_main_fd = pipe_fd[1];
+
+    pthread_mutex_init(&_sapp_tc.android.pt.mutex, NULL);
+    pthread_cond_init(&_sapp_tc.android.pt.cond, NULL);
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&_sapp_tc.android.pt.thread, &attr, _sapp_tc_android_loop, 0);
+    pthread_attr_destroy(&attr);
+
+    /* wait until main loop has started */
+    pthread_mutex_lock(&_sapp_tc.android.pt.mutex);
+    while (!_sapp_tc.android.is_thread_started) {
+        pthread_cond_wait(&_sapp_tc.android.pt.cond, &_sapp_tc.android.pt.mutex);
+    }
+    pthread_mutex_unlock(&_sapp_tc.android.pt.mutex);
+
+    /* send create msg */
+    pthread_mutex_lock(&_sapp_tc.android.pt.mutex);
+    _sapp_tc_android_msg(_SOKOL_ANDROID_MSG_CREATE);
+    while (!_sapp_tc.android.has_created) {
+        pthread_cond_wait(&_sapp_tc.android.pt.cond, &_sapp_tc.android.pt.mutex);
+    }
+    pthread_mutex_unlock(&_sapp_tc.android.pt.mutex);
+
+    /* register for callbacks */
+    activity->callbacks->onStart = _sapp_tc_android_on_start;
+    activity->callbacks->onResume = _sapp_tc_android_on_resume;
+    activity->callbacks->onSaveInstanceState = _sapp_tc_android_on_save_instance_state;
+    activity->callbacks->onWindowFocusChanged = _sapp_tc_android_on_window_focus_changed;
+    activity->callbacks->onPause = _sapp_tc_android_on_pause;
+    activity->callbacks->onStop = _sapp_tc_android_on_stop;
+    activity->callbacks->onDestroy = _sapp_tc_android_on_destroy;
+    activity->callbacks->onNativeWindowCreated = _sapp_tc_android_on_native_window_created;
+    /* activity->callbacks->onNativeWindowResized = _sapp_tc_android_on_native_window_resized; */
+    /* activity->callbacks->onNativeWindowRedrawNeeded = _sapp_tc_android_on_native_window_redraw_needed; */
+    activity->callbacks->onNativeWindowDestroyed = _sapp_tc_android_on_native_window_destroyed;
+    activity->callbacks->onInputQueueCreated = _sapp_tc_android_on_input_queue_created;
+    activity->callbacks->onInputQueueDestroyed = _sapp_tc_android_on_input_queue_destroyed;
+    /* activity->callbacks->onContentRectChanged = _sapp_tc_android_on_content_rect_changed; */
+    /* activity->callbacks->onConfigurationChanged = _sapp_tc_android_on_config_changed; */
+    activity->callbacks->onLowMemory = _sapp_tc_android_on_low_memory;
+
+    _SAPP_INFO(ANDROID_NATIVE_ACTIVITY_CREATE_SUCCESS);
+
+    /* NOT A BUG: do NOT call sapp_discard_state() */
+}
+
+#endif /* _SAPP_ANDROID */
+/* ---- public API (lifted from sokol_app.h >>public, web-live branches) ---- */
+#if defined(SOKOL_NO_ENTRY)
+SOKOL_API_IMPL void sapp_run(const sapp_desc* desc) {
+    SOKOL_ASSERT(desc);
+    #if defined(_SAPP_MACOS)
+        _sapp_tc_macos_run(desc);
+    #elif defined(_SAPP_IOS)
+        _sapp_tc_ios_run(desc);
+    #elif defined(_SAPP_EMSCRIPTEN)
+        _sapp_tc_emsc_run(desc);
+    #elif defined(_SAPP_WIN32)
+        _sapp_tc_win32_run(desc);
+    #elif defined(_SAPP_LINUX)
+        _sapp_tc_linux_run(desc);
+    #else
+    #error "sapp_run() not supported on this platform"
+    #endif
+}
+
+/* this is just a stub so the linker doesn't complain */
+sapp_desc sokol_main(int argc, char* argv[]) {
+    _SOKOL_UNUSED(argc);
+    _SOKOL_UNUSED(argv);
+    _SAPP_STRUCT(sapp_desc, desc);
+    return desc;
+}
+#else
+/* likewise, in normal mode, sapp_run() is just an empty stub */
+SOKOL_API_IMPL void sapp_run(const sapp_desc* desc) {
+    _SOKOL_UNUSED(desc);
+}
+#endif
+
+SOKOL_API_IMPL bool sapp_isvalid(void) {
+    return _sapp_tc.valid;
+}
+
+SOKOL_API_IMPL void* sapp_userdata(void) {
+    return _sapp_tc.desc.user_data;
+}
+
+SOKOL_API_IMPL sapp_desc sapp_query_desc(void) {
+    return _sapp_tc.desc;
+}
+
+SOKOL_API_IMPL uint64_t sapp_frame_count(void) {
+    return _sapp_tc.frame_count;
+}
+
+SOKOL_API_IMPL double sapp_frame_duration(void) {
+    #if defined(_SAPP_MACOS) && defined(SOKOL_METAL)
+        return _sapp_tc_macos_mtl_timing_frame_duration();
+    #elif defined(_SAPP_IOS) && defined(SOKOL_METAL)
+        return _sapp_tc_ios_mtl_timing_frame_duration();
+    #else
+        return _sapp_tc_timing_get(&_sapp_tc.timing);
+    #endif
+}
+
+SOKOL_API_IMPL double sapp_frame_duration_unfiltered(void) {
+    return _sapp_tc.timing.dt;
+}
+
+SOKOL_API_IMPL int sapp_width(void) {
+    return (_sapp_tc.framebuffer_width > 0) ? _sapp_tc.framebuffer_width : 1;
+}
+
+SOKOL_API_IMPL float sapp_widthf(void) {
+    return (float)sapp_width();
+}
+
+SOKOL_API_IMPL int sapp_height(void) {
+    return (_sapp_tc.framebuffer_height > 0) ? _sapp_tc.framebuffer_height : 1;
+}
+
+SOKOL_API_IMPL float sapp_heightf(void) {
+    return (float)sapp_height();
+}
+
+SOKOL_API_IMPL sapp_pixel_format sapp_color_format(void) {
+    #if defined(SOKOL_WGPU)
+        switch (_sapp_tc.wgpu.render_format) {
+            case WGPUTextureFormat_RGBA8Unorm:
+                return SAPP_PIXELFORMAT_RGBA8;
+            case WGPUTextureFormat_BGRA8Unorm:
+                return SAPP_PIXELFORMAT_BGRA8;
+            default:
+                SOKOL_UNREACHABLE;
+                return SAPP_PIXELFORMAT_NONE;
+        }
+    #elif defined(SOKOL_VULKAN)
+        switch (_sapp_tc.vk.surface_format.format) {
+            case VK_FORMAT_R8G8B8A8_UNORM:
+                return SAPP_PIXELFORMAT_RGBA8;
+            case VK_FORMAT_B8G8R8A8_UNORM:
+                return SAPP_PIXELFORMAT_BGRA8;
+            default:
+                // FIXME!
+                SOKOL_UNREACHABLE;
+                return SAPP_PIXELFORMAT_NONE;
+        }
+    #elif defined(SOKOL_METAL) || defined(SOKOL_D3D11)
+        // Modified by tettou771 for TrussC: report 10-bit color format (RGB10A2)
+        return SAPP_PIXELFORMAT_RGB10A2;
+    #else
+        return SAPP_PIXELFORMAT_RGBA8;
+    #endif
+}
+
+SOKOL_API_IMPL sapp_pixel_format sapp_depth_format(void) {
+    return SAPP_PIXELFORMAT_DEPTH_STENCIL;
+}
+
+SOKOL_API_IMPL int sapp_sample_count(void) {
+    return _sapp_tc.sample_count;
+}
+
+SOKOL_API_IMPL bool sapp_high_dpi(void) {
+    return _sapp_tc.desc.high_dpi && (_sapp_tc.dpi_scale >= 1.5f);
+}
+
+SOKOL_API_IMPL float sapp_dpi_scale(void) {
+    return _sapp_tc.dpi_scale;
+}
+
+SOKOL_API_IMPL const void* sapp_egl_get_display(void) {
+    SOKOL_ASSERT(_sapp_tc.valid);
+    #if defined(_SAPP_ANDROID)
+        return _sapp_tc.android.display;
+    #elif defined(_SAPP_LINUX) && defined(_SAPP_EGL)
+        return _sapp_tc.egl.display;
+    #else
+        return 0;
+    #endif
+}
+
+SOKOL_API_IMPL const void* sapp_egl_get_context(void) {
+    SOKOL_ASSERT(_sapp_tc.valid);
+    #if defined(_SAPP_ANDROID)
+        return _sapp_tc.android.context;
+    #elif defined(_SAPP_LINUX) && defined(_SAPP_EGL)
+        return _sapp_tc.egl.context;
+    #else
+        return 0;
+    #endif
+}
+
+SOKOL_API_IMPL void sapp_show_keyboard(bool show) {
+    #if defined(_SAPP_IOS)
+    _sapp_tc_ios_show_keyboard(show);
+    #elif defined(_SAPP_ANDROID)
+    _sapp_tc_android_show_keyboard(show);
+    #else
+    _SOKOL_UNUSED(show);
+    #endif
+}
+
+SOKOL_API_IMPL bool sapp_keyboard_shown(void) {
+    return _sapp_tc.onscreen_keyboard_shown;
+}
+
+SOKOL_API_IMPL bool sapp_is_fullscreen(void) {
+    return _sapp_tc.fullscreen;
+}
+
+SOKOL_API_IMPL void sapp_toggle_fullscreen(void) {
+    #if defined(_SAPP_MACOS)
+    _sapp_tc_macos_toggle_fullscreen();
+    #elif defined(_SAPP_WIN32)
+    _sapp_tc_win32_toggle_fullscreen();
+    #elif defined(_SAPP_LINUX)
+    _sapp_tc_x11_toggle_fullscreen();
+    #elif defined(_SAPP_EMSCRIPTEN)
+    _sapp_tc_emsc_toggle_fullscreen();
+    #endif
+}
+
+_SOKOL_PRIVATE void _sapp_tc_update_cursor(sapp_mouse_cursor cursor, bool shown) {
+    #if defined(_SAPP_MACOS)
+    _sapp_tc_macos_update_cursor(cursor, shown);
+    #elif defined(_SAPP_WIN32)
+    _sapp_tc_win32_update_cursor(cursor, shown, false);
+    #elif defined(_SAPP_LINUX)
+    _sapp_tc_x11_update_cursor(cursor, shown);
+    #elif defined(_SAPP_EMSCRIPTEN)
+    _sapp_tc_emsc_update_cursor(cursor, shown);
+    #endif
+    _sapp_tc.mouse.current_cursor = cursor;
+    _sapp_tc.mouse.shown = shown;
+}
+
+/* NOTE that sapp_show_mouse() does not "stack" like the Win32 or macOS API functions! */
+SOKOL_API_IMPL void sapp_show_mouse(bool show) {
+    if (_sapp_tc.mouse.shown != show) {
+        _sapp_tc_update_cursor(_sapp_tc.mouse.current_cursor, show);
+    }
+}
+
+SOKOL_API_IMPL bool sapp_mouse_shown(void) {
+    return _sapp_tc.mouse.shown;
+}
+
+SOKOL_API_IMPL void sapp_lock_mouse(bool lock) {
+    #if defined(_SAPP_MACOS)
+    _sapp_tc_macos_lock_mouse(lock);
+    #elif defined(_SAPP_EMSCRIPTEN)
+    _sapp_tc_emsc_lock_mouse(lock);
+    #elif defined(_SAPP_WIN32)
+    _sapp_tc_win32_lock_mouse(lock);
+    #elif defined(_SAPP_LINUX)
+    _sapp_tc_x11_lock_mouse(lock);
+    #else
+    _sapp_tc.mouse.locked = lock;
+    #endif
+}
+
+SOKOL_API_IMPL bool sapp_mouse_locked(void) {
+    return _sapp_tc.mouse.locked;
+}
+
+SOKOL_API_IMPL void sapp_set_mouse_cursor(sapp_mouse_cursor cursor) {
+    SOKOL_ASSERT((cursor >= 0) && (cursor < _SAPP_MOUSECURSOR_NUM));
+    if (_sapp_tc.mouse.current_cursor != cursor) {
+        _sapp_tc_update_cursor(cursor, _sapp_tc.mouse.shown);
+    }
+}
+
+SOKOL_API_IMPL sapp_mouse_cursor sapp_get_mouse_cursor(void) {
+    return _sapp_tc.mouse.current_cursor;
+}
+
+SOKOL_API_IMPL sapp_mouse_cursor sapp_bind_mouse_cursor_image(sapp_mouse_cursor cursor, const sapp_image_desc* desc) {
+    SOKOL_ASSERT((cursor >= 0) && (cursor < _SAPP_MOUSECURSOR_NUM));
+    // NOTE: It seems that for some reason, the hotspot doesn't work if it is one less
+    //       than the dimension of the cursor image (or more), on windows. So for a cursor
+    //       that is 32 by 32 px, a hotspot of x = 30 works, but not x = 31.
+    //       The cursor simply dissapears in such cases. Asserting for all platforms to make
+    //       the behaviour consistent.
+    SOKOL_ASSERT(desc->cursor_hotspot_x < desc->width - 1 && desc->cursor_hotspot_y < desc->height - 1);
+    SOKOL_ASSERT(desc->width * desc->height * 4 == (int) desc->pixels.size);
+
+    sapp_unbind_mouse_cursor_image(cursor);
+
+    bool res = false;
+    #if defined(_SAPP_MACOS)
+    res = _sapp_tc_macos_make_custom_mouse_cursor(cursor, desc);
+    #elif defined(_SAPP_EMSCRIPTEN)
+    res = _sapp_tc_emsc_make_custom_mouse_cursor(cursor, desc);
+    #elif defined(_SAPP_WIN32)
+    res = _sapp_tc_win32_make_custom_mouse_cursor(cursor, desc);
+    #elif defined(_SAPP_LINUX)
+    res = _sapp_tc_x11_make_custom_mouse_cursor(cursor, desc);
+    #else
+    _SOKOL_UNUSED(desc);
+    #endif
+    _sapp_tc.custom_cursor_bound[(int)cursor] = res;
+
+    // Update the displayed cursor in case the current cursor is the one we just bound.
+    if (_sapp_tc.mouse.current_cursor == cursor) {
+        _sapp_tc_update_cursor(cursor, _sapp_tc.mouse.shown);
+    }
+    return cursor; // returning the passed-in cursor puerly for convenience, in case you want to asign the value to a variable.
+}
+
+SOKOL_API_IMPL void sapp_unbind_mouse_cursor_image(sapp_mouse_cursor cursor) {
+    SOKOL_ASSERT((cursor >= 0) && (cursor < _SAPP_MOUSECURSOR_NUM));
+    if (_sapp_tc.custom_cursor_bound[(int)cursor]) {
+        // if this is the active cursor, first restore it to its default image,
+        // this must be done before attempting to destroy any cursor image
+        // resources which at least on win32 would fail if the cursor is still in use
+        _sapp_tc.custom_cursor_bound[(int)cursor] = false;
+        if (_sapp_tc.mouse.current_cursor == cursor) {
+            _sapp_tc_update_cursor(cursor, _sapp_tc.mouse.shown);
+        }
+        #if defined(_SAPP_MACOS)
+        _sapp_tc_macos_destroy_custom_mouse_cursor(cursor);
+        #elif defined(_SAPP_EMSCRIPTEN)
+        _sapp_tc_emsc_destroy_custom_mouse_cursor(cursor);
+        #elif defined(_SAPP_WIN32)
+        _sapp_tc_win32_destroy_custom_mouse_cursor(cursor);
+        #elif defined(_SAPP_LINUX)
+        _sapp_tc_x11_destroy_custom_mouse_cursor(cursor);
+        #endif
+    }
+}
+
+SOKOL_API_IMPL void sapp_request_quit(void) {
+    _sapp_tc.quit_requested = true;
+}
+
+SOKOL_API_IMPL void sapp_cancel_quit(void) {
+    _sapp_tc.quit_requested = false;
+}
+
+SOKOL_API_IMPL void sapp_quit(void) {
+    _sapp_tc.quit_ordered = true;
+}
+
+SOKOL_API_IMPL void sapp_consume_event(void) {
+    _sapp_tc.event_consumed = true;
+}
+
+/* NOTE: on HTML5, sapp_set_clipboard_string() must be called from within event handler! */
+SOKOL_API_IMPL void sapp_set_clipboard_string(const char* str) {
+    if (!_sapp_tc.clipboard.enabled) {
+        return;
+    }
+    SOKOL_ASSERT(str);
+    #if defined(_SAPP_MACOS)
+        _sapp_tc_macos_set_clipboard_string(str);
+    #elif defined(_SAPP_EMSCRIPTEN)
+        _sapp_tc_emsc_set_clipboard_string(str);
+    #elif defined(_SAPP_WIN32)
+        _sapp_tc_win32_set_clipboard_string(str);
+    #elif defined(_SAPP_LINUX)
+        _sapp_tc_x11_set_clipboard_string(str);
+    #else
+        /* not implemented */
+    #endif
+    _sapp_tc_strcpy(str, _sapp_tc.clipboard.buffer, (size_t)_sapp_tc.clipboard.buf_size);
+}
+
+SOKOL_API_IMPL const char* sapp_get_clipboard_string(void) {
+    if (!_sapp_tc.clipboard.enabled) {
+        return "";
+    }
+    #if defined(_SAPP_MACOS)
+        return _sapp_tc_macos_get_clipboard_string();
+    #elif defined(_SAPP_EMSCRIPTEN)
+        return _sapp_tc.clipboard.buffer;
+    #elif defined(_SAPP_WIN32)
+        return _sapp_tc_win32_get_clipboard_string();
+    #elif defined(_SAPP_LINUX)
+        return _sapp_tc_x11_get_clipboard_string();
+    #else
+        /* not implemented */
+        return _sapp_tc.clipboard.buffer;
+    #endif
+}
+
+SOKOL_API_IMPL void sapp_set_window_title(const char* title) {
+    SOKOL_ASSERT(title);
+    _sapp_tc_strcpy(title, _sapp_tc.window_title, sizeof(_sapp_tc.window_title));
+    #if defined(_SAPP_MACOS)
+        _sapp_tc_macos_update_window_title();
+    #elif defined(_SAPP_WIN32)
+        _sapp_tc_win32_update_window_title();
+    #elif defined(_SAPP_LINUX)
+        _sapp_tc_x11_update_window_title();
+    #endif
+}
+
+SOKOL_API_IMPL void sapp_set_icon(const sapp_icon_desc* desc) {
+    SOKOL_ASSERT(desc);
+    if (desc->sokol_default) {
+        /* the sokol default-icon generator is not ported: the favicon is the
+           page's business unless the app provides real icon images */
+        return;
+    }
+    const int num_images = _sapp_tc_icon_num_images(desc);
+    if (num_images == 0) {
+        return;
+    }
+    SOKOL_ASSERT((num_images > 0) && (num_images <= SAPP_MAX_ICONIMAGES));
+    if (!_sapp_tc_validate_icon_desc(desc, num_images)) {
+        return;
+    }
+    #if defined(_SAPP_MACOS)
+        _sapp_tc_macos_set_icon(desc, num_images);
+    #elif defined(_SAPP_WIN32)
+        _sapp_tc_win32_set_icon(desc, num_images);
+    #elif defined(_SAPP_LINUX)
+        _sapp_tc_x11_set_icon(desc, num_images);
+    #elif defined(_SAPP_EMSCRIPTEN)
+        _sapp_tc_emsc_set_icon(desc, num_images);
+    #endif
+}
+
+SOKOL_API_IMPL int sapp_get_num_dropped_files(void) {
+    if (!_sapp_tc.drop.enabled) {
+        return 0;
+    }
+    return _sapp_tc.drop.num_files;
+}
+
+SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
+    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
+    if (!_sapp_tc.drop.enabled) {
+        return "";
+    }
+    SOKOL_ASSERT(_sapp_tc.drop.buffer);
+    if ((index < 0) || (index >= _sapp_tc.drop.max_files)) {
+        return "";
+    }
+    return (const char*) _sapp_tc_dropped_file_path_ptr(index);
+}
+
+SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
+    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
+    #if defined(_SAPP_EMSCRIPTEN)
+        if (!_sapp_tc.drop.enabled) {
+            return 0;
+        }
+        return _sapp_tc_js_dropped_file_size(index);
+    #else
+        (void)index;
+        return 0;
+    #endif
+}
+
+SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request) {
+    SOKOL_ASSERT(_sapp_tc.drop.enabled);
+    SOKOL_ASSERT(request);
+    SOKOL_ASSERT(request->callback);
+    SOKOL_ASSERT(request->buffer.ptr);
+    SOKOL_ASSERT(request->buffer.size > 0);
+    #if defined(_SAPP_EMSCRIPTEN)
+        const int index = request->dropped_file_index;
+        sapp_html5_fetch_error error_code = SAPP_HTML5_FETCH_ERROR_NO_ERROR;
+        if ((index < 0) || (index >= _sapp_tc.drop.num_files)) {
+            error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
+        }
+        if (sapp_html5_get_dropped_file_size(index) > request->buffer.size) {
+            error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+        }
+        if (SAPP_HTML5_FETCH_ERROR_NO_ERROR != error_code) {
+            _sapp_tc_emsc_invoke_fetch_cb(index,
+                false, // success
+                (int)error_code,
+                request->callback,
+                0, // fetched_size
+                (void*)request->buffer.ptr,
+                request->buffer.size,
+                request->user_data);
+        } else {
+            _sapp_tc_js_fetch_dropped_file(index,
+                request->callback,
+                (void*)request->buffer.ptr,
+                request->buffer.size,
+                request->user_data);
+        }
+    #else
+        (void)request;
+    #endif
+}
+
+SOKOL_API_IMPL sapp_environment sapp_get_environment(void) {
+    SOKOL_ASSERT(_sapp_tc.valid);
+    _SAPP_STRUCT(sapp_environment, res);
+    res.defaults.color_format = sapp_color_format();
+    res.defaults.depth_format = sapp_depth_format();
+    res.defaults.sample_count = sapp_sample_count();
+    #if defined(SOKOL_METAL)
+        #if defined(_SAPP_MACOS)
+            res.metal.device = (__bridge const void*) _sapp_tc.macos.mtl.device;
+        #else
+            res.metal.device = (__bridge const void*) _sapp_tc.ios.mtl.device;
+        #endif
+    #endif
+    #if defined(SOKOL_D3D11)
+        res.d3d11.device = (const void*) _sapp_tc.d3d11.device;
+        res.d3d11.device_context = (const void*) _sapp_tc.d3d11.device_context;
+    #endif
+    #if defined(SOKOL_WGPU)
+        res.wgpu.device = (const void*) _sapp_tc.wgpu.device;
+    #endif
+    #if defined(SOKOL_VULKAN)
+        res.vulkan.instance = (const void*) _sapp_tc.vk.instance;
+        res.vulkan.physical_device = (const void*) _sapp_tc.vk.physical_device;
+        res.vulkan.device = (const void*) _sapp_tc.vk.device;
+        res.vulkan.queue = (const void*) _sapp_tc.vk.queue;
+        res.vulkan.queue_family_index = _sapp_tc.vk.queue_family_index;
+    #endif
+    return res;
+}
+
+SOKOL_API_IMPL sapp_swapchain sapp_get_swapchain(void) {
+    SOKOL_ASSERT(_sapp_tc.valid);
+    _SAPP_STRUCT(sapp_swapchain, res);
+    #if defined(SOKOL_METAL)
+        #if defined(_SAPP_MACOS)
+            res.metal.current_drawable = (__bridge const void*) _sapp_tc_macos_mtl_swapchain_next();
+            res.metal.depth_stencil_texture = (__bridge const void*) _sapp_tc.macos.mtl.depth_tex;
+            res.metal.msaa_color_texture = (__bridge const void*) _sapp_tc.macos.mtl.msaa_tex;
+        #else
+            res.metal.current_drawable = (__bridge const void*) _sapp_tc_ios_mtl_swapchain_next();
+            res.metal.depth_stencil_texture = (__bridge const void*) _sapp_tc.ios.mtl.depth_tex;
+            res.metal.msaa_color_texture = (__bridge const void*) _sapp_tc.ios.mtl.msaa_tex;
+        #endif
+    #endif
+    #if defined(SOKOL_D3D11)
+        SOKOL_ASSERT(_sapp_tc.d3d11.rtv);
+        if (_sapp_tc.sample_count > 1) {
+            SOKOL_ASSERT(_sapp_tc.d3d11.msaa_rtv);
+            res.d3d11.render_view = (const void*) _sapp_tc.d3d11.msaa_rtv;
+            res.d3d11.resolve_view = (const void*) _sapp_tc.d3d11.rtv;
+        } else {
+            res.d3d11.render_view = (const void*) _sapp_tc.d3d11.rtv;
+        }
+        res.d3d11.depth_stencil_view = (const void*) _sapp_tc.d3d11.dsv;
+    #endif
+    #if defined(SOKOL_WGPU)
+        SOKOL_ASSERT(0 == _sapp_tc.wgpu.swapchain_view);
+        _sapp_tc_wgpu_swapchain_next();
+        // FIXME: swapchain_view being null must be allowed and should skip the frame
+        SOKOL_ASSERT(_sapp_tc.wgpu.swapchain_view);
+        if (_sapp_tc.sample_count > 1) {
+            SOKOL_ASSERT(_sapp_tc.wgpu.msaa_view);
+            res.wgpu.render_view = (const void*) _sapp_tc.wgpu.msaa_view;
+            res.wgpu.resolve_view = (const void*) _sapp_tc.wgpu.swapchain_view;
+        } else {
+            res.wgpu.render_view = (const void*) _sapp_tc.wgpu.swapchain_view;
+        }
+        res.wgpu.depth_stencil_view = (const void*) _sapp_tc.wgpu.depth_stencil_view;
+    #endif
+    #if defined(SOKOL_VULKAN)
+        _sapp_tc_vk_swapchain_next();
+        // FIXME: swapchain_view being null must be allowed and should skip the frame
+        uint32_t img_idx = _sapp_tc.vk.cur_swapchain_image_index;
+        if (_sapp_tc.sample_count > 1) {
+            SOKOL_ASSERT(_sapp_tc.vk.msaa.img && _sapp_tc.vk.msaa.view);
+            res.vulkan.render_image = (const void*) _sapp_tc.vk.msaa.img;
+            res.vulkan.render_view = (const void*) _sapp_tc.vk.msaa.view;
+            res.vulkan.resolve_image = (const void*) _sapp_tc.vk.swapchain_images[img_idx];
+            res.vulkan.resolve_view = (const void*) _sapp_tc.vk.swapchain_views[img_idx];
+        } else {
+            res.vulkan.render_image = (const void*) _sapp_tc.vk.swapchain_images[img_idx];
+            res.vulkan.render_view = (const void*) _sapp_tc.vk.swapchain_views[img_idx];
+        }
+        res.vulkan.depth_stencil_image = (const void*) _sapp_tc.vk.depth.img;
+        res.vulkan.depth_stencil_view = (const void*) _sapp_tc.vk.depth.view;
+        // NOTE: using the current swapchain image index here is *NOT* a bug! The render_finished_semaphore *must*
+        // be associated with its swapchain image in case the swapchain implementation doesn't return swapchain images in order
+        res.vulkan.render_finished_semaphore = _sapp_tc.vk.sync[img_idx].render_finished_sem;
+        res.vulkan.present_complete_semaphore = _sapp_tc.vk.sync[_sapp_tc.vk.sync_slot].present_complete_sem;
+    #endif
+    #if defined(_SAPP_ANY_GL)
+        res.gl.framebuffer = _sapp_tc.gl.framebuffer;
+    #endif
+    res.width = sapp_width();
+    res.height = sapp_height();
+    res.color_format = sapp_color_format();
+    res.depth_format = sapp_depth_format();
+    res.sample_count = sapp_sample_count();
+    return res;
+}
+
+SOKOL_API_IMPL const void* sapp_macos_get_window(void) {
+    #if defined(_SAPP_MACOS)
+        const void* obj = (__bridge const void*) _sapp_tc.macos.window;
+        SOKOL_ASSERT(obj);
+        return obj;
+    #else
+        return 0;
+    #endif
+}
+
+SOKOL_API_IMPL const void* sapp_ios_get_window(void) {
+    #if defined(_SAPP_IOS)
+        const void* obj = (__bridge const void*) _sapp_tc.ios.window;
+        SOKOL_ASSERT(obj);
+        return obj;
+    #else
+        return 0;
+    #endif
+}
+
+// Modified by tettou771 for TrussC: runtime orientation control
+SOKOL_API_IMPL void sapp_ios_set_supported_orientations(uint32_t mask) {
+    #if defined(_SAPP_IOS)
+        _sapp_tc.ios.supported_orientations = (NSUInteger)mask;
+        #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 160000
+            if (@available(iOS 16.0, *)) {
+                [_sapp_tc.ios.view_ctrl setNeedsUpdateOfSupportedInterfaceOrientations];
+            }
+        #endif
+    #else
+        (void)mask;
+    #endif
+}
+
+SOKOL_API_IMPL const void* sapp_d3d11_get_swap_chain(void) {
+    SOKOL_ASSERT(_sapp_tc.valid);
+#if defined(SOKOL_D3D11)
+    return _sapp_tc.d3d11.swap_chain;
+#else
+    return 0;
+#endif
+}
+
+SOKOL_API_IMPL const void* sapp_win32_get_hwnd(void) {
+    SOKOL_ASSERT(_sapp_tc.valid);
+    #if defined(_SAPP_WIN32)
+        return _sapp_tc.win32.hwnd;
+    #else
+        return 0;
+    #endif
+}
+
+SOKOL_API_IMPL int sapp_gl_get_major_version(void) {
+    SOKOL_ASSERT(_sapp_tc.valid);
+    #if defined(_SAPP_ANY_GL)
+        return _sapp_tc.desc.gl.major_version;
+    #else
+        return 0;
+    #endif
+}
+
+SOKOL_API_IMPL int sapp_gl_get_minor_version(void) {
+    SOKOL_ASSERT(_sapp_tc.valid);
+    #if defined(_SAPP_ANY_GL)
+        return _sapp_tc.desc.gl.minor_version;
+    #else
+        return 0;
+    #endif
+}
+
+SOKOL_API_IMPL bool sapp_gl_is_gles(void) {
+    #if defined(SOKOL_GLES3)
+        return true;
+    #else
+        return false;
+    #endif
+}
+
+SOKOL_API_IMPL const void* sapp_x11_get_window(void) {
+    #if defined(_SAPP_LINUX)
+        return (void*)_sapp_tc.x11.window;
+    #else
+        return 0;
+    #endif
+}
+
+SOKOL_API_IMPL const void* sapp_x11_get_display(void) {
+    #if defined(_SAPP_LINUX)
+        return (void*)_sapp_tc.x11.display;
+    #else
+        return 0;
+    #endif
+}
+
+SOKOL_API_IMPL const void* sapp_android_get_native_activity(void) {
+    // NOTE: _sapp_tc.valid is not asserted here because sapp_android_get_native_activity()
+    // needs to be callable from within sokol_main() (see: https://github.com/floooh/sokol/issues/708)
+    #if defined(_SAPP_ANDROID)
+        return (void*)_sapp_tc.android.activity;
+    #else
+        return 0;
+    #endif
+}
+
+SOKOL_API_IMPL void sapp_html5_ask_leave_site(bool ask) {
+    _sapp_tc.html5_ask_leave_site = ask;
+}
+
+// Modified by tettou771 for TrussC: skip the next present call (fix D3D11 flickering)
+SOKOL_API_IMPL void sapp_skip_present(void) {
+    _sapp_tc.skip_present = true;
+}
+// end of modification
+
+
+
+/* ---- other-backend getters (zero stubs, same set as the native sections) - */
+#if defined(__cplusplus)
+extern "C" {
+#endif
+const void* sapp_metal_get_device(void) { return 0; }
+const void* sapp_metal_get_current_drawable(void) { return 0; }
+const void* sapp_metal_get_depth_stencil_texture(void) { return 0; }
+const void* sapp_metal_get_msaa_color_texture(void) { return 0; }
+const void* sapp_d3d11_get_device(void) { return 0; }
+const void* sapp_d3d11_get_device_context(void) { return 0; }
+
+/* ---- multi-window API: explicit platform gap on Android ------------------
+   the activity owns exactly one ANativeWindow; a second window is not
+   representable */
+sapp_window sapp_create_window(const sapp_window_desc* desc) {
+    _SOKOL_UNUSED(desc);
+    fprintf(stderr, "sokol_app_tc.h: sapp_create_window() is not supported on Android (single-window platform)\n");
+    sapp_window w = {0};
+    return w;
+}
+void sapp_destroy_window(sapp_window win) { _SOKOL_UNUSED(win); }
+bool sapp_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
+int sapp_window_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+int sapp_window_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+int sapp_window_framebuffer_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+int sapp_window_framebuffer_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+float sapp_window_dpi_scale(sapp_window win) { _SOKOL_UNUSED(win); return 1.0f; }
+int sapp_window_sample_count(sapp_window win) { _SOKOL_UNUSED(win); return 1; }
+bool sapp_window_occluded(sapp_window win) { _SOKOL_UNUSED(win); return false; }
+void sapp_window_set_title(sapp_window win, const char* title) { _SOKOL_UNUSED(win); _SOKOL_UNUSED(title); }
+double sapp_window_frame_duration(sapp_window win) { _SOKOL_UNUSED(win); return 1.0 / 60.0; }
+const void* sapp_window_metal_current_drawable(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_window_metal_depth_stencil_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_window_metal_msaa_color_texture(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_window_d3d11_render_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_window_d3d11_resolve_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_window_d3d11_depth_stencil_view(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_window_macos_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_window_win32_get_hwnd(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+const void* sapp_window_x11_get_window(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
+#if defined(__cplusplus)
+} /* extern "C" */
+#endif
+
 #elif defined(__EMSCRIPTEN__)
 /*== Emscripten (web) =======================================================
     Implements the public sokol_app.h API on the web plus the multi-window
