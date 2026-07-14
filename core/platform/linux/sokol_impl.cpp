@@ -13,10 +13,6 @@
 #  pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #endif
 
-// sokol_app.h declarations only — the Linux implementation of the sapp_*
-// API lives in sokol_app_tc.h (GLCORE: multi-window X11+GLX; GLES3 /
-// Raspberry Pi: single-window X11+EGL).
-#include "sokol_app.h"
 #define SOKOL_IMPL
 #include "sokol_log.h"
 #define SOKOL_APP_TC_IMPL

@@ -13,7 +13,9 @@ Search for `tettou771` or `Modified by` or `[TrussC` to find all modified sectio
 
 ```
 sokol/
-├── sokol_app.h          # Modified (10 patches)
+├── sokol_app_tc.h       # TrussC-owned fork: full sapp_* implementation on
+│                        #   every platform + multi-window API (sokol_app.h
+│                        #   no longer exists in this tree — see below)
 ├── sokol_gfx.h          # Untouched (direct copy from upstream)
 ├── sokol_glue.h         # Modified (1 patch)
 ├── sokol_log.h          # Untouched
@@ -31,7 +33,25 @@ Matches upstream directory layout: core headers at root, utility headers in `uti
 
 ---
 
-## sokol_app.h
+## sokol_app_tc.h (replaces sokol_app.h)
+
+**sokol_app.h was deleted from this tree (2026-07, "sokol_app graduation").**
+`sokol_app_tc.h` is a self-contained TrussC-owned fork that implements the
+complete `sapp_*` public API (declarations absorbed verbatim, zlib license
+kept) plus the multi-window API on every platform: macOS (multi-window,
+NSWindow+CAMetalLayer+CADisplayLink), Windows (multi-window, HWND+D3D11+DXGI
+waitable), desktop Linux (multi-window, X11+GLX), GLES3 Linux / Raspberry Pi
+(single-window, X11+EGL), web (single-window, rAF + WebGPU/WebGL2), iOS
+(single-window, UIWindowScene+Metal) and Android (single-window,
+NativeActivity+EGL+Choreographer). Design + per-platform behavioral contracts:
+`docs/dev/sokol_app_tc-design.md` and `docs/dev/sapp-*-impl-spec.md`.
+
+It is NOT updated from upstream by 3-way merge — it is a permanent fork;
+upstream sokol_app changes are cherry-picked deliberately when wanted.
+
+The former sokol_app.h patches below are **native behavior** of
+sokol_app_tc.h now (kept here as historical record of what differs from
+upstream semantics):
 
 ### 1. Skip Present (D3D11 flickering fix)
 
@@ -203,9 +223,14 @@ These functions do NOT exist in upstream sokol_gl. They are TrussC additions.
 
 ## How to Update Sokol
 
-For files with TrussC patches (sokol_app.h, sokol_glue.h, util/sokol_gl_tc.h),
+For files with TrussC patches (sokol_glue.h, util/sokol_gl_tc.h),
 **use `git merge-file` as a 3-way merge** instead of overwriting and manually
 re-applying patches. This avoids slip bugs from manual patch transcription.
+
+`sokol_app_tc.h` is NOT part of this process — it is a permanent fork, not a
+patched upstream copy. Pull upstream sokol_app improvements into it by
+deliberate cherry-pick (the per-platform impl specs in docs/dev/ map upstream
+line ranges to the tc sections).
 
 ### Recommended: 3-way merge for patched files
 
@@ -214,20 +239,19 @@ re-applying patches. This avoids slip bugs from manual patch transcription.
 #   BASE   — upstream sokol at the commit recorded above (pre-patch)
 #   OURS   — current TrussC copy with all patches
 #   THEIRS — new upstream master we want to update to
-(cd <sokol-clone>; git show <base-sha>:sokol_app.h) > /tmp/BASE.h
-cp <sokol-clone>/sokol_app.h /tmp/THEIRS.h
-cp core/include/sokol/sokol_app.h /tmp/OURS.h
+(cd <sokol-clone>; git show <base-sha>:sokol_glue.h) > /tmp/BASE.h
+cp <sokol-clone>/sokol_glue.h /tmp/THEIRS.h
+cp core/include/sokol/sokol_glue.h /tmp/OURS.h
 
 # Run merge; conflicts (if any) end up as <<<<<<< / ======= / >>>>>>> blocks
-cp /tmp/OURS.h /tmp/MERGED.h
 git merge-file --diff-algorithm=histogram -p /tmp/OURS.h /tmp/BASE.h /tmp/THEIRS.h > /tmp/MERGED.h
 
 # Resolve conflicts in /tmp/MERGED.h, then copy back
-cp /tmp/MERGED.h core/include/sokol/sokol_app.h
+cp /tmp/MERGED.h core/include/sokol/sokol_glue.h
 ```
 
-Repeat for `sokol_glue.h` and `util/sokol_gl_tc.h` (use upstream `util/sokol_gl.h`
-as both BASE and THEIRS, since sokol_gl_tc.h is the renamed fork).
+Repeat for `util/sokol_gl_tc.h` (use upstream `util/sokol_gl.h` as BASE and
+THEIRS, since sokol_gl_tc.h is the renamed fork).
 
 ### Direct overwrite (for files without TrussC patches)
 

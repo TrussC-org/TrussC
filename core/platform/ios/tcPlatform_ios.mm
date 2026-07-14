@@ -16,7 +16,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <MediaPlayer/MediaPlayer.h>
 
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 // ---------------------------------------------------------------------------
 // Sensor managers (lazily initialized)

@@ -11,9 +11,8 @@
 #  pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #endif
 
-// sokol_app.h: declarations only — the macOS implementation of the sapp_* API
-// (main window, run loop, events) lives in sokol_app_tc.h below.
-#include "sokol_app.h"
+// sokol_app_tc.h is the self-contained sapp_* implementation on macOS
+// (main window, run loop, events, multi-window API).
 
 #define SOKOL_IMPL
 #include "sokol_log.h"

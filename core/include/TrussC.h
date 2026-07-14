@@ -13,7 +13,7 @@
 // sokol headers
 #include "sokol/sokol_log.h"
 #define SOKOL_NO_ENTRY  // We define our own main()
-#include "sokol/sokol_app.h"
+#include "sokol/sokol_app_tc.h"
 #include "sokol/sokol_gfx.h"
 #include "sokol/sokol_glue.h"
 #include "sokol/util/sokol_gl_tc.h"

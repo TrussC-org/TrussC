@@ -10,7 +10,7 @@
 #include <linux/limits.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 // OpenGL for screen capture
 #include <GL/gl.h>

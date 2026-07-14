@@ -18,7 +18,6 @@
 #  pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #endif
 
-#include "sokol_app.h"      // declarations only
 
 #define SOKOL_IMPL
 #include "sokol_log.h"

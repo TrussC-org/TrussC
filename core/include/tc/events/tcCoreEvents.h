@@ -6,7 +6,7 @@
 
 #include "tcEvent.h"
 #include "tcEventArgs.h"
-#include "sokol/sokol_app.h"
+#include "sokol/sokol_app_tc.h"
 
 namespace trussc {
 

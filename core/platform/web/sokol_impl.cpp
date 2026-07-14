@@ -13,10 +13,6 @@
 #  pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #endif
 
-// sokol_app.h declarations only — the web implementation of the sapp_* API
-// (canvas, rAF frame loop, HTML5 events, WGPU/WebGL2 swapchain) lives in
-// sokol_app_tc.h below.
-#include "sokol_app.h"
 #define SOKOL_IMPL
 #include "sokol_log.h"
 #define SOKOL_APP_TC_IMPL

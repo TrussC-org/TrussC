@@ -14,7 +14,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include "tc/utils/tcLog.h"
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 // ---------------------------------------------------------------------------
 // Helper: get root view controller from sokol window

@@ -9,7 +9,7 @@
 #include <android/log.h>
 #include <android/native_activity.h>
 #include <jni.h>
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 // GLES3 for screen capture
 #include <GLES3/gl3.h>

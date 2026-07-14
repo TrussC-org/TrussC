@@ -30,7 +30,7 @@
 #endif
 
 // sokol headers
-#include "sokol/sokol_app.h"
+#include "sokol/sokol_app_tc.h"
 #include "sokol/sokol_gfx.h"
 #include "sokol/util/sokol_gl_tc.h"
 

@@ -402,11 +402,22 @@ can feed events manually, so imgui does not chain us to sokol_app.
   claiming "Linux" support (fixed on the branch — message now says
   desktop Linux (OpenGL); iOS also gained the graceful stubs instead of
   a link error).
-- **P6 — delete sokol_app.h**, update TRUSSC_MODIFICATIONS.md, retire the
-  fork patches. The header must become self-contained first: sokol_app_tc.h
-  still requires sokol_app.h's declaration section (types, enums, public
-  API decls) — absorb it, switch every sokol_impl TU to include only
-  sokol_app_tc.h, then delete the upstream file.
+- **P6 — delete sokol_app.h. DONE 2026-07-15.** sokol_app_tc.h is now
+  SELF-CONTAINED: the upstream declaration block (doc comment + types +
+  enums + sapp_* decls, lines 4–2269 of sokol_app.h, self-guarded by
+  SOKOL_APP_INCLUDED) was absorbed verbatim at the top, so third-party
+  glue that checks SOKOL_APP_INCLUDED (sokol_glue.h, sokol_imgui.h)
+  keeps working unchanged. All 25 including files switched (shims
+  dropped their now-redundant decls-only include; TrussC.h, tcFont,
+  tcCoreEvents, tcPlatform_* and the tcxImGui/tcxCurl platform files
+  swapped the name); **core/include/sokol/sokol_app.h deleted**.
+  TRUSSC_MODIFICATIONS.md reframed: sokol_app_tc.h is a permanent fork
+  (upstream changes are cherry-picked, never 3-way merged); the former
+  sokol_app patches are recorded as its native behavior. Verified after
+  deletion: mac core build + 4/4 core tests + multiWindowExample runtime
+  (second window created via keystroke, dpi 2), iOS simulator build +
+  launch + render, Android core + AllFeaturesExample full link, web
+  multiWindowExample wasm build; win/linux by CI.
 
 Keyboard keycode tables, clipboard, drag&drop, fullscreen, mouse
 lock/cursor images are lifted from sokol_app per platform as each driver

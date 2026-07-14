@@ -18,7 +18,7 @@
 #import <CoreLocation/CoreLocation.h>
 
 // sokol_app の swapchain 取得関数
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 namespace trussc {
 

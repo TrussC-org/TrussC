@@ -18,7 +18,7 @@
 #include <d3d11.h>
 
 // sokol_app のウィンドウ取得
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 // stb_image_write（スクリーンショット保存用）
 #include "stb/stb_image_write.h"
