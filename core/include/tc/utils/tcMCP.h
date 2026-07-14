@@ -192,6 +192,11 @@ public:
     // --- Registration API ---
 
     void registerTool(const Tool& tool) {
+        // Last registration wins. Warn, because silently replacing a standard
+        // tool (they register before setup()) is a hard bug to spot.
+        if (tools_.count(tool.name)) {
+            logWarning("MCP") << "tool '" << tool.name << "' re-registered; previous handler replaced";
+        }
         tools_[tool.name] = tool;
     }
 

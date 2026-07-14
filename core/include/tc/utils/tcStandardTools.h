@@ -119,9 +119,10 @@ inline json pixelsToJpegJson(const trussc::Pixels& px, int reqWidth, int quality
                 {"height", dstH}};
 }
 
-// App-published ops status registries (see mcp::status / graph / statusImage
-// below). Main-thread only: registration happens in setup()/update() and the
-// getters run inside MCP tool handlers, which execute on the main loop.
+// App-published ops status registries (see mcp::status / statusGraph /
+// statusImage below). Main-thread only: registration happens in
+// setup()/update() and the getters run inside MCP tool handlers, which
+// execute on the main loop.
 struct StatusEntry {
     std::string name;
     std::function<json()> getter;   // returns a number or string json value
@@ -160,8 +161,8 @@ inline void addStatusEntry(StatusEntry entry) {
 // (anchorbolt start) discover the anchorbolt_status tool via tools/list and
 // forward the payload to the fleet server. No supervisor-side configuration.
 //
-//   mcp::status("scene",   [&]{ return sceneName; });     // shown as-is
-//   mcp::graph("visitors", [&]{ return visitorCount; });  // plotted over time
+//   mcp::status("scene",         [&]{ return sceneName; });     // shown as-is
+//   mcp::statusGraph("visitors",  [&]{ return visitorCount; }); // plotted over time
 //   mcp::statusImage("entranceCam", [&]{ return camPixels; });
 //
 // Registering the same name again replaces the previous entry.
@@ -175,7 +176,7 @@ inline void status(const std::string& name, std::function<std::string()> getter)
     detail::addStatusEntry({name, [getter]() { return json(getter()); }, false});
 }
 
-inline void graph(const std::string& name, std::function<double()> getter) {
+inline void statusGraph(const std::string& name, std::function<double()> getter) {
     detail::addStatusEntry({name, [getter]() { return json(getter()); }, true});
 }
 
@@ -269,7 +270,7 @@ inline void registerInspectionTools() {
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
-    tool("anchorbolt_status", "App-published ops status: values registered via mcp::status()/mcp::graph() plus the names of mcp::statusImage() images. mode 'graph' means the value wants to be plotted over time. Empty when the app publishes nothing. Supervisors (anchorbolt start) discover this tool via tools/list and forward the payload to the fleet server.")
+    tool("anchorbolt_status", "App-published ops status: values registered via mcp::status()/mcp::statusGraph() plus the names of mcp::statusImage() images. mode 'graph' means the value wants to be plotted over time. Empty when the app publishes nothing. Supervisors (anchorbolt start) discover this tool via tools/list and forward the payload to the fleet server.")
         .bind(std::function<json()>([]() -> json {
             json values = json::array();
             for (auto& e : detail::statusRegistry()) {

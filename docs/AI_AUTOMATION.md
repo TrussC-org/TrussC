@@ -115,14 +115,14 @@ plotted over time and images become live streams in the dashboard.
 
 ```cpp
 void tcApp::setup() {
-    mcp::status("scene",   [&] { return sceneName; });     // shown as-is
-    mcp::graph("visitors", [&] { return visitorCount; });  // plotted over time
+    mcp::status("scene",         [&] { return sceneName; });     // shown as-is
+    mcp::statusGraph("visitors", [&] { return visitorCount; });  // plotted over time
     mcp::statusImage("entranceCam", [&] { return camPixels; });  // e.g. a webcam
 }
 ```
 
 - `mcp::status(name, getter)` — a string or number, displayed as-is
-- `mcp::graph(name, getter)` — a number that wants to be a time series
+- `mcp::statusGraph(name, getter)` — a number that wants to be a time series
 - `mcp::statusImage(name, getter)` — `Pixels` fetched on demand via
   `anchorbolt_image` (a webcam feed turns your installation's spare camera
   into a monitoring camera with this one line)
