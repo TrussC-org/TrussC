@@ -10,6 +10,8 @@
 #include "../events/tcCoreEvents.h"
 #include "stb/stb_image_write.h"
 #include "../graphics/tcPixels.h"
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 // Forward declaration for stbi_write_png_to_mem (missing in older stb_image_write.h headers)
@@ -64,6 +66,34 @@ inline Json nodeToJson(Node& node, int maxDepth = -1) {
 
 namespace mcp {
 
+namespace detail {
+
+// Area-average (box filter) downscale for interleaved 8-bit images. Good
+// enough for monitoring thumbnails at any ratio; never called to upscale.
+inline void downscaleImage(const unsigned char* src, int srcW, int srcH, int channels,
+                           std::vector<unsigned char>& dst, int dstW, int dstH) {
+    dst.resize(size_t(dstW) * dstH * channels);
+    for (int y = 0; y < dstH; ++y) {
+        int sy0 = int(size_t(y) * srcH / dstH);
+        int sy1 = std::max(int(size_t(y + 1) * srcH / dstH), sy0 + 1);
+        for (int x = 0; x < dstW; ++x) {
+            int sx0 = int(size_t(x) * srcW / dstW);
+            int sx1 = std::max(int(size_t(x + 1) * srcW / dstW), sx0 + 1);
+            uint64_t acc[4] = {0, 0, 0, 0};
+            for (int sy = sy0; sy < sy1; ++sy) {
+                const unsigned char* p = src + (size_t(sy) * srcW + sx0) * channels;
+                for (int sx = sx0; sx < sx1; ++sx, p += channels)
+                    for (int c = 0; c < channels; ++c) acc[c] += p[c];
+            }
+            uint64_t n = uint64_t(sy1 - sy0) * (sx1 - sx0);
+            unsigned char* o = &dst[(size_t(y) * dstW + x) * channels];
+            for (int c = 0; c < channels; ++c) o[c] = (unsigned char)(acc[c] / n);
+        }
+    }
+}
+
+} // namespace detail
+
 // ---------------------------------------------------------------------------
 // Inspection Tools (read-only, always available when MCP is enabled)
 // ---------------------------------------------------------------------------
@@ -117,6 +147,54 @@ inline void registerInspectionTools() {
             } else {
                 return json{{"status", "error"}, {"message", "Failed to save screenshot"}};
             }
+        });
+
+    tool("get_thumbnail", "Small JPEG snapshot for monitoring/periodic polling. Only the framebuffer readback touches the frame loop; downscale + JPEG encode run on the HTTP worker thread, so polling this does NOT stutter the app (unlike get_screenshot's full-res synchronous PNG — use that for one-off debugging captures).")
+        .arg<int>("width", "Target width in pixels, aspect preserved (default 512, clamped 16-4096; never upscales)", false)
+        .arg<int>("quality", "JPEG quality 1-100 (default 75)", false)
+        .bind([](const json& args) -> json {
+            int reqWidth = 512;
+            int quality  = 75;
+            if (args.contains("width") && args.at("width").is_number())
+                reqWidth = std::clamp(args.at("width").get<int>(), 16, 4096);
+            if (args.contains("quality") && args.at("quality").is_number())
+                quality = std::clamp(args.at("quality").get<int>(), 1, 100);
+
+            // Two-stage deferral: main stage (at the afterFrame readback point)
+            // only grabs the pixels; the returned closure — downscale + JPEG +
+            // Base64 — runs on the HTTP worker that is blocked on this reply.
+            mcp::deferToolResultTwoStage([reqWidth, quality]() -> std::function<json()> {
+                auto px = std::make_shared<trussc::Pixels>();
+                bool grabbed = trussc::grabScreen(*px);
+                return [px, grabbed, reqWidth, quality]() -> json {
+                    if (!grabbed) {
+                        return json{{"status", "error"}, {"message", "Failed to grab screen"}};
+                    }
+                    int srcW = px->getWidth(), srcH = px->getHeight();
+                    int ch   = px->getChannels();
+                    int dstW = std::min(reqWidth, srcW);
+                    int dstH = std::max(1, (int)std::lround((double)srcH * dstW / srcW));
+                    std::vector<unsigned char> small;
+                    mcp::detail::downscaleImage(px->getData(), srcW, srcH, ch, small, dstW, dstH);
+
+                    std::vector<unsigned char> jpg;
+                    stbi_write_jpg_to_func(
+                        [](void* ctx, void* data, int size) {
+                            auto* v = static_cast<std::vector<unsigned char>*>(ctx);
+                            auto* b = static_cast<unsigned char*>(data);
+                            v->insert(v->end(), b, b + size);
+                        },
+                        &jpg, dstW, dstH, ch, small.data(), quality);
+                    if (jpg.empty()) {
+                        return json{{"status", "error"}, {"message", "JPEG encode failed"}};
+                    }
+                    return json{{"mimeType", "image/jpeg"},
+                                {"data", trussc::toBase64(jpg)},
+                                {"width", dstW},
+                                {"height", dstH}};
+                };
+            });
+            return json(nullptr);  // ignored — deferred result is sent instead
         });
 
     tool("get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, sokol memory bytes. Cheap enough to poll — reads counters only, touches no GPU state.")

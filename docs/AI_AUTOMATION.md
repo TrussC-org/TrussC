@@ -50,8 +50,9 @@ TrussC uses **HTTP transport** for MCP. All JSON-RPC messages are sent as HTTP P
 ### Inspection Tools (always available in MCP mode)
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `get_screenshot` | (none) | Get current screen as Base64 PNG image |
+| `get_screenshot` | (none) | Get current screen as Base64 PNG image (full resolution, lossless — encodes synchronously on the frame loop, so use it for one-off debugging captures, not polling) |
 | `save_screenshot` | `path` | Save screenshot to file |
+| `get_thumbnail` | `width`, `quality` (both optional) | Small Base64 JPEG for monitoring/periodic polling (default width 512, aspect preserved, never upscales; quality default 75). Only the framebuffer readback touches the frame loop — downscale + JPEG encode run on the HTTP worker thread, so polling this does not stutter the app (measured under continuous hammering: ~179 fps vs ~46 fps with `get_screenshot`) |
 | `get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll |
 | `quit` | (none) | Quit the application gracefully |
 | `get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
@@ -240,7 +241,7 @@ Configure your MCP client with the HTTP URL:
 
 | Category | Tools | Enabled by |
 |----------|-------|------------|
-| Inspection (read-only) | `get_screenshot`, `save_screenshot`, `get_health`, `get_node_tree`, `get_selected_node` | Automatic when MCP is enabled |
+| Inspection (read-only) | `get_screenshot`, `save_screenshot`, `get_thumbnail`, `get_health`, `get_node_tree`, `get_selected_node` | Automatic when MCP is enabled |
 | Recording (window capture to video) | `start_recording`, `stop_recording` | Automatic when MCP is enabled |
 | Debugger (input injection / scene mutation) | `mouse_click`, `mouse_press`, `mouse_release`, `key_press`, `mouse_move`, `mouse_scroll`, `key_release`, `select_node`, `set_node_members` | `mcp::registerDebuggerTools()` |
 | ImGui (widget interaction) | `imgui_get_widgets`, `imgui_click`, `imgui_input`, `imgui_checkbox` | Requires tcxImGui addon + `mcp::registerDebuggerTools()` |
