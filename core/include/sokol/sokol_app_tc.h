@@ -8999,14 +8999,16 @@ sapp_swapchain sapp_get_swapchain(void) {
 #define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_tc_clear(&item, sizeof(item)); }
 #endif
 
-/* controlled failure instead of sokol_app.h's log-item machinery */
-#define _SAPP_PANIC(code) do { fprintf(stderr, "sokol_app_tc.h: panic: " #code "\n"); abort(); } while (0)
-#define _SAPP_ERROR(code) fprintf(stderr, "sokol_app_tc.h: error: " #code "\n")
-#define _SAPP_ERROR_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: error: " #code ": %s\n", msg)
-#define _SAPP_WARN_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: warn: " #code ": %s\n", msg)
-#define _SAPP_INFO_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: info: " #code ": %s\n", msg)
-#define _SAPP_INFO(code) fprintf(stderr, "sokol_app_tc.h: info: " #code "\n")
-#define _SAPP_WARN(code) fprintf(stderr, "sokol_app_tc.h: warn: " #code "\n")
+/* controlled failure instead of sokol_app.h's log-item machinery.
+   stderr goes nowhere on Android -- route to the system log (liblog). */
+#include <android/log.h>
+#define _SAPP_PANIC(code) do { __android_log_print(ANDROID_LOG_FATAL, "sokol_app_tc", "panic: " #code); abort(); } while (0)
+#define _SAPP_ERROR(code) __android_log_print(ANDROID_LOG_ERROR, "sokol_app_tc", "error: " #code)
+#define _SAPP_ERROR_MSG(code, msg) __android_log_print(ANDROID_LOG_ERROR, "sokol_app_tc", "error: " #code ": %s", msg)
+#define _SAPP_WARN_MSG(code, msg) __android_log_print(ANDROID_LOG_WARN, "sokol_app_tc", "warn: " #code ": %s", msg)
+#define _SAPP_INFO_MSG(code, msg) __android_log_print(ANDROID_LOG_INFO, "sokol_app_tc", "info: " #code ": %s", msg)
+#define _SAPP_INFO(code) __android_log_print(ANDROID_LOG_INFO, "sokol_app_tc", "info: " #code)
+#define _SAPP_WARN(code) __android_log_print(ANDROID_LOG_WARN, "sokol_app_tc", "warn: " #code)
 typedef struct {
     #if defined(_SAPP_APPLE)
         struct {
@@ -10977,7 +10979,7 @@ const void* sapp_d3d11_get_device_context(void) { return 0; }
    representable */
 sapp_window sapp_create_window(const sapp_window_desc* desc) {
     _SOKOL_UNUSED(desc);
-    fprintf(stderr, "sokol_app_tc.h: sapp_create_window() is not supported on Android (single-window platform)\n");
+    __android_log_print(ANDROID_LOG_ERROR, "sokol_app_tc", "sapp_create_window() is not supported on Android (single-window platform)");
     sapp_window w = {0};
     return w;
 }
