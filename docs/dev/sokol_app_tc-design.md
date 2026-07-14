@@ -342,8 +342,9 @@ can feed events manually, so imgui does not chain us to sokol_app.
 - **P5 — Android driver.** NativeActivity + ALooper + Choreographer + EGL
   surface lifecycle. Last on purpose; needs a real-device verification
   plan (rotation, pause/resume, surface recreate).
-  - **IMPLEMENTED + compile/link-verified 2026-07-14; device pass
-    pending** (user will prepare Android hardware; checklist =
+  - **IMPLEMENTED + compile/link-verified 2026-07-14, full CI green
+    (run 29306102924, all jobs incl. build-android + build-ios + ci-ok);
+    device pass pending** (user will prepare Android hardware; checklist =
     sapp-android-impl-spec.md §12d). Implementation contract:
     docs/dev/sapp-android-impl-spec.md (opus-extracted, sixth sibling).
     Same verbatim-lift as web/iOS: android backend body (sokol_app.h
