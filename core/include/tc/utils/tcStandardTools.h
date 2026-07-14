@@ -14,6 +14,21 @@
 #include <cmath>
 #include <cstdlib>
 
+// Platform bits for detail::currentPid() / detail::processRssBytes()
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <unistd.h>
+#elif defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <psapi.h>
+#elif !defined(__EMSCRIPTEN__)
+#include <fstream>
+#include <unistd.h>
+#endif
+
 // Forward declaration for stbi_write_png_to_mem (missing in older stb_image_write.h headers)
 extern "C" unsigned char *stbi_write_png_to_mem(const unsigned char *pixels, int stride_bytes, int x, int y, int n, int *out_len);
 
@@ -168,6 +183,47 @@ inline void addStatusEntry(StatusEntry entry) {
     reg.push_back(std::move(entry));
 }
 
+// Process identity + real memory footprint for tc_get_health. RSS is the
+// resident set of the whole process — the number that matters for leak
+// hunting and for telling "the app grew" from "the OS ran out".
+inline int64_t currentPid() {
+#if defined(_WIN32)
+    return (int64_t)GetCurrentProcessId();
+#elif defined(__EMSCRIPTEN__)
+    return 0;
+#else
+    return (int64_t)getpid();
+#endif
+}
+
+inline int64_t processRssBytes() {
+#if defined(__APPLE__)
+    mach_task_basic_info info;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
+                  (task_info_t)&info, &count) == KERN_SUCCESS) {
+        return (int64_t)info.resident_size;
+    }
+    return 0;
+#elif defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS pmc;
+    if (K32GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
+        return (int64_t)pmc.WorkingSetSize;
+    }
+    return 0;
+#elif defined(__EMSCRIPTEN__)
+    return 0;
+#else
+    // Linux: /proc/self/statm field 2 = resident pages
+    std::ifstream in("/proc/self/statm");
+    long total = 0, resident = 0;
+    if (in >> total >> resident) {
+        return (int64_t)resident * sysconf(_SC_PAGESIZE);
+    }
+    return 0;
+#endif
+}
+
 } // namespace detail
 
 // ---------------------------------------------------------------------------
@@ -318,7 +374,7 @@ inline void registerInspectionTools() {
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
-    tool("tc_get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, sokol memory bytes. Cheap enough to poll — reads counters only, touches no GPU state.")
+    tool("tc_get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, pid, process RSS bytes, sokol-tracked bytes. Cheap enough to poll — reads counters only, touches no GPU state. pid lets a supervisor confirm it is talking to ITS child (port collisions); rssBytes is the number to graph for leak hunting.")
         .bind(std::function<json()>([]() -> json {
             return json{{"status", "ok"},
                         {"fps", trussc::getFps()},
@@ -327,6 +383,8 @@ inline void registerInspectionTools() {
                         {"width", trussc::getWindowWidth()},
                         {"height", trussc::getWindowHeight()},
                         {"version", trussc::getVersion()},
+                        {"pid", detail::currentPid()},
+                        {"rssBytes", detail::processRssBytes()},
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
         }));
 
