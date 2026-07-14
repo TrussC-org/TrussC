@@ -37,7 +37,7 @@ namespace mcp {
 // ---------------------------------------------------------------------------
 // Deferred tool responses
 // ---------------------------------------------------------------------------
-// Some tools (e.g. get_screenshot) need state that only exists AFTER present()
+// Some tools (e.g. tc_get_screenshot) need state that only exists AFTER present()
 // — during the frame, drawing is still deferred and a readback would be blank.
 // Such a handler calls deferToolResultUntilAfterFrame(): processHttpQueue()
 // stashes the request instead of answering it, and drainDeferredResponses()
@@ -100,7 +100,7 @@ inline void deferToolResultUntilAfterFrame(std::function<json()> produce) {
 }
 
 // Two-stage variant for tools whose result is expensive to build (e.g.
-// get_thumbnail): `mainStage` runs at the afterFrame safe point on the MAIN
+// tc_get_thumbnail): `mainStage` runs at the afterFrame safe point on the MAIN
 // thread — do the GPU readback there and nothing else — and the closure it
 // returns runs on the HTTP worker thread that is already sitting blocked on
 // this reply. Put the heavy work (downscale, encode) in that closure and the

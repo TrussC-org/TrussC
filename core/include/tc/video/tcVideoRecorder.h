@@ -287,7 +287,7 @@ public:
     ScreenRecorder& operator=(const ScreenRecorder&) = delete;
 
     // Record the whole window (swapchain) — the same fully-composited image
-    // get_screenshot returns. Size is taken from the framebuffer.
+    // tc_get_screenshot returns. Size is taken from the framebuffer.
     bool start(const std::string& path, const VideoRecordSettings& settings = {}) {
         return startSource(Source::Swapchain, nullptr,
                            sapp_width(), sapp_height(), path, settings);

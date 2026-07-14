@@ -28,7 +28,7 @@ namespace trussc {
 // members (same encoding as JsonWriteReflector), mods ({type, members} each),
 // and the children in draw order. maxDepth limits recursion (-1 = unlimited,
 // 0 = this node only); where children are cut off, "childCount" says how many
-// were omitted so a caller can drill in with another get_node_tree(id) call.
+// were omitted so a caller can drill in with another tc_get_node_tree(id) call.
 inline Json nodeToJson(Node& node, int maxDepth = -1) {
     Json j = Json::object();
     j["type"] = node.getTypeName();
@@ -93,7 +93,7 @@ inline void downscaleImage(const unsigned char* src, int srcW, int srcH, int cha
 }
 
 // Downscale + JPEG encode + Base64. Runs on the HTTP worker inside two-stage
-// deferral thunks (get_thumbnail / anchorbolt_image), never on the main loop.
+// deferral thunks (tc_get_thumbnail / tc_get_status_image), never on the main loop.
 inline json pixelsToJpegJson(const trussc::Pixels& px, int reqWidth, int quality) {
     int srcW = px.getWidth(), srcH = px.getHeight();
     int ch   = px.getChannels();
@@ -155,11 +155,11 @@ inline void addStatusEntry(StatusEntry entry) {
 } // namespace detail
 
 // ---------------------------------------------------------------------------
-// App-published ops status (the anchorbolt convention)
+// App-published ops status
 //
-// Apps expose custom monitoring data with one line per value; supervisors
-// (anchorbolt start) discover the anchorbolt_status tool via tools/list and
-// forward the payload to the fleet server. No supervisor-side configuration.
+// Apps expose custom monitoring data with one line per value; a supervisor
+// (e.g. anchorbolt start) discovers the tc_get_status tool via tools/list
+// and forwards the payload to its server. No supervisor-side configuration.
 //
 //   mcp::status("scene",         [&]{ return sceneName; });     // shown as-is
 //   mcp::statusGraph("visitors",  [&]{ return visitorCount; }); // plotted over time
@@ -194,7 +194,7 @@ inline void statusImage(const std::string& name, std::function<trussc::Pixels()>
 
 inline void registerInspectionTools() {
 
-    tool("get_screenshot", "Get screenshot as Base64 PNG")
+    tool("tc_get_screenshot", "Get screenshot as Base64 PNG")
         .bind(std::function<json()>([]() -> json {
             // Defer the actual capture+encode to just after present(): during a
             // frame nothing has been rendered yet (drawing is deferred), so a
@@ -233,7 +233,7 @@ inline void registerInspectionTools() {
             return json(nullptr);  // ignored — deferred result is sent instead
         }));
 
-    tool("save_screenshot", "Save screenshot to file")
+    tool("tc_save_screenshot", "Save screenshot to file")
         .arg<std::string>("path", "File path")
         .bind<std::string>([](std::string path) {
             if (trussc::saveScreenshot(path)) {
@@ -243,7 +243,7 @@ inline void registerInspectionTools() {
             }
         });
 
-    tool("get_thumbnail", "Small JPEG snapshot for monitoring/periodic polling. Only the framebuffer readback touches the frame loop; downscale + JPEG encode run on the HTTP worker thread, so polling this does NOT stutter the app (unlike get_screenshot's full-res synchronous PNG — use that for one-off debugging captures).")
+    tool("tc_get_thumbnail", "Small JPEG snapshot for monitoring/periodic polling. Only the framebuffer readback touches the frame loop; downscale + JPEG encode run on the HTTP worker thread, so polling this does NOT stutter the app (unlike tc_get_screenshot's full-res synchronous PNG — use that for one-off debugging captures).")
         .arg<int>("width", "Target width in pixels, aspect preserved (default 512, clamped 16-4096; never upscales)", false)
         .arg<int>("quality", "JPEG quality 1-100 (default 75)", false)
         .bind([](const json& args) -> json {
@@ -270,7 +270,7 @@ inline void registerInspectionTools() {
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
-    tool("anchorbolt_status", "App-published ops status: values registered via mcp::status()/mcp::statusGraph() plus the names of mcp::statusImage() images. mode 'graph' means the value wants to be plotted over time. Empty when the app publishes nothing. Supervisors (anchorbolt start) discover this tool via tools/list and forward the payload to the fleet server.")
+    tool("tc_get_status", "App-published ops status: values registered via mcp::status()/mcp::statusGraph() plus the names of mcp::statusImage() images. mode 'graph' means the value wants to be plotted over time. Empty when the app publishes nothing. Supervisors discover this tool via tools/list and forward the payload to their monitoring server.")
         .bind(std::function<json()>([]() -> json {
             json values = json::array();
             for (auto& e : detail::statusRegistry()) {
@@ -289,8 +289,8 @@ inline void registerInspectionTools() {
             return json{{"values", values}, {"images", images}};
         }));
 
-    tool("anchorbolt_image", "Fetch an app-published image registered via mcp::statusImage(), downscaled + JPEG-encoded like get_thumbnail (pixel grab on the main loop, encode on the HTTP worker — no frame stutter).")
-        .arg<std::string>("name", "Image name as listed by anchorbolt_status")
+    tool("tc_get_status_image", "Fetch an app-published image registered via mcp::statusImage(), downscaled + JPEG-encoded like tc_get_thumbnail (pixel grab on the main loop, encode on the HTTP worker — no frame stutter).")
+        .arg<std::string>("name", "Image name as listed by tc_get_status")
         .arg<int>("width", "Target width in pixels, aspect preserved (default 512, clamped 16-4096; never upscales)", false)
         .arg<int>("quality", "JPEG quality 1-100 (default 75)", false)
         .bind([](const json& args) -> json {
@@ -308,7 +308,7 @@ inline void registerInspectionTools() {
             }
             if (!getter) {
                 return json{{"status", "error"},
-                            {"message", "unknown image '" + name + "' (see anchorbolt_status)"}};
+                            {"message", "unknown image '" + name + "' (see tc_get_status)"}};
             }
             mcp::deferToolResultTwoStage([getter, reqWidth, quality]() -> std::function<json()> {
                 auto px = std::make_shared<trussc::Pixels>();
@@ -330,7 +330,7 @@ inline void registerInspectionTools() {
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
-    tool("get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, sokol memory bytes. Cheap enough to poll — reads counters only, touches no GPU state.")
+    tool("tc_get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, sokol memory bytes. Cheap enough to poll — reads counters only, touches no GPU state.")
         .bind(std::function<json()>([]() -> json {
             return json{{"status", "ok"},
                         {"fps", trussc::getFps()},
@@ -342,7 +342,7 @@ inline void registerInspectionTools() {
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
         }));
 
-    tool("quit", "Quit the application gracefully")
+    tool("tc_quit", "Quit the application gracefully")
         .bind(std::function<json()>([]() -> json {
             sapp_request_quit();
             return json{{"status", "ok"}};
@@ -350,9 +350,9 @@ inline void registerInspectionTools() {
 
     // --- Recording tools (native encoder, no ffmpeg) ---
 
-    tool("start_recording", "Start recording the window to a video file (the screenshot's video counterpart). Omit path for a timestamped file in the data dir; give duration for a fixed-length clip that auto-stops and finalizes itself.")
+    tool("tc_start_recording", "Start recording the window to a video file (the screenshot's video counterpart). Omit path for a timestamped file in the data dir; give duration for a fixed-length clip that auto-stops and finalizes itself.")
         .arg<std::string>("path", "Output file path (relative paths resolve to the data dir). Omit for recording-<timestamp>.mp4/.mov in the data dir.", false)
-        .arg<float>("duration", "Fixed length in seconds; the file auto-stops & finalizes at that length. Omit or 0 = unlimited (stop_recording to end).", false)
+        .arg<float>("duration", "Fixed length in seconds; the file auto-stops & finalizes at that length. Omit or 0 = unlimited (tc_stop_recording to end).", false)
         .arg<float>("fps", "Target frame rate (default 60; ProMotion frames are decimated to it)", false)
         .arg<std::string>("codec", "h264 (default) | hevc | prores422 | prores4444 (.mov, macOS)", false)
         .bind([](const json& args) -> json {
@@ -389,7 +389,7 @@ inline void registerInspectionTools() {
             return r;
         });
 
-    tool("stop_recording", "Stop the current recording and finalize the file. Wins over a pending fixed duration (finalizes immediately at the current length); a no-op if nothing is recording.")
+    tool("tc_stop_recording", "Stop the current recording and finalize the file. Wins over a pending fixed duration (finalizes immediately at the current length); a no-op if nothing is recording.")
         .bind(std::function<json()>([]() -> json {
             if (!trussc::isRecording()) {
                 // Harmless no-op (e.g. a fixed-duration recording already
@@ -409,7 +409,7 @@ inline void registerInspectionTools() {
 
     // --- Node tree tools ---
 
-    tool("get_node_tree", "Dump the node tree as JSON: per node {type, name, id, members (reflected, rotation in degrees, colors 0-1), mods, children}. Where depth cuts children off, childCount marks how many were omitted — drill in with another call passing that node's id")
+    tool("tc_get_node_tree", "Dump the node tree as JSON: per node {type, name, id, members (reflected, rotation in degrees, colors 0-1), mods, children}. Where depth cuts children off, childCount marks how many were omitted — drill in with another call passing that node's id")
         .arg<int>("id", "Subtree root instance id (omit for the whole tree)", false)
         .arg<int>("depth", "Max child depth (omit for unlimited, 0 = the node only)", false)
         .bind([](const json& args) -> json {
@@ -431,7 +431,7 @@ inline void registerInspectionTools() {
             return json{{"status", "ok"}, {"tree", nodeToJson(*root, depth)}};
         });
 
-    tool("get_selected_node", "Get the currently selected node (type, name, id, reflected members), or null if nothing is selected")
+    tool("tc_get_selected_node", "Get the currently selected node (type, name, id, reflected members), or null if nothing is selected")
         .bind(std::function<json()>([]() -> json {
             Node* n = getSelectedNode();
             if (!n) {
@@ -453,7 +453,7 @@ inline void registerDebuggerTools() {
 
     // --- Mouse Tools ---
 
-    tool("mouse_move", "Move mouse cursor (with a button held, emits a drag)")
+    tool("tc_mouse_move", "Move mouse cursor (with a button held, emits a drag)")
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button held during the move (0:left, 1:right, 2:middle; omit or -1 for a plain move)", false)
@@ -490,11 +490,11 @@ inline void registerDebuggerTools() {
             return json{{"status", "ok"}};
         });
 
-    // Split press/release. A drag gesture is press → mouse_move(button) × N →
-    // release; mouse_click fires press+release back-to-back, so drag consumers
+    // Split press/release. A drag gesture is press → tc_mouse_move(button) × N →
+    // release; tc_mouse_click fires press+release back-to-back, so drag consumers
     // (e.g. EasyCam orbit) never see an open gesture. Anchoring the global
     // mouse position at press keeps the first drag delta sane.
-    tool("mouse_press", "Press and hold a mouse button (start of a drag; pair with mouse_move + mouse_release)")
+    tool("tc_mouse_press", "Press and hold a mouse button (start of a drag; pair with tc_mouse_move + tc_mouse_release)")
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
@@ -514,7 +514,7 @@ inline void registerDebuggerTools() {
             return json{{"status", "ok"}};
         });
 
-    tool("mouse_release", "Release a mouse button (end of a drag)")
+    tool("tc_mouse_release", "Release a mouse button (end of a drag)")
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
@@ -534,7 +534,7 @@ inline void registerDebuggerTools() {
             return json{{"status", "ok"}};
         });
 
-    tool("mouse_click", "Click mouse button (optionally with modifier keys held)")
+    tool("tc_mouse_click", "Click mouse button (optionally with modifier keys held)")
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
@@ -567,7 +567,7 @@ inline void registerDebuggerTools() {
             return json{{"status", "ok"}};
         });
 
-    tool("mouse_scroll", "Scroll mouse wheel")
+    tool("tc_mouse_scroll", "Scroll mouse wheel")
         .arg<float>("dx", "Horizontal scroll delta")
         .arg<float>("dy", "Vertical scroll delta")
         .bind<float, float>([](float dx, float dy) {
@@ -583,7 +583,7 @@ inline void registerDebuggerTools() {
 
     // --- Key Tools ---
 
-    tool("key_press", "Press a key")
+    tool("tc_key_press", "Press a key")
         .arg<int>("key", "Key code (sokol_app keycode)")
         .bind<int>([](int key) {
             KeyEventArgs args;
@@ -594,7 +594,7 @@ inline void registerDebuggerTools() {
             return json{{"status", "ok"}};
         });
 
-    tool("key_release", "Release a key")
+    tool("tc_key_release", "Release a key")
         .arg<int>("key", "Key code (sokol_app keycode)")
         .bind<int>([](int key) {
             KeyEventArgs args;
@@ -607,8 +607,8 @@ inline void registerDebuggerTools() {
 
     // --- Node Tools ---
 
-    tool("select_node", "Select a node by instance id (0 clears the selection); drives the same selection an inspector shows")
-        .arg<int>("id", "Instance id from get_node_tree (0 to clear)")
+    tool("tc_select_node", "Select a node by instance id (0 clears the selection); drives the same selection an inspector shows")
+        .arg<int>("id", "Instance id from tc_get_node_tree (0 to clear)")
         .bind<int>([](int id) {
             if (id == 0) {
                 setSelectedNode(nullptr);
@@ -623,8 +623,8 @@ inline void registerDebuggerTools() {
             return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0)}};
         });
 
-    tool("set_node_members", "Set reflected members of a node — or one of its mods — from a JSON object (same encoding as get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in degrees, enums by label string)")
-        .arg<int>("id", "Instance id from get_node_tree")
+    tool("tc_set_node_members", "Set reflected members of a node — or one of its mods — from a JSON object (same encoding as tc_get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in degrees, enums by label string)")
+        .arg<int>("id", "Instance id from tc_get_node_tree")
         .arg<json>("members", "Member values to apply, e.g. {\"pos\":[10,20,0],\"visible\":true}")
         .arg<std::string>("mod", "Mod short type name (e.g. \"LayoutMod\") to target a mod attached to the node instead of the node itself", false)
         .bind([](const json& args) -> json {

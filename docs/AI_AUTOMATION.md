@@ -25,7 +25,7 @@ TRUSSC_MCP=1 TRUSSC_MCP_PORT=8080 ./myApp
 
 When enabled:
 1. An **HTTP server** starts on the specified port (or an OS-assigned port).
-2. **Inspection tools** (`get_screenshot`, `save_screenshot`) are automatically registered.
+2. **Inspection tools** (`tc_get_screenshot`, `tc_save_screenshot`) are automatically registered.
 3. The server endpoint URL is printed to stderr: `[MCP] HTTP server listening on http://localhost:PORT/mcp`
 
 ### Related: `TRUSSC_LOG_FILE`
@@ -47,45 +47,54 @@ TrussC uses **HTTP transport** for MCP. All JSON-RPC messages are sent as HTTP P
 
 ## Standard MCP Tools
 
+Tool names are namespaced by origin, so the framework never collides with
+your own tools:
+
+- **`tc_*`** — provided by TrussC core (registered by default, or generated
+  by core sugar like `mcp::status()`)
+- **`tcx_<addon>_*`** — provided by an official addon (e.g. `tcx_imgui_click`)
+- **anything else** — yours; custom tools created with `mcp::tool()` should
+  NOT use these prefixes
+
 ### Inspection Tools (always available in MCP mode)
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `get_screenshot` | (none) | Get current screen as Base64 PNG image (full resolution, lossless — encodes synchronously on the frame loop, so use it for one-off debugging captures, not polling) |
-| `save_screenshot` | `path` | Save screenshot to file |
-| `get_thumbnail` | `width`, `quality` (both optional) | Small Base64 JPEG for monitoring/periodic polling (default width 512, aspect preserved, never upscales; quality default 75). Only the framebuffer readback touches the frame loop — downscale + JPEG encode run on the HTTP worker thread, so polling this does not stutter the app (measured under continuous hammering: ~179 fps vs ~46 fps with `get_screenshot`) |
-| `get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll |
-| `anchorbolt_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status-the-anchorbolt-convention)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
-| `anchorbolt_image` | `name`, `width`, `quality` (last two optional) | Fetch an app-published image registered via `mcp::statusImage()`, downscaled + JPEG-encoded exactly like `get_thumbnail` (pixel grab on the main loop, encode on the HTTP worker — no frame stutter) |
-| `quit` | (none) | Quit the application gracefully |
-| `get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
-| `get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |
+| `tc_get_screenshot` | (none) | Get current screen as Base64 PNG image (full resolution, lossless — encodes synchronously on the frame loop, so use it for one-off debugging captures, not polling) |
+| `tc_save_screenshot` | `path` | Save screenshot to file |
+| `tc_get_thumbnail` | `width`, `quality` (both optional) | Small Base64 JPEG for monitoring/periodic polling (default width 512, aspect preserved, never upscales; quality default 75). Only the framebuffer readback touches the frame loop — downscale + JPEG encode run on the HTTP worker thread, so polling this does not stutter the app (measured under continuous hammering: ~179 fps vs ~46 fps with `tc_get_screenshot`) |
+| `tc_get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll |
+| `tc_get_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
+| `tc_get_status_image` | `name`, `width`, `quality` (last two optional) | Fetch an app-published image registered via `mcp::statusImage()`, downscaled + JPEG-encoded exactly like `tc_get_thumbnail` (pixel grab on the main loop, encode on the HTTP worker — no frame stutter) |
+| `tc_quit` | (none) | Quit the application gracefully |
+| `tc_get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
+| `tc_get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |
 
 ### Recording Tools (always available in MCP mode)
 
-The video counterpart of `save_screenshot` — capture the window to a video file with the native encoder (no ffmpeg). Always registered when MCP is enabled, but unlike the inspection tools these *write* (start/stop a recording), so they are listed separately.
+The video counterpart of `tc_save_screenshot` — capture the window to a video file with the native encoder (no ffmpeg). Always registered when MCP is enabled, but unlike the inspection tools these *write* (start/stop a recording), so they are listed separately.
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `start_recording` | `path`, `duration`, `fps`, `codec` (all optional) | Start recording the window. Omit `path` for a timestamped `recording-<timestamp>.mp4` (`.mov` for ProRes) in the data dir; relative paths resolve under the data dir. `duration` (seconds) makes a fixed-length clip that **auto-stops and finalizes itself** at exactly that length (omit or `0` = unlimited). `fps` is the target frame rate (default 60; ProMotion frames are decimated to it). `codec` is `h264` (default) / `hevc` / `prores422` / `prores4444`. Returns `{status, path (resolved), fps, codec}` plus `duration` when a fixed length was set |
-| `stop_recording` | (none) | Stop the current recording and finalize the file. A manual stop **always wins** over a pending fixed `duration` — it finalizes immediately at the current length. Returns `{status, recording:false, path, frames, length}` (`length` = measured output seconds). Idle is not an error: returns `{status:"ok", recording:false, message:"not recording"}` |
+| `tc_start_recording` | `path`, `duration`, `fps`, `codec` (all optional) | Start recording the window. Omit `path` for a timestamped `recording-<timestamp>.mp4` (`.mov` for ProRes) in the data dir; relative paths resolve under the data dir. `duration` (seconds) makes a fixed-length clip that **auto-stops and finalizes itself** at exactly that length (omit or `0` = unlimited). `fps` is the target frame rate (default 60; ProMotion frames are decimated to it). `codec` is `h264` (default) / `hevc` / `prores422` / `prores4444`. Returns `{status, path (resolved), fps, codec}` plus `duration` when a fixed length was set |
+| `tc_stop_recording` | (none) | Stop the current recording and finalize the file. A manual stop **always wins** over a pending fixed `duration` — it finalizes immediately at the current length. Returns `{status, recording:false, path, frames, length}` (`length` = measured output seconds). Idle is not an error: returns `{status:"ok", recording:false, message:"not recording"}` |
 
 ### Debugger Tools (opt-in via `mcp::registerDebuggerTools()`)
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `mouse_move` | `x`, `y`, `button` (optional) | Move cursor; with `button` held, emits a drag |
-| `mouse_press` | `x`, `y`, `button` | Press and hold — start of a drag gesture |
-| `mouse_release` | `x`, `y`, `button` | Release — end of a drag gesture |
-| `mouse_click` | `x`, `y`, `button`, `shift`/`ctrl`/`alt`/`super` (optional) | Click mouse button (0:left, 1:right), optionally with modifier keys held — e.g. `super: true` Cmd+clicks |
-| `mouse_scroll` | `dx`, `dy` | Scroll mouse wheel |
-| `key_press` | `key` | Press a key (sokol_app keycode) |
-| `key_release` | `key` | Release a key |
-| `select_node` | `id` | Select a node by instance id (0 clears); drives the same selection an inspector shows |
-| `set_node_members` | `id`, `members`, `mod` (optional) | Set reflected members from a JSON object (same encoding as `get_node_tree`; enums accept label string or int). Pass `mod` (a Mod's short type name, e.g. `"LayoutMod"`) to target a mod attached to the node instead of the node itself. Reports `applied` / `skipped` (type mismatch) / `readOnly` / `unknown` keys |
+| `tc_mouse_move` | `x`, `y`, `button` (optional) | Move cursor; with `button` held, emits a drag |
+| `tc_mouse_press` | `x`, `y`, `button` | Press and hold — start of a drag gesture |
+| `tc_mouse_release` | `x`, `y`, `button` | Release — end of a drag gesture |
+| `tc_mouse_click` | `x`, `y`, `button`, `shift`/`ctrl`/`alt`/`super` (optional) | Click mouse button (0:left, 1:right), optionally with modifier keys held — e.g. `super: true` Cmd+clicks |
+| `tc_mouse_scroll` | `dx`, `dy` | Scroll mouse wheel |
+| `tc_key_press` | `key` | Press a key (sokol_app keycode) |
+| `tc_key_release` | `key` | Release a key |
+| `tc_select_node` | `id` | Select a node by instance id (0 clears); drives the same selection an inspector shows |
+| `tc_set_node_members` | `id`, `members`, `mod` (optional) | Set reflected members from a JSON object (same encoding as `tc_get_node_tree`; enums accept label string or int). Pass `mod` (a Mod's short type name, e.g. `"LayoutMod"`) to target a mod attached to the node instead of the node itself. Reports `applied` / `skipped` (type mismatch) / `readOnly` / `unknown` keys |
 
 The node tools make a scene **round-trippable for agents**: arrange things in a
-GUI (e.g. with the `tcxNodeInspector` addon's gizmo), then `get_node_tree` to
+GUI (e.g. with the `tcxNodeInspector` addon's gizmo), then `tc_get_node_tree` to
 read the exact values back and bake them into code — or drive the scene the
-other way with `set_node_members`.
+other way with `tc_set_node_members`.
 
 To enable debugger tools, call `mcp::registerDebuggerTools()` in your `setup()`.
 Registering the tools *is* the opt-in — there is no separate enable step, and
@@ -105,13 +114,14 @@ The **tcxImGui** addon provides additional MCP tools for AI agents to inspect an
 
 See [addons/tcxImGui/README.md](../addons/tcxImGui/README.md) for full details on available tools and setup.
 
-## Publishing Custom Ops Status (the anchorbolt convention)
+## Publishing Custom Ops Status
 
 Apps can publish their own monitoring data — one line per value, no
 supervisor-side configuration. A supervisor (e.g. `anchorbolt start`)
-discovers the `anchorbolt_status` tool via `tools/list` and forwards the
-payload to its fleet server, where numbers registered with `graph` are
-plotted over time and images become live streams in the dashboard.
+discovers the `tc_get_status` tool via `tools/list` and forwards the
+payload to its monitoring server, where numbers registered with
+`statusGraph` are plotted over time and images become live streams in the
+dashboard.
 
 ```cpp
 void tcApp::setup() {
@@ -124,7 +134,7 @@ void tcApp::setup() {
 - `mcp::status(name, getter)` — a string or number, displayed as-is
 - `mcp::statusGraph(name, getter)` — a number that wants to be a time series
 - `mcp::statusImage(name, getter)` — `Pixels` fetched on demand via
-  `anchorbolt_image` (a webcam feed turns your installation's spare camera
+  `tc_get_status_image` (a webcam feed turns your installation's spare camera
   into a monitoring camera with this one line)
 
 Getters run on the main loop inside tool handlers, so they can safely read
@@ -203,29 +213,29 @@ curl -X POST http://localhost:8080/mcp \
 # Take screenshot
 curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"save_screenshot","arguments":{"path":"/tmp/test.png"}}}'
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"tc_save_screenshot","arguments":{"path":"/tmp/test.png"}}}'
 
 # Mouse click (requires registerDebuggerTools())
 curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"mouse_click","arguments":{"x":100,"y":200}}}'
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"tc_mouse_click","arguments":{"x":100,"y":200}}}'
 
 # Record a fixed 3-second clip (auto-stops & finalizes itself); omit "duration"
-# for an unlimited recording you end with stop_recording. Omit "path" for a
+# for an unlimited recording you end with tc_stop_recording. Omit "path" for a
 # timestamped file in the data dir; the response carries the resolved path.
 curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","id":4,"params":{"name":"start_recording","arguments":{"path":"/tmp/clip.mp4","duration":3}}}'
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":4,"params":{"name":"tc_start_recording","arguments":{"path":"/tmp/clip.mp4","duration":3}}}'
 
 # Stop early (a manual stop always wins — valid shorter file); no-op if idle
 curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","id":5,"params":{"name":"stop_recording","arguments":{}}}'
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":5,"params":{"name":"tc_stop_recording","arguments":{}}}'
 ```
 
 ### Taking Screenshots from Shell
 
-**IMPORTANT for AI agents**: Do NOT use macOS `screencapture`, OS screen recorders (QuickTime, `ffmpeg`-avfoundation, OBS, etc.), or similar OS commands. TrussC apps may render with Metal/OpenGL and the OS cannot capture the screen correctly. Always use the MCP tools — `save_screenshot` for a still, `start_recording` / `stop_recording` for video.
+**IMPORTANT for AI agents**: Do NOT use macOS `screencapture`, OS screen recorders (QuickTime, `ffmpeg`-avfoundation, OBS, etc.), or similar OS commands. TrussC apps may render with Metal/OpenGL and the OS cannot capture the screen correctly. Always use the MCP tools — `tc_save_screenshot` for a still, `tc_start_recording` / `tc_stop_recording` for video.
 
 ```bash
 # Start app, wait, take screenshot, then kill
@@ -236,7 +246,7 @@ curl -s -X POST http://localhost:8080/mcp \
   -d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{}}'
 curl -s -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"save_screenshot","arguments":{"path":"/tmp/screenshot.png"}}}'
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"tc_save_screenshot","arguments":{"path":"/tmp/screenshot.png"}}}'
 kill %1
 # Screenshot is now at /tmp/screenshot.png
 ```
@@ -268,10 +278,10 @@ Configure your MCP client with the HTTP URL:
 
 | Category | Tools | Enabled by |
 |----------|-------|------------|
-| Inspection (read-only) | `get_screenshot`, `save_screenshot`, `get_thumbnail`, `get_health`, `get_node_tree`, `get_selected_node` | Automatic when MCP is enabled |
-| Recording (window capture to video) | `start_recording`, `stop_recording` | Automatic when MCP is enabled |
-| Debugger (input injection / scene mutation) | `mouse_click`, `mouse_press`, `mouse_release`, `key_press`, `mouse_move`, `mouse_scroll`, `key_release`, `select_node`, `set_node_members` | `mcp::registerDebuggerTools()` |
-| ImGui (widget interaction) | `imgui_get_widgets`, `imgui_click`, `imgui_input`, `imgui_checkbox` | Requires tcxImGui addon + `mcp::registerDebuggerTools()` |
+| Inspection (read-only) | `tc_get_screenshot`, `tc_save_screenshot`, `tc_get_thumbnail`, `tc_get_health`, `tc_get_node_tree`, `tc_get_selected_node` | Automatic when MCP is enabled |
+| Recording (window capture to video) | `tc_start_recording`, `tc_stop_recording` | Automatic when MCP is enabled |
+| Debugger (input injection / scene mutation) | `tc_mouse_click`, `tc_mouse_press`, `tc_mouse_release`, `tc_key_press`, `tc_mouse_move`, `tc_mouse_scroll`, `tc_key_release`, `tc_select_node`, `tc_set_node_members` | `mcp::registerDebuggerTools()` |
+| ImGui (widget interaction) | `tcx_imgui_get_widgets`, `tcx_imgui_click`, `tcx_imgui_input`, `tcx_imgui_checkbox` | Requires tcxImGui addon + `mcp::registerDebuggerTools()` |
 | Custom | `mcp::tool(...)` | Your code |
 
 ### Network exposure

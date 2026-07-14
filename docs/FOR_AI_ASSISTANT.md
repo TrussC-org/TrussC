@@ -1129,7 +1129,7 @@ Pass the length in seconds: `startRecording("out.mp4", 3.0f)` records exactly 3 
 
 ### Can an AI agent start/stop recording over MCP?
 
-Yes — every TrussC app in MCP mode (`TRUSSC_MCP=1`) exposes `start_recording` and `stop_recording` as standard tools (the video counterpart of `save_screenshot`, always available). `start_recording` takes optional `path` (omit → timestamped file in the data dir), `duration` (fixed-length auto-stop), `fps`, and `codec`, and returns the resolved path; `stop_recording` returns `{path, frames, length}` and is a no-op (not an error) when nothing is recording. See docs/AI_AUTOMATION.md.
+Yes — every TrussC app in MCP mode (`TRUSSC_MCP=1`) exposes `tc_start_recording` and `tc_stop_recording` as standard tools (the video counterpart of `tc_save_screenshot`, always available). `tc_start_recording` takes optional `path` (omit → timestamped file in the data dir), `duration` (fixed-length auto-stop), `fps`, and `codec`, and returns the resolved path; `tc_stop_recording` returns `{path, frames, length}` and is a no-op (not an error) when nothing is recording. See docs/AI_AUTOMATION.md.
 
 ### How do I avoid a black first frame when a VideoPlayer starts?
 
@@ -1381,7 +1381,7 @@ Every TrussC app can become an **MCP server.** Launch with `TRUSSC_MCP=1` and th
 
 ### How does an AI tune/verify a running app over MCP?
 
-A rebuild-free loop: launch (`TRUSSC_MCP=1`) → `get_screenshot` to see the current state → `get_node_tree` to read pos / rotation (degrees) / color as numbers → `set_node_members` to nudge them directly → screenshot to check → repeat → finally bake the values into C++ source. Main tools: `get_node_tree` / `get_selected_node` / `select_node` / `set_node_members`. Mouse/key injection is opt-in via `mcp::registerDebuggerTools()` in `setup()`. Drive ImGui UIs with dedicated tools (`imgui_get_widgets` / `imgui_click` / `imgui_input` / `imgui_checkbox`) — raw `mouse_click` doesn't reach ImGui. Expose your own state with `TC_REFLECT`, or return JSON via `mcp::tool` / `mcp::resource`. This enables a closed AI development loop, so you can hand off long, autonomous development sessions.
+A rebuild-free loop: launch (`TRUSSC_MCP=1`) → `tc_get_screenshot` to see the current state → `tc_get_node_tree` to read pos / rotation (degrees) / color as numbers → `tc_set_node_members` to nudge them directly → screenshot to check → repeat → finally bake the values into C++ source. Main tools: `tc_get_node_tree` / `tc_get_selected_node` / `tc_select_node` / `tc_set_node_members`. Mouse/key injection is opt-in via `mcp::registerDebuggerTools()` in `setup()`. Drive ImGui UIs with dedicated tools (`tcx_imgui_get_widgets` / `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox`) — raw `tc_mouse_click` doesn't reach ImGui. Expose your own state with `TC_REFLECT`, or return JSON via `mcp::tool` / `mcp::resource`. This enables a closed AI development loop, so you can hand off long, autonomous development sessions.
 
 ## Community & support
 

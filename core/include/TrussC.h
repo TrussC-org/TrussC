@@ -2249,7 +2249,7 @@ namespace internal {
         }
 
         // Force a frame when a capture is pending so present()/afterFrame runs
-        // and the deferred screenshot (or MCP get_screenshot) actually fires —
+        // and the deferred screenshot (or MCP tc_get_screenshot) actually fires —
         // otherwise a request arriving in a paused/event-driven app would never
         // be served and a blocked MCP HTTP worker would hang.
         if (!pendingScreenshotPaths.empty()
