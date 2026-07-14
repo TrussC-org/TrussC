@@ -2062,7 +2062,7 @@ namespace internal {
         // key off this. (sokol's init_cb runs on the main thread.)
         getMainThreadId();
 
-        // Ops integration: a supervisor (e.g. `gusset agent`) injects a log
+        // Ops integration: a supervisor (e.g. `anchorbolt agent`) injects a log
         // file path via the environment so the app needs zero code changes.
         // Opened BEFORE setup() so setup-time log lines land in the file too.
         #ifndef __EMSCRIPTEN__

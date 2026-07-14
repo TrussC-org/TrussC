@@ -33,7 +33,7 @@ When enabled:
 Independent of MCP mode, setting `TRUSSC_LOG_FILE=/path/to/app.log` makes the app
 call `setLogFile()` before `setup()` runs, so every log line — including
 setup-time output — is appended to that file with zero app code. This is how a
-supervisor process (e.g. `gusset agent`) captures logs from an unmodified app.
+supervisor process (e.g. `anchorbolt agent`) captures logs from an unmodified app.
 
 ## Transport
 
