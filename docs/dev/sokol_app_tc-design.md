@@ -382,8 +382,31 @@ can feed events manually, so imgui does not chain us to sokol_app.
     NDK r29 arm64-v8a android-26 build, ANativeActivity_onCreate +
     sokol_main exported in the final .so dynamic table, zero rename
     leftovers; mac + iOS-sim regression rebuilds green.
+- **P5.5 — GLES3/EGL Linux driver (Raspberry Pi).** DONE — implemented +
+  DEVICE PASS on a Raspberry Pi 5 (2026-07-15). The linux section now
+  selects `#if SOKOL_GLCORE` (the P2 multi-window X11+GLX driver) /
+  `#elif SOKOL_GLES3` (verbatim lift of upstream's single-window X11
+  backend on the EGL context path — TrussC's RasPi configuration, the
+  LAST consumer of the upstream implementation). linux/sokol_impl.cpp
+  dropped its upstream branch; nothing in the tree compiles sokol_app.h's
+  implementation anymore. Verified on the Pi (relayed by the user):
+  emptyExample render/resize/move/close exit 0, fboExample (EGL default-
+  framebuffer ↔ FBO interplay), easyCamExample (3D + mouse + keyboard),
+  multiWindowExample graceful platform-gap failure (W → createWindow
+  fails with a log, app keeps running, exit 0). Known cosmetics, all
+  pre-existing / cross-platform: sokol_gfx
+  GL_VERTEX_ATTRIBUTE_NOT_FOUND_IN_SHADER("psize") warning on GLES3
+  backends (also seen on Android; fires per frame there → suspicious
+  per-frame pipeline creation, separate issue), X11 Xft.dpi fallback
+  warning (harmless), and the createWindow() stub message wrongly
+  claiming "Linux" support (fixed on the branch — message now says
+  desktop Linux (OpenGL); iOS also gained the graceful stubs instead of
+  a link error).
 - **P6 — delete sokol_app.h**, update TRUSSC_MODIFICATIONS.md, retire the
-  fork patches.
+  fork patches. The header must become self-contained first: sokol_app_tc.h
+  still requires sokol_app.h's declaration section (types, enums, public
+  API decls) — absorb it, switch every sokol_impl TU to include only
+  sokol_app_tc.h, then delete the upstream file.
 
 Keyboard keycode tables, clipboard, drag&drop, fullscreen, mouse
 lock/cursor images are lifted from sokol_app per platform as each driver
