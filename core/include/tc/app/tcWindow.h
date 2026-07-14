@@ -136,21 +136,24 @@ inline void Window::setApp(std::shared_ptr<App> app) {
     ctx_.rootNode = app_.get();
 }
 
-#if !defined(__APPLE__) && !defined(_WIN32) && !(defined(__linux__) && defined(SOKOL_GLCORE))
-// Stubs for platforms without window glue (web / Android / Raspberry Pi). The
-// real implementations live in platform/mac/tcWindowMac.mm,
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+#if !(defined(__APPLE__) && TARGET_OS_OSX) && !defined(_WIN32) && !(defined(__linux__) && defined(SOKOL_GLCORE))
+// Stubs for platforms without window glue (web / iOS / Android / Raspberry
+// Pi). The real implementations live in platform/mac/tcWindowMac.mm,
 // platform/win/tcWindowWin.cpp and platform/linux/tcWindowLinux.cpp (desktop
 // Linux is SOKOL_GLCORE; Raspberry Pi builds the same sources with GLES3/EGL
 // and keeps these stubs).
-// (iOS also defines __APPLE__ but has no window glue — iOS is not in the CI
-// build matrix; revisit if an iOS app ever links these symbols.)
 inline Window::~Window() {}
 inline void Window::close() {}
 inline void Window::setTitle(const std::string&) {}
 inline int Window::getWidth() const { return 0; }
 inline int Window::getHeight() const { return 0; }
 inline std::shared_ptr<Window> createWindow(const WindowSettings&) {
-    logError("Window") << "createWindow(): secondary windows are only supported on macOS, Windows and Linux for now";
+    logError("Window") << "createWindow(): secondary windows are supported on "
+        "macOS, Windows and desktop Linux (OpenGL); this platform is "
+        "single-window";
     return nullptr;
 }
 #endif
