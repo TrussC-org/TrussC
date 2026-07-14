@@ -92,29 +92,45 @@ inline void downscaleImage(const unsigned char* src, int srcW, int srcH, int cha
     }
 }
 
-// Downscale + JPEG encode + Base64. Runs on the HTTP worker inside two-stage
-// deferral thunks (tc_get_thumbnail / tc_get_status_image), never on the main loop.
-inline json pixelsToJpegJson(const trussc::Pixels& px, int reqWidth, int quality) {
+// Optional downscale + PNG/JPEG encode + Base64. Runs on the HTTP worker
+// inside two-stage deferral thunks (tc_get_screenshot / tc_get_status_image),
+// never on the main loop. reqWidth <= 0 means "no resize"; never upscales.
+inline json pixelsToImageJson(const trussc::Pixels& px, const std::string& format,
+                              int reqWidth, int quality) {
     int srcW = px.getWidth(), srcH = px.getHeight();
     int ch   = px.getChannels();
-    int dstW = std::min(reqWidth, srcW);
+    int dstW = (reqWidth > 0) ? std::min(reqWidth, srcW) : srcW;
     int dstH = std::max(1, (int)std::lround((double)srcH * dstW / srcW));
-    std::vector<unsigned char> small;
-    downscaleImage(px.getData(), srcW, srcH, ch, small, dstW, dstH);
 
-    std::vector<unsigned char> jpg;
-    stbi_write_jpg_to_func(
-        [](void* ctx, void* data, int size) {
-            auto* v = static_cast<std::vector<unsigned char>*>(ctx);
-            auto* b = static_cast<unsigned char*>(data);
-            v->insert(v->end(), b, b + size);
-        },
-        &jpg, dstW, dstH, ch, small.data(), quality);
-    if (jpg.empty()) {
-        return json{{"status", "error"}, {"message", "JPEG encode failed"}};
+    const unsigned char* data = px.getData();
+    std::vector<unsigned char> small;
+    if (dstW != srcW) {
+        downscaleImage(px.getData(), srcW, srcH, ch, small, dstW, dstH);
+        data = small.data();
     }
-    return json{{"mimeType", "image/jpeg"},
-                {"data", trussc::toBase64(jpg)},
+
+    std::vector<unsigned char> out;
+    if (format == "png") {
+        int len = 0;
+        unsigned char* png = stbi_write_png_to_mem(data, 0, dstW, dstH, ch, &len);
+        if (png) {
+            out.assign(png, png + len);
+            std::free(png);
+        }
+    } else {
+        stbi_write_jpg_to_func(
+            [](void* ctx, void* d, int size) {
+                auto* v = static_cast<std::vector<unsigned char>*>(ctx);
+                auto* b = static_cast<unsigned char*>(d);
+                v->insert(v->end(), b, b + size);
+            },
+            &out, dstW, dstH, ch, data, quality);
+    }
+    if (out.empty()) {
+        return json{{"status", "error"}, {"message", format + " encode failed"}};
+    }
+    return json{{"mimeType", format == "png" ? "image/png" : "image/jpeg"},
+                {"data", trussc::toBase64(out)},
                 {"width", dstW},
                 {"height", dstH}};
 }
@@ -194,44 +210,43 @@ inline void statusImage(const std::string& name, std::function<trussc::Pixels()>
 
 inline void registerInspectionTools() {
 
-    tool("tc_get_screenshot", "Get screenshot as Base64 PNG")
-        .bind(std::function<json()>([]() -> json {
-            // Defer the actual capture+encode to just after present(): during a
-            // frame nothing has been rendered yet (drawing is deferred), so a
-            // readback here would be blank (black on Linux). The producer below
-            // runs at the afterFrame safe point and its result is what the MCP
-            // client receives.
-            mcp::deferToolResultUntilAfterFrame([]() -> json {
-                // Capture screen to pixels
-                Pixels pixels;
-                if (!grabScreen(pixels)) {
-                    return json{{"status", "error"}, {"message", "Failed to grab screen"}};
+    tool("tc_get_screenshot", "Screenshot as Base64 PNG/JPEG. Defaults to full-resolution PNG; pass width for a downscaled monitoring thumbnail (aspect preserved, never upscales) and format 'jpg' for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread, so polling does not stutter the app.")
+        .arg<std::string>("format", "'png' (default, lossless) or 'jpg'", false)
+        .arg<int>("width", "Target width in pixels, aspect preserved (clamped 16-4096; never upscales; omit = full resolution)", false)
+        .arg<int>("quality", "JPEG quality 1-100 (default 75; ignored for png)", false)
+        .bind([](const json& args) -> json {
+            std::string format = "png";
+            if (args.contains("format") && args.at("format").is_string()) {
+                format = args.at("format").get<std::string>();
+                if (format != "png" && format != "jpg" && format != "jpeg") {
+                    return json{{"status", "error"},
+                                {"message", "format must be 'png' or 'jpg'"}};
                 }
+                if (format == "jpeg") format = "jpg";
+            }
+            int reqWidth = 0;  // 0 = full resolution
+            int quality  = 75;
+            if (args.contains("width") && args.at("width").is_number())
+                reqWidth = std::clamp(args.at("width").get<int>(), 16, 4096);
+            if (args.contains("quality") && args.at("quality").is_number())
+                quality = std::clamp(args.at("quality").get<int>(), 1, 100);
 
-                // Encode to PNG in memory
-                int pngSize = 0;
-                unsigned char* pngData = stbi_write_png_to_mem(
-                    pixels.getData(), 0,
-                    pixels.getWidth(), pixels.getHeight(), pixels.getChannels(),
-                    &pngSize);
-
-                if (!pngData) {
-                    return json{{"status", "error"}, {"message", "Failed to encode PNG"}};
-                }
-
-                // Convert to Base64
-                std::string b64 = toBase64(pngData, pngSize);
-
-                // Free PNG data
-                std::free(pngData);
-
-                return json{
-                    {"mimeType", "image/png"},
-                    {"data", b64}
+            // Two-stage deferral: the main stage runs at the afterFrame safe
+            // point (mid-frame the framebuffer is blank — drawing is deferred)
+            // and only grabs the pixels; the returned closure — downscale +
+            // encode + Base64 — runs on the HTTP worker blocked on this reply.
+            mcp::deferToolResultTwoStage([format, reqWidth, quality]() -> std::function<json()> {
+                auto px = std::make_shared<trussc::Pixels>();
+                bool grabbed = trussc::grabScreen(*px);
+                return [px, grabbed, format, reqWidth, quality]() -> json {
+                    if (!grabbed) {
+                        return json{{"status", "error"}, {"message", "Failed to grab screen"}};
+                    }
+                    return detail::pixelsToImageJson(*px, format, reqWidth, quality);
                 };
             });
             return json(nullptr);  // ignored — deferred result is sent instead
-        }));
+        });
 
     tool("tc_save_screenshot", "Save screenshot to file")
         .arg<std::string>("path", "File path")
@@ -241,33 +256,6 @@ inline void registerInspectionTools() {
             } else {
                 return json{{"status", "error"}, {"message", "Failed to save screenshot"}};
             }
-        });
-
-    tool("tc_get_thumbnail", "Small JPEG snapshot for monitoring/periodic polling. Only the framebuffer readback touches the frame loop; downscale + JPEG encode run on the HTTP worker thread, so polling this does NOT stutter the app (unlike tc_get_screenshot's full-res synchronous PNG — use that for one-off debugging captures).")
-        .arg<int>("width", "Target width in pixels, aspect preserved (default 512, clamped 16-4096; never upscales)", false)
-        .arg<int>("quality", "JPEG quality 1-100 (default 75)", false)
-        .bind([](const json& args) -> json {
-            int reqWidth = 512;
-            int quality  = 75;
-            if (args.contains("width") && args.at("width").is_number())
-                reqWidth = std::clamp(args.at("width").get<int>(), 16, 4096);
-            if (args.contains("quality") && args.at("quality").is_number())
-                quality = std::clamp(args.at("quality").get<int>(), 1, 100);
-
-            // Two-stage deferral: main stage (at the afterFrame readback point)
-            // only grabs the pixels; the returned closure — downscale + JPEG +
-            // Base64 — runs on the HTTP worker that is blocked on this reply.
-            mcp::deferToolResultTwoStage([reqWidth, quality]() -> std::function<json()> {
-                auto px = std::make_shared<trussc::Pixels>();
-                bool grabbed = trussc::grabScreen(*px);
-                return [px, grabbed, reqWidth, quality]() -> json {
-                    if (!grabbed) {
-                        return json{{"status", "error"}, {"message", "Failed to grab screen"}};
-                    }
-                    return detail::pixelsToJpegJson(*px, reqWidth, quality);
-                };
-            });
-            return json(nullptr);  // ignored — deferred result is sent instead
         });
 
     tool("tc_get_status", "App-published ops status: values registered via mcp::status()/mcp::statusGraph() plus the names of mcp::statusImage() images. mode 'graph' means the value wants to be plotted over time. Empty when the app publishes nothing. Supervisors discover this tool via tools/list and forward the payload to their monitoring server.")
@@ -324,7 +312,7 @@ inline void registerInspectionTools() {
                         return json{{"status", "error"},
                                     {"message", "image getter returned no pixels"}};
                     }
-                    return detail::pixelsToJpegJson(*px, reqWidth, quality);
+                    return detail::pixelsToImageJson(*px, "jpg", reqWidth, quality);
                 };
             });
             return json(nullptr);  // ignored — deferred result is sent instead
