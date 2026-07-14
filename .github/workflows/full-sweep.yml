@@ -1,0 +1,209 @@
+# Exhaustive example sweep: every example (examples/ + every bundled addon
+# example) on every desktop platform + web. This replaced the old [full] mode
+# of build.yml. It exists to catch example rot (API drift, include-order
+# breakage, generated-build-file drift) that the per-PR gate — which builds
+# AllFeaturesExample + one example per addon — doesn't need to pay for.
+#
+# Runs weekly off the critical path; a failure opens (or comments on) an
+# issue instead of blocking anyone. Being a separate workflow, it never
+# touches the README badge, which points at build.yml.
+name: Full Sweep
+
+on:
+  schedule:
+    - cron: '0 18 * * 6' # Sat 18:00 UTC = Sun 03:00 JST
+  workflow_dispatch:
+
+concurrency:
+  group: full-sweep
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sweep:
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            preset: macos
+            launcher: ccache
+          # windows-2022, Ninja: see build.yml for why.
+          - os: windows-2022
+            preset: windows
+            launcher: sccache
+            cmake_gen: Ninja
+          - os: ubuntu-latest
+            preset: linux
+            launcher: ccache
+
+    runs-on: ${{ matrix.os }}
+
+    env:
+      TRUSSC_CMAKE_GENERATOR: ${{ matrix.cmake_gen }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Same cache keys as build.yml, so the sweep starts warm from PR builds.
+      - name: Setup compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: ${{ matrix.launcher }}
+          key: ${{ matrix.os }}-build
+          max-size: 800M
+
+      - name: Enable compiler launcher
+        shell: bash
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+
+      - name: Cache build directories
+        uses: actions/cache@v5
+        with:
+          path: |
+            core/build-${{ matrix.preset }}
+            tools/build
+          key: ${{ runner.os }}-build-v4-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
+          restore-keys: |
+            ${{ runner.os }}-build-v4-
+
+      - name: Cache sokol-shdc
+        uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x tools/install_dependencies_linux.sh
+          ./tools/install_dependencies_linux.sh -y
+
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build trusscli
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
+            sed -i '' 's/open /#open /g' tools/build_mac.command
+            ./tools/build_mac.command
+          elif [ "$RUNNER_OS" == "Linux" ]; then
+            chmod +x tools/build_linux.sh
+            sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
+            sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
+            ./tools/build_linux.sh
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            ./tools/build_win.bat
+          fi
+
+      - name: Build every example
+        shell: bash
+        run: |
+          chmod +x examples/build_all.py
+          ./examples/build_all.py --verbose
+
+      - name: Compiler cache stats
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ matrix.launcher }}" = "sccache" ]; then
+            sccache --show-stats || true
+          else
+            ccache -s || true
+          fi
+
+  sweep-web:
+    timeout-minutes: 180
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: ccache
+          key: web-build
+          max-size: 800M
+
+      - name: Enable compiler launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+
+      - name: Cache build directories
+        uses: actions/cache@v5
+        with:
+          path: |
+            core/build-web
+            tools/build
+          key: web-build-v3-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
+          restore-keys: |
+            web-build-v3-
+
+      - name: Cache sokol-shdc
+        uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      # Same pin as build.yml — bump both together.
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '6.0.2'
+
+      - name: Install Linux dependencies (for trusscli)
+        run: |
+          chmod +x tools/install_dependencies_linux.sh
+          ./tools/install_dependencies_linux.sh -y
+
+      - name: Build trusscli
+        run: |
+          chmod +x tools/build_linux.sh
+          sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
+          sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
+          ./tools/build_linux.sh
+
+      - name: Build every example (Web)
+        run: |
+          chmod +x examples/build_all.py
+          ./examples/build_all.py --web-only --verbose
+
+      - name: Compiler cache stats
+        if: always()
+        run: ccache -s || true
+
+  # On any failure, open an issue (or comment on the existing open one) so a
+  # red sweep is impossible to miss without blocking anything.
+  report:
+    needs: [sweep, sweep-web]
+    if: always() && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open or update tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Full sweep failed"
+          body="The weekly full example sweep failed: ${RUN_URL}"
+          existing=$(gh issue list -R "$REPO" --search "\"$title\" in:title" \
+                     --state open --json number -q '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" -R "$REPO" --body "$body"
+          else
+            gh issue create -R "$REPO" --title "$title" --body "$body"
+          fi

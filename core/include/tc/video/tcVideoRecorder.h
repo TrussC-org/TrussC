@@ -228,11 +228,11 @@ public:
     // direct readback (returns its base address + row stride), then submit it at
     // a PTS. The screen recorder reads the GPU capture straight into this buffer
     // instead of into a temporary Pixels/RGBA buffer the encoder then re-copies.
-    unsigned char* lockFrame(int& strideOut) {
+    TC_PLATFORMS("macos") unsigned char* lockFrame(int& strideOut) {
         if (!open_) return nullptr;
         return lockFramePlatform(strideOut);
     }
-    bool submitFrame(double timeSec) {
+    TC_PLATFORMS("macos") bool submitFrame(double timeSec) {
         if (!open_) return false;
         if (!submitFramePlatform(timeSec)) {
             logError("VideoWriter") << "encoder rejected frame " << frameCount_;
@@ -350,6 +350,7 @@ private:
         if (!writer_.open(path, w, h, settings)) return false;
         source_ = src;
         fbo_ = fbo;
+        fboAlive_ = fbo ? fbo->lifetimeToken() : std::shared_ptr<void>{};
         duration_ = settings.duration;
         startElapsed_ = getElapsedTimef();
         nextCaptureTime_ = -1.0f;
@@ -361,6 +362,14 @@ private:
 
     void onAfterFrame() {
         if (!writer_.isOpen()) return;
+        // Recorded Fbo was destroyed: finalize instead of reading a dangling
+        // pointer. The file stays valid up to the last captured frame.
+        if (source_ == Source::Fbo && fboAlive_.expired()) {
+            logWarning("ScreenRecorder")
+                << "recorded Fbo was destroyed; stopping and finalizing";
+            stop();
+            return;
+        }
         float now = getElapsedTimef();
 
         // Fixed-duration cutoff. `t` is the wall-clock PTS this frame would carry;
@@ -437,6 +446,7 @@ private:
     VideoWriter writer_;
     Source source_ = Source::None;
     const Fbo* fbo_ = nullptr;
+    std::weak_ptr<void> fboAlive_;  // expires when the recorded Fbo dies
     float startElapsed_ = 0.0f;
     float duration_ = 0.0f;           // fixed-length cutoff in seconds (0 = unlimited)
     float nextCaptureTime_ = -1.0f;   // scheduled time of the next frame to capture
@@ -470,6 +480,22 @@ TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const
 TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const std::string& path,
                            float durationSec) {
     return internal::globalScreenRecorder().start(path, durationSec);
+}
+
+// Record an offscreen Fbo instead of the window (clean, GUI-free output).
+// The Fbo must stay alive while recording — if it is destroyed mid-recording,
+// the recording stops and finalizes automatically.
+TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const Fbo& fbo,
+                           const std::string& path,
+                           const VideoRecordSettings& settings = {}) {
+    return internal::globalScreenRecorder().start(fbo, path, settings);
+}
+
+// Fixed-duration Fbo recording (see above).
+TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const Fbo& fbo,
+                           const std::string& path,
+                           float durationSec) {
+    return internal::globalScreenRecorder().start(fbo, path, durationSec);
 }
 
 inline void stopRecording() { internal::globalScreenRecorder().stop(); }

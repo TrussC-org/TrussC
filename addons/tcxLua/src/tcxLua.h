@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sol/sol.hpp"
+#include "tcxLuaPathAdapter.h"  // sol2 <-> std::filesystem::path (Lua string) conversion; must precede any path binding TU
 #include "TrussC.h"
 
 // namespace tcx::lua {
@@ -41,6 +42,7 @@ public:
 
 protected:
     void setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua);
+    void setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua);   // luagen-types (Phase 2 usertypes)
     void setTypeBindings(const std::shared_ptr<sol::state>& lua);
     void setConstBindings(const std::shared_ptr<sol::state>& lua);
     void setColorConstBindings(const std::shared_ptr<sol::state>& lua);
@@ -58,6 +60,12 @@ protected:
                 TweenT(TweenValue, TweenValue, float, EaseType),
                 TweenT(TweenValue, TweenValue, float, EaseType, EaseMode)
                 // FIXME: move constructor?
+            >(),
+            sol::call_constructor, sol::constructors<
+                TweenT(),
+                TweenT(TweenValue, TweenValue, float),
+                TweenT(TweenValue, TweenValue, float, EaseType),
+                TweenT(TweenValue, TweenValue, float, EaseType, EaseMode)
             >(),
             "from", &TweenT::from,
             "to", &TweenT::to,

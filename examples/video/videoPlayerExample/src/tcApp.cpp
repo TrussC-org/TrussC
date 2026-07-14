@@ -15,6 +15,12 @@
 void tcApp::setup() {
     setWindowTitle("Video Player Example");
 
+    // Auto-load a bundled sample if present (the only way to load on iOS,
+    // where there is no file dialog / drag & drop)
+    if (std::filesystem::exists(getDataPath("test.mp4"))) {
+        loadVideo(getDataPath("test.mp4"));
+    }
+
     // You can set a video path here for testing
     // videoPath_ = "/path/to/your/video.mp4";
     // loadVideo(videoPath_);
@@ -157,13 +163,15 @@ void tcApp::keyPressed(int key) {
     else if (key == 'I') {
         showInfo_ = !showInfo_;
     }
+#if !(defined(__APPLE__) && TARGET_OS_IOS)
     else if (key == 'L') {
-        // Open file dialog
+        // Open file dialog (sync dialogs are unavailable on iOS)
         auto result = loadDialog("Select Video File", "");
         if (result.success) {
             loadVideo(result.filePath);
         }
     }
+#endif
 }
 
 void tcApp::filesDropped(const vector<string>& files) {

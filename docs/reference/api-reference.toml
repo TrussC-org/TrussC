@@ -1958,6 +1958,11 @@ description.en = "Check if currently rendering to FBO"
 description.ja = "FBOに描画中か確認"
 description.ko = "현재 FBO 렌더링 중인지 확인"
 
+["Fbo::lifetimeToken"]
+description.en = "Lifetime token for observers holding a raw pointer to this Fbo (e.g. ScreenRecorder auto-stops when the recorded Fbo dies). Per-object: it does not transfer on move"
+description.ja = "この Fbo への生ポインタを持つ監視者向けの生存トークン（例: ScreenRecorder は録画中の Fbo が破棄されると自動停止する）。オブジェクト固有で、ムーブしても移らない"
+description.ko = "이 Fbo의 원시 포인터를 가진 관찰자를 위한 수명 토큰(예: ScreenRecorder는 녹화 중인 Fbo가 파괴되면 자동 정지). 객체 고유이며 이동해도 옮겨지지 않음"
+
 ["Fbo::isAllocated"]
 description.en = "Check if allocated"
 description.ja = "確保されているか確認"
@@ -6845,9 +6850,9 @@ description.ko = "화면 녹화가 현재 캡처 중인지 확인"
 ["ScreenRecorder::start"]
 category = "video"
 keywords = ["begin", "record", "capture", "go"]
-description.en = "Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically"
-description.ja = "ライブ録画開始（ウィンドウ、またはGUIなしのクリーン出力はFbo）。サイズは自動取得"
-description.ko = "라이브 녹화 시작 (윈도우, 또는 GUI 없는 클린 출력은 Fbo); 크기는 자동 취득"
+description.en = "Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically"
+description.ja = "ライブ録画開始（ウィンドウ、またはGUIなしのクリーン出力はFbo）。サイズは自動取得。録画中に start を呼ぶと現在のファイルを確定してから新規開始。録画中の Fbo が破棄された場合は自動で停止・確定する"
+description.ko = "라이브 녹화 시작 (윈도우, 또는 GUI 없는 클린 출력은 Fbo); 크기는 자동 취득. 녹화 중에 start를 호출하면 현재 파일을 마무리한 뒤 새로 시작. 녹화 중인 Fbo가 파괴되면 자동으로 정지·마무리"
 
 ["ScreenRecorder::stop"]
 category = "video"
@@ -9882,25 +9887,15 @@ description.ko = "디바이스의 안정적인 고유 식별자"
 
 ["GrabberFrame"]
 keywords = ["webcam", "camera", "frame", "timestamp", "queue", "measurement"]
-description.en = "One captured camera frame with its capture-time timestamp: RGBA pixels, width/height, and timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getBufferFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time"
-description.ja = "キャプチャ時刻付きのカメラ1フレーム。RGBAピクセル・width/height・timestampUs（monotonicなsteady_clockのマイクロ秒。キャプチャスレッドで打刻）を持つ。VideoGrabber::getBufferFrames() が返す。ピクセルと時刻が一体なので「ピクセル取得と時刻取得の間に次フレームが割り込む」競合が起きない。カメラを計測/測定に使うときの基本単位"
-description.ko = "캡처 시각이 붙은 카메라 1프레임. RGBA 픽셀, width/height, timestampUs(단조 steady_clock 마이크로초, 캡처 스레드에서 기록)를 가짐. VideoGrabber::getBufferFrames()가 반환. 픽셀과 시각이 한 구조체로 오므로 둘을 따로 읽는 사이에 다음 프레임이 끼어드는 경쟁이 없음"
-related = ["VideoGrabber", "VideoGrabber::getBufferFrames", "VideoGrabber::setFrameQueueSize"]
+description.en = "One captured camera frame with its capture-time timestamp: Pixels (RGBA8) plus timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getQueuedFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time"
+description.ja = "キャプチャ時刻付きのカメラ1フレーム。Pixels（RGBA8）と timestampUs（monotonicなsteady_clockのマイクロ秒。キャプチャスレッドで打刻）を持つ。VideoGrabber::getQueuedFrames() が返す。ピクセルと時刻が一体なので「ピクセル取得と時刻取得の間に次フレームが割り込む」競合が起きない。カメラを計測/測定に使うときの基本単位"
+description.ko = "캡처 시각이 붙은 카메라 1프레임. Pixels(RGBA8)와 timestampUs(단조 steady_clock 마이크로초, 캡처 스레드에서 기록)를 가짐. VideoGrabber::getQueuedFrames()가 반환. 픽셀과 시각이 한 구조체로 오므로 둘을 따로 읽는 사이에 다음 프레임이 끼어드는 경쟁이 없음"
+related = ["VideoGrabber", "VideoGrabber::getQueuedFrames", "VideoGrabber::setFrameQueueSize"]
 
 ["GrabberFrame::pixels"]
-description.en = "RGBA8 pixel data (width * height * 4 bytes)"
-description.ja = "RGBA8 のピクセルデータ（width * height * 4 バイト）"
-description.ko = "RGBA8 픽셀 데이터 (width * height * 4 바이트)"
-
-["GrabberFrame::width"]
-description.en = "Frame width in pixels"
-description.ja = "フレームの幅（ピクセル）"
-description.ko = "프레임 너비(픽셀)"
-
-["GrabberFrame::height"]
-description.en = "Frame height in pixels"
-description.ja = "フレームの高さ（ピクセル）"
-description.ko = "프레임 높이(픽셀)"
+description.en = "The frame as RGBA8 Pixels (carries its own width/height). Pixels is move-only - use clone() if you need a copy"
+description.ja = "フレーム本体（RGBA8 の Pixels。width/height は Pixels が持つ）。Pixels はムーブ専用なので、コピーが要る時は clone() を使う"
+description.ko = "프레임 본체(RGBA8 Pixels, width/height는 Pixels가 가짐). Pixels는 이동 전용이므로 복사가 필요하면 clone() 사용"
 
 ["GrabberFrame::timestampUs"]
 description.en = "Capture time in microseconds on the monotonic clock (std::chrono::steady_clock), stamped on the capture thread the moment the frame arrived from the driver. Not wall-clock time — use for interval math and cross-source sync only"
@@ -9933,7 +9928,7 @@ description.en = "Copy the current frame into an Image (allocating/updating it a
 description.ja = "現在のフレームを Image にコピー（必要に応じて確保・更新する）"
 description.ko = "현재 프레임을 Image로 복사(필요에 따라 할당/갱신)"
 
-["VideoGrabber::getBufferFrames"]
+["VideoGrabber::getQueuedFrames"]
 category = "video"
 keywords = ["frame queue", "timestamp", "drain", "all frames", "high fps", "sync", "measurement", "sensor", "latency", "analysis"]
 description.en = "Drain all frames captured since the last call (appended to the given vector, oldest first; returns the count). Each GrabberFrame carries a monotonic timestamp stamped on the capture thread, so timestamps stay truthful even if the main loop stalls, and no frame is lost when the camera runs faster than the app loop. Requires setFrameQueueSize() > 0; getPixels()/isFrameNew() are unaffected"
@@ -10031,7 +10026,7 @@ keywords = ["frame queue", "enable", "capacity", "buffer", "measurement"]
 description.en = "Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup()"
 description.ja = "タイムスタンプ付きフレームキューを有効化し容量を設定（0 = 無効。デフォルトで、オフ時のオーバーヘッドはゼロ）。満杯時は古いフレームから捨てるので、取り出しが遅れてもキャプチャは止まらない。容量目安は ceil(カメラfps / アプリfps) + 余裕で、8〜16 で十分。setup() の前後どちらでも呼べる"
 description.ko = "타임스탬프 프레임 큐를 활성화하고 용량을 설정 (0 = 비활성, 기본값. 꺼져 있으면 오버헤드 없음). 가득 차면 오래된 프레임부터 버려서 소비가 늦어도 캡처가 막히지 않음. 용량은 ceil(카메라fps / 앱fps) + 여유, 8~16이면 충분. setup() 전후 어느 쪽에서도 호출 가능"
-related = ["VideoGrabber::getBufferFrames", "VideoGrabber::getFrameQueueSize", "GrabberFrame"]
+related = ["VideoGrabber::getQueuedFrames", "VideoGrabber::getFrameQueueSize", "GrabberFrame"]
 
 ["VideoGrabber::setVerbose"]
 description.en = "Enable or disable verbose logging"
@@ -10079,7 +10074,7 @@ keywords = ["thumbnail", "snapshot", "grab", "single frame", "poster", "exact fr
 description.en = "Extract the exact frame at a given time from a video file. Frame-accurate on every platform"
 description.ja = "ビデオファイルの指定時刻の正確なフレームを抽出。全プラットフォームでフレーム精度"
 description.ko = "비디오 파일에서 지정한 시간의 정확한 프레임을 추출. 모든 플랫폼에서 프레임 정확도"
-related = ["Pixels", "VideoPlayer", "VideoPlayer::load", "VideoPlayer::extractKeyFrame", "VideoPlayer::getPath"]
+related = ["Pixels", "Image", "VideoPlayer", "VideoPlayer::load", "VideoPlayer::extractKeyFrame", "VideoPlayer::getPath"]
 platform_note.en = "Implemented on macOS (AVAssetImageGenerator), Windows (Media Foundation / IMFSourceReader), and Linux (FFmpeg). Android stubs it (`return false`); iOS and web have no extractFramePlatform() definition and are unsupported."
 platform_note.ja = "macOS（AVAssetImageGenerator）・Windows（Media Foundation / IMFSourceReader）・Linux（FFmpeg）で実装済み。android は false を返すスタブ、ios/web は extractFramePlatform() の定義自体が無く未対応。"
 details.en = '''
@@ -10095,6 +10090,12 @@ Comes in two forms:
   good for thumbnails/posters from a file you are not playing.
 - **Instance** — `player.extractFrame(px, timeSec)`. Uses the currently loaded
   file ([`getPath`](#VideoPlayer::getPath)); returns false if nothing is loaded.
+
+Both forms also take an [`Image`](#Image) instead of `Pixels`
+(`extractFrame(path, img, timeSec)` / `player.extractFrame(img, timeSec)`):
+the result lands in a ready-to-draw Image (allocation + texture upload
+included). The upload touches the GPU, so the Image overloads are
+**main-thread only** — for background work use the `Pixels` forms.
 
 If you only need the nearest keyframe (faster, time-approximate — e.g. a rough
 thumbnail), use [`extractKeyFrame`](#VideoPlayer::extractKeyFrame) instead. These
@@ -10115,6 +10116,12 @@ details.ja = '''
 - **インスタンス** — `player.extractFrame(px, timeSec)`。現在ロード中のファイル
   （[`getPath`](#VideoPlayer::getPath)）を使う。未ロードなら false。
 
+どちらの形も `Pixels` の代わりに [`Image`](#Image) を渡せる
+（`extractFrame(path, img, timeSec)` / `player.extractFrame(img, timeSec)`）。
+確保〜テクスチャアップロード込みで、そのまま draw できる Image が返る。
+GPU に触るため Image 版は**メインスレッド限定** — バックグラウンド処理には
+`Pixels` 版を使う。
+
 最寄りキーフレームで十分（速い・時刻は近似、例えばラフなサムネイル）なら
 [`extractKeyFrame`](#VideoPlayer::extractKeyFrame) を使う。これらは単発取得用で、
 連続再生には**使わない**（呼ぶたびにデコードコンテキストを開くため重い）。再生は
@@ -10127,7 +10134,7 @@ keywords = ["thumbnail", "snapshot", "keyframe", "fast", "single frame", "poster
 description.en = "Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate"
 description.ja = "指定時刻以前の最寄りキーフレームを抽出。extractFrame より速いが時刻は近似"
 description.ko = "지정한 시간 이전의 가장 가까운 키프레임을 추출. extractFrame보다 빠르지만 시간은 근사치"
-related = ["Pixels", "VideoPlayer", "VideoPlayer::load", "VideoPlayer::extractFrame", "VideoPlayer::getPath"]
+related = ["Pixels", "Image", "VideoPlayer", "VideoPlayer::load", "VideoPlayer::extractFrame", "VideoPlayer::getPath"]
 platform_note.en = "Implemented on macOS (AVAssetImageGenerator), Windows (Media Foundation / IMFSourceReader), and Linux (FFmpeg). Android stubs it (`return false`); iOS and web are unsupported."
 platform_note.ja = "macOS（AVAssetImageGenerator）・Windows（Media Foundation / IMFSourceReader）・Linux（FFmpeg）で実装済み。android は false を返すスタブ、ios/web は未対応。"
 details.en = '''
@@ -10145,7 +10152,9 @@ fastest here — handy for the black-flash stopgap).
 Same two forms as [`extractFrame`](#VideoPlayer::extractFrame): static
 (`VideoPlayer::extractKeyFrame(path, px, timeSec)`, no `load()` needed) and
 instance (`player.extractKeyFrame(px, timeSec)`, uses the loaded
-[`getPath`](#VideoPlayer::getPath)). Single-shot only — not for playback.
+[`getPath`](#VideoPlayer::getPath)) — plus [`Image`](#Image) overloads of both
+that return a ready-to-draw Image (main-thread only). Single-shot only — not
+for playback.
 '''
 details.ja = '''
 [`extractFrame`](#VideoPlayer::extractFrame) と同様だが、**`timeSec` 以下の最寄り
@@ -10161,7 +10170,9 @@ details.ja = '''
 [`extractFrame`](#VideoPlayer::extractFrame) と同じく 2 種類:静的
 （`VideoPlayer::extractKeyFrame(path, px, timeSec)`、`load()` 不要）とインスタンス
 （`player.extractKeyFrame(px, timeSec)`、ロード中の
-[`getPath`](#VideoPlayer::getPath) を使う）。単発取得用で再生には使わない。
+[`getPath`](#VideoPlayer::getPath) を使う）。さらに両方に [`Image`](#Image) 版が
+あり、そのまま draw できる Image を返す（メインスレッド限定）。単発取得用で再生には
+使わない。
 '''
 
 ["VideoPlayer::getAudioChannels"]
@@ -10451,6 +10462,112 @@ keywords = ["active", "running", "status"]
 description.en = "Check if video is currently playing (not paused)"
 description.ja = "再生中か確認（一時停止中は false）"
 description.ko = "현재 재생 중인지 확인 (일시정지 시 false)"
+
+["VideoPlayerBase::isReady"]
+category = "video"
+keywords = ["ready", "first frame", "black flash", "decoded", "has picture"]
+description.en = "True while the texture holds a real picture — i.e. drawing shows actual video, not black. With the default auto poster this is true from load() on; false only if the poster failed and no frame has arrived yet"
+description.ja = "実フレームがテクスチャに載っていれば true ＝ 描画すると黒ではなく実映像が出る状態。デフォルトの自動ポスターでは load() 直後から true。false はポスター失敗かつフレーム未到着の間だけ"
+description.ko = "실제 그림이 텍스처에 있으면 true — 그리면 검은 화면이 아니라 실제 영상이 나오는 상태. 기본 자동 포스터에서는 load() 직후부터 true. 포스터 실패 & 프레임 미도착일 때만 false"
+related = ["VideoPlayerBase::isFrameNew", "VideoPlayerBase::isLoaded", "VideoPlayer::extractKeyFrame"]
+details.en = '''
+`isReady()` is the "would drawing show a real picture?" test. With the
+default [auto poster](#VideoPlayer::setAutoPoster) it is true from `load()`
+on — the poster puts frame 0 on the texture synchronously — and stays true
+through `play()`, `stop()`, seeking and pausing (the texture always holds a
+real picture). It is false only between `load()` and the first picture when
+the poster is disabled or unavailable (`setAutoPoster(false)`, or platforms
+without frame extraction).
+
+Typical use — avoid the black flash at playback start by bridging with a
+still (see [`extractKeyFrame`](#VideoPlayer::extractKeyFrame)):
+
+```cpp
+player.isReady() ? player.draw(0, 0) : still.draw(0, 0);
+```
+
+Distinct from [`isLoaded`](#VideoPlayerBase::isLoaded) (file opened, may still
+be black) and [`isFrameNew`](#VideoPlayerBase::isFrameNew) (momentary
+"a new frame arrived during this update()" — flickers at video rate, so never
+branch your draw on it directly).
+'''
+details.ja = '''
+`isReady()` は「描画したら実映像が出るか？」の判定。デフォルトの
+[自動ポスター](#VideoPlayer::setAutoPoster) が有効なら `load()` 直後から true
+（ポスターが同期的にフレーム0を載せる）で、`play()`・`stop()`・シーク・一時停止を
+通して true のまま（テクスチャには常に実映像が載っている）。false になるのは
+ポスターが無効/利用不可（`setAutoPoster(false)` や抽出未対応プラットフォーム）で、
+load 後まだ最初のフレームが来ていない間だけ。
+
+典型的な用途は再生開始時の黒フラッシュ回避（静止画でつなぐ。
+[`extractKeyFrame`](#VideoPlayer::extractKeyFrame) 参照）:
+
+```cpp
+player.isReady() ? player.draw(0, 0) : still.draw(0, 0);
+```
+
+[`isLoaded`](#VideoPlayerBase::isLoaded)（ファイルは開けたがまだ黒かもしれない）
+や [`isFrameNew`](#VideoPlayerBase::isFrameNew)（「この update() で新フレームが
+来た」という単発フラグ。動画レートで点滅するので draw の分岐に直接使わない）
+とは別物。
+'''
+
+["VideoPlayer::play"]
+category = "video"
+description.en = "Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture"
+description.ja = "再生を開始/再開。自動ポスター（デフォルト）有効時は、停止/一時停止中のシークがあれば新しい位置の正確なフレームを載せてから再生するので、古い絵のまま再生が始まらない"
+description.ko = "재생 시작/재개. 자동 포스터(기본) 활성 시 정지/일시정지 중 시크가 있으면 새 위치의 정확한 프레임을 올린 뒤 재생하므로 오래된 그림으로 시작하지 않음"
+related = ["VideoPlayer::setAutoPoster", "VideoPlayerBase::play"]
+
+["VideoPlayer::setAutoPoster"]
+category = "video"
+keywords = ["poster", "first frame", "black flash", "auto", "preload"]
+description.en = "Auto poster (default ON): on load/stop/play the player synchronously puts the frame at the current position on the texture, so drawing never shows black or a stale picture. Turn off to skip the one-time synchronous decode"
+description.ja = "自動ポスター（デフォルトON）。load/stop/play 時に現在位置のフレームを同期的にテクスチャへ載せるので、描画が黒や古い絵になる瞬間が無い。同期デコード（1回きり）を避けたい場合のみオフにする"
+description.ko = "자동 포스터(기본 ON). load/stop/play 시 현재 위치의 프레임을 동기적으로 텍스처에 올려 검은 화면이나 오래된 그림이 그려지는 순간이 없음. 일회성 동기 디코드를 피하려면 끈다"
+related = ["VideoPlayer::getAutoPoster", "VideoPlayerBase::isReady", "VideoPlayer::extractKeyFrame"]
+details.en = '''
+Maintains the invariant "the texture always shows the frame AT the playback
+position":
+
+- `load()` — extracts frame 0 (always a keyframe: exact and fast) before
+  returning, so [`isReady`](#VideoPlayerBase::isReady) is true immediately and
+  the first `draw()` shows a real picture.
+- `stop()` — rewinds, so the poster becomes frame 0 (picture matches the
+  rewound position).
+- `play()` — if the position moved while stopped/paused (seek), the exact
+  frame at the new position is extracted synchronously before playback, so
+  playback never starts on a stale picture.
+
+The synchronous extraction costs one decode (keyframe-fast at position 0,
+seek+decode elsewhere). `setAutoPoster(false)` restores the previous behavior
+(texture stays black until the first live frame).
+
+Platforms without frame extraction: web bridges natively (the video element
+preloads its first frame), Android has no VideoPlayer yet — both no-op safely.
+'''
+details.ja = '''
+「テクスチャには常に再生位置のフレームが載っている」という不変条件を維持する:
+
+- `load()` — 返る前にフレーム0（必ずキーフレーム＝正確かつ高速）を抽出して
+  載せる。[`isReady`](#VideoPlayerBase::isReady) は即 true になり、最初の
+  `draw()` から実映像が出る。
+- `stop()` — 先頭に巻き戻るので、ポスターもフレーム0になる（絵と位置が一致）。
+- `play()` — 停止/一時停止中にシークで位置が動いていたら、新しい位置の正確な
+  フレームを同期抽出してから再生する。古い絵のまま再生が始まることがない。
+
+同期抽出のコストはデコード1回（位置0はキーフレームで高速、それ以外はシーク+
+デコード）。`setAutoPoster(false)` で従来挙動（最初のライブフレームまで黒）に戻る。
+
+フレーム抽出が無いプラットフォーム: web は video 要素のプリロードで自然に
+カバー、Android は VideoPlayer 自体が未実装。どちらも安全に no-op。
+'''
+
+["VideoPlayer::getAutoPoster"]
+category = "video"
+description.en = "Return whether the auto poster is enabled (default true)"
+description.ja = "自動ポスターが有効かを返す（デフォルト true）"
+description.ko = "자동 포스터가 활성화되어 있는지 반환 (기본 true)"
 
 ["VideoPlayerBase::play"]
 category = "video"
@@ -10812,6 +10929,76 @@ description.en = "true: coords match framebuffer size; false: coords use logical
 description.ja = "true: 座標が framebuffer サイズに一致、false: 論理サイズを使用 (デフォルト false)"
 description.ko = "true: 좌표가 framebuffer 크기와 일치, false: 논리 크기 사용 (기본값 false)"
 
+["WindowSettings::reserveUniformBuffer"]
+description.en = "Reserve the per-frame GPU uniform buffer in bytes, vector::reserve style; 0 = backend default 4MB ≈ 8k draw calls. Metal/WebGPU/Vulkan only — GL/D3D11 have no such cap (chainable)"
+description.ja = "フレームあたりの GPU ユニフォームバッファを vector::reserve の要領でバイト単位で予約; 0 = バックエンド既定の 4MB ≈ 8千ドローコール。Metal/WebGPU/Vulkan のみ — GL/D3D11 に上限はない (チェイン可能)"
+description.ko = "프레임당 GPU 유니폼 버퍼를 vector::reserve 방식으로 바이트 단위 예약; 0 = 백엔드 기본 4MB ≈ 8천 드로우 콜. Metal/WebGPU/Vulkan 전용 — GL/D3D11에는 상한이 없음 (체인 가능)"
+details.en = '''
+On Metal/WebGPU/Vulkan every draw call's shader constants (matrices, material,
+lights, ...) are copied into one fixed-size per-frame ring buffer, each copy
+rounded up to 256-byte alignment. The buffer is allocated once at startup
+(sokol default 4MB), so a frame can hold roughly **8,000 draw calls** — plenty
+for typical scenes, but exceeded by scenes that issue thousands of individual
+lit-mesh draws (per-glyph text rain, per-object particle meshes, heavy
+instancing-free crowds).
+
+**When it overflows**: debug builds stop on an assert inside
+`_sg_mtl_apply_uniforms`; release builds have no check and silently write past
+the buffer — later draws read garbage constants, which shows up as flipped
+geometry, wrong colors, or an entirely black frame. Lowering the load restores
+the picture, which makes the bug look intermittent and hard to trace.
+
+**What to reserve**: budget ≈ *(draws per frame) × ~512 bytes* (a lit mesh draw
+applies vertex + fragment blocks, each aligned to 256B), then add headroom.
+Example: `reserveUniformBuffer(32 * 1024 * 1024)` covers ~65k draws. The cost
+is plain memory (the value ×2 for the in-flight frame pair) with no per-frame
+overhead, so over-reserving is cheap. Set it before `TC_RUN_APP` — the value is
+consumed once at graphics startup. GL/D3D11 ignore it; uniforms have no
+per-frame cap there.
+'''
+details.ja = '''
+Metal/WebGPU/Vulkan では、全ドローコールのシェーダー定数（行列・マテリアル・
+ライト等）がフレームごとの固定サイズのリングバッファへコピーされ、1回ごとに
+256バイト境界へ切り上げられる。バッファは起動時に一度だけ確保され（sokol 既定
+4MB）、1フレームに収まるのはおよそ **8,000 ドローコール**。通常のシーンには
+十分だが、ライト付きメッシュを1体ずつ数千回描くシーン（グリフ単位のテキスト
+レイン、オブジェクト単位のパーティクル等）では超過する。
+
+**溢れると何が起きるか**: デバッグビルドは `_sg_mtl_apply_uniforms` 内の
+assert で停止する。リリースビルドにはチェックがなく黙って範囲外に書き込み、
+以降のドローがゴミの定数を読む——ジオメトリの反転、色化け、画面全体の
+ブラックアウトとして現れる。負荷を下げると直るため、断続的で追いにくい
+バグに見える。
+
+**いくつ予約するか**: 目安は *(1フレームのドロー数) × 約512バイト*（ライト付き
+ドローは頂点＋フラグメントの2ブロック、各256Bアライン）＋余裕。例:
+`reserveUniformBuffer(32 * 1024 * 1024)` で約6.5万ドロー分。コストは純粋な
+メモリのみ（インフライト2フレーム分で設定値×2）で毎フレームの負荷はゼロ、
+多めに予約しても安価。値は描画系の起動時に一度だけ読まれるため
+`TC_RUN_APP` の前に設定すること。GL/D3D11 はこの値を無視する（そもそも
+フレームあたりの上限がない）。
+'''
+details.ko = '''
+Metal/WebGPU/Vulkan에서는 모든 드로우 콜의 셰이더 상수(행렬·material·light 등)가
+프레임당 고정 크기 링 버퍼로 복사되며, 매 복사는 256바이트 정렬로 올림된다.
+버퍼는 시작 시 한 번만 할당되고(sokol 기본 4MB), 한 프레임에 담기는 것은 약
+**8,000 드로우 콜**. 일반적인 씬에는 충분하지만, 라이트가 적용된 메시를 개별로
+수천 번 그리는 씬(글리프 단위 텍스트 레인, 오브젝트 단위 파티클 등)에서는
+초과한다.
+
+**넘치면 생기는 일**: 디버그 빌드는 `_sg_mtl_apply_uniforms`의 assert에서 멈춘다.
+릴리스 빌드는 검사 없이 조용히 범위 밖에 기록하고, 이후 드로우가 쓰레기 상수를
+읽는다 — 지오메트리 반전, 색 깨짐, 화면 전체 블랙아웃으로 나타난다. 부하를
+낮추면 회복되므로 간헐적이고 추적하기 어려운 버그처럼 보인다.
+
+**얼마나 예약할까**: 기준은 *(프레임당 드로우 수) × 약 512바이트*(라이트 드로우는
+정점+프래그먼트 2블록, 각 256B 정렬) + 여유. 예: `reserveUniformBuffer(32 * 1024
+* 1024)`로 약 6.5만 드로우를 커버한다. 비용은 순수 메모리뿐(인플라이트 2프레임
+분으로 설정값 ×2)이며 프레임당 오버헤드는 없으니 넉넉히 예약해도 저렴하다. 값은
+그래픽 초기화 시 한 번만 읽히므로 `TC_RUN_APP` 전에 설정할 것. GL/D3D11은 이
+값을 무시한다(애초에 프레임당 상한이 없다).
+'''
+
 ["WindowSettings::sampleCount"]
 description.en = "MSAA sample count (default 4)"
 description.ja = "MSAA サンプル数 (デフォルト 4)"
@@ -10876,6 +11063,25 @@ description.ja = '''
 '''
 description.ko = '''
 윈도우 제목 (기본값 \"TrussC App\")
+'''
+
+["WindowSettings::uniformBufferReserve"]
+description.en = "Per-frame GPU uniform buffer reservation in bytes; 0 = backend default (4MB). Overflow silently corrupts frames in release builds on Metal/WebGPU/Vulkan"
+description.ja = "フレームあたりの GPU ユニフォームバッファの予約量 (バイト); 0 = バックエンド既定 (4MB)。Metal/WebGPU/Vulkan でオーバーフローすると Release ビルドでフレームが静かに壊れる"
+description.ko = "프레임당 GPU 유니폼 버퍼 예약량 (바이트); 0 = 백엔드 기본값 (4MB). Metal/WebGPU/Vulkan에서 오버플로하면 릴리스 빌드에서 프레임이 조용히 손상됨"
+related = ["WindowSettings::reserveUniformBuffer"]
+details.en = '''
+The backing field for [`reserveUniformBuffer`](#WindowSettings::reserveUniformBuffer)
+— see that entry for when the reservation is needed, what an overflow looks
+like, and how to size it.
+'''
+details.ja = '''
+[`reserveUniformBuffer`](#WindowSettings::reserveUniformBuffer) の実体フィールド。
+どんな時に予約が必要か・溢れると何が起きるか・値の見積もり方はそちらを参照。
+'''
+details.ko = '''
+[`reserveUniformBuffer`](#WindowSettings::reserveUniformBuffer)의 실제 필드.
+언제 예약이 필요한지·넘치면 어떻게 되는지·값 산정 방법은 해당 항목 참조.
 '''
 
 ["WindowSettings::width"]
@@ -14576,9 +14782,9 @@ related = ["VideoPlayer::setGammaCorrection"]
 ["startRecording"]
 category = "window_system"
 keywords = ["record", "video", "capture", "movie", "mp4"]
-description.en = "Start recording the window to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited"
-description.ja = "ウィンドウを動画ファイルに録画開始（ネイティブエンコーダ、ffmpeg不要）。秒数引数（または VideoRecordSettings.duration）を渡すと、その長さで自動停止・確定する固定長クリップになる（0 = 無制限）"
-description.ko = "윈도우를 동영상 파일로 녹화 시작 (네이티브 인코더, ffmpeg 불필요). 초 인자(또는 VideoRecordSettings.duration)를 넘기면 그 길이에서 자동 정지·마무리되는 고정 길이 클립이 된다(0 = 무제한)"
+description.en = "Start recording the window — or an Fbo (clean, GUI-free output) — to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited. Calling it again while recording finalizes the current file first, then starts fresh (same path = the old file is overwritten)"
+description.ja = "ウィンドウ — または Fbo（GUI無しのクリーン出力）— を動画ファイルに録画開始（ネイティブエンコーダ、ffmpeg不要）。秒数引数（または VideoRecordSettings.duration）を渡すと、その長さで自動停止・確定する固定長クリップになる（0 = 無制限）。録画中にもう一度呼ぶと現在のファイルを確定してから新規開始（同じパスなら前のファイルは上書き）"
+description.ko = "윈도우 — 또는 Fbo(GUI 없는 클린 출력) — 를 동영상 파일로 녹화 시작 (네이티브 인코더, ffmpeg 불필요). 초 인자(또는 VideoRecordSettings.duration)를 넘기면 그 길이에서 자동 정지·마무리되는 고정 길이 클립이 된다(0 = 무제한). 녹화 중에 다시 호출하면 현재 파일을 마무리한 뒤 새로 시작(같은 경로면 이전 파일 덮어씀)"
 related = ["VideoRecordSettings", "stopRecording", "isRecording", "saveScreenshot"]
 platform_note.en = "Global convenience over the singleton ScreenRecorder; non-functional on web for the same reason (VideoWriter stub returns false)."
 platform_note.ja = "シングルトン ScreenRecorder への薄いラッパ。同じ理由で web では機能しない（VideoWriter スタブが false）。"

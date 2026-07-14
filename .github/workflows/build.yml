@@ -6,11 +6,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      full:
-        description: "Full build: every example on every platform (not just AllFeaturesExample). Same as putting [full] in a commit message."
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -160,6 +155,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-build-v4-
 
+      # sokol-shdc (shader compiler) is downloaded by core CMake from
+      # raw.githubusercontent.com, which 429s anonymous CI traffic. Cache the
+      # binary under a static key so runs stop re-downloading it (this also
+      # pins the tool — bump the key to pick up a newer upstream build).
+      - name: Cache sokol-shdc
+        uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
       # Linux: Install dependencies using shared script
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -190,24 +195,23 @@ jobs:
             find . -name trusscli.exe
           fi
 
-      - name: Build examples
+      - name: Build AllFeaturesExample
         shell: bash
-        env:
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-          FULL_INPUT: ${{ github.event.inputs.full }}
         run: |
           chmod +x examples/build_all.py
-          if [[ "$COMMIT_MSG" == *"[full]"* || "$FULL_INPUT" == "true" ]]; then
-             echo "Running full build ([full] in commit message or manual full=true)..."
-             ./examples/build_all.py --verbose
-          else
-             echo "Running quick build (AllFeaturesExample only)..."
-             ./examples/build_all.py --test-only --verbose
-          fi
+          ./examples/build_all.py --test-only --verbose
+
+      # Per-addon dependency compile coverage: the first example of every bundled
+      # addon. Catches breakage in addons (and their fetched third-party deps)
+      # that AllFeaturesExample doesn't link. The exhaustive every-example sweep
+      # lives in full-sweep.yml (weekly).
+      - name: Build one example per addon
+        shell: bash
+        run: ./examples/build_all.py --one-per-addon --verbose
 
       # Behavioral test harnesses bundled with monorepo addons (addons/*/tests/):
-      # built AND run (non-zero exit fails the job). Runs on every build, not just
-      # [full] - the tests are small console projects. No-op when none exist.
+      # built AND run (non-zero exit fails the job). The tests are small console
+      # projects. No-op when none exist.
       - name: Build & run addon tests
         shell: bash
         run: ./examples/build_all.py --addon-tests-only --verbose
@@ -283,6 +287,13 @@ jobs:
           key: android-build-v4-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
           restore-keys: android-build-v4-
 
+      # See the build job: avoid the 429-prone sokol-shdc download.
+      - name: Cache sokol-shdc
+        uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
       - name: Install Linux dependencies (for trusscli)
         run: |
           chmod +x tools/install_dependencies_linux.sh
@@ -351,10 +362,20 @@ jobs:
           restore-keys: |
             web-build-v3-
 
+      # See the build job: avoid the 429-prone sokol-shdc download.
+      - name: Cache sokol-shdc
+        uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      # Pinned: 'latest' let toolchain drift break CI while the repo was
+      # unchanged (a newer LLVM turned snappy's -Wpass-failed into an error).
+      # Bump deliberately in its own PR.
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: 'latest'
+          version: '6.0.2'
 
       - name: Install Linux dependencies (for trusscli)
         run: |
@@ -368,23 +389,52 @@ jobs:
           sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
           ./tools/build_linux.sh
 
-      - name: Build examples (Web)
-        env:
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-          FULL_INPUT: ${{ github.event.inputs.full }}
+      - name: Build AllFeaturesExample (Web)
         run: |
           chmod +x examples/build_all.py
-          if [[ "$COMMIT_MSG" == *"[full]"* || "$FULL_INPUT" == "true" ]]; then
-             echo "Running full build ([full] in commit message or manual full=true)..."
-             ./examples/build_all.py --web-only --verbose
-          else
-             echo "Running quick build (AllFeaturesExample only)..."
-             ./examples/build_all.py --web-only --test-only --verbose
-          fi
+          ./examples/build_all.py --web-only --test-only --verbose
+
+      # See the build job: per-addon dependency compile coverage.
+      - name: Build one example per addon (Web)
+        run: ./examples/build_all.py --web-only --one-per-addon --verbose
 
       - name: Compiler cache stats
         if: always()
         run: ccache -s || true
+
+  # Compile-only iOS gate: build one addon-free example against the device SDK
+  # with code signing disabled. Catches iOS platform-layer rot at compile time
+  # (the tcFileDialog attribute-order break sat undetected for weeks because
+  # nothing in CI compiled against the iOS SDK). Runtime behavior is still
+  # verified on a real device by hand.
+  # videoPlayerExample, not AllFeaturesExample: tcxLua's generated bindings
+  # reference the sync dialogs (unavailable on iOS) — the binding generator
+  # needs platform awareness before the full example can compile here.
+  # No ccache: the Xcode generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER.
+  build-ios:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    timeout-minutes: 60
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # See the build job: avoid the 429-prone sokol-shdc download.
+      - name: Cache sokol-shdc
+        uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Build videoPlayerExample (iOS device SDK, unsigned)
+        run: |
+          cd examples/video/videoPlayerExample
+          cmake -B build-ios -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+          cmake --build build-ios --config Release -- \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 
   # Verify the API reference (docs/reference/) against the real C++ headers.
   # The structure is DERIVED from the clang AST, so signatures can't drift — the
@@ -413,12 +463,12 @@ jobs:
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,
   # so matrix/job renames never break required checks. It fails on any failed,
-  # cancelled, or unexpectedly-skipped job; the three heavy build jobs may be
+  # cancelled, or unexpectedly-skipped job; the four heavy build jobs may be
   # skipped only when the `changes` gate declared the diff docs-only.
   # ---------------------------------------------------------------------------
   ci-ok:
     runs-on: ubuntu-latest
-    needs: [changes, build, build-android, build-web, reference-check]
+    needs: [changes, build, build-android, build-web, build-ios, reference-check]
     if: always()
     steps:
       - name: Verify job results
@@ -428,6 +478,7 @@ jobs:
           R_BUILD: ${{ needs.build.result }}
           R_ANDROID: ${{ needs.build-android.result }}
           R_WEB: ${{ needs.build-web.result }}
+          R_IOS: ${{ needs.build-ios.result }}
           R_REF: ${{ needs.reference-check.result }}
         run: |
           ok=1
@@ -447,6 +498,7 @@ jobs:
           check "build"           "$R_BUILD"    skippable
           check "build-android"   "$R_ANDROID"  skippable
           check "build-web"       "$R_WEB"      skippable
+          check "build-ios"       "$R_IOS"      skippable
           check "reference-check" "$R_REF"
           [ "$ok" = "1" ] || { echo "ci-ok: FAILING"; exit 1; }
           echo "ci-ok: all good"

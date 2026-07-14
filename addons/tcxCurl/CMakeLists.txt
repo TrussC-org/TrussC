@@ -1,5 +1,5 @@
 # =============================================================================
-# tcxCurl - HTTPS Client Addon (libcurl + mbedTLS)
+# tcxCurl - HTTPS Client Addon (libcurl; Schannel on Windows, system TLS else)
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.20)
@@ -37,67 +37,21 @@ elseif(NOT WIN32)
     target_compile_definitions(tcxCurl INTERFACE TCX_HTTP_CURL=1)
     target_link_libraries(tcxCurl INTERFACE CURL::libcurl)
 else()
-    # Windows: fetch curl from source
-    # mbedTLSが取得できればmbedTLS、できなければSchannel（Windows標準）にフォールバック
+    # Windows: fetch curl from source, built against Schannel — the native
+    # Windows TLS stack. Schannel uses the OS certificate store (no bundled CA
+    # file to ship or let expire) and negotiates like the OS/browser, which is
+    # the most interoperable choice against real servers. This puts Windows in
+    # line with every other platform, which all use their system/OS TLS (macOS
+    # SecureTransport, Linux system OpenSSL, Android HttpURLConnection, Web
+    # fetch) — Windows is no longer the odd one out on a bundled TLS engine.
+    #
+    # (If a build ever needs a portable, bundled-CA TLS engine instead — e.g. a
+    # locked-down offline kiosk with a stale OS root store — the tcxTls addon
+    # already carries mbedTLS, so tcxCurl could opt into it here via
+    # `_tc_load_addon(tcxTls)` + CURL_USE_MBEDTLS. Not built until a real need
+    # exists: Schannel covers the normal case, and mbedTLS has shown weaker
+    # real-world handshake interop.)
     include(FetchContent)
-
-    set(_TCX_USE_MBEDTLS OFF)
-
-    # mbedTLSの取得を試みる（オフライン環境ではスキップ）
-    if(NOT TARGET mbedtls)
-        # キャッシュ済みならそのまま使う
-        set(_mbedtls_cached_dir "${FETCHCONTENT_BASE_DIR}/mbedtls-src")
-        if(EXISTS "${_mbedtls_cached_dir}/CMakeLists.txt")
-            set(_TCX_USE_MBEDTLS ON)
-        else()
-            # ネットワーク接続チェック（git ls-remoteで軽量に確認）
-            execute_process(
-                COMMAND git ls-remote --exit-code -q https://github.com/Mbed-TLS/mbedtls.git HEAD
-                RESULT_VARIABLE _git_result
-                OUTPUT_QUIET ERROR_QUIET
-                TIMEOUT 5
-            )
-            if(_git_result EQUAL 0)
-                set(_TCX_USE_MBEDTLS ON)
-            else()
-                message(STATUS "[tcxCurl] mbedTLS not available (offline?), using Schannel")
-            endif()
-        endif()
-    else()
-        set(_TCX_USE_MBEDTLS ON)
-    endif()
-
-    if(_TCX_USE_MBEDTLS)
-        message(STATUS "[tcxCurl] Fetching mbedTLS...")
-        FetchContent_Declare(
-            mbedtls
-            GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
-            GIT_TAG v3.5.0
-        )
-        set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-        set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
-        set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
-        set(DISABLE_PACKAGE_CONFIG_AND_INSTALL ON CACHE BOOL "" FORCE)
-        FetchContent_MakeAvailable(mbedtls)
-
-        # Help curl's FindMbedTLS.cmake locate FetchContent-built mbedTLS
-        FetchContent_GetProperties(mbedtls SOURCE_DIR MBEDTLS_SRC_DIR)
-        set(MBEDTLS_INCLUDE_DIR "${MBEDTLS_SRC_DIR}/include" CACHE PATH "" FORCE)
-        set(MBEDTLS_LIBRARY mbedtls CACHE STRING "" FORCE)
-        set(MBEDX509_LIBRARY mbedx509 CACHE STRING "" FORCE)
-        set(MBEDCRYPTO_LIBRARY mbedcrypto CACHE STRING "" FORCE)
-
-        # Download Mozilla CA certificate bundle for mbedTLS
-        set(CACERT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cacert.pem")
-        if(NOT EXISTS "${CACERT_PATH}")
-            message(STATUS "[tcxCurl] Downloading CA certificate bundle...")
-            file(DOWNLOAD
-                "https://curl.se/ca/cacert.pem"
-                "${CACERT_PATH}"
-                TLS_VERIFY ON
-            )
-        endif()
-    endif()
 
     # curlの共通設定
     set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
@@ -123,17 +77,10 @@ else()
     set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
     set(CURL_ENABLE_EXPORT_TARGET OFF CACHE BOOL "" FORCE)
 
-    # SSLバックエンドの選択
-    if(_TCX_USE_MBEDTLS)
-        message(STATUS "[tcxCurl] Fetching curl with mbedTLS backend...")
-        set(CURL_USE_SCHANNEL OFF CACHE BOOL "" FORCE)
-        set(CURL_USE_MBEDTLS ON CACHE BOOL "" FORCE)
-        set(CURL_CA_BUNDLE "${CACERT_PATH}" CACHE STRING "" FORCE)
-    else()
-        message(STATUS "[tcxCurl] Fetching curl with Schannel backend...")
-        set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
-        set(CURL_USE_MBEDTLS OFF CACHE BOOL "" FORCE)
-    endif()
+    # SSL backend: Schannel (Windows native), no mbedTLS.
+    message(STATUS "[tcxCurl] Fetching curl with Schannel backend...")
+    set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
+    set(CURL_USE_MBEDTLS OFF CACHE BOOL "" FORCE)
 
     FetchContent_Declare(
         curl

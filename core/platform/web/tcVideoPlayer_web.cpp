@@ -42,6 +42,9 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             var video = document.createElement('video');
             video.setAttribute('playsinline', '');
             video.crossOrigin = 'anonymous';
+            // preload the first frame so update() can upload it BEFORE play()
+            // (the web equivalent of the auto-poster: no black flash)
+            video.preload = 'auto';
             video.style.display = 'none';
             document.body.appendChild(video);
             window._trussc_player_video = video;
@@ -391,6 +394,20 @@ bool VideoPlayer::isUsingHwAccelPlatform() const {
 
 std::string VideoPlayer::getHwAccelNamePlatform() const {
     return platformHandle_ ? "browser" : "none";
+}
+
+// =============================================================================
+// Frame extraction - unsupported on web (browsers have no synchronous media
+// decode). The auto-poster path is covered natively instead: the <video>
+// element preloads its first frame and update() uploads it before play().
+// =============================================================================
+
+bool VideoPlayer::extractFramePlatform(const fs::path&, Pixels&, float, float*) {
+    return false;
+}
+
+bool VideoPlayer::extractKeyFramePlatform(const fs::path&, Pixels&, float, float*) {
+    return false;
 }
 
 } // namespace trussc

@@ -42,11 +42,7 @@ struct FileDialogResult {
 // title: Bold header text
 // message: Body text
 // -----------------------------------------------------------------------------
-// NOTE: TC_PLATFORMS ([[clang::annotate]]) must precede the GNU-style
-// TC_SYNC_DIALOG_UNAVAILABLE attribute — the reverse order is a parse
-// error when both expand (iOS builds).
-TC_PLATFORMS("macos,windows,linux,android,web")
-TC_SYNC_DIALOG_UNAVAILABLE void alertDialog(const std::string& title, const std::string& message);
+TC_PLATFORMS("macos,windows,linux,android,web") TC_SYNC_DIALOG_UNAVAILABLE void alertDialog(const std::string& title, const std::string& message);
 
 void alertDialogAsync(const std::string& title,
                       const std::string& message,
@@ -56,8 +52,7 @@ void alertDialogAsync(const std::string& title,
 // Confirm dialog (Yes/No)
 // Returns true if user clicked Yes
 // -----------------------------------------------------------------------------
-TC_PLATFORMS("macos,windows,linux,android,web")
-TC_SYNC_DIALOG_UNAVAILABLE bool confirmDialog(const std::string& title, const std::string& message);
+TC_PLATFORMS("macos,windows,linux,android,web") TC_SYNC_DIALOG_UNAVAILABLE bool confirmDialog(const std::string& title, const std::string& message);
 
 void confirmDialogAsync(const std::string& title,
                         const std::string& message,
@@ -67,8 +62,7 @@ void confirmDialogAsync(const std::string& title,
 // File open dialog
 // folderSelection: true for folder selection mode
 // -----------------------------------------------------------------------------
-TC_PLATFORMS("macos,windows,linux,android")
-TC_SYNC_DIALOG_UNAVAILABLE FileDialogResult loadDialog(const std::string& title = "",
+TC_PLATFORMS("macos,windows,linux,android") TC_SYNC_DIALOG_UNAVAILABLE FileDialogResult loadDialog(const std::string& title = "",
                             const std::string& message = "",
                             const std::string& defaultPath = "",
                             bool folderSelection = false);
@@ -83,8 +77,7 @@ void loadDialogAsync(const std::string& title,
 // File save dialog
 // defaultName: Initial filename
 // -----------------------------------------------------------------------------
-TC_PLATFORMS("macos,windows,linux,android")
-TC_SYNC_DIALOG_UNAVAILABLE FileDialogResult saveDialog(const std::string& title = "",
+TC_PLATFORMS("macos,windows,linux,android") TC_SYNC_DIALOG_UNAVAILABLE FileDialogResult saveDialog(const std::string& title = "",
                             const std::string& message = "",
                             const std::string& defaultPath = "",
                             const std::string& defaultName = "");
