@@ -289,6 +289,46 @@ can feed events manually, so imgui does not chain us to sokol_app.
     texSubImage2D). Local verification used `-sGROWABLE_ARRAYBUFFERS=0`;
     a permanent trussc_app.cmake fix is a separate concern (flagged).
 - **P4 — iOS driver.** UIWindow + CAMetalLayer + CADisplayLink + touch.
+  - **IMPLEMENTED + simulator-verified 2026-07-14; device (iPhone) pass
+    pending.** Implementation contract: docs/dev/sapp-ios-impl-spec.md
+    (opus-extracted, fifth sibling). Same maximal-verbatim-lift approach
+    as web: upstream's iOS backend (sokol_app.h 6365–6932) + @interface
+    decls + the real mach timestamp clock lifted and renamed
+    `_sapp_tc_*`; the shared-helper block and the full >>public API block
+    were reused verbatim from the web section (they were lifted
+    platform-complete there — all `_SAPP_IOS` branches were already
+    present and just light up). iOS-sized `_sapp_tc_t` keeps upstream
+    member names. All six TrussC patches preserved by construction (the
+    vendored sokol_app.h already contains them): runtime orientation
+    (`_sapp_tc_ios_view_ctrl` + sapp_ios_set_supported_orientations),
+    immersive mode (**`_sapp_ios_immersive_mode` kept NON-STATIC under
+    its original name** — tcPlatform_ios.mm externs it; the blanket
+    rename was reverted for this one symbol), view-bounds dimensions,
+    drawable-size readback, RGB10A2 layer + MSAA + framebufferOnly=false,
+    sapp_ios_get_window. Single-window like web: sapp_create_window()
+    logs + returns invalid; real Metal getters (device/drawable/depth/
+    msaa) wrapped extern "C". GLES3/EAGL not ported (head enforces
+    SOKOL_METAL with #error). ios/sokol_impl.mm switched to the
+    declarations-only shim. Verified: iOS-simulator app build (Ninja,
+    iphonesimulator SDK) links every consumer (tcPlatform/tcFileDialog/
+    TrussC.h event chain); emptyExample runs on the iPhone 17 Pro
+    simulator — scene adoption → Metal init → CADisplayLink frames →
+    sokol render (screenshots show the animated wireframe; two shots 3 s
+    apart differ), no driver errors in os_log; mac core rebuild green.
+    Device checklist (spec §12d: touch/rotation/orientation-lock/
+    keyboard/suspend-resume/immersive/document-picker/captureWindow)
+    remains for the user's iPhone.
+    SIDE FINDINGS fixed while landing P4 (both pre-existing, not P4):
+    (1) tcFileDialog.h put `[[clang::annotate]]` (TC_PLATFORMS) after the
+    GNU `__attribute__((unavailable))` (TC_SYNC_DIALOG_UNAVAILABLE) —
+    a parse error on iOS where both expand; order swapped. (2) The
+    built-in shader headers had no `metal_sim` variant, so ANY TrussC app
+    aborted on the iOS simulator (sg_query_backend() reports
+    SG_BACKEND_METAL_SIMULATOR → null shader source → memmove segfault
+    in sg_make_shader). All 8 core shaders regenerated with metal_sim
+    added; `_TC_SOKOL_SLANG` in trussc_app.cmake gained metal_sim so
+    user shaders work on the simulator too. This makes iOS an
+    AI-verifiable platform (simctl install/launch/screenshot).
 - **P5 — Android driver.** NativeActivity + ALooper + Choreographer + EGL
   surface lifecycle. Last on purpose; needs a real-device verification
   plan (rotation, pause/resume, surface recreate).
