@@ -119,6 +119,18 @@ inline void registerInspectionTools() {
             }
         });
 
+    tool("get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, sokol memory bytes. Cheap enough to poll — reads counters only, touches no GPU state.")
+        .bind(std::function<json()>([]() -> json {
+            return json{{"status", "ok"},
+                        {"fps", trussc::getFps()},
+                        {"frameCount", trussc::getFrameCount()},
+                        {"uptimeSec", trussc::getElapsedTime()},
+                        {"width", trussc::getWindowWidth()},
+                        {"height", trussc::getWindowHeight()},
+                        {"version", trussc::getVersion()},
+                        {"memoryBytes", trussc::getSokolMemoryBytes()}};
+        }));
+
     tool("quit", "Quit the application gracefully")
         .bind(std::function<json()>([]() -> json {
             sapp_request_quit();

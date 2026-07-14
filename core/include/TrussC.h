@@ -2062,6 +2062,17 @@ namespace internal {
         // key off this. (sokol's init_cb runs on the main thread.)
         getMainThreadId();
 
+        // Ops integration: a supervisor (e.g. `trusscli kiosk`) injects a log
+        // file path via the environment so the app needs zero code changes.
+        // Opened BEFORE setup() so setup-time log lines land in the file too.
+        #ifndef __EMSCRIPTEN__
+        if (const char* envLog = std::getenv("TRUSSC_LOG_FILE")) {
+            if (envLog[0] != '\0' && !setLogFile(envLog)) {
+                logWarning("System") << "TRUSSC_LOG_FILE: cannot open '" << envLog << "'";
+            }
+        }
+        #endif
+
         setup();
 
         // The Apple data path root is chosen lazily on first getDataPath() use
