@@ -289,8 +289,18 @@ can feed events manually, so imgui does not chain us to sokol_app.
     texSubImage2D). Local verification used `-sGROWABLE_ARRAYBUFFERS=0`;
     a permanent trussc_app.cmake fix is a separate concern (flagged).
 - **P4 — iOS driver.** UIWindow + CAMetalLayer + CADisplayLink + touch.
-  - **IMPLEMENTED + simulator-verified 2026-07-14; device (iPhone) pass
-    pending.** Implementation contract: docs/dev/sapp-ios-impl-spec.md
+  - **DONE — implemented + simulator-verified + DEVICE PASS on the user's
+    iPhone 16 (2026-07-14, all §12d checklist items): touch (multi-touch,
+    pointer-value ids), rotation → RESIZED, orientation lock via
+    setOrientation, on-screen keyboard raise + Enter/Space/Backspace
+    (32/257/259; letters land as CHAR which TrussC drops — the known
+    wiring gap, spec §7) + dismiss via sapp_show_keyboard(false),
+    immersive mode on/off (status bar + clock), document picker + result
+    (sapp_ios_get_window), captureWindow thumbnail (RGB10A2 unpack),
+    suspend/resume via home-and-back. Full CI green on the dev-merged
+    HEAD (run 29299153508) including the new compile-only build-ios job,
+    which now covers this driver every push.**
+    Implementation contract: docs/dev/sapp-ios-impl-spec.md
     (opus-extracted, fifth sibling). Same maximal-verbatim-lift approach
     as web: upstream's iOS backend (sokol_app.h 6365–6932) + @interface
     decls + the real mach timestamp clock lifted and renamed
