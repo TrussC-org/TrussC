@@ -988,6 +988,14 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
             -sASYNCIFY=1
             --shell-file=${_TC_SHELL_FILE}
         )
+        # Emscripten 6.x flipped GROWABLE_ARRAYBUFFERS on by default, which backs
+        # the wasm heap with a resizable ArrayBuffer. Current browsers reject
+        # views over resizable buffers in TextDecoder and WebGL2 texture uploads,
+        # so apps die at runtime (WGPU: inside the emdawnwebgpu JS bindings;
+        # WebGL2: texSubImage2D). Force the pre-6.x grow-and-detach behavior.
+        if(EMSCRIPTEN_VERSION VERSION_GREATER_EQUAL "6.0")
+            target_link_options(${PROJECT_NAME} PRIVATE -sGROWABLE_ARRAYBUFFERS=0)
+        endif()
         # Backend-specific link options
         # TC_WEB_BACKEND is set in core/CMakeLists.txt (defaults to WGPU)
         if(NOT DEFINED TC_WEB_BACKEND)
