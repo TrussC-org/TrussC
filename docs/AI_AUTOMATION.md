@@ -54,6 +54,8 @@ TrussC uses **HTTP transport** for MCP. All JSON-RPC messages are sent as HTTP P
 | `save_screenshot` | `path` | Save screenshot to file |
 | `get_thumbnail` | `width`, `quality` (both optional) | Small Base64 JPEG for monitoring/periodic polling (default width 512, aspect preserved, never upscales; quality default 75). Only the framebuffer readback touches the frame loop — downscale + JPEG encode run on the HTTP worker thread, so polling this does not stutter the app (measured under continuous hammering: ~179 fps vs ~46 fps with `get_screenshot`) |
 | `get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll |
+| `anchorbolt_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status-the-anchorbolt-convention)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
+| `anchorbolt_image` | `name`, `width`, `quality` (last two optional) | Fetch an app-published image registered via `mcp::statusImage()`, downscaled + JPEG-encoded exactly like `get_thumbnail` (pixel grab on the main loop, encode on the HTTP worker — no frame stutter) |
 | `quit` | (none) | Quit the application gracefully |
 | `get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
 | `get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |
@@ -102,6 +104,31 @@ These tools are inert unless the MCP server is also running (`TRUSSC_MCP=1`).
 The **tcxImGui** addon provides additional MCP tools for AI agents to inspect and interact with ImGui widgets. To use these, add `tcxImGui` to your project via `trusscli add tcxImGui` or `addons.make`, then call `imguiSetup()` before `mcp::registerDebuggerTools()`.
 
 See [addons/tcxImGui/README.md](../addons/tcxImGui/README.md) for full details on available tools and setup.
+
+## Publishing Custom Ops Status (the anchorbolt convention)
+
+Apps can publish their own monitoring data — one line per value, no
+supervisor-side configuration. A supervisor (e.g. `anchorbolt start`)
+discovers the `anchorbolt_status` tool via `tools/list` and forwards the
+payload to its fleet server, where numbers registered with `graph` are
+plotted over time and images become live streams in the dashboard.
+
+```cpp
+void tcApp::setup() {
+    mcp::status("scene",   [&] { return sceneName; });     // shown as-is
+    mcp::graph("visitors", [&] { return visitorCount; });  // plotted over time
+    mcp::statusImage("entranceCam", [&] { return camPixels; });  // e.g. a webcam
+}
+```
+
+- `mcp::status(name, getter)` — a string or number, displayed as-is
+- `mcp::graph(name, getter)` — a number that wants to be a time series
+- `mcp::statusImage(name, getter)` — `Pixels` fetched on demand via
+  `anchorbolt_image` (a webcam feed turns your installation's spare camera
+  into a monitoring camera with this one line)
+
+Getters run on the main loop inside tool handlers, so they can safely read
+app state. Registering the same name again replaces the entry.
 
 ## Creating Custom Tools
 

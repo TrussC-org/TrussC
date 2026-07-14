@@ -92,7 +92,100 @@ inline void downscaleImage(const unsigned char* src, int srcW, int srcH, int cha
     }
 }
 
+// Downscale + JPEG encode + Base64. Runs on the HTTP worker inside two-stage
+// deferral thunks (get_thumbnail / anchorbolt_image), never on the main loop.
+inline json pixelsToJpegJson(const trussc::Pixels& px, int reqWidth, int quality) {
+    int srcW = px.getWidth(), srcH = px.getHeight();
+    int ch   = px.getChannels();
+    int dstW = std::min(reqWidth, srcW);
+    int dstH = std::max(1, (int)std::lround((double)srcH * dstW / srcW));
+    std::vector<unsigned char> small;
+    downscaleImage(px.getData(), srcW, srcH, ch, small, dstW, dstH);
+
+    std::vector<unsigned char> jpg;
+    stbi_write_jpg_to_func(
+        [](void* ctx, void* data, int size) {
+            auto* v = static_cast<std::vector<unsigned char>*>(ctx);
+            auto* b = static_cast<unsigned char*>(data);
+            v->insert(v->end(), b, b + size);
+        },
+        &jpg, dstW, dstH, ch, small.data(), quality);
+    if (jpg.empty()) {
+        return json{{"status", "error"}, {"message", "JPEG encode failed"}};
+    }
+    return json{{"mimeType", "image/jpeg"},
+                {"data", trussc::toBase64(jpg)},
+                {"width", dstW},
+                {"height", dstH}};
+}
+
+// App-published ops status registries (see mcp::status / graph / statusImage
+// below). Main-thread only: registration happens in setup()/update() and the
+// getters run inside MCP tool handlers, which execute on the main loop.
+struct StatusEntry {
+    std::string name;
+    std::function<json()> getter;   // returns a number or string json value
+    bool graph = false;             // display hint: plot as time series
+};
+
+inline std::vector<StatusEntry>& statusRegistry() {
+    static std::vector<StatusEntry> reg;
+    return reg;
+}
+
+struct StatusImageEntry {
+    std::string name;
+    std::function<trussc::Pixels()> getter;
+};
+
+inline std::vector<StatusImageEntry>& statusImageRegistry() {
+    static std::vector<StatusImageEntry> reg;
+    return reg;
+}
+
+inline void addStatusEntry(StatusEntry entry) {
+    auto& reg = statusRegistry();
+    for (auto& e : reg) {
+        if (e.name == entry.name) { e = std::move(entry); return; }
+    }
+    reg.push_back(std::move(entry));
+}
+
 } // namespace detail
+
+// ---------------------------------------------------------------------------
+// App-published ops status (the anchorbolt convention)
+//
+// Apps expose custom monitoring data with one line per value; supervisors
+// (anchorbolt start) discover the anchorbolt_status tool via tools/list and
+// forward the payload to the fleet server. No supervisor-side configuration.
+//
+//   mcp::status("scene",   [&]{ return sceneName; });     // shown as-is
+//   mcp::graph("visitors", [&]{ return visitorCount; });  // plotted over time
+//   mcp::statusImage("entranceCam", [&]{ return camPixels; });
+//
+// Registering the same name again replaces the previous entry.
+// ---------------------------------------------------------------------------
+
+inline void status(const std::string& name, std::function<double()> getter) {
+    detail::addStatusEntry({name, [getter]() { return json(getter()); }, false});
+}
+
+inline void status(const std::string& name, std::function<std::string()> getter) {
+    detail::addStatusEntry({name, [getter]() { return json(getter()); }, false});
+}
+
+inline void graph(const std::string& name, std::function<double()> getter) {
+    detail::addStatusEntry({name, [getter]() { return json(getter()); }, true});
+}
+
+inline void statusImage(const std::string& name, std::function<trussc::Pixels()> getter) {
+    auto& reg = detail::statusImageRegistry();
+    for (auto& e : reg) {
+        if (e.name == name) { e.getter = getter; return; }
+    }
+    reg.push_back({name, getter});
+}
 
 // ---------------------------------------------------------------------------
 // Inspection Tools (read-only, always available when MCP is enabled)
@@ -170,28 +263,67 @@ inline void registerInspectionTools() {
                     if (!grabbed) {
                         return json{{"status", "error"}, {"message", "Failed to grab screen"}};
                     }
-                    int srcW = px->getWidth(), srcH = px->getHeight();
-                    int ch   = px->getChannels();
-                    int dstW = std::min(reqWidth, srcW);
-                    int dstH = std::max(1, (int)std::lround((double)srcH * dstW / srcW));
-                    std::vector<unsigned char> small;
-                    mcp::detail::downscaleImage(px->getData(), srcW, srcH, ch, small, dstW, dstH);
+                    return detail::pixelsToJpegJson(*px, reqWidth, quality);
+                };
+            });
+            return json(nullptr);  // ignored — deferred result is sent instead
+        });
 
-                    std::vector<unsigned char> jpg;
-                    stbi_write_jpg_to_func(
-                        [](void* ctx, void* data, int size) {
-                            auto* v = static_cast<std::vector<unsigned char>*>(ctx);
-                            auto* b = static_cast<unsigned char*>(data);
-                            v->insert(v->end(), b, b + size);
-                        },
-                        &jpg, dstW, dstH, ch, small.data(), quality);
-                    if (jpg.empty()) {
-                        return json{{"status", "error"}, {"message", "JPEG encode failed"}};
+    tool("anchorbolt_status", "App-published ops status: values registered via mcp::status()/mcp::graph() plus the names of mcp::statusImage() images. mode 'graph' means the value wants to be plotted over time. Empty when the app publishes nothing. Supervisors (anchorbolt start) discover this tool via tools/list and forward the payload to the fleet server.")
+        .bind(std::function<json()>([]() -> json {
+            json values = json::array();
+            for (auto& e : detail::statusRegistry()) {
+                json v;
+                try {
+                    v = e.getter();
+                } catch (...) {
+                    continue;  // a throwing getter drops its entry, not the tool
+                }
+                values.push_back({{"name", e.name},
+                                  {"value", v},
+                                  {"mode", e.graph ? "graph" : "status"}});
+            }
+            json images = json::array();
+            for (auto& e : detail::statusImageRegistry()) images.push_back(e.name);
+            return json{{"values", values}, {"images", images}};
+        }));
+
+    tool("anchorbolt_image", "Fetch an app-published image registered via mcp::statusImage(), downscaled + JPEG-encoded like get_thumbnail (pixel grab on the main loop, encode on the HTTP worker — no frame stutter).")
+        .arg<std::string>("name", "Image name as listed by anchorbolt_status")
+        .arg<int>("width", "Target width in pixels, aspect preserved (default 512, clamped 16-4096; never upscales)", false)
+        .arg<int>("quality", "JPEG quality 1-100 (default 75)", false)
+        .bind([](const json& args) -> json {
+            std::string name = args.value("name", "");
+            int reqWidth = 512;
+            int quality  = 75;
+            if (args.contains("width") && args.at("width").is_number())
+                reqWidth = std::clamp(args.at("width").get<int>(), 16, 4096);
+            if (args.contains("quality") && args.at("quality").is_number())
+                quality = std::clamp(args.at("quality").get<int>(), 1, 100);
+
+            std::function<trussc::Pixels()> getter;
+            for (auto& e : detail::statusImageRegistry()) {
+                if (e.name == name) { getter = e.getter; break; }
+            }
+            if (!getter) {
+                return json{{"status", "error"},
+                            {"message", "unknown image '" + name + "' (see anchorbolt_status)"}};
+            }
+            mcp::deferToolResultTwoStage([getter, reqWidth, quality]() -> std::function<json()> {
+                auto px = std::make_shared<trussc::Pixels>();
+                bool ok = true;
+                try {
+                    *px = getter();  // app getter runs on the main loop
+                } catch (...) {
+                    ok = false;
+                }
+                if (ok && (px->getWidth() <= 0 || px->getHeight() <= 0 || !px->getData())) ok = false;
+                return [px, ok, reqWidth, quality]() -> json {
+                    if (!ok) {
+                        return json{{"status", "error"},
+                                    {"message", "image getter returned no pixels"}};
                     }
-                    return json{{"mimeType", "image/jpeg"},
-                                {"data", trussc::toBase64(jpg)},
-                                {"width", dstW},
-                                {"height", dstH}};
+                    return detail::pixelsToJpegJson(*px, reqWidth, quality);
                 };
             });
             return json(nullptr);  // ignored — deferred result is sent instead
