@@ -684,7 +684,10 @@ if(TC_SHADER_SOURCES)
     set(_TC_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/tc/gpu/shaders")
     file(MAKE_DIRECTORY "${_TC_SHADER_OUTPUT_DIR}")
 
-    set(_TC_SOKOL_SLANG "metal_macos:metal_ios:hlsl5:glsl300es:glsl430:wgsl")
+    # metal_sim keeps apps runnable on the iOS simulator (sg_query_backend()
+    # reports SG_BACKEND_METAL_SIMULATOR there; without it shader lookup
+    # returns null sources and crashes in sg_make_shader).
+    set(_TC_SOKOL_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl300es:glsl430:wgsl")
 
     set(_TC_SHADER_OUTPUTS "")
     foreach(_shader_src ${TC_SHADER_SOURCES})

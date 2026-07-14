@@ -707,8 +707,11 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
             message(STATUS "[${PROJECT_NAME}] sokol-shdc downloaded successfully")
         endif()
 
-        # Output languages: Metal (macOS/iOS), HLSL (Windows), GLSL (Linux), WGSL (Web/WebGPU)
-        set(_TC_SOKOL_SLANG "metal_macos:metal_ios:hlsl5:glsl300es:wgsl")
+        # Output languages: Metal (macOS/iOS/iOS-simulator), HLSL (Windows),
+        # GLSL (Linux), WGSL (Web/WebGPU). metal_sim keeps apps runnable on the
+        # iOS simulator (sg_query_backend() reports SG_BACKEND_METAL_SIMULATOR
+        # there; without it shader lookup returns null sources and crashes).
+        set(_TC_SOKOL_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl300es:wgsl")
 
         set(_TC_SHADER_OUTPUTS "")
         foreach(_shader_src ${_TC_SHADER_SOURCES})
