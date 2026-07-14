@@ -342,10 +342,26 @@ can feed events manually, so imgui does not chain us to sokol_app.
 - **P5 — Android driver.** NativeActivity + ALooper + Choreographer + EGL
   surface lifecycle. Last on purpose; needs a real-device verification
   plan (rotation, pause/resume, surface recreate).
-  - **IMPLEMENTED + compile/link-verified 2026-07-14, full CI green
-    (run 29306102924, all jobs incl. build-android + build-ios + ci-ok);
-    device pass pending** (user will prepare Android hardware; checklist =
-    sapp-android-impl-spec.md §12d). Implementation contract:
+  - **DONE — implemented + full CI green (run 29306102924) + DEVICE PASS
+    on the user's Pixel 8a (2026-07-14, §12d): launch → render at 59 fps,
+    multi-touch (small integer ids per AMotionEvent — iOS's pointer-value
+    ids are the other upstream convention, both correct), BACK consumed
+    without killing the app, rotation via ORIENT lock + physical rotate
+    (RESIZED counts up, relayout clean, landscape verified), home/resume
+    AND a real 150 s doze cycle → EGL surface destroy/recreate → frames
+    and content return (lifecycle verified in logcat: RESUME →
+    SET_NATIVE_WINDOW → FOCUS), immersive on/off (status bar), DPI
+    2.625 from AConfiguration density (411x914 logical / 1080x2400 fb),
+    captureWindow thumbnail. One unreproduced one-off: a black-screen
+    after the very first doze (before logging existed); a full scripted
+    doze cycle later passed — logging is now in place if it resurfaces.
+    KNOWN GAPS, both pre-existing and NOT port bugs: soft keyboard never
+    appears (upstream ANativeActivity_showSoftInput is broken in the NDK
+    — upstream's own comment says so; sapp_keyboard_shown() also never
+    true), and the file dialog is a TrussC-side stub
+    (tcFileDialog_android.cpp: needs a JNI ACTION_OPEN_DOCUMENT
+    implementation). Android driver logs now go to logcat (tag
+    sokol_app_tc) instead of the stderr black hole.** Implementation contract:
     docs/dev/sapp-android-impl-spec.md (opus-extracted, sixth sibling).
     Same verbatim-lift as web/iOS: android backend body (sokol_app.h
     10319–11038) + state structs + posix CLOCK_MONOTONIC clock renamed
