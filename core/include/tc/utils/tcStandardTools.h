@@ -6,6 +6,7 @@
 
 #include "tcMCP.h"
 #include "tcUtils.h"
+#include "tcTime.h"
 #include "tcJsonReflect.h"
 #include "../events/tcCoreEvents.h"
 #include "stb/stb_image_write.h"
@@ -13,6 +14,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <deque>
+#include <mutex>
 
 // Platform bits for detail::currentPid() / detail::processRssBytes()
 #if defined(__APPLE__)
@@ -202,6 +205,19 @@ inline void addStatusEntry(StatusEntry entry) {
     reg.push_back(std::move(entry));
 }
 
+// Operator-alert queue (see mcp::alert below). Unlike the status getters,
+// alerts can fire from any thread — a sensor callback, an async timer — so
+// the queue carries its own lock. Bounded: past 100 pending, oldest drop.
+inline std::mutex& alertMutex() {
+    static std::mutex m;
+    return m;
+}
+
+inline std::deque<json>& alertQueue() {
+    static std::deque<json> q;
+    return q;
+}
+
 // Process identity + real memory footprint for tc_get_health. RSS is the
 // resident set of the whole process — the number that matters for leak
 // hunting and for telling "the app grew" from "the OS ran out".
@@ -280,6 +296,29 @@ inline void statusImage(const std::string& name, std::function<trussc::Pixels()>
 }
 
 // ---------------------------------------------------------------------------
+// Operator alerts
+//
+//   mcp::alert("IR camera disconnected!");
+//
+// Queues a message for the supervisor: anchorbolt drains tc_get_alerts on
+// its health cadence and forwards each entry to its notification sinks
+// (Slack / Discord / ntfy...), so this can literally end up on someone's
+// phone. Deliberately named ALERT, not notify — it is for "a human should
+// hear about this", not a general message bus. The message is also written
+// to the log (so it survives locally even with no supervisor attached).
+// Thread-safe; callable from sensor callbacks / async timers.
+// ---------------------------------------------------------------------------
+
+inline void alert(const std::string& msg) {
+    trussc::logWarning("alert") << msg;
+    std::lock_guard<std::mutex> lock(detail::alertMutex());
+    auto& q = detail::alertQueue();
+    q.push_back(json{{"at", trussc::getTimestampString("%Y-%m-%dT%H:%M:%S")},
+                     {"text", msg}});
+    if (q.size() > 100) q.pop_front();
+}
+
+// ---------------------------------------------------------------------------
 // Inspection Tools (read-only, always available when MCP is enabled)
 // ---------------------------------------------------------------------------
 
@@ -352,6 +391,18 @@ inline void registerInspectionTools() {
             json images = json::array();
             for (auto& e : detail::statusImageRegistry()) images.push_back(e.name);
             return json{{"values", values}, {"images", images}};
+        }));
+
+    tool("tc_get_alerts", "Drain operator alerts raised by the app via mcp::alert(). Returns and CLEARS the pending list, so exactly one consumer receives each alert. Empty 'alerts' array when nothing is pending. Supervisors (anchorbolt start) poll this on the health cadence and forward entries to their notification sinks.")
+        .bind(std::function<json()>([]() -> json {
+            std::deque<json> drained;
+            {
+                std::lock_guard<std::mutex> lock(detail::alertMutex());
+                drained.swap(detail::alertQueue());
+            }
+            json arr = json::array();
+            for (auto& a : drained) arr.push_back(std::move(a));
+            return json{{"alerts", arr}};
         }));
 
     tool("tc_get_status_image", "Fetch an app-published image registered via mcp::statusImage(), downscaled + JPEG-encoded like tc_get_screenshot (pixel grab on the main loop, encode on the HTTP worker — no frame stutter).")

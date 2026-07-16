@@ -64,6 +64,7 @@ your own tools:
 | `tc_get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, pid, rssBytes, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll. `pid` lets a supervisor confirm the reply comes from *its* child (port collisions); `rssBytes` is whole-process resident memory (the leak-hunting number); `memoryBytes` is sokol-tracked allocations only |
 | `tc_get_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
 | `tc_get_status_image` | `name`, `width`, `quality` (last two optional) | Fetch an app-published image registered via `mcp::statusImage()`, downscaled + JPEG-encoded exactly like `tc_get_screenshot` (pixel grab on the main loop, encode on the HTTP worker — no frame stutter) |
+| `tc_get_alerts` | - | Drain operator alerts raised via `mcp::alert()` — returns and clears the pending list, so exactly one consumer receives each alert |
 | `tc_quit` | (none) | Quit the application gracefully |
 | `tc_get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
 | `tc_get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |
@@ -138,6 +139,23 @@ void tcApp::setup() {
 
 Getters run on the main loop inside tool handlers, so they can safely read
 app state. Registering the same name again replaces the entry.
+
+### Operator Alerts
+
+For events a human should hear about — a sensor disconnected, a help button
+pressed — the app can raise an alert:
+
+```cpp
+mcp::alert("IR camera disconnected!");
+```
+
+The message is written to the log (WARNING level) and queued; a supervisor
+drains the standard `tc_get_alerts` tool on its health cadence and forwards
+each entry to its notification sinks (Slack / Discord / ntfy...), so an
+alert can literally end up on someone's phone. It is deliberately named
+**alert**, not notify: raise them for exceptional, human-relevant events,
+not as a message bus. Thread-safe (callable from sensor callbacks and async
+timers); the queue is bounded at 100 pending, oldest dropped first.
 
 ## Creating Custom Tools
 
