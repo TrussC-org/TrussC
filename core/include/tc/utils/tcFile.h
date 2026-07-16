@@ -18,18 +18,18 @@ namespace trussc {
 // =============================================================================
 
 // Get filename from path: "dir/test.txt" -> "test.txt"
-inline std::string getFileName(const std::string& path) {
-    return std::filesystem::path(path).filename().string();
+inline std::string getFileName(const fs::path& path) {
+    return path.filename().string();
 }
 
 // Get filename without extension: "dir/test.txt" -> "test"
-inline std::string getBaseName(const std::string& path) {
-    return std::filesystem::path(path).stem().string();
+inline std::string getBaseName(const fs::path& path) {
+    return path.stem().string();
 }
 
 // Get file extension without dot: "dir/test.txt" -> "txt"
-inline std::string getFileExtension(const std::string& path) {
-    std::string ext = std::filesystem::path(path).extension().string();
+inline std::string getFileExtension(const fs::path& path) {
+    std::string ext = path.extension().string();
     if (!ext.empty() && ext[0] == '.') {
         ext = ext.substr(1);
     }
@@ -37,17 +37,17 @@ inline std::string getFileExtension(const std::string& path) {
 }
 
 // Get parent directory: "dir/test.txt" -> "dir"
-inline std::string getParentDirectory(const std::string& path) {
-    return std::filesystem::path(path).parent_path().string();
+inline std::string getParentDirectory(const fs::path& path) {
+    return path.parent_path().string();
 }
 
 // Join paths: ("dir", "file.txt") -> "dir/file.txt"
-inline std::string joinPath(const std::string& dir, const std::string& file) {
-    return (std::filesystem::path(dir) / file).string();
+inline std::string joinPath(const fs::path& dir, const fs::path& file) {
+    return (dir / file).string();
 }
 
 // Get absolute path
-inline std::string getAbsolutePath(const std::string& path) {
+inline std::string getAbsolutePath(const fs::path& path) {
     return std::filesystem::absolute(path).string();
 }
 
@@ -56,21 +56,21 @@ inline std::string getAbsolutePath(const std::string& path) {
 // =============================================================================
 
 // Check if file exists
-inline bool fileExists(const std::string& path) {
-    std::string fullPath = getDataPath(path);
+inline bool fileExists(const fs::path& path) {
+    fs::path fullPath = getDataPath(path);
     return std::filesystem::exists(fullPath) && std::filesystem::is_regular_file(fullPath);
 }
 
 // Check if directory exists
-inline bool directoryExists(const std::string& path) {
-    std::string fullPath = getDataPath(path);
+inline bool directoryExists(const fs::path& path) {
+    fs::path fullPath = getDataPath(path);
     return std::filesystem::exists(fullPath) && std::filesystem::is_directory(fullPath);
 }
 
 // Create directory (and parent directories if needed)
 // Returns true if directory was created or already exists
-inline bool createDirectory(const std::string& path) {
-    std::string fullPath = getDataPath(path);
+inline bool createDirectory(const fs::path& path) {
+    fs::path fullPath = getDataPath(path);
     try {
         if (std::filesystem::exists(fullPath)) {
             return std::filesystem::is_directory(fullPath);
@@ -84,9 +84,9 @@ inline bool createDirectory(const std::string& path) {
 
 // List files and directories in a directory
 // Returns vector of filenames (not full paths)
-inline std::vector<std::string> listDirectory(const std::string& path) {
+inline std::vector<std::string> listDirectory(const fs::path& path) {
     std::vector<std::string> result;
-    std::string fullPath = getDataPath(path);
+    fs::path fullPath = getDataPath(path);
 
     if (!std::filesystem::exists(fullPath) || !std::filesystem::is_directory(fullPath)) {
         return result;
@@ -104,8 +104,8 @@ inline std::vector<std::string> listDirectory(const std::string& path) {
 }
 
 // Remove file
-inline bool removeFile(const std::string& path) {
-    std::string fullPath = getDataPath(path);
+inline bool removeFile(const fs::path& path) {
+    fs::path fullPath = getDataPath(path);
     try {
         return std::filesystem::remove(fullPath);
     } catch (const std::exception& e) {
@@ -115,8 +115,8 @@ inline bool removeFile(const std::string& path) {
 }
 
 // Get file size in bytes (-1 on error)
-inline int64_t getFileSize(const std::string& path) {
-    std::string fullPath = getDataPath(path);
+inline int64_t getFileSize(const fs::path& path) {
+    fs::path fullPath = getDataPath(path);
     try {
         if (!std::filesystem::exists(fullPath)) return -1;
         return static_cast<int64_t>(std::filesystem::file_size(fullPath));
@@ -130,9 +130,11 @@ inline int64_t getFileSize(const std::string& path) {
 // =============================================================================
 
 // Load entire text file into string
-inline std::string loadTextFile(const std::string& path) {
-    std::string fullPath = getDataPath(path);
-    std::ifstream file(fullPath);
+// (binary mode: the returned string is the file's exact bytes on every
+// platform; Windows text mode would silently fold \r\n into \n)
+inline std::string loadTextFile(const fs::path& path) {
+    fs::path fullPath = getDataPath(path);
+    std::ifstream file(fullPath, std::ios::binary);
     if (!file.is_open()) {
         logError() << "Cannot open file: " << path;
         return "";
@@ -144,9 +146,11 @@ inline std::string loadTextFile(const std::string& path) {
 }
 
 // Save string to text file
-inline bool saveTextFile(const std::string& path, const std::string& content) {
-    std::string fullPath = getDataPath(path);
-    std::ofstream file(fullPath);
+// (binary mode: what you pass is what lands on disk on every platform;
+// Windows text mode would expand \n to \r\n, changing the file size)
+inline bool saveTextFile(const fs::path& path, const std::string& content) {
+    fs::path fullPath = getDataPath(path);
+    std::ofstream file(fullPath, std::ios::binary);
     if (!file.is_open()) {
         logError() << "Cannot create file: " << path;
         return false;
@@ -157,9 +161,9 @@ inline bool saveTextFile(const std::string& path, const std::string& content) {
 }
 
 // Append string to text file
-inline bool appendToFile(const std::string& path, const std::string& content) {
-    std::string fullPath = getDataPath(path);
-    std::ofstream file(fullPath, std::ios::app);
+inline bool appendToFile(const fs::path& path, const std::string& content) {
+    fs::path fullPath = getDataPath(path);
+    std::ofstream file(fullPath, std::ios::app | std::ios::binary);
     if (!file.is_open()) {
         logError() << "Cannot open file for append: " << path;
         return false;
@@ -196,9 +200,9 @@ public:
     }
 
     // Open file (append = true to append to existing file)
-    bool open(const std::string& path, bool append = false) {
+    bool open(const fs::path& path, bool append = false) {
         close();
-        std::string fullPath = getDataPath(path);
+        fs::path fullPath = getDataPath(path);
         auto mode = std::ios::out | std::ios::binary;
         if (append) mode |= std::ios::app;
 
@@ -304,9 +308,9 @@ public:
     }
 
     // Open file for reading
-    bool open(const std::string& path) {
+    bool open(const fs::path& path) {
         close();
-        std::string fullPath = getDataPath(path);
+        fs::path fullPath = getDataPath(path);
         file_.open(fullPath, std::ios::in | std::ios::binary);
         if (!file_.is_open()) {
             logError() << "FileReader: Cannot open file: " << path;

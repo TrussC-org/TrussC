@@ -105,6 +105,19 @@ try("fs::path to Lua string", function()      -- tcxLuaPathAdapter: path -> stri
     local p = getDataPath('bindcheck_probe.txt')
     return type(p) == 'string' and #p > 0
 end)
+try("ctor CALL form (generated)", function()  -- Type(...) via sol::call_constructor
+    -- .new() alone passing is NOT enough: without call_constructor the
+    -- usertype table has no __call and Vec3(1,2,3) dies with
+    -- "attempt to call a table value". Regression check for both worlds.
+    local v = Vec3(1, 2, 3)
+    local c = Color(1, 0, 0)
+    return approx(v.z, 3) and approx(c.r, 1)
+end)
+try("ctor CALL form (hand-written)", function()
+    local f = Fbo()
+    local m = Mat4()
+    return f ~= nil and m ~= nil
+end)
 
 -- Emit machine-parseable summary via print (base lib; goes to stdout).
 print("##BINDCHECK_BEGIN##")

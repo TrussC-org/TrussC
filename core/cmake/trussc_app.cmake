@@ -396,6 +396,12 @@ foreach(ENTRY \${ENTRIES})
             # NULL thunk data
         elseif(SYM MATCHES \"^_RTC_\")
             # Internal symbol for runtime checks
+        elseif(SYM MATCHES \"^(size|mode|uid|gid)$\")
+            # Archive member header metadata, not a symbol. The header lines
+            # ('    2A4B8 size', '       0 mode', ...) only match the
+            # hex-address regex once a member grows to a 6-hex-digit size
+            # field (>= 1 MB object file), which is why small libs never hit
+            # this.
         else()
             list(APPEND SYMBOLS \"\${SYM}\")
         endif()
@@ -486,6 +492,23 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         target_compile_options(${PROJECT_NAME} PRIVATE ${_TC_WARN_FLAGS})
         if(TARGET guest)
             target_compile_options(guest PRIVATE ${_TC_WARN_FLAGS})
+        endif()
+    endif()
+
+    # CI gate for the repo's OWN bundled projects (examples/tests): uses of
+    # [[deprecated]] TrussC API become errors so stale API can't ship in
+    # examples. Opt-in via -DTC_DEPRECATED_ERRORS=ON or the
+    # TC_DEPRECATED_ERRORS env var (set in CI); never on for user builds.
+    # GCC/Clang only — MSVC's C4996 also covers CRT "unsafe" warnings.
+    if(NOT DEFINED TC_DEPRECATED_ERRORS AND DEFINED ENV{TC_DEPRECATED_ERRORS})
+        set(TC_DEPRECATED_ERRORS "$ENV{TC_DEPRECATED_ERRORS}")
+    endif()
+    if(TC_DEPRECATED_ERRORS)
+        set(_TC_DEPR_FLAG
+            $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Werror=deprecated-declarations>)
+        target_compile_options(${PROJECT_NAME} PRIVATE ${_TC_DEPR_FLAG})
+        if(TARGET guest)
+            target_compile_options(guest PRIVATE ${_TC_DEPR_FLAG})
         endif()
     endif()
 
@@ -684,8 +707,11 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
             message(STATUS "[${PROJECT_NAME}] sokol-shdc downloaded successfully")
         endif()
 
-        # Output languages: Metal (macOS/iOS), HLSL (Windows), GLSL (Linux), WGSL (Web/WebGPU)
-        set(_TC_SOKOL_SLANG "metal_macos:metal_ios:hlsl5:glsl300es:wgsl")
+        # Output languages: Metal (macOS/iOS/iOS-simulator), HLSL (Windows),
+        # GLSL (Linux), WGSL (Web/WebGPU). metal_sim keeps apps runnable on the
+        # iOS simulator (sg_query_backend() reports SG_BACKEND_METAL_SIMULATOR
+        # there; without it shader lookup returns null sources and crashes).
+        set(_TC_SOKOL_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl300es:wgsl")
 
         set(_TC_SHADER_OUTPUTS "")
         foreach(_shader_src ${_TC_SHADER_SOURCES})
@@ -965,6 +991,14 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
             -sASYNCIFY=1
             --shell-file=${_TC_SHELL_FILE}
         )
+        # Emscripten 6.x flipped GROWABLE_ARRAYBUFFERS on by default, which backs
+        # the wasm heap with a resizable ArrayBuffer. Current browsers reject
+        # views over resizable buffers in TextDecoder and WebGL2 texture uploads,
+        # so apps die at runtime (WGPU: inside the emdawnwebgpu JS bindings;
+        # WebGL2: texSubImage2D). Force the pre-6.x grow-and-detach behavior.
+        if(EMSCRIPTEN_VERSION VERSION_GREATER_EQUAL "6.0")
+            target_link_options(${PROJECT_NAME} PRIVATE -sGROWABLE_ARRAYBUFFERS=0)
+        endif()
         # Backend-specific link options
         # TC_WEB_BACKEND is set in core/CMakeLists.txt (defaults to WGPU)
         if(NOT DEFINED TC_WEB_BACKEND)

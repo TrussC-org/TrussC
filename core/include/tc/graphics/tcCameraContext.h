@@ -72,24 +72,17 @@ public:
 
 namespace internal {
 
-// The context the current drawing happens under (most recent registration).
-// Nodes stamp this during drawTree(); null until the first camera setup of
-// the process (e.g. headless mode), in which case picking falls back to the
-// plain vertical screen ray.
-inline std::shared_ptr<const CameraContext> currentCameraContext;
+// The context the current drawing happens under (most recent registration)
+// lives in WindowContext (tc/app/tcWindowContext.h): reach it via
+// internal::currentWindowContext().currentCameraContext. Null until the first
+// camera setup of the process (e.g. headless mode), in which case picking
+// falls back to the plain vertical screen ray.
 
 // Register a new camera scope. Always allocates a fresh context — see the
-// immutability note in the header comment.
+// immutability note in the header comment. Defined in tcWindowContext.h
+// (needs the complete WindowContext).
 inline void registerCameraContext(const Mat4& view, const Mat4& projection,
-                                  float viewW, float viewH, bool pickable = true) {
-    auto ctx = std::make_shared<CameraContext>();
-    ctx->view = view;
-    ctx->projection = projection;
-    ctx->viewW = viewW;
-    ctx->viewH = viewH;
-    ctx->pickable = pickable;
-    currentCameraContext = std::move(ctx);
-}
+                                  float viewW, float viewH, bool pickable = true);
 
 // Per-pick ray cache used by one hit-test traversal: the cursor position plus
 // one lazily-built ray per camera context encountered (a frame typically has

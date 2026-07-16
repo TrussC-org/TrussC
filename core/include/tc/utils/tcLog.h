@@ -16,6 +16,7 @@
 // Uses Event system
 #include "../events/tcEvent.h"
 #include "../events/tcEventListener.h"
+#include "tcFileIO.h"   // fs alias + pathToUtf8
 
 namespace trussc {
 
@@ -133,16 +134,16 @@ public:
 
     // === File settings ===
 
-    bool setLogFile(const std::string& path) {
+    bool setLogFile(const fs::path& path) {
         closeFile();
 
         fileStream_.open(path, std::ios::app);
         if (!fileStream_.is_open()) {
-            log(LogLevel::Error, "Failed to open log file: " + path);
+            log(LogLevel::Error, "Failed to open log file: " + internal::pathToUtf8(path));
             return false;
         }
 
-        filePath_ = path;
+        filePath_ = internal::pathToUtf8(path);
 
         // Register file listener
         fileListener_ = onLog.listen([this](LogEventArgs& e) {
@@ -214,7 +215,7 @@ inline void setFileLogLevel(LogLevel level) {
     getLogger().setFileLogLevel(level);
 }
 
-inline bool setLogFile(const std::string& path) {
+inline bool setLogFile(const fs::path& path) {
     return getLogger().setLogFile(path);
 }
 
@@ -236,7 +237,7 @@ inline void tcSetConsoleLogLevel(LogLevel level) { setConsoleLogLevel(level); }
 inline void tcSetFileLogLevel(LogLevel level) { setFileLogLevel(level); }
 
 [[deprecated("Use setLogFile() instead. Will be removed in v1.0.0")]]
-inline bool tcSetLogFile(const std::string& path) { return setLogFile(path); }
+inline bool tcSetLogFile(const fs::path& path) { return setLogFile(path); }
 
 [[deprecated("Use closeLogFile() instead. Will be removed in v1.0.0")]]
 inline void tcCloseLogFile() { closeLogFile(); }

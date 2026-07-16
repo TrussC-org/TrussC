@@ -14,7 +14,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include "tc/utils/tcLog.h"
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 // ---------------------------------------------------------------------------
 // Helper: get root view controller from sokol window
@@ -74,7 +74,7 @@ bool confirmDialog(const std::string& title, const std::string& message) {
 
 FileDialogResult loadDialog(const std::string& title,
                             const std::string& message,
-                            const std::string& defaultPath,
+                            const fs::path& defaultPath,
                             bool folderSelection) {
     logError() << "[FileDialog] Sync loadDialog is not supported on iOS. Use loadDialogAsync.";
     return FileDialogResult{};
@@ -82,8 +82,8 @@ FileDialogResult loadDialog(const std::string& title,
 
 FileDialogResult saveDialog(const std::string& title,
                             const std::string& message,
-                            const std::string& defaultPath,
-                            const std::string& defaultName) {
+                            const fs::path& defaultPath,
+                            const fs::path& defaultName) {
     logError() << "[FileDialog] Sync saveDialog is not supported on iOS. Use saveDialogAsync.";
     return FileDialogResult{};
 }
@@ -170,7 +170,7 @@ void confirmDialogAsync(const std::string& title,
 // ---------------------------------------------------------------------------
 void loadDialogAsync(const std::string& title,
                      const std::string& message,
-                     const std::string& defaultPath,
+                     const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback) {
     auto cb = callback;
@@ -228,8 +228,8 @@ void loadDialogAsync(const std::string& title,
 // ---------------------------------------------------------------------------
 void saveDialogAsync(const std::string& title,
                      const std::string& message,
-                     const std::string& defaultPath,
-                     const std::string& defaultName,
+                     const fs::path& defaultPath,
+                     const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback) {
     auto cb = callback;
 

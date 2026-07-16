@@ -45,7 +45,7 @@ bool matchLooksLikeRequest(FcPattern* match, const std::string& wanted) {
 
 } // namespace
 
-std::string systemFontPath(const std::string& name) {
+fs::path systemFontPath(const std::string& name) {
     if (name.empty()) return "";
 
     // FcConfigGetCurrent() lazily calls FcInit() on first use, so we don't

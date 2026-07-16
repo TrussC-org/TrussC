@@ -233,6 +233,12 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
                  float m20, float m21, float m22, float m23,
                  float m30, float m31, float m32, float m33),
             Mat4(const Mat4&)>(),
+        sol::call_constructor, sol::constructors<Mat4(),
+            Mat4(float m00, float m01, float m02, float m03,
+                 float m10, float m11, float m12, float m13,
+                 float m20, float m21, float m22, float m23,
+                 float m30, float m31, float m32, float m33),
+            Mat4(const Mat4&)>(),
         sol::meta_function::multiplication,
         sol::overload(
            [](const Mat4& a, const Mat4& b){ return a * b; },
@@ -266,6 +272,11 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
 
     sol::usertype<Mat3> mat3_type = lua->new_usertype<Mat3>("Mat3",
         sol::constructors<Mat3(),
+            Mat3(float m00, float m01, float m02,
+                 float m10, float m11, float m12,
+                 float m20, float m21, float m22),
+            Mat3(const Mat3&)>(),
+        sol::call_constructor, sol::constructors<Mat3(),
             Mat3(float m00, float m01, float m02,
                  float m10, float m11, float m12,
                  float m20, float m21, float m22),
@@ -322,7 +333,8 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
 
 
     sol::usertype<Fbo> fbo_type = lua->new_usertype<Fbo>("Fbo",
-        sol::constructors<Fbo()>() // FIXME: move constructor?
+        sol::constructors<Fbo()>(),
+        sol::call_constructor, sol::constructors<Fbo()>() // FIXME: move constructor?
     );
 
     fbo_type["allocate"] = sol::overload(
@@ -362,7 +374,8 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     fbo_type["getSampler"] = &Fbo::getSampler;
 
     sol::usertype<Texture> tex_type = lua->new_usertype<Texture>("Texture",
-        sol::constructors<Texture()>() // FIXME: move constructor?
+        sol::constructors<Texture()>(),
+        sol::call_constructor, sol::constructors<Texture()>() // FIXME: move constructor?
     );
     tex_type["allocate"] = sol::overload(
         [](Texture& f, int w, int h){ return f.allocate(w, h); },
@@ -428,7 +441,8 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
 
 
     sol::usertype<Image> img_type = lua->new_usertype<Image>("Image",
-        sol::constructors<Image()>() // FIXME: move constructor?
+        sol::constructors<Image()>(),
+        sol::call_constructor, sol::constructors<Image()>() // FIXME: move constructor?
     );
     img_type["load"] = sol::overload(
         &Image::load,
@@ -461,7 +475,8 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     img_type["getTexture"] = [](Image& f) -> Texture& { return f.getTexture(); };
 
     sol::usertype<Pixels> pix_type = lua->new_usertype<Pixels>("Pixels",
-        sol::constructors<Pixels()>() // FIXME: move constructor?
+        sol::constructors<Pixels()>(),
+        sol::call_constructor, sol::constructors<Pixels()>() // FIXME: move constructor?
     );
     pix_type["allocate"] = sol::overload(
         [](Pixels& f, int w, int h){ return f.allocate(w, h); },
@@ -506,7 +521,8 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
 
 
     sol::usertype<Shader> shader_type = lua->new_usertype<Shader>("Shader",
-        sol::constructors<Shader()>() // FIXME: move constructor?
+        sol::constructors<Shader()>(),
+        sol::call_constructor, sol::constructors<Shader()>() // FIXME: move constructor?
     );
     shader_type["load"] = &Shader::load;
     shader_type["clear"] = &Shader::clear;
@@ -533,7 +549,8 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     shader_type["submitVertices"] = &Shader::submitVertices;
 
     sol::usertype<EasyCam> easycam_t = lua->new_usertype<EasyCam>("EasyCam",
-        sol::constructors<EasyCam()>()
+        sol::constructors<EasyCam()>(),
+        sol::call_constructor, sol::constructors<EasyCam()>()
     );
 
     easycam_t["begin"] = &EasyCam::begin;
@@ -572,7 +589,8 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     easycam_t["mouseScrolled"] = &EasyCam::mouseScrolled;
 
     sol::usertype<Light> light_t = lua->new_usertype<Light>("Light",
-        sol::constructors<Light()>()
+        sol::constructors<Light()>(),
+        sol::call_constructor, sol::constructors<Light()>()
     );
     light_t["setDirectional"] = sol::overload(
         [](Light& m, float x, float y, float z){ return m.setDirectional(x, y, z); },
@@ -649,7 +667,8 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
 
 
     sol::usertype<Material> material_t = lua->new_usertype<Material>("Material",
-        sol::constructors<Material()>()
+        sol::constructors<Material()>(),
+        sol::call_constructor, sol::constructors<Material()>()
     );
     material_t["getBaseColor"] = &Material::getBaseColor;
     material_t["setBaseColor"] = sol::overload(
@@ -710,6 +729,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     // luagen in trussc_generated.cpp. Only the Json usertype is hand-written here.
     sol::usertype<Json> json_t = lua->new_usertype<Json>("Json",
         sol::constructors<Json()>(),
+        sol::call_constructor, sol::constructors<Json()>(),
         "get_string", [](Json& j){ return j.get<std::string>(); },
         "get_double", [](Json& j){ return j.get<double>(); },
         "get_float", [](Json& j){ return j.get<float>(); },
@@ -749,6 +769,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     // loadXml/parseXml are free functions -> generated by luagen. Xml usertype is hand-written.
     sol::usertype<Xml> xml_t = lua->new_usertype<Xml>("Xml",
         sol::constructors<Xml()>(),
+        sol::call_constructor, sol::constructors<Xml()>(),
         "load", &Xml::load,
         "parse", &Xml::parse,
         "save", sol::overload(
@@ -773,6 +794,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
 
     sol::usertype<XmlAttribute> xmlattr_t = lua->new_usertype<XmlAttribute>("XmlAttribute",
         sol::constructors<XmlAttribute()>(),
+        sol::call_constructor, sol::constructors<XmlAttribute()>(),
         "set", sol::overload( // WORKAROUND
             [](XmlAttribute& x, pugi::string_view_t s){ return (x = s); },
             [](XmlAttribute& x, const pugi::char_t* s){ return (x = s); },
@@ -788,6 +810,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
 
     sol::usertype<XmlText> xmltext_t = lua->new_usertype<XmlText>("XmlText",
         sol::constructors<XmlText()>(),
+        sol::call_constructor, sol::constructors<XmlText()>(),
         "set", sol::overload( // WORKAROUND
             [](XmlText& x, pugi::string_view_t s){ return (x = s); },
             [](XmlText& x, const pugi::char_t* s){ return (x = s); },
@@ -800,6 +823,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
 
     sol::usertype<XmlNode> xmlnode_t = lua->new_usertype<XmlNode>("XmlNode",
         sol::constructors<XmlNode()>(),
+        sol::call_constructor, sol::constructors<XmlNode()>(),
         "append_attribute", sol::overload(
             [](XmlNode& x, pugi::string_view_t n){ return x.append_attribute(n); },
             [](XmlNode& x, const pugi::char_t* n){ return x.append_attribute(n); }
@@ -871,6 +895,8 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     lua->new_usertype<SoundBuffer>("SoundBuffer",
         sol::constructors<SoundBuffer(),
             SoundBuffer(const SoundBuffer&), SoundBuffer(SoundBuffer&&)>(),
+        sol::call_constructor, sol::constructors<SoundBuffer(),
+            SoundBuffer(const SoundBuffer&), SoundBuffer(SoundBuffer&&)>(),
         sol::base_classes, sol::bases<SoundSource>(),
         "loadOgg", &SoundBuffer::loadOgg,
         "loadWav", &SoundBuffer::loadWav,
@@ -918,6 +944,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
 
     lua->new_usertype<MicInput>("MicInput",
         sol::constructors<MicInput>(),
+        sol::call_constructor, sol::constructors<MicInput>(),
             // MicInput(const MicInput&), MicInput(MicInput&&)>(),
         "start", &MicInput::start,
         "stop", &MicInput::stop,

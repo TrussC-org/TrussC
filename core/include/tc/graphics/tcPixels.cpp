@@ -12,11 +12,12 @@ bool Pixels::save(const fs::path& path) const {
     // Convert relative paths to data path
     fs::path savePath = path;
     if (path.is_relative()) {
-        savePath = getDataPath(path.string());
+        savePath = getDataPath(path);
     }
 
     auto ext = savePath.extension().string();
-    auto pathStr = savePath.string();
+    // UTF-8 for stb (STBIW_WINDOWS_UTF8 makes stb wide-open it on Windows)
+    auto pathStr = internal::pathToUtf8(savePath);
     int result = 0;
 
     if (ext == ".png" || ext == ".PNG") {

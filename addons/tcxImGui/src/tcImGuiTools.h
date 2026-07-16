@@ -132,8 +132,8 @@ inline void registerImGuiTools() {
     // Activate collection
     enableCollection();
 
-    // imgui_get_widgets — list all widgets
-    tc::mcp::tool("imgui_get_widgets", "List ImGui widgets with labels, types, and positions")
+    // tcx_imgui_get_widgets — list all widgets
+    tc::mcp::tool("tcx_imgui_get_widgets", "List ImGui widgets with labels, types, and positions")
         .arg<std::string>("window", "Filter by window name (optional, omit for all)", false)
         .bind(std::function<json(const json&)>([](const json& args) -> json {
             std::string window = args.value("window", "");
@@ -175,8 +175,8 @@ inline void registerImGuiTools() {
             return json{{"widgets", widgets}, {"count", (int)widgets.size()}};
         }));
 
-    // imgui_click — click a widget by label
-    tc::mcp::tool("imgui_click", "Click an ImGui widget by label")
+    // tcx_imgui_click — click a widget by label
+    tc::mcp::tool("tcx_imgui_click", "Click an ImGui widget by label")
         .arg<std::string>("label", "Widget label text")
         .arg<std::string>("window", "Window name (optional, required if label is ambiguous)", false)
         .bind(std::function<json(const json&)>([](const json& args) -> json {
@@ -197,8 +197,8 @@ inline void registerImGuiTools() {
             };
         }));
 
-    // imgui_input — set the value of an input/slider/drag widget
-    tc::mcp::tool("imgui_input", "Set the value of an ImGui widget: text inputs, and numeric entry on slider/drag widgets")
+    // tcx_imgui_input — set the value of an input/slider/drag widget
+    tc::mcp::tool("tcx_imgui_input", "Set the value of an ImGui widget: text inputs, and numeric entry on slider/drag widgets")
         .arg<std::string>("label", "Widget label")
         .arg<std::string>("text", "Replacement text (or numeric value for slider/drag)")
         .arg<std::string>("window", "Window name (optional)", false)
@@ -222,8 +222,8 @@ inline void registerImGuiTools() {
             };
         }));
 
-    // imgui_checkbox — toggle or set a checkbox
-    tc::mcp::tool("imgui_checkbox", "Toggle an ImGui checkbox")
+    // tcx_imgui_checkbox — toggle or set a checkbox
+    tc::mcp::tool("tcx_imgui_checkbox", "Toggle an ImGui checkbox")
         .arg<std::string>("label", "Checkbox label")
         .arg<bool>("value", "Desired state (true/false)", false)
         .arg<std::string>("window", "Window name (optional)", false)
@@ -262,7 +262,7 @@ inline void registerImGuiTools() {
             };
         }));
 
-    tc::logNotice() << "[MCP] ImGui tools registered (imgui_get_widgets, imgui_click, imgui_input, imgui_checkbox)";
+    tc::logNotice() << "[MCP] ImGui tools registered (tcx_imgui_get_widgets, tcx_imgui_click, tcx_imgui_input, tcx_imgui_checkbox)";
 }
 
 } // namespace tcx::imgui

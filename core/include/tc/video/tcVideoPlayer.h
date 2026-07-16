@@ -53,19 +53,32 @@ public:
     // Load / Close
     // =========================================================================
 
-    bool load(const std::string& path) override {
+    LoadResult load(const fs::path& path) override {
         if (initialized_) {
             close();
         }
 
         // Resolve relative paths via getDataPath; URLs pass through untouched
         // (the web backend streams straight from them)
-        bool isUrl = path.rfind("http://", 0) == 0 || path.rfind("https://", 0) == 0;
-        std::string resolvedPath = isUrl ? path : getDataPath(path);
+        const std::string pathStr = path.string();
+        bool isUrl = pathStr.rfind("http://", 0) == 0 || pathStr.rfind("https://", 0) == 0;
+        fs::path resolvedPath = isUrl ? path : getDataPath(path);
+
+        // Missing files are classified up front (URLs skip the check —
+        // the platform backends stream straight from them).
+        if (!isUrl) {
+            std::error_code ec;
+            if (!fs::exists(resolvedPath, ec)) {
+                return LoadResult::fail(LoadError::FileNotFound,
+                                        "file not found: " + internal::pathToUtf8(resolvedPath));
+            }
+        }
 
         // Platform-specific load
         if (!loadPlatform(resolvedPath)) {
-            return false;
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    "platform decoder failed to open: " +
+                                    internal::pathToUtf8(resolvedPath));
         }
 
         // Remember the resolved path so instance-level frame extraction
@@ -102,7 +115,7 @@ public:
         // the black-clear are alternatives, never both.
         bool postered = autoPoster_ && loadPosterFrame(0.0f);
         if (!postered) clearTexture();
-        return true;
+        return LoadResult::success();
     }
 
     void close() override {
@@ -355,8 +368,8 @@ public:
 
     /// Path of the currently loaded video file (empty string when not loaded).
     /// This is the resolved path (relative paths passed to load() are resolved
-    /// via getDataPath).
-    const std::string& getPath() const { return sourcePath_; }
+    /// via getDataPath), as UTF-8.
+    fs::path getPath() const { return sourcePath_; }
 
 protected:
     // -------------------------------------------------------------------------
@@ -438,7 +451,7 @@ private:
 
     // Resolved path of the currently loaded video (empty when not loaded).
     // Used by getPath() and the instance-level frame-extraction overloads.
-    std::string sourcePath_;
+    fs::path sourcePath_;
 
     // -------------------------------------------------------------------------
     // Internal methods
@@ -542,7 +555,7 @@ private:
     // -------------------------------------------------------------------------
     // Platform-specific methods (implemented in tcVideoPlayer_mac.mm, etc.)
     // -------------------------------------------------------------------------
-    bool loadPlatform(const std::string& path);
+    bool loadPlatform(const fs::path& path);
     void closePlatform();
     void playPlatform();
     void stopPlatform();
@@ -599,7 +612,7 @@ public:
     /// @param timeSec   Time in seconds to extract from
     /// @param outDuration If non-null, receives video duration in seconds
     /// @return true on success
-    static bool extractFrame(const std::string& path, Pixels& outPixels,
+    static bool extractFrame(const fs::path& path, Pixels& outPixels,
                              float timeSec, float* outDuration = nullptr) {
         return extractFramePlatform(path, outPixels, timeSec, outDuration);
     }
@@ -611,7 +624,7 @@ public:
     /// @param timeSec   Upper-bound time in seconds
     /// @param outDuration If non-null, receives video duration in seconds
     /// @return true on success
-    static bool extractKeyFrame(const std::string& path, Pixels& outPixels,
+    static bool extractKeyFrame(const fs::path& path, Pixels& outPixels,
                                 float timeSec, float* outDuration = nullptr) {
         return extractKeyFramePlatform(path, outPixels, timeSec, outDuration);
     }
@@ -639,7 +652,7 @@ public:
     // -------------------------------------------------------------------------
 
     /// Extract the exact frame at a time into a ready-to-draw Image (static).
-    static bool extractFrame(const std::string& path, Image& outImage,
+    static bool extractFrame(const fs::path& path, Image& outImage,
                              float timeSec, float* outDuration = nullptr) {
         Pixels px;
         if (!extractFramePlatform(path, px, timeSec, outDuration)) return false;
@@ -649,7 +662,7 @@ public:
 
     /// Extract the nearest keyframe at or before a time into a ready-to-draw
     /// Image (static, faster).
-    static bool extractKeyFrame(const std::string& path, Image& outImage,
+    static bool extractKeyFrame(const fs::path& path, Image& outImage,
                                 float timeSec, float* outDuration = nullptr) {
         Pixels px;
         if (!extractKeyFramePlatform(path, px, timeSec, outDuration)) return false;
@@ -683,9 +696,9 @@ private:
         img.update();
     }
 
-    static bool extractFramePlatform(const std::string& path, Pixels& outPixels,
+    static bool extractFramePlatform(const fs::path& path, Pixels& outPixels,
                                      float timeSec, float* outDuration);
-    static bool extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
+    static bool extractKeyFramePlatform(const fs::path& path, Pixels& outPixels,
                                         float timeSec, float* outDuration);
 
     // Allow platform implementations to access internals

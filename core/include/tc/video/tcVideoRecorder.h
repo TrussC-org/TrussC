@@ -108,7 +108,7 @@ public:
     // Open the encoder. `path` is resolved via getDataPath() when relative; the
     // parent directory is created if missing. Returns false if the encoder (or
     // the requested codec on this platform) could not be created.
-    bool open(const std::string& path, int width, int height,
+    bool open(const fs::path& path, int width, int height,
               const VideoRecordSettings& settings = {}) {
         close();
         if (width <= 0 || height <= 0) {
@@ -123,8 +123,7 @@ public:
         path_ = getDataPath(path);
         {   // native encoders won't create intermediate directories
             std::error_code ec;
-            std::filesystem::path parent =
-                std::filesystem::path(path_).parent_path();
+            fs::path parent = path_.parent_path();
             if (!parent.empty()) std::filesystem::create_directories(parent, ec);
         }
         width_ = width;
@@ -134,7 +133,8 @@ public:
         frameCount_ = 0;
         scratch_.resize((size_t)width_ * height_ * 4);
 
-        if (!openPlatform(path_, width_, height_, fps_, settings_)) {
+        // Platform encoders take UTF-8 (converted to native inside)
+        if (!openPlatform(internal::pathToUtf8(path_), width_, height_, fps_, settings_)) {
             logError("VideoWriter")
                 << "failed to open " << videoCodecName(settings_.codec)
                 << " encoder for " << path_;
@@ -162,7 +162,7 @@ public:
     int  getWidth() const { return width_; }
     int  getHeight() const { return height_; }
     float getFps() const { return fps_; }
-    const std::string& getPath() const { return path_; }
+    fs::path getPath() const { return path_; }
     const VideoRecordSettings& getSettings() const { return settings_; }
 
     // Append one frame at the fixed-rate clock (frameIndex / fps) — deterministic
@@ -266,7 +266,7 @@ private:
 #endif
 
     internal::VideoWriterPlatformData* platform_ = nullptr;
-    std::string path_;
+    fs::path path_;
     std::vector<unsigned char> scratch_;
     int   width_  = 0;
     int   height_ = 0;
@@ -287,14 +287,14 @@ public:
     ScreenRecorder& operator=(const ScreenRecorder&) = delete;
 
     // Record the whole window (swapchain) — the same fully-composited image
-    // get_screenshot returns. Size is taken from the framebuffer.
-    bool start(const std::string& path, const VideoRecordSettings& settings = {}) {
+    // tc_get_screenshot returns. Size is taken from the framebuffer.
+    bool start(const fs::path& path, const VideoRecordSettings& settings = {}) {
         return startSource(Source::Swapchain, nullptr,
                            sapp_width(), sapp_height(), path, settings);
     }
 
     // Record an offscreen Fbo every frame (clean output, GUI-free).
-    bool start(const Fbo& fbo, const std::string& path,
+    bool start(const Fbo& fbo, const fs::path& path,
                const VideoRecordSettings& settings = {}) {
         return startSource(Source::Fbo, &fbo,
                            fbo.getWidth(), fbo.getHeight(), path, settings);
@@ -303,12 +303,12 @@ public:
     // Fixed-duration convenience: record for `durationSec` seconds, then auto-stop
     // and finalize the file at exactly that length. Same as filling
     // settings.duration. (durationSec <= 0 records until stop(), like the default.)
-    bool start(const std::string& path, float durationSec) {
+    bool start(const fs::path& path, float durationSec) {
         VideoRecordSettings s;
         s.duration = durationSec;
         return start(path, s);
     }
-    bool start(const Fbo& fbo, const std::string& path, float durationSec) {
+    bool start(const Fbo& fbo, const fs::path& path, float durationSec) {
         VideoRecordSettings s;
         s.duration = durationSec;
         return start(fbo, path, s);
@@ -337,14 +337,14 @@ public:
 
     bool isRecording() const { return writer_.isOpen(); }
     int  getFrameCount() const { return writer_.getFrameCount(); }
-    const std::string& getPath() const { return writer_.getPath(); }
+    fs::path getPath() const { return writer_.getPath(); }
     VideoWriter& writer() { return writer_; }   // for advanced introspection
 
 private:
     enum class Source { None, Swapchain, Fbo };
 
     bool startSource(Source src, const Fbo* fbo, int w, int h,
-                     const std::string& path,
+                     const fs::path& path,
                      const VideoRecordSettings& settings) {
         stop();
         if (!writer_.open(path, w, h, settings)) return false;
@@ -469,7 +469,7 @@ namespace internal {
 
 // Start recording the whole window to a video file. `path` is required;
 // relative paths resolve via getDataPath(). Auto-finalizes on app exit.
-TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const std::string& path,
+TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const fs::path& path,
                            const VideoRecordSettings& settings = {}) {
     return internal::globalScreenRecorder().start(path, settings);
 }
@@ -477,7 +477,7 @@ TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const
 // Fixed-duration convenience: record the whole window for `durationSec` seconds,
 // then auto-stop and finalize at exactly that length. (durationSec <= 0 behaves
 // like the unlimited overload above — record until stopRecording().)
-TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const std::string& path,
+TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const fs::path& path,
                            float durationSec) {
     return internal::globalScreenRecorder().start(path, durationSec);
 }
@@ -486,14 +486,14 @@ TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const
 // The Fbo must stay alive while recording — if it is destroyed mid-recording,
 // the recording stops and finalizes automatically.
 TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const Fbo& fbo,
-                           const std::string& path,
+                           const fs::path& path,
                            const VideoRecordSettings& settings = {}) {
     return internal::globalScreenRecorder().start(fbo, path, settings);
 }
 
 // Fixed-duration Fbo recording (see above).
 TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const Fbo& fbo,
-                           const std::string& path,
+                           const fs::path& path,
                            float durationSec) {
     return internal::globalScreenRecorder().start(fbo, path, durationSec);
 }
@@ -501,6 +501,6 @@ TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const
 inline void stopRecording() { internal::globalScreenRecorder().stop(); }
 inline bool isRecording()   { return internal::globalScreenRecorder().isRecording(); }
 inline int  recordingFrameCount() { return internal::globalScreenRecorder().getFrameCount(); }
-inline const std::string& recordingPath() { return internal::globalScreenRecorder().getPath(); }
+inline fs::path recordingPath() { return internal::globalScreenRecorder().getPath(); }
 
 } // namespace trussc

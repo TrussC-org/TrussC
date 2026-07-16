@@ -12,7 +12,7 @@
 
 namespace trussc {
 
-std::string systemFontPath(const std::string& /*name*/) {
+fs::path systemFontPath(const std::string& /*name*/) {
     return "";
 }
 
