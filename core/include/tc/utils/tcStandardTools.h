@@ -22,6 +22,9 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <psapi.h>
 #elif !defined(__EMSCRIPTEN__)
@@ -118,10 +121,10 @@ inline json pixelsToImageJson(const trussc::Pixels& px, const std::string& forma
     int dstH = std::max(1, (int)std::lround((double)srcH * dstW / srcW));
 
     const unsigned char* data = px.getData();
-    std::vector<unsigned char> small;
+    std::vector<unsigned char> scaled;
     if (dstW != srcW) {
-        downscaleImage(px.getData(), srcW, srcH, ch, small, dstW, dstH);
-        data = small.data();
+        downscaleImage(px.getData(), srcW, srcH, ch, scaled, dstW, dstH);
+        data = scaled.data();
     }
 
     std::vector<unsigned char> out;
@@ -351,7 +354,7 @@ inline void registerInspectionTools() {
             return json{{"values", values}, {"images", images}};
         }));
 
-    tool("tc_get_status_image", "Fetch an app-published image registered via mcp::statusImage(), downscaled + JPEG-encoded like tc_get_thumbnail (pixel grab on the main loop, encode on the HTTP worker — no frame stutter).")
+    tool("tc_get_status_image", "Fetch an app-published image registered via mcp::statusImage(), downscaled + JPEG-encoded like tc_get_screenshot (pixel grab on the main loop, encode on the HTTP worker — no frame stutter).")
         .arg<std::string>("name", "Image name as listed by tc_get_status")
         .arg<int>("width", "Target width in pixels, aspect preserved (default 512, clamped 16-4096; never upscales)", false)
         .arg<int>("quality", "JPEG quality 1-100 (default 75)", false)
