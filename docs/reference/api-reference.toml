@@ -10938,6 +10938,22 @@ keywords = ["internal"]
 hide = true
 keywords = ["internal"]
 
+["Window::dispatchMouseMoveToTree"]
+hide = true
+keywords = ["internal"]
+
+["Window::dispatchMouseScrollToTree"]
+hide = true
+keywords = ["internal"]
+
+["Window::dispatchKeyPressToTree"]
+hide = true
+keywords = ["internal"]
+
+["Window::dispatchKeyReleaseToTree"]
+hide = true
+keywords = ["internal"]
+
 ["Window::syncRootSize"]
 hide = true
 keywords = ["internal"]
