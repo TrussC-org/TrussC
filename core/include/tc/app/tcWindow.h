@@ -89,6 +89,18 @@ public:
     void dispatchMouseReleaseToTree(const MouseEventArgs& e) {
         if (ctx_.rootNode) ctx_.rootNode->dispatchMouseRelease(e);
     }
+    void dispatchMouseMoveToTree(const internal::MouseEventRaw& e) {
+        if (ctx_.rootNode) ctx_.rootNode->dispatchMouseMove(e);
+    }
+    void dispatchMouseScrollToTree(const ScrollEventArgs& e) {
+        if (ctx_.rootNode) ctx_.rootNode->dispatchMouseScroll(e);
+    }
+    void dispatchKeyPressToTree(const KeyEventArgs& e) {
+        if (ctx_.rootNode) ctx_.rootNode->dispatchKeyPress(e);
+    }
+    void dispatchKeyReleaseToTree(const KeyEventArgs& e) {
+        if (ctx_.rootNode) ctx_.rootNode->dispatchKeyRelease(e);
+    }
     void tickTree() {
         if (!ctx_.rootNode) return;
         ctx_.rootNode->updateTree();
