@@ -59,7 +59,7 @@ your own tools:
 ### Inspection Tools (always available in MCP mode)
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `tc_get_screenshot` | `format`, `width`, `quality` (all optional) | Screenshot as Base64 image. Defaults to full-resolution lossless PNG; pass `width` for a downscaled monitoring thumbnail (aspect preserved, never upscales, clamped 16-4096) and `format: "jpg"` (+ `quality`, default 75) for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread (measured under continuous hammering at jpg/512: ~179 fps vs ~46 fps for the old synchronous encode; baseline ~236) |
+| `tc_get_screenshot` | `format`, `width`, `quality` (all optional) | Screenshot as an MCP image content block (rendered inline by MCP clients) plus a text metadata block. Defaults to full-resolution lossless PNG; pass `width` for a downscaled monitoring thumbnail (aspect preserved, never upscales, clamped 16-4096) and `format: "jpg"` (+ `quality`, default 75) for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread (measured under continuous hammering at jpg/512: ~179 fps vs ~46 fps for the old synchronous encode; baseline ~236) |
 | `tc_save_screenshot` | `path` | Save screenshot to file |
 | `tc_get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, pid, rssBytes, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll. `pid` lets a supervisor confirm the reply comes from *its* child (port collisions); `rssBytes` is whole-process resident memory (the leak-hunting number); `memoryBytes` is sokol-tracked allocations only |
 | `tc_get_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
@@ -194,6 +194,22 @@ curl -X POST http://localhost:8080/mcp \
   "id": 1,
   "result": {
     "content": [{ "type": "text", "text": "{\"status\":\"ok\"}" }]
+  }
+}
+```
+
+Image tools (`tc_get_screenshot`, `tc_get_status_image`) return an
+MCP-standard **image content block** — clients like Claude Code render it
+inline instead of receiving a Base64 wall — followed by a text block with
+the metadata:
+
+```json
+{
+  "result": {
+    "content": [
+      { "type": "image", "data": "<base64>", "mimeType": "image/png" },
+      { "type": "text", "text": "{\"width\":1920,\"height\":1200}" }
+    ]
   }
 }
 ```

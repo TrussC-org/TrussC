@@ -150,6 +150,22 @@ inline json pixelsToImageJson(const trussc::Pixels& px, const std::string& forma
                 {"height", dstH}};
 }
 
+// Wrap an encoded image as MCP-standard content blocks: an image block
+// (clients like Claude Code render it inline) followed by a text block with
+// the metadata (width/height as JSON, for scripted consumers). Error objects
+// pass through untouched and get the normal text wrapping.
+inline json imageContentResult(json img) {
+    if (!img.contains("data")) return img;  // error object
+    json meta = json::object();
+    for (auto& key : {"width", "height"}) {
+        if (img.contains(key)) meta[key] = img[key];
+    }
+    return json::array({
+        json{{"type", "image"}, {"data", img["data"]}, {"mimeType", img["mimeType"]}},
+        json{{"type", "text"}, {"text", meta.dump()}},
+    });
+}
+
 // App-published ops status registries (see mcp::status / statusGraph /
 // statusImage below). Main-thread only: registration happens in
 // setup()/update() and the getters run inside MCP tool handlers, which
@@ -298,7 +314,7 @@ inline void registerInspectionTools() {
                     if (!grabbed) {
                         return json{{"status", "error"}, {"message", "Failed to grab screen"}};
                     }
-                    return detail::pixelsToImageJson(*px, format, reqWidth, quality);
+                    return detail::imageContentResult(detail::pixelsToImageJson(*px, format, reqWidth, quality));
                 };
             });
             return json(nullptr);  // ignored — deferred result is sent instead
@@ -368,7 +384,7 @@ inline void registerInspectionTools() {
                         return json{{"status", "error"},
                                     {"message", "image getter returned no pixels"}};
                     }
-                    return detail::pixelsToImageJson(*px, "jpg", reqWidth, quality);
+                    return detail::imageContentResult(detail::pixelsToImageJson(*px, "jpg", reqWidth, quality));
                 };
             });
             return json(nullptr);  // ignored — deferred result is sent instead
