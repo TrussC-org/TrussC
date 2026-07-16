@@ -9,10 +9,26 @@
 // emits the structural surface. Correctness is verified by compiling the output.
 
 const fs = require('fs');
-const path = process.argv[2];
-if (!path) { console.error('usage: node luagen-types.js <reference-data.json> [colors.json]'); process.exit(1); }
+const nodePath = require('path');
+// argv: <reference-data.json> [colors.json] [--shards N --outdir DIR]
+// Without --shards the single file goes to stdout (legacy behavior). With
+// --shards N the output is written to DIR as N shard TUs + an aggregator —
+// splitting the sol2 template instantiations across TUs keeps peak compiler
+// memory low enough for small machines (a single 100-usertype TU cannot be
+// compiled on an 8 GB Raspberry Pi 5 even at -j1).
+const argv = process.argv.slice(2);
+const flags = {};
+const positional = [];
+for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--shards') flags.shards = parseInt(argv[++i], 10);
+    else if (argv[i] === '--outdir') flags.outdir = argv[++i];
+    else positional.push(argv[i]);
+}
+const path = positional[0];
+if (!path) { console.error('usage: node luagen-types.js <reference-data.json> [colors.json] [--shards N --outdir DIR]'); process.exit(1); }
+if (flags.shards > 1 && !flags.outdir) { console.error('--shards requires --outdir'); process.exit(1); }
 const data = JSON.parse(fs.readFileSync(path, 'utf8'));
-const colorsPath = process.argv[3];
+const colorsPath = positional[1];
 const colorsData = colorsPath ? JSON.parse(fs.readFileSync(colorsPath, 'utf8')) : null;
 
 const skip = { template: 0, unbindable: 0, op: 0 };
@@ -244,6 +260,10 @@ const EXCLUDE = new Set([
     'MicInput', 'Pixels', 'Shader', 'SoundBuffer', 'Texture',
 ]);
 
+// Heavy blocks (usertypes + enums) are collected individually so they can be
+// bin-packed across shard TUs; light tail bindings (constants, colors) stay in
+// the aggregator. `body` remains the concatenation for single-file output.
+const blocks = [];
 let body = '', count = 0;
 // wrap a whole usertype block when the TYPE itself is platform-restricted
 function guardedType(code, e) {
@@ -259,12 +279,12 @@ for (const id in data) {
         if (!e.lua_bind || !e.lua_bind.length) { report.push(`${e.name}: templated, no lua_bind (skipped)`); continue; }
         for (const T of e.lua_bind) {
             const base = e.name.replace(/<.*>/, '');
-            try { body += guardedType(emitType(e, `${base}<${T}>`, `${base}_${T.replace(/[^A-Za-z0-9]/g, '')}`, T), e); count++; }
+            try { blocks.push(guardedType(emitType(e, `${base}<${T}>`, `${base}_${T.replace(/[^A-Za-z0-9]/g, '')}`, T), e)); count++; }
             catch (err) { report.push(`${e.name}<${T}>: ${err.message}`); }
         }
         continue;
     }
-    try { body += guardedType(emitType(e, e.name, e.name, null), e); count++; }
+    try { blocks.push(guardedType(emitType(e, e.name, e.name, null), e)); count++; }
     catch (err) { report.push(`${e.name}: ${err.message}`); }
 }
 
@@ -284,7 +304,7 @@ for (const id in data) {
     s2 += `        sol::meta_function::equal_to, [](${Q} a, ${Q} b){ return a == b; }`;
     for (const m of e.members) s2 += `,\n        "${m.name}", sol::var(${Q}::${m.name})`;
     s2 += `);\n`;
-    body += s2; enumCount++;
+    blocks.push(s2); enumCount++;
 }
 if (nestedEnums.length) report.push(`nested enums (not yet emitted): ${nestedEnums.join(', ')}`);
 
@@ -292,11 +312,12 @@ if (nestedEnums.length) report.push(`nested enums (not yet emitted): ${nestedEnu
 // Top-level non-hidden constants (TAU, KEY_*, MOUSE_BUTTON_*, VSYNC, Direction
 // shorthands Left/Center/...). Plain assignments; sol converts values as usual.
 let constCount = 0;
-body += `    // constants\n`;
+let tail = '';   // light bindings kept in the aggregator TU (constants, colors)
+tail += `    // constants\n`;
 for (const id in data) {
     const e = data[id];
     if (e.kind !== 'var' || e.owner || e.ns || e.hidden) continue;
-    body += `    (*lua)["${e.name}"] = trussc::${e.name};\n`;
+    tail += `    (*lua)["${e.name}"] = trussc::${e.name};\n`;
     constCount++;
 }
 
@@ -307,30 +328,69 @@ let colorCount = 0;
 if (colorsData) {
     // `colors` is just a named table; use a file-local tag struct (emitted in the
     // prelude below) as the usertype key — there is no trussc::Colors.
-    body += `    {\n        sol::usertype<TcxLuaColorsTable> t = lua->new_usertype<TcxLuaColorsTable>("colors");\n`;
+    tail += `    {\n        sol::usertype<TcxLuaColorsTable> t = lua->new_usertype<TcxLuaColorsTable>("colors");\n`;
     for (const group of colorsData) for (const item of group.items) {
-        body += `        t["${item.name}"] = sol::var(trussc::colors::${item.name});\n`;
+        tail += `        t["${item.name}"] = sol::var(trussc::colors::${item.name});\n`;
         colorCount++;
     }
-    body += `    }\n`;
+    tail += `    }\n`;
 }
 
-process.stdout.write(`// AUTO-GENERATED usertype bindings from reference-data.json by luagen-types.js
+const PRELUDE = (needsColorsTag) => `// AUTO-GENERATED usertype bindings from reference-data.json by luagen-types.js
 #include "tcxLua.h"
 #include "TrussC.h"
 using namespace trussc;
 using namespace std;
-namespace { struct TcxLuaColorsTable {}; }   // tag for the \`colors\` constant table
-#ifndef _MSC_VER
+${needsColorsTag ? 'namespace { struct TcxLuaColorsTable {}; }   // tag for the `colors` constant table\n' : ''}#ifndef _MSC_VER
 #pragma GCC diagnostic push
 #pragma clang diagnostic push
 #endif
-void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
-${body}}
-#ifndef _MSC_VER
+`;
+const POSTLUDE = `#ifndef _MSC_VER
 #pragma GCC diagnostic pop
 #pragma clang diagnostic pop
 #endif
-`);
+`;
+
+const shards = flags.shards > 1 ? flags.shards : 1;
+if (shards === 1) {
+    // Legacy single-file output on stdout.
+    body = blocks.join('') + tail;
+    process.stdout.write(`${PRELUDE(true)}void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
+${body}}
+${POSTLUDE}`);
+} else {
+    // Shard output: greedy bin-packing of the heavy blocks (block size is a
+    // fair proxy for sol2 template load) into N TUs, plus an aggregator that
+    // defines setGeneratedTypeBindings, calls each shard, and carries the
+    // light tail (constants + colors).
+    const buckets = Array.from({ length: shards }, () => ({ size: 0, parts: [] }));
+    for (const b of [...blocks].sort((a, c) => c.length - a.length)) {
+        const min = buckets.reduce((x, y) => (y.size < x.size ? y : x));
+        min.parts.push(b); min.size += b.length;
+    }
+    const outdir = flags.outdir;
+    // Remove stale shard files from a previous (different-N) run.
+    for (const f of fs.readdirSync(outdir)) {
+        if (/^trussctype_generated_\d+\.cpp$/.test(f)) fs.unlinkSync(nodePath.join(outdir, f));
+    }
+    const decls = [];
+    buckets.forEach((bk, i) => {
+        const nn = String(i).padStart(2, '0');
+        const fn = `tcxLuaGenShard_${nn}`;
+        decls.push(fn);
+        fs.writeFileSync(nodePath.join(outdir, `trussctype_generated_${nn}.cpp`),
+            `${PRELUDE(false)}void ${fn}(const std::shared_ptr<sol::state>& lua) {
+${bk.parts.join('')}}
+${POSTLUDE}`);
+    });
+    fs.writeFileSync(nodePath.join(outdir, 'trussctype_generated.cpp'),
+        `${PRELUDE(true)}${decls.map((d) => `void ${d}(const std::shared_ptr<sol::state>& lua);`).join('\n')}
+void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
+${decls.map((d) => `    ${d}(lua);`).join('\n')}
+${tail}}
+${POSTLUDE}`);
+    console.error(`[luagen-types] wrote ${shards} shard TUs + aggregator to ${outdir} (largest shard ${Math.max(...buckets.map(b => b.size))} bytes)`);
+}
 console.error(`[luagen-types] usertypes: ${count} | enums: ${enumCount} | colors: ${colorCount} | consts: ${constCount} | skipped members: template ${skip.template}, unbindable ${skip.unbindable}, unsupported-op ${skip.op}`);
 for (const r of report) console.error('  ' + r);

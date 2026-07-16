@@ -7,7 +7,8 @@ HERE=${0:A:h}
 ADDON=${HERE:h}            # .../addons/tcxLua
 G="$ADDON/src/generated/trussc_generated.cpp"
 H="$ADDON/src/tcxLua.cpp"
-GT="$ADDON/src/generated/trussctype_generated.cpp"   # luagen-types Phase 2 usertypes
+# luagen-types Phase 2 usertypes — may be a single file or N shard TUs
+GT=("$ADDON"/src/generated/trussctype_generated*.cpp)
 OUT="$HERE/bin/data/expected.lua"
 
 {
@@ -22,7 +23,7 @@ OUT="$HERE/bin/data/expected.lua"
     | awk '{printf "    \"%s\",\n", $0}'
   echo "  },"
   echo "  usertypes = {"
-  { grep -vE '^[[:space:]]*//' "$H"; grep -vE '^[[:space:]]*//' "$GT"; } \
+  { grep -vE '^[[:space:]]*//' "$H"; grep -vhE '^[[:space:]]*//' "${GT[@]}"; } \
     | grep -oE 'new_usertype<.*>\([[:space:]]*"[^"]+"' \
     | sed -E 's/.*\(\s*"([^"]+)"/\1/' | sort -u \
     | awk '{printf "    \"%s\",\n", $0}'
