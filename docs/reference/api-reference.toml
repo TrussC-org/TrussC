@@ -1989,6 +1989,66 @@ description.en = "Save FBO contents to file"
 description.ja = "FBOの内容をファイルに保存"
 description.ko = "FBO 내용을 파일로 저장"
 
+["LoadResult"]
+category = "file"
+keywords = ["error", "load", "result", "fail"]
+description.en = "Result of a resource load (Image, SoundBuffer, VideoPlayer, Font, ...). Truthy on success; on failure carries a LoadError and a human-readable message."
+description.ja = "リソース読み込み（Image、SoundBuffer、VideoPlayer、Font など）の結果。成功時は真、失敗時は LoadError とメッセージを保持"
+description.ko = "리소스 로드(Image, SoundBuffer, VideoPlayer, Font 등)의 결과. 성공 시 참, 실패 시 LoadError와 메시지를 보유"
+related = ["LoadError", "loadErrorName"]
+details.en = """
+Replaces the old `bool` returns of the load APIs (v0.7). `explicit operator bool()`
+keeps `if (img.load(...))` working unchanged; assigning to a plain bool needs
+`.ok()`. The error taxonomy is deliberately coarse and will grow richer without
+breaking compatibility.
+"""
+
+["LoadResult::error"]
+description.en = "What went wrong; LoadError::None on success"
+description.ja = "失敗の種別。成功時は LoadError::None"
+description.ko = "실패 종류. 성공 시 LoadError::None"
+
+["LoadResult::message"]
+description.en = "Human-readable failure detail (may be empty)"
+description.ja = "人間可読な失敗の詳細（空のこともある）"
+description.ko = "사람이 읽을 수 있는 실패 상세(비어 있을 수 있음)"
+
+["LoadResult::ok"]
+description.en = "true if the load succeeded (error == LoadError::None)"
+description.ja = "読み込みが成功していれば true（error == LoadError::None）"
+description.ko = "로드가 성공했으면 true (error == LoadError::None)"
+
+["LoadResult::success"]
+description.en = "Make a success result (static)"
+description.ja = "成功の結果を作る（static）"
+description.ko = "성공 결과를 만듦 (static)"
+
+["LoadResult::fail"]
+description.en = "Make a failure result with an error kind and optional message (static)"
+description.ja = "エラー種別と任意のメッセージ付きで失敗の結果を作る（static）"
+description.ko = "오류 종류와 선택적 메시지로 실패 결과를 만듦 (static)"
+
+["LoadError"]
+category = "file"
+keywords = ["error", "load", "not found", "decode"]
+description.en = "Load failure kind: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown."
+description.ja = "読み込み失敗の種別：None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown。"
+description.ko = "로드 실패 종류: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown."
+related = ["LoadResult"]
+value_desc.None.en = "Success (no error)"
+value_desc.FileNotFound.en = "The (resolved) path does not exist or could not be opened"
+value_desc.UnsupportedFormat.en = "Extension / container not supported on this platform"
+value_desc.DecodeFailed.en = "The decoder rejected the data (corrupt, truncated, wrong codec)"
+value_desc.Unknown.en = "Anything the loader could not classify"
+
+["loadErrorName"]
+category = "file"
+keywords = ["error", "name", "label", "log"]
+description.en = "Short label for a LoadError value (\"FileNotFound\", ...). For log messages"
+description.ja = "LoadError 値の短いラベル（\"FileNotFound\" など）。ログ用"
+description.ko = "LoadError 값의 짧은 레이블(\"FileNotFound\" 등). 로그용"
+related = ["LoadResult", "LoadError"]
+
 ["FileDialogResult"]
 keywords = ["open", "save", "picker", "browse"]
 description.en = "Result of a load/save file dialog"

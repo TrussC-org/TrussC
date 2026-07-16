@@ -1,6 +1,7 @@
 #pragma once
 #include "tc/utils/tcAnnotations.h"
 #include "tc/utils/tcFileIO.h"   // fs alias + path boundary helpers
+#include "tc/utils/tcLoadResult.h"
 
 // =============================================================================
 // TrussC Sound
@@ -85,29 +86,29 @@ public:
     // File-based decoders (implemented in tcSound_impl.cpp).
     // WAV / MP3 / FLAC go through ma_decoder (miniaudio); OGG goes through
     // stb_vorbis directly because miniaudio does not bundle a Vorbis decoder.
-    bool loadOgg(const fs::path& path);
-    bool loadWav(const fs::path& path);
-    bool loadMp3(const fs::path& path);
-    bool loadFlac(const fs::path& path);
+    LoadResult loadOgg(const fs::path& path);
+    LoadResult loadWav(const fs::path& path);
+    LoadResult loadMp3(const fs::path& path);
+    LoadResult loadFlac(const fs::path& path);
 
     // Auto-detect entry point. Dispatches to the format-specific loader
     // based on the file's extension (.wav / .mp3 / .ogg / .flac / .aac /
     // .m4a — case-insensitive).
-    bool load(const fs::path& path);
+    LoadResult load(const fs::path& path);
 
     // Memory-based decoders. Format must be known (no extension to sniff).
-    bool loadWavFromMemory(const void* data, size_t dataSize);
-    bool loadMp3FromMemory(const void* data, size_t dataSize);
-    bool loadFlacFromMemory(const void* data, size_t dataSize);
-    bool loadOggFromMemory(const void* data, size_t dataSize);
+    LoadResult loadWavFromMemory(const void* data, size_t dataSize);
+    LoadResult loadMp3FromMemory(const void* data, size_t dataSize);
+    LoadResult loadFlacFromMemory(const void* data, size_t dataSize);
+    LoadResult loadOggFromMemory(const void* data, size_t dataSize);
 
     // Load AAC/M4A file (platform-specific implementation)
-    // Returns false on unsupported platforms
-    TC_PLATFORMS("macos,windows,linux,ios,web") bool loadAac(const fs::path& path);
+    // Fails on unsupported platforms
+    TC_PLATFORMS("macos,windows,linux,ios,web") LoadResult loadAac(const fs::path& path);
 
     // Load AAC data from memory (platform-specific implementation)
-    // Returns false on unsupported platforms
-    TC_PLATFORMS("macos,windows,linux,ios,web") bool loadAacFromMemory(const void* data, size_t dataSize);
+    // Fails on unsupported platforms
+    TC_PLATFORMS("macos,windows,linux,ios,web") LoadResult loadAacFromMemory(const void* data, size_t dataSize);
 
     // -------------------------------------------------------------------------
     // ADTS header utilities (for raw AAC from MOV containers)
@@ -151,12 +152,13 @@ public:
 #endif
 
     // Load raw PCM data (16-bit signed, little-endian)
-    bool loadPcmFromMemory(const void* data, size_t dataSize,
-                           int numChannels, int rate, int bitsPerSample = 16,
-                           bool bigEndian = false) {
+    LoadResult loadPcmFromMemory(const void* data, size_t dataSize,
+                                 int numChannels, int rate, int bitsPerSample = 16,
+                                 bool bigEndian = false) {
         if (bitsPerSample != 16 && bitsPerSample != 32) {
             printf("SoundBuffer: unsupported bits per sample: %d\n", bitsPerSample);
-            return false;
+            return LoadResult::fail(LoadError::UnsupportedFormat,
+                                    "unsupported bits per sample: " + std::to_string(bitsPerSample));
         }
 
         channels = numChannels;
@@ -190,7 +192,7 @@ public:
         printf("SoundBuffer: loaded PCM from memory (%d ch, %d Hz, %zu samples)\n",
                channels, sampleRate, numSamples);
 
-        return true;
+        return LoadResult::success();
     }
 
     float getDuration() const override {
@@ -406,10 +408,10 @@ public:
 
     // Open the file, validate format, populate channels / sampleRate /
     // duration. Decoders for individual voices are opened later by the
-    // engine when play() is called. Returns false if the file can't be
+    // engine when play() is called. Fails if the file can't be
     // opened or the format is unsupported. Format is detected from
     // extension (.wav .mp3 .flac .ogg — same as SoundBuffer::load).
-    bool loadStream(const fs::path& path, int maxPolyphony = 1);
+    LoadResult loadStream(const fs::path& path, int maxPolyphony = 1);
 
     float getDuration() const override { return duration_; }
 
@@ -1052,7 +1054,7 @@ public:
     //                            can overlap. Default 1 = single-instance
     //                            (typical BGM); raise for cross-fade or
     //                            layered ambient tracks.
-    bool load(const fs::path& path) {
+    LoadResult load(const fs::path& path) {
         // Initialize AudioEngine (only once)
         AudioEngine::getInstance().init();
 
@@ -1062,28 +1064,29 @@ public:
         // Determine format by extension
         std::string ext = path.extension().string();
         if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
-        bool success = false;
+        LoadResult result = LoadResult::fail(LoadError::UnsupportedFormat,
+                                             "unsupported extension '." + ext + "'");
 
         if (ext == "ogg" || ext == "OGG") {
-            success = buf->loadOgg(path);
+            result = buf->loadOgg(path);
         } else if (ext == "wav" || ext == "WAV") {
-            success = buf->loadWav(path);
+            result = buf->loadWav(path);
         } else if (ext == "mp3" || ext == "MP3") {
-            success = buf->loadMp3(path);
+            result = buf->loadMp3(path);
         } else if (ext == "flac" || ext == "FLAC") {
-            success = buf->loadFlac(path);
+            result = buf->loadFlac(path);
         } else if (ext == "aac" || ext == "AAC" || ext == "m4a" || ext == "M4A") {
-            success = buf->loadAac(path);
+            result = buf->loadAac(path);
         } else {
             printf("Sound: unsupported format: %s\n", ext.c_str());
         }
 
-        if (!success) {
+        if (!result) {
             buffer_.reset();
-            return false;
+            return result;
         }
         buffer_ = std::move(buf);
-        return true;
+        return LoadResult::success();
     }
 
     // Stream the file from disk instead of loading it all into RAM.
@@ -1099,7 +1102,7 @@ public:
     // user apps portable we fall back to eager load() and log a warning so
     // the developer can branch explicitly with isStreaming() / #ifdef
     // __EMSCRIPTEN__ if they need to know.
-    TC_PLATFORMS("macos,windows,linux,android,ios") bool loadStream(const fs::path& path, int maxPolyphony = 1) {
+    TC_PLATFORMS("macos,windows,linux,android,ios") LoadResult loadStream(const fs::path& path, int maxPolyphony = 1) {
         AudioEngine::getInstance().init();
 #ifdef __EMSCRIPTEN__
         (void)maxPolyphony;
@@ -1110,12 +1113,13 @@ public:
         return load(path);
 #else
         auto stream = std::make_shared<SoundStream>();
-        if (!stream->loadStream(path, maxPolyphony)) {
+        LoadResult r = stream->loadStream(path, maxPolyphony);
+        if (!r) {
             buffer_.reset();
-            return false;
+            return r;
         }
         buffer_ = std::move(stream);
-        return true;
+        return LoadResult::success();
 #endif
     }
 

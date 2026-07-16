@@ -1851,6 +1851,7 @@ int64_t getFileSize(const fs::path & path)  // Get file size in bytes
 std::string getParentDirectory(const fs::path & path)  // Get parent directory
 std::string joinPath(const fs::path & dir, const fs::path & file)  // Join directory and filename
 std::vector<std::string> listDirectory(const fs::path & path)  // List files in directory
+const char * loadErrorName(LoadError e)  // Short label for a LoadError value ("FileNotFound", ...). For log messages
 Json loadJson(const fs::path & path)  // Load a JSON file and return it as a Json object. Relative paths are resolved via getDataPath; returns an empty Json on error.
 std::string loadTextFile(const fs::path & path)  // Load entire text file
 Xml loadXml(const fs::path & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
@@ -2451,7 +2452,7 @@ bool Font::isLoaded() const  // Check if loaded
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
 bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
 bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is forbidden at the start of a line (kinsoku rule).
-bool Font::load(const fs::path & nameOrPath, int size)  // Load font file
+LoadResult Font::load(const fs::path & nameOrPath, int size)  // Load font file
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
 void Font::setHangingPunctuation(bool enabled)  // Let prohibited line-start CJK punctuation hang past the line edge instead of wrapping (default off)
@@ -2570,8 +2571,8 @@ Texture & Image::getTexture() [+1]  // Get internal texture
 int Image::getWidth() const  // Get width
 void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 bool Image::isAllocated() const  // Check if allocated
-bool Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
-bool Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain.
+LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
+LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain.
 void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°.
 void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true))
@@ -2676,6 +2677,14 @@ void Light::setProjectorAspect(float a)  // Set projector aspect ratio
 void Light::setShadowBias(float bias)  // Set shadow depth bias in world units
 void Light::setSpecular(const Color & c) [+1]  // Set specular light color
 void Light::setSpot(const Vec3 & position, const Vec3 & direction, float innerHalfAngle = 0.0, float outerHalfAngle = 0.785399973) [+1]  // Set as spot light with cone angles
+```
+
+### LoadResult — Result of a resource load (Image, SoundBuffer, VideoPlayer, Font, ...). Truthy on success; on failure carries a LoadError and a human-readable message.
+
+```cpp
+LoadResult LoadResult::fail(LoadError e, std::string msg = std::string())  // Make a failure result with an error kind and optional message (static)
+bool LoadResult::ok() const  // true if the load succeeded (error == LoadError::None)
+LoadResult LoadResult::success()  // Make a success result (static)
 ```
 
 ### Location — GPS / WiFi location fix returned by getLocation()
@@ -3087,9 +3096,9 @@ int Pixels::getWidth() const  // Get width
 void Pixels::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 bool Pixels::isAllocated() const  // Check if allocated
 bool Pixels::isFloat() const  // Whether the pixel data uses 32-bit floats
-bool Pixels::load(const fs::path & path)  // Load image from file
-bool Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Load image from memory
-bool Pixels::loadHDR(const fs::path & path)  // Load an HDR (.hdr) image into a float pixel buffer
+LoadResult Pixels::load(const fs::path & path)  // Load image from file
+LoadResult Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Load image from memory
+LoadResult Pixels::loadHDR(const fs::path & path)  // Load an HDR (.hdr) image into a float pixel buffer
 bool Pixels::loadPlatform(const fs::path & path)  // Load an image using the platform image decoder
 void Pixels::mirror(bool horizontal, bool vertical)  // Flip in place. Both true is 180°.
 void Pixels::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
@@ -3361,9 +3370,9 @@ bool Sound::isLoop() const  // Check if loop mode is enabled
 bool Sound::isPaused() const  // Check if paused
 bool Sound::isPlaying() const  // Check if playing
 bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
-bool Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
+LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
 void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
-bool Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
+LoadResult Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
 void Sound::loadTestTone(float frequency = 440.0, float duration = 1.0)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.
 void Sound::pause()  // Pause playback
 void Sound::play()  // Play audio
@@ -3394,18 +3403,18 @@ void SoundBuffer::generateSquareWave(float frequency, float duration, float volu
 void SoundBuffer::generateTriangleWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono triangle wave.
 int SoundBuffer::getAdtsSampleRateIndex(int sampleRate)  // ADTS sample-rate index for the given rate (AAC-in-MOV container helper).
 float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sampleRate).
-bool SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
-bool SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
-bool SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios,web]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
-bool SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM.
-bool SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
-bool SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM.
-bool SoundBuffer::loadMp3FromMemory(const void * data, size_t dataSize)  // Decode MP3 data from a memory buffer.
-bool SoundBuffer::loadOgg(const fs::path & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis).
-bool SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  // Decode OGG Vorbis data from a memory buffer.
-bool SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths.
-bool SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into PCM.
-bool SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from a memory buffer.
+LoadResult SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
+LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
+LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios,web]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
+LoadResult SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM.
+LoadResult SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
+LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM.
+LoadResult SoundBuffer::loadMp3FromMemory(const void * data, size_t dataSize)  // Decode MP3 data from a memory buffer.
+LoadResult SoundBuffer::loadOgg(const fs::path & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis).
+LoadResult SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  // Decode OGG Vorbis data from a memory buffer.
+LoadResult SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths.
+LoadResult SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into PCM.
+LoadResult SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from a memory buffer.
 void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed.
 ```
 
@@ -3422,7 +3431,7 @@ Kind SoundSource::kind() const  // Source kind (Eager for SoundBuffer, Stream fo
 float SoundStream::getDuration() const  // Decoded file duration in seconds.
 int SoundStream::getMaxPolyphony() const  // Number of concurrent decoder slots reserved at loadStream().
 fs::path SoundStream::getPath() const  // Path the stream was opened from.
-bool SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported.
+LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported.
 ```
 
 ### StrokeMesh — Variable-width polyline stroke geometry with caps, joins and miter limit; build it from points or a Path, then update() and draw()
@@ -3838,7 +3847,7 @@ int VideoPlayer::getTotalFrames() const  // Get total number of frames
 bool VideoPlayer::getUseHwAccel() const  // Get HW accel preference (not the actual backend — use isUsingHwAccel() for that)
 bool VideoPlayer::hasAudio() const  // Check if the loaded video has an audio track
 bool VideoPlayer::isUsingHwAccel() const  // Check if hardware decoding is currently active (after load)
-bool VideoPlayer::load(const fs::path & path)  // Load a video file
+LoadResult VideoPlayer::load(const fs::path & path)  // Load a video file
 void VideoPlayer::nextFrame()  // Advance to the next frame
 void VideoPlayer::play()  // Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture
 void VideoPlayer::playImpl()  // Backend implementation of playImpl for this platform's video player.
@@ -3889,7 +3898,7 @@ bool VideoPlayerBase::isPaused() const  // Check if video is paused
 bool VideoPlayerBase::isPlaying() const  // Check if video is currently playing (not paused)
 bool VideoPlayerBase::isReady() const  // True while the texture holds a real picture — i.e. drawing shows actual video, not black. With the default auto poster this is true from load() on; false only if the poster failed and no frame has arrived yet
 bool VideoPlayerBase::isUsingHwAccel() const  // Return true if hardware-accelerated decoding is currently active.
-bool VideoPlayerBase::load(const fs::path & path)  // Load a video from the given file path; return true on success.
+LoadResult VideoPlayerBase::load(const fs::path & path)  // Load a video from the given file path; return true on success.
 void VideoPlayerBase::markDone()  // Mark playback as done, clearing playing unless looping.
 void VideoPlayerBase::markFrameNew()  // Mark that a new frame has arrived (sets frameNew and firstFrameReceived).
 void VideoPlayerBase::nextFrame()  // Advance to the next frame.
@@ -4001,6 +4010,7 @@ enum ImageType { Color, Grayscale }  // Image type: Color or Grayscale.
 enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku) strictness for vertical / Japanese text
 enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.
 enum LightType { Directional, Point, Spot }  // Light type: Directional, Point, or Spot.
+enum LoadError { None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown }  // Load failure kind: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown.
 enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Log severity, from Verbose (most detailed) to Fatal; Silent disables logging.
 enum MixMode { Auto, DownmixMono }  // Sound channel mixing: Auto (match the output) or DownmixMono.
 enum MouseButton { Left, Right, Middle, None }  // Mouse button: Left, Right, Middle, or None.

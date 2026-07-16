@@ -53,7 +53,7 @@ public:
     // Load / Close
     // =========================================================================
 
-    bool load(const fs::path& path) override {
+    LoadResult load(const fs::path& path) override {
         if (initialized_) {
             close();
         }
@@ -64,9 +64,21 @@ public:
         bool isUrl = pathStr.rfind("http://", 0) == 0 || pathStr.rfind("https://", 0) == 0;
         fs::path resolvedPath = isUrl ? path : getDataPath(path);
 
+        // Missing files are classified up front (URLs skip the check —
+        // the platform backends stream straight from them).
+        if (!isUrl) {
+            std::error_code ec;
+            if (!fs::exists(resolvedPath, ec)) {
+                return LoadResult::fail(LoadError::FileNotFound,
+                                        "file not found: " + internal::pathToUtf8(resolvedPath));
+            }
+        }
+
         // Platform-specific load
         if (!loadPlatform(resolvedPath)) {
-            return false;
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    "platform decoder failed to open: " +
+                                    internal::pathToUtf8(resolvedPath));
         }
 
         // Remember the resolved path so instance-level frame extraction
@@ -103,7 +115,7 @@ public:
         // the black-clear are alternatives, never both.
         bool postered = autoPoster_ && loadPosterFrame(0.0f);
         if (!postered) clearTexture();
-        return true;
+        return LoadResult::success();
     }
 
     void close() override {

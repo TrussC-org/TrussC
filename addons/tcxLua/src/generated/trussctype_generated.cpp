@@ -505,6 +505,14 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["rawEvent"] = &trussc::CoreEvents::rawEvent;
     }
     {
+        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
+        t["error"] = &trussc::LoadResult::error;
+        t["message"] = &trussc::LoadResult::message;
+        t["ok"] = &trussc::LoadResult::ok;
+        t["success"] = &trussc::LoadResult::success;
+        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
+    }
+    {
         sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream",
             sol::constructors<trussc::SoundStream()>(),
             sol::call_constructor, sol::constructors<trussc::SoundStream()>());
@@ -1592,6 +1600,13 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         "Right", sol::var(trussc::MouseButton::Right),
         "Middle", sol::var(trussc::MouseButton::Middle),
         "None", sol::var(trussc::MouseButton::None));
+    lua->new_usertype<trussc::LoadError>("LoadError",
+        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
+        "None", sol::var(trussc::LoadError::None),
+        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
+        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
+        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
+        "Unknown", sol::var(trussc::LoadError::Unknown));
     lua->new_usertype<trussc::MixMode>("MixMode",
         sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
         "Auto", sol::var(trussc::MixMode::Auto),

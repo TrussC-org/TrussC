@@ -203,6 +203,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("isProximityClose", []() { return trussc::isProximityClose(); });
     lua->set_function("getLocation", []() { return trussc::getLocation(); });
     lua->set_function("events", []() -> decltype(auto) { return trussc::events(); });
+    lua->set_function("loadErrorName", [](trussc::LoadError e) { return trussc::loadErrorName(e); });
     lua->set_function("initAudio", []() { return trussc::initAudio(); });
     lua->set_function("shutdownAudio", []() { return trussc::shutdownAudio(); });
     lua->set_function("getMicInput", []() -> decltype(auto) { return trussc::getMicInput(); });

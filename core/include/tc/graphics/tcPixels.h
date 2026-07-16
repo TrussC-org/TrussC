@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcLoadResult.h"
 
 // =============================================================================
 // tcPixels.h - CPU pixel buffer management
@@ -212,14 +213,22 @@ public:
     // === File I/O ===
 
     // Load from file (stb_image first, then platform-specific fallback for HEIC etc.)
-    bool load(const fs::path& path) {
+    LoadResult load(const fs::path& path) {
         clear();
 
+        std::error_code ec;
+        if (!std::filesystem::exists(path, ec)) {
+            return LoadResult::fail(LoadError::FileNotFound,
+                                    "file not found: " + internal::pathToUtf8(path));
+        }
         int w, h, channels;
         unsigned char* loaded = stbi_load(internal::pathToUtf8(path).c_str(), &w, &h, &channels, 4);
         if (!loaded) {
+            const char* stbReason = stbi_failure_reason();
             // Fallback to platform-specific loader (ImageIO on macOS)
-            return loadPlatform(path);
+            if (loadPlatform(path)) return LoadResult::success();
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    stbReason ? stbReason : "decoder rejected the file");
         }
 
         width_ = w;
@@ -233,19 +242,26 @@ public:
         stbi_image_free(loaded);
 
         allocated_ = true;
-        return true;
+        return LoadResult::success();
     }
 
     // Load an HDR (Radiance .hdr / .pic) image as float pixels. stb_image
     // decodes radiance RGBE into linear float32 RGB. The alpha channel is
     // synthesized as 1.0 to keep downstream code RGBA-friendly.
-    bool loadHDR(const fs::path& path) {
+    LoadResult loadHDR(const fs::path& path) {
         clear();
 
+        std::error_code ec;
+        if (!std::filesystem::exists(path, ec)) {
+            return LoadResult::fail(LoadError::FileNotFound,
+                                    "file not found: " + internal::pathToUtf8(path));
+        }
         int w, h, channels;
         float* loaded = stbi_loadf(internal::pathToUtf8(path).c_str(), &w, &h, &channels, 3);
         if (!loaded) {
-            return false;
+            const char* stbReason = stbi_failure_reason();
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    stbReason ? stbReason : "decoder rejected the file");
         }
 
         width_ = w;
@@ -265,20 +281,22 @@ public:
         stbi_image_free(loaded);
 
         allocated_ = true;
-        return true;
+        return LoadResult::success();
     }
 
     // Platform-specific image loader (implemented per platform)
     bool loadPlatform(const fs::path& path);
 
     // Load from memory
-    bool loadFromMemory(const unsigned char* buffer, int len) {
+    LoadResult loadFromMemory(const unsigned char* buffer, int len) {
         clear();
 
         int w, h, channels;
         unsigned char* loaded = stbi_load_from_memory(buffer, len, &w, &h, &channels, 4);
         if (!loaded) {
-            return false;
+            const char* stbReason = stbi_failure_reason();
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    stbReason ? stbReason : "decoder rejected the data");
         }
 
         width_ = w;
@@ -292,7 +310,7 @@ public:
         stbi_image_free(loaded);
 
         allocated_ = true;
-        return true;
+        return LoadResult::success();
     }
 
     // Save to file (implemented in tcPixels.cpp for dataPath support)

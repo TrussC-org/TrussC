@@ -74,16 +74,23 @@ public:
     // Load / Close
     // =========================================================================
 
-    bool load(const tc::fs::path& path) override {
+    tc::LoadResult load(const tc::fs::path& path) override {
         if (initialized_) {
             close();
         }
         resetStats();
 
+        std::error_code ec;
+        if (!tc::fs::exists(path, ec)) {
+            return tc::LoadResult::fail(tc::LoadError::FileNotFound,
+                "file not found: " + tc::internal::pathToUtf8(path));
+        }
+
         // Parse MOV file
         if (!movParser_.open(path)) {
             tc::logError("HapPlayer") << "Failed to open: " << path;
-            return false;
+            return tc::LoadResult::fail(tc::LoadError::DecodeFailed,
+                "failed to parse MOV: " + tc::internal::pathToUtf8(path));
         }
 
         const auto& info = movParser_.getInfo();
@@ -92,14 +99,17 @@ public:
         if (!videoTrack) {
             tc::logError("HapPlayer") << "No video track found";
             movParser_.close();
-            return false;
+            return tc::LoadResult::fail(tc::LoadError::DecodeFailed,
+                "no video track found");
         }
 
         if (!videoTrack->isHap()) {
             tc::logError("HapPlayer") << "Not a HAP codec (FourCC: "
                 << MovParser::fourccToString(videoTrack->codecFourCC) << ")";
             movParser_.close();
-            return false;
+            return tc::LoadResult::fail(tc::LoadError::UnsupportedFormat,
+                "not a HAP codec (FourCC: " +
+                MovParser::fourccToString(videoTrack->codecFourCC) + ")");
         }
 
         // Store video info
@@ -120,7 +130,8 @@ public:
         if (hapFormat_ == HapFormat::Unknown) {
             tc::logError("HapPlayer") << "Could not determine HAP format";
             movParser_.close();
-            return false;
+            return tc::LoadResult::fail(tc::LoadError::DecodeFailed,
+                "could not determine HAP format");
         }
 
         // Allocate frame buffer for decoded DXT data
@@ -131,7 +142,8 @@ public:
         if (!createCompressedTexture()) {
             tc::logError("HapPlayer") << "Failed to create compressed texture";
             movParser_.close();
-            return false;
+            return tc::LoadResult::fail(tc::LoadError::Unknown,
+                "failed to create compressed texture");
         }
 
         // Load audio track if available
@@ -147,7 +159,7 @@ public:
 
         initialized_ = true;
         currentFrame_ = 0;
-        return true;
+        return tc::LoadResult::success();
     }
 
     void close() override {

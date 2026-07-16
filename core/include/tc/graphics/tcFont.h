@@ -38,6 +38,7 @@
 #include "stb/stb_truetype.h"
 
 #include "../utils/tcLog.h"
+#include "tc/utils/tcLoadResult.h"
 #include "../utils/tcSystemFont.h"
 #include "../types/tcDirection.h"
 #include "../types/tcRectangle.h"
@@ -885,7 +886,7 @@ public:
     //   - A system font name (PostScript or family name) — resolved via
     //     tc::systemFontPath when the path doesn't exist on disk. Lets users
     //     write `font.load("HiraginoSans-W3", 24)` cross-platform.
-    bool load(const fs::path& nameOrPath, int size) {
+    LoadResult load(const fs::path& nameOrPath, int size) {
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
         dpiScale_ = sapp_dpi_scale();
@@ -925,16 +926,30 @@ public:
 #ifdef __EMSCRIPTEN__
             // Async load - returns immediately, font available after fetch completes
             loadFromUrlAsync(actualPath, physicalSize);
-            return true;  // Will be loaded asynchronously
+            return LoadResult::success();  // Will be loaded asynchronously
 #else
             logError() << "Font: URL loading only supported in WebAssembly";
-            return false;
+            return LoadResult::fail(LoadError::UnsupportedFormat,
+                                    "URL loading only supported in WebAssembly: " + actualPath);
 #endif
         } else {
             atlasManager_ = internal::SharedFontCache::getInstance().getOrCreate(cacheKey_);
         }
 
-        return atlasManager_ != nullptr;
+        if (!atlasManager_) {
+            // Classify: the resolved path doesn't exist on disk -> the font
+            // was never found (bad path or unresolvable system-font name);
+            // otherwise the file opened but stb_truetype rejected it.
+            std::error_code ec;
+            if (!fs::exists(internal::utf8ToPath(actualPath), ec)) {
+                std::string msg = "font not found: \"" + nameStr + "\"";
+                if (actualPath != nameStr) msg += " (resolved to \"" + actualPath + "\")";
+                return LoadResult::fail(LoadError::FileNotFound, msg);
+            }
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    "failed to init font: " + actualPath);
+        }
+        return LoadResult::success();
     }
 
 private:

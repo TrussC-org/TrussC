@@ -119,7 +119,7 @@ int main() {
         check("Pixels::save: PNG with Japanese path", px.save(imgPath));
 
         Pixels loaded;
-        bool ok = loaded.load(getDataPath(imgPath));
+        bool ok = loaded.load(getDataPath(imgPath)).ok();
         check("Pixels::load: PNG back from Japanese path", ok);
         bool same = ok && loaded.getWidth() == 4 && loaded.getHeight() == 4;
         if (same) {
@@ -139,7 +139,7 @@ int main() {
             out.write(reinterpret_cast<const char*>(wav.data()), wav.size());
         }
         Sound snd;
-        check("Sound::load: WAV with Japanese absolute path", snd.load(wavPath));
+        check("Sound::load: WAV with Japanese absolute path", snd.load(wavPath).ok());
         check("Sound::load: decoded duration > 0", snd.getDuration() > 0.05f);
     }
 

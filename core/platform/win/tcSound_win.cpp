@@ -132,8 +132,14 @@ namespace {
     }
 }
 
-bool SoundBuffer::loadAac(const fs::path& path) {
+LoadResult SoundBuffer::loadAac(const fs::path& path) {
     EnsureMFStartup();
+
+    std::error_code ec;
+    if (!fs::exists(path, ec)) {
+        return LoadResult::fail(LoadError::FileNotFound,
+                                "file not found: " + internal::pathToUtf8(path));
+    }
 
     // fs::path is already wide on Windows
     std::wstring wpath = path.wstring();
@@ -143,7 +149,11 @@ bool SoundBuffer::loadAac(const fs::path& path) {
 
     if (FAILED(hr)) {
         printf("SoundBuffer: loadAac failed to open %s (0x%08X)\n", path.c_str(), hr);
-        return false;
+        char hrBuf[16];
+        snprintf(hrBuf, sizeof(hrBuf), "0x%08X", (unsigned)hr);
+        return LoadResult::fail(LoadError::DecodeFailed,
+                                "failed to open " + internal::pathToUtf8(path) +
+                                " (hr=" + hrBuf + ")");
     }
 
     bool result = ReadFromSourceReader(pReader, this);
@@ -156,16 +166,18 @@ bool SoundBuffer::loadAac(const fs::path& path) {
         printf("SoundBuffer: failed to decode AAC %s\n", path.c_str());
     }
 
-    return result;
+    return result ? LoadResult::success()
+                  : LoadResult::fail(LoadError::DecodeFailed,
+                                     "failed to decode AAC: " + internal::pathToUtf8(path));
 }
 
-bool SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
+LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
     EnsureMFStartup();
 
     IStream* pStream = SHCreateMemStream((const BYTE*)data, (UINT)dataSize);
     if (!pStream) {
         printf("SoundBuffer: loadAacFromMemory failed to create stream\n");
-        return false;
+        return LoadResult::fail(LoadError::DecodeFailed, "failed to create memory stream");
     }
 
     IMFByteStream* pByteStream = NULL;
@@ -174,7 +186,7 @@ bool SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
 
     if (FAILED(hr)) {
         printf("SoundBuffer: loadAacFromMemory failed to create MF byte stream\n");
-        return false;
+        return LoadResult::fail(LoadError::DecodeFailed, "failed to create MF byte stream");
     }
 
     IMFSourceReader* pReader = NULL;
@@ -183,7 +195,7 @@ bool SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
 
     if (FAILED(hr)) {
         printf("SoundBuffer: loadAacFromMemory failed to create SourceReader\n");
-        return false;
+        return LoadResult::fail(LoadError::DecodeFailed, "failed to create SourceReader");
     }
 
     bool result = ReadFromSourceReader(pReader, this);
@@ -196,7 +208,8 @@ bool SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
         printf("SoundBuffer: failed to decode AAC from memory\n");
     }
 
-    return result;
+    return result ? LoadResult::success()
+                  : LoadResult::fail(LoadError::DecodeFailed, "failed to decode AAC from memory");
 }
 
 } // namespace trussc

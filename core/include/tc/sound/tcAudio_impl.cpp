@@ -274,7 +274,7 @@ private:
 // query duration/channels/sampleRate. Per-voice decoders are opened
 // lazily by AudioEngine::play().
 // ---------------------------------------------------------------------------
-bool SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
+LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     if (maxPolyphony < 1) maxPolyphony = 1;
 
     // Detect format by extension. We don't go through stb_vorbis here —
@@ -300,7 +300,17 @@ bool SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
         // and streaming would need per-platform plumbing — lower priority.
         printf("SoundStream: unsupported extension for streaming '.%s' (use load() for full decode)\n",
                ext.c_str());
-        return false;
+        return LoadResult::fail(LoadError::UnsupportedFormat,
+                                "unsupported extension for streaming '." + ext +
+                                "' (use load() for full decode)");
+    }
+
+    // Classify missing files before handing the path to miniaudio (whose
+    // error codes don't distinguish the two cases cheaply).
+    std::error_code ec;
+    if (!fs::exists(path, ec)) {
+        return LoadResult::fail(LoadError::FileNotFound,
+                                "file not found: " + internal::pathToUtf8(path));
     }
 
     // Probe decode: open, query, close. Per-voice decoders re-open later.
@@ -315,7 +325,9 @@ bool SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     if (r != MA_SUCCESS) {
         printf("SoundStream: failed to open %s (result=%d)\n",
                internal::pathToUtf8(path).c_str(), (int)r);
-        return false;
+        return LoadResult::fail(LoadError::DecodeFailed,
+                                "failed to open " + internal::pathToUtf8(path) +
+                                " (result=" + std::to_string((int)r) + ")");
     }
 
     ma_uint64 totalFrames = 0;
@@ -333,7 +345,7 @@ bool SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
 
     printf("SoundStream: ready %s (%d ch, %d Hz, %.2f s, maxPolyphony=%d)\n",
            internal::pathToUtf8(path).c_str(), channels, sampleRate, duration_, maxPolyphony);
-    return true;
+    return LoadResult::success();
 }
 
 // ---------------------------------------------------------------------------
