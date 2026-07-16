@@ -263,6 +263,10 @@ void Window::close() {
         ctx_.swapchainTarget.cache.clear();
     }
     delete st;
+    // The window's own exit event: per-window resource holders (e.g. the
+    // tcxImGui per-window manager) tear down here, while this window's
+    // CoreEvents is still alive.
+    events_.exit.notify();
     if (app_) {
         app_->exit();
         app_->cleanup();
@@ -273,6 +277,7 @@ void Window::close() {
 }
 
 void Window::setTitle(const std::string& title) {
+    title_ = title;
     auto* st = static_cast<AdapterState*>(native_);
     if (st) sapp_window_set_title(st->win, title.c_str());
 }
@@ -293,6 +298,9 @@ std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
         return nullptr;
     }
     auto win = std::shared_ptr<Window>(new Window());
+    win->title_ = settings.title;
+    win->ctx_.swapchainColorFormat = SG_PIXELFORMAT_RGBA8;
+    win->ctx_.swapchainSampleCount = settings.sampleCount > 0 ? settings.sampleCount : 1;
     auto* st = new AdapterState();
 
     sapp_window_desc d = {};

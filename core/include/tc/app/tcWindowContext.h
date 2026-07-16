@@ -89,6 +89,13 @@ struct WindowContext {
     // ensureSwapchainPass/resumeSwapchainPass; must return the SAME drawable
     // for the duration of one window frame).
     bool isMain = true;
+    // Swapchain attachment formats of THIS window. Secondary windows: set by
+    // the platform adapter (mac/win: BGRA8, linux: RGBA8 -- the main window
+    // is the only RGB10A2 surface). Zero = environment defaults (main).
+    // Consumers that build pipelines rendering into this window's swapchain
+    // (e.g. tcxImGui) must use these instead of the environment defaults.
+    sg_pixel_format swapchainColorFormat = _SG_PIXELFORMAT_DEFAULT;
+    int swapchainSampleCount = 0;
     int fbWidth = 0;
     int fbHeight = 0;
     float dpiScale = 1.0f;

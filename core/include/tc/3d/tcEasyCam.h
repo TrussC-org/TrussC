@@ -294,6 +294,13 @@ public:
 
     // ---------------------------------------------------------------------------
     // Mouse input (auto-subscribe to events)
+    //
+    // Multi-window contract: the listeners bind to the CURRENT window's event
+    // streams at the moment enableMouseInput() is called (events() resolves
+    // per window). Call it from within the lifecycle of the App that drives
+    // the camera's window -- setup()/update()/draw() of a secondary window's
+    // App binds to THAT window; calling it from the main App and then using
+    // the camera in a secondary window would listen to the wrong stream.
     // ---------------------------------------------------------------------------
 
     void enableMouseInput() {

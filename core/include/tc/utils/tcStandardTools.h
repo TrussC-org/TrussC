@@ -324,11 +324,42 @@ inline void alert(const std::string& msg) {
 
 inline void registerInspectionTools() {
 
+    // Resolve the optional MCP "window" arg (0 = main window; 1..N = open
+    // secondary windows in the order tc_list_windows reports). Returns the
+    // WindowContext to capture from, or null on a bad index (error filled in).
+    // Must run at the afterFrame safe point (same frame the index was read).
+    auto resolveWindowCtx = [](int windowIdx, json& err) -> trussc::internal::WindowContext* {
+        if (windowIdx == 0) return &trussc::internal::mainWindowContext();
+        auto wins = trussc::internal::openWindows();
+        if (windowIdx < 0 || (size_t)windowIdx > wins.size()) {
+            err = json{{"status", "error"},
+                       {"message", "window index out of range (0=main, 1.." +
+                                   std::to_string(wins.size()) + " secondary)"}};
+            return nullptr;
+        }
+        return &wins[(size_t)windowIdx - 1]->context();
+    };
+
+    tool("tc_list_windows", "List open windows (index 0 = main; use the index as the 'window' arg of tc_get_screenshot / tc_save_screenshot)")
+        .bind(std::function<json()>([]() -> json {
+            json arr = json::array();
+            arr.push_back(json{{"index", 0}, {"main", true},
+                               {"width", getWindowWidth()}, {"height", getWindowHeight()}});
+            int i = 1;
+            for (auto* w : trussc::internal::openWindows()) {
+                arr.push_back(json{{"index", i++}, {"main", false},
+                                   {"title", w->getTitle()},
+                                   {"width", w->getWidth()}, {"height", w->getHeight()}});
+            }
+            return json{{"windows", arr}};
+        }));
+
     tool("tc_get_screenshot", "Screenshot as Base64 PNG/JPEG. Defaults to full-resolution PNG; pass width for a downscaled monitoring thumbnail (aspect preserved, never upscales) and format 'jpg' for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread, so polling does not stutter the app.")
         .arg<std::string>("format", "'png' (default, lossless) or 'jpg'", false)
         .arg<int>("width", "Target width in pixels, aspect preserved (clamped 16-4096; never upscales; omit = full resolution)", false)
         .arg<int>("quality", "JPEG quality 1-100 (default 75; ignored for png)", false)
-        .bind([](const json& args) -> json {
+        .arg<int>("window", "Window index from tc_list_windows (default 0 = main)", false)
+        .bind([resolveWindowCtx](const json& args) -> json {
             std::string format = "png";
             if (args.contains("format") && args.at("format").is_string()) {
                 format = args.at("format").get<std::string>();
@@ -344,14 +375,23 @@ inline void registerInspectionTools() {
                 reqWidth = std::clamp(args.at("width").get<int>(), 16, 4096);
             if (args.contains("quality") && args.at("quality").is_number())
                 quality = std::clamp(args.at("quality").get<int>(), 1, 100);
+            const int windowIdx = args.value("window", 0);
 
             // Two-stage deferral: the main stage runs at the afterFrame safe
             // point (mid-frame the framebuffer is blank — drawing is deferred)
             // and only grabs the pixels; the returned closure — downscale +
             // encode + Base64 — runs on the HTTP worker blocked on this reply.
-            mcp::deferToolResultTwoStage([format, reqWidth, quality]() -> std::function<json()> {
+            // Window targeting: switch the current window context around the
+            // readback so captureWindow reads the target's presented drawable.
+            mcp::deferToolResultTwoStage([resolveWindowCtx, windowIdx, format, reqWidth, quality]() -> std::function<json()> {
+                json err;
+                auto* ctx = resolveWindowCtx(windowIdx, err);
+                if (!ctx) return [err]() -> json { return err; };
+                auto* prev = trussc::internal::currentWindowCtx;
+                trussc::internal::currentWindowCtx = ctx;
                 auto px = std::make_shared<trussc::Pixels>();
                 bool grabbed = trussc::grabScreen(*px);
+                trussc::internal::currentWindowCtx = prev;
                 return [px, grabbed, format, reqWidth, quality]() -> json {
                     if (!grabbed) {
                         return json{{"status", "error"}, {"message", "Failed to grab screen"}};
@@ -364,14 +404,32 @@ inline void registerInspectionTools() {
 
     tool("tc_save_screenshot", "Save screenshot to file")
         .arg<std::string>("path", "File path")
-        .bind<std::string>([](std::string path) {
+        .arg<int>("window", "Window index from list_windows (default 0 = main)", false)
+        .bind([resolveWindowCtx](const json& args) -> json {
             // JSON strings are UTF-8 — convert explicitly (fs::path(string)
             // would interpret them in the ACP on Windows)
-            if (trussc::saveScreenshot(trussc::internal::utf8ToPath(path))) {
-                return json{{"status", "ok"}, {"path", path}};
-            } else {
+            const std::string path = args.at("path").get<std::string>();
+            const int windowIdx = args.value("window", 0);
+            if (windowIdx == 0) {
+                // Main window: the classic queued path (drained after present)
+                if (trussc::saveScreenshot(trussc::internal::utf8ToPath(path))) {
+                    return json{{"status", "ok"}, {"path", path}};
+                }
                 return json{{"status", "error"}, {"message", "Failed to save screenshot"}};
             }
+            // Secondary window: defer, then capture that window's drawable
+            mcp::deferToolResultUntilAfterFrame([resolveWindowCtx, windowIdx, path]() -> json {
+                json err;
+                auto* ctx = resolveWindowCtx(windowIdx, err);
+                if (!ctx) return err;
+                auto* prev = trussc::internal::currentWindowCtx;
+                trussc::internal::currentWindowCtx = ctx;
+                bool ok = trussc::internal::captureWindowToFile(trussc::internal::utf8ToPath(path));
+                trussc::internal::currentWindowCtx = prev;
+                if (ok) return json{{"status", "ok"}, {"path", path}, {"window", windowIdx}};
+                return json{{"status", "error"}, {"message", "Failed to capture window " + std::to_string(windowIdx)}};
+            });
+            return json(nullptr);  // deferred result is sent instead
         });
 
     tool("tc_get_status", "App-published ops status: values registered via mcp::status()/mcp::statusGraph() plus the names of mcp::statusImage() images. mode 'graph' means the value wants to be plotted over time. Empty when the app publishes nothing. Supervisors discover this tool via tools/list and forward the payload to their monitoring server.")

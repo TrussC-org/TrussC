@@ -10901,6 +10901,11 @@ description.en = "Whether the native window is still open"
 description.ja = "ウィンドウが開いているか"
 description.ko = "윈도우가 열려 있는지"
 
+["Window::getTitle"]
+description.en = "Last title set for this window (via WindowSettings or setTitle)"
+description.ja = "このウィンドウに最後に設定されたタイトル（WindowSettings または setTitle 経由）"
+description.ko = "이 창에 마지막으로 설정된 제목 (WindowSettings 또는 setTitle 경유)"
+
 ["Window::setTitle"]
 description.en = "Set the window title"
 description.ja = "ウィンドウタイトルを設定"

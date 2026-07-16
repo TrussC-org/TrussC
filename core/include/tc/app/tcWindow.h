@@ -24,6 +24,27 @@
 
 namespace trussc {
 
+class Window;
+
+namespace internal {
+// Open-window registry (creation order, secondaries only — the main window is
+// not a Window object). Non-inline storage in tcGlobal.cpp so the hot-reload
+// host and guest see ONE list. Used by the MCP window-targeting tools.
+void registerWindow(Window* w);
+void unregisterWindow(Window* w);
+std::vector<Window*> openWindows();   // only windows whose native side is alive
+
+// RAII registrar: a Window member, so every ~Window() unregisters no matter
+// which platform adapter defines the destructor.
+struct WindowRegistryEntry {
+    Window* w;
+    explicit WindowRegistryEntry(Window* win) : w(win) { registerWindow(win); }
+    ~WindowRegistryEntry() { unregisterWindow(w); }
+    WindowRegistryEntry(const WindowRegistryEntry&) = delete;
+    WindowRegistryEntry& operator=(const WindowRegistryEntry&) = delete;
+};
+}
+
 class TC_PLATFORMS("macos,windows,linux") Window {
 public:
     ~Window();
@@ -52,6 +73,8 @@ public:
     bool isOpen() const { return native_ != nullptr; }
 
     void setTitle(const std::string& title);
+    // Last title set via WindowSettings/setTitle (for window listing/tooling).
+    const std::string& getTitle() const { return title_; }
     int getWidth() const;    // logical size (matches the window's coordinates)
     int getHeight() const;
 
@@ -98,6 +121,8 @@ public:
     CoreEvents events_;
     internal::RenderContext render_;
     Color clearColor_ = Color(0.05f, 0.05f, 0.08f, 1.0f);
+    std::string title_;
+    internal::WindowRegistryEntry registryEntry_{this};
 };
 
 // Create a secondary window. macOS, Windows and Linux (nullptr elsewhere).

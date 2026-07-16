@@ -3956,6 +3956,7 @@ void Window::close()  // Close the native window; the main window and other wind
 CoreEvents & Window::events()  // This window's own event stream (mousePressed / keyPressed / draw / ...)
 std::shared_ptr<App> Window::getApp() const  // Get the App attached to this window
 int Window::getHeight() const  // Window height in logical points (matches its coordinate system)
+const std::string & Window::getTitle() const  // Last title set for this window (via WindowSettings or setTitle)
 int Window::getWidth() const  // Window width in logical points (matches its coordinate system)
 bool Window::isOpen() const  // Whether the native window is still open
 void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window
