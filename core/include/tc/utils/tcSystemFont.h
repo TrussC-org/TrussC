@@ -1,5 +1,6 @@
 #pragma once
 #include "tc/utils/tcAnnotations.h"
+#include "tc/utils/tcFileIO.h"   // fs alias
 
 // =============================================================================
 // System font lookup — resolve a font name (PostScript name or family/display
@@ -27,7 +28,7 @@ namespace trussc {
 // `name` accepts whatever the platform's lookup API accepts — typically
 // either a PostScript name ("HiraginoSans-W3") or a family / display name
 // ("Hiragino Sans"). The PostScript form is the most portable.
-TC_PLATFORMS("macos,windows,linux,ios") std::string systemFontPath(const std::string& name);
+TC_PLATFORMS("macos,windows,linux,ios") fs::path systemFontPath(const std::string& name);
 
 // Enumerate the names of all fonts known to the OS. The exact form (PS name
 // vs. family) is platform-specific; expect deduplicated family-style names

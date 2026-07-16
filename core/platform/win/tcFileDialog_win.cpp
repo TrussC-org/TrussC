@@ -34,13 +34,6 @@ std::string toUtf8(const wchar_t* wstr) {
     return result;
 }
 
-// Extract filename from path
-std::string extractFileName(const std::string& path) {
-    size_t pos = path.find_last_of("/\\");
-    if (pos == std::string::npos) return path;
-    return path.substr(pos + 1);
-}
-
 } // anonymous namespace
 
 namespace trussc {
@@ -84,7 +77,7 @@ void confirmDialogAsync(const std::string& title,
 // -----------------------------------------------------------------------------
 FileDialogResult loadDialog(const std::string& title,
                             const std::string& message,
-                            const std::string& defaultPath,
+                            const fs::path& defaultPath,
                             bool folderSelection) {
     FileDialogResult result;
     (void)message;  // Windows file dialog doesn't support message
@@ -112,14 +105,14 @@ FileDialogResult loadDialog(const std::string& title,
 
         std::wstring dirW;
         if (!defaultPath.empty()) {
-            dirW = toWide(defaultPath);
+            dirW = defaultPath.wstring();
             ofn.lpstrInitialDir = dirW.c_str();
         }
 
         if (GetOpenFileNameW(&ofn)) {
             result.success = true;
-            result.filePath = toUtf8(szFileName);
-            result.fileName = extractFileName(result.filePath);
+            result.filePath = fs::path(szFileName);
+            result.fileName = result.filePath.filename();
         }
     } else {
         // フォルダ選択ダイアログ（IFileDialog / モダンUI）
@@ -139,7 +132,7 @@ FileDialogResult loadDialog(const std::string& title,
 
             // デフォルトパス設定
             if (!defaultPath.empty()) {
-                std::wstring defaultPathW = toWide(defaultPath);
+                std::wstring defaultPathW = defaultPath.wstring();
                 IShellItem* pDefaultFolder = nullptr;
                 if (SUCCEEDED(SHCreateItemFromParsingName(defaultPathW.c_str(), nullptr,
                               IID_IShellItem, (void**)&pDefaultFolder))) {
@@ -155,8 +148,8 @@ FileDialogResult loadDialog(const std::string& title,
                     PWSTR pszPath = nullptr;
                     if (SUCCEEDED(pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszPath))) {
                         result.success = true;
-                        result.filePath = toUtf8(pszPath);
-                        result.fileName = extractFileName(result.filePath);
+                        result.filePath = fs::path(pszPath);
+                        result.fileName = result.filePath.filename();
                         CoTaskMemFree(pszPath);
                     }
                     pItem->Release();
@@ -172,7 +165,7 @@ FileDialogResult loadDialog(const std::string& title,
 
 void loadDialogAsync(const std::string& title,
                      const std::string& message,
-                     const std::string& defaultPath,
+                     const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback) {
     FileDialogResult result = loadDialog(title, message, defaultPath, folderSelection);
@@ -184,8 +177,8 @@ void loadDialogAsync(const std::string& title,
 // -----------------------------------------------------------------------------
 FileDialogResult saveDialog(const std::string& title,
                             const std::string& message,
-                            const std::string& defaultPath,
-                            const std::string& defaultName) {
+                            const fs::path& defaultPath,
+                            const fs::path& defaultName) {
     FileDialogResult result;
     (void)message;  // Windows file dialog doesn't support message
 
@@ -217,14 +210,14 @@ FileDialogResult saveDialog(const std::string& title,
 
     std::wstring dirW;
     if (!defaultPath.empty()) {
-        dirW = toWide(defaultPath);
+        dirW = defaultPath.wstring();
         ofn.lpstrInitialDir = dirW.c_str();
     }
 
     if (GetSaveFileNameW(&ofn)) {
         result.success = true;
-        result.filePath = toUtf8(szFileName);
-        result.fileName = extractFileName(result.filePath);
+        result.filePath = fs::path(szFileName);
+        result.fileName = result.filePath.filename();
     }
 
     return result;
@@ -232,8 +225,8 @@ FileDialogResult saveDialog(const std::string& title,
 
 void saveDialogAsync(const std::string& title,
                      const std::string& message,
-                     const std::string& defaultPath,
-                     const std::string& defaultName,
+                     const fs::path& defaultPath,
+                     const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback) {
     FileDialogResult result = saveDialog(title, message, defaultPath, defaultName);
     if (callback) callback(result);

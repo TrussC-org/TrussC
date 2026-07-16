@@ -907,11 +907,11 @@ public:
             std::ifstream test(nameOrPath, std::ios::binary);
             if (!test.good()) {
                 // Not a usable file path — try as a system font name.
-                std::string resolved = systemFontPath(nameStr);
+                fs::path resolved = systemFontPath(nameStr);
                 if (!resolved.empty()) {
-                    actualPath = resolved;
+                    actualPath = internal::pathToUtf8(resolved);
                     logNotice("Font") << "Resolved \"" << nameStr
-                                      << "\" → " << resolved;
+                                      << "\" → " << actualPath;
                 }
                 // If resolution failed, fall through with the original input so
                 // the eventual load error mentions what the user actually asked for.

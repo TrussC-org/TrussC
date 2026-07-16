@@ -162,7 +162,7 @@ public:
     int  getWidth() const { return width_; }
     int  getHeight() const { return height_; }
     float getFps() const { return fps_; }
-    std::string getPath() const { return internal::pathToUtf8(path_); }
+    fs::path getPath() const { return path_; }
     const VideoRecordSettings& getSettings() const { return settings_; }
 
     // Append one frame at the fixed-rate clock (frameIndex / fps) — deterministic
@@ -303,12 +303,12 @@ public:
     // Fixed-duration convenience: record for `durationSec` seconds, then auto-stop
     // and finalize the file at exactly that length. Same as filling
     // settings.duration. (durationSec <= 0 records until stop(), like the default.)
-    bool start(const std::string& path, float durationSec) {
+    bool start(const fs::path& path, float durationSec) {
         VideoRecordSettings s;
         s.duration = durationSec;
         return start(path, s);
     }
-    bool start(const Fbo& fbo, const std::string& path, float durationSec) {
+    bool start(const Fbo& fbo, const fs::path& path, float durationSec) {
         VideoRecordSettings s;
         s.duration = durationSec;
         return start(fbo, path, s);
@@ -337,7 +337,7 @@ public:
 
     bool isRecording() const { return writer_.isOpen(); }
     int  getFrameCount() const { return writer_.getFrameCount(); }
-    std::string getPath() const { return writer_.getPath(); }
+    fs::path getPath() const { return writer_.getPath(); }
     VideoWriter& writer() { return writer_; }   // for advanced introspection
 
 private:
@@ -477,7 +477,7 @@ TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const
 // Fixed-duration convenience: record the whole window for `durationSec` seconds,
 // then auto-stop and finalize at exactly that length. (durationSec <= 0 behaves
 // like the unlimited overload above — record until stopRecording().)
-TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const std::string& path,
+TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const fs::path& path,
                            float durationSec) {
     return internal::globalScreenRecorder().start(path, durationSec);
 }
@@ -486,14 +486,14 @@ TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const
 // The Fbo must stay alive while recording — if it is destroyed mid-recording,
 // the recording stops and finalizes automatically.
 TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const Fbo& fbo,
-                           const std::string& path,
+                           const fs::path& path,
                            const VideoRecordSettings& settings = {}) {
     return internal::globalScreenRecorder().start(fbo, path, settings);
 }
 
 // Fixed-duration Fbo recording (see above).
 TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const Fbo& fbo,
-                           const std::string& path,
+                           const fs::path& path,
                            float durationSec) {
     return internal::globalScreenRecorder().start(fbo, path, durationSec);
 }
@@ -501,6 +501,6 @@ TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const
 inline void stopRecording() { internal::globalScreenRecorder().stop(); }
 inline bool isRecording()   { return internal::globalScreenRecorder().isRecording(); }
 inline int  recordingFrameCount() { return internal::globalScreenRecorder().getFrameCount(); }
-inline std::string recordingPath() { return internal::globalScreenRecorder().getPath(); }
+inline fs::path recordingPath() { return internal::globalScreenRecorder().getPath(); }
 
 } // namespace trussc

@@ -12660,9 +12660,9 @@ related = ["Environment", "setEnvironment"]
 ["getExecutableDir"]
 category = "file"
 keywords = ["exe", "binary", "app folder", "directory"]
-description.en = "Get the directory containing the running executable (with trailing slash)."
-description.ja = "実行中の実行ファイルを含むディレクトリを取得(末尾スラッシュ付き)"
-description.ko = "실행 중인 실행 파일이 있는 디렉터리를 얻음(끝 슬래시 포함)"
+description.en = "Get the directory containing the running executable."
+description.ja = "実行中の実行ファイルを含むディレクトリを取得"
+description.ko = "실행 중인 실행 파일이 있는 디렉터리를 얻음"
 related = ["getExecutablePath", "setDataPathToResources"]
 platform_note.en = '''
 Real directory on all native platforms (android = internalDataPath). Web returns hardcoded "/".

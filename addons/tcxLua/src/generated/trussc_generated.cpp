@@ -88,12 +88,12 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getLogger", []() -> decltype(auto) { return trussc::getLogger(); });
     lua->set_function("setConsoleLogLevel", [](trussc::LogLevel level) { return trussc::setConsoleLogLevel(level); });
     lua->set_function("setFileLogLevel", [](trussc::LogLevel level) { return trussc::setFileLogLevel(level); });
-    lua->set_function("setLogFile", [](const std::string & path) { return trussc::setLogFile(path); });
+    lua->set_function("setLogFile", [](const fs::path & path) { return trussc::setLogFile(path); });
     lua->set_function("closeLogFile", []() { return trussc::closeLogFile(); });
     lua->set_function("tcGetLogger", []() -> decltype(auto) { return trussc::tcGetLogger(); });
     lua->set_function("tcSetConsoleLogLevel", [](trussc::LogLevel level) { return trussc::tcSetConsoleLogLevel(level); });
     lua->set_function("tcSetFileLogLevel", [](trussc::LogLevel level) { return trussc::tcSetFileLogLevel(level); });
-    lua->set_function("tcSetLogFile", [](const std::string & path) { return trussc::tcSetLogFile(path); });
+    lua->set_function("tcSetLogFile", [](const fs::path & path) { return trussc::tcSetLogFile(path); });
     lua->set_function("tcCloseLogFile", []() { return trussc::tcCloseLogFile(); });
     lua->set_function("logAt", sol::overload(
         []() { return trussc::logAt(); },
@@ -206,9 +206,9 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("initAudio", []() { return trussc::initAudio(); });
     lua->set_function("shutdownAudio", []() { return trussc::shutdownAudio(); });
     lua->set_function("getMicInput", []() -> decltype(auto) { return trussc::getMicInput(); });
-    lua->set_function("setDataPathRoot", [](const std::string & path) { return trussc::setDataPathRoot(path); });
-    lua->set_function("getDataPathRoot", []() { return trussc::getDataPathRoot().string(); });
-    lua->set_function("getDataPath", [](const std::string & filename) { return trussc::getDataPath(filename).string(); });
+    lua->set_function("setDataPathRoot", [](const fs::path & path) { return trussc::setDataPathRoot(path); });
+    lua->set_function("getDataPathRoot", []() { return trussc::getDataPathRoot(); });
+    lua->set_function("getDataPath", [](const fs::path & filename) { return trussc::getDataPath(filename); });
     lua->set_function("setDataPathToResources", []() { return trussc::setDataPathToResources(); });
     lua->set_function("toInt", [](const std::string & str) { return trussc::toInt(str); });
     lua->set_function("toInt64", [](const std::string & str) { return trussc::toInt64(str); });
@@ -281,45 +281,45 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         []() { return trussc::loadDialog(); },
         [](const std::string & title) { return trussc::loadDialog(title); },
         [](const std::string & title, const std::string & message) { return trussc::loadDialog(title, message); },
-        [](const std::string & title, const std::string & message, const std::string & defaultPath) { return trussc::loadDialog(title, message, defaultPath); },
-        [](const std::string & title, const std::string & message, const std::string & defaultPath, bool folderSelection) { return trussc::loadDialog(title, message, defaultPath, folderSelection); }
+        [](const std::string & title, const std::string & message, const fs::path & defaultPath) { return trussc::loadDialog(title, message, defaultPath); },
+        [](const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection) { return trussc::loadDialog(title, message, defaultPath, folderSelection); }
     ));
-    lua->set_function("loadDialogAsync", [](const std::string & title, const std::string & message, const std::string & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback) { return trussc::loadDialogAsync(title, message, defaultPath, folderSelection, callback); });
+    lua->set_function("loadDialogAsync", [](const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback) { return trussc::loadDialogAsync(title, message, defaultPath, folderSelection, callback); });
     lua->set_function("saveDialog", sol::overload(
         []() { return trussc::saveDialog(); },
         [](const std::string & title) { return trussc::saveDialog(title); },
         [](const std::string & title, const std::string & message) { return trussc::saveDialog(title, message); },
-        [](const std::string & title, const std::string & message, const std::string & defaultPath) { return trussc::saveDialog(title, message, defaultPath); },
-        [](const std::string & title, const std::string & message, const std::string & defaultPath, const std::string & defaultName) { return trussc::saveDialog(title, message, defaultPath, defaultName); }
+        [](const std::string & title, const std::string & message, const fs::path & defaultPath) { return trussc::saveDialog(title, message, defaultPath); },
+        [](const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName) { return trussc::saveDialog(title, message, defaultPath, defaultName); }
     ));
-    lua->set_function("saveDialogAsync", [](const std::string & title, const std::string & message, const std::string & defaultPath, const std::string & defaultName, std::function<void (const FileDialogResult &)> callback) { return trussc::saveDialogAsync(title, message, defaultPath, defaultName, callback); });
-    lua->set_function("loadJson", [](const std::string & path) { return trussc::loadJson(path); });
+    lua->set_function("saveDialogAsync", [](const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback) { return trussc::saveDialogAsync(title, message, defaultPath, defaultName, callback); });
+    lua->set_function("loadJson", [](const fs::path & path) { return trussc::loadJson(path); });
     lua->set_function("saveJson", sol::overload(
-        [](const trussc::Json & j, const std::string & path) { return trussc::saveJson(j, path); },
-        [](const trussc::Json & j, const std::string & path, int indent) { return trussc::saveJson(j, path, indent); }
+        [](const trussc::Json & j, const fs::path & path) { return trussc::saveJson(j, path); },
+        [](const trussc::Json & j, const fs::path & path, int indent) { return trussc::saveJson(j, path, indent); }
     ));
     lua->set_function("parseJson", [](const std::string & str) { return trussc::parseJson(str); });
     lua->set_function("toJsonString", sol::overload(
         [](const trussc::Json & j) { return trussc::toJsonString(j); },
         [](const trussc::Json & j, int indent) { return trussc::toJsonString(j, indent); }
     ));
-    lua->set_function("loadXml", [](const std::string & path) { return trussc::loadXml(path); });
+    lua->set_function("loadXml", [](const fs::path & path) { return trussc::loadXml(path); });
     lua->set_function("parseXml", [](const std::string & str) { return trussc::parseXml(str); });
-    lua->set_function("getFileName", [](const std::string & path) { return trussc::getFileName(path); });
-    lua->set_function("getBaseName", [](const std::string & path) { return trussc::getBaseName(path); });
-    lua->set_function("getFileExtension", [](const std::string & path) { return trussc::getFileExtension(path); });
-    lua->set_function("getParentDirectory", [](const std::string & path) { return trussc::getParentDirectory(path); });
-    lua->set_function("joinPath", [](const std::string & dir, const std::string & file) { return trussc::joinPath(dir, file); });
-    lua->set_function("getAbsolutePath", [](const std::string & path) { return trussc::getAbsolutePath(path); });
-    lua->set_function("fileExists", [](const std::string & path) { return trussc::fileExists(path); });
-    lua->set_function("directoryExists", [](const std::string & path) { return trussc::directoryExists(path); });
-    lua->set_function("createDirectory", [](const std::string & path) { return trussc::createDirectory(path); });
-    lua->set_function("listDirectory", [](const std::string & path) { return trussc::listDirectory(path); });
-    lua->set_function("removeFile", [](const std::string & path) { return trussc::removeFile(path); });
-    lua->set_function("getFileSize", [](const std::string & path) { return trussc::getFileSize(path); });
-    lua->set_function("loadTextFile", [](const std::string & path) { return trussc::loadTextFile(path); });
-    lua->set_function("saveTextFile", [](const std::string & path, const std::string & content) { return trussc::saveTextFile(path, content); });
-    lua->set_function("appendToFile", [](const std::string & path, const std::string & content) { return trussc::appendToFile(path, content); });
+    lua->set_function("getFileName", [](const fs::path & path) { return trussc::getFileName(path); });
+    lua->set_function("getBaseName", [](const fs::path & path) { return trussc::getBaseName(path); });
+    lua->set_function("getFileExtension", [](const fs::path & path) { return trussc::getFileExtension(path); });
+    lua->set_function("getParentDirectory", [](const fs::path & path) { return trussc::getParentDirectory(path); });
+    lua->set_function("joinPath", [](const fs::path & dir, const fs::path & file) { return trussc::joinPath(dir, file); });
+    lua->set_function("getAbsolutePath", [](const fs::path & path) { return trussc::getAbsolutePath(path); });
+    lua->set_function("fileExists", [](const fs::path & path) { return trussc::fileExists(path); });
+    lua->set_function("directoryExists", [](const fs::path & path) { return trussc::directoryExists(path); });
+    lua->set_function("createDirectory", [](const fs::path & path) { return trussc::createDirectory(path); });
+    lua->set_function("listDirectory", [](const fs::path & path) { return trussc::listDirectory(path); });
+    lua->set_function("removeFile", [](const fs::path & path) { return trussc::removeFile(path); });
+    lua->set_function("getFileSize", [](const fs::path & path) { return trussc::getFileSize(path); });
+    lua->set_function("loadTextFile", [](const fs::path & path) { return trussc::loadTextFile(path); });
+    lua->set_function("saveTextFile", [](const fs::path & path, const std::string & content) { return trussc::saveTextFile(path, content); });
+    lua->set_function("appendToFile", [](const fs::path & path, const std::string & content) { return trussc::appendToFile(path, content); });
     lua->set_function("getVersion", []() { return trussc::getVersion(); });
     lua->set_function("getGlobalMouseX", []() { return trussc::getGlobalMouseX(); });
     lua->set_function("getGlobalMouseY", []() { return trussc::getGlobalMouseY(); });
@@ -639,17 +639,17 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("popShader", []() { return trussc::popShader(); });
     lua->set_function("videoCodecName", [](trussc::VideoCodec c) { return trussc::videoCodecName(c); });
     lua->set_function("startRecording", sol::overload(
-        [](const std::string & path) { return trussc::startRecording(path); },
-        [](const std::string & path, const trussc::VideoRecordSettings & settings) { return trussc::startRecording(path, settings); },
-        [](const std::string & path, float durationSec) { return trussc::startRecording(path, durationSec); },
-        [](const trussc::Fbo & fbo, const std::string & path) { return trussc::startRecording(fbo, path); },
-        [](const trussc::Fbo & fbo, const std::string & path, const trussc::VideoRecordSettings & settings) { return trussc::startRecording(fbo, path, settings); },
-        [](const trussc::Fbo & fbo, const std::string & path, float durationSec) { return trussc::startRecording(fbo, path, durationSec); }
+        [](const fs::path & path) { return trussc::startRecording(path); },
+        [](const fs::path & path, const trussc::VideoRecordSettings & settings) { return trussc::startRecording(path, settings); },
+        [](const fs::path & path, float durationSec) { return trussc::startRecording(path, durationSec); },
+        [](const trussc::Fbo & fbo, const fs::path & path) { return trussc::startRecording(fbo, path); },
+        [](const trussc::Fbo & fbo, const fs::path & path, const trussc::VideoRecordSettings & settings) { return trussc::startRecording(fbo, path, settings); },
+        [](const trussc::Fbo & fbo, const fs::path & path, float durationSec) { return trussc::startRecording(fbo, path, durationSec); }
     ));
     lua->set_function("stopRecording", []() { return trussc::stopRecording(); });
     lua->set_function("isRecording", []() { return trussc::isRecording(); });
     lua->set_function("recordingFrameCount", []() { return trussc::recordingFrameCount(); });
-    lua->set_function("recordingPath", []() -> decltype(auto) { return trussc::recordingPath(); });
+    lua->set_function("recordingPath", []() { return trussc::recordingPath(); });
     lua->set_function("createPlane", sol::overload(
         [](float width, float height) { return trussc::createPlane(width, height); },
         [](float width, float height, int cols) { return trussc::createPlane(width, height, cols); },
@@ -745,6 +745,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("isOverlayFocused", []() { return trussc::isOverlayFocused(); });
     lua->set_function("getSelectedNode", []() { return trussc::getSelectedNode(); });
     lua->set_function("getRootNode", []() { return trussc::getRootNode(); });
+    lua->set_function("createWindow", sol::overload(
+        []() { return trussc::createWindow(); },
+        [](const trussc::WindowSettings & settings) { return trussc::createWindow(settings); }
+    ));
     lua->set_function("nodeToJson", [](trussc::Node & node, int maxDepth) { return trussc::nodeToJson(node, maxDepth); });
     lua->set_function("lerp", [](float a, float b, float t) { return std::lerp(a, b, t); });
     lua->set_function("sin", [](float x) { return std::sin(x); });

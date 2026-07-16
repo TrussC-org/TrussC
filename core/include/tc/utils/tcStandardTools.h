@@ -161,7 +161,7 @@ inline void registerInspectionTools() {
             }
             bool ok = trussc::startRecording(trussc::internal::utf8ToPath(path), settings);
             json r{{"status", ok ? "ok" : "error"},
-                   {"path", trussc::recordingPath()},
+                   {"path", trussc::internal::pathToUtf8(trussc::recordingPath())},
                    {"fps", settings.fps},
                    {"codec", trussc::videoCodecName(settings.codec)}};
             if (settings.duration > 0.0f) r["duration"] = settings.duration;
@@ -176,7 +176,7 @@ inline void registerInspectionTools() {
                 return json{{"status", "ok"}, {"recording", false},
                             {"message", "not recording"}};
             }
-            std::string path = trussc::recordingPath();
+            std::string path = trussc::internal::pathToUtf8(trussc::recordingPath());
             int frames = trussc::recordingFrameCount();
             float fps  = trussc::internal::globalScreenRecorder().writer().getFps();
             trussc::stopRecording();

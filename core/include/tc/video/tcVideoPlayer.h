@@ -357,7 +357,7 @@ public:
     /// Path of the currently loaded video file (empty string when not loaded).
     /// This is the resolved path (relative paths passed to load() are resolved
     /// via getDataPath), as UTF-8.
-    std::string getPath() const { return internal::pathToUtf8(sourcePath_); }
+    fs::path getPath() const { return sourcePath_; }
 
 protected:
     // -------------------------------------------------------------------------

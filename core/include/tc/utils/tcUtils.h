@@ -16,7 +16,7 @@
 
 // Forward declaration for tcPlatform.h (avoid circular include)
 namespace trussc {
-    std::string getExecutableDir();
+    fs::path getExecutableDir();
 }
 
 namespace trussc {
@@ -61,19 +61,19 @@ namespace internal {
 inline void resolveDataPathRootOnce() {
 #ifdef __APPLE__
     if (dataPathRootProbed || dataPathRootUserSet) return;
-    std::string exe = getExecutableDir();
+    fs::path exe = getExecutableDir();
     // Don't latch until the executable path is actually available — early on
     // iOS it can be empty/"/", which would resolve the checks against the CWD.
-    if (exe.empty() || exe == "/") return;
+    if (exe.empty() || exe == fs::path("/")) return;
     dataPathRootProbed = true;
     std::error_code ec;
     // Check the flat-bundle layout FIRST (unambiguous on iOS: data/ sits right
     // next to the executable). macOS dev has no Contents/MacOS/data, so it
     // correctly falls through to the ../../../data (bin/data) layout.
-    if (std::filesystem::exists(exe + "data", ec)) {
-        dataPathRoot = "data/";           // iOS flat bundle / distributed
-    } else if (std::filesystem::exists(exe + "../../../data", ec)) {
-        dataPathRoot = "../../../data/";  // macOS dev / bin layout
+    if (std::filesystem::exists(exe / "data", ec)) {
+        dataPathRoot = "data";            // iOS flat bundle / distributed
+    } else if (std::filesystem::exists(exe / "../../../data", ec)) {
+        dataPathRoot = "../../../data";   // macOS dev / bin layout
     }
     // else: keep the compile-time default
 #endif
@@ -99,7 +99,7 @@ inline fs::path getDataPath(const fs::path& filename) {
         return internal::dataPathRoot / filename;
     } else {
         // Relative root: resolve relative to executable directory
-        return fs::path(getExecutableDir()) / internal::dataPathRoot / filename;
+        return getExecutableDir() / internal::dataPathRoot / filename;
     }
 }
 

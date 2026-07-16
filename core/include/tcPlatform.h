@@ -136,10 +136,10 @@ void setWindowDecorated(bool decorated);
 void setWindowSizeLogical(int width, int height);
 
 // Get absolute path of executable
-std::string getExecutablePath();
+fs::path getExecutablePath();
 
 // Get directory containing executable (with trailing /)
-std::string getExecutableDir();
+fs::path getExecutableDir();
 
 // ---------------------------------------------------------------------------
 // Immersive mode (hide system UI)

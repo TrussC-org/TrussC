@@ -118,16 +118,15 @@ void setWindowSizeLogical(int width, int height) {
     (void)height;
 }
 
-std::string getExecutablePath() {
+fs::path getExecutablePath() {
     NSString* path = [[NSBundle mainBundle] executablePath];
-    return path ? std::string([path UTF8String]) : "";
+    return path ? fs::path([path UTF8String]) : fs::path();
 }
 
-std::string getExecutableDir() {
-    NSString* path = [[NSBundle mainBundle] executablePath];
-    NSString* dir = [path stringByDeletingLastPathComponent];
-    if (!dir || dir.length == 0) return "";
-    return std::string([dir UTF8String]) + "/";
+fs::path getExecutableDir() {
+    fs::path exePath = getExecutablePath();
+    if (exePath.empty()) return {};
+    return exePath.parent_path();
 }
 
 // ---------------------------------------------------------------------------

@@ -1557,11 +1557,11 @@ bool isOverlayFocused()  // True when an overlay currently owns keyboard focus (
 bool isOverlayHovered()  // True when an overlay currently has the pointer over it (e.g. cursor over a tcxImGui panel); guard raw mouse input so clicks on UI panels are not also handled by the app
 bool isShiftPressed()  // True while either Shift key (left or right) is held
 bool isSuperPressed()  // True while either Super / Cmd / Win key (left or right) is held
-FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const std::string & defaultPath = std::string(""), bool folderSelection = false) [macos,windows,linux,android]  // Show file open dialog. Returns FileDialogResult with filePath, fileName, success
-void loadDialogAsync(const std::string & title, const std::string & message, const std::string & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback)  // Show file open dialog asynchronously. Callback receives FileDialogResult
+FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), bool folderSelection = false) [macos,windows,linux,android]  // Show file open dialog. Returns FileDialogResult with filePath, fileName, success
+void loadDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback)  // Show file open dialog asynchronously. Callback receives FileDialogResult
 void requestExitApp()  // Request application exit. Can be cancelled by listening to events().exitRequested and setting args.cancel = true
-FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const std::string & defaultPath = std::string(""), const std::string & defaultName = std::string("")) [macos,windows,linux,android]  // Show file save dialog. Returns FileDialogResult with filePath, fileName, success
-void saveDialogAsync(const std::string & title, const std::string & message, const std::string & defaultPath, const std::string & defaultName, std::function<void (const FileDialogResult &)> callback)  // Show file save dialog asynchronously. Callback receives FileDialogResult
+FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), const fs::path & defaultName = fs::path()) [macos,windows,linux,android]  // Show file save dialog. Returns FileDialogResult with filePath, fileName, success
+void saveDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback)  // Show file save dialog asynchronously. Callback receives FileDialogResult
 void setCursor(Cursor cursor)  // Set the mouse cursor shape
 void setTouchAsMouse(bool enabled)  // Enable/disable touch events firing as mouse events (for Android/iOS)
 void showCursor()  // Show the mouse cursor (default)
@@ -1747,7 +1747,7 @@ bool grabScreen(Pixels & outPixels)  // Capture current screen to Pixels
 bool isFullscreen()  // Check if window is fullscreen
 bool isRecording()  // Check whether a recording is in progress
 int recordingFrameCount()  // Number of frames captured so far in the current recording
-std::string recordingPath()  // Output file path of the current recording
+fs::path recordingPath()  // Output file path of the current recording
 void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
 int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Template on the app type; returns the process exit code
 bool saveScreenshot(const std::filesystem::path & path)  // Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
@@ -1843,8 +1843,8 @@ std::string getAbsolutePath(const fs::path & path)  // Get absolute path
 std::string getBaseName(const fs::path & path)  // Get filename without extension
 fs::path getDataPath(const fs::path & filename)  // Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged.
 fs::path getDataPathRoot()  // Get the current data path root as fs::path.
-std::string getExecutableDir()  // Get the directory containing the running executable (with trailing slash).
-std::string getExecutablePath()  // Get the absolute path of the running executable.
+fs::path getExecutableDir()  // Get the directory containing the running executable.
+fs::path getExecutablePath()  // Get the absolute path of the running executable.
 std::string getFileExtension(const fs::path & path)  // Get file extension without dot
 std::string getFileName(const fs::path & path)  // Get filename from path
 int64_t getFileSize(const fs::path & path)  // Get file size in bytes
@@ -1882,7 +1882,7 @@ void shutdownAudio()  // Shut down the global AudioEngine and close the audio de
 
 ```cpp
 std::vector<std::string> listSystemFonts() [macos,windows,linux,ios]  // Enumerate names of all fonts known to the OS
-std::string systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub.
+fs::path systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub.
 ```
 
 ### Animation
@@ -2011,7 +2011,7 @@ float atanh(float x) [std]  // Inverse hyperbolic tangent
 Baseline  // Direction shorthand for Direction::Baseline (text baseline)
 Bottom  // Direction shorthand for Direction::Bottom
 Center  // Direction shorthand for Direction::Center
-std::shared_ptr<Window> createWindow(const WindowSettings & settings = {}) [macos]  // Create a secondary window (macOS only for now; returns nullptr elsewhere). It runs on its own display link; closing it leaves the app running
+std::shared_ptr<Window> createWindow(const WindowSettings & settings = {}) [macos,windows,linux]  // Create a secondary window (macOS only for now; returns nullptr elsewhere). It runs on its own display link; closing it leaves the app running
 const char * enumLabel(E value)  // Return the display string for one enum value (TC_ENUM_LABELS override, else reflected name).
 const std::array<std::string_view, internal::enumValidCount<E> enumNames()  // Return a compile-time array of all valid enumerator names of E.
 EnumLabelSpan enumReflectedSpan()  // Return an EnumLabelSpan synthesized from reflection (valid for contiguous zero-based enums).
@@ -3228,7 +3228,7 @@ bool Reflector::visit(const char * name, float & v) [+7]  // Handle one reflecte
 
 ```cpp
 int ScreenRecorder::getFrameCount() const  // Number of frames captured so far
-std::string ScreenRecorder::getPath() const  // Output file path of the current recording
+fs::path ScreenRecorder::getPath() const  // Output file path of the current recording
 bool ScreenRecorder::isRecording() const  // Check if the screen recorder is currently capturing
 bool ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically
 void ScreenRecorder::stop()  // Stop live capture and finalize the file
@@ -3421,7 +3421,7 @@ Kind SoundSource::kind() const  // Source kind (Eager for SoundBuffer, Stream fo
 ```cpp
 float SoundStream::getDuration() const  // Decoded file duration in seconds.
 int SoundStream::getMaxPolyphony() const  // Number of concurrent decoder slots reserved at loadStream().
-std::string SoundStream::getPath() const  // Path the stream was opened from.
+fs::path SoundStream::getPath() const  // Path the stream was opened from.
 bool SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported.
 ```
 
@@ -3829,7 +3829,7 @@ int VideoPlayer::getCurrentFrame() const  // Get current frame number
 float VideoPlayer::getDuration() const  // Get total duration in seconds
 float VideoPlayer::getGammaCorrection() const  // Get current gamma correction value
 std::string VideoPlayer::getHwAccelName() const  // Get the name of the active decode backend. Returns 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', or 'none'
-std::string VideoPlayer::getPath() const  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
+fs::path VideoPlayer::getPath() const  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
 unsigned char * VideoPlayer::getPixels() [+1]  // Pointer to the current RGBA pixel buffer (mutable)
 unsigned char * VideoPlayer::getPixelsUV()  // Pointer to the interleaved UV (chroma) plane when decoding NV12; null otherwise
 unsigned char * VideoPlayer::getPixelsY()  // Pointer to the Y (luma) plane when decoding NV12/YUV; null otherwise
@@ -3931,7 +3931,7 @@ void VideoWriter::close()  // Finalize and flush the video file
 float VideoWriter::getFps() const  // Fixed encoding frame rate
 int VideoWriter::getFrameCount() const  // Number of frames written so far
 int VideoWriter::getHeight() const  // Encoder output height in pixels
-std::string VideoWriter::getPath() const  // Resolved output file path
+fs::path VideoWriter::getPath() const  // Resolved output file path
 const VideoRecordSettings & VideoWriter::getSettings() const  // Encoder settings the writer was opened with
 int VideoWriter::getWidth() const  // Encoder output width in pixels
 bool VideoWriter::isOpen() const  // Check if the encoder is open and accepting frames

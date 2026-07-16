@@ -413,7 +413,7 @@ public:
 
     float getDuration() const override { return duration_; }
 
-    std::string getPath() const { return internal::pathToUtf8(path_); }
+    fs::path getPath() const { return path_; }
     int getMaxPolyphony() const { return maxPolyphony_; }
 
 private:

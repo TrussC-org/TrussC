@@ -209,20 +209,20 @@ void setWindowSizeLogical(int width, int height) {
     (void)height;
 }
 
-std::string getExecutablePath() {
+fs::path getExecutablePath() {
     // Android doesn't have a traditional executable path.
     // Return empty — use getExecutableDir() for asset access.
-    return "";
+    return {};
 }
 
-std::string getExecutableDir() {
+fs::path getExecutableDir() {
     // On Android, assets are accessed via AAssetManager, not filesystem paths.
     // For files that need a real path, use internal storage.
     auto* activity = (ANativeActivity*)sapp_android_get_native_activity();
     if (activity && activity->internalDataPath) {
-        return std::string(activity->internalDataPath) + "/";
+        return fs::path(activity->internalDataPath);
     }
-    return "/data/local/tmp/";
+    return fs::path("/data/local/tmp");
 }
 
 // ---------------------------------------------------------------------------

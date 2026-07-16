@@ -111,23 +111,20 @@ void setWindowSizeLogical(int width, int height) {
     logWarning("Platform") << "setWindowSize not yet implemented on Linux";
 }
 
-std::string getExecutablePath() {
+fs::path getExecutablePath() {
     char path[PATH_MAX];
     ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
     if (len != -1) {
         path[len] = '\0';
-        return std::string(path);
+        return fs::path(path);
     }
-    return "";
+    return {};
 }
 
-std::string getExecutableDir() {
-    std::string exePath = getExecutablePath();
-    size_t lastSlash = exePath.rfind('/');
-    if (lastSlash != std::string::npos) {
-        return exePath.substr(0, lastSlash + 1);
-    }
-    return "./";
+fs::path getExecutableDir() {
+    fs::path exePath = getExecutablePath();
+    if (!exePath.empty()) return exePath.parent_path();
+    return fs::path(".");
 }
 
 // ---------------------------------------------------------------------------

@@ -178,34 +178,21 @@ void setWindowSizeLogical(int width, int height) {
 // ---------------------------------------------------------------------------
 // getExecutablePath - 実行ファイルの絶対パスを取得
 // ---------------------------------------------------------------------------
-std::string getExecutablePath() {
+fs::path getExecutablePath() {
+    // Native UTF-16 straight into fs::path — no UTF-8 round trip, so
+    // non-ASCII install paths survive intact.
     wchar_t path[MAX_PATH] = { 0 };
     GetModuleFileNameW(nullptr, path, MAX_PATH);
-
-    // UTF-16 から UTF-8 に変換
-    int size = WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr);
-    if (size <= 0) return "";
-
-    std::string result(size - 1, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, path, -1, result.data(), size, nullptr, nullptr);
-
-    return result;
+    return fs::path(path);
 }
 
 // ---------------------------------------------------------------------------
 // getExecutableDir - 実行ファイルがあるディレクトリを取得
 // ---------------------------------------------------------------------------
-std::string getExecutableDir() {
-    std::string path = getExecutablePath();
-    if (path.empty()) return "";
-
-    // 最後の \ または / を探す
-    size_t pos = path.find_last_of("\\/");
-    if (pos != std::string::npos) {
-        return path.substr(0, pos + 1);
-    }
-
-    return path;
+fs::path getExecutableDir() {
+    fs::path path = getExecutablePath();
+    if (path.empty()) return {};
+    return path.parent_path();
 }
 
 // ---------------------------------------------------------------------------
