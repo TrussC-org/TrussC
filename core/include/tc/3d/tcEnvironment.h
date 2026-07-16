@@ -55,7 +55,7 @@ public:
 
     // Load an equirectangular HDR image from disk and bake all IBL maps.
     // Returns false if the file cannot be loaded.
-    bool loadFromHDR(const std::string& path) {
+    bool loadFromHDR(const fs::path& path) {
         Pixels src;
         if (!src.loadHDR(path)) {
             logError("Environment") << "loadHDR failed: " << path;

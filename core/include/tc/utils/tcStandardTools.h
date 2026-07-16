@@ -323,7 +323,9 @@ inline void registerInspectionTools() {
     tool("tc_save_screenshot", "Save screenshot to file")
         .arg<std::string>("path", "File path")
         .bind<std::string>([](std::string path) {
-            if (trussc::saveScreenshot(path)) {
+            // JSON strings are UTF-8 — convert explicitly (fs::path(string)
+            // would interpret them in the ACP on Windows)
+            if (trussc::saveScreenshot(trussc::internal::utf8ToPath(path))) {
                 return json{{"status", "ok"}, {"path", path}};
             } else {
                 return json{{"status", "error"}, {"message", "Failed to save screenshot"}};
@@ -442,9 +444,9 @@ inline void registerInspectionTools() {
                 path = "recording-" + trussc::getTimestampString("%Y-%m-%d-%H-%M-%S")
                      + (isProRes ? ".mov" : ".mp4");
             }
-            bool ok = trussc::startRecording(path, settings);
+            bool ok = trussc::startRecording(trussc::internal::utf8ToPath(path), settings);
             json r{{"status", ok ? "ok" : "error"},
-                   {"path", trussc::recordingPath()},
+                   {"path", trussc::internal::pathToUtf8(trussc::recordingPath())},
                    {"fps", settings.fps},
                    {"codec", trussc::videoCodecName(settings.codec)}};
             if (settings.duration > 0.0f) r["duration"] = settings.duration;
@@ -459,7 +461,7 @@ inline void registerInspectionTools() {
                 return json{{"status", "ok"}, {"recording", false},
                             {"message", "not recording"}};
             }
-            std::string path = trussc::recordingPath();
+            std::string path = trussc::internal::pathToUtf8(trussc::recordingPath());
             int frames = trussc::recordingFrameCount();
             float fps  = trussc::internal::globalScreenRecorder().writer().getFps();
             trussc::stopRecording();
@@ -546,8 +548,8 @@ inline void registerDebuggerTools() {
             }
 
             // Update global mouse state
-            ::trussc::internal::mouseX = x;
-            ::trussc::internal::mouseY = y;
+            ::trussc::internal::currentWindowContext().mouseX = x;
+            ::trussc::internal::currentWindowContext().mouseY = y;
 
             return json{{"status", "ok"}};
         });
@@ -566,8 +568,8 @@ inline void registerDebuggerTools() {
             args.button = a.value("button", 0);
             args.syncLegacy();
 
-            ::trussc::internal::mouseX = args.pos.x;
-            ::trussc::internal::mouseY = args.pos.y;
+            ::trussc::internal::currentWindowContext().mouseX = args.pos.x;
+            ::trussc::internal::currentWindowContext().mouseY = args.pos.y;
 
             events().mousePressed.notify(args);
             if (::trussc::internal::appMousePressedFunc)
@@ -586,8 +588,8 @@ inline void registerDebuggerTools() {
             args.button = a.value("button", 0);
             args.syncLegacy();
 
-            ::trussc::internal::mouseX = args.pos.x;
-            ::trussc::internal::mouseY = args.pos.y;
+            ::trussc::internal::currentWindowContext().mouseX = args.pos.x;
+            ::trussc::internal::currentWindowContext().mouseY = args.pos.y;
 
             events().mouseReleased.notify(args);
             if (::trussc::internal::appMouseReleasedFunc)
@@ -634,7 +636,7 @@ inline void registerDebuggerTools() {
         .arg<float>("dy", "Vertical scroll delta")
         .bind<float, float>([](float dx, float dy) {
             ScrollEventArgs args;
-            args.pos = args.globalPos = Vec2(::trussc::internal::mouseX, ::trussc::internal::mouseY);
+            args.pos = args.globalPos = Vec2(::trussc::internal::currentWindowContext().mouseX, ::trussc::internal::currentWindowContext().mouseY);
             args.scroll = Vec2(dx, dy);
             args.syncLegacy();
             events().mouseScrolled.notify(args);

@@ -18,7 +18,7 @@
 #include <d3d11.h>
 
 // sokol_app のウィンドウ取得
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 // stb_image_write（スクリーンショット保存用）
 #include "stb/stb_image_write.h"
@@ -178,34 +178,21 @@ void setWindowSizeLogical(int width, int height) {
 // ---------------------------------------------------------------------------
 // getExecutablePath - 実行ファイルの絶対パスを取得
 // ---------------------------------------------------------------------------
-std::string getExecutablePath() {
+fs::path getExecutablePath() {
+    // Native UTF-16 straight into fs::path — no UTF-8 round trip, so
+    // non-ASCII install paths survive intact.
     wchar_t path[MAX_PATH] = { 0 };
     GetModuleFileNameW(nullptr, path, MAX_PATH);
-
-    // UTF-16 から UTF-8 に変換
-    int size = WideCharToMultiByte(CP_UTF8, 0, path, -1, nullptr, 0, nullptr, nullptr);
-    if (size <= 0) return "";
-
-    std::string result(size - 1, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, path, -1, result.data(), size, nullptr, nullptr);
-
-    return result;
+    return fs::path(path);
 }
 
 // ---------------------------------------------------------------------------
 // getExecutableDir - 実行ファイルがあるディレクトリを取得
 // ---------------------------------------------------------------------------
-std::string getExecutableDir() {
-    std::string path = getExecutablePath();
-    if (path.empty()) return "";
-
-    // 最後の \ または / を探す
-    size_t pos = path.find_last_of("\\/");
-    if (pos != std::string::npos) {
-        return path.substr(0, pos + 1);
-    }
-
-    return path;
+fs::path getExecutableDir() {
+    fs::path path = getExecutablePath();
+    if (path.empty()) return {};
+    return path.parent_path();
 }
 
 // ---------------------------------------------------------------------------
@@ -364,7 +351,7 @@ bool captureWindow(Pixels& outPixels) {
 // ---------------------------------------------------------------------------
 bool internal::captureWindowToFile(const std::filesystem::path& path) {
     if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path.string()));
+        return internal::captureWindowToFile(getDataPath(path));
     }
     // Capture to Pixels
     Pixels pixels;
@@ -385,7 +372,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     }
 
     int result = 0;
-    std::string pathStr = path.string();
+    std::string pathStr = internal::pathToUtf8(path);   // UTF-8 for stb (STBIW_WINDOWS_UTF8)
 
     if (ext == ".png") {
         result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);

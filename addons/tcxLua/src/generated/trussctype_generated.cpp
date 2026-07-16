@@ -505,10 +505,18 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["rawEvent"] = &trussc::CoreEvents::rawEvent;
     }
     {
+        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
+        t["error"] = &trussc::LoadResult::error;
+        t["message"] = &trussc::LoadResult::message;
+        t["ok"] = &trussc::LoadResult::ok;
+        t["success"] = &trussc::LoadResult::success;
+        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
+    }
+    {
         sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream",
             sol::constructors<trussc::SoundStream()>(),
             sol::call_constructor, sol::constructors<trussc::SoundStream()>());
-        t["loadStream"] = sol::overload([](trussc::SoundStream& self, const std::string & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const std::string & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
+        t["loadStream"] = sol::overload([](trussc::SoundStream& self, const fs::path & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const fs::path & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
         t["getDuration"] = &trussc::SoundStream::getDuration;
         t["getPath"] = &trussc::SoundStream::getPath;
         t["getMaxPolyphony"] = &trussc::SoundStream::getMaxPolyphony;
@@ -568,7 +576,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
             sol::call_constructor, sol::constructors<trussc::Sound()>());
         t["load"] = &trussc::Sound::load;
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
-        t["loadStream"] = sol::overload([](trussc::Sound& self, const std::string & path) { return self.loadStream(path); }, [](trussc::Sound& self, const std::string & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
+        t["loadStream"] = sol::overload([](trussc::Sound& self, const fs::path & path) { return self.loadStream(path); }, [](trussc::Sound& self, const fs::path & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
 #endif
         t["loadTestTone"] = sol::overload([](trussc::Sound& self) { return self.loadTestTone(); }, [](trussc::Sound& self, float frequency) { return self.loadTestTone(frequency); }, [](trussc::Sound& self, float frequency, float duration) { return self.loadTestTone(frequency, duration); });
         t["loadFromBuffer"] = sol::overload([](trussc::Sound& self, const trussc::SoundBuffer & buf) { return self.loadFromBuffer(buf); }, [](trussc::Sound& self, std::shared_ptr<trussc::SoundBuffer> buf) { return self.loadFromBuffer(buf); });
@@ -625,7 +633,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         sol::usertype<trussc::FileWriter> t = lua->new_usertype<trussc::FileWriter>("FileWriter",
             sol::constructors<trussc::FileWriter()>(),
             sol::call_constructor, sol::constructors<trussc::FileWriter()>());
-        t["open"] = sol::overload([](trussc::FileWriter& self, const std::string & path) { return self.open(path); }, [](trussc::FileWriter& self, const std::string & path, bool append) { return self.open(path, append); });
+        t["open"] = sol::overload([](trussc::FileWriter& self, const fs::path & path) { return self.open(path); }, [](trussc::FileWriter& self, const fs::path & path, bool append) { return self.open(path, append); });
         t["close"] = &trussc::FileWriter::close;
         t["isOpen"] = &trussc::FileWriter::isOpen;
         t["write"] = sol::overload([](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.write(text); }, [](trussc::FileWriter& self, char c) -> decltype(auto) { return self.write(c); });
@@ -1005,7 +1013,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         sol::usertype<trussc::VideoWriter> t = lua->new_usertype<trussc::VideoWriter>("VideoWriter",
             sol::constructors<trussc::VideoWriter()>(),
             sol::call_constructor, sol::constructors<trussc::VideoWriter()>());
-        t["open"] = sol::overload([](trussc::VideoWriter& self, const std::string & path, int width, int height) { return self.open(path, width, height); }, [](trussc::VideoWriter& self, const std::string & path, int width, int height, const trussc::VideoRecordSettings & settings) { return self.open(path, width, height, settings); });
+        t["open"] = sol::overload([](trussc::VideoWriter& self, const fs::path & path, int width, int height) { return self.open(path, width, height); }, [](trussc::VideoWriter& self, const fs::path & path, int width, int height, const trussc::VideoRecordSettings & settings) { return self.open(path, width, height, settings); });
         t["close"] = &trussc::VideoWriter::close;
         t["isOpen"] = &trussc::VideoWriter::isOpen;
         t["getFrameCount"] = &trussc::VideoWriter::getFrameCount;
@@ -1026,7 +1034,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         sol::usertype<trussc::ScreenRecorder> t = lua->new_usertype<trussc::ScreenRecorder>("ScreenRecorder",
             sol::constructors<trussc::ScreenRecorder()>(),
             sol::call_constructor, sol::constructors<trussc::ScreenRecorder()>());
-        t["start"] = sol::overload([](trussc::ScreenRecorder& self, const std::string & path) { return self.start(path); }, [](trussc::ScreenRecorder& self, const std::string & path, const trussc::VideoRecordSettings & settings) { return self.start(path, settings); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const std::string & path) { return self.start(fbo, path); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const std::string & path, const trussc::VideoRecordSettings & settings) { return self.start(fbo, path, settings); }, [](trussc::ScreenRecorder& self, const std::string & path, float durationSec) { return self.start(path, durationSec); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const std::string & path, float durationSec) { return self.start(fbo, path, durationSec); });
+        t["start"] = sol::overload([](trussc::ScreenRecorder& self, const fs::path & path) { return self.start(path); }, [](trussc::ScreenRecorder& self, const fs::path & path, const trussc::VideoRecordSettings & settings) { return self.start(path, settings); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const fs::path & path) { return self.start(fbo, path); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const fs::path & path, const trussc::VideoRecordSettings & settings) { return self.start(fbo, path, settings); }, [](trussc::ScreenRecorder& self, const fs::path & path, float durationSec) { return self.start(path, durationSec); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const fs::path & path, float durationSec) { return self.start(fbo, path, durationSec); });
         t["stop"] = &trussc::ScreenRecorder::stop;
         t["isRecording"] = &trussc::ScreenRecorder::isRecording;
         t["getFrameCount"] = &trussc::ScreenRecorder::getFrameCount;
@@ -1533,6 +1541,27 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["targetFps"] = &trussc::HeadlessSettings::targetFps;
         t["setFps"] = &trussc::HeadlessSettings::setFps;
     }
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+    {
+        sol::usertype<trussc::Window> t = lua->new_usertype<trussc::Window>("Window",
+            sol::constructors<trussc::Window()>(),
+            sol::call_constructor, sol::constructors<trussc::Window()>());
+        t["setApp"] = &trussc::Window::setApp;
+        t["getApp"] = &trussc::Window::getApp;
+        t["events"] = &trussc::Window::events;
+        t["close"] = &trussc::Window::close;
+        t["isOpen"] = &trussc::Window::isOpen;
+        t["setTitle"] = &trussc::Window::setTitle;
+        t["getWidth"] = &trussc::Window::getWidth;
+        t["getHeight"] = &trussc::Window::getHeight;
+        t["setClearColor"] = &trussc::Window::setClearColor;
+        t["dispatchMousePressToTree"] = &trussc::Window::dispatchMousePressToTree;
+        t["dispatchMouseReleaseToTree"] = &trussc::Window::dispatchMouseReleaseToTree;
+        t["tickTree"] = &trussc::Window::tickTree;
+        t["drawTreeNow"] = &trussc::Window::drawTreeNow;
+        t["syncRootSize"] = &trussc::Window::syncRootSize;
+    }
+#endif
     lua->new_usertype<trussc::Direction>("Direction",
         sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
         "Left", sol::var(trussc::Direction::Left),
@@ -1571,6 +1600,13 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         "Right", sol::var(trussc::MouseButton::Right),
         "Middle", sol::var(trussc::MouseButton::Middle),
         "None", sol::var(trussc::MouseButton::None));
+    lua->new_usertype<trussc::LoadError>("LoadError",
+        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
+        "None", sol::var(trussc::LoadError::None),
+        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
+        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
+        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
+        "Unknown", sol::var(trussc::LoadError::Unknown));
     lua->new_usertype<trussc::MixMode>("MixMode",
         sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
         "Auto", sol::var(trussc::MixMode::Auto),

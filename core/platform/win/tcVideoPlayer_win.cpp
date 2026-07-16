@@ -845,10 +845,11 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
 
 namespace trussc {
 
-bool VideoPlayer::loadPlatform(const std::string& path) {
+bool VideoPlayer::loadPlatform(const fs::path& path) {
     auto impl = new TCVideoPlayerImpl();
 
-    if (!impl->load(path, this)) {
+    // Impl-side strings are UTF-8 (converted to wide via CP_UTF8 internally)
+    if (!impl->load(internal::pathToUtf8(path), this)) {
         delete impl;
         return false;
     }
@@ -1200,18 +1201,19 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
     return ok;
 }
 
-bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
+bool VideoPlayer::extractFramePlatform(const fs::path& path, Pixels& outPixels,
                                        float timeSec, float* outDuration) {
-    return tcv_extract_frame_win(path, outPixels, timeSec, outDuration, /*exact=*/true);
+    return tcv_extract_frame_win(internal::pathToUtf8(path), outPixels, timeSec, outDuration, /*exact=*/true);
 }
 
-bool VideoPlayer::extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
+bool VideoPlayer::extractKeyFramePlatform(const fs::path& path, Pixels& outPixels,
                                           float timeSec, float* outDuration) {
-    if (tcv_extract_frame_win(path, outPixels, timeSec, outDuration, /*exact=*/false)) {
+    std::string p = internal::pathToUtf8(path);
+    if (tcv_extract_frame_win(p, outPixels, timeSec, outDuration, /*exact=*/false)) {
         return true;
     }
     // No keyframe reachable — fall back to an exact decode.
-    return tcv_extract_frame_win(path, outPixels, timeSec, outDuration, /*exact=*/true);
+    return tcv_extract_frame_win(p, outPixels, timeSec, outDuration, /*exact=*/true);
 }
 
 } // namespace trussc

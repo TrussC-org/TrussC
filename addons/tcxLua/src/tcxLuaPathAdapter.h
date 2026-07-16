@@ -41,6 +41,24 @@
 #include "sol/sol.hpp"
 
 namespace sol {
+
+    // std::filesystem::path has begin()/end() (component iteration), so sol2's
+    // container detection would otherwise treat it as a Lua container and try
+    // to instantiate container_traits (which needs operator[] -> hard compile
+    // error, and would be wrong semantics anyway). A path is a VALUE here --
+    // pushed/read as a UTF-8 Lua string via the stack specializations below.
+    template <>
+    struct is_container<std::filesystem::path> : std::false_type {};
+
+    // Tell sol2 a path IS a Lua string (value semantics). Without this the
+    // default lua_type_of = userdata makes usertype member fields of type
+    // fs::path (e.g. FileDialogResult.filePath) go through the by-reference
+    // userdata machinery, which cannot bind our by-value getter result
+    // (non-const lvalue ref to temporary) and fails to compile.
+    template <>
+    struct lua_type_of<std::filesystem::path>
+        : std::integral_constant<type, type::string> {};
+
 namespace stack {
 
     // Lua string (LUA_TSTRING) -> std::filesystem::path.
@@ -62,7 +80,7 @@ namespace stack {
     // Accept a Lua string where a std::filesystem::path is expected. Anything
     // else is rejected through the handler with a useful message.
     template <>
-    struct unqualified_checker<std::filesystem::path, type::userdata> {
+    struct unqualified_checker<std::filesystem::path, type::string> {
         template <typename Handler>
         static bool check(lua_State* L, int index, Handler&& handler, record& tracking) {
             tracking.use(1);

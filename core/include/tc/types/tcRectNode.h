@@ -190,7 +190,7 @@ protected:
             float gx1 = g1.x, gy1 = g1.y, gx2 = g2.x, gy2 = g2.y;
 
             // Calculate rectangle in screen coordinates (considering DPI scale)
-            float dpi = sapp_dpi_scale();
+            float dpi = getDpiScale();
             float sx = std::min(gx1, gx2) * dpi;
             float sy = std::min(gy1, gy2) * dpi;
             float sw = std::abs(gx2 - gx1) * dpi;

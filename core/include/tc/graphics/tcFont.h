@@ -30,7 +30,7 @@
 #endif
 
 // sokol headers
-#include "sokol/sokol_app.h"
+#include "sokol/sokol_app_tc.h"
 #include "sokol/sokol_gfx.h"
 #include "sokol/util/sokol_gl_tc.h"
 
@@ -38,6 +38,7 @@
 #include "stb/stb_truetype.h"
 
 #include "../utils/tcLog.h"
+#include "tc/utils/tcLoadResult.h"
 #include "../utils/tcSystemFont.h"
 #include "../types/tcDirection.h"
 #include "../types/tcRectangle.h"
@@ -191,8 +192,9 @@ public:
     bool setup(const std::string& fontPath, int fontSize) {
         cleanup();
 
-        // Load font file
-        std::ifstream file(fontPath, std::ios::binary | std::ios::ate);
+        // Load font file (fontPath is UTF-8 — convert so non-ASCII paths
+        // survive on Windows)
+        std::ifstream file(internal::utf8ToPath(fontPath), std::ios::binary | std::ios::ate);
         if (!file) {
             logError() << "FontAtlasManager: failed to open " << fontPath;
             return false;
@@ -884,7 +886,7 @@ public:
     //   - A system font name (PostScript or family name) — resolved via
     //     tc::systemFontPath when the path doesn't exist on disk. Lets users
     //     write `font.load("HiraginoSans-W3", 24)` cross-platform.
-    bool load(const std::string& nameOrPath, int size) {
+    LoadResult load(const fs::path& nameOrPath, int size) {
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
         dpiScale_ = sapp_dpi_scale();
@@ -896,17 +898,21 @@ public:
             initResources();
         }
 
-        // Resolve input to a concrete path (file / URL).
-        std::string actualPath = nameOrPath;
-        if (!isUrl(nameOrPath)) {
+        // Resolve input to a concrete path (file / URL). A font NAME
+        // ("HiraginoSans-W3") is a valid relative fs::path, so both spellings
+        // arrive here; the UTF-8 string form is what cache keys and the
+        // system-font lookup use.
+        std::string nameStr = internal::pathToUtf8(nameOrPath);
+        std::string actualPath = nameStr;
+        if (!isUrl(nameStr)) {
             std::ifstream test(nameOrPath, std::ios::binary);
             if (!test.good()) {
                 // Not a usable file path — try as a system font name.
-                std::string resolved = systemFontPath(nameOrPath);
+                fs::path resolved = systemFontPath(nameStr);
                 if (!resolved.empty()) {
-                    actualPath = resolved;
-                    logNotice("Font") << "Resolved \"" << nameOrPath
-                                      << "\" → " << resolved;
+                    actualPath = internal::pathToUtf8(resolved);
+                    logNotice("Font") << "Resolved \"" << nameStr
+                                      << "\" → " << actualPath;
                 }
                 // If resolution failed, fall through with the original input so
                 // the eventual load error mentions what the user actually asked for.
@@ -920,16 +926,30 @@ public:
 #ifdef __EMSCRIPTEN__
             // Async load - returns immediately, font available after fetch completes
             loadFromUrlAsync(actualPath, physicalSize);
-            return true;  // Will be loaded asynchronously
+            return LoadResult::success();  // Will be loaded asynchronously
 #else
             logError() << "Font: URL loading only supported in WebAssembly";
-            return false;
+            return LoadResult::fail(LoadError::UnsupportedFormat,
+                                    "URL loading only supported in WebAssembly: " + actualPath);
 #endif
         } else {
             atlasManager_ = internal::SharedFontCache::getInstance().getOrCreate(cacheKey_);
         }
 
-        return atlasManager_ != nullptr;
+        if (!atlasManager_) {
+            // Classify: the resolved path doesn't exist on disk -> the font
+            // was never found (bad path or unresolvable system-font name);
+            // otherwise the file opened but stb_truetype rejected it.
+            std::error_code ec;
+            if (!fs::exists(internal::utf8ToPath(actualPath), ec)) {
+                std::string msg = "font not found: \"" + nameStr + "\"";
+                if (actualPath != nameStr) msg += " (resolved to \"" + actualPath + "\")";
+                return LoadResult::fail(LoadError::FileNotFound, msg);
+            }
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    "failed to init font: " + actualPath);
+        }
+        return LoadResult::success();
     }
 
 private:

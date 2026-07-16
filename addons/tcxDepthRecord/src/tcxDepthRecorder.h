@@ -44,16 +44,15 @@ public:
                std::uint32_t streams = REC_ALL,
                DepthCodecId depthCodec = DepthCodecId::HiloLZ4,
                ColorCodecId colorCodec = ColorCodecId::LZ4) {
-        std::filesystem::path p(path);
-        std::string resolved = p.is_relative() ? getDataPath(path) : path;
-        std::filesystem::path rp(resolved);
+        // getDataPath passes absolute paths through unchanged
+        std::filesystem::path rp = getDataPath(path);
         if (rp.has_parent_path()) {
             std::error_code ec;
             std::filesystem::create_directories(rp.parent_path(), ec);
         }
         file_.open(rp, std::ios::binary | std::ios::trunc);
         if (!file_) {
-            logError("tcxDepthRecord") << "DepthRecorder: cannot open " << resolved;
+            logError("tcxDepthRecord") << "DepthRecorder: cannot open " << rp;
             return false;
         }
         streams_ = streams;

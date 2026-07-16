@@ -11,11 +11,12 @@
 #include <cmath>
 #include <memory>
 #include <filesystem>
+#include "tc/utils/tcFileIO.h"   // fs alias + path boundary helpers
 #include "../sound/tcSound.h"
 
 // Forward declaration for tcPlatform.h (avoid circular include)
 namespace trussc {
-    std::string getExecutableDir();
+    fs::path getExecutableDir();
 }
 
 namespace trussc {
@@ -38,26 +39,19 @@ namespace internal {
     // in the iOS build, and the runtime probe also runs too early in _setup_cb
     // to see a valid executable path — so it happens lazily on first use).
     #ifdef __APPLE__
-    inline std::string dataPathRoot = "../../../data/";
+    inline fs::path dataPathRoot = "../../../data";
     #else
-    inline std::string dataPathRoot = "data/";
+    inline fs::path dataPathRoot = "data";
     #endif
-    inline bool dataPathRootIsAbsolute = false;
     inline bool dataPathRootUserSet = false;  // user called setDataPathRoot()
     inline bool dataPathRootProbed = false;   // lazy Apple probe done
 }
 
 // Set the data path root
-// If relative path, resolved relative to executable directory
-// If absolute path (starts with /), used as-is
-inline void setDataPathRoot(const std::string& path) {
+// If relative, resolved relative to executable directory
+// If absolute, used as-is (fs::path::is_absolute — handles "C:/..." on Windows too)
+inline void setDataPathRoot(const fs::path& path) {
     internal::dataPathRoot = path;
-    // Add trailing slash if missing
-    if (!internal::dataPathRoot.empty() && internal::dataPathRoot.back() != '/') {
-        internal::dataPathRoot += '/';
-    }
-    // Record whether path is absolute
-    internal::dataPathRootIsAbsolute = (!path.empty() && path[0] == '/');
     internal::dataPathRootUserSet = true;  // explicit choice wins over the probe
 }
 
@@ -67,19 +61,19 @@ namespace internal {
 inline void resolveDataPathRootOnce() {
 #ifdef __APPLE__
     if (dataPathRootProbed || dataPathRootUserSet) return;
-    std::string exe = getExecutableDir();
+    fs::path exe = getExecutableDir();
     // Don't latch until the executable path is actually available — early on
     // iOS it can be empty/"/", which would resolve the checks against the CWD.
-    if (exe.empty() || exe == "/") return;
+    if (exe.empty() || exe == fs::path("/")) return;
     dataPathRootProbed = true;
     std::error_code ec;
     // Check the flat-bundle layout FIRST (unambiguous on iOS: data/ sits right
     // next to the executable). macOS dev has no Contents/MacOS/data, so it
     // correctly falls through to the ../../../data (bin/data) layout.
-    if (std::filesystem::exists(exe + "data", ec)) {
-        dataPathRoot = "data/";           // iOS flat bundle / distributed
-    } else if (std::filesystem::exists(exe + "../../../data", ec)) {
-        dataPathRoot = "../../../data/";  // macOS dev / bin layout
+    if (std::filesystem::exists(exe / "data", ec)) {
+        dataPathRoot = "data";            // iOS flat bundle / distributed
+    } else if (std::filesystem::exists(exe / "../../../data", ec)) {
+        dataPathRoot = "../../../data";   // macOS dev / bin layout
     }
     // else: keep the compile-time default
 #endif
@@ -87,29 +81,25 @@ inline void resolveDataPathRootOnce() {
 } // namespace internal
 
 // Get the data path root
-inline std::string getDataPathRoot() {
+inline fs::path getDataPathRoot() {
     internal::resolveDataPathRootOnce();
     return internal::dataPathRoot;
 }
 
 // Get data path for a filename
-// - If filename is absolute, return as-is
+// - If filename is absolute, return as-is (like oF)
 // - Otherwise, resolved relative to executable directory + dataPathRoot
-inline std::string getDataPath(const std::string& filename) {
+inline fs::path getDataPath(const fs::path& filename) {
     internal::resolveDataPathRootOnce();
-
-    // If filename is absolute, return as-is (like oF)
-    // Uses std::filesystem for cross-platform support (Unix: /path, Windows: C:\path)
-    if (!filename.empty() && std::filesystem::path(filename).is_absolute()) {
+    if (!filename.empty() && filename.is_absolute()) {
         return filename;
     }
 
-    if (internal::dataPathRootIsAbsolute) {
-        // Absolute dataPathRoot: use as-is
-        return internal::dataPathRoot + filename;
+    if (internal::dataPathRoot.is_absolute()) {
+        return internal::dataPathRoot / filename;
     } else {
-        // Relative path: resolve relative to executable directory
-        return getExecutableDir() + internal::dataPathRoot + filename;
+        // Relative root: resolve relative to executable directory
+        return getExecutableDir() / internal::dataPathRoot / filename;
     }
 }
 

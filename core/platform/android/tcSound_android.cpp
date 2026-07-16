@@ -13,14 +13,16 @@
 
 namespace trussc {
 
-bool SoundBuffer::loadAac(const std::string& path) {
+LoadResult SoundBuffer::loadAac(const fs::path& path) {
     logWarning("SoundBuffer") << "AAC loading not yet implemented on Android";
-    return false;
+    return LoadResult::fail(LoadError::UnsupportedFormat,
+                            "AAC loading not yet implemented on Android");
 }
 
-bool SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
+LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
     logWarning("SoundBuffer") << "AAC loading from memory not yet implemented on Android";
-    return false;
+    return LoadResult::fail(LoadError::UnsupportedFormat,
+                            "AAC loading from memory not yet implemented on Android");
 }
 
 } // namespace trussc

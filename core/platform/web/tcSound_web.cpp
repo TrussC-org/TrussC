@@ -119,11 +119,11 @@ EM_JS(void, copyAacData, (float* outPtr, int totalSamples), {
 // -----------------------------------------------------------------------------
 // SoundBuffer::loadAac - Web implementation (deferred loading)
 // -----------------------------------------------------------------------------
-bool SoundBuffer::loadAac(const std::string& path) {
+LoadResult SoundBuffer::loadAac(const fs::path& path) {
     printf("SoundBuffer: deferring AAC load: %s [Web]\n", path.c_str());
 
-    // Save path for deferred loading
-    deferredAacPath_ = path;
+    // Save path for deferred loading (web paths are plain UTF-8 strings)
+    deferredAacPath_ = path.string();
 
     // Set placeholder values so the app doesn't crash
     channels = 2;
@@ -131,7 +131,7 @@ bool SoundBuffer::loadAac(const std::string& path) {
     numSamples = 44100;  // 1 second placeholder
     samples.resize(numSamples * channels, 0.0f);
 
-    return true;  // Will actually load when play() is called
+    return LoadResult::success();  // Will actually load when play() is called
 }
 
 // -----------------------------------------------------------------------------
@@ -221,15 +221,16 @@ void SoundBuffer::ensureAacLoaded() {
 // -----------------------------------------------------------------------------
 // SoundBuffer::loadAacFromMemory - Web implementation
 // -----------------------------------------------------------------------------
-bool SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
+LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
     if (!data || dataSize == 0) {
         logWarning("SoundBuffer") << "loadAacFromMemory() called with empty data";
-        return false;
+        return LoadResult::fail(LoadError::DecodeFailed, "empty memory range");
     }
 
     // TODO: Implement memory-based AAC decode for Web
     logWarning("SoundBuffer") << "loadAacFromMemory() not yet implemented for Web (use file path instead)";
-    return false;
+    return LoadResult::fail(LoadError::UnsupportedFormat,
+                            "AAC decode from memory not yet implemented for Web");
 }
 
 } // namespace trussc

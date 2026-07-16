@@ -138,7 +138,7 @@ TlsClient::TlsClient() {
                                      reinterpret_cast<const unsigned char*>(pers),
                                      strlen(pers));
     if (ret != 0) {
-        tcLogError() << "TlsClient: Failed to seed random generator: " << ret;
+        logError() << "TlsClient: Failed to seed random generator: " << ret;
     }
 }
 
@@ -157,7 +157,7 @@ bool TlsClient::setCACertificate(const std::string& pemData) {
     if (ret < 0) {
         char errBuf[256];
         mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-        tcLogError() << "TlsClient: Failed to parse CA certificate: " << errBuf;
+        logError() << "TlsClient: Failed to parse CA certificate: " << errBuf;
         return false;
     }
     // Explicit user intent: skip the default-CA auto-load entirely.
@@ -170,16 +170,16 @@ bool TlsClient::setCACertificateFile(const std::string& path) {
     // call — works portably on POSIX and Windows.
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) {
-        tcLogError() << "TlsClient: Failed to open CA certificate file: " << path;
+        logError() << "TlsClient: Failed to open CA certificate file: " << path;
         return false;
     }
     std::streamsize size = file.tellg();
     if (size < 0) {
-        tcLogError() << "TlsClient: Failed to size CA certificate file: " << path;
+        logError() << "TlsClient: Failed to size CA certificate file: " << path;
         return false;
     }
     if (size > kMaxCaPemBytes) {
-        tcLogError() << "TlsClient: CA certificate file too large ("
+        logError() << "TlsClient: CA certificate file too large ("
                      << size << " bytes, limit " << kMaxCaPemBytes
                      << "): " << path;
         return false;
@@ -220,7 +220,7 @@ void TlsClient::ensureDefaultCAsLoaded() {
         }
         CertCloseStore(store, 0);
         if (parsed > 0) {
-            tcLogNotice() << "TlsClient: loaded " << parsed
+            logNotice() << "TlsClient: loaded " << parsed
                           << " CAs from Windows Cert Store (ROOT)";
             return;
         }
@@ -240,7 +240,7 @@ void TlsClient::ensureDefaultCAsLoaded() {
         struct stat st;
         if (stat(*p, &st) != 0) continue;
         if (st.st_size > kMaxCaPemBytes) {
-            tcLogWarning() << "TlsClient: skipping " << *p
+            logWarning() << "TlsClient: skipping " << *p
                            << " (size " << st.st_size
                            << " > limit " << kMaxCaPemBytes << ")";
             continue;
@@ -257,7 +257,7 @@ void TlsClient::ensureDefaultCAsLoaded() {
         if (ret < 0) continue;  // try the next path
         const size_t loaded = countCerts(&ctx_->cacert) - before;
         if (loaded > 0) {
-            tcLogNotice() << "TlsClient: loaded " << loaded
+            logNotice() << "TlsClient: loaded " << loaded
                           << " CAs from " << *p;
             return;
         }
@@ -273,14 +273,14 @@ void TlsClient::ensureDefaultCAsLoaded() {
     if (ret >= 0) {
         const size_t loaded = countCerts(&ctx_->cacert) - before;
         if (loaded > 0) {
-            tcLogNotice() << "TlsClient: loaded " << loaded
+            logNotice() << "TlsClient: loaded " << loaded
                           << " CAs from bundled cacert.pem ("
                           << tls_internal::bundledCaBundleDate() << ")";
             return;
         }
     }
 
-    tcLogError() << "TlsClient: failed to load any default CA certificates. "
+    logError() << "TlsClient: failed to load any default CA certificates. "
                  << "TLS handshakes will fail unless setCACertificate() or "
                  << "setVerifyNone() is called explicitly.";
 }
@@ -377,7 +377,7 @@ bool TlsClient::connect(const std::string& host, int port) {
         // TCP Connected immediately
         running_ = true;
         handshakePending_ = true;
-        tcLogNotice() << "TCP connected to " << host << ":" << port << ", starting TLS handshake...";
+        logNotice() << "TCP connected to " << host << ":" << port << ", starting TLS handshake...";
     }
 
     if (running_) {
@@ -497,7 +497,7 @@ void TlsClient::processNetwork() {
 #endif
             connectPending_ = false;
             handshakePending_ = true;
-            tcLogNotice() << "TCP connected (async), starting TLS handshake...";
+            logNotice() << "TCP connected (async), starting TLS handshake...";
         } else {
             return; // Still connecting
         }
@@ -509,7 +509,7 @@ void TlsClient::processNetwork() {
             handshakePending_ = false;
             connected_ = true;
             
-            tcLogNotice() << "TLS connected to " << remoteHost_ << ":" << remotePort_
+            logNotice() << "TLS connected to " << remoteHost_ << ":" << remotePort_
                           << " [" << getTlsVersion() << ", " << getCipherSuite() << "]";
 
             tc::TcpConnectEventArgs args;

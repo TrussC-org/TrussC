@@ -22,7 +22,7 @@
 
 #include <jni.h>
 #include <android/native_activity.h>
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 #include <cstring>
 

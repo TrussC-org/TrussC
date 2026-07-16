@@ -90,7 +90,7 @@ void confirmDialogAsync(const std::string& title,
 // -----------------------------------------------------------------------------
 FileDialogResult loadDialog(const std::string& title,
                             const std::string& message,
-                            const std::string& defaultPath,
+                            const fs::path& defaultPath,
                             bool folderSelection) {
     FileDialogResult result;
 
@@ -137,7 +137,7 @@ FileDialogResult loadDialog(const std::string& title,
 
 void loadDialogAsync(const std::string& title,
                      const std::string& message,
-                     const std::string& defaultPath,
+                     const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback) {
     @autoreleasepool {
@@ -194,8 +194,8 @@ void loadDialogAsync(const std::string& title,
 // -----------------------------------------------------------------------------
 FileDialogResult saveDialog(const std::string& title,
                             const std::string& message,
-                            const std::string& defaultPath,
-                            const std::string& defaultName) {
+                            const fs::path& defaultPath,
+                            const fs::path& defaultName) {
     FileDialogResult result;
 
     @autoreleasepool {
@@ -233,8 +233,8 @@ FileDialogResult saveDialog(const std::string& title,
 
 void saveDialogAsync(const std::string& title,
                      const std::string& message,
-                     const std::string& defaultPath,
-                     const std::string& defaultName,
+                     const fs::path& defaultPath,
+                     const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback) {
     @autoreleasepool {
         NSSavePanel* panel = [NSSavePanel savePanel];

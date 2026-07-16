@@ -226,7 +226,7 @@ bool GltfModel::load(const string& path) {
     textures_.clear();
     loaded_ = false;
 
-    string resolved = getDataPath(path);
+    string resolved = getDataPath(path).string();
 
     // Parse with cgltf
     cgltf_options options = {};

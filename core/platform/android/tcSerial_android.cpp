@@ -35,7 +35,7 @@
 #include <mutex>
 #include <thread>
 #include <vector>
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 namespace trussc {
 namespace androidserial {

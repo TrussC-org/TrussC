@@ -54,15 +54,14 @@ void tcApp::addBall(float x, float y) {
     // Add collision callback to ball
     auto* collider = ball->getCollider();
     if (collider) {
-        ballListeners.emplace_back();
-        collider->onCollisionEnter.listen(ballListeners.back(), [this](box2d::CollisionEvent& e) {
+        ballListeners.push_back(collider->onCollisionEnter.listen([this](box2d::CollisionEvent& e) {
             enterCount++;
             collisionMarkers.push_back({
                 e.contactPoint,
                 0.3f,
                 Color(0.2f, 0.8f, 1.0f)  // cyan for ball collisions
             });
-        });
+        }));
     }
 
     addChild(ball);
