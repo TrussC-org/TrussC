@@ -15,7 +15,7 @@ namespace trussc {
 
 bool Pixels::loadPlatform(const fs::path& path) {
     @autoreleasepool {
-        NSString* nsPath = [NSString stringWithUTF8String:path.string().c_str()];
+        NSString* nsPath = [NSString stringWithUTF8String:internal::pathToUtf8(path).c_str()];
         NSURL* url = [NSURL fileURLWithPath:nsPath];
 
         // Create image source

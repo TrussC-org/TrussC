@@ -37,7 +37,7 @@ std::string cfStringToStd(CFStringRef s) {
 
 } // namespace
 
-std::string systemFontPath(const std::string& name) {
+fs::path systemFontPath(const std::string& name) {
     if (name.empty()) return "";
     CFStringRef cfName = CFStringCreateWithCString(nullptr, name.c_str(), kCFStringEncodingUTF8);
     if (!cfName) return "";

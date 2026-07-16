@@ -43,9 +43,9 @@ public:
         // the format-correct one; no per-site swapchain/FBO branch.
         internal::loadPipeline(internal::active3D());
 
-        float dpiScale = sapp_dpi_scale();
-        float w = (float)sapp_width() / dpiScale;
-        float h = (float)sapp_height() / dpiScale;
+        float dpiScale = getDpiScale();
+        float w = (float)getFramebufferWidth() / dpiScale;
+        float h = (float)getFramebufferHeight() / dpiScale;
         float aspect = w / h;
 
         // Camera basis from orientation quaternion (no gimbal lock / no pole
@@ -99,10 +99,10 @@ public:
         Mat4 view = Mat4::lookAt(eye, target_, camUp);
 
         // Save for worldToScreen/screenToWorld
-        internal::currentProjectionMatrix = projection;
-        internal::currentViewMatrix = view;
-        internal::currentViewW = w;
-        internal::currentViewH = h;
+        internal::currentWindowContext().currentProjectionMatrix = projection;
+        internal::currentWindowContext().currentViewMatrix = view;
+        internal::currentWindowContext().currentViewW = w;
+        internal::currentWindowContext().currentViewH = h;
 
         // Register this camera scope: nodes drawn between begin()/end() stamp
         // it, so mouse picking unprojects through THIS camera for them.
@@ -294,6 +294,13 @@ public:
 
     // ---------------------------------------------------------------------------
     // Mouse input (auto-subscribe to events)
+    //
+    // Multi-window contract: the listeners bind to the CURRENT window's event
+    // streams at the moment enableMouseInput() is called (events() resolves
+    // per window). Call it from within the lifecycle of the App that drives
+    // the camera's window -- setup()/update()/draw() of a secondary window's
+    // App binds to THAT window; calling it from the main App and then using
+    // the camera in a secondary window would listen to the wrong stream.
     // ---------------------------------------------------------------------------
 
     void enableMouseInput() {

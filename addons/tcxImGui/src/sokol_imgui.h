@@ -561,6 +561,18 @@ SOKOL_IMGUI_API_DECL void simgui_shutdown(void);
 inline void simgui_setup(const simgui_desc_t& desc) { return simgui_setup(&desc); }
 inline void simgui_new_frame(const simgui_frame_desc_t& desc) { return simgui_new_frame(&desc); }
 
+/* [TrussC] multi-context API (multi-window support). Each context is a full,
+   independent sokol_imgui instance (own ImGui context, font atlas, buffers,
+   pipeline). simgui_tc_set_context() selects which instance the classic
+   simgui_* calls (and ImGui::GetCurrentContext) operate on. The context
+   handle from simgui_tc_get_context() before any make/set is the default
+   instance (what plain simgui_setup initialized). */
+typedef struct simgui_tc_context { void* ptr; } simgui_tc_context;
+SOKOL_IMGUI_API_DECL simgui_tc_context simgui_tc_make_context(const simgui_desc_t* desc);
+SOKOL_IMGUI_API_DECL void simgui_tc_set_context(simgui_tc_context ctx);
+SOKOL_IMGUI_API_DECL simgui_tc_context simgui_tc_get_context(void);
+SOKOL_IMGUI_API_DECL void simgui_tc_destroy_context(simgui_tc_context ctx);
+
 #endif
 #endif /* SOKOL_IMGUI_INCLUDED */
 
@@ -646,8 +658,17 @@ typedef struct {
     sg_range vertices;
     sg_range indices;
     bool is_osx;
+    void* imgui_ctx;    // [TrussC] the ImGuiContext* owned by this instance
 } _simgui_state_t;
-static _simgui_state_t _simgui;
+
+// [TrussC] Multi-context support (multi-window): _simgui becomes a reference
+// to the ACTIVE instance so the whole implementation below compiles
+// unchanged. simgui_setup()/simgui_* operate on the instance selected via
+// simgui_tc_set_context(); the default instance preserves classic
+// single-window behavior.
+static _simgui_state_t _simgui_default_instance;
+static _simgui_state_t* _simgui_cur = &_simgui_default_instance;
+#define _simgui (*_simgui_cur)
 
 //>#shdgen
 #if defined(SOKOL_GLCORE)
@@ -2127,10 +2148,19 @@ static void _simgui_imgui_newframe(void) {
 }
 
 static void _simgui_imgui_create_context(void) {
+    // [TrussC] Since Dear ImGui 1.90, CreateContext() RESTORES the previously
+    // current context before returning (it is deliberately not
+    // context-switching). Capture the RETURN VALUE and make the new context
+    // current explicitly -- the rest of simgui_setup() configures "the
+    // current context" and must target the newly created one.
     #if defined(__cplusplus)
-        ImGui::CreateContext();
+        ImGuiContext* ctx = ImGui::CreateContext();
+        ImGui::SetCurrentContext(ctx);
+        _simgui.imgui_ctx = (void*)ctx;
     #else
-        _SIMGUI_CFUNC(CreateContext)(0);
+        ImGuiContext* ctx = _SIMGUI_CFUNC(CreateContext)(0);
+        _SIMGUI_CFUNC(SetCurrentContext)(ctx);
+        _simgui.imgui_ctx = (void*)ctx;
     #endif
 }
 
@@ -3169,5 +3199,72 @@ SOKOL_API_IMPL bool simgui_handle_event(const sapp_event* ev) {
     return io->WantCaptureKeyboard || io->WantCaptureMouse;
 }
 #endif // SOKOL_IMGUI_NO_SOKOL_APP
+
+/* [TrussC] multi-context API implementation */
+SOKOL_API_IMPL simgui_tc_context simgui_tc_get_context(void) {
+    simgui_tc_context c; c.ptr = (void*)_simgui_cur; return c;
+}
+
+SOKOL_API_IMPL void simgui_tc_set_context(simgui_tc_context ctx) {
+    SOKOL_ASSERT(ctx.ptr);
+    _simgui_cur = (_simgui_state_t*)ctx.ptr;
+    if (_simgui.imgui_ctx) {
+        #if defined(__cplusplus)
+            ImGui::SetCurrentContext((ImGuiContext*)_simgui.imgui_ctx);
+        #else
+            _SIMGUI_CFUNC(SetCurrentContext)((ImGuiContext*)_simgui.imgui_ctx);
+        #endif
+    }
+}
+
+SOKOL_API_IMPL simgui_tc_context simgui_tc_make_context(const simgui_desc_t* desc) {
+    SOKOL_ASSERT(desc);
+    /* plain malloc: instance lifetime is independent of any per-instance
+       custom allocator (custom allocators across tc contexts unsupported) */
+    _simgui_state_t* inst = (_simgui_state_t*)malloc(sizeof(_simgui_state_t));
+    SOKOL_ASSERT(inst);
+    memset(inst, 0, sizeof(_simgui_state_t));
+    _simgui_state_t* prev = _simgui_cur;
+    #if defined(__cplusplus)
+        ImGuiContext* prev_im = ImGui::GetCurrentContext();
+    #else
+        ImGuiContext* prev_im = _SIMGUI_CFUNC(GetCurrentContext)();
+    #endif
+    _simgui_cur = inst;
+    simgui_setup(desc);      /* fills the new instance, creates its ImGui context */
+    _simgui_cur = prev;
+    #if defined(__cplusplus)
+        ImGui::SetCurrentContext(prev_im);
+    #else
+        _SIMGUI_CFUNC(SetCurrentContext)(prev_im);
+    #endif
+    simgui_tc_context c; c.ptr = (void*)inst; return c;
+}
+
+SOKOL_API_IMPL void simgui_tc_destroy_context(simgui_tc_context ctx) {
+    if (!ctx.ptr || ctx.ptr == (void*)&_simgui_default_instance) {
+        return;   /* the default instance is torn down by plain simgui_shutdown() */
+    }
+    _simgui_state_t* inst = (_simgui_state_t*)ctx.ptr;
+    _simgui_state_t* prev = _simgui_cur;
+    #if defined(__cplusplus)
+        ImGuiContext* prev_im = ImGui::GetCurrentContext();
+    #else
+        ImGuiContext* prev_im = _SIMGUI_CFUNC(GetCurrentContext)();
+    #endif
+    if (prev == inst) { prev = &_simgui_default_instance; prev_im = 0; }
+    simgui_tc_context sel; sel.ptr = (void*)inst;
+    simgui_tc_set_context(sel);
+    simgui_shutdown();
+    _simgui_cur = prev;
+    if (prev_im) {
+        #if defined(__cplusplus)
+            ImGui::SetCurrentContext(prev_im);
+        #else
+            _SIMGUI_CFUNC(SetCurrentContext)(prev_im);
+        #endif
+    }
+    free(inst);
+}
 
 #endif // SOKOL_IMPL

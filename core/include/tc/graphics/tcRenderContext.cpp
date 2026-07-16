@@ -187,7 +187,7 @@ bool internal::RenderContext::drawBitmapStringBillboard(const std::string& text,
     // Absence-of-context handling only (not a semantic gate): with no camera
     // context yet (headless / before the first camera setup) or a degenerate
     // viewport there is nothing to project through.
-    std::shared_ptr<const CameraContext> ctx = internal::currentCameraContext;
+    std::shared_ptr<const CameraContext> ctx = internal::currentWindowContext().currentCameraContext;
     if (!ctx || ctx->viewW <= 0.0f || ctx->viewH <= 0.0f) return false;
 
     if (text.empty()) return true;                 // handled: nothing to draw
@@ -226,7 +226,7 @@ bool internal::RenderContext::drawBitmapStringBillboard(const std::string& text,
     sgl_matrix_mode_projection();
     sgl_push_matrix();
     sgl_load_identity();
-    sgl_ortho(0.0f, internal::currentViewW, internal::currentViewH, 0.0f, -10000.0f, 10000.0f);
+    sgl_ortho(0.0f, internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH, 0.0f, -10000.0f, 10000.0f);
 
     sgl_matrix_mode_modelview();
     sgl_push_matrix();
@@ -311,7 +311,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
         sgl_matrix_mode_projection();
         sgl_push_matrix();
         sgl_load_identity();
-        sgl_ortho(0.0f, internal::currentViewW, internal::currentViewH, 0.0f, -10000.0f, 10000.0f);
+        sgl_ortho(0.0f, internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH, 0.0f, -10000.0f, 10000.0f);
 
         sgl_matrix_mode_modelview();
         sgl_push_matrix();
@@ -484,7 +484,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
         sgl_matrix_mode_projection();
         sgl_push_matrix();
         sgl_load_identity();
-        sgl_ortho(0.0f, internal::currentViewW, internal::currentViewH, 0.0f, -10000.0f, 10000.0f);
+        sgl_ortho(0.0f, internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH, 0.0f, -10000.0f, 10000.0f);
 
         sgl_matrix_mode_modelview();
         sgl_push_matrix();
@@ -580,12 +580,19 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
 }
 
 // ---------------------------------------------------------------------------
-// Default context singleton (non-inline — see tcRenderContext.h comment)
+// Default context accessor (non-inline — see tcRenderContext.h comment)
 // ---------------------------------------------------------------------------
 namespace internal {
 RenderContext& getDefaultContext() {
-    static RenderContext instance;
-    return instance;
+    // The RenderContext is owned per window context. The main window's is
+    // wired lazily here (preserving the pre-context construction timing);
+    // Phase 1 pre-wires the pointer when constructing secondary contexts.
+    auto& ctx = currentWindowContext();
+    if (!ctx.render) {
+        static RenderContext instance;   // main-window storage
+        ctx.render = &instance;
+    }
+    return *ctx.render;
 }
 } // namespace internal
 

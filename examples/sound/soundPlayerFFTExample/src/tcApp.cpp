@@ -23,7 +23,7 @@ void tcApp::setup() {
     spectrumSmooth.resize(FFT_SIZE / 2, 0.0f);
 
     // Load music
-    std::string musicPath = getDataPath("beat_loop.wav");
+    fs::path musicPath = getDataPath("beat_loop.wav");
     if (music.load(musicPath)) {
         musicLoaded = true;
         music.setLoop(true);

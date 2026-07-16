@@ -37,7 +37,7 @@ namespace mcp {
 // ---------------------------------------------------------------------------
 // Deferred tool responses
 // ---------------------------------------------------------------------------
-// Some tools (e.g. get_screenshot) need state that only exists AFTER present()
+// Some tools (e.g. tc_get_screenshot) need state that only exists AFTER present()
 // — during the frame, drawing is still deferred and a readback would be blank.
 // Such a handler calls deferToolResultUntilAfterFrame(): processHttpQueue()
 // stashes the request instead of answering it, and drainDeferredResponses()
@@ -47,16 +47,26 @@ namespace mcp {
 
 namespace detail {
 
+// The promise carries a THUNK, not the reply string: the blocked HTTP worker
+// executes it (future.get()()) to obtain the reply. For ordinary tools the
+// thunk just returns a string built on the main thread; two-stage tools (see
+// deferToolResultTwoStage) put their heavy encode work inside the thunk so it
+// runs on the HTTP worker — off the frame loop — while main only did the
+// readback.
+using ReplyThunk = std::function<std::string()>;
+
 struct DeferredResponse {
-    std::shared_ptr<std::promise<std::string>> response;  // unblocks the HTTP worker
-    std::function<std::string()> makeEnvelope;            // builds the JSON-RPC reply
+    std::shared_ptr<std::promise<ReplyThunk>> response;  // unblocks the HTTP worker
+    std::function<ReplyThunk()> makeEnvelope;            // main stage → worker thunk
 };
 
 struct DeferralState {
     bool requested = false;                  // set by deferToolResultUntilAfterFrame()
-    std::function<json()> produce;           // tool content producer
+    std::function<json()> produce;           // tool content producer (runs fully on main)
+    bool twoStageRequested = false;          // set by deferToolResultTwoStage()
+    std::function<std::function<json()>()> produceTwoStage;  // main stage → worker stage
     bool hasEnvelope = false;                // set by handleToolsCall(), read by processHttpQueue()
-    std::function<std::string()> envelope;   // full JSON-RPC reply builder
+    std::function<ReplyThunk()> envelope;    // JSON-RPC reply builder (main part)
 };
 inline DeferralState& deferralState() { static DeferralState s; return s; }
 
@@ -89,19 +99,32 @@ inline void deferToolResultUntilAfterFrame(std::function<json()> produce) {
     detail::deferralState().produce = std::move(produce);
 }
 
-// Run all deferred tool producers and unblock their HTTP workers. Call from an
-// events().afterFrame listener (i.e. after present()).
+// Two-stage variant for tools whose result is expensive to build (e.g.
+// tc_get_thumbnail): `mainStage` runs at the afterFrame safe point on the MAIN
+// thread — do the GPU readback there and nothing else — and the closure it
+// returns runs on the HTTP worker thread that is already sitting blocked on
+// this reply. Put the heavy work (downscale, encode) in that closure and the
+// frame loop never pays for it.
+inline void deferToolResultTwoStage(std::function<std::function<json()>()> mainStage) {
+    detail::deferralState().twoStageRequested = true;
+    detail::deferralState().produceTwoStage = std::move(mainStage);
+}
+
+// Run all deferred main stages and unblock their HTTP workers. Call from an
+// events().afterFrame listener (i.e. after present()). Only the main part of
+// each envelope runs here; the returned thunk executes on the HTTP worker.
 inline void drainDeferredResponses() {
     auto& list = detail::deferredResponses();
     if (list.empty()) return;
     for (auto& d : list) {
-        std::string envelope;
+        detail::ReplyThunk thunk;
         try {
-            envelope = d.makeEnvelope();
+            thunk = d.makeEnvelope();
         } catch (const std::exception& e) {
-            envelope = std::string("{\"error\":\"deferred response failed: ") + e.what() + "\"}";
+            std::string err = std::string("{\"error\":\"deferred response failed: ") + e.what() + "\"}";
+            thunk = [err]() { return err; };
         }
-        d.response->set_value(envelope);
+        d.response->set_value(std::move(thunk));
     }
     list.clear();
 }
@@ -169,6 +192,11 @@ public:
     // --- Registration API ---
 
     void registerTool(const Tool& tool) {
+        // Last registration wins. Warn, because silently replacing a standard
+        // tool (they register before setup()) is a hard bug to spot.
+        if (tools_.count(tool.name)) {
+            logWarning("MCP") << "tool '" << tool.name << "' re-registered; previous handler replaced";
+        }
         tools_[tool.name] = tool;
     }
 
@@ -283,8 +311,10 @@ private:
         try {
             auto& ds = detail::deferralState();
             ds.requested = false;
+            ds.twoStageRequested = false;
 
-            // Execute tool handler (may call deferToolResultUntilAfterFrame())
+            // Execute tool handler (may call deferToolResultUntilAfterFrame()
+            // or deferToolResultTwoStage())
             json content = tools_[name].handler(args);
 
             // Handler asked to produce its result after the next present().
@@ -292,8 +322,31 @@ private:
                 auto produce = std::move(ds.produce);
                 ds.requested = false;
                 ds.hasEnvelope = true;
-                ds.envelope = [formatResult, produce]() -> std::string {
-                    return formatResult(produce());
+                // Everything runs on main at drain time; the worker thunk just
+                // hands back the prebuilt string.
+                ds.envelope = [formatResult, produce]() -> detail::ReplyThunk {
+                    std::string reply = formatResult(produce());
+                    return [reply]() { return reply; };
+                };
+                return std::string();  // processHttpQueue() stashes the reply
+            }
+
+            // Two-stage: main stage at drain time (readback), returned closure
+            // — wrapped so the JSON-RPC formatting ALSO happens on the worker —
+            // executes on the blocked HTTP worker thread.
+            if (ds.twoStageRequested) {
+                auto mainStage = std::move(ds.produceTwoStage);
+                ds.twoStageRequested = false;
+                ds.hasEnvelope = true;
+                ds.envelope = [formatResult, mainStage]() -> detail::ReplyThunk {
+                    std::function<json()> workerStage = mainStage();
+                    return [formatResult, workerStage]() -> std::string {
+                        try {
+                            return formatResult(workerStage());
+                        } catch (const std::exception& e) {
+                            return std::string("{\"error\":\"deferred worker stage failed: ") + e.what() + "\"}";
+                        }
+                    };
                 };
                 return std::string();  // processHttpQueue() stashes the reply
             }
@@ -371,7 +424,10 @@ private:
 
 struct McpRequest {
     std::string body;
-    std::shared_ptr<std::promise<std::string>> response;
+    // Carries a thunk the HTTP worker executes to obtain the reply string —
+    // see detail::ReplyThunk. Normal replies are prebuilt (thunk just returns
+    // them); two-stage tool replies do their heavy encode inside the thunk.
+    std::shared_ptr<std::promise<detail::ReplyThunk>> response;
 };
 
 namespace detail {
@@ -443,7 +499,7 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
             }
         }
 
-        auto p = std::make_shared<std::promise<std::string>>();
+        auto p = std::make_shared<std::promise<detail::ReplyThunk>>();
         auto f = p->get_future();
 
         McpRequest mcpReq;
@@ -452,8 +508,16 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
 
         detail::getHttpChannel().send(std::move(mcpReq));
 
-        // Block until main thread processes the request
-        std::string result = f.get();
+        // Block until main thread processes the request, then execute the
+        // reply thunk HERE — heavy two-stage work (thumbnail encode etc.) runs
+        // on this worker thread, not the frame loop.
+        detail::ReplyThunk thunk = f.get();
+        std::string result;
+        try {
+            result = thunk();
+        } catch (const std::exception& e) {
+            result = std::string("{\"error\":\"reply construction failed: ") + e.what() + "\"}";
+        }
 
         res.set_content(result, "application/json");
     });
@@ -505,7 +569,9 @@ inline void stopHttpServer() {
     {
         auto& list = detail::deferredResponses();
         for (auto& d : list) {
-            d.response->set_value("{\"error\":\"server shutting down\"}");
+            d.response->set_value([]() -> std::string {
+                return "{\"error\":\"server shutting down\"}";
+            });
         }
         list.clear();
     }
@@ -544,7 +610,7 @@ inline void processHttpQueue() {
             // Return empty JSON-RPC response for notifications
             result = "{}";
         }
-        req.response->set_value(result);
+        req.response->set_value([result]() { return result; });
     }
 }
 

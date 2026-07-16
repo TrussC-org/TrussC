@@ -20,8 +20,8 @@ using Json = nlohmann::json;
 // JSON file loading
 // Relative paths are resolved via getDataPath (like oF)
 // ---------------------------------------------------------------------------
-inline Json loadJson(const std::string& path) {
-    std::string fullPath = getDataPath(path);
+inline Json loadJson(const fs::path& path) {
+    fs::path fullPath = getDataPath(path);
     std::ifstream file(fullPath);
     if (!file.is_open()) {
         logError() << "Cannot open JSON file: " << path;
@@ -42,8 +42,8 @@ inline Json loadJson(const std::string& path) {
 // JSON file writing
 // Relative paths are resolved via getDataPath (like oF)
 // ---------------------------------------------------------------------------
-inline bool saveJson(const Json& j, const std::string& path, int indent = 2) {
-    std::string fullPath = getDataPath(path);
+inline bool saveJson(const Json& j, const fs::path& path, int indent = 2) {
+    fs::path fullPath = getDataPath(path);
     std::ofstream file(fullPath);
     if (!file.is_open()) {
         logError() << "Cannot create JSON file: " << path;

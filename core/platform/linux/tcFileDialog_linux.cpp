@@ -25,13 +25,6 @@ bool initGtk() {
     return true;
 }
 
-// Extract filename from path
-std::string extractFileName(const std::string& path) {
-    size_t pos = path.find_last_of('/');
-    if (pos == std::string::npos) return path;
-    return path.substr(pos + 1);
-}
-
 // Process GTK events
 void processGtkEvents() {
     while (gtk_events_pending()) {
@@ -114,7 +107,7 @@ void confirmDialogAsync(const std::string& title,
 // -----------------------------------------------------------------------------
 FileDialogResult loadDialog(const std::string& title,
                             const std::string& message,
-                            const std::string& defaultPath,
+                            const fs::path& defaultPath,
                             bool folderSelection) {
     FileDialogResult result;
     (void)message;  // GTK file chooser doesn't have a message field
@@ -151,7 +144,7 @@ FileDialogResult loadDialog(const std::string& title,
         if (filename) {
             result.success = true;
             result.filePath = filename;
-            result.fileName = extractFileName(result.filePath);
+            result.fileName = result.filePath.filename();
             g_free(filename);
         }
     }
@@ -164,7 +157,7 @@ FileDialogResult loadDialog(const std::string& title,
 
 void loadDialogAsync(const std::string& title,
                      const std::string& message,
-                     const std::string& defaultPath,
+                     const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback) {
     FileDialogResult result = loadDialog(title, message, defaultPath, folderSelection);
@@ -176,8 +169,8 @@ void loadDialogAsync(const std::string& title,
 // -----------------------------------------------------------------------------
 FileDialogResult saveDialog(const std::string& title,
                             const std::string& message,
-                            const std::string& defaultPath,
-                            const std::string& defaultName) {
+                            const fs::path& defaultPath,
+                            const fs::path& defaultName) {
     FileDialogResult result;
     (void)message;  // GTK file chooser doesn't have a message field
 
@@ -210,7 +203,7 @@ FileDialogResult saveDialog(const std::string& title,
         if (filename) {
             result.success = true;
             result.filePath = filename;
-            result.fileName = extractFileName(result.filePath);
+            result.fileName = result.filePath.filename();
             g_free(filename);
         }
     }
@@ -223,8 +216,8 @@ FileDialogResult saveDialog(const std::string& title,
 
 void saveDialogAsync(const std::string& title,
                      const std::string& message,
-                     const std::string& defaultPath,
-                     const std::string& defaultName,
+                     const fs::path& defaultPath,
+                     const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback) {
     FileDialogResult result = saveDialog(title, message, defaultPath, defaultName);
     if (callback) callback(result);

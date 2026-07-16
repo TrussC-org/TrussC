@@ -40,13 +40,18 @@ public:
         audioInListener_  = AudioEngine::getInstance().audioIn.listen(
             [this](AudioInBuffer& b) { audioIn(b); });
 
-        // The App is the scene-graph root; expose it via getRootNode() so
-        // tools (e.g. the MCP node tools) can walk the tree.
-        internal::rootNode = this;
+        // The FIRST App becomes the scene-graph root of the active window
+        // (normally the main App created by runApp) — exposed via
+        // getRootNode() so tools (e.g. the MCP node tools) can walk the tree.
+        // Later App instances don't clobber it: they are secondary-window
+        // content, registered explicitly by Window::setApp().
+        if (internal::currentWindowContext().rootNode == nullptr) {
+            internal::currentWindowContext().rootNode = this;
+        }
     }
 
     virtual ~App() {
-        if (internal::rootNode == this) internal::rootNode = nullptr;
+        if (internal::currentWindowContext().rootNode == this) internal::currentWindowContext().rootNode = nullptr;
     }
 
     // -------------------------------------------------------------------------

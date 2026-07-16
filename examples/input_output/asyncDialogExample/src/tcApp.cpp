@@ -72,9 +72,9 @@ void tcApp::draw() {
         infoY += 25;
 
         setColor(0.86f);
-        drawBitmapString("File: " + lastResult.fileName, 40, infoY);
+        drawBitmapString("File: " + lastResult.fileName.string(), 40, infoY);
         infoY += 20;
-        drawBitmapString("Path: " + lastResult.filePath, 40, infoY);
+        drawBitmapString("Path: " + lastResult.filePath.string(), 40, infoY);
         infoY += 35;
 
         if (hasImage && loadedImage.isAllocated()) {
@@ -119,10 +119,10 @@ void tcApp::triggerAction(int index) {
                 [this](const FileDialogResult& result) {
                 lastResult = result;
                 if (result.success) {
-                    statusMessage = "File selected: " + result.fileName;
+                    statusMessage = "File selected: " + result.fileName.string();
 
                     // Try to load as image
-                    string path = result.filePath;
+                    string path = result.filePath.string();
                     string lower = path;
                     for (auto& c : lower) c = tolower(c);
 
@@ -147,7 +147,7 @@ void tcApp::triggerAction(int index) {
                 [this](const FileDialogResult& result) {
                 lastResult = result;
                 if (result.success) {
-                    statusMessage = "Save location: " + result.fileName;
+                    statusMessage = "Save location: " + result.fileName.string();
                 } else {
                     statusMessage = "Cancelled";
                 }

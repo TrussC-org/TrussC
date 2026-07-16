@@ -3,7 +3,7 @@
 // =============================================================================
 
 // sokol ヘッダー（sokol_imgui.h より先に必要）
-#include "sokol/sokol_app.h"
+#include "sokol/sokol_app_tc.h"
 #include "sokol/sokol_gfx.h"
 #include "sokol/sokol_log.h"
 

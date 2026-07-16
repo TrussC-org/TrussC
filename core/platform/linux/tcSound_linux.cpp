@@ -251,14 +251,26 @@ private:
     size_t memoryPos_ = 0;
 };
 
-bool SoundBuffer::loadAac(const std::string& path) {
+LoadResult SoundBuffer::loadAac(const fs::path& path) {
+    std::error_code ec;
+    if (!fs::exists(path, ec)) {
+        return LoadResult::fail(LoadError::FileNotFound,
+                                "file not found: " + internal::pathToUtf8(path));
+    }
     GstAacDecoder decoder;
-    return decoder.decodeFile(path, *this);
+    return decoder.decodeFile(internal::pathToUtf8(path), *this)
+               ? LoadResult::success()
+               : LoadResult::fail(LoadError::DecodeFailed,
+                                  "GStreamer failed to decode AAC: " +
+                                  internal::pathToUtf8(path));
 }
 
-bool SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
+LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
     GstAacDecoder decoder;
-    return decoder.decodeMemory(data, dataSize, *this);
+    return decoder.decodeMemory(data, dataSize, *this)
+               ? LoadResult::success()
+               : LoadResult::fail(LoadError::DecodeFailed,
+                                  "GStreamer failed to decode AAC from memory");
 }
 
 } // namespace trussc

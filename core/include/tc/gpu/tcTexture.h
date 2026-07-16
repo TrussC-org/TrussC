@@ -904,7 +904,7 @@ private:
                       float u0, float v0, float u1, float v1) const {
         // Blend pipeline for the active target (behavior preserved: FBO uses Fill2D
         // even for premultiplied sources, as before).
-        if (internal::inFboPass) {
+        if (internal::currentWindowContext().inFboPass) {
             internal::loadPipeline(internal::activeFill2D());
         } else if (premultipliedAlpha_) {
             internal::loadPipeline(internal::activePremult());

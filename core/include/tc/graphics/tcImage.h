@@ -67,32 +67,34 @@ public:
     // onto a 3D surface that moves toward/away from the camera) — without
     // mipmaps, small projected sizes shimmer/moiré. Costs about +33% GPU
     // memory and a one-time CPU box-average to build the chain.
-    bool load(const fs::path& path, bool mipmaps = false) {
+    LoadResult load(const fs::path& path, bool mipmaps = false) {
         clear();
 
-        fs::path resolved = path.is_absolute() ? path : fs::path(getDataPath(path.string()));
-        if (!pixels_.load(resolved)) {
-            return false;
+        fs::path resolved = getDataPath(path);   // absolute paths pass through
+        LoadResult r = pixels_.load(resolved);
+        if (!r) {
+            return r;
         }
 
         mipmaps_ = mipmaps;
         usage_ = TextureUsage::Immutable;
         texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
-        return true;
+        return LoadResult::success();
     }
 
     // Load image from memory
-    bool loadFromMemory(const unsigned char* buffer, int len, bool mipmaps = false) {
+    LoadResult loadFromMemory(const unsigned char* buffer, int len, bool mipmaps = false) {
         clear();
 
-        if (!pixels_.loadFromMemory(buffer, len)) {
-            return false;
+        LoadResult r = pixels_.loadFromMemory(buffer, len);
+        if (!r) {
+            return r;
         }
 
         mipmaps_ = mipmaps;
         usage_ = TextureUsage::Immutable;
         texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
-        return true;
+        return LoadResult::success();
     }
 
     // Save image (override of HasTexture::save())

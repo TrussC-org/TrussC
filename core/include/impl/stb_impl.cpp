@@ -10,6 +10,12 @@
 #  pragma GCC diagnostic ignored "-Wunused-function"
 #endif
 
+// Treat filenames as UTF-8 on Windows (stb converts to the wide API
+// internally). No effect on other platforms. Callers pass UTF-8 via
+// internal::pathToUtf8() — see tc/utils/tcFileIO.h.
+#define STBI_WINDOWS_UTF8
+#define STBIW_WINDOWS_UTF8
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 

@@ -61,6 +61,12 @@ protected:
                 TweenT(TweenValue, TweenValue, float, EaseType, EaseMode)
                 // FIXME: move constructor?
             >(),
+            sol::call_constructor, sol::constructors<
+                TweenT(),
+                TweenT(TweenValue, TweenValue, float),
+                TweenT(TweenValue, TweenValue, float, EaseType),
+                TweenT(TweenValue, TweenValue, float, EaseType, EaseMode)
+            >(),
             "from", &TweenT::from,
             "to", &TweenT::to,
             "duration", &TweenT::duration,

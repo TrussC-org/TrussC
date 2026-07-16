@@ -9,7 +9,7 @@
 #include <android/log.h>
 #include <android/native_activity.h>
 #include <jni.h>
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 // GLES3 for screen capture
 #include <GLES3/gl3.h>
@@ -209,20 +209,20 @@ void setWindowSizeLogical(int width, int height) {
     (void)height;
 }
 
-std::string getExecutablePath() {
+fs::path getExecutablePath() {
     // Android doesn't have a traditional executable path.
     // Return empty — use getExecutableDir() for asset access.
-    return "";
+    return {};
 }
 
-std::string getExecutableDir() {
+fs::path getExecutableDir() {
     // On Android, assets are accessed via AAssetManager, not filesystem paths.
     // For files that need a real path, use internal storage.
     auto* activity = (ANativeActivity*)sapp_android_get_native_activity();
     if (activity && activity->internalDataPath) {
-        return std::string(activity->internalDataPath) + "/";
+        return fs::path(activity->internalDataPath);
     }
-    return "/data/local/tmp/";
+    return fs::path("/data/local/tmp");
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +258,7 @@ bool captureWindow(Pixels& outPixels) {
 
 bool internal::captureWindowToFile(const std::filesystem::path& path) {
     if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path.string()));
+        return internal::captureWindowToFile(getDataPath(path));
     }
     Pixels pixels;
     if (!captureWindow(pixels)) {
@@ -266,7 +266,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     }
 
     std::string ext = path.extension().string();
-    std::string pathStr = path.string();
+    std::string pathStr = internal::pathToUtf8(path);   // UTF-8 for stb (STBIW_WINDOWS_UTF8)
 
     int width = pixels.getWidth();
     int height = pixels.getHeight();

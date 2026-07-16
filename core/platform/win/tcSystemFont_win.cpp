@@ -79,7 +79,7 @@ std::string fontFilePath(IDWriteFont* font) {
 
 } // namespace
 
-std::string systemFontPath(const std::string& name) {
+fs::path systemFontPath(const std::string& name) {
     if (name.empty()) return "";
     auto factory = getFactory();
     if (!factory) return "";

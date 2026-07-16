@@ -1,8 +1,7 @@
 // =============================================================================
-// sokol バックエンド実装 (Windows / Linux)
+// sokol バックエンド実装 (Linux / Raspberry Pi)
 // =============================================================================
 
-#define SOKOL_IMPL
 #define SOKOL_NO_ENTRY  // main() を自分で定義するため
 
 // Suppress warnings from third-party sokol headers. They have intentional
@@ -14,8 +13,10 @@
 #  pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #endif
 
+#define SOKOL_IMPL
 #include "sokol_log.h"
-#include "sokol_app.h"
+#define SOKOL_APP_TC_IMPL
+#include "sokol_app_tc.h"
 #include "sokol_gfx.h"
 #include "sokol_glue.h"
 #include "util/sokol_gl_tc.h"
