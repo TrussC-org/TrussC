@@ -188,7 +188,7 @@ FileDialogResult saveDialog(const std::string& title,
     wchar_t szFileName[MAX_PATH] = L"";
 
     if (!defaultName.empty()) {
-        std::wstring nameW = toWide(defaultName);
+        std::wstring nameW = defaultName.wstring();
         wcsncpy_s(szFileName, MAX_PATH, nameW.c_str(), _TRUNCATE);
     }
 
