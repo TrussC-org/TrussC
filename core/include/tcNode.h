@@ -938,19 +938,37 @@ private:
     // Dispatch mouse event to tree (for 2D mode). `e` is in screen space
     // (pos == globalPos); each node receives a copy localized to its space.
     // return: node that handled event (nullptr if not handled)
+    //
+    // Propagation (v0.7): press/release/move BUBBLE like scroll always has —
+    // starting at the front-most hit node, the event walks the parent chain
+    // (localized per level, firing node + mod hooks) until a handler consumes
+    // it by returning true. The first consumer of a press becomes the
+    // grabbedNode: it owns the drag (fireMouseDrag) and the matching release.
+    // RectNode's default onMousePress still returns true (consume), so
+    // bubbling activates only where a handler explicitly returns false — a
+    // press that previously died silently now reaches the ancestors instead.
+    // Hover (enter/leave) is unaffected: it stays front-most-only, recomputed
+    // per frame by updateHoverState().
     Ptr dispatchMousePress(const MouseEventArgs& e) {
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
         // Selection: clicking a node selects it; clicking empty space clears it.
+        // (Selection follows the front-most hit, not the consumer — it is a
+        // debugger/inspector concept, independent of event consumption.)
         internal::currentWindowContext().selectedNode = result.hit() ? result.node.get() : nullptr;
 
         if (result.hit()) {
-            MouseEventArgs local = result.node->localizeMouse(e);
-            if (result.node->fireMousePress(local)) {
-                // Set grabbed node for drag tracking
-                internal::currentWindowContext().grabbedNode = result.node.get();
-                internal::currentWindowContext().grabbedButton = e.button;
-                return result.node;
+            // Bubble up from the hit node until consumed
+            Node* current = result.node.get();
+            while (current) {
+                MouseEventArgs local = current->localizeMouse(e);
+                if (current->fireMousePress(local)) {
+                    // The consumer grabs the pointer for drag tracking
+                    internal::currentWindowContext().grabbedNode = current;
+                    internal::currentWindowContext().grabbedButton = e.button;
+                    return std::dynamic_pointer_cast<Node>(current->shared_from_this());
+                }
+                current = current->getParent().get();
             }
         }
 
@@ -973,13 +991,17 @@ private:
             return result;
         }
 
-        // Fallback: send to hit node
+        // Fallback (no grab): bubble from the hit node like press
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
         if (result.hit()) {
-            MouseEventArgs local = result.node->localizeMouse(e);
-            if (result.node->fireMouseRelease(local)) {
-                return result.node;
+            Node* current = result.node.get();
+            while (current) {
+                MouseEventArgs local = current->localizeMouse(e);
+                if (current->fireMouseRelease(local)) {
+                    return std::dynamic_pointer_cast<Node>(current->shared_from_this());
+                }
+                current = current->getParent().get();
             }
         }
 
@@ -994,13 +1016,18 @@ private:
             internal::currentWindowContext().grabbedNode->fireMouseDrag(internal::toDragArgs(local));
         }
 
-        // Also send move event to hit node (for hover, etc.)
+        // Also send move event, bubbling from the hit node (hover itself is
+        // handled separately by updateHoverState and stays front-most-only)
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
         if (result.hit()) {
-            internal::MouseEventRaw local = result.node->localizeMouse(e);
-            if (result.node->fireMouseMove(internal::toMoveArgs(local))) {
-                return result.node;
+            Node* current = result.node.get();
+            while (current) {
+                internal::MouseEventRaw local = current->localizeMouse(e);
+                if (current->fireMouseMove(internal::toMoveArgs(local))) {
+                    return std::dynamic_pointer_cast<Node>(current->shared_from_this());
+                }
+                current = current->getParent().get();
             }
         }
 

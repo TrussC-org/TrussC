@@ -144,7 +144,7 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
             e.syncLegacy();
             win->events().mousePressed.notify(e);
             if (win->getApp()) win->getApp()->mousePressed(e);
-            win->dispatchMousePressToTree(e);
+            if (!e.consumed) win->dispatchMousePressToTree(e);
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_UP: {
@@ -159,7 +159,7 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
             e.syncLegacy();
             win->events().mouseReleased.notify(e);
             if (win->getApp()) win->getApp()->mouseReleased(e);
-            win->dispatchMouseReleaseToTree(e);
+            if (!e.consumed) win->dispatchMouseReleaseToTree(e);
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_ENTER:
@@ -176,11 +176,16 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
                 MouseDragEventArgs e = internal::toDragArgs(raw);
                 win->events().mouseDragged.notify(e);
                 if (win->getApp()) win->getApp()->mouseDragged(e);
+                raw.consumed = e.consumed;
             } else {
                 MouseMoveEventArgs e = internal::toMoveArgs(raw);
                 win->events().mouseMoved.notify(e);
                 if (win->getApp()) win->getApp()->mouseMoved(e);
+                raw.consumed = e.consumed;
             }
+            // Node tree: drag goes to the grabbed node, move bubbles from the
+            // hit node (same dispatchMouseMove path as the main window).
+            if (!raw.consumed) win->dispatchMouseMoveToTree(raw);
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_LEAVE: {
@@ -198,6 +203,7 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
             e.syncLegacy();
             win->events().mouseScrolled.notify(e);
             if (win->getApp()) win->getApp()->mouseScrolled(e);
+            if (!e.consumed) win->dispatchMouseScrollToTree(e);
             break;
         }
         case SAPP_EVENTTYPE_KEY_DOWN: {
@@ -208,6 +214,7 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
             if (!ev->key_repeat) ctx.keysPressed.insert(e.key);
             win->events().keyPressed.notify(e);
             if (win->getApp()) win->getApp()->keyPressed(e);
+            if (!e.consumed) win->dispatchKeyPressToTree(e);
             break;
         }
         case SAPP_EVENTTYPE_KEY_UP: {
@@ -218,6 +225,7 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
             ctx.keysPressed.erase(e.key);
             win->events().keyReleased.notify(e);
             if (win->getApp()) win->getApp()->keyReleased(e);
+            if (!e.consumed) win->dispatchKeyReleaseToTree(e);
             break;
         }
         case SAPP_EVENTTYPE_SUSPENDED:

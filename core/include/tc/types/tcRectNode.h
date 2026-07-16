@@ -213,11 +213,17 @@ protected:
     // These override the rich form and fire the corresponding Event. They also
     // forward to the simple (Vec2,int) virtual so that a subclass which overrode
     // the legacy simple form (pre-rich, oF-style) still gets called.
+    //
+    // Propagation: press/release/move/scroll all BUBBLE (v0.7) — returning
+    // false hands the event to the parent chain. RectNode consumes
+    // press/release/drag by default (return true); override and return false
+    // to let an ancestor (e.g. a draggable panel behind this label) take the
+    // gesture. The press consumer becomes the grab target for drag/release.
     bool onMousePress(const MouseEventArgs& e) override {
         MouseEventArgs args = e;  // already localized to this node
         mousePressed.notify(args);
         onMousePress(e.pos, e.button);  // legacy subclass hook
-        return true;  // Consume event
+        return true;  // Consume event (return false to bubble to parent)
     }
 
     bool onMouseRelease(const MouseEventArgs& e) override {
