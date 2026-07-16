@@ -130,8 +130,9 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         "Nearest", sol::var(trussc::TextureFilter::Nearest),
         "Linear", sol::var(trussc::TextureFilter::Linear));
     {
-        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
-        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
+        sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
+        t["raw"] = &trussc::ConsoleEventArgs::raw;
+        t["args"] = &trussc::ConsoleEventArgs::args;
     }
 }
 #ifndef _MSC_VER
