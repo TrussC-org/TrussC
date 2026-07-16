@@ -10968,9 +10968,9 @@ keywords = ["internal"]
 
 ["createWindow"]
 keywords = ["multi window", "second window", "open window", "display"]
-description.en = "Create a secondary window (macOS only for now; returns nullptr elsewhere). It runs on its own display link; closing it leaves the app running"
-description.ja = "セカンダリウィンドウを作成 (現状macOSのみ、他プラットフォームはnullptr)。専用のdisplay linkで駆動され、閉じてもアプリは動き続ける"
-description.ko = "보조 윈도우를 생성 (현재 macOS 전용, 다른 플랫폼은 nullptr). 전용 display link로 구동되며 닫아도 앱은 계속 실행됨"
+description.en = "Create a secondary window (macOS / Windows / desktop Linux; returns nullptr on single-window platforms). It ticks on its own display's vsync; closing it leaves the app running. Give it content with Window::setApp()"
+description.ja = "セカンダリウィンドウを作成 (macOS / Windows / デスクトップLinux。シングルウィンドウのプラットフォームでは nullptr)。ウィンドウ自身のディスプレイのvsyncで駆動され、閉じてもアプリは動き続ける。中身は Window::setApp() で与える"
+description.ko = "보조 윈도우를 생성 (macOS / Windows / 데스크톱 Linux, 단일 윈도우 플랫폼에서는 nullptr). 해당 디스플레이의 vsync로 구동되며 닫아도 앱은 계속 실행됨. 내용은 Window::setApp()으로 부여"
 related = ["Window", "WindowSettings"]
 
 ["WindowSettings"]
