@@ -273,6 +273,7 @@ void Window::close() {
 }
 
 void Window::setTitle(const std::string& title) {
+    title_ = title;
     auto* st = static_cast<AdapterState*>(native_);
     if (st) sapp_window_set_title(st->win, title.c_str());
 }
@@ -293,6 +294,7 @@ std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
         return nullptr;
     }
     auto win = std::shared_ptr<Window>(new Window());
+    win->title_ = settings.title;
     auto* st = new AdapterState();
 
     sapp_window_desc d = {};

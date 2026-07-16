@@ -43,8 +43,9 @@ TrussC uses **HTTP transport** for MCP. All JSON-RPC messages are sent as HTTP P
 ### Inspection Tools (always available in MCP mode)
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `get_screenshot` | (none) | Get current screen as Base64 PNG image |
-| `save_screenshot` | `path` | Save screenshot to file |
+| `get_screenshot` | `window`? | Get current screen as Base64 PNG image. Optional `window` index from `list_windows` (default 0 = main) |
+| `save_screenshot` | `path`, `window`? | Save screenshot to file. Optional `window` index from `list_windows` (default 0 = main) |
+| `list_windows` | (none) | List open windows: index 0 = main, then secondary windows (title, size). Use the index as the `window` arg above |
 | `quit` | (none) | Quit the application gracefully |
 | `get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
 | `get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |

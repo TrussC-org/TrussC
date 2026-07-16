@@ -70,17 +70,57 @@ namespace mcp {
 
 inline void registerInspectionTools() {
 
-    tool("get_screenshot", "Get screenshot as Base64 PNG")
+    // Resolve the optional MCP "window" arg (0 = main window; 1..N = open
+    // secondary windows in the order list_windows reports). Returns the
+    // WindowContext to capture from, or null on a bad index (error filled in).
+    // Must run at the afterFrame safe point (same frame the index was read).
+    auto resolveWindowCtx = [](int windowIdx, json& err) -> trussc::internal::WindowContext* {
+        if (windowIdx == 0) return &trussc::internal::mainWindowContext();
+        auto wins = trussc::internal::openWindows();
+        if (windowIdx < 0 || (size_t)windowIdx > wins.size()) {
+            err = json{{"status", "error"},
+                       {"message", "window index out of range (0=main, 1.." +
+                                   std::to_string(wins.size()) + " secondary)"}};
+            return nullptr;
+        }
+        return &wins[(size_t)windowIdx - 1]->context();
+    };
+
+    tool("list_windows", "List open windows (index 0 = main; use the index as the 'window' arg of get_screenshot / save_screenshot)")
         .bind(std::function<json()>([]() -> json {
+            json arr = json::array();
+            arr.push_back(json{{"index", 0}, {"main", true},
+                               {"width", getWindowWidth()}, {"height", getWindowHeight()}});
+            int i = 1;
+            for (auto* w : trussc::internal::openWindows()) {
+                arr.push_back(json{{"index", i++}, {"main", false},
+                                   {"title", w->getTitle()},
+                                   {"width", w->getWidth()}, {"height", w->getHeight()}});
+            }
+            return json{{"windows", arr}};
+        }));
+
+    tool("get_screenshot", "Get screenshot as Base64 PNG")
+        .arg<int>("window", "Window index from list_windows (default 0 = main)", false)
+        .bind([resolveWindowCtx](const json& args) -> json {
+            const int windowIdx = args.value("window", 0);
             // Defer the actual capture+encode to just after present(): during a
             // frame nothing has been rendered yet (drawing is deferred), so a
             // readback here would be blank (black on Linux). The producer below
             // runs at the afterFrame safe point and its result is what the MCP
             // client receives.
-            mcp::deferToolResultUntilAfterFrame([]() -> json {
-                // Capture screen to pixels
+            mcp::deferToolResultUntilAfterFrame([resolveWindowCtx, windowIdx]() -> json {
+                json err;
+                auto* ctx = resolveWindowCtx(windowIdx, err);
+                if (!ctx) return err;
+                // Capture the target window: captureWindow reads the active
+                // context's last presented drawable, so switch for the call.
+                auto* prev = trussc::internal::currentWindowCtx;
+                trussc::internal::currentWindowCtx = ctx;
                 Pixels pixels;
-                if (!grabScreen(pixels)) {
+                bool ok = grabScreen(pixels);
+                trussc::internal::currentWindowCtx = prev;
+                if (!ok) {
                     return json{{"status", "error"}, {"message", "Failed to grab screen"}};
                 }
 
@@ -107,18 +147,36 @@ inline void registerInspectionTools() {
                 };
             });
             return json(nullptr);  // ignored — deferred result is sent instead
-        }));
+        });
 
     tool("save_screenshot", "Save screenshot to file")
         .arg<std::string>("path", "File path")
-        .bind<std::string>([](std::string path) {
+        .arg<int>("window", "Window index from list_windows (default 0 = main)", false)
+        .bind([resolveWindowCtx](const json& args) -> json {
             // JSON strings are UTF-8 — convert explicitly (fs::path(string)
             // would interpret them in the ACP on Windows)
-            if (trussc::saveScreenshot(trussc::internal::utf8ToPath(path))) {
-                return json{{"status", "ok"}, {"path", path}};
-            } else {
+            const std::string path = args.at("path").get<std::string>();
+            const int windowIdx = args.value("window", 0);
+            if (windowIdx == 0) {
+                // Main window: the classic queued path (drained after present)
+                if (trussc::saveScreenshot(trussc::internal::utf8ToPath(path))) {
+                    return json{{"status", "ok"}, {"path", path}};
+                }
                 return json{{"status", "error"}, {"message", "Failed to save screenshot"}};
             }
+            // Secondary window: defer, then capture that window's drawable
+            mcp::deferToolResultUntilAfterFrame([resolveWindowCtx, windowIdx, path]() -> json {
+                json err;
+                auto* ctx = resolveWindowCtx(windowIdx, err);
+                if (!ctx) return err;
+                auto* prev = trussc::internal::currentWindowCtx;
+                trussc::internal::currentWindowCtx = ctx;
+                bool ok = trussc::internal::captureWindowToFile(trussc::internal::utf8ToPath(path));
+                trussc::internal::currentWindowCtx = prev;
+                if (ok) return json{{"status", "ok"}, {"path", path}, {"window", windowIdx}};
+                return json{{"status", "error"}, {"message", "Failed to capture window " + std::to_string(windowIdx)}};
+            });
+            return json(nullptr);  // deferred result is sent instead
         });
 
     tool("quit", "Quit the application gracefully")

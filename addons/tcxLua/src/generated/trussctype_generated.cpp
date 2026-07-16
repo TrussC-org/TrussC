@@ -1552,6 +1552,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["close"] = &trussc::Window::close;
         t["isOpen"] = &trussc::Window::isOpen;
         t["setTitle"] = &trussc::Window::setTitle;
+        t["getTitle"] = &trussc::Window::getTitle;
         t["getWidth"] = &trussc::Window::getWidth;
         t["getHeight"] = &trussc::Window::getHeight;
         t["setClearColor"] = &trussc::Window::setClearColor;

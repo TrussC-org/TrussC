@@ -338,6 +338,27 @@ WindowContext& mainWindowContext() {
     static WindowContext ctx;
     return ctx;
 }
+
+// Open-window registry (see tcWindow.h). Non-inline for the same host/guest
+// reason as mainWindowContext(). Main thread only.
+static std::vector<Window*>& windowRegistryStorage() {
+    static std::vector<Window*> list;
+    return list;
+}
+void registerWindow(Window* w) {
+    windowRegistryStorage().push_back(w);
+}
+void unregisterWindow(Window* w) {
+    auto& list = windowRegistryStorage();
+    list.erase(std::remove(list.begin(), list.end(), w), list.end());
+}
+std::vector<Window*> openWindows() {
+    std::vector<Window*> out;
+    for (Window* w : windowRegistryStorage()) {
+        if (w && w->isOpen()) out.push_back(w);
+    }
+    return out;
+}
 } // namespace internal
 
 CoreEvents& events() {
