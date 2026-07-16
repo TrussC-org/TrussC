@@ -1129,7 +1129,7 @@ Pass the length in seconds: `startRecording("out.mp4", 3.0f)` records exactly 3 
 
 ### Can an AI agent start/stop recording over MCP?
 
-Yes — every TrussC app in MCP mode (`TRUSSC_MCP=1`) exposes `start_recording` and `stop_recording` as standard tools (the video counterpart of `save_screenshot`, always available). `start_recording` takes optional `path` (omit → timestamped file in the data dir), `duration` (fixed-length auto-stop), `fps`, and `codec`, and returns the resolved path; `stop_recording` returns `{path, frames, length}` and is a no-op (not an error) when nothing is recording. See docs/AI_AUTOMATION.md.
+Yes — every TrussC app in MCP mode (`TRUSSC_MCP=1`) exposes `tc_start_recording` and `tc_stop_recording` as standard tools (the video counterpart of `tc_save_screenshot`, always available). `tc_start_recording` takes optional `path` (omit → timestamped file in the data dir), `duration` (fixed-length auto-stop), `fps`, and `codec`, and returns the resolved path; `tc_stop_recording` returns `{path, frames, length}` and is a no-op (not an error) when nothing is recording. See docs/AI_AUTOMATION.md.
 
 ### How do I avoid a black first frame when a VideoPlayer starts?
 
@@ -1361,6 +1361,10 @@ If you want an app that runs without a window (update loop only, no `draw()`), u
 - Log to a file: `getLogger().setLogFile(path)` (unique name: `getTimestampString()`; hook all lines: `onLog.listen`)
 - CLI / console app: handle `argc`/`argv` in `main()` (no framework arg API); no args → `runApp<Gui>()`; headless loop → `runHeadlessApp<App>()`
 
+### How are file paths handled? Japanese / non-ASCII filenames on Windows?
+
+All file-path parameters take `fs::path` (`std::filesystem::path`) — string literals and `std::string` convert implicitly, so just write `img.load("photo.png")` as always. `getDataPath()` also returns `fs::path`; join paths with `/` (`getDataPath("save") / "shot.png"`), not string concatenation. Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform including Windows: TrussC converts to the OS-native encoding at the C-library boundary internally, so there is nothing to configure. `setDataPathRoot()` accepts absolute roots on Windows (`C:/data`) too. If you need a narrow string from a path, use `path.string()` on macOS/Linux; avoid it for file IO on Windows (pass the `fs::path` through instead).
+
 ### "Window / media / basics" → which API?
 
 - Window: `setWindowTitle()` / `setWindowSize()` / `setFullscreen(bool)` / `toggleFullscreen()`
@@ -1381,7 +1385,7 @@ Every TrussC app can become an **MCP server.** Launch with `TRUSSC_MCP=1` and th
 
 ### How does an AI tune/verify a running app over MCP?
 
-A rebuild-free loop: launch (`TRUSSC_MCP=1`) → `get_screenshot` to see the current state → `get_node_tree` to read pos / rotation (degrees) / color as numbers → `set_node_members` to nudge them directly → screenshot to check → repeat → finally bake the values into C++ source. Main tools: `get_node_tree` / `get_selected_node` / `select_node` / `set_node_members`. Mouse/key injection is opt-in via `mcp::registerDebuggerTools()` in `setup()`. Drive ImGui UIs with dedicated tools (`imgui_get_widgets` / `imgui_click` / `imgui_input` / `imgui_checkbox`) — raw `mouse_click` doesn't reach ImGui. Expose your own state with `TC_REFLECT`, or return JSON via `mcp::tool` / `mcp::resource`. This enables a closed AI development loop, so you can hand off long, autonomous development sessions.
+A rebuild-free loop: launch (`TRUSSC_MCP=1`) → `tc_get_screenshot` to see the current state → `tc_get_node_tree` to read pos / rotation (degrees) / color as numbers → `tc_set_node_members` to nudge them directly → screenshot to check → repeat → finally bake the values into C++ source. Main tools: `tc_get_node_tree` / `tc_get_selected_node` / `tc_select_node` / `tc_set_node_members`. Mouse/key injection is opt-in via `mcp::registerDebuggerTools()` in `setup()`. Drive ImGui UIs with dedicated tools (`tcx_imgui_get_widgets` / `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox`) — raw `tc_mouse_click` doesn't reach ImGui. Expose your own state with `TC_REFLECT`, or return JSON via `mcp::tool` / `mcp::resource`. This enables a closed AI development loop, so you can hand off long, autonomous development sessions.
 
 ## Community & support
 
@@ -1553,11 +1557,11 @@ bool isOverlayFocused()  // True when an overlay currently owns keyboard focus (
 bool isOverlayHovered()  // True when an overlay currently has the pointer over it (e.g. cursor over a tcxImGui panel); guard raw mouse input so clicks on UI panels are not also handled by the app
 bool isShiftPressed()  // True while either Shift key (left or right) is held
 bool isSuperPressed()  // True while either Super / Cmd / Win key (left or right) is held
-FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const std::string & defaultPath = std::string(""), bool folderSelection = false) [macos,windows,linux,android]  // Show file open dialog. Returns FileDialogResult with filePath, fileName, success
-void loadDialogAsync(const std::string & title, const std::string & message, const std::string & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback)  // Show file open dialog asynchronously. Callback receives FileDialogResult
+FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), bool folderSelection = false) [macos,windows,linux,android]  // Show file open dialog. Returns FileDialogResult with filePath, fileName, success
+void loadDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback)  // Show file open dialog asynchronously. Callback receives FileDialogResult
 void requestExitApp()  // Request application exit. Can be cancelled by listening to events().exitRequested and setting args.cancel = true
-FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const std::string & defaultPath = std::string(""), const std::string & defaultName = std::string("")) [macos,windows,linux,android]  // Show file save dialog. Returns FileDialogResult with filePath, fileName, success
-void saveDialogAsync(const std::string & title, const std::string & message, const std::string & defaultPath, const std::string & defaultName, std::function<void (const FileDialogResult &)> callback)  // Show file save dialog asynchronously. Callback receives FileDialogResult
+FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), const fs::path & defaultName = fs::path()) [macos,windows,linux,android]  // Show file save dialog. Returns FileDialogResult with filePath, fileName, success
+void saveDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback)  // Show file save dialog asynchronously. Callback receives FileDialogResult
 void setCursor(Cursor cursor)  // Set the mouse cursor shape
 void setTouchAsMouse(bool enabled)  // Enable/disable touch events firing as mouse events (for Android/iOS)
 void showCursor()  // Show the mouse cursor (default)
@@ -1743,7 +1747,7 @@ bool grabScreen(Pixels & outPixels)  // Capture current screen to Pixels
 bool isFullscreen()  // Check if window is fullscreen
 bool isRecording()  // Check whether a recording is in progress
 int recordingFrameCount()  // Number of frames captured so far in the current recording
-const std::string & recordingPath()  // Output file path of the current recording
+fs::path recordingPath()  // Output file path of the current recording
 void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
 int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Template on the app type; returns the process exit code
 bool saveScreenshot(const std::filesystem::path & path)  // Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
@@ -1757,7 +1761,7 @@ void setWindowPosition(int x, int y) [macos,windows]  // Set window position in 
 void setWindowSize(int width, int height)  // Set window size
 void setWindowSizeLogical(int width, int height)  // Resize the window to the given logical size (logical pixels)
 void setWindowTitle(const std::string & title)  // Set window title
-bool startRecording(const std::string & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start recording the window — or an Fbo (clean, GUI-free output) — to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited. Calling it again while recording finalizes the current file first, then starts fresh (same path = the old file is overwritten)
+bool startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start recording the window — or an Fbo (clean, GUI-free output) — to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited. Calling it again while recording finalizes the current file first, then starts fresh (same path = the old file is overwritten)
 void stopRecording()  // Stop the current recording and finalize the file
 void toggleFullscreen()  // Toggle fullscreen mode
 ```
@@ -1794,7 +1798,7 @@ Json reflectToJson(T & obj)  // Return all reflected (TC_REFLECT) members of obj
 void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame
 void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
-bool setLogFile(const std::string & path)  // Open a file to receive log output
+bool setLogFile(const fs::path & path)  // Open a file to receive log output
 const std::string & shortTypeName(const std::type_info & ti)  // Short (unqualified) readable name for a type, cached per type
 std::vector<std::string> splitString(const std::string & source, const std::string & delimiter, bool ignoreEmpty = false, bool trim = false)  // Split string by delimiter
 void stringReplace(std::string & input, const std::string & searchStr, const std::string & replaceStr)  // Replace substring in place
@@ -1809,7 +1813,7 @@ LogStream tcLogVerbose(const std::string & module = std::string("")) ⚠️depre
 LogStream tcLogWarning(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logWarning()
 void tcSetConsoleLogLevel(LogLevel level) ⚠️deprecated  // Deprecated alias for setConsoleLogLevel()
 void tcSetFileLogLevel(LogLevel level) ⚠️deprecated  // Deprecated alias for setFileLogLevel()
-bool tcSetLogFile(const std::string & path) ⚠️deprecated  // Deprecated alias for setLogFile()
+bool tcSetLogFile(const fs::path & path) ⚠️deprecated  // Deprecated alias for setLogFile()
 std::string toBase64(const unsigned char * bytes, size_t len) [+2]  // Encode raw bytes as a Base64 string
 std::string toBinary(int value) [+4]  // Convert an integer to a binary string
 bool toBool(const std::string & str)  // Parse a string into a bool
@@ -1831,29 +1835,30 @@ const std::string & typeName(const std::type_info & ti) [+1]  // Readable (deman
 ### File
 
 ```cpp
-bool appendToFile(const std::string & path, const std::string & content)  // Append string to file
-bool createDirectory(const std::string & path)  // Create directory (and parents)
-bool directoryExists(const std::string & path)  // Check if directory exists
-bool fileExists(const std::string & path)  // Check if file exists
-std::string getAbsolutePath(const std::string & path)  // Get absolute path
-std::string getBaseName(const std::string & path)  // Get filename without extension
-std::string getDataPath(const std::string & filename)  // Get full path relative to data directory
-std::string getDataPathRoot()  // Get the current data path root (with trailing slash).
-std::string getExecutableDir()  // Get the directory containing the running executable (with trailing slash).
-std::string getExecutablePath()  // Get the absolute path of the running executable.
-std::string getFileExtension(const std::string & path)  // Get file extension without dot
-std::string getFileName(const std::string & path)  // Get filename from path
-int64_t getFileSize(const std::string & path)  // Get file size in bytes
-std::string getParentDirectory(const std::string & path)  // Get parent directory
-std::string joinPath(const std::string & dir, const std::string & file)  // Join directory and filename
-std::vector<std::string> listDirectory(const std::string & path)  // List files in directory
-Json loadJson(const std::string & path)  // Load a JSON file and return it as a Json object. Relative paths are resolved via getDataPath; returns an empty Json on error.
-std::string loadTextFile(const std::string & path)  // Load entire text file
-Xml loadXml(const std::string & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
-bool removeFile(const std::string & path)  // Remove file
-bool saveJson(const Json & j, const std::string & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath. indent sets the pretty-print width (negative for compact). Returns true on success.
-bool saveTextFile(const std::string & path, const std::string & content)  // Save string to text file
-void setDataPathRoot(const std::string & path)  // Set the root directory used to resolve relative data paths. A relative path is resolved against the executable directory; an absolute path (starting with /) is used as-is. A trailing slash is added automatically.
+bool appendToFile(const fs::path & path, const std::string & content)  // Append string to file
+bool createDirectory(const fs::path & path)  // Create directory (and parents)
+bool directoryExists(const fs::path & path)  // Check if directory exists
+bool fileExists(const fs::path & path)  // Check if file exists
+std::string getAbsolutePath(const fs::path & path)  // Get absolute path
+std::string getBaseName(const fs::path & path)  // Get filename without extension
+fs::path getDataPath(const fs::path & filename)  // Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged.
+fs::path getDataPathRoot()  // Get the current data path root as fs::path.
+fs::path getExecutableDir()  // Get the directory containing the running executable.
+fs::path getExecutablePath()  // Get the absolute path of the running executable.
+std::string getFileExtension(const fs::path & path)  // Get file extension without dot
+std::string getFileName(const fs::path & path)  // Get filename from path
+int64_t getFileSize(const fs::path & path)  // Get file size in bytes
+std::string getParentDirectory(const fs::path & path)  // Get parent directory
+std::string joinPath(const fs::path & dir, const fs::path & file)  // Join directory and filename
+std::vector<std::string> listDirectory(const fs::path & path)  // List files in directory
+const char * loadErrorName(LoadError e)  // Short label for a LoadError value ("FileNotFound", ...). For log messages
+Json loadJson(const fs::path & path)  // Load a JSON file and return it as a Json object. Relative paths are resolved via getDataPath; returns an empty Json on error.
+std::string loadTextFile(const fs::path & path)  // Load entire text file
+Xml loadXml(const fs::path & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
+bool removeFile(const fs::path & path)  // Remove file
+bool saveJson(const Json & j, const fs::path & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath. indent sets the pretty-print width (negative for compact). Returns true on success.
+bool saveTextFile(const fs::path & path, const std::string & content)  // Save string to text file
+void setDataPathRoot(const fs::path & path)  // Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is.
 void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms.
 ```
 
@@ -1878,7 +1883,7 @@ void shutdownAudio()  // Shut down the global AudioEngine and close the audio de
 
 ```cpp
 std::vector<std::string> listSystemFonts() [macos,windows,linux,ios]  // Enumerate names of all fonts known to the OS
-std::string systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub.
+fs::path systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub.
 ```
 
 ### Animation
@@ -2007,6 +2012,7 @@ float atanh(float x) [std]  // Inverse hyperbolic tangent
 Baseline  // Direction shorthand for Direction::Baseline (text baseline)
 Bottom  // Direction shorthand for Direction::Bottom
 Center  // Direction shorthand for Direction::Center
+std::shared_ptr<Window> createWindow(const WindowSettings & settings = {}) [macos,windows,linux]  // Create a secondary window (macOS only for now; returns nullptr elsewhere). It runs on its own display link; closing it leaves the app running
 const char * enumLabel(E value)  // Return the display string for one enum value (TC_ENUM_LABELS override, else reflected name).
 const std::array<std::string_view, internal::enumValidCount<E> enumNames()  // Return a compile-time array of all valid enumerator names of E.
 EnumLabelSpan enumReflectedSpan()  // Return an EnumLabelSpan synthesized from reflection (valid for contiguous zero-based enums).
@@ -2320,7 +2326,7 @@ const Texture & Environment::getIrradianceMap() const  // Get irradiance cubemap
 const Texture & Environment::getPrefilterMap() const  // Get prefiltered environment cubemap for specular IBL
 int Environment::getPrefilterMipLevels() const  // Get number of mip levels in the prefilter map
 bool Environment::isLoaded() const  // Check if environment is loaded
-bool Environment::loadFromHDR(const std::string & path) [+1]  // Load environment from HDR image file
+bool Environment::loadFromHDR(const fs::path & path) [+1]  // Load environment from HDR image file
 bool Environment::loadProcedural()  // Generate a simple procedural sky environment
 void Environment::release()  // Release GPU resources
 ```
@@ -2383,7 +2389,7 @@ bool Fbo::save(const fs::path & path) const  // Save FBO contents to file
 void FileReader::close()  // Close file
 bool FileReader::eof() const  // Check if at end of file
 bool FileReader::isOpen() const  // Check if file is open
-bool FileReader::open(const std::string & path)  // Open file for reading
+bool FileReader::open(const fs::path & path)  // Open file for reading
 size_t FileReader::read(void * buffer, size_t size)  // Read binary data
 int FileReader::readChar()  // Read one character (-1 at EOF)
 std::string FileReader::readLine() [+1]  // Read one line
@@ -2398,7 +2404,7 @@ size_t FileReader::tell()  // Get current position
 void FileWriter::close()  // Close file
 void FileWriter::flush()  // Flush buffer to disk
 bool FileWriter::isOpen() const  // Check if file is open
-bool FileWriter::open(const std::string & path, bool append = false)  // Open file for writing
+bool FileWriter::open(const fs::path & path, bool append = false)  // Open file for writing
 FileWriter & FileWriter::write(const std::string & text) [+2]  // Write data to file
 FileWriter & FileWriter::writeLine(const std::string & text = std::string(""))  // Write line with newline
 ```
@@ -2446,7 +2452,7 @@ bool Font::isLoaded() const  // Check if loaded
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
 bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
 bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is forbidden at the start of a line (kinsoku rule).
-bool Font::load(const std::string & nameOrPath, int size)  // Load font file
+LoadResult Font::load(const fs::path & nameOrPath, int size)  // Load font file
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
 void Font::setHangingPunctuation(bool enabled)  // Let prohibited line-start CJK punctuation hang past the line edge instead of wrapping (default off)
@@ -2546,7 +2552,7 @@ sg_sampler IesProfile::getSampler() const  // Return the sokol-gfx sampler of th
 int IesProfile::getTextureWidth() const  // Get width of the generated 1D lookup texture
 sg_view IesProfile::getView() const  // Return the sokol-gfx texture view of the IES profile for pipeline binding (advanced interop).
 bool IesProfile::isLoaded() const  // Check if profile is loaded
-bool IesProfile::load(const std::string & path)  // Load IES profile from file
+bool IesProfile::load(const fs::path & path)  // Load IES profile from file
 bool IesProfile::loadFromString(const std::string & data)  // Load IES profile from inline string data
 ```
 
@@ -2565,8 +2571,8 @@ Texture & Image::getTexture() [+1]  // Get internal texture
 int Image::getWidth() const  // Get width
 void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 bool Image::isAllocated() const  // Check if allocated
-bool Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
-bool Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain.
+LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
+LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain.
 void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°.
 void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true))
@@ -2673,6 +2679,14 @@ void Light::setSpecular(const Color & c) [+1]  // Set specular light color
 void Light::setSpot(const Vec3 & position, const Vec3 & direction, float innerHalfAngle = 0.0, float outerHalfAngle = 0.785399973) [+1]  // Set as spot light with cone angles
 ```
 
+### LoadResult — Result of a resource load (Image, SoundBuffer, VideoPlayer, Font, ...). Truthy on success; on failure carries a LoadError and a human-readable message.
+
+```cpp
+LoadResult LoadResult::fail(LoadError e, std::string msg = std::string())  // Make a failure result with an error kind and optional message (static)
+bool LoadResult::ok() const  // true if the load succeeded (error == LoadError::None)
+LoadResult LoadResult::success()  // Make a success result (static)
+```
+
 ### Location — GPS / WiFi location fix returned by getLocation()
 
 ```cpp
@@ -2699,7 +2713,7 @@ bool Logger::isFileOpen() const  // Check whether a log file is currently open
 void Logger::log(LogLevel level, const std::string & message)  // Emit a log message at the given level
 void Logger::setConsoleLogLevel(LogLevel level)  // Set the minimum console log level
 void Logger::setFileLogLevel(LogLevel level)  // Set the minimum file log level
-bool Logger::setLogFile(const std::string & path)  // Open a file to receive log output
+bool Logger::setLogFile(const fs::path & path)  // Open a file to receive log output
 ```
 
 ### Mat3 — 3x3 matrix for 2D affine / homography transforms (row-major). Includes static factories and a homography solver
@@ -3082,9 +3096,9 @@ int Pixels::getWidth() const  // Get width
 void Pixels::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 bool Pixels::isAllocated() const  // Check if allocated
 bool Pixels::isFloat() const  // Whether the pixel data uses 32-bit floats
-bool Pixels::load(const fs::path & path)  // Load image from file
-bool Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Load image from memory
-bool Pixels::loadHDR(const fs::path & path)  // Load an HDR (.hdr) image into a float pixel buffer
+LoadResult Pixels::load(const fs::path & path)  // Load image from file
+LoadResult Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Load image from memory
+LoadResult Pixels::loadHDR(const fs::path & path)  // Load an HDR (.hdr) image into a float pixel buffer
 bool Pixels::loadPlatform(const fs::path & path)  // Load an image using the platform image decoder
 void Pixels::mirror(bool horizontal, bool vertical)  // Flip in place. Both true is 180°.
 void Pixels::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
@@ -3223,9 +3237,9 @@ bool Reflector::visit(const char * name, float & v) [+7]  // Handle one reflecte
 
 ```cpp
 int ScreenRecorder::getFrameCount() const  // Number of frames captured so far
-const std::string & ScreenRecorder::getPath() const  // Output file path of the current recording
+fs::path ScreenRecorder::getPath() const  // Output file path of the current recording
 bool ScreenRecorder::isRecording() const  // Check if the screen recorder is currently capturing
-bool ScreenRecorder::start(const std::string & path, const VideoRecordSettings & settings = {}) [+3]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically
+bool ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically
 void ScreenRecorder::stop()  // Stop live capture and finalize the file
 VideoWriter & ScreenRecorder::writer()  // Access the underlying VideoWriter for advanced introspection
 ```
@@ -3356,9 +3370,9 @@ bool Sound::isLoop() const  // Check if loop mode is enabled
 bool Sound::isPaused() const  // Check if paused
 bool Sound::isPlaying() const  // Check if playing
 bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
-bool Sound::load(const std::string & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
+LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
 void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
-bool Sound::loadStream(const std::string & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
+LoadResult Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
 void Sound::loadTestTone(float frequency = 440.0, float duration = 1.0)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.
 void Sound::pause()  // Pause playback
 void Sound::play()  // Play audio
@@ -3389,18 +3403,18 @@ void SoundBuffer::generateSquareWave(float frequency, float duration, float volu
 void SoundBuffer::generateTriangleWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono triangle wave.
 int SoundBuffer::getAdtsSampleRateIndex(int sampleRate)  // ADTS sample-rate index for the given rate (AAC-in-MOV container helper).
 float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sampleRate).
-bool SoundBuffer::load(const std::string & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
-bool SoundBuffer::loadAac(const std::string & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
-bool SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios,web]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
-bool SoundBuffer::loadFlac(const std::string & path)  // Decode a FLAC file into PCM.
-bool SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
-bool SoundBuffer::loadMp3(const std::string & path)  // Decode an MP3 file into PCM.
-bool SoundBuffer::loadMp3FromMemory(const void * data, size_t dataSize)  // Decode MP3 data from a memory buffer.
-bool SoundBuffer::loadOgg(const std::string & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis).
-bool SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  // Decode OGG Vorbis data from a memory buffer.
-bool SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths.
-bool SoundBuffer::loadWav(const std::string & path)  // Decode a WAV file into PCM.
-bool SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from a memory buffer.
+LoadResult SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
+LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
+LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios,web]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
+LoadResult SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM.
+LoadResult SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
+LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM.
+LoadResult SoundBuffer::loadMp3FromMemory(const void * data, size_t dataSize)  // Decode MP3 data from a memory buffer.
+LoadResult SoundBuffer::loadOgg(const fs::path & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis).
+LoadResult SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  // Decode OGG Vorbis data from a memory buffer.
+LoadResult SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths.
+LoadResult SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into PCM.
+LoadResult SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from a memory buffer.
 void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed.
 ```
 
@@ -3416,8 +3430,8 @@ Kind SoundSource::kind() const  // Source kind (Eager for SoundBuffer, Stream fo
 ```cpp
 float SoundStream::getDuration() const  // Decoded file duration in seconds.
 int SoundStream::getMaxPolyphony() const  // Number of concurrent decoder slots reserved at loadStream().
-const std::string & SoundStream::getPath() const  // Path the stream was opened from.
-bool SoundStream::loadStream(const std::string & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported.
+fs::path SoundStream::getPath() const  // Path the stream was opened from.
+LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported.
 ```
 
 ### StrokeMesh — Variable-width polyline stroke geometry with caps, joins and miter limit; build it from points or a Path, then update() and draw()
@@ -3813,8 +3827,8 @@ void VideoGrabber::update()  // Poll for a new frame and upload it to the textur
 ```cpp
 void VideoPlayer::close()  // Close the video and release resources
 void VideoPlayer::draw(float x, float y) const [+1]  // Draw the current video frame at (x, y), optionally scaled to w x h
-bool VideoPlayer::extractFrame(const std::string & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
-bool VideoPlayer::extractKeyFrame(const std::string & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
+bool VideoPlayer::extractFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
+bool VideoPlayer::extractKeyFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
 int VideoPlayer::getAudioChannels() const [macos,windows,linux,ios]  // Number of audio channels (0 if no audio)
 uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC of the audio codec in the loaded video (0 if none)
 std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video
@@ -3824,7 +3838,7 @@ int VideoPlayer::getCurrentFrame() const  // Get current frame number
 float VideoPlayer::getDuration() const  // Get total duration in seconds
 float VideoPlayer::getGammaCorrection() const  // Get current gamma correction value
 std::string VideoPlayer::getHwAccelName() const  // Get the name of the active decode backend. Returns 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', or 'none'
-const std::string & VideoPlayer::getPath() const  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
+fs::path VideoPlayer::getPath() const  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
 unsigned char * VideoPlayer::getPixels() [+1]  // Pointer to the current RGBA pixel buffer (mutable)
 unsigned char * VideoPlayer::getPixelsUV()  // Pointer to the interleaved UV (chroma) plane when decoding NV12; null otherwise
 unsigned char * VideoPlayer::getPixelsY()  // Pointer to the Y (luma) plane when decoding NV12/YUV; null otherwise
@@ -3833,7 +3847,7 @@ int VideoPlayer::getTotalFrames() const  // Get total number of frames
 bool VideoPlayer::getUseHwAccel() const  // Get HW accel preference (not the actual backend — use isUsingHwAccel() for that)
 bool VideoPlayer::hasAudio() const  // Check if the loaded video has an audio track
 bool VideoPlayer::isUsingHwAccel() const  // Check if hardware decoding is currently active (after load)
-bool VideoPlayer::load(const std::string & path)  // Load a video file
+LoadResult VideoPlayer::load(const fs::path & path)  // Load a video file
 void VideoPlayer::nextFrame()  // Advance to the next frame
 void VideoPlayer::play()  // Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture
 void VideoPlayer::playImpl()  // Backend implementation of playImpl for this platform's video player.
@@ -3884,7 +3898,7 @@ bool VideoPlayerBase::isPaused() const  // Check if video is paused
 bool VideoPlayerBase::isPlaying() const  // Check if video is currently playing (not paused)
 bool VideoPlayerBase::isReady() const  // True while the texture holds a real picture — i.e. drawing shows actual video, not black. With the default auto poster this is true from load() on; false only if the poster failed and no frame has arrived yet
 bool VideoPlayerBase::isUsingHwAccel() const  // Return true if hardware-accelerated decoding is currently active.
-bool VideoPlayerBase::load(const std::string & path)  // Load a video from the given file path; return true on success.
+LoadResult VideoPlayerBase::load(const fs::path & path)  // Load a video from the given file path; return true on success.
 void VideoPlayerBase::markDone()  // Mark playback as done, clearing playing unless looping.
 void VideoPlayerBase::markFrameNew()  // Mark that a new frame has arrived (sets frameNew and firstFrameReceived).
 void VideoPlayerBase::nextFrame()  // Advance to the next frame.
@@ -3926,13 +3940,27 @@ void VideoWriter::close()  // Finalize and flush the video file
 float VideoWriter::getFps() const  // Fixed encoding frame rate
 int VideoWriter::getFrameCount() const  // Number of frames written so far
 int VideoWriter::getHeight() const  // Encoder output height in pixels
-const std::string & VideoWriter::getPath() const  // Resolved output file path
+fs::path VideoWriter::getPath() const  // Resolved output file path
 const VideoRecordSettings & VideoWriter::getSettings() const  // Encoder settings the writer was opened with
 int VideoWriter::getWidth() const  // Encoder output width in pixels
 bool VideoWriter::isOpen() const  // Check if the encoder is open and accepting frames
 unsigned char * VideoWriter::lockFrame(int & strideOut) [macos]  // Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame
-bool VideoWriter::open(const std::string & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the encoder at the given size (path resolved via getDataPath)
+bool VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the encoder at the given size (path resolved via getDataPath)
 bool VideoWriter::submitFrame(double timeSec) [macos]  // Append the previously locked frame at the given presentation time (seconds)
+```
+
+### Window — A secondary application window (macOS only for now). Owns its own Node tree, events, mouse state and render context; ticks at its display's refresh rate. GPU resources are shared with every other window
+
+```cpp
+void Window::close()  // Close the native window; the main window and other windows keep running
+CoreEvents & Window::events()  // This window's own event stream (mousePressed / keyPressed / draw / ...)
+std::shared_ptr<App> Window::getApp() const  // Get the App attached to this window
+int Window::getHeight() const  // Window height in logical points (matches its coordinate system)
+int Window::getWidth() const  // Window width in logical points (matches its coordinate system)
+bool Window::isOpen() const  // Whether the native window is still open
+void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window
+void Window::setClearColor(const Color & c)  // Background clear color for this window
+void Window::setTitle(const std::string & title)  // Set the window title
 ```
 
 ### WindowSettings — Window configuration passed to the app at startup (size, title, DPI, MSAA, fullscreen, decoration, VSync). Setters chain
@@ -3958,10 +3986,10 @@ XmlNode Xml::addRoot(const std::string & name)  // Append a new root element wit
 XmlNode Xml::child(const std::string & name)  // Find a direct child node of the document by name.
 XmlDocument & Xml::document() [+1]  // Access the underlying pugixml document for advanced operations.
 bool Xml::empty() const  // Return true if the document has no content.
-bool Xml::load(const std::string & path)  // Load an XML document from a file. Relative paths are resolved via getDataPath. Returns true on success.
+bool Xml::load(const fs::path & path)  // Load an XML document from a file. Relative paths are resolved via getDataPath. Returns true on success.
 bool Xml::parse(const std::string & str)  // Parse an XML document from a string. Returns true on success.
 XmlNode Xml::root() [+1]  // Get the document's root element node.
-bool Xml::save(const std::string & path, const std::string & indent = std::string("  ")) const  // Save the document to a file. Relative paths are resolved via getDataPath. indent sets the per-level indentation string. Returns true on success.
+bool Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Save the document to a file. Relative paths are resolved via getDataPath. indent sets the per-level indentation string. Returns true on success.
 std::string Xml::toString(const std::string & indent = std::string("  ")) const  // Serialize the document to an XML string. indent sets the per-level indentation string.
 ```
 
@@ -3982,6 +4010,7 @@ enum ImageType { Color, Grayscale }  // Image type: Color or Grayscale.
 enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku) strictness for vertical / Japanese text
 enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.
 enum LightType { Directional, Point, Spot }  // Light type: Directional, Point, or Spot.
+enum LoadError { None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown }  // Load failure kind: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown.
 enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Log severity, from Verbose (most detailed) to Fatal; Silent disables logging.
 enum MixMode { Auto, DownmixMono }  // Sound channel mixing: Auto (match the output) or DownmixMono.
 enum MouseButton { Left, Right, Middle, None }  // Mouse button: Left, Right, Middle, or None.

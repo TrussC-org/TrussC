@@ -11,7 +11,7 @@ void tcApp::setup() {
         .bind([this](const json& args) -> json {
             string path = args.at("path").get<string>();
             logNotice("tcApp") << "MCP: Loading " << path;
-            bool success = player_.load(path);
+            bool success = player_.load(path).ok();
             if (success) {
                 player_.play();
                 statusText_ = "Loaded: " + path;

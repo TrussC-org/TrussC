@@ -125,7 +125,7 @@
         the sokol_glue.h header:
 
             #include "sokol_gfx.h"
-            #include "sokol_app.h"
+            #include "sokol_app_tc.h"
             #include "sokol_glue.h"
             //...
             sg_setup(&(sg_desc){

@@ -63,8 +63,8 @@ public:
 
 protected:
     bool openDevice() override {
-        std::filesystem::path p(path_);
-        std::string resolved = p.is_relative() ? getDataPath(path_) : path_;
+        // getDataPath passes absolute paths through unchanged
+        std::filesystem::path resolved = getDataPath(path_);
         file_.open(resolved, std::ios::binary);
         if (!file_) {
             logError("tcxDepthRecord") << "PlaybackDepthCamera: cannot open " << resolved;

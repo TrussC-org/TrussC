@@ -12,7 +12,7 @@
 
 namespace trussc {
 
-bool VideoPlayer::loadPlatform(const std::string& path) {
+bool VideoPlayer::loadPlatform(const fs::path& path) {
     logWarning("VideoPlayer") << "Not yet implemented on Android";
     return false;
 }
@@ -46,13 +46,13 @@ int VideoPlayer::getAudioChannelsPlatform() const { return 0; }
 bool VideoPlayer::isUsingHwAccelPlatform() const { return false; }
 std::string VideoPlayer::getHwAccelNamePlatform() const { return "none"; }
 
-bool VideoPlayer::extractFramePlatform(const std::string& path, Pixels& outPixels,
+bool VideoPlayer::extractFramePlatform(const fs::path& path, Pixels& outPixels,
                                        float timeSec, float* outDuration) {
     (void)path; (void)outPixels; (void)timeSec; (void)outDuration;
     return false;
 }
 
-bool VideoPlayer::extractKeyFramePlatform(const std::string& path, Pixels& outPixels,
+bool VideoPlayer::extractKeyFramePlatform(const fs::path& path, Pixels& outPixels,
                                           float timeSec, float* outDuration) {
     (void)path; (void)outPixels; (void)timeSec; (void)outDuration;
     return false;

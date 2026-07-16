@@ -16,7 +16,7 @@ namespace tcx::obj {
 bool ObjLoader::load(const fs::path& path) {
     clear();
 
-    fs::path objPath = path.is_absolute() ? path : fs::path(getDataPath(path.string()));
+    fs::path objPath = getDataPath(path);   // absolute paths pass through
 
     if (!fs::exists(objPath)) {
         logError() << "ObjLoader::load: file not found: " << objPath;

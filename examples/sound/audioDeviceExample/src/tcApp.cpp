@@ -39,7 +39,7 @@ void tcApp::setup() {
     refreshDevices();
 
     // Enable MCP debugger + ImGui tools so this example can be driven
-    // automatically (e.g. for stress testing via mcp:imgui_click).
+    // automatically (e.g. for stress testing via mcp:tcx_imgui_click).
     // Only active when TRUSSC_MCP=1 is set in the environment.
     // MCP is desktop-only — Web builds skip it.
 #ifndef __EMSCRIPTEN__

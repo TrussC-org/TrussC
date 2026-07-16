@@ -152,7 +152,7 @@ public:
 
         sg_pixel_format colorFmt;
         int sampleCount;
-        if (internal::inFboPass) {
+        if (internal::currentWindowContext().inFboPass) {
             colorFmt = internal::currentFboColorFormat;
             sampleCount = internal::currentFboSampleCount;
         } else {
@@ -181,7 +181,7 @@ public:
         // after this mesh composites on top. Inside an FBO pass we defer into the
         // per-FBO list (flushed in flushFboDeferredPbr); otherwise into the
         // swapchain list (flushed in flushDeferredShaderDraws).
-        if (internal::inFboPass) {
+        if (internal::currentWindowContext().inFboPass) {
             internal::fboPointDraws.push_back({ internal::fboLayerNext, cmd });
             internal::fboLayerNext++;
             sgl_layer(internal::fboLayerNext);
@@ -201,7 +201,7 @@ private:
 
         // TrussC Mat4 is row-major; GLSL mat4 is column-major. Transpose before
         // upload so the shader can use the conventional `viewProj * v`.
-        Mat4 viewProj = (internal::currentProjectionMatrix * internal::currentViewMatrix).transposed();
+        Mat4 viewProj = (internal::currentWindowContext().currentProjectionMatrix * internal::currentWindowContext().currentViewMatrix).transposed();
         std::memcpy(vsp.viewProj, viewProj.m, sizeof(vsp.viewProj));
 
         const int   w  = getWindowWidth();

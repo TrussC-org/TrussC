@@ -25,19 +25,19 @@ std::string sep = "/";
 void tcApp::reloadLuaFile(){
 #ifdef FILE_RELOAD_SUPPORTED
     std::string luaScriptBaseName = "sketch.lua";
-    std::string luaScriptPath = getDataPath(luaScriptBaseName);
+    fs::path luaScriptPath = getDataPath(luaScriptBaseName);
 
     if(fileExists(luaScriptPath)){
-        sol::optional<sol::error> result = lua->safe_script_file(luaScriptPath);
+        sol::optional<sol::error> result = lua->safe_script_file(luaScriptPath.string());
         if (result.has_value()) {
             std::cerr << "Lua execution failed: "
                     << result.value().what() << std::endl;
         }
     }else{
-        tcLogError("tcApp") << "Lua file not found at: " << luaScriptPath;
+        logError("tcApp") << "Lua file not found at: " << luaScriptPath;
     }
 #else
-    tcLogWarning("tcApp") << "[file reload] sorry, this platform currently not supported";
+    logWarning("tcApp") << "[file reload] sorry, this platform currently not supported";
 #endif // FILE_RELOAD_SUPPORTED
 }
 

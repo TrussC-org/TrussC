@@ -8,12 +8,12 @@
 using namespace std;
 
 void tcApp::setup() {
-    tcLogNotice() << "=== TLS (HTTPS) Client Example ===";
-    tcLogNotice() << "Press C to connect to httpbin.org (HTTPS)";
-    tcLogNotice() << "Press SPACE to send HTTP GET request";
-    tcLogNotice() << "Press D to disconnect";
-    tcLogNotice() << "Press X to clear log";
-    tcLogNotice() << "==================================";
+    logNotice() << "=== TLS (HTTPS) Client Example ===";
+    logNotice() << "Press C to connect to httpbin.org (HTTPS)";
+    logNotice() << "Press SPACE to send HTTP GET request";
+    logNotice() << "Press D to disconnect";
+    logNotice() << "Press X to clear log";
+    logNotice() << "==================================";
 
     // TLS configuration (no certificate verification - for testing)
     client.setVerifyNone();
@@ -190,7 +190,7 @@ void tcApp::cleanup() {
 }
 
 void tcApp::addSent(const string& msg) {
-    tcLogNotice() << "[SENT] " << msg;
+    logNotice() << "[SENT] " << msg;
     lock_guard<mutex> lock(sentMutex);
     sentMessages.push_back(msg);
     if (sentMessages.size() > 30) {
@@ -199,7 +199,7 @@ void tcApp::addSent(const string& msg) {
 }
 
 void tcApp::addReceived(const string& msg) {
-    tcLogNotice() << "[RECV] " << msg;
+    logNotice() << "[RECV] " << msg;
     lock_guard<mutex> lock(receivedMutex);
     receivedMessages.push_back(msg);
     if (receivedMessages.size() > 30) {

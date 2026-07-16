@@ -438,7 +438,7 @@ protected:
     // sample count and depth match the FBO, so one is built lazily (from the same
     // createPipelineDesc()) and cached per distinct (format, sampleCount) target.
     sg_pipeline pipelineForCurrentTarget() {
-        if (!internal::inFboPass) return pipeline;
+        if (!internal::currentWindowContext().inFboPass) return pipeline;
         uint64_t key = ((uint64_t)internal::currentFboColorFormat << 8)
                      | (uint64_t)(internal::currentFboSampleCount & 0xff);
         auto it = targetPipelines_.find(key);
@@ -623,16 +623,17 @@ public:
         // sapp_width(), physical px, which additionally halved everything on
         // retina.) Re-run the real setup with the CURRENT view params instead.
         sg_reset_state_cache();
-        if (internal::inFboPass) {
+        auto& wctx = internal::currentWindowContext();
+        if (wctx.inFboPass) {
             sgl_defaults();
             internal::loadPipeline(internal::activeFill2D());
             sgl_matrix_mode_projection();
-            sgl_ortho(0.0f, internal::currentViewW, internal::currentViewH, 0.0f, -10000.0f, 10000.0f);
+            sgl_ortho(0.0f, wctx.currentViewW, wctx.currentViewH, 0.0f, -10000.0f, 10000.0f);
             sgl_matrix_mode_modelview();
             sgl_load_identity();
         } else {
-            internal::setupScreenFovWithSize(internal::currentScreenFov,
-                                             internal::currentViewW, internal::currentViewH,
+            internal::setupScreenFovWithSize(wctx.currentScreenFov,
+                                             wctx.currentViewW, wctx.currentViewH,
                                              0.0f, 0.0f);
         }
     }

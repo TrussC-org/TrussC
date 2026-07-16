@@ -45,9 +45,9 @@ void tcApp::draw() {
         y += 25;
 
         setColor(0.86f);
-        drawBitmapString("File: " + lastResult.fileName, 40, y);
+        drawBitmapString("File: " + lastResult.fileName.string(), 40, y);
         y += 20;
-        drawBitmapString("Path: " + lastResult.filePath, 40, y);
+        drawBitmapString("Path: " + lastResult.filePath.string(), 40, y);
         y += 40;
 
         // Display if image is loaded
@@ -86,7 +86,7 @@ void tcApp::keyPressed(int key) {
                 logNotice("tcApp") << "Selected: " << lastResult.filePath;
 
                 // Try to load if image file
-                string path = lastResult.filePath;
+                string path = lastResult.filePath.string();
                 if (path.find(".png") != string::npos ||
                     path.find(".jpg") != string::npos ||
                     path.find(".jpeg") != string::npos ||

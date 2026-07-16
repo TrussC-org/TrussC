@@ -47,12 +47,12 @@ void setWindowSizeLogical(int width, int height) {
     emscripten_set_canvas_element_size("canvas", width, height);
 }
 
-std::string getExecutablePath() {
-    return "/";
+fs::path getExecutablePath() {
+    return fs::path("/");
 }
 
-std::string getExecutableDir() {
-    return "/";
+fs::path getExecutableDir() {
+    return fs::path("/");
 }
 
 bool captureWindow(Pixels& outPixels) {

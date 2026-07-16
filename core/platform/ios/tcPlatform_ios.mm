@@ -16,7 +16,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <MediaPlayer/MediaPlayer.h>
 
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 // ---------------------------------------------------------------------------
 // Sensor managers (lazily initialized)
@@ -118,16 +118,15 @@ void setWindowSizeLogical(int width, int height) {
     (void)height;
 }
 
-std::string getExecutablePath() {
+fs::path getExecutablePath() {
     NSString* path = [[NSBundle mainBundle] executablePath];
-    return path ? std::string([path UTF8String]) : "";
+    return path ? fs::path([path UTF8String]) : fs::path();
 }
 
-std::string getExecutableDir() {
-    NSString* path = [[NSBundle mainBundle] executablePath];
-    NSString* dir = [path stringByDeletingLastPathComponent];
-    if (!dir || dir.length == 0) return "";
-    return std::string([dir UTF8String]) + "/";
+fs::path getExecutableDir() {
+    fs::path exePath = getExecutablePath();
+    if (exePath.empty()) return {};
+    return exePath.parent_path();
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +138,7 @@ bool captureWindow(Pixels& outPixels) {
     // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
     // unrendered drawable, scrambling captures on GPU-heavy frames. Fall back
     // only if no pass ran yet. (Mirrors the macOS fix.)
-    const void* drawablePtr = internal::lastSwapchainDrawable;
+    const void* drawablePtr = internal::currentWindowContext().lastSwapchainDrawable;
     if (!drawablePtr) drawablePtr = sapp_get_swapchain().metal.current_drawable;
     id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)drawablePtr;
     if (!drawable) {
@@ -228,7 +227,7 @@ bool captureWindow(Pixels& outPixels) {
 
 bool internal::captureWindowToFile(const std::filesystem::path& path) {
     if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path.string()));
+        return internal::captureWindowToFile(getDataPath(path));
     }
     Pixels pixels;
     if (!captureWindow(pixels)) {

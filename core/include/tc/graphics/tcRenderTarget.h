@@ -138,30 +138,8 @@ struct RenderTarget {
     }
 };
 
-inline RenderTarget  swapchainTarget;                  // .context set after sgl_setup()
-inline RenderTarget* currentTarget = &swapchainTarget; // Fbo::begin/end retargets this
-
-// Role keys: high nibble = role, low byte = blend mode (2D only).
-inline sgl_pipeline active2D(BlendMode m) { return currentTarget->pipeline(0x000u | (uint32_t)m, pipeDesc2D(m)); }
-inline sgl_pipeline activeFill2D()        { return active2D(BlendMode::Alpha); }
-inline sgl_pipeline activePremult()       { return currentTarget->pipeline(0x100u, pipeDescPremult()); }
-inline sgl_pipeline activeClear()         { return currentTarget->pipeline(0x200u, pipeDesc2D(BlendMode::Disabled)); }
-inline sgl_pipeline active3D()            { return currentTarget->pipeline(0x300u, pipeDesc3D()); }
-
-// Single chokepoint for loading an sgl pipeline by role. No-op if the target isn't
-// ready (id 0). In debug builds it asserts the pipeline was built for the active
-// target's context — the runtime safety net against loading a pipeline meant for a
-// different target (the bug class this refactor removes).
-inline void loadPipeline(sgl_pipeline p) {
-    if (p.id == 0) return;
-#ifndef NDEBUG
-    auto& owner = pipelineOwnerCtx();
-    auto it = owner.find(p.id);
-    // Only check pipelines WE built (others, e.g. sgl's built-in default, are unknown).
-    assert((it == owner.end() || it->second == currentTarget->context.id)
-           && "loadPipeline: sgl pipeline built for a different render target than the active one");
-#endif
-    sgl_load_pipeline(p);
-}
+// The swapchain target, the active-target pointer, and the active*() pipeline
+// helpers moved to the per-window WindowContext — see tc/app/tcWindowContext.h
+// (included right after this header from TrussC.h).
 
 }} // namespace trussc::internal

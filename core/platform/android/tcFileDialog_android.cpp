@@ -42,7 +42,7 @@ void confirmDialogAsync(const std::string& title,
 
 FileDialogResult loadDialog(const std::string& title,
                             const std::string& message,
-                            const std::string& defaultPath,
+                            const fs::path& defaultPath,
                             bool folderSelection) {
     (void)title; (void)message; (void)defaultPath; (void)folderSelection;
     return FileDialogResult{};
@@ -50,7 +50,7 @@ FileDialogResult loadDialog(const std::string& title,
 
 void loadDialogAsync(const std::string& title,
                      const std::string& message,
-                     const std::string& defaultPath,
+                     const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback) {
     if (callback) callback(FileDialogResult{});
@@ -58,16 +58,16 @@ void loadDialogAsync(const std::string& title,
 
 FileDialogResult saveDialog(const std::string& title,
                             const std::string& message,
-                            const std::string& defaultPath,
-                            const std::string& defaultName) {
+                            const fs::path& defaultPath,
+                            const fs::path& defaultName) {
     (void)title; (void)message; (void)defaultPath; (void)defaultName;
     return FileDialogResult{};
 }
 
 void saveDialogAsync(const std::string& title,
                      const std::string& message,
-                     const std::string& defaultPath,
-                     const std::string& defaultName,
+                     const fs::path& defaultPath,
+                     const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback) {
     if (callback) callback(FileDialogResult{});
 }

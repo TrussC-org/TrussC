@@ -13,6 +13,7 @@
 // =============================================================================
 
 #include <string>
+#include "tc/utils/tcFileIO.h"   // fs alias
 #include <vector>
 #include <functional>
 
@@ -32,8 +33,8 @@ namespace trussc {
 
 // Dialog result for load/save dialogs
 struct FileDialogResult {
-    std::string filePath;   // Full path
-    std::string fileName;   // Filename only
+    fs::path filePath;      // Full path
+    fs::path fileName;      // Filename only
     bool success = false;   // true if not cancelled
 };
 
@@ -64,12 +65,12 @@ void confirmDialogAsync(const std::string& title,
 // -----------------------------------------------------------------------------
 TC_PLATFORMS("macos,windows,linux,android") TC_SYNC_DIALOG_UNAVAILABLE FileDialogResult loadDialog(const std::string& title = "",
                             const std::string& message = "",
-                            const std::string& defaultPath = "",
+                            const fs::path& defaultPath = {},
                             bool folderSelection = false);
 
 void loadDialogAsync(const std::string& title,
                      const std::string& message,
-                     const std::string& defaultPath,
+                     const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback);
 
@@ -79,13 +80,13 @@ void loadDialogAsync(const std::string& title,
 // -----------------------------------------------------------------------------
 TC_PLATFORMS("macos,windows,linux,android") TC_SYNC_DIALOG_UNAVAILABLE FileDialogResult saveDialog(const std::string& title = "",
                             const std::string& message = "",
-                            const std::string& defaultPath = "",
-                            const std::string& defaultName = "");
+                            const fs::path& defaultPath = {},
+                            const fs::path& defaultName = {});
 
 void saveDialogAsync(const std::string& title,
                      const std::string& message,
-                     const std::string& defaultPath,
-                     const std::string& defaultName,
+                     const fs::path& defaultPath,
+                     const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback);
 
 } // namespace trussc

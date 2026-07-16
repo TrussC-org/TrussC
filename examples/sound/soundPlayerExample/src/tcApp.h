@@ -14,7 +14,7 @@ private:
     Sound music;
     Sound sfx;
 
-    std::string musicPath;
+    std::filesystem::path musicPath;
     bool musicLoaded = false;
     bool sfxLoaded = false;
 };

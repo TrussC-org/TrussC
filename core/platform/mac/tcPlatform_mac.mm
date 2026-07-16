@@ -18,7 +18,7 @@
 #import <CoreLocation/CoreLocation.h>
 
 // sokol_app の swapchain 取得関数
-#include "sokol_app.h"
+#include "sokol_app_tc.h"
 
 namespace trussc {
 
@@ -180,15 +180,13 @@ void setWindowSizeLogical(int width, int height) {
     }
 }
 
-std::string getExecutablePath() {
+fs::path getExecutablePath() {
     NSString* path = [[NSBundle mainBundle] executablePath];
-    return std::string([path UTF8String]);
+    return fs::path([path UTF8String]);
 }
 
-std::string getExecutableDir() {
-    NSString* path = [[NSBundle mainBundle] executablePath];
-    NSString* dir = [path stringByDeletingLastPathComponent];
-    return std::string([dir UTF8String]) + "/";
+fs::path getExecutableDir() {
+    return getExecutablePath().parent_path();
 }
 
 // ---------------------------------------------------------------------------
@@ -252,7 +250,7 @@ bool internal::captureWindowAsync(
     // Read back the drawable this frame ACTUALLY rendered into (recorded by the
     // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
     // unrendered drawable. Fall back only if no pass ran yet.
-    const void* drawablePtr = internal::lastSwapchainDrawable;
+    const void* drawablePtr = internal::currentWindowContext().lastSwapchainDrawable;
     if (!drawablePtr) drawablePtr = sapp_get_swapchain().metal.current_drawable;
     id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)drawablePtr;
     if (!drawable) return false;
@@ -357,7 +355,7 @@ bool captureWindow(Pixels& outPixels) {
 bool internal::captureWindowToFile(const std::filesystem::path& path) {
     // Resolve relative paths
     if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path.string()));
+        return internal::captureWindowToFile(getDataPath(path));
     }
     // Capture to Pixels
     Pixels pixels;

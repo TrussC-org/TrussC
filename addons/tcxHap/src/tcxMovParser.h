@@ -185,7 +185,7 @@ public:
         return *this;
     }
 
-    bool open(const std::string& path) {
+    bool open(const tc::fs::path& path) {
         close();
 
         // Create a completely fresh fstream object (not reusing old one)
