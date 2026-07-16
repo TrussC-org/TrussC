@@ -28,7 +28,7 @@ struct Vec2 {
     // Constructors
     Vec2() = default;
     Vec2(float x_, float y_) : x(x_), y(y_) {}
-    Vec2(float v) : x(v), y(v) {}
+    explicit Vec2(float v) : x(v), y(v) {}
     Vec2(const Vec2&) = default;
     Vec2& operator=(const Vec2&) = default;
 
@@ -145,7 +145,7 @@ struct Vec3 {
     // Constructors
     Vec3() = default;
     Vec3(float x_, float y_, float z_) : x(x_), y(y_), z(z_) {}
-    Vec3(float v) : x(v), y(v), z(v) {}
+    explicit Vec3(float v) : x(v), y(v), z(v) {}
     Vec3(const Vec2& v, float z_ = 0.0f) : x(v.x), y(v.y), z(z_) {}
     Vec3(const Vec3&) = default;
     Vec3& operator=(const Vec3&) = default;
@@ -247,7 +247,7 @@ struct IVec2 {
 
     IVec2() = default;
     IVec2(int x_, int y_) : x(x_), y(y_) {}
-    IVec2(int v) : x(v), y(v) {}
+    explicit IVec2(int v) : x(v), y(v) {}
 
     IVec2 operator+(const IVec2& v) const { return IVec2(x + v.x, y + v.y); }
     IVec2 operator-(const IVec2& v) const { return IVec2(x - v.x, y - v.y); }
@@ -277,7 +277,7 @@ struct IVec3 {
 
     IVec3() = default;
     IVec3(int x_, int y_, int z_) : x(x_), y(y_), z(z_) {}
-    IVec3(int v) : x(v), y(v), z(v) {}
+    explicit IVec3(int v) : x(v), y(v), z(v) {}
     IVec3(const IVec2& v, int z_ = 0) : x(v.x), y(v.y), z(z_) {}
 
     IVec3 operator+(const IVec3& v) const { return IVec3(x + v.x, y + v.y, z + v.z); }
@@ -311,7 +311,7 @@ struct Vec4 {
     // Constructors
     Vec4() = default;
     Vec4(float x_, float y_, float z_, float w_) : x(x_), y(y_), z(z_), w(w_) {}
-    Vec4(float v) : x(v), y(v), z(v), w(v) {}
+    explicit Vec4(float v) : x(v), y(v), z(v), w(v) {}
     Vec4(const Vec3& v, float w_ = 1.0f) : x(v.x), y(v.y), z(v.z), w(w_) {}
     Vec4(const Vec2& v, float z_ = 0.0f, float w_ = 1.0f) : x(v.x), y(v.y), z(z_), w(w_) {}
     Vec4(const Vec4&) = default;
@@ -328,6 +328,8 @@ struct Vec4 {
     // Arithmetic operators
     Vec4 operator+(const Vec4& v) const { return Vec4(x + v.x, y + v.y, z + v.z, w + v.w); }
     Vec4 operator-(const Vec4& v) const { return Vec4(x - v.x, y - v.y, z - v.z, w - v.w); }
+    Vec4 operator*(const Vec4& v) const { return Vec4(x * v.x, y * v.y, z * v.z, w * v.w); }
+    Vec4 operator/(const Vec4& v) const { return Vec4(x / v.x, y / v.y, z / v.z, w / v.w); }
     Vec4 operator*(float s) const { return Vec4(x * s, y * s, z * s, w * s); }
     Vec4 operator/(float s) const { return Vec4(x / s, y / s, z / s, w / s); }
     Vec4 operator-() const { return Vec4(-x, -y, -z, -w); }
@@ -335,6 +337,8 @@ struct Vec4 {
     // Compound assignment operators
     Vec4& operator+=(const Vec4& v) { x += v.x; y += v.y; z += v.z; w += v.w; return *this; }
     Vec4& operator-=(const Vec4& v) { x -= v.x; y -= v.y; z -= v.z; w -= v.w; return *this; }
+    Vec4& operator*=(const Vec4& v) { x *= v.x; y *= v.y; z *= v.z; w *= v.w; return *this; }
+    Vec4& operator/=(const Vec4& v) { x /= v.x; y /= v.y; z /= v.z; w /= v.w; return *this; }
     Vec4& operator*=(float s) { x *= s; y *= s; z *= s; w *= s; return *this; }
     Vec4& operator/=(float s) { x /= s; y /= s; z /= s; w /= s; return *this; }
 
