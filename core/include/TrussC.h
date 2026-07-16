@@ -2011,6 +2011,17 @@ namespace internal {
         // key off this. (sokol's init_cb runs on the main thread.)
         getMainThreadId();
 
+        // Ops integration: a supervisor (e.g. `anchorbolt start`) injects a log
+        // file path via the environment so the app needs zero code changes.
+        // Opened BEFORE setup() so setup-time log lines land in the file too.
+        #ifndef __EMSCRIPTEN__
+        if (const char* envLog = std::getenv("TRUSSC_LOG_FILE")) {
+            if (envLog[0] != '\0' && !setLogFile(envLog)) {
+                logWarning("System") << "TRUSSC_LOG_FILE: cannot open '" << envLog << "'";
+            }
+        }
+        #endif
+
         setup();
 
         // The Apple data path root is chosen lazily on first getDataPath() use
@@ -2190,7 +2201,7 @@ namespace internal {
         }
 
         // Force a frame when a capture is pending so present()/afterFrame runs
-        // and the deferred screenshot (or MCP get_screenshot) actually fires —
+        // and the deferred screenshot (or MCP tc_get_screenshot) actually fires —
         // otherwise a request arriving in a paused/event-driven app would never
         // be served and a blocked MCP HTTP worker would hang.
         if (!pendingScreenshotPaths.empty()

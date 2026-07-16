@@ -127,6 +127,11 @@ bool TcpServer::start(int port, int maxClients) {
 }
 
 void TcpServer::stop() {
+    // A server that never ran (or was already stopped) cleans up silently —
+    // logging "stopped" from e.g. a static instance's destructor in a CLI
+    // that never called start() would be announcing an event that didn't
+    // happen. Cleanup below is idempotent either way.
+    bool wasRunning = running_;
     running_ = false;
 
     // Close server socket (unblocks accept)
@@ -152,7 +157,7 @@ void TcpServer::stop() {
     // Disconnect all clients
     disconnectAllClients();
 
-    logNotice() << "TCP server stopped";
+    if (wasRunning) logNotice() << "TCP server stopped";
 }
 
 bool TcpServer::isRunning() const {
