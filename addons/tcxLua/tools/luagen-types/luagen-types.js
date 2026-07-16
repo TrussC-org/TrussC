@@ -2,7 +2,7 @@
 // luagen-types.js — Phase 2: generate tcxLua Sol2 USERTYPE bindings (constructors,
 // properties, methods, static methods, operators) from reference-data.json.
 //
-//   node luagen-types.js <reference-data.json> > trussctype_generated.cpp
+//   node luagen-types.js <reference-data.json> [colors.json]   # writes src/generated/ (16 shards + aggregator)
 //
 // Pairs with luagen.js (Phase 1 = free functions). Custom Lua glue (Json/Xml
 // get_string etc.) is NOT in reference-data, so those stay hand-written; this only
@@ -10,25 +10,18 @@
 
 const fs = require('fs');
 const nodePath = require('path');
-// argv: <reference-data.json> [colors.json] [--shards N --outdir DIR]
-// Without --shards the single file goes to stdout (legacy behavior). With
-// --shards N the output is written to DIR as N shard TUs + an aggregator —
-// splitting the sol2 template instantiations across TUs keeps peak compiler
-// memory low enough for small machines (a single 100-usertype TU cannot be
-// compiled on an 8 GB Raspberry Pi 5 even at -j1).
-const argv = process.argv.slice(2);
-const flags = {};
-const positional = [];
-for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--shards') flags.shards = parseInt(argv[++i], 10);
-    else if (argv[i] === '--outdir') flags.outdir = argv[++i];
-    else positional.push(argv[i]);
-}
-const path = positional[0];
-if (!path) { console.error('usage: node luagen-types.js <reference-data.json> [colors.json] [--shards N --outdir DIR]'); process.exit(1); }
-if (flags.shards > 1 && !flags.outdir) { console.error('--shards requires --outdir'); process.exit(1); }
+// Output: SHARDS shard TUs + an aggregator, written straight into
+// src/generated/. Splitting the sol2 template instantiations across TUs keeps
+// peak compiler memory sane: the old single 100-usertype TU needed ~8 GB RSS
+// (unbuildable on an 8 GB Raspberry Pi 5 even at -j1); one shard needs ~1.3 GB.
+// 16 balances Mac (-j16 ~ 20 GB) and RPi5 (-j4 ~ 5 GB); to change it, edit the
+// constant and regenerate.
+const SHARDS = 16;
+const OUTDIR = nodePath.join(__dirname, '../../src/generated');
+const path = process.argv[2];
+if (!path) { console.error('usage: node luagen-types.js <reference-data.json> [colors.json]'); process.exit(1); }
 const data = JSON.parse(fs.readFileSync(path, 'utf8'));
-const colorsPath = positional[1];
+const colorsPath = process.argv[3];
 const colorsData = colorsPath ? JSON.parse(fs.readFileSync(colorsPath, 'utf8')) : null;
 
 const skip = { template: 0, unbindable: 0, op: 0 };
@@ -352,24 +345,17 @@ const POSTLUDE = `#ifndef _MSC_VER
 #endif
 `;
 
-const shards = flags.shards > 1 ? flags.shards : 1;
-if (shards === 1) {
-    // Legacy single-file output on stdout.
-    body = blocks.join('') + tail;
-    process.stdout.write(`${PRELUDE(true)}void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
-${body}}
-${POSTLUDE}`);
-} else {
+{
     // Shard output: greedy bin-packing of the heavy blocks (block size is a
     // fair proxy for sol2 template load) into N TUs, plus an aggregator that
     // defines setGeneratedTypeBindings, calls each shard, and carries the
     // light tail (constants + colors).
-    const buckets = Array.from({ length: shards }, () => ({ size: 0, parts: [] }));
+    const buckets = Array.from({ length: SHARDS }, () => ({ size: 0, parts: [] }));
     for (const b of [...blocks].sort((a, c) => c.length - a.length)) {
         const min = buckets.reduce((x, y) => (y.size < x.size ? y : x));
         min.parts.push(b); min.size += b.length;
     }
-    const outdir = flags.outdir;
+    const outdir = OUTDIR;
     // Remove stale shard files from a previous (different-N) run.
     for (const f of fs.readdirSync(outdir)) {
         if (/^trussctype_generated_\d+\.cpp$/.test(f)) fs.unlinkSync(nodePath.join(outdir, f));
@@ -390,7 +376,7 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
 ${decls.map((d) => `    ${d}(lua);`).join('\n')}
 ${tail}}
 ${POSTLUDE}`);
-    console.error(`[luagen-types] wrote ${shards} shard TUs + aggregator to ${outdir} (largest shard ${Math.max(...buckets.map(b => b.size))} bytes)`);
+    console.error(`[luagen-types] wrote ${SHARDS} shard TUs + aggregator to ${outdir} (largest shard ${Math.max(...buckets.map(b => b.size))} bytes)`);
 }
 console.error(`[luagen-types] usertypes: ${count} | enums: ${enumCount} | colors: ${colorCount} | consts: ${constCount} | skipped members: template ${skip.template}, unbindable ${skip.unbindable}, unsupported-op ${skip.op}`);
 for (const r of report) console.error('  ' + r);
