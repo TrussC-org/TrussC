@@ -166,11 +166,11 @@ inline void loadPipeline(sgl_pipeline p) {
 }
 
 // Restore the current blend pipeline after temporary pipeline changes.
-// FBO uses its accumulating Fill2D; swapchain honors the current blend mode.
-// (moved from TrussC.h)
+// Honors the current blend mode on the swapchain and inside Fbo passes alike:
+// active2D() resolves per render target, so the pipeline always matches the
+// active target's color format / sample count. (moved from TrussC.h)
 inline void restoreCurrentPipeline() {
-    auto& ctx = currentWindowContext();
-    loadPipeline(ctx.inFboPass ? activeFill2D() : active2D(ctx.currentBlendMode));
+    loadPipeline(active2D(currentWindowContext().currentBlendMode));
 }
 
 // Register a new camera scope (declared in tcCameraContext.h, defined here

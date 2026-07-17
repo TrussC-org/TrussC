@@ -217,9 +217,11 @@ public:
         sg_begin_pass(&pass);
 
         // Reset sokol_gl state. We are still mid-FBO (currentTarget is this FBO),
-        // so activeFill2D() resolves to the FBO's alpha-blend pipeline.
+        // so the restored pipeline resolves in the FBO's context/format. The
+        // current blend mode survives the clear (same contract as tc::clear()
+        // on the swapchain, which saves and restores it).
         sgl_defaults();
-        internal::loadPipeline(internal::activeFill2D());
+        internal::restoreCurrentPipeline();
         sgl_matrix_mode_projection();
         sgl_ortho(0.0f, (float)width_, (float)height_, 0.0f, -10000.0f, 10000.0f);
         sgl_matrix_mode_modelview();
@@ -666,14 +668,16 @@ private:
 
         active_ = true;
         internal::currentWindowContext().inFboPass = true;
-        // Retarget to this FBO BEFORE loading its fill pipeline so activeFill2D()
+        // Retarget to this FBO BEFORE loading its pipeline so active2D()
         // resolves in the FBO's context/format (setupScreenFov above still ran on
         // the previous target, as before).
         internal::currentWindowContext().currentTarget = &shared.target;
 
-        // Use the FBO's alpha-blend Fill2D pipeline (Porter-Duff over); the result
-        // is stored as premultiplied alpha in the FBO.
-        internal::loadPipeline(internal::activeFill2D());
+        // Load the pipeline for the CURRENT blend mode (usually Alpha =
+        // Porter-Duff over; the result is stored as premultiplied alpha in the
+        // FBO). A mode set before begin() persists into the pass, same as it
+        // persists across swapchain frames.
+        internal::restoreCurrentPipeline();
 
         internal::currentFbo = this;
         internal::currentFboColorFormat = toSokolFormat(format_);

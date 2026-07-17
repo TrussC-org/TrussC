@@ -312,7 +312,7 @@ void WebSocketClient::processFrame() {
         } else if (opcode == 0x8) { // Close
             disconnect();
         } else if (opcode == 0x9) { // Ping
-            // Send Pong (not implemented yet)
+            sendPong(payload);       // RFC 6455 5.5.2/5.5.3: reply, echoing the payload
         }
 
         if (!fin) {
@@ -371,6 +371,36 @@ bool WebSocketClient::send(const std::vector<char>& data) {
     }
 
     return client_->send(frame.data(), frame.size());
+#endif
+}
+
+// Reply to a server Ping with a Pong. RFC 6455 requires the Pong to echo the
+// Ping's application data. Skipping this let an idle command channel get reaped
+// by proxies that keep connections alive via pings (e.g. Cloudflare): the app
+// kept reporting "online" over its HTTP heartbeat while its WS silently dropped,
+// so the server-side live flag went false and remote controls disappeared.
+// The whole frame ships in one client_->send(), which TcpClient serializes under
+// its send mutex, so this stays frame-atomic against sends from other threads.
+void WebSocketClient::sendPong(const std::vector<char>& payload) {
+    if (state_ != State::Open) return;
+#ifndef __EMSCRIPTEN__
+    std::vector<unsigned char> frame;
+    frame.push_back(0x8A);  // FIN + opcode 0xA (Pong)
+    // Control frames carry at most 125 bytes, and a Ping never exceeds that, so
+    // a single-byte length is always sufficient here.
+    size_t len = payload.size() > 125 ? 125 : payload.size();
+    frame.push_back(0x80 | (unsigned char)len);  // MASK bit + payload length
+
+    unsigned char mask[4];
+    std::random_device rd;
+    for (int i = 0; i < 4; ++i) mask[i] = rd() & 0xFF;
+    frame.insert(frame.end(), mask, mask + 4);
+
+    for (size_t i = 0; i < len; ++i) {
+        frame.push_back((unsigned char)payload[i] ^ mask[i % 4]);
+    }
+
+    client_->send(frame.data(), frame.size());
 #endif
 }
 

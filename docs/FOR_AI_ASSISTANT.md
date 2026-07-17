@@ -828,11 +828,11 @@ Being header-only gives high portability (a nice side benefit for TrussC's gener
 
 ### Can TrussC open multiple windows?
 
-Not directly, by default. The foundation, sokol (sokol_app), assumes "one process = one window," so TrussC can't open multiple windows directly. This is something given up by adopting sokol (it's wanted but hard to implement). Workaround: **share a texture / output to a second app and run a separate process for the second window.** Depending on the need, use **tcxSyphon** (macOS), **tcxNDI** (cross-platform video transport), **tcxNozzle** (GPU texture sharing), or **tcxVirtualCam** (virtual camera output). (Windows' Spout equivalent exists as a concept, but there's no dedicated addon yet.)
+Yes — since v0.7.0 (macOS / Windows / desktop Linux). `createWindow(settings)` returns a `shared_ptr<Window>`, and `Window::setApp(make_shared<SubApp>())` gives it content: the SubApp runs the familiar `setup()/update()/draw()` + input-hook lifecycle, wired to *that* window. **Everything is per-window** — mouse/keyboard state, hover/drag, camera, delta time, ImGui context — so `getMouseX()`, `getDeltaTime()`, `imguiBegin()` etc. answer for the window whose App is running; there is no new API to learn beyond `createWindow` / `setApp`. **GPU resources (Texture / Fbo / Mesh / Font) are shared** across windows, so render once into an Fbo and draw it in both. Each window ticks on its own display's vsync, and a fully occluded window skips rendering without stalling the others. On single-window platforms (web / iOS / Android / Raspberry Pi) `createWindow()` logs an error and returns nullptr. See `examples/windowing/`. (For *cross-machine* or *cross-process* setups, texture sharing still applies: **tcxSyphon**, **tcxNDI**, **tcxNozzle**, **tcxVirtualCam**.)
 
 ### How does one C++ codebase run on every platform?
 
-One C++ codebase builds for macOS / Windows / Linux / iOS / Android / web (WebAssembly). The foundation is two layers: **sokol_app** abstracts window creation and input across platforms, and **sokol_gfx** maps drawing to each OS's native graphics API (backend auto-selected: macOS/iOS=Metal, Windows=Direct3D 11, Linux=OpenGL, Android/RPi=GLES3, web=WebGPU). OS-specific code lives in `core/platform/{mac,ios,win,linux,android,web}/` (`.mm` Objective-C++ on mac/ios, `.cpp` elsewhere). CMake detects the platform at configure time and links the right sources / backend defines / frameworks, so your app code is platform-agnostic.
+One C++ codebase builds for macOS / Windows / Linux / iOS / Android / web (WebAssembly). The foundation is two layers: **sokol_app_tc** (TrussC's self-contained fork of sokol_app, since v0.7.0 — same `sapp_*` API plus multi-window) abstracts window creation and input across platforms, and **sokol_gfx** maps drawing to each OS's native graphics API (backend auto-selected: macOS/iOS=Metal, Windows=Direct3D 11, Linux=OpenGL, Android/RPi=GLES3, web=WebGPU). OS-specific code lives in `core/platform/{mac,ios,win,linux,android,web}/` (`.mm` Objective-C++ on mac/ios, `.cpp` elsewhere). CMake detects the platform at configure time and links the right sources / backend defines / frameworks, so your app code is platform-agnostic.
 
 ### How do shaders work across all backends? (sokol-shdc)
 
@@ -1011,6 +1011,10 @@ You don't write event handling from scratch. **RectNode has subscribable mouse e
 - **Subscribe from outside (no subclass)**: `listener_ = button->mousePressed.listen([this](MouseEventArgs& e){ ... });` (keep the returned `EventListener` as a member).
 - **Subclass and override**: `bool onMousePress(const MouseEventArgs& e) override { ...; return true; }`.
 Draw freely in local coordinates around (0,0) — rounded corners, image, shader, fully your own. (For a ready-made look, `RectNodeButton` — a simple color-on-press button with events pre-enabled — is built in.)
+
+### What happens when a mouse handler returns false? (event bubbling)
+
+Since v0.7.0, `press` / `release` / `move` **bubble up the parent chain** exactly like `scroll` always has: the front-most hit node gets the event first, and if its handler returns `false` the event is re-localized and offered to the parent, then the grandparent, until someone returns `true` (consumes). **The first node that consumes a press becomes the grab target** — it receives the drag events and the matching release, even if the pointer leaves it. `RectNode`'s built-in handlers return `true` by default, so ready-made widgets swallow clicks as before; return `false` from an override to make a node "transparent" to input (e.g. a decorative label on top of a clickable panel — the label draws but the panel gets the click). Hover (enter/leave) does not bubble; it stays on the front-most node only.
 
 ## Events (loose coupling)
 
@@ -2012,7 +2016,7 @@ float atanh(float x) [std]  // Inverse hyperbolic tangent
 Baseline  // Direction shorthand for Direction::Baseline (text baseline)
 Bottom  // Direction shorthand for Direction::Bottom
 Center  // Direction shorthand for Direction::Center
-std::shared_ptr<Window> createWindow(const WindowSettings & settings = {}) [macos,windows,linux]  // Create a secondary window (macOS only for now; returns nullptr elsewhere). It runs on its own display link; closing it leaves the app running
+std::shared_ptr<Window> createWindow(const WindowSettings & settings = {}) [macos,windows,linux]  // Create a secondary window (macOS / Windows / desktop Linux; returns nullptr on single-window platforms). It ticks on its own display's vsync; closing it leaves the app running. Give it content with Window::setApp()
 const char * enumLabel(E value)  // Return the display string for one enum value (TC_ENUM_LABELS override, else reflected name).
 const std::array<std::string_view, internal::enumValidCount<E> enumNames()  // Return a compile-time array of all valid enumerator names of E.
 EnumLabelSpan enumReflectedSpan()  // Return an EnumLabelSpan synthesized from reflection (valid for contiguous zero-based enums).
@@ -3197,7 +3201,7 @@ float RectNode::getWidth() const  // Get the node width (RectNode method) (C++ o
 bool RectNode::hitTest(const Ray & localRay, float & outDistance) [+1]  // Hit-test the rectangle against a ray (with out distance) or a 2D point (RectNode method) (C++ only)
 bool RectNode::isClipping() const  // Whether scissor clipping is enabled (RectNode method) (C++ only)
 bool RectNode::onMouseDrag(const MouseDragEventArgs & e)  // Fire the mouseDragged event and forward to the legacy simple-form hook.
-bool RectNode::onMousePress(const MouseEventArgs & e)  // Fire the mousePressed event and forward to the legacy simple-form hook.
+bool RectNode::onMousePress(const MouseEventArgs & e)  // Fire the mousePressed event and forward to the legacy simple-form hook. Returns true (consume); return false from an override to bubble the press to the parent chain — the consumer becomes the drag/release grab target.
 bool RectNode::onMouseRelease(const MouseEventArgs & e)  // Fire the mouseReleased event and forward to the legacy simple-form hook.
 bool RectNode::onMouseScroll(const ScrollEventArgs & e)  // Fire the scroll event; returns false to allow bubbling to a parent (e.g. ScrollContainer).
 void RectNode::onSizeChanged()  // Callback invoked when the rect's size changes.

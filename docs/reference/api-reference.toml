@@ -10968,9 +10968,9 @@ keywords = ["internal"]
 
 ["createWindow"]
 keywords = ["multi window", "second window", "open window", "display"]
-description.en = "Create a secondary window (macOS only for now; returns nullptr elsewhere). It runs on its own display link; closing it leaves the app running"
-description.ja = "セカンダリウィンドウを作成 (現状macOSのみ、他プラットフォームはnullptr)。専用のdisplay linkで駆動され、閉じてもアプリは動き続ける"
-description.ko = "보조 윈도우를 생성 (현재 macOS 전용, 다른 플랫폼은 nullptr). 전용 display link로 구동되며 닫아도 앱은 계속 실행됨"
+description.en = "Create a secondary window (macOS / Windows / desktop Linux; returns nullptr on single-window platforms). It ticks on its own display's vsync; closing it leaves the app running. Give it content with Window::setApp()"
+description.ja = "セカンダリウィンドウを作成 (macOS / Windows / デスクトップLinux。シングルウィンドウのプラットフォームでは nullptr)。ウィンドウ自身のディスプレイのvsyncで駆動され、閉じてもアプリは動き続ける。中身は Window::setApp() で与える"
+description.ko = "보조 윈도우를 생성 (macOS / Windows / 데스크톱 Linux, 단일 윈도우 플랫폼에서는 nullptr). 해당 디스플레이의 vsync로 구동되며 닫아도 앱은 계속 실행됨. 내용은 Window::setApp()으로 부여"
 related = ["Window", "WindowSettings"]
 
 ["WindowSettings"]
@@ -14290,9 +14290,9 @@ related = ["getBitmapLineHeight"]
 category = "graphics_style"
 keywords = ["additive", "multiply", "transparency", "compositing", "ofenableblendmode"]
 of = ["ofEnableBlendMode"]
-description.en = "Set blend mode. BlendMode::Alpha (default), Add, Multiply, Screen, Subtract, Disabled"
-description.ja = "ブレンドモードを設定。BlendMode::Alpha（デフォルト）, Add, Multiply, Screen, Subtract, Disabled"
-description.ko = "블렌드 모드를 설정. BlendMode::Alpha (기본값), Add, Multiply, Screen, Subtract, Disabled"
+description.en = "Set blend mode. BlendMode::Alpha (default), Add, Multiply, Screen, Subtract, Disabled. Works on the screen and inside Fbo passes alike; the mode persists until changed (it also carries into a subsequent Fbo::begin)"
+description.ja = "ブレンドモードを設定。BlendMode::Alpha（デフォルト）, Add, Multiply, Screen, Subtract, Disabled。画面・Fboパス内のどちらでも有効で、変更するまで持続する（Fbo::begin をまたいでも引き継がれる）"
+description.ko = "블렌드 모드를 설정. BlendMode::Alpha (기본값), Add, Multiply, Screen, Subtract, Disabled. 화면과 Fbo 패스 안에서 동일하게 동작하며, 변경할 때까지 유지됨 (이후의 Fbo::begin에도 이어짐)"
 related = ["BlendMode", "getBlendMode", "clear"]
 
 ["setCameraPosition"]
