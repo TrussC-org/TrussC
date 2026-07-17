@@ -82,6 +82,7 @@ private:
     void sendHandshake();
     void processHandshake(const std::string& header);
     void processFrame();
+    void sendPong(const std::vector<char>& payload);
 
     std::unique_ptr<TcpClient> client_;
     EventListener receiveListener_;
