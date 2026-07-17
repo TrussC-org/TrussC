@@ -51,6 +51,19 @@ macro(_tc_load_addon _ADDON_NAME)
             _tc_auto_addon(${_ADDON_NAME} "${_ADDON_PATH}")
         endif()
 
+        # Keep TrussC.h's /subsystem:windows pragma out of addon library objects
+        # (see the guard in TrussC.h): a single such .drectve in a linked static
+        # lib overrides the command-line /SUBSYSTEM and flips a console tool to
+        # the GUI subsystem. This is the one chokepoint every addon passes through
+        # regardless of how its target was created (own CMakeLists or auto). Skip
+        # header-only INTERFACE addons — they compile no TUs of their own.
+        if(WIN32 AND TARGET ${_ADDON_NAME})
+            get_target_property(_TC_ADDON_TYPE ${_ADDON_NAME} TYPE)
+            if(NOT _TC_ADDON_TYPE STREQUAL "INTERFACE_LIBRARY")
+                target_compile_definitions(${_ADDON_NAME} PRIVATE TRUSSC_LIBRARY_TU)
+            endif()
+        endif()
+
         list(APPEND _TC_LOADED_ADDONS ${_ADDON_NAME})
         set(_TC_LOADED_ADDONS "${_TC_LOADED_ADDONS}" CACHE INTERNAL "List of loaded TrussC addons")
     endif()

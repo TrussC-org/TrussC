@@ -97,6 +97,39 @@ This ensures:
 - User projects work when you move just the project folder
 - No complex relative path calculations needed
 
+### Windows Subsystem: console tools vs GUI apps
+
+On Windows every executable is stamped with a **subsystem** that decides how it
+attaches to a launching terminal. A `WINDOWS` (GUI) image detaches immediately —
+`cmd` returns to the prompt, closing the console window doesn't kill it and sends
+no `CTRL_CLOSE` — while a `CONSOLE` image keeps its terminal (stdout is visible,
+`Ctrl+C` / window-close reach it).
+
+- **GUI apps (default).** In Release, `TrussC.h` emits
+  `#pragma comment(linker, "/subsystem:windows /entry:mainCRTStartup")` so a
+  double-clicked app never flashes a console. The pragma fires from the **app's
+  own** translation units.
+- **Console tools.** Define `TRUSSC_SHOW_CONSOLE` (in `local.cmake`, which
+  survives `trusscli update`) to suppress that pragma in the app's TUs, leaving
+  the default console subsystem — how `trusscli` itself builds.
+  ```cmake
+  # local.cmake
+  if(WIN32)
+      target_compile_definitions(${PROJECT_NAME} PRIVATE TRUSSC_SHOW_CONSOLE)
+  endif()
+  ```
+
+**Why libraries must not carry the pragma.** A `#pragma comment(linker, ...)` in
+a *library* object (core TrussC or an addon) rides into the final link via that
+object's `.drectve` section, and for `/subsystem` a `.drectve` directive
+**overrides the command-line `/SUBSYSTEM`**. So a single GUI-header-including
+addon (e.g. `tcxWebSocket`) would silently turn a console tool back into a GUI
+app. To prevent that the build defines `TRUSSC_LIBRARY_TU` (PRIVATE) on the core
+lib and on every addon target, and the pragma is gated on
+`!defined(TRUSSC_LIBRARY_TU)`. Net effect: the subsystem is decided **only by the
+app's own TUs** — GUI by default, console when the app defines
+`TRUSSC_SHOW_CONSOLE` — no matter which addons it links.
+
 ---
 
 ## 4. API Design
