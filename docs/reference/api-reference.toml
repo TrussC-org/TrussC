@@ -14290,9 +14290,9 @@ related = ["getBitmapLineHeight"]
 category = "graphics_style"
 keywords = ["additive", "multiply", "transparency", "compositing", "ofenableblendmode"]
 of = ["ofEnableBlendMode"]
-description.en = "Set blend mode. BlendMode::Alpha (default), Add, Multiply, Screen, Subtract, Disabled"
-description.ja = "ブレンドモードを設定。BlendMode::Alpha（デフォルト）, Add, Multiply, Screen, Subtract, Disabled"
-description.ko = "블렌드 모드를 설정. BlendMode::Alpha (기본값), Add, Multiply, Screen, Subtract, Disabled"
+description.en = "Set blend mode. BlendMode::Alpha (default), Add, Multiply, Screen, Subtract, Disabled. Works on the screen and inside Fbo passes alike; the mode persists until changed (it also carries into a subsequent Fbo::begin)"
+description.ja = "ブレンドモードを設定。BlendMode::Alpha（デフォルト）, Add, Multiply, Screen, Subtract, Disabled。画面・Fboパス内のどちらでも有効で、変更するまで持続する（Fbo::begin をまたいでも引き継がれる）"
+description.ko = "블렌드 모드를 설정. BlendMode::Alpha (기본값), Add, Multiply, Screen, Subtract, Disabled. 화면과 Fbo 패스 안에서 동일하게 동작하며, 변경할 때까지 유지됨 (이후의 Fbo::begin에도 이어짐)"
 related = ["BlendMode", "getBlendMode", "clear"]
 
 ["setCameraPosition"]
