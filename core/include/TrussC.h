@@ -560,10 +560,11 @@ inline void popScissor() {
 
 // Set blend mode
 // Alpha channel is additive in all modes (to prevent transparency when drawing to FBO)
+// Works on the swapchain AND inside an Fbo pass: active2D() resolves the
+// pipeline against the current render target, so each target lazily gets a
+// pipeline matching its own color format / sample count.
 inline void setBlendMode(BlendMode mode) {
     if (internal::currentWindowContext().swapchainTarget.context.id == 0) return;  // renderer not set up yet
-    // Skip in FBO - FBO uses its own pipeline
-    if (internal::currentWindowContext().inFboPass) return;
     internal::currentWindowContext().currentBlendMode = mode;
     internal::loadPipeline(internal::active2D(mode));
 }
@@ -580,7 +581,7 @@ inline void resetBlendMode() {
 
 // Restore current blend mode pipeline (use after temporary pipeline changes)
 inline void restoreBlendPipeline() {
-    internal::loadPipeline(internal::active2D(internal::currentWindowContext().currentBlendMode));
+    internal::restoreCurrentPipeline();
 }
 
 // ---------------------------------------------------------------------------
@@ -1310,9 +1311,7 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     sgl_disable_texture();
 
     // Restore current blend pipeline (not default, which has blend disabled).
-    // FBO uses its accumulating Fill2D; swapchain honors the current blend mode.
-    internal::loadPipeline(internal::currentWindowContext().inFboPass ? internal::activeFill2D()
-                                               : internal::active2D(internal::currentWindowContext().currentBlendMode));
+    internal::restoreCurrentPipeline();
 
     // Restore matrices
     sgl_pop_matrix();
