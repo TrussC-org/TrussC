@@ -355,6 +355,31 @@ inline std::string toBase64(const std::string& bytes) {
     return toBase64(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size());
 }
 
+inline std::vector<unsigned char> fromBase64(const std::string& encoded) {
+    auto val = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') return c - 'A';
+        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+        if (c >= '0' && c <= '9') return c - '0' + 52;
+        if (c == '+') return 62;
+        if (c == '/') return 63;
+        return -1;   // '=' padding, whitespace, and anything else: skipped
+    };
+    std::vector<unsigned char> out;
+    out.reserve(encoded.size() * 3 / 4);
+    int buf = 0, bits = 0;
+    for (char c : encoded) {
+        int v = val(c);
+        if (v < 0) continue;
+        buf = (buf << 6) | v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push_back((unsigned char)((buf >> bits) & 0xFF));
+        }
+    }
+    return out;
+}
+
 // ---------------------------------------------------------------------------
 // String Operations
 // ---------------------------------------------------------------------------

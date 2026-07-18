@@ -229,6 +229,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const std::vector<unsigned char> & bytes) { return trussc::toBase64(bytes); },
         [](const std::string & bytes) { return trussc::toBase64(bytes); }
     ));
+    lua->set_function("fromBase64", [](const std::string & encoded) { return trussc::fromBase64(encoded); });
     lua->set_function("isStringInString", [](const std::string & haystack, const std::string & needle) { return trussc::isStringInString(haystack, needle); });
     lua->set_function("stringTimesInString", [](const std::string & haystack, const std::string & needle) { return trussc::stringTimesInString(haystack, needle); });
     lua->set_function("splitString", sol::overload(
