@@ -1346,6 +1346,17 @@ int main(int argc, char** argv) {
 ```
 If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp()` (immediate) / `requestExitApp()` (cancellable).
 
+### Windows: my console tool detaches from cmd / keeps running after I close the console — how do I make it a real console app?
+
+That happens because the exe was linked as the Windows **GUI** subsystem — the TrussC default, so a double-clicked GUI app never flashes a console. A GUI image returns to the `cmd` prompt immediately, ignores `Ctrl+C`, and gets no `CTRL_CLOSE` when its console window closes (so a supervisor loop keeps running in the background). For a CLI/console tool you want the **console** subsystem instead: define `TRUSSC_SHOW_CONSOLE` in `local.cmake` (it survives `trusscli update`, unlike the generated `CMakeLists.txt`):
+```cmake
+# local.cmake
+if(WIN32)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE TRUSSC_SHOW_CONSOLE)
+endif()
+```
+That is the whole procedure — no linker flags, no per-addon steps. In particular you do **not** need to do anything about addons: the core lib and every addon are compiled with `TRUSSC_LIBRARY_TU`, so their objects never inject `/subsystem:windows`, and your tool links as console even when it uses GUI-header-including addons (e.g. `tcxWebSocket`). Verify with `dumpbin /headers app.exe | findstr subsystem` — you want `Windows CUI` (console), not `Windows GUI`. Mechanism: ARCHITECTURE.md §3.5 "Windows Subsystem".
+
 ## "I want to X" — which API?
 
 ### "I want to save / load / communicate" → which API?

@@ -146,6 +146,15 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${TC_ALL_SOURCES})
 
 add_library(TrussC STATIC ${TC_ALL_SOURCES})
 
+# PRIVATE (not PUBLIC): the core lib's own TUs must not emit TrussC.h's
+# /subsystem:windows pragma — a library .drectve overrides the command-line
+# /SUBSYSTEM and would flip console tools to the GUI subsystem. The app's own
+# TUs never get this define, so GUI apps still pin /subsystem:windows. Addons
+# get the same treatment in use_addon.cmake.
+if(WIN32)
+    target_compile_definitions(TrussC PRIVATE TRUSSC_LIBRARY_TU)
+endif()
+
 add_library(tc::TrussC ALIAS TrussC)
 
 # Bake the git-derived version into tc::getVersion() (tcVersion.h).

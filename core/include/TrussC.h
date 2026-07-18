@@ -5,8 +5,17 @@
 // =============================================================================
 
 // Windows: Hide console window (in Release builds)
-// Define TRUSSC_SHOW_CONSOLE to always show console
-#if defined(_WIN32) && !defined(_DEBUG) && !defined(TRUSSC_SHOW_CONSOLE)
+// Define TRUSSC_SHOW_CONSOLE to always show console.
+//
+// This must fire ONLY in the app's own translation units, never in a library
+// (core TrussC or an addon static lib). A library object that emits the
+// /subsystem:windows directive forces the GUI subsystem onto the final image via
+// its .drectve, which overrides the command-line /SUBSYSTEM — so a single
+// GUI-header-including library (core, or e.g. a networking addon) would silently
+// turn a console tool into a GUI app that detaches from its launcher. The build
+// defines TRUSSC_LIBRARY_TU when compiling the TrussC lib and every addon; the
+// app's own main TU has neither define, so GUI apps still pin /subsystem:windows.
+#if defined(_WIN32) && !defined(_DEBUG) && !defined(TRUSSC_SHOW_CONSOLE) && !defined(TRUSSC_LIBRARY_TU)
 #pragma comment(linker, "/subsystem:\"windows\" /entry:\"mainCRTStartup\"")
 #endif
 
