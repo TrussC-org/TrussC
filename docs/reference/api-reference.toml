@@ -15022,7 +15022,18 @@ keywords = ["base64", "encode", "encoding", "bytes"]
 description.en = "Encode raw bytes as a Base64 string"
 description.ja = "生バイトを Base64 文字列にエンコード"
 description.ko = "raw 바이트를 Base64 문자열로 인코딩"
-related = ["compress", "toBinary"]
+related = ["compress", "toBinary", "fromBase64"]
+
+["fromBase64"]
+category = "utility"
+keywords = ["base64", "decode", "decoding", "bytes", "binary"]
+description.en = "Decode a Base64 string back into raw bytes"
+description.ja = "Base64 文字列を生バイトにデコード"
+description.ko = "Base64 문자열을 raw 바이트로 디코딩"
+details.en = "The counterpart of toBase64. Padding ('='), whitespace, and any other non-alphabet characters are skipped, so line-wrapped or MIME-style input decodes fine. To turn decoded image bytes into a picture, combine with Image::loadFromMemory."
+details.ja = "toBase64 の対になる関数。パディング（'='）・空白・その他のアルファベット外文字は読み飛ばすので、改行入りや MIME 形式の入力もそのままデコードできます。デコードした画像バイト列を絵にするには Image::loadFromMemory と組み合わせてください。"
+details.ko = "toBase64 의 대응 함수입니다. 패딩('='), 공백, 그 외 알파벳 이외의 문자는 건너뛰므로 줄바꿈이 있거나 MIME 형식인 입력도 그대로 디코딩됩니다. 디코딩한 이미지 바이트를 그림으로 만들려면 Image::loadFromMemory 와 조합하세요."
+related = ["toBase64", "decompress"]
 
 ["toBinary"]
 category = "utility"
