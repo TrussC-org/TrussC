@@ -4426,11 +4426,26 @@ Sound sfx = bundle.build();
 ## Common Pitfalls
 1. **Color is 0–1, not 0–255.** Use `Color::fromBytes()` to convert.
 2. **Angles use TAU (2π), not PI.** Half turn = `TAU * 0.5`.
-3. **Use `destroy()` for nodes.** Don't erase from vectors directly.
+3. **Use `destroy()` for nodes.** It defers removal to the end of the update cycle and is safe from any thread; `removeChild()` erases immediately. Check `isDead()` to skip destroyed nodes.
 4. **`enableEvents()` required** for Node to receive mouse events.
-5. **`drawLine()` is always 1px.** Use `drawStroke()` or `beginStroke()/endStroke()` for thick lines.
+5. **`drawLine()` is always 1px** (there is no `setLineWidth()`). Use `drawStroke()` or `beginStroke()/endStroke()` for thick lines.
 6. **Inside `Node::draw()`, coordinates are local.** Already translated to node position.
-7. **Texture update once per frame.** `loadData()`/`update()` ignored on second call.
+7. **Texture update once per frame.** `loadData()`/`update()` on the same frame logs a warning and is skipped (sokol limitation).
+8. **Letter keys are UPPERCASE.** `keyPressed(int key)` receives sokol keycodes: `key == 'A'`, never `'a'` (`'a'` = 97 never matches).
+9. **GPU classes are main-thread only.** `Image` / `Texture` / `Fbo` / `Font` call into sokol; using them on a background thread crashes (no framework assert catches it). Load `Pixels` on the background thread, create the `Image`/`Texture` on the main thread.
+10. **`Pixels` / `Image` / `Texture` are non-copyable** (deleted copy ctor). Use `std::move()`, or `Pixels::clone()` for a deep copy.
+11. **Create nodes with `make_shared<>()`.** `addChild()` asserts if the node isn't owned by a `shared_ptr`.
+12. **Never `addChild()` in a constructor** — `weak_from_this()` isn't valid until the `shared_ptr` exists (debug builds assert with "move to setup()"). Do it in the node's `setup()` override.
+13. **Event-driven draw needs `redraw()`.** With `setIndependentFps(updateFps, EVENT_DRIVEN)`, draw runs only when `redraw()` was called — forgetting it looks like a frozen screen.
+14. **Prefer `Event<T>` + `EventListener` over raw `function<>` callbacks.** `EventListener` is RAII: it auto-disconnects on destruction, so no dangling-callback crashes.
+15. **`LayoutMod` never auto-relayouts.** Call `updateLayout()` after adding/removing/resizing children (property setters like `setSpacing()` do trigger it).
+16. **`getGlobalPos()` returns `Vec3`** — the node's origin in global space, shorthand for `localToGlobal(Vec3(0,0,0))`.
+17. **Unqualified `random()` may resolve to POSIX `::random()`** and compile to the wrong thing silently. Write `tc::random(min, max)` explicitly; there is no `randomf`.
+18. **EasyCam starts at elevation 0** — a true side-on view, so flat scenes (ground planes, orbits) look like a line on first launch. Set `cam.setElevation(...)` / `setAzimuth(...)` explicitly.
+19. **EasyCam `enableMouseInput()` eats every left press.** It consumes the press as orbit-start during `events().mousePressed`, and node-tree dispatch only runs when the event wasn't consumed — all Node mouse handlers silently stop working (app-level `mousePressed()` still fires, which is confusing). With clickable nodes, use `setOrbitButton(MOUSE_BUTTON_RIGHT)` or `setDragModifier(...)` instead.
+20. **`setBlendMode()` inside a 3D scene kills depth.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). There is no public API to re-enable depth mid-scene — structure the draw order instead: render all depth-tested 3D first, blended overlays/effects last; if you need 3D again after changing the blend mode, start a new camera scope (`EasyCam::begin()` reloads the depth-enabled 3D pipeline).
+21. **IBL no-ops on iOS Safari (wasm).** `Environment::loadProcedural()`/`loadFromHDR()` return false on iOS web (the cube-face bake breaks the canvas swapchain there); PBR falls back to flat hemisphere ambient + direct lights. Don't rely on IBL reflections for cross-platform looks if you target iOS web. Native, desktop web, and Android web are unaffected.
+22. **Don't hand-parse JSON/XML.** `tc::Json` (nlohmann) and `tc::Xml` (pugixml) are bundled and included via `<TrussC.h>` — use `loadJson`/`parseJson`/`loadXml`/`parseXml`.
 
 ## Code Examples
 
