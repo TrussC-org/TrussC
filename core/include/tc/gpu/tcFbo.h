@@ -222,8 +222,8 @@ public:
         // on the swapchain, which saves and restores it).
         sgl_defaults();
         internal::restoreCurrentPipeline();
-        sgl_matrix_mode_projection();
-        sgl_ortho(0.0f, (float)width_, (float)height_, 0.0f, -10000.0f, 10000.0f);
+        internal::sglLoadProjection(
+            internal::screen2DProjection((float)width_, (float)height_));
         sgl_matrix_mode_modelview();
         sgl_load_identity();
     }

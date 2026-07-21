@@ -221,8 +221,8 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
         sgl_matrix_mode_projection();
         sgl_push_matrix();
 
-        sgl_load_identity();
-        sgl_ortho(-1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f);
+        internal::sglLoadProjection(internal::toBackendClip(
+            Mat4::ortho(-1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f)));
         sgl_matrix_mode_modelview();
         sgl_load_identity();
 

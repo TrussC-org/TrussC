@@ -19,6 +19,7 @@
 #include <memory>
 #include <vector>
 #include "tc/math/tcRay.h"
+#include "tc/graphics/tcClipSpace.h"
 
 namespace trussc {
 
@@ -35,8 +36,10 @@ public:
     bool  pickable = true;
 
     // Unproject a screen point (pixels, top-left origin) into a world-space
-    // ray. Same unprojection scheme as screenToWorld(): near plane (NDC z=-1)
-    // to mid depth (z=0, which avoids precision issues with a large far clip).
+    // ray. Same unprojection scheme as screenToWorld(): near plane to mid
+    // depth (mid instead of far avoids precision issues with a large far
+    // clip). NDC z values come from the backend's clip-space convention —
+    // `projection` is stored backend-native (#134).
     Ray screenPointToRay(float screenX, float screenY) const {
         if (viewW <= 0.0f || viewH <= 0.0f) {
             return Ray::fromScreenPoint2D(screenX, screenY);
@@ -47,8 +50,8 @@ public:
         float ndcY = 1.0f - (screenY / viewH) * 2.0f;
 
         Mat4 invMvp = (projection * view).inverted();
-        Vec4 nearClip = invMvp * Vec4(ndcX, ndcY, -1.0f, 1.0f);
-        Vec4 midClip  = invMvp * Vec4(ndcX, ndcY,  0.0f, 1.0f);
+        Vec4 nearClip = invMvp * Vec4(ndcX, ndcY, internal::ndcNearZ(), 1.0f);
+        Vec4 midClip  = invMvp * Vec4(ndcX, ndcY, internal::ndcMidZ(),  1.0f);
         if (std::abs(nearClip.w) < 1e-7f || std::abs(midClip.w) < 1e-7f) {
             return Ray::fromScreenPoint2D(screenX, screenY);
         }
@@ -66,7 +69,7 @@ public:
         Vec3 ndc(clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
         return Vec3((ndc.x + 1.0f) * 0.5f * viewW,
                     (1.0f - ndc.y) * 0.5f * viewH,
-                    (ndc.z + 1.0f) * 0.5f);
+                    internal::depthFromNdcZ(ndc.z));
     }
 };
 

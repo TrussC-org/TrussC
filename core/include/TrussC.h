@@ -68,6 +68,9 @@
 // TrussC ray (for hit testing)
 #include "tc/math/tcRay.h"
 
+// Clip-space Z convention helpers (single source of truth, #134)
+#include "tc/graphics/tcClipSpace.h"
+
 // Camera snapshot for draw-time stamping & picking
 #include "tc/graphics/tcCameraContext.h"
 
@@ -609,14 +612,12 @@ inline void enable3D() {
 [[deprecated("Use setupScreenPerspective(fovDeg) or setupScreenFov(fovDeg) instead. Note: FOV is now in degrees, not radians.")]]
 inline void enable3DPerspective(float fovY = 0.785f, float nearZ = 0.1f, float farZ = 1000.0f) {
     internal::loadPipeline(internal::active3D());   // format-correct 3D for the active target
-    // Set perspective projection
-    sgl_matrix_mode_projection();
-    sgl_load_identity();
+    // Set perspective projection (backend-native clip-z, #134)
     float dpiScale = sapp_dpi_scale();
     float w = (float)sapp_width() / dpiScale;
     float h = (float)sapp_height() / dpiScale;
     float aspect = w / h;
-    sgl_perspective(fovY, aspect, nearZ, farZ);
+    internal::sglLoadProjection(internal::toBackendClip(Mat4::perspective(fovY, aspect, nearZ, farZ)));
     sgl_matrix_mode_modelview();
     sgl_load_identity();
 }
@@ -656,12 +657,16 @@ namespace internal {
             sgl_defaults();
             // 2D alpha pipeline for the active target (swapchain or FBO).
             loadPipeline(activeFill2D());
-            sgl_matrix_mode_projection();
             // Ortho volume CENTERED on the camera: the lookat below moves the
             // world center to the view origin, so the volume must span
             // [-W/2, W/2] x [H/2, -H/2] (Y flipped) — a [0, W] x [H, 0] volume
             // here double-offsets everything by half a screen.
-            sgl_ortho(-viewW / 2.0f, viewW / 2.0f, viewH / 2.0f, -viewH / 2.0f, -farDist, farDist);
+            // Built as a Mat4 and remapped to the backend's clip-z convention
+            // (#134); the SAME matrix is stored and fed to sgl so the sgl and
+            // mesh (PBR/points) pipelines agree on depth.
+            Mat4 proj = internal::toBackendClip(
+                Mat4::ortho(-viewW / 2.0f, viewW / 2.0f, viewH / 2.0f, -viewH / 2.0f, -farDist, farDist));
+            internal::sglLoadProjection(proj);
             sgl_matrix_mode_modelview();
             sgl_load_identity();
             // Camera position (for consistent Z behavior with perspective)
@@ -672,7 +677,7 @@ namespace internal {
             );
 
             // Save matrices for worldToScreen/screenToWorld
-            internal::currentWindowContext().currentProjectionMatrix = Mat4::ortho(-viewW / 2.0f, viewW / 2.0f, viewH / 2.0f, -viewH / 2.0f, -farDist, farDist);
+            internal::currentWindowContext().currentProjectionMatrix = proj;
             internal::currentWindowContext().currentViewMatrix = Mat4::lookAt(
                 Vec3(eyeX, eyeY, dist),
                 Vec3(eyeX, eyeY, 0.0f),
@@ -685,15 +690,16 @@ namespace internal {
             float aspect = viewW / viewH;
 
             // Set perspective projection with Y-flip for screen coordinates (Y down)
-            sgl_matrix_mode_projection();
-            sgl_load_identity();
             float fovRad = fovDeg * TAU / 360.0f;
             float top = nearDist * tanf(fovRad * 0.5f);
             float bottom = -top;
             float right = top * aspect;
             float left = -right;
-            // Swap top/bottom to flip Y axis (screen coords: Y increases downward)
-            sgl_frustum(left, right, top, bottom, nearDist, farDist);
+            // Swap top/bottom to flip Y axis (screen coords: Y increases
+            // downward). Backend-native clip-z, same reasoning as ortho above.
+            Mat4 proj = internal::toBackendClip(
+                Mat4::frustum(left, right, top, bottom, nearDist, farDist));
+            internal::sglLoadProjection(proj);
 
             // Set view matrix (camera at viewport center, looking at Z=0)
             sgl_matrix_mode_modelview();
@@ -705,7 +711,7 @@ namespace internal {
             );
 
             // Save matrices for worldToScreen/screenToWorld
-            internal::currentWindowContext().currentProjectionMatrix = Mat4::frustum(left, right, top, bottom, nearDist, farDist);
+            internal::currentWindowContext().currentProjectionMatrix = proj;
             internal::currentWindowContext().currentViewMatrix = Mat4::lookAt(
                 Vec3(eyeX, eyeY, dist),
                 Vec3(eyeX, eyeY, 0.0f),
@@ -797,11 +803,11 @@ inline Vec3 worldToScreen(const Vec3& worldPos) {
     }
     Vec3 ndc(clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
 
-    // NDC [-1, 1] to screen coordinates
+    // NDC to screen coordinates (x, y are [-1, 1] under every convention)
     // Note: NDC Y is up (+1=top), screen Y is down (+Y=bottom), so flip Y
     float screenX = (ndc.x + 1.0f) * 0.5f * viewW;
     float screenY = (1.0f - ndc.y) * 0.5f * viewH;  // Flip Y for screen coordinates
-    float depth = (ndc.z + 1.0f) * 0.5f;  // Normalize depth to [0, 1]
+    float depth = internal::depthFromNdcZ(ndc.z);   // convention-aware [0, 1] depth
 
     return Vec3(screenX, screenY, depth);
 }
@@ -824,10 +830,11 @@ inline Vec3 screenToWorld(const Vec2& screenPos, float worldZ = 0.0f) {
     Mat4 mvp = internal::currentWindowContext().currentProjectionMatrix * internal::currentWindowContext().currentViewMatrix;
     Mat4 invMvp = mvp.inverted();
 
-    // Unproject two points: near plane (z=-1) and a middle point (z=0)
-    // Using z=0 instead of z=1 (far) to avoid precision issues with large far clip
-    Vec4 nearClip = invMvp * Vec4(ndcX, ndcY, -1.0f, 1.0f);
-    Vec4 midClip = invMvp * Vec4(ndcX, ndcY, 0.0f, 1.0f);
+    // Unproject two points: near plane and a middle point (mid instead of far
+    // to avoid precision issues with large far clip). NDC z values depend on
+    // the backend's clip-space convention.
+    Vec4 nearClip = invMvp * Vec4(ndcX, ndcY, internal::ndcNearZ(), 1.0f);
+    Vec4 midClip = invMvp * Vec4(ndcX, ndcY, internal::ndcMidZ(), 1.0f);
 
     // Perspective division (use smaller threshold for numerical stability)
     if (std::abs(nearClip.w) < 1e-7f || std::abs(midClip.w) < 1e-7f) {
@@ -1270,8 +1277,8 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     // Switch to ortho projection (same coordinate system as drawBitmapString)
     sgl_matrix_mode_projection();
     sgl_push_matrix();
-    sgl_load_identity();
-    sgl_ortho(0.0f, internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH, 0.0f, -10000.0f, 10000.0f);
+    internal::sglLoadProjection(internal::screen2DProjection(
+        internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH));
     sgl_matrix_mode_modelview();
     sgl_push_matrix();
     sgl_load_identity();
