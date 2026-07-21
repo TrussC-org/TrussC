@@ -138,17 +138,23 @@ struct GuestLibrary {
 
     void unload() {
         destroy();
+        // Intentionally NOT dlclose()d / FreeLibrary()d: the old guest's code
+        // can still be referenced from host-owned state even after its App is
+        // destroyed -- shared_ptr control blocks it allocated (e.g. the COW
+        // listener list inside Event<T> after this App's listeners were
+        // removed), std::function invokers, vtables/typeinfo. Unmapping the
+        // image turns any such leftover into a jump into unmapped memory
+        // (observed: SEGV in Event::listenImpl releasing the previous list
+        // snapshot on the first reload). Leaking ~one guest image per reload
+        // is the standard hot-reload trade-off and is bounded by dev usage.
         if (handle) {
-#ifdef _WIN32
-            FreeLibrary(handle);
-#else
-            dlclose(handle);
-#endif
             handle = nullptr;
-            // Remove the per-load temp copy. On Linux this is safe even if
-            // dlclose didn't fully unload: unlink just drops the directory
-            // entry — the mmap'd pages stay alive until the OS releases them.
+#ifndef _WIN32
+            // POSIX: unlinking the mapped temp copy is safe (drops the
+            // directory entry only). Windows can't delete a loaded DLL, so
+            // temp copies remain until the next run cleans them up.
             try { fs::remove(loadedPath); } catch (...) {}
+#endif
         }
         createApp = nullptr;
         destroyApp = nullptr;
