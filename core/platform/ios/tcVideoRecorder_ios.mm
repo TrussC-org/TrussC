@@ -37,6 +37,11 @@ using internal::VideoWriterPlatformData;
 
 bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
                                float fps, const VideoRecordSettings& settings) {
+    if (settings.audio) {
+        logWarning("VideoWriter")
+            << "audio recording is not supported on this platform yet - "
+               "recording video only";
+    }
     @autoreleasepool {
         NSString* codecKey = AVVideoCodecTypeH264;
         AVFileType fileType = AVFileTypeMPEG4;
@@ -149,6 +154,9 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
         return true;
     }
 }
+
+// Audio track is macOS-only for now; the header degrades to video-only.
+bool VideoWriter::appendAudioPlatform(const float*, int, double) { return false; }
 
 bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     VideoWriterPlatformData* pd = platform_;

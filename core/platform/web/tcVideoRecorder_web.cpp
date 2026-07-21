@@ -31,6 +31,9 @@ bool VideoWriter::openPlatform(const std::string&, int, int, float,
     return false;
 }
 
+// Audio track is macOS-only for now; the header degrades to video-only.
+bool VideoWriter::appendAudioPlatform(const float*, int, double) { return false; }
+
 bool VideoWriter::appendPlatform(const unsigned char*, double) { return false; }
 
 void VideoWriter::closePlatform() {}
