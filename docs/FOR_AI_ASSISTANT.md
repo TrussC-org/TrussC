@@ -1154,7 +1154,7 @@ Pass the length in seconds: `startRecording("out.mp4", 3.0f)` records exactly 3 
 
 ### Can the screen recording include the app's audio? (VideoRecordSettings.audio)
 
-Yes — set `audio = true` and the recording gains an AAC track of the engine's master mix (macOS and Windows; Linux warns and records video-only):
+Yes — set `audio = true` and the recording gains an AAC track of the engine's master mix (macOS / Windows / Linux; Linux needs a GStreamer AAC encoder — gst-libav or gst-plugins-bad — and warns + records video-only without one):
 
 ```cpp
 VideoRecordSettings s;

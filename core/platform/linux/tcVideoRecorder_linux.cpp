@@ -44,10 +44,14 @@ namespace trussc {
 namespace internal {
 struct VideoWriterPlatformData {
     GstElement* pipeline = nullptr;
-    GstElement* appsrc   = nullptr;  // borrowed (owned by pipeline)
+    GstElement* appsrc   = nullptr;  // video source (we hold a ref)
+    GstElement* audiosrc = nullptr;  // audio source (we hold a ref); null = video-only
     int    width  = 0;
     int    height = 0;
     double fps    = 30.0;
+    bool   hasAudio = false;
+    int    audioRate = 0;
+    int    audioChannels = 0;
     bool   failed = false;
 };
 }  // namespace internal
@@ -246,11 +250,6 @@ void configureKeyframeInterval(GstElement* enc, int frames) {
 // ---------------------------------------------------------------------------
 bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
                                float fps, const VideoRecordSettings& settings) {
-    if (settings.audio) {
-        logWarning("VideoWriter")
-            << "audio recording is not supported on this platform yet - "
-               "recording video only";
-    }
     // Resolve the codec to an encoder plan. H.264 and HEVC are supported via
     // GStreamer; ProRes is AVFoundation-only (macOS), so reject it clearly
     // rather than silently writing a different format than requested.
@@ -267,6 +266,35 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     if (!gstInitialized) {
         gst_init(nullptr, nullptr);
         gstInitialized = true;
+    }
+
+    // Audio track: pick the first AAC encoder available on this system. All of
+    // these are software encoders that initialize reliably when installed, so
+    // (unlike the video encoders) a presence check is enough — no probe
+    // pipeline needed. Missing encoder or unusable format degrades to
+    // video-only with a warning, mirroring the mac/win backends.
+    const char* aacEnc = nullptr;
+    if (settings.audio) {
+        if (settings.audioSampleRate > 0 && settings.audioChannels > 0) {
+            static const char* kAacEncoders[] = {
+                "fdkaacenc",   // gst-plugins-bad + libfdk-aac: best quality
+                "voaacenc",    // gst-plugins-bad + vo-aacenc
+                "avenc_aac",   // gst-libav: broadly installed
+                "faac",        // gst-plugins-bad + libfaac
+            };
+            for (const char* cand : kAacEncoders) {
+                if (elementAvailable(cand)) { aacEnc = cand; break; }
+            }
+            if (!aacEnc) {
+                logWarning("VideoWriter")
+                    << "no GStreamer AAC encoder found (install gst-libav or "
+                       "gst-plugins-bad) - recording video only";
+            }
+        } else {
+            logWarning("VideoWriter")
+                << "audio requested but sample rate / channel count are unset "
+                   "- recording video only";
+        }
     }
 
     // Auto-select the most efficient encoder that actually works here: the
@@ -291,6 +319,15 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     desc += opt->segment;
     if (haveParse) { desc += " ! "; desc += plan.parse; }
     desc += " ! mp4mux name=mux ! filesink name=sink";
+    // Audio branch: a second appsrc feeding interleaved float samples through
+    // audioconvert into the AAC encoder, muxed into the same mp4.
+    if (aacEnc) {
+        desc += " appsrc name=asrc ! queue ! audioconvert ! ";
+        desc += aacEnc;
+        desc += " name=aenc";
+        if (elementAvailable("aacparse")) desc += " ! aacparse";
+        desc += " ! mux.";
+    }
 
     GError* err = nullptr;
     GstElement* pipeline = gst_parse_launch(desc.c_str(), &err);
@@ -349,11 +386,47 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
                  "block",        TRUE,
                  nullptr);
 
+    // Audio appsrc: interleaved float32 at the engine's rate/channels;
+    // audioconvert adapts to whatever the AAC encoder negotiates.
+    GstElement* audiosrc = nullptr;
+    if (aacEnc) {
+        audiosrc = gst_bin_get_by_name(GST_BIN(pipeline), "asrc");
+        if (audiosrc) {
+            GstCaps* acaps = gst_caps_new_simple(
+                "audio/x-raw",
+                "format",   G_TYPE_STRING, "F32LE",
+                "layout",   G_TYPE_STRING, "interleaved",
+                "rate",     G_TYPE_INT, settings.audioSampleRate,
+                "channels", G_TYPE_INT, settings.audioChannels,
+                nullptr);
+            gst_app_src_set_caps(GST_APP_SRC(audiosrc), acaps);
+            gst_caps_unref(acaps);
+            g_object_set(audiosrc,
+                         "format",       GST_FORMAT_TIME,
+                         "is-live",      FALSE,
+                         "do-timestamp", FALSE,
+                         "block",        TRUE,
+                         nullptr);
+        }
+        // AAC bitrate (bits/sec on all candidate encoders), best-effort.
+        GstElement* aenc = gst_bin_get_by_name(GST_BIN(pipeline), "aenc");
+        if (aenc) {
+            if (settings.audioBitrate > 0 &&
+                g_object_class_find_property(G_OBJECT_GET_CLASS(aenc),
+                                             "bitrate")) {
+                g_object_set(aenc, "bitrate", (gint)settings.audioBitrate,
+                             nullptr);
+            }
+            gst_object_unref(aenc);
+        }
+    }
+
     if (gst_element_set_state(pipeline, GST_STATE_PLAYING) ==
         GST_STATE_CHANGE_FAILURE) {
         logError("VideoWriter")
             << "could not start pipeline (encoder: " << opt->encName << ")";
         gst_object_unref(appsrc);
+        if (audiosrc) gst_object_unref(audiosrc);
         gst_object_unref(sink);
         gst_object_unref(pipeline);
         return false;
@@ -363,22 +436,57 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     auto* pd = new VideoWriterPlatformData();
     pd->pipeline = pipeline;
     pd->appsrc   = appsrc;  // keep our ref; released in closePlatform()
+    pd->audiosrc = audiosrc;
     pd->width    = w;
     pd->height   = h;
     pd->fps      = (fps > 0) ? fps : 30.0;
+    if (audiosrc) {
+        pd->hasAudio      = true;
+        pd->audioRate     = settings.audioSampleRate;
+        pd->audioChannels = settings.audioChannels;
+    }
     platform_ = pd;
 
     logNotice("VideoWriter")
         << "GStreamer " << plan.label << " encoder: " << opt->encName
-        << (opt->hardware ? " (hardware)" : " (software)");
+        << (opt->hardware ? " (hardware)" : " (software)")
+        << (pd->hasAudio ? std::string(" + AAC audio (") + aacEnc + ")"
+                         : std::string());
     return true;
 }
 
 // ---------------------------------------------------------------------------
-// appendPlatform - push one RGBA8 (top-down) frame into the pipeline
+// appendAudioPlatform - push interleaved float samples into the audio branch
 // ---------------------------------------------------------------------------
-// Audio track is macOS-only for now; the header degrades to video-only.
-bool VideoWriter::appendAudioPlatform(const float*, int, double) { return false; }
+bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
+                                      double timeSec) {
+    VideoWriterPlatformData* pd = platform_;
+    if (!pd || !pd->audiosrc || !pd->hasAudio || pd->failed) return false;
+    if (!interleaved || frames <= 0) return false;
+
+    const gsize size = (gsize)frames * pd->audioChannels * sizeof(float);
+    GstBuffer* buf = gst_buffer_new_allocate(nullptr, size, nullptr);
+    if (!buf) {
+        logError("VideoWriter") << "could not allocate audio buffer";
+        pd->failed = true;
+        return false;
+    }
+    gst_buffer_fill(buf, 0, interleaved, size);
+
+    GST_BUFFER_PTS(buf) = (GstClockTime)(timeSec * GST_SECOND);
+    GST_BUFFER_DURATION(buf) =
+        (GstClockTime)((double)frames / pd->audioRate * GST_SECOND);
+
+    GstFlowReturn ret =
+        gst_app_src_push_buffer(GST_APP_SRC(pd->audiosrc), buf);  // takes ownership
+    if (ret != GST_FLOW_OK) {
+        logError("VideoWriter")
+            << "audio appsrc rejected buffer: " << gst_flow_get_name(ret);
+        pd->failed = true;
+        return false;
+    }
+    return true;
+}
 
 bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     VideoWriterPlatformData* pd = platform_;
@@ -420,8 +528,12 @@ void VideoWriter::closePlatform() {
     if (!pd) return;
 
     if (pd->pipeline && pd->appsrc && !pd->failed) {
-        // Signal EOS so mp4mux writes its moov atom, then wait for the EOS (or
-        // ERROR) to travel the pipeline - otherwise the file is left truncated.
+        // Signal EOS on every source so mp4mux writes its moov atom (the muxer
+        // waits for EOS on ALL its pads), then wait for the EOS (or ERROR) to
+        // travel the pipeline - otherwise the file is left truncated.
+        if (pd->audiosrc) {
+            gst_app_src_end_of_stream(GST_APP_SRC(pd->audiosrc));
+        }
         if (gst_app_src_end_of_stream(GST_APP_SRC(pd->appsrc)) == GST_FLOW_OK) {
             GstBus* bus = gst_element_get_bus(pd->pipeline);
             if (bus) {
@@ -452,6 +564,7 @@ void VideoWriter::closePlatform() {
         gst_element_set_state(pd->pipeline, GST_STATE_NULL);
     }
     if (pd->appsrc)   gst_object_unref(pd->appsrc);
+    if (pd->audiosrc) gst_object_unref(pd->audiosrc);
     if (pd->pipeline) gst_object_unref(pd->pipeline);
 
     delete pd;

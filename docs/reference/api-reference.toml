@@ -10793,9 +10793,9 @@ related = ["startRecording", "VideoCodec", "ScreenRecorder"]
 ["VideoRecordSettings::audio"]
 category = "video"
 keywords = ["sound", "aac", "track", "master mix", "record audio"]
-description.en = "Record the AudioEngine's master mix into the file as an AAC track (macOS and Windows; other platforms warn and record video only). ScreenRecorder also switches the video PTS to the audio device clock, so A/V stay in sync however unstable the frame rate is"
-description.ja = "AudioEngineのマスターミックスをAACトラックとしてファイルに録音する（macOSとWindows。他プラットフォームは警告して映像のみ）。ScreenRecorder は映像PTSもオーディオデバイスクロックに切り替えるため、フレームレートが不安定でもA/Vがズレない"
-description.ko = "AudioEngine의 마스터 믹스를 AAC 트랙으로 파일에 녹음(macOS와 Windows, 다른 플랫폼은 경고 후 영상만 녹화). ScreenRecorder는 영상 PTS도 오디오 디바이스 클럭으로 전환하므로 프레임레이트가 불안정해도 A/V가 어긋나지 않음"
+description.en = "Record the AudioEngine's master mix into the file as an AAC track (macOS/Windows/Linux; other platforms warn and record video only; Linux needs a GStreamer AAC encoder such as gst-libav or gst-plugins-bad). ScreenRecorder also switches the video PTS to the audio device clock, so A/V stay in sync however unstable the frame rate is"
+description.ja = "AudioEngineのマスターミックスをAACトラックとしてファイルに録音する（macOS/Windows/Linux。他プラットフォームは警告して映像のみ。LinuxはGStreamerのAACエンコーダ（gst-libavかgst-plugins-bad）が必要）。ScreenRecorder は映像PTSもオーディオデバイスクロックに切り替えるため、フレームレートが不安定でもA/Vがズレない"
+description.ko = "AudioEngine의 마스터 믹스를 AAC 트랙으로 파일에 녹음(macOS/Windows/Linux, 다른 플랫폼은 경고 후 영상만 녹화, Linux는 GStreamer AAC 인코더(gst-libav 또는 gst-plugins-bad) 필요). ScreenRecorder는 영상 PTS도 오디오 디바이스 클럭으로 전환하므로 프레임레이트가 불안정해도 A/V가 어긋나지 않음"
 related = ["AudioRecorder", "AudioEngine"]
 
 ["VideoRecordSettings::audioBitrate"]
