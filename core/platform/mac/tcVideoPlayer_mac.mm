@@ -53,6 +53,7 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
 @property (nonatomic, assign) BOOL isFinished;
 @property (nonatomic, assign) BOOL hasNewFrame;
 @property (nonatomic, assign) BOOL loop;
+@property (nonatomic, assign) BOOL sizeMismatchWarned;   // warn once per load
 
 // Pixel buffer for C++ side
 @property (nonatomic, assign) unsigned char* pixelBuffer;
@@ -106,6 +107,7 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
         _isFinished = NO;
         _hasNewFrame = NO;
         _loop = NO;
+        _sizeMismatchWarned = NO;
 
         _pixelBuffer = nullptr;
         _pixelBufferSize = 0;
@@ -311,6 +313,7 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
     _isReady = NO;
     _isFinished = NO;
     _hasNewFrame = NO;
+    _sizeMismatchWarned = NO;
 }
 
 - (void)playerDidFinishPlaying:(NSNotification*)notification {
@@ -346,13 +349,26 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
             size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
             unsigned char* baseAddress = (unsigned char*)CVPixelBufferGetBaseAddress(pixelBuffer);
 
-            // Convert BGRA to RGBA
-            if (_pixelBuffer && width == (size_t)_videoWidth && height == (size_t)_videoHeight) {
-                for (size_t y = 0; y < height; y++) {
+            // Convert BGRA to RGBA. The decoder's buffer can be slightly larger
+            // than the track's naturalSize (e.g. a non-square SAR makes
+            // naturalSize 1919 while the coded frame is 1920): copy the
+            // overlapping region instead of dropping the frame, which used to
+            // freeze playback silently on such files.
+            if (_pixelBuffer) {
+                if ((width != (size_t)_videoWidth || height != (size_t)_videoHeight)
+                        && !_sizeMismatchWarned) {
+                    _sizeMismatchWarned = YES;
+                    NSLog(@"TCVideoPlayer: decoded frame %zux%zu differs from track naturalSize "
+                          @"%ldx%ld (non-square SAR?); copying the overlapping region",
+                          width, height, (long)_videoWidth, (long)_videoHeight);
+                }
+                size_t copyW = MIN(width, (size_t)_videoWidth);
+                size_t copyH = MIN(height, (size_t)_videoHeight);
+                for (size_t y = 0; y < copyH; y++) {
                     unsigned char* srcRow = baseAddress + y * bytesPerRow;
-                    unsigned char* dstRow = _pixelBuffer + y * width * 4;
+                    unsigned char* dstRow = _pixelBuffer + y * (size_t)_videoWidth * 4;
 
-                    for (size_t x = 0; x < width; x++) {
+                    for (size_t x = 0; x < copyW; x++) {
                         // BGRA -> RGBA
                         dstRow[x * 4 + 0] = srcRow[x * 4 + 2];  // R <- B
                         dstRow[x * 4 + 1] = srcRow[x * 4 + 1];  // G <- G
