@@ -470,6 +470,12 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](trussc::Vec3 pos, trussc::Vec2 size, float radius) { return trussc::drawRectSquircle(pos, size, radius); },
         [](float x, float y, float w, float h, float radius) { return trussc::drawRectSquircle(x, y, w, h, radius); }
     ));
+    lua->set_function("drawSuperellipse", sol::overload(
+        [](trussc::Vec3 pos, trussc::Vec2 size) { return trussc::drawSuperellipse(pos, size); },
+        [](trussc::Vec3 pos, trussc::Vec2 size, float n) { return trussc::drawSuperellipse(pos, size, n); },
+        [](float x, float y, float w, float h) { return trussc::drawSuperellipse(x, y, w, h); },
+        [](float x, float y, float w, float h, float n) { return trussc::drawSuperellipse(x, y, w, h, n); }
+    ));
     lua->set_function("drawCircle", sol::overload(
         [](trussc::Vec3 center, float radius) { return trussc::drawCircle(center, radius); },
         [](float cx, float cy, float radius) { return trussc::drawCircle(cx, cy, radius); }
@@ -619,6 +625,12 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("appendArc", sol::overload(
         [](float cx, float cy, float radius, float angleBegin, float angleEnd) { return trussc::appendArc(cx, cy, radius, angleBegin, angleEnd); },
         [](const trussc::Vec2 & center, float radius, float angleBegin, float angleEnd) { return trussc::appendArc(center, radius, angleBegin, angleEnd); }
+    ));
+    lua->set_function("appendSuperellipse", sol::overload(
+        [](float x, float y, float w, float h) { return trussc::appendSuperellipse(x, y, w, h); },
+        [](float x, float y, float w, float h, float n) { return trussc::appendSuperellipse(x, y, w, h, n); },
+        [](const trussc::Vec2 & pos, const trussc::Vec2 & size) { return trussc::appendSuperellipse(pos, size); },
+        [](const trussc::Vec2 & pos, const trussc::Vec2 & size, float n) { return trussc::appendSuperellipse(pos, size, n); }
     ));
     lua->set_function("appendCurve", sol::overload(
         [](const std::vector<Vec3> & points) { return trussc::appendCurve(points); },
