@@ -318,7 +318,13 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     std::string desc = "appsrc name=src ! queue ! videoconvert ! ";
     desc += opt->segment;
     if (haveParse) { desc += " ! "; desc += plan.parse; }
-    desc += " ! mp4mux name=mux ! filesink name=sink";
+    // The queue between encoder and muxer is load-bearing when audio is muxed:
+    // mp4mux blocks video consumption for its interleave window (~250ms) while
+    // waiting for audio, audio only arrives from the main thread, and the main
+    // thread is blocked pushing video into an appsrc that holds barely one raw
+    // frame -> permanent deadlock. A post-encode queue absorbs the window in
+    // the cheap compressed domain and breaks the cycle.
+    desc += " ! queue ! mp4mux name=mux ! filesink name=sink";
     // Audio branch: a second appsrc feeding interleaved float samples through
     // audioconvert into the AAC encoder, muxed into the same mp4.
     if (aacEnc) {
