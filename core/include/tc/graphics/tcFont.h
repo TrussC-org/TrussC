@@ -270,16 +270,19 @@ public:
 
     void cleanup() {
         // Only release GPU resources if sokol is still valid
-        // (may have already shut down at program exit)
+        // (may have already shut down at program exit). Destruction is
+        // deferred: cleanup() also runs mid-frame when a font is re-loaded
+        // via setup(), and draws recorded earlier that frame may still
+        // reference the old atlas views.
         if (sg_isvalid()) {
             for (auto& pd : pendingDestroys_) {
-                sg_destroy_view(pd.view);
-                sg_destroy_image(pd.image);
+                internal::deferGpuDestroy(pd.view);
+                internal::deferGpuDestroy(pd.image);
             }
             for (auto& atlas : atlases_) {
                 if (atlas.textureValid_) {
-                    sg_destroy_view(atlas.view_);
-                    sg_destroy_image(atlas.texture_);
+                    internal::deferGpuDestroy(atlas.view_);
+                    internal::deferGpuDestroy(atlas.texture_);
                 }
             }
         }
@@ -440,16 +443,17 @@ public:
     // Clear all atlas pages and cached glyphs.
     // Font data and metrics are preserved, so glyphs are re-rasterized on demand.
     void clearAtlas() {
-        if (sg_isvalid()) {
-            for (auto& pd : pendingDestroys_) {
-                sg_destroy_view(pd.view);
-                sg_destroy_image(pd.image);
-            }
-            for (auto& atlas : atlases_) {
-                if (atlas.textureValid_) {
-                    sg_destroy_view(atlas.view_);
-                    sg_destroy_image(atlas.texture_);
-                }
+        // Deferred destroy: text drawn earlier this frame may still have
+        // sokol_gl commands referencing the old atlas views (drained in
+        // present(); skipped there if sokol has already shut down).
+        for (auto& pd : pendingDestroys_) {
+            internal::deferGpuDestroy(pd.view);
+            internal::deferGpuDestroy(pd.image);
+        }
+        for (auto& atlas : atlases_) {
+            if (atlas.textureValid_) {
+                internal::deferGpuDestroy(atlas.view_);
+                internal::deferGpuDestroy(atlas.texture_);
             }
         }
         pendingDestroys_.clear();

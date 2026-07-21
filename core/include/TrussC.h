@@ -89,6 +89,9 @@
 // TrussC graphics backend detection (runtime query of sokol_gfx backend)
 #include "tc/graphics/tcBackend.h"
 
+// GPU destroy queue (deferred sg_destroy_* — see header for why)
+#include "tc/gpu/tcGpuDestroyQueue.h"
+
 // TrussC build info (populated by trussc_app() at CMake configure time)
 #include "tcBuildInfo.h"
 
@@ -1063,8 +1066,9 @@ inline void getBitmapStringBounds(const std::string& text, float& width, float& 
 //
 // Two paths:
 //   - Size grew (tier promotion) or first allocation:
-//     create a fresh sg_image. The old one is destroyed first, which is
-//     safe because tier growth happens at most a handful of times per app.
+//     create a fresh sg_image. The old one is destroyed deferred (see
+//     tcGpuDestroyQueue.h) so sokol_gl commands recorded earlier in the
+//     frame keep their handles valid until the end-of-frame flush.
 //   - Same size, contents changed (registerGlyph / updateGlyph):
 //     reuse the image via sg_update_image(). No destroy → no dangling
 //     references in sokol_gl's deferred command queue. This makes per-frame
@@ -1127,10 +1131,13 @@ inline void ensureFontAtlas(int rows) {
         sg_update_image(internal::fontTexture, &data);
         internal::fontAtlasUploadFrame = getFrameCount();
     } else {
-        // Size changed (or first allocation). Recreate the image.
+        // Size changed (or first allocation). Recreate the image. The old
+        // image/view are destroyed deferred — sokol_gl commands recorded
+        // earlier this frame still reference them until the end-of-frame
+        // flush (drained in present() after sg_commit).
         if (internal::fontAtlasInitialized) {
-            sg_destroy_view(internal::fontView);
-            sg_destroy_image(internal::fontTexture);
+            internal::deferGpuDestroy(internal::fontView);
+            internal::deferGpuDestroy(internal::fontTexture);
             internal::fontAtlasInitialized = false;
         }
 

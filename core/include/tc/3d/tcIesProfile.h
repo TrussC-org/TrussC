@@ -290,9 +290,11 @@ private:
     // -------------------------------------------------------------------------
 
     void release() {
-        if (sampler_.id) { sg_destroy_sampler(sampler_); sampler_ = {}; }
-        if (view_.id)    { sg_destroy_view(view_);       view_ = {};    }
-        if (image_.id)   { sg_destroy_image(image_);     image_ = {};   }
+        // Deferred destroy: a deferred PBR draw recorded this frame may still
+        // bind these handles (drained in present(), after end-of-frame flush)
+        internal::deferGpuDestroy(sampler_); sampler_ = {};
+        internal::deferGpuDestroy(view_);    view_ = {};
+        internal::deferGpuDestroy(image_);   image_ = {};
         loaded_ = false;
     }
 

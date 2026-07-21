@@ -300,9 +300,10 @@ void present() {
     sg_commit();
 
     // Now that every deferred draw (swapchain layers above, FBO passes at
-    // their Fbo::end()) has been submitted, it is safe to destroy GPU buffers
-    // released by meshes during this frame (temporary Mesh draws, re-uploads).
-    internal::drainPendingGpuBufferDestroys();
+    // their Fbo::end()) has been submitted, it is safe to destroy the GPU
+    // resources released during this frame (temporary Mesh draws, texture
+    // re-uploads, atlas growth, sampler changes, ...).
+    internal::drainPendingGpuDestroys();
 }
 
 bool isInSwapchainPass() {

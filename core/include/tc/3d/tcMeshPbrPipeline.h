@@ -22,7 +22,8 @@
 //     (flushDeferredShaderDraws), FBO-pass draws into fboPbrDraws (flushed at
 //     Fbo::end()), so they composite with sokol_gl 2D in submission order.
 //     Captured sg_buffer handles stay valid because Mesh defers buffer
-//     destruction to end of frame (internal::pendingGpuBufferDestroys).
+//     destruction to end of frame (internal::deferGpuDestroy,
+//     tcGpuDestroyQueue.h).
 //
 // =============================================================================
 
@@ -588,13 +589,14 @@ private:
     void ensureShadowTexture(int resolution) {
         if (resolution == shadowTexResolution_) return;
 
-        // Destroy old resources
-        if (shadowColorImage_.id)   sg_destroy_image(shadowColorImage_);
-        if (shadowColorAttView_.id) sg_destroy_view(shadowColorAttView_);
-        if (shadowColorTexView_.id) sg_destroy_view(shadowColorTexView_);
-        if (shadowDepthImage_.id)   sg_destroy_image(shadowDepthImage_);
-        if (shadowDepthAttView_.id) sg_destroy_view(shadowDepthAttView_);
-        if (shadowSampler_.id)      sg_destroy_sampler(shadowSampler_);
+        // Release old resources (deferred: a deferred PBR draw recorded this
+        // frame may still bind the old shadow map view/sampler)
+        internal::deferGpuDestroy(shadowColorImage_);
+        internal::deferGpuDestroy(shadowColorAttView_);
+        internal::deferGpuDestroy(shadowColorTexView_);
+        internal::deferGpuDestroy(shadowDepthImage_);
+        internal::deferGpuDestroy(shadowDepthAttView_);
+        internal::deferGpuDestroy(shadowSampler_);
 
         // R32F color target (stores depth value for sampling)
         sg_image_desc cd = {};
