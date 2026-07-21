@@ -17,6 +17,6 @@ private:
     bool showInfo_ = true;
     string videoPath_;
 
-    void loadVideo(const string& path);
+    void loadVideo(const fs::path& path);
     string formatTime(float seconds);
 };
