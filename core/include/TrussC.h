@@ -2018,6 +2018,10 @@ namespace mcp {
     void registerDebuggerTools();
 }
 
+// Defined in tc/sound/tcSound.h (included later in this header); declared here
+// so the cleanup callback below can stop the audio device on exit.
+inline void shutdownAudio();
+
 namespace internal {
 
     inline void _setup_cb() {
@@ -2273,6 +2277,14 @@ namespace internal {
         console::stop();
 
         if (appCleanupFunc) appCleanupFunc();
+
+        // Stop the audio device explicitly: the AudioEngine singleton is
+        // intentionally leaked (see AudioEngine::getInstance()), so no
+        // exit-time destructor will do this. Runs after appCleanupFunc so
+        // the app's exit() can still use audio; shutdown() is a no-op when
+        // the engine was never initialized.
+        trussc::shutdownAudio();
+
         cleanup();
     }
 
