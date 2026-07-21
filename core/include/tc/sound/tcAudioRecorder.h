@@ -91,6 +91,10 @@ public:
         }
 
         fs::path resolved = getDataPath(path);
+        if (resolved.has_parent_path()) {   // same convenience as VideoWriter
+            std::error_code ec;
+            fs::create_directories(resolved.parent_path(), ec);
+        }
         file_.open(resolved, std::ios::binary | std::ios::trunc);
         if (!file_) {
             logError("AudioRecorder") << "start: cannot open " << resolved.string();

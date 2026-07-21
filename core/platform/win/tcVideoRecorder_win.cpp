@@ -54,7 +54,9 @@
 #include "TrussC.h"
 
 #include <cmath>
+#include <cstring>
 #include <string>
+#include <vector>
 
 #pragma comment(lib, "mf.lib")
 #pragma comment(lib, "mfplat.lib")
@@ -76,6 +78,15 @@ struct VideoWriterPlatformData {
     bool  mfStarted = false;   // this instance called MFStartup
     bool  usedHardware = false;
     bool  failed = false;
+
+    // Audio track (AAC). hasAudio stays false when settings.audio is off, the
+    // engine format is outside the MF AAC encoder's input constraints, or the
+    // audio stream could not be negotiated (video-only degradation).
+    bool  hasAudio = false;
+    DWORD audioStream = 0;
+    int   audioRate = 0;
+    int   audioChannels = 0;
+    std::vector<short> s16;    // float -> PCM16 conversion scratch
 };
 }  // namespace internal
 using internal::VideoWriterPlatformData;
@@ -96,13 +107,66 @@ void fpsToRatio(double fps, UINT32& num, UINT32& den) {
     }
 }
 
+// Audio track parameters, validated by openPlatform(). rate/channels must be
+// within the MF AAC encoder's input constraints (PCM16, 44.1/48 kHz, 1-2 ch);
+// bytesPerSec one of the encoder's discrete CBR steps (12000/16000/20000/24000).
+struct AudioParams {
+    bool wanted = false;
+    int  rate = 0;
+    int  channels = 0;
+    UINT32 bytesPerSec = 24000;
+};
+
+// Add the AAC output + PCM16 input audio streams to the sink writer. Called
+// before BeginWriting(); a failure fails the whole open (streams cannot be
+// removed from a sink writer), and the caller retries without audio.
+HRESULT configureAudioStream(IMFSinkWriter* writer, const AudioParams& ap,
+                             DWORD& audioStreamIndex) {
+    // --- Output media type: AAC-LC ---
+    IMFMediaType* outType = nullptr;
+    HRESULT hr = MFCreateMediaType(&outType);
+    if (SUCCEEDED(hr)) hr = outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+    if (SUCCEEDED(hr)) hr = outType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC);
+    if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND,
+                                               (UINT32)ap.rate);
+    if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS,
+                                               (UINT32)ap.channels);
+    if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+    if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
+                                               ap.bytesPerSec);
+    if (SUCCEEDED(hr)) hr = writer->AddStream(outType, &audioStreamIndex);
+    if (outType) outType->Release();
+    if (FAILED(hr)) return hr;
+
+    // --- Input media type: interleaved PCM16 ---
+    const UINT32 blockAlign = (UINT32)ap.channels * 2;
+    IMFMediaType* inType = nullptr;
+    hr = MFCreateMediaType(&inType);
+    if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+    if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
+    if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND,
+                                              (UINT32)ap.rate);
+    if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS,
+                                              (UINT32)ap.channels);
+    if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+    if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, blockAlign);
+    if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
+                                              (UINT32)ap.rate * blockAlign);
+    if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, 1);
+    if (SUCCEEDED(hr)) hr = writer->SetInputMediaType(audioStreamIndex, inType,
+                                                      nullptr);
+    if (inType) inType->Release();
+    return hr;
+}
+
 // Add the compressed output + RGB32 input streams and begin writing. Returns
 // the stream index. Failure here (notably for a hardware encoder that can't
 // negotiate on this machine) is what drives the software fallback in open().
 HRESULT configureWriter(IMFSinkWriter* writer, int w, int h,
                         UINT32 fpsNum, UINT32 fpsDen, int br,
                         VideoCodec codec, int keyframeInterval,
-                        DWORD& streamIndex) {
+                        DWORD& streamIndex,
+                        const AudioParams& audio, DWORD& audioStreamIndex) {
     // --- Output media type: H.264 or HEVC (both mux into .mp4) ---
     const GUID subtype = (codec == VideoCodec::HEVC) ? MFVideoFormat_HEVC
                                                      : MFVideoFormat_H264;
@@ -144,6 +208,12 @@ HRESULT configureWriter(IMFSinkWriter* writer, int w, int h,
     if (inType) inType->Release();
     if (FAILED(hr)) return hr;
 
+    // Audio track, if requested (must be added before BeginWriting).
+    if (audio.wanted) {
+        hr = configureAudioStream(writer, audio, audioStreamIndex);
+        if (FAILED(hr)) return hr;
+    }
+
     // Activates and negotiates the encoder MFT synchronously: a hardware
     // encoder that exists but can't run here fails at this point.
     return writer->BeginWriting();
@@ -178,10 +248,12 @@ bool streamUsesHardwareEncoder(IMFSinkWriter* writer, DWORD streamIndex) {
 HRESULT openWriter(const std::wstring& wpath, int w, int h,
                    UINT32 fpsNum, UINT32 fpsDen, int br,
                    VideoCodec codec, int keyframeInterval, bool hwEnabled,
+                   const AudioParams& audio,
                    IMFSinkWriter** outWriter, DWORD* outStream,
-                   bool* outHardware) {
+                   DWORD* outAudioStream, bool* outHardware) {
     *outWriter = nullptr;
     *outStream = 0;
+    *outAudioStream = 0;
     *outHardware = false;
 
     // SinkWriter creation flags: allow/forbid hardware MFTs, and don't throttle
@@ -203,16 +275,19 @@ HRESULT openWriter(const std::wstring& wpath, int w, int h,
     }
 
     DWORD streamIndex = 0;
+    DWORD audioStreamIndex = 0;
     hr = configureWriter(writer, w, h, fpsNum, fpsDen, br,
-                         codec, keyframeInterval, streamIndex);
+                         codec, keyframeInterval, streamIndex,
+                         audio, audioStreamIndex);
     if (FAILED(hr)) {
         writer->Release();
         return hr;
     }
 
-    *outWriter   = writer;
-    *outStream   = streamIndex;
-    *outHardware = streamUsesHardwareEncoder(writer, streamIndex);
+    *outWriter      = writer;
+    *outStream      = streamIndex;
+    *outAudioStream = audioStreamIndex;
+    *outHardware    = streamUsesHardwareEncoder(writer, streamIndex);
     return S_OK;
 }
 
@@ -223,10 +298,31 @@ HRESULT openWriter(const std::wstring& wpath, int w, int h,
 // ---------------------------------------------------------------------------
 bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
                                float fps, const VideoRecordSettings& settings) {
+    // Audio track: the MF AAC encoder only accepts PCM16 at 44.1/48 kHz, 1-2
+    // channels. Outside those constraints we warn and record video-only
+    // (mirrors the mac backend's degradation behavior).
+    AudioParams audio;
     if (settings.audio) {
-        logWarning("VideoWriter")
-            << "audio recording is not supported on this platform yet - "
-               "recording video only";
+        const int aRate = settings.audioSampleRate;
+        const int aCh   = settings.audioChannels;
+        if ((aRate == 44100 || aRate == 48000) && aCh >= 1 && aCh <= 2) {
+            audio.wanted   = true;
+            audio.rate     = aRate;
+            audio.channels = aCh;
+            // The encoder supports discrete CBR steps only:
+            // 12000/16000/20000/24000 bytes/sec (96/128/160/192 kbit).
+            const UINT32 steps[] = {12000, 16000, 20000, 24000};
+            const int want = settings.audioBitrate / 8;
+            audio.bytesPerSec = steps[0];
+            for (UINT32 s : steps) {
+                if ((int)s <= want) audio.bytesPerSec = s;
+            }
+        } else {
+            logWarning("VideoWriter")
+                << "audio format " << aRate << " Hz / " << aCh
+                << " ch not supported by the AAC encoder "
+                   "(needs 44100/48000 Hz, 1-2 ch) - recording video only";
+        }
     }
     // This backend encodes H.264 and HEVC (both into .mp4). ProRes is a macOS-
     // only mastering codec; reject it clearly rather than silently substituting.
@@ -270,6 +366,7 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
 
     IMFSinkWriter* writer = nullptr;
     DWORD streamIndex = 0;
+    DWORD audioStreamIndex = 0;
     bool  isHw = false;
 
     const VideoCodec codec = settings.codec;
@@ -279,10 +376,11 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     // file each attempt (the writer otherwise locks/appends).
     DeleteFileW(wpath.c_str());
     hr = openWriter(wpath, w, h, fpsNum, fpsDen, br, codec, kf,
-                    /*hwEnabled*/ true, &writer, &streamIndex, &isHw);
+                    /*hwEnabled*/ true, audio,
+                    &writer, &streamIndex, &audioStreamIndex, &isHw);
 
-    // Software fallback: only the hardware path can fail here, so a failed open
-    // means "hardware encoder unusable on this machine" -> retry pure software.
+    // Software fallback: a failed open normally means "hardware encoder
+    // unusable on this machine" -> retry pure software.
     if (FAILED(hr) || !writer) {
         logWarning("VideoWriter")
             << "hardware " << videoCodecName(codec)
@@ -290,7 +388,28 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
             << std::hex << (unsigned)hr << "); falling back to software";
         DeleteFileW(wpath.c_str());
         hr = openWriter(wpath, w, h, fpsNum, fpsDen, br, codec, kf,
-                        /*hwEnabled*/ false, &writer, &streamIndex, &isHw);
+                        /*hwEnabled*/ false, audio,
+                        &writer, &streamIndex, &audioStreamIndex, &isHw);
+    }
+
+    // Last resort with audio requested: the AAC stream itself may be what
+    // failed (sink writer streams can't be removed, so a failed audio setup
+    // fails the whole open). Degrade to video-only rather than not recording.
+    if ((FAILED(hr) || !writer) && audio.wanted) {
+        logWarning("VideoWriter")
+            << "could not set up the AAC audio track (hr=0x"
+            << std::hex << (unsigned)hr << ") - recording video only";
+        audio.wanted = false;
+        DeleteFileW(wpath.c_str());
+        hr = openWriter(wpath, w, h, fpsNum, fpsDen, br, codec, kf,
+                        /*hwEnabled*/ true, audio,
+                        &writer, &streamIndex, &audioStreamIndex, &isHw);
+        if (FAILED(hr) || !writer) {
+            DeleteFileW(wpath.c_str());
+            hr = openWriter(wpath, w, h, fpsNum, fpsDen, br, codec, kf,
+                            /*hwEnabled*/ false, audio,
+                            &writer, &streamIndex, &audioStreamIndex, &isHw);
+        }
     }
 
     if (FAILED(hr) || !writer) {
@@ -305,19 +424,89 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     pd->writer       = writer;
     pd->streamIndex  = streamIndex;
     pd->usedHardware = isHw;
+    if (audio.wanted) {
+        pd->hasAudio      = true;
+        pd->audioStream   = audioStreamIndex;
+        pd->audioRate     = audio.rate;
+        pd->audioChannels = audio.channels;
+    }
     platform_ = pd;
 
     logNotice("VideoWriter")
         << "Media Foundation " << videoCodecName(codec) << " encoder: "
-        << (isHw ? "hardware" : "software");
+        << (isHw ? "hardware" : "software")
+        << (pd->hasAudio ? " + AAC audio" : "");
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// appendAudioPlatform - append interleaved float samples to the AAC track
+// ---------------------------------------------------------------------------
+// Called on the recorder's writer thread, interleaved with video WriteSample
+// calls on the same thread; the sink writer handles the muxing (throttling is
+// disabled at creation, so neither stream ever blocks waiting for the other).
+bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
+                                      double timeSec) {
+    VideoWriterPlatformData* pd = platform_;
+    if (!pd || !pd->writer || pd->failed || !pd->hasAudio) return false;
+    if (!interleaved || frames <= 0) return false;
+
+    // float [-1,1] -> interleaved PCM16, clamped.
+    const int samples = frames * pd->audioChannels;
+    pd->s16.resize((size_t)samples);
+    for (int i = 0; i < samples; ++i) {
+        float v = interleaved[i];
+        if (v > 1.0f) v = 1.0f;
+        else if (v < -1.0f) v = -1.0f;
+        pd->s16[(size_t)i] = (short)(v * 32767.0f);
+    }
+
+    const DWORD byteCount = (DWORD)samples * sizeof(short);
+    IMFMediaBuffer* buffer = nullptr;
+    HRESULT hr = MFCreateMemoryBuffer(byteCount, &buffer);
+    if (FAILED(hr) || !buffer) {
+        logError("VideoWriter") << "MFCreateMemoryBuffer (audio) failed";
+        pd->failed = true;
+        return false;
+    }
+
+    BYTE* dst = nullptr;
+    hr = buffer->Lock(&dst, nullptr, nullptr);
+    if (FAILED(hr)) {
+        buffer->Release();
+        pd->failed = true;
+        return false;
+    }
+    memcpy(dst, pd->s16.data(), byteCount);
+    buffer->Unlock();
+    buffer->SetCurrentLength(byteCount);
+
+    IMFSample* sample = nullptr;
+    hr = MFCreateSample(&sample);
+    if (SUCCEEDED(hr)) hr = sample->AddBuffer(buffer);
+    if (SUCCEEDED(hr)) {
+        // MF time units are 100-nanosecond ticks (1e7 per second).
+        sample->SetSampleTime((LONGLONG)(timeSec * 1.0e7 + 0.5));
+        sample->SetSampleDuration(
+            (LONGLONG)((double)frames / pd->audioRate * 1.0e7 + 0.5));
+        hr = pd->writer->WriteSample(pd->audioStream, sample);
+    }
+
+    if (sample) sample->Release();
+    buffer->Release();
+
+    if (FAILED(hr)) {
+        logError("VideoWriter") << "WriteSample (audio) failed (hr=0x"
+                                  << std::hex << (unsigned)hr << ")";
+        pd->failed = true;
+        return false;
+    }
     return true;
 }
 
 // ---------------------------------------------------------------------------
 // appendPlatform - encode one RGBA8 (top-down) frame
 // ---------------------------------------------------------------------------
-// Audio track is macOS-only for now; the header degrades to video-only.
-bool VideoWriter::appendAudioPlatform(const float*, int, double) { return false; }
 
 bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     VideoWriterPlatformData* pd = platform_;
