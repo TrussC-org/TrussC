@@ -99,8 +99,8 @@ struct VideoRecordSettings {
                                 // many seconds of output; 0 = unlimited (call
                                 // stop() manually). Ignored by VideoWriter.
 
-    // Record the engine's master mix into the file as an AAC track (macOS only
-    // for now; other platforms warn and record video-only). ScreenRecorder also
+    // Record the engine's master mix into the file as an AAC track (macOS and
+    // Windows; other platforms warn and record video-only). ScreenRecorder also
     // switches the video PTS clock from wall time to the AUDIO DEVICE clock, so
     // A/V stay in sync no matter how unstable the frame rate is.
     bool audio = false;
