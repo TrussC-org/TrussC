@@ -518,12 +518,6 @@ inline void registerInspectionTools() {
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
         }));
 
-    tool("tc_quit", "Quit the application gracefully")
-        .bind(std::function<json()>([]() -> json {
-            sapp_request_quit();
-            return json{{"status", "ok"}};
-        }));
-
     // --- Recording tools (native encoder, no ffmpeg) ---
 
     tool("tc_start_recording", "Start recording the window to a video file (the screenshot's video counterpart). Omit path for a timestamped file in the data dir; give duration for a fixed-length clip that auto-stops and finalizes itself.")
@@ -618,14 +612,26 @@ inline void registerInspectionTools() {
 }
 
 // ---------------------------------------------------------------------------
-// Debugger Tools (input injection, opt-in via mcp::registerDebuggerTools())
+// Control Tools (opt-in via mcp::registerControlTools())
+//
+// The always-on standard set is strictly read-only; everything that lets the
+// outside OPERATE the app — input injection, node selection/mutation, quit —
+// lives behind this one opt-in. (Formerly registerDebuggerTools(); renamed
+// because the read-only tools are debugging aids too — the real boundary is
+// read vs control.)
 // ---------------------------------------------------------------------------
 
-inline void registerDebuggerTools() {
+inline void registerControlTools() {
 
-    // Registering the debugger surface IS the opt-in to input injection /
+    // Registering the control surface IS the opt-in to input injection /
     // scene mutation. Mark it so isDebuggerEnabled() reflects reality.
     detail::isDebuggerEnabled().store(true);
+
+    tool("tc_quit", "Quit the application gracefully")
+        .bind(std::function<json()>([]() -> json {
+            sapp_request_quit();
+            return json{{"status", "ok"}};
+        }));
 
     // --- Mouse Tools ---
 
@@ -840,6 +846,9 @@ inline void registerDebuggerTools() {
         });
 
 }
+
+[[deprecated("renamed to registerControlTools(); will be removed in v1.0.0")]]
+inline void registerDebuggerTools() { registerControlTools(); }
 
 } // namespace mcp
 } // namespace trussc
