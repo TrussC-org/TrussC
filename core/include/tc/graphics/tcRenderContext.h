@@ -454,6 +454,20 @@ public:
         drawRectSquircle(Vec3(x, y, 0), Vec2(w, h), radius);
     }
 
+    // -------------------------------------------------------------------------
+    // Superellipse (Lamé curve): |x/rx|^n + |y/ry|^n = 1, inscribed in the
+    // rect (pos, size) — drop-in alternative to drawRectRounded. The exponent
+    // n morphs the shape: 2 = ellipse, 4 = squircle, higher -> closer to the
+    // rect, 1 = diamond, <1 = concave (star-like). Default n=5 approximates
+    // the Apple app-icon silhouette. Aspect ratio comes from size.
+    // (Implementation in tcRenderContext.cpp)
+    // -------------------------------------------------------------------------
+    void drawSuperellipse(Vec3 pos, Vec2 size, float n = 5.0f);
+
+    void drawSuperellipse(float x, float y, float w, float h, float n = 5.0f) {
+        drawSuperellipse(Vec3(x, y, 0), Vec2(w, h), n);
+    }
+
     // Main implementation (Vec3)
     void drawCircle(Vec3 center, float radius) {
         int segments = decideCircleSegments(radius);

@@ -901,6 +901,17 @@ inline void drawRectSquircle(float x, float y, float w, float h, float radius) {
     getDefaultContext().drawRectSquircle(x, y, w, h, radius);
 }
 
+// Superellipse inscribed in the rect (pos, size) — drop-in alternative to
+// drawRectRounded. n morphs the shape (2=ellipse, 4=squircle, higher->rect);
+// default n=5 approximates the Apple app-icon silhouette.
+inline void drawSuperellipse(Vec3 pos, Vec2 size, float n = 5.0f) {
+    getDefaultContext().drawSuperellipse(pos, size, n);
+}
+
+inline void drawSuperellipse(float x, float y, float w, float h, float n = 5.0f) {
+    getDefaultContext().drawSuperellipse(x, y, w, h, n);
+}
+
 // Circle
 inline void drawCircle(Vec3 center, float radius) {
     getDefaultContext().drawCircle(center, radius);

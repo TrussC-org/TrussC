@@ -94,6 +94,9 @@ setIndependentFps(60, EVENT_DRIVEN);   // call redraw() on every visible change
 ```cpp
 drawRect(x, y, w, h)
 drawRectRounded(x, y, w, h, radius)
+drawRectSquircle(x, y, w, h, radius)   // iOS-style curvature-continuous corners
+drawSuperellipse(x, y, w, h, n = 5)    // Lamé curve inscribed in the rect; default n=5 ≈ Apple icon.
+                                       // n: 2=ellipse, 4=squircle, higher→rect, 1=diamond, <1=star
 drawCircle(x, y, radius)
 drawEllipse(x, y, rx, ry)
 drawArc(x, y, radius, angleBegin, angleEnd)   // Angles in radians, TAU = 2*PI
@@ -137,9 +140,10 @@ beginShape();
 vertex(0, 0);
 appendArc(cx, cy, r, angleBegin, angleEnd);   // Arc vertices
 appendCurve(controlPoints, false);            // Catmull-Rom segment (>=4 points)
+appendSuperellipse(x, y, w, h, n);            // Full superellipse outline (bounding-box, like drawSuperellipse)
 endShape(true);                               // close the outline
 ```
-`appendArc` and `appendCurve` also work inside `beginStroke` / `beginLines`.
+`appendArc`, `appendCurve` and `appendSuperellipse` also work inside `beginStroke` / `beginLines`.
 
 ### Path (accumulator class)
 `Path` collects vertices over multiple calls and can be drawn later,
@@ -1473,6 +1477,7 @@ float srgbToLinear(float x)  // Convert a single sRGB channel value to linear RG
 ```cpp
 void appendArc(float cx, float cy, float radius, float angleBegin, float angleEnd) [+1]  // Append arc vertices to the current shape (use between beginShape/endShape)
 void appendCurve(const std::vector<Vec3> & points) [+1]  // Append Catmull-Rom curve vertices to the current shape (use between beginShape/endShape; needs >=4 points, closed=true wraps around)
+void appendSuperellipse(float x, float y, float w, float h, float n = 5.0) [+1]  // Append the closed outline of a superellipse inscribed in a rect to the current shape (use between beginShape/endShape)
 void beginLines()  // Begin batch line drawing. Add vertex pairs with vertex(), then call endLines(). Each pair of vertices draws one independent line segment. Use setColor() between vertices for per-line colors.
 void beginShape()  // Begin drawing a shape
 void beginStroke()  // Begin drawing a stroke (uses StrokeMesh internally)
@@ -1492,6 +1497,7 @@ void drawRectRounded(Vec3 pos, Vec2 size, float radius) [+1]  // Draw rounded re
 void drawRectSquircle(Vec3 pos, Vec2 size, float radius) [+1]  // Draw squircle rectangle (curvature-continuous corners, iOS-style)
 void drawSphere(float radius, int resolution = 16) [+2]  // Draw 3D sphere (respects fill/noFill)
 void drawStroke(float x1, float y1, float x2, float y2) [+1]  // Draw a single stroke segment (thick line with cap/join)
+void drawSuperellipse(Vec3 pos, Vec2 size, float n = 5.0) [+1]  // Draw a superellipse (Lamé curve) inscribed in a rect — Apple-icon-like by default (n=5)
 void drawTriangle(Vec3 p1, Vec3 p2, Vec3 p3) [+1]  // Draw triangle
 void endLines()  // End batch line drawing and render all accumulated line segments
 void endShape(bool close = false)  // End drawing a shape
@@ -1535,7 +1541,7 @@ void pushStyle()  // Push current style (color, fill, stroke, blend) onto stack
 void resetBlendMode()  // Reset blend mode to Alpha (default)
 void resetScissor()  // Reset (disable) scissor clipping
 void resetStyle()  // Reset style to default values (white color, fill enabled, stroke disabled)
-void setBlendMode(BlendMode mode)  // Set blend mode. BlendMode::Alpha (default), Add, Multiply, Screen, Subtract, Disabled
+void setBlendMode(BlendMode mode)  // Set blend mode. BlendMode::Alpha (default), Add, Multiply, Screen, Subtract, Disabled. Works on the screen and inside Fbo passes alike; the mode persists until changed (it also carries into a subsequent Fbo::begin)
 void setCircleResolution(int res) ⚠️deprecated  // Deprecated alias for setCurveResolution()
 void setCurveResolution(int n)  // Set fixed curve segment count (switches off adaptive tolerance mode)
 void setCurveTolerance(float pixels)  // Set adaptive curve tessellation tolerance in pixels (smaller = smoother, scale-aware)
@@ -1822,6 +1828,7 @@ void closeLogFile()  // Close the current log file
 bool compress(const void * src, std::size_t nbytes, std::vector<std::uint8_t> & out, Codec codec) [+1]  // Compress a byte buffer with the given codec (Codec::None or Codec::LZ4). The vector overload resizes out and returns true on success; the raw (dst pointer) overload returns the number of bytes written, or -1 on failure (no resizing).
 std::size_t compressBound(std::size_t nbytes, Codec codec)  // Worst-case compressed size, for sizing a destination buffer
 bool decompress(const void * src, std::size_t nbytes, std::vector<std::uint8_t> & out, std::size_t decompressedSize, Codec codec) [+1]  // Decompress a byte buffer; decompressedSize is the known original byte count. The vector overload resizes out and returns true on success (false / cleared out on mismatch or failure); the raw (dst pointer) overload returns the number of bytes written, or -1 on failure.
+std::vector<unsigned char> fromBase64(const std::string & encoded)  // Decode a Base64 string back into raw bytes
 Logger & getLogger()  // Access the global logger instance
 std::thread::id getMainThreadId()  // Get the main thread ID. Records the current thread's ID on the first call, so it must first be called from the main thread.
 const char * getVersion()  // TrussC version string from git describe (e.g. "v0.6.2" or "v0.6.2-14-gabc123")
@@ -2176,6 +2183,22 @@ void AudioEngine::shutdown()  // Stop and close the audio device.
 ### AudioOutBuffer — Argument type for the AudioEngine::audioOut event. Holds the interleaved mutable output buffer for a single audio callback. Listeners should ADD their contribution to data (voices are already mixed in); do not call engine APIs from here.
 
 ```cpp
+```
+
+### AudioRecordSettings — Settings for AudioRecorder::start(): sample format (S16/F32) and an optional channel map
+
+```cpp
+```
+
+### AudioRecorder — Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks
+
+```cpp
+uint64_t AudioRecorder::getDroppedFrames() const  // Frames lost to ring-buffer overflow (0 in normal operation; nonzero means the writer thread fell behind)
+fs::path AudioRecorder::getPath() const  // Resolved path of the file being written
+double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far
+bool AudioRecorder::isRecording() const  // True while recording
+bool AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened
+void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes). Safe to call when not recording; also runs automatically on destruction
 ```
 
 ### AudioSettings — Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device.
@@ -3995,6 +4018,7 @@ bool VideoWriter::isOpen() const  // Check if the encoder is open and accepting 
 unsigned char * VideoWriter::lockFrame(int & strideOut) [macos]  // Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame
 bool VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the encoder at the given size (path resolved via getDataPath)
 bool VideoWriter::submitFrame(double timeSec) [macos]  // Append the previously locked frame at the given presentation time (seconds)
+bool VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec)  // Append interleaved float32 samples to the audio track at an explicit PTS (seconds, same timeline as addFrameAt). Only meaningful when opened with settings.audio = true and audioSampleRate/audioChannels set; returns false otherwise
 ```
 
 ### Window — A secondary application window (macOS only for now). Owns its own Node tree, events, mouse state and render context; ticks at its display's refresh rate. GPU resources are shared with every other window
@@ -4045,6 +4069,7 @@ std::string Xml::toString(const std::string & indent = std::string("  ")) const 
 ## Enums
 
 ```cpp
+enum AudioRecordSettings::SampleFormat { S16, F32 }  // WAV sample format: S16 = 16-bit PCM (default), F32 = 32-bit IEEE float (headroom survives, no clipping in the file)
 enum AxisMode { None, Fill, Content }  // Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children).
 enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Built-in system beep sounds (ping, success, error, …) for beep().
 enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled }  // Color blend mode: Alpha, Add, Multiply, Screen, Subtract, Disabled.
