@@ -42,6 +42,11 @@
 #include <mutex>
 #include <thread>
 #include <chrono>
+#include <cstring>
+
+// Audio-track recording taps the AudioEngine's master mix (sound never
+// includes video, so this dependency is one-way).
+#include "../sound/tcSound.h"
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
@@ -93,6 +98,18 @@ struct VideoRecordSettings {
     float duration = 0.0f;      // ScreenRecorder: auto-stop & finalize after this
                                 // many seconds of output; 0 = unlimited (call
                                 // stop() manually). Ignored by VideoWriter.
+
+    // Record the engine's master mix into the file as an AAC track (macOS only
+    // for now; other platforms warn and record video-only). ScreenRecorder also
+    // switches the video PTS clock from wall time to the AUDIO DEVICE clock, so
+    // A/V stay in sync no matter how unstable the frame rate is.
+    bool audio = false;
+    int  audioBitrate = 192000; // AAC bits/sec
+    // Sample rate / channel count of the audio track. ScreenRecorder fills
+    // these from the running AudioEngine; set them manually only when feeding
+    // writeAudio() yourself on a bare VideoWriter.
+    int  audioSampleRate = 0;
+    int  audioChannels = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -243,6 +260,16 @@ public:
     }
 #endif
 
+    // Append interleaved float samples to the audio track at an explicit PTS
+    // (seconds, same timeline as addFrameAt). Only meaningful when the writer
+    // was opened with settings.audio = true (and audioSampleRate/Channels set);
+    // no-op false otherwise. Channel count / rate must match the settings.
+    bool writeAudio(const float* interleaved, int frames, double timeSec) {
+        if (!open_ || !interleaved || frames <= 0) return false;
+        if (!settings_.audio) return false;
+        return appendAudioPlatform(interleaved, frames, timeSec);
+    }
+
 private:
     bool appendRGBA(const unsigned char* rgba, double timeSec) {
         if (!open_ || !rgba) return false;
@@ -258,6 +285,7 @@ private:
     bool openPlatform(const std::string& fullPath, int w, int h, float fps,
                       const VideoRecordSettings& settings);
     bool appendPlatform(const unsigned char* rgba, double timeSec);
+    bool appendAudioPlatform(const float* interleaved, int frames, double timeSec);
     void closePlatform();
 #if TC_ASYNC_SCREEN_CAPTURE
     // Direct-buffer hooks for the zero-intermediate capture path (macOS).
@@ -318,6 +346,7 @@ public:
     void stop() {
         afterFrameListener_ = EventListener{};   // no new captures get queued
         exitListener_ = EventListener{};
+        audioListener_ = EventListener{};        // audio thread stops feeding
 #if TC_ASYNC_SCREEN_CAPTURE
         // Drain async captures still encoding on background threads before we
         // close the writer (their completion handlers append into it).
@@ -331,6 +360,8 @@ public:
         fbo_ = nullptr;
         {
             std::lock_guard<std::mutex> lk(writerMutex_);
+            if (audioActive_) drainAudio();      // flush the tail of the ring
+            audioActive_ = false;
             writer_.close();
         }
     }
@@ -347,14 +378,28 @@ private:
                      const fs::path& path,
                      const VideoRecordSettings& settings) {
         stop();
-        if (!writer_.open(path, w, h, settings)) return false;
+        VideoRecordSettings s = settings;
+        if (s.audio) {
+            auto& engine = AudioEngine::getInstance();
+            if (!engine.isInitialized()) {
+                logWarning("ScreenRecorder")
+                    << "audio requested but AudioEngine is not initialized - "
+                       "recording video only";
+                s.audio = false;
+            } else {
+                if (s.audioSampleRate <= 0) s.audioSampleRate = engine.getSampleRate();
+                if (s.audioChannels   <= 0) s.audioChannels   = engine.getChannels();
+            }
+        }
+        if (!writer_.open(path, w, h, s)) return false;
         source_ = src;
         fbo_ = fbo;
         fboAlive_ = fbo ? fbo->lifetimeToken() : std::shared_ptr<void>{};
-        duration_ = settings.duration;
+        duration_ = s.duration;
         startElapsed_ = getElapsedTimef();
         nextCaptureTime_ = -1.0f;
         lastFrameTime_ = -1.0f;
+        if (s.audio) startAudioTap(s.audioSampleRate, s.audioChannels);
         afterFrameListener_ = events().afterFrame.listen([this]() { onAfterFrame(); });
         exitListener_ = events().exit.listen([this]() { stop(); });
         return true;
@@ -371,6 +416,13 @@ private:
             return;
         }
         float now = getElapsedTimef();
+
+        // Feed buffered audio to the encoder once per frame (main thread; the
+        // audio thread only ever touches the lock-free ring).
+        if (audioActive_) {
+            std::lock_guard<std::mutex> lk(writerMutex_);
+            drainAudio();
+        }
 
         // Fixed-duration cutoff. `t` is the wall-clock PTS this frame would carry;
         // once it reaches the requested length we finalize and append nothing more,
@@ -410,7 +462,13 @@ private:
         if (nextCaptureTime_ <= now) {
             nextCaptureTime_ = now + interval;   // source slower than target: resync
         }
-        double t = (double)(now - startElapsed_);   // wall-clock PTS
+        // PTS: wall clock normally; the AUDIO DEVICE clock when an audio track
+        // is being recorded, so frames land exactly where they happened on the
+        // audio timeline (drift-free A/V sync however unstable the fps is).
+        double t = audioActive_ ? audioClockSeconds()
+                                : (double)(now - startElapsed_);
+        t = std::max(t, lastPts_ + 1e-4);   // writer needs monotonic PTS
+        lastPts_ = t;
         if (source_ == Source::Fbo && fbo_) {
             writer_.addFrameAt(*fbo_, t);
             return;
@@ -443,6 +501,133 @@ private:
 #endif
     }
 
+    // --- audio tap (settings.audio) ------------------------------------------
+    // Same tap pattern as AudioRecorder: a Monitor-priority audioOut listener
+    // copies the master mix into an SPSC ring; the main thread drains it into
+    // the writer. The tap also anchors the AUDIO DEVICE clock: each callback
+    // publishes (framePosition, wall time), and audioClockSeconds() maps "now"
+    // onto the audio timeline by extrapolating from the latest pair. Overflow
+    // (writer stalled >4 s) is repaid as silence so A/V alignment survives.
+
+    static double nowWallSec() {
+        using namespace std::chrono;
+        return duration_cast<duration<double>>(
+                   steady_clock::now().time_since_epoch()).count();
+    }
+
+    void startAudioTap(int rate, int channels) {
+        audioRate_ = rate;
+        audioCh_   = channels;
+        size_t want = (size_t)rate * channels * 4;   // ~4 seconds
+        size_t cap = 1; while (cap < want) cap <<= 1;
+        audioRing_.assign(cap, 0.0f);
+        audioHead_.store(0, std::memory_order_relaxed);
+        audioTail_.store(0, std::memory_order_relaxed);
+        silenceDebt_.store(0, std::memory_order_relaxed);
+        consumedFrames_ = 0;
+        lastPts_ = -1.0;
+        anchored_.store(false, std::memory_order_relaxed);
+        recStartWall_ = nowWallSec();
+        audioActive_ = true;
+        audioListener_ = AudioEngine::getInstance().audioOut.listen(
+            [this](AudioOutBuffer& b) { onAudioBuffer(b); },
+            audio::priority::Monitor);
+    }
+
+    // Audio thread. Push the mixed buffer (prepending any silence debt) and
+    // publish the clock anchor.
+    void onAudioBuffer(const AudioOutBuffer& b) {
+        if (b.sampleRate != audioRate_ || b.channels != audioCh_) return;
+        const double noww = nowWallSec();
+        if (!anchored_.load(std::memory_order_relaxed)) {
+            // First buffer: its samples STARTED one buffer-duration ago; that
+            // instant, expressed on the recording timeline, is the audio
+            // track's PTS origin.
+            fp0_ = b.framePosition;
+            offset0_ = std::max(
+                0.0, (noww - (double)b.frameCount / audioRate_) - recStartWall_);
+            anchored_.store(true, std::memory_order_release);
+        }
+        fpLast_.store(b.framePosition + (uint64_t)b.frameCount, std::memory_order_relaxed);
+        wallLast_.store(noww, std::memory_order_relaxed);
+
+        const size_t cap = audioRing_.size();
+        auto space = [&] {
+            return cap - (size_t)(audioHead_.load(std::memory_order_relaxed)
+                                  - audioTail_.load(std::memory_order_acquire));
+        };
+        auto push = [&](const float* src, size_t nFloats) {   // src null = silence
+            const uint64_t head = audioHead_.load(std::memory_order_relaxed);
+            const size_t at = (size_t)(head & (cap - 1));
+            const size_t first = std::min(nFloats, cap - at);
+            if (src) {
+                std::memcpy(audioRing_.data() + at, src, first * sizeof(float));
+                if (nFloats > first)
+                    std::memcpy(audioRing_.data(), src + first, (nFloats - first) * sizeof(float));
+            } else {
+                std::memset(audioRing_.data() + at, 0, first * sizeof(float));
+                if (nFloats > first)
+                    std::memset(audioRing_.data(), 0, (nFloats - first) * sizeof(float));
+            }
+            audioHead_.store(head + nFloats, std::memory_order_release);
+        };
+
+        // Repay silence debt (frames lost to a previous overflow) first, so
+        // the ring's content stays contiguous on the audio timeline.
+        uint64_t debt = silenceDebt_.load(std::memory_order_relaxed);
+        if (debt > 0) {
+            uint64_t repay = std::min(debt, (uint64_t)(space() / audioCh_));
+            if (repay > 0) {
+                push(nullptr, (size_t)repay * audioCh_);
+                silenceDebt_.store(debt - repay, std::memory_order_relaxed);
+            }
+        }
+        const size_t n = (size_t)b.frameCount * audioCh_;
+        if (space() < n || silenceDebt_.load(std::memory_order_relaxed) > 0) {
+            silenceDebt_.fetch_add((uint64_t)b.frameCount, std::memory_order_relaxed);
+            return;
+        }
+        push(b.data, n);
+    }
+
+    // Main thread (writerMutex_ held). Hand every complete frame in the ring
+    // to the writer at its sample-accurate PTS.
+    void drainAudio() {
+        if (!writer_.isOpen() || !anchored_.load(std::memory_order_acquire)) return;
+        const size_t cap = audioRing_.size();
+        size_t n = (size_t)(audioHead_.load(std::memory_order_acquire)
+                            - audioTail_.load(std::memory_order_relaxed));
+        n -= n % (size_t)audioCh_;
+        if (n == 0) return;
+        audioScratch_.resize(n);
+        const uint64_t tail = audioTail_.load(std::memory_order_relaxed);
+        const size_t at = (size_t)(tail & (cap - 1));
+        const size_t first = std::min(n, cap - at);
+        std::memcpy(audioScratch_.data(), audioRing_.data() + at, first * sizeof(float));
+        if (n > first)
+            std::memcpy(audioScratch_.data() + first, audioRing_.data(), (n - first) * sizeof(float));
+        audioTail_.store(tail + n, std::memory_order_release);
+
+        const int frames = (int)(n / (size_t)audioCh_);
+        const double pts = offset0_ + (double)consumedFrames_ / audioRate_;
+        consumedFrames_ += (uint64_t)frames;
+        // Respect the fixed-duration cutoff (the video side stops there too).
+        if (duration_ > 0.0f && pts >= (double)duration_) return;
+        writer_.writeAudio(audioScratch_.data(), frames, pts);
+    }
+
+    // "Now" on the audio timeline: extrapolate from the latest (framePosition,
+    // wall time) pair the audio thread published. Before the first callback,
+    // fall back to the wall clock (sub-buffer-length window at start).
+    double audioClockSeconds() {
+        const double noww = nowWallSec();
+        if (!anchored_.load(std::memory_order_acquire))
+            return noww - recStartWall_;
+        const double atLast = offset0_
+            + (double)(fpLast_.load(std::memory_order_relaxed) - fp0_) / audioRate_;
+        return atLast + (noww - wallLast_.load(std::memory_order_relaxed));
+    }
+
     VideoWriter writer_;
     Source source_ = Source::None;
     const Fbo* fbo_ = nullptr;
@@ -451,10 +636,26 @@ private:
     float duration_ = 0.0f;           // fixed-length cutoff in seconds (0 = unlimited)
     float nextCaptureTime_ = -1.0f;   // scheduled time of the next frame to capture
     float lastFrameTime_ = -1.0f;     // previous afterFrame time (for source dt)
+    double lastPts_ = -1.0;           // monotonicity clamp for the video PTS
     EventListener afterFrameListener_;
     EventListener exitListener_;
     std::mutex writerMutex_;          // serializes encoder access (completion threads + stop)
     std::atomic<int> inFlight_{0};    // async captures not yet encoded (macOS)
+
+    // Audio tap state (see the comment block above).
+    bool audioActive_ = false;
+    int  audioRate_ = 0, audioCh_ = 0;
+    std::vector<float> audioRing_, audioScratch_;
+    std::atomic<uint64_t> audioHead_{0}, audioTail_{0};   // in floats
+    std::atomic<uint64_t> silenceDebt_{0};                // in frames
+    uint64_t consumedFrames_ = 0;                         // consumer-only
+    std::atomic<bool>     anchored_{false};
+    uint64_t fp0_ = 0;                // framePosition of the first buffer
+    double   offset0_ = 0.0;          // audio-track PTS origin on the rec timeline
+    double   recStartWall_ = 0.0;
+    std::atomic<uint64_t> fpLast_{0};
+    std::atomic<double>   wallLast_{0.0};
+    EventListener audioListener_;
 };
 
 // ---------------------------------------------------------------------------
