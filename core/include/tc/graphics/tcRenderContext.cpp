@@ -167,6 +167,65 @@ void internal::RenderContext::drawRectSquircle(Vec3 pos, Vec2 size, float radius
 }
 
 // ---------------------------------------------------------------------------
+// Superellipse (Lamé curve): |x/rx|^n + |y/ry|^n = 1, inscribed in (pos, size).
+// Parametric form: (rx * sign(cos t) * |cos t|^(2/n),
+//                   ry * sign(sin t) * |sin t|^(2/n))
+// n=2 is an ellipse, n=4 a squircle, n->inf approaches the bounding rect,
+// n=1 a diamond, n<1 concave (astroid-like). The shape is star-convex from
+// its center for any n>0, so the center-fan fill below is always valid —
+// including concave n<1 shapes that a first-vertex fan (endShape) would
+// render incorrectly.
+// ---------------------------------------------------------------------------
+void internal::RenderContext::drawSuperellipse(Vec3 pos, Vec2 size, float n) {
+    if (n <= 0) return;
+
+    float x = pos.x, y = pos.y, cz = pos.z;
+    float w = size.x, h = size.y;
+
+    // Normalize negative dimensions; see drawRectRounded for rationale.
+    if (w < 0) { x += w; w = -w; }
+    if (h < 0) { y += h; h = -h; }
+
+    float rx = w * 0.5f, ry = h * 0.5f;
+    float cx = x + rx, cy = y + ry;
+
+    // Same conservative heuristic as drawEllipse: segment count from the
+    // larger radius. Uniform-angle sampling naturally lands vertices on the
+    // corner diagonals, which is where large-n curvature concentrates.
+    int segments = decideCircleSegments(std::max(rx, ry));
+    if (segments == 0) return;
+
+    float expo = 2.0f / n;
+    auto point = [&](float angle) -> Vec2 {
+        float c = std::cos(angle), s = std::sin(angle);
+        return Vec2(cx + std::copysign(std::pow(std::abs(c), expo), c) * rx,
+                    cy + std::copysign(std::pow(std::abs(s), expo), s) * ry);
+    };
+
+    auto& writer = internal::getActiveWriter();
+
+    if (fillEnabled_) {
+        writer.begin(PrimitiveType::TriangleStrip);
+        writer.color(currentR_, currentG_, currentB_, currentA_);
+        for (int i = 0; i <= segments; i++) {
+            Vec2 p = point((float)i / segments * TAU);
+            writer.vertex(cx, cy, cz);
+            writer.vertex(p.x, p.y, cz);
+        }
+        writer.end();
+    }
+    if (strokeEnabled_) {
+        writer.begin(PrimitiveType::LineStrip);
+        writer.color(currentR_, currentG_, currentB_, currentA_);
+        for (int i = 0; i <= segments; i++) {
+            Vec2 p = point((float)i / segments * TAU);
+            writer.vertex(p.x, p.y, cz);
+        }
+        writer.end();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Bitmap string billboard (project a world position through the current camera
 // context and draw the glyphs screen-aligned on top of the scene).
 //

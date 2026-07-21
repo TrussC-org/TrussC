@@ -11476,6 +11476,32 @@ description.ja = "現在の図形にCatmull-Rom曲線の頂点を追加（beginS
 description.ko = "현재 도형에 Catmull-Rom 곡선 정점을 추가 (beginShape/endShape 사이에서 사용, 4점 이상 필요, closed=true는 닫힌 곡선)"
 related = ["drawCurve"]
 
+["appendSuperellipse"]
+category = "graphics_shapes"
+keywords = ["superellipse", "lame curve", "squircle", "shape", "outline"]
+description.en = "Append the closed outline of a superellipse inscribed in a rect to the current shape (use between beginShape/endShape)"
+description.ja = "矩形に内接するスーパー楕円の閉じた輪郭を現在の図形に追加（beginShape/endShape間で使用）"
+description.ko = "사각형에 내접하는 초타원의 닫힌 윤곽을 현재 도형에 추가 (beginShape/endShape 사이에서 사용)"
+details.en = '''
+Same bounding-box convention and exponent parameter as
+[`drawSuperellipse`](#drawSuperellipse). Note that `endShape()` fills with a
+first-vertex fan, which is only correct for convex outlines (`n >= 1`); for
+concave `n < 1` shapes use [`drawSuperellipse`](#drawSuperellipse) directly.
+'''
+details.ja = '''
+[`drawSuperellipse`](#drawSuperellipse) と同じバウンディングボックス指定・指数
+パラメータを取る。`endShape()` の塗りは先頭頂点からのファンなので凸形状
+（`n >= 1`）でのみ正しい。凹になる `n < 1` は
+[`drawSuperellipse`](#drawSuperellipse) を直接使うこと。
+'''
+details.ko = '''
+[`drawSuperellipse`](#drawSuperellipse)와 같은 바운딩 박스 지정과 지수
+매개변수를 사용한다. `endShape()`의 채우기는 첫 정점 기준 팬이므로 볼록한
+윤곽(`n >= 1`)에서만 올바르다. 오목한 `n < 1` 형태는
+[`drawSuperellipse`](#drawSuperellipse)를 직접 사용할 것.
+'''
+related = ["drawSuperellipse", "appendArc", "beginShape"]
+
 ["appendToFile"]
 category = "file"
 keywords = ["write", "add", "concat"]
@@ -12249,7 +12275,7 @@ of = ["ofDrawRectRounded"]
 description.en = "Draw rounded rectangle (circular arc corners)"
 description.ja = "角丸矩形を描画（円弧コーナー）"
 description.ko = "둥근 모서리 사각형 그리기 (원호 모서리)"
-related = ["drawRectSquircle"]
+related = ["drawRectSquircle", "drawSuperellipse"]
 
 ["drawRectSquircle"]
 category = "graphics_shapes"
@@ -12257,6 +12283,7 @@ keywords = ["rounded", "ios", "superellipse", "smooth corner"]
 description.en = "Draw squircle rectangle (curvature-continuous corners, iOS-style)"
 description.ja = "スクワークル矩形を描画（曲率連続コーナー、iOS風）"
 description.ko = "스쿼클 사각형 그리기 (곡률 연속 모서리, iOS 스타일)"
+related = ["drawRectRounded", "drawSuperellipse"]
 
 ["drawSphere"]
 category = "graphics_shapes"
@@ -12274,6 +12301,43 @@ description.en = "Draw a single stroke segment (thick line with cap/join)"
 description.ja = "単一のストロークを描画（太線、端点/結合スタイル対応）"
 description.ko = "단일 stroke 세그먼트를 그림 (캡/조인이 있는 굵은 선)"
 related = ["setStrokeWeight", "setStrokeCap", "setStrokeJoin", "drawLine"]
+
+["drawSuperellipse"]
+category = "graphics_shapes"
+keywords = ["superellipse", "lame curve", "apple icon", "squircle", "rounded", "piet hein"]
+description.en = "Draw a superellipse (Lamé curve) inscribed in a rect — Apple-icon-like by default (n=5)"
+description.ja = "矩形に内接するスーパー楕円（ラメ曲線）を描画 — デフォルト（n=5）はAppleアイコン風"
+description.ko = "사각형에 내접하는 초타원(라메 곡선) 그리기 — 기본값(n=5)은 Apple 아이콘 스타일"
+details.en = '''
+Draws the Lamé curve `|x/rx|^n + |y/ry|^n = 1` filling the rect `(x, y, w, h)` —
+a drop-in alternative to [`drawRectRounded`](#drawRectRounded). The exponent `n`
+morphs the shape: `2` = ellipse, `4` = squircle, higher values approach the
+bounding rect; `1` = diamond, `< 1` = concave star-like shapes (filled correctly
+via a center fan). The default `n = 5` approximates the Apple app-icon
+silhouette; Piet Hein's classic superellipse uses `n = 2.5`. Aspect ratio comes
+from `w`/`h`. Unlike [`drawRectSquircle`](#drawRectSquircle) (which rounds the
+corners of a rect with straight edges in between), the whole outline is one
+continuous superellipse.
+'''
+details.ja = '''
+矩形 `(x, y, w, h)` を満たすラメ曲線 `|x/rx|^n + |y/ry|^n = 1` を描画する。
+[`drawRectRounded`](#drawRectRounded) の代わりにそのまま使える。指数 `n` で形が
+変わる: `2` = 楕円、`4` = スクワークル、大きいほど矩形に近づく。`1` = ひし形、
+`1` 未満は凹んだ星形（中心ファンで正しく塗られる）。デフォルトの `n = 5` は
+Apple のアプリアイコンに近いシルエット。Piet Hein の古典的スーパー楕円は
+`n = 2.5`。縦横比は `w`/`h` で決まる。[`drawRectSquircle`](#drawRectSquircle)
+（角だけ丸めて辺は直線）と違い、輪郭全体が1本の連続したスーパー楕円になる。
+'''
+details.ko = '''
+사각형 `(x, y, w, h)`를 채우는 라메 곡선 `|x/rx|^n + |y/ry|^n = 1`을 그린다.
+[`drawRectRounded`](#drawRectRounded) 대신 바로 사용할 수 있다. 지수 `n`으로
+형태가 변한다: `2` = 타원, `4` = 스쿼클, 클수록 사각형에 가까워진다. `1` =
+마름모, `1` 미만은 오목한 별 모양(중심 팬으로 올바르게 채워진다). 기본값
+`n = 5`는 Apple 앱 아이콘에 가까운 실루엣이며, Piet Hein의 고전적 초타원은
+`n = 2.5`. 종횡비는 `w`/`h`로 결정된다. [`drawRectSquircle`](#drawRectSquircle)
+(모서리만 둥글고 변은 직선)과 달리 윤곽 전체가 하나의 연속된 초타원이다.
+'''
+related = ["drawRectRounded", "drawRectSquircle", "drawEllipse", "appendSuperellipse"]
 
 ["drawTriangle"]
 category = "graphics_shapes"
