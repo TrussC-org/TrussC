@@ -1076,6 +1076,25 @@ uint64_t getFrameCount();  // forward decl — defined in Time section below
 inline void ensureFontAtlas(int rows) {
     if (rows <= 0) return;
     if (!internal::fontInitialized) return;  // pipeline/sampler not ready yet
+
+    // The atlas texture is fixed-width with a hard row cap (512x512 =
+    // CELLS_PER_COL rows). generateAtlasPixels() clamps its buffer to that
+    // cap, so the row count used for the texture height / upload size below
+    // MUST be clamped identically — otherwise sg_update_image would read
+    // past the end of the CPU pixel buffer (SIGBUS, issue #188). Glyphs
+    // registered beyond capacity degrade gracefully: their cells are skipped
+    // by generateAtlasPixels and they render as blanks.
+    if (rows > bitmapfont::CELLS_PER_COL) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            logWarning("BitmapFont") << "Glyph atlas is full ("
+                << bitmapfont::CELLS_PER_COL << " rows, "
+                << bitmapfont::TOTAL_CELLS << " cells); glyphs registered "
+                << "beyond capacity will not render.";
+        }
+        rows = bitmapfont::CELLS_PER_COL;
+    }
     const uint64_t curRegistry = bitmapfont::internal::registryVersion;
     const bool sizeOk = internal::fontAtlasInitialized
                      && internal::fontAtlasRows >= rows;
