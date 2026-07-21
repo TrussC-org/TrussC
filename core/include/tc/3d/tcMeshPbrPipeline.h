@@ -15,13 +15,14 @@
 //   5. tc/gpu/shaders/meshPbr.glsl.h (generated sokol-shdc output)
 //   6. tcMeshPbrPipeline.h        (this file; defines Mesh::drawGpuPbr())
 //
-// v1 limitations:
-//   - Swapchain target only. Drawing PBR mesh inside an Fbo pass will trigger
-//     a sokol_gfx pipeline format mismatch. Phase 4 will add per-target cache.
-//   - Swapchain PBR draws are deferred into the per-layer flush
-//     (flushDeferredShaderDraws) so they composite with sokol_gl 2D in
-//     submission order — a 2D background drawn before a PBR mesh now stays
-//     behind it. FBO-pass PBR draws remain immediate.
+// Draw submission:
+//   - Pipelines are cached per (color format, sample count), so both the
+//     swapchain and Fbo passes are supported render targets.
+//   - ALL PBR draws are deferred: swapchain draws into the per-layer flush
+//     (flushDeferredShaderDraws), FBO-pass draws into fboPbrDraws (flushed at
+//     Fbo::end()), so they composite with sokol_gl 2D in submission order.
+//     Captured sg_buffer handles stay valid because Mesh defers buffer
+//     destruction to end of frame (internal::pendingGpuBufferDestroys).
 //
 // =============================================================================
 

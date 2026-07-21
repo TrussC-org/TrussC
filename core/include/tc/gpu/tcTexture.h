@@ -902,9 +902,16 @@ private:
 
     void drawInternal(float x, float y, float w, float h,
                       float u0, float v0, float u1, float v1) const {
-        // Blend pipeline for the active target (behavior preserved: FBO uses Fill2D
-        // even for premultiplied sources, as before).
-        if (internal::currentWindowContext().inFboPass) {
+        // Blend pipeline for the active target. An explicit non-Alpha blend mode
+        // set via setBlendMode() takes priority — texture draws (including
+        // Fbo::draw) must honor it, e.g. compositing an Fbo with Subtract.
+        // Under the default Alpha mode, behavior is preserved: premultiplied
+        // sources use the premult pipeline on the swapchain, FBO passes use
+        // Fill2D even for premultiplied sources, as before.
+        BlendMode blend = internal::currentWindowContext().currentBlendMode;
+        if (blend != BlendMode::Alpha) {
+            internal::loadPipeline(internal::active2D(blend));
+        } else if (internal::currentWindowContext().inFboPass) {
             internal::loadPipeline(internal::activeFill2D());
         } else if (premultipliedAlpha_) {
             internal::loadPipeline(internal::activePremult());
