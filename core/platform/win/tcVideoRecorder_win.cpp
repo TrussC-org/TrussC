@@ -223,6 +223,11 @@ HRESULT openWriter(const std::wstring& wpath, int w, int h,
 // ---------------------------------------------------------------------------
 bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
                                float fps, const VideoRecordSettings& settings) {
+    if (settings.audio) {
+        logWarning("VideoWriter")
+            << "audio recording is not supported on this platform yet - "
+               "recording video only";
+    }
     // This backend encodes H.264 and HEVC (both into .mp4). ProRes is a macOS-
     // only mastering codec; reject it clearly rather than silently substituting.
     if (settings.codec != VideoCodec::H264 && settings.codec != VideoCodec::HEVC) {
@@ -311,6 +316,9 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
 // ---------------------------------------------------------------------------
 // appendPlatform - encode one RGBA8 (top-down) frame
 // ---------------------------------------------------------------------------
+// Audio track is macOS-only for now; the header degrades to video-only.
+bool VideoWriter::appendAudioPlatform(const float*, int, double) { return false; }
+
 bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     VideoWriterPlatformData* pd = platform_;
     if (!pd || !pd->writer || pd->failed) return false;

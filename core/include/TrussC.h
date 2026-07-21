@@ -2858,6 +2858,7 @@ inline void drawCone(float x, float y, float z, float radius, float height, int 
 // TrussC sound
 #include "tc/sound/tcSound.h"
 #include "tc/sound/tcChipSound.h"
+#include "tc/sound/tcAudioRecorder.h"
 
 // TrussC threading
 #include "tc/utils/tcThread.h"

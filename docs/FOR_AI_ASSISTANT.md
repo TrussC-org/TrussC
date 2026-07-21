@@ -1108,6 +1108,27 @@ Pass a **priority** to `audioOut.listen(...)` and listeners compose in a fixed o
 - **Monitor** (scope / FFT / record) **reads last** — it sees the finished buffer, so it's **ideal for visualization.**
 Adding a Generator later never moves it behind Effect / Monitor — order is fixed by priority.
 
+### How do I record the audio the app is playing? (AudioRecorder)
+
+`AudioRecorder` records the engine's **master mix** — everything the speakers get, `Sound` playback and `audioOut` synthesis alike — to a WAV file. It taps `audioOut` at `audio::priority::Monitor` (so it always runs after every generator/effect), and file IO happens on a background thread; the audio thread never blocks.
+
+```cpp
+AudioRecorder rec;
+rec.start("take.wav");                 // stereo s16 by default (engine 2ch)
+rec.stop();                            // finalizes the header; also runs in the dtor
+```
+
+`AudioRecordSettings` selects the sample format (`S16` / `F32` float WAV) and an optional **channel remap** — the same `vector<vector<int>>` structure and unnormalized-sum semantics as `Sound::setChannelMap()` (outer index = file channel, inner list = engine channels summed into it; clipping is your choice, use F32 if you want headroom kept):
+
+```cpp
+AudioRecordSettings s;
+s.format = AudioRecordSettings::SampleFormat::F32;
+s.channelMap = { {0, 1} };             // one mono file channel = L + R summed
+rec.start("mono.wav", s);
+```
+
+With no map: 1ch engine → mono file, 2ch → stereo, 3ch+ → averaged mono downmix. Several recorders can run at once (e.g. a stereo master and a mapped stem simultaneously). The engine must be initialized before `start()`.
+
 ### Abstract anything drawable with HasTexture?
 
 `Image` / `Fbo` / `VideoPlayer` / `VideoGrabber` all **inherit `HasTexture`** and have `getTexture()`. So you can **abstract "owns a texture = drawable"** behind a `HasTexture` (pointer/reference) and draw images, video, or FBOs with the same code. **Note: `Pixels` is NOT a HasTexture** — it's a CPU-side pixel buffer (no GPU texture), so it doesn't fit this abstraction. (Often surprising, so worth flagging.)
@@ -1130,6 +1151,18 @@ Encoder settings: `VideoRecordSettings`. Platforms: macOS / Windows / Linux / An
 ### How do I record a fixed-length clip that stops itself?
 
 Pass the length in seconds: `startRecording("out.mp4", 3.0f)` records exactly 3 seconds, then **auto-stops and finalizes the file itself** (PTS-based cut, output length == the requested length within one frame). Same as setting `VideoRecordSettings.duration` (0 = unlimited = the default). A manual `stopRecording()` **always wins**: call it early and you get a valid shorter file; call it after the auto-stop already fired and it's a harmless no-op. So you never need a timer thread to end a recording.
+
+### Can the screen recording include the app's audio? (VideoRecordSettings.audio)
+
+Yes — set `audio = true` and the recording gains an AAC track of the engine's master mix (macOS for now; Windows/Linux warn and record video-only):
+
+```cpp
+VideoRecordSettings s;
+s.audio = true;                        // sample rate / channels auto-filled from AudioEngine
+startRecording("out.mp4", s);
+```
+
+While audio is recorded, the **video PTS runs on the audio device clock** (frames are stamped where they happened on the audio timeline), so A/V sync holds drift-free even when the frame rate is unstable — no need to lock the app to a fixed fps for a clean take. The AudioEngine must be initialized, otherwise it warns and records video-only.
 
 ### Can an AI agent start/stop recording over MCP?
 
