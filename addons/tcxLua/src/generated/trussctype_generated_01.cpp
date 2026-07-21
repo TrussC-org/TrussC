@@ -40,27 +40,28 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         t["getBounds"] = &trussc::Path::getBounds;
         t["getPerimeter"] = &trussc::Path::getPerimeter;
     }
-    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
-        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
-        "Immutable", sol::var(trussc::TextureUsage::Immutable),
-        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
-        "Stream", sol::var(trussc::TextureUsage::Stream),
-        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
     {
-        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
-        t["updateFps"] = &trussc::FpsSettings::updateFps;
-        t["drawFps"] = &trussc::FpsSettings::drawFps;
-        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
-        t["synced"] = &trussc::FpsSettings::synced;
+        sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
+        t["sampleRate"] = &trussc::AudioSettings::sampleRate;
+        t["channels"] = &trussc::AudioSettings::channels;
+        t["bufferSize"] = &trussc::AudioSettings::bufferSize;
+        t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
+        t["deviceName"] = &trussc::AudioSettings::deviceName;
     }
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
+    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
+        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
+        "Off", sol::var(trussc::KinsokuLevel::Off),
+        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
+        "Standard", sol::var(trussc::KinsokuLevel::Standard));
+    lua->new_usertype<trussc::AxisMode>("AxisMode",
+        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
+        "None", sol::var(trussc::AxisMode::None),
+        "Fill", sol::var(trussc::AxisMode::Fill),
+        "Content", sol::var(trussc::AxisMode::Content));
     {
-        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
-        t["width"] = &trussc::ResizeEventArgs::width;
-        t["height"] = &trussc::ResizeEventArgs::height;
+        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
+        t["message"] = &trussc::TcpErrorEventArgs::message;
+        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
     }
 }
 #ifndef _MSC_VER

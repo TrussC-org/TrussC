@@ -83,12 +83,12 @@ After `imguiBegin()`, use the standard [Dear ImGui API](https://github.com/ocorn
 
 When using TrussC's MCP interface, tcxImGui provides tools for AI agents to inspect and interact with ImGui widgets.
 
-To enable, call `imguiSetup()` before `mcp::registerDebuggerTools()`:
+To enable, call `imguiSetup()` before `mcp::registerControlTools()`:
 
 ```cpp
 void tcApp::setup() {
     imguiSetup();
-    mcp::registerDebuggerTools();  // ImGui tools auto-registered
+    mcp::registerControlTools();  // ImGui tools auto-registered
 }
 ```
 

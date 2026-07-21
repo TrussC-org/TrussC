@@ -28,8 +28,8 @@ void tcApp::setup() {
     logNotice("tcApp") << "Press 'L' to load a video file";
 }
 
-void tcApp::loadVideo(const string& path) {
-    logNotice("tcApp") << "Loading video: " << path;
+void tcApp::loadVideo(const fs::path& path) {
+    logNotice("tcApp") << "Loading video: " << path.string();
 
     if (video_.load(path)) {
         logNotice("tcApp") << "Video loaded: " << (int)video_.getWidth() << "x"
@@ -37,7 +37,7 @@ void tcApp::loadVideo(const string& path) {
                              << video_.getDuration() << " sec";
         video_.play();
     } else {
-        logError("tcApp") << "Failed to load video: " << path;
+        logError("tcApp") << "Failed to load video: " << path.string();
     }
 }
 

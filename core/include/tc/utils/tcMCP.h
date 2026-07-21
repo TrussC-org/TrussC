@@ -75,7 +75,7 @@ inline std::vector<DeferredResponse>& deferredResponses() {
     return v;
 }
 
-// Set by registerDebuggerTools() (which is web-available), so this flag must
+// Set by registerControlTools() (which is web-available), so this flag must
 // live outside the server-only #ifndef block below.
 inline std::atomic<bool>& isDebuggerEnabled() {
     static std::atomic<bool> enabled{false};
@@ -85,7 +85,7 @@ inline std::atomic<bool>& isDebuggerEnabled() {
 } // namespace detail
 
 // Check if debugger tools are registered (input injection / scene mutation).
-// The flag is set by registerDebuggerTools() — registering IS the opt-in, so
+// The flag is set by registerControlTools() — registering IS the opt-in, so
 // apps/addons can query this to tell whether the debugger surface is exposed.
 inline bool isDebuggerEnabled() {
     return detail::isDebuggerEnabled().load();
@@ -619,9 +619,9 @@ inline int getHttpPort() {
     return detail::getHttpPort().load();
 }
 
-// Deprecated: registerDebuggerTools() is now the opt-in by itself (it sets the
+// Deprecated: registerControlTools() is now the opt-in by itself (it sets the
 // isDebuggerEnabled() flag). This shim is a no-op kept for source compatibility.
-[[deprecated("registerDebuggerTools() now opts in by itself; remove this call. Will be removed in v1.0.0")]]
+[[deprecated("registerControlTools() now opts in by itself; remove this call. Will be removed in v1.0.0")]]
 inline void enableDebugger() {}
 
 #endif // __EMSCRIPTEN__

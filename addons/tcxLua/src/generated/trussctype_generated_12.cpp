@@ -88,46 +88,48 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         t["lerp"] = &trussc::ColorOKLab::lerp;
     }
     {
-        sol::usertype<trussc::RectNodeButton> t = lua->new_usertype<trussc::RectNodeButton>("RectNodeButton",
-            sol::constructors<trussc::RectNodeButton()>(),
-            sol::call_constructor, sol::constructors<trussc::RectNodeButton()>());
-        t["normalColor"] = &trussc::RectNodeButton::normalColor;
-        t["hoverColor"] = &trussc::RectNodeButton::hoverColor;
-        t["pressColor"] = &trussc::RectNodeButton::pressColor;
-        t["label"] = &trussc::RectNodeButton::label;
-        t["isPressed"] = &trussc::RectNodeButton::isPressed;
-        t["draw"] = &trussc::RectNodeButton::draw;
+        sol::usertype<trussc::PlayingSound> t = lua->new_usertype<trussc::PlayingSound>("PlayingSound");
+        t["buffer"] = &trussc::PlayingSound::buffer;
+        t["volume"] = &trussc::PlayingSound::volume;
+        t["pan"] = &trussc::PlayingSound::pan;
+        t["speed"] = &trussc::PlayingSound::speed;
+        t["loop"] = &trussc::PlayingSound::loop;
+        t["playing"] = &trussc::PlayingSound::playing;
+        t["paused"] = &trussc::PlayingSound::paused;
+        t["mixMode"] = &trussc::PlayingSound::mixMode;
+        t["positionF"] = &trussc::PlayingSound::positionF;
+        t["rateRatio"] = &trussc::PlayingSound::rateRatio;
     }
     {
-        sol::usertype<trussc::ShaderVertex> t = lua->new_usertype<trussc::ShaderVertex>("ShaderVertex");
-        t["x"] = &trussc::ShaderVertex::x;
-        t["y"] = &trussc::ShaderVertex::y;
-        t["z"] = &trussc::ShaderVertex::z;
-        t["u"] = &trussc::ShaderVertex::u;
-        t["v"] = &trussc::ShaderVertex::v;
-        t["r"] = &trussc::ShaderVertex::r;
-        t["g"] = &trussc::ShaderVertex::g;
-        t["b"] = &trussc::ShaderVertex::b;
-        t["a"] = &trussc::ShaderVertex::a;
+        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
+        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
+        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
+        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
+        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
+        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
+        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
     }
     {
-        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream",
-            sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>(),
-            sol::call_constructor, sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>());
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener",
+            sol::constructors<trussc::EventListener()>(),
+            sol::call_constructor, sol::constructors<trussc::EventListener()>());
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
     }
-    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
-        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
-        "Miter", sol::var(trussc::StrokeJoin::Miter),
-        "Round", sol::var(trussc::StrokeJoin::Round),
-        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
+    lua->new_usertype<trussc::PointStyle>("PointStyle",
+        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
+        "Square", sol::var(trussc::PointStyle::Square),
+        "Round", sol::var(trussc::PointStyle::Round),
+        "Pixel", sol::var(trussc::PointStyle::Pixel));
     {
-        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
-        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
+        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
+        t["format"] = &trussc::AudioRecordSettings::format;
+        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
     }
     {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+        sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
+        t["raw"] = &trussc::ConsoleEventArgs::raw;
+        t["args"] = &trussc::ConsoleEventArgs::args;
     }
 }
 #ifndef _MSC_VER

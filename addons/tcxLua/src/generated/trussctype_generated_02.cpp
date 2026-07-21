@@ -77,37 +77,39 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["getGpuPointCount"] = &trussc::Mesh::getGpuPointCount;
     }
     {
-        sol::usertype<trussc::ScrollBar> t = lua->new_usertype<trussc::ScrollBar>("ScrollBar");
-        t["getBarColor"] = &trussc::ScrollBar::getBarColor;
-        t["setBarColor"] = &trussc::ScrollBar::setBarColor;
-        t["getBarWidth"] = &trussc::ScrollBar::getBarWidth;
-        t["setBarWidth"] = &trussc::ScrollBar::setBarWidth;
-        t["getMargin"] = &trussc::ScrollBar::getMargin;
-        t["setMargin"] = &trussc::ScrollBar::setMargin;
-        t["getOffset"] = &trussc::ScrollBar::getOffset;
-        t["updateFromContainer"] = &trussc::ScrollBar::updateFromContainer;
+        sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector",
+            sol::constructors<trussc::JsonReadReflector(trussc::Json)>(),
+            sol::call_constructor, sol::constructors<trussc::JsonReadReflector(trussc::Json)>());
+        t["applied"] = &trussc::JsonReadReflector::applied;
+        t["skipped"] = &trussc::JsonReadReflector::skipped;
+        t["readOnly"] = &trussc::JsonReadReflector::readOnly;
+        t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
+        t["endGroup"] = &trussc::JsonReadReflector::endGroup;
     }
-    lua->new_usertype<trussc::LoadError>("LoadError",
-        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
-        "None", sol::var(trussc::LoadError::None),
-        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
-        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
-        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
-        "Unknown", sol::var(trussc::LoadError::Unknown));
-    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
-        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
-        "Off", sol::var(trussc::KinsokuLevel::Off),
-        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
-        "Standard", sol::var(trussc::KinsokuLevel::Standard));
-    lua->new_usertype<trussc::EaseMode>("EaseMode",
-        sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
-        "In", sol::var(trussc::EaseMode::In),
-        "Out", sol::var(trussc::EaseMode::Out),
-        "InOut", sol::var(trussc::EaseMode::InOut));
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
     {
-        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
-        t["message"] = &trussc::UdpErrorEventArgs::message;
-        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
+        sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
+        t["frameCount"] = &trussc::AudioInBuffer::frameCount;
+        t["channels"] = &trussc::AudioInBuffer::channels;
+        t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
+        t["framePosition"] = &trussc::AudioInBuffer::framePosition;
+    }
+    lua->new_usertype<trussc::TcyMode>("TcyMode",
+        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
+        "Rotate", sol::var(trussc::TcyMode::Rotate),
+        "Upright", sol::var(trussc::TcyMode::Upright),
+        "Combine", sol::var(trussc::TcyMode::Combine));
+    {
+        sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
+        t["members"] = &trussc::JsonWriteReflector::members;
+        t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
     }
 }
 #ifndef _MSC_VER

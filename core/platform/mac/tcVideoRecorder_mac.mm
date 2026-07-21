@@ -32,6 +32,12 @@ struct VideoWriterPlatformData {
     int64_t frameIndex = 0;
     bool failed = false;
     CVPixelBufferRef pendingPB = NULL;   // locked buffer between lockFrame/submitFrame
+    // Audio track (settings.audio): AAC encoder input + the LPCM float source
+    // format description used to wrap incoming sample chunks.
+    AVAssetWriterInput* audioInput = nil;
+    CMAudioFormatDescriptionRef audioFmt = NULL;
+    int audioRate = 0;
+    int audioCh = 0;
 };
 }  // namespace internal
 using internal::VideoWriterPlatformData;
@@ -105,7 +111,13 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
         AVAssetWriterInput* input =
             [AVAssetWriterInput assetWriterInputWithMediaType:AVMediaTypeVideo
                                                outputSettings:outSettings];
-        input.expectsMediaDataInRealTime = NO;
+        // Offline (video-only) writers keep the throttled non-realtime mode.
+        // WITH an audio track, both inputs must run in realtime mode: in
+        // non-realtime mode AVAssetWriter throttles readyForMoreMediaData to
+        // interleave the tracks, and a video append that spin-waits for
+        // readiness while holding the recorder's writer mutex deadlocks
+        // against the audio feed that would unblock it.
+        input.expectsMediaDataInRealTime = settings.audio ? YES : NO;
 
         NSDictionary* sourceAttrs = @{
             (NSString*)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
@@ -128,6 +140,54 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
         }
         [writer addInput:input];
 
+        // Optional AAC audio track. Failures here degrade to video-only with a
+        // warning — a broken audio path must never kill the recording.
+        AVAssetWriterInput* audioInput = nil;
+        CMAudioFormatDescriptionRef audioFmt = NULL;
+        if (settings.audio) {
+            if (settings.audioSampleRate <= 0 || settings.audioChannels <= 0) {
+                logWarning("VideoWriter")
+                    << "audio requested but audioSampleRate/audioChannels are "
+                       "unset - recording video only";
+            } else {
+                NSDictionary* aSettings = @{
+                    AVFormatIDKey: @(kAudioFormatMPEG4AAC),
+                    AVSampleRateKey: @(settings.audioSampleRate),
+                    AVNumberOfChannelsKey: @(settings.audioChannels),
+                    AVEncoderBitRateKey: @(settings.audioBitrate > 0
+                                               ? settings.audioBitrate : 192000),
+                };
+                audioInput = [AVAssetWriterInput
+                    assetWriterInputWithMediaType:AVMediaTypeAudio
+                                   outputSettings:aSettings];
+                audioInput.expectsMediaDataInRealTime = YES;   // see video input note
+                if ([writer canAddInput:audioInput]) {
+                    [writer addInput:audioInput];
+                    // Source samples arrive as packed interleaved float32 LPCM.
+                    AudioStreamBasicDescription asbd = {};
+                    asbd.mSampleRate       = settings.audioSampleRate;
+                    asbd.mFormatID         = kAudioFormatLinearPCM;
+                    asbd.mFormatFlags      = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+                    asbd.mChannelsPerFrame = (UInt32)settings.audioChannels;
+                    asbd.mBitsPerChannel   = 32;
+                    asbd.mBytesPerFrame    = (UInt32)(settings.audioChannels * sizeof(float));
+                    asbd.mFramesPerPacket  = 1;
+                    asbd.mBytesPerPacket   = asbd.mBytesPerFrame;
+                    if (CMAudioFormatDescriptionCreate(kCFAllocatorDefault, &asbd,
+                                                       0, NULL, 0, NULL, NULL,
+                                                       &audioFmt) != noErr) {
+                        logWarning("VideoWriter")
+                            << "audio format description failed - recording video only";
+                        audioFmt = NULL;   // input stays attached but unfed
+                    }
+                } else {
+                    logWarning("VideoWriter")
+                        << "writer cannot add audio input - recording video only";
+                    audioInput = nil;
+                }
+            }
+        }
+
         if (![writer startWriting]) {
             logError("VideoWriter")
                 << "startWriting failed: "
@@ -144,7 +204,66 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
         pd->width = w;
         pd->height = h;
         pd->fps = (fps > 0) ? fps : 30.0;
+        pd->audioInput = audioInput;
+        pd->audioFmt = audioFmt;
+        pd->audioRate = settings.audioSampleRate;
+        pd->audioCh = settings.audioChannels;
         platform_ = pd;
+        return true;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// appendAudioPlatform - wrap interleaved float32 samples into a CMSampleBuffer
+// and hand them to the AAC input. PTS timescale = the sample rate itself, so
+// chunk boundaries are sample-accurate.
+// ---------------------------------------------------------------------------
+bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
+                                      double timeSec) {
+    VideoWriterPlatformData* pd = platform_;
+    if (!pd || !pd->writer || pd->failed || !pd->audioInput || !pd->audioFmt)
+        return false;
+
+    @autoreleasepool {
+        int spins = 0;
+        while (!pd->audioInput.readyForMoreMediaData && spins < 5000) {
+            [NSThread sleepForTimeInterval:0.001];
+            ++spins;
+        }
+        if (!pd->audioInput.readyForMoreMediaData) {
+            logWarning("VideoWriter") << "audio input not ready (timeout), chunk dropped";
+            return false;   // audio-only failure: the video keeps going
+        }
+
+        const size_t bytes = (size_t)frames * pd->audioCh * sizeof(float);
+        CMBlockBufferRef bb = NULL;
+        if (CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault, NULL, bytes,
+                                               kCFAllocatorDefault, NULL, 0,
+                                               bytes, 0, &bb) != kCMBlockBufferNoErr) {
+            return false;
+        }
+        CMBlockBufferReplaceDataBytes(interleaved, bb, 0, bytes);
+
+        CMSampleBufferRef sb = NULL;
+        CMTime pts = CMTimeMakeWithSeconds(timeSec, pd->audioRate);
+        OSStatus st = CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+            kCFAllocatorDefault, bb, pd->audioFmt, frames, pts, NULL, &sb);
+        CFRelease(bb);
+        if (st != noErr || !sb) {
+            if (sb) CFRelease(sb);
+            return false;
+        }
+
+        BOOL ok = [pd->audioInput appendSampleBuffer:sb];
+        CFRelease(sb);
+        if (!ok) {
+            logWarning("VideoWriter")
+                << "appendSampleBuffer (audio) failed: "
+                << (pd->writer.error
+                        ? pd->writer.error.localizedDescription.UTF8String
+                        : "unknown");
+            return false;
+        }
         return true;
     }
 }
@@ -314,6 +433,7 @@ void VideoWriter::closePlatform() {
     @autoreleasepool {
         if (pd->writer && pd->writer.status == AVAssetWriterStatusWriting) {
             [pd->input markAsFinished];
+            if (pd->audioInput) [pd->audioInput markAsFinished];
             dispatch_semaphore_t sem = dispatch_semaphore_create(0);
             [pd->writer finishWritingWithCompletionHandler:^{
                 dispatch_semaphore_signal(sem);
@@ -323,6 +443,8 @@ void VideoWriter::closePlatform() {
         pd->writer = nil;
         pd->input = nil;
         pd->adaptor = nil;
+        pd->audioInput = nil;
+        if (pd->audioFmt) { CFRelease(pd->audioFmt); pd->audioFmt = NULL; }
     }
 
     delete pd;

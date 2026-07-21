@@ -86,44 +86,45 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["build"] = &trussc::ChipSoundBundle::build;
     }
     {
-        sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
-        t["isWeb"] = &trussc::Platform::isWeb;
-        t["isMacOS"] = &trussc::Platform::isMacOS;
-        t["isIOS"] = &trussc::Platform::isIOS;
-        t["isWindows"] = &trussc::Platform::isWindows;
-        t["isAndroid"] = &trussc::Platform::isAndroid;
-        t["isLinux"] = &trussc::Platform::isLinux;
-        t["isApple"] = &trussc::Platform::isApple;
-        t["isMobile"] = &trussc::Platform::isMobile;
-        t["isDesktop"] = &trussc::Platform::isDesktop;
-        t["name"] = &trussc::Platform::name;
+        sol::usertype<trussc::RectNodeButton> t = lua->new_usertype<trussc::RectNodeButton>("RectNodeButton",
+            sol::constructors<trussc::RectNodeButton()>(),
+            sol::call_constructor, sol::constructors<trussc::RectNodeButton()>());
+        t["normalColor"] = &trussc::RectNodeButton::normalColor;
+        t["hoverColor"] = &trussc::RectNodeButton::hoverColor;
+        t["pressColor"] = &trussc::RectNodeButton::pressColor;
+        t["label"] = &trussc::RectNodeButton::label;
+        t["isPressed"] = &trussc::RectNodeButton::isPressed;
+        t["draw"] = &trussc::RectNodeButton::draw;
     }
-    lua->new_usertype<trussc::Direction>("Direction",
-        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
-        "Left", sol::var(trussc::Direction::Left),
-        "Center", sol::var(trussc::Direction::Center),
-        "Right", sol::var(trussc::Direction::Right),
-        "Top", sol::var(trussc::Direction::Top),
-        "Bottom", sol::var(trussc::Direction::Bottom),
-        "Baseline", sol::var(trussc::Direction::Baseline));
-    lua->new_usertype<trussc::MouseButton>("MouseButton",
-        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
-        "Left", sol::var(trussc::MouseButton::Left),
-        "Right", sol::var(trussc::MouseButton::Right),
-        "Middle", sol::var(trussc::MouseButton::Middle),
-        "None", sol::var(trussc::MouseButton::None));
     {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
-        t["altitude"] = &trussc::Location::altitude;
-        t["accuracy"] = &trussc::Location::accuracy;
+        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
+        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
+        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
+        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
+        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
+        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
+        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
+    }
+    {
+        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream",
+            sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>(),
+            sol::call_constructor, sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>());
+    }
+    {
+        sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
+        t["data"] = &trussc::UdpReceiveEventArgs::data;
+        t["remoteHost"] = &trussc::UdpReceiveEventArgs::remoteHost;
+        t["remotePort"] = &trussc::UdpReceiveEventArgs::remotePort;
     }
     {
         sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
         t["files"] = &trussc::DragDropEventArgs::files;
         t["x"] = &trussc::DragDropEventArgs::x;
         t["y"] = &trussc::DragDropEventArgs::y;
+    }
+    {
+        sol::usertype<trussc::TcpReceiveEventArgs> t = lua->new_usertype<trussc::TcpReceiveEventArgs>("TcpReceiveEventArgs");
+        t["data"] = &trussc::TcpReceiveEventArgs::data;
     }
 }
 #ifndef _MSC_VER

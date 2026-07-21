@@ -83,43 +83,47 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["consumed"] = &trussc::MouseMoveEventArgs::consumed;
         t["syncLegacy"] = &trussc::MouseMoveEventArgs::syncLegacy;
     }
-    lua->new_usertype<trussc::Orientation>("Orientation",
-        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
-        "Portrait", sol::var(trussc::Orientation::Portrait),
-        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
-        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
-        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
-        "Landscape", sol::var(trussc::Orientation::Landscape),
-        "All", sol::var(trussc::Orientation::All),
-        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
     {
-        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
-        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
-        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
-        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
-        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
-        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
-        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
+        sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream",
+            sol::constructors<trussc::SoundStream()>(),
+            sol::call_constructor, sol::constructors<trussc::SoundStream()>());
+        t["loadStream"] = sol::overload([](trussc::SoundStream& self, const fs::path & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const fs::path & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
+        t["getDuration"] = &trussc::SoundStream::getDuration;
+        t["getPath"] = &trussc::SoundStream::getPath;
+        t["getMaxPolyphony"] = &trussc::SoundStream::getMaxPolyphony;
     }
     {
-        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
-        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
-        t["channels"] = &trussc::AudioOutBuffer::channels;
-        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
-        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
+        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
+        t["view"] = &trussc::CameraContext::view;
+        t["projection"] = &trussc::CameraContext::projection;
+        t["viewW"] = &trussc::CameraContext::viewW;
+        t["viewH"] = &trussc::CameraContext::viewH;
+        t["pickable"] = &trussc::CameraContext::pickable;
+        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
+        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
     }
-    lua->new_usertype<trussc::LightType>("LightType",
-        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
-        "Directional", sol::var(trussc::LightType::Directional),
-        "Point", sol::var(trussc::LightType::Point),
-        "Spot", sol::var(trussc::LightType::Spot));
-    lua->new_usertype<trussc::ImageType>("ImageType",
-        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
-        "Color", sol::var(trussc::ImageType::Color),
-        "Grayscale", sol::var(trussc::ImageType::Grayscale));
     {
-        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
-        t["text"] = &trussc::ClipboardPastedEventArgs::text;
+        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
+        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
+        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
+        t["x"] = &trussc::TouchEventArgs::x;
+        t["y"] = &trussc::TouchEventArgs::y;
+        t["id"] = &trussc::TouchEventArgs::id;
+    }
+    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
+        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
+        "Miter", sol::var(trussc::StrokeJoin::Miter),
+        "Round", sol::var(trussc::StrokeJoin::Round),
+        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
+    {
+        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
+        t["mode"] = &trussc::CurveStyle::mode;
+        t["tolerance"] = &trussc::CurveStyle::tolerance;
+        t["resolution"] = &trussc::CurveStyle::resolution;
+    }
+    {
+        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
+        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
     }
 }
 #ifndef _MSC_VER

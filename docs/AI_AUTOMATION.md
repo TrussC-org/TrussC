@@ -66,7 +66,6 @@ your own tools:
 | `tc_get_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
 | `tc_get_status_image` | `name`, `width`, `quality` (last two optional) | Fetch an app-published image registered via `mcp::statusImage()`, downscaled + JPEG-encoded exactly like `tc_get_screenshot` (pixel grab on the main loop, encode on the HTTP worker — no frame stutter) |
 | `tc_get_alerts` | - | Drain operator alerts raised via `mcp::alert()` — returns and clears the pending list, so exactly one consumer receives each alert |
-| `tc_quit` | (none) | Quit the application gracefully |
 | `tc_get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
 | `tc_get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |
 
@@ -79,9 +78,15 @@ The video counterpart of `tc_save_screenshot` — capture the window to a video 
 | `tc_start_recording` | `path`, `duration`, `fps`, `codec` (all optional) | Start recording the window. Omit `path` for a timestamped `recording-<timestamp>.mp4` (`.mov` for ProRes) in the data dir; relative paths resolve under the data dir. `duration` (seconds) makes a fixed-length clip that **auto-stops and finalizes itself** at exactly that length (omit or `0` = unlimited). `fps` is the target frame rate (default 60; ProMotion frames are decimated to it). `codec` is `h264` (default) / `hevc` / `prores422` / `prores4444`. Returns `{status, path (resolved), fps, codec}` plus `duration` when a fixed length was set |
 | `tc_stop_recording` | (none) | Stop the current recording and finalize the file. A manual stop **always wins** over a pending fixed `duration` — it finalizes immediately at the current length. Returns `{status, recording:false, path, frames, length}` (`length` = measured output seconds). Idle is not an error: returns `{status:"ok", recording:false, message:"not recording"}` |
 
-### Debugger Tools (opt-in via `mcp::registerDebuggerTools()`)
+### Control Tools (opt-in via `mcp::registerControlTools()`)
+
+Everything that lets the outside *operate* the app — the always-on set above is
+strictly read-only. (Renamed from `registerDebuggerTools()` — the old name still
+works, deprecated until v1.0.0.)
+
 | Tool | Arguments | Description |
 |------|-----------|-------------|
+| `tc_quit` | (none) | Quit the application gracefully |
 | `tc_mouse_move` | `x`, `y`, `button` (optional) | Move cursor; with `button` held, emits a drag |
 | `tc_mouse_press` | `x`, `y`, `button` | Press and hold — start of a drag gesture |
 | `tc_mouse_release` | `x`, `y`, `button` | Release — end of a drag gesture |
@@ -97,13 +102,13 @@ GUI (e.g. with the `tcxNodeInspector` addon's gizmo), then `tc_get_node_tree` to
 read the exact values back and bake them into code — or drive the scene the
 other way with `tc_set_node_members`.
 
-To enable debugger tools, call `mcp::registerDebuggerTools()` in your `setup()`.
+To enable the control tools, call `mcp::registerControlTools()` in your `setup()`.
 Registering the tools *is* the opt-in — there is no separate enable step, and
 `mcp::isDebuggerEnabled()` will report `true` once they are registered:
 
 ```cpp
 void tcApp::setup() {
-    mcp::registerDebuggerTools();
+    mcp::registerControlTools();
 }
 ```
 
@@ -111,7 +116,7 @@ These tools are inert unless the MCP server is also running (`TRUSSC_MCP=1`).
 
 ### ImGui Tools (requires tcxImGui addon)
 
-The **tcxImGui** addon provides additional MCP tools for AI agents to inspect and interact with ImGui widgets. To use these, add `tcxImGui` to your project via `trusscli add tcxImGui` or `addons.make`, then call `imguiSetup()` before `mcp::registerDebuggerTools()`.
+The **tcxImGui** addon provides additional MCP tools for AI agents to inspect and interact with ImGui widgets. To use these, add `tcxImGui` to your project via `trusscli add tcxImGui` or `addons.make`, then call `imguiSetup()` before `mcp::registerControlTools()`.
 
 See [addons/tcxImGui/README.md](../addons/tcxImGui/README.md) for full details on available tools and setup.
 
@@ -249,7 +254,7 @@ curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"tc_save_screenshot","arguments":{"path":"/tmp/test.png"}}}'
 
-# Mouse click (requires registerDebuggerTools())
+# Mouse click (requires registerControlTools())
 curl -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"tc_mouse_click","arguments":{"x":100,"y":200}}}'
@@ -314,8 +319,8 @@ Configure your MCP client with the HTTP URL:
 |----------|-------|------------|
 | Inspection (read-only) | `tc_get_screenshot`, `tc_save_screenshot`, `tc_get_health`, `tc_get_node_tree`, `tc_get_selected_node` | Automatic when MCP is enabled |
 | Recording (window capture to video) | `tc_start_recording`, `tc_stop_recording` | Automatic when MCP is enabled |
-| Debugger (input injection / scene mutation) | `tc_mouse_click`, `tc_mouse_press`, `tc_mouse_release`, `tc_key_press`, `tc_mouse_move`, `tc_mouse_scroll`, `tc_key_release`, `tc_select_node`, `tc_set_node_members` | `mcp::registerDebuggerTools()` |
-| ImGui (widget interaction) | `tcx_imgui_get_widgets`, `tcx_imgui_click`, `tcx_imgui_input`, `tcx_imgui_checkbox` | Requires tcxImGui addon + `mcp::registerDebuggerTools()` |
+| Control (input injection / scene mutation / quit) | `tc_mouse_click`, `tc_mouse_press`, `tc_mouse_release`, `tc_key_press`, `tc_mouse_move`, `tc_mouse_scroll`, `tc_key_release`, `tc_select_node`, `tc_set_node_members`, `tc_quit` | `mcp::registerControlTools()` |
+| ImGui (widget interaction) | `tcx_imgui_get_widgets`, `tcx_imgui_click`, `tcx_imgui_input`, `tcx_imgui_checkbox` | Requires tcxImGui addon + `mcp::registerControlTools()` |
 | Custom | `mcp::tool(...)` | Your code |
 
 ### Network exposure
