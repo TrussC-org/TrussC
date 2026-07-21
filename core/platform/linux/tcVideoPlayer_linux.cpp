@@ -1178,8 +1178,7 @@ public:
 
         sg_reset_state_cache();
         sgl_defaults();
-        sgl_matrix_mode_projection();
-        sgl_ortho(0.0f, vpW, vpH, 0.0f, -10000.0f, 10000.0f);
+        trussc::internal::sglLoadProjection(trussc::internal::screen2DProjection(vpW, vpH));
         sgl_matrix_mode_modelview();
         sgl_load_identity();
     }

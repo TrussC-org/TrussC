@@ -225,8 +225,8 @@ bool internal::RenderContext::drawBitmapStringBillboard(const std::string& text,
     //    the 3D scene regardless of what is in front of it.
     sgl_matrix_mode_projection();
     sgl_push_matrix();
-    sgl_load_identity();
-    sgl_ortho(0.0f, internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH, 0.0f, -10000.0f, 10000.0f);
+    internal::sglLoadProjection(internal::screen2DProjection(
+        internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH));
 
     sgl_matrix_mode_modelview();
     sgl_push_matrix();
@@ -310,8 +310,8 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
         // Switch to ortho projection for screen-fixed 2D drawing
         sgl_matrix_mode_projection();
         sgl_push_matrix();
-        sgl_load_identity();
-        sgl_ortho(0.0f, internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH, 0.0f, -10000.0f, 10000.0f);
+        internal::sglLoadProjection(internal::screen2DProjection(
+            internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH));
 
         sgl_matrix_mode_modelview();
         sgl_push_matrix();
@@ -483,8 +483,8 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
 
         sgl_matrix_mode_projection();
         sgl_push_matrix();
-        sgl_load_identity();
-        sgl_ortho(0.0f, internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH, 0.0f, -10000.0f, 10000.0f);
+        internal::sglLoadProjection(internal::screen2DProjection(
+            internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH));
 
         sgl_matrix_mode_modelview();
         sgl_push_matrix();

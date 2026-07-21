@@ -627,8 +627,8 @@ public:
         if (wctx.inFboPass) {
             sgl_defaults();
             internal::loadPipeline(internal::activeFill2D());
-            sgl_matrix_mode_projection();
-            sgl_ortho(0.0f, wctx.currentViewW, wctx.currentViewH, 0.0f, -10000.0f, 10000.0f);
+            internal::sglLoadProjection(
+                internal::screen2DProjection(wctx.currentViewW, wctx.currentViewH));
             sgl_matrix_mode_modelview();
             sgl_load_identity();
         } else {
