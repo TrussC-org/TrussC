@@ -2,7 +2,7 @@
 
 // =============================================================================
 // tcImGuiTools.h - ImGui MCP Tools
-// Auto-expose ImGui widgets as MCP tools (enabled via registerDebuggerTools())
+// Auto-expose ImGui widgets as MCP tools (enabled via registerControlTools())
 //
 // Uses ImGui Test Engine hooks (IMGUI_ENABLE_TEST_ENGINE) to collect
 // widget info each frame, then provides MCP tools to query and interact
@@ -119,7 +119,7 @@ inline std::string classifyWidget(ImGuiItemStatusFlags flags) {
 }
 
 // ---------------------------------------------------------------------------
-// MCP tool registration (call from registerDebuggerTools)
+// MCP tool registration (call from registerControlTools)
 // ---------------------------------------------------------------------------
 inline void registerImGuiTools() {
     using json = nlohmann::json;
