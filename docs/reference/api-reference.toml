@@ -3457,9 +3457,9 @@ description.ja = "このlightを有効化"
 description.ko = "이 조명을 활성화"
 
 ["Light::enableShadow"]
-description.en = "Enable shadow casting (depth map at given resolution)"
-description.ja = "shadow castingを有効化（指定解像度のdepth map）"
-description.ko = "섀도우 캐스팅을 활성화 (지정 해상도의 뎁스맵)"
+description.en = "Enable shadow casting (depth map at given resolution; up to 4 shadow lights per frame)"
+description.ja = "shadow castingを有効化（指定解像度のdepth map、1フレームに最大4灯まで）"
+description.ko = "섀도우 캐스팅을 활성화 (지정 해상도의 뎁스맵, 프레임당 최대 4개 조명)"
 
 ["Light::getAmbient"]
 description.en = "Get ambient light color"
@@ -11770,11 +11770,32 @@ endLines();
 
 ["beginShadowPass"]
 category = "graphics_lighting"
-keywords = ["depth pass", "shadow map", "light view"]
-description.en = "Begin shadow depth pass from the light's point of view"
-description.ja = "light視点のshadow depth passを開始"
-description.ko = "조명 시점의 섀도우 뎁스 패스를 시작"
+keywords = ["depth pass", "shadow map", "light view", "multi light"]
+description.en = "Begin shadow depth pass from the light's point of view (up to 4 shadow lights per frame)"
+description.ja = "light視点のshadow depth passを開始（1フレームに最大4灯まで）"
+description.ko = "조명 시점의 섀도우 뎁스 패스를 시작 (프레임당 최대 4개 조명)"
 related = ["Light", "endShadowPass", "shadowDraw", "addLight"]
+details.en = '''
+Run one `beginShadowPass(light)` / [`endShadowPass`](#endShadowPass) cycle per
+shadow-casting light, before the PBR pass. Up to 4 lights can cast shadows in
+the same frame — each pass renders into its own layer of a shared shadow map
+array. Passes beyond the limit are ignored with a one-time warning. All
+layers share one resolution: the largest requested via `enableShadow()`.
+'''
+details.ja = '''
+shadowを落とすlightごとに `beginShadowPass(light)` /
+[`endShadowPass`](#endShadowPass) のサイクルをPBRパスの前に1回ずつ実行する。
+1フレームに最大4灯までshadowを落とせる（各パスは共有shadow map配列の
+専用レイヤーに描画される）。上限を超えたパスは一度だけ警告を出して無視される。
+解像度は全レイヤー共通で、`enableShadow()` で要求された最大値になる。
+'''
+details.ko = '''
+섀도우를 드리우는 조명마다 `beginShadowPass(light)` /
+[`endShadowPass`](#endShadowPass) 사이클을 PBR 패스 전에 한 번씩 실행한다.
+한 프레임에 최대 4개 조명이 섀도우를 드리울 수 있으며, 각 패스는 공유 섀도우 맵
+배열의 전용 레이어에 렌더링된다. 한도를 넘는 패스는 한 번만 경고를 내고
+무시된다. 해상도는 모든 레이어가 공유하며 `enableShadow()`로 요청된 최댓값이 된다.
+'''
 
 ["beginShape"]
 category = "graphics_shapes"
@@ -12247,6 +12268,14 @@ description.ja = "ディレクトリが存在するか確認"
 description.ko = "디렉토리 존재 여부를 확인"
 related = ["fileExists", "createDirectory", "listDirectory"]
 
+["disableDepthTest"]
+category = "graphics_style"
+keywords = ["depth", "z-buffer", "occlusion", "overlay", "hud", "2d"]
+description.en = "Disable depth test/write on the blend pipelines again (the default). Call before drawing 2D overlays (HUD, text) so they are not occluded by the 3D scene"
+description.ja = "ブレンドパイプラインのデプステスト/書き込みを再び無効化（デフォルト状態）。2DオーバーレイやHUDが3Dシーンに隠されないよう、描画前に呼ぶ"
+description.ko = "블렌드 파이프라인의 깊이 테스트/쓰기를 다시 비활성화 (기본 상태). 2D 오버레이 (HUD, 텍스트)가 3D 씬에 가려지지 않도록 그리기 전에 호출"
+related = ["enableDepthTest", "isDepthTestEnabled", "setBlendMode"]
+
 ["disable3D"]
 category = "graphics_3d_setup"
 keywords = ["2d", "ortho", "deprecated"]
@@ -12575,6 +12604,30 @@ EaseFunction 오버로드는 커스텀 ease-in 커브에 같은 변환을 적용
 linear로 폴백.
 '''
 related = ["EaseType", "EaseFunction", "easeIn", "easeInOut", "ease"]
+
+["enableDepthTest"]
+category = "graphics_style"
+keywords = ["depth", "z-buffer", "occlusion", "3d", "blend", "restore"]
+description.en = "Re-enable depth test/write on the blend pipelines (compare LESS_EQUAL + depth write, same as the 3D pipeline). Use to restore depth after setBlendMode() mid-scene; persists like the blend mode (across frames and Fbo passes) until disableDepthTest()"
+description.ja = "ブレンドパイプラインのデプステスト/書き込みを再有効化（LESS_EQUAL比較+デプス書き込み、3Dパイプラインと同じ設定）。シーン途中の setBlendMode() 後にデプスを復元するために使う。ブレンドモードと同様にフレームやFboパスをまたいで disableDepthTest() まで持続する"
+description.ko = "블렌드 파이프라인의 깊이 테스트/쓰기를 다시 활성화 (LESS_EQUAL 비교 + 깊이 쓰기, 3D 파이프라인과 동일한 설정). 씬 도중 setBlendMode() 이후 깊이를 복원할 때 사용. 블렌드 모드처럼 프레임과 Fbo 패스를 넘어 disableDepthTest()까지 유지됨"
+details = '''
+Every setBlendMode() pipeline (Alpha, Add, even Disabled) normally has depth write/test OFF;
+only the 3D pipeline (screen setup / EasyCam::begin()) writes depth. Changing the blend mode
+inside a 3D scene therefore drops depth testing for everything drawn after it. enableDepthTest()
+restores it without starting a new camera scope:
+
+    cam.begin();
+    drawSolidGeometry();              // depth-tested (3D pipeline)
+    setBlendMode(BlendMode::Add);
+    drawGlowEffects();                // additive, no depth by default
+    resetBlendMode();
+    enableDepthTest();
+    drawMoreSolidGeometry();          // depth-tested again, correctly occluded
+    cam.end();
+    disableDepthTest();               // back to default before 2D overlays
+'''
+related = ["disableDepthTest", "isDepthTestEnabled", "setBlendMode"]
 
 ["enable3D"]
 category = "graphics_3d_setup"
@@ -13810,6 +13863,14 @@ description.en = "True while either Control key (left or right) is held"
 description.ja = "Control キー (左右どちらでも) が押されているか"
 description.ko = "Control 키 (좌우 어느 쪽이든) 가 눌려 있는지"
 related = ["isShiftPressed", "isAltPressed", "isSuperPressed"]
+
+["isDepthTestEnabled"]
+category = "graphics_style"
+keywords = ["depth", "z-buffer", "check", "state"]
+description.en = "Whether the depth-tested blend pipeline variant is active (set by enableDepthTest)"
+description.ja = "デプステスト付きブレンドパイプラインが有効か（enableDepthTest で設定）"
+description.ko = "깊이 테스트가 적용된 블렌드 파이프라인이 활성 상태인지 (enableDepthTest로 설정)"
+related = ["enableDepthTest", "disableDepthTest"]
 
 ["isFillEnabled"]
 category = "graphics_style"

@@ -73,6 +73,11 @@ inline void clearMaterial() {
 // Begin a shadow depth pass from the given light's point of view.
 // The light must already be in the activeLights list (via addLight).
 // Between begin/end, call shadowDraw() for each shadow-casting mesh.
+// Can be called for up to 4 different lights per frame
+// (internal::maxShadowLights) — each pass renders into its own layer of a
+// shared shadow map array. Extra passes beyond the limit are ignored with a
+// one-time warning. Re-running a pass for the SAME light twice in one frame
+// overwrites that light's layer (one shadow map content per light per frame).
 inline void beginShadowPass(Light& light) {
     int idx = -1;
     for (int i = 0; i < (int)internal::activeLights.size(); i++) {

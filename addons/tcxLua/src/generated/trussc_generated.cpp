@@ -426,6 +426,9 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("setBlendMode", [](trussc::BlendMode mode) { return trussc::setBlendMode(mode); });
     lua->set_function("getBlendMode", []() { return trussc::getBlendMode(); });
     lua->set_function("resetBlendMode", []() { return trussc::resetBlendMode(); });
+    lua->set_function("enableDepthTest", []() { return trussc::enableDepthTest(); });
+    lua->set_function("disableDepthTest", []() { return trussc::disableDepthTest(); });
+    lua->set_function("isDepthTestEnabled", []() { return trussc::isDepthTestEnabled(); });
     lua->set_function("enable3D", []() { return trussc::enable3D(); });
     lua->set_function("enable3DPerspective", sol::overload(
         []() { return trussc::enable3DPerspective(); },

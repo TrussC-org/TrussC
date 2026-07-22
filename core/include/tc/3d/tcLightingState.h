@@ -25,6 +25,12 @@ namespace internal {
     inline std::vector<Light*> activeLights;
     inline constexpr int maxLights = 8;
 
+    // Max lights that can cast a shadow in the same frame (shadow map array
+    // layers + mat4 uniform slots in meshPbr.glsl). Lights beyond this get a
+    // one-time warning and no shadow. Must match MAX_SHADOW_LIGHTS in
+    // core/shaders/meshPbr.glsl.
+    inline constexpr int maxShadowLights = 4;
+
     // Current material (PBR metallic-roughness)
     inline Material* currentMaterial = nullptr;
 
