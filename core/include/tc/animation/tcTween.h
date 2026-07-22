@@ -36,6 +36,7 @@ public:
         , easeType_(other.easeType_)
         , easeTypeOut_(other.easeTypeOut_)
         , mode_(other.mode_)
+        , customEase_(std::move(other.customEase_))
         , playing_(other.playing_)
         , completed_(other.completed_)
         , asymmetric_(other.asymmetric_)
@@ -71,6 +72,7 @@ public:
             easeType_ = other.easeType_;
             easeTypeOut_ = other.easeTypeOut_;
             mode_ = other.mode_;
+            customEase_ = std::move(other.customEase_);
             playing_ = other.playing_;
             completed_ = other.completed_;
             asymmetric_ = other.asymmetric_;
@@ -141,6 +143,18 @@ public:
         easeTypeOut_ = outType;
         mode_ = EaseMode::InOut;
         asymmetric_ = true;
+        return *this;
+    }
+
+    // Custom ease: user-supplied curve (may capture state — a live-edited
+    // curve object, for example). The default mode In applies the function
+    // as authored; pass Out/InOut to derive those from an ease-in curve.
+    Tween& ease(EaseFunction fn, EaseMode mode = EaseMode::In) {
+        customEase_ = std::move(fn);
+        easeType_ = EaseType::Custom;
+        easeTypeOut_ = EaseType::Custom;
+        mode_ = mode;
+        asymmetric_ = false;
         return *this;
     }
 
@@ -249,6 +263,7 @@ private:
     EaseType easeType_ = EaseType::Cubic;
     EaseType easeTypeOut_ = EaseType::Cubic;
     EaseMode mode_ = EaseMode::InOut;
+    EaseFunction customEase_;
     bool playing_ = false;
     bool completed_ = false;
     bool asymmetric_ = false;
@@ -318,6 +333,10 @@ private:
     }
 
     float applyEasing(float t) const {
+        if (easeType_ == EaseType::Custom) {
+            // Null customEase_ falls back to linear inside ease().
+            return trussc::ease(t, customEase_, mode_);
+        }
         if (asymmetric_) {
             return easeInOut(t, easeType_, easeTypeOut_);
         }

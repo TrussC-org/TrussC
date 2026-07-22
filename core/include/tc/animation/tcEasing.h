@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <functional>
 #include "../../tcMath.h"
 #include "../utils/tcReflect.h"
 
@@ -18,10 +19,16 @@ enum class EaseType {
     Circ,     // Circular
     Back,     // Overshoot
     Elastic,  // Elastic spring
-    Bounce    // Bouncing
+    Bounce,   // Bouncing
+    Custom    // User-supplied curve function (falls back to Linear when none is set)
 };
 TC_ENUM_LABELS(EaseType, "Linear", "Quad", "Cubic", "Quart", "Quint", "Sine",
-               "Expo", "Circ", "Back", "Elastic", "Bounce")
+               "Expo", "Circ", "Back", "Elastic", "Bounce", "Custom")
+
+// User-defined easing curve: maps normalized time t (0-1) to progress.
+// May capture state (lambdas, functors) — e.g. a live-editable curve object.
+// Values outside 0-1 are allowed (overshoot, Back/Elastic-style).
+using EaseFunction = std::function<float(float)>;
 
 // Easing mode - defines acceleration/deceleration
 enum class EaseMode {
@@ -162,6 +169,41 @@ inline float ease(float t, EaseType type, EaseMode mode) {
         case EaseMode::In:    return easeIn(t, type);
         case EaseMode::Out:   return easeOut(t, type);
         case EaseMode::InOut: return easeInOut(t, type);
+        default:              return t;
+    }
+}
+
+// ----- Custom-curve variants -----
+// The supplied function is treated as the ease-in base curve, exactly like
+// the built-in types: Out/InOut are derived by the standard reflection.
+// A null function falls back to linear.
+
+// Ease-in: the curve as authored
+inline float easeIn(float t, const EaseFunction& fn) {
+    return fn ? fn(t) : t;
+}
+
+// Ease-out: time-and-value flipped curve
+inline float easeOut(float t, const EaseFunction& fn) {
+    return fn ? 1.0f - fn(1.0f - t) : t;
+}
+
+// Ease-in-out: first half ease-in, second half ease-out (both halved)
+inline float easeInOut(float t, const EaseFunction& fn) {
+    if (!fn) return t;
+    if (t < 0.5f) {
+        return fn(t * 2.0f) * 0.5f;
+    } else {
+        return 1.0f - fn((1.0f - t) * 2.0f) * 0.5f;
+    }
+}
+
+// Convenience: apply a custom curve with mode
+inline float ease(float t, const EaseFunction& fn, EaseMode mode) {
+    switch (mode) {
+        case EaseMode::In:    return easeIn(t, fn);
+        case EaseMode::Out:   return easeOut(t, fn);
+        case EaseMode::InOut: return easeInOut(t, fn);
         default:              return t;
     }
 }
