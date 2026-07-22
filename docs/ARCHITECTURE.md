@@ -536,7 +536,7 @@ void tcApp::draw() {
 
 **PBR Material Presets:** `Material::gold()`, `Material::silver()`, `Material::copper()`, `Material::iron()`, `Material::plastic(color)`, `Material::rubber(color)`
 
-**Features:** IES photometric profiles, IBL environment maps (HDR/procedural), normal maps, PBR texture maps (glTF 2.0), shadow mapping with PCF
+**Features:** IES photometric profiles, IBL environment maps (HDR/procedural), normal maps, PBR texture maps (glTF 2.0), shadow mapping with PCF (up to 4 shadow-casting lights per frame — run one `beginShadowPass()`/`endShadowPass()` cycle per light; each renders into its own layer of a shared shadow map array)
 
 > **Platform note — IBL on iOS/iPadOS Safari (wasm):** The IBL bake renders into cube-face render targets, which iOS/iPadOS Safari (both WebGPU and WebGL2) cannot do without breaking the canvas swapchain. So `loadProcedural()` / `loadFromHDR()` are **auto-skipped on iOS Safari**: PBR meshes fall back to a flat hemisphere ambient + direct lights (no environment reflections). Direct lighting, normal maps, shadows and plain FBOs all work fine. Native, desktop web, and Android web bake IBL normally. For a consistent look across iOS and other targets, don't rely on IBL reflections. See `tc/3d/tcEnvironment.h`.
 

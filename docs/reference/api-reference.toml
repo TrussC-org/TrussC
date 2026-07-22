@@ -3457,9 +3457,9 @@ description.ja = "このlightを有効化"
 description.ko = "이 조명을 활성화"
 
 ["Light::enableShadow"]
-description.en = "Enable shadow casting (depth map at given resolution)"
-description.ja = "shadow castingを有効化（指定解像度のdepth map）"
-description.ko = "섀도우 캐스팅을 활성화 (지정 해상도의 뎁스맵)"
+description.en = "Enable shadow casting (depth map at given resolution; up to 4 shadow lights per frame)"
+description.ja = "shadow castingを有効化（指定解像度のdepth map、1フレームに最大4灯まで）"
+description.ko = "섀도우 캐스팅을 활성화 (지정 해상도의 뎁스맵, 프레임당 최대 4개 조명)"
 
 ["Light::getAmbient"]
 description.en = "Get ambient light color"
@@ -11770,11 +11770,32 @@ endLines();
 
 ["beginShadowPass"]
 category = "graphics_lighting"
-keywords = ["depth pass", "shadow map", "light view"]
-description.en = "Begin shadow depth pass from the light's point of view"
-description.ja = "light視点のshadow depth passを開始"
-description.ko = "조명 시점의 섀도우 뎁스 패스를 시작"
+keywords = ["depth pass", "shadow map", "light view", "multi light"]
+description.en = "Begin shadow depth pass from the light's point of view (up to 4 shadow lights per frame)"
+description.ja = "light視点のshadow depth passを開始（1フレームに最大4灯まで）"
+description.ko = "조명 시점의 섀도우 뎁스 패스를 시작 (프레임당 최대 4개 조명)"
 related = ["Light", "endShadowPass", "shadowDraw", "addLight"]
+details.en = '''
+Run one `beginShadowPass(light)` / [`endShadowPass`](#endShadowPass) cycle per
+shadow-casting light, before the PBR pass. Up to 4 lights can cast shadows in
+the same frame — each pass renders into its own layer of a shared shadow map
+array. Passes beyond the limit are ignored with a one-time warning. All
+layers share one resolution: the largest requested via `enableShadow()`.
+'''
+details.ja = '''
+shadowを落とすlightごとに `beginShadowPass(light)` /
+[`endShadowPass`](#endShadowPass) のサイクルをPBRパスの前に1回ずつ実行する。
+1フレームに最大4灯までshadowを落とせる（各パスは共有shadow map配列の
+専用レイヤーに描画される）。上限を超えたパスは一度だけ警告を出して無視される。
+解像度は全レイヤー共通で、`enableShadow()` で要求された最大値になる。
+'''
+details.ko = '''
+섀도우를 드리우는 조명마다 `beginShadowPass(light)` /
+[`endShadowPass`](#endShadowPass) 사이클을 PBR 패스 전에 한 번씩 실행한다.
+한 프레임에 최대 4개 조명이 섀도우를 드리울 수 있으며, 각 패스는 공유 섀도우 맵
+배열의 전용 레이어에 렌더링된다. 한도를 넘는 패스는 한 번만 경고를 내고
+무시된다. 해상도는 모든 레이어가 공유하며 `enableShadow()`로 요청된 최댓값이 된다.
+'''
 
 ["beginShape"]
 category = "graphics_shapes"

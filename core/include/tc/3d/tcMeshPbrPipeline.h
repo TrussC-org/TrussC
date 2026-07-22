@@ -220,12 +220,13 @@ public:
         bindMatTex(VIEW_tc_pbr_emissiveTex,           SMP_tc_pbr_emissiveTexSmp,           pbrMat.getEmissiveTexture());
         bindMatTex(VIEW_tc_pbr_occlusionTex,          SMP_tc_pbr_occlusionTexSmp,          pbrMat.getOcclusionTexture());
 
-        // Shadow map texture (or fallback white = fully lit)
-        if (shadowLightIndex_ >= 0 && shadowColorTexView_.id != 0) {
+        // Shadow map texture array (or fallback array = never sampled because
+        // the shader sees numShadowSlots == 0)
+        if (shadowSlotCount_ > 0 && shadowColorTexView_.id != 0) {
             bind.views[VIEW_tc_pbr_shadowMap]      = shadowColorTexView_;
             bind.samplers[SMP_tc_pbr_shadowMapSmp] = shadowSampler_;
         } else {
-            bind.views[VIEW_tc_pbr_shadowMap]      = fallbackWhiteView_;
+            bind.views[VIEW_tc_pbr_shadowMap]      = fallbackShadowArrayView_;
             bind.samplers[SMP_tc_pbr_shadowMapSmp] = fallbackSampler_;
         }
 
@@ -348,16 +349,20 @@ public:
         fsp.texFlags[2] = pbrMat.hasEmissiveTexture()           ? 1.0f : 0.0f;
         fsp.texFlags[3] = pbrMat.hasOcclusionTexture()          ? 1.0f : 0.0f;
 
-        // Shadow map VP matrix and params
-        fsp.shadowParams[0] = static_cast<float>(shadowLightIndex_);
-        if (shadowLightIndex_ >= 0) {
-            Mat4 svpT = shadowViewProj_.transposed();
-            std::memcpy(fsp.shadowViewProj, svpT.m, sizeof(fsp.shadowViewProj));
-            fsp.shadowParams[1] = internal::activeLights[shadowLightIndex_]->getShadowBias();
-            fsp.shadowParams[2] = static_cast<float>(shadowTexResolution_);
-            fsp.shadowParams[3] = 1.0f;    // shadow strength
-        } else {
-            fsp.shadowParams[0] = -1.0f;
+        // Shadow slots: per-slot light VP matrices and params, packed by VALUE
+        // so deferred draws replay with the shadow state that was current at
+        // submission time (issue #192). The array texture VIEW is shared, but
+        // each light's layer is rendered exactly once per frame before the
+        // material draws that use it, so the layer content matches the matrix.
+        fsp.shadowMapParams[0] = static_cast<float>(shadowTexResolution_);
+        fsp.shadowMapParams[1] = static_cast<float>(shadowSlotCount_);
+        for (int s = 0; s < shadowSlotCount_; s++) {
+            Mat4 svpT = shadowSlotViewProj_[s].transposed();
+            std::memcpy(fsp.shadowViewProj[s], svpT.m, sizeof(fsp.shadowViewProj[s]));
+            fsp.shadowSlotParams[s][0] = static_cast<float>(shadowSlotLightIndex_[s]);
+            fsp.shadowSlotParams[s][1] = shadowSlotBias_[s];
+            fsp.shadowSlotParams[s][2] = 1.0f;    // shadow strength
+            fsp.shadowSlotParams[s][3] = 0.0f;
         }
 
         // --- Submit ---------------------------------------------------------
@@ -476,6 +481,24 @@ private:
         fallbackIes_ = fallbackWhite_;
         fallbackIesView_ = fallbackWhiteView_;
 
+        // 1x1x1 white ARRAY texture for the shadow map binding when no shadow
+        // pass has run (the shader never samples it — numShadowSlots is 0 —
+        // but sokol-gfx validates that the bound image type matches the
+        // shader's texture2DArray).
+        sg_image_desc sa_desc = {};
+        sa_desc.type = SG_IMAGETYPE_ARRAY;
+        sa_desc.num_slices = 1;
+        sa_desc.width = 1;
+        sa_desc.height = 1;
+        sa_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        sa_desc.data.mip_levels[0].ptr = white_pixel;
+        sa_desc.data.mip_levels[0].size = sizeof(white_pixel);
+        sa_desc.label = "tc_pbr_fallback_shadow_array";
+        fallbackShadowArray_ = sg_make_image(&sa_desc);
+        sg_view_desc sa_view_desc = {};
+        sa_view_desc.texture.image = fallbackShadowArray_;
+        fallbackShadowArrayView_ = sg_make_view(&sa_view_desc);
+
         fallbackInitialized_ = true;
     }
 
@@ -486,6 +509,28 @@ public:
     void beginShadowPass(int lightIndex) {
         ensureShadowInit();
         const Light& light = *internal::activeLights[lightIndex];
+
+        // Per-frame slot assignment: the slot counter resets on the first
+        // beginShadowPass() of each frame (keyed on getFrameCount()), and each
+        // pass claims the next array layer in call order. Slot data persists
+        // across frames so draws submitted before the first shadow pass of a
+        // frame keep the previous frame's shadow state (same semantics as the
+        // old single-map design).
+        uint64_t frame = getFrameCount();
+        if (frame != shadowSlotFrame_) {
+            shadowSlotFrame_ = frame;
+            shadowSlotCount_ = 0;
+        }
+        if (shadowSlotCount_ >= internal::maxShadowLights) {
+            if (!shadowOverflowWarned_) {
+                logWarning("TrussC") << "beginShadowPass: more than "
+                    << internal::maxShadowLights << " shadow passes in one "
+                    << "frame; lights beyond the limit cast no shadow";
+                shadowOverflowWarned_ = true;
+            }
+            // inShadowPass_ stays false -> shadowDraw()/endShadowPass() no-op
+            return;
+        }
         ensureShadowTexture(light.getShadowResolution());
 
         // Suspend swapchain pass if active. Remember whether one was active so
@@ -499,13 +544,16 @@ public:
             internal::currentWindowContext().inSwapchainPass = false;
         }
 
-        // Compute light VP matrix (reuse spot projector VP)
-        shadowViewProj_ = light.computeProjectorViewProj();
-        shadowLightIndex_ = lightIndex;
+        // Claim the next shadow slot for this light (VP reuses spot projector VP)
+        int slot = shadowSlotCount_++;
+        currentShadowSlot_ = slot;
+        shadowSlotViewProj_[slot]   = light.computeProjectorViewProj();
+        shadowSlotLightIndex_[slot] = lightIndex;
+        shadowSlotBias_[slot]       = light.getShadowBias();
 
-        // Begin shadow depth pass
+        // Begin shadow depth pass into this slot's array layer
         sg_pass pass = {};
-        pass.attachments.colors[0] = shadowColorAttView_;
+        pass.attachments.colors[0] = shadowColorAttView_[slot];
         pass.attachments.depth_stencil = shadowDepthAttView_;
         pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
         pass.action.colors[0].clear_value = { 10000.0f, 0.0f, 0.0f, 1.0f };  // R32F: far distance
@@ -514,8 +562,8 @@ public:
         pass.label = "tc_shadow_pass";
         sg_begin_pass(&pass);
 
-        int res = light.getShadowResolution();
-        sg_apply_viewport(0, 0, res, res, true);
+        // Render at the shared array resolution (max of all requested sizes)
+        sg_apply_viewport(0, 0, shadowTexResolution_, shadowTexResolution_, true);
         sg_apply_pipeline(shadowPipeline_);
 
         inShadowPass_ = true;
@@ -536,7 +584,7 @@ public:
         // Shadow VS uniforms: model + lightViewProj
         tc_shadow_shadow_vs_params_t svp = {};
         Mat4 modelT = getDefaultContext().getMatrix().transposed();
-        Mat4 lightVPT = shadowViewProj_.transposed();
+        Mat4 lightVPT = shadowSlotViewProj_[currentShadowSlot_].transposed();
         std::memcpy(svp.model, modelT.m, sizeof(svp.model));
         std::memcpy(svp.lightViewProj, lightVPT.m, sizeof(svp.lightViewProj));
         sg_range r = { &svp, sizeof(svp) };
@@ -593,37 +641,52 @@ private:
         shadowInitialized_ = true;
     }
 
+    // The shadow map array is shared by all shadow slots at ONE resolution:
+    // the largest resolution requested by any shadow-enabled light so far.
+    // It is only recreated when it needs to GROW; lights requesting a smaller
+    // resolution render into (and sample from) the shared larger map.
     void ensureShadowTexture(int resolution) {
-        if (resolution == shadowTexResolution_) return;
+        if (resolution <= shadowTexResolution_) return;
 
         // Release old resources (deferred: a deferred PBR draw recorded this
         // frame may still bind the old shadow map view/sampler)
         internal::deferGpuDestroy(shadowColorImage_);
-        internal::deferGpuDestroy(shadowColorAttView_);
+        for (int s = 0; s < internal::maxShadowLights; s++) {
+            internal::deferGpuDestroy(shadowColorAttView_[s]);
+        }
         internal::deferGpuDestroy(shadowColorTexView_);
         internal::deferGpuDestroy(shadowDepthImage_);
         internal::deferGpuDestroy(shadowDepthAttView_);
         internal::deferGpuDestroy(shadowSampler_);
 
-        // R32F color target (stores depth value for sampling)
+        // R32F color target array (stores depth value for sampling), one
+        // layer per shadow slot
         sg_image_desc cd = {};
+        cd.type = SG_IMAGETYPE_ARRAY;
+        cd.num_slices = internal::maxShadowLights;
         cd.usage.color_attachment = true;
         cd.width = resolution;
         cd.height = resolution;
         cd.pixel_format = SG_PIXELFORMAT_R32F;
         cd.sample_count = 1;
-        cd.label = "tc_shadow_color";
+        cd.label = "tc_shadow_color_array";
         shadowColorImage_ = sg_make_image(&cd);
 
-        sg_view_desc cav = {};
-        cav.color_attachment.image = shadowColorImage_;
-        shadowColorAttView_ = sg_make_view(&cav);
+        // Per-layer attachment views for rendering...
+        for (int s = 0; s < internal::maxShadowLights; s++) {
+            sg_view_desc cav = {};
+            cav.color_attachment.image = shadowColorImage_;
+            cav.color_attachment.slice = s;
+            shadowColorAttView_[s] = sg_make_view(&cav);
+        }
 
+        // ...and one full-array texture view for sampling
         sg_view_desc ctv = {};
         ctv.texture.image = shadowColorImage_;
         shadowColorTexView_ = sg_make_view(&ctv);
 
-        // Depth buffer (for correct depth testing during shadow pass)
+        // Depth buffer (for correct depth testing during shadow pass; a
+        // single 2D image reused by every slot's pass)
         sg_image_desc dd = {};
         dd.usage.depth_stencil_attachment = true;
         dd.width = resolution;
@@ -659,19 +722,27 @@ private:
     sg_pipeline shadowPipeline_{};
     bool shadowInitialized_{false};
 
-    sg_image shadowColorImage_{};
-    sg_view shadowColorAttView_{};
-    sg_view shadowColorTexView_{};
-    sg_image shadowDepthImage_{};
+    sg_image shadowColorImage_{};   // SG_IMAGETYPE_ARRAY, maxShadowLights layers
+    sg_view shadowColorAttView_[internal::maxShadowLights]{};  // per-layer render views
+    sg_view shadowColorTexView_{};  // full-array sampling view
+    sg_image shadowDepthImage_{};   // shared 2D depth, reused per slot pass
     sg_view shadowDepthAttView_{};
     sg_sampler shadowSampler_{};
     int shadowTexResolution_{0};
 
     bool inShadowPass_{false};
     bool shadowWasInSwapchainPass_{false};  // swapchain pass active before beginShadowPass()
-    Mat4 shadowViewProj_{};
-    int shadowLightIndex_{-1};
     int shadowDrawCount_{0};
+
+    // Per-frame shadow slot state (lightIndex -> array layer, in
+    // beginShadowPass() call order; counter resets each frame)
+    uint64_t shadowSlotFrame_{static_cast<uint64_t>(-1)};
+    int shadowSlotCount_{0};
+    int currentShadowSlot_{-1};
+    Mat4 shadowSlotViewProj_[internal::maxShadowLights]{};
+    int shadowSlotLightIndex_[internal::maxShadowLights]{};
+    float shadowSlotBias_[internal::maxShadowLights]{};
+    bool shadowOverflowWarned_{false};
 
     // --- Fallback resources ---
     sg_image fallbackCube_{};
@@ -684,6 +755,8 @@ private:
     sg_view fallbackWhiteView_{};
     sg_image fallbackIes_{};       // alias of fallbackWhite_
     sg_view fallbackIesView_{};
+    sg_image fallbackShadowArray_{};
+    sg_view fallbackShadowArrayView_{};
     sg_sampler fallbackSampler_{};
     bool fallbackInitialized_{false};
 };
