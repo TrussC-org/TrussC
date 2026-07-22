@@ -32,6 +32,26 @@ else {
     execFileSync('node', a, { maxBuffer: 256 * 1024 * 1024 });
     structure = JSON.parse(fs.readFileSync(tmp, 'utf8'));
 }
+// --- refuse a partial AST: this file RENDERS TYPES ---------------------------
+// structure.js marks __meta.partialAst when clang failed mid-parse (typical
+// cause: the gitignored generated shader headers, core/include/tc/gpu/shaders/
+// *.glsl.h, are missing in a fresh worktree). Names survive a partial AST but
+// unresolved template types degrade to `int`, silently corrupting every
+// rendered signature here and downstream (emit-forai, luagen, web emits).
+if (structure && structure.__meta) {
+    const partial = structure.__meta.partialAst;
+    delete structure.__meta;
+    if (partial && process.env.TC_ALLOW_PARTIAL_AST !== '1') {
+        console.error(
+            'generate: REFUSING to render from a PARTIAL AST (clang failed mid-parse; see diagnostics above).\n' +
+            'Typical cause: generated shader headers missing in a fresh worktree.\n' +
+            'Fix: run a build once (cmake configure+build generates core/include/tc/gpu/shaders/*.glsl.h),\n' +
+            '     or copy that directory from a built checkout.\n' +
+            'Override (types WILL be wrong): TC_ALLOW_PARTIAL_AST=1');
+        process.exit(1);
+    }
+}
+
 // --- prose (TOML) ---
 const prose = TOML.parse(fs.readFileSync(path.join(__dirname, 'api-reference.toml'), 'utf8'));
 

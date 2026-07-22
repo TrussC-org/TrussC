@@ -25,6 +25,7 @@ const argv = process.argv.slice(2);
 const argVal = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
 
 // --- 1. obtain the AST dump (cached or fresh) -------------------------------
+let astPartial = false;   // set when clang failed mid-parse (e.g. missing generated *.glsl.h)
 function dumpAst() {
     const CXX = process.env.CXX || 'c++';
     const extra = (process.env.TC_COVERAGE_CXXFLAGS || '').split(/\s+/).filter(Boolean);
@@ -42,7 +43,13 @@ function dumpAst() {
         const out = (e.stdout || '').toString();
         const err = (e.stderr || '').toString();
         if (out.length > 100000) {
-            process.stderr.write('structure: clang exited non-zero but produced an AST; using it. First diagnostics:\n'
+            // A partial AST keeps symbol NAMES intact (fine for check.js's
+            // orphan/undocumented gates) but degrades unresolved template
+            // TYPES to int — poison for anything that renders signatures
+            // (generate.js / emit-forai). Record the fact; the --json output
+            // carries it as __meta so type-consumers can refuse.
+            astPartial = true;
+            process.stderr.write('structure: clang exited non-zero but produced a PARTIAL AST; using it (names ok, types may degrade). First diagnostics:\n'
                 + err.split('\n').slice(0, 8).join('\n') + '\n');
             return out;
         }
@@ -313,7 +320,15 @@ for (const s of require('./std-symbols.js')) {
 // --- 5. output --------------------------------------------------------------
 const jsonOut = argVal('--json');
 if (argv.includes('--ids')) { console.log(Object.keys(structure).sort().join('\n')); process.exit(0); }
-if (jsonOut) { fs.writeFileSync(jsonOut, JSON.stringify(structure, null, 0)); process.stderr.write(`structure written to ${jsonOut} (${Object.keys(structure).length} symbols)\n`); process.exit(0); }
+if (jsonOut) {
+    // __meta rides along ONLY in the JSON output (--ids stays a pure id list,
+    // which is all check.js needs — its gates are name-based and stay valid
+    // on a partial AST). Type-consumers (generate.js) look for this and refuse.
+    if (astPartial) structure.__meta = { partialAst: true };
+    fs.writeFileSync(jsonOut, JSON.stringify(structure, null, 0));
+    process.stderr.write(`structure written to ${jsonOut} (${Object.keys(structure).length - (astPartial ? 1 : 0)} symbols${astPartial ? ', PARTIAL AST' : ''})\n`);
+    process.exit(0);
+}
 
 const byKind = {}; for (const id in structure) byKind[structure[id].kind] = (byKind[structure[id].kind] || 0) + 1;
 const deprecated = Object.values(structure).filter(e => e.deprecated).length;
