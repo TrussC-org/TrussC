@@ -105,11 +105,12 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
         t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
     }
-    {
-        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream",
-            sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>(),
-            sol::call_constructor, sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>());
-    }
+    lua->new_usertype<trussc::WindowType>("WindowType",
+        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
+        "Rect", sol::var(trussc::WindowType::Rect),
+        "Hanning", sol::var(trussc::WindowType::Hanning),
+        "Hamming", sol::var(trussc::WindowType::Hamming),
+        "Blackman", sol::var(trussc::WindowType::Blackman));
     {
         sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
         t["data"] = &trussc::UdpReceiveEventArgs::data;

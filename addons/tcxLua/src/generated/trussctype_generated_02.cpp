@@ -77,29 +77,32 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["getGpuPointCount"] = &trussc::Mesh::getGpuPointCount;
     }
     {
-        sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector",
-            sol::constructors<trussc::JsonReadReflector(trussc::Json)>(),
-            sol::call_constructor, sol::constructors<trussc::JsonReadReflector(trussc::Json)>());
-        t["applied"] = &trussc::JsonReadReflector::applied;
-        t["skipped"] = &trussc::JsonReadReflector::skipped;
-        t["readOnly"] = &trussc::JsonReadReflector::readOnly;
-        t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
-        t["endGroup"] = &trussc::JsonReadReflector::endGroup;
+        sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
+        t["isWeb"] = &trussc::Platform::isWeb;
+        t["isMacOS"] = &trussc::Platform::isMacOS;
+        t["isIOS"] = &trussc::Platform::isIOS;
+        t["isWindows"] = &trussc::Platform::isWindows;
+        t["isAndroid"] = &trussc::Platform::isAndroid;
+        t["isLinux"] = &trussc::Platform::isLinux;
+        t["isApple"] = &trussc::Platform::isApple;
+        t["isMobile"] = &trussc::Platform::isMobile;
+        t["isDesktop"] = &trussc::Platform::isDesktop;
+        t["name"] = &trussc::Platform::name;
     }
-    lua->new_usertype<trussc::LogLevel>("LogLevel",
-        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
-        "Verbose", sol::var(trussc::LogLevel::Verbose),
-        "Notice", sol::var(trussc::LogLevel::Notice),
-        "Warning", sol::var(trussc::LogLevel::Warning),
-        "Error", sol::var(trussc::LogLevel::Error),
-        "Fatal", sol::var(trussc::LogLevel::Fatal),
-        "Silent", sol::var(trussc::LogLevel::Silent));
+    lua->new_usertype<trussc::Direction>("Direction",
+        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
+        "Left", sol::var(trussc::Direction::Left),
+        "Center", sol::var(trussc::Direction::Center),
+        "Right", sol::var(trussc::Direction::Right),
+        "Top", sol::var(trussc::Direction::Top),
+        "Bottom", sol::var(trussc::Direction::Bottom),
+        "Baseline", sol::var(trussc::Direction::Baseline));
     {
-        sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
-        t["frameCount"] = &trussc::AudioInBuffer::frameCount;
-        t["channels"] = &trussc::AudioInBuffer::channels;
-        t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
-        t["framePosition"] = &trussc::AudioInBuffer::framePosition;
+        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
+        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
+        t["channels"] = &trussc::AudioOutBuffer::channels;
+        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
+        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
     }
     lua->new_usertype<trussc::TcyMode>("TcyMode",
         sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },

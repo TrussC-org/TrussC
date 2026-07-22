@@ -1225,6 +1225,61 @@ for (auto& f : frames) {
 
 Key properties: timestamps are **monotonic (`std::chrono::steady_clock`), not wall-clock**, and are stamped the moment the frame arrives from the driver — they stay truthful even if the main loop freezes for seconds. When the queue is full the oldest frame is dropped (capture never blocks). This is the right tool for measurement-grade capture — syncing camera frames against an external timeline (sensor logs, audio, other clocks), motion analysis, latency measurement; for a plain live preview, `update()` + `draw()` remains simpler. Pushed by the capture threads on **macOS / Windows / Linux**; web and Android have no capture thread and keep the queue empty.
 
+## Animation (Tween & easing)
+
+### How do I animate a value over time? (Tween basics)
+
+`Tween<T>` animates any lerp-able type (float, Vec2, Vec3, Vec4, Color, …).
+Once `start()` is called it auto-updates every frame via `events().update` —
+no manual update call:
+
+```cpp
+Tween<float> radius;
+radius.from(10).to(200).duration(1.5)
+      .ease(EaseType::Elastic, EaseMode::Out)
+      .delay(0.2).loop(-1).yoyo()      // loop forever, reverse each pass
+      .start();
+// draw(): drawCircle(400, 300, radius.getValue());
+// completion: listener = radius.complete->listen([]{ ... });
+```
+
+To animate a Node's transform (position / scale / rotation), use the Mod
+instead: `node->addMod<TweenMod>().moveTo(300, 200).duration(0.8f).ease(EaseType::Back, EaseMode::Out).start();`
+
+For manual control without a Tween, the free functions `ease(t, type, mode)` /
+`easeIn` / `easeOut` / `easeInOut` map a 0-1 progress value through a curve.
+
+### How do I use a custom easing curve? (ease with a lambda / EaseFunction)
+
+Every `ease()` also accepts an **`EaseFunction`** (`std::function<float(float)>`,
+mapping time 0-1 to progress). Use it when the built-in families don't cut it:
+a motion designed on a curve editor, an ease that snaps hard into the endpoint,
+a stepped/quantized motion, a spring model — any 1:1 curve you can express as
+code:
+
+```cpp
+tween.ease([](float t) { return t * t * (3 - 2 * t); });   // smoothstep, done
+```
+
+What makes this powerful:
+
+- **The function may capture state, and it's evaluated every frame.** Capture a
+  curve-editor object by reference (or `shared_ptr`) and edits retarget the
+  motion instantly — register once, never re-set:
+  ```cpp
+  tween.ease([this](float t) { return editor->eval(t); });  // live-editable
+  ```
+  (Capturing by value snapshots the curve instead — useful to "freeze" it.)
+- **Overshoot works**: return values outside 0-1 (Back/Elastic-style motion).
+- **One base curve, three modes**: default mode `In` applies the function
+  as authored; `ease(fn, EaseMode::Out / InOut)` derives the reflected
+  variants from an ease-in base curve, same as the built-in types.
+- `EaseType::Custom` without a function falls back to Linear (safe default).
+
+See **`examples/animation/customEaseExample`** for three approaches: a
+freehand-drawn LUT curve, a tone-curve style point editor (each a
+self-contained copy-paste-able RectNode), and a plain code lambda.
+
 ## Networking
 
 ### TCP / UDP networking? (brief)
@@ -1427,6 +1482,7 @@ All file-path parameters take `fs::path` (`std::filesystem::path`) — string li
 - Random / noise: `random()` / `noise()` / `signedNoise()`
 - Time (elapsed seconds): `getElapsedTime()` (double) / frame rate: `getFrameRate()`
 - Delay / repeat: `callAfter()` / `callEvery()` (main-thread, synchronous)
+- Animate a value: `Tween<T>` (`.from/.to/.duration/.ease/.start`) / a Node transform: `addMod<TweenMod>()` / custom curve: `ease(lambda)` (EaseFunction)
 - Fullscreen / borderless span: `setFullscreen(true)` / `setWindowDecorated(false)`+`setWindowPosition(0,0)`+`setWindowSize(w,h)` (no multi-display enumeration API; macOS: turn off "Displays have separate Spaces")
 
 ## AI-native (MCP)
@@ -1944,10 +2000,10 @@ fs::path systemFontPath(const std::string & name) [macos,windows,linux,ios]  // 
 ### Animation
 
 ```cpp
-float ease(float t, EaseType type, EaseMode mode)  // Apply easing to value (0-1)
-float easeIn(float t, EaseType type)  // Apply ease-in to value (0-1)
-float easeInOut(float t, EaseType type) [+1]  // Apply ease-in-out to value (0-1)
-float easeOut(float t, EaseType type)  // Apply ease-out to value (0-1)
+float ease(float t, EaseType type, EaseMode mode) [+1]  // Apply easing to a normalized value (0-1) with an EaseType or a custom EaseFunction
+float easeIn(float t, EaseType type) [+1]  // Apply ease-in (accelerate) to value (0-1); takes an EaseType or a custom EaseFunction
+float easeInOut(float t, EaseType type) [+2]  // Apply ease-in-out to value (0-1); takes an EaseType, an asymmetric type pair, or a custom EaseFunction
+float easeOut(float t, EaseType type) [+1]  // Apply ease-out (decelerate) to value (0-1); takes an EaseType or a custom EaseFunction
 ```
 
 ### Types - Color
@@ -3701,7 +3757,7 @@ float TouchEventArgs::y() const  // Convenience: Y position of the first touch p
 ```cpp
 Tween<T> & Tween::delay(float seconds)  // Delay before the animation starts, in seconds (chainable)
 Tween<T> & Tween::duration(float seconds)  // Set the animation duration in seconds (chainable)
-Tween<T> & Tween::ease(EaseType type, EaseMode mode = InOut) [+1]  // Set the easing curve; the two-type overload uses an asymmetric ease (one curve in, another out)
+Tween<T> & Tween::ease(EaseType type, EaseMode mode = InOut) [+2]  // Set the easing curve: a built-in EaseType, an asymmetric in/out pair, or a custom EaseFunction
 Tween<T> & Tween::finish()  // Jump immediately to the end value and fire the complete event
 Tween<T> & Tween::from(T value)  // Set the start value (chainable)
 float Tween::getDuration() const  // Return the configured duration in seconds
@@ -3728,7 +3784,7 @@ Tween<T> & Tween::yoyo(bool enable = true)  // Reverse direction on each loop it
 TweenMod & TweenMod::delay(float seconds)  // Set delay before animation starts (TweenMod method) (C++ only)
 TweenMod & TweenMod::duration(float seconds)  // Set animation duration (TweenMod method) (C++ only)
 void TweenMod::earlyUpdate()  // Mod lifecycle: advance the tween each frame in the early-update phase.
-TweenMod & TweenMod::ease(EaseType type, EaseMode mode = InOut)  // Set easing function (TweenMod method). Types: Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce. Modes: In, Out, InOut (C++ only)
+TweenMod & TweenMod::ease(EaseType type, EaseMode mode = InOut) [+1]  // Set easing (TweenMod method): a built-in EaseType + EaseMode, or a custom EaseFunction (C++ only)
 float TweenMod::getDelay() const  // Get the start delay in seconds (TweenMod method) (C++ only)
 float TweenMod::getDuration() const  // Get the animation duration in seconds (TweenMod method) (C++ only)
 EaseMode TweenMod::getEaseMode() const  // Get the current easing mode (In/Out/InOut) (TweenMod method) (C++ only)
@@ -4079,7 +4135,7 @@ enum CurveStyle::Mode { Tolerance, Resolution }  // Curve tessellation mode: ada
 enum Deliver { Inline, Main }  // Event delivery timing: Inline fires synchronously on the calling thread; Main queues the event to the main thread.
 enum Direction { Left, Center, Right, Top, Bottom, Baseline }  // Alignment / direction: Left, Center, Right, Top, Bottom, Baseline.
 enum EaseMode { In, Out, InOut }  // Easing direction: In, Out, or InOut.
-enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce }  // Easing function family (Linear, Quad, Cubic, Sine, Expo, …) for tweens.
+enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce, Custom }  // Easing function family (Linear, Quad, Cubic, Sine, Expo, …) for tweens.
 enum ImageType { Color, Grayscale }  // Image type: Color or Grayscale.
 enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku) strictness for vertical / Japanese text
 enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.
@@ -4112,6 +4168,7 @@ enum WritingMode { Horizontal, VerticalRL }  // Text writing mode: Horizontal or
 ## Type aliases
 
 ```cpp
+using EaseFunction  // User-defined easing curve: std::function mapping normalized time t (0-1) to progress
 using Json  // Alias for nlohmann::json (using Json = nlohmann::json). Used as the in-memory JSON value type by loadJson, saveJson, parseJson and toJsonString. See the nlohmann/json documentation for its full API.
 using NodePtr  // Shared pointer to a Node (std::shared_ptr<Node>); the standard way to hold and pass scene nodes
 using NodeWeakPtr  // Alias for weak_ptr<Node> (using NodeWeakPtr = weak_ptr<Node>). A non-owning weak reference to a Node; lock() it to obtain a NodePtr if the node still exists.

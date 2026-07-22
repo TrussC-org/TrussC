@@ -88,18 +88,17 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["toVec2"] = &trussc::IVec2::toVec2;
     }
     {
-        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader",
-            sol::constructors<trussc::FileReader()>(),
-            sol::call_constructor, sol::constructors<trussc::FileReader()>());
-        t["open"] = &trussc::FileReader::open;
-        t["close"] = &trussc::FileReader::close;
-        t["isOpen"] = &trussc::FileReader::isOpen;
-        t["eof"] = &trussc::FileReader::eof;
-        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
-        t["readChar"] = &trussc::FileReader::readChar;
-        t["seek"] = &trussc::FileReader::seek;
-        t["tell"] = &trussc::FileReader::tell;
-        t["remaining"] = &trussc::FileReader::remaining;
+        sol::usertype<trussc::IesProfile> t = lua->new_usertype<trussc::IesProfile>("IesProfile",
+            sol::constructors<trussc::IesProfile()>(),
+            sol::call_constructor, sol::constructors<trussc::IesProfile()>());
+        t["load"] = &trussc::IesProfile::load;
+        t["loadFromString"] = &trussc::IesProfile::loadFromString;
+        t["isLoaded"] = &trussc::IesProfile::isLoaded;
+        t["getMaxVerticalAngle"] = &trussc::IesProfile::getMaxVerticalAngle;
+        t["getMaxCandela"] = &trussc::IesProfile::getMaxCandela;
+        t["getTextureWidth"] = &trussc::IesProfile::getTextureWidth;
+        t["getView"] = &trussc::IesProfile::getView;
+        t["getSampler"] = &trussc::IesProfile::getSampler;
     }
     {
         sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");

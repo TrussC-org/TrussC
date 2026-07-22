@@ -124,8 +124,8 @@ void tcxLuaGenShard_00(const std::shared_ptr<sol::state>& lua) {
         "Nearest", sol::var(trussc::TextureFilter::Nearest),
         "Linear", sol::var(trussc::TextureFilter::Linear));
     {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
+        t["count"] = &trussc::EnumLabelSpan::count;
     }
 }
 #ifndef _MSC_VER
