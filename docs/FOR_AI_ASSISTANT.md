@@ -1575,6 +1575,8 @@ void vertex(float x, float y, float z) [+3]  // Add a vertex
 ### Graphics - Style
 
 ```cpp
+void disableDepthTest()  // Disable depth test/write on the blend pipelines again (the default). Call before drawing 2D overlays (HUD, text) so they are not occluded by the 3D scene
+void enableDepthTest()  // Re-enable depth test/write on the blend pipelines (compare LESS_EQUAL + depth write, same as the 3D pipeline). Use to restore depth after setBlendMode() mid-scene; persists like the blend mode (across frames and Fbo passes) until disableDepthTest()
 void fill()  // Enable fill mode (shapes are solid, no outline)
 BlendMode getBlendMode()  // Get current blend mode
 int getCircleResolution() ⚠️deprecated  // Deprecated alias for getCurveResolution()
@@ -1587,6 +1589,7 @@ PointStyle getPointStyle()  // Get the current point shape (PointStyle).
 StrokeCap getStrokeCap()  // Get current stroke cap style
 StrokeJoin getStrokeJoin()  // Get current stroke join style
 float getStrokeWeight()  // Get current stroke width
+bool isDepthTestEnabled()  // Whether the depth-tested blend pipeline variant is active (set by enableDepthTest)
 bool isFillEnabled()  // Check if fill mode is enabled
 bool isStrokeEnabled()  // Check if stroke mode is enabled
 void noFill()  // Enable stroke mode (shapes show outline only)
@@ -4525,7 +4528,7 @@ Sound sfx = bundle.build();
 17. **Unqualified `random()` may resolve to POSIX `::random()`** and compile to the wrong thing silently. Write `tc::random(min, max)` explicitly; there is no `randomf`.
 18. **EasyCam starts at elevation 0** — a true side-on view, so flat scenes (ground planes, orbits) look like a line on first launch. Set `cam.setElevation(...)` / `setAzimuth(...)` explicitly.
 19. **EasyCam `enableMouseInput()` eats every left press.** It consumes the press as orbit-start during `events().mousePressed`, and node-tree dispatch only runs when the event wasn't consumed — all Node mouse handlers silently stop working (app-level `mousePressed()` still fires, which is confusing). With clickable nodes, use `setOrbitButton(MOUSE_BUTTON_RIGHT)` or `setDragModifier(...)` instead.
-20. **`setBlendMode()` inside a 3D scene kills depth.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). There is no public API to re-enable depth mid-scene — structure the draw order instead: render all depth-tested 3D first, blended overlays/effects last; if you need 3D again after changing the blend mode, start a new camera scope (`EasyCam::begin()` reloads the depth-enabled 3D pipeline).
+20. **`setBlendMode()` inside a 3D scene kills depth — restore it with `enableDepthTest()`.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF by default; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). Call `tc::enableDepthTest()` after the blend-mode change to restore depth (LESS_EQUAL + depth write, same as the 3D pipeline) for all subsequent draws; it persists like the blend mode (across frames and Fbo passes) until `disableDepthTest()` — call that before 2D overlays (HUD, text) so they draw on top. Query with `isDepthTestEnabled()`.
 21. **IBL no-ops on iOS Safari (wasm).** `Environment::loadProcedural()`/`loadFromHDR()` return false on iOS web (the cube-face bake breaks the canvas swapchain there); PBR falls back to flat hemisphere ambient + direct lights. Don't rely on IBL reflections for cross-platform looks if you target iOS web. Native, desktop web, and Android web are unaffected.
 22. **Don't hand-parse JSON/XML.** `tc::Json` (nlohmann) and `tc::Xml` (pugixml) are bundled and included via `<TrussC.h>` — use `loadJson`/`parseJson`/`loadXml`/`parseXml`.
 

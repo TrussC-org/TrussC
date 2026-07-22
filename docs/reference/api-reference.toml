@@ -12247,6 +12247,14 @@ description.ja = "ディレクトリが存在するか確認"
 description.ko = "디렉토리 존재 여부를 확인"
 related = ["fileExists", "createDirectory", "listDirectory"]
 
+["disableDepthTest"]
+category = "graphics_style"
+keywords = ["depth", "z-buffer", "occlusion", "overlay", "hud", "2d"]
+description.en = "Disable depth test/write on the blend pipelines again (the default). Call before drawing 2D overlays (HUD, text) so they are not occluded by the 3D scene"
+description.ja = "ブレンドパイプラインのデプステスト/書き込みを再び無効化（デフォルト状態）。2DオーバーレイやHUDが3Dシーンに隠されないよう、描画前に呼ぶ"
+description.ko = "블렌드 파이프라인의 깊이 테스트/쓰기를 다시 비활성화 (기본 상태). 2D 오버레이 (HUD, 텍스트)가 3D 씬에 가려지지 않도록 그리기 전에 호출"
+related = ["enableDepthTest", "isDepthTestEnabled", "setBlendMode"]
+
 ["disable3D"]
 category = "graphics_3d_setup"
 keywords = ["2d", "ortho", "deprecated"]
@@ -12575,6 +12583,30 @@ EaseFunction 오버로드는 커스텀 ease-in 커브에 같은 변환을 적용
 linear로 폴백.
 '''
 related = ["EaseType", "EaseFunction", "easeIn", "easeInOut", "ease"]
+
+["enableDepthTest"]
+category = "graphics_style"
+keywords = ["depth", "z-buffer", "occlusion", "3d", "blend", "restore"]
+description.en = "Re-enable depth test/write on the blend pipelines (compare LESS_EQUAL + depth write, same as the 3D pipeline). Use to restore depth after setBlendMode() mid-scene; persists like the blend mode (across frames and Fbo passes) until disableDepthTest()"
+description.ja = "ブレンドパイプラインのデプステスト/書き込みを再有効化（LESS_EQUAL比較+デプス書き込み、3Dパイプラインと同じ設定）。シーン途中の setBlendMode() 後にデプスを復元するために使う。ブレンドモードと同様にフレームやFboパスをまたいで disableDepthTest() まで持続する"
+description.ko = "블렌드 파이프라인의 깊이 테스트/쓰기를 다시 활성화 (LESS_EQUAL 비교 + 깊이 쓰기, 3D 파이프라인과 동일한 설정). 씬 도중 setBlendMode() 이후 깊이를 복원할 때 사용. 블렌드 모드처럼 프레임과 Fbo 패스를 넘어 disableDepthTest()까지 유지됨"
+details = '''
+Every setBlendMode() pipeline (Alpha, Add, even Disabled) normally has depth write/test OFF;
+only the 3D pipeline (screen setup / EasyCam::begin()) writes depth. Changing the blend mode
+inside a 3D scene therefore drops depth testing for everything drawn after it. enableDepthTest()
+restores it without starting a new camera scope:
+
+    cam.begin();
+    drawSolidGeometry();              // depth-tested (3D pipeline)
+    setBlendMode(BlendMode::Add);
+    drawGlowEffects();                // additive, no depth by default
+    resetBlendMode();
+    enableDepthTest();
+    drawMoreSolidGeometry();          // depth-tested again, correctly occluded
+    cam.end();
+    disableDepthTest();               // back to default before 2D overlays
+'''
+related = ["disableDepthTest", "isDepthTestEnabled", "setBlendMode"]
 
 ["enable3D"]
 category = "graphics_3d_setup"
@@ -13810,6 +13842,14 @@ description.en = "True while either Control key (left or right) is held"
 description.ja = "Control キー (左右どちらでも) が押されているか"
 description.ko = "Control 키 (좌우 어느 쪽이든) 가 눌려 있는지"
 related = ["isShiftPressed", "isAltPressed", "isSuperPressed"]
+
+["isDepthTestEnabled"]
+category = "graphics_style"
+keywords = ["depth", "z-buffer", "check", "state"]
+description.en = "Whether the depth-tested blend pipeline variant is active (set by enableDepthTest)"
+description.ja = "デプステスト付きブレンドパイプラインが有効か（enableDepthTest で設定）"
+description.ko = "깊이 테스트가 적용된 블렌드 파이프라인이 활성 상태인지 (enableDepthTest로 설정)"
+related = ["enableDepthTest", "disableDepthTest"]
 
 ["isFillEnabled"]
 category = "graphics_style"
