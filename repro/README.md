@@ -36,11 +36,20 @@ which includes `fix/deferred-mesh-buffers-and-texture-blend` (PR #183) and
 - Test 4: shader quad appears only inside the small corner fbo copy
   (bug = full-size on screen + missing from the fbo)
 
-### fboSemanticsRepro (KNOWN-UNFIXED semantics — #189/#190/#191)
-Expected to look the SAME on every platform (these are not fixed yet):
-- mode 0 (1 marker rect top-left): both squares BLUE
-- mode 1 (2 marker rects): yellow left half still visible over gray
-- mode 2 (3 marker rects): fullscreen gradient wiped when the fbo block runs
+### fboSemanticsRepro (ROUND 2 — #189/#190/#191 now FIXED on this branch)
+- mode 0 (1 marker rect top-left): left square RED, right square BLUE
+  (#189 fbo version pool; bug = both blue)
+- mode 1 (2 marker rects): yellow left half GONE — dark gray + cyan rect only
+  (#190 clear() erase semantics; bug = yellow visible)
+- mode 2 (3 marker rects): fullscreen gradient VISIBLE in BOTH halves; the
+  fbo half additionally shows the green corner copy (#191 pass LOAD;
+  bug = gradient wiped when the fbo block runs)
+
+Round-2 platform attention: #191 required a small documented patch to the
+vendored sokol_gfx.h METAL backend only (MSAA swapchain store action). D3D11
+and GL are believed to preserve the MSAA target natively — mode 2 on
+Windows/Linux is the key thing to confirm. Also confirm mode 0 MSAA fbo
+behavior (the version pool shares the MSAA render target across versions).
 
 ## What to report per platform
 
