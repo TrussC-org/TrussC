@@ -13,7 +13,6 @@
 
 | Feature | Description | Difficulty |
 |---------|-------------|------------|
-| Multi-light shadows | Support shadow maps for multiple lights simultaneously | High |
 | Area lights | Rectangle / disc / line area light sources | High |
 | Cascaded shadow maps | CSM for directional lights (large outdoor scenes) | High |
 | `LoadResult` error taxonomy enrichment | The API SHAPE shipped in v0.7: `trussc::LoadResult` (`LoadError` enum + message, `explicit operator bool()`) is returned by Image/Pixels/SoundBuffer/Sound/SoundStream/VideoPlayer/tcxHap/Font load APIs, with `fs::exists` pre-checks (FileNotFound), `stbi_failure_reason()`, and native error codes (OSStatus/HRESULT/ma_result) in messages. Note: `Shader` has no path-based load in core (nothing to convert). REMAINING (non-breaking): grow the enum (permission-denied, network, ...) and enrich per-decoder messages (AVFoundation NSError text, GStreamer detail, MF verbose HRESULT mapping) — per-domain audit of error sources can proceed incrementally. | Medium |

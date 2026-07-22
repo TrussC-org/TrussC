@@ -709,6 +709,13 @@ floorMesh.draw();
 wallMesh.draw();
 ```
 
+Up to 4 lights can cast shadows in the same frame: run one
+`beginShadowPass(light) ... endShadowPass()` cycle per shadow light before the
+PBR pass (see `examples/3d/multiShadowExample`). Each light renders into its
+own layer of a shared shadow map array; the shared resolution is the largest
+requested by any shadow light. Passes beyond the 4-light limit are ignored
+with a one-time warning.
+
 **Light types:**
 ```cpp
 light.setDirectional(Vec3(0, -1, 0));                      // Sun-like
