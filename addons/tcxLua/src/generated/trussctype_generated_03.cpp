@@ -31,7 +31,7 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["rotateXFrom"] = &trussc::TweenMod::rotateXFrom;
         t["rotateYFrom"] = &trussc::TweenMod::rotateYFrom;
         t["duration"] = &trussc::TweenMod::duration;
-        t["ease"] = sol::overload([](trussc::TweenMod& self, trussc::EaseType type) -> decltype(auto) { return self.ease(type); }, [](trussc::TweenMod& self, trussc::EaseType type, trussc::EaseMode mode) -> decltype(auto) { return self.ease(type, mode); });
+        t["ease"] = sol::overload([](trussc::TweenMod& self, trussc::EaseType type) -> decltype(auto) { return self.ease(type); }, [](trussc::TweenMod& self, trussc::EaseType type, trussc::EaseMode mode) -> decltype(auto) { return self.ease(type, mode); }, [](trussc::TweenMod& self, trussc::EaseFunction fn) -> decltype(auto) { return self.ease(fn); }, [](trussc::TweenMod& self, trussc::EaseFunction fn, trussc::EaseMode mode) -> decltype(auto) { return self.ease(fn, mode); });
         t["delay"] = &trussc::TweenMod::delay;
         t["start"] = &trussc::TweenMod::start;
         t["pause"] = &trussc::TweenMod::pause;
@@ -46,35 +46,33 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["getEaseMode"] = &trussc::TweenMod::getEaseMode;
     }
     {
-        sol::usertype<trussc::MouseDragEventArgs> t = lua->new_usertype<trussc::MouseDragEventArgs>("MouseDragEventArgs");
-        t["x"] = &trussc::MouseDragEventArgs::x;
-        t["y"] = &trussc::MouseDragEventArgs::y;
-        t["deltaX"] = &trussc::MouseDragEventArgs::deltaX;
-        t["deltaY"] = &trussc::MouseDragEventArgs::deltaY;
-        t["button"] = &trussc::MouseDragEventArgs::button;
-        t["shift"] = &trussc::MouseDragEventArgs::shift;
-        t["ctrl"] = &trussc::MouseDragEventArgs::ctrl;
-        t["alt"] = &trussc::MouseDragEventArgs::alt;
-        t["super"] = &trussc::MouseDragEventArgs::super;
-        t["pos"] = &trussc::MouseDragEventArgs::pos;
-        t["globalPos"] = &trussc::MouseDragEventArgs::globalPos;
-        t["delta"] = &trussc::MouseDragEventArgs::delta;
-        t["globalDelta"] = &trussc::MouseDragEventArgs::globalDelta;
-        t["consumed"] = &trussc::MouseDragEventArgs::consumed;
-        t["syncLegacy"] = &trussc::MouseDragEventArgs::syncLegacy;
+        sol::usertype<trussc::NetworkInterface> t = lua->new_usertype<trussc::NetworkInterface>("NetworkInterface");
+        t["name"] = &trussc::NetworkInterface::name;
+        t["address"] = &trussc::NetworkInterface::address;
+        t["netmask"] = &trussc::NetworkInterface::netmask;
+        t["mac"] = &trussc::NetworkInterface::mac;
+        t["isIPv4"] = &trussc::NetworkInterface::isIPv4;
+        t["isLoopback"] = &trussc::NetworkInterface::isLoopback;
+        t["isUp"] = &trussc::NetworkInterface::isUp;
+        t["getName"] = &trussc::NetworkInterface::getName;
+        t["getAddress"] = &trussc::NetworkInterface::getAddress;
+        t["getNetmask"] = &trussc::NetworkInterface::getNetmask;
+        t["getMac"] = &trussc::NetworkInterface::getMac;
+        t["getIsIPv4"] = &trussc::NetworkInterface::getIsIPv4;
+        t["getIsLoopback"] = &trussc::NetworkInterface::getIsLoopback;
+        t["getIsUp"] = &trussc::NetworkInterface::getIsUp;
     }
     {
-        sol::usertype<trussc::IesProfile> t = lua->new_usertype<trussc::IesProfile>("IesProfile",
-            sol::constructors<trussc::IesProfile()>(),
-            sol::call_constructor, sol::constructors<trussc::IesProfile()>());
-        t["load"] = &trussc::IesProfile::load;
-        t["loadFromString"] = &trussc::IesProfile::loadFromString;
-        t["isLoaded"] = &trussc::IesProfile::isLoaded;
-        t["getMaxVerticalAngle"] = &trussc::IesProfile::getMaxVerticalAngle;
-        t["getMaxCandela"] = &trussc::IesProfile::getMaxCandela;
-        t["getTextureWidth"] = &trussc::IesProfile::getTextureWidth;
-        t["getView"] = &trussc::IesProfile::getView;
-        t["getSampler"] = &trussc::IesProfile::getSampler;
+        sol::usertype<trussc::VideoRecordSettings> t = lua->new_usertype<trussc::VideoRecordSettings>("VideoRecordSettings");
+        t["codec"] = &trussc::VideoRecordSettings::codec;
+        t["fps"] = &trussc::VideoRecordSettings::fps;
+        t["bitrate"] = &trussc::VideoRecordSettings::bitrate;
+        t["keyframeInterval"] = &trussc::VideoRecordSettings::keyframeInterval;
+        t["duration"] = &trussc::VideoRecordSettings::duration;
+        t["audio"] = &trussc::VideoRecordSettings::audio;
+        t["audioBitrate"] = &trussc::VideoRecordSettings::audioBitrate;
+        t["audioSampleRate"] = &trussc::VideoRecordSettings::audioSampleRate;
+        t["audioChannels"] = &trussc::VideoRecordSettings::audioChannels;
     }
     {
         sol::usertype<trussc::ScrollBar> t = lua->new_usertype<trussc::ScrollBar>("ScrollBar");
@@ -87,13 +85,14 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["getOffset"] = &trussc::ScrollBar::getOffset;
         t["updateFromContainer"] = &trussc::ScrollBar::updateFromContainer;
     }
-    lua->new_usertype<trussc::LoadError>("LoadError",
-        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
-        "None", sol::var(trussc::LoadError::None),
-        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
-        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
-        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
-        "Unknown", sol::var(trussc::LoadError::Unknown));
+    {
+        sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
+        t["sampleRate"] = &trussc::AudioSettings::sampleRate;
+        t["channels"] = &trussc::AudioSettings::channels;
+        t["bufferSize"] = &trussc::AudioSettings::bufferSize;
+        t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
+        t["deviceName"] = &trussc::AudioSettings::deviceName;
+    }
     {
         sol::usertype<trussc::TcpClientConnectEventArgs> t = lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
         t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
@@ -106,10 +105,11 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["getHost"] = &trussc::TcpServerClient::getHost;
         t["getPort"] = &trussc::TcpServerClient::getPort;
     }
-    lua->new_usertype<trussc::Deliver>("Deliver",
-        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
-        "Inline", sol::var(trussc::Deliver::Inline),
-        "Main", sol::var(trussc::Deliver::Main));
+    {
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
+        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
+        t["setFps"] = &trussc::HeadlessSettings::setFps;
+    }
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

@@ -222,6 +222,15 @@ public:
         return *this;
     }
 
+    // Custom ease: user-supplied curve (may capture state). Default mode In
+    // applies the function as authored; Out/InOut derive from an ease-in curve.
+    TweenMod& ease(EaseFunction fn, EaseMode mode = EaseMode::In) {
+        customEase_ = std::move(fn);
+        easeType_ = EaseType::Custom;
+        easeMode_ = mode;
+        return *this;
+    }
+
     TweenMod& delay(float seconds) {
         delay_ = seconds;
         return *this;
@@ -311,7 +320,9 @@ protected:
         if (elapsed_ < 0) return;
 
         float t = getProgress();
-        float easedT = trussc::ease(t, easeType_, easeMode_);
+        float easedT = (easeType_ == EaseType::Custom)
+            ? trussc::ease(t, customEase_, easeMode_)   // null fn -> linear
+            : trussc::ease(t, easeType_, easeMode_);
 
         // Apply position
         if (posEnabled_) {
@@ -446,6 +457,7 @@ private:
     float elapsed_ = 0.0f;
     EaseType easeType_ = EaseType::Cubic;
     EaseMode easeMode_ = EaseMode::InOut;
+    EaseFunction customEase_;
     bool playing_ = false;
     bool completed_ = false;
 
