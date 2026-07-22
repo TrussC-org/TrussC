@@ -213,6 +213,36 @@ inline void appendArc(const Vec2& center, float radius,
     appendArc(center.x, center.y, radius, angleBegin, angleEnd);
 }
 
+// Append the full closed outline of a superellipse (Lamé curve) inscribed in
+// the rect (x, y, w, h) — same bounding-box convention as drawSuperellipse.
+// Emits the start point twice (loop closure); the duplicate is benign.
+// Note: endShape() fills with a first-vertex fan, which is only correct for
+// convex outlines — fine for n >= 1; for concave n < 1 shapes use
+// drawSuperellipse (center fan) or fill via Path.
+inline void appendSuperellipse(float x, float y, float w, float h,
+                               float n = 5.0f) {
+    if (n <= 0.0f) return;
+    if (w < 0) { x += w; w = -w; }
+    if (h < 0) { y += h; h = -h; }
+    float rx = w * 0.5f, ry = h * 0.5f;
+    float cx = x + rx, cy = y + ry;
+    auto& ctx = getDefaultContext();
+    int segs = ctx.decideArcSegments(std::max(rx, ry), TAU);
+    if (segs < 8) segs = 8;
+    float expo = 2.0f / n;
+    for (int i = 0; i <= segs; i++) {
+        float a = TAU * ((float)i / (float)segs);
+        float c = std::cos(a), s = std::sin(a);
+        vertex(cx + std::copysign(std::pow(std::abs(c), expo), c) * rx,
+               cy + std::copysign(std::pow(std::abs(s), expo), s) * ry);
+    }
+}
+
+inline void appendSuperellipse(const Vec2& pos, const Vec2& size,
+                               float n = 5.0f) {
+    appendSuperellipse(pos.x, pos.y, size.x, size.y, n);
+}
+
 // Helper — tessellate one Catmull-Rom segment (with p0/p3 as tangent
 // influences, p1->p2 as the visible piece) into the active vertex buffer.
 namespace internal {
