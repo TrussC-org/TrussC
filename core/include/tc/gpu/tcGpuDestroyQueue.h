@@ -22,10 +22,12 @@
 namespace trussc {
 namespace internal {
 
-inline std::vector<sg_buffer>  pendingGpuBufferDestroys;
-inline std::vector<sg_image>   pendingGpuImageDestroys;
-inline std::vector<sg_view>    pendingGpuViewDestroys;
-inline std::vector<sg_sampler> pendingGpuSamplerDestroys;
+inline std::vector<sg_buffer>   pendingGpuBufferDestroys;
+inline std::vector<sg_image>    pendingGpuImageDestroys;
+inline std::vector<sg_view>     pendingGpuViewDestroys;
+inline std::vector<sg_sampler>  pendingGpuSamplerDestroys;
+inline std::vector<sg_pipeline> pendingGpuPipelineDestroys;
+inline std::vector<sg_shader>   pendingGpuShaderDestroys;
 
 inline void deferGpuDestroy(sg_buffer buf) {
     if (buf.id != 0) pendingGpuBufferDestroys.push_back(buf);
@@ -43,6 +45,14 @@ inline void deferGpuDestroy(sg_sampler smp) {
     if (smp.id != 0) pendingGpuSamplerDestroys.push_back(smp);
 }
 
+inline void deferGpuDestroy(sg_pipeline pip) {
+    if (pip.id != 0) pendingGpuPipelineDestroys.push_back(pip);
+}
+
+inline void deferGpuDestroy(sg_shader shd) {
+    if (shd.id != 0) pendingGpuShaderDestroys.push_back(shd);
+}
+
 // Destroy everything queued this frame. Called from present() after
 // sg_commit(). Skips the sg_destroy calls entirely when sokol_gfx has
 // already shut down (handles queued during teardown are reclaimed by
@@ -53,11 +63,16 @@ inline void drainPendingGpuDestroys() {
         for (sg_view view : pendingGpuViewDestroys)      sg_destroy_view(view);
         for (sg_image img : pendingGpuImageDestroys)     sg_destroy_image(img);
         for (sg_sampler smp : pendingGpuSamplerDestroys) sg_destroy_sampler(smp);
+        // Pipelines before shaders: a pipeline references its shader.
+        for (sg_pipeline pip : pendingGpuPipelineDestroys) sg_destroy_pipeline(pip);
+        for (sg_shader shd : pendingGpuShaderDestroys)     sg_destroy_shader(shd);
     }
     pendingGpuBufferDestroys.clear();
     pendingGpuImageDestroys.clear();
     pendingGpuViewDestroys.clear();
     pendingGpuSamplerDestroys.clear();
+    pendingGpuPipelineDestroys.clear();
+    pendingGpuShaderDestroys.clear();
 }
 
 } // namespace internal

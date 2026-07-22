@@ -95,16 +95,24 @@ public:
     }
 
     void clear() {
+        // Defer all destroys to end-of-frame (tcGpuDestroyQueue.h): a deferred
+        // shader draw recorded this frame may still reference these handles.
+        // This is what makes scope-local Shaders safe — the captured pipeline
+        // and buffers outlive the object until the flush.
         if (loaded) {
-            if (indexBuffer.id) sg_destroy_buffer(indexBuffer);
-            if (vertexBuffer.id) sg_destroy_buffer(vertexBuffer);
-            if (pipeline.id) sg_destroy_pipeline(pipeline);
-            if (shader.id) sg_destroy_shader(shader);
+            internal::deferGpuDestroy(indexBuffer);
+            internal::deferGpuDestroy(vertexBuffer);
+            internal::deferGpuDestroy(pipeline);
+            internal::deferGpuDestroy(shader);
         }
         for (auto& [key, pip] : targetPipelines_) {
-            if (pip.id) sg_destroy_pipeline(pip);
+            internal::deferGpuDestroy(pip);
         }
         targetPipelines_.clear();
+        for (auto& [slot, cached] : imageViews_) {
+            internal::deferGpuDestroy(cached.view);
+        }
+        imageViews_.clear();
         shader = {};
         pipeline = {};
         vertexBuffer = {};
@@ -125,9 +133,14 @@ public:
         internal::shaderStack.push_back(this);
 
         // Increment layer for post-shader sokol_gl draws
-        // (shader draws will be deferred and executed between layers)
-        internal::sglLayerNext++;
-        sgl_layer(internal::sglLayerNext);
+        // (shader draws will be deferred and executed between layers).
+        // Inside an FBO pass the layering is handled per-submission instead
+        // (fboLayerNext bump in submitVertices, like the deferred PBR path),
+        // so only the swapchain layer counter is advanced here.
+        if (!internal::currentWindowContext().inFboPass) {
+            internal::sglLayerNext++;
+            sgl_layer(internal::sglLayerNext);
+        }
 
         // Call virtual hook
         onBegin();
@@ -231,8 +244,21 @@ public:
     // Texture binding
     // -------------------------------------------------------------------------
 
+    // Convenience overload taking a raw sg_image. sokol's binding model needs
+    // an sg_view, so one is created here and cached per slot (recreated only
+    // when the image changes; the old view goes through the deferred-destroy
+    // queue since a recorded draw may still reference it). Prefer the sg_view
+    // overload when a view is already available (e.g. Texture::getView()).
     void setTexture(int slot, sg_image image, sg_sampler sampler) {
-        pendingTextures[slot] = { image, sampler };
+        auto& cached = imageViews_[slot];
+        if (cached.image.id != image.id) {
+            internal::deferGpuDestroy(cached.view);
+            sg_view_desc vd = {};
+            vd.texture.image = image;
+            cached.view = sg_make_view(&vd);
+            cached.image = image;
+        }
+        pendingViews[slot] = { cached.view, sampler };
     }
 
     void setTexture(int slot, sg_view view, sg_sampler sampler) {
@@ -245,112 +271,55 @@ public:
 
     void submitVertices(const ShaderVertex* data, int count, PrimitiveType type) {
         if (count == 0) return;
+        if (!loaded) return;
 
         // Lines/LineStrip are not supported in shader mode (use StrokeMesh instead)
         if (type == PrimitiveType::Lines || type == PrimitiveType::LineStrip) {
             return;
         }
 
-        // Defer this draw - will be executed in present() between sokol_gl layers
+        // Capture contract: snapshot EVERYTHING the replay needs NOW, so the
+        // flush never touches this Shader object (it may be scope-local and
+        // destroyed before present()) and later setUniform()/setTexture()
+        // calls cannot retroactively change this draw. Same pattern as
+        // PbrDrawCommand; executed by internal::executeDeferredShaderDraw().
         internal::DeferredShaderDraw draw;
-        draw.layerId = internal::sglLayerNext - 1;  // Layer before this shader
-        draw.shader = this;
+        draw.pipeline = pipelineForCurrentTarget();  // target-resolved (swapchain vs FBO)
         draw.vertices.assign(data, data + count);
         draw.type = type;
-        internal::deferredShaderDraws.push_back(std::move(draw));
-    }
 
-    // Execute a deferred draw (called from present())
-    void executeDeferredDraw(const std::vector<ShaderVertex>& vertices, PrimitiveType type) {
-        if (vertices.empty()) return;
-
-        // Ensure pipeline and uniforms are applied (FBO-aware: deferred draws run
-        // at present time on the swapchain, but route through the same helper so
-        // the path stays correct if a draw is ever executed inside an FBO pass).
-        sg_apply_pipeline(pipelineForCurrentTarget());
-        applyUniforms();
-
-        // Append to vertex buffer
-        sg_range range = { vertices.data(), vertices.size() * sizeof(ShaderVertex) };
-        int vertexOffset = sg_append_buffer(vertexBuffer, &range);
-        if (vertexOffset < 0) {
-            logWarning("Shader") << "Vertex buffer overflow, skipping draw";
-            return;
+        // Snapshot uniform block bytes (the same bytes applyUniforms() would
+        // upload, but frozen per draw instead of last-write-wins).
+        draw.uniforms.reserve(pendingUniforms.size());
+        for (const auto& [slot, bytes] : pendingUniforms) {
+            draw.uniforms.emplace_back(slot, bytes);
         }
 
-        // Setup bindings
+        // Snapshot bindings: stream buffers + texture view/sampler pairs.
         sg_bindings bind = {};
         bind.vertex_buffers[0] = vertexBuffer;
-
-        // Apply pending textures
-        for (auto& [slot, tex] : pendingViews) {
+        for (const auto& [slot, tex] : pendingViews) {
             bind.views[slot] = tex.view;
             bind.samplers[slot] = tex.sampler;
         }
-
-        setupBindings(bind);
-
-        // Generate triangle indices
-        std::vector<uint16_t> indices;
-        int count = (int)vertices.size();
-
-        if (type == PrimitiveType::Quads) {
-            int numQuads = count / 4;
-            indices.reserve(numQuads * 6);
-            for (int i = 0; i < numQuads; i++) {
-                int base = i * 4;
-                indices.push_back(base + 0);
-                indices.push_back(base + 1);
-                indices.push_back(base + 2);
-                indices.push_back(base + 0);
-                indices.push_back(base + 2);
-                indices.push_back(base + 3);
-            }
-        } else if (type == PrimitiveType::TriangleStrip) {
-            if (count >= 3) {
-                indices.reserve((count - 2) * 3);
-                for (int i = 0; i < count - 2; i++) {
-                    if (i % 2 == 0) {
-                        indices.push_back(i);
-                        indices.push_back(i + 1);
-                        indices.push_back(i + 2);
-                    } else {
-                        indices.push_back(i + 1);
-                        indices.push_back(i);
-                        indices.push_back(i + 2);
-                    }
-                }
-            }
-        } else if (type == PrimitiveType::Triangles) {
-            indices.reserve(count);
-            for (int i = 0; i < count; i++) {
-                indices.push_back((uint16_t)i);
-            }
-        } else if (type == PrimitiveType::Points) {
-            return;
-        }
-
-        // Adjust indices for vertex buffer offset
-        int baseVertex = vertexOffset / sizeof(ShaderVertex);
-        for (auto& idx : indices) {
-            idx += baseVertex;
-        }
-
-        // Append to index buffer
-        sg_range idxRange = { indices.data(), indices.size() * sizeof(uint16_t) };
-        int indexOffset = sg_append_buffer(indexBuffer, &idxRange);
-        if (indexOffset < 0) {
-            logWarning("Shader") << "Index buffer overflow, skipping draw";
-            return;
-        }
-
+        setupBindings(bind);  // subclass hook (runs at submission, object is alive)
         bind.index_buffer = indexBuffer;
-        bind.vertex_buffer_offsets[0] = 0;
-        sg_apply_bindings(&bind);
+        draw.bindings = bind;
 
-        // Draw
-        int baseElement = indexOffset / sizeof(uint16_t);
-        sg_draw(baseElement, (int)indices.size(), 1);
+        if (internal::currentWindowContext().inFboPass) {
+            // Defer into the per-FBO list; flushed per-layer by
+            // flushFboDeferredPbr() at Fbo::end()/clearColor(). Bump the FBO
+            // layer so 2D drawn after this composites on top of it, matching
+            // the deferred PBR/point pattern (tcMeshPbrPipeline.h).
+            draw.layerId = internal::fboLayerNext;
+            internal::fboShaderDraws.push_back(std::move(draw));
+            internal::fboLayerNext++;
+            sgl_layer(internal::fboLayerNext);
+        } else {
+            // Swapchain: executed in present() between sokol_gl layers.
+            draw.layerId = internal::sglLayerNext - 1;  // Layer before this shader
+            internal::deferredShaderDraws.push_back(std::move(draw));
+        }
     }
 
 protected:
@@ -369,16 +338,19 @@ protected:
     std::unordered_map<uint64_t, sg_pipeline> targetPipelines_;
 
     // Pending texture bindings
-    struct TextureBinding {
-        sg_image image;
-        sg_sampler sampler;
-    };
     struct ViewBinding {
         sg_view view;
         sg_sampler sampler;
     };
-    std::unordered_map<int, TextureBinding> pendingTextures;
     std::unordered_map<int, ViewBinding> pendingViews;
+
+    // Views created by the setTexture(slot, sg_image, sampler) convenience
+    // overload, cached per slot and released (deferred) in clear().
+    struct CachedImageView {
+        sg_image image = {};
+        sg_view view = {};
+    };
+    std::unordered_map<int, CachedImageView> imageViews_;
 
     // Pending uniform data (stored for reapplication after pipeline switch)
     std::unordered_map<int, std::vector<uint8_t>> pendingUniforms;
@@ -460,8 +432,9 @@ private:
         vertexBuffer = other.vertexBuffer;
         indexBuffer = other.indexBuffer;
         loaded = other.loaded;
-        pendingTextures = std::move(other.pendingTextures);
         pendingViews = std::move(other.pendingViews);
+        pendingUniforms = std::move(other.pendingUniforms);
+        imageViews_ = std::move(other.imageViews_);
         targetPipelines_ = std::move(other.targetPipelines_);
 
         other.shader = {};
@@ -528,10 +501,13 @@ inline void flushDeferredShaderDraws() {
             sgl_draw_layer(layer);
         }
 
-        // Deferred shader draws are independent of sgl, always safe
+        // Deferred shader draws are independent of sgl, always safe. Each is a
+        // self-contained snapshot (pipeline/bindings/uniforms captured at
+        // submission), so no Shader object is touched here — the object may
+        // already be destroyed.
         for (auto& draw : internal::deferredShaderDraws) {
             if (draw.layerId == layer) {
-                draw.shader->executeDeferredDraw(draw.vertices, draw.type);
+                internal::executeDeferredShaderDraw(draw);
             }
         }
 

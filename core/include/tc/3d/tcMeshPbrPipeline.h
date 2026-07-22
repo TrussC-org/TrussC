@@ -693,6 +693,12 @@ inline PbrPipeline& getPbrPipeline() {
 inline void flushFboDeferredPbr(sgl_context ctx) {
     for (int layer = 0; layer <= fboLayerNext; layer++) {
         sgl_context_draw_layer(ctx, layer);
+        // Deferred shader draws share this FBO's layer space; replay them
+        // first within the layer, matching the swapchain flush order
+        // (sokol_gl -> shader -> PBR -> points) in flushDeferredShaderDraws.
+        for (auto& d : fboShaderDraws) {
+            if (d.layerId == layer) executeDeferredShaderDraw(d);
+        }
         for (auto& d : fboPbrDraws) {
             if (d.layerId == layer) getPbrPipeline().executePbrDraw(d.cmd);
         }
@@ -702,6 +708,7 @@ inline void flushFboDeferredPbr(sgl_context ctx) {
             if (d.layerId == layer) executePointDraw(d.cmd);
         }
     }
+    fboShaderDraws.clear();
     fboPbrDraws.clear();
     fboPointDraws.clear();
     fboLayerNext = 0;
