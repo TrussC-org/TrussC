@@ -72,11 +72,6 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["toVec3"] = &trussc::IVec3::toVec3;
         t["xy"] = &trussc::IVec3::xy;
     }
-    {
-        sol::usertype<trussc::Tween<trussc::Vec2>> t = lua->new_usertype<trussc::Tween<trussc::Vec2>>("Tween_Vec2",
-            sol::constructors<trussc::Tween<trussc::Vec2>(), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType, trussc::EaseMode)>(),
-            sol::call_constructor, sol::constructors<trussc::Tween<trussc::Vec2>(), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType, trussc::EaseMode)>());
-    }
     lua->new_usertype<trussc::EaseType>("EaseType",
         sol::meta_function::equal_to, [](trussc::EaseType a, trussc::EaseType b){ return a == b; },
         "Linear", sol::var(trussc::EaseType::Linear),
@@ -89,7 +84,22 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         "Circ", sol::var(trussc::EaseType::Circ),
         "Back", sol::var(trussc::EaseType::Back),
         "Elastic", sol::var(trussc::EaseType::Elastic),
-        "Bounce", sol::var(trussc::EaseType::Bounce));
+        "Bounce", sol::var(trussc::EaseType::Bounce),
+        "Custom", sol::var(trussc::EaseType::Custom));
+    {
+        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader",
+            sol::constructors<trussc::FileReader()>(),
+            sol::call_constructor, sol::constructors<trussc::FileReader()>());
+        t["open"] = &trussc::FileReader::open;
+        t["close"] = &trussc::FileReader::close;
+        t["isOpen"] = &trussc::FileReader::isOpen;
+        t["eof"] = &trussc::FileReader::eof;
+        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
+        t["readChar"] = &trussc::FileReader::readChar;
+        t["seek"] = &trussc::FileReader::seek;
+        t["tell"] = &trussc::FileReader::tell;
+        t["remaining"] = &trussc::FileReader::remaining;
+    }
     {
         sol::usertype<trussc::LogEventArgs> t = lua->new_usertype<trussc::LogEventArgs>("LogEventArgs",
             sol::constructors<trussc::LogEventArgs(trussc::LogLevel, const std::string &)>(),
@@ -98,12 +108,11 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["message"] = &trussc::LogEventArgs::message;
         t["timestamp"] = &trussc::LogEventArgs::timestamp;
     }
-    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
-        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
-        "H264", sol::var(trussc::VideoCodec::H264),
-        "HEVC", sol::var(trussc::VideoCodec::HEVC),
-        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
-        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
+    {
+        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream",
+            sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>(),
+            sol::call_constructor, sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>());
+    }
     {
         sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
         t["isReadOnly"] = &trussc::Reflector::isReadOnly;

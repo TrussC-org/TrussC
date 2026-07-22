@@ -74,14 +74,9 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
         t["flush"] = &trussc::FileWriter::flush;
     }
     {
-        sol::usertype<trussc::Ray> t = lua->new_usertype<trussc::Ray>("Ray",
-            sol::constructors<trussc::Ray(), trussc::Ray(const trussc::Vec3 &, const trussc::Vec3 &)>(),
-            sol::call_constructor, sol::constructors<trussc::Ray(), trussc::Ray(const trussc::Vec3 &, const trussc::Vec3 &)>());
-        t["origin"] = &trussc::Ray::origin;
-        t["direction"] = &trussc::Ray::direction;
-        t["at"] = &trussc::Ray::at;
-        t["transformed"] = &trussc::Ray::transformed;
-        t["fromScreenPoint2D"] = sol::overload([](float screenX, float screenY) { return trussc::Ray::fromScreenPoint2D(screenX, screenY); }, [](float screenX, float screenY, float startZ) { return trussc::Ray::fromScreenPoint2D(screenX, screenY, startZ); });
+        sol::usertype<trussc::Tween<trussc::Vec3>> t = lua->new_usertype<trussc::Tween<trussc::Vec3>>("Tween_Vec3",
+            sol::constructors<trussc::Tween<trussc::Vec3>(), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType, trussc::EaseMode)>(),
+            sol::call_constructor, sol::constructors<trussc::Tween<trussc::Vec3>(), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType, trussc::EaseMode)>());
     }
     {
         sol::usertype<trussc::Tween<float>> t = lua->new_usertype<trussc::Tween<float>>("Tween_float",
@@ -96,19 +91,22 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
         "Screen", sol::var(trussc::BlendMode::Screen),
         "Subtract", sol::var(trussc::BlendMode::Subtract),
         "Disabled", sol::var(trussc::BlendMode::Disabled));
-    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
-        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
-        "Repeat", sol::var(trussc::TextureWrap::Repeat),
-        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
-        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
+    {
+        sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
+        t["frameCount"] = &trussc::AudioInBuffer::frameCount;
+        t["channels"] = &trussc::AudioInBuffer::channels;
+        t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
+        t["framePosition"] = &trussc::AudioInBuffer::framePosition;
+    }
     lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
         sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
         "Vertical", sol::var(trussc::LayoutDirection::Vertical),
         "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
-    lua->new_usertype<trussc::MixMode>("MixMode",
-        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
-        "Auto", sol::var(trussc::MixMode::Auto),
-        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
+    {
+        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
+        t["message"] = &trussc::UdpErrorEventArgs::message;
+        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
+    }
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

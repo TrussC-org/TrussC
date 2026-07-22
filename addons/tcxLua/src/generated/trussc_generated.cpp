@@ -746,13 +746,23 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("sameSubnet", [](const std::string & a, const std::string & b, const std::string & netmask) { return trussc::sameSubnet(a, b, netmask); });
     lua->set_function("getOui", [](const std::string & mac) { return trussc::getOui(mac); });
     lua->set_function("isLocallyAdministered", [](const std::string & mac) { return trussc::isLocallyAdministered(mac); });
-    lua->set_function("easeIn", [](float t, trussc::EaseType type) { return trussc::easeIn(t, type); });
-    lua->set_function("easeOut", [](float t, trussc::EaseType type) { return trussc::easeOut(t, type); });
+    lua->set_function("easeIn", sol::overload(
+        [](float t, trussc::EaseType type) { return trussc::easeIn(t, type); },
+        [](float t, const trussc::EaseFunction & fn) { return trussc::easeIn(t, fn); }
+    ));
+    lua->set_function("easeOut", sol::overload(
+        [](float t, trussc::EaseType type) { return trussc::easeOut(t, type); },
+        [](float t, const trussc::EaseFunction & fn) { return trussc::easeOut(t, fn); }
+    ));
     lua->set_function("easeInOut", sol::overload(
         [](float t, trussc::EaseType type) { return trussc::easeInOut(t, type); },
-        [](float t, trussc::EaseType inType, trussc::EaseType outType) { return trussc::easeInOut(t, inType, outType); }
+        [](float t, trussc::EaseType inType, trussc::EaseType outType) { return trussc::easeInOut(t, inType, outType); },
+        [](float t, const trussc::EaseFunction & fn) { return trussc::easeInOut(t, fn); }
     ));
-    lua->set_function("ease", [](float t, trussc::EaseType type, trussc::EaseMode mode) { return trussc::ease(t, type, mode); });
+    lua->set_function("ease", sol::overload(
+        [](float t, trussc::EaseType type, trussc::EaseMode mode) { return trussc::ease(t, type, mode); },
+        [](float t, const trussc::EaseFunction & fn, trussc::EaseMode mode) { return trussc::ease(t, fn, mode); }
+    ));
     lua->set_function("typeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::typeName(ti); });
     lua->set_function("shortTypeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::shortTypeName(ti); });
     lua->set_function("isOverlayHovered", []() { return trussc::isOverlayHovered(); });

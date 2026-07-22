@@ -41,12 +41,14 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         t["getPerimeter"] = &trussc::Path::getPerimeter;
     }
     {
-        sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
-        t["sampleRate"] = &trussc::AudioSettings::sampleRate;
-        t["channels"] = &trussc::AudioSettings::channels;
-        t["bufferSize"] = &trussc::AudioSettings::bufferSize;
-        t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
-        t["deviceName"] = &trussc::AudioSettings::deviceName;
+        sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
+        t["key"] = &trussc::KeyEventArgs::key;
+        t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
+        t["shift"] = &trussc::KeyEventArgs::shift;
+        t["ctrl"] = &trussc::KeyEventArgs::ctrl;
+        t["alt"] = &trussc::KeyEventArgs::alt;
+        t["super"] = &trussc::KeyEventArgs::super;
+        t["consumed"] = &trussc::KeyEventArgs::consumed;
     }
     lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
         sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
