@@ -22,7 +22,8 @@
 //     (flushDeferredShaderDraws), FBO-pass draws into fboPbrDraws (flushed at
 //     Fbo::end()), so they composite with sokol_gl 2D in submission order.
 //     Captured sg_buffer handles stay valid because Mesh defers buffer
-//     destruction to end of frame (internal::pendingGpuBufferDestroys).
+//     destruction to end of frame (internal::deferGpuDestroy,
+//     tcGpuDestroyQueue.h).
 //
 // =============================================================================
 
@@ -487,8 +488,12 @@ public:
         const Light& light = *internal::activeLights[lightIndex];
         ensureShadowTexture(light.getShadowResolution());
 
-        // Suspend swapchain pass if active
-        if (internal::currentWindowContext().inSwapchainPass) {
+        // Suspend swapchain pass if active. Remember whether one was active so
+        // endShadowPass() only resumes when there is something to resume
+        // (mirrors Fbo::wasInSwapchainPass_ — issue #191: it used to start a
+        // swapchain pass even when none was active before).
+        shadowWasInSwapchainPass_ = internal::currentWindowContext().inSwapchainPass;
+        if (shadowWasInSwapchainPass_) {
             sgl_draw();
             sg_end_pass();
             internal::currentWindowContext().inSwapchainPass = false;
@@ -548,8 +553,11 @@ public:
         inShadowPass_ = false;
         shadowDrawCount_ = 0;
 
-        // Resume swapchain pass
-        resumeSwapchainPass();
+        // Resume swapchain pass only if one was active before beginShadowPass()
+        if (shadowWasInSwapchainPass_) {
+            resumeSwapchainPass();
+            shadowWasInSwapchainPass_ = false;
+        }
     }
 
 private:
@@ -588,13 +596,14 @@ private:
     void ensureShadowTexture(int resolution) {
         if (resolution == shadowTexResolution_) return;
 
-        // Destroy old resources
-        if (shadowColorImage_.id)   sg_destroy_image(shadowColorImage_);
-        if (shadowColorAttView_.id) sg_destroy_view(shadowColorAttView_);
-        if (shadowColorTexView_.id) sg_destroy_view(shadowColorTexView_);
-        if (shadowDepthImage_.id)   sg_destroy_image(shadowDepthImage_);
-        if (shadowDepthAttView_.id) sg_destroy_view(shadowDepthAttView_);
-        if (shadowSampler_.id)      sg_destroy_sampler(shadowSampler_);
+        // Release old resources (deferred: a deferred PBR draw recorded this
+        // frame may still bind the old shadow map view/sampler)
+        internal::deferGpuDestroy(shadowColorImage_);
+        internal::deferGpuDestroy(shadowColorAttView_);
+        internal::deferGpuDestroy(shadowColorTexView_);
+        internal::deferGpuDestroy(shadowDepthImage_);
+        internal::deferGpuDestroy(shadowDepthAttView_);
+        internal::deferGpuDestroy(shadowSampler_);
 
         // R32F color target (stores depth value for sampling)
         sg_image_desc cd = {};
@@ -659,6 +668,7 @@ private:
     int shadowTexResolution_{0};
 
     bool inShadowPass_{false};
+    bool shadowWasInSwapchainPass_{false};  // swapchain pass active before beginShadowPass()
     Mat4 shadowViewProj_{};
     int shadowLightIndex_{-1};
     int shadowDrawCount_{0};
@@ -691,6 +701,12 @@ inline PbrPipeline& getPbrPipeline() {
 inline void flushFboDeferredPbr(sgl_context ctx) {
     for (int layer = 0; layer <= fboLayerNext; layer++) {
         sgl_context_draw_layer(ctx, layer);
+        // Deferred shader draws share this FBO's layer space; replay them
+        // first within the layer, matching the swapchain flush order
+        // (sokol_gl -> shader -> PBR -> points) in flushDeferredShaderDraws.
+        for (auto& d : fboShaderDraws) {
+            if (d.layerId == layer) executeDeferredShaderDraw(d);
+        }
         for (auto& d : fboPbrDraws) {
             if (d.layerId == layer) getPbrPipeline().executePbrDraw(d.cmd);
         }
@@ -700,6 +716,7 @@ inline void flushFboDeferredPbr(sgl_context ctx) {
             if (d.layerId == layer) executePointDraw(d.cmd);
         }
     }
+    fboShaderDraws.clear();
     fboPbrDraws.clear();
     fboPointDraws.clear();
     fboLayerNext = 0;

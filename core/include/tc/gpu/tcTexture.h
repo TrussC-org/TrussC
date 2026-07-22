@@ -304,10 +304,11 @@ public:
     void updateCompressed(const void* data, size_t dataSize) {
         if (!allocated_ || pixelFormat_ == SG_PIXELFORMAT_NONE) return;
 
-        // Destroy old resources
-        sg_destroy_sampler(sampler_);
-        sg_destroy_view(view_);
-        sg_destroy_image(image_);
+        // Release old resources (deferred: draws recorded this frame may
+        // still reference them — destroyed after end-of-frame flush)
+        internal::deferGpuDestroy(sampler_);
+        internal::deferGpuDestroy(view_);
+        internal::deferGpuDestroy(image_);
 
         // Recreate with new data
         createCompressedResources(data, dataSize);
@@ -358,24 +359,24 @@ public:
     // Release resources
     void clear() {
         if (allocated_) {
-            sg_destroy_sampler(sampler_);
-            sg_destroy_view(view_);
-            if (attachmentView_.id != 0) {
-                sg_destroy_view(attachmentView_);
-            }
+            // Deferred destroy: draws recorded this frame (sokol_gl quads,
+            // deferred PBR bindings) may still reference these handles.
+            internal::deferGpuDestroy(sampler_);
+            internal::deferGpuDestroy(view_);
+            internal::deferGpuDestroy(attachmentView_);
             for (sg_view v : cubeFaceAttachmentViews_) {
-                if (v.id != 0) sg_destroy_view(v);
+                internal::deferGpuDestroy(v);
             }
             cubeFaceAttachmentViews_.clear();
             for (sg_view v : mipAttachmentViews_) {
-                if (v.id != 0) sg_destroy_view(v);
+                internal::deferGpuDestroy(v);
             }
             mipAttachmentViews_.clear();
             for (sg_view v : mipSamplingViews_) {
-                if (v.id != 0) sg_destroy_view(v);
+                internal::deferGpuDestroy(v);
             }
             mipSamplingViews_.clear();
-            sg_destroy_image(image_);
+            internal::deferGpuDestroy(image_);
             allocated_ = false;
         }
         width_ = 0;
@@ -450,9 +451,10 @@ public:
                 img_desc.data.mip_levels[level].size = mipChain.back().getTotalBytes();
             }
 
-            // Tear down old GPU resources and rebuild.
-            sg_destroy_view(view_);
-            sg_destroy_image(image_);
+            // Tear down old GPU resources (deferred — a draw recorded earlier
+            // this frame may still reference the old view) and rebuild.
+            internal::deferGpuDestroy(view_);
+            internal::deferGpuDestroy(image_);
 
             image_ = sg_make_image(&img_desc);
 
@@ -781,6 +783,11 @@ private:
         }
 
         image_ = sg_make_image(&img_desc);
+        if (sg_query_image_state(image_) == SG_RESOURCESTATE_FAILED) {
+            logError("Texture") << "GPU texture allocation failed ("
+                << width_ << "x" << height_ << ", format "
+                << (int)img_desc.pixel_format << ")";
+        }
 
         // Create texture view (for sampling)
         sg_view_desc view_desc = {};
@@ -896,7 +903,8 @@ private:
 
     void recreateSampler() {
         if (!allocated_) return;
-        sg_destroy_sampler(sampler_);
+        // Deferred: a draw recorded this frame may still bind the old sampler
+        internal::deferGpuDestroy(sampler_);
         createSampler();
     }
 
@@ -953,6 +961,7 @@ private:
         mipmapped_ = other.mipmapped_;
         numMipLevels_ = other.numMipLevels_;
         mipAttachmentViews_ = std::move(other.mipAttachmentViews_);
+        mipSamplingViews_ = std::move(other.mipSamplingViews_);
         usage_ = other.usage_;
         lastUpdateFrame_ = other.lastUpdateFrame_;
         pixelFormat_ = other.pixelFormat_;
@@ -974,6 +983,7 @@ private:
         other.mipmapped_ = false;
         other.numMipLevels_ = 1;
         other.mipAttachmentViews_.clear();
+        other.mipSamplingViews_.clear();
         other.pixelFormat_ = SG_PIXELFORMAT_NONE;
     }
 };

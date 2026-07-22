@@ -708,10 +708,13 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         endif()
 
         # Output languages: Metal (macOS/iOS/iOS-simulator), HLSL (Windows),
-        # GLSL (Linux), WGSL (Web/WebGPU). metal_sim keeps apps runnable on the
+        # GLSL 4.30 (Linux desktop, SOKOL_GLCORE), GLSL ES3 (Android/RasPi/
+        # WebGL2), WGSL (Web/WebGPU). metal_sim keeps apps runnable on the
         # iOS simulator (sg_query_backend() reports SG_BACKEND_METAL_SIMULATOR
         # there; without it shader lookup returns null sources and crashes).
-        set(_TC_SOKOL_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl300es:wgsl")
+        # glsl430 is required for GLCORE — without it every custom shader on
+        # Linux desktop fails with "Failed to get shader desc" (issue #193).
+        set(_TC_SOKOL_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl300es:wgsl")
 
         set(_TC_SHADER_OUTPUTS "")
         foreach(_shader_src ${_TC_SHADER_SOURCES})

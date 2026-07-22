@@ -16183,7 +16183,18 @@ _SOKOL_PRIVATE void _sg_mtl_begin_render_pass(const sg_pass* pass, const _sg_att
             SOKOL_ASSERT(msaa_tex != nil);
             pass_desc.colorAttachments[0].texture = msaa_tex;
             pass_desc.colorAttachments[0].resolveTexture = _sg.mtl.cur_drawable.texture;
-            pass_desc.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
+            // [TrussC] Modified by tettou771: honor the swapchain-pass "preserve
+            // contents" hint (action->depth.store_action == SG_STOREACTION_STORE,
+            // set by trussc::ensureSwapchainPass/resumeSwapchainPass for passes
+            // that may be suspended and resumed within one frame). Upstream
+            // hardcodes MultisampleResolve, which discards the msaa texture, so
+            // a later pass on the same swapchain with SG_LOADACTION_LOAD would
+            // load undefined content. Default behavior (no hint) is unchanged.
+            if (action->depth.store_action == SG_STOREACTION_STORE) {
+                pass_desc.colorAttachments[0].storeAction = MTLStoreActionStoreAndMultisampleResolve;
+            } else {
+                pass_desc.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
+            }
         } else {
             // non-msaa: render into current_drawable
             pass_desc.colorAttachments[0].texture = _sg.mtl.cur_drawable.texture;
@@ -16198,7 +16209,10 @@ _SOKOL_PRIVATE void _sg_mtl_begin_render_pass(const sg_pass* pass, const _sg_att
             id<MTLTexture> ds_tex = (__bridge id<MTLTexture>) swapchain->metal.depth_stencil_texture;
             SOKOL_ASSERT(ds_tex != nil);
             pass_desc.depthAttachment.texture = ds_tex;
-            pass_desc.depthAttachment.storeAction = MTLStoreActionDontCare;
+            // [TrussC] Modified by tettou771: honor an explicit depth store action
+            // (default DONTCARE keeps upstream behavior) so a suspended/resumed
+            // swapchain pass can reload its depth buffer with SG_LOADACTION_LOAD.
+            pass_desc.depthAttachment.storeAction = _sg_mtl_store_action(action->depth.store_action, false);
             pass_desc.depthAttachment.loadAction = _sg_mtl_load_action(action->depth.load_action);
             pass_desc.depthAttachment.clearDepth = action->depth.clear_value;
             if (_sg_is_depth_stencil_format(swapchain->depth_format)) {

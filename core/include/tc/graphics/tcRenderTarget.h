@@ -97,6 +97,18 @@ inline sg_pipeline_desc pipeDesc2D(BlendMode mode) {
     return d;
 }
 
+// Opaque fullscreen erase quad used by clear() (issue #190): blending disabled
+// (dst = src, alpha included) and depth write with compare ALWAYS. The quad is
+// drawn at the far plane, so it both erases prior color AND resets the depth
+// buffer to far — 3D drawn after a mid-frame clear() is not occluded by
+// pre-clear 3D geometry.
+inline sg_pipeline_desc pipeDescClear() {
+    sg_pipeline_desc d = pipeDesc2D(BlendMode::Disabled);
+    d.depth.write_enabled = true;
+    d.depth.compare = SG_COMPAREFUNC_ALWAYS;
+    return d;
+}
+
 // Compositing a PREMULTIPLIED source (e.g. an FBO color texture). rgb is NOT
 // re-multiplied by src alpha (it already is).
 inline sg_pipeline_desc pipeDescPremult() {

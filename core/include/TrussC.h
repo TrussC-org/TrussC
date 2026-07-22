@@ -89,6 +89,9 @@
 // TrussC graphics backend detection (runtime query of sokol_gfx backend)
 #include "tc/graphics/tcBackend.h"
 
+// GPU destroy queue (deferred sg_destroy_* — see header for why)
+#include "tc/gpu/tcGpuDestroyQueue.h"
+
 // TrussC build info (populated by trussc_app() at CMake configure time)
 #include "tcBuildInfo.h"
 
@@ -1074,8 +1077,9 @@ inline void getBitmapStringBounds(const std::string& text, float& width, float& 
 //
 // Two paths:
 //   - Size grew (tier promotion) or first allocation:
-//     create a fresh sg_image. The old one is destroyed first, which is
-//     safe because tier growth happens at most a handful of times per app.
+//     create a fresh sg_image. The old one is destroyed deferred (see
+//     tcGpuDestroyQueue.h) so sokol_gl commands recorded earlier in the
+//     frame keep their handles valid until the end-of-frame flush.
 //   - Same size, contents changed (registerGlyph / updateGlyph):
 //     reuse the image via sg_update_image(). No destroy → no dangling
 //     references in sokol_gl's deferred command queue. This makes per-frame
@@ -1087,6 +1091,25 @@ uint64_t getFrameCount();  // forward decl — defined in Time section below
 inline void ensureFontAtlas(int rows) {
     if (rows <= 0) return;
     if (!internal::fontInitialized) return;  // pipeline/sampler not ready yet
+
+    // The atlas texture is fixed-width with a hard row cap (512x512 =
+    // CELLS_PER_COL rows). generateAtlasPixels() clamps its buffer to that
+    // cap, so the row count used for the texture height / upload size below
+    // MUST be clamped identically — otherwise sg_update_image would read
+    // past the end of the CPU pixel buffer (SIGBUS, issue #188). Glyphs
+    // registered beyond capacity degrade gracefully: their cells are skipped
+    // by generateAtlasPixels and they render as blanks.
+    if (rows > bitmapfont::CELLS_PER_COL) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            logWarning("BitmapFont") << "Glyph atlas is full ("
+                << bitmapfont::CELLS_PER_COL << " rows, "
+                << bitmapfont::TOTAL_CELLS << " cells); glyphs registered "
+                << "beyond capacity will not render.";
+        }
+        rows = bitmapfont::CELLS_PER_COL;
+    }
     const uint64_t curRegistry = bitmapfont::internal::registryVersion;
     const bool sizeOk = internal::fontAtlasInitialized
                      && internal::fontAtlasRows >= rows;
@@ -1119,10 +1142,13 @@ inline void ensureFontAtlas(int rows) {
         sg_update_image(internal::fontTexture, &data);
         internal::fontAtlasUploadFrame = getFrameCount();
     } else {
-        // Size changed (or first allocation). Recreate the image.
+        // Size changed (or first allocation). Recreate the image. The old
+        // image/view are destroyed deferred — sokol_gl commands recorded
+        // earlier this frame still reference them until the end-of-frame
+        // flush (drained in present() after sg_commit).
         if (internal::fontAtlasInitialized) {
-            sg_destroy_view(internal::fontView);
-            sg_destroy_image(internal::fontTexture);
+            internal::deferGpuDestroy(internal::fontView);
+            internal::deferGpuDestroy(internal::fontTexture);
             internal::fontAtlasInitialized = false;
         }
 
