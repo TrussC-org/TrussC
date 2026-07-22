@@ -488,8 +488,12 @@ public:
         const Light& light = *internal::activeLights[lightIndex];
         ensureShadowTexture(light.getShadowResolution());
 
-        // Suspend swapchain pass if active
-        if (internal::currentWindowContext().inSwapchainPass) {
+        // Suspend swapchain pass if active. Remember whether one was active so
+        // endShadowPass() only resumes when there is something to resume
+        // (mirrors Fbo::wasInSwapchainPass_ — issue #191: it used to start a
+        // swapchain pass even when none was active before).
+        shadowWasInSwapchainPass_ = internal::currentWindowContext().inSwapchainPass;
+        if (shadowWasInSwapchainPass_) {
             sgl_draw();
             sg_end_pass();
             internal::currentWindowContext().inSwapchainPass = false;
@@ -549,8 +553,11 @@ public:
         inShadowPass_ = false;
         shadowDrawCount_ = 0;
 
-        // Resume swapchain pass
-        resumeSwapchainPass();
+        // Resume swapchain pass only if one was active before beginShadowPass()
+        if (shadowWasInSwapchainPass_) {
+            resumeSwapchainPass();
+            shadowWasInSwapchainPass_ = false;
+        }
     }
 
 private:
@@ -661,6 +668,7 @@ private:
     int shadowTexResolution_{0};
 
     bool inShadowPass_{false};
+    bool shadowWasInSwapchainPass_{false};  // swapchain pass active before beginShadowPass()
     Mat4 shadowViewProj_{};
     int shadowLightIndex_{-1};
     int shadowDrawCount_{0};

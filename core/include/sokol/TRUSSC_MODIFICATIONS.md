@@ -16,7 +16,7 @@ sokol/
 ├── sokol_app_tc.h       # TrussC-owned fork: full sapp_* implementation on
 │                        #   every platform + multi-window API (sokol_app.h
 │                        #   no longer exists in this tree — see below)
-├── sokol_gfx.h          # Untouched (direct copy from upstream)
+├── sokol_gfx.h          # Modified (1 patch: swapchain store-action hint, Metal)
 ├── sokol_glue.h         # Modified (1 patch)
 ├── sokol_log.h          # Untouched
 ├── TRUSSC_MODIFICATIONS.md
@@ -139,6 +139,29 @@ upstream semantics):
 
 **Changes:**
 - In `_sapp_macos_set_dock_tile()` CGImage creation: explicitly cast both operands to `CGBitmapInfo` (the destination type, a `uint32_t` typedef) before the bitwise OR. No behavioral change.
+
+---
+
+## sokol_gfx.h
+
+### Swapchain pass store-action hint (Metal)
+
+**Purpose:** Support TrussC's swapchain pass suspend/resume (Fbo / shadow /
+reflection passes mid-frame, issue #191). A resumed swapchain pass uses
+`SG_LOADACTION_LOAD`, but upstream hardcodes the Metal swapchain store actions
+to `MultisampleResolve` (MSAA color) and `DontCare` (depth), so the loaded
+content would be undefined.
+
+**Changes (both in `_sg_mtl_begin_pass`, swapchain branch, marked `[TrussC]`):**
+- MSAA color: when `action->depth.store_action == SG_STOREACTION_STORE` (the
+  "this pass may be suspended/resumed" hint set by
+  `trussc::ensureSwapchainPass()` / `resumeSwapchainPass()`), use
+  `MTLStoreActionStoreAndMultisampleResolve` instead of `MultisampleResolve`.
+- Depth: honor `action->depth.store_action` via `_sg_mtl_store_action()`
+  instead of hardcoded `DontCare` (default `DONTCARE` keeps upstream behavior).
+
+Passes without the hint (including every pass begun by plain sokol users and
+TrussC's final per-frame pass) behave exactly as upstream.
 
 ---
 

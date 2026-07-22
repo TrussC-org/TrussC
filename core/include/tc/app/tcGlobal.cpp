@@ -206,78 +206,157 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
 // Clear screen (RGB float: 0.0 ~ 1.0)
 // Works correctly in FBO or during swapchain pass (oF compatible)
 // ---------------------------------------------------------------------------
+namespace {
+// Record an opaque fullscreen quad (activeClear pipeline) into the CURRENT
+// sokol_gl layer — clear()'s erase semantics on the swapchain (issue #190).
+// Deferred shader/PBR/point draws recorded before this stay in earlier layers
+// (behind the quad); later ones composite on top. The quad is drawn at the
+// far plane with depth compare ALWAYS + write enabled (pipeDescClear), so it
+// also resets the depth buffer: 3D drawn after the clear() is not occluded by
+// pre-clear 3D geometry. sgl just records — this works with or without an
+// active render pass.
+void recordSwapchainClearQuad(float r, float g, float b, float a) {
+    BlendMode prevBlendMode = internal::currentWindowContext().currentBlendMode;
+
+    sgl_push_matrix();
+    sgl_matrix_mode_projection();
+    sgl_push_matrix();
+
+    internal::sglLoadProjection(internal::toBackendClip(
+        Mat4::ortho(-1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f)));
+    sgl_matrix_mode_modelview();
+    sgl_load_identity();
+
+    internal::loadPipeline(internal::activeClear());
+    sgl_disable_texture();
+    sgl_begin_quads();
+    sgl_c4f(r, g, b, a);
+    // z = -1 maps through the GL-convention ortho above (z_ndc = -z) to the
+    // far plane; toBackendClip remaps to the backend's depth range.
+    sgl_v3f(-1.0f, -1.0f, -1.0f);
+    sgl_v3f( 1.0f, -1.0f, -1.0f);
+    sgl_v3f( 1.0f,  1.0f, -1.0f);
+    sgl_v3f(-1.0f,  1.0f, -1.0f);
+    sgl_end();
+
+    sgl_matrix_mode_projection();
+    sgl_pop_matrix();
+    sgl_matrix_mode_modelview();
+    sgl_pop_matrix();
+
+    internal::loadPipeline(internal::active2D(prevBlendMode));
+}
+} // anonymous namespace
+
 void clear(float r, float g, float b, float a /* = 1.0f */) {
     // Skip in headless mode (no graphics context)
     if (headless::isActive()) return;
 
-    if (internal::currentWindowContext().inFboPass && internal::fboClearColorFunc) {
+    auto& ctx = internal::currentWindowContext();
+    if (ctx.inFboPass && internal::fboClearColorFunc) {
         // During FBO pass, call FBO's clearColor() to restart pass
         internal::fboClearColorFunc(r, g, b, a);
-    } else if (internal::currentWindowContext().inSwapchainPass) {
-        // During swapchain pass
-        BlendMode prevBlendMode = internal::currentWindowContext().currentBlendMode;
-
-        sgl_push_matrix();
-        sgl_matrix_mode_projection();
-        sgl_push_matrix();
-
-        internal::sglLoadProjection(internal::toBackendClip(
-            Mat4::ortho(-1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f)));
-        sgl_matrix_mode_modelview();
-        sgl_load_identity();
-
-        internal::loadPipeline(internal::activeClear());
-        sgl_disable_texture();
-        sgl_begin_quads();
-        sgl_c4f(r, g, b, a);
-        sgl_v2f(-1.0f, -1.0f);
-        sgl_v2f( 1.0f, -1.0f);
-        sgl_v2f( 1.0f,  1.0f);
-        sgl_v2f(-1.0f,  1.0f);
-        sgl_end();
-
-        sgl_matrix_mode_projection();
-        sgl_pop_matrix();
-        sgl_matrix_mode_modelview();
-        sgl_pop_matrix();
-
-        internal::loadPipeline(internal::active2D(prevBlendMode));
+    } else if (ctx.inSwapchainPass) {
+        // During swapchain pass: erase by recording an opaque fullscreen quad
+        recordSwapchainClearQuad(r, g, b, a);
     } else {
-        // Outside pass: defer swapchain pass start to present().
-        // Save clear color — the pass will start in present() with this value.
-        // sgl commands accumulate without an active pass, so FBOs can render
-        // in their own passes without interrupting the swapchain pass.
-        internal::currentWindowContext().swapchainClearValue = { r, g, b, a };
+        // Outside a pass. If nothing has been recorded for the swapchain yet
+        // this frame, keep the cheap path: stash the clear color as the pass
+        // CLEAR action, consumed when the pass starts in ensureSwapchainPass()
+        // (the normal clear()-at-top-of-draw() pattern costs nothing extra).
+        // Otherwise clear() must ERASE what came before (issue #190): record
+        // the opaque fullscreen quad in submission order instead.
+        //
+        // "Something recorded" = any sokol_gl vertices in the current
+        // (swapchain) context this frame (sgl_num_vertices is per context and
+        // rewinds on sg_commit), any deferred shader / PBR / point draws, or
+        // a swapchain pass that already ran this frame (e.g. FullscreenShader
+        // drew directly and an FBO suspended the pass — that drawable content
+        // survives the resume via LOAD, see #191, so it must be erased too).
+        bool hasRecorded = sgl_num_vertices() > 0
+            || !internal::deferredShaderDraws.empty()
+            || !internal::deferredPbrDraws.empty()
+            || !internal::deferredPointDraws.empty()
+            || ctx.swapchainPassStartedThisFrame;
+        if (hasRecorded) {
+            recordSwapchainClearQuad(r, g, b, a);
+        } else {
+            // sgl commands accumulate without an active pass, so FBOs can
+            // render in their own passes without interrupting the swapchain
+            // pass; the swapchain pass itself starts in present().
+            ctx.swapchainClearValue = { r, g, b, a };
+        }
     }
 }
 
 // ---------------------------------------------------------------------------
 // パス管理関数（non-inline: Hot Reload時にHost/Guest間で同じ状態を参照するため）
 // ---------------------------------------------------------------------------
-void ensureSwapchainPass() {
-    if (!internal::currentWindowContext().inSwapchainPass && !internal::currentWindowContext().inFboPass) {
-        sg_pass pass = {};
+namespace {
+// Start (or restart) the swapchain render pass for the current window.
+// The FIRST start of a frame clears color and depth with swapchainClearValue
+// (frame background). Any subsequent start — resumeSwapchainPass() after an
+// FBO / shadow / reflection pass suspended it — must LOAD color AND depth so
+// everything already rendered into the drawable this frame survives (issue
+// #191: FullscreenShader/direct-pass content was wiped by the old
+// unconditional CLEAR).
+// `preserveContents` marks a pass that may be suspended and resumed later in
+// the same frame (any pass started OUTSIDE present(): FullscreenShader / LUT
+// force-starts, resumes after Fbo / shadow / reflection passes). Such passes
+// set depth.store_action = SG_STOREACTION_STORE, which does double duty:
+//   - stores the depth buffer so the resume can LOAD it (upstream sokol
+//     discards swapchain depth after every pass), and
+//   - on Metal + MSAA it is the hint (see the [TrussC] patch in sokol_gfx.h)
+//     to store the multisample texture, which upstream resolve-only passes
+//     discard — without it a resumed pass would LOAD undefined content.
+// The final pass started in present() passes false, so the normal
+// clear-at-top-of-draw() frame keeps today's exact store behavior (resolve-
+// only color, discarded depth) — zero bandwidth regression.
+void beginSwapchainPassInternal(bool preserveContents) {
+    auto& ctx = internal::currentWindowContext();
+    sg_pass pass = {};
+    if (!ctx.swapchainPassStartedThisFrame) {
         pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        pass.action.colors[0].clear_value = internal::currentWindowContext().swapchainClearValue;
+        pass.action.colors[0].clear_value = ctx.swapchainClearValue;
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         pass.action.depth.clear_value = 1.0f;
-        auto& ctx = internal::currentWindowContext();
-        // Secondary windows provide their own swapchain (same drawable for the
-        // whole window frame); the main window uses sokol_glue as before.
-        pass.swapchain = ctx.acquireSwapchain ? ctx.acquireSwapchain(ctx.acquireSwapchainUser)
-                                              : sglue_swapchain();
-        // Record the drawable we render into so end-of-frame capture reads back
-        // THIS one (sapp_get_swapchain() advances the Metal drawable per call).
-        ctx.lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
-        sg_begin_pass(&pass);
-        ctx.inSwapchainPass = true;
+    } else {
+        pass.action.colors[0].load_action = SG_LOADACTION_LOAD;
+        pass.action.depth.load_action = SG_LOADACTION_LOAD;
+    }
+    if (preserveContents) {
+        pass.action.depth.store_action = SG_STOREACTION_STORE;
+    }
+    // Secondary windows provide their own swapchain (same drawable for the
+    // whole window frame); the main window uses sokol_glue as before.
+    pass.swapchain = ctx.acquireSwapchain ? ctx.acquireSwapchain(ctx.acquireSwapchainUser)
+                                          : sglue_swapchain();
+    // Record the drawable we render into so end-of-frame capture reads back
+    // THIS one (sapp_get_swapchain() advances the Metal drawable per call).
+    ctx.lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
+    sg_begin_pass(&pass);
+    ctx.inSwapchainPass = true;
+    ctx.swapchainPassStartedThisFrame = true;
+}
+} // anonymous namespace
+
+void ensureSwapchainPass() {
+    if (!internal::currentWindowContext().inSwapchainPass && !internal::currentWindowContext().inFboPass) {
+        // Callers outside present() (FullscreenShader, tcxLut, ...) force-start
+        // the pass mid-frame; it may be suspended by an Fbo/shadow pass later,
+        // so its contents must be preserved.
+        beginSwapchainPassInternal(true);
     }
 }
 
 void present() {
     if (headless::isActive()) return;
 
-    ensureSwapchainPass();
+    // Final pass of the frame — nothing suspends it, so no preserve hint
+    // (keeps the normal one-pass frame's store behavior unchanged).
+    if (!internal::currentWindowContext().inSwapchainPass && !internal::currentWindowContext().inFboPass) {
+        beginSwapchainPassInternal(false);
+    }
 
     internal::flushDeferredShaderDraws();
 
@@ -297,6 +376,9 @@ void present() {
 
     sg_end_pass();
     internal::currentWindowContext().inSwapchainPass = false;
+    // Frame is over: the next swapchain pass start belongs to the next frame
+    // and must CLEAR again with swapchainClearValue (see issue #191).
+    internal::currentWindowContext().swapchainPassStartedThisFrame = false;
     sg_commit();
 
     // Now that every deferred draw (swapchain layers above, FBO passes at
@@ -319,17 +401,10 @@ void suspendSwapchainPass() {
 
 void resumeSwapchainPass() {
     if (!internal::currentWindowContext().inSwapchainPass) {
-        sg_pass pass = {};
-        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        pass.action.colors[0].clear_value = internal::currentWindowContext().swapchainClearValue;
-        pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-        pass.action.depth.clear_value = 1.0f;
-        auto& ctx = internal::currentWindowContext();
-        pass.swapchain = ctx.acquireSwapchain ? ctx.acquireSwapchain(ctx.acquireSwapchainUser)
-                                              : sglue_swapchain();
-        ctx.lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
-        sg_begin_pass(&pass);
-        ctx.inSwapchainPass = true;
+        // Restart uses LOAD when the pass already ran this frame — see
+        // beginSwapchainPassInternal() (issue #191). A resumed pass may be
+        // suspended again (multiple Fbo blocks), so preserve its contents too.
+        beginSwapchainPassInternal(true);
     }
 }
 
