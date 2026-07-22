@@ -67,7 +67,7 @@ layout(binding=1) uniform fs_params {
     vec4 texFlags;                        // x=hasBaseColorTex, y=hasMetRoughTex, z=hasEmissiveTex, w=hasOcclusionTex
     mat4 shadowViewProj[MAX_SHADOW_LIGHTS];   // per-slot light VP for shadow depth comparison
     vec4 shadowSlotParams[MAX_SHADOW_LIGHTS]; // x=lightIndex (-1=unused), y=bias, z=strength, w=unused
-    vec4 shadowMapParams;                     // x=mapSize, y=numShadowSlots, zw=unused
+    vec4 shadowMapParams;                     // x=mapSize, y=numShadowSlots, z=originTopLeft, w=unused
 };
 
 // IBL resources. Bound only when iblParams.x > 0.5.
@@ -161,6 +161,16 @@ float calcShadow(int slot, vec3 worldPos) {
     vec4 clip = shadowViewProj[slot] * vec4(worldPos, 1.0);
     vec3 ndc = clip.xyz / clip.w;
     vec2 shadowUV = ndc.xy * 0.5 + 0.5;
+
+    // The shadow map is an offscreen render target. On top-left-origin
+    // backends (Metal / D3D11 / WebGPU) its rows are stored flipped relative
+    // to the GL convention assumed by the NDC->UV mapping above, so sampling
+    // without a flip reads the mirror image: shadows land offset and half the
+    // receiver plane self-shadows along a straight line (the v=0.5 axis).
+    // shadowMapParams.z carries sg_query_features().origin_top_left.
+    if (shadowMapParams.z > 0.5) {
+        shadowUV.y = 1.0 - shadowUV.y;
+    }
 
     // Outside shadow frustum = fully lit
     if (shadowUV.x < 0.0 || shadowUV.x > 1.0 ||
