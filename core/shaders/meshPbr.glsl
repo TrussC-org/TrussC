@@ -40,6 +40,7 @@ void main() {
 
 @fs fs_pbr
 #define MAX_LIGHTS 8
+#define MAX_SHADOW_LIGHTS 4
 #define PI 3.14159265359
 #define INV_PI 0.31830988618
 
@@ -64,8 +65,9 @@ layout(binding=1) uniform fs_params {
     vec4 projectorParams;                 // x=projectorLightIndex (-1=none), yzw=unused
     vec4 iesParams;                       // x=iesLightIndex (-1=none), y=maxVertAngle (rad), zw=unused
     vec4 texFlags;                        // x=hasBaseColorTex, y=hasMetRoughTex, z=hasEmissiveTex, w=hasOcclusionTex
-    mat4 shadowViewProj;                  // light VP for shadow depth comparison
-    vec4 shadowParams;                    // x=shadowLightIndex (-1=none), y=bias, z=mapSize, w=strength
+    mat4 shadowViewProj[MAX_SHADOW_LIGHTS];   // per-slot light VP for shadow depth comparison
+    vec4 shadowSlotParams[MAX_SHADOW_LIGHTS]; // x=lightIndex (-1=unused), y=bias, z=strength, w=unused
+    vec4 shadowMapParams;                     // x=mapSize, y=numShadowSlots, zw=unused
 };
 
 // IBL resources. Bound only when iblParams.x > 0.5.
@@ -98,8 +100,8 @@ layout(binding=8) uniform sampler emissiveTexSmp;
 layout(binding=9) uniform texture2D occlusionTex;
 layout(binding=9) uniform sampler occlusionTexSmp;
 
-// Shadow map (R32F depth from light's POV)
-layout(binding=10) uniform texture2D shadowMap;
+// Shadow map array (R32F depth from each shadow light's POV, one layer per slot)
+layout(binding=10) uniform texture2DArray shadowMap;
 layout(binding=10) uniform sampler shadowMapSmp;
 
 in vec3 v_worldPos;
@@ -155,10 +157,8 @@ vec3 tonemapACES(vec3 x) {
 // Shadow map sampling with 3x3 PCF
 // ---------------------------------------------------------------------------
 
-float calcShadow(vec3 worldPos) {
-    if (shadowParams.x < -0.5) return 1.0;  // no shadow light
-
-    vec4 clip = shadowViewProj * vec4(worldPos, 1.0);
+float calcShadow(int slot, vec3 worldPos) {
+    vec4 clip = shadowViewProj[slot] * vec4(worldPos, 1.0);
     vec3 ndc = clip.xyz / clip.w;
     vec2 shadowUV = ndc.xy * 0.5 + 0.5;
 
@@ -172,21 +172,21 @@ float calcShadow(vec3 worldPos) {
     // Linear depth comparison: clip.w = -z_eye (distance from light).
     // Shadow pass stores clip.w, so we compute the same here.
     float currentDepth = clip.w;
-    float bias = shadowParams.y;  // in world units
-    float texelSize = 1.0 / max(shadowParams.z, 1.0);
+    float bias = shadowSlotParams[slot].y;  // in world units
+    float texelSize = 1.0 / max(shadowMapParams.x, 1.0);
 
     // 3x3 PCF kernel
     float shadow = 0.0;
     for (int x = -1; x <= 1; x++) {
         for (int y = -1; y <= 1; y++) {
             vec2 offset = vec2(float(x), float(y)) * texelSize;
-            float storedDepth = texture(sampler2D(shadowMap, shadowMapSmp), shadowUV + offset).r;
+            float storedDepth = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(shadowUV + offset, float(slot))).r;
             shadow += (currentDepth - bias > storedDepth) ? 0.0 : 1.0;
         }
     }
     shadow /= 9.0;
 
-    return mix(1.0, shadow, shadowParams.w);
+    return mix(1.0, shadow, shadowSlotParams[slot].z);
 }
 
 // ---------------------------------------------------------------------------
@@ -217,8 +217,11 @@ vec3 evalLight(int lightIdx, vec4 posType, vec4 colorIntensity, vec4 atten, vec4
 
         // Spot cone falloff. Skipped for projector lights — the projector
         // frustum defines the boundary instead of the spot cone.
-        int projIdx = int(projectorParams.x + 0.5);
-        if (type == 2 && lightIdx != projIdx) {
+        // projectorParams.x is -1 when no projector exists; compare with a
+        // threshold first to avoid int(-0.5)→0 truncation matching light 0.
+        bool isProjector = (projectorParams.x >= -0.5) &&
+                           (lightIdx == int(projectorParams.x + 0.5));
+        if (type == 2 && !isProjector) {
             vec3 sDir = normalize(spotDir.xyz);
             float theta = dot(-toLight, sDir);  // cosine of angle from spot axis
             float innerCos = spotDir.w;
@@ -271,9 +274,10 @@ vec3 evalLight(int lightIdx, vec4 posType, vec4 colorIntensity, vec4 atten, vec4
         radiance *= iesIntensity;
     }
 
-    // Projector texture modulation: multiply light color by the projected image
-    int projIdx = int(projectorParams.x + 0.5);
-    if (lightIdx == projIdx && type == 2) {
+    // Projector texture modulation: multiply light color by the projected image.
+    // Threshold check first: with no projector (x = -1), int(-0.5) truncates
+    // to 0 and would wrongly treat light 0 as the projector.
+    if (projectorParams.x >= -0.5 && lightIdx == int(projectorParams.x + 0.5) && type == 2) {
         vec4 clip = projectorViewProj * vec4(worldPos, 1.0);
         vec3 ndc = clip.xyz / clip.w;
         vec2 projUV = ndc.xy * 0.5 + 0.5;
@@ -355,8 +359,7 @@ void main() {
     int numLights = int(cameraPos.w + 0.5);
 
     vec3 Lo = vec3(0.0);
-    float shadowFactor = calcShadow(v_worldPos);
-    int shadowIdx = int(shadowParams.x + 0.5);
+    int numShadowSlots = int(shadowMapParams.y + 0.5);
 
     for (int i = 0; i < MAX_LIGHTS; i++) {
         if (i >= numLights) break;
@@ -364,8 +367,14 @@ void main() {
                                       lightAttenuation[i], lightSpotDir[i],
                                       N, V, v_worldPos,
                                       albedo, metallic, roughness, F0);
-        // Apply shadow only to the shadow-casting light
-        if (i == shadowIdx) contribution *= shadowFactor;
+        // Apply the shadow of the slot owned by this light (if any)
+        for (int s = 0; s < MAX_SHADOW_LIGHTS; s++) {
+            if (s >= numShadowSlots) break;
+            if (int(shadowSlotParams[s].x + 0.5) == i) {
+                contribution *= calcShadow(s, v_worldPos);
+                break;
+            }
+        }
         Lo += contribution;
     }
 

@@ -165,8 +165,11 @@ public:
 
     // === Shadow mapping ===
 
-    // Enable shadow casting for this light. Only one light with shadows is
-    // supported at a time (v1). Resolution controls the depth texture size.
+    // Enable shadow casting for this light. Up to 4 lights can cast shadows
+    // in the same frame (internal::maxShadowLights); further shadow passes
+    // are ignored with a one-time warning. Resolution controls the depth
+    // texture size — the shadow map array is shared, so lights requesting
+    // different resolutions all render at the largest requested size.
     void enableShadow(int resolution = 1024) { shadowEnabled_ = true; shadowResolution_ = resolution; }
     void disableShadow() { shadowEnabled_ = false; }
     bool isShadowEnabled() const { return shadowEnabled_; }
