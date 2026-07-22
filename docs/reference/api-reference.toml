@@ -16303,9 +16303,6 @@ hide = true
 ["App::handleDraw"]
 hide = true
 
-["Shader::executeDeferredDraw"]
-hide = true
-
 ["kMinCircleSegments"]
 hide = true
 
@@ -16570,11 +16567,6 @@ description.ko = "셰이더 그리기용 동적 인덱스 버퍼."
 description.en = "Whether the shader has been loaded."
 description.ja = "シェーダがロード済みかどうか。"
 description.ko = "셰이더가 로드되었는지 여부."
-
-["Shader::pendingTextures"]
-description.en = "Texture bindings staged per slot, applied at draw time."
-description.ja = "スロットごとに保留中のテクスチャバインディング。描画時に適用。"
-description.ko = "슬롯별로 대기 중인 텍스처 바인딩. 그리기 시 적용."
 
 ["Shader::pendingViews"]
 description.en = "View bindings staged per slot, applied at draw time."
