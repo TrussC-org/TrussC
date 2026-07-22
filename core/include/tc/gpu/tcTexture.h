@@ -961,6 +961,7 @@ private:
         mipmapped_ = other.mipmapped_;
         numMipLevels_ = other.numMipLevels_;
         mipAttachmentViews_ = std::move(other.mipAttachmentViews_);
+        mipSamplingViews_ = std::move(other.mipSamplingViews_);
         usage_ = other.usage_;
         lastUpdateFrame_ = other.lastUpdateFrame_;
         pixelFormat_ = other.pixelFormat_;
@@ -982,6 +983,7 @@ private:
         other.mipmapped_ = false;
         other.numMipLevels_ = 1;
         other.mipAttachmentViews_.clear();
+        other.mipSamplingViews_.clear();
         other.pixelFormat_ = SG_PIXELFORMAT_NONE;
     }
 };

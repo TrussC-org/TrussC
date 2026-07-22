@@ -107,14 +107,14 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
     if (!allocated_ || !pixels) return false;
 
     size_t bytesPerRow = width_ * 4;  // RGBA8
-    return readPixelsInternal(colorTexture_.getImage(), width_, height_,
+    return readPixelsInternal(curColorTex_().getImage(), width_, height_,
                               MTLPixelFormatRGBA8Unorm, bytesPerRow, pixels);
 }
 
 bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     if (!allocated_ || !pixels) return false;
 
-    sg_pixel_format sgFmt = colorTexture_.getPixelFormat();
+    sg_pixel_format sgFmt = curColorTex_().getPixelFormat();
     // Determine actual format (NONE means legacy RGBA8)
     if (sgFmt == SG_PIXELFORMAT_NONE) sgFmt = SG_PIXELFORMAT_RGBA8;
 
@@ -125,7 +125,7 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
         int ch = channelCount(format_);
         std::vector<unsigned char> tmp(width_ * height_ * ch);
         size_t bytesPerRow = width_ * ch;
-        bool ok = readPixelsInternal(colorTexture_.getImage(), width_, height_,
+        bool ok = readPixelsInternal(curColorTex_().getImage(), width_, height_,
                                      mtlFmt, bytesPerRow, tmp.data());
         if (!ok) return false;
         // Convert U8 to float
@@ -144,7 +144,7 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     if (sgFmt == SG_PIXELFORMAT_R16F || sgFmt == SG_PIXELFORMAT_RG16F || sgFmt == SG_PIXELFORMAT_RGBA16F) {
         int ch = channelCount(format_);
         std::vector<uint16_t> tmp(width_ * height_ * ch);
-        bool ok = readPixelsInternal(colorTexture_.getImage(), width_, height_,
+        bool ok = readPixelsInternal(curColorTex_().getImage(), width_, height_,
                                      mtlFmt, bytesPerRow, tmp.data());
         if (!ok) return false;
         // Convert half-float to float (IEEE 754 binary16)
@@ -176,7 +176,7 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     }
 
     // 32F formats: direct read
-    return readPixelsInternal(colorTexture_.getImage(), width_, height_,
+    return readPixelsInternal(curColorTex_().getImage(), width_, height_,
                               mtlFmt, bytesPerRow, pixels);
 }
 

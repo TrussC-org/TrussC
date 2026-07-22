@@ -160,6 +160,16 @@ public:
 
             colorTexture_.clear();
             mipScratchTexture_.clear();
+
+            // Version pool: destroy through the deferred queue (inside
+            // Texture::clear / deferGpuDestroy) — draws recorded this frame
+            // may still sample these textures.
+            for (ColorVersion& v : versionPool_) {
+                internal::deferGpuDestroy(v.resolveAttView);
+                v.tex.clear();
+            }
+            versionPool_.clear();
+
             allocated_ = false;
         }
         width_ = 0;
@@ -174,6 +184,12 @@ public:
         resolveAttView_ = {};
         depthImage_ = {};
         depthAttView_ = {};
+        currentVersion_ = 0;
+        poolFrame_ = UINT64_MAX;
+        lastDrawFrame_ = UINT64_MAX;
+        drawnThisFrame_ = false;
+        poolAllocFailed_ = false;
+        versionNoticeShown_ = false;
     }
 
     // Begin rendering to FBO (preserves previous content)
@@ -201,13 +217,13 @@ public:
         internal::flushFboDeferredPbr(shared.context);
         sg_end_pass();
 
-        // Restart pass with new clear color
+        // Restart pass with new clear color (targeting the current version)
         sg_pass pass = {};
         if (sampleCount_ > 1) {
             pass.attachments.colors[0] = msaaColorAttView_;
-            pass.attachments.resolves[0] = resolveAttView_;
+            pass.attachments.resolves[0] = curResolveAttView_();
         } else {
-            pass.attachments.colors[0] = colorTexture_.getAttachmentView();
+            pass.attachments.colors[0] = curColorTex_().getAttachmentView();
         }
         pass.attachments.depth_stencil = depthAttView_;
         pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
@@ -322,28 +338,38 @@ public:
 
     // === HasTexture implementation ===
 
-    // getTexture() always returns non-MSAA texture (for drawing/reading)
-    Texture& getTexture() override { return colorTexture_; }
-    const Texture& getTexture() const override { return colorTexture_; }
+    // getTexture() always returns the non-MSAA texture (for drawing/reading)
+    // of the CURRENT version: when this Fbo was re-rendered after being drawn
+    // earlier in the same frame, that is the version-pool texture holding the
+    // latest content — draws recorded before the re-render keep sampling the
+    // older version they captured (see version pool contract below).
+    Texture& getTexture() override { return curColorTex_(); }
+    const Texture& getTexture() const override { return curColorTex_(); }
 
     // GL backends store FBO color textures bottom-to-top in memory
     // (unlike Metal/D3D11 which are top-to-bottom). Override draw to
     // flip V on GL so the displayed image matches user-space top-left coords.
+    // Version-pool textures take the exact same path (Texture::drawFlippedY /
+    // Texture::draw), so the GL Y-flip applies to every version equally.
     void draw(float x, float y) const override {
         if (!hasTexture()) return;
+        markDrawnThisFrame_();
+        const Texture& tex = curColorTex_();
         if (needsGlYFlip()) {
-            colorTexture_.drawFlippedY(x, y, (float)width_, (float)height_);
+            tex.drawFlippedY(x, y, (float)width_, (float)height_);
         } else {
-            colorTexture_.draw(x, y);
+            tex.draw(x, y);
         }
     }
 
     void draw(float x, float y, float w, float h) const override {
         if (!hasTexture()) return;
+        markDrawnThisFrame_();
+        const Texture& tex = curColorTex_();
         if (needsGlYFlip()) {
-            colorTexture_.drawFlippedY(x, y, w, h);
+            tex.drawFlippedY(x, y, w, h);
         } else {
-            colorTexture_.draw(x, y, w, h);
+            tex.draw(x, y, w, h);
         }
     }
 
@@ -356,10 +382,11 @@ public:
         return false;
     }
 
-    // Access to internal resources (for advanced users)
-    sg_image getColorImage() const { return colorTexture_.getImage(); }
-    sg_view getTextureView() const { return colorTexture_.getView(); }
-    sg_sampler getSampler() const { return colorTexture_.getSampler(); }
+    // Access to internal resources (for advanced users).
+    // Like getTexture(), these refer to the CURRENT version's texture.
+    sg_image getColorImage() const { return curColorTex_().getImage(); }
+    sg_view getTextureView() const { return curColorTex_().getView(); }
+    sg_sampler getSampler() const { return curColorTex_().getSampler(); }
 
 private:
     static bool needsGlYFlip() {
@@ -400,6 +427,152 @@ private:
     // Common resources
     sg_image depthImage_ = {};
     sg_view depthAttView_ = {};
+
+    // =========================================================================
+    // Same-frame revision version pool (issue #189)
+    //
+    // TrussC records draws and replays them at end-of-frame flush. Without
+    // versioning, an Fbo that is drawn, re-rendered, and drawn again within
+    // one frame shows the FINAL content in both draws — every recorded quad
+    // samples the same image. The pool gives each revision its own texture so
+    // each recorded draw shows the content that existed at submission time.
+    //
+    // Contract:
+    // - Version 0 is `colorTexture_` (+ `resolveAttView_` when MSAA).
+    //   Versions 1..N live in `versionPool_`, allocated lazily and EXACTLY
+    //   matching the primary color texture: size, format, mip levels,
+    //   filter/wrap. For MSAA they are non-MSAA RESOLVE targets only — the
+    //   MSAA color render target and the depth buffer are consumed inside the
+    //   pass and shared across ALL versions (never duplicated).
+    // - begin() advances to the next version iff this Fbo was drawn earlier
+    //   in the same frame. draw()/getTexture() always use the CURRENT version.
+    // - The pool persists across frames (no realloc churn). On the first
+    //   frame sync of a new frame, the previous frame's commands have flushed,
+    //   so all versions are reusable: the latest version's handles are swapped
+    //   into the primary slot (handle swap only — no pixel copies) and the
+    //   cursor resets to 0. This keeps content rendered once (e.g. in setup())
+    //   visible on all later frames.
+    // - On version allocation failure (GPU out of memory) versioning is
+    //   disabled for this Fbo and rendering continues into the current
+    //   texture — the legacy both-draws-show-final behavior — instead of
+    //   crashing. Texture::createResources already logs the error.
+    // =========================================================================
+
+    struct ColorVersion {
+        Texture tex;                  // matches colorTexture_ exactly
+        sg_view resolveAttView = {};  // only used when sampleCount_ > 1
+    };
+    std::vector<ColorVersion> versionPool_;        // versions 1..N (0 = colorTexture_)
+    int currentVersion_ = 0;                       // cursor; 0 = primary colorTexture_
+    uint64_t poolFrame_ = UINT64_MAX;              // frame the cursor was last synced to
+    mutable uint64_t lastDrawFrame_ = UINT64_MAX;  // frame of the last fbo draw
+    mutable bool drawnThisFrame_ = false;          // drawn since last begin()/frame sync
+    bool poolAllocFailed_ = false;                 // sticky: versioning disabled after OOM
+    bool versionNoticeShown_ = false;              // one-time 10-version notice emitted
+
+    Texture& curColorTex_() {
+        return currentVersion_ == 0 ? colorTexture_ : versionPool_[currentVersion_ - 1].tex;
+    }
+    const Texture& curColorTex_() const {
+        return currentVersion_ == 0 ? colorTexture_ : versionPool_[currentVersion_ - 1].tex;
+    }
+    sg_view curResolveAttView_() const {
+        return currentVersion_ == 0 ? resolveAttView_ : versionPool_[currentVersion_ - 1].resolveAttView;
+    }
+
+    // Called from the draw() overloads: the current version's content is now
+    // referenced by a recorded command, so a subsequent begin() in the same
+    // frame must switch to a fresh version.
+    void markDrawnThisFrame_() const {
+        drawnThisFrame_ = true;
+        lastDrawFrame_ = getFrameCount();
+    }
+
+    // Frame-boundary sync. Once the frame that recorded the versions has
+    // flushed, all pool entries are reusable again.
+    void syncVersionFrame_() {
+        uint64_t fc = getFrameCount();
+        if (fc == poolFrame_) return;
+        poolFrame_ = fc;
+        // Promote the latest content into the primary slot by swapping
+        // handles (moves only, no pixel copies) so persistent content — e.g.
+        // an Fbo rendered once in setup() — survives the cursor reset.
+        if (currentVersion_ > 0) {
+            ColorVersion& v = versionPool_[currentVersion_ - 1];
+            std::swap(colorTexture_, v.tex);
+            std::swap(resolveAttView_, v.resolveAttView);
+            currentVersion_ = 0;
+        }
+        // A draw already recorded THIS frame (before the first begin()) still
+        // counts as drawn-this-frame.
+        drawnThisFrame_ = (lastDrawFrame_ == fc);
+    }
+
+    // Advance the cursor to the next version, allocating it lazily.
+    // Returns false (cursor unchanged) when versioning is degraded by an
+    // earlier allocation failure or when the new allocation fails now.
+    bool advanceVersion_() {
+        if (poolAllocFailed_) return false;
+        int next = currentVersion_ + 1;
+        if ((int)versionPool_.size() < next) {
+            ColorVersion v;
+            // Match the primary color texture exactly. Filters/wrap are set
+            // before allocate() so the sampler is created once with the right
+            // settings (Texture::allocate keeps them across its clear()).
+            v.tex.setMinFilter(colorTexture_.getMinFilter());
+            v.tex.setMagFilter(colorTexture_.getMagFilter());
+            v.tex.setWrapU(colorTexture_.getWrapU());
+            v.tex.setWrapV(colorTexture_.getWrapV());
+            v.tex.allocate(width_, height_, format_,
+                           TextureUsage::RenderTarget, 1, numMipLevels_);
+            if (sg_query_image_state(v.tex.getImage()) == SG_RESOURCESTATE_FAILED) {
+                // Texture::createResources logged the error. Degrade
+                // gracefully: keep rendering into the current texture
+                // (accepting the legacy both-draws-show-final behavior).
+                poolAllocFailed_ = true;
+                return false;  // v's destructor defers the failed handles
+            }
+            v.tex.setPremultipliedAlpha(true);
+            if (sampleCount_ > 1) {
+                sg_view_desc rd = {};
+                rd.resolve_attachment.image = v.tex.getImage();
+                v.resolveAttView = sg_make_view(&rd);
+            }
+            versionPool_.push_back(std::move(v));
+        }
+        currentVersion_ = next;
+        if (!versionNoticeShown_ && next >= 10) {
+            versionNoticeShown_ = true;
+            logNotice("Fbo") << "this Fbo was re-rendered " << next
+                << " times after being drawn this frame - each revision needs "
+                   "its own texture; check your draw loop if unintended";
+        }
+        return true;
+    }
+
+    // Copy src's mip 0 into dst's mip 0 with the shared 1:1 blit pipeline.
+    // Used only for begin() WITHOUT clear on a non-MSAA Fbo right after a
+    // version switch: LOAD semantics require the previous content to be
+    // present in the (undefined) fresh version texture. The MSAA path needs
+    // no copy — its LOAD happens on the shared MSAA color render target.
+    void blitColorInto_(const Texture& src, Texture& dst) {
+        ensureSharedMip(format_);
+        auto& s = getSharedMip(format_);
+
+        sg_pass pass = {};
+        pass.attachments.colors[0] = dst.getAttachmentView();
+        pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+        sg_begin_pass(&pass);
+
+        sg_apply_pipeline(s.blitPipeline);
+        sg_bindings bind = {};
+        bind.vertex_buffers[0] = s.vbuf;
+        bind.views[VIEW_tc_fbomip_srcTex] = src.getViewForMip(0);
+        bind.samplers[SMP_tc_fbomip_srcSmp] = s.sampler;
+        sg_apply_bindings(&bind);
+        sg_draw(0, 4, 1);
+        sg_end_pass();
+    }
 
     // =========================================================================
     // Shared rendering resources (sgl_context + pipelines) per (sampleCount, format).
@@ -564,7 +737,7 @@ private:
 
                 sg_bindings bind = {};
                 bind.vertex_buffers[0] = s.vbuf;
-                bind.views[VIEW_tc_fbomip_srcTex] = colorTexture_.getViewForMip(level - 1);
+                bind.views[VIEW_tc_fbomip_srcTex] = curColorTex_().getViewForMip(level - 1);
                 bind.samplers[SMP_tc_fbomip_srcSmp] = s.sampler;
                 sg_apply_bindings(&bind);
 
@@ -575,7 +748,7 @@ private:
             // Pass 2: blit scratch[level] → main[level]
             {
                 sg_pass pass = {};
-                pass.attachments.colors[0] = colorTexture_.getAttachmentViewForMip(level);
+                pass.attachments.colors[0] = curColorTex_().getAttachmentViewForMip(level);
                 pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
                 sg_begin_pass(&pass);
 
@@ -605,22 +778,42 @@ private:
 
         auto& shared = getShared(sampleCount_, format_);
 
+        // Version pool frame sync (see version pool contract above): on a new
+        // frame all versions become reusable and the cursor resets to primary.
+        syncVersionFrame_();
+
         // Suspend if in swapchain pass
         wasInSwapchainPass_ = isInSwapchainPass();
         if (wasInSwapchainPass_) {
             suspendSwapchainPass();
         }
 
-        // Begin offscreen pass
+        // If this Fbo was already drawn this frame, redirect rendering to the
+        // next version texture so the recorded draws keep sampling the content
+        // that existed when they were submitted.
+        if (drawnThisFrame_) {
+            int prevVersion = currentVersion_;
+            if (advanceVersion_() && !doClear && sampleCount_ == 1) {
+                // begin() without clear must see the previous content, but a
+                // version texture's content is stale/undefined — copy the
+                // previous version's pixels over before the pass starts.
+                const Texture& prev = (prevVersion == 0)
+                    ? colorTexture_ : versionPool_[prevVersion - 1].tex;
+                blitColorInto_(prev, curColorTex_());
+            }
+        }
+        drawnThisFrame_ = false;
+
+        // Begin offscreen pass (targeting the current version)
         sg_pass pass = {};
 
         if (sampleCount_ > 1) {
             // MSAA: Render to MSAA texture, resolve to non-MSAA texture
             pass.attachments.colors[0] = msaaColorAttView_;
-            pass.attachments.resolves[0] = resolveAttView_;
+            pass.attachments.resolves[0] = curResolveAttView_();
         } else {
             // Non-MSAA: Render directly to color texture
-            pass.attachments.colors[0] = colorTexture_.getAttachmentView();
+            pass.attachments.colors[0] = curColorTex_().getAttachmentView();
         }
         pass.attachments.depth_stencil = depthAttView_;
 
@@ -707,6 +900,14 @@ private:
         savedViewMatrix_ = other.savedViewMatrix_;
         savedCameraContext_ = std::move(other.savedCameraContext_);
         colorTexture_ = std::move(other.colorTexture_);
+        mipScratchTexture_ = std::move(other.mipScratchTexture_);
+        versionPool_ = std::move(other.versionPool_);
+        currentVersion_ = other.currentVersion_;
+        poolFrame_ = other.poolFrame_;
+        lastDrawFrame_ = other.lastDrawFrame_;
+        drawnThisFrame_ = other.drawnThisFrame_;
+        poolAllocFailed_ = other.poolAllocFailed_;
+        versionNoticeShown_ = other.versionNoticeShown_;
         msaaColorImage_ = other.msaaColorImage_;
         msaaColorAttView_ = other.msaaColorAttView_;
         resolveAttView_ = other.resolveAttView_;
@@ -718,6 +919,13 @@ private:
         other.wasInSwapchainPass_ = false;
         other.mipmaps_ = false;
         other.numMipLevels_ = 1;
+        other.versionPool_.clear();
+        other.currentVersion_ = 0;
+        other.poolFrame_ = UINT64_MAX;
+        other.lastDrawFrame_ = UINT64_MAX;
+        other.drawnThisFrame_ = false;
+        other.poolAllocFailed_ = false;
+        other.versionNoticeShown_ = false;
         other.width_ = 0;
         other.height_ = 0;
         other.sampleCount_ = 1;
