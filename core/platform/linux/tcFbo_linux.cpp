@@ -59,14 +59,14 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
     if (!allocated_ || !pixels) return false;
 
     size_t rowBytes = width_ * 4;
-    return readFromGLTexture(colorTexture_.getImage(), width_, height_,
+    return readFromGLTexture(curColorTex_().getImage(), width_, height_,
                              GL_RGBA, GL_UNSIGNED_BYTE, pixels, rowBytes, true);
 }
 
 bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     if (!allocated_ || !pixels) return false;
 
-    sg_pixel_format sgFmt = colorTexture_.getPixelFormat();
+    sg_pixel_format sgFmt = curColorTex_().getPixelFormat();
     if (sgFmt == SG_PIXELFORMAT_NONE) sgFmt = SG_PIXELFORMAT_RGBA8;
 
     int ch = channelCount(format_);
@@ -82,20 +82,20 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
 
     // For 32F: read directly as float
     if (sgFmt == SG_PIXELFORMAT_R32F || sgFmt == SG_PIXELFORMAT_RG32F || sgFmt == SG_PIXELFORMAT_RGBA32F) {
-        return readFromGLTexture(colorTexture_.getImage(), width_, height_,
+        return readFromGLTexture(curColorTex_().getImage(), width_, height_,
                                  glFormat, GL_FLOAT, pixels, rowBytes, true);
     }
 
     // For 16F: read as half-float then convert
     if (sgFmt == SG_PIXELFORMAT_R16F || sgFmt == SG_PIXELFORMAT_RG16F || sgFmt == SG_PIXELFORMAT_RGBA16F) {
         // GL can read half-float directly into float with GL_FLOAT
-        return readFromGLTexture(colorTexture_.getImage(), width_, height_,
+        return readFromGLTexture(curColorTex_().getImage(), width_, height_,
                                  glFormat, GL_FLOAT, pixels, width_ * ch * sizeof(float), true);
     }
 
     // U8: read as unsigned byte then convert
     std::vector<unsigned char> tmp(width_ * height_ * ch);
-    if (!readFromGLTexture(colorTexture_.getImage(), width_, height_,
+    if (!readFromGLTexture(curColorTex_().getImage(), width_, height_,
                            glFormat, GL_UNSIGNED_BYTE, tmp.data(), width_ * ch, true)) {
         return false;
     }

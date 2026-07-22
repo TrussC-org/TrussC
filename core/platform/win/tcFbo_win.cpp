@@ -29,7 +29,7 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
         return false;
     }
 
-    sg_d3d11_image_info info = sg_d3d11_query_image_info(colorTexture_.getImage());
+    sg_d3d11_image_info info = sg_d3d11_query_image_info(curColorTex_().getImage());
     ID3D11Texture2D* srcTexture = (ID3D11Texture2D*)info.tex2d;
 
     if (!srcTexture) {
@@ -91,7 +91,7 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
         return false;
     }
 
-    sg_d3d11_image_info info = sg_d3d11_query_image_info(colorTexture_.getImage());
+    sg_d3d11_image_info info = sg_d3d11_query_image_info(curColorTex_().getImage());
     ID3D11Texture2D* srcTexture = (ID3D11Texture2D*)info.tex2d;
 
     if (!srcTexture) {
@@ -127,7 +127,7 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
 
     int ch = channelCount(format_);
     int bpp = bytesPerPixel(format_);
-    sg_pixel_format sgFmt = colorTexture_.getPixelFormat();
+    sg_pixel_format sgFmt = curColorTex_().getPixelFormat();
     if (sgFmt == SG_PIXELFORMAT_NONE) sgFmt = SG_PIXELFORMAT_RGBA8;
 
     // 32F: direct memcpy per row
