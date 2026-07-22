@@ -600,6 +600,40 @@ inline void restoreBlendPipeline() {
 }
 
 // ---------------------------------------------------------------------------
+// Depth test (for 2D blend pipelines)
+// ---------------------------------------------------------------------------
+// Every setBlendMode() pipeline normally has depth write/test OFF; only the 3D
+// pipeline (loaded by screen setup / EasyCam::begin()) writes depth. Changing
+// the blend mode mid-scene therefore drops depth testing for everything after
+// it. enableDepthTest() restores depth (compare LESS_EQUAL + depth write, same
+// config as the 3D pipeline) for the CURRENT blend mode and every subsequent
+// setBlendMode() / textured draw, until disableDepthTest().
+//
+// Like the blend mode, the flag persists until changed: across frames and into
+// Fbo passes alike (active2D() resolves per render target). Screen setup and
+// EasyCam::begin() keep loading the always-depth-tested 3D pipeline regardless
+// of this flag — it exists to restore depth AFTER a blend-mode change.
+
+// Enable depth test/write on the current (and future) blend pipelines
+inline void enableDepthTest() {
+    if (internal::currentWindowContext().swapchainTarget.context.id == 0) return;  // renderer not set up yet
+    internal::currentWindowContext().depthTestEnabled = true;
+    internal::restoreCurrentPipeline();
+}
+
+// Disable depth test/write on the current (and future) blend pipelines (default)
+inline void disableDepthTest() {
+    if (internal::currentWindowContext().swapchainTarget.context.id == 0) return;  // renderer not set up yet
+    internal::currentWindowContext().depthTestEnabled = false;
+    internal::restoreCurrentPipeline();
+}
+
+// Whether the depth-tested blend pipeline variant is active (see enableDepthTest)
+inline bool isDepthTestEnabled() {
+    return internal::currentWindowContext().depthTestEnabled;
+}
+
+// ---------------------------------------------------------------------------
 // 3D drawing mode
 // ---------------------------------------------------------------------------
 

@@ -45,7 +45,7 @@ sg_shader sglPremultShader();
 // Pixel format / sample count / depth format are left at defaults on purpose: sgl
 // fills them from the target's context, so the same desc is correct for swapchain
 // AND any FBO format. Keep these in sync with tcGlobal.cpp until that is unified.
-inline sg_pipeline_desc pipeDesc2D(BlendMode mode) {
+inline sg_pipeline_desc pipeDesc2D(BlendMode mode, bool depthTest = false) {
     sg_pipeline_desc d = {};
     d.colors[0].write_mask = SG_COLORMASK_RGBA;   // write alpha too (sgl defaults to RGB-only)
     auto& b = d.colors[0].blend;
@@ -94,6 +94,13 @@ inline sg_pipeline_desc pipeDesc2D(BlendMode mode) {
             b.enabled = false;
             break;
     }
+    // Depth-tested variant (tc::enableDepthTest()): same depth config as the 3D
+    // pipeline (pipeDesc3D below), so blended draws can rejoin the scene's depth
+    // buffer after a blend-mode change mid-frame.
+    if (depthTest) {
+        d.depth.write_enabled = true;
+        d.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+    }
     return d;
 }
 
@@ -111,13 +118,17 @@ inline sg_pipeline_desc pipeDescClear() {
 
 // Compositing a PREMULTIPLIED source (e.g. an FBO color texture). rgb is NOT
 // re-multiplied by src alpha (it already is).
-inline sg_pipeline_desc pipeDescPremult() {
+inline sg_pipeline_desc pipeDescPremult(bool depthTest = false) {
     sg_pipeline_desc d = {};
     d.colors[0].write_mask = SG_COLORMASK_RGBA;
     auto& b = d.colors[0].blend;
     b.enabled = true;
     b.src_factor_rgb   = SG_BLENDFACTOR_ONE; b.dst_factor_rgb   = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     b.src_factor_alpha = SG_BLENDFACTOR_ONE; b.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    if (depthTest) {   // see pipeDesc2D — keeps premultiplied texture draws consistent
+        d.depth.write_enabled = true;
+        d.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+    }
     return d;
 }
 

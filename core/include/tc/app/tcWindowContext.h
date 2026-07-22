@@ -86,6 +86,11 @@ struct WindowContext {
     ScissorRect currentScissor = {0, 0, 0, 0, false};
     // Current 2D blend mode (the "role"); actual sgl pipeline in currentTarget
     BlendMode currentBlendMode = BlendMode::Alpha;
+    // Depth-tested 2D pipelines (tc::enableDepthTest()). When true, active2D()
+    // resolves the depth-enabled variant of the current blend pipeline, so
+    // blended draws keep participating in the scene's depth buffer. Persists
+    // like currentBlendMode: across frames and into Fbo passes, until changed.
+    bool depthTestEnabled = false;
 
     // --- window identity / swapchain source (Phase 1 seam) ---
     // Main window: isMain=true, swapchain comes from sglue_swapchain() and
@@ -148,10 +153,20 @@ inline WindowContext& currentWindowContext() {
 // resolve through the current window's target now)
 // ---------------------------------------------------------------------------
 
-// Role keys: high nibble = role, low byte = blend mode (2D only).
-inline sgl_pipeline active2D(BlendMode m) { return currentWindowContext().currentTarget->pipeline(0x000u | (uint32_t)m, pipeDesc2D(m)); }
+// Role keys: high nibble = role, low byte = blend mode (2D only). Bit 12
+// (0x1000u) marks the depth-tested variant of a 2D blend pipeline
+// (tc::enableDepthTest()) — orthogonal to both role and blend mode.
+inline sgl_pipeline active2D(BlendMode m) {
+    bool depth = currentWindowContext().depthTestEnabled;
+    return currentWindowContext().currentTarget->pipeline(
+        (depth ? 0x1000u : 0x000u) | (uint32_t)m, pipeDesc2D(m, depth));
+}
 inline sgl_pipeline activeFill2D()        { return active2D(BlendMode::Alpha); }
-inline sgl_pipeline activePremult()       { return currentWindowContext().currentTarget->pipeline(0x100u, pipeDescPremult()); }
+inline sgl_pipeline activePremult() {
+    bool depth = currentWindowContext().depthTestEnabled;
+    return currentWindowContext().currentTarget->pipeline(
+        (depth ? 0x1000u : 0x000u) | 0x100u, pipeDescPremult(depth));
+}
 inline sgl_pipeline activeClear()         { return currentWindowContext().currentTarget->pipeline(0x200u, pipeDescClear()); }
 inline sgl_pipeline active3D()            { return currentWindowContext().currentTarget->pipeline(0x300u, pipeDesc3D()); }
 
