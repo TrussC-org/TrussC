@@ -11,7 +11,7 @@ which includes `fix/deferred-mesh-buffers-and-texture-blend` (PR #183) and
 1. `trusscli new <appName>`, then replace the generated `src/` contents with
    the files from `repro/<appName>/src/`. Keep the generated `main.cpp`
    (the repro apps only replace tcApp.*). shaderRepro needs
-   `src/shaders/test.glsl`; fboSemanticsRepro needs `src/shaders/effects.glsl`
+   `src/shaders/test.glsl`; fboSemanticsRepro needs `src/effects.glsl` (src root — its tcApp.h includes "effects.glsl.h" without a shaders/ prefix)
    (both included here).
 2. Configure against THIS checkout's core:
    `cmake --preset <platform> -DTRUSSC_DIR=<this-checkout>/core`, then build.
