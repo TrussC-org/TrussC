@@ -152,7 +152,7 @@ inline WindowContext& currentWindowContext() {
 inline sgl_pipeline active2D(BlendMode m) { return currentWindowContext().currentTarget->pipeline(0x000u | (uint32_t)m, pipeDesc2D(m)); }
 inline sgl_pipeline activeFill2D()        { return active2D(BlendMode::Alpha); }
 inline sgl_pipeline activePremult()       { return currentWindowContext().currentTarget->pipeline(0x100u, pipeDescPremult()); }
-inline sgl_pipeline activeClear()         { return currentWindowContext().currentTarget->pipeline(0x200u, pipeDesc2D(BlendMode::Disabled)); }
+inline sgl_pipeline activeClear()         { return currentWindowContext().currentTarget->pipeline(0x200u, pipeDescClear()); }
 inline sgl_pipeline active3D()            { return currentWindowContext().currentTarget->pipeline(0x300u, pipeDesc3D()); }
 
 // Single chokepoint for loading an sgl pipeline by role. No-op if the target isn't
