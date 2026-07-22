@@ -2062,7 +2062,7 @@ float getNearClip()  // Get the near-clip override (0 = auto-calculate from the 
 
 ```cpp
 void addLight(Light & light)  // Add a light to the scene
-void beginShadowPass(Light & light)  // Begin shadow depth pass from the light's point of view
+void beginShadowPass(Light & light)  // Begin shadow depth pass from the light's point of view (up to 4 shadow lights per frame)
 Color calculateLighting(const Vec3 & worldPos, const Vec3 & worldNormal, const Material & material)  // CPU-side lighting result for a world position and normal, summing all active lights with the given material
 void clearEnvironment()  // Clear IBL environment
 void clearLights()  // Remove all lights from the scene
@@ -2777,7 +2777,7 @@ Mat4 Light::computeProjectorViewProj(float nearClip = 0.100000001, float farClip
 void Light::disable()  // Disable this light
 void Light::disableShadow()  // Disable shadow casting
 void Light::enable()  // Enable this light
-void Light::enableShadow(int resolution = 1024)  // Enable shadow casting (depth map at given resolution)
+void Light::enableShadow(int resolution = 1024)  // Enable shadow casting (depth map at given resolution; up to 4 shadow lights per frame)
 const Color & Light::getAmbient() const  // Get ambient light color
 float Light::getConstantAttenuation() const  // Get constant attenuation factor
 const Color & Light::getDiffuse() const  // Get diffuse (main) light color
