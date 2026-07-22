@@ -8,30 +8,6 @@
 
 namespace trussc {
 
-namespace internal {
-
-// GPU buffers whose owning Mesh is gone but that may still be referenced by a
-// deferred PBR / point draw command recorded this frame (swapchain draws are
-// replayed in flushDeferredShaderDraws, FBO-pass draws in Fbo::end()). Without
-// this, a temporary Mesh — e.g. drawBox() creating createBox(...).draw() —
-// destroys its sg_buffers at end of statement and the deferred replay binds
-// dead handles, silently drawing nothing. Destruction is deferred here and
-// drained once per frame in present(), after all deferred draws have executed.
-inline std::vector<sg_buffer> pendingGpuBufferDestroys;
-
-inline void deferGpuBufferDestroy(sg_buffer buf) {
-    if (buf.id != 0) pendingGpuBufferDestroys.push_back(buf);
-}
-
-inline void drainPendingGpuBufferDestroys() {
-    for (sg_buffer buf : pendingGpuBufferDestroys) {
-        sg_destroy_buffer(buf);
-    }
-    pendingGpuBufferDestroys.clear();
-}
-
-} // namespace internal
-
 // Primitive mode
 enum class PrimitiveMode {
     Triangles,
@@ -1139,7 +1115,7 @@ public:
             }
         }
 
-        if (pbuf_.id != 0) { internal::deferGpuBufferDestroy(pbuf_); pbuf_ = {}; }
+        if (pbuf_.id != 0) { internal::deferGpuDestroy(pbuf_); pbuf_ = {}; }
         sg_buffer_desc pbd = {};
         pbd.data.ptr  = pointPacked_.data();
         pbd.data.size = pointPacked_.size() * sizeof(float);
@@ -1162,17 +1138,17 @@ public:
 private:
     void releaseGpuBuffers() const {
         // Deferred destroy: a deferred draw command recorded this frame may
-        // still hold these handles (see internal::pendingGpuBufferDestroys).
+        // still hold these handles (see internal::deferGpuDestroy in tcGpuDestroyQueue.h).
         if (vbuf_.id != 0) {
-            internal::deferGpuBufferDestroy(vbuf_);
+            internal::deferGpuDestroy(vbuf_);
             vbuf_ = {};
         }
         if (ibuf_.id != 0) {
-            internal::deferGpuBufferDestroy(ibuf_);
+            internal::deferGpuDestroy(ibuf_);
             ibuf_ = {};
         }
         if (pbuf_.id != 0) {
-            internal::deferGpuBufferDestroy(pbuf_);
+            internal::deferGpuDestroy(pbuf_);
             pbuf_ = {};
         }
         gpuVertexCount_ = 0;
