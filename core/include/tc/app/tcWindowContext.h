@@ -74,6 +74,12 @@ struct WindowContext {
     sg_color swapchainClearValue = { 0.0f, 0.0f, 0.0f, 1.0f };
     bool inSwapchainPass = false;
     bool inFboPass = false;
+    // True once the swapchain pass has been started at least once this frame.
+    // First start CLEARs with swapchainClearValue (frame background); any
+    // later restart (resume after an FBO / shadow / reflection pass suspended
+    // it) must LOAD color and depth so the content already rendered into the
+    // drawable survives (issue #191). Reset in present() after sg_commit().
+    bool swapchainPassStartedThisFrame = false;
     // Metal drawable actually rendered into this frame (see tcGlobal.cpp notes)
     const void* lastSwapchainDrawable = nullptr;
     std::vector<ScissorRect> scissorStack;

@@ -254,30 +254,71 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
 // ---------------------------------------------------------------------------
 // パス管理関数（non-inline: Hot Reload時にHost/Guest間で同じ状態を参照するため）
 // ---------------------------------------------------------------------------
-void ensureSwapchainPass() {
-    if (!internal::currentWindowContext().inSwapchainPass && !internal::currentWindowContext().inFboPass) {
-        sg_pass pass = {};
+namespace {
+// Start (or restart) the swapchain render pass for the current window.
+// The FIRST start of a frame clears color and depth with swapchainClearValue
+// (frame background). Any subsequent start — resumeSwapchainPass() after an
+// FBO / shadow / reflection pass suspended it — must LOAD color AND depth so
+// everything already rendered into the drawable this frame survives (issue
+// #191: FullscreenShader/direct-pass content was wiped by the old
+// unconditional CLEAR).
+// `preserveContents` marks a pass that may be suspended and resumed later in
+// the same frame (any pass started OUTSIDE present(): FullscreenShader / LUT
+// force-starts, resumes after Fbo / shadow / reflection passes). Such passes
+// set depth.store_action = SG_STOREACTION_STORE, which does double duty:
+//   - stores the depth buffer so the resume can LOAD it (upstream sokol
+//     discards swapchain depth after every pass), and
+//   - on Metal + MSAA it is the hint (see the [TrussC] patch in sokol_gfx.h)
+//     to store the multisample texture, which upstream resolve-only passes
+//     discard — without it a resumed pass would LOAD undefined content.
+// The final pass started in present() passes false, so the normal
+// clear-at-top-of-draw() frame keeps today's exact store behavior (resolve-
+// only color, discarded depth) — zero bandwidth regression.
+void beginSwapchainPassInternal(bool preserveContents) {
+    auto& ctx = internal::currentWindowContext();
+    sg_pass pass = {};
+    if (!ctx.swapchainPassStartedThisFrame) {
         pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        pass.action.colors[0].clear_value = internal::currentWindowContext().swapchainClearValue;
+        pass.action.colors[0].clear_value = ctx.swapchainClearValue;
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         pass.action.depth.clear_value = 1.0f;
-        auto& ctx = internal::currentWindowContext();
-        // Secondary windows provide their own swapchain (same drawable for the
-        // whole window frame); the main window uses sokol_glue as before.
-        pass.swapchain = ctx.acquireSwapchain ? ctx.acquireSwapchain(ctx.acquireSwapchainUser)
-                                              : sglue_swapchain();
-        // Record the drawable we render into so end-of-frame capture reads back
-        // THIS one (sapp_get_swapchain() advances the Metal drawable per call).
-        ctx.lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
-        sg_begin_pass(&pass);
-        ctx.inSwapchainPass = true;
+    } else {
+        pass.action.colors[0].load_action = SG_LOADACTION_LOAD;
+        pass.action.depth.load_action = SG_LOADACTION_LOAD;
+    }
+    if (preserveContents) {
+        pass.action.depth.store_action = SG_STOREACTION_STORE;
+    }
+    // Secondary windows provide their own swapchain (same drawable for the
+    // whole window frame); the main window uses sokol_glue as before.
+    pass.swapchain = ctx.acquireSwapchain ? ctx.acquireSwapchain(ctx.acquireSwapchainUser)
+                                          : sglue_swapchain();
+    // Record the drawable we render into so end-of-frame capture reads back
+    // THIS one (sapp_get_swapchain() advances the Metal drawable per call).
+    ctx.lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
+    sg_begin_pass(&pass);
+    ctx.inSwapchainPass = true;
+    ctx.swapchainPassStartedThisFrame = true;
+}
+} // anonymous namespace
+
+void ensureSwapchainPass() {
+    if (!internal::currentWindowContext().inSwapchainPass && !internal::currentWindowContext().inFboPass) {
+        // Callers outside present() (FullscreenShader, tcxLut, ...) force-start
+        // the pass mid-frame; it may be suspended by an Fbo/shadow pass later,
+        // so its contents must be preserved.
+        beginSwapchainPassInternal(true);
     }
 }
 
 void present() {
     if (headless::isActive()) return;
 
-    ensureSwapchainPass();
+    // Final pass of the frame — nothing suspends it, so no preserve hint
+    // (keeps the normal one-pass frame's store behavior unchanged).
+    if (!internal::currentWindowContext().inSwapchainPass && !internal::currentWindowContext().inFboPass) {
+        beginSwapchainPassInternal(false);
+    }
 
     internal::flushDeferredShaderDraws();
 
@@ -297,6 +338,9 @@ void present() {
 
     sg_end_pass();
     internal::currentWindowContext().inSwapchainPass = false;
+    // Frame is over: the next swapchain pass start belongs to the next frame
+    // and must CLEAR again with swapchainClearValue (see issue #191).
+    internal::currentWindowContext().swapchainPassStartedThisFrame = false;
     sg_commit();
 
     // Now that every deferred draw (swapchain layers above, FBO passes at
@@ -319,17 +363,10 @@ void suspendSwapchainPass() {
 
 void resumeSwapchainPass() {
     if (!internal::currentWindowContext().inSwapchainPass) {
-        sg_pass pass = {};
-        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        pass.action.colors[0].clear_value = internal::currentWindowContext().swapchainClearValue;
-        pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-        pass.action.depth.clear_value = 1.0f;
-        auto& ctx = internal::currentWindowContext();
-        pass.swapchain = ctx.acquireSwapchain ? ctx.acquireSwapchain(ctx.acquireSwapchainUser)
-                                              : sglue_swapchain();
-        ctx.lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
-        sg_begin_pass(&pass);
-        ctx.inSwapchainPass = true;
+        // Restart uses LOAD when the pass already ran this frame — see
+        // beginSwapchainPassInternal() (issue #191). A resumed pass may be
+        // suspended again (multiple Fbo blocks), so preserve its contents too.
+        beginSwapchainPassInternal(true);
     }
 }
 
