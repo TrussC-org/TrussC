@@ -632,6 +632,14 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     light_t["getShadowResolution"] = &Light::getShadowResolution;
     light_t["setShadowBias"] = &Light::setShadowBias;
     light_t["getShadowBias"] = &Light::getShadowBias;
+    light_t["setShadowSoftness"] = &Light::setShadowSoftness;
+    light_t["getShadowSoftness"] = &Light::getShadowSoftness;
+    light_t["setShadowSamples"] = &Light::setShadowSamples;
+    light_t["getShadowSamples"] = &Light::getShadowSamples;
+    light_t["setShadowArea"] = &Light::setShadowArea;
+    light_t["getShadowAreaCenter"] = &Light::getShadowAreaCenter;
+    light_t["getShadowAreaRadius"] = &Light::getShadowAreaRadius;
+    light_t["computeShadowViewProj"] = &Light::computeShadowViewProj;
     light_t["getType"] = &Light::getType;
     light_t["getDirection"] = &Light::getDirection;
     light_t["getPosition"] = &Light::getPosition;
