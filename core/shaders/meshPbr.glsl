@@ -249,7 +249,33 @@ float shadowUvPerWorld(int slot, float linearDepth) {
 }
 
 float calcShadow(int slot, vec3 worldPos, vec3 N, vec3 L) {
-    vec4 clip = shadowViewProj[slot] * vec4(worldPos, 1.0);
+    // Cheap initial projection of the ORIGINAL surface point, used only to learn
+    // the shadow-map texel's world size at this depth (clip0.w = distance from
+    // the light, matching what shadowUvPerWorld expects).
+    vec4 clip0 = shadowViewProj[slot] * vec4(worldPos, 1.0);
+    float linearDepth0 = clip0.w;
+
+    // Normal-offset bias. At an object/floor corner a single shadow-map texel
+    // straddles both the object's side wall and the floor; it stores the wall's
+    // (closer) depth, so floor pixels there compare as shadowed -> a dark
+    // speckle line at the contact seam (corner acne). This is a normal
+    // discontinuity, not a slope, so slope-scaled depth bias can't catch it.
+    // Fix: push the sampling position out along the surface normal by ~one
+    // shadow texel's world size, so the floor samples a texel that no longer
+    // overlaps the wall. texelWorld = 1 / (texels-per-world) and
+    // texels-per-world = shadowUvPerWorld(uv/world) * mapSize.
+    // Modulate by sin(angle) = sqrt(1-NdotL^2) so light-facing surfaces (where
+    // there is no acne) get ~no offset and grazing surfaces (worst acne) get
+    // the full push -- this keeps shadows attached at the base (no peter-pan).
+    float ndlRaw = clamp(dot(N, L), -1.0, 1.0);
+    float sinTheta = sqrt(max(1.0 - ndlRaw * ndlRaw, 0.0));
+    float texelWorld = 1.0 / max(shadowUvPerWorld(slot, linearDepth0) * shadowMapParams.x, 1e-6);
+    const float normalOffsetScale = 2.0;
+    vec3 offsetWorld = worldPos + N * (texelWorld * normalOffsetScale * sinTheta);
+
+    // Re-project the offset point; this clip drives BOTH shadowUV and the
+    // compare depth (clip.w). The slope-scaled depth bias below still applies.
+    vec4 clip = shadowViewProj[slot] * vec4(offsetWorld, 1.0);
     vec3 ndc = clip.xyz / clip.w;
     vec2 shadowUV = ndc.xy * 0.5 + 0.5;
 
