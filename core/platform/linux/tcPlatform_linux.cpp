@@ -12,7 +12,10 @@
 #include <X11/extensions/Xrandr.h>
 #include "sokol_app_tc.h"
 
-// OpenGL for screen capture
+// OpenGL for screen capture. GL_GLEXT_PROTOTYPES makes glext.h declare the
+// GL 3.0 function prototypes (glBindFramebuffer); without it only the enum
+// tokens are visible. Mesa's libGL exports the symbols, so linking is fine.
+#define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 #include <GL/glext.h>   // glBindFramebuffer / GL_READ_FRAMEBUFFER (per-window capture)
 

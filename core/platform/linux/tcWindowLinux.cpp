@@ -48,7 +48,7 @@ sg_swapchain acquireSecondarySwapchain(void* user) {
 
 // --- tick: drive this window's update/draw with its context active ---------
 void windowTick(sapp_window swin, void* user) {
-    Window* win = static_cast<Window*>(user);
+    trussc::Window* win = static_cast<trussc::Window*>(user);
     if (!win) return;
     auto& ctx = win->context();
 
@@ -127,7 +127,7 @@ void windowTick(sapp_window swin, void* user) {
 
 // --- events: map sapp_event onto CoreEvents / App hooks / tree dispatch ----
 void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
-    Window* win = static_cast<Window*>(user);
+    trussc::Window* win = static_cast<trussc::Window*>(user);
     if (!win) return;
     auto& ctx = win->context();
     auto* prev = internal::currentWindowCtx;
@@ -259,7 +259,7 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
 
 void windowClosed(sapp_window swin, void* user) {
     (void)swin;
-    Window* win = static_cast<Window*>(user);
+    trussc::Window* win = static_cast<trussc::Window*>(user);
     if (win) win->close();   // tears down native + app state
 }
 
