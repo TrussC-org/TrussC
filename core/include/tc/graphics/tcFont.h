@@ -2157,9 +2157,10 @@ private:
     float dpiScale_ = 1.0f;    // DPI scale at load time (physical/logical ratio)
     int logicalSize_ = 0;      // User-requested font size (logical pixels)
 
-    // Shared GPU resources
+    // Shared GPU resources. The TTF draw path loads the active per-target 2D
+    // fill pipeline (internal::activeFill2D()) at draw time, so the font class
+    // only needs its own sampler here.
     static inline sg_sampler sampler_ = {};
-    static inline sgl_pipeline pipeline_ = {};
     static inline bool resourcesInitialized_ = false;
 
     void initResources() {
@@ -2171,15 +2172,6 @@ private:
         smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
         smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
         sampler_ = sg_make_sampler(&smp_desc);
-
-        // Alpha blend pipeline
-        sg_pipeline_desc pip_desc = {};
-        pip_desc.colors[0].blend.enabled = true;
-        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
-        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
-        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ZERO;
-        pipeline_ = sgl_make_pipeline(&pip_desc);
 
         resourcesInitialized_ = true;
     }

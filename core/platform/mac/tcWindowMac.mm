@@ -15,6 +15,7 @@
 #include "TrussC.h"
 
 #if defined(__APPLE__)
+#import <Cocoa/Cocoa.h>      // NSWindow (per-window setSize)
 #include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.mm)
 
 using namespace trussc;
@@ -59,6 +60,12 @@ void windowTick(sapp_window swin, void* user) {
     ctx.fbWidth = fbw;
     ctx.fbHeight = fbh;
     ctx.dpiScale = sapp_window_dpi_scale(swin);
+
+    // Per-window frame-rate throttle (Window::setFps): the CADisplayLink keeps
+    // firing at the display's vsync; skip the tick cheaply (before beginFrame,
+    // before advancing the per-window delta/frame count) when throttled down.
+    if (!internal::windowThrottleShouldTick(ctx)) return;
+
     // Keep a RectNode root in sync with the window's logical size (same
     // contract as the main App on SAPP_EVENTTYPE_RESIZED).
     win->syncRootSize((float)sapp_window_width(swin), (float)sapp_window_height(swin));
@@ -299,6 +306,16 @@ void Window::setTitle(const std::string& title) {
     title_ = title;
     auto* st = static_cast<AdapterState*>(native_);
     if (st) sapp_window_set_title(st->win, title.c_str());
+}
+
+void Window::setSize(int width, int height) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    NSWindow* nsWindow = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(st->win);
+    if (nsWindow) {
+        // Logical (point) content size — matches getWidth()/getHeight() units.
+        [nsWindow setContentSize:NSMakeSize((CGFloat)width, (CGFloat)height)];
+    }
 }
 
 int Window::getWidth() const {

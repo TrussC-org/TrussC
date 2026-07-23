@@ -15,6 +15,7 @@
 #include "TrussC.h"
 
 #if defined(_WIN32)
+#include <windows.h>        // HWND / SetWindowPos (per-window setSize)
 #include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.cpp)
 
 using namespace trussc;
@@ -57,6 +58,12 @@ void windowTick(sapp_window swin, void* user) {
     ctx.fbWidth = fbw;
     ctx.fbHeight = fbh;
     ctx.dpiScale = sapp_window_dpi_scale(swin);
+
+    // Per-window frame-rate throttle (Window::setFps): the DXGI waitable keeps
+    // pacing at the display's vsync; skip the tick cheaply (before beginFrame,
+    // before advancing the per-window delta/frame count) when throttled down.
+    if (!internal::windowThrottleShouldTick(ctx)) return;
+
     // Keep a RectNode root in sync with the window's logical size (same
     // contract as the main App on SAPP_EVENTTYPE_RESIZED).
     win->syncRootSize((float)sapp_window_width(swin), (float)sapp_window_height(swin));
@@ -295,6 +302,22 @@ void Window::setTitle(const std::string& title) {
     title_ = title;
     auto* st = static_cast<AdapterState*>(native_);
     if (st) sapp_window_set_title(st->win, title.c_str());
+}
+
+void Window::setSize(int width, int height) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    HWND hwnd = (HWND)(void*)sapp_window_win32_get_hwnd(st->win);
+    if (!hwnd) return;
+    // Logical -> physical client size via this window's DPI scale, then grow to
+    // the outer window rect so the CLIENT area ends up the requested size.
+    float s = ctx_.dpiScale > 0.0f ? ctx_.dpiScale : 1.0f;
+    RECT r = {0, 0, (LONG)(width * s), (LONG)(height * s)};
+    DWORD style   = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
+    DWORD exStyle = (DWORD)GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    AdjustWindowRectEx(&r, style, FALSE, exStyle);
+    SetWindowPos(hwnd, nullptr, 0, 0, r.right - r.left, r.bottom - r.top,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 int Window::getWidth() const {

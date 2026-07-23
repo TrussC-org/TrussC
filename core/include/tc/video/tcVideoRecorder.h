@@ -402,6 +402,19 @@ private:
         nextCaptureTime_ = -1.0f;
         lastFrameTime_ = -1.0f;
         if (s.audio) startAudioTap(s.audioSampleRate, s.audioChannels);
+        // Per-window binding (T3): events() resolves through the window context
+        // that is CURRENT when recording starts — so calling recordScreen() from
+        // a secondary window's tick subscribes to THAT window's afterFrame/exit,
+        // and swapchain frames are captured while that window's context (and its
+        // lastSwapchainDrawable) is current. No explicit window handle is needed;
+        // the recorder follows whichever window started it.
+        //   Platform note: the swapchain readback is fully per-window on macOS
+        //   (captureWindowAsync reads currentWindowContext().lastSwapchainDrawable).
+        //   On Windows/Linux the readback still reads the MAIN swapchain
+        //   (sapp_get_swapchain / sapp_width) — the same pre-existing limitation
+        //   as saveScreenshot() there — so recording a SECONDARY window captures
+        //   main-window content on those two platforms. Fbo-source recording is
+        //   per-window everywhere (it reads the passed Fbo, not the swapchain).
         afterFrameListener_ = events().afterFrame.listen([this]() { onAfterFrame(); });
         exitListener_ = events().exit.listen([this]() { stop(); });
         return true;

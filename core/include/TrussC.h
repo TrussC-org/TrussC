@@ -305,6 +305,13 @@ namespace internal {
 
     // MSAAサンプルカウント（FBOパス中のPBRパイプライン用）
     inline int currentFboSampleCount = 1;
+
+    // Per-window routing for the context-aware global window-control functions
+    // (setWindowTitle / setWindowSize). Defined in tc/app/tcWindow.h once Window
+    // is complete; forward-declared here because those globals appear earlier in
+    // this header. Return true if a secondary window consumed the call.
+    bool routeSetWindowTitleToWindow(const std::string& title);
+    bool routeSetWindowSizeToWindow(int width, int height);
 }
 
 // ---------------------------------------------------------------------------
@@ -1422,8 +1429,30 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
 // Window control
 // ---------------------------------------------------------------------------
 
-// Set window title
+namespace internal {
+// Returns true when called from a secondary window's context, emitting a
+// one-time warning that `fn` is main-window only (`why` states the platform
+// limitation). The global window-control functions that have no per-window
+// implementation call this and bail, so a secondary tick can never silently
+// drive the MAIN window (the pre-Phase-2 trap). No-op / false on the main
+// context, where the caller proceeds normally.
+inline bool warnIfSecondaryWindowControl(const char* fn, const char* why) {
+    if (currentWindowContext().isMain) return false;
+    static std::unordered_set<std::string> warned;
+    if (warned.insert(fn).second) {
+        logWarning("Window") << fn << "() is main-window only (" << why
+            << "). Called from a secondary window's context — ignored to avoid "
+            "retargeting the main window.";
+    }
+    return true;
+}
+}
+
+// Set window title. Context-aware: from a secondary window's tick/event it
+// retitles THAT window (Window::setTitle); on the main context it retitles the
+// main window as before.
 inline void setWindowTitle(const std::string& title) {
+    if (internal::routeSetWindowTitleToWindow(title)) return;
     sapp_set_window_title(title.c_str());
 }
 
@@ -1462,18 +1491,30 @@ enum class Cursor {
     Custom15    = SAPP_MOUSECURSOR_CUSTOM_15,
 };
 
+// Cursor visibility/shape asymmetry: sokol_app's cursor API targets the main
+// window, and on macOS cursor visibility is app-global (NSCursor hide/unhide is
+// process-wide, not per-NSWindow) — so there is no honest per-secondary-window
+// cursor control. From a secondary context these warn once and no-op rather
+// than silently changing the main window's cursor.
+
 // Show the mouse cursor (default)
 inline void showCursor() {
+    if (internal::warnIfSecondaryWindowControl("showCursor",
+        "cursor visibility is app-global on macOS and sokol_app targets the main window")) return;
     sapp_show_mouse(true);
 }
 
 // Hide the mouse cursor
 inline void hideCursor() {
+    if (internal::warnIfSecondaryWindowControl("hideCursor",
+        "cursor visibility is app-global on macOS and sokol_app targets the main window")) return;
     sapp_show_mouse(false);
 }
 
 // Set mouse cursor shape (uses OS system cursors or custom cursors)
 inline void setCursor(Cursor cursor) {
+    if (internal::warnIfSecondaryWindowControl("setCursor",
+        "sokol_app's cursor shape targets the main window")) return;
     sapp_set_mouse_cursor((sapp_mouse_cursor)cursor);
 }
 
@@ -1527,6 +1568,20 @@ inline std::string getClipboardString() {
 // pixelPerfect=true: specify in framebuffer size
 // pixelPerfect=false: specify in logical size
 inline void setWindowSize(int width, int height) {
+    auto& ctx = internal::currentWindowContext();
+    if (!ctx.isMain) {
+        // Secondary window: route to Window::setSize (logical size). Convert
+        // framebuffer -> logical using THIS window's dpi scale in pixel-perfect
+        // mode, mirroring the main path's sapp_dpi_scale() conversion.
+        int lw = width, lh = height;
+        if (internal::pixelPerfectMode) {
+            float s = ctx.dpiScale > 0.0f ? ctx.dpiScale : 1.0f;
+            lw = static_cast<int>(width / s);
+            lh = static_cast<int>(height / s);
+        }
+        internal::routeSetWindowSizeToWindow(lw, lh);
+        return;
+    }
     if (internal::pixelPerfectMode) {
         // Pixel perfect mode: convert framebuffer size to logical size
         float scale = sapp_dpi_scale();
@@ -1537,20 +1592,34 @@ inline void setWindowSize(int width, int height) {
     }
 }
 
+// Fullscreen asymmetry: sapp_toggle_fullscreen()/sapp_is_fullscreen() act on the
+// main window only. Per-secondary-window fullscreen would need substantial
+// native work on each platform (macOS NSWindow toggleFullScreen:, Win32 style
+// swap, X11 EWMH _NET_WM_STATE_FULLSCREEN) and is not implemented; from a
+// secondary context these warn once and no-op / report false rather than
+// driving the main window.
+
 // Toggle fullscreen
 inline void setFullscreen(bool full) {
+    if (internal::warnIfSecondaryWindowControl("setFullscreen",
+        "sokol_app fullscreen targets the main window; per-window fullscreen is not implemented")) return;
     if (full != sapp_is_fullscreen()) {
         sapp_toggle_fullscreen();
     }
 }
 
-// Get fullscreen state
+// Get fullscreen state. From a secondary context per-window fullscreen is not
+// tracked, so this warns once and returns false.
 inline bool isFullscreen() {
+    if (internal::warnIfSecondaryWindowControl("isFullscreen",
+        "per-window fullscreen is not tracked")) return false;
     return sapp_is_fullscreen();
 }
 
 // Toggle fullscreen
 inline void toggleFullscreen() {
+    if (internal::warnIfSecondaryWindowControl("toggleFullscreen",
+        "sokol_app fullscreen targets the main window; per-window fullscreen is not implemented")) return;
     sapp_toggle_fullscreen();
 }
 
@@ -1769,6 +1838,15 @@ struct FpsSettings {
 // EVENT_DRIVEN: only on redraw() call
 // > 0: fixed fps
 inline void setFps(float fps) {
+    // Context-aware: called during a secondary window's tick it retargets THAT
+    // window's throttle (Window::setFps); on the main context it steers the main
+    // loop exactly as before. This removes the pre-Phase-2 trap where setFps()
+    // from secondary app code silently retuned the main loop.
+    auto& wctx = internal::currentWindowContext();
+    if (!wctx.isMain) {
+        wctx.throttleFps = fps;
+        return;
+    }
     internal::updateTargetFps = fps;
     internal::drawTargetFps = fps;
     internal::updateSyncedToDraw = true;
@@ -1777,8 +1855,20 @@ inline void setFps(float fps) {
 }
 
 // Set independent FPS for update and draw (not synchronized)
-// Each loop runs at its own rate, may cause timing variations
+// Each loop runs at its own rate, may cause timing variations.
+// MAIN-WINDOW ONLY: a secondary window has a single synced throttle rate
+// (Window::setFps); calling this from a secondary tick logs once and no-ops.
 inline void setIndependentFps(float updateFps, float drawFps) {
+    if (!internal::currentWindowContext().isMain) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            logWarning("Window") << "setIndependentFps() is main-window only; a "
+                "secondary window runs a single synced rate. Use Window::setFps() "
+                "(or the context-aware setFps()). Ignored.";
+        }
+        return;
+    }
     internal::updateTargetFps = updateFps;
     internal::drawTargetFps = drawFps;
     internal::updateSyncedToDraw = false;
@@ -1813,7 +1903,19 @@ inline float getFps() {
 
 // Request redraw (used when auto-draw is stopped)
 // count: number of draws (max value is used when called multiple times)
+// MAIN-WINDOW ONLY: the event-driven / redraw() loop drives the main window's
+// _frame_cb. Secondary windows are paced by their own display link (Window::
+// setFps throttles them); redraw() from a secondary tick logs once and no-ops.
 inline void redraw(int count = 1) {
+    if (!internal::currentWindowContext().isMain) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            logWarning("Window") << "redraw() / event-driven loop is main-window "
+                "only; secondary windows are paced by their display link. Ignored.";
+        }
+        return;
+    }
     if (count > internal::redrawCount) {
         internal::redrawCount = count;
     }

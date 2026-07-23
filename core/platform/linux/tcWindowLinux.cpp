@@ -16,6 +16,7 @@
 #include "TrussC.h"
 
 #if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
+#include <X11/Xlib.h>       // XResizeWindow (per-window setSize)
 #include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.cpp)
 
 using namespace trussc;
@@ -57,6 +58,12 @@ void windowTick(sapp_window swin, void* user) {
     ctx.fbWidth = fbw;
     ctx.fbHeight = fbh;
     ctx.dpiScale = sapp_window_dpi_scale(swin);
+
+    // Per-window frame-rate throttle (Window::setFps): the timer keeps pacing at
+    // the display's refresh rate; skip the tick cheaply (before beginFrame,
+    // before advancing the per-window delta/frame count) when throttled down.
+    if (!internal::windowThrottleShouldTick(ctx)) return;
+
     // Keep a RectNode root in sync with the window's logical size (same
     // contract as the main App on SAPP_EVENTTYPE_RESIZED).
     win->syncRootSize((float)sapp_window_width(swin), (float)sapp_window_height(swin));
@@ -295,6 +302,19 @@ void Window::setTitle(const std::string& title) {
     title_ = title;
     auto* st = static_cast<AdapterState*>(native_);
     if (st) sapp_window_set_title(st->win, title.c_str());
+}
+
+void Window::setSize(int width, int height) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    Display* dpy = (Display*)(void*)sapp_x11_get_display();
+    ::Window xwin = (::Window)(uintptr_t)sapp_window_x11_get_window(st->win);
+    if (!dpy || !xwin) return;
+    // Logical -> physical pixels via this window's DPI scale (X11 sizes are in
+    // device pixels; sapp_window_width() reports the logical size).
+    float s = ctx_.dpiScale > 0.0f ? ctx_.dpiScale : 1.0f;
+    XResizeWindow(dpy, xwin, (unsigned)(width * s), (unsigned)(height * s));
+    XFlush(dpy);
 }
 
 int Window::getWidth() const {

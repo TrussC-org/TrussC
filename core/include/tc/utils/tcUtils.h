@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <cmath>
+#include <chrono>
 #include <memory>
 #include <filesystem>
 #include "tc/utils/tcFileIO.h"   // fs alias + path boundary helpers
@@ -566,9 +567,29 @@ inline int presetToKey(Beep type) {
 // Internal state manager
 struct BeepManager {
     std::unordered_map<int, std::shared_ptr<Sound>> cache;
-    uint64_t lastBeepFrame = 0;
+    // Time-based debounce (multi-window safe): keyed on a monotonic clock rather
+    // than the main-window frame counter, so the "collapse a burst of beep()
+    // calls in one frame into a single beep" guard works identically no matter
+    // which window (or a worker thread) triggers it. A local steady_clock read
+    // avoids depending on getElapsedTime(), which isn't declared in this header.
+    std::chrono::steady_clock::time_point lastBeepTime{};
+    bool lastBeepTimeValid = false;
+    static constexpr double beepDebounceSeconds = 0.005;  // suppress within ~5 ms
     float volume = 0.5f;
     static constexpr size_t MAX_CACHE_SIZE = 128;
+
+    // Returns true if a beep issued now should be suppressed (a previous beep
+    // fired < beepDebounceSeconds ago). Updates the timestamp on a pass.
+    bool debounce() {
+        auto now = std::chrono::steady_clock::now();
+        if (lastBeepTimeValid) {
+            double dt = std::chrono::duration<double>(now - lastBeepTime).count();
+            if (dt < beepDebounceSeconds) return true;
+        }
+        lastBeepTime = now;
+        lastBeepTimeValid = true;
+        return false;
+    }
 
     // Generate sound for a preset type
     std::shared_ptr<Sound> generatePreset(Beep type) {
@@ -722,13 +743,7 @@ struct BeepManager {
     }
 
     void playPreset(Beep type) {
-        // Debounce keyed on the MAIN-window frame counter (Fix 3): beeps are a
-        // process-global convenience sound and this header is included before
-        // getFrameCount() is declared, so it deliberately reads the global
-        // rather than the per-window counter.
-        uint64_t currentFrame = internal::updateFrameCount;
-        if (currentFrame == lastBeepFrame && currentFrame > 0) return;
-        lastBeepFrame = currentFrame;
+        if (debounce()) return;
 
         int key = presetToKey(type);
         auto it = cache.find(key);
@@ -743,9 +758,7 @@ struct BeepManager {
     }
 
     void playFrequency(float freq) {
-        uint64_t currentFrame = internal::updateFrameCount;
-        if (currentFrame == lastBeepFrame && currentFrame > 0) return;
-        lastBeepFrame = currentFrame;
+        if (debounce()) return;
 
         int key = static_cast<int>(freq);
         auto it = cache.find(key);

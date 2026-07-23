@@ -78,7 +78,28 @@ public:
     int getWidth() const;    // logical size (matches the window's coordinates)
     int getHeight() const;
 
+    // Resize this window's content area to the given LOGICAL size (points),
+    // matching getWidth()/getHeight() units. Implemented natively per platform
+    // (macOS NSWindow, Windows HWND, X11) because sokol_app has no per-window
+    // resize entry point. No-op if the native window is gone.
+    void setSize(int width, int height);
+
     void setClearColor(const Color& c) { clearColor_ = c; }
+
+    // Per-window target frame rate (throttle).
+    //   fps <= 0            -> free-run at the display's vsync (default)
+    //   0 < fps < display   -> update/draw run at ~fps
+    //   fps >= display rate -> effectively free-run (nothing is skipped)
+    // The native display link always fires at vsync and cannot be portably
+    // retuned, so a lower rate is realised by skipping display ticks with a
+    // time accumulator (the skip bails before the frame's work, so it is cheap).
+    // Unlike the main loop this is a SINGLE rate: independent update/draw rates
+    // (setIndependentFps) and the event-driven redraw() loop are main-window
+    // only. getFps() returns the last target set here (0 = free-run), not a
+    // measured rate — use getFrameRate() from inside this window's tick for the
+    // measured value.
+    void setFps(float fps) { ctx_.throttleFps = fps; }
+    float getFps() const { return ctx_.throttleFps; }
 
     internal::WindowContext& context() { return ctx_; }
 
@@ -137,6 +158,39 @@ public:
     internal::WindowRegistryEntry registryEntry_{this};
 };
 
+namespace internal {
+// The secondary Window whose context is currently active (during its
+// windowTick / event dispatch), or nullptr on the main context. Linear scan
+// over the (tiny) open-window registry — used by the context-aware global
+// window-control functions to route to the right window. Defined here (after
+// Window is complete); the globals in TrussC.h call the forward-declared
+// route* helpers below.
+inline Window* currentWindow() {
+    auto& ctx = currentWindowContext();
+    if (ctx.isMain) return nullptr;
+    for (Window* w : openWindows()) {
+        if (&w->context() == &ctx) return w;
+    }
+    return nullptr;
+}
+
+// Route helpers for the global window-control functions (forward-declared near
+// the top of TrussC.h, defined here). Each returns true if a secondary window
+// consumed the call; false on the main context (caller keeps main behavior).
+inline bool routeSetWindowTitleToWindow(const std::string& title) {
+    Window* w = currentWindow();
+    if (!w) return false;
+    w->setTitle(title);
+    return true;
+}
+inline bool routeSetWindowSizeToWindow(int width, int height) {
+    Window* w = currentWindow();
+    if (!w) return false;
+    w->setSize(width, height);
+    return true;
+}
+}
+
 // Create a secondary window. macOS, Windows and Linux (nullptr elsewhere).
 // The returned shared_ptr keeps the window alive; closing the window (user or
 // close()) destroys the native side while the handle stays valid (isOpen()).
@@ -187,6 +241,7 @@ inline void Window::close() {}
 inline void Window::setTitle(const std::string&) {}
 inline int Window::getWidth() const { return 0; }
 inline int Window::getHeight() const { return 0; }
+inline void Window::setSize(int, int) {}
 inline std::shared_ptr<Window> createWindow(const WindowSettings&) {
     logError("Window") << "createWindow(): secondary windows are supported on "
         "macOS, Windows and desktop Linux (OpenGL); this platform is "

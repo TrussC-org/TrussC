@@ -200,6 +200,20 @@ struct WindowContext {
     int frameTimeIndex = 0;
     bool frameTimeBufferFilled = false;
 
+    // --- per-window frame-rate throttle (Window::setFps / global setFps) ---
+    // A secondary window's native display link always fires at the display's
+    // vsync; we cannot portably retune it, so a lower target rate is realised
+    // by SKIPPING display ticks via a time accumulator (windowThrottleShouldTick
+    // in the native windowTick, before beginFrame). throttleFps <= 0 (or >= the
+    // display refresh rate, which the accumulator degenerates to) = free-run at
+    // vsync, the default and the pre-Phase-2 behavior. The MAIN window ignores
+    // this field entirely (its loop is driven by updateTargetFps/drawTargetFps
+    // in _frame_cb).
+    float throttleFps = 0.0f;
+    double throttleAccumulator = 0.0;
+    std::chrono::high_resolution_clock::time_point throttleLastTime;
+    bool throttleLastTimeInitialized = false;
+
     // --- misc per-window ---
     int clipboardSize = 65536;   // Clipboard buffer size (for overflow check)
     // Resolved absolute paths queued by saveScreenshot() on THIS window, drained
@@ -227,6 +241,37 @@ inline WindowContext* currentWindowCtx = nullptr;
 
 inline WindowContext& currentWindowContext() {
     return currentWindowCtx ? *currentWindowCtx : mainWindowContext();
+}
+
+// ---------------------------------------------------------------------------
+// Per-window frame-rate throttle (T1). Shared by every platform's windowTick.
+// Called once per native display tick BEFORE beginFrame: returns true to run
+// this window's update/draw, false to skip it cheaply (the display link keeps
+// firing at vsync — this only decides whether we do the frame's work).
+// Free-run (throttleFps <= 0) always ticks. Otherwise accumulate real elapsed
+// wall-clock time and let one tick through per 1/fps interval; a target >= the
+// display rate degenerates to running every tick. Mirrors the main loop's
+// fixed-FPS draw-skip logic (TrussC.h _frame_cb).
+// ---------------------------------------------------------------------------
+inline bool windowThrottleShouldTick(WindowContext& ctx) {
+    if (ctx.throttleFps <= 0.0f) return true;
+    auto now = std::chrono::high_resolution_clock::now();
+    if (!ctx.throttleLastTimeInitialized) {
+        ctx.throttleLastTimeInitialized = true;
+        ctx.throttleLastTime = now;
+        return true;  // always run the first tick
+    }
+    double elapsed = std::chrono::duration<double>(now - ctx.throttleLastTime).count();
+    ctx.throttleLastTime = now;
+    ctx.throttleAccumulator += elapsed;
+    double interval = 1.0 / ctx.throttleFps;
+    if (ctx.throttleAccumulator >= interval) {
+        ctx.throttleAccumulator -= interval;
+        // Clamp after a long stall (occlusion) so we don't burst-catch-up.
+        if (ctx.throttleAccumulator > interval) ctx.throttleAccumulator = 0.0;
+        return true;
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
