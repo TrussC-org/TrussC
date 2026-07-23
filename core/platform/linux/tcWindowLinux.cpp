@@ -317,6 +317,43 @@ void Window::setSize(int width, int height) {
     XFlush(dpy);
 }
 
+void Window::setFullscreen(bool full) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    Display* dpy = (Display*)(void*)sapp_x11_get_display();
+    ::Window xwin = (::Window)(uintptr_t)sapp_window_x11_get_window(st->win);
+    if (!dpy || !xwin) return;
+
+    // EWMH: ask the window manager to toggle _NET_WM_STATE_FULLSCREEN via a
+    // ClientMessage sent to the root window with SubstructureRedirect. The WM
+    // resizes the window to the monitor; the per-window tick's fbWidth/fbHeight
+    // sync + syncRootSize pick up the new size on the next tick.
+    Atom wmState     = XInternAtom(dpy, "_NET_WM_STATE", False);
+    Atom wmFullscreen = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
+    if (wmState == None || wmFullscreen == None) return;
+
+    XEvent xev = {};
+    xev.type = ClientMessage;
+    xev.xclient.window = xwin;
+    xev.xclient.message_type = wmState;
+    xev.xclient.format = 32;
+    xev.xclient.data.l[0] = full ? 1 : 0;   // _NET_WM_STATE_ADD / _REMOVE
+    xev.xclient.data.l[1] = (long)wmFullscreen;
+    xev.xclient.data.l[2] = 0;
+    xev.xclient.data.l[3] = 1;               // source indication: normal app
+    xev.xclient.data.l[4] = 0;
+
+    ::Window root = DefaultRootWindow(dpy);
+    XSendEvent(dpy, root, False,
+               SubstructureRedirectMask | SubstructureNotifyMask, &xev);
+    XFlush(dpy);
+    fullscreenRequested_ = full;
+}
+
+bool Window::isFullscreen() const {
+    return fullscreenRequested_;
+}
+
 int Window::getWidth() const {
     auto* st = static_cast<AdapterState*>(native_);
     return st ? sapp_window_width(st->win) : 0;

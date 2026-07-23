@@ -318,6 +318,31 @@ void Window::setSize(int width, int height) {
     }
 }
 
+void Window::setFullscreen(bool full) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    fullscreenRequested_ = full;
+    NSWindow* nsWindow = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(st->win);
+    if (!nsWindow) return;
+    // NSWindow's native fullscreen is a toggle; only fire it when the live state
+    // differs from what was requested (the transition is animated/async, and the
+    // per-window CADisplayLink resize callback picks up the new framebuffer size).
+    const bool isFull = (nsWindow.styleMask & NSWindowStyleMaskFullScreen) != 0;
+    if (isFull != full) {
+        [nsWindow toggleFullScreen:nil];
+    }
+}
+
+bool Window::isFullscreen() const {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return false;
+    NSWindow* nsWindow = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(st->win);
+    if (!nsWindow) return false;
+    // Read the live styleMask so the reported state is correct once the async
+    // toggleFullScreen: animation settles (fullscreenRequested_ is the intent).
+    return (nsWindow.styleMask & NSWindowStyleMaskFullScreen) != 0;
+}
+
 int Window::getWidth() const {
     auto* st = static_cast<AdapterState*>(native_);
     return st ? sapp_window_width(st->win) : 0;

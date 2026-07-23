@@ -24,6 +24,11 @@ namespace {
 
 struct AdapterState {
     sapp_window win{0};
+    // Borderless-fullscreen save/restore (Window::setFullscreen).
+    bool    savedValid = false;
+    LONG_PTR savedStyle = 0;
+    LONG_PTR savedExStyle = 0;
+    RECT    savedRect{0, 0, 0, 0};   // window rect (screen coords) before fullscreen
 };
 
 // Swapchain provider handed to WindowContext::acquireSwapchain. Unlike Metal
@@ -318,6 +323,54 @@ void Window::setSize(int width, int height) {
     AdjustWindowRectEx(&r, style, FALSE, exStyle);
     SetWindowPos(hwnd, nullptr, 0, 0, r.right - r.left, r.bottom - r.top,
                  SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void Window::setFullscreen(bool full) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    HWND hwnd = (HWND)(void*)sapp_window_win32_get_hwnd(st->win);
+    if (!hwnd) return;
+    if (full == fullscreenRequested_) return;   // already in the requested state
+
+    if (full) {
+        // Save the current windowed style + rect, then switch to a borderless
+        // popup covering the window's current monitor (physical pixels; the DXGI
+        // swapchain resizes to the client area, and windowTick's fbWidth/fbHeight
+        // sync + syncRootSize pick up the new size).
+        st->savedStyle   = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        st->savedExStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        GetWindowRect(hwnd, &st->savedRect);
+        st->savedValid = true;
+
+        HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi = { sizeof(mi) };
+        if (!GetMonitorInfoW(mon, &mi)) return;
+        const RECT& r = mi.rcMonitor;   // full monitor rect in physical pixels
+
+        SetWindowLongPtrW(hwnd, GWL_STYLE,
+            (st->savedStyle & ~(WS_OVERLAPPEDWINDOW)) | WS_POPUP);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE,
+            st->savedExStyle & ~(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE));
+        SetWindowPos(hwnd, HWND_TOP, r.left, r.top,
+                     r.right - r.left, r.bottom - r.top,
+                     SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        fullscreenRequested_ = true;
+    } else {
+        // Restore the saved windowed style + rect.
+        if (st->savedValid) {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, st->savedStyle);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, st->savedExStyle);
+            const RECT& r = st->savedRect;
+            SetWindowPos(hwnd, nullptr, r.left, r.top,
+                         r.right - r.left, r.bottom - r.top,
+                         SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
+        }
+        fullscreenRequested_ = false;
+    }
+}
+
+bool Window::isFullscreen() const {
+    return fullscreenRequested_;
 }
 
 int Window::getWidth() const {

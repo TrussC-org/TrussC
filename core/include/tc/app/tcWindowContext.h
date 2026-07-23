@@ -135,6 +135,13 @@ struct WindowContext {
     bool swapchainPassStartedThisFrame = false;
     // Metal drawable actually rendered into this frame (see tcGlobal.cpp notes)
     const void* lastSwapchainDrawable = nullptr;
+    // Full swapchain description this frame actually rendered into (recorded by
+    // beginSwapchainPassInternal, same timing as lastSwapchainDrawable). Used by
+    // the per-window capture backends on Windows (d3d11.render_view) and Linux
+    // (gl.framebuffer / width / height) so a secondary window's screenshot /
+    // recording reads back ITS surface instead of the main swapchain. On macOS
+    // capture reads lastSwapchainDrawable directly and ignores this.
+    sg_swapchain lastSwapchain{};
     std::vector<ScissorRect> scissorStack;
     ScissorRect currentScissor = {0, 0, 0, 0, false};
     // Current 2D blend mode (the "role"); actual sgl pipeline in currentTarget

@@ -84,6 +84,21 @@ public:
     // resize entry point. No-op if the native window is gone.
     void setSize(int width, int height);
 
+    // Per-window fullscreen. Implemented natively per platform because sokol_app's
+    // fullscreen only targets the main window:
+    //   macOS  -> NSWindow toggleFullScreen: (native, animated; isFullscreen()
+    //             reads the live styleMask, so it reflects the true state once
+    //             the async transition finishes).
+    //   Windows-> borderless-fullscreen: save style + rect, switch to a popup
+    //             sized to the window's monitor, restore on exit.
+    //   Linux  -> EWMH _NET_WM_STATE_FULLSCREEN ClientMessage to the root window.
+    // The framebuffer-size change is picked up by the normal per-window resize
+    // path (windowTick keeps fbWidth/fbHeight in sync and syncRootSize fires
+    // windowResized). No-op if the native window is gone.
+    void setFullscreen(bool full);
+    bool isFullscreen() const;
+    void toggleFullscreen() { setFullscreen(!isFullscreen()); }
+
     void setClearColor(const Color& c) { clearColor_ = c; }
 
     // Per-window target frame rate (throttle).
@@ -154,6 +169,10 @@ public:
     CoreEvents events_;
     internal::RenderContext render_;
     Color clearColor_ = Color(0.05f, 0.05f, 0.08f, 1.0f);
+    // Fullscreen intent. Windows/Linux report isFullscreen() from this flag
+    // (there is no cheap live query); macOS ignores it and reads the live
+    // NSWindow styleMask instead (the transition is async).
+    bool fullscreenRequested_ = false;
     std::string title_;
     internal::WindowRegistryEntry registryEntry_{this};
 };
@@ -187,6 +206,28 @@ inline bool routeSetWindowSizeToWindow(int width, int height) {
     Window* w = currentWindow();
     if (!w) return false;
     w->setSize(width, height);
+    return true;
+}
+// Fullscreen routing: from a secondary window's context the global
+// setFullscreen()/toggleFullscreen()/isFullscreen() drive THAT window instead of
+// warning + no-op'ing (the pre-Phase-2 behavior). Return true when a secondary
+// window consumed the call; the read variant reports the window's state via out.
+inline bool routeSetFullscreenToWindow(bool full) {
+    Window* w = currentWindow();
+    if (!w) return false;
+    w->setFullscreen(full);
+    return true;
+}
+inline bool routeToggleFullscreenToWindow() {
+    Window* w = currentWindow();
+    if (!w) return false;
+    w->toggleFullscreen();
+    return true;
+}
+inline bool routeIsFullscreenFromWindow(bool& out) {
+    Window* w = currentWindow();
+    if (!w) return false;
+    out = w->isFullscreen();
     return true;
 }
 }
@@ -242,6 +283,8 @@ inline void Window::setTitle(const std::string&) {}
 inline int Window::getWidth() const { return 0; }
 inline int Window::getHeight() const { return 0; }
 inline void Window::setSize(int, int) {}
+inline void Window::setFullscreen(bool) {}
+inline bool Window::isFullscreen() const { return false; }
 inline std::shared_ptr<Window> createWindow(const WindowSettings&) {
     logError("Window") << "createWindow(): secondary windows are supported on "
         "macOS, Windows and desktop Linux (OpenGL); this platform is "

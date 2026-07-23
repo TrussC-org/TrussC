@@ -312,6 +312,9 @@ namespace internal {
     // this header. Return true if a secondary window consumed the call.
     bool routeSetWindowTitleToWindow(const std::string& title);
     bool routeSetWindowSizeToWindow(int width, int height);
+    bool routeSetFullscreenToWindow(bool full);
+    bool routeToggleFullscreenToWindow();
+    bool routeIsFullscreenFromWindow(bool& out);
 }
 
 // ---------------------------------------------------------------------------
@@ -1592,34 +1595,30 @@ inline void setWindowSize(int width, int height) {
     }
 }
 
-// Fullscreen asymmetry: sapp_toggle_fullscreen()/sapp_is_fullscreen() act on the
-// main window only. Per-secondary-window fullscreen would need substantial
-// native work on each platform (macOS NSWindow toggleFullScreen:, Win32 style
-// swap, X11 EWMH _NET_WM_STATE_FULLSCREEN) and is not implemented; from a
-// secondary context these warn once and no-op / report false rather than
-// driving the main window.
+// Fullscreen. Context-aware: sapp_toggle_fullscreen()/sapp_is_fullscreen() only
+// act on the main window, so from a secondary window's tick/event these route to
+// THAT window's native per-window fullscreen (macOS NSWindow toggleFullScreen:,
+// Win32 borderless-fullscreen style swap, X11 EWMH _NET_WM_STATE_FULLSCREEN —
+// see Window::setFullscreen). On the main context they behave exactly as before.
 
-// Toggle fullscreen
+// Enter / leave fullscreen.
 inline void setFullscreen(bool full) {
-    if (internal::warnIfSecondaryWindowControl("setFullscreen",
-        "sokol_app fullscreen targets the main window; per-window fullscreen is not implemented")) return;
+    if (internal::routeSetFullscreenToWindow(full)) return;
     if (full != sapp_is_fullscreen()) {
         sapp_toggle_fullscreen();
     }
 }
 
-// Get fullscreen state. From a secondary context per-window fullscreen is not
-// tracked, so this warns once and returns false.
+// Get fullscreen state (of the current window's context).
 inline bool isFullscreen() {
-    if (internal::warnIfSecondaryWindowControl("isFullscreen",
-        "per-window fullscreen is not tracked")) return false;
+    bool out = false;
+    if (internal::routeIsFullscreenFromWindow(out)) return out;
     return sapp_is_fullscreen();
 }
 
-// Toggle fullscreen
+// Toggle fullscreen.
 inline void toggleFullscreen() {
-    if (internal::warnIfSecondaryWindowControl("toggleFullscreen",
-        "sokol_app fullscreen targets the main window; per-window fullscreen is not implemented")) return;
+    if (internal::routeToggleFullscreenToWindow()) return;
     sapp_toggle_fullscreen();
 }
 

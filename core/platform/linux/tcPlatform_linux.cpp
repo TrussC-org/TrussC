@@ -14,6 +14,7 @@
 
 // OpenGL for screen capture
 #include <GL/gl.h>
+#include <GL/glext.h>   // glBindFramebuffer / GL_READ_FRAMEBUFFER (per-window capture)
 
 namespace trussc {
 
@@ -132,9 +133,20 @@ fs::path getExecutableDir() {
 // ---------------------------------------------------------------------------
 
 bool captureWindow(Pixels& outPixels) {
-    // Get window dimensions from sokol
-    int width = sapp_width();
-    int height = sapp_height();
+    // Read back the CURRENT window's framebuffer. A secondary window's context
+    // records its own swapchain (framebuffer id + size) in lastSwapchain, and the
+    // capture runs inside that window's tick while its GL drawable is current, so
+    // reading its framebuffer at its own size is correct. The main window keeps
+    // using sapp_width()/height() and the default framebuffer — byte-identical.
+    auto& winCtx = internal::currentWindowContext();
+    int width, height;
+    if (!winCtx.isMain && winCtx.fbWidth > 0 && winCtx.fbHeight > 0) {
+        width  = winCtx.fbWidth;
+        height = winCtx.fbHeight;
+    } else {
+        width  = sapp_width();
+        height = sapp_height();
+    }
 
     if (width <= 0 || height <= 0) {
         logError("Screenshot") << "Invalid window dimensions";
@@ -143,6 +155,14 @@ bool captureWindow(Pixels& outPixels) {
 
     // Allocate pixel buffer
     outPixels.allocate(width, height, 4);
+
+    // Bind the window's swapchain framebuffer as the read source so the readback
+    // targets THIS window's surface, not whatever was last bound (main window's
+    // framebuffer id is 0 / lastSwapchain unset for capture-only frames, so this
+    // is a no-op there).
+    if (!winCtx.isMain) {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, winCtx.lastSwapchain.gl.framebuffer);
+    }
 
     // Read pixels from OpenGL framebuffer
     glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, outPixels.getData());

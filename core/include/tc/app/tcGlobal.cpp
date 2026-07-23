@@ -334,6 +334,11 @@ void beginSwapchainPassInternal(bool preserveContents) {
     // Record the drawable we render into so end-of-frame capture reads back
     // THIS one (sapp_get_swapchain() advances the Metal drawable per call).
     ctx.lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
+    // Record the whole swapchain too: the Windows / Linux capture backends read
+    // this window's render_view / gl.framebuffer + size from here (mac uses the
+    // drawable above). Main window: this is sglue_swapchain(), i.e. identical to
+    // sapp_get_swapchain(), so the main capture path is unchanged.
+    ctx.lastSwapchain = pass.swapchain;
     sg_begin_pass(&pass);
     ctx.inSwapchainPass = true;
     ctx.swapchainPassStartedThisFrame = true;
