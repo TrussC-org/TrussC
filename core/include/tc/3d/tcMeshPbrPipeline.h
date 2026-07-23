@@ -33,6 +33,7 @@
 
 #include "tc/gpu/shaders/meshPbr.glsl.h"
 #include "tc/gpu/shaders/shadowDepth.glsl.h"
+#include "tc/graphics/tcClipSpace.h"
 
 namespace trussc {
 namespace internal {
@@ -645,7 +646,14 @@ public:
         // Shadow VS uniforms: model + lightViewProj + depth-storage params.
         tc_shadow_shadow_vs_params_t svp = {};
         Mat4 modelT = getDefaultContext().getMatrix().transposed();
-        Mat4 lightVPT = shadowSlotViewProj_[currentShadowSlot_].transposed();
+        // shadowSlotViewProj_ stays in the GL clip convention because the
+        // sampling shader's ndc.z frustum check assumes [-1, 1] on every
+        // backend (the depth COMPARE never touches ndc.z). Only the matrix
+        // actually rasterizing the shadow pass must match the backend's clip
+        // range — without this remap, [0,1] backends clip away the near half
+        // of a directional light's ortho volume and those casters vanish.
+        Mat4 lightVPT = internal::toBackendClip(
+            shadowSlotViewProj_[currentShadowSlot_]).transposed();
         std::memcpy(svp.model, modelT.m, sizeof(svp.model));
         std::memcpy(svp.lightViewProj, lightVPT.m, sizeof(svp.lightViewProj));
         // depthParams: xyz = light direction, w = mode (0=persp, 1=ortho)
