@@ -82,6 +82,12 @@ void windowTick(sapp_window swin, void* user) {
     auto* prev = internal::currentWindowCtx;
     internal::currentWindowCtx = &ctx;
 
+    // Per-window frame count (Fix 3): the main window advances
+    // internal::updateFrameCount in appUpdateFunc; a secondary window advances
+    // its own counter here so getFrameCount()/getUpdateCount() report this
+    // window's tick count while its context is active.
+    ctx.updateCount++;
+
     // Own sokol_gl context, created lazily on the first tick (sgl is set up
     // by then). Same lifecycle caveats as Fbo contexts on sgl resize.
     if (ctx.swapchainTarget.context.id == SG_INVALID_ID) {

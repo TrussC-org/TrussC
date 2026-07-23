@@ -489,7 +489,9 @@ private:
     }
 
     // Frame-boundary sync. Once the frame that recorded the versions has
-    // flushed, all pool entries are reusable again.
+    // flushed, all pool entries are reusable again. Keyed on the per-window
+    // getFrameCount() (Fix 3): each window records + flushes (sg_commit) its Fbo
+    // draws within its own tick, so a per-window frame boundary is correct.
     void syncVersionFrame_() {
         uint64_t fc = getFrameCount();
         if (fc == poolFrame_) return;

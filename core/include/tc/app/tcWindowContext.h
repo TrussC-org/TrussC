@@ -4,15 +4,19 @@
 // tcWindowContext.h - per-window state container (internal)
 // =============================================================================
 //
-// Phase 0 of multi-window support: every piece of state that is conceptually
-// "per window" — input, hover/scene, camera/projection, render-pass — lives in
-// one WindowContext instead of scattered process globals. The app is still
-// single-window: currentWindowContext() == mainWindowContext() always. Phase 1
-// creates additional contexts (one per native window) and switches
-// internal::currentWindowCtx while dispatching each window's events and draw.
+// Multi-window support: every piece of state that is conceptually "per window"
+// — input, hover/scene, camera/projection, render-pass, per-window frame count,
+// lighting/material/environment, and the per-frame shadow-slot assignment —
+// lives in one WindowContext instead of scattered process globals.
+// currentWindowContext() == mainWindowContext() while only the main window is
+// running; each secondary native window owns its own context and the native
+// layer switches internal::currentWindowCtx while dispatching that window's
+// events and draw (see tcWindow.h / platform/*/tcWindow*).
 //
 // This file is included from TrussC.h AFTER tcRenderTarget.h (RenderTarget by
-// value) and tcCameraContext.h / tcCoreEvents.h; it is not self-contained.
+// value) and tcCameraContext.h / tcCoreEvents.h; it is not self-contained. It
+// is included BEFORE the 3D headers (tcLight/tcMaterial/tcEnvironment), so the
+// lighting members below are held by forward-declared pointer / pointer-vector.
 //
 // Hot-reload note: mainWindowContext() is NON-inline (defined in tcGlobal.cpp)
 // so Host and Guest share one instance — same pattern as events() and
@@ -23,10 +27,59 @@ namespace trussc {
 
 class Node;
 class CoreEvents;
+// 3D types whose state lives per-window (defined later, in the tc/3d headers).
+// Held here by pointer / pointer-vector so tcWindowContext.h stays includable
+// before them.
+class Light;
+class Material;
+class Environment;
 
 namespace internal {
 
 class RenderContext;   // the real class lives in internal:: (tcRenderContext.h)
+
+// ---------------------------------------------------------------------------
+// Lighting limits (were in tcLightingState.h; hoisted here because WindowContext
+// now owns the lighting state and the shadow-slot arrays need maxShadowLights at
+// definition time). tcLightingState.h documents the lighting state and points
+// back here. maxShadowLights must match MAX_SHADOW_LIGHTS in
+// core/shaders/meshPbr.glsl.
+// ---------------------------------------------------------------------------
+inline constexpr int maxLights = 8;
+inline constexpr int maxShadowLights = 4;
+
+// ---------------------------------------------------------------------------
+// Per-window shadow-slot state (was in the PbrPipeline singleton). The GPU
+// shadow-map array/views/sampler/pipeline STAY shared in the singleton; only
+// the per-frame slot ASSIGNMENT moves here. Window ticks run strictly
+// serialized on the main thread and each window's shadow passes + PBR flush
+// complete within its own tick, so the shared array layers can be reused
+// serially across windows with zero extra GPU memory.
+// ---------------------------------------------------------------------------
+struct ShadowSlotState {
+    // Slot assignment: `frame` (the per-window updateCount at the last reset)
+    // resets the counter on the first beginShadowPass() of each window tick;
+    // each pass claims the next layer in call order. Slot data persists across
+    // frames so draws submitted before the first shadow pass keep the previous
+    // frame's shadow state.
+    uint64_t frame = static_cast<uint64_t>(-1);
+    int count = 0;
+    int current = -1;
+    bool inPass = false;
+    bool wasInSwapchainPass = false;   // swapchain pass active before beginShadowPass()
+    Mat4  viewProj[maxShadowLights]{};
+    int   lightIndex[maxShadowLights]{};
+    float bias[maxShadowLights]{};
+    float softness[maxShadowLights]{};
+    int   samples[maxShadowLights]{};
+    // Directional-ortho depth storage: per-slot mode (0=persp, 1=ortho), light
+    // direction, and ortho depth reference (refDot = dot(eye, lightDir)).
+    float mode[maxShadowLights]{};
+    float lightDirX[maxShadowLights]{};
+    float lightDirY[maxShadowLights]{};
+    float lightDirZ[maxShadowLights]{};
+    float refDot[maxShadowLights]{};
+};
 
 // ---------------------------------------------------------------------------
 // Scissor clipping stack (moved from TrussC.h)
@@ -112,6 +165,28 @@ struct WindowContext {
     float dpiScale = 1.0f;
     sg_swapchain (*acquireSwapchain)(void* user) = nullptr;
     void* acquireSwapchainUser = nullptr;
+
+    // --- per-window frame count ---
+    // getFrameCount()/getUpdateCount() resolve through the current context.
+    // The MAIN window keeps using internal::updateFrameCount (bit-identical to
+    // the old global, and the value the hot-reload host mirrors); secondary
+    // windows advance THIS counter once per tick. See tcGlobal.cpp.
+    uint64_t updateCount = 0;
+
+    // --- lighting / material / environment (per window) ---
+    // Moved out of the tcLightingState.h process globals so each window has its
+    // own active light set, current material, camera position (PBR view vector),
+    // exposure and IBL environment. Registration in activeLights is by address:
+    // a Light registered with addLight() must outlive its registration (prefer
+    // stable storage — members, not vector<Light> elements). See tcLight.h.
+    std::vector<Light*> activeLights;
+    Material* currentMaterial = nullptr;
+    Vec3 cameraPosition = {0, 0, 0};
+    float pbrExposure = 1.0f;              // global exposure scalar (pre-ACES tonemap)
+    Environment* currentEnvironment = nullptr;
+
+    // --- per-window shadow-slot assignment (GPU resources stay shared) ---
+    ShadowSlotState shadow;
 
     // --- frame timing (per window) ---
     // getDeltaTime()/getFrameRate() resolve through the current context, so a

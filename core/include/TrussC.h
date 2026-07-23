@@ -649,10 +649,11 @@ inline void enable3D() {
 [[deprecated("Use setupScreenPerspective(fovDeg) or setupScreenFov(fovDeg) instead. Note: FOV is now in degrees, not radians.")]]
 inline void enable3DPerspective(float fovY = 0.785f, float nearZ = 0.1f, float farZ = 1000.0f) {
     internal::loadPipeline(internal::active3D());   // format-correct 3D for the active target
-    // Set perspective projection (backend-native clip-z, #134)
-    float dpiScale = sapp_dpi_scale();
-    float w = (float)sapp_width() / dpiScale;
-    float h = (float)sapp_height() / dpiScale;
+    // Set perspective projection (backend-native clip-z, #134). Per-window
+    // framebuffer size / dpi so this is correct inside a secondary window's draw.
+    float dpiScale = getDpiScale();
+    float w = (float)getFramebufferWidth() / dpiScale;
+    float h = (float)getFramebufferHeight() / dpiScale;
     float aspect = w / h;
     internal::sglLoadProjection(internal::toBackendClip(Mat4::perspective(fovY, aspect, nearZ, farZ)));
     sgl_matrix_mode_modelview();
@@ -827,8 +828,9 @@ inline Vec3 worldToScreen(const Vec3& worldPos) {
     // Get current viewport dimensions
     float viewW = internal::currentWindowContext().currentViewW;
     float viewH = internal::currentWindowContext().currentViewH;
-    if (viewW == 0) viewW = (float)sapp_width() / sapp_dpi_scale();
-    if (viewH == 0) viewH = (float)sapp_height() / sapp_dpi_scale();
+    // Per-window fallback (secondary windows have their own framebuffer/dpi).
+    if (viewW == 0) viewW = (float)getFramebufferWidth() / getDpiScale();
+    if (viewH == 0) viewH = (float)getFramebufferHeight() / getDpiScale();
 
     // Transform world -> clip space
     Mat4 mvp = internal::currentWindowContext().currentProjectionMatrix * internal::currentWindowContext().currentViewMatrix;
@@ -856,8 +858,9 @@ inline Vec3 screenToWorld(const Vec2& screenPos, float worldZ = 0.0f) {
     // Get current viewport dimensions
     float viewW = internal::currentWindowContext().currentViewW;
     float viewH = internal::currentWindowContext().currentViewH;
-    if (viewW == 0) viewW = (float)sapp_width() / sapp_dpi_scale();
-    if (viewH == 0) viewH = (float)sapp_height() / sapp_dpi_scale();
+    // Per-window fallback (secondary windows have their own framebuffer/dpi).
+    if (viewW == 0) viewW = (float)getFramebufferWidth() / getDpiScale();
+    if (viewH == 0) viewH = (float)getFramebufferHeight() / getDpiScale();
 
     // Screen to NDC (flip Y: screen Y is down, NDC Y is up)
     float ndcX = (screenPos.x / viewW) * 2.0f - 1.0f;
@@ -1157,6 +1160,11 @@ inline void ensureFontAtlas(int rows) {
     // stale fontAtlasVersion makes us try again on the next call.
     // (When size changes we destroy + create a brand-new image below, so the
     // guard only applies to the same-dimensions in-place path.)
+    // Keyed on the per-window getFrameCount() (Fix 3): the guard only needs to
+    // block a second update WITHIN one tick, and each window's tick does its
+    // own sg_commit, so a per-window counter is sufficient (a rare coincidental
+    // counter match across windows just defers one tick — never a double
+    // update). The main window is bit-identical to before.
     if (sizeOk && internal::fontAtlasUploadFrame == getFrameCount()) return;
 
     // Regenerate pixel buffer. Use the LARGER of `rows` and the currently
@@ -1599,9 +1607,10 @@ inline Vec2 getWindowSize() {
     return Vec2(static_cast<float>(getWindowWidth()), static_cast<float>(getWindowHeight()));
 }
 
-// Aspect ratio
+// Aspect ratio (of the CURRENT window's framebuffer, like getWindowWidth/Height)
 inline float getAspectRatio() {
-    return static_cast<float>(sapp_width()) / static_cast<float>(sapp_height());
+    return static_cast<float>(getFramebufferWidth()) /
+           static_cast<float>(getFramebufferHeight());
 }
 
 // ---------------------------------------------------------------------------

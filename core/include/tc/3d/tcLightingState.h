@@ -1,11 +1,19 @@
 #pragma once
 
 // =============================================================================
-// tcLightingState.h - Lighting global state (internal use)
+// tcLightingState.h - Lighting state (breadcrumb; per-window)
 // =============================================================================
 //
-// Must be included before tc3DGraphics.h
-// to allow tcMesh.h to access lighting state
+// The lighting state (activeLights, currentMaterial, cameraPosition,
+// pbrExposure, currentEnvironment) used to be process globals here. It is now
+// PER-WINDOW: it lives in internal::WindowContext (tc/app/tcWindowContext.h)
+// and is reached through internal::currentWindowContext(). Single-window apps
+// are unchanged (the main window is the only context).
+//
+// The limits internal::maxLights / internal::maxShadowLights also moved to
+// tcWindowContext.h (the shadow-slot arrays need maxShadowLights at definition
+// time). This file is kept as the documented home of the lighting state and to
+// preserve the include-order contract (included before tc3DGraphics.h).
 //
 // =============================================================================
 
@@ -16,29 +24,5 @@ namespace trussc {
 // Forward declarations
 class Light;
 class Material;
-
-// ---------------------------------------------------------------------------
-// internal namespace - Lighting global state
-// ---------------------------------------------------------------------------
-namespace internal {
-    // List of active lights (up to 8).
-    inline std::vector<Light*> activeLights;
-    inline constexpr int maxLights = 8;
-
-    // Max lights that can cast a shadow in the same frame (shadow map array
-    // layers + mat4 uniform slots in meshPbr.glsl). Lights beyond this get a
-    // one-time warning and no shadow. Must match MAX_SHADOW_LIGHTS in
-    // core/shaders/meshPbr.glsl.
-    inline constexpr int maxShadowLights = 4;
-
-    // Current material (PBR metallic-roughness)
-    inline Material* currentMaterial = nullptr;
-
-    // Camera position (for specular calculation / PBR view vector)
-    inline Vec3 cameraPosition = {0, 0, 0};
-
-    // Global exposure scalar applied before ACES tonemap
-    inline float pbrExposure = 1.0f;
-}
 
 } // namespace trussc

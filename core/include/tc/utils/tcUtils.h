@@ -722,6 +722,10 @@ struct BeepManager {
     }
 
     void playPreset(Beep type) {
+        // Debounce keyed on the MAIN-window frame counter (Fix 3): beeps are a
+        // process-global convenience sound and this header is included before
+        // getFrameCount() is declared, so it deliberately reads the global
+        // rather than the per-window counter.
         uint64_t currentFrame = internal::updateFrameCount;
         if (currentFrame == lastBeepFrame && currentFrame > 0) return;
         lastBeepFrame = currentFrame;
