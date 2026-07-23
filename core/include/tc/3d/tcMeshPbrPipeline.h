@@ -354,9 +354,20 @@ public:
         // submission time (issue #192). The array texture VIEW is shared, but
         // each light's layer is rendered exactly once per frame before the
         // material draws that use it, so the layer content matches the matrix.
+        // Slot data refreshes every frame that runs a shadow pass. Draws
+        // submitted before the first shadow pass of a frame may still use the
+        // previous frame's slots (intentional, one frame old at most). If the
+        // slots are older than that, the app stopped calling beginShadowPass()
+        // entirely -- expose zero slots instead of ghost shadows from a stale
+        // map (the per-frame slot reset only runs inside beginShadowPass()).
+        int liveSlotCount = (shadowSlotFrame_ + 1 >= getFrameCount()) ? shadowSlotCount_ : 0;
         fsp.shadowMapParams[0] = static_cast<float>(shadowTexResolution_);
-        fsp.shadowMapParams[1] = static_cast<float>(shadowSlotCount_);
-        for (int s = 0; s < shadowSlotCount_; s++) {
+        fsp.shadowMapParams[1] = static_cast<float>(liveSlotCount);
+        // z flags a top-left-origin backend (Metal / D3D11 / WebGPU): the
+        // shader must v-flip its shadow UV to sample the offscreen map
+        // correctly (GL convention otherwise).
+        fsp.shadowMapParams[2] = sg_query_features().origin_top_left ? 1.0f : 0.0f;
+        for (int s = 0; s < liveSlotCount; s++) {
             Mat4 svpT = shadowSlotViewProj_[s].transposed();
             std::memcpy(fsp.shadowViewProj[s], svpT.m, sizeof(fsp.shadowViewProj[s]));
             fsp.shadowSlotParams[s][0] = static_cast<float>(shadowSlotLightIndex_[s]);
