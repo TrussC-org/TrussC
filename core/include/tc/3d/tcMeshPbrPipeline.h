@@ -375,11 +375,17 @@ public:
             fsp.shadowSlotParams[s][2] = 1.0f;    // shadow strength
             fsp.shadowSlotParams[s][3] = shadowSlotSoftness_[s];  // emitter size (world units, 0 = hard/PCSS off)
             // x = PCSS variable-PCF tap count (clamped [1,36] at the Light API).
-            // y/z/w reserved (zero) for a future directional-ortho shadow phase.
+            // y = depth-storage mode (0=perspective/spot, 1=ortho/directional).
+            // z/w reserved (zero).
             fsp.shadowSlotParams2[s][0] = static_cast<float>(shadowSlotSamples_[s]);
-            fsp.shadowSlotParams2[s][1] = 0.0f;
+            fsp.shadowSlotParams2[s][1] = shadowSlotMode_[s];
             fsp.shadowSlotParams2[s][2] = 0.0f;
             fsp.shadowSlotParams2[s][3] = 0.0f;
+            // xyz = light direction (normalized), w = refDot (ortho depth ref).
+            fsp.shadowSlotLightDir[s][0] = shadowSlotLightDirX_[s];
+            fsp.shadowSlotLightDir[s][1] = shadowSlotLightDirY_[s];
+            fsp.shadowSlotLightDir[s][2] = shadowSlotLightDirZ_[s];
+            fsp.shadowSlotLightDir[s][3] = shadowSlotRefDot_[s];
         }
 
         // --- Submit ---------------------------------------------------------
@@ -527,6 +533,19 @@ public:
         ensureShadowInit();
         const Light& light = *internal::activeLights[lightIndex];
 
+        // Point lights are not supported yet: they need a cube/omni shadow map,
+        // which this single-2D-layer pipeline can't express. Warn once and no-op
+        // cleanly — do NOT claim a slot or begin a pass. inShadowPass_ stays false
+        // so shadowDraw()/endShadowPass() no-op, and no stale slot is exposed.
+        if (light.getType() == LightType::Point) {
+            if (!shadowPointWarned_) {
+                logWarning("TrussC") << "beginShadowPass: point light shadows not "
+                    << "supported yet; this light casts no shadow";
+                shadowPointWarned_ = true;
+            }
+            return;
+        }
+
         // Per-frame slot assignment: the slot counter resets on the first
         // beginShadowPass() of each frame (keyed on getFrameCount()), and each
         // pass claims the next array layer in call order. Slot data persists
@@ -561,14 +580,37 @@ public:
             internal::currentWindowContext().inSwapchainPass = false;
         }
 
-        // Claim the next shadow slot for this light (VP reuses spot projector VP)
+        // Claim the next shadow slot for this light. computeShadowViewProj()
+        // returns the perspective projector VP for Spot lights and an ortho box
+        // VP for Directional lights.
         int slot = shadowSlotCount_++;
         currentShadowSlot_ = slot;
-        shadowSlotViewProj_[slot]   = light.computeProjectorViewProj();
+        shadowSlotViewProj_[slot]   = light.computeShadowViewProj();
         shadowSlotLightIndex_[slot] = lightIndex;
         shadowSlotBias_[slot]       = light.getShadowBias();
         shadowSlotSoftness_[slot]   = light.getShadowSoftness();
         shadowSlotSamples_[slot]    = light.getShadowSamples();
+
+        // Depth-storage mode + ortho depth reference. For Directional lights the
+        // shadow depth is stored as dot(worldPos, lightDir) - refDot (linear world
+        // units); refDot = dot(eye, lightDir) with eye = center - dir*radius, i.e.
+        // dot(center, dir) - radius. Spot keeps clip.w (mode 0), refDot unused.
+        if (light.getType() == LightType::Directional) {
+            Vec3 dir = light.getDirection().normalized();
+            const Vec3& center = light.getShadowAreaCenter();
+            float radius = light.getShadowAreaRadius();
+            shadowSlotMode_[slot]     = 1.0f;
+            shadowSlotLightDirX_[slot] = dir.x;
+            shadowSlotLightDirY_[slot] = dir.y;
+            shadowSlotLightDirZ_[slot] = dir.z;
+            shadowSlotRefDot_[slot]   = center.dot(dir) - radius;
+        } else {
+            shadowSlotMode_[slot]     = 0.0f;
+            shadowSlotLightDirX_[slot] = 0.0f;
+            shadowSlotLightDirY_[slot] = 0.0f;
+            shadowSlotLightDirZ_[slot] = 0.0f;
+            shadowSlotRefDot_[slot]   = 0.0f;
+        }
 
         // Begin shadow depth pass into this slot's array layer
         sg_pass pass = {};
@@ -600,12 +642,23 @@ public:
         }
         sg_apply_bindings(&bind);
 
-        // Shadow VS uniforms: model + lightViewProj
+        // Shadow VS uniforms: model + lightViewProj + depth-storage params.
         tc_shadow_shadow_vs_params_t svp = {};
         Mat4 modelT = getDefaultContext().getMatrix().transposed();
         Mat4 lightVPT = shadowSlotViewProj_[currentShadowSlot_].transposed();
         std::memcpy(svp.model, modelT.m, sizeof(svp.model));
         std::memcpy(svp.lightViewProj, lightVPT.m, sizeof(svp.lightViewProj));
+        // depthParams: xyz = light direction, w = mode (0=persp, 1=ortho)
+        int cs = currentShadowSlot_;
+        svp.depthParams[0] = shadowSlotLightDirX_[cs];
+        svp.depthParams[1] = shadowSlotLightDirY_[cs];
+        svp.depthParams[2] = shadowSlotLightDirZ_[cs];
+        svp.depthParams[3] = shadowSlotMode_[cs];
+        // depthParams2.x = refDot (ortho depth reference)
+        svp.depthParams2[0] = shadowSlotRefDot_[cs];
+        svp.depthParams2[1] = 0.0f;
+        svp.depthParams2[2] = 0.0f;
+        svp.depthParams2[3] = 0.0f;
         sg_range r = { &svp, sizeof(svp) };
         sg_apply_uniforms(UB_tc_shadow_shadow_vs_params, &r);
 
@@ -763,7 +816,15 @@ private:
     float shadowSlotBias_[internal::maxShadowLights]{};
     float shadowSlotSoftness_[internal::maxShadowLights]{};
     int shadowSlotSamples_[internal::maxShadowLights]{};
+    // Directional-ortho depth storage: per-slot mode (0=persp, 1=ortho), light
+    // direction, and ortho depth reference (refDot = dot(eye, lightDir)).
+    float shadowSlotMode_[internal::maxShadowLights]{};
+    float shadowSlotLightDirX_[internal::maxShadowLights]{};
+    float shadowSlotLightDirY_[internal::maxShadowLights]{};
+    float shadowSlotLightDirZ_[internal::maxShadowLights]{};
+    float shadowSlotRefDot_[internal::maxShadowLights]{};
     bool shadowOverflowWarned_{false};
+    bool shadowPointWarned_{false};
 
     // --- Fallback resources ---
     sg_image fallbackCube_{};

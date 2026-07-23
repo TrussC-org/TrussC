@@ -67,7 +67,8 @@ layout(binding=1) uniform fs_params {
     vec4 texFlags;                        // x=hasBaseColorTex, y=hasMetRoughTex, z=hasEmissiveTex, w=hasOcclusionTex
     mat4 shadowViewProj[MAX_SHADOW_LIGHTS];   // per-slot light VP for shadow depth comparison
     vec4 shadowSlotParams[MAX_SHADOW_LIGHTS]; // x=lightIndex (-1=unused), y=bias, z=strength, w=softness (emitter size, 0=hard)
-    vec4 shadowSlotParams2[MAX_SHADOW_LIGHTS]; // x=pcfTapCount (PCSS variable-PCF taps), y/z/w reserved (0) for a future directional-ortho phase
+    vec4 shadowSlotParams2[MAX_SHADOW_LIGHTS]; // x=pcfTapCount (PCSS variable-PCF taps), y=mode (0=perspective/spot, 1=ortho/directional), z/w reserved
+    vec4 shadowSlotLightDir[MAX_SHADOW_LIGHTS]; // xyz=light direction (normalized), w=refDot (=dot(eye,lightDir), ortho depth reference)
     vec4 shadowMapParams;                     // x=mapSize, y=numShadowSlots, z=originTopLeft, w=unused
 };
 
@@ -240,20 +241,35 @@ const vec2 poissonPCF[36] = vec2[](
 // (m[0][0], m[1][0], m[2][0]), which is rotation-invariant and equals near/halfW.
 // The 1/linearDepth term makes a fixed world penumbra shrink in UV with
 // distance, i.e. the penumbra stays constant in world space.
-float shadowUvPerWorld(int slot, float linearDepth) {
+// mode: 0 = perspective (spot), 1 = ortho (directional). For ortho the mapping
+// is depth-independent: 1 world unit is a CONSTANT fraction of the box, so we
+// drop the 1/linearDepth term. projScale = length of the clip.x world-gradient
+// = 2/(right-left) = 1/radius for the ortho box, hence 0.5*projScale = 0.5/radius.
+float shadowUvPerWorld(int slot, float linearDepth, float mode) {
     vec3 gradClipX = vec3(shadowViewProj[slot][0][0],
                           shadowViewProj[slot][1][0],
                           shadowViewProj[slot][2][0]);
     float projScale = length(gradClipX);
+    if (mode > 0.5) {
+        return 0.5 * projScale;  // ortho: constant, no depth division
+    }
     return 0.5 * projScale / max(linearDepth, 1e-4);
 }
 
 float calcShadow(int slot, vec3 worldPos, vec3 N, vec3 L) {
+    // Shadow projection mode: 0 = perspective (spot), 1 = ortho (directional).
+    float mode = shadowSlotParams2[slot].y;
+    vec3 lightDirW = shadowSlotLightDir[slot].xyz;  // normalized travel direction
+    float refDot = shadowSlotLightDir[slot].w;      // dot(eye, lightDir)
+
     // Cheap initial projection of the ORIGINAL surface point, used only to learn
-    // the shadow-map texel's world size at this depth (clip0.w = distance from
-    // the light, matching what shadowUvPerWorld expects).
+    // the shadow-map texel's world size at this depth. For perspective the depth
+    // is clip0.w (distance from the light); for ortho clip0.w == 1 is meaningless,
+    // so we use the projection onto the light direction instead (linear, world).
     vec4 clip0 = shadowViewProj[slot] * vec4(worldPos, 1.0);
-    float linearDepth0 = clip0.w;
+    float linearDepth0 = (mode > 0.5)
+        ? (dot(worldPos, lightDirW) - refDot)
+        : clip0.w;
 
     // Normal-offset bias. At an object/floor corner a single shadow-map texel
     // straddles both the object's side wall and the floor; it stores the wall's
@@ -269,7 +285,7 @@ float calcShadow(int slot, vec3 worldPos, vec3 N, vec3 L) {
     // the full push -- this keeps shadows attached at the base (no peter-pan).
     float ndlRaw = clamp(dot(N, L), -1.0, 1.0);
     float sinTheta = sqrt(max(1.0 - ndlRaw * ndlRaw, 0.0));
-    float texelWorld = 1.0 / max(shadowUvPerWorld(slot, linearDepth0) * shadowMapParams.x, 1e-6);
+    float texelWorld = 1.0 / max(shadowUvPerWorld(slot, linearDepth0, mode) * shadowMapParams.x, 1e-6);
     const float normalOffsetScale = 2.0;
     vec3 offsetWorld = worldPos + N * (texelWorld * normalOffsetScale * sinTheta);
 
@@ -289,16 +305,29 @@ float calcShadow(int slot, vec3 worldPos, vec3 N, vec3 L) {
         shadowUV.y = 1.0 - shadowUV.y;
     }
 
-    // Outside shadow frustum = fully lit
+    // Outside shadow frustum = fully lit. The x/y bounds catch receivers outside
+    // the box sideways. For perspective, clip.w < 0 means behind the light. For
+    // ortho (clip.w == 1) that never triggers, so instead reject receivers in
+    // front of the near plane or beyond the far plane via the NDC z (ortho maps
+    // near -> -1, far -> +1).
     if (shadowUV.x < 0.0 || shadowUV.x > 1.0 ||
-        shadowUV.y < 0.0 || shadowUV.y > 1.0 ||
-        clip.w < 0.0) {  // behind the light
+        shadowUV.y < 0.0 || shadowUV.y > 1.0) {
+        return 1.0;
+    }
+    if (mode > 0.5) {
+        if (ndc.z < -1.0 || ndc.z > 1.0) {
+            return 1.0;
+        }
+    } else if (clip.w < 0.0) {  // behind the light (perspective)
         return 1.0;
     }
 
-    // Linear depth comparison: clip.w = -z_eye (distance from light).
-    // Shadow pass stores clip.w, so we compute the same here.
-    float currentDepth = clip.w;
+    // Linear world-space depth of the receiver, matching what the shadow pass
+    // stored. Perspective: clip.w = distance from light. Ortho: projection of the
+    // (normal-offset) world position onto the light direction, minus the eye ref.
+    float currentDepth = (mode > 0.5)
+        ? (dot(offsetWorld, lightDirW) - refDot)
+        : clip.w;
 
     // Slope-scaled bias: the stored depth is linear/world-scale, so constBias
     // is a world-space offset. On surfaces grazing the light (near the
@@ -341,7 +370,7 @@ float calcShadow(int slot, vec3 worldPos, vec3 N, vec3 L) {
     // (receiverDepth ~= blockerDepth) the penumbra collapses to ~0 and the
     // filter converges to the hard look; far from the caster it widens.
     // -----------------------------------------------------------------------
-    float uvPerWorld = shadowUvPerWorld(slot, currentDepth);
+    float uvPerWorld = shadowUvPerWorld(slot, currentDepth, mode);
 
     // Per-fragment random rotation of the Poisson disk. A single fixed disk
     // shared by every fragment makes all penumbrae sample the SAME 16 directions,
@@ -383,7 +412,16 @@ float calcShadow(int slot, vec3 worldPos, vec3 N, vec3 L) {
 
     // Penumbra width in world units (exact for linear depth), then to UV.
     // Clamp the UV radius to 16 texels to bound cost and ringing artifacts.
-    float penumbraWorld = softness * max(currentDepth - avgBlocker, 0.0) / max(avgBlocker, 1e-4);
+    // Perspective (finite emitter): similar-triangles PCSS,
+    //   penumbra = softness * (dr - db) / db.
+    // Ortho / directional (emitter at infinity): db -> infinity kills that ratio,
+    //   so softness instead sets penumbra growth per unit caster-receiver gap.
+    //   The 0.01 factor makes softness read as "world units of blur per 100 units
+    //   of separation" (sun ≈ 0.9). Contact hardening still holds: (dr-db) -> 0.
+    float casterGap = max(currentDepth - avgBlocker, 0.0);
+    float penumbraWorld = (mode > 0.5)
+        ? (softness * casterGap * 0.01)
+        : (softness * casterGap / max(avgBlocker, 1e-4));
     float radiusUV = clamp(penumbraWorld * uvPerWorld, 0.0, 16.0 * texelSize);
 
     // Variable-radius PCF over the progressive Poisson disk. The tap count is

@@ -153,6 +153,32 @@ public:
         return proj * view;
     }
 
+    // === Shadow view-projection ===
+
+    // Build the light's view-projection matrix used to render + sample the
+    // shadow map. Branches on light type:
+    //   Spot        -> the perspective projector VP (computeProjectorViewProj).
+    //   Directional -> an orthographic box: eye placed one radius behind the
+    //                  shadow-area center along the light direction, looking
+    //                  down the direction, ortho extent [-radius,+radius]^2,
+    //                  near 0 / far 2*radius.
+    //   Point       -> not supported (beginShadowPass warns + no-ops); returns
+    //                  the ortho fallback so callers never see garbage.
+    Mat4 computeShadowViewProj() const {
+        if (type_ == LightType::Spot) {
+            return computeProjectorViewProj();
+        }
+        // Directional (and Point fallback): orthographic box along direction_.
+        Vec3 dir = direction_.normalized();
+        float r = shadowAreaRadius_;
+        Vec3 eye = shadowAreaCenter_ - dir * r;
+        Vec3 up(0.0f, 1.0f, 0.0f);
+        if (std::abs(dir.y) > 0.99f) up = Vec3(0.0f, 0.0f, 1.0f);
+        Mat4 view = Mat4::lookAt(eye, shadowAreaCenter_, up);
+        Mat4 proj = Mat4::ortho(-r, r, -r, r, 0.0f, 2.0f * r);
+        return proj * view;
+    }
+
     // === IES photometric profile ===
 
     // Attach an IES angular intensity profile to this light. The IesProfile
@@ -182,8 +208,26 @@ public:
     // The penumbra also contact-hardens automatically: sharp where the caster
     // touches the receiver, blurrier the farther the two are apart. 0 (default)
     // means a point emitter -> hard-edged shadows and the zero-cost Phase A path.
+    // For DIRECTIONAL lights the emitter is at infinity, so `size` instead means
+    // "the penumbra widens by `size` world units per 100 units of caster-receiver
+    // distance" (e.g. the sun ≈ 0.9); contact hardening still applies.
     Light& setShadowSoftness(float size) { shadowSoftness_ = size; return *this; }
     float getShadowSoftness() const { return shadowSoftness_; }
+
+    // Shadow area (DIRECTIONAL lights only). A directional light has no
+    // meaningful position, so its shadow map is an orthographic box: a cube
+    // centered on `center` with half-extent `radius` across the light and
+    // `radius` along the light direction (near 0, far 2*radius from the eye
+    // placed one radius behind the center). Size it to enclose every caster and
+    // receiver you want shadowed; anything outside the box renders unshadowed.
+    // Ignored for Spot lights (they use the perspective projector frustum).
+    Light& setShadowArea(const Vec3& center, float radius) {
+        shadowAreaCenter_ = center;
+        shadowAreaRadius_ = radius;
+        return *this;
+    }
+    const Vec3& getShadowAreaCenter() const { return shadowAreaCenter_; }
+    float getShadowAreaRadius() const { return shadowAreaRadius_; }
 
     // Shadow samples: the number of variable-PCF taps used by the PCSS filter.
     // Affects soft shadows only (setShadowSoftness > 0); the hard-edged Phase A
@@ -396,6 +440,8 @@ private:
     float shadowBias_ = 1.0f;
     float shadowSoftness_ = 0.0f;   // emitter size in world units (0 = hard)
     int shadowSamples_ = 16;        // PCSS variable-PCF tap count [1..36]
+    Vec3 shadowAreaCenter_{0.0f, 0.0f, 0.0f};  // directional ortho box center
+    float shadowAreaRadius_ = 500.0f;          // directional ortho box half-extent
 };
 
 // ---------------------------------------------------------------------------
