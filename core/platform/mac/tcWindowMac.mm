@@ -114,6 +114,9 @@ void windowTick(sapp_window swin, void* user) {
 
     present();
     win->events().afterFrame.notify();
+    // Drain this window's saveScreenshot() queue while ITS context (and its
+    // lastSwapchainDrawable) is current — must run before we restore prev.
+    internal::drainPendingScreenshots();
 
     sgl_set_context(sgl_default_context());
     internal::currentWindowCtx = prev;

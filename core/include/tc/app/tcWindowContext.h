@@ -202,6 +202,12 @@ struct WindowContext {
 
     // --- misc per-window ---
     int clipboardSize = 65536;   // Clipboard buffer size (for overflow check)
+    // Resolved absolute paths queued by saveScreenshot() on THIS window, drained
+    // right after present() while this context is current (so the capture reads
+    // back this window's lastSwapchainDrawable, not the main window's). The main
+    // window drains from the afterFrame listener in _setup_cb; each secondary
+    // window drains in its own windowTick. See TrussC.h drainPendingScreenshots().
+    std::vector<std::filesystem::path> pendingScreenshotPaths;
 
     // Wired lazily by getDefaultContext() / events() for the main window
     // (preserves their pre-context construction timing); Phase 1 pre-wires

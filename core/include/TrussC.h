@@ -1875,9 +1875,20 @@ inline bool grabScreen(Pixels& outPixels) {
 }
 
 namespace internal {
-    // Resolved absolute paths queued by saveScreenshot(), drained right after
-    // present() (see the afterFrame listener installed in _setup_cb).
-    inline std::vector<std::filesystem::path> pendingScreenshotPaths;
+    // Capture every path queued by saveScreenshot() on the CURRENT window's
+    // queue (WindowContext::pendingScreenshotPaths) and clear it. Called right
+    // after present() while that window's context — and thus its
+    // lastSwapchainDrawable — is current: the main window from the afterFrame
+    // listener installed in _setup_cb, each secondary window from its own
+    // windowTick (platform/*/tcWindow*). Failures log via logError.
+    inline void drainPendingScreenshots() {
+        auto& queue = currentWindowContext().pendingScreenshotPaths;
+        if (queue.empty()) return;
+        for (const auto& p : queue) {
+            captureWindowToFile(p);
+        }
+        queue.clear();
+    }
     // Keeps the afterFrame drain subscription alive for the app's lifetime.
     inline EventListener screenshotAfterFrameListener;
 }
@@ -1909,8 +1920,14 @@ inline bool saveScreenshot(const std::filesystem::path& path) {
         }
     }
 
-    internal::pendingScreenshotPaths.push_back(std::move(resolved));
-    redraw();  // guarantee a present() (and thus afterFrame) even when paused
+    internal::currentWindowContext().pendingScreenshotPaths.push_back(std::move(resolved));
+    // Guarantee a present() (and thus the afterFrame drain) even when paused.
+    // redraw() only pokes the MAIN loop's redrawCount, so it applies to the main
+    // window only. A secondary window free-runs at vsync while visible and drains
+    // this queue on its next tick, so no redraw is needed (nor available) there.
+    if (internal::currentWindowContext().isMain) {
+        redraw();
+    }
     return true;
 }
 
@@ -2166,12 +2183,10 @@ namespace internal {
         // swapchain is committed and we are outside any pass — the only safe
         // readback point (see grabScreen()/saveScreenshot()).
         internal::screenshotAfterFrameListener = events().afterFrame.listen([]() {
-            if (!internal::pendingScreenshotPaths.empty()) {
-                for (const auto& p : internal::pendingScreenshotPaths) {
-                    internal::captureWindowToFile(p);  // failures log via logError
-                }
-                internal::pendingScreenshotPaths.clear();
-            }
+            // Main window: currentWindowContext() resolves to the main context
+            // here, so this drains the main window's queue (secondary windows
+            // drain their own in windowTick).
+            internal::drainPendingScreenshots();
             #ifndef __EMSCRIPTEN__
             mcp::drainDeferredResponses();
             #endif
@@ -2303,7 +2318,7 @@ namespace internal {
         // and the deferred screenshot (or MCP tc_get_screenshot) actually fires —
         // otherwise a request arriving in a paused/event-driven app would never
         // be served and a blocked MCP HTTP worker would hang.
-        if (!pendingScreenshotPaths.empty()
+        if (!mainWindowContext().pendingScreenshotPaths.empty()
             #ifndef __EMSCRIPTEN__
             || mcp::hasDeferredResponses()
             #endif
