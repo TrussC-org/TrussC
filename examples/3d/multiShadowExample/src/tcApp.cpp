@@ -130,20 +130,20 @@ void tcApp::drawScene(bool shadowPass) {
     // Center tall box
     if (!shadowPass) setMaterial(boxMat);
     pushMatrix();
-    translate(0, 95, 0);
+    translate(0, 94.5f, 0);
     shadowPass ? shadowDraw(tallBoxMesh) : tallBoxMesh.draw();
     popMatrix();
 
     // Left cube
     pushMatrix();
-    translate(-170, 45, 60);
+    translate(-170, 44.5f, 60);
     rotateY(0.1f * TAU);
     shadowPass ? shadowDraw(boxMesh) : boxMesh.draw();
     popMatrix();
 
     // Right cube
     pushMatrix();
-    translate(180, 45, -40);
+    translate(180, 44.5f, -40);
     rotateY(-0.05f * TAU);
     shadowPass ? shadowDraw(boxMesh) : boxMesh.draw();
     popMatrix();
@@ -151,7 +151,7 @@ void tcApp::drawScene(bool shadowPass) {
     // Sphere in front
     if (!shadowPass) setMaterial(sphereMat);
     pushMatrix();
-    translate(30, 55, 190);
+    translate(30, 54.5f, 190);
     shadowPass ? shadowDraw(sphereMesh) : sphereMesh.draw();
     popMatrix();
 }

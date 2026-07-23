@@ -66,7 +66,9 @@ layout(binding=1) uniform fs_params {
     vec4 iesParams;                       // x=iesLightIndex (-1=none), y=maxVertAngle (rad), zw=unused
     vec4 texFlags;                        // x=hasBaseColorTex, y=hasMetRoughTex, z=hasEmissiveTex, w=hasOcclusionTex
     mat4 shadowViewProj[MAX_SHADOW_LIGHTS];   // per-slot light VP for shadow depth comparison
-    vec4 shadowSlotParams[MAX_SHADOW_LIGHTS]; // x=lightIndex (-1=unused), y=bias, z=strength, w=unused
+    vec4 shadowSlotParams[MAX_SHADOW_LIGHTS]; // x=lightIndex (-1=unused), y=bias, z=strength, w=softness (emitter size, 0=hard)
+    vec4 shadowSlotParams2[MAX_SHADOW_LIGHTS]; // x=pcfTapCount (PCSS variable-PCF taps), y=mode (0=perspective/spot, 1=ortho/directional), z/w reserved
+    vec4 shadowSlotLightDir[MAX_SHADOW_LIGHTS]; // xyz=light direction (normalized), w=refDot (=dot(eye,lightDir), ortho depth reference)
     vec4 shadowMapParams;                     // x=mapSize, y=numShadowSlots, z=originTopLeft, w=unused
 };
 
@@ -154,11 +156,142 @@ vec3 tonemapACES(vec3 x) {
 }
 
 // ---------------------------------------------------------------------------
-// Shadow map sampling with 3x3 PCF
+// Shadow map sampling with bilinear-PCF (3x3 kernel of software-sampler2DShadow
+// taps) and slope-scaled bias
 // ---------------------------------------------------------------------------
 
-float calcShadow(int slot, vec3 worldPos) {
-    vec4 clip = shadowViewProj[slot] * vec4(worldPos, 1.0);
+// One bilinear PCF tap emulating a hardware sampler2DShadow: fetch the 4 texels
+// surrounding `uv`, binary-compare EACH stored depth against `compareDepth`
+// first, then bilerp the four 0/1 results by the sub-texel fraction. Comparing
+// before filtering is essential — filtering the depths first would invent a
+// phantom averaged occluder along shadow edges.
+float shadowTapBilinear(vec2 uv, float layer, float compareDepth, float mapSize) {
+    // NEAREST sampler: texel centers sit at (i+0.5)/mapSize. Shift by -0.5 so
+    // floor() lands on the lower-left texel and `f` is measured from centers.
+    vec2 texel = uv * mapSize - 0.5;
+    vec2 base = floor(texel);
+    vec2 f = texel - base;
+    float invSize = 1.0 / mapSize;
+
+    vec2 uv00 = (base + vec2(0.5, 0.5)) * invSize;
+    vec2 uv10 = (base + vec2(1.5, 0.5)) * invSize;
+    vec2 uv01 = (base + vec2(0.5, 1.5)) * invSize;
+    vec2 uv11 = (base + vec2(1.5, 1.5)) * invSize;
+
+    float d00 = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv00, layer)).r;
+    float d10 = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv10, layer)).r;
+    float d01 = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv01, layer)).r;
+    float d11 = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv11, layer)).r;
+
+    float s00 = (compareDepth > d00) ? 0.0 : 1.0;
+    float s10 = (compareDepth > d10) ? 0.0 : 1.0;
+    float s01 = (compareDepth > d01) ? 0.0 : 1.0;
+    float s11 = (compareDepth > d11) ? 0.0 : 1.0;
+
+    return mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
+}
+
+// 16-tap Poisson disk (unit radius) reused for the PCSS blocker search and the
+// variable-radius PCF filter. A fixed const array keeps the loops bounded so
+// sokol-shdc can cross-compile to every backend (Metal/HLSL/WGSL/GLSL).
+const vec2 poisson16[16] = vec2[](
+    vec2(-0.94201624, -0.39906216), vec2( 0.94558609, -0.76890725),
+    vec2(-0.09418410, -0.92938870), vec2( 0.34495938,  0.29387760),
+    vec2(-0.91588581,  0.45771432), vec2(-0.81544232, -0.87912464),
+    vec2(-0.38277543,  0.27676845), vec2( 0.97484398,  0.75648379),
+    vec2( 0.44323325, -0.97511554), vec2( 0.53742981, -0.47373420),
+    vec2(-0.26496911, -0.41893023), vec2( 0.79197514,  0.19090188),
+    vec2(-0.24188840,  0.99706507), vec2(-0.81409955,  0.91437590),
+    vec2( 0.19984126,  0.78641367), vec2( 0.14383161, -0.14100790)
+);
+
+// 36-tap Poisson disk (unit radius) in PROGRESSIVE (best-candidate) order: any
+// prefix of the first N points is itself well distributed, so the variable-PCF
+// loop can pick a user-selectable tap count (1..36) and still get an even
+// sampling. Generated offline by best-candidate sampling (fixed seed) — see
+// scratchpad/genpoisson.js. Fixed 36-length array keeps the loop bound
+// compile-time constant for sokol-shdc cross-compilation.
+const vec2 poissonPCF[36] = vec2[](
+    vec2( 0.15811,  0.39927), vec2(-0.41643, -0.90876),
+    vec2( 0.76014, -0.63879), vec2(-0.98691,  0.14799),
+    vec2( 0.96775,  0.18529), vec2(-0.46005,  0.88534),
+    vec2(-0.30417, -0.17954), vec2( 0.13979, -0.62645),
+    vec2(-0.86224, -0.47441), vec2( 0.63782,  0.75486),
+    vec2( 0.44607, -0.13772), vec2( 0.11233,  0.94311),
+    vec2(-0.45647,  0.34034), vec2(-0.80725,  0.58860),
+    vec2( 0.57030,  0.27985), vec2( 0.88917, -0.25455),
+    vec2( 0.05600,  0.01048), vec2( 0.41726, -0.90564),
+    vec2(-0.00273, -0.99484), vec2(-0.16149,  0.61705),
+    vec2(-0.48320, -0.52442), vec2(-0.68467, -0.12540),
+    vec2(-0.00759, -0.31905), vec2( 0.44600, -0.46944),
+    vec2( 0.31576,  0.69695), vec2(-0.19722, -0.66777),
+    vec2(-0.14528,  0.25372), vec2( 0.81261,  0.47152),
+    vec2(-0.97963, -0.18934), vec2(-0.18333,  0.97108),
+    vec2( 0.71840, -0.01082), vec2(-0.69530,  0.19561),
+    vec2( 0.31284,  0.14318), vec2(-0.52531,  0.61236),
+    vec2(-0.67948, -0.73252), vec2(-0.39331,  0.07426)
+);
+
+// Convert a world-space radius (at the receiver) into a shadow-map UV radius.
+// The shadow projection is a perspective frustum, so 1 world unit maps to
+// uvPerWorld = 0.5 * projScale / linearDepth UV units, where projScale is the
+// projection's x-axis scale (matrix element [0][0] = near/halfW). Because our
+// spot lights are rotated, [0][0] alone is not the scale — the view rotation
+// mixes the axes — so we take the length of the clip.x world-gradient
+// (m[0][0], m[1][0], m[2][0]), which is rotation-invariant and equals near/halfW.
+// The 1/linearDepth term makes a fixed world penumbra shrink in UV with
+// distance, i.e. the penumbra stays constant in world space.
+// mode: 0 = perspective (spot), 1 = ortho (directional). For ortho the mapping
+// is depth-independent: 1 world unit is a CONSTANT fraction of the box, so we
+// drop the 1/linearDepth term. projScale = length of the clip.x world-gradient
+// = 2/(right-left) = 1/radius for the ortho box, hence 0.5*projScale = 0.5/radius.
+float shadowUvPerWorld(int slot, float linearDepth, float mode) {
+    vec3 gradClipX = vec3(shadowViewProj[slot][0][0],
+                          shadowViewProj[slot][1][0],
+                          shadowViewProj[slot][2][0]);
+    float projScale = length(gradClipX);
+    if (mode > 0.5) {
+        return 0.5 * projScale;  // ortho: constant, no depth division
+    }
+    return 0.5 * projScale / max(linearDepth, 1e-4);
+}
+
+float calcShadow(int slot, vec3 worldPos, vec3 N, vec3 L) {
+    // Shadow projection mode: 0 = perspective (spot), 1 = ortho (directional).
+    float mode = shadowSlotParams2[slot].y;
+    vec3 lightDirW = shadowSlotLightDir[slot].xyz;  // normalized travel direction
+    float refDot = shadowSlotLightDir[slot].w;      // dot(eye, lightDir)
+
+    // Cheap initial projection of the ORIGINAL surface point, used only to learn
+    // the shadow-map texel's world size at this depth. For perspective the depth
+    // is clip0.w (distance from the light); for ortho clip0.w == 1 is meaningless,
+    // so we use the projection onto the light direction instead (linear, world).
+    vec4 clip0 = shadowViewProj[slot] * vec4(worldPos, 1.0);
+    float linearDepth0 = (mode > 0.5)
+        ? (dot(worldPos, lightDirW) - refDot)
+        : clip0.w;
+
+    // Normal-offset bias. At an object/floor corner a single shadow-map texel
+    // straddles both the object's side wall and the floor; it stores the wall's
+    // (closer) depth, so floor pixels there compare as shadowed -> a dark
+    // speckle line at the contact seam (corner acne). This is a normal
+    // discontinuity, not a slope, so slope-scaled depth bias can't catch it.
+    // Fix: push the sampling position out along the surface normal by ~one
+    // shadow texel's world size, so the floor samples a texel that no longer
+    // overlaps the wall. texelWorld = 1 / (texels-per-world) and
+    // texels-per-world = shadowUvPerWorld(uv/world) * mapSize.
+    // Modulate by sin(angle) = sqrt(1-NdotL^2) so light-facing surfaces (where
+    // there is no acne) get ~no offset and grazing surfaces (worst acne) get
+    // the full push -- this keeps shadows attached at the base (no peter-pan).
+    float ndlRaw = clamp(dot(N, L), -1.0, 1.0);
+    float sinTheta = sqrt(max(1.0 - ndlRaw * ndlRaw, 0.0));
+    float texelWorld = 1.0 / max(shadowUvPerWorld(slot, linearDepth0, mode) * shadowMapParams.x, 1e-6);
+    const float normalOffsetScale = 2.0;
+    vec3 offsetWorld = worldPos + N * (texelWorld * normalOffsetScale * sinTheta);
+
+    // Re-project the offset point; this clip drives BOTH shadowUV and the
+    // compare depth (clip.w). The slope-scaled depth bias below still applies.
+    vec4 clip = shadowViewProj[slot] * vec4(offsetWorld, 1.0);
     vec3 ndc = clip.xyz / clip.w;
     vec2 shadowUV = ndc.xy * 0.5 + 0.5;
 
@@ -172,29 +305,143 @@ float calcShadow(int slot, vec3 worldPos) {
         shadowUV.y = 1.0 - shadowUV.y;
     }
 
-    // Outside shadow frustum = fully lit
+    // Outside shadow frustum = fully lit. The x/y bounds catch receivers outside
+    // the box sideways. For perspective, clip.w < 0 means behind the light. For
+    // ortho (clip.w == 1) that never triggers, so instead reject receivers in
+    // front of the near plane or beyond the far plane via the NDC z (ortho maps
+    // near -> -1, far -> +1).
     if (shadowUV.x < 0.0 || shadowUV.x > 1.0 ||
-        shadowUV.y < 0.0 || shadowUV.y > 1.0 ||
-        clip.w < 0.0) {  // behind the light
+        shadowUV.y < 0.0 || shadowUV.y > 1.0) {
+        return 1.0;
+    }
+    if (mode > 0.5) {
+        if (ndc.z < -1.0 || ndc.z > 1.0) {
+            return 1.0;
+        }
+    } else if (clip.w < 0.0) {  // behind the light (perspective)
         return 1.0;
     }
 
-    // Linear depth comparison: clip.w = -z_eye (distance from light).
-    // Shadow pass stores clip.w, so we compute the same here.
-    float currentDepth = clip.w;
-    float bias = shadowSlotParams[slot].y;  // in world units
-    float texelSize = 1.0 / max(shadowMapParams.x, 1.0);
+    // Linear world-space depth of the receiver, matching what the shadow pass
+    // stored. Perspective: clip.w = distance from light. Ortho: projection of the
+    // (normal-offset) world position onto the light direction, minus the eye ref.
+    float currentDepth = (mode > 0.5)
+        ? (dot(offsetWorld, lightDirW) - refDot)
+        : clip.w;
 
-    // 3x3 PCF kernel
-    float shadow = 0.0;
-    for (int x = -1; x <= 1; x++) {
-        for (int y = -1; y <= 1; y++) {
-            vec2 offset = vec2(float(x), float(y)) * texelSize;
-            float storedDepth = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(shadowUV + offset, float(slot))).r;
-            shadow += (currentDepth - bias > storedDepth) ? 0.0 : 1.0;
+    // Slope-scaled bias: the stored depth is linear/world-scale, so constBias
+    // is a world-space offset. On surfaces grazing the light (near the
+    // terminator) a single texel spans far more depth, so a constant bias
+    // under-shoots and self-shadow acne appears. Scale by tan(angle between N
+    // and L); tan is clamped so grazing pixels don't peter-pan. At full facing
+    // (N==L) the slope term is 0, so lit surfaces keep the exact constBias
+    // behavior existing apps were tuned against.
+    float constBias = shadowSlotParams[slot].y;  // in world units
+    float ndl = clamp(dot(N, L), 0.001, 1.0);
+    float slope = min(tan(acos(ndl)), 8.0);
+    float bias = constBias * (1.0 + slope);
+    float compareDepth = currentDepth - bias;
+
+    float mapSize = max(shadowMapParams.x, 1.0);
+    float texelSize = 1.0 / mapSize;
+
+    float softness = shadowSlotParams[slot].w;  // emitter size (world units)
+
+    // -----------------------------------------------------------------------
+    // Phase A path (softness == 0): fixed 3x3 kernel of bilinear taps.
+    // Zero extra cost, identical to the tuned hard-shadow look.
+    // -----------------------------------------------------------------------
+    if (softness <= 0.0) {
+        float shadow = 0.0;
+        for (int x = -1; x <= 1; x++) {
+            for (int y = -1; y <= 1; y++) {
+                vec2 offset = vec2(float(x), float(y)) * texelSize;
+                shadow += shadowTapBilinear(shadowUV + offset, float(slot), compareDepth, mapSize);
+            }
+        }
+        shadow /= 9.0;
+        return mix(1.0, shadow, shadowSlotParams[slot].z);
+    }
+
+    // -----------------------------------------------------------------------
+    // PCSS path (softness > 0): blocker search -> penumbra estimate -> PCF.
+    // Our shadow map stores LINEAR world-scale depth, so the penumbra formula
+    // is exact and contact hardening falls out for free: near a contact point
+    // (receiverDepth ~= blockerDepth) the penumbra collapses to ~0 and the
+    // filter converges to the hard look; far from the caster it widens.
+    // -----------------------------------------------------------------------
+    float uvPerWorld = shadowUvPerWorld(slot, currentDepth, mode);
+
+    // Per-fragment random rotation of the Poisson disk. A single fixed disk
+    // shared by every fragment makes all penumbrae sample the SAME 16 directions,
+    // so at large softness the taps line up into concentric bands / ghost edges.
+    // Rotating the disk by a per-pixel angle turns that structured banding into
+    // fine dithered noise. Interleaved Gradient Noise (Jimenez 2014) on the
+    // fragment coordinate gives a cheap, well-distributed hash. We build the 2x2
+    // rotation once and reuse it for BOTH the blocker search and the PCF loop
+    // (sharing is fine and cheaper — the noise decorrelates neighbours anyway).
+    const float TAU = 6.28318530718;
+    float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy,
+                                            vec2(0.06711056, 0.00583715))));
+    float angle = TAU * ign;
+    float ca = cos(angle);
+    float sa = sin(angle);
+    mat2 rot = mat2(ca, -sa, sa, ca);
+
+    // Blocker search: sample the Poisson disk over a search radius derived from
+    // the emitter size, clamped so we always cover a couple of texels (find the
+    // caster even for tiny emitters) but never blow up the sample footprint.
+    float searchUV = clamp(softness * uvPerWorld, 1.5 * texelSize, 16.0 * texelSize);
+    float blockerSum = 0.0;
+    float blockerCount = 0.0;
+    for (int i = 0; i < 16; i++) {
+        vec2 o = (rot * poisson16[i]) * searchUV;
+        float d = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(shadowUV + o, float(slot))).r;
+        // Closer to the light than the (biased) receiver -> it's a blocker.
+        if (d < compareDepth) {
+            blockerSum += d;
+            blockerCount += 1.0;
         }
     }
-    shadow /= 9.0;
+
+    // No blockers found -> fully lit (mix with strength is a no-op at 1.0).
+    if (blockerCount < 0.5) {
+        return 1.0;
+    }
+    float avgBlocker = blockerSum / blockerCount;
+
+    // Penumbra width in world units (exact for linear depth), then to UV.
+    // Clamp the UV radius to 16 texels to bound cost and ringing artifacts.
+    // Perspective (finite emitter): similar-triangles PCSS,
+    //   penumbra = softness * (dr - db) / db.
+    // Ortho / directional (emitter at infinity): db -> infinity kills that ratio,
+    //   so softness instead sets penumbra growth per unit caster-receiver gap.
+    //   The 0.01 factor makes softness read as "world units of blur per 100 units
+    //   of separation" (sun ≈ 0.9). Contact hardening still holds: (dr-db) -> 0.
+    float casterGap = max(currentDepth - avgBlocker, 0.0);
+    float penumbraWorld = (mode > 0.5)
+        ? (softness * casterGap * 0.01)
+        : (softness * casterGap / max(avgBlocker, 1e-4));
+    float radiusUV = clamp(penumbraWorld * uvPerWorld, 0.0, 16.0 * texelSize);
+
+    // Variable-radius PCF over the progressive Poisson disk. The tap count is
+    // user-selectable per light (Light::setShadowSamples): more taps clean up
+    // the penumbra edges of a large blur at a linear cost, fewer taps trade
+    // some noise for speed. The loop bound stays a compile-time constant (36)
+    // for cross-compilation; pcfTaps just cuts it short. As radiusUV collapses
+    // below a texel the taps pile into one texel and the result hardens.
+    int pcfTaps = int(shadowSlotParams2[slot].x + 0.5);
+    float shadow = 0.0;
+    float tapCount = 0.0;
+    for (int i = 0; i < 36; i++) {
+        if (i >= pcfTaps) {
+            break;
+        }
+        vec2 o = (rot * poissonPCF[i]) * radiusUV;
+        shadow += shadowTapBilinear(shadowUV + o, float(slot), compareDepth, mapSize);
+        tapCount += 1.0;
+    }
+    shadow /= max(tapCount, 1.0);
 
     return mix(1.0, shadow, shadowSlotParams[slot].z);
 }
@@ -381,7 +628,15 @@ void main() {
         for (int s = 0; s < MAX_SHADOW_LIGHTS; s++) {
             if (s >= numShadowSlots) break;
             if (int(shadowSlotParams[s].x + 0.5) == i) {
-                contribution *= calcShadow(s, v_worldPos);
+                // Direction to the owning light, for slope-scaled bias.
+                vec4 pt = lightPosType[i];
+                vec3 shadowL;
+                if (int(pt.w + 0.5) == 0) {
+                    shadowL = normalize(-pt.xyz);  // directional
+                } else {
+                    shadowL = normalize(pt.xyz - v_worldPos);  // point / spot
+                }
+                contribution *= calcShadow(s, v_worldPos, N, shadowL);
                 break;
             }
         }
