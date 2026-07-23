@@ -2,11 +2,15 @@
 
 constexpr float tcApp::softnessPresets[3];
 
-// Tiny deterministic hash so the city layout is the same on every run
-static float hash01(int n) {
-    n = (n << 13) ^ n;
-    n = n * (n * n * 15731 + 789221) + 1376312589;
-    return float(n & 0x7fffffff) / float(0x7fffffff);
+// Tiny deterministic hash so the city layout is the same on every run AND
+// on every platform: unsigned arithmetic only -- signed overflow is UB and
+// actually produced different layouts per compiler.
+static float hash01(int id) {
+    uint32_t n = static_cast<uint32_t>(id) * 2654435769u;
+    n ^= n >> 16;
+    n *= 2246822519u;
+    n ^= n >> 13;
+    return float(n & 0xffffffu) / float(0xffffffu);
 }
 
 void tcApp::setup() {
