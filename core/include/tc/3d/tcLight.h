@@ -185,6 +185,17 @@ public:
     Light& setShadowSoftness(float size) { shadowSoftness_ = size; return *this; }
     float getShadowSoftness() const { return shadowSoftness_; }
 
+    // Shadow samples: the number of variable-PCF taps used by the PCSS filter.
+    // Affects soft shadows only (setShadowSoftness > 0); the hard-edged Phase A
+    // path ignores it. Higher = smoother, cleaner penumbra edges (e.g. diagonal
+    // edges under a large blur) at a linear cost; lower = faster but noisier.
+    // Clamped to [1, 36]. Default 16. The blocker search is unaffected.
+    Light& setShadowSamples(int taps) {
+        shadowSamples_ = (taps < 1) ? 1 : ((taps > 36) ? 36 : taps);
+        return *this;
+    }
+    int getShadowSamples() const { return shadowSamples_; }
+
     LightType getType() const { return type_; }
     const Vec3& getDirection() const { return direction_; }
     const Vec3& getPosition() const { return position_; }
@@ -384,6 +395,7 @@ private:
     int shadowResolution_ = 1024;
     float shadowBias_ = 1.0f;
     float shadowSoftness_ = 0.0f;   // emitter size in world units (0 = hard)
+    int shadowSamples_ = 16;        // PCSS variable-PCF tap count [1..36]
 };
 
 // ---------------------------------------------------------------------------

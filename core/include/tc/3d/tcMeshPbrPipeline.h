@@ -374,6 +374,12 @@ public:
             fsp.shadowSlotParams[s][1] = shadowSlotBias_[s];
             fsp.shadowSlotParams[s][2] = 1.0f;    // shadow strength
             fsp.shadowSlotParams[s][3] = shadowSlotSoftness_[s];  // emitter size (world units, 0 = hard/PCSS off)
+            // x = PCSS variable-PCF tap count (clamped [1,36] at the Light API).
+            // y/z/w reserved (zero) for a future directional-ortho shadow phase.
+            fsp.shadowSlotParams2[s][0] = static_cast<float>(shadowSlotSamples_[s]);
+            fsp.shadowSlotParams2[s][1] = 0.0f;
+            fsp.shadowSlotParams2[s][2] = 0.0f;
+            fsp.shadowSlotParams2[s][3] = 0.0f;
         }
 
         // --- Submit ---------------------------------------------------------
@@ -562,6 +568,7 @@ public:
         shadowSlotLightIndex_[slot] = lightIndex;
         shadowSlotBias_[slot]       = light.getShadowBias();
         shadowSlotSoftness_[slot]   = light.getShadowSoftness();
+        shadowSlotSamples_[slot]    = light.getShadowSamples();
 
         // Begin shadow depth pass into this slot's array layer
         sg_pass pass = {};
@@ -755,6 +762,7 @@ private:
     int shadowSlotLightIndex_[internal::maxShadowLights]{};
     float shadowSlotBias_[internal::maxShadowLights]{};
     float shadowSlotSoftness_[internal::maxShadowLights]{};
+    int shadowSlotSamples_[internal::maxShadowLights]{};
     bool shadowOverflowWarned_{false};
 
     // --- Fallback resources ---

@@ -66,7 +66,8 @@ layout(binding=1) uniform fs_params {
     vec4 iesParams;                       // x=iesLightIndex (-1=none), y=maxVertAngle (rad), zw=unused
     vec4 texFlags;                        // x=hasBaseColorTex, y=hasMetRoughTex, z=hasEmissiveTex, w=hasOcclusionTex
     mat4 shadowViewProj[MAX_SHADOW_LIGHTS];   // per-slot light VP for shadow depth comparison
-    vec4 shadowSlotParams[MAX_SHADOW_LIGHTS]; // x=lightIndex (-1=unused), y=bias, z=strength, w=unused
+    vec4 shadowSlotParams[MAX_SHADOW_LIGHTS]; // x=lightIndex (-1=unused), y=bias, z=strength, w=softness (emitter size, 0=hard)
+    vec4 shadowSlotParams2[MAX_SHADOW_LIGHTS]; // x=pcfTapCount (PCSS variable-PCF taps), y/z/w reserved (0) for a future directional-ortho phase
     vec4 shadowMapParams;                     // x=mapSize, y=numShadowSlots, z=originTopLeft, w=unused
 };
 
@@ -203,6 +204,33 @@ const vec2 poisson16[16] = vec2[](
     vec2( 0.19984126,  0.78641367), vec2( 0.14383161, -0.14100790)
 );
 
+// 36-tap Poisson disk (unit radius) in PROGRESSIVE (best-candidate) order: any
+// prefix of the first N points is itself well distributed, so the variable-PCF
+// loop can pick a user-selectable tap count (1..36) and still get an even
+// sampling. Generated offline by best-candidate sampling (fixed seed) — see
+// scratchpad/genpoisson.js. Fixed 36-length array keeps the loop bound
+// compile-time constant for sokol-shdc cross-compilation.
+const vec2 poissonPCF[36] = vec2[](
+    vec2( 0.15811,  0.39927), vec2(-0.41643, -0.90876),
+    vec2( 0.76014, -0.63879), vec2(-0.98691,  0.14799),
+    vec2( 0.96775,  0.18529), vec2(-0.46005,  0.88534),
+    vec2(-0.30417, -0.17954), vec2( 0.13979, -0.62645),
+    vec2(-0.86224, -0.47441), vec2( 0.63782,  0.75486),
+    vec2( 0.44607, -0.13772), vec2( 0.11233,  0.94311),
+    vec2(-0.45647,  0.34034), vec2(-0.80725,  0.58860),
+    vec2( 0.57030,  0.27985), vec2( 0.88917, -0.25455),
+    vec2( 0.05600,  0.01048), vec2( 0.41726, -0.90564),
+    vec2(-0.00273, -0.99484), vec2(-0.16149,  0.61705),
+    vec2(-0.48320, -0.52442), vec2(-0.68467, -0.12540),
+    vec2(-0.00759, -0.31905), vec2( 0.44600, -0.46944),
+    vec2( 0.31576,  0.69695), vec2(-0.19722, -0.66777),
+    vec2(-0.14528,  0.25372), vec2( 0.81261,  0.47152),
+    vec2(-0.97963, -0.18934), vec2(-0.18333,  0.97108),
+    vec2( 0.71840, -0.01082), vec2(-0.69530,  0.19561),
+    vec2( 0.31284,  0.14318), vec2(-0.52531,  0.61236),
+    vec2(-0.67948, -0.73252), vec2(-0.39331,  0.07426)
+);
+
 // Convert a world-space radius (at the receiver) into a shadow-map UV radius.
 // The shadow projection is a perspective frustum, so 1 world unit maps to
 // uvPerWorld = 0.5 * projScale / linearDepth UV units, where projScale is the
@@ -332,14 +360,24 @@ float calcShadow(int slot, vec3 worldPos, vec3 N, vec3 L) {
     float penumbraWorld = softness * max(currentDepth - avgBlocker, 0.0) / max(avgBlocker, 1e-4);
     float radiusUV = clamp(penumbraWorld * uvPerWorld, 0.0, 16.0 * texelSize);
 
-    // Variable-radius PCF over the same Poisson disk. As radiusUV collapses
+    // Variable-radius PCF over the progressive Poisson disk. The tap count is
+    // user-selectable per light (Light::setShadowSamples): more taps clean up
+    // the penumbra edges of a large blur at a linear cost, fewer taps trade
+    // some noise for speed. The loop bound stays a compile-time constant (36)
+    // for cross-compilation; pcfTaps just cuts it short. As radiusUV collapses
     // below a texel the taps pile into one texel and the result hardens.
+    int pcfTaps = int(shadowSlotParams2[slot].x + 0.5);
     float shadow = 0.0;
-    for (int i = 0; i < 16; i++) {
-        vec2 o = (rot * poisson16[i]) * radiusUV;
+    float tapCount = 0.0;
+    for (int i = 0; i < 36; i++) {
+        if (i >= pcfTaps) {
+            break;
+        }
+        vec2 o = (rot * poissonPCF[i]) * radiusUV;
         shadow += shadowTapBilinear(shadowUV + o, float(slot), compareDepth, mapSize);
+        tapCount += 1.0;
     }
-    shadow /= 16.0;
+    shadow /= max(tapCount, 1.0);
 
     return mix(1.0, shadow, shadowSlotParams[slot].z);
 }
