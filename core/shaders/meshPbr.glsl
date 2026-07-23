@@ -154,10 +154,42 @@ vec3 tonemapACES(vec3 x) {
 }
 
 // ---------------------------------------------------------------------------
-// Shadow map sampling with 3x3 PCF
+// Shadow map sampling with bilinear-PCF (3x3 kernel of software-sampler2DShadow
+// taps) and slope-scaled bias
 // ---------------------------------------------------------------------------
 
-float calcShadow(int slot, vec3 worldPos) {
+// One bilinear PCF tap emulating a hardware sampler2DShadow: fetch the 4 texels
+// surrounding `uv`, binary-compare EACH stored depth against `compareDepth`
+// first, then bilerp the four 0/1 results by the sub-texel fraction. Comparing
+// before filtering is essential — filtering the depths first would invent a
+// phantom averaged occluder along shadow edges.
+float shadowTapBilinear(vec2 uv, float layer, float compareDepth, float mapSize) {
+    // NEAREST sampler: texel centers sit at (i+0.5)/mapSize. Shift by -0.5 so
+    // floor() lands on the lower-left texel and `f` is measured from centers.
+    vec2 texel = uv * mapSize - 0.5;
+    vec2 base = floor(texel);
+    vec2 f = texel - base;
+    float invSize = 1.0 / mapSize;
+
+    vec2 uv00 = (base + vec2(0.5, 0.5)) * invSize;
+    vec2 uv10 = (base + vec2(1.5, 0.5)) * invSize;
+    vec2 uv01 = (base + vec2(0.5, 1.5)) * invSize;
+    vec2 uv11 = (base + vec2(1.5, 1.5)) * invSize;
+
+    float d00 = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv00, layer)).r;
+    float d10 = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv10, layer)).r;
+    float d01 = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv01, layer)).r;
+    float d11 = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv11, layer)).r;
+
+    float s00 = (compareDepth > d00) ? 0.0 : 1.0;
+    float s10 = (compareDepth > d10) ? 0.0 : 1.0;
+    float s01 = (compareDepth > d01) ? 0.0 : 1.0;
+    float s11 = (compareDepth > d11) ? 0.0 : 1.0;
+
+    return mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
+}
+
+float calcShadow(int slot, vec3 worldPos, vec3 N, vec3 L) {
     vec4 clip = shadowViewProj[slot] * vec4(worldPos, 1.0);
     vec3 ndc = clip.xyz / clip.w;
     vec2 shadowUV = ndc.xy * 0.5 + 0.5;
@@ -182,16 +214,29 @@ float calcShadow(int slot, vec3 worldPos) {
     // Linear depth comparison: clip.w = -z_eye (distance from light).
     // Shadow pass stores clip.w, so we compute the same here.
     float currentDepth = clip.w;
-    float bias = shadowSlotParams[slot].y;  // in world units
-    float texelSize = 1.0 / max(shadowMapParams.x, 1.0);
 
-    // 3x3 PCF kernel
+    // Slope-scaled bias: the stored depth is linear/world-scale, so constBias
+    // is a world-space offset. On surfaces grazing the light (near the
+    // terminator) a single texel spans far more depth, so a constant bias
+    // under-shoots and self-shadow acne appears. Scale by tan(angle between N
+    // and L); tan is clamped so grazing pixels don't peter-pan. At full facing
+    // (N==L) the slope term is 0, so lit surfaces keep the exact constBias
+    // behavior existing apps were tuned against.
+    float constBias = shadowSlotParams[slot].y;  // in world units
+    float ndl = clamp(dot(N, L), 0.001, 1.0);
+    float slope = min(tan(acos(ndl)), 8.0);
+    float bias = constBias * (1.0 + slope);
+    float compareDepth = currentDepth - bias;
+
+    float mapSize = max(shadowMapParams.x, 1.0);
+    float texelSize = 1.0 / mapSize;
+
+    // 3x3 kernel of bilinear taps (1-texel spacing) -> smooth penumbra ramp.
     float shadow = 0.0;
     for (int x = -1; x <= 1; x++) {
         for (int y = -1; y <= 1; y++) {
             vec2 offset = vec2(float(x), float(y)) * texelSize;
-            float storedDepth = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(shadowUV + offset, float(slot))).r;
-            shadow += (currentDepth - bias > storedDepth) ? 0.0 : 1.0;
+            shadow += shadowTapBilinear(shadowUV + offset, float(slot), compareDepth, mapSize);
         }
     }
     shadow /= 9.0;
@@ -381,7 +426,15 @@ void main() {
         for (int s = 0; s < MAX_SHADOW_LIGHTS; s++) {
             if (s >= numShadowSlots) break;
             if (int(shadowSlotParams[s].x + 0.5) == i) {
-                contribution *= calcShadow(s, v_worldPos);
+                // Direction to the owning light, for slope-scaled bias.
+                vec4 pt = lightPosType[i];
+                vec3 shadowL;
+                if (int(pt.w + 0.5) == 0) {
+                    shadowL = normalize(-pt.xyz);  // directional
+                } else {
+                    shadowL = normalize(pt.xyz - v_worldPos);  // point / spot
+                }
+                contribution *= calcShadow(s, v_worldPos, N, shadowL);
                 break;
             }
         }
