@@ -177,7 +177,13 @@ public:
     void setShadowBias(float bias) { shadowBias_ = bias; }
     float getShadowBias() const { return shadowBias_; }
 
-    // TODO: focus blur requires aperture integration or prefiltered mip LOD heuristic
+    // Shadow softness: the light's effective emitter size in WORLD units. Drives
+    // PCSS (percentage-closer soft shadows) — bigger emitter = wider penumbra.
+    // The penumbra also contact-hardens automatically: sharp where the caster
+    // touches the receiver, blurrier the farther the two are apart. 0 (default)
+    // means a point emitter -> hard-edged shadows and the zero-cost Phase A path.
+    Light& setShadowSoftness(float size) { shadowSoftness_ = size; return *this; }
+    float getShadowSoftness() const { return shadowSoftness_; }
 
     LightType getType() const { return type_; }
     const Vec3& getDirection() const { return direction_; }
@@ -377,6 +383,7 @@ private:
     bool shadowEnabled_ = false;
     int shadowResolution_ = 1024;
     float shadowBias_ = 1.0f;
+    float shadowSoftness_ = 0.0f;   // emitter size in world units (0 = hard)
 };
 
 // ---------------------------------------------------------------------------

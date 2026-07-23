@@ -373,7 +373,7 @@ public:
             fsp.shadowSlotParams[s][0] = static_cast<float>(shadowSlotLightIndex_[s]);
             fsp.shadowSlotParams[s][1] = shadowSlotBias_[s];
             fsp.shadowSlotParams[s][2] = 1.0f;    // shadow strength
-            fsp.shadowSlotParams[s][3] = 0.0f;
+            fsp.shadowSlotParams[s][3] = shadowSlotSoftness_[s];  // emitter size (world units, 0 = hard/PCSS off)
         }
 
         // --- Submit ---------------------------------------------------------
@@ -561,6 +561,7 @@ public:
         shadowSlotViewProj_[slot]   = light.computeProjectorViewProj();
         shadowSlotLightIndex_[slot] = lightIndex;
         shadowSlotBias_[slot]       = light.getShadowBias();
+        shadowSlotSoftness_[slot]   = light.getShadowSoftness();
 
         // Begin shadow depth pass into this slot's array layer
         sg_pass pass = {};
@@ -753,6 +754,7 @@ private:
     Mat4 shadowSlotViewProj_[internal::maxShadowLights]{};
     int shadowSlotLightIndex_[internal::maxShadowLights]{};
     float shadowSlotBias_[internal::maxShadowLights]{};
+    float shadowSlotSoftness_[internal::maxShadowLights]{};
     bool shadowOverflowWarned_{false};
 
     // --- Fallback resources ---
