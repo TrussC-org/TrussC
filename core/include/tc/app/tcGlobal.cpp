@@ -44,14 +44,22 @@ void setup() {
     sgdesc.view_pool_size = 10000;
     sgdesc.sampler_pool_size = 10000;
     // Per-frame uniform ring buffer (Metal/WebGPU/Vulkan; GL/D3D11 ignore it).
-    // The 4MB sokol default caps out around ~8k draw calls per frame (each apply
-    // is 256-byte aligned); past that, RELEASE builds silently write out of
-    // bounds — garbage uniforms render as flipped or fully black frames. Apps
-    // with very high draw-call counts reserve more up front via WindowSettings::
-    // reserveUniformBuffer (the backend allocates it x2 in-flight frames).
+    // On Metal the ring auto-grows on overflow (x2 per step, with a warning log
+    // — TrussC patch in sokol_gfx.h), so start small (1MB ≈ 2k draw calls per
+    // frame, each apply 256-byte aligned) and let heavy scenes grow to size;
+    // WindowSettings::reserveUniformBuffer just skips the one-time grow hitch.
+    // WebGPU/Vulkan do NOT auto-grow: keep the 4MB sokol default there — past
+    // the cap, RELEASE builds silently write out of bounds (garbage uniforms
+    // render as flipped or fully black frames), so high-draw-count apps must
+    // reserve enough up front. The backend allocates it x2 in-flight frames.
     if (internal::gpuUniformBufferReserve > 0) {
         sgdesc.uniform_buffer_size = internal::gpuUniformBufferReserve;
     }
+    #if defined(SOKOL_METAL)
+    else {
+        sgdesc.uniform_buffer_size = 1024 * 1024;
+    }
+    #endif
     sgdesc.allocator.alloc_fn = smemtrack_alloc;
     sgdesc.allocator.free_fn = smemtrack_free;
     sg_setup(&sgdesc);
@@ -253,9 +261,9 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
     if (headless::isActive()) return;
 
     auto& ctx = internal::currentWindowContext();
-    if (ctx.inFboPass && internal::fboClearColorFunc) {
+    if (ctx.inFboPass && ctx.fboClearColorFunc) {
         // During FBO pass, call FBO's clearColor() to restart pass
-        internal::fboClearColorFunc(r, g, b, a);
+        ctx.fboClearColorFunc(r, g, b, a);
     } else if (ctx.inSwapchainPass) {
         // During swapchain pass: erase by recording an opaque fullscreen quad
         recordSwapchainClearQuad(r, g, b, a);
@@ -274,9 +282,9 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
         // drew directly and an FBO suspended the pass — that drawable content
         // survives the resume via LOAD, see #191, so it must be erased too).
         bool hasRecorded = sgl_num_vertices() > 0
-            || !internal::deferredShaderDraws.empty()
-            || !internal::deferredPbrDraws.empty()
-            || !internal::deferredPointDraws.empty()
+            || !ctx.deferredShaderDraws.empty()
+            || !ctx.deferredPbrDraws.empty()
+            || !ctx.deferredPointDraws.empty()
             || ctx.swapchainPassStartedThisFrame;
         if (hasRecorded) {
             recordSwapchainClearQuad(r, g, b, a);

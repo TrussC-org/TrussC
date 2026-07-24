@@ -52,28 +52,30 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["getPath"] = &trussc::VideoPlayer::getPath;
     }
 #endif
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
     {
-        sol::usertype<trussc::Serial> t = lua->new_usertype<trussc::Serial>("Serial",
-            sol::constructors<trussc::Serial()>(),
-            sol::call_constructor, sol::constructors<trussc::Serial()>());
-        t["getDeviceList"] = &trussc::Serial::getDeviceList;
-        t["setup"] = sol::overload([](trussc::Serial& self, const std::string & portName, int baudRate) { return self.setup(portName, baudRate); }, [](trussc::Serial& self, int deviceIndex, int baudRate) { return self.setup(deviceIndex, baudRate); });
-        t["close"] = &trussc::Serial::close;
-        t["isInitialized"] = &trussc::Serial::isInitialized;
-        t["getDevicePath"] = &trussc::Serial::getDevicePath;
-        t["available"] = &trussc::Serial::available;
-        t["readByte"] = &trussc::Serial::readByte;
-        t["writeBytes"] = [](trussc::Serial& self, const std::string & buffer) { return self.writeBytes(buffer); };
-        t["writeByte"] = &trussc::Serial::writeByte;
-        t["flushInput"] = &trussc::Serial::flushInput;
-        t["flushOutput"] = &trussc::Serial::flushOutput;
-        t["flush"] = &trussc::Serial::flush;
-        t["drain"] = &trussc::Serial::drain;
-        t["printDevices"] = &trussc::Serial::printDevices;
-        t["listDevices"] = &trussc::Serial::listDevices;
+        sol::usertype<trussc::WindowSettings> t = lua->new_usertype<trussc::WindowSettings>("WindowSettings");
+        t["width"] = &trussc::WindowSettings::width;
+        t["height"] = &trussc::WindowSettings::height;
+        t["title"] = &trussc::WindowSettings::title;
+        t["highDpi"] = &trussc::WindowSettings::highDpi;
+        t["pixelPerfect"] = &trussc::WindowSettings::pixelPerfect;
+        t["sampleCount"] = &trussc::WindowSettings::sampleCount;
+        t["fullscreen"] = &trussc::WindowSettings::fullscreen;
+        t["decorated"] = &trussc::WindowSettings::decorated;
+        t["clipboardSize"] = &trussc::WindowSettings::clipboardSize;
+        t["swapInterval"] = &trussc::WindowSettings::swapInterval;
+        t["uniformBufferReserve"] = &trussc::WindowSettings::uniformBufferReserve;
+        t["setSize"] = &trussc::WindowSettings::setSize;
+        t["setTitle"] = &trussc::WindowSettings::setTitle;
+        t["setHighDpi"] = &trussc::WindowSettings::setHighDpi;
+        t["setPixelPerfect"] = &trussc::WindowSettings::setPixelPerfect;
+        t["setSampleCount"] = &trussc::WindowSettings::setSampleCount;
+        t["setFullscreen"] = &trussc::WindowSettings::setFullscreen;
+        t["setDecorated"] = &trussc::WindowSettings::setDecorated;
+        t["setClipboardSize"] = &trussc::WindowSettings::setClipboardSize;
+        t["setSwapInterval"] = &trussc::WindowSettings::setSwapInterval;
+        t["reserveUniformBuffer"] = &trussc::WindowSettings::reserveUniformBuffer;
     }
-#endif
     {
         sol::usertype<trussc::IVec2> t = lua->new_usertype<trussc::IVec2>("IVec2",
             sol::constructors<trussc::IVec2(), trussc::IVec2(int, int), trussc::IVec2(int)>(),
@@ -116,16 +118,17 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         "Stream", sol::var(trussc::TextureUsage::Stream),
         "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
     {
-        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
-        t["updateFps"] = &trussc::FpsSettings::updateFps;
-        t["drawFps"] = &trussc::FpsSettings::drawFps;
-        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
-        t["synced"] = &trussc::FpsSettings::synced;
+        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
+        t["id"] = &trussc::TouchPoint::id;
+        t["x"] = &trussc::TouchPoint::x;
+        t["y"] = &trussc::TouchPoint::y;
+        t["pressure"] = &trussc::TouchPoint::pressure;
+        t["changed"] = &trussc::TouchPoint::changed;
     }
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
+    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
+        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
+        "Nearest", sol::var(trussc::TextureFilter::Nearest),
+        "Linear", sol::var(trussc::TextureFilter::Linear));
     {
         sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
         t["name"] = &trussc::AudioDeviceInfo::name;
