@@ -2,18 +2,18 @@
 // tcApp.cpp - windowControlExample (main window)
 // =============================================================================
 // The main window opens one SECONDARY window at setup and shows instructions.
-//   Main window keys:  g -> toggle fullscreen on the MAIN window.
-//   Secondary window keys (focus the blue window): f/s/r/1/2/3 (see SubApp).
-// The secondary window is where the per-window routing is exercised: its key
-// handlers call the context-aware global functions, which route to it because
-// its tick is the one running.
+// keyPressed is per-window, so the focused window is the one that reacts:
+//   f -> toggle fullscreen on the FOCUSED window (works from either window).
+//   Secondary-only keys (focus the blue window): s/r/1/2/3 (see SubApp).
+// The context-aware global functions (toggleFullscreen / saveScreenshot / ...)
+// route to whichever window's tick is currently running.
 // Secondary windows: macOS / Windows / Linux; elsewhere createWindow logs an error.
 
 #include "tcApp.h"
 
 void tcApp::setup() {
-    logNotice("tcApp") << "MAIN window: 'g' toggles MAIN fullscreen. "
-                          "Focus the blue window for f/s/r/1/2/3.";
+    logNotice("tcApp") << "'f' toggles fullscreen on the focused window. "
+                          "Focus the blue window for s/r/1/2/3.";
 
     WindowSettings ws;
     ws.setSize(500, 400);
@@ -39,7 +39,7 @@ void tcApp::draw() {
 
     setColor(1.0f);
     drawBitmapString("windowControlExample - MAIN window", 80, 34);
-    drawBitmapString("g: toggle fullscreen on THIS (main) window", 80, 52);
+    drawBitmapString("f: toggle fullscreen on THIS (focused) window", 80, 52);
     drawBitmapString(string("main fullscreen: ") + (isFullscreen() ? "ON" : "off"), 80, 68);
 
     drawBitmapString("secondary window (blue): " +
@@ -53,8 +53,11 @@ void tcApp::draw() {
 }
 
 void tcApp::keyPressed(int key) {
-    if (key == 'G') {
-        toggleFullscreen();   // main context -> main window (sokol_app path)
+    // Per-window: fires only while the MAIN window has focus, so
+    // toggleFullscreen() (current context = main) targets the main window.
+    // SubApp handles the same 'F' for the secondary — the focused window reacts.
+    if (key == 'F') {
+        toggleFullscreen();
         logNotice("tcApp") << "main toggleFullscreen -> isFullscreen=" << isFullscreen();
     }
 }

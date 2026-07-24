@@ -10,22 +10,20 @@ functions, which route to whichever window's tick is currently running.
 
 ## Keys
 
-Focus the window you want to control (the routing follows keyboard focus).
-
-Main window:
-
-| Key | Action |
-|-----|--------|
-| `g` | Toggle fullscreen on the **main** window |
-
-Secondary (blue) window:
+`keyPressed` is per-window, so the **focused** window is the one that reacts —
+the context-aware global functions route to whichever window's tick is running.
 
 | Key | Action |
 |-----|--------|
-| `f` | Toggle fullscreen on the **secondary** window (global `toggleFullscreen()` routes here) |
+| `f` | Toggle fullscreen on the **focused** window (works from either window) |
+
+Secondary (blue) window only:
+
+| Key | Action |
+|-----|--------|
 | `s` | `saveScreenshot("winctrl_secondary.png")` from this window |
 | `r` | Start / stop a 3-second `startRecording("winctrl_secondary.mp4", 3.0f)` from this window |
-| `1` / `2` / `3` | Set the secondary window's fps to 15 / 30 / free-run (`Window::setFps`) |
+| `1` / `2` / `3` | Set the secondary window's fps to 15 / 30 / vsync free-run (`Window::setFps(0)`) |
 
 ## Autotest
 

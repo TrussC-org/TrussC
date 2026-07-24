@@ -48,12 +48,17 @@ public:
         setColor(1.0f, 0.85f, 0.2f);
         drawCircle(x, y, 34);
 
+        // getFps() returns 0 for "free-run at vsync" — show that as "vsync"
+        // rather than a bare 0, which reads like a stall.
+        float fpsTarget = self ? self->getFps() : 0.0f;
+        string fpsLabel = (fpsTarget > 0.0f) ? toString(fpsTarget) : string("vsync");
+
         setColor(1.0f);
         drawBitmapString("SECONDARY window (blue)", 20, 26);
         drawBitmapString("f: fullscreen (global toggleFullscreen -> this window)", 20, 46);
-        drawBitmapString("s: saveScreenshot   r: record 3s   1/2/3: fps 15/30/free", 20, 62);
+        drawBitmapString("s: saveScreenshot   r: record 3s   1/2/3: fps 15/30/vsync", 20, 62);
         drawBitmapString("size: " + toString(getWindowWidth()) + "x" + toString(getWindowHeight())
-                         + "   fps target: " + toString(self ? self->getFps() : 0.0f), 20, 82);
+                         + "   fps target: " + fpsLabel, 20, 82);
         if (isRecording()) {
             setColor(1.0f, 0.3f, 0.3f);
             drawBitmapString("REC " + toString(recordingFrameCount()), 20, 102);
