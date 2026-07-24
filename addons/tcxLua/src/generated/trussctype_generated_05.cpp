@@ -41,29 +41,26 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["fromOKLab"] = sol::overload([](float L, float a_lab, float b_lab) { return trussc::Color::fromOKLab(L, a_lab, b_lab); }, [](float L, float a_lab, float b_lab, float alpha) { return trussc::Color::fromOKLab(L, a_lab, b_lab, alpha); });
         t["fromLinear"] = sol::overload([](float r, float g, float b) { return trussc::Color::fromLinear(r, g, b); }, [](float r, float g, float b, float a) { return trussc::Color::fromLinear(r, g, b, a); });
     }
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
     {
-        sol::usertype<trussc::Window> t = lua->new_usertype<trussc::Window>("Window",
-            sol::constructors<trussc::Window()>(),
-            sol::call_constructor, sol::constructors<trussc::Window()>());
-        t["setApp"] = &trussc::Window::setApp;
-        t["getApp"] = &trussc::Window::getApp;
-        t["events"] = &trussc::Window::events;
-        t["close"] = &trussc::Window::close;
-        t["isOpen"] = &trussc::Window::isOpen;
-        t["setTitle"] = &trussc::Window::setTitle;
-        t["getTitle"] = &trussc::Window::getTitle;
-        t["getWidth"] = &trussc::Window::getWidth;
-        t["getHeight"] = &trussc::Window::getHeight;
-        t["setClearColor"] = &trussc::Window::setClearColor;
-        t["dispatchMousePressToTree"] = &trussc::Window::dispatchMousePressToTree;
-        t["dispatchMouseReleaseToTree"] = &trussc::Window::dispatchMouseReleaseToTree;
-        t["dispatchMouseScrollToTree"] = &trussc::Window::dispatchMouseScrollToTree;
-        t["dispatchKeyPressToTree"] = &trussc::Window::dispatchKeyPressToTree;
-        t["dispatchKeyReleaseToTree"] = &trussc::Window::dispatchKeyReleaseToTree;
-        t["tickTree"] = &trussc::Window::tickTree;
-        t["drawTreeNow"] = &trussc::Window::drawTreeNow;
-        t["syncRootSize"] = &trussc::Window::syncRootSize;
+        sol::usertype<trussc::Serial> t = lua->new_usertype<trussc::Serial>("Serial",
+            sol::constructors<trussc::Serial()>(),
+            sol::call_constructor, sol::constructors<trussc::Serial()>());
+        t["getDeviceList"] = &trussc::Serial::getDeviceList;
+        t["setup"] = sol::overload([](trussc::Serial& self, const std::string & portName, int baudRate) { return self.setup(portName, baudRate); }, [](trussc::Serial& self, int deviceIndex, int baudRate) { return self.setup(deviceIndex, baudRate); });
+        t["close"] = &trussc::Serial::close;
+        t["isInitialized"] = &trussc::Serial::isInitialized;
+        t["getDevicePath"] = &trussc::Serial::getDevicePath;
+        t["available"] = &trussc::Serial::available;
+        t["readByte"] = &trussc::Serial::readByte;
+        t["writeBytes"] = [](trussc::Serial& self, const std::string & buffer) { return self.writeBytes(buffer); };
+        t["writeByte"] = &trussc::Serial::writeByte;
+        t["flushInput"] = &trussc::Serial::flushInput;
+        t["flushOutput"] = &trussc::Serial::flushOutput;
+        t["flush"] = &trussc::Serial::flush;
+        t["drain"] = &trussc::Serial::drain;
+        t["printDevices"] = &trussc::Serial::printDevices;
+        t["listDevices"] = &trussc::Serial::listDevices;
     }
 #endif
     {
@@ -84,37 +81,38 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["syncLegacy"] = &trussc::MouseMoveEventArgs::syncLegacy;
     }
     {
-        sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream",
-            sol::constructors<trussc::SoundStream()>(),
-            sol::call_constructor, sol::constructors<trussc::SoundStream()>());
-        t["loadStream"] = sol::overload([](trussc::SoundStream& self, const fs::path & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const fs::path & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
-        t["getDuration"] = &trussc::SoundStream::getDuration;
-        t["getPath"] = &trussc::SoundStream::getPath;
-        t["getMaxPolyphony"] = &trussc::SoundStream::getMaxPolyphony;
+        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader",
+            sol::constructors<trussc::FileReader()>(),
+            sol::call_constructor, sol::constructors<trussc::FileReader()>());
+        t["open"] = &trussc::FileReader::open;
+        t["close"] = &trussc::FileReader::close;
+        t["isOpen"] = &trussc::FileReader::isOpen;
+        t["eof"] = &trussc::FileReader::eof;
+        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
+        t["readChar"] = &trussc::FileReader::readChar;
+        t["seek"] = &trussc::FileReader::seek;
+        t["tell"] = &trussc::FileReader::tell;
+        t["remaining"] = &trussc::FileReader::remaining;
     }
     {
-        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
-        t["view"] = &trussc::CameraContext::view;
-        t["projection"] = &trussc::CameraContext::projection;
-        t["viewW"] = &trussc::CameraContext::viewW;
-        t["viewH"] = &trussc::CameraContext::viewH;
-        t["pickable"] = &trussc::CameraContext::pickable;
-        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
-        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
+        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
+        t["error"] = &trussc::LoadResult::error;
+        t["message"] = &trussc::LoadResult::message;
+        t["ok"] = &trussc::LoadResult::ok;
+        t["success"] = &trussc::LoadResult::success;
+        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
     }
-    {
-        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
-        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
-        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
-        t["x"] = &trussc::TouchEventArgs::x;
-        t["y"] = &trussc::TouchEventArgs::y;
-        t["id"] = &trussc::TouchEventArgs::id;
-    }
-    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
-        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
-        "Miter", sol::var(trussc::StrokeJoin::Miter),
-        "Round", sol::var(trussc::StrokeJoin::Round),
-        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
+    lua->new_usertype<trussc::WindowType>("WindowType",
+        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
+        "Rect", sol::var(trussc::WindowType::Rect),
+        "Hanning", sol::var(trussc::WindowType::Hanning),
+        "Hamming", sol::var(trussc::WindowType::Hamming),
+        "Blackman", sol::var(trussc::WindowType::Blackman));
+    lua->new_usertype<trussc::LightType>("LightType",
+        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
+        "Directional", sol::var(trussc::LightType::Directional),
+        "Point", sol::var(trussc::LightType::Point),
+        "Spot", sol::var(trussc::LightType::Spot));
     {
         sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
         t["mode"] = &trussc::CurveStyle::mode;
@@ -122,8 +120,8 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["resolution"] = &trussc::CurveStyle::resolution;
     }
     {
-        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
-        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
     }
 }
 #ifndef _MSC_VER

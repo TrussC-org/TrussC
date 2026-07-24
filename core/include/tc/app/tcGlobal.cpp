@@ -253,9 +253,9 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
     if (headless::isActive()) return;
 
     auto& ctx = internal::currentWindowContext();
-    if (ctx.inFboPass && internal::fboClearColorFunc) {
+    if (ctx.inFboPass && ctx.fboClearColorFunc) {
         // During FBO pass, call FBO's clearColor() to restart pass
-        internal::fboClearColorFunc(r, g, b, a);
+        ctx.fboClearColorFunc(r, g, b, a);
     } else if (ctx.inSwapchainPass) {
         // During swapchain pass: erase by recording an opaque fullscreen quad
         recordSwapchainClearQuad(r, g, b, a);
@@ -274,9 +274,9 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
         // drew directly and an FBO suspended the pass — that drawable content
         // survives the resume via LOAD, see #191, so it must be erased too).
         bool hasRecorded = sgl_num_vertices() > 0
-            || !internal::deferredShaderDraws.empty()
-            || !internal::deferredPbrDraws.empty()
-            || !internal::deferredPointDraws.empty()
+            || !ctx.deferredShaderDraws.empty()
+            || !ctx.deferredPbrDraws.empty()
+            || !ctx.deferredPointDraws.empty()
             || ctx.swapchainPassStartedThisFrame;
         if (hasRecorded) {
             recordSwapchainClearQuad(r, g, b, a);

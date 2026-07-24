@@ -294,17 +294,9 @@ namespace internal {
     // Pass state (inSwapchainPass / swapchainClearValue / lastSwapchainDrawable /
     // inFboPass) moved to WindowContext (tc/app/tcWindowContext.h).
 
-    // FBO clearColor function pointer (set in tcFbo.h)
-    inline void (*fboClearColorFunc)(float, float, float, float) = nullptr;
-
-    // Current active FBO pointer (used from clearColor)
-    inline void* currentFbo = nullptr;
-
-    // Color pixel format of the current FBO pass (for PBR pipeline format matching)
-    inline sg_pixel_format currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
-
-    // MSAAサンプルカウント（FBOパス中のPBRパイプライン用）
-    inline int currentFboSampleCount = 1;
+    // FBO-pass state (fboClearColorFunc / currentFbo / currentFboColorFormat /
+    // currentFboSampleCount) moved to WindowContext (tc/app/tcWindowContext.h),
+    // next to inFboPass — they are per-window pipeline-format selectors.
 
     // Per-window routing for the context-aware global window-control functions
     // (setWindowTitle / setWindowSize). Defined in tc/app/tcWindow.h once Window

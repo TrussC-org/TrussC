@@ -41,18 +41,14 @@ struct PointDrawCommand {
 };
 struct DeferredPointDraw { int layerId; PointDrawCommand cmd; };
 
-// Swapchain point draws (shares sglLayerNext with sokol_gl 2D + deferred PBR);
-// replayed by flushDeferredShaderDraws() in tcShader.h.
-inline std::vector<DeferredPointDraw> deferredPointDraws;
-
-// Point draws deferred WITHIN an FBO pass (shares fboLayerNext); replayed by
-// flushFboDeferredPbr() in tcMeshPbrPipeline.h.
-inline std::vector<DeferredPointDraw> fboPointDraws;
-
-// Shared FBO-pass layer counter, used by both this pipeline and the PBR pipeline
-// (mirror of the swapchain's sglLayerNext). Declared here because this header is
-// included before tcMeshPbrPipeline.h.
-inline int fboLayerNext = 0;
+// Point-cloud draw queues (swapchain deferredPointDraws / FBO-pass fboPointDraws)
+// and the FBO-pass layer counter (fboLayerNext) are now PER-WINDOW, held in
+// WindowContext (tc/app/tcWindowContext.h) and reached via
+// currentWindowContext(). They used to be process globals here; the swapchain
+// queue shares the window's sglLayerNext with sokol_gl 2D + deferred PBR, and
+// fboLayerNext is shared by this pipeline and the PBR pipeline (mirror of the
+// swapchain's sglLayerNext). Replayed by flushDeferredShaderDraws() (tcShader.h)
+// and flushFboDeferredPbr() (tcMeshPbrPipeline.h).
 
 // Submit a packaged point draw to the GPU. Used from both flush sites.
 inline void executePointDraw(const PointDrawCommand& c) {
@@ -152,9 +148,10 @@ public:
 
         sg_pixel_format colorFmt;
         int sampleCount;
-        if (internal::currentWindowContext().inFboPass) {
-            colorFmt = internal::currentFboColorFormat;
-            sampleCount = internal::currentFboSampleCount;
+        auto& wctx = internal::currentWindowContext();
+        if (wctx.inFboPass) {
+            colorFmt = wctx.currentFboColorFormat;
+            sampleCount = wctx.currentFboSampleCount;
         } else {
             colorFmt = _SG_PIXELFORMAT_DEFAULT;
             sampleCount = sapp_sample_count();
@@ -181,14 +178,15 @@ public:
         // after this mesh composites on top. Inside an FBO pass we defer into the
         // per-FBO list (flushed in flushFboDeferredPbr); otherwise into the
         // swapchain list (flushed in flushDeferredShaderDraws).
-        if (internal::currentWindowContext().inFboPass) {
-            internal::fboPointDraws.push_back({ internal::fboLayerNext, cmd });
-            internal::fboLayerNext++;
-            sgl_layer(internal::fboLayerNext);
+        // (wctx resolved above at the format-selection step.)
+        if (wctx.inFboPass) {
+            wctx.fboPointDraws.push_back({ wctx.fboLayerNext, cmd });
+            wctx.fboLayerNext++;
+            sgl_layer(wctx.fboLayerNext);
         } else {
-            internal::deferredPointDraws.push_back({ internal::sglLayerNext, cmd });
-            internal::sglLayerNext++;
-            sgl_layer(internal::sglLayerNext);
+            wctx.deferredPointDraws.push_back({ wctx.sglLayerNext, cmd });
+            wctx.sglLayerNext++;
+            sgl_layer(wctx.sglLayerNext);
         }
     }
 
