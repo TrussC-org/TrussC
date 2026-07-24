@@ -42,75 +42,98 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         t["requestCameraPermission"] = &trussc::VideoGrabber::requestCameraPermission;
     }
 #endif
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+    lua->new_usertype<trussc::Cursor>("Cursor",
+        sol::meta_function::equal_to, [](trussc::Cursor a, trussc::Cursor b){ return a == b; },
+        "Default", sol::var(trussc::Cursor::Default),
+        "Arrow", sol::var(trussc::Cursor::Arrow),
+        "IBeam", sol::var(trussc::Cursor::IBeam),
+        "Crosshair", sol::var(trussc::Cursor::Crosshair),
+        "Hand", sol::var(trussc::Cursor::Hand),
+        "ResizeEW", sol::var(trussc::Cursor::ResizeEW),
+        "ResizeNS", sol::var(trussc::Cursor::ResizeNS),
+        "ResizeNWSE", sol::var(trussc::Cursor::ResizeNWSE),
+        "ResizeNESW", sol::var(trussc::Cursor::ResizeNESW),
+        "ResizeAll", sol::var(trussc::Cursor::ResizeAll),
+        "NotAllowed", sol::var(trussc::Cursor::NotAllowed),
+        "Custom0", sol::var(trussc::Cursor::Custom0),
+        "Custom1", sol::var(trussc::Cursor::Custom1),
+        "Custom2", sol::var(trussc::Cursor::Custom2),
+        "Custom3", sol::var(trussc::Cursor::Custom3),
+        "Custom4", sol::var(trussc::Cursor::Custom4),
+        "Custom5", sol::var(trussc::Cursor::Custom5),
+        "Custom6", sol::var(trussc::Cursor::Custom6),
+        "Custom7", sol::var(trussc::Cursor::Custom7),
+        "Custom8", sol::var(trussc::Cursor::Custom8),
+        "Custom9", sol::var(trussc::Cursor::Custom9),
+        "Custom10", sol::var(trussc::Cursor::Custom10),
+        "Custom11", sol::var(trussc::Cursor::Custom11),
+        "Custom12", sol::var(trussc::Cursor::Custom12),
+        "Custom13", sol::var(trussc::Cursor::Custom13),
+        "Custom14", sol::var(trussc::Cursor::Custom14),
+        "Custom15", sol::var(trussc::Cursor::Custom15));
     {
-        sol::usertype<trussc::ScreenRecorder> t = lua->new_usertype<trussc::ScreenRecorder>("ScreenRecorder",
-            sol::constructors<trussc::ScreenRecorder()>(),
-            sol::call_constructor, sol::constructors<trussc::ScreenRecorder()>());
-        t["start"] = sol::overload([](trussc::ScreenRecorder& self, const fs::path & path) { return self.start(path); }, [](trussc::ScreenRecorder& self, const fs::path & path, const trussc::VideoRecordSettings & settings) { return self.start(path, settings); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const fs::path & path) { return self.start(fbo, path); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const fs::path & path, const trussc::VideoRecordSettings & settings) { return self.start(fbo, path, settings); }, [](trussc::ScreenRecorder& self, const fs::path & path, float durationSec) { return self.start(path, durationSec); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const fs::path & path, float durationSec) { return self.start(fbo, path, durationSec); });
-        t["stop"] = &trussc::ScreenRecorder::stop;
-        t["isRecording"] = &trussc::ScreenRecorder::isRecording;
-        t["getFrameCount"] = &trussc::ScreenRecorder::getFrameCount;
-        t["getPath"] = &trussc::ScreenRecorder::getPath;
-        t["writer"] = &trussc::ScreenRecorder::writer;
-    }
-#endif
-    {
-        sol::usertype<trussc::ColorOKLCH> t = lua->new_usertype<trussc::ColorOKLCH>("ColorOKLCH",
-            sol::constructors<trussc::ColorOKLCH(), trussc::ColorOKLCH(float, float, float), trussc::ColorOKLCH(float, float, float, float)>(),
-            sol::call_constructor, sol::constructors<trussc::ColorOKLCH(), trussc::ColorOKLCH(float, float, float), trussc::ColorOKLCH(float, float, float, float)>());
-        t["L"] = &trussc::ColorOKLCH::L;
-        t["C"] = &trussc::ColorOKLCH::C;
-        t["H"] = &trussc::ColorOKLCH::H;
-        t["alpha"] = &trussc::ColorOKLCH::alpha;
-        t["toOKLab"] = &trussc::ColorOKLCH::toOKLab;
-        t["toLinear"] = &trussc::ColorOKLCH::toLinear;
-        t["toRGB"] = &trussc::ColorOKLCH::toRGB;
-        t["toHSB"] = &trussc::ColorOKLCH::toHSB;
-        t["lerp"] = sol::overload([](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t) { return self.lerp(target, t); }, [](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t, bool shortestPath) { return self.lerp(target, t, shortestPath); });
+        sol::usertype<trussc::ChipSoundNote> t = lua->new_usertype<trussc::ChipSoundNote>("ChipSoundNote",
+            sol::constructors<trussc::ChipSoundNote(), trussc::ChipSoundNote(trussc::Wave, float, float), trussc::ChipSoundNote(trussc::Wave, float, float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::ChipSoundNote(), trussc::ChipSoundNote(trussc::Wave, float, float), trussc::ChipSoundNote(trussc::Wave, float, float, float)>());
+        t["wave"] = &trussc::ChipSoundNote::wave;
+        t["hz"] = &trussc::ChipSoundNote::hz;
+        t["volume"] = &trussc::ChipSoundNote::volume;
+        t["duration"] = &trussc::ChipSoundNote::duration;
+        t["attack"] = &trussc::ChipSoundNote::attack;
+        t["decay"] = &trussc::ChipSoundNote::decay;
+        t["sustain"] = &trussc::ChipSoundNote::sustain;
+        t["release"] = &trussc::ChipSoundNote::release;
+        t["build"] = &trussc::ChipSoundNote::build;
+        t["generateBuffer"] = &trussc::ChipSoundNote::generateBuffer;
+        t["getTotalDuration"] = &trussc::ChipSoundNote::getTotalDuration;
     }
     {
         sol::usertype<trussc::Tween<trussc::Vec2>> t = lua->new_usertype<trussc::Tween<trussc::Vec2>>("Tween_Vec2",
             sol::constructors<trussc::Tween<trussc::Vec2>(), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType, trussc::EaseMode)>(),
             sol::call_constructor, sol::constructors<trussc::Tween<trussc::Vec2>(), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType), trussc::Tween<trussc::Vec2>(trussc::Vec2, trussc::Vec2, float, trussc::EaseType, trussc::EaseMode)>());
     }
-    lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
-        sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
-        "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
-        "TriangleStrip", sol::var(trussc::PrimitiveMode::TriangleStrip),
-        "TriangleFan", sol::var(trussc::PrimitiveMode::TriangleFan),
-        "Lines", sol::var(trussc::PrimitiveMode::Lines),
-        "LineStrip", sol::var(trussc::PrimitiveMode::LineStrip),
-        "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
-        "Points", sol::var(trussc::PrimitiveMode::Points));
-    lua->new_usertype<trussc::PrimitiveType>("PrimitiveType",
-        sol::meta_function::equal_to, [](trussc::PrimitiveType a, trussc::PrimitiveType b){ return a == b; },
-        "Points", sol::var(trussc::PrimitiveType::Points),
-        "Lines", sol::var(trussc::PrimitiveType::Lines),
-        "LineStrip", sol::var(trussc::PrimitiveType::LineStrip),
-        "Triangles", sol::var(trussc::PrimitiveType::Triangles),
-        "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
-        "Quads", sol::var(trussc::PrimitiveType::Quads));
     {
-        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
-        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
-        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
+        sol::usertype<trussc::RectNodeButton> t = lua->new_usertype<trussc::RectNodeButton>("RectNodeButton",
+            sol::constructors<trussc::RectNodeButton()>(),
+            sol::call_constructor, sol::constructors<trussc::RectNodeButton()>());
+        t["normalColor"] = &trussc::RectNodeButton::normalColor;
+        t["hoverColor"] = &trussc::RectNodeButton::hoverColor;
+        t["pressColor"] = &trussc::RectNodeButton::pressColor;
+        t["label"] = &trussc::RectNodeButton::label;
+        t["isPressed"] = &trussc::RectNodeButton::isPressed;
+        t["draw"] = &trussc::RectNodeButton::draw;
     }
-    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
-        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
-        "Butt", sol::var(trussc::StrokeCap::Butt),
-        "Round", sol::var(trussc::StrokeCap::Round),
-        "Square", sol::var(trussc::StrokeCap::Square));
-    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
-        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
-        "U8", sol::var(trussc::PixelFormat::U8),
-        "F32", sol::var(trussc::PixelFormat::F32));
     {
-        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
-        t["width"] = &trussc::ResizeEventArgs::width;
-        t["height"] = &trussc::ResizeEventArgs::height;
+        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
+        t["view"] = &trussc::CameraContext::view;
+        t["projection"] = &trussc::CameraContext::projection;
+        t["viewW"] = &trussc::CameraContext::viewW;
+        t["viewH"] = &trussc::CameraContext::viewH;
+        t["pickable"] = &trussc::CameraContext::pickable;
+        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
+        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
     }
+    {
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener",
+            sol::constructors<trussc::EventListener()>(),
+            sol::call_constructor, sol::constructors<trussc::EventListener()>());
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
+    }
+    {
+        sol::usertype<trussc::FullscreenShader> t = lua->new_usertype<trussc::FullscreenShader>("FullscreenShader",
+            sol::constructors<trussc::FullscreenShader()>(),
+            sol::call_constructor, sol::constructors<trussc::FullscreenShader()>());
+        t["draw"] = &trussc::FullscreenShader::draw;
+    }
+    lua->new_usertype<trussc::ImageType>("ImageType",
+        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
+        "Color", sol::var(trussc::ImageType::Color),
+        "Grayscale", sol::var(trussc::ImageType::Grayscale));
+    lua->new_usertype<trussc::Codec>("Codec",
+        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
+        "None", sol::var(trussc::Codec::None),
+        "LZ4", sol::var(trussc::Codec::LZ4));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

@@ -45,28 +45,27 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
     }
 #endif
     {
-        sol::usertype<trussc::WindowSettings> t = lua->new_usertype<trussc::WindowSettings>("WindowSettings");
-        t["width"] = &trussc::WindowSettings::width;
-        t["height"] = &trussc::WindowSettings::height;
-        t["title"] = &trussc::WindowSettings::title;
-        t["highDpi"] = &trussc::WindowSettings::highDpi;
-        t["pixelPerfect"] = &trussc::WindowSettings::pixelPerfect;
-        t["sampleCount"] = &trussc::WindowSettings::sampleCount;
-        t["fullscreen"] = &trussc::WindowSettings::fullscreen;
-        t["decorated"] = &trussc::WindowSettings::decorated;
-        t["clipboardSize"] = &trussc::WindowSettings::clipboardSize;
-        t["swapInterval"] = &trussc::WindowSettings::swapInterval;
-        t["uniformBufferReserve"] = &trussc::WindowSettings::uniformBufferReserve;
-        t["setSize"] = &trussc::WindowSettings::setSize;
-        t["setTitle"] = &trussc::WindowSettings::setTitle;
-        t["setHighDpi"] = &trussc::WindowSettings::setHighDpi;
-        t["setPixelPerfect"] = &trussc::WindowSettings::setPixelPerfect;
-        t["setSampleCount"] = &trussc::WindowSettings::setSampleCount;
-        t["setFullscreen"] = &trussc::WindowSettings::setFullscreen;
-        t["setDecorated"] = &trussc::WindowSettings::setDecorated;
-        t["setClipboardSize"] = &trussc::WindowSettings::setClipboardSize;
-        t["setSwapInterval"] = &trussc::WindowSettings::setSwapInterval;
-        t["reserveUniformBuffer"] = &trussc::WindowSettings::reserveUniformBuffer;
+        sol::usertype<trussc::Quaternion> t = lua->new_usertype<trussc::Quaternion>("Quaternion",
+            sol::constructors<trussc::Quaternion(), trussc::Quaternion(float, float, float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::Quaternion(), trussc::Quaternion(float, float, float, float)>(),
+            sol::meta_function::equal_to, [](const trussc::Quaternion& a, const trussc::Quaternion & b){ return a == b; },
+            sol::meta_function::multiplication, [](const trussc::Quaternion& a, const trussc::Quaternion & b){ return a * b; });
+        t["w"] = &trussc::Quaternion::w;
+        t["x"] = &trussc::Quaternion::x;
+        t["y"] = &trussc::Quaternion::y;
+        t["z"] = &trussc::Quaternion::z;
+        t["toEuler"] = &trussc::Quaternion::toEuler;
+        t["toMatrix"] = &trussc::Quaternion::toMatrix;
+        t["length"] = &trussc::Quaternion::length;
+        t["lengthSquared"] = &trussc::Quaternion::lengthSquared;
+        t["normalized"] = &trussc::Quaternion::normalized;
+        t["normalize"] = &trussc::Quaternion::normalize;
+        t["conjugate"] = &trussc::Quaternion::conjugate;
+        t["rotate"] = &trussc::Quaternion::rotate;
+        t["identity"] = &trussc::Quaternion::identity;
+        t["fromAxisAngle"] = &trussc::Quaternion::fromAxisAngle;
+        t["fromEuler"] = sol::overload([](float pitch, float yaw, float roll) { return trussc::Quaternion::fromEuler(pitch, yaw, roll); }, [](const trussc::Vec3 & euler) { return trussc::Quaternion::fromEuler(euler); });
+        t["slerp"] = &trussc::Quaternion::slerp;
     }
     {
         sol::usertype<trussc::MouseDragEventArgs> t = lua->new_usertype<trussc::MouseDragEventArgs>("MouseDragEventArgs");
