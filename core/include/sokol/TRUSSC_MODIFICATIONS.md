@@ -16,7 +16,8 @@ sokol/
 ├── sokol_app_tc.h       # TrussC-owned fork: full sapp_* implementation on
 │                        #   every platform + multi-window API (sokol_app.h
 │                        #   no longer exists in this tree — see below)
-├── sokol_gfx.h          # Modified (1 patch: swapchain store-action hint, Metal)
+├── sokol_gfx.h          # Modified (2 patches: swapchain store-action hint +
+│                        #   uniform-buffer auto-grow, both Metal)
 ├── sokol_glue.h         # Modified (1 patch)
 ├── sokol_log.h          # Untouched
 ├── TRUSSC_MODIFICATIONS.md
@@ -162,6 +163,32 @@ content would be undefined.
 
 Passes without the hint (including every pass begun by plain sokol users and
 TrussC's final per-frame pass) behave exactly as upstream.
+
+### Per-frame uniform buffer auto-grow (Metal)
+
+**Purpose:** Upstream sizes the Metal per-frame uniform ring buffer once at
+`sg_setup()` (`sg_desc.uniform_buffer_size`, default 4MB ≈ 8k draw calls) and
+only `SOKOL_ASSERT`s on overflow — in release builds the assert compiles out
+and uniforms are silently corrupted (flipped/black frames). TrussC grows the
+ring on demand instead, so `WindowSettings::reserveUniformBuffer` becomes an
+optional optimization rather than a correctness requirement.
+
+**Changes (marked `[TrussC modification]`):**
+- New `_SG_LOGITEM_XMACRO(METAL_UNIFORM_BUFFER_GROWN, ...)`.
+- New `_sg_mtl_grow_uniform_buffer()` (before `_sg_mtl_apply_uniforms`): on
+  overflow, allocate a doubled `MTLBuffer` for the CURRENT rotate slot, retire
+  the old one through the normal deferred-release queue (draws already encoded
+  captured the old binding, and the buffer outlives in-flight command buffers),
+  reset `cur_ub_offset` to 0, rebind via `_sg_mtl_bind_uniform_buffers()`, and
+  log a warning with old/new sizes.
+- `_sg_mtl_apply_uniforms()`: overflow check + grow call before the memcpy.
+- `_sg_mtl_begin_pass()`: at first pass of a frame, if this rotate slot's
+  buffer is smaller than `ub_size` (grown while the slot was in flight),
+  replace it — safe because the inflight-frame semaphore was just acquired.
+- `#include <stdio.h>` next to `<string.h>` (snprintf for the log message).
+
+WebGPU/Vulkan backends are untouched (their uniform buffers are baked into
+bind groups / descriptor sets; growing them is much more invasive).
 
 ---
 

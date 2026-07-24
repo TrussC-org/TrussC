@@ -44,14 +44,22 @@ void setup() {
     sgdesc.view_pool_size = 10000;
     sgdesc.sampler_pool_size = 10000;
     // Per-frame uniform ring buffer (Metal/WebGPU/Vulkan; GL/D3D11 ignore it).
-    // The 4MB sokol default caps out around ~8k draw calls per frame (each apply
-    // is 256-byte aligned); past that, RELEASE builds silently write out of
-    // bounds — garbage uniforms render as flipped or fully black frames. Apps
-    // with very high draw-call counts reserve more up front via WindowSettings::
-    // reserveUniformBuffer (the backend allocates it x2 in-flight frames).
+    // On Metal the ring auto-grows on overflow (x2 per step, with a warning log
+    // — TrussC patch in sokol_gfx.h), so start small (1MB ≈ 2k draw calls per
+    // frame, each apply 256-byte aligned) and let heavy scenes grow to size;
+    // WindowSettings::reserveUniformBuffer just skips the one-time grow hitch.
+    // WebGPU/Vulkan do NOT auto-grow: keep the 4MB sokol default there — past
+    // the cap, RELEASE builds silently write out of bounds (garbage uniforms
+    // render as flipped or fully black frames), so high-draw-count apps must
+    // reserve enough up front. The backend allocates it x2 in-flight frames.
     if (internal::gpuUniformBufferReserve > 0) {
         sgdesc.uniform_buffer_size = internal::gpuUniformBufferReserve;
     }
+    #if defined(SOKOL_METAL)
+    else {
+        sgdesc.uniform_buffer_size = 1024 * 1024;
+    }
+    #endif
     sgdesc.allocator.alloc_fn = smemtrack_alloc;
     sgdesc.allocator.free_fn = smemtrack_free;
     sg_setup(&sgdesc);
