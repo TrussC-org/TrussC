@@ -3441,6 +3441,11 @@ description.en = "Build the projector's view-projection matrix from spot params 
 description.ja = "スポットのパラメータとレンズシフトからプロジェクタのビュー射影行列を構築"
 description.ko = "스포트 파라미터와 렌즈 시프트로 프로젝터의 뷰-프로젝션 행렬을 구축"
 
+["Light::computeShadowViewProj"]
+description.en = "Build the light's view-projection matrix for rendering + sampling the shadow map (spot: projector frustum; directional: orthographic box)"
+description.ja = "shadow mapの描画・サンプルに使うlightのビュー射影行列を構築（spot: projector錐台、directional: 正射影ボックス）"
+description.ko = "섀도우 맵 렌더링/샘플링에 쓰는 조명의 뷰-프로젝션 행렬을 구축 (스포트: 프로젝터 절두체, 디렉셔널: 직교 박스)"
+
 ["Light::disable"]
 description.en = "Disable this light"
 description.ja = "このlightを無効化"
@@ -3526,6 +3531,16 @@ description.en = "Get quadratic attenuation factor"
 description.ja = "quadratic減衰係数を取得"
 description.ko = "이차 감쇠 계수를 얻음"
 
+["Light::getShadowAreaCenter"]
+description.en = "Get directional shadow volume center"
+description.ja = "directional shadowボリュームの中心を取得"
+description.ko = "디렉셔널 섀도우 볼륨 중심을 얻음"
+
+["Light::getShadowAreaRadius"]
+description.en = "Get directional shadow volume radius (half-extent)"
+description.ja = "directional shadowボリュームの半径（half-extent）を取得"
+description.ko = "디렉셔널 섀도우 볼륨 반지름(half-extent)을 얻음"
+
 ["Light::getShadowBias"]
 description.en = "Get shadow depth bias"
 description.ja = "shadow depth biasを取得"
@@ -3535,6 +3550,16 @@ description.ko = "섀도우 뎁스 바이어스를 얻음"
 description.en = "Get shadow map resolution"
 description.ja = "shadow map解像度を取得"
 description.ko = "섀도우 맵 해상도를 얻음"
+
+["Light::getShadowSamples"]
+description.en = "Get PCSS PCF tap count"
+description.ja = "PCSSのPCFタップ数を取得"
+description.ko = "PCSS PCF 탭 수를 얻음"
+
+["Light::getShadowSoftness"]
+description.en = "Get shadow softness (emitter size in world units)"
+description.ja = "shadowの柔らかさ（emitterサイズ、world単位）を取得"
+description.ko = "섀도우 부드러움(이미터 크기, 월드 단위)을 얻음"
 
 ["Light::getSpecular"]
 description.en = "Get specular light color"
@@ -3626,10 +3651,76 @@ description.en = "Set projector aspect ratio"
 description.ja = "projectorのaspect ratioを設定"
 description.ko = "프로젝터 종횡비를 설정"
 
+["Light::setShadowArea"]
+description.en = "Set the orthographic shadow volume (center + radius) for a directional light (default radius 500)"
+description.ja = "directional lightの正射影shadowボリューム（中心＋半径）を設定（デフォルト半径500）"
+description.ko = "디렉셔널 라이트의 직교 섀도우 볼륨(중심 + 반지름)을 설정 (기본 반지름 500)"
+related = ["Light::setShadowSoftness", "Light::enableShadow", "beginShadowPass"]
+details.en = '''
+Directional lights have no position, so their shadow map is an orthographic box
+centered on `center` with half-extent `radius`. Size it to enclose every caster
+and receiver you want shadowed — anything outside the box renders unshadowed.
+Ignored by Spot lights (they use the perspective projector frustum) and by Point
+lights (which don't support shadows).
+'''
+details.ja = '''
+directional lightは位置を持たないため、shadow mapは `center` を中心とし
+half-extent `radius` の正射影ボックスになる。shadowを落としたいcasterと
+receiverをすべて囲むサイズにする。ボックス外はshadowなしで描画される。
+Spot lightでは無視され（perspective projector錐台を使う）、Point light
+（shadow非対応）でも無視される。
+'''
+details.ko = '''
+디렉셔널 라이트는 위치가 없으므로 섀도우 맵은 `center`를 중심으로 half-extent
+`radius`인 직교 박스가 된다. 섀도우를 드리우려는 모든 캐스터와 리시버를 감싸는
+크기로 설정한다. 박스 밖은 섀도우 없이 렌더링된다. 스포트 라이트에서는 무시되며
+(퍼스펙티브 프로젝터 절두체를 사용), 포인트 라이트(섀도우 미지원)에서도 무시된다.
+'''
+
 ["Light::setShadowBias"]
 description.en = "Set shadow depth bias in world units"
 description.ja = "shadow depth biasを設定（world単位）"
 description.ko = "섀도우 뎁스 바이어스를 설정 (월드 단위)"
+
+["Light::setShadowSamples"]
+description.en = "Set the PCSS PCF tap count (clamped 1-36, default 16); only affects soft shadows (softness > 0)"
+description.ja = "PCSSのPCFタップ数を設定（1〜36にclamp、デフォルト16）。soft shadow（softness > 0）のみに影響"
+description.ko = "PCSS PCF 탭 수를 설정 (1~36으로 클램프, 기본값 16); 소프트 섀도우(softness > 0)에만 영향"
+
+["Light::setShadowSoftness"]
+description.en = "Set shadow softness as the light's emitter size in world units (0 = hard, default); drives PCSS penumbra"
+description.ja = "shadowの柔らかさをlightのemitterサイズ（world単位）で設定（0=硬い、デフォルト）。PCSSの半影を制御"
+description.ko = "섀도우 부드러움을 조명 이미터 크기(월드 단위)로 설정 (0=단단함, 기본값); PCSS 반영을 제어"
+related = ["Light::setShadowSamples", "Light::setShadowArea", "beginShadowPass"]
+details.en = '''
+Drives PCSS (percentage-closer soft shadows): a bigger emitter widens the
+penumbra, which also contact-hardens automatically — sharp where the caster
+touches the receiver, blurrier the farther the two are apart. `0` (default)
+means a point emitter, giving hard edges and the zero-cost hard-shadow path.
+The unit depends on light type: for Spot lights `size` is the emitter diameter
+in world units; for Directional lights the emitter is at infinity, so `size` is
+how many world units the penumbra widens per 100 units of caster-receiver
+distance (the sun ≈ 0.9). The tap count from
+[`setShadowSamples`](#Light::setShadowSamples) only applies when `size > 0`.
+'''
+details.ja = '''
+PCSS（percentage-closer soft shadows）を駆動する。emitterが大きいほど半影が広がり、
+接触硬化も自動で効く（casterがreceiverに接する所は鋭く、離れるほどぼける）。`0`
+（デフォルト）は点emitterで、硬いエッジとゼロコストのハードシャドウ経路になる。
+単位はlight typeで変わる。Spot lightでは `size` はemitterの直径（world単位）。
+Directional lightではemitterが無限遠にあるため、`size` は「caster-receiver間の距離
+100単位あたり半影が広がるworld単位」を表す（太陽 ≈ 0.9）。`size > 0` のときだけ
+[`setShadowSamples`](#Light::setShadowSamples) のタップ数が効く。
+'''
+details.ko = '''
+PCSS(percentage-closer soft shadows)를 구동한다. 이미터가 클수록 반영이 넓어지며,
+접촉 경화도 자동으로 적용된다(캐스터가 리시버에 닿는 곳은 날카롭고 멀어질수록 흐려진다).
+`0`(기본값)은 점 이미터로, 단단한 가장자리와 무비용 하드 섀도우 경로가 된다.
+단위는 조명 유형에 따라 다르다. 스포트 라이트에서는 `size`가 이미터 지름(월드 단위)이다.
+디렉셔널 라이트에서는 이미터가 무한대에 있으므로, `size`는 캐스터-리시버 거리 100단위당
+반영이 넓어지는 월드 단위를 뜻한다(태양 ≈ 0.9).
+[`setShadowSamples`](#Light::setShadowSamples)의 탭 수는 `size > 0`일 때만 적용된다.
+'''
 
 ["Light::setSpecular"]
 description.en = "Set specular light color"
@@ -11169,6 +11260,47 @@ description.ko = "윈도우 높이 (논리 포인트, 좌표계와 일치)"
 description.en = "Background clear color for this window"
 description.ja = "このウィンドウの背景クリア色"
 description.ko = "이 윈도우의 배경 클리어 색"
+
+["Window::setSize"]
+keywords = ["resize", "dimensions", "width", "height", "logical"]
+description.en = "Resize this window's content area to the given logical size (points)"
+description.ja = "このウィンドウのコンテンツ領域を指定した論理サイズ（ポイント）にリサイズ"
+description.ko = "이 윈도우의 콘텐츠 영역을 지정한 논리 크기(포인트)로 리사이즈"
+
+["Window::setFps"]
+keywords = ["frame rate", "framerate", "throttle", "vsync", "speed"]
+description.en = "Set this window's target frame rate; <= 0 (or >= the display rate) free-runs at vsync, otherwise update/draw run at ~fps by skipping display ticks"
+description.ja = "このウィンドウの目標フレームレートを設定。0 以下（またはディスプレイのリフレッシュレート以上）で vsync 同期のフリーラン、それ以外は表示ティックを間引いて約 fps で update/draw を実行"
+description.ko = "이 윈도우의 목표 프레임레이트를 설정. 0 이하(또는 디스플레이 리프레시레이트 이상)이면 vsync 프리런, 그 외에는 표시 틱을 건너뛰어 약 fps로 update/draw 실행"
+related = ["Window::getFps"]
+
+["Window::getFps"]
+keywords = ["frame rate", "framerate", "throttle", "target"]
+description.en = "This window's target frame rate set via setFps (0 = free-run at vsync); not a measured rate"
+description.ja = "setFps で設定したこのウィンドウの目標フレームレート（0 = vsync フリーラン）。実測値ではない"
+description.ko = "setFps로 설정한 이 윈도우의 목표 프레임레이트 (0 = vsync 프리런). 실측값이 아님"
+related = ["Window::setFps"]
+
+["Window::setFullscreen"]
+keywords = ["fullscreen", "full screen", "maximize", "borderless"]
+description.en = "Enter or leave fullscreen for this window (macOS native fullscreen, Windows borderless-fullscreen, Linux EWMH _NET_WM_STATE_FULLSCREEN)"
+description.ja = "このウィンドウのフルスクリーンを開始/解除（macOS はネイティブフルスクリーン、Windows はボーダーレスフルスクリーン、Linux は EWMH _NET_WM_STATE_FULLSCREEN）"
+description.ko = "이 윈도우의 전체화면을 켜거나 끔 (macOS 네이티브 전체화면, Windows 보더리스 전체화면, Linux EWMH _NET_WM_STATE_FULLSCREEN)"
+related = ["Window::isFullscreen", "Window::toggleFullscreen"]
+
+["Window::isFullscreen"]
+keywords = ["fullscreen", "full screen", "state"]
+description.en = "Whether this window is currently fullscreen (macOS reads the live window state; the transition is animated)"
+description.ja = "このウィンドウが現在フルスクリーンかどうか（macOS はライブのウィンドウ状態を参照。遷移はアニメーション）"
+description.ko = "이 윈도우가 현재 전체화면인지 여부 (macOS는 실시간 윈도우 상태를 읽음. 전환은 애니메이션)"
+related = ["Window::setFullscreen", "Window::toggleFullscreen"]
+
+["Window::toggleFullscreen"]
+keywords = ["fullscreen", "full screen", "toggle"]
+description.en = "Toggle this window's fullscreen state"
+description.ja = "このウィンドウのフルスクリーン状態を切り替え"
+description.ko = "이 윈도우의 전체화면 상태를 전환"
+related = ["Window::setFullscreen", "Window::isFullscreen"]
 
 ["Window::context"]
 hide = true

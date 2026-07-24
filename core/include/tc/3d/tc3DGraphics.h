@@ -21,49 +21,50 @@ namespace trussc {
 // Light management
 // ---------------------------------------------------------------------------
 
-// Add light (up to 8 max)
+// Add light (up to 8 max). Registered by address in the CURRENT window's
+// context — the Light must outlive its registration (prefer stable storage).
 inline void addLight(Light& light) {
-    if (internal::activeLights.size() < internal::maxLights) {
+    auto& lights = internal::currentWindowContext().activeLights;
+    if (lights.size() < internal::maxLights) {
         // Duplicate check
-        auto it = std::find(internal::activeLights.begin(),
-                            internal::activeLights.end(), &light);
-        if (it == internal::activeLights.end()) {
-            internal::activeLights.push_back(&light);
+        auto it = std::find(lights.begin(), lights.end(), &light);
+        if (it == lights.end()) {
+            lights.push_back(&light);
         }
     }
 }
 
-// Remove light
+// Remove light (from the current window's context)
 inline void removeLight(Light& light) {
-    auto it = std::find(internal::activeLights.begin(),
-                        internal::activeLights.end(), &light);
-    if (it != internal::activeLights.end()) {
-        internal::activeLights.erase(it);
+    auto& lights = internal::currentWindowContext().activeLights;
+    auto it = std::find(lights.begin(), lights.end(), &light);
+    if (it != lights.end()) {
+        lights.erase(it);
     }
 }
 
-// Clear all lights
+// Clear all lights (in the current window's context)
 inline void clearLights() {
-    internal::activeLights.clear();
+    internal::currentWindowContext().activeLights.clear();
 }
 
-// Get number of active lights
+// Get number of active lights (in the current window's context)
 inline int getNumLights() {
-    return static_cast<int>(internal::activeLights.size());
+    return static_cast<int>(internal::currentWindowContext().activeLights.size());
 }
 
 // ---------------------------------------------------------------------------
 // Material
 // ---------------------------------------------------------------------------
 
-// Set PBR material for subsequent mesh draws
+// Set PBR material for subsequent mesh draws (in the current window's context)
 inline void setMaterial(Material& material) {
-    internal::currentMaterial = &material;
+    internal::currentWindowContext().currentMaterial = &material;
 }
 
 // Clear material (revert to default rendering)
 inline void clearMaterial() {
-    internal::currentMaterial = nullptr;
+    internal::currentWindowContext().currentMaterial = nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,9 +80,10 @@ inline void clearMaterial() {
 // one-time warning. Re-running a pass for the SAME light twice in one frame
 // overwrites that light's layer (one shadow map content per light per frame).
 inline void beginShadowPass(Light& light) {
+    auto& lights = internal::currentWindowContext().activeLights;
     int idx = -1;
-    for (int i = 0; i < (int)internal::activeLights.size(); i++) {
-        if (internal::activeLights[i] == &light) { idx = i; break; }
+    for (int i = 0; i < (int)lights.size(); i++) {
+        if (lights[i] == &light) { idx = i; break; }
     }
     if (idx < 0) return;
     internal::getPbrPipeline().beginShadowPass(idx);
@@ -101,15 +103,15 @@ inline void shadowDraw(const Mesh& mesh) {
 // ---------------------------------------------------------------------------
 
 inline void setCameraPosition(const Vec3& pos) {
-    internal::cameraPosition = pos;
+    internal::currentWindowContext().cameraPosition = pos;
 }
 
 inline void setCameraPosition(float x, float y, float z) {
-    internal::cameraPosition = Vec3(x, y, z);
+    internal::currentWindowContext().cameraPosition = Vec3(x, y, z);
 }
 
 inline const Vec3& getCameraPosition() {
-    return internal::cameraPosition;
+    return internal::currentWindowContext().cameraPosition;
 }
 
 } // namespace trussc

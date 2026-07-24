@@ -11,15 +11,29 @@
 layout(binding=0) uniform shadow_vs_params {
     mat4 model;
     mat4 lightViewProj;
+    // xyz = light direction (normalized), w = mode (0=perspective, 1=ortho)
+    vec4 depthParams;
+    // x = refDot = dot(eye, lightDir) for ortho; yzw unused
+    vec4 depthParams2;
 };
 
 in vec3 position;
 out float v_linearDepth;
 
 void main() {
-    vec4 clipPos = lightViewProj * model * vec4(position, 1.0);
+    vec4 worldPos = model * vec4(position, 1.0);
+    vec4 clipPos = lightViewProj * worldPos;
     gl_Position = clipPos;
-    v_linearDepth = clipPos.w;  // = -z_eye (distance from light)
+    // Store LINEAR depth in WORLD units, independent of the NDC z convention.
+    // Perspective: clip.w = -z_eye (distance from light).
+    // Ortho: clip.w == 1, so instead project the world position onto the light
+    // direction and subtract the eye's projection (refDot) -> signed distance
+    // from the near plane, still linear in world units.
+    if (depthParams.w > 0.5) {
+        v_linearDepth = dot(worldPos.xyz, depthParams.xyz) - depthParams2.x;
+    } else {
+        v_linearDepth = clipPos.w;
+    }
 }
 @end
 
