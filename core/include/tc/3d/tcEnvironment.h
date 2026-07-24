@@ -399,22 +399,18 @@ private:
     }
 };
 
-// Forward-declared pointer to the active environment. Set via
+// The active IBL environment is per-window state (WindowContext), set via
 // setEnvironment() and consumed by PbrPipeline::drawMesh().
-namespace internal {
-    inline Environment* currentEnvironment = nullptr;
-}
-
 inline void setEnvironment(Environment& env) {
-    internal::currentEnvironment = &env;
+    internal::currentWindowContext().currentEnvironment = &env;
 }
 
 inline void clearEnvironment() {
-    internal::currentEnvironment = nullptr;
+    internal::currentWindowContext().currentEnvironment = nullptr;
 }
 
 inline Environment* getEnvironment() {
-    return internal::currentEnvironment;
+    return internal::currentWindowContext().currentEnvironment;
 }
 
 } // namespace trussc

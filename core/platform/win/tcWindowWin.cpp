@@ -15,6 +15,7 @@
 #include "TrussC.h"
 
 #if defined(_WIN32)
+#include <windows.h>        // HWND / SetWindowPos (per-window setSize)
 #include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.cpp)
 
 using namespace trussc;
@@ -23,6 +24,11 @@ namespace {
 
 struct AdapterState {
     sapp_window win{0};
+    // Borderless-fullscreen save/restore (Window::setFullscreen).
+    bool    savedValid = false;
+    LONG_PTR savedStyle = 0;
+    LONG_PTR savedExStyle = 0;
+    RECT    savedRect{0, 0, 0, 0};   // window rect (screen coords) before fullscreen
 };
 
 // Swapchain provider handed to WindowContext::acquireSwapchain. Unlike Metal
@@ -57,6 +63,12 @@ void windowTick(sapp_window swin, void* user) {
     ctx.fbWidth = fbw;
     ctx.fbHeight = fbh;
     ctx.dpiScale = sapp_window_dpi_scale(swin);
+
+    // Per-window frame-rate throttle (Window::setFps): the DXGI waitable keeps
+    // pacing at the display's vsync; skip the tick cheaply (before beginFrame,
+    // before advancing the per-window delta/frame count) when throttled down.
+    if (!internal::windowThrottleShouldTick(ctx)) return;
+
     // Keep a RectNode root in sync with the window's logical size (same
     // contract as the main App on SAPP_EVENTTYPE_RESIZED).
     win->syncRootSize((float)sapp_window_width(swin), (float)sapp_window_height(swin));
@@ -79,6 +91,10 @@ void windowTick(sapp_window swin, void* user) {
 
     auto* prev = internal::currentWindowCtx;
     internal::currentWindowCtx = &ctx;
+
+    // Per-window frame count (Fix 3): advance this window's own tick counter so
+    // getFrameCount()/getUpdateCount() report it while this context is active.
+    ctx.updateCount++;
 
     // Own sokol_gl context, created lazily on the first tick (sgl is set up
     // by then). Same lifecycle caveats as Fbo contexts on sgl resize.
@@ -106,6 +122,9 @@ void windowTick(sapp_window swin, void* user) {
 
     present();
     win->events().afterFrame.notify();
+    // Drain this window's saveScreenshot() queue while ITS context (and its
+    // lastSwapchainDrawable) is current — must run before we restore prev.
+    internal::drainPendingScreenshots();
 
     sgl_set_context(sgl_default_context());
     internal::currentWindowCtx = prev;
@@ -288,6 +307,70 @@ void Window::setTitle(const std::string& title) {
     title_ = title;
     auto* st = static_cast<AdapterState*>(native_);
     if (st) sapp_window_set_title(st->win, title.c_str());
+}
+
+void Window::setSize(int width, int height) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    HWND hwnd = (HWND)(void*)sapp_window_win32_get_hwnd(st->win);
+    if (!hwnd) return;
+    // Logical -> physical client size via this window's DPI scale, then grow to
+    // the outer window rect so the CLIENT area ends up the requested size.
+    float s = ctx_.dpiScale > 0.0f ? ctx_.dpiScale : 1.0f;
+    RECT r = {0, 0, (LONG)(width * s), (LONG)(height * s)};
+    DWORD style   = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
+    DWORD exStyle = (DWORD)GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    AdjustWindowRectEx(&r, style, FALSE, exStyle);
+    SetWindowPos(hwnd, nullptr, 0, 0, r.right - r.left, r.bottom - r.top,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void Window::setFullscreen(bool full) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    HWND hwnd = (HWND)(void*)sapp_window_win32_get_hwnd(st->win);
+    if (!hwnd) return;
+    if (full == fullscreenRequested_) return;   // already in the requested state
+
+    if (full) {
+        // Save the current windowed style + rect, then switch to a borderless
+        // popup covering the window's current monitor (physical pixels; the DXGI
+        // swapchain resizes to the client area, and windowTick's fbWidth/fbHeight
+        // sync + syncRootSize pick up the new size).
+        st->savedStyle   = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        st->savedExStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        GetWindowRect(hwnd, &st->savedRect);
+        st->savedValid = true;
+
+        HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi = { sizeof(mi) };
+        if (!GetMonitorInfoW(mon, &mi)) return;
+        const RECT& r = mi.rcMonitor;   // full monitor rect in physical pixels
+
+        SetWindowLongPtrW(hwnd, GWL_STYLE,
+            (st->savedStyle & ~(WS_OVERLAPPEDWINDOW)) | WS_POPUP);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE,
+            st->savedExStyle & ~(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE));
+        SetWindowPos(hwnd, HWND_TOP, r.left, r.top,
+                     r.right - r.left, r.bottom - r.top,
+                     SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        fullscreenRequested_ = true;
+    } else {
+        // Restore the saved windowed style + rect.
+        if (st->savedValid) {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, st->savedStyle);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, st->savedExStyle);
+            const RECT& r = st->savedRect;
+            SetWindowPos(hwnd, nullptr, r.left, r.top,
+                         r.right - r.left, r.bottom - r.top,
+                         SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
+        }
+        fullscreenRequested_ = false;
+    }
+}
+
+bool Window::isFullscreen() const {
+    return fullscreenRequested_;
 }
 
 int Window::getWidth() const {

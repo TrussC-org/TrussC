@@ -305,6 +305,16 @@ namespace internal {
 
     // MSAAサンプルカウント（FBOパス中のPBRパイプライン用）
     inline int currentFboSampleCount = 1;
+
+    // Per-window routing for the context-aware global window-control functions
+    // (setWindowTitle / setWindowSize). Defined in tc/app/tcWindow.h once Window
+    // is complete; forward-declared here because those globals appear earlier in
+    // this header. Return true if a secondary window consumed the call.
+    bool routeSetWindowTitleToWindow(const std::string& title);
+    bool routeSetWindowSizeToWindow(int width, int height);
+    bool routeSetFullscreenToWindow(bool full);
+    bool routeToggleFullscreenToWindow();
+    bool routeIsFullscreenFromWindow(bool& out);
 }
 
 // ---------------------------------------------------------------------------
@@ -649,10 +659,11 @@ inline void enable3D() {
 [[deprecated("Use setupScreenPerspective(fovDeg) or setupScreenFov(fovDeg) instead. Note: FOV is now in degrees, not radians.")]]
 inline void enable3DPerspective(float fovY = 0.785f, float nearZ = 0.1f, float farZ = 1000.0f) {
     internal::loadPipeline(internal::active3D());   // format-correct 3D for the active target
-    // Set perspective projection (backend-native clip-z, #134)
-    float dpiScale = sapp_dpi_scale();
-    float w = (float)sapp_width() / dpiScale;
-    float h = (float)sapp_height() / dpiScale;
+    // Set perspective projection (backend-native clip-z, #134). Per-window
+    // framebuffer size / dpi so this is correct inside a secondary window's draw.
+    float dpiScale = getDpiScale();
+    float w = (float)getFramebufferWidth() / dpiScale;
+    float h = (float)getFramebufferHeight() / dpiScale;
     float aspect = w / h;
     internal::sglLoadProjection(internal::toBackendClip(Mat4::perspective(fovY, aspect, nearZ, farZ)));
     sgl_matrix_mode_modelview();
@@ -827,8 +838,9 @@ inline Vec3 worldToScreen(const Vec3& worldPos) {
     // Get current viewport dimensions
     float viewW = internal::currentWindowContext().currentViewW;
     float viewH = internal::currentWindowContext().currentViewH;
-    if (viewW == 0) viewW = (float)sapp_width() / sapp_dpi_scale();
-    if (viewH == 0) viewH = (float)sapp_height() / sapp_dpi_scale();
+    // Per-window fallback (secondary windows have their own framebuffer/dpi).
+    if (viewW == 0) viewW = (float)getFramebufferWidth() / getDpiScale();
+    if (viewH == 0) viewH = (float)getFramebufferHeight() / getDpiScale();
 
     // Transform world -> clip space
     Mat4 mvp = internal::currentWindowContext().currentProjectionMatrix * internal::currentWindowContext().currentViewMatrix;
@@ -856,8 +868,9 @@ inline Vec3 screenToWorld(const Vec2& screenPos, float worldZ = 0.0f) {
     // Get current viewport dimensions
     float viewW = internal::currentWindowContext().currentViewW;
     float viewH = internal::currentWindowContext().currentViewH;
-    if (viewW == 0) viewW = (float)sapp_width() / sapp_dpi_scale();
-    if (viewH == 0) viewH = (float)sapp_height() / sapp_dpi_scale();
+    // Per-window fallback (secondary windows have their own framebuffer/dpi).
+    if (viewW == 0) viewW = (float)getFramebufferWidth() / getDpiScale();
+    if (viewH == 0) viewH = (float)getFramebufferHeight() / getDpiScale();
 
     // Screen to NDC (flip Y: screen Y is down, NDC Y is up)
     float ndcX = (screenPos.x / viewW) * 2.0f - 1.0f;
@@ -1157,6 +1170,11 @@ inline void ensureFontAtlas(int rows) {
     // stale fontAtlasVersion makes us try again on the next call.
     // (When size changes we destroy + create a brand-new image below, so the
     // guard only applies to the same-dimensions in-place path.)
+    // Keyed on the per-window getFrameCount() (Fix 3): the guard only needs to
+    // block a second update WITHIN one tick, and each window's tick does its
+    // own sg_commit, so a per-window counter is sufficient (a rare coincidental
+    // counter match across windows just defers one tick — never a double
+    // update). The main window is bit-identical to before.
     if (sizeOk && internal::fontAtlasUploadFrame == getFrameCount()) return;
 
     // Regenerate pixel buffer. Use the LARGER of `rows` and the currently
@@ -1414,8 +1432,30 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
 // Window control
 // ---------------------------------------------------------------------------
 
-// Set window title
+namespace internal {
+// Returns true when called from a secondary window's context, emitting a
+// one-time warning that `fn` is main-window only (`why` states the platform
+// limitation). The global window-control functions that have no per-window
+// implementation call this and bail, so a secondary tick can never silently
+// drive the MAIN window (the pre-Phase-2 trap). No-op / false on the main
+// context, where the caller proceeds normally.
+inline bool warnIfSecondaryWindowControl(const char* fn, const char* why) {
+    if (currentWindowContext().isMain) return false;
+    static std::unordered_set<std::string> warned;
+    if (warned.insert(fn).second) {
+        logWarning("Window") << fn << "() is main-window only (" << why
+            << "). Called from a secondary window's context — ignored to avoid "
+            "retargeting the main window.";
+    }
+    return true;
+}
+}
+
+// Set window title. Context-aware: from a secondary window's tick/event it
+// retitles THAT window (Window::setTitle); on the main context it retitles the
+// main window as before.
 inline void setWindowTitle(const std::string& title) {
+    if (internal::routeSetWindowTitleToWindow(title)) return;
     sapp_set_window_title(title.c_str());
 }
 
@@ -1454,18 +1494,30 @@ enum class Cursor {
     Custom15    = SAPP_MOUSECURSOR_CUSTOM_15,
 };
 
+// Cursor visibility/shape asymmetry: sokol_app's cursor API targets the main
+// window, and on macOS cursor visibility is app-global (NSCursor hide/unhide is
+// process-wide, not per-NSWindow) — so there is no honest per-secondary-window
+// cursor control. From a secondary context these warn once and no-op rather
+// than silently changing the main window's cursor.
+
 // Show the mouse cursor (default)
 inline void showCursor() {
+    if (internal::warnIfSecondaryWindowControl("showCursor",
+        "cursor visibility is app-global on macOS and sokol_app targets the main window")) return;
     sapp_show_mouse(true);
 }
 
 // Hide the mouse cursor
 inline void hideCursor() {
+    if (internal::warnIfSecondaryWindowControl("hideCursor",
+        "cursor visibility is app-global on macOS and sokol_app targets the main window")) return;
     sapp_show_mouse(false);
 }
 
 // Set mouse cursor shape (uses OS system cursors or custom cursors)
 inline void setCursor(Cursor cursor) {
+    if (internal::warnIfSecondaryWindowControl("setCursor",
+        "sokol_app's cursor shape targets the main window")) return;
     sapp_set_mouse_cursor((sapp_mouse_cursor)cursor);
 }
 
@@ -1519,6 +1571,20 @@ inline std::string getClipboardString() {
 // pixelPerfect=true: specify in framebuffer size
 // pixelPerfect=false: specify in logical size
 inline void setWindowSize(int width, int height) {
+    auto& ctx = internal::currentWindowContext();
+    if (!ctx.isMain) {
+        // Secondary window: route to Window::setSize (logical size). Convert
+        // framebuffer -> logical using THIS window's dpi scale in pixel-perfect
+        // mode, mirroring the main path's sapp_dpi_scale() conversion.
+        int lw = width, lh = height;
+        if (internal::pixelPerfectMode) {
+            float s = ctx.dpiScale > 0.0f ? ctx.dpiScale : 1.0f;
+            lw = static_cast<int>(width / s);
+            lh = static_cast<int>(height / s);
+        }
+        internal::routeSetWindowSizeToWindow(lw, lh);
+        return;
+    }
     if (internal::pixelPerfectMode) {
         // Pixel perfect mode: convert framebuffer size to logical size
         float scale = sapp_dpi_scale();
@@ -1529,20 +1595,30 @@ inline void setWindowSize(int width, int height) {
     }
 }
 
-// Toggle fullscreen
+// Fullscreen. Context-aware: sapp_toggle_fullscreen()/sapp_is_fullscreen() only
+// act on the main window, so from a secondary window's tick/event these route to
+// THAT window's native per-window fullscreen (macOS NSWindow toggleFullScreen:,
+// Win32 borderless-fullscreen style swap, X11 EWMH _NET_WM_STATE_FULLSCREEN —
+// see Window::setFullscreen). On the main context they behave exactly as before.
+
+// Enter / leave fullscreen.
 inline void setFullscreen(bool full) {
+    if (internal::routeSetFullscreenToWindow(full)) return;
     if (full != sapp_is_fullscreen()) {
         sapp_toggle_fullscreen();
     }
 }
 
-// Get fullscreen state
+// Get fullscreen state (of the current window's context).
 inline bool isFullscreen() {
+    bool out = false;
+    if (internal::routeIsFullscreenFromWindow(out)) return out;
     return sapp_is_fullscreen();
 }
 
-// Toggle fullscreen
+// Toggle fullscreen.
 inline void toggleFullscreen() {
+    if (internal::routeToggleFullscreenToWindow()) return;
     sapp_toggle_fullscreen();
 }
 
@@ -1599,9 +1675,10 @@ inline Vec2 getWindowSize() {
     return Vec2(static_cast<float>(getWindowWidth()), static_cast<float>(getWindowHeight()));
 }
 
-// Aspect ratio
+// Aspect ratio (of the CURRENT window's framebuffer, like getWindowWidth/Height)
 inline float getAspectRatio() {
-    return static_cast<float>(sapp_width()) / static_cast<float>(sapp_height());
+    return static_cast<float>(getFramebufferWidth()) /
+           static_cast<float>(getFramebufferHeight());
 }
 
 // ---------------------------------------------------------------------------
@@ -1760,6 +1837,15 @@ struct FpsSettings {
 // EVENT_DRIVEN: only on redraw() call
 // > 0: fixed fps
 inline void setFps(float fps) {
+    // Context-aware: called during a secondary window's tick it retargets THAT
+    // window's throttle (Window::setFps); on the main context it steers the main
+    // loop exactly as before. This removes the pre-Phase-2 trap where setFps()
+    // from secondary app code silently retuned the main loop.
+    auto& wctx = internal::currentWindowContext();
+    if (!wctx.isMain) {
+        wctx.throttleFps = fps;
+        return;
+    }
     internal::updateTargetFps = fps;
     internal::drawTargetFps = fps;
     internal::updateSyncedToDraw = true;
@@ -1768,8 +1854,20 @@ inline void setFps(float fps) {
 }
 
 // Set independent FPS for update and draw (not synchronized)
-// Each loop runs at its own rate, may cause timing variations
+// Each loop runs at its own rate, may cause timing variations.
+// MAIN-WINDOW ONLY: a secondary window has a single synced throttle rate
+// (Window::setFps); calling this from a secondary tick logs once and no-ops.
 inline void setIndependentFps(float updateFps, float drawFps) {
+    if (!internal::currentWindowContext().isMain) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            logWarning("Window") << "setIndependentFps() is main-window only; a "
+                "secondary window runs a single synced rate. Use Window::setFps() "
+                "(or the context-aware setFps()). Ignored.";
+        }
+        return;
+    }
     internal::updateTargetFps = updateFps;
     internal::drawTargetFps = drawFps;
     internal::updateSyncedToDraw = false;
@@ -1804,7 +1902,19 @@ inline float getFps() {
 
 // Request redraw (used when auto-draw is stopped)
 // count: number of draws (max value is used when called multiple times)
+// MAIN-WINDOW ONLY: the event-driven / redraw() loop drives the main window's
+// _frame_cb. Secondary windows are paced by their own display link (Window::
+// setFps throttles them); redraw() from a secondary tick logs once and no-ops.
 inline void redraw(int count = 1) {
+    if (!internal::currentWindowContext().isMain) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            logWarning("Window") << "redraw() / event-driven loop is main-window "
+                "only; secondary windows are paced by their display link. Ignored.";
+        }
+        return;
+    }
     if (count > internal::redrawCount) {
         internal::redrawCount = count;
     }
@@ -1866,9 +1976,20 @@ inline bool grabScreen(Pixels& outPixels) {
 }
 
 namespace internal {
-    // Resolved absolute paths queued by saveScreenshot(), drained right after
-    // present() (see the afterFrame listener installed in _setup_cb).
-    inline std::vector<std::filesystem::path> pendingScreenshotPaths;
+    // Capture every path queued by saveScreenshot() on the CURRENT window's
+    // queue (WindowContext::pendingScreenshotPaths) and clear it. Called right
+    // after present() while that window's context — and thus its
+    // lastSwapchainDrawable — is current: the main window from the afterFrame
+    // listener installed in _setup_cb, each secondary window from its own
+    // windowTick (platform/*/tcWindow*). Failures log via logError.
+    inline void drainPendingScreenshots() {
+        auto& queue = currentWindowContext().pendingScreenshotPaths;
+        if (queue.empty()) return;
+        for (const auto& p : queue) {
+            captureWindowToFile(p);
+        }
+        queue.clear();
+    }
     // Keeps the afterFrame drain subscription alive for the app's lifetime.
     inline EventListener screenshotAfterFrameListener;
 }
@@ -1900,8 +2021,14 @@ inline bool saveScreenshot(const std::filesystem::path& path) {
         }
     }
 
-    internal::pendingScreenshotPaths.push_back(std::move(resolved));
-    redraw();  // guarantee a present() (and thus afterFrame) even when paused
+    internal::currentWindowContext().pendingScreenshotPaths.push_back(std::move(resolved));
+    // Guarantee a present() (and thus the afterFrame drain) even when paused.
+    // redraw() only pokes the MAIN loop's redrawCount, so it applies to the main
+    // window only. A secondary window free-runs at vsync while visible and drains
+    // this queue on its next tick, so no redraw is needed (nor available) there.
+    if (internal::currentWindowContext().isMain) {
+        redraw();
+    }
     return true;
 }
 
@@ -2157,12 +2284,10 @@ namespace internal {
         // swapchain is committed and we are outside any pass — the only safe
         // readback point (see grabScreen()/saveScreenshot()).
         internal::screenshotAfterFrameListener = events().afterFrame.listen([]() {
-            if (!internal::pendingScreenshotPaths.empty()) {
-                for (const auto& p : internal::pendingScreenshotPaths) {
-                    internal::captureWindowToFile(p);  // failures log via logError
-                }
-                internal::pendingScreenshotPaths.clear();
-            }
+            // Main window: currentWindowContext() resolves to the main context
+            // here, so this drains the main window's queue (secondary windows
+            // drain their own in windowTick).
+            internal::drainPendingScreenshots();
             #ifndef __EMSCRIPTEN__
             mcp::drainDeferredResponses();
             #endif
@@ -2294,7 +2419,7 @@ namespace internal {
         // and the deferred screenshot (or MCP tc_get_screenshot) actually fires —
         // otherwise a request arriving in a paused/event-driven app would never
         // be served and a blocked MCP HTTP worker would hang.
-        if (!pendingScreenshotPaths.empty()
+        if (!mainWindowContext().pendingScreenshotPaths.empty()
             #ifndef __EMSCRIPTEN__
             || mcp::hasDeferredResponses()
             #endif

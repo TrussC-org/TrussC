@@ -52,6 +52,21 @@ public:
         quadraticAttenuation_ = 0.0f;
     }
 
+    // Unregister from every window context's light list on destruction, so a
+    // destroyed-but-still-registered Light never dangles in activeLights (the
+    // PBR pipeline derefs those pointers every lit draw). Defined out-of-line
+    // (tcGlobal.cpp) because it must see the Window registry, declared later.
+    // Registration is by ADDRESS, so:
+    //   - Copy: the copy is NOT registered (copies params, not registration).
+    //   - Move: falls back to copy (no move ctor because of this destructor);
+    //     a moved-from Light still unregisters itself on destruction and the
+    //     target is left unregistered. A registered Light must therefore stay
+    //     put: register objects with stable storage (members), not elements of
+    //     a vector<Light> that can reallocate.
+    ~Light();
+    Light(const Light&) = default;             // copy does NOT copy registration
+    Light& operator=(const Light&) = default;
+
     // === Light type settings ===
 
     // Set as directional light (specify direction)
@@ -444,6 +459,12 @@ private:
     float shadowAreaRadius_ = 500.0f;          // directional ortho box half-extent
 };
 
+// Unregister a Light from every window context's activeLights. Defined in
+// tcGlobal.cpp (needs the Window registry, which is declared later). Called by
+// ~Light() above.
+namespace internal { void removeLightFromAllContexts(Light* light); }
+inline Light::~Light() { internal::removeLightFromAllContexts(this); }
+
 // ---------------------------------------------------------------------------
 // Lighting calculation helper (called from Mesh)
 // ---------------------------------------------------------------------------
@@ -452,7 +473,8 @@ private:
 // Sum contributions from all active lights
 inline Color calculateLighting(const Vec3& worldPos, const Vec3& worldNormal,
                                const Material& material) {
-    if (internal::activeLights.empty()) {
+    auto& activeLights = internal::currentWindowContext().activeLights;
+    if (activeLights.empty()) {
         return material.getBaseColor();
     }
 
@@ -464,10 +486,11 @@ inline Color calculateLighting(const Vec3& worldPos, const Vec3& worldNormal,
     float b = em.b * es;
 
     // Sum contributions from each light
-    for (Light* light : internal::activeLights) {
+    const Vec3& cameraPosition = internal::currentWindowContext().cameraPosition;
+    for (Light* light : activeLights) {
         if (light && light->isEnabled()) {
             Color contribution = light->calculate(worldPos, worldNormal,
-                                                  material, internal::cameraPosition);
+                                                  material, cameraPosition);
             r += contribution.r;
             g += contribution.g;
             b += contribution.b;

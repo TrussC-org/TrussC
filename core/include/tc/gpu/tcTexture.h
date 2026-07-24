@@ -415,6 +415,9 @@ public:
                 pixels.getHeight() != height_ ||
                 pixels.getChannels() != channels_) return;
 
+            // DEVICE frame counter (Fix 3): sokol's one-update-per-image-per-
+            // frame limit is a device constraint, so this must stay on
+            // sapp_frame_count(), NOT the per-window getFrameCount().
             uint64_t currentFrame = sapp_frame_count();
             if (lastUpdateFrame_ == currentFrame) {
                 logWarning() << "[Texture] loadData() called twice in same frame, skipped";

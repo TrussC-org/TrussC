@@ -499,7 +499,7 @@ public:
         // GPU PBR path: requires normals and a Material.
         // Evaluated per-pixel on the GPU via the meshPbr shader.
         if (hasNormals() && normals_.size() >= vertices_.size() &&
-            internal::currentMaterial) {
+            internal::currentWindowContext().currentMaterial) {
             drawGpuPbr();
             return;
         }
@@ -595,7 +595,7 @@ public:
         // Get current transformation matrix
         Mat4 modelMatrix = getDefaultContext().getMatrix();
 
-        const Material& baseMaterial = *internal::currentMaterial;
+        const Material& baseMaterial = *internal::currentWindowContext().currentMaterial;
         bool useVertexColors = hasColors() && colors_.size() >= vertices_.size();
 
         sgl_begin_triangles();

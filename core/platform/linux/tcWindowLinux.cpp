@@ -16,6 +16,7 @@
 #include "TrussC.h"
 
 #if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
+#include <X11/Xlib.h>       // XResizeWindow (per-window setSize)
 #include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.cpp)
 
 using namespace trussc;
@@ -47,7 +48,7 @@ sg_swapchain acquireSecondarySwapchain(void* user) {
 
 // --- tick: drive this window's update/draw with its context active ---------
 void windowTick(sapp_window swin, void* user) {
-    Window* win = static_cast<Window*>(user);
+    trussc::Window* win = static_cast<trussc::Window*>(user);
     if (!win) return;
     auto& ctx = win->context();
 
@@ -57,6 +58,12 @@ void windowTick(sapp_window swin, void* user) {
     ctx.fbWidth = fbw;
     ctx.fbHeight = fbh;
     ctx.dpiScale = sapp_window_dpi_scale(swin);
+
+    // Per-window frame-rate throttle (Window::setFps): the timer keeps pacing at
+    // the display's refresh rate; skip the tick cheaply (before beginFrame,
+    // before advancing the per-window delta/frame count) when throttled down.
+    if (!internal::windowThrottleShouldTick(ctx)) return;
+
     // Keep a RectNode root in sync with the window's logical size (same
     // contract as the main App on SAPP_EVENTTYPE_RESIZED).
     win->syncRootSize((float)sapp_window_width(swin), (float)sapp_window_height(swin));
@@ -79,6 +86,10 @@ void windowTick(sapp_window swin, void* user) {
 
     auto* prev = internal::currentWindowCtx;
     internal::currentWindowCtx = &ctx;
+
+    // Per-window frame count (Fix 3): advance this window's own tick counter so
+    // getFrameCount()/getUpdateCount() report it while this context is active.
+    ctx.updateCount++;
 
     // Own sokol_gl context, created lazily on the first tick (sgl is set up
     // by then). Same lifecycle caveats as Fbo contexts on sgl resize.
@@ -106,6 +117,9 @@ void windowTick(sapp_window swin, void* user) {
 
     present();
     win->events().afterFrame.notify();
+    // Drain this window's saveScreenshot() queue while ITS context (and its
+    // lastSwapchainDrawable) is current — must run before we restore prev.
+    internal::drainPendingScreenshots();
 
     sgl_set_context(sgl_default_context());
     internal::currentWindowCtx = prev;
@@ -113,7 +127,7 @@ void windowTick(sapp_window swin, void* user) {
 
 // --- events: map sapp_event onto CoreEvents / App hooks / tree dispatch ----
 void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
-    Window* win = static_cast<Window*>(user);
+    trussc::Window* win = static_cast<trussc::Window*>(user);
     if (!win) return;
     auto& ctx = win->context();
     auto* prev = internal::currentWindowCtx;
@@ -245,7 +259,7 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
 
 void windowClosed(sapp_window swin, void* user) {
     (void)swin;
-    Window* win = static_cast<Window*>(user);
+    trussc::Window* win = static_cast<trussc::Window*>(user);
     if (win) win->close();   // tears down native + app state
 }
 
@@ -288,6 +302,56 @@ void Window::setTitle(const std::string& title) {
     title_ = title;
     auto* st = static_cast<AdapterState*>(native_);
     if (st) sapp_window_set_title(st->win, title.c_str());
+}
+
+void Window::setSize(int width, int height) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    Display* dpy = (Display*)(void*)sapp_x11_get_display();
+    ::Window xwin = (::Window)(uintptr_t)sapp_window_x11_get_window(st->win);
+    if (!dpy || !xwin) return;
+    // Logical -> physical pixels via this window's DPI scale (X11 sizes are in
+    // device pixels; sapp_window_width() reports the logical size).
+    float s = ctx_.dpiScale > 0.0f ? ctx_.dpiScale : 1.0f;
+    XResizeWindow(dpy, xwin, (unsigned)(width * s), (unsigned)(height * s));
+    XFlush(dpy);
+}
+
+void Window::setFullscreen(bool full) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    Display* dpy = (Display*)(void*)sapp_x11_get_display();
+    ::Window xwin = (::Window)(uintptr_t)sapp_window_x11_get_window(st->win);
+    if (!dpy || !xwin) return;
+
+    // EWMH: ask the window manager to toggle _NET_WM_STATE_FULLSCREEN via a
+    // ClientMessage sent to the root window with SubstructureRedirect. The WM
+    // resizes the window to the monitor; the per-window tick's fbWidth/fbHeight
+    // sync + syncRootSize pick up the new size on the next tick.
+    Atom wmState     = XInternAtom(dpy, "_NET_WM_STATE", False);
+    Atom wmFullscreen = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
+    if (wmState == None || wmFullscreen == None) return;
+
+    XEvent xev = {};
+    xev.type = ClientMessage;
+    xev.xclient.window = xwin;
+    xev.xclient.message_type = wmState;
+    xev.xclient.format = 32;
+    xev.xclient.data.l[0] = full ? 1 : 0;   // _NET_WM_STATE_ADD / _REMOVE
+    xev.xclient.data.l[1] = (long)wmFullscreen;
+    xev.xclient.data.l[2] = 0;
+    xev.xclient.data.l[3] = 1;               // source indication: normal app
+    xev.xclient.data.l[4] = 0;
+
+    ::Window root = DefaultRootWindow(dpy);
+    XSendEvent(dpy, root, False,
+               SubstructureRedirectMask | SubstructureNotifyMask, &xev);
+    XFlush(dpy);
+    fullscreenRequested_ = full;
+}
+
+bool Window::isFullscreen() const {
+    return fullscreenRequested_;
 }
 
 int Window::getWidth() const {

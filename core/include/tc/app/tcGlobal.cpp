@@ -334,6 +334,11 @@ void beginSwapchainPassInternal(bool preserveContents) {
     // Record the drawable we render into so end-of-frame capture reads back
     // THIS one (sapp_get_swapchain() advances the Metal drawable per call).
     ctx.lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
+    // Record the whole swapchain too: the Windows / Linux capture backends read
+    // this window's render_view / gl.framebuffer + size from here (mac uses the
+    // drawable above). Main window: this is sglue_swapchain(), i.e. identical to
+    // sapp_get_swapchain(), so the main capture path is unchanged.
+    ctx.lastSwapchain = pass.swapchain;
     sg_begin_pass(&pass);
     ctx.inSwapchainPass = true;
     ctx.swapchainPassStartedThisFrame = true;
@@ -440,6 +445,22 @@ std::vector<Window*> openWindows() {
     }
     return out;
 }
+
+// Unregister a destroyed Light from every window context's activeLights, so a
+// still-registered Light never dangles (the PBR pipeline derefs those pointers
+// every lit draw — issue: ~Light() had no cleanup). Called by ~Light()
+// (declared in tcLight.h); defined here because it needs the Window registry.
+// Non-inline keeps it host/guest-shared under hot reload, same as the registry.
+void removeLightFromAllContexts(Light* light) {
+    auto scrub = [&](WindowContext& ctx) {
+        auto& v = ctx.activeLights;
+        v.erase(std::remove(v.begin(), v.end(), light), v.end());
+    };
+    scrub(mainWindowContext());
+    for (Window* w : openWindows()) {
+        if (w) scrub(w->context());
+    }
+}
 } // namespace internal
 
 CoreEvents& events() {
@@ -465,16 +486,27 @@ double getElapsedTime() {
     return duration.count();
 }
 
+// getFrameCount()/getUpdateCount() resolve through the CURRENT window context.
+// The main window keeps returning internal::updateFrameCount — bit-identical to
+// the old global, and the value the hot-reload host mirrors (tcHotReloadHost.h)
+// — while a secondary window returns its own per-tick counter (advanced in the
+// native windowTick before update()). Single-window apps are unaffected.
 uint64_t getUpdateCount() {
-    return internal::updateFrameCount;
+    auto& ctx = internal::currentWindowContext();
+    return ctx.isMain ? internal::updateFrameCount : ctx.updateCount;
 }
 
+// Device/main-window frame count. Left on sapp_frame_count(): it is the
+// sokol_app frame index used for one-update-per-device-frame guards, not a
+// per-window update counter (secondary draws happen within main-thread ticks
+// and are not tracked separately).
 uint64_t getDrawCount() {
     return sapp_frame_count();
 }
 
 uint64_t getFrameCount() {
-    return internal::updateFrameCount;
+    auto& ctx = internal::currentWindowContext();
+    return ctx.isMain ? internal::updateFrameCount : ctx.updateCount;
 }
 
 double getDeltaTime() {

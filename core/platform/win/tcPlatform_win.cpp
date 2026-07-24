@@ -199,15 +199,25 @@ fs::path getExecutableDir() {
 // captureWindow - 現在のウィンドウをキャプチャ
 // ---------------------------------------------------------------------------
 bool captureWindow(Pixels& outPixels) {
-    // sokol の swapchain から D3D11 テクスチャを取得
-    sapp_swapchain sc = sapp_get_swapchain();
-    if (!sc.d3d11.render_view) {
+    // Pick the render-target view of the CURRENT window: a secondary window's
+    // context records its own swapchain in lastSwapchain (beginSwapchainPassInternal),
+    // so its screenshot / recording reads back ITS surface. The main window has no
+    // per-window swapchain recorded here for capture-only frames, so it keeps using
+    // sapp_get_swapchain() — byte-identical to the previous behavior.
+    const void* renderView = nullptr;
+    auto& winCtx = internal::currentWindowContext();
+    if (!winCtx.isMain && winCtx.lastSwapchain.d3d11.render_view) {
+        renderView = winCtx.lastSwapchain.d3d11.render_view;
+    } else {
+        renderView = sapp_get_swapchain().d3d11.render_view;
+    }
+    if (!renderView) {
         logError() << "[Screenshot] D3D11 render target view is null";
         return false;
     }
 
     // RenderTargetView からテクスチャを取得
-    ID3D11RenderTargetView* rtv = (ID3D11RenderTargetView*)sc.d3d11.render_view;
+    ID3D11RenderTargetView* rtv = (ID3D11RenderTargetView*)renderView;
     ID3D11Resource* resource = nullptr;
     rtv->GetResource(&resource);
 

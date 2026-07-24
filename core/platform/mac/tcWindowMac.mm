@@ -15,6 +15,7 @@
 #include "TrussC.h"
 
 #if defined(__APPLE__)
+#import <Cocoa/Cocoa.h>      // NSWindow (per-window setSize)
 #include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.mm)
 
 using namespace trussc;
@@ -59,6 +60,12 @@ void windowTick(sapp_window swin, void* user) {
     ctx.fbWidth = fbw;
     ctx.fbHeight = fbh;
     ctx.dpiScale = sapp_window_dpi_scale(swin);
+
+    // Per-window frame-rate throttle (Window::setFps): the CADisplayLink keeps
+    // firing at the display's vsync; skip the tick cheaply (before beginFrame,
+    // before advancing the per-window delta/frame count) when throttled down.
+    if (!internal::windowThrottleShouldTick(ctx)) return;
+
     // Keep a RectNode root in sync with the window's logical size (same
     // contract as the main App on SAPP_EVENTTYPE_RESIZED).
     win->syncRootSize((float)sapp_window_width(swin), (float)sapp_window_height(swin));
@@ -81,6 +88,12 @@ void windowTick(sapp_window swin, void* user) {
 
     auto* prev = internal::currentWindowCtx;
     internal::currentWindowCtx = &ctx;
+
+    // Per-window frame count (Fix 3): the main window advances
+    // internal::updateFrameCount in appUpdateFunc; a secondary window advances
+    // its own counter here so getFrameCount()/getUpdateCount() report this
+    // window's tick count while its context is active.
+    ctx.updateCount++;
 
     // Own sokol_gl context, created lazily on the first tick (sgl is set up
     // by then). Same lifecycle caveats as Fbo contexts on sgl resize.
@@ -108,6 +121,9 @@ void windowTick(sapp_window swin, void* user) {
 
     present();
     win->events().afterFrame.notify();
+    // Drain this window's saveScreenshot() queue while ITS context (and its
+    // lastSwapchainDrawable) is current — must run before we restore prev.
+    internal::drainPendingScreenshots();
 
     sgl_set_context(sgl_default_context());
     internal::currentWindowCtx = prev;
@@ -290,6 +306,41 @@ void Window::setTitle(const std::string& title) {
     title_ = title;
     auto* st = static_cast<AdapterState*>(native_);
     if (st) sapp_window_set_title(st->win, title.c_str());
+}
+
+void Window::setSize(int width, int height) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    NSWindow* nsWindow = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(st->win);
+    if (nsWindow) {
+        // Logical (point) content size — matches getWidth()/getHeight() units.
+        [nsWindow setContentSize:NSMakeSize((CGFloat)width, (CGFloat)height)];
+    }
+}
+
+void Window::setFullscreen(bool full) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    fullscreenRequested_ = full;
+    NSWindow* nsWindow = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(st->win);
+    if (!nsWindow) return;
+    // NSWindow's native fullscreen is a toggle; only fire it when the live state
+    // differs from what was requested (the transition is animated/async, and the
+    // per-window CADisplayLink resize callback picks up the new framebuffer size).
+    const bool isFull = (nsWindow.styleMask & NSWindowStyleMaskFullScreen) != 0;
+    if (isFull != full) {
+        [nsWindow toggleFullScreen:nil];
+    }
+}
+
+bool Window::isFullscreen() const {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return false;
+    NSWindow* nsWindow = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(st->win);
+    if (!nsWindow) return false;
+    // Read the live styleMask so the reported state is correct once the async
+    // toggleFullScreen: animation settles (fullscreenRequested_ is the intent).
+    return (nsWindow.styleMask & NSWindowStyleMaskFullScreen) != 0;
 }
 
 int Window::getWidth() const {

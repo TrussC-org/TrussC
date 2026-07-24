@@ -78,7 +78,43 @@ public:
     int getWidth() const;    // logical size (matches the window's coordinates)
     int getHeight() const;
 
+    // Resize this window's content area to the given LOGICAL size (points),
+    // matching getWidth()/getHeight() units. Implemented natively per platform
+    // (macOS NSWindow, Windows HWND, X11) because sokol_app has no per-window
+    // resize entry point. No-op if the native window is gone.
+    void setSize(int width, int height);
+
+    // Per-window fullscreen. Implemented natively per platform because sokol_app's
+    // fullscreen only targets the main window:
+    //   macOS  -> NSWindow toggleFullScreen: (native, animated; isFullscreen()
+    //             reads the live styleMask, so it reflects the true state once
+    //             the async transition finishes).
+    //   Windows-> borderless-fullscreen: save style + rect, switch to a popup
+    //             sized to the window's monitor, restore on exit.
+    //   Linux  -> EWMH _NET_WM_STATE_FULLSCREEN ClientMessage to the root window.
+    // The framebuffer-size change is picked up by the normal per-window resize
+    // path (windowTick keeps fbWidth/fbHeight in sync and syncRootSize fires
+    // windowResized). No-op if the native window is gone.
+    void setFullscreen(bool full);
+    bool isFullscreen() const;
+    void toggleFullscreen() { setFullscreen(!isFullscreen()); }
+
     void setClearColor(const Color& c) { clearColor_ = c; }
+
+    // Per-window target frame rate (throttle).
+    //   fps <= 0            -> free-run at the display's vsync (default)
+    //   0 < fps < display   -> update/draw run at ~fps
+    //   fps >= display rate -> effectively free-run (nothing is skipped)
+    // The native display link always fires at vsync and cannot be portably
+    // retuned, so a lower rate is realised by skipping display ticks with a
+    // time accumulator (the skip bails before the frame's work, so it is cheap).
+    // Unlike the main loop this is a SINGLE rate: independent update/draw rates
+    // (setIndependentFps) and the event-driven redraw() loop are main-window
+    // only. getFps() returns the last target set here (0 = free-run), not a
+    // measured rate — use getFrameRate() from inside this window's tick for the
+    // measured value.
+    void setFps(float fps) { ctx_.throttleFps = fps; }
+    float getFps() const { return ctx_.throttleFps; }
 
     internal::WindowContext& context() { return ctx_; }
 
@@ -133,9 +169,68 @@ public:
     CoreEvents events_;
     internal::RenderContext render_;
     Color clearColor_ = Color(0.05f, 0.05f, 0.08f, 1.0f);
+    // Fullscreen intent. Windows/Linux report isFullscreen() from this flag
+    // (there is no cheap live query); macOS ignores it and reads the live
+    // NSWindow styleMask instead (the transition is async).
+    bool fullscreenRequested_ = false;
     std::string title_;
     internal::WindowRegistryEntry registryEntry_{this};
 };
+
+namespace internal {
+// The secondary Window whose context is currently active (during its
+// windowTick / event dispatch), or nullptr on the main context. Linear scan
+// over the (tiny) open-window registry — used by the context-aware global
+// window-control functions to route to the right window. Defined here (after
+// Window is complete); the globals in TrussC.h call the forward-declared
+// route* helpers below.
+inline Window* currentWindow() {
+    auto& ctx = currentWindowContext();
+    if (ctx.isMain) return nullptr;
+    for (Window* w : openWindows()) {
+        if (&w->context() == &ctx) return w;
+    }
+    return nullptr;
+}
+
+// Route helpers for the global window-control functions (forward-declared near
+// the top of TrussC.h, defined here). Each returns true if a secondary window
+// consumed the call; false on the main context (caller keeps main behavior).
+inline bool routeSetWindowTitleToWindow(const std::string& title) {
+    Window* w = currentWindow();
+    if (!w) return false;
+    w->setTitle(title);
+    return true;
+}
+inline bool routeSetWindowSizeToWindow(int width, int height) {
+    Window* w = currentWindow();
+    if (!w) return false;
+    w->setSize(width, height);
+    return true;
+}
+// Fullscreen routing: from a secondary window's context the global
+// setFullscreen()/toggleFullscreen()/isFullscreen() drive THAT window instead of
+// warning + no-op'ing (the pre-Phase-2 behavior). Return true when a secondary
+// window consumed the call; the read variant reports the window's state via out.
+inline bool routeSetFullscreenToWindow(bool full) {
+    Window* w = currentWindow();
+    if (!w) return false;
+    w->setFullscreen(full);
+    return true;
+}
+inline bool routeToggleFullscreenToWindow() {
+    Window* w = currentWindow();
+    if (!w) return false;
+    w->toggleFullscreen();
+    return true;
+}
+inline bool routeIsFullscreenFromWindow(bool& out) {
+    Window* w = currentWindow();
+    if (!w) return false;
+    out = w->isFullscreen();
+    return true;
+}
+}
 
 // Create a secondary window. macOS, Windows and Linux (nullptr elsewhere).
 // The returned shared_ptr keeps the window alive; closing the window (user or
@@ -187,6 +282,9 @@ inline void Window::close() {}
 inline void Window::setTitle(const std::string&) {}
 inline int Window::getWidth() const { return 0; }
 inline int Window::getHeight() const { return 0; }
+inline void Window::setSize(int, int) {}
+inline void Window::setFullscreen(bool) {}
+inline bool Window::isFullscreen() const { return false; }
 inline std::shared_ptr<Window> createWindow(const WindowSettings&) {
     logError("Window") << "createWindow(): secondary windows are supported on "
         "macOS, Windows and desktop Linux (OpenGL); this platform is "
