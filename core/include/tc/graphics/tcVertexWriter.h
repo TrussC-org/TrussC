@@ -250,34 +250,30 @@ inline void executeDeferredShaderDraw(const DeferredShaderDraw& d) {
 }
 
 // ---------------------------------------------------------------------------
-// Global shader stack and vertex writers
+// Vertex writers (shared scratch — stateless singletons) and the per-window
+// shader-stack / layer-counter / deferred-draw accessors.
 // ---------------------------------------------------------------------------
-    inline std::vector<Shader*> shaderStack;
     inline SglWriter sglWriter;
     inline ShaderWriter shaderWriter;
 
-    // sokol_gl layer management for proper draw ordering with shaders
-    // Each pushShader() increments this, so post-shader draws go to a new layer
-    inline int sglLayerNext = 0;
-
-    // Deferred shader draws - executed in present() for proper ordering
-    inline std::vector<DeferredShaderDraw> deferredShaderDraws;
-
-    // Shader draws deferred WITHIN an FBO pass (shares fboLayerNext, declared
-    // in tcMeshPointPipeline.h); replayed by flushFboDeferredPbr() at
-    // Fbo::end()/clearColor() in the same per-layer walk as PBR/point draws.
-    inline std::vector<DeferredShaderDraw> fboShaderDraws;
+    // The shader stack, sokol_gl layer counter (sglLayerNext), and the deferred
+    // swapchain/FBO draw queues are now PER-WINDOW: they live in WindowContext
+    // (tc/app/tcWindowContext.h) and are reached through currentWindowContext().
+    // They used to be process globals here — moved so no per-frame draw/record
+    // state is shared between windows (each window ticks serially, populating
+    // and draining its own queues within one tick).
 
     inline Shader* getCurrentShader() {
-        return shaderStack.empty() ? nullptr : shaderStack.back();
+        auto& s = currentWindowContext().shaderStack;
+        return s.empty() ? nullptr : s.back();
     }
 
     inline bool isShaderActive() {
-        return !shaderStack.empty();
+        return !currentWindowContext().shaderStack.empty();
     }
 
     inline void resetShaderStack() {
-        shaderStack.clear();
+        currentWindowContext().shaderStack.clear();
     }
 
     inline VertexWriter& getActiveWriter() {
