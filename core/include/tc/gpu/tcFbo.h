@@ -271,12 +271,13 @@ public:
         // Switch back to default context
         sgl_set_context(sgl_default_context());
         active_ = false;
-        internal::currentWindowContext().inFboPass = false;
-        internal::currentFbo = nullptr;
-        internal::currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
-        internal::currentFboSampleCount = 1;
-        internal::currentWindowContext().currentTarget = &internal::currentWindowContext().swapchainTarget;   // RenderTarget: back to swapchain
-        internal::fboClearColorFunc = nullptr;
+        auto& wctx = internal::currentWindowContext();
+        wctx.inFboPass = false;
+        wctx.currentFbo = nullptr;
+        wctx.currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
+        wctx.currentFboSampleCount = 1;
+        wctx.currentTarget = &wctx.swapchainTarget;   // RenderTarget: back to swapchain
+        wctx.fboClearColorFunc = nullptr;
 
         // Restore the screen camera state saved in beginInternal() so
         // worldToScreen / camera-context stamping after end() see the screen
@@ -492,6 +493,14 @@ private:
     // flushed, all pool entries are reusable again. Keyed on the per-window
     // getFrameCount() (Fix 3): each window records + flushes (sg_commit) its Fbo
     // draws within its own tick, so a per-window frame boundary is correct.
+    //
+    // Supported contract / cross-window limitation: an Fbo must be drawn from a
+    // SINGLE window within a given frame. Drawing one Fbo object from multiple
+    // windows in the same frame is unsupported — getFrameCount() is per-window
+    // (PR #200), so two windows' independent counters can coincide, making this
+    // early-return skip the version promote (stale snapshot / unbounded version
+    // growth). There is no clean fix for the key: sapp_frame_count() would break
+    // secondary-window frame boundaries. Keep one Fbo to one window per frame.
     void syncVersionFrame_() {
         uint64_t fc = getFrameCount();
         if (fc == poolFrame_) return;
@@ -838,10 +847,11 @@ private:
 
         // Start this FBO pass's deferred-PBR layer counter fresh (mirrors the
         // swapchain's sglLayerNext). Meshes drawn now defer into fboPbrDraws,
-        // point splats into fboPointDraws (both share fboLayerNext).
-        internal::fboPbrDraws.clear();
-        internal::fboPointDraws.clear();
-        internal::fboLayerNext = 0;
+        // point splats into fboPointDraws (both share fboLayerNext). These are
+        // per-window (this tick's context).
+        internal::currentWindowContext().fboPbrDraws.clear();
+        internal::currentWindowContext().fboPointDraws.clear();
+        internal::currentWindowContext().fboLayerNext = 0;
         sgl_layer(0);
 
         // Save the screen camera state so end() can restore it — the FBO's own
@@ -874,10 +884,11 @@ private:
         // persists across swapchain frames.
         internal::restoreCurrentPipeline();
 
-        internal::currentFbo = this;
-        internal::currentFboColorFormat = toSokolFormat(format_);
-        internal::currentFboSampleCount = sampleCount_;
-        internal::fboClearColorFunc = internal::_fboClearColorHelper;
+        auto& wctx = internal::currentWindowContext();
+        wctx.currentFbo = this;
+        wctx.currentFboColorFormat = toSokolFormat(format_);
+        wctx.currentFboSampleCount = sampleCount_;
+        wctx.fboClearColorFunc = internal::_fboClearColorHelper;
     }
 
 private:
@@ -949,7 +960,7 @@ private:
 // ---------------------------------------------------------------------------
 namespace internal {
 inline void _fboClearColorHelper(float r, float g, float b, float a) {
-    Fbo* fbo = static_cast<Fbo*>(internal::currentFbo);
+    Fbo* fbo = static_cast<Fbo*>(internal::currentWindowContext().currentFbo);
     if (fbo) {
         fbo->clearColor(r, g, b, a);
     }

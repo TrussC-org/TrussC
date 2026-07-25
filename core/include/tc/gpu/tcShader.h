@@ -129,17 +129,18 @@ public:
     void begin() {
         if (!loaded) return;
 
-        // Push to stack
-        internal::shaderStack.push_back(this);
+        // Push to stack (per-window)
+        auto& wctx = internal::currentWindowContext();
+        wctx.shaderStack.push_back(this);
 
         // Increment layer for post-shader sokol_gl draws
         // (shader draws will be deferred and executed between layers).
         // Inside an FBO pass the layering is handled per-submission instead
         // (fboLayerNext bump in submitVertices, like the deferred PBR path),
         // so only the swapchain layer counter is advanced here.
-        if (!internal::currentWindowContext().inFboPass) {
-            internal::sglLayerNext++;
-            sgl_layer(internal::sglLayerNext);
+        if (!wctx.inFboPass) {
+            wctx.sglLayerNext++;
+            sgl_layer(wctx.sglLayerNext);
         }
 
         // Call virtual hook
@@ -148,8 +149,9 @@ public:
 
     void end() {
         if (!loaded) return;
-        if (internal::shaderStack.empty()) return;
-        if (internal::shaderStack.back() != this) {
+        auto& stack = internal::currentWindowContext().shaderStack;
+        if (stack.empty()) return;
+        if (stack.back() != this) {
             logWarning("Shader") << "end() called on wrong shader";
             return;
         }
@@ -158,10 +160,10 @@ public:
         onEnd();
 
         // Pop from stack
-        internal::shaderStack.pop_back();
+        stack.pop_back();
 
         // Restore sokol_gl state if no more shaders
-        if (internal::shaderStack.empty()) {
+        if (stack.empty()) {
             // Reset sokol_gfx state cache so sokol_gl can apply its pipeline
             sg_reset_state_cache();
         }
@@ -306,19 +308,20 @@ public:
         bind.index_buffer = indexBuffer;
         draw.bindings = bind;
 
-        if (internal::currentWindowContext().inFboPass) {
+        auto& wctx = internal::currentWindowContext();
+        if (wctx.inFboPass) {
             // Defer into the per-FBO list; flushed per-layer by
             // flushFboDeferredPbr() at Fbo::end()/clearColor(). Bump the FBO
             // layer so 2D drawn after this composites on top of it, matching
             // the deferred PBR/point pattern (tcMeshPbrPipeline.h).
-            draw.layerId = internal::fboLayerNext;
-            internal::fboShaderDraws.push_back(std::move(draw));
-            internal::fboLayerNext++;
-            sgl_layer(internal::fboLayerNext);
+            draw.layerId = wctx.fboLayerNext;
+            wctx.fboShaderDraws.push_back(std::move(draw));
+            wctx.fboLayerNext++;
+            sgl_layer(wctx.fboLayerNext);
         } else {
             // Swapchain: executed in present() between sokol_gl layers.
-            draw.layerId = internal::sglLayerNext - 1;  // Layer before this shader
-            internal::deferredShaderDraws.push_back(std::move(draw));
+            draw.layerId = wctx.sglLayerNext - 1;  // Layer before this shader
+            wctx.deferredShaderDraws.push_back(std::move(draw));
         }
     }
 
@@ -410,15 +413,16 @@ protected:
     // sample count and depth match the FBO, so one is built lazily (from the same
     // createPipelineDesc()) and cached per distinct (format, sampleCount) target.
     sg_pipeline pipelineForCurrentTarget() {
-        if (!internal::currentWindowContext().inFboPass) return pipeline;
-        uint64_t key = ((uint64_t)internal::currentFboColorFormat << 8)
-                     | (uint64_t)(internal::currentFboSampleCount & 0xff);
+        auto& wctx = internal::currentWindowContext();
+        if (!wctx.inFboPass) return pipeline;
+        uint64_t key = ((uint64_t)wctx.currentFboColorFormat << 8)
+                     | (uint64_t)(wctx.currentFboSampleCount & 0xff);
         auto it = targetPipelines_.find(key);
         if (it != targetPipelines_.end()) return it->second;
         sg_pipeline_desc desc = createPipelineDesc();
         desc.shader = shader;
-        desc.colors[0].pixel_format = internal::currentFboColorFormat;
-        desc.sample_count           = internal::currentFboSampleCount;
+        desc.colors[0].pixel_format = wctx.currentFboColorFormat;
+        desc.sample_count           = wctx.currentFboSampleCount;
         desc.depth.pixel_format     = SG_PIXELFORMAT_DEPTH_STENCIL;  // Fbo always allocates depth-stencil
         sg_pipeline pip = sg_make_pipeline(&desc);
         targetPipelines_[key] = pip;
@@ -494,8 +498,11 @@ inline void flushDeferredShaderDraws() {
     sgl_error_t err = sgl_error();
     bool sglOverflow = err.vertices_full || err.commands_full;
 
+    // Deferred swapchain queues + layer counter are per-window (this tick's ctx).
+    auto& wctx = internal::currentWindowContext();
+
     // For each layer: draw sokol_gl, then execute shader draws for that layer
-    for (int layer = 0; layer <= internal::sglLayerNext; layer++) {
+    for (int layer = 0; layer <= wctx.sglLayerNext; layer++) {
         // Draw sokol_gl content for this layer (skip if overflowed)
         if (!sglOverflow) {
             sgl_draw_layer(layer);
@@ -505,7 +512,7 @@ inline void flushDeferredShaderDraws() {
         // self-contained snapshot (pipeline/bindings/uniforms captured at
         // submission), so no Shader object is touched here — the object may
         // already be destroyed.
-        for (auto& draw : internal::deferredShaderDraws) {
+        for (auto& draw : wctx.deferredShaderDraws) {
             if (draw.layerId == layer) {
                 internal::executeDeferredShaderDraw(draw);
             }
@@ -514,7 +521,7 @@ inline void flushDeferredShaderDraws() {
         // Deferred PBR mesh draws — same per-layer ordering, so PBR composites
         // with sokol_gl 2D in submission order (a 2D background drawn first
         // stays behind the meshes).
-        for (auto& d : internal::deferredPbrDraws) {
+        for (auto& d : wctx.deferredPbrDraws) {
             if (d.layerId == layer) {
                 internal::getPbrPipeline().executePbrDraw(d.cmd);
             }
@@ -522,7 +529,7 @@ inline void flushDeferredShaderDraws() {
 
         // Deferred point-splat draws (Mesh in PrimitiveMode::Points) — same
         // per-layer ordering, sharing the swapchain pass + depth buffer.
-        for (auto& d : internal::deferredPointDraws) {
+        for (auto& d : wctx.deferredPointDraws) {
             if (d.layerId == layer) {
                 internal::executePointDraw(d.cmd);
             }
@@ -530,12 +537,12 @@ inline void flushDeferredShaderDraws() {
     }
 
     // Clear deferred draws for next frame
-    internal::deferredShaderDraws.clear();
-    internal::deferredPbrDraws.clear();
-    internal::deferredPointDraws.clear();
+    wctx.deferredShaderDraws.clear();
+    wctx.deferredPbrDraws.clear();
+    wctx.deferredPointDraws.clear();
 
     // Reset layer for next frame
-    internal::sglLayerNext = 0;
+    wctx.sglLayerNext = 0;
     sgl_layer(0);
 }
 } // namespace internal

@@ -12,8 +12,9 @@ FetchContent_Declare(
     mbedtls
     GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
     # LTS branch. Keep on 3.6.x for security updates; pre-3.6 lacks several CVE
-    # fixes (e.g. CVE-2024-23744, CVE-2024-28755).
-    GIT_TAG v3.6.2
+    # fixes (e.g. CVE-2024-23744, CVE-2024-28755). v3.6.3..v3.6.7 add many more
+    # TLS/DTLS handshake, timing-side-channel and memory-safety fixes.
+    GIT_TAG v3.6.7
 )
 set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)

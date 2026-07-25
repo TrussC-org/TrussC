@@ -51,7 +51,9 @@ struct PbrDrawCommand {
     int                vertexCount;
 };
 struct DeferredPbrDraw { int layerId; PbrDrawCommand cmd; };
-inline std::vector<DeferredPbrDraw> deferredPbrDraws;
+// deferredPbrDraws (swapchain) is now PER-WINDOW, held in WindowContext
+// (tc/app/tcWindowContext.h) and reached via currentWindowContext(). Replayed
+// per sokol_gl layer by flushDeferredShaderDraws() (tcShader.h).
 
 // PBR draws deferred WITHIN an FBO pass. Flushed at Fbo::end()/clearColor() via
 // flushFboDeferredPbr(), which interleaves them with the FBO context's sokol_gl
@@ -59,9 +61,11 @@ inline std::vector<DeferredPbrDraw> deferredPbrDraws;
 // replaces the old per-mesh sgl_draw() in the FBO path, which redrew the whole
 // FBO context on every mesh (O(N^2)) and overflowed the per-frame uniform buffer
 // once enough meshes were in flight.
-inline std::vector<DeferredPbrDraw> fboPbrDraws;
-// fboLayerNext (the shared FBO-pass layer counter) is declared in
-// tcMeshPointPipeline.h, which is included before this file.
+// fboPbrDraws (PBR draws deferred WITHIN an FBO pass) is now PER-WINDOW, held in
+// WindowContext and reached via currentWindowContext(); flushed per-layer by
+// flushFboDeferredPbr() below. The shared FBO-pass layer counter fboLayerNext is
+// likewise a WindowContext member (used by both this pipeline and the point
+// pipeline).
 
 class PbrPipeline {
 public:
@@ -120,8 +124,8 @@ public:
         sg_pixel_format colorFmt;
         int sampleCount;
         if (wctx.inFboPass) {
-            colorFmt = internal::currentFboColorFormat;
-            sampleCount = internal::currentFboSampleCount;
+            colorFmt = wctx.currentFboColorFormat;
+            sampleCount = wctx.currentFboSampleCount;
         } else {
             colorFmt = _SG_PIXELFORMAT_DEFAULT;
             sampleCount = sapp_sample_count();
@@ -408,13 +412,13 @@ public:
             // Defer (like the swapchain path) into the per-FBO list; flushed
             // per-layer in Fbo::end(). Bump the FBO layer so 2D drawn after this
             // mesh composites on top of it, matching the swapchain ordering.
-            internal::fboPbrDraws.push_back({ internal::fboLayerNext, cmd });
-            internal::fboLayerNext++;
-            sgl_layer(internal::fboLayerNext);
+            wctx.fboPbrDraws.push_back({ wctx.fboLayerNext, cmd });
+            wctx.fboLayerNext++;
+            sgl_layer(wctx.fboLayerNext);
         } else {
-            internal::deferredPbrDraws.push_back({ internal::sglLayerNext, cmd });
-            internal::sglLayerNext++;
-            sgl_layer(internal::sglLayerNext);
+            wctx.deferredPbrDraws.push_back({ wctx.sglLayerNext, cmd });
+            wctx.sglLayerNext++;
+            sgl_layer(wctx.sglLayerNext);
         }
     }
 
@@ -863,27 +867,29 @@ inline PbrPipeline& getPbrPipeline() {
 // single FBO context). Called by Fbo::end()/clearColor() while the FBO pass is
 // still active. Each sgl layer is drawn exactly once (O(N)).
 inline void flushFboDeferredPbr(sgl_context ctx) {
-    for (int layer = 0; layer <= fboLayerNext; layer++) {
+    // FBO-pass deferral queues + layer counter are per-window (this window's tick).
+    auto& wctx = currentWindowContext();
+    for (int layer = 0; layer <= wctx.fboLayerNext; layer++) {
         sgl_context_draw_layer(ctx, layer);
         // Deferred shader draws share this FBO's layer space; replay them
         // first within the layer, matching the swapchain flush order
         // (sokol_gl -> shader -> PBR -> points) in flushDeferredShaderDraws.
-        for (auto& d : fboShaderDraws) {
+        for (auto& d : wctx.fboShaderDraws) {
             if (d.layerId == layer) executeDeferredShaderDraw(d);
         }
-        for (auto& d : fboPbrDraws) {
+        for (auto& d : wctx.fboPbrDraws) {
             if (d.layerId == layer) getPbrPipeline().executePbrDraw(d.cmd);
         }
         // Point splats share this FBO's layer space (fboLayerNext); replay them
         // in the same walk so they composite in submission order with PBR + 2D.
-        for (auto& d : fboPointDraws) {
+        for (auto& d : wctx.fboPointDraws) {
             if (d.layerId == layer) executePointDraw(d.cmd);
         }
     }
-    fboShaderDraws.clear();
-    fboPbrDraws.clear();
-    fboPointDraws.clear();
-    fboLayerNext = 0;
+    wctx.fboShaderDraws.clear();
+    wctx.fboPbrDraws.clear();
+    wctx.fboPointDraws.clear();
+    wctx.fboLayerNext = 0;
 }
 
 } // namespace internal

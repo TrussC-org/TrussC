@@ -592,15 +592,16 @@ private:
 // endStroke() implementation (uses StrokeMesh)
 // ===========================================================================
 inline void endStroke(bool close) {
-    if (!internal::strokeStarted || internal::strokeVertices.empty()) {
-        internal::strokeStarted = false;
+    auto& wctx = internal::currentWindowContext();
+    if (!wctx.strokeStarted || wctx.strokeVertices.empty()) {
+        wctx.strokeStarted = false;
         return;
     }
 
-    auto& verts = internal::strokeVertices;
+    auto& verts = wctx.strokeVertices;
     if (verts.size() < 2) {
-        internal::strokeVertices.clear();
-        internal::strokeStarted = false;
+        wctx.strokeVertices.clear();
+        wctx.strokeStarted = false;
         return;
     }
 
@@ -646,7 +647,7 @@ inline void endStroke(bool close) {
 
     // Build StrokeMesh from stroke vertices
     StrokeMesh stroke;
-    stroke.setCapType(toMeshCap(internal::strokeStartCap));  // Start cap from first vertex
+    stroke.setCapType(toMeshCap(wctx.strokeStartCap));  // Start cap from first vertex
     stroke.setJoinType(toMeshJoin(ctx.getStrokeJoin()));
 
     // Add vertices with per-vertex width
@@ -664,8 +665,8 @@ inline void endStroke(bool close) {
     stroke.update();
     stroke.draw();
 
-    internal::strokeVertices.clear();
-    internal::strokeStarted = false;
+    wctx.strokeVertices.clear();
+    wctx.strokeStarted = false;
 }
 
 // ===========================================================================

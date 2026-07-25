@@ -239,9 +239,10 @@ namespace internal {
     inline int sglPendingResize = 0;  // non-zero = need resize next frame
 
     // Per-frame uniform buffer reservation passed to sg_setup (Metal/WebGPU/Vulkan
-    // ring buffer; GL/D3D11 ignore it). 0 = sokol default (4MB ≈ 8k draw calls per
-    // frame, each apply 256-byte aligned). Set via WindowSettings::
-    // reserveUniformBuffer for scenes with very high draw-call counts.
+    // ring buffer; GL/D3D11 ignore it). 0 = default: 1MB on Metal (auto-grows on
+    // overflow — TrussC patch in sokol_gfx.h), 4MB sokol default on WebGPU/Vulkan
+    // (no auto-grow there, so set this via WindowSettings::reserveUniformBuffer
+    // for scenes with very high draw-call counts).
     inline int gpuUniformBufferReserve = 0;
 
     // ---------------------------------------------------------------------------
@@ -294,17 +295,9 @@ namespace internal {
     // Pass state (inSwapchainPass / swapchainClearValue / lastSwapchainDrawable /
     // inFboPass) moved to WindowContext (tc/app/tcWindowContext.h).
 
-    // FBO clearColor function pointer (set in tcFbo.h)
-    inline void (*fboClearColorFunc)(float, float, float, float) = nullptr;
-
-    // Current active FBO pointer (used from clearColor)
-    inline void* currentFbo = nullptr;
-
-    // Color pixel format of the current FBO pass (for PBR pipeline format matching)
-    inline sg_pixel_format currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
-
-    // MSAAサンプルカウント（FBOパス中のPBRパイプライン用）
-    inline int currentFboSampleCount = 1;
+    // FBO-pass state (fboClearColorFunc / currentFbo / currentFboColorFormat /
+    // currentFboSampleCount) moved to WindowContext (tc/app/tcWindowContext.h),
+    // next to inFboPass — they are per-window pipeline-format selectors.
 
     // Per-window routing for the context-aware global window-control functions
     // (setWindowTitle / setWindowSize). Defined in tc/app/tcWindow.h once Window
@@ -2168,14 +2161,15 @@ struct WindowSettings {
         return *this;
     }
 
-    // Reserve the per-frame GPU uniform buffer, in bytes (0 = backend default,
-    // 4MB). Like std::vector::reserve: this is the capacity set aside up front
-    // (if the buffer ever becomes auto-growing, a sufficient reservation still
-    // skips the mid-frame grow hitch). Every draw call takes a 256-byte-aligned
-    // slice of this ring buffer, so ~4MB caps out around 8k draw calls per
-    // frame; overflowing it in a release build silently corrupts uniforms
-    // (flipped/black frames). Only the Metal/WebGPU/Vulkan backends allocate it
-    // (x2 in-flight frames); GL/D3D11 ignore it — they have no such cap.
+    // Reserve the per-frame GPU uniform buffer, in bytes (0 = default: 1MB on
+    // Metal, 4MB on WebGPU/Vulkan). Like std::vector::reserve: on Metal the
+    // ring auto-grows (doubling, with a warning log) when a frame overflows it,
+    // so a sufficient reservation only skips the one-time grow hitch. Every
+    // draw call takes a 256-byte-aligned slice of this ring buffer (~4MB per
+    // 8k draw calls per frame). WebGPU/Vulkan do NOT auto-grow yet: there an
+    // overflowing frame is still an error, so size this generously for very
+    // high draw-call scenes. GL/D3D11 ignore it — they have no such cap.
+    // Metal/WebGPU/Vulkan allocate it x2 (in-flight frames).
     WindowSettings& reserveUniformBuffer(int bytes) {
         uniformBufferReserve = bytes;
         return *this;

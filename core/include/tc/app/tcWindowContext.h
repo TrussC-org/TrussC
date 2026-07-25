@@ -27,16 +27,39 @@ namespace trussc {
 
 class Node;
 class CoreEvents;
+class Shader;          // shader stack holds Shader* (defined in tc/gpu/tcShader.h)
 // 3D types whose state lives per-window (defined later, in the tc/3d headers).
 // Held here by pointer / pointer-vector so tcWindowContext.h stays includable
 // before them.
 class Light;
 class Material;
 class Environment;
+// Stroke cap of the first beginStroke() vertex (per-window shape accumulator).
+// Opaque-enum-declaration: a scoped enum is a COMPLETE type once declared this
+// way (underlying type int, matching the real definition in tcRenderContext.h,
+// included after this file), so it can be a value member with a value-init
+// default (StrokeCap{} == Butt == 0, byte-identical to the old global default).
+enum class StrokeCap;
 
 namespace internal {
 
 class RenderContext;   // the real class lives in internal:: (tcRenderContext.h)
+
+// ---------------------------------------------------------------------------
+// Per-window draw/record queue element types. Defined later (in the 3d /
+// graphics headers, all included after this file); WindowContext holds their
+// queues by std::vector, which C++17 guarantees to support an incomplete
+// element type as long as the type is complete wherever the vector's members
+// are instantiated. WindowContext is only ever constructed at tcGlobal.cpp
+// (mainWindowContext) and tcWindow.h (Window::ctx_), both of which see the full
+// definitions — same trick as activeLights holding Light* before Light. The
+// small StrokeVertex / LinesVertex accumulator structs (tcShape.h) are likewise
+// forward-declared here and kept defined where they were.
+struct DeferredPbrDraw;
+struct DeferredPointDraw;
+struct DeferredShaderDraw;
+struct StrokeVertex;
+struct LinesVertex;
 
 // ---------------------------------------------------------------------------
 // Lighting limits (were in tcLightingState.h; hoisted here because WindowContext
@@ -127,6 +150,17 @@ struct WindowContext {
     sg_color swapchainClearValue = { 0.0f, 0.0f, 0.0f, 1.0f };
     bool inSwapchainPass = false;
     bool inFboPass = false;
+    // FBO-pass companions of inFboPass — per-window for the same reason. They are
+    // read on EVERY mesh / point / shader submit while inFboPass to select the
+    // pipeline's color format + sample count, so a stale value from another
+    // window would resolve the wrong pipeline. Set in Fbo::beginInternal(),
+    // reset in Fbo::end(). currentFbo (the active Fbo*, held as void* so this
+    // header stays includable before Fbo) and fboClearColorFunc route the FBO
+    // clear-color path (tc::clear() -> _fboClearColorHelper -> Fbo::clearColor).
+    void (*fboClearColorFunc)(float, float, float, float) = nullptr;
+    void* currentFbo = nullptr;
+    sg_pixel_format currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
+    int currentFboSampleCount = 1;
     // True once the swapchain pass has been started at least once this frame.
     // First start CLEARs with swapchainClearValue (frame background); any
     // later restart (resume after an FBO / shadow / reflection pass suspended
@@ -229,6 +263,43 @@ struct WindowContext {
     // window drains from the afterFrame listener in _setup_cb; each secondary
     // window drains in its own windowTick. See TrussC.h drainPendingScreenshots().
     std::vector<std::filesystem::path> pendingScreenshotPaths;
+
+    // --- per-window deferred draw queues + sokol_gl layer counter ---------
+    // These were process globals, "safe" only because window ticks run strictly
+    // serialized and each window fully populates + drains its own queues within
+    // one tick. Made per-window so no per-frame draw/record state is shared
+    // between windows. Swapchain path: populated by drawMesh / point drawMesh /
+    // Shader::submitVertices during draw, drained in flushDeferredShaderDraws()
+    // at present() (which also resets sglLayerNext to 0). sglLayerNext is the
+    // per-frame sokol_gl layer counter (bumped so later 2D composites on top).
+    std::vector<DeferredPbrDraw>    deferredPbrDraws;
+    std::vector<DeferredPointDraw>  deferredPointDraws;
+    std::vector<DeferredShaderDraw> deferredShaderDraws;
+    int sglLayerNext = 0;
+    // FBO-pass path: the same deferral, scoped to one Fbo::begin()/end() pass.
+    // Populated during the pass, drained in flushFboDeferredPbr() at Fbo::end()
+    // (which resets fboLayerNext). fboLayerNext is reset to 0 at Fbo::begin().
+    // Per-window for the same reason: an FBO pass runs inside a window tick and
+    // must not read/leak another window's in-flight FBO draws.
+    std::vector<DeferredPbrDraw>    fboPbrDraws;
+    std::vector<DeferredPointDraw>  fboPointDraws;
+    std::vector<DeferredShaderDraw> fboShaderDraws;
+    int fboLayerNext = 0;
+
+    // --- per-window shader stack (pushShader / popShader) ------------------
+    // Made per-window so an unbalanced push in window A can't leak into B.
+    std::vector<Shader*> shaderStack;
+
+    // --- per-window shape / stroke accumulators (beginShape/endShape etc.) -
+    // Made per-window so a shape left open at end-of-tick can't bleed into the
+    // next window. strokeStartCap defaults to Butt (StrokeCap{} == 0).
+    std::vector<Vec3>         shapeVertices;
+    bool                      shapeStarted = false;
+    std::vector<LinesVertex>  linesVertices;
+    bool                      linesStarted = false;
+    std::vector<StrokeVertex> strokeVertices;
+    bool                      strokeStarted = false;
+    StrokeCap                 strokeStartCap{};   // Butt; real enum in tcRenderContext.h
 
     // Wired lazily by getDefaultContext() / events() for the main window
     // (preserves their pre-context construction timing); Phase 1 pre-wires

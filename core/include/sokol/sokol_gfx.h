@@ -4427,6 +4427,7 @@ typedef struct sg_stats {
     _SG_LOGITEM_XMACRO(D3D11_MAP_FOR_APPEND_BUFFER_FAILED, "Map() failed when appending to buffer (d3d11)") \
     _SG_LOGITEM_XMACRO(D3D11_MAP_FOR_UPDATE_IMAGE_FAILED, "Map() failed when updating image (d3d11)") \
     _SG_LOGITEM_XMACRO(METAL_CREATE_BUFFER_FAILED, "failed to create buffer object (metal)") \
+    _SG_LOGITEM_XMACRO(METAL_UNIFORM_BUFFER_GROWN, "per-frame uniform buffer overflowed and was auto-grown (metal); use sg_desc.uniform_buffer_size to pre-allocate") \
     _SG_LOGITEM_XMACRO(METAL_TEXTURE_FORMAT_NOT_SUPPORTED, "pixel format not supported for texture (metal)") \
     _SG_LOGITEM_XMACRO(METAL_CREATE_TEXTURE_FAILED, "failed to create texture object (metal)") \
     _SG_LOGITEM_XMACRO(METAL_CREATE_SAMPLER_FAILED, "failed to create sampler object (metal)") \
@@ -5482,6 +5483,7 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
 
 #include <stdlib.h> // malloc, free, qsort
 #include <string.h> // memset
+#include <stdio.h> // snprintf ([TrussC modification] metal uniform-buffer auto-grow log)
 #include <float.h> // FLT_MAX
 
 #ifndef SOKOL_API_IMPL
@@ -16268,7 +16270,24 @@ _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachment
 
     // if this is first pass in frame, get uniform buffer base pointer
     if (0 == _sg.mtl.cur_ub_base_ptr) {
-        _sg.mtl.cur_ub_base_ptr = (uint8_t*)[_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] contents];
+        // [TrussC modification] if the uniform ring was auto-grown in a previous
+        // frame while this rotate slot was in flight, replace its (smaller)
+        // buffer now: the inflight-frame semaphore acquired above guarantees the
+        // GPU is done with this slot's previous command buffer.
+        id<MTLBuffer> ub = _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index];
+        if ((int)[ub length] < _sg.mtl.ub_size) {
+            _sg_mtl_release_resource(_sg.frame_index, _sg_mtl_add_resource(ub));
+            ub = [_sg.mtl.device
+                newBufferWithLength:(NSUInteger)_sg.mtl.ub_size
+                options:MTLResourceCPUCacheModeWriteCombined|MTLResourceStorageModeShared
+            ];
+            #if defined(SOKOL_DEBUG)
+                ub.label = [NSString stringWithFormat:@"sg-uniform-buffer.%d", _sg.mtl.cur_frame_rotate_index];
+            #endif
+            _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] = ub;
+        }
+        // [TrussC modification end]
+        _sg.mtl.cur_ub_base_ptr = (uint8_t*)[ub contents];
     }
 
     if (pass->compute) {
@@ -16625,8 +16644,55 @@ _SOKOL_PRIVATE bool _sg_mtl_apply_bindings(_sg_bindings_ptrs_t* bnd) {
     return true;
 }
 
+// >>[TrussC modification] tettou771: auto-grow the per-frame uniform ring on overflow.
+// Upstream sokol only SOKOL_ASSERTs on overflow, which compiles out in release
+// builds and silently corrupts uniforms (flipped/black frames). Instead, when an
+// sg_apply_uniforms() call would overflow the ring, swap in a bigger MTLBuffer
+// for the CURRENT rotate slot and continue at offset 0:
+//   - draws already encoded this frame captured the old buffer binding at encode
+//     time (Metal encoders snapshot bindings per draw), so their data stays valid
+//   - the old buffer is retired through the normal deferred-release queue, so it
+//     outlives all in-flight command buffers that reference it
+//   - the other rotate slot(s) may still be in flight and are replaced lazily at
+//     the start of their next frame (see _sg_mtl_begin_pass), where the inflight
+//     semaphore guarantees the GPU is done with them
+_SOKOL_PRIVATE void _sg_mtl_grow_uniform_buffer(size_t data_size) {
+    const int old_size = _sg.mtl.ub_size;
+    int new_size = old_size;
+    do {
+        new_size *= 2;
+    } while ((size_t)new_size < data_size);
+    id old_buf = _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index];
+    _sg_mtl_release_resource(_sg.frame_index, _sg_mtl_add_resource(old_buf));
+    id<MTLBuffer> new_buf = [_sg.mtl.device
+        newBufferWithLength:(NSUInteger)new_size
+        options:MTLResourceCPUCacheModeWriteCombined|MTLResourceStorageModeShared
+    ];
+    #if defined(SOKOL_DEBUG)
+        new_buf.label = [NSString stringWithFormat:@"sg-uniform-buffer.%d", _sg.mtl.cur_frame_rotate_index];
+    #endif
+    _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] = new_buf;
+    _sg.mtl.ub_size = new_size;
+    _sg.mtl.cur_ub_offset = 0;
+    _sg.mtl.cur_ub_base_ptr = (uint8_t*)[new_buf contents];
+    // rebind so subsequent setXXXBufferOffset calls resolve into the new buffer
+    if (_sg.cur_pass.valid) {
+        _sg_mtl_bind_uniform_buffers();
+    }
+    char log_msg[160];
+    snprintf(log_msg, sizeof(log_msg),
+        "per-frame uniform buffer overflowed, auto-grown %d -> %d bytes (metal); use sg_desc.uniform_buffer_size to pre-allocate",
+        old_size, new_size);
+    _sg_log(SG_LOGITEM_METAL_UNIFORM_BUFFER_GROWN, 2, log_msg, __LINE__);
+}
+// <<[TrussC modification]
+
 _SOKOL_PRIVATE void _sg_mtl_apply_uniforms(int ub_slot, const sg_range* data) {
     SOKOL_ASSERT((ub_slot >= 0) && (ub_slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS));
+    // [TrussC modification] grow instead of overflowing (see _sg_mtl_grow_uniform_buffer)
+    if (((size_t)_sg.mtl.cur_ub_offset + data->size) > (size_t)_sg.mtl.ub_size) {
+        _sg_mtl_grow_uniform_buffer(data->size);
+    }
     SOKOL_ASSERT(((size_t)_sg.mtl.cur_ub_offset + data->size) <= (size_t)_sg.mtl.ub_size);
     SOKOL_ASSERT((_sg.mtl.cur_ub_offset & (_SG_MTL_UB_ALIGN-1)) == 0);
     const _sg_pipeline_t* pip = _sg_pipeline_ref_ptr(&_sg.cur_pip);

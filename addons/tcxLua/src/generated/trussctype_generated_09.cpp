@@ -41,25 +41,15 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
     }
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     {
-        sol::usertype<trussc::TcpClient> t = lua->new_usertype<trussc::TcpClient>("TcpClient",
-            sol::constructors<trussc::TcpClient()>(),
-            sol::call_constructor, sol::constructors<trussc::TcpClient()>());
-        t["onConnect"] = &trussc::TcpClient::onConnect;
-        t["onReceive"] = &trussc::TcpClient::onReceive;
-        t["onDisconnect"] = &trussc::TcpClient::onDisconnect;
-        t["onError"] = &trussc::TcpClient::onError;
-        t["connect"] = &trussc::TcpClient::connect;
-        t["connectAsync"] = &trussc::TcpClient::connectAsync;
-        t["disconnect"] = &trussc::TcpClient::disconnect;
-        t["isConnected"] = &trussc::TcpClient::isConnected;
-        t["send"] = sol::overload([](trussc::TcpClient& self, const std::vector<char> & data) { return self.send(data); }, [](trussc::TcpClient& self, const std::string & message) { return self.send(message); });
-        t["setReceiveBufferSize"] = &trussc::TcpClient::setReceiveBufferSize;
-        t["setBlocking"] = &trussc::TcpClient::setBlocking;
-        t["setUseThread"] = &trussc::TcpClient::setUseThread;
-        t["isUsingThread"] = &trussc::TcpClient::isUsingThread;
-        t["processNetwork"] = &trussc::TcpClient::processNetwork;
-        t["getRemoteHost"] = &trussc::TcpClient::getRemoteHost;
-        t["getRemotePort"] = &trussc::TcpClient::getRemotePort;
+        sol::usertype<trussc::ScreenRecorder> t = lua->new_usertype<trussc::ScreenRecorder>("ScreenRecorder",
+            sol::constructors<trussc::ScreenRecorder()>(),
+            sol::call_constructor, sol::constructors<trussc::ScreenRecorder()>());
+        t["start"] = sol::overload([](trussc::ScreenRecorder& self, const fs::path & path) { return self.start(path); }, [](trussc::ScreenRecorder& self, const fs::path & path, const trussc::VideoRecordSettings & settings) { return self.start(path, settings); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const fs::path & path) { return self.start(fbo, path); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const fs::path & path, const trussc::VideoRecordSettings & settings) { return self.start(fbo, path, settings); }, [](trussc::ScreenRecorder& self, const fs::path & path, float durationSec) { return self.start(path, durationSec); }, [](trussc::ScreenRecorder& self, const trussc::Fbo & fbo, const fs::path & path, float durationSec) { return self.start(fbo, path, durationSec); });
+        t["stop"] = &trussc::ScreenRecorder::stop;
+        t["isRecording"] = &trussc::ScreenRecorder::isRecording;
+        t["getFrameCount"] = &trussc::ScreenRecorder::getFrameCount;
+        t["getPath"] = &trussc::ScreenRecorder::getPath;
+        t["writer"] = &trussc::ScreenRecorder::writer;
     }
 #endif
     {
@@ -79,9 +69,17 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
             sol::call_constructor, sol::constructors<trussc::Tween<trussc::Vec3>(), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType), trussc::Tween<trussc::Vec3>(trussc::Vec3, trussc::Vec3, float, trussc::EaseType, trussc::EaseMode)>());
     }
     {
-        sol::usertype<trussc::Tween<float>> t = lua->new_usertype<trussc::Tween<float>>("Tween_float",
-            sol::constructors<trussc::Tween<float>(), trussc::Tween<float>(float, float, float), trussc::Tween<float>(float, float, float, trussc::EaseType), trussc::Tween<float>(float, float, float, trussc::EaseType, trussc::EaseMode)>(),
-            sol::call_constructor, sol::constructors<trussc::Tween<float>(), trussc::Tween<float>(float, float, float), trussc::Tween<float>(float, float, float, trussc::EaseType), trussc::Tween<float>(float, float, float, trussc::EaseType, trussc::EaseMode)>());
+        sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
+        t["isWeb"] = &trussc::Platform::isWeb;
+        t["isMacOS"] = &trussc::Platform::isMacOS;
+        t["isIOS"] = &trussc::Platform::isIOS;
+        t["isWindows"] = &trussc::Platform::isWindows;
+        t["isAndroid"] = &trussc::Platform::isAndroid;
+        t["isLinux"] = &trussc::Platform::isLinux;
+        t["isApple"] = &trussc::Platform::isApple;
+        t["isMobile"] = &trussc::Platform::isMobile;
+        t["isDesktop"] = &trussc::Platform::isDesktop;
+        t["name"] = &trussc::Platform::name;
     }
     lua->new_usertype<trussc::BlendMode>("BlendMode",
         sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
@@ -98,15 +96,15 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
         t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
         t["framePosition"] = &trussc::AudioInBuffer::framePosition;
     }
-    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
-        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
-        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
-        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
-    {
-        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
-        t["message"] = &trussc::UdpErrorEventArgs::message;
-        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
-    }
+    lua->new_usertype<trussc::TcyMode>("TcyMode",
+        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
+        "Rotate", sol::var(trussc::TcyMode::Rotate),
+        "Upright", sol::var(trussc::TcyMode::Upright),
+        "Combine", sol::var(trussc::TcyMode::Combine));
+    lua->new_usertype<trussc::MixMode>("MixMode",
+        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
+        "Auto", sol::var(trussc::MixMode::Auto),
+        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

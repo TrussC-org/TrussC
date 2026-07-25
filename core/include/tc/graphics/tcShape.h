@@ -18,22 +18,19 @@ namespace internal {
         float width;
     };
 
-    // Shape (polygon) vertices
-    inline std::vector<Vec3> shapeVertices;
-    inline bool shapeStarted = false;
-
     // Lines (independent line segments) vertices + colors
     struct LinesVertex {
         Vec3 pos;
         Color color;
     };
-    inline std::vector<LinesVertex> linesVertices;
-    inline bool linesStarted = false;
 
-    // Stroke vertices
-    inline std::vector<StrokeVertex> strokeVertices;
-    inline bool strokeStarted = false;
-    inline StrokeCap strokeStartCap = StrokeCap::Butt;  // Cap at first vertex
+    // The begin/end{Shape,Lines,Stroke} accumulators (shapeVertices/shapeStarted,
+    // linesVertices/linesStarted, strokeVertices/strokeStarted, strokeStartCap)
+    // are now PER-WINDOW: they live in WindowContext (tc/app/tcWindowContext.h)
+    // and are reached through currentWindowContext(). Moved out of process
+    // globals so a shape left open at end-of-tick can't bleed into the next
+    // window. StrokeVertex / LinesVertex above stay defined here (WindowContext
+    // holds their vectors by forward declaration).
 }
 
 // ===========================================================================
@@ -42,20 +39,22 @@ namespace internal {
 
 // Begin shape drawing
 inline void beginShape() {
-    internal::shapeVertices.clear();
-    internal::shapeStarted = true;
-    internal::strokeStarted = false;
+    auto& wctx = internal::currentWindowContext();
+    wctx.shapeVertices.clear();
+    wctx.shapeStarted = true;
+    wctx.strokeStarted = false;
 }
 
 // End shape drawing
 // close: if true, connects start and end points
 inline void endShape(bool close = false) {
-    if (!internal::shapeStarted || internal::shapeVertices.empty()) {
-        internal::shapeStarted = false;
+    auto& wctx = internal::currentWindowContext();
+    if (!wctx.shapeStarted || wctx.shapeVertices.empty()) {
+        wctx.shapeStarted = false;
         return;
     }
 
-    auto& verts = internal::shapeVertices;
+    auto& verts = wctx.shapeVertices;
     size_t n = verts.size();
     auto& ctx = getDefaultContext();
     Color col = ctx.getColor();
@@ -87,8 +86,8 @@ inline void endShape(bool close = false) {
         writer.end();
     }
 
-    internal::shapeVertices.clear();
-    internal::shapeStarted = false;
+    wctx.shapeVertices.clear();
+    wctx.shapeStarted = false;
 }
 
 // ===========================================================================
@@ -97,20 +96,22 @@ inline void endShape(bool close = false) {
 
 // Begin batch line drawing
 inline void beginLines() {
-    internal::linesVertices.clear();
-    internal::linesStarted = true;
-    internal::shapeStarted = false;
-    internal::strokeStarted = false;
+    auto& wctx = internal::currentWindowContext();
+    wctx.linesVertices.clear();
+    wctx.linesStarted = true;
+    wctx.shapeStarted = false;
+    wctx.strokeStarted = false;
 }
 
 // End batch line drawing — draws all accumulated vertex pairs as independent lines
 inline void endLines() {
-    if (!internal::linesStarted || internal::linesVertices.size() < 2) {
-        internal::linesStarted = false;
+    auto& wctx = internal::currentWindowContext();
+    if (!wctx.linesStarted || wctx.linesVertices.size() < 2) {
+        wctx.linesStarted = false;
         return;
     }
 
-    auto& verts = internal::linesVertices;
+    auto& verts = wctx.linesVertices;
     size_t n = verts.size();
     auto& writer = internal::getActiveWriter();
 
@@ -123,8 +124,8 @@ inline void endLines() {
     }
     writer.end();
 
-    internal::linesVertices.clear();
-    internal::linesStarted = false;
+    wctx.linesVertices.clear();
+    wctx.linesStarted = false;
 }
 
 // ===========================================================================
@@ -133,9 +134,10 @@ inline void endLines() {
 
 // Begin stroke drawing
 inline void beginStroke() {
-    internal::strokeVertices.clear();
-    internal::strokeStarted = true;
-    internal::shapeStarted = false;
+    auto& wctx = internal::currentWindowContext();
+    wctx.strokeVertices.clear();
+    wctx.strokeStarted = true;
+    wctx.shapeStarted = false;
 }
 
 // End stroke drawing - renders using StrokeMesh
@@ -148,18 +150,19 @@ inline void endStroke(bool close = false);  // Forward declaration (implemented 
 
 // Add vertex (3D)
 inline void vertex(float x, float y, float z) {
-    if (internal::linesStarted) {
+    auto& wctx = internal::currentWindowContext();
+    if (wctx.linesStarted) {
         auto& ctx = getDefaultContext();
-        internal::linesVertices.push_back({Vec3{x, y, z}, ctx.getColor()});
-    } else if (internal::shapeStarted) {
-        internal::shapeVertices.push_back(Vec3{x, y, z});
-    } else if (internal::strokeStarted) {
+        wctx.linesVertices.push_back({Vec3{x, y, z}, ctx.getColor()});
+    } else if (wctx.shapeStarted) {
+        wctx.shapeVertices.push_back(Vec3{x, y, z});
+    } else if (wctx.strokeStarted) {
         auto& ctx = getDefaultContext();
         // Save start cap on first vertex
-        if (internal::strokeVertices.empty()) {
-            internal::strokeStartCap = ctx.getStrokeCap();
+        if (wctx.strokeVertices.empty()) {
+            wctx.strokeStartCap = ctx.getStrokeCap();
         }
-        internal::strokeVertices.push_back({
+        wctx.strokeVertices.push_back({
             Vec3{x, y, z},
             ctx.getColor(),
             ctx.getStrokeWeight()

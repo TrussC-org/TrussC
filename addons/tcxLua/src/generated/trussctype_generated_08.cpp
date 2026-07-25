@@ -46,29 +46,29 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["setPosition"] = &trussc::Sound::setPosition;
         t["getDuration"] = &trussc::Sound::getDuration;
     }
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     {
-        sol::usertype<trussc::Quaternion> t = lua->new_usertype<trussc::Quaternion>("Quaternion",
-            sol::constructors<trussc::Quaternion(), trussc::Quaternion(float, float, float, float)>(),
-            sol::call_constructor, sol::constructors<trussc::Quaternion(), trussc::Quaternion(float, float, float, float)>(),
-            sol::meta_function::equal_to, [](const trussc::Quaternion& a, const trussc::Quaternion & b){ return a == b; },
-            sol::meta_function::multiplication, [](const trussc::Quaternion& a, const trussc::Quaternion & b){ return a * b; });
-        t["w"] = &trussc::Quaternion::w;
-        t["x"] = &trussc::Quaternion::x;
-        t["y"] = &trussc::Quaternion::y;
-        t["z"] = &trussc::Quaternion::z;
-        t["toEuler"] = &trussc::Quaternion::toEuler;
-        t["toMatrix"] = &trussc::Quaternion::toMatrix;
-        t["length"] = &trussc::Quaternion::length;
-        t["lengthSquared"] = &trussc::Quaternion::lengthSquared;
-        t["normalized"] = &trussc::Quaternion::normalized;
-        t["normalize"] = &trussc::Quaternion::normalize;
-        t["conjugate"] = &trussc::Quaternion::conjugate;
-        t["rotate"] = &trussc::Quaternion::rotate;
-        t["identity"] = &trussc::Quaternion::identity;
-        t["fromAxisAngle"] = &trussc::Quaternion::fromAxisAngle;
-        t["fromEuler"] = sol::overload([](float pitch, float yaw, float roll) { return trussc::Quaternion::fromEuler(pitch, yaw, roll); }, [](const trussc::Vec3 & euler) { return trussc::Quaternion::fromEuler(euler); });
-        t["slerp"] = &trussc::Quaternion::slerp;
+        sol::usertype<trussc::TcpClient> t = lua->new_usertype<trussc::TcpClient>("TcpClient",
+            sol::constructors<trussc::TcpClient()>(),
+            sol::call_constructor, sol::constructors<trussc::TcpClient()>());
+        t["onConnect"] = &trussc::TcpClient::onConnect;
+        t["onReceive"] = &trussc::TcpClient::onReceive;
+        t["onDisconnect"] = &trussc::TcpClient::onDisconnect;
+        t["onError"] = &trussc::TcpClient::onError;
+        t["connect"] = &trussc::TcpClient::connect;
+        t["connectAsync"] = &trussc::TcpClient::connectAsync;
+        t["disconnect"] = &trussc::TcpClient::disconnect;
+        t["isConnected"] = &trussc::TcpClient::isConnected;
+        t["send"] = sol::overload([](trussc::TcpClient& self, const std::vector<char> & data) { return self.send(data); }, [](trussc::TcpClient& self, const std::string & message) { return self.send(message); });
+        t["setReceiveBufferSize"] = &trussc::TcpClient::setReceiveBufferSize;
+        t["setBlocking"] = &trussc::TcpClient::setBlocking;
+        t["setUseThread"] = &trussc::TcpClient::setUseThread;
+        t["isUsingThread"] = &trussc::TcpClient::isUsingThread;
+        t["processNetwork"] = &trussc::TcpClient::processNetwork;
+        t["getRemoteHost"] = &trussc::TcpClient::getRemoteHost;
+        t["getRemotePort"] = &trussc::TcpClient::getRemotePort;
     }
+#endif
     {
         sol::usertype<trussc::ColorHSB> t = lua->new_usertype<trussc::ColorHSB>("ColorHSB",
             sol::constructors<trussc::ColorHSB(), trussc::ColorHSB(float, float, float), trussc::ColorHSB(float, float, float, float)>(),
@@ -122,10 +122,11 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["fileName"] = &trussc::FileDialogResult::fileName;
         t["success"] = &trussc::FileDialogResult::success;
     }
-    lua->new_usertype<trussc::MixMode>("MixMode",
-        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
-        "Auto", sol::var(trussc::MixMode::Auto),
-        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
+    {
+        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
+        t["message"] = &trussc::UdpErrorEventArgs::message;
+        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
+    }
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop
