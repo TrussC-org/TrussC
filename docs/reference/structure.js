@@ -294,7 +294,17 @@ function parseSig(sig) {
 
 // --- 4. build the structure map (overloads merged into one entry) -----------
 const syms = enumerate(splitTopLevel(astText));
-const pub = syms.filter(s => isTc(s.file) && !isHidden(s) && !noise(s) && symbolId(s));
+let pub = syms.filter(s => isTc(s.file) && !isHidden(s) && !noise(s) && symbolId(s));
+// drop OPAQUE enum declarations (`enum class StrokeCap;`) when the same enum is
+// also seen complete. An opaque decl carries no enumerators, and it can live in a
+// header included EARLIER than the definition (tcWindowContext.h needs StrokeCap
+// as a member type before tcRenderContext.h defines it) — so the "first id wins"
+// dedupe below would let it beat the definition and publish an enum with zero
+// members. Symmetric with walkRecord's completeDefinition guard, but exact: a
+// legitimately empty `enum class Foo {};` has no complete-with-members sibling
+// and is kept as-is.
+const enumsWithMembers = new Set(pub.filter(s => s.kind === 'enum' && s.members && s.members.length).map(symbolId));
+pub = pub.filter(s => !(s.kind === 'enum' && !(s.members && s.members.length) && enumsWithMembers.has(symbolId(s))));
 const structure = Object.create(null);                          // null proto: ids like "toString"/"constructor" are safe keys
 for (const s of pub) {
     const id = symbolId(s);
