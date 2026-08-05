@@ -80,6 +80,26 @@ for (const id in structure) {
         documented: !!(p.description && p.description.en),
     };
 }
+// --- refuse enums that lost their enumerators --------------------------------
+// An enum reaching the output with zero members is almost always an OPAQUE
+// FORWARD DECLARATION (`enum class StrokeCap;`, needed when a header is included
+// before the real definition) winning structure.js's "first id wins" dedupe.
+// Downstream this silently DELETES the enum from the Lua bindings and the web
+// data (an enum with no members has nothing to bind), so fail loudly here.
+// There is no legitimately empty public enum in TrussC; if one is ever added,
+// mark it `hide = true` in api-reference.toml or relax this gate deliberately.
+const emptyEnums = Object.values(joined).filter(e => e.kind === 'enum' && !e.hidden && !(e.members && e.members.length));
+if (emptyEnums.length) {
+    console.error(
+        `generate: REFUSING to write reference data — ${emptyEnums.length} enum(s) have ZERO enumerators:\n` +
+        emptyEnums.map(e => '  ' + e.id).join('\n') + '\n' +
+        'Cause: an opaque forward declaration (`enum class Foo;`) in an earlier-included header\n' +
+        '       beat the real definition in structure.js\'s "first id wins" dedupe.\n' +
+        'Fix: structure.js drops opaque enum decls when the enum is also seen complete — if this\n' +
+        '     fires, the definition never reached the AST (check the enum is inside namespace trussc\n' +
+        '     and its header is reachable from TrussC.h).');
+    process.exit(1);
+}
 fs.writeFileSync(OUT_JSON, JSON.stringify(joined, null, 0));
 
 // --- human/AI markdown index, grouped by category (prose) then owner ---
