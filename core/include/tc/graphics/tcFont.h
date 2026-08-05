@@ -101,9 +101,11 @@ namespace internal {
 struct FontCacheKey {
     std::string fontPath;
     int fontSize;
+    bool mipmaps = false;   // opt-in: build a mip chain so minified glyphs don't shimmer
 
     bool operator==(const FontCacheKey& other) const {
-        return fontPath == other.fontPath && fontSize == other.fontSize;
+        return fontPath == other.fontPath && fontSize == other.fontSize
+            && mipmaps == other.mipmaps;
     }
 };
 
@@ -111,7 +113,8 @@ struct FontCacheKeyHash {
     size_t operator()(const FontCacheKey& key) const {
         size_t h1 = std::hash<std::string>()(key.fontPath);
         size_t h2 = std::hash<int>()(key.fontSize);
-        return h1 ^ (h2 << 1);
+        size_t h3 = std::hash<bool>()(key.mipmaps);
+        return h1 ^ (h2 << 1) ^ (h3 << 2);
     }
 };
 
@@ -219,6 +222,10 @@ public:
 
         return initFromFontData(fontSize);
     }
+
+    // Opt-in mipmapping. Must be set before glyphs are uploaded (the atlas
+    // texture is (re)built lazily in updateAtlasTexture, which reads this).
+    void setMipmaps(bool enabled) { wantMipmaps_ = enabled; }
 
 private:
     bool initFromFontData(int fontSize, int fontIndex = 0) {
@@ -496,6 +503,7 @@ private:
 
     // Atlases
     std::vector<AtlasState> atlases_;
+    bool wantMipmaps_ = false;   // opt-in mip chain (set via setMipmaps before upload)
 
     // Glyph cache
     std::unordered_map<uint32_t, GlyphInfo> glyphs_;
@@ -777,6 +785,49 @@ private:
         // immutable (default) - can set initial data
         img_desc.data.mip_levels[0].ptr = atlas.pixels_.data();
         img_desc.data.mip_levels[0].size = atlas.pixels_.size();
+
+        // Optional mip chain: without it, glyphs minified on screen (far/small
+        // text, non-HiDPI displays) alias and shimmer under motion — MSAA can't
+        // fix in-texture minification. sokol never auto-generates mipmaps, so we
+        // build the chain on the CPU here. Glyph texels are white (RGB=255) with
+        // coverage in A, so every mip keeps RGB=255 and box-averages only alpha;
+        // that avoids the dark colour fringe straight-alpha RGBA averaging would
+        // produce and keeps minified glyphs clean. (GLYPH_PADDING=2 means very
+        // coarse mips bleed slightly between neighbours, but that range is
+        // sub-pixel on screen and far preferable to shimmer.)
+        std::vector<std::vector<uint8_t>> lowerMips;   // levels 1..N (level 0 = atlas.pixels_)
+        if (wantMipmaps_) {
+            int numMips = 1;
+            for (int mw = atlas.width_, mh = atlas.height_; mw > 1 || mh > 1; ) {
+                mw = std::max(1, mw / 2);
+                mh = std::max(1, mh / 2);
+                ++numMips;
+            }
+            lowerMips.reserve(numMips - 1);   // reserve so .data() pointers stay valid
+
+            const uint8_t* prev = atlas.pixels_.data();
+            int pw = atlas.width_, ph = atlas.height_;
+            img_desc.num_mipmaps = numMips;
+            for (int level = 1; level < numMips; ++level) {
+                int cw = std::max(1, pw / 2), ch = std::max(1, ph / 2);
+                std::vector<uint8_t> dst(static_cast<size_t>(cw) * ch * 4);
+                for (int y = 0; y < ch; ++y) {
+                    for (int x = 0; x < cw; ++x) {
+                        int x0 = x * 2, y0 = y * 2;
+                        int x1 = std::min(x0 + 1, pw - 1), y1 = std::min(y0 + 1, ph - 1);
+                        int a = (prev[(y0 * pw + x0) * 4 + 3] + prev[(y0 * pw + x1) * 4 + 3]
+                               + prev[(y1 * pw + x0) * 4 + 3] + prev[(y1 * pw + x1) * 4 + 3] + 2) / 4;
+                        uint8_t* d = &dst[(static_cast<size_t>(y) * cw + x) * 4];
+                        d[0] = 255; d[1] = 255; d[2] = 255; d[3] = static_cast<uint8_t>(a);
+                    }
+                }
+                lowerMips.push_back(std::move(dst));
+                img_desc.data.mip_levels[level].ptr  = lowerMips.back().data();
+                img_desc.data.mip_levels[level].size = lowerMips.back().size();
+                prev = lowerMips.back().data();
+                pw = cw; ph = ch;
+            }
+        }
         atlas.texture_ = sg_make_image(&img_desc);
 
         sg_view_desc view_desc = {};
@@ -818,6 +869,7 @@ public:
         if (!manager->setup(key.fontPath, key.fontSize)) {
             return nullptr;
         }
+        manager->setMipmaps(key.mipmaps);
 
         cache_[key] = manager;
         return manager;
@@ -835,6 +887,7 @@ public:
         if (!manager->setupFromMemory(data, size, key.fontSize)) {
             return nullptr;
         }
+        manager->setMipmaps(key.mipmaps);
 
         cache_[key] = manager;
         return manager;

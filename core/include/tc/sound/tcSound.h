@@ -1063,7 +1063,7 @@ public:
     //                            layered ambient tracks.
     LoadResult load(const fs::path& path) {
         // Initialize AudioEngine (only once)
-        AudioEngine::getInstance().init();
+        if (!AudioEngine::getInstance().isInitialized()) AudioEngine::getInstance().init();
 
         // Decode into a SoundBuffer, then store as the polymorphic source.
         auto buf = std::make_shared<SoundBuffer>();
@@ -1110,7 +1110,7 @@ public:
     // the developer can branch explicitly with isStreaming() / #ifdef
     // __EMSCRIPTEN__ if they need to know.
     TC_PLATFORMS("macos,windows,linux,android,ios") LoadResult loadStream(const fs::path& path, int maxPolyphony = 1) {
-        AudioEngine::getInstance().init();
+        if (!AudioEngine::getInstance().isInitialized()) AudioEngine::getInstance().init();
 #ifdef __EMSCRIPTEN__
         (void)maxPolyphony;
         logWarning("Sound") << "loadStream() is not supported on Web — "
@@ -1132,7 +1132,7 @@ public:
 
     // For testing: Generate sine wave
     void loadTestTone(float frequency = 440.0f, float duration = 1.0f) {
-        AudioEngine::getInstance().init();
+        if (!AudioEngine::getInstance().isInitialized()) AudioEngine::getInstance().init();
         auto buf = std::make_shared<SoundBuffer>();
         buf->generateSineWave(frequency, duration, 0.5f);
         buffer_ = std::move(buf);
@@ -1140,12 +1140,12 @@ public:
 
     // Load from pre-generated SoundBuffer
     void loadFromBuffer(const SoundBuffer& buf) {
-        AudioEngine::getInstance().init();
+        if (!AudioEngine::getInstance().isInitialized()) AudioEngine::getInstance().init();
         buffer_ = std::make_shared<SoundBuffer>(buf);
     }
 
     void loadFromBuffer(std::shared_ptr<SoundBuffer> buf) {
-        AudioEngine::getInstance().init();
+        if (!AudioEngine::getInstance().isInitialized()) AudioEngine::getInstance().init();
         buffer_ = buf;  // upcast SoundBuffer -> SoundSource via shared_ptr conversion
     }
 
@@ -1412,7 +1412,7 @@ private:
 
 // Initialize audio engine (called automatically in setup())
 inline void initAudio() {
-    AudioEngine::getInstance().init();
+    if (!AudioEngine::getInstance().isInitialized()) AudioEngine::getInstance().init();
 }
 
 // Shutdown audio engine
