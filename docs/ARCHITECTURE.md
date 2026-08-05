@@ -354,6 +354,23 @@ sokol_gl uses a fixed-size CPU vertex buffer (default 64k vertices). When draw c
 
 This is fully automatic — no user action required. The mechanism exists because sokol_gl has no resize API and no way to query how many vertices are needed before drawing.
 
+**Deferred Draw Model (record now, replay at frame end):**
+
+2D (sokol_gl) and 3D (PBR meshes, point clouds, custom-shader draws) have to interleave correctly — a rectangle drawn after a mesh must composite *over* it. sokol_gl cannot be mixed into an arbitrary draw order, so TrussC **records** 3D draws instead of issuing them immediately, tags each with a **layer number**, and replays everything in layer order at the end of the frame:
+
+1. Each submit (`PbrPipeline::drawMesh`, a point-mesh draw, a `Shader` draw) packages a fully resolved command — pipeline, bindings, uniforms — appends it to the current window's queue, then bumps `sglLayerNext` and calls `sgl_layer()` so all subsequent 2D lands on a higher layer.
+2. `present()` walks layer 0..N and, per layer, draws that layer's 2D and then its shader / PBR / point commands (`flushDeferredShaderDraws`, `tc/gpu/tcShader.h`).
+3. Inside an FBO pass the same thing happens into a separate set of queues with their own layer cursor, flushed by `Fbo::end()` (`flushFboDeferredPbr`, `tc/3d/tcMeshPbrPipeline.h`).
+
+The consequence — and the source of most bugs in this area — is that **record time is not execute time**. Four invariants keep that safe. Anything added to this path must satisfy all four:
+
+1. **Commands capture their inputs by value.** A recorded command holds copies of its bindings and uniform blocks, never references to mutable state. Mutating a material, transform or light after the draw call cannot retroactively alter an already recorded draw.
+2. **GPU resources are never destroyed mid-frame.** Owners hand their handles to `internal::deferGpuDestroy()` (`tc/gpu/tcGpuDestroyQueue.h`); they are reclaimed in `present()` *after* `sg_commit()`. This covers plain destruction and reallocation alike — when a buffer grows, the old handle stays alive until the commands referencing it have been submitted. Destroying a handle immediately leaves dead handles inside recorded commands, and sokol silently drops the offending draw.
+3. **A mutable-content resource read more than once per frame needs snapshots.** An `Fbo` keeps a *version pool*: re-`begin()`ing after the FBO has already been drawn advances to a new version (blitting forward when existing content must be preserved). So `begin/end/draw` followed by `begin/end/draw` in one frame samples the intermediate content for the first draw and the final content for the second, even though both quads execute at frame end. Contract: an Fbo must be drawn from a **single window** within a frame — the pool's frame key is per-window.
+4. **All per-frame record state is per-window.** The three swapchain queues and the FBO-pass queues, both layer cursors, the shader stack, the `beginShape` / `beginLines` / `beginStroke` accumulators and the FBO-pass format selectors live in `WindowContext`, not in process globals. Window ticks are serialized on the main thread, but nothing is shared, so one window cannot observe or clobber another's in-flight draws.
+
+Fonts sit outside this machinery: both the bitmap and TTF paths emit quads straight into the active sokol_gl context, so glyphs layer as ordinary 2D content and need no deferral.
+
 **Node Style Isolation:**
 
 Each Node's `draw()` and `endDraw()` start from a clean default style — `resetStyle()` is called automatically before each. This means:
