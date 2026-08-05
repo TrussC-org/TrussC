@@ -612,6 +612,67 @@ inline void registerInspectionTools() {
 }
 
 // ---------------------------------------------------------------------------
+// Key injection helpers (shared by tc_key_press / tc_key_release)
+//
+// These mirror the real SAPP_EVENTTYPE_KEY_DOWN / KEY_UP path in TrussC.h
+// step for step, including the ordering: notify listeners, update the
+// held-key set, then call the app/Node-tree callback. Modifier flags are
+// DERIVED from the held-key set, the way sokol gets ev->modifiers from the
+// keys the OS reports as down — so an injected modifier hold (tc_key_press
+// with the modifier keycode) shows up on every event that follows it, and
+// e.shift agrees with what isShiftPressed() reports.
+// ---------------------------------------------------------------------------
+namespace detail {
+
+// Modifier flags for the event carrying `key`, as of AFTER this event's own
+// state change — which is what the OS reports: a Shift key-down already has
+// the Shift flag set, its key-up already has it cleared. Every other key is
+// read straight from the held-key set.
+inline void fillKeyModifiers(KeyEventArgs& args, int key, bool down) {
+    auto heldAfter = [key, down](int code) {
+        return code == key ? down : isKeyPressed(code);
+    };
+    args.shift = heldAfter(SAPP_KEYCODE_LEFT_SHIFT)   || heldAfter(SAPP_KEYCODE_RIGHT_SHIFT);
+    args.ctrl  = heldAfter(SAPP_KEYCODE_LEFT_CONTROL) || heldAfter(SAPP_KEYCODE_RIGHT_CONTROL);
+    args.alt   = heldAfter(SAPP_KEYCODE_LEFT_ALT)     || heldAfter(SAPP_KEYCODE_RIGHT_ALT);
+    args.super = heldAfter(SAPP_KEYCODE_LEFT_SUPER)   || heldAfter(SAPP_KEYCODE_RIGHT_SUPER);
+}
+
+inline void injectKeyDown(int key) {
+    KeyEventArgs args;
+    args.key = key;
+    fillKeyModifiers(args, key, true);
+    events().keyPressed.notify(args);
+
+    ::trussc::internal::currentWindowContext().keysPressed.insert(key);
+
+    if (::trussc::internal::appKeyPressedFunc)
+        ::trussc::internal::appKeyPressedFunc(args);
+}
+
+inline void injectKeyUp(int key) {
+    KeyEventArgs args;
+    args.key = key;
+    fillKeyModifiers(args, key, false);
+    events().keyReleased.notify(args);
+
+    ::trussc::internal::currentWindowContext().keysPressed.erase(key);
+
+    if (::trussc::internal::appKeyReleasedFunc)
+        ::trussc::internal::appKeyReleasedFunc(args);
+}
+
+// Currently held keycodes, for the tool reply (handy when scripting chords).
+inline json heldKeysJson() {
+    std::vector<int> held(::trussc::internal::currentWindowContext().keysPressed.begin(),
+                          ::trussc::internal::currentWindowContext().keysPressed.end());
+    std::sort(held.begin(), held.end());
+    return json(held);
+}
+
+} // namespace detail
+
+// ---------------------------------------------------------------------------
 // Control Tools (opt-in via mcp::registerControlTools())
 //
 // The always-on standard set is strictly read-only; everything that lets the
@@ -765,26 +826,78 @@ inline void registerControlTools() {
 
     // --- Key Tools ---
 
-    tool("tc_key_press", "Press a key")
-        .arg<int>("key", "Key code (sokol_app keycode)")
-        .bind<int>([](int key) {
-            KeyEventArgs args;
-            args.key = key;
-            events().keyPressed.notify(args);
-            if (::trussc::internal::appKeyPressedFunc)
-                ::trussc::internal::appKeyPressedFunc(args);
-            return json{{"status", "ok"}};
+    // The modifier flags are shorthand for pressing/releasing the modifier
+    // KEY ITSELF (the LEFT_* keycode), like a real keyboard does — so both
+    // e.shift on the callback and isShiftPressed() in update() see it. Hold a
+    // modifier across several keys by pressing its keycode explicitly
+    // (tc_key_press 340), then plain presses inherit it.
+    tool("tc_key_press",
+         "Press a key (updates the held-key set that isKeyPressed() reads). "
+         "A modifier flag also presses that modifier's own key first (shift -> keycode 340, "
+         "ctrl -> 341, alt -> 342, super -> 343) and reports it in modifiersPressed; "
+         "pair it with the same flag on tc_key_release, or hold a modifier across several "
+         "keys by pressing/releasing its keycode explicitly")
+        .arg<int>("key", "Key code (sokol_app keycode; letters are uppercase ASCII: 'A'=65..'Z'=90)")
+        .arg<bool>("shift", "Hold Shift for this press", false)
+        .arg<bool>("ctrl", "Hold Ctrl for this press", false)
+        .arg<bool>("alt", "Hold Alt for this press", false)
+        .arg<bool>("super", "Hold Super/Command for this press", false)
+        .bind([](const json& a) -> json {
+            const int key = a.at("key").get<int>();
+
+            // Press the requested modifiers first (skip any already held —
+            // whichever side, so an explicit RIGHT_SHIFT hold is respected).
+            json pressedMods = json::array();
+            auto holdMod = [&](const char* flag, bool alreadyHeld, int code) {
+                if (a.value(flag, false) && !alreadyHeld) {
+                    detail::injectKeyDown(code);
+                    pressedMods.push_back(code);
+                }
+            };
+            holdMod("shift", isShiftPressed(),   SAPP_KEYCODE_LEFT_SHIFT);
+            holdMod("ctrl",  isControlPressed(), SAPP_KEYCODE_LEFT_CONTROL);
+            holdMod("alt",   isAltPressed(),     SAPP_KEYCODE_LEFT_ALT);
+            holdMod("super", isSuperPressed(),   SAPP_KEYCODE_LEFT_SUPER);
+
+            detail::injectKeyDown(key);
+
+            return json{{"status", "ok"},
+                        {"modifiersPressed", pressedMods},
+                        {"heldKeys", detail::heldKeysJson()}};
         });
 
-    tool("tc_key_release", "Release a key")
-        .arg<int>("key", "Key code (sokol_app keycode)")
-        .bind<int>([](int key) {
-            KeyEventArgs args;
-            args.key = key;
-            events().keyReleased.notify(args);
-            if (::trussc::internal::appKeyReleasedFunc)
-                ::trussc::internal::appKeyReleasedFunc(args);
-            return json{{"status", "ok"}};
+    tool("tc_key_release",
+         "Release a key (updates the held-key set that isKeyPressed() reads). "
+         "A modifier flag also releases that modifier's own key afterwards "
+         "(shift -> keycode 340, ctrl -> 341, alt -> 342, super -> 343), "
+         "mirroring tc_key_press")
+        .arg<int>("key", "Key code (sokol_app keycode; letters are uppercase ASCII: 'A'=65..'Z'=90)")
+        .arg<bool>("shift", "Also release Shift after this key", false)
+        .arg<bool>("ctrl", "Also release Ctrl after this key", false)
+        .arg<bool>("alt", "Also release Alt after this key", false)
+        .arg<bool>("super", "Also release Super/Command after this key", false)
+        .bind([](const json& a) -> json {
+            const int key = a.at("key").get<int>();
+
+            // The key goes up first — while the modifiers are still held, so
+            // this event still carries them (as it does on a real keyboard).
+            detail::injectKeyUp(key);
+
+            json releasedMods = json::array();
+            auto dropMod = [&](const char* flag, int code) {
+                if (a.value(flag, false) && isKeyPressed(code)) {
+                    detail::injectKeyUp(code);
+                    releasedMods.push_back(code);
+                }
+            };
+            dropMod("shift", SAPP_KEYCODE_LEFT_SHIFT);
+            dropMod("ctrl",  SAPP_KEYCODE_LEFT_CONTROL);
+            dropMod("alt",   SAPP_KEYCODE_LEFT_ALT);
+            dropMod("super", SAPP_KEYCODE_LEFT_SUPER);
+
+            return json{{"status", "ok"},
+                        {"modifiersReleased", releasedMods},
+                        {"heldKeys", detail::heldKeysJson()}};
         });
 
     // --- Node Tools ---
