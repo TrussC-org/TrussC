@@ -70,7 +70,7 @@ void tcApp::draw() {
 }
 
 void tcApp::keyPressed(int key) {
-    if (key == 'r' || key == 'R') {
+    if (key == 'R') {
         VideoRecordSettings s;
         s.fps = 60.0f;
         s.audio = true;

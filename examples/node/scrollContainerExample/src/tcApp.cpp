@@ -142,19 +142,15 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
     switch (key) {
-        case 'a':
         case 'A':
             addItem();
             break;
-        case 'd':
         case 'D':
             removeItem();
             break;
-        case 'h':
         case 'H':
             addHItem();
             break;
-        case 'j':
         case 'J':
             removeHItem();
             break;

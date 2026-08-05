@@ -221,7 +221,6 @@ void tcApp::keyPressed(int key) {
         case '1': mode = 0; break;
         case '2': mode = 1; break;
         case '3': mode = 2; break;
-        case 'c':
         case 'C':
             mousePolyline.clear();
             break;

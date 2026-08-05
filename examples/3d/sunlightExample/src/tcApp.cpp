@@ -153,7 +153,8 @@ void tcApp::draw() {
 }
 
 void tcApp::keyPressed(int key) {
-    if (key == 's') {
+    // Letter keycodes are uppercase ASCII regardless of shift.
+    if (key == 'S') {
         softnessIndex = (softnessIndex + 1) % 3;
         sunLight.setShadowSoftness(softnessPresets[softnessIndex]);
     }

@@ -159,10 +159,10 @@ void tcApp::triggerAction(int index) {
 
 void tcApp::keyPressed(int key) {
     switch (key) {
-        case 'A': case 'a': triggerAction(0); break;
-        case 'C': case 'c': triggerAction(1); break;
-        case 'O': case 'o': triggerAction(2); break;
-        case 'S': case 's': triggerAction(3); break;
+        case 'A': triggerAction(0); break;
+        case 'C': triggerAction(1); break;
+        case 'O': triggerAction(2); break;
+        case 'S': triggerAction(3); break;
     }
 }
 
