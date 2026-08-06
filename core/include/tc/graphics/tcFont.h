@@ -101,11 +101,14 @@ namespace internal {
 struct FontCacheKey {
     std::string fontPath;
     int fontSize;
-    bool mipmaps = false;   // opt-in: build a mip chain so minified glyphs don't shimmer
+    bool mipmaps = true;    // allowed to build a mip chain (built lazily on first minified draw)
+    int oversample = 1;     // rasterize NxN finer, then box-prefilter back down
+    bool gridFit = false;   // nudge scale so the ascent lands on a whole pixel
 
     bool operator==(const FontCacheKey& other) const {
         return fontPath == other.fontPath && fontSize == other.fontSize
-            && mipmaps == other.mipmaps;
+            && mipmaps == other.mipmaps && oversample == other.oversample
+            && gridFit == other.gridFit;
     }
 };
 
@@ -114,7 +117,9 @@ struct FontCacheKeyHash {
         size_t h1 = std::hash<std::string>()(key.fontPath);
         size_t h2 = std::hash<int>()(key.fontSize);
         size_t h3 = std::hash<bool>()(key.mipmaps);
-        return h1 ^ (h2 << 1) ^ (h3 << 2);
+        size_t h4 = std::hash<int>()(key.oversample);
+        size_t h5 = std::hash<bool>()(key.gridFit);
+        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3) ^ (h5 << 4);
     }
 };
 
@@ -192,7 +197,7 @@ public:
     // -------------------------------------------------------------------------
     // Initialization
     // -------------------------------------------------------------------------
-    bool setup(const std::string& fontPath, int fontSize) {
+    bool setup(const std::string& fontPath, int fontSize, bool gridFit = false) {
         cleanup();
 
         // Load font file (fontPath is UTF-8 — convert so non-ASCII paths
@@ -211,24 +216,46 @@ public:
             return false;
         }
 
-        return initFromFontData(fontSize);
+        return initFromFontData(fontSize, gridFit);
     }
 
-    bool setupFromMemory(const uint8_t* data, size_t size, int fontSize) {
+    bool setupFromMemory(const uint8_t* data, size_t size, int fontSize, bool gridFit = false) {
         cleanup();
 
         fontData_.resize(size);
         std::memcpy(fontData_.data(), data, size);
 
-        return initFromFontData(fontSize);
+        return initFromFontData(fontSize, gridFit);
     }
 
     // Opt-in mipmapping. Must be set before glyphs are uploaded (the atlas
     // texture is (re)built lazily in updateAtlasTexture, which reads this).
     void setMipmaps(bool enabled) { wantMipmaps_ = enabled; }
 
+    // Called from the draw path the first time this atlas is sampled below the
+    // bilinear-safe rate. Building the chain eagerly would tax every app that
+    // never minifies: the atlas texture is destroyed and recreated on every new
+    // glyph (see updateAtlasTexture), so a mip chain means re-walking ~1.33x
+    // the atlas on the CPU each time a fresh glyph shows up -- which for CJK is
+    // most frames during warm-up. Deferring it makes the cost land only on apps
+    // that actually draw small text, and only once.
+    void requestMipmaps() {
+        if (!wantMipmaps_ || mipsBuilt_) return;
+        mipsBuilt_ = true;
+        for (auto& atlas : atlases_) atlas.textureDirty_ = true;
+        // Fires at most once per atlas, and marks a real one-off cost (~33%
+        // more atlas texture, plus a rebuild), so it is worth saying out loud.
+        logNotice("Font") << "text drawn minified — building glyph atlas mipmaps";
+    }
+    bool hasMipmaps() const { return mipsBuilt_; }
+
+    // Must be set before any glyph is rasterized (glyphs are lazy, so setting
+    // it right after setup() is early enough). Clamped to at least 1.
+    void setOversample(int n) { oversample_ = (n < 1) ? 1 : n; }
+    int getOversample() const { return oversample_; }
+
 private:
-    bool initFromFontData(int fontSize, int fontIndex = 0) {
+    bool initFromFontData(int fontSize, bool gridFit, int fontIndex = 0) {
         // Get font offset (required for .ttc files with multiple fonts)
         int offset = stbtt_GetFontOffsetForIndex(fontData_.data(), fontIndex);
         if (offset < 0) {
@@ -250,9 +277,54 @@ private:
         // Get font metrics
         int ascent, descent, lineGap;
         stbtt_GetFontVMetrics(&fontInfo_, &ascent, &descent, &lineGap);
+
         ascent_ = ascent * scale_;
         descent_ = descent * scale_;
         lineGap_ = lineGap * scale_;
+
+        // Kept so the draw path can fall back to them. See getRawAscent().
+        rawAscent_  = ascent_;
+        rawLineGap_ = lineGap_;
+
+        // Vertical grid fit.
+        //
+        // A glyph outline has its baseline at font-unit y = 0, so the baseline
+        // is a texel boundary in the atlas at ANY scale -- the rasterizer never
+        // splits it. What decides whether that survives to the screen is where
+        // the bitmap is placed: with the default Direction::Top the baseline
+        // lands at y + ascent, so a fractional ascent drags every glyph on the
+        // line off the pixel grid and the horizontal strokes smear no matter
+        // how good the atlas is.
+        //
+        // ascent_ is a PLACEMENT quantity: it is the offset from the top of the
+        // line box down to the baseline, and it never reaches the rasterizer
+        // (which works from scale_ via GetGlyphBitmapBox / MakeGlyphBitmap). So
+        // rounding it is enough, and nothing else moves -- glyph bitmaps,
+        // advances and line width are all bit-identical to the unfitted font.
+        // The only thing given up is that the text sits up to half a pixel off
+        // the ascent the font declares, which is invisible and costs no ink.
+        if (gridFit) {
+            const float fittedAscent = std::round(ascent_);
+            if (fittedAscent >= 1.0f) ascent_ = fittedAscent;
+        }
+
+        // Whole ascent alone only aligns the FIRST line: forEachGlyph advances
+        // by getLineHeight() per newline, and (ascent - descent + lineGap) *
+        // scale is fractional independently of the ascent. On Hiragino at 21px
+        // the line height is 31.5, so grid fitting the ascent produced perfect
+        // odd lines and worst-case (half-pixel) even ones — measurably worse
+        // overall than not fitting at all.
+        //
+        // Line height is a layout quantity too: rounding it moves the next
+        // baseline and nothing else, so every line inherits the first line's
+        // alignment.
+        if (gridFit) {
+            const float lh = ascent_ - descent_ + lineGap_;
+            const float lhRounded = std::round(lh);
+            if (lhRounded >= 1.0f) {
+                lineGap_ += (lhRounded - lh);
+            }
+        }
 
         // Get space advance
         int spaceIndex = stbtt_FindGlyphIndex(&fontInfo_, ' ');
@@ -440,6 +512,26 @@ public:
     float getLineHeight() const { return ascent_ - descent_ + lineGap_; }
     float getAscent() const { return ascent_; }
     float getDescent() const { return descent_; }
+
+    // The font's own metrics, before grid fit (identical to the above when grid
+    // fit is off).
+    //
+    // Grid fit rounds a placement value in MODEL space, so it only lands the
+    // baseline on the pixel grid while one model unit is one device pixel.
+    // Under a non-integer scale it does the opposite of its job: a fitted
+    // ascent of, say, 13 puts every baseline at 6.5 device pixels when drawn at
+    // scale 0.5 -- the worst possible phase, on every line, in every frame,
+    // instead of the uniformly distributed phase an unfitted ascent gives. That
+    // is not a rounding-error-level effect; measured on Helvetica at scale 0.5
+    // it costs up to 13% of the energy concentration it wins back at 1:1.
+    //
+    // So the draw path asks for these whenever the transform is not 1:1. The
+    // public Font::getAscent()/getLineHeight() keep reporting the fitted values,
+    // because those describe the font as laid out, and a metric that changed
+    // with whatever transform happened to be current would be much worse to
+    // build a layout on.
+    float getRawAscent() const { return rawAscent_; }
+    float getRawLineHeight() const { return rawAscent_ - descent_ + rawLineGap_; }
     float getSpaceAdvance() const { return spaceAdvance_; }
     int getFontSize() const { return fontSize_; }
 
@@ -496,6 +588,8 @@ private:
     stbtt_fontinfo fontInfo_ = {};
     int fontSize_ = 0;
     float scale_ = 0;
+    float rawAscent_ = 0;    // pre-grid-fit; see getRawAscent()
+    float rawLineGap_ = 0;
     float ascent_ = 0;
     float descent_ = 0;
     float lineGap_ = 0;
@@ -503,7 +597,9 @@ private:
 
     // Atlases
     std::vector<AtlasState> atlases_;
-    bool wantMipmaps_ = false;   // opt-in mip chain (set via setMipmaps before upload)
+    bool wantMipmaps_ = true;    // mip chain allowed (opt out via Font::setMipmaps)
+    bool mipsBuilt_ = false;     // ...and actually needed, i.e. something minified
+    int oversample_ = 1;         // NxN supersampling of the rasterized glyph
 
     // Glyph cache
     std::unordered_map<uint32_t, GlyphInfo> glyphs_;
@@ -603,14 +699,23 @@ private:
         int advanceWidth, leftSideBearing;
         stbtt_GetGlyphHMetrics(&fontInfo_, glyphIndex, &advanceWidth, &leftSideBearing);
 
+        // Oversampling: rasterize at oversample_ times the target resolution and
+        // box-prefilter back down, so the bilinear fetch at draw time has real
+        // sub-pixel detail to interpolate instead of one hard-edged coverage
+        // sample. Unlike snapping the quad this survives rotation and scale --
+        // there is simply more information in the atlas, whatever the transform.
+        // Layout below is in OVERSAMPLED texels; the metrics handed back to the
+        // draw path are converted to final pixels at the end.
+        const int   os      = oversample_;
+        const float osScale = scale_ * (float)os;
+
         int x0, y0, x1, y1;
-        stbtt_GetGlyphBitmapBox(&fontInfo_, glyphIndex, scale_, scale_, &x0, &y0, &x1, &y1);
+        stbtt_GetGlyphBitmapBox(&fontInfo_, glyphIndex, osScale, osScale, &x0, &y0, &x1, &y1);
 
-        int glyphWidth = x1 - x0;
-        int glyphHeight = y1 - y0;
-
-        // Zero-width glyphs (like space)
-        if (glyphWidth <= 0 || glyphHeight <= 0) {
+        // Zero-width glyphs (like space). Tested on the raw box, before the
+        // prefilter margin below -- that margin is nonzero for os > 1 and would
+        // make an empty glyph look like it had area.
+        if ((x1 - x0) <= 0 || (y1 - y0) <= 0) {
             outInfo.atlasIndex_ = 0;
             outInfo.u0_ = outInfo.v0_ = outInfo.u1_ = outInfo.v1_ = 0;
             outInfo.xoff_ = 0;
@@ -621,6 +726,11 @@ private:
             outInfo.valid_ = true;
             return true;
         }
+
+        // The prefilter is a box of width `os`, which needs os-1 texels of extra
+        // room to run out into (stb's own packer reserves exactly the same).
+        int glyphWidth  = (x1 - x0) + (os - 1);
+        int glyphHeight = (y1 - y0) + (os - 1);
 
         int paddedWidth = glyphWidth + GLYPH_PADDING;
         int paddedHeight = glyphHeight + GLYPH_PADDING;
@@ -673,14 +783,46 @@ private:
         int destX = atlas.currentX_;
         int destY = atlas.currentY_;
 
-        // Render glyph (8bit grayscale)
-        std::vector<uint8_t> glyphBitmap(glyphWidth * glyphHeight);
-        stbtt_MakeGlyphBitmap(&fontInfo_,
-                              glyphBitmap.data(),
-                              glyphWidth, glyphHeight,
-                              glyphWidth,  // stride
-                              scale_, scale_,
-                              glyphIndex);
+        // Render glyph (8bit grayscale). Zero-filled because the prefilter runs
+        // out past the rasterized box into the os-1 margin and expects to read
+        // background there.
+        std::vector<uint8_t> glyphBitmap((size_t)glyphWidth * glyphHeight, 0);
+
+        // Box prefiltering shifts the image by (os-1)/2 oversampled texels;
+        // stb reports the compensating offset in final pixels via sub*, which
+        // has to be folded into the glyph origin below.
+        //
+        // That leaves the origin at a non-integer position -- 1/(2*os) of a
+        // pixel, so a quarter pixel at os = 2 -- which means the atlas texel
+        // grid never quite lands on the screen pixel grid, however carefully
+        // grid fit places the baseline. Cancelling it (rasterize with the
+        // opposite shift, snap the box outward to whole pixels, render into the
+        // interior of a larger bitmap so the margin does not move the glyph)
+        // was built and measured: with the phase pinned and stepped 0.0..0.9 it
+        // was worth +0.5% mean concentration and roughly halved the spread
+        // across phases. Not enough to justify the code, which went through
+        // three separate sign/offset bugs on the way -- two of which no
+        // sharpness metric could see, because a glyph rendered crisply in the
+        // wrong place still scores as crisp. Left alone deliberately.
+        float subX = 0.0f, subY = 0.0f;
+        if (os > 1) {
+            stbtt_MakeGlyphBitmapSubpixelPrefilter(&fontInfo_,
+                                                   glyphBitmap.data(),
+                                                   glyphWidth, glyphHeight,
+                                                   glyphWidth,  // stride
+                                                   osScale, osScale,
+                                                   0.0f, 0.0f,  // no subpixel shift
+                                                   os, os,
+                                                   &subX, &subY,
+                                                   glyphIndex);
+        } else {
+            stbtt_MakeGlyphBitmap(&fontInfo_,
+                                  glyphBitmap.data(),
+                                  glyphWidth, glyphHeight,
+                                  glyphWidth,  // stride
+                                  scale_, scale_,
+                                  glyphIndex);
+        }
 
         // Copy to atlas (RGBA)
         for (int y = 0; y < glyphHeight; y++) {
@@ -701,10 +843,14 @@ private:
         outInfo.v0_ = (float)destY / atlas.height_;
         outInfo.u1_ = (float)(destX + glyphWidth) / atlas.width_;
         outInfo.v1_ = (float)(destY + glyphHeight) / atlas.height_;
-        outInfo.xoff_ = (float)x0;
-        outInfo.yoff_ = (float)y0;
-        outInfo.width_ = (float)glyphWidth;
-        outInfo.height_ = (float)glyphHeight;
+        // UVs above address oversampled TEXELS; everything the draw path uses is
+        // in FINAL pixels, so divide out the oversampling here. This is the only
+        // place the two spaces meet -- emitPlacedGlyphsToAtlas needs no changes.
+        const float inv = 1.0f / (float)os;
+        outInfo.xoff_ = (float)x0 * inv + subX;
+        outInfo.yoff_ = (float)y0 * inv + subY;
+        outInfo.width_ = (float)glyphWidth * inv;
+        outInfo.height_ = (float)glyphHeight * inv;
         outInfo.advance_ = advanceWidth * scale_;
         outInfo.valid_ = true;
 
@@ -796,7 +942,14 @@ private:
         // coarse mips bleed slightly between neighbours, but that range is
         // sub-pixel on screen and far preferable to shimmer.)
         std::vector<std::vector<uint8_t>> lowerMips;   // levels 1..N (level 0 = atlas.pixels_)
-        if (wantMipmaps_) {
+        // Oversampling and mipmapping compose: oversampling owns 1:1 and above,
+        // the mip chain owns minification -- which is exactly where a denser
+        // atlas would otherwise make aliasing worse. pickSampler() keeps the
+        // GPU on mip 0 while the modelview is not minifying, so the mips below
+        // are only ever reached when they are the right answer. On an NxN
+        // atlas the chain also lands better than on a 1x one: drawing at 1/N
+        // scale reads mip log2(N), whose resolution matches the target exactly.
+        if (wantMipmaps_ && mipsBuilt_) {
             int numMips = 1;
             for (int mw = atlas.width_, mh = atlas.height_; mw > 1 || mh > 1; ) {
                 mw = std::max(1, mw / 2);
@@ -866,10 +1019,11 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
-        if (!manager->setup(key.fontPath, key.fontSize)) {
+        if (!manager->setup(key.fontPath, key.fontSize, key.gridFit)) {
             return nullptr;
         }
         manager->setMipmaps(key.mipmaps);
+        manager->setOversample(key.oversample);
 
         cache_[key] = manager;
         return manager;
@@ -884,10 +1038,11 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
-        if (!manager->setupFromMemory(data, size, key.fontSize)) {
+        if (!manager->setupFromMemory(data, size, key.fontSize, key.gridFit)) {
             return nullptr;
         }
         manager->setMipmaps(key.mipmaps);
+        manager->setOversample(key.oversample);
 
         cache_[key] = manager;
         return manager;
@@ -896,6 +1051,20 @@ public:
     // Release specific font
     void release(const FontCacheKey& key) {
         cache_.erase(key);
+    }
+
+    // Drop a cached atlas, but only when this cache holds the last reference.
+    // Called when a Font reloads at a different key: the cache owns a strong
+    // ref and nothing else ever evicts, so without this every size a Font
+    // visits stays resident for the process lifetime (a size slider walking
+    // 16..40 leaves 25 atlases behind). use_count() == 1 means "only the cache
+    // is holding it", so a Font still using this atlas is never freed from
+    // under it.
+    void releaseIfUnused(const FontCacheKey& key) {
+        auto it = cache_.find(key);
+        if (it != cache_.end() && it->second.use_count() == 1) {
+            cache_.erase(it);
+        }
     }
 
     // Release all
@@ -943,6 +1112,91 @@ public:
     //   - A system font name (PostScript or family name) — resolved via
     //     tc::systemFontPath when the path doesn't exist on disk. Lets users
     //     write `font.load("HiraginoSans-W3", 24)` cross-platform.
+    // -------------------------------------------------------------------------
+    // Oversampling (supersampled glyph rasterization)
+    // -------------------------------------------------------------------------
+    // Rasterize each glyph N times finer than the target size and box-prefilter
+    // it back down, so the bilinear fetch at draw time interpolates real detail.
+    // Costs N^2 atlas memory. Unlike rounding glyph positions onto the pixel
+    // grid, this keeps working under rotation and scale -- the atlas simply
+    // holds more information, whatever the transform does with it.
+    //
+    // Order-independent by design: calling it after load() re-resolves the
+    // atlas rather than silently doing nothing.
+    static void setDefaultOversampling(int n) {
+        defaultOversample_ = clampOversample(n);
+    }
+    static int getDefaultOversampling() { return defaultOversample_; }
+
+    Font& setOversampling(int n) {
+        n = clampOversample(n);
+        if (n == oversample_) return *this;      // nothing to rebuild
+        oversample_ = n;
+        reresolveAtlas([n](internal::FontCacheKey& k) { k.oversample = n; },
+                       "setOversampling");
+        return *this;
+    }
+    int getOversampling() const { return oversample_; }
+
+    // Allow a mip chain for this atlas. On by default and built lazily: nothing
+    // is generated until a draw actually samples below the bilinear-safe rate,
+    // so apps that never minify text pay nothing. Turn it off to trade shimmer
+    // on small/distant text for ~33% less atlas memory and no rebuild cost.
+    // Nudge the rasterization scale (by up to a few percent) so the ascent is a
+    // whole number of pixels. With the default Direction::Top that puts the
+    // baseline -- and with it every glyph bitmap on the line -- on the pixel
+    // grid, which is what lets the atlas's own alignment reach the screen.
+    // Costs nothing: no extra memory, no draw-time work, and unlike rounding
+    // quads it cannot misfire under a transform, because nothing about it
+    // depends on the modelview.
+    //
+    // The trade is that the requested size is honoured approximately: ask for
+    // 16 and the glyphs may be rasterized at 15.6 or 16.4. Metrics stay
+    // self-consistent (getWidth/getLineHeight report the fitted values), so
+    // only layout pinned to hard-coded numbers would notice.
+    Font& setGridFit(bool enabled) {
+        if (enabled == gridFit_) return *this;
+        gridFit_ = enabled;
+        reresolveAtlas([enabled](internal::FontCacheKey& k) { k.gridFit = enabled; },
+                       "setGridFit");
+        return *this;
+    }
+    bool getGridFit() const { return gridFit_; }
+
+    Font& setMipmaps(bool enabled) {
+        if (enabled == mipmaps_) return *this;
+        mipmaps_ = enabled;
+        reresolveAtlas([enabled](internal::FontCacheKey& k) { k.mipmaps = enabled; },
+                       "setMipmaps");
+        return *this;
+    }
+    bool getMipmaps() const { return mipmaps_; }
+
+    // Apply an atlas-option change to the cache key and swap in the atlas it
+    // now names. Called from the option setters so they are order-independent:
+    // a setter that only takes effect when it precedes load() is the kind of
+    // trap that leaves a feature quietly doing nothing.
+    template <class ApplyToKey>
+    void reresolveAtlas(ApplyToKey apply, const char* who) {
+        if (!atlasManager_) {                    // picked up by the next load()
+            apply(cacheKey_);
+            return;
+        }
+        if (isUrl(cacheKey_.fontPath)) {
+            // The bytes live in the async-fetch cache entry, not on disk, so we
+            // cannot re-rasterize from here. Record it for the next load().
+            logWarning("Font") << who << " on a URL-loaded font takes effect on "
+                                         "the next load()";
+            apply(cacheKey_);
+            return;
+        }
+        const internal::FontCacheKey previousKey = cacheKey_;
+        apply(cacheKey_);
+        atlasManager_ = internal::SharedFontCache::getInstance().getOrCreate(cacheKey_);
+        internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
+    }
+
+public:
     LoadResult load(const fs::path& nameOrPath, int size) {
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
@@ -976,8 +1230,20 @@ public:
             }
         }
 
+        // What this Font was holding before, so a reload at a different key can
+        // hand the previous atlas back to the cache. Note this is deliberately
+        // NOT done in ~Font(): a Font constructed and destroyed every frame
+        // would then re-rasterize its whole atlas every frame, turning a merely
+        // wasteful pattern into a stall. Keeping unreferenced atlases cached is
+        // what a cache is for; only a *reload* has a known-dead predecessor.
+        const internal::FontCacheKey previousKey = cacheKey_;
+        const bool hadAtlas = (atlasManager_ != nullptr);
+
         cacheKey_.fontPath = actualPath;
         cacheKey_.fontSize = physicalSize;
+        cacheKey_.oversample = oversample_;
+        cacheKey_.mipmaps = mipmaps_;
+        cacheKey_.gridFit = gridFit_;
 
         if (isUrl(actualPath)) {
 #ifdef __EMSCRIPTEN__
@@ -991,6 +1257,12 @@ public:
 #endif
         } else {
             atlasManager_ = internal::SharedFontCache::getInstance().getOrCreate(cacheKey_);
+        }
+
+        // The assignment above dropped this Font's reference to its previous
+        // atlas. If nothing else holds it, let the cache go too.
+        if (hadAtlas && !(previousKey == cacheKey_)) {
+            internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
         }
 
         if (!atlasManager_) {
@@ -1347,8 +1619,9 @@ protected:
         };
 
         float offsetY = 0;
-        float totalTextH = getLineHeight() * lineWidths.size();
-        float ascent = atlasManager_->getAscent() * s;
+        const float lineH = placementLineHeight();
+        float totalTextH = lineH * lineWidths.size();
+        float ascent = placementAscent();
         switch (v) {
             case Direction::Top:      offsetY = 0; break;
             case Direction::Baseline: offsetY = -ascent; break;
@@ -1366,7 +1639,7 @@ protected:
             if (cp == '\n') {
                 currentLine++;
                 cursorX = x + lineOffsetX(currentLine);
-                cursorY += getLineHeight();
+                cursorY += lineH;
                 continue;
             }
             if (cp == '\t') {
@@ -1400,7 +1673,7 @@ protected:
             // the old font pipeline (dst_factor_alpha=ZERO destroyed dst alpha).
             internal::loadPipeline(internal::activeFill2D());
             sgl_enable_texture();
-            sgl_texture(atlas.getView(), sampler_);
+            sgl_texture(atlas.getView(), pickSampler());
 
             Color col = getColor();
             sgl_c4f(col.r, col.g, col.b, col.a);
@@ -1487,8 +1760,8 @@ protected:
 
         const float s   = 1.0f / dpiScale_;
         const float em  = (float)logicalSize_;
-        const float asc = atlasManager_->getAscent() * s;
-        const float colSpacing = getLineHeight();
+        const float asc = placementAscent();
+        const float colSpacing = placementLineHeight();
         const float cellH = em;  // CJK vertical advance per cell
 
         // -------- Tokenize --------
@@ -2112,6 +2385,32 @@ public:
         return atlasManager_ ? atlasManager_->getDescent() / dpiScale_ : 0;
     }
 
+    // ---- Placement metrics (draw path) --------------------------------------
+    // Grid fit rounds in model space, so it only puts the baseline on the pixel
+    // grid while one model unit is one device pixel. Under any other transform
+    // it pins every baseline to a fixed bad phase instead of a uniformly
+    // distributed one, which measures worse than not fitting at all. So the
+    // draw path asks whether the fit actually lands before using it, and falls
+    // back to the font's own metrics when it does not. See
+    // FontAtlasManager::getRawAscent() for the numbers.
+    bool gridFitLands() const {
+        if (!atlasManager_ || !cacheKey_.gridFit) return false;
+        return std::fabs(getDefaultContext().getScale() - 1.0f) < 0.01f;
+    }
+
+    float placementAscent() const {
+        if (!atlasManager_) return 0;
+        return (gridFitLands() ? atlasManager_->getAscent()
+                               : atlasManager_->getRawAscent()) / dpiScale_;
+    }
+
+    float placementLineHeight() const {
+        if (lineHeight_ > 0) return lineHeight_;   // explicit setLineHeight wins
+        if (!atlasManager_) return 0;
+        return (gridFitLands() ? atlasManager_->getLineHeight()
+                               : atlasManager_->getRawLineHeight()) / dpiScale_;
+    }
+
     int getSize() const {
         return logicalSize_;
     }
@@ -2193,8 +2492,9 @@ public:
         return atlasManager_ ? &atlasManager_->getAtlas(index) : nullptr;
     }
 
-    // Get shared sampler (for debug atlas rendering)
-    sg_sampler getSampler() { initResources(); return sampler_; }
+    // Get shared sampler (for debug atlas rendering). Returns the mip-0-pinned
+    // one: a debug view of the atlas wants to show the texels as stored.
+    sg_sampler getSampler() { initResources(); return samplerSharp_; }
 
     size_t getLoadedGlyphCount() const {
         return atlasManager_ ? atlasManager_->getLoadedGlyphCount() : 0;
@@ -2208,23 +2508,83 @@ private:
     std::shared_ptr<internal::FontAtlasManager> atlasManager_;
     internal::FontCacheKey cacheKey_;
     float dpiScale_ = 1.0f;    // DPI scale at load time (physical/logical ratio)
+    int oversample_ = defaultOversample_;   // desired; stamped into cacheKey_ on load
+    bool mipmaps_ = true;                   // desired; stamped into cacheKey_ on load
+    // On by default: it costs no memory and no draw-time work, is positive at
+    // 1:1 on every face and size measured, and stands down automatically under
+    // any other transform (see gridFitLands()).
+    bool gridFit_ = true;                   // desired; stamped into cacheKey_ on load
+
+    // 4x4 already costs 16x the atlas; beyond that the prefilter gains nothing
+    // a bigger font size would not give more cheaply.
+    static int clampOversample(int n) { return (n < 1) ? 1 : (n > 4 ? 4 : n); }
+    static inline int defaultOversample_ = 1;
     int logicalSize_ = 0;      // User-requested font size (logical pixels)
 
     // Shared GPU resources. The TTF draw path loads the active per-target 2D
     // fill pipeline (internal::activeFill2D()) at draw time, so the font class
     // only needs its own sampler here.
-    static inline sg_sampler sampler_ = {};
+    static inline sg_sampler samplerSharp_ = {};    // max_lod 0 (1:1 and above)
+    static inline sg_sampler samplerMipped_ = {};   // full chain (minified)
     static inline bool resourcesInitialized_ = false;
+
+    // Minified text wants the mip chain; everything sharper wants the
+    // oversampled mip 0. The quantity that decides it is texels per screen
+    // pixel: the quad covers width*oversample texels and width/dpiScale *
+    // getScale() * dpiScale screen pixels, so the dpiScale cancels and it is
+    // just oversample/getScale().
+    //
+    // The threshold is 2, not 1, because a bilinear fetch reads a 2x2
+    // neighbourhood and copes with 2:1 on its own. Measured on 16px text
+    // (phase-sweep shimmer, un-oversampled atlas): at 2 texels/px mip 0 is
+    // actually BETTER (1.05% vs 1.16% — the mip chain only adds blur where
+    // nothing was broken), while at 4 it is not close (9.79% vs 2.95%) and it
+    // keeps growing from there (16 texels/px: 28.4% vs 13.6%).
+    //
+    // getScale() takes the same shortcuts the adaptive curve tessellator
+    // already accepts (tcRenderContext.h): column lengths approximate rotation
+    // and shear, and perspective is not considered. Choosing a mip level is a
+    // far more forgiving use of that estimate than choosing a segment count.
+    sg_sampler pickSampler() const {
+        const int   oversample = atlasManager_->getOversample();
+        const float scale = getDefaultContext().getScale();
+        const float texelsPerPixel = (scale > 0.0f) ? (oversample / scale)
+                                                    : (float)oversample;
+        if (texelsPerPixel <= 2.0f) return samplerSharp_;
+
+        // First draw below the bilinear-safe rate is what pays for the chain.
+        atlasManager_->requestMipmaps();
+        return samplerMipped_;
+    }
 
     void initResources() {
         if (resourcesInitialized_) return;
 
+        // Two samplers, picked per draw by the effective scale (see
+        // pickSampler). Trilinear on both: without mipmap_filter sokol defaults
+        // to NEAREST, which snaps to the nearest level and makes a 0.6x draw
+        // jump to the half-resolution mip and magnify it back up -- visibly
+        // soft, with a pop at the boundary. Texture already sets LINEAR here
+        // (tcTexture.h); the font path was the outlier.
         sg_sampler_desc smp_desc = {};
         smp_desc.min_filter = SG_FILTER_LINEAR;
         smp_desc.mag_filter = SG_FILTER_LINEAR;
+        smp_desc.mipmap_filter = SG_FILTER_LINEAR;
         smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
         smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
-        sampler_ = sg_make_sampler(&smp_desc);
+        samplerMipped_ = sg_make_sampler(&smp_desc);
+
+        // Pinned to mip 0. An NxN atlas is N times denser than the screen, so
+        // even a 1:1 draw computes LOD log2(N) and would read a mip that throws
+        // the oversampling away. Clamping the LOD is how the denser atlas gets
+        // to be denser. Harmless on a mip-less atlas -- there is only level 0.
+        //
+        // NOT 0.0f: sokol treats a zero max_lod as "unset" and substitutes
+        // FLT_MAX (_sg_sampler_desc_defaults), so asking for exactly mip 0
+        // silently asks for the whole chain. A small epsilon reads as an
+        // explicit value and still floors to level 0 under trilinear.
+        smp_desc.max_lod = 0.01f;
+        samplerSharp_ = sg_make_sampler(&smp_desc);
 
         resourcesInitialized_ = true;
     }
