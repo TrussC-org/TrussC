@@ -841,29 +841,14 @@ private:
         // coarse mips bleed slightly between neighbours, but that range is
         // sub-pixel on screen and far preferable to shimmer.)
         std::vector<std::vector<uint8_t>> lowerMips;   // levels 1..N (level 0 = atlas.pixels_)
-        // PROVISIONAL: mipmaps are skipped while oversampling is on.
-        //
-        // The two are complementary, not conflicting -- oversampling wins at
-        // 1:1 and above, mipmaps own minification, which is precisely where
-        // oversampling makes aliasing worse (measured: phase-sweep shimmer on
-        // 16px text at scale(0.5) goes 1.21% -> 2.29% at oversample 2). What
-        // stops them combining today is LOD *selection*, not the mip content:
-        // an NxN atlas is N times denser than the screen, so a 1:1 draw sits at
-        // LOD log2(N) and the GPU reads a mip no better than an un-oversampled
-        // atlas -- the oversampling is paid for and then discarded.
-        //
-        // The fix is to pick the sampler from the effective scale
-        // (RenderContext::getScale(), already used this way for adaptive curve
-        // tessellation): max_lod = 0 at 1:1 and above, full mip chain below.
-        // Until that lands, silently doing both would cost the memory of both
-        // and deliver neither, so prefer the one the caller asked for last.
-        if (wantMipmaps_ && oversample_ > 1) {
-            logWarning("Font") << "mipmaps skipped while oversampling ("
-                               << oversample_ << "x) is on: mip selection would "
-                                  "discard the oversampling at 1:1. Pending "
-                                  "scale-aware sampler selection.";
-        }
-        if (wantMipmaps_ && oversample_ == 1) {
+        // Oversampling and mipmapping compose: oversampling owns 1:1 and above,
+        // the mip chain owns minification -- which is exactly where a denser
+        // atlas would otherwise make aliasing worse. pickSampler() keeps the
+        // GPU on mip 0 while the modelview is not minifying, so the mips below
+        // are only ever reached when they are the right answer. On an NxN
+        // atlas the chain also lands better than on a 1x one: drawing at 1/N
+        // scale reads mip log2(N), whose resolution matches the target exactly.
+        if (wantMipmaps_) {
             int numMips = 1;
             for (int mw = atlas.width_, mh = atlas.height_; mw > 1 || mh > 1; ) {
                 mw = std::max(1, mw / 2);
@@ -1046,27 +1031,49 @@ public:
         n = clampOversample(n);
         if (n == oversample_) return *this;      // nothing to rebuild
         oversample_ = n;
-
-        if (!atlasManager_) {                    // applied by the next load()
-            cacheKey_.oversample = n;
-            return *this;
-        }
-        if (isUrl(cacheKey_.fontPath)) {
-            // The bytes live in the async-fetch cache entry, not on disk, so we
-            // cannot re-rasterize from here. Record it for the next load().
-            logWarning("Font") << "setOversampling on a URL-loaded font takes "
-                                  "effect on the next load()";
-            return *this;
-        }
-
-        const internal::FontCacheKey previousKey = cacheKey_;
-        cacheKey_.oversample = n;
-        atlasManager_ = internal::SharedFontCache::getInstance().getOrCreate(cacheKey_);
-        internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
+        reresolveAtlas([n](internal::FontCacheKey& k) { k.oversample = n; },
+                       "setOversampling");
         return *this;
     }
     int getOversampling() const { return oversample_; }
 
+    // Build a mip chain for the atlas. Only reached when the text is actually
+    // minified (pickSampler pins mip 0 at 1:1 and above), so this is what stops
+    // small/distant text from shimmering without softening it anywhere else.
+    Font& setMipmaps(bool enabled) {
+        if (enabled == mipmaps_) return *this;
+        mipmaps_ = enabled;
+        reresolveAtlas([enabled](internal::FontCacheKey& k) { k.mipmaps = enabled; },
+                       "setMipmaps");
+        return *this;
+    }
+    bool getMipmaps() const { return mipmaps_; }
+
+    // Apply an atlas-option change to the cache key and swap in the atlas it
+    // now names. Called from the option setters so they are order-independent:
+    // a setter that only takes effect when it precedes load() is the kind of
+    // trap that leaves a feature quietly doing nothing.
+    template <class ApplyToKey>
+    void reresolveAtlas(ApplyToKey apply, const char* who) {
+        if (!atlasManager_) {                    // picked up by the next load()
+            apply(cacheKey_);
+            return;
+        }
+        if (isUrl(cacheKey_.fontPath)) {
+            // The bytes live in the async-fetch cache entry, not on disk, so we
+            // cannot re-rasterize from here. Record it for the next load().
+            logWarning("Font") << who << " on a URL-loaded font takes effect on "
+                                         "the next load()";
+            apply(cacheKey_);
+            return;
+        }
+        const internal::FontCacheKey previousKey = cacheKey_;
+        apply(cacheKey_);
+        atlasManager_ = internal::SharedFontCache::getInstance().getOrCreate(cacheKey_);
+        internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
+    }
+
+public:
     LoadResult load(const fs::path& nameOrPath, int size) {
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
@@ -1112,6 +1119,7 @@ public:
         cacheKey_.fontPath = actualPath;
         cacheKey_.fontSize = physicalSize;
         cacheKey_.oversample = oversample_;
+        cacheKey_.mipmaps = mipmaps_;
 
         if (isUrl(actualPath)) {
 #ifdef __EMSCRIPTEN__
@@ -1540,7 +1548,7 @@ protected:
             // the old font pipeline (dst_factor_alpha=ZERO destroyed dst alpha).
             internal::loadPipeline(internal::activeFill2D());
             sgl_enable_texture();
-            sgl_texture(atlas.getView(), sampler_);
+            sgl_texture(atlas.getView(), pickSampler(atlasManager_->getOversample()));
 
             Color col = getColor();
             sgl_c4f(col.r, col.g, col.b, col.a);
@@ -2333,8 +2341,9 @@ public:
         return atlasManager_ ? &atlasManager_->getAtlas(index) : nullptr;
     }
 
-    // Get shared sampler (for debug atlas rendering)
-    sg_sampler getSampler() { initResources(); return sampler_; }
+    // Get shared sampler (for debug atlas rendering). Returns the mip-0-pinned
+    // one: a debug view of the atlas wants to show the texels as stored.
+    sg_sampler getSampler() { initResources(); return samplerSharp_; }
 
     size_t getLoadedGlyphCount() const {
         return atlasManager_ ? atlasManager_->getLoadedGlyphCount() : 0;
@@ -2349,6 +2358,7 @@ private:
     internal::FontCacheKey cacheKey_;
     float dpiScale_ = 1.0f;    // DPI scale at load time (physical/logical ratio)
     int oversample_ = defaultOversample_;   // desired; stamped into cacheKey_ on load
+    bool mipmaps_ = false;                  // desired; stamped into cacheKey_ on load
 
     // 4x4 already costs 16x the atlas; beyond that the prefilter gains nothing
     // a bigger font size would not give more cheaply.
@@ -2359,18 +2369,62 @@ private:
     // Shared GPU resources. The TTF draw path loads the active per-target 2D
     // fill pipeline (internal::activeFill2D()) at draw time, so the font class
     // only needs its own sampler here.
-    static inline sg_sampler sampler_ = {};
+    static inline sg_sampler samplerSharp_ = {};    // max_lod 0 (1:1 and above)
+    static inline sg_sampler samplerMipped_ = {};   // full chain (minified)
     static inline bool resourcesInitialized_ = false;
+
+    // Minified text wants the mip chain; everything sharper wants the
+    // oversampled mip 0. The quantity that decides it is texels per screen
+    // pixel: the quad covers width*oversample texels and width/dpiScale *
+    // getScale() * dpiScale screen pixels, so the dpiScale cancels and it is
+    // just oversample/getScale().
+    //
+    // The threshold is 2, not 1, because a bilinear fetch reads a 2x2
+    // neighbourhood and copes with 2:1 on its own. Measured on 16px text
+    // (phase-sweep shimmer, un-oversampled atlas): at 2 texels/px mip 0 is
+    // actually BETTER (1.05% vs 1.16% — the mip chain only adds blur where
+    // nothing was broken), while at 4 it is not close (9.79% vs 2.95%) and it
+    // keeps growing from there (16 texels/px: 28.4% vs 13.6%).
+    //
+    // getScale() takes the same shortcuts the adaptive curve tessellator
+    // already accepts (tcRenderContext.h): column lengths approximate rotation
+    // and shear, and perspective is not considered. Choosing a mip level is a
+    // far more forgiving use of that estimate than choosing a segment count.
+    static sg_sampler pickSampler(int oversample) {
+        const float scale = getDefaultContext().getScale();
+        const float texelsPerPixel = (scale > 0.0f) ? (oversample / scale)
+                                                    : (float)oversample;
+        return (texelsPerPixel <= 2.0f) ? samplerSharp_ : samplerMipped_;
+    }
 
     void initResources() {
         if (resourcesInitialized_) return;
 
+        // Two samplers, picked per draw by the effective scale (see
+        // pickSampler). Trilinear on both: without mipmap_filter sokol defaults
+        // to NEAREST, which snaps to the nearest level and makes a 0.6x draw
+        // jump to the half-resolution mip and magnify it back up -- visibly
+        // soft, with a pop at the boundary. Texture already sets LINEAR here
+        // (tcTexture.h); the font path was the outlier.
         sg_sampler_desc smp_desc = {};
         smp_desc.min_filter = SG_FILTER_LINEAR;
         smp_desc.mag_filter = SG_FILTER_LINEAR;
+        smp_desc.mipmap_filter = SG_FILTER_LINEAR;
         smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
         smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
-        sampler_ = sg_make_sampler(&smp_desc);
+        samplerMipped_ = sg_make_sampler(&smp_desc);
+
+        // Pinned to mip 0. An NxN atlas is N times denser than the screen, so
+        // even a 1:1 draw computes LOD log2(N) and would read a mip that throws
+        // the oversampling away. Clamping the LOD is how the denser atlas gets
+        // to be denser. Harmless on a mip-less atlas -- there is only level 0.
+        //
+        // NOT 0.0f: sokol treats a zero max_lod as "unset" and substitutes
+        // FLT_MAX (_sg_sampler_desc_defaults), so asking for exactly mip 0
+        // silently asks for the whole chain. A small epsilon reads as an
+        // explicit value and still floors to level 0 under trilinear.
+        smp_desc.max_lod = 0.01f;
+        samplerSharp_ = sg_make_sampler(&smp_desc);
 
         resourcesInitialized_ = true;
     }
