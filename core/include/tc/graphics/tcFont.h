@@ -898,6 +898,20 @@ public:
         cache_.erase(key);
     }
 
+    // Drop a cached atlas, but only when this cache holds the last reference.
+    // Called when a Font reloads at a different key: the cache owns a strong
+    // ref and nothing else ever evicts, so without this every size a Font
+    // visits stays resident for the process lifetime (a size slider walking
+    // 16..40 leaves 25 atlases behind). use_count() == 1 means "only the cache
+    // is holding it", so a Font still using this atlas is never freed from
+    // under it.
+    void releaseIfUnused(const FontCacheKey& key) {
+        auto it = cache_.find(key);
+        if (it != cache_.end() && it->second.use_count() == 1) {
+            cache_.erase(it);
+        }
+    }
+
     // Release all
     void clear() {
         cache_.clear();
@@ -976,6 +990,15 @@ public:
             }
         }
 
+        // What this Font was holding before, so a reload at a different key can
+        // hand the previous atlas back to the cache. Note this is deliberately
+        // NOT done in ~Font(): a Font constructed and destroyed every frame
+        // would then re-rasterize its whole atlas every frame, turning a merely
+        // wasteful pattern into a stall. Keeping unreferenced atlases cached is
+        // what a cache is for; only a *reload* has a known-dead predecessor.
+        const internal::FontCacheKey previousKey = cacheKey_;
+        const bool hadAtlas = (atlasManager_ != nullptr);
+
         cacheKey_.fontPath = actualPath;
         cacheKey_.fontSize = physicalSize;
 
@@ -991,6 +1014,12 @@ public:
 #endif
         } else {
             atlasManager_ = internal::SharedFontCache::getInstance().getOrCreate(cacheKey_);
+        }
+
+        // The assignment above dropped this Font's reference to its previous
+        // atlas. If nothing else holds it, let the cache go too.
+        if (hadAtlas && !(previousKey == cacheKey_)) {
+            internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
         }
 
         if (!atlasManager_) {
