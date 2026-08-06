@@ -102,10 +102,11 @@ struct FontCacheKey {
     std::string fontPath;
     int fontSize;
     bool mipmaps = false;   // opt-in: build a mip chain so minified glyphs don't shimmer
+    int oversample = 1;     // rasterize NxN finer, then box-prefilter back down
 
     bool operator==(const FontCacheKey& other) const {
         return fontPath == other.fontPath && fontSize == other.fontSize
-            && mipmaps == other.mipmaps;
+            && mipmaps == other.mipmaps && oversample == other.oversample;
     }
 };
 
@@ -114,7 +115,8 @@ struct FontCacheKeyHash {
         size_t h1 = std::hash<std::string>()(key.fontPath);
         size_t h2 = std::hash<int>()(key.fontSize);
         size_t h3 = std::hash<bool>()(key.mipmaps);
-        return h1 ^ (h2 << 1) ^ (h3 << 2);
+        size_t h4 = std::hash<int>()(key.oversample);
+        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3);
     }
 };
 
@@ -226,6 +228,11 @@ public:
     // Opt-in mipmapping. Must be set before glyphs are uploaded (the atlas
     // texture is (re)built lazily in updateAtlasTexture, which reads this).
     void setMipmaps(bool enabled) { wantMipmaps_ = enabled; }
+
+    // Must be set before any glyph is rasterized (glyphs are lazy, so setting
+    // it right after setup() is early enough). Clamped to at least 1.
+    void setOversample(int n) { oversample_ = (n < 1) ? 1 : n; }
+    int getOversample() const { return oversample_; }
 
 private:
     bool initFromFontData(int fontSize, int fontIndex = 0) {
@@ -504,6 +511,7 @@ private:
     // Atlases
     std::vector<AtlasState> atlases_;
     bool wantMipmaps_ = false;   // opt-in mip chain (set via setMipmaps before upload)
+    int oversample_ = 1;         // NxN supersampling of the rasterized glyph
 
     // Glyph cache
     std::unordered_map<uint32_t, GlyphInfo> glyphs_;
@@ -603,14 +611,23 @@ private:
         int advanceWidth, leftSideBearing;
         stbtt_GetGlyphHMetrics(&fontInfo_, glyphIndex, &advanceWidth, &leftSideBearing);
 
+        // Oversampling: rasterize at oversample_ times the target resolution and
+        // box-prefilter back down, so the bilinear fetch at draw time has real
+        // sub-pixel detail to interpolate instead of one hard-edged coverage
+        // sample. Unlike snapping the quad this survives rotation and scale --
+        // there is simply more information in the atlas, whatever the transform.
+        // Layout below is in OVERSAMPLED texels; the metrics handed back to the
+        // draw path are converted to final pixels at the end.
+        const int   os      = oversample_;
+        const float osScale = scale_ * (float)os;
+
         int x0, y0, x1, y1;
-        stbtt_GetGlyphBitmapBox(&fontInfo_, glyphIndex, scale_, scale_, &x0, &y0, &x1, &y1);
+        stbtt_GetGlyphBitmapBox(&fontInfo_, glyphIndex, osScale, osScale, &x0, &y0, &x1, &y1);
 
-        int glyphWidth = x1 - x0;
-        int glyphHeight = y1 - y0;
-
-        // Zero-width glyphs (like space)
-        if (glyphWidth <= 0 || glyphHeight <= 0) {
+        // Zero-width glyphs (like space). Tested on the raw box, before the
+        // prefilter margin below -- that margin is nonzero for os > 1 and would
+        // make an empty glyph look like it had area.
+        if ((x1 - x0) <= 0 || (y1 - y0) <= 0) {
             outInfo.atlasIndex_ = 0;
             outInfo.u0_ = outInfo.v0_ = outInfo.u1_ = outInfo.v1_ = 0;
             outInfo.xoff_ = 0;
@@ -621,6 +638,11 @@ private:
             outInfo.valid_ = true;
             return true;
         }
+
+        // The prefilter is a box of width `os`, which needs os-1 texels of extra
+        // room to run out into (stb's own packer reserves exactly the same).
+        int glyphWidth  = (x1 - x0) + (os - 1);
+        int glyphHeight = (y1 - y0) + (os - 1);
 
         int paddedWidth = glyphWidth + GLYPH_PADDING;
         int paddedHeight = glyphHeight + GLYPH_PADDING;
@@ -673,14 +695,33 @@ private:
         int destX = atlas.currentX_;
         int destY = atlas.currentY_;
 
-        // Render glyph (8bit grayscale)
-        std::vector<uint8_t> glyphBitmap(glyphWidth * glyphHeight);
-        stbtt_MakeGlyphBitmap(&fontInfo_,
-                              glyphBitmap.data(),
-                              glyphWidth, glyphHeight,
-                              glyphWidth,  // stride
-                              scale_, scale_,
-                              glyphIndex);
+        // Render glyph (8bit grayscale). Zero-filled because the prefilter runs
+        // out past the rasterized box into the os-1 margin and expects to read
+        // background there.
+        std::vector<uint8_t> glyphBitmap((size_t)glyphWidth * glyphHeight, 0);
+
+        // Box prefiltering shifts the image by (os-1)/2 oversampled texels;
+        // stb reports the compensating offset in final pixels via sub*, which
+        // has to be folded into the glyph origin below.
+        float subX = 0.0f, subY = 0.0f;
+        if (os > 1) {
+            stbtt_MakeGlyphBitmapSubpixelPrefilter(&fontInfo_,
+                                                   glyphBitmap.data(),
+                                                   glyphWidth, glyphHeight,
+                                                   glyphWidth,  // stride
+                                                   osScale, osScale,
+                                                   0.0f, 0.0f,  // no subpixel shift
+                                                   os, os,
+                                                   &subX, &subY,
+                                                   glyphIndex);
+        } else {
+            stbtt_MakeGlyphBitmap(&fontInfo_,
+                                  glyphBitmap.data(),
+                                  glyphWidth, glyphHeight,
+                                  glyphWidth,  // stride
+                                  scale_, scale_,
+                                  glyphIndex);
+        }
 
         // Copy to atlas (RGBA)
         for (int y = 0; y < glyphHeight; y++) {
@@ -701,10 +742,14 @@ private:
         outInfo.v0_ = (float)destY / atlas.height_;
         outInfo.u1_ = (float)(destX + glyphWidth) / atlas.width_;
         outInfo.v1_ = (float)(destY + glyphHeight) / atlas.height_;
-        outInfo.xoff_ = (float)x0;
-        outInfo.yoff_ = (float)y0;
-        outInfo.width_ = (float)glyphWidth;
-        outInfo.height_ = (float)glyphHeight;
+        // UVs above address oversampled TEXELS; everything the draw path uses is
+        // in FINAL pixels, so divide out the oversampling here. This is the only
+        // place the two spaces meet -- emitPlacedGlyphsToAtlas needs no changes.
+        const float inv = 1.0f / (float)os;
+        outInfo.xoff_ = (float)x0 * inv + subX;
+        outInfo.yoff_ = (float)y0 * inv + subY;
+        outInfo.width_ = (float)glyphWidth * inv;
+        outInfo.height_ = (float)glyphHeight * inv;
         outInfo.advance_ = advanceWidth * scale_;
         outInfo.valid_ = true;
 
@@ -796,7 +841,29 @@ private:
         // coarse mips bleed slightly between neighbours, but that range is
         // sub-pixel on screen and far preferable to shimmer.)
         std::vector<std::vector<uint8_t>> lowerMips;   // levels 1..N (level 0 = atlas.pixels_)
-        if (wantMipmaps_) {
+        // PROVISIONAL: mipmaps are skipped while oversampling is on.
+        //
+        // The two are complementary, not conflicting -- oversampling wins at
+        // 1:1 and above, mipmaps own minification, which is precisely where
+        // oversampling makes aliasing worse (measured: phase-sweep shimmer on
+        // 16px text at scale(0.5) goes 1.21% -> 2.29% at oversample 2). What
+        // stops them combining today is LOD *selection*, not the mip content:
+        // an NxN atlas is N times denser than the screen, so a 1:1 draw sits at
+        // LOD log2(N) and the GPU reads a mip no better than an un-oversampled
+        // atlas -- the oversampling is paid for and then discarded.
+        //
+        // The fix is to pick the sampler from the effective scale
+        // (RenderContext::getScale(), already used this way for adaptive curve
+        // tessellation): max_lod = 0 at 1:1 and above, full mip chain below.
+        // Until that lands, silently doing both would cost the memory of both
+        // and deliver neither, so prefer the one the caller asked for last.
+        if (wantMipmaps_ && oversample_ > 1) {
+            logWarning("Font") << "mipmaps skipped while oversampling ("
+                               << oversample_ << "x) is on: mip selection would "
+                                  "discard the oversampling at 1:1. Pending "
+                                  "scale-aware sampler selection.";
+        }
+        if (wantMipmaps_ && oversample_ == 1) {
             int numMips = 1;
             for (int mw = atlas.width_, mh = atlas.height_; mw > 1 || mh > 1; ) {
                 mw = std::max(1, mw / 2);
@@ -870,6 +937,7 @@ public:
             return nullptr;
         }
         manager->setMipmaps(key.mipmaps);
+        manager->setOversample(key.oversample);
 
         cache_[key] = manager;
         return manager;
@@ -888,6 +956,7 @@ public:
             return nullptr;
         }
         manager->setMipmaps(key.mipmaps);
+        manager->setOversample(key.oversample);
 
         cache_[key] = manager;
         return manager;
@@ -957,6 +1026,47 @@ public:
     //   - A system font name (PostScript or family name) — resolved via
     //     tc::systemFontPath when the path doesn't exist on disk. Lets users
     //     write `font.load("HiraginoSans-W3", 24)` cross-platform.
+    // -------------------------------------------------------------------------
+    // Oversampling (supersampled glyph rasterization)
+    // -------------------------------------------------------------------------
+    // Rasterize each glyph N times finer than the target size and box-prefilter
+    // it back down, so the bilinear fetch at draw time interpolates real detail.
+    // Costs N^2 atlas memory. Unlike rounding glyph positions onto the pixel
+    // grid, this keeps working under rotation and scale -- the atlas simply
+    // holds more information, whatever the transform does with it.
+    //
+    // Order-independent by design: calling it after load() re-resolves the
+    // atlas rather than silently doing nothing.
+    static void setDefaultOversampling(int n) {
+        defaultOversample_ = clampOversample(n);
+    }
+    static int getDefaultOversampling() { return defaultOversample_; }
+
+    Font& setOversampling(int n) {
+        n = clampOversample(n);
+        if (n == oversample_) return *this;      // nothing to rebuild
+        oversample_ = n;
+
+        if (!atlasManager_) {                    // applied by the next load()
+            cacheKey_.oversample = n;
+            return *this;
+        }
+        if (isUrl(cacheKey_.fontPath)) {
+            // The bytes live in the async-fetch cache entry, not on disk, so we
+            // cannot re-rasterize from here. Record it for the next load().
+            logWarning("Font") << "setOversampling on a URL-loaded font takes "
+                                  "effect on the next load()";
+            return *this;
+        }
+
+        const internal::FontCacheKey previousKey = cacheKey_;
+        cacheKey_.oversample = n;
+        atlasManager_ = internal::SharedFontCache::getInstance().getOrCreate(cacheKey_);
+        internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
+        return *this;
+    }
+    int getOversampling() const { return oversample_; }
+
     LoadResult load(const fs::path& nameOrPath, int size) {
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
@@ -1001,6 +1111,7 @@ public:
 
         cacheKey_.fontPath = actualPath;
         cacheKey_.fontSize = physicalSize;
+        cacheKey_.oversample = oversample_;
 
         if (isUrl(actualPath)) {
 #ifdef __EMSCRIPTEN__
@@ -2237,6 +2348,12 @@ private:
     std::shared_ptr<internal::FontAtlasManager> atlasManager_;
     internal::FontCacheKey cacheKey_;
     float dpiScale_ = 1.0f;    // DPI scale at load time (physical/logical ratio)
+    int oversample_ = defaultOversample_;   // desired; stamped into cacheKey_ on load
+
+    // 4x4 already costs 16x the atlas; beyond that the prefilter gains nothing
+    // a bigger font size would not give more cheaply.
+    static int clampOversample(int n) { return (n < 1) ? 1 : (n > 4 ? 4 : n); }
+    static inline int defaultOversample_ = 1;
     int logicalSize_ = 0;      // User-requested font size (logical pixels)
 
     // Shared GPU resources. The TTF draw path loads the active per-target 2D
