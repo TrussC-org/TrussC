@@ -29,7 +29,11 @@ public:
     void setup() override;
     void update() override;
     void draw() override;
-    void keyPressed(int key) override;
+    // Takes the KeyEventArgs overload because the controls are shift-modified:
+    // keyPressed(int) receives a raw sapp_keycode, whose letter values are
+    // uppercase ASCII whether or not shift is held, so shift is unreadable
+    // from the int form.
+    void keyPressed(const KeyEventArgs& e) override;
 
 private:
     bool tolMode_ = true;

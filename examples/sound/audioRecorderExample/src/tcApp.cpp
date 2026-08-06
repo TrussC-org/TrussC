@@ -87,7 +87,7 @@ void tcApp::draw() {
 }
 
 void tcApp::keyPressed(int key) {
-    if (key == 'r' || key == 'R') {
+    if (key == 'R') {
         if (recorder.isRecording()) recorder.stop();
         else recorder.start("recorded.wav");
     }

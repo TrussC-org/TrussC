@@ -151,12 +151,18 @@ void tcApp::drawHud() {
     drawBitmapString(line3, 20, 66);
 }
 
-void tcApp::keyPressed(int key) {
-    switch (key) {
-        case 'T': tolerance_ = std::max(0.01f,  tolerance_ * 0.5f);  applyMode(); break;
-        case 't': tolerance_ = std::min(20.0f,  tolerance_ * 2.0f);  applyMode(); break;
-        case 'R': resolution_ = std::max(3,    resolution_ - 2);    applyMode(); break;
-        case 'r': resolution_ = std::min(256,  resolution_ + 2);    applyMode(); break;
-        case 'm': case 'M': tolMode_ = !tolMode_; applyMode(); break;
+void tcApp::keyPressed(const KeyEventArgs& e) {
+    switch (e.key) {
+        case 'T':
+            tolerance_ = e.shift ? std::max(0.01f, tolerance_ * 0.5f)
+                                 : std::min(20.0f, tolerance_ * 2.0f);
+            applyMode();
+            break;
+        case 'R':
+            resolution_ = e.shift ? std::max(3,   resolution_ - 2)
+                                  : std::min(256, resolution_ + 2);
+            applyMode();
+            break;
+        case 'M': tolMode_ = !tolMode_; applyMode(); break;
     }
 }
