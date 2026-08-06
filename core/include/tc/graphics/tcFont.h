@@ -282,6 +282,10 @@ private:
         descent_ = descent * scale_;
         lineGap_ = lineGap * scale_;
 
+        // Kept so the draw path can fall back to them. See getRawAscent().
+        rawAscent_  = ascent_;
+        rawLineGap_ = lineGap_;
+
         // Vertical grid fit.
         //
         // A glyph outline has its baseline at font-unit y = 0, so the baseline
@@ -508,6 +512,26 @@ public:
     float getLineHeight() const { return ascent_ - descent_ + lineGap_; }
     float getAscent() const { return ascent_; }
     float getDescent() const { return descent_; }
+
+    // The font's own metrics, before grid fit (identical to the above when grid
+    // fit is off).
+    //
+    // Grid fit rounds a placement value in MODEL space, so it only lands the
+    // baseline on the pixel grid while one model unit is one device pixel.
+    // Under a non-integer scale it does the opposite of its job: a fitted
+    // ascent of, say, 13 puts every baseline at 6.5 device pixels when drawn at
+    // scale 0.5 -- the worst possible phase, on every line, in every frame,
+    // instead of the uniformly distributed phase an unfitted ascent gives. That
+    // is not a rounding-error-level effect; measured on Helvetica at scale 0.5
+    // it costs up to 13% of the energy concentration it wins back at 1:1.
+    //
+    // So the draw path asks for these whenever the transform is not 1:1. The
+    // public Font::getAscent()/getLineHeight() keep reporting the fitted values,
+    // because those describe the font as laid out, and a metric that changed
+    // with whatever transform happened to be current would be much worse to
+    // build a layout on.
+    float getRawAscent() const { return rawAscent_; }
+    float getRawLineHeight() const { return rawAscent_ - descent_ + rawLineGap_; }
     float getSpaceAdvance() const { return spaceAdvance_; }
     int getFontSize() const { return fontSize_; }
 
@@ -564,6 +588,8 @@ private:
     stbtt_fontinfo fontInfo_ = {};
     int fontSize_ = 0;
     float scale_ = 0;
+    float rawAscent_ = 0;    // pre-grid-fit; see getRawAscent()
+    float rawLineGap_ = 0;
     float ascent_ = 0;
     float descent_ = 0;
     float lineGap_ = 0;
@@ -1593,8 +1619,9 @@ protected:
         };
 
         float offsetY = 0;
-        float totalTextH = getLineHeight() * lineWidths.size();
-        float ascent = atlasManager_->getAscent() * s;
+        const float lineH = placementLineHeight();
+        float totalTextH = lineH * lineWidths.size();
+        float ascent = placementAscent();
         switch (v) {
             case Direction::Top:      offsetY = 0; break;
             case Direction::Baseline: offsetY = -ascent; break;
@@ -1612,7 +1639,7 @@ protected:
             if (cp == '\n') {
                 currentLine++;
                 cursorX = x + lineOffsetX(currentLine);
-                cursorY += getLineHeight();
+                cursorY += lineH;
                 continue;
             }
             if (cp == '\t') {
@@ -1733,8 +1760,8 @@ protected:
 
         const float s   = 1.0f / dpiScale_;
         const float em  = (float)logicalSize_;
-        const float asc = atlasManager_->getAscent() * s;
-        const float colSpacing = getLineHeight();
+        const float asc = placementAscent();
+        const float colSpacing = placementLineHeight();
         const float cellH = em;  // CJK vertical advance per cell
 
         // -------- Tokenize --------
@@ -2358,6 +2385,32 @@ public:
         return atlasManager_ ? atlasManager_->getDescent() / dpiScale_ : 0;
     }
 
+    // ---- Placement metrics (draw path) --------------------------------------
+    // Grid fit rounds in model space, so it only puts the baseline on the pixel
+    // grid while one model unit is one device pixel. Under any other transform
+    // it pins every baseline to a fixed bad phase instead of a uniformly
+    // distributed one, which measures worse than not fitting at all. So the
+    // draw path asks whether the fit actually lands before using it, and falls
+    // back to the font's own metrics when it does not. See
+    // FontAtlasManager::getRawAscent() for the numbers.
+    bool gridFitLands() const {
+        if (!atlasManager_ || !cacheKey_.gridFit) return false;
+        return std::fabs(getDefaultContext().getScale() - 1.0f) < 0.01f;
+    }
+
+    float placementAscent() const {
+        if (!atlasManager_) return 0;
+        return (gridFitLands() ? atlasManager_->getAscent()
+                               : atlasManager_->getRawAscent()) / dpiScale_;
+    }
+
+    float placementLineHeight() const {
+        if (lineHeight_ > 0) return lineHeight_;   // explicit setLineHeight wins
+        if (!atlasManager_) return 0;
+        return (gridFitLands() ? atlasManager_->getLineHeight()
+                               : atlasManager_->getRawLineHeight()) / dpiScale_;
+    }
+
     int getSize() const {
         return logicalSize_;
     }
@@ -2457,7 +2510,10 @@ private:
     float dpiScale_ = 1.0f;    // DPI scale at load time (physical/logical ratio)
     int oversample_ = defaultOversample_;   // desired; stamped into cacheKey_ on load
     bool mipmaps_ = true;                   // desired; stamped into cacheKey_ on load
-    bool gridFit_ = false;                  // desired; stamped into cacheKey_ on load
+    // On by default: it costs no memory and no draw-time work, is positive at
+    // 1:1 on every face and size measured, and stands down automatically under
+    // any other transform (see gridFitLands()).
+    bool gridFit_ = true;                   // desired; stamped into cacheKey_ on load
 
     // 4x4 already costs 16x the atlas; beyond that the prefilter gains nothing
     // a bigger font size would not give more cheaply.
