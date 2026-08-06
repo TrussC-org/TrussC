@@ -765,6 +765,19 @@ private:
         // Box prefiltering shifts the image by (os-1)/2 oversampled texels;
         // stb reports the compensating offset in final pixels via sub*, which
         // has to be folded into the glyph origin below.
+        //
+        // That leaves the origin at a non-integer position -- 1/(2*os) of a
+        // pixel, so a quarter pixel at os = 2 -- which means the atlas texel
+        // grid never quite lands on the screen pixel grid, however carefully
+        // grid fit places the baseline. Cancelling it (rasterize with the
+        // opposite shift, snap the box outward to whole pixels, render into the
+        // interior of a larger bitmap so the margin does not move the glyph)
+        // was built and measured: with the phase pinned and stepped 0.0..0.9 it
+        // was worth +0.5% mean concentration and roughly halved the spread
+        // across phases. Not enough to justify the code, which went through
+        // three separate sign/offset bugs on the way -- two of which no
+        // sharpness metric could see, because a glyph rendered crisply in the
+        // wrong place still scores as crisp. Left alone deliberately.
         float subX = 0.0f, subY = 0.0f;
         if (os > 1) {
             stbtt_MakeGlyphBitmapSubpixelPrefilter(&fontInfo_,
