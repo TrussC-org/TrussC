@@ -103,10 +103,12 @@ struct FontCacheKey {
     int fontSize;
     bool mipmaps = true;    // allowed to build a mip chain (built lazily on first minified draw)
     int oversample = 1;     // rasterize NxN finer, then box-prefilter back down
+    bool gridFit = false;   // nudge scale so the ascent lands on a whole pixel
 
     bool operator==(const FontCacheKey& other) const {
         return fontPath == other.fontPath && fontSize == other.fontSize
-            && mipmaps == other.mipmaps && oversample == other.oversample;
+            && mipmaps == other.mipmaps && oversample == other.oversample
+            && gridFit == other.gridFit;
     }
 };
 
@@ -116,7 +118,8 @@ struct FontCacheKeyHash {
         size_t h2 = std::hash<int>()(key.fontSize);
         size_t h3 = std::hash<bool>()(key.mipmaps);
         size_t h4 = std::hash<int>()(key.oversample);
-        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3);
+        size_t h5 = std::hash<bool>()(key.gridFit);
+        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3) ^ (h5 << 4);
     }
 };
 
@@ -194,7 +197,7 @@ public:
     // -------------------------------------------------------------------------
     // Initialization
     // -------------------------------------------------------------------------
-    bool setup(const std::string& fontPath, int fontSize) {
+    bool setup(const std::string& fontPath, int fontSize, bool gridFit = false) {
         cleanup();
 
         // Load font file (fontPath is UTF-8 — convert so non-ASCII paths
@@ -213,16 +216,16 @@ public:
             return false;
         }
 
-        return initFromFontData(fontSize);
+        return initFromFontData(fontSize, gridFit);
     }
 
-    bool setupFromMemory(const uint8_t* data, size_t size, int fontSize) {
+    bool setupFromMemory(const uint8_t* data, size_t size, int fontSize, bool gridFit = false) {
         cleanup();
 
         fontData_.resize(size);
         std::memcpy(fontData_.data(), data, size);
 
-        return initFromFontData(fontSize);
+        return initFromFontData(fontSize, gridFit);
     }
 
     // Opt-in mipmapping. Must be set before glyphs are uploaded (the atlas
@@ -252,7 +255,7 @@ public:
     int getOversample() const { return oversample_; }
 
 private:
-    bool initFromFontData(int fontSize, int fontIndex = 0) {
+    bool initFromFontData(int fontSize, bool gridFit, int fontIndex = 0) {
         // Get font offset (required for .ttc files with multiple fonts)
         int offset = stbtt_GetFontOffsetForIndex(fontData_.data(), fontIndex);
         if (offset < 0) {
@@ -274,9 +277,50 @@ private:
         // Get font metrics
         int ascent, descent, lineGap;
         stbtt_GetFontVMetrics(&fontInfo_, &ascent, &descent, &lineGap);
+
         ascent_ = ascent * scale_;
         descent_ = descent * scale_;
         lineGap_ = lineGap * scale_;
+
+        // Vertical grid fit.
+        //
+        // A glyph outline has its baseline at font-unit y = 0, so the baseline
+        // is a texel boundary in the atlas at ANY scale -- the rasterizer never
+        // splits it. What decides whether that survives to the screen is where
+        // the bitmap is placed: with the default Direction::Top the baseline
+        // lands at y + ascent, so a fractional ascent drags every glyph on the
+        // line off the pixel grid and the horizontal strokes smear no matter
+        // how good the atlas is.
+        //
+        // ascent_ is a PLACEMENT quantity: it is the offset from the top of the
+        // line box down to the baseline, and it never reaches the rasterizer
+        // (which works from scale_ via GetGlyphBitmapBox / MakeGlyphBitmap). So
+        // rounding it is enough, and nothing else moves -- glyph bitmaps,
+        // advances and line width are all bit-identical to the unfitted font.
+        // The only thing given up is that the text sits up to half a pixel off
+        // the ascent the font declares, which is invisible and costs no ink.
+        if (gridFit) {
+            const float fittedAscent = std::round(ascent_);
+            if (fittedAscent >= 1.0f) ascent_ = fittedAscent;
+        }
+
+        // Whole ascent alone only aligns the FIRST line: forEachGlyph advances
+        // by getLineHeight() per newline, and (ascent - descent + lineGap) *
+        // scale is fractional independently of the ascent. On Hiragino at 21px
+        // the line height is 31.5, so grid fitting the ascent produced perfect
+        // odd lines and worst-case (half-pixel) even ones — measurably worse
+        // overall than not fitting at all.
+        //
+        // Line height is a layout quantity too: rounding it moves the next
+        // baseline and nothing else, so every line inherits the first line's
+        // alignment.
+        if (gridFit) {
+            const float lh = ascent_ - descent_ + lineGap_;
+            const float lhRounded = std::round(lh);
+            if (lhRounded >= 1.0f) {
+                lineGap_ += (lhRounded - lh);
+            }
+        }
 
         // Get space advance
         int spaceIndex = stbtt_FindGlyphIndex(&fontInfo_, ' ');
@@ -936,7 +980,7 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
-        if (!manager->setup(key.fontPath, key.fontSize)) {
+        if (!manager->setup(key.fontPath, key.fontSize, key.gridFit)) {
             return nullptr;
         }
         manager->setMipmaps(key.mipmaps);
@@ -955,7 +999,7 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
-        if (!manager->setupFromMemory(data, size, key.fontSize)) {
+        if (!manager->setupFromMemory(data, size, key.fontSize, key.gridFit)) {
             return nullptr;
         }
         manager->setMipmaps(key.mipmaps);
@@ -1059,6 +1103,27 @@ public:
     // is generated until a draw actually samples below the bilinear-safe rate,
     // so apps that never minify text pay nothing. Turn it off to trade shimmer
     // on small/distant text for ~33% less atlas memory and no rebuild cost.
+    // Nudge the rasterization scale (by up to a few percent) so the ascent is a
+    // whole number of pixels. With the default Direction::Top that puts the
+    // baseline -- and with it every glyph bitmap on the line -- on the pixel
+    // grid, which is what lets the atlas's own alignment reach the screen.
+    // Costs nothing: no extra memory, no draw-time work, and unlike rounding
+    // quads it cannot misfire under a transform, because nothing about it
+    // depends on the modelview.
+    //
+    // The trade is that the requested size is honoured approximately: ask for
+    // 16 and the glyphs may be rasterized at 15.6 or 16.4. Metrics stay
+    // self-consistent (getWidth/getLineHeight report the fitted values), so
+    // only layout pinned to hard-coded numbers would notice.
+    Font& setGridFit(bool enabled) {
+        if (enabled == gridFit_) return *this;
+        gridFit_ = enabled;
+        reresolveAtlas([enabled](internal::FontCacheKey& k) { k.gridFit = enabled; },
+                       "setGridFit");
+        return *this;
+    }
+    bool getGridFit() const { return gridFit_; }
+
     Font& setMipmaps(bool enabled) {
         if (enabled == mipmaps_) return *this;
         mipmaps_ = enabled;
@@ -1139,6 +1204,7 @@ public:
         cacheKey_.fontSize = physicalSize;
         cacheKey_.oversample = oversample_;
         cacheKey_.mipmaps = mipmaps_;
+        cacheKey_.gridFit = gridFit_;
 
         if (isUrl(actualPath)) {
 #ifdef __EMSCRIPTEN__
@@ -2378,6 +2444,7 @@ private:
     float dpiScale_ = 1.0f;    // DPI scale at load time (physical/logical ratio)
     int oversample_ = defaultOversample_;   // desired; stamped into cacheKey_ on load
     bool mipmaps_ = true;                   // desired; stamped into cacheKey_ on load
+    bool gridFit_ = false;                  // desired; stamped into cacheKey_ on load
 
     // 4x4 already costs 16x the atlas; beyond that the prefilter gains nothing
     // a bigger font size would not give more cheaply.
