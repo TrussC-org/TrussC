@@ -101,7 +101,7 @@ namespace internal {
 struct FontCacheKey {
     std::string fontPath;
     int fontSize;
-    bool mipmaps = false;   // opt-in: build a mip chain so minified glyphs don't shimmer
+    bool mipmaps = true;    // allowed to build a mip chain (built lazily on first minified draw)
     int oversample = 1;     // rasterize NxN finer, then box-prefilter back down
 
     bool operator==(const FontCacheKey& other) const {
@@ -228,6 +228,23 @@ public:
     // Opt-in mipmapping. Must be set before glyphs are uploaded (the atlas
     // texture is (re)built lazily in updateAtlasTexture, which reads this).
     void setMipmaps(bool enabled) { wantMipmaps_ = enabled; }
+
+    // Called from the draw path the first time this atlas is sampled below the
+    // bilinear-safe rate. Building the chain eagerly would tax every app that
+    // never minifies: the atlas texture is destroyed and recreated on every new
+    // glyph (see updateAtlasTexture), so a mip chain means re-walking ~1.33x
+    // the atlas on the CPU each time a fresh glyph shows up -- which for CJK is
+    // most frames during warm-up. Deferring it makes the cost land only on apps
+    // that actually draw small text, and only once.
+    void requestMipmaps() {
+        if (!wantMipmaps_ || mipsBuilt_) return;
+        mipsBuilt_ = true;
+        for (auto& atlas : atlases_) atlas.textureDirty_ = true;
+        // Fires at most once per atlas, and marks a real one-off cost (~33%
+        // more atlas texture, plus a rebuild), so it is worth saying out loud.
+        logNotice("Font") << "text drawn minified — building glyph atlas mipmaps";
+    }
+    bool hasMipmaps() const { return mipsBuilt_; }
 
     // Must be set before any glyph is rasterized (glyphs are lazy, so setting
     // it right after setup() is early enough). Clamped to at least 1.
@@ -510,7 +527,8 @@ private:
 
     // Atlases
     std::vector<AtlasState> atlases_;
-    bool wantMipmaps_ = false;   // opt-in mip chain (set via setMipmaps before upload)
+    bool wantMipmaps_ = true;    // mip chain allowed (opt out via Font::setMipmaps)
+    bool mipsBuilt_ = false;     // ...and actually needed, i.e. something minified
     int oversample_ = 1;         // NxN supersampling of the rasterized glyph
 
     // Glyph cache
@@ -848,7 +866,7 @@ private:
         // are only ever reached when they are the right answer. On an NxN
         // atlas the chain also lands better than on a 1x one: drawing at 1/N
         // scale reads mip log2(N), whose resolution matches the target exactly.
-        if (wantMipmaps_) {
+        if (wantMipmaps_ && mipsBuilt_) {
             int numMips = 1;
             for (int mw = atlas.width_, mh = atlas.height_; mw > 1 || mh > 1; ) {
                 mw = std::max(1, mw / 2);
@@ -1037,9 +1055,10 @@ public:
     }
     int getOversampling() const { return oversample_; }
 
-    // Build a mip chain for the atlas. Only reached when the text is actually
-    // minified (pickSampler pins mip 0 at 1:1 and above), so this is what stops
-    // small/distant text from shimmering without softening it anywhere else.
+    // Allow a mip chain for this atlas. On by default and built lazily: nothing
+    // is generated until a draw actually samples below the bilinear-safe rate,
+    // so apps that never minify text pay nothing. Turn it off to trade shimmer
+    // on small/distant text for ~33% less atlas memory and no rebuild cost.
     Font& setMipmaps(bool enabled) {
         if (enabled == mipmaps_) return *this;
         mipmaps_ = enabled;
@@ -1548,7 +1567,7 @@ protected:
             // the old font pipeline (dst_factor_alpha=ZERO destroyed dst alpha).
             internal::loadPipeline(internal::activeFill2D());
             sgl_enable_texture();
-            sgl_texture(atlas.getView(), pickSampler(atlasManager_->getOversample()));
+            sgl_texture(atlas.getView(), pickSampler());
 
             Color col = getColor();
             sgl_c4f(col.r, col.g, col.b, col.a);
@@ -2358,7 +2377,7 @@ private:
     internal::FontCacheKey cacheKey_;
     float dpiScale_ = 1.0f;    // DPI scale at load time (physical/logical ratio)
     int oversample_ = defaultOversample_;   // desired; stamped into cacheKey_ on load
-    bool mipmaps_ = false;                  // desired; stamped into cacheKey_ on load
+    bool mipmaps_ = true;                   // desired; stamped into cacheKey_ on load
 
     // 4x4 already costs 16x the atlas; beyond that the prefilter gains nothing
     // a bigger font size would not give more cheaply.
@@ -2390,11 +2409,16 @@ private:
     // already accepts (tcRenderContext.h): column lengths approximate rotation
     // and shear, and perspective is not considered. Choosing a mip level is a
     // far more forgiving use of that estimate than choosing a segment count.
-    static sg_sampler pickSampler(int oversample) {
+    sg_sampler pickSampler() const {
+        const int   oversample = atlasManager_->getOversample();
         const float scale = getDefaultContext().getScale();
         const float texelsPerPixel = (scale > 0.0f) ? (oversample / scale)
                                                     : (float)oversample;
-        return (texelsPerPixel <= 2.0f) ? samplerSharp_ : samplerMipped_;
+        if (texelsPerPixel <= 2.0f) return samplerSharp_;
+
+        // First draw below the bilinear-safe rate is what pays for the chain.
+        atlasManager_->requestMipmaps();
+        return samplerMipped_;
     }
 
     void initResources() {
