@@ -2385,7 +2385,16 @@ public:
         return atlasManager_ ? atlasManager_->getDescent() / dpiScale_ : 0;
     }
 
+    int getSize() const {
+        return logicalSize_;
+    }
+
+protected:
     // ---- Placement metrics (draw path) --------------------------------------
+    // Internal: these answer "where does this draw actually put the baseline",
+    // which is not the same question as getAscent()/getLineHeight() and is not
+    // something a caller should have to reason about.
+    //
     // Grid fit rounds in model space, so it only puts the baseline on the pixel
     // grid while one model unit is one device pixel. Under any other transform
     // it pins every baseline to a fixed bad phase instead of a uniformly
@@ -2411,11 +2420,6 @@ public:
                                : atlasManager_->getRawLineHeight()) / dpiScale_;
     }
 
-    int getSize() const {
-        return logicalSize_;
-    }
-
-protected:
     // -------------------------------------------------------------------------
     // Alignment offset calculation (available to subclasses)
     // -------------------------------------------------------------------------

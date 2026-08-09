@@ -17366,3 +17366,66 @@ hide = true
 
 ["ScrollBar::Direction"]
 hide = true
+
+["Font::setOversampling"]
+keywords = ["oversampling", "supersample", "sharpness", "quality", "atlas"]
+description.en = "Rasterize glyphs at N x N the target size and box-filter them down, trading N^2 atlas memory for sharper text under arbitrary transforms (1 = off)."
+description.ja = "グリフを N x N 倍の解像度でラスタライズしてから縮小し、アトラスのメモリを N^2 倍払う代わりに任意の変換下で文字を鮮明にする（1 = 無効）。"
+description.ko = "글리프를 N x N 배 해상도로 래스터화한 뒤 축소하여, 아틀라스 메모리를 N^2 배 쓰는 대신 임의의 변환에서도 글자를 또렷하게 만든다(1 = 끔)."
+
+["Font::getOversampling"]
+keywords = ["oversampling", "supersample", "quality"]
+description.en = "Return the oversampling factor this font rasterizes with (1 = off)."
+description.ja = "このフォントがラスタライズに使うオーバーサンプリング倍率を返す（1 = 無効）。"
+description.ko = "이 폰트가 래스터화에 사용하는 오버샘플링 배수를 반환한다(1 = 끔)."
+
+["Font::setDefaultOversampling"]
+keywords = ["oversampling", "default", "global", "quality"]
+description.en = "Set the oversampling factor newly loaded fonts start with; does not affect fonts already loaded."
+description.ja = "以降に読み込むフォントの既定のオーバーサンプリング倍率を設定する。読み込み済みのフォントには影響しない。"
+description.ko = "이후 로드하는 폰트의 기본 오버샘플링 배수를 설정한다. 이미 로드된 폰트에는 영향을 주지 않는다."
+
+["Font::getDefaultOversampling"]
+keywords = ["oversampling", "default", "global"]
+description.en = "Return the oversampling factor newly loaded fonts start with."
+description.ja = "以降に読み込むフォントの既定のオーバーサンプリング倍率を返す。"
+description.ko = "이후 로드하는 폰트의 기본 오버샘플링 배수를 반환한다."
+
+["Font::setMipmaps"]
+keywords = ["mipmap", "minification", "shimmer", "scale", "quality"]
+description.en = "Enable mipmapping of the glyph atlas so text stays stable when drawn much smaller than its loaded size (on by default; the chain is built lazily on the first minified draw)."
+description.ja = "グリフアトラスのミップマップを有効にし、読み込みサイズよりかなり小さく描画してもテキストがちらつかないようにする（既定で有効。ミップ列は最初に縮小描画された時点で生成される）。"
+description.ko = "글리프 아틀라스의 밉맵을 활성화하여 로드 크기보다 훨씬 작게 그려도 텍스트가 흔들리지 않게 한다(기본 활성화. 밉 체인은 첫 축소 렌더링 시점에 생성된다)."
+
+["Font::getMipmaps"]
+keywords = ["mipmap", "minification", "quality"]
+description.en = "Return whether the glyph atlas is allowed to build mipmaps."
+description.ja = "グリフアトラスがミップマップを生成してよいかどうかを返す。"
+description.ko = "글리프 아틀라스가 밉맵을 생성해도 되는지 여부를 반환한다."
+
+["Font::setGridFit"]
+keywords = ["grid fit", "hinting", "baseline", "pixel grid", "sharpness"]
+description.en = "Round the ascent and line height to whole pixels so every baseline lands on the pixel grid, sharpening horizontal strokes at no memory or draw cost (on by default; automatically stands down when the transform is not 1:1, where rounding in model space would hurt instead)."
+description.ja = "アセントと行の高さを整数ピクセルに丸めてベースラインをピクセル境界に乗せ、メモリも描画コストもかけずに横画を鮮明にする（既定で有効。1:1 でない変換下ではモデル空間での丸めが逆効果になるため自動的に無効化される）。"
+description.ko = "어센트와 줄 높이를 정수 픽셀로 반올림해 베이스라인을 픽셀 격자에 맞추고, 메모리와 렌더링 비용 없이 가로획을 또렷하게 만든다(기본 활성화. 1:1이 아닌 변환에서는 모델 공간 반올림이 역효과이므로 자동으로 해제된다)."
+
+["Font::getGridFit"]
+keywords = ["grid fit", "hinting", "baseline"]
+description.en = "Return whether vertical grid fit is enabled for this font."
+description.ja = "このフォントで縦方向のグリッドフィットが有効かどうかを返す。"
+description.ko = "이 폰트에 세로 그리드 피팅이 활성화되어 있는지 여부를 반환한다."
+
+["Font::gridFitLands"]
+description.en = "Report whether grid fit actually lands on the pixel grid, i.e. whether it is enabled and the current transform maps one model unit to one device pixel."
+description.ja = "グリッドフィットが実際にピクセル境界に乗るかどうかを返す。有効であり、かつ現在の変換で1モデル単位が1デバイスピクセルに対応する場合のみ真。"
+description.ko = "그리드 피팅이 실제로 픽셀 격자에 맞는지 여부를 반환한다. 활성화되어 있고 현재 변환이 1 모델 단위를 1 디바이스 픽셀로 매핑할 때만 참이다."
+
+["Font::placementAscent"]
+description.en = "Return the ascent the draw path should place the baseline with: the grid-fitted value when the fit lands, the font's own value otherwise."
+description.ja = "描画パスがベースラインの配置に使うべきアセントを返す。グリッドフィットが有効に働く場合は丸めた値、そうでなければフォント本来の値。"
+description.ko = "렌더링 경로가 베이스라인 배치에 사용해야 할 어센트를 반환한다. 그리드 피팅이 유효할 때는 반올림한 값을, 그렇지 않으면 폰트 본래의 값을 돌려준다."
+
+["Font::placementLineHeight"]
+description.en = "Return the line height the draw path should advance by: an explicit setLineHeight value if set, otherwise the grid-fitted or unfitted line height depending on whether the fit lands."
+description.ja = "描画パスが行送りに使うべき行の高さを返す。setLineHeight が明示指定されていればその値、なければグリッドフィットが有効に働くかどうかに応じて丸めた値か本来の値。"
+description.ko = "렌더링 경로가 줄 이동에 사용해야 할 줄 높이를 반환한다. setLineHeight가 명시되어 있으면 그 값을, 아니면 그리드 피팅의 유효 여부에 따라 반올림한 값 또는 본래의 값을 돌려준다."
