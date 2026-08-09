@@ -103,12 +103,14 @@ struct FontCacheKey {
     int fontSize;
     bool mipmaps = true;    // allowed to build a mip chain (built lazily on first minified draw)
     int oversample = 1;     // rasterize NxN finer, then box-prefilter back down
-    bool gridFit = false;   // nudge scale so the ascent lands on a whole pixel
+
+    // Grid fit is deliberately absent: it is a draw-time placement decision
+    // (see Font::fitY) and does not touch the atlas, so two fonts that differ
+    // only in gridFit can and should share one.
 
     bool operator==(const FontCacheKey& other) const {
         return fontPath == other.fontPath && fontSize == other.fontSize
-            && mipmaps == other.mipmaps && oversample == other.oversample
-            && gridFit == other.gridFit;
+            && mipmaps == other.mipmaps && oversample == other.oversample;
     }
 };
 
@@ -118,8 +120,7 @@ struct FontCacheKeyHash {
         size_t h2 = std::hash<int>()(key.fontSize);
         size_t h3 = std::hash<bool>()(key.mipmaps);
         size_t h4 = std::hash<int>()(key.oversample);
-        size_t h5 = std::hash<bool>()(key.gridFit);
-        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3) ^ (h5 << 4);
+        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3);
     }
 };
 
@@ -197,7 +198,7 @@ public:
     // -------------------------------------------------------------------------
     // Initialization
     // -------------------------------------------------------------------------
-    bool setup(const std::string& fontPath, int fontSize, bool gridFit = false) {
+    bool setup(const std::string& fontPath, int fontSize) {
         cleanup();
 
         // Load font file (fontPath is UTF-8 — convert so non-ASCII paths
@@ -216,16 +217,16 @@ public:
             return false;
         }
 
-        return initFromFontData(fontSize, gridFit);
+        return initFromFontData(fontSize);
     }
 
-    bool setupFromMemory(const uint8_t* data, size_t size, int fontSize, bool gridFit = false) {
+    bool setupFromMemory(const uint8_t* data, size_t size, int fontSize) {
         cleanup();
 
         fontData_.resize(size);
         std::memcpy(fontData_.data(), data, size);
 
-        return initFromFontData(fontSize, gridFit);
+        return initFromFontData(fontSize);
     }
 
     // Opt-in mipmapping. Must be set before glyphs are uploaded (the atlas
@@ -255,7 +256,7 @@ public:
     int getOversample() const { return oversample_; }
 
 private:
-    bool initFromFontData(int fontSize, bool gridFit, int fontIndex = 0) {
+    bool initFromFontData(int fontSize, int fontIndex = 0) {
         // Get font offset (required for .ttc files with multiple fonts)
         int offset = stbtt_GetFontOffsetForIndex(fontData_.data(), fontIndex);
         if (offset < 0) {
@@ -282,49 +283,9 @@ private:
         descent_ = descent * scale_;
         lineGap_ = lineGap * scale_;
 
-        // Kept so the draw path can fall back to them. See getRawAscent().
-        rawAscent_  = ascent_;
-        rawLineGap_ = lineGap_;
-
-        // Vertical grid fit.
-        //
-        // A glyph outline has its baseline at font-unit y = 0, so the baseline
-        // is a texel boundary in the atlas at ANY scale -- the rasterizer never
-        // splits it. What decides whether that survives to the screen is where
-        // the bitmap is placed: with the default Direction::Top the baseline
-        // lands at y + ascent, so a fractional ascent drags every glyph on the
-        // line off the pixel grid and the horizontal strokes smear no matter
-        // how good the atlas is.
-        //
-        // ascent_ is a PLACEMENT quantity: it is the offset from the top of the
-        // line box down to the baseline, and it never reaches the rasterizer
-        // (which works from scale_ via GetGlyphBitmapBox / MakeGlyphBitmap). So
-        // rounding it is enough, and nothing else moves -- glyph bitmaps,
-        // advances and line width are all bit-identical to the unfitted font.
-        // The only thing given up is that the text sits up to half a pixel off
-        // the ascent the font declares, which is invisible and costs no ink.
-        if (gridFit) {
-            const float fittedAscent = std::round(ascent_);
-            if (fittedAscent >= 1.0f) ascent_ = fittedAscent;
-        }
-
-        // Whole ascent alone only aligns the FIRST line: forEachGlyph advances
-        // by getLineHeight() per newline, and (ascent - descent + lineGap) *
-        // scale is fractional independently of the ascent. On Hiragino at 21px
-        // the line height is 31.5, so grid fitting the ascent produced perfect
-        // odd lines and worst-case (half-pixel) even ones — measurably worse
-        // overall than not fitting at all.
-        //
-        // Line height is a layout quantity too: rounding it moves the next
-        // baseline and nothing else, so every line inherits the first line's
-        // alignment.
-        if (gridFit) {
-            const float lh = ascent_ - descent_ + lineGap_;
-            const float lhRounded = std::round(lh);
-            if (lhRounded >= 1.0f) {
-                lineGap_ += (lhRounded - lh);
-            }
-        }
+        // Note: the metrics reported here are the font's own, always. Grid fit
+        // does not live at load time -- it is a draw-time decision made per
+        // baseline against the live transform. See Font::fitY().
 
         // Get space advance
         int spaceIndex = stbtt_FindGlyphIndex(&fontInfo_, ' ');
@@ -513,25 +474,6 @@ public:
     float getAscent() const { return ascent_; }
     float getDescent() const { return descent_; }
 
-    // The font's own metrics, before grid fit (identical to the above when grid
-    // fit is off).
-    //
-    // Grid fit rounds a placement value in MODEL space, so it only lands the
-    // baseline on the pixel grid while one model unit is one device pixel.
-    // Under a non-integer scale it does the opposite of its job: a fitted
-    // ascent of, say, 13 puts every baseline at 6.5 device pixels when drawn at
-    // scale 0.5 -- the worst possible phase, on every line, in every frame,
-    // instead of the uniformly distributed phase an unfitted ascent gives. That
-    // is not a rounding-error-level effect; measured on Helvetica at scale 0.5
-    // it costs up to 13% of the energy concentration it wins back at 1:1.
-    //
-    // So the draw path asks for these whenever the transform is not 1:1. The
-    // public Font::getAscent()/getLineHeight() keep reporting the fitted values,
-    // because those describe the font as laid out, and a metric that changed
-    // with whatever transform happened to be current would be much worse to
-    // build a layout on.
-    float getRawAscent() const { return rawAscent_; }
-    float getRawLineHeight() const { return rawAscent_ - descent_ + rawLineGap_; }
     float getSpaceAdvance() const { return spaceAdvance_; }
     int getFontSize() const { return fontSize_; }
 
@@ -588,8 +530,6 @@ private:
     stbtt_fontinfo fontInfo_ = {};
     int fontSize_ = 0;
     float scale_ = 0;
-    float rawAscent_ = 0;    // pre-grid-fit; see getRawAscent()
-    float rawLineGap_ = 0;
     float ascent_ = 0;
     float descent_ = 0;
     float lineGap_ = 0;
@@ -1019,7 +959,7 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
-        if (!manager->setup(key.fontPath, key.fontSize, key.gridFit)) {
+        if (!manager->setup(key.fontPath, key.fontSize)) {
             return nullptr;
         }
         manager->setMipmaps(key.mipmaps);
@@ -1038,7 +978,7 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
-        if (!manager->setupFromMemory(data, size, key.fontSize, key.gridFit)) {
+        if (!manager->setupFromMemory(data, size, key.fontSize)) {
             return nullptr;
         }
         manager->setMipmaps(key.mipmaps);
@@ -1138,31 +1078,31 @@ public:
     }
     int getOversampling() const { return oversample_; }
 
-    // Allow a mip chain for this atlas. On by default and built lazily: nothing
-    // is generated until a draw actually samples below the bilinear-safe rate,
-    // so apps that never minify text pay nothing. Turn it off to trade shimmer
-    // on small/distant text for ~33% less atlas memory and no rebuild cost.
-    // Nudge the rasterization scale (by up to a few percent) so the ascent is a
-    // whole number of pixels. With the default Direction::Top that puts the
-    // baseline -- and with it every glyph bitmap on the line -- on the pixel
-    // grid, which is what lets the atlas's own alignment reach the screen.
-    // Costs nothing: no extra memory, no draw-time work, and unlike rounding
-    // quads it cannot misfire under a transform, because nothing about it
-    // depends on the modelview.
+    // Round each baseline to a whole pixel at draw time. With the default
+    // Direction::Top the baseline lands at y + ascent, and a fractional ascent
+    // drags every glyph bitmap on the line off the pixel grid -- the horizontal
+    // strokes then smear no matter how good the atlas is. Snapping the baseline
+    // is what lets the atlas's own alignment reach the screen.
     //
-    // The trade is that the requested size is honoured approximately: ask for
-    // 16 and the glyphs may be rasterized at 15.6 or 16.4. Metrics stay
-    // self-consistent (getWidth/getLineHeight report the fitted values), so
-    // only layout pinned to hard-coded numbers would notice.
+    // Costs nothing: no extra memory, no reload, one round() per line. It also
+    // cannot misfire under a transform, because it stands down when the
+    // transform is not 1:1 (see fitY).
+    //
+    // The trade is that a line sits up to half a pixel off the baseline the
+    // font declares. Nothing else moves: glyph bitmaps, advances, line widths
+    // and the reported metrics are all identical to an unfitted font, so the
+    // text occupies the same box and drifts no further than that half pixel no
+    // matter how many lines it runs to.
     Font& setGridFit(bool enabled) {
-        if (enabled == gridFit_) return *this;
         gridFit_ = enabled;
-        reresolveAtlas([enabled](internal::FontCacheKey& k) { k.gridFit = enabled; },
-                       "setGridFit");
         return *this;
     }
     bool getGridFit() const { return gridFit_; }
 
+    // Allow a mip chain for this atlas. On by default and built lazily: nothing
+    // is generated until a draw actually samples below the bilinear-safe rate,
+    // so apps that never minify text pay nothing. Turn it off to trade shimmer
+    // on small/distant text for ~33% less atlas memory and no rebuild cost.
     Font& setMipmaps(bool enabled) {
         if (enabled == mipmaps_) return *this;
         mipmaps_ = enabled;
@@ -1243,7 +1183,6 @@ public:
         cacheKey_.fontSize = physicalSize;
         cacheKey_.oversample = oversample_;
         cacheKey_.mipmaps = mipmaps_;
-        cacheKey_.gridFit = gridFit_;
 
         if (isUrl(actualPath)) {
 #ifdef __EMSCRIPTEN__
@@ -1619,9 +1558,9 @@ protected:
         };
 
         float offsetY = 0;
-        const float lineH = placementLineHeight();
+        const float lineH = getLineHeight();
         float totalTextH = lineH * lineWidths.size();
-        float ascent = placementAscent();
+        float ascent = getAscent();
         switch (v) {
             case Direction::Top:      offsetY = 0; break;
             case Direction::Baseline: offsetY = -ascent; break;
@@ -1630,16 +1569,22 @@ protected:
             default: break;
         }
 
+        // Baseline of line n. Accumulated from the anchor, then snapped once --
+        // see fitY() for why stepping by a snapped line height is wrong.
+        auto baselineOf = [&](int lineIdx) -> float {
+            return y + fitY(offsetY + ascent + lineH * (float)lineIdx);
+        };
+
         int currentLine = 0;
         float cursorX = x + lineOffsetX(0);
-        float cursorY = y + offsetY + ascent;
+        float cursorY = baselineOf(0);
 
         for (size_t i = 0; i < text.size(); ) {
             uint32_t cp = decodeUTF8(text, i);
             if (cp == '\n') {
                 currentLine++;
                 cursorX = x + lineOffsetX(currentLine);
-                cursorY += lineH;
+                cursorY = baselineOf(currentLine);
                 continue;
             }
             if (cp == '\t') {
@@ -1760,8 +1705,8 @@ protected:
 
         const float s   = 1.0f / dpiScale_;
         const float em  = (float)logicalSize_;
-        const float asc = placementAscent();
-        const float colSpacing = placementLineHeight();
+        const float asc = getAscent();
+        const float colSpacing = getLineHeight();
         const float cellH = em;  // CJK vertical advance per cell
 
         // -------- Tokenize --------
@@ -1873,6 +1818,17 @@ protected:
         float  colX        = colX0;
         float  colCenterX  = colX - em / 2.f;
         float  colY        = colYStart(0);
+        float  colTop      = colY;   // anchor fitY() accumulates from
+
+        // Baseline for an upright glyph whose cell starts at cellTop. Snapped
+        // once, from the top of the column -- see fitY().
+        //
+        // Rotated glyphs are left alone: their baseline runs vertically after
+        // the rotation, so moving baselineY moves them ACROSS the column rather
+        // than along it, and grid fit has nothing to say about that axis.
+        auto uprightBaseline = [&](float cellTop) -> float {
+            return colTop + fitY(cellTop - colTop + asc);
+        };
 
         for (const auto& t : toks) {
             if (t.kind == VTokKind_::Newline) {
@@ -1880,6 +1836,7 @@ protected:
                 colX       -= colSpacing;
                 colCenterX  = colX - em / 2.f;
                 colY        = colYStart(colIdx);
+                colTop      = colY;
                 continue;
             }
 
@@ -1897,7 +1854,7 @@ protected:
                     const internal::GlyphInfo* g = atlasManager_->getOrLoadGlyph(useCp);
                     if (g && g->isValid()) {
                         float drawX = colCenterX - g->getAdvance() * s / 2.f;
-                        float baselineY = colY + asc;
+                        float baselineY = uprightBaseline(colY);
                         // Fallback offset for Tu without vertical form.
                         if (vo == internal::VertOrient::Tu && !hasVert) {
                             internal::VertOffset off = internal::getVerticalPunctOffset(cp);
@@ -1944,7 +1901,7 @@ protected:
                         const internal::GlyphInfo* g = atlasManager_->getOrLoadGlyph(cp);
                         if (g && g->isValid()) {
                             float drawX = colCenterX - g->getAdvance() * s / 2.f;
-                            float baselineY = colY + asc;
+                            float baselineY = uprightBaseline(colY);
                             visitor(PlacedGlyph{cp, drawX, baselineY, 0.f, 0.f, 0.f, 1.f});
                         }
                         colY += cellH;
@@ -1957,7 +1914,7 @@ protected:
                     const float scaledW = rw * xscale;
                     const float cellLeft = colCenterX - em / 2.f;
                     float cursorX = cellLeft + (em - scaledW) / 2.f;
-                    float baselineY = colY + asc;
+                    float baselineY = uprightBaseline(colY);
                     for (uint32_t cp : t.cps) {
                         const internal::GlyphInfo* g = atlasManager_->getOrLoadGlyph(cp);
                         if (!g || !g->isValid()) continue;
@@ -2390,34 +2347,36 @@ public:
     }
 
 protected:
-    // ---- Placement metrics (draw path) --------------------------------------
-    // Internal: these answer "where does this draw actually put the baseline",
-    // which is not the same question as getAscent()/getLineHeight() and is not
-    // something a caller should have to reason about.
-    //
-    // Grid fit rounds in model space, so it only puts the baseline on the pixel
-    // grid while one model unit is one device pixel. Under any other transform
-    // it pins every baseline to a fixed bad phase instead of a uniformly
-    // distributed one, which measures worse than not fitting at all. So the
-    // draw path asks whether the fit actually lands before using it, and falls
-    // back to the font's own metrics when it does not. See
-    // FontAtlasManager::getRawAscent() for the numbers.
+    // ---- Grid fit (draw path) -----------------------------------------------
+    // Whether snapping a baseline to a whole model unit actually puts it on the
+    // pixel grid. Rounding happens in MODEL space, so it only lands while one
+    // model unit is one device pixel. Under any other scale it does the
+    // opposite of its job: a snapped baseline at, say, y = 13 sits at 6.5
+    // device pixels when drawn at scale 0.5 -- the worst possible phase, on
+    // every line, in every frame, instead of the uniformly distributed phase an
+    // unsnapped baseline gives. That is not a rounding-error-level effect;
+    // measured on Helvetica at scale 0.5 it costs up to 13% of the energy
+    // concentration it wins back at 1:1. So grid fit stands down off 1:1.
     bool gridFitLands() const {
-        if (!atlasManager_ || !cacheKey_.gridFit) return false;
+        if (!gridFit_) return false;
         return std::fabs(getDefaultContext().getScale() - 1.0f) < 0.01f;
     }
 
-    float placementAscent() const {
-        if (!atlasManager_) return 0;
-        return (gridFitLands() ? atlasManager_->getAscent()
-                               : atlasManager_->getRawAscent()) / dpiScale_;
-    }
-
-    float placementLineHeight() const {
-        if (lineHeight_ > 0) return lineHeight_;   // explicit setLineHeight wins
-        if (!atlasManager_) return 0;
-        return (gridFitLands() ? atlasManager_->getLineHeight()
-                               : atlasManager_->getRawLineHeight()) / dpiScale_;
+    // Snap a baseline offset to the pixel grid.
+    //
+    // Callers must pass the offset ACCUMULATED from the anchor (ascent +
+    // n * lineHeight), not a per-line delta, and must round once. Rounding the
+    // line height instead and stepping by it would compound: at lineHeight
+    // 11.66 the block would run 0, 12, 24, 36 and end a whole pixel below where
+    // the text is supposed to be. Accumulating first gives 0, 12, 23, 35 --
+    // every baseline on the grid AND the block never more than half a pixel
+    // from its true height, however many lines it runs to.
+    //
+    // The offset is snapped rather than the final position so that a caller
+    // animating y still gets smooth sub-pixel motion instead of whole-pixel
+    // judder; what is fixed is the spacing within the block.
+    float fitY(float offsetFromAnchor) const {
+        return gridFitLands() ? std::round(offsetFromAnchor) : offsetFromAnchor;
     }
 
     // -------------------------------------------------------------------------
@@ -2514,10 +2473,11 @@ private:
     float dpiScale_ = 1.0f;    // DPI scale at load time (physical/logical ratio)
     int oversample_ = defaultOversample_;   // desired; stamped into cacheKey_ on load
     bool mipmaps_ = true;                   // desired; stamped into cacheKey_ on load
-    // On by default: it costs no memory and no draw-time work, is positive at
-    // 1:1 on every face and size measured, and stands down automatically under
-    // any other transform (see gridFitLands()).
-    bool gridFit_ = true;                   // desired; stamped into cacheKey_ on load
+    // On by default: it costs no memory and one round() per line, is positive
+    // at 1:1 on every face and size measured, and stands down automatically
+    // under any other transform (see gridFitLands()). Not part of cacheKey_ --
+    // it is a placement decision and never reaches the atlas.
+    bool gridFit_ = true;
 
     // 4x4 already costs 16x the atlas; beyond that the prefilter gains nothing
     // a bigger font size would not give more cheaply.
