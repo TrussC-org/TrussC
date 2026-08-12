@@ -315,6 +315,49 @@ Available macros: `TC_FONT_SANS`, `TC_FONT_SERIF`, `TC_FONT_MONO`,
 `TC_FONT_SANS_JA`, `TC_FONT_SERIF_JA`. Backends: CoreText (macOS/iOS),
 DirectWrite (Windows), fontconfig (Linux). Web falls back to a Noto CDN URL.
 
+### Why is my small text blurry, and how do I sharpen it?
+
+Two knobs, and they are deliberately not symmetric.
+
+**Grid fit — on by default, leave it on.** Each baseline is snapped to a
+whole pixel at draw time, so the horizontal strokes of every glyph land on
+the pixel grid instead of straddling it. It costs no memory and one
+rounding per line, and it measures +5 to +20% sharper on every face and
+size tested at 1:1. It stands down automatically when the transform is not
+1:1 (rounding in model space would land on a *fixed bad* phase under, say,
+`scale(0.5)`, which is worse than not rounding at all), so you can leave it
+on unconditionally.
+
+```cpp
+font.setGridFit(false);          // opt OUT — only if you need the exact declared baseline
+```
+
+The only thing it changes is that a line may sit up to half a pixel off the
+baseline the font declares. Glyph bitmaps, advances, line widths and the
+reported metrics are untouched, and because line offsets are accumulated
+before rounding (not stepped by a rounded line height), a 100-line block is
+still within half a pixel of its true height.
+
+**Oversampling — opt-in, and think before enabling.** Glyphs are rasterized
+N×N finer and box-prefiltered back down, which recovers the detail lost to
+the fractional pen position. The gain is real but the cost is N² *atlas
+area*:
+
+```cpp
+font.setOversampling(2);              // this font (1–4, default 1)
+Font::setDefaultOversampling(2);      // every font loaded afterwards
+```
+
+Worth it for small text — at 9–13 px it buys +15 to +20% for an atlas that
+was tiny to begin with. Rarely worth it above ~24 px, where the gain falls
+to a few percent and the atlas is already large. If you only draw big text,
+leave it at 1.
+
+Neither knob helps if the text is *minified* (drawn smaller than its loaded
+size) — for that, load the font at the size you actually draw it, or rely on
+mipmaps (`setMipmaps`, on by default, built lazily on the first minified
+draw).
+
 ### Color
 ```cpp
 clear();                              // Transparent black (0,0,0,0)
