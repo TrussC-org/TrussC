@@ -158,7 +158,6 @@ void tcApp::keyPressed(int key) {
         case '4': mode = 3; break;
 
         case '=':
-        case '+':
             noiseScale *= 1.1f;
             break;
         case '-':
@@ -174,7 +173,6 @@ void tcApp::keyPressed(int key) {
             if (timeSpeed < 0.01f) timeSpeed = 0.01f;
             break;
 
-        case 'r':
         case 'R':
             resetParticles();
             break;
