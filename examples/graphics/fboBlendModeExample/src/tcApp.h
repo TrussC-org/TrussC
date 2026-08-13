@@ -7,13 +7,13 @@ using namespace tc;
 // =============================================================================
 // fboBlendModeExample - setBlendMode() inside an Fbo pass
 //
+// Blend modes apply inside an Fbo pass exactly as they do on the screen.
 // The SAME scene is drawn twice: two half-gray rects overlapping, with
 // BlendMode::Add active while the second one is drawn.
 //   - Left:  directly to the swapchain
 //   - Right: into an Fbo, then the Fbo is composited to the screen
-// If blend modes work inside Fbo passes, both overlap regions read 1.0
-// (0.5 + 0.5, full white). If setBlendMode is ignored in the Fbo, the right
-// overlap stays 0.5 — the visual proof of the bug this example pins down.
+// Both overlap regions read 1.0 (0.5 + 0.5, full white), so the two panes
+// are pixel-identical — a visual check that the Fbo pass honors the mode.
 // =============================================================================
 class tcApp : public App {
 public:
