@@ -12,6 +12,12 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         sol::usertype<trussc::Font> t = lua->new_usertype<trussc::Font>("Font",
             sol::constructors<trussc::Font()>(),
             sol::call_constructor, sol::constructors<trussc::Font()>());
+        t["setOversampling"] = &trussc::Font::setOversampling;
+        t["getOversampling"] = &trussc::Font::getOversampling;
+        t["setGridFit"] = &trussc::Font::setGridFit;
+        t["getGridFit"] = &trussc::Font::getGridFit;
+        t["setMipmaps"] = &trussc::Font::setMipmaps;
+        t["getMipmaps"] = &trussc::Font::getMipmaps;
         t["load"] = &trussc::Font::load;
         t["isLoaded"] = &trussc::Font::isLoaded;
         t["setAlign"] = sol::overload([](trussc::Font& self, trussc::Direction h, trussc::Direction v) { return self.setAlign(h, v); }, [](trussc::Font& self, trussc::Direction h) { return self.setAlign(h); });
@@ -55,54 +61,47 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["getAtlasCount"] = &trussc::Font::getAtlasCount;
         t["getSampler"] = &trussc::Font::getSampler;
         t["getLoadedGlyphCount"] = &trussc::Font::getLoadedGlyphCount;
+        t["setDefaultOversampling"] = &trussc::Font::setDefaultOversampling;
+        t["getDefaultOversampling"] = &trussc::Font::getDefaultOversampling;
         t["getTotalCacheMemoryUsage"] = &trussc::Font::getTotalCacheMemoryUsage;
     }
     {
-        sol::usertype<trussc::RectNode> t = lua->new_usertype<trussc::RectNode>("RectNode");
-        t["mousePressed"] = &trussc::RectNode::mousePressed;
-        t["mouseReleased"] = &trussc::RectNode::mouseReleased;
-        t["mouseDragged"] = &trussc::RectNode::mouseDragged;
-        t["mouseScrolled"] = &trussc::RectNode::mouseScrolled;
-        t["getWidth"] = &trussc::RectNode::getWidth;
-        t["getHeight"] = &trussc::RectNode::getHeight;
-        t["getSize"] = &trussc::RectNode::getSize;
-        t["setWidth"] = &trussc::RectNode::setWidth;
-        t["setHeight"] = &trussc::RectNode::setHeight;
-        t["setSize"] = sol::overload([](trussc::RectNode& self, float w, float h) { return self.setSize(w, h); }, [](trussc::RectNode& self, float size) { return self.setSize(size); }, [](trussc::RectNode& self, const trussc::Vec2 & s) { return self.setSize(s); });
-        t["setRect"] = &trussc::RectNode::setRect;
-        t["setClipping"] = &trussc::RectNode::setClipping;
-        t["isClipping"] = &trussc::RectNode::isClipping;
-        t["getLeft"] = &trussc::RectNode::getLeft;
-        t["getRight"] = &trussc::RectNode::getRight;
-        t["getTop"] = &trussc::RectNode::getTop;
-        t["getBottom"] = &trussc::RectNode::getBottom;
-        t["hitTest"] = [](trussc::RectNode& self, trussc::Vec2 local) { return self.hitTest(local); };
-        t["draw"] = &trussc::RectNode::draw;
+        sol::usertype<trussc::ColorOKLCH> t = lua->new_usertype<trussc::ColorOKLCH>("ColorOKLCH",
+            sol::constructors<trussc::ColorOKLCH(), trussc::ColorOKLCH(float, float, float), trussc::ColorOKLCH(float, float, float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::ColorOKLCH(), trussc::ColorOKLCH(float, float, float), trussc::ColorOKLCH(float, float, float, float)>());
+        t["L"] = &trussc::ColorOKLCH::L;
+        t["C"] = &trussc::ColorOKLCH::C;
+        t["H"] = &trussc::ColorOKLCH::H;
+        t["alpha"] = &trussc::ColorOKLCH::alpha;
+        t["toOKLab"] = &trussc::ColorOKLCH::toOKLab;
+        t["toLinear"] = &trussc::ColorOKLCH::toLinear;
+        t["toRGB"] = &trussc::ColorOKLCH::toRGB;
+        t["toHSB"] = &trussc::ColorOKLCH::toHSB;
+        t["lerp"] = sol::overload([](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t) { return self.lerp(target, t); }, [](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t, bool shortestPath) { return self.lerp(target, t, shortestPath); });
     }
-    {
-        sol::usertype<trussc::AudioRecorder> t = lua->new_usertype<trussc::AudioRecorder>("AudioRecorder",
-            sol::constructors<trussc::AudioRecorder()>(),
-            sol::call_constructor, sol::constructors<trussc::AudioRecorder()>());
-        t["start"] = sol::overload([](trussc::AudioRecorder& self, const fs::path & path) { return self.start(path); }, [](trussc::AudioRecorder& self, const fs::path & path, const trussc::AudioRecordSettings & settings) { return self.start(path, settings); });
-        t["stop"] = &trussc::AudioRecorder::stop;
-        t["isRecording"] = &trussc::AudioRecorder::isRecording;
-        t["getRecordedSeconds"] = &trussc::AudioRecorder::getRecordedSeconds;
-        t["getDroppedFrames"] = &trussc::AudioRecorder::getDroppedFrames;
-        t["getPath"] = &trussc::AudioRecorder::getPath;
-    }
-    lua->new_usertype<trussc::Beep>("Beep",
-        sol::meta_function::equal_to, [](trussc::Beep a, trussc::Beep b){ return a == b; },
-        "ping", sol::var(trussc::Beep::ping),
-        "success", sol::var(trussc::Beep::success),
-        "complete", sol::var(trussc::Beep::complete),
-        "coin", sol::var(trussc::Beep::coin),
-        "error", sol::var(trussc::Beep::error),
-        "warning", sol::var(trussc::Beep::warning),
-        "cancel", sol::var(trussc::Beep::cancel),
-        "click", sol::var(trussc::Beep::click),
-        "typing", sol::var(trussc::Beep::typing),
-        "notify", sol::var(trussc::Beep::notify),
-        "sweep", sol::var(trussc::Beep::sweep));
+    lua->new_usertype<trussc::EaseType>("EaseType",
+        sol::meta_function::equal_to, [](trussc::EaseType a, trussc::EaseType b){ return a == b; },
+        "Linear", sol::var(trussc::EaseType::Linear),
+        "Quad", sol::var(trussc::EaseType::Quad),
+        "Cubic", sol::var(trussc::EaseType::Cubic),
+        "Quart", sol::var(trussc::EaseType::Quart),
+        "Quint", sol::var(trussc::EaseType::Quint),
+        "Sine", sol::var(trussc::EaseType::Sine),
+        "Expo", sol::var(trussc::EaseType::Expo),
+        "Circ", sol::var(trussc::EaseType::Circ),
+        "Back", sol::var(trussc::EaseType::Back),
+        "Elastic", sol::var(trussc::EaseType::Elastic),
+        "Bounce", sol::var(trussc::EaseType::Bounce),
+        "Custom", sol::var(trussc::EaseType::Custom));
+    lua->new_usertype<trussc::Orientation>("Orientation",
+        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
+        "Portrait", sol::var(trussc::Orientation::Portrait),
+        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
+        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
+        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
+        "Landscape", sol::var(trussc::Orientation::Landscape),
+        "All", sol::var(trussc::Orientation::All),
+        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
     {
         sol::usertype<trussc::ShaderVertex> t = lua->new_usertype<trussc::ShaderVertex>("ShaderVertex");
         t["x"] = &trussc::ShaderVertex::x;
@@ -115,26 +114,22 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["b"] = &trussc::ShaderVertex::b;
         t["a"] = &trussc::ShaderVertex::a;
     }
+    lua->new_usertype<trussc::WindowType>("WindowType",
+        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
+        "Rect", sol::var(trussc::WindowType::Rect),
+        "Hanning", sol::var(trussc::WindowType::Hanning),
+        "Hamming", sol::var(trussc::WindowType::Hamming),
+        "Blackman", sol::var(trussc::WindowType::Blackman));
+    lua->new_usertype<trussc::LightType>("LightType",
+        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
+        "Directional", sol::var(trussc::LightType::Directional),
+        "Point", sol::var(trussc::LightType::Point),
+        "Spot", sol::var(trussc::LightType::Spot));
     {
-        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream",
-            sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>(),
-            sol::call_constructor, sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>());
-    }
-    {
-        sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
-        t["data"] = &trussc::UdpReceiveEventArgs::data;
-        t["remoteHost"] = &trussc::UdpReceiveEventArgs::remoteHost;
-        t["remotePort"] = &trussc::UdpReceiveEventArgs::remotePort;
-    }
-    {
-        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
-        t["format"] = &trussc::AudioRecordSettings::format;
-        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
-    }
-    {
-        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
-        t["pixels"] = &trussc::GrabberFrame::pixels;
-        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
+        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
+        t["files"] = &trussc::DragDropEventArgs::files;
+        t["x"] = &trussc::DragDropEventArgs::x;
+        t["y"] = &trussc::DragDropEventArgs::y;
     }
 }
 #ifndef _MSC_VER
