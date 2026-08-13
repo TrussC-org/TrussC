@@ -242,7 +242,7 @@ jobs:
         run: |
           cmake -B build `
             -DCMAKE_BUILD_TYPE=Release `
-            -DTRUSSC_DIR="${{ github.workspace }}/TrussC/trussc"
+            -DTRUSSC_DIR="${{ github.workspace }}/TrussC/core"
 
       - name: Build
         run: cmake --build build --config Release

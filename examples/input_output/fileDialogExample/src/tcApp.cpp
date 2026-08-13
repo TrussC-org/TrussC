@@ -74,8 +74,7 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
     switch (key) {
-        case 'O':
-        case 'o': {
+        case 'O': {
             // File selection dialog
             statusMessage = "Opening file dialog...";
             lastResult = loadDialog("Select a file", "");
@@ -104,8 +103,7 @@ void tcApp::keyPressed(int key) {
             break;
         }
 
-        case 'F':
-        case 'f': {
+        case 'F': {
             // Folder selection dialog
             statusMessage = "Opening folder dialog...";
             lastResult = loadDialog("Select a folder", "", "", true);
@@ -120,8 +118,7 @@ void tcApp::keyPressed(int key) {
             break;
         }
 
-        case 'S':
-        case 's': {
+        case 'S': {
             // Save dialog
             statusMessage = "Opening save dialog...";
             lastResult = saveDialog("Save File", "Save your file", "", "untitled.txt");
@@ -136,8 +133,7 @@ void tcApp::keyPressed(int key) {
             break;
         }
 
-        case 'A':
-        case 'a': {
+        case 'A': {
             // Alert dialog
             statusMessage = "Showing alert...";
             alertDialog("Alert", "This is a test alert from TrussC!");

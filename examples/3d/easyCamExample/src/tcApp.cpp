@@ -150,7 +150,6 @@ void tcApp::drawGrid(float size, int divisions) {
 
 void tcApp::keyPressed(int key) {
     switch (key) {
-        case 'c':
         case 'C':
             if (cam.isMouseInputEnabled()) {
                 cam.disableMouseInput();
@@ -158,20 +157,16 @@ void tcApp::keyPressed(int key) {
                 cam.enableMouseInput();
             }
             break;
-        case 'r':
         case 'R':
             cam.reset();
             cam.setDistance(600);
             break;
-        case 'f':
         case 'F':
             toggleFullscreen();
             break;
-        case 'h':
         case 'H':
             showHelp = !showHelp;
             break;
-        case 'o':
         case 'O':
             cam.setOrtho(!cam.getOrtho());
             break;

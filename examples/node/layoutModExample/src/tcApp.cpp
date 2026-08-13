@@ -108,19 +108,15 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
     switch (key) {
-        case 'v':
         case 'V':
             addBoxToVStack();
             break;
-        case 'h':
         case 'H':
             addBoxToHStack();
             break;
-        case 'd':
         case 'D':
             removeLastFromVStack();
             break;
-        case 'f':
         case 'F':
             removeLastFromHStack();
             break;
