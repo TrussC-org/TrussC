@@ -92,10 +92,30 @@ works, deprecated until v1.0.0.)
 | `tc_mouse_release` | `x`, `y`, `button` | Release — end of a drag gesture |
 | `tc_mouse_click` | `x`, `y`, `button`, `shift`/`ctrl`/`alt`/`super` (optional) | Click mouse button (0:left, 1:right), optionally with modifier keys held — e.g. `super: true` Cmd+clicks |
 | `tc_mouse_scroll` | `dx`, `dy` | Scroll mouse wheel |
-| `tc_key_press` | `key` | Press a key (sokol_app keycode) |
-| `tc_key_release` | `key` | Release a key |
+| `tc_key_press` | `key`, `shift`/`ctrl`/`alt`/`super` (optional) | Press a key (sokol_app keycode; letters are uppercase ASCII, `'A'`=65). A modifier flag presses that modifier's own key first, so both `e.shift` and `isShiftPressed()` see it |
+| `tc_key_release` | `key`, `shift`/`ctrl`/`alt`/`super` (optional) | Release a key; a modifier flag releases that modifier's own key afterwards |
 | `tc_select_node` | `id` | Select a node by instance id (0 clears); drives the same selection an inspector shows |
 | `tc_set_node_members` | `id`, `members`, `mod` (optional) | Set reflected members from a JSON object (same encoding as `tc_get_node_tree`; enums accept label string or int). Pass `mod` (a Mod's short type name, e.g. `"LayoutMod"`) to target a mod attached to the node instead of the node itself. Reports `applied` / `skipped` (type mismatch) / `readOnly` / `unknown` keys |
+
+Injected key events go through the same two channels a real key does: the
+`keyPressed` / `keyReleased` callbacks **and** the held-key set that
+`isKeyPressed()` / `isShiftPressed()` read — so an app that polls in `update()`
+reacts to injection just like it does to the keyboard. `tc_key_press` /
+`tc_key_release` reply with the resulting `heldKeys`, which is the quickest way
+to see the state an app is actually looking at.
+
+The modifier flags are shorthand for pressing that modifier's **own key**
+(`shift` → keycode 340, `ctrl` → 341, `alt` → 342, `super` → 343), the way a
+real keyboard does it — pair the same flag on press and release. To hold a
+modifier across several keys, press and release its keycode explicitly; the
+presses in between inherit it:
+
+```
+tc_key_press   {"key": 340}          # Shift down
+tc_key_press   {"key": 65}           # 'A' arrives with shift = true
+tc_key_release {"key": 65}
+tc_key_release {"key": 340}          # Shift up
+```
 
 The node tools make a scene **round-trippable for agents**: arrange things in a
 GUI (e.g. with the `tcxNodeInspector` addon's gizmo), then `tc_get_node_tree` to
