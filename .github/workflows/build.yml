@@ -97,16 +97,21 @@ jobs:
           - os: macos-latest
             preset: macos
             launcher: ccache
-          # Pinned to 2022: windows-latest now redirects to a VS2026 runner,
-          # where projectGenerator's VS-project generation falls back to the
-          # "Visual Studio 17 2022" generator and fails (VS2022 absent). Revert
-          # to windows-latest once projectGenerator supports VS2026.
+          # Unpinned back to windows-latest (a VS2026 runner). The previous
+          # windows-2022 pin blamed projectGenerator's VS-project generation,
+          # but that reason does not hold: this job never runs that path (it
+          # builds via tools/build_win.bat, which forces -G Ninja, plus
+          # examples/build_all.py -- `trusscli update` is never invoked with the
+          # Visual Studio IDE type), and VsDetector has mapped VS18 -> "2026"
+          # since f7810df0 (2026-04-17), two months BEFORE the pin was added.
+          # The real VS2026 breakage at the time was build_win.bat defaulting to
+          # the VS generator, which was fixed in the same batch.
           #
           # CI builds examples with the Ninja generator (TRUSSC_CMAKE_GENERATOR)
           # instead of the Visual Studio generator: the compiler-launcher hook
           # sccache relies on is ignored by the VS generator, and Ninja + cl.exe
           # (from vcvars) is version-agnostic anyway. Local dev is unchanged.
-          - os: windows-2022
+          - os: windows-latest
             preset: windows
             launcher: sccache
             cmake_gen: Ninja
