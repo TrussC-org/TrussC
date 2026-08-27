@@ -600,7 +600,8 @@ struct PlayingSound {
 // Use AudioEngine::listDevices() to enumerate available device names.
 // ---------------------------------------------------------------------------
 struct AudioSettings {
-    int sampleRate   = 96000;   // engine output sample rate (Hz)
+    int sampleRate   = 0;       // engine output sample rate (Hz);
+                                // 0 = AudioEngine::DEFAULT_SAMPLE_RATE (48 kHz)
     int channels     = 2;       // engine output channel count (1 = mono, 2 = stereo)
     int bufferSize   = 0;       // requested device buffer size in frames; 0 = let miniaudio choose
     int maxPolyphony = 32;      // max simultaneously-playing Sound voices
@@ -1432,7 +1433,7 @@ inline size_t getAudioAnalysisBuffer(float* outBuffer, size_t numSamples) {
 class MicInput {
 public:
     static constexpr int BUFFER_SIZE = 4096;  // Ring buffer size
-    static constexpr int DEFAULT_SAMPLE_RATE = 44100;
+    static constexpr int DEFAULT_SAMPLE_RATE = 48000;  // match AudioEngine::DEFAULT_SAMPLE_RATE
 
     MicInput() = default;
     ~MicInput();

@@ -471,9 +471,9 @@ description.ja = "同時再生可能な Sound ボイスの最大数 (デフォ�
 description.ko = "동시 재생 가능한 Sound 보이스 최대 수 (기본값 32)"
 
 ["AudioSettings::sampleRate"]
-description.en = "Engine output sample rate in Hz (default 96000)"
-description.ja = "エンジン出力サンプルレート (Hz、デフォルト 96000)"
-description.ko = "엔진 출력 샘플레이트 (Hz, 기본값 96000)"
+description.en = "Engine output sample rate in Hz (0 = the engine default, 48000)"
+description.ja = "エンジン出力サンプルレート (Hz、0 = エンジンのデフォルト 48000)"
+description.ko = "엔진 출력 샘플레이트 (Hz, 0 = 엔진 기본값 48000)"
 
 ["AxisMode"]
 description.en = "Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children)."
