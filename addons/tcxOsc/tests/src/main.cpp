@@ -67,11 +67,35 @@ static Recv sendAndExpectNone(OscReceiver& rx, OscSender& tx,
     return anySent ? Recv::NotReceived : Recv::Unroutable;
 }
 
+// Bind a receiver to the first candidate port that actually takes it, and
+// return that port (0 if none did).
+//
+// The candidates all sit BELOW 49152 on purpose. At or above that Windows hands
+// out dynamic ports, and Hyper-V / WSL / Docker reserve blocks inside that
+// range; a bind landing in a reserved block fails with WSAEACCES (10013). A
+// hardcoded 57110 did exactly that on the windows-latest CI runner while
+// passing everywhere else. Trying several ports also survives an ordinary
+// collision with whatever else happens to be listening, so the test never
+// depends on one number being free.
+//
+// They avoid 9000/9001 as well: the tcxOsc examples bind those, and 9000 is
+// about the most common OSC port in the wild, so it is the LEAST safe choice
+// on a machine that does OSC work.
+static int bindFirstFree(OscReceiver& rx, const int (&candidates)[4]) {
+    for (int port : candidates) {
+        if (rx.setup(port)) return port;
+        // setup() creates the socket and registers its listeners even when the
+        // bind fails; close() undoes both so the next attempt starts clean.
+        rx.close();
+    }
+    return 0;
+}
+
 int main() {
     const std::string GROUP_A = "239.77.0.1";
     const std::string GROUP_B = "239.77.0.2";
-    const int PORT_UNI  = 57110;
-    const int PORT_MC   = 57111;  // joined receiver
+    static const int UNI_PORTS[4] = { 17110, 18110, 19110, 27110 };
+    static const int MC_PORTS[4]  = { 17111, 18111, 19111, 27111 };  // joined receiver
 
     // Outgoing multicast interface. macOS CI runners have no multicast route on
     // the default NIC (send -> EHOSTUNREACH), but lo0 is multicast-capable, so
@@ -91,13 +115,14 @@ int main() {
     // ----- 1. unicast loopback (baseline) ------------------------------------
     {
         OscReceiver rx;
-        bool bound = rx.setup(PORT_UNI);
-        check("unicast: receiver bound", bound);
+        const int portUni = bindFirstFree(rx, UNI_PORTS);
+        check("unicast: receiver bound", portUni != 0);
+        if (portUni) std::printf("  (unicast port %d)\n", portUni);
 
         OscMessage m("/uni");
         m.addInt(42);
         OscMessage got;
-        bool ok = sendAndRecv(rx, tx, "127.0.0.1", PORT_UNI, m, got) == Recv::Received;
+        bool ok = sendAndRecv(rx, tx, "127.0.0.1", portUni, m, got) == Recv::Received;
         check("unicast: message received", ok);
         check("unicast: address == /uni", ok && got.getAddress() == "/uni");
         check("unicast: arg == 42", ok && got.getArgCount() == 1 && got.getArgAsInt(0) == 42);
@@ -110,14 +135,16 @@ int main() {
     // IS routable (Linux/Windows CI, local macOS), which is the real coverage.
     {
         OscReceiver rx;
-        check("multicast: receiver bound", rx.setup(PORT_MC));
+        const int portMc = bindFirstFree(rx, MC_PORTS);
+        check("multicast: receiver bound", portMc != 0);
+        if (portMc) std::printf("  (multicast port %d)\n", portMc);
         check("multicast: joinMulticast(A)", rx.joinMulticast(GROUP_A, MIF));
         sleepMs(100);  // let the join settle
 
         OscMessage m("/mc");
         m.addInt(7);
         OscMessage got;
-        Recv r = sendAndRecv(rx, tx, GROUP_A, PORT_MC, m, got);
+        Recv r = sendAndRecv(rx, tx, GROUP_A, portMc, m, got);
         if (r == Recv::Unroutable) {
             std::printf("%-56s %s\n", "multicast: SKIPPED (no multicast route on this host)", "SKIP");
             std::fflush(stdout);
@@ -136,7 +163,7 @@ int main() {
             OscMessage mb("/other");
             mb.addInt(99);
             check("scoping: unjoined group's traffic does not reach the receiver",
-                  sendAndExpectNone(rx, tx, GROUP_B, PORT_MC, mb) == Recv::NotReceived);
+                  sendAndExpectNone(rx, tx, GROUP_B, portMc, mb) == Recv::NotReceived);
         }
         rx.close();
     }
