@@ -30,17 +30,36 @@ REM Setup Visual Studio environment
 for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VS_PATH=%%i
 if defined VS_PATH call "%VS_PATH%\VC\Auxiliary\Build\vcvarsall.bat" x64
 
-REM A leftover CMakeCache.txt from a previous run with a different generator
-REM (e.g. a Visual Studio generator from before this Ninja switch, or a CI
-REM cache) makes -G Ninja abort with a generator-mismatch error. Wipe the
-REM cache when it doesn't already record Ninja so the switch is seamless.
-if exist "CMakeCache.txt" (
-    findstr /C:"CMAKE_GENERATOR:INTERNAL=Ninja" "CMakeCache.txt" >nul 2>&1
-    if errorlevel 1 (
-        echo Different CMake generator found in cache, cleaning...
-        del /q "CMakeCache.txt"
-        if exist "CMakeFiles" rmdir /s /q "CMakeFiles"
-    )
+REM A leftover CMakeCache.txt can be stale in two different ways, and BOTH
+REM abort the configure below with an error that never names the cache:
+REM
+REM  1. It records a different generator (e.g. a Visual Studio generator from
+REM     before this Ninja switch) -> -G Ninja fails on a generator mismatch.
+REM  2. It records an absolute compiler path that no longer exists. This is
+REM     what upgrading Visual Studio does: the cache still points at, say,
+REM     .../Visual Studio/2022/.../cl.exe while only VS2026 is installed, and
+REM     CMake fails with "is not a full path to an existing compiler tool".
+REM     CI hits the same thing whenever the hosted runner image moves to a
+REM     newer VS while the restored build-directory cache does not.
+REM
+REM Wipe the cache in either case so the switch is seamless. Written without
+REM delayed expansion: every value is read on a later line than it is set.
+set "CACHE_CLEAN_REASON="
+if not exist "CMakeCache.txt" goto cache_checked
+
+findstr /C:"CMAKE_GENERATOR:INTERNAL=Ninja" "CMakeCache.txt" >nul 2>&1
+if errorlevel 1 set "CACHE_CLEAN_REASON=generator changed"
+
+set "CACHED_CXX="
+for /f "usebackq tokens=1,* delims==" %%i in (`findstr /b /c:"CMAKE_CXX_COMPILER:FILEPATH=" "CMakeCache.txt"`) do set "CACHED_CXX=%%j"
+if defined CACHED_CXX set "CACHED_CXX=%CACHED_CXX:/=\%"
+if defined CACHED_CXX if not exist "%CACHED_CXX%" set "CACHE_CLEAN_REASON=recorded compiler no longer exists"
+
+:cache_checked
+if defined CACHE_CLEAN_REASON (
+    echo Stale CMake cache ^(%CACHE_CLEAN_REASON%^), cleaning...
+    del /q "CMakeCache.txt"
+    if exist "CMakeFiles" rmdir /s /q "CMakeFiles"
 )
 
 REM CMake configuration. Force the Ninja generator: without -G, CMake defaults
