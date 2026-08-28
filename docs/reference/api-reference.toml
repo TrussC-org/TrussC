@@ -8426,9 +8426,10 @@ platform_note.en = "TCP server (socket/bind/listen/accept on a background accept
 platform_note.ja = "TCP サーバ (socket/bind/listen/accept をバックグラウンド accept スレッドで)。ネイティブ5プラットフォームで実装。wasm では実質利用不可: ブラウザは着信を listen()/accept() できず、accept スレッドに必要な std::thread も web 既定ビルドに無い。api-definition.yaml には未記載。"
 
 ["TcpServer::broadcast"]
-description.en = "Broadcast data to all clients"
-description.ja = "全クライアントへブロードキャスト"
-description.ko = "모든 클라이언트로 브로드캐스트"
+description.en = "Broadcast data to all clients (blocking, sent one client at a time)"
+description.ja = "全クライアントへブロードキャスト（ブロッキング、1クライアントずつ送信）"
+description.ko = "모든 클라이언트로 브로드캐스트 (블로킹, 클라이언트별 순차 전송)"
+details = "Calls send() per client in sequence, so one slow peer delays the clients after it. Set a send timeout with setSendTimeout() when broadcasting to unreliable peers."
 
 ["TcpServer::disconnectAllClients"]
 description.en = "Disconnect all clients"
@@ -8486,9 +8487,17 @@ description.ja = "クライアントからのデータ受信時に発火"
 description.ko = "클라이언트로부터 데이터 수신 시 발생"
 
 ["TcpServer::send"]
-description.en = "Send data to a specific client"
-description.ja = "指定クライアントへ送信"
-description.ko = "특정 클라이언트로 전송"
+description.en = "Send data to a specific client (blocking)"
+description.ja = "指定クライアントへ送信（ブロッキング）"
+description.ko = "특정 클라이언트로 전송 (블로킹)"
+details = "Returns once the payload has been handed to the kernel. Only the target client's send lock is held, so a peer that stops reading blocks this call alone, not other clients or the accept loop. Use setSendTimeout() to bound the wait."
+
+["TcpServer::setSendTimeout"]
+description.en = "Set the per-send timeout in seconds (0 = block until sent)"
+description.ja = "送信のタイムアウトを秒で設定（0 = 送信完了までブロック）"
+description.ko = "전송 타임아웃을 초 단위로 설정 (0 = 전송 완료까지 블록)"
+keywords = ["timeout", "blocking", "send"]
+details = "Applies to clients accepted after the call. Guards against a peer that has stopped reading holding a send open indefinitely."
 
 ["TcpServer::setReceiveBufferSize"]
 description.en = "Set the receive buffer size"

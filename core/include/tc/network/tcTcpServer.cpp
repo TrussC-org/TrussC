@@ -17,6 +17,16 @@
     #define SOCKET_ERROR -1
 #endif
 
+// Writing to a socket the peer already closed raises SIGPIPE, whose default
+// action terminates the process. Linux suppresses it per-call with MSG_NOSIGNAL;
+// Apple has no such flag and uses the SO_NOSIGPIPE socket option instead (set on
+// each accepted socket below). Windows has no SIGPIPE.
+#if defined(MSG_NOSIGNAL)
+    #define TC_SEND_FLAGS MSG_NOSIGNAL
+#else
+    #define TC_SEND_FLAGS 0
+#endif
+
 namespace trussc {
 
 std::atomic<int> TcpServer::instanceCount_{0};
@@ -191,6 +201,26 @@ void TcpServer::acceptThreadFunc() {
         inet_ntop(AF_INET, &clientAddr.sin_addr, hostStr, INET_ADDRSTRLEN);
         int clientPort = ntohs(clientAddr.sin_port);
 
+#ifdef SO_NOSIGPIPE
+        // Apple: suppress SIGPIPE per-socket (no MSG_NOSIGNAL there)
+        {
+            int on = 1;
+            ::setsockopt(clientSocket, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
+        }
+#endif
+
+        if (sendTimeout_ > 0.0f) {
+#ifdef _WIN32
+            DWORD ms = static_cast<DWORD>(sendTimeout_ * 1000.0f);
+            ::setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&ms, sizeof(ms));
+#else
+            struct timeval tv;
+            tv.tv_sec = static_cast<time_t>(sendTimeout_);
+            tv.tv_usec = static_cast<suseconds_t>((sendTimeout_ - static_cast<float>(tv.tv_sec)) * 1e6f);
+            ::setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+        }
+
         // Register client
         int clientId;
         {
@@ -201,6 +231,8 @@ void TcpServer::acceptThreadFunc() {
             client.host_ = hostStr;
             client.port_ = clientPort;
             client.socket_ = clientSocket;
+            client.channel_ = std::make_shared<internal::TcpSendChannel>();
+            client.channel_->socket = clientSocket;
             clients_[clientId] = client;
         }
 
@@ -285,20 +317,22 @@ void TcpServer::clientThreadFunc(int clientId) {
 // Client management
 // =============================================================================
 void TcpServer::disconnectClient(int clientId) {
-    std::lock_guard<std::mutex> lock(clientsMutex_);
-    auto it = clients_.find(clientId);
-    if (it != clients_.end()) {
-#ifdef _WIN32
-        shutdown(it->second.socket_, SD_BOTH);
-        CLOSE_SOCKET(it->second.socket_);
-#else
-        shutdown(it->second.socket_, SHUT_RDWR);
-        CLOSE_SOCKET(it->second.socket_);
-#endif
-        clients_.erase(it);
+    std::shared_ptr<internal::TcpSendChannel> ch;
+    {
+        std::lock_guard<std::mutex> lock(clientsMutex_);
+        auto it = clients_.find(clientId);
+        if (it != clients_.end()) {
+            ch = it->second.channel_;
+            clients_.erase(it);
+        }
     }
 
+    // Outside clientsMutex_: closing can block behind an in-flight send, and
+    // holding the map lock there would stall the whole server.
+    closeChannel(ch);
+
     // Detach thread (let it self-terminate)
+    std::lock_guard<std::mutex> lock(clientsMutex_);
     auto threadIt = clientThreads_.find(clientId);
     if (threadIt != clientThreads_.end()) {
         if (threadIt->second.joinable()) {
@@ -340,12 +374,15 @@ void TcpServer::disconnectAllClients() {
 }
 
 void TcpServer::removeClient(int clientId) {
-    std::lock_guard<std::mutex> lock(clientsMutex_);
-    auto it = clients_.find(clientId);
-    if (it != clients_.end()) {
-        CLOSE_SOCKET(it->second.socket_);
+    std::shared_ptr<internal::TcpSendChannel> ch;
+    {
+        std::lock_guard<std::mutex> lock(clientsMutex_);
+        auto it = clients_.find(clientId);
+        if (it == clients_.end()) return;
+        ch = it->second.channel_;
         clients_.erase(it);
     }
+    closeChannel(ch);
 }
 
 int TcpServer::getClientCount() const {
@@ -374,11 +411,42 @@ const TcpServerClient* TcpServer::getClient(int clientId) const {
 // =============================================================================
 // Data send
 // =============================================================================
-bool TcpServer::send(int clientId, const void* data, size_t size) {
+std::shared_ptr<internal::TcpSendChannel> TcpServer::findChannel(int clientId) const {
     std::lock_guard<std::mutex> lock(clientsMutex_);
     auto it = clients_.find(clientId);
-    if (it == clients_.end()) {
+    if (it == clients_.end()) return nullptr;
+    return it->second.channel_;
+}
+
+void TcpServer::closeChannel(const std::shared_ptr<internal::TcpSendChannel>& ch) {
+    if (!ch) return;
+    // Order matters: refuse new sends, then shut the socket down so a send
+    // already blocked inside the kernel returns instead of pinning the mutex,
+    // and only then take the mutex and close the descriptor for good.
+    if (!ch->open.exchange(false)) return;
+#ifdef _WIN32
+    ::shutdown(ch->socket, SD_BOTH);
+#else
+    ::shutdown(ch->socket, SHUT_RDWR);
+#endif
+    std::lock_guard<std::mutex> lock(ch->mutex);
+    CLOSE_SOCKET(ch->socket);
+    ch->socket = INVALID_SOCKET;
+}
+
+// Blocking: returns once the whole payload has been handed to the kernel, or on
+// error. Only this client's send mutex is held, never clientsMutex_, so a peer
+// that stops reading cannot stall the rest of the server.
+bool TcpServer::send(int clientId, const void* data, size_t size) {
+    std::shared_ptr<internal::TcpSendChannel> ch = findChannel(clientId);
+    if (!ch) {
         notifyError("Client not found", 0, clientId);
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(ch->mutex);
+    if (!ch->open) {
+        notifyError("Client disconnected", 0, clientId);
         return false;
     }
 
@@ -386,9 +454,17 @@ bool TcpServer::send(int clientId, const void* data, size_t size) {
     size_t remaining = size;
 
     while (remaining > 0) {
-        int sent = static_cast<int>(::send(it->second.socket_, ptr, remaining, 0));
+        int sent = static_cast<int>(::send(ch->socket, ptr, remaining, TC_SEND_FLAGS));
         if (sent == SOCKET_ERROR) {
-            notifyError("Send failed", SOCKET_ERROR_CODE, clientId);
+            int err = SOCKET_ERROR_CODE;
+#ifndef _WIN32
+            if (err == EINTR) continue;
+#endif
+            notifyError("Send failed", err, clientId);
+            return false;
+        }
+        if (sent == 0) {
+            notifyError("Send failed", 0, clientId);
             return false;
         }
         ptr += sent;
@@ -424,6 +500,10 @@ void TcpServer::broadcast(const std::string& message) {
 // =============================================================================
 // Settings
 // =============================================================================
+void TcpServer::setSendTimeout(float seconds) {
+    sendTimeout_ = seconds < 0.0f ? 0.0f : seconds;
+}
+
 void TcpServer::setReceiveBufferSize(size_t size) {
     receiveBufferSize_ = size;
 }

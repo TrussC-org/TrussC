@@ -30,6 +30,32 @@
 
 namespace trussc {
 
+namespace internal {
+
+// -----------------------------------------------------------------------------
+// Per-client send channel.
+//
+// Sending must NOT hold the server-wide client mutex: a client that stops
+// reading would otherwise block client registration, disconnects and every
+// other send (head-of-line blocking). Each client therefore owns its own send
+// mutex, held by shared_ptr so an in-flight send keeps the channel alive even
+// after the client is erased from the map.
+//
+// `open` is cleared before the socket is shut down, so a send that wakes up
+// mid-teardown fails instead of writing to a closed (or recycled) descriptor.
+// -----------------------------------------------------------------------------
+struct TcpSendChannel {
+#ifdef _WIN32
+    SOCKET socket = INVALID_SOCKET;
+#else
+    int socket = -1;
+#endif
+    std::mutex mutex;
+    std::atomic<bool> open{true};
+};
+
+} // namespace internal
+
 // =============================================================================
 // Connected client information
 // =============================================================================
@@ -51,6 +77,9 @@ private:
 #else
     int socket_;
 #endif
+
+    // Owns the send mutex for this client (see internal::TcpSendChannel)
+    std::shared_ptr<internal::TcpSendChannel> channel_;
 };
 
 // =============================================================================
@@ -171,6 +200,10 @@ public:
     // Set receive buffer size
     void setReceiveBufferSize(size_t size);
 
+    // Set the per-send timeout in seconds (0 = block until sent, the default).
+    // Applies to clients accepted after this call.
+    void setSendTimeout(float seconds);
+
     // -------------------------------------------------------------------------
     // Information retrieval
     // -------------------------------------------------------------------------
@@ -202,6 +235,13 @@ private:
 
     int nextClientId_ = 1;
     size_t receiveBufferSize_ = 65536;
+    float sendTimeout_ = 0.0f;
+
+    // Look up a client's send channel without holding clientsMutex_ during the send
+    std::shared_ptr<internal::TcpSendChannel> findChannel(int clientId) const;
+
+    // Clear `open`, shut down and close the socket, in that order
+    static void closeChannel(const std::shared_ptr<internal::TcpSendChannel>& ch);
 
     static std::atomic<int> instanceCount_;
     static void initWinsock();
