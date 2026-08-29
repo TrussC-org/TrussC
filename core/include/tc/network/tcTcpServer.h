@@ -41,7 +41,10 @@ namespace internal {
 // mutex, held by shared_ptr so an in-flight send keeps the channel alive even
 // after the client is erased from the map.
 //
-// `open` is cleared before the socket is shut down, so a send that wakes up
+// The socket is non-blocking and the send loop waits in short slices, so
+// clearing `open` is what cuts a send short when the client goes away: nothing
+// else can interrupt a send that is already parked (Winsock's shutdown() does
+// not). It is cleared before the socket is shut down, so a send that wakes up
 // mid-teardown fails instead of writing to a closed (or recycled) descriptor.
 // -----------------------------------------------------------------------------
 struct TcpSendChannel {
@@ -201,7 +204,7 @@ public:
     void setReceiveBufferSize(size_t size);
 
     // Set the per-send timeout in seconds (0 = block until sent, the default).
-    // Applies to clients accepted after this call.
+    // Applies to every send that starts after this call, on every client.
     void setSendTimeout(float seconds);
 
     // -------------------------------------------------------------------------
@@ -235,7 +238,7 @@ private:
 
     int nextClientId_ = 1;
     size_t receiveBufferSize_ = 65536;
-    float sendTimeout_ = 0.0f;
+    std::atomic<float> sendTimeout_{0.0f};   // read by every sending thread
 
     // Look up a client's send channel without holding clientsMutex_ during the send
     std::shared_ptr<internal::TcpSendChannel> findChannel(int clientId) const;

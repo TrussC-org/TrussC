@@ -18,8 +18,9 @@
 #endif
 
 #ifndef _WIN32
-    #include <sys/time.h>   // timeval, for the SO_SNDTIMEO option below
+    #include <poll.h>       // poll(), for the send/receive waits below
 #endif
+#include <chrono>
 
 // Writing to a socket the peer already closed raises SIGPIPE, whose default
 // action terminates the process. MSG_NOSIGNAL suppresses it per call, and both
@@ -37,6 +38,78 @@
 namespace trussc {
 
 std::atomic<int> TcpServer::instanceCount_{0};
+
+namespace {
+
+#ifdef _WIN32
+using socket_t = SOCKET;
+#else
+using socket_t = int;
+#endif
+
+// Accepted sockets are non-blocking, and both the send loop and the receive
+// thread wait in slices instead of parking in the kernel. A blocking call
+// cannot be interrupted portably: Winsock's shutdown() does not wake a send()
+// that is already parked, so disconnecting a peer that stopped reading hung
+// until that peer moved. Waiting in slices lets either loop notice the channel
+// closing on its own, which is the same on every platform.
+bool setNonBlocking(socket_t s) {
+#ifdef _WIN32
+    u_long mode = 1;
+    return ioctlsocket(s, FIONBIO, &mode) == 0;
+#else
+    int flags = fcntl(s, F_GETFL, 0);
+    if (flags < 0) return false;
+    return fcntl(s, F_SETFL, flags | O_NONBLOCK) == 0;
+#endif
+}
+
+// Wait for the socket to become writable (forWrite) or readable, up to
+// sliceMs. Returns 1 ready, 0 timed out, -1 socket error.
+int waitReady(socket_t s, bool forWrite, int sliceMs) {
+#ifdef _WIN32
+    fd_set fds, exceptfds;
+    FD_ZERO(&fds);
+    FD_SET(s, &fds);
+    FD_ZERO(&exceptfds);
+    FD_SET(s, &exceptfds);
+    struct timeval tv;
+    tv.tv_sec = sliceMs / 1000;
+    tv.tv_usec = (sliceMs % 1000) * 1000;
+    int res = ::select(0, forWrite ? NULL : &fds, forWrite ? &fds : NULL, &exceptfds, &tv);
+    if (res <= 0) return res == 0 ? 0 : -1;
+    return FD_ISSET(s, &exceptfds) ? -1 : 1;
+#else
+    struct pollfd pfd;
+    pfd.fd = s;
+    pfd.events = static_cast<short>(forWrite ? POLLOUT : POLLIN);
+    pfd.revents = 0;
+    int res = ::poll(&pfd, 1, sliceMs);
+    if (res < 0) return errno == EINTR ? 0 : -1;
+    if (res == 0) return 0;
+    if (pfd.revents & (POLLERR | POLLNVAL)) return -1;
+    return 1;
+#endif
+}
+
+// The error a failed wait left on the socket. poll() reports POLLERR without
+// touching errno, so read it from the socket rather than guessing.
+int socketError(socket_t s) {
+    int err = 0;
+#ifdef _WIN32
+    int len = static_cast<int>(sizeof(err));
+    if (::getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&err, &len) != 0) return SOCKET_ERROR_CODE;
+#else
+    socklen_t len = sizeof(err);
+    if (::getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &len) != 0) return SOCKET_ERROR_CODE;
+#endif
+    return err;
+}
+
+// How long a wait parks before re-checking whether the channel is still open.
+constexpr int kWaitSliceMs = 100;
+
+} // namespace
 
 // =============================================================================
 // Winsock initialization (Windows only)
@@ -216,16 +289,12 @@ void TcpServer::acceptThreadFunc() {
         }
 #endif
 
-        if (sendTimeout_ > 0.0f) {
-#ifdef _WIN32
-            DWORD ms = static_cast<DWORD>(sendTimeout_ * 1000.0f);
-            ::setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&ms, sizeof(ms));
-#else
-            struct timeval tv;
-            tv.tv_sec = static_cast<time_t>(sendTimeout_);
-            tv.tv_usec = static_cast<suseconds_t>((sendTimeout_ - static_cast<float>(tv.tv_sec)) * 1e6f);
-            ::setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-#endif
+        // SO_SNDTIMEO would bound a blocking send, but nothing can then cut
+        // that send short when the client is disconnected. The send loop polls
+        // and times out on its own instead.
+        if (!setNonBlocking(clientSocket)) {
+            logWarning() << "Client socket could not be made non-blocking; "
+                            "sends to it will not observe disconnects promptly";
         }
 
         // Register client
@@ -279,7 +348,33 @@ void TcpServer::clientThreadFunc(int clientId) {
         clientSocket = it->second.socket_;
     }
 
+    // Holding the channel keeps this loop's view of the socket's lifetime in
+    // step with the send path: `open` is cleared before the descriptor is
+    // closed, so checking it first keeps this thread off a closed (or already
+    // recycled) descriptor.
+    std::shared_ptr<internal::TcpSendChannel> channel = findChannel(clientId);
+
     while (running_) {
+        if (channel && !channel->open) break;
+
+        // The socket is non-blocking, so wait in slices rather than parking in
+        // recv(): this thread then notices the server stopping and the client
+        // being disconnected without waiting for traffic that may never come.
+        const int ready = waitReady(clientSocket, false, kWaitSliceMs);
+        if (ready == 0) continue;
+        if (ready < 0) {
+            if (running_ && channel && channel->open) {
+                TcpClientDisconnectEventArgs args;
+                args.clientId = clientId;
+                args.reason = "Connection error";
+                args.wasClean = false;
+                onClientDisconnect.notify(args);
+
+                removeClient(clientId);
+            }
+            break;
+        }
+
         int received = static_cast<int>(recv(clientSocket, buffer.data(), buffer.size(), 0));
 
         if (received > 0) {
@@ -474,34 +569,63 @@ bool TcpServer::send(int clientId, const void* data, size_t size) {
         } else {
             const char* ptr = static_cast<const char*>(data);
             size_t remaining = size;
+            const float timeout = sendTimeout_.load();   // 0 = wait indefinitely
+            const auto start = std::chrono::steady_clock::now();
 
             while (remaining > 0) {
-                int sent = static_cast<int>(::send(ch->socket, ptr, remaining, TC_SEND_FLAGS));
-                if (sent == SOCKET_ERROR) {
-                    int err = SOCKET_ERROR_CODE;
-#ifndef _WIN32
-                    if (err == EINTR) continue;
-#endif
-                    // A send timeout (SO_SNDTIMEO) leaves the stream truncated
-                    // mid-payload with the connection still open, so the next
-                    // send() would splice a fresh message onto a partial one.
-                    // Drop the client instead of handing back a corrupt stream.
-                    if (isWouldBlock(err) && remaining != size) {
-                        failure = "Send timed out mid-payload; client dropped";
-                        failureCode = err;
-                        truncated = true;
-                        break;
-                    }
-                    failure = "Send failed";
-                    failureCode = err;
+                // Re-read every iteration: closeChannel() clears this to cut a
+                // parked send short, and that is the only thing that can.
+                if (!ch->open) {
+                    failure = "Client disconnected";
                     break;
+                }
+
+                int sent = static_cast<int>(::send(ch->socket, ptr, remaining, TC_SEND_FLAGS));
+                if (sent > 0) {
+                    ptr += sent;
+                    remaining -= sent;
+                    continue;
                 }
                 if (sent == 0) {
                     failure = "Send failed";
                     break;
                 }
-                ptr += sent;
-                remaining -= sent;
+
+                int err = SOCKET_ERROR_CODE;
+#ifndef _WIN32
+                if (err == EINTR) continue;
+#endif
+                if (!isWouldBlock(err)) {
+                    failure = "Send failed";
+                    failureCode = err;
+                    break;
+                }
+
+                // The peer is not draining its window. Park for one slice so a
+                // disconnect can interrupt this, then re-check the deadline.
+                if (waitReady(ch->socket, true, kWaitSliceMs) < 0) {
+                    failure = "Send failed";
+                    failureCode = socketError(ch->socket);
+                    break;
+                }
+                if (timeout <= 0.0f) continue;
+
+                const std::chrono::duration<float> elapsed =
+                    std::chrono::steady_clock::now() - start;
+                if (elapsed.count() < timeout) continue;
+
+                failureCode = err;
+                // A timeout that wrote nothing leaves the stream intact. One
+                // that fires mid-payload leaves it truncated with the
+                // connection still open, so the next send() would splice a
+                // fresh message onto a partial one: drop the client instead.
+                if (remaining != size) {
+                    failure = "Send timed out mid-payload; client dropped";
+                    truncated = true;
+                } else {
+                    failure = "Send timed out";
+                }
+                break;
             }
         }
     }

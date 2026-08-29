@@ -8497,7 +8497,7 @@ description.en = "Set the per-send timeout in seconds (0 = block until sent)"
 description.ja = "送信のタイムアウトを秒で設定（0 = 送信完了までブロック）"
 description.ko = "전송 타임아웃을 초 단위로 설정 (0 = 전송 완료까지 블록)"
 keywords = ["timeout", "blocking", "send"]
-details = "Applies to clients accepted after the call. Guards against a peer that has stopped reading holding a send open indefinitely. A timeout that fires mid-payload leaves the stream truncated, so the client is disconnected rather than left open for the next send() to splice a fresh message onto a partial one."
+details = "Applies to every send that starts after the call, on every client. Guards against a peer that has stopped reading holding a send open indefinitely. A timeout that fires mid-payload leaves the stream truncated, so the client is disconnected rather than left open for the next send() to splice a fresh message onto a partial one."
 
 ["TcpServer::setReceiveBufferSize"]
 description.en = "Set the receive buffer size"
