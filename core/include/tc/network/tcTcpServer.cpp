@@ -17,10 +17,17 @@
     #define SOCKET_ERROR -1
 #endif
 
+#ifndef _WIN32
+    #include <sys/time.h>   // timeval, for the SO_SNDTIMEO option below
+#endif
+
 // Writing to a socket the peer already closed raises SIGPIPE, whose default
-// action terminates the process. Linux suppresses it per-call with MSG_NOSIGNAL;
-// Apple has no such flag and uses the SO_NOSIGPIPE socket option instead (set on
-// each accepted socket below). Windows has no SIGPIPE.
+// action terminates the process. MSG_NOSIGNAL suppresses it per call, and both
+// Linux and current Apple SDKs define it. Older Apple SDKs do not, so each
+// accepted socket also gets SO_NOSIGPIPE below — either mechanism alone is
+// enough (verified on macOS 26.5 with a four-way probe: unprotected sends die
+// on signal 13, each option alone survives). Windows has no SIGPIPE at all and
+// does not define MSG_NOSIGNAL, so the flag is 0 there.
 #if defined(MSG_NOSIGNAL)
     #define TC_SEND_FLAGS MSG_NOSIGNAL
 #else
@@ -202,7 +209,7 @@ void TcpServer::acceptThreadFunc() {
         int clientPort = ntohs(clientAddr.sin_port);
 
 #ifdef SO_NOSIGPIPE
-        // Apple: suppress SIGPIPE per-socket (no MSG_NOSIGNAL there)
+        // Belt and braces for Apple SDKs that predate MSG_NOSIGNAL
         {
             int on = 1;
             ::setsockopt(clientSocket, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
@@ -411,6 +418,14 @@ const TcpServerClient* TcpServer::getClient(int clientId) const {
 // =============================================================================
 // Data send
 // =============================================================================
+static bool isWouldBlock(int err) {
+#ifdef _WIN32
+    return err == WSAEWOULDBLOCK || err == WSAETIMEDOUT;
+#else
+    return err == EWOULDBLOCK || err == EAGAIN;
+#endif
+}
+
 std::shared_ptr<internal::TcpSendChannel> TcpServer::findChannel(int clientId) const {
     std::lock_guard<std::mutex> lock(clientsMutex_);
     auto it = clients_.find(clientId);
@@ -444,34 +459,61 @@ bool TcpServer::send(int clientId, const void* data, size_t size) {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(ch->mutex);
-    if (!ch->open) {
-        notifyError("Client disconnected", 0, clientId);
-        return false;
-    }
+    // The failure is recorded here and reported after the lock is released.
+    // onError listeners run inline by default, and the obvious thing to write in
+    // one is disconnectClient() — which re-enters this same non-recursive mutex
+    // through closeChannel() and deadlocks the caller.
+    const char* failure = nullptr;
+    int failureCode = 0;
+    bool truncated = false;   // partial payload written: the stream is unusable
 
-    const char* ptr = static_cast<const char*>(data);
-    size_t remaining = size;
+    {
+        std::lock_guard<std::mutex> lock(ch->mutex);
+        if (!ch->open) {
+            failure = "Client disconnected";
+        } else {
+            const char* ptr = static_cast<const char*>(data);
+            size_t remaining = size;
 
-    while (remaining > 0) {
-        int sent = static_cast<int>(::send(ch->socket, ptr, remaining, TC_SEND_FLAGS));
-        if (sent == SOCKET_ERROR) {
-            int err = SOCKET_ERROR_CODE;
+            while (remaining > 0) {
+                int sent = static_cast<int>(::send(ch->socket, ptr, remaining, TC_SEND_FLAGS));
+                if (sent == SOCKET_ERROR) {
+                    int err = SOCKET_ERROR_CODE;
 #ifndef _WIN32
-            if (err == EINTR) continue;
+                    if (err == EINTR) continue;
 #endif
-            notifyError("Send failed", err, clientId);
-            return false;
+                    // A send timeout (SO_SNDTIMEO) leaves the stream truncated
+                    // mid-payload with the connection still open, so the next
+                    // send() would splice a fresh message onto a partial one.
+                    // Drop the client instead of handing back a corrupt stream.
+                    if (isWouldBlock(err) && remaining != size) {
+                        failure = "Send timed out mid-payload; client dropped";
+                        failureCode = err;
+                        truncated = true;
+                        break;
+                    }
+                    failure = "Send failed";
+                    failureCode = err;
+                    break;
+                }
+                if (sent == 0) {
+                    failure = "Send failed";
+                    break;
+                }
+                ptr += sent;
+                remaining -= sent;
+            }
         }
-        if (sent == 0) {
-            notifyError("Send failed", 0, clientId);
-            return false;
-        }
-        ptr += sent;
-        remaining -= sent;
     }
 
-    return true;
+    if (!failure) return true;
+
+    // Outside the send lock: safe for a listener to disconnect the client.
+    // A timeout that wrote nothing leaves the stream intact — only a truncated
+    // one forces the drop.
+    if (truncated) removeClient(clientId);
+    notifyError(failure, failureCode, clientId);
+    return false;
 }
 
 bool TcpServer::send(int clientId, const std::vector<char>& data) {
