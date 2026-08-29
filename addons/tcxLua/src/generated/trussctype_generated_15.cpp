@@ -49,6 +49,7 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["send"] = sol::overload([](trussc::TcpServer& self, int clientId, const std::vector<char> & data) { return self.send(clientId, data); }, [](trussc::TcpServer& self, int clientId, const std::string & message) { return self.send(clientId, message); });
         t["broadcast"] = sol::overload([](trussc::TcpServer& self, const std::vector<char> & data) { return self.broadcast(data); }, [](trussc::TcpServer& self, const std::string & message) { return self.broadcast(message); });
         t["setReceiveBufferSize"] = &trussc::TcpServer::setReceiveBufferSize;
+        t["setSendTimeout"] = &trussc::TcpServer::setSendTimeout;
         t["getPort"] = &trussc::TcpServer::getPort;
     }
 #endif
