@@ -79,6 +79,13 @@ static bool completesWithin(int ms, F fn) {
 // A peer that connects and then never reads, so the server's socket buffer fills.
 static rawsocket_t connectSilentPeer(int port) {
     rawsocket_t s = ::socket(AF_INET, SOCK_STREAM, 0);
+
+    // Shrink the receive buffer so the sender's queue fills quickly. This has to
+    // happen BEFORE connect(): the size takes part in the window negotiation, so
+    // setting it on an established socket does not shrink the advertised window.
+    int rcv = 4096;
+    ::setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&rcv, sizeof(rcv));
+
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(static_cast<uint16_t>(port));
@@ -87,9 +94,6 @@ static rawsocket_t connectSilentPeer(int port) {
         TC_CLOSE(s);
         return static_cast<rawsocket_t>(-1);
     }
-    // Shrink the receive buffer so the sender's queue fills quickly
-    int rcv = 4096;
-    ::setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&rcv, sizeof(rcv));
     return s;
 }
 
@@ -117,17 +121,46 @@ int main() {
     const int stalledId = ids[0];
 
     // --- park a send inside the kernel by overflowing the stalled peer ------
-    // 8 MB with a 4 KB peer receive buffer: this cannot drain, so send() blocks.
+    //
+    // How much has to be pushed before send() blocks is entirely a property of
+    // the platform's socket buffers (Winsock in particular keeps its own send
+    // buffer and returns as soon as the payload is copied into it), so a fixed
+    // payload size is not a portable way to reach the state under test. Send
+    // 1 MB chunks in a loop instead and watch for progress to stop.
     atomic<bool> sendReturned{false};
-    vector<char> payload(8u * 1024u * 1024u, 'x');
+    atomic<long long> chunksSent{0};
+    vector<char> chunk(1u * 1024u * 1024u, 'x');
     thread blocker([&] {
-        server.send(stalledId, payload.data(), payload.size());
+        while (server.send(stalledId, chunk.data(), chunk.size())) {
+            chunksSent.fetch_add(1);
+            if (chunksSent.load() > 512) break;   // 512 MB: give up, not our bug
+        }
         sendReturned = true;
     });
 
-    // Give it time to actually block rather than merely be scheduled
-    this_thread::sleep_for(chrono::milliseconds(400));
-    check("send to a non-reading peer is still in flight", !sendReturned.load());
+    // Blocked == no progress for a while, with at least something written.
+    bool parked = false;
+    long long lastSeen = -1;
+    int quietRounds = 0;
+    for (int i = 0; i < 100 && !parked; ++i) {
+        this_thread::sleep_for(chrono::milliseconds(100));
+        const long long now = chunksSent.load();
+        if (sendReturned.load()) break;
+        quietRounds = (now == lastSeen) ? quietRounds + 1 : 0;
+        lastSeen = now;
+        if (now > 0 && quietRounds >= 4) parked = true;   // ~400 ms of silence
+    }
+
+    // The premise is not the invariant. If this platform will not let us wedge a
+    // send, say so and still check that nothing else regressed, rather than
+    // reporting a failure that says nothing about the code under test.
+    if (!parked) {
+        printf("%-56s %s\n", "send to a non-reading peer is still in flight",
+               "SKIP (could not wedge a send on this platform)");
+        fflush(stdout);
+    } else {
+        check("send to a non-reading peer is still in flight", !sendReturned.load());
+    }
 
     // --- the actual invariant: the rest of the server keeps working ---------
     check("getClientIds() does not block behind that send",
@@ -168,12 +201,45 @@ int main() {
 
     if (g_fail) { blocker.detach(); bail(); }
     if (blocker.joinable()) blocker.join();
-    check("the parked send returned after disconnect", sendReturned.load());
+    if (parked) check("the parked send returned after disconnect", sendReturned.load());
 
     if (healthy != static_cast<rawsocket_t>(-1)) TC_CLOSE(healthy);
     TC_CLOSE(stalled);
 
     check("server stops cleanly", completesWithin(4000, [&] { server.stop(); }));
+
+    // --- onError must not run while the send lock is held --------------------
+    // Disconnecting the offending client is the obvious thing to write in an
+    // onError listener. Listeners run inline on the sending thread by default,
+    // so firing the event under the send mutex made that handler re-enter the
+    // same non-recursive mutex through closeChannel() and wedge the caller.
+    {
+        TcpServer s2;
+        if (!s2.start(port + 1, 8)) { printf("could not start second server\n"); bail(); }
+        s2.setSendTimeout(0.5f);
+
+        auto handled = make_shared<atomic<bool>>(false);
+        EventListener sub = s2.onError.listen([&s2, handled](TcpServerErrorEventArgs& e) {
+            s2.disconnectClient(e.clientId);   // re-enters the send path's mutex
+            handled->store(true);
+        });
+
+        rawsocket_t deaf = connectSilentPeer(port + 1);
+        if (deaf == static_cast<rawsocket_t>(-1)) { printf("no peer\n"); bail(); }
+        for (int i = 0; i < 200 && s2.getClientCount() < 1; ++i)
+            this_thread::sleep_for(chrono::milliseconds(5));
+
+        vector<int> ids2 = s2.getClientIds();
+        if (ids2.empty()) { printf("no client id (2)\n"); bail(); }
+
+        vector<char> big(8u * 1024u * 1024u, 'y');
+        check("onError listener may disconnect its own client",
+              completesWithin(15000, [&] { s2.send(ids2[0], big.data(), big.size()); }));
+
+        TC_CLOSE(deaf);
+        if (g_fail) bail();
+        check("second server stops cleanly", completesWithin(4000, [&] { s2.stop(); }));
+    }
 
     printf("\n%s\n", g_fail ? "FAILED" : "ALL PASS");
     return g_fail ? 1 : 0;
