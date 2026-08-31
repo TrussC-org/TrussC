@@ -312,6 +312,18 @@ int main() {
         // The premise is not the invariant: if the platform swallowed the whole
         // payload faster than the timeout, the send was never at risk and the
         // check would pass without exercising anything.
+        //
+        // Windows reports SKIP here and cannot be tuned out of it. Winsock's
+        // send buffering is not bounded by the peer's advertised window, so
+        // shrinking that window does not make it wait -- measured, it makes it
+        // worse (16 MB absorbed in 50 ms against a default window, 10 ms against
+        // a 64 KB one, while macOS slowed from 8.4 s to 13.7 s because the small
+        // window also caps what each recv() returns). The only lever is
+        // SO_SNDBUF on the server's own socket, which is not the test's to set.
+        //
+        // Leaving it at SKIP is sound: what this case guards is that our own
+        // deadline restarts on progress, which is arithmetic in send(), not
+        // platform behaviour. macOS and Linux both reach the state and check it.
         printf("  (the send took %.2fs against a 1.00s idle timeout)\n", sendSecs);
         if (sendSecs <= 1.0) {
             printf("%-56s %s\n", "a slow but draining peer does not trip the idle timeout",
