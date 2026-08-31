@@ -91,20 +91,19 @@ static void setRecvTimeout(rawsocket_t s, int ms) {
 }
 
 // A peer that connects and then never reads, so the server's socket buffer fills.
-static rawsocket_t connectSilentPeer(int port, int recvBufferBytes = 4096) {
+static rawsocket_t connectSilentPeer(int port, bool shrinkRecvBuffer = true) {
     rawsocket_t s = ::socket(AF_INET, SOCK_STREAM, 0);
 
-    // The receive buffer sets how much the sender can push before it has to wait,
-    // so each case picks its own size. This has to happen BEFORE connect(): the
-    // size takes part in the window negotiation, so setting it on an established
-    // socket does not shrink the advertised window.
+    // Shrink the receive buffer so the sender's queue fills quickly. This has to
+    // happen BEFORE connect(): the size takes part in the window negotiation, so
+    // setting it on an established socket does not shrink the advertised window.
     //
-    // 4 KB wedges a send almost immediately, which is what the head-of-line
-    // cases want. A peer that is meant to DRAIN needs more: the window also caps
-    // how much each recv() can return, so 4 KB would throttle a drain loop far
-    // below the rate it is trying to model.
-    if (recvBufferBytes > 0) {
-        ::setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&recvBufferBytes, sizeof(recvBufferBytes));
+    // A peer that is meant to DRAIN slowly wants the opposite: the tiny window
+    // caps every recv() at a few KB, which would throttle the drain loop far
+    // below the rate the test is trying to model.
+    if (shrinkRecvBuffer) {
+        int rcv = 4096;
+        ::setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&rcv, sizeof(rcv));
     }
 
     sockaddr_in addr{};
@@ -280,10 +279,7 @@ int main() {
         if (!s3.start(port + 2, 8)) { printf("could not start third server\n"); bail(); }
         s3.setSendTimeout(1.0f);
 
-        // 64 KB: small enough that no platform can swallow the payload outright
-        // (Winsock took all 16 MB in 50 ms against a default-sized window and
-        // reported SKIP), large enough that each recv() can still return a chunk.
-        rawsocket_t slow = connectSilentPeer(port + 2, /*recvBufferBytes=*/64 * 1024);
+        rawsocket_t slow = connectSilentPeer(port + 2, /*shrinkRecvBuffer=*/false);
         if (slow == static_cast<rawsocket_t>(-1)) { printf("no slow peer\n"); bail(); }
         setRecvTimeout(slow, 200);
         for (int i = 0; i < 200 && s3.getClientCount() < 1; ++i)
@@ -293,8 +289,7 @@ int main() {
         if (ids3.empty()) { printf("no client id (3)\n"); bail(); }
 
         // 16 MB is past what a sender-side socket buffer absorbs outright, so
-        // the send has to wait on the peer, and the wait is what gets measured.
-        // (4 MB fits Linux's send buffer and returned without ever waiting.)
+        // the send has to wait on the peer and the wait is what gets measured.
         atomic<bool> sendOk{false}, sendDone{false};
         vector<char> payload(16u * 1024u * 1024u, 'z');
         const auto sendStart = chrono::steady_clock::now();
@@ -303,15 +298,13 @@ int main() {
             sendDone = true;
         });
 
-        // 64 KB every 10 ms (~6 MB/s): a couple of seconds to take 16 MB, well
-        // past the 1 s timeout, but never 10 ms without progress. The 64 KB
-        // window caps what one recv() can return, so the interval and not the
-        // buffer size is what sets the rate.
-        vector<char> sink(64u * 1024u);
+        // 256 KB every 40 ms (~6 MB/s): about 2.5 s to take 16 MB, well past the
+        // 1 s timeout, but never 40 ms without progress.
+        vector<char> sink(256u * 1024u);
         const auto deadline = chrono::steady_clock::now() + chrono::seconds(30);
         while (!sendDone.load() && chrono::steady_clock::now() < deadline) {
             (void)::recv(slow, sink.data(), static_cast<int>(sink.size()), 0);
-            this_thread::sleep_for(chrono::milliseconds(10));
+            this_thread::sleep_for(chrono::milliseconds(40));
         }
         if (sender.joinable()) sender.join();
         const double sendSecs = chrono::duration<double>(chrono::steady_clock::now() - sendStart).count();
