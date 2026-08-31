@@ -8493,11 +8493,11 @@ description.ko = "특정 클라이언트로 전송 (블로킹)"
 details = "Returns once the payload has been handed to the kernel. Only the target client's send lock is held, so a peer that stops reading blocks this call alone, not other clients or the accept loop. Use setSendTimeout() to bound the wait."
 
 ["TcpServer::setSendTimeout"]
-description.en = "Set the per-send timeout in seconds (0 = block until sent)"
-description.ja = "送信のタイムアウトを秒で設定（0 = 送信完了までブロック）"
-description.ko = "전송 타임아웃을 초 단위로 설정 (0 = 전송 완료까지 블록)"
+description.en = "Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)"
+description.ja = "送信が無通信のまま何秒まで待つかを設定（0 = 無制限に待つ）"
+description.ko = "전송이 진척 없이 몇 초까지 대기할지 설정 (0 = 무제한 대기)"
 keywords = ["timeout", "blocking", "send"]
-details = "Applies to every send that starts after the call, on every client. Guards against a peer that has stopped reading holding a send open indefinitely. A timeout that fires mid-payload leaves the stream truncated, so the client is disconnected rather than left open for the next send() to splice a fresh message onto a partial one."
+details = "The timeout measures silence, not the duration of the send: it restarts every time bytes are accepted, so a peer that keeps draining never trips it however large the payload or slow the link. What it catches is a peer that has stopped reading. Defaults to 60 seconds — long enough that no healthy peer reaches it, short enough that a dead one cannot hold a send open forever; pass 0 to wait indefinitely instead. Applies to every send that starts after the call, on every client. A timeout that fires mid-payload leaves the stream truncated, so the client is disconnected rather than left open for the next send() to splice a fresh message onto a partial one."
 
 ["TcpServer::setReceiveBufferSize"]
 description.en = "Set the receive buffer size"

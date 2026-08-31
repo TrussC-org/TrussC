@@ -203,7 +203,9 @@ public:
     // Set receive buffer size
     void setReceiveBufferSize(size_t size);
 
-    // Set the per-send timeout in seconds (0 = block until sent, the default).
+    // Set how long a send may make NO progress before it gives up, in seconds
+    // (0 = wait indefinitely). Defaults to 60 s: long enough that no healthy
+    // peer trips it, short enough that a dead one cannot hang a send forever.
     // Applies to every send that starts after this call, on every client.
     void setSendTimeout(float seconds);
 
@@ -238,7 +240,7 @@ private:
 
     int nextClientId_ = 1;
     size_t receiveBufferSize_ = 65536;
-    std::atomic<float> sendTimeout_{0.0f};   // read by every sending thread
+    std::atomic<float> sendTimeout_{60.0f};   // idle, not total; read by every sending thread
 
     // Look up a client's send channel without holding clientsMutex_ during the send
     std::shared_ptr<internal::TcpSendChannel> findChannel(int clientId) const;

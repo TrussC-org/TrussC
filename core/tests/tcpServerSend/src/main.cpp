@@ -34,6 +34,7 @@
     #include <netinet/in.h>
     #include <arpa/inet.h>
     #include <unistd.h>
+    #include <sys/time.h>
     #define TC_CLOSE ::close
     using rawsocket_t = int;
 #endif
@@ -76,15 +77,34 @@ static bool completesWithin(int ms, F fn) {
     _Exit(1);
 }
 
+// Bound a blocking recv() so a drain loop cannot hang once the data runs out.
+static void setRecvTimeout(rawsocket_t s, int ms) {
+#ifdef _WIN32
+    DWORD tv = static_cast<DWORD>(ms);
+    ::setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+#else
+    struct timeval tv;
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    ::setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
+}
+
 // A peer that connects and then never reads, so the server's socket buffer fills.
-static rawsocket_t connectSilentPeer(int port) {
+static rawsocket_t connectSilentPeer(int port, bool shrinkRecvBuffer = true) {
     rawsocket_t s = ::socket(AF_INET, SOCK_STREAM, 0);
 
     // Shrink the receive buffer so the sender's queue fills quickly. This has to
     // happen BEFORE connect(): the size takes part in the window negotiation, so
     // setting it on an established socket does not shrink the advertised window.
-    int rcv = 4096;
-    ::setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&rcv, sizeof(rcv));
+    //
+    // A peer that is meant to DRAIN slowly wants the opposite: the tiny window
+    // caps every recv() at a few KB, which would throttle the drain loop far
+    // below the rate the test is trying to model.
+    if (shrinkRecvBuffer) {
+        int rcv = 4096;
+        ::setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&rcv, sizeof(rcv));
+    }
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -247,6 +267,63 @@ int main() {
         TC_CLOSE(deaf);
         if (g_fail) bail();
         check("second server stops cleanly", completesWithin(4000, [&] { s2.stop(); }));
+    }
+
+    // --- the timeout measures silence, not the length of the send -----------
+    // A peer that drains a little at a time keeps the send progressing, so a
+    // payload that takes far longer than the timeout to deliver must still go
+    // through. Measuring total elapsed time instead would drop a healthy client
+    // for the offence of being on a slow link with a big payload.
+    {
+        TcpServer s3;
+        if (!s3.start(port + 2, 8)) { printf("could not start third server\n"); bail(); }
+        s3.setSendTimeout(1.0f);
+
+        rawsocket_t slow = connectSilentPeer(port + 2, /*shrinkRecvBuffer=*/false);
+        if (slow == static_cast<rawsocket_t>(-1)) { printf("no slow peer\n"); bail(); }
+        setRecvTimeout(slow, 200);
+        for (int i = 0; i < 200 && s3.getClientCount() < 1; ++i)
+            this_thread::sleep_for(chrono::milliseconds(5));
+
+        vector<int> ids3 = s3.getClientIds();
+        if (ids3.empty()) { printf("no client id (3)\n"); bail(); }
+
+        // 16 MB is past what a sender-side socket buffer absorbs outright, so
+        // the send has to wait on the peer and the wait is what gets measured.
+        atomic<bool> sendOk{false}, sendDone{false};
+        vector<char> payload(16u * 1024u * 1024u, 'z');
+        const auto sendStart = chrono::steady_clock::now();
+        thread sender([&] {
+            sendOk = s3.send(ids3[0], payload.data(), payload.size());
+            sendDone = true;
+        });
+
+        // 256 KB every 40 ms (~6 MB/s): about 2.5 s to take 16 MB, well past the
+        // 1 s timeout, but never 40 ms without progress.
+        vector<char> sink(256u * 1024u);
+        const auto deadline = chrono::steady_clock::now() + chrono::seconds(30);
+        while (!sendDone.load() && chrono::steady_clock::now() < deadline) {
+            (void)::recv(slow, sink.data(), static_cast<int>(sink.size()), 0);
+            this_thread::sleep_for(chrono::milliseconds(40));
+        }
+        if (sender.joinable()) sender.join();
+        const double sendSecs = chrono::duration<double>(chrono::steady_clock::now() - sendStart).count();
+
+        // The premise is not the invariant: if the platform swallowed the whole
+        // payload faster than the timeout, the send was never at risk and the
+        // check would pass without exercising anything.
+        printf("  (the send took %.2fs against a 1.00s idle timeout)\n", sendSecs);
+        if (sendSecs <= 1.0) {
+            printf("%-56s %s\n", "a slow but draining peer does not trip the idle timeout",
+                   "SKIP (payload absorbed faster than the timeout)");
+            fflush(stdout);
+        } else {
+            check("a slow but draining peer does not trip the idle timeout", sendOk.load());
+        }
+
+        TC_CLOSE(slow);
+        if (g_fail) bail();
+        check("third server stops cleanly", completesWithin(4000, [&] { s3.stop(); }));
     }
 
     printf("\n%s\n", g_fail ? "FAILED" : "ALL PASS");

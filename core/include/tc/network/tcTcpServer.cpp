@@ -569,8 +569,13 @@ bool TcpServer::send(int clientId, const void* data, size_t size) {
         } else {
             const char* ptr = static_cast<const char*>(data);
             size_t remaining = size;
+            // The timeout measures SILENCE, not the length of the send: a peer
+            // that keeps draining is healthy however long the payload takes,
+            // and a peer that has stopped reading is what the timeout is for.
+            // Measuring total elapsed time instead would drop a healthy client
+            // for the offence of being on a slow link with a big payload.
             const float timeout = sendTimeout_.load();   // 0 = wait indefinitely
-            const auto start = std::chrono::steady_clock::now();
+            auto lastProgress = std::chrono::steady_clock::now();
 
             while (remaining > 0) {
                 // Re-read every iteration: closeChannel() clears this to cut a
@@ -584,6 +589,7 @@ bool TcpServer::send(int clientId, const void* data, size_t size) {
                 if (sent > 0) {
                     ptr += sent;
                     remaining -= sent;
+                    lastProgress = std::chrono::steady_clock::now();
                     continue;
                 }
                 if (sent == 0) {
@@ -610,9 +616,9 @@ bool TcpServer::send(int clientId, const void* data, size_t size) {
                 }
                 if (timeout <= 0.0f) continue;
 
-                const std::chrono::duration<float> elapsed =
-                    std::chrono::steady_clock::now() - start;
-                if (elapsed.count() < timeout) continue;
+                const std::chrono::duration<float> idle =
+                    std::chrono::steady_clock::now() - lastProgress;
+                if (idle.count() < timeout) continue;
 
                 failureCode = err;
                 // A timeout that wrote nothing leaves the stream intact. One

@@ -3695,7 +3695,7 @@ int TcpServer::getPort() const  // The listening port
 bool TcpServer::isRunning() const  // Whether the server is running
 bool TcpServer::send(int clientId, const void * data, size_t size) [+2]  // Send data to a specific client
 void TcpServer::setReceiveBufferSize(size_t size)  // Set the receive buffer size
-void TcpServer::setSendTimeout(float seconds)  // Set the per-send timeout in seconds (0 = block until sent)
+void TcpServer::setSendTimeout(float seconds)  // Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)
 bool TcpServer::start(int port, int maxClients = 10)  // Start listening on a port
 void TcpServer::stop()  // Stop the server
 ```
