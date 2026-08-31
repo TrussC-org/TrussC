@@ -2661,6 +2661,7 @@ std::string Font::wrapTextVertical(const std::string & text) const  // Insert ha
 sg_pipeline_desc FullscreenShader::createPipelineDesc()  // Build the fullscreen-quad pipeline descriptor (overrides Shader's).
 void FullscreenShader::createVertexBuffer()  // Create the fullscreen-quad vertex/index buffers (overrides Shader's).
 void FullscreenShader::draw()  // Draw a fullscreen quad with this shader applied
+void FullscreenShader::setParams(const T & params)  // Set the uniform block for the fullscreen pass; call before draw (C++ only)
 ```
 
 ### GrabberFrame — One captured camera frame with its capture-time timestamp: Pixels (RGBA8) plus timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getQueuedFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time
@@ -3129,6 +3130,7 @@ Node * Node::findByInstanceId(uint64_t id)  // Find a node in this subtree (self
 HitResult Node::findHitNode(const Ray & globalRay)  // Hit test the whole tree with a global ray, returning the frontmost node (C++ only)
 HitResult Node::findHitNodeFromScreen(float screenX, float screenY)  // Hit test the whole tree from a screen point, using each node's own camera context (C++ only)
 HitResult Node::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Recursive hit test in reverse draw order; override for clipping-aware picking.
+T * Node::addMod(Args &&... args)  // Attach a mod of type T to this node, forwarding any arguments to its constructor; returns the mod for chaining (C++ only)
 bool Node::getActive() const ⚠️deprecated  // Deprecated alias for isActive()
 std::shared_ptr<const CameraContext> Node::getCameraContext() const  // Return the camera context this node was last drawn under (null if never drawn).
 size_t Node::getChildCount() const  // Get the number of child nodes (C++ only)
@@ -3143,6 +3145,7 @@ Vec3 Node::getGlobalPos() const  // Get the node's origin in global (world) spac
 uint64_t Node::getInstanceId() const  // Per-process unique id, assigned once at construction and stable across reparenting (C++ only)
 const Mat4 & Node::getLocalMatrix() const  // Get this node's local transform matrix (cached) (C++ only)
 Mod * Node::getModByTypeName(const std::string & name) const  // Find an attached mod by its short type name, e.g. "LayoutMod" (null if not attached) (C++ only) 
+T * Node::getMod()  // Get the attached mod of type T, or nullptr if this node has none (C++ only)
 std::vector<Mod *> Node::getMods() const  // Get all attached mods (pointers stay owned by this node) (C++ only)
 std::vector<std::string> Node::getModTypeNames() const  // Get the short (unqualified) type names of the attached mods (C++ only)
 float Node::getMouseX() const  // Get mouse X in this node's local coordinate system (C++ only)
@@ -3165,6 +3168,7 @@ float Node::getX() const  // Get local X position (C++ only)
 float Node::getY() const  // Get local Y position (C++ only)
 float Node::getZ() const  // Get local Z position (C++ only)
 Vec3 Node::globalToLocal(const Vec3 & global) const [+1] ⚠️deprecated  // Convert a global coordinate to this node's local space (C++ only)
+bool Node::hasMod() const  // Whether a mod of type T is attached to this node (C++ only)
 bool Node::hasName() const  // Whether an instance name has been set (C++ only)
 bool Node::hitTest(const Ray & localRay, float & outDistance) [+1]  // Geometric hit-test predicate in local space; override to make a node pickable.
 int Node::indexOfChild(const Node * child) const  // Index of the given child among this node's children (-1 if not a child) (C++ only)
@@ -3192,6 +3196,7 @@ bool Node::onMouseRelease(const MouseEventArgs & e) [+1]  // Handle a mouse rele
 bool Node::onMouseScroll(const ScrollEventArgs & e) [+1]  // Handle a scroll event (event localized to this node); return true to consume.
 void Node::onVisibleChanged(bool visible)  // Callback invoked when the node's visible state changes.
 void Node::processTimers()  // Process due timers (callAfter / callEvery), invoked within the update pass.
+void Node::removeMod()  // Remove the attached mod of type T, calling its onDestroy() before it is freed (C++ only)
 void Node::removeAllChildren()  // Remove all child nodes (C++ only)
 void Node::removeChild(Ptr child)  // Remove a child node (C++ only)
 std::pair<const CameraContext *, Ray> Node::resolvePickRay(internal::PickRaySource & pick, const CameraContext * inheritedCtx, const Ray & globalRay) const  // Resolve this node's effective camera context and the global ray to hit-test it with.
