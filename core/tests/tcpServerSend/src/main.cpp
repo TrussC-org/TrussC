@@ -127,6 +127,11 @@ int main() {
     // buffer and returns as soon as the payload is copied into it), so a fixed
     // payload size is not a portable way to reach the state under test. Send
     // 1 MB chunks in a loop instead and watch for progress to stop.
+    //
+    // How much gets through before it stops is a property of the platform too,
+    // and it reaches zero: on macOS the very first chunk blocks against a peer
+    // with a 4 KB receive buffer, so "parked" cannot require that a chunk was
+    // completed first.
     atomic<bool> sendReturned{false};
     atomic<long long> chunksSent{0};
     vector<char> chunk(1u * 1024u * 1024u, 'x');
@@ -138,7 +143,10 @@ int main() {
         sendReturned = true;
     });
 
-    // Blocked == no progress for a while, with at least something written.
+    // Blocked == no progress for a while while the send is still running. The
+    // send thread sets sendReturned when send() gives up or finishes, so a
+    // still-clear flag is what says the silence is a parked send rather than a
+    // finished one — a chunk counter that never leaves 0 says the same thing.
     bool parked = false;
     long long lastSeen = -1;
     int quietRounds = 0;
@@ -148,7 +156,7 @@ int main() {
         if (sendReturned.load()) break;
         quietRounds = (now == lastSeen) ? quietRounds + 1 : 0;
         lastSeen = now;
-        if (now > 0 && quietRounds >= 4) parked = true;   // ~400 ms of silence
+        if (!sendReturned.load() && quietRounds >= 4) parked = true;   // ~400 ms of silence
     }
 
     // The premise is not the invariant. If this platform will not let us wedge a
