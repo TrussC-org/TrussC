@@ -1112,6 +1112,7 @@ public:
     }
     bool getMipmaps() const { return mipmaps_; }
 
+private:
     // Apply an atlas-option change to the cache key and swap in the atlas it
     // now names. Called from the option setters so they are order-independent:
     // a setter that only takes effect when it precedes load() is the kind of
