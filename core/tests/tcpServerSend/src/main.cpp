@@ -224,8 +224,15 @@ int main() {
     }
 
     // --- teardown must not hang behind the parked send ----------------------
-    check("disconnecting the stalled client unblocks its send",
-          completesWithin(4000, [&] { server.disconnectClient(stalledId); }));
+    // The waits inside send() and the receive thread use a 10 s backstop, so
+    // anything close to that here means a disconnect is NOT waking them and
+    // they are timing out instead. Print it: the number is the evidence for
+    // whether shutdown() wakes a poll on this platform.
+    const auto disconnectStart = chrono::steady_clock::now();
+    const bool disconnected = completesWithin(4000, [&] { server.disconnectClient(stalledId); });
+    printf("  (disconnectClient took %.0f ms; the waits fall back at 10000 ms)\n",
+           chrono::duration<double, milli>(chrono::steady_clock::now() - disconnectStart).count());
+    check("disconnecting the stalled client unblocks its send", disconnected);
 
     if (g_fail) { blocker.detach(); bail(); }
     if (blocker.joinable()) blocker.join();

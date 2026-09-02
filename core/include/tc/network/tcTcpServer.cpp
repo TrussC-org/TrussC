@@ -106,8 +106,14 @@ int socketError(socket_t s) {
     return err;
 }
 
-// How long a wait parks before re-checking whether the channel is still open.
-constexpr int kWaitSliceMs = 100;
+// A backstop, not a heartbeat. closeChannel() shuts the socket down before it
+// takes the send lock, and a shutdown socket is immediately reported ready by
+// select()/poll() — the thing Winsock declines to do is wake a send() already
+// parked in the kernel, which is why the waiting happens out here instead. So a
+// disconnect wakes these waits at once and this timeout should never be what
+// ends one; it is deliberately far longer than any latency it would explain, so
+// that a wait which does reach it reads as a bug rather than as tuning.
+constexpr int kWaitSliceMs = 10000;
 
 } // namespace
 
