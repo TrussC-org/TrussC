@@ -338,6 +338,73 @@ int main() {
         check("third server stops cleanly", completesWithin(4000, [&] { s3.stop(); }));
     }
 
+    // --- teardown waits for the client threads it started ---------------------
+    // stop() used to detach every client thread instead of joining it, so it
+    // returned — and ~TcpServer() finished — while those threads were still
+    // reading members of the object being destroyed.
+    //
+    // Timing is what separates the two: an onReceive listener runs ON the
+    // client's receive thread, so a listener that is still busy when stop() is
+    // called holds that thread. Joining waits for it; detaching does not. A
+    // stop() that returns while the listener is mid-call is the bug, and it is
+    // observable without a sanitizer.
+    {
+        TcpServer s5;
+        if (!s5.start(port + 4, 8)) { printf("could not start fifth server\n"); bail(); }
+
+        auto entered = make_shared<atomic<bool>>(false);
+        EventListener busy = s5.onReceive.listen([entered](TcpServerReceiveEventArgs&) {
+            entered->store(true);
+            this_thread::sleep_for(chrono::milliseconds(600));
+        });
+
+        rawsocket_t talker = connectSilentPeer(port + 4);
+        if (talker == static_cast<rawsocket_t>(-1)) { printf("no talker\n"); bail(); }
+        for (int i = 0; i < 200 && s5.getClientCount() < 1; ++i)
+            this_thread::sleep_for(chrono::milliseconds(5));
+        (void)::send(talker, "x", 1, 0);
+        for (int i = 0; i < 400 && !entered->load(); ++i)
+            this_thread::sleep_for(chrono::milliseconds(5));
+        check("the listener is running on the client thread", entered->load());
+
+        const auto t0 = chrono::steady_clock::now();
+        const bool returned = completesWithin(10000, [&] { s5.stop(); });
+        const double stopMs = chrono::duration<double, milli>(chrono::steady_clock::now() - t0).count();
+        printf("  (stop() took %.0f ms against a listener busy for 600 ms)\n", stopMs);
+        check("stop() returns rather than hanging", returned);
+        if (!returned) { bail(); }
+        check("stop() waits for a client thread still inside a listener", stopMs >= 300.0);
+
+        TC_CLOSE(talker);
+    }
+
+    // --- the same teardown, repeatedly, to shake out a deadlock ---------------
+    // Joining is the kind of fix that fails loudly in the other direction: a
+    // server torn down while a client thread holds, or waits for, the same lock
+    // hangs instead of returning. Churn through it.
+    {
+        const bool ok = completesWithin(30000, [&] {
+            for (int round = 0; round < 20; ++round) {
+                TcpServer s4;
+                if (!s4.start(port + 3, 8)) return;
+
+                rawsocket_t a = connectSilentPeer(port + 3);
+                rawsocket_t b = connectSilentPeer(port + 3);
+                for (int i = 0; i < 200 && s4.getClientCount() < 2; ++i)
+                    this_thread::sleep_for(chrono::milliseconds(5));
+
+                // Leave traffic in flight so the receive threads are awake, and
+                // one client mid-send, when the destructor runs.
+                for (int id : s4.getClientIds()) s4.send(id, string("ping"));
+
+                if (a != static_cast<rawsocket_t>(-1)) TC_CLOSE(a);
+                if (b != static_cast<rawsocket_t>(-1)) TC_CLOSE(b);
+            }                                   // ~TcpServer() -> stop() here
+        });
+        check("destroying a server with live clients joins its threads", ok);
+        if (!ok) bail();                        // a hang here means the join deadlocked
+    }
+
     printf("\n%s\n", g_fail ? "FAILED" : "ALL PASS");
     return g_fail ? 1 : 0;
 }

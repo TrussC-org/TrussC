@@ -433,15 +433,31 @@ void TcpServer::disconnectClient(int clientId) {
     // holding the map lock there would stall the whole server.
     closeChannel(ch);
 
-    // Detach thread (let it self-terminate)
-    std::lock_guard<std::mutex> lock(clientsMutex_);
-    auto threadIt = clientThreads_.find(clientId);
-    if (threadIt != clientThreads_.end()) {
-        if (threadIt->second.joinable()) {
-            threadIt->second.detach();
+    // Wait for this client's receive thread before returning. Detaching it
+    // instead — which is what this did — let stop() return, and therefore
+    // ~TcpServer() finish, while those threads were still reading members of
+    // the object being destroyed.
+    //
+    // The one thread that cannot be joined here is the caller's own: an
+    // onReceive listener disconnecting its own client runs ON that thread, and
+    // joining it would deadlock. It is detached, and it is already unwinding.
+    std::thread finishing;
+    {
+        std::lock_guard<std::mutex> lock(clientsMutex_);
+        auto threadIt = clientThreads_.find(clientId);
+        if (threadIt != clientThreads_.end()) {
+            if (threadIt->second.get_id() == std::this_thread::get_id()) {
+                threadIt->second.detach();
+            } else {
+                finishing = std::move(threadIt->second);
+            }
+            clientThreads_.erase(threadIt);
         }
-        clientThreads_.erase(threadIt);
     }
+
+    // Outside clientsMutex_: the thread being joined takes that same lock on its
+    // way out (removeClient), so holding it here would deadlock the pair.
+    if (finishing.joinable()) finishing.join();
 }
 
 void TcpServer::disconnectAllClients() {
