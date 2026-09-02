@@ -9,6 +9,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <shared_mutex>
 #include <memory>
 #include <unordered_map>
 #include <functional>
@@ -236,7 +237,12 @@ private:
 
     std::unordered_map<int, TcpServerClient> clients_;
     std::unordered_map<int, std::thread> clientThreads_;
-    mutable std::mutex clientsMutex_;
+
+    // Shared: every send() looks a channel up through here, and so does every
+    // getClientCount() a draw loop makes. Those are reads, and readers of a
+    // plain mutex would take turns for no reason. Only registering, removing
+    // and disconnecting a client write.
+    mutable std::shared_mutex clientsMutex_;
 
     int nextClientId_ = 1;
     size_t receiveBufferSize_ = 65536;
@@ -244,6 +250,14 @@ private:
 
     // Look up a client's send channel without holding clientsMutex_ during the send
     std::shared_ptr<internal::TcpSendChannel> findChannel(int clientId) const;
+
+    // Every channel, taken under one lock. broadcast() used to take the lock
+    // once for the id list and again for each id it then sent to.
+    std::vector<std::pair<int, std::shared_ptr<internal::TcpSendChannel>>> snapshotChannels() const;
+
+    // The send loop itself, once the channel is in hand
+    bool sendToChannel(const std::shared_ptr<internal::TcpSendChannel>& ch, int clientId,
+                       const void* data, size_t size);
 
     // Clear `open`, shut down and close the socket, in that order
     static void closeChannel(const std::shared_ptr<internal::TcpSendChannel>& ch);

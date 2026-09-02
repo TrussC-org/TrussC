@@ -306,7 +306,7 @@ void TcpServer::acceptThreadFunc() {
         // Register client
         int clientId;
         {
-            std::lock_guard<std::mutex> lock(clientsMutex_);
+            std::unique_lock<std::shared_mutex> lock(clientsMutex_);
             clientId = nextClientId_++;
             TcpServerClient client;
             client.id_ = clientId;
@@ -329,7 +329,7 @@ void TcpServer::acceptThreadFunc() {
 
         // Start receive thread for client
         {
-            std::lock_guard<std::mutex> lock(clientsMutex_);
+            std::unique_lock<std::shared_mutex> lock(clientsMutex_);
             clientThreads_[clientId] = std::thread(&TcpServer::clientThreadFunc, this, clientId);
         }
     }
@@ -348,7 +348,7 @@ void TcpServer::clientThreadFunc(int clientId) {
 #endif
 
     {
-        std::lock_guard<std::mutex> lock(clientsMutex_);
+        std::shared_lock<std::shared_mutex> lock(clientsMutex_);
         auto it = clients_.find(clientId);
         if (it == clients_.end()) return;
         clientSocket = it->second.socket_;
@@ -427,7 +427,7 @@ void TcpServer::clientThreadFunc(int clientId) {
 void TcpServer::disconnectClient(int clientId) {
     std::shared_ptr<internal::TcpSendChannel> ch;
     {
-        std::lock_guard<std::mutex> lock(clientsMutex_);
+        std::unique_lock<std::shared_mutex> lock(clientsMutex_);
         auto it = clients_.find(clientId);
         if (it != clients_.end()) {
             ch = it->second.channel_;
@@ -449,7 +449,7 @@ void TcpServer::disconnectClient(int clientId) {
     // joining it would deadlock. It is detached, and it is already unwinding.
     std::thread finishing;
     {
-        std::lock_guard<std::mutex> lock(clientsMutex_);
+        std::unique_lock<std::shared_mutex> lock(clientsMutex_);
         auto threadIt = clientThreads_.find(clientId);
         if (threadIt != clientThreads_.end()) {
             if (threadIt->second.get_id() == std::this_thread::get_id()) {
@@ -469,7 +469,7 @@ void TcpServer::disconnectClient(int clientId) {
 void TcpServer::disconnectAllClients() {
     std::vector<int> ids;
     {
-        std::lock_guard<std::mutex> lock(clientsMutex_);
+        std::unique_lock<std::shared_mutex> lock(clientsMutex_);
         for (const auto& pair : clients_) {
             ids.push_back(pair.first);
         }
@@ -482,7 +482,7 @@ void TcpServer::disconnectAllClients() {
     // Collect threads to join (without holding lock during join to avoid deadlock)
     std::vector<std::thread> threadsToJoin;
     {
-        std::lock_guard<std::mutex> lock(clientsMutex_);
+        std::unique_lock<std::shared_mutex> lock(clientsMutex_);
         for (auto& pair : clientThreads_) {
             if (pair.second.joinable()) {
                 threadsToJoin.push_back(std::move(pair.second));
@@ -500,7 +500,7 @@ void TcpServer::disconnectAllClients() {
 void TcpServer::removeClient(int clientId) {
     std::shared_ptr<internal::TcpSendChannel> ch;
     {
-        std::lock_guard<std::mutex> lock(clientsMutex_);
+        std::unique_lock<std::shared_mutex> lock(clientsMutex_);
         auto it = clients_.find(clientId);
         if (it == clients_.end()) return;
         ch = it->second.channel_;
@@ -510,12 +510,12 @@ void TcpServer::removeClient(int clientId) {
 }
 
 int TcpServer::getClientCount() const {
-    std::lock_guard<std::mutex> lock(clientsMutex_);
+    std::shared_lock<std::shared_mutex> lock(clientsMutex_);
     return static_cast<int>(clients_.size());
 }
 
 std::vector<int> TcpServer::getClientIds() const {
-    std::lock_guard<std::mutex> lock(clientsMutex_);
+    std::shared_lock<std::shared_mutex> lock(clientsMutex_);
     std::vector<int> ids;
     for (const auto& pair : clients_) {
         ids.push_back(pair.first);
@@ -524,7 +524,7 @@ std::vector<int> TcpServer::getClientIds() const {
 }
 
 const TcpServerClient* TcpServer::getClient(int clientId) const {
-    std::lock_guard<std::mutex> lock(clientsMutex_);
+    std::shared_lock<std::shared_mutex> lock(clientsMutex_);
     auto it = clients_.find(clientId);
     if (it != clients_.end()) {
         return &it->second;
@@ -544,10 +544,19 @@ static bool isWouldBlock(int err) {
 }
 
 std::shared_ptr<internal::TcpSendChannel> TcpServer::findChannel(int clientId) const {
-    std::lock_guard<std::mutex> lock(clientsMutex_);
+    std::shared_lock<std::shared_mutex> lock(clientsMutex_);
     auto it = clients_.find(clientId);
     if (it == clients_.end()) return nullptr;
     return it->second.channel_;
+}
+
+std::vector<std::pair<int, std::shared_ptr<internal::TcpSendChannel>>>
+TcpServer::snapshotChannels() const {
+    std::shared_lock<std::shared_mutex> lock(clientsMutex_);
+    std::vector<std::pair<int, std::shared_ptr<internal::TcpSendChannel>>> out;
+    out.reserve(clients_.size());
+    for (const auto& pair : clients_) out.emplace_back(pair.first, pair.second.channel_);
+    return out;
 }
 
 void TcpServer::closeChannel(const std::shared_ptr<internal::TcpSendChannel>& ch) {
@@ -575,7 +584,13 @@ bool TcpServer::send(int clientId, const void* data, size_t size) {
         notifyError("Client not found", 0, clientId);
         return false;
     }
+    return sendToChannel(ch, clientId, data, size);
+}
 
+// The send itself. broadcast() calls this with a channel it already holds, so
+// it does not go back to the registry once per client.
+bool TcpServer::sendToChannel(const std::shared_ptr<internal::TcpSendChannel>& ch, int clientId,
+                              const void* data, size_t size) {
     // The failure is recorded here and reported after the lock is released.
     // onError listeners run inline by default, and the obvious thing to write in
     // one is disconnectClient() — which re-enters this same non-recursive mutex
@@ -677,9 +692,12 @@ bool TcpServer::send(int clientId, const std::string& message) {
 }
 
 void TcpServer::broadcast(const void* data, size_t size) {
-    std::vector<int> ids = getClientIds();
-    for (int id : ids) {
-        send(id, data, size);
+    // One pass over the registry, not one lookup per client: a broadcast from
+    // a draw loop used to take the client lock once for the id list and again
+    // for every id in it. A client that goes away mid-broadcast is reported by
+    // its own channel (closed) rather than by a failed lookup.
+    for (auto& [id, ch] : snapshotChannels()) {
+        sendToChannel(ch, id, data, size);
     }
 }
 
