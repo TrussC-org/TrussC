@@ -106,14 +106,23 @@ int socketError(socket_t s) {
     return err;
 }
 
-// A backstop, not a heartbeat. closeChannel() shuts the socket down before it
-// takes the send lock, and a shutdown socket is immediately reported ready by
-// select()/poll() — the thing Winsock declines to do is wake a send() already
-// parked in the kernel, which is why the waiting happens out here instead. So a
-// disconnect wakes these waits at once and this timeout should never be what
-// ends one; it is deliberately far longer than any latency it would explain, so
-// that a wait which does reach it reads as a bug rather than as tuning.
-constexpr int kWaitSliceMs = 10000;
+// How long a wait parks before re-checking whether the channel is still open.
+//
+// A longer value was tried, on the theory that closeChannel() shuts the socket
+// down before closing it and a shutdown socket is reported ready at once, so the
+// timeout would never be what ends a wait. Measured across CI at 10 s:
+//
+//   Linux    disconnectClient  5 ms    shutdown() wakes poll()
+//   macOS    disconnectClient 35 ms    shutdown() wakes poll()
+//   Windows  disconnectClient  4+ s    shutdown() does NOT wake select()
+//
+// So Winsock declines to wake a waiting select() for the same reason it declines
+// to wake a parked send(), and on Windows this slice is not a backstop at all —
+// it is the mechanism. macOS additionally hung a full slice per round in the
+// teardown stress case, which points at a receive thread polling a descriptor
+// closed and recycled under it between its `open` check and its wait; the short
+// slice bounds that too. Both want fixing before this number can grow.
+constexpr int kWaitSliceMs = 100;
 
 } // namespace
 
