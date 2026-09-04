@@ -34,6 +34,10 @@ const PRIM = new Set([
 function argBindable(a) {
     if (a.isArray) return false;
     if (a.isPointer) return false;
+    // An rvalue ref is a move-in param. Lua has no move semantics, and sol2
+    // cannot form a callable from a lambda taking T&&, so bind the copying
+    // overload instead (there is always one, or the API is unusable from Lua).
+    if (/&&/.test(a.type)) return false;
     if (a.isRef && !a.isConst && !/&&/.test(a.type)) {
         // A non-const ref is a bindable in/out only for a USERTYPE (TrussC class,
         // passed by ref). For a value Sol2 converts (primitive or std type) it's a

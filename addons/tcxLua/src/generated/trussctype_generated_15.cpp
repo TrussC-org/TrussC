@@ -8,86 +8,82 @@ using namespace std;
 #pragma clang diagnostic push
 #endif
 void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     {
-        sol::usertype<trussc::VideoWriter> t = lua->new_usertype<trussc::VideoWriter>("VideoWriter",
-            sol::constructors<trussc::VideoWriter()>(),
-            sol::call_constructor, sol::constructors<trussc::VideoWriter()>());
-        t["open"] = sol::overload([](trussc::VideoWriter& self, const fs::path & path, int width, int height) { return self.open(path, width, height); }, [](trussc::VideoWriter& self, const fs::path & path, int width, int height, const trussc::VideoRecordSettings & settings) { return self.open(path, width, height, settings); });
-        t["close"] = &trussc::VideoWriter::close;
-        t["isOpen"] = &trussc::VideoWriter::isOpen;
-        t["getFrameCount"] = &trussc::VideoWriter::getFrameCount;
-        t["getWidth"] = &trussc::VideoWriter::getWidth;
-        t["getHeight"] = &trussc::VideoWriter::getHeight;
-        t["getFps"] = &trussc::VideoWriter::getFps;
-        t["getPath"] = &trussc::VideoWriter::getPath;
-        t["getSettings"] = &trussc::VideoWriter::getSettings;
-        t["addFrame"] = sol::overload([](trussc::VideoWriter& self, const trussc::Fbo & fbo) { return self.addFrame(fbo); }, [](trussc::VideoWriter& self, const trussc::Pixels & pixels) { return self.addFrame(pixels); });
-        t["addFrameAt"] = sol::overload([](trussc::VideoWriter& self, const trussc::Fbo & fbo, double timeSec) { return self.addFrameAt(fbo, timeSec); }, [](trussc::VideoWriter& self, const trussc::Pixels & pixels, double timeSec) { return self.addFrameAt(pixels, timeSec); });
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE))
-        t["submitFrame"] = &trussc::VideoWriter::submitFrame;
-#endif
-    }
-#endif
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
-    {
-        sol::usertype<trussc::TcpServer> t = lua->new_usertype<trussc::TcpServer>("TcpServer",
-            sol::constructors<trussc::TcpServer()>(),
-            sol::call_constructor, sol::constructors<trussc::TcpServer()>());
-        t["onClientConnect"] = &trussc::TcpServer::onClientConnect;
-        t["onReceive"] = &trussc::TcpServer::onReceive;
-        t["onClientDisconnect"] = &trussc::TcpServer::onClientDisconnect;
-        t["onError"] = &trussc::TcpServer::onError;
-        t["start"] = sol::overload([](trussc::TcpServer& self, int port) { return self.start(port); }, [](trussc::TcpServer& self, int port, int maxClients) { return self.start(port, maxClients); });
-        t["stop"] = &trussc::TcpServer::stop;
-        t["isRunning"] = &trussc::TcpServer::isRunning;
-        t["disconnectClient"] = &trussc::TcpServer::disconnectClient;
-        t["disconnectAllClients"] = &trussc::TcpServer::disconnectAllClients;
-        t["getClientCount"] = &trussc::TcpServer::getClientCount;
-        t["getClientIds"] = &trussc::TcpServer::getClientIds;
-        t["getClient"] = &trussc::TcpServer::getClient;
-        t["send"] = sol::overload([](trussc::TcpServer& self, int clientId, const std::vector<char> & data) { return self.send(clientId, data); }, [](trussc::TcpServer& self, int clientId, const std::string & message) { return self.send(clientId, message); });
-        t["broadcast"] = sol::overload([](trussc::TcpServer& self, const std::vector<char> & data) { return self.broadcast(data); }, [](trussc::TcpServer& self, const std::string & message) { return self.broadcast(message); });
-        t["setReceiveBufferSize"] = &trussc::TcpServer::setReceiveBufferSize;
-        t["setSendTimeout"] = &trussc::TcpServer::setSendTimeout;
-        t["getPort"] = &trussc::TcpServer::getPort;
-    }
-#endif
-    {
-        sol::usertype<trussc::RectNode> t = lua->new_usertype<trussc::RectNode>("RectNode");
-        t["mousePressed"] = &trussc::RectNode::mousePressed;
-        t["mouseReleased"] = &trussc::RectNode::mouseReleased;
-        t["mouseDragged"] = &trussc::RectNode::mouseDragged;
-        t["mouseScrolled"] = &trussc::RectNode::mouseScrolled;
-        t["getWidth"] = &trussc::RectNode::getWidth;
-        t["getHeight"] = &trussc::RectNode::getHeight;
-        t["getSize"] = &trussc::RectNode::getSize;
-        t["setWidth"] = &trussc::RectNode::setWidth;
-        t["setHeight"] = &trussc::RectNode::setHeight;
-        t["setSize"] = sol::overload([](trussc::RectNode& self, float w, float h) { return self.setSize(w, h); }, [](trussc::RectNode& self, float size) { return self.setSize(size); }, [](trussc::RectNode& self, const trussc::Vec2 & s) { return self.setSize(s); });
-        t["setRect"] = &trussc::RectNode::setRect;
-        t["setClipping"] = &trussc::RectNode::setClipping;
-        t["isClipping"] = &trussc::RectNode::isClipping;
-        t["getLeft"] = &trussc::RectNode::getLeft;
-        t["getRight"] = &trussc::RectNode::getRight;
-        t["getTop"] = &trussc::RectNode::getTop;
-        t["getBottom"] = &trussc::RectNode::getBottom;
-        t["hitTest"] = [](trussc::RectNode& self, trussc::Vec2 local) { return self.hitTest(local); };
-        t["draw"] = &trussc::RectNode::draw;
+        sol::usertype<trussc::LayoutMod> t = lua->new_usertype<trussc::LayoutMod>("LayoutMod",
+            sol::constructors<trussc::LayoutMod(), trussc::LayoutMod(trussc::LayoutDirection), trussc::LayoutMod(trussc::LayoutDirection, float)>(),
+            sol::call_constructor, sol::constructors<trussc::LayoutMod(), trussc::LayoutMod(trussc::LayoutDirection), trussc::LayoutMod(trussc::LayoutDirection, float)>());
+        t["getDirection"] = &trussc::LayoutMod::getDirection;
+        t["setDirection"] = &trussc::LayoutMod::setDirection;
+        t["getSpacing"] = &trussc::LayoutMod::getSpacing;
+        t["setSpacing"] = &trussc::LayoutMod::setSpacing;
+        t["getCrossAxis"] = &trussc::LayoutMod::getCrossAxis;
+        t["setCrossAxis"] = &trussc::LayoutMod::setCrossAxis;
+        t["getMainAxis"] = &trussc::LayoutMod::getMainAxis;
+        t["setMainAxis"] = &trussc::LayoutMod::setMainAxis;
+        t["getPaddingLeft"] = &trussc::LayoutMod::getPaddingLeft;
+        t["getPaddingTop"] = &trussc::LayoutMod::getPaddingTop;
+        t["getPaddingRight"] = &trussc::LayoutMod::getPaddingRight;
+        t["getPaddingBottom"] = &trussc::LayoutMod::getPaddingBottom;
+        t["setPadding"] = sol::overload([](trussc::LayoutMod& self, float padding) -> decltype(auto) { return self.setPadding(padding); }, [](trussc::LayoutMod& self, float vertical, float horizontal) -> decltype(auto) { return self.setPadding(vertical, horizontal); }, [](trussc::LayoutMod& self, float top, float right, float bottom, float left) -> decltype(auto) { return self.setPadding(top, right, bottom, left); });
+        t["setPaddingLeft"] = &trussc::LayoutMod::setPaddingLeft;
+        t["setPaddingTop"] = &trussc::LayoutMod::setPaddingTop;
+        t["setPaddingRight"] = &trussc::LayoutMod::setPaddingRight;
+        t["setPaddingBottom"] = &trussc::LayoutMod::setPaddingBottom;
+        t["updateLayout"] = &trussc::LayoutMod::updateLayout;
     }
     {
-        sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab",
-            sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>(),
-            sol::call_constructor, sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>());
-        t["L"] = &trussc::ColorOKLab::L;
-        t["a"] = &trussc::ColorOKLab::a;
-        t["b"] = &trussc::ColorOKLab::b;
-        t["alpha"] = &trussc::ColorOKLab::alpha;
-        t["toLinear"] = &trussc::ColorOKLab::toLinear;
-        t["toRGB"] = &trussc::ColorOKLab::toRGB;
-        t["toHSB"] = &trussc::ColorOKLab::toHSB;
-        t["toOKLCH"] = &trussc::ColorOKLab::toOKLCH;
-        t["lerp"] = &trussc::ColorOKLab::lerp;
+        sol::usertype<trussc::StrokeMesh> t = lua->new_usertype<trussc::StrokeMesh>("StrokeMesh",
+            sol::constructors<trussc::StrokeMesh(), trussc::StrokeMesh(const trussc::Path &)>(),
+            sol::call_constructor, sol::constructors<trussc::StrokeMesh(), trussc::StrokeMesh(const trussc::Path &)>());
+        t["setWidth"] = &trussc::StrokeMesh::setWidth;
+        t["setColor"] = &trussc::StrokeMesh::setColor;
+        t["setCapType"] = &trussc::StrokeMesh::setCapType;
+        t["setJoinType"] = &trussc::StrokeMesh::setJoinType;
+        t["setMiterLimit"] = &trussc::StrokeMesh::setMiterLimit;
+        t["addVertex"] = sol::overload([](trussc::StrokeMesh& self, float x, float y) -> decltype(auto) { return self.addVertex(x, y); }, [](trussc::StrokeMesh& self, float x, float y, float z) -> decltype(auto) { return self.addVertex(x, y, z); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p) -> decltype(auto) { return self.addVertex(p); }, [](trussc::StrokeMesh& self, const trussc::Vec2 & p) -> decltype(auto) { return self.addVertex(p); });
+        t["addVertexWithWidth"] = sol::overload([](trussc::StrokeMesh& self, float x, float y, float width) -> decltype(auto) { return self.addVertexWithWidth(x, y, width); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p, float width) -> decltype(auto) { return self.addVertexWithWidth(p, width); });
+        t["setWidths"] = &trussc::StrokeMesh::setWidths;
+        t["setShape"] = &trussc::StrokeMesh::setShape;
+        t["setClosed"] = &trussc::StrokeMesh::setClosed;
+        t["clear"] = &trussc::StrokeMesh::clear;
+        t["update"] = &trussc::StrokeMesh::update;
+        t["draw"] = &trussc::StrokeMesh::draw;
+        t["getMesh"] = &trussc::StrokeMesh::getMesh;
+        t["getPolylines"] = &trussc::StrokeMesh::getPolylines;
+    }
+    {
+        sol::usertype<trussc::CoreEvents> t = lua->new_usertype<trussc::CoreEvents>("CoreEvents");
+        t["setup"] = &trussc::CoreEvents::setup;
+        t["update"] = &trussc::CoreEvents::update;
+        t["draw"] = &trussc::CoreEvents::draw;
+        t["onRender"] = &trussc::CoreEvents::onRender;
+        t["afterFrame"] = &trussc::CoreEvents::afterFrame;
+        t["exit"] = &trussc::CoreEvents::exit;
+        t["exitRequested"] = &trussc::CoreEvents::exitRequested;
+        t["keyPressed"] = &trussc::CoreEvents::keyPressed;
+        t["keyReleased"] = &trussc::CoreEvents::keyReleased;
+        t["mousePressed"] = &trussc::CoreEvents::mousePressed;
+        t["mouseReleased"] = &trussc::CoreEvents::mouseReleased;
+        t["mouseMoved"] = &trussc::CoreEvents::mouseMoved;
+        t["mouseDragged"] = &trussc::CoreEvents::mouseDragged;
+        t["mouseScrolled"] = &trussc::CoreEvents::mouseScrolled;
+        t["windowResized"] = &trussc::CoreEvents::windowResized;
+        t["filesDropped"] = &trussc::CoreEvents::filesDropped;
+        t["clipboardPasted"] = &trussc::CoreEvents::clipboardPasted;
+        t["console"] = &trussc::CoreEvents::console;
+        t["touchPressed"] = &trussc::CoreEvents::touchPressed;
+        t["touchMoved"] = &trussc::CoreEvents::touchMoved;
+        t["touchReleased"] = &trussc::CoreEvents::touchReleased;
+        t["rawEvent"] = &trussc::CoreEvents::rawEvent;
+    }
+    {
+        sol::usertype<trussc::ChipSoundBundle> t = lua->new_usertype<trussc::ChipSoundBundle>("ChipSoundBundle");
+        t["entries"] = &trussc::ChipSoundBundle::entries;
+        t["volume"] = &trussc::ChipSoundBundle::volume;
+        t["add"] = sol::overload([](trussc::ChipSoundBundle& self, const trussc::ChipSoundNote & note, float time) -> decltype(auto) { return self.add(note, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time) -> decltype(auto) { return self.add(wave, hz, duration, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time, float vol) -> decltype(auto) { return self.add(wave, hz, duration, time, vol); });
+        t["clear"] = &trussc::ChipSoundBundle::clear;
+        t["getDuration"] = &trussc::ChipSoundBundle::getDuration;
+        t["build"] = &trussc::ChipSoundBundle::build;
     }
     {
         sol::usertype<trussc::MouseEventArgs> t = lua->new_usertype<trussc::MouseEventArgs>("MouseEventArgs");
@@ -104,35 +100,33 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["syncLegacy"] = &trussc::MouseEventArgs::syncLegacy;
     }
     {
-        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
-        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
-        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
-        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
-        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
-        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
-        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
+        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
+        t["view"] = &trussc::CameraContext::view;
+        t["projection"] = &trussc::CameraContext::projection;
+        t["viewW"] = &trussc::CameraContext::viewW;
+        t["viewH"] = &trussc::CameraContext::viewH;
+        t["pickable"] = &trussc::CameraContext::pickable;
+        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
+        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
     }
-    lua->new_usertype<trussc::MouseButton>("MouseButton",
-        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
-        "Left", sol::var(trussc::MouseButton::Left),
-        "Right", sol::var(trussc::MouseButton::Right),
-        "Middle", sol::var(trussc::MouseButton::Middle),
-        "None", sol::var(trussc::MouseButton::None));
+    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
+        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
+        "Immutable", sol::var(trussc::TextureUsage::Immutable),
+        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
+        "Stream", sol::var(trussc::TextureUsage::Stream),
+        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
     {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
-        t["altitude"] = &trussc::Location::altitude;
-        t["accuracy"] = &trussc::Location::accuracy;
+        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
+        t["id"] = &trussc::TouchPoint::id;
+        t["x"] = &trussc::TouchPoint::x;
+        t["y"] = &trussc::TouchPoint::y;
+        t["pressure"] = &trussc::TouchPoint::pressure;
+        t["changed"] = &trussc::TouchPoint::changed;
     }
-    lua->new_usertype<trussc::ImageType>("ImageType",
-        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
-        "Color", sol::var(trussc::ImageType::Color),
-        "Grayscale", sol::var(trussc::ImageType::Grayscale));
-    lua->new_usertype<trussc::Codec>("Codec",
-        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
-        "None", sol::var(trussc::Codec::None),
-        "LZ4", sol::var(trussc::Codec::LZ4));
+    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
+        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
+        "Nearest", sol::var(trussc::TextureFilter::Nearest),
+        "Linear", sol::var(trussc::TextureFilter::Linear));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

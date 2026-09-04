@@ -739,6 +739,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](float x, float y, float z) { return trussc::setCameraPosition(x, y, z); }
     ));
     lua->set_function("getCameraPosition", []() -> decltype(auto) { return trussc::getCameraPosition(); });
+    lua->set_function("sendErrorName", [](trussc::SendError e) { return trussc::sendErrorName(e); });
     lua->set_function("listNetworkInterfaces", []() { return trussc::listNetworkInterfaces(); });
     lua->set_function("printNetworkInterfaces", []() { return trussc::printNetworkInterfaces(); });
     lua->set_function("getLocalIp", []() { return trussc::getLocalIp(); });
@@ -774,7 +775,8 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getRootNode", []() { return trussc::getRootNode(); });
     lua->set_function("createWindow", sol::overload(
         []() { return trussc::createWindow(); },
-        [](const trussc::WindowSettings & settings) { return trussc::createWindow(settings); }
+        [](const trussc::WindowSettings & settings) { return trussc::createWindow(settings); },
+        [](const trussc::WindowSettings & a0) { return trussc::createWindow(a0); }
     ));
     lua->set_function("nodeToJson", [](trussc::Node & node, int maxDepth) { return trussc::nodeToJson(node, maxDepth); });
     lua->set_function("lerp", [](float a, float b, float t) { return std::lerp(a, b, t); });

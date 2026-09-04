@@ -2167,6 +2167,7 @@ bool isPrivate(const std::string & addr)  // True if addr is a private IPv4 (10/
 std::vector<NetworkInterface> listNetworkInterfaces() [macos,windows,linux,android,ios]  // List all network interface address entries (IPv4/IPv6, loopback, up or down)
 void printNetworkInterfaces() [macos,windows,linux,android,ios]  // Log the interface list (one line per entry)
 bool sameSubnet(const std::string & a, const std::string & b, const std::string & netmask)  // True if IPv4 a and b are on the same subnet under netmask
+const char * sendErrorName(SendError e)  // Short label for a SendError value ("QueueFull", ...). For log messages
 ```
 
 ### Other
@@ -2599,6 +2600,7 @@ void Font::drawStringInternal(const std::string & text, float x, float y, Direct
 void Font::drawStringVerticalInternal(const std::string & text, float x, float y, Direction h, Direction v) const  // Draw pre-wrapped text in vertical writing mode (internal layout + atlas emit).
 void Font::emitPlacedGlyphsToAtlas(const std::vector<PlacedGlyph> & placed) const  // Emit atlas quads for a stream of placed glyphs (shared by horizontal and vertical layout).
 void Font::enableWrap(bool enabled)  // Enable or disable line wrapping (default off)
+float Font::fitY(float offsetFromAnchor) const  // Snap a baseline offset accumulated from the anchor to the pixel grid, or pass it through unchanged when grid fit does not land. Callers must accumulate first and round once: rounding the line height and stepping by it would compound into a whole-pixel layout drift.
 void Font::forEachGlyph(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const [+1]  // Invoke a visitor once per laid-out glyph (positions follow writing mode, wrap, kinsoku, and TCY). Backend-agnostic layout pass shared by drawing, vector outlines, and hit testing
 void Font::forEachGlyphHorizontal(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const  // Run the horizontal-writing layout pass over pre-wrapped text, invoking the visitor per placed glyph.
 void Font::forEachGlyphVertical(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const  // Run the vertical-writing layout pass over pre-wrapped text, invoking the visitor per placed glyph.
@@ -2610,8 +2612,10 @@ size_t Font::getAtlasCount() const  // Get number of atlas pages
 size_t Font::getAtlasMemoryUsage() const  // Get atlas memory usage in bytes (alias of getMemoryUsage)
 Rect Font::getBBox(const std::string & text) const  // Get the bounding box of the text (top-left origin)
 float Font::getDefaultLineHeight() const  // Get the font's default line height (unaffected by setLineHeight)
+int Font::getDefaultOversampling()  // Return the oversampling factor newly loaded fonts start with.
 float Font::getDescent() const  // Get the font descent (distance from baseline to bottom; negative)
 Path Font::getGlyphPath(uint32_t codepoint) const  // Vector outline of a single glyph as one Path with one subpath per contour. Em-normalized (1.0 = em), screen Y-down, baseline at y=0, pen at x=0. Use Path::drawFill() for filled rendering — holes (e, a, O, 日 ...) are auto-detected via earcut.
+bool Font::getGridFit() const  // Return whether vertical grid fit is enabled for this font.
 bool Font::getHangingPunctuation() const  // Check if hanging punctuation is enabled
 float Font::getHeight(const std::string & text) const  // Get text height
 KinsokuLevel Font::getKinsoku() const  // Get the current kinsoku level
@@ -2620,6 +2624,8 @@ float Font::getLineHeight() const  // Get line height
 size_t Font::getLoadedGlyphCount() const  // Get number of loaded glyphs
 float Font::getMaxLineLength() const  // Get the current wrap length
 size_t Font::getMemoryUsage() const  // Get atlas memory usage in bytes
+bool Font::getMipmaps() const  // Return whether the glyph atlas is allowed to build mipmaps.
+int Font::getOversampling() const  // Return the oversampling factor this font rasterizes with (1 = off).
 sg_sampler Font::getSampler()  // Return the shared sokol-gfx sampler used for atlas rendering (advanced interop).
 int Font::getSize() const  // Get font size
 Path Font::getStringPath(const std::string & text, float x, float y, Direction h, Direction v) const [+1]  // Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely.
@@ -2628,6 +2634,7 @@ TcyMode Font::getTcyLatinMode() const  // Get the tate-chu-yoko mode for Latin l
 size_t Font::getTotalCacheMemoryUsage()  // Total memory used by the shared font atlas cache across all fonts
 float Font::getWidth(const std::string & text) const  // Get text width
 WritingMode Font::getWritingMode() const  // Current writing mode
+bool Font::gridFitLands() const  // Report whether grid fit actually lands on the pixel grid, i.e. whether it is enabled and the current transform maps one model unit to one device pixel.
 bool Font::isLoaded() const  // Check if loaded
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
 bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
@@ -2635,12 +2642,16 @@ bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is
 LoadResult Font::load(const fs::path & nameOrPath, int size)  // Load font file
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
+void Font::setDefaultOversampling(int n)  // Set the oversampling factor newly loaded fonts start with; does not affect fonts already loaded.
+Font & Font::setGridFit(bool enabled)  // Snap every baseline to a whole pixel at draw time so horizontal strokes stay sharp, at no memory cost and one rounding per line (on by default; automatically stands down when the transform is not 1:1, where rounding in model space would hurt instead).
 void Font::setHangingPunctuation(bool enabled)  // Let prohibited line-start CJK punctuation hang past the line edge instead of wrapping (default off)
 void Font::setKinsoku(KinsokuLevel level)  // Choose which CJK kinsoku (line-break prohibition) table to apply during wrap
 void Font::setLatinHyphenation(bool enabled)  // When wrapping a Latin run with no break point, insert '-' before the forced break (default off)
 void Font::setLineHeight(float pixels)  // Set line height in pixels (0 = use font default)
 void Font::setLineHeightEm(float multiplier)  // Set line height as a multiple of the font default (1.0 = default, 1.5 = 1.5x)
 void Font::setMaxLineLength(float length)  // Set the wrap length (horizontal: line width; vertical: column height)
+Font & Font::setMipmaps(bool enabled)  // Enable mipmapping of the glyph atlas so text stays stable when drawn much smaller than its loaded size (on by default; the chain is built lazily on the first minified draw).
+Font & Font::setOversampling(int n)  // Rasterize glyphs at N x N the target size and box-filter them down, trading N^2 atlas memory for sharper text under arbitrary transforms (1 = off).
 void Font::setTcyDigits(int maxDigits, TcyMode inMode, TcyMode overflowMode)  // Tate-chu-yoko config for ASCII digit runs in vertical text. Runs with <= maxDigits use inMode (typically Combine — squeezed into one cell); longer runs fall back to overflowMode (typically Rotate).
 void Font::setTcyLatin(TcyMode mode)  // Tate-chu-yoko mode for Latin letter runs in vertical text. Default is Rotate (whole run rotated 90 CW).
 void Font::setWritingMode(WritingMode mode)  // Switch between horizontal and vertical (tategaki) writing. Default is Horizontal (existing behavior unchanged).
@@ -2817,6 +2828,7 @@ void LayoutMod::updateLayout()  // Recalculate layout (call after adding/removin
 ```cpp
 Color Light::calculate(const Vec3 & worldPos, const Vec3 & worldNormal, const Material & material, const Vec3 & viewPos) const  // Compute the CPU Phong lighting contribution at a world position/normal for a material
 Mat4 Light::computeProjectorViewProj(float nearClip = 0.100000001, float farClip = 10000.0) const  // Build the projector's view-projection matrix from spot params and lens shift
+Mat4 Light::computeShadowViewProj() const  // Build the light's view-projection matrix for rendering + sampling the shadow map (spot: projector frustum; directional: orthographic box)
 void Light::disable()  // Disable this light
 void Light::disableShadow()  // Disable shadow casting
 void Light::enable()  // Enable this light
@@ -2834,8 +2846,12 @@ const Vec3 & Light::getPosition() const  // Get light position
 const Texture * Light::getProjectionTexture() const  // Get projection texture (gobo)
 float Light::getProjectorAspect() const  // Get projector aspect ratio
 float Light::getQuadraticAttenuation() const  // Get quadratic attenuation factor
+const Vec3 & Light::getShadowAreaCenter() const  // Get directional shadow volume center
+float Light::getShadowAreaRadius() const  // Get directional shadow volume radius (half-extent)
 float Light::getShadowBias() const  // Get shadow depth bias
 int Light::getShadowResolution() const  // Get shadow map resolution
+int Light::getShadowSamples() const  // Get PCSS PCF tap count
+float Light::getShadowSoftness() const  // Get shadow softness (emitter size in world units)
 const Color & Light::getSpecular() const  // Get specular light color
 float Light::getSpotInnerCos() const  // Get spot light inner cone cosine
 float Light::getSpotOuterCos() const  // Get spot light outer cone cosine
@@ -2854,7 +2870,10 @@ void Light::setLensShift(float sx, float sy)  // Set projector lens shift (-1 to
 void Light::setPoint(const Vec3 & position) [+1]  // Set as point light
 void Light::setProjectionTexture(const Texture * tex)  // Set texture for projector-style light (gobo)
 void Light::setProjectorAspect(float a)  // Set projector aspect ratio
+Light & Light::setShadowArea(const Vec3 & center, float radius)  // Set the orthographic shadow volume (center + radius) for a directional light (default radius 500)
 void Light::setShadowBias(float bias)  // Set shadow depth bias in world units
+Light & Light::setShadowSamples(int taps)  // Set the PCSS PCF tap count (clamped 1-36, default 16); only affects soft shadows (softness > 0)
+Light & Light::setShadowSoftness(float size)  // Set shadow softness as the light's emitter size in world units (0 = hard, default); drives PCSS penumbra
 void Light::setSpecular(const Color & c) [+1]  // Set specular light color
 void Light::setSpot(const Vec3 & position, const Vec3 & direction, float innerHalfAngle = 0.0, float outerHalfAngle = 0.785399973) [+1]  // Set as spot light with cone angles
 ```
@@ -3477,6 +3496,12 @@ void ScrollContainer::updateScrollBounds()  // Recalculate scroll bounds from th
 void ScrollEventArgs::syncLegacy()  // Copy the canonical scroll field into the deprecated scrollX/scrollY mirror fields (legacy mirrors scheduled for removal in v1.0).
 ```
 
+### SendResult — Result of sendAsync(). Truthy when the payload was queued; carries the id that onSendComplete reports back.
+
+```cpp
+bool SendResult::ok() const  // true if the payload was queued (error == SendError::None)
+```
+
 ### Serial — Cross-platform serial port (USB/COM): connect, read/write bytes
 
 ```cpp
@@ -3682,19 +3707,29 @@ void TcpClient::setUseThread(bool useThread)  // Whether to use threads (must be
 ```cpp
 ```
 
+### TcpSendCompleteEventArgs — A queued send finished. Fires exactly once for every id sendAsync() handed out
+
+```cpp
+```
+
 ### TcpServer — TCP server (accept clients, send/broadcast)
 
 ```cpp
-void TcpServer::broadcast(const void * data, size_t size) [+2]  // Broadcast data to all clients
+void TcpServer::broadcast(const void * data, size_t size) [+2]  // Broadcast data to all clients and wait for every one of them (blocking)
+int TcpServer::broadcastAsync(const void * data, size_t size) [+2]  // Queue data for every client and return at once; returns how many accepted it
 void TcpServer::disconnectAllClients()  // Disconnect all clients
 void TcpServer::disconnectClient(int clientId)  // Disconnect a specific client
 const TcpServerClient * TcpServer::getClient(int clientId) const  // Client info (nullptr if not found)
 int TcpServer::getClientCount() const  // Number of connected clients
 std::vector<int> TcpServer::getClientIds() const  // IDs of all connected clients
 int TcpServer::getPort() const  // The listening port
+size_t TcpServer::getSendAsyncBufferSize() const  // The current high-water mark for one client's send queue, in bytes
+size_t TcpServer::getSendAsyncPendingBytes(int clientId) const  // How much a client has queued and not yet completed, in bytes (0 for an unknown client)
 bool TcpServer::isRunning() const  // Whether the server is running
-bool TcpServer::send(int clientId, const void * data, size_t size) [+2]  // Send data to a specific client
+bool TcpServer::send(int clientId, const void * data, size_t size) [+2]  // Send data to a specific client (blocking)
+SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2]  // Queue data for a client and return at once, without waiting for it to be written
 void TcpServer::setReceiveBufferSize(size_t size)  // Set the receive buffer size
+void TcpServer::setSendAsyncBufferSize(size_t bytes)  // Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB
 void TcpServer::setSendTimeout(float seconds)  // Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)
 bool TcpServer::start(int port, int maxClients = 10)  // Start listening on a port
 void TcpServer::stop()  // Stop the server
@@ -4137,13 +4172,19 @@ bool VideoWriter::writeAudio(const float * interleaved, int frames, double timeS
 void Window::close()  // Close the native window; the main window and other windows keep running
 CoreEvents & Window::events()  // This window's own event stream (mousePressed / keyPressed / draw / ...)
 std::shared_ptr<App> Window::getApp() const  // Get the App attached to this window
+float Window::getFps() const  // This window's target frame rate set via setFps (0 = free-run at vsync); not a measured rate
 int Window::getHeight() const  // Window height in logical points (matches its coordinate system)
 const std::string & Window::getTitle() const  // Last title set for this window (via WindowSettings or setTitle)
 int Window::getWidth() const  // Window width in logical points (matches its coordinate system)
+bool Window::isFullscreen() const  // Whether this window is currently fullscreen (macOS reads the live window state; the transition is animated)
 bool Window::isOpen() const  // Whether the native window is still open
 void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window
 void Window::setClearColor(const Color & c)  // Background clear color for this window
+void Window::setFps(float fps)  // Set this window's target frame rate; <= 0 (or >= the display rate) free-runs at vsync, otherwise update/draw run at ~fps by skipping display ticks
+void Window::setFullscreen(bool full)  // Enter or leave fullscreen for this window (macOS native fullscreen, Windows borderless-fullscreen, Linux EWMH _NET_WM_STATE_FULLSCREEN)
+void Window::setSize(int width, int height)  // Resize this window's content area to the given logical size (points)
 void Window::setTitle(const std::string & title)  // Set the window title
+void Window::toggleFullscreen()  // Toggle this window's fullscreen state
 ```
 
 ### WindowSettings — Window configuration passed to the app at startup (size, title, DPI, MSAA, fullscreen, decoration, VSync). Setters chain
@@ -4203,6 +4244,7 @@ enum PixelFormat { U8, F32 }  // CPU pixel data format: U8 (8-bit) or F32 (float
 enum PointStyle { Square, Round, Pixel }  // Shape used to draw points: Square, Round, Pixel.
 enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Draw primitive mode: Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points.
 enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Geometry primitive type: Points, Lines, LineStrip, Triangles, TriangleStrip, Quads.
+enum SendError { None, ClientNotFound, Disconnected, QueueFull, NotRunning }  // Why a send could not be queued, or how a queued one finished: None, ClientNotFound, Disconnected, QueueFull, NotRunning.
 enum SoundSource::Kind { Eager, Stream }  // Source kind tag on SoundSource, letting the mixer dispatch without a per-frame virtual call: Eager (SoundBuffer, full PCM in RAM) vs Stream (SoundStream, decoded on demand).
 enum StrokeCap { Butt, Round, Square }  // Line cap style for strokes: Butt, Round, Square.
 enum StrokeJoin { Miter, Round, Bevel }  // Line join style for strokes: Miter, Round, Bevel.
