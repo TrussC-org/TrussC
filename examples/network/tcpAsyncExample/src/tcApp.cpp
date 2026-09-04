@@ -24,6 +24,15 @@ string mib(size_t bytes) {
 } // namespace
 
 void tcApp::setup() {
+    // The whole point of this example is the difference between two keys, so
+    // make it drivable without hands: with TRUSSC_MCP=1 in the environment, A
+    // and B can be injected and the frame-time graph read back. Without that
+    // variable nothing is started and no port is opened.
+    // MCP is desktop-only — Web builds skip it.
+#ifndef __EMSCRIPTEN__
+    mcp::registerControlTools();
+#endif
+
     payload.assign(kPayloadBytes, 'x');
     frameMs.assign(kGraphFrames, 0.0f);
 
