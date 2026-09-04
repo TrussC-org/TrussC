@@ -227,6 +227,16 @@ function enumerate(objs) {
                 const flags = [/operator/.test(m.name || '') ? 'operator' : null, m.storageClass === 'static' ? 'static' : null,
                     m.isImplicit ? 'implicit' : null, m.explicitlyDeleted ? 'deleted' : null, m.explicitlyDefaulted ? 'defaulted' : null].filter(Boolean);
                 syms.push({ kind: 'method', ns: nsPath, owner: qn, name: m.name, sig: m.type && m.type.qualType, params: paramsOf(m), args: argsOf(m), file: fileOf(m), access, flags: [...(extraFlags || []), ...flags], ann: annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
+            } else if (m.kind === 'FunctionTemplateDecl' && m.name) {
+                // A templated member (ToolBuilder::arg<T>, Node::getMod<T>) is a
+                // FunctionTemplateDecl wrapping the method, so the CXXMethodDecl
+                // branch above never sees it. Read the wrapped decl the way the
+                // namespace-level branch below does, and flag it 'template' so
+                // the binders skip it — every consumer already filters sig.tmpl.
+                const fn = (m.inner || []).find(x => x.kind === 'CXXMethodDecl' || x.kind === 'FunctionDecl');
+                if (fn) syms.push({ kind: 'method', ns: nsPath, owner: qn, name: m.name, sig: fn.type && fn.type.qualType, params: paramsOf(fn), args: argsOf(fn), file: fileOf(m), access,
+                    flags: [...(extraFlags || []), 'template', /operator/.test(m.name) ? 'operator' : null, fn.storageClass === 'static' ? 'static' : null].filter(Boolean),
+                    ann: annotationsOf(fn, fileOf(m)), deprecated: deprecatedOf(fn) });
             } else if (m.kind === 'FieldDecl') {
                 syms.push({ kind: 'field', ns: nsPath, owner: qn, name: m.name, ftype: m.type && m.type.qualType, file: fileOf(m), access, flags: [], deprecated: deprecatedOf(m) });
             } else if (m.kind === 'EnumDecl' && m.name) {
@@ -275,9 +285,14 @@ const noise = (s) => (s.flags || []).some(f => ['implicit', 'defaulted', 'delete
 function symbolId(s) {
     const pre = nsPrefix(s); const q = (n) => pre ? pre + '::' + n : n;
     switch (s.kind) {
-        case 'method': case 'field': return s.owner + '::' + s.name;
-        case 'enum': return s.owner ? s.owner + '::' + s.name : q(s.name);
-        case 'type': { const b = s.owner ? s.owner + '::' + s.name : q(s.name); return s.tparams && s.tparams.length ? `${b}<${s.tparams.join(', ')}>` : b; }
+        // Members are qualified like everything else: a type in a sub-namespace
+        // would otherwise be `mcp::ToolBuilder` while its own method is a bare
+        // `ToolBuilder::arg`, and generic member names (`Tool::name`) would read
+        // as top-level ids. No visible symbol sits in a sub-namespace today, so
+        // this leaves every current id byte-identical.
+        case 'method': case 'field': return q(s.owner + '::' + s.name);
+        case 'enum': return s.owner ? q(s.owner + '::' + s.name) : q(s.name);
+        case 'type': { const b = s.owner ? q(s.owner + '::' + s.name) : q(s.name); return s.tparams && s.tparams.length ? `${b}<${s.tparams.join(', ')}>` : b; }
         case 'func': case 'var': case 'typedef': return q(s.name);
         default: return null;
     }
