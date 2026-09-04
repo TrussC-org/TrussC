@@ -40,16 +40,14 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         t["getBounds"] = &trussc::Path::getBounds;
         t["getPerimeter"] = &trussc::Path::getPerimeter;
     }
-    {
-        sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
-        t["key"] = &trussc::KeyEventArgs::key;
-        t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
-        t["shift"] = &trussc::KeyEventArgs::shift;
-        t["ctrl"] = &trussc::KeyEventArgs::ctrl;
-        t["alt"] = &trussc::KeyEventArgs::alt;
-        t["super"] = &trussc::KeyEventArgs::super;
-        t["consumed"] = &trussc::KeyEventArgs::consumed;
-    }
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
     {
         sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
         t["frameCount"] = &trussc::AudioInBuffer::frameCount;
@@ -70,8 +68,9 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
     }
     {
-        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
-        t["text"] = &trussc::ClipboardPastedEventArgs::text;
+        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
+        t["pixels"] = &trussc::GrabberFrame::pixels;
+        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
     }
 }
 #ifndef _MSC_VER

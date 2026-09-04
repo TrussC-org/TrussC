@@ -115,33 +115,34 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         "typing", sol::var(trussc::Beep::typing),
         "notify", sol::var(trussc::Beep::notify),
         "sweep", sol::var(trussc::Beep::sweep));
-    lua->new_usertype<trussc::LogLevel>("LogLevel",
-        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
-        "Verbose", sol::var(trussc::LogLevel::Verbose),
-        "Notice", sol::var(trussc::LogLevel::Notice),
-        "Warning", sol::var(trussc::LogLevel::Warning),
-        "Error", sol::var(trussc::LogLevel::Error),
-        "Fatal", sol::var(trussc::LogLevel::Fatal),
-        "Silent", sol::var(trussc::LogLevel::Silent));
+    lua->new_usertype<trussc::Direction>("Direction",
+        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
+        "Left", sol::var(trussc::Direction::Left),
+        "Center", sol::var(trussc::Direction::Center),
+        "Right", sol::var(trussc::Direction::Right),
+        "Top", sol::var(trussc::Direction::Top),
+        "Bottom", sol::var(trussc::Direction::Bottom),
+        "Baseline", sol::var(trussc::Direction::Baseline));
     {
         sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
         t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
         t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
         t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
     }
-    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
-        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
-        "Miter", sol::var(trussc::StrokeJoin::Miter),
-        "Round", sol::var(trussc::StrokeJoin::Round),
-        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
+    {
+        sol::usertype<trussc::FullscreenShader> t = lua->new_usertype<trussc::FullscreenShader>("FullscreenShader",
+            sol::constructors<trussc::FullscreenShader()>(),
+            sol::call_constructor, sol::constructors<trussc::FullscreenShader()>());
+        t["draw"] = &trussc::FullscreenShader::draw;
+    }
     lua->new_usertype<trussc::ImageType>("ImageType",
         sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
         "Color", sol::var(trussc::ImageType::Color),
         "Grayscale", sol::var(trussc::ImageType::Grayscale));
-    lua->new_usertype<trussc::Codec>("Codec",
-        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
-        "None", sol::var(trussc::Codec::None),
-        "LZ4", sol::var(trussc::Codec::LZ4));
+    {
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
+    }
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

@@ -555,6 +555,63 @@ int main() {
         TC_CLOSE(second);
     }
 
+    // --- a timeout that wrote nothing is not a disconnect ---------------------
+    // The completion has to say which of two very different things happened:
+    // the peer is gone, or the peer is merely too slow and the connection is
+    // still there. Reporting both as Disconnected left a listener parsing the
+    // onError message string to tell them apart.
+    //
+    // Constructing "timed out having written nothing" on demand needs a message
+    // the kernel cannot take half of. One byte is that message: a buffer
+    // boundary then always falls on a message boundary, so each send is either
+    // written whole or not at all. Fill the pipe a byte at a time and the first
+    // send after it fills is the one that gets nothing through.
+    {
+        TcpServer s8;
+        if (!s8.start(port + 7, 8)) { printf("could not start eighth server\n"); bail(); }
+        s8.setSendTimeout(0.5f);                  // short, so this does not take a minute
+        s8.setSendAsyncBufferSize(64 * 1024);     // bounds the queue at 64k one-byte items
+
+        auto sawTimeout = make_shared<atomic<bool>>(false);
+        auto sawTimeoutBytes = make_shared<atomic<size_t>>(1);
+        EventListener finished = s8.onSendComplete.listen(
+            [sawTimeout, sawTimeoutBytes](TcpSendCompleteEventArgs& a) {
+                if (a.error != SendError::Timeout) return;
+                sawTimeoutBytes->store(a.bytesSent);
+                sawTimeout->store(true);
+            });
+
+        rawsocket_t deaf = connectSilentPeer(port + 7);
+        if (deaf == static_cast<rawsocket_t>(-1)) { printf("no deaf peer\n"); bail(); }
+        for (int i = 0; i < 200 && s8.getClientCount() < 1; ++i)
+            this_thread::sleep_for(chrono::milliseconds(5));
+        vector<int> ids8 = s8.getClientIds();
+        if (ids8.empty()) { printf("deaf peer never registered\n"); bail(); }
+        const int deafId = ids8[0];
+
+        const auto t0 = chrono::steady_clock::now();
+        const auto deadline = t0 + chrono::seconds(30);
+        uint64_t offered = 0;
+        while (!sawTimeout->load() && chrono::steady_clock::now() < deadline) {
+            for (int i = 0; i < 4096 && !sawTimeout->load(); ++i) {
+                ++offered;
+                if (!s8.sendAsync(deafId, string("x"))) break;   // queue full: let it drain
+            }
+            this_thread::sleep_for(chrono::milliseconds(1));
+        }
+        const double secs = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
+        printf("  (%llu one-byte sends in %.1fs before the pipe stopped taking them)\n",
+               static_cast<unsigned long long>(offered), secs);
+
+        check("a send that timed out having written nothing reports Timeout",
+              sawTimeout->load());
+        check("that timeout reports no bytes sent", sawTimeoutBytes->load() == 0);
+        check("a pure timeout leaves the client connected", s8.getClientCount() == 1);
+        check("eighth server stops cleanly", completesWithin(15000, [&] { s8.stop(); }));
+
+        TC_CLOSE(deaf);
+    }
+
     // --- the same teardown, repeatedly, to shake out a deadlock ---------------
     // Joining is the kind of fix that fails loudly in the other direction: a
     // server torn down while a client thread holds, or waits for, the same lock

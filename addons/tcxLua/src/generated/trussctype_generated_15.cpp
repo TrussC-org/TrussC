@@ -127,6 +127,10 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
         "Nearest", sol::var(trussc::TextureFilter::Nearest),
         "Linear", sol::var(trussc::TextureFilter::Linear));
+    {
+        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
+        t["count"] = &trussc::EnumLabelSpan::count;
+    }
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

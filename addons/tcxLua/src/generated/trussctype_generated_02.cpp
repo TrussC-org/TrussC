@@ -90,34 +90,38 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["rateRatio"] = &trussc::PlayingSound::rateRatio;
     }
     {
-        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
-        t["error"] = &trussc::LoadResult::error;
-        t["message"] = &trussc::LoadResult::message;
-        t["ok"] = &trussc::LoadResult::ok;
-        t["success"] = &trussc::LoadResult::success;
-        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
+        sol::usertype<trussc::ShaderVertex> t = lua->new_usertype<trussc::ShaderVertex>("ShaderVertex");
+        t["x"] = &trussc::ShaderVertex::x;
+        t["y"] = &trussc::ShaderVertex::y;
+        t["z"] = &trussc::ShaderVertex::z;
+        t["u"] = &trussc::ShaderVertex::u;
+        t["v"] = &trussc::ShaderVertex::v;
+        t["r"] = &trussc::ShaderVertex::r;
+        t["g"] = &trussc::ShaderVertex::g;
+        t["b"] = &trussc::ShaderVertex::b;
+        t["a"] = &trussc::ShaderVertex::a;
     }
     {
-        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream",
-            sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>(),
-            sol::call_constructor, sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>());
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener",
+            sol::constructors<trussc::EventListener()>(),
+            sol::call_constructor, sol::constructors<trussc::EventListener()>());
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
     }
+    lua->new_usertype<trussc::PointStyle>("PointStyle",
+        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
+        "Square", sol::var(trussc::PointStyle::Square),
+        "Round", sol::var(trussc::PointStyle::Round),
+        "Pixel", sol::var(trussc::PointStyle::Pixel));
     {
-        sol::usertype<trussc::FullscreenShader> t = lua->new_usertype<trussc::FullscreenShader>("FullscreenShader",
-            sol::constructors<trussc::FullscreenShader()>(),
-            sol::call_constructor, sol::constructors<trussc::FullscreenShader()>());
-        t["draw"] = &trussc::FullscreenShader::draw;
+        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
+        t["format"] = &trussc::AudioRecordSettings::format;
+        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
     }
-    {
-        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
-        t["success"] = &trussc::TcpConnectEventArgs::success;
-        t["message"] = &trussc::TcpConnectEventArgs::message;
-    }
-    {
-        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
-        t["name"] = &trussc::AudioDeviceInfo::name;
-        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
-    }
+    lua->new_usertype<trussc::Codec>("Codec",
+        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
+        "None", sol::var(trussc::Codec::None),
+        "LZ4", sol::var(trussc::Codec::LZ4));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

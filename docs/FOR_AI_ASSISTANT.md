@@ -4244,7 +4244,7 @@ enum PixelFormat { U8, F32 }  // CPU pixel data format: U8 (8-bit) or F32 (float
 enum PointStyle { Square, Round, Pixel }  // Shape used to draw points: Square, Round, Pixel.
 enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Draw primitive mode: Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points.
 enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Geometry primitive type: Points, Lines, LineStrip, Triangles, TriangleStrip, Quads.
-enum SendError { None, ClientNotFound, Disconnected, QueueFull, NotRunning }  // Why a send could not be queued, or how a queued one finished: None, ClientNotFound, Disconnected, QueueFull, NotRunning.
+enum SendError { None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning }  // Why a send could not be queued, or how a queued one finished: None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning.
 enum SoundSource::Kind { Eager, Stream }  // Source kind tag on SoundSource, letting the mixer dispatch without a per-frame virtual call: Eager (SoundBuffer, full PCM in RAM) vs Stream (SoundStream, decoded on demand).
 enum StrokeCap { Butt, Round, Square }  // Line cap style for strokes: Butt, Round, Square.
 enum StrokeJoin { Miter, Round, Bevel }  // Line join style for strokes: Miter, Round, Bevel.

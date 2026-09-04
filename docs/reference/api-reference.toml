@@ -8417,13 +8417,14 @@ description.ko = "수신 데이터"
 ["SendError"]
 category = "network"
 keywords = ["send", "error", "async", "queue full", "disconnected"]
-description.en = "Why a send could not be queued, or how a queued one finished: None, ClientNotFound, Disconnected, QueueFull, NotRunning."
-description.ja = "送信をキューに入れられなかった理由、またはキュー済み送信の結末：None, ClientNotFound, Disconnected, QueueFull, NotRunning。"
-description.ko = "전송을 큐에 넣지 못한 이유 또는 큐에 든 전송의 결과: None, ClientNotFound, Disconnected, QueueFull, NotRunning."
+description.en = "Why a send could not be queued, or how a queued one finished: None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning."
+description.ja = "送信をキューに入れられなかった理由、またはキュー済み送信の結末：None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning。"
+description.ko = "전송을 큐에 넣지 못한 이유 또는 큐에 든 전송의 결과: None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning."
 related = ["SendResult", "sendErrorName", "TcpSendCompleteEventArgs", "TcpServer::sendAsync"]
 value_desc.None.en = "Success: queued, or the whole payload reached the kernel"
 value_desc.ClientNotFound.en = "No client is registered under that id"
 value_desc.Disconnected.en = "The connection went away before the payload was written"
+value_desc.Timeout.en = "The peer stopped reading long enough to trip the send timeout; the connection is still up"
 value_desc.QueueFull.en = "The send queue is already at its high-water mark"
 value_desc.NotRunning.en = "The server is not running"
 
@@ -8489,9 +8490,9 @@ description.ja = "このペイロードをキューに入れた SendResult::id �
 description.ko = "이 페이로드를 큐에 넣은 SendResult::id와 일치"
 
 ["TcpSendCompleteEventArgs::error"]
-description.en = "SendError::None when the whole payload reached the kernel"
-description.ja = "ペイロード全体がカーネルに渡っていれば SendError::None"
-description.ko = "페이로드 전체가 커널에 전달되었으면 SendError::None"
+description.en = "SendError::None when the whole payload reached the kernel; Disconnected when the client went away, Timeout when it merely stopped reading"
+description.ja = "ペイロード全体がカーネルに渡っていれば SendError::None。相手が居なくなったなら Disconnected、読むのをやめただけなら Timeout"
+description.ko = "페이로드 전체가 커널에 전달되었으면 SendError::None. 상대가 사라졌으면 Disconnected, 읽기를 멈춘 것뿐이면 Timeout"
 
 ["TcpSendCompleteEventArgs::bytesSent"]
 description.en = "How much of the payload got through"
@@ -8619,7 +8620,7 @@ description.en = "Set how long a send may stall without progress before giving u
 description.ja = "送信が無通信のまま何秒まで待つかを設定（0 = 無制限に待つ）"
 description.ko = "전송이 진척 없이 몇 초까지 대기할지 설정 (0 = 무제한 대기)"
 keywords = ["timeout", "blocking", "send"]
-details = "The timeout measures silence, not the duration of the send: it restarts every time bytes are accepted, so a peer that keeps draining never trips it however large the payload or slow the link. What it catches is a peer that has stopped reading. Defaults to 60 seconds — long enough that no healthy peer reaches it, short enough that a dead one cannot hold a send open forever; pass 0 to wait indefinitely instead. Applies to every send that starts after the call, on every client. A timeout that fires mid-payload leaves the stream truncated, so the client is disconnected rather than left open for the next send() to splice a fresh message onto a partial one."
+details = "The timeout measures silence, not the duration of the send: it restarts every time bytes are accepted, so a peer that keeps draining never trips it however large the payload or slow the link. What it catches is a peer that has stopped reading. Defaults to 60 seconds — long enough that no healthy peer reaches it, short enough that a dead one cannot hold a send open forever; pass 0 to wait indefinitely instead. Applies to every send that starts after the call, on every client. A timeout that fires mid-payload leaves the stream truncated, so the client is disconnected rather than left open for the next send() to splice a fresh message onto a partial one — that completion reports SendError::Disconnected, because the client really has gone. One that fires having written nothing leaves the connection intact and reports SendError::Timeout instead, so a listener can tell a slow peer from a lost one without reading the error message."
 
 ["TcpServer::setSendAsyncBufferSize"]
 description.en = "Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB"

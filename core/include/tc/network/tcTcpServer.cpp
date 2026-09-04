@@ -658,6 +658,11 @@ struct WriteOutcome {
     int code = 0;
     size_t written = 0;
     bool truncated = false;          // partial payload written: the stream is unusable
+
+    // What the caller is told. The question a listener actually has is whether
+    // the connection is still usable: a timeout that wrote nothing leaves it
+    // up, so it is not a disconnect and must not report as one.
+    SendError error = SendError::Disconnected;
 };
 
 } // namespace
@@ -724,10 +729,12 @@ static WriteOutcome writePayload(internal::TcpSendChannel& ch, const void* data,
         // the next send would splice a fresh message onto a partial one: the
         // client has to go.
         if (out.written > 0) {
+            // The client is about to be dropped, so it really has gone.
             out.failure = "Send timed out mid-payload; client dropped";
             out.truncated = true;
         } else {
             out.failure = "Send timed out";
+            out.error = SendError::Timeout;
         }
         break;
     }
@@ -865,7 +872,7 @@ void TcpServer::writerThreadFunc(int clientId, std::shared_ptr<internal::TcpSend
             }
         }
         notifyError(out.failure, out.code, clientId);
-        completeSend(clientId, ch, item, SendError::Disconnected, out.written);
+        completeSend(clientId, ch, item, out.error, out.written);
     }
 
     // This thread is the only one that writes to the descriptor, so it is the
