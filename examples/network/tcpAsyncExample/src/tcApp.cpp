@@ -59,6 +59,12 @@ void tcApp::setup() {
     // would queue faster than the main thread could drain it.
     connectListener = client.onReceive.listen([this](TcpReceiveEventArgs& e) {
         bytesReceived.fetch_add(e.data.size());
+
+        // Sleeping here is what a slow consumer looks like from the sender's
+        // side: this listener runs on the receive thread, so holding it stops
+        // the socket being drained, the server's window closes, and the send
+        // path finally has something to wait for.
+        if (slowConsumer.load()) this_thread::sleep_for(chrono::milliseconds(40));
     });
 
     client.connect("127.0.0.1", kPort);
@@ -102,16 +108,26 @@ void tcApp::draw() {
     y += 26;
 
     setColor(0.7f);
-    drawBitmapString("A: stream with sendAsync   B: stream with send   SPACE: stop   "
-                     "[ / ]: queue limit   X: reset", 40, y);
-    y += 30;
+    drawBitmapString("A: stream with sendAsync   B: stream with send   SPACE: stop", 40, y);
+    y += 18;
+    drawBitmapString("S: slow the receiver down   [ / ]: queue limit   X: reset", 40, y);
+    y += 26;
 
     const char* modeName = mode == Mode::Async    ? "ASYNC  (sendAsync)"
                            : mode == Mode::Blocking ? "BLOCKING  (send)"
                                                     : "idle";
     setColor(mode == Mode::Blocking ? Color(1.0f, 0.5f, 0.35f) : Color(0.4f, 0.78f, 1.0f));
     drawBitmapString(string("Mode: ") + modeName, 40, y);
-    y += 30;
+    y += 20;
+
+    // Without this the peer keeps up and neither mode has anything to wait for,
+    // so both look identical however the platform buffers.
+    const bool slow = slowConsumer.load();
+    setColor(slow ? Color(1.0f, 0.85f, 0.4f) : Color(0.5f));
+    drawBitmapString(slow ? "Receiver: slow (40 ms per chunk) - this is what makes the two modes differ"
+                          : "Receiver: keeping up - press S to slow it down",
+                     40, y);
+    y += 26;
 
     // --- frame time graph ----------------------------------------------------
     // 16.7 ms is the 60 fps budget; a bar above the line is a frame the send
@@ -195,6 +211,8 @@ void tcApp::keyPressed(int key) {
         mode = Mode::Blocking;
     } else if (key == KEY_SPACE || key == ' ') {
         mode = Mode::Off;
+    } else if (key == 'S') {
+        slowConsumer.store(!slowConsumer.load());
     } else if (key == 'X') {
         reset();
     } else if (key == '[') {
