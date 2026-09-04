@@ -16,10 +16,12 @@
 
 #include <TrussC.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -383,6 +385,154 @@ int main() {
         check("stop() waits for a client thread still inside a listener", stopMs >= 300.0);
 
         TC_CLOSE(talker);
+    }
+
+    // --- sendAsync() returns without waiting for the peer ---------------------
+    // The request this whole thing started from: a send issued from a draw loop
+    // to a peer that has stopped reading has to return in microseconds. The
+    // synchronous send() cannot — it is done only once the kernel has the
+    // payload — so it stalls the frame however well the rest of the server
+    // holds up.
+    //
+    // The same block covers the accounting the queue owes its caller: what is
+    // outstanding, what the high-water mark refuses, and that every id it
+    // handed out is reported back exactly once even when the server stops with
+    // the queue still full.
+    {
+        TcpServer s6;
+        if (!s6.start(port + 5, 8)) { printf("could not start sixth server\n"); bail(); }
+
+        auto completedMutex = make_shared<mutex>();
+        auto completed = make_shared<vector<TcpSendCompleteEventArgs>>();
+        EventListener finished = s6.onSendComplete.listen(
+            [completedMutex, completed](TcpSendCompleteEventArgs& a) {
+                lock_guard<mutex> lock(*completedMutex);
+                completed->push_back(a);
+            });
+
+        rawsocket_t deaf = connectSilentPeer(port + 5);
+        if (deaf == static_cast<rawsocket_t>(-1)) { printf("no deaf peer\n"); bail(); }
+        for (int i = 0; i < 200 && s6.getClientCount() < 1; ++i)
+            this_thread::sleep_for(chrono::milliseconds(5));
+        vector<int> ids6 = s6.getClientIds();
+        if (ids6.empty()) { printf("deaf peer never registered\n"); bail(); }
+        const int deafId = ids6[0];
+
+        // Four of these fit under the 16 MB default mark; none of them can be
+        // written, because the peer never reads.
+        vector<char> big(4 * 1024 * 1024, 'x');
+        vector<uint64_t> queuedIds;
+        double worstMs = 0.0;
+        for (int i = 0; i < 4; ++i) {
+            const auto t0 = chrono::steady_clock::now();
+            const SendResult r = s6.sendAsync(deafId, big.data(), big.size());
+            const double ms =
+                chrono::duration<double, milli>(chrono::steady_clock::now() - t0).count();
+            worstMs = max(worstMs, ms);
+            if (r) queuedIds.push_back(r.id);
+        }
+        printf("  (slowest of 4 sendAsync calls to a non-reading peer took %.1f ms)\n", worstMs);
+        check("sendAsync queues every payload up to the mark", queuedIds.size() == 4);
+        check("sendAsync returns without waiting for the peer", worstMs < 500.0);
+        check("pending bytes account for what is queued",
+              s6.getSendAsyncPendingBytes(deafId) > 4u * 1024 * 1024);
+        check("pending bytes are 0 for an unknown client", s6.getSendAsyncPendingBytes(9999) == 0);
+
+        // The limit is a high-water mark, not a cap: it refuses a send only once
+        // the queue ALREADY holds that much, and it does not drop the client.
+        s6.setSendAsyncBufferSize(1024 * 1024);
+        check("getSendAsyncBufferSize() reports what was set",
+              s6.getSendAsyncBufferSize() == 1024u * 1024);
+        const SendResult refused = s6.sendAsync(deafId, big.data(), big.size());
+        check("sendAsync is refused once the queue is past its mark",
+              refused.error == SendError::QueueFull);
+        check("a refused send is falsy and has no id", !refused && refused.id == 0);
+        check("a full queue does not disconnect the client", s6.getClientCount() == 1);
+
+        check("sixth server stops cleanly", completesWithin(10000, [&] { s6.stop(); }));
+
+        // stop() joins the writer, so every completion has already fired.
+        {
+            lock_guard<mutex> lock(*completedMutex);
+            check("every queued send completed", completed->size() == queuedIds.size());
+            bool onceEach = completed->size() == queuedIds.size();
+            for (size_t i = 0; i < queuedIds.size() && onceEach; ++i) {
+                size_t seen = 0;
+                for (const auto& c : *completed)
+                    if (c.sendId == queuedIds[i]) ++seen;
+                if (seen != 1) onceEach = false;
+            }
+            check("each queued id completed exactly once", onceEach);
+            bool disconnectedNotSuccess = true;
+            for (const auto& c : *completed)
+                if (c.error != SendError::Disconnected) disconnectedNotSuccess = false;
+            check("a send the teardown never wrote completes as Disconnected",
+                  disconnectedNotSuccess);
+        }
+
+        TC_CLOSE(deaf);
+    }
+
+    // --- one queue per client, shared by send() and sendAsync() ---------------
+    // send() is sendAsync() plus a wait on that one id. Sharing the queue is
+    // what keeps the two in order: a synchronous send that wrote directly to the
+    // socket would overtake everything already queued ahead of it.
+    {
+        TcpServer s7;
+        if (!s7.start(port + 6, 8)) { printf("could not start seventh server\n"); bail(); }
+
+        rawsocket_t reader = connectSilentPeer(port + 6, /*shrinkRecvBuffer=*/false);
+        if (reader == static_cast<rawsocket_t>(-1)) { printf("no reader\n"); bail(); }
+        setRecvTimeout(reader, 2000);
+        for (int i = 0; i < 200 && s7.getClientCount() < 1; ++i)
+            this_thread::sleep_for(chrono::milliseconds(5));
+        vector<int> ids7 = s7.getClientIds();
+        if (ids7.empty()) { printf("reader never registered\n"); bail(); }
+        const int readerId = ids7[0];
+
+        s7.sendAsync(readerId, string("A"));
+        s7.sendAsync(readerId, string("B"));
+        s7.send(readerId, string("C"));            // sync, must not overtake A and B
+        s7.sendAsync(readerId, string("D"));
+        vector<char> tail{'E'};
+        s7.sendAsync(readerId, move(tail));       // the move overload
+
+        string got;
+        while (got.size() < 5) {
+            char buf[16];
+            const int n = static_cast<int>(::recv(reader, buf, sizeof(buf), 0));
+            if (n <= 0) break;
+            got.append(buf, buf + n);
+        }
+        check("sync and async sends to one client arrive in order", got == "ABCDE");
+
+        // broadcastAsync buffers the payload once and reports how many clients
+        // took it.
+        rawsocket_t second = connectSilentPeer(port + 6, /*shrinkRecvBuffer=*/false);
+        if (second == static_cast<rawsocket_t>(-1)) { printf("no second reader\n"); bail(); }
+        setRecvTimeout(second, 2000);
+        for (int i = 0; i < 200 && s7.getClientCount() < 2; ++i)
+            this_thread::sleep_for(chrono::milliseconds(5));
+
+        const int queuedFor = s7.broadcastAsync(string("hi"));
+        check("broadcastAsync reports how many clients it queued for", queuedFor == 2);
+
+        string a, b;
+        for (rawsocket_t peer : {reader, second}) {
+            string& into = (peer == reader) ? a : b;
+            while (into.size() < 2) {
+                char buf[8];
+                const int n = static_cast<int>(::recv(peer, buf, sizeof(buf), 0));
+                if (n <= 0) break;
+                into.append(buf, buf + n);
+            }
+        }
+        check("broadcastAsync reaches every client", a == "hi" && b == "hi");
+
+        check("seventh server stops cleanly", completesWithin(4000, [&] { s7.stop(); }));
+
+        TC_CLOSE(reader);
+        TC_CLOSE(second);
     }
 
     // --- the same teardown, repeatedly, to shake out a deadlock ---------------
