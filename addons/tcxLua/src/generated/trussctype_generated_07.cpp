@@ -119,21 +119,22 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
         "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
         "Unknown", sol::var(trussc::LoadError::Unknown));
+    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
+        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
+        "Repeat", sol::var(trussc::TextureWrap::Repeat),
+        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
+        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
     {
-        sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
-        t["message"] = &trussc::TcpServerErrorEventArgs::message;
-        t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
-        t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
+        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
+        t["filePath"] = &trussc::FileDialogResult::filePath;
+        t["fileName"] = &trussc::FileDialogResult::fileName;
+        t["success"] = &trussc::FileDialogResult::success;
     }
-    lua->new_usertype<trussc::EaseMode>("EaseMode",
-        sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
-        "In", sol::var(trussc::EaseMode::In),
-        "Out", sol::var(trussc::EaseMode::Out),
-        "InOut", sol::var(trussc::EaseMode::InOut));
-    lua->new_usertype<trussc::Deliver>("Deliver",
-        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
-        "Inline", sol::var(trussc::Deliver::Inline),
-        "Main", sol::var(trussc::Deliver::Main));
+    {
+        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
+        t["message"] = &trussc::UdpErrorEventArgs::message;
+        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
+    }
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

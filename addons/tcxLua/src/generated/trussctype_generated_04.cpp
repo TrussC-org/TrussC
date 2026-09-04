@@ -66,70 +66,77 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["getTotalCacheMemoryUsage"] = &trussc::Font::getTotalCacheMemoryUsage;
     }
     {
-        sol::usertype<trussc::ColorOKLCH> t = lua->new_usertype<trussc::ColorOKLCH>("ColorOKLCH",
-            sol::constructors<trussc::ColorOKLCH(), trussc::ColorOKLCH(float, float, float), trussc::ColorOKLCH(float, float, float, float)>(),
-            sol::call_constructor, sol::constructors<trussc::ColorOKLCH(), trussc::ColorOKLCH(float, float, float), trussc::ColorOKLCH(float, float, float, float)>());
-        t["L"] = &trussc::ColorOKLCH::L;
-        t["C"] = &trussc::ColorOKLCH::C;
-        t["H"] = &trussc::ColorOKLCH::H;
-        t["alpha"] = &trussc::ColorOKLCH::alpha;
-        t["toOKLab"] = &trussc::ColorOKLCH::toOKLab;
-        t["toLinear"] = &trussc::ColorOKLCH::toLinear;
-        t["toRGB"] = &trussc::ColorOKLCH::toRGB;
-        t["toHSB"] = &trussc::ColorOKLCH::toHSB;
-        t["lerp"] = sol::overload([](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t) { return self.lerp(target, t); }, [](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t, bool shortestPath) { return self.lerp(target, t, shortestPath); });
+        sol::usertype<trussc::ChipSoundNote> t = lua->new_usertype<trussc::ChipSoundNote>("ChipSoundNote",
+            sol::constructors<trussc::ChipSoundNote(), trussc::ChipSoundNote(trussc::Wave, float, float), trussc::ChipSoundNote(trussc::Wave, float, float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::ChipSoundNote(), trussc::ChipSoundNote(trussc::Wave, float, float), trussc::ChipSoundNote(trussc::Wave, float, float, float)>());
+        t["wave"] = &trussc::ChipSoundNote::wave;
+        t["hz"] = &trussc::ChipSoundNote::hz;
+        t["volume"] = &trussc::ChipSoundNote::volume;
+        t["duration"] = &trussc::ChipSoundNote::duration;
+        t["attack"] = &trussc::ChipSoundNote::attack;
+        t["decay"] = &trussc::ChipSoundNote::decay;
+        t["sustain"] = &trussc::ChipSoundNote::sustain;
+        t["release"] = &trussc::ChipSoundNote::release;
+        t["build"] = &trussc::ChipSoundNote::build;
+        t["generateBuffer"] = &trussc::ChipSoundNote::generateBuffer;
+        t["getTotalDuration"] = &trussc::ChipSoundNote::getTotalDuration;
     }
-    lua->new_usertype<trussc::EaseType>("EaseType",
-        sol::meta_function::equal_to, [](trussc::EaseType a, trussc::EaseType b){ return a == b; },
-        "Linear", sol::var(trussc::EaseType::Linear),
-        "Quad", sol::var(trussc::EaseType::Quad),
-        "Cubic", sol::var(trussc::EaseType::Cubic),
-        "Quart", sol::var(trussc::EaseType::Quart),
-        "Quint", sol::var(trussc::EaseType::Quint),
-        "Sine", sol::var(trussc::EaseType::Sine),
-        "Expo", sol::var(trussc::EaseType::Expo),
-        "Circ", sol::var(trussc::EaseType::Circ),
-        "Back", sol::var(trussc::EaseType::Back),
-        "Elastic", sol::var(trussc::EaseType::Elastic),
-        "Bounce", sol::var(trussc::EaseType::Bounce),
-        "Custom", sol::var(trussc::EaseType::Custom));
-    lua->new_usertype<trussc::Orientation>("Orientation",
-        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
-        "Portrait", sol::var(trussc::Orientation::Portrait),
-        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
-        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
-        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
-        "Landscape", sol::var(trussc::Orientation::Landscape),
-        "All", sol::var(trussc::Orientation::All),
-        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
     {
-        sol::usertype<trussc::ShaderVertex> t = lua->new_usertype<trussc::ShaderVertex>("ShaderVertex");
-        t["x"] = &trussc::ShaderVertex::x;
-        t["y"] = &trussc::ShaderVertex::y;
-        t["z"] = &trussc::ShaderVertex::z;
-        t["u"] = &trussc::ShaderVertex::u;
-        t["v"] = &trussc::ShaderVertex::v;
-        t["r"] = &trussc::ShaderVertex::r;
-        t["g"] = &trussc::ShaderVertex::g;
-        t["b"] = &trussc::ShaderVertex::b;
-        t["a"] = &trussc::ShaderVertex::a;
+        sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab",
+            sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>(),
+            sol::call_constructor, sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>());
+        t["L"] = &trussc::ColorOKLab::L;
+        t["a"] = &trussc::ColorOKLab::a;
+        t["b"] = &trussc::ColorOKLab::b;
+        t["alpha"] = &trussc::ColorOKLab::alpha;
+        t["toLinear"] = &trussc::ColorOKLab::toLinear;
+        t["toRGB"] = &trussc::ColorOKLab::toRGB;
+        t["toHSB"] = &trussc::ColorOKLab::toHSB;
+        t["toOKLCH"] = &trussc::ColorOKLab::toOKLCH;
+        t["lerp"] = &trussc::ColorOKLab::lerp;
     }
-    lua->new_usertype<trussc::WindowType>("WindowType",
-        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
-        "Rect", sol::var(trussc::WindowType::Rect),
-        "Hanning", sol::var(trussc::WindowType::Hanning),
-        "Hamming", sol::var(trussc::WindowType::Hamming),
-        "Blackman", sol::var(trussc::WindowType::Blackman));
+    {
+        sol::usertype<trussc::RectNodeButton> t = lua->new_usertype<trussc::RectNodeButton>("RectNodeButton",
+            sol::constructors<trussc::RectNodeButton()>(),
+            sol::call_constructor, sol::constructors<trussc::RectNodeButton()>());
+        t["normalColor"] = &trussc::RectNodeButton::normalColor;
+        t["hoverColor"] = &trussc::RectNodeButton::hoverColor;
+        t["pressColor"] = &trussc::RectNodeButton::pressColor;
+        t["label"] = &trussc::RectNodeButton::label;
+        t["isPressed"] = &trussc::RectNodeButton::isPressed;
+        t["draw"] = &trussc::RectNodeButton::draw;
+    }
+    {
+        sol::usertype<trussc::GraphicsBackend> t = lua->new_usertype<trussc::GraphicsBackend>("GraphicsBackend");
+        t["isWebGPU"] = &trussc::GraphicsBackend::isWebGPU;
+        t["isWebGL2"] = &trussc::GraphicsBackend::isWebGL2;
+        t["isMetal"] = &trussc::GraphicsBackend::isMetal;
+        t["isD3D11"] = &trussc::GraphicsBackend::isD3D11;
+        t["isVulkan"] = &trussc::GraphicsBackend::isVulkan;
+        t["isOpenGL"] = &trussc::GraphicsBackend::isOpenGL;
+        t["name"] = &trussc::GraphicsBackend::name;
+    }
+    {
+        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
+        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
+        t["channels"] = &trussc::AudioOutBuffer::channels;
+        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
+        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
+    }
     lua->new_usertype<trussc::LightType>("LightType",
         sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
         "Directional", sol::var(trussc::LightType::Directional),
         "Point", sol::var(trussc::LightType::Point),
         "Spot", sol::var(trussc::LightType::Spot));
     {
-        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
-        t["files"] = &trussc::DragDropEventArgs::files;
-        t["x"] = &trussc::DragDropEventArgs::x;
-        t["y"] = &trussc::DragDropEventArgs::y;
+        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
+        t["format"] = &trussc::AudioRecordSettings::format;
+        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
+    }
+    {
+        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
+        t["pixels"] = &trussc::GrabberFrame::pixels;
+        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
     }
 }
 #ifndef _MSC_VER

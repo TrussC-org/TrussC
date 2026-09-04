@@ -50,20 +50,28 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         t["super"] = &trussc::KeyEventArgs::super;
         t["consumed"] = &trussc::KeyEventArgs::consumed;
     }
-    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
-        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
-        "Off", sol::var(trussc::KinsokuLevel::Off),
-        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
-        "Standard", sol::var(trussc::KinsokuLevel::Standard));
-    lua->new_usertype<trussc::AxisMode>("AxisMode",
-        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
-        "None", sol::var(trussc::AxisMode::None),
-        "Fill", sol::var(trussc::AxisMode::Fill),
-        "Content", sol::var(trussc::AxisMode::Content));
     {
-        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
-        t["message"] = &trussc::TcpErrorEventArgs::message;
-        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
+        sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
+        t["frameCount"] = &trussc::AudioInBuffer::frameCount;
+        t["channels"] = &trussc::AudioInBuffer::channels;
+        t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
+        t["framePosition"] = &trussc::AudioInBuffer::framePosition;
+    }
+    {
+        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
+        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
+        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
+        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
+        t["endGroup"] = &trussc::Reflector::endGroup;
+    }
+    {
+        sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
+        t["members"] = &trussc::JsonWriteReflector::members;
+        t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
+    }
+    {
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
     }
 }
 #ifndef _MSC_VER

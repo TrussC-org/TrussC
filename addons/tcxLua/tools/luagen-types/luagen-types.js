@@ -39,6 +39,7 @@ const PRIM = new Set(['void','bool','char','short','int','long','float','double'
 function argBindable(a) {
     if (a.isArray || a.isPointer) return false;
     if (/\binternal::/.test(a.type)) return false;   // internal:: types are incomplete / not public API
+    if (/&&/.test(a.type)) return false;             // move-in param: no Lua equivalent, sol2 cannot wrap it
     if (a.isRef && !a.isConst && !/&&/.test(a.type)) {
         const base = a.type.replace(/[&*]/g, '').replace(/\bconst\b/g, '').trim();
         const allPrim = base.split(/\s+/).every(w => PRIM.has(w));

@@ -8,38 +8,34 @@ using namespace std;
 #pragma clang diagnostic push
 #endif
 void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
     {
-        sol::usertype<trussc::VideoGrabber> t = lua->new_usertype<trussc::VideoGrabber>("VideoGrabber",
-            sol::constructors<trussc::VideoGrabber()>(),
-            sol::call_constructor, sol::constructors<trussc::VideoGrabber()>());
-        t["listDevices"] = &trussc::VideoGrabber::listDevices;
-        t["setDeviceID"] = &trussc::VideoGrabber::setDeviceID;
-        t["getDeviceID"] = &trussc::VideoGrabber::getDeviceID;
-        t["setDesiredFrameRate"] = &trussc::VideoGrabber::setDesiredFrameRate;
-        t["getDesiredFrameRate"] = &trussc::VideoGrabber::getDesiredFrameRate;
-        t["setVerbose"] = &trussc::VideoGrabber::setVerbose;
-        t["isVerbose"] = &trussc::VideoGrabber::isVerbose;
-        t["setup"] = sol::overload([](trussc::VideoGrabber& self) { return self.setup(); }, [](trussc::VideoGrabber& self, int width) { return self.setup(width); }, [](trussc::VideoGrabber& self, int width, int height) { return self.setup(width, height); });
-        t["close"] = &trussc::VideoGrabber::close;
-        t["update"] = &trussc::VideoGrabber::update;
-        t["isFrameNew"] = &trussc::VideoGrabber::isFrameNew;
-        t["isInitialized"] = &trussc::VideoGrabber::isInitialized;
-        t["isPendingPermission"] = &trussc::VideoGrabber::isPendingPermission;
-        t["getWidth"] = &trussc::VideoGrabber::getWidth;
-        t["getHeight"] = &trussc::VideoGrabber::getHeight;
-        t["getDeviceName"] = &trussc::VideoGrabber::getDeviceName;
-        t["getPixels"] = [](trussc::VideoGrabber& self) { return self.getPixels(); };
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
-        t["setFrameQueueSize"] = &trussc::VideoGrabber::setFrameQueueSize;
-#endif
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
-        t["getFrameQueueSize"] = &trussc::VideoGrabber::getFrameQueueSize;
-#endif
-        t["copyToImage"] = &trussc::VideoGrabber::copyToImage;
-        t["getTexture"] = [](trussc::VideoGrabber& self) -> decltype(auto) { return self.getTexture(); };
-        t["checkCameraPermission"] = &trussc::VideoGrabber::checkCameraPermission;
-        t["requestCameraPermission"] = &trussc::VideoGrabber::requestCameraPermission;
+        sol::usertype<trussc::TcpServer> t = lua->new_usertype<trussc::TcpServer>("TcpServer",
+            sol::constructors<trussc::TcpServer()>(),
+            sol::call_constructor, sol::constructors<trussc::TcpServer()>());
+        t["onClientConnect"] = &trussc::TcpServer::onClientConnect;
+        t["onReceive"] = &trussc::TcpServer::onReceive;
+        t["onClientDisconnect"] = &trussc::TcpServer::onClientDisconnect;
+        t["onError"] = &trussc::TcpServer::onError;
+        t["onSendComplete"] = &trussc::TcpServer::onSendComplete;
+        t["start"] = sol::overload([](trussc::TcpServer& self, int port) { return self.start(port); }, [](trussc::TcpServer& self, int port, int maxClients) { return self.start(port, maxClients); });
+        t["stop"] = &trussc::TcpServer::stop;
+        t["isRunning"] = &trussc::TcpServer::isRunning;
+        t["disconnectClient"] = &trussc::TcpServer::disconnectClient;
+        t["disconnectAllClients"] = &trussc::TcpServer::disconnectAllClients;
+        t["getClientCount"] = &trussc::TcpServer::getClientCount;
+        t["getClientIds"] = &trussc::TcpServer::getClientIds;
+        t["getClient"] = &trussc::TcpServer::getClient;
+        t["send"] = sol::overload([](trussc::TcpServer& self, int clientId, const std::vector<char> & data) { return self.send(clientId, data); }, [](trussc::TcpServer& self, int clientId, const std::string & message) { return self.send(clientId, message); });
+        t["broadcast"] = sol::overload([](trussc::TcpServer& self, const std::vector<char> & data) { return self.broadcast(data); }, [](trussc::TcpServer& self, const std::string & message) { return self.broadcast(message); });
+        t["sendAsync"] = [](trussc::TcpServer& self, int clientId, const std::string & message) { return self.sendAsync(clientId, message); };
+        t["broadcastAsync"] = sol::overload([](trussc::TcpServer& self, const std::vector<char> & data) { return self.broadcastAsync(data); }, [](trussc::TcpServer& self, const std::string & message) { return self.broadcastAsync(message); });
+        t["setReceiveBufferSize"] = &trussc::TcpServer::setReceiveBufferSize;
+        t["setSendTimeout"] = &trussc::TcpServer::setSendTimeout;
+        t["setSendAsyncBufferSize"] = &trussc::TcpServer::setSendAsyncBufferSize;
+        t["getSendAsyncBufferSize"] = &trussc::TcpServer::getSendAsyncBufferSize;
+        t["getSendAsyncPendingBytes"] = &trussc::TcpServer::getSendAsyncPendingBytes;
+        t["getPort"] = &trussc::TcpServer::getPort;
     }
 #endif
     lua->new_usertype<trussc::Cursor>("Cursor",
@@ -104,47 +100,41 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         t["isFileOpen"] = &trussc::Logger::isFileOpen;
     }
     {
-        sol::usertype<trussc::PlayingSound> t = lua->new_usertype<trussc::PlayingSound>("PlayingSound");
-        t["buffer"] = &trussc::PlayingSound::buffer;
-        t["volume"] = &trussc::PlayingSound::volume;
-        t["pan"] = &trussc::PlayingSound::pan;
-        t["speed"] = &trussc::PlayingSound::speed;
-        t["loop"] = &trussc::PlayingSound::loop;
-        t["playing"] = &trussc::PlayingSound::playing;
-        t["paused"] = &trussc::PlayingSound::paused;
-        t["mixMode"] = &trussc::PlayingSound::mixMode;
-        t["positionF"] = &trussc::PlayingSound::positionF;
-        t["rateRatio"] = &trussc::PlayingSound::rateRatio;
+        sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream",
+            sol::constructors<trussc::SoundStream()>(),
+            sol::call_constructor, sol::constructors<trussc::SoundStream()>());
+        t["loadStream"] = sol::overload([](trussc::SoundStream& self, const fs::path & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const fs::path & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
+        t["getDuration"] = &trussc::SoundStream::getDuration;
+        t["getPath"] = &trussc::SoundStream::getPath;
+        t["getMaxPolyphony"] = &trussc::SoundStream::getMaxPolyphony;
+    }
+    lua->new_usertype<trussc::BlendMode>("BlendMode",
+        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
+        "Alpha", sol::var(trussc::BlendMode::Alpha),
+        "Add", sol::var(trussc::BlendMode::Add),
+        "Multiply", sol::var(trussc::BlendMode::Multiply),
+        "Screen", sol::var(trussc::BlendMode::Screen),
+        "Subtract", sol::var(trussc::BlendMode::Subtract),
+        "Disabled", sol::var(trussc::BlendMode::Disabled));
+    {
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener",
+            sol::constructors<trussc::EventListener()>(),
+            sol::call_constructor, sol::constructors<trussc::EventListener()>());
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
+    }
+    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
+        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
+        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
+        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
+    {
+        sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
+        t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
+        t["data"] = &trussc::TcpServerReceiveEventArgs::data;
     }
     {
-        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
-        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
-        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
-        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
-        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
-        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
-        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
-    }
-    {
-        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream",
-            sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>(),
-            sol::call_constructor, sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>());
-    }
-    {
-        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
-        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
-        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
-        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
-        t["endGroup"] = &trussc::Reflector::endGroup;
-    }
-    {
-        sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
-        t["members"] = &trussc::JsonWriteReflector::members;
-        t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
-    }
-    {
-        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
-        t["text"] = &trussc::ClipboardPastedEventArgs::text;
+        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
+        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
     }
 }
 #ifndef _MSC_VER

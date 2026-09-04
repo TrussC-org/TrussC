@@ -739,6 +739,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](float x, float y, float z) { return trussc::setCameraPosition(x, y, z); }
     ));
     lua->set_function("getCameraPosition", []() -> decltype(auto) { return trussc::getCameraPosition(); });
+    lua->set_function("sendErrorName", [](trussc::SendError e) { return trussc::sendErrorName(e); });
     lua->set_function("listNetworkInterfaces", []() { return trussc::listNetworkInterfaces(); });
     lua->set_function("printNetworkInterfaces", []() { return trussc::printNetworkInterfaces(); });
     lua->set_function("getLocalIp", []() { return trussc::getLocalIp(); });

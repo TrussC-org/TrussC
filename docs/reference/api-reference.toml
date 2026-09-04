@@ -8455,6 +8455,90 @@ description.en = "Received data"
 description.ja = "受信データ"
 description.ko = "수신 데이터"
 
+["SendError"]
+category = "network"
+keywords = ["send", "error", "async", "queue full", "disconnected"]
+description.en = "Why a send could not be queued, or how a queued one finished: None, ClientNotFound, Disconnected, QueueFull, NotRunning."
+description.ja = "送信をキューに入れられなかった理由、またはキュー済み送信の結末：None, ClientNotFound, Disconnected, QueueFull, NotRunning。"
+description.ko = "전송을 큐에 넣지 못한 이유 또는 큐에 든 전송의 결과: None, ClientNotFound, Disconnected, QueueFull, NotRunning."
+related = ["SendResult", "sendErrorName", "TcpSendCompleteEventArgs", "TcpServer::sendAsync"]
+value_desc.None.en = "Success: queued, or the whole payload reached the kernel"
+value_desc.ClientNotFound.en = "No client is registered under that id"
+value_desc.Disconnected.en = "The connection went away before the payload was written"
+value_desc.QueueFull.en = "The send queue is already at its high-water mark"
+value_desc.NotRunning.en = "The server is not running"
+
+["SendResult"]
+category = "network"
+keywords = ["send", "async", "result", "queued", "id"]
+description.en = "Result of sendAsync(). Truthy when the payload was queued; carries the id that onSendComplete reports back."
+description.ja = "sendAsync() の結果。キューに入れば真となり、onSendComplete が返してくる id を保持"
+description.ko = "sendAsync()의 결과. 큐에 들어가면 참이며, onSendComplete가 되돌려주는 id를 보유"
+related = ["SendError", "TcpServer::sendAsync", "TcpSendCompleteEventArgs"]
+details.en = """
+Same shape as `LoadResult`: `explicit operator bool()` makes
+`if (server.sendAsync(id, data, n))` read naturally, and `error` says why when
+it is falsy. The `id` is what ties the call to its completion — it is non-zero
+only when the payload was actually queued.
+"""
+
+["SendResult::error"]
+description.en = "Why the send was not queued; SendError::None on success"
+description.ja = "キューに入らなかった理由。成功時は SendError::None"
+description.ko = "큐에 들어가지 못한 이유. 성공 시 SendError::None"
+
+["SendResult::id"]
+description.en = "Identifies this send in onSendComplete; 0 when nothing was queued"
+description.ja = "この送信を onSendComplete で識別する ID。キューに入らなかった場合は 0"
+description.ko = "이 전송을 onSendComplete에서 식별하는 ID. 큐에 들어가지 않았으면 0"
+
+["SendResult::ok"]
+description.en = "true if the payload was queued (error == SendError::None)"
+description.ja = "ペイロードがキューに入っていれば true（error == SendError::None）"
+description.ko = "페이로드가 큐에 들어갔으면 true (error == SendError::None)"
+
+["sendErrorName"]
+category = "network"
+keywords = ["send", "error", "name", "label", "log"]
+description.en = "Short label for a SendError value (\"QueueFull\", ...). For log messages"
+description.ja = "SendError 値の短いラベル（\"QueueFull\" など）。ログ用"
+description.ko = "SendError 값의 짧은 레이블(\"QueueFull\" 등). 로그용"
+related = ["SendError", "SendResult"]
+
+["TcpSendCompleteEventArgs"]
+category = "network"
+keywords = ["send", "async", "complete", "callback", "event"]
+description.en = "A queued send finished. Fires exactly once for every id sendAsync() handed out"
+description.ja = "キュー済みの送信が完了した通知。sendAsync() が返した id ごとにちょうど1回発火"
+description.ko = "큐에 든 전송이 완료됨. sendAsync()가 반환한 id마다 정확히 한 번 발생"
+related = ["TcpServer::onSendComplete", "TcpServer::sendAsync", "SendError"]
+details.en = """
+Every non-zero `SendResult::id` completes exactly once, including sends still on
+the queue when the client is disconnected or the server stops — those report
+`SendError::Disconnected`. It fires on that client's writer thread, so a
+listener touching app state wants `Deliver::Main`.
+"""
+
+["TcpSendCompleteEventArgs::clientId"]
+description.en = "Which client the send was for (-1 when the sender has no clients)"
+description.ja = "どのクライアント宛ての送信か（クライアントを持たない送信側では -1）"
+description.ko = "어느 클라이언트로의 전송인지 (클라이언트가 없는 송신 측에서는 -1)"
+
+["TcpSendCompleteEventArgs::sendId"]
+description.en = "Matches the SendResult::id that queued this payload"
+description.ja = "このペイロードをキューに入れた SendResult::id と一致"
+description.ko = "이 페이로드를 큐에 넣은 SendResult::id와 일치"
+
+["TcpSendCompleteEventArgs::error"]
+description.en = "SendError::None when the whole payload reached the kernel"
+description.ja = "ペイロード全体がカーネルに渡っていれば SendError::None"
+description.ko = "페이로드 전체가 커널에 전달되었으면 SendError::None"
+
+["TcpSendCompleteEventArgs::bytesSent"]
+description.en = "How much of the payload got through"
+description.ja = "実際に送れたバイト数"
+description.ko = "실제로 전송된 바이트 수"
+
 ["TcpServer"]
 keywords = ["tcp listener", "server socket", "accept", "host", "network server"]
 of = ["ofxTCPServer"]
@@ -8467,9 +8551,18 @@ platform_note.en = "TCP server (socket/bind/listen/accept on a background accept
 platform_note.ja = "TCP サーバ (socket/bind/listen/accept をバックグラウンド accept スレッドで)。ネイティブ5プラットフォームで実装。wasm では実質利用不可: ブラウザは着信を listen()/accept() できず、accept スレッドに必要な std::thread も web 既定ビルドに無い。api-definition.yaml には未記載。"
 
 ["TcpServer::broadcast"]
-description.en = "Broadcast data to all clients"
-description.ja = "全クライアントへブロードキャスト"
-description.ko = "모든 클라이언트로 브로드캐스트"
+description.en = "Broadcast data to all clients and wait for every one of them (blocking)"
+description.ja = "全クライアントへブロードキャストし、全員分の完了を待つ（ブロッキング）"
+description.ko = "모든 클라이언트로 브로드캐스트하고 전원의 완료를 대기 (블로킹)"
+details = "Queues the payload for every client first and then waits, so a slow peer no longer delays the clients behind it — but the call still returns only once all of them have it. Use broadcastAsync() to return immediately instead, and setSendTimeout() to bound the wait on unreliable peers."
+
+["TcpServer::broadcastAsync"]
+description.en = "Queue data for every client and return at once; returns how many accepted it"
+description.ja = "全クライアントへキュー投入して即座に返る。受け付けたクライアント数を返す"
+description.ko = "모든 클라이언트에 큐로 넣고 즉시 반환. 받아들인 클라이언트 수를 반환"
+keywords = ["broadcast", "async", "non-blocking", "queue"]
+related = ["TcpServer::sendAsync", "TcpServer::broadcast", "TcpServer::onSendComplete"]
+details = "The payload is buffered once and shared by every client's queue, not copied per peer, so broadcasting a frame to twenty clients costs one copy. Clients whose queue is already at its high-water mark are skipped, which is why the return value can be less than getClientCount(). Each client that did accept it reports through onSendComplete."
 
 ["TcpServer::disconnectAllClients"]
 description.en = "Disconnect all clients"
@@ -8501,6 +8594,20 @@ description.en = "The listening port"
 description.ja = "待ち受けポート"
 description.ko = "수신 대기 포트"
 
+["TcpServer::getSendAsyncBufferSize"]
+description.en = "The current high-water mark for one client's send queue, in bytes"
+description.ja = "クライアント1つあたりの送信キューの高水位マーク（バイト）"
+description.ko = "클라이언트 하나당 송신 큐의 high-water mark (바이트)"
+related = ["TcpServer::setSendAsyncBufferSize"]
+
+["TcpServer::getSendAsyncPendingBytes"]
+description.en = "How much a client has queued and not yet completed, in bytes (0 for an unknown client)"
+description.ja = "そのクライアントがキューに抱えていて未完了のバイト数（未知のクライアントなら0）"
+description.ko = "해당 클라이언트가 큐에 쌓아둔 미완료 바이트 수 (알 수 없는 클라이언트면 0)"
+keywords = ["backpressure", "queue", "pending", "async"]
+related = ["TcpServer::sendAsync", "TcpServer::setSendAsyncBufferSize"]
+details = "The measure of back-pressure: it rises when a peer stops keeping up and falls as the queue drains. Compare it against getSendAsyncBufferSize() to see how close that client is to refusing further sendAsync() calls."
+
 ["TcpServer::isRunning"]
 description.en = "Whether the server is running"
 description.ja = "サーバが動作中か"
@@ -8526,10 +8633,42 @@ description.en = "Fired when data is received from a client"
 description.ja = "クライアントからのデータ受信時に発火"
 description.ko = "클라이언트로부터 데이터 수신 시 발생"
 
+["TcpServer::onSendComplete"]
+description.en = "Fired when a queued send finishes, successfully or not"
+description.ja = "キュー済みの送信が完了した時に発火（成功・失敗どちらも）"
+description.ko = "큐에 든 전송이 완료되면 발생 (성공/실패 모두)"
+keywords = ["async", "send", "complete", "event"]
+related = ["TcpServer::sendAsync", "TcpSendCompleteEventArgs"]
+details = "Fires exactly once for every id sendAsync() returned, including payloads still on the queue when the client is disconnected or the server stops. It runs on that client's writer thread, so listen with Deliver::Main when the listener touches app state."
+
 ["TcpServer::send"]
-description.en = "Send data to a specific client"
-description.ja = "指定クライアントへ送信"
-description.ko = "특정 클라이언트로 전송"
+description.en = "Send data to a specific client (blocking)"
+description.ja = "指定クライアントへ送信（ブロッキング）"
+description.ko = "특정 클라이언트로 전송 (블로킹)"
+details = "Returns once the payload has been handed to the kernel. Internally it is sendAsync() plus a wait on that one id, so sync and async sends to the same client stay in order and share one timeout; the payload is lent to the queue rather than copied. A peer that stops reading blocks this call alone, not other clients or the accept loop. Use setSendTimeout() to bound the wait, or sendAsync() not to wait at all."
+
+["TcpServer::sendAsync"]
+description.en = "Queue data for a client and return at once, without waiting for it to be written"
+description.ja = "クライアント宛てのデータをキューに入れて即座に返る（書き込み完了を待たない）"
+description.ko = "클라이언트로 보낼 데이터를 큐에 넣고 즉시 반환 (기록 완료를 기다리지 않음)"
+keywords = ["async", "non-blocking", "queue", "backpressure", "draw loop"]
+related = ["TcpServer::onSendComplete", "SendResult", "TcpServer::setSendAsyncBufferSize", "TcpServer::broadcastAsync"]
+details = "What send() cannot do from a draw loop: a peer that has stopped reading makes send() wait, and the frame waits with it. sendAsync() copies (or, with the vector&& overload, takes) the payload and hands it to that client's queue, where a writer thread drains it. A falsy SendResult means nothing was queued and error says why — QueueFull is back-pressure, not a broken connection, and the client stays connected. Everything that IS queued reports through onSendComplete exactly once."
+
+["TcpServer::setSendTimeout"]
+description.en = "Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)"
+description.ja = "送信が無通信のまま何秒まで待つかを設定（0 = 無制限に待つ）"
+description.ko = "전송이 진척 없이 몇 초까지 대기할지 설정 (0 = 무제한 대기)"
+keywords = ["timeout", "blocking", "send"]
+details = "The timeout measures silence, not the duration of the send: it restarts every time bytes are accepted, so a peer that keeps draining never trips it however large the payload or slow the link. What it catches is a peer that has stopped reading. Defaults to 60 seconds — long enough that no healthy peer reaches it, short enough that a dead one cannot hold a send open forever; pass 0 to wait indefinitely instead. Applies to every send that starts after the call, on every client. A timeout that fires mid-payload leaves the stream truncated, so the client is disconnected rather than left open for the next send() to splice a fresh message onto a partial one."
+
+["TcpServer::setSendAsyncBufferSize"]
+description.en = "Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB"
+description.ja = "クライアント1つあたりの送信キューの高水位マークを設定（バイト、0 = 無制限）。既定は16MB"
+description.ko = "클라이언트 하나당 송신 큐의 high-water mark를 바이트로 설정 (0 = 무제한). 기본값 16MB"
+keywords = ["backpressure", "queue", "limit", "async", "high-water mark"]
+related = ["TcpServer::sendAsync", "TcpServer::getSendAsyncPendingBytes"]
+details = "A mark, not a cap: sendAsync() is refused with QueueFull only when the queue ALREADY holds this much, so a single message of any size still goes through on an empty queue and there is no separate \"message too large\" case — the queue overshoots the mark by at most one message. A full queue does not disconnect anyone; only the idle timeout does. send() waits for room instead of failing, which is why QueueFull is something only sendAsync() can return. The 16 MB default is chosen so a frame streamer learns about back-pressure after a frame or two rather than after a large buffer of latency has piled up; raising it only delays that news."
 
 ["TcpServer::setReceiveBufferSize"]
 description.en = "Set the receive buffer size"
