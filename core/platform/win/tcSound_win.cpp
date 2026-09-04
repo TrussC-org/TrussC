@@ -148,7 +148,8 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
     HRESULT hr = MFCreateSourceReaderFromURL(wpath.c_str(), NULL, &pReader);
 
     if (FAILED(hr)) {
-        printf("SoundBuffer: loadAac failed to open %s (0x%08X)\n", path.c_str(), hr);
+        printf("SoundBuffer: loadAac failed to open %s (0x%08X)\n",
+               internal::pathToUtf8(path).c_str(), hr);
         char hrBuf[16];
         snprintf(hrBuf, sizeof(hrBuf), "0x%08X", (unsigned)hr);
         return LoadResult::fail(LoadError::DecodeFailed,
@@ -161,9 +162,10 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
 
     if (result) {
         printf("SoundBuffer: loaded AAC %s (%d ch, %d Hz, %zu samples)\n",
-               path.c_str(), (int)channels, (int)sampleRate, (size_t)numSamples);
+               internal::pathToUtf8(path).c_str(), (int)channels, (int)sampleRate,
+               (size_t)numSamples);
     } else {
-        printf("SoundBuffer: failed to decode AAC %s\n", path.c_str());
+        printf("SoundBuffer: failed to decode AAC %s\n", internal::pathToUtf8(path).c_str());
     }
 
     return result ? LoadResult::success()
