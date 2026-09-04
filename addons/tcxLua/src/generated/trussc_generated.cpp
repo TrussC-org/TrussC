@@ -775,8 +775,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getRootNode", []() { return trussc::getRootNode(); });
     lua->set_function("createWindow", sol::overload(
         []() { return trussc::createWindow(); },
-        [](const trussc::WindowSettings & settings) { return trussc::createWindow(settings); },
-        [](const trussc::WindowSettings & a0) { return trussc::createWindow(a0); }
+        [](const trussc::WindowSettings & settings) { return trussc::createWindow(settings); }
     ));
     lua->set_function("nodeToJson", [](trussc::Node & node, int maxDepth) { return trussc::nodeToJson(node, maxDepth); });
     lua->set_function("lerp", [](float a, float b, float t) { return std::lerp(a, b, t); });
