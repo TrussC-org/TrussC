@@ -463,11 +463,31 @@ int main() {
                 if (seen != 1) onceEach = false;
             }
             check("each queued id completed exactly once", onceEach);
-            bool disconnectedNotSuccess = true;
-            for (const auto& c : *completed)
-                if (c.error != SendError::Disconnected) disconnectedNotSuccess = false;
-            check("a send the teardown never wrote completes as Disconnected",
-                  disconnectedNotSuccess);
+
+            // What the teardown could not write has to come back as
+            // Disconnected. How MUCH it could not write is a premise, not the
+            // invariant, and it is not the same everywhere: Winsock accepts a
+            // multi-megabyte payload whole — it locks the caller's pages and
+            // sends in the background rather than copying into a socket buffer
+            // the peer's window bounds — so on Windows the first of these is
+            // written in full and completes as a success, while Linux cannot
+            // place any of it. (Measured on Windows 11 / MSVC: payload 0
+            // accepted by a single send() in 0.3 ms, payloads 1-3 blocked.)
+            //
+            // So pair each completion with its own bytesSent instead of
+            // assuming the platform: whatever got out whole must report
+            // success, whatever did not must report Disconnected.
+            bool consistent = true;
+            size_t unwritten = 0;
+            for (const auto& c : *completed) {
+                const bool whole = c.bytesSent == big.size();
+                if (whole && c.error != SendError::None) consistent = false;
+                if (!whole && c.error != SendError::Disconnected) consistent = false;
+                if (c.error == SendError::Disconnected) ++unwritten;
+            }
+            printf("  (%zu of %zu queued sends were still unwritten at teardown)\n",
+                   unwritten, queuedIds.size());
+            check("completion error matches how much of the payload got out", consistent);
         }
 
         TC_CLOSE(deaf);
