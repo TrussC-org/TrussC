@@ -375,7 +375,7 @@ std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> sou
             // behavior.
             printf("SoundStream: maxPolyphony=%d reached for %s — "
                    "stop a previous instance or raise maxPolyphony\n",
-                   s->getMaxPolyphony(), s->getPath().c_str());
+                   s->getMaxPolyphony(), internal::pathToUtf8(s->getPath()).c_str());
             return nullptr;
         }
 
@@ -387,7 +387,7 @@ std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> sou
         ma_result r = maDecoderInitPathA(s->path_, &cfg, &stream->decoder);
         if (r != MA_SUCCESS) {
             printf("SoundStream: per-voice decoder init failed for %s (result=%d)\n",
-                   s->getPath().c_str(), (int)r);
+                   internal::pathToUtf8(s->getPath()).c_str(), (int)r);
             return nullptr;
         }
         stream->decoderInitialized = true;
@@ -826,7 +826,7 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
             ma_result r = maDecoderInitPathA(src->path_, &cfg, &newStream->decoder);
             if (r != MA_SUCCESS) {
                 printf("AudioEngine: stream voice migration failed for %s (result=%d) — stopping voice\n",
-                       src->getPath().c_str(), (int)r);
+                       internal::pathToUtf8(src->getPath()).c_str(), (int)r);
                 slot->playing = false;
                 // Drop the stale stream so its old decoder is destroyed.
                 slot->stream.reset();

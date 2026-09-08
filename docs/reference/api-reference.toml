@@ -2595,6 +2595,13 @@ description.en = "Draw a fullscreen quad with this shader applied"
 description.ja = "この Shader を適用してフルスクリーンクアッドを描画"
 description.ko = "이 Shader를 적용하여 전체 화면 쿼드를 그리기"
 
+["FullscreenShader::setParams"]
+keywords = ["uniform", "params", "postprocess", "shader"]
+description.en = "Set the uniform block for the fullscreen pass; call before draw (C++ only)"
+description.ja = "フルスクリーンパスの uniform ブロックを設定する。draw の前に呼ぶ（C++のみ）"
+description.ko = "전체 화면 패스의 uniform 블록을 설정. draw 전에 호출 (C++ 전용)"
+related = ["FullscreenShader", "FullscreenShader::draw", "Shader::setUniform"]
+
 ["GraphicsBackend"]
 keywords = ["renderer", "metal", "opengl", "d3d11", "webgpu", "gpu api"]
 description.en = "Runtime sokol_gfx backend query. Values are meaningful only after sg_setup() has completed (i.e. after the first setup() call)."
@@ -5329,6 +5336,15 @@ description.ja = "スクリーン座標からツリー全体をヒットテス�
 description.ko = "스크린 좌표에서 트리 전체를 히트 테스트 (각 노드 자신의 카메라 컨텍스트 사용) (C++ 전용)"
 related = ["Node::findHitNode"]
 
+["Node::addMod"]
+category = "scene_graph"
+keywords = ["behaviors", "components", "attach", "mod"]
+description.en = "Attach a mod of type T to this node, forwarding any arguments to its constructor; returns the mod for chaining (C++ only)"
+description.ja = "型 T の Mod をこのノードにアタッチする。引数はコンストラクタにそのまま渡され、Mod のポインタを返すので続けて設定できる（C++のみ）"
+description.ko = "타입 T의 모드를 이 노드에 부착하고 인자를 생성자로 전달. 모드 포인터를 반환하므로 체이닝 가능 (C++ 전용)"
+related = ["Node::getMod", "Node::hasMod", "Node::removeMod", "Mod"]
+details = "setup() runs after the mod is attached and its owner is set, so a mod may call getMod() / addChild() on its owner from inside setup(). Main thread only."
+
 ["Node::getActive"]
 category = "scene_graph"
 keywords = ["deprecated", "alias", "state"]
@@ -5452,6 +5468,14 @@ description.en = "Get the short (unqualified) type names of the attached mods (C
 description.ja = "アタッチされたModの短い（非修飾）型名を取得（C++のみ）"
 description.ko = "부착된 모드의 짧은(비수식) 타입 이름을 얻음 (C++ 전용)"
 related = ["Node::getMods", "Node::getModByTypeName"]
+
+["Node::getMod"]
+category = "scene_graph"
+keywords = ["behaviors", "components", "find", "mod"]
+description.en = "Get the attached mod of type T, or nullptr if this node has none (C++ only)"
+description.ja = "型 T のアタッチ済み Mod を取得する。無ければ nullptr（C++のみ）"
+description.ko = "타입 T의 부착된 모드를 얻음. 없으면 nullptr (C++ 전용)"
+related = ["Node::addMod", "Node::hasMod", "Node::getModByTypeName"]
 
 ["Node::getMods"]
 category = "scene_graph"
@@ -5629,6 +5653,14 @@ description.ko = "글로벌 좌표를 이 노드의 로컬 공간으로 변환 (
 details = "The out-parameter overload; new code should use `globalToLocal(Vec3)`. Scheduled for removal in v1.0.0."
 related = ["Node::localToGlobal", "Node::getGlobalMatrixInverse"]
 
+["Node::hasMod"]
+category = "scene_graph"
+keywords = ["behaviors", "components", "query", "mod"]
+description.en = "Whether a mod of type T is attached to this node (C++ only)"
+description.ja = "型 T の Mod がこのノードにアタッチされているか（C++のみ）"
+description.ko = "타입 T의 모드가 이 노드에 부착되어 있는지 여부 (C++ 전용)"
+related = ["Node::addMod", "Node::getMod", "Node::removeMod"]
+
 ["Node::hasName"]
 category = "scene_graph"
 keywords = ["named", "identity"]
@@ -5730,6 +5762,15 @@ description.en = "Callback fired when a child is removed (overridable) (C++ only
 description.ja = "子が削除されたときに呼ばれるコールバック（オーバーライド可能）（C++のみ）"
 description.ko = "자식이 제거될 때 호출되는 콜백 (오버라이드 가능) (C++ 전용)"
 related = ["Node::removeChild", "Node::onChildAdded"]
+
+["Node::removeMod"]
+category = "scene_graph"
+keywords = ["behaviors", "components", "detach", "mod"]
+description.en = "Remove the attached mod of type T, calling its onDestroy() before it is freed (C++ only)"
+description.ja = "型 T の Mod を取り外す。解放前に onDestroy() が呼ばれる（C++のみ）"
+description.ko = "타입 T의 모드를 제거. 해제 전에 onDestroy()가 호출됨 (C++ 전용)"
+related = ["Node::addMod", "Node::hasMod", "Mod"]
+details = "Removing a mod during a dispatch or update defers the destruction until iteration finishes, so the call in flight cannot dangle. A mod can remove itself without naming its type via Mod::removeSelf()."
 
 ["Node::removeAllChildren"]
 category = "scene_graph"
