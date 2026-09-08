@@ -112,13 +112,16 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["minute"] = &trussc::BuildInfo::minute;
         t["second"] = &trussc::BuildInfo::second;
     }
-    lua->new_usertype<trussc::LoadError>("LoadError",
-        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
-        "None", sol::var(trussc::LoadError::None),
-        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
-        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
-        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
-        "Unknown", sol::var(trussc::LoadError::Unknown));
+    {
+        sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
+        t["key"] = &trussc::KeyEventArgs::key;
+        t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
+        t["shift"] = &trussc::KeyEventArgs::shift;
+        t["ctrl"] = &trussc::KeyEventArgs::ctrl;
+        t["alt"] = &trussc::KeyEventArgs::alt;
+        t["super"] = &trussc::KeyEventArgs::super;
+        t["consumed"] = &trussc::KeyEventArgs::consumed;
+    }
     lua->new_usertype<trussc::TextureWrap>("TextureWrap",
         sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
         "Repeat", sol::var(trussc::TextureWrap::Repeat),

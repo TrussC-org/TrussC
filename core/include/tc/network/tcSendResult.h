@@ -25,6 +25,7 @@ enum class SendError {
     None = 0,        // queued (SendResult) / the whole payload reached the kernel (completion)
     ClientNotFound,  // no client is registered under that id
     Disconnected,    // the connection went away before the payload was written
+    Timeout,         // the peer stopped reading; the connection is still up
     QueueFull,       // the send queue is already at its high-water mark
     NotRunning,      // the server (or client) is not connected
 };
@@ -53,6 +54,7 @@ inline const char* sendErrorName(SendError e) {
         case SendError::None:           return "None";
         case SendError::ClientNotFound: return "ClientNotFound";
         case SendError::Disconnected:   return "Disconnected";
+        case SendError::Timeout:        return "Timeout";
         case SendError::QueueFull:      return "QueueFull";
         case SendError::NotRunning:     return "NotRunning";
     }

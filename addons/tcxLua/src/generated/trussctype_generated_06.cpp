@@ -131,11 +131,10 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["getHost"] = &trussc::TcpServerClient::getHost;
         t["getPort"] = &trussc::TcpServerClient::getPort;
     }
-    {
-        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
-        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
-        t["setFps"] = &trussc::HeadlessSettings::setFps;
-    }
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop
