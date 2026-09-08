@@ -14,7 +14,10 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '../../..');
-const EXAMPLES_DIR = path.join(ROOT, 'trussc/examples');
+// Repo-relative: independent of what the framework checkout is named. Deriving it
+// from ROOT hardcoded a lowercase 'trussc/', which only resolves on a
+// case-insensitive filesystem (macOS) and threw ENOENT on Linux.
+const EXAMPLES_DIR = path.join(__dirname, '../../examples');
 const API_JS = path.join(ROOT, 'trussc.org/generated/trussc-api.js');
 
 const CALLBACK_CATEGORIES = new Set(['Lifecycle', 'Events']);
