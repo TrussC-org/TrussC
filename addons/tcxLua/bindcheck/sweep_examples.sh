@@ -11,7 +11,9 @@ EXAMPLES=(exampleBasic exampleEasyCam exampleFileReload exampleJsonXml exampleLi
           exampleLuaJITCheck exampleMath examplePath exampleSimple exampleTween exampleTypes)
 
 printf "%-22s %-8s %-10s %s\n" EXAMPLE BUILD RUNTIME NOTES
-for d in $EXAMPLES; do
+# "${EXAMPLES[@]}", not $EXAMPLES: zsh expands a bare array name to every
+# element, bash only to the first — which silently swept one example.
+for d in "${EXAMPLES[@]}"; do
   cd "$ADDON/$d" || { printf "%-22s %s\n" "$d" "NODIR"; continue; }
   trusscli update >"$LOG/$d.update.log" 2>&1
   if ! trusscli build >"$LOG/$d.build.log" 2>&1; then
@@ -19,6 +21,7 @@ for d in $EXAMPLES; do
     continue
   fi
   BIN=$(ls -d "$ADDON/$d/bin/"*.app/Contents/MacOS/* 2>/dev/null | head -1)
+  [[ -n "$BIN" ]] || { [[ -x "$ADDON/$d/bin/$d" ]] && BIN="$ADDON/$d/bin/$d"; }
   [[ -z "$BIN" ]] && { printf "%-22s %-8s %-10s\n" "$d" "OK" "NOBIN"; continue; }
   cd "$ADDON/$d/bin"
   "$BIN" >"$LOG/$d.out.log" 2>"$LOG/$d.err.log" &
