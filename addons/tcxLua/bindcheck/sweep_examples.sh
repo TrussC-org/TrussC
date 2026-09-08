@@ -1,10 +1,10 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # Build every tcxLua example and run each for ~5s to catch build breaks,
 # runtime crashes (uncaught sol::error -> SIGABRT), and Lua errors.
 # RUNTIME=ALIVE means the app was still looping healthily when we killed it.
 set -u
-HERE=${0:A:h}
-ADDON=${HERE:h}            # .../addons/tcxLua
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ADDON="$(dirname "$HERE")"            # .../addons/tcxLua
 LOG="$HERE/sweep_logs"
 mkdir -p "$LOG"
 EXAMPLES=(exampleBasic exampleEasyCam exampleFileReload exampleJsonXml exampleLiveUpdate \
