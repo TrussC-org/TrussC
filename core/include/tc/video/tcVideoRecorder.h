@@ -242,16 +242,29 @@ public:
         return appendRGBA(rgba, timeSec);
     }
 
-#if TC_ASYNC_SCREEN_CAPTURE
     // Zero-intermediate path (macOS): lock the encoder's next pixel buffer for
     // direct readback (returns its base address + row stride), then submit it at
     // a PTS. The screen recorder reads the GPU capture straight into this buffer
     // instead of into a temporary Pixels/RGBA buffer the encoder then re-copies.
+    //
+    // Declared on every platform and annotated instead of being compiled out,
+    // which is how the rest of the platform-specific API is written (see
+    // TC_PLATFORMS in tcPlatform.h). The reference and the Lua bindings are
+    // derived from the AST, so a declaration behind #if is simply absent from
+    // whichever platform generates them — these two were the only symbols in the
+    // public surface that disappeared, which made the generated reference depend
+    // on the machine it was generated on. Elsewhere the call fails instead.
     TC_PLATFORMS("macos") unsigned char* lockFrame(int& strideOut) {
+#if TC_ASYNC_SCREEN_CAPTURE
         if (!open_) return nullptr;
         return lockFramePlatform(strideOut);
+#else
+        (void)strideOut;
+        return nullptr;
+#endif
     }
     TC_PLATFORMS("macos") bool submitFrame(double timeSec) {
+#if TC_ASYNC_SCREEN_CAPTURE
         if (!open_) return false;
         if (!submitFramePlatform(timeSec)) {
             logError("VideoWriter") << "encoder rejected frame " << frameCount_;
@@ -259,8 +272,11 @@ public:
         }
         ++frameCount_;
         return true;
-    }
+#else
+        (void)timeSec;
+        return false;
 #endif
+    }
 
     // Append interleaved float samples to the audio track at an explicit PTS
     // (seconds, same timeline as addFrameAt). Only meaningful when the writer

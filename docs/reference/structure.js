@@ -31,7 +31,19 @@ function dumpAst() {
     const extra = (process.env.TC_COVERAGE_CXXFLAGS || '').split(/\s+/).filter(Boolean);
     const tmp = path.join(require('os').tmpdir(), 'tc-structure-probe.cpp');
     fs.writeFileSync(tmp, '#include <TrussC.h>\n');
-    const args = ['-std=c++20', '-DNDEBUG', '-I', INCLUDE, '-Xclang', '-ast-dump=json',
+    // Mirror the backend macro the real build defines for this platform
+    // (core/CMakeLists.txt). Headers branch on it — the desktop-Linux guard for
+    // the createWindow() unsupported-platform stub is
+    // `!(defined(__linux__) && defined(SOKOL_GLCORE))` — so dumping without it
+    // makes Linux look like a platform without secondary windows and pulls the
+    // stub into the AST alongside the real declaration. That produced a
+    // duplicate createWindow overload whose only trace was an extra `[+1]` in
+    // the generated index. Override with TC_BACKEND_DEFINE.
+    const backend = process.env.TC_BACKEND_DEFINE || (
+        process.platform === 'darwin' ? 'SOKOL_METAL'
+        : process.platform === 'win32' ? 'SOKOL_D3D11'
+        : 'SOKOL_GLCORE');
+    const args = ['-std=c++20', '-DNDEBUG', `-D${backend}`, '-I', INCLUDE, '-Xclang', '-ast-dump=json',
         '-Xclang', '-ast-dump-filter=trussc', '-fsyntax-only', ...extra, tmp];
     process.stderr.write('structure: running clang AST dump (~280 MB, a few seconds)…\n');
     try {
