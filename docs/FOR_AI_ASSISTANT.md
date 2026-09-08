@@ -2516,7 +2516,7 @@ void Environment::release()  // Release GPU resources
 
 ```cpp
 void Event::clear()  // Remove all listeners
-EventListener Event::listen(Callback callback, int priority = App) [+2] ⚠️deprecated  // Register a listener callback and return an EventListener token; lower priority runs first, and Deliver::Main runs the callback on the main thread
+EventListener Event::listen(Callback callback, int priority = App) [+5] ⚠️deprecated  // Register a listener callback and return an EventListener token; lower priority runs first, and Deliver::Main runs the callback on the main thread
 size_t Event::listenerCount() const  // Number of currently registered listeners
 void Event::notify(T & arg)  // Fire the event, calling all listeners in priority order (no argument for Event<void>); stops early if a listener marks an input arg consumed
 ```
@@ -3129,6 +3129,7 @@ const std::string & NetworkInterface::getNetmask() const  // Subnet mask
 
 ```cpp
 void Node::addChild(Ptr child, bool keepGlobalPosition = false)  // Add a child node (C++ only)
+T * Node::addMod(Args &&... args)  // Attach a mod of type T to this node, forwarding any arguments to its constructor; returns the mod for chaining (C++ only)
 void Node::beginDraw()  // Hook called before draw() and drawChildren(); override for clipping etc.
 uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Run callback once after delay seconds. Fired from the update loop (frame-quantized). Returns a timer id.
 uint64_t Node::callAfterAsync(double delay, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callAfter, but fired by a precise background scheduler thread (no frame jitter). The callback runs OFF the main thread: guard shared state with a mutex, never draw from it, and don't cancel while holding that mutex. Native only (uses a real thread). Returns a timer id.
@@ -3149,7 +3150,6 @@ Node * Node::findByInstanceId(uint64_t id)  // Find a node in this subtree (self
 HitResult Node::findHitNode(const Ray & globalRay)  // Hit test the whole tree with a global ray, returning the frontmost node (C++ only)
 HitResult Node::findHitNodeFromScreen(float screenX, float screenY)  // Hit test the whole tree from a screen point, using each node's own camera context (C++ only)
 HitResult Node::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Recursive hit test in reverse draw order; override for clipping-aware picking.
-T * Node::addMod(Args &&... args)  // Attach a mod of type T to this node, forwarding any arguments to its constructor; returns the mod for chaining (C++ only)
 bool Node::getActive() const ⚠️deprecated  // Deprecated alias for isActive()
 std::shared_ptr<const CameraContext> Node::getCameraContext() const  // Return the camera context this node was last drawn under (null if never drawn).
 size_t Node::getChildCount() const  // Get the number of child nodes (C++ only)
@@ -3163,8 +3163,8 @@ Mat4 Node::getGlobalMatrixInverse() const  // Get the inverse of the global tran
 Vec3 Node::getGlobalPos() const  // Get the node's origin in global (world) space (C++ only)
 uint64_t Node::getInstanceId() const  // Per-process unique id, assigned once at construction and stable across reparenting (C++ only)
 const Mat4 & Node::getLocalMatrix() const  // Get this node's local transform matrix (cached) (C++ only)
-Mod * Node::getModByTypeName(const std::string & name) const  // Find an attached mod by its short type name, e.g. "LayoutMod" (null if not attached) (C++ only) 
 T * Node::getMod()  // Get the attached mod of type T, or nullptr if this node has none (C++ only)
+Mod * Node::getModByTypeName(const std::string & name) const  // Find an attached mod by its short type name, e.g. "LayoutMod" (null if not attached) (C++ only) 
 std::vector<Mod *> Node::getMods() const  // Get all attached mods (pointers stay owned by this node) (C++ only)
 std::vector<std::string> Node::getModTypeNames() const  // Get the short (unqualified) type names of the attached mods (C++ only)
 float Node::getMouseX() const  // Get mouse X in this node's local coordinate system (C++ only)
@@ -3215,9 +3215,9 @@ bool Node::onMouseRelease(const MouseEventArgs & e) [+1]  // Handle a mouse rele
 bool Node::onMouseScroll(const ScrollEventArgs & e) [+1]  // Handle a scroll event (event localized to this node); return true to consume.
 void Node::onVisibleChanged(bool visible)  // Callback invoked when the node's visible state changes.
 void Node::processTimers()  // Process due timers (callAfter / callEvery), invoked within the update pass.
-void Node::removeMod()  // Remove the attached mod of type T, calling its onDestroy() before it is freed (C++ only)
 void Node::removeAllChildren()  // Remove all child nodes (C++ only)
 void Node::removeChild(Ptr child)  // Remove a child node (C++ only)
+void Node::removeMod()  // Remove the attached mod of type T, calling its onDestroy() before it is freed (C++ only)
 std::pair<const CameraContext *, Ray> Node::resolvePickRay(internal::PickRaySource & pick, const CameraContext * inheritedCtx, const Ray & globalRay) const  // Resolve this node's effective camera context and the global ray to hit-test it with.
 void Node::setActive(bool active)  // Set the active state (inactive: update and draw are skipped) (C++ only)
 void Node::setCameraContext(std::shared_ptr<const CameraContext> ctx)  // Set the camera context for a manually-managed node (normally set automatically by drawTree).

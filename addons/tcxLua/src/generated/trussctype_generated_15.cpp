@@ -31,26 +31,27 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["setPaddingBottom"] = &trussc::LayoutMod::setPaddingBottom;
         t["updateLayout"] = &trussc::LayoutMod::updateLayout;
     }
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     {
-        sol::usertype<trussc::StrokeMesh> t = lua->new_usertype<trussc::StrokeMesh>("StrokeMesh",
-            sol::constructors<trussc::StrokeMesh(), trussc::StrokeMesh(const trussc::Path &)>(),
-            sol::call_constructor, sol::constructors<trussc::StrokeMesh(), trussc::StrokeMesh(const trussc::Path &)>());
-        t["setWidth"] = &trussc::StrokeMesh::setWidth;
-        t["setColor"] = &trussc::StrokeMesh::setColor;
-        t["setCapType"] = &trussc::StrokeMesh::setCapType;
-        t["setJoinType"] = &trussc::StrokeMesh::setJoinType;
-        t["setMiterLimit"] = &trussc::StrokeMesh::setMiterLimit;
-        t["addVertex"] = sol::overload([](trussc::StrokeMesh& self, float x, float y) -> decltype(auto) { return self.addVertex(x, y); }, [](trussc::StrokeMesh& self, float x, float y, float z) -> decltype(auto) { return self.addVertex(x, y, z); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p) -> decltype(auto) { return self.addVertex(p); }, [](trussc::StrokeMesh& self, const trussc::Vec2 & p) -> decltype(auto) { return self.addVertex(p); });
-        t["addVertexWithWidth"] = sol::overload([](trussc::StrokeMesh& self, float x, float y, float width) -> decltype(auto) { return self.addVertexWithWidth(x, y, width); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p, float width) -> decltype(auto) { return self.addVertexWithWidth(p, width); });
-        t["setWidths"] = &trussc::StrokeMesh::setWidths;
-        t["setShape"] = &trussc::StrokeMesh::setShape;
-        t["setClosed"] = &trussc::StrokeMesh::setClosed;
-        t["clear"] = &trussc::StrokeMesh::clear;
-        t["update"] = &trussc::StrokeMesh::update;
-        t["draw"] = &trussc::StrokeMesh::draw;
-        t["getMesh"] = &trussc::StrokeMesh::getMesh;
-        t["getPolylines"] = &trussc::StrokeMesh::getPolylines;
+        sol::usertype<trussc::VideoWriter> t = lua->new_usertype<trussc::VideoWriter>("VideoWriter",
+            sol::constructors<trussc::VideoWriter()>(),
+            sol::call_constructor, sol::constructors<trussc::VideoWriter()>());
+        t["open"] = sol::overload([](trussc::VideoWriter& self, const fs::path & path, int width, int height) { return self.open(path, width, height); }, [](trussc::VideoWriter& self, const fs::path & path, int width, int height, const trussc::VideoRecordSettings & settings) { return self.open(path, width, height, settings); });
+        t["close"] = &trussc::VideoWriter::close;
+        t["isOpen"] = &trussc::VideoWriter::isOpen;
+        t["getFrameCount"] = &trussc::VideoWriter::getFrameCount;
+        t["getWidth"] = &trussc::VideoWriter::getWidth;
+        t["getHeight"] = &trussc::VideoWriter::getHeight;
+        t["getFps"] = &trussc::VideoWriter::getFps;
+        t["getPath"] = &trussc::VideoWriter::getPath;
+        t["getSettings"] = &trussc::VideoWriter::getSettings;
+        t["addFrame"] = sol::overload([](trussc::VideoWriter& self, const trussc::Fbo & fbo) { return self.addFrame(fbo); }, [](trussc::VideoWriter& self, const trussc::Pixels & pixels) { return self.addFrame(pixels); });
+        t["addFrameAt"] = sol::overload([](trussc::VideoWriter& self, const trussc::Fbo & fbo, double timeSec) { return self.addFrameAt(fbo, timeSec); }, [](trussc::VideoWriter& self, const trussc::Pixels & pixels, double timeSec) { return self.addFrameAt(pixels, timeSec); });
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE))
+        t["submitFrame"] = &trussc::VideoWriter::submitFrame;
+#endif
     }
+#endif
     {
         sol::usertype<trussc::CoreEvents> t = lua->new_usertype<trussc::CoreEvents>("CoreEvents");
         t["setup"] = &trussc::CoreEvents::setup;
@@ -100,36 +101,39 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["syncLegacy"] = &trussc::MouseEventArgs::syncLegacy;
     }
     {
-        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
-        t["view"] = &trussc::CameraContext::view;
-        t["projection"] = &trussc::CameraContext::projection;
-        t["viewW"] = &trussc::CameraContext::viewW;
-        t["viewH"] = &trussc::CameraContext::viewH;
-        t["pickable"] = &trussc::CameraContext::pickable;
-        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
-        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
+        sol::usertype<trussc::ShaderVertex> t = lua->new_usertype<trussc::ShaderVertex>("ShaderVertex");
+        t["x"] = &trussc::ShaderVertex::x;
+        t["y"] = &trussc::ShaderVertex::y;
+        t["z"] = &trussc::ShaderVertex::z;
+        t["u"] = &trussc::ShaderVertex::u;
+        t["v"] = &trussc::ShaderVertex::v;
+        t["r"] = &trussc::ShaderVertex::r;
+        t["g"] = &trussc::ShaderVertex::g;
+        t["b"] = &trussc::ShaderVertex::b;
+        t["a"] = &trussc::ShaderVertex::a;
     }
-    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
-        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
-        "Immutable", sol::var(trussc::TextureUsage::Immutable),
-        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
-        "Stream", sol::var(trussc::TextureUsage::Stream),
-        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
     {
-        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
-        t["id"] = &trussc::TouchPoint::id;
-        t["x"] = &trussc::TouchPoint::x;
-        t["y"] = &trussc::TouchPoint::y;
-        t["pressure"] = &trussc::TouchPoint::pressure;
-        t["changed"] = &trussc::TouchPoint::changed;
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener",
+            sol::constructors<trussc::EventListener()>(),
+            sol::call_constructor, sol::constructors<trussc::EventListener()>());
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
     }
-    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
-        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
-        "Nearest", sol::var(trussc::TextureFilter::Nearest),
-        "Linear", sol::var(trussc::TextureFilter::Linear));
+    lua->new_usertype<trussc::LightType>("LightType",
+        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
+        "Directional", sol::var(trussc::LightType::Directional),
+        "Point", sol::var(trussc::LightType::Point),
+        "Spot", sol::var(trussc::LightType::Spot));
     {
-        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
-        t["count"] = &trussc::EnumLabelSpan::count;
+        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
+        t["mode"] = &trussc::CurveStyle::mode;
+        t["tolerance"] = &trussc::CurveStyle::tolerance;
+        t["resolution"] = &trussc::CurveStyle::resolution;
+    }
+    {
+        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
+        t["pixels"] = &trussc::GrabberFrame::pixels;
+        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
     }
 }
 #ifndef _MSC_VER

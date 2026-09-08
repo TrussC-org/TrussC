@@ -33,27 +33,37 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["xy"] = &trussc::Vec4::xy;
         t["xyz"] = &trussc::Vec4::xyz;
     }
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
     {
-        sol::usertype<trussc::ColorLinear> t = lua->new_usertype<trussc::ColorLinear>("ColorLinear",
-            sol::constructors<trussc::ColorLinear(), trussc::ColorLinear(float, float, float), trussc::ColorLinear(float, float, float, float), trussc::ColorLinear(float), trussc::ColorLinear(float, float)>(),
-            sol::call_constructor, sol::constructors<trussc::ColorLinear(), trussc::ColorLinear(float, float, float), trussc::ColorLinear(float, float, float, float), trussc::ColorLinear(float), trussc::ColorLinear(float, float)>(),
-            sol::meta_function::addition, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a + b; },
-            sol::meta_function::subtraction, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a - b; },
-            sol::meta_function::multiplication, sol::overload([](const trussc::ColorLinear& a, float b){ return a * b; }, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a * b; }),
-            sol::meta_function::division, [](const trussc::ColorLinear& a, float b){ return a / b; },
-            sol::meta_function::equal_to, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a == b; });
-        t["r"] = &trussc::ColorLinear::r;
-        t["g"] = &trussc::ColorLinear::g;
-        t["b"] = &trussc::ColorLinear::b;
-        t["a"] = &trussc::ColorLinear::a;
-        t["toSRGB"] = &trussc::ColorLinear::toSRGB;
-        t["toHSB"] = &trussc::ColorLinear::toHSB;
-        t["toOKLab"] = &trussc::ColorLinear::toOKLab;
-        t["toOKLCH"] = &trussc::ColorLinear::toOKLCH;
-        t["clamped"] = &trussc::ColorLinear::clamped;
-        t["clampedLDR"] = &trussc::ColorLinear::clampedLDR;
-        t["lerp"] = &trussc::ColorLinear::lerp;
+        sol::usertype<trussc::Window> t = lua->new_usertype<trussc::Window>("Window",
+            sol::constructors<trussc::Window()>(),
+            sol::call_constructor, sol::constructors<trussc::Window()>());
+        t["setApp"] = &trussc::Window::setApp;
+        t["getApp"] = &trussc::Window::getApp;
+        t["events"] = &trussc::Window::events;
+        t["close"] = &trussc::Window::close;
+        t["isOpen"] = &trussc::Window::isOpen;
+        t["setTitle"] = &trussc::Window::setTitle;
+        t["getTitle"] = &trussc::Window::getTitle;
+        t["getWidth"] = &trussc::Window::getWidth;
+        t["getHeight"] = &trussc::Window::getHeight;
+        t["setSize"] = &trussc::Window::setSize;
+        t["setFullscreen"] = &trussc::Window::setFullscreen;
+        t["isFullscreen"] = &trussc::Window::isFullscreen;
+        t["toggleFullscreen"] = &trussc::Window::toggleFullscreen;
+        t["setClearColor"] = &trussc::Window::setClearColor;
+        t["setFps"] = &trussc::Window::setFps;
+        t["getFps"] = &trussc::Window::getFps;
+        t["dispatchMousePressToTree"] = &trussc::Window::dispatchMousePressToTree;
+        t["dispatchMouseReleaseToTree"] = &trussc::Window::dispatchMouseReleaseToTree;
+        t["dispatchMouseScrollToTree"] = &trussc::Window::dispatchMouseScrollToTree;
+        t["dispatchKeyPressToTree"] = &trussc::Window::dispatchKeyPressToTree;
+        t["dispatchKeyReleaseToTree"] = &trussc::Window::dispatchKeyReleaseToTree;
+        t["tickTree"] = &trussc::Window::tickTree;
+        t["drawTreeNow"] = &trussc::Window::drawTreeNow;
+        t["syncRootSize"] = &trussc::Window::syncRootSize;
     }
+#endif
     {
         sol::usertype<trussc::Rect> t = lua->new_usertype<trussc::Rect>("Rect",
             sol::constructors<trussc::Rect(), trussc::Rect(float, float, float, float), trussc::Rect(const trussc::Vec2 &, float, float), trussc::Rect(const trussc::Vec3 &, float, float), trussc::Rect(float, float, float, float, float)>(),
@@ -99,21 +109,27 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         "Screen", sol::var(trussc::BlendMode::Screen),
         "Subtract", sol::var(trussc::BlendMode::Subtract),
         "Disabled", sol::var(trussc::BlendMode::Disabled));
-    lua->new_usertype<trussc::WindowType>("WindowType",
-        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
-        "Rect", sol::var(trussc::WindowType::Rect),
-        "Hanning", sol::var(trussc::WindowType::Hanning),
-        "Hamming", sol::var(trussc::WindowType::Hamming),
-        "Blackman", sol::var(trussc::WindowType::Blackman));
-    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
-        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
-        "Butt", sol::var(trussc::StrokeCap::Butt),
-        "Round", sol::var(trussc::StrokeCap::Round),
-        "Square", sol::var(trussc::StrokeCap::Square));
     {
-        sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
-        t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
-        t["data"] = &trussc::TcpServerReceiveEventArgs::data;
+        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
+        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
+        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
+    }
+    {
+        sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
+        t["data"] = &trussc::UdpReceiveEventArgs::data;
+        t["remoteHost"] = &trussc::UdpReceiveEventArgs::remoteHost;
+        t["remotePort"] = &trussc::UdpReceiveEventArgs::remotePort;
+    }
+    {
+        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
+        t["format"] = &trussc::AudioRecordSettings::format;
+        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
+    }
+    {
+        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
+        t["name"] = &trussc::AudioDeviceInfo::name;
+        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
     }
 }
 #ifndef _MSC_VER

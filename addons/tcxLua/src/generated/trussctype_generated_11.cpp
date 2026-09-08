@@ -91,29 +91,36 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["getPath"] = &trussc::AudioRecorder::getPath;
     }
     {
-        sol::usertype<trussc::Tween<float>> t = lua->new_usertype<trussc::Tween<float>>("Tween_float",
-            sol::constructors<trussc::Tween<float>(), trussc::Tween<float>(float, float, float), trussc::Tween<float>(float, float, float, trussc::EaseType), trussc::Tween<float>(float, float, float, trussc::EaseType, trussc::EaseMode)>(),
-            sol::call_constructor, sol::constructors<trussc::Tween<float>(), trussc::Tween<float>(float, float, float), trussc::Tween<float>(float, float, float, trussc::EaseType), trussc::Tween<float>(float, float, float, trussc::EaseType, trussc::EaseMode)>());
+        sol::usertype<trussc::RectNodeButton> t = lua->new_usertype<trussc::RectNodeButton>("RectNodeButton",
+            sol::constructors<trussc::RectNodeButton()>(),
+            sol::call_constructor, sol::constructors<trussc::RectNodeButton()>());
+        t["normalColor"] = &trussc::RectNodeButton::normalColor;
+        t["hoverColor"] = &trussc::RectNodeButton::hoverColor;
+        t["pressColor"] = &trussc::RectNodeButton::pressColor;
+        t["label"] = &trussc::RectNodeButton::label;
+        t["isPressed"] = &trussc::RectNodeButton::isPressed;
+        t["draw"] = &trussc::RectNodeButton::draw;
     }
     {
-        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
-        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
-        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
-        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
-        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
-        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
-        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
+        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
+        t["view"] = &trussc::CameraContext::view;
+        t["projection"] = &trussc::CameraContext::projection;
+        t["viewW"] = &trussc::CameraContext::viewW;
+        t["viewH"] = &trussc::CameraContext::viewH;
+        t["pickable"] = &trussc::CameraContext::pickable;
+        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
+        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
     }
-    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
-        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
-        "H264", sol::var(trussc::VideoCodec::H264),
-        "HEVC", sol::var(trussc::VideoCodec::HEVC),
-        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
-        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
-    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
-        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
-        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
-        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
+    {
+        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream",
+            sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>(),
+            sol::call_constructor, sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>());
+    }
+    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
+        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
+        "Miter", sol::var(trussc::StrokeJoin::Miter),
+        "Round", sol::var(trussc::StrokeJoin::Round),
+        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
     {
         sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
         t["files"] = &trussc::DragDropEventArgs::files;
@@ -121,8 +128,8 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["y"] = &trussc::DragDropEventArgs::y;
     }
     {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
+        t["count"] = &trussc::EnumLabelSpan::count;
     }
 }
 #ifndef _MSC_VER

@@ -48,30 +48,21 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         "Error", sol::var(trussc::LogLevel::Error),
         "Fatal", sol::var(trussc::LogLevel::Fatal),
         "Silent", sol::var(trussc::LogLevel::Silent));
-    {
-        sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
-        t["frameCount"] = &trussc::AudioInBuffer::frameCount;
-        t["channels"] = &trussc::AudioInBuffer::channels;
-        t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
-        t["framePosition"] = &trussc::AudioInBuffer::framePosition;
-    }
-    {
-        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
-        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
-        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
-        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
-        t["endGroup"] = &trussc::Reflector::endGroup;
-    }
-    {
-        sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
-        t["members"] = &trussc::JsonWriteReflector::members;
-        t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
-    }
-    {
-        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
-        t["pixels"] = &trussc::GrabberFrame::pixels;
-        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
-    }
+    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
+        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
+        "H264", sol::var(trussc::VideoCodec::H264),
+        "HEVC", sol::var(trussc::VideoCodec::HEVC),
+        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
+        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
+    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
+        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
+        "Butt", sol::var(trussc::StrokeCap::Butt),
+        "Round", sol::var(trussc::StrokeCap::Round),
+        "Square", sol::var(trussc::StrokeCap::Square));
+    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
+        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
+        "Nearest", sol::var(trussc::TextureFilter::Nearest),
+        "Linear", sol::var(trussc::TextureFilter::Linear));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

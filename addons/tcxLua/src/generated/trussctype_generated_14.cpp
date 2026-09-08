@@ -36,37 +36,26 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["reflected"] = &trussc::Vec3::reflected;
         t["xy"] = &trussc::Vec3::xy;
     }
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
     {
-        sol::usertype<trussc::Window> t = lua->new_usertype<trussc::Window>("Window",
-            sol::constructors<trussc::Window()>(),
-            sol::call_constructor, sol::constructors<trussc::Window()>());
-        t["setApp"] = &trussc::Window::setApp;
-        t["getApp"] = &trussc::Window::getApp;
-        t["events"] = &trussc::Window::events;
-        t["close"] = &trussc::Window::close;
-        t["isOpen"] = &trussc::Window::isOpen;
-        t["setTitle"] = &trussc::Window::setTitle;
-        t["getTitle"] = &trussc::Window::getTitle;
-        t["getWidth"] = &trussc::Window::getWidth;
-        t["getHeight"] = &trussc::Window::getHeight;
-        t["setSize"] = &trussc::Window::setSize;
-        t["setFullscreen"] = &trussc::Window::setFullscreen;
-        t["isFullscreen"] = &trussc::Window::isFullscreen;
-        t["toggleFullscreen"] = &trussc::Window::toggleFullscreen;
-        t["setClearColor"] = &trussc::Window::setClearColor;
-        t["setFps"] = &trussc::Window::setFps;
-        t["getFps"] = &trussc::Window::getFps;
-        t["dispatchMousePressToTree"] = &trussc::Window::dispatchMousePressToTree;
-        t["dispatchMouseReleaseToTree"] = &trussc::Window::dispatchMouseReleaseToTree;
-        t["dispatchMouseScrollToTree"] = &trussc::Window::dispatchMouseScrollToTree;
-        t["dispatchKeyPressToTree"] = &trussc::Window::dispatchKeyPressToTree;
-        t["dispatchKeyReleaseToTree"] = &trussc::Window::dispatchKeyReleaseToTree;
-        t["tickTree"] = &trussc::Window::tickTree;
-        t["drawTreeNow"] = &trussc::Window::drawTreeNow;
-        t["syncRootSize"] = &trussc::Window::syncRootSize;
+        sol::usertype<trussc::StrokeMesh> t = lua->new_usertype<trussc::StrokeMesh>("StrokeMesh",
+            sol::constructors<trussc::StrokeMesh(), trussc::StrokeMesh(const trussc::Path &)>(),
+            sol::call_constructor, sol::constructors<trussc::StrokeMesh(), trussc::StrokeMesh(const trussc::Path &)>());
+        t["setWidth"] = &trussc::StrokeMesh::setWidth;
+        t["setColor"] = &trussc::StrokeMesh::setColor;
+        t["setCapType"] = &trussc::StrokeMesh::setCapType;
+        t["setJoinType"] = &trussc::StrokeMesh::setJoinType;
+        t["setMiterLimit"] = &trussc::StrokeMesh::setMiterLimit;
+        t["addVertex"] = sol::overload([](trussc::StrokeMesh& self, float x, float y) -> decltype(auto) { return self.addVertex(x, y); }, [](trussc::StrokeMesh& self, float x, float y, float z) -> decltype(auto) { return self.addVertex(x, y, z); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p) -> decltype(auto) { return self.addVertex(p); }, [](trussc::StrokeMesh& self, const trussc::Vec2 & p) -> decltype(auto) { return self.addVertex(p); });
+        t["addVertexWithWidth"] = sol::overload([](trussc::StrokeMesh& self, float x, float y, float width) -> decltype(auto) { return self.addVertexWithWidth(x, y, width); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p, float width) -> decltype(auto) { return self.addVertexWithWidth(p, width); });
+        t["setWidths"] = &trussc::StrokeMesh::setWidths;
+        t["setShape"] = &trussc::StrokeMesh::setShape;
+        t["setClosed"] = &trussc::StrokeMesh::setClosed;
+        t["clear"] = &trussc::StrokeMesh::clear;
+        t["update"] = &trussc::StrokeMesh::update;
+        t["draw"] = &trussc::StrokeMesh::draw;
+        t["getMesh"] = &trussc::StrokeMesh::getMesh;
+        t["getPolylines"] = &trussc::StrokeMesh::getPolylines;
     }
-#endif
     {
         sol::usertype<trussc::RectNode> t = lua->new_usertype<trussc::RectNode>("RectNode");
         t["mousePressed"] = &trussc::RectNode::mousePressed;
@@ -89,45 +78,46 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["hitTest"] = [](trussc::RectNode& self, trussc::Vec2 local) { return self.hitTest(local); };
         t["draw"] = &trussc::RectNode::draw;
     }
-    lua->new_usertype<trussc::TextureFormat>("TextureFormat",
-        sol::meta_function::equal_to, [](trussc::TextureFormat a, trussc::TextureFormat b){ return a == b; },
-        "RGBA8", sol::var(trussc::TextureFormat::RGBA8),
-        "RGBA16F", sol::var(trussc::TextureFormat::RGBA16F),
-        "RGBA32F", sol::var(trussc::TextureFormat::RGBA32F),
-        "R8", sol::var(trussc::TextureFormat::R8),
-        "R16F", sol::var(trussc::TextureFormat::R16F),
-        "R32F", sol::var(trussc::TextureFormat::R32F),
-        "RG8", sol::var(trussc::TextureFormat::RG8),
-        "RG16F", sol::var(trussc::TextureFormat::RG16F),
-        "RG32F", sol::var(trussc::TextureFormat::RG32F),
-        "BGRA8", sol::var(trussc::TextureFormat::BGRA8),
-        "RGBA16", sol::var(trussc::TextureFormat::RGBA16));
-    lua->new_usertype<trussc::Beep>("Beep",
-        sol::meta_function::equal_to, [](trussc::Beep a, trussc::Beep b){ return a == b; },
-        "ping", sol::var(trussc::Beep::ping),
-        "success", sol::var(trussc::Beep::success),
-        "complete", sol::var(trussc::Beep::complete),
-        "coin", sol::var(trussc::Beep::coin),
-        "error", sol::var(trussc::Beep::error),
-        "warning", sol::var(trussc::Beep::warning),
-        "cancel", sol::var(trussc::Beep::cancel),
-        "click", sol::var(trussc::Beep::click),
-        "typing", sol::var(trussc::Beep::typing),
-        "notify", sol::var(trussc::Beep::notify),
-        "sweep", sol::var(trussc::Beep::sweep));
-    lua->new_usertype<trussc::Direction>("Direction",
-        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
-        "Left", sol::var(trussc::Direction::Left),
-        "Center", sol::var(trussc::Direction::Center),
-        "Right", sol::var(trussc::Direction::Right),
-        "Top", sol::var(trussc::Direction::Top),
-        "Bottom", sol::var(trussc::Direction::Bottom),
-        "Baseline", sol::var(trussc::Direction::Baseline));
+    lua->new_usertype<trussc::EaseType>("EaseType",
+        sol::meta_function::equal_to, [](trussc::EaseType a, trussc::EaseType b){ return a == b; },
+        "Linear", sol::var(trussc::EaseType::Linear),
+        "Quad", sol::var(trussc::EaseType::Quad),
+        "Cubic", sol::var(trussc::EaseType::Cubic),
+        "Quart", sol::var(trussc::EaseType::Quart),
+        "Quint", sol::var(trussc::EaseType::Quint),
+        "Sine", sol::var(trussc::EaseType::Sine),
+        "Expo", sol::var(trussc::EaseType::Expo),
+        "Circ", sol::var(trussc::EaseType::Circ),
+        "Back", sol::var(trussc::EaseType::Back),
+        "Elastic", sol::var(trussc::EaseType::Elastic),
+        "Bounce", sol::var(trussc::EaseType::Bounce),
+        "Custom", sol::var(trussc::EaseType::Custom));
+    lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
+        sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
+        "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveMode::TriangleStrip),
+        "TriangleFan", sol::var(trussc::PrimitiveMode::TriangleFan),
+        "Lines", sol::var(trussc::PrimitiveMode::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveMode::LineStrip),
+        "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
+        "Points", sol::var(trussc::PrimitiveMode::Points));
     {
-        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
-        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
-        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
+        sol::usertype<trussc::GraphicsBackend> t = lua->new_usertype<trussc::GraphicsBackend>("GraphicsBackend");
+        t["isWebGPU"] = &trussc::GraphicsBackend::isWebGPU;
+        t["isWebGL2"] = &trussc::GraphicsBackend::isWebGL2;
+        t["isMetal"] = &trussc::GraphicsBackend::isMetal;
+        t["isD3D11"] = &trussc::GraphicsBackend::isD3D11;
+        t["isVulkan"] = &trussc::GraphicsBackend::isVulkan;
+        t["isOpenGL"] = &trussc::GraphicsBackend::isOpenGL;
+        t["name"] = &trussc::GraphicsBackend::name;
+    }
+    {
+        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
+        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
+        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
+        t["x"] = &trussc::TouchEventArgs::x;
+        t["y"] = &trussc::TouchEventArgs::y;
+        t["id"] = &trussc::TouchEventArgs::id;
     }
     {
         sol::usertype<trussc::FullscreenShader> t = lua->new_usertype<trussc::FullscreenShader>("FullscreenShader",
@@ -140,8 +130,9 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         "Color", sol::var(trussc::ImageType::Color),
         "Grayscale", sol::var(trussc::ImageType::Grayscale));
     {
-        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
-        t["text"] = &trussc::ClipboardPastedEventArgs::text;
+        sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
+        t["raw"] = &trussc::ConsoleEventArgs::raw;
+        t["args"] = &trussc::ConsoleEventArgs::args;
     }
 }
 #ifndef _MSC_VER
