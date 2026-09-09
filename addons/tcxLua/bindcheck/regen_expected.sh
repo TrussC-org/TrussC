@@ -23,10 +23,20 @@ OUT="$HERE/bin/data/expected.lua"
     | awk '{printf "    \"%s\",\n", $0}'
   echo "  },"
   echo "  usertypes = {"
-  { grep -vE '^[[:space:]]*//' "$H"; grep -vhE '^[[:space:]]*//' "${GT[@]}"; } \
-    | grep -oE 'new_usertype<.*>\([[:space:]]*"[^"]+"' \
-    | sed -E 's/.*\(\s*"([^"]+)"/\1/' | sort -u \
-    | awk '{printf "    \"%s\",\n", $0}'
+  {
+    # literal registrations: new_usertype<T>("Name", ...)
+    { grep -vE '^[[:space:]]*//' "$H"; grep -vhE '^[[:space:]]*//' "${GT[@]}"; } \
+      | grep -oE 'new_usertype<.*>\([[:space:]]*"[^"]+"' \
+      | sed -E 's/.*\(\s*"([^"]+)"/\1/'
+    # helper registrations: defineTween<Tween<float>, float>(lua, "TweenFloat").
+    # The helper calls new_usertype<T>(name) with a RUNTIME name, so the literal
+    # grep above can never see it -- and that gap is exactly why bindcheck stayed
+    # green while the generated Tween_float shadowed TweenFloat's methods. Pick
+    # the name up at the call site instead.
+    grep -vE '^[[:space:]]*//' "$H" \
+      | grep -oE 'define[A-Z][A-Za-z]*<.*>\([^;]*"[^"]+"' \
+      | sed -E 's/.*"([^"]+)"/\1/'
+  } | sort -u | awk '{printf "    \"%s\",\n", $0}'
   echo "  },"
   echo "}"
 } > "$OUT"
