@@ -252,6 +252,16 @@ const EXCLUDE = new Set([
     // setters). v2 migrated the 14 gen⊇hand types (Vec2/Color/Mesh/… now generated).
     'AudioEngine', 'EasyCam', 'Fbo', 'Image', 'Light', 'Mat3', 'Mat4', 'Material',
     'MicInput', 'Pixels', 'Shader', 'SoundBuffer', 'Texture',
+    // --- Tween<T>: owned by defineTween() in tcxLua.cpp, which registers the SAME
+    // C++ types under different Lua names (TweenFloat vs the generated Tween_float).
+    // sol2 keeps one metatable per C++ type, so emitting these too made the two
+    // registrations collide: the generated one carries constructors only, so the
+    // hand-written methods went missing and `tween:loop(-1)` crashed at runtime.
+    // Both sketch-doc emitters already skip Tween for the same reason
+    // (emit-sketch-api.js / emit-sketch-reference.js) and document the defineTween
+    // surface instead; this keeps the C++ generator consistent with them. The
+    // TC_LUA_BIND annotation on Tween<T> stays — those emitters read it.
+    'Tween',
 ]);
 
 // Heavy blocks (usertypes + enums) are collected individually so they can be
@@ -328,6 +338,73 @@ if (colorsData) {
         colorCount++;
     }
     tail += `    }\n`;
+}
+
+// ---- collision guard ------------------------------------------------------
+// sol2 keeps ONE metatable per C++ type, so registering a type here AND in the
+// hand-written glue breaks whichever registration loses -- silently, with no
+// error, and with BOTH Lua names still resolvable. A name-presence check like
+// bindcheck therefore stays green while the methods are gone: that is how the
+// generated `Tween_float` shadowed defineTween's `TweenFloat` and made
+// `tween:loop(-1)` crash at runtime. Fail generation instead -- a type the hand
+// glue owns belongs in EXCLUDE above.
+{
+    // tcxLua.cpp is compiled with `using namespace trussc`, so its registrations
+    // are unqualified; compare on a normalized form.
+    const norm = (t) => t.replace(/\btrussc::/g, '').replace(/\s+/g, '');
+    // read the balanced <...> starting at s[i] === '<', return [inner, nextIndex]
+    const readAngles = (s, i) => {
+        let depth = 0;
+        for (let j = i; j < s.length; j++) {
+            if (s[j] === '<') depth++;
+            else if (s[j] === '>') { if (--depth === 0) return [s.slice(i + 1, j), j + 1]; }
+        }
+        return null;
+    };
+    const splitTop = (s) => {
+        const out = []; let depth = 0, start = 0;
+        for (let j = 0; j < s.length; j++) {
+            const c = s[j];
+            if (c === '<' || c === '(') depth++;
+            else if (c === '>' || c === ')') depth--;
+            else if (c === ',' && depth === 0) { out.push(s.slice(start, j)); start = j + 1; }
+        }
+        out.push(s.slice(start));
+        return out;
+    };
+    // every `new_usertype<T>(` — T is the registered C++ type
+    const registered = (text) => {
+        const out = [];
+        for (const m of text.matchAll(/\bnew_usertype\s*</g)) {
+            const r = readAngles(text, m.index + m[0].length - 1);
+            if (r && /^\s*\(/.test(text.slice(r[1]))) out.push(norm(r[0]));
+        }
+        return out;
+    };
+    // every `defineTween<Tween<float>, float>(lua, "TweenFloat")`-style helper:
+    // the helper body calls new_usertype<T>(name) with a RUNTIME name, so the
+    // type is only visible at the call site, in the first template argument.
+    const viaHelper = (text) => {
+        const out = [];
+        for (const m of text.matchAll(/\bdefine[A-Z][A-Za-z0-9_]*\s*</g)) {
+            const r = readAngles(text, m.index + m[0].length - 1);
+            if (r && /^\s*\(/.test(text.slice(r[1]))) out.push(norm(splitTop(r[0])[0]));
+        }
+        return out;
+    };
+    const strip = (t) => t.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+    const hand = strip(fs.readFileSync(nodePath.join(__dirname, '../../src/tcxLua.cpp'), 'utf8'));
+    const owned = new Set([...registered(hand), ...viaHelper(hand)]);
+    const clash = [...new Set(registered(blocks.join('')))].filter((t) => owned.has(t));
+    if (clash.length) {
+        console.error('[luagen-types] ERROR: these C++ types are registered by BOTH the generator');
+        console.error('  and the hand-written glue in tcxLua.cpp -- sol2 allows only one metatable');
+        console.error('  per type, so one registration would be silently lost:');
+        for (const t of clash) console.error(`    ${t}`);
+        console.error('  Add the type to EXCLUDE in luagen-types.js (the hand glue owns it), or drop');
+        console.error('  the hand-written registration. Nothing was written.');
+        process.exit(1);
+    }
 }
 
 const PRELUDE = (needsColorsTag) => `// AUTO-GENERATED usertype bindings from reference-data.json by luagen-types.js

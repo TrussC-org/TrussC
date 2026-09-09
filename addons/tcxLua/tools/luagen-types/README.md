@@ -34,6 +34,17 @@ definition (NOT visible in reference-data signatures) — needs deeper handling 
 hand-written shim. `Json`/`Xml` keep custom Lua glue (hand-written). (PlayingSound
 recovered once fields are filtered by `type`.)
 
+`Tween` is excluded for a different reason: `defineTween` in `tcxLua.cpp` owns it and
+registers the same C++ types under different Lua names (`TweenFloat` vs a generated
+`Tween_float`). sol2 keeps **one metatable per C++ type**, so emitting both made one
+registration silently lose its methods — and since both Lua names still resolved,
+bindcheck's name-presence check stayed green while `tween:loop(-1)` crashed at
+runtime. `TC_LUA_BIND` on `Tween<T>` stays: the two sketch-doc emitters read it and
+document the `defineTween` surface. A **collision guard** now fails generation (exit
+1, nothing written) if any C++ type is registered by both this generator and
+`tcxLua.cpp` — including via a `defineXxx<T, …>(lua, "Name")` helper, whose runtime
+name is invisible to literal-string greps.
+
 ## Integration — IN PRODUCTION
 `setGeneratedTypeBindings()` (in `src/generated/trussctype_generated.cpp`) is called
 from `setBindings()` and registers **99 generated usertypes**, including the core
