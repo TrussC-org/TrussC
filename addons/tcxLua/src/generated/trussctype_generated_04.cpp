@@ -66,71 +66,72 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["getTotalCacheMemoryUsage"] = &trussc::Font::getTotalCacheMemoryUsage;
     }
     {
-        sol::usertype<trussc::ChipSoundNote> t = lua->new_usertype<trussc::ChipSoundNote>("ChipSoundNote",
-            sol::constructors<trussc::ChipSoundNote(), trussc::ChipSoundNote(trussc::Wave, float, float), trussc::ChipSoundNote(trussc::Wave, float, float, float)>(),
-            sol::call_constructor, sol::constructors<trussc::ChipSoundNote(), trussc::ChipSoundNote(trussc::Wave, float, float), trussc::ChipSoundNote(trussc::Wave, float, float, float)>());
-        t["wave"] = &trussc::ChipSoundNote::wave;
-        t["hz"] = &trussc::ChipSoundNote::hz;
-        t["volume"] = &trussc::ChipSoundNote::volume;
-        t["duration"] = &trussc::ChipSoundNote::duration;
-        t["attack"] = &trussc::ChipSoundNote::attack;
-        t["decay"] = &trussc::ChipSoundNote::decay;
-        t["sustain"] = &trussc::ChipSoundNote::sustain;
-        t["release"] = &trussc::ChipSoundNote::release;
-        t["build"] = &trussc::ChipSoundNote::build;
-        t["generateBuffer"] = &trussc::ChipSoundNote::generateBuffer;
-        t["getTotalDuration"] = &trussc::ChipSoundNote::getTotalDuration;
+        sol::usertype<trussc::HasTexture> t = lua->new_usertype<trussc::HasTexture>("HasTexture");
+        t["getTexture"] = [](trussc::HasTexture& self) -> decltype(auto) { return self.getTexture(); };
+        t["hasTexture"] = &trussc::HasTexture::hasTexture;
+        t["draw"] = sol::overload([](trussc::HasTexture& self, float x, float y) { return self.draw(x, y); }, [](trussc::HasTexture& self, float x, float y, float w, float h) { return self.draw(x, y, w, h); });
+        t["setMinFilter"] = &trussc::HasTexture::setMinFilter;
+        t["setMagFilter"] = &trussc::HasTexture::setMagFilter;
+        t["setFilter"] = &trussc::HasTexture::setFilter;
+        t["getMinFilter"] = &trussc::HasTexture::getMinFilter;
+        t["getMagFilter"] = &trussc::HasTexture::getMagFilter;
+        t["setWrapU"] = &trussc::HasTexture::setWrapU;
+        t["setWrapV"] = &trussc::HasTexture::setWrapV;
+        t["setWrap"] = &trussc::HasTexture::setWrap;
+        t["getWrapU"] = &trussc::HasTexture::getWrapU;
+        t["getWrapV"] = &trussc::HasTexture::getWrapV;
+        t["save"] = &trussc::HasTexture::save;
     }
     {
-        sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab",
-            sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>(),
-            sol::call_constructor, sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>());
-        t["L"] = &trussc::ColorOKLab::L;
-        t["a"] = &trussc::ColorOKLab::a;
-        t["b"] = &trussc::ColorOKLab::b;
-        t["alpha"] = &trussc::ColorOKLab::alpha;
-        t["toLinear"] = &trussc::ColorOKLab::toLinear;
-        t["toRGB"] = &trussc::ColorOKLab::toRGB;
-        t["toHSB"] = &trussc::ColorOKLab::toHSB;
-        t["toOKLCH"] = &trussc::ColorOKLab::toOKLCH;
-        t["lerp"] = &trussc::ColorOKLab::lerp;
+        sol::usertype<trussc::ChipSoundBundle> t = lua->new_usertype<trussc::ChipSoundBundle>("ChipSoundBundle");
+        t["entries"] = &trussc::ChipSoundBundle::entries;
+        t["volume"] = &trussc::ChipSoundBundle::volume;
+        t["add"] = sol::overload([](trussc::ChipSoundBundle& self, const trussc::ChipSoundNote & note, float time) -> decltype(auto) { return self.add(note, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time) -> decltype(auto) { return self.add(wave, hz, duration, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time, float vol) -> decltype(auto) { return self.add(wave, hz, duration, time, vol); });
+        t["clear"] = &trussc::ChipSoundBundle::clear;
+        t["getDuration"] = &trussc::ChipSoundBundle::getDuration;
+        t["build"] = &trussc::ChipSoundBundle::build;
     }
     {
-        sol::usertype<trussc::RectNodeButton> t = lua->new_usertype<trussc::RectNodeButton>("RectNodeButton",
-            sol::constructors<trussc::RectNodeButton()>(),
-            sol::call_constructor, sol::constructors<trussc::RectNodeButton()>());
-        t["normalColor"] = &trussc::RectNodeButton::normalColor;
-        t["hoverColor"] = &trussc::RectNodeButton::hoverColor;
-        t["pressColor"] = &trussc::RectNodeButton::pressColor;
-        t["label"] = &trussc::RectNodeButton::label;
-        t["isPressed"] = &trussc::RectNodeButton::isPressed;
-        t["draw"] = &trussc::RectNodeButton::draw;
+        sol::usertype<trussc::ScrollBar> t = lua->new_usertype<trussc::ScrollBar>("ScrollBar");
+        t["getBarColor"] = &trussc::ScrollBar::getBarColor;
+        t["setBarColor"] = &trussc::ScrollBar::setBarColor;
+        t["getBarWidth"] = &trussc::ScrollBar::getBarWidth;
+        t["setBarWidth"] = &trussc::ScrollBar::setBarWidth;
+        t["getMargin"] = &trussc::ScrollBar::getMargin;
+        t["setMargin"] = &trussc::ScrollBar::setMargin;
+        t["getOffset"] = &trussc::ScrollBar::getOffset;
+        t["updateFromContainer"] = &trussc::ScrollBar::updateFromContainer;
     }
-    lua->new_usertype<trussc::BlendMode>("BlendMode",
-        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
-        "Alpha", sol::var(trussc::BlendMode::Alpha),
-        "Add", sol::var(trussc::BlendMode::Add),
-        "Multiply", sol::var(trussc::BlendMode::Multiply),
-        "Screen", sol::var(trussc::BlendMode::Screen),
-        "Subtract", sol::var(trussc::BlendMode::Subtract),
-        "Disabled", sol::var(trussc::BlendMode::Disabled));
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
     {
-        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
-        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
-        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
-    }
-    {
-        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
-        t["filePath"] = &trussc::FileDialogResult::filePath;
-        t["fileName"] = &trussc::FileDialogResult::fileName;
-        t["success"] = &trussc::FileDialogResult::success;
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener",
+            sol::constructors<trussc::EventListener()>(),
+            sol::call_constructor, sol::constructors<trussc::EventListener()>());
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
     }
     {
-        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
-        t["mode"] = &trussc::CurveStyle::mode;
-        t["tolerance"] = &trussc::CurveStyle::tolerance;
-        t["resolution"] = &trussc::CurveStyle::resolution;
+        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
+        t["updateFps"] = &trussc::FpsSettings::updateFps;
+        t["drawFps"] = &trussc::FpsSettings::drawFps;
+        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
+        t["synced"] = &trussc::FpsSettings::synced;
+    }
+    lua->new_usertype<trussc::WritingMode>("WritingMode",
+        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
+        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
+        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
+    {
+        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
+        t["message"] = &trussc::TcpErrorEventArgs::message;
+        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
     }
 }
 #ifndef _MSC_VER

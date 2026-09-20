@@ -46,21 +46,22 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["getEaseMode"] = &trussc::TweenMod::getEaseMode;
     }
     {
-        sol::usertype<trussc::NetworkInterface> t = lua->new_usertype<trussc::NetworkInterface>("NetworkInterface");
-        t["name"] = &trussc::NetworkInterface::name;
-        t["address"] = &trussc::NetworkInterface::address;
-        t["netmask"] = &trussc::NetworkInterface::netmask;
-        t["mac"] = &trussc::NetworkInterface::mac;
-        t["isIPv4"] = &trussc::NetworkInterface::isIPv4;
-        t["isLoopback"] = &trussc::NetworkInterface::isLoopback;
-        t["isUp"] = &trussc::NetworkInterface::isUp;
-        t["getName"] = &trussc::NetworkInterface::getName;
-        t["getAddress"] = &trussc::NetworkInterface::getAddress;
-        t["getNetmask"] = &trussc::NetworkInterface::getNetmask;
-        t["getMac"] = &trussc::NetworkInterface::getMac;
-        t["getIsIPv4"] = &trussc::NetworkInterface::getIsIPv4;
-        t["getIsLoopback"] = &trussc::NetworkInterface::getIsLoopback;
-        t["getIsUp"] = &trussc::NetworkInterface::getIsUp;
+        sol::usertype<trussc::MouseDragEventArgs> t = lua->new_usertype<trussc::MouseDragEventArgs>("MouseDragEventArgs");
+        t["x"] = &trussc::MouseDragEventArgs::x;
+        t["y"] = &trussc::MouseDragEventArgs::y;
+        t["deltaX"] = &trussc::MouseDragEventArgs::deltaX;
+        t["deltaY"] = &trussc::MouseDragEventArgs::deltaY;
+        t["button"] = &trussc::MouseDragEventArgs::button;
+        t["shift"] = &trussc::MouseDragEventArgs::shift;
+        t["ctrl"] = &trussc::MouseDragEventArgs::ctrl;
+        t["alt"] = &trussc::MouseDragEventArgs::alt;
+        t["super"] = &trussc::MouseDragEventArgs::super;
+        t["pos"] = &trussc::MouseDragEventArgs::pos;
+        t["globalPos"] = &trussc::MouseDragEventArgs::globalPos;
+        t["delta"] = &trussc::MouseDragEventArgs::delta;
+        t["globalDelta"] = &trussc::MouseDragEventArgs::globalDelta;
+        t["consumed"] = &trussc::MouseDragEventArgs::consumed;
+        t["syncLegacy"] = &trussc::MouseDragEventArgs::syncLegacy;
     }
     {
         sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader",
@@ -77,37 +78,46 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["remaining"] = &trussc::FileReader::remaining;
     }
     {
-        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
-        t["view"] = &trussc::CameraContext::view;
-        t["projection"] = &trussc::CameraContext::projection;
-        t["viewW"] = &trussc::CameraContext::viewW;
-        t["viewH"] = &trussc::CameraContext::viewH;
-        t["pickable"] = &trussc::CameraContext::pickable;
-        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
-        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
+        sol::usertype<trussc::Font::PlacedGlyph> t = lua->new_usertype<trussc::Font::PlacedGlyph>("FontPlacedGlyph");
+        t["codepoint"] = &trussc::Font::PlacedGlyph::codepoint;
+        t["drawX"] = &trussc::Font::PlacedGlyph::drawX;
+        t["baselineY"] = &trussc::Font::PlacedGlyph::baselineY;
+        t["rotationCw"] = &trussc::Font::PlacedGlyph::rotationCw;
+        t["pivotX"] = &trussc::Font::PlacedGlyph::pivotX;
+        t["pivotY"] = &trussc::Font::PlacedGlyph::pivotY;
+        t["scaleX"] = &trussc::Font::PlacedGlyph::scaleX;
     }
-    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
-        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
-        "Immutable", sol::var(trussc::TextureUsage::Immutable),
-        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
-        "Stream", sol::var(trussc::TextureUsage::Stream),
-        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
+    lua->new_usertype<trussc::LoadError>("LoadError",
+        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
+        "None", sol::var(trussc::LoadError::None),
+        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
+        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
+        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
+        "Unknown", sol::var(trussc::LoadError::Unknown));
     {
-        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
-        t["updateFps"] = &trussc::FpsSettings::updateFps;
-        t["drawFps"] = &trussc::FpsSettings::drawFps;
-        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
-        t["synced"] = &trussc::FpsSettings::synced;
+        sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
+        t["frameCount"] = &trussc::AudioInBuffer::frameCount;
+        t["channels"] = &trussc::AudioInBuffer::channels;
+        t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
+        t["framePosition"] = &trussc::AudioInBuffer::framePosition;
     }
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
     {
-        sol::usertype<trussc::SendResult> t = lua->new_usertype<trussc::SendResult>("SendResult");
-        t["error"] = &trussc::SendResult::error;
-        t["id"] = &trussc::SendResult::id;
-        t["ok"] = &trussc::SendResult::ok;
+        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
+        t["latitude"] = &trussc::Location::latitude;
+        t["longitude"] = &trussc::Location::longitude;
+        t["altitude"] = &trussc::Location::altitude;
+        t["accuracy"] = &trussc::Location::accuracy;
+    }
+    {
+        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
+        t["format"] = &trussc::AudioRecordSettings::format;
+        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
+    }
+    {
+        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
+        t["hit"] = &trussc::Ray::Hit::hit;
+        t["t"] = &trussc::Ray::Hit::t;
+        t["point"] = &trussc::Ray::Hit::point;
     }
 }
 #ifndef _MSC_VER

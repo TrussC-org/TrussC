@@ -274,10 +274,26 @@ function guardedType(code, e) {
     const g = platformGuard(e.platforms);
     return g ? `#if ${g}\n${code}#endif\n` : code;
 }
+// Lua has no namespaces, so a nested type's parent qualifier is folded into the
+// name: Node::HitResult -> NodeHitResult, Ray::Hit -> RayHit, SoundSource::Kind
+// -> SoundSourceKind. Registering them is not cosmetic. An UNregistered type
+// reaches Lua as an opaque userdata with no metatable, so a bound method that
+// returns one hands back a value nothing can read -- `node:findHitNode(ray)` gave
+// Lua a HitResult whose .node/.distance/.localPoint were all inaccessible, and
+// the hand-written `soundSource:kind()` did the same with SoundSource::Kind.
+// These types have no declared constructors (they are results, not things Lua
+// builds), so they get a read-only surface, which is exactly what is wanted.
+const flatName = (e) => (e.owner ? e.owner.replace(/::/g, '') : '') + e.name;
+
 for (const id in data) {
     const e = data[id];
-    if (e.kind !== 'type' || e.owner || e.ns) continue;
-    if (EXCLUDE.has(e.name)) { report.push(`${e.name}: excluded (custom Lua glue, hand-written)`); continue; }
+    if (e.kind !== 'type' || e.ns) continue;
+    if (EXCLUDE.has(e.owner ? `${e.owner}::${e.name}` : e.name)) { report.push(`${id}: excluded (custom Lua glue, hand-written)`); continue; }
+    if (e.owner) {
+        try { blocks.push(guardedType(emitType(e, `${e.owner}::${e.name}`, flatName(e), null), e)); count++; }
+        catch (err) { report.push(`${id}: ${err.message}`); }
+        continue;
+    }
     if (e.tparams && e.tparams.length) {
         // templated type: instantiate per lua_bind entry, else report
         if (!e.lua_bind || !e.lua_bind.length) { report.push(`${e.name}: templated, no lua_bind (skipped)`); continue; }
@@ -297,20 +313,21 @@ for (const id in data) {
 // value) so semantics don't change: values are usertype instances, == works via
 // the metamethod, and C++ enum returns compare equal to the constants.
 // Enums are constants declared on every platform -> no platform guards.
-let enumCount = 0, nestedEnums = [];
+let enumCount = 0;
 for (const id in data) {
     const e = data[id];
     if (e.kind !== 'enum' || e.ns) continue;
-    if (e.owner) { nestedEnums.push(id); continue; }   // nested (SoundSource::Kind) — future
-    if (!e.members || !e.members.length) { report.push(`${e.name}: enum without members (skipped)`); continue; }
-    const Q = `trussc::${e.name}`;
-    let s2 = `    lua->new_usertype<${Q}>("${e.name}",\n`;
+    if (!e.members || !e.members.length) { report.push(`${id}: enum without members (skipped)`); continue; }
+    // nested enums are flattened the same way as nested types (SoundSource::Kind
+    // -> SoundSourceKind); an unregistered one returned by a bound method is just
+    // as unreadable from Lua as an unregistered struct.
+    const Q = `trussc::${e.owner ? e.owner + '::' : ''}${e.name}`;
+    let s2 = `    lua->new_usertype<${Q}>("${flatName(e)}",\n`;
     s2 += `        sol::meta_function::equal_to, [](${Q} a, ${Q} b){ return a == b; }`;
     for (const m of e.members) s2 += `,\n        "${m.name}", sol::var(${Q}::${m.name})`;
     s2 += `);\n`;
     blocks.push(s2); enumCount++;
 }
-if (nestedEnums.length) report.push(`nested enums (not yet emitted): ${nestedEnums.join(', ')}`);
 
 // ---- constants (kind:var) --------------------------------------------------
 // Top-level non-hidden constants (TAU, KEY_*, MOUSE_BUTTON_*, VSYNC, Direction
