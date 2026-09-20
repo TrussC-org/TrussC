@@ -430,10 +430,20 @@ function build(examplesMap) {
     const memberEntry = (sym) => {
         const refId = sym.id;
         const ym = YML_METHOD.get(refId);
+        // Each overload carries its OWN return type. They used to share one
+        // `return` (the first overload's) next to a list of bare param strings,
+        // which read fine only while overloads happened to agree -- 38 members
+        // do not. Ray::intersectSphere was advertised as returning Hit in both
+        // forms when the out-param one returns bool, and Node::globalToLocal as
+        // returning Vec3 in both when the four-arg form returns void.
+        const sigs = sym.signatures.length ? sym.signatures : [{ params: '' }];
         const out = {
             name: sym.name,
-            return: (sym.signatures[0] && sym.signatures[0].ret) ?? (ym && ym.return) ?? '',
-            signatures: (sym.signatures.length ? sym.signatures : [{ params: '' }]).map(s => stripU(s.params || '')),
+            signatures: sigs.map(s => ({
+                ret: s.ret ?? (ym && ym.return) ?? '',
+                params: stripU(s.params || ''),
+                ...(s.deprecated ? { deprecated: s.deprecated } : {}),
+            })),
             desc: descTrio(refId, ym).desc,
         };
         const dep = mergeDeprecated(refId, ym);

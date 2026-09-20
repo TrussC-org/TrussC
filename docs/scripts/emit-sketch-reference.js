@@ -319,10 +319,13 @@ for (const id in REF) {
                 const isStatic = !!m.static;
                 // instance -> colon syntax `recv:method`; static -> dot syntax `Type.method`
                 const dispName = isStatic ? `${typeName}.${m.name}` : `${recv}:${m.name}`;
+                // Per-overload return types, same shape emit-web.js uses: sharing
+                // the first overload's `return` across every param list misreports
+                // any method whose overloads disagree (Ray::intersectSphere is
+                // Hit / bool, Node::globalToLocal is Vec3 / void).
                 (isStatic ? statics : methods).push({
                     name: dispName,
-                    return: mapType(bindSigs[0].ret),
-                    signatures: bindSigs.map(s => luaParams(s.args)),
+                    signatures: bindSigs.map(s => ({ ret: mapType(s.ret), params: luaParams(s.args) })),
                     desc: en(m.description),
                     desc_ja: ja(m.description),
                     desc_ko: ko(m.description),
