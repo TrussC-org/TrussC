@@ -6813,6 +6813,28 @@ description.ja = "原点と正規化された方向を持つ Ray。統一され�
 description.ko = "원점과 정규화된 방향을 가진 Ray. 통합된 히트 테스트와 피킹에 사용"
 related = ["EasyCam", "screenToWorld"]
 
+["Ray::Hit"]
+keywords = ["raycast", "pick", "hittest", "intersect", "result"]
+description.en = "Result of a ray intersection (this is Ray::Hit). Returned by every intersect* overload; `hit` says whether anything was hit, and `t` / `point` are only meaningful when it did. Convertible to bool, so it reads directly as a condition: `if (auto h = ray.intersectSphere(r))`."
+description.ja = "レイの交差結果 (Ray::Hit)。すべての intersect* が返す。`hit` がヒットしたかを示し、`t` と `point` はヒットしたときのみ意味を持つ。bool に変換できるので `if (auto h = ray.intersectSphere(r))` とそのまま条件に書ける"
+description.ko = "레이 교차 결과 (Ray::Hit). 모든 intersect* 오버로드가 반환. `hit`이 교차 여부를 나타내고 `t`와 `point`는 교차했을 때만 의미가 있다. bool로 변환되므로 `if (auto h = ray.intersectSphere(r))`처럼 조건문에 바로 쓸 수 있다"
+related = ["Ray", "Node::HitResult"]
+
+["Ray::Hit::hit"]
+description.en = "True if the ray hit"
+description.ja = "レイがヒットしたかどうか"
+description.ko = "레이가 교차했는지 여부"
+
+["Ray::Hit::point"]
+description.en = "Intersection point — only meaningful when hit is true"
+description.ja = "交点 — hit が true のときのみ意味を持つ"
+description.ko = "교점 — hit이 true일 때만 의미가 있다"
+
+["Ray::Hit::t"]
+description.en = "Distance along the ray to the intersection — only meaningful when hit is true"
+description.ja = "交差点までのレイ上の距離 — hit が true のときのみ意味を持つ"
+description.ko = "교차점까지 레이 위의 거리 — hit이 true일 때만 의미가 있다"
+
 ["Ray::at"]
 description.en = "Get the point along the ray at distance t: origin + direction * t"
 description.ja = "距離 t におけるレイ上の点を取得: origin + direction * t"
@@ -6829,24 +6851,24 @@ description.ja = "2D スクリーン座標から Z 軸に平行な正射影レ�
 description.ko = "2D 화면 좌표로부터 Z축에 평행한 정사영 레이를 생성"
 
 ["Ray::intersectAABB"]
-description.en = "Intersect an axis-aligned bounding box; writes distance, returns whether it hit"
-description.ja = "軸並行バウンディングボックスと交差。距離を書き込み、ヒットしたかを返す"
-description.ko = "축 정렬 경계 상자와 교차. 거리를 기록하고 교차 여부를 반환"
+description.en = "Intersect an axis-aligned bounding box and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0."
+description.ja = "軸並行バウンディングボックスと交差し、距離と交点を持つ Ray::Hit を返す。出力引数版は deprecated で v1.0.0 で削除"
+description.ko = "축 정렬 경계 상자와 교차하여 거리와 교점을 담은 Ray::Hit를 반환. 출력 인자 버전은 deprecated이며 v1.0.0에서 제거"
 
 ["Ray::intersectPlane"]
-description.en = "Intersect an arbitrary plane; writes distance and hit point, returns whether it hit"
-description.ja = "任意の平面と交差。距離と交点を書き込み、ヒットしたかを返す"
-description.ko = "임의의 평면과 교차. 거리와 교점을 기록하고 교차 여부를 반환"
+description.en = "Intersect an arbitrary plane and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0."
+description.ja = "任意の平面と交差し、距離と交点を持つ Ray::Hit を返す。出力引数版は deprecated で v1.0.0 で削除"
+description.ko = "임의의 평면과 교차하여 거리와 교점을 담은 Ray::Hit를 반환. 출력 인자 버전은 deprecated이며 v1.0.0에서 제거"
 
 ["Ray::intersectSphere"]
-description.en = "Intersect a sphere centered at the origin; writes distance, returns whether it hit"
-description.ja = "原点中心の球と交差。距離を書き込み、ヒットしたかを返す"
-description.ko = "원점 중심의 구와 교차. 거리를 기록하고 교차 여부를 반환"
+description.en = "Intersect a sphere centered at the origin and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0."
+description.ja = "原点中心の球と交差し、距離と交点を持つ Ray::Hit を返す。出力引数版は deprecated で v1.0.0 で削除"
+description.ko = "원점 중심의 구와 교차하여 거리와 교점을 담은 Ray::Hit를 반환. 출력 인자 버전은 deprecated이며 v1.0.0에서 제거"
 
 ["Ray::intersectZPlane"]
-description.en = "Intersect the Z=0 plane; writes distance and hit point, returns whether it hit"
-description.ja = "Z=0 平面と交差。距離と交点を書き込み、ヒットしたかを返す"
-description.ko = "Z=0 평면과 교차. 거리와 교점을 기록하고 교차 여부를 반환"
+description.en = "Intersect the Z=0 plane and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0."
+description.ja = "Z=0 平面と交差し、距離と交点を持つ Ray::Hit を返す。出力引数版は deprecated で v1.0.0 で削除"
+description.ko = "Z=0 평면과 교차하여 거리와 교점을 담은 Ray::Hit를 반환. 출력 인자 버전은 deprecated이며 v1.0.0에서 제거"
 
 ["Ray::origin"]
 description.en = "Ray origin point"
