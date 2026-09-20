@@ -2516,7 +2516,7 @@ void Environment::release()  // Release GPU resources
 
 ```cpp
 void Event::clear()  // Remove all listeners
-EventListener Event::listen(Callback callback, int priority = App) [+5] ⚠️deprecated  // Register a listener callback and return an EventListener token; lower priority runs first, and Deliver::Main runs the callback on the main thread
+EventListener Event::listen(Callback callback, int priority = App) [+5]  // Register a listener callback and return an EventListener token; lower priority runs first, and Deliver::Main runs the callback on the main thread
 size_t Event::listenerCount() const  // Number of currently registered listeners
 void Event::notify(T & arg)  // Fire the event, calling all listeners in priority order (no argument for Event<void>); stops early if a listener marks an input arg consumed
 ```
@@ -2715,6 +2715,11 @@ void HasTexture::setWrapV(TextureWrap wrap)  // Set the texture wrap mode on the
 
 ```cpp
 HeadlessSettings & HeadlessSettings::setFps(float fps)  // Set the target update rate (chainable)
+```
+
+### Hit — Result of a ray intersection (this is Ray::Hit). Returned by every intersect* overload; `hit` says whether anything was hit, and `t` / `point` are only meaningful when it did. Convertible to bool, so it reads directly as a condition: `if (auto h = ray.intersectSphere(r))`.
+
+```cpp
 ```
 
 ### HitResult — Result of a node hit test (this is Node::HitResult). Returned by Node::findHitNode() / findHitNodeFromScreen(); call hit() to check whether anything was hit.
@@ -3186,7 +3191,7 @@ bool Node::getVisible() const ⚠️deprecated  // Deprecated alias for isVisibl
 float Node::getX() const  // Get local X position (C++ only)
 float Node::getY() const  // Get local Y position (C++ only)
 float Node::getZ() const  // Get local Z position (C++ only)
-Vec3 Node::globalToLocal(const Vec3 & global) const [+1] ⚠️deprecated  // Convert a global coordinate to this node's local space (C++ only)
+Vec3 Node::globalToLocal(const Vec3 & global) const [+1]  // Convert a global coordinate to this node's local space (C++ only)
 bool Node::hasMod() const  // Whether a mod of type T is attached to this node (C++ only)
 bool Node::hasName() const  // Whether an instance name has been set (C++ only)
 bool Node::hitTest(const Ray & localRay, float & outDistance) [+1]  // Geometric hit-test predicate in local space; override to make a node pickable.
@@ -3197,7 +3202,7 @@ bool Node::isDead() const  // Check if node is marked for destruction (C++ only)
 bool Node::isEventsEnabled() const  // Whether events are enabled (only such nodes are hit-test targets) (C++ only)
 bool Node::isMouseOver() const  // Whether the mouse is over this node (auto-updated each frame, O(1)) (C++ only)
 bool Node::isVisible() const  // Whether the node is visible (invisible: only draw is skipped) (C++ only)
-Vec3 Node::localToGlobal(const Vec3 & local) const [+1] ⚠️deprecated  // Convert a local coordinate to global space (C++ only)
+Vec3 Node::localToGlobal(const Vec3 & local) const [+1]  // Convert a local coordinate to global space (C++ only)
 void Node::moveToBack()  // Move this node to the beginning of its parent's child list — drawn first, beneath siblings. No-op if no parent or already first (C++ only)
 void Node::moveToFront()  // Move this node to the end of its parent's child list — drawn last, on top of siblings. No-op if no parent or already last (C++ only)
 void Node::onActiveChanged(bool active)  // Callback invoked when the node's active state changes.
@@ -3361,10 +3366,10 @@ Mat4 Quaternion::toMatrix() const  // Convert to rotation matrix
 ```cpp
 Vec3 Ray::at(float t) const  // Get the point along the ray at distance t: origin + direction * t
 Ray Ray::fromScreenPoint2D(float screenX, float screenY, float startZ = 1000.0)  // Build an orthographic Z-parallel ray from a 2D screen point
-bool Ray::intersectAABB(const Vec3 & boxMin, const Vec3 & boxMax, float & outT) const  // Intersect an axis-aligned bounding box; writes distance, returns whether it hit
-bool Ray::intersectPlane(const Vec3 & planeNormal, float planeD, float & outT, Vec3 & outPoint) const  // Intersect an arbitrary plane; writes distance and hit point, returns whether it hit
-bool Ray::intersectSphere(float radius, float & outT) const  // Intersect a sphere centered at the origin; writes distance, returns whether it hit
-bool Ray::intersectZPlane(float & outT, Vec3 & outPoint) const  // Intersect the Z=0 plane; writes distance and hit point, returns whether it hit
+Hit Ray::intersectAABB(const Vec3 & boxMin, const Vec3 & boxMax) const [+1]  // Intersect an axis-aligned bounding box and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0.
+Hit Ray::intersectPlane(const Vec3 & planeNormal, float planeD) const [+1]  // Intersect an arbitrary plane and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0.
+Hit Ray::intersectSphere(float radius) const [+1]  // Intersect a sphere centered at the origin and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0.
+Hit Ray::intersectZPlane() const [+1]  // Intersect the Z=0 plane and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0.
 Ray Ray::transformed(const Mat4 & inverseMatrix) const  // Transform the ray by a matrix (typically an inverse to map into local space)
 ```
 
