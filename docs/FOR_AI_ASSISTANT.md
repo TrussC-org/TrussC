@@ -2494,6 +2494,11 @@ void EasyCam::setUpAxis(const Vec3 & up) [+1]  // Set the camera up axis (defaul
 void EasyCam::setZoomSensitivity(float s)  // Set zoom sensitivity
 ```
 
+### Entry — One scheduled note in a ChipSoundBundle: the note itself plus the time it starts at. `ChipSoundBundle::entries` is a vector of these, so a melody can be inspected or edited directly as well as built with add().
+
+```cpp
+```
+
 ### EnumLabelSpan — Label table for one enum type: a view over its human-readable enumerator names.
 
 ```cpp
@@ -4234,6 +4239,7 @@ enum AudioRecordSettings::SampleFormat { S16, F32 }  // WAV sample format: S16 =
 enum AxisMode { None, Fill, Content }  // Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children).
 enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Built-in system beep sounds (ping, success, error, …) for beep().
 enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled }  // Color blend mode: Alpha, Add, Multiply, Screen, Subtract, Disabled.
+enum ChipSoundNote::Wave { Sin, Square, Triangle, Sawtooth, Noise, PinkNoise, Silent }  // Waveform a ChipSoundNote is synthesised from. Also available unqualified as `Wave`.
 enum Codec { None, LZ4 }  // Compression codec: None (raw) or LZ4.
 enum Cursor { Default, Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Custom0, Custom1, Custom2, Custom3, Custom4, Custom5, Custom6, Custom7, Custom8, Custom9, Custom10, Custom11, Custom12, Custom13, Custom14, Custom15 }  // Mouse cursor shape (Default, Arrow, IBeam, Crosshair, Hand, resize cursors, …).
 enum CurveStyle::Mode { Tolerance, Resolution }  // Curve tessellation mode: adaptive tolerance or fixed resolution
@@ -4241,6 +4247,7 @@ enum Deliver { Inline, Main }  // Event delivery timing: Inline fires synchronou
 enum Direction { Left, Center, Right, Top, Bottom, Baseline }  // Alignment / direction: Left, Center, Right, Top, Bottom, Baseline.
 enum EaseMode { In, Out, InOut }  // Easing direction: In, Out, or InOut.
 enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce, Custom }  // Easing function family (Linear, Quad, Cubic, Sine, Expo, …) for tweens.
+enum EasyCam::Modifier { None, Shift, Ctrl, Alt, Super }  // Modifier key that must be held for EasyCam mouse input (orbit / pan / zoom), so the camera can share the mouse with scene interaction
 enum ImageType { Color, Grayscale }  // Image type: Color or Grayscale.
 enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku) strictness for vertical / Japanese text
 enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.

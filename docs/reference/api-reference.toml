@@ -1547,9 +1547,26 @@ of_category = "camera-types"
 related = ["setupScreenPerspective", "worldToScreen", "Ray"]
 
 ["EasyCam::Modifier"]
-hide = true
-keywords = ["shift", "ctrl", "alt"]
-related = ["isShiftPressed", "KeyEventArgs"]
+keywords = ["shift", "ctrl", "alt", "camera", "gate", "drag"]
+description.en = "Modifier key that must be held for EasyCam mouse input (orbit / pan / zoom), so the camera can share the mouse with scene interaction"
+description.ja = "EasyCam のマウス入力（オービット / パン / ズーム）に必要な修飾キー。カメラとシーン操作でマウスを共有するために使う"
+description.ko = "EasyCam 마우스 입력(오비트 / 팬 / 줌)에 필요한 수정자 키. 카메라와 씬 조작이 마우스를 공유할 수 있게 한다"
+related = ["EasyCam::setDragModifier", "EasyCam::getDragModifier"]
+value_desc.None.en = "No modifier — plain drags control the camera (default)"
+value_desc.None.ja = "修飾キー不要 — そのままのドラッグでカメラが動く（デフォルト）"
+value_desc.None.ko = "수정자 없음 — 그냥 드래그하면 카메라가 움직인다(기본값)"
+value_desc.Shift.en = "Hold Shift for camera input"
+value_desc.Shift.ja = "Shift を押しながらでカメラ操作"
+value_desc.Shift.ko = "Shift를 누른 채로 카메라 조작"
+value_desc.Ctrl.en = "Hold Ctrl for camera input"
+value_desc.Ctrl.ja = "Ctrl を押しながらでカメラ操作"
+value_desc.Ctrl.ko = "Ctrl을 누른 채로 카메라 조작"
+value_desc.Alt.en = "Hold Alt for camera input"
+value_desc.Alt.ja = "Alt を押しながらでカメラ操作"
+value_desc.Alt.ko = "Alt를 누른 채로 카메라 조작"
+value_desc.Super.en = "Hold the platform key (Cmd / Win) for camera input"
+value_desc.Super.ja = "プラットフォームキー（Cmd / Win）を押しながらでカメラ操作"
+value_desc.Super.ko = "플랫폼 키(Cmd / Win)를 누른 채로 카메라 조작"
 
 ["EasyCam::begin"]
 category = "graphics_camera"
@@ -17562,10 +17579,39 @@ description.ja = "Mod ライフサイクル：早期更新フェーズで毎フ�
 description.ko = "Mod 라이프사이클: 조기 업데이트 단계에서 매 프레임 트윈을 진행한다."
 
 ["ChipSoundBundle::Entry"]
-hide = true
+keywords = ["note", "timeline", "schedule", "melody"]
+description.en = "One scheduled note in a ChipSoundBundle: the note itself plus the time it starts at. `ChipSoundBundle::entries` is a vector of these, so a melody can be inspected or edited directly as well as built with add()."
+description.ja = "ChipSoundBundle に並ぶ1音: 音符そのものと、その開始時刻。`ChipSoundBundle::entries` はこれの配列なので、add() で積むだけでなくメロディを直接読んだり書き換えたりもできる"
+description.ko = "ChipSoundBundle에 놓인 한 음: 음표 자체와 시작 시각. `ChipSoundBundle::entries`가 이들의 배열이므로 add()로 쌓는 것 외에 멜로디를 직접 읽거나 고칠 수도 있다"
+related = ["ChipSoundBundle", "ChipSoundNote"]
 
 ["ChipSoundNote::Wave"]
-hide = true
+keywords = ["waveform", "chiptune", "oscillator", "square", "noise"]
+description.en = "Waveform a ChipSoundNote is synthesised from. Also available unqualified as `Wave`."
+description.ja = "ChipSoundNote を合成する波形。`Wave` という非修飾の別名でも使える"
+description.ko = "ChipSoundNote를 합성하는 파형. `Wave`라는 비수식 별칭으로도 쓸 수 있다"
+related = ["ChipSoundNote", "ChipSoundBundle"]
+value_desc.Sin.en = "Sine — smooth, no harmonics (default)"
+value_desc.Sin.ja = "サイン波 — 倍音のない滑らかな音（デフォルト）"
+value_desc.Sin.ko = "사인파 — 배음이 없는 부드러운 소리(기본값)"
+value_desc.Square.en = "Square — the classic chiptune lead"
+value_desc.Square.ja = "矩形波 — チップチューンの定番リード"
+value_desc.Square.ko = "구형파 — 칩튠의 대표적인 리드"
+value_desc.Triangle.en = "Triangle — softer than square, often used for bass"
+value_desc.Triangle.ja = "三角波 — 矩形波より柔らかく、ベースによく使う"
+value_desc.Triangle.ko = "삼각파 — 구형파보다 부드러워 베이스에 자주 쓴다"
+value_desc.Sawtooth.en = "Sawtooth — bright and buzzy"
+value_desc.Sawtooth.ja = "ノコギリ波 — 明るくざらついた音"
+value_desc.Sawtooth.ko = "톱니파 — 밝고 거친 소리"
+value_desc.Noise.en = "White noise — percussion and effects"
+value_desc.Noise.ja = "ホワイトノイズ — 打楽器や効果音に"
+value_desc.Noise.ko = "화이트 노이즈 — 타악기와 효과음에"
+value_desc.PinkNoise.en = "Pink noise — darker than white, 1/f spectrum"
+value_desc.PinkNoise.ja = "ピンクノイズ — ホワイトより暗い 1/f スペクトル"
+value_desc.PinkNoise.ko = "핑크 노이즈 — 화이트보다 어두운 1/f 스펙트럼"
+value_desc.Silent.en = "Silence — occupies its duration without sounding, for rests"
+value_desc.Silent.ja = "無音 — 長さだけ占めて鳴らない。休符に使う"
+value_desc.Silent.ko = "무음 — 길이만 차지하고 소리내지 않는다. 쉼표용"
 
 ["ScrollBar::Direction"]
 hide = true
