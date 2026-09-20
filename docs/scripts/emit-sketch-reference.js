@@ -312,7 +312,9 @@ for (const id in REF) {
                     desc_ko: ko(m.description),
                 });
             } else if (m.kind === 'method') {
-                const bindSigs = (m.signatures || []).filter(sigBindable);
+                // Deprecated OVERLOADS are dropped, not the whole method: a symbol
+                // only carries `deprecated` when every overload is (skipped above).
+                const bindSigs = (m.signatures || []).filter((s) => sigBindable(s) && !s.deprecated);
                 if (!bindSigs.length) continue;
                 const isStatic = !!m.static;
                 // instance -> colon syntax `recv:method`; static -> dot syntax `Type.method`
