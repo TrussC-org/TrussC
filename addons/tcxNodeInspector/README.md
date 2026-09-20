@@ -61,9 +61,9 @@ struct Sprite : Node {
     Sprite() { enableEvents(); }    // make it a canvas hit-test target
 
     bool hitTest(const Ray& r, float& outDist) override {  // circle pick
-        float t; Vec3 hp;
-        if (!r.intersectZPlane(t, hp)) return false;
-        if (hp.x*hp.x + hp.y*hp.y <= radius*radius) { outDist = t; return true; }
+        const Ray::Hit h = r.intersectZPlane();
+        if (!h.hit) return false;
+        if (h.point.x*h.point.x + h.point.y*h.point.y <= radius*radius) { outDist = h.t; return true; }
         return false;
     }
 

@@ -26,7 +26,42 @@ for _, name in ipairs(expected.usertypes) do
     end
 end
 
--- 3) Call a safe subset of pure functions and assert results.
+-- 3) Existence of usertype MEMBERS. A reachable type NAME proves nothing about
+-- its surface: the Tween double registration left "TweenFloat" resolvable while
+-- every one of its methods went missing with the losing metatable, and sections
+-- 1-2 stayed green throughout.
+--
+-- Only member FUNCTIONS, enum values and sol::var constants are probed here.
+-- Indexing the type table for one of those is safe (it hands back the function
+-- or the value), but doing it for a member VARIABLE makes sol2 run the property
+-- getter with the type table as `self`, read it as a userdata pointer and
+-- SEGFAULT -- past pcall, since it never becomes a Lua error. Nor can the
+-- surface simply be enumerated: sol2 keeps members in `__sol.storage`, so
+-- getmetatable(T) yields only sol2's own keys. Fields are therefore counted and
+-- reported as UNCHECKED rather than silently dropped; closing that hole needs a
+-- real instance of each type, which most result types cannot produce from Lua.
+report.m_present, report.m_missing, report.m_expected = 0, {}, 0
+local function probe(tbl)
+    for typeName, members in pairs(tbl or {}) do
+        local ut = _G[typeName]
+        for _, m in ipairs(members) do
+            report.m_expected = report.m_expected + 1
+            local ok, v = pcall(function() return ut and ut[m] end)
+            if ok and v ~= nil then
+                report.m_present = report.m_present + 1
+            else
+                table.insert(report.m_missing, typeName .. "." .. m)
+            end
+        end
+    end
+end
+probe(expected.methods)
+probe(expected.enum_values)
+
+report.f_unchecked = 0
+for _, members in pairs(expected.fields or {}) do report.f_unchecked = report.f_unchecked + #members end
+
+-- 4) Call a safe subset of pure functions and assert results.
 local function approx(a, b) return math.abs(a - b) < 1e-4 end
 local function check(label, ok)
     table.insert(report.calls, { label = label, ok = ok })
@@ -113,6 +148,29 @@ try("ctor CALL form (generated)", function()  -- Type(...) via sol::call_constru
     local c = Color(1, 0, 0)
     return approx(v.z, 3) and approx(c.r, 1)
 end)
+-- Ray's Hit-returning overloads + the nested result types. Existence alone would
+-- not have caught the bug these replace: an UNregistered return type still lets
+-- the call succeed and hands Lua a userdata with no readable members, which is
+-- exactly what node:findHitNode() did with Node::HitResult before it was bound.
+try("Ray:intersectSphere -> RayHit", function()
+    local r = Ray(Vec3(0, 0, 10), Vec3(0, 0, -1))
+    local h = r:intersectSphere(5)
+    return h.hit == true and approx(h.t, 5) and approx(h.point.z, 5)
+end)
+try("Ray:intersectZPlane parallel miss", function()
+    local r = Ray(Vec3(0, 0, 10), Vec3(0, 1, 0))
+    return r:intersectZPlane().hit == false
+end)
+try("Ray:intersectAABB -> RayHit", function()
+    local r = Ray(Vec3(0, 0, 10), Vec3(0, 0, -1))
+    local h = r:intersectAABB(Vec3(-1, -1, -1), Vec3(1, 1, 1))
+    return h.hit == true and approx(h.t, 9)
+end)
+try("Node:findHitNode -> NodeHitResult readable", function()
+    local n = Node()
+    local hr = n:findHitNode(Ray(Vec3(0, 0, 10), Vec3(0, 0, -1)))
+    return hr:hit() == false and approx(hr.distance, 0)
+end)
 try("ctor CALL form (hand-written)", function()
     local f = Fbo()
     local m = Mat4()
@@ -129,6 +187,12 @@ print(string.format("usertypes_expected=%d", #expected.usertypes))
 print(string.format("usertypes_present=%d", report.ut_present))
 print(string.format("usertypes_missing=%d", #report.ut_missing))
 for _, n in ipairs(report.ut_missing) do print("MISSING_UT " .. n) end
+print(string.format("methods_expected=%d", report.m_expected))
+print(string.format("methods_present=%d", report.m_present))
+print(string.format("methods_missing=%d", #report.m_missing))
+table.sort(report.m_missing)
+for _, n in ipairs(report.m_missing) do print("MISSING_METHOD " .. n) end
+print(string.format("fields_unchecked=%d", report.f_unchecked))
 local call_fail = 0
 for _, c in ipairs(report.calls) do
     if not c.ok then

@@ -77,40 +77,44 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["reserveUniformBuffer"] = &trussc::WindowSettings::reserveUniformBuffer;
     }
     {
-        sol::usertype<trussc::IVec2> t = lua->new_usertype<trussc::IVec2>("IVec2",
-            sol::constructors<trussc::IVec2(), trussc::IVec2(int, int), trussc::IVec2(int)>(),
-            sol::call_constructor, sol::constructors<trussc::IVec2(), trussc::IVec2(int, int), trussc::IVec2(int)>(),
-            sol::meta_function::addition, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a + b; },
-            sol::meta_function::subtraction, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a - b; },
-            sol::meta_function::unary_minus, [](const trussc::IVec2& a){ return -a; },
-            sol::meta_function::multiplication, [](const trussc::IVec2& a, int b){ return a * b; },
-            sol::meta_function::equal_to, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a == b; });
-        t["x"] = &trussc::IVec2::x;
-        t["y"] = &trussc::IVec2::y;
-        t["toVec2"] = &trussc::IVec2::toVec2;
+        sol::usertype<trussc::NetworkInterface> t = lua->new_usertype<trussc::NetworkInterface>("NetworkInterface");
+        t["name"] = &trussc::NetworkInterface::name;
+        t["address"] = &trussc::NetworkInterface::address;
+        t["netmask"] = &trussc::NetworkInterface::netmask;
+        t["mac"] = &trussc::NetworkInterface::mac;
+        t["isIPv4"] = &trussc::NetworkInterface::isIPv4;
+        t["isLoopback"] = &trussc::NetworkInterface::isLoopback;
+        t["isUp"] = &trussc::NetworkInterface::isUp;
+        t["getName"] = &trussc::NetworkInterface::getName;
+        t["getAddress"] = &trussc::NetworkInterface::getAddress;
+        t["getNetmask"] = &trussc::NetworkInterface::getNetmask;
+        t["getMac"] = &trussc::NetworkInterface::getMac;
+        t["getIsIPv4"] = &trussc::NetworkInterface::getIsIPv4;
+        t["getIsLoopback"] = &trussc::NetworkInterface::getIsLoopback;
+        t["getIsUp"] = &trussc::NetworkInterface::getIsUp;
     }
     {
-        sol::usertype<trussc::IesProfile> t = lua->new_usertype<trussc::IesProfile>("IesProfile",
-            sol::constructors<trussc::IesProfile()>(),
-            sol::call_constructor, sol::constructors<trussc::IesProfile()>());
-        t["load"] = &trussc::IesProfile::load;
-        t["loadFromString"] = &trussc::IesProfile::loadFromString;
-        t["isLoaded"] = &trussc::IesProfile::isLoaded;
-        t["getMaxVerticalAngle"] = &trussc::IesProfile::getMaxVerticalAngle;
-        t["getMaxCandela"] = &trussc::IesProfile::getMaxCandela;
-        t["getTextureWidth"] = &trussc::IesProfile::getTextureWidth;
-        t["getView"] = &trussc::IesProfile::getView;
-        t["getSampler"] = &trussc::IesProfile::getSampler;
+        sol::usertype<trussc::MouseEventArgs> t = lua->new_usertype<trussc::MouseEventArgs>("MouseEventArgs");
+        t["x"] = &trussc::MouseEventArgs::x;
+        t["y"] = &trussc::MouseEventArgs::y;
+        t["button"] = &trussc::MouseEventArgs::button;
+        t["shift"] = &trussc::MouseEventArgs::shift;
+        t["ctrl"] = &trussc::MouseEventArgs::ctrl;
+        t["alt"] = &trussc::MouseEventArgs::alt;
+        t["super"] = &trussc::MouseEventArgs::super;
+        t["pos"] = &trussc::MouseEventArgs::pos;
+        t["globalPos"] = &trussc::MouseEventArgs::globalPos;
+        t["consumed"] = &trussc::MouseEventArgs::consumed;
+        t["syncLegacy"] = &trussc::MouseEventArgs::syncLegacy;
     }
-    {
-        sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");
-        t["deviceName"] = &trussc::AudioDeviceChangedArgs::deviceName;
-        t["isDefaultDevice"] = &trussc::AudioDeviceChangedArgs::isDefaultDevice;
-        t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
-        t["channels"] = &trussc::AudioDeviceChangedArgs::channels;
-        t["bufferSize"] = &trussc::AudioDeviceChangedArgs::bufferSize;
-        t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
-    }
+    lua->new_usertype<trussc::PrimitiveType>("PrimitiveType",
+        sol::meta_function::equal_to, [](trussc::PrimitiveType a, trussc::PrimitiveType b){ return a == b; },
+        "Points", sol::var(trussc::PrimitiveType::Points),
+        "Lines", sol::var(trussc::PrimitiveType::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveType::LineStrip),
+        "Triangles", sol::var(trussc::PrimitiveType::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
+        "Quads", sol::var(trussc::PrimitiveType::Quads));
     {
         sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
         t["sampleRate"] = &trussc::AudioSettings::sampleRate;
@@ -120,21 +124,25 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["deviceName"] = &trussc::AudioSettings::deviceName;
     }
     {
-        sol::usertype<trussc::TcpClientConnectEventArgs> t = lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
-        t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
-        t["host"] = &trussc::TcpClientConnectEventArgs::host;
-        t["port"] = &trussc::TcpClientConnectEventArgs::port;
+        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
+        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
+        t["channels"] = &trussc::AudioOutBuffer::channels;
+        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
+        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
     }
+    lua->new_usertype<trussc::CurveStyle::Mode>("CurveStyleMode",
+        sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
+        "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
+        "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
+    lua->new_usertype<trussc::ImageType>("ImageType",
+        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
+        "Color", sol::var(trussc::ImageType::Color),
+        "Grayscale", sol::var(trussc::ImageType::Grayscale));
     {
-        sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
-        t["getId"] = &trussc::TcpServerClient::getId;
-        t["getHost"] = &trussc::TcpServerClient::getHost;
-        t["getPort"] = &trussc::TcpServerClient::getPort;
+        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
+        t["pixels"] = &trussc::GrabberFrame::pixels;
+        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
     }
-    lua->new_usertype<trussc::Deliver>("Deliver",
-        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
-        "Inline", sol::var(trussc::Deliver::Inline),
-        "Main", sol::var(trussc::Deliver::Main));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

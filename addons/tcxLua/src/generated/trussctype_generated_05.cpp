@@ -64,44 +64,37 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
     }
 #endif
     {
-        sol::usertype<trussc::MouseMoveEventArgs> t = lua->new_usertype<trussc::MouseMoveEventArgs>("MouseMoveEventArgs");
-        t["x"] = &trussc::MouseMoveEventArgs::x;
-        t["y"] = &trussc::MouseMoveEventArgs::y;
-        t["deltaX"] = &trussc::MouseMoveEventArgs::deltaX;
-        t["deltaY"] = &trussc::MouseMoveEventArgs::deltaY;
-        t["shift"] = &trussc::MouseMoveEventArgs::shift;
-        t["ctrl"] = &trussc::MouseMoveEventArgs::ctrl;
-        t["alt"] = &trussc::MouseMoveEventArgs::alt;
-        t["super"] = &trussc::MouseMoveEventArgs::super;
-        t["pos"] = &trussc::MouseMoveEventArgs::pos;
-        t["globalPos"] = &trussc::MouseMoveEventArgs::globalPos;
-        t["delta"] = &trussc::MouseMoveEventArgs::delta;
-        t["globalDelta"] = &trussc::MouseMoveEventArgs::globalDelta;
-        t["consumed"] = &trussc::MouseMoveEventArgs::consumed;
-        t["syncLegacy"] = &trussc::MouseMoveEventArgs::syncLegacy;
+        sol::usertype<trussc::IVec2> t = lua->new_usertype<trussc::IVec2>("IVec2",
+            sol::constructors<trussc::IVec2(), trussc::IVec2(int, int), trussc::IVec2(int)>(),
+            sol::call_constructor, sol::constructors<trussc::IVec2(), trussc::IVec2(int, int), trussc::IVec2(int)>(),
+            sol::meta_function::addition, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a + b; },
+            sol::meta_function::subtraction, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a - b; },
+            sol::meta_function::unary_minus, [](const trussc::IVec2& a){ return -a; },
+            sol::meta_function::multiplication, [](const trussc::IVec2& a, int b){ return a * b; },
+            sol::meta_function::equal_to, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a == b; });
+        t["x"] = &trussc::IVec2::x;
+        t["y"] = &trussc::IVec2::y;
+        t["toVec2"] = &trussc::IVec2::toVec2;
     }
     {
-        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader",
-            sol::constructors<trussc::FileReader()>(),
-            sol::call_constructor, sol::constructors<trussc::FileReader()>());
-        t["open"] = &trussc::FileReader::open;
-        t["close"] = &trussc::FileReader::close;
-        t["isOpen"] = &trussc::FileReader::isOpen;
-        t["eof"] = &trussc::FileReader::eof;
-        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
-        t["readChar"] = &trussc::FileReader::readChar;
-        t["seek"] = &trussc::FileReader::seek;
-        t["tell"] = &trussc::FileReader::tell;
-        t["remaining"] = &trussc::FileReader::remaining;
+        sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream",
+            sol::constructors<trussc::SoundStream()>(),
+            sol::call_constructor, sol::constructors<trussc::SoundStream()>());
+        t["loadStream"] = sol::overload([](trussc::SoundStream& self, const fs::path & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const fs::path & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
+        t["getDuration"] = &trussc::SoundStream::getDuration;
+        t["getPath"] = &trussc::SoundStream::getPath;
+        t["getMaxPolyphony"] = &trussc::SoundStream::getMaxPolyphony;
     }
-    lua->new_usertype<trussc::PrimitiveType>("PrimitiveType",
-        sol::meta_function::equal_to, [](trussc::PrimitiveType a, trussc::PrimitiveType b){ return a == b; },
-        "Points", sol::var(trussc::PrimitiveType::Points),
-        "Lines", sol::var(trussc::PrimitiveType::Lines),
-        "LineStrip", sol::var(trussc::PrimitiveType::LineStrip),
-        "Triangles", sol::var(trussc::PrimitiveType::Triangles),
-        "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
-        "Quads", sol::var(trussc::PrimitiveType::Quads));
+    {
+        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
+        t["view"] = &trussc::CameraContext::view;
+        t["projection"] = &trussc::CameraContext::projection;
+        t["viewW"] = &trussc::CameraContext::viewW;
+        t["viewH"] = &trussc::CameraContext::viewH;
+        t["pickable"] = &trussc::CameraContext::pickable;
+        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
+        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
+    }
     {
         sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
         t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
@@ -109,22 +102,23 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["error"] = &trussc::TcpSendCompleteEventArgs::error;
         t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
     }
+    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
+        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
+        "Off", sol::var(trussc::KinsokuLevel::Off),
+        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
+        "Standard", sol::var(trussc::KinsokuLevel::Standard));
+    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
+        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
+        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
+        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
     {
-        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
-        t["updateFps"] = &trussc::FpsSettings::updateFps;
-        t["drawFps"] = &trussc::FpsSettings::drawFps;
-        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
-        t["synced"] = &trussc::FpsSettings::synced;
+        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
+        t["note"] = &trussc::ChipSoundBundle::Entry::note;
+        t["time"] = &trussc::ChipSoundBundle::Entry::time;
     }
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
     {
-        sol::usertype<trussc::SendResult> t = lua->new_usertype<trussc::SendResult>("SendResult");
-        t["error"] = &trussc::SendResult::error;
-        t["id"] = &trussc::SendResult::id;
-        t["ok"] = &trussc::SendResult::ok;
+        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
+        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
     }
 }
 #ifndef _MSC_VER

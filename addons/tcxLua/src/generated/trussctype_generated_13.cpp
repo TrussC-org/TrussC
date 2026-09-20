@@ -33,27 +33,37 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["xy"] = &trussc::Vec4::xy;
         t["xyz"] = &trussc::Vec4::xyz;
     }
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
     {
-        sol::usertype<trussc::ColorLinear> t = lua->new_usertype<trussc::ColorLinear>("ColorLinear",
-            sol::constructors<trussc::ColorLinear(), trussc::ColorLinear(float, float, float), trussc::ColorLinear(float, float, float, float), trussc::ColorLinear(float), trussc::ColorLinear(float, float)>(),
-            sol::call_constructor, sol::constructors<trussc::ColorLinear(), trussc::ColorLinear(float, float, float), trussc::ColorLinear(float, float, float, float), trussc::ColorLinear(float), trussc::ColorLinear(float, float)>(),
-            sol::meta_function::addition, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a + b; },
-            sol::meta_function::subtraction, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a - b; },
-            sol::meta_function::multiplication, sol::overload([](const trussc::ColorLinear& a, float b){ return a * b; }, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a * b; }),
-            sol::meta_function::division, [](const trussc::ColorLinear& a, float b){ return a / b; },
-            sol::meta_function::equal_to, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a == b; });
-        t["r"] = &trussc::ColorLinear::r;
-        t["g"] = &trussc::ColorLinear::g;
-        t["b"] = &trussc::ColorLinear::b;
-        t["a"] = &trussc::ColorLinear::a;
-        t["toSRGB"] = &trussc::ColorLinear::toSRGB;
-        t["toHSB"] = &trussc::ColorLinear::toHSB;
-        t["toOKLab"] = &trussc::ColorLinear::toOKLab;
-        t["toOKLCH"] = &trussc::ColorLinear::toOKLCH;
-        t["clamped"] = &trussc::ColorLinear::clamped;
-        t["clampedLDR"] = &trussc::ColorLinear::clampedLDR;
-        t["lerp"] = &trussc::ColorLinear::lerp;
+        sol::usertype<trussc::Window> t = lua->new_usertype<trussc::Window>("Window",
+            sol::constructors<trussc::Window()>(),
+            sol::call_constructor, sol::constructors<trussc::Window()>());
+        t["setApp"] = &trussc::Window::setApp;
+        t["getApp"] = &trussc::Window::getApp;
+        t["events"] = &trussc::Window::events;
+        t["close"] = &trussc::Window::close;
+        t["isOpen"] = &trussc::Window::isOpen;
+        t["setTitle"] = &trussc::Window::setTitle;
+        t["getTitle"] = &trussc::Window::getTitle;
+        t["getWidth"] = &trussc::Window::getWidth;
+        t["getHeight"] = &trussc::Window::getHeight;
+        t["setSize"] = &trussc::Window::setSize;
+        t["setFullscreen"] = &trussc::Window::setFullscreen;
+        t["isFullscreen"] = &trussc::Window::isFullscreen;
+        t["toggleFullscreen"] = &trussc::Window::toggleFullscreen;
+        t["setClearColor"] = &trussc::Window::setClearColor;
+        t["setFps"] = &trussc::Window::setFps;
+        t["getFps"] = &trussc::Window::getFps;
+        t["dispatchMousePressToTree"] = &trussc::Window::dispatchMousePressToTree;
+        t["dispatchMouseReleaseToTree"] = &trussc::Window::dispatchMouseReleaseToTree;
+        t["dispatchMouseScrollToTree"] = &trussc::Window::dispatchMouseScrollToTree;
+        t["dispatchKeyPressToTree"] = &trussc::Window::dispatchKeyPressToTree;
+        t["dispatchKeyReleaseToTree"] = &trussc::Window::dispatchKeyReleaseToTree;
+        t["tickTree"] = &trussc::Window::tickTree;
+        t["drawTreeNow"] = &trussc::Window::drawTreeNow;
+        t["syncRootSize"] = &trussc::Window::syncRootSize;
     }
+#endif
     {
         sol::usertype<trussc::Rect> t = lua->new_usertype<trussc::Rect>("Rect",
             sol::constructors<trussc::Rect(), trussc::Rect(float, float, float, float), trussc::Rect(const trussc::Vec2 &, float, float), trussc::Rect(const trussc::Vec3 &, float, float), trussc::Rect(float, float, float, float, float)>(),
@@ -71,16 +81,20 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["contains"] = &trussc::Rect::contains;
         t["intersects"] = &trussc::Rect::intersects;
     }
-    {
-        sol::usertype<trussc::Ray> t = lua->new_usertype<trussc::Ray>("Ray",
-            sol::constructors<trussc::Ray(), trussc::Ray(const trussc::Vec3 &, const trussc::Vec3 &)>(),
-            sol::call_constructor, sol::constructors<trussc::Ray(), trussc::Ray(const trussc::Vec3 &, const trussc::Vec3 &)>());
-        t["origin"] = &trussc::Ray::origin;
-        t["direction"] = &trussc::Ray::direction;
-        t["at"] = &trussc::Ray::at;
-        t["transformed"] = &trussc::Ray::transformed;
-        t["fromScreenPoint2D"] = sol::overload([](float screenX, float screenY) { return trussc::Ray::fromScreenPoint2D(screenX, screenY); }, [](float screenX, float screenY, float startZ) { return trussc::Ray::fromScreenPoint2D(screenX, screenY, startZ); });
-    }
+    lua->new_usertype<trussc::EaseType>("EaseType",
+        sol::meta_function::equal_to, [](trussc::EaseType a, trussc::EaseType b){ return a == b; },
+        "Linear", sol::var(trussc::EaseType::Linear),
+        "Quad", sol::var(trussc::EaseType::Quad),
+        "Cubic", sol::var(trussc::EaseType::Cubic),
+        "Quart", sol::var(trussc::EaseType::Quart),
+        "Quint", sol::var(trussc::EaseType::Quint),
+        "Sine", sol::var(trussc::EaseType::Sine),
+        "Expo", sol::var(trussc::EaseType::Expo),
+        "Circ", sol::var(trussc::EaseType::Circ),
+        "Back", sol::var(trussc::EaseType::Back),
+        "Elastic", sol::var(trussc::EaseType::Elastic),
+        "Bounce", sol::var(trussc::EaseType::Bounce),
+        "Custom", sol::var(trussc::EaseType::Custom));
     {
         sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector",
             sol::constructors<trussc::JsonReadReflector(trussc::Json)>(),
@@ -91,29 +105,39 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
         t["endGroup"] = &trussc::JsonReadReflector::endGroup;
     }
-    lua->new_usertype<trussc::BlendMode>("BlendMode",
-        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
-        "Alpha", sol::var(trussc::BlendMode::Alpha),
-        "Add", sol::var(trussc::BlendMode::Add),
-        "Multiply", sol::var(trussc::BlendMode::Multiply),
-        "Screen", sol::var(trussc::BlendMode::Screen),
-        "Subtract", sol::var(trussc::BlendMode::Subtract),
-        "Disabled", sol::var(trussc::BlendMode::Disabled));
-    lua->new_usertype<trussc::WindowType>("WindowType",
-        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
-        "Rect", sol::var(trussc::WindowType::Rect),
-        "Hanning", sol::var(trussc::WindowType::Hanning),
-        "Hamming", sol::var(trussc::WindowType::Hamming),
-        "Blackman", sol::var(trussc::WindowType::Blackman));
-    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
-        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
-        "Butt", sol::var(trussc::StrokeCap::Butt),
-        "Round", sol::var(trussc::StrokeCap::Round),
-        "Square", sol::var(trussc::StrokeCap::Square));
+    lua->new_usertype<trussc::Direction>("Direction",
+        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
+        "Left", sol::var(trussc::Direction::Left),
+        "Center", sol::var(trussc::Direction::Center),
+        "Right", sol::var(trussc::Direction::Right),
+        "Top", sol::var(trussc::Direction::Top),
+        "Bottom", sol::var(trussc::Direction::Bottom),
+        "Baseline", sol::var(trussc::Direction::Baseline));
+    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
+        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
+        "Immutable", sol::var(trussc::TextureUsage::Immutable),
+        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
+        "Stream", sol::var(trussc::TextureUsage::Stream),
+        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
+    lua->new_usertype<trussc::LightType>("LightType",
+        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
+        "Directional", sol::var(trussc::LightType::Directional),
+        "Point", sol::var(trussc::LightType::Point),
+        "Spot", sol::var(trussc::LightType::Spot));
     {
-        sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
-        t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
-        t["data"] = &trussc::TcpServerReceiveEventArgs::data;
+        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
+        t["filePath"] = &trussc::FileDialogResult::filePath;
+        t["fileName"] = &trussc::FileDialogResult::fileName;
+        t["success"] = &trussc::FileDialogResult::success;
+    }
+    {
+        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
+        t["width"] = &trussc::ResizeEventArgs::width;
+        t["height"] = &trussc::ResizeEventArgs::height;
+    }
+    {
+        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
+        t["count"] = &trussc::EnumLabelSpan::count;
     }
 }
 #ifndef _MSC_VER

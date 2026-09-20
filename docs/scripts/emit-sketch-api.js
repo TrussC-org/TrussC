@@ -65,10 +65,13 @@ function snippetOf(name, args) {
     if (!req.length) return `${name}()`;
     return `${name}(${req.map((a, i) => `\${${i + 1}:${cleanName(a.name) || 'a' + i}}`).join(', ')})`;
 }
-// first signature whose args are all bindable
+// First signature whose args are all bindable. Deprecated OVERLOADS are skipped
+// rather than the whole method: a symbol only carries `deprecated` when every
+// overload is (handled where members are collected), so what survives here is the
+// form that is still recommended.
 function firstBindableSig(e) {
     for (const sig of (e.signatures || [])) {
-        if (sig.tmpl) continue;
+        if (sig.tmpl || sig.deprecated) continue;
         const args = sig.args || [];
         if (args.every(argBindable)) return { sig, args };
     }
