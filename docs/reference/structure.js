@@ -26,12 +26,38 @@ const argVal = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] :
 
 // --- 1. obtain the AST dump (cached or fresh) -------------------------------
 let astPartial = false;   // set when clang failed mid-parse (e.g. missing generated *.glsl.h)
+// The dump needs CLANG specifically (-Xclang -ast-dump=json); g++ rejects those
+// flags outright. On macOS `c++` IS clang, so defaulting to it worked there and
+// died on Linux with four "unrecognized command-line option" lines from g++ --
+// the same class of macOS-only assumption as the SOKOL backend define below.
+// Probe for a real clang instead, and keep $CXX as the override.
+function pickCxx() {
+    if (process.env.CXX) return process.env.CXX;
+    for (const c of ['clang++', 'c++']) {
+        try {
+            if (/clang/i.test(execSync(`${c} --version`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString())) return c;
+        } catch { /* not installed — try the next candidate */ }
+    }
+    return 'c++';   // none found: fall through so the failure path reports why
+}
 function dumpAst() {
-    const CXX = process.env.CXX || 'c++';
+    const CXX = pickCxx();
     const extra = (process.env.TC_COVERAGE_CXXFLAGS || '').split(/\s+/).filter(Boolean);
     const tmp = path.join(require('os').tmpdir(), 'tc-structure-probe.cpp');
     fs.writeFileSync(tmp, '#include <TrussC.h>\n');
-    const args = ['-std=c++20', '-DNDEBUG', '-I', INCLUDE, '-Xclang', '-ast-dump=json',
+    // Mirror the backend macro the real build defines for this platform
+    // (core/CMakeLists.txt). Headers branch on it — the desktop-Linux guard for
+    // the createWindow() unsupported-platform stub is
+    // `!(defined(__linux__) && defined(SOKOL_GLCORE))` — so dumping without it
+    // makes Linux look like a platform without secondary windows and pulls the
+    // stub into the AST alongside the real declaration. That produced a
+    // duplicate createWindow overload whose only trace was an extra `[+1]` in
+    // the generated index. Override with TC_BACKEND_DEFINE.
+    const backend = process.env.TC_BACKEND_DEFINE || (
+        process.platform === 'darwin' ? 'SOKOL_METAL'
+        : process.platform === 'win32' ? 'SOKOL_D3D11'
+        : 'SOKOL_GLCORE');
+    const args = ['-std=c++20', '-DNDEBUG', `-D${backend}`, '-I', INCLUDE, '-Xclang', '-ast-dump=json',
         '-Xclang', '-ast-dump-filter=trussc', '-fsyntax-only', ...extra, tmp];
     process.stderr.write('structure: running clang AST dump (~280 MB, a few seconds)…\n');
     try {
@@ -53,7 +79,12 @@ function dumpAst() {
                 + err.split('\n').slice(0, 8).join('\n') + '\n');
             return out;
         }
-        process.stderr.write('structure: clang AST dump FAILED (no usable output). clang stderr:\n' + err + '\n');
+        process.stderr.write(`structure: clang AST dump FAILED (no usable output) using CXX=${CXX}.\n`);
+        if (/unrecognized command-line option/.test(err)) {
+            process.stderr.write('structure: that compiler is not clang -- this dump requires clang (-Xclang -ast-dump=json).\n'
+                + 'structure: install clang or set CXX=/path/to/clang++.\n');
+        }
+        process.stderr.write('structure: compiler stderr:\n' + err + '\n');
         throw e;
     }
 }
@@ -242,7 +273,7 @@ function enumerate(objs) {
             } else if (m.kind === 'EnumDecl' && m.name) {
                 syms.push({ kind: 'enum', ns: nsPath, owner: qn, name: m.name, file: fileOf(m), access, flags: ['nested'], members: enumMembersOf(m), ann: annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
             } else if (m.kind === 'CXXRecordDecl' && m.name && access === 'public') {
-                walkRecord(m, nsPath, extraFlags, undefined, qn);   // nested public type -> keyed Owner::Name (Ray::HitResult, ChipSoundBundle::Entry)
+                walkRecord(m, nsPath, extraFlags, undefined, qn);   // nested public type -> keyed Owner::Name (Node::HitResult, ChipSoundBundle::Entry)
             }
         }
     }
@@ -330,7 +361,8 @@ for (const s of pub) {
     if (s.sig) {
         const p = parseSig(s.sig);                             // ret + const from qualType
         if (p) { const sig = { ret: p.ret, params: s.params !== undefined ? s.params : p.params, const: p.const, args: s.args,
-                tmpl: (s.flags || []).includes('template') || undefined };   // tmpl: needs explicit instantiation (e.g. typeName<T>()) — binders skip it
+                tmpl: (s.flags || []).includes('template') || undefined,     // tmpl: needs explicit instantiation (e.g. typeName<T>()) — binders skip it
+                deprecated: s.deprecated || undefined };                     // C++ carries [[deprecated]] per DECLARATION, so it belongs on the overload
             if (!e.signatures.some(x => x.params === sig.params && x.const === sig.const)) e.signatures.push(sig); }
     }
 }
@@ -340,6 +372,24 @@ for (const s of require('./std-symbols.js')) {
     if (structure[s.id]) continue;                              // a real trussc:: symbol wins
     structure[s.id] = { id: s.id, kind: s.kind, owner: undefined, name: s.name, ns: undefined,
         signatures: s.signatures || [], static: false, provider: s.provider };
+}
+
+// --- 4c. reconcile per-overload deprecation ---------------------------------
+// A symbol's `deprecated` means EVERY overload is deprecated. It used to mean
+// "at least one is" (the first deprecated decl won, above), and every consumer
+// that skips deprecated symbols therefore dropped the LIVE overload along with
+// the dead one. That is not theoretical: adding a replacement overload is the
+// house deprecation pattern, and it had already erased Node::globalToLocal(Vec3),
+// Node::localToGlobal(Vec3) and all six Event::listen forms from the Lua
+// reference while they stayed callable. The distinction now lives on each
+// signature; the symbol-level flag is only set when nothing is left to
+// recommend. Symbols with no signatures (types, fields, enums) keep the flag
+// straight off their declaration.
+for (const id in structure) {
+    const e = structure[id];
+    if (!e.signatures || !e.signatures.length) continue;
+    const dep = e.signatures.filter((sig) => sig.deprecated);
+    e.deprecated = dep.length === e.signatures.length ? dep[0].deprecated : undefined;
 }
 
 // --- 5. output --------------------------------------------------------------

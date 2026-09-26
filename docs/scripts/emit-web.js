@@ -430,10 +430,20 @@ function build(examplesMap) {
     const memberEntry = (sym) => {
         const refId = sym.id;
         const ym = YML_METHOD.get(refId);
+        // Each overload carries its OWN return type. They used to share one
+        // `return` (the first overload's) next to a list of bare param strings,
+        // which read fine only while overloads happened to agree -- 38 members
+        // do not. Ray::intersectSphere was advertised as returning Hit in both
+        // forms when the out-param one returns bool, and Node::globalToLocal as
+        // returning Vec3 in both when the four-arg form returns void.
+        const sigs = sym.signatures.length ? sym.signatures : [{ params: '' }];
         const out = {
             name: sym.name,
-            return: (sym.signatures[0] && sym.signatures[0].ret) ?? (ym && ym.return) ?? '',
-            signatures: (sym.signatures.length ? sym.signatures : [{ params: '' }]).map(s => stripU(s.params || '')),
+            signatures: sigs.map(s => ({
+                ret: s.ret ?? (ym && ym.return) ?? '',
+                params: stripU(s.params || ''),
+                ...(s.deprecated ? { deprecated: s.deprecated } : {}),
+            })),
             desc: descTrio(refId, ym).desc,
         };
         const dep = mergeDeprecated(refId, ym);
@@ -441,10 +451,53 @@ function build(examplesMap) {
         return attachPlatforms(out, sym, ym);
     };
 
+    // Nested types and enums (Ray::Hit, Node::HitResult, SoundSource::Kind, …) are
+    // real public API -- 17 members return or take one -- but they appeared in
+    // neither list, so a reader who followed `Hit Ray::intersectSphere(float)` had
+    // nowhere to learn what Hit is. They cannot join the flat lists under their
+    // bare names (ScrollBar::Direction would collide with the top-level Direction
+    // enum), so they hang off their owner under the qualified name the reference,
+    // the toml and the corpus already key them by.
+    const nestedByOwner = new Map();                         // owner -> [sym, …]
+    for (const sym of REF_VALS) {
+        if (!sym.owner || sym.ns) continue;
+        if (sym.kind !== 'type' && sym.kind !== 'enum') continue;
+        if (!nestedByOwner.has(sym.owner)) nestedByOwner.set(sym.owner, []);
+        nestedByOwner.get(sym.owner).push(sym);
+    }
+    // Members are keyed by the OWNER string, which for a nested symbol is its own
+    // qualified id -- so the same lookups work unchanged.
+    const nestedEntry = (sym) => {
+        const { desc, desc_ja, desc_ko } = descTrio(sym.id, null);
+        const out = { name: sym.id, short: sym.name, kind: sym.kind, desc, desc_ja, desc_ko };
+        if (sym.kind === 'enum') {
+            const vd = sym.value_desc || {};
+            const memberList = (Array.isArray(sym.members) && sym.members.length)
+                ? sym.members
+                : Object.keys(vd).map((name, i) => ({ name, value: i }));
+            out.values = memberList.map(m => {
+                const d = vd[m.name] || {};
+                return { name: m.name, value: m.value, desc: d.en || '', desc_ja: d.ja || '', desc_ko: d.ko || '' };
+            });
+            return out;
+        }
+        if (sym.constructors && sym.constructors.length) out.constructor = { signatures: sym.constructors.map(c => stripU(c.params)) };
+        const nf = fieldsByOwner.get(sym.id);
+        if (nf && nf.length) out.properties = nf.map(f => {
+            const d = descTrio(f.id, null);
+            return { name: f.name, type: f.type || '', desc: d.desc, desc_ja: d.desc_ja, desc_ko: d.desc_ko };
+        });
+        const nm = methodsByOwner.get(sym.id) || [];
+        const ni = nm.filter(m => !m.static), ns = nm.filter(m => m.static);
+        if (ni.length) out.methods = ni.map(memberEntry);
+        if (ns.length) out.static_methods = ns.map(memberEntry);
+        return out;
+    };
+
     const types = [];
     for (const sym of REF_VALS) {
         if (sym.kind !== 'type') continue;
-        if (sym.owner) continue;                             // nested types (ChipSoundBundle::Entry, Font::PlacedGlyph) belong to their owner, not the flat type list
+        if (sym.owner) continue;                             // nested ones are attached to their owner below
         const typeName = sym.name;
         const ym = YML_TYPE.get(typeName);
         const { desc, desc_ja, desc_ko } = descTrio(sym.id, ym);
@@ -477,6 +530,8 @@ function build(examplesMap) {
         if (statics.length) typeData.static_methods = statics.map(memberEntry);
         // operators: yaml schema only.
         const typeOps = mapOperators(typeName, ym); if (typeOps.length) typeData.operators = typeOps;
+        const nested = nestedByOwner.get(sym.id);
+        if (nested && nested.length) typeData.nested = nested.map(nestedEntry);
         types.push(typeData);
     }
 

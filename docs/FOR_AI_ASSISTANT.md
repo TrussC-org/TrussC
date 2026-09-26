@@ -2494,6 +2494,11 @@ void EasyCam::setUpAxis(const Vec3 & up) [+1]  // Set the camera up axis (defaul
 void EasyCam::setZoomSensitivity(float s)  // Set zoom sensitivity
 ```
 
+### Entry — One scheduled note in a ChipSoundBundle: the note itself plus the time it starts at. `ChipSoundBundle::entries` is a vector of these, so a melody can be inspected or edited directly as well as built with add().
+
+```cpp
+```
+
 ### EnumLabelSpan — Label table for one enum type: a view over its human-readable enumerator names.
 
 ```cpp
@@ -2516,7 +2521,7 @@ void Environment::release()  // Release GPU resources
 
 ```cpp
 void Event::clear()  // Remove all listeners
-EventListener Event::listen(Callback callback, int priority = App) [+2] ⚠️deprecated  // Register a listener callback and return an EventListener token; lower priority runs first, and Deliver::Main runs the callback on the main thread
+EventListener Event::listen(Callback callback, int priority = App) [+5]  // Register a listener callback and return an EventListener token; lower priority runs first, and Deliver::Main runs the callback on the main thread
 size_t Event::listenerCount() const  // Number of currently registered listeners
 void Event::notify(T & arg)  // Fire the event, calling all listeners in priority order (no argument for Event<void>); stops early if a listener marks an input arg consumed
 ```
@@ -2715,6 +2720,11 @@ void HasTexture::setWrapV(TextureWrap wrap)  // Set the texture wrap mode on the
 
 ```cpp
 HeadlessSettings & HeadlessSettings::setFps(float fps)  // Set the target update rate (chainable)
+```
+
+### Hit — Result of a ray intersection (this is Ray::Hit). Returned by every intersect* overload; `hit` says whether anything was hit, and `t` / `point` are only meaningful when it did. Convertible to bool, so it reads directly as a condition: `if (auto h = ray.intersectSphere(r))`.
+
+```cpp
 ```
 
 ### HitResult — Result of a node hit test (this is Node::HitResult). Returned by Node::findHitNode() / findHitNodeFromScreen(); call hit() to check whether anything was hit.
@@ -3129,6 +3139,7 @@ const std::string & NetworkInterface::getNetmask() const  // Subnet mask
 
 ```cpp
 void Node::addChild(Ptr child, bool keepGlobalPosition = false)  // Add a child node (C++ only)
+T * Node::addMod(Args &&... args)  // Attach a mod of type T to this node, forwarding any arguments to its constructor; returns the mod for chaining (C++ only)
 void Node::beginDraw()  // Hook called before draw() and drawChildren(); override for clipping etc.
 uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Run callback once after delay seconds. Fired from the update loop (frame-quantized). Returns a timer id.
 uint64_t Node::callAfterAsync(double delay, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callAfter, but fired by a precise background scheduler thread (no frame jitter). The callback runs OFF the main thread: guard shared state with a mutex, never draw from it, and don't cancel while holding that mutex. Native only (uses a real thread). Returns a timer id.
@@ -3149,7 +3160,6 @@ Node * Node::findByInstanceId(uint64_t id)  // Find a node in this subtree (self
 HitResult Node::findHitNode(const Ray & globalRay)  // Hit test the whole tree with a global ray, returning the frontmost node (C++ only)
 HitResult Node::findHitNodeFromScreen(float screenX, float screenY)  // Hit test the whole tree from a screen point, using each node's own camera context (C++ only)
 HitResult Node::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Recursive hit test in reverse draw order; override for clipping-aware picking.
-T * Node::addMod(Args &&... args)  // Attach a mod of type T to this node, forwarding any arguments to its constructor; returns the mod for chaining (C++ only)
 bool Node::getActive() const ⚠️deprecated  // Deprecated alias for isActive()
 std::shared_ptr<const CameraContext> Node::getCameraContext() const  // Return the camera context this node was last drawn under (null if never drawn).
 size_t Node::getChildCount() const  // Get the number of child nodes (C++ only)
@@ -3163,8 +3173,8 @@ Mat4 Node::getGlobalMatrixInverse() const  // Get the inverse of the global tran
 Vec3 Node::getGlobalPos() const  // Get the node's origin in global (world) space (C++ only)
 uint64_t Node::getInstanceId() const  // Per-process unique id, assigned once at construction and stable across reparenting (C++ only)
 const Mat4 & Node::getLocalMatrix() const  // Get this node's local transform matrix (cached) (C++ only)
-Mod * Node::getModByTypeName(const std::string & name) const  // Find an attached mod by its short type name, e.g. "LayoutMod" (null if not attached) (C++ only) 
 T * Node::getMod()  // Get the attached mod of type T, or nullptr if this node has none (C++ only)
+Mod * Node::getModByTypeName(const std::string & name) const  // Find an attached mod by its short type name, e.g. "LayoutMod" (null if not attached) (C++ only) 
 std::vector<Mod *> Node::getMods() const  // Get all attached mods (pointers stay owned by this node) (C++ only)
 std::vector<std::string> Node::getModTypeNames() const  // Get the short (unqualified) type names of the attached mods (C++ only)
 float Node::getMouseX() const  // Get mouse X in this node's local coordinate system (C++ only)
@@ -3186,7 +3196,7 @@ bool Node::getVisible() const ⚠️deprecated  // Deprecated alias for isVisibl
 float Node::getX() const  // Get local X position (C++ only)
 float Node::getY() const  // Get local Y position (C++ only)
 float Node::getZ() const  // Get local Z position (C++ only)
-Vec3 Node::globalToLocal(const Vec3 & global) const [+1] ⚠️deprecated  // Convert a global coordinate to this node's local space (C++ only)
+Vec3 Node::globalToLocal(const Vec3 & global) const [+1]  // Convert a global coordinate to this node's local space (C++ only)
 bool Node::hasMod() const  // Whether a mod of type T is attached to this node (C++ only)
 bool Node::hasName() const  // Whether an instance name has been set (C++ only)
 bool Node::hitTest(const Ray & localRay, float & outDistance) [+1]  // Geometric hit-test predicate in local space; override to make a node pickable.
@@ -3197,7 +3207,7 @@ bool Node::isDead() const  // Check if node is marked for destruction (C++ only)
 bool Node::isEventsEnabled() const  // Whether events are enabled (only such nodes are hit-test targets) (C++ only)
 bool Node::isMouseOver() const  // Whether the mouse is over this node (auto-updated each frame, O(1)) (C++ only)
 bool Node::isVisible() const  // Whether the node is visible (invisible: only draw is skipped) (C++ only)
-Vec3 Node::localToGlobal(const Vec3 & local) const [+1] ⚠️deprecated  // Convert a local coordinate to global space (C++ only)
+Vec3 Node::localToGlobal(const Vec3 & local) const [+1]  // Convert a local coordinate to global space (C++ only)
 void Node::moveToBack()  // Move this node to the beginning of its parent's child list — drawn first, beneath siblings. No-op if no parent or already first (C++ only)
 void Node::moveToFront()  // Move this node to the end of its parent's child list — drawn last, on top of siblings. No-op if no parent or already last (C++ only)
 void Node::onActiveChanged(bool active)  // Callback invoked when the node's active state changes.
@@ -3215,9 +3225,9 @@ bool Node::onMouseRelease(const MouseEventArgs & e) [+1]  // Handle a mouse rele
 bool Node::onMouseScroll(const ScrollEventArgs & e) [+1]  // Handle a scroll event (event localized to this node); return true to consume.
 void Node::onVisibleChanged(bool visible)  // Callback invoked when the node's visible state changes.
 void Node::processTimers()  // Process due timers (callAfter / callEvery), invoked within the update pass.
-void Node::removeMod()  // Remove the attached mod of type T, calling its onDestroy() before it is freed (C++ only)
 void Node::removeAllChildren()  // Remove all child nodes (C++ only)
 void Node::removeChild(Ptr child)  // Remove a child node (C++ only)
+void Node::removeMod()  // Remove the attached mod of type T, calling its onDestroy() before it is freed (C++ only)
 std::pair<const CameraContext *, Ray> Node::resolvePickRay(internal::PickRaySource & pick, const CameraContext * inheritedCtx, const Ray & globalRay) const  // Resolve this node's effective camera context and the global ray to hit-test it with.
 void Node::setActive(bool active)  // Set the active state (inactive: update and draw are skipped) (C++ only)
 void Node::setCameraContext(std::shared_ptr<const CameraContext> ctx)  // Set the camera context for a manually-managed node (normally set automatically by drawTree).
@@ -3361,10 +3371,10 @@ Mat4 Quaternion::toMatrix() const  // Convert to rotation matrix
 ```cpp
 Vec3 Ray::at(float t) const  // Get the point along the ray at distance t: origin + direction * t
 Ray Ray::fromScreenPoint2D(float screenX, float screenY, float startZ = 1000.0)  // Build an orthographic Z-parallel ray from a 2D screen point
-bool Ray::intersectAABB(const Vec3 & boxMin, const Vec3 & boxMax, float & outT) const  // Intersect an axis-aligned bounding box; writes distance, returns whether it hit
-bool Ray::intersectPlane(const Vec3 & planeNormal, float planeD, float & outT, Vec3 & outPoint) const  // Intersect an arbitrary plane; writes distance and hit point, returns whether it hit
-bool Ray::intersectSphere(float radius, float & outT) const  // Intersect a sphere centered at the origin; writes distance, returns whether it hit
-bool Ray::intersectZPlane(float & outT, Vec3 & outPoint) const  // Intersect the Z=0 plane; writes distance and hit point, returns whether it hit
+Hit Ray::intersectAABB(const Vec3 & boxMin, const Vec3 & boxMax) const [+1]  // Intersect an axis-aligned bounding box and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0.
+Hit Ray::intersectPlane(const Vec3 & planeNormal, float planeD) const [+1]  // Intersect an arbitrary plane and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0.
+Hit Ray::intersectSphere(float radius) const [+1]  // Intersect a sphere centered at the origin and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0.
+Hit Ray::intersectZPlane() const [+1]  // Intersect the Z=0 plane and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0.
 Ray Ray::transformed(const Mat4 & inverseMatrix) const  // Transform the ray by a matrix (typically an inverse to map into local space)
 ```
 
@@ -4229,6 +4239,7 @@ enum AudioRecordSettings::SampleFormat { S16, F32 }  // WAV sample format: S16 =
 enum AxisMode { None, Fill, Content }  // Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children).
 enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Built-in system beep sounds (ping, success, error, …) for beep().
 enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled }  // Color blend mode: Alpha, Add, Multiply, Screen, Subtract, Disabled.
+enum ChipSoundNote::Wave { Sin, Square, Triangle, Sawtooth, Noise, PinkNoise, Silent }  // Waveform a ChipSoundNote is synthesised from. Also available unqualified as `Wave`.
 enum Codec { None, LZ4 }  // Compression codec: None (raw) or LZ4.
 enum Cursor { Default, Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Custom0, Custom1, Custom2, Custom3, Custom4, Custom5, Custom6, Custom7, Custom8, Custom9, Custom10, Custom11, Custom12, Custom13, Custom14, Custom15 }  // Mouse cursor shape (Default, Arrow, IBeam, Crosshair, Hand, resize cursors, …).
 enum CurveStyle::Mode { Tolerance, Resolution }  // Curve tessellation mode: adaptive tolerance or fixed resolution
@@ -4236,6 +4247,7 @@ enum Deliver { Inline, Main }  // Event delivery timing: Inline fires synchronou
 enum Direction { Left, Center, Right, Top, Bottom, Baseline }  // Alignment / direction: Left, Center, Right, Top, Bottom, Baseline.
 enum EaseMode { In, Out, InOut }  // Easing direction: In, Out, or InOut.
 enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce, Custom }  // Easing function family (Linear, Quad, Cubic, Sine, Expo, …) for tweens.
+enum EasyCam::Modifier { None, Shift, Ctrl, Alt, Super }  // Modifier key that must be held for EasyCam mouse input (orbit / pan / zoom), so the camera can share the mouse with scene interaction
 enum ImageType { Color, Grayscale }  // Image type: Color or Grayscale.
 enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku) strictness for vertical / Japanese text
 enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.

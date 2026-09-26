@@ -53,97 +53,136 @@ struct Ray {
     }
 
     // ==========================================================================
+    // Hit test result
+    // ==========================================================================
+
+    // Result of an intersect* call, returned by value the way Node::HitResult
+    // is. The out-param overloads below force an uninitialized local at every
+    // call site, cannot be used in an `if` initializer, and cannot be bound to
+    // Lua at all (the binding generator skips out-params), so they only remain
+    // as thin adapters until v1.0.0.
+    struct Hit {
+        bool  hit = false;   // true if the ray hit
+        float t = 0.0f;      // distance along the ray -- only meaningful when hit
+        Vec3  point;         // intersection point -- only meaningful when hit
+
+        explicit operator bool() const { return hit; }
+    };
+
+    // ==========================================================================
     // Plane intersection
     // ==========================================================================
 
-    // Intersection with Z=0 plane (for 2D UI)
-    // Returns true if intersection, sets outT to distance and outPoint to intersection point
-    bool intersectZPlane(float& outT, Vec3& outPoint) const {
+    // Intersection with the Z=0 plane (for 2D UI)
+    Hit intersectZPlane() const {
         // If direction.z is near 0, parallel (no intersection)
         if (std::abs(direction.z) < 1e-6f) {
-            return false;
+            return {};
         }
 
         // Intersection with Z=0 plane: origin.z + t * direction.z = 0
-        float t = -origin.z / direction.z;
+        const float t = -origin.z / direction.z;
 
         // t < 0 is behind the ray (no intersection)
         if (t < 0) {
-            return false;
+            return {};
         }
 
-        outT = t;
-        outPoint = at(t);
-        return true;
+        return { true, t, at(t) };
     }
 
-    // Intersection with arbitrary plane
-    // plane: plane normal (normalized)
+    [[deprecated("Use the Hit-returning intersectZPlane() instead. Will be removed in v1.0.0")]]
+    bool intersectZPlane(float& outT, Vec3& outPoint) const {
+        const Hit h = intersectZPlane();
+        if (h.hit) {
+            outT = h.t;
+            outPoint = h.point;
+        }
+        return h.hit;
+    }
+
+    // Intersection with an arbitrary plane
+    // planeNormal: plane normal (normalized)
     // planeD: plane distance (signed distance from origin)
-    bool intersectPlane(const Vec3& planeNormal, float planeD, float& outT, Vec3& outPoint) const {
-        float denom = direction.dot(planeNormal);
+    Hit intersectPlane(const Vec3& planeNormal, float planeD) const {
+        const float denom = direction.dot(planeNormal);
 
         // Check if parallel
         if (std::abs(denom) < 1e-6f) {
-            return false;
+            return {};
         }
 
-        float t = -(origin.dot(planeNormal) + planeD) / denom;
+        const float t = -(origin.dot(planeNormal) + planeD) / denom;
 
         if (t < 0) {
-            return false;
+            return {};
         }
 
-        outT = t;
-        outPoint = at(t);
-        return true;
+        return { true, t, at(t) };
+    }
+
+    [[deprecated("Use the Hit-returning intersectPlane() instead. Will be removed in v1.0.0")]]
+    bool intersectPlane(const Vec3& planeNormal, float planeD, float& outT, Vec3& outPoint) const {
+        const Hit h = intersectPlane(planeNormal, planeD);
+        if (h.hit) {
+            outT = h.t;
+            outPoint = h.point;
+        }
+        return h.hit;
     }
 
     // ==========================================================================
     // Sphere intersection
     // ==========================================================================
 
-    // Intersection with sphere centered at origin
-    bool intersectSphere(float radius, float& outT) const {
+    // Intersection with a sphere centered at the origin
+    Hit intersectSphere(float radius) const {
         // |origin + t * direction|^2 = radius^2
         // a*t^2 + b*t + c = 0
-        float a = direction.dot(direction);  // 1 if normalized
-        float b = 2.0f * origin.dot(direction);
-        float c = origin.dot(origin) - radius * radius;
+        const float a = direction.dot(direction);  // 1 if normalized
+        const float b = 2.0f * origin.dot(direction);
+        const float c = origin.dot(origin) - radius * radius;
 
-        float discriminant = b * b - 4 * a * c;
+        const float discriminant = b * b - 4 * a * c;
         if (discriminant < 0) {
-            return false;
+            return {};
         }
 
-        float sqrtD = std::sqrt(discriminant);
-        float t1 = (-b - sqrtD) / (2 * a);
-        float t2 = (-b + sqrtD) / (2 * a);
+        const float sqrtD = std::sqrt(discriminant);
+        const float t1 = (-b - sqrtD) / (2 * a);
+        const float t2 = (-b + sqrtD) / (2 * a);
 
         // Select the closest positive t
         if (t1 > 0) {
-            outT = t1;
-            return true;
+            return { true, t1, at(t1) };
         }
         if (t2 > 0) {
-            outT = t2;
-            return true;
+            return { true, t2, at(t2) };
         }
 
-        return false;
+        return {};
+    }
+
+    [[deprecated("Use the Hit-returning intersectSphere() instead. Will be removed in v1.0.0")]]
+    bool intersectSphere(float radius, float& outT) const {
+        const Hit h = intersectSphere(radius);
+        if (h.hit) {
+            outT = h.t;
+        }
+        return h.hit;
     }
 
     // ==========================================================================
     // AABB (Axis-Aligned Bounding Box) intersection
     // ==========================================================================
 
-    // Intersection with AABB defined by min/max
-    bool intersectAABB(const Vec3& boxMin, const Vec3& boxMax, float& outT) const {
+    // Intersection with an AABB defined by min/max
+    Hit intersectAABB(const Vec3& boxMin, const Vec3& boxMax) const {
         float tmin = 0.0f;
         float tmax = std::numeric_limits<float>::max();
 
         for (int i = 0; i < 3; i++) {
-            float invD = 1.0f / direction[i];
+            const float invD = 1.0f / direction[i];
             float t0 = (boxMin[i] - origin[i]) * invD;
             float t1 = (boxMax[i] - origin[i]) * invD;
 
@@ -155,12 +194,20 @@ struct Ray {
             tmax = std::min(tmax, t1);
 
             if (tmax < tmin) {
-                return false;
+                return {};
             }
         }
 
-        outT = tmin;
-        return true;
+        return { true, tmin, at(tmin) };
+    }
+
+    [[deprecated("Use the Hit-returning intersectAABB() instead. Will be removed in v1.0.0")]]
+    bool intersectAABB(const Vec3& boxMin, const Vec3& boxMax, float& outT) const {
+        const Hit h = intersectAABB(boxMin, boxMax);
+        if (h.hit) {
+            outT = h.t;
+        }
+        return h.hit;
     }
 };
 

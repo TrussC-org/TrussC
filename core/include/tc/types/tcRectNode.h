@@ -110,16 +110,15 @@ public:
         }
 
         // Calculate intersection with Z=0 plane
-        float t;
-        Vec3 hitPoint;
-        if (!localRay.intersectZPlane(t, hitPoint)) {
+        const Ray::Hit h = localRay.intersectZPlane();
+        if (!h.hit) {
             return false;
         }
 
         // Check if intersection point is within rectangle
-        if (hitPoint.x >= 0 && hitPoint.x <= width_ &&
-            hitPoint.y >= 0 && hitPoint.y <= height_) {
-            outDistance = t;
+        if (h.point.x >= 0 && h.point.x <= width_ &&
+            h.point.y >= 0 && h.point.y <= height_) {
+            outDistance = h.t;
             return true;
         }
 
@@ -156,10 +155,9 @@ public:
             Mat4 globalInverse = localInverse * parentInverseMatrix;
             Ray localRay = ray.transformed(globalInverse);
 
-            float t;
-            Vec3 hp;
-            if (!localRay.intersectZPlane(t, hp) ||
-                hp.x < 0 || hp.x > width_ || hp.y < 0 || hp.y > height_) {
+            const Ray::Hit h = localRay.intersectZPlane();
+            if (!h.hit ||
+                h.point.x < 0 || h.point.x > width_ || h.point.y < 0 || h.point.y > height_) {
                 return HitResult{};
             }
         }
