@@ -56,10 +56,10 @@ historical context — these were on by default until 2026-05-27 (PR #97).
 
 ## Known Issues
 
-- Default value is not treated perfectly now ([Issue#1](https://github.com/funatsufumiya/tcxLua/issues/1)). So you may need additional values when using methods for example:
+- Default value is not treated perfectly now ([Issue#1](https://github.com/ffunatsu/tcxLua/issues/1)). So you may need additional values when using methods for example:
   - `clear(0.08, 1.0)` instead of `clear(0.08)`
   - `setColor(1.0, 0.0, 0.0, 1.0)` instead of `setColor(1.0, 0.0, 0.0)`
-- `end()` methods are replaced to `end_fbo()`, `end_shader()`, `end_cam()` etc ([Issue#11](https://github.com/funatsufumiya/tcxLua/issues/11)).
+- `end()` methods are replaced to `end_fbo()`, `end_shader()`, `end_cam()` etc ([Issue#11](https://github.com/ffunatsu/tcxLua/issues/11)).
 
 ## Development
 
