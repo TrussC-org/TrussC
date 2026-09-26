@@ -61,6 +61,21 @@ public:
     bool send(const std::string& message);
     bool send(const std::vector<char>& data);
 
+    // Send a Ping. Answering the server's Pings keeps a reachable connection
+    // alive, but it cannot reveal one that is gone: when the network drops
+    // silently mid-path, the server's Ping and its close never arrive, so the
+    // client stays Open and never reconnects. A long-lived client should ping
+    // on a timer, so a dead connection surfaces through TCP -- a retransmission
+    // timeout, or an RST once the path is back -- instead of hanging until the
+    // app restarts. It also keeps idle timeouts in proxies from firing when the
+    // server does not ping.
+    //
+    // The Pong is not reported to the app; a failure shows up as a disconnect.
+    // Payload is capped at 125 bytes (RFC 6455 5.5: control frames).
+    // Returns false when not connected, and on Emscripten, where the browser
+    // owns the connection and exposes no ping.
+    bool sendPing(const std::string& payload = "keepalive");
+
     State getState() const { return state_; }
     bool isConnected() const { return state_ == State::Open; }
 
@@ -83,6 +98,9 @@ private:
     void processHandshake(const std::string& header);
     void processFrame();
     void sendPong(const std::vector<char>& payload);
+
+    // One masked control frame (Ping / Pong), sent in a single write.
+    bool sendControl(uint8_t opcode, const char* data, size_t len);
 
     std::unique_ptr<TcpClient> client_;
     EventListener receiveListener_;
