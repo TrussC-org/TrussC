@@ -38,9 +38,9 @@ struct VisualNode : public Node {
     }
 
     bool hitTest(const Ray& localRay, float& outDistance) override {
-        float t; Vec3 hp;
-        if (!localRay.intersectZPlane(t, hp)) return false;
-        if (hp.x * hp.x + hp.y * hp.y <= radius * radius) { outDistance = t; return true; }
+        const Ray::Hit h = localRay.intersectZPlane();
+        if (!h.hit) return false;
+        if (h.point.x * h.point.x + h.point.y * h.point.y <= radius * radius) { outDistance = h.t; return true; }
         return false;
     }
 

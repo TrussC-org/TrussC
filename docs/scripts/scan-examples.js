@@ -14,7 +14,10 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '../../..');
-const EXAMPLES_DIR = path.join(ROOT, 'trussc/examples');
+// Repo-relative: independent of what the framework checkout is named. Deriving it
+// from ROOT hardcoded a lowercase 'trussc/', which only resolves on a
+// case-insensitive filesystem (macOS) and threw ENOENT on Linux.
+const EXAMPLES_DIR = path.join(__dirname, '../../examples');
 const API_JS = path.join(ROOT, 'trussc.org/generated/trussc-api.js');
 
 const CALLBACK_CATEGORIES = new Set(['Lifecycle', 'Events']);
@@ -34,12 +37,24 @@ function loadSymbols() {
     return { funcs, types, excluded };
 }
 
+// A directory is an example project if it has hand-written TrussC project files.
+// CMakeLists.txt used to be the marker, but it is a trusscli GENERATED file that
+// 60 of the examples gitignore, so whether it is committed is a historical
+// accident: fileExample and networkInterfaceExample were never added, which no
+// git status would ever show, and a fresh clone dropped both from the index.
+// addons.make and src/tcApp.cpp are hand-written and each present in all 97
+// examples today. Either one is enough — neither is strictly required of a
+// project, and a directory with neither is fair to skip.
+function isProject(p) {
+    return fs.existsSync(path.join(p, 'addons.make')) || fs.existsSync(path.join(p, 'src', 'tcApp.cpp'));
+}
+
 function findExamples(dir, out = []) {
     for (const name of fs.readdirSync(dir)) {
         if (name.startsWith('.') || SKIP_DIR.test(name)) continue;
         const p = path.join(dir, name);
         if (!fs.statSync(p).isDirectory()) continue;
-        if (fs.existsSync(path.join(p, 'src')) && fs.existsSync(path.join(p, 'CMakeLists.txt'))) out.push(p);
+        if (fs.existsSync(path.join(p, 'src')) && isProject(p)) out.push(p);
         else findExamples(p, out);
     }
     return out;
