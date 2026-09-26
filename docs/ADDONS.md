@@ -514,9 +514,9 @@ Each addon entry in `registry.json` looks like:
 
 ```jsonc
 {
-  "name": "tcxGeo",
-  "owner": "tettou771",            // GitHub user/org. Empty for bundled.
-  "url": "https://github.com/tettou771/tcxGeo.git",
+  "name": "tcxLua",
+  "owner": "ffunatsu",                 // GitHub user/org. Empty for bundled.
+  "url": "https://github.com/ffunatsu/tcxLua.git",
   "bundled": false,                    // true if shipped inside TrussC core
   "version": "0.1.0",
   "latest_tag": "v0.1.0",
@@ -534,10 +534,10 @@ Each addon entry in `registry.json` looks like:
 
 ### Display Convention for Name Collisions
 
-Two different repos can produce addons with the same `name` (for example, a bundled `tcxGeo` and a community `tettou771/tcxGeo`). The registry intentionally keeps both. Consumers (trusscli, the website) should display them as:
+Two different repos can produce addons with the same `name` (for example, a bundled `tcxLua` and a community `ffunatsu/tcxLua`). The registry intentionally keeps both. Consumers (trusscli, the website) should display them as:
 
-- `bundled: true` → plain `tcxGeo`
-- `bundled: false` → `owner/name` (e.g. `tettou771/tcxGeo`)
+- `bundled: true` → plain `tcxLua`
+- `bundled: false` → `owner/name` (e.g. `ffunatsu/tcxLua`)
 
 `trusscli addon clone <name>` should accept both forms; a bare `<name>` that maps to multiple entries should prompt the user to disambiguate with `<owner>/<name>`.
 

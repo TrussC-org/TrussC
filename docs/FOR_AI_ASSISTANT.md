@@ -4369,7 +4369,7 @@ trusscli addon clone <owner>/<name>    # exact GitHub repo
 trusscli addon clone <git-url>         # any HTTPS or SSH URL
 ```
 
-Ambiguous names (e.g. a bundled `tcxGeo` colliding with `tettou771/tcxGeo`) require `owner/name` disambiguation.
+Ambiguous names (e.g. a bundled `tcxLua` colliding with `ffunatsu/tcxLua`) require `owner/name` disambiguation.
 
 ### Browsing
 

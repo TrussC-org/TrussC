@@ -1,6 +1,6 @@
 {
   "description": "Lua binding",
-  "author": "tettou771",
+  "author": "Fumiya Funatsu, tettou771",
   "license": "MIT",
   "category": "bridges",
   "keywords": [
