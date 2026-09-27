@@ -95,6 +95,9 @@ void tcApp::update() {
         subRef = secondSize();
         logNotice("appSetSizeTest") << "reference: sub->setSize(" << str(kSecondB) << ") from its own window -> second "
                                     << str(subRef);
+        // A reference that did not resize anything would make S1 pass for free.
+        check("R1", !same(subRef, secondStart),
+              "reference: the second window resizes itself (" + str(secondStart) + " -> " + str(subRef) + ")");
         sub->jobs.push_back([this] { sub->setSize((float)kSecondA.x, (float)kSecondA.y); });   // restore
         step = 3;
         break;
@@ -126,11 +129,17 @@ void tcApp::update() {
         if (!settled()) break;
         mainRef = mainSize();
         logNotice("appSetSizeTest") << "reference: main->setSize(+40,+30) from the main window -> main " << str(mainRef);
-        if (same(mainRef, mainStart)) {
-            logNotice("appSetSizeTest") << "NOTE: the main window did not resize at all on this platform "
-                                           "(Linux: setWindowSizeLogical is not implemented). S3 then only "
-                                           "shows the call was not misrouted; S4 still checks the second window.";
-        }
+#if defined(__linux__)
+        // Linux cannot resize the main window (setWindowSizeLogical is not
+        // implemented), so the reference is a no-op by design there.
+        logNotice("appSetSizeTest") << "NOTE: Linux cannot resize the main window, so R2 is skipped and S3 only "
+                                       "shows the call was not misrouted; S4 still checks the second window.";
+#else
+        // A reference that did not resize the main window would make S3 pass
+        // for free (on macOS it used to resize the FOCUSED window instead).
+        check("R2", !same(mainRef, mainStart),
+              "reference: the main window resizes itself (" + str(mainStart) + " -> " + str(mainRef) + ")");
+#endif
         setSize((float)mainStart.x, (float)mainStart.y);   // restore
         step = 7;
         break;

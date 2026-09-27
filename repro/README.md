@@ -28,10 +28,15 @@ from the App's own window context, which has always resized the right
 window. So the expected value never has to be hard-coded — it holds in
 pixel-perfect mode, and on platforms where the main window cannot be resized
 (Linux: `setWindowSizeLogical` is not implemented) both sides are a no-op.
-Each check also verifies that the OTHER window did not change.
+Each check also verifies that the OTHER window did not change. R1/R2 make
+sure the references themselves resized something — a broken reference would
+let S1/S3 pass for free (on macOS, `setWindowSizeLogical` used to resize the
+FOCUSED window, so the main-window reference hit the second window).
 
 | id | call | made from | must |
 |----|------|-----------|------|
+| R1 | `sub->setSize()` (reference) | second window | actually resize the second window |
+| R2 | `mainApp->setSize()` (reference) | main window | actually resize the main window (skipped on Linux) |
 | S1 | `sub->setSize()` | main window | resize the second window like the reference |
 | S2 | (same) | | leave the main window alone |
 | S3 | `mainApp->setSize()` | second window | resize the main window like the reference |
@@ -43,7 +48,8 @@ Each check also verifies that the OTHER window did not change.
 
 ## Expected results
 
-With the fix: `RESULT: 8 passed, 0 failed`, in both runs.
+With the fix: `RESULT: 10 passed, 0 failed` on macOS / Windows,
+`9 passed, 0 failed` on Linux (R2 skipped), in both runs.
 
 Without the fix (`main`), measured on Linux (GNOME, X11):
 
@@ -56,11 +62,12 @@ Without the fix (`main`), measured on Linux (GNOME, X11):
 [FAIL] S6  ... (100x100)
 [PASS] S7        <- S7/S8 pin long-standing behavior; they pass before the fix too
 [PASS] S8
-RESULT: 4 passed, 4 failed
+RESULT: 5 passed, 4 failed   (R1 passes too)
 ```
 
-On macOS / Windows, where the main window does resize, S2 and S3 are
-expected to fail as well.
+On Windows, where the main window does resize, S2 and S3 fail as well
+(measured before R1/R2 were added: 2 passed, 6 failed). On macOS before the
+fix, R2 fails because the main-window reference resized the focused window.
 
 `[WARNING] [Platform] setWindowSize not yet implemented on Linux` lines are
 expected on Linux: they mark every call that reached the main window.
