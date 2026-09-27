@@ -59,7 +59,8 @@ public:
     // One App per window; attaching an App that is already driving another
     // window (or the main one) is an error.
     // Caveat (Phase 2): App::setSize / window-control helpers still target
-    // the MAIN window; use this Window handle to control this one.
+    // the MAIN window; use this Window handle to control this one (from
+    // inside the App, App::getWindow() returns it).
     // Note: the App's setup() runs once on the window's first tree update
     // (standard Node lifecycle), i.e. on the window's first tick.
     void setApp(std::shared_ptr<App> app);
@@ -266,6 +267,16 @@ inline void Window::setApp(std::shared_ptr<App> app) {
     if (app) internal::attachedApps.insert(app.get());
     app_ = std::move(app);
     ctx_.rootNode = app_.get();
+}
+
+// Looked up in the open-window registry rather than cached on the App: every
+// platform's close() drops app_, so a closed window stops matching here and
+// no back-pointer can dangle. The registry holds only a handful of windows.
+inline Window* App::getWindow() const {
+    for (Window* w : internal::openWindows()) {
+        if (w->getApp().get() == this) return w;
+    }
+    return nullptr;
 }
 
 #if defined(__APPLE__)

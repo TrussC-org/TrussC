@@ -22,6 +22,8 @@
 // =============================================================================
 namespace trussc {
 
+class Window;
+
 // =============================================================================
 // App - Application base class
 // Inherits from tc::RectNode and functions as scene graph root node
@@ -73,6 +75,19 @@ public:
 
     /// Check if exit has been requested
     bool isExitRequested() const { return exitRequested_; }
+
+    // -------------------------------------------------------------------------
+    // Window
+    // -------------------------------------------------------------------------
+
+    // The Window this App is attached to via Window::setApp(), or nullptr if
+    // it is not attached to one — which currently includes the main App
+    // started by runApp() (the main window is not a Window object yet) and an
+    // App whose window has been closed. Resolved from the App itself, not from
+    // the active window context, so subApp->getWindow() called from the main
+    // window's callbacks still returns the second window. Defined in
+    // tc/app/tcWindow.h (needs the complete Window).
+    Window* getWindow() const;
 
 private:
     bool exitRequested_ = false;
