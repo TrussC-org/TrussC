@@ -58,9 +58,11 @@ public:
     // children as usual for scene content.
     // One App per window; attaching an App that is already driving another
     // window (or the main one) is an error.
-    // Caveat (Phase 2): App::setSize / window-control helpers still target
-    // the MAIN window; use this Window handle to control this one (from
-    // inside the App, App::getWindow() returns it).
+    // App::setSize() resizes this window from anywhere. The global
+    // window-control functions do not: they act on the window being processed
+    // (setWindowTitle/setWindowSize, fullscreen) or on the main window only
+    // (position, decoration). To control this window from elsewhere, use this
+    // Window handle (from inside the App, App::getWindow() returns it).
     // Note: the App's setup() runs once on the window's first tree update
     // (standard Node lifecycle), i.e. on the window's first tick.
     void setApp(std::shared_ptr<App> app);
@@ -277,6 +279,33 @@ inline Window* App::getWindow() const {
         if (w->getApp().get() == this) return w;
     }
     return nullptr;
+}
+
+// Picks the window from the App, not from the active context: the global
+// setWindowSize() follows the context, so from another window's callback it
+// resized THAT window instead. Width/height get the same framebuffer ->
+// logical conversion as setWindowSize(), with the target window's own scale.
+inline void App::setSize(float w, float h) {
+    int width = static_cast<int>(w), height = static_cast<int>(h);
+    if (Window* win = getWindow()) {
+        if (internal::pixelPerfectMode) {
+            float s = win->context().dpiScale > 0.0f ? win->context().dpiScale : 1.0f;
+            width = static_cast<int>(width / s);
+            height = static_cast<int>(height / s);
+        }
+        win->setSize(width, height);
+        return;
+    }
+    if (this != internal::mainWindowContext().rootNode) {
+        RectNode::setSize(w, h);   // attached to no window: nothing to resize
+        return;
+    }
+    if (internal::pixelPerfectMode) {
+        float scale = sapp_dpi_scale();
+        width = static_cast<int>(width / scale);
+        height = static_cast<int>(height / scale);
+    }
+    setWindowSizeLogical(width, height);   // main window only; never routed
 }
 
 #if defined(__APPLE__)

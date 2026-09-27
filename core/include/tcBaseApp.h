@@ -60,11 +60,13 @@ public:
     // Size (synchronized with window)
     // -------------------------------------------------------------------------
 
-    // Override setSize to resize window
-    void setSize(float w, float h) override {
-        setWindowSize(static_cast<int>(w), static_cast<int>(h));
-        // Actual size update happens in windowResized callback
-    }
+    // Override setSize to resize the App's OWN window — the one it is attached
+    // to via Window::setApp(), or the main window for the main App — no matter
+    // which window's callback makes the call. Same units as setWindowSize().
+    // An App attached to no window resizes no window: only its RectNode size
+    // changes. The actual size update happens in the windowResized callback.
+    // Defined in tc/app/tcWindow.h (needs the complete Window).
+    void setSize(float w, float h) override;
 
     // -------------------------------------------------------------------------
     // Exit request (for programmatic termination)
