@@ -2242,6 +2242,7 @@ void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback even
 void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio)
 void App::exit()  // App exit callback (override for cleanup before shutdown)
 void App::filesDropped(const std::vector<std::string> & files)  // Files were dropped onto the window
+Window * App::getWindow() const  // The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks
 bool App::isExitRequested() const  // Whether an exit has been requested
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Key pressed. Use KEY_* constants for special keys, or uppercase char literals for printable keys (e.g. key == 'A', key == '1')
 void App::keyReleased(const KeyEventArgs & e) [+1]  // Key released

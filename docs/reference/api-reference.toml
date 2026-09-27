@@ -38,6 +38,13 @@ description.en = "Files were dropped onto the window"
 description.ja = "ウィンドウにファイルがドロップされた"
 description.ko = "윈도우에 파일이 드롭됨"
 
+["App::getWindow"]
+keywords = ["multi window", "second window", "own window", "attach"]
+description.en = "The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks"
+description.ja = "Window::setApp() でこのAppが載っているWindow。載っていなければ nullptr (runApp() で起動したメインAppと、ウィンドウが閉じられたAppを含む)。App自身から引くので、どのウィンドウのコールバックから subApp->getWindow() を呼んでも正しいウィンドウが返る"
+description.ko = "Window::setApp()으로 이 App이 연결된 Window. 연결되어 있지 않으면 nullptr (runApp()으로 시작한 메인 App과 윈도우가 닫힌 App 포함). App 자체에서 조회하므로 어느 윈도우의 콜백에서 subApp->getWindow()를 호출해도 올바른 윈도우가 반환됨"
+related = ["Window::setApp", "Window::getApp", "createWindow"]
+
 ["App::isExitRequested"]
 category = "events"
 keywords = ["quit", "close"]
