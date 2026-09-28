@@ -301,7 +301,9 @@ public:
         }
     }
 
-    // Visible state (false: only draw is skipped)
+    // Visible state (false: this node AND its descendants are not drawn and
+    // cannot be hit by the mouse; update() and timers keep running — that is
+    // the difference from setActive(false), which stops the whole subtree)
     bool isVisible() const { return isVisible_; }
     void setVisible(bool visible) {
         if (isVisible_ != visible) {
@@ -885,7 +887,8 @@ private:
         beginDraw();
 
         // User drawing, then mod draw (mods draw in the node's local space,
-        // after the node's own draw()).
+        // after the node's own draw()). An invisible node hides its whole
+        // subtree (#233): neither its own drawing nor its children.
         if (isVisible_) {
             auto& rc = internal::getDefaultContext();
             const size_t matrixDepth = rc.getMatrixStackDepth();
@@ -898,10 +901,10 @@ private:
             if (rc.getMatrixStackDepth() != matrixDepth || rc.getStyleStackDepth() != styleDepth) {
                 rc.restoreStackDepth(matrixDepth, styleDepth, getTypeName().c_str());
             }
-        }
 
-        // Draw child nodes (overridable for clipping, etc.)
-        drawChildren();
+            // Draw child nodes (overridable for clipping, etc.)
+            drawChildren();
+        }
 
         // End draw hook
         resetStyle();
@@ -1368,7 +1371,7 @@ private:
     std::vector<Ptr> children_;
     bool eventsEnabled_ = false;  // Enabled via enableEvents()
     bool isActive_ = true;        // false: update/draw are skipped
-    bool isVisible_ = true;       // false: only draw is skipped
+    bool isVisible_ = true;       // false: this node and its subtree are not drawn (update runs)
 
     // Camera this node was last drawn under (stamped each drawTree). Drives
     // per-context pick rays; see tcCameraContext.h.
