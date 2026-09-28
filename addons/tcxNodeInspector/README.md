@@ -143,6 +143,38 @@ inspector_.style().gizmoLength    = 35.0f;   // handle length / ring radius (scr
 inspector_.style().gizmoThickness = 2.0f;    // handle width (px)
 ```
 
+## What the user changed (touched)
+
+The inspector records every value the user changes by hand, per node: a
+member edited in the Inspector panel (nested members as a path such as
+`outline.color`, mod members under the mod's type), the name field, and the
+`pos` / `rotation` of every node moved or rotated with the gizmo. Changes made
+from code, or by the MCP tool `tc_set_node_members`, are not recorded.
+
+With MCP on, `tcx_imgui_get_touched` returns the record under `inspector`,
+next to tcxImGui's own `widgets`. Each entry carries the member's current value
+in the `tc_get_node_tree` encoding (rotation in degrees, colors `[r,g,b,a]`):
+
+```json
+{"nodeType": "Ball", "nodeName": "a", "nodeId": 2, "member": "outline.color",
+ "value": [0, 0.2, 0.2, 1]}
+```
+
+A destroyed node reports `"destroyed": true`, and a removed mod
+`"modRemoved": true`, each with the value as of the last edit.
+`tcx_imgui_reset_touched` clears the record. From code:
+
+```cpp
+NodeInspector::instance().getTouched();     // the same JSON array
+NodeInspector::instance().resetTouched();
+```
+
+The Hierarchy / Inspector panels are kept out of tcxImGui's `widgets` record:
+their widgets are shared by whichever node is selected, so an ImGui widget ID
+can't say whose value it was. A custom `ImGuiReflector` override takes part by
+calling `edit(name, widget)`. The old `edit(widget)` form still works but
+records nothing.
+
 ## Styling
 
 Inspectors get cramped fast, so the defaults are **compact** with a

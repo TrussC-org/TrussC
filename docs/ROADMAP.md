@@ -42,7 +42,7 @@
 | `SG_VERTEXFORMAT_INT10_N2` adoption | sokol_gfx (2026-05) added a 10-10-10-2 normalized int vertex format. Adopt for `tcMesh` normal / tangent attributes — 3x smaller than FLOAT3 with effectively no visual loss (Unity / Unreal default). D3D11 backend not yet supported upstream, so verify Windows path before committing. | Medium |
 | `TextureFormat` expansion | `tc::TextureFormat` currently exposes RGBA8/16F/32F, R8/16F/32F, RG8/16F/32F (+ `BGRA8` and `RGBA16`, added 2026-05-31 for tcxSyphon BGRA interop and tcxNozzle 16-bit interop). sokol_gfx offers more that are worth adding *when a concrete consumer appears* — not speculatively, since each needs createResources / FBO-attachment / blend-pipeline (`write_mask`) / `draw()` sampling verification per format. Candidates, roughly by usefulness: **`SRGBA8`** (`SG_PIXELFORMAT_SRGBA8`, correct sRGB color management) · **`RGB10A2`** (`SG_PIXELFORMAT_RGB10A2`, 10-bit HDR / wide gamut — pairs with the 10-bit output row below; likely the next real need) · **`RG11B10F`** (`SG_PIXELFORMAT_RG11B10F`, cheap packed HDR float, no alpha) · **`RGB9E5`** (`SG_PIXELFORMAT_RGB9E5`, shared-exponent HDR, read-only) · minor / niche: signed-normalized variants (`R8SN`/`RG8SN`/`RGBA8SN`), integer formats (`R32UI`/`RGBA32UI` etc. for compute / data textures), `R16`/`RG16`/`RGBA16` unorm-16 (depth-like precision without float), and depth/stencil formats (`DEPTH`, `DEPTH_STENCIL`) if we ever expose them as sampleable. | Low (per format, on demand) |
 | Configurable 10-bit color output | TrussC currently forces RGB10A2 swap-chain in sokol_app patches. Make it opt-in via WindowSettings once upstream sokol adds a `SAPP_PIXELFORMAT_RGB10A2` (currently not in upstream — track [floooh/sokol](https://github.com/floooh/sokol)). | Low |
-| Dear ImGui 1.92.6 → latest | Currently on 1.92.6 WIP. 1.92.8 (2026-05-12) introduced a notable breaking change: `AddRect()` / `AddPolyline()` / `PathStroke()` swapped their `flags` and `thickness` arg positions. TrussC core does not touch these, but user code that does will need updates. Inline redirection keeps source compatible unless `IMGUI_DISABLE_OBSOLETE_FUNCTIONS` is on. Plan a single bump to the latest 1.92.x. | Low |
+| Dear ImGui 1.92.6 → latest | **DONE** (2026-09): bumped from 1.92.6 WIP to v1.92.9b, the latest stable release (tcxNodeInspector's `AddPolyline()` call moved to the new `thickness, flags` order; everything that uses imgui builds with `IMGUI_DISABLE_OBSOLETE_FUNCTIONS`). The bundled copy now carries a small TrussC patch (a value hook for the MCP tools) — updates go through a 3-way merge, see [`addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md`](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md). | Low |
 
 
 ---
@@ -96,7 +96,7 @@ Image processing libraries are particularly prone to vulnerabilities, so **check
 | nlohmann/json | JSON parsing | Medium | |
 | sokol | Rendering backend | Medium | **TrussC has customizations (see below)** |
 | miniaudio | Audio | Medium | |
-| Dear ImGui | GUI (tcxImGui addon) | Low | Use stable versions |
+| Dear ImGui | GUI (tcxImGui addon) | Low | Use stable versions. Current: v1.92.9b. **Patched** (value hook for the MCP tools) — update by 3-way merge, see [`addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md`](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md) |
 
 **Update Checklist:**
 - Check GitHub Release Notes / Security Advisories

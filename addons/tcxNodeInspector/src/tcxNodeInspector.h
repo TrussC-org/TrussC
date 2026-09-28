@@ -35,14 +35,19 @@ namespace tcx::nodeinspector {
 // Read-only values (getter-only TC_VALUE) render greyed out; enums
 // render as a combo of their labels.
 struct ImGuiReflector : ::trussc::Reflector {
-    bool visit(const char* n, float& v) override       { return edit([&] { return ImGui::DragFloat(n, &v, 0.5f); }); }
-    bool visit(const char* n, int& v) override         { return edit([&] { return ImGui::DragInt(n, &v); }); }
-    bool visit(const char* n, bool& v) override        { return edit([&] { return ImGui::Checkbox(n, &v); }); }
-    bool visit(const char* n, ::tc::Vec2& v) override  { return edit([&] { return ImGui::DragFloat2(n, &v.x, 0.5f); }); }
-    bool visit(const char* n, ::tc::Vec3& v) override  { return edit([&] { return ImGui::DragFloat3(n, &v.x, 0.5f); }); }
-    bool visit(const char* n, ::tc::Color& v) override { return edit([&] { return ImGui::ColorEdit4(n, &v.r); }); }
+    // Members changed through their widget in this pass, as member paths
+    // ("radius", nested groups joined by '.': "outline.color"). The inspector
+    // records them as touched; an override that calls edit(name, ...) takes part.
+    std::vector<std::string> edited;
+
+    bool visit(const char* n, float& v) override       { return edit(n, [&] { return ImGui::DragFloat(n, &v, 0.5f); }); }
+    bool visit(const char* n, int& v) override         { return edit(n, [&] { return ImGui::DragInt(n, &v); }); }
+    bool visit(const char* n, bool& v) override        { return edit(n, [&] { return ImGui::Checkbox(n, &v); }); }
+    bool visit(const char* n, ::tc::Vec2& v) override  { return edit(n, [&] { return ImGui::DragFloat2(n, &v.x, 0.5f); }); }
+    bool visit(const char* n, ::tc::Vec3& v) override  { return edit(n, [&] { return ImGui::DragFloat3(n, &v.x, 0.5f); }); }
+    bool visit(const char* n, ::tc::Color& v) override { return edit(n, [&] { return ImGui::ColorEdit4(n, &v.r); }); }
     bool visit(const char* n, std::string& v) override {
-        return edit([&] {
+        return edit(n, [&] {
             char buf[256];
             std::snprintf(buf, sizeof(buf), "%s", v.c_str());
             if (ImGui::InputText(n, buf, sizeof(buf))) { v = buf; return true; }
@@ -50,7 +55,7 @@ struct ImGuiReflector : ::trussc::Reflector {
         });
     }
     bool visit(const char* n, int& v, const ::trussc::EnumLabelSpan& labels) override {
-        return edit([&] {
+        return edit(n, [&] {
             const char* preview = (v >= 0 && v < labels.count) ? labels.labels[v] : "(?)";
             bool changed = false;
             if (ImGui::BeginCombo(n, preview)) {
@@ -68,6 +73,7 @@ struct ImGuiReflector : ::trussc::Reflector {
     // its whole subtree so the reflected children draw nothing.
     void beginGroup(const char* name) override {
         depth_++;
+        groupNames_.push_back(name);
         if (suppressDepth_ > 0) { groupState_.push_back(0); return; }
         bool open = ImGui::TreeNodeEx(
             name, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth);
@@ -83,25 +89,39 @@ struct ImGuiReflector : ::trussc::Reflector {
         groupState_.pop_back();
         if (state == 1) ImGui::TreePop();
         if (suppressDepth_ == depth_) suppressDepth_ = 0;
+        groupNames_.pop_back();
         depth_--;
     }
 
 protected:
     // Run a widget; suppress inside a collapsed group, grey out when read-only.
+    // A change is recorded in `edited` under the member's path.
     template <class F>
-    bool edit(F&& widget) {
+    bool edit(const char* name, F&& widget) {
         if (suppressDepth_ > 0) return false;
-        if (!isReadOnly()) return widget();
+        if (!isReadOnly()) {
+            bool changed = widget();
+            if (changed && name) {
+                std::string path;
+                for (auto& g : groupNames_) { path += g; path += '.'; }
+                edited.push_back(path + name);
+            }
+            return changed;
+        }
         ImGui::BeginDisabled(true);
         widget();
         ImGui::EndDisabled();
         return false;
     }
+    // Unnamed form (kept for overrides written against it): nothing is recorded.
+    template <class F>
+    bool edit(F&& widget) { return edit(nullptr, std::forward<F>(widget)); }
 
 private:
     int depth_ = 0;                  // current group nesting depth
     int suppressDepth_ = 0;          // >0: suppress until we exit this depth
     std::vector<int> groupState_;    // per open group: 0 suppressed, 1 open, 2 collapsed
+    std::vector<std::string> groupNames_;   // enclosing group names (member paths)
 };
 
 // A single debug overlay per app — NodeInspector is a singleton, not something
@@ -221,6 +241,19 @@ public:
     void toggleInSelection(::tc::Node* n);            // = Cmd/Ctrl+click
     void clearSelection();
 
+    // -------------------------------------------------------------------------
+    // Touched: what the user changed by hand, per node
+    // -------------------------------------------------------------------------
+    // Every member edited in the Inspector panel (the name field included) and
+    // every node moved / rotated with the gizmo is recorded under its node,
+    // mod and member path until resetTouched(). Changes made from code or by
+    // the MCP tool tc_set_node_members are not recorded. The MCP tool
+    // tcx_imgui_get_touched reports them (key "inspector") with each member's
+    // current value, in the tc_get_node_tree encoding; tcx_imgui_reset_touched
+    // clears them along with the ImGui widgets' record.
+    ::tc::Json getTouched();
+    void resetTouched() { touched_.clear(); }
+
 private:
     Style    style_;
     bool     enabled_      = true;
@@ -228,7 +261,7 @@ private:
     uint64_t nameBufFor_   = 0;
 
     // Singleton: no user-constructed instances (use instance() / the static API).
-    NodeInspector() = default;
+    NodeInspector();
     NodeInspector(const NodeInspector&) = delete;
     NodeInspector& operator=(const NodeInspector&) = delete;
 
@@ -302,6 +335,23 @@ private:
     std::vector<std::weak_ptr<::tc::Node>> selection_;
     ::tc::Node* lastPrimary_ = nullptr;   // last core selectedNode we synced with
     void reconcileSelection();            // prune dead + collapse on external change
+
+    // --- touched ---------------------------------------------------------------
+    // Keyed by node + mod + member path. The Inspector's widgets are reused
+    // for whichever node is selected (one ImGuiID for "radius" of every node),
+    // so the ImGui-level record can't say whose value it was — hence this one,
+    // and the Hierarchy / Inspector panels are kept out of the ImGui record.
+    struct TouchedMember {
+        std::weak_ptr<::tc::Node> node;
+        uint64_t          nodeId = 0;
+        std::string       nodeType, nodeName;
+        const ::tc::Mod*  mod = nullptr;   // identity only (may have been removed since)
+        std::string       modType;
+        std::string       member;          // "pos", "outline.color", "name"
+        ::tc::Json        value;           // as of the last edit / read (reported once gone)
+    };
+    std::vector<TouchedMember> touched_;
+    void recordTouched(::tc::Node* node, ::tc::Mod* mod, const std::string& member);
 };
 
 } // namespace tcx::nodeinspector

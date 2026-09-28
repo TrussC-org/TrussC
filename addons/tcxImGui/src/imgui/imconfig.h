@@ -43,18 +43,66 @@
 //#define IMGUI_DISABLE_WIN32_DEFAULT_IME_FUNCTIONS         // [Win32] [Default with non-Visual Studio compilers] Don't implement default IME handler (won't require imm32.lib/.a)
 //#define IMGUI_DISABLE_WIN32_FUNCTIONS                     // [Win32] Won't use and link with any Win32 function (clipboard, IME).
 //#define IMGUI_ENABLE_OSX_DEFAULT_CLIPBOARD_FUNCTIONS      // [OSX] Implement default OSX clipboard handler (need to link with '-framework ApplicationServices', this is why this is not the default).
+//#define IMGUI_DISABLE_TIME_FUNCTIONS                      // Don't setup default platform_io.Platform_SessionDate value using time(), localtime_r().
 //#define IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS             // Don't implement default platform_io.Platform_OpenInShellFn() handler (Win32: ShellExecute(), require shell32.lib/.a, Mac/Linux: use system("")).
 //#define IMGUI_DISABLE_DEFAULT_FORMAT_FUNCTIONS            // Don't implement ImFormatString/ImFormatStringV so you can implement them yourself (e.g. if you don't want to link with vsnprintf)
 //#define IMGUI_DISABLE_DEFAULT_MATH_FUNCTIONS              // Don't implement ImFabs/ImSqrt/ImPow/ImFmod/ImCos/ImSin/ImAcos/ImAtan2 so you can implement them yourself.
 //#define IMGUI_DISABLE_FILE_FUNCTIONS                      // Don't implement ImFileOpen/ImFileClose/ImFileRead/ImFileWrite and ImFileHandle at all (replace them with dummies)
 //#define IMGUI_DISABLE_DEFAULT_FILE_FUNCTIONS              // Don't implement ImFileOpen/ImFileClose/ImFileRead/ImFileWrite and ImFileHandle so you can implement them yourself if you don't want to link with fopen/fclose/fread/fwrite. This will also disable the LogToTTY() function.
 //#define IMGUI_DISABLE_DEFAULT_ALLOCATORS                  // Don't implement default allocators calling malloc()/free() to avoid linking with them. You will need to call ImGui::SetAllocatorFunctions().
-//#define IMGUI_DISABLE_DEFAULT_FONT                        // Disable default embedded font (ProggyClean.ttf), remove ~9.5 KB from output binary. AddFontDefault() will assert.
+//#define IMGUI_DISABLE_DEFAULT_FONT                        // Disable default embedded fonts (ProggyClean + ProggyForever). Remove ~9 KB + ~14 KB from output binary. AddFontDefaultXXX() functions will assert.
+//#define IMGUI_DISABLE_DEFAULT_FONT_BITMAP                 // Disable default embedded bitmap font (ProggyClean). Remove ~9 KB from output binary. AddFontDefaultBitmap() will assert.
+//#define IMGUI_DISABLE_DEFAULT_FONT_VECTOR                 // Disable default embedded vector font (ProggyForever), Remove ~14 KB from output binary. AddFontDefaultVector() will assert.
 //#define IMGUI_DISABLE_SSE                                 // Disable use of SSE intrinsics even if available
 
 //---- Enable Test Engine / Automation features.
-// TrussC: Enable test engine hooks for MCP ImGui tools (widget collection)
+// [TrussC] Enable test engine hooks for MCP ImGui tools (widget collection)
 #define IMGUI_ENABLE_TEST_ENGINE
+
+// [TrussC] begin: widget value hook (MCP tools read the values of value widgets)
+// Dear ImGui keeps no widget values (the caller's variable owns them) and the
+// test engine hooks never see the variable. imgui_widgets.cpp therefore
+// declares IMGUI_TC_ITEM_VALUE() once in each value widget, where the pointer
+// to the caller's variable and its type are in hand. It declares a scope object
+// that calls ImGuiTcHook_ItemValue() when the widget function RETURNS, through
+// any return path, so the hook sees the final value of this frame (after drag,
+// slider and text-input edits). Active only while TestEngineHookItems is set.
+// Implemented by tcxImGui (tcImGuiHooks.h). See TRUSSC_MODIFICATIONS.md; every
+// patched line in imgui_widgets.cpp carries a "[TrussC]" comment.
+struct ImGuiContext;
+enum ImGuiTcValueKind_
+{
+    ImGuiTcValueKind_Drag = 1,      // DragScalar(N): Data = the value(s), Components = N
+    ImGuiTcValueKind_Slider,        // SliderScalar(N), VSliderScalar
+    ImGuiTcValueKind_SliderAngle,   // SliderAngle: Data = the float in radians (displayed in degrees)
+    ImGuiTcValueKind_Input,         // InputScalar(N)
+    ImGuiTcValueKind_Color,         // ColorEdit4/ColorPicker4: Data = float[Components], Flags = ImGuiColorEditFlags
+    ImGuiTcValueKind_Combo,         // Combo: Data = int* current item
+    ImGuiTcValueKind_ComboPreview,  // BeginCombo: Data = const char* preview value (may be NULL)
+    ImGuiTcValueKind_Text,          // InputTextEx: Data = char* const* (the function's 'buf' variable,
+                                    //   which a resize callback may repoint), Flags = ImGuiInputTextFlags
+};
+struct ImGuiTcItemValue;
+extern void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item);
+extern unsigned int ImGuiTcHook_EditCount(ImGuiContext* ctx);   // edits the hooks have seen so far
+struct ImGuiTcItemValue
+{
+    ImGuiContext*   Ctx;            // NULL when hooks are off: nothing is reported
+    void*           Window;         // ImGuiWindow* current at entry (a combo popup may be current at exit)
+    unsigned int    Id;             // ImGuiID, or 0 = the ID of Label in Window (composite widgets)
+    const char*     Label;
+    int             Kind;           // ImGuiTcValueKind_
+    int             DataType;       // ImGuiDataType of each component
+    const void*     Data;
+    int             Components;
+    int             Flags;
+    unsigned int    EditCountAtEntry;   // an edit of a part (a component, ##X in ColorEdit) counts as an edit of the whole
+    ~ImGuiTcItemValue() { if (Ctx) ImGuiTcHook_ItemValue(this); }
+};
+#define IMGUI_TC_ITEM_VALUE(_ID, _LABEL, _KIND, _DATA_TYPE, _DATA, _COMPONENTS, _FLAGS) \
+    ImGuiTcItemValue imgui_tc_item_value = { GImGui->TestEngineHookItems ? GImGui : NULL, GImGui->CurrentWindow, _ID, _LABEL, _KIND, _DATA_TYPE, _DATA, _COMPONENTS, (int)(_FLAGS), \
+                                             GImGui->TestEngineHookItems ? ImGuiTcHook_EditCount(GImGui) : 0u }
+// [TrussC] end
 
 //---- Include imgui_user.h at the end of imgui.h as a convenience
 // May be convenient for some users to only explicitly include vanilla imgui.h and have extra stuff included.

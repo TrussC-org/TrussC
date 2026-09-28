@@ -3,14 +3,27 @@
 // =============================================================================
 // tcImGuiHooks.h - ImGui Test Engine Hook implementations + Widget Registry
 //
-// Provides the extern functions required by IMGUI_ENABLE_TEST_ENGINE.
-// Separated from tcImGuiTools.h so that imgui_impl.mm/.cpp can include
-// this without pulling in MCP / nlohmann dependencies.
+// Provides the extern functions required by IMGUI_ENABLE_TEST_ENGINE, plus the
+// [TrussC] value hook (see imgui/imconfig.h) that reports the value of each
+// value widget. Separated from tcImGuiTools.h so that imgui_impl.mm/.cpp can
+// include this without pulling in MCP / nlohmann dependencies.
+//
+// Two registries:
+// - Per ImGui context, the widgets of the last completed frame (labels, rects,
+//   status flags, values). Rebuilt every frame; what tcx_imgui_get_widgets
+//   lists. One per context, so every window running imgui is listed.
+// - "Touched": every widget whose value was changed through the widget (drag,
+//   typing, a click) since startup or the last resetTouched(). Kept across
+//   frames with the last known value, so it survives the widget not being
+//   drawn (collapsed tree, closed window). ImGuiItemStatusFlags_Edited is only
+//   set by widget interaction, never by code assigning the variable.
 // =============================================================================
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
 
+#include <cstdint>
+#include <cstring>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -18,60 +31,221 @@
 namespace tcx::imgui {
 
 // ---------------------------------------------------------------------------
+// Widget value reported by the [TrussC] value hook
+// ---------------------------------------------------------------------------
+struct WidgetValue {
+    int kind = 0;                      // ImGuiTcValueKind_* (0 = no value)
+    ImGuiDataType dataType = 0;        // scalar kinds: type of each component
+    int components = 0;
+    std::vector<unsigned char> bytes;  // components * sizeof(dataType), copied at report time
+    bool hasText = false;
+    std::string text;                  // Text: the string; Combo(Preview): the item shown
+    bool hsv = false;                  // Color: the variable holds HSV (ImGuiColorEditFlags_InputHSV)
+    bool password = false;             // Text: password field, the string is withheld
+    bool truncated = false;            // Text: longer than kMaxTextBytes
+
+    static constexpr size_t kMaxTextBytes = 64 * 1024;
+};
+
+// ---------------------------------------------------------------------------
 // Widget info collected from Test Engine hooks
 // ---------------------------------------------------------------------------
 struct WidgetInfo {
     ImGuiID id = 0;
     std::string label;
-    std::string windowName;
+    std::string windowName;            // the ImGui window (panel) it was submitted to
     ImRect rect;
     ImGuiItemStatusFlags statusFlags = 0;
+    WidgetValue value;
 };
 
-// ---------------------------------------------------------------------------
-// Double-buffered widget registry
-// ---------------------------------------------------------------------------
+// A widget changed by interaction since startup / the last resetTouched()
+struct TouchedWidget {
+    ImGuiContext* ctx = nullptr;       // null once that context is destroyed (window closed)
+    ImGuiID id = 0;
+    std::string label;
+    std::string windowName;
+    ImGuiItemStatusFlags statusFlags = 0;   // last seen (Checkable/Checked for checkboxes)
+    WidgetValue value;                 // last known value
+};
+
 namespace detail {
+
+// Per ImGui context (each window running imgui has its own)
+struct ContextState {
     // Current frame (written during ImGui rendering)
-    inline std::vector<WidgetInfo> currentFrame;
-    inline std::unordered_map<ImGuiID, size_t> currentIdMap;
+    std::vector<WidgetInfo> currentFrame;
+    std::unordered_map<ImGuiID, size_t> currentIdMap;
 
     // Last completed frame (read by MCP tools)
-    inline std::vector<WidgetInfo> lastFrame;
+    std::vector<WidgetInfo> lastFrame;
+    std::unordered_map<ImGuiID, size_t> lastIdMap;
 
-    // Whether collection is active
-    inline bool collecting = false;
+    // Edits the hooks have seen so far (see ImGuiTcItemValue::EditCountAtEntry)
+    unsigned int editCount = 0;
+
+    // The combo whose popup is open at each BeginComboDepth (index depth - 1):
+    // a pick in the popup (a Selectable) is an edit of that combo.
+    struct OpenCombo { ImGuiID id = 0; std::string label, windowName; };
+    std::vector<OpenCombo> openCombos;
+
+    // Opaque owner tag (tcxImGui: the tc::internal::WindowContext*), so tools
+    // can say which OS window a widget is in
+    const void* owner = nullptr;
+};
+
+inline std::unordered_map<ImGuiContext*, ContextState>& contexts() {
+    static std::unordered_map<ImGuiContext*, ContextState> m;
+    return m;
 }
 
-// Begin frame: clear current buffer
+inline std::vector<TouchedWidget>& touched() {
+    static std::vector<TouchedWidget> v;
+    return v;
+}
+
+// Whether collection is active
+inline bool collecting = false;
+
+// > 0 while a TouchedExclusionScope is open: edits are not recorded as touched
+inline int touchedExcludeDepth = 0;
+
+inline TouchedWidget* findTouched(ImGuiContext* ctx, ImGuiID id) {
+    for (auto& t : touched()) {
+        if (t.ctx == ctx && t.id == id) return &t;
+    }
+    return nullptr;
+}
+
+inline TouchedWidget& markTouched(ImGuiContext* ctx, ImGuiID id) {
+    touched().push_back(TouchedWidget{});
+    TouchedWidget& t = touched().back();
+    t.ctx = ctx;
+    t.id = id;
+    return t;
+}
+
+// Inside a ColorEdit/ColorPicker, its parts (##X, ##Text, ##picker, ...) run as
+// widgets of their own on temporaries. The whole widget reports instead.
+inline bool insideColorWidget(ImGuiContext* ctx) {
+    return ctx->ColorEditCurrentID != 0;
+}
+
+inline void captureValue(WidgetValue& out, const ImGuiTcItemValue& item, ImGuiContext* ctx) {
+    out = WidgetValue{};
+    out.kind = item.Kind;
+    switch (item.Kind) {
+    case ImGuiTcValueKind_Text: {
+        out.password = (item.Flags & ImGuiInputTextFlags_Password) != 0;
+        const char* s = *static_cast<char* const*>(item.Data);
+        if (!out.password && s) {
+            size_t n = strnlen(s, WidgetValue::kMaxTextBytes + 1);
+            out.truncated = n > WidgetValue::kMaxTextBytes;
+            out.text.assign(s, out.truncated ? WidgetValue::kMaxTextBytes : n);
+        }
+        out.hasText = !out.password;
+        break;
+    }
+    case ImGuiTcValueKind_ComboPreview: {
+        const char* s = static_cast<const char*>(item.Data);
+        out.hasText = s != nullptr;
+        if (s) out.text = s;
+        break;
+    }
+    default: {
+        out.dataType = item.DataType;
+        out.components = item.Components;
+        size_t size = ImGui::DataTypeGetInfo(item.DataType)->Size * (size_t)item.Components;
+        out.bytes.resize(size);
+        std::memcpy(out.bytes.data(), item.Data, size);
+        if (item.Kind == ImGuiTcValueKind_Color) {
+            // Like ColorEdit4 itself: the IO default applies when the widget
+            // flags don't pick an input format.
+            ImGuiColorEditFlags f = item.Flags;
+            if (!(f & ImGuiColorEditFlags_InputMask_)) f |= ctx->IO.ConfigColorEditFlags & ImGuiColorEditFlags_InputMask_;
+            out.hsv = (f & ImGuiColorEditFlags_InputHSV) != 0;
+        }
+        break;
+    }
+    }
+}
+
+// Combo: BeginCombo (inside Combo) already reported the item shown; keep it.
+inline void mergeValue(WidgetValue& dst, WidgetValue&& src) {
+    if (src.kind == ImGuiTcValueKind_Combo &&
+        (dst.kind == ImGuiTcValueKind_ComboPreview || dst.kind == ImGuiTcValueKind_Combo)) {
+        src.hasText = dst.hasText;
+        src.text = std::move(dst.text);
+    }
+    dst = std::move(src);
+}
+
+} // namespace detail
+
+// Begin frame: clear the current context's buffer. Also turns the hooks on for
+// this context — every window's imgui runs its own context, and hook
+// collection is a per-context switch.
 inline void beginFrame() {
     if (!detail::collecting) return;
-    detail::currentFrame.clear();
-    detail::currentIdMap.clear();
+    ImGuiContext* ctx = ImGui::GetCurrentContext();
+    if (!ctx) return;
+    ctx->TestEngineHookItems = true;
+    auto& cs = detail::contexts()[ctx];
+    cs.currentFrame.clear();
+    cs.currentIdMap.clear();
 }
 
 // Swap frames: move current to last
 inline void swapFrames() {
     if (!detail::collecting) return;
-    detail::lastFrame.swap(detail::currentFrame);
+    ImGuiContext* ctx = ImGui::GetCurrentContext();
+    if (!ctx) return;
+    auto& cs = detail::contexts()[ctx];
+    cs.lastFrame.swap(cs.currentFrame);
+    cs.lastIdMap.swap(cs.currentIdMap);
 }
 
 // Enable/disable collection
 inline void enableCollection() {
-    auto* ctx = ImGui::GetCurrentContext();
-    if (ctx) {
-        ctx->TestEngineHookItems = true;
-    }
+    if (auto* ctx = ImGui::GetCurrentContext()) ctx->TestEngineHookItems = true;
     detail::collecting = true;
 }
 
 inline void disableCollection() {
-    auto* ctx = ImGui::GetCurrentContext();
-    if (ctx) {
-        ctx->TestEngineHookItems = false;
-    }
+    for (auto& [ctx, cs] : detail::contexts()) ctx->TestEngineHookItems = false;
+    if (auto* ctx = ImGui::GetCurrentContext()) ctx->TestEngineHookItems = false;
     detail::collecting = false;
 }
+
+// Tag a context with its owner (tcxImGui: the WindowContext it renders into).
+inline void setContextOwner(ImGuiContext* ctx, const void* owner) {
+    if (ctx) detail::contexts()[ctx].owner = owner;
+}
+
+// Call before destroying an ImGui context: drops its frame registry. Its
+// touched widgets stay listed (last known value) but no longer update.
+inline void forgetContext(ImGuiContext* ctx) {
+    if (!ctx) return;
+    detail::contexts().erase(ctx);
+    for (auto& t : detail::touched()) {
+        if (t.ctx == ctx) t.ctx = nullptr;
+    }
+}
+
+// Widgets changed by interaction since startup / the last resetTouched()
+inline const std::vector<TouchedWidget>& getTouched() { return detail::touched(); }
+inline void resetTouched() { detail::touched().clear(); }
+
+// While one is alive, edits made through imgui widgets are not recorded as
+// touched. For tools that keep their own record of what the user changed
+// (tcxNodeInspector: its widgets are reused for whichever node is selected, so
+// an ImGuiID can't say which node's value it was).
+struct TouchedExclusionScope {
+    TouchedExclusionScope()  { ++detail::touchedExcludeDepth; }
+    ~TouchedExclusionScope() { --detail::touchedExcludeDepth; }
+    TouchedExclusionScope(const TouchedExclusionScope&) = delete;
+    TouchedExclusionScope& operator=(const TouchedExclusionScope&) = delete;
+};
 
 } // namespace tcx::imgui
 
@@ -84,38 +258,65 @@ inline void disableCollection() {
 inline void ImGuiTestEngineHook_ItemAdd(ImGuiContext* ctx, ImGuiID id, const ImRect& bb, const ImGuiLastItemData* item_data) {
     if (!tcx::imgui::detail::collecting) return;
 
-    std::string windowName;
-    if (ctx->CurrentWindow) {
-        windowName = ctx->CurrentWindow->Name;
-    }
+    auto& cs = tcx::imgui::detail::contexts()[ctx];
 
     tcx::imgui::WidgetInfo info;
     info.id = id;
     info.rect = bb;
-    info.windowName = std::move(windowName);
+    if (ctx->CurrentWindow) {
+        info.windowName = ctx->CurrentWindow->Name;
+    }
     if (item_data) {
         info.statusFlags = item_data->StatusFlags;
     }
 
-    auto& cur = tcx::imgui::detail::currentFrame;
-    auto& idMap = tcx::imgui::detail::currentIdMap;
-
-    size_t idx = cur.size();
-    cur.push_back(std::move(info));
-    idMap[id] = idx;
+    size_t idx = cs.currentFrame.size();
+    cs.currentFrame.push_back(std::move(info));
+    cs.currentIdMap[id] = idx;
 }
 
 inline void ImGuiTestEngineHook_ItemInfo(ImGuiContext* ctx, ImGuiID id, const char* label, ImGuiItemStatusFlags flags) {
-    if (!tcx::imgui::detail::collecting) return;
-    (void)ctx;
+    namespace d = tcx::imgui::detail;
+    if (!d::collecting) return;
 
-    auto& idMap = tcx::imgui::detail::currentIdMap;
-    auto it = idMap.find(id);
-    if (it == idMap.end()) return;
+    auto& cs = d::contexts()[ctx];
+    if (flags & ImGuiItemStatusFlags_Edited) cs.editCount++;
 
-    auto& widget = tcx::imgui::detail::currentFrame[it->second];
+    auto it = cs.currentIdMap.find(id);
+    if (it == cs.currentIdMap.end()) return;
+
+    auto& widget = cs.currentFrame[it->second];
     if (label) widget.label = label;
     widget.statusFlags = flags;
+
+    // A pick inside a combo popup is an edit of the combo, not of the item
+    // picked (also covers custom BeginCombo/Selectable combos).
+    if (ctx->BeginComboDepth > 0) {
+        if ((flags & ImGuiItemStatusFlags_Edited) && d::touchedExcludeDepth == 0 &&
+            (size_t)ctx->BeginComboDepth <= cs.openCombos.size()) {
+            const auto& combo = cs.openCombos[ctx->BeginComboDepth - 1];
+            if (combo.id && !d::findTouched(ctx, combo.id)) {
+                auto& t = d::markTouched(ctx, combo.id);
+                t.label = combo.label;
+                t.windowName = combo.windowName;
+            }
+        }
+        return;
+    }
+
+    // Touched: an interaction changed this widget. Widgets that report a value
+    // are also marked from the value hook (which also catches the widgets
+    // that set Edited only after their ItemInfo, e.g. InputScalar).
+    if (widget.label.empty() || d::insideColorWidget(ctx)) return;
+    tcx::imgui::TouchedWidget* t = d::findTouched(ctx, id);
+    if (!t && (flags & ImGuiItemStatusFlags_Edited) && d::touchedExcludeDepth == 0) {
+        t = &d::markTouched(ctx, id);
+    }
+    if (t) {
+        t->label = widget.label;
+        t->windowName = widget.windowName;
+        t->statusFlags = flags;
+    }
 }
 
 inline void ImGuiTestEngineHook_Log(ImGuiContext* ctx, const char* fmt, ...) {
@@ -124,12 +325,96 @@ inline void ImGuiTestEngineHook_Log(ImGuiContext* ctx, const char* fmt, ...) {
 }
 
 inline const char* ImGuiTestEngine_FindItemDebugLabel(ImGuiContext* ctx, ImGuiID id) {
-    (void)ctx;
-    auto& idMap = tcx::imgui::detail::currentIdMap;
-    auto it = idMap.find(id);
-    if (it != idMap.end()) {
-        auto& w = tcx::imgui::detail::currentFrame[it->second];
+    auto& contexts = tcx::imgui::detail::contexts();
+    auto cit = contexts.find(ctx);
+    if (cit == contexts.end()) return nullptr;
+    auto& cs = cit->second;
+    auto it = cs.currentIdMap.find(id);
+    if (it != cs.currentIdMap.end()) {
+        auto& w = cs.currentFrame[it->second];
         if (!w.label.empty()) return w.label.c_str();
     }
     return nullptr;
+}
+
+// -----------------------------------------------------------------------------
+// [TrussC] value hook (declared in imgui/imconfig.h)
+// -----------------------------------------------------------------------------
+
+inline unsigned int ImGuiTcHook_EditCount(ImGuiContext* ctx) {
+    return tcx::imgui::detail::contexts()[ctx].editCount;
+}
+
+// Runs when a value widget returns. The widget's own item (or, for a
+// composite widget, its group) is g.LastItemData at this point.
+inline void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item) {
+    namespace d = tcx::imgui::detail;
+    if (!d::collecting || !item || !item->Ctx) return;
+    ImGuiContext* ctx = item->Ctx;
+    ImGuiWindow* window = static_cast<ImGuiWindow*>(item->Window);
+    auto& cs = d::contexts()[ctx];
+
+    // Edited by this call: its own item, or any part of it (a component of
+    // DragFloat3, ##X inside ColorEdit). Counting it also lets an enclosing
+    // widget see this edit.
+    bool edited = cs.editCount != item->EditCountAtEntry;
+    if (item->Kind != ImGuiTcValueKind_ComboPreview &&   // BeginCombo may return inside its popup
+        (ctx->LastItemData.StatusFlags & ImGuiItemStatusFlags_Edited)) {
+        edited = true;
+    }
+    if (edited) cs.editCount++;
+
+    // Nothing was submitted (collapsed / hidden window).
+    if (!window || window->SkipItems) return;
+    // A part of a ColorEdit/ColorPicker: the whole reports.
+    if (d::insideColorWidget(ctx)) return;
+    // The text field of a Ctrl+Click'ed Drag/Slider: that widget reports.
+    if (item->Kind == ImGuiTcValueKind_Text && (item->Flags & ImGuiInputTextFlags_TempInput)) return;
+    // A component of a multi-component widget (label ""): the group reports.
+    if (!item->Label || !item->Label[0]) return;
+
+    const ImGuiID id = item->Id ? item->Id : window->GetID(item->Label);
+
+    // BeginCombo that opened its popup returns with the popup current.
+    if (item->Kind == ImGuiTcValueKind_ComboPreview && ctx->BeginComboDepth > 0 &&
+        ctx->CurrentWindow != window) {
+        cs.openCombos.resize((size_t)ctx->BeginComboDepth);
+        cs.openCombos.back() = {id, item->Label, window->Name};
+    }
+
+    tcx::imgui::WidgetValue value;
+    d::captureValue(value, *item, ctx);
+
+    // Frame registry. A single widget already has an entry (ItemAdd); a group
+    // (DragFloat3, ColorEdit4, ...) never went through ItemAdd under its own
+    // ID, so it gets one here when its group was visible.
+    auto it = cs.currentIdMap.find(id);
+    if (it != cs.currentIdMap.end()) {
+        auto& entry = cs.currentFrame[it->second];
+        // BeginCombo registers no label (no ItemInfo upstream); its hook runs
+        // only once ItemAdd let the combo through, so name it here.
+        if (item->Kind == ImGuiTcValueKind_ComboPreview && entry.label.empty()) entry.label = item->Label;
+        d::mergeValue(entry.value, tcx::imgui::WidgetValue(value));
+    } else if (!item->Id && (ctx->LastItemData.StatusFlags & ImGuiItemStatusFlags_Visible)) {
+        tcx::imgui::WidgetInfo info;
+        info.id = id;
+        info.label = item->Label;
+        info.windowName = window->Name;
+        info.rect = ctx->LastItemData.Rect;
+        info.statusFlags = ctx->LastItemData.StatusFlags | ImGuiItemStatusFlags_Inputable;
+        info.value = value;
+        cs.currentIdMap[id] = cs.currentFrame.size();
+        cs.currentFrame.push_back(std::move(info));
+    }
+
+    // Touched registry
+    tcx::imgui::TouchedWidget* t = d::findTouched(ctx, id);
+    if (!t && edited && item->Kind != ImGuiTcValueKind_ComboPreview && d::touchedExcludeDepth == 0) {
+        t = &d::markTouched(ctx, id);
+    }
+    if (t) {
+        t->label = item->Label;
+        t->windowName = window->Name;
+        d::mergeValue(t->value, std::move(value));
+    }
 }
