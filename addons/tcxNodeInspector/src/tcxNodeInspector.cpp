@@ -42,7 +42,87 @@ struct StyleScope {
     }
 };
 
+// The member's current value in the tc_get_node_tree encoding (null if the
+// path no longer resolves). "name" without a mod is the node's name field.
+Json memberValue(Node* node, Mod* mod, const string& member) {
+    if (!mod && member == "name") return node->getName();
+    Json j = mod ? reflectToJson(*mod) : reflectToJson(*node);
+    const Json* cur = &j;
+    size_t start = 0;
+    while (true) {
+        size_t dot = member.find('.', start);
+        string key = member.substr(start, dot == string::npos ? string::npos : dot - start);
+        if (!cur->is_object()) return nullptr;
+        auto it = cur->find(key);
+        if (it == cur->end()) return nullptr;
+        cur = &*it;
+        if (dot == string::npos) return *cur;
+        start = dot + 1;
+    }
+}
+
+bool hasMod(Node* node, const Mod* mod) {
+    for (Mod* m : node->getMods()) {
+        if (m == mod) return true;
+    }
+    return false;
+}
+
 } // namespace
+
+NodeInspector::NodeInspector() {
+    // Hand-made edits show up in tcx_imgui_get_touched (key "inspector") and
+    // are cleared by tcx_imgui_reset_touched.
+    tcx::imgui::addTouchedSource("inspector",
+                                 [this] { return getTouched(); },
+                                 [this] { resetTouched(); });
+}
+
+void NodeInspector::recordTouched(Node* node, Mod* mod, const string& member) {
+    if (!node) return;
+    const uint64_t id = node->getInstanceId();
+    TouchedMember* t = nullptr;
+    for (auto& e : touched_) {
+        if (e.nodeId == id && e.mod == mod && e.member == member) { t = &e; break; }
+    }
+    if (!t) {
+        touched_.push_back(TouchedMember{});
+        t = &touched_.back();
+        t->node = node->weak_from_this();
+        t->nodeId = id;
+        t->mod = mod;
+        t->member = member;
+        if (mod) { Mod& m = *mod; t->modType = shortTypeName(typeid(m)); }
+    }
+    t->nodeType = node->getTypeName();
+    t->nodeName = node->hasName() ? node->getName() : string();
+    t->value = memberValue(node, mod, member);
+}
+
+Json NodeInspector::getTouched() {
+    Json arr = Json::array();
+    for (auto& t : touched_) {
+        auto node = t.node.lock();
+        if (node) {   // current names / value while the node lives
+            t.nodeType = node->getTypeName();
+            t.nodeName = node->hasName() ? node->getName() : string();
+        }
+        Json e = {{"nodeType", t.nodeType}, {"nodeId", t.nodeId}};
+        if (!t.nodeName.empty()) e["nodeName"] = t.nodeName;
+        if (t.mod) e["mod"] = t.modType;
+        e["member"] = t.member;
+        if (!node) {
+            e["destroyed"] = true;             // value as of the last edit
+        } else if (t.mod && !hasMod(node.get(), t.mod)) {
+            e["modRemoved"] = true;            // value as of the last edit
+        } else {
+            t.value = memberValue(node.get(), const_cast<Mod*>(t.mod), t.member);
+        }
+        e["value"] = t.value;
+        arr.push_back(std::move(e));
+    }
+    return arr;
+}
 
 void NodeInspector::syncNameBuf(Node* node) {
     snprintf(nameBuf_, sizeof(nameBuf_), "%s", node->getName().c_str());
@@ -129,6 +209,7 @@ void NodeInspector::draw(Node& root) {
 
 void NodeInspector::drawHierarchy(Node& root) {
     if (!enabled_) return;
+    tcx::imgui::TouchedExclusionScope noImGuiTouched;   // see TouchedMember
     StyleScope ss(style_);
     ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(240, 420), ImGuiCond_FirstUseEver);
@@ -164,6 +245,7 @@ void NodeInspector::drawTreeNode(const Node::Ptr& node) {
 
 void NodeInspector::drawInspector() {
     if (!enabled_) return;
+    tcx::imgui::TouchedExclusionScope noImGuiTouched;   // recorded per node instead
     StyleScope ss(style_);
     ImGui::SetNextWindowPos(ImVec2(260, 10), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(280, 420), ImGuiCond_FirstUseEver);
@@ -186,11 +268,15 @@ void NodeInspector::drawInspector() {
                         static_cast<unsigned long long>(node->getInstanceId()));
 
     if (nameBufFor_ != node->getInstanceId()) syncNameBuf(node);
-    if (ImGui::InputText("name", nameBuf_, sizeof(nameBuf_))) node->setName(nameBuf_);
+    if (ImGui::InputText("name", nameBuf_, sizeof(nameBuf_))) {
+        node->setName(nameBuf_);
+        recordTouched(node, nullptr, "name");
+    }
 
     ImGui::SeparatorText("Members");
     ImGuiReflector r;
     node->reflectMembers(r);
+    for (auto& member : r.edited) recordTouched(node, nullptr, member);
 
     // One section per attached mod, edited through the same reflector. The
     // header carries the mod's type; widget IDs are scoped per mod so two mods
@@ -200,7 +286,9 @@ void NodeInspector::drawInspector() {
         const std::string& modType = shortTypeName(typeid(m));
         ImGui::SeparatorText(modType.c_str());
         ImGui::PushID(mod);
+        r.edited.clear();
         mod->reflectMembers(r);
+        for (auto& member : r.edited) recordTouched(node, mod, member);
         ImGui::PopID();
     }
 
@@ -623,7 +711,10 @@ void NodeInspector::gizmoDragHandler(MouseDragEventArgs& e) {
                 // One shared world delta for every selected node (a node
                 // destroyed mid-drag just drops out via its weak_ptr).
                 for (auto& [w, start] : dragStarts_) {
-                    if (auto sp = w.lock()) sp->setGlobalPos(start + delta);
+                    if (auto sp = w.lock()) {
+                        sp->setGlobalPos(start + delta);
+                        recordTouched(sp.get(), nullptr, "pos");
+                    }
                 }
             }
         }
@@ -646,6 +737,7 @@ void NodeInspector::gizmoDragHandler(MouseDragEventArgs& e) {
                 case 2: euler.z += dragAngleAccum_; break;
             }
             node->setEuler(euler);
+            recordTouched(node, nullptr, "rotation");
         }
     }
     e.consumed = true;
