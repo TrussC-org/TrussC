@@ -887,9 +887,17 @@ private:
         // User drawing, then mod draw (mods draw in the node's local space,
         // after the node's own draw()).
         if (isVisible_) {
+            auto& rc = internal::getDefaultContext();
+            const size_t matrixDepth = rc.getMatrixStackDepth();
+            const size_t styleDepth = rc.getStyleStackDepth();
             resetStyle();
             draw();
             forEachMod([](Mod* m) { m->draw(); });
+            // An unbalanced push/pop in draw() is named and contained here
+            // (#232): the pop below must undo THIS node's push, not the user's.
+            if (rc.getMatrixStackDepth() != matrixDepth || rc.getStyleStackDepth() != styleDepth) {
+                rc.restoreStackDepth(matrixDepth, styleDepth, getTypeName().c_str());
+            }
         }
 
         // Draw child nodes (overridable for clipping, etc.)
