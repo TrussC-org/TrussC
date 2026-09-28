@@ -63,21 +63,19 @@ Linux では追加の開発パッケージが必要です。ヘルパースク�
 
 ### エディタのセットアップ
 
-#### VSCode
+入れる拡張機能はどのエディタでも共通です。エディタによって変わるのは IntelliSense だけです。
 
-| 拡張機能 | 用途 |
-|-----------|---------|
-| **CMake Tools** | ビルド連携 |
-| **C/C++** | IntelliSense + デバッグ |
-| **CodeLLDB** | デバッグ実行 (macOS / Linux) |
+| 拡張機能 | 用途 | 対象 |
+|-----------|---------|------|
+| **CMake Tools** | ビルド連携 | すべてのエディタ |
+| **CodeLLDB** | デバッグ | すべてのエディタ |
+| **C/C++**（Microsoft） | IntelliSense（Windows ではデバッグも） | VSCode のみ |
+| **clangd** | IntelliSense | VS Code のフォーク（Cursor、Antigravity、VSCodium、Windsurf など） |
 
-#### Cursor
-
-| 拡張機能 | 用途 |
-|-----------|---------|
-| **CMake Tools** | ビルド連携 |
-| **clangd** | IntelliSense (Cursor では C/C++ 拡張が使用不可) |
-| **CodeLLDB** | デバッグ実行 (macOS / Linux) |
+- **VS Code のフォーク**では Microsoft の C/C++ 拡張が動きません（公式の VS Code 以外では起動を拒否します）。そのため clangd を使います。
+- VSCode では C/C++ 拡張と clangd を一緒に入れないでください。IntelliSense がぶつかります。
+- Windows + VSCode でも CodeLLDB を入れて問題ありません。生成される `launch.json` は Windows では C/C++ 拡張のデバッガ（`cppvsdbg`）を使うので、CodeLLDB は使われないだけです。
+- **Windows + VS Code のフォーク**では `cppvsdbg` が使えません。プロジェクトを `--ide cursor` で生成してください（例: `trusscli update --ide cursor`）。この `launch.json` はどの OS でも CodeLLDB を使います。制限として、LLDB は MSVC ビルドを PDB 経由でデバッグするため、変数の表示や式の評価は Visual Studio のデバッガより弱くなります。
 
 ---
 
