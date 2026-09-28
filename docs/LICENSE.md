@@ -39,7 +39,7 @@ TrussC includes or depends on the following third-party libraries. All use permi
 | Library | Version | License | Author/Organization | License URL |
 |---------|---------|---------|---------------------|-------------|
 | **sokol** | - | zlib License | Andre Weissflog | [LICENSE (in headers)](https://github.com/floooh/sokol/blob/master/sokol_app.h) |
-| **Dear ImGui** | 1.92.6 | MIT | Omar Cornut | [LICENSE.txt](https://github.com/ocornut/imgui/blob/master/LICENSE.txt) |
+| **Dear ImGui** | 1.92.9b | MIT | Omar Cornut | [LICENSE.txt](https://github.com/ocornut/imgui/blob/master/LICENSE.txt) |
 | **stb_image** | 2.30 | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE (in README)](https://github.com/nothings/stb?tab=readme-ov-file#whats-the-license) |
 | **stb_image_write** | 1.16 | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE (in README)](https://github.com/nothings/stb?tab=readme-ov-file#whats-the-license) |
 | **stb_truetype** | 1.26 | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE (in README)](https://github.com/nothings/stb?tab=readme-ov-file#whats-the-license) |

@@ -30,7 +30,7 @@ miniaudio (see `tc/sound/tcAudio_impl.cpp` for the rationale).
 
 Matches upstream directory layout: core headers at root, utility headers in `util/`.
 
-**Note:** `sokol_imgui.h` has been moved to `addons/tcxImGui/src/sokol_imgui.h`. When updating sokol, update that copy as well (see How to Update Sokol below).
+**Note:** `sokol_imgui.h` has been moved to `addons/tcxImGui/src/sokol_imgui.h`. It carries TrussC patches (the `simgui_tc_*` multi-context API, marked `[TrussC]`) and one upstream cherry-pick, documented in [`addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md`](../../../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md) together with the Dear ImGui patches. When updating sokol, update that copy as well (see How to Update Sokol below).
 
 ---
 
@@ -273,8 +273,8 @@ These functions do NOT exist in upstream sokol_gl. They are TrussC additions.
 
 ## How to Update Sokol
 
-For files with TrussC patches (sokol_glue.h, util/sokol_gl_tc.h),
-**use `git merge-file` as a 3-way merge** instead of overwriting and manually
+For files with TrussC patches (sokol_glue.h, util/sokol_gl_tc.h, and
+addons/tcxImGui/src/sokol_imgui.h), **use `git merge-file` as a 3-way merge** instead of overwriting and manually
 re-applying patches. This avoids slip bugs from manual patch transcription.
 
 `sokol_app_tc.h` is NOT part of this process — it is a permanent fork, not a
@@ -294,6 +294,7 @@ cp <sokol-clone>/sokol_glue.h /tmp/THEIRS.h
 cp core/include/sokol/sokol_glue.h /tmp/OURS.h
 
 # Run merge; conflicts (if any) end up as <<<<<<< / ======= / >>>>>>> blocks
+# (git 2.43 rejects --diff-algorithm; drop it there — plain merge-file works)
 git merge-file --diff-algorithm=histogram -p /tmp/OURS.h /tmp/BASE.h /tmp/THEIRS.h > /tmp/MERGED.h
 
 # Resolve conflicts in /tmp/MERGED.h, then copy back
@@ -301,13 +302,13 @@ cp /tmp/MERGED.h core/include/sokol/sokol_glue.h
 ```
 
 Repeat for `util/sokol_gl_tc.h` (use upstream `util/sokol_gl.h` as BASE and
-THEIRS, since sokol_gl_tc.h is the renamed fork).
+THEIRS, since sokol_gl_tc.h is the renamed fork), and for
+`addons/tcxImGui/src/sokol_imgui.h` (upstream `util/sokol_imgui.h`).
 
 ### Direct overwrite (for files without TrussC patches)
 
 1. **sokol_gfx.h** -- overwrite directly (no modifications)
-2. **addons/tcxImGui/src/sokol_imgui.h** -- overwrite directly from upstream `util/sokol_imgui.h`
-3. **Other headers** (sokol_log.h, etc.) -- overwrite directly
+2. **Other headers** (sokol_log.h, etc.) -- overwrite directly
 
 ### After updating
 

@@ -96,12 +96,81 @@ void tcApp::setup() {
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `tcx_imgui_get_widgets` | `window` (optional) | List all widgets with labels, types, and positions |
-| `tcx_imgui_click` | `label`, `window` (optional) | Click a widget by label |
-| `tcx_imgui_input` | `label`, `text`, `window` (optional) | Set a widget's value: replaces text in input widgets, and enters numeric values directly into slider/drag widgets (Ctrl+Click temp input) |
-| `tcx_imgui_checkbox` | `label`, `value` (optional), `window` (optional) | Toggle or set a checkbox |
+| `tcx_imgui_get_widgets` | `window`, `windowId` (optional) | List the widgets drawn in the last frame — in every window running imgui — with labels, types, positions and, for value widgets, their current values |
+| `tcx_imgui_get_touched` | — | The values the user changed by hand since startup (or the last reset), with their current value. Includes widgets not drawn right now, and the edits recorded by addons such as tcxNodeInspector |
+| `tcx_imgui_reset_touched` | — | Clear that record. No value is changed |
+| `tcx_imgui_click` | `label`, `window`, `windowId` (optional) | Click a widget by label |
+| `tcx_imgui_input` | `label`, `text`, `window`, `windowId` (optional) | Set a widget's value: replaces text in input widgets, and enters numeric values directly into slider/drag widgets (Ctrl+Click temp input) |
+| `tcx_imgui_checkbox` | `label`, `value`, `window`, `windowId` (optional) | Toggle or set a checkbox |
 
-These tools use ImGui's Test Engine hooks to collect widget info each frame.
+`window` is the ImGui window (panel) name. `windowId` is the OS window as
+`tc_list_windows` numbers it (0 = main); you only need it when the same panel
+exists in two OS windows.
+
+These tools use ImGui's Test Engine hooks plus a small patch to the bundled
+Dear ImGui that hands each value widget's variable to tcxImGui. See
+[src/imgui/TRUSSC_MODIFICATIONS.md](src/imgui/TRUSSC_MODIFICATIONS.md).
+
+### Widget values
+
+Each value widget in `tcx_imgui_get_widgets` carries `widget`, `valueType` and
+`value`, plus `touched` (changed by hand, see below):
+
+```json
+{"label": "speed", "window": "Params", "windowId": 0, "type": "input",
+ "widget": "slider", "valueType": "float", "value": 0.35, "touched": true, "rect": {...}}
+```
+
+| Widget | `widget` | `value` |
+|---|---|---|
+| `SliderFloat`, `DragInt`, `InputFloat`, `VSliderFloat`, ... | `slider` / `drag` / `input` | A number. `valueType` names the C++ type (`float`, `double`, `int`, `uint`, `int64`, ...). A float comes as the shortest decimal that reads back as the same float (`0.1f` → `0.1`), so it is exact |
+| `DragFloat3`, `SliderInt2`, `InputFloat4`, ... | same | An array, `[x, y, z]`, listed under the widget's own label |
+| `SliderAngle` | `slider_angle` | Radians — the variable's value — with `"unit": "rad"`, although the widget displays degrees |
+| `ColorEdit3/4`, `ColorPicker3/4` | `color` | The variable as it is: `[r, g, b]` or `[r, g, b, a]`, 0-1. `colorSpace` is `"rgb"`, or `"hsv"` with `ImGuiColorEditFlags_InputHSV` (then the values are the raw HSV the variable holds, not converted) |
+| `Combo` | `combo` | The selected index. `item` is the text shown |
+| `BeginCombo` (a custom combo) | `combo` | Only `item`, the text shown |
+| `InputText`, `InputTextMultiline` | `text` | The string. A password field reports `"password": true` and never its text |
+| `Checkbox` | `checkbox` | `true` / `false` (also in `checked`) |
+
+The parts of a composite widget (the `##X` / `##Y` fields of a `ColorEdit`, the
+`-` / `+` buttons of `InputInt`) are still listed, so you can click or type
+into them, but carry no value — the widget reports under its own label.
+
+### Touched: what the user changed by hand
+
+A typical loop: you tweak sliders in the running app, then ask the AI to "make
+it like this". The AI calls `tcx_imgui_get_touched`, writes those values into
+the code, and calls `tcx_imgui_reset_touched`.
+
+```json
+{"status": "ok", "count": 2,
+ "widgets": [
+   {"label": "speed", "window": "Params", "windowId": 0, "widget": "slider",
+    "valueType": "float", "value": 0.35, "visible": true},
+   {"label": "tint", "window": "Params", "windowId": 0, "widget": "color",
+    "valueType": "color", "value": [1, 0.4, 0.2, 1], "colorSpace": "rgb", "visible": false}
+ ],
+ "inspector": []}
+```
+
+- A widget is recorded when its value is changed through the widget: dragging,
+  typing, clicking — including input sent by the `tcx_imgui_*` tools. A value
+  assigned from code is never recorded; a recorded widget's value does follow
+  later changes from code.
+- Changing a part (one component of a `DragFloat3`, the R field of a
+  `ColorEdit`) records the whole widget under its label.
+- A widget that is not drawn right now (collapsed header, closed window) keeps
+  its last known value and reports `"visible": false`.
+- The record starts when the MCP tools are registered (`TRUSSC_MCP=1`) and is
+  kept until `tcx_imgui_reset_touched`.
+- Other keys come from addons that keep their own record. tcxNodeInspector adds
+  `inspector`: the node members edited in its panel or moved with its gizmo,
+  per node. Its Hierarchy / Inspector panels are left out of `widgets`, because
+  their widgets are shared by whichever node is selected.
+
+An addon can contribute its own list with
+`tcx::imgui::addTouchedSource(key, get, reset)`, and keep its panels out of the
+widget record with a `tcx::imgui::TouchedExclusionScope` while it draws them.
 
 ## How It Works
 

@@ -138,6 +138,17 @@ These tools are inert unless the MCP server is also running (`TRUSSC_MCP=1`).
 
 The **tcxImGui** addon provides additional MCP tools for AI agents to inspect and interact with ImGui widgets. To use these, add `tcxImGui` to your project via `trusscli add tcxImGui` or `addons.make`, then call `imguiSetup()` before `mcp::registerControlTools()`.
 
+| Tool | Arguments | Description |
+|------|-----------|-------------|
+| `tcx_imgui_get_widgets` | `window`, `windowId` (optional) | Widgets drawn in the last frame, in every window running imgui: label, `window` (ImGui panel), `windowId` (OS window, `tc_list_windows` numbering), type, rect, and for value widgets `widget` / `valueType` / `value` — floats at full precision, N-component widgets (`DragFloat3`) as one array under their own label, colors as the variable holds them (0-1, `colorSpace` `rgb`/`hsv`), `SliderAngle` in radians. `touched` = changed by hand |
+| `tcx_imgui_get_touched` | (none) | What the user changed by hand since startup or the last reset, with current values. `widgets`: ImGui widgets (not drawn right now = last known value, `visible: false`); `inspector`: tcxNodeInspector edits per node (node type / name / id, mod, member path, value in the `tc_get_node_tree` encoding). Code assignments and `tc_set_node_members` writes are not recorded |
+| `tcx_imgui_reset_touched` | (none) | Clear that record (both lists). No value changes |
+| `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox` | `label` + tool args, `window` / `windowId` (optional) | Drive a widget by label |
+
+The "tweak by hand, then bake" loop: the user adjusts sliders / the inspector in
+the running app → `tcx_imgui_get_touched` → write the values into the source →
+`tcx_imgui_reset_touched`.
+
 See [addons/tcxImGui/README.md](../addons/tcxImGui/README.md) for full details on available tools and setup.
 
 ## Publishing Custom Ops Status
@@ -340,7 +351,7 @@ Configure your MCP client with the HTTP URL:
 | Inspection (read-only) | `tc_get_screenshot`, `tc_save_screenshot`, `tc_get_health`, `tc_get_node_tree`, `tc_get_selected_node` | Automatic when MCP is enabled |
 | Recording (window capture to video) | `tc_start_recording`, `tc_stop_recording` | Automatic when MCP is enabled |
 | Control (input injection / scene mutation / quit) | `tc_mouse_click`, `tc_mouse_press`, `tc_mouse_release`, `tc_key_press`, `tc_mouse_move`, `tc_mouse_scroll`, `tc_key_release`, `tc_select_node`, `tc_set_node_members`, `tc_quit` | `mcp::registerControlTools()` |
-| ImGui (widget interaction) | `tcx_imgui_get_widgets`, `tcx_imgui_click`, `tcx_imgui_input`, `tcx_imgui_checkbox` | Requires tcxImGui addon + `mcp::registerControlTools()` |
+| ImGui (widget reading / interaction) | `tcx_imgui_get_widgets`, `tcx_imgui_get_touched`, `tcx_imgui_reset_touched` (read-only: the reset clears the record, not app state), `tcx_imgui_click`, `tcx_imgui_input`, `tcx_imgui_checkbox` | Requires tcxImGui addon + `mcp::registerControlTools()` |
 | Custom | `mcp::tool(...)` | Your code |
 
 ### Network exposure
