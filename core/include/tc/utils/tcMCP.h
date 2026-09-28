@@ -18,6 +18,8 @@
 #include <future>
 #include <thread>
 #include <atomic>
+#include <mutex>
+#include <cctype>
 
 // JSON support
 #include "../../nlohmann/json.hpp"
@@ -458,7 +460,124 @@ inline std::string& mcpAuthToken() {
     return token;
 }
 
+// Whether the server is bound to a loopback address (the Host check applies).
+inline std::atomic<bool>& mcpLoopbackOnly() {
+    static std::atomic<bool> loopback{true};
+    return loopback;
+}
+
+// Browser origins allowed besides the server's own (mcp::allowOrigin()).
+// Read on HTTP worker threads, written from app code: guarded.
+inline std::vector<std::string>& allowedOrigins() {
+    static std::vector<std::string> origins;
+    return origins;
+}
+inline std::mutex& allowedOriginsMutex() {
+    static std::mutex m;
+    return m;
+}
+
+inline std::string asciiLower(std::string s) {
+    for (auto& c : s) c = (char)std::tolower((unsigned char)c);
+    return s;
+}
+
+inline std::string trimSpaces(const std::string& s) {
+    size_t b = s.find_first_not_of(" \t");
+    if (b == std::string::npos) return std::string();
+    size_t e = s.find_last_not_of(" \t");
+    return s.substr(b, e - b + 1);
+}
+
+// "localhost:8080" / "127.0.0.1" / "[::1]:8080" -> is the host part loopback?
+inline bool isLoopbackHostHeader(const std::string& hostHeader) {
+    std::string h = asciiLower(trimSpaces(hostHeader));
+    std::string name;
+    if (!h.empty() && h[0] == '[') {                 // [v6]:port
+        size_t close = h.find(']');
+        if (close == std::string::npos) return false;
+        name = h.substr(0, close + 1);
+    } else {
+        size_t colon = h.find(':');
+        name = (colon == std::string::npos) ? h : h.substr(0, colon);
+    }
+    return name == "localhost" || name == "127.0.0.1" || name == "[::1]";
+}
+
+// The server's own origins, then the ones added with mcp::allowOrigin().
+inline bool isAllowedOrigin(const std::string& origin, int port) {
+    std::string o = asciiLower(trimSpaces(origin));
+    while (!o.empty() && o.back() == '/') o.pop_back();
+    const std::string p = std::to_string(port);
+    if (o == "http://localhost:" + p || o == "http://127.0.0.1:" + p || o == "http://[::1]:" + p) {
+        return true;
+    }
+    std::lock_guard<std::mutex> lock(allowedOriginsMutex());
+    for (const auto& a : allowedOrigins()) {
+        if (o == a) return true;
+    }
+    return false;
+}
+
+// "application/json", optionally with parameters ("; charset=utf-8").
+inline bool isJsonContentType(const std::string& contentType) {
+    std::string t = contentType.substr(0, contentType.find(';'));
+    return asciiLower(trimSpaces(t)) == "application/json";
+}
+
+inline void rejectRequest(httplib::Response& res, int status, const std::string& why) {
+    res.status = status;
+    res.set_content(json{{"error", why}}.dump(), "application/json");
+}
+
+// Browser-facing checks every request passes before anything else runs (#238,
+// MCP Streamable HTTP transport: servers must validate Origin). A web page
+// open in the user's browser can SEND requests to a loopback server even
+// without CORS; these keep it out:
+// - Host: when bound to loopback, it must name a loopback host. A DNS
+//   rebinding page reaches 127.0.0.1 under its own domain name.
+// - Origin: native MCP clients send none. When present, it must be the
+//   server's own origin or one added with mcp::allowOrigin().
+// - Content-Type (POST): application/json only. Anything else is a request a
+//   browser could send without a CORS preflight.
+// Returns false (response filled: 403 / 415) when the request is refused.
+inline bool checkRequest(const httplib::Request& req, httplib::Response& res, bool requireJson) {
+    if (mcpLoopbackOnly().load() && req.has_header("Host") &&
+        !isLoopbackHostHeader(req.get_header_value("Host"))) {
+        rejectRequest(res, 403, "forbidden host '" + req.get_header_value("Host") +
+                                "': the MCP server only answers to localhost, 127.0.0.1 or [::1]");
+        return false;
+    }
+    if (req.has_header("Origin") &&
+        !isAllowedOrigin(req.get_header_value("Origin"), getHttpPort().load())) {
+        rejectRequest(res, 403, "forbidden origin '" + req.get_header_value("Origin") +
+                                "': allow it from code with mcp::allowOrigin()");
+        return false;
+    }
+    if (requireJson && !isJsonContentType(req.get_header_value("Content-Type"))) {
+        rejectRequest(res, 415, "unsupported Content-Type '" + req.get_header_value("Content-Type") +
+                                "': send application/json");
+        return false;
+    }
+    return true;
+}
+
 } // namespace detail
+
+// Allow a web page served from `origin` ("http://localhost:5173") to call the
+// MCP server from a browser. Native MCP clients send no Origin and need
+// nothing. Only code can add origins — no environment variable does, by design
+// (environment variables may narrow the MCP surface, never widen it; #242).
+inline void allowOrigin(const std::string& origin) {
+    std::string o = detail::asciiLower(detail::trimSpaces(origin));
+    while (!o.empty() && o.back() == '/') o.pop_back();
+    if (o.empty()) return;
+    std::lock_guard<std::mutex> lock(detail::allowedOriginsMutex());
+    for (const auto& a : detail::allowedOrigins()) {
+        if (a == o) return;
+    }
+    detail::allowedOrigins().push_back(o);
+}
 
 // Start HTTP server.
 //   port  : 0 = OS auto-assign, else fixed port
@@ -481,6 +600,7 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
         return;
     }
     detail::mcpAuthToken() = token;
+    detail::mcpLoopbackOnly().store(isLoopback);
 
     svr = std::make_unique<httplib::Server>();
 
@@ -488,6 +608,8 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
     // ignore CORS, while a wildcard origin would let any web page in the user's
     // browser drive the local server. (OPTIONS preflight handler dropped too.)
     svr->Post("/mcp", [](const httplib::Request& req, httplib::Response& res) {
+        if (!detail::checkRequest(req, res, true)) return;
+
         // Bearer auth when a token is configured (always so for non-loopback).
         const std::string& tok = detail::mcpAuthToken();
         if (!tok.empty()) {
@@ -523,7 +645,8 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
     });
 
     // GET / — Server info
-    svr->Get("/", [](const httplib::Request&, httplib::Response& res) {
+    svr->Get("/", [](const httplib::Request& req, httplib::Response& res) {
+        if (!detail::checkRequest(req, res, false)) return;
         json info = {
             {"name", "TrussC MCP Server"},
             {"transport", "http"},
@@ -624,6 +747,9 @@ inline int getHttpPort() {
 [[deprecated("registerControlTools() now opts in by itself; remove this call. Will be removed in v1.0.0")]]
 inline void enableDebugger() {}
 
+#else
+// No MCP HTTP server on the web: a no-op, so app code calling it stays portable.
+inline void allowOrigin(const std::string&) {}
 #endif // __EMSCRIPTEN__
 
 // ---------------------------------------------------------------------------
