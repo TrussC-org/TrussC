@@ -1961,6 +1961,7 @@ bool ImGui::BeginCombo(const char* label, const char* preview_value, ImGuiComboF
     ItemSize(total_bb, style.FramePadding.y);
     if (!ItemAdd(total_bb, id, &bb))
         return false;
+    IMGUI_TC_ITEM_VALUE(id, label, ImGuiTcValueKind_ComboPreview, 0, preview_value, 1, flags); // [TrussC]
 
     // Open on click
     bool hovered, held;
@@ -2171,6 +2172,7 @@ static const char* Items_SingleStringGetter(void* data, int idx)
 bool ImGui::Combo(const char* label, int* current_item, const char* (*getter)(void* user_data, int idx), void* user_data, int items_count, int popup_max_height_in_items)
 {
     ImGuiContext& g = *GImGui;
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Combo, ImGuiDataType_S32, current_item, 1, 0); // [TrussC]
 
     // Call the getter to obtain the preview string which is a parameter to BeginCombo()
     const char* preview_value = NULL;
@@ -2732,6 +2734,7 @@ bool ImGui::DragScalar(const char* label, ImGuiDataType data_type, void* p_data,
     ItemSize(total_bb, style.FramePadding.y);
     if (!ItemAdd(total_bb, id, &frame_bb, temp_input_allowed ? ImGuiItemFlags_Inputable : 0))
         return false;
+    IMGUI_TC_ITEM_VALUE(id, label, ImGuiTcValueKind_Drag, data_type, p_data, 1, flags); // [TrussC]
 
     // Default format string when passing NULL
     if (format == NULL)
@@ -2814,6 +2817,7 @@ bool ImGui::DragScalarN(const char* label, ImGuiDataType data_type, void* p_data
 
     ImGuiContext& g = *GImGui;
     bool value_changed = false;
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Drag, data_type, p_data, components, flags); // [TrussC]
     BeginGroup();
     PushID(label);
     PushMultiItemsWidths(components, CalcItemWidth());
@@ -3334,6 +3338,7 @@ bool ImGui::SliderScalar(const char* label, ImGuiDataType data_type, void* p_dat
     ItemSize(total_bb, style.FramePadding.y);
     if (!ItemAdd(total_bb, id, &frame_bb, temp_input_allowed ? ImGuiItemFlags_Inputable : 0))
         return false;
+    IMGUI_TC_ITEM_VALUE(id, label, ImGuiTcValueKind_Slider, data_type, p_data, 1, flags); // [TrussC]
 
     // Default format string when passing NULL
     if (format == NULL)
@@ -3413,6 +3418,7 @@ bool ImGui::SliderScalarN(const char* label, ImGuiDataType data_type, void* v, i
 
     ImGuiContext& g = *GImGui;
     bool value_changed = false;
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Slider, data_type, v, components, flags); // [TrussC]
     BeginGroup();
     PushID(label);
     PushMultiItemsWidths(components, CalcItemWidth());
@@ -3464,6 +3470,7 @@ bool ImGui::SliderFloat4(const char* label, float v[4], float v_min, float v_max
 
 bool ImGui::SliderAngle(const char* label, float* v_rad, float v_degrees_min, float v_degrees_max, const char* format, ImGuiSliderFlags flags)
 {
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_SliderAngle, ImGuiDataType_Float, v_rad, 1, flags); // [TrussC]
     if (format == NULL)
         format = "%.0f deg";
     float v_deg = (*v_rad) * 360.0f / (2 * IM_PI);
@@ -3511,6 +3518,7 @@ bool ImGui::VSliderScalar(const char* label, const ImVec2& size, ImGuiDataType d
     ItemSize(bb, style.FramePadding.y);
     if (!ItemAdd(frame_bb, id))
         return false;
+    IMGUI_TC_ITEM_VALUE(id, label, ImGuiTcValueKind_Slider, data_type, p_data, 1, flags); // [TrussC]
 
     // Default format string when passing NULL
     if (format == NULL)
@@ -3806,6 +3814,7 @@ bool ImGui::InputScalar(const char* label, ImGuiDataType data_type, void* p_data
 
     ImGuiContext& g = *GImGui;
     ImGuiStyle& style = g.Style;
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Input, data_type, p_data, 1, flags); // [TrussC]
     //IM_ASSERT((flags & ImGuiInputTextFlags_EnterReturnsTrue) == 0); // Not supported by InputScalar(). Please open an issue if you this would be useful to you. Otherwise use IsItemDeactivatedAfterEdit()!
 
     if (format == NULL)
@@ -3914,6 +3923,7 @@ bool ImGui::InputScalarN(const char* label, ImGuiDataType data_type, void* p_dat
 
     ImGuiContext& g = *GImGui;
     bool value_changed = false;
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Input, data_type, p_data, components, flags); // [TrussC]
     BeginGroup();
     PushID(label);
     PushMultiItemsWidths(components, CalcItemWidth());
@@ -4742,6 +4752,7 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
     if (is_multiline) // Open group before calling GetID() because groups tracks id created within their scope (including the scrollbar)
         BeginGroup();
     const ImGuiID id = window->GetID(label);
+    IMGUI_TC_ITEM_VALUE(id, label, ImGuiTcValueKind_Text, 0, &buf, 1, flags); // [TrussC] &buf: a resize callback may repoint buf
     const char* label_end = FindRenderedTextEnd(label);
     const ImVec2 label_size = CalcTextSize(label, label_end, false);
     const ImVec2 frame_size = CalcItemSize(size_arg, CalcItemWidth(), (is_multiline ? g.FontSize * 8.0f : label_size.y) + style.FramePadding.y * 2.0f); // Arbitrary default of 8 lines high for multi-line
@@ -5847,6 +5858,7 @@ bool ImGui::ColorEdit4(const char* label, float col[4], ImGuiColorEditFlags flag
     const char* label_display_end = FindRenderedTextEnd(label);
     float w_full = CalcItemWidth();
     g.NextItemData.ClearFlags();
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Color, ImGuiDataType_Float, col, (flags & ImGuiColorEditFlags_NoAlpha) ? 3 : 4, flags); // [TrussC]
 
     BeginGroup();
     PushID(label);
@@ -6125,6 +6137,7 @@ bool ImGui::ColorPicker4(const char* label, float col[4], ImGuiColorEditFlags fl
     const float width = CalcItemWidth();
     const bool is_readonly = ((g.NextItemData.ItemFlagsSet | g.CurrentItemFlags) & ImGuiItemFlags_ReadOnly) != 0;
     g.NextItemData.ClearFlags();
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Color, ImGuiDataType_Float, col, (flags & ImGuiColorEditFlags_NoAlpha) ? 3 : 4, flags); // [TrussC]
 
     PushID(label);
     const bool set_current_color_edit_id = (g.ColorEditCurrentID == 0);

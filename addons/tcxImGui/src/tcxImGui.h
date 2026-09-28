@@ -44,6 +44,10 @@ public:
         }
         simguiCtx_ = simgui_tc_make_context(&desc);
         simgui_tc_set_context(simguiCtx_);
+        // Tag this window's ImGui context so the MCP tools can say which OS
+        // window a widget is in.
+        imguiCtx_ = ImGui::GetCurrentContext();
+        setContextOwner(imguiCtx_, &tc::internal::currentWindowContext());
 
         initialized_ = true;
 
@@ -143,7 +147,12 @@ public:
         // static destructor during exit() (e.g. an abnormal teardown path where
         // the exit event never fired), sokol_gfx is already gone and its objects
         // with it — skipping is the correct cleanup, touching them would crash.
-        if (sg_isvalid()) simgui_tc_destroy_context(simguiCtx_);
+        // (The widget registry is a static too: only touched on the live path.)
+        if (sg_isvalid()) {
+            forgetContext(imguiCtx_);   // drop its widget registry before the context goes
+            simgui_tc_destroy_context(simguiCtx_);
+        }
+        imguiCtx_ = nullptr;
         simguiCtx_ = {};
         initialized_ = false;
         tc::logVerbose() << "ImGui shutdown";
@@ -199,6 +208,7 @@ private:
     }
 
     simgui_tc_context simguiCtx_ {};
+    ImGuiContext* imguiCtx_ = nullptr;   // the ImGui context inside simguiCtx_
 
     bool initialized_ = false;
     bool renderPending_ = false;
