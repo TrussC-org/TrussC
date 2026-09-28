@@ -20,6 +20,7 @@
 #include <atomic>
 #include <mutex>
 #include <cctype>
+#include <chrono>
 
 // JSON support
 #include "../../nlohmann/json.hpp"
@@ -46,6 +47,12 @@ namespace mcp {
 // (invoked from an afterFrame listener) runs the producer at the safe readback
 // point and unblocks the waiting HTTP worker. All state below is touched only
 // on the main thread inside processHttpQueue()/handleToolsCall().
+//
+// A deferral can name a TARGET window (an opaque WindowContext*): its producer
+// then runs right after THAT window's present(), inside its own tick, where
+// its drawable is the current one (a secondary window's readback is only valid
+// there — #243). The main window drains untargeted entries from its afterFrame
+// listener; each secondary window drains its own from its tick.
 
 namespace detail {
 
@@ -60,15 +67,25 @@ using ReplyThunk = std::function<std::string()>;
 struct DeferredResponse {
     std::shared_ptr<std::promise<ReplyThunk>> response;  // unblocks the HTTP worker
     std::function<ReplyThunk()> makeEnvelope;            // main stage → worker thunk
+    const void* target = nullptr;                        // window to run in (null = main)
+    std::chrono::steady_clock::time_point deadline;      // targeted: give up after this
+    std::function<std::string()> timeoutReply;           // targeted: reply when given up
 };
+
+// A targeted deferral whose window renders no frame in this time (minimized,
+// hidden, throttled very low, closed) is answered with an error instead of
+// leaving the HTTP worker blocked.
+inline constexpr std::chrono::seconds kTargetedDeferralTimeout{5};
 
 struct DeferralState {
     bool requested = false;                  // set by deferToolResultUntilAfterFrame()
     std::function<json()> produce;           // tool content producer (runs fully on main)
     bool twoStageRequested = false;          // set by deferToolResultTwoStage()
     std::function<std::function<json()>()> produceTwoStage;  // main stage → worker stage
+    const void* target = nullptr;            // window the deferral runs in (null = main)
     bool hasEnvelope = false;                // set by handleToolsCall(), read by processHttpQueue()
     std::function<ReplyThunk()> envelope;    // JSON-RPC reply builder (main part)
+    std::function<std::string()> timeoutReply;  // targeted deferral given up (see above)
 };
 inline DeferralState& deferralState() { static DeferralState s; return s; }
 
@@ -95,10 +112,14 @@ inline bool isDebuggerEnabled() {
 
 // Call inside a tool handler to defer its result until just after the next
 // present(). `produce` returns the tool's content json (same shape a normal
-// handler would return) and runs at that safe readback point.
-inline void deferToolResultUntilAfterFrame(std::function<json()> produce) {
+// handler would return) and runs at that safe readback point. `targetWindow`
+// (a WindowContext*, null = the main window) picks whose present() — the
+// producer then runs inside that window's tick, with its context current.
+inline void deferToolResultUntilAfterFrame(std::function<json()> produce,
+                                           const void* targetWindow = nullptr) {
     detail::deferralState().requested = true;
     detail::deferralState().produce = std::move(produce);
+    detail::deferralState().target = targetWindow;
 }
 
 // Two-stage variant for tools whose result is expensive to build (e.g.
@@ -107,28 +128,44 @@ inline void deferToolResultUntilAfterFrame(std::function<json()> produce) {
 // returns runs on the HTTP worker thread that is already sitting blocked on
 // this reply. Put the heavy work (downscale, encode) in that closure and the
 // frame loop never pays for it.
-inline void deferToolResultTwoStage(std::function<std::function<json()>()> mainStage) {
+// `targetWindow`: as for deferToolResultUntilAfterFrame().
+inline void deferToolResultTwoStage(std::function<std::function<json()>()> mainStage,
+                                    const void* targetWindow = nullptr) {
     detail::deferralState().twoStageRequested = true;
     detail::deferralState().produceTwoStage = std::move(mainStage);
+    detail::deferralState().target = targetWindow;
 }
 
-// Run all deferred main stages and unblock their HTTP workers. Call from an
-// events().afterFrame listener (i.e. after present()). Only the main part of
-// each envelope runs here; the returned thunk executes on the HTTP worker.
-inline void drainDeferredResponses() {
+// Run the deferred main stages aimed at `targetWindow` (null = the main
+// window) and unblock their HTTP workers. Call right after that window's
+// present(): the main window from an events().afterFrame listener, a secondary
+// window from its tick. Only the main part of each envelope runs here; the
+// returned thunk executes on the HTTP worker. The main window's call also
+// answers targeted entries that ran past their deadline.
+inline void drainDeferredResponses(const void* targetWindow = nullptr) {
     auto& list = detail::deferredResponses();
     if (list.empty()) return;
+    const auto now = std::chrono::steady_clock::now();
+    std::vector<detail::DeferredResponse> keep;
     for (auto& d : list) {
-        detail::ReplyThunk thunk;
-        try {
-            thunk = d.makeEnvelope();
-        } catch (const std::exception& e) {
-            std::string err = std::string("{\"error\":\"deferred response failed: ") + e.what() + "\"}";
-            thunk = [err]() { return err; };
+        if (d.target == targetWindow) {
+            detail::ReplyThunk thunk;
+            try {
+                thunk = d.makeEnvelope();
+            } catch (const std::exception& e) {
+                std::string err = std::string("{\"error\":\"deferred response failed: ") + e.what() + "\"}";
+                thunk = [err]() { return err; };
+            }
+            d.response->set_value(std::move(thunk));
+        } else if (!targetWindow && d.target && now >= d.deadline) {
+            std::string reply = d.timeoutReply ? d.timeoutReply()
+                                               : std::string("{\"error\":\"window did not render\"}");
+            d.response->set_value([reply]() { return reply; });
+        } else {
+            keep.push_back(std::move(d));
         }
-        d.response->set_value(std::move(thunk));
     }
-    list.clear();
+    list.swap(keep);
 }
 
 inline bool hasDeferredResponses() { return !detail::deferredResponses().empty(); }
@@ -320,6 +357,13 @@ private:
             json content = tools_[name].handler(args);
 
             // Handler asked to produce its result after the next present().
+            if (ds.target) {
+                ds.timeoutReply = [formatResult]() -> std::string {
+                    return formatResult(json{{"status", "error"},
+                        {"message", "the window rendered no frame within 5 s (minimized, hidden or closed?)"}});
+                };
+            }
+
             if (ds.requested) {
                 auto produce = std::move(ds.produce);
                 ds.requested = false;
@@ -720,13 +764,22 @@ inline void processHttpQueue() {
     while (detail::getHttpChannel().tryReceive(req)) {
         auto& ds = detail::deferralState();
         ds.hasEnvelope = false;
+        ds.target = nullptr;
+        ds.timeoutReply = nullptr;
         std::string result = Server::instance().processMessage(req.body);
         if (ds.hasEnvelope) {
             // Tool deferred its reply until after present(): stash the promise
             // and answer it from drainDeferredResponses(). The HTTP worker stays
             // blocked on its future a few ms longer (correct, not a hang).
-            detail::deferredResponses().push_back({ req.response, std::move(ds.envelope) });
+            detail::DeferredResponse d;
+            d.response = req.response;
+            d.makeEnvelope = std::move(ds.envelope);
+            d.target = ds.target;
+            d.deadline = std::chrono::steady_clock::now() + detail::kTargetedDeferralTimeout;
+            d.timeoutReply = std::move(ds.timeoutReply);
+            detail::deferredResponses().push_back(std::move(d));
             ds.hasEnvelope = false;
+            ds.target = nullptr;
             continue;
         }
         if (result.empty()) {
