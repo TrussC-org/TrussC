@@ -25,7 +25,11 @@
 // MCP registrations (#227): the guest App registers a tool, a status entry and
 // a status image capturing `this`. Each cycle checks they are visible while
 // the guest lives (the registry is the host's, shared) and gone after unload,
-// while a tool the host registered itself stays.
+// while a tool the host registered itself stays. Sharing is required on Linux
+// and macOS (the guest resolves TrussC against the host). A Windows DLL keeps its own
+// copy of the inline registries, so there the guest's registrations never
+// reach the host at all (nothing to go stale; a separate limitation) and the
+// MCP checks are skipped when that is the case.
 //
 // Exit code: 0 = survived all cycles (including process exit), non-zero or a
 // crash = regression. TC_RUN_APP is intentionally NOT used: no sokol loop, no
@@ -115,14 +119,19 @@ int main() {
             std::printf("hotReloadLifecycle: FAIL - create failed (cycle %d)\n", i);
             return 3;
         }
-        if (!mcp::hasTool("guest_probe") || !hasStatus("guest_status") || !hasStatusImage("guest_image")) {
+        const bool shared = mcp::hasTool("guest_probe") && hasStatus("guest_status") && hasStatusImage("guest_image");
+        if (!shared) {
+#if defined(__linux__) || defined(__APPLE__)
             std::printf("hotReloadLifecycle: FAIL - guest MCP registrations not visible to the host (cycle %d)\n", i);
             return 4;
+#else
+            if (i == 1) std::printf("hotReloadLifecycle: note - the guest's MCP registrations stay in its own registry on this platform; MCP checks skipped\n");
+#endif
         }
         // Destruction + unload: listener removal churns the COW lists, and the
         // (pre-fix) dlclose here is what armed/triggered both crashes.
         lib.unload();
-        if (mcp::hasTool("guest_probe") || hasStatus("guest_status") || hasStatusImage("guest_image")) {
+        if (shared && (mcp::hasTool("guest_probe") || hasStatus("guest_status") || hasStatusImage("guest_image"))) {
             std::printf("hotReloadLifecycle: FAIL - the destroyed guest's MCP registrations are still listed (cycle %d)\n", i);
             return 5;
         }

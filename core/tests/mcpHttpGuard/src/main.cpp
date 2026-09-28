@@ -50,7 +50,9 @@ int main() {
 
     atomic<bool> done{false};
     thread worker([&] {
-        httplib::Client cli("127.0.0.1", port);
+        // Same name the server bound to: "localhost" resolves to ::1 first on
+        // some hosts (CI runners), where 127.0.0.1 would find nothing.
+        httplib::Client cli("localhost", port);
         cli.set_connection_timeout(5);
         cli.set_read_timeout(10);
 
