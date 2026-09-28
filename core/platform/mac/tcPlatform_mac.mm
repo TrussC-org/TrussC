@@ -153,15 +153,10 @@ void setWindowDecorated(bool decorated) {
 }
 
 void setWindowSizeLogical(int width, int height) {
-    // メインウィンドウを取得
-    NSWindow* window = [[NSApplication sharedApplication] mainWindow];
-    if (!window) {
-        // mainWindow が nil の場合、最初のウィンドウを試す
-        NSArray* windows = [[NSApplication sharedApplication] windows];
-        if (windows.count > 0) {
-            window = windows[0];
-        }
-    }
+    // The TrussC main window, like the other functions in this file. NOT
+    // [NSApp mainWindow]: that is AppKit's focused window, which is a
+    // secondary window whenever one has focus.
+    NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
 
     if (window) {
         // 現在のフレームを取得

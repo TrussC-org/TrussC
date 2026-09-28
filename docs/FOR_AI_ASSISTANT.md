@@ -2252,7 +2252,7 @@ void App::mousePressed(const MouseEventArgs & e) [+1]  // Mouse button pressed
 void App::mouseReleased(const MouseEventArgs & e) [+1]  // Mouse button released
 void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Mouse wheel / trackpad scrolled
 void App::requestExit()  // Request the app to exit
-void App::setSize(float w, float h)  // Set the app's size
+void App::setSize(float w, float h)  // Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size
 void App::touchMoved(const TouchEventArgs & touch)  // Touch moved (Android/iOS, multi-touch)
 void App::touchPressed(const TouchEventArgs & touch)  // Touch began (Android/iOS, multi-touch)
 void App::touchReleased(const TouchEventArgs & touch)  // Touch ended or was cancelled (check touch.cancelled)

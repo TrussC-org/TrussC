@@ -119,10 +119,10 @@ related = ["App::isExitRequested"]
 ["App::setSize"]
 category = "events"
 keywords = ["resize", "window", "dimensions"]
-description.en = "Set the app's size"
-description.ja = "アプリのサイズを設定"
-description.ko = "앱 크기를 설정"
-related = ["getWindowSize"]
+description.en = "Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size"
+description.ja = "アプリ自身のウィンドウ (Appが載っているウィンドウ、メインAppならメインウィンドウ) をリサイズ。どのウィンドウのコールバックから呼んでも同じ。単位は setWindowSize() と同じ。どのウィンドウにも載っていないAppは自分のサイズだけが変わる"
+description.ko = "앱 자신의 윈도우 (App이 연결된 윈도우, 메인 App이면 메인 윈도우)를 리사이즈. 어느 윈도우의 콜백에서 호출해도 동일. 단위는 setWindowSize()와 같음. 어떤 윈도우에도 연결되지 않은 App은 자신의 크기만 바뀜"
+related = ["getWindowSize", "setWindowSize", "App::getWindow"]
 
 ["App::touchMoved"]
 category = "events"
