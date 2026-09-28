@@ -739,7 +739,7 @@ void NodeInspector::drawGizmo() {
             pts.clear();
             pts.reserve(ring.size());
             for (auto& p : ring) pts.emplace_back(p.x, p.y);
-            dl->AddPolyline(pts.data(), (int)pts.size(), col, ImDrawFlags_Closed, w);
+            dl->AddPolyline(pts.data(), (int)pts.size(), col, w, ImDrawFlags_Closed);
         }
     }
 
