@@ -1373,7 +1373,7 @@ static int cmdAdd(const vector<string>& args) {
         }
         else if (!a.empty() && a[0] == '-') {
             cerr << "Error: unknown option '" << a << "'\n"
-                 << "Run 'trusscli add --help' for usage.\n";
+                 << "Run 'trusscli addon add --help' for usage.\n";
             return 1;
         }
         else {
@@ -1382,8 +1382,8 @@ static int cmdAdd(const vector<string>& args) {
     }
 
     if (requestedAddons.empty()) {
-        cerr << "Error: 'add' requires at least one addon name\n"
-             << "Usage: trusscli add <addon> [<addon>...]\n";
+        cerr << "Error: 'addon add' requires at least one addon name\n"
+             << "Usage: trusscli addon add <addon> [<addon>...]\n";
         return 1;
     }
 
@@ -1527,7 +1527,7 @@ static int cmdRemove(const vector<string>& args) {
         }
         else if (!a.empty() && a[0] == '-') {
             cerr << "Error: unknown option '" << a << "'\n"
-                 << "Run 'trusscli remove --help' for usage.\n";
+                 << "Run 'trusscli addon remove --help' for usage.\n";
             return 1;
         }
         else {
@@ -1536,8 +1536,8 @@ static int cmdRemove(const vector<string>& args) {
     }
 
     if (requestedAddons.empty()) {
-        cerr << "Error: 'remove' requires at least one addon name\n"
-             << "Usage: trusscli remove <addon> [<addon>...]\n";
+        cerr << "Error: 'addon remove' requires at least one addon name\n"
+             << "Usage: trusscli addon remove <addon> [<addon>...]\n";
         return 1;
     }
 

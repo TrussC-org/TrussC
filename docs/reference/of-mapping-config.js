@@ -132,12 +132,12 @@ const ofOnlyEntries = [
     ]},
     // GUI
     { category: "gui", name: "GUI", name_ja: "GUI", name_ko: "GUI", order: 18, entries: [
-        { of: "ofxGui / ofxImGui", tc: "ImGui (built-in)", notes: "Included by default", notes_ja: "Included by default", notes_ko: "" },
+        { of: "ofxGui / ofxImGui", tc: "Dear ImGui (tcxImGui addon)", notes: "tcxImGui addon (not in core)", notes_ja: "tcxImGui アドオン（コアには含まれない）", notes_ko: "tcxImGui 애드온 (코어에는 포함되지 않음)" },
     ]},
     // I/O
     { category: "io", name: "I/O", name_ja: "I/O", name_ko: "I/O", order: 19, entries: [
-        { of: "ofSystemLoadDialog()", tc: "systemLoadDialog()", notes: "", notes_ja: "", notes_ko: "" },
-        { of: "ofSystemSaveDialog()", tc: "systemSaveDialog()", notes: "", notes_ja: "", notes_ko: "" },
+        { of: "ofSystemLoadDialog()", tc: "loadDialog()", notes: "loadDialogAsync() for a non-blocking variant", notes_ja: "非同期版は loadDialogAsync()", notes_ko: "비동기 버전은 loadDialogAsync()" },
+        { of: "ofSystemSaveDialog()", tc: "saveDialog()", notes: "saveDialogAsync() for a non-blocking variant", notes_ja: "非同期版は saveDialogAsync()", notes_ko: "비동기 버전은 saveDialogAsync()" },
         { of: "ofLoadJson(path)", tc: "loadJson(path)", notes: "nlohmann/json", notes_ja: "nlohmann/json", notes_ko: "" },
         { of: "-", tc: "loadXml(path)", notes: "pugixml", notes_ja: "pugixml", notes_ko: "" },
     ]},
