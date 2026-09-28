@@ -174,6 +174,29 @@ inline bool hasDeferredResponses() { return !detail::deferredResponses().empty()
 // Types & Interfaces
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Registration owners (#227)
+// ---------------------------------------------------------------------------
+// While an owner is set, every tool / resource / status entry registered is
+// tagged with it, and removeRegistrationsOwnedBy() takes them all out again.
+// The hot reload host sets one per guest generation, so a reload drops what
+// the old guest registered — handlers that capture the old App — before that
+// App is deleted. Plain apps never set one (tag null = permanent).
+namespace detail {
+inline const void*& registrationOwner() {
+    static const void* owner = nullptr;
+    return owner;
+}
+// Registries defined elsewhere (status entries in tcStandardTools.h) hook
+// their own cleanup in here the first time they are used.
+inline std::vector<std::function<void(const void*)>>& ownerCleanupHooks() {
+    static std::vector<std::function<void(const void*)>> hooks;
+    return hooks;
+}
+inline void setRegistrationOwner(const void* owner) { registrationOwner() = owner; }
+inline void removeRegistrationsOwnedBy(const void* owner);   // after Server
+} // namespace detail
+
 struct ToolArg {
     std::string name;
     std::string type; // "string", "int", "float", "boolean", "object", "array"
@@ -187,6 +210,7 @@ public:
     std::string description;
     std::vector<ToolArg> args;
     std::function<json(const json&)> handler;
+    const void* owner = nullptr;   // see registrationOwner()
 
     json getSchema() const {
         json schema = {
@@ -215,6 +239,7 @@ public:
     std::string mimeType;
     std::string description;
     std::function<std::string()> handler; // Returns content (text or base64)
+    const void* owner = nullptr;   // see registrationOwner()
 };
 
 // ---------------------------------------------------------------------------
@@ -237,10 +262,25 @@ public:
             logWarning("MCP") << "tool '" << tool.name << "' re-registered; previous handler replaced";
         }
         tools_[tool.name] = tool;
+        tools_[tool.name].owner = detail::registrationOwner();
     }
 
     void registerResource(const Resource& res) {
         resources_[res.uri] = res;
+        resources_[res.uri].owner = detail::registrationOwner();
+    }
+
+    bool hasTool(const std::string& name) const { return tools_.count(name) != 0; }
+
+    // Drop every tool / resource registered under `owner` (non-null).
+    void removeOwnedBy(const void* owner) {
+        if (!owner) return;
+        for (auto it = tools_.begin(); it != tools_.end();) {
+            it = (it->second.owner == owner) ? tools_.erase(it) : std::next(it);
+        }
+        for (auto it = resources_.begin(); it != resources_.end();) {
+            it = (it->second.owner == owner) ? resources_.erase(it) : std::next(it);
+        }
     }
 
     // --- Message Processing (returns JSON-RPC response string) ---
@@ -804,6 +844,19 @@ inline void enableDebugger() {}
 // No MCP HTTP server on the web: a no-op, so app code calling it stays portable.
 inline void allowOrigin(const std::string&) {}
 #endif // __EMSCRIPTEN__
+
+namespace detail {
+inline void removeRegistrationsOwnedBy(const void* owner) {
+    if (!owner) return;
+    Server::instance().removeOwnedBy(owner);
+    for (auto& hook : ownerCleanupHooks()) hook(owner);
+}
+} // namespace detail
+
+// Whether a tool with this name is currently registered.
+inline bool hasTool(const std::string& name) {
+    return Server::instance().hasTool(name);
+}
 
 // ---------------------------------------------------------------------------
 // Argument Type Traits & Builder Helpers

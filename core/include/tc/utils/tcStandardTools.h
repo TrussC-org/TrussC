@@ -180,24 +180,42 @@ struct StatusEntry {
     std::string name;
     std::function<json()> getter;   // returns a number or string json value
     bool graph = false;             // display hint: plot as time series
+    const void* owner = nullptr;    // mcp::detail::registrationOwner() at registration
 };
+
+// Both registries drop an owner's entries in mcp::detail::removeRegistrationsOwnedBy()
+// (hot reload: a guest generation's getters capture its App, #227).
+template <class Entry>
+inline void hookOwnerCleanup(std::vector<Entry>& reg) {
+    mcp::detail::ownerCleanupHooks().push_back([&reg](const void* owner) {
+        reg.erase(std::remove_if(reg.begin(), reg.end(),
+                                 [owner](const Entry& e) { return e.owner == owner; }),
+                  reg.end());
+    });
+}
 
 inline std::vector<StatusEntry>& statusRegistry() {
     static std::vector<StatusEntry> reg;
+    static bool hooked = (hookOwnerCleanup(reg), true);
+    (void)hooked;
     return reg;
 }
 
 struct StatusImageEntry {
     std::string name;
     std::function<trussc::Pixels()> getter;
+    const void* owner = nullptr;    // as StatusEntry::owner
 };
 
 inline std::vector<StatusImageEntry>& statusImageRegistry() {
     static std::vector<StatusImageEntry> reg;
+    static bool hooked = (hookOwnerCleanup(reg), true);
+    (void)hooked;
     return reg;
 }
 
 inline void addStatusEntry(StatusEntry entry) {
+    entry.owner = mcp::detail::registrationOwner();
     auto& reg = statusRegistry();
     for (auto& e : reg) {
         if (e.name == entry.name) { e = std::move(entry); return; }
@@ -289,10 +307,11 @@ inline void statusGraph(const std::string& name, std::function<double()> getter)
 
 inline void statusImage(const std::string& name, std::function<trussc::Pixels()> getter) {
     auto& reg = detail::statusImageRegistry();
+    const void* owner = mcp::detail::registrationOwner();
     for (auto& e : reg) {
-        if (e.name == name) { e.getter = getter; return; }
+        if (e.name == name) { e.getter = getter; e.owner = owner; return; }
     }
-    reg.push_back({name, getter});
+    reg.push_back({name, getter, owner});
 }
 
 // ---------------------------------------------------------------------------
