@@ -51,9 +51,16 @@ findstr /C:"CMAKE_GENERATOR:INTERNAL=Ninja" "CMakeCache.txt" >nul 2>&1
 if errorlevel 1 set "CACHE_CLEAN_REASON=generator changed"
 
 set "CACHED_CXX="
+set "CACHED_CC="
 for /f "usebackq tokens=1,* delims==" %%i in (`findstr /b /c:"CMAKE_CXX_COMPILER:FILEPATH=" "CMakeCache.txt"`) do set "CACHED_CXX=%%j"
+for /f "usebackq tokens=1,* delims==" %%i in (`findstr /b /c:"CMAKE_C_COMPILER:FILEPATH=" "CMakeCache.txt"`) do set "CACHED_CC=%%j"
+REM Always print what was read, so a log shows which branch ran (#251: in one
+REM CI run this check stayed silent and the cause could not be reconstructed).
+echo Cached compilers: CXX=[%CACHED_CXX%] C=[%CACHED_CC%]
 if defined CACHED_CXX set "CACHED_CXX=%CACHED_CXX:/=\%"
+if defined CACHED_CC set "CACHED_CC=%CACHED_CC:/=\%"
 if defined CACHED_CXX if not exist "%CACHED_CXX%" set "CACHE_CLEAN_REASON=recorded compiler no longer exists"
+if defined CACHED_CC if not exist "%CACHED_CC%" set "CACHE_CLEAN_REASON=recorded compiler no longer exists"
 
 :cache_checked
 if defined CACHE_CLEAN_REASON (
@@ -68,9 +75,20 @@ REM CMake doesn't recognize a newer VS (e.g. VS2026 / "Visual Studio 18"). The
 REM vcvarsall call above puts cl.exe and VS-bundled ninja on PATH, so Ninja
 REM builds work across VS versions. Single-config generator -> set the build
 REM type here (the --build --config flag is multi-config only).
+REM
+REM If configure fails anyway, retry once from a clean cache: whatever made a
+REM leftover cache unusable (the checks above can miss a case, #251), a fresh
+REM configure gets past it, and a real error simply fails twice.
 echo Running CMake...
 cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
-if %ERRORLEVEL% neq 0 (
+if errorlevel 1 (
+    echo.
+    echo CMake configuration failed - retrying once with a clean cache...
+    if exist "CMakeCache.txt" del /q "CMakeCache.txt"
+    if exist "CMakeFiles" rmdir /s /q "CMakeFiles"
+    cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
+)
+if errorlevel 1 (
     echo.
     echo ERROR: CMake configuration failed!
     echo Please make sure CMake is installed and in your PATH.
