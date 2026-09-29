@@ -275,6 +275,12 @@ Place icon files in the `icon/` folder:
   - `.ico` - Windows icon format
   - `.png` - Converted to `.ico` automatically (requires ImageMagick)
 
+### Windows Application Manifest (UTF-8)
+Every Windows executable built through `trussc_app()` embeds an application manifest (`core/resources/windows/app.manifest`), merged with the linker's default one:
+
+- `activeCodePage` = `UTF-8`: on Windows 10 version 1903 or later the process code page is UTF-8, so narrow strings are UTF-8 in every API that takes them (`fs::path(std::string)`, `path.string()`, `fopen`, `getenv`, the `-A` Win32 functions), in TrussC, addons and third-party libraries alike. A UTF-8 literal or `std::string` works as a file path: `img.load("写真.png")`. Older Windows ignores the setting.
+- `longPathAware`: paths longer than 260 characters work where Windows has long paths enabled (the `LongPathsEnabled` policy).
+
 ---
 
 ## 4. Addon System
