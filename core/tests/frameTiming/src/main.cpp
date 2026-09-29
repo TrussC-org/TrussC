@@ -30,7 +30,8 @@
 //      not counted), resets don't affect them, and a main-window timer is
 //      charged only the time since its creation: one created between updates
 //      (after an idle gap or a stall), and one created late in a long update
-//      or setup() in a measured-dt mode.
+//      or setup() in a measured-dt mode. A node re-parented during an update
+//      (so updated twice in it) is counted down once.
 //   7. ScreenRecorder pacing (the pacer's tick(), all ScreenRecorder reads):
 //      decimation and PTS are exact after long uptime, and neither the PTS nor
 //      the duration cutoff moves with resetElapsedTimeCounter(); neither does
@@ -975,6 +976,57 @@ static void testModeSwitchMeasuredDelta() {
 }
 
 // ---------------------------------------------------------------------------
+// 6d. A node re-parented during an update is counted down once
+// ---------------------------------------------------------------------------
+// A node that moves itself under a parent traversed later in the same update
+// runs updateTree() twice in it; its timers must not count that update twice
+// (fire a frame early).
+struct MovingNode : Node {
+    shared_ptr<Node> target;
+    bool moveNow = false;
+    int fired = 0;
+    void update() override {
+        if (moveNow) {
+            moveNow = false;
+            target->addChild(shared_from_this());
+        }
+    }
+};
+
+static void testReparentChargesOnce() {
+    auto& ctx = internal::mainWindowContext();
+    auto root = make_shared<App>();
+    auto p1 = make_shared<Node>(), p2 = make_shared<Node>();
+    auto n = make_shared<MovingNode>();
+    root->addChild(p1);
+    root->addChild(p2);
+    p1->addChild(n);
+    n->target = p2;
+    const double dt = 1.0 / 60.0;
+    // One simulated measured-dt update of the whole tree (as simUpdate does).
+    auto update = [&] {
+        internal::updateFrameCount++;
+        ctx.updateDeltaTime = dt;
+        g_simNow += secs(dt);
+        ctx.updateTime = g_simNow;
+        ctx.fixedStepUpdate = false;
+        ctx.inUpdate = true;
+        root->handleUpdate(0, 0);
+        ctx.inUpdate = false;
+    };
+    n->callAfter(3 * dt, [&] { ++n->fired; });
+    anchorSimClock();
+    update();                               // 2 dt left
+    n->moveNow = true;
+    update();                               // under p1, then again under p2
+    check("re-parent: the node was updated under its new parent", n->getParent() == p2);
+    check("re-parent: its timer is counted down once in that update (not fired early)", n->fired == 0);
+    update();
+    check("re-parent: ...and fires on schedule", n->fired == 1);
+    ctx.updateDeltaTime = 0.0;
+}
+
+// ---------------------------------------------------------------------------
 // 7. ScreenRecorder pacing
 // ---------------------------------------------------------------------------
 struct PaceResult { int captures = 0; bool ptsIncreasing = true; double minDelta = 1e9, maxDelta = 0; vector<double> pts; };
@@ -1306,6 +1358,7 @@ int main() {
     testNodeTimersInLoop();
     testTimersCountFromCreation();
     testModeSwitchMeasuredDelta();
+    testReparentChargesOnce();
     testRecorderPacing();
     testHealthUptime();
     testHeadlessLoop();

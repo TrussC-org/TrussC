@@ -1499,6 +1499,11 @@ protected:
 
     std::vector<Timer> timers_;
     inline static uint64_t nextTimerId_ = 1;
+    // The update (getUpdateCount()) this node's timers were last counted down
+    // in. A node re-parented during an update under a parent that is
+    // traversed later runs updateTree() twice in that update; its timers are
+    // counted down only once.
+    uint64_t timersChargedUpdate_ = UINT64_MAX;
 
 private:
     uint64_t addTimer(double delay, double interval, bool repeating,
@@ -1534,8 +1539,10 @@ protected:
     //   next update;
     // - one created during a fixed-Hz step: it starts with the next step and
     //   counts step time, so it can't fire a step early.
-    // A tiny epsilon absorbs rounding, so callAfter(1.0) created in an update
-    // at a fixed 60 Hz fires on exactly the 60th step.
+    // A node's timers are counted down at most once per update, even if a
+    // re-parent makes updateTree() reach the node twice. A tiny epsilon
+    // absorbs rounding, so callAfter(1.0) created in an update at a fixed
+    // 60 Hz fires on exactly the 60th step.
     //
     // Reentrancy-safe: a callback may invoke callAfter / callEvery / cancelTimer
     // / cancelAllTimers on this same node. We snapshot the ready-timer IDs up
@@ -1549,6 +1556,8 @@ protected:
         constexpr double dueEpsilon = 1e-9;
         const double dt = getDeltaTime();
         const uint64_t thisUpdate = getUpdateCount();
+        const bool chargedAlready = (timersChargedUpdate_ == thisUpdate);
+        timersChargedUpdate_ = thisUpdate;
         const auto updateTime = internal::getUpdateTime();
         // No update time (a loop that doesn't set one, e.g. a secondary
         // window's tick): pending timers count whole deltas from the update
@@ -1559,7 +1568,9 @@ protected:
         readyIds.reserve(timers_.size());
         for (auto& t : timers_) {
             double charge = 0.0;
-            if (t.pending && haveUpdateTime) {
+            if (chargedAlready) {
+                // Second traversal in this update (re-parented): no charge.
+            } else if (t.pending && haveUpdateTime) {
                 if (updateTime > t.created) {
                     t.pending = false;
                     charge = std::min(dt, std::chrono::duration<double>(updateTime - t.created).count());
