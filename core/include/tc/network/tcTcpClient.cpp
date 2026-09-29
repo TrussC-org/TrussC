@@ -81,6 +81,9 @@ bool TcpClient::connect(const std::string& host, int port) {
         return false;
     }
 
+    // A send() racing the peer's close must fail, not raise SIGPIPE
+    internal::setNoSigpipe(socket_);
+
     // Set non-blocking if not using threads to avoid blocking connect
     if (!useThread_) {
         setBlocking(false);
@@ -247,7 +250,7 @@ bool TcpClient::send(const void* data, size_t size) {
     size_t remaining = size;
 
     while (remaining > 0) {
-        int sent = static_cast<int>(::send(socket_, ptr, remaining, 0));
+        int sent = static_cast<int>(::send(socket_, ptr, remaining, TC_SEND_FLAGS));
         if (sent == SOCKET_ERROR) {
             int err = SOCKET_ERROR_CODE;
             if (err == WOULD_BLOCK_ERROR) {

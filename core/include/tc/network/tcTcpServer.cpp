@@ -23,18 +23,9 @@
 #endif
 #include <chrono>
 
-// Writing to a socket the peer already closed raises SIGPIPE, whose default
-// action terminates the process. MSG_NOSIGNAL suppresses it per call, and both
-// Linux and current Apple SDKs define it. Older Apple SDKs do not, so each
-// accepted socket also gets SO_NOSIGPIPE below — either mechanism alone is
-// enough (verified on macOS 26.5 with a four-way probe: unprotected sends die
-// on signal 13, each option alone survives). Windows has no SIGPIPE at all and
-// does not define MSG_NOSIGNAL, so the flag is 0 there.
-#if defined(MSG_NOSIGNAL)
-    #define TC_SEND_FLAGS MSG_NOSIGNAL
-#else
-    #define TC_SEND_FLAGS 0
-#endif
+// SIGPIPE: sends pass TC_SEND_FLAGS and every accepted socket gets
+// SO_NOSIGPIPE (see tcSocketInternal.h), so a peer that closed first makes
+// send() fail instead of killing the process.
 
 namespace trussc {
 
@@ -268,13 +259,7 @@ void TcpServer::acceptThreadFunc() {
         inet_ntop(AF_INET, &clientAddr.sin_addr, hostStr, INET_ADDRSTRLEN);
         int clientPort = ntohs(clientAddr.sin_port);
 
-#ifdef SO_NOSIGPIPE
-        // Belt and braces for Apple SDKs that predate MSG_NOSIGNAL
-        {
-            int on = 1;
-            ::setsockopt(clientSocket, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
-        }
-#endif
+        internal::setNoSigpipe(clientSocket);
 
         // SO_SNDTIMEO would bound a blocking send, but nothing can then cut
         // that send short when the client is disconnected. The send loop polls

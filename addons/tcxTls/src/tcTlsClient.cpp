@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "tcTlsClient.h"
+#include "tc/network/tcSocketInternal.h"
 #include "tc/utils/tcLog.h"
 #include "tc/events/tcCoreEvents.h"
 
@@ -95,7 +96,9 @@ static int mbedtls_net_send_callback(void* ctx, const unsigned char* buf, size_t
     }
 #else
     int fd = *static_cast<int*>(ctx);
-    int ret = static_cast<int>(::send(fd, buf, len, 0));
+    // TC_SEND_FLAGS: a peer that closed first makes this fail instead of
+    // raising SIGPIPE
+    int ret = static_cast<int>(::send(fd, buf, len, TC_SEND_FLAGS));
     if (ret < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) return MBEDTLS_ERR_SSL_WANT_WRITE;
         return MBEDTLS_ERR_NET_SEND_FAILED;
@@ -320,6 +323,9 @@ bool TlsClient::connect(const std::string& host, int port) {
         return false;
     }
 #endif
+
+    // A send racing the peer's close must fail, not raise SIGPIPE
+    tc::internal::setNoSigpipe(socket_);
 
     // Set non-blocking if not using threads
     if (!useThread_) {

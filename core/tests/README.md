@@ -86,3 +86,7 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   gets a loopback packet. The per-class counts used to call `WSACleanup()` on
   every 0 -> 1 -> 0 cycle and tear Winsock down for the whole process. Only
   Windows can fail it; elsewhere the same steps run and pass.
+- `tcpClientSigpipe/` — *(POSIX)* `TcpClient::send()` to a peer that reset
+  the connection returns false instead of raising SIGPIPE, which killed the
+  process without a trace (#254). One part keeps `connected_` set (no receive
+  thread) so every send reaches the dead socket; one races the receive thread.

@@ -10,6 +10,21 @@
 
 #ifdef _WIN32
     #include <winsock2.h>
+#else
+    #include <sys/socket.h>
+#endif
+
+// Writing to a socket the peer already closed raises SIGPIPE, whose default
+// action terminates the process. MSG_NOSIGNAL suppresses it per call, and both
+// Linux and current Apple SDKs define it. Older Apple SDKs do not, so every
+// socket also gets SO_NOSIGPIPE through setNoSigpipe() — either mechanism alone
+// is enough (verified on macOS 26.5 with a four-way probe: unprotected sends die
+// on signal 13, each option alone survives). Windows has no SIGPIPE at all and
+// does not define MSG_NOSIGNAL, so the flag is 0 there.
+#if defined(MSG_NOSIGNAL)
+    #define TC_SEND_FLAGS MSG_NOSIGNAL
+#else
+    #define TC_SEND_FLAGS 0
 #endif
 
 namespace trussc {
@@ -22,6 +37,21 @@ namespace internal {
 // once that count ran out every socket in the process stopped working.
 // Returns false if WSAStartup() failed. Always true on other platforms.
 bool ensureWinsock();
+
+// Belt and braces for Apple SDKs that predate MSG_NOSIGNAL (see TC_SEND_FLAGS).
+// A no-op where SO_NOSIGPIPE does not exist.
+#ifdef _WIN32
+inline void setNoSigpipe(SOCKET) {}
+#else
+inline void setNoSigpipe(int s) {
+#ifdef SO_NOSIGPIPE
+    int on = 1;
+    ::setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
+#else
+    (void)s;
+#endif
+}
+#endif
 
 } // namespace internal
 } // namespace trussc
