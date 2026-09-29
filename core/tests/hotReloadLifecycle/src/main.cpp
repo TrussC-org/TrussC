@@ -22,6 +22,15 @@
 // image lifetime, not on the code changing — and GuestLibrary already loads
 // each cycle from a fresh unique temp copy, exactly like a real reload.
 //
+// MCP registrations (#227): the guest App registers a tool, a status entry and
+// a status image capturing `this`. Each cycle checks they are visible while
+// the guest lives (the registry is the host's, shared) and gone after unload,
+// while a tool the host registered itself stays. Sharing is required on Linux
+// and macOS (the guest resolves TrussC against the host). A Windows DLL keeps its own
+// copy of the inline registries, so there the guest's registrations never
+// reach the host at all (nothing to go stale; a separate limitation) and the
+// MCP checks are skipped when that is the case.
+//
 // Exit code: 0 = survived all cycles (including process exit), non-zero or a
 // crash = regression. TC_RUN_APP is intentionally NOT used: no sokol loop, no
 // GPU, no file watcher, no cmake rebuild — CI-safe on every desktop platform.
@@ -84,6 +93,18 @@ int main() {
     }
     std::printf("hotReloadLifecycle: guest = %s\n", guestPath.c_str());
 
+    // Host-owned registration: must survive every reload.
+    mcp::tool("host_probe", "hotReloadLifecycle host tool")
+        .bind(std::function<json()>([]() -> json { return json{{"ok", true}}; }));
+    auto hasStatus = [](const char* name) {
+        for (auto& e : mcp::detail::statusRegistry()) if (e.name == name) return true;
+        return false;
+    };
+    auto hasStatusImage = [](const char* name) {
+        for (auto& e : mcp::detail::statusImageRegistry()) if (e.name == name) return true;
+        return false;
+    };
+
     const int kCycles = 5;
     for (int i = 1; i <= kCycles; ++i) {
         GuestLibrary lib;
@@ -98,9 +119,26 @@ int main() {
             std::printf("hotReloadLifecycle: FAIL - create failed (cycle %d)\n", i);
             return 3;
         }
+        const bool shared = mcp::hasTool("guest_probe") && hasStatus("guest_status") && hasStatusImage("guest_image");
+        if (!shared) {
+#if defined(__linux__) || defined(__APPLE__)
+            std::printf("hotReloadLifecycle: FAIL - guest MCP registrations not visible to the host (cycle %d)\n", i);
+            return 4;
+#else
+            if (i == 1) std::printf("hotReloadLifecycle: note - the guest's MCP registrations stay in its own registry on this platform; MCP checks skipped\n");
+#endif
+        }
         // Destruction + unload: listener removal churns the COW lists, and the
         // (pre-fix) dlclose here is what armed/triggered both crashes.
         lib.unload();
+        if (shared && (mcp::hasTool("guest_probe") || hasStatus("guest_status") || hasStatusImage("guest_image"))) {
+            std::printf("hotReloadLifecycle: FAIL - the destroyed guest's MCP registrations are still listed (cycle %d)\n", i);
+            return 5;
+        }
+        if (!mcp::hasTool("host_probe")) {
+            std::printf("hotReloadLifecycle: FAIL - the host's own tool was removed (cycle %d)\n", i);
+            return 6;
+        }
         std::printf("hotReloadLifecycle: cycle %d/%d ok\n", i, kCycles);
     }
 

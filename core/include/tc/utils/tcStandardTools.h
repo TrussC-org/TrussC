@@ -180,24 +180,42 @@ struct StatusEntry {
     std::string name;
     std::function<json()> getter;   // returns a number or string json value
     bool graph = false;             // display hint: plot as time series
+    const void* owner = nullptr;    // mcp::detail::registrationOwner() at registration
 };
+
+// Both registries drop an owner's entries in mcp::detail::removeRegistrationsOwnedBy()
+// (hot reload: a guest generation's getters capture its App, #227).
+template <class Entry>
+inline void hookOwnerCleanup(std::vector<Entry>& reg) {
+    mcp::detail::ownerCleanupHooks().push_back([&reg](const void* owner) {
+        reg.erase(std::remove_if(reg.begin(), reg.end(),
+                                 [owner](const Entry& e) { return e.owner == owner; }),
+                  reg.end());
+    });
+}
 
 inline std::vector<StatusEntry>& statusRegistry() {
     static std::vector<StatusEntry> reg;
+    static bool hooked = (hookOwnerCleanup(reg), true);
+    (void)hooked;
     return reg;
 }
 
 struct StatusImageEntry {
     std::string name;
     std::function<trussc::Pixels()> getter;
+    const void* owner = nullptr;    // as StatusEntry::owner
 };
 
 inline std::vector<StatusImageEntry>& statusImageRegistry() {
     static std::vector<StatusImageEntry> reg;
+    static bool hooked = (hookOwnerCleanup(reg), true);
+    (void)hooked;
     return reg;
 }
 
 inline void addStatusEntry(StatusEntry entry) {
+    entry.owner = mcp::detail::registrationOwner();
     auto& reg = statusRegistry();
     for (auto& e : reg) {
         if (e.name == entry.name) { e = std::move(entry); return; }
@@ -289,10 +307,11 @@ inline void statusGraph(const std::string& name, std::function<double()> getter)
 
 inline void statusImage(const std::string& name, std::function<trussc::Pixels()> getter) {
     auto& reg = detail::statusImageRegistry();
+    const void* owner = mcp::detail::registrationOwner();
     for (auto& e : reg) {
-        if (e.name == name) { e.getter = getter; return; }
+        if (e.name == name) { e.getter = getter; e.owner = owner; return; }
     }
-    reg.push_back({name, getter});
+    reg.push_back({name, getter, owner});
 }
 
 // ---------------------------------------------------------------------------
@@ -327,7 +346,8 @@ inline void registerInspectionTools() {
     // Resolve the optional MCP "window" arg (0 = main window; 1..N = open
     // secondary windows in the order tc_list_windows reports). Returns the
     // WindowContext to capture from, or null on a bad index (error filled in).
-    // Must run at the afterFrame safe point (same frame the index was read).
+    // Resolved when the request is handled; the capture itself then runs in
+    // that window's own tick (deferral target), see drainPendingScreenshots().
     auto resolveWindowCtx = [](int windowIdx, json& err) -> trussc::internal::WindowContext* {
         if (windowIdx == 0) return &trussc::internal::mainWindowContext();
         auto wins = trussc::internal::openWindows();
@@ -377,28 +397,27 @@ inline void registerInspectionTools() {
                 quality = std::clamp(args.at("quality").get<int>(), 1, 100);
             const int windowIdx = args.value("window", 0);
 
-            // Two-stage deferral: the main stage runs at the afterFrame safe
-            // point (mid-frame the framebuffer is blank — drawing is deferred)
-            // and only grabs the pixels; the returned closure — downscale +
-            // encode + Base64 — runs on the HTTP worker blocked on this reply.
-            // Window targeting: switch the current window context around the
-            // readback so captureWindow reads the target's presented drawable.
-            mcp::deferToolResultTwoStage([resolveWindowCtx, windowIdx, format, reqWidth, quality]() -> std::function<json()> {
-                json err;
-                auto* ctx = resolveWindowCtx(windowIdx, err);
-                if (!ctx) return [err]() -> json { return err; };
-                auto* prev = trussc::internal::currentWindowCtx;
-                trussc::internal::currentWindowCtx = ctx;
+            json err;
+            auto* ctx = resolveWindowCtx(windowIdx, err);
+            if (!ctx) return err;
+
+            // Two-stage deferral: the main stage runs right after the TARGET
+            // window's present(), inside that window's own tick, where its
+            // drawable is current (mid-frame the framebuffer is blank —
+            // drawing is deferred; from another window's tick a secondary
+            // window's back buffer is not the one read, #243). It only grabs
+            // the pixels; the returned closure — downscale + encode + Base64 —
+            // runs on the HTTP worker blocked on this reply.
+            mcp::deferToolResultTwoStage([format, reqWidth, quality]() -> std::function<json()> {
                 auto px = std::make_shared<trussc::Pixels>();
                 bool grabbed = trussc::grabScreen(*px);
-                trussc::internal::currentWindowCtx = prev;
                 return [px, grabbed, format, reqWidth, quality]() -> json {
                     if (!grabbed) {
                         return json{{"status", "error"}, {"message", "Failed to grab screen"}};
                     }
                     return detail::imageContentResult(detail::pixelsToImageJson(*px, format, reqWidth, quality));
                 };
-            });
+            }, ctx->isMain ? nullptr : ctx);
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
@@ -417,18 +436,16 @@ inline void registerInspectionTools() {
                 }
                 return json{{"status", "error"}, {"message", "Failed to save screenshot"}};
             }
-            // Secondary window: defer, then capture that window's drawable
-            mcp::deferToolResultUntilAfterFrame([resolveWindowCtx, windowIdx, path]() -> json {
-                json err;
-                auto* ctx = resolveWindowCtx(windowIdx, err);
-                if (!ctx) return err;
-                auto* prev = trussc::internal::currentWindowCtx;
-                trussc::internal::currentWindowCtx = ctx;
+            // Secondary window: capture inside that window's own tick, right
+            // after its present(), where its drawable is current (#243)
+            json err;
+            auto* ctx = resolveWindowCtx(windowIdx, err);
+            if (!ctx) return err;
+            mcp::deferToolResultUntilAfterFrame([windowIdx, path]() -> json {
                 bool ok = trussc::internal::captureWindowToFile(trussc::internal::utf8ToPath(path));
-                trussc::internal::currentWindowCtx = prev;
                 if (ok) return json{{"status", "ok"}, {"path", path}, {"window", windowIdx}};
                 return json{{"status", "error"}, {"message", "Failed to capture window " + std::to_string(windowIdx)}};
-            });
+            }, ctx);
             return json(nullptr);  // deferred result is sent instead
         });
 
