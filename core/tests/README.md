@@ -80,3 +80,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   or without the #230 fix: it catches the web early return leaking into native
   builds. The web half is what guards #230; the daily run (`daily.yml`,
   `sweep-web`) runs it under node.
+- `serialHangup/` — a lost serial device is reported (#260): when the device
+  behind a `Serial` goes away, `available()` / `readBytes()` / `readByte()` /
+  `writeBytes()` each notice it on their own, close the port, log one warning,
+  and `isConnected()` turns false so `setup()` can reconnect; a quiet but
+  present device is not a loss. A pseudo-terminal plays the device, and closing
+  its master stands in for the USB unplug. POSIX only (SKIP on Windows).
+- `serialBaudRate/` — `Serial::setup()` never succeeds at a speed other than
+  the one asked for (#260): rates without a termios B-constant used to open at
+  9600 and report success. Linux must apply any rate exactly (termios2); on
+  macOS a pty rejects `IOSSIOSPEED`, so there such rates must fail cleanly.
+  POSIX only (SKIP on Windows).
