@@ -81,25 +81,50 @@ namespace detail {
         static CurlGlobalGuard guard;
     }
 
-    // Header lines whose value is a credential: setVerbose() output shows
-    // their name but not their value.
-    inline bool isCredentialHeader(std::string_view line) {
+    // Credential headers: setVerbose() output shows their name but not their
+    // value. Matched by name only (case-insensitive).
+    inline bool credentialNameAt(std::string_view line, size_t pos, size_t& colon) {
         static constexpr std::string_view names[] = {
-            "authorization:", "proxy-authorization:", "x-api-key:", "api-key:",
+            "authorization", "proxy-authorization", "x-api-key", "api-key",
         };
         for (auto name : names) {
-            if (line.size() >= name.size() &&
-                std::equal(name.begin(), name.end(), line.begin(), [](char n, char c) {
+            if (line.size() - pos > name.size() && line[pos + name.size()] == ':' &&
+                std::equal(name.begin(), name.end(), line.begin() + pos, [](char n, char c) {
                     return n == std::tolower(static_cast<unsigned char>(c));
                 })) {
+                colon = pos + name.size();
                 return true;
             }
         }
         return false;
     }
 
-    // Returns a header block with credential values replaced by <redacted>,
-    // line endings kept.
+    // Returns one line of curl's debug output with a credential value replaced
+    // by <redacted>. Catches both header lines ("Authorization: ...") and the
+    // info lines curl writes for HTTP/2 and HTTP/3 requests
+    // ("[HTTP/2] [1] [authorization: ...]"): a name counts when it starts the
+    // line or follows '[' or whitespace. Inside [...] the value ends at ']'.
+    inline std::string redactCredentialLine(std::string_view line) {
+        size_t eol = line.size();
+        while (eol > 0 && (line[eol - 1] == '\n' || line[eol - 1] == '\r')) --eol;
+        for (size_t pos = 0; pos < eol; ++pos) {
+            if (pos > 0 && line[pos - 1] != '[' && line[pos - 1] != ' ' && line[pos - 1] != '\t') continue;
+            size_t colon = 0;
+            if (!credentialNameAt(line.substr(0, eol), pos, colon)) continue;
+            size_t valueEnd = eol;
+            if (pos > 0 && line[pos - 1] == '[') {
+                size_t close = line.find(']', colon);
+                if (close != std::string_view::npos && close < eol) valueEnd = close;
+            }
+            std::string out(line.substr(0, colon + 1));
+            out += " <redacted>";
+            out.append(line.substr(valueEnd));
+            return out;
+        }
+        return std::string(line);
+    }
+
+    // Applies redactCredentialLine() to every line of a block, line endings kept.
     inline std::string redactCredentialHeaders(std::string_view block) {
         std::string out;
         out.reserve(block.size());
@@ -107,16 +132,7 @@ namespace detail {
         while (pos < block.size()) {
             size_t nl = block.find('\n', pos);
             size_t next = (nl == std::string_view::npos) ? block.size() : nl + 1;
-            std::string_view line = block.substr(pos, next - pos);
-            if (isCredentialHeader(line)) {
-                size_t eol = line.size();
-                while (eol > 0 && (line[eol - 1] == '\n' || line[eol - 1] == '\r')) --eol;
-                out.append(line.substr(0, line.find(':') + 1));
-                out += " <redacted>";
-                out.append(line.substr(eol));
-            } else {
-                out.append(line);
-            }
+            out += redactCredentialLine(block.substr(pos, next - pos));
             pos = next;
         }
         return out;
@@ -171,9 +187,11 @@ public:
     // (which expect the raw response) are unaffected.
     void setFollowRedirects(bool follow) { followRedirects_ = follow; }
 
-    // Enable verbose curl logging to stderr (for debugging). Credential
-    // headers (Authorization, X-Api-Key, ...) are shown with their value
-    // replaced by <redacted>.
+    // Enable verbose curl logging to stderr (for debugging). The values of
+    // the Authorization, Proxy-Authorization, X-Api-Key and Api-Key headers
+    // are shown as <redacted>. Only those header names are masked: a
+    // credential an app puts elsewhere (another header, the URL query) is
+    // printed as-is.
     void setVerbose(bool v) { verbose_ = v; }
 
     // Check if server is reachable
