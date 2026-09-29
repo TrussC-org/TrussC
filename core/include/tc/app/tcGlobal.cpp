@@ -574,7 +574,8 @@ FixedStepAdvance advanceFixedStep(double& accumulator, double elapsed,
     FixedStepAdvance r;
     if (!(interval > 0.0) || !std::isfinite(interval)) return r;
     if (elapsed > 0.0 && std::isfinite(elapsed)) accumulator += elapsed;
-    while (r.steps < maxSteps && accumulator >= interval) {
+    const int cap = maxSteps > 0 ? maxSteps : std::numeric_limits<int>::max();
+    while (r.steps < cap && accumulator >= interval) {
         accumulator -= interval;
         ++r.steps;
     }
@@ -654,21 +655,44 @@ void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double inter
     if (warned[headless ? 1 : 0].exchange(true)) return;
     const char* where = headless ? "Headless loop" : "Update loop";
     const char* frame = headless ? "loop pass" : "frame";
-    // The main loop steps once per frame callback, so a rate above 10x the
-    // display rate can't keep up either. The headless loop sleeps only until
-    // its next step is due, so on its own it falls behind only when one OS
-    // sleep overshoots by 10 steps (tens of kHz).
-    const char* rateCause = headless
-        ? ", or the rate is so high that one OS sleep spans more than 10 steps"
-        : ", or the update rate is more than 10x the display's frame rate";
-    logWarning("Loop") << where << " fell behind its fixed rate: ran "
+    // stepsRun is the cap (getMaxUpdateSteps()): time is only dropped once
+    // the cap is reached. The main loop steps once per frame callback, so a
+    // rate above that many times the display rate can't keep up either. The
+    // headless loop sleeps only until its next step is due, so on its own it
+    // falls behind only when one OS sleep overshoots by that many steps.
+    auto warning = logWarning("Loop");
+    warning << where << " fell behind its fixed rate: ran "
         << stepsRun << " update steps in one " << frame << " and dropped "
         << droppedTime << " s (" << (interval > 0.0 ? droppedTime / interval : 0.0)
         << " steps at " << (interval > 0.0 ? 1.0 / interval : 0.0)
         << " Hz) instead of replaying it. The app stalled, or update() is too slow "
-           "for this rate" << rateCause << ". Logged once.";
+           "for this rate";
+    if (headless) {
+        warning << ", or the rate is so high that one OS sleep spans more than "
+            << stepsRun << " steps";
+    } else {
+        warning << ", or the update rate is more than " << stepsRun
+            << "x the display's frame rate";
+    }
+    warning << ". setMaxUpdateSteps() sets the cap (0 = run every step). Logged once.";
 }
 } // namespace internal
+
+// ---------------------------------------------------------------------------
+// Update step cap of the fixed-step loops (setMaxUpdateSteps, #228). Stored
+// here, not inline in a header, so the hot-reload Host and Guest share it.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<int> maxUpdateSteps{10};
+} // namespace
+
+void setMaxUpdateSteps(int steps) {
+    maxUpdateSteps.store(steps, std::memory_order_relaxed);
+}
+
+int getMaxUpdateSteps() {
+    return maxUpdateSteps.load(std::memory_order_relaxed);
+}
 
 double getElapsedTime() {
     return std::chrono::duration<double>(internal::getElapsedDuration()).count();

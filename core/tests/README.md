@@ -84,10 +84,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
   `getFrameElapsedTime()` constant within a frame (through the main loop's frame
   start); fixed-Hz update steps report the nominal `1/updateFps`, catch-up is
-  capped at 10 steps per frame (and per `runHeadlessApp` pass at any rate:
-  the pass sleeps only until the next step is due, on a timer that doesn't
-  round up to a ~15.6 ms Windows tick, so 1 kHz keeps up), each loop
-  warning once, without starving `runOnMainThread` work; runtime mode switches
+  capped at `setMaxUpdateSteps()` steps per frame (default 10, `<= 0` runs
+  every step; also per `runHeadlessApp` pass at any rate: the pass sleeps
+  only until the next step is due, on a timer that doesn't round up to a
+  ~15.6 ms Windows tick, so 1 kHz keeps up), each loop warning once, without
+  starving `runOnMainThread` work; runtime mode switches
   don't replay old time and re-applying the current rates every frame changes
   nothing; `getFrameRate()` is the measured rate (steady at non-integer ratios;
   also in the default draw-synced mode, the independent VSYNC update and

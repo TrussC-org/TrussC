@@ -10,7 +10,8 @@
 //   2. getFrameElapsedTime() is constant within a frame (also through the
 //      main loop's frame start, beginMainLoopFrame).
 //   3. Fixed-Hz update: every step reports the nominal 1/updateFps as dt, at
-//      most 10 steps run per frame (excess dropped, warned once), and
+//      most 10 steps run per frame by default (excess dropped, warned once;
+//      setMaxUpdateSteps() sets the cap, <= 0 runs every step), and
 //      getFrameRate() reports the measured rate, steady at non-integer ratios.
 //      The independent VSYNC update and the default draw-synced update
 //      (setFps(VSYNC) / setFps(N), runSyncedUpdate) record their rate too.
@@ -33,10 +34,10 @@
 //      the duration cutoff moves with resetElapsedTimeCounter(); neither does
 //      tc_get_health's uptime.
 //   8. runHeadlessApp: nominal dt, catch-up capped at 10 steps per pass at
-//      any rate (with its own warning), runOnMainThread not starved,
-//      getFrameRate() ~ the target rate, and a fast rate keeps up: the loop
-//      sleeps until the next step is due, on a timer that doesn't round up to
-//      a Windows timer tick (~15.6 ms).
+//      any rate (with its own warning; setMaxUpdateSteps() applies here too),
+//      runOnMainThread not starved, getFrameRate() ~ the target rate, and a
+//      fast rate keeps up: the loop sleeps until the next step is due, on a
+//      timer that doesn't round up to a Windows timer tick (~15.6 ms).
 // =============================================================================
 
 #include <TrussC.h>
@@ -133,20 +134,34 @@ static void testElapsedClock() {
 // 3. Fixed-step helper
 // ---------------------------------------------------------------------------
 static void testFixedStepHelper() {
+    // setMaxUpdateSteps(): the cap is 10 until the app changes it.
+    checkf("setMaxUpdateSteps: the default cap is 10", getMaxUpdateSteps() == 10, getMaxUpdateSteps());
     const double iv = 1.0 / 60.0;
     {
         double acc = 0.0;
-        auto r = internal::advanceFixedStep(acc, 3.0, iv);
-        check("advanceFixedStep: 3 s at 60 Hz runs at most 10 steps", r.steps == internal::maxUpdateStepsPerFrame);
+        auto r = internal::advanceFixedStep(acc, 3.0, iv, getMaxUpdateSteps());
+        check("advanceFixedStep: 3 s at 60 Hz runs at most 10 steps", r.steps == 10);
         check("advanceFixedStep: leaves less than one interval", acc >= 0.0 && acc < iv);
         checkf("advanceFixedStep: reports the dropped time",
                fabs(r.droppedTime - (3.0 - 10 * iv - acc)) < 1e-9, r.droppedTime);
     }
     {
+        double acc = 0.0;
+        auto r = internal::advanceFixedStep(acc, 3.0, iv, 25);
+        check("advanceFixedStep: a cap of 25 runs 25 steps", r.steps == 25 && r.droppedTime > 0.0 && acc < iv);
+        for (int cap : {0, -1}) {
+            acc = 0.0;
+            r = internal::advanceFixedStep(acc, 3.0, iv, cap);
+            char name[128];
+            snprintf(name, sizeof name, "advanceFixedStep: cap %d runs every step (180), drops nothing", cap);
+            checkf(name, abs(r.steps - 180) <= 1 && r.droppedTime == 0.0 && acc < iv, r.steps);
+        }
+    }
+    {
         double acc = 0.0, maxAcc = 0.0;
         int steps = 0, drops = 0;
         for (int i = 0; i < 1000; ++i) {
-            auto r = internal::advanceFixedStep(acc, 0.02, iv);
+            auto r = internal::advanceFixedStep(acc, 0.02, iv, getMaxUpdateSteps());
             steps += r.steps;
             if (r.droppedTime > 0.0) ++drops;
             maxAcc = max(maxAcc, acc);
@@ -157,11 +172,11 @@ static void testFixedStepHelper() {
     }
     {
         double acc = 0.0;
-        auto r = internal::advanceFixedStep(acc, 1.0, 0.0);
+        auto r = internal::advanceFixedStep(acc, 1.0, 0.0, getMaxUpdateSteps());
         check("advanceFixedStep: interval 0 runs nothing", r.steps == 0 && r.droppedTime == 0.0);
     }
     // Headless pass sleep: until the next step is due, at most 1 ms, so a
-    // fast rate stays under the 10-step cap per pass.
+    // fast rate stays under the step cap per pass.
     const double inf = numeric_limits<double>::infinity();
     check("headless sleep: at most 1 ms (60 Hz)",
           internal::headlessSleepTime(0.0, iv, 0.0) == internal::headlessMaxSleepTime &&
@@ -267,6 +282,29 @@ static void testMainLoopUpdates() {
     t += secs(3.0);
     internal::runIndependentUpdates(t);
     check("fixed Hz: the warning is one-time", g_dropWarnings == warningsBefore + 1);
+
+    // --- setMaxUpdateSteps(): a custom cap, and <= 0 for no cap ---
+    setMaxUpdateSteps(25);
+    check("setMaxUpdateSteps: getMaxUpdateSteps() reads back 25", getMaxUpdateSteps() == 25);
+    before = g_updates;
+    t += secs(3.0);
+    internal::runIndependentUpdates(t);
+    checkf("setMaxUpdateSteps(25): a 3 s stall runs 25 steps", g_updates - before == 25, g_updates - before);
+    for (int cap : {0, -1}) {
+        setMaxUpdateSteps(cap);
+        before = g_updates;
+        g_dts.clear();
+        t += secs(3.0);
+        internal::runIndependentUpdates(t);
+        bool nominal = !g_dts.empty();
+        for (double dt : g_dts) if (dt != 1.0 / 120.0) nominal = false;
+        char name[128];
+        snprintf(name, sizeof name, "setMaxUpdateSteps(%d): a 3 s stall replays every step (360)", cap);
+        checkf(name, abs(g_updates - before - 360) <= 1 && nominal, g_updates - before);
+        check("setMaxUpdateSteps(<= 0): ...and leaves less than one interval",
+              internal::updateAccumulator >= 0.0 && internal::updateAccumulator < 1.0 / 120.0);
+    }
+    setMaxUpdateSteps(10);
 
     // --- measured rate when overloaded: frames 200 ms apart at 120 Hz ---
     for (int f = 0; f < 12; ++f) {
@@ -940,8 +978,9 @@ struct LightHeadlessApp : App {
 };
 
 // A fast headless app (1 kHz) whose passes last ~16 ms: the first step of each
-// pass sleeps 15 ms. The cap stays 10 steps per pass at any rate, like the
-// main loop's per frame (#228), so ~16 steps are due and 10 run.
+// pass sleeps 15 ms. The cap (getMaxUpdateSteps()) applies per pass at any
+// rate, like the main loop's per frame (#228), so ~16 steps are due and the
+// cap's worth run.
 static int g_lpMaxPerPass = 0;
 struct LongPassHeadlessApp : App {
     double passTime = -1.0;
@@ -959,10 +998,10 @@ struct LongPassHeadlessApp : App {
 };
 
 // A light fast headless app (1 kHz): the loop's own sleep must not stretch a
-// pass past 10 steps. With Sleep() at the default Windows timer resolution
-// (~15.6 ms) a pass would span ~16 steps, and the cap would hold it to
-// ~640 updates/s. The rate is taken between the first steps of two passes,
-// so it has no partial pass at either end.
+// pass past the default 10-step cap. With Sleep() at the default Windows
+// timer resolution (~15.6 ms) a pass would span ~16 steps, and the cap would
+// hold it to ~640 updates/s. The rate is taken between the first steps of two
+// passes, so it has no partial pass at either end.
 static int    g_fMaxPerPass = 0;
 static double g_fRate = 0.0;
 struct FastHeadlessApp : App {
@@ -988,6 +1027,22 @@ struct FastHeadlessApp : App {
         }
         ++updates;
         g_fMaxPerPass = max(g_fMaxPerPass, ++inPass);
+    }
+};
+
+// A 100 Hz headless app that stalls once for 150 ms: afterwards about 15
+// steps are due. The default cap runs 10 of them in the next pass; with
+// setMaxUpdateSteps(0) that pass runs them all.
+static int g_sMaxPerPass = 0;
+struct StallHeadlessApp : App {
+    double passTime = -1.0;
+    int inPass = 0, updates = 0;
+    void update() override {
+        double pass = getFrameElapsedTime();   // one sample per loop pass
+        if (pass != passTime) { passTime = pass; inPass = 0; }
+        g_sMaxPerPass = max(g_sMaxPerPass, ++inPass);
+        if (++updates == 5) sleepMs(150);
+        if (updates >= 40) requestExit();
     }
 };
 
@@ -1029,7 +1084,19 @@ static void testHeadlessLoop() {
 
     runHeadlessApp<LongPassHeadlessApp>(HeadlessSettings().setFps(1000));
     checkf("headless: 1 kHz, ~16 ms passes: still 10 steps per pass",
-           g_lpMaxPerPass == internal::maxUpdateStepsPerFrame, g_lpMaxPerPass);
+           g_lpMaxPerPass == 10, g_lpMaxPerPass);
+
+    // runHeadlessApp takes the same setMaxUpdateSteps() cap as the main loop.
+    setMaxUpdateSteps(4);
+    g_lpMaxPerPass = 0;
+    runHeadlessApp<LongPassHeadlessApp>(HeadlessSettings().setFps(1000));
+    checkf("headless: setMaxUpdateSteps(4): 1 kHz, ~16 ms passes run 4 steps per pass",
+           g_lpMaxPerPass == 4, g_lpMaxPerPass);
+    setMaxUpdateSteps(0);
+    runHeadlessApp<StallHeadlessApp>(HeadlessSettings().setFps(100));
+    checkf("headless: setMaxUpdateSteps(0): the pass after a 150 ms stall runs every due step (>= 14)",
+           g_sMaxPerPass >= 14, g_sMaxPerPass);
+    setMaxUpdateSteps(10);
 
     // Lower bound at half the wait: a timer may fire a few microseconds early
     // against steady_clock, but a sleeper that doesn't sleep would busy-spin.
@@ -1043,7 +1110,7 @@ static void testHeadlessLoop() {
     checkf("headless: 1 kHz keeps up (>= 900/s; 16 ms passes give ~640)",
            g_fRate >= 900.0, g_fRate);
     checkf("headless: ...within the 10-step cap per pass",
-           g_fMaxPerPass >= 1 && g_fMaxPerPass <= internal::maxUpdateStepsPerFrame, g_fMaxPerPass);
+           g_fMaxPerPass >= 1 && g_fMaxPerPass <= 10, g_fMaxPerPass);
 }
 
 int main() {

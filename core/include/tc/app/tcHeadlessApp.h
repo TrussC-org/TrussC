@@ -122,13 +122,14 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     app.setup();
 
     // Main loop: fixed timestep at the nominal 1/fps (getDeltaTime() reports
-    // exactly that), at most 10 steps per pass (maxUpdateStepsPerFrame, the
-    // main loop's cap per frame). After a stall (sleep/resume) or when
-    // update() is slower than its rate, the excess time is dropped with a
-    // one-time warning instead of replayed, and runOnMainThread work is
-    // drained between bounded passes (#228). Between passes the loop sleeps
-    // until the next step is due, at most 1 ms, on a precise timer
-    // (HeadlessSleeper), so a fast rate stays well under 10 steps per pass.
+    // exactly that), at most getMaxUpdateSteps() steps per pass (the main
+    // loop's cap per frame, setMaxUpdateSteps; default 10). After a stall
+    // (sleep/resume) or when update() is slower than its rate, the excess
+    // time is dropped with a one-time warning instead of replayed, and
+    // runOnMainThread work is drained between bounded passes (#228). Between
+    // passes the loop sleeps until the next step is due, at most 1 ms, on a
+    // precise timer (HeadlessSleeper), so a fast rate stays well under the
+    // cap per pass.
     const double targetDelta = 1.0 / headless::targetFps;
     double accumulator = 0.0;
     auto lastTime = std::chrono::steady_clock::now();
@@ -147,8 +148,8 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         internal::pumpAudioDiagnostics();
 
         // Fixed timestep update
-        internal::FixedStepAdvance adv =
-            internal::advanceFixedStep(accumulator, elapsed, targetDelta);
+        internal::FixedStepAdvance adv = internal::advanceFixedStep(
+            accumulator, elapsed, targetDelta, getMaxUpdateSteps());
         if (adv.droppedTime > 0.0) {
             internal::warnUpdateStepsDropped(internal::FixedStepLoop::Headless,
                                              adv.droppedTime, targetDelta, adv.steps);

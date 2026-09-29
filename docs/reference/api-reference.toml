@@ -5375,9 +5375,9 @@ related = ["Node::moveToFront", "Node::moveToBack", "LayoutMod::updateLayout", "
 ["Node::callAfter"]
 category = "timers"
 keywords = ["timer", "delay", "timeout", "schedule", "later"]
-description.en = "Run callback once after delay seconds. A frame timer fired from the update loop: the delay counts down by getDeltaTime() on each update of this node, so it pauses while the node is inactive and resetElapsedTimeCounter() doesn't affect it. Only time after the call counts: created in an update, it starts with the next one; created elsewhere (an event handler, draw()) in the main window, an idle gap or stall before the call is not charged. In fixed-Hz update mode it counts step time (1 / updateFps per step), so time the loop drops after a stall (beyond 10 steps per frame) is not counted and the timer fires that much later in wall time. Returns a timer id."
-description.ja = "delay秒後にcallbackを1回実行。更新ループから発火するフレームタイマーで、このノードの update ごとに getDeltaTime() ずつカウントダウンする。ノードが非アクティブの間は止まり、resetElapsedTimeCounter() の影響は受けない。数えるのは呼び出し後の時間だけで、update 内で作ると次の update から、メインウィンドウでそれ以外（イベントハンドラや draw()）で作ると呼び出し前の待機や停止の時間は数えない。固定Hz update モードではステップ時間（1ステップあたり 1 / updateFps）で数えるので、停止のあとループが捨てた時間（1フレーム10ステップを超える分）は数えられず、実時間ではその分遅れて発火する。タイマーidを返す"
-description.ko = "delay초 후 callback을 한 번 실행. 업데이트 루프에서 실행되는 프레임 타이머로, 이 노드의 update마다 getDeltaTime()만큼 카운트다운한다. 노드가 비활성인 동안에는 멈추고 resetElapsedTimeCounter()의 영향을 받지 않는다. 호출 이후의 시간만 센다: update 안에서 만들면 다음 update부터, 메인 윈도우에서 그 밖(이벤트 핸들러, draw())에서 만들면 호출 전의 대기나 정지 시간은 세지 않는다. 고정 Hz update 모드에서는 스텝 시간(스텝당 1 / updateFps)으로 세므로, 정지 후 루프가 버린 시간(프레임당 10스텝을 넘는 분)은 세지 않고 실제 시간으로는 그만큼 늦게 실행된다. 타이머 id를 반환"
+description.en = "Run callback once after delay seconds. A frame timer fired from the update loop: the delay counts down by getDeltaTime() on each update of this node, so it pauses while the node is inactive and resetElapsedTimeCounter() doesn't affect it. Only time after the call counts: created in an update, it starts with the next one; created elsewhere (an event handler, draw()) in the main window, an idle gap or stall before the call is not charged. In fixed-Hz update mode it counts step time (1 / updateFps per step), so time the loop drops after a stall (beyond setMaxUpdateSteps() steps per frame) is not counted and the timer fires that much later in wall time. Returns a timer id."
+description.ja = "delay秒後にcallbackを1回実行。更新ループから発火するフレームタイマーで、このノードの update ごとに getDeltaTime() ずつカウントダウンする。ノードが非アクティブの間は止まり、resetElapsedTimeCounter() の影響は受けない。数えるのは呼び出し後の時間だけで、update 内で作ると次の update から、メインウィンドウでそれ以外（イベントハンドラや draw()）で作ると呼び出し前の待機や停止の時間は数えない。固定Hz update モードではステップ時間（1ステップあたり 1 / updateFps）で数えるので、停止のあとループが捨てた時間（1フレーム setMaxUpdateSteps() ステップを超える分）は数えられず、実時間ではその分遅れて発火する。タイマーidを返す"
+description.ko = "delay초 후 callback을 한 번 실행. 업데이트 루프에서 실행되는 프레임 타이머로, 이 노드의 update마다 getDeltaTime()만큼 카운트다운한다. 노드가 비활성인 동안에는 멈추고 resetElapsedTimeCounter()의 영향을 받지 않는다. 호출 이후의 시간만 센다: update 안에서 만들면 다음 update부터, 메인 윈도우에서 그 밖(이벤트 핸들러, draw())에서 만들면 호출 전의 대기나 정지 시간은 세지 않는다. 고정 Hz update 모드에서는 스텝 시간(스텝당 1 / updateFps)으로 세므로, 정지 후 루프가 버린 시간(프레임당 setMaxUpdateSteps() 스텝을 넘는 분)은 세지 않고 실제 시간으로는 그만큼 늦게 실행된다. 타이머 id를 반환"
 related = ["Node::callAfterAsync", "Node::callEvery", "Node::cancelTimer"]
 
 ["Node::callAfterAsync"]
@@ -5407,10 +5407,10 @@ related = ["Node::callAfterAsync", "Node::cancelAsyncTimer", "Node::callEvery"]
 ["Node::callEveryCatchUp"]
 category = "timers"
 keywords = ["timer", "interval", "repeat", "catch up", "missed", "late", "fixed rate"]
-description.en = "Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp <= 0, the default: no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (10 per frame) is not counted. Returns a timer id."
-description.ja = "callEvery と同じだが、期限の来たインターバル1つにつき1回ずつ呼ぶ。1回の update で呼ぶのは最大 maxCatchUp 回（maxCatchUp <= 0 が既定で、上限なし）。update が遅れたあとでもカウンタやシミュレーションを予定どおりに進めたいとき用。上限を超えた分のインターバルは捨て、位相は保つ。コールバック内でこのタイマーをキャンセルすると残りの呼び出しは止まる。上限なしだと、VSYNC / setFps() のループで長く止まったとき（EVENT_DRIVEN モードで長く待機したときも）その回数分を一度に呼ぶ。固定Hz update モードではステップ時間で数えるので、ループがステップ上限（1フレーム10ステップ）を超えて捨てた時間は数えない。タイマーidを返す"
-description.ko = "callEvery와 같지만, 만기된 인터벌 하나마다 한 번씩 호출한다. 한 번의 update에서 호출하는 것은 최대 maxCatchUp회(기본값 maxCatchUp <= 0은 제한 없음). update가 늦은 뒤에도 카운터나 시뮬레이션을 예정대로 진행시키고 싶을 때 쓴다. 제한을 넘는 인터벌은 버리고 위상은 유지한다. 콜백 안에서 이 타이머를 취소하면 남은 호출은 멈춘다. 제한이 없으면 VSYNC / setFps() 루프가 오래 멈췄을 때(EVENT_DRIVEN 모드에서 오래 대기했을 때도) 그 횟수만큼 한꺼번에 호출한다. 고정 Hz update 모드에서는 스텝 시간으로 세므로, 루프가 스텝 상한(프레임당 10스텝)을 넘어 버린 시간은 세지 않는다. 타이머 id를 반환"
-related = ["Node::callEvery", "Node::cancelTimer", "setIndependentFps"]
+description.en = "Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp <= 0, the default: no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (setMaxUpdateSteps) is not counted. Returns a timer id."
+description.ja = "callEvery と同じだが、期限の来たインターバル1つにつき1回ずつ呼ぶ。1回の update で呼ぶのは最大 maxCatchUp 回（maxCatchUp <= 0 が既定で、上限なし）。update が遅れたあとでもカウンタやシミュレーションを予定どおりに進めたいとき用。上限を超えた分のインターバルは捨て、位相は保つ。コールバック内でこのタイマーをキャンセルすると残りの呼び出しは止まる。上限なしだと、VSYNC / setFps() のループで長く止まったとき（EVENT_DRIVEN モードで長く待機したときも）その回数分を一度に呼ぶ。固定Hz update モードではステップ時間で数えるので、ループがステップ上限（setMaxUpdateSteps）を超えて捨てた時間は数えない。タイマーidを返す"
+description.ko = "callEvery와 같지만, 만기된 인터벌 하나마다 한 번씩 호출한다. 한 번의 update에서 호출하는 것은 최대 maxCatchUp회(기본값 maxCatchUp <= 0은 제한 없음). update가 늦은 뒤에도 카운터나 시뮬레이션을 예정대로 진행시키고 싶을 때 쓴다. 제한을 넘는 인터벌은 버리고 위상은 유지한다. 콜백 안에서 이 타이머를 취소하면 남은 호출은 멈춘다. 제한이 없으면 VSYNC / setFps() 루프가 오래 멈췄을 때(EVENT_DRIVEN 모드에서 오래 대기했을 때도) 그 횟수만큼 한꺼번에 호출한다. 고정 Hz update 모드에서는 스텝 시간으로 세므로, 루프가 스텝 상한(setMaxUpdateSteps)을 넘어 버린 시간은 세지 않는다. 타이머 id를 반환"
+related = ["Node::callEvery", "Node::cancelTimer", "setMaxUpdateSteps"]
 
 ["Node::cancelAllAsyncTimers"]
 category = "timers"
@@ -13950,6 +13950,14 @@ description.ja = "現在の変換行列を取得"
 description.ko = "현재 변환 행렬을 얻음"
 related = ["Mat4", "setMatrix", "worldToScreen"]
 
+["getMaxUpdateSteps"]
+category = "window_system"
+keywords = ["update cap", "catch up", "fixed step", "stall", "tick rate"]
+description.en = "The cap on fixed-rate update steps per frame (and per runHeadlessApp loop pass) set by setMaxUpdateSteps(). 10 by default; 0 or less means no cap"
+description.ja = "setMaxUpdateSteps() で設定した、1フレーム（runHeadlessApp ではループ1周）あたりの固定レート update ステップの上限。既定は10で、0以下は上限なし"
+description.ko = "setMaxUpdateSteps()로 설정한, 프레임당(runHeadlessApp에서는 루프 1회당) 고정 레이트 update 스텝의 상한. 기본값은 10이며 0 이하는 상한 없음"
+related = ["setMaxUpdateSteps", "setIndependentFps"]
+
 ["getMemoryUsage"]
 category = "memory"
 keywords = ["ram", "rss", "footprint", "heap", "process"]
@@ -15159,10 +15167,10 @@ related = ["WindowSettings", "runHeadlessApp", "events"]
 ["runHeadlessApp"]
 category = "window_system"
 keywords = ["no window", "offscreen", "cli", "server"]
-description.en = "Run an app class without a window or graphics context (update loop only). Updates are fixed steps at the target rate (getDeltaTime() is 1 / fps), at most 10 per loop pass (between passes the loop sleeps until the next step is due, at most 1 ms); time beyond that (after a stall, or when update() is slower than its rate) is dropped with a one-time warning. Template on the app type; returns the process exit code"
-description.ja = "ウィンドウやグラフィックスコンテキストなしでアプリクラスを実行（update ループのみ）。update は目標レートの固定ステップ（getDeltaTime() は 1 / fps）で、ループ1周あたり最大10ステップ（周と周の間は次のステップの時刻まで、最長1ms スリープする）。それを超える分（停止後や update() がレートに追いつかない場合）は捨てられ、一度だけ警告が出る。アプリ型をテンプレート引数に取り、プロセスの終了コードを返す"
-description.ko = "윈도우나 그래픽스 컨텍스트 없이 앱 클래스를 실행 (update 루프만). update는 목표 레이트의 고정 스텝(getDeltaTime()은 1 / fps)으로 루프 1회당 최대 10스텝(회차 사이에는 다음 스텝 시각까지, 최대 1ms 슬립). 이를 넘는 시간(정지 후, update()가 레이트를 따라가지 못할 때)은 버려지고 경고가 한 번 출력된다. 앱 타입을 템플릿 인자로 받고 프로세스 종료 코드를 반환"
-related = ["HeadlessSettings", "runApp"]
+description.en = "Run an app class without a window or graphics context (update loop only). Updates are fixed steps at the target rate (getDeltaTime() is 1 / fps), at most setMaxUpdateSteps() per loop pass (default 10; between passes the loop sleeps until the next step is due, at most 1 ms); time beyond that (after a stall, or when update() is slower than its rate) is dropped with a one-time warning. Template on the app type; returns the process exit code"
+description.ja = "ウィンドウやグラフィックスコンテキストなしでアプリクラスを実行（update ループのみ）。update は目標レートの固定ステップ（getDeltaTime() は 1 / fps）で、ループ1周あたり最大 setMaxUpdateSteps() ステップ（既定10。周と周の間は次のステップの時刻まで、最長1ms スリープする）。それを超える分（停止後や update() がレートに追いつかない場合）は捨てられ、一度だけ警告が出る。アプリ型をテンプレート引数に取り、プロセスの終了コードを返す"
+description.ko = "윈도우나 그래픽스 컨텍스트 없이 앱 클래스를 실행 (update 루프만). update는 목표 레이트의 고정 스텝(getDeltaTime()은 1 / fps)으로 루프 1회당 최대 setMaxUpdateSteps() 스텝(기본값 10. 회차 사이에는 다음 스텝 시각까지, 최대 1ms 슬립). 이를 넘는 시간(정지 후, update()가 레이트를 따라가지 못할 때)은 버려지고 경고가 한 번 출력된다. 앱 타입을 템플릿 인자로 받고 프로세스 종료 코드를 반환"
+related = ["HeadlessSettings", "runApp", "setMaxUpdateSteps"]
 
 ["runOnMainThread"]
 category = "utility"
@@ -15440,10 +15448,10 @@ platform_note.ja = "モバイル専用。macOS / Windows / Linux / Web では no
 ["setIndependentFps"]
 category = "window_system"
 keywords = ["framerate", "update rate", "decouple", "tick rate"]
-description.en = "Set independent update and draw rates. A fixed update rate runs fixed steps (getDeltaTime() is 1 / updateFps for each), at most 10 per frame: time beyond that (after a stall, when update() is too slow, or when updateFps is more than 10x the display rate) is dropped with a one-time warning. Switching at runtime starts the new rate from the switch (no catch-up; on the next frame a fixed update rate runs one step and a fixed draw rate draws). Calling it again with the current rates does nothing, and changing only the draw rate keeps the update's phase"
-description.ja = "updateとdrawのフレームレートを個別に設定。固定の update レートは固定ステップで回り（各ステップの getDeltaTime() は 1 / updateFps）、1フレームあたり最大10ステップ。それを超える分（停止後、update() が遅すぎる場合、updateFps がディスプレイのレートの10倍を超える場合）は捨てられ、一度だけ警告が出る。実行中の切り替えは切り替えた時点から新しいレートで始まる（取り戻しはせず、次のフレームで固定 update レートは1ステップ回り、固定 draw レートは描画する）。今と同じレートで呼んでも何もせず、draw のレートだけを変えても update の位相は保たれる"
-description.ko = "update와 draw의 프레임레이트를 독립적으로 설정. 고정 update 레이트는 고정 스텝으로 돌며(각 스텝의 getDeltaTime()은 1 / updateFps) 프레임당 최대 10스텝. 이를 넘는 시간(정지 후, update()가 너무 느릴 때, updateFps가 디스플레이 레이트의 10배를 넘을 때)은 버려지고 경고가 한 번 출력된다. 실행 중 전환은 전환 시점부터 새 레이트로 시작한다(따라잡기 없이, 다음 프레임에 고정 update 레이트는 한 스텝 돌고 고정 draw 레이트는 그린다). 현재와 같은 레이트로 호출하면 아무것도 하지 않으며, draw 레이트만 바꾸면 update의 위상은 유지된다"
-related = ["setFps", "getFpsSettings"]
+description.en = "Set independent update and draw rates. A fixed update rate runs fixed steps (getDeltaTime() is 1 / updateFps for each), at most setMaxUpdateSteps() per frame (default 10): time beyond that (after a stall, when update() is too slow, or when updateFps is more than that many times the display rate) is dropped with a one-time warning. Switching at runtime starts the new rate from the switch (no catch-up; on the next frame a fixed update rate runs one step and a fixed draw rate draws). Calling it again with the current rates does nothing, and changing only the draw rate keeps the update's phase"
+description.ja = "updateとdrawのフレームレートを個別に設定。固定の update レートは固定ステップで回り（各ステップの getDeltaTime() は 1 / updateFps）、1フレームあたり最大 setMaxUpdateSteps() ステップ（既定10）。それを超える分（停止後、update() が遅すぎる場合、updateFps がディスプレイのレートのその倍数を超える場合）は捨てられ、一度だけ警告が出る。実行中の切り替えは切り替えた時点から新しいレートで始まる（取り戻しはせず、次のフレームで固定 update レートは1ステップ回り、固定 draw レートは描画する）。今と同じレートで呼んでも何もせず、draw のレートだけを変えても update の位相は保たれる"
+description.ko = "update와 draw의 프레임레이트를 독립적으로 설정. 고정 update 레이트는 고정 스텝으로 돌며(각 스텝의 getDeltaTime()은 1 / updateFps) 프레임당 최대 setMaxUpdateSteps() 스텝(기본값 10). 이를 넘는 시간(정지 후, update()가 너무 느릴 때, updateFps가 디스플레이 레이트의 그 배수를 넘을 때)은 버려지고 경고가 한 번 출력된다. 실행 중 전환은 전환 시점부터 새 레이트로 시작한다(따라잡기 없이, 다음 프레임에 고정 update 레이트는 한 스텝 돌고 고정 draw 레이트는 그린다). 현재와 같은 레이트로 호출하면 아무것도 하지 않으며, draw 레이트만 바꾸면 update의 위상은 유지된다"
+related = ["setFps", "getFpsSettings", "setMaxUpdateSteps"]
 
 ["setKeepScreenOn"]
 category = "window_system"
@@ -15462,6 +15470,14 @@ description.en = "Open a file to receive log output"
 description.ja = "ログ出力を受けるファイルを開く"
 description.ko = "로그 출력을 받을 파일을 엶"
 related = ["closeLogFile", "setFileLogLevel"]
+
+["setMaxUpdateSteps"]
+category = "window_system"
+keywords = ["update cap", "catch up", "fixed step", "stall", "deterministic", "tick rate"]
+description.en = "Set the most fixed-rate update steps run in one frame (setIndependentFps with an update rate) or in one runHeadlessApp loop pass. More are pending after a stall, when update() is slower than its own rate, or when the update rate is more than this many times the display rate; the time beyond the cap is dropped with a one-time warning instead of replayed. Default 10. 0 or less removes the cap so every step runs (e.g. a deterministic simulation), at the cost of a freeze while a long stall is replayed and of frames that keep growing while update() is slower than its rate"
+description.ja = "1フレーム（update レートを指定した setIndependentFps）または runHeadlessApp のループ1周で回す固定レート update ステップの最大数を設定する。停止のあと、update() が自分のレートに追いつかないとき、update レートがディスプレイのレートのこの倍数を超えるときにステップが溜まり、上限を超えた分の時間は再実行せずに捨てられ、一度だけ警告が出る。既定は10。0以下にすると上限がなくなり全ステップを回す（決定的なシミュレーションなど）が、長い停止のあとは再実行の間止まり、update() がレートに追いつかない間はフレームが伸び続ける"
+description.ko = "한 프레임(update 레이트를 지정한 setIndependentFps) 또는 runHeadlessApp 루프 1회에서 돌리는 고정 레이트 update 스텝의 최대 수를 설정한다. 정지 후, update()가 자신의 레이트를 따라가지 못할 때, update 레이트가 디스플레이 레이트의 이 배수를 넘을 때 스텝이 쌓이며, 상한을 넘는 시간은 다시 실행하지 않고 버려지고 경고가 한 번 출력된다. 기본값은 10. 0 이하로 하면 상한이 없어져 모든 스텝을 돌리지만(결정적 시뮬레이션 등), 긴 정지 후에는 재실행하는 동안 멈추고 update()가 레이트를 따라가지 못하는 동안에는 프레임이 계속 길어진다"
+related = ["getMaxUpdateSteps", "setIndependentFps", "runHeadlessApp", "Node::callEveryCatchUp"]
 
 ["setMaterial"]
 category = "graphics_lighting"
