@@ -67,21 +67,28 @@ This will list any missing packages and ask to install them. Use `-y` to skip th
 
 ### Editor Setup
 
-#### VSCode
+One set of extensions for every editor. The only choice that depends on the
+editor is the IntelliSense provider:
 
-| Extension | Purpose |
-|-----------|---------|
-| **CMake Tools** | Build integration |
-| **C/C++** | IntelliSense + debugging |
-| **CodeLLDB** | Debug execution (macOS / Linux) |
+| Extension | Purpose | Where |
+|-----------|---------|-------|
+| **CMake Tools** | Build integration | All editors |
+| **CodeLLDB** | Debugging | All editors |
+| **C/C++** (Microsoft) | IntelliSense (+ debugging on Windows) | VSCode only |
+| **clangd** | IntelliSense | VS Code forks (Cursor, Antigravity, VSCodium, Windsurf, ...) |
 
-#### Cursor
-
-| Extension | Purpose |
-|-----------|---------|
-| **CMake Tools** | Build integration |
-| **clangd** | IntelliSense (C/C++ extension is blocked in Cursor) |
-| **CodeLLDB** | Debug execution (macOS / Linux) |
+- **VS Code forks** can't use the Microsoft C/C++ extension (it refuses to run
+  outside the official VS Code), which is why they use clangd.
+- In VSCode, don't install clangd next to the C/C++ extension: the two fight
+  over IntelliSense.
+- On Windows + VSCode, CodeLLDB is harmless: the generated `launch.json` uses
+  the C/C++ extension's debugger (`cppvsdbg`) there, so CodeLLDB simply goes
+  unused.
+- **Windows + a VS Code fork:** `cppvsdbg` isn't available, so generate the
+  project with `--ide cursor` (e.g. `trusscli update --ide cursor`); its
+  `launch.json` uses CodeLLDB on every OS. Known limitation: LLDB debugs the
+  MSVC build through its PDB, and variable inspection / expression evaluation
+  are weaker than with Visual Studio's debugger.
 
 ---
 

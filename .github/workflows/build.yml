@@ -150,15 +150,27 @@ jobs:
           # cache). No-op for sccache (ignores CCACHE_*).
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
+      # The build directories' CMakeCache records absolute compiler paths (the
+      # VS / MSVC toolset directory, the Xcode app), so a cache restored onto a
+      # different runner image points at a compiler that isn't there and
+      # configure fails ("is not a full path to an existing compiler tool",
+      # #223: a windows-2022 sweep restored a windows-latest VS 18 cache
+      # through the OS-only prefix). Key on the runner IMAGE: the first build
+      # after an image update is cold (the compiler cache still helps), and a
+      # cache never crosses images.
+      - name: Runner image id (cache key)
+        shell: bash
+        run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
+
       - name: Cache build directories
         uses: actions/cache@v5
         with:
           path: |
             core/build-${{ matrix.preset }}
             tools/build
-          key: ${{ runner.os }}-build-v4-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
+          key: ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
           restore-keys: |
-            ${{ runner.os }}-build-v4-
+            ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-
 
       # sokol-shdc (shader compiler) is downloaded by core CMake from
       # raw.githubusercontent.com, which 429s anonymous CI traffic. Cache the

@@ -135,7 +135,7 @@ These tools are inert unless the MCP server is also running (`TRUSSC_MCP=1`).
 
 ### ImGui Tools (requires tcxImGui addon)
 
-The **tcxImGui** addon provides additional MCP tools for AI agents to inspect and interact with ImGui widgets. To use these, add `tcxImGui` to your project via `trusscli add tcxImGui` or `addons.make`, then call `imguiSetup()` before `mcp::registerControlTools()`.
+The **tcxImGui** addon provides additional MCP tools for AI agents to inspect and interact with ImGui widgets. To use these, add `tcxImGui` to your project via `trusscli addon add tcxImGui` or `addons.make`, then call `imguiSetup()` before `mcp::registerControlTools()`.
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|

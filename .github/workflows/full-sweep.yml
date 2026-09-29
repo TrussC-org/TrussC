@@ -32,8 +32,11 @@ jobs:
           - os: macos-latest
             preset: macos
             launcher: ccache
-          # windows-2022, Ninja: see build.yml for why.
-          - os: windows-2022
+          # Same runner as build.yml (windows-latest, Ninja; see there why the
+          # old windows-2022 pin was dropped). The sweep kept the pin after
+          # build.yml was unpinned (86c3f513), and the two then shared build
+          # caches across VS versions (#223).
+          - os: windows-latest
             preset: windows
             launcher: sccache
             cmake_gen: Ninja
@@ -49,7 +52,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Same cache keys as build.yml, so the sweep starts warm from PR builds.
+      # Same cache keys as build.yml, so the sweep starts warm from PR builds
+      # (the build-directory cache only when the runner image matches).
       - name: Setup compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -64,15 +68,27 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
+      # The build directories' CMakeCache records absolute compiler paths (the
+      # VS / MSVC toolset directory, the Xcode app), so a cache restored onto a
+      # different runner image points at a compiler that isn't there and
+      # configure fails ("is not a full path to an existing compiler tool",
+      # #223: a windows-2022 sweep restored a windows-latest VS 18 cache
+      # through the OS-only prefix). Key on the runner IMAGE: the first build
+      # after an image update is cold (the compiler cache still helps), and a
+      # cache never crosses images.
+      - name: Runner image id (cache key)
+        shell: bash
+        run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
+
       - name: Cache build directories
         uses: actions/cache@v5
         with:
           path: |
             core/build-${{ matrix.preset }}
             tools/build
-          key: ${{ runner.os }}-build-v4-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
+          key: ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
           restore-keys: |
-            ${{ runner.os }}-build-v4-
+            ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-
 
       - name: Cache sokol-shdc
         uses: actions/cache@v5

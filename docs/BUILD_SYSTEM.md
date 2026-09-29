@@ -334,8 +334,10 @@ TrussC defaults to **RelWithDebInfo** (Release with Debug Info). This provides o
 | Build Type | Optimization | Debug Symbols | assert() | Use Case |
 |---|---|---|---|---|
 | **Debug** | None (`-O0`) | Yes | Enabled | Step-through debugging of optimized-out variables |
-| **RelWithDebInfo** | `-O2` | Yes | Enabled | **Default.** Development, debugging, installations |
+| **RelWithDebInfo** | `-O2` | Yes | Disabled (`-DNDEBUG`, CMake's default) | **Default.** Development, debugging, installations |
 | **Release** | `-O2`/`-O3` | No | Disabled | Minimal binary size for distribution |
+
+`NDEBUG` also turns off sokol's validation layer (`SOKOL_DEBUG`), so only a **Debug** build reports sokol API misuse.
 
 For most users, the default RelWithDebInfo is sufficient. If you need a full Debug build (e.g., when variables are optimized out during step-through debugging):
 

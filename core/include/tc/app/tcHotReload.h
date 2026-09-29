@@ -45,9 +45,8 @@ namespace trussc {
 // functions that the Host uses to create/destroy your App via dlopen/dlsym.
 //
 // If the build is NOT configured for hot reload (TC_HOT_RELOAD_BUILD not
-// defined), the macro emits a compile-time error with instructions to
-// reconfigure. This catches the common mistake of adding TC_HOT_RELOAD
-// without re-running cmake configure.
+// defined), the macro is a no-op. The pre-build check notices the macro,
+// forces cmake to reconfigure, and hot reload is active from the next build.
 // ---------------------------------------------------------------------------
 #ifdef TC_HOT_RELOAD_BUILD
 
