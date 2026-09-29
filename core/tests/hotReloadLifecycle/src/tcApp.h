@@ -16,6 +16,10 @@ using namespace tc;
 // capturing `this` — the usual app pattern. On reload the host must remove
 // them before this App is deleted, or the old build's handlers stay listed
 // and callable with a dangling `this` (#227).
+//
+// setup/draw/exit (tcApp.cpp) only run in `--app` mode (see main.cpp); the
+// lifecycle cycles never call them. They use tcxImGui so the guest target is
+// checked for addon include directories and for linking the addon archive.
 // =============================================================================
 class tcApp : public App {
 public:
@@ -26,6 +30,10 @@ public:
         mcp::status("guest_status", std::function<double()>([this]() { return (double)ticks_; }));
         mcp::statusImage("guest_image", [this]() { (void)ticks_; return Pixels(); });
     }
+
+    void setup() override;
+    void draw() override;
+    void exit() override;
 
 private:
     EventListener updateListener_;

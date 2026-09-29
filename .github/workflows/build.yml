@@ -1,7 +1,8 @@
 # Per-PR / per-push CI: the FAST lane. Every platform in parallel, each job
 # kept to what catches breakage cheaply: AllFeaturesExample on every platform
 # (desktop, Android, web, iOS), plus the core library + trusscli and the
-# behavioral tests (core, addon, hot reload) on desktop. AllFeaturesExample
+# behavioral tests (core/tests incl. the hot reload host/guest split, addon
+# tests) on desktop. AllFeaturesExample
 # references every documented public core API and the repo-contained bundled
 # addons without running them (its src/coverage.h), so each platform compiles
 # every call and links it against its own implementation. Target: about 10
@@ -241,13 +242,10 @@ jobs:
 
       # Behavioral regression tests for the core (core/tests/*/): built AND run
       # on every build (small headless console projects, non-zero exit fails).
+      # hotReloadLifecycle also covers the host/guest split build with an addon.
       - name: Build & run core tests
         shell: bash
         run: ./examples/build_all.py --core-tests-only --verbose
-
-      - name: Build HotReloadExample (host/guest split smoke test)
-        shell: bash
-        run: ./examples/build_all.py --test-hot-reload --verbose
 
       - name: Compiler cache stats
         if: always()

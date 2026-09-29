@@ -178,10 +178,6 @@ jobs:
         shell: bash
         run: ./examples/build_all.py --core-tests-only --verbose
 
-      - name: Build HotReloadExample (host/guest split smoke test)
-        shell: bash
-        run: ./examples/build_all.py --test-hot-reload --verbose
-
       - name: Compiler cache stats
         if: always()
         shell: bash
