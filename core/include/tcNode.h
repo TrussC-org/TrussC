@@ -1322,8 +1322,9 @@ public:
     // spent before the call (earlier in a long update or setup(), an idle gap,
     // a stall) can't make it fire early; one created during a fixed-Hz step
     // counts whole steps (step time). (A secondary window's tick doesn't
-    // record its update time yet, so there a timer counts the window's whole
-    // next delta.)
+    // record its update time or in-update mark yet, so there a timer created
+    // in or between its ticks counts the window's whole next delta, until
+    // #307.)
 
     // Execute callback once after specified delay in seconds
     uint64_t callAfter(double delay, std::function<void()> callback) {
