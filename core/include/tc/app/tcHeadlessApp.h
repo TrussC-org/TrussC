@@ -6,6 +6,7 @@
 // =============================================================================
 
 #include "tcHeadlessState.h"
+#include "tcFrameTiming.h"            // advanceFixedStep / HeadlessSleeper
 #include "../utils/tcMainThread.h"   // getMainThreadId / drainMainThreadQueue
 
 #include <chrono>
@@ -38,9 +39,6 @@ namespace headless {
     // Frame count
     inline uint64_t frameCount = 0;
 
-    // Start time
-    inline std::chrono::high_resolution_clock::time_point startTime;
-
 #ifdef _WIN32
     // Windows console control handler
     inline BOOL WINAPI consoleHandler(DWORD signal) {
@@ -68,10 +66,10 @@ namespace headless {
 #endif
     }
 
-    // Get elapsed time since start
+    // Elapsed time: the same clock as trussc::getElapsedTime() (one steady
+    // clock with its origin at program start, #229).
     inline double getElapsedTime() {
-        auto now = std::chrono::high_resolution_clock::now();
-        return std::chrono::duration<double>(now - startTime).count();
+        return trussc::getElapsedTime();
     }
 
     // Get frame count
@@ -111,7 +109,11 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     headless::active = true;
     headless::running = true;
     headless::frameCount = 0;
-    headless::startTime = std::chrono::high_resolution_clock::now();
+
+    // Headless apps run in the main window's (GPU-less) context: that is
+    // where getDeltaTime() / getFrameRate() / getFrameElapsedTime() read.
+    auto& ctx = internal::mainWindowContext();
+    internal::sampleFrameTime(ctx);
 
     // Create app instance
     AppClass app;
@@ -119,17 +121,25 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // Call setup
     app.setup();
 
-    // Main loop
+    // Main loop: fixed timestep at the nominal 1/fps (getDeltaTime() reports
+    // exactly that), at most 10 steps per pass (maxUpdateStepsPerFrame, the
+    // main loop's cap per frame). After a stall (sleep/resume) or when
+    // update() is slower than its rate, the excess time is dropped with a
+    // one-time warning instead of replayed, and runOnMainThread work is
+    // drained between bounded passes (#228). Between passes the loop sleeps
+    // until the next step is due, at most 1 ms, on a precise timer
+    // (HeadlessSleeper), so a fast rate stays well under 10 steps per pass.
     const double targetDelta = 1.0 / headless::targetFps;
     double accumulator = 0.0;
-    auto lastTime = std::chrono::high_resolution_clock::now();
+    auto lastTime = std::chrono::steady_clock::now();
+    internal::HeadlessSleeper sleeper;
 
     while (headless::running && !app.isExitRequested()) {
-        auto now = std::chrono::high_resolution_clock::now();
+        auto now = std::chrono::steady_clock::now();
         double elapsed = std::chrono::duration<double>(now - lastTime).count();
         lastTime = now;
 
-        accumulator += elapsed;
+        internal::sampleFrameTime(ctx);
 
         // Run work marshalled from worker threads (runOnMainThread, Event
         // Deliver::Main) on the main thread, mirroring the windowed _frame_cb.
@@ -137,14 +147,28 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         internal::pumpAudioDiagnostics();
 
         // Fixed timestep update
-        while (accumulator >= targetDelta) {
+        internal::FixedStepAdvance adv =
+            internal::advanceFixedStep(accumulator, elapsed, targetDelta);
+        if (adv.droppedTime > 0.0) {
+            internal::warnUpdateStepsDropped(internal::FixedStepLoop::Headless,
+                                             adv.droppedTime, targetDelta, adv.steps);
+        }
+        for (int i = 0; i < adv.steps; ++i) {
+            ctx.updateDeltaTime = targetDelta;
             app.update();
             headless::frameCount++;
-            accumulator -= targetDelta;
         }
+        // Measured rate: the time the steps consumed, in (fractional) steps,
+        // over the wall time. A pass is often shorter than a step (~1 ms on
+        // Linux/macOS), so whole-step counts would read 0 in most windows.
+        internal::recordUpdateRateSample(ctx, elapsed,
+                                         (elapsed - adv.droppedTime) / targetDelta);
 
-        // Sleep to reduce CPU usage (1ms)
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        // Sleep until the next step is due (at most 1 ms), counted from the
+        // pass start: the steps above already took part of that time.
+        const double spent = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - now).count();
+        sleeper.sleep(internal::headlessSleepTime(accumulator, targetDelta, spent));
     }
 
     // Call exit and cleanup

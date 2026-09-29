@@ -43,6 +43,8 @@
 #include <thread>
 #include <chrono>
 #include <cstring>
+#include <algorithm>
+#include <optional>
 
 // Audio-track recording taps the AudioEngine's master mix (sound never
 // includes video, so this dependency is one-way).
@@ -323,6 +325,115 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// ScreenRecorder frame pacing (internal). A pure state machine, split out so
+// the decimation / PTS math is testable headless (core/tests/frameTiming).
+//
+// `now` is seconds on clockNow(), which the app cannot reset (#229). ScreenRecorder
+// never reads a clock itself: it calls start() and, once per frame, tick(), so
+// the frameTiming checks on those cover its real path. Everything is double: with float,
+// timestamps were quantized after about a day of uptime and frames were
+// dropped after about three, and resetElapsedTimeCounter() mid-recording
+// stalled capture.
+// ---------------------------------------------------------------------------
+namespace internal {
+struct ScreenRecorderPacer {
+    // The pacing clock: framework uptime in seconds, never reset.
+    static double clockNow() { return getUptimeSeconds(); }
+
+    double startTime = 0.0;       // `now` when recording started (PTS origin)
+    double interval = 1.0 / 60.0; // target frame interval (1 / fps)
+    double duration = 0.0;        // fixed-length cutoff in seconds (0 = unlimited)
+    double nextCaptureTime = 0.0; // scheduled time of the next frame to capture
+    double lastFrameTime = 0.0;   // previous source frame time (for source dt)
+    double lastPts = -1.0;        // monotonicity clamp for the video PTS
+    bool   hasNextCapture = false;
+    bool   hasLastFrame = false;
+
+    // Start a recording now (on clockNow()).
+    void start(double fps, double durationSec) { start(clockNow(), fps, durationSec); }
+
+    void start(double now, double fps, double durationSec) {
+        startTime = now;
+        interval = 1.0 / (fps > 0.0 ? fps : 60.0);
+        duration = durationSec > 0.0 ? durationSec : 0.0;
+        nextCaptureTime = 0.0;
+        lastFrameTime = 0.0;
+        lastPts = -1.0;
+        hasNextCapture = false;
+        hasLastFrame = false;
+    }
+
+    // Fixed-duration cutoff: `now - startTime` is the wall-clock PTS this frame
+    // would carry; once it reaches the requested length nothing more is written.
+    bool reachedDuration(double now) const {
+        return duration > 0.0 && (now - startTime) >= duration;
+    }
+
+    // Decimate the (often higher-rate) source frame stream to the target fps by
+    // capturing the frame NEAREST each target slot. nextCaptureTime advances
+    // by exactly one interval (drift-free); a frame is captured once the slot
+    // falls within half a source frame of now, so a frame landing a hair
+    // before its slot (e.g. every other frame on a 120Hz display, where
+    // 16.67ms sat right on the old threshold) still counts instead of aliasing
+    // the rate down (#142). The tolerance is the source frame time dt, not a
+    // fudge constant, so it holds for any source:target ratio (120->60,
+    // 120->30, 144->60, or a source slower than the target).
+    bool shouldCapture(double now) {
+        double dt = hasLastFrame ? (now - lastFrameTime) : interval;
+        lastFrameTime = now;
+        hasLastFrame = true;
+        if (hasNextCapture && (now + 0.5 * dt) < nextCaptureTime) {
+            return false;   // this frame isn't the closest one to the next slot yet
+        }
+        nextCaptureTime = (hasNextCapture ? nextCaptureTime : now) + interval;
+        hasNextCapture = true;
+        if (nextCaptureTime <= now) {
+            nextCaptureTime = now + interval;   // source slower than target: resync
+        }
+        return true;
+    }
+
+    // The writer needs strictly increasing PTS.
+    double commitPts(double t) {
+        t = std::max(t, lastPts + 1e-4);
+        lastPts = t;
+        return t;
+    }
+
+    // What to do with one source frame.
+    struct Tick {
+        bool reachedDuration = false;  // the fixed length is reached: stop, write nothing
+        bool capture = false;          // decimation keeps this frame
+        double wallPts = 0.0;          // its wall-clock PTS (seconds since start)
+    };
+
+    // One source frame, now: reads clockNow() once. ScreenRecorder calls this
+    // once per frame and takes its cutoff, decimation and PTS from it.
+    Tick tick() { return tick(clockNow()); }
+
+    Tick tick(double now) {
+        Tick t;
+        t.wallPts = now - startTime;
+        if (reachedDuration(now)) {
+            t.reachedDuration = true;
+            return t;
+        }
+        t.capture = shouldCapture(now);
+        return t;
+    }
+
+    // One source frame on the wall-clock timeline (no audio track): the PTS to
+    // write it at, or nullopt when decimation skips it or the fixed length is
+    // reached.
+    std::optional<double> onFrame(double now) {
+        Tick t = tick(now);
+        if (!t.capture) return std::nullopt;
+        return commitPts(t.wallPts);
+    }
+};
+} // namespace internal
+
+// ---------------------------------------------------------------------------
 // ScreenRecorder - live capture of the window (or an Fbo) at wall-clock speed.
 // ---------------------------------------------------------------------------
 class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
@@ -413,10 +524,8 @@ private:
         source_ = src;
         fbo_ = fbo;
         fboAlive_ = fbo ? fbo->lifetimeToken() : std::shared_ptr<void>{};
-        duration_ = s.duration;
-        startElapsed_ = getElapsedTimef();
-        nextCaptureTime_ = -1.0f;
-        lastFrameTime_ = -1.0f;
+        // Pace on the framework clock, which the app cannot reset (#229).
+        pacer_.start(writer_.getFps(), s.duration);
         if (s.audio) startAudioTap(s.audioSampleRate, s.audioChannels);
         // Per-window binding (T3): events() resolves through the window context
         // that is CURRENT when recording starts — so calling recordScreen() from
@@ -445,7 +554,9 @@ private:
             stop();
             return;
         }
-        float now = getElapsedTimef();
+        // This frame's cutoff, decimation and wall-clock PTS, on the pacer's
+        // clock, which the app cannot reset (#229).
+        const auto tick = pacer_.tick();
 
         // Feed buffered audio to the encoder once per frame (main thread; the
         // audio thread only ever touches the lock-free ring).
@@ -454,8 +565,8 @@ private:
             drainAudio();
         }
 
-        // Fixed-duration cutoff. `t` is the wall-clock PTS this frame would carry;
-        // once it reaches the requested length we finalize and append nothing more,
+        // Fixed-duration cutoff. tick.wallPts is the wall-clock PTS this frame would
+        // carry; once it reaches the requested length we finalize and append nothing more,
         // so the output length == duration (to within one frame slot). The cut is
         // PTS-based, so any async capture already in flight — its PTS was sampled
         // below when it was issued, always < duration — can't push the file past
@@ -467,38 +578,20 @@ private:
         // ourselves only swaps in a new list for the NEXT fire; the in-progress
         // dispatch is unaffected, and removeListener() takes a recursive_mutex that
         // notify() does not hold (no deadlock). No deferral needed.
-        if (duration_ > 0.0f && (double)(now - startElapsed_) >= (double)duration_) {
+        if (tick.reachedDuration) {
             stop();
             return;
         }
 
-        float interval = 1.0f / writer_.getFps();
-
-        // Decimate the (often higher-rate) frame stream to the target fps by
-        // capturing the frame NEAREST each target slot. nextCaptureTime_ advances
-        // by exactly one interval (drift-free); we capture once the slot falls
-        // within half a frame of now, so a frame landing a hair before its slot
-        // (e.g. every-other frame on a 120Hz display, where 16.67ms sat right on
-        // the old threshold) still counts instead of aliasing the rate down. The
-        // half-frame tolerance is the source frame time dt, not a fudge constant,
-        // so it stays correct for any source:target ratio (120->60, 120->30,
-        // 144->60, or a source slower than the target).
-        float dt = (lastFrameTime_ >= 0.0f) ? (now - lastFrameTime_) : interval;
-        lastFrameTime_ = now;
-        if (nextCaptureTime_ >= 0.0f && (now + 0.5f * dt) < nextCaptureTime_) {
+        // Decimate to the target fps (see ScreenRecorderPacer::shouldCapture).
+        if (!tick.capture) {
             return;   // this frame isn't the closest one to the next slot yet
-        }
-        nextCaptureTime_ = (nextCaptureTime_ < 0.0f ? now : nextCaptureTime_) + interval;
-        if (nextCaptureTime_ <= now) {
-            nextCaptureTime_ = now + interval;   // source slower than target: resync
         }
         // PTS: wall clock normally; the AUDIO DEVICE clock when an audio track
         // is being recorded, so frames land exactly where they happened on the
         // audio timeline (drift-free A/V sync however unstable the fps is).
-        double t = audioActive_ ? audioClockSeconds()
-                                : (double)(now - startElapsed_);
-        t = std::max(t, lastPts_ + 1e-4);   // writer needs monotonic PTS
-        lastPts_ = t;
+        double t = pacer_.commitPts(audioActive_ ? audioClockSeconds()
+                                                 : tick.wallPts);
         if (source_ == Source::Fbo && fbo_) {
             writer_.addFrameAt(*fbo_, t);
             return;
@@ -555,7 +648,6 @@ private:
         audioTail_.store(0, std::memory_order_relaxed);
         silenceDebt_.store(0, std::memory_order_relaxed);
         consumedFrames_ = 0;
-        lastPts_ = -1.0;
         anchored_.store(false, std::memory_order_relaxed);
         recStartWall_ = nowWallSec();
         audioActive_ = true;
@@ -642,7 +734,7 @@ private:
         const double pts = offset0_ + (double)consumedFrames_ / audioRate_;
         consumedFrames_ += (uint64_t)frames;
         // Respect the fixed-duration cutoff (the video side stops there too).
-        if (duration_ > 0.0f && pts >= (double)duration_) return;
+        if (pacer_.duration > 0.0 && pts >= pacer_.duration) return;
         writer_.writeAudio(audioScratch_.data(), frames, pts);
     }
 
@@ -662,11 +754,7 @@ private:
     Source source_ = Source::None;
     const Fbo* fbo_ = nullptr;
     std::weak_ptr<void> fboAlive_;  // expires when the recorded Fbo dies
-    float startElapsed_ = 0.0f;
-    float duration_ = 0.0f;           // fixed-length cutoff in seconds (0 = unlimited)
-    float nextCaptureTime_ = -1.0f;   // scheduled time of the next frame to capture
-    float lastFrameTime_ = -1.0f;     // previous afterFrame time (for source dt)
-    double lastPts_ = -1.0;           // monotonicity clamp for the video PTS
+    internal::ScreenRecorderPacer pacer_;   // decimation, PTS, duration cutoff
     EventListener afterFrameListener_;
     EventListener exitListener_;
     std::mutex writerMutex_;          // serializes encoder access (completion threads + stop)

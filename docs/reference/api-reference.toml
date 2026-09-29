@@ -5375,9 +5375,9 @@ related = ["Node::moveToFront", "Node::moveToBack", "LayoutMod::updateLayout", "
 ["Node::callAfter"]
 category = "timers"
 keywords = ["timer", "delay", "timeout", "schedule", "later"]
-description.en = "Run callback once after delay seconds. Fired from the update loop (frame-quantized). Returns a timer id."
-description.ja = "delay秒後にcallbackを1回実行。更新ループから発火（フレーム単位）。タイマーidを返す"
-description.ko = "delay초 후 callback을 한 번 실행. 업데이트 루프에서 발생(프레임 단위). 타이머 id를 반환"
+description.en = "Run callback once after delay seconds. A frame timer fired from the update loop: the delay counts down by getDeltaTime() on each update of this node, so it pauses while the node is inactive and resetElapsedTimeCounter() doesn't affect it. Only time after the call counts: created in an update, it starts with the next one; created elsewhere (an event handler, draw()) in the main window, an idle gap or stall before the call is not charged. In fixed-Hz update mode it counts step time (1 / updateFps per step), so time the loop drops after a stall (beyond 10 steps per frame) is not counted and the timer fires that much later in wall time. Returns a timer id."
+description.ja = "delay秒後にcallbackを1回実行。更新ループから発火するフレームタイマーで、このノードの update ごとに getDeltaTime() ずつカウントダウンする。ノードが非アクティブの間は止まり、resetElapsedTimeCounter() の影響は受けない。数えるのは呼び出し後の時間だけで、update 内で作ると次の update から、メインウィンドウでそれ以外（イベントハンドラや draw()）で作ると呼び出し前の待機や停止の時間は数えない。固定Hz update モードではステップ時間（1ステップあたり 1 / updateFps）で数えるので、停止のあとループが捨てた時間（1フレーム10ステップを超える分）は数えられず、実時間ではその分遅れて発火する。タイマーidを返す"
+description.ko = "delay초 후 callback을 한 번 실행. 업데이트 루프에서 실행되는 프레임 타이머로, 이 노드의 update마다 getDeltaTime()만큼 카운트다운한다. 노드가 비활성인 동안에는 멈추고 resetElapsedTimeCounter()의 영향을 받지 않는다. 호출 이후의 시간만 센다: update 안에서 만들면 다음 update부터, 메인 윈도우에서 그 밖(이벤트 핸들러, draw())에서 만들면 호출 전의 대기나 정지 시간은 세지 않는다. 고정 Hz update 모드에서는 스텝 시간(스텝당 1 / updateFps)으로 세므로, 정지 후 루프가 버린 시간(프레임당 10스텝을 넘는 분)은 세지 않고 실제 시간으로는 그만큼 늦게 실행된다. 타이머 id를 반환"
 related = ["Node::callAfterAsync", "Node::callEvery", "Node::cancelTimer"]
 
 ["Node::callAfterAsync"]
@@ -5391,9 +5391,9 @@ related = ["Node::callEveryAsync", "Node::cancelAsyncTimer", "Node::callAfter"]
 ["Node::callEvery"]
 category = "timers"
 keywords = ["timer", "interval", "repeat", "schedule", "periodic"]
-description.en = "Run callback repeatedly every interval seconds. Fired from the update loop (frame-quantized). Returns a timer id."
-description.ja = "interval秒ごとにcallbackを繰り返し実行。更新ループから発火（フレーム単位）。タイマーidを返す"
-description.ko = "interval초마다 callback을 반복 실행. 업데이트 루프에서 발생(프레임 단위). 타이머 id를 반환"
+description.en = "Run callback repeatedly every interval seconds. A frame timer counted down by getDeltaTime() like callAfter. Keeps its phase (next due = previous due + interval); when an update comes more than a whole interval late it fires once, not once per missed interval. Returns a timer id."
+description.ja = "interval秒ごとにcallbackを繰り返し実行。callAfter と同じく getDeltaTime() でカウントダウンするフレームタイマー。位相を保つ（次の予定 = 前回の予定 + interval）。update がインターバル1つ分以上遅れたときは、取りこぼした回数分ではなく1回だけ発火する。タイマーidを返す"
+description.ko = "interval초마다 callback을 반복 실행. callAfter처럼 getDeltaTime()으로 카운트다운하는 프레임 타이머. 위상을 유지한다(다음 예정 = 이전 예정 + interval). update가 인터벌 하나 이상 늦으면 놓친 횟수만큼이 아니라 한 번만 실행된다. 타이머 id를 반환"
 related = ["Node::callEveryAsync", "Node::callAfter", "Node::cancelTimer"]
 
 ["Node::callEveryAsync"]
@@ -13602,9 +13602,10 @@ related = ["setDefaultScreenFov"]
 category = "time_frame"
 keywords = ["dt", "elapsed", "frametime", "timestep", "interval"]
 of = ["ofGetLastFrameTime"]
-description.en = "Seconds since last frame"
-description.ja = "前フレームからの経過秒数"
-description.ko = "이전 프레임으로부터의 경과 시간(초)"
+description.en = "Seconds since the previous update. Measured wall time in VSYNC / setFps modes; in fixed-Hz update mode (setIndependentFps with an update rate) and in runHeadlessApp every step reports exactly 1 / updateFps. Per window"
+description.ja = "前回の update からの経過秒数。VSYNC / setFps モードでは実測時間。固定Hz update モード（update レートを指定した setIndependentFps）と runHeadlessApp では各ステップが正確に 1 / updateFps を返す。ウィンドウごと"
+description.ko = "이전 update로부터의 경과 시간(초). VSYNC / setFps 모드에서는 실측 시간. 고정 Hz update 모드(update 레이트를 지정한 setIndependentFps)와 runHeadlessApp에서는 각 스텝이 정확히 1 / updateFps를 반환. 윈도우별"
+related = ["getFrameRate", "setIndependentFps", "getFrameElapsedTime"]
 
 ["getDeviceOrientation"]
 category = "platform"
@@ -13642,34 +13643,35 @@ description.ko = "앱 시작 이후 draw() 호출 횟수를 얻음"
 ["getElapsedTime"]
 category = "time_elapsed"
 keywords = ["seconds", "uptime", "runtime", "clock"]
-description.en = "Elapsed seconds (double) since program start. A separate clock from getElapsedTimef(); it is NOT reset by resetElapsedTimeCounter()."
-description.ja = "プログラム開始からの経過秒（double）。getElapsedTimef() とは別クロックで、resetElapsedTimeCounter() の影響を受けない。"
-description.ko = "프로그램 시작 이후 경과 초(double). getElapsedTimef()와는 별개의 시계이며 resetElapsedTimeCounter()의 영향을 받지 않는다."
-related = ["getElapsedTimeMillis", "getElapsedTimeMicros"]
+description.en = "Elapsed seconds (double) since program start, on a steady clock (system clock changes don't affect it). The same clock as getElapsedTimef/Millis/Micros: resetElapsedTimeCounter() restarts all of them, so the difference of two readings is only a duration if nothing resets the counter in between. Keeps full precision where getElapsedTimef() loses it after long uptimes"
+description.ja = "プログラム開始からの経過秒（double）。steady clock なのでシステム時刻の変更の影響を受けない。getElapsedTimef/Millis/Micros と同じクロックで、resetElapsedTimeCounter() でこれら全てが0から数え直すので、2回の値の差が経過時間になるのは間にリセットがない場合だけ。長時間稼働で精度が落ちる getElapsedTimef() と違い、精度を保つ"
+description.ko = "프로그램 시작 이후 경과 초(double). steady clock이라 시스템 시각 변경의 영향을 받지 않는다. getElapsedTimef/Millis/Micros와 같은 시계이며 resetElapsedTimeCounter()로 이들 모두가 0부터 다시 세므로, 두 값의 차이가 경과 시간이 되는 것은 그 사이에 리셋이 없을 때뿐이다. 장시간 가동에서 정밀도가 떨어지는 getElapsedTimef()와 달리 정밀도를 유지한다"
+related = ["getElapsedTimef", "getFrameElapsedTime", "resetElapsedTimeCounter", "getElapsedTimeMillis", "getElapsedTimeMicros"]
 
 ["getElapsedTimeMicros"]
 category = "time_elapsed"
 keywords = ["microseconds", "uptime", "runtime", "clock"]
 of = ["ofGetElapsedTimeMicros"]
-description.en = "Elapsed microseconds (int64)"
-description.ja = "経過マイクロ秒（int64）"
-description.ko = "경과 시간(마이크로초, int64)"
+description.en = "Elapsed microseconds (uint64) since program start. Same clock as getElapsedTime()"
+description.ja = "プログラム開始からの経過マイクロ秒（uint64）。getElapsedTime() と同じクロック"
+description.ko = "프로그램 시작 이후 경과 마이크로초(uint64). getElapsedTime()과 같은 시계"
 
 ["getElapsedTimeMillis"]
 category = "time_elapsed"
 keywords = ["milliseconds", "uptime", "runtime", "clock"]
 of = ["ofGetElapsedTimeMillis"]
-description.en = "Elapsed milliseconds (int64)"
-description.ja = "経過ミリ秒（int64）"
-description.ko = "경과 시간(밀리초, int64)"
+description.en = "Elapsed milliseconds (uint64) since program start. Same clock as getElapsedTime()"
+description.ja = "プログラム開始からの経過ミリ秒（uint64）。getElapsedTime() と同じクロック"
+description.ko = "프로그램 시작 이후 경과 밀리초(uint64). getElapsedTime()과 같은 시계"
 
 ["getElapsedTimef"]
 category = "time_elapsed"
 keywords = ["time", "seconds", "uptime", "runtime", "clock"]
 of = ["ofGetElapsedTimef"]
-description.en = "Elapsed seconds (float)"
-description.ja = "経過秒数（float）"
-description.ko = "경과 시간(초, float)"
+description.en = "Elapsed seconds (float) since program start. Same clock as getElapsedTime(); a float loses precision after about a day of uptime (7.8 ms steps at 18 h), so use it for animation and display, and getElapsedTime() (double) where precision matters"
+description.ja = "プログラム開始からの経過秒数（float）。getElapsedTime() と同じクロック。float は稼働約1日で精度が落ちる（18時間で7.8ms刻み）ので、アニメーションや表示用に使い、精度が要るところでは getElapsedTime()（double）を使う"
+description.ko = "프로그램 시작 이후 경과 시간(초, float). getElapsedTime()과 같은 시계. float는 가동 약 하루 후 정밀도가 떨어지므로(18시간에 7.8ms 단위) 애니메이션·표시용으로 쓰고, 정밀도가 필요한 곳에는 getElapsedTime()(double)을 쓴다"
+related = ["getElapsedTime", "getFrameElapsedTime", "resetElapsedTimeCounter"]
 
 ["getEnvironment"]
 category = "graphics_lighting"
@@ -13752,9 +13754,9 @@ related = ["fileExists", "loadTextFile"]
 ["getFps"]
 category = "time_frame"
 keywords = ["framerate", "speed", "refresh", "rate", "performance"]
-description.en = "Get current FPS (alias for getFrameRate)"
-description.ja = "現在のFPSを取得（getFrameRateのエイリアス）"
-description.ko = "현재 FPS를 얻음 (getFrameRate의 별칭)"
+description.en = "Get the measured FPS (alias for getFrameRate)"
+description.ja = "実測のFPSを取得（getFrameRateのエイリアス）"
+description.ko = "실측 FPS를 얻음 (getFrameRate의 별칭)"
 related = ["setFps", "getFpsSettings"]
 
 ["getFpsSettings"]
@@ -13773,13 +13775,22 @@ description.en = "Total frames rendered"
 description.ja = "描画されたフレーム数"
 description.ko = "렌더링된 총 프레임 수"
 
+["getFrameElapsedTime"]
+category = "time_elapsed"
+keywords = ["time", "seconds", "animation", "per frame", "consistent", "clock"]
+description.en = "Elapsed seconds (double) sampled once at the start of the current frame, so every update step and the draw of one frame see the same value (getElapsedTime() moves during the frame). Same clock and reset as getElapsedTime(). Sampled by the main loop and runHeadlessApp; in a secondary window it currently returns the live getElapsedTime()"
+description.ja = "現在のフレーム開始時に1回だけ取った経過秒（double）。1フレーム内の全 update ステップと draw が同じ値を見る（getElapsedTime() はフレーム中も進む）。クロックとリセットは getElapsedTime() と同じ。メインループと runHeadlessApp が取得する。サブウィンドウでは今のところ getElapsedTime() の現在値を返す"
+description.ko = "현재 프레임 시작 시 한 번만 샘플링한 경과 초(double). 한 프레임 안의 모든 update 스텝과 draw가 같은 값을 본다(getElapsedTime()은 프레임 중에도 진행). 시계와 리셋은 getElapsedTime()과 같다. 메인 루프와 runHeadlessApp이 샘플링한다. 보조 윈도우에서는 지금은 getElapsedTime()의 현재 값을 반환한다"
+related = ["getElapsedTime", "getDeltaTime", "resetElapsedTimeCounter"]
+
 ["getFrameRate"]
 category = "time_frame"
 keywords = ["fps", "framerate", "speed", "refresh", "performance"]
 of = ["ofGetFrameRate"]
-description.en = "Current FPS"
-description.ja = "現在のFPS"
-description.ko = "현재 FPS"
+description.en = "Measured update rate (updates per second over the last 10 frames). In fixed-Hz update mode and runHeadlessApp this is the measured rate, not the configured one: the fixed steps are counted by the time they consumed, so it reads steady when the rate isn't a multiple of the frame rate and drops when time is dropped"
+description.ja = "実測の update レート（直近10フレームの1秒あたり update 回数）。固定Hz update モードと runHeadlessApp でも設定値ではなく実測値。固定ステップは消費した時間で数えるので、フレームレートの整数倍でないレートでも値が揺れず、時間が捨てられると下がる"
+description.ko = "실측 update 레이트(최근 10프레임의 초당 update 횟수). 고정 Hz update 모드와 runHeadlessApp에서도 설정값이 아닌 실측값. 고정 스텝은 소비한 시간으로 세므로 프레임레이트의 정수배가 아닌 레이트에서도 값이 흔들리지 않고, 시간이 버려지면 내려간다"
+related = ["getFps", "getDeltaTime", "getFpsSettings"]
 
 ["getFramebufferHeight"]
 category = "window_system"
@@ -14136,17 +14147,19 @@ platform_note.ja = "Windows / Linux / Web では -1。macOS は非公開 CoreDis
 ["getSystemTimeMicros"]
 category = "time_system"
 keywords = ["unix", "epoch", "microseconds", "wallclock", "timestamp"]
-description.en = "Unix time in microseconds"
-description.ja = "Unix時間（マイクロ秒）"
-description.ko = "Unix 시간(마이크로초)"
+description.en = "Unix time in microseconds (wall clock). To measure a duration, take the difference of two readings as int64_t: it follows system clock adjustments, so a clock step can make t1 < t0 and an unsigned difference would wrap. Unlike the getElapsedTime family, resetElapsedTimeCounter() doesn't affect it"
+description.ja = "Unix時間（マイクロ秒、壁時計）。時間を計るときは2回の値の差を int64_t で取る。システム時刻の調整に追従するので、時刻の変更で t1 < t0 になりうり、符号なしの差は巻き戻る。getElapsedTime 系と違い resetElapsedTimeCounter() の影響は受けない"
+description.ko = "Unix 시간(마이크로초, 벽시계). 시간을 잴 때는 두 값의 차이를 int64_t로 구한다. 시스템 시각 조정을 따르므로 시각 변경으로 t1 < t0이 될 수 있고, 부호 없는 차이는 되감긴다. getElapsedTime 계열과 달리 resetElapsedTimeCounter()의 영향을 받지 않는다"
+related = ["getSystemTimeMillis", "getElapsedTime"]
 
 ["getSystemTimeMillis"]
 category = "time_system"
 keywords = ["unix", "epoch", "milliseconds", "wallclock", "timestamp"]
 of = ["ofGetSystemTimeMillis"]
-description.en = "Unix time in milliseconds"
-description.ja = "Unix時間（ミリ秒）"
-description.ko = "Unix 시간(밀리초)"
+description.en = "Unix time in milliseconds (wall clock). It follows system clock adjustments, so take differences as int64_t (see getSystemTimeMicros)"
+description.ja = "Unix時間（ミリ秒、壁時計）。システム時刻の調整に追従するので、差は int64_t で取る（getSystemTimeMicros を参照）"
+description.ko = "Unix 시간(밀리초, 벽시계). 시스템 시각 조정을 따르므로 차이는 int64_t로 구한다(getSystemTimeMicros 참조)"
+related = ["getSystemTimeMicros", "getElapsedTime"]
 
 ["getSystemVolume"]
 category = "platform"
@@ -15029,9 +15042,10 @@ description.ko = "블렌드 모드를 Alpha (기본값)로 초기화"
 category = "time_elapsed"
 keywords = ["clear", "restart", "zero"]
 of = ["ofResetElapsedTimeCounter"]
-description.en = "Reset elapsed time"
-description.ja = "経過時間をリセット"
-description.ko = "경과 시간을 초기화"
+description.en = "Restart the elapsed-time counter: getElapsedTime/f/Millis/Micros and getFrameElapsedTime count from 0 again. Display only: Node timers, the loop, recording and the tc_get_health uptime keep running on the underlying clock. A duration taken as the difference of two of those readings across a reset comes out wrong (negative, or wrapped for the unsigned Millis/Micros); measure durations with getSystemTimeMicros()"
+description.ja = "経過時間カウンタを0から数え直す（getElapsedTime/f/Millis/Micros と getFrameElapsedTime が対象）。表示上のリセットのみで、Nodeタイマー・ループ・録画・tc_get_health の uptime は内部のクロックで動き続ける。リセットをまたいだ2回の値の差は経過時間にならない（負になる。符号なしの Millis/Micros では巻き戻る）ので、時間計測は getSystemTimeMicros() で行う"
+description.ko = "경과 시간 카운터를 0부터 다시 센다(getElapsedTime/f/Millis/Micros와 getFrameElapsedTime 대상). 표시상의 리셋일 뿐이며 Node 타이머, 루프, 녹화, tc_get_health의 uptime은 내부 시계로 계속 동작한다. 리셋을 사이에 둔 두 값의 차이는 경과 시간이 되지 않으므로(음수가 되고, 부호 없는 Millis/Micros는 되감긴다) 시간 측정은 getSystemTimeMicros()로 한다"
+related = ["getElapsedTime", "getFrameElapsedTime"]
 
 ["resetMatrix"]
 category = "transform"
@@ -15137,9 +15151,9 @@ related = ["WindowSettings", "runHeadlessApp", "events"]
 ["runHeadlessApp"]
 category = "window_system"
 keywords = ["no window", "offscreen", "cli", "server"]
-description.en = "Run an app class without a window or graphics context (update loop only). Template on the app type; returns the process exit code"
-description.ja = "ウィンドウやグラフィックスコンテキストなしでアプリクラスを実行（update ループのみ）。アプリ型をテンプレート引数に取り、プロセスの終了コードを返す"
-description.ko = "윈도우나 그래픽스 컨텍스트 없이 앱 클래스를 실행 (update 루프만). 앱 타입을 템플릿 인자로 받고 프로세스 종료 코드를 반환"
+description.en = "Run an app class without a window or graphics context (update loop only). Updates are fixed steps at the target rate (getDeltaTime() is 1 / fps), at most 10 per loop pass (between passes the loop sleeps until the next step is due, at most 1 ms); time beyond that (after a stall, or when update() is slower than its rate) is dropped with a one-time warning. Template on the app type; returns the process exit code"
+description.ja = "ウィンドウやグラフィックスコンテキストなしでアプリクラスを実行（update ループのみ）。update は目標レートの固定ステップ（getDeltaTime() は 1 / fps）で、ループ1周あたり最大10ステップ（周と周の間は次のステップの時刻まで、最長1ms スリープする）。それを超える分（停止後や update() がレートに追いつかない場合）は捨てられ、一度だけ警告が出る。アプリ型をテンプレート引数に取り、プロセスの終了コードを返す"
+description.ko = "윈도우나 그래픽스 컨텍스트 없이 앱 클래스를 실행 (update 루프만). update는 목표 레이트의 고정 스텝(getDeltaTime()은 1 / fps)으로 루프 1회당 최대 10스텝(회차 사이에는 다음 스텝 시각까지, 최대 1ms 슬립). 이를 넘는 시간(정지 후, update()가 레이트를 따라가지 못할 때)은 버려지고 경고가 한 번 출력된다. 앱 타입을 템플릿 인자로 받고 프로세스 종료 코드를 반환"
 related = ["HeadlessSettings", "runApp"]
 
 ["runOnMainThread"]
@@ -15391,10 +15405,10 @@ related = ["LogLevel", "setConsoleLogLevel", "setLogFile"]
 category = "graphics_shapes"
 keywords = ["frame rate", "framerate", "vsync", "speed", "ofsetframerate"]
 of = ["ofSetFrameRate"]
-description.en = "Set target frame rate (VSYNC = -1.0)"
-description.ja = "ターゲットフレームレートを設定 (VSYNC = -1.0)"
-description.ko = "목표 프레임레이트를 설정 (VSYNC = -1.0)"
-related = ["getFps"]
+description.en = "Set the target frame rate; update and draw run together (VSYNC = -1, EVENT_DRIVEN = 0, or a fixed fps). A fixed fps at or just above the display rate draws every display frame. Switching at runtime starts the new rate from the switch (no catch-up; a fixed fps draws the next frame). Calling it again with the current rate does nothing, so it is safe to call every frame"
+description.ja = "ターゲットフレームレートを設定し、update と draw を同期して回す（VSYNC = -1、EVENT_DRIVEN = 0、または固定fps）。ディスプレイのリフレッシュレートと同じか少し上の固定fpsは毎フレーム描画する。実行中の切り替えは切り替えた時点から新しいレートで始まる（取り戻しはせず、固定fpsなら次のフレームを描画する）。今と同じレートで呼んでも何もしないので、毎フレーム呼んでもよい"
+description.ko = "목표 프레임레이트를 설정하고 update와 draw를 동기로 돌린다(VSYNC = -1, EVENT_DRIVEN = 0, 또는 고정 fps). 디스플레이 리프레시레이트와 같거나 약간 높은 고정 fps는 매 프레임 그린다. 실행 중 전환은 전환 시점부터 새 레이트로 시작한다(따라잡기 없이, 고정 fps라면 다음 프레임을 그린다). 현재와 같은 레이트로 호출하면 아무것도 하지 않으므로 매 프레임 호출해도 된다"
+related = ["getFps", "setIndependentFps", "getFpsSettings"]
 
 ["setFullscreen"]
 category = "window_system"
@@ -15418,9 +15432,9 @@ platform_note.ja = "モバイル専用。macOS / Windows / Linux / Web では no
 ["setIndependentFps"]
 category = "window_system"
 keywords = ["framerate", "update rate", "decouple", "tick rate"]
-description.en = "Set independent update and draw frame rates"
-description.ja = "updateとdrawのフレームレートを個別に設定"
-description.ko = "update와 draw의 프레임레이트를 독립적으로 설정"
+description.en = "Set independent update and draw rates. A fixed update rate runs fixed steps (getDeltaTime() is 1 / updateFps for each), at most 10 per frame: time beyond that (after a stall, when update() is too slow, or when updateFps is more than 10x the display rate) is dropped with a one-time warning. Switching at runtime starts the new rate from the switch (no catch-up; on the next frame a fixed update rate runs one step and a fixed draw rate draws). Calling it again with the current rates does nothing, and changing only the draw rate keeps the update's phase"
+description.ja = "updateとdrawのフレームレートを個別に設定。固定の update レートは固定ステップで回り（各ステップの getDeltaTime() は 1 / updateFps）、1フレームあたり最大10ステップ。それを超える分（停止後、update() が遅すぎる場合、updateFps がディスプレイのレートの10倍を超える場合）は捨てられ、一度だけ警告が出る。実行中の切り替えは切り替えた時点から新しいレートで始まる（取り戻しはせず、次のフレームで固定 update レートは1ステップ回り、固定 draw レートは描画する）。今と同じレートで呼んでも何もせず、draw のレートだけを変えても update の位相は保たれる"
+description.ko = "update와 draw의 프레임레이트를 독립적으로 설정. 고정 update 레이트는 고정 스텝으로 돌며(각 스텝의 getDeltaTime()은 1 / updateFps) 프레임당 최대 10스텝. 이를 넘는 시간(정지 후, update()가 너무 느릴 때, updateFps가 디스플레이 레이트의 10배를 넘을 때)은 버려지고 경고가 한 번 출력된다. 실행 중 전환은 전환 시점부터 새 레이트로 시작한다(따라잡기 없이, 다음 프레임에 고정 update 레이트는 한 스텝 돌고 고정 draw 레이트는 그린다). 현재와 같은 레이트로 호출하면 아무것도 하지 않으며, draw 레이트만 바꾸면 update의 위상은 유지된다"
 related = ["setFps", "getFpsSettings"]
 
 ["setKeepScreenOn"]
@@ -17590,9 +17604,9 @@ description.ja = "ローカル行列が変化したときのカスタム処理�
 description.ko = "로컬 행렬이 변경될 때의 사용자 동작용 훅."
 
 ["Node::processTimers"]
-description.en = "Process due timers (callAfter / callEvery), invoked within the update pass."
-description.ja = "期限の来たタイマー（callAfter / callEvery）を処理する。更新パス内で呼ばれる。"
-description.ko = "만기된 타이머(callAfter / callEvery)를 처리한다. 업데이트 패스 내에서 호출."
+description.en = "Count this node's timers (callAfter / callEvery) down by getDeltaTime() and fire the due ones, invoked within the update pass."
+description.ja = "このノードのタイマー（callAfter / callEvery）を getDeltaTime() 分カウントダウンし、期限の来たものを実行する。更新パス内で呼ばれる。"
+description.ko = "이 노드의 타이머(callAfter / callEvery)를 getDeltaTime()만큼 카운트다운하고 만기된 것을 실행한다. 업데이트 패스 내에서 호출."
 
 ["RectNode::findHitNodeRecursive"]
 description.en = "Clipping-aware recursive hit test (overrides Node's to respect the rect bounds)."

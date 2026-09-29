@@ -31,6 +31,8 @@
 #include <vector>
 #include <functional>
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <typeindex>
 #include <unordered_map>
@@ -64,6 +66,18 @@ class Node;
 class Mod;
 using NodePtr = std::shared_ptr<Node>;
 using NodeWeakPtr = std::weak_ptr<Node>;
+
+// Frame timing the Node timers count down with (defined in tcGlobal.cpp,
+// declared in TrussC.h).
+double getDeltaTime();
+uint64_t getUpdateCount();
+namespace internal {
+    // The current window's update time (the wall time of the update call; a
+    // fixed-Hz step's nominal time) and whether one of its updates is running
+    // (WindowContext::updateTime / inUpdate, tcGlobal.cpp).
+    std::chrono::steady_clock::time_point getUpdateTime();
+    bool isInUpdate();
+}
 
 // Hover state cache (updated once per frame): hoveredNode / prevHoveredNode /
 // grabbedNode / grabbedButton / selectedNode / rootNode moved to WindowContext
@@ -1297,20 +1311,27 @@ public:
     // Timers — public API: schedule callbacks on a node (call from anywhere)
     // -------------------------------------------------------------------------
 
+    // Frame timers are countdowns driven by this node's updates (#228): each
+    // update subtracts getDeltaTime() (the nominal 1/updateFps per step in
+    // fixed-Hz mode), so they follow the loop, pause while the node is
+    // inactive, and are not affected by resetElapsedTimeCounter(). A timer
+    // created during an update starts counting on the next one. In the main
+    // window, a timer created between updates (an event handler, draw(),
+    // runOnMainThread work) counts only the time after its creation, so an
+    // idle gap or a stall before it existed can't make it fire early. (A
+    // secondary window's tick doesn't record its update time yet, so there
+    // such a timer counts the window's whole next delta.)
+
     // Execute callback once after specified delay in seconds
     uint64_t callAfter(double delay, std::function<void()> callback) {
-        uint64_t id = nextTimerId_++;
-        double triggerTime = getElapsedTime() + delay;
-        timers_.push_back({id, triggerTime, 0.0, callback, false});
-        return id;
+        return addTimer(delay, 0.0, false, std::move(callback));
     }
 
-    // Execute callback repeatedly at specified interval
+    // Execute callback repeatedly at specified interval. Keeps its phase (each
+    // due time = previous due time + interval); when late by more than one
+    // interval it fires once, not once per missed interval.
     uint64_t callEvery(double interval, std::function<void()> callback) {
-        uint64_t id = nextTimerId_++;
-        double triggerTime = getElapsedTime() + interval;
-        timers_.push_back({id, triggerTime, interval, callback, true});
-        return id;
+        return addTimer(interval, interval, true, std::move(callback));
     }
 
     // Cancel timer
@@ -1437,32 +1458,79 @@ protected:
     // Override for custom behavior when local matrix changes
     virtual void onLocalMatrixChanged() {}
 
-    // Timer structure
+    // Timer structure (a countdown, see callAfter / callEvery)
     struct Timer {
         uint64_t id;
-        double triggerTime;
-        double interval;
+        double remaining;     // seconds until due; due when <= 0
+        double interval;      // repeat interval (callEvery), 0 for callAfter
         std::function<void()> callback;
         bool repeating;
+        uint64_t createdUpdate;  // getUpdateCount() when created
+        // Created between updates: not counting yet. The first update after
+        // `created` is charged only the time since `created`.
+        bool pending;
+        std::chrono::steady_clock::time_point created;
     };
 
     std::vector<Timer> timers_;
     inline static uint64_t nextTimerId_ = 1;
 
-    // Process timers (called within updateRecursive)
+private:
+    uint64_t addTimer(double delay, double interval, bool repeating,
+                      std::function<void()> callback) {
+        uint64_t id = nextTimerId_++;
+        timers_.push_back({id, delay, interval, std::move(callback), repeating,
+                           getUpdateCount(), !internal::isInUpdate(),
+                           std::chrono::steady_clock::now()});
+        return id;
+    }
+
+protected:
+    // Process timers (called within updateTree, before update())
+    //
+    // Countdown: every timer subtracts this update's delta time, except
+    // - one created during this same update (by this node's setup(), which
+    //   runs just before, or by a parent's update()): it starts next update,
+    //   so it can't fire a frame early;
+    // - one created between updates (pending): the first update after its
+    //   creation subtracts only the time since then (capped at the delta
+    //   time). Without this, the first delta would include time from before
+    //   the timer existed: after an EVENT_DRIVEN idle gap or a stall (a
+    //   blocking dialog in a key handler) it would fire on the next update.
+    // A tiny epsilon absorbs rounding, so callAfter(1.0) created in an update
+    // at a fixed 60 Hz fires on exactly the 60th step.
     //
     // Reentrancy-safe: a callback may invoke callAfter / callEvery / cancelTimer
     // / cancelAllTimers on this same node. We snapshot the ready-timer IDs up
     // front, then look each one up by ID before firing, copying out the
     // callback and metadata so vector reallocation during the callback can't
-    // dangle the in-flight reference.
+    // dangle the in-flight reference. Timers added by a callback wait for the
+    // next update.
     void processTimers() {
-        double currentTime = getElapsedTime();
+        if (timers_.empty()) return;
+        constexpr double dueEpsilon = 1e-9;
+        const double dt = getDeltaTime();
+        const uint64_t thisUpdate = getUpdateCount();
+        const auto updateTime = internal::getUpdateTime();
+        // No update time (a loop that doesn't set one, e.g. a secondary
+        // window's tick): count pending timers like ones created in an update.
+        const bool haveUpdateTime = updateTime != std::chrono::steady_clock::time_point{};
 
         std::vector<uint64_t> readyIds;
         readyIds.reserve(timers_.size());
-        for (const auto& t : timers_) {
-            if (currentTime >= t.triggerTime) {
+        for (auto& t : timers_) {
+            double charge = 0.0;
+            if (t.pending && haveUpdateTime) {
+                if (updateTime > t.created) {
+                    t.pending = false;
+                    charge = std::min(dt, std::chrono::duration<double>(updateTime - t.created).count());
+                }
+            } else if (t.createdUpdate != thisUpdate) {
+                t.pending = false;
+                charge = dt;
+            }
+            if (charge > 0.0) t.remaining -= charge;
+            if (t.remaining <= dueEpsilon) {
                 readyIds.push_back(t.id);
             }
         }
@@ -1473,17 +1541,24 @@ protected:
             if (it == timers_.end()) continue;  // cancelled by an earlier callback in this batch
 
             std::function<void()> callback = it->callback;
-            bool   repeating = it->repeating;
-            double interval  = it->interval;
 
-            if (repeating) {
-                it->triggerTime = currentTime + interval;
-                callback();  // safe: we already captured what we need from `it`
+            if (it->repeating) {
+                // Keep the phase: next due = this due time + interval. When
+                // late by whole intervals, skip them and fire once.
+                if (it->interval > 0.0) {
+                    double late = -it->remaining;
+                    double skipped = late > 0.0
+                        ? std::floor(late / it->interval + dueEpsilon) : 0.0;
+                    it->remaining += it->interval * (skipped + 1.0);
+                } else {
+                    it->remaining = 0.0;   // interval <= 0: every update
+                }
+                if (callback) callback();  // safe: we already captured what we need from `it`
             } else {
                 // Remove before firing so the timer is gone even if the
                 // callback throws or registers a new timer that reallocates.
                 cancelTimer(id);
-                callback();
+                if (callback) callback();
             }
         }
     }

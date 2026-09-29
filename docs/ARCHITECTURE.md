@@ -184,6 +184,7 @@ namespace tc {
 
     // Time
     double getElapsedTime();
+    double getFrameElapsedTime();
     double getDeltaTime();
     uint64_t getFrameNum();
 
@@ -224,6 +225,14 @@ tc::setIndependentFps(60, 30);      // Update 60Hz, draw 30fps
 ```
 
 **Note:** In event-driven mode, the app doesn't freeze. Event handlers still fire normally.
+
+**Timing rules:**
+
+- **One clock.** `getElapsedTime()` (double), `getElapsedTimef()`, `getElapsedTimeMillis()` and `getElapsedTimeMicros()` read one `steady_clock` whose origin is taken at program start. `resetElapsedTimeCounter()` only restarts what these getters report; framework timing (Node timers, the loop, `ScreenRecorder`, the `tc_get_health` uptime) runs on the underlying clock and is never reset. `getFrameElapsedTime()` is the same value sampled once per frame, so every update step and the draw of a frame agree. `getElapsedTimef()` is a float that loses precision after about a day: use it for animation, and the double where precision matters. Because the counter can be reset, measure durations with `getSystemTimeMicros()` differences taken as `int64_t`.
+- **Delta time.** In VSYNC and `setFps()` modes `getDeltaTime()` is the measured time since the previous update. With a fixed update rate (`setIndependentFps(120, VSYNC)`, and `runHeadlessApp`) update runs as fixed steps and every step reports exactly `1 / updateFps`.
+- **Bounded catch-up.** A fixed-rate update runs at most 10 steps per frame. Time beyond that (after a stall, when `update()` is slower than its own rate, or when the update rate is more than 10x the display rate) is dropped with a one-time warning, instead of freezing the app while it replays. `runHeadlessApp` applies the same cap per loop pass. Between passes it sleeps only until the next step is due (at most 1 ms), on a high-resolution timer on Windows, where a plain sleep rounds up to ~15.6 ms, so a fast headless rate stays within 10 steps per pass. `getFrameRate()` reports the measured rate, so it shows when that happens (fixed steps are counted by the time they consumed, which keeps the value steady when the update rate isn't a multiple of the frame rate).
+- **Switching modes at runtime** (`setFps()` / `setIndependentFps()`) starts the new rate from the moment of the switch; time spent in the previous mode is not replayed. The first frame after a switch runs one fixed update step and draws at a fixed draw rate. Calling them again with the current rates does nothing, so `setFps(guiValue)` every frame is fine.
+- **Fixed draw rates** skip display frames with a half-frame tolerance: a target at or just above the display rate (`setFps(60)` on a 59.94 Hz display) draws every frame, and integer ratios (60 on 120 Hz, 30 on 60 Hz) draw every other frame. `Window::setFps()` throttles secondary windows the same way.
 
 ### B. Scene Graph & Event System
 
@@ -327,6 +336,9 @@ this->callAfter(1.0, []{ cout << "1 second passed" << endl; });
 this->callEvery(0.5, []{ cout << "Every 0.5 seconds" << endl; });
 ```
 
+- Timers are countdowns: each update of the node subtracts `getDeltaTime()`, so they follow the loop (including fixed-rate steps), pause while the node is inactive, and are not affected by `resetElapsedTimeCounter()`. With a fixed update rate they count step time: time the loop drops after a stall (beyond 10 steps per frame) is not counted, so the timer fires that much later in wall time
+- Only time after the call counts: a timer created in an update (including an `events().update` listener) starts with the next one. In the main window, one created elsewhere (an event handler, `draw()`, `runOnMainThread` work) is not charged for an idle gap or a stall before it existed; in a secondary window it still counts that window's whole next delta
+- `callEvery` keeps its phase (next due = previous due + interval). If an update comes more than a whole interval late it fires once, not once per missed interval
 - Timers auto-destroyed when Node is deleted
 - Zero overhead when no timers are active
 
