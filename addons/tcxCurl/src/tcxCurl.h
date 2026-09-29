@@ -107,7 +107,7 @@ namespace detail {
     // curl cuts info lines at about 2 KB and error lines at 255 chars), so when
     // the value has a '@' or the line was cut, the whole value is replaced. A
     // "Uses proxy env variable" line always ends with the closing quote, so one
-    // that doesn't was cut (whatever the cap of the curl version). The
+    // that doesn't was cut, and so is one at curl's 2047-char cap. The
     // proxy host still shows on curl's "Connected to" line. no_proxy (a host
     // list) is left alone. eol excludes the trailing CR/LF.
     inline bool isProxyEchoLine(std::string_view line) {
@@ -123,8 +123,10 @@ namespace detail {
         if (open == std::string_view::npos || open >= eol) return std::string(line);
         bool usesLine = line.rfind("Unsupported proxy ", 0) != 0;
         size_t close = line.rfind('\'', eol - 1);
+        // curl <= 8.12 cuts at 2047 chars (8.5 without "..."), so a quote in the
+        // value can land exactly at the end; 8.13+ cuts at 2043 + "...".
         bool cut = (close == open) ||
-                   (usesLine ? line[eol - 1] != '\'' : eol >= 255);
+                   (usesLine ? (line[eol - 1] != '\'' || eol >= 2047) : eol >= 255);
         size_t valueEnd = cut ? eol : close;
         std::string_view value = line.substr(open + 1, valueEnd - open - 1);
         if (!cut && value.find('@') == std::string_view::npos) {
@@ -328,6 +330,7 @@ private:
                 flushPendingHeaderOut(*state, true);
             } else if (chunk.rfind("Issue another request to this URL", 0) == 0) {
                 flushPendingHeaderOut(*state, false);
+                state->maskNextLine = false;  // also when "Connection died" armed it
             }
         }
         if (type == CURLINFO_TEXT && detail::isProxyEchoLine(chunk)) {
