@@ -246,6 +246,7 @@ These functions do NOT exist in upstream sokol_gl. They are TrussC additions.
 | `sgl_tc_context_reset(ctx)` | Reset command/vertex/uniform counters to zero (fast path between FBO draws on shared context) |
 | `sgl_tc_context_release_buffers(ctx)` | Release CPU + GPU buffers to free idle memory (context shell and pipelines preserved) |
 | `sgl_tc_context_ensure_buffers(ctx)` | Ensure buffers are allocated (no-op if already allocated, call before drawing after release) |
+| `sgl_tc_reset_matrix_stacks()` | Drop every matrix stack of the current context back to depth 0 — called at frame end (`present()`) so an unpopped `pushMatrix()` can't carry sgl's stack depth into the next frame (TrussC #232) |
 
 ### 13. Float Vertex Colors (UBYTE4N -> FLOAT4)
 
