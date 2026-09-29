@@ -70,10 +70,12 @@ struct DeferredResponse {
     const void* target = nullptr;                        // window to run in (null = main)
     std::chrono::steady_clock::time_point deadline;      // targeted: give up after this
     std::function<std::string()> timeoutReply;           // targeted: reply when given up
-    // registrationOwner() when the request came in: a hot reload guest
-    // generation. removeRegistrationsOwnedBy() answers the entry with
+    // Registration owner of the code the producer runs (DeferralState::owner):
+    // a hot reload guest generation, or null for host code. When that owner
+    // is removed, removeRegistrationsOwnedBy() answers the entry with
     // errorReply instead of running its producer, which may reach the App
-    // about to be deleted (a status-image getter, a tool capturing `this`).
+    // about to be deleted (a guest tool capturing `this`, a status-image
+    // getter). A host tool's deferral is not affected.
     const void* owner = nullptr;
     std::function<std::string(const std::string&)> errorReply;  // tool error with this message
 };
@@ -92,13 +94,22 @@ struct DeferralState {
     bool hasEnvelope = false;                // set by handleToolsCall(), read by processHttpQueue()
     std::function<ReplyThunk()> envelope;    // JSON-RPC reply builder (main part)
     std::function<std::string()> timeoutReply;  // targeted deferral given up (see above)
-    std::function<std::string(const std::string&)> errorReply;  // deferral cancelled (reload)
+    std::function<std::string(const std::string&)> errorReply;  // deferral cancelled (unload)
+    // Registration owner of the code the deferred producer runs: the called
+    // tool's owner, set by handleToolsCall(); a host tool that runs code
+    // someone else registered (tc_get_status_image a status-image getter)
+    // names that code's owner with setDeferralOwner().
+    const void* owner = nullptr;
 };
 // The MCP state below is one per process, so it is defined non-inline in
 // tcMCP.cpp: a hot reload guest on Windows would otherwise get its own copy of
 // each, and a tool handler it runs would defer into a DeferralState the host
 // never reads (#249; docs/ARCHITECTURE.md, "One instance per process").
 DeferralState& deferralState();
+
+// Call after deferring, in a tool handler whose deferred producer runs code
+// registered under another owner (see DeferralState::owner).
+inline void setDeferralOwner(const void* owner) { deferralState().owner = owner; }
 
 std::vector<DeferredResponse>& deferredResponses();
 
@@ -391,6 +402,7 @@ private:
             auto& ds = detail::deferralState();
             ds.requested = false;
             ds.twoStageRequested = false;
+            ds.owner = tools_[name].owner;   // the handler may name another (setDeferralOwner)
 
             // Execute tool handler (may call deferToolResultUntilAfterFrame()
             // or deferToolResultTwoStage())
@@ -786,6 +798,7 @@ inline void processHttpQueue() {
         ds.target = nullptr;
         ds.timeoutReply = nullptr;
         ds.errorReply = nullptr;
+        ds.owner = nullptr;
         std::string result = Server::instance().processMessage(req.body);
         if (ds.hasEnvelope) {
             // Tool deferred its reply until after present(): stash the promise
@@ -797,7 +810,7 @@ inline void processHttpQueue() {
             d.target = ds.target;
             d.deadline = std::chrono::steady_clock::now() + detail::kTargetedDeferralTimeout;
             d.timeoutReply = std::move(ds.timeoutReply);
-            d.owner = detail::registrationOwner();
+            d.owner = ds.owner;
             d.errorReply = std::move(ds.errorReply);
             detail::deferredResponses().push_back(std::move(d));
             ds.hasEnvelope = false;
@@ -832,10 +845,11 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
     if (!owner) return;
     Server::instance().removeOwnedBy(owner);
     for (auto& hook : ownerCleanupHooks()) hook(owner);
-    // Deferred replies to requests made while this owner was live: answer
-    // them now, with an error, instead of running their producers at the next
-    // drain, after the App they may reach has been deleted (the reload runs
-    // between processHttpQueue() and drainDeferredResponses() in one frame).
+    // Deferred replies whose producers run this owner's code: answer them
+    // now, with an error, instead of running them at the next drain, after
+    // the App they may reach has been deleted (a reload runs between
+    // processHttpQueue() and drainDeferredResponses() in one frame; the exit
+    // path unloads the guest too). Host tools' deferrals stay pending.
     auto& pending = deferredResponses();
     std::vector<DeferredResponse> keep;
     for (auto& d : pending) {
@@ -843,7 +857,8 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
             keep.push_back(std::move(d));
             continue;
         }
-        const std::string message = "the app was reloaded before this deferred reply was produced";
+        const std::string message = "the app code behind this reply was unloaded (hot reload or exit) "
+                                    "before the reply was produced";
         std::string reply = d.errorReply ? d.errorReply(message)
                                          : "{\"error\":\"" + message + "\"}";
         d.response->set_value([reply]() { return reply; });

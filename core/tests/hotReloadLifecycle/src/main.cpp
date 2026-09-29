@@ -36,11 +36,12 @@
 // answered by THIS generation, a guest tool that defers its reply (the
 // deferral state must be shared too), the host's tc_get_status reading the
 // guest's status entry, and a control tool the guest registered, which must
-// inject into the host's input dispatch. The unload itself happens while a
-// guest_deferred call waits for the afterFrame drain, as a reload does in a
-// real frame: that reply must come back as an error (its producer reaches the
-// deleted App through `this`). After unload the guest tool must be gone from
-// the server as well.
+// inject into the host's input dispatch. The unload itself happens while
+// deferred replies wait for the afterFrame drain, as a reload does in a real
+// frame: those whose producers run guest code (guest_deferred, which reaches
+// the App through `this`, and tc_get_status_image on the guest's getter) must
+// come back as an error, and a host tool's deferred reply must still answer.
+// After unload the guest tool must be gone from the server as well.
 //
 // Settings and registries app code and the core loop share (#249): guest code
 // calls setFps(), redraw(), setTouchAsMouse(), the clip / fov setters,
@@ -99,31 +100,33 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace fs = std::filesystem;
 
-// POST one JSON-RPC request to the MCP server from a worker thread while this
-// (main) thread plays the frame loop's part: processHttpQueue() answers it,
-// drainDeferredResponses() is the afterFrame step deferred tools wait for.
-// `beforeDrain`, if given, runs once the server has stashed a deferred reply
-// and before the first drain: where a hot reload happens in a real frame
-// (processHttpQueue() -> host poll -> reload, then the afterFrame drain).
-// Returns the reply body, or "" on a transport failure / timeout.
-static std::string mcpPost(int port, const std::string& body,
-                           const std::function<void()>& beforeDrain = nullptr) {
-    // Everything the worker touches lives in this shared block, not in this
-    // frame: past the deadline the worker is detached and may still finish
-    // later (name lookup and each send / recv have their own timeouts, the
-    // whole request has none), so it must not write into a returned frame or
-    // hand its late reply to the next request.
-    struct Exchange {
-        std::string body;
-        std::string reply;
-        std::atomic<bool> done{false};
-    };
-    auto ex = std::make_shared<Exchange>();
-    ex->body = body;
-    std::thread worker([ex, port] {
+// A JSON-RPC request POSTed to the MCP server from a worker thread while this
+// (main) thread plays the frame loop's part (awaitPosts()). Everything the
+// worker touches lives in this shared block, not in a caller's frame: past the
+// deadline the worker is detached and may still finish later (name lookup and
+// each send / recv have their own timeouts, the whole request has none), so it
+// must not write into a returned frame or hand its late reply to the next
+// request.
+struct Exchange {
+    std::string body;
+    std::string reply;
+    std::atomic<bool> done{false};
+};
+struct PendingPost {
+    std::shared_ptr<Exchange> ex;
+    std::thread worker;
+};
+
+static PendingPost startPost(int port, const std::string& body) {
+    PendingPost p;
+    p.ex = std::make_shared<Exchange>();
+    p.ex->body = body;
+    auto ex = p.ex;
+    p.worker = std::thread([ex, port] {
         // Same name the server bound to: "localhost" resolves to ::1 first on
         // some hosts (CI runners), where 127.0.0.1 would find nothing.
         httplib::Client cli("localhost", port);
@@ -133,33 +136,65 @@ static std::string mcpPost(int port, const std::string& body,
         if (r && r->status == 200) ex->reply = r->body;
         ex->done = true;
     });
+    return p;
+}
+
+// Pump the frame loop's part until every post is answered (or 20 s pass):
+// processHttpQueue() answers or stashes the requests, drainDeferredResponses()
+// is the afterFrame step deferred tools wait for. `beforeDrain`, if given,
+// runs once `deferred` replies are stashed and before the first drain: where
+// a hot reload happens in a real frame (processHttpQueue() -> host poll ->
+// reload, then the afterFrame drain). Returns each reply body, "" on a
+// transport failure / timeout.
+static std::vector<std::string> awaitPosts(std::vector<PendingPost>& posts, size_t deferred = 0,
+                                           const std::function<void()>& beforeDrain = nullptr) {
+    auto allDone = [&posts] {
+        for (auto& p : posts) {
+            if (!p.ex->done) return false;
+        }
+        return true;
+    };
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
     bool hooked = !beforeDrain;
-    while (!ex->done && std::chrono::steady_clock::now() < deadline) {
+    while (!allDone() && std::chrono::steady_clock::now() < deadline) {
         mcp::processHttpQueue();
-        if (!hooked && mcp::hasDeferredResponses()) {
+        if (!hooked && mcp::detail::deferredResponses().size() >= deferred) {
             beforeDrain();
             hooked = true;
         }
         if (hooked) mcp::drainDeferredResponses();
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    if (!ex->done) {
-        worker.detach();
-        return "";
+    std::vector<std::string> replies;
+    for (auto& p : posts) {
+        if (p.ex->done) {
+            p.worker.join();
+            replies.push_back(p.ex->reply);
+        } else {
+            p.worker.detach();
+            replies.push_back("");
+        }
     }
-    worker.join();
-    return ex->reply;
+    return replies;
 }
 
-// tools/call -> the tool's content json (the text block, parsed), or a
-// discarded json on failure. `error` receives the JSON-RPC error message.
-static json callTool(int port, const std::string& name, const json& args, std::string* error = nullptr,
-                     const std::function<void()>& beforeDrain = nullptr) {
+static std::string mcpPost(int port, const std::string& body) {
+    std::vector<PendingPost> posts;
+    posts.push_back(startPost(port, body));
+    return awaitPosts(posts)[0];
+}
+
+static std::string toolCallBody(const std::string& name, const json& args) {
     static int id = 0;
     json req = {{"jsonrpc", "2.0"}, {"id", ++id}, {"method", "tools/call"},
                 {"params", {{"name", name}, {"arguments", args}}}};
-    json reply = json::parse(mcpPost(port, req.dump(), beforeDrain), nullptr, false);
+    return req.dump();
+}
+
+// A tools/call reply body -> the tool's content json (the text block, parsed),
+// or a discarded json on failure. `error` receives the JSON-RPC error message.
+static json toolContent(const std::string& body, std::string* error = nullptr) {
+    json reply = json::parse(body, nullptr, false);
     if (reply.is_discarded() || !reply.is_object()) return json::value_t::discarded;
     if (reply.contains("error")) {
         if (error && reply["error"].is_object()) *error = reply["error"].value("message", "");
@@ -170,6 +205,10 @@ static json callTool(int port, const std::string& name, const json& args, std::s
     } catch (...) {
         return json::value_t::discarded;
     }
+}
+
+static json callTool(int port, const std::string& name, const json& args, std::string* error = nullptr) {
+    return toolContent(mcpPost(port, toolCallBody(name, args)), error);
 }
 
 static bool listsTool(int port, const std::string& name) {
@@ -441,22 +480,38 @@ static int runCycles(const std::string& guestPath, int port) {
 
         // Destruction + unload: listener removal churns the COW lists, and the
         // (pre-fix) dlclose here is what armed/triggered both crashes. It
-        // happens while a guest_deferred call is waiting for the afterFrame
-        // drain, as a reload does in a real frame: the pending reply must be
-        // answered with an error, not produced later by code that reaches the
-        // deleted App through `this`.
+        // happens while three deferred replies wait for the afterFrame drain,
+        // as a reload does in a real frame. The two whose producers run guest
+        // code (guest_deferred reaches the App through `this`; the host's
+        // tc_get_status_image runs the guest's getter) must be answered with
+        // an error, never produced on the deleted App; the host's own deferred
+        // tool must still answer.
+        std::vector<PendingPost> posts;
+        posts.push_back(startPost(port, toolCallBody("guest_deferred", json::object())));
+        posts.push_back(startPost(port, toolCallBody("tc_get_status_image", json{{"name", "guest_image"}})));
+        posts.push_back(startPost(port, toolCallBody("host_deferred", json::object())));
         bool unloadedWhileDeferred = false;
-        json cancelled = callTool(port, "guest_deferred", json::object(), nullptr, [&] {
+        auto replies = awaitPosts(posts, posts.size(), [&] {
             lib.unload();
             unloadedWhileDeferred = true;
         });
         if (!unloadedWhileDeferred) {
             lib.unload();
-            return fail(35, "guest_deferred did not leave a deferred reply pending");
+            return fail(35, "guest_deferred, tc_get_status_image and host_deferred did not all leave a deferred reply pending");
         }
-        if (!cancelled.is_object() || cancelled.value("status", "") != "error") {
-            return fail(35, "a deferred reply pending when the guest was unloaded was not answered with an error: " +
-                            (cancelled.is_discarded() ? std::string("no reply") : cancelled.dump()));
+        for (size_t k = 0; k < 2; k++) {
+            json cancelled = toolContent(replies[k]);
+            if (!cancelled.is_object() || cancelled.value("status", "") != "error" ||
+                cancelled.value("message", "").find("unloaded") == std::string::npos) {
+                return fail(35, std::string("a deferred reply running guest code, pending when the guest was unloaded, "
+                                            "was not answered with the unload error: ") +
+                                (cancelled.is_discarded() ? std::string("no reply") : cancelled.dump()));
+            }
+        }
+        json hostDeferred = toolContent(replies[2]);
+        if (!hostDeferred.is_object() || !hostDeferred.value("deferred", false)) {
+            return fail(36, "a host tool's deferred reply pending across the guest's unload did not survive it: " +
+                            (hostDeferred.is_discarded() ? std::string("no reply") : hostDeferred.dump()));
         }
         if (mcp::hasTool("guest_probe") || mcp::hasTool("tc_key_press") ||
             hasStatus("guest_status") || hasStatusImage("guest_image")) {
@@ -494,6 +549,12 @@ int main(int argc, char** argv) {
     // Host-owned registration: must survive every reload.
     mcp::tool("host_probe", "hotReloadLifecycle host tool")
         .bind(std::function<json()>([]() -> json { return json{{"ok", true}}; }));
+    // A host tool that defers: its reply must survive a guest's unload.
+    mcp::tool("host_deferred", "hotReloadLifecycle host tool answering after the frame")
+        .bind(std::function<json()>([]() -> json {
+            mcp::deferToolResultUntilAfterFrame([]() -> json { return json{{"deferred", true}, {"host", true}}; });
+            return json(nullptr);  // replaced by the deferred result
+        }));
     // What TRUSSC_MCP=1 gives a running app: the standard tools + the server.
     mcp::registerInspectionTools();
     mcp::startHttpServer(0, "localhost");

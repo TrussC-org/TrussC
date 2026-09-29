@@ -170,8 +170,9 @@ void registerInspectionTools() {
                 quality = std::clamp(args.at("quality").get<int>(), 1, 100);
 
             std::function<trussc::Pixels()> getter;
+            const void* getterOwner = nullptr;
             for (auto& e : detail::statusImageRegistry()) {
-                if (e.name == name) { getter = e.getter; break; }
+                if (e.name == name) { getter = e.getter; getterOwner = e.owner; break; }
             }
             if (!getter) {
                 return json{{"status", "error"},
@@ -194,6 +195,9 @@ void registerInspectionTools() {
                     return detail::imageContentResult(detail::pixelsToImageJson(*px, "jpg", reqWidth, quality));
                 };
             });
+            // The getter is the registering app's code (a hot reload guest's):
+            // unloading it answers this reply with an error instead of running it.
+            mcp::detail::setDeferralOwner(getterOwner);
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
