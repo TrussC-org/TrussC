@@ -7662,9 +7662,10 @@ platform_note.en = "Real backends only on Windows (Win32 COM), macOS/Linux (POSI
 platform_note.ja = "実バックエンドは Windows (Win32 COM)、macOS/Linux (POSIX termios)、Android (USB Host CDC-ACM、JNI+usbfs、CDC-ACMクラス機器のみ、初回接続は非同期のUSB許可ダイアログが必要) のみ。iOS はサンドボックスで /dev/tty にアクセスできず実質不可 (__APPLE__ の列挙分岐はコンパイルされるが機器を列挙/オープンできない)、wasm はシリアルデバイスが存在せず setup() が POSIX open()/termios 経路に落ちて失敗。"
 
 ["Serial::available"]
-description.en = "Number of bytes available to read"
-description.ja = "読み取り可能なバイト数"
-description.ko = "읽을 수 있는 바이트 수"
+description.en = "Number of bytes available to read; 0 when not connected (a lost device also closes the port)"
+description.ja = "読み取り可能なバイト数。未接続なら0（デバイスの消失を検出するとポートも閉じる）"
+description.ko = "읽을 수 있는 바이트 수. 연결되지 않았으면 0 (장치 소실을 감지하면 포트도 닫음)"
+related = ["Serial::isConnected", "Serial::readBytes"]
 
 ["Serial::close"]
 description.en = "Disconnect and release resources"
@@ -7703,10 +7704,66 @@ description.en = "Current device path"
 description.ja = "現在のデバイスパス"
 description.ko = "현재 장치 경로"
 
+["Serial::isConnected"]
+keywords = ["unplug", "disconnect", "reconnect", "device lost", "connected"]
+description.en = "Whether the port is open and working; turns false after close() or when a read/write call finds the device gone"
+description.ja = "ポートが開いていて使えるか。close() 後や、読み書きの呼び出しがデバイスの消失を検出すると false になる"
+description.ko = "포트가 열려 있고 사용 가능한지. close() 후나 읽기/쓰기 호출이 장치 소실을 감지하면 false가 됨"
+related = ["Serial::setup", "Serial::available", "Serial::readBytes", "Serial::writeBytes", "TcpClient::isConnected"]
+details.en = '''
+An unplugged USB-serial device (or a hub power loss, a driver reset) is noticed
+by [`available()`](#Serial::available), [`readBytes()`](#Serial::readBytes),
+[`readByte()`](#Serial::readByte) and [`writeBytes()`](#Serial::writeBytes): the
+call closes the port, logs one warning and returns its error value
+(`available()` returns 0), and `isConnected()` is false from then on. A loop
+that checks `isConnected()` and calls [`setup()`](#Serial::setup) again
+reconnects once the device is back (see `serialExample`). A quiet device that
+sends nothing is not a loss. `isConnected()` itself does not probe the device,
+so an app that never reads or writes does not notice an unplug.
+
+Reconnecting re-asserts DTR, which resets auto-reset boards such as most
+Arduinos. On Windows, any failure of the underlying ClearCommError / ReadFile /
+WriteFile counts as a loss. On Android the flag also turns true after `setup()`
+returned false, once the user grants USB permission.
+'''
+details.ja = '''
+USB シリアル機器の抜去（ハブの電源断、ドライバのリセットなども）は
+[`available()`](#Serial::available)、[`readBytes()`](#Serial::readBytes)、
+[`readByte()`](#Serial::readByte)、[`writeBytes()`](#Serial::writeBytes) が検出する。
+その呼び出しがポートを閉じ、警告を1回ログに出してエラー値を返し（`available()` は
+0）、以後 `isConnected()` は false になる。`isConnected()` を見て
+[`setup()`](#Serial::setup) を呼び直すループなら、機器が戻れば再接続できる
+（`serialExample` 参照）。何も送ってこないだけの機器は消失とみなさない。
+`isConnected()` 自体は機器を調べないので、読み書きを一切しないアプリは抜去に
+気づかない。
+
+再接続では DTR が再びアサートされ、多くの Arduino のような自動リセット付きボードは
+リセットされる。Windows では下位の ClearCommError / ReadFile / WriteFile の失敗は
+すべて消失として扱う。Android では、`setup()` が false を返した後でもユーザーが
+USB 許可を与えた時点で true になる。
+'''
+details.ko = '''
+USB 시리얼 장치의 분리(허브 전원 차단, 드라이버 리셋 등 포함)는
+[`available()`](#Serial::available), [`readBytes()`](#Serial::readBytes),
+[`readByte()`](#Serial::readByte), [`writeBytes()`](#Serial::writeBytes)가 감지한다.
+해당 호출이 포트를 닫고 경고를 한 번 로그로 남긴 뒤 오류 값을 반환하며
+(`available()`은 0), 이후 `isConnected()`는 false가 된다. `isConnected()`를 확인하고
+[`setup()`](#Serial::setup)을 다시 호출하는 루프라면 장치가 돌아왔을 때 재연결된다
+(`serialExample` 참조). 아무것도 보내지 않을 뿐인 장치는 소실로 보지 않는다.
+`isConnected()` 자체는 장치를 조사하지 않으므로, 읽기/쓰기를 전혀 하지 않는 앱은
+분리를 알아채지 못한다.
+
+재연결 시 DTR이 다시 어서트되어 대부분의 Arduino 같은 자동 리셋 보드는 리셋된다.
+Windows에서는 하위 ClearCommError / ReadFile / WriteFile의 실패를 모두 소실로
+취급한다. Android에서는 `setup()`이 false를 반환한 뒤에도 사용자가 USB 권한을
+허용하면 true가 된다.
+'''
+
 ["Serial::isInitialized"]
-description.en = "Whether currently connected"
-description.ja = "接続中か"
-description.ko = "현재 연결 중인지"
+description.en = "Whether currently connected; same as isConnected()"
+description.ja = "接続中か。isConnected() と同じ"
+description.ko = "현재 연결 중인지. isConnected()와 같음"
+related = ["Serial::isConnected"]
 
 ["Serial::listDevices"]
 description.en = "List available serial devices"
@@ -7719,19 +7776,64 @@ description.ja = "利用可能なシリアルデバイスをログ出力"
 description.ko = "사용 가능한 시리얼 장치를 로그로 출력"
 
 ["Serial::readByte"]
-description.en = "Read a single byte; 0-255 on success, -1 no data, -2 error"
-description.ja = "1バイト読む。成功時0-255、データ無し-1、エラー-2"
-description.ko = "1바이트를 읽음. 성공 0-255, 데이터 없음 -1, 오류 -2"
+description.en = "Read a single byte; 0-255 on success, -1 no data, -2 error (a lost device also closes the port)"
+description.ja = "1バイト読む。成功時0-255、データ無し-1、エラー-2（デバイスの消失を検出するとポートも閉じる）"
+description.ko = "1바이트를 읽음. 성공 0-255, 데이터 없음 -1, 오류 -2 (장치 소실을 감지하면 포트도 닫음)"
+related = ["Serial::isConnected"]
 
 ["Serial::readBytes"]
-description.en = "Read bytes; returns actual count (>=0) or -1 on error"
-description.ja = "バイトを読む。実際の読み取り数(>=0)、エラー時-1を返す"
-description.ko = "바이트를 읽음. 실제 읽은 수(>=0) 또는 오류 시 -1 반환"
+description.en = "Read bytes; returns actual count (>=0) or -1 on error (a lost device also closes the port)"
+description.ja = "バイトを読む。実際の読み取り数(>=0)、エラー時-1を返す（デバイスの消失を検出するとポートも閉じる）"
+description.ko = "바이트를 읽음. 실제 읽은 수(>=0) 또는 오류 시 -1 반환 (장치 소실을 감지하면 포트도 닫음)"
+related = ["Serial::isConnected", "Serial::available"]
 
 ["Serial::setup"]
+keywords = ["baud rate", "connect", "open port", "250000", "921600"]
 description.en = "Connect to a port by path or by index from listDevices()"
 description.ja = "パス指定、またはlistDevices()のインデックスでポートに接続"
 description.ko = "경로 또는 listDevices()의 인덱스로 포트에 연결"
+related = ["Serial::isConnected", "Serial::listDevices"]
+details.en = '''
+Opens the port as 8N1 without flow control and returns false when it cannot
+be opened or configured. Any rate the driver supports works: on macOS and Linux,
+rates without a termios B-constant (250000, 74880, 921600 on macOS, ...) are set
+with `IOSSIOSPEED` (macOS) or `termios2` (Linux); on Windows the rate goes to
+the driver unchanged. A rate that cannot be applied makes `setup()` log an error
+and return false, instead of opening at another speed. The log line names the
+rate the port runs at, and a warning appears if a Linux driver reports a rate
+other than the one requested.
+
+Calling `setup()` again, for example to reconnect after
+[`isConnected()`](#Serial::isConnected) turned false, closes the previous port
+first. Opening re-asserts DTR, which resets auto-reset boards such as most
+Arduinos.
+'''
+details.ja = '''
+8N1・フロー制御なしでポートを開き、開けない・設定できないときは false を返す。
+ドライバが対応するレートなら何でも使える。macOS / Linux では termios に
+B 定数が無いレート（250000、74880、macOS の 921600 など）を `IOSSIOSPEED`（macOS）
+または `termios2`（Linux）で設定する。Windows ではレートをそのままドライバに渡す。
+適用できないレートでは、別の速度で開くのではなく、エラーをログに出して false を
+返す。ログには実際に動作しているレートが出る。Linux のドライバが要求と違う
+レートを返した場合は警告も出る。
+
+[`isConnected()`](#Serial::isConnected) が false になった後の再接続などで
+`setup()` を呼び直すと、先に前のポートを閉じる。開くと DTR が再びアサートされ、
+多くの Arduino のような自動リセット付きボードはリセットされる。
+'''
+details.ko = '''
+8N1, 흐름 제어 없음으로 포트를 열며, 열 수 없거나 설정할 수 없으면 false를 반환한다.
+드라이버가 지원하는 속도라면 무엇이든 쓸 수 있다. macOS / Linux에서는 termios에
+B 상수가 없는 속도(250000, 74880, macOS의 921600 등)를 `IOSSIOSPEED`(macOS) 또는
+`termios2`(Linux)로 설정한다. Windows에서는 속도를 그대로 드라이버에 전달한다.
+적용할 수 없는 속도라면 다른 속도로 여는 대신 오류를 로그로 남기고 false를
+반환한다. 로그에는 실제로 동작하는 속도가 나오며, Linux 드라이버가 요청과 다른
+속도를 보고하면 경고도 나온다.
+
+[`isConnected()`](#Serial::isConnected)가 false가 된 뒤 재연결하는 경우 등
+`setup()`을 다시 호출하면 이전 포트를 먼저 닫는다. 열 때 DTR이 다시 어서트되어
+대부분의 Arduino 같은 자동 리셋 보드는 리셋된다.
+'''
 
 ["Serial::writeByte"]
 description.en = "Write a single byte; true on success"
@@ -7739,9 +7841,10 @@ description.ja = "1バイト書く。成功でtrue"
 description.ko = "1바이트를 씀. 성공 시 true"
 
 ["Serial::writeBytes"]
-description.en = "Write bytes; returns actual count or -1 on error"
-description.ja = "バイトを書く。実際の書き込み数、エラー時-1を返す"
-description.ko = "바이트를 씀. 실제 쓴 수 또는 오류 시 -1 반환"
+description.en = "Write bytes; returns actual count or -1 on error (a lost device also closes the port)"
+description.ja = "バイトを書く。実際の書き込み数、エラー時-1を返す（デバイスの消失を検出するとポートも閉じる）"
+description.ko = "바이트를 씀. 실제 쓴 수 또는 오류 시 -1 반환 (장치 소실을 감지하면 포트도 닫음)"
+related = ["Serial::isConnected"]
 
 ["SerialDeviceInfo"]
 keywords = ["com port info", "serial device", "port list", "tty info"]

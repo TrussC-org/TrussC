@@ -3606,7 +3606,7 @@ bool SendResult::ok() const  // true if the payload was queued (error == SendErr
 ### Serial — Cross-platform serial port (USB/COM): connect, read/write bytes
 
 ```cpp
-int Serial::available() const  // Number of bytes available to read
+int Serial::available() const  // Number of bytes available to read; 0 when not connected (a lost device also closes the port)
 void Serial::close()  // Disconnect and release resources
 void Serial::drain()  // Wait until output transmission completes
 void Serial::flush()  // Clear both input and output buffers
@@ -3614,14 +3614,15 @@ void Serial::flushInput()  // Clear the input buffer
 void Serial::flushOutput()  // Clear the output buffer
 std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated  // Deprecated alias for listDevices()
 const std::string & Serial::getDevicePath() const  // Current device path
-bool Serial::isInitialized() const  // Whether currently connected
+bool Serial::isConnected() const  // Whether the port is open and working; turns false after close() or when a read/write call finds the device gone
+bool Serial::isInitialized() const  // Whether currently connected; same as isConnected()
 std::vector<SerialDeviceInfo> Serial::listDevices()  // List available serial devices
 void Serial::printDevices()  // Log all available serial devices
-int Serial::readByte()  // Read a single byte; 0-255 on success, -1 no data, -2 error
-int Serial::readBytes(void * buffer, int length) [+1]  // Read bytes; returns actual count (>=0) or -1 on error
+int Serial::readByte()  // Read a single byte; 0-255 on success, -1 no data, -2 error (a lost device also closes the port)
+int Serial::readBytes(void * buffer, int length) [+1]  // Read bytes; returns actual count (>=0) or -1 on error (a lost device also closes the port)
 bool Serial::setup(const std::string & portName, int baudRate) [+1]  // Connect to a port by path or by index from listDevices()
 bool Serial::writeByte(unsigned char byte)  // Write a single byte; true on success
-int Serial::writeBytes(const void * buffer, int length) [+1]  // Write bytes; returns actual count or -1 on error
+int Serial::writeBytes(const void * buffer, int length) [+1]  // Write bytes; returns actual count or -1 on error (a lost device also closes the port)
 ```
 
 ### SerialDeviceInfo — Info for one serial device (from Serial::listDevices)

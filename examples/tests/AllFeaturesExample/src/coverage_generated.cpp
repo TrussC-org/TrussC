@@ -2435,6 +2435,7 @@ struct Cover_Serial : af::Scope<Serial> {
         (void)af::val<Serial>().setup(af::val<const std::string>(), af::val<int>());
         (void)af::val<Serial>().setup(af::val<int>(), af::val<int>());
         (void)af::val<Serial>().close();
+        (void)af::val<Serial>().isConnected();
         (void)af::val<Serial>().isInitialized();
         (void)af::val<Serial>().getDevicePath();
         (void)af::val<Serial>().available();

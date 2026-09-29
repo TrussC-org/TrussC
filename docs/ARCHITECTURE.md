@@ -599,5 +599,5 @@ To avoid GPL contamination and size bloat, these features wrap OS-specific APIs:
 
 ### Serial Communication (No Boost)
 
-- **macOS/Linux:** POSIX (`open()`, `tcsetattr()`, `read()`)
+- **macOS/Linux:** POSIX (`open()`, `tcsetattr()`, `read()`); rates without a termios B-constant via `IOSSIOSPEED` (macOS) / `termios2` (Linux), device loss via `poll()` hangup and `EIO` / `ENXIO` / `ENODEV`
 - **Windows:** Win32 (`CreateFile()`, `SetCommState()`, `ReadFile()`)
