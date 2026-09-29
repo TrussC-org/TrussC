@@ -820,6 +820,29 @@ static void testNodeTimersInLoop() {
         checkf("loop timers: ...after a 3 s stall, 4 calls per capped step (40), not 1440",
                steps == 10 && calls == 40, calls);
     }
+    // Created in step 1 of a capped catch-up frame (after a 3 s stall): a
+    // timer made during a fixed step counts whole steps from the next step,
+    // so callAfter(5/120) fires on step 6 of the same frame. The frame is
+    // taken at the real clock, so all its steps' nominal times lie before the
+    // creation: counted from its creation time instead, it would wait for a
+    // later frame.
+    {
+        const int k = 5;
+        int step = 0, firedOn = -1;
+        g_loopDuring = [&] {
+            if (++step == 1) node->callAfter(k / 120.0, [&] { firedOn = step; });
+        };
+        const auto now = Clk::now();
+        internal::lastUpdateTime = now - secs(3.0);
+        const int before = g_updates;
+        internal::runIndependentUpdates(now);
+        g_loopDuring = nullptr;
+        char name[160];
+        snprintf(name, sizeof name,
+                 "loop timers: callAfter(%d/120) made in step 1 of a capped frame fires on its step %d", k, k + 1);
+        checkf(name, g_updates - before == 10 && firedOn == k + 1, firedOn);
+        node->cancelAllTimers();
+    }
     internal::appUpdateFunc = nullptr;
     g_loopNode = nullptr;
     setFps(VSYNC);
