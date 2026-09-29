@@ -532,8 +532,9 @@ jobs:
   # reload guest is a DLL on Windows and compiles its own copy of each, so state
   # the host and app code share splits there, silently (e.g. the guest's MCP
   # tools never reached the host). Textual scan that reads every #if branch, so
-  # one Linux run covers every platform's code; about a second. Existing
-  # entries, each with its reason: tools/header_state_allowlist.txt.
+  # one Linux run covers every platform's code; about a second. It first checks
+  # its own scanner against tools/header_state_selftest.h. Existing entries,
+  # each with its reason: tools/header_state_allowlist.txt.
   # Cheap and independent of the build — always runs (not gated).
   header-state-check:
     timeout-minutes: 5

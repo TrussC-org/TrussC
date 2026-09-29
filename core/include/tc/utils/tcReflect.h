@@ -241,7 +241,7 @@ template <class E>
 inline const char* const* enumCNames() {
     static constexpr auto buf = enumCharBuf<E>();
     static constexpr auto off = enumOffsets<E>();
-    static const auto ptrs = [] {
+    static const auto ptrs = [] {  // immutable once built
         std::array<const char*, enumValidCount<E>()> p{};
         for (std::size_t i = 0; i < p.size(); ++i) p[i] = buf.data() + off[i];
         return p;

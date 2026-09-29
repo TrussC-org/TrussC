@@ -8,14 +8,21 @@
 # nothing, on Windows either.
 #
 # Format:  <header> <scope>::<name>   # <category>: <reason>
+#          <header> <scope>::*        # immutable: <reason>   (every immutable
+#                                       finding in that scope: a constants table)
 #
-#   harmless       a per-module copy changes nothing observable: a warn-once
-#                  flag, a cache of derived data, a counter only one side uses
+# The category must be one of these four (the checker rejects anything else):
+#
+#   harmless       a per-module copy breaks nothing: a warn-once flag, a cache
+#                  of derived data, a counter only one side uses
 #   immutable      const data, the same in every copy
 #   host-only      only code compiled into the host touches it (the core loop
 #                  in TrussC.h, which the host's main.cpp instantiates, and the
 #                  .cpp files of TrussC.lib); a guest's copy is never used
 #   no-hot-reload  only on a path hot reload never takes (Android, headless)
+#
+# The declaration in the header carries a comment saying the same, so whoever
+# edits it sees why the per-module copy is fine.
 #
 # State that must be one per process (a singleton, a registry, a setting app
 # code writes and the core loop reads) does not belong here: define it
@@ -68,6 +75,9 @@ core/include/TrussC.h trussc::internal::nodeCount              # harmless: debug
 core/include/TrussC.h trussc::internal::textureCount           # harmless: as nodeCount
 core/include/TrussC.h trussc::internal::fboCount               # harmless: as nodeCount
 
+# --- tcColor.h
+core/include/tcColor.h trussc::colors::*   # immutable: the named color constants (const Color)
+
 # --- tcBitmapFont.h
 core/include/tcBitmapFont.h trussc::bitmapfont::asciiGlyph::ASCII          # immutable: glyph table
 
@@ -108,7 +118,7 @@ core/include/tc/graphics/tcFont.h trussc::Font::samplerMipped_        # harmless
 core/include/tc/graphics/tcFont.h trussc::Font::resourcesInitialized_ # harmless: as samplerSharp_
 core/include/tc/graphics/tcRenderTarget.h trussc::internal::pipelineOwnerCtx::m  # harmless: debug-build assertion bookkeeping; a module only checks pipelines it built itself
 core/include/tc/graphics/tcVertexWriter.h trussc::internal::sglWriter     # harmless: stateless writer object
-core/include/tc/graphics/tcVertexWriter.h trussc::internal::shaderWriter  # harmless: stateless writer object
+core/include/tc/graphics/tcVertexWriter.h trussc::internal::shaderWriter  # harmless: per-draw scratch, filled and flushed (begin() to end()) inside one function
 
 # --- tc/sound
 core/include/tc/sound/tcSound.h trussc::SoundBuffer::getAdtsSampleRateIndex::rates  # immutable: lookup table

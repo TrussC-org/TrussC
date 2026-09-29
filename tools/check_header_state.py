@@ -17,21 +17,34 @@ What is flagged, in core/include (vendored libraries excluded):
   - an `inline` variable (namespace scope, or `static inline` in a class)
   - a namespace-scope `static` variable, or a variable in an anonymous
     namespace (one copy per translation unit, not even per module)
-`constexpr` variables are not flagged: compile-time constants have no run-time
-state to split. Everything else must be listed in the allowlist
+  - a class template's static data member defined in the header
+    (`template <class T> int Reg<T>::count = 0;`) and a variable template
+    (`template <class T> T zero = T();`): one instance per module, like an
+    inline variable
+Every declarator of a declaration counts (`static int a = 0, b = 1;` is two
+findings). `constexpr` variables are not flagged: compile-time constants have
+no run-time state to split. Everything else must be listed in the allowlist
 (tools/header_state_allowlist.txt) with the reason a per-module copy is
-harmless: a cache, immutable data, state only the host ever touches, ... An
-allowlist entry that no longer matches anything fails too, so the list cannot
-go stale.
+harmless, under one of the categories in CATEGORIES below. An allowlist entry
+that no longer matches anything fails too, so the list cannot go stale.
 
 The scan is textual (comments, strings and preprocessor lines blanked, braces
 tracked to tell namespace, class and function scopes apart), so it reads both
 sides of every #if -- the Windows branches too, which a compiler-based check
-run on Linux or macOS would skip. It runs in well under a second.
+run on Linux or macOS would skip. It runs in well under a second. Being
+textual, it can still be fooled by unusual code; tools/header_state_selftest.h
+pins the constructs it must see through (compound-assignment operators, braced
+default arguments and mem-initializers, template members, several declarators,
+...), and every run checks the scanner against it first.
+
+An entry `<path> <scope>::*` covers every IMMUTABLE finding in that scope (a
+table of constants); an entry in the immutable category must match an
+immutable finding.
 
 Usage:
-  python3 tools/check_header_state.py          # check; exit 1 on a finding
-  python3 tools/check_header_state.py --list   # print every finding
+  python3 tools/check_header_state.py              # self-test, then check; exit 1 on a failure
+  python3 tools/check_header_state.py --self-test  # the self-test only
+  python3 tools/check_header_state.py --list       # print every finding
 """
 
 import argparse
@@ -43,6 +56,12 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCAN_ROOT = os.path.join(REPO, "core", "include")
 ALLOWLIST = os.path.join(REPO, "tools", "header_state_allowlist.txt")
+SELFTEST = os.path.join(REPO, "tools", "header_state_selftest.h")
+
+# Allowlist categories (see the allowlist's header). Anything else is rejected,
+# so state that a Windows guest would really split cannot be parked there
+# under a new label: it has to move into a .cpp.
+CATEGORIES = ("harmless", "immutable", "host-only", "no-hot-reload")
 
 # Vendored third-party code under core/include: not TrussC's to police.
 VENDORED_DIRS = {"sokol", "stb", "nlohmann", "pugixml", "earcut", "lz4", "impl"}
@@ -157,7 +176,11 @@ def blank(text):
     return "".join(out)
 
 
-TOKEN_RE = re.compile(r"[A-Za-z_]\w*|\d[\w.']*|::|->|&&|\|\||==|!=|<=|>=|\.\.\.|\S")
+# Multi-character punctuators the walker must not split: `a += b` lexed as `+`,
+# `=` would read as an initializer (`operator+=` then hides every later body in
+# its class). Longest first, as the C++ lexer does.
+TOKEN_RE = re.compile(r"[A-Za-z_]\w*|\d[\w.']*|<<=|>>=|::|->|&&|\|\||==|!=|<=|>=|"
+                      r"\+=|-=|\*=|/=|%=|&=|\|=|\^=|\.\.\.|\S")
 
 
 def tokenize(text):
@@ -278,6 +301,10 @@ def classify_head(head):
             idents = [x for x in head[i + 1:group_end] if is_ident(x) and x != "const"]
             return "variable", (idents[-1] if idents else None)
         if i > 0 and is_ident(head[i - 1]) and head[i - 1] not in ("decltype", "alignas", "sizeof"):
+            if nxt[:1].isdigit() or nxt in ('"', "-", "+", "{"):
+                # A parameter list never starts with a literal: this is a
+                # direct-initialized variable (`inline std::vector<int> v(3);`)
+                return "variable", head[i - 1]
             return "function", qualified_name_before(head, i - 1)
         return "other", None
     cut = head
@@ -289,6 +316,74 @@ def classify_head(head):
     if not idents:
         return "other", None
     return "variable", idents[-1]
+
+
+def first_declarator(head):
+    """`head` cut before its second declarator (`int a, b` -> `int a`)."""
+    for i, t in top_level(head):
+        if t == ",":
+            return head[:i]
+    return head
+
+
+DECL_PREFIX = {"*", "&", "&&", "const", "volatile"}
+DECL_FOLLOW = {"=", ",", "[", "{", "(", ":", None}   # None: end of statement
+
+
+def later_declarators(toks, start):
+    """Names declared after the first declarator of a declaration: `toks` is
+    the whole statement, toks[start:] what follows the first declarator's
+    name. A comma separates declarators only outside (), [] and {}, and only
+    when a declarator follows it, so a comma between template arguments in
+    an initializer (`= std::pair<int, int>(1, 2), b`) does not."""
+    names = []
+    depth = 0
+    for i in range(start, len(toks)):
+        t = toks[i]
+        if t in ("(", "[", "{"):
+            depth += 1
+        elif t in (")", "]", "}"):
+            depth -= 1
+        elif t == "," and depth == 0:
+            k = i + 1
+            while k < len(toks) and toks[k] in DECL_PREFIX:
+                k += 1
+            if k + 1 < len(toks) and toks[k] == "(" and toks[k + 1] in ("*", "&"):
+                # `(*fp)(args)`: a pointer to function
+                end = skip_group(toks, k, "(", ")")
+                idents = [x for x in toks[k + 1:end] if is_ident(x) and x != "const"]
+                if idents:
+                    names.append(idents[-1])
+            elif k < len(toks) and is_ident(toks[k]):
+                if (toks[k + 1] if k + 1 < len(toks) else None) in DECL_FOLLOW:
+                    names.append(toks[k])
+    return names
+
+
+def class_qualified_name(head, name):
+    """`Reg<T>::items` in a declaration head -> "Reg::items" (template
+    arguments dropped); None when `name` is not qualified."""
+    idx = max(i for i, t in enumerate(head) if t == name)
+    parts = [name]
+    k = idx - 1
+    while k >= 1 and head[k] == "::":
+        j = k - 1
+        if head[j] == ">":
+            depth = 0
+            while j >= 0:
+                if head[j] == ">":
+                    depth += 1
+                elif head[j] == "<":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j -= 1
+            j -= 1
+        if j < 0 or not is_ident(head[j]):
+            break
+        parts.insert(0, head[j])
+        k = j - 1
+    return "::".join(parts) if len(parts) > 1 else None
 
 
 def is_immutable(head):
@@ -388,24 +483,39 @@ def scan_tokens(tokens, rel):
 
     def analyze_decl(stmt, line):
         """A namespace- or class-scope declaration ended at `;`."""
-        head = declaration_head(strip_prefix(stmt))
+        is_template = stmt[:2] == ["template", "<"]
+        toks = strip_prefix(stmt)
+        head = first_declarator(declaration_head(toks))
         what, name = classify_head(head)
         if what != "variable" or not name or "constexpr" in head:
             return
+        names = [name] + later_declarators(toks, len(head))
         specs = set(head)
+        immutable = is_immutable(head)
+
+        def add_all(kind):
+            for nm in names:
+                add(line, nm, kind, immutable)
+
         if stack[-1]["kind"] == "class":
             if "static" in specs and "inline" in specs:
-                add(line, name, "inline variable", is_immutable(head))
+                add_all("inline variable")
             return
         if "extern" in specs:
             return
         if "inline" in specs:
-            add(line, name, "inline variable", is_immutable(head))
+            add_all("inline variable")
+        elif is_template:
+            member = class_qualified_name(head, name)
+            if member:
+                add(line, member, "template static data member (one per module)", immutable)
+            else:
+                add_all("variable template (one per module)")
         elif "static" in specs:
-            if not is_immutable(head):
-                add(line, name, "namespace static (one per translation unit)", False)
-        elif in_anon_ns() and not is_immutable(head):
-            add(line, name, "anonymous-namespace variable (one per translation unit)", False)
+            if not immutable:
+                add_all("namespace static (one per translation unit)")
+        elif in_anon_ns() and not immutable:
+            add_all("anonymous-namespace variable (one per translation unit)")
 
     def open_frame(kind):
         """Classify the `{` that ends `buf`."""
@@ -428,14 +538,20 @@ def scan_tokens(tokens, rel):
         # Namespace or class scope
         if not b:
             return {"kind": "func", "name": ""}                     # ctor body after `a{1}`
+        if b.count("(") > b.count(")"):
+            # Inside a parameter list still open: a braced default argument
+            # (`const Settings& s = {}`, `int v = int{1}`), not a body. The
+            # declaration goes on after the `}`.
+            return {"kind": "init", "name": "", "keep": True}
         top = list(top_level(b))
         if any(t == "=" and (i == 0 or b[i - 1] != "operator") for i, t in top):
             return {"kind": "init", "name": "", "keep": True}      # `= { ... }`
         colon = [i for i, t in top if t == ":"]
         if (colon and ")" in b[:colon[0]]
-                and b[-1] != ")" and b[-1] not in TRAILING_QUALIFIERS):
+                and b[-1] not in (")", "}") and b[-1] not in TRAILING_QUALIFIERS):
             # Brace-initialized member in a constructor's mem-initializer list:
-            # `Foo() : a_{1}, b_(2) {` -- the body is the NEXT `{`
+            # `Foo() : a_{1}, b_(2) {` -- the body is the `{` after a complete
+            # initializer, i.e. after its `)` or `}`
             return {"kind": "init", "name": "", "keep": True}
         if any(t == "enum" for _, t in top):
             return {"kind": "init", "name": "", "keep": True}
@@ -481,8 +597,18 @@ def scan_tokens(tokens, rel):
             # A `static` directly in a function body always declares a static
             # local (block-scope functions cannot be static).
             if not (buf and buf[-1] in ("static", "thread_local")):
-                rest = [t for t, _ in tokens[i:i + 80]]
-                head = declaration_head(rest)
+                # The statement, up to its `;` (a lambda in the initializer
+                # has `;`s of its own, one level down)
+                rest, depth = [], 0
+                for t, _ in tokens[i:i + 2000]:
+                    if t == ";" and depth == 0:
+                        break
+                    if t in ("(", "[", "{"):
+                        depth += 1
+                    elif t in (")", "]", "}"):
+                        depth -= 1
+                    rest.append(t)
+                head = first_declarator(declaration_head(rest))
                 cut = head
                 for k, t in top_level(head):
                     if t in ("(", "[", "{"):
@@ -491,8 +617,8 @@ def scan_tokens(tokens, rel):
                 if "constexpr" not in cut:
                     idents = [t for t in cut if is_ident(t) and t not in
                               ("static", "thread_local", "const", "inline", "mutable")]
-                    add(line, idents[-1] if idents else "?", "function-local static",
-                        is_immutable(cut))
+                    for nm in [idents[-1] if idents else "?"] + later_declarators(rest, len(head)):
+                        add(line, nm, "function-local static", is_immutable(cut))
             buf.append(tok)
             i += 1
             continue
@@ -564,29 +690,70 @@ def scan():
 
 def load_allowlist(path):
     """{key: reason}. Format, one entry per line:
-         <path> <scope>::<name>   # <reason>
-    `#` lines and blank lines are ignored. Every entry needs a reason."""
+         <path> <scope>::<name>   # <category>: <reason>
+    `#` lines and blank lines are ignored. Every entry needs a reason, under
+    one of CATEGORIES."""
     entries, errors = {}, []
     with open(path, encoding="utf-8") as f:
         for lineno, raw in enumerate(f, 1):
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
+            where = f"{os.path.relpath(path, REPO)}:{lineno}"
             key, sep, reason = line.partition("#")
             key = " ".join(key.split())
             if not sep or not reason.strip():
-                errors.append(f"{os.path.relpath(path, REPO)}:{lineno}: entry has no reason: {key}")
+                errors.append(f"{where}: entry has no reason: {key}")
+                continue
+            category, colon, detail = reason.partition(":")
+            if not colon or category.strip() not in CATEGORIES or not detail.strip():
+                errors.append(f"{where}: the reason must be '<category>: <why>', with a category "
+                              f"from {', '.join(CATEGORIES)}: {key}")
                 continue
             if key in entries:
-                errors.append(f"{os.path.relpath(path, REPO)}:{lineno}: duplicate entry: {key}")
+                errors.append(f"{where}: duplicate entry: {key}")
             entries[key] = reason.strip()
     return entries, errors
+
+
+def self_test():
+    """Scan tools/header_state_selftest.h and compare with the `// expect:`
+    markers in it: each marks the keys (<scope>::<name>) the declaration on
+    its line must produce. Returns a list of mismatches."""
+    with open(SELFTEST, encoding="utf-8") as f:
+        text = f.read()
+    expected = set()
+    for lineno, raw in enumerate(text.split("\n"), 1):
+        m = re.search(r"//\s*expect:\s*(.+)$", raw)
+        if m:
+            expected.update((lineno, k) for k in m.group(1).split())
+    rel = os.path.relpath(SELFTEST, REPO).replace(os.sep, "/")
+    got = {(f.line, f.key.split(" ", 1)[1]) for f in scan_tokens(tokenize(blank(text)), rel)}
+    errors = [f"{rel}:{ln}: expected finding not reported: {k}" for ln, k in sorted(expected - got)]
+    errors += [f"{rel}:{ln}: unexpected finding: {k}" for ln, k in sorted(got - expected)]
+    return errors
 
 
 def main():
     ap = argparse.ArgumentParser(description="Flag mutable header-inline state in core/include.")
     ap.add_argument("--list", action="store_true", help="print every finding and exit 0")
+    ap.add_argument("--self-test", action="store_true",
+                    help="only check the scanner against tools/header_state_selftest.h")
     args = ap.parse_args()
+
+    # The scanner first: a blind spot would make the check below pass on
+    # state it never saw.
+    problems = self_test()
+    if problems:
+        for p in problems:
+            print(p)
+        print()
+        print("check_header_state.py no longer reads tools/header_state_selftest.h as")
+        print("expected: fix the scanner (or the fixture's expect: markers) first.")
+        return 1
+    if args.self_test:
+        print("header state check: self-test OK")
+        return 0
 
     findings = scan()
     if args.list:
@@ -597,11 +764,25 @@ def main():
         return 0
 
     allow, errors = load_allowlist(ALLOWLIST)
+    category = {k: r.split(":", 1)[0].strip() for k, r in allow.items()}
+    # `<path> <scope>::*` covers every finding in that scope, for tables of
+    # constants; only immutable ones, so a mutable variable added to the same
+    # scope later is still reported.
+    wildcards = {k[:-1]: k for k in allow if k.endswith("::*")}
+    for k in wildcards.values():
+        if category[k] != "immutable":
+            errors.append(f"a wildcard entry must be in the immutable category: {k}")
     used = set()
     new = []
     for f in findings:
         if f.key in allow:
             used.add(f.key)
+            if category[f.key] == "immutable" and not f.immutable:
+                errors.append(f"{f.path}:{f.line}: listed as immutable, but it is not: {f.key}")
+            continue
+        wild = next((k for prefix, k in wildcards.items() if f.key.startswith(prefix)), None)
+        if wild and f.immutable and category[wild] == "immutable":
+            used.add(wild)
         else:
             new.append(f)
 

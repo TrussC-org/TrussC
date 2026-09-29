@@ -121,6 +121,7 @@ public:
     // -------------------------------------------------------------------------
     // Get ADTS sample rate index
     static int getAdtsSampleRateIndex(int sampleRate) {
+        // Immutable lookup table (the same in every module's copy)
         static const int rates[] = {96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350};
         for (int i = 0; i < 13; i++) {
             if (rates[i] == sampleRate) return i;

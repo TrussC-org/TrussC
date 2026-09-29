@@ -180,7 +180,7 @@ private:
     // render targets). iPad reports as Mac, so also check touch points. Cached.
     static bool isIosWeb() {
 #ifdef __EMSCRIPTEN__
-        static int cached = -1;
+        static int cached = -1;  // cached probe: a per-module copy is harmless
         if (cached < 0) {
             cached = emscripten_run_script_int(
                 "((/iPhone|iPad|iPod/.test(navigator.userAgent)||"
@@ -210,6 +210,8 @@ private:
         bool initialized = false;
     };
 
+    // A cache of GPU pipelines: harmless per module (a Windows hot reload guest
+    // builds its own, once per generation).
     static BakeResources& bake() {
         static BakeResources r;
         return r;
@@ -314,7 +316,7 @@ private:
         // IBL is opt-in via setEnvironment(), so this only affects apps that use
         // it; they degrade gracefully on iOS instead of breaking.
         if (isIosWeb()) {
-            static bool warned = false;
+            static bool warned = false;  // warn-once flag: a per-module copy is harmless
             if (!warned) {
                 warned = true;
                 logWarning("Environment")

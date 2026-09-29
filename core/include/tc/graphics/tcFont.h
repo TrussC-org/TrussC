@@ -937,6 +937,8 @@ private:
 // ---------------------------------------------------------------------------
 class SharedFontCache {
 public:
+    // A cache for the Font objects of the same module: harmless per module (a
+    // Windows hot reload guest builds its own, once per generation).
     static SharedFontCache& getInstance() {
         static SharedFontCache instance;
         return instance;
@@ -2483,12 +2485,14 @@ private:
     // 4x4 already costs 16x the atlas; beyond that the prefilter gains nothing
     // a bigger font size would not give more cheaply.
     static int clampOversample(int n) { return (n < 1) ? 1 : (n > 4 ? 4 : n); }
+    // Set and read by the code that loads fonts (app code): harmless per module.
     static inline int defaultOversample_ = 1;
     int logicalSize_ = 0;      // User-requested font size (logical pixels)
 
     // Shared GPU resources. The TTF draw path loads the active per-target 2D
     // fill pipeline (internal::activeFill2D()) at draw time, so the font class
-    // only needs its own sampler here.
+    // only needs its own sampler here. Lazily created: harmless per module (a
+    // Windows hot reload guest creates its own).
     static inline sg_sampler samplerSharp_ = {};    // max_lod 0 (1:1 and above)
     static inline sg_sampler samplerMipped_ = {};   // full chain (minified)
     static inline bool resourcesInitialized_ = false;
