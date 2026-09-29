@@ -494,6 +494,37 @@ To enable, run with environment variable: `TRUSSC_MCP=1`.
 
 See [AI_AUTOMATION.md](AI_AUTOMATION.md) for full reference.
 
+### G. One Instance per Process (header-inline state)
+
+A hot reload build runs the core in the **host** executable and the app (plus its addons) in a **guest** shared library ([BUILD_SYSTEM.md §7](BUILD_SYSTEM.md#7-hot-reload-development)). The guest calls TrussC functions that live in the host, but it also compiles every **header-inline** function and variable it uses into itself. Whether those copies are merged with the host's depends on the platform:
+
+| Platform | How the guest reaches the host | Header-inline state used by the guest |
+|---|---|---|
+| Linux | unresolved symbols, bound at `dlopen` (host built with `-rdynamic` + `--whole-archive`) | the host's definition wins by symbol interposition: **one instance** |
+| macOS | `-undefined dynamic_lookup` (host built with `-export_dynamic`) | dyld coalesces the guest's weak definition with the host's: **one instance** |
+| Windows | the host EXE's import library (TrussC.lib's symbols exported through a generated `.def`) | only **non-inline** functions are imported; an inline function is compiled into the DLL with its own `static` locals, and an `inline` variable gets its own storage: **a second instance** |
+
+So on Windows, guest code that registers an MCP tool, calls `setBeepVolume()` or queues work with `runOnMainThread()` through header-inline state writes into its own copy, which the host's frame loop never reads. Nothing fails to compile or link; the feature silently does nothing (#249).
+
+**The rule:**
+
+- State that must be one per process (a singleton, a registry, a queue, a flag that both the core loop and app code touch) is defined **non-inline in a `.cpp`** of the core library, behind an accessor function declared in the header, as in `tcGlobal.cpp` and `tcMCP.cpp`:
+
+  ```cpp
+  // header
+  namespace internal { Registry& registry(); }
+  // tcGlobal.cpp (or a sibling .cpp)
+  namespace internal { Registry& registry() { static Registry r; return r; } }
+  ```
+
+  Expose it through a **function**, not an `extern` variable: a DLL reads another module's variable only through `__declspec(dllimport)`, which TrussC's headers do not use.
+- A `static` local in a header-inline function, or an `inline` variable, is allowed only when a per-module copy is harmless: a cache of derived data, immutable data, a warn-once flag, or state that only the core loop touches. Say so in a comment.
+- Stateless inline code (math, getters, helpers that go through the accessors above) is unaffected and stays inline for speed. Moving state out of line costs one out-of-line call, which matters only on hot paths.
+
+`tools/check_header_state.py` enforces this in CI: it scans `core/include`, every `#if` branch included, for `static` locals in functions and for `inline` variables, and fails on any that is not in `tools/header_state_allowlist.txt`. Each allowlist entry carries its reason; entries marked **known split** are existing cases that still misbehave in a Windows guest and are waiting to be moved. Addons are not scanned: their code lives only in the guest and is recreated on each reload by design.
+
+`core/tests/hotReloadLifecycle` checks the result at run time on every desktop platform: the guest's MCP tools, status entries and control tools must reach the host's registry and HTTP server, answer from the current guest generation, and disappear on reload.
+
 ---
 
 ## 6. 3D Graphics

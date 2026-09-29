@@ -442,6 +442,7 @@ On the next build, cmake reconfigures back to a single static binary. The `TC_RU
 ### Limitations
 
 - **Supported platforms**: macOS (`.dylib`), Linux (`.so`), Windows (`.dll`). Wasm / iOS / Android fall back to static mode automatically.
+- **Windows guest state**: the guest DLL compiles its own copy of every header-inline variable, so framework state must live in the host behind non-inline functions ([ARCHITECTURE.md §5.G](ARCHITECTURE.md#g-one-instance-per-process-header-inline-state)). MCP tools, events, timers, audio, recording and the main-thread queue are shared. Some state is not yet, so in a Windows guest: `setFps()` / `setIndependentFps()` / `redraw()`, `setNearClip()` / `setFarClip()` / `setDefaultScreenFov()`, `setTouchAsMouse()`, `setDataPathRoot()` and custom bitmap-font glyphs do not reach the host; `WindowSettings::pixelPerfect` is not seen by guest code; tcxImGui panels do not block node-tree hover; and guest drawing during a secondary window's tick goes to the main window. These are the "known split" entries in `tools/header_state_allowlist.txt`.
 - **Comment style**: Use `//` to disable. `/* */` block comments are not detected by the cmake scanner.
 - **Build tool**: `trusscli build` handles hot reload state changes in one step. Raw `cmake --build` may require building twice when toggling `TC_HOT_RELOAD` on/off.
 - **Build errors**: If the code doesn't compile, the previous version keeps running. Fix the error and save again.
