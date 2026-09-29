@@ -5,13 +5,17 @@
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 //
 // Guards the invariants:
-//   - Destroying a Thread whose worker has entered threadedFunction() never
-//     calls std::terminate: not when its worker has already returned, not when
-//     only stopThread() was called, not after a restart, not when a subclass
-//     that does not wait is destroyed from its own threadedFunction().
+//   - Destroying a Thread never calls std::terminate: not when its worker has
+//     already returned, not when only stopThread() was called, not after a
+//     restart, not when a subclass that does not wait is destroyed from its
+//     own threadedFunction().
 //     ~Thread() used to join only while isThreadRunning() was true, so those
 //     cases left a joinable std::thread behind (SIGABRT), and the last one
 //     joined itself (resource_deadlock_would_occur, then std::terminate).
+//   - A subclass that does not wait, destroyed right after startThread()
+//     (with or without stopThread(), the issue's repro (b)), is joined: its
+//     worker skips threadedFunction() instead of calling the pure virtual
+//     ("pure virtual method called").
 //   - After that self-destruction, the worker writes nothing to the freed
 //     object.
 //   - A subclass that waits in its own destructor (the documented contract)
@@ -20,10 +24,10 @@
 //     still running (the subclass did not wait), also after only stopThread(),
 //     and none otherwise.
 //
-// Not covered, because both still terminate (see "Destruction" in
-// tcThread.h): a subclass that does not wait and is destroyed before its
-// worker entered threadedFunction() (e.g. right after startThread()), and a
-// subclass that waits and is destroyed from its own threadedFunction().
+// Not covered, because it still terminates (see "Destruction" in
+// tcThread.h): a subclass that waits and is destroyed from its own
+// threadedFunction(). Nor is a destruction at the very moment the worker calls
+// threadedFunction(): that window is too narrow to hit on purpose.
 //
 // The pre-fix build aborts on the first case, so each case prints its own line
 // as soon as it is done. A watchdog turns a hang (a join that never returns)
@@ -190,15 +194,38 @@ int main() {
         {
             Loop t;
             t.startThread();
-            // Only once the worker is inside threadedFunction(): before that, a
-            // non-waiting subclass can still reach the pure virtual (see
-            // "Destruction" in tcThread.h).
+            // Wait until the worker is inside threadedFunction(), so that the
+            // destructor joins a running loop. Case 2b destroys it before that.
             check("stopThread only: worker entered the loop",
                   waitUntil([] { return g_loopEntered.load(); }));
             t.stopThread();
         }
         check("stopThread only: destroyed without terminate", true);
         check("stopThread only: destructor joined the worker", g_loopExited.load());
+    }
+
+    // --- 2b. Destroyed right after startThread() (#257 repro (b)) ---
+    // The subclass part is gone by the time ~Thread() runs, and the worker has
+    // usually not called threadedFunction() yet: it must skip the call instead
+    // of reaching the pure virtual. Without the skip, each of these aborts.
+    // Once each only: a destruction at the very moment the worker makes the
+    // call still aborts (see "Destruction" in tcThread.h), and repeating these
+    // would only turn that rare race into a CI flake.
+    {
+        g_threadWarnings.store(0);
+        {
+            Loop t;
+            t.startThread();
+            t.stopThread();
+        }
+        check("destroyed right after start + stopThread: no terminate", true);
+        {
+            Loop t;
+            t.startThread();
+        }
+        check("destroyed right after start: no terminate", true);
+        check("destroyed right after start: at most one warning each",
+              g_threadWarnings.load() <= 2);
     }
 
     // --- 3. Restarted after the first run finished, then destroyed ---

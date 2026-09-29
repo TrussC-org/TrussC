@@ -37,14 +37,17 @@ namespace trussc {
 //   The base destructor also stops and joins, but it runs after the subclass
 //   destructor, so the subclass members are already destroyed while
 //   threadedFunction() may still be using them. It logs a warning when it
-//   finds threadedFunction() still running. Calling only stopThread() (the
-//   ofThread exit() habit) does not wait either.
+//   finds the thread still running. Calling only stopThread() (the ofThread
+//   exit() habit) does not wait either.
 //
-//   The base join prevents std::terminate only once the worker has entered
-//   threadedFunction(). A subclass that does not wait and is destroyed
-//   before that, e.g. right after startThread() (with or without
-//   stopThread()), still terminates: the worker then calls the pure virtual
-//   threadedFunction() ("pure virtual method called").
+//   A subclass that does not wait may be destroyed before its worker has
+//   called threadedFunction(), e.g. right after startThread() (with or
+//   without stopThread()). The subclass part is then already gone, so the
+//   worker skips threadedFunction() and the base destructor joins it. Only a
+//   destruction at the very moment the worker makes that call can still
+//   reach the pure virtual threadedFunction() ("pure virtual method called").
+//   Waiting in the subclass destructor rules that out, and threadedFunction()
+//   then always runs.
 //
 //   A subclass that waits must not be destroyed from its own
 //   threadedFunction() (delete this, or dropping the last shared_ptr on the
@@ -58,8 +61,8 @@ namespace trussc {
 // ---------------------------------------------------------------------------
 
 namespace internal {
-// Logs the warning for a Thread destroyed while threadedFunction() is still
-// running. Defined in tcGlobal.cpp: this header is included before tcLog.h
+// Logs the warning for a Thread destroyed while its thread is still running.
+// Defined in tcGlobal.cpp: this header is included before tcLog.h
 // (tcEvent.h -> tcMainThread.h -> tcThread.h), so it cannot log by itself.
 void logThreadNotWaited();
 } // namespace internal
@@ -72,11 +75,17 @@ public:
     // sent stopThread(), or has already returned. This is a safety net only:
     // see "Destruction" above.
     virtual ~Thread() {
+        // Before anything else: the subclass part is already destroyed, so a
+        // worker that has not called threadedFunction() yet must skip it (see
+        // startThread()). Only a worker that has already passed that check
+        // but not made the call yet can still reach the pure virtual.
+        destroying_ = true;
         const bool joinable = thread_.joinable();
         const bool fromOwnThread =
             joinable && thread_.get_id() == std::this_thread::get_id();
-        // threadedFunction() has not returned, yet the subclass destructor has
-        // already run: the subclass did not wait.
+        // The worker has not finished (threadedFunction() has not returned, or
+        // has not been called yet), yet the subclass destructor has already
+        // run: the subclass did not wait.
         const bool notWaited = joinable && !fromOwnThread && workerActive_;
 
         stopThread();
@@ -150,7 +159,9 @@ public:
             // threadedFunction() destroys it (the destructor sets it).
             bool destroyed = false;
             selfDestroyed_ = &destroyed;
-            threadedFunction();
+            // Once ~Thread() has started, the call would reach the pure
+            // virtual: skip it, and let the destructor join this worker.
+            if (!destroying_) threadedFunction();
             if (destroyed) return;   // this object is gone: touch nothing
             // Clear workerActive_ first: once isThreadRunning() reads false
             // for a worker that returned, the destructor sees it as finished.
@@ -233,14 +244,18 @@ protected:
 private:
     std::thread thread_;
     std::atomic<bool> threadRunning_;
-    // True from startThread() until threadedFunction() returns. Unlike
-    // threadRunning_, stopThread() does not clear it.
+    // True from startThread() until threadedFunction() returns (or is
+    // skipped, see destroying_). Unlike threadRunning_, stopThread() does not
+    // clear it.
     std::atomic<bool> workerActive_{false};
     // Set by the worker to a flag on its own stack. Only the destructor, when
     // it runs on that same worker, writes through it.
     bool* selfDestroyed_ = nullptr;
     // Held by startThread() while it assigns thread_ (see there).
     std::mutex startMutex_;
+    // Set first thing in ~Thread(). A worker that has not called
+    // threadedFunction() by then skips it.
+    std::atomic<bool> destroying_{false};
 };
 
 // ---------------------------------------------------------------------------

@@ -601,7 +601,7 @@ void logThreadNotWaited() {
     // A global or static Thread still running at exit can be destroyed after
     // the Logger: skip the warning rather than log through a destroyed Logger.
     if (loggerDestroyed.load()) return;
-    logWarning("Thread") << "destroyed while threadedFunction() was still running. "
+    logWarning("Thread") << "destroyed while its thread was still running. "
                             "Call waitForThread() in the subclass destructor: the base "
                             "Thread destructor joins only after the subclass members "
                             "are destroyed";
