@@ -104,8 +104,10 @@ namespace detail {
     //   Uses proxy env variable https_proxy == 'http://user:secret@host:3128'
     //   Unsupported proxy syntax in 'http://user:secret@host': <reason>
     // Picking a password out of that is fragile (a raw '@' or quote in it, and
-    // curl cuts info lines at 2047 chars and error lines at 255), so when the
-    // value has a '@' or the line was cut, the whole value is replaced. The
+    // curl cuts info lines at about 2 KB and error lines at 255 chars), so when
+    // the value has a '@' or the line was cut, the whole value is replaced. A
+    // "Uses proxy env variable" line always ends with the closing quote, so one
+    // that doesn't was cut (whatever the cap of the curl version). The
     // proxy host still shows on curl's "Connected to" line. no_proxy (a host
     // list) is left alone. eol excludes the trailing CR/LF.
     inline bool isProxyEchoLine(std::string_view line) {
@@ -119,9 +121,10 @@ namespace detail {
     inline std::string redactProxyEchoLine(std::string_view line, size_t eol) {
         size_t open = line.find('\'');
         if (open == std::string_view::npos || open >= eol) return std::string(line);
-        size_t cap = (line.rfind("Unsupported proxy ", 0) == 0) ? 255 : 2047;
+        bool usesLine = line.rfind("Unsupported proxy ", 0) != 0;
         size_t close = line.rfind('\'', eol - 1);
-        bool cut = (close == open) || eol >= cap;
+        bool cut = (close == open) ||
+                   (usesLine ? line[eol - 1] != '\'' : eol >= 255);
         size_t valueEnd = cut ? eol : close;
         std::string_view value = line.substr(open + 1, valueEnd - open - 1);
         if (!cut && value.find('@') == std::string_view::npos) {
@@ -316,15 +319,23 @@ private:
         }
         std::string_view chunk(data, size);
         auto* state = static_cast<VerboseState*>(userp);
-        if (type == CURLINFO_TEXT && state &&
-            (chunk.rfind("Connection died, retrying", 0) == 0 ||
-             chunk.rfind("Issue another request to this URL", 0) == 0)) {
-            flushPendingHeaderOut(*state);  // the request that tail belonged to is over
+        if (type == CURLINFO_TEXT && state) {
+            // The request that a pending tail belonged to is over. After
+            // "Connection died" curl may still flush that request's remaining
+            // bytes, so the rest of the cut line stays hidden; by "Issue
+            // another request" they are discarded.
+            if (chunk.rfind("Connection died, retrying", 0) == 0) {
+                flushPendingHeaderOut(*state, true);
+            } else if (chunk.rfind("Issue another request to this URL", 0) == 0) {
+                flushPendingHeaderOut(*state, false);
+            }
         }
         if (type == CURLINFO_TEXT && detail::isProxyEchoLine(chunk)) {
             // One echo per chunk: a value containing a newline stays masked.
+            // Only curl's own trailing '\n' is dropped; a CR/LF inside the
+            // value must not move the end-of-line checks.
             size_t eol = chunk.size();
-            while (eol > 0 && (chunk[eol - 1] == '\n' || chunk[eol - 1] == '\r')) --eol;
+            if (eol > 0 && chunk[eol - 1] == '\n') --eol;
             printVerbose(prefix, detail::redactProxyEchoLine(chunk, eol));
             return 0;
         }
@@ -358,12 +369,12 @@ private:
     // A request header block that ended mid-line (curl caps very large header
     // output, or the request was restarted): print what there is, redacted,
     // say it was cut, and hide the rest of that line if it shows up later.
-    static void flushPendingHeaderOut(VerboseState& state) {
+    static void flushPendingHeaderOut(VerboseState& state, bool maskRest = true) {
         if (state.pendingHeaderOut.empty()) return;
         printVerbose("> ", state.pendingHeaderOut);
         std::fputs("* (request header output ended mid-line)\n", stderr);
         state.pendingHeaderOut.clear();
-        state.maskNextLine = true;
+        state.maskNextLine = maskRest;
     }
 
     // Prints a block of debug output, redacted, with the prefix on each line.
