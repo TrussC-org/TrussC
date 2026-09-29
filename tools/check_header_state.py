@@ -51,7 +51,7 @@ immutable finding.
 
 Usage:
   python3 tools/check_header_state.py              # self-test, then check; exit 1 on a failure
-  python3 tools/check_header_state.py --self-test  # the self-test only
+  python3 tools/check_header_state.py --self-test  # the self-tests only (scanner, failure message)
   python3 tools/check_header_state.py --list       # print every finding
 """
 
@@ -65,6 +65,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCAN_ROOT = os.path.join(REPO, "core", "include")
 ALLOWLIST = os.path.join(REPO, "tools", "header_state_allowlist.txt")
 SELFTEST = os.path.join(REPO, "tools", "header_state_selftest.h")
+GLOBAL_CPP = os.path.join(REPO, "core", "include", "tc", "app", "tcGlobal.cpp")
 
 # Allowlist categories (see the allowlist's header). Anything else is rejected,
 # so state that a Windows guest would really split cannot be parked there
@@ -696,32 +697,162 @@ def scan():
 # Allowlist
 # ---------------------------------------------------------------------------
 
-def load_allowlist(path):
-    """{key: reason}. Format, one entry per line:
+def parse_allowlist(lines, source):
+    """{key: reason} from allowlist lines. Format, one entry per line:
          <path> <scope>::<name>   # <category>: <reason>
     `#` lines and blank lines are ignored. Every entry needs a reason, under
     one of CATEGORIES."""
     entries, errors = {}, []
-    with open(path, encoding="utf-8") as f:
-        for lineno, raw in enumerate(f, 1):
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            where = f"{os.path.relpath(path, REPO)}:{lineno}"
-            key, sep, reason = line.partition("#")
-            key = " ".join(key.split())
-            if not sep or not reason.strip():
-                errors.append(f"{where}: entry has no reason: {key}")
-                continue
-            category, colon, detail = reason.partition(":")
-            if not colon or category.strip() not in CATEGORIES or not detail.strip():
-                errors.append(f"{where}: the reason must be '<category>: <why>', with a category "
-                              f"from {', '.join(CATEGORIES)}: {key}")
-                continue
-            if key in entries:
-                errors.append(f"{where}: duplicate entry: {key}")
-            entries[key] = reason.strip()
+    for lineno, raw in enumerate(lines, 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        where = f"{source}:{lineno}"
+        key, sep, reason = line.partition("#")
+        key = " ".join(key.split())
+        if not sep or not reason.strip():
+            errors.append(f"{where}: entry has no reason: {key}")
+            continue
+        category, colon, detail = reason.partition(":")
+        if category.strip() == "<category>" or detail.strip() == "<reason>":
+            errors.append(f"{where}: fill in the category and the reason (the '{PLACEHOLDER}' "
+                          f"placeholder is still there): {key}")
+            continue
+        if not colon or category.strip() not in CATEGORIES or not detail.strip():
+            errors.append(f"{where}: the reason must be '<category>: <why>', with a category "
+                          f"from {', '.join(CATEGORIES)}: {key}")
+            continue
+        if key in entries:
+            errors.append(f"{where}: duplicate entry: {key}")
+        entries[key] = reason.strip()
     return entries, errors
+
+
+def load_allowlist(path):
+    with open(path, encoding="utf-8") as f:
+        return parse_allowlist(f.read().split("\n"), os.path.relpath(path, REPO))
+
+
+# ---------------------------------------------------------------------------
+# The failure message
+# ---------------------------------------------------------------------------
+# Written for someone who has never used hot reload: what goes wrong first, in
+# one plain sentence, then the fix that is always right, and only then the
+# allowlist, as the exception. message_self_test() pins that order.
+
+WHAT_GOES_WRONG = ("A static or inline variable in a header gets a separate copy inside a "
+                   "Windows hot-reload app, so the app and TrussC would see different values.")
+
+# The accessor example: a real one, internal::touchAsMouse() in tcGlobal.cpp
+# (message_self_test() checks it is still there).
+EXAMPLE_NAME = "touchAsMouse"
+EXAMPLE_CPP = "bool& touchAsMouse() {"
+EXAMPLE = [
+    "    header, before:  inline bool touchAsMouse = true;",
+    "    header, after:   bool& touchAsMouse();",
+    "    .cpp, after:     bool& touchAsMouse() { static bool enabled = true; return enabled; }",
+]
+
+# When each allowlist category applies, one plain line each.
+CATEGORY_HELP = {
+    "harmless": "a separate copy breaks nothing: a warn-once flag, a small cache (not of GPU objects)",
+    "immutable": "constant data that never changes, so every copy is the same",
+    "host-only": "only TrussC's own main loop and .cpp files use it, never app or addon code",
+    "no-hot-reload": "only used where hot reload never runs (Android, headless apps)",
+}
+PLACEHOLDER = "<category>: <reason>"
+
+
+def finding_line(f):
+    tag = "immutable" if f.immutable else "mutable"
+    return f"{f.path}:{f.line}: new {f.kind} ({tag}): {f.key.split(' ', 1)[1]}"
+
+
+def allowlist_line(f):
+    """The allowlist entry for finding f, ready to paste; the placeholder
+    must be filled in (the loader rejects it as is)."""
+    return f"{f.key}   # {PLACEHOLDER}"
+
+
+def failure_message(new, problems):
+    """The lines a failing run prints: each new finding, what goes wrong and
+    how to fix it, then the other allowlist problems (stale or malformed
+    entries), which explain themselves."""
+    out = [finding_line(f) for f in new]
+    if new:
+        width = max(len(c) for c in CATEGORIES)
+        out += [
+            "",
+            WHAT_GOES_WRONG,
+            "",
+            "When unsure, move it to a .cpp and reach it through a function. That is",
+            f"always correct. For example, internal::{EXAMPLE_NAME}() in tcGlobal.cpp:",
+            "",
+            *EXAMPLE,
+            "",
+            f"Callers then write {EXAMPLE_NAME}() where they wrote {EXAMPLE_NAME}. For a",
+            "static inside a function, move the whole function into the .cpp and keep",
+            "only its declaration in the header.",
+            "",
+            "Only if you are sure a separate copy is harmless, allowlist it instead:",
+            f"add {'this line' if len(new) == 1 else 'these lines'} to tools/header_state_allowlist.txt, with",
+            f"'{PLACEHOLDER}' replaced by one of the categories below and why:",
+            "",
+            *[allowlist_line(f) for f in new],
+            "",
+            *[f"  {c.ljust(width)}  {CATEGORY_HELP[c]}" for c in CATEGORIES],
+            "",
+            "Picking a category without being sure is the wrong move: the bug it",
+            "would hide shows up only at run time, and only on Windows. Move the",
+            "variable to a .cpp instead.",
+        ]
+    if problems:
+        if new:
+            out.append("")
+        out += problems
+    out += ["", "More: docs/ARCHITECTURE.md, \"One instance per process\"."]
+    return out
+
+
+def message_self_test():
+    """Check failure_message() on a made-up finding: the plain sentence comes
+    first, the .cpp fix before the allowlist route, the pasted line parses
+    (once filled in) to the finding's key, and every category is explained.
+    Returns a list of problems."""
+    errors = []
+    f = Finding("core/include/tcExample.h", 12, "trussc::internal", "exampleState",
+                "inline variable", False)
+    lines = failure_message([f], [])
+    if lines[:3] != [finding_line(f), "", WHAT_GOES_WRONG]:
+        errors.append("failure message: the first line after the findings must be WHAT_GOES_WRONG")
+    paste = [i for i, ln in enumerate(lines) if ln == allowlist_line(f)]
+    fix = [i for i, ln in enumerate(lines) if ln.startswith("When unsure, move it to a .cpp")]
+    if len(paste) != 1 or not fix or fix[0] > paste[0]:
+        errors.append("failure message: needs the .cpp fix first, then one allowlist line per finding")
+    else:
+        for c in CATEGORIES:
+            filled = lines[paste[0]].replace(PLACEHOLDER, f"{c}: why it is fine")
+            entries, errs = parse_allowlist([filled], "<message>")
+            if errs or list(entries) != [f.key]:
+                errors.append(f"failure message: the allowlist line, filled in as {c}, does not "
+                              f"parse to the finding's key: {filled}")
+        _entries, errs = parse_allowlist([lines[paste[0]]], "<message>")
+        if not errs:
+            errors.append("failure message: the allowlist line is accepted with the placeholder unfilled")
+    if set(CATEGORY_HELP) != set(CATEGORIES):
+        errors.append("failure message: CATEGORY_HELP must explain every category in CATEGORIES")
+    for c in CATEGORIES:
+        if not any(ln.split()[:1] == [c] for ln in lines):
+            errors.append(f"failure message: category '{c}' is not listed")
+    if not any("wrong move" in ln for ln in lines):
+        errors.append("failure message: must say that picking a category without being sure is wrong")
+    if "docs/ARCHITECTURE.md" not in lines[-1]:
+        errors.append("failure message: must end with the pointer to docs/ARCHITECTURE.md")
+    with open(GLOBAL_CPP, encoding="utf-8") as g:
+        if EXAMPLE_CPP not in g.read():
+            errors.append(f"failure message: its example, {EXAMPLE_CPP} in tcGlobal.cpp, is gone: "
+                          f"point EXAMPLE at another accessor there")
+    return errors
 
 
 def self_test():
@@ -746,7 +877,8 @@ def main():
     ap = argparse.ArgumentParser(description="Flag mutable header-inline state in core/include.")
     ap.add_argument("--list", action="store_true", help="print every finding and exit 0")
     ap.add_argument("--self-test", action="store_true",
-                    help="only check the scanner against tools/header_state_selftest.h")
+                    help="only check the scanner against tools/header_state_selftest.h, "
+                         "and the failure message")
     args = ap.parse_args()
 
     # The scanner first: a blind spot would make the check below pass on
@@ -758,6 +890,11 @@ def main():
         print()
         print("check_header_state.py no longer reads tools/header_state_selftest.h as")
         print("expected: fix the scanner (or the fixture's expect: markers) first.")
+        return 1
+    problems = message_self_test()
+    if problems:
+        for p in problems:
+            print(p)
         return 1
     if args.self_test:
         print("header state check: self-test OK")
@@ -794,23 +931,12 @@ def main():
         else:
             new.append(f)
 
-    for f in new:
-        tag = "immutable" if f.immutable else "mutable"
-        errors.append(f"{f.path}:{f.line}: {f.kind} ({tag}) not in the allowlist: {f.key}")
     for key in sorted(set(allow) - used):
         errors.append(f"allowlist entry matches nothing (moved or removed? drop it): {key}")
 
-    if errors:
-        for e in errors:
-            print(e)
-        print()
-        print("Header-inline state is one instance PER MODULE on Windows: a hot reload")
-        print("guest DLL gets its own copy, invisible to the host. State that must be one")
-        print("per process (singletons, registries, flags, caches of GPU objects nothing")
-        print("frees) belongs non-inline in a .cpp (see tcGlobal.cpp). If a per-module")
-        print("copy is harmless (a warn-once flag, a cache of derived data, immutable")
-        print("data), add the entry to tools/header_state_allowlist.txt with the reason.")
-        print("See docs/ARCHITECTURE.md, 'One instance per process'.")
+    if new or errors:
+        for line in failure_message(new, errors):
+            print(line)
         return 1
     print(f"header state check: OK ({len(findings)} finding(s), all allowlisted)")
     return 0
