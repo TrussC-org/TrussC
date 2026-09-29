@@ -1278,8 +1278,23 @@ static void micDataCallback(ma_device* pDevice, void* pOutput, const void* pInpu
     }
 }
 
+// Stop and free the capture device; logs nothing.
+static void releaseCaptureDevice(void*& handle) {
+    if (!handle) return;
+    ma_device* device = static_cast<ma_device*>(handle);
+    ma_device_stop(device);
+    ma_device_uninit(device);
+    delete device;
+    handle = nullptr;
+}
+
 MicInput::~MicInput() {
-    stop();
+    // Not stop(): it logs, and getMicInput()'s function-local instance is
+    // destroyed during static destruction when the mic is still running at
+    // exit. getLogger()'s Logger is a function-local static too; when the
+    // mic's first start() was the first thing to log, the Logger was
+    // constructed after this instance and is already destroyed here.
+    releaseCaptureDevice(device_);
 }
 
 bool MicInput::start(int sampleRate) {
@@ -1332,13 +1347,7 @@ bool MicInput::start(int sampleRate) {
 void MicInput::stop() {
     if (!running_) return;
 
-    if (device_) {
-        ma_device* device = static_cast<ma_device*>(device_);
-        ma_device_stop(device);
-        ma_device_uninit(device);
-        delete device;
-        device_ = nullptr;
-    }
+    releaseCaptureDevice(device_);
 
     running_ = false;
     deviceName_.clear();
