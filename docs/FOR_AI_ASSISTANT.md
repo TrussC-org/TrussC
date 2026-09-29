@@ -1906,14 +1906,14 @@ int getFramebufferHeight()  // Get framebuffer height in pixels (window height *
 int getFramebufferWidth()  // Get framebuffer width in pixels (window width * DPI scale)
 bool getKeepScreenOn() [macos,windows,android,ios]  // Check whether keep-screen-on is currently enabled
 IVec2 getWindowPosition() [macos,windows]  // Get window position in screen coordinates (top-left origin). macOS/Windows only; other platforms return (-1, -1)
-bool grabScreen(Pixels & outPixels)  // Capture current screen to Pixels
+bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Capture current screen to Pixels
 bool isFullscreen()  // Check if window is fullscreen
 bool isRecording()  // Check whether a recording is in progress
 int recordingFrameCount()  // Number of frames captured so far in the current recording
 fs::path recordingPath()  // Output file path of the current recording
 void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
 int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Template on the app type; returns the process exit code
-bool saveScreenshot(const std::filesystem::path & path)  // Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
+bool saveScreenshot(const std::filesystem::path & path) [macos,windows,linux,ios,android]  // Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
 void setClipboardString(const std::string & text)  // Copy text to clipboard
 void setFullscreen(bool full)  // Set fullscreen mode
 void setIndependentFps(float updateFps, float drawFps)  // Set independent update and draw frame rates
