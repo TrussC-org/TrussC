@@ -50,10 +50,11 @@
 // recorder, the async scheduler (and its owner numbering), the beep manager,
 // the console state, the PBR / point pipelines, the FBO, IBL-bake and font
 // caches, and the node / texture / FBO debug counters guest code reaches must
-// be the host's instances. The GPU caches are
-// the costly ones: nothing frees what they hold, so a guest with its own copy
-// built a new set of sokol_gl contexts, shaders and atlases in the host's pools
-// every reload, and FBO drawing stopped after a few reloads. Guest code's
+// be the host's instances, and the ids the guest's callAfter() hands out must
+// continue the host's sequence. The GPU caches are the costly ones: nothing
+// frees what they hold, so a guest with its own copy built a new set of
+// sokol_gl contexts, shaders and atlases in the host's pools every reload, and
+// FBO drawing stopped after a few reloads. Guest code's
 // setBeepVolume() and mcp::alert() must reach the host (the alert over HTTP,
 // through tc_get_alerts), and work a guest worker thread queues with
 // runOnMainThread() must run when the host drains the main-thread queue.
@@ -358,7 +359,9 @@ static int runCycles(const std::string& guestPath, int port) {
         // One instance per process: the singletons and GPU caches guest code
         // reaches must be the host's (none of these lookups touches the GPU).
         const uint64_t ownerBefore = internal::AsyncScheduler::newOwner();
+        const uint64_t timerBefore = internal::nextNodeTimerId();
         const GuestInstances in = guest->sharedInstances();
+        const uint64_t timerAfter = internal::nextNodeTimerId();
         const uint64_t ownerAfter = internal::AsyncScheduler::newOwner();
         const struct { const void* guest; const void* host; const char* what; } same[] = {
             {in.audioEngine, &AudioEngine::getInstance(), "AudioEngine::getInstance()"},
@@ -382,6 +385,9 @@ static int runCycles(const std::string& guestPath, int port) {
         }
         if (!(ownerBefore < in.asyncOwner && in.asyncOwner < ownerAfter)) {
             return fail(30, "AsyncScheduler::newOwner() in the guest does not continue the host's sequence");
+        }
+        if (!(timerBefore < in.timerId && in.timerId < timerAfter)) {
+            return fail(34, "a timer id from the guest's callAfter() does not continue the host's sequence (one node could hold two timers with the same id)");
         }
 
         // Work a guest worker thread hands to runOnMainThread() runs when the

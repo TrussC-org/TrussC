@@ -87,9 +87,6 @@ core/include/tcBitmapFont.h trussc::bitmapfont::asciiGlyph::ASCII          # imm
 # --- tcMath.h
 core/include/tcMath.h trussc::internal::getRandomEngine::engine  # harmless: thread_local RNG; guest code seeds and draws from the same copy
 
-# --- tcNode.h
-core/include/tcNode.h trussc::Node::nextTimerId_               # harmless: timer ids are only looked up in their own node's list
-
 # --- tc/3d
 core/include/tc/3d/tcEnvironment.h trussc::Environment::isIosWeb::cached                 # harmless: cached platform probe
 core/include/tc/3d/tcEnvironment.h trussc::Environment::bakeFromEquirectTexture::warned  # harmless: warn-once flag

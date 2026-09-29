@@ -62,6 +62,7 @@ struct GuestInstances {
     const void* textureCount = nullptr;
     const void* fboCount = nullptr;
     uint64_t asyncOwner = 0;   // a fresh AsyncScheduler owner token
+    uint64_t timerId = 0;      // an id the guest's callAfter() handed out
 };
 
 class tcApp : public App {

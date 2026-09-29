@@ -750,12 +750,13 @@ FontSamplers& fontSamplers() {
 // Settings and registries that app code and host code share (#249): the main
 // loop's rate and redraw requests, the projection defaults, the sokol_gl
 // budget, touch-as-mouse, the data path root, the bitmap font atlas and its
-// glyph registry, the overlay queries, the node id source, the debug counters,
-// the current window context and the Apps attached to secondary windows. Each
-// used to be an inline variable in its header, so a Windows hot reload guest's
-// setFps(), redraw(), setDataPathRoot(), registerGlyph(), ... wrote a copy the
-// host never read, the guest never saw what the host set, and an App whose
-// window the host's close() released stayed attached in the guest's copy.
+// glyph registry, the overlay queries, the node and timer id sources, the
+// debug counters, the current window context and the Apps attached to
+// secondary windows. Each used to be an inline variable in its header, so a
+// Windows hot reload guest's setFps(), redraw(), setDataPathRoot(),
+// registerGlyph(), ... wrote a copy the host never read, the guest never saw
+// what the host set, and an App whose window the host's close() released
+// stayed attached in the guest's copy.
 //
 // Plain data (trivially destructible, constant-initialized) is a function-local
 // static. Objects with a destructor are leaked on purpose: code running in
@@ -831,6 +832,15 @@ std::function<bool()>& overlayFocusedQuery() {
 
 uint64_t nextNodeInstanceId() {
     static std::atomic<uint64_t> next{0};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+// Node::callAfter() / callEvery() ids. As an inline static member, host code
+// and a Windows hot reload guest each counted from 1 (and every reloaded guest
+// again), so one node could hold two timers with the same id, and
+// cancelTimer(id), which removes every timer with that id, cancelled both.
+uint64_t nextNodeTimerId() {
+    static std::atomic<uint64_t> next{1};
     return next.fetch_add(1, std::memory_order_relaxed);
 }
 

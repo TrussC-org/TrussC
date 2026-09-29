@@ -82,6 +82,12 @@ namespace internal {
     // unique per process, not per module: a Windows hot reload guest DLL would
     // otherwise count from 0 again in every generation.
     uint64_t nextNodeInstanceId();
+
+    // Source of the ids callAfter() / callEvery() return, starting at 1. Also
+    // one per process (tcGlobal.cpp): with a counter per module, host and
+    // guest code, or two guest generations, could give one node two timers
+    // with the same id, and cancelTimer(id) removes every timer with that id.
+    uint64_t nextNodeTimerId();
 }
 
 // True when an overlay currently has the pointer over it (e.g. cursor is over a
@@ -1313,7 +1319,7 @@ public:
 
     // Execute callback once after specified delay in seconds
     uint64_t callAfter(double delay, std::function<void()> callback) {
-        uint64_t id = nextTimerId_++;
+        uint64_t id = internal::nextNodeTimerId();
         double triggerTime = getElapsedTime() + delay;
         timers_.push_back({id, triggerTime, 0.0, callback, false});
         return id;
@@ -1321,7 +1327,7 @@ public:
 
     // Execute callback repeatedly at specified interval
     uint64_t callEvery(double interval, std::function<void()> callback) {
-        uint64_t id = nextTimerId_++;
+        uint64_t id = internal::nextNodeTimerId();
         double triggerTime = getElapsedTime() + interval;
         timers_.push_back({id, triggerTime, interval, callback, true});
         return id;
@@ -1459,10 +1465,7 @@ protected:
         bool repeating;
     };
 
-    std::vector<Timer> timers_;
-    // Per module on a Windows hot reload guest, which is harmless: a timer id is
-    // only looked up in its own node's timers_ (tools/header_state_allowlist.txt).
-    inline static uint64_t nextTimerId_ = 1;
+    std::vector<Timer> timers_;   // ids from internal::nextNodeTimerId()
 
     // Process timers (called within updateRecursive)
     //

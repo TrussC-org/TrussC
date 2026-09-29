@@ -82,6 +82,11 @@ GuestInstances tcApp::sharedInstances() {
     g.textureCount = &tc::internal::textureCount();
     g.fboCount = &tc::internal::fboCount();
     g.asyncOwner = tc::internal::AsyncScheduler::newOwner();
+    // callAfter() is inline, so this is the guest's copy of it: its id must
+    // come from the host's sequence, or a node could hold a host timer and a
+    // guest timer with the same id (cancelTimer(id) removes both).
+    g.timerId = callAfter(3600.0, [] {});
+    cancelTimer(g.timerId);
     return g;
 }
 
