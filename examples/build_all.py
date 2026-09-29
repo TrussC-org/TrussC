@@ -138,6 +138,13 @@ def find_core_tests(root_dir):
                 test_paths.append(tdir)
     return test_paths
 
+def find_core_web_tests(root_dir):
+    # The trusscli project core tests that ALSO run as a WebAssembly build under
+    # node: those carrying a `web-test` marker file. Web-only behaviour
+    # (#ifdef __EMSCRIPTEN__) is otherwise only ever compiled in CI, never run.
+    return [t for t in find_core_tests(root_dir)
+            if os.path.isfile(os.path.join(t, "web-test"))]
+
 def find_core_unit_tests(root_dir):
     # Standalone headless unit tests for the core: core/tests/*/ dirs that ship
     # their OWN committed CMakeLists.txt (built with plain cmake, NOT trusscli).
@@ -169,12 +176,14 @@ def find_test_binary(test_dir, platform_info):
                 return p
     return None
 
-def run_test_binary(binary, cwd):
+def run_test_binary(binary, cwd, launcher=None):
     # Run a test executable, CAPTURE its output and echo it through our own
     # (flushed) stdout. Inherited-handle child output gets lost or reordered
     # on the Windows CI runners, which made failing tests undiagnosable.
+    # launcher: an interpreter to run it with (node for a web test's .js).
+    cmd = ([launcher] if launcher else []) + [binary]
     try:
-        r = subprocess.run([binary], cwd=cwd, stdout=subprocess.PIPE,
+        r = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
                            stderr=subprocess.STDOUT, timeout=600)
     except subprocess.TimeoutExpired as e:
         if e.stdout:
@@ -269,6 +278,52 @@ def build_and_run_unit_test(test_dir, pg_bin, platform_info, args):
         return False, "run"
     return True, None
 
+def find_node():
+    # emsdk_env exports EMSDK_NODE (the node emsdk ships and emcc targets);
+    # fall back to whatever node is on PATH.
+    node = os.environ.get("EMSDK_NODE")
+    if node and os.path.isfile(node):
+        return node
+    return shutil.which("node")
+
+def build_and_run_web_test(test_dir, pg_bin, platform_info, args):
+    # Build a core test for WebAssembly (trusscli --web + emcmake, the same
+    # path as a web example), then RUN its bin/<name>.js under node (non-zero
+    # exit = failure). Emscripten's default ENVIRONMENT includes node, so the
+    # regular web app build runs as a console program as long as the test
+    # never touches the canvas / GPU. The .html shell is simply unused.
+    node = find_node()
+    if not node:
+        Colors.print("  node not found (source emsdk_env or put node on PATH)", Colors.RED)
+        return False, "node-missing"
+
+    pg_cmd = [str(pg_bin), "update", "-p", test_dir, "--tc-root", ROOT_DIR, "--ide", "cmake", "--web"]
+    if not run_command(pg_cmd, cwd=ROOT_DIR, verbose=args.verbose):
+        return False, "update"
+
+    if shutil.which("emcmake"):
+        cmd_config = ["emcmake", "cmake", "-S", ".", "-B", "build-web"]
+    else:
+        cmd_config = ["cmake", "-S", ".", "-B", "build-web"]
+    if not run_command(cmd_config, cwd=test_dir, verbose=args.verbose):
+        return False, "web-configure"
+
+    import multiprocessing
+    cmd_build = ["cmake", "--build", "build-web", "-j", str(multiprocessing.cpu_count())]
+    if not run_command(cmd_build, cwd=test_dir, verbose=args.verbose):
+        return False, "web-build"
+
+    base = os.path.basename(os.path.normpath(test_dir))
+    js = os.path.join(test_dir, "bin", base + ".js")
+    if not os.path.isfile(js):
+        Colors.print(f"  Web test output not found: {os.path.relpath(js, test_dir)}", Colors.RED)
+        return False, "binary-missing"
+
+    Colors.print(f"  Running node {os.path.relpath(js, test_dir)} ...", Colors.YELLOW)
+    if not run_test_binary(js, cwd=test_dir, launcher=node):
+        return False, "web-run"
+    return True, None
+
 def run_test_suite(tests, label, pg_bin, platform_info, args, builder=build_and_run_test):
     # Build AND run a set of console test projects (addon or core). Streams each
     # test's output; returns 0 if all pass, 1 if any fails.
@@ -308,7 +363,7 @@ def main():
     parser.add_argument('--test-only', action='store_true', help="Build ONLY AllFeaturesExample for quick CI check")
     parser.add_argument('--one-per-addon', action='store_true', help="Build the first example-* of each bundled addon (per-addon dependency compile coverage)")
     parser.add_argument('--addon-tests-only', action='store_true', help="Build AND RUN every addons/*/tests/ harness (console, non-zero exit fails). No-op if none exist.")
-    parser.add_argument('--core-tests-only', action='store_true', help="Build AND RUN every core/tests/*/ harness (console, non-zero exit fails). No-op if none exist.")
+    parser.add_argument('--core-tests-only', action='store_true', help="Build AND RUN every core/tests/*/ harness (console, non-zero exit fails). No-op if none exist. With --web also, with --web-only instead: build the ones with a web-test marker for WebAssembly and run them under node.")
     parser.add_argument('--verbose', action='store_true', help="Show detailed build output")
     args = parser.parse_args()
 
@@ -330,7 +385,8 @@ def main():
     if args.addon_tests_only:
         Colors.print("Mode: Addon tests (build + run)", Colors.YELLOW)
     if args.core_tests_only:
-        Colors.print("Mode: Core tests (build + run)", Colors.YELLOW)
+        where = "web, under node" if args.web_only else ("native + web" if args.web else "native")
+        Colors.print(f"Mode: Core tests (build + run, {where})", Colors.YELLOW)
     print("")
 
     # Addon test harnesses (addons/*/tests/): build AND run each. A cheap,
@@ -347,10 +403,14 @@ def main():
     # Two flavours: trusscli project tests (src/, link libTrussC) and standalone
     # CMake unit tests (committed CMakeLists.txt, no libTrussC link — e.g. sokol
     # dummy-backend tests). Both run; the job fails if either has a failure.
+    # With --web / --web-only, the project tests carrying a `web-test` marker
+    # are also / instead built for WebAssembly and run under node.
     if args.core_tests_only:
-        tests = find_core_tests(ROOT_DIR)
-        unit_tests = find_core_unit_tests(ROOT_DIR)
-        if not tests and not unit_tests:
+        native = not args.web_only
+        tests = find_core_tests(ROOT_DIR) if native else []
+        unit_tests = find_core_unit_tests(ROOT_DIR) if native else []
+        web_tests = find_core_web_tests(ROOT_DIR) if args.web else []
+        if not tests and not unit_tests and not web_tests:
             Colors.print("No core tests found (core/tests/*/); nothing to do.", Colors.YELLOW)
             sys.exit(0)
         rc = 0
@@ -359,6 +419,9 @@ def main():
         if unit_tests:
             rc |= run_test_suite(unit_tests, "core unit", pg_bin, platform_info, args,
                                  builder=build_and_run_unit_test)
+        if web_tests:
+            rc |= run_test_suite(web_tests, "core web", pg_bin, platform_info, args,
+                                 builder=build_and_run_web_test)
         sys.exit(rc)
 
     if args.test_only:

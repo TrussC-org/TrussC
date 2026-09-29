@@ -2,12 +2,9 @@
 // core/tests/screenshotContract — behavioral regression test for #230.
 //
 // Headless, console, exit code = pass/fail. build_all.py runs it natively
-// (--core-tests-only). The web half runs only in a WebAssembly build of this
-// project, started under node (Emscripten's default environment includes
-// node): trusscli update -p <this dir> --ide cmake --web, then
-// emcmake cmake -S . -B build-web, cmake --build build-web, and
-// node bin/screenshotContract.js. No canvas or GPU is needed on either side:
-// nothing here renders.
+// (--core-tests-only) and, because this dir has a `web-test` marker, also as a
+// WebAssembly build under node (--web-only --core-tests-only). No canvas or GPU
+// is needed on either side: nothing here renders.
 //
 // Guards the return-value contract of the screenshot APIs:
 //   - Web: capture is not implemented, so grabScreen() and saveScreenshot()
@@ -22,9 +19,9 @@
 //     has no framebuffer.
 //
 // Only the web half fails without the #230 fix; the native half passes on
-// the pre-#230 code too, since #230 did not change native behaviour. CI runs
-// only the native half, so CI does not notice if the web fix is undone. Run
-// the web half by hand after touching the web screenshot path.
+// the pre-#230 code too, since #230 did not change native behaviour. The
+// per-PR CI runs only the native half; the web half runs in the daily run
+// (daily.yml, sweep-web), so undoing the web fix shows up there within a day.
 // =============================================================================
 
 #include <TrussC.h>

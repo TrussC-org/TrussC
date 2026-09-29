@@ -31,6 +31,19 @@ the API still compiles/links/instantiates but do not assert runtime behaviour.
    accounting. `build_all.py` tells the two apart by the committed `CMakeLists.txt`
    + absence of `src/`, and runs both under `--core-tests-only`.
 
+### Also on web (`web-test` marker)
+
+A trusscli project test that also has a `web-test` file in its dir is built for
+WebAssembly too and run under **node** (`build_all.py --web-only
+--core-tests-only`; in CI, the daily run's `sweep-web` job, not the per-PR
+lane). Use it when the invariant lives in
+web-only code (`#ifdef __EMSCRIPTEN__`), which the web example builds only ever
+compile. The test is the regular web app build (Emscripten's default
+environment includes node), so it must not touch the canvas / GPU: plain
+`main()` and no drawing. It still runs natively under `--core-tests-only`, so
+give the native side something real to check (or an explicit skip).
+Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
+
 ## Keep it curated (avoid rot)
 
 - Default workflow: **when you fix a bug, add the regression test that would have
@@ -48,11 +61,11 @@ the API still compiles/links/instantiates but do not assert runtime behaviour.
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
   V vertices) GPU-buffer blow-up that grew the buffer until allocation failed
   (Metal `id:52`), the root cause of disappearing deferred 2D/PBR content.
-- `screenshotContract/` — the screenshot APIs report what they actually do
-  (#230). Web: `grabScreen()` / `saveScreenshot()` return false, nothing is
-  queued or created, and each API warns once. Native: `saveScreenshot()` still
-  creates the destination folder, queues the capture and returns true. CI runs
-  only the native half, which passes with or without the #230 fix: it catches
-  the web early return leaking into native builds, not the web fix being
-  undone. The web half is the part that guards #230, and it is run by hand: a
-  WebAssembly build run under node (steps in the header of `src/main.cpp`).
+- `screenshotContract/` — *(also on web)* the screenshot APIs report what they
+  actually do (#230). Web: `grabScreen()` / `saveScreenshot()` return false,
+  nothing is queued or created, and each API warns once. Native:
+  `saveScreenshot()` still creates the destination folder, queues the capture
+  and returns true. The per-PR CI runs only the native half, which passes with
+  or without the #230 fix: it catches the web early return leaking into native
+  builds. The web half is what guards #230; the daily run (`daily.yml`,
+  `sweep-web`) runs it under node.
