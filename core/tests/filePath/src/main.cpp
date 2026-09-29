@@ -13,9 +13,16 @@
 // Windows code page that mangles both directions the same way still round-
 // trips there. Section 8 (#259) creates its names from u8 literals, which
 // never go through the code page, and checks the UTF-8 strings going into and
-// coming out of fs::path against them: the UTF-8 process code page from the
-// Windows app manifest, and the helpers / logging that convert with
-// pathToUtf8() instead of path::string().
+// coming out of fs::path against them. What it catches in CI:
+//   - Windows: a missing UTF-8 activeCodePage manifest (the GetACP() check),
+//     and a listDirectory that stops at an entry it cannot convert (a name
+//     holding an unpaired UTF-16 surrogate).
+//   - every platform: `log << path` falling back to the std::ostream
+//     inserter, which quotes the path.
+// What it does not catch anywhere: the path helpers, VideoPlayer::load or
+// AudioRecorder going back from pathToUtf8() to path::string(). With the
+// manifest, the Windows process code page is UTF-8, and on POSIX
+// path::string() already is UTF-8, so both return the same bytes there.
 // =============================================================================
 
 #include <TrussC.h>
@@ -260,6 +267,35 @@ int main() {
             for (const auto& s : got) ok = ok && fileExists(s);
             return ok;
         });
+#ifdef _WIN32
+        // listDirectory converts each entry on its own and skips one that
+        // fails. A name holding an unpaired UTF-16 surrogate (NTFS allows it)
+        // fails pathToUtf8() whatever the code page. NTFS lists names in
+        // order, so it comes between a.txt and z.txt: a listing that stops
+        // at it loses z.txt. Kept out of root, whose listing is checked above.
+        {
+            const fs::path dir = sandbox / "surrogate";
+            std::wstring bad = L"b";
+            bad += wchar_t(0xD800);
+            bad += L".txt";
+            checkNoThrow("unpaired-surrogate name created on disk", [&] {
+                fs::create_directories(dir);
+                for (const std::wstring& n : {std::wstring(L"a.txt"), bad, std::wstring(L"z.txt")}) {
+                    std::ofstream out(dir / fs::path(n), std::ios::binary);
+                    out << "x";
+                }
+                for (const auto& e : fs::directory_iterator(dir)) {
+                    if (e.path().filename().wstring() == bad) return true;
+                }
+                return false;
+            });
+            checkNoThrow("listDirectory: skips an unconvertible entry, lists the rest", [&] {
+                vector<string> got = listDirectory(dir);
+                std::sort(got.begin(), got.end());
+                return got == vector<string>{"a.txt", "z.txt"};
+            });
+        }
+#endif
 
         for (const auto& n : names) {
             const string label = string("getFileName: ") + n.label;
@@ -307,6 +343,7 @@ int main() {
         });
 
         // `log << path` writes pathToUtf8(path): UTF-8, no quotes, no throw
+        // for these names (valid Unicode)
         {
             vector<string> seen;
             EventListener sub = getLogger().onLog.listen([&](LogEventArgs& e) {
