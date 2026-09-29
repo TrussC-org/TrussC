@@ -775,9 +775,10 @@ inline void stopHttpServer() {
     {
         auto& list = detail::deferredResponses();
         for (auto& d : list) {
-            d.response->set_value([]() -> std::string {
-                return "{\"error\":\"server shutting down\"}";
-            });
+            const std::string message = "the MCP server shut down before the reply was produced";
+            std::string reply = d.errorReply ? d.errorReply(message)
+                                             : "{\"error\":\"" + message + "\"}";
+            d.response->set_value([reply]() { return reply; });
         }
         list.clear();
     }
@@ -868,8 +869,9 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
     // Deferred replies whose producers run this owner's code: answer them
     // now, with an error, instead of running them at the next drain, after
     // the App they may reach has been deleted (a reload runs between
-    // processHttpQueue() and drainDeferredResponses() in one frame; the exit
-    // path unloads the guest too). Host tools' deferrals stay pending.
+    // processHttpQueue() and drainDeferredResponses() in one frame). At exit
+    // stopHttpServer() runs before the guest is unloaded and has already
+    // answered every pending reply. Host tools' deferrals stay pending.
     auto& pending = deferredResponses();
     std::vector<DeferredResponse> keep;
     for (auto& d : pending) {
@@ -877,7 +879,7 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
             keep.push_back(std::move(d));
             continue;
         }
-        const std::string message = "the app code behind this reply was unloaded (hot reload or exit) "
+        const std::string message = "the app code behind this reply was unloaded by a hot reload "
                                     "before the reply was produced";
         std::string reply = d.errorReply ? d.errorReply(message)
                                          : "{\"error\":\"" + message + "\"}";
