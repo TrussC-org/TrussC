@@ -5743,9 +5743,9 @@ related = ["getMouseX", "getMouseY"]
 ["Node::isVisible"]
 category = "scene_graph"
 keywords = ["shown", "draw", "state"]
-description.en = "Whether the node is visible (invisible: only draw is skipped) (C++ only)"
-description.ja = "ノードが表示状態か（非表示時はdrawのみスキップされる）（C++のみ）"
-description.ko = "노드가 보이는 상태인지 (비표시 시 draw만 건너뜀) (C++ 전용)"
+description.en = "Whether the node is visible (invisible: the node and its descendants are not drawn and not hit by the mouse; update() keeps running) (C++ only)"
+description.ja = "ノードが表示状態か（非表示時はノードと子孫が描画されず、マウスの当たり判定からも外れる。update() は動き続ける）（C++のみ）"
+description.ko = "노드가 보이는 상태인지 (비표시 시 노드와 자손이 그려지지 않고 마우스 히트 판정에서도 빠짐. update()는 계속 실행됨) (C++ 전용)"
 related = ["Node::setVisible"]
 
 ["Node::localToGlobal"]
@@ -5937,9 +5937,9 @@ related = ["Node::getScaleZ", "Node::setScale"]
 ["Node::setVisible"]
 category = "scene_graph"
 keywords = ["show", "hide", "state"]
-description.en = "Set the visible state (invisible: only draw is skipped) (C++ only)"
-description.ja = "表示状態を設定（非表示時はdrawのみスキップされる）（C++のみ）"
-description.ko = "보이는 상태를 설정 (비표시 시 draw만 건너뜀) (C++ 전용)"
+description.en = "Set the visible state (invisible: the node and its descendants are not drawn and not hit by the mouse; update() keeps running) (C++ only)"
+description.ja = "表示状態を設定（非表示時はノードと子孫が描画されず、マウスの当たり判定からも外れる。update() は動き続ける）（C++のみ）"
+description.ko = "보이는 상태를 설정 (비표시 시 노드와 자손이 그려지지 않고 마우스 히트 판정에서도 빠짐. update()는 계속 실행됨) (C++ 전용)"
 related = ["Node::isVisible", "Node::setActive"]
 
 ["Node::setX"]

@@ -419,7 +419,7 @@ destroy()               Mark for deferred removal (see below!)
 moveToFront()           Z-order: redraw last → on top of siblings
 moveToBack()            Z-order: redraw first → behind siblings
 setActive(false)        Skip update AND draw
-setVisible(false)       Skip draw only
+setVisible(false)       Hide this node and its subtree (update keeps running)
 enableEvents()          Required to receive mouse events
 setPos(x, y)
 setRot(radians)
@@ -1051,7 +1051,7 @@ App itself is the scene-graph root (App inherits RectNode and is window-sized). 
 
 Three different things:
 - **`setActive(false)`**: **stops** the node entirely (disable) — neither `update()` nor `draw()` runs, no mouse events. **Children stop too** (an inactive subtree costs nothing). For pausing or scene switching. Resume with `setActive(true)`.
-- **`setVisible(false)`**: **hides the visuals only.** `draw()` is skipped but `update()` and events still run.
+- **`setVisible(false)`**: **hides** the node **and its whole subtree** — none of them draw, and the mouse can't hit them — but `update()` and timers keep running. Hiding a panel hides its buttons too; to hide only a node's own drawing, skip it inside `draw()`.
 - **`destroy()`**: actually **removes** the node. It is generally **thread-safe and callable any time**, setting a flag so removal is **deferred** to outside update/draw — safe to call mid-traversal. `isDead()` is true right after.
 So: setActive / setVisible to temporarily stop/hide, destroy when you're done with it.
 
@@ -3207,7 +3207,7 @@ bool Node::isActive() const  // Whether the node is active (inactive: update and
 bool Node::isDead() const  // Check if node is marked for destruction (C++ only)
 bool Node::isEventsEnabled() const  // Whether events are enabled (only such nodes are hit-test targets) (C++ only)
 bool Node::isMouseOver() const  // Whether the mouse is over this node (auto-updated each frame, O(1)) (C++ only)
-bool Node::isVisible() const  // Whether the node is visible (invisible: only draw is skipped) (C++ only)
+bool Node::isVisible() const  // Whether the node is visible (invisible: the node and its descendants are not drawn and not hit by the mouse; update() keeps running) (C++ only)
 Vec3 Node::localToGlobal(const Vec3 & local) const [+1]  // Convert a local coordinate to global space (C++ only)
 void Node::moveToBack()  // Move this node to the beginning of its parent's child list — drawn first, beneath siblings. No-op if no parent or already first (C++ only)
 void Node::moveToFront()  // Move this node to the end of its parent's child list — drawn last, on top of siblings. No-op if no parent or already last (C++ only)
@@ -3247,7 +3247,7 @@ void Node::setScaleX(float sx)  // Set local X scale (C++ only)
 void Node::setScaleY(float sy)  // Set local Y scale (C++ only)
 void Node::setScaleZ(float sz)  // Set local Z scale (C++ only)
 void Node::setup()  // Called once at start
-void Node::setVisible(bool visible)  // Set the visible state (invisible: only draw is skipped) (C++ only)
+void Node::setVisible(bool visible)  // Set the visible state (invisible: the node and its descendants are not drawn and not hit by the mouse; update() keeps running) (C++ only)
 void Node::setX(float x)  // Set local X position (C++ only)
 void Node::setY(float y)  // Set local Y position (C++ only)
 void Node::setZ(float z)  // Set local Z position (C++ only)
