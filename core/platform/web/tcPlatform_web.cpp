@@ -58,17 +58,11 @@ fs::path getExecutableDir() {
 // ---------------------------------------------------------------------------
 // Screenshot — not implemented on web (#230)
 // ---------------------------------------------------------------------------
-// Nothing in the browser build reads the canvas back, and #230 decided not
-// to add it: screenshots on web are taken with the browser's own tools. Adding
-// it would mean, per backend:
-//   - WGPU (default): the swapchain cannot be read back synchronously (the
-//     same limitation as Fbo::readPixelsPlatform in tcFbo_web.cpp), so it
-//     would need new JS glue, e.g. a canvas.toBlob() download.
-//   - GLES3 (TC_WEB_BACKEND=GLES3): glReadPixels right after present(), as on
-//     Linux/Android, may be enough, but it is neither wired up nor tested.
-// So every capture entry point fails honestly: it returns false and warns
-// once per API, so an app that calls grabScreen() or saveScreenshot() every
-// frame does not flood the browser console.
+// Nothing in the browser build reads the canvas back: screenshots on web are
+// taken with the browser's own tools (#230). Saving the canvas as a browser
+// download is tracked in #298. Every capture entry point fails honestly: it
+// returns false and warns once per API, so an app that calls grabScreen() or
+// saveScreenshot() every frame does not flood the browser console.
 static bool captureWindowWarned_ = false;
 static bool captureWindowToFileWarned_ = false;
 
