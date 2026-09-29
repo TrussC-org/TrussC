@@ -1,8 +1,9 @@
 # Daily CI: the HEAVY lane. Everything the per-PR fast lane (build.yml)
 # leaves out: every example (examples/ + every bundled addon example, which
 # includes AllFeaturesExample) on every desktop platform + web, and the
-# behavioral tests again on top of the full build. It catches example rot (API drift, include-order breakage,
-# generated-build-file drift) and addon / third-party build breakage.
+# behavioral tests again on top of the full build. It catches example rot
+# (API drift, include-order breakage, generated-build-file drift) and addon /
+# third-party build breakage.
 #
 # Runs once a day on main, skipped when main hasn't changed since the last
 # completed daily run. A failure opens (or comments on) a tracking issue with
