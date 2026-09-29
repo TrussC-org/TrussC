@@ -103,11 +103,18 @@ namespace internal {
     // Lives in tcSerial.cpp: <asm/termbits.h> clashes with <termios.h>.
     bool setSerialCustomBaudRate(int fd, int baudRate, int& appliedBaudRate);
 
+    // Read back the output rate an open serial fd runs at, as a number
+    // (Linux: termios2). Returns false with errno set when it cannot, and
+    // ENOTSUP where there is no such read-back (macOS). Also in tcSerial.cpp.
+    bool readSerialBaudRate(int fd, int& baudRate);
+
     // Whether the rate a driver reports back counts as the requested one.
-    // A Linux driver that cannot generate a rate does not fail the ioctl: it
-    // writes back another rate instead, often the previous one or 9600. A
-    // driver's nearest divisor stays close, so allow the 2% the kernel itself
-    // uses when it matches a rate to a B-constant (tty_termios_encode_baud_rate).
+    // A Linux driver that cannot generate a rate does not fail tcsetattr() or
+    // the termios2 ioctl: it writes back another rate instead, often the
+    // previous one or 9600 (ftdi_sio above the chip maximum, cp210x clamping).
+    // This happens for B-constant rates too. A driver's nearest divisor stays
+    // close, so allow the 2% the kernel itself uses when it matches a rate to
+    // a B-constant (tty_termios_encode_baud_rate).
     inline bool isBaudRateClose(int requested, int applied) {
         long long diff = static_cast<long long>(applied) - requested;
         long long allowed = requested / 50;
@@ -431,7 +438,13 @@ public:
         }
 
         int appliedBaudRate = baudRate;
-        if (!speed && !internal::setSerialCustomBaudRate(fd_, baudRate, appliedBaudRate)) {
+        if (speed) {
+            // On Linux tcsetattr() succeeds even when the driver swapped in
+            // another rate, so read back what it applied. Where there is no
+            // read-back (macOS), or it fails, the requested rate stands.
+            int readBack = 0;
+            if (internal::readSerialBaudRate(fd_, readBack)) appliedBaudRate = readBack;
+        } else if (!internal::setSerialCustomBaudRate(fd_, baudRate, appliedBaudRate)) {
             int err = errno;
             logError() << "Serial: cannot set " << baudRate << " baud on " << portName
                        << " (" << std::strerror(err) << ")";

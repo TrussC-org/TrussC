@@ -7812,10 +7812,10 @@ rates without a termios B-constant (250000, 74880, 921600 on macOS, ...) are set
 with `IOSSIOSPEED` (macOS) or `termios2` (Linux); on Windows the rate goes to
 the driver unchanged. A rate the driver rejects makes `setup()` log an error
 and return false, instead of opening at another speed. A Linux driver may
-instead replace a rate set through `termios2` with another one (often 9600):
-`setup()` reads the rate back and fails when it is more than 2% off, and
-accepts a closer one (the driver's nearest divisor) with a warning that names
-it.
+instead replace any rate, with or without a B-constant, by another one (often
+9600, for example an FTDI chip asked for more than its maximum): `setup()`
+reads the rate back and fails when it is more than 2% off, and accepts a
+closer one (the driver's nearest divisor) with a warning that names it.
 
 Calling `setup()` again, for example to reconnect after
 [`isConnected()`](#Serial::isConnected) turned false, closes the previous port
@@ -7828,9 +7828,10 @@ details.ja = '''
 B 定数が無いレート（250000、74880、macOS の 921600 など）を `IOSSIOSPEED`（macOS）
 または `termios2`（Linux）で設定する。Windows ではレートをそのままドライバに渡す。
 ドライバが拒否したレートでは、別の速度で開くのではなく、エラーをログに出して
-false を返す。Linux のドライバは `termios2` で設定したレートを拒否せず、別のレート
-（多くは 9600）に置き換えることがある。`setup()` は適用されたレートを読み戻し、
-要求と 2% を超えて違えば失敗する。それより近いレート（ドライバが出せる最も近い値）は、
+false を返す。Linux のドライバはレートを拒否せず、B 定数の有無にかかわらず
+別のレート（多くは 9600。たとえば FTDI チップに上限を超えるレートを指定したとき）に
+置き換えることがある。`setup()` は適用されたレートを読み戻し、要求と 2% を超えて
+違えば失敗する。それより近いレート（ドライバが出せる最も近い値）は、
 そのレートを示す警告を出して受け入れる。
 
 [`isConnected()`](#Serial::isConnected) が false になった後の再接続などで
@@ -7843,10 +7844,11 @@ details.ko = '''
 B 상수가 없는 속도(250000, 74880, macOS의 921600 등)를 `IOSSIOSPEED`(macOS) 또는
 `termios2`(Linux)로 설정한다. Windows에서는 속도를 그대로 드라이버에 전달한다.
 드라이버가 거부한 속도라면 다른 속도로 여는 대신 오류를 로그로 남기고 false를
-반환한다. Linux 드라이버는 `termios2`로 설정한 속도를 거부하지 않고 다른 속도
-(대개 9600)로 바꿔 적용하기도 한다. `setup()`은 적용된 속도를 다시 읽어 요청과
-2%를 넘게 다르면 실패하고, 그보다 가까운 속도(드라이버가 낼 수 있는 가장 가까운 값)는
-그 속도를 알리는 경고와 함께 받아들인다.
+반환한다. Linux 드라이버는 속도를 거부하지 않고, B 상수가 있든 없든 다른 속도
+(대개 9600. 예를 들어 FTDI 칩에 최대치를 넘는 속도를 지정했을 때)로 바꿔 적용하기도
+한다. `setup()`은 적용된 속도를 다시 읽어 요청과 2%를 넘게 다르면 실패하고,
+그보다 가까운 속도(드라이버가 낼 수 있는 가장 가까운 값)는 그 속도를 알리는 경고와
+함께 받아들인다.
 
 [`isConnected()`](#Serial::isConnected)가 false가 된 뒤 재연결하는 경우 등
 `setup()`을 다시 호출하면 이전 포트를 먼저 닫는다. 열 때 DTR이 다시 어서트되어
