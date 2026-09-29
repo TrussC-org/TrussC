@@ -99,51 +99,37 @@ namespace detail {
         return false;
     }
 
-    // curl echoes a proxy taken from the environment, credentials included, on
+    // curl echoes a proxy taken from the environment, userinfo included, on
     // info lines like
     //   Uses proxy env variable https_proxy == 'http://user:secret@host:3128'
     //   Unsupported proxy syntax in 'http://user:secret@host': <reason>
-    // Masks the password: from the first ':' after the scheme to the LAST '@'
-    // (a raw '@' in a password or an e-mail user name is common). curl cuts
-    // info lines at about 2 KB; when that removed the closing quote, the rest
-    // of the line is masked. eol excludes CR/LF.
+    // Picking a password out of that is fragile (a raw '@' or quote in it, and
+    // curl cuts info lines at 2047 chars and error lines at 255), so when the
+    // value has a '@' or the line was cut, the whole value is replaced. The
+    // proxy host still shows on curl's "Connected to" line. no_proxy (a host
+    // list) is left alone. eol excludes the trailing CR/LF.
     inline bool isProxyEchoLine(std::string_view line) {
-        return line.rfind("Uses proxy env variable ", 0) == 0 ||
-               line.rfind("Unsupported proxy ", 0) == 0;
+        if (line.rfind("Unsupported proxy ", 0) == 0) return true;
+        constexpr std::string_view uses = "Uses proxy env variable ";
+        if (line.rfind(uses, 0) != 0) return false;
+        std::string_view var = line.substr(uses.size());
+        return var.rfind("no_proxy ", 0) != 0 && var.rfind("NO_PROXY ", 0) != 0;
     }
 
     inline std::string redactProxyEchoLine(std::string_view line, size_t eol) {
         size_t open = line.find('\'');
         if (open == std::string_view::npos || open >= eol) return std::string(line);
+        size_t cap = (line.rfind("Unsupported proxy ", 0) == 0) ? 255 : 2047;
         size_t close = line.rfind('\'', eol - 1);
-        bool cut = (close == open);  // closing quote lost to truncation
+        bool cut = (close == open) || eol >= cap;
         size_t valueEnd = cut ? eol : close;
         std::string_view value = line.substr(open + 1, valueEnd - open - 1);
-
-        // Scheme only when the value starts with one ("scheme://").
-        size_t userStart = 0;
-        if (!value.empty() && std::isalpha(static_cast<unsigned char>(value[0]))) {
-            size_t q = 1;
-            while (q < value.size() && (std::isalnum(static_cast<unsigned char>(value[q])) ||
-                                        value[q] == '+' || value[q] == '.' || value[q] == '-')) {
-                ++q;
-            }
-            if (value.substr(q, 3) == "://") userStart = q + 3;
+        if (!cut && value.find('@') == std::string_view::npos) {
+            return std::string(line);  // no userinfo: keep it readable
         }
-        size_t colon = value.find(':', userStart);
-        if (colon == std::string_view::npos) return std::string(line);
-        size_t at = value.rfind('@');
-        size_t maskEnd;
-        if (at != std::string_view::npos && at > colon) {
-            maskEnd = at;
-        } else if (cut) {
-            maskEnd = value.size();  // cut before the '@': the rest may be password
-        } else {
-            return std::string(line);  // host:port, no credentials
-        }
-        std::string out(line.substr(0, open + 1 + colon + 1));
+        std::string out(line.substr(0, open + 1));
         out += "<redacted>";
-        out.append(line.substr(open + 1 + maskEnd));
+        out.append(line.substr(valueEnd));
         return out;
     }
 
@@ -241,10 +227,10 @@ public:
 
     // Enable verbose curl logging to stderr (for debugging). The values of
     // the Authorization, Proxy-Authorization, X-Api-Key and Api-Key headers
-    // are shown as <redacted>, and so is the password of a proxy taken from
-    // the environment (https_proxy etc.). Only those are masked: a credential
-    // an app puts elsewhere (another header, the URL query, user:pass@ in the
-    // base URL) is printed as-is.
+    // are shown as <redacted>, and so is a proxy URL with user:password taken
+    // from the environment (https_proxy etc.). Only those are masked: a
+    // credential an app puts elsewhere (another header, the URL query,
+    // user:pass@ in the base URL) is printed as-is.
     void setVerbose(bool v) { verbose_ = v; }
 
     // Check if server is reachable
@@ -311,6 +297,10 @@ private:
     // until the rest arrives, so every line is redacted whole.
     struct VerboseState {
         std::string pendingHeaderOut;
+        // A tail was printed before its line was complete (see
+        // flushPendingHeaderOut): the start of the next piece is the rest of
+        // that line, possibly a credential value, and is hidden.
+        bool maskNextLine = false;
     };
 
     // setVerbose() output, like `curl -v`: info text (TLS handshake lines
@@ -326,12 +316,31 @@ private:
         }
         std::string_view chunk(data, size);
         auto* state = static_cast<VerboseState*>(userp);
-        if (type == CURLINFO_HEADER_IN && state) {
-            flushPendingHeaderOut(*state);  // that request's headers are done
+        if (type == CURLINFO_TEXT && state &&
+            (chunk.rfind("Connection died, retrying", 0) == 0 ||
+             chunk.rfind("Issue another request to this URL", 0) == 0)) {
+            flushPendingHeaderOut(*state);  // the request that tail belonged to is over
+        }
+        if (type == CURLINFO_TEXT && detail::isProxyEchoLine(chunk)) {
+            // One echo per chunk: a value containing a newline stays masked.
+            size_t eol = chunk.size();
+            while (eol > 0 && (chunk[eol - 1] == '\n' || chunk[eol - 1] == '\r')) --eol;
+            printVerbose(prefix, detail::redactProxyEchoLine(chunk, eol));
+            return 0;
         }
         if (type == CURLINFO_HEADER_OUT && state) {
+            // Header pieces keep arriving after the response has started
+            // (curl 8.7+ finishes sending them), so a tail is only flushed at
+            // the end of the transfer or when curl restarts the request.
             std::string block = std::move(state->pendingHeaderOut);
+            state->pendingHeaderOut.clear();
             block.append(chunk);
+            if (state->maskNextLine) {
+                size_t nl = block.find('\n');
+                if (nl == std::string::npos) return 0;  // still inside that line
+                block.replace(0, nl, "<redacted>");
+                state->maskNextLine = false;
+            }
             size_t lastNl = block.rfind('\n');
             if (lastNl == std::string::npos) {
                 state->pendingHeaderOut = std::move(block);
@@ -346,13 +355,15 @@ private:
         return 0;
     }
 
-    // A request header block curl cut off mid-line (it caps very large header
-    // output): print what there is, redacted, and say it was cut.
+    // A request header block that ended mid-line (curl caps very large header
+    // output, or the request was restarted): print what there is, redacted,
+    // say it was cut, and hide the rest of that line if it shows up later.
     static void flushPendingHeaderOut(VerboseState& state) {
         if (state.pendingHeaderOut.empty()) return;
         printVerbose("> ", state.pendingHeaderOut);
         std::fputs("* (request header output ended mid-line)\n", stderr);
         state.pendingHeaderOut.clear();
+        state.maskNextLine = true;
     }
 
     // Prints a block of debug output, redacted, with the prefix on each line.
