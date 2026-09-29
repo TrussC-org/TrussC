@@ -58,7 +58,7 @@ fs::path getExecutableDir() {
 // ---------------------------------------------------------------------------
 // Screenshot — not implemented on web (#230)
 // ---------------------------------------------------------------------------
-// Nothing in the browser build reads the canvas back yet, and #230 decided not
+// Nothing in the browser build reads the canvas back, and #230 decided not
 // to add it: screenshots on web are taken with the browser's own tools. Adding
 // it would mean, per backend:
 //   - WGPU (default): the swapchain cannot be read back synchronously (the

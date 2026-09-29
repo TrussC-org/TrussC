@@ -12374,8 +12374,8 @@ description.en = "Capture the current window contents into a Pixels object. Retu
 description.ja = "現在のウィンドウ内容を Pixels オブジェクトにキャプチャ。成功時 true を返す"
 description.ko = "현재 윈도우 내용을 Pixels 객체로 캡처. 성공 시 true 반환"
 related = ["Pixels", "grabScreen", "saveScreenshot"]
-platform_note.en = "Not implemented on web (no canvas readback yet): always returns false and logs a one-time warning. Take screenshots with the browser's own tools there. All native backends read back the framebuffer."
-platform_note.ja = "Web では未実装（canvas の読み戻しがまだない）: 常に false を返し、警告を1回だけ出す。Web ではブラウザ自身のスクリーンショット機能を使う。ネイティブは全てフレームバッファを読み戻す。"
+platform_note.en = "Not implemented on web (no canvas readback): always returns false and logs a one-time warning. Take screenshots with the browser's own tools there. All native backends read back the framebuffer."
+platform_note.ja = "Web では未実装（canvas の読み戻しはない）: 常に false を返し、警告を1回だけ出す。Web ではブラウザ自身のスクリーンショット機能を使う。ネイティブは全てフレームバッファを読み戻す。"
 
 ["ceil"]
 category = "math_general"
@@ -14148,8 +14148,8 @@ description.en = "Capture current screen to Pixels"
 description.ja = "現在の画面をPixelsにキャプチャ"
 description.ko = "현재 화면을 Pixels에 캡처"
 related = ["Pixels", "saveScreenshot", "captureWindow"]
-platform_note.en = "Not implemented on web (no canvas readback yet): always returns false and logs a one-time warning. Take screenshots with the browser's own tools there."
-platform_note.ja = "Web では未実装（canvas の読み戻しがまだない）: 常に false を返し、警告を1回だけ出す。Web ではブラウザ自身のスクリーンショット機能を使う。"
+platform_note.en = "Not implemented on web (no canvas readback): always returns false and logs a one-time warning. Take screenshots with the browser's own tools there."
+platform_note.ja = "Web では未実装（canvas の読み戻しはない）: 常に false を返し、警告を1回だけ出す。Web ではブラウザ自身のスクリーンショット機能を使う。"
 
 ["hexToInt"]
 category = "utility"
@@ -15044,8 +15044,8 @@ description.en = "Save a screenshot of the rendered frame (png/jpg/bmp). Safe to
 description.ja = "描画済みフレームのスクショを保存（png/jpg/bmp）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない"
 description.ko = "렌더링된 프레임의 스크린샷 저장(png/jpg/bmp). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님"
 related = ["grabScreen", "startRecording", "captureWindow"]
-platform_note.en = "Not implemented on web (no canvas readback yet): always returns false without queuing anything, since no file could be written, and logs a one-time warning pointing to the browser's own screenshot feature."
-platform_note.ja = "Web では未実装（canvas の読み戻しがまだない）: ファイルを書けないので何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
+platform_note.en = "Not implemented on web (no canvas readback): always returns false without queuing anything, since no file could be written, and logs a one-time warning pointing to the browser's own screenshot feature."
+platform_note.ja = "Web では未実装（canvas の読み戻しはない）: ファイルを書けないので何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
 
 ["saveTextFile"]
 category = "file"
