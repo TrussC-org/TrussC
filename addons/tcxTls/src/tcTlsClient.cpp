@@ -297,9 +297,16 @@ bool TlsClient::connect(const std::string& host, int port) {
         disconnect();
     }
 
-    // Ensure previous receive thread has finished
+    // Ensure previous receive thread has finished. A listener on that thread
+    // (onDisconnect, say) that reconnects cannot join it: detach instead. The
+    // loop in tlsReceiveThreadFunc() ends on its own once running_ is cleared
+    // or the new receive thread has taken over.
     if (tlsReceiveThread_.joinable()) {
-        tlsReceiveThread_.join();
+        if (tlsReceiveThread_.get_id() == std::this_thread::get_id()) {
+            tlsReceiveThread_.detach();
+        } else {
+            tlsReceiveThread_.join();
+        }
     }
 
     // Reset SSL context (clear previous connection state)
@@ -390,7 +397,8 @@ bool TlsClient::connect(const std::string& host, int port) {
         if (useThread_) {
             // Thread mode: wait for TCP then handshake
             setBlocking(true);
-            tlsReceiveThread_ = std::thread(&TlsClient::tlsReceiveThreadFunc, this);
+            tlsReceiveThread_ = std::thread(&TlsClient::tlsReceiveThreadFunc, this,
+                                            ++tlsReceiveGeneration_);
         } else {
             // Register update listener for async connect/handshake/recv
             updateListener_ = events().update.listen(this, &TlsClient::processNetwork);
@@ -667,10 +675,14 @@ bool TlsClient::send(const std::string& message) {
 // =============================================================================
 // TLS Receive Thread
 // =============================================================================
-void TlsClient::tlsReceiveThreadFunc() {
-    while (running_) {
+void TlsClient::tlsReceiveThreadFunc(unsigned generation) {
+    // running_ alone cannot end this loop when a listener on this thread
+    // reconnects: connect() detaches this thread, starts the new connection's
+    // own, and running_ is true again for that one. The generation says which
+    // thread is current.
+    while (running_ && tlsReceiveGeneration_ == generation) {
         processNetwork();
-        if (running_) {
+        if (running_ && tlsReceiveGeneration_ == generation) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }

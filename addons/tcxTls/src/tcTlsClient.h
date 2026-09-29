@@ -107,9 +107,13 @@ private:
     void ensureDefaultCAsLoaded();
 
     // Receive thread (for TLS)
-    void tlsReceiveThreadFunc();
+    void tlsReceiveThreadFunc(unsigned generation);
 
     std::thread tlsReceiveThread_;
+
+    // Bumped for every receive thread started; a thread whose generation is
+    // no longer current stops (see tlsReceiveThreadFunc)
+    std::atomic<unsigned> tlsReceiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()
     std::vector<unsigned char> tlsRecvBuf_;

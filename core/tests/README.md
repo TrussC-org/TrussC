@@ -94,3 +94,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   bytes (#254): two clients with different receive buffer sizes take 8 MB each
   from two loopback peers. The receive buffer used to be one function-local
   static shared by every client's receive thread.
+- `tcpClientReconnect/` — `TcpClient::connect()` after the peer closed the
+  connection reconnects (#254); it used to assign the new receive thread over
+  the old, still-joinable one (`std::terminate`). Also checks that 20
+  reconnects leak no descriptors and that a reconnect from an inline
+  `onDisconnect` listener leaves exactly one receive thread (both counted on
+  Linux).

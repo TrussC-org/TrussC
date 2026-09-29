@@ -188,11 +188,18 @@ protected:
     bool connectPending_ = false;
 
 private:
-    void receiveThreadFunc();
+    void receiveThreadFunc(unsigned generation);
     void connectThreadFunc(const std::string& host, int port);
+
+    // Close the socket and release the receive thread (connectThread_ is left alone)
+    void resetConnection();
 
     std::thread receiveThread_;
     std::thread connectThread_;
+
+    // Bumped for every receive thread started; a thread whose generation is
+    // no longer current stops (see receiveThreadFunc)
+    std::atomic<unsigned> receiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()
     std::vector<char> recvBuf_;

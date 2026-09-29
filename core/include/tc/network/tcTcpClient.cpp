@@ -70,9 +70,16 @@ TcpClient& TcpClient::operator=(TcpClient&& other) noexcept {
 // Connection management
 // =============================================================================
 bool TcpClient::connect(const std::string& host, int port) {
-    if (connected_ || connectPending_) {
+    if (connected_ || running_ || connectPending_) {
         disconnect();
     }
+
+    // After the peer closed the connection (or it failed) the flags above are
+    // all clear, but the socket and the finished receive thread are still
+    // here. Release them before starting over: overwriting socket_ leaks the
+    // descriptor, and assigning a new thread to a still-joinable
+    // receiveThread_ calls std::terminate.
+    resetConnection();
 
     // Create socket
     socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -156,7 +163,8 @@ bool TcpClient::connect(const std::string& host, int port) {
         if (useThread_) {
             // Start receive thread (ensure blocking mode for thread unless explicitly set otherwise)
             setBlocking(true);
-            receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this);
+            receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this,
+                                         ++receiveGeneration_);
         } else {
             // Register update listener
             updateListener_ = events().update.listen(this, &TcpClient::processNetwork);
@@ -194,6 +202,28 @@ void TcpClient::disconnect() {
     connectPending_ = false;
     updateListener_.disconnect();
 
+    resetConnection();
+
+    if (connectThread_.joinable()) {
+        if (connectThread_.get_id() == std::this_thread::get_id()) {
+            connectThread_.detach();
+        } else {
+            connectThread_.join();
+        }
+    }
+
+    if (connected_) {
+        connected_ = false;
+        TcpDisconnectEventArgs args;
+        args.reason = "Disconnected by client";
+        args.wasClean = true;
+        onDisconnect.notify(args);
+    }
+}
+
+// Close the socket and release the receive thread. connectThread_ is left
+// alone: connect() runs on it for connectAsync(), and calls this.
+void TcpClient::resetConnection() {
 #ifdef _WIN32
     if (socket_ != INVALID_SOCKET) {
         shutdown(socket_, SD_BOTH);
@@ -210,28 +240,14 @@ void TcpClient::disconnect() {
 
     if (receiveThread_.joinable()) {
         if (receiveThread_.get_id() == std::this_thread::get_id()) {
-            // Called from within the receive thread (e.g. via callback)
-            // Cannot join self. Detach to allow thread to finish naturally.
+            // Called from within the receive thread (e.g. a listener that
+            // disconnects or reconnects). Cannot join self. Detach: the loop in
+            // receiveThreadFunc() ends on its own once running_ is cleared or
+            // a newer receive thread has taken over.
             receiveThread_.detach();
         } else {
             receiveThread_.join();
         }
-    }
-
-    if (connectThread_.joinable()) {
-        if (connectThread_.get_id() == std::this_thread::get_id()) {
-            connectThread_.detach();
-        } else {
-            connectThread_.join();
-        }
-    }
-
-    if (connected_) {
-        connected_ = false;
-        TcpDisconnectEventArgs args;
-        args.reason = "Disconnected by client";
-        args.wasClean = true;
-        onDisconnect.notify(args);
     }
 }
 
@@ -396,10 +412,14 @@ void TcpClient::processNetwork() {
     }
 }
 
-void TcpClient::receiveThreadFunc() {
-    while (running_) {
+void TcpClient::receiveThreadFunc(unsigned generation) {
+    // running_ alone cannot end this loop when a listener on this thread
+    // reconnects: connect() detaches this thread, starts the new connection's
+    // own, and running_ is true again for that one. The generation says which
+    // thread is current.
+    while (running_ && receiveGeneration_ == generation) {
         processNetwork();
-        if (running_) {
+        if (running_ && receiveGeneration_ == generation) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
