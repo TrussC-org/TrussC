@@ -99,22 +99,50 @@ namespace detail {
         return false;
     }
 
+    // curl echoes a proxy taken from the environment, credentials included:
+    //   Uses proxy env variable https_proxy == 'http://user:secret@host:3128'
+    // Masks the password part (with or without a scheme). eol excludes CR/LF.
+    inline std::string redactProxyEnvLine(std::string_view line, size_t eol) {
+        size_t open = line.find('\'');
+        size_t close = line.rfind('\'', eol - 1);
+        if (open == std::string_view::npos || close == std::string_view::npos || close <= open) {
+            return std::string(line);
+        }
+        std::string_view value = line.substr(open + 1, close - open - 1);
+        size_t at = value.rfind('@');
+        if (at == std::string_view::npos) return std::string(line);
+        size_t scheme = value.find("://");
+        size_t userStart = (scheme != std::string_view::npos && scheme < at) ? scheme + 3 : 0;
+        size_t colon = value.find(':', userStart);
+        if (colon == std::string_view::npos || colon > at) return std::string(line);
+        size_t from = open + 1 + colon + 1;
+        size_t to = open + 1 + at;
+        std::string out(line.substr(0, from));
+        out += "<redacted>";
+        out.append(line.substr(to));
+        return out;
+    }
+
     // Returns one line of curl's debug output with a credential value replaced
     // by <redacted>. Catches both header lines ("Authorization: ...") and the
     // info lines curl writes for HTTP/2 and HTTP/3 requests
     // ("[HTTP/2] [1] [authorization: ...]"): a name counts when it starts the
-    // line or follows '[' or whitespace. Inside [...] the value ends at ']'.
+    // line or follows '[' or whitespace. Inside [...] the value runs to the
+    // ']' curl puts at the end of the line (a value may contain ']' itself).
+    // Also masks the password in curl's "Uses proxy env variable" line.
     inline std::string redactCredentialLine(std::string_view line) {
         size_t eol = line.size();
         while (eol > 0 && (line[eol - 1] == '\n' || line[eol - 1] == '\r')) --eol;
+        if (line.substr(0, eol).rfind("Uses proxy env variable ", 0) == 0) {
+            return redactProxyEnvLine(line, eol);
+        }
         for (size_t pos = 0; pos < eol; ++pos) {
             if (pos > 0 && line[pos - 1] != '[' && line[pos - 1] != ' ' && line[pos - 1] != '\t') continue;
             size_t colon = 0;
             if (!credentialNameAt(line.substr(0, eol), pos, colon)) continue;
             size_t valueEnd = eol;
-            if (pos > 0 && line[pos - 1] == '[') {
-                size_t close = line.find(']', colon);
-                if (close != std::string_view::npos && close < eol) valueEnd = close;
+            if (pos > 0 && line[pos - 1] == '[' && line[eol - 1] == ']' && eol - 1 > colon) {
+                valueEnd = eol - 1;
             }
             std::string out(line.substr(0, colon + 1));
             out += " <redacted>";
@@ -189,9 +217,10 @@ public:
 
     // Enable verbose curl logging to stderr (for debugging). The values of
     // the Authorization, Proxy-Authorization, X-Api-Key and Api-Key headers
-    // are shown as <redacted>. Only those header names are masked: a
-    // credential an app puts elsewhere (another header, the URL query) is
-    // printed as-is.
+    // are shown as <redacted>, and so is the password of a proxy taken from
+    // the environment (https_proxy etc.). Only those are masked: a credential
+    // an app puts elsewhere (another header, the URL query, user:pass@ in the
+    // base URL) is printed as-is.
     void setVerbose(bool v) { verbose_ = v; }
 
     // Check if server is reachable
@@ -252,9 +281,17 @@ private:
         return totalSize;
     }
 
+    // Per-request state for debugCallback (CURLOPT_DEBUGDATA). A large request
+    // header block can reach the callback in several pieces, splitting a line
+    // (and a credential value) between calls: the unterminated tail waits here
+    // until the rest arrives, so every line is redacted whole.
+    struct VerboseState {
+        std::string pendingHeaderOut;
+    };
+
     // setVerbose() output: what CURLOPT_VERBOSE prints (info text, request
     // and response headers), one prefix per line, credentials redacted.
-    static int debugCallback(CURL*, curl_infotype type, char* data, size_t size, void*) {
+    static int debugCallback(CURL*, curl_infotype type, char* data, size_t size, void* userp) {
         const char* prefix = nullptr;
         switch (type) {
             case CURLINFO_TEXT:       prefix = "* "; break;
@@ -262,7 +299,28 @@ private:
             case CURLINFO_HEADER_OUT: prefix = "> "; break;
             default: return 0;  // bodies and TLS records (not shown by CURLOPT_VERBOSE either)
         }
-        std::string text = detail::redactCredentialHeaders(std::string_view(data, size));
+        std::string_view chunk(data, size);
+        auto* state = static_cast<VerboseState*>(userp);
+        if (type == CURLINFO_HEADER_OUT && state) {
+            std::string block = std::move(state->pendingHeaderOut);
+            block.append(chunk);
+            size_t lastNl = block.rfind('\n');
+            if (lastNl == std::string::npos) {
+                state->pendingHeaderOut = std::move(block);
+                return 0;
+            }
+            state->pendingHeaderOut = block.substr(lastNl + 1);
+            block.resize(lastNl + 1);
+            printVerbose(prefix, block);
+            return 0;
+        }
+        printVerbose(prefix, chunk);
+        return 0;
+    }
+
+    // Prints a block of debug output, redacted, with the prefix on each line.
+    static void printVerbose(const char* prefix, std::string_view block) {
+        std::string text = detail::redactCredentialHeaders(block);
         size_t pos = 0;
         while (pos < text.size()) {
             size_t nl = text.find('\n', pos);
@@ -271,7 +329,6 @@ private:
             pos = next;
         }
         if (!text.empty() && text.back() != '\n') std::fputc('\n', stderr);
-        return 0;
     }
 #endif
 };
@@ -318,8 +375,10 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, 30L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, 15L);
+    VerboseState verboseState;
     if (verbose_) {
         curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, debugCallback);
+        curl_easy_setopt(curl, CURLOPT_DEBUGDATA, &verboseState);
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
     }
 
@@ -352,6 +411,9 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
     }
 
     CURLcode res = curl_easy_perform(curl);
+    if (!verboseState.pendingHeaderOut.empty()) {
+        printVerbose("> ", verboseState.pendingHeaderOut);  // never newline-terminated
+    }
 
     if (res != CURLE_OK) {
         response.error = curl_easy_strerror(res);
