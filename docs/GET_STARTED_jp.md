@@ -262,3 +262,15 @@ myProject/
 - `.ico` - Windows アイコン形式
 - `.png` - ImageMagick があれば `.ico` に自動変換されます
 
+
+## 9. 展示・常設での運用
+
+何日も何週間も無人で動かす場合（展示、サイネージなど）は、ビルドとは別にマシン側の設定が必要です。
+
+- **Windows:** [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md)（英語）で次の設定を説明しています。
+  - Smart App Control
+  - 画面を消さない設定
+  - Windows Update による再起動
+  - ダイアログを出さずにクラッシュダンプを残す方法
+  - 自動起動と再起動
+- **Linux（Raspberry Pi などの SBC）:** 起動時の自動起動とモニタのスリープ対策は、[GET_STARTED_CONSOLE_MODE.md](GET_STARTED_CONSOLE_MODE.md) を参照してください。
