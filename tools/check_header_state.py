@@ -24,6 +24,8 @@ What is flagged, in core/include (vendored libraries excluded):
     (`template <class T> int Reg<T>::count = 0;`) and a variable template
     (`template <class T> T zero = T();`): one instance per module, like an
     inline variable
+  - a `static` / `thread_local` variable in a `#define` body: every function
+    using the macro gets its own function-local static (key: MACRO::name)
 Every declarator of a declaration counts (`static int a = 0, b = 1;` is two
 findings). `constexpr` variables are not flagged: compile-time constants have
 no run-time state to split. Nor are `const` namespace-scope `static` and
@@ -93,13 +95,14 @@ def is_ident(t):
 # Lexing
 # ---------------------------------------------------------------------------
 
-def blank(text):
+def blank(text, directives=True):
     """Blank comments, string / char literals and preprocessor lines, keeping
     every newline so line numbers stay valid. A literal becomes a lone `"`, so
-    `extern "C"` is still recognizable."""
+    `extern "C"` is still recognizable. directives=False: `text` is a macro
+    body, where a `#` is the stringizing operator, not a directive."""
     out = []
     i, n = 0, len(text)
-    line_start = True
+    line_start = directives
     while i < n:
         c = text[i]
         if line_start:
@@ -133,7 +136,7 @@ def blank(text):
         if c == "\n":
             out.append(c)
             i += 1
-            line_start = True
+            line_start = directives
             continue
         if text.startswith("//", i):
             while i < n and text[i] != "\n":
@@ -242,6 +245,27 @@ def strip_prefix(toks):
             continue
         out.append(toks[i])
         i += 1
+    return out
+
+
+def strip_class_specifiers(toks):
+    """Drop what may sit between a class key and the class name: attributes
+    (`[[deprecated("x")]]`) and specifier calls (`alignas(16)`,
+    `__declspec(novtable)`, `__attribute__((...))`), so
+    `class alignas(16) Foo : Bar {` reads as `class Foo : Bar {`."""
+    out, i = [], 0
+    while i < len(toks):
+        out.append(toks[i])
+        i += 1
+        if out[-1] not in CLASS_KEYS:
+            continue
+        while i < len(toks):
+            if toks[i] == "[" and i + 1 < len(toks) and toks[i + 1] == "[":
+                i = skip_group(toks, i, "[", "]")
+            elif is_ident(toks[i]) and i + 1 < len(toks) and toks[i + 1] == "(":
+                i = skip_group(toks, i + 1, "(", ")")
+            else:
+                break
     return out
 
 
@@ -427,8 +451,25 @@ def is_immutable(head):
     return not stars or stars[-1] < last_const
 
 
+def group_start(buf, i, open_tok, close_tok):
+    """buf[i] == close_tok: index of its matching open_tok (-1 if none)."""
+    depth = 0
+    while i >= 0:
+        if buf[i] == close_tok:
+            depth += 1
+        elif buf[i] == open_tok:
+            depth -= 1
+            if depth == 0:
+                return i
+        i -= 1
+    return -1
+
+
 def is_lambda_body(buf):
-    """Does a `{` right after `buf` open a lambda body?"""
+    """Does a `{` right after `buf` open a lambda body?
+    `[captures] <template params> (params) specifiers -> ret {`, where the
+    template parameter list, the parameters and the trailing return type are
+    optional and the specifiers may take an argument (`noexcept(false)`)."""
     i = len(buf) - 1
     # Trailing return type: `-> type`
     depth = 0
@@ -445,31 +486,30 @@ def is_lambda_body(buf):
             break
         elif t in (";", "{", "}", "="):
             break
-    while i >= 0 and buf[i] in TRAILING_QUALIFIERS:
-        i -= 1
+
+    def skip_specifiers(i):
+        # mutable, constexpr, noexcept, noexcept(...), throw(...)
+        while i >= 0:
+            if buf[i] in TRAILING_QUALIFIERS:
+                i -= 1
+            elif buf[i] == ")":
+                k = group_start(buf, i, "(", ")")
+                if k >= 1 and buf[k - 1] in ("noexcept", "throw"):
+                    i = k - 2
+                else:
+                    return i
+            else:
+                return i
+        return i
+
+    i = skip_specifiers(i)
     if i >= 0 and buf[i] == ")":
-        depth, k = 0, i
-        while k >= 0:
-            if buf[k] == ")":
-                depth += 1
-            elif buf[k] == "(":
-                depth -= 1
-                if depth == 0:
-                    break
-            k -= 1
-        i = k - 1
-        while i >= 0 and buf[i] in TRAILING_QUALIFIERS:
-            i -= 1
+        i = skip_specifiers(group_start(buf, i, "(", ")") - 1)
+    if i >= 0 and buf[i] == ">":
+        # Template parameter list: `[]<class T>(T v) {`
+        i = group_start(buf, i, "<", ">") - 1
     if i >= 0 and buf[i] == "]":
-        depth, k = 0, i
-        while k >= 0:
-            if buf[k] == "]":
-                depth += 1
-            elif buf[k] == "[":
-                depth -= 1
-                if depth == 0:
-                    break
-            k -= 1
+        k = group_start(buf, i, "[", "]")
         before = buf[k - 1] if k >= 1 else ""
         if before in ("operator", "delete", "new"):
             return False
@@ -477,6 +517,37 @@ def is_lambda_body(buf):
         # introducer follows an operator, `(`, `,`, `{`, `return`, ...
         return before == "return" or not (is_ident(before) or before in (")", "]"))
     return False
+
+
+def statement_from(tokens, i):
+    """The statement starting at tokens[i], up to its `;` (a lambda in an
+    initializer, or a body, has `;`s of its own, one level down)."""
+    rest, depth = [], 0
+    for t in tokens[i:i + 2000]:
+        if t == ";" and depth == 0:
+            break
+        if t in ("(", "[", "{"):
+            depth += 1
+        elif t in (")", "]", "}"):
+            depth -= 1
+        rest.append(t)
+    return rest
+
+
+def static_local(rest):
+    """The block-scope `static` / `thread_local` declaration `rest` (from that
+    keyword to its `;`): (names, immutable), or None for a constexpr one."""
+    head = first_declarator(declaration_head(rest))
+    cut = head
+    for k, t in top_level(head):
+        if t in ("(", "[", "{"):
+            cut = head[:k]
+            break
+    if "constexpr" in cut:
+        return None
+    idents = [t for t in cut if is_ident(t) and t not in
+              ("static", "thread_local", "const", "inline", "mutable")]
+    return [idents[-1] if idents else "?"] + later_declarators(rest, len(head)), is_immutable(cut)
 
 
 # ---------------------------------------------------------------------------
@@ -547,7 +618,7 @@ def scan_tokens(tokens, rel):
 
     def open_frame(kind):
         """Classify the `{` that ends `buf`."""
-        b = strip_prefix(buf)
+        b = strip_class_specifiers(strip_prefix(buf))
         if kind == "ns" and (b[:1] == ["namespace"] or b[:2] == ["inline", "namespace"]):
             names = [t for t in b if is_ident(t) and t not in ("namespace", "inline")]
             return {"kind": "ns", "name": "::".join(names), "anon": not names}
@@ -557,7 +628,7 @@ def scan_tokens(tokens, rel):
             return {"kind": "func", "name": "<lambda>", "keep": True}
         if kind in ("func", "init"):
             # Inside a function: a local class, or just a block / initializer
-            tail = buf[-12:]
+            tail = strip_class_specifiers(buf[-24:])
             keys = [k for k, t in enumerate(tail) if t in CLASS_KEYS]
             if keys and not any(t in ("(", "=") for t in tail[keys[-1]:]):
                 nm = tail[keys[-1] + 1] if keys[-1] + 1 < len(tail) else ""
@@ -625,28 +696,11 @@ def scan_tokens(tokens, rel):
             # A `static` directly in a function body always declares a static
             # local (block-scope functions cannot be static).
             if not (buf and buf[-1] in ("static", "thread_local")):
-                # The statement, up to its `;` (a lambda in the initializer
-                # has `;`s of its own, one level down)
-                rest, depth = [], 0
-                for t, _ in tokens[i:i + 2000]:
-                    if t == ";" and depth == 0:
-                        break
-                    if t in ("(", "[", "{"):
-                        depth += 1
-                    elif t in (")", "]", "}"):
-                        depth -= 1
-                    rest.append(t)
-                head = first_declarator(declaration_head(rest))
-                cut = head
-                for k, t in top_level(head):
-                    if t in ("(", "[", "{"):
-                        cut = head[:k]
-                        break
-                if "constexpr" not in cut:
-                    idents = [t for t in cut if is_ident(t) and t not in
-                              ("static", "thread_local", "const", "inline", "mutable")]
-                    for nm in [idents[-1] if idents else "?"] + later_declarators(rest, len(head)):
-                        add(line, nm, "function-local static", is_immutable(cut))
+                decl = static_local(statement_from([t for t, _ in tokens], i))
+                if decl:
+                    names, immutable = decl
+                    for nm in names:
+                        add(line, nm, "function-local static", immutable)
             buf.append(tok)
             i += 1
             continue
@@ -690,9 +744,58 @@ def scan_tokens(tokens, rel):
     return findings
 
 
+DEFINE_RE = re.compile(r"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)", re.M)
+
+
+def scan_macros(text, rel):
+    """Statics in #define bodies, which the walker never sees (it blanks
+    directives): a macro that declares one puts a function-local static into
+    every function that uses it, one per module (a warn-once macro, say). A
+    static member function the macro defines is not state; the statics in its
+    body are."""
+    findings = []
+    for m in DEFINE_RE.finditer(text):
+        # The directive runs to the first line end not escaped by a backslash
+        end = m.end()
+        while True:
+            nl = text.find("\n", end)
+            if nl < 0:
+                end = len(text)
+                break
+            if text[nl - 1] == "\\":
+                end = nl + 1
+                continue
+            end = nl
+            break
+        body = text[m.end():end]
+        if body.startswith("("):
+            # Parameter list (newlines kept, so line numbers stay valid)
+            close = body.find(")")
+            body = "".join(ch if ch == "\n" else " " for ch in body[:close + 1]) + body[close + 1:]
+        first_line = text.count("\n", 0, m.start()) + 1
+        toks = tokenize(blank(body.replace("\\\n", " \n"), directives=False))
+        words = [t for t, _ in toks]
+        for k, (t, line) in enumerate(toks):
+            if t not in ("static", "thread_local") or (k and words[k - 1] in ("static", "thread_local")):
+                continue
+            rest = statement_from(words, k)
+            head = declaration_head(rest)
+            if len(rest) > len(head) and rest[len(head)] == "{" and classify_head(head)[0] == "function":
+                continue   # a (static member) function the macro defines
+            decl = static_local(rest)
+            if decl:
+                names, immutable = decl
+                for nm in names:
+                    findings.append(Finding(rel, first_line + line - 1, m.group(1), nm,
+                                            "static in a macro body (one per module at every use)",
+                                            immutable))
+    return findings
+
+
 def scan_file(path, rel):
     with open(path, encoding="utf-8", errors="replace") as f:
-        return scan_tokens(tokenize(blank(f.read())), rel)
+        text = f.read()
+    return scan_tokens(tokenize(blank(text)), rel) + scan_macros(text, rel)
 
 
 def scan():
@@ -885,11 +988,14 @@ def self_test():
         text = f.read()
     expected = set()
     for lineno, raw in enumerate(text.split("\n"), 1):
-        m = re.search(r"//\s*expect:\s*(.+)$", raw)
+        # `// expect: ...`, or `/* expect: ... */` where a line comment cannot
+        # go (a continued macro line)
+        m = re.search(r"//\s*expect:\s*(.+)$", raw) or re.search(r"/\*\s*expect:\s*(.+?)\s*\*/", raw)
         if m:
             expected.update((lineno, k) for k in m.group(1).split())
     rel = os.path.relpath(SELFTEST, REPO).replace(os.sep, "/")
-    got = {(f.line, f.key.split(" ", 1)[1]) for f in scan_tokens(tokenize(blank(text)), rel)}
+    found = scan_tokens(tokenize(blank(text)), rel) + scan_macros(text, rel)
+    got = {(f.line, f.key.split(" ", 1)[1]) for f in found}
     errors = [f"{rel}:{ln}: expected finding not reported: {k}" for ln, k in sorted(expected - got)]
     errors += [f"{rel}:{ln}: unexpected finding: {k}" for ln, k in sorted(got - expected)]
     return errors

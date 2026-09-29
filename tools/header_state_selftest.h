@@ -122,6 +122,43 @@ inline void multiLocal() {
     (void)o; (void)p; (void)q; (void)r;
 }
 
+// --- Specifiers between the class key and the name are not a parameter list
+struct alignas(16) Aligned : Settings {
+    int& get() { static int al = 0; return al; }                         // expect: fx::Aligned::get::al
+    static inline int alignedMember = 0;                                  // expect: fx::Aligned::alignedMember
+};
+struct __declspec(novtable) Declspec : Settings {
+    static inline int declspecMember = 0;                                 // expect: fx::Declspec::declspecMember
+};
+struct [[deprecated("use Settings")]] Deprecated : Settings {
+    static inline int deprecatedMember = 0;                               // expect: fx::Deprecated::deprecatedMember
+};
+class __attribute__((visibility("default"))) Visible {
+    static inline int visibleMember = 0;                                  // expect: fx::Visible::visibleMember
+};
+inline void localAligned() {
+    struct alignas(8) Local { int& get() { static int la = 0; return la; } };  // expect: fx::localAligned::Local::get::la
+}
+
+// --- Lambda shapes: a template parameter list, noexcept(...)
+inline auto genericLambda = []<class T>(T v) { static T inGeneric{}; return v; };  // expect: fx::genericLambda fx::<lambda>::inGeneric
+inline auto noexceptLambda = [](int v) noexcept(true) { static int inNoexcept = 0; return v + inNoexcept; };  // expect: fx::noexceptLambda fx::<lambda>::inNoexcept
+inline auto genericNoexcept = []<class T>(T v) mutable noexcept(false) -> T { static T gn{}; return v; };  // expect: fx::genericNoexcept fx::<lambda>::gn
+struct LambdaMember {
+    std::function<int()> fn = []() noexcept(true) { static int inMember = 0; return inMember; };  // expect: fx::LambdaMember::<lambda>::inMember
+};
+
+// --- Macro bodies: a static there is one per module at every use
+#define FX_WARN_ONCE() do { static bool warnedOnce = false; (void)warnedOnce; } while (0)  // expect: FX_WARN_ONCE::warnedOnce
+#define FX_MULTI_LINE(x) \
+    do { \
+        static thread_local int macroTls = (x); /* expect: FX_MULTI_LINE::macroTls */ \
+        (void)macroTls; \
+    } while (0)
+#define FX_SINGLETON(T) static T& instance() { static T inst; return inst; }  // expect: FX_SINGLETON::inst
+#define FX_NOT_FLAGGED_CONSTEXPR() do { static constexpr int k = 1; (void)k; } while (0)
+#define FX_NOT_FLAGGED_CAST(x) static_cast<int>(x)
+
 // --- A friend operator<< must not open a template bracket that hides what follows
 struct Streamable {
     friend std::ostream& operator<<(std::ostream& os, const Streamable&) { return os; }
