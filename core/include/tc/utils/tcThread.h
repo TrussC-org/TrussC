@@ -36,10 +36,20 @@ namespace trussc {
 //
 //   The base destructor also stops and joins, but it runs after the subclass
 //   destructor, so the subclass members are already destroyed while
-//   threadedFunction() may still be using them. The base join only prevents
-//   std::terminate, and it logs a warning when it finds threadedFunction()
-//   still running. Calling only stopThread() (the ofThread exit() habit) does
-//   not wait either.
+//   threadedFunction() may still be using them. It logs a warning when it
+//   finds threadedFunction() still running. Calling only stopThread() (the
+//   ofThread exit() habit) does not wait either.
+//
+//   The base join prevents std::terminate only once the worker has entered
+//   threadedFunction(). A subclass that does not wait and is destroyed
+//   before that, e.g. right after startThread() (with or without
+//   stopThread()), still terminates: the worker then calls the pure virtual
+//   threadedFunction() ("pure virtual method called").
+//
+//   A subclass that waits must not be destroyed from its own
+//   threadedFunction() (delete this, or dropping the last shared_ptr on the
+//   worker): its waitForThread() would then join its own thread, which throws
+//   std::system_error (resource_deadlock_would_occur) and terminates.
 //
 // Mutex usage:
 //   As documented, no custom wrappers provided.
