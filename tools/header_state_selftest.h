@@ -100,6 +100,15 @@ template <class T> constexpr T notFlaggedConstexprTemplate = T();
 template <class T> struct Tmpl { static inline int shared = 0; };  // expect: fx::Tmpl::shared
 template <class T> T notFlaggedFunctionTemplate(T v);
 template <class T> using NotFlaggedAlias = Reg<T>;
+// Out-of-class member definitions keep their class, template arguments dropped
+template <class T> struct Store { T& get(); T& get(int); };
+template <class T> struct Other { T& get(); };
+template <class T> T& Store<T>::get() { static T st; return st; }         // expect: fx::Store::get::st
+template <class T> T& Other<T>::get() { static T st; return st; }         // expect: fx::Other::get::st
+template <class T> T& Store<T>::get(int) { static T st2; return st2; }    // expect: fx::Store::get::st2
+template <class T> struct Nest;
+template <class T> struct Nest<std::vector<T>> { int& at(); };
+template <class T> int& Nest<std::vector<T>>::at() { static int pa; return pa; }  // expect: fx::Nest::at::pa
 
 // --- Every declarator counts
 inline int multiA = 0, multiB = 1;                          // expect: fx::multiA fx::multiB

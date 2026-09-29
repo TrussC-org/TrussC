@@ -280,15 +280,31 @@ def declaration_head(toks):
 
 
 def qualified_name_before(toks, i):
-    """The (possibly qualified) name that ends at toks[i]."""
+    """The (possibly qualified) name that ends at toks[i], template arguments
+    dropped: `Reg<T>::get` -> "Reg::get", so an out-of-class member of a class
+    template keeps its class (and differs from `Other<T>::get`)."""
     parts = [toks[i]]
     k = i - 1
     if k >= 0 and toks[k] == "~":
         parts.insert(0, "~")
         k -= 1
-    while k >= 1 and toks[k] == "::" and is_ident(toks[k - 1]):
-        parts[0:0] = [toks[k - 1], "::"]
-        k -= 2
+    while k >= 1 and toks[k] == "::":
+        j = k - 1
+        if toks[j] == ">":
+            depth = 0
+            while j >= 0:
+                if toks[j] == ">":
+                    depth += 1
+                elif toks[j] == "<":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j -= 1
+            j -= 1
+        if j < 0 or not is_ident(toks[j]):
+            break
+        parts[0:0] = [toks[j], "::"]
+        k = j - 1
     return "".join(parts)
 
 
