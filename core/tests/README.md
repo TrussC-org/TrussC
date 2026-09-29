@@ -48,3 +48,9 @@ the API still compiles/links/instantiates but do not assert runtime behaviour.
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
   V vertices) GPU-buffer blow-up that grew the buffer until allocation failed
   (Metal `id:52`), the root cause of disappearing deferred 2D/PBR content.
+- `screenshotContract/` — the screenshot APIs report what they actually do
+  (#230). Web: `grabScreen()` / `saveScreenshot()` return false, nothing is
+  queued or created, and each API warns once. Native: `saveScreenshot()` still
+  creates the destination folder, queues the capture and returns true. CI runs
+  the native half; the web half needs a WebAssembly build run under node (steps
+  in the header of `src/main.cpp`).
