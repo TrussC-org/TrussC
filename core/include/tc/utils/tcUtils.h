@@ -778,10 +778,9 @@ struct BeepManager {
     }
 };
 
-inline BeepManager& getManager() {
-    static BeepManager manager;
-    return manager;
-}
+// Defined in tcGlobal.cpp: one beep cache / volume / debounce per process, so a
+// hot reload guest's setBeepVolume() survives reloads on Windows too (#249).
+BeepManager& getManager();
 
 } // namespace internal
 

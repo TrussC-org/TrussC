@@ -792,17 +792,10 @@ public:
     static constexpr int DEFAULT_MAX_PLAYING_SOUNDS = 32;
     static constexpr int DEFAULT_BUFFER_SIZE = 0;  // 0 = let miniaudio choose
 
-    static AudioEngine& getInstance() {
-        // Intentionally leaked. A plain function-local static registers its
-        // destructor against the __dso_handle of the image whose code runs the
-        // first call — under hot reload that is the guest dylib, so dlclose()
-        // of an old guest destroys the engine the host is still using (the
-        // next listen() then dies on the destroyed Event mutex). The heap
-        // instance has no exit-time destructor; the framework cleanup path
-        // calls shutdown() explicitly for a clean device stop on normal exit.
-        static AudioEngine* instance = new AudioEngine();
-        return *instance;
-    }
+    // The one engine per process. Defined in tcAudio_impl.cpp, not inline: a
+    // hot reload guest on Windows compiles its own copy of every header-inline
+    // function, static included, and would run a second engine (#249).
+    static AudioEngine& getInstance();
 
     // Initialize and shutdown (implementation in tcAudio_impl.cpp).
     //

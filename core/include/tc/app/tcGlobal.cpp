@@ -16,8 +16,10 @@
 //      logs in guest, ...). Moving the definition into this .cpp keeps
 //      one canonical instance shared via the host's exported symbols.
 //
-// When adding a new global singleton accessor, prefer defining it here
-// (or in a sibling .cpp) rather than inline in a header.
+// When adding a new global singleton accessor, define it here (or in a
+// sibling .cpp) rather than inline in a header. tools/check_header_state.py
+// (run in CI) fails on new header-inline state; docs/ARCHITECTURE.md, "One
+// instance per process", has the rule and the reasons.
 // =============================================================================
 
 #include <TrussC.h>
@@ -580,5 +582,134 @@ Logger& getLogger() {
     static Logger logger;
     return logger;
 }
+
+// ---------------------------------------------------------------------------
+// More one-per-process state (#249). Each of these used to be a function-local
+// static or an inline variable in its header, which a Windows hot reload guest
+// DLL duplicated: its recordings, beeps, console switch, main-thread queue,
+// GPU releases, ... went into a copy the host's frame loop never looked at.
+// ---------------------------------------------------------------------------
+
+std::thread::id Thread::getMainThreadId() {
+    static std::thread::id mainThreadId = std::this_thread::get_id();
+    return mainThreadId;
+}
+
+namespace console {
+namespace detail {
+ThreadChannel<ConsoleEventArgs>& getChannel() {
+    static ThreadChannel<ConsoleEventArgs> channel;
+    return channel;
+}
+std::atomic<bool>& isRunning() {
+    static std::atomic<bool> running{false};
+    return running;
+}
+std::unique_ptr<std::thread>& getThread() {
+    static std::unique_ptr<std::thread> t;
+    return t;
+}
+} // namespace detail
+} // namespace console
+
+namespace internal {
+
+#if !defined(__EMSCRIPTEN__)
+ThreadChannel<std::function<void()>>& mainThreadQueue() {
+    static ThreadChannel<std::function<void()>> q;
+    return q;
+}
+#endif
+
+AsyncScheduler& AsyncScheduler::get() {
+    static AsyncScheduler instance;
+    return instance;
+}
+
+uint64_t AsyncScheduler::newOwner() {
+    static std::atomic<uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+// Deferred GPU destroys (tcGpuDestroyQueue.h)
+namespace {
+struct PendingGpuDestroys {
+    std::vector<sg_buffer>   buffers;
+    std::vector<sg_image>    images;
+    std::vector<sg_view>     views;
+    std::vector<sg_sampler>  samplers;
+    std::vector<sg_pipeline> pipelines;
+    std::vector<sg_shader>   shaders;
+};
+// Leaked on purpose: resources held by statics (user globals, caches) release
+// their handles from exit-time destructors, possibly after a function-local
+// static queue would already be gone. Never destroying the queue keeps
+// deferGpuDestroy() safe until the very end, as the inline vectors it replaces
+// were (constant-initialized, so destroyed after everything built later).
+PendingGpuDestroys& pendingGpuDestroys() {
+    static PendingGpuDestroys* q = new PendingGpuDestroys();
+    return *q;
+}
+} // anonymous namespace
+
+void deferGpuDestroy(sg_buffer buf) {
+    if (buf.id != 0) pendingGpuDestroys().buffers.push_back(buf);
+}
+void deferGpuDestroy(sg_image img) {
+    if (img.id != 0) pendingGpuDestroys().images.push_back(img);
+}
+void deferGpuDestroy(sg_view view) {
+    if (view.id != 0) pendingGpuDestroys().views.push_back(view);
+}
+void deferGpuDestroy(sg_sampler smp) {
+    if (smp.id != 0) pendingGpuDestroys().samplers.push_back(smp);
+}
+void deferGpuDestroy(sg_pipeline pip) {
+    if (pip.id != 0) pendingGpuDestroys().pipelines.push_back(pip);
+}
+void deferGpuDestroy(sg_shader shd) {
+    if (shd.id != 0) pendingGpuDestroys().shaders.push_back(shd);
+}
+
+void drainPendingGpuDestroys() {
+    auto& q = pendingGpuDestroys();
+    if (sg_isvalid()) {
+        for (sg_buffer buf : q.buffers)   sg_destroy_buffer(buf);
+        for (sg_view view : q.views)      sg_destroy_view(view);
+        for (sg_image img : q.images)     sg_destroy_image(img);
+        for (sg_sampler smp : q.samplers) sg_destroy_sampler(smp);
+        // Pipelines before shaders: a pipeline references its shader.
+        for (sg_pipeline pip : q.pipelines) sg_destroy_pipeline(pip);
+        for (sg_shader shd : q.shaders)     sg_destroy_shader(shd);
+    }
+    q.buffers.clear();
+    q.images.clear();
+    q.views.clear();
+    q.samplers.clear();
+    q.pipelines.clear();
+    q.shaders.clear();
+}
+
+BeepManager& getManager() {
+    static BeepManager manager;
+    return manager;
+}
+
+ScreenRecorder& globalScreenRecorder() {
+    static ScreenRecorder rec;
+    return rec;
+}
+
+PbrPipeline& getPbrPipeline() {
+    static PbrPipeline instance;
+    return instance;
+}
+
+PointPipeline& getPointPipeline() {
+    static PointPipeline instance;
+    return instance;
+}
+
+} // namespace internal
 
 } // namespace trussc

@@ -138,11 +138,11 @@ public:
     }
 
     // Get/set main thread ID
-    // Records current thread ID on first call
-    static std::thread::id getMainThreadId() {
-        static std::thread::id mainThreadId = std::this_thread::get_id();
-        return mainThreadId;
-    }
+    // Records current thread ID on first call (the framework makes that call on
+    // the main thread at startup). Defined in tcGlobal.cpp so the id is one per
+    // process: header-inline, a Windows hot reload guest recorded its own, on
+    // whichever thread first asked (#249).
+    static std::thread::id getMainThreadId();
 
 protected:
     // ---------------------------------------------------------------------------
