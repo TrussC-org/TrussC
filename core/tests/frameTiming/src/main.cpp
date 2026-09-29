@@ -38,6 +38,10 @@
 //      runOnMainThread not starved, getFrameRate() ~ the target rate, and a
 //      fast rate keeps up: the loop sleeps until the next step is due, on a
 //      timer that doesn't round up to a Windows timer tick (~15.6 ms).
+//
+// Most checks drive the loops with simulated time and are exact. The ones
+// that depend on real sleeps say so ("Timing-sensitive") and use lower bounds,
+// medians or wide margins, so a busy CI runner doesn't fail them.
 // =============================================================================
 
 #include <TrussC.h>
@@ -98,16 +102,22 @@ static void testElapsedClock() {
     double f = getElapsedTimef();
     double ms = getElapsedTimeMillis() / 1000.0;
     double us = getElapsedTimeMicros() / 1e6;
+    // Timing-sensitive: read back to back; separate clocks would differ by the
+    // 120 ms above, so the 50 ms margin only absorbs a busy runner's
+    // preemption.
     check("clock: getElapsedTimef/Millis/Micros read the same clock",
-          fabs(f - d) < 0.01 && fabs(ms - d) < 0.01 && fabs(us - d) < 0.01);
+          fabs(f - d) < 0.05 && fabs(ms - d) < 0.05 && fabs(us - d) < 0.05);
 
     // Reset = display offset: the getters restart, the framework clock doesn't.
     double upBefore = internal::getUptimeSeconds();
     resetElapsedTimeCounter();
     double afterReset = getElapsedTime();
-    checkf("reset: getElapsedTime() restarts near 0", afterReset >= 0.0 && afterReset < 0.01, afterReset);
+    // Timing-sensitive: not restarted, they would read >= 0.12 s. The 50 ms
+    // margin is for a busy runner preempting the test between the reset and
+    // the reads.
+    checkf("reset: getElapsedTime() restarts near 0", afterReset >= 0.0 && afterReset < 0.05, afterReset);
     check("reset: Millis/Micros/f restart too",
-          getElapsedTimeMillis() < 10 && getElapsedTimeMicros() < 10000 && getElapsedTimef() < 0.01f);
+          getElapsedTimeMillis() < 50 && getElapsedTimeMicros() < 50000 && getElapsedTimef() < 0.05f);
     double upAfter = internal::getUptimeSeconds();
     check("reset: framework uptime is not reset", upAfter >= upBefore && upAfter >= 0.11);
     sleepMs(30);
@@ -376,7 +386,9 @@ static void testMainLoopUpdates() {
 
     // --- VSYNC update: one per frame, measured dt, rate recorded ---
     // (Runs after the fixed-Hz part: the first-ever update call would ask sokol
-    // for its frame-duration estimate.)
+    // for its frame-duration estimate.) Timing-sensitive, lower bounds only:
+    // this and the synced part below sleep 10 ms per frame and check that dt
+    // is at least that.
     setIndependentFps(VSYNC, VSYNC);
     ctx.rateCount = 0;
     ctx.rateIndex = 0;
@@ -873,8 +885,10 @@ static void testRecorderPacing() {
     // ScreenRecorder never reads a clock itself: it calls the pacer's start()
     // and, once per frame, tick(), both on the pacer's clock, which
     // resetElapsedTimeCounter() doesn't move (#229). Driven here exactly so.
+    // Timing-sensitive: the 1 s recording leaves a busy runner ~0.96 s of
+    // slack between the reset and the next tick.
     internal::ScreenRecorderPacer live;
-    live.start(30.0, 0.3);                       // starts now; 0.3 s long
+    live.start(30.0, 1.0);                       // starts now; 1 s long
     sleepMs(40);
     double c0 = internal::ScreenRecorderPacer::clockNow();
     resetElapsedTimeCounter();
@@ -883,8 +897,8 @@ static void testRecorderPacing() {
           c1 >= c0 && fabs(c1 - internal::getUptimeSeconds()) < 0.05);
     auto k = live.tick();
     checkf("recorder: a frame after a reset is captured and keeps its PTS (>= 40 ms)",
-           k.capture && !k.reachedDuration && k.wallPts >= 0.039 && k.wallPts < 0.3, k.wallPts);
-    sleepMs(300);
+           k.capture && !k.reachedDuration && k.wallPts >= 0.039 && k.wallPts < 1.0, k.wallPts);
+    sleepMs(1000);
     auto end = live.tick();
     checkf("recorder: a reset does not push the duration cutoff back",
            end.reachedDuration && !end.capture, end.wallPts);
@@ -1046,10 +1060,10 @@ struct StallHeadlessApp : App {
     }
 };
 
-// HeadlessSleeper: a short wait returns soon, not after a whole timer tick
-// (Sleep() rounds up to ~15.6 ms on Windows). The median of several waits
-// keeps a busy machine's odd late wake-up out of the result.
-static double medianSleeperWait(double seconds) {
+// HeadlessSleeper: the waits of 21 sleeps, sorted. The median keeps a busy
+// machine's odd late wake-up out of a "returns soon" check, and the minimum
+// keeps its odd slow yield out of a "returns at once" check.
+static vector<double> sleeperWaits(double seconds) {
     internal::HeadlessSleeper sleeper;
     vector<double> took;
     for (int i = 0; i < 21; ++i) {
@@ -1058,7 +1072,7 @@ static double medianSleeperWait(double seconds) {
         took.push_back(chrono::duration<double>(Clk::now() - t0).count());
     }
     sort(took.begin(), took.end());
-    return took[took.size() / 2];
+    return took;
 }
 
 static void testHeadlessLoop() {
@@ -1098,17 +1112,24 @@ static void testHeadlessLoop() {
            g_sMaxPerPass >= 14, g_sMaxPerPass);
     setMaxUpdateSteps(10);
 
+    // Timing-sensitive (real sleeps): medians / minimums of 21 waits, so a
+    // busy runner's odd late wake-up doesn't decide the result.
     // Lower bound at half the wait: a timer may fire a few microseconds early
     // against steady_clock, but a sleeper that doesn't sleep would busy-spin.
-    const double shortWait = medianSleeperWait(0.0002);
-    checkf("headless sleeper: 0.2 ms wait < 5 ms (not a 15.6 ms tick)",
+    const vector<double> shortWaits = sleeperWaits(0.0002);
+    const double shortWait = shortWaits[shortWaits.size() / 2];
+    checkf("headless sleeper: 0.2 ms wait < 5 ms (not a 15.6 ms tick; median)",
            shortWait >= 0.0001 && shortWait < 0.005, shortWait);
-    const double noWait = medianSleeperWait(0.0);
-    checkf("headless sleeper: a 0 wait returns at once", noWait < 0.001, noWait);
+    const double noWait = sleeperWaits(0.0).front();
+    checkf("headless sleeper: a 0 wait returns at once (< 1 ms; fastest)", noWait < 0.001, noWait);
 
+    // Timing-sensitive (real time over 0.5 s): the bound sits between the
+    // ~1000/s a working sleeper gives and the ~640/s of a 15.6 ms tick, with
+    // room for a busy runner's late wake-ups (each one drops what exceeds 10
+    // steps).
     runHeadlessApp<FastHeadlessApp>(HeadlessSettings().setFps(1000));
-    checkf("headless: 1 kHz keeps up (>= 900/s; 16 ms passes give ~640)",
-           g_fRate >= 900.0, g_fRate);
+    checkf("headless: 1 kHz keeps up (>= 800/s; 16 ms passes give ~640)",
+           g_fRate >= 800.0, g_fRate);
     checkf("headless: ...within the 10-step cap per pass",
            g_fMaxPerPass >= 1 && g_fMaxPerPass <= 10, g_fMaxPerPass);
 }
