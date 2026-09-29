@@ -56,13 +56,18 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
 - `threadSafety/` — main-thread affinity: `runOnMainThread` defers + delivers on
   the main thread, `Event` `Deliver::Main` marshals worker-fired notifies onto the
   main thread, and `Node::destroy()` is safe from any thread.
-- `threadLifecycle/` — destroying a `tc::Thread` never calls `std::terminate`
-  (#257): not after its worker returned on its own, not after only
-  `stopThread()`, not after a restart, and not from its own `threadedFunction()`
-  (it detaches instead of joining itself). A subclass that calls
-  `waitForThread()` in its own destructor never has `threadedFunction()` running
-  after its members are gone, and the base destructor logs exactly one warning
-  when the subclass did not wait.
+- `threadLifecycle/` — destroying a `tc::Thread` whose worker has entered
+  `threadedFunction()` never calls `std::terminate` (#257): not after its
+  worker returned on its own, not after only `stopThread()`, not after a
+  restart, and not from its own `threadedFunction()` when the subclass does not
+  wait (the base destructor detaches instead of joining itself, and the worker
+  writes nothing to the freed object). A subclass that calls `waitForThread()`
+  in its own destructor never has `threadedFunction()` running after its
+  members are gone, and the base destructor logs exactly one warning when the
+  subclass did not wait, including after only `stopThread()`. Not covered, since
+  they still terminate (see the "Destruction" notes in `tcThread.h`): a
+  non-waiting subclass destroyed before its worker entered `threadedFunction()`,
+  and a waiting subclass destroyed from its own `threadedFunction()`.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an

@@ -5,16 +5,25 @@
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 //
 // Guards the invariants:
-//   - Destroying a Thread never calls std::terminate: not when its worker has
-//     already returned, not when only stopThread() was called, not after a
-//     restart, not when it is destroyed from its own threadedFunction().
+//   - Destroying a Thread whose worker has entered threadedFunction() never
+//     calls std::terminate: not when its worker has already returned, not when
+//     only stopThread() was called, not after a restart, not when a subclass
+//     that does not wait is destroyed from its own threadedFunction().
 //     ~Thread() used to join only while isThreadRunning() was true, so those
 //     cases left a joinable std::thread behind (SIGABRT), and the last one
 //     joined itself (resource_deadlock_would_occur, then std::terminate).
+//   - After that self-destruction, the worker writes nothing to the freed
+//     object.
 //   - A subclass that waits in its own destructor (the documented contract)
 //     never has threadedFunction() running after its members are destroyed.
 //   - The base destructor logs one warning when it finds threadedFunction()
-//     still running (the subclass did not wait), and none otherwise.
+//     still running (the subclass did not wait), also after only stopThread(),
+//     and none otherwise.
+//
+// Not covered, because both still terminate (see "Destruction" in
+// tcThread.h): a subclass that does not wait and is destroyed before its
+// worker entered threadedFunction() (e.g. right after startThread()), and a
+// subclass that waits and is destroyed from its own threadedFunction().
 //
 // The pre-fix build aborts on the first case, so each case prints its own line
 // as soon as it is done. A watchdog turns a hang (a join that never returns)
@@ -27,6 +36,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <thread>
 
@@ -63,7 +73,8 @@ static atomic<bool> g_loopExited{false};
 static atomic<bool> g_waiterEntered{false};
 static atomic<bool> g_waiterMembersGone{false};
 static atomic<int>  g_ranAfterMembersGone{0};
-static atomic<bool> g_selfGo{false};
+static atomic<bool> g_lingerEntered{false};
+static atomic<bool> g_lingerExited{false};
 static atomic<bool> g_selfDeleted{false};
 
 // Returns without looping: the worker finishes on its own.
@@ -102,17 +113,46 @@ protected:
     }
 };
 
-// Deletes itself from its own worker, so ~Thread runs on that worker.
-struct SelfDeleting : Thread {
+// Leaves its loop when stopped, but stays inside threadedFunction() until the
+// destructor's warning arrives (2 s at most), so the destructor always finds
+// it still running after stopThread().
+struct Lingering : Thread {
 protected:
     void threadedFunction() override {
-        // Wait until startThread() has returned on the main thread: it is still
-        // assigning thread_ when the worker starts.
-        while (!g_selfGo.load()) Thread::sleep(1);
+        g_lingerEntered.store(true);
+        while (isThreadRunning()) sleep(1);
+        waitUntil([] { return g_threadWarnings.load() > 0; }, 2000);
+        g_lingerExited.store(true);
+    }
+};
+
+// Deletes itself from its own worker, so ~Thread runs on that worker. It lives
+// in a static buffer that operator delete poisons instead of freeing, so any
+// write the worker makes after the delete shows up.
+struct SelfDeleting : Thread {
+    static void* operator new(size_t size);
+    static void operator delete(void* p) noexcept;
+protected:
+    void threadedFunction() override {
         delete this;
         g_selfDeleted.store(true);   // globals only from here: the object is gone
     }
 };
+
+constexpr unsigned char kSelfPoison = 0xAB;
+alignas(SelfDeleting) static unsigned char g_selfStorage[sizeof(SelfDeleting)];
+
+void* SelfDeleting::operator new(size_t) { return g_selfStorage; }   // one object only
+void SelfDeleting::operator delete(void* p) noexcept {
+    memset(p, kSelfPoison, sizeof(g_selfStorage));
+}
+
+static bool selfStorageUntouched() {
+    for (unsigned char b : g_selfStorage) {
+        if (b != kSelfPoison) return false;
+    }
+    return true;
+}
 
 int main() {
     // A join that never returns would hang CI; fail loudly instead.
@@ -151,7 +191,8 @@ int main() {
             Loop t;
             t.startThread();
             // Only once the worker is inside threadedFunction(): before that, a
-            // non-waiting subclass can still reach the pure virtual.
+            // non-waiting subclass can still reach the pure virtual (see
+            // "Destruction" in tcThread.h).
             check("stopThread only: worker entered the loop",
                   waitUntil([] { return g_loopEntered.load(); }));
             t.stopThread();
@@ -210,26 +251,43 @@ int main() {
         check("not waited: exactly one warning", g_threadWarnings.load() == 1);
     }
 
-    // --- 6. Never started ---
+    // --- 6. stopThread() only, while threadedFunction() is still running ---
+    {
+        g_threadWarnings.store(0);
+        g_lingerEntered.store(false);
+        g_lingerExited.store(false);
+        {
+            Lingering t;
+            t.startThread();
+            check("stopped, still running: worker entered the loop",
+                  waitUntil([] { return g_lingerEntered.load(); }));
+            t.stopThread();
+        }   // isThreadRunning() is false, but threadedFunction() has not returned
+        check("stopped, still running: destructor joined the worker", g_lingerExited.load());
+        check("stopped, still running: exactly one warning", g_threadWarnings.load() == 1);
+    }
+
+    // --- 7. Never started ---
     {
         g_threadWarnings.store(0);
         { Loop t; }
         check("never started: no warning", g_threadWarnings.load() == 0);
     }
 
-    // --- 7. Destroyed from its own threadedFunction(): detach, not self-join ---
+    // --- 8. Destroyed from its own threadedFunction(): detach, not self-join ---
     {
         g_threadWarnings.store(0);
-        g_selfGo.store(false);
         g_selfDeleted.store(false);
         auto* t = new SelfDeleting();
-        t->startThread();
-        g_selfGo.store(true);
+        t->startThread();   // the worker deletes the object right away
         check("self-destroy: destructor returned on its own worker",
               waitUntil([] { return g_selfDeleted.load(); }));
         check("self-destroy: no warning", g_threadWarnings.load() == 0);
-        // Let the detached worker leave its lambda before the process moves on.
+        // Let the detached worker leave its lambda, then check that neither it
+        // nor startThread() wrote to the object after the delete.
         this_thread::sleep_for(chrono::milliseconds(50));
+        check("self-destroy: nothing written to the object after delete",
+              selfStorageUntouched());
     }
 
     printf("\n%s  (%d failure%s)\n", g_fail ? "FAILED" : "PASSED",
