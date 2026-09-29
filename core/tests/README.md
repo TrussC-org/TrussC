@@ -99,4 +99,6 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   the old, still-joinable one (`std::terminate`). Also checks that 20
   reconnects leak no descriptors and that a reconnect from an inline
   `onDisconnect` listener leaves exactly one receive thread (both counted on
-  Linux).
+  Linux), that reconnecting through `connectAsync()` works, and that refused
+  attempts release the old socket (counted on Linux) before a later
+  `connect()` succeeds.

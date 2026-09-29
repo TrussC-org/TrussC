@@ -14,6 +14,12 @@
 //     receive thread, reconnects too, and afterwards exactly one receive
 //     thread is left (checked on Linux): the old thread has to stop even
 //     though running_ is true again for the new connection.
+//   - Reconnecting through connectAsync() works too. connect() then runs on
+//     connectThread_, which its cleanup must leave alone, and each call joins
+//     the previous call's finished connect thread.
+//   - A reconnect the peer refuses (its device still rebooting) returns false
+//     and still releases the old socket (checked on Linux), and the next
+//     connect() succeeds.
 //
 // The pre-fix build aborts on the first reconnect. The scenario runs on a
 // worker with a deadline, so a hang reports FAIL instead of eating the CI
@@ -95,8 +101,8 @@ static bool waitFor(int ms, P pred) {
     _Exit(1);
 }
 
-// A listening socket on 127.0.0.1 with a port the OS picks
-static rawsocket_t listenLoopback(int& port) {
+// A TCP socket bound to 127.0.0.1 with a port the OS picks
+static rawsocket_t bindLoopback(int& port) {
     rawsocket_t s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == kNoSocket) return kNoSocket;
     sockaddr_in addr{};
@@ -104,12 +110,23 @@ static rawsocket_t listenLoopback(int& port) {
     addr.sin_port = 0;
     inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
     socklen_t len = sizeof(addr);
-    if (::bind(s, (sockaddr*)&addr, sizeof(addr)) != 0 || ::listen(s, 8) != 0 ||
+    if (::bind(s, (sockaddr*)&addr, sizeof(addr)) != 0 ||
         ::getsockname(s, (sockaddr*)&addr, &len) != 0) {
         TC_CLOSE(s);
         return kNoSocket;
     }
     port = ntohs(addr.sin_port);
+    return s;
+}
+
+// A listening socket on 127.0.0.1 with a port the OS picks
+static rawsocket_t listenLoopback(int& port) {
+    rawsocket_t s = bindLoopback(port);
+    if (s == kNoSocket) return kNoSocket;
+    if (::listen(s, 8) != 0) {
+        TC_CLOSE(s);
+        return kNoSocket;
+    }
     return s;
 }
 
@@ -183,6 +200,19 @@ static void scenario() {
         received.append(e.data.begin(), e.data.end());
     });
 
+    // The raw peer sends msg; the client must receive exactly that
+    auto peerToClient = [&](rawsocket_t p, const string& msg) {
+        {
+            lock_guard<mutex> lock(rxMutex);
+            received.clear();
+        }
+        ::send(p, msg.data(), static_cast<int>(msg.size()), 0);
+        return waitFor(3000, [&] {
+            lock_guard<mutex> lock(rxMutex);
+            return received == msg;
+        });
+    };
+
     // --- first connection ---------------------------------------------------
     check("initial connect()", client.connect("127.0.0.1", port));
     rawsocket_t peer = acceptWithin(listener, 2000);
@@ -252,18 +282,8 @@ static void scenario() {
     reconnectSub.disconnect();
 
     check("listener reconnect: data reaches the peer", clientToPeer(client, peer, "after"));
-
-    {
-        lock_guard<mutex> lock(rxMutex);
-        received.clear();
-    }
-    const string pong = "pong from the peer";
-    ::send(peer, pong.data(), static_cast<int>(pong.size()), 0);
     check("listener reconnect: the client receives the peer's data",
-          waitFor(3000, [&] {
-              lock_guard<mutex> lock(rxMutex);
-              return received == pong;
-          }));
+          peerToClient(peer, "pong from the peer"));
 
 #ifdef __linux__
     // The detached thread finishes within a millisecond or so once it sees it
@@ -281,10 +301,85 @@ static void scenario() {
 #endif
     if (g_fail) bail();
 
+    // --- reconnect through connectAsync() -----------------------------------
+    // connect() runs on connectThread_ here, and its cleanup must not join or
+    // detach that thread. From the second round on, connectAsync() also joins
+    // the previous round's finished connect thread.
+    atomic<int> asyncConnects{0};
+    EventListener connectSub = client.onConnect.listen([&](TcpConnectEventArgs& e) {
+        if (e.success) ++asyncConnects;
+    });
+    bool asyncNoticed = true, asyncConnected = true, asyncAccepted = true, asyncDelivered = true;
+    for (int i = 0; i < 3; ++i) {
+        TC_CLOSE(peer);
+        if (!waitFor(2000, [&] { return !client.isConnected(); })) { asyncNoticed = false; break; }
+        const int before = asyncConnects.load();
+        client.connectAsync("127.0.0.1", port);
+        if (!waitFor(3000, [&] { return asyncConnects.load() > before; })) { asyncConnected = false; break; }
+        peer = acceptWithin(listener, 2000);
+        if (peer == kNoSocket) { asyncAccepted = false; break; }
+        if (!clientToPeer(client, peer, "async " + to_string(i))) { asyncDelivered = false; break; }
+    }
+    connectSub.disconnect();
+    check("connectAsync(): client notices each remote close", asyncNoticed);
+    check("connectAsync() after a remote close connects (3 rounds)", asyncConnected);
+    check("connectAsync(): peer accepts every reconnect", asyncAccepted);
+    check("connectAsync(): data reaches the peer after every reconnect", asyncDelivered);
+    if (g_fail) bail();
+    check("connectAsync(): the client receives the peer's data",
+          peerToClient(peer, "pong after connectAsync"));
+    if (g_fail) bail();
+
+    // --- refused reconnects, then a successful one --------------------------
+    // The usual recovery while the peer device is still rebooting. The refused
+    // port is bound but not listening, and held until the end, so nothing else
+    // can take it and the client's own ephemeral port cannot be it (on Linux a
+    // connect() to a free ephemeral port can connect to itself).
+    int refusedPort = 0;
+    rawsocket_t refusedSock = bindLoopback(refusedPort);
+    check("refused port is reserved", refusedSock != kNoSocket);
+    if (refusedSock == kNoSocket) bail();
+
+    TC_CLOSE(peer);
+    peer = kNoSocket;
+    check("refused reconnect: client notices the remote close",
+          waitFor(2000, [&] { return !client.isConnected(); }));
+    if (g_fail) bail();
+#ifdef __linux__
+    // Includes the client's old socket, which the peer closed
+    const int fdsBeforeRefused = countEntries("/proc/self/fd");
+#endif
+    bool refused = true;
+    for (int i = 0; i < 3; ++i) {
+        if (client.connect("127.0.0.1", refusedPort)) refused = false;
+    }
+    check("refused reconnect: connect() returns false (3 attempts)", refused);
+    check("refused reconnect: client is not connected", !client.isConnected());
+    if (g_fail) bail();
+#ifdef __linux__
+    const int fdsAfterRefused = countEntries("/proc/self/fd");
+    printf("  (open descriptors: %d before the refused attempts, %d after)\n",
+           fdsBeforeRefused, fdsAfterRefused);
+    check("refused reconnect: the old socket is released", fdsAfterRefused < fdsBeforeRefused);
+#else
+    printf("%-60s %s\n", "refused reconnect: the old socket is released",
+           "SKIP (counted on Linux)");
+#endif
+
+    check("refused reconnect: a later connect() succeeds", client.connect("127.0.0.1", port));
+    peer = acceptWithin(listener, 2000);
+    check("refused reconnect: peer accepts the later connect()", peer != kNoSocket);
+    if (g_fail) bail();
+    check("refused reconnect: data reaches the peer afterwards", clientToPeer(client, peer, "back"));
+    check("refused reconnect: the client receives the peer's data",
+          peerToClient(peer, "welcome back"));
+    if (g_fail) bail();
+
     // --- teardown ---------------------------------------------------------
     client.disconnect();
     check("disconnect() leaves the client disconnected", !client.isConnected());
     TC_CLOSE(peer);
+    TC_CLOSE(refusedSock);
     TC_CLOSE(listener);
 }
 
