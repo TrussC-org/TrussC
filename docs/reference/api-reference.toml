@@ -14459,8 +14459,8 @@ description.en = "Show file open dialog. Returns FileDialogResult with filePath,
 description.ja = "ファイル選択ダイアログを表示。FileDialogResult（filePath, fileName, success）を返す"
 description.ko = "파일 열기 대화상자 표시. filePath, fileName, success가 담긴 FileDialogResult 반환"
 related = ["FileDialogResult", "loadDialogAsync", "saveDialog", "loadTextFile"]
-platform_note.en = "Sync file/folder open. iOS no-ops (use loadDialogAsync); Android returns empty result (no JNI Intent yet); Web/WASM logs a warning and returns empty."
-platform_note.ja = "同期のファイル/フォルダ選択。iOS はスタブ（loadDialogAsync を使う）、Android は空の結果を返す（JNI Intent 未実装）、Web/WASM は警告を出して空を返す。"
+platform_note.en = "Sync file/folder open. iOS logs an error and returns an empty result (use loadDialogAsync); Android returns empty result (no JNI Intent yet); Web/WASM logs a warning and returns empty."
+platform_note.ja = "同期のファイル/フォルダ選択。iOS はエラーログを出して空の結果を返すスタブ（loadDialogAsync を使う）、Android は空の結果を返す（JNI Intent 未実装）、Web/WASM は警告を出して空を返す。"
 
 ["loadDialogAsync"]
 category = "window_input"
@@ -15014,8 +15014,8 @@ description.en = "Show file save dialog. Returns FileDialogResult with filePath,
 description.ja = "ファイル保存ダイアログを表示。FileDialogResult（filePath, fileName, success）を返す"
 description.ko = "파일 저장 대화상자 표시. filePath, fileName, success가 담긴 FileDialogResult 반환"
 related = ["FileDialogResult", "saveDialogAsync", "loadDialog", "saveTextFile"]
-platform_note.en = "Sync file save. iOS no-ops (use saveDialogAsync); Android returns empty result (no JNI Intent yet); Web/WASM logs a warning and returns empty."
-platform_note.ja = "同期のファイル保存。iOS はスタブ（saveDialogAsync を使う）、Android は空の結果を返す（JNI Intent 未実装）、Web/WASM は警告を出して空を返す。"
+platform_note.en = "Sync file save. iOS logs an error and returns an empty result (use saveDialogAsync); Android returns empty result (no JNI Intent yet); Web/WASM logs a warning and returns empty."
+platform_note.ja = "同期のファイル保存。iOS はエラーログを出して空の結果を返すスタブ（saveDialogAsync を使う）、Android は空の結果を返す（JNI Intent 未実装）、Web/WASM は警告を出して空を返す。"
 
 ["saveDialogAsync"]
 category = "window_input"
