@@ -750,11 +750,12 @@ FontSamplers& fontSamplers() {
 // Settings and registries that app code and host code share (#249): the main
 // loop's rate and redraw requests, the projection defaults, the sokol_gl
 // budget, touch-as-mouse, the data path root, the bitmap font atlas and its
-// glyph registry, the overlay queries, the node id source and the current
-// window context. Each used to be an inline variable in its header, so a
-// Windows hot reload guest's setFps(), redraw(), setDataPathRoot(),
-// registerGlyph(), ... wrote a copy the host never read, and the guest never
-// saw what the host set.
+// glyph registry, the overlay queries, the node id source, the current window
+// context and the Apps attached to secondary windows. Each used to be an
+// inline variable in its header, so a Windows hot reload guest's setFps(),
+// redraw(), setDataPathRoot(), registerGlyph(), ... wrote a copy the host never
+// read, the guest never saw what the host set, and an App whose window the
+// host's close() released stayed attached in the guest's copy.
 //
 // Plain data (trivially destructible, constant-initialized) is a function-local
 // static. Objects with a destructor are leaked on purpose: code running in
@@ -843,6 +844,14 @@ WindowContext*& currentWindowCtx() {
 
 WindowContext& currentWindowContext() {
     return currentWindowCtxStorage ? *currentWindowCtxStorage : mainWindowContext();
+}
+
+// Window::setApp() (app code) adds to it and the platform close() (host code)
+// removes from it. Leaked like the ones above: ~Window() calls close(), and a
+// Window an app keeps in a global is destroyed at exit.
+std::unordered_set<const App*>& attachedApps() {
+    static auto* apps = new std::unordered_set<const App*>();
+    return *apps;
 }
 
 } // namespace internal

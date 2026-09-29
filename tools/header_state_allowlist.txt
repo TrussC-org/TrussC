@@ -108,7 +108,6 @@ core/include/tc/app/tcHeadlessState.h trussc::headless::active    # no-hot-reloa
 core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::load::loadCounter   # host-only: the hot reload host itself
 core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::create::generation  # host-only: the hot reload host itself
 core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::g_host  # host-only: the hot reload host itself (a guest's copy is constructed, never used)
-core/include/tc/app/tcWindow.h trussc::internal::attachedApps     # harmless: double-attach misuse guard, per binary is enough (see its comment)
 
 # --- tc/gpu
 core/include/tc/gpu/tcFbo.h trussc::Fbo::ensureSharedMip::quadVerts   # immutable: vertex data

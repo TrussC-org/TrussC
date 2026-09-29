@@ -296,7 +296,7 @@ void Window::close() {
     if (app_) {
         app_->exit();
         app_->cleanup();
-        internal::attachedApps.erase(app_.get());
+        internal::attachedApps().erase(app_.get());
         app_.reset();
         ctx_.rootNode = nullptr;
     }

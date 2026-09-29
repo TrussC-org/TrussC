@@ -247,26 +247,30 @@ inline Window::Window() {
 }
 
 namespace internal {
-// Apps currently driving a window (double-attach guard). An inline variable:
-// a hot-reload guest gets its own copy, so the guard is per-binary — fine for
-// a misuse check. (runApp unification — "runApp = create main window +
+// Apps currently driving a window (double-attach guard). One set per process,
+// defined in tcGlobal.cpp: setApp() below adds to it from app code, and the
+// platform close() (TrussC.lib) removes from it, so under hot reload the guest
+// adds and the host removes. With a copy per module a Windows guest never saw
+// the removal, and re-attaching an App after its window closed was refused.
+// Main thread only. (runApp unification — "runApp = create main window +
 // setApp" — is a future refactor; the main App is guarded via rootNode.)
-inline std::unordered_set<const App*> attachedApps;
+std::unordered_set<const App*>& attachedApps();
 }
 
 inline void Window::setApp(std::shared_ptr<App> app) {
+    auto& attached = internal::attachedApps();
     if (app) {
         if (app.get() == internal::mainWindowContext().rootNode) {
             logError("Window") << "setApp(): this App is the running main App";
             return;
         }
-        if (internal::attachedApps.count(app.get())) {
+        if (attached.count(app.get())) {
             logError("Window") << "setApp(): this App already drives another window";
             return;
         }
     }
-    if (app_) internal::attachedApps.erase(app_.get());
-    if (app) internal::attachedApps.insert(app.get());
+    if (app_) attached.erase(app_.get());
+    if (app) attached.insert(app.get());
     app_ = std::move(app);
     ctx_.rootNode = app_.get();
 }
