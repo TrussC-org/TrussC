@@ -16,7 +16,8 @@
 //      The independent VSYNC update and the default draw-synced update
 //      (setFps(VSYNC) / setFps(N), runSyncedUpdate) record their rate too.
 //   4. setFps()/setIndependentFps() at runtime do not replay the time spent in
-//      the previous mode; the first frame after a switch runs a step / draws;
+//      the previous mode (neither as fixed steps nor as the first measured
+//      dt); the first frame after a switch runs a step / draws;
 //      re-applying the current rates (every frame, from update() or draw())
 //      changes nothing.
 //   5. Fixed-fps draw skip / window throttle: no skipped frames when the
@@ -933,6 +934,47 @@ static void testTimersCountFromCreation() {
 }
 
 // ---------------------------------------------------------------------------
+// 6c. A mode switch restarts the measured delta (guard 4)
+// ---------------------------------------------------------------------------
+// After an hour of EVENT_DRIVEN update (no update runs), switching to
+// setFps(VSYNC) must not report the hour as the first dt: every Node timer
+// would count it at once. The first dt after a switch is sokol's frame
+// estimate (1/60 here, before sokol_app runs).
+static void testModeSwitchMeasuredDelta() {
+    setFps(VSYNC);
+    auto node = make_shared<TimerNode>();
+    g_loopNode = node.get();
+    internal::appUpdateFunc = timerLoopUpdate;
+    int fired = 0;
+    bool created = false;
+    g_loopDuring = [&] {
+        if (created) return;
+        created = true;
+        node->callAfter(1.0, [&] { ++fired; });
+    };
+    internal::runSyncedUpdate();            // creates the timer
+    g_loopDuring = nullptr;
+    internal::runSyncedUpdate();            // it is counting now
+    setIndependentFps(EVENT_DRIVEN, VSYNC);
+    internal::runIndependentUpdates(Clk::now());   // no update runs
+    // As if that last update had been an hour ago.
+    internal::mainWindowContext().mainUpdateCallTime -= secs(3600.0);
+    setFps(VSYNC);
+    internal::runSyncedUpdate();
+    const double dt = getDeltaTime();
+    checkf("mode switch: the first dt after an hour of EVENT_DRIVEN is about a frame (< 0.1 s)",
+           dt >= 0.0 && dt < 0.1, dt);
+    check("mode switch: ...so no timer fires early", fired == 0);
+    sleepMs(20);
+    internal::runSyncedUpdate();
+    checkf("mode switch: the next dt is measured again (>= 20 ms)",
+           getDeltaTime() >= 0.0199 && getDeltaTime() < 5.0, getDeltaTime());
+    node->cancelAllTimers();
+    internal::appUpdateFunc = nullptr;
+    g_loopNode = nullptr;
+}
+
+// ---------------------------------------------------------------------------
 // 7. ScreenRecorder pacing
 // ---------------------------------------------------------------------------
 struct PaceResult { int captures = 0; bool ptsIncreasing = true; double minDelta = 1e9, maxDelta = 0; vector<double> pts; };
@@ -1263,6 +1305,7 @@ int main() {
     testNodeTimers();
     testNodeTimersInLoop();
     testTimersCountFromCreation();
+    testModeSwitchMeasuredDelta();
     testRecorderPacing();
     testHealthUptime();
     testHeadlessLoop();
