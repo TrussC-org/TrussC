@@ -12,10 +12,15 @@ using namespace tc;
 // window-context root slot, Event COW listener lists). The extra update
 // listener widens the churn on the global events() singleton.
 //
-// It also registers an MCP tool, a status entry and a status image, each
+// It also registers MCP tools, a status entry and a status image, each
 // capturing `this` — the usual app pattern. On reload the host must remove
 // them before this App is deleted, or the old build's handlers stay listed
-// and callable with a dangling `this` (#227).
+// and callable with a dangling `this` (#227). The host must also SEE them: a
+// Windows guest DLL used to register into its own copy of the registry (#249).
+// guest_probe answers with the registration owner this generation was created
+// under, so the host can tell the new generation answered, not an old one;
+// guest_deferred defers its reply the way screenshot tools do; the control
+// tools are registered from guest code the way apps do (in setup()).
 //
 // setup/draw/exit (tcApp.cpp) only run in `--app` mode (see main.cpp); the
 // lifecycle cycles never call them. They use tcxImGui so the guest target is
@@ -25,10 +30,22 @@ class tcApp : public App {
 public:
     tcApp() {
         updateListener_ = events().update.listen([this]() { ticks_++; });
+        // The owner the host tagged this generation with (an identity only)
+        const uint64_t generation = (uint64_t)(uintptr_t)mcp::detail::registrationOwner();
         mcp::tool("guest_probe", "hotReloadLifecycle guest tool")
-            .bind(std::function<json()>([this]() -> json { return json{{"ticks", ticks_}}; }));
+            .bind(std::function<json()>([this, generation]() -> json {
+                return json{{"ticks", ticks_}, {"generation", generation}};
+            }));
+        mcp::tool("guest_deferred", "hotReloadLifecycle guest tool answering after the frame")
+            .bind(std::function<json()>([generation]() -> json {
+                mcp::deferToolResultUntilAfterFrame([generation]() -> json {
+                    return json{{"deferred", true}, {"generation", generation}};
+                });
+                return json(nullptr);  // replaced by the deferred result
+            }));
         mcp::status("guest_status", std::function<double()>([this]() { return (double)ticks_; }));
         mcp::statusImage("guest_image", [this]() { (void)ticks_; return Pixels(); });
+        mcp::registerControlTools();
     }
 
     void setup() override;
