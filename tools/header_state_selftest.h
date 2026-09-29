@@ -6,6 +6,7 @@
 // apart.
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <iosfwd>
 #include <string>
@@ -65,6 +66,32 @@ struct V {
 };
 inline V& operator+=(V& a, int) { return a; }
 inline int& afterFreeCompound() { static int b = 0; return b; }  // expect: fx::afterFreeCompound::b
+
+// --- Parentheses that are not a parameter list: decltype / alignas, and a
+// direct initializer made of names and literals
+inline int producer() { return 0; }
+constexpr int kCount = 3;
+constexpr const char* kDefaultText = "text";
+inline decltype(producer()) declTypeVar;                    // expect: fx::declTypeVar
+alignas(64) inline std::atomic<int> alignedAtomic{0};       // expect: fx::alignedAtomic
+inline std::vector<int> exprInit(kCount);                   // expect: fx::exprInit
+inline std::vector<int> exprInit2(kCount * 2, kCount);      // expect: fx::exprInit2
+static std::string staticExprInit(kDefaultText);            // expect: fx::staticExprInit
+static std::string qualifiedExprInit(fx::kDefaultText);     // expect: fx::qualifiedExprInit
+struct AlignedMember {
+    alignas(16) static inline int alignedStatic = 0;        // expect: fx::AlignedMember::alignedStatic
+    static inline decltype(kCount + 0) declTypeMember = 0;  // expect: fx::AlignedMember::declTypeMember
+};
+inline void alignedLocal() {
+    alignas(16) static int alignedLocalVar = 0;             // expect: fx::alignedLocal::alignedLocalVar
+    static alignas(16) int alignedLocalVar2 = 0;            // expect: fx::alignedLocal::alignedLocalVar2
+}
+static std::string notFlaggedStaticFnDecl(const std::string& s);
+inline int notFlaggedInlineFnDecl(Settings s);
+static int notFlaggedUnnamedParam(int, float);
+static Settings notFlaggedPointerParam(Settings* p);
+inline std::vector<int> notFlaggedVexingParse();
+std::vector<int> notFlaggedNonInlineVar(kCount);           // neither inline nor static: a link error in a header, not a split
 
 // --- Braced default arguments are not bodies
 struct Settings { int x = 0; };

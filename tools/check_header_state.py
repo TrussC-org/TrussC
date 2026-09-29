@@ -27,7 +27,10 @@ What is flagged, in core/include (vendored libraries excluded):
   - a `static` / `thread_local` variable in a `#define` body: every function
     using the macro gets its own function-local static (key: MACRO::name)
 Every declarator of a declaration counts (`static int a = 0, b = 1;` is two
-findings). `constexpr` variables are not flagged: compile-time constants have
+findings). Parentheses of decltype / alignas / sizeof / __declspec are part
+of the type, and a bodiless namespace-scope `inline` / `static` declaration
+whose parentheses hold names and literals (`inline std::vector<int>
+v(kCount);`) is a variable, not a function (see looks_like_initializer). `constexpr` variables are not flagged: compile-time constants have
 no run-time state to split. Nor are `const` namespace-scope `static` and
 anonymous-namespace variables, any more than a plain namespace-scope `const`:
 all three have internal linkage, so every translation unit on every platform
@@ -84,6 +87,16 @@ RAW_PREFIXES = {"R", "u8R", "uR", "UR", "LR"}
 TRAILING_QUALIFIERS = {"const", "volatile", "noexcept", "override", "final",
                        "mutable", "constexpr", "consteval", "&", "&&"}
 IDENT = re.compile(r"[A-Za-z_]\w*$")
+# Names whose parentheses are part of a type or a specifier, never a
+# parameter list or an initializer: `inline decltype(f()) g;`,
+# `alignas(64) inline int x;`
+SPECIFIER_CALLS = {"decltype", "alignas", "alignof", "sizeof", "typeof", "__typeof__",
+                   "__declspec", "__attribute__"}
+# Words that make a parenthesized list a parameter list (see looks_like_initializer)
+TYPE_WORDS = {"void", "bool", "char", "char8_t", "char16_t", "char32_t", "wchar_t", "short",
+              "int", "long", "float", "double", "signed", "unsigned", "auto", "const",
+              "volatile", "struct", "class", "enum", "typename", "size_t", "ptrdiff_t"}
+FIXED_WIDTH = re.compile(r"u?int(8|16|32|64|ptr|max)_t$")
 MACRO = re.compile(r"[A-Z][A-Z0-9]*_[A-Z0-9_]+$")   # TC_PLATFORMS, TC_LUA_BIND, ...
 
 
@@ -344,7 +357,7 @@ def classify_head(head):
     if "operator" in head:
         return "function", "operator"
     for i, t in top_level(head):
-        if t != "(":
+        if t != "(" or (i > 0 and head[i - 1] in SPECIFIER_CALLS):
             continue
         nxt = head[i + 1] if i + 1 < len(head) else ""
         if nxt in ("*", "&", "^") or (is_ident(nxt) and head[i + 2:i + 4] == ["::", "*"]):
@@ -352,7 +365,7 @@ def classify_head(head):
             group_end = skip_group(head, i, "(", ")")
             idents = [x for x in head[i + 1:group_end] if is_ident(x) and x != "const"]
             return "variable", (idents[-1] if idents else None)
-        if i > 0 and is_ident(head[i - 1]) and head[i - 1] not in ("decltype", "alignas", "sizeof"):
+        if i > 0 and is_ident(head[i - 1]):
             if nxt[:1].isdigit() or nxt in ('"', "-", "+", "{"):
                 # A parameter list never starts with a literal: this is a
                 # direct-initialized variable (`inline std::vector<int> v(3);`)
@@ -368,6 +381,51 @@ def classify_head(head):
     if not idents:
         return "other", None
     return "variable", idents[-1]
+
+
+def looks_like_initializer(head):
+    """In a bodiless declaration `... name(args);`, do the parentheses hold an
+    initializer (names, literals, arithmetic: `v(kCount * 2)`) rather than a
+    parameter list? A parameter has a type: a type keyword or `const`, two
+    names in a row (`Foo f`), a pointer or reference declarator (`Foo* p`,
+    `Foo&`), `...`, or a template argument list. `()` declares a function. A
+    lone user-type name is read as an initializer, so an unnamed parameter
+    (`static int f(Foo);`) is a false finding: name the parameter."""
+    for i, t in top_level(head):
+        if t != "(" or i == 0 or head[i - 1] in SPECIFIER_CALLS:
+            continue
+        inner = head[i + 1:skip_group(head, i, "(", ")") - 1]
+        if not inner:
+            return False
+        args, cur, depth = [], [], 0
+        for x in inner:
+            if x in ("(", "[", "{"):
+                depth += 1
+            elif x in (")", "]", "}"):
+                depth -= 1
+            if x == "," and depth == 0:
+                args.append(cur)
+                cur = []
+            else:
+                cur.append(x)
+        args.append(cur)
+        for a in args:
+            if not a:
+                return False
+            for k, x in enumerate(a):
+                prev = a[k - 1] if k else None
+                if x in TYPE_WORDS or FIXED_WIDTH.match(x) or x in ("...", "<", "&&"):
+                    return False
+                if is_ident(x) and prev is not None and is_ident(prev):
+                    return False                        # `Foo f`
+                if x in ("*", "&") and prev is not None and (is_ident(prev) or prev in (">", "*")):
+                    tail = a[k + 1:]
+                    while tail and tail[0] in ("*", "&", "const"):
+                        tail = tail[1:]
+                    if not tail or (is_ident(tail[0]) and (len(tail) == 1 or tail[1] in ("=", "["))):
+                        return False                    # `Foo* p`, `Foo&`
+        return True
+    return False
 
 
 def first_declarator(head):
@@ -540,12 +598,12 @@ def static_local(rest):
     head = first_declarator(declaration_head(rest))
     cut = head
     for k, t in top_level(head):
-        if t in ("(", "[", "{"):
+        if t in ("(", "[", "{") and not (k and head[k - 1] in SPECIFIER_CALLS):
             cut = head[:k]
             break
     if "constexpr" in cut:
         return None
-    idents = [t for t in cut if is_ident(t) and t not in
+    idents = [t for t in cut if is_ident(t) and t not in SPECIFIER_CALLS and t not in
               ("static", "thread_local", "const", "inline", "mutable")]
     return [idents[-1] if idents else "?"] + later_declarators(rest, len(head)), is_immutable(cut)
 
@@ -586,6 +644,12 @@ def scan_tokens(tokens, rel):
         toks = strip_prefix(stmt)
         head = first_declarator(declaration_head(toks))
         what, name = classify_head(head)
+        if (what == "function" and name != "operator" and stack[-1]["kind"] == "ns"
+                and ({"inline", "static"} & set(head)) and "extern" not in head
+                and looks_like_initializer(head)):
+            # `inline std::vector<int> v(kCount);`: an initializer, not
+            # parameters
+            what, name = "variable", name.split("::")[-1]
         if what != "variable" or not name or "constexpr" in head:
             return
         names = [name] + later_declarators(toks, len(head))
@@ -659,7 +723,8 @@ def scan_tokens(tokens, rel):
             rest = [t for t in b[keys[0] + 1:] if is_ident(t) and t not in ("final", "alignas")]
             return {"kind": "class", "name": rest[0] if rest else "<anon>", "keep": True}
         what, nm = classify_head(b)
-        if what == "function" or any(t == "(" for _, t in top):
+        if what == "function" or any(t == "(" and not (i and b[i - 1] in SPECIFIER_CALLS)
+                                     for i, t in top):
             return {"kind": "func", "name": nm or ""}
         return {"kind": "init", "name": "", "keep": True}           # `name{ ... }`
 
@@ -780,8 +845,9 @@ def scan_macros(text, rel):
                 continue
             rest = statement_from(words, k)
             head = declaration_head(rest)
-            if len(rest) > len(head) and rest[len(head)] == "{" and classify_head(head)[0] == "function":
-                continue   # a (static member) function the macro defines
+            if classify_head(head)[0] == "function" and (
+                    (len(rest) > len(head) and rest[len(head)] == "{") or not looks_like_initializer(head)):
+                continue   # a (static member) function the macro declares or defines
             decl = static_local(rest)
             if decl:
                 names, immutable = decl
