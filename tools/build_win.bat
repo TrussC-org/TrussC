@@ -54,9 +54,10 @@ set "CACHED_CXX="
 set "CACHED_CC="
 for /f "usebackq tokens=1,* delims==" %%i in (`findstr /b /c:"CMAKE_CXX_COMPILER:FILEPATH=" "CMakeCache.txt"`) do set "CACHED_CXX=%%j"
 for /f "usebackq tokens=1,* delims==" %%i in (`findstr /b /c:"CMAKE_C_COMPILER:FILEPATH=" "CMakeCache.txt"`) do set "CACHED_CC=%%j"
-REM Always print what was read, so a log shows which branch ran (#251: in one
-REM CI run this check stayed silent and the cause could not be reconstructed).
-echo Cached compilers: CXX=[%CACHED_CXX%] C=[%CACHED_CC%]
+REM Print what was read, so a log shows which branch ran (#251: in one CI run
+REM this check stayed silent and the cause could not be reconstructed). The
+REM quotes keep a path containing & or ^ from breaking the line.
+echo Cached compilers: CXX="%CACHED_CXX%" C="%CACHED_CC%"
 if defined CACHED_CXX set "CACHED_CXX=%CACHED_CXX:/=\%"
 if defined CACHED_CC set "CACHED_CC=%CACHED_CC:/=\%"
 if defined CACHED_CXX if not exist "%CACHED_CXX%" set "CACHE_CLEAN_REASON=recorded compiler no longer exists"
