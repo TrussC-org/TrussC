@@ -564,7 +564,7 @@ inline void registerInspectionTools() {
                                {"backend", dev.backend},
                                {"sampleRate", engine.getSampleRate()},
                                {"channels", engine.getChannels()},
-                               {"bufferSize", engine.getBufferSize()},
+                               {"requestedBufferSize", engine.getBufferSize()},  // 0 = backend default; the granted size is periodFrames
                                {"periodFrames", dev.periodFrames},
                                {"deviceSampleRate", dev.deviceSampleRate},
                                {"deviceChannels", dev.deviceChannels},

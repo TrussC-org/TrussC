@@ -312,7 +312,7 @@ std::vector<AudioVoiceInfo> AudioEngine::getVoices() {
         info.streaming = (src.kind() == SoundSource::Stream);
         const fs::path p = info.streaming ? static_cast<const SoundStream&>(src).getPath()
                                           : static_cast<const SoundBuffer&>(src).getPath();
-        info.path     = internal::pathToUtf8(p);
+        info.path     = internal::pathToUtf8(p.lexically_normal());
         info.paused   = v->paused;
         info.loop     = v->loop;
         // positionF counts source frames for eager voices and engine-rate

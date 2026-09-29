@@ -337,7 +337,7 @@ int main() {
               state["dropped"].dump());
         check("tool: voices list the playing file",
               state["voices"].size() == 1 &&
-              state["voices"][0].value("file", "") == internal::pathToUtf8(wav),
+              state["voices"][0].value("file", "") == internal::pathToUtf8(wav.lexically_normal()),
               state["voices"].dump());
         check("tool: master meters and thread load present",
               state["master"].contains("peak") && state["master"].value("clippedSamples", (uint64_t)0) > 0 &&
