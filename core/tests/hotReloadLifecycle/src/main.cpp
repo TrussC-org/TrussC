@@ -73,6 +73,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -83,30 +84,40 @@ namespace fs = std::filesystem;
 // drainDeferredResponses() is the afterFrame step deferred tools wait for.
 // Returns the reply body, or "" on a transport failure / timeout.
 static std::string mcpPost(int port, const std::string& body) {
-    std::atomic<bool> done{false};
-    std::string reply;
-    std::thread worker([&] {
+    // Everything the worker touches lives in this shared block, not in this
+    // frame: past the deadline the worker is detached and may still finish
+    // later (name lookup and each send / recv have their own timeouts, the
+    // whole request has none), so it must not write into a returned frame or
+    // hand its late reply to the next request.
+    struct Exchange {
+        std::string body;
+        std::string reply;
+        std::atomic<bool> done{false};
+    };
+    auto ex = std::make_shared<Exchange>();
+    ex->body = body;
+    std::thread worker([ex, port] {
         // Same name the server bound to: "localhost" resolves to ::1 first on
         // some hosts (CI runners), where 127.0.0.1 would find nothing.
         httplib::Client cli("localhost", port);
         cli.set_connection_timeout(5);
         cli.set_read_timeout(10);
-        auto r = cli.Post("/mcp", body, "application/json");
-        if (r && r->status == 200) reply = r->body;
-        done = true;
+        auto r = cli.Post("/mcp", ex->body, "application/json");
+        if (r && r->status == 200) ex->reply = r->body;
+        ex->done = true;
     });
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
-    while (!done && std::chrono::steady_clock::now() < deadline) {
+    while (!ex->done && std::chrono::steady_clock::now() < deadline) {
         mcp::processHttpQueue();
         mcp::drainDeferredResponses();
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    if (!done) {
+    if (!ex->done) {
         worker.detach();
         return "";
     }
     worker.join();
-    return reply;
+    return ex->reply;
 }
 
 // tools/call -> the tool's content json (the text block, parsed), or a
@@ -240,10 +251,11 @@ static int runCycles(const std::string& guestPath, int port) {
         if (!statusListed) return fail(11, "tc_get_status over HTTP does not report guest_status");
         const int pressesBefore = g_hostKeyPresses.load();
         json pressed = callTool(port, "tc_key_press", json{{"key", 65}});
-        callTool(port, "tc_key_release", json{{"key", 65}});
+        json released = callTool(port, "tc_key_release", json{{"key", 65}});
         if (pressed.is_discarded() || g_hostKeyPresses.load() != pressesBefore + 1) {
             return fail(12, "the guest-registered tc_key_press did not reach the host's key dispatch");
         }
+        if (released.is_discarded()) return fail(25, "the guest-registered tc_key_release did not answer");
 
         // Settings and registries shared by app code and the core loop (#249).
         // The host resets them first, so each generation must write its own.
