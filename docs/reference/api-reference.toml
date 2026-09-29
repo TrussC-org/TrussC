@@ -7798,10 +7798,12 @@ Opens the port as 8N1 without flow control and returns false when it cannot
 be opened or configured. Any rate the driver supports works: on macOS and Linux,
 rates without a termios B-constant (250000, 74880, 921600 on macOS, ...) are set
 with `IOSSIOSPEED` (macOS) or `termios2` (Linux); on Windows the rate goes to
-the driver unchanged. A rate that cannot be applied makes `setup()` log an error
-and return false, instead of opening at another speed. The log line names the
-rate the port runs at, and a warning appears if a Linux driver reports a rate
-other than the one requested.
+the driver unchanged. A rate the driver rejects makes `setup()` log an error
+and return false, instead of opening at another speed. A Linux driver may
+instead replace a rate set through `termios2` with another one (often 9600):
+`setup()` reads the rate back and fails when it is more than 2% off, and
+accepts a closer one (the driver's nearest divisor) with a warning that names
+it.
 
 Calling `setup()` again, for example to reconnect after
 [`isConnected()`](#Serial::isConnected) turned false, closes the previous port
@@ -7813,9 +7815,11 @@ details.ja = '''
 ドライバが対応するレートなら何でも使える。macOS / Linux では termios に
 B 定数が無いレート（250000、74880、macOS の 921600 など）を `IOSSIOSPEED`（macOS）
 または `termios2`（Linux）で設定する。Windows ではレートをそのままドライバに渡す。
-適用できないレートでは、別の速度で開くのではなく、エラーをログに出して false を
-返す。ログには実際に動作しているレートが出る。Linux のドライバが要求と違う
-レートを返した場合は警告も出る。
+ドライバが拒否したレートでは、別の速度で開くのではなく、エラーをログに出して
+false を返す。Linux のドライバは `termios2` で設定したレートを拒否せず、別のレート
+（多くは 9600）に置き換えることがある。`setup()` は適用されたレートを読み戻し、
+要求と 2% を超えて違えば失敗する。それより近いレート（ドライバが出せる最も近い値）は、
+そのレートを示す警告を出して受け入れる。
 
 [`isConnected()`](#Serial::isConnected) が false になった後の再接続などで
 `setup()` を呼び直すと、先に前のポートを閉じる。開くと DTR が再びアサートされ、
@@ -7826,9 +7830,11 @@ details.ko = '''
 드라이버가 지원하는 속도라면 무엇이든 쓸 수 있다. macOS / Linux에서는 termios에
 B 상수가 없는 속도(250000, 74880, macOS의 921600 등)를 `IOSSIOSPEED`(macOS) 또는
 `termios2`(Linux)로 설정한다. Windows에서는 속도를 그대로 드라이버에 전달한다.
-적용할 수 없는 속도라면 다른 속도로 여는 대신 오류를 로그로 남기고 false를
-반환한다. 로그에는 실제로 동작하는 속도가 나오며, Linux 드라이버가 요청과 다른
-속도를 보고하면 경고도 나온다.
+드라이버가 거부한 속도라면 다른 속도로 여는 대신 오류를 로그로 남기고 false를
+반환한다. Linux 드라이버는 `termios2`로 설정한 속도를 거부하지 않고 다른 속도
+(대개 9600)로 바꿔 적용하기도 한다. `setup()`은 적용된 속도를 다시 읽어 요청과
+2%를 넘게 다르면 실패하고, 그보다 가까운 속도(드라이버가 낼 수 있는 가장 가까운 값)는
+그 속도를 알리는 경고와 함께 받아들인다.
 
 [`isConnected()`](#Serial::isConnected)가 false가 된 뒤 재연결하는 경우 등
 `setup()`을 다시 호출하면 이전 포트를 먼저 닫는다. 열 때 DTR이 다시 어서트되어

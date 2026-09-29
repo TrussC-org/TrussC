@@ -4,10 +4,10 @@
 //
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 //
-// Guards the invariant: Serial::setup() never reports success at a speed
-// other than the one asked for. Before the fix, a rate missing from the
-// termios table (250000, 74880, and 921600 on macOS) silently opened at 9600
-// while setup() returned true and logged the requested rate.
+// Guards the invariant: Serial::setup() does not report success after opening
+// at a speed other than the one asked for. Before the fix, a rate missing from
+// the termios table (250000, 74880, and 921600 on macOS) silently opened at
+// 9600 while setup() returned true and logged the requested rate.
 //
 //  - Rates with a termios B-constant apply as before.
 //  - Linux: any other rate is applied exactly (termios2 + BOTHER).
@@ -15,6 +15,11 @@
 //    here setup() must return false (real serial drivers accept it; that part
 //    needs hardware).
 //  - A rate <= 0 is refused.
+//  - Linux read-back: a real driver that cannot generate a rate writes back
+//    another one (often 9600) instead of failing, and setup() must then fail.
+//    A pty applies any rate as given, so the rule that tells a fallback from
+//    a driver's nearest divisor (internal::isBaudRateClose()) is checked on
+//    its own.
 //
 // A pseudo-terminal stands in for the port; its master reads back the speed
 // Serial set on the slave. POSIX only; prints SKIP and passes on Windows,
@@ -156,6 +161,18 @@ int main() {
     openAt(250000, &readback);
     check("no \"using 9600\" fallback", !logged("using 9600"));
     check("no silent 9600 for 250000", readback != 9600);
+
+    // --- 5. the read-back rule ------------------------------------------------
+    // A fallback is far off; a nearest divisor (CP2102N: 74766 for 74880) is
+    // within the kernel's 2%.
+    check("read-back 9600 for 250000 is not the rate", !internal::isBaudRateClose(250000, 9600));
+    check("read-back 74766 for 74880 is the rate", internal::isBaudRateClose(74880, 74766));
+    check("read-back 250000 for 250000 is the rate", internal::isBaudRateClose(250000, 250000));
+    check("read-back 2% off is the rate", internal::isBaudRateClose(100000, 98000) &&
+                                          internal::isBaudRateClose(100000, 102000));
+    check("read-back more than 2% off is not the rate", !internal::isBaudRateClose(100000, 97999) &&
+                                                        !internal::isBaudRateClose(100000, 102001));
+    check("read-back 0 is not the rate", !internal::isBaudRateClose(9600, 0));
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;

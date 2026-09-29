@@ -99,6 +99,17 @@ namespace internal {
     // or the requested rate where there is no read-back (macOS).
     // Lives in tcSerial.cpp: <asm/termbits.h> clashes with <termios.h>.
     bool setSerialCustomBaudRate(int fd, int baudRate, int& appliedBaudRate);
+
+    // Whether the rate a driver reports back counts as the requested one.
+    // A Linux driver that cannot generate a rate does not fail the ioctl: it
+    // writes back another rate instead, often the previous one or 9600. A
+    // driver's nearest divisor stays close, so allow the 2% the kernel itself
+    // uses when it matches a rate to a B-constant (tty_termios_encode_baud_rate).
+    inline bool isBaudRateClose(int requested, int applied) {
+        long long diff = static_cast<long long>(applied) - requested;
+        long long allowed = requested / 50;
+        return diff >= -allowed && diff <= allowed;
+    }
 }
 #endif
 
@@ -421,6 +432,16 @@ public:
             int err = errno;
             logError() << "Serial: cannot set " << baudRate << " baud on " << portName
                        << " (" << std::strerror(err) << ")";
+            ::close(fd_);
+            fd_ = -1;
+            return false;
+        }
+        // A driver that could not generate the rate may have applied another
+        // one (see isBaudRateClose()): that is a failure, not a connection at
+        // the wrong speed.
+        if (!internal::isBaudRateClose(baudRate, appliedBaudRate)) {
+            logError() << "Serial: cannot set " << baudRate << " baud on " << portName
+                       << " (the driver applied " << appliedBaudRate << ")";
             ::close(fd_);
             fd_ = -1;
             return false;
