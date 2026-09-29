@@ -1,14 +1,17 @@
 // Fixture for tools/check_header_state.py (its self-test runs on every check).
 // Not compiled and not included anywhere. A declaration the scanner must flag
 // carries an `expect:` comment listing the keys it must report on that line;
-// the scanner must report exactly these, nothing more. Each block below is a
+// the scanner must report exactly these, nothing more. A key ending in @const
+// must be reported as immutable, every other one as mutable. Each block below is a
 // construct that once hid state from the scanner or that it must keep telling
 // apart.
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <functional>
 #include <iosfwd>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -17,7 +20,7 @@ namespace fx {
 
 // --- What is flagged, and what is not
 inline int inlineVar = 0;                                   // expect: fx::inlineVar
-inline const int inlineConst = 1;                           // expect: fx::inlineConst
+inline const int inlineConst = 1;                           // expect: fx::inlineConst@const
 constexpr int notFlaggedConstexpr = 2;
 inline constexpr int notFlaggedInlineConstexpr = 3;
 static int nsStatic = 0;                                    // expect: fx::nsStatic
@@ -31,7 +34,7 @@ inline int& perThread() { thread_local int t = 0; return t; }  // expect: fx::pe
 inline int notFlaggedLocal() { int plain = 0; return plain; }
 inline std::vector<int> directInit(3);                      // expect: fx::directInit
 inline std::string directInitText("text");                  // expect: fx::directInitText
-inline const std::string constDirectInit("text");           // expect: fx::constDirectInit
+inline const std::string constDirectInit("text");           // expect: fx::constDirectInit@const
 std::vector<int> notFlaggedFunctionDecl(int count);
 
 struct Holder {
@@ -66,6 +69,30 @@ struct V {
 };
 inline V& operator+=(V& a, int) { return a; }
 inline int& afterFreeCompound() { static int b = 0; return b; }  // expect: fx::afterFreeCompound::b
+
+// --- Immutable only when nothing reachable through it can change
+struct Registry { int n = 0; };
+static Registry* const constPtrToMutable = nullptr;         // expect: fx::constPtrToMutable
+static const std::unique_ptr<Registry> constSmartPtr;       // expect: fx::constSmartPtr
+static const std::shared_ptr<const Registry> constSharedPtr;  // expect: fx::constSharedPtr
+static const std::vector<Registry*> constVectorOfPtrs;      // expect: fx::constVectorOfPtrs
+static const std::array<int, 2> notFlaggedConstArray = {1, 2};
+static const char* const notFlaggedConstTable[] = {"a"};
+static const std::vector<const char*> notFlaggedConstVectorOfConst;
+static const int* ptrToConst = nullptr;                     // expect: fx::ptrToConst
+inline const char* const constTable[] = {"a", "b"};         // expect: fx::constTable@const
+inline const Registry& constRef = *static_cast<const Registry*>(nullptr);  // expect: fx::constRef@const
+inline Registry* const inlineConstPtr = nullptr;            // expect: fx::inlineConstPtr
+// const only inside the template arguments: read as mutable (conservative)
+inline std::array<const int, 2> arrayOfConst = {1, 2};      // expect: fx::arrayOfConst
+inline void (*const constFnPtr)(int) = nullptr;             // expect: fx::constFnPtr@const
+inline const char* const* const ptrTable = nullptr;         // expect: fx::ptrTable@const
+inline void pointerLocals() {
+    static Registry* const reg = new Registry();            // expect: fx::pointerLocals::reg
+    static const std::unique_ptr<Registry> owned;           // expect: fx::pointerLocals::owned
+    static const char* const names[] = {"x"};               // expect: fx::pointerLocals::names@const
+    static const auto table = std::array<int, 2>{1, 2};     // expect: fx::pointerLocals::table@const
+}
 
 // --- Parentheses that are not a parameter list: decltype / alignas, and a
 // direct initializer made of names and literals

@@ -496,17 +496,48 @@ def class_qualified_name(head, name):
     return "::".join(parts) if len(parts) > 1 else None
 
 
+SMART_POINTERS = {"unique_ptr", "shared_ptr", "weak_ptr"}
+
+
 def is_immutable(head):
-    """A const object -- not merely a pointer (or function pointer) to const."""
+    """Const data that nothing reachable through it can change: a const
+    object that holds no pointer to mutable data. `const T`, `const T&`,
+    `const T* const` and `static const char* const names[]` are immutable;
+    `T* const` (the pointer is fixed, what it points to is not), a pointer to
+    const that can itself be reassigned, `const std::vector<T*>` and smart
+    pointers are not, so none of them passes as immutable data (the
+    immutable category and `::*` wildcards trust this)."""
     for i, t in top_level(head):
-        if t == "(" and i + 1 < len(head) and head[i + 1] in ("*", "&"):
+        if (t == "(" and i + 1 < len(head) and head[i + 1] in ("*", "&")
+                and not (i and head[i - 1] in SPECIFIER_CALLS)):
+            # Pointer to function: code is immutable, the pointer may not be
             group = head[i:skip_group(head, i, "(", ")")]
             return "const" in group
-    if "const" not in head:
+    if "const" not in head or SMART_POINTERS & set(head):
         return False
-    last_const = max(i for i, t in enumerate(head) if t == "const")
-    stars = [i for i, t in enumerate(head) if t == "*"]
-    return not stars or stars[-1] < last_const
+    # The declarator only: a direct initializer's arguments (`x(a * b)`) are
+    # not part of the type
+    decl = head
+    for i, t in top_level(head):
+        if t == "(" and i and is_ident(head[i - 1]) and head[i - 1] not in SPECIFIER_CALLS:
+            decl = head[:i]
+            break
+    # The object itself is const: a top-level const with no pointer after it
+    top = list(top_level(decl))
+    consts = [i for i, t in top if t == "const"]
+    stars = [i for i, t in top if t == "*"]
+    if not consts or (stars and stars[-1] > consts[-1]):
+        return False
+    # Every pointer, top level or in template arguments, points to const
+    start = 0
+    for i, t in enumerate(decl):
+        if t in ("<", ",", "("):
+            start = i + 1
+        elif t == "*":
+            if "const" not in decl[start:i]:
+                return False
+            start = i + 1
+    return True
 
 
 def group_start(buf, i, open_tok, close_tok):
@@ -1061,7 +1092,9 @@ def self_test():
             expected.update((lineno, k) for k in m.group(1).split())
     rel = os.path.relpath(SELFTEST, REPO).replace(os.sep, "/")
     found = scan_tokens(tokenize(blank(text)), rel) + scan_macros(text, rel)
-    got = {(f.line, f.key.split(" ", 1)[1]) for f in found}
+    # `key@const`: must be reported as immutable (the allowlist's immutable
+    # category and wildcards trust that); a plain key as mutable
+    got = {(f.line, f.key.split(" ", 1)[1] + ("@const" if f.immutable else "")) for f in found}
     errors = [f"{rel}:{ln}: expected finding not reported: {k}" for ln, k in sorted(expected - got)]
     errors += [f"{rel}:{ln}: unexpected finding: {k}" for ln, k in sorted(got - expected)]
     return errors
