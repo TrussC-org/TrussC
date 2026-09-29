@@ -52,5 +52,7 @@ the API still compiles/links/instantiates but do not assert runtime behaviour.
   (#230). Web: `grabScreen()` / `saveScreenshot()` return false, nothing is
   queued or created, and each API warns once. Native: `saveScreenshot()` still
   creates the destination folder, queues the capture and returns true. CI runs
-  the native half; the web half needs a WebAssembly build run under node (steps
-  in the header of `src/main.cpp`).
+  only the native half, which passes with or without the #230 fix: it catches
+  the web early return leaking into native builds, not the web fix being
+  undone. The web half is the part that guards #230, and it is run by hand: a
+  WebAssembly build run under node (steps in the header of `src/main.cpp`).

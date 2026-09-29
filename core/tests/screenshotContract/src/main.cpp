@@ -20,6 +20,11 @@
 //     return does not leak into native builds. grabScreen() is not called
 //     here: it reads the framebuffer back immediately, and a console test
 //     has no framebuffer.
+//
+// Only the web half fails without the #230 fix; the native half passes on
+// the pre-#230 code too, since #230 did not change native behaviour. CI runs
+// only the native half, so CI does not notice if the web fix is undone. Run
+// the web half by hand after touching the web screenshot path.
 // =============================================================================
 
 #include <TrussC.h>
@@ -60,12 +65,17 @@ int main() {
     check("grabScreen() returns false again", !grabScreen(px));
     check("grabScreen() warned exactly once", screenshotWarnings == 1);
 
+    // Count saveScreenshot()'s own warnings. A running total would pass by
+    // accident on the pre-#230 code, where grabScreen() warned on every call
+    // (2) and saveScreenshot() never warned (0).
+    const int warningsBeforeSave = screenshotWarnings;
     check("saveScreenshot(relative) returns false", !saveScreenshot("shot.png"));
     check("saveScreenshot(absolute) returns false",
           !saveScreenshot("/tmp/tc_screenshotContract/shot.png"));
     check("saveScreenshot(nested relative) returns false",
           !saveScreenshot("sub/dir/shot.jpg"));
-    check("saveScreenshot() warned exactly once", screenshotWarnings == 2);
+    check("saveScreenshot() warned exactly once",
+          screenshotWarnings - warningsBeforeSave == 1);
 
     check("nothing was queued", queue.empty());
     check("no destination folder was created (absolute)",
