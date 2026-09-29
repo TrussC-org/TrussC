@@ -58,10 +58,9 @@ static TcDocumentPickerDelegate* _tc_activePickerDelegate = nil;
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// Sync versions (linker stubs - never called due to header unavailable attr)
+// Sync versions: iOS can't block the main thread on a modal, so these log an
+// error and return a failed result. Use the async versions below.
 // ---------------------------------------------------------------------------
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wavailability"
 
 void alertDialog(const std::string& title, const std::string& message) {
     logError() << "[FileDialog] Sync alertDialog is not supported on iOS. Use alertDialogAsync.";
@@ -87,8 +86,6 @@ FileDialogResult saveDialog(const std::string& title,
     logError() << "[FileDialog] Sync saveDialog is not supported on iOS. Use saveDialogAsync.";
     return FileDialogResult{};
 }
-
-#pragma clang diagnostic pop
 
 // ---------------------------------------------------------------------------
 // alertDialogAsync - UIAlertController

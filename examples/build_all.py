@@ -307,7 +307,6 @@ def main():
     parser.add_argument('--web-only', action='store_true', help="Build for WebAssembly only (skip native build)")
     parser.add_argument('--test-only', action='store_true', help="Build ONLY AllFeaturesExample for quick CI check")
     parser.add_argument('--one-per-addon', action='store_true', help="Build the first example-* of each bundled addon (per-addon dependency compile coverage)")
-    parser.add_argument('--test-hot-reload', action='store_true', help="Build ONLY HotReloadExample (exercises the host/guest split + addon includes)")
     parser.add_argument('--addon-tests-only', action='store_true', help="Build AND RUN every addons/*/tests/ harness (console, non-zero exit fails). No-op if none exist.")
     parser.add_argument('--core-tests-only', action='store_true', help="Build AND RUN every core/tests/*/ harness (console, non-zero exit fails). No-op if none exist.")
     parser.add_argument('--verbose', action='store_true', help="Show detailed build output")
@@ -328,8 +327,6 @@ def main():
         Colors.print("Mode: AllFeaturesExample Only", Colors.YELLOW)
     if args.one_per_addon:
         Colors.print("Mode: One example per addon", Colors.YELLOW)
-    if args.test_hot_reload:
-        Colors.print("Mode: HotReloadExample Only", Colors.YELLOW)
     if args.addon_tests_only:
         Colors.print("Mode: Addon tests (build + run)", Colors.YELLOW)
     if args.core_tests_only:
@@ -370,13 +367,6 @@ def main():
             example_dirs = [test_example]
         else:
             Colors.print(f"AllFeaturesExample not found at: {test_example}", Colors.RED)
-            sys.exit(1)
-    elif args.test_hot_reload:
-        hr_example = os.path.join(ROOT_DIR, "examples", "tests", "HotReloadExample")
-        if os.path.exists(hr_example):
-            example_dirs = [hr_example]
-        else:
-            Colors.print(f"HotReloadExample not found at: {hr_example}", Colors.RED)
             sys.exit(1)
     elif args.one_per_addon:
         # Dependency compile coverage: one example is enough to prove an addon

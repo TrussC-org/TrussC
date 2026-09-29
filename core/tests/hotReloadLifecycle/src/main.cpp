@@ -32,8 +32,15 @@
 // MCP checks are skipped when that is the case.
 //
 // Exit code: 0 = survived all cycles (including process exit), non-zero or a
-// crash = regression. TC_RUN_APP is intentionally NOT used: no sokol loop, no
-// GPU, no file watcher, no cmake rebuild — CI-safe on every desktop platform.
+// crash = regression. The test itself never enters TC_RUN_APP: no sokol loop,
+// no GPU, no file watcher, no cmake rebuild — CI-safe on every desktop
+// platform.
+//
+// `hotReloadLifecycle --app` instead runs the real hot reload host
+// (TC_RUN_APP): a window, the file watcher and rebuilds, with the guest's
+// tcxImGui panel — edit src/tcApp.cpp while it runs to try a reload by hand.
+// CI only builds that path, which still links the host loop and the guest's
+// addon code on every desktop platform.
 // =============================================================================
 
 #include "tcApp.h"
@@ -83,8 +90,14 @@ static std::string findGuestLibrary() {
     return "";
 }
 
-int main() {
+int main(int argc, char** argv) {
     using namespace trussc::hot_reload;
+
+    if (argc > 1 && std::string(argv[1]) == "--app") {
+        WindowSettings settings;
+        settings.setSize(960, 600);
+        return TC_RUN_APP(tcApp, settings);
+    }
 
     std::string guestPath = findGuestLibrary();
     if (guestPath.empty()) {

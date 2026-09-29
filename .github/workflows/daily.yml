@@ -1,29 +1,71 @@
-# Exhaustive example sweep: every example (examples/ + every bundled addon
-# example) on every desktop platform + web. This replaced the old [full] mode
-# of build.yml. It exists to catch example rot (API drift, include-order
-# breakage, generated-build-file drift) that the per-PR gate — which builds
-# AllFeaturesExample + one example per addon — doesn't need to pay for.
+# Daily CI: the HEAVY lane. Everything the per-PR fast lane (build.yml)
+# leaves out: every example (examples/ + every bundled addon example, which
+# includes AllFeaturesExample) on every desktop platform + web, and the
+# behavioral tests again on top of the full build. It catches example rot
+# (API drift, include-order breakage, generated-build-file drift) and addon /
+# third-party build breakage.
 #
-# Runs weekly off the critical path; a failure opens (or comments on) an
-# issue instead of blocking anyone. Being a separate workflow, it never
-# touches the README badge, which points at build.yml.
-name: Full Sweep
+# Runs once a day on main, skipped when main hasn't changed since the last
+# completed daily run. A failure opens (or comments on) a tracking issue with
+# the commit range since the last green daily run, instead of blocking anyone.
+# Being a separate workflow, it never touches the README badge (build.yml).
+name: Daily
 
 on:
   schedule:
-    - cron: '0 18 * * 6' # Sat 18:00 UTC = Sun 03:00 JST
+    - cron: '0 18 * * *' # daily 18:00 UTC = 03:00 JST
   workflow_dispatch:
 
 concurrency:
-  group: full-sweep
+  group: daily
   cancel-in-progress: true
 
 permissions:
   contents: read
+  actions: read   # the check job reads this workflow's previous runs
   issues: write
 
 jobs:
+  # Skip the day when main is where the last completed daily run left it.
+  # A manual dispatch always runs. Also finds the last GREEN run's commit for
+  # the failure report's range.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.c.outputs.run }}
+      last_green: ${{ steps.c.outputs.last_green }}
+    steps:
+      - id: c
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # No history yet (first run, or the API can't find it): run.
+          if ! runs=$(gh api "repos/$REPO/actions/workflows/daily.yml/runs?branch=main&per_page=30" \
+                      -q "[.workflow_runs[] | select(.id != $RUN_ID and .status == \"completed\")]" 2>/dev/null); then
+            runs='[]'
+          fi
+          last_done=$(echo "$runs" | jq -r '[.[] | select(.conclusion == "success" or .conclusion == "failure")][0].head_sha // ""')
+          # A skipped day also concludes "success" (its jobs were skipped), so a
+          # commit counts as green only if no run on it failed.
+          last_green=$(echo "$runs" | jq -r '([.[] | select(.conclusion == "failure") | .head_sha]) as $red
+                         | [.[] | select(.conclusion == "success" and ((.head_sha as $s | $red | index($s)) | not))][0].head_sha // ""')
+          echo "last completed: ${last_done:-none}  last green: ${last_green:-none}  now: $SHA"
+          echo "last_green=$last_green" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" = "schedule" ] && [ "$last_done" = "$SHA" ]; then
+            echo "main is unchanged since the last daily run: skipping."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   sweep:
+    needs: check
+    if: needs.check.outputs.run == 'true'
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -33,9 +75,9 @@ jobs:
             preset: macos
             launcher: ccache
           # Same runner as build.yml (windows-latest, Ninja; see there why the
-          # old windows-2022 pin was dropped). The sweep kept the pin after
-          # build.yml was unpinned (86c3f513), and the two then shared build
-          # caches across VS versions (#223).
+          # old windows-2022 pin was dropped). The weekly sweep this replaces
+          # kept the pin after build.yml was unpinned (86c3f513), and the two
+          # then shared build caches across VS versions (#223).
           - os: windows-latest
             preset: windows
             launcher: sccache
@@ -128,6 +170,15 @@ jobs:
           chmod +x examples/build_all.py
           ./examples/build_all.py --verbose
 
+      # The behavioral tests again, on top of the full build (cheap next to it).
+      - name: Build & run addon tests
+        shell: bash
+        run: ./examples/build_all.py --addon-tests-only --verbose
+
+      - name: Build & run core tests
+        shell: bash
+        run: ./examples/build_all.py --core-tests-only --verbose
+
       - name: Compiler cache stats
         if: always()
         shell: bash
@@ -139,6 +190,8 @@ jobs:
           fi
 
   sweep-web:
+    needs: check
+    if: needs.check.outputs.run == 'true'
     timeout-minutes: 180
     runs-on: ubuntu-latest
 
@@ -202,9 +255,11 @@ jobs:
         run: ccache -s || true
 
   # On any failure, open an issue (or comment on the existing open one) so a
-  # red sweep is impossible to miss without blocking anything.
+  # red daily run is impossible to miss without blocking anything. The body
+  # names the commits merged since the last green daily run — with several
+  # PRs a day, that range is where the breakage came from.
   report:
-    needs: [sweep, sweep-web]
+    needs: [check, sweep, sweep-web]
     if: always() && contains(needs.*.result, 'failure')
     runs-on: ubuntu-latest
     steps:
@@ -213,9 +268,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SERVER: ${{ github.server_url }}
+          SHA: ${{ github.sha }}
+          LAST_GREEN: ${{ needs.check.outputs.last_green }}
         run: |
-          title="Full sweep failed"
-          body="The weekly full example sweep failed: ${RUN_URL}"
+          title="Daily build failed"
+          if [ -n "$LAST_GREEN" ]; then
+            range="Commits since the last green daily run: ${SERVER}/${REPO}/compare/${LAST_GREEN}...${SHA}"
+          else
+            range="No earlier green daily run to compare against (commit ${SHA})."
+          fi
+          body=$(printf 'The daily build failed: %s\n\n%s\n' "$RUN_URL" "$range")
           existing=$(gh issue list -R "$REPO" --search "\"$title\" in:title" \
                      --state open --json number -q '.[0].number' || true)
           if [ -n "$existing" ]; then

@@ -1,7 +1,8 @@
 # TrussC addons - one addon per line
-tcxBox2d
-tcxLua
+tcxDepthCamera
+tcxDepthRecord
+tcxImGui
 tcxLut
+tcxObj
 tcxOsc
-tcxTls
-tcxWebSocket
+tcxQuadWarp

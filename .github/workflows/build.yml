@@ -1,3 +1,19 @@
+# Per-PR / per-push CI: the FAST lane. Every platform in parallel, each job
+# kept to what catches breakage cheaply: AllFeaturesExample on every platform
+# (desktop, Android, web, iOS), plus the core library + trusscli and the
+# behavioral tests (core/tests incl. the hot reload host/guest split, addon
+# tests) on desktop. AllFeaturesExample
+# references every documented public core API and the repo-contained bundled
+# addons without running them (its src/coverage.h), so each platform compiles
+# every call and links it against its own implementation. Target: about 10
+# minutes wall-clock (the slowest job). Building every example on every
+# platform lives in daily.yml, once a day on main, opening an issue on failure.
+#
+# Also runs for the merge queue (merge_group): each queued PR is built on top
+# of main plus the PRs queued ahead of it, so PRs no longer need "Update
+# branch" before merging. Queue runs restore caches but never save them (the
+# queue's temporary refs are deleted right after, so a saved cache would only
+# push useful ones out of the 10 GB repo limit).
 name: Build
 
 on:
@@ -5,6 +21,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -21,8 +38,8 @@ env:
 jobs:
   # Path-based change detector. Emits docs_only=true when EVERY file in the diff
   # is documentation (any *.md, or anything under docs/ — prose + doc tooling).
-  # The heavy build jobs gate on this so a docs-only change skips the ~20min
-  # compile matrix while the cheap reference-check still runs. Conservative:
+  # The build jobs gate on this so a docs-only change skips the compile
+  # matrix while the cheap reference-check still runs. Conservative:
   # anything that isn't clearly a doc (and every non-diff event, e.g.
   # workflow_dispatch) counts as code and builds everything.
   changes:
@@ -42,6 +59,9 @@ jobs:
           if [ "$event" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
+          elif [ "$event" = "merge_group" ]; then
+            base="${{ github.event.merge_group.base_sha }}"
+            head="${{ github.event.merge_group.head_sha }}"
           elif [ "$event" = "push" ]; then
             base="${{ github.event.before }}"
             head="${{ github.sha }}"
@@ -89,7 +109,7 @@ jobs:
   build:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 180
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -138,6 +158,7 @@ jobs:
           variant: ${{ matrix.launcher }}
           key: ${{ matrix.os }}-build
           max-size: 800M
+          save: ${{ github.event_name != 'merge_group' }}
 
       - name: Enable compiler launcher
         shell: bash
@@ -163,7 +184,19 @@ jobs:
         run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
 
       - name: Cache build directories
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: |
+            core/build-${{ matrix.preset }}
+            tools/build
+          key: ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-
+
+      - name: Cache build directories (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: |
             core/build-${{ matrix.preset }}
@@ -212,36 +245,30 @@ jobs:
             find . -name trusscli.exe
           fi
 
+      # Compile-and-link canary: every documented core API + the repo-contained
+      # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every
+      # other example is built daily (daily.yml).
       - name: Build AllFeaturesExample
         shell: bash
         run: |
           chmod +x examples/build_all.py
           ./examples/build_all.py --test-only --verbose
 
-      # Per-addon dependency compile coverage: the first example of every bundled
-      # addon. Catches breakage in addons (and their fetched third-party deps)
-      # that AllFeaturesExample doesn't link. The exhaustive every-example sweep
-      # lives in full-sweep.yml (weekly).
-      - name: Build one example per addon
-        shell: bash
-        run: ./examples/build_all.py --one-per-addon --verbose
-
       # Behavioral test harnesses bundled with monorepo addons (addons/*/tests/):
       # built AND run (non-zero exit fails the job). The tests are small console
       # projects. No-op when none exist.
       - name: Build & run addon tests
         shell: bash
-        run: ./examples/build_all.py --addon-tests-only --verbose
+        run: |
+          chmod +x examples/build_all.py
+          ./examples/build_all.py --addon-tests-only --verbose
 
       # Behavioral regression tests for the core (core/tests/*/): built AND run
       # on every build (small headless console projects, non-zero exit fails).
+      # hotReloadLifecycle also covers the host/guest split build with an addon.
       - name: Build & run core tests
         shell: bash
         run: ./examples/build_all.py --core-tests-only --verbose
-
-      - name: Build HotReloadExample (host/guest split smoke test)
-        shell: bash
-        run: ./examples/build_all.py --test-hot-reload --verbose
 
       - name: Compiler cache stats
         if: always()
@@ -256,7 +283,7 @@ jobs:
   build-android:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 60
+    timeout-minutes: 30
     runs-on: ubuntu-latest
 
     steps:
@@ -268,6 +295,7 @@ jobs:
           variant: ccache
           key: android-build
           max-size: 800M
+          save: ${{ github.event_name != 'merge_group' }}
 
       - name: Enable compiler launcher
         run: |
@@ -296,7 +324,18 @@ jobs:
           echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
 
       - name: Cache Android build
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: |
+            core/build-android
+            tools/build
+          key: android-build-v4-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
+          restore-keys: android-build-v4-
+
+      - name: Cache Android build (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: |
             core/build-android
@@ -348,7 +387,7 @@ jobs:
   build-web:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 120
+    timeout-minutes: 30
     runs-on: ubuntu-latest
 
     steps:
@@ -360,6 +399,7 @@ jobs:
           variant: ccache
           key: web-build
           max-size: 800M
+          save: ${{ github.event_name != 'merge_group' }}
 
       - name: Enable compiler launcher
         run: |
@@ -370,7 +410,19 @@ jobs:
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
       - name: Cache build directories
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: |
+            core/build-web
+            tools/build
+          key: web-build-v3-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
+          restore-keys: |
+            web-build-v3-
+
+      - name: Cache build directories (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: |
             core/build-web
@@ -406,27 +458,23 @@ jobs:
           sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
           ./tools/build_linux.sh
 
+      # Every addon example (web) is built daily (daily.yml).
       - name: Build AllFeaturesExample (Web)
         run: |
           chmod +x examples/build_all.py
           ./examples/build_all.py --web-only --test-only --verbose
 
-      # See the build job: per-addon dependency compile coverage.
-      - name: Build one example per addon (Web)
-        run: ./examples/build_all.py --web-only --one-per-addon --verbose
-
       - name: Compiler cache stats
         if: always()
         run: ccache -s || true
 
-  # Compile-only iOS gate: build one addon-free example against the device SDK
-  # with code signing disabled. Catches iOS platform-layer rot at compile time
-  # (the tcFileDialog attribute-order break sat undetected for weeks because
-  # nothing in CI compiled against the iOS SDK). Runtime behavior is still
-  # verified on a real device by hand.
-  # videoPlayerExample, not AllFeaturesExample: tcxLua's generated bindings
-  # reference the sync dialogs (unavailable on iOS) — the binding generator
-  # needs platform awareness before the full example can compile here.
+  # Compile-only iOS gate: AllFeaturesExample against the device SDK with code
+  # signing disabled — every documented core API compiled and linked for iOS
+  # (the tcFileDialog attribute-order break once sat undetected for weeks
+  # because nothing in CI compiled against the iOS SDK). Runtime behavior is
+  # still verified on a real device by hand. (It used to be videoPlayerExample:
+  # AllFeaturesExample linked tcxLua, whose generated bindings reference the
+  # sync dialogs that don't compile on iOS. tcxLua is no longer in it.)
   # No ccache: the Xcode generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER.
   build-ios:
     needs: changes
@@ -444,9 +492,9 @@ jobs:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
 
-      - name: Build videoPlayerExample (iOS device SDK, unsigned)
+      - name: Build AllFeaturesExample (iOS device SDK, unsigned)
         run: |
-          cd examples/video/videoPlayerExample
+          cd examples/tests/AllFeaturesExample
           cmake -B build-ios -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
