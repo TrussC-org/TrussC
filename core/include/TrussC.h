@@ -1834,26 +1834,39 @@ namespace internal {
 // (#228), so the new mode does not replay the time spent in the previous one.
 // The timestamps re-base at the next frame, and each accumulator is seeded
 // with one interval: that frame runs one fixed update step / draws (the switch
-// doesn't cost a frame), and the new phase starts there. The measured delta
-// restarts at the switch too: the first update of a VSYNC / setFps() mode
-// reports the time since the switch, not since the last update of the
-// previous mode (an hour of EVENT_DRIVEN idle would otherwise reach every
-// Node timer at once). Time after the switch still counts: a setFps() in
-// setup() followed by a 4 s load reports those 4 s, and so does the wait for
-// the first redraw() after a switch to EVENT_DRIVEN. (Before the very first
-// frame there is no baseline yet; that update uses sokol's estimate.) A
-// changed update mode also ends the remaining old steps of a fixed-Hz frame
-// when the switch comes from inside update() (runIndependentUpdates checks
-// the timestamp flag).
+// doesn't cost a frame), and the new phase starts there.
+//
+// The measured delta (VSYNC / setFps() modes) must not replay the previous
+// mode either, but must keep the time that really belongs to the new one:
+// - Switched between updates (a key handler, draw(), runOnMainThread work):
+//   the baseline moves to the switch, so the first update of the new mode
+//   reports the time since the switch (not an hour of EVENT_DRIVEN idle,
+//   but the wait for the first redraw() after it). Once the loop runs, this
+//   also sets the first baseline when there is none yet (setup() running in
+//   the first draw() of an EVENT_DRIVEN update).
+// - Switched inside an update: the baseline stays at that update's start,
+//   so the next update counts all of it, including work done before the
+//   call (setup() { callAfter(3.0); load 4 s; setFps(60); } still fires the
+//   timer right after the load).
+// - Before the loop runs there is no baseline; the first update uses
+//   sokol's estimate.
+// A switch to a measured mode inside a fixed-Hz step also ends that step's
+// fixed-step mark, so a timer created later in the step counts from its
+// creation. A changed update mode also ends the remaining old steps of a
+// fixed-Hz frame when the switch comes from inside update()
+// (runIndependentUpdates checks the timestamp flag).
 inline void restartLoopTiming(bool update, bool draw) {
     if (update) {
         lastUpdateTimeInitialized = false;
         auto& wctx = mainWindowContext();
-        if (wctx.mainUpdateCallTimeInitialized) {
+        const bool fixedStep = !updateSyncedToDraw && updateTargetFps > 0.0f;
+        if (!wctx.inUpdate &&
+            (wctx.mainUpdateCallTimeInitialized || wctx.frameUptimeSampled)) {
             wctx.mainUpdateCallTime = std::chrono::steady_clock::now();
+            wctx.mainUpdateCallTimeInitialized = true;
         }
-        updateAccumulator = (!updateSyncedToDraw && updateTargetFps > 0.0f)
-            ? 1.0 / updateTargetFps : 0.0;
+        if (!fixedStep) wctx.fixedStepUpdate = false;
+        updateAccumulator = fixedStep ? 1.0 / updateTargetFps : 0.0;
     }
     if (draw) {
         lastDrawTimeInitialized = false;
@@ -2405,8 +2418,8 @@ namespace internal {
     // of the first one taking the whole gap (#228), and their nominal time on
     // the loop's timeline (stepTime) as the update time Node timers count
     // from, and whether this update is such a step. mainUpdateCallTime is
-    // kept current either way; a mode switch moves it to the switch
-    // (restartLoopTiming).
+    // kept current either way; a mode switch between updates moves it to the
+    // switch (restartLoopTiming).
     inline void beginMainUpdateCall(double fixedDelta = 0.0,
                                     std::chrono::steady_clock::time_point stepTime = {}) {
         auto& wctx = mainWindowContext();
