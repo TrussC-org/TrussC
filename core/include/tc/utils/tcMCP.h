@@ -87,19 +87,17 @@ struct DeferralState {
     std::function<ReplyThunk()> envelope;    // JSON-RPC reply builder (main part)
     std::function<std::string()> timeoutReply;  // targeted deferral given up (see above)
 };
-inline DeferralState& deferralState() { static DeferralState s; return s; }
+// The MCP state below is one per process, so it is defined non-inline in
+// tcMCP.cpp: a hot reload guest on Windows would otherwise get its own copy of
+// each, and a tool handler it runs would defer into a DeferralState the host
+// never reads (#249; docs/ARCHITECTURE.md, "One instance per process").
+DeferralState& deferralState();
 
-inline std::vector<DeferredResponse>& deferredResponses() {
-    static std::vector<DeferredResponse> v;
-    return v;
-}
+std::vector<DeferredResponse>& deferredResponses();
 
 // Set by registerControlTools() (which is web-available), so this flag must
 // live outside the server-only #ifndef block below.
-inline std::atomic<bool>& isDebuggerEnabled() {
-    static std::atomic<bool> enabled{false};
-    return enabled;
-}
+std::atomic<bool>& isDebuggerEnabled();
 
 } // namespace detail
 
@@ -182,17 +180,13 @@ inline bool hasDeferredResponses() { return !detail::deferredResponses().empty()
 // The hot reload host sets one per guest generation, so a reload drops what
 // the old guest registered — handlers that capture the old App — before that
 // App is deleted. Plain apps never set one (tag null = permanent).
+// Both accessors are defined in tcMCP.cpp: the host sets the owner and a guest
+// registers under it, so they must see the same one on every platform.
 namespace detail {
-inline const void*& registrationOwner() {
-    static const void* owner = nullptr;
-    return owner;
-}
-// Registries defined elsewhere (status entries in tcStandardTools.h) hook
-// their own cleanup in here the first time they are used.
-inline std::vector<std::function<void(const void*)>>& ownerCleanupHooks() {
-    static std::vector<std::function<void(const void*)>> hooks;
-    return hooks;
-}
+const void*& registrationOwner();
+// Registries defined elsewhere (the status registries of tcStandardTools.h,
+// in tcMCP.cpp) hook their own cleanup in here the first time they are used.
+std::vector<std::function<void(const void*)>>& ownerCleanupHooks();
 inline void setRegistrationOwner(const void* owner) { registrationOwner() = owner; }
 inline void removeRegistrationsOwnedBy(const void* owner);   // after Server
 } // namespace detail
@@ -248,10 +242,9 @@ public:
 
 class Server {
 public:
-    static Server& instance() {
-        static Server server;
-        return server;
-    }
+    // The one registry every tool / resource goes into. Defined in tcMCP.cpp,
+    // so a hot reload guest registers into the host's server (#249).
+    static Server& instance();
 
     // --- Registration API ---
 
@@ -518,48 +511,22 @@ struct McpRequest {
 
 namespace detail {
 
-inline ThreadChannel<McpRequest>& getHttpChannel() {
-    static ThreadChannel<McpRequest> channel;
-    return channel;
-}
-
-inline std::unique_ptr<httplib::Server>& getHttpServer() {
-    static std::unique_ptr<httplib::Server> svr;
-    return svr;
-}
-
-inline std::unique_ptr<std::thread>& getHttpThread() {
-    static std::unique_ptr<std::thread> t;
-    return t;
-}
-
-inline std::atomic<int>& getHttpPort() {
-    static std::atomic<int> port{0};
-    return port;
-}
+// HTTP server state, one per process (defined in tcMCP.cpp, see above).
+ThreadChannel<McpRequest>& getHttpChannel();
+std::unique_ptr<httplib::Server>& getHttpServer();
+std::unique_ptr<std::thread>& getHttpThread();
+std::atomic<int>& getHttpPort();
 
 // Bearer token required on /mcp requests. Empty = no auth (localhost default).
-inline std::string& mcpAuthToken() {
-    static std::string token;
-    return token;
-}
+std::string& mcpAuthToken();
 
 // Whether the server is bound to a loopback address (the Host check applies).
-inline std::atomic<bool>& mcpLoopbackOnly() {
-    static std::atomic<bool> loopback{true};
-    return loopback;
-}
+std::atomic<bool>& mcpLoopbackOnly();
 
 // Browser origins allowed besides the server's own (mcp::allowOrigin()).
 // Read on HTTP worker threads, written from app code: guarded.
-inline std::vector<std::string>& allowedOrigins() {
-    static std::vector<std::string> origins;
-    return origins;
-}
-inline std::mutex& allowedOriginsMutex() {
-    static std::mutex m;
-    return m;
-}
+std::vector<std::string>& allowedOrigins();
+std::mutex& allowedOriginsMutex();
 
 inline std::string asciiLower(std::string s) {
     for (auto& c : s) c = (char)std::tolower((unsigned char)c);
