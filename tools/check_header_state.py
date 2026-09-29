@@ -736,9 +736,10 @@ def load_allowlist(path):
 # ---------------------------------------------------------------------------
 # The failure message
 # ---------------------------------------------------------------------------
-# Written for someone who has never used hot reload: what goes wrong first, in
-# one plain sentence, then the fix that is always right, and only then the
-# allowlist, as the exception. message_self_test() pins that order.
+# Written for someone who has never used hot reload: it opens with one plain
+# sentence saying what goes wrong, then lists the findings, then the fix that
+# is always right, and only then the allowlist, as the exception.
+# message_self_test() pins that order.
 
 WHAT_GOES_WRONG = ("A static or inline variable in a header gets a separate copy inside a "
                    "Windows hot-reload app, so the app and TrussC would see different values.")
@@ -775,15 +776,16 @@ def allowlist_line(f):
 
 
 def failure_message(new, problems):
-    """The lines a failing run prints: each new finding, what goes wrong and
+    """The lines a failing run prints: what goes wrong, each new finding, and
     how to fix it, then the other allowlist problems (stale or malformed
     entries), which explain themselves."""
-    out = [finding_line(f) for f in new]
+    out = []
     if new:
         width = max(len(c) for c in CATEGORIES)
         out += [
-            "",
             WHAT_GOES_WRONG,
+            "",
+            *[finding_line(f) for f in new],
             "",
             "When unsure, move it to a .cpp and reach it through a function. That is",
             f"always correct. For example, internal::{EXAMPLE_NAME}() in tcGlobal.cpp:",
@@ -815,16 +817,17 @@ def failure_message(new, problems):
 
 
 def message_self_test():
-    """Check failure_message() on a made-up finding: the plain sentence comes
-    first, the .cpp fix before the allowlist route, the pasted line parses
+    """Check failure_message() on a made-up finding: the plain sentence opens
+    it, the findings follow, the .cpp fix comes before the allowlist route, the pasted line parses
     (once filled in) to the finding's key, and every category is explained.
     Returns a list of problems."""
     errors = []
     f = Finding("core/include/tcExample.h", 12, "trussc::internal", "exampleState",
                 "inline variable", False)
     lines = failure_message([f], [])
-    if lines[:3] != [finding_line(f), "", WHAT_GOES_WRONG]:
-        errors.append("failure message: the first line after the findings must be WHAT_GOES_WRONG")
+    if lines[:3] != [WHAT_GOES_WRONG, "", finding_line(f)]:
+        errors.append("failure message: must open with WHAT_GOES_WRONG and a blank line, "
+                      "then the findings")
     paste = [i for i, ln in enumerate(lines) if ln == allowlist_line(f)]
     fix = [i for i, ln in enumerate(lines) if ln.startswith("When unsure, move it to a .cpp")]
     if len(paste) != 1 or not fix or fix[0] > paste[0]:
