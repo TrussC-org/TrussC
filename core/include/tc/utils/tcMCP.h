@@ -70,6 +70,12 @@ struct DeferredResponse {
     const void* target = nullptr;                        // window to run in (null = main)
     std::chrono::steady_clock::time_point deadline;      // targeted: give up after this
     std::function<std::string()> timeoutReply;           // targeted: reply when given up
+    // registrationOwner() when the request came in: a hot reload guest
+    // generation. removeRegistrationsOwnedBy() answers the entry with
+    // errorReply instead of running its producer, which may reach the App
+    // about to be deleted (a status-image getter, a tool capturing `this`).
+    const void* owner = nullptr;
+    std::function<std::string(const std::string&)> errorReply;  // tool error with this message
 };
 
 // A targeted deferral whose window renders no frame in this time (minimized,
@@ -86,6 +92,7 @@ struct DeferralState {
     bool hasEnvelope = false;                // set by handleToolsCall(), read by processHttpQueue()
     std::function<ReplyThunk()> envelope;    // JSON-RPC reply builder (main part)
     std::function<std::string()> timeoutReply;  // targeted deferral given up (see above)
+    std::function<std::string(const std::string&)> errorReply;  // deferral cancelled (reload)
 };
 // The MCP state below is one per process, so it is defined non-inline in
 // tcMCP.cpp: a hot reload guest on Windows would otherwise get its own copy of
@@ -390,6 +397,11 @@ private:
             json content = tools_[name].handler(args);
 
             // Handler asked to produce its result after the next present().
+            if (ds.requested || ds.twoStageRequested) {
+                ds.errorReply = [formatResult](const std::string& message) -> std::string {
+                    return formatResult(json{{"status", "error"}, {"message", message}});
+                };
+            }
             if (ds.target) {
                 ds.timeoutReply = [formatResult]() -> std::string {
                     return formatResult(json{{"status", "error"},
@@ -773,6 +785,7 @@ inline void processHttpQueue() {
         ds.hasEnvelope = false;
         ds.target = nullptr;
         ds.timeoutReply = nullptr;
+        ds.errorReply = nullptr;
         std::string result = Server::instance().processMessage(req.body);
         if (ds.hasEnvelope) {
             // Tool deferred its reply until after present(): stash the promise
@@ -784,6 +797,8 @@ inline void processHttpQueue() {
             d.target = ds.target;
             d.deadline = std::chrono::steady_clock::now() + detail::kTargetedDeferralTimeout;
             d.timeoutReply = std::move(ds.timeoutReply);
+            d.owner = detail::registrationOwner();
+            d.errorReply = std::move(ds.errorReply);
             detail::deferredResponses().push_back(std::move(d));
             ds.hasEnvelope = false;
             ds.target = nullptr;
@@ -817,6 +832,23 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
     if (!owner) return;
     Server::instance().removeOwnedBy(owner);
     for (auto& hook : ownerCleanupHooks()) hook(owner);
+    // Deferred replies to requests made while this owner was live: answer
+    // them now, with an error, instead of running their producers at the next
+    // drain, after the App they may reach has been deleted (the reload runs
+    // between processHttpQueue() and drainDeferredResponses() in one frame).
+    auto& pending = deferredResponses();
+    std::vector<DeferredResponse> keep;
+    for (auto& d : pending) {
+        if (d.owner != owner) {
+            keep.push_back(std::move(d));
+            continue;
+        }
+        const std::string message = "the app was reloaded before this deferred reply was produced";
+        std::string reply = d.errorReply ? d.errorReply(message)
+                                         : "{\"error\":\"" + message + "\"}";
+        d.response->set_value([reply]() { return reply; });
+    }
+    pending.swap(keep);
 }
 } // namespace detail
 

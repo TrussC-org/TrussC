@@ -75,10 +75,13 @@ public:
             .bind(std::function<json()>([this, generation]() -> json {
                 return json{{"ticks", ticks_}, {"generation", generation}};
             }));
+        // The producer reaches the App through `this`, as app tools do: it
+        // must never run once the App is deleted (hotReloadLifecycle unloads
+        // the guest while one is pending).
         mcp::tool("guest_deferred", "hotReloadLifecycle guest tool answering after the frame")
-            .bind(std::function<json()>([generation]() -> json {
-                mcp::deferToolResultUntilAfterFrame([generation]() -> json {
-                    return json{{"deferred", true}, {"generation", generation}};
+            .bind(std::function<json()>([this, generation]() -> json {
+                mcp::deferToolResultUntilAfterFrame([this, generation]() -> json {
+                    return json{{"deferred", true}, {"generation", generation}, {"ticks", ticks_}};
                 });
                 return json(nullptr);  // replaced by the deferred result
             }));
