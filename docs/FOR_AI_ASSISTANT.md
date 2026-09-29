@@ -1392,6 +1392,78 @@ listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
 });
 ```
 
+### My app crashed — how do I find where? (getting a backtrace)
+
+Outside a debugger, a crash usually leaves very little: `Segmentation fault` / exit code 139 on macOS and Linux, or an "Application Error" entry (`0xc0000005`) in the Windows Event Log. That is also all an AI agent sees when it launches the app from a shell. To get the call stack:
+- **Run it under the debugger.** In VS Code / Cursor press F5: it stops at the crash and shows the stack. CodeLLDB is used on macOS / Linux, the MSVC debugger on Windows.
+- **From a terminal** (handy for agents), run the app under the debugger in batch mode so it prints the stack and exits:
+  - macOS: `lldb --batch -o run -o bt -- bin/MyApp.app/Contents/MacOS/MyApp`
+  - Linux: `gdb -batch -ex run -ex bt --args bin/MyApp`
+- **After the fact:**
+  - macOS writes a crash report on its own: `~/Library/Logs/DiagnosticReports/MyApp-*.ips`. The crashing thread's frames are in it.
+  - Linux: `coredumpctl gdb MyApp` then `bt`, if systemd-coredump is installed. Ubuntu's apport keeps reports in `/var/crash`.
+  - Windows: Event Viewer → Windows Logs → Application → "Application Error" names the faulting module and offset. For a full dump, see [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md).
+
+Apps build as RelWithDebInfo by default, which includes debug symbols, so the stack shows function names and line numbers.
+
+### What usually makes a TrussC app crash? (safe patterns)
+
+Most crashes come from a handful of patterns. Write it the safe way from the start:
+- **Nodes: create with `make_shared`, build the tree in `setup()`.** Create every node with `make_shared<T>()`. Call `addChild()` / `addMod()` / `callEvery()` in `setup()`, not in the constructor: `weak_from_this()` isn't ready while the constructor runs.
+- **Remove with `destroy()` while things are in flight.** From inside an event handler, a timer callback, or while walking the tree, remove nodes with `destroy()`. The removal is deferred to a safe point.
+- **Main-thread-only objects.** GPU objects (`Image`, `Texture`, `Fbo`, `Font`, `Shader`) and the Node tree belong to the main thread. Callbacks from audio, network or async timers must not touch them. See "Which thread does my callback run on?" below.
+- **Stop your own threads before your members go away.** A `Thread` subclass should call `waitForThread()` in its **own** destructor. The base class stops the thread only after your members are already destroyed.
+- **Callbacks must not outlive their object.** Keep the `EventListener` returned by `listen()` as a member, so it disconnects when the object dies. Don't capture a raw `this` in callbacks that can outlive the object (`runOnMainThread()`, a raw `std::thread`); capture a `weak_ptr` or copies instead.
+
+### Which thread does my callback run on?
+
+| Callback | Runs on |
+|---|---|
+| `setup()` / `update()` / `draw()`, input handlers, Node events, `callAfter` / `callEvery`, Tween, MCP tools | main thread |
+| `AudioEngine` `audioOut` / `audioIn` listeners | audio thread |
+| `callAfterAsync` / `callEveryAsync` | background scheduler thread |
+| `TcpClient` / `TcpServer` / `UdpSocket` events (`onReceive`, `onConnect`, `onDisconnect`, `onError`) | a network thread (desktop) |
+| tcxOsc `onMessageReceived`, tcxMidi `MidiIn::onMessage` | the addon's receive thread. Their polling APIs run on the main thread |
+| `Thread::threadedFunction()` | your thread |
+
+On the web (wasm) there are no background threads, so these "async" callbacks run on the main thread during the update loop.
+
+Rules for callbacks that are not on the main thread:
+1. **Don't touch nodes, GPU objects or drawing there.** Either copy the data into a mutex-protected member (or a `ThreadChannel`) and consume it in `update()`, or let the event deliver it on the main thread:
+   ```cpp
+   listener_ = client.onReceive.listen([this](TcpReceiveEventArgs& e) {
+       // runs on the main thread (next frame); dropped if listener_ is gone
+   }, Deliver::Main);
+   ```
+   `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. Plain `runOnMainThread(fn)` also moves work to the main thread, but has no such check, so don't capture a raw `this` there.
+2. **Audio callbacks stay on the audio thread.** They need low latency, so don't marshal them. Keep them short: no allocation, no file IO, no locks that the main thread may hold for a long time. Share values through atomics.
+3. **When the receiving object goes away, stop the source first.** Disconnect the socket, call `waitForThread()`, or drop the listener, and do it before the members the callback uses are destroyed.
+
+### Build error: "is not a full path to an existing compiler tool" (after updating Visual Studio)
+
+The build folder's `CMakeCache.txt` still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. Delete the app's build folder (`build-windows`, or whichever `build-*` folder the preset uses) and build again. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically.
+
+### Build error: "hot reload state changed -- reconfigure required"
+
+You added or removed `TC_HOT_RELOAD(...)`. Hot reload is switched at configure time, so the build stops once to make CMake reconfigure. It prints "TC_HOT_RELOAD detected." or "TC_HOT_RELOAD removed." first. `trusscli build` reconfigures automatically; with plain CMake, just build again.
+
+### Windows: "... was blocked by your organization's Device Guard policy" (Smart App Control)
+
+Windows 11's Smart App Control starts in an evaluation mode and can switch itself to enforcement days or weeks after setup. From then on, unsigned executables are blocked, including your app and tools built on the machine. SmartScreen's "Run anyway" does not help.
+- **Check:** Event Viewer → Applications and Services Logs → Microsoft → Windows → CodeIntegrity → Operational. Event 3077 records the block.
+- **Fix:** Windows Security → App & browser control → Smart App Control → Off, then restart. Turning it off may be one-way: turning it back on can require reinstalling Windows. Defender and SmartScreen keep running.
+- **For installation PCs**, check this during setup rather than on site. In the long run, code-signing the exe avoids it.
+
+### Running an app unattended for days or weeks on Windows?
+
+Several Windows defaults can stop an unattended app, or hide why it stopped:
+- the display turns off even in fullscreen;
+- Windows Update restarts the PC at night;
+- a crash dialog keeps the dead process open;
+- a Task Scheduler start runs in `C:\Windows\System32`.
+
+Most of this is configuration, not code. Follow the checklist in [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md): Smart App Control, power and display, Windows Update, crash dumps without dialogs, auto-start and restart, working directory, GPU selection.
+
 ## Enums (compile-time reflection)
 
 TrussC reflects plain `enum class` at compile time (magic_enum-style), so enum-to-string is free — no hand-written `switch`. This powers JSON dumps (enums serialize as their label) and the inspector's labeled combo boxes.

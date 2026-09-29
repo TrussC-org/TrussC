@@ -277,3 +277,10 @@ myProject/
 - `.ico` - Windows icon format
 - `.png` - Automatically converted to `.ico` if ImageMagick is available
 
+
+## 9. Deploying an Installation
+
+Running an app unattended for days or weeks (exhibitions, signage) needs a few machine settings beyond the build itself:
+
+- **Windows:** [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md) covers Smart App Control, keeping the display on, Windows Update restarts, crash dumps without dialogs, auto-start and restart.
+- **Linux (Raspberry Pi and other SBCs):** [GET_STARTED_CONSOLE_MODE.md](GET_STARTED_CONSOLE_MODE.md) covers auto-start at boot and keeping the monitor awake.
