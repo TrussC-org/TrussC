@@ -159,9 +159,12 @@ int main() {
         check("1. 200 ms of silence: no data, still connected", quietOk && serial.isConnected());
         check("1. no loss warning while quiet", g_lostWarnings == 0);
 
+        // Through a const reference: available() must stay const and still
+        // close the port
+        const Serial& cs = serial;
         pty.unplug();
-        check("1. available() notices the unplug within 1 s",
-              waitFor(1000, [&] { serial.available(); return !serial.isConnected(); }));
+        check("1. const available() notices the unplug within 1 s",
+              waitFor(1000, [&] { cs.available(); return !cs.isConnected(); }));
         check("1. isInitialized() is false too", !serial.isInitialized());
         check("1. available() == 0 after the loss", serial.available() == 0);
         check("1. readBytes() == -1 after the loss", serial.readBytes(buf, sizeof(buf)) == -1);
@@ -223,9 +226,10 @@ int main() {
         Pty pty;
         Serial serial;
         if (connect(pty, serial, "5. setup() connects")) {
+            int before = g_lostWarnings;
             serial.close();
             check("5. close() disconnects", !serial.isConnected());
-            check("5. close() logs no loss warning", g_lostWarnings == 4);
+            check("5. close() logs no loss warning", g_lostWarnings == before);
         }
     }
 
