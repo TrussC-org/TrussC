@@ -101,33 +101,38 @@ file(GLOB_RECURSE TC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp
 )
 
-# Common source files (platform-independent)
-file(GLOB TC_IMPL_SOURCES     ${CMAKE_CURRENT_SOURCE_DIR}/include/impl/*.cpp)
-file(GLOB TC_APP_SOURCES      ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/app/*.cpp)
-file(GLOB TC_GRAPHICS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/graphics/*.cpp)
-file(GLOB TC_NETWORK_SOURCES  ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/network/*.cpp)
-file(GLOB TC_SOUND_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/sound/*.cpp)
-file(GLOB TC_UTILS_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/utils/*.cpp)
+# Common source files (platform-independent). CONFIGURE_DEPENDS: every app
+# builds TrussC in its own tree (trussc_app.cmake add_subdirectory()s core),
+# and a plain glob is evaluated only at configure time, so an existing tree
+# would keep building without a .cpp added to core later (and fail to link
+# whatever it defines) until something reconfigured it. With CONFIGURE_DEPENDS
+# each build re-checks these globs and reconfigures when their result changes.
+file(GLOB TC_IMPL_SOURCES     CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/impl/*.cpp)
+file(GLOB TC_APP_SOURCES      CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/app/*.cpp)
+file(GLOB TC_GRAPHICS_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/graphics/*.cpp)
+file(GLOB TC_NETWORK_SOURCES  CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/network/*.cpp)
+file(GLOB TC_SOUND_SOURCES    CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/sound/*.cpp)
+file(GLOB TC_UTILS_SOURCES    CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/utils/*.cpp)
 # Vendored single-file libs (e.g. lz4 for tc::compress)
-file(GLOB TC_VENDOR_SOURCES   ${CMAKE_CURRENT_SOURCE_DIR}/include/lz4/*.c)
+file(GLOB TC_VENDOR_SOURCES   CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/lz4/*.c)
 
 # Platform-specific source files
 if(TC_PLATFORM_EMSCRIPTEN)
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/web/*.cpp)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/web/*.cpp)
 elseif(TC_PLATFORM_IOS)
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/ios/*.mm)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/ios/*.mm)
     # Shared with macOS: ImageIO loader (HEIC, TIFF, ...), no AppKit in it
     list(APPEND TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/mac/tcPixels_mac.mm)
 elseif(TC_PLATFORM_ANDROID)
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/android/*.cpp)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/android/*.cpp)
 elseif(TC_PLATFORM_MACOS)
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/mac/*.mm)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/mac/*.mm)
 elseif(TC_PLATFORM_WINDOWS)
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/win/*.cpp)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/win/*.cpp)
 elseif(TC_PLATFORM_LINUX OR TC_PLATFORM_RASPBIAN)
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
 else()
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
 endif()
 
 # Combine all sources
