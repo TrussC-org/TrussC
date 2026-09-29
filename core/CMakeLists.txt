@@ -654,7 +654,10 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/use_addon.cmake)
 # =============================================================================
 # Built-in Shaders (compiled with sokol-shdc)
 # =============================================================================
-file(GLOB TC_SHADER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.glsl")
+# CONFIGURE_DEPENDS, like the source globs above: an existing app build tree
+# re-globs on each build, so a newly added shader gets its sokol-shdc command
+# (and its header) without a manual reconfigure (#366).
+file(GLOB TC_SHADER_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.glsl")
 if(TC_SHADER_SOURCES)
     # Select sokol-shdc binary based on host platform
     set(_TC_SOKOL_SHDC_BASE_URL "https://raw.githubusercontent.com/floooh/sokol-tools-bin/master/bin")
