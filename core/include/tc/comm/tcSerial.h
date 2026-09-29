@@ -5,13 +5,20 @@
 // TrussC Serial Communication
 // Cross-platform serial communication class
 // - Windows: Win32 API (CreateFile, SetCommState, etc.)
-// - macOS/Linux: POSIX API (termios)
+// - macOS/Linux: POSIX API (termios). Baud rates without a termios B-constant
+//   are set through IOSSIOSPEED (macOS) or termios2 / BOTHER (Linux), see
+//   tcSerial.cpp.
 // - Android: USB Host API (CDC-ACM devices only), JNI + usbfs.
 //   See platform/android/tcSerial_android.cpp for details and caveats.
+//
+// Device loss (e.g. a USB-serial adapter unplugged): available(), readBytes(),
+// readByte() and writeBytes() detect it, close the port and log one warning,
+// so isConnected() turns false and the app can call setup() again.
 // =============================================================================
 
 #include <string>
 #include <vector>
+#include <optional>
 #include <cstdint>
 #include <cstring>
 
@@ -33,6 +40,7 @@
     #include <unistd.h>
     #include <termios.h>
     #include <sys/ioctl.h>
+    #include <poll.h>
     #include <dirent.h>
     #include <cerrno>
 #endif
@@ -78,6 +86,19 @@ namespace androidserial {
     int readBytes(Impl* impl, void* buffer, int length);
     int writeBytes(Impl* impl, const void* buffer, int length);
     void flushInput(Impl* impl);
+}
+#endif
+
+#if !defined(_WIN32) && !defined(__ANDROID__)
+namespace internal {
+    // Apply a baud rate that has no termios B-constant to an open serial fd,
+    // after tcsetattr() has applied the other settings: IOSSIOSPEED on macOS,
+    // termios2 with BOTHER on Linux. Returns false with errno set when the
+    // driver rejects the rate, or ENOTSUP when the platform has neither.
+    // On success appliedBaudRate is the rate the driver reports back (Linux),
+    // or the requested rate where there is no read-back (macOS).
+    // Lives in tcSerial.cpp: <asm/termbits.h> clashes with <termios.h>.
+    bool setSerialCustomBaudRate(int fd, int baudRate, int& appliedBaudRate);
 }
 #endif
 
@@ -328,6 +349,13 @@ public:
 
 #elif !defined(__ANDROID__)
         // POSIX (macOS, Linux)
+        // Reject a nonsense rate before opening: opening asserts DTR, which
+        // resets auto-reset boards such as most Arduinos.
+        if (baudRate <= 0) {
+            logError() << "Serial: invalid baud rate " << baudRate;
+            return false;
+        }
+
         // Open device (non-blocking)
         fd_ = open(portName.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
         if (fd_ == -1) {
@@ -355,10 +383,11 @@ public:
         // Set raw mode (no input/output processing)
         cfmakeraw(&options);
 
-        // Set baud rate
-        speed_t speed = baudRateToSpeed(baudRate);
-        cfsetispeed(&options, speed);
-        cfsetospeed(&options, speed);
+        // Set baud rate. A rate without a B-constant opens with a placeholder
+        // here and gets its real value from setSerialCustomBaudRate() below.
+        std::optional<speed_t> speed = baudRateToSpeed(baudRate);
+        cfsetispeed(&options, speed ? *speed : B9600);
+        cfsetospeed(&options, speed ? *speed : B9600);
 
         // 8N1 (8 data bits, no parity, 1 stop bit)
         options.c_cflag &= ~PARENB;  // No parity
@@ -387,12 +416,26 @@ public:
             return false;
         }
 
+        int appliedBaudRate = baudRate;
+        if (!speed && !internal::setSerialCustomBaudRate(fd_, baudRate, appliedBaudRate)) {
+            int err = errno;
+            logError() << "Serial: cannot set " << baudRate << " baud on " << portName
+                       << " (" << std::strerror(err) << ")";
+            ::close(fd_);
+            fd_ = -1;
+            return false;
+        }
+
         // Flush buffers
         tcflush(fd_, TCIOFLUSH);
 
         devicePath_ = portName;
         initialized_ = true;
-        logNotice() << "Serial: connected to " << portName << " at " << baudRate << " baud";
+        if (appliedBaudRate != baudRate) {
+            logWarning() << "Serial: requested " << baudRate << " baud on " << portName
+                         << ", the driver applied " << appliedBaudRate;
+        }
+        logNotice() << "Serial: connected to " << portName << " at " << appliedBaudRate << " baud";
         return true;
 #endif
     }
@@ -431,10 +474,14 @@ public:
     // Status
     // ---------------------------------------------------------------------------
 
-    // Check if connected
+    // Whether the port is open and working. Turns false after close(), and
+    // also when available() / readBytes() / readByte() / writeBytes() find
+    // that the device went away (USB unplug, driver reset): the port is then
+    // closed, and setup() connects again. This call does not probe the
+    // device itself; detection happens inside those I/O calls.
     // Android: may flip to true AFTER setup() returned false, once the user
     // grants USB permission (see androidserial note above).
-    bool isInitialized() const {
+    bool isConnected() const {
 #if defined(_WIN32)
         return initialized_ && handle_ != INVALID_HANDLE_VALUE;
 #elif defined(__ANDROID__)
@@ -444,14 +491,21 @@ public:
 #endif
     }
 
+    // Same as isConnected(). The older name, kept for existing code.
+    bool isInitialized() const {
+        return isConnected();
+    }
+
     // Get current device path
     const std::string& getDevicePath() const {
         return devicePath_;
     }
 
-    // Get number of bytes available for reading
+    // Get number of bytes available for reading.
+    // Returns 0 when not connected; a device loss found here closes the port
+    // (isConnected() turns false).
     int available() const {
-        if (!isInitialized()) return 0;
+        if (!isConnected()) return 0;
 
 #if defined(_WIN32)
         COMSTAT comStat;
@@ -459,15 +513,21 @@ public:
         if (ClearCommError(handle_, &errors, &comStat)) {
             return (int)comStat.cbInQue;
         }
+        markDisconnected("ClearCommError", GetLastError());
         return 0;
 #elif defined(__ANDROID__)
         return androidserial::available(aimpl_);
 #else
         int bytesAvailable = 0;
         if (ioctl(fd_, FIONREAD, &bytesAvailable) == -1) {
+            int err = errno;
+            if (isDeviceLostError(err)) markDisconnected("ioctl(FIONREAD)", err);
             return 0;
         }
-        return bytesAvailable;
+        if (bytesAvailable > 0) return bytesAvailable;
+        // Nothing buffered: tell a quiet port from a hung-up one
+        if (isHungUp()) markDisconnected("hangup", 0);
+        return 0;
 #endif
     }
 
@@ -476,14 +536,16 @@ public:
     // ---------------------------------------------------------------------------
 
     // Read specified number of bytes
-    // Returns: actual bytes read (>=0), -1 on error
+    // Returns: actual bytes read (>=0), -1 on error. A device loss found here
+    // closes the port (isConnected() turns false) and returns -1.
     int readBytes(void* buffer, int length) {
-        if (!isInitialized()) return -1;
+        if (!isConnected()) return -1;
         if (length <= 0) return 0;
 
 #if defined(_WIN32)
         DWORD bytesRead = 0;
         if (!ReadFile(handle_, buffer, length, &bytesRead, nullptr)) {
+            markDisconnected("ReadFile", GetLastError());
             return -1;
         }
         return (int)bytesRead;
@@ -491,14 +553,22 @@ public:
         return androidserial::readBytes(aimpl_, buffer, length);
 #else
         ssize_t result = read(fd_, buffer, length);
+        if (result > 0) return static_cast<int>(result);
         if (result == -1) {
-            // EAGAIN/EWOULDBLOCK means "no data available", return 0
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                return 0;
+            int err = errno;
+            // EAGAIN/EWOULDBLOCK means "no data available", like 0 below
+            if (err != EAGAIN && err != EWOULDBLOCK) {
+                if (isDeviceLostError(err)) markDisconnected("read", err);
+                return -1;
             }
+        }
+        // No data. With VMIN = VTIME = 0, read() returns 0 both for a quiet
+        // port and for a hung-up tty, so only poll() can tell them apart.
+        if (isHungUp()) {
+            markDisconnected("hangup", 0);
             return -1;
         }
-        return static_cast<int>(result);
+        return 0;
 #endif
     }
 
@@ -513,14 +583,16 @@ public:
     }
 
     // Read single byte
-    // Returns: byte read (0-255), -1 if no data, -2 on error
+    // Returns: byte read (0-255), -1 if no data, -2 on error. A device loss
+    // found here closes the port (isConnected() turns false) and returns -2.
     int readByte() {
-        if (!isInitialized()) return -2;
+        if (!isConnected()) return -2;
 
         unsigned char byte;
 #if defined(_WIN32)
         DWORD bytesRead = 0;
         if (!ReadFile(handle_, &byte, 1, &bytesRead, nullptr)) {
+            markDisconnected("ReadFile", GetLastError());
             return -2;  // Error
         }
         if (bytesRead == 1) {
@@ -534,12 +606,20 @@ public:
         return -2;  // Error
 #else
         ssize_t result = read(fd_, &byte, 1);
-        if (result == 1) {
-            return byte;
-        } else if (result == 0 || (result == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))) {
-            return -1;  // No data
+        if (result == 1) return byte;
+        if (result == -1) {
+            int err = errno;
+            if (err != EAGAIN && err != EWOULDBLOCK) {
+                if (isDeviceLostError(err)) markDisconnected("read", err);
+                return -2;  // Error
+            }
         }
-        return -2;  // Error
+        // No data, or a hung-up tty (see readBytes())
+        if (isHungUp()) {
+            markDisconnected("hangup", 0);
+            return -2;
+        }
+        return -1;  // No data
 #endif
     }
 
@@ -548,14 +628,16 @@ public:
     // ---------------------------------------------------------------------------
 
     // Write specified number of bytes
-    // Returns: actual bytes written, -1 on error
+    // Returns: actual bytes written, -1 on error. A device loss found here
+    // closes the port (isConnected() turns false) and returns -1.
     int writeBytes(const void* buffer, int length) {
-        if (!isInitialized()) return -1;
+        if (!isConnected()) return -1;
         if (length <= 0) return 0;
 
 #if defined(_WIN32)
         DWORD bytesWritten = 0;
         if (!WriteFile(handle_, buffer, length, &bytesWritten, nullptr)) {
+            markDisconnected("WriteFile", GetLastError());
             return -1;
         }
         return (int)bytesWritten;
@@ -564,6 +646,8 @@ public:
 #else
         ssize_t result = write(fd_, buffer, length);
         if (result == -1) {
+            int err = errno;
+            if (isDeviceLostError(err)) markDisconnected("write", err);
             return -1;
         }
         return static_cast<int>(result);
@@ -633,19 +717,67 @@ public:
     }
 
 private:
+    // mutable: the const available() closes the port when it finds the
+    // device gone (see markDisconnected()).
 #if defined(_WIN32)
-    HANDLE handle_;        // Windows handle
+    mutable HANDLE handle_;        // Windows handle
 #elif defined(__ANDROID__)
     androidserial::Impl* aimpl_;  // Android backend state
 #else
-    int fd_;               // File descriptor (POSIX)
+    mutable int fd_;               // File descriptor (POSIX)
 #endif
-    bool initialized_;     // Connection state
+    mutable bool initialized_;     // Connection state
     std::string devicePath_; // Current device path
 
-#if !defined(_WIN32) && !defined(__ANDROID__)
-    // Convert baud rate to speed_t (POSIX only)
-    speed_t baudRateToSpeed(int baudRate) {
+#if defined(_WIN32)
+    // The device went away: close the handle (a stale one would block
+    // reopening the COM port) and log once; later calls see !isConnected().
+    // Any failure of ClearCommError / ReadFile / WriteFile counts as a loss:
+    // with fAbortOnError off, line errors do not fail them, and the error
+    // code a removed device returns differs between drivers.
+    void markDisconnected(const char* call, DWORD error) const {
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            CloseHandle(handle_);
+            handle_ = INVALID_HANDLE_VALUE;
+        }
+        initialized_ = false;
+        logWarning() << "Serial: lost connection to " << devicePath_
+                     << " (" << call << " failed, error " << error << ")";
+    }
+#elif !defined(__ANDROID__)
+    // The device went away: close the fd and log once; later calls see
+    // !isConnected(). err is the errno that showed it, 0 for a hangup.
+    void markDisconnected(const char* call, int err) const {
+        if (fd_ != -1) {
+            ::close(fd_);
+            fd_ = -1;
+        }
+        initialized_ = false;
+        logWarning() << "Serial: lost connection to " << devicePath_ << " ("
+                     << call << (err ? ": " : "") << (err ? std::strerror(err) : "") << ")";
+    }
+
+    // errno values that mean the device is gone, not "try again"
+    static bool isDeviceLostError(int err) {
+        return err == EIO || err == ENXIO || err == ENODEV;
+    }
+
+    // Whether the tty was hung up (device removed, pty master closed). The
+    // zero timeout never blocks. POLLNVAL is deliberately not counted: our
+    // fd is always open here, and macOS reports POLLNVAL for a device whose
+    // driver lacks kqueue support, which would drop a working port.
+    bool isHungUp() const {
+        struct pollfd pfd;
+        pfd.fd = fd_;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        if (poll(&pfd, 1, 0) <= 0) return false;
+        return (pfd.revents & (POLLHUP | POLLERR)) != 0;
+    }
+
+    // termios B-constant for a baud rate, or nullopt when there is none
+    // (setup() then sets the exact rate with setSerialCustomBaudRate()).
+    static std::optional<speed_t> baudRateToSpeed(int baudRate) {
         switch (baudRate) {
             case 300:    return B300;
             case 600:    return B600;
@@ -661,12 +793,41 @@ private:
 #ifdef B460800
             case 460800: return B460800;
 #endif
+#ifdef B500000
+            case 500000: return B500000;
+#endif
+#ifdef B576000
+            case 576000: return B576000;
+#endif
 #ifdef B921600
             case 921600: return B921600;
 #endif
+#ifdef B1000000
+            case 1000000: return B1000000;
+#endif
+#ifdef B1152000
+            case 1152000: return B1152000;
+#endif
+#ifdef B1500000
+            case 1500000: return B1500000;
+#endif
+#ifdef B2000000
+            case 2000000: return B2000000;
+#endif
+#ifdef B2500000
+            case 2500000: return B2500000;
+#endif
+#ifdef B3000000
+            case 3000000: return B3000000;
+#endif
+#ifdef B3500000
+            case 3500000: return B3500000;
+#endif
+#ifdef B4000000
+            case 4000000: return B4000000;
+#endif
             default:
-                logWarning() << "Serial: unsupported baud rate " << baudRate << ", using 9600";
-                return B9600;
+                return std::nullopt;
         }
     }
 #endif

@@ -104,6 +104,7 @@ file(GLOB_RECURSE TC_HEADERS
 # Common source files (platform-independent)
 file(GLOB TC_IMPL_SOURCES     ${CMAKE_CURRENT_SOURCE_DIR}/include/impl/*.cpp)
 file(GLOB TC_APP_SOURCES      ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/app/*.cpp)
+file(GLOB TC_COMM_SOURCES     ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/comm/*.cpp)
 file(GLOB TC_GRAPHICS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/graphics/*.cpp)
 file(GLOB TC_NETWORK_SOURCES  ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/network/*.cpp)
 file(GLOB TC_SOUND_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/sound/*.cpp)
@@ -135,6 +136,7 @@ set(TC_ALL_SOURCES
     ${TC_HEADERS}
     ${TC_IMPL_SOURCES}
     ${TC_APP_SOURCES}
+    ${TC_COMM_SOURCES}
     ${TC_GRAPHICS_SOURCES}
     ${TC_NETWORK_SOURCES}
     ${TC_SOUND_SOURCES}
