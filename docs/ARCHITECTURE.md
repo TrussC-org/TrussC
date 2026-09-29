@@ -334,11 +334,16 @@ this->callAfter(1.0, []{ cout << "1 second passed" << endl; });
 
 // Repeating timer
 this->callEvery(0.5, []{ cout << "Every 0.5 seconds" << endl; });
+
+// Repeating timer that calls back once for every interval that came due
+// (at most 5 per update), e.g. a fixed-rate simulation step
+this->callEveryCatchUp(0.01, [this]{ stepSimulation(0.01); }, 5);
 ```
 
 - Timers are countdowns: each update of the node subtracts `getDeltaTime()`, so they follow the loop (including fixed-rate steps), pause while the node is inactive, and are not affected by `resetElapsedTimeCounter()`. With a fixed update rate they count step time: time the loop drops after a stall (beyond 10 steps per frame) is not counted, so the timer fires that much later in wall time
 - Only time after the call counts: a timer created in an update (including an `events().update` listener) starts with the next one. In the main window, one created elsewhere (an event handler, `draw()`, `runOnMainThread` work) is not charged for an idle gap or a stall before it existed; in a secondary window it still counts that window's whole next delta
 - `callEvery` keeps its phase (next due = previous due + interval). If an update comes more than a whole interval late it fires once, not once per missed interval
+- `callEveryCatchUp(interval, callback, maxCatchUp = 0)` keeps the phase too, but calls back once for every interval that came due, at most `maxCatchUp` times per update (`<= 0`: no limit). Past the limit the remaining due intervals are dropped; cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or `setFps()` loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once
 - Timers auto-destroyed when Node is deleted
 - Zero overhead when no timers are active
 

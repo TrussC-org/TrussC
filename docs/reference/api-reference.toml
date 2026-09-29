@@ -5391,10 +5391,10 @@ related = ["Node::callEveryAsync", "Node::cancelAsyncTimer", "Node::callAfter"]
 ["Node::callEvery"]
 category = "timers"
 keywords = ["timer", "interval", "repeat", "schedule", "periodic"]
-description.en = "Run callback repeatedly every interval seconds. A frame timer counted down by getDeltaTime() like callAfter. Keeps its phase (next due = previous due + interval); when an update comes more than a whole interval late it fires once, not once per missed interval. Returns a timer id."
-description.ja = "interval秒ごとにcallbackを繰り返し実行。callAfter と同じく getDeltaTime() でカウントダウンするフレームタイマー。位相を保つ（次の予定 = 前回の予定 + interval）。update がインターバル1つ分以上遅れたときは、取りこぼした回数分ではなく1回だけ発火する。タイマーidを返す"
-description.ko = "interval초마다 callback을 반복 실행. callAfter처럼 getDeltaTime()으로 카운트다운하는 프레임 타이머. 위상을 유지한다(다음 예정 = 이전 예정 + interval). update가 인터벌 하나 이상 늦으면 놓친 횟수만큼이 아니라 한 번만 실행된다. 타이머 id를 반환"
-related = ["Node::callEveryAsync", "Node::callAfter", "Node::cancelTimer"]
+description.en = "Run callback repeatedly every interval seconds. A frame timer counted down by getDeltaTime() like callAfter. Keeps its phase (next due = previous due + interval); when an update comes more than a whole interval late it fires once, not once per missed interval (callEveryCatchUp does that). Returns a timer id."
+description.ja = "interval秒ごとにcallbackを繰り返し実行。callAfter と同じく getDeltaTime() でカウントダウンするフレームタイマー。位相を保つ（次の予定 = 前回の予定 + interval）。update がインターバル1つ分以上遅れたときは、取りこぼした回数分ではなく1回だけ発火する（回数分呼ぶのは callEveryCatchUp）。タイマーidを返す"
+description.ko = "interval초마다 callback을 반복 실행. callAfter처럼 getDeltaTime()으로 카운트다운하는 프레임 타이머. 위상을 유지한다(다음 예정 = 이전 예정 + interval). update가 인터벌 하나 이상 늦으면 놓친 횟수만큼이 아니라 한 번만 실행된다(횟수만큼 호출하는 것은 callEveryCatchUp). 타이머 id를 반환"
+related = ["Node::callEveryCatchUp", "Node::callEveryAsync", "Node::callAfter", "Node::cancelTimer"]
 
 ["Node::callEveryAsync"]
 category = "timers"
@@ -5403,6 +5403,14 @@ description.en = "Like callEvery, but fired by a precise background scheduler th
 description.ja = "callEveryの精密版。バックグラウンドのスケジューラスレッドがドリフトなく発火（絶対時刻で再スケジュール）。シーケンサのクロックやLED/MIDI出力のタイミングに最適。スレッドの注意点はcallAfterAsyncと同じ。ネイティブ専用。タイマーidを返す"
 description.ko = "callEvery의 정밀 버전. 백그라운드 스케줄러 스레드가 드리프트 없이 실행(절대 시각으로 재예약). 시퀀서 클럭이나 LED/MIDI 출력 타이밍에 적합. 스레드 주의사항은 callAfterAsync와 동일. 네이티브 전용. 타이머 id를 반환"
 related = ["Node::callAfterAsync", "Node::cancelAsyncTimer", "Node::callEvery"]
+
+["Node::callEveryCatchUp"]
+category = "timers"
+keywords = ["timer", "interval", "repeat", "catch up", "missed", "late", "fixed rate"]
+description.en = "Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp <= 0, the default: no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (10 per frame) is not counted. Returns a timer id."
+description.ja = "callEvery と同じだが、期限の来たインターバル1つにつき1回ずつ呼ぶ。1回の update で呼ぶのは最大 maxCatchUp 回（maxCatchUp <= 0 が既定で、上限なし）。update が遅れたあとでもカウンタやシミュレーションを予定どおりに進めたいとき用。上限を超えた分のインターバルは捨て、位相は保つ。コールバック内でこのタイマーをキャンセルすると残りの呼び出しは止まる。上限なしだと、VSYNC / setFps() のループで長く止まったとき（EVENT_DRIVEN モードで長く待機したときも）その回数分を一度に呼ぶ。固定Hz update モードではステップ時間で数えるので、ループがステップ上限（1フレーム10ステップ）を超えて捨てた時間は数えない。タイマーidを返す"
+description.ko = "callEvery와 같지만, 만기된 인터벌 하나마다 한 번씩 호출한다. 한 번의 update에서 호출하는 것은 최대 maxCatchUp회(기본값 maxCatchUp <= 0은 제한 없음). update가 늦은 뒤에도 카운터나 시뮬레이션을 예정대로 진행시키고 싶을 때 쓴다. 제한을 넘는 인터벌은 버리고 위상은 유지한다. 콜백 안에서 이 타이머를 취소하면 남은 호출은 멈춘다. 제한이 없으면 VSYNC / setFps() 루프가 오래 멈췄을 때(EVENT_DRIVEN 모드에서 오래 대기했을 때도) 그 횟수만큼 한꺼번에 호출한다. 고정 Hz update 모드에서는 스텝 시간으로 세므로, 루프가 스텝 상한(프레임당 10스텝)을 넘어 버린 시간은 세지 않는다. 타이머 id를 반환"
+related = ["Node::callEvery", "Node::cancelTimer", "setIndependentFps"]
 
 ["Node::cancelAllAsyncTimers"]
 category = "timers"

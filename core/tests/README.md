@@ -93,7 +93,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   also in the default draw-synced mode, the independent VSYNC update and
   headless); the fixed-fps draw skip doesn't drop frames at the display rate;
   Node timers are countdowns that keep their phase and are not charged for
-  time before they were created; the `ScreenRecorder` pacer (its
-  `start()`/`tick()` are all the timing `ScreenRecorder` reads) stays exact
-  after long uptime and, like the `tc_get_health` uptime, ignores
-  `resetElapsedTimeCounter()`.
+  time before they were created, and `callEveryCatchUp` fires once per due
+  interval up to its limit (a cancel from the callback stops it); the
+  `ScreenRecorder` pacer (its `start()`/`tick()` are all the timing
+  `ScreenRecorder` reads) stays exact after long uptime and, like the
+  `tc_get_health` uptime, ignores `resetElapsedTimeCounter()`.

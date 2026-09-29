@@ -22,9 +22,12 @@
 //      target equals or sits just above the display rate; integer ratios
 //      unchanged. Also through the main loop's draw decision.
 //   6. Node timers are countdowns: callAfter fires on schedule, callEvery keeps
-//      its phase (and takes std::bind results / generic lambdas), resets don't
-//      affect them, and a timer created between main-window updates (after an
-//      idle gap or a stall) is charged only the time since its creation.
+//      its phase and fires once when late (and takes std::bind results /
+//      generic lambdas), callEveryCatchUp fires once per due interval up to its
+//      limit (cancelling from the callback stops it; fixed-Hz dropped time is
+//      not counted), resets don't affect them, and a timer created between
+//      main-window updates (after an idle gap or a stall) is charged only the
+//      time since its creation.
 //   7. ScreenRecorder pacing (the pacer's tick(), all ScreenRecorder reads):
 //      decimation and PTS are exact after long uptime, and neither the PTS nor
 //      the duration cutoff moves with resetElapsedTimeCounter(); neither does
@@ -581,6 +584,67 @@ static void testNodeTimers() {
         node->cancelTimer(id);
         checkf("timers: callEvery(0.02) at 60 fps fires 300 +/-1 times in 6 s", abs(fired - 300) <= 1, fired);
     }
+    // A late callEvery fires once; callEveryCatchUp once per interval that
+    // came due, keeping the phase.
+    {
+        int every = 0, catchUp = 0;
+        uint64_t a = node->callEvery(0.1, [&] { ++every; });
+        uint64_t b = node->callEveryCatchUp(0.1, [&] { ++catchUp; });
+        anchorSimClock();
+        simUpdate(*node, 0.0);              // start counting
+        simUpdate(*node, 0.35);             // due at 0.1, 0.2 and 0.3
+        check("timers: a late callEvery fires once", every == 1);
+        checkf("timers: a late callEveryCatchUp fires once per due interval (3)", catchUp == 3, catchUp);
+        simUpdate(*node, 0.05);             // 0.40: due again, in phase
+        check("timers: ...and both keep the phase (due again at 0.40)", every == 2 && catchUp == 4);
+        node->cancelTimer(a);
+        node->cancelTimer(b);
+    }
+    // No limit by default: a 10 s stall in a measured-dt loop (VSYNC,
+    // setFps()) makes it fire for the whole stall in one update.
+    {
+        int calls = 0;
+        uint64_t id = node->callEveryCatchUp(0.01, [&] { ++calls; });
+        anchorSimClock();
+        simUpdate(*node, 0.0);
+        simUpdate(*node, 10.0);
+        node->cancelTimer(id);
+        checkf("timers: callEveryCatchUp without a limit fires 1000 times for 10 s",
+               abs(calls - 1000) <= 1, calls);
+    }
+    // maxCatchUp: at most that many calls per update; the rest of the due
+    // intervals are dropped and the phase is kept.
+    {
+        int calls = 0;
+        uint64_t id = node->callEveryCatchUp(0.1, [&] { ++calls; }, 3);
+        anchorSimClock();
+        simUpdate(*node, 0.0);
+        simUpdate(*node, 0.95);             // 9 due (0.1 .. 0.9)
+        checkf("timers: callEveryCatchUp(maxCatchUp = 3) fires 3 of 9 due", calls == 3, calls);
+        simUpdate(*node, 0.04);             // 0.99: not due
+        check("timers: ...drops the rest (nothing due at 0.99)", calls == 3);
+        simUpdate(*node, 0.01);             // 1.00: next due in the old phase
+        check("timers: ...and keeps the phase (due again at 1.00)", calls == 4);
+        node->cancelTimer(id);
+    }
+    // Cancelling the timer from its callback stops the remaining calls, also
+    // when the callback adds timers (the timer vector reallocates).
+    {
+        int calls = 0;
+        uint64_t id = 0;
+        id = node->callEveryCatchUp(0.1, [&] {
+            ++calls;
+            for (int i = 0; i < 64; ++i) node->callAfter(100.0, [] {});
+            if (calls == 2) node->cancelTimer(id);
+        });
+        anchorSimClock();
+        simUpdate(*node, 0.0);
+        simUpdate(*node, 0.55);             // 5 due
+        checkf("timers: callEveryCatchUp cancelled by its callback stops (2 of 5)", calls == 2, calls);
+        simUpdate(*node, 0.1);
+        check("timers: ...and stays cancelled", calls == 2);
+        node->cancelAllTimers();
+    }
     // callEvery takes any callable that can be called with no arguments,
     // including ones that also accept an int (std::bind results, generic
     // lambdas): it has no overload those would make ambiguous. Compile check,
@@ -673,6 +737,33 @@ static void testNodeTimersInLoop() {
         checkf("loop timers: ...then fires on the first step 0.05 s after its creation",
                fired == 1 && steps >= 6 && steps <= 7 && firedAfter >= 0.05 - 1e-6 && prevAfter < 0.05,
                firedAfter);
+    }
+    // callEveryCatchUp counts step time: after a 3 s stall the frame runs 10
+    // capped steps, and a 480 Hz catch-up timer on 120 Hz steps catches up
+    // those 10 steps (4 calls each), not the 3 s the loop dropped.
+    {
+        int calls = 0, perFrame = -1;
+        bool created = false;
+        g_loopDuring = [&] {
+            if (created) return;
+            created = true;
+            node->callEveryCatchUp(1.0 / 480.0, [&] { ++calls; });
+        };
+        runFrames(t, 2, 1.0 / 60.0);        // created, then counting
+        g_loopDuring = nullptr;
+        calls = 0;
+        runFrames(t, 1, 1.0 / 60.0);
+        perFrame = calls;
+        calls = 0;
+        internal::lastUpdateTime = t - secs(3.0);   // the previous frame, 3 s ago
+        const int before = g_updates;
+        internal::runIndependentUpdates(t);
+        const int steps = g_updates - before;
+        node->cancelAllTimers();
+        checkf("loop timers: callEveryCatchUp(1/480) at 120 Hz runs 8 calls per 60 Hz frame",
+               perFrame == 8, perFrame);
+        checkf("loop timers: ...after a 3 s stall, 4 calls per capped step (40), not 1440",
+               steps == 10 && calls == 40, calls);
     }
     internal::appUpdateFunc = nullptr;
     g_loopNode = nullptr;

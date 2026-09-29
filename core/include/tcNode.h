@@ -1329,9 +1329,25 @@ public:
 
     // Execute callback repeatedly at specified interval. Keeps its phase (each
     // due time = previous due time + interval); when late by more than one
-    // interval it fires once, not once per missed interval.
+    // interval it fires once, not once per missed interval (callEveryCatchUp
+    // does that).
     uint64_t callEvery(double interval, std::function<void()> callback) {
         return addTimer(interval, interval, true, std::move(callback));
+    }
+
+    // Like callEvery, but calls back once for every interval that came due,
+    // at most maxCatchUp times per update (maxCatchUp <= 0: no limit), so a
+    // counter or a simulation driven by it catches up after a late update.
+    // Past the limit the remaining due intervals are dropped; the phase is
+    // kept. Cancelling the timer from the callback stops the remaining calls.
+    // Without a limit, a long stall in a loop whose delta is measured (VSYNC or
+    // setFps(), including an EVENT_DRIVEN idle stretch) makes it fire that
+    // many times at once. In fixed-Hz update mode it counts step time, so time
+    // dropped by the update step cap is not counted.
+    uint64_t callEveryCatchUp(double interval, std::function<void()> callback,
+                              int maxCatchUp = 0) {
+        return addTimer(interval, interval, true, std::move(callback),
+                        true, maxCatchUp);
     }
 
     // Cancel timer
@@ -1465,6 +1481,10 @@ protected:
         double interval;      // repeat interval (callEvery), 0 for callAfter
         std::function<void()> callback;
         bool repeating;
+        // callEveryCatchUp: one call per due interval, at most maxCatchUp per
+        // update (<= 0: no limit). callEvery calls once however late it is.
+        bool catchUp;
+        int maxCatchUp;
         uint64_t createdUpdate;  // getUpdateCount() when created
         // Created between updates: not counting yet. The first update after
         // `created` is charged only the time since `created`.
@@ -1477,9 +1497,11 @@ protected:
 
 private:
     uint64_t addTimer(double delay, double interval, bool repeating,
-                      std::function<void()> callback) {
+                      std::function<void()> callback,
+                      bool catchUp = false, int maxCatchUp = 0) {
         uint64_t id = nextTimerId_++;
         timers_.push_back({id, delay, interval, std::move(callback), repeating,
+                           catchUp, maxCatchUp,
                            getUpdateCount(), !internal::isInUpdate(),
                            std::chrono::steady_clock::now()});
         return id;
@@ -1505,7 +1527,8 @@ protected:
     // front, then look each one up by ID before firing, copying out the
     // callback and metadata so vector reallocation during the callback can't
     // dangle the in-flight reference. Timers added by a callback wait for the
-    // next update.
+    // next update. A catch-up timer looks itself up again before each further
+    // call, so cancelling it from its callback stops the remaining calls.
     void processTimers() {
         if (timers_.empty()) return;
         constexpr double dueEpsilon = 1e-9;
@@ -1543,17 +1566,34 @@ protected:
             std::function<void()> callback = it->callback;
 
             if (it->repeating) {
-                // Keep the phase: next due = this due time + interval. When
-                // late by whole intervals, skip them and fire once.
+                // Keep the phase: next due = this due time + interval, past
+                // every interval that came due in this update. callEvery
+                // fires once for them; callEveryCatchUp once per interval, up
+                // to its limit (the rest are dropped).
+                uint64_t calls = 1;
                 if (it->interval > 0.0) {
                     double late = -it->remaining;
                     double skipped = late > 0.0
                         ? std::floor(late / it->interval + dueEpsilon) : 0.0;
                     it->remaining += it->interval * (skipped + 1.0);
+                    if (it->catchUp) {
+                        double due = skipped + 1.0;
+                        calls = due < 1.8e19 ? (uint64_t)due : UINT64_MAX;
+                    }
                 } else {
-                    it->remaining = 0.0;   // interval <= 0: every update
+                    it->remaining = 0.0;   // interval <= 0: every update, once
                 }
-                if (callback) callback();  // safe: we already captured what we need from `it`
+                if (it->catchUp && it->maxCatchUp > 0 && calls > (uint64_t)it->maxCatchUp) {
+                    calls = (uint64_t)it->maxCatchUp;
+                }
+                // safe: we already captured what we need from `it`
+                for (uint64_t n = 0; n < calls; ++n) {
+                    if (n > 0 && std::none_of(timers_.begin(), timers_.end(),
+                            [id](const Timer& t) { return t.id == id; })) {
+                        break;   // cancelled by the callback
+                    }
+                    if (callback) callback();
+                }
             } else {
                 // Remove before firing so the timer is gone even if the
                 // callback throws or registers a new timer that reallocates.
