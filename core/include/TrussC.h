@@ -1975,8 +1975,16 @@ namespace internal {
     // lastSwapchainDrawable — is current: the main window from the afterFrame
     // listener installed in _setup_cb, each secondary window from its own
     // windowTick (platform/*/tcWindow*). Failures log via logError.
+    // A secondary window also answers the MCP requests aimed at it here
+    // (tc_get_screenshot / tc_save_screenshot with a window index): only
+    // inside its own tick is its drawable the one a readback sees (#243).
+    // The main window's are drained by the same afterFrame listener.
     inline void drainPendingScreenshots() {
-        auto& queue = currentWindowContext().pendingScreenshotPaths;
+        auto& ctx = currentWindowContext();
+        #ifndef __EMSCRIPTEN__
+        if (!ctx.isMain) mcp::drainDeferredResponses(&ctx);
+        #endif
+        auto& queue = ctx.pendingScreenshotPaths;
         if (queue.empty()) return;
         for (const auto& p : queue) {
             captureWindowToFile(p);
