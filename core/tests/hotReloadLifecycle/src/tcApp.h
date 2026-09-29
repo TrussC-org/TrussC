@@ -22,12 +22,13 @@ using namespace tc;
 // guest_deferred defers its reply the way screenshot tools do; the control
 // tools are registered from guest code the way apps do (in setup()).
 //
-// writeSharedState / readSharedState / sharedInstances / queueFromWorker
-// (tcApp.cpp) are guest code the cycles call through the vtable: settings app
-// code writes and the core loop reads, state the host sets that guest code
-// reads, the process-wide singletons and GPU caches guest code reaches, and
-// work it queues for the main thread, all of which a Windows guest DLL used to
-// keep its own copy of (#249).
+// writeSharedState / readSharedState / sharedInstances / queueFromWorker /
+// attachApp (tcApp.cpp) are guest code the cycles call through the vtable:
+// settings app code writes and the core loop reads, state the host sets that
+// guest code reads, the process-wide singletons and GPU caches guest code
+// reaches, work it queues for the main thread, and the secondary windows'
+// double-attach guard (guest setApp() adds, the host's close() removes), all
+// of which a Windows guest DLL used to keep its own copy of (#249).
 //
 // setup/draw/exit (tcApp.cpp) only run in `--app` mode (see main.cpp); the
 // lifecycle cycles never call them. They use tcxImGui so the guest target is
@@ -93,6 +94,8 @@ public:
     virtual GuestInstances sharedInstances();
     // runOnMainThread(++*ran) from a worker thread of the guest's own.
     virtual void queueFromWorker(std::atomic<int>* ran);
+    // window.setApp(app) as app code calls it; true if the window took it.
+    virtual bool attachApp(Window& window, std::shared_ptr<App> app);
 
 private:
     EventListener updateListener_;

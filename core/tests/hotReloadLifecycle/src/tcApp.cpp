@@ -88,3 +88,11 @@ void tcApp::queueFromWorker(std::atomic<int>* ran) {
     std::thread worker([ran] { runOnMainThread([ran] { ++*ran; }); });
     worker.join();
 }
+
+// Window::setApp() is inline, so this runs the guest's copy of it: the
+// double-attach guard it consults and adds to must be the one the host's
+// close() removes from.
+bool tcApp::attachApp(Window& window, std::shared_ptr<App> app) {
+    window.setApp(app);
+    return window.getApp() == app;
+}

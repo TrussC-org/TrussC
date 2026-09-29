@@ -56,6 +56,9 @@
 // setBeepVolume() and mcp::alert() must reach the host (the alert over HTTP,
 // through tc_get_alerts), and work a guest worker thread queues with
 // runOnMainThread() must run when the host drains the main-thread queue.
+// An App guest code attaches to a window and the host releases (as the
+// platform close() does) must attach again: the double-attach guard is one set
+// per process, not a copy per module.
 //
 // On Linux and macOS all of this holds either way, since the host uses (and so
 // contains) every definition checked here; on Windows it fails if any of that
@@ -388,6 +391,28 @@ static int runCycles(const std::string& guestPath, int port) {
         }
         if (ran.load() != 1) {
             return fail(32, "work a guest worker thread queued with runOnMainThread() never reached the host's main-thread queue");
+        }
+
+        // A secondary window's App: guest code attaches it (Window::setApp()
+        // is inline), the host releases it, and guest code attaches it again,
+        // as when an app reopens a window the user closed. The platform
+        // close() that releases it is TrussC.lib code; the host's own
+        // setApp(nullptr) releases it the same way without a native window.
+        // A guest with its own double-attach guard never saw the release and
+        // refused the second attach ("already drives another window").
+        {
+            // Created after the guest App, so it does not become the main
+            // context's root (the "running main App" setApp() refuses).
+            auto sub = std::make_shared<App>();
+            Window first, second;
+            const bool attached = guest->attachApp(first, sub);
+            first.setApp(nullptr);
+            const bool reattached = attached && guest->attachApp(second, sub);
+            second.setApp(nullptr);
+            if (!attached) return fail(33, "guest code could not attach an App to a window");
+            if (!reattached) {
+                return fail(33, "an App the host released from its window could not be attached again from guest code: the guest keeps its own double-attach guard");
+            }
         }
 
         // Destruction + unload: listener removal churns the COW lists, and the
