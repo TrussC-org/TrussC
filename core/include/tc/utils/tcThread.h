@@ -130,7 +130,12 @@ public:
 
         threadRunning_ = true;
         workerActive_ = true;
+        // Held until thread_ is assigned. The worker waits for it, so
+        // threadedFunction() cannot destroy this object (see the destructor)
+        // while thread_ is still being assigned here.
+        std::lock_guard<std::mutex> lock(startMutex_);
         thread_ = std::thread([this]() {
+            { std::lock_guard<std::mutex> started(startMutex_); }
             // Lives on this worker's stack, so it outlives the object if
             // threadedFunction() destroys it (the destructor sets it).
             bool destroyed = false;
@@ -224,6 +229,8 @@ private:
     // Set by the worker to a flag on its own stack. Only the destructor, when
     // it runs on that same worker, writes through it.
     bool* selfDestroyed_ = nullptr;
+    // Held by startThread() while it assigns thread_ (see there).
+    std::mutex startMutex_;
 };
 
 // ---------------------------------------------------------------------------
