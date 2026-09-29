@@ -197,8 +197,11 @@ private:
     std::thread receiveThread_;
     std::thread connectThread_;
 
-    // Bumped for every receive thread started; a thread whose generation is
-    // no longer current stops (see receiveThreadFunc)
+    // Bumped for every receive thread started. receiveThreadFunc() stops a
+    // thread whose generation is no longer current once processNetwork()
+    // returns to it, as it does right after onDisconnect. A thread still in
+    // processNetwork()'s receive loop (a reconnect from an onReceive
+    // listener) is not stopped by this.
     std::atomic<unsigned> receiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()
