@@ -193,6 +193,9 @@ private:
 
     std::thread receiveThread_;
     std::thread connectThread_;
+
+    // Receive buffer, sized to receiveBufferSize_ by processNetwork()
+    std::vector<char> recvBuf_;
 };
 
 } // namespace trussc

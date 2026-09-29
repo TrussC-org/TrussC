@@ -529,19 +529,19 @@ void TlsClient::processNetwork() {
 
     if (!connected_) return;
 
-    // 3. Handle data receive
-    static std::vector<unsigned char> buffer;
-    if (buffer.size() != receiveBufferSize_) {
-        buffer.resize(receiveBufferSize_);
+    // 3. Handle data receive. The buffer is this client's own: every
+    // client's receive thread runs this at the same time.
+    if (tlsRecvBuf_.size() != receiveBufferSize_) {
+        tlsRecvBuf_.resize(receiveBufferSize_);
     }
 
     while (connected_) {
-        int ret = mbedtls_ssl_read(&ctx_->ssl, buffer.data(), buffer.size());
+        int ret = mbedtls_ssl_read(&ctx_->ssl, tlsRecvBuf_.data(), tlsRecvBuf_.size());
 
         if (ret > 0) {
             tc::TcpReceiveEventArgs args;
-            args.data.assign(reinterpret_cast<char*>(buffer.data()),
-                            reinterpret_cast<char*>(buffer.data()) + ret);
+            args.data.assign(reinterpret_cast<char*>(tlsRecvBuf_.data()),
+                            reinterpret_cast<char*>(tlsRecvBuf_.data()) + ret);
             onReceive.notify(args);
             if (!useThread_) break;
         } else if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {

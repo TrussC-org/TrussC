@@ -90,3 +90,7 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   the connection returns false instead of raising SIGPIPE, which killed the
   process without a trace (#254). One part keeps `connected_` set (no receive
   thread) so every send reaches the dead socket; one races the receive thread.
+- `tcpClientIsolation/` — each TcpClient's `onReceive` gets only its own
+  bytes (#254): two clients with different receive buffer sizes take 8 MB each
+  from two loopback peers. The receive buffer used to be one function-local
+  static shared by every client's receive thread.

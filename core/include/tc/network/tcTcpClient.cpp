@@ -32,6 +32,9 @@ TcpClient::TcpClient(TcpClient&& other) noexcept
     , connected_(other.connected_.load())
     , receiveBufferSize_(other.receiveBufferSize_)
 {
+    // recvBuf_ is not taken from `other`: it is scratch space that
+    // processNetwork() sizes on the next receive, and a receive thread of
+    // `other` may still be reading into it.
 #ifdef _WIN32
     other.socket_ = INVALID_SOCKET;
 #else
@@ -50,6 +53,7 @@ TcpClient& TcpClient::operator=(TcpClient&& other) noexcept {
         running_ = other.running_.load();
         connected_ = other.connected_.load();
         receiveBufferSize_ = other.receiveBufferSize_;
+        // recvBuf_ stays this object's own (see the move constructor).
 
 #ifdef _WIN32
         other.socket_ = INVALID_SOCKET;
@@ -348,18 +352,18 @@ void TcpClient::processNetwork() {
 
     if (!connected_) return;
 
-    // Receive data
-    static std::vector<char> buffer;
-    if (buffer.size() != receiveBufferSize_) {
-        buffer.resize(receiveBufferSize_);
+    // Receive data. The buffer is this client's own: every client's receive
+    // thread runs this at the same time.
+    if (recvBuf_.size() != receiveBufferSize_) {
+        recvBuf_.resize(receiveBufferSize_);
     }
 
     while (connected_) {
-        int received = static_cast<int>(recv(socket_, buffer.data(), buffer.size(), 0));
+        int received = static_cast<int>(recv(socket_, recvBuf_.data(), recvBuf_.size(), 0));
 
         if (received > 0) {
             TcpReceiveEventArgs args;
-            args.data.assign(buffer.begin(), buffer.begin() + received);
+            args.data.assign(recvBuf_.begin(), recvBuf_.begin() + received);
             onReceive.notify(args);
             
             // If using threads, we might block again. 

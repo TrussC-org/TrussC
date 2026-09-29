@@ -110,6 +110,9 @@ private:
     void tlsReceiveThreadFunc();
 
     std::thread tlsReceiveThread_;
+
+    // Receive buffer, sized to receiveBufferSize_ by processNetwork()
+    std::vector<unsigned char> tlsRecvBuf_;
 };
 
 }  // namespace tcx::tls
