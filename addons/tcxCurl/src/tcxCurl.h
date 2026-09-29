@@ -31,9 +31,12 @@
 // =============================================================================
 
 #include <string>
+#include <string_view>
 #include <vector>
 #include <algorithm>
 #include <functional>
+#include <cctype>
+#include <cstdio>
 #include <nlohmann/json.hpp>
 
 #ifdef TCX_HTTP_CURL
@@ -76,6 +79,47 @@ namespace detail {
     };
     inline void ensureCurlInit() {
         static CurlGlobalGuard guard;
+    }
+
+    // Header lines whose value is a credential: setVerbose() output shows
+    // their name but not their value.
+    inline bool isCredentialHeader(std::string_view line) {
+        static constexpr std::string_view names[] = {
+            "authorization:", "proxy-authorization:", "x-api-key:", "api-key:",
+        };
+        for (auto name : names) {
+            if (line.size() >= name.size() &&
+                std::equal(name.begin(), name.end(), line.begin(), [](char n, char c) {
+                    return n == std::tolower(static_cast<unsigned char>(c));
+                })) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Returns a header block with credential values replaced by <redacted>,
+    // line endings kept.
+    inline std::string redactCredentialHeaders(std::string_view block) {
+        std::string out;
+        out.reserve(block.size());
+        size_t pos = 0;
+        while (pos < block.size()) {
+            size_t nl = block.find('\n', pos);
+            size_t next = (nl == std::string_view::npos) ? block.size() : nl + 1;
+            std::string_view line = block.substr(pos, next - pos);
+            if (isCredentialHeader(line)) {
+                size_t eol = line.size();
+                while (eol > 0 && (line[eol - 1] == '\n' || line[eol - 1] == '\r')) --eol;
+                out.append(line.substr(0, line.find(':') + 1));
+                out += " <redacted>";
+                out.append(line.substr(eol));
+            } else {
+                out.append(line);
+            }
+            pos = next;
+        }
+        return out;
     }
 } // namespace detail
 
@@ -127,7 +171,9 @@ public:
     // (which expect the raw response) are unaffected.
     void setFollowRedirects(bool follow) { followRedirects_ = follow; }
 
-    // Enable verbose curl logging to stderr (for debugging)
+    // Enable verbose curl logging to stderr (for debugging). Credential
+    // headers (Authorization, X-Api-Key, ...) are shown with their value
+    // replaced by <redacted>.
     void setVerbose(bool v) { verbose_ = v; }
 
     // Check if server is reachable
@@ -187,6 +233,28 @@ private:
         response->append(static_cast<char*>(contents), totalSize);
         return totalSize;
     }
+
+    // setVerbose() output: what CURLOPT_VERBOSE prints (info text, request
+    // and response headers), one prefix per line, credentials redacted.
+    static int debugCallback(CURL*, curl_infotype type, char* data, size_t size, void*) {
+        const char* prefix = nullptr;
+        switch (type) {
+            case CURLINFO_TEXT:       prefix = "* "; break;
+            case CURLINFO_HEADER_IN:  prefix = "< "; break;
+            case CURLINFO_HEADER_OUT: prefix = "> "; break;
+            default: return 0;  // bodies and TLS records (not shown by CURLOPT_VERBOSE either)
+        }
+        std::string text = detail::redactCredentialHeaders(std::string_view(data, size));
+        size_t pos = 0;
+        while (pos < text.size()) {
+            size_t nl = text.find('\n', pos);
+            size_t next = (nl == std::string::npos) ? text.size() : nl + 1;
+            std::fprintf(stderr, "%s%.*s", prefix, static_cast<int>(next - pos), text.data() + pos);
+            pos = next;
+        }
+        if (!text.empty() && text.back() != '\n') std::fputc('\n', stderr);
+        return 0;
+    }
 #endif
 };
 
@@ -233,6 +301,7 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, 30L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, 15L);
     if (verbose_) {
+        curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, debugCallback);
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
     }
 
