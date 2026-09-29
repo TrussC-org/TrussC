@@ -705,8 +705,12 @@ static void cover_window_system() {
     (void)getBackendName();
     (void)setIndependentFps(af::val<float>(), af::val<float>());
     (void)redraw(af::val<int>());
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)grabScreen(af::val<Pixels>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)saveScreenshot(af::val<const std::filesystem::path>());
+#endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
     (void)startRecording(af::val<const fs::path>(), af::val<const VideoRecordSettings>());
     (void)startRecording(af::val<const fs::path>(), af::val<float>());
