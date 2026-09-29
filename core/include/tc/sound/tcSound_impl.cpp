@@ -49,8 +49,8 @@ bool drainDecoder(ma_decoder& decoder, SoundBuffer& out, const char* sourceLabel
     ma_uint64 frameCount = 0;
     ma_result result = ma_decoder_get_length_in_pcm_frames(&decoder, &frameCount);
     if (result != MA_SUCCESS || frameCount == 0) {
-        printf("SoundBuffer: failed to query length for %s (result=%d)\n",
-               sourceLabel, (int)result);
+        logError("SoundBuffer") << "failed to query length for " << sourceLabel
+                                << " (result=" << (int)result << ")";
         ma_decoder_uninit(&decoder);
         return false;
     }
@@ -64,8 +64,9 @@ bool drainDecoder(ma_decoder& decoder, SoundBuffer& out, const char* sourceLabel
     ma_decoder_uninit(&decoder);
 
     if (result != MA_SUCCESS || framesRead == 0) {
-        printf("SoundBuffer: failed to decode %s (result=%d, framesRead=%llu)\n",
-               sourceLabel, (int)result, (unsigned long long)framesRead);
+        logError("SoundBuffer") << "failed to decode " << sourceLabel << " (result="
+                                << (int)result << ", framesRead=" << (unsigned long long)framesRead
+                                << ")";
         return false;
     }
 
@@ -110,13 +111,14 @@ bool decodeFileWithMiniaudio(const fs::path& path,
     std::string pathStr = internal::pathToUtf8(path);
     ma_result result = maDecoderInitPath(path, &cfg, &decoder);
     if (result != MA_SUCCESS) {
-        printf("SoundBuffer: failed to open %s %s (result=%d)\n",
-               label, pathStr.c_str(), (int)result);
+        logError("SoundBuffer") << "failed to open " << label << " " << pathStr
+                                << " (result=" << (int)result << ")";
         return false;
     }
     if (!drainDecoder(decoder, out, pathStr.c_str())) return false;
-    printf("SoundBuffer: loaded %s %s (%d ch, %d Hz, %zu samples)\n",
-           label, pathStr.c_str(), out.channels, out.sampleRate, out.numSamples);
+    logVerbose("SoundBuffer") << "loaded " << label << " " << pathStr << " (" << out.channels
+                              << " ch, " << out.sampleRate << " Hz, " << out.numSamples
+                              << " samples)";
     return true;
 }
 
@@ -128,13 +130,14 @@ bool decodeMemoryWithMiniaudio(const void* data, size_t dataSize,
     ma_decoder_config cfg = makeFloat32Config(hint);
     ma_result result = ma_decoder_init_memory(data, dataSize, &cfg, &decoder);
     if (result != MA_SUCCESS) {
-        printf("SoundBuffer: failed to decode %s from memory (result=%d)\n",
-               label, (int)result);
+        logError("SoundBuffer") << "failed to decode " << label << " from memory (result="
+                                << (int)result << ")";
         return false;
     }
     if (!drainDecoder(decoder, out, "memory")) return false;
-    printf("SoundBuffer: decoded %s from memory (%d ch, %d Hz, %zu samples)\n",
-           label, out.channels, out.sampleRate, out.numSamples);
+    logVerbose("SoundBuffer") << "decoded " << label << " from memory (" << out.channels
+                              << " ch, " << out.sampleRate << " Hz, " << out.numSamples
+                              << " samples)";
     return true;
 }
 
@@ -150,7 +153,7 @@ LoadResult SoundBuffer::loadOgg(const fs::path& path) {
     // ourselves (wide API) and hand it over (close_handle_on_close=TRUE).
     FILE* f = internal::openFile(path, "rb");
     if (!f) {
-        printf("SoundBuffer: failed to open %s\n", pathStr.c_str());
+        logError("SoundBuffer") << "failed to open " << pathStr;
         return LoadResult::fail(LoadError::FileNotFound,
                                 "failed to open: " + pathStr);
     }
@@ -158,7 +161,8 @@ LoadResult SoundBuffer::loadOgg(const fs::path& path) {
     stb_vorbis* vorbis = stb_vorbis_open_file(f, 1, &error, nullptr);
     if (!vorbis) {
         fclose(f);
-        printf("SoundBuffer: failed to open %s (error=%d)\n", pathStr.c_str(), error);
+        logError("SoundBuffer") << "failed to open " << pathStr << " (stb_vorbis error="
+                                << error << ")";
         return LoadResult::fail(LoadError::DecodeFailed,
                                 "stb_vorbis failed to open " + pathStr +
                                 " (error=" + std::to_string(error) + ")");
@@ -176,11 +180,14 @@ LoadResult SoundBuffer::loadOgg(const fs::path& path) {
 
     stb_vorbis_close(vorbis);
 
-    printf("SoundBuffer: loaded %s (%d ch, %d Hz, %zu samples)\n",
-           pathStr.c_str(), channels, sampleRate, numSamples);
-
-    return decoded > 0 ? LoadResult::success()
-                       : LoadResult::fail(LoadError::DecodeFailed, "no samples decoded");
+    if (decoded <= 0) {
+        logError("SoundBuffer") << "no samples decoded from " << pathStr;
+        return LoadResult::fail(LoadError::DecodeFailed, "no samples decoded");
+    }
+    path_ = path;
+    logVerbose("SoundBuffer") << "loaded " << pathStr << " (" << channels << " ch, "
+                              << sampleRate << " Hz, " << numSamples << " samples)";
+    return LoadResult::success();
 }
 
 // -----------------------------------------------------------------------------
@@ -196,6 +203,7 @@ LoadResult loadFileViaMiniaudio(const fs::path& path, ma_encoding_format hint,
                                 const char* label, SoundBuffer& out) {
     std::error_code ec;
     if (!fs::exists(path, ec)) {
+        logError("SoundBuffer") << "file not found: " << internal::pathToUtf8(path);
         return LoadResult::fail(LoadError::FileNotFound,
                                 "file not found: " + internal::pathToUtf8(path));
     }
@@ -210,38 +218,48 @@ LoadResult loadFileViaMiniaudio(const fs::path& path, ma_encoding_format hint,
 } // namespace
 
 LoadResult SoundBuffer::loadWav(const fs::path& path) {
-    return loadFileViaMiniaudio(path, ma_encoding_format_wav, "WAV", *this);
+    LoadResult r = loadFileViaMiniaudio(path, ma_encoding_format_wav, "WAV", *this);
+    if (r) path_ = path;
+    return r;
 }
 
 LoadResult SoundBuffer::loadMp3(const fs::path& path) {
-    return loadFileViaMiniaudio(path, ma_encoding_format_mp3, "MP3", *this);
+    LoadResult r = loadFileViaMiniaudio(path, ma_encoding_format_mp3, "MP3", *this);
+    if (r) path_ = path;
+    return r;
 }
 
 LoadResult SoundBuffer::loadFlac(const fs::path& path) {
-    return loadFileViaMiniaudio(path, ma_encoding_format_flac, "FLAC", *this);
+    LoadResult r = loadFileViaMiniaudio(path, ma_encoding_format_flac, "FLAC", *this);
+    if (r) path_ = path;
+    return r;
 }
 
 LoadResult SoundBuffer::loadWavFromMemory(const void* data, size_t dataSize) {
+    path_.clear();
     return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_wav, "WAV", *this)
                ? LoadResult::success()
                : LoadResult::fail(LoadError::DecodeFailed, "WAV decode from memory failed");
 }
 
 LoadResult SoundBuffer::loadMp3FromMemory(const void* data, size_t dataSize) {
+    path_.clear();
     return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_mp3, "MP3", *this)
                ? LoadResult::success()
                : LoadResult::fail(LoadError::DecodeFailed, "MP3 decode from memory failed");
 }
 
 LoadResult SoundBuffer::loadFlacFromMemory(const void* data, size_t dataSize) {
+    path_.clear();
     return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_flac, "FLAC", *this)
                ? LoadResult::success()
                : LoadResult::fail(LoadError::DecodeFailed, "FLAC decode from memory failed");
 }
 
 LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
+    path_.clear();
     if (data == nullptr || dataSize == 0) {
-        printf("SoundBuffer: empty memory range for OGG decode\n");
+        logError("SoundBuffer") << "empty memory range for OGG decode";
         return LoadResult::fail(LoadError::DecodeFailed, "empty memory range");
     }
     int error = 0;
@@ -249,7 +267,8 @@ LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
         static_cast<const unsigned char*>(data), static_cast<int>(dataSize),
         &error, nullptr);
     if (!vorbis) {
-        printf("SoundBuffer: failed to decode OGG from memory (error=%d)\n", error);
+        logError("SoundBuffer") << "failed to decode OGG from memory (stb_vorbis error="
+                                << error << ")";
         return LoadResult::fail(LoadError::DecodeFailed,
                                 "stb_vorbis failed to decode OGG from memory (error=" +
                                 std::to_string(error) + ")");
@@ -265,10 +284,13 @@ LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
         vorbis, channels, samples.data(), static_cast<int>(samples.size()));
 
     stb_vorbis_close(vorbis);
-    printf("SoundBuffer: decoded OGG from memory (%d ch, %d Hz, %zu samples)\n",
-           channels, sampleRate, numSamples);
-    return decoded > 0 ? LoadResult::success()
-                       : LoadResult::fail(LoadError::DecodeFailed, "no samples decoded");
+    if (decoded <= 0) {
+        logError("SoundBuffer") << "no samples decoded from OGG in memory";
+        return LoadResult::fail(LoadError::DecodeFailed, "no samples decoded");
+    }
+    logVerbose("SoundBuffer") << "decoded OGG from memory (" << channels << " ch, "
+                              << sampleRate << " Hz, " << numSamples << " samples)";
+    return LoadResult::success();
 }
 
 // -----------------------------------------------------------------------------
@@ -287,10 +309,15 @@ LoadResult SoundBuffer::load(const fs::path& path) {
     if (ext == "mp3")  return loadMp3(path);
     if (ext == "ogg")  return loadOgg(path);
     if (ext == "flac") return loadFlac(path);
-    if (ext == "aac" || ext == "m4a") return loadAac(path);
+    if (ext == "aac" || ext == "m4a") {
+        // loadAac is per platform; record the path here for all of them.
+        LoadResult r = loadAac(path);
+        if (r) path_ = path;
+        return r;
+    }
 
-    printf("SoundBuffer: unsupported extension '.%s' for %s\n",
-           ext.c_str(), internal::pathToUtf8(path).c_str());
+    logError("SoundBuffer") << "unsupported extension '." << ext << "' for "
+                            << internal::pathToUtf8(path);
     return LoadResult::fail(LoadError::UnsupportedFormat,
                             "unsupported extension '." + ext + "' for " +
                             internal::pathToUtf8(path));

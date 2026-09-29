@@ -35,6 +35,13 @@ call `setLogFile()` before `setup()` runs, so every log line — including
 setup-time output — is appended to that file with zero app code. This is how a
 supervisor process (e.g. `anchorbolt start`) captures logs from an unmodified app.
 
+The audio engine reports through the logger too, so the file also receives
+the plays it had to drop (`Sound::play()` returned false: every voice busy, a
+stream's `maxPolyphony`, an unreadable stream file, no output device).
+Repeats are summed into at most one line per drop reason every 2 seconds,
+nothing is logged from the audio thread itself, and what is still held back
+is logged on exit. `tc_get_audio_state` (below) reports the same counts.
+
 ## Transport
 
 TrussC uses **HTTP transport** for MCP. All JSON-RPC messages are sent as HTTP POST requests to the `/mcp` endpoint.
@@ -61,6 +68,7 @@ your own tools:
 | `tc_get_screenshot` | `format`, `width`, `quality`, `window` (all optional) | Screenshot as an MCP image content block (rendered inline by MCP clients) plus a text metadata block. Defaults to full-resolution lossless PNG; pass `width` for a downscaled monitoring thumbnail (aspect preserved, never upscales, clamped 16-4096) and `format: "jpg"` (+ `quality`, default 75) for small payloads. `window` = index from `tc_list_windows` (default 0 = main). Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread (measured under continuous hammering at jpg/512: ~179 fps vs ~46 fps for the old synchronous encode; baseline ~236) |
 | `tc_save_screenshot` | `path`, `window`? | Save screenshot to file. Optional `window` index from `tc_list_windows` (default 0 = main) |
 | `tc_list_windows` | (none) | List open windows: index 0 = main, then secondary windows (title, size). Use the index as the `window` arg above |
+| `tc_get_audio_state` | `devices` (optional, default `true`) | Audio engine diagnostics, read-only (never starts the engine): `running`; `output` `{device, default, backend, sampleRate, channels, bufferSize, periodFrames, deviceSampleRate, deviceChannels, maxPolyphony}`; `input` `{running, device, sampleRate}` (the `getMicInput()` microphone); `voices` `[{slot, file, streaming, position, duration, volume, pan, speed, loop, paused, level}]` (`level` = the voice's output peak in the last callback); `master` `{peak, rms, clippedSamples}` (linear, measured before the clamp); `dropped` `{total, voiceLimit, streamLimit, decoderError, notRunning}` (plays refused since startup); `thread` `{load, loadMax}` (audio-thread time / audio time over ~0.5 s of audio); `devices` `{playback, capture}` lists. Meters and levels read 0 while the engine is not running. Pass `devices: false` to skip the enumeration when polling (it can be slow on some backends). Same numbers as `AudioEngine::getStats()` / `getVoices()` |
 | `tc_get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, pid, rssBytes, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll. `pid` lets a supervisor confirm the reply comes from *its* child (port collisions); `rssBytes` is whole-process resident memory (the leak-hunting number); `memoryBytes` is sokol-tracked allocations only |
 | `tc_get_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
 | `tc_get_status_image` | `name`, `width`, `quality` (last two optional) | Fetch an app-published image registered via `mcp::statusImage()`, downscaled + JPEG-encoded exactly like `tc_get_screenshot` (pixel grab on the main loop, encode on the HTTP worker — no frame stutter) |
@@ -347,7 +355,7 @@ Configure your MCP client with the HTTP URL:
 
 | Category | Tools | Enabled by |
 |----------|-------|------------|
-| Inspection (read-only) | `tc_get_screenshot`, `tc_save_screenshot`, `tc_get_health`, `tc_get_node_tree`, `tc_get_selected_node` | Automatic when MCP is enabled |
+| Inspection (read-only) | `tc_get_screenshot`, `tc_save_screenshot`, `tc_get_health`, `tc_get_audio_state`, `tc_get_node_tree`, `tc_get_selected_node` | Automatic when MCP is enabled |
 | Recording (window capture to video) | `tc_start_recording`, `tc_stop_recording` | Automatic when MCP is enabled |
 | Control (input injection / scene mutation / quit) | `tc_mouse_click`, `tc_mouse_press`, `tc_mouse_release`, `tc_key_press`, `tc_mouse_move`, `tc_mouse_scroll`, `tc_key_release`, `tc_select_node`, `tc_set_node_members`, `tc_quit` | `mcp::registerControlTools()` |
 | ImGui (widget reading / interaction) | `tcx_imgui_get_widgets`, `tcx_imgui_get_touched`, `tcx_imgui_reset_touched` (read-only: the reset clears the record, not app state), `tcx_imgui_click`, `tcx_imgui_input`, `tcx_imgui_checkbox` | Requires tcxImGui addon + `mcp::registerControlTools()` |

@@ -2350,6 +2350,8 @@ int AudioEngine::getChannels() const  // Current engine output channel count.
 AudioEngine & AudioEngine::getInstance()  // Get the global AudioEngine singleton.
 int AudioEngine::getMaxPolyphony() const  // Maximum number of simultaneously-playing Sound voices.
 int AudioEngine::getSampleRate() const  // Current engine output sample rate (Hz). Returns the default (48000) before init().
+AudioStats AudioEngine::getStats() const  // Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread load. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers.
+std::vector<AudioVoiceInfo> AudioEngine::getVoices()  // Snapshot of the voices currently playing or paused (AudioVoiceInfo: slot, file, streaming, position, duration, volume, pan, speed, loop, paused, level). Voices left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener.
 bool AudioEngine::init() [+1]  // Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success.
 bool AudioEngine::isInitialized() const  // True after a successful init().
 std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available playback devices (name + isDefault). Empty if unsupported on the platform.
@@ -2385,6 +2387,16 @@ void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV heade
 ```
 
 ### AudioSettings — Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device.
+
+```cpp
+```
+
+### AudioStats — Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / load describe the recent output.
+
+```cpp
+```
+
+### AudioVoiceInfo — One active voice as reported by AudioEngine::getVoices(): a copy taken under the engine lock, so later changes to the voice are not reflected.
 
 ```cpp
 ```
@@ -3147,6 +3159,7 @@ void Mesh::uploadToGpu() const  // Upload the mesh's vertex/index data to its GP
 
 ```cpp
 size_t MicInput::getBuffer(float * outBuffer, size_t numSamples)  // Copy the latest captured samples into outBuffer. numSamples is capped at the ring buffer size (4096). Returns the number of samples written.
+std::string MicInput::getDeviceName() const  // Name of the capture device start() opened; empty while stopped, and on Web (the browser does not expose it).
 int MicInput::getSampleRate() const  // Sample rate the microphone was opened at.
 bool MicInput::isRunning() const  // True while the microphone device is open and capturing.
 void MicInput::onAudioData(const float * input, size_t frameCount)  // Mic input callback: receive captured input samples (internal, called from the audio thread).
@@ -3668,7 +3681,7 @@ void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly f
 LoadResult Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
 void Sound::loadTestTone(float frequency = 440.0, float duration = 1.0)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.
 void Sound::pause()  // Pause playback
-void Sound::play()  // Play audio
+bool Sound::play()  // Play from the beginning (this Sound's previous voice is stopped first). Returns false when nothing will play: not loaded, or the engine dropped the play (every voice busy, the stream's maxPolyphony reached by a copy of a streamed Sound, the stream file could not be reopened, or no output device running). Drops are logged as warnings and counted in AudioEngine::getStats().
 void Sound::resume()  // Resume playback
 void Sound::setChannelGains(const std::vector<float> & gains)  // Per-output-channel gain multiplier. Entries beyond .size() default to 1.0. No internal normalization (setVolume is the overall gain).
 void Sound::setChannelMap(const std::vector<int> & map) [+1]  // Per-output-channel routing. 1D: each entry is a src ch index (-1 = silent). 2D: each entry lists src ch indices that sum into that output.
@@ -3696,6 +3709,7 @@ void SoundBuffer::generateSquareWave(float frequency, float duration, float volu
 void SoundBuffer::generateTriangleWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono triangle wave.
 int SoundBuffer::getAdtsSampleRateIndex(int sampleRate)  // ADTS sample-rate index for the given rate (AAC-in-MOV container helper).
 float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sampleRate).
+fs::path SoundBuffer::getPath() const  // File the samples were decoded from (for AAC, when loaded through load()); empty for memory, PCM and generated buffers.
 LoadResult SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
 LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
 LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios,web]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).

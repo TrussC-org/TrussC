@@ -28,12 +28,19 @@ namespace {
         }
     }
 
+    // "0x8007000E" — HRESULTs read best in hex.
+    std::string hrHex(HRESULT hr) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "0x%08X", (unsigned)hr);
+        return buf;
+    }
+
     void EnsureMFStartup() {
         static std::once_flag flag;
         std::call_once(flag, []() {
             HRESULT hr = MFStartup(MF_VERSION);
             if (FAILED(hr)) {
-                printf("tcSound_win: MFStartup failed (0x%08X)\n", hr);
+                logError("SoundBuffer") << "MFStartup failed (" << hrHex(hr) << ")";
             }
         });
     }
@@ -148,24 +155,22 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
     HRESULT hr = MFCreateSourceReaderFromURL(wpath.c_str(), NULL, &pReader);
 
     if (FAILED(hr)) {
-        printf("SoundBuffer: loadAac failed to open %s (0x%08X)\n",
-               internal::pathToUtf8(path).c_str(), hr);
-        char hrBuf[16];
-        snprintf(hrBuf, sizeof(hrBuf), "0x%08X", (unsigned)hr);
+        logError("SoundBuffer") << "loadAac failed to open " << internal::pathToUtf8(path)
+                                << " (" << hrHex(hr) << ")";
         return LoadResult::fail(LoadError::DecodeFailed,
                                 "failed to open " + internal::pathToUtf8(path) +
-                                " (hr=" + hrBuf + ")");
+                                " (hr=" + hrHex(hr) + ")");
     }
 
     bool result = ReadFromSourceReader(pReader, this);
     SafeRelease(&pReader);
 
     if (result) {
-        printf("SoundBuffer: loaded AAC %s (%d ch, %d Hz, %zu samples)\n",
-               internal::pathToUtf8(path).c_str(), (int)channels, (int)sampleRate,
-               (size_t)numSamples);
+        logVerbose("SoundBuffer") << "loaded AAC " << internal::pathToUtf8(path) << " ("
+                                  << (int)channels << " ch, " << (int)sampleRate << " Hz, "
+                                  << (size_t)numSamples << " samples)";
     } else {
-        printf("SoundBuffer: failed to decode AAC %s\n", internal::pathToUtf8(path).c_str());
+        logError("SoundBuffer") << "failed to decode AAC " << internal::pathToUtf8(path);
     }
 
     return result ? LoadResult::success()
@@ -178,7 +183,7 @@ LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
 
     IStream* pStream = SHCreateMemStream((const BYTE*)data, (UINT)dataSize);
     if (!pStream) {
-        printf("SoundBuffer: loadAacFromMemory failed to create stream\n");
+        logError("SoundBuffer") << "loadAacFromMemory failed to create a memory stream";
         return LoadResult::fail(LoadError::DecodeFailed, "failed to create memory stream");
     }
 
@@ -187,7 +192,8 @@ LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
     pStream->Release();  // MFByteStream holds a reference
 
     if (FAILED(hr)) {
-        printf("SoundBuffer: loadAacFromMemory failed to create MF byte stream\n");
+        logError("SoundBuffer") << "loadAacFromMemory failed to create an MF byte stream ("
+                                << hrHex(hr) << ")";
         return LoadResult::fail(LoadError::DecodeFailed, "failed to create MF byte stream");
     }
 
@@ -196,7 +202,8 @@ LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
     SafeRelease(&pByteStream);
 
     if (FAILED(hr)) {
-        printf("SoundBuffer: loadAacFromMemory failed to create SourceReader\n");
+        logError("SoundBuffer") << "loadAacFromMemory failed to create a SourceReader ("
+                                << hrHex(hr) << ")";
         return LoadResult::fail(LoadError::DecodeFailed, "failed to create SourceReader");
     }
 
@@ -204,10 +211,11 @@ LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
     SafeRelease(&pReader);
 
     if (result) {
-        printf("SoundBuffer: decoded AAC from memory (%d ch, %d Hz, %zu samples)\n",
-               (int)channels, (int)sampleRate, (size_t)numSamples);
+        logVerbose("SoundBuffer") << "decoded AAC from memory (" << (int)channels << " ch, "
+                                  << (int)sampleRate << " Hz, " << (size_t)numSamples
+                                  << " samples)";
     } else {
-        printf("SoundBuffer: failed to decode AAC from memory\n");
+        logError("SoundBuffer") << "failed to decode AAC from memory";
     }
 
     return result ? LoadResult::success()

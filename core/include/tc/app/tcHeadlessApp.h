@@ -18,6 +18,13 @@
 
 namespace trussc {
 
+// tcAudio_impl.cpp: log the dropped plays that were only counted (see
+// tcSound.h); the flush variant ignores the rate limit.
+namespace internal {
+void pumpAudioDiagnostics();
+void flushAudioDiagnostics();
+}
+
 // ---------------------------------------------------------------------------
 // Headless mode internal state (extends tcHeadlessState.h)
 // ---------------------------------------------------------------------------
@@ -127,6 +134,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         // Run work marshalled from worker threads (runOnMainThread, Event
         // Deliver::Main) on the main thread, mirroring the windowed _frame_cb.
         internal::drainMainThreadQueue();
+        internal::pumpAudioDiagnostics();
 
         // Fixed timestep update
         while (accumulator >= targetDelta) {
@@ -142,6 +150,10 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // Call exit and cleanup
     app.exit();
     app.cleanup();
+
+    // Headless apps leave the audio device running (no shutdownAudio() on
+    // this path), so log the drops the rate limit still holds back here.
+    internal::flushAudioDiagnostics();
 
     headless::active = false;
     return 0;

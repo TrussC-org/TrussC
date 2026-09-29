@@ -56,6 +56,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
 - `threadSafety/` — main-thread affinity: `runOnMainThread` defers + delivers on
   the main thread, `Event` `Deliver::Main` marshals worker-fired notifies onto the
   main thread, and `Node::destroy()` is safe from any thread.
+- `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
+  `Sound::play()` returns false for every drop reason, drops are counted and
+  reach the TrussC logger (rate limited, and only from the main thread — an
+  off-main drop is counted and reported by `runHeadlessApp`'s own frame pump;
+  its exit flush and `AudioEngine::shutdown()` log what the rate limit held
+  back), the audio thread's meters (peak / RMS / clipped samples / voice
+  level / load) work and shutdown clears them, a reused `SoundBuffer`'s
+  `getPath()` follows its last fill (memory / PCM / generated fills clear it),
+  and `tc_get_audio_state` reports it all, the microphone included. Runs on
+  miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
+  sound card is needed.
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×

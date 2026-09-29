@@ -83,6 +83,12 @@ public:
     // channels and sampleRate are inherited from SoundSource.
     size_t numSamples = 0;       // Samples per channel
 
+    // File the samples were decoded from (set by the path-based loaders;
+    // for AAC by load(), which Sound::load() uses). Empty for memory / PCM /
+    // generated buffers. Reported per voice by AudioEngine::getVoices() and
+    // tc_get_audio_state.
+    fs::path getPath() const { return path_; }
+
     // File-based decoders (implemented in tcSound_impl.cpp).
     // WAV / MP3 / FLAC go through ma_decoder (miniaudio); OGG goes through
     // stb_vorbis directly because miniaudio does not bundle a Vorbis decoder.
@@ -156,11 +162,12 @@ public:
                                  int numChannels, int rate, int bitsPerSample = 16,
                                  bool bigEndian = false) {
         if (bitsPerSample != 16 && bitsPerSample != 32) {
-            printf("SoundBuffer: unsupported bits per sample: %d\n", bitsPerSample);
+            logError("SoundBuffer") << "unsupported bits per sample: " << bitsPerSample;
             return LoadResult::fail(LoadError::UnsupportedFormat,
                                     "unsupported bits per sample: " + std::to_string(bitsPerSample));
         }
 
+        path_.clear();
         channels = numChannels;
         sampleRate = rate;
 
@@ -189,8 +196,8 @@ public:
             std::memcpy(samples.data(), src, dataSize);
         }
 
-        printf("SoundBuffer: loaded PCM from memory (%d ch, %d Hz, %zu samples)\n",
-               channels, sampleRate, numSamples);
+        logVerbose("SoundBuffer") << "loaded PCM from memory (" << channels << " ch, "
+                                  << sampleRate << " Hz, " << numSamples << " samples)";
 
         return LoadResult::success();
     }
@@ -205,6 +212,7 @@ public:
     // -------------------------------------------------------------------------
 
     void generateSineWave(float frequency, float duration, float volume = 0.5f, int sr = 44100) {
+        path_.clear();
         sampleRate = sr;
         channels = 1;
         numSamples = (size_t)(duration * sampleRate);
@@ -217,6 +225,7 @@ public:
     }
 
     void generateSquareWave(float frequency, float duration, float volume = 0.5f, int sr = 44100) {
+        path_.clear();
         sampleRate = sr;
         channels = 1;
         numSamples = (size_t)(duration * sampleRate);
@@ -230,6 +239,7 @@ public:
     }
 
     void generateTriangleWave(float frequency, float duration, float volume = 0.5f, int sr = 44100) {
+        path_.clear();
         sampleRate = sr;
         channels = 1;
         numSamples = (size_t)(duration * sampleRate);
@@ -247,6 +257,7 @@ public:
     }
 
     void generateSawtoothWave(float frequency, float duration, float volume = 0.5f, int sr = 44100) {
+        path_.clear();
         sampleRate = sr;
         channels = 1;
         numSamples = (size_t)(duration * sampleRate);
@@ -261,6 +272,7 @@ public:
     }
 
     void generateNoise(float duration, float volume = 0.5f, int sr = 44100) {
+        path_.clear();
         sampleRate = sr;
         channels = 1;
         numSamples = (size_t)(duration * sampleRate);
@@ -276,6 +288,7 @@ public:
     }
 
     void generatePinkNoise(float duration, float volume = 0.5f, int sr = 44100) {
+        path_.clear();
         sampleRate = sr;
         channels = 1;
         numSamples = (size_t)(duration * sampleRate);
@@ -308,6 +321,7 @@ public:
     }
 
     void generateSilence(float duration, int sr = 44100) {
+        path_.clear();
         sampleRate = sr;
         channels = 1;
         numSamples = (size_t)(duration * sampleRate);
@@ -375,6 +389,9 @@ public:
             else if (s < -1.0f) s = -1.0f;
         }
     }
+
+private:
+    fs::path path_;  // see getPath(); cleared by the memory / generator paths
 };
 
 // ---------------------------------------------------------------------------
@@ -583,6 +600,11 @@ struct PlayingSound {
     // pitch. The user-facing `speed` field stays semantically "1.0 =
     // natural pitch", independent of the engine rate.
     float rateRatio{1.0f};
+
+    // Peak absolute value of this voice's contribution to the mix (after
+    // volume / pan / channel gains) over the most recent audio callback.
+    // Written by the audio thread, read for diagnostics (tc_get_audio_state).
+    std::atomic<float> level{0.0f};
 };
 
 // ---------------------------------------------------------------------------
@@ -671,6 +693,87 @@ struct AudioInBuffer {
 };
 
 // ---------------------------------------------------------------------------
+// AudioVoiceInfo — one active voice, as reported by AudioEngine::getVoices().
+// A snapshot: the values are copied under the engine lock, so later changes
+// to the voice are not reflected.
+// ---------------------------------------------------------------------------
+struct AudioVoiceInfo {
+    int         slot = 0;           // mixer slot index (0 .. maxPolyphony-1)
+    std::string path;               // source file (UTF-8); empty for generated / memory buffers
+    bool        streaming = false;  // true for SoundStream (loadStream), false for an eager SoundBuffer
+    bool        paused = false;
+    bool        loop = false;
+    float       position = 0.0f;    // playback position in seconds
+    float       duration = 0.0f;    // source duration in seconds
+    float       volume = 1.0f;
+    float       pan = 0.0f;
+    float       speed = 1.0f;
+    float       level = 0.0f;       // peak of this voice's output in the last callback
+                                    // (linear, 1.0 = full scale; 0 while paused)
+};
+
+// ---------------------------------------------------------------------------
+// AudioStats — engine health counters and meters, as reported by
+// AudioEngine::getStats(). Counters are cumulative since the process
+// started (they survive re-init); meters describe the recent output.
+// ---------------------------------------------------------------------------
+struct AudioStats {
+    // Plays AudioEngine::play() refused (Sound::play() returned false),
+    // in total and by reason.
+    uint64_t droppedPlays = 0;
+    uint64_t droppedVoiceLimit = 0;    // every mixer slot busy (AudioSettings::maxPolyphony)
+    uint64_t droppedStreamLimit = 0;   // the SoundStream's own maxPolyphony reached (copies of one streamed Sound)
+    uint64_t droppedDecoderError = 0;  // the stream's file could not be reopened for a new voice
+    uint64_t droppedNotRunning = 0;    // no running output device (init failed or engine shut down)
+
+    uint64_t clippedSamples = 0;       // output samples beyond +/-1.0 that were hard-clipped
+
+    // Meters: 0 while no device is running (before init, after shutdown).
+    float peak = 0.0f;                 // master output peak over the last ~100 ms (linear, before clipping)
+    float rms = 0.0f;                  // master output RMS over the same window
+    float load = 0.0f;                 // audio thread load: mix time / audio time, averaged over ~0.5 s
+    float loadMax = 0.0f;              // worst single callback in that window (> 1 = overrun)
+};
+
+// Engine diagnostics state (counters, meters, report timers). Defined in
+// tcAudio_impl.cpp so the audio-thread accumulators stay out of this header.
+namespace internal {
+    struct AudioDiagnostics;
+    // Log the dropped plays that were only counted: drops off the main
+    // thread, and repeats inside the rate limit. Rate limited. Called once
+    // per frame by the app loop on the main thread.
+    void pumpAudioDiagnostics();
+    // Same, ignoring the rate limit, so no counted drop is left unlogged:
+    // the exit paths call it (AudioEngine::shutdown(), runHeadlessApp()).
+    // Main thread.
+    void flushAudioDiagnostics();
+
+    // Device details for tc_get_audio_state that need miniaudio types.
+    struct AudioDeviceReport {
+        std::string backend;          // miniaudio backend ("Core Audio", "WASAPI", "PulseAudio", "Null", ...)
+        std::string outputDevice;     // name of the open playback device; empty when not running
+        bool outputIsDefault = false; // it is the OS default playback device
+        int  periodFrames = 0;        // period size the device actually granted
+        int  deviceSampleRate = 0;    // device's native format (miniaudio converts when it
+        int  deviceChannels = 0;      //   differs from the engine's sampleRate / channels)
+        bool enumerated = false;      // the two lists below were filled
+        std::vector<AudioDeviceInfo> playbackDevices;
+        std::vector<AudioDeviceInfo> captureDevices;
+    };
+    // `enumerate` also lists the devices, which can take a while on some
+    // backends. Main thread; does not initialize the engine.
+    AudioDeviceReport audioDeviceReport(bool enumerate);
+
+    // Test hook, not a user setting: AudioEngine, listDevices(),
+    // audioDeviceReport() and (native) MicInput open miniaudio's null
+    // backend only, a device-less clock that still drives the real mixer
+    // callback, so a headless test runs without a sound card. Call it before
+    // anything opens an audio context: the engine keeps the context it
+    // opened first. State lives in tcAudio_impl.cpp.
+    void setNullAudioBackendForTests(bool on);
+}
+
+// ---------------------------------------------------------------------------
 // Audio Engine (singleton, miniaudio-based)
 // ---------------------------------------------------------------------------
 class AudioEngine {
@@ -726,6 +829,13 @@ public:
     int getMaxPolyphony() const { return (int)playingSounds_.size(); }
     int getBufferSize()   const { return bufferSize_; }
     bool isInitialized()  const { return initialized_; }
+
+    // Diagnostics (the tc_get_audio_state MCP tool reports both).
+    // getStats() only reads atomics: cheap, callable from any thread.
+    // getVoices() copies the active voices under the engine lock: call it
+    // from the main thread, never from an audioOut / audioIn listener.
+    AudioStats getStats() const;
+    std::vector<AudioVoiceInfo> getVoices();
 
     // Real-time audio listeners. audioOut fires once per audio device
     // callback AFTER all Sound voices have been mixed into the output
@@ -792,14 +902,35 @@ public:
     void mixAudio(float* buffer, int num_frames, int num_channels);
 
 private:
-    AudioEngine() {
-        playingSounds_.resize(DEFAULT_MAX_PLAYING_SOUNDS);
-        analysisBuffer_.resize(ANALYSIS_BUFFER_SIZE, 0.0f);
-    }
+    // Out of line (tcAudio_impl.cpp): they own the diagnostics state.
+    AudioEngine();
+    ~AudioEngine();
 
-    ~AudioEngine() {
-        shutdown();
-    }
+    // Why AudioEngine::play() refused a voice (see AudioStats). The values
+    // index the diagnostics arrays in tcAudio_impl.cpp: keep the order.
+    enum class DropReason { VoiceLimit, StreamLimit, DecoderError, NotRunning };
+
+    // Count a refused play; log it now when on the main thread and not rate
+    // limited, otherwise leave it for reportDiagnostics(). `code` is the
+    // miniaudio result for DecoderError. tcAudio_impl.cpp.
+    void noteDroppedPlay(DropReason reason, const SoundSource* source, int code = 0);
+
+    // Audio thread, once per callback, before the final clamp: master peak /
+    // RMS / clipped-sample count. Only atomics and audio-thread-owned
+    // accumulators — no locks, no allocation, no logging.
+    void meterOutput(const float* buffer, int numFrames, int numChannels);
+
+    // Main thread: log what was only counted (see pumpAudioDiagnostics()).
+    // `force` ignores the rate limit (flushAudioDiagnostics()).
+    void reportDiagnostics(bool force = false);
+    friend void internal::pumpAudioDiagnostics();
+    friend void internal::flushAudioDiagnostics();
+    friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
+
+    // Zero the output meters, the load window and every voice's level. Only
+    // while no device is running (init(), shutdown()), so the audio thread
+    // cannot race it.
+    void resetMeters();
 
     // Eager mix path: linear interpolation over a fully-decoded SoundBuffer.
     //
@@ -844,6 +975,7 @@ private:
         const int srcCh = src.channels;
         const int mapSize = map ? (int)map->size() : 0;
         const int gainsSize = gains ? (int)gains->size() : 0;
+        float level = 0.0f;  // peak of this voice's contribution (diagnostics)
 
         for (int frame = 0; frame < num_frames; frame++) {
             // Resolve bounds for both directions BEFORE indexing.
@@ -910,13 +1042,17 @@ private:
                 float gain = (c < gainsSize) ? (*gains)[c] : 1.0f;
                 float panMul = (c == 0) ? panL : ((c == 1) ? panR : 1.0f);
 
-                buffer[frame * num_channels + c] += sample * gain * panMul * vol;
+                float out = sample * gain * panMul * vol;
+                buffer[frame * num_channels + c] += out;
+                float mag = std::fabs(out);
+                if (mag > level) level = mag;
             }
 
             posF += posStep;
         }
 
         sound.positionF = posF;
+        sound.level.store(level, std::memory_order_relaxed);
     }
 
     // Streaming mix path: full implementation in tcAudio_impl.cpp where
@@ -980,6 +1116,10 @@ private:
         }
         framePosition_ += (uint64_t)num_frames;
 
+        // Meter the final mix (voices + audioOut listeners) before the clamp,
+        // so peak / clipped-sample counts see what the clamp throws away.
+        meterOutput(buffer, num_frames, num_channels);
+
         // Clipping
         for (int i = 0; i < num_frames * num_channels; i++) {
             if (buffer[i] > 1.0f) buffer[i] = 1.0f;
@@ -1029,6 +1169,10 @@ private:
     std::vector<float> analysisBuffer_;
     size_t analysisWritePos_ = 0;
     std::mutex analysisMutex_;
+
+    // Drop counters, output meters, audio-thread load and the log rate
+    // limiter (see getStats(), pumpAudioDiagnostics()).
+    std::unique_ptr<internal::AudioDiagnostics> diag_;
 };
 
 // ---------------------------------------------------------------------------
@@ -1084,9 +1228,11 @@ public:
         } else if (ext == "flac" || ext == "FLAC") {
             result = buf->loadFlac(path);
         } else if (ext == "aac" || ext == "AAC" || ext == "m4a" || ext == "M4A") {
-            result = buf->loadAac(path);
+            // Through SoundBuffer::load(): the per-platform loadAac() does
+            // not record the file for getPath(), load() does.
+            result = buf->load(path);
         } else {
-            printf("Sound: unsupported format: %s\n", ext.c_str());
+            logError("Sound") << "unsupported format: " << ext;
         }
 
         if (!result) {
@@ -1160,8 +1306,16 @@ public:
     // -------------------------------------------------------------------------
     // Playback Control
     // -------------------------------------------------------------------------
-    void play() {
-        if (!buffer_) return;
+
+    // Start playing from the beginning (this Sound's previous voice is
+    // stopped first). Returns false when nothing will play: not loaded, or
+    // the engine dropped the play — every voice slot busy
+    // (AudioSettings::maxPolyphony), the stream's own maxPolyphony reached
+    // (copies of a streamed Sound share it), the stream file could not be
+    // reopened, or no output device is running. Drops are logged as
+    // warnings and counted in AudioEngine::getStats().
+    bool play() {
+        if (!buffer_) return false;
 
 #ifdef __EMSCRIPTEN__
         // Web platform: complete deferred AAC loading if needed.
@@ -1189,6 +1343,7 @@ public:
             internal::sharedStore(playing_->channelMap,   channelMap_);
             internal::sharedStore(playing_->channelGains, channelGains_);
         }
+        return playing_ != nullptr;
     }
 
     void stop() {
@@ -1453,6 +1608,10 @@ public:
     bool isRunning() const { return running_; }
     int getSampleRate() const { return sampleRate_; }
 
+    // Name of the capture device start() opened; empty while stopped (and
+    // on Web, where the browser does not expose it).
+    std::string getDeviceName() const { return deviceName_; }
+
     // Callback (internal use)
     void onAudioData(const float* input, size_t frameCount);
 
@@ -1460,6 +1619,7 @@ private:
     void* device_ = nullptr;  // ma_device*
     bool running_ = false;
     int sampleRate_ = DEFAULT_SAMPLE_RATE;
+    std::string deviceName_;
 
     // Ring buffer
     std::vector<float> buffer_;

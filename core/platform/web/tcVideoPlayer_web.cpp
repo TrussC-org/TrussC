@@ -106,7 +106,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
 
     int result = emscripten_run_script_int(script);
     if (result <= 0) {
-        printf("VideoPlayer: failed to load [Web]\n");
+        logError("VideoPlayer") << "failed to load '" << pathStr << "' [Web]";
         return false;
     }
 
@@ -118,7 +118,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
     pixels_ = new unsigned char[width_ * height_ * 4];
     std::memset(pixels_, 0, width_ * height_ * 4);
 
-    printf("VideoPlayer: loading '%s' [Web]\n", pathStr.c_str());
+    logNotice("VideoPlayer") << "loading '" << pathStr << "' [Web]";
     return true;
 }
 
@@ -138,7 +138,7 @@ void VideoPlayer::closePlatform() {
         console.log('[VideoPlayer] Web: closed');
     )JS");
 
-    printf("VideoPlayer: closed [Web]\n");
+    logVerbose("VideoPlayer") << "closed [Web]";
 }
 
 void VideoPlayer::playPlatform() {
@@ -187,7 +187,7 @@ void VideoPlayer::updatePlatform() {
         // Reallocate texture
         texture_.allocate(width_, height_, 4, TextureUsage::Stream);
 
-        printf("VideoPlayer: resized to %dx%d [Web]\n", width_, height_);
+        logVerbose("VideoPlayer") << "resized to " << width_ << "x" << height_ << " [Web]";
     }
 
     if (!pixels_ || width_ <= 0 || height_ <= 0) return;
