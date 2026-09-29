@@ -318,6 +318,39 @@ void Window::setSize(int width, int height) {
     }
 }
 
+// Cocoa's screen space has its origin at the BOTTOM-left of the primary display
+// with y growing upward, while setPosition()/getPosition() are specified
+// top-left with y growing downward (matching Windows and X11). Flip against the
+// primary screen's height; NSScreen.screens[0] is the primary one by definition.
+static CGFloat _tcPrimaryScreenHeight() {
+    NSArray<NSScreen*>* screens = [NSScreen screens];
+    if (screens.count == 0) return 0.0;
+    return screens[0].frame.size.height;
+}
+
+void Window::setPosition(int x, int y) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    NSWindow* nsWindow = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(st->win);
+    if (!nsWindow) return;
+    // setFrameTopLeftPoint: takes the top-left of the FRAME (title bar included),
+    // which is exactly the corner these coordinates describe — so only the y
+    // axis has to be flipped, not the window height.
+    const CGFloat flippedY = _tcPrimaryScreenHeight() - (CGFloat)y;
+    [nsWindow setFrameTopLeftPoint:NSMakePoint((CGFloat)x, flippedY)];
+}
+
+IVec2 Window::getPosition() const {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return IVec2(-1, -1);
+    NSWindow* nsWindow = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(st->win);
+    if (!nsWindow) return IVec2(-1, -1);
+    const NSRect f = [nsWindow frame];
+    // frame.origin is the bottom-left; NSMaxY is the top edge in Cocoa space.
+    const CGFloat topDown = _tcPrimaryScreenHeight() - NSMaxY(f);
+    return IVec2((int)f.origin.x, (int)topDown);
+}
+
 void Window::setFullscreen(bool full) {
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;

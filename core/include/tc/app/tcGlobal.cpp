@@ -68,6 +68,12 @@ void setup() {
     sgl_desc_t sgldesc = {};
     sgldesc.logger.func = slog_func;
     sgldesc.pipeline_pool_size = 256;
+    // sokol_gl's default of 4 contexts runs out fast: the swapchain takes one,
+    // every secondary window takes one more, and Fbo::ensureShared() takes one
+    // per (sample count, color format) combination. An app with a second window
+    // and a couple of float FBO formats is already past four, and the overflow
+    // is a per-frame SGL_LOGITEM_CONTEXT_POOL_EXHAUSTED with nothing drawn.
+    sgldesc.context_pool_size = 64;
     sgldesc.max_vertices = internal::sglMaxVertices;
     sgldesc.max_commands = internal::sglMaxCommands;
     sgldesc.allocator.alloc_fn = smemtrack_alloc;
@@ -176,6 +182,7 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     sgl_desc_t sgldesc = {};
     sgldesc.logger.func = slog_func;
     sgldesc.pipeline_pool_size = 256;
+    sgldesc.context_pool_size = 64;   // same reason as in the setup path above
     sgldesc.max_vertices = newMaxVertices;
     sgldesc.max_commands = newMaxCommands;
     sgldesc.allocator.alloc_fn = smemtrack_alloc;

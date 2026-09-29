@@ -87,6 +87,28 @@ public:
     // resize entry point. No-op if the native window is gone.
     void setSize(int width, int height);
 
+    // Move this window on the desktop. Coordinates are SCREEN coordinates with
+    // the primary display's top-left at (0, 0) — the same space the global
+    // getWindowPosition()/setWindowPosition() use, and what the OS display
+    // settings show. A display placed left of or above the primary one has
+    // negative coordinates.
+    //
+    // Implemented natively per platform (macOS NSWindow, Windows HWND, X11)
+    // because sokol_app has no per-window move entry point — the global
+    // setWindowPosition() targets the MAIN window only. No-op if the native
+    // window is gone.
+    //
+    // Ordering matters for multi-display setups: setFullscreen() covers the
+    // display the window is CURRENTLY on (Windows MonitorFromWindow, macOS the
+    // window's screen, Linux the WM's choice), so move the window onto the
+    // target display FIRST, then go fullscreen. This is the same order
+    // openFrameworks uses in its GLFW backend.
+    void setPosition(int x, int y);
+
+    // Current position in the same screen-coordinate space as setPosition().
+    // Returns (-1, -1) if the native window is gone.
+    IVec2 getPosition() const;
+
     // Per-window fullscreen. Implemented natively per platform because sokol_app's
     // fullscreen only targets the main window:
     //   macOS  -> NSWindow toggleFullScreen: (native, animated; isFullscreen()
