@@ -408,7 +408,7 @@ Edit C++ code and see changes reflected in a running app within seconds — no r
    void tcApp::draw() { ... }
    ```
 
-2. Build and run as usual. On the first build after adding `TC_HOT_RELOAD`, cmake will automatically reconfigure to enable hot reload.
+2. Build and run as usual. The first build after adding `TC_HOT_RELOAD` stops with "hot reload state changed -- reconfigure required". Build again: the next build reconfigures and enables hot reload.
 
 3. While the app is running, edit and save any source file in `src/`. The change is compiled and loaded within 1-3 seconds.
 
@@ -437,11 +437,11 @@ Comment out or delete the `TC_HOT_RELOAD` line:
 ```cpp
 // TC_HOT_RELOAD(tcApp)   ← commented out
 ```
-On the next build, cmake reconfigures back to a single static binary. The `TC_RUN_APP` macro in `main.cpp` automatically falls through to normal `runApp<>()`.
+The next build stops once in the same way; build again and cmake reconfigures back to a single static binary. The `TC_RUN_APP` macro in `main.cpp` automatically falls through to normal `runApp<>()`.
 
 ### Limitations
 
 - **Supported platforms**: macOS (`.dylib`), Linux (`.so`), Windows (`.dll`). Wasm / iOS / Android fall back to static mode automatically.
 - **Comment style**: Use `//` to disable. `/* */` block comments are not detected by the cmake scanner.
-- **Build tool**: `trusscli build` handles hot reload state changes in one step. Raw `cmake --build` may require building twice when toggling `TC_HOT_RELOAD` on/off.
+- **Build tool**: After you add or remove `TC_HOT_RELOAD`, the first build stops once and the second one reconfigures and succeeds. This is the same with `trusscli build` / `trusscli run` and with raw `cmake --build`.
 - **Build errors**: If the code doesn't compile, the previous version keeps running. Fix the error and save again.

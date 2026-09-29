@@ -972,7 +972,7 @@ trusscli upgrade               Upgrade TrussC (git pull + rebuild trusscli)
 trusscli addon add|remove <a>  Add / remove addons (also clone / list / search / pull — see `trusscli addon --help`)
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
-trusscli clean                 Delete build directories
+trusscli clean                 Delete build directories (run `trusscli update` before the next build)
 trusscli build                 Build (auto-selects native)
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
@@ -1085,7 +1085,7 @@ public:
 EventListener pauseListener_;             // keep as a member (auto-disconnects on destruction)
 pauseListener_ = btn->pressed.listen([this]() { /* ... */ });
 ```
-**Always store the `EventListener` returned by `listen()` as a member** (it disconnects the moment it goes out of scope). Safer than raw `function<>` callbacks — auto-disconnect, multiple listeners, thread-safe, and safe to remove during notify. Don't call parent methods from a child.
+**Always store the `EventListener` returned by `listen()` as a member** (it disconnects the moment it goes out of scope). Safer than raw `function<>` callbacks — auto-disconnect, multiple listeners, thread-safe, and safe to remove during notify. Disconnecting does not wait for a callback already running on another thread; see "Which thread does my callback run on?" for events fired off the main thread. Don't call parent methods from a child.
 
 ### Bubble events up, don't broadcast?
 
@@ -1334,7 +1334,7 @@ self-contained copy-paste-able RectNode), and a plain code lambda.
 
 ### TCP / UDP networking? (brief)
 
-Core has `TcpClient` / `TcpServer` / `UdpSocket`. It's event-driven — `listen()` to `onReceive` / `onConnect` / `onDisconnect` / `onError` (`Event<T>`), and `connect` / `send` to transmit.
+Core has `TcpClient` / `TcpServer` / `UdpSocket`. It's event-driven — `listen()` to their `Event<T>` members, and `connect` / `send` to transmit. `TcpClient` has `onConnect` / `onReceive` / `onDisconnect` / `onError`; `TcpServer` has `onClientConnect` / `onReceive` / `onClientDisconnect` / `onError` / `onSendComplete`; `UdpSocket` has `onReceive` / `onError`. Most of them fire on a network thread: see "Which thread does my callback run on?".
 - TCP: `client.connectAsync(host, port)` → `client.send("...")`. Server: `server.start(port)`, `broadcast(...)` to all clients.
 - UDP: `udp.bind(port)` (receive thread auto-starts) → `udp.sendTo(host, port, data)`. Broadcast (`setBroadcast`) and multicast (`joinMulticastGroup` / `setMulticastTTL`) supported.
 
@@ -1395,13 +1395,13 @@ listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
 ### My app crashed — how do I find where? (getting a backtrace)
 
 Outside a debugger, a crash usually leaves very little: `Segmentation fault` / exit code 139 on macOS and Linux, or an "Application Error" entry (`0xc0000005`) in the Windows Event Log. That is also all an AI agent sees when it launches the app from a shell. To get the call stack:
-- **Run it under the debugger.** In VS Code / Cursor press F5: it stops at the crash and shows the stack. CodeLLDB is used on macOS / Linux, the MSVC debugger on Windows.
+- **Run it under the debugger.** In VS Code / Cursor press F5: it stops at the crash and shows the stack. VS Code uses CodeLLDB on macOS / Linux and the MSVC debugger (`cppvsdbg`) on Windows. Cursor and other forks use CodeLLDB on every OS (see [GET_STARTED.md](GET_STARTED.md)).
 - **From a terminal** (handy for agents), run the app under the debugger in batch mode so it prints the stack and exits:
-  - macOS: `lldb --batch -o run -o bt -- bin/MyApp.app/Contents/MacOS/MyApp`
+  - macOS: `lldb --batch -o run -k bt -k quit -- bin/MyApp.app/Contents/MacOS/MyApp`. After a crash, lldb skips the rest of the `-o` commands and runs only the `-k` ones, so `bt` must be a `-k` command. Use `-k "thread backtrace all"` for every thread.
   - Linux: `gdb -batch -ex run -ex bt --args bin/MyApp`
 - **After the fact:**
   - macOS writes a crash report on its own: `~/Library/Logs/DiagnosticReports/MyApp-*.ips`. The crashing thread's frames are in it.
-  - Linux: `coredumpctl gdb MyApp` then `bt`, if systemd-coredump is installed. Ubuntu's apport keeps reports in `/var/crash`.
+  - Linux: `coredumpctl gdb MyApp` then `bt`, if systemd-coredump is installed. Ubuntu's default crash handler, apport, ignores programs that don't come from a package, so a TrussC app leaves nothing in `/var/crash`. On Ubuntu, install `systemd-coredump` to get `coredumpctl`, or use the gdb line above.
   - Windows: Event Viewer → Windows Logs → Application → "Application Error" names the faulting module and offset. For a full dump, see [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md).
 
 Apps build as RelWithDebInfo by default, which includes debug symbols, so the stack shows function names and line numbers.
@@ -1413,7 +1413,7 @@ Most crashes come from a handful of patterns. Write it the safe way from the sta
 - **Remove with `destroy()` while things are in flight.** From inside an event handler, a timer callback, or while walking the tree, remove nodes with `destroy()`. The removal is deferred to a safe point.
 - **Main-thread-only objects.** GPU objects (`Image`, `Texture`, `Fbo`, `Font`, `Shader`) and the Node tree belong to the main thread. Callbacks from audio, network or async timers must not touch them. See "Which thread does my callback run on?" below.
 - **Stop your own threads before your members go away.** A `Thread` subclass should call `waitForThread()` in its **own** destructor. The base class stops the thread only after your members are already destroyed.
-- **Callbacks must not outlive their object.** Keep the `EventListener` returned by `listen()` as a member, so it disconnects when the object dies. Don't capture a raw `this` in callbacks that can outlive the object (`runOnMainThread()`, a raw `std::thread`); capture a `weak_ptr` or copies instead.
+- **Callbacks must not outlive their object.** Keep the `EventListener` returned by `listen()` as a member, so it disconnects when the object dies. That is enough for events fired on the main thread and for `Deliver::Main` listeners. For events fired on another thread, see rule 3 below. Don't capture a raw `this` in callbacks that can outlive the object (`runOnMainThread()`, a raw `std::thread`); capture a `weak_ptr` or copies instead.
 
 ### Which thread does my callback run on?
 
@@ -1422,11 +1422,15 @@ Most crashes come from a handful of patterns. Write it the safe way from the sta
 | `setup()` / `update()` / `draw()`, input handlers, Node events, `callAfter` / `callEvery`, Tween, MCP tools | main thread |
 | `AudioEngine` `audioOut` / `audioIn` listeners | audio thread |
 | `callAfterAsync` / `callEveryAsync` | background scheduler thread |
-| `TcpClient` / `TcpServer` / `UdpSocket` events (`onReceive`, `onConnect`, `onDisconnect`, `onError`) | a network thread (desktop) |
+| `TcpClient` events (`onConnect`, `onReceive`, `onDisconnect`, `onError`) | the receive thread or the `connectAsync()` thread. When `connect()`, `disconnect()` or `send()` fires them, the thread that made the call |
+| `TcpServer` events (`onClientConnect`, `onReceive`, `onClientDisconnect`, `onError`, `onSendComplete`) | the server's threads |
+| `UdpSocket` events (`onReceive`, `onError`) | the receive thread |
 | tcxOsc `onMessageReceived`, tcxMidi `MidiIn::onMessage` | the addon's receive thread. Their polling APIs run on the main thread |
 | `Thread::threadedFunction()` | your thread |
 
-On the web (wasm) there are no background threads, so these "async" callbacks run on the main thread during the update loop.
+With `setUseThread(false)`, `TcpClient` and `UdpSocket` poll from `update` instead, so all their events run on the main thread.
+
+On the web (wasm) there are no background threads. `callAfterAsync` / `callEveryAsync`, `Thread` and `TcpServer` are native only; use `callAfter` / `callEvery` there.
 
 Rules for callbacks that are not on the main thread:
 1. **Don't touch nodes, GPU objects or drawing there.** Either copy the data into a mutex-protected member (or a `ThreadChannel`) and consume it in `update()`, or let the event deliver it on the main thread:
@@ -1437,15 +1441,21 @@ Rules for callbacks that are not on the main thread:
    ```
    `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. Plain `runOnMainThread(fn)` also moves work to the main thread, but has no such check, so don't capture a raw `this` there.
 2. **Audio callbacks stay on the audio thread.** They need low latency, so don't marshal them. Keep them short: no allocation, no file IO, no locks that the main thread may hold for a long time. Share values through atomics.
-3. **When the receiving object goes away, stop the source first.** Disconnect the socket, call `waitForThread()`, or drop the listener, and do it before the members the callback uses are destroyed.
+3. **When the receiving object goes away, stop the source first, and wait for it.** `Event` does not wait for a callback that is already running on another thread, so dropping or disconnecting the listener is not enough there. It is enough only for listeners on the main thread and for `Deliver::Main` listeners, whose queued call is dropped. For an inline listener on another thread, call the source's own stop-and-wait before the members the callback uses are destroyed:
+   - `TcpClient::disconnect()` and `UdpSocket::close()` join their threads.
+   - A `Thread` subclass calls `waitForThread()` in its own destructor.
+   - `cancelAsyncTimer()` / `cancelAllAsyncTimers()` wait for an in-flight `callAfterAsync` / `callEveryAsync` callback. `~Node` calls `cancelAllAsyncTimers()` too, but only after your members are gone, so call it yourself in your destructor or `cleanup()`.
+   - Audio has no such wait yet. Until it exists, an inline `audioOut` / `audioIn` listener must not touch state that can be destroyed while the audio engine runs.
+
+   `Deliver::Main` needs a copyable payload. For a payload type that can't be copied, it runs the listener inline on the firing thread, so it gives no cross-thread protection there.
 
 ### Build error: "is not a full path to an existing compiler tool" (after updating Visual Studio)
 
-The build folder's `CMakeCache.txt` still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. Delete the app's build folder (`build-windows`, or whichever `build-*` folder the preset uses) and build again. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically.
+The project still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. In a trusscli project, deleting the build folder is not enough: `CMakePresets.json` also stores the old ninja, include, library and compiler paths, and `trusscli build` does not configure a missing build folder (it fails with "could not load cache"). Run `trusscli update` in the project folder instead, with the same `--ide` the project uses (for example `--ide cursor`, or `--ide vs` to regenerate the `vs/` solution), then build again. It rewrites `CMakePresets.json` for the Visual Studio installed now, cleans the build folder and configures again. Only for a project without trusscli presets, delete the build folder and configure again. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically.
 
 ### Build error: "hot reload state changed -- reconfigure required"
 
-You added or removed `TC_HOT_RELOAD(...)`. Hot reload is switched at configure time, so the build stops once to make CMake reconfigure. It prints "TC_HOT_RELOAD detected." or "TC_HOT_RELOAD removed." first. `trusscli build` reconfigures automatically; with plain CMake, just build again.
+You added or removed `TC_HOT_RELOAD(...)`. Hot reload is switched at configure time, so the build stops once to make CMake reconfigure. It prints "TC_HOT_RELOAD detected." or "TC_HOT_RELOAD removed." first. This is expected, with `trusscli build` / `trusscli run` as well as with plain CMake: just build again. The next build reconfigures and succeeds.
 
 ### Windows: "... was blocked by your organization's Device Guard policy" (Smart App Control)
 
@@ -1460,7 +1470,7 @@ Several Windows defaults can stop an unattended app, or hide why it stopped:
 - the display turns off even in fullscreen;
 - Windows Update restarts the PC at night;
 - a crash dialog keeps the dead process open;
-- a Task Scheduler start runs in `C:\Windows\System32`.
+- a Task Scheduler start runs in `C:\Windows\System32`, and the task is stopped after 3 days unless its time limit is turned off.
 
 Most of this is configuration, not code. Follow the checklist in [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md): Smart App Control, power and display, Windows Update, crash dumps without dialogs, auto-start and restart, working directory, GPU selection.
 
@@ -5018,10 +5028,11 @@ void tcApp::setup() {
 ### IDE Setup
 - Ask which IDE they use first: VSCode, Cursor, or Xcode
 - VSCode/Cursor: After generating, open the project in IDE. Three required extensions will be suggested automatically:
-  1. **C/C++** (`ms-vscode.cpptools`) — IntelliSense and syntax highlighting
-  2. **CMake Tools** (`ms-vscode.cmake-tools`) — Build integration
-  3. **CodeLLDB** (`vadimcn.vscode-lldb`) — Debugger
+  1. **CMake Tools** (`ms-vscode.cmake-tools`) — Build integration (every editor)
+  2. **CodeLLDB** (`vadimcn.vscode-lldb`) — Debugger (every editor)
+  3. IntelliSense: **C/C++** (`ms-vscode.cpptools`) in VSCode only; **clangd** (`llvm-vs-code-extensions.vscode-clangd`) in VS Code forks (Cursor, Antigravity, VSCodium, Windsurf). The C/C++ extension refuses to run outside the official VS Code, so don't suggest it for forks, and don't install clangd next to it in VSCode.
   - If the popup doesn't appear, open Extensions panel and search for each one
+  - For a VS Code fork, generate the project with `--ide cursor` (e.g. `trusscli update --ide cursor`): its popup suggests clangd, and its `launch.json` uses CodeLLDB on every OS. This matters on Windows, where the MSVC debugger (`cppvsdbg`) that VSCode projects use is not available in forks. See [GET_STARTED.md](GET_STARTED.md).
 - Build key is F5.
 - Xcode: Can build directly. The .xcodeproj file is inside the `xcode` folder within the project.
 

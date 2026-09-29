@@ -80,8 +80,10 @@ The Inspector renders each reflected type with the matching ImGui widget
 (`float`/`int`/`bool`/`Vec2`/`Vec3`/`Color`/`string`). Enum values render as a
 combo of their labels when the enum declares them (`TC_ENUM_LABELS`, optional —
 without labels an enum edits as a plain int), and getter-only values render
-greyed out. Want a custom widget for a type? Subclass `tcx::ImGuiReflector`
-and override the relevant `visit()`.
+greyed out. The Inspector always uses the built-in `tcx::ImGuiReflector`, and
+there is no way to plug in a subclass yet. A subclass that overrides a
+`visit()` only helps in an ImGui panel your app draws itself (call
+`node->reflectMembers(r)` there). It does not change the Inspector.
 
 ## Mods
 
@@ -171,9 +173,10 @@ NodeInspector::instance().resetTouched();
 
 The Hierarchy / Inspector panels are kept out of tcxImGui's `widgets` record:
 their widgets are shared by whichever node is selected, so an ImGui widget ID
-can't say whose value it was. A custom `ImGuiReflector` override takes part by
-calling `edit(name, widget)`. The old `edit(widget)` form still works but
-records nothing.
+can't say whose value it was. Only the Inspector's own `ImGuiReflector` feeds
+this record. A subclass used in your own panel fills its `edited` list when it
+calls `edit(name, widget)`, but nothing moves that list into the record. The
+old `edit(widget)` form still works but fills nothing.
 
 ## Styling
 

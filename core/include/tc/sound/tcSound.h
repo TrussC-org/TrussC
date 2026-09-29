@@ -114,7 +114,7 @@ public:
 
     // Load AAC data from memory (platform-specific implementation)
     // Fails on unsupported platforms
-    TC_PLATFORMS("macos,windows,linux,ios,web") LoadResult loadAacFromMemory(const void* data, size_t dataSize);
+    TC_PLATFORMS("macos,windows,linux,ios") LoadResult loadAacFromMemory(const void* data, size_t dataSize);
 
     // -------------------------------------------------------------------------
     // ADTS header utilities (for raw AAC from MOV containers)
