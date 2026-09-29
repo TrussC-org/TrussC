@@ -14,6 +14,9 @@
 // Device loss (e.g. a USB-serial adapter unplugged): available(), readBytes(),
 // readByte() and writeBytes() detect it, close the port and log one warning,
 // so isConnected() turns false and the app can call setup() again.
+//
+// Not thread-safe: since those calls may close the port, an app that uses one
+// Serial from several threads must guard every call with one mutex.
 // =============================================================================
 
 #include <string>
@@ -784,9 +787,12 @@ private:
     }
 
     // Whether the tty was hung up (device removed, pty master closed). The
-    // zero timeout never blocks. POLLNVAL is deliberately not counted: our
-    // fd is always open here, and macOS reports POLLNVAL for a device whose
-    // driver lacks kqueue support, which would drop a working port.
+    // zero timeout never blocks. POLLNVAL is deliberately not counted. fd_ is
+    // always open here, so Linux never reports it, and macOS poll() reports
+    // it for any device it cannot attach a kqueue filter to, which would drop
+    // a working port of such a driver. A macOS unplug does not need it: the
+    // serial driver then fails ioctl(), read() and write() with ENXIO, and
+    // every caller makes one of those calls before this one.
     bool isHungUp() const {
         struct pollfd pfd;
         pfd.fd = fd_;

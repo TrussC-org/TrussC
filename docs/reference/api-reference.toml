@@ -7725,6 +7725,10 @@ Reconnecting re-asserts DTR, which resets auto-reset boards such as most
 Arduinos. On Windows, any failure of the underlying ClearCommError / ReadFile /
 WriteFile counts as a loss. On Android the flag also turns true after `setup()`
 returned false, once the user grants USB permission.
+
+`Serial` is not thread-safe. Because `available()`, `readBytes()`, `readByte()`
+and `writeBytes()` may close the port, an app that uses one `Serial` from
+several threads must guard every call with one mutex.
 '''
 details.ja = '''
 USB シリアル機器の抜去（ハブの電源断、ドライバのリセットなども）は
@@ -7741,6 +7745,10 @@ USB シリアル機器の抜去（ハブの電源断、ドライバのリセッ�
 リセットされる。Windows では下位の ClearCommError / ReadFile / WriteFile の失敗は
 すべて消失として扱う。Android では、`setup()` が false を返した後でもユーザーが
 USB 許可を与えた時点で true になる。
+
+`Serial` はスレッドセーフではない。`available()`、`readBytes()`、`readByte()`、
+`writeBytes()` はポートを閉じることがあるので、1つの `Serial` を複数のスレッドから
+使う場合は、すべての呼び出しを1つの mutex で守ること。
 '''
 details.ko = '''
 USB 시리얼 장치의 분리(허브 전원 차단, 드라이버 리셋 등 포함)는
@@ -7757,6 +7765,10 @@ USB 시리얼 장치의 분리(허브 전원 차단, 드라이버 리셋 등 포
 Windows에서는 하위 ClearCommError / ReadFile / WriteFile의 실패를 모두 소실로
 취급한다. Android에서는 `setup()`이 false를 반환한 뒤에도 사용자가 USB 권한을
 허용하면 true가 된다.
+
+`Serial`은 스레드 안전하지 않다. `available()`, `readBytes()`, `readByte()`,
+`writeBytes()`가 포트를 닫을 수 있으므로, 하나의 `Serial`을 여러 스레드에서
+사용한다면 모든 호출을 하나의 mutex로 보호해야 한다.
 '''
 
 ["Serial::isInitialized"]
