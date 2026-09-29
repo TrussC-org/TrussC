@@ -876,6 +876,12 @@ SOKOL_GL_API_DECL void sgl_tc_context_release_buffers(sgl_context ctx);
    buffers may have been released. */
 SOKOL_GL_API_DECL void sgl_tc_context_ensure_buffers(sgl_context ctx);
 
+/* [TrussC] Drop every matrix stack of the CURRENT context back to depth 0
+   (the matrices themselves are left for the caller to reload). Called at
+   frame end so a pushMatrix() without its pop can't carry sgl's stack
+   depth into the next frame (TrussC #232). */
+SOKOL_GL_API_DECL void sgl_tc_reset_matrix_stacks(void);
+
 /* create and destroy pipeline objects */
 SOKOL_GL_API_DECL sgl_pipeline sgl_make_pipeline(const sg_pipeline_desc* desc);
 SOKOL_GL_API_DECL sgl_pipeline sgl_context_make_pipeline(sgl_context ctx, const sg_pipeline_desc* desc);
@@ -4804,6 +4810,19 @@ SOKOL_API_IMPL void sgl_tc_context_reset(sgl_context ctx_id) {
     if (ctx) {
         _sgl_reset_buffers(ctx);
     }
+}
+
+/* [TrussC fork] See declaration. */
+SOKOL_API_IMPL void sgl_tc_reset_matrix_stacks(void) {
+    SOKOL_ASSERT(_SGL_INIT_COOKIE == _sgl.init_cookie);
+    _sgl_context_t* ctx = _sgl.cur_ctx;
+    if (!ctx) {
+        return;
+    }
+    for (int i = 0; i < SGL_NUM_MATRIXMODES; i++) {
+        ctx->matrix_tos[i] = 0;
+    }
+    ctx->matrix_dirty = true;
 }
 
 /* [TrussC fork] Release CPU buffers and GPU vertex buffer to free idle memory.

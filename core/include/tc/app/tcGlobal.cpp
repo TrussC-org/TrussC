@@ -376,6 +376,23 @@ void present() {
     events().onRender.notify();
 
     sgl_error_t err = sgl_error();
+    // Matrix stack errors (#232): TrussC keeps its push/pop balanced per node
+    // and per frame, so what reaches sokol_gl is nesting deeper than its fixed
+    // stack (64), or a raw sgl_push/pop_matrix mismatch. Reported once, then
+    // at most every 5 s — the flags are cleared again at sg_commit().
+    if (err.stack_overflow || err.stack_underflow) {
+        static std::chrono::steady_clock::time_point lastReport{};
+        static bool reported = false;
+        auto now = std::chrono::steady_clock::now();
+        if (!reported || now - lastReport >= std::chrono::seconds(5)) {
+            reported = true;
+            lastReport = now;
+            logWarning("sokol_gl") << "matrix stack "
+                << (err.stack_overflow ? "overflow (more than 64 nested pushMatrix / node levels in one frame)"
+                                       : "underflow (sgl_pop_matrix without a push)")
+                << "; transforms past that point are wrong this frame";
+        }
+    }
     if (err.vertices_full || err.commands_full) {
         int newVerts = internal::sglMaxVertices * 4;
         if (newVerts > internal::sglPendingResize) {
@@ -399,6 +416,14 @@ void present() {
     // resources released during this frame (temporary Mesh draws, texture
     // re-uploads, atlas growth, sampler changes, ...).
     internal::drainPendingGpuDestroys();
+
+    // Frame end (#232): whatever this frame left pushed is dropped here (with
+    // a warning), so a missing pop can't leak into the next frame; sokol_gl's
+    // matrix stacks go back to depth 0 with it. Done here because present()
+    // is each window's last call of the frame — not in beginFrame(), which
+    // EasyCam::end() also calls mid-frame to return to 2D.
+    internal::getDefaultContext().resetStacksAtFrameEnd();
+    sgl_tc_reset_matrix_stacks();
 }
 
 bool isInSwapchainPass() {

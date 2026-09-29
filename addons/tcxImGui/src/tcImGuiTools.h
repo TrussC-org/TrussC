@@ -329,10 +329,11 @@ inline nlohmann::json touchedWidgetsJson() {
 inline void registerImGuiTools() {
     using json = nlohmann::json;
 
-    // Idempotent: safe to call from imguiSetup() and/or the app.
-    static bool registered = false;
-    if (registered) return;
-    registered = true;
+    // Idempotent: safe to call from imguiSetup() and/or the app. Keyed on the
+    // tools actually being registered, not a one-shot flag: after a hot reload
+    // the host removes what the old guest registered (#227), and the new guest
+    // must be able to register them again.
+    if (tc::mcp::hasTool("tcx_imgui_get_widgets")) return;
 
     // Activate collection
     enableCollection();

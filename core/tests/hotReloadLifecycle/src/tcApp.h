@@ -11,11 +11,20 @@ using namespace tc;
 // BASE class touches on construction/destruction (AudioEngine listeners, the
 // window-context root slot, Event COW listener lists). The extra update
 // listener widens the churn on the global events() singleton.
+//
+// It also registers an MCP tool, a status entry and a status image, each
+// capturing `this` — the usual app pattern. On reload the host must remove
+// them before this App is deleted, or the old build's handlers stay listed
+// and callable with a dangling `this` (#227).
 // =============================================================================
 class tcApp : public App {
 public:
     tcApp() {
         updateListener_ = events().update.listen([this]() { ticks_++; });
+        mcp::tool("guest_probe", "hotReloadLifecycle guest tool")
+            .bind(std::function<json()>([this]() -> json { return json{{"ticks", ticks_}}; }));
+        mcp::status("guest_status", std::function<double()>([this]() { return (double)ticks_; }));
+        mcp::statusImage("guest_image", [this]() { (void)ticks_; return Pixels(); });
     }
 
 private:

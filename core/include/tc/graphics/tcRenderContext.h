@@ -26,6 +26,7 @@
 
 #include <vector>
 #include <string>
+#include <chrono>
 
 namespace trussc {
 
@@ -255,13 +256,20 @@ public:
         sgl_push_matrix();
     }
 
+    // A pop with nothing pushed is a bug in the caller: warn (rate-limited)
+    // and leave both stacks alone, so TrussC's and sokol_gl's stay in step.
     void popMatrix() {
-        if (!matrixStack_.empty()) {
-            currentMatrix_ = matrixStack_.back();
-            matrixStack_.pop_back();
+        if (matrixStack_.empty()) {
+            warnUnbalanced(popMatrixWarning_, "popMatrix() without a matching pushMatrix()");
+            return;
         }
+        currentMatrix_ = matrixStack_.back();
+        matrixStack_.pop_back();
         sgl_pop_matrix();
     }
+
+    size_t getMatrixStackDepth() const { return matrixStack_.size(); }
+    size_t getStyleStackDepth() const { return styleStack_.size(); }
 
     // -----------------------------------------------------------------------
     // Style stack
@@ -275,11 +283,48 @@ public:
     }
 
     void popStyle() {
-        if (!styleStack_.empty()) {
-            style_ = styleStack_.back();
-            styleStack_.pop_back();
-            applyBlend(style_.blend);
+        if (styleStack_.empty()) {
+            warnUnbalanced(popStyleWarning_, "popStyle() without a matching pushStyle()");
+            return;
         }
+        style_ = styleStack_.back();
+        styleStack_.pop_back();
+        applyBlend(style_.blend);
+    }
+
+    // Frame end (#232): whatever a frame left pushed is dropped, so a missing
+    // pop stays contained in the frame where it happened instead of drifting
+    // getMatrix() (billboards, screen-fixed text, shader / PBR draws) and
+    // growing the stacks forever. Warns (rate-limited) when anything was left.
+    // Called at the end of present(); the sokol_gl side is reset there too.
+    void resetStacksAtFrameEnd() {
+        if (!matrixStack_.empty() || !styleStack_.empty()) {
+            warnUnbalanced(frameEndWarning_,
+                "the frame ended with " + std::to_string(matrixStack_.size()) +
+                " pushMatrix() and " + std::to_string(styleStack_.size()) +
+                " pushStyle() still open (missing pop); dropped");
+        }
+        matrixStack_.clear();
+        styleStack_.clear();
+        currentMatrix_ = Mat4::identity();
+    }
+
+    // After a Node's draw() (and its mods) run: if it left the stacks deeper or
+    // shallower than it found them, name the node and put them back, so its
+    // parent's own pop — and every later sibling — see the depth they expect.
+    void restoreStackDepth(size_t matrixDepth, size_t styleDepth, const char* who) {
+        const size_t md = matrixStack_.size(), sd = styleStack_.size();
+        if (md == matrixDepth && sd == styleDepth) return;
+        warnUnbalanced(nodeDrawWarning_,
+            std::string(who) + "::draw() left the stacks unbalanced (pushMatrix " +
+            std::to_string((long long)md - (long long)matrixDepth) + ", pushStyle " +
+            std::to_string((long long)sd - (long long)styleDepth) + ")");
+        while (matrixStack_.size() > matrixDepth) popMatrix();
+        while (styleStack_.size() > styleDepth) popStyle();
+        // Popped more than it pushed: the lost entries can't be recovered, but
+        // refilling the depth keeps the parent's pops matched to its pushes.
+        while (matrixStack_.size() < matrixDepth) pushMatrix();
+        while (styleStack_.size() < styleDepth) pushStyle();
     }
 
     // Reset style to default values (white color, fill enabled, etc.)
@@ -1000,6 +1045,30 @@ private:
     // Matrix stack
     Mat4 currentMatrix_ = Mat4::identity();
     std::vector<Mat4> matrixStack_;
+
+    // Unbalanced push/pop warnings (#232). A missing pop repeats every frame,
+    // so each kind logs its first occurrence, then at most once per 5 s with
+    // the count since the last line.
+    struct RateLimitedWarning {
+        std::chrono::steady_clock::time_point last{};
+        bool logged = false;
+        int suppressed = 0;
+    };
+    RateLimitedWarning popMatrixWarning_, popStyleWarning_, frameEndWarning_, nodeDrawWarning_;
+
+    void warnUnbalanced(RateLimitedWarning& w, const std::string& what) {
+        const auto now = std::chrono::steady_clock::now();
+        if (w.logged && now - w.last < std::chrono::seconds(5)) {
+            w.suppressed++;
+            return;
+        }
+        auto line = logWarning("RenderContext");
+        line << what;
+        if (w.suppressed > 0) line << " (+" << w.suppressed << " more since the last report)";
+        w.logged = true;
+        w.last = now;
+        w.suppressed = 0;
+    }
 
     // Text alignment (shortcut to style_)
     Direction& textAlignH_ = style_.textAlignH;

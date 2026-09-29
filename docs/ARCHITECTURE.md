@@ -231,7 +231,7 @@ tc::setIndependentFps(60, 30);      // Update 60Hz, draw 30fps
 
 - **tc::Node**: Base class with parent-child relationships and local transformation
 - **Activation Control**: `isActive` stops node and all descendants completely
-- **Visibility Control**: `isVisible` skips only draw (update/events continue)
+- **Visibility Control**: `isVisible` false hides the node and its whole subtree — no draw, no mouse hit test — while update continues (`isActive` false stops the subtree entirely)
 - **Event Traverse**: Child nodes receive events even if parent has events disabled
 
 **Event Dispatch (Internal):**
@@ -278,7 +278,7 @@ protected:
 | `eventsEnabled_` | `false` | Call `enableEvents()` to receive events |
 | `width`, `height` | `100.0f` | Hit area size (0 = no hit) |
 | `isActive` | `true` | If false, node and children are completely disabled |
-| `isVisible` | `true` | If false, draw and hit test are skipped |
+| `isVisible` | `true` | If false, draw and mouse hit test are skipped for the node and all its descendants; update keeps running |
 
 **Event Handler Return Values:**
 

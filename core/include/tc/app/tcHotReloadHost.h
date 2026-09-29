@@ -61,6 +61,7 @@ struct GuestLibrary {
     DestroyAppFn destroyApp = nullptr;
     std::shared_ptr<App> app;
     string loadedPath;  // actual path loaded (may be a temp copy on Windows)
+    const void* mcpOwner = nullptr;  // this generation's MCP registrations (create/destroy)
 
     bool load(const string& path) {
         // Always load from a unique temp path. Without this, the OS dynamic
@@ -122,6 +123,15 @@ struct GuestLibrary {
 
     App* create() {
         if (createApp) {
+            // Everything this guest generation registers with MCP (tools,
+            // resources, status getters) is tagged with it from here on, and
+            // destroy() removes it all before the App those handlers capture
+            // is deleted — no stale tool from an old build lingers in
+            // tools/list pointing at a freed App (#227). The tag is only an
+            // identity, never dereferenced.
+            static uintptr_t generation = 0;
+            mcpOwner = reinterpret_cast<const void*>(++generation);
+            mcp::detail::setRegistrationOwner(mcpOwner);
             App* raw = createApp();
             auto deleter = destroyApp;
             app = std::shared_ptr<App>(raw, [deleter](App* p) {
@@ -133,6 +143,11 @@ struct GuestLibrary {
     }
 
     void destroy() {
+        if (mcpOwner) {
+            mcp::detail::removeRegistrationsOwnedBy(mcpOwner);
+            mcp::detail::setRegistrationOwner(nullptr);
+            mcpOwner = nullptr;
+        }
         app.reset();
     }
 
