@@ -2392,8 +2392,8 @@ namespace internal {
     // (fixedDelta > 0), so every step of a frame reports the same dt instead
     // of the first one taking the whole gap (#228), and their nominal time on
     // the loop's timeline (stepTime) as the update time Node timers count
-    // from. mainUpdateCallTime is kept current either way, so a later switch
-    // to VSYNC measures from here.
+    // from, and whether this update is such a step. mainUpdateCallTime is
+    // kept current either way, so a later switch to VSYNC measures from here.
     inline void beginMainUpdateCall(double fixedDelta = 0.0,
                                     std::chrono::steady_clock::time_point stepTime = {}) {
         auto& wctx = mainWindowContext();
@@ -2408,6 +2408,7 @@ namespace internal {
         wctx.mainUpdateCallTimeInitialized = true;
         wctx.mainUpdateCallTime = callNow;
         wctx.updateTime = (fixedDelta > 0.0) ? stepTime : callNow;
+        wctx.fixedStepUpdate = (fixedDelta > 0.0);
     }
 
     // One main-window update: timing (beginMainUpdateCall), then the app's

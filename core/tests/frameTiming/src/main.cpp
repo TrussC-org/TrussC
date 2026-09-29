@@ -26,9 +26,10 @@
 //      its phase and fires once when late (and takes std::bind results /
 //      generic lambdas), callEveryCatchUp fires once per due interval up to its
 //      limit (cancelling from the callback stops it; fixed-Hz dropped time is
-//      not counted), resets don't affect them, and a timer created between
-//      main-window updates (after an idle gap or a stall) is charged only the
-//      time since its creation.
+//      not counted), resets don't affect them, and a main-window timer is
+//      charged only the time since its creation: one created between updates
+//      (after an idle gap or a stall), and one created late in a long update
+//      or setup() in a measured-dt mode.
 //   7. ScreenRecorder pacing (the pacer's tick(), all ScreenRecorder reads):
 //      decimation and PTS are exact after long uptime, and neither the PTS nor
 //      the duration cutoff moves with resetElapsedTimeCounter(); neither does
@@ -557,10 +558,11 @@ struct TimerNode : Node {
     void step() { processTimers(); }
 };
 
-// One simulated update of the main window: advance the update count, set dt
-// and the update time (the simulated clock advanced by `advance`, default
-// dt), and run the node's timers inside the update. `during` runs inside the
-// update before the node's timers (like a parent's update() or setup()).
+// One simulated update of the main window (a measured-dt update, as in VSYNC /
+// setFps() modes): advance the update count, set dt and the update time (the
+// simulated clock advanced by `advance`, default dt), and run the node's
+// timers inside the update. `during` runs inside the update before the node's
+// timers (like a parent's update() or setup()).
 static Clk::time_point g_simNow;
 static void simUpdate(TimerNode& n, double dt, double advance = -1.0,
                       const function<void()>& during = nullptr) {
@@ -569,6 +571,7 @@ static void simUpdate(TimerNode& n, double dt, double advance = -1.0,
     ctx.updateDeltaTime = dt;
     g_simNow += secs(advance >= 0.0 ? advance : dt);
     ctx.updateTime = g_simNow;
+    ctx.fixedStepUpdate = false;
     ctx.inUpdate = true;
     if (during) during();
     n.step();
@@ -819,6 +822,114 @@ static void testNodeTimersInLoop() {
     g_loopNode = nullptr;
     setFps(VSYNC);
     internal::mainWindowContext().updateDeltaTime = 0.0;
+}
+
+// ---------------------------------------------------------------------------
+// 6b. A timer created during a measured update counts from its creation
+// ---------------------------------------------------------------------------
+// In VSYNC / setFps() modes an update's dt is the wall time since the previous
+// update, so the update after a long one (a long setup(), a synchronous load
+// in update()) reports all of it. A timer created at the end of the long
+// update must be charged only the time after its creation, or it fires on
+// the next update. Timing-sensitive (real 300 ms sleeps), but every bound is
+// derived from the timestamps taken around the creation, so a preempted
+// runner can't fail it.
+static shared_ptr<App> g_treeRoot;
+static void treeUpdate() {
+    internal::updateFrameCount++;           // as the app's update does
+    ++g_updates;
+    g_treeRoot->handleUpdate(0, 0);
+}
+
+struct LongSetupNode : Node {
+    int fired = 0;
+    Clk::time_point createdFrom, createdTo;
+    void setup() override {
+        sleepMs(300);                       // e.g. a synchronous load
+        createdFrom = Clk::now();
+        callAfter(0.2, [this] { ++fired; });
+        createdTo = Clk::now();
+    }
+};
+
+static double secsBetween(Clk::time_point a, Clk::time_point b) {
+    return chrono::duration<double>(b - a).count();
+}
+
+static void testTimersCountFromCreation() {
+    setFps(VSYNC);                          // measured dt, update synced to draw
+    auto node = make_shared<TimerNode>();
+    g_loopNode = node.get();
+    internal::appUpdateFunc = timerLoopUpdate;
+
+    // An update that runs 300 ms before it creates callAfter(0.1) and
+    // callEveryCatchUp(0.05).
+    {
+        const double iv = 0.05;
+        int after = 0, catchUp = 0;
+        Clk::time_point from, to;
+        bool created = false;
+        g_loopDuring = [&] {
+            if (created) return;
+            created = true;
+            sleepMs(300);
+            from = Clk::now();
+            node->callAfter(0.1, [&] { ++after; });
+            node->callEveryCatchUp(iv, [&] { ++catchUp; });
+            to = Clk::now();
+        };
+        internal::runSyncedUpdate();        // the long update that creates them
+        g_loopDuring = nullptr;
+        internal::runSyncedUpdate();        // dt covers the whole long update
+        const double dt = getDeltaTime();
+        const double since2 = secsBetween(from, internal::getUpdateTime());
+        checkf("measured dt: the update after a 300 ms update reports it (>= 0.3 s)", dt >= 0.299, dt);
+        checkf("measured dt: callAfter(0.1) created at its end doesn't fire on the next update",
+               after == 0 || since2 >= 0.1 - 1e-6, since2);
+        checkf("measured dt: callEveryCatchUp(0.05) created there doesn't catch up the 300 ms",
+               catchUp <= (int)floor(since2 / iv + 1e-6), catchUp);
+        sleepMs(150);
+        internal::runSyncedUpdate();
+        const auto u3 = internal::getUpdateTime();
+        check("measured dt: ...callAfter fires once 0.1 s have passed since its creation", after == 1);
+        const int lo = (int)floor(secsBetween(to, u3) / iv), hi = (int)floor(secsBetween(from, u3) / iv + 1e-6);
+        char name[160];
+        snprintf(name, sizeof name,
+                 "measured dt: ...callEveryCatchUp caught up the time since its creation only (%d .. %d)", lo, hi);
+        checkf(name, catchUp >= lo && catchUp <= hi && catchUp >= 3, catchUp);
+        node->cancelAllTimers();
+    }
+
+    // A long setup(): Node::setup() (and App::setup()) runs inside the first
+    // update, so the next update's dt covers it.
+    {
+        g_treeRoot = make_shared<App>();
+        auto n = make_shared<LongSetupNode>();
+        g_treeRoot->addChild(n);
+        internal::appUpdateFunc = treeUpdate;
+        internal::runSyncedUpdate();        // setup(): 300 ms, then callAfter(0.2)
+        internal::runSyncedUpdate();
+        const double dt = getDeltaTime();
+        Clk::time_point prevU = internal::getUpdateTime(), lastU = prevU;
+        checkf("long setup(): the next update's dt covers it (>= 0.3 s)", dt >= 0.299, dt);
+        checkf("long setup(): callAfter(0.2) made at its end doesn't fire on the next update",
+               n->fired == 0 || secsBetween(n->createdFrom, lastU) >= 0.2 - 1e-6,
+               secsBetween(n->createdFrom, lastU));
+        for (int f = 0; f < 40 && !n->fired; ++f) {
+            sleepMs(50);
+            internal::runSyncedUpdate();
+            prevU = lastU;
+            lastU = internal::getUpdateTime();
+        }
+        checkf("long setup(): ...then fires on the first update 0.2 s after its creation",
+               n->fired == 1 && secsBetween(n->createdFrom, lastU) >= 0.2 - 1e-6 &&
+               secsBetween(n->createdTo, prevU) < 0.2,
+               secsBetween(n->createdFrom, lastU));
+        g_treeRoot.reset();
+    }
+
+    internal::appUpdateFunc = nullptr;
+    g_loopNode = nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -1151,6 +1262,7 @@ int main() {
     testFrameSkip();
     testNodeTimers();
     testNodeTimersInLoop();
+    testTimersCountFromCreation();
     testRecorderPacing();
     testHealthUptime();
     testHeadlessLoop();

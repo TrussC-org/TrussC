@@ -73,10 +73,12 @@ double getDeltaTime();
 uint64_t getUpdateCount();
 namespace internal {
     // The current window's update time (the wall time of the update call; a
-    // fixed-Hz step's nominal time) and whether one of its updates is running
-    // (WindowContext::updateTime / inUpdate, tcGlobal.cpp).
+    // fixed-Hz step's nominal time), whether one of its updates is running,
+    // and whether that update is a fixed-Hz step (WindowContext::updateTime /
+    // inUpdate / fixedStepUpdate, tcGlobal.cpp).
     std::chrono::steady_clock::time_point getUpdateTime();
     bool isInUpdate();
+    bool isFixedStepUpdate();
 }
 
 // Hover state cache (updated once per frame): hoveredNode / prevHoveredNode /
@@ -1315,12 +1317,13 @@ public:
     // update subtracts getDeltaTime() (the nominal 1/updateFps per step in
     // fixed-Hz mode), so they follow the loop, pause while the node is
     // inactive, and are not affected by resetElapsedTimeCounter(). A timer
-    // created during an update starts counting on the next one. In the main
-    // window, a timer created between updates (an event handler, draw(),
-    // runOnMainThread work) counts only the time after its creation, so an
-    // idle gap or a stall before it existed can't make it fire early. (A
-    // secondary window's tick doesn't record its update time yet, so there
-    // such a timer counts the window's whole next delta.)
+    // starts counting with the next update after the one it was created in.
+    // In the main window it counts only the time after its creation, so time
+    // spent before the call (earlier in a long update or setup(), an idle gap,
+    // a stall) can't make it fire early; one created during a fixed-Hz step
+    // counts whole steps (step time). (A secondary window's tick doesn't
+    // record its update time yet, so there a timer counts the window's whole
+    // next delta.)
 
     // Execute callback once after specified delay in seconds
     uint64_t callAfter(double delay, std::function<void()> callback) {
@@ -1486,8 +1489,10 @@ protected:
         bool catchUp;
         int maxCatchUp;
         uint64_t createdUpdate;  // getUpdateCount() when created
-        // Created between updates: not counting yet. The first update after
-        // `created` is charged only the time since `created`.
+        // Not counting yet: the first update after `created` is charged only
+        // the time since `created`. Every timer starts pending except one
+        // created during a fixed-Hz step, which counts whole steps from the
+        // next one.
         bool pending;
         std::chrono::steady_clock::time_point created;
     };
@@ -1500,10 +1505,17 @@ private:
                       std::function<void()> callback,
                       bool catchUp = false, int maxCatchUp = 0) {
         uint64_t id = nextTimerId_++;
+        const bool inUpdate = internal::isInUpdate();
+        auto created = std::chrono::steady_clock::now();
+        // Created during an update: never before that update's time, so the
+        // update it was created in isn't charged for it (a nominal or simulated
+        // update time can be ahead of the clock).
+        if (inUpdate) created = std::max(created, internal::getUpdateTime());
         timers_.push_back({id, delay, interval, std::move(callback), repeating,
                            catchUp, maxCatchUp,
-                           getUpdateCount(), !internal::isInUpdate(),
-                           std::chrono::steady_clock::now()});
+                           getUpdateCount(),
+                           !(inUpdate && internal::isFixedStepUpdate()),
+                           created});
         return id;
     }
 
@@ -1511,14 +1523,17 @@ protected:
     // Process timers (called within updateTree, before update())
     //
     // Countdown: every timer subtracts this update's delta time, except
-    // - one created during this same update (by this node's setup(), which
-    //   runs just before, or by a parent's update()): it starts next update,
-    //   so it can't fire a frame early;
-    // - one created between updates (pending): the first update after its
-    //   creation subtracts only the time since then (capped at the delta
-    //   time). Without this, the first delta would include time from before
-    //   the timer existed: after an EVENT_DRIVEN idle gap or a stall (a
-    //   blocking dialog in a key handler) it would fire on the next update.
+    // - a pending one (all but those created during a fixed-Hz step): the
+    //   first update after its creation subtracts only the time since then
+    //   (capped at the delta time), and the update it was created in (by this
+    //   node's setup(), which runs just before, or a parent's update())
+    //   subtracts nothing. Without this, the first measured delta would
+    //   include time from before the timer existed: after a long setup() or
+    //   a synchronous load earlier in its update, an EVENT_DRIVEN idle gap or
+    //   a stall (a blocking dialog in a key handler) it would fire on the
+    //   next update;
+    // - one created during a fixed-Hz step: it starts with the next step and
+    //   counts step time, so it can't fire a step early.
     // A tiny epsilon absorbs rounding, so callAfter(1.0) created in an update
     // at a fixed 60 Hz fires on exactly the 60th step.
     //
@@ -1536,7 +1551,8 @@ protected:
         const uint64_t thisUpdate = getUpdateCount();
         const auto updateTime = internal::getUpdateTime();
         // No update time (a loop that doesn't set one, e.g. a secondary
-        // window's tick): count pending timers like ones created in an update.
+        // window's tick): pending timers count whole deltas from the update
+        // after the one they were created in.
         const bool haveUpdateTime = updateTime != std::chrono::steady_clock::time_point{};
 
         std::vector<uint64_t> readyIds;

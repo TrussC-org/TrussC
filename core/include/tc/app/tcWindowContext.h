@@ -251,10 +251,13 @@ struct WindowContext {
     bool frameUptimeSampled = false;
     // Node timers (Node::processTimers): the time of the update being run
     // (the wall time of the update call; a fixed-Hz step's nominal time on the
-    // loop's timeline), and whether an update is running right now, so a timer
-    // created between updates is charged only the time after its creation.
+    // loop's timeline), whether an update is running right now, and whether it
+    // is a fixed-Hz step. A timer is charged only the time after its creation,
+    // except one created during a fixed step, which counts whole steps from
+    // the next one.
     std::chrono::steady_clock::time_point updateTime{};
     bool inUpdate = false;
+    bool fixedStepUpdate = false;
     // Measured update rate (getFrameRate): per frame, the wall time it covered
     // and the update steps it ran. Recorded by the loops, read-only in the getter.
     // Fixed-step loops record fractional steps (the time they consumed divided

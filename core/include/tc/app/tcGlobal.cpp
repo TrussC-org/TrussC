@@ -566,6 +566,10 @@ bool isInUpdate() {
     return currentWindowContext().inUpdate;
 }
 
+bool isFixedStepUpdate() {
+    return currentWindowContext().fixedStepUpdate;
+}
+
 // ---------------------------------------------------------------------------
 // Loop timing helpers (tcFrameTiming.h)
 // ---------------------------------------------------------------------------
