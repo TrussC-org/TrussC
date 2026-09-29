@@ -16,10 +16,11 @@
 //    needs hardware).
 //  - A rate <= 0 is refused.
 //  - Linux read-back: a real driver that cannot generate a rate writes back
-//    another one (often 9600) instead of failing, and setup() must then fail.
-//    A pty applies any rate as given, so the rule that tells a fallback from
-//    a driver's nearest divisor (internal::isBaudRateClose()) is checked on
-//    its own.
+//    another one (often 9600) instead of failing, for B-constant rates as
+//    well as termios2 ones, and setup() must then fail. A pty applies any
+//    rate as given, so fakeDriver.cpp makes TCGETS2 report such a swap. The
+//    rule that tells a fallback from a driver's nearest divisor
+//    (internal::isBaudRateClose()) is also checked on its own.
 //
 // A pseudo-terminal stands in for the port; its master reads back the speed
 // Serial set on the slave. POSIX only; prints SKIP and passes on Windows,
@@ -50,6 +51,11 @@ int main() {
 
 // baudReadback.cpp
 long readOutputBaud(int fd);
+
+#if defined(__linux__)
+// fakeDriver.cpp: while non-zero, TCGETS2 reports this output rate
+void setFakeDriverRate(unsigned rate);
+#endif
 
 static int g_fail = 0;
 static void check(const string& name, bool ok) {
@@ -127,6 +133,46 @@ static void expectAppliedOrRefused(int rate) {
     }
 }
 
+#if defined(__linux__)
+// Open a fresh pty at `rate` while the "driver" writes `driverRate` back.
+// Returns setup()'s result.
+static bool openWithDriverRate(int rate, unsigned driverRate) {
+    g_logs.clear();
+    Pty pty;
+    if (!pty.open()) {
+        check("open a pty for " + to_string(rate), false);
+        return false;
+    }
+    Serial serial;
+    setFakeDriverRate(driverRate);
+    bool ok = serial.setup(pty.slavePath, rate);
+    setFakeDriverRate(0);
+    check(to_string(rate) + " -> " + to_string(driverRate) + ": isConnected() matches setup()",
+          serial.isConnected() == ok);
+    return ok;
+}
+
+// A driver that fell back to another rate: setup() must fail and say so.
+static void expectSwapRefused(int rate, unsigned driverRate) {
+    string name = to_string(rate) + " -> " + to_string(driverRate);
+    check(name + ": setup() fails", !openWithDriverRate(rate, driverRate));
+    check(name + ": the error names the applied rate",
+          logged("cannot set " + to_string(rate) + " baud") &&
+          logged("the driver applied " + to_string(driverRate)));
+    check(name + ": no success line at the requested rate",
+          !logged("at " + to_string(rate) + " baud"));
+}
+
+// A driver's nearest divisor: setup() succeeds and logs the applied rate.
+static void expectNearestAccepted(int rate, unsigned driverRate) {
+    string name = to_string(rate) + " -> " + to_string(driverRate);
+    check(name + ": setup() succeeds", openWithDriverRate(rate, driverRate));
+    check(name + ": the log names the applied rate",
+          logged("at " + to_string(driverRate) + " baud") &&
+          logged("the driver applied " + to_string(driverRate)));
+}
+#endif
+
 int main() {
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
         g_logs.push_back(e.message);
@@ -173,6 +219,21 @@ int main() {
     check("read-back more than 2% off is not the rate", !internal::isBaudRateClose(100000, 97999) &&
                                                         !internal::isBaudRateClose(100000, 102001));
     check("read-back 0 is not the rate", !internal::isBaudRateClose(9600, 0));
+
+#if defined(__linux__)
+    // --- 6. a driver that swaps in another rate -------------------------------
+    // tcsetattr() succeeds for a B-constant rate too, so setup() must read
+    // the rate back on that path as well as on the termios2 one.
+    expectSwapRefused(115200, 9600);         // B-constant
+#ifdef B4000000
+    expectSwapRefused(4000000, 9600);        // FT232R above its 3 MBd maximum
+#endif
+    expectSwapRefused(250000, 9600);         // termios2
+    expectSwapRefused(2000000, 1000000);     // clamped to the chip maximum
+    // CP2104: 115384 is the nearest rate its divisor gives for 115200
+    expectNearestAccepted(115200, 115384);
+    expectNearestAccepted(74880, 74766);     // termios2, CP2102N
+#endif
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;

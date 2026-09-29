@@ -90,6 +90,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   at a speed other than the one asked for (#260): rates without a termios
   B-constant used to open at 9600 and report success. Linux must apply any rate
   exactly (termios2); on macOS a pty rejects `IOSSIOSPEED`, so there such rates
-  must fail cleanly. A pty never swaps the rate the way a real Linux driver
-  can, so the read-back rule that turns such a swap into a failure is checked
-  on its own. POSIX only (SKIP on Windows).
+  must fail cleanly. A real Linux driver that cannot generate a rate writes
+  another one back instead of failing, B-constant rates included, and
+  `setup()` must then fail rather than report the requested rate. A pty never
+  does that, so on Linux the test defines its own `ioctl()` that makes
+  `TCGETS2` report such a swap (`src/fakeDriver.cpp`). POSIX only (SKIP on
+  Windows).
