@@ -18,6 +18,9 @@
 
 namespace trussc {
 
+// tcAudio_impl.cpp: logs the dropped plays that were only counted (see tcSound.h).
+namespace internal { void pumpAudioDiagnostics(); }
+
 // ---------------------------------------------------------------------------
 // Headless mode internal state (extends tcHeadlessState.h)
 // ---------------------------------------------------------------------------
@@ -127,6 +130,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         // Run work marshalled from worker threads (runOnMainThread, Event
         // Deliver::Main) on the main thread, mirroring the windowed _frame_cb.
         internal::drainMainThreadQueue();
+        internal::pumpAudioDiagnostics();
 
         // Fixed timestep update
         while (accumulator >= targetDelta) {

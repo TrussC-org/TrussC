@@ -2235,6 +2235,8 @@ namespace mcp {
 // Defined in tc/sound/tcSound.h (included later in this header); declared here
 // so the cleanup callback below can stop the audio device on exit.
 inline void shutdownAudio();
+// tcAudio_impl.cpp: logs the dropped plays that were only counted (see tcSound.h).
+namespace internal { void pumpAudioDiagnostics(); }
 
 namespace internal {
 
@@ -2357,6 +2359,10 @@ namespace internal {
         // Deliver::Main). Done before update/draw so queued tree edits land
         // while no traversal is in flight.
         internal::drainMainThreadQueue();
+
+        // Log the dropped plays that could only be counted (off the main
+        // thread, or repeats inside the rate limit). Rate limited.
+        internal::pumpAudioDiagnostics();
 
         // Process console input (fire events)
         console::processQueue();

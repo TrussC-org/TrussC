@@ -535,6 +535,64 @@ inline void registerInspectionTools() {
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
         }));
 
+    tool("tc_get_audio_state", "Audio engine diagnostics (read-only; never starts the engine): running; playing voices {slot, file, streaming, position/duration s, volume, pan, speed, loop, paused, level = peak of the voice's output}, master peak / RMS (linear, before clipping) and clipped-sample count, plays dropped since startup by reason (voice limit, stream maxPolyphony, decoder error, no device), audio-thread load, and the output / input devices. Pass devices=false to skip the device enumeration (slow on some backends) when polling.")
+        .arg<bool>("devices", "Enumerate playback / capture devices (default true)", false)
+        .bind([](const json& args) -> json {
+            bool enumerate = true;
+            if (args.contains("devices") && args.at("devices").is_boolean())
+                enumerate = args.at("devices").get<bool>();
+
+            auto& engine = trussc::AudioEngine::getInstance();
+            const trussc::AudioStats st = engine.getStats();
+            const auto dev = trussc::internal::audioDeviceReport(enumerate);
+
+            json voices = json::array();
+            for (const auto& v : engine.getVoices()) {
+                voices.push_back({{"slot", v.slot}, {"file", v.path},
+                                  {"streaming", v.streaming},
+                                  {"position", v.position}, {"duration", v.duration},
+                                  {"volume", v.volume}, {"pan", v.pan}, {"speed", v.speed},
+                                  {"loop", v.loop}, {"paused", v.paused},
+                                  {"level", v.level}});
+            }
+
+            auto& mic = trussc::getMicInput();
+            json r{{"status", "ok"},
+                   {"running", engine.isInitialized()},
+                   {"output", {{"device", dev.outputDevice},
+                               {"default", dev.outputIsDefault},
+                               {"backend", dev.backend},
+                               {"sampleRate", engine.getSampleRate()},
+                               {"channels", engine.getChannels()},
+                               {"bufferSize", engine.getBufferSize()},
+                               {"periodFrames", dev.periodFrames},
+                               {"deviceSampleRate", dev.deviceSampleRate},
+                               {"deviceChannels", dev.deviceChannels},
+                               {"maxPolyphony", engine.getMaxPolyphony()}}},
+                   {"input", {{"running", mic.isRunning()},
+                              {"device", mic.getDeviceName()},
+                              {"sampleRate", mic.getSampleRate()}}},
+                   {"voices", voices},
+                   {"master", {{"peak", st.peak}, {"rms", st.rms},
+                               {"clippedSamples", st.clippedSamples}}},
+                   {"dropped", {{"total", st.droppedPlays},
+                                {"voiceLimit", st.droppedVoiceLimit},
+                                {"streamLimit", st.droppedStreamLimit},
+                                {"decoderError", st.droppedDecoderError},
+                                {"notRunning", st.droppedNotRunning}}},
+                   {"thread", {{"load", st.load}, {"loadMax", st.loadMax}}}};
+            if (dev.enumerated) {
+                auto list = [](const std::vector<trussc::AudioDeviceInfo>& in) {
+                    json a = json::array();
+                    for (const auto& d : in) a.push_back({{"name", d.name}, {"default", d.isDefault}});
+                    return a;
+                };
+                r["devices"] = {{"playback", list(dev.playbackDevices)},
+                                {"capture", list(dev.captureDevices)}};
+            }
+            return r;
+        });
+
     // --- Recording tools (native encoder, no ffmpeg) ---
 
     tool("tc_start_recording", "Start recording the window to a video file (the screenshot's video counterpart). Omit path for a timestamped file in the data dir; give duration for a fixed-length clip that auto-stops and finalizes itself.")
