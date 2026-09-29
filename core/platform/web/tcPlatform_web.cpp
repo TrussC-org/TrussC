@@ -55,15 +55,40 @@ fs::path getExecutableDir() {
     return fs::path("/");
 }
 
+// ---------------------------------------------------------------------------
+// Screenshot — not supported on web (#230)
+// ---------------------------------------------------------------------------
+// The browser build has no way to read the canvas back: the default WebGPU
+// backend cannot read the swapchain synchronously (the same limitation as
+// Fbo::readPixelsPlatform in tcFbo_web.cpp), and a canvas.toBlob() download
+// would need new JS glue. Screenshots on web are taken with the browser's own
+// tools instead. So every capture entry point fails honestly: it returns false
+// and warns once per API, so an app that calls grabScreen() or
+// saveScreenshot() every frame does not flood the browser console.
+static bool captureWindowWarned_ = false;
+static bool captureWindowToFileWarned_ = false;
+
 bool captureWindow(Pixels& outPixels) {
-    // TODO: WebGL からピクセル読み取り
-    logWarning() << "[Screenshot] Emscripten では未実装";
+    (void)outPixels;
+    if (!captureWindowWarned_) {
+        captureWindowWarned_ = true;
+        logWarning("Screenshot") << "grabScreen()/captureWindow() is not supported "
+            "on web: the canvas cannot be read back, so no pixels are returned "
+            "(returns false). Use the browser's own screenshot feature instead.";
+    }
     return false;
 }
 
+// Reached from saveScreenshot(), which on web skips the deferred queue and
+// comes straight here (see TrussC.h).
 bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    // TODO: ダウンロードとして保存
-    logWarning() << "[Screenshot] Emscripten では未実装";
+    (void)path;
+    if (!captureWindowToFileWarned_) {
+        captureWindowToFileWarned_ = true;
+        logWarning("Screenshot") << "saveScreenshot() is not supported on web: "
+            "no file is written (returns false). Use the browser's own "
+            "screenshot feature instead.";
+    }
     return false;
 }
 
