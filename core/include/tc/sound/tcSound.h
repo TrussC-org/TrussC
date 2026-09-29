@@ -728,6 +728,7 @@ struct AudioStats {
 
     uint64_t clippedSamples = 0;       // output samples beyond +/-1.0 that were hard-clipped
 
+    // Meters: 0 while no device is running (before init, after shutdown).
     float peak = 0.0f;                 // master output peak over the last ~100 ms (linear, before clipping)
     float rms = 0.0f;                  // master output RMS over the same window
     float load = 0.0f;                 // audio thread load: mix time / audio time, averaged over ~0.5 s
@@ -742,6 +743,10 @@ namespace internal {
     // thread, and repeats inside the rate limit. Rate limited. Called once
     // per frame by the app loop on the main thread.
     void pumpAudioDiagnostics();
+    // Same, ignoring the rate limit, so no counted drop is left unlogged:
+    // the exit paths call it (AudioEngine::shutdown(), runHeadlessApp()).
+    // Main thread.
+    void flushAudioDiagnostics();
 
     // Device details for tc_get_audio_state that need miniaudio types.
     struct AudioDeviceReport {
@@ -916,9 +921,16 @@ private:
     void meterOutput(const float* buffer, int numFrames, int numChannels);
 
     // Main thread: log what was only counted (see pumpAudioDiagnostics()).
-    void reportDiagnostics();
+    // `force` ignores the rate limit (flushAudioDiagnostics()).
+    void reportDiagnostics(bool force = false);
     friend void internal::pumpAudioDiagnostics();
+    friend void internal::flushAudioDiagnostics();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
+
+    // Zero the output meters, the load window and every voice's level. Only
+    // while no device is running (init(), shutdown()), so the audio thread
+    // cannot race it.
+    void resetMeters();
 
     // Eager mix path: linear interpolation over a fully-decoded SoundBuffer.
     //

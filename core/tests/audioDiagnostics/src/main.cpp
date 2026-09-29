@@ -17,6 +17,10 @@
 //   thread's pumpAudioDiagnostics() reports them).
 // - The audio thread meters the output: peak / RMS / clipped samples, the
 //   per-voice level and the audio-thread load.
+// - The app loop does the reporting itself: runHeadlessApp's frame pump logs
+//   an off-main drop with no help from the test, and its exit flush logs
+//   what the rate limit still held back; AudioEngine::shutdown() flushes too,
+//   and clears the meters (no device, no output).
 // - tc_get_audio_state reports the same numbers over MCP, including the
 //   microphone (MicInput on the null backend: its device name while it runs).
 // - A reused SoundBuffer's getPath() follows its last fill: a file load sets
@@ -125,6 +129,34 @@ static Json callAudioState(const string& arguments) {
         return Json();
     }
 }
+
+// runHeadlessApp phase: an off-main drop in setup() must be logged by the
+// loop's own frame pump (the app only watches the log); on the way out one
+// more off-main drop, inside the rate-limit window, must be logged by the
+// loop's exit flush.
+static Sound* g_copy = nullptr;         // a streamed Sound's copy past maxPolyphony
+static string g_offMainLine;
+static size_t g_linesBefore = 0;
+static atomic<bool> g_pumpSeen{false};
+
+static void playCopyOffMain() {
+    thread worker([] { g_copy->play(); });
+    worker.join();
+}
+
+struct PumpApp : App {
+    int frames = 0;
+    void setup() override { playCopyOffMain(); }
+    void update() override {
+        ++frames;
+        if (!g_pumpSeen && countLogs(LogLevel::Warning, g_offMainLine) == g_linesBefore + 1) {
+            g_pumpSeen = true;
+            playCopyOffMain();   // held back by the rate limit: only the exit flush logs it
+            requestExit();
+        }
+        if (frames >= 400) requestExit();   // ~2 s: the pump never reported
+    }
+};
 
 int main() {
     // Device-less engine; set before anything opens a context.
@@ -337,9 +369,55 @@ int main() {
     }
     eager.stop();
 
-    // --- no running device ------------------------------------------------------
+    // --- the app loop pumps by itself, and flushes at exit ----------------------
+    {
+        Sound hs1;
+        check("loadStream() for the app-loop case", (bool)hs1.loadStream(wav, 1));
+        Sound hs2 = hs1;     // a copy: past the stream's maxPolyphony while hs1 plays
+        hs1.setLoop(true);   // still playing after the waits below
+        check("app-loop stream plays", hs1.play());
+        g_copy = &hs2;
+        waitReportInterval();   // a stream-limit line is due again
+        g_offMainLine = "1 play dropped since the last report: a SoundStream";
+        g_linesBefore = countLogs(LogLevel::Warning, g_offMainLine);
+        HeadlessSettings hs;
+        hs.setFps(200.0f);
+        runHeadlessApp<PumpApp>(hs);
+        check("app loop: the frame pump logged the off-main drop", g_pumpSeen.load());
+        check("app loop: the exit flush logged the held-back drop",
+              countLogs(LogLevel::Warning, g_offMainLine) == g_linesBefore + 2,
+              lastLog(LogLevel::Warning));
+        check("app loop: every log line came from the main thread", allLogsOnMainThread());
+        g_copy = nullptr;
+        hs1.stop();
+    }
+
+    // --- shutdown: flush what is held back, clear the meters --------------------
+    Sound busy1, busy2, extra;
+    busy1.loadTestTone(440.0f, 10.0f);
+    busy2.loadTestTone(550.0f, 10.0f);
+    extra.loadTestTone(660.0f, 10.0f);
+    busy1.setVolume(3.0f);
+    check("two voices fill the pool", busy1.play() && busy2.play());
+    check("the loud voice is metered", waitFor([&] { return engine.getStats().peak > 1.0f; }, 2000));
+    const string heldLine = "1 play dropped since the last report: every voice slot busy";
+    const size_t heldBefore = countLogs(LogLevel::Warning, heldLine);
+    check("a first drop (logged now) and a second (held back)", !extra.play() && !extra.play());
     engine.shutdown();
+    check("shutdown flushes the held-back drop", countLogs(LogLevel::Warning, heldLine) == heldBefore + 1,
+          lastLog(LogLevel::Warning));
     check("shutdown is logged through the logger", countLogs(LogLevel::Notice, "[AudioEngine] shutdown") == 1);
+    st = engine.getStats();
+    check("shutdown clears the meters",
+          st.peak == 0.0f && st.rms == 0.0f && st.load == 0.0f && st.loadMax == 0.0f,
+          to_string(st.peak));
+    voices = engine.getVoices();
+    check("voices left in their slots report level 0 after shutdown",
+          !voices.empty() && voices[0].level == 0.0f, to_string(voices.size()));
+    busy1.stop();
+    busy2.stop();
+
+    // --- no running device ------------------------------------------------------
     check("play() returns false with no running device", !eager.play());
     st = engine.getStats();
     check("not-running drop is counted", st.droppedNotRunning == 1);

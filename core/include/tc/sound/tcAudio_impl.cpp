@@ -104,7 +104,7 @@ struct AudioDiagnostics {
     std::atomic<float>    load{0.0f};
     std::atomic<float>    loadMax{0.0f};
 
-    // --- audio thread only: meter / load windows ---
+    // --- audio thread only (reset while no device runs): meter / load windows ---
     float    winPeak = 0.0f;
     double   winSumSq = 0.0;
     uint64_t winSamples = 0;     // frames * channels in the meter window
@@ -247,18 +247,38 @@ void AudioEngine::meterOutput(const float* buffer, int numFrames, int numChannel
     }
 }
 
-void AudioEngine::reportDiagnostics() {
+void AudioEngine::reportDiagnostics(bool force) {
     AudioDiagnostics& d = *diag_;
     const auto now = std::chrono::steady_clock::now();
 
     for (int r = 0; r < AudioDiagnostics::kDropReasons; ++r) {
         if (d.unreportedDrops[r].load(std::memory_order_relaxed) == 0) continue;
-        if (now - d.lastDropLog[r] < AudioDiagnostics::kReportInterval) continue;
+        if (!force && now - d.lastDropLog[r] < AudioDiagnostics::kReportInterval) continue;
         const uint64_t n = d.unreportedDrops[r].exchange(0, std::memory_order_relaxed);
         if (n == 0) continue;
         d.lastDropLog[r] = now;
         logWarning(dropModule(r)) << n << (n == 1 ? " play" : " plays")
                                   << " dropped since the last report: " << dropReasonText(r);
+    }
+}
+
+void AudioEngine::resetMeters() {
+    AudioDiagnostics& d = *diag_;
+    d.peak.store(0.0f, std::memory_order_relaxed);
+    d.rms.store(0.0f, std::memory_order_relaxed);
+    d.load.store(0.0f, std::memory_order_relaxed);
+    d.loadMax.store(0.0f, std::memory_order_relaxed);
+    d.winPeak = 0.0f;
+    d.winSumSq = 0.0;
+    d.winSamples = 0;
+    d.winFrames = 0;
+    d.loadBusy = 0.0;
+    d.loadAudio = 0.0;
+    d.loadWinMax = 0.0f;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& v : playingSounds_) {
+        if (v) v->level.store(0.0f, std::memory_order_relaxed);
     }
 }
 
@@ -313,6 +333,10 @@ namespace internal {
 
 void pumpAudioDiagnostics() {
     AudioEngine::getInstance().reportDiagnostics();
+}
+
+void flushAudioDiagnostics() {
+    AudioEngine::getInstance().reportDiagnostics(true);
 }
 
 AudioDeviceReport audioDeviceReport(bool enumerate) {
@@ -941,6 +965,10 @@ bool AudioEngine::init(const AudioSettings& settings) {
         initialized_ = false;
     }
 
+    // No device runs here: drop the previous device's meters (also when the
+    // init below fails, so a dead engine never reports old output).
+    resetMeters();
+
     // Commit settings to runtime fields BEFORE migration / device init so
     // anyone reading getSampleRate() during this window sees the new value.
     sampleRate_ = settings.sampleRate > 0 ? settings.sampleRate : DEFAULT_SAMPLE_RATE;
@@ -1196,6 +1224,13 @@ void AudioEngine::shutdown() {
         delete ctx;
         context_ = nullptr;
     }
+
+    // The audio thread is gone: its last meter values describe nothing now.
+    resetMeters();
+
+    // Log the drops still held back by the rate limit, so the exit path
+    // does not lose them. Main thread only, like every diagnostics line.
+    if (isMainThread()) reportDiagnostics(true);
 
     // Only a running engine announces its shutdown: the app's exit path
     // calls this unconditionally, also when audio was never used.
