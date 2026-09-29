@@ -112,7 +112,7 @@ bool VideoGrabber::setupPlatform() {
     height_ = requestedHeight_;
     deviceName_ = "Web Camera";
 
-    printf("VideoGrabber: setup requested (%dx%d) [Web]\n", width_, height_);
+    logNotice("VideoGrabber") << "setup requested (" << width_ << "x" << height_ << ") [Web]";
     return true;
 }
 
@@ -135,7 +135,7 @@ void VideoGrabber::closePlatform() {
         console.log('[VideoGrabber] Web: stopped');
     )JS");
 
-    printf("VideoGrabber: stopped [Web]\n");
+    logNotice("VideoGrabber") << "stopped [Web]";
 }
 
 void VideoGrabber::updatePlatform() {
