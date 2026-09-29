@@ -187,8 +187,11 @@ def blank(text):
 
 # Multi-character punctuators the walker must not split: `a += b` lexed as `+`,
 # `=` would read as an initializer (`operator+=` then hides every later body in
-# its class). Longest first, as the C++ lexer does.
-TOKEN_RE = re.compile(r"[A-Za-z_]\w*|\d[\w.']*|<<=|>>=|::|->|&&|\|\||==|!=|<=|>=|"
+# its class), and the second `<` of `operator<<` would open a template bracket
+# that never closes. Longest first, as the C++ lexer does. `>>` stays two `>`:
+# it closes two template argument lists (`vector<vector<int>>`), and a `>`
+# with no bracket open is ignored anyway.
+TOKEN_RE = re.compile(r"[A-Za-z_]\w*|\d[\w.']*|<<=|>>=|<<|::|->|&&|\|\||==|!=|<=|>=|"
                       r"\+=|-=|\*=|/=|%=|&=|\|=|\^=|\.\.\.|\S")
 
 

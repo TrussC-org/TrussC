@@ -7,6 +7,7 @@
 #pragma once
 
 #include <functional>
+#include <iosfwd>
 #include <string>
 #include <utility>
 #include <vector>
@@ -111,6 +112,18 @@ inline void multiLocal() {
     static auto fn = std::function<int(int, int)>(), fn2 = fn;  // expect: fx::multiLocal::fn fx::multiLocal::fn2
     (void)o; (void)p; (void)q; (void)r;
 }
+
+// --- A friend operator<< must not open a template bracket that hides what follows
+struct Streamable {
+    friend std::ostream& operator<<(std::ostream& os, const Streamable&) { return os; }
+    int& afterShiftLeft() { static int shl = 0; return shl; }             // expect: fx::Streamable::afterShiftLeft::shl
+    static inline int memberAfterShiftLeft = 0;                           // expect: fx::Streamable::memberAfterShiftLeft
+    friend std::istream& operator>>(std::istream& is, Streamable&) { return is; }
+    int& afterShiftRight() { static int shr = 0; return shr; }            // expect: fx::Streamable::afterShiftRight::shr
+    static inline int memberAfterShiftRight = 0;                          // expect: fx::Streamable::memberAfterShiftRight
+};
+inline std::ostream& operator<<(std::ostream& os, const Settings&) { static int freeShl = 0; (void)freeShl; return os; }  // expect: fx::operator::freeShl
+inline int& afterFreeShift() { static int afs = 0; return afs; }          // expect: fx::afterFreeShift::afs
 
 // --- Both sides of an #if
 #ifdef _WIN32
