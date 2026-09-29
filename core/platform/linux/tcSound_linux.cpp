@@ -71,20 +71,20 @@ private:
         pipeline_ = gst_parse_launch(pipelineStr.c_str(), &error);
 
         if (error) {
-            printf("SoundBuffer: GStreamer pipeline error: %s\n", error->message);
+            logError("SoundBuffer") << "GStreamer pipeline error: " << error->message;
             g_error_free(error);
             return false;
         }
 
         if (!pipeline_) {
-            printf("SoundBuffer: Failed to create GStreamer pipeline\n");
+            logError("SoundBuffer") << "failed to create the GStreamer pipeline";
             return false;
         }
 
         // Get appsink element
         GstElement* sink = gst_bin_get_by_name(GST_BIN(pipeline_), "sink");
         if (!sink) {
-            printf("SoundBuffer: Failed to get appsink element\n");
+            logError("SoundBuffer") << "failed to get the appsink element";
             cleanup();
             return false;
         }
@@ -114,7 +114,7 @@ private:
         // Start pipeline
         GstStateChangeReturn ret = gst_element_set_state(pipeline_, GST_STATE_PLAYING);
         if (ret == GST_STATE_CHANGE_FAILURE) {
-            printf("SoundBuffer: Failed to start GStreamer pipeline\n");
+            logError("SoundBuffer") << "failed to start the GStreamer pipeline";
             gst_object_unref(sink);
             cleanup();
             return false;
@@ -139,7 +139,7 @@ private:
                     if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_ERROR) {
                         GError* err = nullptr;
                         gst_message_parse_error(msg, &err, nullptr);
-                        printf("SoundBuffer: GStreamer error: %s\n", err->message);
+                        logError("SoundBuffer") << "GStreamer error: " << err->message;
                         g_error_free(err);
                     }
                     gst_message_unref(msg);
@@ -175,7 +175,7 @@ private:
         cleanup();
 
         if (allSamples.empty()) {
-            printf("SoundBuffer: No audio samples decoded\n");
+            logError("SoundBuffer") << "no audio samples decoded";
             return false;
         }
 
@@ -185,8 +185,9 @@ private:
         buffer.sampleRate = 44100;
         buffer.numSamples = buffer.samples.size() / buffer.channels;
 
-        printf("SoundBuffer: Loaded AAC (%d ch, %d Hz, %zu samples)\n",
-               buffer.channels, buffer.sampleRate, buffer.numSamples);
+        logVerbose("SoundBuffer") << "loaded AAC (" << buffer.channels << " ch, "
+                                  << buffer.sampleRate << " Hz, " << buffer.numSamples
+                                  << " samples)";
 
         return true;
     }

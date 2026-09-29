@@ -120,7 +120,7 @@ EM_JS(void, copyAacData, (float* outPtr, int totalSamples), {
 // SoundBuffer::loadAac - Web implementation (deferred loading)
 // -----------------------------------------------------------------------------
 LoadResult SoundBuffer::loadAac(const fs::path& path) {
-    printf("SoundBuffer: deferring AAC load: %s [Web]\n", path.c_str());
+    logVerbose("SoundBuffer") << "deferring AAC load: " << path.string() << " [Web]";
 
     // Save path for deferred loading (web paths are plain UTF-8 strings)
     deferredAacPath_ = path.string();
@@ -140,7 +140,7 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
 void SoundBuffer::ensureAacLoaded() {
     if (deferredAacPath_.empty()) return;
 
-    printf("SoundBuffer: loading AAC now: %s [Web]\n", deferredAacPath_.c_str());
+    logVerbose("SoundBuffer") << "loading AAC now: " << deferredAacPath_ << " [Web]";
 
     // Start async decode
     if (!decodeAacFile(deferredAacPath_.c_str(), nullptr, nullptr, nullptr, nullptr)) {
@@ -206,13 +206,15 @@ void SoundBuffer::ensureAacLoaded() {
             }
         }
 
-        printf("SoundBuffer: resampled %d Hz -> %d Hz (%d -> %zu samples)\n",
-               srcSampleRate, targetSampleRate, srcNumSamples, newNumSamples);
+        logVerbose("SoundBuffer") << "resampled " << srcSampleRate << " Hz -> "
+                                  << targetSampleRate << " Hz (" << srcNumSamples << " -> "
+                                  << newNumSamples << " samples)";
     }
 
-    printf("SoundBuffer: loaded AAC (%d ch, %d Hz, %zu samples, duration=%.2fs) [Web]\n",
-           channels, sampleRate, numSamples,
-           (float)numSamples / sampleRate);
+    logVerbose("SoundBuffer") << "loaded AAC (" << channels << " ch, " << sampleRate << " Hz, "
+                              << numSamples << " samples, duration="
+                              << (sampleRate > 0 ? (float)numSamples / sampleRate : 0.0f)
+                              << " s) [Web]";
 
     // Clear deferred path (loading complete)
     deferredAacPath_.clear();
