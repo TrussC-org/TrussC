@@ -41,7 +41,8 @@
 // frame: those whose producers run guest code (guest_deferred, which reaches
 // the App through `this`, and tc_get_status_image on the guest's getter) must
 // come back as an error, and a host tool's deferred reply must still answer.
-// After unload the guest tool must be gone from the server as well.
+// After unload the guest tool must be gone from the server as well, and so
+// must the browser origin guest code allowed (the host's stays).
 //
 // Settings and registries app code and the core loop share (#249): guest code
 // calls setFps(), redraw(), setTouchAsMouse(), the clip / fov setters,
@@ -296,6 +297,9 @@ static int runCycles(const std::string& guestPath, int port) {
         if (!(mcp::hasTool("guest_probe") && hasStatus("guest_status") && hasStatusImage("guest_image"))) {
             return fail(4, "guest MCP registrations not visible to the host");
         }
+        if (!mcp::detail::isAllowedOrigin(kGuestOrigin, port)) {
+            return fail(37, "the browser origin guest code allowed with mcp::allowOrigin() is not allowed");
+        }
 
         // Through the HTTP server, as a client sees the running app
         const uint64_t generation = (uint64_t)(uintptr_t)lib.mcpOwner;
@@ -517,6 +521,12 @@ static int runCycles(const std::string& guestPath, int port) {
             hasStatus("guest_status") || hasStatusImage("guest_image")) {
             return fail(5, "the destroyed guest's MCP registrations are still listed");
         }
+        if (mcp::detail::isAllowedOrigin(kGuestOrigin, port)) {
+            return fail(37, "the browser origin the destroyed guest allowed is still allowed");
+        }
+        if (!mcp::detail::isAllowedOrigin(kHostOrigin, port)) {
+            return fail(37, "unloading the guest removed a browser origin the host allowed");
+        }
         std::string callError;
         if (!callTool(port, "guest_probe", json::object(), &callError).is_discarded() ||
             callError.find("Tool not found") == std::string::npos) {
@@ -557,6 +567,9 @@ int main(int argc, char** argv) {
         }));
     // What TRUSSC_MCP=1 gives a running app: the standard tools + the server.
     mcp::registerInspectionTools();
+    // A browser origin the host allows: it must survive every unload, while
+    // the one each guest generation allows (tcApp()) goes with it.
+    mcp::allowOrigin(kHostOrigin);
     mcp::startHttpServer(0, "localhost");
     int port = 0;
     for (int i = 0; i < 500 && port <= 0; i++) {

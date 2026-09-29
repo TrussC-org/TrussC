@@ -548,8 +548,15 @@ std::string& mcpAuthToken();
 std::atomic<bool>& mcpLoopbackOnly();
 
 // Browser origins allowed besides the server's own (mcp::allowOrigin()).
-// Read on HTTP worker threads, written from app code: guarded.
-std::vector<std::string>& allowedOrigins();
+// Read on HTTP worker threads, written from app code: guarded. Each entry
+// carries its registrationOwner(), so a hot reload guest's origins go with
+// its other registrations (removeRegistrationsOwnedBy()); the same origin
+// allowed by two owners is two entries.
+struct AllowedOrigin {
+    std::string origin;
+    const void* owner = nullptr;
+};
+std::vector<AllowedOrigin>& allowedOrigins();
 std::mutex& allowedOriginsMutex();
 
 inline std::string asciiLower(std::string s) {
@@ -589,7 +596,7 @@ inline bool isAllowedOrigin(const std::string& origin, int port) {
     }
     std::lock_guard<std::mutex> lock(allowedOriginsMutex());
     for (const auto& a : allowedOrigins()) {
-        if (o == a) return true;
+        if (o == a.origin) return true;
     }
     return false;
 }
@@ -647,11 +654,12 @@ inline void allowOrigin(const std::string& origin) {
     std::string o = detail::asciiLower(detail::trimSpaces(origin));
     while (!o.empty() && o.back() == '/') o.pop_back();
     if (o.empty()) return;
+    const void* owner = detail::registrationOwner();
     std::lock_guard<std::mutex> lock(detail::allowedOriginsMutex());
     for (const auto& a : detail::allowedOrigins()) {
-        if (a == o) return;
+        if (a.origin == o && a.owner == owner) return;
     }
-    detail::allowedOrigins().push_back(o);
+    detail::allowedOrigins().push_back({o, owner});
 }
 
 // Start HTTP server.
@@ -845,6 +853,18 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
     if (!owner) return;
     Server::instance().removeOwnedBy(owner);
     for (auto& hook : ownerCleanupHooks()) hook(owner);
+#ifndef __EMSCRIPTEN__
+    {
+        // Browser origins this owner allowed (mcp::allowOrigin())
+        std::lock_guard<std::mutex> lock(allowedOriginsMutex());
+        auto& origins = allowedOrigins();
+        std::vector<AllowedOrigin> kept;
+        for (auto& a : origins) {
+            if (a.owner != owner) kept.push_back(std::move(a));
+        }
+        origins.swap(kept);
+    }
+#endif
     // Deferred replies whose producers run this owner's code: answer them
     // now, with an error, instead of running them at the next drain, after
     // the App they may reach has been deleted (a reload runs between

@@ -103,8 +103,8 @@ std::atomic<bool>& mcpLoopbackOnly() {
     return loopback;
 }
 
-std::vector<std::string>& allowedOrigins() {
-    static std::vector<std::string> origins;
+std::vector<AllowedOrigin>& allowedOrigins() {
+    static std::vector<AllowedOrigin> origins;
     return origins;
 }
 
