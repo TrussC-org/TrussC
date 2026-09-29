@@ -581,4 +581,14 @@ Logger& getLogger() {
     return logger;
 }
 
+namespace internal {
+// Declared in tcThread.h, which is included before tcLog.h and cannot log.
+void logThreadNotWaited() {
+    logWarning("Thread") << "destroyed while threadedFunction() was still running. "
+                            "Call waitForThread() in the subclass destructor: the base "
+                            "Thread destructor joins only after the subclass members "
+                            "are destroyed";
+}
+} // namespace internal
+
 } // namespace trussc

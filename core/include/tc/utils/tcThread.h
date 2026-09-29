@@ -29,21 +29,61 @@ namespace trussc {
 //       }
 //   };
 //
+// Destruction:
+//   A subclass must call waitForThread() in its OWN destructor:
+//
+//     ~MyThread() { waitForThread(); }   // stop, then join
+//
+//   The base destructor also stops and joins, but it runs after the subclass
+//   destructor, so the subclass members are already destroyed while
+//   threadedFunction() may still be using them. The base join only prevents
+//   std::terminate, and it logs a warning when it finds threadedFunction()
+//   still running. Calling only stopThread() (the ofThread exit() habit) does
+//   not wait either.
+//
 // Mutex usage:
 //   As documented, no custom wrappers provided.
 //   std::mutex and std::lock_guard are recommended.
 //
 // ---------------------------------------------------------------------------
 
+namespace internal {
+// Logs the warning for a Thread destroyed while threadedFunction() is still
+// running. Defined in tcGlobal.cpp: this header is included before tcLog.h
+// (tcEvent.h -> tcMainThread.h -> tcThread.h), so it cannot log by itself.
+void logThreadNotWaited();
+} // namespace internal
+
 class TC_PLATFORMS("macos,windows,linux,android,ios") Thread {
 public:
     Thread() : threadRunning_(false) {}
 
+    // Stops the thread and joins it, whether it is still running, was only
+    // sent stopThread(), or has already returned. This is a safety net only:
+    // see "Destruction" above.
     virtual ~Thread() {
-        // If thread is running, stop and wait
-        if (isThreadRunning()) {
-            stopThread();
-            waitForThread(false);
+        const bool joinable = thread_.joinable();
+        const bool fromOwnThread =
+            joinable && thread_.get_id() == std::this_thread::get_id();
+        // threadedFunction() has not returned, yet the subclass destructor has
+        // already run: the subclass did not wait.
+        const bool notWaited = joinable && !fromOwnThread && workerActive_;
+
+        stopThread();
+        if (notWaited) {
+            internal::logThreadNotWaited();
+        }
+        if (joinable) {
+            if (fromOwnThread) {
+                // Destroyed from inside threadedFunction(). Joining itself would
+                // throw resource_deadlock_would_occur, so detach, and tell the
+                // worker not to touch this object once threadedFunction()
+                // returns (see startThread()).
+                if (selfDestroyed_) *selfDestroyed_ = true;
+                thread_.detach();
+            } else {
+                thread_.join();
+            }
         }
     }
 
@@ -84,8 +124,17 @@ public:
         }
 
         threadRunning_ = true;
+        workerActive_ = true;
         thread_ = std::thread([this]() {
+            // Lives on this worker's stack, so it outlives the object if
+            // threadedFunction() destroys it (the destructor sets it).
+            bool destroyed = false;
+            selfDestroyed_ = &destroyed;
             threadedFunction();
+            if (destroyed) return;   // this object is gone: touch nothing
+            // Clear workerActive_ first: once isThreadRunning() reads false
+            // for a worker that returned, the destructor sees it as finished.
+            workerActive_ = false;
             threadRunning_ = false;
         });
     }
@@ -164,6 +213,12 @@ protected:
 private:
     std::thread thread_;
     std::atomic<bool> threadRunning_;
+    // True from startThread() until threadedFunction() returns. Unlike
+    // threadRunning_, stopThread() does not clear it.
+    std::atomic<bool> workerActive_{false};
+    // Set by the worker to a flag on its own stack. Only the destructor, when
+    // it runs on that same worker, writes through it.
+    bool* selfDestroyed_ = nullptr;
 };
 
 // ---------------------------------------------------------------------------
