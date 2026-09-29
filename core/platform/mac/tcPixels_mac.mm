@@ -1,6 +1,7 @@
 // =============================================================================
-// tcPixels_mac.mm - Platform-specific image loader using macOS ImageIO
-// Supports HEIC/HEIF, TIFF, JPEG 2000, and any format macOS can decode.
+// tcPixels_mac.mm - Platform-specific image loader using ImageIO
+// Supports HEIC/HEIF, TIFF, JPEG 2000, and any format the OS can decode.
+// Built on macOS and iOS (core/CMakeLists.txt adds it to the iOS sources).
 // =============================================================================
 
 #include "TrussC.h"

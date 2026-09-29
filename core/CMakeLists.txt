@@ -116,6 +116,8 @@ if(TC_PLATFORM_EMSCRIPTEN)
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/web/*.cpp)
 elseif(TC_PLATFORM_IOS)
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/ios/*.mm)
+    # Shared with macOS: ImageIO loader (HEIC, TIFF, ...), no AppKit in it
+    list(APPEND TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/mac/tcPixels_mac.mm)
 elseif(TC_PLATFORM_ANDROID)
     file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/android/*.cpp)
 elseif(TC_PLATFORM_MACOS)
@@ -212,6 +214,8 @@ elseif(TC_PLATFORM_IOS)
         "-framework MetalKit"
         "-framework QuartzCore"
         "-framework CoreGraphics"
+        "-framework CoreText"
+        "-framework ImageIO"
         "-framework AudioToolbox"
         "-framework AVFoundation"
         "-framework CoreMedia"
