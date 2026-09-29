@@ -39,6 +39,7 @@ api-reference.toml  ──────────►  prose      (symbol-id →
 |-----------------|--------|
 | `emit-forai.js` | injects the C++ API index into `../FOR_AI_ASSISTANT.md` (documented-only, overloads collapsed, enum values, category-grouped). |
 | `emit-of.js`    | the openFrameworks↔TrussC migration guide → `trussc.org/generated/of-mapping.json` + `../TrussC_vs_openFrameworks.md` §5. Grouping/notes from `of-mapping-config.js`. |
+| `emit-coverage.js` | the CI compile-and-link canary → `examples/tests/AllFeaturesExample/src/coverage_generated.cpp`: every documented public core function / method / field / constant / constructor referenced once (never run), with `TC_PLATFORMS` guards, so each CI platform links it against its own implementation. Re-run after an API change and commit the output. |
 | `../scripts/emit-web.js` | the web reference data → `trussc.org/generated/trussc-api.js` (full public surface, same shape the site consumes). Reads `reference-data.json` + `extras.json` (macros / keywords / constant values / example links) + `colors.json`. |
 
 The legacy `api-definition.yaml` and its `generate-docs.js` / `mine.js` are

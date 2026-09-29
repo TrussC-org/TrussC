@@ -1,10 +1,12 @@
 # Per-PR / per-push CI: the FAST lane. Every platform in parallel, each job
-# kept to what catches breakage cheaply — the core library + trusscli and the
-# behavioral tests (core, addon, hot reload) on desktop, AllFeaturesExample on
-# Android and web, one example on iOS. Target: about 10 minutes wall-clock
-# (the slowest job). Building every example on every platform (every addon
-# example, AllFeaturesExample on desktop, ...) lives in daily.yml, which runs
-# once a day on main and opens an issue on failure.
+# kept to what catches breakage cheaply: AllFeaturesExample on every platform
+# (desktop, Android, web, iOS), plus the core library + trusscli and the
+# behavioral tests (core, addon, hot reload) on desktop. AllFeaturesExample
+# references every documented public core API and the repo-contained bundled
+# addons without running them (its src/coverage.h), so each platform compiles
+# every call and links it against its own implementation. Target: about 10
+# minutes wall-clock (the slowest job). Building every example on every
+# platform lives in daily.yml, once a day on main, opening an issue on failure.
 name: Build
 
 on:
@@ -219,8 +221,14 @@ jobs:
             find . -name trusscli.exe
           fi
 
-      # Examples (AllFeaturesExample, every addon example) are built daily on
-      # desktop, in daily.yml. Here: the behavioral tests only.
+      # Compile-and-link canary: every documented core API + the repo-contained
+      # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every
+      # other example is built daily (daily.yml).
+      - name: Build AllFeaturesExample
+        shell: bash
+        run: |
+          chmod +x examples/build_all.py
+          ./examples/build_all.py --test-only --verbose
 
       # Behavioral test harnesses bundled with monorepo addons (addons/*/tests/):
       # built AND run (non-zero exit fails the job). The tests are small console
@@ -414,14 +422,13 @@ jobs:
         if: always()
         run: ccache -s || true
 
-  # Compile-only iOS gate: build one addon-free example against the device SDK
-  # with code signing disabled. Catches iOS platform-layer rot at compile time
-  # (the tcFileDialog attribute-order break sat undetected for weeks because
-  # nothing in CI compiled against the iOS SDK). Runtime behavior is still
-  # verified on a real device by hand.
-  # videoPlayerExample, not AllFeaturesExample: tcxLua's generated bindings
-  # reference the sync dialogs (unavailable on iOS) — the binding generator
-  # needs platform awareness before the full example can compile here.
+  # Compile-only iOS gate: AllFeaturesExample against the device SDK with code
+  # signing disabled — every documented core API compiled and linked for iOS
+  # (the tcFileDialog attribute-order break once sat undetected for weeks
+  # because nothing in CI compiled against the iOS SDK). Runtime behavior is
+  # still verified on a real device by hand. (It used to be videoPlayerExample:
+  # AllFeaturesExample linked tcxLua, whose generated bindings reference the
+  # sync dialogs that don't compile on iOS. tcxLua is no longer in it.)
   # No ccache: the Xcode generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER.
   build-ios:
     needs: changes
@@ -439,9 +446,9 @@ jobs:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
 
-      - name: Build videoPlayerExample (iOS device SDK, unsigned)
+      - name: Build AllFeaturesExample (iOS device SDK, unsigned)
         run: |
-          cd examples/video/videoPlayerExample
+          cd examples/tests/AllFeaturesExample
           cmake -B build-ios -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
