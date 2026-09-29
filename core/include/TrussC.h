@@ -1835,16 +1835,23 @@ namespace internal {
 // The timestamps re-base at the next frame, and each accumulator is seeded
 // with one interval: that frame runs one fixed update step / draws (the switch
 // doesn't cost a frame), and the new phase starts there. The measured delta
-// restarts too: the first update of a VSYNC / setFps() mode reports sokol's
-// frame-duration estimate, not the time since the last update of the previous
-// mode (an hour of EVENT_DRIVEN idle would otherwise reach every Node timer
-// at once). A changed update mode also ends the remaining old steps of a
-// fixed-Hz frame when the switch comes from inside update()
-// (runIndependentUpdates checks the timestamp flag).
+// restarts at the switch too: the first update of a VSYNC / setFps() mode
+// reports the time since the switch, not since the last update of the
+// previous mode (an hour of EVENT_DRIVEN idle would otherwise reach every
+// Node timer at once). Time after the switch still counts: a setFps() in
+// setup() followed by a 4 s load reports those 4 s, and so does the wait for
+// the first redraw() after a switch to EVENT_DRIVEN. (Before the very first
+// frame there is no baseline yet; that update uses sokol's estimate.) A
+// changed update mode also ends the remaining old steps of a fixed-Hz frame
+// when the switch comes from inside update() (runIndependentUpdates checks
+// the timestamp flag).
 inline void restartLoopTiming(bool update, bool draw) {
     if (update) {
         lastUpdateTimeInitialized = false;
-        mainWindowContext().mainUpdateCallTimeInitialized = false;
+        auto& wctx = mainWindowContext();
+        if (wctx.mainUpdateCallTimeInitialized) {
+            wctx.mainUpdateCallTime = std::chrono::steady_clock::now();
+        }
         updateAccumulator = (!updateSyncedToDraw && updateTargetFps > 0.0f)
             ? 1.0 / updateTargetFps : 0.0;
     }
@@ -2398,7 +2405,8 @@ namespace internal {
     // of the first one taking the whole gap (#228), and their nominal time on
     // the loop's timeline (stepTime) as the update time Node timers count
     // from, and whether this update is such a step. mainUpdateCallTime is
-    // kept current either way; a mode switch restarts it (restartLoopTiming).
+    // kept current either way; a mode switch moves it to the switch
+    // (restartLoopTiming).
     inline void beginMainUpdateCall(double fixedDelta = 0.0,
                                     std::chrono::steady_clock::time_point stepTime = {}) {
         auto& wctx = mainWindowContext();
@@ -2406,8 +2414,7 @@ namespace internal {
         if (fixedDelta > 0.0) {
             wctx.updateDeltaTime = fixedDelta;
         } else if (!wctx.mainUpdateCallTimeInitialized) {
-            // First frame, or right after a mode switch: sokol's estimate.
-            wctx.updateDeltaTime = sapp_frame_duration();
+            wctx.updateDeltaTime = sapp_frame_duration(); // first frame: sokol's estimate
         } else {
             wctx.updateDeltaTime = std::chrono::duration<double>(callNow - wctx.mainUpdateCallTime).count();
         }

@@ -937,10 +937,23 @@ static void testTimersCountFromCreation() {
 // ---------------------------------------------------------------------------
 // 6c. A mode switch restarts the measured delta (guard 4)
 // ---------------------------------------------------------------------------
-// After an hour of EVENT_DRIVEN update (no update runs), switching to
-// setFps(VSYNC) must not report the hour as the first dt: every Node timer
-// would count it at once. The first dt after a switch is sokol's frame
-// estimate (1/60 here, before sokol_app runs).
+// The first measured dt after a switch counts from the switch. After an hour
+// of EVENT_DRIVEN update (no update runs), switching to setFps(VSYNC) must
+// not report the hour: every Node timer would count it at once. Time after
+// the switch must still count: a load right after setFps() in setup(), the
+// wait for the first redraw() after switching to EVENT_DRIVEN, and the rest
+// of a frame whose independent update switched to a synced mode.
+// Timing-sensitive (real sleeps), with bounds taken from timestamps or lower
+// bounds only.
+struct SwitchingSetupNode : Node {
+    int fired = 0;
+    void setup() override {
+        setFps(60);                         // a real switch (from VSYNC)
+        callAfter(0.2, [this] { ++fired; });
+        sleepMs(300);                       // e.g. loading assets
+    }
+};
+
 static void testModeSwitchMeasuredDelta() {
     setFps(VSYNC);
     auto node = make_shared<TimerNode>();
@@ -963,7 +976,7 @@ static void testModeSwitchMeasuredDelta() {
     setFps(VSYNC);
     internal::runSyncedUpdate();
     const double dt = getDeltaTime();
-    checkf("mode switch: the first dt after an hour of EVENT_DRIVEN is about a frame (< 0.1 s)",
+    checkf("mode switch: the first dt after an hour of EVENT_DRIVEN counts from the switch (< 0.1 s)",
            dt >= 0.0 && dt < 0.1, dt);
     check("mode switch: ...so no timer fires early", fired == 0);
     sleepMs(20);
@@ -971,6 +984,59 @@ static void testModeSwitchMeasuredDelta() {
     checkf("mode switch: the next dt is measured again (>= 20 ms)",
            getDeltaTime() >= 0.0199 && getDeltaTime() < 5.0, getDeltaTime());
     node->cancelAllTimers();
+
+    // setFps() then a 300 ms load in setup() (inside the first update): the
+    // next update's dt covers the load, and callAfter(0.2) made after the
+    // switch fires on it.
+    {
+        g_treeRoot = make_shared<App>();
+        auto n = make_shared<SwitchingSetupNode>();
+        g_treeRoot->addChild(n);
+        internal::appUpdateFunc = treeUpdate;
+        internal::runSyncedUpdate();        // setup(): setFps(60), callAfter(0.2), 300 ms
+        internal::runSyncedUpdate();
+        const double dt2 = getDeltaTime();
+        checkf("mode switch: setFps() then a 300 ms load in setup(): the next dt covers the load",
+               dt2 >= 0.299, dt2);
+        check("mode switch: ...and callAfter(0.2) made after setFps() fires on that update", n->fired == 1);
+        g_treeRoot.reset();
+        internal::appUpdateFunc = timerLoopUpdate;
+        setFps(VSYNC);
+    }
+
+    // VSYNC -> setFps(EVENT_DRIVEN), then the first redraw() 50 ms later:
+    // its dt is the 50 ms wait.
+    internal::runSyncedUpdate();
+    setFps(EVENT_DRIVEN);
+    sleepMs(50);
+    internal::runSyncedUpdate();            // the redraw()'s update
+    checkf("mode switch: the first update after setFps(EVENT_DRIVEN) counts the wait (>= 50 ms)",
+           getDeltaTime() >= 0.0499, getDeltaTime());
+
+    // setFps() from inside an independent VSYNC update: the synced update of
+    // the same frame (runSyncedUpdate, as _frame_cb runs it) counts only the
+    // time since the switch, not a whole frame.
+    {
+        setIndependentFps(VSYNC, VSYNC);
+        internal::runIndependentUpdates(Clk::now());
+        Clk::time_point before;
+        bool switched = false;
+        g_loopDuring = [&] {
+            if (switched) return;
+            switched = true;
+            before = Clk::now();
+            setFps(VSYNC);
+        };
+        sleepMs(20);
+        internal::runIndependentUpdates(Clk::now());   // switches from inside update()
+        g_loopDuring = nullptr;
+        internal::runSyncedUpdate();
+        const double dt3 = getDeltaTime();
+        const double since = secsBetween(before, internal::getUpdateTime());
+        checkf("mode switch: setFps() inside update(): that frame's synced update counts only since the switch",
+               dt3 >= 0.0 && dt3 <= since + 1e-6, dt3);
+    }
+
     internal::appUpdateFunc = nullptr;
     g_loopNode = nullptr;
 }
