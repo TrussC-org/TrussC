@@ -91,7 +91,11 @@ public:
     Thread(const Thread&) = delete;
     Thread& operator=(const Thread&) = delete;
 
-    // Move allowed (but not while thread is running)
+    // Moving does not move the running thread: the new object gets none. A
+    // running thread can't follow a moved object in this inheritance design,
+    // so e.g. vector<MyThread> growth would silently stop every worker. Hold
+    // Thread subclasses via unique_ptr / shared_ptr instead.
+    [[deprecated("Moving a Thread does not move the running thread. Hold it via unique_ptr. Will be removed in v1.0.0")]]
     Thread(Thread&& other) noexcept : threadRunning_(false) {
         // Ensure source is not running
         if (other.isThreadRunning()) {
@@ -100,6 +104,7 @@ public:
         }
     }
 
+    [[deprecated("Moving a Thread does not move the running thread. Hold it via unique_ptr. Will be removed in v1.0.0")]]
     Thread& operator=(Thread&& other) noexcept {
         if (this != &other) {
             if (isThreadRunning()) {
