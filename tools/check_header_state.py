@@ -7,23 +7,31 @@ TrussC.lib; every header-inline function or variable is compiled again into
 the guest DLL, with its own copy of every function-local `static` and every
 `inline` variable (PE has no symbol interposition and no weak coalescing
 across modules). Linux (-rdynamic interposition) and macOS (dyld weak
-coalescing) share one instance, so a split only shows on Windows, and only at
-run time. State that must be one per process therefore lives non-inline in a
-.cpp (docs/ARCHITECTURE.md, "One instance per process").
+coalescing) give the guest the host's instance, but only of state the host
+contains too, i.e. state host code uses; state only guest code touches is the
+guest's own there as well (on Linux, a fresh copy per reloaded generation).
+So a split between host and guest shows only on Windows, and only at run
+time. State that must be one per process therefore lives non-inline in a .cpp
+(docs/ARCHITECTURE.md, "One instance per process").
 
 What is flagged, in core/include (vendored libraries excluded):
   - a `static` / `thread_local` local variable inside a function body
     (every function defined in a header is inline or a template)
   - an `inline` variable (namespace scope, or `static inline` in a class)
-  - a namespace-scope `static` variable, or a variable in an anonymous
-    namespace (one copy per translation unit, not even per module)
+  - a mutable namespace-scope `static` variable, or a mutable variable in an
+    anonymous namespace (one copy per translation unit, not even per module)
   - a class template's static data member defined in the header
     (`template <class T> int Reg<T>::count = 0;`) and a variable template
     (`template <class T> T zero = T();`): one instance per module, like an
     inline variable
 Every declarator of a declaration counts (`static int a = 0, b = 1;` is two
 findings). `constexpr` variables are not flagged: compile-time constants have
-no run-time state to split. Everything else must be listed in the allowlist
+no run-time state to split. Nor are `const` namespace-scope `static` and
+anonymous-namespace variables, any more than a plain namespace-scope `const`:
+all three have internal linkage, so every translation unit on every platform
+already has its own copy of the same constant, and hot reload changes nothing
+about that (tools/header_state_selftest.h pins it: notFlaggedNsStaticConst).
+Everything else must be listed in the allowlist
 (tools/header_state_allowlist.txt) with the reason a per-module copy is
 harmless, under one of the categories in CATEGORIES below. An allowlist entry
 that no longer matches anything fails too, so the list cannot go stale.
@@ -798,8 +806,9 @@ def main():
         print()
         print("Header-inline state is one instance PER MODULE on Windows: a hot reload")
         print("guest DLL gets its own copy, invisible to the host. State that must be one")
-        print("per process (singletons, registries, flags) belongs non-inline in a .cpp")
-        print("(see tcGlobal.cpp). If a per-module copy is harmless (a cache, immutable")
+        print("per process (singletons, registries, flags, caches of GPU objects nothing")
+        print("frees) belongs non-inline in a .cpp (see tcGlobal.cpp). If a per-module")
+        print("copy is harmless (a warn-once flag, a cache of derived data, immutable")
         print("data), add the entry to tools/header_state_allowlist.txt with the reason.")
         print("See docs/ARCHITECTURE.md, 'One instance per process'.")
         return 1

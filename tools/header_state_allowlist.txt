@@ -1,11 +1,14 @@
 # Header-inline state accepted by tools/check_header_state.py (CI).
 #
 # Each entry is a function-local static or an inline variable in core/include
-# that a hot reload guest on WINDOWS gets its own copy of: the guest is a DLL,
-# and a DLL compiles every header-inline function and variable into itself
-# (docs/ARCHITECTURE.md, "One instance per process"). Linux and macOS share one
-# copy between host and guest. A per-module copy of every entry below breaks
-# nothing, on Windows either.
+# that a hot reload guest can get its own copy of (docs/ARCHITECTURE.md, "One
+# instance per process"). On WINDOWS it always does: the guest is a DLL, and a
+# DLL compiles every header-inline function and variable into itself. Linux
+# and macOS give the guest the host's copy only when the host contains the
+# definition too, that is, when host code uses it. State that only guest code
+# touches is the guest's own there as well (on Linux, a fresh copy for every
+# reloaded generation). A per-module copy of every entry below breaks nothing,
+# on any platform.
 #
 # Format:  <header> <scope>::<name>   # <category>: <reason>
 #          <header> <scope>::*        # immutable: <reason>   (every immutable
