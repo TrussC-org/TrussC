@@ -45,8 +45,21 @@
 // the host must see each; guest code must in turn see what the host set
 // (pixelPerfect, the sokol_gl budget, the bitmap-font sampler, the window
 // context it is ticking), and node ids must keep counting across generations.
-// On Linux and macOS these hold either way; on Windows they fail if any of
-// that state is header-inline again.
+//
+// Process-wide singletons and GPU caches (#249): the AudioEngine, the screen
+// recorder, the async scheduler (and its owner numbering), the beep manager,
+// the console state, the PBR / point pipelines, and the FBO, IBL-bake and font
+// caches guest code reaches must be the host's instances. The GPU caches are
+// the costly ones: nothing frees what they hold, so a guest with its own copy
+// built a new set of sokol_gl contexts, shaders and atlases in the host's pools
+// every reload, and FBO drawing stopped after a few reloads. Guest code's
+// setBeepVolume() and mcp::alert() must reach the host (the alert over HTTP,
+// through tc_get_alerts), and work a guest worker thread queues with
+// runOnMainThread() must run when the host drains the main-thread queue.
+//
+// On Linux and macOS all of this holds either way, since the host uses (and so
+// contains) every definition checked here; on Windows it fails if any of that
+// state is header-inline again.
 //
 // Exit code: 0 = survived all cycles (including process exit), non-zero or a
 // crash = regression. The test itself never enters TC_RUN_APP: no sokol loop,
@@ -74,6 +87,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -270,6 +284,11 @@ static int runCycles(const std::string& guestPath, int port) {
         bitmapfont::internal::registry().clear();
         internal::overlayHoveredQuery() = nullptr;
         internal::overlayFocusedQuery() = nullptr;
+        setBeepVolume(0.5f);
+        {
+            std::lock_guard<std::mutex> lock(mcp::detail::alertMutex());
+            mcp::detail::alertQueue().clear();
+        }
         guest->writeSharedState();
         const FpsSettings fps = getFpsSettings();
         const bool overlaySeen = isOverlayHovered() && isOverlayFocused();
@@ -292,12 +311,22 @@ static int runCycles(const std::string& guestPath, int port) {
             return fail(19, "a glyph the guest registered is not in the host's registry");
         }
         if (!overlaySeen) return fail(20, "the overlay queries the guest installed are not seen by the host");
+        if (getBeepVolume() != 0.37f) return fail(27, "setBeepVolume() from the guest did not reach the host's beep manager");
+        json alerts = callTool(port, "tc_get_alerts", json::object());
+        bool alertSeen = false;
+        if (alerts.is_object() && alerts["alerts"].is_array()) {
+            for (auto& a : alerts["alerts"]) {
+                alertSeen |= a.is_object() && a.value("text", "") == "hotReloadLifecycle guest alert";
+            }
+        }
+        if (!alertSeen) return fail(28, "an mcp::alert() from the guest is not in the host's tc_get_alerts over HTTP");
         setFps(internal::VSYNC);
         setTouchAsMouse(true);
         setNearClip(0.0f);
         setFarClip(0.0f);
         setDefaultScreenFov(45.0f);
         setDataPathRoot("data");
+        setBeepVolume(0.5f);
         bitmapfont::internal::registry().clear();   // it points into the guest's image
 
         // And the other way: what guest code sees of state the host sets.
@@ -320,6 +349,45 @@ static int runCycles(const std::string& guestPath, int port) {
         if (!seen.fontSamplerReady) return fail(23, "the guest does not see the host's bitmap-font sampler");
         if (seen.windowContext != &secondary) {
             return fail(24, "the guest does not see the window context the host is ticking");
+        }
+
+        // One instance per process: the singletons and GPU caches guest code
+        // reaches must be the host's (none of these lookups touches the GPU).
+        const uint64_t ownerBefore = internal::AsyncScheduler::newOwner();
+        const GuestInstances in = guest->sharedInstances();
+        const uint64_t ownerAfter = internal::AsyncScheduler::newOwner();
+        const struct { const void* guest; const void* host; const char* what; } same[] = {
+            {in.audioEngine, &AudioEngine::getInstance(), "AudioEngine::getInstance()"},
+            {in.screenRecorder, &internal::globalScreenRecorder(), "screen recorder"},
+            {in.asyncScheduler, &internal::AsyncScheduler::get(), "AsyncScheduler"},
+            {in.beepManager, &internal::getManager(), "beep manager"},
+            {in.consoleRunning, &console::detail::isRunning(), "console state"},
+            {in.pbrPipeline, &internal::getPbrPipeline(), "PBR pipeline"},
+            {in.pointPipeline, &internal::getPointPipeline(), "point pipeline"},
+            {in.fboShared, &internal::fboSharedMap(), "FBO context cache (a new sokol_gl context per reload)"},
+            {in.fboSharedMip, &internal::fboSharedMipMap(), "FBO mipmap pipeline cache"},
+            {in.iblBake, &internal::iblBakeResources(), "IBL bake pipelines"},
+            {in.fontCache, &internal::SharedFontCache::getInstance(), "font atlas cache"},
+            {in.fontSamplers, &internal::fontSamplers(), "font samplers"},
+        };
+        for (const auto& s : same) {
+            if (s.guest != s.host) return fail(29, std::string("the guest has its own ") + s.what);
+        }
+        if (!(ownerBefore < in.asyncOwner && in.asyncOwner < ownerAfter)) {
+            return fail(30, "AsyncScheduler::newOwner() in the guest does not continue the host's sequence");
+        }
+
+        // Work a guest worker thread hands to runOnMainThread() runs when the
+        // host drains the main-thread queue (as _frame_cb does), not before.
+        std::atomic<int> ran{0};
+        guest->queueFromWorker(&ran);
+        const int ranOnWorker = ran.load();
+        internal::drainMainThreadQueue();
+        if (ranOnWorker != 0) {
+            return fail(31, "runOnMainThread() on a guest worker thread ran there: the guest's main thread id is not the host's");
+        }
+        if (ran.load() != 1) {
+            return fail(32, "work a guest worker thread queued with runOnMainThread() never reached the host's main-thread queue");
         }
 
         // Destruction + unload: listener removal churns the COW lists, and the
@@ -346,6 +414,10 @@ int main(int argc, char** argv) {
         settings.setSize(960, 600);
         return TC_RUN_APP(tcApp, settings);
     }
+
+    // Record the main thread id first, as _setup_cb does: isMainThread() and
+    // runOnMainThread() key off whichever thread asks first.
+    getMainThreadId();
 
     std::string guestPath = findGuestLibrary();
     if (guestPath.empty()) {

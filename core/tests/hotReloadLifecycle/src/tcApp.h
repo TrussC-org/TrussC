@@ -22,10 +22,12 @@ using namespace tc;
 // guest_deferred defers its reply the way screenshot tools do; the control
 // tools are registered from guest code the way apps do (in setup()).
 //
-// writeSharedState / readSharedState (tcApp.cpp) are guest code the cycles
-// call through the vtable: settings app code writes and the core loop reads,
-// and state the host sets that guest code reads, all of which a Windows guest
-// DLL used to keep its own copy of (#249).
+// writeSharedState / readSharedState / sharedInstances / queueFromWorker
+// (tcApp.cpp) are guest code the cycles call through the vtable: settings app
+// code writes and the core loop reads, state the host sets that guest code
+// reads, the process-wide singletons and GPU caches guest code reaches, and
+// work it queues for the main thread, all of which a Windows guest DLL used to
+// keep its own copy of (#249).
 //
 // setup/draw/exit (tcApp.cpp) only run in `--app` mode (see main.cpp); the
 // lifecycle cycles never call them. They use tcxImGui so the guest target is
@@ -38,6 +40,24 @@ struct GuestView {
     int sglMaxVertices = 0;
     bool fontSamplerReady = false;
     const void* windowContext = nullptr;
+};
+
+// Where guest code finds the one-per-process singletons and GPU caches
+// (sharedInstances): each must be the host's instance, not one of its own.
+struct GuestInstances {
+    const void* audioEngine = nullptr;
+    const void* screenRecorder = nullptr;
+    const void* asyncScheduler = nullptr;
+    const void* beepManager = nullptr;
+    const void* consoleRunning = nullptr;
+    const void* pbrPipeline = nullptr;
+    const void* pointPipeline = nullptr;
+    const void* fboShared = nullptr;
+    const void* fboSharedMip = nullptr;
+    const void* iblBake = nullptr;
+    const void* fontCache = nullptr;
+    const void* fontSamplers = nullptr;
+    uint64_t asyncOwner = 0;   // a fresh AsyncScheduler owner token
 };
 
 class tcApp : public App {
@@ -70,6 +90,9 @@ public:
     // guest's code.
     virtual void writeSharedState();
     virtual GuestView readSharedState();
+    virtual GuestInstances sharedInstances();
+    // runOnMainThread(++*ran) from a worker thread of the guest's own.
+    virtual void queueFromWorker(std::atomic<int>* ran);
 
 private:
     EventListener updateListener_;

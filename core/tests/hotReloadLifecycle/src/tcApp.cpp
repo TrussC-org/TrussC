@@ -40,6 +40,8 @@ void tcApp::writeSharedState() {
     setFarClip(750.0f);
     setDefaultScreenFov(30.0f);
     setDataPathRoot("guest-data-root");
+    setBeepVolume(0.37f);
+    mcp::alert("hotReloadLifecycle guest alert");
     static const uint8_t box[13] = {0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
                                     0x81, 0x81, 0x81, 0x81, 0x81, 0xFF};
     tc::bitmapfont::registerGlyph({0xE000, box, tc::bitmapfont::Width::Halfwidth});
@@ -58,4 +60,31 @@ GuestView tcApp::readSharedState() {
     v.fontSamplerReady = tc::internal::bitmapFontAtlas().initialized;
     v.windowContext = &tc::internal::currentWindowContext();
     return v;
+}
+
+// The singletons and GPU caches guest code reaches through their accessors.
+// None of these calls touches the GPU: the caches are only looked up.
+GuestInstances tcApp::sharedInstances() {
+    GuestInstances g;
+    g.audioEngine = &AudioEngine::getInstance();
+    g.screenRecorder = &tc::internal::globalScreenRecorder();
+    g.asyncScheduler = &tc::internal::AsyncScheduler::get();
+    g.beepManager = &tc::internal::getManager();
+    g.consoleRunning = &tc::console::detail::isRunning();
+    g.pbrPipeline = &tc::internal::getPbrPipeline();
+    g.pointPipeline = &tc::internal::getPointPipeline();
+    g.fboShared = &tc::internal::fboSharedMap();
+    g.fboSharedMip = &tc::internal::fboSharedMipMap();
+    g.iblBake = &tc::internal::iblBakeResources();
+    g.fontCache = &tc::internal::SharedFontCache::getInstance();
+    g.fontSamplers = &tc::internal::fontSamplers();
+    g.asyncOwner = tc::internal::AsyncScheduler::newOwner();
+    return g;
+}
+
+// Work a guest worker thread (a network or timer callback, say) hands to the
+// main thread: it must land in the queue the host's frame loop drains.
+void tcApp::queueFromWorker(std::atomic<int>* ran) {
+    std::thread worker([ran] { runOnMainThread([ran] { ++*ran; }); });
+    worker.join();
 }
