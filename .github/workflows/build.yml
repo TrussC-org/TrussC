@@ -1,3 +1,10 @@
+# Per-PR / per-push CI: the FAST lane. Every platform in parallel, each job
+# kept to what catches breakage cheaply — the core library + trusscli and the
+# behavioral tests (core, addon, hot reload) on desktop, AllFeaturesExample on
+# Android and web, one example on iOS. Target: about 10 minutes wall-clock
+# (the slowest job). Building every example on every platform (every addon
+# example, AllFeaturesExample on desktop, ...) lives in daily.yml, which runs
+# once a day on main and opens an issue on failure.
 name: Build
 
 on:
@@ -21,8 +28,8 @@ env:
 jobs:
   # Path-based change detector. Emits docs_only=true when EVERY file in the diff
   # is documentation (any *.md, or anything under docs/ — prose + doc tooling).
-  # The heavy build jobs gate on this so a docs-only change skips the ~20min
-  # compile matrix while the cheap reference-check still runs. Conservative:
+  # The build jobs gate on this so a docs-only change skips the compile
+  # matrix while the cheap reference-check still runs. Conservative:
   # anything that isn't clearly a doc (and every non-diff event, e.g.
   # workflow_dispatch) counts as code and builds everything.
   changes:
@@ -89,7 +96,7 @@ jobs:
   build:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 180
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -212,26 +219,17 @@ jobs:
             find . -name trusscli.exe
           fi
 
-      - name: Build AllFeaturesExample
-        shell: bash
-        run: |
-          chmod +x examples/build_all.py
-          ./examples/build_all.py --test-only --verbose
-
-      # Per-addon dependency compile coverage: the first example of every bundled
-      # addon. Catches breakage in addons (and their fetched third-party deps)
-      # that AllFeaturesExample doesn't link. The exhaustive every-example sweep
-      # lives in full-sweep.yml (weekly).
-      - name: Build one example per addon
-        shell: bash
-        run: ./examples/build_all.py --one-per-addon --verbose
+      # Examples (AllFeaturesExample, every addon example) are built daily on
+      # desktop, in daily.yml. Here: the behavioral tests only.
 
       # Behavioral test harnesses bundled with monorepo addons (addons/*/tests/):
       # built AND run (non-zero exit fails the job). The tests are small console
       # projects. No-op when none exist.
       - name: Build & run addon tests
         shell: bash
-        run: ./examples/build_all.py --addon-tests-only --verbose
+        run: |
+          chmod +x examples/build_all.py
+          ./examples/build_all.py --addon-tests-only --verbose
 
       # Behavioral regression tests for the core (core/tests/*/): built AND run
       # on every build (small headless console projects, non-zero exit fails).
@@ -256,7 +254,7 @@ jobs:
   build-android:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 60
+    timeout-minutes: 30
     runs-on: ubuntu-latest
 
     steps:
@@ -348,7 +346,7 @@ jobs:
   build-web:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 120
+    timeout-minutes: 30
     runs-on: ubuntu-latest
 
     steps:
@@ -406,14 +404,11 @@ jobs:
           sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
           ./tools/build_linux.sh
 
+      # Every addon example (web) is built daily (daily.yml).
       - name: Build AllFeaturesExample (Web)
         run: |
           chmod +x examples/build_all.py
           ./examples/build_all.py --web-only --test-only --verbose
-
-      # See the build job: per-addon dependency compile coverage.
-      - name: Build one example per addon (Web)
-        run: ./examples/build_all.py --web-only --one-per-addon --verbose
 
       - name: Compiler cache stats
         if: always()
