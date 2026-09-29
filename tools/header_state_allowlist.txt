@@ -14,7 +14,12 @@
 # The category must be one of these four (the checker rejects anything else):
 #
 #   harmless       a per-module copy breaks nothing: a warn-once flag, a cache
-#                  of derived data, a counter only one side uses
+#                  of derived data, a counter only one side uses. NOT a cache
+#                  of GPU objects that nothing frees (sokol_gl contexts,
+#                  shaders, pipelines, samplers, font atlases): every reloaded
+#                  generation would build and keep a new set in the host's
+#                  sokol pools, and sokol_gl has 4 context slots, sokol_gfx
+#                  32 shader slots.
 #   immutable      const data, the same in every copy
 #   host-only      only code compiled into the host touches it (the core loop
 #                  in TrussC.h, which the host's main.cpp instantiates, and the
@@ -89,7 +94,6 @@ core/include/tcNode.h trussc::Node::nextTimerId_               # harmless: timer
 
 # --- tc/3d
 core/include/tc/3d/tcEnvironment.h trussc::Environment::isIosWeb::cached                 # harmless: cached platform probe
-core/include/tc/3d/tcEnvironment.h trussc::Environment::bake::r                          # harmless: cache of IBL bake pipelines; a Windows guest builds its own (per generation)
 core/include/tc/3d/tcEnvironment.h trussc::Environment::bakeFromEquirectTexture::warned  # harmless: warn-once flag
 
 # --- tc/app
@@ -104,18 +108,12 @@ core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::g_host  # host-only: t
 core/include/tc/app/tcWindow.h trussc::internal::attachedApps     # harmless: double-attach misuse guard, per binary is enough (see its comment)
 
 # --- tc/gpu
-core/include/tc/gpu/tcFbo.h trussc::Fbo::sharedMap::map               # harmless: cache of per-format FBO pipelines; a Windows guest builds its own (per generation)
-core/include/tc/gpu/tcFbo.h trussc::Fbo::sharedMipMap::map            # harmless: as sharedMap
 core/include/tc/gpu/tcFbo.h trussc::Fbo::ensureSharedMip::quadVerts   # immutable: vertex data
 
 # --- tc/graphics
 core/include/tc/graphics/tcClipSpace.h trussc::internal::clipZOverrideForTests::v     # harmless: test hook for headless tests
 core/include/tc/graphics/tcClipSpace.h trussc::internal::toBackendClip::zeroToOne     # immutable: constant matrix
-core/include/tc/graphics/tcFont.h trussc::internal::SharedFontCache::getInstance::instance  # harmless: cache of font atlases for the Font objects of the same module; a Windows guest builds its own (per generation)
 core/include/tc/graphics/tcFont.h trussc::Font::defaultOversample_    # harmless: set and read by the code that loads fonts (the guest's own)
-core/include/tc/graphics/tcFont.h trussc::Font::samplerSharp_         # harmless: lazily created shared sampler; a Windows guest creates its own
-core/include/tc/graphics/tcFont.h trussc::Font::samplerMipped_        # harmless: as samplerSharp_
-core/include/tc/graphics/tcFont.h trussc::Font::resourcesInitialized_ # harmless: as samplerSharp_
 core/include/tc/graphics/tcRenderTarget.h trussc::internal::pipelineOwnerCtx::m  # harmless: debug-build assertion bookkeeping; a module only checks pipelines it built itself
 core/include/tc/graphics/tcVertexWriter.h trussc::internal::sglWriter     # harmless: stateless writer object
 core/include/tc/graphics/tcVertexWriter.h trussc::internal::shaderWriter  # harmless: per-draw scratch, filled and flushed (begin() to end()) inside one function

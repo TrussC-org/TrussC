@@ -714,6 +714,36 @@ PointPipeline& getPointPipeline() {
     return instance;
 }
 
+// GPU caches whose contents nothing destroys (sokol_gl contexts, shaders,
+// pipelines, samplers, font atlases). With a copy per module, every hot reload
+// guest generation built and kept a new set in the host's sokol pools: FBO
+// drawing stopped once sokol_gl's 4 context slots ran out, IBL bakes once the
+// 32 shader slots did, and old generations' font atlases stayed resident.
+std::unordered_map<uint64_t, FboSharedResources>& fboSharedMap() {
+    static std::unordered_map<uint64_t, FboSharedResources> map;
+    return map;
+}
+
+std::unordered_map<uint64_t, FboSharedMipResources>& fboSharedMipMap() {
+    static std::unordered_map<uint64_t, FboSharedMipResources> map;
+    return map;
+}
+
+IblBakeResources& iblBakeResources() {
+    static IblBakeResources resources;
+    return resources;
+}
+
+SharedFontCache& SharedFontCache::getInstance() {
+    static SharedFontCache instance;
+    return instance;
+}
+
+FontSamplers& fontSamplers() {
+    static FontSamplers samplers;
+    return samplers;
+}
+
 } // namespace internal
 
 // ---------------------------------------------------------------------------

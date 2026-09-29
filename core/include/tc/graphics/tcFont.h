@@ -937,12 +937,11 @@ private:
 // ---------------------------------------------------------------------------
 class SharedFontCache {
 public:
-    // A cache for the Font objects of the same module: harmless per module (a
-    // Windows hot reload guest builds its own, once per generation).
-    static SharedFontCache& getInstance() {
-        static SharedFontCache instance;
-        return instance;
-    }
+    // One cache per process, defined in tcGlobal.cpp. It keeps every atlas it
+    // holds until a Font reloads at another key. Header-inline, each hot reload
+    // guest generation filled a cache of its own, and the atlases of every old
+    // generation stayed resident, since a guest library is never unloaded (#249).
+    static SharedFontCache& getInstance();
 
     // Get cached font (returns nullptr if not cached)
     std::shared_ptr<FontAtlasManager> get(const FontCacheKey& key) {
@@ -1027,6 +1026,16 @@ private:
     SharedFontCache() = default;
     std::unordered_map<FontCacheKey, std::shared_ptr<FontAtlasManager>, FontCacheKeyHash> cache_;
 };
+
+// The samplers every Font draws with (see Font::initResources). One pair per
+// process, defined in tcGlobal.cpp, like the cache above: nothing destroys
+// them, so a copy per module made a new pair for each hot reload generation.
+struct FontSamplers {
+    sg_sampler sharp = {};    // max_lod 0 (1:1 and above)
+    sg_sampler mipped = {};   // full chain (minified)
+    bool initialized = false;
+};
+FontSamplers& fontSamplers();
 
 } // namespace internal
 
@@ -1147,10 +1156,8 @@ public:
         int physicalSize = (int)(size * dpiScale_ + 0.5f);
         logicalSize_ = size;
 
-        // Create sampler and pipeline if not yet
-        if (!resourcesInitialized_) {
-            initResources();
-        }
+        // Create the shared samplers if not yet
+        initResources();
 
         // Resolve input to a concrete path (file / URL). A font NAME
         // ("HiraginoSans-W3") is a valid relative fs::path, so both spellings
@@ -2460,7 +2467,7 @@ public:
 
     // Get shared sampler (for debug atlas rendering). Returns the mip-0-pinned
     // one: a debug view of the atlas wants to show the texels as stored.
-    sg_sampler getSampler() { initResources(); return samplerSharp_; }
+    sg_sampler getSampler() { initResources(); return internal::fontSamplers().sharp; }
 
     size_t getLoadedGlyphCount() const {
         return atlasManager_ ? atlasManager_->getLoadedGlyphCount() : 0;
@@ -2491,11 +2498,8 @@ private:
 
     // Shared GPU resources. The TTF draw path loads the active per-target 2D
     // fill pipeline (internal::activeFill2D()) at draw time, so the font class
-    // only needs its own sampler here. Lazily created: harmless per module (a
-    // Windows hot reload guest creates its own).
-    static inline sg_sampler samplerSharp_ = {};    // max_lod 0 (1:1 and above)
-    static inline sg_sampler samplerMipped_ = {};   // full chain (minified)
-    static inline bool resourcesInitialized_ = false;
+    // only needs its own samplers: internal::fontSamplers(), one pair per
+    // process, lazily created by initResources().
 
     // Minified text wants the mip chain; everything sharper wants the
     // oversampled mip 0. The quantity that decides it is texels per screen
@@ -2519,15 +2523,16 @@ private:
         const float scale = getDefaultContext().getScale();
         const float texelsPerPixel = (scale > 0.0f) ? (oversample / scale)
                                                     : (float)oversample;
-        if (texelsPerPixel <= 2.0f) return samplerSharp_;
+        if (texelsPerPixel <= 2.0f) return internal::fontSamplers().sharp;
 
         // First draw below the bilinear-safe rate is what pays for the chain.
         atlasManager_->requestMipmaps();
-        return samplerMipped_;
+        return internal::fontSamplers().mipped;
     }
 
     void initResources() {
-        if (resourcesInitialized_) return;
+        internal::FontSamplers& samplers = internal::fontSamplers();
+        if (samplers.initialized) return;
 
         // Two samplers, picked per draw by the effective scale (see
         // pickSampler). Trilinear on both: without mipmap_filter sokol defaults
@@ -2541,7 +2546,7 @@ private:
         smp_desc.mipmap_filter = SG_FILTER_LINEAR;
         smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
         smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
-        samplerMipped_ = sg_make_sampler(&smp_desc);
+        samplers.mipped = sg_make_sampler(&smp_desc);
 
         // Pinned to mip 0. An NxN atlas is N times denser than the screen, so
         // even a 1:1 draw computes LOD log2(N) and would read a mip that throws
@@ -2553,9 +2558,9 @@ private:
         // silently asks for the whole chain. A small epsilon reads as an
         // explicit value and still floors to level 0 under trilinear.
         smp_desc.max_lod = 0.01f;
-        samplerSharp_ = sg_make_sampler(&smp_desc);
+        samplers.sharp = sg_make_sampler(&smp_desc);
 
-        resourcesInitialized_ = true;
+        samplers.initialized = true;
     }
 
     // UTF-8 decode (simple version)
