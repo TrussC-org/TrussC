@@ -4,7 +4,8 @@
 # that a hot reload guest on WINDOWS gets its own copy of: the guest is a DLL,
 # and a DLL compiles every header-inline function and variable into itself
 # (docs/ARCHITECTURE.md, "One instance per process"). Linux and macOS share one
-# copy between host and guest, so nothing below misbehaves there.
+# copy between host and guest. A per-module copy of every entry below breaks
+# nothing, on Windows either.
 #
 # Format:  <header> <scope>::<name>   # <category>: <reason>
 #
@@ -15,51 +16,23 @@
 #                  in TrussC.h, which the host's main.cpp instantiates, and the
 #                  .cpp files of TrussC.lib); a guest's copy is never used
 #   no-hot-reload  only on a path hot reload never takes (Android, headless)
-#   known split    a Windows guest reads or writes its own copy, so the feature
-#                  misbehaves in a Windows hot reload guest. Not fixed yet (a
-#                  follow-up to #249). Do not add entries of this kind: define
-#                  new state in a .cpp instead.
 #
-# New state that must be one per process (a singleton, a registry, a flag the
-# host and app code both touch) does not belong here: define it non-inline in a
-# .cpp (tcGlobal.cpp or a sibling) and declare an accessor in the header.
+# State that must be one per process (a singleton, a registry, a setting app
+# code writes and the core loop reads) does not belong here: define it
+# non-inline in a .cpp (tcGlobal.cpp or a sibling) and declare an accessor in
+# the header.
 
-# --- TrussC.h: bitmap font atlas (drawn by RenderContext in tcRenderContext.cpp)
-core/include/TrussC.h trussc::internal::fontTexture            # known split: host-only for drawBitmapString (RenderContext, tcRenderContext.cpp), but the inline drawBitmapStringHighlight() also builds the atlas, so a Windows guest calling it creates a second, unused atlas texture
-core/include/TrussC.h trussc::internal::fontView               # known split: as fontTexture
-core/include/TrussC.h trussc::internal::fontSampler            # known split: as fontTexture
-core/include/TrussC.h trussc::internal::fontInitialized        # known split: as fontTexture
-core/include/TrussC.h trussc::internal::fontAtlasInitialized   # known split: as fontTexture
-core/include/TrussC.h trussc::internal::fontAtlasRows          # known split: as fontTexture
-core/include/TrussC.h trussc::internal::fontAtlasVersion       # known split: as fontTexture
-core/include/TrussC.h trussc::internal::fontAtlasUploadFrame   # known split: as fontTexture
+# --- TrussC.h: bitmap font atlas
 core/include/TrussC.h trussc::ensureFontAtlas::warned          # harmless: warn-once flag
 
 # --- TrussC.h: window / projection settings
-core/include/TrussC.h trussc::internal::pixelPerfectMode       # known split: set by the host from WindowSettings; inline readers in guest code (setWindowSize, App::setSize, setupScreenFov) see false, so pixelPerfect apps size and project wrongly in a Windows guest
-core/include/TrussC.h trussc::internal::defaultScreenFov       # known split: setDefaultScreenFov() from a Windows guest only reaches its own copy (the host's frame start and the host's Fbo::begin do not see it)
-core/include/TrussC.h trussc::internal::nearClipOverride       # known split: setNearClip() from a Windows guest only reaches its own copy
-core/include/TrussC.h trussc::internal::farClipOverride        # known split: setFarClip() from a Windows guest only reaches its own copy
 core/include/TrussC.h trussc::internal::windowDecorated        # host-only: set by the launcher, applied in _setup_cb
 core/include/TrussC.h trussc::internal::warnIfSecondaryWindowControl::warned  # harmless: warn-once flag
 
 # --- TrussC.h: sokol_gl / GPU budgets
-core/include/TrussC.h trussc::internal::sglMaxVertices         # known split: grown by the host (resizeSgl, tcGlobal.cpp); an Fbo created by a Windows guest sizes its sokol_gl context from the guest's copy (the default budget)
-core/include/TrussC.h trussc::internal::sglMaxCommands         # known split: as sglMaxVertices
-core/include/TrussC.h trussc::internal::sglPendingResize       # host-only: frame loop + resizeSgl (tcGlobal.cpp)
 core/include/TrussC.h trussc::internal::gpuUniformBufferReserve  # host-only: launcher -> setup() (tcGlobal.cpp)
 
 # --- TrussC.h: loop timing
-core/include/TrussC.h trussc::internal::updateTargetFps        # known split: setFps() / setIndependentFps() from a Windows guest (usually in setup()) only reach its own copy; the host's loop keeps its rate
-core/include/TrussC.h trussc::internal::drawTargetFps          # known split: as updateTargetFps
-core/include/TrussC.h trussc::internal::updateSyncedToDraw     # known split: as updateTargetFps
-core/include/TrussC.h trussc::internal::redrawCount            # known split: redraw() from a Windows guest only reaches its own copy, so an event-driven loop never redraws on request
-core/include/TrussC.h trussc::internal::lastUpdateTime         # host-only: frame loop
-core/include/TrussC.h trussc::internal::lastUpdateTimeInitialized  # host-only: frame loop
-core/include/TrussC.h trussc::internal::updateAccumulator      # known split: frame loop state, also reset by setFps() / setIndependentFps() (see updateTargetFps)
-core/include/TrussC.h trussc::internal::lastDrawTime           # host-only: frame loop
-core/include/TrussC.h trussc::internal::lastDrawTimeInitialized  # host-only: frame loop
-core/include/TrussC.h trussc::internal::drawAccumulator        # known split: as updateAccumulator
 core/include/TrussC.h trussc::internal::updateFrameCount       # host-only: advanced by the host's loop, read through getFrameCount() / getUpdateCount() (tcGlobal.cpp)
 core/include/TrussC.h trussc::internal::startTime              # host-only: getElapsedTime() (tcGlobal.cpp)
 core/include/TrussC.h trussc::internal::startTimeInitialized   # host-only: getElapsedTime() (tcGlobal.cpp)
@@ -68,7 +41,6 @@ core/include/TrussC.h trussc::setIndependentFps::warned        # harmless: warn-
 core/include/TrussC.h trussc::redraw::warned                   # harmless: warn-once flag
 
 # --- TrussC.h: input / launcher wiring
-core/include/TrussC.h trussc::internal::touchAsMouse           # known split: setTouchAsMouse() from a Windows guest only reaches its own copy; the host's event callback keeps the default
 core/include/TrussC.h trussc::internal::touchPressedListener   # host-only: installed by the launcher
 core/include/TrussC.h trussc::internal::touchMovedListener     # host-only: installed by the launcher
 core/include/TrussC.h trussc::internal::touchReleasedListener  # host-only: installed by the launcher
@@ -97,18 +69,12 @@ core/include/TrussC.h trussc::internal::textureCount           # harmless: as no
 core/include/TrussC.h trussc::internal::fboCount               # harmless: as nodeCount
 
 # --- tcBitmapFont.h
-core/include/tcBitmapFont.h trussc::bitmapfont::internal::registry         # known split: registerGlyph() / updateGlyph() from a Windows guest fill its own registry; the atlas the host bakes never shows those glyphs
-core/include/tcBitmapFont.h trussc::bitmapfont::internal::nextFreeCell     # known split: as registry
-core/include/tcBitmapFont.h trussc::bitmapfont::internal::registryVersion  # known split: as registry
 core/include/tcBitmapFont.h trussc::bitmapfont::asciiGlyph::ASCII          # immutable: glyph table
 
 # --- tcMath.h
 core/include/tcMath.h trussc::internal::getRandomEngine::engine  # harmless: thread_local RNG; guest code seeds and draws from the same copy
 
 # --- tcNode.h
-core/include/tcNode.h trussc::internal::overlayHoveredQuery    # known split: tcxImGui (guest code) installs it in its own copy; the host's App::handleUpdate -> updateHoverState reads the host's (null), so nodes under an ImGui panel still get hovered in a Windows guest
-core/include/tcNode.h trussc::internal::overlayFocusedQuery    # known split: as overlayHoveredQuery
-core/include/tcNode.h trussc::Node::nextInstanceId_            # harmless: ids only need to be unique among live nodes, and guest code creates (nearly) all of them from its own counter
 core/include/tcNode.h trussc::Node::nextTimerId_               # harmless: timer ids are only looked up in their own node's list
 
 # --- tc/3d
@@ -126,7 +92,6 @@ core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::load::lo
 core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::create::generation  # host-only: the hot reload host itself
 core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::g_host  # host-only: the hot reload host itself (a guest's copy is constructed, never used)
 core/include/tc/app/tcWindow.h trussc::internal::attachedApps     # harmless: double-attach misuse guard, per binary is enough (see its comment)
-core/include/tc/app/tcWindowContext.h trussc::internal::currentWindowCtx  # known split: stays null in a Windows guest, so guest draw calls made during a SECONDARY window's tick target the main window's context (single-window apps are unaffected; see its comment)
 
 # --- tc/gpu
 core/include/tc/gpu/tcFbo.h trussc::Fbo::sharedMap::map               # harmless: cache of per-format FBO pipelines; a Windows guest builds its own (per generation)
@@ -154,6 +119,3 @@ core/include/tc/utils/tcTypeName.h trussc::typeName::cache            # harmless
 core/include/tc/utils/tcTypeName.h trussc::typeName::mutex            # harmless: guards its module's cache
 core/include/tc/utils/tcTypeName.h trussc::shortTypeName::cache       # harmless: demangle cache
 core/include/tc/utils/tcTypeName.h trussc::shortTypeName::mutex       # harmless: guards its module's cache
-core/include/tc/utils/tcUtils.h trussc::internal::dataPathRoot         # known split: setDataPathRoot() from a Windows guest only reaches its own copy; host-side code (e.g. tc_start_recording's relative paths) keeps the default root
-core/include/tc/utils/tcUtils.h trussc::internal::dataPathRootUserSet  # known split: as dataPathRoot
-core/include/tc/utils/tcUtils.h trussc::internal::dataPathRootProbed   # harmless: lazy probe of the default root, same result in every copy

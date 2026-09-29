@@ -29,3 +29,33 @@ void tcApp::draw() {
 void tcApp::exit() {
     imguiShutdown();
 }
+
+// Settings app code writes (usually in setup()) that the core loop, the event
+// callback, the atlas baker, ... read on the host side.
+void tcApp::writeSharedState() {
+    setFps(37.0f);
+    redraw(3);
+    setTouchAsMouse(false);
+    setNearClip(0.25f);
+    setFarClip(750.0f);
+    setDefaultScreenFov(30.0f);
+    setDataPathRoot("guest-data-root");
+    static const uint8_t box[13] = {0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
+                                    0x81, 0x81, 0x81, 0x81, 0x81, 0xFF};
+    tc::bitmapfont::registerGlyph({0xE000, box, tc::bitmapfont::Width::Halfwidth});
+    // What tcxImGui installs (guest code) for the host's node-tree hover
+    tc::internal::overlayHoveredQuery() = []() { return true; };
+    tc::internal::overlayFocusedQuery() = []() { return true; };
+}
+
+// State the host sets (launcher settings, the sokol_gl budget it grows, the
+// bitmap-font sampler it creates, the secondary window it is ticking), as the
+// guest's inline readers see it.
+GuestView tcApp::readSharedState() {
+    GuestView v;
+    v.pixelPerfect = tc::internal::pixelPerfectMode();
+    v.sglMaxVertices = tc::internal::sglBudget().maxVertices;
+    v.fontSamplerReady = tc::internal::bitmapFontAtlas().initialized;
+    v.windowContext = &tc::internal::currentWindowContext();
+    return v;
+}

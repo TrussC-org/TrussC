@@ -84,8 +84,8 @@ void windowTick(sapp_window swin, void* user) {
         ctx.lastUpdateCallTime = callNow;
     }
 
-    auto* prev = internal::currentWindowCtx;
-    internal::currentWindowCtx = &ctx;
+    auto* prev = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &ctx;
 
     // Per-window frame count (Fix 3): advance this window's own tick counter so
     // getFrameCount()/getUpdateCount() report it while this context is active.
@@ -122,7 +122,7 @@ void windowTick(sapp_window swin, void* user) {
     internal::drainPendingScreenshots();
 
     sgl_set_context(sgl_default_context());
-    internal::currentWindowCtx = prev;
+    internal::currentWindowCtx() = prev;
 }
 
 // --- events: map sapp_event onto CoreEvents / App hooks / tree dispatch ----
@@ -130,8 +130,8 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
     trussc::Window* win = static_cast<trussc::Window*>(user);
     if (!win) return;
     auto& ctx = win->context();
-    auto* prev = internal::currentWindowCtx;
-    internal::currentWindowCtx = &ctx;
+    auto* prev = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &ctx;
 
     // Raw event pass-through (same hook addons use on the main window)
     win->events().rawEvent.notify(*ev);
@@ -254,7 +254,7 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
             break;
     }
 
-    internal::currentWindowCtx = prev;
+    internal::currentWindowCtx() = prev;
 }
 
 void windowClosed(sapp_window swin, void* user) {

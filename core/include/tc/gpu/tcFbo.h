@@ -605,6 +605,8 @@ private:
         return ((uint64_t)sampleCount << 32) | (uint64_t)format;
     }
 
+    // Caches of per-format sokol_gl contexts / pipelines: harmless per module (a
+    // Windows hot reload guest builds its own, once per generation).
     static std::unordered_map<uint64_t, SharedResources>& sharedMap() {
         static std::unordered_map<uint64_t, SharedResources> map;
         return map;
@@ -622,8 +624,8 @@ private:
 
         // Create sgl context (match main context buffer sizes)
         sgl_context_desc_t ctx_desc = {};
-        ctx_desc.max_vertices = internal::sglMaxVertices;
-        ctx_desc.max_commands = internal::sglMaxCommands;
+        ctx_desc.max_vertices = internal::sglBudget().maxVertices;
+        ctx_desc.max_commands = internal::sglBudget().maxCommands;
         ctx_desc.color_format = sgFormat;
         ctx_desc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
         ctx_desc.sample_count = sampleCount;
@@ -655,6 +657,8 @@ private:
         bool initialized = false;
     };
 
+    // Cache of per-format mipmap pipelines: harmless per module, like
+    // sharedMap().
     static std::unordered_map<uint64_t, SharedMipResources>& sharedMipMap() {
         static std::unordered_map<uint64_t, SharedMipResources> map;
         return map;
@@ -674,7 +678,7 @@ private:
         // bilinear sample of the previous mip is enough to produce a 2x2
         // box-filtered destination level. textureLod() in the shader pins
         // the source level, so a single pipeline handles every level.
-        static const float quadVerts[] = {
+        static const float quadVerts[] = {  // immutable
             // x,     y,    u,    v
             -1.0f, -1.0f, 0.0f, 0.0f,
              1.0f, -1.0f, 1.0f, 0.0f,
@@ -869,7 +873,7 @@ private:
         // Setup screen projection using defaultScreenFov (like main screen).
         // pickable=false: geometry drawn into an offscreen target must not be
         // pickable from main-screen clicks (see tcCameraContext.h).
-        internal::setupScreenFovWithSize(internal::defaultScreenFov, (float)width_, (float)height_, 0.0f, 0.0f, false);
+        internal::setupScreenFovWithSize(internal::defaultScreenFov(), (float)width_, (float)height_, 0.0f, 0.0f, false);
 
         active_ = true;
         internal::currentWindowContext().inFboPass = true;

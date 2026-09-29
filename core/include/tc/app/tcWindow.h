@@ -288,7 +288,7 @@ inline Window* App::getWindow() const {
 inline void App::setSize(float w, float h) {
     int width = static_cast<int>(w), height = static_cast<int>(h);
     if (Window* win = getWindow()) {
-        if (internal::pixelPerfectMode) {
+        if (internal::pixelPerfectMode()) {
             float s = win->context().dpiScale > 0.0f ? win->context().dpiScale : 1.0f;
             width = static_cast<int>(width / s);
             height = static_cast<int>(height / s);
@@ -300,7 +300,7 @@ inline void App::setSize(float w, float h) {
         RectNode::setSize(w, h);   // attached to no window: nothing to resize
         return;
     }
-    if (internal::pixelPerfectMode) {
+    if (internal::pixelPerfectMode()) {
         float scale = sapp_dpi_scale();
         width = static_cast<int>(width / scale);
         height = static_cast<int>(height / scale);

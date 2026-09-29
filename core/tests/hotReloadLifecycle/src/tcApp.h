@@ -22,10 +22,24 @@ using namespace tc;
 // guest_deferred defers its reply the way screenshot tools do; the control
 // tools are registered from guest code the way apps do (in setup()).
 //
+// writeSharedState / readSharedState (tcApp.cpp) are guest code the cycles
+// call through the vtable: settings app code writes and the core loop reads,
+// and state the host sets that guest code reads, all of which a Windows guest
+// DLL used to keep its own copy of (#249).
+//
 // setup/draw/exit (tcApp.cpp) only run in `--app` mode (see main.cpp); the
 // lifecycle cycles never call them. They use tcxImGui so the guest target is
 // checked for addon include directories and for linking the addon archive.
 // =============================================================================
+
+// What guest code sees of state the host set (readSharedState).
+struct GuestView {
+    bool pixelPerfect = false;
+    int sglMaxVertices = 0;
+    bool fontSamplerReady = false;
+    const void* windowContext = nullptr;
+};
+
 class tcApp : public App {
 public:
     tcApp() {
@@ -51,6 +65,11 @@ public:
     void setup() override;
     void draw() override;
     void exit() override;
+
+    // Defined in tcApp.cpp (guest only), virtual so the host's calls run the
+    // guest's code.
+    virtual void writeSharedState();
+    virtual GuestView readSharedState();
 
 private:
     EventListener updateListener_;

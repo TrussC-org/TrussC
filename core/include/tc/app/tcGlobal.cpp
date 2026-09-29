@@ -70,8 +70,8 @@ void setup() {
     sgl_desc_t sgldesc = {};
     sgldesc.logger.func = slog_func;
     sgldesc.pipeline_pool_size = 256;
-    sgldesc.max_vertices = internal::sglMaxVertices;
-    sgldesc.max_commands = internal::sglMaxCommands;
+    sgldesc.max_vertices = internal::sglBudget().maxVertices;
+    sgldesc.max_commands = internal::sglBudget().maxCommands;
     sgldesc.allocator.alloc_fn = smemtrack_alloc;
     sgldesc.allocator.free_fn = smemtrack_free;
     sgl_setup(&sgldesc);
@@ -85,16 +85,17 @@ void setup() {
     // allocated lazily on first drawBitmapString call (see ensureFontAtlas in
     // TrussC.h) and grown tier-by-tier as new codepoint ranges are used.
     // Headless apps that never call drawBitmapString pay 0 KB for the atlas.
-    if (!internal::fontInitialized) {
+    auto& fontAtlas = internal::bitmapFontAtlas();
+    if (!fontAtlas.initialized) {
         // Sampler (nearest neighbor, pixel perfect)
         sg_sampler_desc smp_desc = {};
         smp_desc.min_filter = SG_FILTER_NEAREST;
         smp_desc.mag_filter = SG_FILTER_NEAREST;
         smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
         smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
-        internal::fontSampler = sg_make_sampler(&smp_desc);
+        fontAtlas.sampler = sg_make_sampler(&smp_desc);
 
-        internal::fontInitialized = true;
+        fontAtlas.initialized = true;
     }
 
     // The 3D / blend-mode / premultiplied / clear pipelines are no longer created
@@ -125,15 +126,16 @@ void cleanup() {
     // to release individually here.
 
     // Release font resources
-    if (internal::fontInitialized) {
-        sg_destroy_sampler(internal::fontSampler);
-        if (internal::fontAtlasInitialized) {
-            sg_destroy_view(internal::fontView);
-            sg_destroy_image(internal::fontTexture);
-            internal::fontAtlasInitialized = false;
-            internal::fontAtlasRows = 0;
+    auto& fontAtlas = internal::bitmapFontAtlas();
+    if (fontAtlas.initialized) {
+        sg_destroy_sampler(fontAtlas.sampler);
+        if (fontAtlas.atlasInitialized) {
+            sg_destroy_view(fontAtlas.view);
+            sg_destroy_image(fontAtlas.texture);
+            fontAtlas.atlasInitialized = false;
+            fontAtlas.rows = 0;
         }
-        internal::fontInitialized = false;
+        fontAtlas.initialized = false;
     }
     sgl_shutdown();
     sg_shutdown();
@@ -162,8 +164,9 @@ sg_shader sglPremultShader() {
 }
 
 void resizeSgl(int newMaxVertices, int newMaxCommands) {
-    logNotice("sokol_gl") << "Resizing: vertices " << sglMaxVertices
-        << " -> " << newMaxVertices << ", commands " << sglMaxCommands
+    auto& budget = sglBudget();
+    logNotice("sokol_gl") << "Resizing: vertices " << budget.maxVertices
+        << " -> " << newMaxVertices << ", commands " << budget.maxCommands
         << " -> " << newMaxCommands;
 
     // 1. Shutdown and re-init sokol_gl with larger buffers. sgl_shutdown()
@@ -172,8 +175,8 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     //    Font texture/sampler/view are sg resources — they survive sgl_shutdown.
     sgl_shutdown();
 
-    sglMaxVertices = newMaxVertices;
-    sglMaxCommands = newMaxCommands;
+    budget.maxVertices = newMaxVertices;
+    budget.maxCommands = newMaxCommands;
 
     sgl_desc_t sgldesc = {};
     sgldesc.logger.func = slog_func;
@@ -208,7 +211,7 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     // by sgl_shutdown but is NOT rebuilt here — FBOs surviving an sgl buffer resize
     // is a pre-existing limitation, out of scope for this refactor.
 
-    sglPendingResize = 0;
+    budget.pendingResize = 0;
 }
 } // namespace internal
 
@@ -396,12 +399,13 @@ void present() {
         }
     }
     if (err.vertices_full || err.commands_full) {
-        int newVerts = internal::sglMaxVertices * 4;
-        if (newVerts > internal::sglPendingResize) {
-            internal::sglPendingResize = newVerts;
+        auto& budget = internal::sglBudget();
+        int newVerts = budget.maxVertices * 4;
+        if (newVerts > budget.pendingResize) {
+            budget.pendingResize = newVerts;
             logNotice("sokol_gl") << "Vertex buffer overflow detected ("
-                << internal::sglMaxVertices << " vertices, "
-                << internal::sglMaxCommands << " commands). "
+                << budget.maxVertices << " vertices, "
+                << budget.maxCommands << " commands). "
                 << "Will resize to " << newVerts << " next frame.";
         }
     }
@@ -711,5 +715,127 @@ PointPipeline& getPointPipeline() {
 }
 
 } // namespace internal
+
+// ---------------------------------------------------------------------------
+// Settings and registries that app code and host code share (#249): the main
+// loop's rate and redraw requests, the projection defaults, the sokol_gl
+// budget, touch-as-mouse, the data path root, the bitmap font atlas and its
+// glyph registry, the overlay queries, the node id source and the current
+// window context. Each used to be an inline variable in its header, so a
+// Windows hot reload guest's setFps(), redraw(), setDataPathRoot(),
+// registerGlyph(), ... wrote a copy the host never read, and the guest never
+// saw what the host set.
+//
+// Plain data (trivially destructible, constant-initialized) is a function-local
+// static. Objects with a destructor are leaked on purpose: code running in
+// exit-time destructors (an App saving its settings under getDataPath(), say)
+// may reach them after a function-local static would already be destroyed,
+// which the inline variables they replace, built before any app global, never
+// were.
+// ---------------------------------------------------------------------------
+namespace internal {
+
+MainLoopState& mainLoop() {
+    static MainLoopState state;
+    return state;
+}
+
+SglBudget& sglBudget() {
+    static SglBudget budget;
+    return budget;
+}
+
+BitmapFontAtlas& bitmapFontAtlas() {
+    static BitmapFontAtlas atlas;
+    return atlas;
+}
+
+bool& pixelPerfectMode() {
+    static bool mode = false;
+    return mode;
+}
+
+float& defaultScreenFov() {
+    static float fovDeg = 45.0f;
+    return fovDeg;
+}
+
+float& nearClipOverride() {
+    static float dist = 0.0f;
+    return dist;
+}
+
+float& farClipOverride() {
+    static float dist = 0.0f;
+    return dist;
+}
+
+bool& touchAsMouse() {
+    static bool enabled = true;
+    return enabled;
+}
+
+DataPathState& dataPathState() {
+    static DataPathState* state = [] {
+        auto* s = new DataPathState();
+#ifdef __APPLE__
+        s->root = "../../../data";
+#else
+        s->root = "data";
+#endif
+        return s;
+    }();
+    return *state;
+}
+
+std::function<bool()>& overlayHoveredQuery() {
+    static auto* query = new std::function<bool()>();
+    return *query;
+}
+
+std::function<bool()>& overlayFocusedQuery() {
+    static auto* query = new std::function<bool()>();
+    return *query;
+}
+
+uint64_t nextNodeInstanceId() {
+    static std::atomic<uint64_t> next{0};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+namespace {
+WindowContext* currentWindowCtxStorage = nullptr;
+} // anonymous namespace
+
+WindowContext*& currentWindowCtx() {
+    return currentWindowCtxStorage;
+}
+
+WindowContext& currentWindowContext() {
+    return currentWindowCtxStorage ? *currentWindowCtxStorage : mainWindowContext();
+}
+
+} // namespace internal
+
+namespace bitmapfont {
+namespace internal {
+
+std::vector<StoredGlyph>& registry() {
+    static auto* glyphs = new std::vector<StoredGlyph>();
+    return *glyphs;
+}
+
+uint16_t& nextFreeCell() {
+    static uint16_t cell = FIRST_REGISTERED_CELL;
+    return cell;
+}
+
+uint64_t& registryVersion() {
+    static uint64_t version = 0;
+    return version;
+}
+
+} // namespace internal
+} // namespace bitmapfont
 
 } // namespace trussc

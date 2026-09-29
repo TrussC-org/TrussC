@@ -39,6 +39,15 @@
 // inject into the host's input dispatch. After unload the guest tool must be
 // gone from the server as well.
 //
+// Settings and registries app code and the core loop share (#249): guest code
+// calls setFps(), redraw(), setTouchAsMouse(), the clip / fov setters,
+// setDataPathRoot() and registerGlyph() and installs the overlay queries, and
+// the host must see each; guest code must in turn see what the host set
+// (pixelPerfect, the sokol_gl budget, the bitmap-font sampler, the window
+// context it is ticking), and node ids must keep counting across generations.
+// On Linux and macOS these hold either way; on Windows they fail if any of
+// that state is header-inline again.
+//
 // Exit code: 0 = survived all cycles (including process exit), non-zero or a
 // crash = regression. The test itself never enters TC_RUN_APP: no sokol loop,
 // no GPU, no file watcher, no cmake rebuild — CI-safe on every desktop
@@ -181,6 +190,7 @@ static int runCycles(const std::string& guestPath, int port) {
     };
 
     const int kCycles = 5;
+    uint64_t prevAppId = 0;
     for (int i = 1; i <= kCycles; ++i) {
         GuestLibrary lib;
         auto fail = [&](int code, const std::string& what) {
@@ -193,6 +203,13 @@ static int runCycles(const std::string& guestPath, int port) {
         // AudioEngine singleton, listener registration on host-owned Events.
         App* app = lib.create();
         if (!app) return fail(3, "create failed");
+        // Node ids are unique per process: a new generation's nodes (its App
+        // first) must not count from 0 again, as a Windows guest DLL's own
+        // counter did.
+        if (i > 1 && app->getInstanceId() <= prevAppId) {
+            return fail(26, "the guest's node ids restarted instead of continuing the process-wide sequence");
+        }
+        prevAppId = app->getInstanceId();
         if (!(mcp::hasTool("guest_probe") && hasStatus("guest_status") && hasStatusImage("guest_image"))) {
             return fail(4, "guest MCP registrations not visible to the host");
         }
@@ -226,6 +243,71 @@ static int runCycles(const std::string& guestPath, int port) {
         callTool(port, "tc_key_release", json{{"key", 65}});
         if (pressed.is_discarded() || g_hostKeyPresses.load() != pressesBefore + 1) {
             return fail(12, "the guest-registered tc_key_press did not reach the host's key dispatch");
+        }
+
+        // Settings and registries shared by app code and the core loop (#249).
+        // The host resets them first, so each generation must write its own.
+        auto* guest = static_cast<tcApp*>(app);
+        setFps(internal::VSYNC);
+        internal::mainLoop().redrawCount = 0;
+        setTouchAsMouse(true);
+        setNearClip(0.0f);
+        setFarClip(0.0f);
+        setDefaultScreenFov(45.0f);
+        setDataPathRoot("data");
+        bitmapfont::internal::registry().clear();
+        internal::overlayHoveredQuery() = nullptr;
+        internal::overlayFocusedQuery() = nullptr;
+        guest->writeSharedState();
+        const FpsSettings fps = getFpsSettings();
+        const bool overlaySeen = isOverlayHovered() && isOverlayFocused();
+        // Drop the guest's queries before its App goes (its code stays mapped,
+        // but the host should not call into a destroyed generation).
+        internal::overlayHoveredQuery() = nullptr;
+        internal::overlayFocusedQuery() = nullptr;
+        if (fps.updateFps != 37.0f || fps.drawFps != 37.0f || !fps.synced) {
+            return fail(14, "setFps() from the guest did not reach the host's loop");
+        }
+        if (internal::mainLoop().redrawCount != 3) return fail(15, "redraw() from the guest did not reach the host's loop");
+        if (getTouchAsMouse()) return fail(16, "setTouchAsMouse() from the guest did not reach the host");
+        if (getNearClip() != 0.25f || getFarClip() != 750.0f || getDefaultScreenFov() != 30.0f) {
+            return fail(17, "setNearClip / setFarClip / setDefaultScreenFov from the guest did not reach the host");
+        }
+        if (getDataPathRoot() != fs::path("guest-data-root")) {
+            return fail(18, "setDataPathRoot() from the guest did not reach the host");
+        }
+        if (!bitmapfont::findRegistered(0xE000)) {
+            return fail(19, "a glyph the guest registered is not in the host's registry");
+        }
+        if (!overlaySeen) return fail(20, "the overlay queries the guest installed are not seen by the host");
+        setFps(internal::VSYNC);
+        setTouchAsMouse(true);
+        setNearClip(0.0f);
+        setFarClip(0.0f);
+        setDefaultScreenFov(45.0f);
+        setDataPathRoot("data");
+        bitmapfont::internal::registry().clear();   // it points into the guest's image
+
+        // And the other way: what guest code sees of state the host sets.
+        internal::WindowContext secondary;
+        secondary.isMain = false;
+        const int grownBudget = internal::sglBudget().maxVertices * 2;
+        const int savedBudget = internal::sglBudget().maxVertices;
+        internal::pixelPerfectMode() = true;
+        internal::sglBudget().maxVertices = grownBudget;
+        internal::bitmapFontAtlas().initialized = true;   // flag only; no GPU here
+        internal::WindowContext* prevCtx = internal::currentWindowCtx();
+        internal::currentWindowCtx() = &secondary;
+        const GuestView seen = guest->readSharedState();
+        internal::currentWindowCtx() = prevCtx;
+        internal::pixelPerfectMode() = false;
+        internal::sglBudget().maxVertices = savedBudget;
+        internal::bitmapFontAtlas().initialized = false;
+        if (!seen.pixelPerfect) return fail(21, "the guest does not see the host's pixelPerfect mode");
+        if (seen.sglMaxVertices != grownBudget) return fail(22, "the guest does not see the host's sokol_gl budget");
+        if (!seen.fontSamplerReady) return fail(23, "the guest does not see the host's bitmap-font sampler");
+        if (seen.windowContext != &secondary) {
+            return fail(24, "the guest does not see the window context the host is ticking");
         }
 
         // Destruction + unload: listener removal churns the COW lists, and the
