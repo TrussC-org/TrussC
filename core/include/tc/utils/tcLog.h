@@ -278,6 +278,15 @@ public:
         return *this;
     }
 
+    // fs::path is written as UTF-8 text, without quotes. The std::ostream
+    // inserter goes through path::string(), which on Windows converts to the
+    // active code page and throws for characters it cannot represent, and
+    // it quotes the path (std::quoted).
+    LogStream& operator<<(const fs::path& path) {
+        stream_ << pathToUtf8(path);
+        return *this;
+    }
+
     // Support for manipulators like std::endl
     LogStream& operator<<(std::ostream& (*manip)(std::ostream&)) {
         manip(stream_);

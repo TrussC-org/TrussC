@@ -14807,6 +14807,14 @@ description.ja = "XML 文字列を Xml オブジェクトにパース"
 description.ko = "XML 문자열을 Xml 객체로 파싱"
 related = ["Xml", "loadXml"]
 
+["pathToUtf8"]
+category = "file"
+keywords = ["utf-8", "encoding", "unicode", "string", "japanese", "windows", "code page"]
+description.en = "Convert a path to a UTF-8 std::string, the same on every platform. Use it instead of path.string(), which on Windows converts to the process code page and can throw for characters outside it."
+description.ja = "パスを UTF-8 の std::string に変換する（全プラットフォームで同じ）。path.string() の代わりに使う。path.string() は Windows ではプロセスのコードページに変換し、そこにない文字で例外を投げることがある"
+description.ko = "경로를 UTF-8 std::string으로 변환 (모든 플랫폼에서 동일). path.string() 대신 사용한다. path.string()은 Windows에서 프로세스 코드 페이지로 변환하며, 거기에 없는 문자에서 예외를 던질 수 있다"
+related = ["utf8ToPath", "getFileName", "joinPath"]
+
 ["popMatrix"]
 category = "transform"
 keywords = ["restore", "transform", "stack", "ofpopmatrix"]
@@ -16144,6 +16152,14 @@ description.en = "Unbind a custom cursor image, restoring the system default"
 description.ja = "カスタムカーソル画像を解除し、システムデフォルトに戻す"
 description.ko = "커스텀 커서 이미지를 해제하고 시스템 기본값으로 복원"
 related = ["Cursor", "bindCursorImage", "setCursor"]
+
+["utf8ToPath"]
+category = "file"
+keywords = ["utf-8", "encoding", "unicode", "string", "japanese", "windows", "code page"]
+description.en = "Convert a UTF-8 string to fs::path, decoding it as UTF-8 on every platform. fs::path(std::string) on Windows decodes in the process code page, which is UTF-8 only in apps built with TrussC's Windows manifest (Windows 10 1903 or later)."
+description.ja = "UTF-8 文字列を fs::path に変換する（全プラットフォームで UTF-8 として解釈）。Windows の fs::path(std::string) はプロセスのコードページで解釈し、それが UTF-8 になるのは TrussC の Windows マニフェスト入りでビルドしたアプリ（Windows 10 1903 以降）だけ"
+description.ko = "UTF-8 문자열을 fs::path로 변환 (모든 플랫폼에서 UTF-8로 해석). Windows의 fs::path(std::string)는 프로세스 코드 페이지로 해석하며, 그것이 UTF-8인 것은 TrussC의 Windows 매니페스트로 빌드한 앱(Windows 10 1903 이상)뿐이다"
+related = ["pathToUtf8", "getDataPath"]
 
 ["vertex"]
 category = "graphics_shapes"

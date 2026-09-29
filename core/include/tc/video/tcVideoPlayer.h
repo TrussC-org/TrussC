@@ -59,8 +59,9 @@ public:
         }
 
         // Resolve relative paths via getDataPath; URLs pass through untouched
-        // (the web backend streams straight from them)
-        const std::string pathStr = path.string();
+        // (the web backend streams straight from them). UTF-8, not
+        // path.string(): that throws on Windows for names outside the code page.
+        const std::string pathStr = pathToUtf8(path);
         bool isUrl = pathStr.rfind("http://", 0) == 0 || pathStr.rfind("https://", 0) == 0;
         fs::path resolvedPath = isUrl ? path : getDataPath(path);
 

@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// tcFileIO.h - fs::path <-> C-library boundary helpers (internal)
+// tcFileIO.h - fs::path <-> UTF-8 conversion and C-library boundary helpers
 // =============================================================================
 //
 // TrussC carries file paths as fs::path end to end. C libraries (stb,
@@ -10,11 +10,14 @@
 // helpers do the conversion at the last moment, right at the library call:
 //
 //   - pathToUtf8()  : path -> UTF-8 bytes (for UTF-8-aware sinks such as
-//                     stb with STBI(W)_WINDOWS_UTF8, NSString, FFmpeg)
+//                     stb with STBI(W)_WINDOWS_UTF8, NSString, FFmpeg, and
+//                     for text: logs, Font, JSON)
 //   - utf8ToPath()  : UTF-8 bytes -> path (for UTF-8 sources such as JSON)
 //   - openFile()    : fopen that takes fs::path (wide API on Windows)
 //
-// Everything here is internal plumbing, not public API.
+// pathToUtf8() / utf8ToPath() are public API: they convert the same way on
+// every platform and never go through the Windows code page, unlike
+// path::string() and fs::path(std::string). openFile() is internal plumbing.
 
 #include <filesystem>
 #include <cstdio>
@@ -24,8 +27,6 @@
 namespace trussc {
 
 namespace fs = std::filesystem;
-
-namespace internal {
 
 // Convert a path to UTF-8 bytes. On POSIX the native encoding already is
 // UTF-8; on Windows the native encoding is UTF-16, so go through u8string().
@@ -47,6 +48,13 @@ inline fs::path utf8ToPath(std::string_view utf8) {
     return fs::path(std::string(utf8));
 #endif
 }
+
+namespace internal {
+
+// These two lived here before they became public API; keep the qualified
+// internal:: spelling working for existing callers (core, addons).
+using trussc::pathToUtf8;
+using trussc::utf8ToPath;
 
 // fopen that accepts fs::path. Uses _wfopen on Windows so non-ASCII paths
 // survive; mode strings are short ASCII ("rb", "wb", ...).

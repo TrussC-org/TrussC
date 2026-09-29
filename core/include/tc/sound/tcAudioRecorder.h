@@ -97,7 +97,7 @@ public:
         }
         file_.open(resolved, std::ios::binary | std::ios::trunc);
         if (!file_) {
-            logError("AudioRecorder") << "start: cannot open " << resolved.string();
+            logError("AudioRecorder") << "start: cannot open " << pathToUtf8(resolved);
             return false;
         }
         path_ = resolved;
@@ -122,7 +122,7 @@ public:
         listener_ = engine.audioOut.listen(
             [this](AudioOutBuffer& b) { capture(b); }, audio::priority::Monitor);
 
-        logNotice("AudioRecorder") << "recording -> " << path_.string()
+        logNotice("AudioRecorder") << "recording -> " << pathToUtf8(path_)
             << " (" << sampleRate_ << " Hz, " << outChannels_ << "ch, "
             << (settings_.format == AudioRecordSettings::SampleFormat::S16 ? "s16" : "f32")
             << ")";
@@ -141,7 +141,7 @@ public:
             logWarning("AudioRecorder") << "stopped, " << dropped
                 << " frames dropped (writer thread fell behind)";
         }
-        logNotice("AudioRecorder") << "stopped: " << path_.string()
+        logNotice("AudioRecorder") << "stopped: " << pathToUtf8(path_)
             << " (" << getRecordedSeconds() << " s)";
     }
 
