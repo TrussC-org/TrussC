@@ -111,11 +111,11 @@ public:
     using Ptr = std::shared_ptr<Node>;
     using WeakPtr = std::weak_ptr<Node>;
 
-    Node() : instanceId_(internal::nextNodeInstanceId()) { internal::nodeCount++; }
+    Node() : instanceId_(internal::nextNodeInstanceId()) { internal::nodeCount()++; }
     virtual ~Node() {
         cancelAllAsyncTimers();  // stop + await any in-flight async callbacks
         for (auto& [t, m] : mods_) m->onDestroy();  // mod cleanup on node destruction
-        internal::nodeCount--;
+        internal::nodeCount()--;
     }
 
     // -------------------------------------------------------------------------

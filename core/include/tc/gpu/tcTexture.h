@@ -105,8 +105,8 @@ enum class TextureUsage {
 // ---------------------------------------------------------------------------
 class Texture {
 public:
-    Texture() { internal::textureCount++; }
-    ~Texture() { clear(); internal::textureCount--; }
+    Texture() { internal::textureCount()++; }
+    ~Texture() { clear(); internal::textureCount()--; }
 
     // Copy prohibited
     Texture(const Texture&) = delete;

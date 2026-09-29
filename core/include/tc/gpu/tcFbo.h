@@ -55,8 +55,8 @@ std::unordered_map<uint64_t, FboSharedMipResources>& fboSharedMipMap();
 // ---------------------------------------------------------------------------
 class Fbo : public HasTexture {
 public:
-    Fbo() { internal::fboCount++; }
-    ~Fbo() { clear(); internal::fboCount--; }
+    Fbo() { internal::fboCount()++; }
+    ~Fbo() { clear(); internal::fboCount()--; }
 
     // Non-copyable
     Fbo(const Fbo&) = delete;

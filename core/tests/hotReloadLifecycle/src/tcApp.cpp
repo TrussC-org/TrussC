@@ -78,6 +78,9 @@ GuestInstances tcApp::sharedInstances() {
     g.iblBake = &tc::internal::iblBakeResources();
     g.fontCache = &tc::internal::SharedFontCache::getInstance();
     g.fontSamplers = &tc::internal::fontSamplers();
+    g.nodeCount = &tc::internal::nodeCount();
+    g.textureCount = &tc::internal::textureCount();
+    g.fboCount = &tc::internal::fboCount();
     g.asyncOwner = tc::internal::AsyncScheduler::newOwner();
     return g;
 }

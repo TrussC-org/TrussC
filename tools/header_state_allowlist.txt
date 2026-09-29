@@ -78,11 +78,6 @@ core/include/TrussC.h trussc::internal::appFilesDroppedFunc    # host-only: as a
 core/include/TrussC.h trussc::buildAppDescriptor::app          # host-only: runApp's App; a hot reload build launches through runHotReloadApp instead
 core/include/TrussC.h trussc::internal::g_androidDesc          # no-hot-reload: Android only
 
-# --- TrussC.h: debug counters
-core/include/TrussC.h trussc::internal::nodeCount              # harmless: debug counter; getNodeCount() in guest code counts the nodes guest code created (nearly all of them), restarting per generation
-core/include/TrussC.h trussc::internal::textureCount           # harmless: as nodeCount
-core/include/TrussC.h trussc::internal::fboCount               # harmless: as nodeCount
-
 # --- tcColor.h
 core/include/tcColor.h trussc::colors::*   # immutable: the named color constants (const Color)
 

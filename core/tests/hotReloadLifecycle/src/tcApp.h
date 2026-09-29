@@ -58,6 +58,9 @@ struct GuestInstances {
     const void* iblBake = nullptr;
     const void* fontCache = nullptr;
     const void* fontSamplers = nullptr;
+    const void* nodeCount = nullptr;
+    const void* textureCount = nullptr;
+    const void* fboCount = nullptr;
     uint64_t asyncOwner = 0;   // a fresh AsyncScheduler owner token
 };
 

@@ -48,8 +48,9 @@
 //
 // Process-wide singletons and GPU caches (#249): the AudioEngine, the screen
 // recorder, the async scheduler (and its owner numbering), the beep manager,
-// the console state, the PBR / point pipelines, and the FBO, IBL-bake and font
-// caches guest code reaches must be the host's instances. The GPU caches are
+// the console state, the PBR / point pipelines, the FBO, IBL-bake and font
+// caches, and the node / texture / FBO debug counters guest code reaches must
+// be the host's instances. The GPU caches are
 // the costly ones: nothing frees what they hold, so a guest with its own copy
 // built a new set of sokol_gl contexts, shaders and atlases in the host's pools
 // every reload, and FBO drawing stopped after a few reloads. Guest code's
@@ -372,6 +373,9 @@ static int runCycles(const std::string& guestPath, int port) {
             {in.iblBake, &internal::iblBakeResources(), "IBL bake pipelines"},
             {in.fontCache, &internal::SharedFontCache::getInstance(), "font atlas cache"},
             {in.fontSamplers, &internal::fontSamplers(), "font samplers"},
+            {in.nodeCount, &internal::nodeCount(), "getNodeCount() counter"},
+            {in.textureCount, &internal::textureCount(), "getTextureCount() counter"},
+            {in.fboCount, &internal::fboCount(), "getFboCount() counter"},
         };
         for (const auto& s : same) {
             if (s.guest != s.host) return fail(29, std::string("the guest has its own ") + s.what);

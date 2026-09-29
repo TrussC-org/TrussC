@@ -1832,18 +1832,18 @@ inline size_t getMemoryUsage() {
 // ---------------------------------------------------------------------------
 // Resource Counters (for debugging)
 // ---------------------------------------------------------------------------
-// A per-module copy is harmless (tools/header_state_allowlist.txt): in a
-// Windows hot reload guest each counts what that module's code created, which
-// for app code is nearly everything.
+// Defined in tcGlobal.cpp, one per process: the objects a Windows hot reload
+// guest creates count in the same totals as the host's, and getNodeCount() in
+// either reads them all. The constructors and destructors bump them.
 namespace internal {
-    inline std::atomic<size_t> nodeCount{0};
-    inline std::atomic<size_t> textureCount{0};
-    inline std::atomic<size_t> fboCount{0};
+    std::atomic<size_t>& nodeCount();
+    std::atomic<size_t>& textureCount();
+    std::atomic<size_t>& fboCount();
 }
 
-inline size_t getNodeCount() { return internal::nodeCount.load(); }
-inline size_t getTextureCount() { return internal::textureCount.load(); }
-inline size_t getFboCount() { return internal::fboCount.load(); }
+inline size_t getNodeCount() { return internal::nodeCount().load(); }
+inline size_t getTextureCount() { return internal::textureCount().load(); }
+inline size_t getFboCount() { return internal::fboCount().load(); }
 
 // ---------------------------------------------------------------------------
 // Loop Architecture (Decoupled Update/Draw)

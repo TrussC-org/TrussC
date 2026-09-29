@@ -750,12 +750,12 @@ FontSamplers& fontSamplers() {
 // Settings and registries that app code and host code share (#249): the main
 // loop's rate and redraw requests, the projection defaults, the sokol_gl
 // budget, touch-as-mouse, the data path root, the bitmap font atlas and its
-// glyph registry, the overlay queries, the node id source, the current window
-// context and the Apps attached to secondary windows. Each used to be an
-// inline variable in its header, so a Windows hot reload guest's setFps(),
-// redraw(), setDataPathRoot(), registerGlyph(), ... wrote a copy the host never
-// read, the guest never saw what the host set, and an App whose window the
-// host's close() released stayed attached in the guest's copy.
+// glyph registry, the overlay queries, the node id source, the debug counters,
+// the current window context and the Apps attached to secondary windows. Each
+// used to be an inline variable in its header, so a Windows hot reload guest's
+// setFps(), redraw(), setDataPathRoot(), registerGlyph(), ... wrote a copy the
+// host never read, the guest never saw what the host set, and an App whose
+// window the host's close() released stayed attached in the guest's copy.
 //
 // Plain data (trivially destructible, constant-initialized) is a function-local
 // static. Objects with a destructor are leaked on purpose: code running in
@@ -832,6 +832,24 @@ std::function<bool()>& overlayFocusedQuery() {
 uint64_t nextNodeInstanceId() {
     static std::atomic<uint64_t> next{0};
     return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+// The debug counters behind getNodeCount() / getTextureCount() /
+// getFboCount(). As inline variables, a Windows hot reload guest counted only
+// the objects its own code created, and the host never saw them.
+std::atomic<size_t>& nodeCount() {
+    static std::atomic<size_t> count{0};
+    return count;
+}
+
+std::atomic<size_t>& textureCount() {
+    static std::atomic<size_t> count{0};
+    return count;
+}
+
+std::atomic<size_t>& fboCount() {
+    static std::atomic<size_t> count{0};
+    return count;
 }
 
 namespace {
