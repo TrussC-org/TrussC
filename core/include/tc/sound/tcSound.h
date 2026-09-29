@@ -699,7 +699,7 @@ struct AudioInBuffer {
 // ---------------------------------------------------------------------------
 struct AudioVoiceInfo {
     int         slot = 0;           // mixer slot index (0 .. maxPolyphony-1)
-    std::string path;               // source file (UTF-8); empty for generated / memory buffers
+    std::string path;               // source file (UTF-8, lexically normalized); empty for generated / memory buffers
     bool        streaming = false;  // true for SoundStream (loadStream), false for an eager SoundBuffer
     bool        paused = false;
     bool        loop = false;
