@@ -1964,8 +1964,8 @@ namespace internal {
 // been rendered yet (drawing is deferred to present()), so on Linux you'd read
 // a blank framebuffer. If you just want a file of the current frame, prefer
 // saveScreenshot() which captures at the correct point automatically.
-// Web: not supported. Always returns false and warns once; take screenshots
-// with the browser's own tools instead.
+// Web: not implemented (no canvas readback). Always returns false and warns
+// once; take screenshots with the browser's own tools instead.
 TC_PLATFORMS("macos,windows,linux,ios,android") inline bool grabScreen(Pixels& outPixels) {
     return captureWindow(outPixels);
 }
@@ -2008,12 +2008,13 @@ namespace internal {
 // after the directory check) is reported via logError("Screenshot").
 // Relative paths resolve against the data path. Supported formats: png/jpg/bmp.
 //
-// Web: not supported. Always returns false (nothing is queued or written) and
-// warns once, pointing to the browser's own screenshot feature.
+// Web: not implemented (no canvas readback). Always returns false (nothing is
+// queued or written) and warns once, pointing to the browser's own screenshot
+// feature.
 TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const std::filesystem::path& path) {
 #ifdef __EMSCRIPTEN__
-    // The browser build cannot read the canvas back (see
-    // platform/web/tcPlatform_web.cpp), so fail up front instead of queuing a
+    // Web capture is not implemented: nothing reads the canvas back (see
+    // platform/web/tcPlatform_web.cpp). So fail up front instead of queuing a
     // capture that would never write a file while this call reported success.
     // The web captureWindowToFile() stub returns false and warns once.
     return internal::captureWindowToFile(path);

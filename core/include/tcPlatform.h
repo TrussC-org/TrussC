@@ -167,8 +167,8 @@ TC_PLATFORMS("macos,windows,android,ios") bool getKeepScreenOn();
 
 // Capture current window and store in Pixels
 // Returns true on success, false on failure
-// Web: not supported (the canvas cannot be read back); always returns false
-// and warns once.
+// Web: not implemented (no canvas readback); always returns false and warns
+// once.
 TC_PLATFORMS("macos,windows,linux,ios,android") bool captureWindow(Pixels& outPixels);
 
 // Internal: synchronous capture + file write (the actual worker behind the
