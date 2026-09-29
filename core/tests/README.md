@@ -80,3 +80,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   or without the #230 fix: it catches the web early return leaking into native
   builds. The web half is what guards #230; the daily run (`daily.yml`,
   `sweep-web`) runs it under node.
+- `winsockLifetime/` — creating and destroying TcpClient / TcpServer any
+  number of times leaves networking working (#254): after 200 of each, a raw
+  `socket()` still succeeds and a UdpSocket that was already receiving still
+  gets a loopback packet. The per-class counts used to call `WSACleanup()` on
+  every 0 -> 1 -> 0 cycle and tear Winsock down for the whole process. Only
+  Windows can fail it; elsewhere the same steps run and pass.

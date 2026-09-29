@@ -3,43 +3,18 @@
 // =============================================================================
 
 #include "tc/network/tcTcpClient.h"
+#include "tc/network/tcSocketInternal.h"
 #include "tc/utils/tcLog.h"
 #include "tc/events/tcCoreEvents.h"
 #include <cstring>
 
 namespace trussc {
 
-std::atomic<int> TcpClient::instanceCount_{0};
-
-// =============================================================================
-// Winsock initialization (Windows only)
-// =============================================================================
-void TcpClient::initWinsock() {
-#ifdef _WIN32
-    static bool initialized = false;
-    if (!initialized) {
-        WSADATA wsaData;
-        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-            logError() << "Winsock initialization failed";
-        }
-        initialized = true;
-    }
-#endif
-}
-
-void TcpClient::cleanupWinsock() {
-#ifdef _WIN32
-    WSACleanup();
-#endif
-}
-
 // =============================================================================
 // Constructor / Destructor
 // =============================================================================
 TcpClient::TcpClient() {
-    if (instanceCount_++ == 0) {
-        initWinsock();
-    }
+    internal::ensureWinsock();
 #ifdef __EMSCRIPTEN__
     useThread_ = false;
 #endif
@@ -47,9 +22,6 @@ TcpClient::TcpClient() {
 
 TcpClient::~TcpClient() {
     disconnect();
-    if (--instanceCount_ == 0) {
-        cleanupWinsock();
-    }
 }
 
 TcpClient::TcpClient(TcpClient&& other) noexcept
@@ -67,7 +39,6 @@ TcpClient::TcpClient(TcpClient&& other) noexcept
 #endif
     other.running_ = false;
     other.connected_ = false;
-    instanceCount_++;
 }
 
 TcpClient& TcpClient::operator=(TcpClient&& other) noexcept {

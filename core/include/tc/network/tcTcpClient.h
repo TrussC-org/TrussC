@@ -193,10 +193,6 @@ private:
 
     std::thread receiveThread_;
     std::thread connectThread_;
-
-    static std::atomic<int> instanceCount_;
-    static void initWinsock();
-    static void cleanupWinsock();
 };
 
 } // namespace trussc

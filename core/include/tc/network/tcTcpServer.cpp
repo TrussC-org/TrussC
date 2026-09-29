@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "tc/network/tcTcpServer.h"
+#include "tc/network/tcSocketInternal.h"
 #include "tc/utils/tcLog.h"
 #include <cstring>
 
@@ -36,8 +37,6 @@
 #endif
 
 namespace trussc {
-
-std::atomic<int> TcpServer::instanceCount_{0};
 
 namespace {
 
@@ -127,41 +126,14 @@ constexpr int kWaitSliceMs = 100;
 } // namespace
 
 // =============================================================================
-// Winsock initialization (Windows only)
-// =============================================================================
-void TcpServer::initWinsock() {
-#ifdef _WIN32
-    static bool initialized = false;
-    if (!initialized) {
-        WSADATA wsaData;
-        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-            logError() << "Winsock initialization failed";
-        }
-        initialized = true;
-    }
-#endif
-}
-
-void TcpServer::cleanupWinsock() {
-#ifdef _WIN32
-    WSACleanup();
-#endif
-}
-
-// =============================================================================
 // Constructor / Destructor
 // =============================================================================
 TcpServer::TcpServer() {
-    if (instanceCount_++ == 0) {
-        initWinsock();
-    }
+    internal::ensureWinsock();
 }
 
 TcpServer::~TcpServer() {
     stop();
-    if (--instanceCount_ == 0) {
-        cleanupWinsock();
-    }
 }
 
 // =============================================================================
