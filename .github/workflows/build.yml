@@ -8,6 +8,12 @@
 # every call and links it against its own implementation. Target: about 10
 # minutes wall-clock (the slowest job). Building every example on every
 # platform lives in daily.yml, once a day on main, opening an issue on failure.
+#
+# Also runs for the merge queue (merge_group): each queued PR is built on top
+# of main plus the PRs queued ahead of it, so PRs no longer need "Update
+# branch" before merging. Queue runs restore caches but never save them (the
+# queue's temporary refs are deleted right after, so a saved cache would only
+# push useful ones out of the 10 GB repo limit).
 name: Build
 
 on:
@@ -15,6 +21,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -52,6 +59,9 @@ jobs:
           if [ "$event" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
+          elif [ "$event" = "merge_group" ]; then
+            base="${{ github.event.merge_group.base_sha }}"
+            head="${{ github.event.merge_group.head_sha }}"
           elif [ "$event" = "push" ]; then
             base="${{ github.event.before }}"
             head="${{ github.sha }}"
@@ -148,6 +158,7 @@ jobs:
           variant: ${{ matrix.launcher }}
           key: ${{ matrix.os }}-build
           max-size: 800M
+          save: ${{ github.event_name != 'merge_group' }}
 
       - name: Enable compiler launcher
         shell: bash
@@ -173,7 +184,19 @@ jobs:
         run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
 
       - name: Cache build directories
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: |
+            core/build-${{ matrix.preset }}
+            tools/build
+          key: ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-
+
+      - name: Cache build directories (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: |
             core/build-${{ matrix.preset }}
@@ -272,6 +295,7 @@ jobs:
           variant: ccache
           key: android-build
           max-size: 800M
+          save: ${{ github.event_name != 'merge_group' }}
 
       - name: Enable compiler launcher
         run: |
@@ -300,7 +324,18 @@ jobs:
           echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
 
       - name: Cache Android build
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: |
+            core/build-android
+            tools/build
+          key: android-build-v4-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
+          restore-keys: android-build-v4-
+
+      - name: Cache Android build (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: |
             core/build-android
@@ -364,6 +399,7 @@ jobs:
           variant: ccache
           key: web-build
           max-size: 800M
+          save: ${{ github.event_name != 'merge_group' }}
 
       - name: Enable compiler launcher
         run: |
@@ -374,7 +410,19 @@ jobs:
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
       - name: Cache build directories
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: |
+            core/build-web
+            tools/build
+          key: web-build-v3-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
+          restore-keys: |
+            web-build-v3-
+
+      - name: Cache build directories (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: |
             core/build-web
