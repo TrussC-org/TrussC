@@ -13610,9 +13610,9 @@ related = ["setDefaultScreenFov"]
 category = "time_frame"
 keywords = ["dt", "elapsed", "frametime", "timestep", "interval"]
 of = ["ofGetLastFrameTime"]
-description.en = "Seconds since the previous update. Measured wall time in VSYNC / setFps modes; in fixed-Hz update mode (setIndependentFps with an update rate) and in runHeadlessApp every step reports exactly 1 / updateFps. Per window"
-description.ja = "前回の update からの経過秒数。VSYNC / setFps モードでは実測時間。固定Hz update モード（update レートを指定した setIndependentFps）と runHeadlessApp では各ステップが正確に 1 / updateFps を返す。ウィンドウごと"
-description.ko = "이전 update로부터의 경과 시간(초). VSYNC / setFps 모드에서는 실측 시간. 고정 Hz update 모드(update 레이트를 지정한 setIndependentFps)와 runHeadlessApp에서는 각 스텝이 정확히 1 / updateFps를 반환. 윈도우별"
+description.en = "Seconds since the previous update. Measured wall time in VSYNC / setFps modes; in fixed-Hz update mode (setIndependentFps with an update rate) and in runHeadlessApp every step reports exactly 1 / updateFps. Per window; a secondary window still measures its delta with high_resolution_clock (the system clock on Linux) until #307, so a system clock step can skew one of its deltas"
+description.ja = "前回の update からの経過秒数。VSYNC / setFps モードでは実測時間。固定Hz update モード（update レートを指定した setIndependentFps）と runHeadlessApp では各ステップが正確に 1 / updateFps を返す。ウィンドウごと。サブウィンドウは #307 までは high_resolution_clock（Linux ではシステム時計）で測るので、システム時刻の変更でその delta が1回ずれることがある"
+description.ko = "이전 update로부터의 경과 시간(초). VSYNC / setFps 모드에서는 실측 시간. 고정 Hz update 모드(update 레이트를 지정한 setIndependentFps)와 runHeadlessApp에서는 각 스텝이 정확히 1 / updateFps를 반환. 윈도우별. 보조 윈도우는 #307까지는 high_resolution_clock(Linux에서는 시스템 시계)으로 재므로, 시스템 시각 변경으로 그 delta가 한 번 어긋날 수 있다"
 related = ["getFrameRate", "setIndependentFps", "getFrameElapsedTime"]
 
 ["getDeviceOrientation"]
@@ -13762,9 +13762,9 @@ related = ["fileExists", "loadTextFile"]
 ["getFps"]
 category = "time_frame"
 keywords = ["framerate", "speed", "refresh", "rate", "performance"]
-description.en = "Get the measured FPS (alias for getFrameRate)"
-description.ja = "実測のFPSを取得（getFrameRateのエイリアス）"
-description.ko = "실측 FPS를 얻음 (getFrameRate의 별칭)"
+description.en = "Get the measured FPS (alias for getFrameRate). In a secondary window it is currently the average of the last 10 calls, like getFrameRate()"
+description.ja = "実測のFPSを取得（getFrameRateのエイリアス）。サブウィンドウでは getFrameRate() と同じく、今のところ直近10回の呼び出しの平均"
+description.ko = "실측 FPS를 얻음 (getFrameRate의 별칭). 보조 윈도우에서는 getFrameRate()와 같이 지금은 최근 10회 호출의 평균"
 related = ["setFps", "getFpsSettings"]
 
 ["getFpsSettings"]
@@ -13795,9 +13795,9 @@ related = ["getElapsedTime", "getDeltaTime", "resetElapsedTimeCounter"]
 category = "time_frame"
 keywords = ["fps", "framerate", "speed", "refresh", "performance"]
 of = ["ofGetFrameRate"]
-description.en = "Measured update rate (updates per second over the last 10 frames). In fixed-Hz update mode and runHeadlessApp this is the measured rate, not the configured one: the fixed steps are counted by the time they consumed, so it reads steady when the rate isn't a multiple of the frame rate and drops when time is dropped"
-description.ja = "実測の update レート（直近10フレームの1秒あたり update 回数）。固定Hz update モードと runHeadlessApp でも設定値ではなく実測値。固定ステップは消費した時間で数えるので、フレームレートの整数倍でないレートでも値が揺れず、時間が捨てられると下がる"
-description.ko = "실측 update 레이트(최근 10프레임의 초당 update 횟수). 고정 Hz update 모드와 runHeadlessApp에서도 설정값이 아닌 실측값. 고정 스텝은 소비한 시간으로 세므로 프레임레이트의 정수배가 아닌 레이트에서도 값이 흔들리지 않고, 시간이 버려지면 내려간다"
+description.en = "Measured update rate (updates per second over the last 10 frames). In fixed-Hz update mode and runHeadlessApp this is the measured rate, not the configured one: the fixed steps are counted by the time they consumed, so it reads steady when the rate isn't a multiple of the frame rate and drops when time is dropped. Recorded by the main loop and runHeadlessApp; in a secondary window each call currently adds the window's last delta and returns the average of the last 10 calls, so reading it once per second gives a ~10 s average"
+description.ja = "実測の update レート（直近10フレームの1秒あたり update 回数）。固定Hz update モードと runHeadlessApp でも設定値ではなく実測値。固定ステップは消費した時間で数えるので、フレームレートの整数倍でないレートでも値が揺れず、時間が捨てられると下がる。メインループと runHeadlessApp が記録する。サブウィンドウでは今のところ、呼ぶたびにそのウィンドウの直近の delta を加えて直近10回の呼び出しの平均を返すので、1秒に1回読むと約10秒の平均になる"
+description.ko = "실측 update 레이트(최근 10프레임의 초당 update 횟수). 고정 Hz update 모드와 runHeadlessApp에서도 설정값이 아닌 실측값. 고정 스텝은 소비한 시간으로 세므로 프레임레이트의 정수배가 아닌 레이트에서도 값이 흔들리지 않고, 시간이 버려지면 내려간다. 메인 루프와 runHeadlessApp이 기록한다. 보조 윈도우에서는 지금은 호출할 때마다 그 윈도우의 최근 delta를 더해 최근 10회 호출의 평균을 반환하므로, 1초에 한 번 읽으면 약 10초의 평균이 된다"
 related = ["getFps", "getDeltaTime", "getFpsSettings"]
 
 ["getFramebufferHeight"]
