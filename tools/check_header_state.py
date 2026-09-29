@@ -50,6 +50,14 @@ pins the constructs it must see through (compound-assignment operators, braced
 default arguments and mem-initializers, template members, several declarators,
 ...), and every run checks the scanner against it first.
 
+Known limits: this is a heuristic textual scanner, not a C++ parser. It tells
+a function declaration from a direct-initialized variable, and immutable data
+from mutable, by the shape of the tokens (see looks_like_initializer and
+is_immutable), and unusual declaration shapes may still slip through or be
+misread. Where it has to guess it leans towards reporting (a deduced `auto`
+type is mutable unless initialized by a literal), and review stays the last
+gate: a shape it misses belongs in tools/header_state_selftest.h with the fix.
+
 An entry `<path> <scope>::*` covers every IMMUTABLE finding in that scope (a
 table of constants); an entry in the immutable category must match an
 immutable finding.
@@ -97,6 +105,9 @@ TYPE_WORDS = {"void", "bool", "char", "char8_t", "char16_t", "char32_t", "wchar_
               "int", "long", "float", "double", "signed", "unsigned", "auto", "const",
               "volatile", "struct", "class", "enum", "typename", "size_t", "ptrdiff_t"}
 FIXED_WIDTH = re.compile(r"u?int(8|16|32|64|ptr|max)_t$")
+# Tokens that only occur in an expression, never in a parameter declaration
+INIT_MARKERS = {"new", "sizeof", "alignof", "true", "false", "nullptr", "this"}
+CAST = re.compile(r"\w*_cast$")      # static_cast, dynamic_cast, bit_cast, ...
 MACRO = re.compile(r"[A-Z][A-Z0-9]*_[A-Z0-9_]+$")   # TC_PLATFORMS, TC_LUA_BIND, ...
 
 
@@ -383,14 +394,62 @@ def classify_head(head):
     return "variable", idents[-1]
 
 
+def looks_like_type_name(a, k):
+    """Is a[k] (a name before `*` / `&` in a parameter-or-initializer list)
+    a type? PascalCase (`Foo* p`), a `_t` name, or qualified by std::
+    (`std::string* out`); a constant (`kW * kH`, `COUNT * 2`) or a
+    lowercase name (`count * scale`) is an operand."""
+    x = a[k]
+    if x in TYPE_WORDS or FIXED_WIDTH.match(x) or x.endswith("_t"):
+        return True
+    if k >= 2 and a[k - 1] == "::" and a[k - 2] == "std":
+        return True
+    return bool(re.match(r"[A-Z]\w*[a-z]", x)) and not re.match(r"k[A-Z]", x)
+
+
+def arg_is_parameter(a):
+    """One comma-separated part of `name(...)`: a parameter declaration
+    (True) or an initializer expression (False)?"""
+    if "=" in [t for _, t in top_level(a)]:
+        return True                                     # a default argument
+    for k, x in enumerate(a):
+        nxt = a[k + 1:k + 3]
+        if x in INIT_MARKERS or CAST.match(x):
+            return False
+        if (x in TYPE_WORDS or FIXED_WIDTH.match(x)) and nxt[:1] == ["("] and nxt[1:] != ["*"] \
+                and nxt[1:] != ["&"]:
+            return False                                # functional cast: int(k)
+    if a[0][:1].isdigit() or a[0] in ('"', "-", "+", "{", "!", "~", "&", "*", "("):
+        return False
+    for k, x in enumerate(a):
+        prev = a[k - 1] if k else None
+        if x in TYPE_WORDS or FIXED_WIDTH.match(x) or x in ("...", "<", "&&"):
+            return True
+        if is_ident(x) and prev is not None and is_ident(prev):
+            return True                                 # `Foo f`
+        if x in ("*", "&") and prev is not None and (
+                prev in (">", "*") or (is_ident(prev) and looks_like_type_name(a, k - 1))):
+            tail = a[k + 1:]
+            while tail and tail[0] in ("*", "&", "const"):
+                tail = tail[1:]
+            if not tail or (is_ident(tail[0]) and (len(tail) == 1 or tail[1] in ("=", "["))):
+                return True                             # `Foo* p`, `Foo&`
+    return False
+
+
 def looks_like_initializer(head):
     """In a bodiless declaration `... name(args);`, do the parentheses hold an
-    initializer (names, literals, arithmetic: `v(kCount * 2)`) rather than a
-    parameter list? A parameter has a type: a type keyword or `const`, two
-    names in a row (`Foo f`), a pointer or reference declarator (`Foo* p`,
-    `Foo&`), `...`, or a template argument list. `()` declares a function. A
-    lone user-type name is read as an initializer, so an unnamed parameter
-    (`static int f(Foo);`) is a false finding: name the parameter."""
+    initializer (names, literals, arithmetic: `v(kW * kH)`, `p(new Foo)`,
+    `x(static_cast<int>(k))`) rather than a parameter list? A parameter has a
+    type: a type keyword or `const`, two names in a row (`Foo f`), a pointer
+    or reference declarator after a type name (`Foo* p`, `Foo&`), `...`, or a
+    template argument list; new / sizeof / *_cast / true / false / nullptr /
+    this and functional casts (`int(k)`) only occur in expressions. `()`
+    declares a function. A lone user-type name is read as an initializer, so
+    an unnamed parameter (`static int f(Foo);`) is a false finding: name the
+    parameter. (C++ itself reads `int x(int(k));` as a function; written in a
+    header with static or inline it is almost surely meant as a variable, and
+    reporting it is the safe side.)"""
     for i, t in top_level(head):
         if t != "(" or i == 0 or head[i - 1] in SPECIFIER_CALLS:
             continue
@@ -409,22 +468,7 @@ def looks_like_initializer(head):
             else:
                 cur.append(x)
         args.append(cur)
-        for a in args:
-            if not a:
-                return False
-            for k, x in enumerate(a):
-                prev = a[k - 1] if k else None
-                if x in TYPE_WORDS or FIXED_WIDTH.match(x) or x in ("...", "<", "&&"):
-                    return False
-                if is_ident(x) and prev is not None and is_ident(prev):
-                    return False                        # `Foo f`
-                if x in ("*", "&") and prev is not None and (is_ident(prev) or prev in (">", "*")):
-                    tail = a[k + 1:]
-                    while tail and tail[0] in ("*", "&", "const"):
-                        tail = tail[1:]
-                    if not tail or (is_ident(tail[0]) and (len(tail) == 1 or tail[1] in ("=", "["))):
-                        return False                    # `Foo* p`, `Foo&`
-        return True
+        return all(a and not arg_is_parameter(a) for a in args)
     return False
 
 
@@ -499,14 +543,52 @@ def class_qualified_name(head, name):
 SMART_POINTERS = {"unique_ptr", "shared_ptr", "weak_ptr"}
 
 
-def is_immutable(head):
+LITERAL_OPERATORS = {"+", "-", "*", "/", "%", "|", "^", "~", "!", "<", ">", "<=", ">=", "==",
+                     "!=", "<<", "&&", "||", "?", ":", "(", ")", "{", "}", ","}
+
+
+def is_literal_initializer(init):
+    """Literals and operators only (`42`, `1.5 * 2`, `"text"`, `{1, 2}`):
+    what a deduced type can take and still be immutable data. A name, a call,
+    `new` or `&x` may make it a pointer to mutable data."""
+    if not init:
+        return False
+    for t in init:
+        if t[:1].isdigit() or t == '"' or t in ("true", "false", "nullptr") or t in LITERAL_OPERATORS:
+            continue
+        return False
+    return True
+
+
+def initializer_of(stmt, head):
+    """The initializer tokens of the declaration `stmt` whose first
+    declarator head is `head`: after `=`, a braced list, or a direct
+    initializer's parentheses; None if there is none."""
+    rest = stmt[len(head):]
+    if rest[:1] == ["="]:
+        for i, t in top_level(rest[1:]):
+            if t == ",":
+                return rest[1:1 + i]
+        return rest[1:]
+    if rest[:1] == ["{"]:
+        return rest[:skip_group(rest, 0, "{", "}")]
+    for i, t in top_level(head):
+        if t == "(" and i and is_ident(head[i - 1]) and head[i - 1] not in SPECIFIER_CALLS:
+            return head[i:skip_group(head, i, "(", ")")]
+    return None
+
+
+def is_immutable(head, init=None):
     """Const data that nothing reachable through it can change: a const
     object that holds no pointer to mutable data. `const T`, `const T&`,
     `const T* const` and `static const char* const names[]` are immutable;
     `T* const` (the pointer is fixed, what it points to is not), a pointer to
     const that can itself be reassigned, `const std::vector<T*>` and smart
     pointers are not, so none of them passes as immutable data (the
-    immutable category and `::*` wildcards trust this)."""
+    immutable category and `::*` wildcards trust this). A deduced type
+    (`const auto`, `const decltype(...)`, not a reference) is known only from
+    its initializer `init`, so it is immutable only when that is a literal
+    (`const auto p = new Registry();` is a Registry* const)."""
     for i, t in top_level(head):
         if (t == "(" and i + 1 < len(head) and head[i + 1] in ("*", "&")
                 and not (i and head[i - 1] in SPECIFIER_CALLS)):
@@ -528,6 +610,9 @@ def is_immutable(head):
     stars = [i for i, t in top if t == "*"]
     if not consts or (stars and stars[-1] > consts[-1]):
         return False
+    if (any(t in ("auto", "decltype", "typeof", "__typeof__") for t in decl)
+            and not any(t in ("&", "&&") for _, t in top)):
+        return is_literal_initializer(init)
     # Every pointer, top level or in template arguments, points to const
     start = 0
     for i, t in enumerate(decl):
@@ -623,9 +708,16 @@ def statement_from(tokens, i):
     return rest
 
 
-def static_local(rest):
+DECL_SPECIFIERS = {"static", "thread_local", "const", "inline", "mutable", "volatile",
+                   "constexpr", "extern"}
+ATTRIBUTE_CALLS = {"alignas", "__declspec", "__attribute__"}
+
+
+def static_local(rest, need_declarator=False):
     """The block-scope `static` / `thread_local` declaration `rest` (from that
-    keyword to its `;`): (names, immutable), or None for a constexpr one."""
+    keyword to its `;`): (names, immutable), or None for a constexpr one.
+    need_declarator (a macro body): None as well when no type and name
+    follow, as in `#define FORCE_INLINE static inline __attribute__((...))`."""
     head = first_declarator(declaration_head(rest))
     cut = head
     for k, t in top_level(head):
@@ -634,9 +726,26 @@ def static_local(rest):
             break
     if "constexpr" in cut:
         return None
+    if need_declarator:
+        # Type and name, attribute groups dropped (decltype(...) is a type)
+        words, k = [], 0
+        while k < len(cut):
+            if cut[k] in ATTRIBUTE_CALLS and k + 1 < len(cut) and cut[k + 1] == "(":
+                k = skip_group(cut, k + 1, "(", ")")
+                continue
+            if cut[k] in SPECIFIER_CALLS and k + 1 < len(cut) and cut[k + 1] == "(":
+                words.append(cut[k])
+                k = skip_group(cut, k + 1, "(", ")")
+                continue
+            if is_ident(cut[k]) and cut[k] not in DECL_SPECIFIERS:
+                words.append(cut[k])
+            k += 1
+        if len(words) < 2:
+            return None
     idents = [t for t in cut if is_ident(t) and t not in SPECIFIER_CALLS and t not in
               ("static", "thread_local", "const", "inline", "mutable")]
-    return [idents[-1] if idents else "?"] + later_declarators(rest, len(head)), is_immutable(cut)
+    return ([idents[-1] if idents else "?"] + later_declarators(rest, len(head)),
+            is_immutable(cut, initializer_of(rest, head)))
 
 
 # ---------------------------------------------------------------------------
@@ -676,7 +785,7 @@ def scan_tokens(tokens, rel):
         head = first_declarator(declaration_head(toks))
         what, name = classify_head(head)
         if (what == "function" and name != "operator" and stack[-1]["kind"] == "ns"
-                and ({"inline", "static"} & set(head)) and "extern" not in head
+                and (({"inline", "static"} & set(head)) or in_anon_ns()) and "extern" not in head
                 and looks_like_initializer(head)):
             # `inline std::vector<int> v(kCount);`: an initializer, not
             # parameters
@@ -685,7 +794,7 @@ def scan_tokens(tokens, rel):
             return
         names = [name] + later_declarators(toks, len(head))
         specs = set(head)
-        immutable = is_immutable(head)
+        immutable = is_immutable(head, initializer_of(toks, head))
 
         def add_all(kind):
             for nm in names:
@@ -722,11 +831,16 @@ def scan_tokens(tokens, rel):
         if is_lambda_body(buf):
             return {"kind": "func", "name": "<lambda>", "keep": True}
         if kind in ("func", "init"):
-            # Inside a function: a local class, or just a block / initializer
-            tail = strip_class_specifiers(buf[-24:])
-            keys = [k for k, t in enumerate(tail) if t in CLASS_KEYS]
-            if keys and not any(t in ("(", "=") for t in tail[keys[-1]:]):
-                nm = tail[keys[-1] + 1] if keys[-1] + 1 < len(tail) else ""
+            # Inside a function: a local class (its key starts the statement,
+            # after any decl-specifiers: not `sizeof(struct Header)` inside a
+            # condition), or just a block / initializer
+            k = 0
+            while k < len(b) and b[k] in DECL_SPECIFIERS | {"typedef"}:
+                k += 1
+            if (k < len(b) and b[k] in CLASS_KEYS
+                    and not any(t == "=" or (t == "(" and not (i and b[i - 1] in SPECIFIER_CALLS))
+                                for i, t in top_level(b) if i > k)):
+                nm = b[k + 1] if k + 1 < len(b) else ""
                 return {"kind": "class", "name": nm if is_ident(nm) else "<local>"}
             return {"kind": kind, "name": "", "keep": kind == "init"}
         # Namespace or class scope
@@ -750,7 +864,8 @@ def scan_tokens(tokens, rel):
         if any(t == "enum" for _, t in top):
             return {"kind": "init", "name": "", "keep": True}
         keys = [i for i, t in top if t in CLASS_KEYS]
-        if keys and not any(t == "(" for i, t in top if i > keys[0]):
+        if keys and not any(t == "(" and not b[i - 1] in SPECIFIER_CALLS
+                            for i, t in top if i > keys[0]):
             rest = [t for t in b[keys[0] + 1:] if is_ident(t) and t not in ("final", "alignas")]
             return {"kind": "class", "name": rest[0] if rest else "<anon>", "keep": True}
         what, nm = classify_head(b)
@@ -876,10 +991,14 @@ def scan_macros(text, rel):
                 continue
             rest = statement_from(words, k)
             head = declaration_head(rest)
-            if classify_head(head)[0] == "function" and (
+            # After `{` or `;` it opens a statement in a block, where a static
+            # is always a variable (block-scope functions cannot be static);
+            # elsewhere it may declare or define a (member) function.
+            in_block = k > 0 and words[k - 1] in ("{", ";")
+            if not in_block and classify_head(head)[0] == "function" and (
                     (len(rest) > len(head) and rest[len(head)] == "{") or not looks_like_initializer(head)):
-                continue   # a (static member) function the macro declares or defines
-            decl = static_local(rest)
+                continue
+            decl = static_local(rest, need_declarator=True)
             if decl:
                 names, immutable = decl
                 for nm in names:

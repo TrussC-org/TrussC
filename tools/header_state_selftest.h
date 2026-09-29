@@ -91,7 +91,8 @@ inline void pointerLocals() {
     static Registry* const reg = new Registry();            // expect: fx::pointerLocals::reg
     static const std::unique_ptr<Registry> owned;           // expect: fx::pointerLocals::owned
     static const char* const names[] = {"x"};               // expect: fx::pointerLocals::names@const
-    static const auto table = std::array<int, 2>{1, 2};     // expect: fx::pointerLocals::table@const
+    // A deduced type is immutable only with a literal initializer (below)
+    static const auto table = std::array<int, 2>{1, 2};     // expect: fx::pointerLocals::table
 }
 
 // --- Parentheses that are not a parameter list: decltype / alignas, and a
@@ -119,6 +120,61 @@ static int notFlaggedUnnamedParam(int, float);
 static Settings notFlaggedPointerParam(Settings* p);
 inline std::vector<int> notFlaggedVexingParse();
 std::vector<int> notFlaggedNonInlineVar(kCount);           // neither inline nor static: a link error in a header, not a split
+
+// --- A deduced type (auto, decltype) is immutable only with a literal
+// initializer: `const auto p = new Registry()` is a Registry* const
+inline Registry* globalRegistry() { static Registry gr; return &gr; }     // expect: fx::globalRegistry::gr
+static const auto deducedNew = new Registry();                           // expect: fx::deducedNew
+static const auto deducedShared = std::make_shared<Registry>();          // expect: fx::deducedShared
+static const decltype(&constPtrToMutable) deducedAddr = &constPtrToMutable;  // expect: fx::deducedAddr
+static const auto deducedCall = globalRegistry();                        // expect: fx::deducedCall
+static const auto notFlaggedDeducedLiteral = 42;
+static const auto notFlaggedDeducedText = "text";
+inline const auto deducedLiteral = 1.5 * 2;                              // expect: fx::deducedLiteral@const
+inline const decltype(kCount) deducedDecltypeLiteral = 3;                // expect: fx::deducedDecltypeLiteral@const
+inline void deducedLocals() {
+    static const auto reg = new Registry();                              // expect: fx::deducedLocals::reg
+    static const auto sp = std::make_shared<Registry>();                 // expect: fx::deducedLocals::sp
+    static const auto lit = 7;                                           // expect: fx::deducedLocals::lit@const
+    static const decltype(kCount) braced{3};                             // expect: fx::deducedLocals::braced@const
+}
+
+// --- Initializers the parameter-list heuristic must see through
+constexpr int kW = 4, kH = 3;
+inline std::vector<int> productInit(kW * kH);                            // expect: fx::productInit
+static Registry* newInit(new Registry);                                  // expect: fx::newInit
+static int castInit(static_cast<int>(kCount));                           // expect: fx::castInit
+static int functionalCastInit(int(kCount));                              // expect: fx::functionalCastInit
+inline bool boolInit(true);                                              // expect: fx::boolInit
+static std::size_t sizeInit(sizeof(Registry));                           // expect: fx::sizeInit
+static void notFlaggedFnPtrParam(int (*cb)(int));
+static void notFlaggedDefaultParam(Registry* reg = nullptr);
+static std::string notFlaggedStdPtrParam(std::string* out);
+static int notFlaggedRegistryParam(Registry* reg);
+namespace {
+std::string anonDirectInit(kDefaultText);                                // expect: fx::anonDirectInit
+int notFlaggedAnonFnDecl(int count);
+}
+
+// --- A base class named by decltype
+inline Settings makeSettings() { return {}; }
+struct DeclBase : decltype(makeSettings()) {
+    static inline int declBaseMember = 0;                                // expect: fx::DeclBase::declBaseMember
+    int& get() { static int db = 0; return db; }                         // expect: fx::DeclBase::get::db
+};
+inline void localDeclBase() {
+    struct L : decltype(makeSettings()) { int& g() { static int ldb = 0; return ldb; } };  // expect: fx::localDeclBase::L::g::ldb
+}
+
+// --- A class key inside a statement is not a local class
+struct Header { int size; };
+inline int longCondition(int n) {
+    if (n > 0 && n < 100 && n != 3 && n != 5 && n != 7 && n != 9 && sizeof(struct Header) > 2) {
+        static int inLongCondition = 0;                                  // expect: fx::longCondition::inLongCondition
+        return inLongCondition;
+    }
+    return 0;
+}
 
 // --- Braced default arguments are not bodies
 struct Settings { int x = 0; };
@@ -210,6 +266,9 @@ struct LambdaMember {
         (void)macroTls; \
     } while (0)
 #define FX_SINGLETON(T) static T& instance() { static T inst; return inst; }  // expect: FX_SINGLETON::inst
+#define FX_BLOCK_STATIC() do { static std::vector<int> blockSized(kW * kH); (void)blockSized; } while (0)  // expect: FX_BLOCK_STATIC::blockSized
+#define FX_NOT_FLAGGED_FORCE_INLINE static inline __attribute__((always_inline))
+#define FX_NOT_FLAGGED_STATIC_API static
 #define FX_NOT_FLAGGED_CONSTEXPR() do { static constexpr int k = 1; (void)k; } while (0)
 #define FX_NOT_FLAGGED_CAST(x) static_cast<int>(x)
 
