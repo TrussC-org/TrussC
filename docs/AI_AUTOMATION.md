@@ -31,8 +31,11 @@ When enabled:
 ### Related: `TRUSSC_LOG_FILE`
 
 Independent of MCP mode, setting `TRUSSC_LOG_FILE=/path/to/app.log` makes the app
-call `setLogFile()` before `setup()` runs, so every log line — including
-setup-time output — is appended to that file with zero app code. This is how a
+call `setLogFile()` before the window and graphics start (`runApp()`, before
+`sapp_run()`), so every log line — including a startup failure such as no
+display or no GL context, and setup-time output — is appended to that file
+with zero app code. sokol's own errors, warnings and panics go through the
+logger too, and lines logged from worker threads land whole. This is how a
 supervisor process (e.g. `anchorbolt start`) captures logs from an unmodified app.
 
 The audio engine reports through the logger too, so the file also receives

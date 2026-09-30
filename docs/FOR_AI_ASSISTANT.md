@@ -1519,7 +1519,7 @@ Reverse (string → value): `toInt(s)` / `toInt64(s)` / `toFloat(s)` / `toDouble
 
 ## Logging
 
-Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`.
+Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`. They are safe to call from any thread (each line lands whole in the console and the log file). sokol's own messages go through the logger too, as `[sg]` / `[sapp]` / `[sgl]` / `[simgui]` lines; its info messages are Verbose, hidden by default.
 
 ### How do I write logs to a file? (getLogger + setLogFile)
 
@@ -1540,6 +1540,7 @@ EventListener logTap_ = getLogger().onLog.listen([](LogEventArgs& e) {
     // e.timestamp / e.level / e.message — e.g. forward to the network
 });
 ```
+The listener runs on whichever thread logged (pass `Deliver::Main` to `listen` before touching nodes or the GPU), outside the logger's own lock, so it may log too.
 
 ## Window & fullscreen
 
