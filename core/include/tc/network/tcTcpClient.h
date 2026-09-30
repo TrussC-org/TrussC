@@ -86,6 +86,15 @@ public:
     // the next frame (see tcEvent.h). Plain listen(fn) runs inline on the
     // firing thread. With setUseThread(false) everything runs on the main
     // thread and this does not apply.
+    //
+    // RECONNECTING FROM A LISTENER: a plain (inline) onDisconnect or onReceive
+    // listener may call connect() to reconnect. That connect() runs on the
+    // old receive thread and detaches it from the client first, so nothing
+    // waits for it: neither disconnect() nor the destructor. Until that
+    // connect() has returned, do not destroy the client, and do not call
+    // disconnect() on it from another thread. Either can end in a
+    // use-after-free, or in a connection that completes after disconnect()
+    // has returned. (A connect() that can be cancelled is #261.)
     // -------------------------------------------------------------------------
     Event<TcpConnectEventArgs> onConnect;       // On connection complete
     Event<TcpReceiveEventArgs> onReceive;       // On data receive
@@ -202,6 +211,16 @@ private:
     // in receiveThreadFunc() both check it. So a listener on the receive
     // thread (onReceive or onDisconnect) can reconnect without the old
     // thread reading the new connection's socket.
+    //
+    // Not covered: the reconnect itself. connect() on the receive thread
+    // detaches that thread and then, on it, creates the socket, resolves the
+    // host, connects (blocking), fires onConnect and starts the new receive
+    // thread. No one owns the detached thread meanwhile: disconnect() and
+    // the destructor do not wait for it, and socket_ is not atomic. A
+    // disconnect() or destruction from another thread in that window races
+    // it (a use-after-free, or a connection that completes after disconnect()
+    // returned), hence the rule in the Events comment above. The fix belongs
+    // to #261 (a cancellable connect) and #262.
     std::atomic<unsigned> receiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()

@@ -118,6 +118,16 @@ private:
     // connection: onReceive, onDisconnect, and onError or onConnect(false)
     // after a failed handshake (performHandshake() tears the failed
     // connection down before it notifies them).
+    //
+    // Not covered: the reconnect itself. connect() on the receive thread
+    // detaches that thread and then, on it, creates the socket, resolves the
+    // host, connects (blocking) and starts the new receive thread. No one
+    // owns the detached thread meanwhile: disconnect() and the destructor do
+    // not wait for it, and socket_ is not atomic. So, as for TcpClient (see
+    // its Events comment): until a connect() called from a listener has
+    // returned, do not destroy the client, and do not call disconnect() on it
+    // from another thread. The fix belongs to #261 (a cancellable connect)
+    // and #262.
     std::atomic<unsigned> tlsReceiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()
