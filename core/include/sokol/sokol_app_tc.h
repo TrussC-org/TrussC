@@ -2486,7 +2486,9 @@ SOKOL_APP_API_DECL const void* sapp_window_x11_get_window(sapp_window win);
    abort() itself once this returns. */
 static inline void _sapp_tc_log(const sapp_logger* logger, uint32_t level, uint32_t item,
                                 uint32_t line_nr, const char* kind, const char* fmt, ...) {
-    char msg[512];
+    /* room for the longest caller message (the WebGPU device callbacks pass
+       up to 1024 bytes) plus "<CODE>: " in front of it */
+    char msg[1024 + 128];
     va_list args;
     va_start(args, fmt);
     vsnprintf(msg, sizeof(msg), fmt, args);
