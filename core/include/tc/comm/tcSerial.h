@@ -477,6 +477,9 @@ public:
     // Move-enabled. onDisconnect listeners are not moved (see Events above).
     Serial(Serial&& other) noexcept {
         Exclusive lock(other.lock_);
+        // other's lock-free isConnected() turns false before its port and
+        // path go (see initialized_)
+        const bool wasOpen = other.initialized_.exchange(false);
 #if defined(_WIN32)
         handle_ = other.handle_;
         other.handle_ = INVALID_HANDLE_VALUE;
@@ -493,9 +496,8 @@ public:
             devicePath_ = std::move(other.devicePath_);
             other.devicePath_.clear();
         }
-        initialized_ = other.initialized_.load();
+        initialized_ = wasOpen;
         baudRate_ = other.baudRate_;
-        other.initialized_ = false;
         ++other.generation_;
     }
 
@@ -503,6 +505,11 @@ public:
         if (this != &other) {
             internal::SerialHeldLog held;  // sent after the locks are released
             ExclusiveBoth locks(lock_, other.lock_);
+            // other's lock-free isConnected() turns false before its port and
+            // path go, this one's before its old port closes (closePort()),
+            // and turns true again only once the new path is in place (see
+            // initialized_)
+            const bool otherWasOpen = other.initialized_.exchange(false);
             // The old port closes without onDisconnect, as in the destructor:
             // a listener that reconnected here would be overwritten below.
 #if defined(_WIN32)
@@ -544,9 +551,8 @@ public:
                 androidserial::destroy(old);  // closes the old connection too
             }
 #endif
-            initialized_ = other.initialized_.load();
+            initialized_ = otherWasOpen;
             baudRate_ = other.baudRate_;
-            other.initialized_ = false;
             // Both hold another connection now (see closeLost())
             ++generation_;
             ++other.generation_;
