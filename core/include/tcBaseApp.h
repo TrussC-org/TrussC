@@ -59,8 +59,9 @@ public:
     // which window's callback makes the call. Same units as setWindowSize().
     // An App attached to no window resizes no window: only its RectNode size
     // changes. The actual size update happens in the windowResized callback.
-    // In the App's constructor no window runs the App yet: it resizes no
-    // window and logs a warning (call it in setup()).
+    // An App no shared_ptr owns yet (e.g. inside its constructor, or one made
+    // on the stack) is run by no window: it resizes no window, only its own
+    // size, and warns once per App (call it in setup()).
     // Defined in tc/app/tcWindow.h (needs the complete Window).
     void setSize(float w, float h) override;
 
@@ -89,6 +90,7 @@ public:
 
 private:
     bool exitRequested_ = false;
+    bool unownedSetSizeWarned_ = false;   // setSize() warned once: no shared_ptr owns this App
 
 public:
 

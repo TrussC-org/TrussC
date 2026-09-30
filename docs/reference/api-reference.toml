@@ -119,9 +119,9 @@ related = ["App::isExitRequested"]
 ["App::setSize"]
 category = "events"
 keywords = ["resize", "window", "dimensions"]
-description.en = "Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. In the App's constructor it resizes no window and logs a warning: call it in setup()"
-description.ja = "アプリ自身のウィンドウ (Appが載っているウィンドウ、メインAppならメインウィンドウ) をリサイズ。どのウィンドウのコールバックから呼んでも同じ。単位は setWindowSize() と同じ。どのウィンドウにも載っていないAppは自分のサイズだけが変わる。Appのコンストラクタ内ではウィンドウは変わらず警告が出る。setup()で呼ぶ"
-description.ko = "앱 자신의 윈도우 (App이 연결된 윈도우, 메인 App이면 메인 윈도우)를 리사이즈. 어느 윈도우의 콜백에서 호출해도 동일. 단위는 setWindowSize()와 같음. 어떤 윈도우에도 연결되지 않은 App은 자신의 크기만 바뀜. App의 생성자 안에서는 윈도우가 바뀌지 않고 경고가 나옴. setup()에서 호출"
+description.en = "Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup()"
+description.ja = "アプリ自身のウィンドウ (Appが載っているウィンドウ、メインAppならメインウィンドウ) をリサイズ。どのウィンドウのコールバックから呼んでも同じ。単位は setWindowSize() と同じ。どのウィンドウにも載っていないAppは自分のサイズだけが変わる。まだshared_ptrに所有されていないApp(コンストラクタ内など)も自分のサイズだけが変わり、一度だけ警告が出る。setup()で呼ぶ"
+description.ko = "앱 자신의 윈도우 (App이 연결된 윈도우, 메인 App이면 메인 윈도우)를 리사이즈. 어느 윈도우의 콜백에서 호출해도 동일. 단위는 setWindowSize()와 같음. 어떤 윈도우에도 연결되지 않은 App은 자신의 크기만 바뀜. 아직 shared_ptr이 소유하지 않은 App(생성자 안 등)도 자신의 크기만 바뀌고 경고가 한 번 나옴. setup()에서 호출"
 related = ["getWindowSize", "setWindowSize", "App::getWindow"]
 
 ["App::touchMoved"]

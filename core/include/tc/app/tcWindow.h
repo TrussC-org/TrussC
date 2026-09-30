@@ -293,13 +293,18 @@ inline Window* App::getWindow() const {
 // resized THAT window instead. Width/height get the same framebuffer ->
 // logical conversion as setWindowSize(), with the target window's own scale.
 inline void App::setSize(float w, float h) {
-    // Not owned by a shared_ptr yet, i.e. called from the App's constructor:
-    // no window runs this App yet (it becomes getRootNode() / a window's App
-    // only once it is made), so there is no window to resize. Only the App's
-    // own size is set, with a warning.
+    // Not owned by a shared_ptr (yet): inside the App's constructor, or an
+    // App made on the stack or in a unique_ptr. No window runs such an App
+    // (it becomes getRootNode() / a window's App only through a shared_ptr),
+    // so there is no window to resize: only the App's own size is set, and
+    // the first such call on this App logs a warning.
     if (weak_from_this().expired()) {
-        logWarning("App") << "setSize() in the App's constructor does not resize "
-            "the window (the App isn't running yet). Call it in setup().";
+        if (!unownedSetSizeWarned_) {
+            unownedSetSizeWarned_ = true;
+            logWarning("App") << "setSize(): this App isn't owned by a shared_ptr yet "
+                "(e.g. inside its constructor), so no window runs it: setSize() only "
+                "changes the App's own size. Call it in setup().";
+        }
         RectNode::setSize(w, h);
         return;
     }
