@@ -30,6 +30,11 @@
 //     limit: past one second the App is still not destroyed, one error is
 //     logged, and the teardown goes on once audioOut() returns. Meanwhile the
 //     public waitForCallbackIdle() still gives up after about a second.
+//   - A secondary window's App whose window was closed (exit(), cleanup(),
+//     audio detached) and that is attached again with Window::setApp() gets
+//     its audioOut() back through one hook, and setup() runs again on the new
+//     window's first tick; moving an App between windows without a close
+//     restarts nothing.
 //   - AudioRecorder::stop() waits for the audioOut pass in flight, and a
 //     capture still in flight when stop() is called (held by a test hook
 //     after its checks, before it hands the buffer to the writer) ends up in
@@ -174,6 +179,25 @@ struct StuckApp : App {
         g_stuckInside = false;
     }
 };
+
+// --- A secondary window's App, closed and attached again ----------------------
+
+static atomic<int> g_reSetups{0};
+static atomic<int> g_reAudioCalls{0};
+
+struct ReattachApp : App {
+    void setup() override { ++g_reSetups; }
+    void audioOut(AudioOutBuffer&) override { ++g_reAudioCalls; }
+};
+
+// One tick of a secondary window, in its own context (as the platform glue
+// does): setup() runs here on the window's first tick.
+static void tickWindow(Window& w) {
+    internal::WindowContext* prev = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &w.context();
+    w.tickTree();
+    internal::currentWindowCtx() = prev;
+}
 
 // -----------------------------------------------------------------------------
 
@@ -357,6 +381,55 @@ int main() {
         check("... and the teardown goes on once audioOut() returns", g_stuckDestroyed.load());
         check("meanwhile the public barrier still gives up after about a second",
               !publicResult && publicTook >= 0.9 && publicTook < 1.5, ms(publicTook));
+    }
+
+    // --- a closed window's App attached again: audio and setup() come back ---------------
+    // Window::close() needs a native window; here the test runs its App part
+    // (exit(), cleanup(), internal::detachAppAudio(), release) itself, then
+    // attaches the App to another window with the real Window::setApp().
+    {
+        auto mainApp = make_shared<App>();   // the main context's root, as runApp's App would be
+        auto sub = make_shared<ReattachApp>();
+        const size_t hooksBefore = engine.audioOut.listenerCount();   // mainApp's and sub's
+        Window first, second;
+        first.setApp(sub);
+        tickWindow(first);
+        const bool firstAudio = waitFor([] { return g_reAudioCalls.load() > 0; }, 2000);
+        check("a new App attached to a window: setup() once, audioOut() called, no second hook",
+              g_reSetups.load() == 1 && firstAudio && engine.audioOut.listenerCount() == hooksBefore,
+              to_string(engine.audioOut.listenerCount()) + " hooks");
+
+        // What the platform Window::close() does with its App.
+        sub->exit();
+        sub->cleanup();
+        internal::detachAppAudio(*sub);
+        first.setApp(nullptr);
+        const int callsAtClose = g_reAudioCalls.load();
+        this_thread::sleep_for(chrono::milliseconds(50));
+        check("after the close, its audioOut() is no longer called",
+              g_reAudioCalls.load() == callsAtClose &&
+              engine.audioOut.listenerCount() == hooksBefore - 1);
+
+        second.setApp(sub);
+        const bool audioBack = waitFor([&] { return g_reAudioCalls.load() > callsAtClose; }, 2000);
+        tickWindow(second);
+        check("attached again: its audioOut() is called again", audioBack);
+        check("... through one hook, not two", engine.audioOut.listenerCount() == hooksBefore,
+              to_string(engine.audioOut.listenerCount()) + " hooks");
+        check("... and setup() runs again on the new window's first tick", g_reSetups.load() == 2,
+              to_string(g_reSetups.load()) + " setups");
+        tickWindow(second);
+        check("... once", g_reSetups.load() == 2);
+
+        // Attached elsewhere without a close in between: nothing restarts.
+        second.setApp(nullptr);
+        first.setApp(sub);
+        tickWindow(first);
+        check("moved to another window without a close: no new setup(), no second hook",
+              g_reSetups.load() == 2 && engine.audioOut.listenerCount() == hooksBefore);
+        first.setApp(nullptr);
+        sub->cleanup();
+        internal::detachAppAudio(*sub);
     }
 
     // --- AudioRecorder::stop() waits for the pass in flight ------------------------------

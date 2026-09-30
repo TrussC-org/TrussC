@@ -64,7 +64,10 @@ public:
     // (position, decoration). To control this window from elsewhere, use this
     // Window handle (from inside the App, App::getWindow() returns it).
     // Note: the App's setup() runs once on the window's first tree update
-    // (standard Node lifecycle), i.e. on the window's first tick.
+    // (standard Node lifecycle), i.e. on the window's first tick. Closing the
+    // window runs exit() and cleanup() and detaches the App's audioOut() /
+    // audioIn(); attaching that App to a window again subscribes them again
+    // and runs setup() again, on that window's first tick.
     void setApp(std::shared_ptr<App> app);
     std::shared_ptr<App> getApp() const { return app_; }
 
@@ -273,6 +276,10 @@ inline void Window::setApp(std::shared_ptr<App> app) {
     if (app) attached.insert(app.get());
     app_ = std::move(app);
     ctx_.rootNode = app_.get();
+    // The App's audio hooks follow the window (#256): close() detaches them,
+    // attaching subscribes them again, and an App whose window was closed
+    // runs setup() again on this window's first tick.
+    if (app_) internal::attachAppAudio(*app_);
 }
 
 // Looked up in the open-window registry rather than cached on the App: every
