@@ -982,13 +982,14 @@ trusscli upgrade               Upgrade TrussC (git pull + rebuild trusscli)
 trusscli addon add|remove <a>  Add / remove addons (also clone / list / search / pull — see `trusscli addon --help`)
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
-trusscli clean                 Delete build directories
-trusscli build                 Build (auto-selects native)
+trusscli clean                 Delete build directories (--all: every target's, incl. xcode-ios, and the generated build-web.* scripts)
+trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache)
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
 ```
 Common options: `-p, --path <path>`, `--tc-root <path>`, `-h, --help` (per-command help).
 Examples: `trusscli new myApp -a tcxOsc -a tcxIME` / `trusscli new ./apps/myApp --web` / `trusscli update -p ./apps/myApp`.
+`update`, `addon add` and `addon remove` keep the project's IDE (`--ide`) and its `--web` / `--android` / `--ios` targets, read back from its `CMakePresets.json`, so a plain `trusscli update -p ./apps/myApp` keeps the web target. Pass `--ide <type>` to switch the IDE, and `--no-web` / `--no-android` / `--no-ios` to drop a target (its build folder and `build-web.*` script stay; `trusscli clean --all` removes them). After a fresh clone (`CMakePresets.json` is gitignored) the defaults apply: `vscode`, native only.
 
 ### VSCode / Cursor won't build (no preset selected)
 
@@ -1483,7 +1484,11 @@ Rules for callbacks that are not on the main thread:
 
 ### Build error: "is not a full path to an existing compiler tool" (after updating Visual Studio)
 
-The build folder's `CMakeCache.txt` still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. Delete the app's build folder (`build-windows`, or whichever `build-*` folder the preset uses) and build again. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically.
+The build folder's `CMakeCache.txt` still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. The project's `CMakePresets.json` pins the same old MSVC, Windows SDK and ninja paths. `trusscli build` handles this: when a pinned path is gone, it detects Visual Studio again, replaces only those paths in the `windows` preset of `CMakePresets.json`, removes `build-windows` and configures again, and prints what it did. A project whose presets pin no Visual Studio path is not touched: delete `build-windows` and run `trusscli build`. `trusscli doctor` reports the missing path. A `--ide vs` project also has a `vs/` solution whose `CMakeCache.txt` still points at the old compiler: run `trusscli update` to regenerate it. With plain CMake, run `trusscli update` (or `trusscli build` once) first. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically.
+
+### Build error: "... is not a directory", "could not load cache", or a missing Makefile / build.ninja
+
+The build folder is missing or empty, e.g. after `trusscli clean` or deleting it by hand. After a configure that failed, the folder has a `CMakeCache.txt` but no build files, and the build stops with "No rule to make target 'Makefile'" or "loading 'build.ninja': No such file or directory". `cmake --build --preset <x>` does not configure by itself. `trusscli build` does: it runs `cmake --preset <x>` first and prints `[build] No CMake cache in <folder>, configuring...`, or after a failed configure `[build] No build files in <folder> (an earlier configure did not finish), configuring...`. With plain CMake, run `cmake --preset <x>` before `cmake --build --preset <x>`.
 
 ### Build error: "hot reload state changed -- reconfigure required"
 
