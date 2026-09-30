@@ -183,6 +183,10 @@ protected:
                     if (type == BLOCK_DEPTH) fresh.depth = true;
                     else fresh.color = true;
                 } else {
+                    // The parser left the stream empty, so an earlier block of
+                    // this type in the frame no longer counts.
+                    if (type == BLOCK_DEPTH) fresh.depth = false;
+                    else fresh.color = false;
                     reportSkippedBlock(type, why);
                 }
                 // These end where their own size fields say (see the parsers).
