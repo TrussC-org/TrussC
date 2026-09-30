@@ -440,11 +440,13 @@ AudioDeviceReport audioDeviceReport(bool enumerate) {
 //      the mixer loads writeFrame before seekEpoch, so a writeFrame that
 //      already covers post-seek data implies it also sees the new epoch,
 //      and it never plays post-seek frames as if they were old ones.
-//   3. The mixer, on a new epoch, sets readFrame = seekBaseFrame (never
-//      backwards: it had not read past that frame), subFrame = 0 and
-//      positionF = target, then stores seekAppliedEpoch and seekAppliedSeq
-//      (release). While a request is still pending it plays nothing, so a
-//      superseded position is never heard.
+//   3. The mixer, on a new epoch, sets readFrame = seekBaseFrame, subFrame
+//      = 0 and positionF = target, then stores seekAppliedEpoch and
+//      seekAppliedSeq (release). readFrame never moves backwards: a mixer
+//      that had run past writeFrame (it can overshoot by up to ceil(speed)-1
+//      frames on an underrun) keeps its readFrame, because the worker bounded
+//      its writes by that value. While a request is still pending it plays
+//      nothing, so a superseded position is never heard.
 // =============================================================================
 
 namespace internal {
@@ -483,8 +485,12 @@ struct StreamInstance {
 
     // Worker only.
     uint64_t seekServedSeq = 0;   // last request the worker took
-    bool     halted = false;      // the stream ended on an error: no more
-                                  // decoding until the next seek request
+
+    // The stream ended on an error. Written by the worker (set before
+    // endOfStream, cleared before a seek's epoch). The worker decodes nothing
+    // more for it until the next seek request, and the mixer ends the voice
+    // once the ring has drained, even when it loops.
+    std::atomic<bool> halted{false};
 
     uint64_t totalFramesInFile = 0;           // duration in source frames
     std::string pathUtf8;                     // for the worker's warnings
@@ -578,11 +584,11 @@ private:
         return ma_decoder_seek_to_pcm_frame(&s.decoder, frame);
     }
 
-    // The stream cannot go on: the mixer drains what the ring holds and a
-    // non-looping voice then ends. The worker decodes nothing more for it
+    // The stream cannot go on: the mixer drains what the ring holds and the
+    // voice then ends, looping or not. The worker decodes nothing more for it
     // until the next seek request. Logged once per occurrence.
     static void endOnError(StreamInstance& s, const std::string& why) {
-        s.halted = true;
+        s.halted.store(true, std::memory_order_relaxed);
         s.endOfStream.store(true, std::memory_order_release);
         logWarning("SoundStream") << s.pathUtf8 << ": " << why << "; the stream ends here";
     }
@@ -591,6 +597,10 @@ private:
     void refillOne(StreamInstance& s) {
         if (s.disposed.load(std::memory_order_acquire)) return;
         if (!s.decoderInitialized) return;
+        if (g_streamFault.load(std::memory_order_relaxed)
+                == (int)internal::StreamFaultForTests::Stalls) {
+            return;   // test: a worker that falls behind (slow storage)
+        }
 
         // True right after a seek to frame 0: a read that then returns no
         // frames means the stream is empty.
@@ -605,7 +615,7 @@ private:
             const double target = s.seekTargetFrame.load(std::memory_order_relaxed);
             const uint64_t frame = (uint64_t)target;
             s.seekServedSeq = req;
-            s.halted = false;
+            s.halted.store(false, std::memory_order_relaxed);
             const ma_result sr = seekDecoder(s, frame);
             // Publish before writing any post-seek data (see the section
             // comment). endOfStream is reset before the epoch, so a mixer
@@ -622,7 +632,7 @@ private:
             s.seekEpoch.store(epoch + 1, std::memory_order_release);
             atStart = (frame == 0);
         }
-        if (s.halted) return;
+        if (s.halted.load(std::memory_order_relaxed)) return;
 
         // Decode in chunks of up to scratchFrames frames at a time.
         constexpr size_t scratchFrames = 1024;
@@ -671,7 +681,7 @@ private:
                             (read - first) * StreamInstance::CHANNELS * sizeof(float));
             }
             s.writeFrame.store(w + read, std::memory_order_release);
-            if (s.halted) break;   // the read that returned these frames failed
+            if (s.halted.load(std::memory_order_relaxed)) break;   // the read that returned these frames failed
 
             if ((ma_uint64)read < (ma_uint64)scratchFrames) {
                 // Short read = end of file. Next iteration's read=0 path
@@ -788,7 +798,15 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
 
     ma_uint64 totalFrames = 0;
     ma_decoder_get_length_in_pcm_frames(&probe, &totalFrames);
+    ma_uint64 probed = totalFrames;
     if (totalFrames == 0) {
+        // A length of 0 can also mean "unknown" (a FLAC whose STREAMINFO
+        // leaves the total at 0, e.g. one encoded to a pipe): decide on a
+        // read. Such a file streams with a duration of 0.
+        float frames[16 * StreamInstance::CHANNELS];
+        ma_decoder_read_pcm_frames(&probe, frames, 16, &probed);
+    }
+    if (probed == 0) {
         // Nothing to play (e.g. a WAV with an empty data chunk), like an
         // eager load() that decodes no samples.
         ma_decoder_uninit(&probe);
@@ -956,9 +974,13 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
     const uint64_t epoch = stream->seekEpoch.load(std::memory_order_acquire);
     if (epoch != stream->seekAppliedEpoch.load(std::memory_order_relaxed)) {
         // The worker seeked: skip what is left of the old data and play
-        // from where the post-seek data starts.
-        stream->readFrame.store(stream->seekBaseFrame.load(std::memory_order_relaxed),
-                                std::memory_order_release);
+        // from where the post-seek data starts. Never backwards: after an
+        // underrun at speed > 1 readFrame can be a few frames past the base,
+        // and the worker bounded its writes by that readFrame, so moving it
+        // back would let the ring hold more than RING_FRAMES.
+        const uint64_t base = stream->seekBaseFrame.load(std::memory_order_relaxed);
+        const uint64_t current = stream->readFrame.load(std::memory_order_relaxed);
+        stream->readFrame.store(std::max(base, current), std::memory_order_release);
         stream->subFrame = 0.0;
         sound.positionF = stream->seekPublishedTarget.load(std::memory_order_relaxed);
         const uint64_t servedSeq = stream->seekPublishedSeq.load(std::memory_order_relaxed);
@@ -983,8 +1005,10 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
     for (int frame = 0; frame < num_frames; ++frame) {
         // Need both readFrame and readFrame+1 for interpolation.
         if (readFrame + 1 >= writeFrame) {
+            // A stream that ended on an error (halted) ends the voice even
+            // when it loops; it was set before endOfStream.
             if (stream->endOfStream.load(std::memory_order_acquire)
-                && !sound.loop.load()) {
+                && (!sound.loop.load() || stream->halted.load(std::memory_order_relaxed))) {
                 sound.playing = false;
                 break;
             }

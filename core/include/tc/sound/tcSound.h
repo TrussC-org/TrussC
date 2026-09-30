@@ -839,10 +839,12 @@ namespace internal {
     void runAudioRecorderCaptureHookForTests(int frames);   // calls the hook, if set
 
     // Test hook, not a user setting: make the StreamWorker's decoder calls
-    // fail, so a headless test can drive a stream's end-of-stream paths
+    // fail, or make the worker skip every stream (Stalls: a worker that falls
+    // behind, e.g. on slow storage; seek requests wait too), so a headless
+    // test can drive a stream's end-of-stream and seek paths
     // (core/tests/streamSeek). Only the worker's refill is affected, not
     // loadStream() or play(). State lives in tcAudio_impl.cpp.
-    enum class StreamFaultForTests { None, ReadFails, SeekFails };
+    enum class StreamFaultForTests { None, ReadFails, SeekFails, Stalls };
     void setStreamFaultForTests(StreamFaultForTests fault);
 
     // Seek a voice (Sound::setPosition()). `frame` counts the voice's
@@ -1687,10 +1689,8 @@ public:
     // position; otherwise it is the position being played.
     float getPosition() const {
         if (!playing_ || !buffer_) return 0;
-        // positionF counts frames at buffer_->sampleRate (source frames for
-        // eager sources, engine-rate frames for streams, whose sampleRate is
-        // the engine rate), so the division yields seconds either way.
-        return (float)internal::voicePosition(*playing_) / buffer_->sampleRate;
+        const int rate = positionRate();
+        return rate > 0 ? (float)(internal::voicePosition(*playing_) / (double)rate) : 0.0f;
     }
 
     // Seek to `seconds`. Eager sounds move at once. A stream moves after
@@ -1700,14 +1700,15 @@ public:
     // paused stream moves when it resumes.
     void setPosition(float seconds) {
         if (!playing_ || !buffer_) return;
-        double pos = seconds * buffer_->sampleRate;
+        const int rate = positionRate();
+        double pos = seconds * (double)rate;
         if (pos < 0) pos = 0;
         // For eager: clamp to numSamples. For streams: clamp to duration.
         if (buffer_->kind() == SoundSource::Eager) {
             auto* eager = static_cast<const SoundBuffer*>(buffer_.get());
             if (pos >= (double)eager->numSamples) pos = (double)eager->numSamples - 1;
         } else {
-            double maxPos = (double)buffer_->getDuration() * buffer_->sampleRate;
+            double maxPos = (double)buffer_->getDuration() * (double)rate;
             if (pos >= maxPos) pos = maxPos - 1;
         }
         internal::seekVoice(*playing_, pos);
@@ -1718,6 +1719,17 @@ public:
     }
 
 private:
+    // Frames per second of the voice's positionF: the source rate for eager
+    // sources; the engine's current rate for streams, whose decoder outputs
+    // at that rate. A stream's sampleRate is the engine rate at loadStream()
+    // and goes stale when the engine is re-initialized at another rate (the
+    // voice's decoder and positionF move to the new rate).
+    int positionRate() const {
+        return buffer_->kind() == SoundSource::Stream
+            ? AudioEngine::getInstance().getSampleRate()
+            : buffer_->sampleRate;
+    }
+
     std::shared_ptr<SoundSource> buffer_;
     std::shared_ptr<PlayingSound> playing_;
     float   volume_  = 1.0f;
