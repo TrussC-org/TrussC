@@ -232,6 +232,10 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // Call exit and cleanup
     app->exit();
     app->cleanup();
+
+    // The audio device keeps running: detach the App's audio hooks and wait
+    // for a callback in flight before the App goes out of scope (#256).
+    internal::detachAppAudio(*app);
     ctx.rootNode.reset();   // no longer the running App
 
     // Headless apps leave the audio device running (no shutdownAudio() on

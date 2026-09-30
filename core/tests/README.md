@@ -73,6 +73,21 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   from its `threadedFunction()` or by a `thread_local` owner at thread exit (it
   still terminates, see the "Destruction" notes in `tcThread.h`), and a
   destruction at the very moment the worker calls `threadedFunction()`.
+- `loggerThreadSafety/` — the Logger is safe to call from any thread, and
+  sokol's messages go through it (#265). Threads logging at once while
+  another thread switches the file (`setLogFile()`) and toggles the levels
+  leave every line whole and exactly once, in the file and on the console;
+  `setLogFile()` / `closeFile()` toggled under load tear or duplicate
+  nothing, and nothing is written after `closeFile()` returns; an `onLog`
+  listener that logs again, itself or through a thread it waits for, does
+  not deadlock. The sokol bridge (`internal::sokolLog`) maps panic / error /
+  warning / info to Fatal / Error / Warning / Verbose, with the tag as the
+  module and `id:<item> line:<line>` when sokol passes no message. POSIX
+  only, each in a forked child: a panic reaches the log file and still
+  aborts through `slog_func`; a panic while another thread holds the
+  Logger's lock does not wait for it (the line goes to stderr); and on
+  Linux, with no X display and `TRUSSC_LOG_FILE` set, `runApp()`'s
+  `XOpenDisplay()` failure lands in that file.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
@@ -85,6 +100,34 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
+- `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
+  (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
+  one disconnects or destroys is not called in that pass, `clear()` stops the
+  rest of the pass, a listener that removes itself does not stop the later
+  ones, and a listener added during a pass starts from the next one. Includes
+  the `Tween` shape: objects in a vector listen with `[this]` and re-listen in
+  their move constructor; growing the vector inside the pass sends no call to
+  a moved-from object.
+- `audioListenerTeardown/` — nothing on the audio thread reaches an object
+  after its owner let it go (#256), on the real `AudioEngine` over miniaudio's
+  null backend: `AudioEngine::waitForCallbackIdle()` waits for an `audioOut`
+  pass in flight, returns at once with no audio running and from inside a
+  listener, and gives up (warning, `false`) on a listener stuck for a second;
+  an App torn down by `runHeadlessApp` while its `audioOut()` runs keeps the
+  hook through `cleanup()`, then its destructor neither starts during
+  `audioOut()` nor sees it called afterwards (the windowed exit, hot reload
+  and closing a secondary window use the same `internal::detachAppAudio()`);
+  that teardown waits for a stuck `audioOut()` past one second without
+  destroying the App (one error logged; the public barrier still gives up
+  after a second meanwhile) and goes on once it returns; an App runs once:
+  `Window::setApp()` refuses an App whose window closed (one error, the
+  window keeps its App, no hook comes back, no second `setup()`) and any App
+  on a window that is not open;
+  `AudioRecorder::stop()` waits for the pass in flight, and a capture held in
+  flight by a test hook (`internal::setAudioRecorderCaptureHookForTests()`)
+  while another thread calls `stop()` still ends up in the WAV and in
+  `getRecordedSeconds()`. A watchdog turns a barrier that never returns into
+  a FAIL.
 - `mediaDecode/` — *(also on web)* the bundled decoders read every image
   format and Ogg Vorbis through the TrussC entry points:
   `Pixels::loadFromMemory()` / `load()` / `loadHDR()` for PNG (8 and 16-bit),
@@ -158,3 +201,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   the App with a `shared_ptr`, so it is the root in `setup()`, `update()` and
   `cleanup()`, `setup()` can `addChild()`, and the root is cleared when the
   run ends.
+- `pixelsIndex/` — `Pixels` indexes with `size_t`, so images past `INT_MAX`
+  bytes work: the offset of the far corner of a 23171x23171 RGBA image, and
+  an `allocate()` byte count that is checked before it can wrap (against a
+  32-bit limit too, standing in for wasm32). A size that would wrap, a
+  negative one, or a channel count other than 1-4 logs an error and leaves the
+  buffer empty, and `crop()` / `Image::allocate()` stop there. With 64-bit
+  `size_t` and at least 4 GiB of memory available (on Linux, the lower of
+  `MemAvailable` and the cgroup v2 `memory.max` headroom), it also allocates real buffers just past 2 GiB and checks
+  `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
+  past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.

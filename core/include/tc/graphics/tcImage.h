@@ -115,6 +115,7 @@ public:
     void allocate(int width, int height, int channels = 4, bool mipmaps = false) {
         clear();
         pixels_.allocate(width, height, channels);
+        if (!pixels_.isAllocated()) return;  // Pixels logged why
         mipmaps_ = mipmaps;
         usage_ = TextureUsage::Dynamic;
         // Dynamic so the texture can be re-uploaded with update(). When

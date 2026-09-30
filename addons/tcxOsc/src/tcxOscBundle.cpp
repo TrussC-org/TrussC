@@ -71,18 +71,20 @@ OscBundle OscBundle::fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok
     bundle.timetag_ = fromBigEndian64(be);
     pos += 8;
 
-    // Read elements
-    while (pos + 4 <= size) {
-        // Element size
+    // Read elements: each is a 4-byte size, then that many bytes. The bundle
+    // parses only if every element is there in full. pos <= size holds
+    // throughout, and each check subtracts from size instead of adding to pos,
+    // so none of them can wrap when size_t is 32 bits.
+    while (pos < size) {
+        // Element size (a size field cut short is a truncated element)
+        if (size - pos < 4) return OscBundle();
         uint32_t sizeBe;
         std::memcpy(&sizeBe, data + pos, 4);
         uint32_t elementSize = fromBigEndian(sizeBe);
         pos += 4;
 
-        if (pos + elementSize > size) {
-            // Invalid size (not enough remaining data)
-            break;
-        }
+        // An element larger than the data left is truncated
+        if (elementSize > size - pos) return OscBundle();
 
         const uint8_t* elementData = data + pos;
 

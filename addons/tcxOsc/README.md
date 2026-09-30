@@ -30,7 +30,9 @@ and other bundles.
 - **Robust parser** — malformed packets are rejected (reported via `onParseError`)
   rather than crashing. Bundles nest up to `OscBundle::MAX_NESTING_DEPTH` (16)
   levels; a packet nested deeper, or one whose nested bundle fails to parse, is
-  rejected as a whole.
+  rejected as a whole. So is a bundle with an element whose size runs past the end
+  of the data, and a top-level message with a blob that does. A message inside a
+  bundle that fails to parse is still skipped (see #399).
 
 ## Install
 
@@ -167,7 +169,7 @@ bool isListening() const;
 
 // Events (fire on the receive thread)
 Event<OscMessage> onMessageReceived;
-Event<OscBundle>  onBundleReceived;
+Event<OscBundle>  onBundleReceived;   // see the note below
 Event<string>     onParseError;
 
 // Polling (call from update(); buffer turns on at first hasNewMessage())
@@ -176,6 +178,12 @@ bool   getNextMessage(OscMessage& out);
 void   setBufferSize(size_t);      // default 100; oldest dropped when full
 size_t getBufferSize() const;
 ```
+
+> **`onBundleReceived`** hands each listener the parsed bundle itself, not a copy,
+> and that `OscBundle&` is valid only during the call. A listener may edit that
+> bundle, but must not keep a reference to an enclosing bundle (from an earlier
+> call for the same packet) and modify it (e.g. `addMessage()` / `clear()`) while a
+> nested bundle of that packet is being dispatched.
 
 ## Examples
 

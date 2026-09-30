@@ -64,8 +64,8 @@
 // through tc_get_alerts), and work a guest worker thread queues with
 // runOnMainThread() must run when the host drains the main-thread queue.
 // An App guest code attaches to a window and the host releases (as the
-// platform close() does) must attach again: the double-attach guard is one set
-// per process, not a copy per module.
+// platform close() does) must be released in guest code's view too: the
+// double-attach guard is one set per process, not a copy per module.
 //
 // On Linux and macOS all of this holds either way, since the host uses (and so
 // contains) every definition checked here; on Windows it fails if any of that
@@ -473,25 +473,42 @@ static int runCycles(const std::string& guestPath, int port) {
         }
 
         // A secondary window's App: guest code attaches it (Window::setApp()
-        // is inline), the host releases it, and guest code attaches it again,
-        // as when an app reopens a window the user closed. The platform
-        // close() that releases it is TrussC.lib code; the host's own
-        // setApp(nullptr) releases it the same way without a native window.
-        // A guest with its own double-attach guard never saw the release and
-        // refused the second attach ("already drives another window").
+        // is inline), the host releases it, and guest code must see the
+        // release in the double-attach guard. The platform close() that
+        // releases it is TrussC.lib code; the host's own setApp(nullptr)
+        // releases it the same way without a native window. A guest with its
+        // own guard never saw the release: the App stayed "attached" in the
+        // guest's view ("already drives another window" for anything there).
+        // An App runs once (#256: a closed App is not attached again), so the
+        // second attach, as when an app reopens a window the user closed,
+        // uses a new App. setApp() only takes an open window: the windows
+        // get a stand-in native state, never dereferenced here and cleared
+        // before ~Window() would close() it.
         {
-            // Created after the guest App, so it does not become the main
-            // context's root (the "running main App" setApp() refuses).
+            // These Apps are not the main context's root (only runApp() or the
+            // host makes an App the root), so setApp() does not refuse them as
+            // the running main App.
             auto sub = std::make_shared<App>();
+            auto reopened = std::make_shared<App>();
+            static int nativeStandIn = 0;
             Window first, second;
+            first.native_ = &nativeStandIn;
+            second.native_ = &nativeStandIn;
             const bool attached = guest->attachApp(first, sub);
+            const bool guestSawAttach = attached && guest->seesAttached(sub.get());
             first.setApp(nullptr);
-            const bool reattached = attached && guest->attachApp(second, sub);
+            const bool guestSawRelease = !guest->seesAttached(sub.get());
+            const bool attachedNew = guest->attachApp(second, reopened);
             second.setApp(nullptr);
-            if (!attached) return fail(33, "guest code could not attach an App to a window");
-            if (!reattached) {
-                return fail(33, "an App the host released from its window could not be attached again from guest code: the guest keeps its own double-attach guard");
+            first.native_ = nullptr;
+            second.native_ = nullptr;
+            if (!attached || !guestSawAttach) {
+                return fail(33, "guest code could not attach an App to a window, or does not see it attached");
             }
+            if (!guestSawRelease) {
+                return fail(33, "guest code still sees an App the host released from its window as attached: the guest keeps its own double-attach guard");
+            }
+            if (!attachedNew) return fail(33, "guest code could not attach a new App to another window");
         }
 
         // Node references into the guest (#255): hover, grab and selection in
