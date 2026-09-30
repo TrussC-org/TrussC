@@ -71,6 +71,12 @@
 // contains) every definition checked here; on Windows it fails if any of that
 // state is header-inline again.
 //
+// Node references (#255), on every platform: the host makes the guest's App
+// the main window's root (getRootNode(), a weak reference), and before it
+// unloads the guest it resets the weak references every window context keeps
+// to nodes (hover, grab, selection, the main root), which here name a node
+// guest code made.
+//
 // Exit code: 0 = survived all cycles (including process exit), non-zero or a
 // crash = regression. The test itself never enters TC_RUN_APP: no sokol loop,
 // no GPU, no file watcher, no cmake rebuild — CI-safe on every desktop
@@ -294,6 +300,12 @@ static int runCycles(const std::string& guestPath, int port) {
             return fail(26, "the guest's node ids restarted instead of continuing the process-wide sequence");
         }
         prevAppId = app->getInstanceId();
+        // The host makes the guest's App the main window's root
+        // (getRootNode()), held weakly (#255): the App's constructor can't
+        // register itself, weak_from_this() being empty until it returns.
+        if (internal::mainWindowContext().rootNode.lock().get() != app) {
+            return fail(38, "the guest's App is not the main window's root (getRootNode())");
+        }
         if (!(mcp::hasTool("guest_probe") && hasStatus("guest_status") && hasStatusImage("guest_image"))) {
             return fail(4, "guest MCP registrations not visible to the host");
         }
@@ -482,6 +494,25 @@ static int runCycles(const std::string& guestPath, int port) {
             }
         }
 
+        // Node references into the guest (#255): hover, grab and selection in
+        // the main window's context and in a secondary window's (one the host
+        // keeps across the reload) name a node guest code made. The host must
+        // drop them, and the main root, before the guest goes: releasing the
+        // last weak reference to a make_shared node runs code of the module
+        // that created it. Left alone they would only expire when the App is
+        // deleted; the check after the unload tells the two apart.
+        Window keptWindow;
+        {
+            std::shared_ptr<Node> guestNode = guest->addGuestChild();
+            for (internal::WindowContext* ctx : {&internal::mainWindowContext(), &keptWindow.context()}) {
+                ctx->hoveredNode = guestNode;
+                ctx->prevHoveredNode = guestNode;
+                ctx->grabbedNode = guestNode;
+                ctx->grabbedButton = 0;
+                ctx->selectedNode = guestNode;
+            }
+        }
+
         // Destruction + unload: listener removal churns the COW lists, and the
         // (pre-fix) dlclose here is what armed/triggered both crashes. It
         // happens while three deferred replies wait for the afterFrame drain,
@@ -502,6 +533,23 @@ static int runCycles(const std::string& guestPath, int port) {
         if (!unloadedWhileDeferred) {
             lib.unload();
             return fail(35, "guest_deferred, tc_get_status_image and host_deferred did not all leave a deferred reply pending");
+        }
+        // Reset, not just expired: an expired reference still holds the guest's
+        // control block.
+        auto isReset = [](const std::weak_ptr<Node>& ref) {
+            const std::weak_ptr<Node> none;
+            return !ref.owner_before(none) && !none.owner_before(ref);
+        };
+        for (internal::WindowContext* ctx : {&internal::mainWindowContext(), &keptWindow.context()}) {
+            if (!isReset(ctx->hoveredNode) || !isReset(ctx->prevHoveredNode) || !isReset(ctx->grabbedNode) ||
+                ctx->grabbedButton != -1 || !isReset(ctx->selectedNode)) {
+                return fail(39, std::string("unloading the guest left a reference to one of its nodes in the ") +
+                                (ctx == &keptWindow.context() ? "secondary" : "main") +
+                                " window's hover / grab / selection");
+            }
+        }
+        if (!isReset(internal::mainWindowContext().rootNode)) {
+            return fail(39, "unloading the guest left the main window's root pointing at its App");
         }
         for (size_t k = 0; k < 2; k++) {
             json cancelled = toolContent(replies[k]);

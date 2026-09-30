@@ -42,18 +42,12 @@ public:
         audioInListener_  = AudioEngine::getInstance().audioIn.listen(
             [this](AudioInBuffer& b) { audioIn(b); });
 
-        // The FIRST App becomes the scene-graph root of the active window
-        // (normally the main App created by runApp) — exposed via
-        // getRootNode() so tools (e.g. the MCP node tools) can walk the tree.
-        // Later App instances don't clobber it: they are secondary-window
-        // content, registered explicitly by Window::setApp().
-        if (internal::currentWindowContext().rootNode == nullptr) {
-            internal::currentWindowContext().rootNode = this;
-        }
-    }
-
-    virtual ~App() {
-        if (internal::currentWindowContext().rootNode == this) internal::currentWindowContext().rootNode = nullptr;
+        // Not registered as a window's scene-graph root here: the root is
+        // held weakly (getRootNode()), and weak_from_this() is empty until
+        // the constructor returns. Whoever creates the App through a
+        // shared_ptr registers it: runApp(), runHeadlessApp() and the hot
+        // reload host for the main window, Window::setApp() for a secondary
+        // window.
     }
 
     // -------------------------------------------------------------------------
@@ -65,6 +59,9 @@ public:
     // which window's callback makes the call. Same units as setWindowSize().
     // An App attached to no window resizes no window: only its RectNode size
     // changes. The actual size update happens in the windowResized callback.
+    // An App no shared_ptr owns yet (e.g. inside its constructor, or one made
+    // on the stack) is run by no window: it resizes no window, only its own
+    // size, and warns once per App (call it in setup()).
     // Defined in tc/app/tcWindow.h (needs the complete Window).
     void setSize(float w, float h) override;
 
@@ -93,6 +90,7 @@ public:
 
 private:
     bool exitRequested_ = false;
+    bool unownedSetSizeWarned_ = false;   // setSize() warned once: no shared_ptr owns this App
 
 public:
 

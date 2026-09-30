@@ -117,3 +117,32 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `ScreenRecorder` pacer (its `start()`/`tick()` are all the timing
   `ScreenRecorder` reads) stays exact after long uptime and, like the
   `tc_get_health` uptime, ignores `resetElapsedTimeCounter()`.
+- `nodeRemoval/` — node lifetime in mouse dispatch (#255): the window context
+  holds the hovered / grabbed / selected node weakly and dispatch holds a
+  strong reference while handlers run, so a node freed by `removeChild()` /
+  `removeAllChildren()` is never touched by the next hover update, drag or
+  release and `getSelectedNode()` returns null; a handler or `Event` listener
+  that removes its own node or an ancestor (grab release and drag, the
+  press / release / move / scroll bubbling, mouseEnter / mouseLeave) runs on
+  a live node, its mods still get the event (checked for the grab release),
+  and the node is freed when dispatch returns;
+  `isMouseOver()` / `getSelectedNode()` never match a new node at a freed
+  node's address, and `setSelectedNode()` with a node no `shared_ptr` owns
+  clears the selection. Working code is unchanged: a removed node the app
+  still holds gets its Leave, reparenting fires no extra Enter / Leave,
+  `destroy()` drops hover / grab / selection at once. Runs in a secondary
+  window's context and in the main one. A freed probe's memory holds a
+  sentinel node that counts any call reaching it, so a stale pointer fails
+  the test instead of depending on heap reuse.
+- `appRoot/` — the running App is `getRootNode()` (#255): the root is a weak
+  reference, so the App can't register itself from its constructor, and the
+  code that creates it through a `shared_ptr` does. `runApp()`'s setup
+  callback (called here without `sapp_run()`) registers the App, and the
+  root is gone once the cleanup callback freed it. Inside the App's
+  constructor `getRootNode()` is not the App yet and `App::setSize()`
+  resizes no window and warns once however often it is called (an App on
+  the stack likewise); from `setup()` it goes to the main window without a
+  warning. `runHeadlessApp()` owns
+  the App with a `shared_ptr`, so it is the root in `setup()`, `update()` and
+  `cleanup()`, `setup()` can `addChild()`, and the root is cleared when the
+  run ends.

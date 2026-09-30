@@ -119,9 +119,9 @@ related = ["App::isExitRequested"]
 ["App::setSize"]
 category = "events"
 keywords = ["resize", "window", "dimensions"]
-description.en = "Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size"
-description.ja = "アプリ自身のウィンドウ (Appが載っているウィンドウ、メインAppならメインウィンドウ) をリサイズ。どのウィンドウのコールバックから呼んでも同じ。単位は setWindowSize() と同じ。どのウィンドウにも載っていないAppは自分のサイズだけが変わる"
-description.ko = "앱 자신의 윈도우 (App이 연결된 윈도우, 메인 App이면 메인 윈도우)를 리사이즈. 어느 윈도우의 콜백에서 호출해도 동일. 단위는 setWindowSize()와 같음. 어떤 윈도우에도 연결되지 않은 App은 자신의 크기만 바뀜"
+description.en = "Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup()"
+description.ja = "アプリ自身のウィンドウ (Appが載っているウィンドウ、メインAppならメインウィンドウ) をリサイズ。どのウィンドウのコールバックから呼んでも同じ。単位は setWindowSize() と同じ。どのウィンドウにも載っていないAppは自分のサイズだけが変わる。まだshared_ptrに所有されていないApp(コンストラクタ内など)も自分のサイズだけが変わり、一度だけ警告が出る。setup()で呼ぶ"
+description.ko = "앱 자신의 윈도우 (App이 연결된 윈도우, 메인 App이면 메인 윈도우)를 리사이즈. 어느 윈도우의 콜백에서 호출해도 동일. 단위는 setWindowSize()와 같음. 어떤 윈도우에도 연결되지 않은 App은 자신의 크기만 바뀜. 아직 shared_ptr이 소유하지 않은 App(생성자 안 등)도 자신의 크기만 바뀌고 경고가 한 번 나옴. setup()에서 호출"
 related = ["getWindowSize", "setWindowSize", "App::getWindow"]
 
 ["App::touchMoved"]
@@ -14081,9 +14081,9 @@ related = ["getFileName", "joinPath"]
 ["getRootNode"]
 category = "scene_graph"
 keywords = ["tree", "app", "top", "hierarchy"]
-description.en = "Get the running App as the root of the node tree (set by the framework while the app is alive, null otherwise). Lets tools walk the whole tree without the app passing itself around."
-description.ja = "実行中のAppをノードツリーのルートとして取得(アプリ生存中はフレームワークが設定、それ以外はnull)。アプリが自身を渡し回さずともツールがツリー全体を辿れる"
-description.ko = "실행 중인 App을 노드 트리의 루트로 얻음(앱이 살아있는 동안 프레임워크가 설정, 그 외에는 null). 앱이 자신을 넘기지 않아도 도구가 트리 전체를 순회 가능"
+description.en = "Get the running App as the root of the node tree (set by the framework while the app is alive, null otherwise). Lets tools walk the whole tree without the app passing itself around. Not yet the App inside its own constructor: use it from setup() on."
+description.ja = "実行中のAppをノードツリーのルートとして取得(アプリ生存中はフレームワークが設定、それ以外はnull)。アプリが自身を渡し回さずともツールがツリー全体を辿れる。App自身のコンストラクタ内ではまだそのAppを返さない。setup()以降で使う"
+description.ko = "실행 중인 App을 노드 트리의 루트로 얻음(앱이 살아있는 동안 프레임워크가 설정, 그 외에는 null). 앱이 자신을 넘기지 않아도 도구가 트리 전체를 순회 가능. App 자신의 생성자 안에서는 아직 그 App을 반환하지 않음. setup()부터 사용"
 related = ["getSelectedNode", "Node"]
 
 ["getScale"]
@@ -14105,9 +14105,9 @@ description.ko = "현재 초 (0-59)"
 ["getSelectedNode"]
 category = "scene_graph"
 keywords = ["selection", "active", "clicked", "inspector"]
-description.en = "Get the currently selected node (the last-clicked node, held by the Node system; null if none). A tool such as an inspector can read it and drive it via setSelectedNode()."
-description.ja = "現在選択中のノード(最後にクリックされたノード、Nodeシステムが保持。なければnull)を取得。inspectorなどのツールがこれを読み取り、setSelectedNode()で操作できる"
-description.ko = "현재 선택된 노드(마지막으로 클릭된 노드, Node 시스템이 보유. 없으면 null)를 얻음. inspector 같은 도구가 이를 읽고 setSelectedNode()로 조작 가능"
+description.en = "Get the currently selected node (the last-clicked node, held by the Node system; null if none or once the node is freed). A tool such as an inspector can read it and drive it via setSelectedNode(). The pointer is for the current call; to keep the node, keep its weak_from_this()."
+description.ja = "現在選択中のノード(最後にクリックされたノード、Nodeシステムが保持。なければ、またはノードが解放されたらnull)を取得。inspectorなどのツールがこれを読み取り、setSelectedNode()で操作できる。ポインタはその呼び出しの間だけ使い、ノードを持ち続けるならweak_from_this()を保持する"
+description.ko = "현재 선택된 노드(마지막으로 클릭된 노드, Node 시스템이 보유. 없거나 노드가 해제되면 null)를 얻음. inspector 같은 도구가 이를 읽고 setSelectedNode()로 조작 가능. 포인터는 그 호출 동안만 사용하고, 노드를 계속 참조하려면 weak_from_this()를 보관"
 related = ["setSelectedNode", "getRootNode", "Node::enableEvents"]
 
 ["getSokolMemoryAllocs"]
@@ -15532,9 +15532,9 @@ related = ["RectNode::setClipping", "pushScissor"]
 ["setSelectedNode"]
 category = "scene_graph"
 keywords = ["select", "selection", "highlight", "set active", "inspector"]
-description.en = "Set the currently selected node. Pass nullptr to clear the selection."
-description.ja = "現在選択中のノードを設定。nullptrを渡すと選択を解除"
-description.ko = "현재 선택된 노드를 설정. nullptr을 전달하면 선택을 해제"
+description.en = "Set the currently selected node. Pass nullptr to clear the selection; a node no shared_ptr owns also clears it."
+description.ja = "現在選択中のノードを設定。nullptrを渡すと選択を解除(shared_ptrで所有されていないノードも解除になる)"
+description.ko = "현재 선택된 노드를 설정. nullptr을 전달하면 선택을 해제(shared_ptr이 소유하지 않는 노드도 해제됨)"
 related = ["getSelectedNode"]
 
 ["setStrokeCap"]

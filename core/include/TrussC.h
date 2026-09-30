@@ -2980,6 +2980,8 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     // Set callbacks
     internal::appSetupFunc = []() {
         app = std::make_shared<AppClass>();
+        // The main window's scene-graph root (getRootNode()), held weakly
+        internal::mainWindowContext().rootNode = app;
         // Note: Size is set in _setup_cb after this callback
         // setup() is called automatically in updateTree() via setupCalled_ flag
     };

@@ -128,12 +128,20 @@ struct WindowContext {
     std::unordered_set<int> keysPressed;
 
     // --- scene / hover state (per window's node tree) ---
-    Node* rootNode = nullptr;         // The running App (set by the framework)
-    Node* hoveredNode = nullptr;      // Currently hovered node
-    Node* prevHoveredNode = nullptr;  // Previously hovered node
-    Node* grabbedNode = nullptr;      // Node grabbed by mouse press
-    int grabbedButton = -1;           // Mouse button that caused the grab
-    Node* selectedNode = nullptr;     // Last node clicked (selection)
+    // Weak references (#255): a node removed from the tree and freed while
+    // one of these still names it just makes lock() return null, so the next
+    // hover update, drag or selection read never touches freed memory. Use
+    // them through lock() and keep the resulting shared_ptr for as long as
+    // the node is used (e.g. across a handler that may remove it). A hot
+    // reload host resets them before it unloads a guest
+    // (resetNodeRefsForUnload): releasing the last weak reference to a
+    // make_shared node runs code of the module that created it.
+    std::weak_ptr<Node> rootNode;         // The running App (set by the framework)
+    std::weak_ptr<Node> hoveredNode;      // Currently hovered node
+    std::weak_ptr<Node> prevHoveredNode;  // Previously hovered node
+    std::weak_ptr<Node> grabbedNode;      // Node grabbed by mouse press
+    int grabbedButton = -1;               // Mouse button that caused the grab
+    std::weak_ptr<Node> selectedNode;     // Last node clicked (selection)
 
     // --- camera / projection state ---
     std::shared_ptr<const CameraContext> currentCameraContext;
@@ -357,6 +365,15 @@ WindowContext*& currentWindowCtx();
 // currentWindowCtx(), and in a single-window app it costs the one out-of-line
 // call its inline version always made (to mainWindowContext()).
 WindowContext& currentWindowContext();
+
+// Drop the node references of every window context: hover, grab and
+// selection in the main window's context and each secondary window's, and
+// the main window's root. The hot reload host calls it before it unloads a
+// guest (tcHotReloadHost.h), so no weak reference to a node the guest created
+// outlives the guest. A secondary window's root stays: it names the App the
+// window itself holds (Window::setApp). Non-inline (tcGlobal.cpp): it walks
+// the window registry.
+void resetNodeRefsForUnload();
 
 // ---------------------------------------------------------------------------
 // Per-window frame timing. Non-inline (tcGlobal.cpp).
