@@ -45,6 +45,11 @@
 //     ./bin/fontSfntCheck
 //   (prefix the last line with `setarch -R` where ASan fails to start
 //   because of the kernel's address randomization),
+// - CFF vertex counting stops within the range stb handles, and a vertex
+//   array that cannot be allocated leaves the glyph empty (with the lower
+//   test limits from local.cmake): a glyph over the limit, one whose closing
+//   vertex is the one over it, one drawn 2^32 times through nested
+//   subroutines, and one whose array allocation fails all come back empty,
 // - valid fonts still load, with the metrics they are built with, including
 //   numberOfHMetrics == numGlyphs, a cmap format 12 subtable, a table of
 //   length 0 and tables that share bytes with another.
@@ -74,6 +79,12 @@ static void check(const string& name, bool ok, const string& detail = "") {
     fflush(stdout);
     if (!ok) ++g_fail;
 }
+
+// Set in core/include/impl/stb_impl.cpp when it is built with
+// TC_STBTT_TEST_LIMITS, which this test's local.cmake defines: the vertex
+// limit of the CFF counting pass, and the largest size STBTT_malloc allocates.
+extern int tcStbttTestMaxVertices;
+extern size_t tcStbttTestMallocMax;
 
 static int g_warnings = 0;
 static string g_lastWarning;
@@ -596,6 +607,95 @@ static void checkCodepointRange() {
           g ? "advance=" + to_string(g->getAdvance()) : "null");
 }
 
+// --- CFF vertex count --------------------------------------------------------------
+// Pushes the operand for global subroutine `index` (bias 107 for fewer than
+// 1240 subroutines) and calls it.
+static void csCallGsubr(Bytes& b, int index) {
+    csNum(b, index - 107);
+    b.push_back(29);  // callgsubr
+}
+
+// Global subroutines: G0 draws 256 one-unit lines that end where they
+// started; G1, G2 and G3 each call the one before 256 times, so G<n> draws
+// 256^(n+1) lines.
+static vector<Bytes> vertexCountGsubrs() {
+    vector<Bytes> g(4);
+    for (int k = 0; k < 16; k++) {
+        for (int i = 0; i < 4; i++) {
+            csNum(g[0], 1); csNum(g[0], 1); csNum(g[0], -1); csNum(g[0], -1);
+        }
+        g[0].push_back(6);  // hlineto, 16 arguments: 16 lines
+    }
+    g[0].push_back(11);  // return
+    for (int n = 1; n < 4; n++) {
+        for (int k = 0; k < 256; k++) csCallGsubr(g[n], n - 1);
+        g[n].push_back(11);
+    }
+    return g;
+}
+
+// Glyphs 0-3 as in cffCharStrings() ('C' is a triangle: 4 vertices with the
+// closing line), 4 ('D'): 2^32 + 1 vertices, 5 ('E'): 2^18 + 1 vertices.
+static Bytes makeVertexCountFont() {
+    vector<Bytes> cs = cffCharStrings();
+    Bytes d;
+    csNum(d, 0); csNum(d, 0); d.push_back(21);  // rmoveto
+    csCallGsubr(d, 3);
+    d.push_back(14);
+    Bytes e;
+    csNum(e, 0); csNum(e, 0); e.push_back(21);
+    for (int k = 0; k < 4; k++) csCallGsubr(e, 1);
+    e.push_back(14);
+    cs.push_back(d);
+    cs.push_back(e);
+    return makeCffFont(cs, vertexCountGsubrs(), 6,
+                       makeCmap({{0x20, 0x20, 2}, {0x41, 0x41, 1}, {0x43, 0x43, 3},
+                                 {0x44, 0x44, 4}, {0x45, 0x45, 5}}));
+}
+
+static void checkVertexCount() {
+    const Bytes f = makeVertexCountFont();
+    const int defaultMaxVertices = tcStbttTestMaxVertices;
+    auto outlineSize = [&](uint32_t cp, int maxVertices, size_t mallocMax) {
+        tcStbttTestMaxVertices = maxVertices;
+        tcStbttTestMallocMax = mallocMax;
+        internal::FontAtlasManager m;
+        int n = -1;
+        if (tryLoad(m, f).ok) n = m.getGlyphPath(cp).size();
+        tcStbttTestMaxVertices = defaultMaxVertices;
+        tcStbttTestMallocMax = SIZE_MAX;
+        return n;
+    };
+    int n = outlineSize('C', 4, SIZE_MAX);
+    check("vertex count: 'C' (4 vertices) with a limit of 4 has an outline", n > 0,
+          "vertices=" + to_string(n));
+    n = outlineSize('C', 3, SIZE_MAX);
+    check("vertex count: 'C' (4 vertices) with a limit of 3 is empty", n == 0,
+          "vertices=" + to_string(n));
+    n = outlineSize('E', 1 << 10, SIZE_MAX);
+    check("vertex count: 'E' (2^18 + 1 vertices) with a limit of 2^10 is empty", n == 0,
+          "vertices=" + to_string(n));
+    n = outlineSize('E', defaultMaxVertices, 1024);
+    check("vertex count: 'E' is empty when its vertex array cannot be allocated", n == 0,
+          "vertices=" + to_string(n));
+    n = outlineSize('E', defaultMaxVertices, SIZE_MAX);
+    check("vertex count: 'E' (2^18 + 1 vertices) has an outline", n > 0,
+          "vertices=" + to_string(n));
+
+    // 2^32 + 1 vertices, well past any limit.
+    internal::FontAtlasManager m;
+    if (!tryLoad(m, f).ok) {
+        check("vertex count: font loads", false);
+        return;
+    }
+    check("vertex count: 'A' has one contour", m.getGlyphPath('A').getNumSubpaths() == 1);
+    const Path pd = m.getGlyphPath('D');
+    check("vertex count: 'D' (2^32 + 1 vertices) is empty", pd.empty(),
+          "vertices=" + to_string(pd.size()));
+    const internal::GlyphInfo* gd = m.getOrLoadGlyph('D');
+    check("vertex count: 'D' draws empty", gd && gd->isValid() && gd->getWidth() == 0);
+}
+
 // --- last contour is one off-curve point ---------------------------------------
 static void checkSinglePointContour() {
     internal::FontAtlasManager m;
@@ -1031,6 +1131,7 @@ int main(int argc, char** argv) {
     checkGlyphIndexClamp("CFF", makeCffFont());
     checkCffCharStringsCount();
     checkCodepointRange();
+    checkVertexCount();
     checkSinglePointContour();
     checkCffLength();
     checkMalformed();

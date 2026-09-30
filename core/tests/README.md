@@ -270,7 +270,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   length 0 and tables that share bytes. Also guards the TrussC patch in
   `stb_truetype.h` (CFF data is read with the CFF table's own length; this
   case runs only in builds with `NDEBUG`, as CI builds, because stb's own
-  assert stops it otherwise) and the
+  assert stops it otherwise), the CFF vertex-count patch (a glyph over the
+  vertex limit, one whose closing vertex is the one over it, one drawn 2^32
+  times through nested subroutines, and one whose vertex array cannot be
+  allocated come back empty; `local.cmake` builds stb_truetype with
+  `TC_STBTT_TEST_LIMITS` so the test can lower those limits) and the
   padded `STBTT_malloc` (a glyph whose last contour is one off-curve point).
   That last case only shows something under AddressSanitizer, and CI does not
   build with ASan, so run it locally after changing stb_truetype or
