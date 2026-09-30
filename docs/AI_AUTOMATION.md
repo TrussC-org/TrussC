@@ -83,11 +83,14 @@ capture it inside its own frame. So:
 
 - While the OS reports the window hidden, `tc_list_windows` shows
   `"occluded": true` for it, and `tc_get_screenshot` / `tc_save_screenshot`
-  fail at once with `window N is not visible (minimized or fully covered):
-  bring it to the front`. The signals are the ones that pause the window:
-  macOS: minimized, fully covered or on another Space; Windows: minimized, or
-  DXGI reports the window occluded; Linux (X11): minimized, or fully obscured
-  (only reported without a compositing manager).
+  fail at once with `window N is not visible (the OS reports it hidden: ...),
+  so it renders no frames: make it visible and retry`. The flag is the OS
+  signal that pauses the window, not a diagnosis, so raising the window does
+  not always help: macOS: minimized, fully covered or on another Space
+  (NSWindow occlusionState); Windows: minimized, or DXGI reports the window
+  occluded (covered, and also while the session is locked or the display is
+  off); Linux (X11): minimized, or fully obscured (only reported without a
+  compositing manager).
 - Otherwise the request waits for the window's next frame. If none comes
   within 5 s (the window became hidden after the check, the platform has no
   signal for how it is hidden, or `Window::setFps()` throttles it very low),

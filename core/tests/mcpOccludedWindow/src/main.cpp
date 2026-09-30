@@ -151,13 +151,13 @@ int main() {
         json r = call(*cli, "tc_get_screenshot", R"({"window":2})", &sec);
         check("tc_get_screenshot hidden window -> error", r.value("status", "") == "error", r.dump());
         check("  names the window and why",
-              contains(messageOf(r), "window 2 is not visible (minimized or fully covered)"), r.dump());
+              contains(messageOf(r), "window 2 is not visible (the OS reports it hidden"), r.dump());
         check("  answered at once (< 2 s, not the 5 s timeout)", sec < 2.0, to_string(sec) + " s");
 
         r = call(*cli, "tc_save_screenshot", R"({"window":2,"path":)" + savePathJson + "}", &sec);
         check("tc_save_screenshot hidden window -> error", r.value("status", "") == "error", r.dump());
         check("  names the window and why",
-              contains(messageOf(r), "window 2 is not visible (minimized or fully covered)"), r.dump());
+              contains(messageOf(r), "window 2 is not visible (the OS reports it hidden"), r.dump());
         check("  answered at once (< 2 s, not the 5 s timeout)", sec < 2.0, to_string(sec) + " s");
         check("  no file written", !filesystem::exists(savePath));
 

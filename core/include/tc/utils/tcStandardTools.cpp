@@ -42,14 +42,16 @@ void registerInspectionTools() {
         if (win->isOccluded()) {
             err = json{{"status", "error"},
                        {"message", "window " + std::to_string(windowIdx) +
-                                   " is not visible (minimized or fully covered): "
-                                   "bring it to the front"}};
+                                   " is not visible (the OS reports it hidden: minimized, "
+                                   "covered, on another Space, or the screen locked or "
+                                   "off), so it renders no frames: make it visible and "
+                                   "retry"}};
             return nullptr;
         }
         return &win->context();
     };
 
-    tool("tc_list_windows", "List open windows (index 0 = main; use the index as the 'window' arg of tc_get_screenshot / tc_save_screenshot). Each secondary window has 'occluded': true while the OS reports it minimized or fully covered; it then renders no frames and cannot be captured.")
+    tool("tc_list_windows", "List open windows (index 0 = main; use the index as the 'window' arg of tc_get_screenshot / tc_save_screenshot). Each secondary window has 'occluded': true while the OS reports it hidden (minimized, covered, on another Space, or the screen locked or off); it then renders no frames and cannot be captured.")
         .bind(std::function<json()>([]() -> json {
             json arr = json::array();
             // The main window keeps rendering while hidden: no occluded field.
