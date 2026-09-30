@@ -17,6 +17,10 @@
 //     that thread instead of leaving it behind), stop() in onReceive, and
 //     stop() in onClientConnect, which runs on the accept thread and still
 //     closes the listening socket before it returns.
+//   - stop() called on several threads at once returns everywhere: from
+//     onClientConnect (accept thread) together with one from another client's
+//     onReceive, or from onSendComplete, and from two plain threads. Every
+//     client ends up disconnected. A watchdog turns a hang into a FAIL line.
 //   - Linux only, each in a forked child so a failure cannot take the rest of
 //     the run with it: accept() errors (here: out of descriptors) back off
 //     instead of spinning, are logged once per burst and reported again after
@@ -34,8 +38,11 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -117,6 +124,36 @@ static bool waitUntil(int ms, Pred pred) {
     }
     return pred();
 }
+
+// Ends the process with a FAIL line unless it is destroyed within `ms`. A
+// deadlock would otherwise hold up the whole run instead of failing it.
+class Watchdog {
+public:
+    Watchdog(const char* name, int ms) {
+        thread_ = thread([this, name, ms] {
+            unique_lock<mutex> lock(mutex_);
+            if (!cv_.wait_for(lock, chrono::milliseconds(ms), [this] { return done_; })) {
+                printf("%-60s FAIL (still running after %d ms)\n", name, ms);
+                fflush(stdout);
+                _Exit(1);
+            }
+        });
+    }
+    ~Watchdog() {
+        {
+            lock_guard<mutex> lock(mutex_);
+            done_ = true;
+        }
+        cv_.notify_all();
+        thread_.join();
+    }
+
+private:
+    mutex mutex_;
+    condition_variable cv_;
+    bool done_ = false;
+    thread thread_;
+};
 
 // A port the OS just handed out, released again for the server to bind
 static int freePort() {
@@ -620,6 +657,136 @@ static void testListenerTeardown() {
     }
 }
 
+// -----------------------------------------------------------------------------
+// stop() on several threads at once
+// -----------------------------------------------------------------------------
+
+// stop() from onClientConnect, on the accept thread, while the first client's
+// thread (its receive thread, or its writer with `fromWriter`) is inside a
+// listener calling stop() too. Each listener waits until the other is inside
+// its own before it calls stop(), so the two calls always overlap.
+static void concurrentStopWithAcceptThread(bool fromWriter) {
+    const char* const other = fromWriter ? "onSendComplete" : "onReceive";
+    const string prefix = string("concurrent stop: onClientConnect + ") + other;
+    // Declared first, so it also covers the server's destruction below
+    Watchdog dog(prefix.c_str(), 20000);
+
+    auto server = make_unique<TcpServer>();
+    TcpServer* srv = server.get();
+    atomic<int> firstId{-1};
+    atomic<bool> connectIn{false}, otherIn{false};
+    atomic<bool> connectStopped{false}, otherStopped{false};
+
+    EventListener onCon = srv->onClientConnect.listen([&, srv](TcpClientConnectEventArgs& e) {
+        if (firstId.load() < 0) {
+            firstId = e.clientId;
+            return;
+        }
+        connectIn = true;
+        waitUntil(3000, [&] { return otherIn.load(); });
+        srv->stop();
+        connectStopped = true;
+    });
+    // The first client's thread, parked in a listener until the accept thread
+    // is in onClientConnect for the second client
+    auto otherListener = [&, srv](int clientId) {
+        if (clientId != firstId.load() || otherIn.exchange(true)) return;
+        waitUntil(3000, [&] { return connectIn.load(); });
+        srv->stop();
+        otherStopped = true;
+    };
+    EventListener onRecv = srv->onReceive.listen([&](TcpServerReceiveEventArgs& e) {
+        if (!fromWriter) otherListener(e.clientId);
+    });
+    EventListener onSent = srv->onSendComplete.listen([&](TcpSendCompleteEventArgs& e) {
+        if (fromWriter) otherListener(e.clientId);
+    });
+
+    const int port = startOnFreePort(*srv, -1);
+    check((prefix + ": server started").c_str(), port != 0);
+    if (!port) return;
+
+    rawsocket_t first = connectTo(port);
+    const bool joined = first != kBadSocket &&
+                        waitUntil(3000, [&] { return srv->getClientCount() == 1 &&
+                                                     firstId.load() >= 0; });
+    if (joined) {
+        if (fromWriter) srv->sendAsync(firstId.load(), string("x"));
+        else ::send(first, "x", 1, 0);
+    }
+    const bool parked = joined && waitUntil(3000, [&] { return otherIn.load(); });
+    rawsocket_t second = parked ? connectTo(port) : kBadSocket;
+
+    const bool bothReturned =
+        parked && second != kBadSocket &&
+        waitUntil(5000, [&] { return connectStopped.load() && otherStopped.load(); });
+    check((prefix + ": both stop() calls return").c_str(), bothReturned);
+    check((prefix + ": the server is stopped").c_str(), !srv->isRunning());
+    // The byte the writer sent comes first; this reads it
+    if (fromWriter && first != kBadSocket) closedByServer(first, 3000);
+    check((prefix + ": every client is disconnected").c_str(),
+          first != kBadSocket && closedByServer(first, 3000) &&
+          second != kBadSocket && closedByServer(second, 3000) &&
+          waitUntil(3000, [&] { return srv->getClientCount() == 0; }));
+
+    if (bothReturned) {
+        server.reset();
+        check((prefix + ": the server is destroyed afterwards").c_str(), true);
+    } else {
+        // Its threads are stuck waiting on each other and still use it
+        server.release();
+    }
+    if (first != kBadSocket) TC_CLOSE(first);
+    if (second != kBadSocket) TC_CLOSE(second);
+}
+
+// Two plain threads calling stop() at the same moment, while the accept thread
+// is held in a listener so that both of them are in stop() before it can end
+static void concurrentStopFromTwoThreads() {
+    Watchdog dog("concurrent stop: two threads", 20000);
+
+    TcpServer server;
+    atomic<bool> inListener{false}, release{false};
+    EventListener onCon = server.onClientConnect.listen([&](TcpClientConnectEventArgs&) {
+        inListener = true;
+        waitUntil(5000, [&] { return release.load(); });
+    });
+    const int port = startOnFreePort(server, -1);
+    check("concurrent stop: two threads: server started", port != 0);
+    if (!port) return;
+
+    rawsocket_t c = connectTo(port);
+    const bool held = c != kBadSocket && waitUntil(3000, [&] { return inListener.load(); });
+
+    atomic<int> returned{0}, threw{0};
+    auto stopper = [&] {
+        try {
+            server.stop();
+        } catch (...) {
+            ++threw;
+        }
+        ++returned;
+    };
+    thread a(stopper), b(stopper);
+    this_thread::sleep_for(chrono::milliseconds(300));   // both are inside stop() by now
+    release = true;
+    a.join();
+    b.join();
+
+    check("concurrent stop: two threads calling stop() at once both return",
+          held && returned.load() == 2);
+    check("concurrent stop: neither of them throws", threw.load() == 0);
+    check("concurrent stop: the client is disconnected",
+          held && closedByServer(c, 3000) && server.getClientCount() == 0);
+    if (c != kBadSocket) TC_CLOSE(c);
+}
+
+static void testConcurrentStop() {
+    concurrentStopWithAcceptThread(false);
+    concurrentStopWithAcceptThread(true);
+    concurrentStopFromTwoThreads();
+}
+
 #ifdef __linux__
 // -----------------------------------------------------------------------------
 // accept() errors back off (runs in a forked child: it exhausts descriptors)
@@ -802,6 +969,7 @@ int main() {
     testLimit();
     testDefaultUnlimited();
     testListenerTeardown();
+    testConcurrentStop();
 
     printf("\n%s\n", g_fail ? "FAILED" : "ALL PASS");
     return g_fail ? 1 : 0;
