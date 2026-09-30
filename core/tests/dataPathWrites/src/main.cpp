@@ -13,11 +13,14 @@
 //   - an absolute path is used as given;
 //   - a parent folder that cannot be created (a regular file in the way; on
 //     POSIX also a read-only folder) logs an Error and returns false;
-//   - UTF-8 folder and file names land on disk by their real names.
+//   - UTF-8 folder and file names land on disk by their real names;
+//   - a path with no file name ("" or "sub/") logs an Error and returns
+//     false without creating any folder.
 // And for setLogFile only:
 //   - getLogFilePath() is the resolved absolute path;
 //   - a failed call (folder or open failure) keeps the current log file:
-//     still open, same path, and the error line and later lines land in it.
+//     still open, same path, and the error line and later lines land in it
+//     (also for a path with no file name).
 // =============================================================================
 
 #include <TrussC.h>
@@ -186,6 +189,29 @@ int main() {
                                     fs::path(u8"波〜ファイル" + std::u8string(w.ext.begin(), w.ext.end()));
             check(w.name + ": UTF-8 names -> real names on disk", fs::is_regular_file(onDisk));
         }
+
+        // 7. No file name: "" resolves to the data folder itself, "sub/" to a
+        //    folder. Both log and return false before creating anything.
+        {
+            // "" against a data root that does not exist yet: it stays missing
+            const fs::path freshRoot = sandbox / "fresh" / tag;
+            setDataPathRoot(freshRoot / "data");
+            ErrorCapture cap;
+            const bool ok = w.write(fs::path());
+            setDataPathRoot(data);
+            check(w.name + ": \"\" -> returns false", !ok);
+            check(w.name + ": \"\" -> logs an Error",
+                  !cap.errors.empty() && cap.errors.back().find("file name in") != string::npos);
+            check(w.name + ": \"\" -> nothing created", !fs::exists(freshRoot));
+        }
+        {
+            ErrorCapture cap;
+            const bool ok = w.write(fs::path(tag + "_sub/"));
+            check(w.name + ": \"sub/\" -> returns false", !ok);
+            check(w.name + ": \"sub/\" -> logs an Error",
+                  !cap.errors.empty() && cap.errors.back().find("file name in") != string::npos);
+            check(w.name + ": \"sub/\" -> nothing created", !fs::exists(data / (tag + "_sub")));
+        }
     }
 
 #ifndef _WIN32
@@ -227,6 +253,18 @@ int main() {
                   cap.errors.back().find("Failed to open log file") != string::npos);
             check("setLogFile(open failure): current log still open, same path",
                   getLogger().isFileOpen() && getLogger().getLogFilePath() == firstPath);
+        }
+        // No file name: keeps the current log
+        {
+            ErrorCapture cap;
+            const bool ok = setLogFile("logs_nofile/");
+            check("setLogFile(no file name): returns false", !ok);
+            check("setLogFile(no file name): logs an Error",
+                  !cap.errors.empty() &&
+                  cap.errors.back().find("Failed to open log file") != string::npos);
+            check("setLogFile(no file name): current log still open, same path, no folder",
+                  getLogger().isFileOpen() && getLogger().getLogFilePath() == firstPath &&
+                  !fs::exists(data / "logs_nofile"));
         }
         logNotice() << "line two";
         closeLogFile();
