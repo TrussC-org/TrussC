@@ -167,6 +167,7 @@ class RigidBody2D : public tc::Mod {
     // access to our protected override.
     friend class trussc::Node;
     friend void detail::routeContact(World* w, const WorldContact& c, int phase);
+    friend class ColliderRenderer2D;   // draws fillMesh_
 
 public:
     RigidBody2D(World& world, const Shape2D& shape,
@@ -315,6 +316,7 @@ protected:
                                  << " coincident corners, almost no area).";
             }
             polys = std::move(shapes.shapes);
+            fillMesh_ = detail::makeFillMesh(shapes.fill);
         }
 
         // Physics is world-space — create the body at the node's global pose.
@@ -490,6 +492,7 @@ private:
     bool trigger_ = false;
     bool fixedRotation_ = false;
     b2Body* body_ = nullptr;
+    tc::Mesh fillMesh_;   // compound fill, triangulated once in setup()
     std::weak_ptr<int> worldAlive_;
 };
 
@@ -553,10 +556,10 @@ protected:
                 break;
             case Shape2D::Compound:
                 // Only an outline Box2D accepted (PolyShape draws nothing
-                // without a body either). The fill is the triangulation the
-                // fixtures were made from.
+                // without a body either). The fill is Path::drawFill()'s,
+                // triangulated once when the body was made.
                 if (!rb->getBody()) break;
-                filled_ ? s.path.drawFill() : detail::drawPathOutline(s.path);
+                filled_ ? rb->fillMesh_.draw() : detail::drawPathOutline(s.path);
                 break;
         }
     }

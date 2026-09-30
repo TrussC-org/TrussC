@@ -12,6 +12,7 @@ PolyShape::PolyShape(PolyShape&& other) noexcept
     : Body(std::move(other))
     , vertices_(std::move(other.vertices_))
     , path_(std::move(other.path_))
+    , fillMesh_(std::move(other.fillMesh_))
     , compound_(other.compound_)
 {
 }
@@ -21,6 +22,7 @@ PolyShape& PolyShape::operator=(PolyShape&& other) noexcept {
         Body::operator=(std::move(other));
         vertices_ = std::move(other.vertices_);
         path_ = std::move(other.path_);
+        fillMesh_ = std::move(other.fillMesh_);
         compound_ = other.compound_;
     }
     return *this;
@@ -44,6 +46,7 @@ void PolyShape::setup(World& world, const std::vector<tc::Vec2>& vertices, float
     }
     vertices_ = hull;
     path_.clear();
+    fillMesh_ = tc::Mesh();
     compound_ = false;
     createBody(world, &polygon, 1, cx, cy);
 }
@@ -71,6 +74,7 @@ void PolyShape::setupConvex(World& world, const std::vector<tc::Vec2>& points, f
     }
     vertices_ = hull;
     path_.clear();
+    fillMesh_ = tc::Mesh();
     compound_ = false;
     createBody(world, &polygon, 1, cx, cy);
 }
@@ -100,6 +104,7 @@ void PolyShape::setupCompound(World& world, const tc::Path& path, float cx, floa
     }
     vertices_ = detail::pathPoints(path);
     path_ = path;
+    fillMesh_ = detail::makeFillMesh(shapes.fill);
     compound_ = true;
     createBody(world, shapes.shapes.data(), shapes.shapes.size(), cx, cy);
 }
@@ -184,7 +189,7 @@ void PolyShape::drawFill() {
     if (!body_ || vertices_.empty()) return;
 
     if (compound_) {
-        path_.drawFill();   // the fill the fixtures were made from
+        fillMesh_.draw();   // Path::drawFill()'s fill, kept from setupCompound()
         return;
     }
 

@@ -343,6 +343,13 @@ bool convexRing(const tc::Path& path, std::vector<tc::Vec2>& ring) {
     return true;
 }
 
+tc::Mesh makeFillMesh(const std::vector<tc::Vec2>& fill) {
+    tc::Mesh mesh;
+    mesh.setMode(tc::PrimitiveMode::Triangles);
+    for (const auto& p : fill) mesh.addVertex(tc::Vec3(p.x, p.y, 0.0f));
+    return mesh;
+}
+
 void drawPathOutline(const tc::Path& path) {
     const auto& verts = path.getVertices();
     for (size_t si = 0; si < path.getNumSubpaths(); ++si) {
@@ -359,6 +366,13 @@ void drawPathOutline(const tc::Path& path) {
 bool makeCompoundShapes(const tc::Path& path, CompoundShapes& out) {
     out = CompoundShapes();
 
+    // Triangulated once: the fixtures below and the fill that draws them.
+    const std::vector<std::array<float, 2>> tris = path.buildFillTriangles();
+    auto keepFill = [&]() {
+        out.fill.reserve(tris.size());
+        for (const auto& p : tris) out.fill.push_back(tc::Vec2(p[0], p[1]));
+    };
+
     std::vector<tc::Vec2> ring;
     if (convexRing(path, ring)) {
         b2PolygonShape shape;
@@ -366,6 +380,7 @@ bool makeCompoundShapes(const tc::Path& path, CompoundShapes& out) {
         const PolygonError err = makePolygonShape(ring, shape, hull);
         if (err == PolygonError::None) {
             out.shapes.push_back(shape);
+            keepFill();
             return true;
         }
         if (err == PolygonError::TooSmallForOffset) {
@@ -377,7 +392,6 @@ bool makeCompoundShapes(const tc::Path& path, CompoundShapes& out) {
         // Collinear or merged corners: triangulate, and keep what has area.
     }
 
-    const std::vector<std::array<float, 2>> tris = path.buildFillTriangles();
     out.triangles = tris.size() / 3;
     std::vector<tc::Vec2> tri(3);
     for (size_t t = 0; t < out.triangles; ++t) {
@@ -403,6 +417,7 @@ bool makeCompoundShapes(const tc::Path& path, CompoundShapes& out) {
         out.error = PolygonError::TooSmallForOffset;
         return false;
     }
+    keepFill();
     return true;
 }
 

@@ -123,6 +123,7 @@ private:
 
     std::vector<tc::Vec2> vertices_;
     tc::Path path_;          // setupCompound() outline, drawn instead of vertices_
+    tc::Mesh fillMesh_;      // setupCompound() fill, triangulated once
     bool compound_ = false;  // made by setupCompound()
 };
 

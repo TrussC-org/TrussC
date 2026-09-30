@@ -88,6 +88,10 @@ bool convexRing(const tc::Path& path, std::vector<tc::Vec2>& ring);
 // The fixtures for an outline of any shape (setupCompound() / Shape2D::compound()).
 struct CompoundShapes {
     std::vector<b2PolygonShape> shapes;  // one fixture each
+    // The fill Path::drawFill() draws (Path::buildFillTriangles(), every 3
+    // points one triangle), kept so drawing needn't tessellate every frame.
+    // Set with `shapes`.
+    std::vector<tc::Vec2> fill;
     size_t triangles = 0;                // from the triangulation (0: one convex polygon)
     size_t skipped = 0;                  // of those, slivers makePolygonShape() refused
     // Why no body can be made (None while `shapes` is usable): Degenerate
@@ -107,6 +111,10 @@ struct CompoundShapes {
 // does. Returns false, with `error` set and no shapes, when no body can be
 // made.
 bool makeCompoundShapes(const tc::Path& path, CompoundShapes& out);
+
+// A Triangles mesh of `fill` (CompoundShapes::fill), drawn with the current
+// color like Path::drawFill().
+tc::Mesh makeFillMesh(const std::vector<tc::Vec2>& fill);
 
 // Outline every subpath of `path` as a closed loop (a compound body's outline;
 // Path::draw() would also fan-fill each subpath, which is wrong for concave
