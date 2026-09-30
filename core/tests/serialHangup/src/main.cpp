@@ -34,9 +34,12 @@
 // its worker from the worker itself is checked on its own (section 15).
 // setup() and close() on a thread marked as a USB worker are refused, with
 // one log line per thread, and before they take the lock, so they cannot
-// deadlock with a close() waiting for that thread (sections 16, 17). Android
-// Serial::setup() keeps the new port by what the backend's setup() returned
-// (section 18). A slow write is played by slowWrite.cpp (Linux only).
+// deadlock with a close() waiting for that thread (sections 16, 17). The
+// mapping from the Android backend's setup() result to the port Serial keeps
+// is pinned on its own (section 18); the Android branch of Serial::setup()
+// that uses it, and the race it answers, are not built here. A loss an I/O
+// call finds on such a thread is left for another thread to report (section
+// 19). A slow write is played by slowWrite.cpp (Linux only).
 //
 // A pseudo-terminal stands in for the USB-serial adapter: Serial opens the
 // slave, the test plays the device on the master, and closing the master
@@ -904,7 +907,7 @@ int main() {
     // plays the worker here; the refusal itself is plain C++.
     atomic<int> refusals{0};
     EventListener refusalSub = getLogger().onLog.listen([&](LogEventArgs& e) {
-        if (e.level == LogLevel::Error && e.message.find("cannot run on a USB worker thread") != string::npos) {
+        if (e.level == LogLevel::Error && e.message.find("on a USB worker thread") != string::npos) {
             ++refusals;
         }
     });
@@ -1005,13 +1008,52 @@ int main() {
     // When the backend asked for the USB permission, its worker may connect
     // before Serial::setup() looks again, so setup() goes by the result: a
     // Pending setup() keeps the new port's path and rate, as a Connected one
-    // does; only a Failed one goes back to the previous port's.
+    // does; only a Failed one goes back to the previous port's. This pins
+    // that mapping only: the Android branch of Serial::setup() that calls it
+    // is not built on this platform, so neither that call site nor the race
+    // with the worker is covered here.
     check("18. a Connected setup() keeps the new port",
           internal::serialSetupStarted(internal::SerialSetupResult::Connected));
     check("18. a Pending setup() keeps it too",
           internal::serialSetupStarted(internal::SerialSetupResult::Pending));
     check("18. a Failed setup() goes back to the previous port",
           !internal::serialSetupStarted(internal::SerialSetupResult::Failed));
+
+    // --- 19. a loss found on a USB worker thread waits for another thread --
+    // Closing the lost port would wait for a USB worker (on Android), which a
+    // worker must not do, so an I/O call there that finds the loss returns
+    // its error value and leaves the port open, with one error line and no
+    // onDisconnect. The next call on another thread reports it.
+    {
+        Pty pty;
+        Serial serial;
+        Recorder rec;
+        rec.attach(serial);
+        if (connect(pty, serial, "19. setup() connects")) {
+            refusals = 0;
+            const int lostBefore = g_lostWarnings;
+            pty.unplug();
+            int n = -1;
+            int r = 0;
+            bool stillConnected = false;
+            thread worker([&] {
+                internal::SerialWorkerThreadMark mark;
+                n = serial.available();
+                char c;
+                r = serial.readBytes(&c, 1);
+                stillConnected = serial.isConnected();
+            });
+            worker.join();
+            check("19. the I/O calls on a worker thread return their error values", n == 0 && r == -1);
+            check("19. they leave the lost port open, without onDisconnect",
+                  stillConnected && rec.count == 0 && g_lostWarnings == lostBefore);
+            check("19. one error line for both", refusals == 1);
+            serial.available();
+            check("19. the next call on another thread closes it and fires once",
+                  !serial.isConnected() && rec.count == 1 && isLossOf(rec.first, pty) &&
+                  g_lostWarnings == lostBefore + 1);
+        }
+    }
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;
