@@ -32,13 +32,25 @@
 //   accepts a FLAC whose length is unknown (STREAMINFO total 0), which plays
 //   to its end.
 // - A looping stream whose decoder returns no frames (the file was emptied
-//   after loadStream()) ends with one warning, and the worker goes on
+//   after loadStream()) ends with one error log, and the worker goes on
 //   refilling the other streams.
 // - A decoder read error, a failed loop seek and a failed seek request each
-//   end the stream with one warning (a test hook makes the decoder fail),
-//   and the voice ends, looping or not.
+//   end the stream with one error log (a test hook makes the decoder fail).
+//   A non-looping voice then ends; a looping one stays playing but silent
+//   (what isPlaying() should say then is #448), and setPosition() makes it
+//   play again.
+// - The frames a failing read still returned are played before the voice
+//   ends.
+// - An MP3 stream's decoder gets a seek table (one point per second, at
+//   most 1024), also when the re-init migration reopens it; a WAV's has
+//   none.
+// - A seek to getDuration() on a long file (the float duration a few frames
+//   past the last frame) does not fail: a looping stream loops.
+// - A stream whose length is unknown ignores setPosition(), with one
+//   warning.
 // - After the engine is re-initialized at another rate, getPosition()
-//   carries over and setPosition() lands at the target.
+//   carries over, also for a voice that has ended (and its pending seek),
+//   and setPosition() lands at the target.
 // A watchdog turns a StreamWorker that never comes back into a FAIL.
 // =============================================================================
 
@@ -69,6 +81,10 @@ static void check(const string& name, bool ok, const string& detail = "") {
 // --- Log capture -------------------------------------------------------------
 static mutex g_logMutex;
 static vector<pair<LogLevel, string>> g_logs;
+
+// While set, the log listener holds the thread that logs "decoder read
+// failed" for 100 ms: the StreamWorker then pauses right where it logs.
+static atomic<bool> g_slowReadFailLog{false};
 
 static size_t countLogs(LogLevel level, const string& needle) {
     lock_guard<mutex> lock(g_logMutex);
@@ -159,6 +175,20 @@ static bool writeFlacUnknownLength(const fs::path& path, int blocks, float level
     return (bool)f;
 }
 
+// Silent MP3: MPEG-1 Layer III, 32 kbps, 48 kHz, stereo, no CRC, i.e.
+// 96-byte frames of 1152 samples; a header followed by zeros (side info with
+// no main data) decodes to silence. No Xing / LAME tag, so the decoder
+// counts the frames for the length.
+constexpr uint32_t kMp3FrameSamples = 1152;
+static bool writeSilentMp3(const fs::path& path, uint32_t frames) {
+    char frame[96] = {};
+    frame[0] = (char)0xFF; frame[1] = (char)0xFB; frame[2] = (char)0x14; frame[3] = 0x00;
+    ofstream f(path, ios::binary | ios::trunc);
+    if (!f) return false;
+    for (uint32_t i = 0; i < frames; ++i) f.write(frame, sizeof(frame));
+    return (bool)f;
+}
+
 // Mean of the left channel over the last audioOut block.
 static atomic<float> g_level{0.0f};
 
@@ -237,8 +267,13 @@ int main() {
     getMainThreadId();   // this thread is the main thread
 
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
-        lock_guard<mutex> lock(g_logMutex);
-        g_logs.push_back({e.level, e.message});
+        {
+            lock_guard<mutex> lock(g_logMutex);
+            g_logs.push_back({e.level, e.message});
+        }
+        if (g_slowReadFailLog.load() && e.message.find("decoder read failed") != string::npos) {
+            sleepMs(100);
+        }
     });
 
     auto& engine = AudioEngine::getInstance();
@@ -277,6 +312,18 @@ int main() {
     const fs::path loopWav = dir / "loop.wav";    // silence, 9216 frames (9 x 1024)
     const fs::path unknownFlac = dir / "unknown.flac";   // 0.3, length unknown
     const fs::path emptyFlac = dir / "empty.flac";       // no frames, length unknown
+    const fs::path shortMp3 = dir / "short.mp3";         // silent, 31.2 s
+    const fs::path longMp3 = dir / "long.mp3";           // silent, ~18 min (see below)
+    // A length whose float duration (what loadStream() stores) times the
+    // rate, minus one, is past the last frame: Sound::setPosition(getDuration())
+    // then targets a frame after the end (~18 minutes, ~4 MB).
+    uint32_t longMp3Frames = 0;
+    for (uint32_t n = 44500; n < 46000 && longMp3Frames == 0; ++n) {
+        const uint64_t total = (uint64_t)n * kMp3FrameSamples;
+        const float duration = (float)((double)total / (double)kRate);
+        if ((uint64_t)((double)duration * kRate - 1.0) > total) longMp3Frames = n;
+    }
+    const uint64_t longMp3Total = (uint64_t)longMp3Frames * kMp3FrameSamples;
     check("test files are written",
           writeWav(dcWav, {{1.0f, 0.1f}, {2.0f, 0.5f}}) && writeWav(bgmWav, {{3.0f, 0.5f}}) &&
           writeWav(shortWav, {{0.2f, 0.1f}}) && writeWav(emptyWav, {}) &&
@@ -285,12 +332,17 @@ int main() {
           writeWav(tailWav, {{0.1f, 0.5f}, {0.2f, 0.1f}}) &&
           writeWav(loopWav, {{9216.0f / kRate, 0.0f}}) &&
           writeFlacUnknownLength(unknownFlac, 6, 0.3f) &&
-          writeFlacUnknownLength(emptyFlac, 0, 0.3f));
+          writeFlacUnknownLength(emptyFlac, 0, 0.3f) &&
+          writeSilentMp3(shortMp3, 1300) &&
+          longMp3Frames > 0 && writeSilentMp3(longMp3, longMp3Frames));
 
     // --- seek while playing ------------------------------------------------------
     Sound s;
     check("loadStream() opens the DC file", (bool)s.loadStream(dcWav) && s.isStreaming());
     check("the stream plays", s.play());
+    check("a WAV stream's decoder has no seek table",
+          internal::lastStreamSeekPointsForTests() == 0,
+          to_string(internal::lastStreamSeekPointsForTests()));
     sleepMs(150);
     check("it plays from the start (level 0.1)", near(g_level.load(), 0.1f, 0.02f),
           to_string(g_level.load()));
@@ -448,6 +500,22 @@ int main() {
         check("it plays (level 0.3)",
               u.play() && waitFor([] { return near(g_level.load(), 0.3f, 0.02f); }, 500),
               to_string(g_level.load()));
+        // With no known end there is nothing to clamp a target to: the
+        // seek is refused (it used to jump to the start).
+        sleepMs(100);
+        const size_t warned = countLogs(LogLevel::Warning, "length is unknown");
+        const float before = u.getPosition();
+        u.setPosition(0.4f);
+        const float after = u.getPosition();
+        check("unknown length: setPosition() is ignored (getPosition() goes on)",
+              before > 0.05f && after >= before, to_string(before) + " -> " + to_string(after));
+        u.setPosition(0.0f);
+        sleepMs(50);
+        check("unknown length: the audio did not jump (getPosition() still goes on)",
+              u.getPosition() > after, to_string(u.getPosition()));
+        check("unknown length: the refused seek is logged once",
+              countLogs(LogLevel::Warning, "length is unknown") == warned + 1,
+              lastLog(LogLevel::Warning));
         check("it ends at the end of the file", waitFor([&] { return !u.isPlaying(); }, 2000));
         u.stop();
     }
@@ -461,19 +529,21 @@ int main() {
         // quiet): the voice's own decoder opens it with no frames.
         check("the file is emptied after loadStream()", writeWav(vanishWav, {}));
         vanish.setLoop(true);
-        const size_t before = countLogs(LogLevel::Warning, "no frames to read");
+        const size_t before = countLogs(LogLevel::Error, "no frames to read");
         check("the emptied stream starts", vanish.play());
-        check("the emptied looping stream ends with a warning",
-              waitFor([&] { return countLogs(LogLevel::Warning, "no frames to read") == before + 1; },
+        check("the emptied looping stream ends with an error log",
+              waitFor([&] { return countLogs(LogLevel::Error, "no frames to read") == before + 1; },
                       1000),
-              lastLog(LogLevel::Warning));
-        check("the emptied looping voice ends (isPlaying() is false)",
-              waitFor([&] { return !vanish.isPlaying(); }, 1000));
+              lastLog(LogLevel::Error));
         sleepMs(1000);   // longer than the other stream's ring holds
         check("the other stream is still refilled (level 0.5 a second later)",
               near(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
-        check("the warning is logged once",
-              countLogs(LogLevel::Warning, "no frames to read") == before + 1);
+        // A looping voice whose stream halted plays on silently; what
+        // isPlaying() should say then is #448 (undecided), so this pins the
+        // current behaviour.
+        check("the emptied looping voice stays playing, silent (#448)", vanish.isPlaying());
+        check("the error is logged once",
+              countLogs(LogLevel::Error, "no frames to read") == before + 1);
         vanish.stop();
         bgm.stop();
     }
@@ -484,16 +554,21 @@ int main() {
         check("a looping stream plays", (bool)c.loadStream(dcWav) && (c.setLoop(true), c.play()));
         sleepMs(100);
         internal::setStreamFaultForTests(internal::StreamFaultForTests::ReadFails);
-        check("a read error ends the stream with a warning",
-              waitFor([] { return countLogs(LogLevel::Warning, "decoder read failed") == 1; }, 1000),
-              lastLog(LogLevel::Warning));
+        check("a read error ends the stream with an error log",
+              waitFor([] { return countLogs(LogLevel::Error, "decoder read failed") == 1; }, 1000),
+              lastLog(LogLevel::Error));
         sleepMs(600);   // the ring drains; nothing new is decoded
         check("the read error is logged once",
-              countLogs(LogLevel::Warning, "decoder read failed") == 1);
+              countLogs(LogLevel::Error, "decoder read failed") == 1);
         check("after a read error the voice falls silent", near(g_level.load(), 0.0f, 0.001f),
               to_string(g_level.load()));
-        check("after a read error the looping voice ends", !c.isPlaying());
+        // #448: see the emptied stream above.
+        check("after a read error the looping voice stays playing, silent (#448)", c.isPlaying());
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+        c.setPosition(2.0f);
+        check("after a read error setPosition() makes it play again (level 0.5)",
+              waitFor([] { return near(g_level.load(), 0.5f, 0.02f); }, 500),
+              to_string(g_level.load()));
         c.stop();
 
         Sound after;
@@ -509,16 +584,23 @@ int main() {
         check("a short looping stream plays", (bool)e.loadStream(shortWav) && (e.setLoop(true), e.play()));
         sleepMs(100);
         internal::setStreamFaultForTests(internal::StreamFaultForTests::SeekFails);
-        check("a failed loop seek ends the stream with a warning",
-              waitFor([] { return countLogs(LogLevel::Warning, "seek to the start for the loop failed") == 1; },
+        check("a failed loop seek ends the stream with an error log",
+              waitFor([] { return countLogs(LogLevel::Error, "seek to the start for the loop failed") == 1; },
                       1000),
-              lastLog(LogLevel::Warning));
-        sleepMs(300);
+              lastLog(LogLevel::Error));
+        sleepMs(600);   // the ring (~340 ms) drains; nothing new is decoded
         check("the failed loop seek is logged once",
-              countLogs(LogLevel::Warning, "seek to the start for the loop failed") == 1);
-        check("after a failed loop seek the looping voice ends",
-              waitFor([&] { return !e.isPlaying(); }, 1000));
+              countLogs(LogLevel::Error, "seek to the start for the loop failed") == 1);
+        check("after a failed loop seek the voice falls silent", near(g_level.load(), 0.0f, 0.001f),
+              to_string(g_level.load()));
+        // #448: see the emptied stream above.
+        check("after a failed loop seek the looping voice stays playing, silent (#448)",
+              e.isPlaying());
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+        e.setPosition(0.0f);
+        check("after a failed loop seek setPosition() makes it play again (level 0.1)",
+              waitFor([] { return near(g_level.load(), 0.1f, 0.02f); }, 500),
+              to_string(g_level.load()));
         e.stop();
     }
 
@@ -529,12 +611,89 @@ int main() {
         sleepMs(100);
         internal::setStreamFaultForTests(internal::StreamFaultForTests::SeekFails);
         f.setPosition(2.0f);
-        check("a failed seek request ends the stream with a warning",
-              waitFor([] { return countLogs(LogLevel::Warning, "seek to frame") == 1; }, 1000),
-              lastLog(LogLevel::Warning));
+        check("a failed seek request ends the stream with an error log",
+              waitFor([] { return countLogs(LogLevel::Error, "seek to frame") == 1; }, 1000),
+              lastLog(LogLevel::Error));
         check("after a failed seek the voice ends", waitFor([&] { return !f.isPlaying(); }, 1000));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         f.stop();
+    }
+
+    // --- a failing read that still returned frames ------------------------------------
+    // The stream underruns (the worker held back), then the next read returns
+    // 1024 frames and an error. Those frames must be published before the
+    // stream ends: a mixer that saw the end first would end the voice
+    // without them. The log listener holds the worker for 100 ms where it
+    // logs the error, so that order is observable every time.
+    {
+        Sound w;
+        check("read error with frames: a non-looping stream at level 0.5 plays",
+              (bool)w.loadStream(bgmWav) && w.play());
+        sleepMs(100);
+        internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
+        sleepMs(450);   // the ring (~340 ms) drains: the mixer underruns
+        check("read error with frames: the voice underruns, still playing",
+              w.isPlaying() && near(g_level.load(), 0.0f, 0.001f), to_string(g_level.load()));
+        {
+            lock_guard<mutex> lock(g_blockMutex);
+            g_blockLevels.clear();
+        }
+        const size_t logged = countLogs(LogLevel::Error, "decoder read failed");
+        g_slowReadFailLog.store(true);
+        g_record.store(true);
+        internal::setStreamFaultForTests(internal::StreamFaultForTests::ReadFailsWithFrames);
+        const bool ended = waitFor([&] { return !w.isPlaying(); }, 1000);
+        g_record.store(false);
+        internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+        g_slowReadFailLog.store(false);
+        int heard = 0;
+        {
+            lock_guard<mutex> lock(g_blockMutex);
+            for (auto& b : g_blockLevels) {
+                if (near(b.second, 0.5f, 0.02f)) ++heard;
+            }
+        }
+        check("read error with frames: the stream ends with an error log",
+              ended && countLogs(LogLevel::Error, "decoder read failed") == logged + 1,
+              lastLog(LogLevel::Error));
+        // 1024 frames = 4 blocks of 256 (a partial block reads lower).
+        check("read error with frames: the frames it returned are played first",
+              heard >= 3, to_string(heard) + " blocks at level 0.5");
+        w.stop();
+    }
+
+    // --- MP3: seek table, and a seek to getDuration() on a long file ----------------------
+    {
+        Sound m;
+        check("MP3: the 31.2 s file streams", (bool)m.loadStream(shortMp3) && m.play());
+        check("MP3: its decoder has a seek table, one point per second (32)",
+              internal::lastStreamSeekPointsForTests() == 32,
+              to_string(internal::lastStreamSeekPointsForTests()));
+        m.stop();
+
+        // getDuration() is a float: on this ~18 minute file,
+        // setPosition(getDuration()) targets a frame past the last one, and a
+        // seek there fails in dr_mp3. The worker clamps it to the last frame,
+        // so a looping stream loops instead of halting.
+        Sound l;
+        check("MP3 long: the file streams, looping",
+              (bool)l.loadStream(longMp3) && (l.setLoop(true), l.play()));
+        check("MP3 long: its seek table is capped at 1024 points",
+              internal::lastStreamSeekPointsForTests() == 1024,
+              to_string(internal::lastStreamSeekPointsForTests()));
+        const double target = (double)l.getDuration() * kRate - 1.0;
+        check("MP3 long: setPosition(getDuration()) targets a frame past the last one",
+              (uint64_t)target > longMp3Total,
+              to_string((uint64_t)target) + " vs " + to_string(longMp3Total) + " frames");
+        sleepMs(100);
+        const size_t failed = countLogs(LogLevel::Error, "seek to frame");
+        l.setPosition(l.getDuration());
+        sleepMs(400);
+        check("MP3 long: the seek to the end does not fail",
+              countLogs(LogLevel::Error, "seek to frame") == failed, lastLog(LogLevel::Error));
+        const float p = l.getPosition();
+        check("MP3 long: it looped to the start", l.isPlaying() && p < 1.0f, to_string(p));
+        l.stop();
     }
 
     // --- seek after an underrun at speed 10 ------------------------------------------
@@ -576,8 +735,21 @@ int main() {
 
     // --- re-init at another rate ------------------------------------------------------
     {
+        // r plays first, so the ended voices below do not take its slot
+        // (play() reuses the first slot that is not playing).
         Sound r;
         check("re-init: a stream plays", (bool)r.loadStream(dcWav) && r.play());
+        // Two voices that have ended, one of them with a seek the mixer never
+        // applies (it no longer runs the voice). Their slots stay in the
+        // engine, and getPosition() still reads them.
+        Sound ended, endedSeek;
+        check("re-init: two short streams play to their end",
+              (bool)ended.loadStream(shortWav) && (bool)endedSeek.loadStream(shortWav) &&
+              ended.play() && endedSeek.play() &&
+              waitFor([&] { return !ended.isPlaying() && !endedSeek.isPlaying(); }, 1000));
+        endedSeek.setPosition(0.1f);
+        const float endedBefore = ended.getPosition();
+        const float endedSeekBefore = endedSeek.getPosition();
         sleepMs(300);
         const float before = r.getPosition();
         AudioSettings s96 = settings;
@@ -586,6 +758,12 @@ int main() {
         const float after = r.getPosition();
         check("re-init: getPosition() carries over", before > 0.2f && near(after, before, 0.05f),
               to_string(before) + " -> " + to_string(after));
+        check("re-init: an ended voice's getPosition() carries over",
+              endedBefore > 0.15f && near(ended.getPosition(), endedBefore, 0.001f),
+              to_string(endedBefore) + " -> " + to_string(ended.getPosition()));
+        check("re-init: an ended voice's pending seek target carries over",
+              near(endedSeekBefore, 0.1f, 0.001f) && near(endedSeek.getPosition(), 0.1f, 0.001f),
+              to_string(endedSeekBefore) + " -> " + to_string(endedSeek.getPosition()));
         r.setPosition(1.5f);
         sleepMs(200);
         check("re-init: setPosition() lands at the target (level 0.5)",
@@ -593,6 +771,25 @@ int main() {
         p = r.getPosition();
         check("re-init: getPosition() follows from the target", p > 1.55f && p < 1.9f, to_string(p));
         r.stop();
+    }
+
+    // --- re-init with an MP3 voice: the migrated decoder gets a seek table ----------------
+    {
+        Sound m, w;
+        check("re-init MP3: an MP3 stream plays", (bool)m.loadStream(shortMp3) && m.play());
+        // Open (and drop) a WAV voice, so the hook reads 0 until the
+        // migration reopens the MP3's decoder.
+        check("re-init MP3: a WAV voice opens", (bool)w.loadStream(bgmWav) && w.play());
+        w.stop();
+        check("re-init MP3: the hook reads the WAV decoder (0)",
+              internal::lastStreamSeekPointsForTests() == 0);
+        AudioSettings s441 = settings;
+        s441.sampleRate = 44100;
+        check("re-init MP3: the engine restarts at 44.1 kHz", engine.init(s441));
+        check("re-init MP3: the migrated decoder has its seek table (32 points)",
+              m.isPlaying() && internal::lastStreamSeekPointsForTests() == 32,
+              to_string(internal::lastStreamSeekPointsForTests()));
+        m.stop();
     }
 
     levelSub.disconnect();   // the listener only touches globals: no barrier needed

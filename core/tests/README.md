@@ -100,11 +100,18 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `getPosition()` carries over and `setPosition()` lands at the target; eager
   sounds seek at once. `loadStream()` rejects a file with no frames
   (`DecodeFailed`) and accepts a FLAC whose length is unknown (STREAMINFO
-  total 0), which plays to its end. A looping stream whose file was emptied
-  after loading ends with one warning while another stream keeps being
-  refilled; a decoder read error, a failed loop seek and a failed seek
-  request each end the stream with one warning, and the voice ends, looping
-  or not. A watchdog turns a StreamWorker that never comes back into a FAIL.
+  total 0), which plays to its end and ignores `setPosition()` with one
+  warning. A looping stream whose file was emptied after loading ends with
+  one error log while another stream keeps being refilled; a decoder read
+  error, a failed loop seek and a failed seek request each end the stream
+  with one error log: a non-looping voice ends, a looping one stays playing
+  but silent (#448) and `setPosition()` makes it play again. The frames a
+  failing read still returned are played before the voice ends. An MP3
+  stream's decoder gets a seek table (one point per second, at most 1024),
+  also after a re-init; `setPosition(getDuration())` on an ~18 minute MP3,
+  whose float duration is past the last frame, loops instead of failing. An
+  ended voice's position (and pending seek) carries over a re-init. A
+  watchdog turns a StreamWorker that never comes back into a FAIL.
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the
