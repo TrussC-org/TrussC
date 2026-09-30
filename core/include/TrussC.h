@@ -2889,6 +2889,13 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     desc.clipboard_size = settings.clipboardSize;
     internal::currentWindowContext().clipboardSize = settings.clipboardSize;
 
+    // Windows: switch the console output code page to UTF-8 while the app
+    // runs (restored on exit), so UTF-8 log text is not shown in the OEM code
+    // page. Takes effect whenever the process has a console (Debug builds,
+    // TRUSSC_SHOW_CONSOLE); a GUI-subsystem Release build has none, and the
+    // call does nothing. Ignored on other platforms.
+    desc.win32.console_utf8 = true;
+
     return desc;
 }
 

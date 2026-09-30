@@ -281,6 +281,8 @@ Every Windows executable built through `trussc_app()` embeds an application mani
 - `activeCodePage` = `UTF-8`: on Windows 10 version 1903 or later the process code page is UTF-8, so narrow strings are UTF-8 in every API that takes them (`fs::path(std::string)`, `path.string()`, `fopen`, `getenv`, the `-A` Win32 functions), in TrussC, addons and third-party libraries alike. A UTF-8 literal or `std::string` works as a file path: `img.load("写真.png")`. Older Windows ignores the setting.
 - `longPathAware`: paths longer than 260 characters work where Windows has long paths enabled (the `LongPathsEnabled` policy).
 
+The console output code page is UTF-8 as well: `runApp()` (through `sapp_desc.win32.console_utf8`) and `runHeadlessApp()` switch it to UTF-8 while the app runs and restore it on exit, so UTF-8 log text reads correctly in the console of a Debug or `TRUSSC_SHOW_CONSOLE` build. This is done at run time, not by the manifest.
+
 ---
 
 ## 4. Addon System

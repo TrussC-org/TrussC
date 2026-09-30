@@ -103,6 +103,14 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // Install signal handlers
     headless::installSignalHandlers();
 
+#ifdef _WIN32
+    // Console output code page UTF-8 while the app runs, as the windowed app
+    // gets from sapp_desc.win32.console_utf8: log text is UTF-8. Without a
+    // console the call fails and nothing changes.
+    const UINT origConsoleOutputCP = GetConsoleOutputCP();
+    const bool consoleOutputCPSet = SetConsoleOutputCP(CP_UTF8) != 0;
+#endif
+
     // Record the main thread id (this runner owns the app/update loop), so
     // isMainThread() / runOnMainThread() behave the same as in the windowed app.
     getMainThreadId();
@@ -156,6 +164,9 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     internal::flushAudioDiagnostics();
 
     headless::active = false;
+#ifdef _WIN32
+    if (consoleOutputCPSet) SetConsoleOutputCP(origConsoleOutputCP);
+#endif
     return 0;
 }
 
