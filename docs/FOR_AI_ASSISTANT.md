@@ -3788,7 +3788,7 @@ Kind SoundSource::kind() const  // Source kind (Eager for SoundBuffer, Stream fo
 ### SoundStream — Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a refill of usually ~10 ms (a file whose length is unknown cannot seek), and each polyphony slot costs one open file handle + decoder + ring buffer.
 
 ```cpp
-float SoundStream::getDuration() const  // Decoded file duration in seconds. 0 when the file does not record its length (e.g. a FLAC encoded to a pipe); such a stream plays to its end but cannot seek.
+float SoundStream::getDuration() const  // Decoded file duration in seconds. 0 when the file does not record its length (e.g. a FLAC encoded to a pipe); such a stream plays to its end but cannot seek, and an engine re-init at another sample rate restarts it from the beginning.
 int SoundStream::getMaxPolyphony() const  // Number of concurrent decoder slots reserved at loadStream().
 fs::path SoundStream::getPath() const  // Path the stream was opened from.
 LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened, the format is unsupported, or the file has no audio frames (DecodeFailed).

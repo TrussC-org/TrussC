@@ -8276,9 +8276,9 @@ description.ko = "스트리밍 사운드 소스: 파일을 열어둔 채로, 전
 related = ["SoundBuffer", "SoundSource"]
 
 ["SoundStream::getDuration"]
-description.en = "Decoded file duration in seconds. 0 when the file does not record its length (e.g. a FLAC encoded to a pipe); such a stream plays to its end but cannot seek."
-description.ja = "デコードしたファイルの秒単位の長さ。ファイルが長さを記録していない場合 (パイプへエンコードした FLAC など) は 0 で、そのストリームは最後まで再生できるがシークはできない"
-description.ko = "디코딩된 파일의 초 단위 길이. 파일에 길이가 기록되어 있지 않으면 (파이프로 인코딩한 FLAC 등) 0이며, 그런 스트림은 끝까지 재생되지만 시크할 수 없음"
+description.en = "Decoded file duration in seconds. 0 when the file does not record its length (e.g. a FLAC encoded to a pipe); such a stream plays to its end but cannot seek, and an engine re-init at another sample rate restarts it from the beginning."
+description.ja = "デコードしたファイルの秒単位の長さ。ファイルが長さを記録していない場合 (パイプへエンコードした FLAC など) は 0 で、そのストリームは最後まで再生できるがシークはできず、別のサンプルレートでエンジンを再初期化すると先頭から再生し直す"
+description.ko = "디코딩된 파일의 초 단위 길이. 파일에 길이가 기록되어 있지 않으면 (파이프로 인코딩한 FLAC 등) 0이며, 그런 스트림은 끝까지 재생되지만 시크할 수 없고, 다른 샘플레이트로 엔진을 재초기화하면 처음부터 다시 재생됨"
 
 ["SoundStream::getMaxPolyphony"]
 description.en = "Number of concurrent decoder slots reserved at loadStream()."

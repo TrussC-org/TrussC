@@ -465,7 +465,8 @@ private:
 //     engines; longer on slow storage or for an MP3 several hours long,
 //     whose seek table is capped). getPosition() reports the requested
 //     target meanwhile. A file whose length is unknown (duration 0, e.g.
-//     a FLAC encoded to a pipe) cannot seek.
+//     a FLAC encoded to a pipe) cannot seek, and an engine re-init at
+//     another sample rate restarts it from the beginning.
 //   - Each polyphony slot costs one open file handle + one decoder +
 //     one ring buffer (default ~16 KB).
 // ---------------------------------------------------------------------------
@@ -1440,7 +1441,9 @@ public:
     //   - setSpeed() is ignored (decoder outputs engine-rate frames).
     //   - setPosition() incurs a seek + ring-buffer refill (usually
     //     ~10 ms); getPosition() reports the requested position meanwhile.
-    //     A file whose length is unknown (getDuration() is 0) cannot seek.
+    //     A file whose length is unknown (getDuration() is 0) cannot seek,
+    //     and an engine re-init at another sample rate restarts it from the
+    //     beginning.
     //
     // Web (Emscripten): streaming relies on std::thread + on-disk file I/O,
     // neither of which is available in the default browser build. To keep
