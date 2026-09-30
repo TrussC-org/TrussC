@@ -29,6 +29,7 @@
 namespace trussc {
     struct NullMutex {
         void lock() {}
+        bool try_lock() { return true; }
         void unlock() {}
     };
 }

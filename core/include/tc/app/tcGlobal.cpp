@@ -821,6 +821,22 @@ void logThreadNotWaited() {
 } // namespace internal
 
 // ---------------------------------------------------------------------------
+// Panic-path flag for the Logger (declared in tcLog.h)
+// ---------------------------------------------------------------------------
+namespace {
+// Set while this thread logs a sokol panic (see internal::isLogNonBlocking).
+thread_local bool logNonBlocking = false;
+} // namespace
+
+namespace internal {
+
+bool isLogNonBlocking() {
+    return logNonBlocking;
+}
+
+} // namespace internal
+
+// ---------------------------------------------------------------------------
 // More one-per-process state (#249). Each of these used to be a function-local
 // static or an inline variable in its header, which a Windows hot reload guest
 // DLL duplicated: its recordings, beeps, console switch, main-thread queue,
