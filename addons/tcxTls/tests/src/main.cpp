@@ -24,6 +24,9 @@
 //     reconnected from it while disconnect() was joining that thread.
 //   - A listener that reconnects on "Disconnected by client" ends up
 //     connected: disconnect() resets the SSL context before it notifies.
+//   - A reconnect from onConnect(true) leaves one receive thread (counted on
+//     Linux): the old thread uses the generation it was started with, not
+//     the one current after onConnect returned.
 //   - connect() to another peer while connected, with a listener that
 //     reconnects on every onDisconnect: the listener's reconnect (to the old
 //     peer, from inside connect()'s own disconnect) is closed again without
@@ -553,6 +556,58 @@ static void scenario() {
           client.send("reconnected") && peer.expect("reconnected", 3000));
     check("by-client reconnect: the client receives the peer's data",
           peerToClient(peer, "welcome again"));
+    client.disconnect();
+    peer.reset();
+    if (g_fail) bail();
+
+    // --- a reconnect from onConnect(true) ------------------------------------
+    // onConnect fires on the receive thread right after the handshake, before
+    // its receive loop. This listener reconnects and then waits until the new
+    // connection's handshake is done. The old thread took its generation only
+    // after onConnect returned, so it took the new one and went on reading
+    // the new connection next to the new receive thread.
+#ifdef __linux__
+    const int threadsBeforeOnConnect = countEntries("/proc/self/task");
+#endif
+    atomic<bool> onConnectArmed{true}, onConnectListenerDone{false};
+    atomic<int> onConnectReconnect{-1};   // -1 not run, 0 connect() failed, 1 ok
+    EventListener onConnectSub = client.onConnect.listen([&](TcpConnectEventArgs& e) {
+        if (e.success && onConnectArmed.exchange(false)) {
+            onConnectReconnect = client.connect("127.0.0.1", port) ? 1 : 0;
+            waitFor(3000, [&] { return client.isConnected(); });
+            onConnectListenerDone = true;
+        }
+    });
+    check("onConnect reconnect: connect()", client.connect("127.0.0.1", port));
+    check("onConnect reconnect: TLS peer completes the handshake",
+          peer.accept(listener, server.conf, 5000));
+    check("onConnect reconnect: TLS peer completes the new handshake",
+          peer.accept(listener, server.conf, 5000));
+    check("onConnect reconnect: the listener's connect() returned true",
+          waitFor(3000, [&] { return onConnectReconnect.load() == 1; }));
+    check("onConnect reconnect: the listener returned",
+          waitFor(5000, [&] { return onConnectListenerDone.load(); }));
+    onConnectSub.disconnect();
+    check("onConnect reconnect: client is connected", waitFor(3000, isConnected));
+    if (g_fail) bail();
+    check("onConnect reconnect: data reaches the peer",
+          client.send("after onConnect") && peer.expect("after onConnect", 3000));
+    check("onConnect reconnect: the client receives the peer's data",
+          peerToClient(peer, "onConnect pong"));
+#ifdef __linux__
+    int threadsAfterOnConnect = -1;
+    waitFor(1000, [&] {
+        threadsAfterOnConnect = countEntries("/proc/self/task");
+        return threadsAfterOnConnect <= threadsBeforeOnConnect + 1;
+    });
+    printf("  (threads: %d before connect(), %d after; one receive thread expected)\n",
+           threadsBeforeOnConnect, threadsAfterOnConnect);
+    check("onConnect reconnect: the old receive thread stopped",
+          threadsAfterOnConnect <= threadsBeforeOnConnect + 1);
+#else
+    printf("%-60s %s\n", "onConnect reconnect: the old receive thread stopped",
+           "SKIP (counted on Linux)");
+#endif
     client.disconnect();
     peer.reset();
     if (g_fail) bail();

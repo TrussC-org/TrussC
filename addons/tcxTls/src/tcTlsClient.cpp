@@ -516,6 +516,13 @@ bool TlsClient::performHandshake() {
 }
 
 void TlsClient::processNetwork() {
+    // Without threads (driven by the update event) no generation is started;
+    // the current one is this call's.
+    processNetworkImpl(tlsReceiveGeneration_);
+}
+
+// generation: the receive thread's own (the generation it was started with)
+void TlsClient::processNetworkImpl(unsigned generation) {
     if (!running_) return;
 
     // 1. Handle TCP connection pending
@@ -572,8 +579,8 @@ void TlsClient::processNetwork() {
     // calls connect(), say) starts a new connection with its own receive
     // thread. The generation stops this loop instead of letting it go back
     // to reading the new connection next to that thread, sharing the SSL
-    // context and tlsRecvBuf_ with it.
-    const unsigned generation = tlsReceiveGeneration_;
+    // context and tlsRecvBuf_ with it. It is the thread's own, passed in, not
+    // read here: onConnect above may already have reconnected.
     while (connected_ && tlsReceiveGeneration_ == generation) {
         int ret = mbedtls_ssl_read(&ctx_->ssl, tlsRecvBuf_.data(), tlsRecvBuf_.size());
 
@@ -746,7 +753,7 @@ void TlsClient::tlsReceiveThreadFunc(unsigned generation) {
     // own, and running_ is true again for that one. The generation says which
     // thread is current (processNetwork()'s receive loop checks it as well).
     while (running_ && tlsReceiveGeneration_ == generation) {
-        processNetwork();
+        processNetworkImpl(generation);
         if (running_ && tlsReceiveGeneration_ == generation) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }

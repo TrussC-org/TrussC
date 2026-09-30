@@ -125,6 +125,9 @@ private:
     // Receive thread (for TLS)
     void tlsReceiveThreadFunc(unsigned generation);
 
+    // processNetwork()'s work, for the receive thread of that generation
+    void processNetworkImpl(unsigned generation);
+
     std::thread tlsReceiveThread_;
 
     // Bumped for every receive thread started. A thread whose generation is
