@@ -257,7 +257,10 @@ namespace internal {
 // defined in tcGlobal.cpp: setApp() below adds to it from app code, and the
 // platform close() (TrussC.lib) removes from it, so under hot reload the guest
 // adds and the host removes. With a copy per module a Windows guest never saw
-// the removal, and re-attaching an App after its window closed was refused.
+// the removal: the released App stayed "attached" in the guest's view, so a
+// new App that got a released App's address was refused. (A closed App is
+// never attached again: setApp() refuses an App whose cleanup() ran; attach
+// a new App instead.)
 // Main thread only. (runApp unification — "runApp = create main window +
 // setApp" — is a future refactor; the main App is guarded via rootNode.)
 std::unordered_set<const App*>& attachedApps();

@@ -465,8 +465,8 @@ static int runCycles(const std::string& guestPath, int port) {
         // release in the double-attach guard. The platform close() that
         // releases it is TrussC.lib code; the host's own setApp(nullptr)
         // releases it the same way without a native window. A guest with its
-        // own guard never saw the release: the App stayed "attached" there,
-        // and re-attaching it was refused ("already drives another window").
+        // own guard never saw the release: the App stayed "attached" in the
+        // guest's view ("already drives another window" for anything there).
         // An App runs once (#256: a closed App is not attached again), so the
         // second attach, as when an app reopens a window the user closed,
         // uses a new App. setApp() only takes an open window: the windows
@@ -485,7 +485,7 @@ static int runCycles(const std::string& guestPath, int port) {
             const bool guestSawAttach = attached && guest->seesAttached(sub.get());
             first.setApp(nullptr);
             const bool guestSawRelease = !guest->seesAttached(sub.get());
-            const bool reattached = guest->attachApp(second, reopened);
+            const bool attachedNew = guest->attachApp(second, reopened);
             second.setApp(nullptr);
             first.native_ = nullptr;
             second.native_ = nullptr;
@@ -495,7 +495,7 @@ static int runCycles(const std::string& guestPath, int port) {
             if (!guestSawRelease) {
                 return fail(33, "guest code still sees an App the host released from its window as attached: the guest keeps its own double-attach guard");
             }
-            if (!reattached) return fail(33, "guest code could not attach a new App to another window");
+            if (!attachedNew) return fail(33, "guest code could not attach a new App to another window");
         }
 
         // Destruction + unload: listener removal churns the COW lists, and the
