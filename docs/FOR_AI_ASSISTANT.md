@@ -2427,7 +2427,7 @@ bool AudioEngine::waitForCallbackIdle()  // Teardown barrier for audioOut / audi
 ```cpp
 ```
 
-### AudioRecorder — Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks
+### AudioRecorder — Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks. Every file has a 36-byte JUNK chunk after the RIFF header, so the samples start at byte 80 (S16) or 92 (F32). A take over 4 GiB of samples (about 3.1 h of 48 kHz stereo F32) is written as RF64 (EBU Tech 3306); older readers without RF64 support can't open it
 
 ```cpp
 uint64_t AudioRecorder::getDroppedFrames() const  // Frames lost to ring-buffer overflow (0 in normal operation; nonzero means the writer thread fell behind)
@@ -2435,7 +2435,7 @@ fs::path AudioRecorder::getPath() const  // Resolved path of the file being writ
 double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far
 bool AudioRecorder::isRecording() const  // True while recording
 bool AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened
-void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForCallbackIdle(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile
+void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes; a take over 4 GiB of samples becomes RF64, logged as a notice); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForCallbackIdle(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile
 ```
 
 ### AudioSettings — Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device.

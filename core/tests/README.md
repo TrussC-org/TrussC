@@ -113,6 +113,19 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   while another thread calls `stop()` still ends up in the WAV and in
   `getRecordedSeconds()`. A watchdog turns a barrier that never returns into
   a FAIL.
+- `audioRecorderWav/` — the WAV header `AudioRecorder` writes never wraps past
+  4 GiB of samples (#336). Every file reserves a 36-byte `JUNK` chunk after
+  `WAVE` (data at byte 80 for S16, 92 for F32). The header sizes are 64-bit:
+  a take stays plain RIFF up to the last frame whose RIFF size fits 32 bits
+  and is RF64 from the next frame on, including the gap where only the RIFF
+  size overflows; the RF64 patch turns `JUNK` into `ds64` with the 64-bit
+  sizes and sets the 32-bit fields to `0xFFFFFFFF`. Checked on the header
+  alone (`internal::wavSizeFields()` / `writeWavHeader()` /
+  `patchWavHeader()` on a memory stream), so no 4 GiB file is written. A
+  short S16 and F32 take on the null backend is plain RIFF with the `JUNK`
+  chunk and loads through `SoundBuffer` with `numSamples` equal to
+  `getRecordedSeconds()` times the sample rate. Not covered: `stop()`'s RF64
+  notice and the seek of a real file past 4 GiB (they need a 4 GiB take).
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
