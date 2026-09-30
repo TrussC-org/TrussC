@@ -157,7 +157,12 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   accept thread is held in a listener (neither throws). Every client ends up
   disconnected. `start()` while another thread's `stop()` is still waiting
   for the accept thread waits for it too, and the restarted server accepts
-  clients. A watchdog turns a hang there into a FAIL line and a non-zero exit.
+  clients; so does `start()` while that `stop()` has joined the accept thread
+  but not yet disconnected the clients (held there by
+  `internal::setTcpServerStopHookForTests()`), and a client of the restarted
+  server stays connected with no `onClientDisconnect`. `start()` from
+  `onReceive` is refused and the server keeps running. A watchdog turns a
+  hang there into a FAIL line and a non-zero exit.
   Linux only, in forked children: failing `accept()` calls (descriptors
   exhausted under a low `RLIMIT_NOFILE`) back off instead of spinning, log
   once and reach `onError` again after the 5 s interval if they persist; a

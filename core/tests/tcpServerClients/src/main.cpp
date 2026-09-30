@@ -25,7 +25,10 @@
 //     onSendComplete (the plain one waits for that listener to finish); and
 //     from two plain threads. Every client ends up disconnected. start()
 //     while another thread's stop() still waits for the accept thread waits
-//     for it too. A watchdog turns a hang into a FAIL line.
+//     for it too, and so does start() while that stop() has joined the accept
+//     thread but not yet cleaned up the clients (held by the stop hook): a
+//     client of the restarted server stays connected. start() from onReceive
+//     is refused. A watchdog turns a hang into a FAIL line.
 //   - Linux only, each in a forked child so a failure cannot take the rest of
 //     the run with it: accept() errors (here: out of descriptors) back off
 //     instead of spinning, are logged once per burst and reported again after
@@ -1017,15 +1020,121 @@ static void startWhileAnotherThreadStops() {
     if (d != kBadSocket) TC_CLOSE(d);
 }
 
+// start() while a stop() on another thread has joined the accept thread but
+// not yet disconnected the clients and joined their threads (held there by the
+// stop hook). start() has to wait for that stop() to finish, or the stop()
+// would go on to disconnect the restarted server's clients. Without the wait,
+// start() returns while the stop() is still held; the test then connects a
+// new client before letting the stop() go, so the stop() gets to it.
+static void startWhileAnotherStopCleansUp() {
+    const char* const prefix = "concurrent stop: start() during another stop()'s cleanup";
+    Watchdog dog(prefix, 20000);
+
+    TcpServer server;
+    atomic<bool> holdNext{false}, held{false}, release{false};
+    internal::setTcpServerStopHookForTests([&] {
+        if (!holdNext.exchange(false)) return;
+        held = true;
+        waitUntil(5000, [&] { return release.load(); });
+    });
+    atomic<int> disconnects{0};
+    EventListener onDis = server.onClientDisconnect.listen([&](TcpClientDisconnectEventArgs&) {
+        ++disconnects;
+    });
+
+    const int port = startOnFreePort(server, -1);
+    check((string(prefix) + ": server started").c_str(), port != 0);
+    if (!port) {
+        internal::setTcpServerStopHookForTests(nullptr);
+        return;
+    }
+
+    holdNext = true;
+    atomic<bool> stopReturned{false};
+    thread stopper([&] {
+        server.stop();
+        stopReturned = true;
+    });
+    const bool isHeld = waitUntil(3000, [&] { return held.load(); });
+    check((string(prefix) + ": the other stop() is held after its join").c_str(), isHeld);
+
+    atomic<int> again{-1};
+    thread starter([&] { again = startOnFreePort(server, -1); });
+
+    // start() must still be waiting while the other stop() is held. Should it
+    // return anyway, a client connects before that stop() goes on.
+    const bool startedEarly = waitUntil(500, [&] { return again.load() >= 0; });
+    check((string(prefix) + ": start() waits for the other stop() to finish").c_str(),
+          isHeld && !startedEarly);
+    rawsocket_t d = kBadSocket;
+    if (startedEarly && again.load() > 0) {
+        d = connectTo(again.load());
+        waitUntil(3000, [&] { return server.getClientCount() == 1; });
+    }
+    release = true;
+    starter.join();
+    check((string(prefix) + ": start() succeeds").c_str(), again.load() > 0);
+    check((string(prefix) + ": the other stop() returns").c_str(),
+          waitUntil(3000, [&] { return stopReturned.load(); }));
+    stopper.join();
+    internal::setTcpServerStopHookForTests(nullptr);
+
+    if (d == kBadSocket && again.load() > 0) d = connectTo(again.load());
+    const bool joined = d != kBadSocket &&
+                        waitUntil(3000, [&] { return server.getClientCount() == 1; });
+    check((string(prefix) + ": the restarted server accepts a client").c_str(), joined);
+    check((string(prefix) + ": that client stays connected").c_str(),
+          joined && !closedByServer(d, 300) && server.isRunning() &&
+          server.getClientCount() == 1);
+    check((string(prefix) + ": and gets no onClientDisconnect").c_str(), disconnects.load() == 0);
+
+    server.stop();
+    if (d != kBadSocket) TC_CLOSE(d);
+}
+
+// start() from an onReceive listener, on a client's receive thread, is
+// refused: it would have to wait for a stop() that may be joining that very
+// thread. The server keeps running and the client stays connected.
+static void startFromClientThreadRefused() {
+    const char* const prefix = "concurrent stop: start() from onReceive";
+    Watchdog dog(prefix, 20000);
+
+    TcpServer server;
+    atomic<bool> listenerDone{false}, refused{false};
+    EventListener onRecv = server.onReceive.listen([&](TcpServerReceiveEventArgs&) {
+        refused = !server.start(freePort());
+        listenerDone = true;
+    });
+    const int port = startOnFreePort(server, -1);
+    check((string(prefix) + ": server started").c_str(), port != 0);
+    if (!port) return;
+
+    rawsocket_t c = connectTo(port);
+    const bool joined = c != kBadSocket &&
+                        waitUntil(3000, [&] { return server.getClientCount() == 1; });
+    if (joined) ::send(c, "x", 1, 0);
+    check((string(prefix) + ": the listener returns").c_str(),
+          joined && waitUntil(3000, [&] { return listenerDone.load(); }));
+    check((string(prefix) + ": start() is refused").c_str(), refused.load());
+    check((string(prefix) + ": the server keeps running").c_str(),
+          server.isRunning() && server.getClientCount() == 1 && !closedByServer(c, 200));
+
+    server.stop();
+    if (c != kBadSocket) TC_CLOSE(c);
+}
+
 static void testConcurrentStop() {
     concurrentStopWithAcceptThread(false, false);
     concurrentStopWithAcceptThread(true, false);
     concurrentStopWithAcceptThread(false, true);
+    concurrentStopWithAcceptThread(true, true);
     concurrentStopOnTwoClientThreads(false);
     concurrentStopOnTwoClientThreads(true);
     concurrentStopOnPlainAndWriterThread();
     concurrentStopFromTwoThreads();
     startWhileAnotherThreadStops();
+    startWhileAnotherStopCleansUp();
+    startFromClientThreadRefused();
 }
 
 #ifdef __linux__
