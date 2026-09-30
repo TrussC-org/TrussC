@@ -9,9 +9,12 @@
 //     it. Driven here without sapp_run(): the test calls the setup, update
 //     and cleanup callbacks the way _setup_cb / _frame_cb / _cleanup_cb do.
 //     Inside the App's constructor getRootNode() is not the App yet, and
-//     App::setSize() resizes no window and warns; from setup() it goes to
-//     the main window as before (the App's own size then follows through
-//     windowResized, which never comes without a window).
+//     App::setSize() resizes no window and warns once however often it is
+//     called; from setup() it goes to the main window as before (the App's
+//     own size then follows through windowResized, which never comes without
+//     a window).
+//   - An App no shared_ptr owns (here one on the stack) is run by no window:
+//     repeated setSize() calls only set its own size and warn once.
 //   - runHeadlessApp(): the App is owned by a shared_ptr, registered while it
 //     runs (in setup() and update()), so setup() can addChild(), and the root
 //     is cleared when the run ends.
@@ -49,8 +52,9 @@ static bool rootIsEmpty() {
 // runApp()'s setup / cleanup callbacks
 // ---------------------------------------------------------------------------
 
-// Warnings logged with the App's constructor-time setSize() text.
-static int g_ctorSizeWarnings = 0;
+// Warnings setSize() logs for an App no shared_ptr owns (counted by the log
+// listener main() installs).
+static int g_unownedSizeWarnings = 0;
 
 static const App* g_windowedApp = nullptr;
 static bool g_rootInCtor = true;
@@ -64,29 +68,24 @@ public:
     WindowedApp() {
         g_windowedApp = this;
         g_rootInCtor = getRootNode() == this;
-        const int before = g_ctorSizeWarnings;
+        const int before = g_unownedSizeWarnings;
+        setSize(100, 100);
+        setSize(200, 150);
         setSize(320, 240);
-        g_warningsFromCtor = g_ctorSizeWarnings - before;
+        g_warningsFromCtor = g_unownedSizeWarnings - before;
         g_widthAfterCtor = getWidth();
         g_heightAfterCtor = getHeight();
     }
     void setup() override {
         g_setupRan = true;
-        const int before = g_ctorSizeWarnings;
+        const int before = g_unownedSizeWarnings;
         setSize(640, 480);
-        g_warningsFromSetup = g_ctorSizeWarnings - before;
+        g_warningsFromSetup = g_unownedSizeWarnings - before;
         g_widthAfterSetup = getWidth();
     }
 };
 
 static void runAppCallbacks() {
-    EventListener logListener = getLogger().onLog.listen([](LogEventArgs& e) {
-        if (e.level == LogLevel::Warning &&
-            e.message.find("setSize() in the App's constructor") != string::npos) {
-            ++g_ctorSizeWarnings;
-        }
-    });
-
     WindowSettings settings;
     (void)buildAppDescriptor<WindowedApp>(settings);
     check("runApp: no root before the setup callback", getRootNode() == nullptr);
@@ -96,7 +95,7 @@ static void runAppCallbacks() {
     check("runApp: the App is getRootNode() once it is made",
           g_windowedApp != nullptr && getRootNode() == g_windowedApp);
     check("runApp: getRootNode() is not the App yet inside its constructor", !g_rootInCtor);
-    check("runApp: setSize() in the constructor warns once", g_warningsFromCtor == 1);
+    check("runApp: setSize() called 3 times in the constructor warns once", g_warningsFromCtor == 1);
     check("runApp: ...and resizes no window, only the App's own size",
           g_widthAfterCtor == 320 && g_heightAfterCtor == 240);
 
@@ -109,6 +108,20 @@ static void runAppCallbacks() {
     internal::appCleanupFunc();
     check("runApp: getRootNode() is null once the cleanup callback freed the App",
           getRootNode() == nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// An App no shared_ptr owns
+// ---------------------------------------------------------------------------
+
+static void unownedApp() {
+    App onStack;   // never owned by a shared_ptr: no window runs it
+    const int before = g_unownedSizeWarnings;
+    for (int i = 1; i <= 3; ++i) onStack.setSize(100.0f * i, 50.0f * i);
+    check("unowned App: 3 setSize() calls warn exactly once", g_unownedSizeWarnings - before == 1);
+    check("unowned App: ...and only set the App's own size",
+          onStack.getWidth() == 300 && onStack.getHeight() == 150);
+    check("unowned App: it is not getRootNode()", getRootNode() != &onStack);
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +161,15 @@ static void runHeadless() {
 }
 
 int main() {
+    EventListener logListener = getLogger().onLog.listen([](LogEventArgs& e) {
+        if (e.level == LogLevel::Warning &&
+            e.message.find("isn't owned by a shared_ptr yet") != string::npos) {
+            ++g_unownedSizeWarnings;
+        }
+    });
+
     runAppCallbacks();
+    unownedApp();
     runHeadless();
 
     std::printf("\n%s  (%d failure%s)\n", g_fail ? "FAILED" : "PASSED",
