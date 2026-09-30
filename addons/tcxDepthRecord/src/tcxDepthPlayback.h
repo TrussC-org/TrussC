@@ -69,6 +69,13 @@ public:
 
 protected:
     bool openDevice() override {
+        // Start from an empty state, so a failed open leaves no manifest or
+        // frame index from a file opened before.
+        header_ = TcdcHeader{};
+        index_.clear();
+        fileSize_ = 0;
+        cursor_ = 0;
+        warnedSkippedBlock_ = false;
         // getDataPath passes absolute paths through unchanged
         std::filesystem::path resolved = getDataPath(path_);
         file_.open(resolved, std::ios::binary);
@@ -94,8 +101,6 @@ protected:
         file_.seekg(0, std::ios::end);
         const std::streamoff fileEnd = file_.tellg();
         fileSize_ = fileEnd > 0 ? static_cast<std::uint64_t>(fileEnd) : 0;
-        warnedSkippedBlock_ = false;
-        index_.clear();
         if (header_.indexOffset != 0 && header_.frameCount > 0) {
             file_.seekg(static_cast<std::streamoff>(header_.indexOffset));
             for (std::uint32_t i = 0; i < header_.frameCount; ++i) {
@@ -104,7 +109,6 @@ protected:
                 index_.push_back(e);
             }
         }
-        cursor_ = 0;
         logNotice("tcxDepthRecord")
             << "PlaybackDepthCamera: " << index_.size() << " frames ("
             << header_.width << "x" << header_.height << "), "
