@@ -133,3 +133,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   window's context and in the main one. A freed probe's memory holds a
   sentinel node that counts any call reaching it, so a stale pointer fails
   the test instead of depending on heap reuse.
+- `appRoot/` — the running App is `getRootNode()` (#255): the root is a weak
+  reference, so the App can't register itself from its constructor, and the
+  code that creates it through a `shared_ptr` does. `runApp()`'s setup
+  callback (called here without `sapp_run()`) registers the App, and the
+  root is gone once the cleanup callback freed it; `runHeadlessApp()` owns
+  the App with a `shared_ptr`, so it is the root in `setup()`, `update()` and
+  `cleanup()`, `setup()` can `addChild()`, and the root is cleared when the
+  run ends.
