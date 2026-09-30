@@ -1415,8 +1415,21 @@ static int stbtt_InitFont_internal(stbtt_fontinfo *info, unsigned char *data, in
       info->fontdicts = stbtt__new_buf(NULL, 0);
       info->fdselect = stbtt__new_buf(NULL, 0);
 
-      // @TODO this should use size from table (not 512MB)
-      info->cff = stbtt__new_buf(data+cff, 512*1024*1024);
+      // TrussC patch: use the CFF table length from the table directory
+      // instead of a fixed 512MB, so the CFF reads below stay inside the table.
+      {
+         stbtt_uint32 cff_length = 0;
+         stbtt_uint32 tabledir = fontstart + 12;
+         numTables = ttUSHORT(data+fontstart+4);
+         for (i=0; i < numTables; ++i) {
+            stbtt_uint32 loc = tabledir + 16*i;
+            if (stbtt_tag(data+loc+0, "CFF ")) {
+               cff_length = ttULONG(data+loc+12);
+               break;
+            }
+         }
+         info->cff = stbtt__new_buf(data+cff, cff_length);
+      }
       b = info->cff;
 
       // read the header

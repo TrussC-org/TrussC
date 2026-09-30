@@ -10,7 +10,7 @@ and contributors, under the stb dual license (MIT or Public Domain, see
 | `stb_image.h` | v2.30 | [nvpro-samples/stb](https://github.com/nvpro-samples/stb), branch `nv/all-fixes` | `1cafe0e01eeaf4142f05b36218793cb46c7ce433` (2025-12-24) | 2026-09-30 | 2 |
 | `stb_image_write.h` | v1.16 | [nothings/stb](https://github.com/nothings/stb), `master` | `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11) | 2025-12-16 | 1 |
 | `stb_perlin.h` | v0.5 | [nothings/stb](https://github.com/nothings/stb), `master` | `2bb4a0accd4003c1db4c24533981e01b1adfd656` (2020-02-02) | 2025-12-16 | none |
-| `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | none |
+| `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | 1 |
 | `../stb_vorbis.c` | v1.22 | [sezero/stb](https://github.com/sezero/stb), branch `stb_vorbis-sezero` | `dd0c5eccaf092012b531d69d595fb587ece79571` (2026-07-13) | 2026-09-30 | none |
 
 `stb_vorbis.c` lives one level up, in `core/include/`, because
@@ -18,7 +18,8 @@ and contributors, under the stb dual license (MIT or Public Domain, see
 
 The implementations are compiled in `core/include/impl/stb_impl.cpp`
 (`stb_image`, `stb_image_write`, `stb_perlin`, `stb_truetype`, with
-`STBI_WINDOWS_UTF8` / `STBIW_WINDOWS_UTF8`) and in
+`STBI_WINDOWS_UTF8` / `STBIW_WINDOWS_UTF8`, and `STBTT_malloc` /
+`STBTT_free` for stb_truetype, see below) and in
 `core/include/tc/sound/tcSound_impl.cpp` (`stb_vorbis`, inside `extern "C"`).
 No other configuration macro is set: every stb_image format is enabled.
 
@@ -68,7 +69,27 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
 
 - **Source**: nothings/stb `master`, the file as of
   `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (a merge commit; the version
-  history in the file ends at 1.26, 2021-08-28). No TrussC patches.
+  history in the file ends at 1.26, 2021-08-28).
+- **TrussC patches** (marked `// TrussC patch:` in the file):
+  1. `stbtt_InitFont_internal`: the CFF buffer is made with the `CFF ` table
+     length from the table directory, instead of upstream's fixed 512MB
+     (upstream has a `@TODO` for it). Every later CFF read (INDEX, DICT,
+     Subrs, FDSelect, CharStrings) is bounds-checked by stb against that
+     buffer, so it stays inside the table.
+- **Configuration** (in `core/include/impl/stb_impl.cpp`, not a change to the
+  file): `STBTT_malloc` allocates 64 zeroed bytes past each requested size.
+  `stbtt_GetGlyphShape` sizes the TrueType vertex array as
+  `n + 2*numberOfContours` and reads one element past it when the last
+  contour of a glyph starts with an off-curve point; the padding keeps that
+  read inside the block.
+- **Not covered by stb, checked by TrussC**: stb_truetype takes no buffer
+  length. `FontAtlasManager` (`core/include/tc/graphics/tcFont.h`) checks the
+  sfnt skeleton (collection header, table directory, table bounds, required
+  tables, the fixed fields stb reads, hmtx and loca) against the data size
+  before `stbtt_InitFont`, and treats a glyph index from the cmap past
+  `numGlyphs` as .notdef. cmap subtable contents, glyph outlines and
+  composite glyph nesting are not checked.
+- **Covered by**: `core/tests/fontSfntCheck`.
 
 ## stb_vorbis.c (in core/include/)
 

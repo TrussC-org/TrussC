@@ -25,8 +25,31 @@
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb/stb_perlin.h"
 
+// stb_truetype allocates through STBTT_malloc. stbtt_GetGlyphShape sizes the
+// TrueType vertex array as n + 2*numberOfContours and can read one element
+// past it (a contour that starts with an off-curve point peeks at the next
+// point, and for the last point of the glyph that is past the array). Every
+// allocation gets zeroed padding after the requested size so that read stays
+// inside the block and sees a fixed value. The stb source is not changed for
+// this; see core/include/stb/README.md.
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#define TC_STBTT_ALLOC_PADDING 64
+static void* tcStbttMalloc(size_t size) {
+    if (size > SIZE_MAX - TC_STBTT_ALLOC_PADDING) return nullptr;
+    void* p = std::malloc(size + TC_STBTT_ALLOC_PADDING);
+    if (p) std::memset(static_cast<char*>(p) + size, 0, TC_STBTT_ALLOC_PADDING);
+    return p;
+}
+#define STBTT_malloc(x,u)  ((void)(u), tcStbttMalloc(x))
+#define STBTT_free(x,u)    ((void)(u), std::free(x))
+
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb/stb_truetype.h"
+
+static_assert(TC_STBTT_ALLOC_PADDING >= 2 * sizeof(stbtt_vertex),
+              "STBTT_malloc padding must cover at least two stbtt_vertex");
 
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma GCC diagnostic pop
