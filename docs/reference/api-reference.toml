@@ -15736,12 +15736,13 @@ related = ["Json", "loadJson", "toJsonString", "saveTextFile"]
 ["saveScreenshot"]
 category = "window_system"
 keywords = ["capture", "png", "export", "save image"]
-description.en = "Save a screenshot of the rendered frame (png/jpg/bmp, picked from the extension, case-insensitive). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written."
-description.ja = "描画済みフレームのスクショを保存（png/jpg/bmp、拡張子で判別し大文字小文字は区別しない）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない"
-description.ko = "렌더링된 프레임의 스크린샷 저장(png/jpg/bmp, 확장자로 판별하며 대소문자 무시). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님"
+description.en = "Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written."
+description.ja = "描画済みフレームのスクショを保存（形式は拡張子で判別し大文字小文字は区別しない。多くのプラットフォームでpng/jpg/bmp、詳細はプラットフォーム注記を参照）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない"
+description.ko = "렌더링된 프레임의 스크린샷 저장(형식은 확장자로 판별하며 대소문자 무시. 대부분의 플랫폼에서 png/jpg/bmp, 자세한 내용은 플랫폼 노트 참조). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님"
 related = ["grabScreen", "startRecording", "captureWindow"]
-platform_note.en = "Not implemented on web (no canvas readback): always returns false without queuing anything, since no file could be written, and logs a one-time warning pointing to the browser's own screenshot feature."
-platform_note.ja = "Web では未実装（canvas の読み戻しはない）: ファイルを書けないので何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
+platform_note.en = "Formats: png/jpg/bmp on Linux and Android; macOS also writes tiff/tif and gif; Windows also writes tga; iOS writes only png and jpg/jpeg. Any other extension saves PNG data at the given path, except on Windows, which appends \".png\" to it. Not implemented on web (no canvas readback): always returns false without queuing anything, since no file could be written, and logs a one-time warning pointing to the browser's own screenshot feature."
+platform_note.ja = "対応形式: Linux と Android は png/jpg/bmp。macOS はさらに tiff/tif と gif、Windows はさらに tga に対応。iOS は png と jpg/jpeg のみ。それ以外の拡張子は指定パスに PNG データで保存する（Windows のみパスに \".png\" を付け足す）。Web では未実装（canvas の読み戻しはない）: ファイルを書けないので何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
+platform_note.ko = "지원 형식: Linux와 Android는 png/jpg/bmp. macOS는 추가로 tiff/tif와 gif, Windows는 추가로 tga를 지원. iOS는 png와 jpg/jpeg만 지원. 그 밖의 확장자는 지정한 경로에 PNG 데이터로 저장(Windows만 경로에 \".png\"를 덧붙임). Web에서는 미구현(canvas 읽기 불가): 파일을 쓸 수 없으므로 아무것도 큐에 넣지 않고 항상 false를 반환하며, 브라우저 자체 스크린샷 기능을 안내하는 경고를 한 번만 출력."
 
 ["saveTextFile"]
 category = "file"
