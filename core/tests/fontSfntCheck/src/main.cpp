@@ -18,15 +18,36 @@
 //   entry past the end of glyf,
 // - truncated copies of a TrueType, a CFF and a collection font (mid header,
 //   mid table directory, mid table body).
+// - loca entries that decrease,
+// - a CFF CharStrings INDEX whose count or offset array cannot be read
+//   within the CFF table (an INDEX past the table, an empty one, a count
+//   past the table; the last two run only with NDEBUG, since stb asserts on
+//   them otherwise).
 // Plus:
-// - a glyph index from the cmap past numGlyphs is treated as .notdef,
+// - a glyph index from the cmap past numGlyphs, or for CFF past the number
+//   of CharStrings, is treated as .notdef,
+// - a codepoint above U+10FFFF is answered as missing (.notdef),
 // - the CFF data is read with the CFF table's own length (a CharStrings
 //   offset past the table no longer reads the bytes that follow it; runs only
 //   with NDEBUG, since stb asserts on that offset otherwise),
 // - a glyph whose last contour is a single off-curve point loads and
 //   rasterizes (stb reads one vertex past its array there; the padded
-//   STBTT_malloc keeps that read inside the block -- run under ASan),
-// - valid fonts still load, with the metrics they are built with.
+//   STBTT_malloc keeps that read inside the block). This case only shows
+//   something under AddressSanitizer: a plain build passes it with or
+//   without the padding, and CI does not build with ASan. Local ASan run,
+//   from the repository root:
+//     tools/bin/trusscli update -p core/tests/fontSfntCheck --tc-root "$PWD" --ide cmake
+//     cd core/tests/fontSfntCheck
+//     cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Release \
+//       -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
+//       -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address
+//     cmake --build build-asan -j4
+//     ./bin/fontSfntCheck
+//   (prefix the last line with `setarch -R` where ASan fails to start
+//   because of the kernel's address randomization),
+// - valid fonts still load, with the metrics they are built with, including
+//   numberOfHMetrics == numGlyphs, a cmap format 12 subtable, a table of
+//   length 0 and tables that share bytes with another.
 // The fonts are built here, so the test runs the same everywhere. Installed
 // fonts found at the usual system paths are also loaded and cut short.
 //
@@ -180,22 +201,24 @@ static Bytes makeMaxp(int numGlyphs) {
     return b;
 }
 
-// Advances: glyph 0 = 500, glyph 1 = 600, glyphs 2 and 3 repeat the last
-// long entry (600).
-static Bytes makeHmtx() {
+// Advances: glyph 0 = 500, every other glyph 600 (with numLong = 2, glyphs
+// 2 and up repeat the last long entry). The default is 12 bytes: two long
+// entries and two short ones.
+static Bytes makeHmtx(int numGlyphs = kNumGlyphs, int numLong = 2) {
     Bytes b;
     put16(b, 500); put16(b, 50);
-    put16(b, 600); put16(b, 0);
-    put16(b, 0);
-    put16(b, 100);
-    return b;  // 12 bytes, numberOfHMetrics = 2
+    for (int i = 1; i < numLong; i++) { put16(b, 600); put16(b, 0); }
+    for (int i = numLong; i < numGlyphs; i++) put16(b, i == 3 ? 100 : 0);
+    return b;
 }
 
-// ' ' -> 2, 'A' -> 1, 'B' -> 4 (== numGlyphs: past the last glyph), 'C' -> 3
-static Bytes makeCmap() {
-    struct Seg { uint16_t start, end; uint16_t glyph; };
-    const vector<Seg> segs = {{0x20, 0x20, 2}, {0x41, 0x41, 1}, {0x42, 0x42, 4},
-                              {0x43, 0x43, 3}, {0xFFFF, 0xFFFF, 0}};
+// Format 4 subtable (Microsoft, Unicode BMP). By default ' ' -> 2, 'A' -> 1,
+// 'B' -> 4 (== numGlyphs: past the last glyph), 'C' -> 3. Segments sorted,
+// the closing 0xFFFF segment is added here.
+struct Seg { uint16_t start, end; uint16_t glyph; };
+static Bytes makeCmap(vector<Seg> segs = {{0x20, 0x20, 2}, {0x41, 0x41, 1}, {0x42, 0x42, 4},
+                                          {0x43, 0x43, 3}}) {
+    segs.push_back({0xFFFF, 0xFFFF, 0});
     const uint32_t segCount = (uint32_t)segs.size();
     uint32_t searchRange = 2, entrySelector = 0;
     while (searchRange * 2 <= segCount * 2) { searchRange *= 2; entrySelector++; }
@@ -217,6 +240,30 @@ static Bytes makeCmap() {
     put16(b, 1);           // numTables
     put16(b, 3);           // Microsoft
     put16(b, 1);           // Unicode BMP
+    put32(b, 12);          // subtable offset
+    b.insert(b.end(), sub.begin(), sub.end());
+    return b;
+}
+
+// Format 12 subtable (Microsoft, Unicode full). Groups of one codepoint each,
+// sorted by codepoint.
+static Bytes makeCmap12(const vector<pair<uint32_t, uint32_t>>& codepointToGlyph) {
+    Bytes sub;
+    put16(sub, 12);
+    put16(sub, 0);
+    put32(sub, 16 + 12 * (uint32_t)codepointToGlyph.size());
+    put32(sub, 0);  // language
+    put32(sub, (uint32_t)codepointToGlyph.size());
+    for (auto& g : codepointToGlyph) {
+        put32(sub, g.first);
+        put32(sub, g.first);
+        put32(sub, g.second);
+    }
+    Bytes b;
+    put16(b, 0);           // version
+    put16(b, 1);           // numTables
+    put16(b, 3);           // Microsoft
+    put16(b, 10);          // Unicode full
     put32(b, 12);          // subtable offset
     b.insert(b.end(), sub.begin(), sub.end());
     return b;
@@ -270,17 +317,21 @@ static void makeGlyfLoca(int locaFormat, Bytes& glyf, Bytes& loca) {
     else put32(loca, (uint32_t)glyf.size());
 }
 
-// hmtx goes last, so a read past it is a read past the data.
-static Bytes makeTrueType(int locaFormat = 0) {
+// hmtx goes last, so a read past it is a read past the data. `extra` tables
+// go between cmap and loca.
+static Bytes makeTrueType(int locaFormat = 0, int numLong = 2, const Bytes& cmap = makeCmap(),
+                          const vector<Table>& extra = {}) {
     Bytes glyf, loca;
     makeGlyfLoca(locaFormat, glyf, loca);
-    return buildSfnt(0x00010000, {{"head", makeHead(locaFormat)},
-                                  {"hhea", makeHhea(2)},
-                                  {"maxp", makeMaxp(kNumGlyphs)},
-                                  {"cmap", makeCmap()},
-                                  {"loca", loca},
-                                  {"glyf", glyf},
-                                  {"hmtx", makeHmtx()}});
+    vector<Table> tables = {{"head", makeHead(locaFormat)},
+                            {"hhea", makeHhea(numLong)},
+                            {"maxp", makeMaxp(kNumGlyphs)},
+                            {"cmap", cmap}};
+    tables.insert(tables.end(), extra.begin(), extra.end());
+    tables.push_back({"loca", loca});
+    tables.push_back({"glyf", glyf});
+    tables.push_back({"hmtx", makeHmtx(kNumGlyphs, numLong)});
+    return buildSfnt(0x00010000, tables);
 }
 
 // --- CFF ---------------------------------------------------------------------
@@ -327,7 +378,9 @@ static vector<Bytes> cffCharStrings() {
 // CFF with header, Name, Top DICT (CharStrings offset only), String and
 // Global Subr INDEXes. The CharStrings INDEX sits at `charStringsAt`, inside
 // the table when `inside`, otherwise the caller puts it after the table.
-static Bytes makeCff(uint32_t charStringsAt, bool inside) {
+static Bytes makeCff(uint32_t charStringsAt, bool inside,
+                     const vector<Bytes>& charStrings = cffCharStrings(),
+                     const vector<Bytes>& gsubrs = {}) {
     Bytes b = {1, 0, 4, 4};  // major, minor, hdrSize, offSize
     const Bytes name = cffIndex({Bytes{'T'}});
     Bytes dict = {29};
@@ -337,27 +390,30 @@ static Bytes makeCff(uint32_t charStringsAt, bool inside) {
     b.insert(b.end(), name.begin(), name.end());
     b.insert(b.end(), top.begin(), top.end());
     put16(b, 0);  // String INDEX
-    put16(b, 0);  // Global Subr INDEX
+    const Bytes gs = cffIndex(gsubrs);
+    b.insert(b.end(), gs.begin(), gs.end());
     if (inside) {
         if (b.size() != charStringsAt) {
             printf("test bug: CharStrings at %zu, not %u\n", b.size(), charStringsAt);
             exit(2);
         }
-        const Bytes cs = cffIndex(cffCharStrings());
+        const Bytes cs = cffIndex(charStrings);
         b.insert(b.end(), cs.begin(), cs.end());
     }
     return b;
 }
-static Bytes makeCffFont() {
+static Bytes makeCffFont(const vector<Bytes>& charStrings = cffCharStrings(),
+                         const vector<Bytes>& gsubrs = {}, int numGlyphs = kNumGlyphs,
+                         const Bytes& cmap = makeCmap()) {
     // The Top DICT has a fixed size, so the CharStrings INDEX starts where
     // the table without it ends.
-    const uint32_t charStringsAt = (uint32_t)makeCff(0, false).size();
+    const uint32_t charStringsAt = (uint32_t)makeCff(0, false, charStrings, gsubrs).size();
     return buildSfnt(tagOf("OTTO"), {{"head", makeHead(0)},
                                      {"hhea", makeHhea(2)},
-                                     {"maxp", makeMaxp(kNumGlyphs)},
-                                     {"cmap", makeCmap()},
-                                     {"CFF ", makeCff(charStringsAt, true)},
-                                     {"hmtx", makeHmtx()}});
+                                     {"maxp", makeMaxp(numGlyphs)},
+                                     {"cmap", cmap},
+                                     {"CFF ", makeCff(charStringsAt, true, charStrings, gsubrs)},
+                                     {"hmtx", makeHmtx(numGlyphs)}});
 }
 
 // CharStrings offset points just past the CFF table; the next table holds a
@@ -471,6 +527,75 @@ static void checkGlyphIndexClamp(const string& label, const Bytes& f) {
           gb ? "advance=" + to_string(gb->getAdvance()) : "null");
 }
 
+// --- CFF: fewer CharStrings than glyphs -----------------------------------------
+static void checkCffCharStringsCount() {
+    const float scale = (float)kFontSize / 1000.0f;
+    // Three CharStrings (.notdef, 'A', space) for four glyphs: 'C' maps to
+    // glyph 3, which maxp allows and the CharStrings INDEX does not have.
+    vector<Bytes> cs = cffCharStrings();
+    cs.pop_back();
+    const string label = "CFF, 3 CharStrings for 4 glyphs";
+    internal::FontAtlasManager m;
+    if (!tryLoad(m, makeCffFont(cs)).ok) {
+        check(label + ": loads", false);
+        return;
+    }
+    check(label + ": 'A' has a glyph", m.fontHasGlyph('A'));
+    check(label + ": 'C' (glyph past the CharStrings) is not a glyph", !m.fontHasGlyph('C'));
+    check(label + ": 'C' advance is 0", m.getGlyphAdvanceEm('C') == 0.0f,
+          to_string(m.getGlyphAdvanceEm('C')));
+    const int before = g_warnings;
+    const Path pc = m.getGlyphPath('C');
+    check(label + ": 'C' outline is empty (with the no-glyph warning)",
+          pc.empty() && g_warnings == before + 1,
+          "vertices=" + to_string(pc.size()) + " warnings=" + to_string(g_warnings - before));
+    const internal::GlyphInfo* gc = m.getOrLoadGlyph('C');
+    check(label + ": 'C' draws as .notdef",
+          gc && gc->isValid() && closeTo(gc->getAdvance(), 500 * scale) && gc->getWidth() > 0,
+          gc ? "advance=" + to_string(gc->getAdvance()) : "null");
+
+    // No CharStrings at all: the count is 0, and the font is refused.
+    expectRejected("CFF with an empty CharStrings INDEX", makeCffFont({}),
+                   "CFF CharStrings INDEX cannot be read");
+#ifdef NDEBUG
+    // A count whose offset array does not fit in the CFF table. (stb's own
+    // STBTT_assert stops at this INDEX in builds without NDEBUG.)
+    {
+        Bytes f = makeCffFont();
+        const Loc cff = findTable(f, "CFF ");
+        const size_t charStringsAt = makeCff(0, false).size();
+        set16(f, cff.offset + charStringsAt, 0xFFFF);
+        expectRejected("CFF CharStrings count past the CFF table", f,
+                       "CFF CharStrings INDEX cannot be read");
+    }
+#else
+    printf("%-72s SKIP (stb asserts in builds without NDEBUG)\n",
+           "rejected: CFF CharStrings count past the CFF table");
+    fflush(stdout);
+#endif
+}
+
+// --- codepoints above U+10FFFF -----------------------------------------------------
+static void checkCodepointRange() {
+    // A format 12 cmap can map any 32-bit value; stb looks it up as given.
+    const Bytes f = makeTrueType(0, 2, makeCmap12({{0x20, 2}, {0x41, 1}, {0x10FFFF, 1},
+                                                   {0x110041, 1}, {0xFFFFFFFF, 1}}));
+    checkValid("TrueType, cmap format 12", f);
+    internal::FontAtlasManager m;
+    if (!tryLoad(m, f).ok) return;
+    const float scale = (float)kFontSize / 1000.0f;
+    check("codepoints: U+10FFFF has a glyph", m.fontHasGlyph(0x10FFFF));
+    check("codepoints: 0x110041 is not a glyph", !m.fontHasGlyph(0x110041));
+    check("codepoints: 0xFFFFFFFF is not a glyph", !m.fontHasGlyph(0xFFFFFFFFu));
+    check("codepoints: 0x110041 advance is 0", m.getGlyphAdvanceEm(0x110041) == 0.0f);
+    const Path p = m.getGlyphPath(0xFFFFFFFFu);
+    check("codepoints: 0xFFFFFFFF outline is empty", p.empty(), "vertices=" + to_string(p.size()));
+    const internal::GlyphInfo* g = m.getOrLoadGlyph(0x110041);
+    check("codepoints: 0x110041 draws as .notdef",
+          g && g->isValid() && closeTo(g->getAdvance(), 500 * scale),
+          g ? "advance=" + to_string(g->getAdvance()) : "null");
+}
+
 // --- last contour is one off-curve point ---------------------------------------
 static void checkSinglePointContour() {
     internal::FontAtlasManager m;
@@ -502,19 +627,11 @@ static void checkCffLength() {
            "CFF: CharStrings past the CFF table are not read");
     fflush(stdout);
 #else
-    internal::FontAtlasManager m;
-    const Bytes f = makeCffFontCharStringsOutside();
-    const LoadOutcome r = tryLoad(m, f);
     // The skeleton is fine; the CharStrings offset is CFF data, which the
-    // check does not look into. stb then finds no CharStrings in the table.
-    if (!r.ok) {
-        check("CFF: CharStrings past the CFF table are not read", true);
-        return;
-    }
-    check("CFF: CharStrings past the CFF table are not read",
-          m.getGlyphPath('A').empty(),
-          "'A' outline has " + to_string(m.getGlyphPath('A').size()) +
-              " vertices, read from the bytes after the CFF table");
+    // skeleton check does not look into. stb finds no CharStrings INDEX in
+    // the CFF table, so there is no count to read and the font is refused.
+    expectRejected("CFF: CharStrings past the CFF table are not read",
+                   makeCffFontCharStringsOutside(), "CFF CharStrings INDEX cannot be read");
 #endif
 }
 
@@ -753,6 +870,15 @@ static void checkMalformed() {
         f = ttLong;
         set32(f, l.offset + 4, 0x80000000u);
         expectRejected("long loca: entry far past glyf", f, "loca entry points past");
+        f = ttLong;
+        set32(f, l.offset + 8, get32(f, l.offset + 4) - 1);
+        expectRejected("long loca: entry below the one before it", f,
+                       "loca entries are not in increasing order");
+        f = tt;
+        l = findTable(f, "loca");
+        set16(f, l.offset + 4, get16(f, l.offset + 2) - 1);
+        expectRejected("loca entry below the one before it", f,
+                       "loca entries are not in increasing order");
         f = tt;
         // Pointing the loca format at long (4-byte) entries doubles the size
         // the table needs.
@@ -886,8 +1012,25 @@ int main(int argc, char** argv) {
     checkValid("TrueType", makeTrueType(0));
     checkValid("TrueType long loca", makeTrueType(1));
     checkValid("CFF", makeCffFont());
+    checkValid("TrueType, numberOfHMetrics == numGlyphs", makeTrueType(0, kNumGlyphs));
+    // Legal in sfnt: a table of length 0, and tables that share bytes.
+    checkValid("TrueType with a zero-length table",
+               makeTrueType(0, 2, makeCmap(), {{"zzzz", Bytes{}}}));
+    {
+        Bytes f = makeTrueType(0, 2, makeCmap(), {{"zzzz", Bytes(4, 0)}, {"yyyy", Bytes(4, 0)}});
+        const Loc glyf = findTable(f, "glyf");
+        const Loc z = findTable(f, "zzzz");
+        set32(f, z.entry + 8, (uint32_t)glyf.offset);
+        set32(f, z.entry + 12, (uint32_t)glyf.length);
+        const Loc y = findTable(f, "yyyy");
+        set32(f, y.entry + 8, (uint32_t)glyf.offset + 4);
+        set32(f, y.entry + 12, (uint32_t)glyf.length - 4);
+        checkValid("TrueType with tables in the same bytes as glyf", f);
+    }
     checkGlyphIndexClamp("TrueType", makeTrueType());
     checkGlyphIndexClamp("CFF", makeCffFont());
+    checkCffCharStringsCount();
+    checkCodepointRange();
     checkSinglePointContour();
     checkCffLength();
     checkMalformed();

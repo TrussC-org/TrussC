@@ -259,14 +259,35 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   offset 0 counts as missing, as in stb), head / hhea / maxp /
   cmap shorter than the fields stb reads, cmap encoding records or a used
   subtable offset past cmap, `numberOfHMetrics` outside 1..numGlyphs, a short
-  hmtx or loca, an unknown loca format, and a loca entry past glyf; and for
+  hmtx or loca, an unknown loca format, a loca entry past glyf or below the
+  one before it, and a CFF CharStrings INDEX whose count or offset array
+  cannot be read within the CFF table; and for
   copies of a TrueType, a CFF and a collection font cut short in the header,
   the table directory and each table. A glyph index from the cmap past
-  numGlyphs draws as .notdef. Also guards the TrussC patch in
+  numGlyphs (for CFF, past the number of CharStrings) and a codepoint above
+  U+10FFFF draw as .notdef. Valid fonts load, including
+  `numberOfHMetrics == numGlyphs`, a cmap format 12 subtable, a table of
+  length 0 and tables that share bytes. Also guards the TrussC patch in
   `stb_truetype.h` (CFF data is read with the CFF table's own length; this
   case runs only in builds with `NDEBUG`, as CI builds, because stb's own
   assert stops it otherwise) and the
-  padded `STBTT_malloc` (a glyph whose last contour is one off-curve point;
-  meaningful under ASan). The fonts are built at runtime; fonts installed at
+  padded `STBTT_malloc` (a glyph whose last contour is one off-curve point).
+  That last case only shows something under AddressSanitizer, and CI does not
+  build with ASan, so run it locally after changing stb_truetype or
+  `stb_impl.cpp`. From the repository root:
+
+  ```sh
+  tools/bin/trusscli update -p core/tests/fontSfntCheck --tc-root "$PWD" --ide cmake
+  cd core/tests/fontSfntCheck
+  cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
+    -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address
+  cmake --build build-asan -j4
+  ./bin/fontSfntCheck
+  ```
+
+  (Prefix the last line with `setarch -R` where ASan fails to start because
+  of the kernel's address randomization.)
+  The fonts are built at runtime; fonts installed at
   the usual system paths are also loaded and cut short when present.
   `fontSfntCheck --dump <files>` prints glyph metrics to compare two builds.
