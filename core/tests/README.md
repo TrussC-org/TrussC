@@ -197,6 +197,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   or without the #230 fix: it catches the web early return leaking into native
   builds. The web half is what guards #230; the daily run (`daily.yml`,
   `sweep-web`) runs it under node.
+- `mcpOccludedWindow/` — the MCP screenshot tools and hidden secondary
+  windows (#347): `tc_list_windows` reports `Window::isOccluded()` as
+  `occluded` on each secondary entry (none on the main one), and
+  `tc_get_screenshot` / `tc_save_screenshot` fail at once with a specific
+  error for a window whose flag is set, instead of waiting 5 s for a frame
+  it will not render. A window whose flag is not set is unchanged: the
+  request is deferred to its tick and, with no tick, answered by the 5 s
+  timeout. Headless: the flag is driven through the test seam
+  `internal::windowOccludedHookForTests()`; the native flags (macOS
+  occlusionState, Win32 `WM_SIZE` / `DXGI_STATUS_OCCLUDED`, X11 `WM_STATE` /
+  `VisibilityNotify`) are checked by hand.
 - `serialHangup/` — a lost serial device is reported (#260): when the device
   behind a `Serial` goes away, `available()` / `readBytes()` / `readByte()` /
   `writeBytes()` each notice it on their own, close the port, log one warning,

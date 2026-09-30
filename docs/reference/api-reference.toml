@@ -12149,6 +12149,13 @@ description.en = "Window height in logical points (matches its coordinate system
 description.ja = "ウィンドウ高さ (論理ポイント、座標系と一致)"
 description.ko = "윈도우 높이 (논리 포인트, 좌표계와 일치)"
 
+["Window::isOccluded"]
+keywords = ["visible", "visibility", "hidden", "minimized", "covered", "occlusion"]
+description.en = "Whether the OS reports this window as not visible, so it renders no frames (its update/draw pause until it is visible again): macOS minimized, fully covered or on another Space; Windows minimized or DXGI-occluded; Linux (X11) minimized or fully obscured (without a compositing manager). False for a closed window"
+description.ja = "OS がこのウィンドウを非表示と報告しているか。true の間はフレームを描かない (再び表示されるまで update/draw が止まる)。macOS は最小化・完全に隠れている・別の Space、Windows は最小化または DXGI が occluded と報告、Linux (X11) は最小化または完全に隠れている (コンポジットマネージャがない場合)。閉じたウィンドウでは false"
+description.ko = "OS가 이 윈도우를 보이지 않는 상태로 보고하는지 여부. true인 동안에는 프레임을 그리지 않음 (다시 보일 때까지 update/draw가 멈춤). macOS는 최소화·완전히 가려짐·다른 Space, Windows는 최소화 또는 DXGI가 occluded로 보고, Linux (X11)는 최소화 또는 완전히 가려짐 (컴포지팅 매니저가 없을 때). 닫힌 윈도우에서는 false"
+related = ["Window::isOpen", "Window::setFps"]
+
 ["Window::setClearColor"]
 description.en = "Background clear color for this window"
 description.ja = "このウィンドウの背景クリア色"

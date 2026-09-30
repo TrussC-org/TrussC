@@ -2428,6 +2428,15 @@ SOKOL_APP_API_DECL int sapp_window_framebuffer_width(sapp_window win);   /* pixe
 SOKOL_APP_API_DECL int sapp_window_framebuffer_height(sapp_window win);
 SOKOL_APP_API_DECL float sapp_window_dpi_scale(sapp_window win);         /* fb / logical, ONE source */
 SOKOL_APP_API_DECL int sapp_window_sample_count(sapp_window win);
+/* true while this window skips its tick_cb because the OS reports it as not
+   visible -- the same flags that gate the tick, so "true" means "renders no
+   frames right now":
+     macOS: occlusionState is not visible (minimized, fully covered, on
+            another Space), kept current by windowDidChangeOcclusionState
+     Win32: minimized (WM_SIZE SIZE_MINIMIZED), or the last Present returned
+            DXGI_STATUS_OCCLUDED
+     X11:   iconified (WM_STATE IconicState), or VisibilityFullyObscured
+   false for an invalid handle */
 SOKOL_APP_API_DECL bool sapp_window_occluded(sapp_window win);
 SOKOL_APP_API_DECL void sapp_window_set_title(sapp_window win, const char* title);
 
@@ -2800,6 +2809,24 @@ static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
     w->desc.event_cb(ev, handle, w->desc.user_data);
 }
 
+/* Secondary windows: store the window server's occlusionState in w->occluded
+   and send SUSPENDED / RESUMED when it changes. Called from
+   windowDidChangeOcclusionState (a hidden view's display link is suspended,
+   so the tick alone often never sees the window become hidden) and from the
+   tick gate (the transition race). Both run on the main run loop; the
+   compare keeps them from sending an event twice. Returns the new state. */
+static bool _sapp_tc_update_occluded(_sapp_tc_window_t* w) {
+    const bool occluded = (w->window.occlusionState & NSWindowOcclusionStateVisible) == 0;
+    if (occluded != w->occluded) {
+        w->occluded = occluded;
+        sapp_event e;
+        memset(&e, 0, sizeof(e));
+        e.type = occluded ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED;
+        _sapp_tc_send(w, &e);
+    }
+    return occluded;
+}
+
 /*-- main window: event routing to the sapp_desc callbacks ------------------*/
 static bool _sapp_tc_app_events_enabled(void) {
     /* same gate as sokol_app.h: nothing fires before the first tick's init_cb */
@@ -3090,15 +3117,7 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
        structurally impossible: the acquiring code below only runs for a
        provably visible window. (The display link also auto-suspends for
        occluded views; this gate covers the transition race.) */
-    const bool occluded = (w->window.occlusionState & NSWindowOcclusionStateVisible) == 0;
-    if (occluded != w->occluded) {
-        w->occluded = occluded;
-        sapp_event e;
-        memset(&e, 0, sizeof(e));
-        e.type = occluded ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED;
-        _sapp_tc_send(w, &e);
-    }
-    if (occluded) return;
+    if (_sapp_tc_update_occluded(w)) return;
 
     /* measured tick interval (the display's refresh period) */
     if (w->last_tick_time > 0.0) {
@@ -3226,7 +3245,14 @@ static void _sapp_tc_stop_fallback_timer(void);
 - (void)windowDidChangeOcclusionState:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (!w || !w->is_main) return;
+    if (!w) return;
+    if (!w->is_main) {
+        /* keeps sapp_window_occluded() current and sends SUSPENDED / RESUMED
+           (the display link of a hidden secondary window is suspended, so
+           its tick would not notice) */
+        _sapp_tc_update_occluded(w);
+        return;
+    }
     if (w->window.occlusionState & NSWindowOcclusionStateVisible) {
         _sapp_tc_stop_fallback_timer();     /* the display link auto-resumes */
     } else {
@@ -3236,8 +3262,10 @@ static void _sapp_tc_stop_fallback_timer(void);
 - (void)windowDidMiniaturize:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (!w || !w->is_main) return;
-    _sapp_tc_start_fallback_timer();
+    if (!w) return;
+    /* the fallback timer is main-only; secondary windows get the event too
+       (Win32 / X11 parity; their occluded flag follows occlusionState) */
+    if (w->is_main) _sapp_tc_start_fallback_timer();
     sapp_event e; memset(&e, 0, sizeof(e));
     e.type = SAPP_EVENTTYPE_ICONIFIED;
     _sapp_tc_send(w, &e);
@@ -3245,8 +3273,8 @@ static void _sapp_tc_stop_fallback_timer(void);
 - (void)windowDidDeminiaturize:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (!w || !w->is_main) return;
-    _sapp_tc_stop_fallback_timer();
+    if (!w) return;
+    if (w->is_main) _sapp_tc_stop_fallback_timer();
     sapp_event e; memset(&e, 0, sizeof(e));
     e.type = SAPP_EVENTTYPE_RESTORED;
     _sapp_tc_send(w, &e);
@@ -7553,8 +7581,9 @@ int sapp_window_sample_count(sapp_window win) {
 }
 
 bool sapp_window_occluded(sapp_window win) {
+    /* both flags gate the secondary tick (see the declaration) */
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    return w ? w->occluded : false;
+    return w ? (w->occluded || w->iconified) : false;
 }
 
 void sapp_window_set_title(sapp_window win, const char* title) {
@@ -10837,8 +10866,9 @@ int sapp_window_sample_count(sapp_window win) {
 }
 
 bool sapp_window_occluded(sapp_window win) {
+    /* both flags gate the secondary tick (see the declaration) */
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    return w ? w->occluded : false;
+    return w ? (w->occluded || w->iconified) : false;
 }
 
 void sapp_window_set_title(sapp_window win, const char* title) {
