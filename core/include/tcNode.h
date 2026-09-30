@@ -1495,6 +1495,12 @@ protected:
         // created during a fixed-Hz step, which counts whole steps from the
         // next one.
         bool pending;
+        // Created during a fixed-Hz step and not counted down yet. If its
+        // first countdown comes in a measured update (the step switched to
+        // VSYNC / setFps() after creating it), that update is charged only
+        // the time since `created`, like for a timer created in a measured
+        // update.
+        bool stepCreated;
         std::chrono::steady_clock::time_point created;
     };
 
@@ -1517,10 +1523,11 @@ private:
         // update it was created in isn't charged for it (a nominal or simulated
         // update time can be ahead of the clock).
         if (inUpdate) created = std::max(created, internal::getUpdateTime());
+        const bool inFixedStep = inUpdate && internal::isFixedStepUpdate();
         timers_.push_back({id, delay, interval, std::move(callback), repeating,
                            catchUp, maxCatchUp,
                            getUpdateCount(),
-                           !(inUpdate && internal::isFixedStepUpdate()),
+                           !inFixedStep, inFixedStep,
                            created});
         return id;
     }
@@ -1539,7 +1546,9 @@ protected:
     //   a stall (a blocking dialog in a key handler) it would fire on the
     //   next update;
     // - one created during a fixed-Hz step: it starts with the next step and
-    //   counts step time, so it can't fire a step early.
+    //   counts step time, so it can't fire a step early. If the step switched
+    //   to a measured mode after creating it, its first (measured) update is
+    //   charged only the time since its creation, as for a pending timer.
     // A node's timers are counted down at most once per update, even if a
     // re-parent makes updateTree() reach the node twice. A tiny epsilon
     // absorbs rounding, so callAfter(1.0) created in an update at a fixed
@@ -1564,6 +1573,7 @@ protected:
         // window's tick): pending timers count whole deltas from the update
         // after the one they were created in.
         const bool haveUpdateTime = updateTime != std::chrono::steady_clock::time_point{};
+        const bool measuredUpdate = haveUpdateTime && !internal::isFixedStepUpdate();
 
         std::vector<uint64_t> readyIds;
         readyIds.reserve(timers_.size());
@@ -1579,6 +1589,14 @@ protected:
             } else if (t.createdUpdate != thisUpdate) {
                 t.pending = false;
                 charge = dt;
+                if (t.stepCreated && measuredUpdate) {
+                    // Created in a fixed step that then switched to a measured
+                    // mode: this update's dt runs from the step's start, so
+                    // count only the time since the timer's creation.
+                    const double since = std::chrono::duration<double>(updateTime - t.created).count();
+                    charge = std::min(dt, since > 0.0 ? since : 0.0);
+                }
+                t.stepCreated = false;
             }
             if (charge > 0.0) t.remaining -= charge;
             if (t.remaining <= dueEpsilon) {

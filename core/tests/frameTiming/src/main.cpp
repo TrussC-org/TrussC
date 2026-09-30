@@ -978,6 +978,19 @@ struct SwitchingSetupNode : Node {
     }
 };
 
+// setup() running in the first fixed-Hz step: a load, a timer, then a switch
+// to a measured mode.
+struct StepSetupNode : Node {
+    int fired = 0;
+    Clk::time_point createdFrom;
+    void setup() override {
+        sleepMs(300);                       // e.g. loading assets
+        createdFrom = Clk::now();
+        callAfter(0.2, [this] { ++fired; });
+        setFps(60);
+    }
+};
+
 struct LoadThenSwitchSetupNode : Node {
     int fired = 0;
     void setup() override {
@@ -1147,6 +1160,64 @@ static void testModeSwitchMeasuredDelta() {
         checkf("mode switch: ...a timer created after the switch in that step counts from its creation",
                fired == 0 || since >= 0.2 - 1e-6, since);
         node->cancelAllTimers();
+    }
+
+    // The other order in a fixed step: a 300 ms step creates callAfter(0.2)
+    // and then switches to VSYNC. The same frame's synced update counts from
+    // the step's start (the switch came inside it), but the timer, made
+    // during the fixed step, counts only from its creation there.
+    {
+        setIndependentFps(120, VSYNC);
+        internal::runIndependentUpdates(Clk::now());   // one step (just switched)
+        int fired = 0;
+        bool done = false;
+        Clk::time_point from;
+        g_loopDuring = [&] {
+            if (done) return;
+            done = true;
+            sleepMs(300);
+            from = Clk::now();
+            node->callAfter(0.2, [&] { ++fired; });
+            setFps(VSYNC);                  // to a measured mode, after creating it
+        };
+        sleepMs(10);                        // a step is due
+        internal::runIndependentUpdates(Clk::now());
+        g_loopDuring = nullptr;
+        internal::runSyncedUpdate();        // dt covers the 300 ms step
+        const double dt5 = getDeltaTime();
+        const double since = secsBetween(from, internal::getUpdateTime());
+        checkf("mode switch: a 300 ms fixed step creates callAfter(0.2), then switches to VSYNC (dt >= 0.3 s)",
+               dt5 >= 0.299, dt5);
+        checkf("mode switch: ...the timer isn't charged the time before its creation",
+               fired == 0 || since >= 0.2 - 1e-6, since);
+        Clk::time_point lastU = internal::getUpdateTime();
+        for (int f = 0; f < 40 && !fired; ++f) {
+            sleepMs(50);
+            internal::runSyncedUpdate();
+            lastU = internal::getUpdateTime();
+        }
+        checkf("mode switch: ...and fires once 0.2 s have passed since its creation",
+               fired == 1 && secsBetween(from, lastU) >= 0.2 - 1e-6, secsBetween(from, lastU));
+        node->cancelAllTimers();
+    }
+
+    // The same through setup() in the first fixed step:
+    // setIndependentFps(60, VSYNC), then setup() { load 300 ms; callAfter(0.2);
+    // setFps(60); }. The update right after it doesn't fire the timer.
+    {
+        setIndependentFps(60, VSYNC);
+        g_treeRoot = make_shared<App>();
+        auto n = make_shared<StepSetupNode>();
+        g_treeRoot->addChild(n);
+        internal::appUpdateFunc = treeUpdate;
+        internal::runIndependentUpdates(Clk::now());   // the first step runs setup()
+        internal::runSyncedUpdate();                    // same frame, now synced
+        const double since = secsBetween(n->createdFrom, internal::getUpdateTime());
+        checkf("mode switch: setup() in a fixed step: load, callAfter(0.2), setFps(60): not fired right after",
+               n->fired == 0 || since >= 0.2 - 1e-6, since);
+        g_treeRoot.reset();
+        internal::appUpdateFunc = timerLoopUpdate;
+        setFps(VSYNC);
     }
 
     // Once the loop runs, a switch between updates sets the first baseline
