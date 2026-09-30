@@ -834,6 +834,13 @@ bool Logger::setLogFile(const fs::path& path) {
     const fs::path resolved = path.is_absolute() ? path : getDataPath(path);
     const std::string pathUtf8 = internal::pathToUtf8(resolved);
 
+    // "" or "logs/": fail before creating any folder (the current log stays
+    // open, as with the failures below).
+    if (resolved.filename().empty()) {
+        log(LogLevel::Error, "Failed to open log file: " + pathUtf8 + " (no file name in path)");
+        return false;
+    }
+
     // Create a missing parent folder, like saveScreenshot().
     std::error_code ec;
     const fs::path parent = resolved.parent_path();

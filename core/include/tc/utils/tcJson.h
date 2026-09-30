@@ -45,6 +45,11 @@ inline Json loadJson(const fs::path& path) {
 // ---------------------------------------------------------------------------
 inline bool saveJson(const Json& j, const fs::path& path, int indent = 2) {
     fs::path fullPath = getDataPath(path);
+    // "" or "out/": fail before creating any folder
+    if (fullPath.filename().empty()) {
+        logError() << "No file name in JSON file path: " << fullPath;
+        return false;
+    }
     std::error_code ec;
     fs::path parent = fullPath.parent_path();
     if (!parent.empty()) {

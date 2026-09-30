@@ -162,6 +162,11 @@ inline std::string loadTextFile(const fs::path& path) {
 // Windows text mode would expand \n to \r\n, changing the file size)
 inline bool saveTextFile(const fs::path& path, const std::string& content) {
     fs::path fullPath = getDataPath(path);
+    // "" or "out/": fail before creating any folder
+    if (fullPath.filename().empty()) {
+        logError() << "No file name in path: " << fullPath;
+        return false;
+    }
     std::error_code ec;
     fs::path parent = fullPath.parent_path();
     if (!parent.empty()) {
@@ -185,6 +190,11 @@ inline bool saveTextFile(const fs::path& path, const std::string& content) {
 // missing parent folder is created.
 inline bool appendToFile(const fs::path& path, const std::string& content) {
     fs::path fullPath = getDataPath(path);
+    // "" or "out/": fail before creating any folder
+    if (fullPath.filename().empty()) {
+        logError() << "No file name in path: " << fullPath;
+        return false;
+    }
     std::error_code ec;
     fs::path parent = fullPath.parent_path();
     if (!parent.empty()) {
@@ -235,6 +245,11 @@ public:
     bool open(const fs::path& path, bool append = false) {
         close();
         fs::path fullPath = getDataPath(path);
+        // "" or "out/": fail before creating any folder
+        if (fullPath.filename().empty()) {
+            logError() << "FileWriter: No file name in path: " << fullPath;
+            return false;
+        }
         std::error_code ec;
         fs::path parent = fullPath.parent_path();
         if (!parent.empty()) {

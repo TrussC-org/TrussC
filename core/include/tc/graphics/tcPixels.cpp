@@ -14,6 +14,11 @@ bool Pixels::save(const fs::path& path) const {
     if (path.is_relative()) {
         savePath = getDataPath(path);
     }
+    // "" or "out/": fail before creating any folder
+    if (savePath.filename().empty()) {
+        logError("Pixels") << "No file name in path: " << savePath;
+        return false;
+    }
 
     // Create a missing parent folder, like saveScreenshot()
     std::error_code ec;

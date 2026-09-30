@@ -57,6 +57,11 @@ public:
     // a missing parent folder is created)
     bool save(const fs::path& path, const std::string& indent = "  ") const {
         fs::path fullPath = getDataPath(path);
+        // "" or "out/": fail before creating any folder
+        if (fullPath.filename().empty()) {
+            logError() << "No file name in XML file path: " << fullPath;
+            return false;
+        }
         std::error_code ec;
         fs::path parent = fullPath.parent_path();
         if (!parent.empty()) {
