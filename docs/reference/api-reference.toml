@@ -7730,9 +7730,12 @@ returned false, once the user grants USB permission, and after an unplug it
 stays true until one of those calls reports the loss (the USB worker thread
 that finds it only records it).
 
-`Serial` is not thread-safe. Because `available()`, `readBytes()`, `readByte()`
-and `writeBytes()` may close the port, an app that uses one `Serial` from
-several threads must guard every call with one mutex.
+Every call takes the `Serial`'s own lock, so one `Serial` may be used from
+several threads without racing on the port: no call closes it while another
+is reading or writing it. Which thread reads or writes what, and in which
+order, is still up to the app. A call that blocks holds the lock meanwhile:
+`drain()`, `setup()`, and `writeBytes()` on Windows (no write timeout) and
+Android (up to 1 s per 16 KB); on macOS and Linux `writeBytes()` never blocks.
 '''
 details.ja = '''
 USB シリアル機器の抜去（ハブの電源断、ドライバのリセットなども）は
@@ -7752,9 +7755,12 @@ USB シリアル機器の抜去（ハブの電源断、ドライバのリセッ�
 USB 許可を与えた時点で true になる。また抜去後は、上の呼び出しのどれかが消失を
 報告するまで true のままになる（消失を見つける USB ワーカースレッドは記録するだけ）。
 
-`Serial` はスレッドセーフではない。`available()`、`readBytes()`、`readByte()`、
-`writeBytes()` はポートを閉じることがあるので、1つの `Serial` を複数のスレッドから
-使う場合は、すべての呼び出しを1つの mutex で守ること。
+どの呼び出しも `Serial` 自身のロックを取るので、1つの `Serial` を複数のスレッドから
+使ってもポートの取り合いにはならない（ほかの呼び出しが読み書きしている最中に
+ポートが閉じられることはない）。ただ、どのスレッドが何をどの順に読み書きするかは
+アプリ側で決める必要がある。ブロックする呼び出しはその間ロックを持ち続ける:
+`drain()`、`setup()`、Windows（書き込みのタイムアウトなし）と Android（16 KB ごとに
+最大1秒）の `writeBytes()`。macOS と Linux の `writeBytes()` はブロックしない。
 '''
 details.ko = '''
 USB 시리얼 장치의 분리(허브 전원 차단, 드라이버 리셋 등 포함)는
@@ -7774,9 +7780,12 @@ Windows에서는 하위 ClearCommError / ReadFile / WriteFile의 실패를 모�
 허용하면 true가 되며, 분리 후에는 위 호출 중 하나가 소실을 보고할 때까지 true로
 남는다(소실을 찾는 USB 워커 스레드는 기록만 한다).
 
-`Serial`은 스레드 안전하지 않다. `available()`, `readBytes()`, `readByte()`,
-`writeBytes()`가 포트를 닫을 수 있으므로, 하나의 `Serial`을 여러 스레드에서
-사용한다면 모든 호출을 하나의 mutex로 보호해야 한다.
+모든 호출이 `Serial` 자신의 락을 잡으므로, 하나의 `Serial`을 여러 스레드에서
+사용해도 포트를 두고 경합하지 않는다(다른 호출이 읽거나 쓰는 도중에 포트가
+닫히는 일은 없다). 다만 어느 스레드가 무엇을 어떤 순서로 읽고 쓸지는 앱이 정해야
+한다. 블록되는 호출은 그동안 락을 계속 잡는다: `drain()`, `setup()`, 그리고
+Windows(쓰기 타임아웃 없음)와 Android(16 KB마다 최대 1초)의 `writeBytes()`.
+macOS와 Linux의 `writeBytes()`는 블록되지 않는다.
 '''
 
 ["Serial::isInitialized"]
@@ -7812,16 +7821,24 @@ It fires for two reasons, each once per open connection:
 move-assigning another one over it, closes the port without firing, so a
 listener never runs from a destructor.
 
-**Thread.** It fires inline on the thread that made the call, normally the main
-thread. On Android the USB worker thread finds the loss but only records it:
-the event fires from the next `available()`, `readBytes()`, `readByte()`,
-`writeBytes()`, `close()` or `setup()` call on the app's thread, and
-`isConnected()` stays true until then. A listener that must run on the main
-thread whichever thread uses the `Serial` passes `Deliver::Main`:
-`serial.onDisconnect.listen(fn, Deliver::Main)`.
+Only those four I/O calls find a loss. A device that went away before
+`close()` or `setup()` without one of them noticing ends as a close
+(`wasClean = true`, `"closed by close()"`): the app ended the connection. On
+Android, where the USB worker thread may have found the loss already, the
+reason then goes on with `(the device had already been lost: <reason>)`, still
+with `wasClean = true`.
 
-**Reconnecting.** The port is already closed and `isConnected()` is false when
-a listener runs, so a listener may call `setup(e.portName, e.baudRate)`. Check
+**Thread.** It fires inline on the thread that made the call, normally the main
+thread, after the call has released the `Serial`'s lock. On Android the USB
+worker thread finds the loss but only records it: the event fires from the
+next `available()`, `readBytes()`, `readByte()`, `writeBytes()`, `close()` or
+`setup()` call on the app's thread, and `isConnected()` stays true until then.
+A listener that must run on the main thread whichever thread uses the `Serial`
+passes `Deliver::Main`: `serial.onDisconnect.listen(fn, Deliver::Main)`.
+
+**Reconnecting.** The port is already closed, `isConnected()` is false and the
+lock is free when a listener runs, so a listener may call
+`setup(e.portName, e.baudRate)`. Check
 `wasClean` first, or every `close()` reopens the port. The call that found the
 loss still returns its error value (`available()` returns 0) and leaves the new
 connection alone.
@@ -7854,16 +7871,23 @@ details.ja = '''
 のムーブ代入でもポートは閉じるが発火しないので、リスナーがデストラクタから
 呼ばれることはない。
 
-**スレッド。** その呼び出しを行ったスレッドでインラインに発火する（通常は
-メインスレッド）。Android では USB ワーカースレッドが消失を見つけるが、記録する
-だけで、アプリのスレッドでの次の `available()`、`readBytes()`、`readByte()`、
-`writeBytes()`、`close()`、`setup()` の呼び出しから発火する。それまでは
-`isConnected()` も true のまま。`Serial` をどのスレッドから使っていても
-メインスレッドで動く必要のあるリスナーは `Deliver::Main` を渡す:
-`serial.onDisconnect.listen(fn, Deliver::Main)`。
+消失を見つけるのは上の4つの I/O 呼び出しだけ。それらが気づかないうちに抜けた
+デバイスを `close()` や `setup()` で閉じた場合は、クローズとして終わる
+（`wasClean = true`、`"closed by close()"`）。接続を終えたのはアプリだから。
+Android では USB ワーカースレッドがすでに消失を見つけていることがあり、その場合は
+reason の後ろに `(the device had already been lost: <理由>)` が付く。
+`wasClean` はこの場合も true。
 
-**再接続。** リスナーが呼ばれる時点でポートは閉じていて `isConnected()` は
-false なので、リスナーから `setup(e.portName, e.baudRate)` を呼んでよい。先に
+**スレッド。** その呼び出しを行ったスレッドで、呼び出しが `Serial` のロックを
+外した後にインラインで発火する（通常はメインスレッド）。Android では USB
+ワーカースレッドが消失を見つけるが、記録するだけで、アプリのスレッドでの次の
+`available()`、`readBytes()`、`readByte()`、`writeBytes()`、`close()`、`setup()` の
+呼び出しから発火する。それまでは `isConnected()` も true のまま。`Serial` を
+どのスレッドから使っていてもメインスレッドで動く必要のあるリスナーは
+`Deliver::Main` を渡す: `serial.onDisconnect.listen(fn, Deliver::Main)`。
+
+**再接続。** リスナーが呼ばれる時点でポートは閉じていて、`isConnected()` は false、
+ロックも外れているので、リスナーから `setup(e.portName, e.baudRate)` を呼んでよい。先に
 `wasClean` を確認すること。そうしないと `close()` のたびにポートが開き直される。
 消失を見つけた呼び出しは、それでも通常のエラー値を返し（`available()` は 0）、
 新しい接続には手を触れない。
@@ -7895,15 +7919,23 @@ details.ko = '''
 다른 `Serial`을 이동 대입해도 포트는 닫히지만 발생하지 않으므로, 리스너가
 소멸자에서 실행되는 일은 없다.
 
-**스레드.** 그 호출을 한 스레드에서 인라인으로 발생한다(보통 메인 스레드).
-Android에서는 USB 워커 스레드가 소실을 찾지만 기록만 하며, 앱 스레드에서의 다음
-`available()`, `readBytes()`, `readByte()`, `writeBytes()`, `close()`,
-`setup()` 호출에서 발생한다. 그때까지는 `isConnected()`도 true로 남는다.
-`Serial`을 어느 스레드에서 쓰든 메인 스레드에서 실행되어야 하는 리스너는
-`Deliver::Main`을 넘긴다: `serial.onDisconnect.listen(fn, Deliver::Main)`.
+소실을 찾는 것은 위의 네 I/O 호출뿐이다. 이들이 알아채기 전에 분리된 장치를
+`close()`나 `setup()`으로 닫으면 닫기로 끝난다(`wasClean = true`,
+`"closed by close()"`). 연결을 끝낸 것은 앱이기 때문이다. Android에서는 USB 워커
+스레드가 이미 소실을 찾았을 수 있으며, 그때는 reason 뒤에
+`(the device had already been lost: <사유>)`가 붙는다. 이 경우에도 `wasClean`은
+true이다.
 
-**재연결.** 리스너가 실행될 때 포트는 이미 닫혀 있고 `isConnected()`는 false이므로,
-리스너에서 `setup(e.portName, e.baudRate)`를 호출해도 된다. 먼저 `wasClean`을
+**스레드.** 그 호출을 한 스레드에서, 호출이 `Serial`의 락을 놓은 뒤에 인라인으로
+발생한다(보통 메인 스레드). Android에서는 USB 워커 스레드가 소실을 찾지만 기록만
+하며, 앱 스레드에서의 다음 `available()`, `readBytes()`, `readByte()`,
+`writeBytes()`, `close()`, `setup()` 호출에서 발생한다. 그때까지는
+`isConnected()`도 true로 남는다. `Serial`을 어느 스레드에서 쓰든 메인 스레드에서
+실행되어야 하는 리스너는 `Deliver::Main`을 넘긴다:
+`serial.onDisconnect.listen(fn, Deliver::Main)`.
+
+**재연결.** 리스너가 실행될 때 포트는 이미 닫혀 있고, `isConnected()`는 false이며
+락도 풀려 있으므로, 리스너에서 `setup(e.portName, e.baudRate)`를 호출해도 된다. 먼저 `wasClean`을
 확인할 것. 그렇지 않으면 `close()`할 때마다 포트가 다시 열린다. 소실을 발견한
 호출은 그래도 평소의 오류 값을 반환하며(`available()`은 0), 새 연결은 건드리지
 않는다.
@@ -7953,7 +7985,11 @@ and return false, instead of opening at another speed. A Linux driver may
 instead replace any rate, with or without a B-constant, by another one (often
 9600, for example an FTDI chip asked for more than its maximum): `setup()`
 reads the rate back and fails when it is more than 2% off, and accepts a
-closer one (the driver's nearest divisor) with a warning that names it.
+closer one (the driver's nearest divisor) with a warning that names it. A
+driver that applies no rate at all (a USB gadget's `/dev/ttyGS*`,
+`usb_serial_generic`, xHCI DbC) keeps its old rate whatever is asked; `setup()`
+tells it apart by trying one more standard rate, and then succeeds with a
+warning that the rate has no effect there.
 
 Calling `setup()` again, for example to reconnect after
 [`isConnected()`](#Serial::isConnected) turned false, closes the previous port
@@ -7971,7 +8007,10 @@ false を返す。Linux のドライバはレートを拒否せず、B 定数の
 別のレート（多くは 9600。たとえば FTDI チップに上限を超えるレートを指定したとき）に
 置き換えることがある。`setup()` は適用されたレートを読み戻し、要求と 2% を超えて
 違えば失敗する。それより近いレート（ドライバが出せる最も近い値）は、
-そのレートを示す警告を出して受け入れる。
+そのレートを示す警告を出して受け入れる。レートをまったく適用しないドライバ
+（USB ガジェットの `/dev/ttyGS*`、`usb_serial_generic`、xHCI DbC）は、何を指定しても
+元のレートのままになる。`setup()` は別の標準レートをもう1つ試してこれを見分け、
+その場合は「レートは効かない」という警告を出して成功する。
 
 [`isConnected()`](#Serial::isConnected) が false になった後の再接続などで
 `setup()` を呼び直すと、先に前のポートを閉じる。そのポートがまだ開いていれば
@@ -7989,7 +8028,10 @@ B 상수가 없는 속도(250000, 74880, macOS의 921600 등)를 `IOSSIOSPEED`(m
 (대개 9600. 예를 들어 FTDI 칩에 최대치를 넘는 속도를 지정했을 때)로 바꿔 적용하기도
 한다. `setup()`은 적용된 속도를 다시 읽어 요청과 2%를 넘게 다르면 실패하고,
 그보다 가까운 속도(드라이버가 낼 수 있는 가장 가까운 값)는 그 속도를 알리는 경고와
-함께 받아들인다.
+함께 받아들인다. 속도를 전혀 적용하지 않는 드라이버(USB 가젯의 `/dev/ttyGS*`,
+`usb_serial_generic`, xHCI DbC)는 무엇을 지정해도 이전 속도를 유지한다. `setup()`은
+다른 표준 속도를 하나 더 시도해 이를 구별하고, 그 경우 속도가 효과가 없다는 경고와
+함께 성공한다.
 
 [`isConnected()`](#Serial::isConnected)가 false가 된 뒤 재연결하는 경우 등
 `setup()`을 다시 호출하면 이전 포트를 먼저 닫는다. 그 포트가 아직 열려 있었으면
