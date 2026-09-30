@@ -483,6 +483,11 @@ public:
             return false;
         }
 
+        // The rate the port has before this setup() changes it (Linux
+        // read-back), to recognize a driver that does not apply rates at all
+        int previousBaudRate = 0;
+        bool havePreviousRate = internal::readSerialBaudRate(fd_, previousBaudRate);
+
         // Set raw mode (no input/output processing)
         cfmakeraw(&options);
 
@@ -536,13 +541,21 @@ public:
         }
         // A driver that could not generate the rate may have applied another
         // one (see isBaudRateClose()): that is a failure, not a connection at
-        // the wrong speed.
+        // the wrong speed. Unless the driver applies no rate at all.
         if (!internal::isBaudRateClose(baudRate, appliedBaudRate)) {
-            logError() << "Serial: cannot set " << baudRate << " baud on " << portName
-                       << " (the driver applied " << appliedBaudRate << ")";
-            ::close(fd_);
-            fd_ = -1;
-            return false;
+            if (havePreviousRate && appliedBaudRate == previousBaudRate &&
+                driverIgnoresBaudRates(previousBaudRate)) {
+                logWarning() << "Serial: the driver of " << portName << " does not apply baud rates"
+                             << " (it keeps " << previousBaudRate << "), so " << baudRate
+                             << " has no effect there";
+                appliedBaudRate = baudRate;
+            } else {
+                logError() << "Serial: cannot set " << baudRate << " baud on " << portName
+                           << " (the driver applied " << appliedBaudRate << ")";
+                ::close(fd_);
+                fd_ = -1;
+                return false;
+            }
         }
 
         // Flush buffers
@@ -948,6 +961,20 @@ private:
         }
         logWarning() << "Serial: lost connection to " << devicePath_ << " (" << reason << ")";
         notifyDisconnect(std::move(reason), false);
+    }
+
+    // Whether the driver ignores rate changes altogether. The kernel then
+    // restores the old rate after every change: a driver without
+    // set_termios (u_serial /dev/ttyGS*, usb_serial_generic,
+    // usb-serial-simple, xHCI DbC). A driver that rejected just the
+    // requested rate, and kept the old one, still applies another standard
+    // rate, so try one once (termios2 takes any rate, B-constant ones too).
+    // Called while setup() opens the port.
+    bool driverIgnoresBaudRates(int keptRate) const {
+        int probe = keptRate == 9600 ? 19200 : 9600;
+        int probeApplied = 0;
+        if (!internal::setSerialCustomBaudRate(fd_, probe, probeApplied)) return false;
+        return probeApplied == keptRate;
     }
 
     // errno values that mean the device is gone, not "try again"
