@@ -1256,6 +1256,7 @@ bool ImGui::Checkbox(const char* label, bool* v)
     const ImRect total_bb(pos, pos + ImVec2(square_sz + (label_size.x > 0.0f ? style.ItemInnerSpacing.x + label_size.x : 0.0f), label_size.y + style.FramePadding.y * 2.0f));
     ItemSize(total_bb, style.FramePadding.y);
     const bool is_visible = ItemAdd(total_bb, id);
+    IMGUI_TC_ITEM_VALUE(id, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, v, 1, 0); // [TrussC] before the clip return: a clipped Checkbox reports too
     const bool is_multi_select = (g.LastItemData.ItemFlags & ImGuiItemFlags_IsMultiSelect) != 0;
     if (!is_visible)
         if (!is_multi_select || !g.BoxSelectState.UnclipMode || !g.BoxSelectState.UnclipRect.Overlaps(total_bb)) // Extra layer of "no logic clip" for box-select support
@@ -1263,7 +1264,6 @@ bool ImGui::Checkbox(const char* label, bool* v)
             IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags | ImGuiItemStatusFlags_Checkable | (*v ? ImGuiItemStatusFlags_Checked : 0));
             return false;
         }
-    IMGUI_TC_ITEM_VALUE(id, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, v, 1, 0); // [TrussC]
 
     // Range-Selection/Multi-selection support (header)
     bool checked = *v;

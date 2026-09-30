@@ -17,11 +17,13 @@
 //   across frames with the last known value, so it survives the widget not
 //   being drawn (collapsed tree, closed window). ImGuiItemStatusFlags_Edited is
 //   only set by widget interaction, never by code assigning the variable.
-//   Only the value hook creates entries (plus the combo / list box routing in
+//   Only the value hook creates entries, plus the combo / list box routing in
 //   the ItemInfo hook: a pick inside a combo popup or a list box is an edit of
-//   that widget), so every entry carries the value of a caller's variable.
-//   Items that change no variable (menu headers, action menu items, plain
-//   Selectables, buttons) are not recorded.
+//   that widget. So an entry carries the value of a caller's variable, except
+//   one routed to a custom BeginCombo / BeginListBox, which has no variable
+//   (only its label, and for a combo the item shown). Items that change no
+//   variable (menu headers, action menu items, plain Selectables, buttons)
+//   are not recorded.
 // =============================================================================
 
 #include "imgui/imgui.h"
@@ -310,23 +312,10 @@ inline void ImGuiTestEngineHook_ItemInfo(ImGuiContext* ctx, ImGuiID id, const ch
     if (label) widget.label = label;
     widget.statusFlags = flags;
 
-    // A pick inside a combo popup is an edit of the combo, not of the item
-    // picked (also covers custom BeginCombo/Selectable combos).
-    if (ctx->BeginComboDepth > 0) {
-        if ((flags & ImGuiItemStatusFlags_Edited) && d::touchedExcludeDepth == 0 &&
-            (size_t)ctx->BeginComboDepth <= cs.openCombos.size()) {
-            const auto& combo = cs.openCombos[ctx->BeginComboDepth - 1];
-            if (combo.id && !d::findTouched(ctx, combo.id)) {
-                auto& t = d::markTouched(ctx, combo.id);
-                t.label = combo.label;
-                t.windowName = combo.windowName;
-            }
-        }
-        return;
-    }
-
-    // Likewise, a pick inside a list box (its child window) is an edit of the
-    // list box (also covers custom BeginListBox/Selectable lists).
+    // A pick inside a list box (its child window) is an edit of the list box,
+    // not of the item picked (also covers custom BeginListBox/Selectable
+    // lists). Checked before the combo popup: a list box inside a combo popup
+    // is the closer owner of its items.
     if (ImGuiWindow* cw = ctx->CurrentWindow; cw && (cw->Flags & ImGuiWindowFlags_ChildWindow)) {
         auto lb = cs.listBoxes.find(cw->ChildId);
         if (lb != cs.listBoxes.end()) {
@@ -338,6 +327,21 @@ inline void ImGuiTestEngineHook_ItemInfo(ImGuiContext* ctx, ImGuiID id, const ch
             }
             return;
         }
+    }
+
+    // Likewise, a pick inside a combo popup is an edit of the combo (also
+    // covers custom BeginCombo/Selectable combos).
+    if (ctx->BeginComboDepth > 0) {
+        if ((flags & ImGuiItemStatusFlags_Edited) && d::touchedExcludeDepth == 0 &&
+            (size_t)ctx->BeginComboDepth <= cs.openCombos.size()) {
+            const auto& combo = cs.openCombos[ctx->BeginComboDepth - 1];
+            if (combo.id && !d::findTouched(ctx, combo.id)) {
+                auto& t = d::markTouched(ctx, combo.id);
+                t.label = combo.label;
+                t.windowName = combo.windowName;
+            }
+        }
+        return;
     }
 
     // Touched entries are created by the value hook only: an edit that no
