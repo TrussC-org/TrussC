@@ -206,7 +206,9 @@ void registerInspectionTools() {
             return json{{"status", "ok"},
                         {"fps", trussc::getFps()},
                         {"frameCount", trussc::getFrameCount()},
-                        {"uptimeSec", trussc::getElapsedTime()},
+                        // Process uptime: the framework clock, which
+                        // resetElapsedTimeCounter() does not touch (#229).
+                        {"uptimeSec", trussc::internal::getUptimeSeconds()},
                         {"width", trussc::getWindowWidth()},
                         {"height", trussc::getWindowHeight()},
                         {"version", trussc::getVersion()},

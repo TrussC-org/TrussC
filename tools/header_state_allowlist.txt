@@ -49,8 +49,6 @@ core/include/TrussC.h trussc::internal::gpuUniformBufferReserve  # host-only: la
 
 # --- TrussC.h: loop timing
 core/include/TrussC.h trussc::internal::updateFrameCount       # host-only: advanced by the host's loop, read through getFrameCount() / getUpdateCount() (tcGlobal.cpp)
-core/include/TrussC.h trussc::internal::startTime              # host-only: getElapsedTime() (tcGlobal.cpp)
-core/include/TrussC.h trussc::internal::startTimeInitialized   # host-only: getElapsedTime() (tcGlobal.cpp)
 core/include/TrussC.h trussc::internal::frameReentryGuard      # host-only: _frame_cb
 core/include/TrussC.h trussc::setIndependentFps::warned        # harmless: warn-once flag
 core/include/TrussC.h trussc::redraw::warned                   # harmless: warn-once flag
@@ -96,7 +94,6 @@ core/include/tc/3d/tcEnvironment.h trussc::Environment::bakeFromEquirectTexture:
 core/include/tc/app/tcHeadlessApp.h trussc::headless::running     # no-hot-reload: runHeadlessApp only (hot reload is windowed)
 core/include/tc/app/tcHeadlessApp.h trussc::headless::targetFps   # no-hot-reload: as running
 core/include/tc/app/tcHeadlessApp.h trussc::headless::frameCount  # no-hot-reload: as running
-core/include/tc/app/tcHeadlessApp.h trussc::headless::startTime   # no-hot-reload: as running
 core/include/tc/app/tcHeadlessApp.h trussc::internal::headlessRestoreConsoleCP  # no-hot-reload: runHeadlessApp's console guard and handler only
 core/include/tc/app/tcHeadlessState.h trussc::headless::active    # no-hot-reload: false in every copy of a hot reload (windowed) process
 core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::load::loadCounter   # host-only: the hot reload host itself
