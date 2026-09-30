@@ -2362,9 +2362,9 @@ namespace internal {
 
     // Ops integration: a supervisor (e.g. `anchorbolt start`) injects a log
     // file path via the environment so the app needs zero code changes.
-    // runApp() and the hot reload host open it BEFORE sapp_run(), so sokol's
-    // init-time failures (no X display, no GL context) and setup-time log
-    // lines land in the file too.
+    // runApp() and the hot reload host open it BEFORE sapp_run(), so the
+    // init-time failures sokol reports (e.g. no X display on Linux) and
+    // setup-time log lines land in the file too.
     inline void openEnvLogFile() {
         #ifndef __EMSCRIPTEN__
         if (const char* envLog = std::getenv("TRUSSC_LOG_FILE")) {
