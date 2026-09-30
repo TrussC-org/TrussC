@@ -85,6 +85,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
+  An `AudioEngine::init()` that can't open the output device (forced with
+  more channels than miniaudio accepts) returns false, logs one error through
+  the logger that names the requested device, and a later `init()` succeeds
+  (#279).
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the

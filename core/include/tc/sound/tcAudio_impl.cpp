@@ -1027,7 +1027,10 @@ bool AudioEngine::init(const AudioSettings& settings) {
         ma_result ctxResult = initContext(ctx);
         if (ctxResult != MA_SUCCESS) {
             logError("AudioEngine") << "no audio backend available (ma_context_init result="
-                                    << (int)ctxResult << "); sounds will not play";
+                                    << (int)ctxResult
+                                    << (settings.deviceName.empty() ? std::string()
+                                        : ", requested device '" + settings.deviceName + "'")
+                                    << "); sounds will not play";
             delete ctx;
             return false;
         }
@@ -1057,6 +1060,16 @@ bool AudioEngine::init(const AudioSettings& settings) {
         }
     }
 
+    // How the failure messages below name the device: the requested one, or
+    // the default it fell back to (#279).
+    std::string deviceDesc = "the output device";
+    if (!settings.deviceName.empty()) {
+        deviceDesc = deviceIDPtr
+            ? "the output device '" + settings.deviceName + "'"
+            : "the system default output device (requested '" + settings.deviceName
+              + "' was not found)";
+    }
+
     ma_device* device = new ma_device();
 
     ma_device_config config = ma_device_config_init(ma_device_type_playback);
@@ -1072,7 +1085,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
 
     ma_result result = ma_device_init(ctxArg, &config, device);
     if (result != MA_SUCCESS) {
-        logError("AudioEngine") << "failed to initialize the output device (result="
+        logError("AudioEngine") << "failed to initialize " << deviceDesc << " (result="
                                 << (int)result << "); sounds will not play";
         delete device;
         return false;
@@ -1080,7 +1093,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
 
     result = ma_device_start(device);
     if (result != MA_SUCCESS) {
-        logError("AudioEngine") << "failed to start the output device (result="
+        logError("AudioEngine") << "failed to start " << deviceDesc << " (result="
                                 << (int)result << "); sounds will not play";
         ma_device_uninit(device);
         delete device;

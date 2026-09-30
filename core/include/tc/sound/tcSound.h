@@ -664,9 +664,9 @@ struct PlayingSound {
 // call to override the engine defaults (sample rate, channel count,
 // device, polyphony).
 //
-// Once init() succeeds, the engine is locked in — calling init() again
-// with different settings is currently a no-op + warning (avoiding the
-// disruption of tearing down a running device while sounds are playing).
+// Calling init(settings) again on a running engine re-initializes it live:
+// the device is reopened with the new settings and playing voices carry on
+// from their position (expect a short audible gap while the device is down).
 //
 // Empty `deviceName` selects the system default playback device.
 // Use AudioEngine::listDevices() to enumerate available device names.
@@ -869,9 +869,17 @@ public:
     // Initialize and shutdown (implementation in tcAudio_impl.cpp).
     //
     // init() with no arguments uses the defaults (DEFAULT_SAMPLE_RATE etc.).
-    // init(settings) writes the runtime config from `settings`. If the
-    // engine is already running, init returns true immediately with a
-    // warning (silent re-init would tear down playing voices).
+    // init(settings) writes the runtime config from `settings`. On a running
+    // engine it re-initializes live: the device is reopened with the new
+    // settings and playing voices move over, keeping their position.
+    //
+    // Returns false when no output device can be opened (none present, the
+    // requested one refused, or no audio backend); the failure is logged
+    // through logError("AudioEngine"), naming the requested device, and the
+    // engine stays uninitialized. It may be called again later, for example
+    // from update() until isInitialized() is true (a device switched on
+    // after the app started). Sound::load*() also calls init() while the
+    // engine is not initialized; play() does not.
     bool init();
     bool init(const AudioSettings& settings);
     void shutdown();

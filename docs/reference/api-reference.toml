@@ -288,9 +288,9 @@ related = ["AudioVoiceInfo", "AudioEngine::getStats"]
 ["AudioEngine::init"]
 category = "audioengine"
 keywords = ["initialize", "start", "open", "device", "setup"]
-description.en = "Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success."
-description.ja = "デフォルト、または AudioSettings の上書きでエンジンを初期化。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。成功時 true を返す"
-description.ko = "기본값 또는 AudioSettings 오버라이드로 엔진을 초기화. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. 성공 시 true 반환"
+description.en = "Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success, false when no output device can be opened; the failure is logged through logError(\"AudioEngine\") with the requested device name. It may be called again later (for example from update() until isInitialized() is true)."
+description.ja = "デフォルト、または AudioSettings の上書きでエンジンを初期化。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。成功時 true、出力デバイスを開けないときは false を返す。失敗は要求したデバイス名とともに logError(\"AudioEngine\") でログに出る。後からもう一度呼んでよい (例: isInitialized() が true になるまで update() から呼ぶ)"
+description.ko = "기본값 또는 AudioSettings 오버라이드로 엔진을 초기화. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. 성공 시 true, 출력 디바이스를 열 수 없으면 false 반환. 실패는 요청한 디바이스 이름과 함께 logError(\"AudioEngine\") 로 로그에 남는다. 나중에 다시 호출해도 된다 (예: isInitialized() 가 true 가 될 때까지 update() 에서 호출)"
 related = ["AudioSettings", "AudioEngine::audioDeviceChanged"]
 
 ["AudioEngine::isInitialized"]
