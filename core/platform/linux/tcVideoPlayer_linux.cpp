@@ -925,30 +925,49 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
         return false;
     }
 
-    // Reserve estimated buffer space
+    // Reserve from the container's stated duration, capped by what the file's
+    // size plausibly decodes to (internal::decodeReserveSamples). Only a hint:
+    // the buffer grows as audio actually decodes.
     std::vector<float> samples;
-    if (duration_ > 0)
-        samples.reserve((size_t)(duration_ * engineSampleRate * 2 * 1.05));
+    if (duration_ > 0) {
+        // Range-checked as a double first: the cast of an out-of-range double
+        // to an integer is undefined.
+        const double statedFrames = duration_ * engineSampleRate * 1.05;
+        const uint64_t frames = statedFrames < 1.8e19 ? (uint64_t)statedFrames : ~(uint64_t)0;
+        std::error_code sizeEc;
+        const uintmax_t fileBytes = fs::file_size(filePath_, sizeEc);
+        try {
+            samples.reserve(internal::decodeReserveSamples(
+                frames, 2, sizeEc ? 0 : (uint64_t)fileBytes, samples.max_size()));
+        } catch (const std::exception&) {
+        }
+    }
 
     AVFrame* frame = av_frame_alloc();
     AVPacket* pkt  = av_packet_alloc();
 
+    // Set when growing the buffer fails; decoding stops and the load fails.
+    bool outOfMemory = false;
     auto appendConverted = [&](int nbIn) {
         int outN = av_rescale_rnd(
             swr_get_delay(swr, audioCtx->sample_rate) + nbIn,
             engineSampleRate, audioCtx->sample_rate, AV_ROUND_UP);
-        std::vector<float> buf(outN * 2);
-        uint8_t* outData[1] = { (uint8_t*)buf.data() };
-        int n = swr_convert(swr, outData, outN,
-                            nbIn > 0 ? (const uint8_t**)frame->data : nullptr, nbIn);
-        if (n > 0)
-            samples.insert(samples.end(), buf.begin(), buf.begin() + n * 2);
+        try {
+            std::vector<float> buf(outN * 2);
+            uint8_t* outData[1] = { (uint8_t*)buf.data() };
+            int n = swr_convert(swr, outData, outN,
+                                nbIn > 0 ? (const uint8_t**)frame->data : nullptr, nbIn);
+            if (n > 0)
+                samples.insert(samples.end(), buf.begin(), buf.begin() + n * 2);
+        } catch (const std::exception&) {
+            outOfMemory = true;
+        }
     };
 
-    while (av_read_frame(fmtCtx, pkt) >= 0) {
+    while (!outOfMemory && av_read_frame(fmtCtx, pkt) >= 0) {
         if (pkt->stream_index == audioIdx) {
             if (avcodec_send_packet(audioCtx, pkt) == 0) {
-                while (avcodec_receive_frame(audioCtx, frame) == 0) {
+                while (!outOfMemory && avcodec_receive_frame(audioCtx, frame) == 0) {
                     appendConverted(frame->nb_samples);
                     av_frame_unref(frame);
                 }
@@ -957,21 +976,29 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
         av_packet_unref(pkt);
     }
 
-    // Flush decoder
-    avcodec_send_packet(audioCtx, nullptr);
-    while (avcodec_receive_frame(audioCtx, frame) == 0) {
-        appendConverted(frame->nb_samples);
-        av_frame_unref(frame);
+    if (!outOfMemory) {
+        // Flush decoder
+        avcodec_send_packet(audioCtx, nullptr);
+        while (!outOfMemory && avcodec_receive_frame(audioCtx, frame) == 0) {
+            appendConverted(frame->nb_samples);
+            av_frame_unref(frame);
+        }
     }
 
     // Flush resampler
-    appendConverted(0);
+    if (!outOfMemory) appendConverted(0);
 
     av_frame_free(&frame);
     av_packet_free(&pkt);
     swr_free(&swr);
     avcodec_free_context(&audioCtx);
     avformat_close_input(&fmtCtx);
+
+    if (outOfMemory) {
+        logError("VideoPlayer") << "not enough memory to decode the audio of " << filePath_
+                                << " (" << samples.size() / 2 << " frames decoded)";
+        return false;
+    }
 
     if (samples.empty()) return false;
 
