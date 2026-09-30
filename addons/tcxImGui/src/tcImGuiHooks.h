@@ -22,13 +22,20 @@
 //   that widget), so every entry carries the value of a caller's variable.
 //   Items that change no variable (menu headers, action menu items, plain
 //   Selectables, buttons) are not recorded.
+//
+// Values queued by the MCP tools (tcx_imgui_input on a value widget) are
+// written into the widget's variable by the value hook at the widget's entry,
+// before the widget reads it, and read back at its return. Such a write is not
+// an edit through the widget, so it is not recorded as touched.
 // =============================================================================
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -76,6 +83,29 @@ struct TouchedWidget {
 
 namespace detail {
 
+// A value queued for one widget by the MCP tools (see queueValue()). The value
+// hook writes it through the widget's Data pointer when the widget is next
+// entered, and reads the variable back when it returns.
+struct PendingValue {
+    enum class State {
+        Queued,         // waiting for the widget to run
+        Written,        // written at entry; the widget is running
+        Applied,        // read back at return: the variable holds the value
+        Changed,        // read back at return: the widget changed it in the same frame
+        ShapeChanged,   // the widget now reports another kind / type / component count
+        Superseded,     // a later value was queued for the same widget before this one was written
+    };
+    ImGuiID id = 0;
+    int kind = 0;                        // ImGuiTcValueKind_ the widget reported
+    ImGuiDataType dataType = 0;
+    int components = 0;
+    std::vector<unsigned char> bytes;    // components * sizeof(dataType)
+    std::chrono::steady_clock::time_point deadline;   // not written after this
+    State state = State::Queued;
+    const ImGuiTcItemValue* writtenBy = nullptr;       // the hook scope that wrote it, until it returns
+    WidgetValue readBack;                // the variable at the widget's return (Applied / Changed)
+};
+
 // Per ImGui context (each window running imgui has its own)
 struct ContextState {
     // Current frame (written during ImGui rendering)
@@ -100,6 +130,9 @@ struct ContextState {
     // for list boxes, so the child window stands in for BeginComboDepth.
     struct OpenListBox { std::string label, windowName; };
     std::unordered_map<ImGuiID, OpenListBox> listBoxes;
+
+    // Values queued by the MCP tools, waiting for their widget (or running in it)
+    std::vector<std::shared_ptr<PendingValue>> pendingValues;
 
     // Opaque owner tag (tcxImGui: the tc::internal::WindowContext*), so tools
     // can say which OS window a widget is in
@@ -192,6 +225,118 @@ inline void mergeValue(WidgetValue& dst, WidgetValue&& src) {
         src.text = std::move(dst.text);
     }
     dst = std::move(src);
+}
+
+// ---------------------------------------------------------------------------
+// Values queued by the MCP tools
+// ---------------------------------------------------------------------------
+
+// Whether the value hook can write a value of this kind: the kinds whose Data
+// is the caller's variable of a fixed size. Not Text (the buffer size is not
+// known), nor the openers (no variable).
+inline bool isWritableKind(int kind) {
+    switch (kind) {
+    case ImGuiTcValueKind_Drag:
+    case ImGuiTcValueKind_Slider:
+    case ImGuiTcValueKind_SliderAngle:
+    case ImGuiTcValueKind_Input:
+    case ImGuiTcValueKind_Color:
+    case ImGuiTcValueKind_Combo:
+    case ImGuiTcValueKind_Bool:
+    case ImGuiTcValueKind_Radio:
+    case ImGuiTcValueKind_ListBox:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Queue `bytes` for the widget `id` of `ctx`, which reported `kind`,
+// `dataType` and `components`. The value hook writes it the next time the
+// widget runs, within `lifetime`. A value still queued for the same widget is
+// superseded. The caller keeps the returned handle to read the outcome.
+inline std::shared_ptr<PendingValue> queueValue(ImGuiContext* ctx, ImGuiID id, int kind,
+                                                ImGuiDataType dataType, int components,
+                                                std::vector<unsigned char> bytes,
+                                                std::chrono::steady_clock::duration lifetime) {
+    auto& pending = contexts()[ctx].pendingValues;
+    for (auto it = pending.begin(); it != pending.end();) {
+        if ((*it)->id == id && (*it)->state == PendingValue::State::Queued) {
+            (*it)->state = PendingValue::State::Superseded;
+            it = pending.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    auto p = std::make_shared<PendingValue>();
+    p->id = id;
+    p->kind = kind;
+    p->dataType = dataType;
+    p->components = components;
+    p->bytes = std::move(bytes);
+    p->deadline = std::chrono::steady_clock::now() + lifetime;
+    pending.push_back(p);
+    return p;
+}
+
+// Drop a queued value that was not written (its widget was not drawn).
+inline void cancelValue(ImGuiContext* ctx, const std::shared_ptr<PendingValue>& p) {
+    auto it = contexts().find(ctx);
+    if (it == contexts().end()) return;
+    auto& pending = it->second.pendingValues;
+    for (auto pit = pending.begin(); pit != pending.end(); ++pit) {
+        if (*pit == p) { pending.erase(pit); return; }
+    }
+}
+
+// At a value widget's entry: write the value queued for it, if any, through
+// Data, before the widget reads its variable.
+inline void writePendingValue(ContextState& cs, ImGuiTcItemValue& item) {
+    ImGuiWindow* window = static_cast<ImGuiWindow*>(item.Window);
+    if (!window || window->SkipItems || !item.Data || !item.Label || !item.Label[0]) return;
+    if (!isWritableKind(item.Kind) || insideColorWidget(item.Ctx)) return;
+    const auto now = std::chrono::steady_clock::now();
+    const ImGuiID id = item.Id ? item.Id : window->GetID(item.Label);
+    auto& pending = cs.pendingValues;
+    for (auto it = pending.begin(); it != pending.end();) {
+        PendingValue& p = **it;
+        if (p.state == PendingValue::State::Queued && now >= p.deadline) {
+            it = pending.erase(it);   // the tool has answered (or given up) by now
+            continue;
+        }
+        // Same ID and kind: SliderAngle's inner SliderFloat and Combo's
+        // BeginCombo share the ID but not the kind, and never see it.
+        if (p.state != PendingValue::State::Queued || p.id != id || p.kind != item.Kind) {
+            ++it;
+            continue;
+        }
+        if (p.dataType != item.DataType || p.components != item.Components ||
+            p.bytes.size() != ImGui::DataTypeGetInfo(item.DataType)->Size * (size_t)item.Components) {
+            p.state = PendingValue::State::ShapeChanged;
+            pending.erase(it);
+            return;
+        }
+        std::memcpy(const_cast<void*>(item.Data), p.bytes.data(), p.bytes.size());
+        p.state = PendingValue::State::Written;
+        p.writtenBy = &item;
+        return;
+    }
+}
+
+// At a value widget's return: read back the variable a value was written into
+// at its entry.
+inline void readBackPendingValue(ContextState& cs, const ImGuiTcItemValue& item) {
+    auto& pending = cs.pendingValues;
+    for (auto it = pending.begin(); it != pending.end(); ++it) {
+        PendingValue& p = **it;
+        if (p.writtenBy != &item) continue;
+        p.writtenBy = nullptr;
+        captureValue(p.readBack, item, item.Ctx);
+        p.state = p.readBack.bytes == p.bytes ? PendingValue::State::Applied
+                                              : PendingValue::State::Changed;
+        pending.erase(it);
+        return;
+    }
 }
 
 } // namespace detail
@@ -375,8 +520,14 @@ inline const char* ImGuiTestEngine_FindItemDebugLabel(ImGuiContext* ctx, ImGuiID
 // [TrussC] value hook (declared in imgui/imconfig.h)
 // -----------------------------------------------------------------------------
 
-inline unsigned int ImGuiTcHook_EditCount(ImGuiContext* ctx) {
-    return tcx::imgui::detail::contexts()[ctx].editCount;
+// Runs when a value widget is entered, before it reads its variable. Writes a
+// value the MCP tools queued for it; returns the edit count so far (see
+// ImGuiTcItemValue::EditCountAtEntry).
+inline unsigned int ImGuiTcHook_ItemEntry(ImGuiTcItemValue* item) {
+    namespace d = tcx::imgui::detail;
+    auto& cs = d::contexts()[item->Ctx];
+    if (d::collecting && !cs.pendingValues.empty()) d::writePendingValue(cs, *item);
+    return cs.editCount;
 }
 
 // Runs when a value widget returns. The widget's own item (or, for a
@@ -387,6 +538,9 @@ inline void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item) {
     ImGuiContext* ctx = item->Ctx;
     ImGuiWindow* window = static_cast<ImGuiWindow*>(item->Window);
     auto& cs = d::contexts()[ctx];
+
+    // A value the tools queued was written at this widget's entry: read it back.
+    if (!cs.pendingValues.empty()) d::readBackPendingValue(cs, *item);
 
     // Edited by this call: its own item, or any part of it (a component of
     // DragFloat3, ##X inside ColorEdit). Counting it also lets an enclosing

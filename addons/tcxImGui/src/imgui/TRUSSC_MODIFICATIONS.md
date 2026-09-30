@@ -55,7 +55,8 @@ for the MCP tools (`tcx_imgui_get_widgets`, `tcx_imgui_click`, ...).
 
 **Purpose:** Let the MCP tools report the VALUE of value widgets (sliders,
 drags, inputs, colors, combos, text fields), and which widgets the user
-changed by hand. Dear ImGui keeps no values — the caller's variable owns them
+changed by hand, and let `tcx_imgui_input` SET a value widget's variable
+without simulating clicks and typing. Dear ImGui keeps no values — the caller's variable owns them
 — and neither test engine hook is ever given the variable. Even upstream's
 test engine reads a value back by Ctrl+Click, Ctrl+A, Ctrl+C and parsing the
 clipboard (`ItemReadAsScalar` in `imgui_te_context.cpp`). As of the upstream
@@ -81,10 +82,17 @@ value pointer, hence this patch.
   `g.ActiveId` still belongs to the group; a Ctrl+Click text input committed by
   clicking another widget above it would otherwise go unrecorded.
 - `IMGUI_TC_ITEM_VALUE(id, label, kind, data_type, data, components, flags)` —
-  declares that scope object. Inactive (a null context, a no-op destructor)
-  unless `GImGui->TestEngineHookItems` is set.
-- `ImGuiTcHook_ItemValue()` and `ImGuiTcHook_EditCount()` are declared here
-  and implemented in `tcImGuiHooks.h`.
+  declares that scope object, then (a second statement, so the call sites
+  stay one line each) calls `ImGuiTcHook_ItemEntry(&object)` at the widget's
+  **entry**, before the widget reads its variable. The entry hook returns the
+  edit count for `EditCountAtEntry`, and writes a value the MCP tools queued
+  for this widget through `Data` (the only write through `Data`). Inactive (a
+  null context, no entry call, a no-op destructor) unless
+  `GImGui->TestEngineHookItems` is set.
+- `ImGuiTcHook_ItemValue()` and `ImGuiTcHook_ItemEntry()` are declared here
+  and implemented in `tcImGuiHooks.h`. (`ImGuiTcHook_ItemEntry()` replaced
+  `ImGuiTcHook_EditCount(ctx)` with #321; it takes the whole object, so it
+  also knows the widget's ID, kind and data.)
 
 ---
 
@@ -145,6 +153,15 @@ How the hooks behave (in `tcImGuiHooks.h`):
   because `g.ColorEditCurrentID` is 0 again when its hook runs.
 - The Ctrl+Click text field of a Drag/Slider (`ImGuiInputTextFlags_TempInput`)
   reports nothing either. The Drag/Slider reports the typed value.
+- Setting a value (`tcx_imgui_input` on a value widget, #321): the tool queues
+  the bytes for the widget's ID and the kind it reported. The entry hook of the
+  next widget with that ID and kind (`SliderAngle`'s inner `SliderFloat` and
+  `Combo`'s `BeginCombo` share the ID, not the kind) writes them through
+  `Data`, checking that the data type and component count still match; the
+  return hook of that same call reads the variable back. The write sets no
+  Edited flag, so it is not recorded as touched. Text (buffer size unknown)
+  and the openers (`BeginCombo`, `BeginListBox`: no variable) are never
+  written.
 - Only the value hook creates "touched" entries, so every entry carries the
   value of a caller's variable. `ItemInfo` refreshes existing entries, and
   routes a pick inside a combo popup (`BeginComboDepth`) or inside a list box's
@@ -277,11 +294,14 @@ done
 1. Update the **Upstream base** tag/commit at the top of this file.
 2. Update the Dear ImGui version in `docs/LICENSE.md`.
 3. Build and run the headless tests in `addons/tcxImGui/tests/` (they cover
-   the touched record through real clicks: menus, check boxes, radio buttons,
-   list boxes). Build every project that uses imgui (see step 3). Run one with
+   the touched record through real clicks — menus, check boxes, radio buttons,
+   list boxes — and setting values through the hook, read back per
+   component). Build every project that uses imgui (see step 3). Run one with
    `TRUSSC_MCP=1` and check `tcx_imgui_get_widgets`: values present, a
-   `DragFloat3` listed under its own label, `tcx_imgui_input` into it shows up
-   in `tcx_imgui_get_touched`.
+   `DragFloat3` listed under its own label, `tcx_imgui_input` with
+   `[1, 2, 3]` into it returns ok and `tcx_imgui_get_widgets` then shows
+   exactly `[1, 2, 3]` (every component, not only one), and it does not show
+   up in `tcx_imgui_get_touched`.
 4. Test on all platforms (macOS, Windows D3D11, Linux, Web, iOS, Android).
 
 ### Updating sokol_imgui.h

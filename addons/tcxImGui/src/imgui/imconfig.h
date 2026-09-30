@@ -66,7 +66,9 @@
 // to the caller's variable and its type are in hand. It declares a scope object
 // that calls ImGuiTcHook_ItemValue() when the widget function RETURNS, through
 // any return path, so the hook sees the final value of this frame (after drag,
-// slider and text-input edits). Active only while TestEngineHookItems is set.
+// slider and text-input edits). At entry, before the widget reads the variable,
+// it calls ImGuiTcHook_ItemEntry(), which may write a value the MCP tools queued
+// for this widget through Data. Active only while TestEngineHookItems is set.
 // Implemented by tcxImGui (tcImGuiHooks.h). See TRUSSC_MODIFICATIONS.md; every
 // patched line in imgui_widgets.cpp carries a "[TrussC]" comment.
 struct ImGuiContext;
@@ -88,7 +90,8 @@ enum ImGuiTcValueKind_
 };
 struct ImGuiTcItemValue;
 extern void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item);
-extern unsigned int ImGuiTcHook_EditCount(ImGuiContext* ctx);   // edits the hooks have seen so far
+extern unsigned int ImGuiTcHook_ItemEntry(ImGuiTcItemValue* item);   // at entry: may write a queued value
+                                                                     // through Data; returns the edit count
 struct ImGuiTcItemValue
 {
     ImGuiContext*   Ctx;            // NULL when hooks are off: nothing is reported
@@ -97,15 +100,15 @@ struct ImGuiTcItemValue
     const char*     Label;
     int             Kind;           // ImGuiTcValueKind_
     int             DataType;       // ImGuiDataType of each component
-    const void*     Data;
+    const void*     Data;           // the caller's variable (written only by ImGuiTcHook_ItemEntry)
     int             Components;
     int             Flags;
     unsigned int    EditCountAtEntry;   // an edit of a part (a component, ##X in ColorEdit) counts as an edit of the whole
     ~ImGuiTcItemValue() { if (Ctx) ImGuiTcHook_ItemValue(this); }
 };
 #define IMGUI_TC_ITEM_VALUE(_ID, _LABEL, _KIND, _DATA_TYPE, _DATA, _COMPONENTS, _FLAGS) \
-    ImGuiTcItemValue imgui_tc_item_value = { GImGui->TestEngineHookItems ? GImGui : NULL, GImGui->CurrentWindow, _ID, _LABEL, _KIND, _DATA_TYPE, _DATA, _COMPONENTS, (int)(_FLAGS), \
-                                             GImGui->TestEngineHookItems ? ImGuiTcHook_EditCount(GImGui) : 0u }
+    ImGuiTcItemValue imgui_tc_item_value = { GImGui->TestEngineHookItems ? GImGui : NULL, GImGui->CurrentWindow, _ID, _LABEL, _KIND, _DATA_TYPE, _DATA, _COMPONENTS, (int)(_FLAGS), 0u }; \
+    if (imgui_tc_item_value.Ctx) imgui_tc_item_value.EditCountAtEntry = ImGuiTcHook_ItemEntry(&imgui_tc_item_value)
 // [TrussC] end
 
 //---- Include imgui_user.h at the end of imgui.h as a convenience
