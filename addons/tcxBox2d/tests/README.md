@@ -15,7 +15,9 @@ Polygon points (#342). `PolyShape::setup()` and `RigidBody2D` with
   points listed in a crossing order come back in hull order;
 - `setupConvex()` / `Shape2D::convex()` take any number of points and make one
   fixture of at most 8 points whose mass is close to the outline's; input
-  they collapse to fewer than 3 points gets a warning saying so.
+  they collapse to fewer than 3 points gets a warning saying so. The
+  reduction picks the same points as the O(h^2) scan it replaced (kept in the
+  harness as the reference) and reduces a 50,000-point outline in under 1 s.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR; a non-zero exit fails the job. Run it locally with:

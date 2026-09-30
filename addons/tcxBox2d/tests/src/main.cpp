@@ -15,14 +15,20 @@
 //     convex input already in outline order keeps its order, and hull points
 //     in a crossing order come back in hull order;
 //   - setupConvex() / Shape2D::convex() take any number of points and make one
-//     fixture of at most 8 points whose mass is close to the outline's.
+//     fixture of at most 8 points whose mass is close to the outline's; the
+//     reduction is O(h log h) and picks the same points as the plain
+//     O(h^2) scan it replaced.
 // =============================================================================
 
 #include <tcxBox2d.h>
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -449,6 +455,14 @@ static void testRigidBody2D(box2d::World& world) {
         check("RigidBody2D polygon 9 points: warning names Shape2D::convex()",
               w.lastContains("Shape2D::convex()"));
     }
+    {
+        WarningCapture w;
+        shared_ptr<Node> node;
+        attach(world, node, box2d::Shape2D::polygon({{0, 0}, {10, 0}}));
+        check("RigidBody2D polygon 2 points: warning says Shape2D::convex() may have dropped points",
+              w.lastContains("fewer than 3 distinct, non-collinear points") &&
+              w.lastContains("Shape2D::convex() may have dropped duplicate and collinear points"));
+    }
     check("RigidBody2D refused polygons left no bodies", world.getBodyCount() == bodiesBefore);
 
     {
@@ -517,7 +531,7 @@ static void testRigidBody2D(box2d::World& world) {
         check("RigidBody2D Shape2D::convex collinear: one warning", w.count == 1);
         check("RigidBody2D Shape2D::convex collinear: warning says they collapsed",
               w.lastContains("fewer than 3 distinct, non-collinear points") &&
-              w.lastContains("Shape2D::convex() drops duplicate and collinear points"));
+              w.lastContains("Shape2D::convex() may have dropped duplicate and collinear points"));
     }
     {
         WarningCapture w;
@@ -527,8 +541,150 @@ static void testRigidBody2D(box2d::World& world) {
         check("RigidBody2D Shape2D::convex 50 copies of one point: one warning", w.count == 1);
         check("RigidBody2D Shape2D::convex 50 copies of one point: warning says they collapsed",
               w.lastContains("fewer than 3 distinct, non-collinear points") &&
-              w.lastContains("Shape2D::convex() drops duplicate and collinear points"));
+              w.lastContains("Shape2D::convex() may have dropped duplicate and collinear points"));
     }
+}
+
+// ---------------------------------------------------------------------------
+// reducedConvexHull(): heap-based reduction vs the O(h^2) scan it replaced
+// ---------------------------------------------------------------------------
+
+// The reduction as it was before the heap: rescan every vertex, drop the first
+// one with the smallest area. Kept verbatim as the reference.
+static vector<Vec2> referenceReducedConvexHull(const vector<Vec2>& points, size_t maxPoints) {
+    if (maxPoints < 3) maxPoints = 3;
+
+    vector<Vec2> pts = points;
+    sort(pts.begin(), pts.end(), [](const Vec2& a, const Vec2& b) {
+        return a.x < b.x || (a.x == b.x && a.y < b.y);
+    });
+    pts.erase(unique(pts.begin(), pts.end(), [](const Vec2& a, const Vec2& b) {
+        return a.x == b.x && a.y == b.y;
+    }), pts.end());
+    if (pts.size() < 3) return pts;
+
+    auto cross = [](const Vec2& o, const Vec2& a, const Vec2& b) {
+        return (double(a.x) - o.x) * (double(b.y) - o.y) - (double(a.y) - o.y) * (double(b.x) - o.x);
+    };
+
+    vector<Vec2> hull(pts.size() * 2);
+    size_t k = 0;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        while (k >= 2 && cross(hull[k - 2], hull[k - 1], pts[i]) <= 0.0) --k;
+        hull[k++] = pts[i];
+    }
+    for (size_t i = pts.size() - 1, lower = k + 1; i > 0; --i) {
+        while (k >= lower && cross(hull[k - 2], hull[k - 1], pts[i - 1]) <= 0.0) --k;
+        hull[k++] = pts[i - 1];
+    }
+    hull.resize(k - 1);
+
+    while (hull.size() > maxPoints) {
+        const size_t n = hull.size();
+        size_t best = 0;
+        double bestArea = numeric_limits<double>::max();
+        for (size_t i = 0; i < n; ++i) {
+            double a = abs(cross(hull[(i + n - 1) % n], hull[i], hull[(i + 1) % n]));
+            if (a < bestArea) {
+                bestArea = a;
+                best = i;
+            }
+        }
+        hull.erase(hull.begin() + static_cast<ptrdiff_t>(best));
+    }
+    return hull;
+}
+
+// Strictly convex outline of `n` (even) points with integer coordinates, exact
+// in float: n/2 shortest primitive edge vectors of the upper half-plane and
+// their negations, walked in angle order. No point is collinear with its
+// neighbours, so all of them are on the hull (a float circle this dense is
+// not: rounding flattens it).
+static vector<Vec2> denseConvexOutline(size_t n) {
+    vector<pair<int, int>> dirs;
+    for (int k = 1; dirs.size() < n / 2; ++k) {
+        // Directions with max(|a|, |b|) == k, angle in [0, TAU / 2).
+        for (int a = -k; a <= k; ++a) {
+            for (int b = 0; b <= k; ++b) {
+                if (max(abs(a), b) != k || (b == 0 && a < 0)) continue;
+                int x = abs(a), y = b;
+                while (y) { int t = x % y; x = y; y = t; }
+                if (x == 1) dirs.push_back({a, b});
+            }
+        }
+    }
+    dirs.resize(n / 2);
+    sort(dirs.begin(), dirs.end(), [](const pair<int, int>& u, const pair<int, int>& v) {
+        return u.first * v.second - u.second * v.first > 0;
+    });
+    vector<Vec2> pts;
+    long long x = 0, y = 0;
+    for (int side = 1; side >= -1; side -= 2) {
+        for (const auto& d : dirs) {
+            pts.push_back(Vec2(float(x), float(y)));
+            x += side * d.first;
+            y += side * d.second;
+        }
+    }
+    return pts;
+}
+
+static void testReducedConvexHull() {
+    // Random inputs, many with equal areas (lattice points, regular polygons)
+    // so the tie-break is exercised, at several target sizes.
+    mt19937 rng(342);
+    uniform_real_distribution<float> coord(-500.0f, 500.0f);
+    uniform_int_distribution<int> lattice(-6, 6);
+    const size_t targets[] = {3, 4, 5, 8, 12};
+    int cases = 0, mismatches = 0;
+    auto compare = [&](const vector<Vec2>& in) {
+        for (size_t m : targets) {
+            ++cases;
+            if (box2d::detail::reducedConvexHull(in, m) != referenceReducedConvexHull(in, m)) ++mismatches;
+        }
+    };
+    for (int t = 0; t < 200; ++t) {
+        vector<Vec2> in(3 + rng() % 200);
+        for (auto& p : in) p = Vec2(coord(rng), coord(rng));
+        compare(in);
+    }
+    for (int t = 0; t < 200; ++t) {
+        vector<Vec2> in(3 + rng() % 120);
+        for (auto& p : in) p = Vec2(float(lattice(rng)), float(lattice(rng)));
+        compare(in);
+    }
+    for (int n = 9; n <= 64; ++n) {
+        compare(circlePoints(n, 100));
+        vector<Vec2> square;  // integer outline of a square: collinear sides
+        for (int i = 0; i < n; ++i) {
+            square.push_back(Vec2(float(i), 0.0f));
+            square.push_back(Vec2(float(i), float(n)));
+            square.push_back(Vec2(0.0f, float(i)));
+            square.push_back(Vec2(float(n), float(i)));
+        }
+        compare(square);
+        vector<Vec2> octagon;  // lattice octagon: its corners tie on area
+        for (int i = -n; i <= n; ++i) {
+            for (int j = -n; j <= n; ++j) {
+                if (abs(i) + abs(j) <= n + n / 2) octagon.push_back(Vec2(float(i), float(j)));
+            }
+        }
+        compare(octagon);
+    }
+    for (size_t n : {100, 1000, 3000}) compare(denseConvexOutline(n));
+    check("reducedConvexHull matches the O(h^2) reference on " + to_string(cases) + " inputs",
+          mismatches == 0);
+
+    // 50,000 points, all on the hull: the O(h^2) scan took seconds here.
+    vector<Vec2> dense = denseConvexOutline(50000);
+    check("reducedConvexHull 50,000-point outline: every point is on the hull",
+          box2d::detail::reducedConvexHull(dense, dense.size()).size() == dense.size());
+    auto t0 = chrono::steady_clock::now();
+    vector<Vec2> reduced = box2d::detail::reducedConvexHull(dense);
+    double sec = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
+    printf("  reducedConvexHull 50,000-point outline: %.3f s\n", sec);
+    check("reducedConvexHull 50,000-point outline: 8 points", reduced.size() == 8);
+    check("reducedConvexHull 50,000-point outline: under 1 s", sec < 1.0);
 }
 
 int main() {
@@ -540,6 +696,7 @@ int main() {
     testPolyShapeValid(world);
     testSetupConvex(world);
     testRigidBody2D(world);
+    testReducedConvexHull();
 
     if (g_fail) {
         printf("\n%d check(s) FAILED\n", g_fail);
