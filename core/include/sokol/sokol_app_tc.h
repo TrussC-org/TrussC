@@ -16781,13 +16781,17 @@ _SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
     ALooper_removeFd(_sapp_tc.android.looper, _sapp_tc.android.pt.read_from_main_fd);
     ALooper_release(_sapp_tc.android.looper);*/
 
-    /* signal "destroyed" */
+    /* log BEFORE signalling "destroyed": once is_thread_stopped is set,
+       onDestroy on the UI thread goes on to exit(0), which destroys the
+       host's statics (TrussC's Logger among them) while this thread would
+       still be logging */
+    _SAPP_INFO(ANDROID_LOOP_THREAD_DONE);
+
+    /* signal "destroyed" -- nothing may log after this */
     pthread_mutex_lock(&_sapp_tc.android.pt.mutex);
     _sapp_tc.android.is_thread_stopped = true;
     pthread_cond_broadcast(&_sapp_tc.android.pt.cond);
     pthread_mutex_unlock(&_sapp_tc.android.pt.mutex);
-
-    _SAPP_INFO(ANDROID_LOOP_THREAD_DONE);
     return NULL;
 }
 
