@@ -1122,7 +1122,7 @@ public:
 };
 ```
 
-The App's own `audioOut()` / `audioIn()` overrides are handled for you: the framework detaches them after `cleanup()` and waits before it destroys the App (on exit, on a hot reload, and when a secondary window closes).
+The App's own `audioOut()` / `audioIn()` overrides are handled for you: the framework detaches them after `cleanup()` and waits before it destroys the App (on exit, on a hot reload, and when a secondary window closes). That framework wait has no time limit: a listener that never returns is a bug in the app, and the teardown hangs on it (after one second an error in the log says so) rather than destroy the App under it. So **inside an audio listener, never wait on the main thread or on a lock the main thread may hold** (no `runOnMainThread` round-trip, no mutex that `update()` or `cleanup()` holds for long). A secondary window's App gets its audio hooks only while a window drives it: closing the window detaches them, and `Window::setApp()` with that App on a window again subscribes them again and runs `setup()` again.
 
 ### Bubble events up, don't broadcast?
 
@@ -1184,7 +1184,7 @@ No PR needed — discovery is by GitHub topic. Three conditions: ① the repo ha
 
 Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. Listening to `audioIn` gives mic input (`AudioInBuffer`, read-only). The callback runs on the audio thread, so avoid heavy work or engine-API calls and return quickly.
 
-Overriding `App::audioOut()` / `App::audioIn()` needs no teardown code: the framework detaches them after `cleanup()` and waits for a callback in flight before it destroys the App. Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForCallbackIdle()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
+Overriding `App::audioOut()` / `App::audioIn()` needs no teardown code: the framework detaches them after `cleanup()` and waits for a callback in flight, as long as it takes, before it destroys the App (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForCallbackIdle()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
 
 ### Output channel mapping? (setChannelMap)
 
@@ -2360,8 +2360,8 @@ VSYNC  // Frame-rate sentinel: sync to the monitor refresh rate
 ### App — Base application class: subclass it and override setup/update/draw and the input callbacks (mousePressed, keyPressed, etc.) to build a TrussC app
 
 ```cpp
-void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut. Detached after cleanup(), like audioOut.
-void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window)
+void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut. Detached after cleanup() and subscribed again on a new attach, like audioOut; the same rule applies: don't wait on the main thread or on its locks in here.
+void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window), for as long as the call takes: don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). Attaching a closed App to a window again subscribes it again
 void App::exit()  // App exit callback (override for cleanup before shutdown)
 void App::filesDropped(const std::vector<std::string> & files)  // Files were dropped onto the window
 Window * App::getWindow() const  // The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks
@@ -4332,7 +4332,7 @@ const std::string & Window::getTitle() const  // Last title set for this window 
 int Window::getWidth() const  // Window width in logical points (matches its coordinate system)
 bool Window::isFullscreen() const  // Whether this window is currently fullscreen (macOS reads the live window state; the transition is animated)
 bool Window::isOpen() const  // Whether the native window is still open
-void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window
+void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. The App's audioOut() / audioIn() are called while a window drives it: closing the window runs exit() and cleanup() and detaches them, and attaching that App to a window again subscribes them again and runs setup() again
 void Window::setClearColor(const Color & c)  // Background clear color for this window
 void Window::setFps(float fps)  // Set this window's target frame rate; <= 0 (or >= the display rate) free-runs at vsync, otherwise update/draw run at ~fps by skipping display ticks
 void Window::setFullscreen(bool full)  // Enter or leave fullscreen for this window (macOS native fullscreen, Windows borderless-fullscreen, Linux EWMH _NET_WM_STATE_FULLSCREEN)
