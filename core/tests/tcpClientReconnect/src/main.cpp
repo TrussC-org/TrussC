@@ -586,7 +586,11 @@ static void scenario() {
     // thread. Here the listener stays until the main thread is inside
     // connect()'s onConnect, which keeps that window open for a while.
     {
-        TcpClient bc;
+        // Kept for the life of the process, as the Events comment of
+        // TcpClient asks of a client whose receive-thread listener called
+        // disconnect(): its old receive thread is never joined, so destroying
+        // the client would race whatever that thread last touched.
+        TcpClient& bc = *new TcpClient();
 #ifdef __linux__
         const int threadsBaseline = countEntries("/proc/self/task");
 #endif
@@ -674,7 +678,7 @@ static void scenario() {
     // connection (the pending connect, onConnect, reads) next to the update
     // event, for as long as the client lived.
     {
-        TcpClient bn;
+        TcpClient& bn = *new TcpClient();   // kept, as above
 #ifdef __linux__
         const int threadsBaseline = countEntries("/proc/self/task");
 #endif

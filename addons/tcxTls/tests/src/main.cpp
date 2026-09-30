@@ -878,7 +878,11 @@ static void scenario() {
     // the pending connect and the handshake on the same SSL context from two
     // threads, for as long as the client lived.
     {
-        TlsClient bn;
+        // Kept for the life of the process, as TcpClient's Events comment asks
+        // of a client whose receive-thread listener called disconnect(): its
+        // old receive thread is never joined, so destroying the client would
+        // race whatever that thread last touched.
+        TlsClient& bn = *new TlsClient();
         bn.setVerifyNone();
 #ifdef __linux__
         const int threadsBaseline = countEntries("/proc/self/task");
