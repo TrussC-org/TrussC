@@ -24,7 +24,7 @@
 //   - an image in a buffer without data is skipped
 //   - a component type glTF 2.0 does not allow fails validation
 //   - a file with no scene loads from its root nodes; with no nodes it fails
-//   - a 100000-deep node chain loads; node cycles and repeated scene nodes
+//   - a 20000-deep node chain loads; node cycles and repeated scene nodes
 //     fail to load
 // Every failed load logs a warning and leaves the model empty.
 // =============================================================================
@@ -547,9 +547,14 @@ int main() {
         loadCase("no scene and no nodes", b, false, m);
     }
     {
-        // A chain 100000 nodes deep, each moved 1 along z: loads without
-        // exhausting the call stack, with the transforms accumulated
-        const int DEPTH = 100000;
+        // A chain 20000 nodes deep, each moved 1 along z: loads without
+        // exhausting the call stack, with the transforms accumulated.
+        // The depth is kept this low because cgltf_validate()'s parent-cycle
+        // check is O(nodes * depth), so 100000 took about 30 s. 20000 still
+        // overflows a recursive walk: one crashed at about 9000 levels in a
+        // Release build with Linux's default 8 MB stack (under 2000 with
+        // ASan), and Windows' default 1 MB stack gives out sooner still
+        const int DEPTH = 20000;
         GltfBuilder b = triangle();
         string nodes = "[";
         for (int i = 0; i < DEPTH - 1; i++) {
