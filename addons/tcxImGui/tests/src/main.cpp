@@ -16,6 +16,8 @@
 //     under the item picked; a custom BeginListBox list under its label
 //   - menu headers, action menu items, MenuItem(bool selected) used as a
 //     toggle, plain Selectables and RadioButton(bool) are not recorded
+//   - a Checkbox scrolled out of view still reports its variable
+//   - a list box inside a combo popup owns the picks in it
 // =============================================================================
 
 #include "imguiHarness.h"
@@ -175,8 +177,76 @@ static void testPanel() {
     check("panel: exactly the value widgets recorded", tcx::imgui::getTouched().size() == 5);
 }
 
+// ---------------------------------------------------------------------------
+// A Checkbox scrolled out of view still reports the variable
+// ---------------------------------------------------------------------------
+static void testClippedCheckbox() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+
+    bool pushDown = false, far = false, near = false;
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 30));
+        ImGui::SetNextWindowSize(ImVec2(300, 200));
+        ImGui::Begin("Scroll");
+        ImGui::Checkbox("near", &near);
+        if (pushDown) ImGui::Dummy(ImVec2(10, 1000));
+        ImGui::Checkbox("far", &far);
+        ImGui::End();
+    });
+    h.frames(3);
+    h.click("far");
+    check("clipped checkbox: toggled on by hand", far && isValue(touchedJson("far"), "checkbox", true));
+    h.click("near");   // move the nav focus off "far": ImGui never clips the focused item
+
+    pushDown = true;   // now below the window's bottom edge: clipped
+    h.frames(2);
+    far = false;       // changed from code while clipped
+    h.frames(2);
+    const tcx::imgui::WidgetInfo* w = h.find("far");
+    check("clipped checkbox: listed with its value",
+          w && w->value.kind == ImGuiTcValueKind_Bool && w->value.bytes.size() == 1 && w->value.bytes[0] == 0);
+    check("clipped checkbox: touched entry follows the variable", isValue(touchedJson("far"), "checkbox", false));
+}
+
+// ---------------------------------------------------------------------------
+// A custom list box inside a custom combo's popup owns its picks
+// ---------------------------------------------------------------------------
+static void testListBoxInCombo() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+
+    int shape = 0;
+    static const char* shapes[] = {"Square", "Circle", "Star"};
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 30));
+        ImGui::SetNextWindowSize(ImVec2(400, 300));
+        ImGui::Begin("Shapes");
+        if (ImGui::BeginCombo("shape", shapes[shape])) {
+            if (ImGui::BeginListBox("shape list", ImVec2(0, 80))) {
+                for (int i = 0; i < 3; i++) {
+                    if (ImGui::Selectable(shapes[i], shape == i)) shape = i;
+                }
+                ImGui::EndListBox();
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::End();
+    });
+    h.frames(3);
+    h.click("shape");
+    h.frames(2);
+    check("listbox in combo: popup open", h.find("Circle") != nullptr);
+    h.click("Circle");
+    check("listbox in combo: picked", shape == 1);
+    check("listbox in combo: recorded under the list box", touched("shape list") != nullptr);
+    check("listbox in combo: not recorded under the combo", touched("shape") == nullptr);
+}
+
 int main() {
     testMenus();
     testPanel();
+    testClippedCheckbox();
+    testListBoxInCombo();
     return harness::summary();
 }

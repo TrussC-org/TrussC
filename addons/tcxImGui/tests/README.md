@@ -24,7 +24,8 @@ Cases (`src/main.cpp`):
   the pressed button; a `ListBox` pick is recorded under the list box label
   with the index, a custom `BeginListBox` list under its label; menu headers,
   action menu items, `MenuItem(bool selected)` toggles, plain `Selectable`s and
-  `RadioButton(bool)` are not recorded.
+  `RadioButton(bool)` are not recorded; a `Checkbox` scrolled out of view still
+  reports its variable; a custom list box inside a combo popup owns its picks.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR across macOS / Windows / Linux; a non-zero exit fails the job. Run it
