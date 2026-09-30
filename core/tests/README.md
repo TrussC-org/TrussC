@@ -251,3 +251,19 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `MemAvailable` and the cgroup v2 `memory.max` headroom), it also allocates real buffers just past 2 GiB and checks
   `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
   past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.
+- `fontSfntCheck/` — font data is checked before stb_truetype reads it:
+  `FontAtlasManager::setupFromMemory()` returns false with a warning for 0
+  bytes, a `.ttc` header whose font count or offset points outside the data,
+  a table directory or a table past the end of the data (also when offset +
+  length wraps in 32 bits), a missing required table, head / hhea / maxp /
+  cmap shorter than the fields stb reads, cmap encoding records or a used
+  subtable offset past cmap, `numberOfHMetrics` outside 1..numGlyphs, a short
+  hmtx or loca, an unknown loca format, and a loca entry past glyf; and for
+  copies of a TrueType, a CFF and a collection font cut short in the header,
+  the table directory and each table. A glyph index from the cmap past
+  numGlyphs draws as .notdef. Also guards the TrussC patch in
+  `stb_truetype.h` (CFF data is read with the CFF table's own length) and the
+  padded `STBTT_malloc` (a glyph whose last contour is one off-curve point;
+  meaningful under ASan). The fonts are built at runtime; fonts installed at
+  the usual system paths are also loaded and cut short when present.
+  `fontSfntCheck --dump <files>` prints glyph metrics to compare two builds.
