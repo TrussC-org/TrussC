@@ -129,10 +129,15 @@ public:
         return true;
     }
 
-    // Stop and finalize the file. Safe to call when not recording.
+    // Stop and finalize the file. Safe to call when not recording. May wait
+    // for a capture already running on the audio thread (about one buffer).
     void stop() {
         if (!running_.exchange(false, std::memory_order_acq_rel)) return;
         listener_ = EventListener();   // unsubscribe (audio thread stops feeding)
+        // Unsubscribing does not wait for a capture() already running on the
+        // audio thread: wait for it before the writer's final drain, and
+        // before the ring can be refilled by start() or freed (#256).
+        AudioEngine::getInstance().waitForCallbackIdle();
         if (writer_.joinable()) writer_.join();
         patchHeader();
         file_.close();

@@ -23,6 +23,14 @@
 namespace trussc {
 
 class Window;
+class App;
+
+namespace internal {
+// Teardown steps 2 and 3 wherever the framework lets an App go (exit, hot
+// reload, closing a secondary window; #256): after app.cleanup(), before the
+// App is destroyed. Defined below the App class.
+inline void detachAppAudio(App& app);
+}
 
 // =============================================================================
 // App - Application base class
@@ -36,7 +44,10 @@ public:
     App() {
         // Auto-subscribe the virtual audio hooks. Subclasses just override
         // audioOut() / audioIn() — no need to write the listener boilerplate.
-        // EventListener members RAII out when App is destroyed.
+        // The framework detaches them after cleanup() and waits for a
+        // callback already running on the audio thread before the App is
+        // destroyed (internal::detachAppAudio()); ~App() would be too late,
+        // the derived members that audioOut() uses are gone by then.
         audioOutListener_ = AudioEngine::getInstance().audioOut.listen(
             [this](AudioOutBuffer& b) { audioOut(b); });
         audioInListener_  = AudioEngine::getInstance().audioIn.listen(
@@ -186,12 +197,17 @@ public:
     // For multiple independent listeners (e.g. a Node-based synth tree),
     // use `AudioEngine::getInstance().audioOut.listen(...)` directly
     // alongside the App override.
+    // They stop being called after cleanup(): the framework detaches them
+    // before it destroys the App (exit, hot reload, closing the App's
+    // window), so the App adds nothing to the last few buffers before it
+    // goes.
     virtual void audioOut(AudioOutBuffer& buf) { (void)buf; }
     virtual void audioIn(const AudioInBuffer& buf) { (void)buf; }
 
 private:
     EventListener audioOutListener_;
     EventListener audioInListener_;
+    friend void internal::detachAppAudio(App& app);
 public:
 
     // -------------------------------------------------------------------------
@@ -255,5 +271,17 @@ public:
         drawTree();
     }
 };
+
+namespace internal {
+// Detach the App's audioOut / audioIn hooks, then wait for a callback that is
+// already running on the audio thread (Event does not wait on disconnect).
+// Afterwards nothing on the audio thread reaches the App, so it can be
+// destroyed. Main thread; returns at once when no audio is running.
+inline void detachAppAudio(App& app) {
+    app.audioOutListener_.disconnect();
+    app.audioInListener_.disconnect();
+    AudioEngine::getInstance().waitForCallbackIdle();
+}
+}
 
 } // namespace trussc

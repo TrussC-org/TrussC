@@ -2329,8 +2329,8 @@ VSYNC  // Frame-rate sentinel: sync to the monitor refresh rate
 ### App — Base application class: subclass it and override setup/update/draw and the input callbacks (mousePressed, keyPressed, etc.) to build a TrussC app
 
 ```cpp
-void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut.
-void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio)
+void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut. Detached after cleanup(), like audioOut.
+void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window)
 void App::exit()  // App exit callback (override for cleanup before shutdown)
 void App::filesDropped(const std::vector<std::string> & files)  // Files were dropped onto the window
 Window * App::getWindow() const  // The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks
@@ -2377,6 +2377,7 @@ std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available 
 void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Audio output callback: mix all playing sounds into the buffer (internal, called from the audio thread).
 std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) [+1]  // Start a new mixer voice for the given source (eager SoundBuffer or streaming SoundStream) and return its live PlayingSound handle. Usually called indirectly via Sound::play().
 void AudioEngine::shutdown()  // Stop and close the audio device.
+bool AudioEngine::waitForCallbackIdle()  // Teardown barrier for audioOut / audioIn listeners: returns once every audio callback that was running when it was called has finished. EventListener::disconnect() does not wait for a callback running on the audio thread, so an object whose listener uses its members disconnects, calls this, and only then lets the members go (in its own destructor or cleanup(), not in a base-class destructor). Returns true at once when no audio runs or when called from inside a listener; gives up on a listener stuck for about one second (logs a warning, returns false).
 ```
 
 ### AudioInBuffer — Argument type for the AudioEngine::audioIn event. Holds the interleaved read-only microphone input for a single capture callback. Process and return quickly; do not call engine APIs from here.
@@ -2402,7 +2403,7 @@ fs::path AudioRecorder::getPath() const  // Resolved path of the file being writ
 double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far
 bool AudioRecorder::isRecording() const  // True while recording
 bool AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened
-void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes). Safe to call when not recording; also runs automatically on destruction
+void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes). Safe to call when not recording; also runs automatically on destruction. Waits for an audio callback already running (about one buffer)
 ```
 
 ### AudioSettings — Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device.
@@ -2627,13 +2628,13 @@ void Environment::release()  // Release GPU resources
 void Event::clear()  // Remove all listeners
 EventListener Event::listen(Callback callback, int priority = App) [+5]  // Register a listener callback and return an EventListener token; lower priority runs first, and Deliver::Main runs the callback on the main thread
 size_t Event::listenerCount() const  // Number of currently registered listeners
-void Event::notify(T & arg)  // Fire the event, calling all listeners in priority order (no argument for Event<void>); stops early if a listener marks an input arg consumed
+void Event::notify(T & arg)  // Fire the event, calling all listeners in priority order (no argument for Event<void>); stops early if a listener marks an input arg consumed. A listener removed during the pass on this thread is not called; one added during the pass starts from the next notify()
 ```
 
 ### EventListener — RAII token returned by Event::listen(); the listener is automatically disconnected when this token is destroyed or reassigned. Move-only
 
 ```cpp
-void EventListener::disconnect()  // Explicitly disconnect the listener now (otherwise happens automatically on destruction)
+void EventListener::disconnect()  // Explicitly disconnect the listener now (otherwise happens automatically on destruction). On the thread that fires the event it is not called again, even later in a notify() pass already running. It does not wait for a callback running on another thread: for audio, follow it with AudioEngine::waitForCallbackIdle()
 bool EventListener::isConnected() const  // True while the listener is still connected to its event
 ```
 

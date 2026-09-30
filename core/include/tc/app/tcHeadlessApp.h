@@ -229,6 +229,10 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     app.exit();
     app.cleanup();
 
+    // The audio device keeps running: detach the App's audio hooks and wait
+    // for a callback in flight before the App goes out of scope (#256).
+    internal::detachAppAudio(app);
+
     // Headless apps leave the audio device running (no shutdownAudio() on
     // this path), so log the drops the rate limit still holds back here.
     internal::flushAudioDiagnostics();

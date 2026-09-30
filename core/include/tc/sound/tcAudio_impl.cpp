@@ -1277,6 +1277,63 @@ void AudioEngine::mixAudio(float* buffer, int num_frames, int num_channels) {
 }
 
 // ---------------------------------------------------------------------------
+// Callbacks in flight and the teardown barrier (#256)
+// ---------------------------------------------------------------------------
+namespace {
+// audioOut / audioIn notifies running on this thread (nested when one device
+// callback fires both). Non-zero only on the audio thread inside a listener,
+// where waitForCallbackIdle() must not wait for itself.
+thread_local int t_callbackDepth = 0;
+
+// How long waitForCallbackIdle() waits. A buffer lasts ~1-100 ms, so a
+// callback still running after this is stuck, not slow.
+constexpr std::chrono::seconds kCallbackIdleTimeout{1};
+} // namespace
+
+int AudioEngine::beginCallback() {
+    ++t_callbackDepth;
+    // seq_cst, like the barrier's epoch advance and slot load, and ordered
+    // before the notify's load of the listener list: for a listener removed
+    // before a barrier, either the barrier counts this callback and waits
+    // for it, or this callback's notify no longer sees the listener.
+    const int slot = (int)(callbackEpoch_.load() & 1u);
+    callbacksInFlight_[slot].fetch_add(1);
+    return slot;
+}
+
+void AudioEngine::endCallback(int slot) {
+    // Release: what the listeners did happens-before the barrier returns.
+    callbacksInFlight_[slot].fetch_sub(1, std::memory_order_release);
+    --t_callbackDepth;
+}
+
+bool AudioEngine::waitForCallbackIdle() {
+    if (t_callbackDepth > 0) return true;   // audio thread, inside a listener
+
+    std::lock_guard<std::mutex> lock(callbackBarrierMutex_);
+    const auto deadline = std::chrono::steady_clock::now() + kCallbackIdleTimeout;
+    // Advance the epoch so new callbacks count in the other slot, then wait
+    // for the old slot to drain. Twice, so both slots are drained after the
+    // caller's disconnect: a callback that read the epoch just before an
+    // advance still counts in the slot it read.
+    for (int pass = 0; pass < 2; ++pass) {
+        const int slot = (int)(callbackEpoch_.fetch_add(1) & 1u);
+        while (callbacksInFlight_[slot].load() != 0) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                logWarning("AudioEngine") << "waitForCallbackIdle: an audioOut / audioIn "
+                    "listener has been running for over "
+                    << kCallbackIdleTimeout.count() << " s; continuing without "
+                    "waiting for it. Is it waiting on this thread (a lock held here, "
+                    "or work queued to it)?";
+                return false;
+            }
+            std::this_thread::yield();
+        }
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // MicInput implementation (Native only - Web version in platform/web/tcMicInput_web.cpp)
 // ---------------------------------------------------------------------------
 #ifndef __EMSCRIPTEN__

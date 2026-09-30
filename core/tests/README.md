@@ -92,6 +92,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   the `Tween` shape: objects in a vector listen with `[this]` and re-listen in
   their move constructor; growing the vector inside the pass sends no call to
   a moved-from object.
+- `audioListenerTeardown/` — nothing on the audio thread reaches an object
+  after its owner let it go (#256), on the real `AudioEngine` over miniaudio's
+  null backend: `AudioEngine::waitForCallbackIdle()` waits for an `audioOut`
+  pass in flight, returns at once with no audio running and from inside a
+  listener, and gives up (warning, `false`) on a listener stuck for a second;
+  an App torn down by `runHeadlessApp` while its `audioOut()` runs keeps the
+  hook through `cleanup()`, then its destructor neither starts during
+  `audioOut()` nor sees it called afterwards (the windowed exit, hot reload
+  and closing a secondary window use the same `internal::detachAppAudio()`);
+  `AudioRecorder::stop()` waits for the pass in flight. A watchdog turns a
+  barrier that never returns into a FAIL.
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×

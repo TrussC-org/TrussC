@@ -849,6 +849,34 @@ public:
     Event<AudioOutBuffer> audioOut;
     Event<AudioInBuffer>  audioIn;
 
+    // Teardown barrier for audioOut / audioIn listeners (#256). Returns once
+    // every audioOut / audioIn notify that was running when it was called has
+    // finished. Event does not wait: when disconnect() returns, the callback
+    // may still be running on the audio thread. So an object whose listener
+    // touches its members disconnects, then waits here, then lets the members
+    // go:
+    //
+    //   ~Synth() { listener_.disconnect();
+    //              AudioEngine::getInstance().waitForCallbackIdle(); }
+    //
+    // Do it in the most-derived class (or in cleanup()), not in a base-class
+    // destructor, which runs after the derived members are already gone. The
+    // App's own audioOut() / audioIn() hooks are handled by the framework:
+    // they are detached after cleanup() and this barrier runs before the App
+    // is destroyed (exit, hot reload, closing a secondary window).
+    //
+    //   - Returns at once when no callback is running: the device is stopped
+    //     or was never started, or the audio thread is between two buffers.
+    //   - Returns at once when called from inside an audioOut / audioIn
+    //     listener (the audio thread): waiting there would wait for itself.
+    //   - Otherwise waits only for callbacks already running (at most two
+    //     back-to-back buffers), not for later ones. Gives up after one
+    //     second, logs a warning and returns false: a listener that blocks
+    //     that long is stuck (e.g. on a lock the caller holds), and waiting
+    //     forever would hang the exit. Returns true otherwise.
+    // Call it without holding a lock that a listener takes.
+    bool waitForCallbackIdle();
+
     // Fired on every successful init() — both the initial startup and any
     // subsequent live re-init. The args carry the new device's real name
     // (never empty), whether it's the system default, and the current
@@ -925,6 +953,14 @@ private:
     // while no device is running (init(), shutdown()), so the audio thread
     // cannot race it.
     void resetMeters();
+
+    // Mark an audioOut / audioIn notify in flight for waitForCallbackIdle()
+    // (tcAudio_impl.cpp). Audio thread; a thread_local depth and one atomic
+    // add each, no lock. beginCallback() returns the slot to pass to
+    // endCallback(). audioIn has no engine-side source yet: whatever fires it
+    // from the engine must enclose that notify the same way.
+    int  beginCallback();
+    void endCallback(int slot);
 
     // Eager mix path: linear interpolation over a fully-decoded SoundBuffer.
     //
@@ -1106,7 +1142,11 @@ private:
             ob.channels      = num_channels;
             ob.sampleRate    = sampleRate_;
             ob.framePosition = framePosition_;
+            // In flight for waitForCallbackIdle(). Must enclose the notify:
+            // it is what loads the listener snapshot.
+            const int slot = beginCallback();
             audioOut.notify(ob);
+            endCallback(slot);
         }
         framePosition_ += (uint64_t)num_frames;
 
@@ -1167,6 +1207,18 @@ private:
     // Drop counters, output meters, audio-thread load and the log rate
     // limiter (see getStats(), pumpAudioDiagnostics()).
     std::unique_ptr<internal::AudioDiagnostics> diag_;
+
+    // Callbacks in flight (beginCallback / endCallback), counted in one of two
+    // slots picked by the epoch's low bit. waitForCallbackIdle() advances the
+    // epoch so new callbacks count in the other slot, then waits for the old
+    // slot to drain, twice (once per slot): it waits only for callbacks that
+    // were already running, and a callback that read the epoch just before an
+    // advance is still caught. The mutex serializes barriers (the epoch
+    // advances of two barriers must not interleave); the audio thread never
+    // takes it.
+    std::atomic<uint32_t> callbackEpoch_{0};
+    std::atomic<int>      callbacksInFlight_[2]{};
+    std::mutex            callbackBarrierMutex_;
 };
 
 // ---------------------------------------------------------------------------
