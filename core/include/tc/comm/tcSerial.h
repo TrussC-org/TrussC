@@ -53,10 +53,12 @@
 //   it stops. Destroying or moving a Serial on a worker is only safe while
 //   no other thread uses that Serial: they take its lock first, and a
 //   close() / setup() on another thread holds it while it waits for the
-//   worker. On another Serial's worker they also wait for the destroyed or
-//   moved Serial's own worker, which must not be waiting for this thread
-//   in turn (for example, by destroying or moving this worker's Serial at
-//   the same time).
+//   worker. On another Serial's worker, the destructor also waits for the
+//   destroyed Serial's own worker, and a move assignment for the worker of
+//   the Serial it assigns over (that one's previous connection); a move
+//   construction waits for no worker. A worker waited for this way must not
+//   be waiting for this thread in turn (for example, by destroying this
+//   worker's Serial, or assigning over it, at the same time).
 // - An I/O call may deadlock the same way with a close() / setup() on
 //   another thread.
 // isConnected() and getDevicePath() are safe there. Listen with

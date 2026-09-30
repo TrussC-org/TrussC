@@ -7769,10 +7769,13 @@ Destroying the `Serial` on its own worker leaves the connection to that
 worker, which releases it when it stops. Destroying or moving a `Serial` on a
 worker is only safe while no other thread uses that `Serial`: they take its
 lock first, and a `close()` / `setup()` on another thread holds it while it
-waits for the worker. On another `Serial`'s worker they also wait for the
-destroyed or moved `Serial`'s own worker, which must not be waiting for this
-thread in turn (for example, by destroying or moving this worker's `Serial`
-at the same time). An I/O call there may deadlock the same way. `isConnected()` and
+waits for the worker. On another `Serial`'s worker, the destructor also
+waits for the destroyed `Serial`'s own worker, and a move assignment for the
+worker of the `Serial` it assigns over (that one's previous connection); a
+move construction waits for no worker. A worker waited for this way must not
+be waiting for this thread in turn (for example, by destroying this worker's
+`Serial`, or assigning over it, at the same time). An I/O call there may
+deadlock the same way. `isConnected()` and
 `getDevicePath()` are safe there. Listen with `Deliver::Main` to run on the
 main thread instead.
 '''
@@ -7824,9 +7827,11 @@ USB 許可を与えた時点で true になる。また抜去後は、上の呼�
 解放される。ワーカー上での `Serial` の破棄やムーブが安全なのは、ほかのスレッドが
 その `Serial` を使っていないときだけ。どちらも先にロックを取るが、別スレッドの
 `close()` / `setup()` はロックを持ったままワーカーを待つからだ。別の `Serial` の
-ワーカー上では、破棄やムーブは対象の `Serial` 自身のワーカーの終了も待つので、
-そのワーカーがこのスレッドを待っていてはいけない（たとえば同時にこのワーカーの
-`Serial` を破棄・ムーブしている場合）。そこでの I/O 呼び出しも
+ワーカー上では、デストラクタは破棄する `Serial` 自身のワーカーの終了も待ち、
+ムーブ代入は代入先の `Serial` のワーカー（その前の接続のもの）の終了も待つ。
+ムーブ構築はどのワーカーも待たない。こうして待つワーカーがこのスレッドを待って
+いてはいけない（たとえば同時にこのワーカーの `Serial` を破棄したり、それに
+ムーブ代入したりしている場合）。そこでの I/O 呼び出しも
 同じ理由でデッドロックしうる。`isConnected()` と `getDevicePath()` はそこでも安全。
 メインスレッドで動かすには `Deliver::Main` で listen する。
 '''
@@ -7876,9 +7881,11 @@ Android로, USB 워커 스레드도 로그를 남긴다(권한 타임아웃, 연
 멈출 때 해제된다. 워커에서 `Serial`을 파괴하거나 이동하는 것은 다른 스레드가 그
 `Serial`을 사용하지 않을 때만 안전하다. 둘 다 먼저 락을 잡는데, 다른 스레드의
 `close()` / `setup()`은 락을 잡은 채 워커를 기다리기 때문이다. 다른 `Serial`의
-워커에서는 파괴나 이동이 대상 `Serial` 자신의 워커도 기다리므로, 그 워커가 이
-스레드를 기다리고 있어서는 안 된다(예를 들어 동시에 이 워커의 `Serial`을 파괴하거나
-이동하는 경우). 거기서의 I/O 호출도
+워커에서는 소멸자가 파괴되는 `Serial` 자신의 워커도 기다리고, 이동 대입은 대입
+대상 `Serial`의 워커(그 이전 연결의 것)도 기다린다. 이동 생성은 어떤 워커도
+기다리지 않는다. 이렇게 기다리는 워커가 이 스레드를 기다리고 있어서는 안 된다
+(예를 들어 동시에 이 워커의 `Serial`을 파괴하거나 거기에 이동 대입하는 경우).
+거기서의 I/O 호출도
 같은 이유로 교착될 수 있다. `isConnected()`와 `getDevicePath()`는 거기서도 안전하다.
 메인 스레드에서 실행하려면 `Deliver::Main`으로 listen한다.
 '''
