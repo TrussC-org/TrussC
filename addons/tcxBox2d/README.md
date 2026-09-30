@@ -107,9 +107,15 @@ many fixtures touch.
   cancels it: a body sliding from one fixture of a compound onto the next
   never sees Exit + Enter. `World::update()` does this; if you call
   `b2World::Step()` yourself, call `world.getCollisionManager()->update()`
-  after it. Exits from outside a step (destroying a body, `SetEnabled(false)`,
-  `SetType()`) fire at once.
-- Stay listeners may destroy or disable bodies.
+  right after it, before creating or destroying bodies. Exits from outside a
+  step (destroying a body, `SetEnabled(false)`, `SetType()`) fire at once.
+- A body destroyed before its deferred Exit fires (`Body::destroy()`, a
+  `RigidBody2D`'s node going away) gets none; the other side still gets its
+  own, with that body null (`CollisionEvent::other`, `Contact2D::other`,
+  `WorldContact::a` / `b`). Bodies freed with a raw `b2World::DestroyBody()`
+  are not tracked: call `update()` first.
+- Stay listeners and the deferred Exit listeners may destroy bodies,
+  including the other body of their own pair, which then hears nothing more.
 
 ## Tests
 

@@ -80,9 +80,12 @@ without it, "combined inertia check ... just inside" aborts on Box2D's
 touching fixture creation:
 
 ```bash
-cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
-cmake --build build-debug && ./bin/tests
+trusscli build -p . --debug   # from this directory; generates the build files if missing
+./bin/tests                   # macOS: ./bin/tests.app/Contents/MacOS/tests
 ```
+
+`trusscli run -p . --debug` builds and runs in one go. Build again without
+`--debug` (or with `--release`) to get back to the default build type.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR; a non-zero exit fails the job. Run it locally with:
