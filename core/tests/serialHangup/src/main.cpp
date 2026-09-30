@@ -35,11 +35,13 @@
 // setup() and close() on a thread marked as a USB worker are refused, with
 // one log line per thread, and before they take the lock, so they cannot
 // deadlock with a close() waiting for that thread (sections 16, 17). The
-// mapping from the Android backend's setup() result to the port Serial keeps
-// is pinned on its own (section 18); the Android branch of Serial::setup()
-// that uses it, and the race it answers, are not built here. A loss an I/O
-// call finds on such a thread is left for another thread to report (section
-// 19). A slow write is played by slowWrite.cpp (Linux only).
+// mappings from the Android backend's setup() result to the port Serial keeps
+// and to whether it counts as a new connection are pinned on their own
+// (section 18); the Android branch of Serial::setup() that uses them, and
+// the races they answer, are not built here. A loss an I/O call finds on
+// such a thread is left for another thread to report (section 19). A move
+// turns the moved-from Serial's isConnected() false before its path goes
+// (section 20). A slow write is played by slowWrite.cpp (Linux only).
 //
 // A pseudo-terminal stands in for the USB-serial adapter: Serial opens the
 // slave, the test plays the device on the master, and closing the master
@@ -1008,16 +1010,29 @@ int main() {
     // When the backend asked for the USB permission, its worker may connect
     // before Serial::setup() looks again, so setup() goes by the result: a
     // Pending setup() keeps the new port's path and rate, as a Connected one
-    // does; only a Failed one goes back to the previous port's. This pins
-    // that mapping only: the Android branch of Serial::setup() that calls it
-    // is not built on this platform, so neither that call site nor the race
-    // with the worker is covered here.
+    // does, and so does one that kept the request already pending for that
+    // device (KeptPending); only a Failed one goes back to the previous
+    // port's. KeptPending started nothing, so it is the only result that is
+    // not counted as a new connection: a setup() waiting to run meanwhile
+    // then still reports the connection that request completes as the
+    // Serial's own, with onDisconnect. This pins those mappings only: the
+    // Android branch of Serial::setup() that calls them is not built on this
+    // platform, so neither that call site nor the race with the worker is
+    // covered here.
     check("18. a Connected setup() keeps the new port",
           internal::serialSetupStarted(internal::SerialSetupResult::Connected));
     check("18. a Pending setup() keeps it too",
           internal::serialSetupStarted(internal::SerialSetupResult::Pending));
+    check("18. a KeptPending setup() keeps it too",
+          internal::serialSetupStarted(internal::SerialSetupResult::KeptPending));
     check("18. a Failed setup() goes back to the previous port",
           !internal::serialSetupStarted(internal::SerialSetupResult::Failed));
+    check("18. Connected, Pending and Failed count as a new connection",
+          internal::serialSetupCountsAsNew(internal::SerialSetupResult::Connected) &&
+          internal::serialSetupCountsAsNew(internal::SerialSetupResult::Pending) &&
+          internal::serialSetupCountsAsNew(internal::SerialSetupResult::Failed));
+    check("18. KeptPending does not",
+          !internal::serialSetupCountsAsNew(internal::SerialSetupResult::KeptPending));
 
     // --- 19. a loss found on a USB worker thread waits for another thread --
     // Closing the lost port would wait for a USB worker (on Android), which a
@@ -1052,6 +1067,64 @@ int main() {
             check("19. the next call on another thread closes it and fires once",
                   !serial.isConnected() && rec.count == 1 && isLossOf(rec.first, pty) &&
                   g_lostWarnings == lostBefore + 1);
+        }
+    }
+
+    // --- 20. a move turns the moved-from Serial's isConnected() false first --
+    // isConnected() reads a flag without the lock, which must turn false
+    // before the port and the path go. So a thread that reads getDevicePath()
+    // and then isConnected() of a Serial being moved from never sees it
+    // connected with an empty path. A race, so this runs many moves (move
+    // construction and move assignment in turn) against a reader, which
+    // counts only reads made within one move out of the Serial.
+    {
+        Pty pty;
+        Serial a;
+        if (connect(pty, a, "20. setup() connects")) {
+            atomic<unsigned> phase{0};  // odd: a move out of a is in progress
+            atomic<bool> stop{false};
+            atomic<bool> reading{false};
+            atomic<int> torn{0};
+            atomic<long> reads{0};
+            thread reader([&] {
+                reading = true;
+                while (!stop) {
+                    const unsigned before = phase.load();
+                    const string path = a.getDevicePath();
+                    const bool connected = a.isConnected();
+                    const unsigned after = phase.load();
+                    if (before == after && (before & 1)) {
+                        ++reads;
+                        if (connected && path.empty()) ++torn;
+                    }
+                }
+            });
+            while (!reading) this_thread::yield();
+            const auto end = chrono::steady_clock::now() + chrono::milliseconds(1500);
+            int moves = 0;
+            while (chrono::steady_clock::now() < end) {
+                for (int i = 0; i < 1000; i++, moves++) {
+                    if (moves & 1) {
+                        Serial other;
+                        ++phase;
+                        other = std::move(a);
+                        ++phase;
+                        a = std::move(other);
+                    } else {
+                        ++phase;
+                        Serial other(std::move(a));
+                        ++phase;
+                        a = std::move(other);
+                    }
+                }
+            }
+            stop = true;
+            reader.join();
+            std::printf("  (20: %d moves, %ld reads within one)\n", moves, reads.load());
+            check("20. a Serial being moved from never shows connected with an empty path",
+                  torn == 0);
+            check("20. the port comes back with its path",
+                  a.isConnected() && a.getDevicePath() == pty.slavePath);
         }
     }
 
