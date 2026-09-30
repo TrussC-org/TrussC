@@ -9,6 +9,7 @@
 // - a table directory, or any table, that runs past the end of the data
 //   (also when offset + length wraps in 32 bits),
 // - a missing cmap / head / hhea / hmtx / maxp, or loca (TrueType) / CFF,
+//   where a directory entry at offset 0 counts as missing (as in stb),
 // - head / hhea / maxp / cmap shorter than the fields stb reads, cmap
 //   encoding records past cmap, a used cmap subtable offset past cmap,
 // - hhea numberOfHMetrics outside 1..numGlyphs, hmtx shorter than
@@ -618,6 +619,63 @@ static void checkMalformed() {
         const Loc l = findTable(f, "CFF ");
         set32(f, l.entry, tagOf("zzzz"));
         expectRejected("CFF font without 'CFF '", f, "missing required table 'CFF '");
+    }
+
+    // A directory entry at offset 0 is "no table" to stb. For maxp, stb would
+    // run with numGlyphs 0xffff while the check read a count from the header
+    // bytes; for glyf, stb takes the CFF path.
+    for (const char* tag : {"cmap", "head", "hhea", "hmtx", "maxp", "loca", "glyf"}) {
+        Bytes f = tt;
+        const Loc l = findTable(f, tag);
+        set32(f, l.entry + 8, 0);
+        // maxp: a length that fits in the data from offset 0 and covers the
+        // fields the check reads, so only the offset makes it missing.
+        if (string(tag) == "maxp") set32(f, l.entry + 12, 6);
+        expectRejected(string("TrueType with '") + tag + "' at offset 0", f,
+                       string("missing required table '") +
+                           (string(tag) == "glyf" ? "CFF " : tag) + "'");
+    }
+    {
+        Bytes f = cff;
+        Loc l = findTable(f, "maxp");
+        set32(f, l.entry + 8, 0);
+        set32(f, l.entry + 12, 6);
+        expectRejected("CFF font with 'maxp' at offset 0", f, "missing required table 'maxp'");
+        f = cff;
+        l = findTable(f, "CFF ");
+        set32(f, l.entry + 8, 0);
+        set32(f, l.entry + 12, 12);
+        expectRejected("CFF font with 'CFF ' at offset 0", f, "missing required table 'CFF '");
+    }
+    {
+        // Two maxp entries: stb stops at the first one (offset 0) and does not
+        // look at the valid one after it.
+        Bytes glyf, loca;
+        makeGlyfLoca(0, glyf, loca);
+        Bytes f = buildSfnt(0x00010000, {{"head", makeHead(0)},
+                                         {"hhea", makeHhea(2)},
+                                         {"maxp", makeMaxp(kNumGlyphs)},
+                                         {"maxp", makeMaxp(kNumGlyphs)},
+                                         {"cmap", makeCmap()},
+                                         {"loca", loca},
+                                         {"glyf", glyf},
+                                         {"hmtx", makeHmtx()}});
+        const Loc l = findTable(f, "maxp");
+        set32(f, l.entry + 8, 0);
+        set32(f, l.entry + 12, 6);
+        expectRejected("first of two 'maxp' entries at offset 0", f,
+                       "missing required table 'maxp'");
+        // Control: the same font with the first entry intact loads.
+        Bytes g = buildSfnt(0x00010000, {{"head", makeHead(0)},
+                                         {"hhea", makeHhea(2)},
+                                         {"maxp", makeMaxp(kNumGlyphs)},
+                                         {"maxp", makeMaxp(kNumGlyphs)},
+                                         {"cmap", makeCmap()},
+                                         {"loca", loca},
+                                         {"glyf", glyf},
+                                         {"hmtx", makeHmtx()}});
+        internal::FontAtlasManager m;
+        check("two 'maxp' entries, both valid: loads", tryLoad(m, g).ok);
     }
 
     // Fixed fields

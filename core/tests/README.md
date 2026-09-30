@@ -255,7 +255,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `FontAtlasManager::setupFromMemory()` returns false with a warning for 0
   bytes, a `.ttc` header whose font count or offset points outside the data,
   a table directory or a table past the end of the data (also when offset +
-  length wraps in 32 bits), a missing required table, head / hhea / maxp /
+  length wraps in 32 bits), a missing required table (a directory entry at
+  offset 0 counts as missing, as in stb), head / hhea / maxp /
   cmap shorter than the fields stb reads, cmap encoding records or a used
   subtable offset past cmap, `numberOfHMetrics` outside 1..numGlyphs, a short
   hmtx or loca, an unknown loca format, and a loca entry past glyf; and for

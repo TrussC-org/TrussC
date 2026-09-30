@@ -409,14 +409,17 @@ private:
             return false;
         }
 
-        // Table directory. stb takes the first entry with a given tag.
+        // Table directory. stb takes the first entry with a given tag, and
+        // reads an offset of 0 as "no such table" (for maxp it then uses
+        // numGlyphs 0xffff; for glyf it takes the CFF path). The same rule
+        // applies here: an entry at offset 0 counts as missing.
         const uint64_t numTables = u16(fontStart + 4);
         const uint64_t dirStart = fontStart + 12;
         if (dirStart + 16 * numTables > n) {
             reason = "table directory is truncated";
             return false;
         }
-        struct Table { uint64_t offset = 0, length = 0; bool found = false; };
+        struct Table { uint64_t offset = 0, length = 0; bool seen = false, found = false; };
         Table cmap, head, hhea, hmtx, maxp, glyf, loca, cff;
         const std::pair<uint64_t, Table*> wanted[] = {
             {tag("cmap"), &cmap}, {tag("head"), &head}, {tag("hhea"), &hhea},
@@ -433,8 +436,8 @@ private:
                 return false;
             }
             for (const auto& w : wanted) {
-                if (w.first == t && !w.second->found) {
-                    *w.second = Table{offset, length, true};
+                if (w.first == t && !w.second->seen) {
+                    *w.second = Table{offset, length, true, offset != 0};
                 }
             }
         }
