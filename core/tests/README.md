@@ -88,6 +88,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   Logger's lock does not wait for it (the line goes to stderr); and on
   Linux, with no X display and `TRUSSC_LOG_FILE` set, `runApp()`'s
   `XOpenDisplay()` failure lands in that file.
+- `dataPathWrites/` — the core file writers share one path rule (#356):
+  `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
+  `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
+  relative path against `getDataPath()` (not the working directory, which the
+  test moves elsewhere), use an absolute path as given, create a missing
+  parent folder, and log an Error and return false when that folder cannot be
+  created (a regular file in the way; on POSIX, unless root, a read-only
+  folder). UTF-8 folder and file names land on disk by their real names. For
+  `setLogFile`, `getLogFilePath()` is the resolved absolute path, and a failed
+  call (folder or open failure) keeps the current log file open, with the
+  error line and later lines in it.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
