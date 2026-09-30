@@ -114,6 +114,8 @@ struct RegenerationSetup {
 // ProjectSettings for the project at `projectPath` with the given addons,
 // its CMakePresets.json read back (readPresetState) and the flags applied on
 // top (applyGenerationOptions), plus the warnings and the summary line.
+// Off macOS an explicit --ios is dropped with a warning, like a saved ios
+// target (writeCMakePresets() writes the ios preset on macOS only).
 RegenerationSetup prepareRegeneration(const std::string& projectPath,
                                       const std::string& tcRoot,
                                       const std::vector<std::string>& addons,

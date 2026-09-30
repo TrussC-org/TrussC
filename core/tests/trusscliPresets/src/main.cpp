@@ -18,8 +18,8 @@
 //   - Saved settings that cannot be used are reported, not dropped silently:
 //     an unparsable file, wrongly typed entries, an unknown IDE id, an IDE
 //     this OS cannot generate (xcode off macOS, vs off Windows), and an ios
-//     target off macOS (left out of the summary too; --ios off macOS keeps
-//     its old, silent behavior).
+//     target off macOS (left out of the summary too; an explicit --ios off
+//     macOS gets the same warning).
 //   - TC_WEB_BACKEND is read the way CMake builds it ("WGPU" or unset is
 //     WebGPU, anything else GLES3, warned unless "GLES3"), as a string or in
 //     the {"type": ..., "value": ...} form.
@@ -644,15 +644,29 @@ static void testPrepareRegeneration() {
               setup.warnings[0].find("macOS") != string::npos);
         check("regenerate: dropped ios is not in the summary",
               !setup.summary.empty() && setup.summary.find("ios") == string::npos);
-        // --ios off macOS behaves as before the summary existed: the setting
-        // is taken (and writeCMakePresets() writes no ios preset), unannounced
+        // An explicit --ios off macOS is dropped with the same warning,
+        // without a saved ios target too
+        fs::path plain = makeProject("regenerate-ios-flag");
+        writeFile(plain / "CMakePresets.json", R"({
+            "configurePresets": [{"name": "web"}],
+            "vendor": {"trussc": {"ide": "cmake"}}
+        })");
         GenerationFlags f;
         f.ios = true;
-        RegenerationSetup flagged = prepareRegeneration(project.string(), g_root.string(),
+        RegenerationSetup flagged = prepareRegeneration(plain.string(), g_root.string(),
                                                         {}, {}, f);
-        check("regenerate: --ios off macOS is taken but not in the summary",
-              flagged.settings.generateIosBuild && !flagged.settings.iosKept &&
-              flagged.summary.find("ios") == string::npos);
+        check("regenerate: --ios off macOS dropped with the same warning",
+              !flagged.settings.generateIosBuild && !flagged.settings.iosKept &&
+              flagged.warnings.size() == 1 &&
+              flagged.warnings[0].find("--ios") != string::npos &&
+              flagged.warnings[0].find("is macOS only; dropped on this OS") !=
+                  string::npos);
+        check("regenerate: --ios off macOS is not in the summary",
+              !flagged.summary.empty() && flagged.summary.find("ios") == string::npos);
+        GenerationFlags noFlag;
+        check("regenerate: no --ios, no ios warning",
+              prepareRegeneration(plain.string(), g_root.string(), {}, {}, noFlag)
+                  .warnings.empty());
 #endif
     }
 }

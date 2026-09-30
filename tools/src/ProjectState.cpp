@@ -22,6 +22,12 @@ static const char* ideHostOnly(IdeType ide) {
     return nullptr;
 }
 
+// The warning for an ios target off macOS, where writeCMakePresets() writes
+// no ios preset. `source` names where it came from.
+static string iosMacOnlyWarning(const string& source) {
+    return "the ios target " + source + " is macOS only; dropped on this OS";
+}
+
 // TC_WEB_BACKEND of the web preset (a cacheVariables entry: a string, a
 // boolean, null, or {"type": ..., "value": ...}), mapped the way CMake builds
 // it (core/CMakeLists.txt, trussc_app.cmake): WebGPU when the variable is
@@ -112,8 +118,7 @@ PresetState parsePresetState(const string& jsonText) {
                 // writeCMakePresets() writes the ios preset on macOS only, so
                 // a kept one would vanish from the rewritten file unnoticed
                 if (!droppedIos) {
-                    state.warnings.push_back("the ios target in CMakePresets.json is "
-                                             "macOS only; dropped on this OS");
+                    state.warnings.push_back(iosMacOnlyWarning("in CMakePresets.json"));
                     droppedIos = true;
                 }
 #endif
@@ -242,6 +247,13 @@ RegenerationSetup prepareRegeneration(const string& projectPath,
     for (const string& w : state.warnings) {
         setup.warnings.push_back(w + ", and the file is rewritten.");
     }
+#ifndef __APPLE__
+    // An explicit --ios is dropped the same way as a saved ios target
+    if (flags.ios.value_or(false)) {
+        settings.generateIosBuild = false;
+        setup.warnings.push_back(iosMacOnlyWarning("of --ios") + ".");
+    }
+#endif
     if (!state.ideWarning.empty() && !flags.ide) {
         setup.warnings.push_back(state.ideWarning + "; using the default IDE (" +
                                  IdeHelper::getIdeId(settings.ideType) + "). Choose one with "
