@@ -23,6 +23,9 @@
 //     to, add no second hook and run no second setup().
 //   - An App that is constructed but never run (make_shared or on the stack)
 //     is never subscribed and gets no callbacks.
+//   - The App's hooks still run ahead of the default-priority audioOut
+//     listeners its setup() subscribed, as when the constructor subscribed
+//     them: a tap there sees what audioOut() wrote.
 //   - The attach is idempotent (a second attach adds no hook) and never
 //     happens again once the App's lifecycle has ended
 //     (internal::detachAppAudio(): an App runs once).
@@ -124,6 +127,22 @@ struct SetupAllocApp : App {
         }
         if (p->tagBuffer.load()) b.data[0] += kTag;
         ++p->audioOutCalls;
+    }
+};
+
+// setup() subscribes a default-priority audioOut listener, the pattern the
+// App audio comment recommends next to the override. It counts the passes in
+// which the App's audioOut() (which tags data[0]) had already run.
+struct TapInSetupApp : SetupAllocApp {
+    atomic<int> appFirst{0}, appLater{0};
+    EventListener tap;
+
+    void setup() override {
+        tap = AudioEngine::getInstance().audioOut.listen([this](AudioOutBuffer& b) {
+            if (b.data[0] > kTag * 0.5f) { ++appFirst; b.data[0] -= kTag; }
+            else ++appLater;
+        });
+        SetupAllocApp::setup();
     }
 };
 
@@ -275,6 +294,42 @@ int main() {
               engine.audioOut.listenerCount() == outBase && engine.audioIn.listenerCount() == inBase);
     }
 
+    // --- order: the App's hooks before default listeners setup() subscribed -----------
+    {
+        Probe p;
+        g_nextProbe = &p;
+        p.tagBuffer = true;
+        auto app = make_shared<TapInSetupApp>();
+        // Subscribed before the App's hooks too, at the default priority.
+        atomic<int> earlyFirst{0}, earlyLater{0};
+        EventListener early = engine.audioOut.listen([&](AudioOutBuffer& b) {
+            if (b.data[0] > kTag * 0.5f) ++earlyFirst; else ++earlyLater;
+        });
+        internal::setupNodeOnce(*app);
+        engine.waitForCallbackIdle();
+        app->appFirst = 0;
+        app->appLater = 0;
+        earlyFirst = 0;
+        earlyLater = 0;
+        const bool passes = waitFor([&] {
+            return app->appFirst.load() + app->appLater.load() >= 10;
+        }, 2000);
+        early.disconnect();
+        app->tap.disconnect();
+        engine.waitForCallbackIdle();
+        check("App's audioOut() runs before a default listener setup() subscribed",
+              passes && app->appLater.load() == 0,
+              to_string(app->appFirst.load()) + " passes with the App first, " +
+              to_string(app->appLater.load()) + " with it later");
+        check("... and before one subscribed before the App was set up",
+              earlyFirst.load() > 0 && earlyLater.load() == 0,
+              to_string(earlyFirst.load()) + " / " + to_string(earlyLater.load()));
+        internal::detachAppAudio(*app);
+        check("order: the hooks are gone after the detach",
+              engine.audioOut.listenerCount() == outBase && engine.audioIn.listenerCount() == inBase,
+              hooks(engine.audioOut.listenerCount()));
+    }
+
     // --- the attach itself: once, and never after the App's end -----------------------
     {
         Probe p;
@@ -286,15 +341,15 @@ int main() {
               p.setups.load() == 1 && engine.audioOut.listenerCount() == outBase + 1 &&
               engine.audioIn.listenerCount() == inBase + 1,
               hooks(engine.audioOut.listenerCount()));
-        // A listener at the same priority, subscribed after the App's hook,
-        // runs after it in every pass. A second attach must keep the App's
+        // A listener at the App hooks' own priority, subscribed after them,
+        // runs after them in every pass. A second attach must keep the App's
         // subscription as it is: re-subscribing it would move it behind this
         // one (and could skip a pass meanwhile).
         atomic<int> appFirst{0}, appLater{0};
         EventListener after = engine.audioOut.listen([&](AudioOutBuffer& b) {
             if (b.data[0] > kTag * 0.5f) { ++appFirst; b.data[0] -= kTag; }
             else ++appLater;
-        });
+        }, internal::appAudioPriority);
         p.tagBuffer = true;
         internal::attachAppAudio(*app);
         engine.waitForCallbackIdle();

@@ -120,7 +120,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   allocates what `audioOut()` reads, no `audioOut()` runs before `setup()`
   has returned and no hook is subscribed while it runs; afterwards there is
   exactly one hook each, also after more ticks or a move to another window;
-  an App that is constructed but never run gets no callbacks; the attach is
+  an App that is constructed but never run gets no callbacks; the App's
+  `audioOut()` still runs before the default-priority listeners its `setup()`
+  subscribed (the order the constructor subscription gave); the attach is
   idempotent and subscribes nothing once `internal::detachAppAudio()` ended
   the App. The hot reload generation's path is in `hotReloadLifecycle/`.
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`

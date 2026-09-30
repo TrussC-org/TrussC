@@ -37,6 +37,11 @@ inline void detachAppAudio(App& app);
 // True once the framework has run the App's cleanup() (#256): Window::setApp()
 // refuses such an App. Defined below the App class.
 inline bool appRanCleanup(const App& app);
+// Priority of the App's audioOut / audioIn hooks: just before Generator (the
+// default), so App::audioOut() runs before every default-priority listener,
+// also one subscribed in setup() before the hooks are (#426). That keeps the
+// order apps had when the App constructor subscribed them.
+constexpr int appAudioPriority = audio::priority::Generator - 1;
 }
 
 // =============================================================================
@@ -196,7 +201,10 @@ public:
     //
     // For multiple independent listeners (e.g. a Node-based synth tree),
     // use `AudioEngine::getInstance().audioOut.listen(...)` directly
-    // alongside the App override.
+    // alongside the App override. The App's hooks run before every listener
+    // at the default priority (audio::priority::Generator), whenever that
+    // listener subscribed, setup() included; pass Effect / Monitor for one
+    // that must see what audioOut() wrote, or a lower value to run before it.
     // They are first called right after setup() returns (the framework
     // subscribes them then, not when the App is constructed), so state that
     // setup() prepares is ready in here. An App that is never run gets no
@@ -300,7 +308,9 @@ namespace internal {
 // Node::setupOnce() runs both on the first updateTree() / drawTree() (the
 // main App, a secondary window's App, every hot reload generation), and
 // runHeadlessApp() through internal::setupNodeOnce(). So the audio thread
-// never runs them before or during setup(). Idempotent (a hook already
+// never runs them before or during setup(). They run at appAudioPriority,
+// ahead of the default-priority listeners setup() may have subscribed first,
+// as when the App constructor subscribed them. Idempotent (a hook already
 // subscribed is kept as it is, not re-subscribed), and a no-op once the App's
 // lifecycle has ended (detachAppAudio()): an App runs once, its hooks are
 // never subscribed again. Main thread.
@@ -308,11 +318,11 @@ inline void attachAppAudio(App& app) {
     if (app.cleanupCalled_) return;
     if (!app.audioOutListener_.isConnected()) {
         app.audioOutListener_ = AudioEngine::getInstance().audioOut.listen(
-            [&app](AudioOutBuffer& b) { app.audioOut(b); });
+            [&app](AudioOutBuffer& b) { app.audioOut(b); }, appAudioPriority);
     }
     if (!app.audioInListener_.isConnected()) {
         app.audioInListener_ = AudioEngine::getInstance().audioIn.listen(
-            [&app](AudioInBuffer& b) { app.audioIn(b); });
+            [&app](AudioInBuffer& b) { app.audioIn(b); }, appAudioPriority);
     }
 }
 
