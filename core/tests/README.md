@@ -141,6 +141,46 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   or without the #230 fix: it catches the web early return leaking into native
   builds. The web half is what guards #230; the daily run (`daily.yml`,
   `sweep-web`) runs it under node.
+- `serialHangup/` — a lost serial device is reported (#260): when the device
+  behind a `Serial` goes away, `available()` / `readBytes()` / `readByte()` /
+  `writeBytes()` each notice it on their own, close the port, log one warning,
+  and `isConnected()` turns false so `setup()` can reconnect; a quiet but
+  present device is not a loss. `onDisconnect` fires once per open connection:
+  for the loss (`wasClean` false, the port, the rate and the warning's text as
+  `reason`) and for `close()` of an open port, but not from the destructor or
+  a move assignment. A listener may call `setup()` from inside the
+  notification, and the call that found the loss must leave that new
+  connection alone. Only the I/O calls find a loss: `close()` or `setup()`
+  after an unplug nobody noticed fire once as a clean close and leak no
+  descriptor. Several threads may share one `Serial` (it has its own
+  reader-writer lock): when they race an unplug, the loss is reported once,
+  the fd is closed once, and the descriptors the kernel hands out right after
+  (recognized by inode) are neither closed nor written to. The I/O calls never
+  wait for each other, even for a write that takes 200 ms; `close()` waits for
+  the writes in progress, is not starved by writes that keep coming, and no
+  write reaches the closed fd; a loss found on one connection never closes the
+  next one. `isConnected()` / `getDevicePath()` answer even from a thread that
+  `close()` is waiting for, and a Logger listener may call back into the
+  `Serial` whose `setup()` / `close()` logged (both would deadlock otherwise;
+  a watchdog turns that into a failure). The Android backend's guard against
+  joining its USB worker from the worker itself (`internal::isThisThread()`)
+  is checked on its own; the backend itself needs Android. `src/slowWrite.cpp`
+  plays the slow write by defining `write()` (Linux only). A pseudo-terminal plays the device, and closing its master
+  stands in for the USB unplug. POSIX only (SKIP on Windows).
+- `serialBaudRate/` — `Serial::setup()` does not report success after opening
+  at a speed other than the one asked for (#260): rates without a termios
+  B-constant used to open at 9600 and report success. Linux must apply any rate
+  exactly (termios2); on macOS a pty rejects `IOSSIOSPEED`, so there such rates
+  must fail cleanly. A real Linux driver that cannot generate a rate writes
+  another one back instead of failing, B-constant rates included, and
+  `setup()` must then fail rather than report the requested rate, also when
+  the rate it writes back is the one the tty had. A driver that applies no
+  rate at all (a USB gadget's `/dev/ttyGS*`) keeps its old rate whatever is
+  asked, and there `setup()` must succeed with a warning. A pty does neither,
+  so on Linux the test defines its own `ioctl()` that makes `TCGETS2` report
+  both (`src/fakeDriver.cpp`). POSIX only, except the Windows write timeout
+  `setup()` derives from the rate (at least 4 times the wire time plus 5 s),
+  which is checked on every platform.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
   `getFrameElapsedTime()` constant within a frame (through the main loop's frame
