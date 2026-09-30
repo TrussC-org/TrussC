@@ -26,8 +26,12 @@
 // number afterwards (section 10). The I/O calls share the Serial's lock, so
 // they never wait for each other, even for a write that takes long; opening
 // and closing wait for the I/O calls in progress (section 11), and a loss
-// found on one connection never closes the next one (section 12). A slow
-// write is played by slowWrite.cpp (Linux only).
+// found on one connection never closes the next one (section 12).
+// isConnected() and getDevicePath() never wait for close(), even from a
+// thread close() is waiting for (section 13). setup() and close() log only
+// once they have released the lock, so a Logger listener may call back into
+// the same Serial (section 14). A slow write is played by slowWrite.cpp
+// (Linux only).
 //
 // A pseudo-terminal stands in for the USB-serial adapter: Serial opens the
 // slave, the test plays the device on the master, and closing the master
@@ -146,6 +150,24 @@ struct Pty {
 void setSlowWrite(int fd, int ms);
 int slowWritesInProgress();
 int slowWritesToClosedFd();
+void setSlowWriteHook(void (*hook)());
+
+// Section 13's hook: runs inside a write that close() is waiting for
+static Serial* g_hookSerial = nullptr;
+static atomic<bool> g_closeCalled{false};
+static atomic<bool> g_hookDone{false};
+static bool g_hookSawConnected = false;
+static string g_hookSawPath;
+
+static void askWhileCloseWaits() {
+    // Wait until close() has been called, then give it time to start
+    // waiting for this write
+    for (int i = 0; i < 400 && !g_closeCalled; ++i) this_thread::sleep_for(chrono::milliseconds(5));
+    this_thread::sleep_for(chrono::milliseconds(50));
+    g_hookSawConnected = g_hookSerial->isConnected();
+    g_hookSawPath = g_hookSerial->getDevicePath();
+    g_hookDone = true;
+}
 
 // The fd this process has open on path (the port Serial opened), or -1
 static int fdOf(const string& path) {
@@ -712,34 +734,122 @@ int main() {
     // setup() closes the first port once the write has returned (a clean
     // close) and opens the second. The worker's write fails, and its loss
     // belongs to the connection that is already closed: it must not close
-    // the new one, whichever of the two gets the lock first afterwards.
+    // the new one, whichever of the two gets the lock first afterwards. Which
+    // one does is up to the scheduler, so play it 8 times: a loss that closed
+    // the new connection would show in some of them.
     {
-        Pty oldPty, newPty;
-        Serial serial;
-        Recorder rec;
-        rec.attach(serial);
-        if (connect(oldPty, serial, "12. setup() connects") && newPty.open()) {
-            const int fd = fdOf(oldPty.slavePath);
-            setSlowWrite(fd, 200);
+        int rounds = 0, writeFailed = 0, reopened = 0, oneCleanClose = 0, stayedOpen = 0, carried = 0;
+        for (int round = 0; round < 8; ++round) {
+            Pty oldPty, newPty;
+            Serial serial;
+            Recorder rec;
+            rec.attach(serial);
+            if (!oldPty.open() || !newPty.open() || !serial.setup(oldPty.slavePath, 115200)) continue;
+            ++rounds;
+            setSlowWrite(fdOf(oldPty.slavePath), 200);
             int written = 0;
             thread worker([&] { written = serial.writeBytes(string("x")); });
-            check("12. the write to the old port is in progress",
-                  waitFor(1000, [] { return slowWritesInProgress() > 0; }));
+            waitFor(1000, [] { return slowWritesInProgress() > 0; });
             oldPty.unplug();
             bool ok = serial.setup(newPty.slavePath, 115200);
             worker.join();
             setSlowWrite(-1, 0);
-            check("12. that write fails", written == -1);
-            check("12. setup() on the new port succeeds", ok);
-            check("12. one notification, a clean close of the old port",
-                  rec.count == 1 && rec.first.wasClean && rec.first.portName == oldPty.slavePath);
-            check("12. the new connection stays open",
-                  serial.isConnected() && serial.getDevicePath() == newPty.slavePath);
-            check("12. the new port carries data", newPty.send("n") &&
-                  waitFor(1000, [&] { return serial.readByte() == 'n'; }));
+            if (written == -1) ++writeFailed;
+            if (ok) ++reopened;
+            if (rec.count == 1 && rec.first.wasClean && rec.first.portName == oldPty.slavePath) ++oneCleanClose;
+            if (serial.isConnected() && serial.getDevicePath() == newPty.slavePath) ++stayedOpen;
+            if (newPty.send("n") && waitFor(1000, [&] { return serial.readByte() == 'n'; })) ++carried;
+        }
+        check("12. 8 rounds of a write failing on the old port during setup()", rounds == 8);
+        check("12. each time, that write fails", writeFailed == rounds);
+        check("12. each time, setup() on the new port succeeds", reopened == rounds);
+        check("12. each time, one notification: a clean close of the old port", oneCleanClose == rounds);
+        check("12. each time, the new connection stays open", stayedOpen == rounds);
+        check("12. each time, the new port carries data", carried == rounds);
+    }
+#endif
+
+#if defined(__linux__)
+    // --- 13. isConnected() / getDevicePath() never wait for close() ----------
+    // close() holds the lock exclusive while it waits for a thread that is
+    // inside a write (on Android it waits the same way for the USB worker,
+    // whose log lines may run a Logger listener). If that thread asks the
+    // Serial isConnected() or getDevicePath(), the answer must not wait for
+    // close() in turn, or neither ever finishes. slowWrite.cpp runs the hook
+    // inside the write, once close() is waiting for it.
+    {
+        Pty pty;
+        Serial serial;
+        if (connect(pty, serial, "13. setup() connects")) {
+            fcntl(pty.master, F_SETFL, fcntl(pty.master, F_GETFL) | O_NONBLOCK);
+            g_hookSerial = &serial;
+            setSlowWrite(fdOf(pty.slavePath), 100);
+            setSlowWriteHook(askWhileCloseWaits);
+            thread writer([&] { serial.writeBytes(string("x")); });
+            check("13. the write close() will wait for is in progress",
+                  waitFor(1000, [] { return slowWritesInProgress() > 0; }));
+            atomic<bool> closed{false};
+            thread closer([&] {
+                serial.close();
+                closed = true;
+            });
+            g_closeCalled = true;
+            bool finished = waitFor(3000, [&] { return closed.load() && g_hookDone.load(); });
+            check("13. isConnected() / getDevicePath() inside it do not deadlock with close()", finished);
+            if (!finished) {
+                // Both threads are stuck for good: report and leave
+                std::printf("\nFAILED (deadlock; %d failure%s)\n", g_fail, g_fail == 1 ? "" : "s");
+                std::fflush(stdout);
+                _exit(1);
+            }
+            closer.join();
+            writer.join();
+            setSlowWrite(-1, 0);
+            setSlowWriteHook(nullptr);
+            check("13. ... and see the port still open, with its path",
+                  g_hookSawConnected && g_hookSawPath == pty.slavePath);
+            check("13. close() then closes it", !serial.isConnected());
         }
     }
 #endif
+
+    // --- 14. a Logger listener may call the Serial that is logging ---------
+    // setup() and close() decide what to log while they hold the lock, and
+    // log once they have released it. A Logger listener that runs inline on
+    // their thread and calls back into the same Serial ("connected to",
+    // "disconnected from") must not deadlock with them. On a thread of its
+    // own with a deadline, so a deadlock fails the check.
+    {
+        Pty pty;
+        Serial serial;
+        atomic<int> callbacks{0};
+        EventListener logBack = getLogger().onLog.listen([&](LogEventArgs& e) {
+            if (e.message.rfind("Serial: connected to", 0) == 0 ||
+                e.message.rfind("Serial: disconnected from", 0) == 0) {
+                serial.isConnected();
+                serial.available();
+                serial.writeBytes(string("l"));
+                ++callbacks;
+            }
+        });
+        atomic<bool> done{false};
+        bool ok = false;
+        thread t([&] {
+            ok = pty.open() && serial.setup(pty.slavePath, 115200);
+            serial.close();
+            done = true;
+        });
+        bool finished = waitFor(3000, [&] { return done.load(); });
+        check("14. a Logger listener calling back from setup() / close() does not deadlock", finished);
+        if (!finished) {
+            // The thread is stuck for good: report and leave
+            std::printf("\nFAILED (deadlock; %d failure%s)\n", g_fail, g_fail == 1 ? "" : "s");
+            std::fflush(stdout);
+            _exit(1);
+        }
+        t.join();
+        check("14. ... and it ran for the connect and the disconnect line", ok && callbacks >= 2);
+    }
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;

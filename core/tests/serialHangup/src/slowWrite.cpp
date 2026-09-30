@@ -10,7 +10,9 @@
 // to that fd first waits ms.
 //
 // It also counts the writes that find their fd closed (EBADF): while a write
-// is in progress, close() must wait for it.
+// is in progress, close() must wait for it. And setSlowWriteHook() runs a
+// function once, inside the next slow write, after the wait: on the writing
+// thread, while Serial holds its lock shared for that write.
 //
 // A separate file so that it does not see the write() declaration of
 // <unistd.h>.
@@ -29,6 +31,7 @@ static std::atomic<int> g_slowFd{-1};
 static std::atomic<int> g_slowMs{0};
 static std::atomic<int> g_inSlowWrite{0};
 static std::atomic<int> g_closedFdWrites{0};
+static std::atomic<void (*)()> g_hook{nullptr};
 
 // fd -1 turns it off
 void setSlowWrite(int fd, int ms) {
@@ -46,6 +49,11 @@ int slowWritesToClosedFd() {
     return g_closedFdWrites;
 }
 
+// Runs hook once, inside the next slow write (nullptr: none)
+void setSlowWriteHook(void (*hook)()) {
+    g_hook = hook;
+}
+
 extern "C" ssize_t write(int fd, const void* buf, size_t n) {
     using WriteFn = ssize_t (*)(int, const void*, size_t);
     static WriteFn real = reinterpret_cast<WriteFn>(dlsym(RTLD_NEXT, "write"));
@@ -60,6 +68,7 @@ extern "C" ssize_t write(int fd, const void* buf, size_t n) {
     int ms = g_slowMs;
     struct timespec wait = {ms / 1000, (ms % 1000) * 1000000L};
     while (nanosleep(&wait, &wait) == -1 && errno == EINTR) {}
+    if (void (*hook)() = g_hook.exchange(nullptr)) hook();
     ssize_t result = real(fd, buf, n);
     int err = errno;
     if (result == -1 && err == EBADF) ++g_closedFdWrites;

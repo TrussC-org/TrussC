@@ -115,8 +115,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   wait for each other, even for a write that takes 200 ms; `close()` waits for
   the writes in progress, is not starved by writes that keep coming, and no
   write reaches the closed fd; a loss found on one connection never closes the
-  next one. `src/slowWrite.cpp` plays the slow write by defining `write()`
-  (Linux only). A pseudo-terminal plays the device, and closing its master
+  next one. `isConnected()` / `getDevicePath()` answer even from a thread that
+  `close()` is waiting for, and a Logger listener may call back into the
+  `Serial` whose `setup()` / `close()` logged (both would deadlock otherwise;
+  a watchdog turns that into a failure). `src/slowWrite.cpp` plays the slow
+  write by defining `write()` (Linux only). A pseudo-terminal plays the device, and closing its master
   stands in for the USB unplug. POSIX only (SKIP on Windows).
 - `serialBaudRate/` — `Serial::setup()` does not report success after opening
   at a speed other than the one asked for (#260): rates without a termios
