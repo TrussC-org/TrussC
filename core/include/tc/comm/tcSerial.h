@@ -44,13 +44,19 @@
 // - setup() and close() stop a USB worker and wait for it, which a worker
 //   must not do. On any Serial's USB worker thread they are refused at once,
 //   before they take the lock, with one error log per thread, and do
-//   nothing.
+//   nothing. Closing a lost port is refused there too: an I/O call there
+//   (on any Serial) that finds the device gone neither closes the port nor
+//   fires onDisconnect, and isConnected() stays true until the next call
+//   on another thread reports the loss.
 // - The destructor and a move cannot refuse. Destroying the Serial on its
 //   own worker leaves the connection to that worker, which releases it when
 //   it stops. Destroying or moving a Serial on a worker is only safe while
 //   no other thread uses that Serial: they take its lock first, and a
 //   close() / setup() on another thread holds it while it waits for the
-//   worker.
+//   worker. On another Serial's worker they also wait for the destroyed or
+//   moved Serial's own worker, which must not be waiting for this thread
+//   in turn (for example, by destroying or moving this worker's Serial at
+//   the same time).
 // - An I/O call may deadlock the same way with a close() / setup() on
 //   another thread.
 // isConnected() and getDevicePath() are safe there. Listen with
