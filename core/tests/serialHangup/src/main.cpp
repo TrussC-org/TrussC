@@ -31,8 +31,12 @@
 // thread close() is waiting for (section 13). setup() and close() log only
 // once they have released the lock, so a Logger listener may call back into
 // the same Serial (section 14). The Android backend's guard against joining
-// its worker from the worker itself is checked on its own (section 15). A
-// slow write is played by slowWrite.cpp (Linux only).
+// its worker from the worker itself is checked on its own (section 15).
+// setup() and close() on a thread marked as a USB worker are refused, with
+// one log line per thread, and before they take the lock, so they cannot
+// deadlock with a close() waiting for that thread (sections 16, 17). Android
+// Serial::setup() keeps the new port by what the backend's setup() returned
+// (section 18). A slow write is played by slowWrite.cpp (Linux only).
 //
 // A pseudo-terminal stands in for the USB-serial adapter: Serial opens the
 // slave, the test plays the device on the master, and closing the master
@@ -159,6 +163,22 @@ static atomic<bool> g_closeCalled{false};
 static atomic<bool> g_hookDone{false};
 static bool g_hookSawConnected = false;
 static string g_hookSawPath;
+
+// Section 17's hook: the thread close() waits for is a USB worker, and a
+// Logger listener running there calls close() and setup()
+static string g_hookOtherPath;
+static bool g_hookSetupOk = true;
+
+static void refuseWhileCloseWaits() {
+    internal::SerialWorkerThreadMark mark;
+    for (int i = 0; i < 400 && !g_closeCalled; ++i) this_thread::sleep_for(chrono::milliseconds(5));
+    this_thread::sleep_for(chrono::milliseconds(50));
+    g_hookSerial->close();
+    g_hookSetupOk = g_hookSerial->setup(g_hookOtherPath, 9600);
+    g_hookSawConnected = g_hookSerial->isConnected();
+    g_hookSawPath = g_hookSerial->getDevicePath();
+    g_hookDone = true;
+}
 
 static void askWhileCloseWaits() {
     // Wait until close() has been called, then give it time to start
@@ -874,6 +894,124 @@ int main() {
         check("15. seen from inside, the worker is this thread", fromInside);
         check("15. once joined, it is nobody's thread", !internal::isThisThread(worker));
     }
+
+    // --- 16. setup() / close() on a USB worker thread are refused ---------
+    // On Android a Logger listener may run inline on a USB worker thread, of
+    // this Serial or another. setup() and close() there would stop a worker
+    // and wait for it, so they are refused: nothing closes, no onDisconnect,
+    // the path stays, and one error line per thread (a listener that calls
+    // close() on every line must not loop). internal::SerialWorkerThreadMark
+    // plays the worker here; the refusal itself is plain C++.
+    atomic<int> refusals{0};
+    EventListener refusalSub = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error && e.message.find("cannot run on a USB worker thread") != string::npos) {
+            ++refusals;
+        }
+    });
+    {
+        Pty pty, other;
+        Serial serial;
+        Recorder rec;
+        rec.attach(serial);
+        if (connect(pty, serial, "16. setup() connects") && other.open()) {
+            refusals = 0;
+            bool setupOk = true;
+            bool stillConnected = false;
+            string pathAfter;
+            thread worker([&] {
+                internal::SerialWorkerThreadMark mark;
+                serial.close();
+                setupOk = serial.setup(other.slavePath, 9600);
+                serial.close();
+                stillConnected = serial.isConnected();
+                pathAfter = serial.getDevicePath();
+            });
+            worker.join();
+            check("16. close() on a worker thread leaves the port open", stillConnected);
+            check("16. setup() there returns false and keeps the path", !setupOk && pathAfter == pty.slavePath);
+            check("16. neither fires onDisconnect", rec.count == 0);
+            check("16. one error line for three refused calls", refusals == 1);
+            check("16. the port still carries data",
+                  pty.send("w") && waitFor(1000, [&] { return serial.readByte() == 'w'; }));
+            thread second([&] {
+                internal::SerialWorkerThreadMark mark;
+                serial.close();
+            });
+            second.join();
+            check("16. another worker thread logs its own refusal", refusals == 2 && serial.isConnected());
+            { internal::SerialWorkerThreadMark mark; }
+            check("16. the mark ends with its scope", !internal::onSerialWorkerThread());
+            serial.close();
+            check("16. then close() closes and fires once", !serial.isConnected() && rec.count == 1);
+        }
+    }
+
+#if defined(__linux__)
+    // --- 17. the refusal comes before the lock ----------------------------
+    // close() on one thread holds the lock while it waits for a thread that
+    // is inside a write (on Android: for the USB worker). If that thread is a
+    // USB worker and calls close() or setup() (a Logger listener there), they
+    // must be refused before they take the lock, or neither thread ever
+    // finishes. slowWrite.cpp runs the hook inside the write, once close() is
+    // waiting for it. The refused setup() must not show its port meanwhile.
+    {
+        Pty pty, other;
+        Serial serial;
+        Recorder rec;
+        rec.attach(serial);
+        if (connect(pty, serial, "17. setup() connects") && other.open()) {
+            fcntl(pty.master, F_SETFL, fcntl(pty.master, F_GETFL) | O_NONBLOCK);
+            g_hookSerial = &serial;
+            g_hookOtherPath = other.slavePath;
+            g_closeCalled = false;
+            g_hookDone = false;
+            g_hookSawConnected = false;
+            g_hookSawPath.clear();
+            setSlowWrite(fdOf(pty.slavePath), 100);
+            setSlowWriteHook(refuseWhileCloseWaits);
+            thread writer([&] { serial.writeBytes(string("x")); });
+            check("17. the write close() will wait for is in progress",
+                  waitFor(1000, [] { return slowWritesInProgress() > 0; }));
+            atomic<bool> closed{false};
+            thread closer([&] {
+                serial.close();
+                closed = true;
+            });
+            g_closeCalled = true;
+            bool finished = waitFor(3000, [&] { return closed.load() && g_hookDone.load(); });
+            check("17. close() / setup() on the worker do not deadlock with close() waiting for it", finished);
+            if (!finished) {
+                // Both threads are stuck for good: report and leave
+                std::printf("\nFAILED (deadlock; %d failure%s)\n", g_fail, g_fail == 1 ? "" : "s");
+                std::fflush(stdout);
+                _exit(1);
+            }
+            closer.join();
+            writer.join();
+            setSlowWrite(-1, 0);
+            setSlowWriteHook(nullptr);
+            check("17. the refused setup() returned false", !g_hookSetupOk);
+            check("17. meanwhile the port stayed open, with its own path",
+                  g_hookSawConnected && g_hookSawPath == pty.slavePath);
+            check("17. the outer close() fires once, for the port and rate it had",
+                  rec.count == 1 && rec.first.wasClean && rec.first.portName == pty.slavePath &&
+                  rec.first.baudRate == 115200);
+            check("17. and closes it", !serial.isConnected());
+        }
+    }
+#endif
+
+    // --- 18. Android setup() keeps the new port by the backend's result -----
+    // When the backend asked for the USB permission, its worker may connect
+    // before Serial::setup() looks again, so setup() goes by the result: a
+    // Pending setup() keeps the new port's path and rate, as a Connected one
+    // does; only a Failed one goes back to the previous port's.
+    check("18. a Connected setup() keeps the new port",
+          internal::serialSetupStarted(internal::SerialSetupResult::Connected));
+    check("18. a Pending setup() keeps it too",
+          internal::serialSetupStarted(internal::SerialSetupResult::Pending));
+    check("18. a Failed setup() goes back to the previous port",
+          !internal::serialSetupStarted(internal::SerialSetupResult::Failed));
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;
