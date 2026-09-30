@@ -6,10 +6,12 @@
 // - internal::pixelBufferCount() checks every product before forming it, so
 //   the byte count of Pixels::allocate() cannot wrap. UINT32_MAX stands in
 //   for a 32-bit size_t (wasm32), so the 32-bit cases run here too.
-// - Pixels::allocate() refuses a size that wraps (or is negative) with an
-//   error log and leaves the buffer empty; crop() and Image::allocate() stop
-//   there instead of writing into the empty buffer.
-// - When the machine has the memory (64-bit, >= 4 GiB available), real
+// - Pixels::allocate() refuses a size that wraps (or is negative), or a
+//   channel count other than 1-4, with an error log and leaves the buffer
+//   empty; crop() and Image::allocate() stop there instead of writing into
+//   the empty buffer.
+// - When the machine has the memory (64-bit, >= 4 GiB available, counting a
+//   cgroup v2 memory.max on Linux), real
 //   buffers just past INT_MAX bytes: getColor() / setColor() at the far
 //   corner and past the INT_MAX offset, and halve() reading source pixels
 //   past it. Skipped otherwise (says so).
@@ -20,6 +22,7 @@
 #include <climits>
 #include <cstdint>
 #include <cstdio>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -70,6 +73,20 @@ static void checkBufferCount() {
           !internal::pixelBufferCount(10, -1, 4, 1, kSizeMax, n));
     check("count: negative channels are refused",
           !internal::pixelBufferCount(10, 10, -4, 1, kSizeMax, n));
+    check("count: 0 channels are refused",
+          !internal::pixelBufferCount(10, 10, 0, 1, kSizeMax, n));
+    check("count: 0 channels are refused for an empty image too",
+          !internal::pixelBufferCount(0, 0, 0, 1, kSizeMax, n));
+    check("count: 5 channels are refused",
+          !internal::pixelBufferCount(10, 10, 5, 1, kSizeMax, n));
+    {
+        bool all = true;
+        for (int c = 1; c <= 4; c++) {
+            size_t m = 0;
+            all = all && internal::pixelBufferCount(10, 10, c, 1, kSizeMax, m) && m == (size_t)100 * c;
+        }
+        check("count: 1, 2, 3 and 4 channels are accepted", all);
+    }
     check("count: an empty buffer is 0 elements",
           internal::pixelBufferCount(0, 0, 4, 1, kSizeMax, n) && n == 0);
     check("count: w x h x channels elements",
@@ -90,23 +107,28 @@ static void checkBufferCount() {
           !internal::pixelBufferCount(16384, 16384, 4, sizeof(float), k32Max, n));
     check("count: a refused size leaves the output alone", n == k32Max);
 
-    // 64-bit size_t: three int dimensions can still pass 2^64
-    check("count: 2^30 x 2^30 x 16 U8 (2^64 bytes, 0 in a 64-bit size_t) is refused",
-          !internal::pixelBufferCount(1 << 30, 1 << 30, 16, 1, kSizeMax, n));
-    check("count: INT_MAX^3 F32 is refused",
-          !internal::pixelBufferCount(INT_MAX, INT_MAX, INT_MAX, sizeof(float), kSizeMax, n));
+    // 64-bit size_t: INT_MAX x INT_MAX x 4 is just under 2^64 elements, so
+    // the F32 byte count passes 2^64
+    check("count: INT_MAX x INT_MAX x 4 F32 (past 2^64 bytes) is refused",
+          !internal::pixelBufferCount(INT_MAX, INT_MAX, 4, sizeof(float), kSizeMax, n));
+    if (sizeof(size_t) >= 8) {
+        size_t m = 0;
+        check("count: INT_MAX x INT_MAX x 4 U8 (just under 2^64 bytes) is accepted",
+              internal::pixelBufferCount(INT_MAX, INT_MAX, 4, 1, kSizeMax, m) &&
+              (uint64_t)m == (uint64_t)INT_MAX * INT_MAX * 4);
+    }
 }
 
 // --- allocate() refuses a wrapping size ------------------------------------------
 static void checkAllocateGuard() {
-    // 2^30 * 2^30 * 16 is 2^64 bytes: 0 in a 64-bit size_t, and more than a
-    // 32-bit one holds.
-    const int big = 1 << 30;
+    // INT_MAX x INT_MAX x 4 F32 is past 2^64 bytes: more than a 64-bit
+    // size_t holds, let alone a 32-bit one.
+    const int big = INT_MAX;
     {
         const size_t before = countErrors("cannot allocate");
         Pixels px;
-        px.allocate(big, big, 16);
-        check("allocate: 2^30 x 2^30 x 16 is refused, buffer empty",
+        px.allocate(big, big, 4, PixelFormat::F32);
+        check("allocate: INT_MAX x INT_MAX x 4 F32 is refused, buffer empty",
               !px.isAllocated() && px.getData() == nullptr && px.getWidth() == 0 &&
               px.getHeight() == 0 && px.getChannels() == 0 && px.getTotalBytes() == 0);
         check("allocate: the refusal logs an error", countErrors("cannot allocate") == before + 1);
@@ -126,70 +148,188 @@ static void checkAllocateGuard() {
         // A refused allocate() replaces what was there (it clears first)
         Pixels px;
         px.allocate(2, 2, 4);
-        px.allocate(big, big, 16, PixelFormat::U8);
+        px.allocate(big, big, 4, PixelFormat::F32);
         check("allocate: a refused re-allocate leaves the buffer empty",
               !px.isAllocated() && px.getData() == nullptr && px.getWidth() == 0);
     }
     {
         // crop() into a size that can't be allocated keeps the source
         Pixels px;
-        px.allocate(2, 2, 16);
-        px.getData()[0] = 42;
+        px.allocate(2, 2, 4, PixelFormat::F32);
+        px.getDataF32()[0] = 42.0f;
         const size_t before = countErrors("cannot allocate");
         px.crop(0, 0, big, big);
         check("crop: a destination that can't be allocated keeps the source",
               px.isAllocated() && px.getWidth() == 2 && px.getHeight() == 2 &&
-              px.getChannels() == 16 && px.getData()[0] == 42 &&
+              px.getChannels() == 4 && px.getDataF32()[0] == 42.0f &&
               countErrors("cannot allocate") == before + 1);
     }
     {
         // Image::allocate() stops at the refused Pixels (no texture made)
         Image img;
-        img.allocate(big, big, 16);
-        check("Image::allocate: a refused size leaves the image empty",
+        img.allocate(4, 4, 0);
+        check("Image::allocate: a refused channel count leaves the image empty",
               !img.isAllocated() && img.getWidth() == 0 && !img.getTexture().isAllocated());
+    }
+}
+
+// --- allocate() refuses a channel count other than 1-4 -----------------------------
+static void checkAllocateChannels() {
+    for (PixelFormat fmt : {PixelFormat::U8, PixelFormat::F32}) {
+        const string f = (fmt == PixelFormat::F32) ? "F32" : "U8";
+        for (int ch : {0, 5}) {
+            const size_t before = countErrors("channels must be 1 to 4");
+            Pixels px;
+            px.allocate(4, 4, ch, fmt);
+            check("channels: " + f + " allocate(4, 4, " + to_string(ch) + ") is refused, buffer empty",
+                  !px.isAllocated() && px.getData() == nullptr && px.getWidth() == 0 &&
+                  px.getChannels() == 0 && px.getTotalBytes() == 0);
+            check("channels: " + f + " allocate(4, 4, " + to_string(ch) + ") logs an error",
+                  countErrors("channels must be 1 to 4") == before + 1);
+            px.setColor(0, 0, Color(1, 1, 1, 1));
+            check("channels: " + f + " getColor / setColor on it are no-ops",
+                  px.getColor(0, 0).a == 0.0f && px.getData() == nullptr);
+        }
+    }
+    {
+        // setFromPixels() with 0 channels copies nothing into the empty buffer
+        const unsigned char src[4] = {1, 2, 3, 4};
+        Pixels px;
+        px.setFromPixels(src, 2, 2, 0);
+        check("channels: setFromPixels(..., 0) leaves the buffer empty",
+              !px.isAllocated() && px.getData() == nullptr);
+    }
+    {
+        bool all = true;
+        for (int ch = 1; ch <= 4; ch++) {
+            Pixels px;
+            px.allocate(4, 4, ch);
+            all = all && px.isAllocated() && px.getChannels() == ch && px.getTotalBytes() == (size_t)16 * ch;
+        }
+        check("channels: allocate() takes 1, 2, 3 and 4 channels", all);
     }
 }
 
 // --- real buffers past INT_MAX bytes -----------------------------------------------
 
-// Physical memory the large buffers can use; 0 when unknown.
-static uint64_t availableMemoryBytes() {
+// Memory the large buffers can use. `known` is false when it can't be
+// measured; `note` says how the number was derived, when that matters.
+struct AvailableMemory {
+    bool known = false;
+    uint64_t bytes = 0;
+    string note;
+};
+
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+// A cgroup v2 memory file as a byte count. False when it is missing,
+// unreadable, or "max" (no limit).
+static bool readCgroupBytes(const string& path, uint64_t& out) {
+    ifstream f(path);
+    string v;
+    if (!(f >> v) || v == "max") return false;
+    try {
+        size_t used = 0;
+        const unsigned long long n = stoull(v, &used);
+        if (used != v.size()) return false;
+        out = n;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+// Headroom under the tightest cgroup v2 memory.max, from this process's
+// cgroup up to /sys/fs/cgroup itself (the root inside a container). False
+// when no level sets a limit or cgroup v2 is not mounted.
+static bool cgroupHeadroomBytes(uint64_t& out) {
+    string rel;  // this process's cgroup, e.g. "/user.slice/foo.scope"
+    {
+        ifstream f("/proc/self/cgroup");
+        string line;
+        while (getline(f, line)) {
+            if (line.rfind("0::", 0) == 0) { rel = line.substr(3); break; }
+        }
+    }
+    bool limited = false;
+    uint64_t best = 0;
+    for (;;) {
+        const string dir = "/sys/fs/cgroup" + (rel == "/" ? string() : rel);
+        uint64_t maxB = 0, curB = 0;
+        if (readCgroupBytes(dir + "/memory.max", maxB)) {
+            uint64_t room = maxB;
+            if (readCgroupBytes(dir + "/memory.current", curB)) room = (curB < maxB) ? maxB - curB : 0;
+            if (!limited || room < best) best = room;
+            limited = true;
+        }
+        if (rel.empty() || rel == "/") break;
+        const size_t slash = rel.find_last_of('/');
+        rel = (slash == 0 || slash == string::npos) ? "/" : rel.substr(0, slash);
+    }
+    if (limited) out = best;
+    return limited;
+}
+#endif
+
+static AvailableMemory availableMemory() {
+    AvailableMemory m;
 #if defined(__EMSCRIPTEN__)
-    return 0;
+    return m;
 #elif defined(__linux__)
     FILE* f = fopen("/proc/meminfo", "r");
-    if (!f) return 0;
-    char line[256];
-    unsigned long long kb = 0;
-    bool found = false;
-    while (fgets(line, sizeof(line), f)) {
-        if (sscanf(line, "MemAvailable: %llu kB", &kb) == 1) { found = true; break; }
+    if (f) {
+        char line[256];
+        unsigned long long kb = 0;
+        while (fgets(line, sizeof(line), f)) {
+            if (sscanf(line, "MemAvailable: %llu kB", &kb) == 1) {
+                m.known = true;
+                m.bytes = (uint64_t)kb * 1024;
+                break;
+            }
+        }
+        fclose(f);
     }
-    fclose(f);
-    return found ? (uint64_t)kb * 1024 : 0;
+    // In a container (or a systemd scope with MemoryMax) the cgroup limit
+    // can be far below MemAvailable. It only lowers a known MemAvailable: a
+    // cgroup limit alone says nothing about the physical memory behind it.
+    uint64_t room = 0;
+    if (m.known && cgroupHeadroomBytes(room) && room < m.bytes) {
+        m.bytes = room;
+        m.note = "cgroup memory.max headroom";
+    }
+    return m;
 #elif defined(__APPLE__)
     uint64_t total = 0;
     size_t len = sizeof(total);
-    if (sysctlbyname("hw.memsize", &total, &len, nullptr, 0) != 0) return 0;
-    return total / 2;  // total, not free: count on half of it
+    if (sysctlbyname("hw.memsize", &total, &len, nullptr, 0) != 0) return m;
+    m.known = true;
+    m.bytes = total / 2;  // total, not free: count on half of it
+    m.note = "half of total";
+    return m;
 #elif defined(_WIN32)
     MEMORYSTATUSEX st{};
     st.dwLength = sizeof(st);
-    if (!GlobalMemoryStatusEx(&st)) return 0;
-    return st.ullAvailPhys;
+    if (!GlobalMemoryStatusEx(&st)) return m;
+    m.known = true;
+    m.bytes = st.ullAvailPhys;
+    return m;
 #else
-    return 0;
+    return m;
 #endif
 }
 
 static void checkLargeBuffers() {
     const uint64_t kNeed = 4ull << 30;  // 2.15 GB buffer + 0.54 GB halve() output
-    const uint64_t avail = availableMemoryBytes();
-    if (sizeof(size_t) < 8 || avail < kNeed) {
-        printf("%-72s SKIP  -- %zu-bit size_t, %llu MiB available (needs 64-bit, %llu MiB)\n",
+    const AvailableMemory mem = availableMemory();
+    string availText = "unknown";
+    if (mem.known) {
+        availText = to_string((unsigned long long)(mem.bytes >> 20)) + " MiB";
+        if (!mem.note.empty()) availText += " (" + mem.note + ")";
+    }
+    printf("available memory: %s\n", availText.c_str());
+    if (sizeof(size_t) < 8 || !mem.known || mem.bytes < kNeed) {
+        printf("%-72s SKIP  -- %zu-bit size_t, %s available (needs 64-bit, %llu MiB)\n",
                "large: buffers past INT_MAX bytes", sizeof(size_t) * 8,
-               (unsigned long long)(avail >> 20), (unsigned long long)(kNeed >> 20));
+               availText.c_str(), (unsigned long long)(kNeed >> 20));
         fflush(stdout);
         return;
     }
@@ -259,6 +399,7 @@ int main() {
     checkOffset();
     checkBufferCount();
     checkAllocateGuard();
+    checkAllocateChannels();
     checkLargeBuffers();
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");
