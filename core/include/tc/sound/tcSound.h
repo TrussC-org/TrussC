@@ -462,7 +462,10 @@ private:
 //   - setPosition() posts a seek: the StreamWorker seeks the decoder and
 //     re-fills the ring buffer, and the audio moves once the mixer
 //     reaches the new data (~10 ms blackout, similar tradeoff to other
-//     engines). getPosition() reports the requested target meanwhile.
+//     engines; longer on slow storage or for an MP3 several hours long,
+//     whose seek table is capped). getPosition() reports the requested
+//     target meanwhile. A file whose length is unknown (duration 0, e.g.
+//     a FLAC encoded to a pipe) cannot seek.
 //   - Each polyphony slot costs one open file handle + one decoder +
 //     one ring buffer (default ~16 KB).
 // ---------------------------------------------------------------------------
@@ -842,10 +845,17 @@ namespace internal {
     // fail, or make the worker skip every stream (Stalls: a worker that falls
     // behind, e.g. on slow storage; seek requests wait too), so a headless
     // test can drive a stream's end-of-stream and seek paths
-    // (core/tests/streamSeek). Only the worker's refill is affected, not
+    // (core/tests/streamSeek). ReadFails reads no frames; ReadFailsWithFrames
+    // decodes as usual and then reports an error for every read that
+    // returned frames. Only the worker's refill is affected, not
     // loadStream() or play(). State lives in tcAudio_impl.cpp.
-    enum class StreamFaultForTests { None, ReadFails, SeekFails, Stalls };
+    enum class StreamFaultForTests { None, ReadFails, ReadFailsWithFrames, SeekFails, Stalls };
     void setStreamFaultForTests(StreamFaultForTests fault);
+
+    // Test hook: the number of seek points in the seek table of the stream
+    // decoder opened last (by play() or by the re-init migration), 0 when it
+    // has none (not an MP3). tcAudio_impl.cpp.
+    uint32_t lastStreamSeekPointsForTests();
 
     // Seek a voice (Sound::setPosition()). `frame` counts the voice's
     // positionF units: source frames for an eager voice, engine-rate frames
@@ -855,7 +865,8 @@ namespace internal {
     // position, and the mixer, the only writer of the ring's read side and
     // of positionF, moves to it when it reaches that data (~10 ms). Until
     // then the request is pending; a later request replaces it (the last
-    // one wins). Call it from one thread per voice, like the Sound API.
+    // one wins). A stream whose length is unknown ignores it (one warning
+    // per voice). Call it from one thread per voice, like the Sound API.
     // tcAudio_impl.cpp.
     void seekVoice(PlayingSound& voice, double frame);
 
@@ -1409,8 +1420,9 @@ public:
     //
     // Limitations vs eager load():
     //   - setSpeed() is ignored (decoder outputs engine-rate frames).
-    //   - setPosition() incurs a seek + ring-buffer refill (~10 ms);
-    //     getPosition() reports the requested position meanwhile.
+    //   - setPosition() incurs a seek + ring-buffer refill (usually
+    //     ~10 ms); getPosition() reports the requested position meanwhile.
+    //     A file whose length is unknown (getDuration() is 0) cannot seek.
     //
     // Web (Emscripten): streaming relies on std::thread + on-disk file I/O,
     // neither of which is available in the default browser build. To keep
@@ -1685,7 +1697,7 @@ public:
     }
 
     // Playback position in seconds. On a stream, after setPosition() and
-    // until the audio has moved there (~10 ms), this is the requested
+    // until the audio has moved there (usually ~10 ms), this is the requested
     // position; otherwise it is the position being played.
     float getPosition() const {
         if (!playing_ || !buffer_) return 0;
@@ -1694,10 +1706,13 @@ public:
     }
 
     // Seek to `seconds`. Eager sounds move at once. A stream moves after
-    // its decoder has seeked and the ring has refilled (~10 ms of silence);
+    // its decoder has seeked and the ring has refilled (~10 ms of silence;
+    // longer on slow storage or for an MP3 several hours long);
     // getPosition() reports the new position right away, and if
     // setPosition() is called again before that, the last call wins. A
-    // paused stream moves when it resumes.
+    // paused stream moves when it resumes. A stream whose length is
+    // unknown (getDuration() is 0) cannot seek: the call is ignored with a
+    // warning.
     void setPosition(float seconds) {
         if (!playing_ || !buffer_) return;
         const int rate = positionRate();
@@ -1708,6 +1723,9 @@ public:
             auto* eager = static_cast<const SoundBuffer*>(buffer_.get());
             if (pos >= (double)eager->numSamples) pos = (double)eager->numSamples - 1;
         } else {
+            // The float duration can be a few frames past the last frame
+            // on a long file; the StreamWorker clamps to the decoder's
+            // length. An unknown length (0) is refused by seekVoice().
             double maxPos = (double)buffer_->getDuration() * (double)rate;
             if (pos >= maxPos) pos = maxPos - 1;
         }
