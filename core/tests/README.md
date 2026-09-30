@@ -85,17 +85,18 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
-- `mediaDecode/` — the bundled decoders read every image format and Ogg
-  Vorbis through the TrussC entry points: `Pixels::loadFromMemory()` /
-  `load()` / `loadHDR()` for PNG (8 and 16-bit), JPEG, BMP (24-bit and 8-bit
-  paletted), TGA (raw and RLE), HDR, GIF (first frame of a two-frame file) and
-  PNM, checking size and pixels; `SoundBuffer::loadOgg()` /
-  `loadOggFromMemory()` for channels, rate, length and levels. Also guards the
-  two TrussC patches in `stb_image.h`: BMP pixels that index past the stored
-  palette read as black (the stack is painted first, so the check cannot pass on a zeroed stack), and a
-  GIF with the longest LZW prefix chains decodes on a 64 KB stack (POSIX
-  only). Image fixtures are made at runtime; the Ogg clip is embedded
-  (`src/toneOgg.h`).
+- `mediaDecode/` — *(also on web)* the bundled decoders read every image
+  format and Ogg Vorbis through the TrussC entry points:
+  `Pixels::loadFromMemory()` / `load()` / `loadHDR()` for PNG (8 and 16-bit),
+  JPEG, BMP (24-bit and 8-bit paletted), TGA (raw and RLE), HDR, GIF (first
+  frame of a two-frame file) and PNM, checking size and pixels;
+  `SoundBuffer::loadOgg()` / `loadOggFromMemory()` for channels, rate, length
+  and levels. Also guards the two TrussC patches in `stb_image.h`: BMP pixels
+  that index past the stored palette read as black (the stack is painted
+  first, so the check cannot pass on a zeroed stack), and a GIF with the
+  longest LZW prefix chains decodes on a 64 KB thread stack (native POSIX
+  only; elsewhere only its output is checked). Image fixtures are made at
+  runtime; the Ogg clip is embedded (`src/toneOgg.h`).
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×

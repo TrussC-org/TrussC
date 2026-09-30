@@ -15,10 +15,12 @@
 // - Pixels::load() and Pixels::loadHDR() read the same files from disk.
 // - A paletted BMP whose pixels index past the stored palette entries reads
 //   those pixels as black (TrussC patch in stb_image.h).
-// - A GIF whose LZW prefix chains are as long as the format allows decodes on
-//   a thread with a 64 KB stack, the default WebAssembly stack size (TrussC
-//   patch in stb_image.h: the chain is walked with a loop, not recursion).
-//   POSIX only; elsewhere the same GIF is decoded on the calling thread.
+// - A GIF whose LZW prefix chains are as long as the format allows decodes
+//   with a small stack (TrussC patch in stb_image.h: the chain is walked with
+//   a loop, not recursion).
+//   Native POSIX builds run it on a thread with a 64 KB stack; Windows and
+//   the web build decode it on the calling thread, which only checks the
+//   output there (the wasm call stack is not the 64 KB data stack).
 // - SoundBuffer::loadOgg() and loadOggFromMemory() report the clip's channel
 //   count, rate and length, and decode its samples.
 // =============================================================================
@@ -34,8 +36,9 @@
 #include <string>
 #include <vector>
 
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #include <pthread.h>
+#define TC_TEST_SMALL_STACK_THREAD 1
 #endif
 
 #include "toneOgg.h"
@@ -266,10 +269,10 @@ static void* runSmallStackJob(void* arg) {
     return nullptr;
 }
 
-// Runs the decode on a thread with `stackBytes` of stack (POSIX), or on the
-// calling thread elsewhere. Returns false if the thread could not start.
+// Runs the decode on a thread with `stackBytes` of stack (native POSIX), or
+// on the calling thread elsewhere. Returns false if the thread could not start.
 static bool decodeOnSmallStack(SmallStackJob& job, size_t stackBytes) {
-#if !defined(_WIN32)
+#if defined(TC_TEST_SMALL_STACK_THREAD)
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     if (pthread_attr_setstacksize(&attr, stackBytes) != 0) { pthread_attr_destroy(&attr); return false; }
@@ -447,7 +450,12 @@ int main() {
         job.bytes = &deep;
         const bool ran = decodeOnSmallStack(job, 64 * 1024);
         check("gif long LZW chains: decode thread ran", ran);
-        check("gif long LZW chains: decodes on a 64 KB stack",
+#if defined(TC_TEST_SMALL_STACK_THREAD)
+        const string where = "on a 64 KB thread stack";
+#else
+        const string where = "on the calling thread";
+#endif
+        check("gif long LZW chains: decodes " + where,
               ran && job.ok && job.w == 2 && job.h == 2 && job.rgba[0] == 30 && job.rgba[1] == 60 &&
                   job.rgba[2] == 90 && job.rgba[3] == 255,
               to_string(job.w) + "x" + to_string(job.h) + " first pixel " + to_string(job.rgba[0]) + "," +
