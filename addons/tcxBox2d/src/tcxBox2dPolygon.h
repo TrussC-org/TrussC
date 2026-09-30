@@ -12,13 +12,15 @@ namespace tcx::box2d {
 // =============================================================================
 // Polygon Body
 // =============================================================================
-// One body made of one convex Box2D polygon (Box2D limitation: convex, 3 to 8
-// points).
-//   - setup():       3 to 8 points. Concave input silently becomes its convex
-//                    hull, as Box2D does; draw(), drawFill() and getVertices()
-//                    show that hull, so what you see is what collides.
-//   - setupConvex(): any number of points, approximated by a convex hull of at
-//                    most 8 points.
+// A polygon body. A Box2D polygon is one convex shape of 3 to 8 points.
+//   - setup():         one polygon, 3 to 8 points. Concave input silently
+//                      becomes its convex hull, as Box2D does; draw(),
+//                      drawFill() and getVertices() show that hull, so what
+//                      you see is what collides.
+//   - setupConvex():   any number of points, approximated by one convex hull
+//                      of at most 8 points.
+//   - setupCompound(): any outline, kept exactly (concave parts, holes), as
+//                      one fixture per triangle on one body.
 // Input that can't make a polygon (fewer than 3 or more than 8 points for
 // setup(), collinear points, points that nearly coincide, a polygon tiny next
 // to its distance from the local origin) logs a warning and creates no body,
@@ -44,7 +46,7 @@ public:
     // More than 8 points, or degenerate points (collinear, nearly coincident,
     // tiny next to their distance from the local origin), log a warning and
     // create no body: check isCreated(). For more points use setupConvex()
-    // (convex approximation).
+    // (convex approximation) or setupCompound() (exact shape).
     void setup(World& world, const std::vector<tc::Vec2>& vertices, float x, float y);
 
     // Same as above with every point of the path (all subpaths together), so
@@ -64,6 +66,30 @@ public:
     // Same as above with every point of the path (all subpaths together).
     void setupConvex(World& world, const tc::Path& path, float x, float y);
 
+    // Create a body with the exact shape of any outline: concave, with holes,
+    // any number of points. Path::buildFillTriangles() triangulates it (the
+    // fill drawFill() shows: non-zero winding, a subpath wound opposite to its
+    // enclosing one is a hole, self-intersections are split), and each
+    // triangle becomes one fixture on the one body. Mass and centroid are the
+    // sum over the fixtures. A path that is one convex ring of at most 8
+    // points becomes one ordinary polygon fixture instead. Slivers Box2D can't
+    // use (collinear or nearly coincident corners, almost no area) are
+    // skipped with one warning; if nothing is left, or the whole body is tiny
+    // next to its distance from the local origin, a warning and no body
+    // (check isCreated()). Collision events come once per touching body pair,
+    // however many fixtures touch.
+    // Area the fill covers more than once (a self-overlapping outline such as
+    // a pentagram's center, overlapping subpaths wound the same way, a hole
+    // wound like its outer ring) gets one layer of triangles per cover, so it
+    // weighs once per layer: give a simple outline and wind holes opposite.
+    // getVertices() returns the outline points (every subpath, in order);
+    // draw() outlines each subpath and drawFill() fills like Path::drawFill()
+    // (triangulated once, here, not every frame).
+    void setupCompound(World& world, const tc::Path& path, float x, float y);
+
+    // Same as above with the points as one closed outline.
+    void setupCompound(World& world, const std::vector<tc::Vec2>& points, float x, float y);
+
     // Create regular polygon
     // sides: number of sides (3-8)
     // radius: circumscribed circle radius
@@ -77,8 +103,8 @@ public:
     // is a hull vertex and they already go around the outline in order
     // (either winding, any start), they come back as given; otherwise (points
     // dropped, or listed in a crossing order) the order is Box2D's (from the
-    // rightmost point).
-    // Empty without a body.
+    // rightmost point). After setupCompound(), the outline points of every
+    // subpath. Empty without a body.
     const std::vector<tc::Vec2>& getVertices() const { return vertices_; }
     int getNumVertices() const { return static_cast<int>(vertices_.size()); }
 
@@ -95,11 +121,15 @@ public:
     void draw(const tc::Color& color);
 
 private:
-    // Create the body with one fixture from a checked shape and its hull.
-    void createBody(World& world, const b2PolygonShape& polygon,
-                    const std::vector<tc::Vec2>& hull, float cx, float cy);
+    // Create the body with one fixture per checked shape. vertices_ and path_
+    // are set by the caller.
+    void createBody(World& world, const b2PolygonShape* shapes, size_t count,
+                    float cx, float cy);
 
     std::vector<tc::Vec2> vertices_;
+    tc::Path path_;          // setupCompound() outline, drawn instead of vertices_
+    tc::Mesh fillMesh_;      // setupCompound() fill, triangulated once
+    bool compound_ = false;  // made by setupCompound()
 };
 
 } // namespace tcx::box2d

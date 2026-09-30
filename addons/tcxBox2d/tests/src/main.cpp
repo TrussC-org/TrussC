@@ -18,6 +18,38 @@
 //     fixture of at most 8 points whose mass is close to the outline's; the
 //     reduction is O(h log h) and picks the same points as the plain
 //     O(h^2) scan it replaced.
+//
+// Compound bodies (#427). setupCompound() / Shape2D::compound() keep any
+// outline exactly, one fixture per triangle of Path::buildFillTriangles():
+//   - a 20-point circle gives many fixtures and the 20-gon's mass; a convex
+//     outline of at most 8 points gives exactly one fixture; a pentagram's
+//     doubly covered center weighs twice; an L whose edge runs straight back
+//     is triangulated, not made its hull; the fill kept for drawing is
+//     Path::buildFillTriangles()' own;
+//   - concave notches and holes stay empty: a ball in the hole falls to the
+//     hole's floor, a ball above the solid part lands on it;
+//   - slivers are skipped with one warning; nothing usable gives no body;
+//   - Collider2D filter and trigger settings reach every fixture;
+//   - a compound touching a box with several fixtures at once gives exactly
+//     one Enter / Began, one Stay per update, and one Exit / Ended;
+//   - a sensor box moved across the seam between two fixtures gets no Exit /
+//     Ended, whichever contact Box2D updates first;
+//   - Stay listeners may destroy bodies of the next pair or of their own
+//     (the other pairs still get their Stay);
+//   - listeners of a deferred Exit / Ended or of Stay may free the other body
+//     of their pair (a RigidBody2D's hears nothing more; a classic Body
+//     destroyed from Stay gets its Exit at once), and a body destroyed between
+//     Step() and update() gets no Exit / Ended, its partner one with no
+//     other, and a new body at its address none;
+//   - the offset/inertia check runs once on the whole body: a rounded
+//     rectangle, an off-center 128-gon and a 4096-gon keep every triangle
+//     with no warning; a tiny outline far from the origin is refused as a
+//     whole, and a tiny convex ring as one polygon; bodies just inside the
+//     limit keep a positive inertia at densities 0.001 to 1000;
+//   - every fixture of a polygon or compound body has the requested density
+//     (PolyShape and RigidBody2D), and setDensity() / setBodyType() (or
+//     setStatic() / setDynamic()) afterwards give exactly the mass data of a
+//     body created that way.
 // =============================================================================
 
 #include <tcxBox2d.h>
@@ -26,6 +58,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <random>
@@ -546,6 +579,1429 @@ static void testRigidBody2D(box2d::World& world) {
 }
 
 // ---------------------------------------------------------------------------
+// Compound bodies (#427)
+// ---------------------------------------------------------------------------
+static float polygonArea(const vector<Vec2>& pts) {
+    double a = 0;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        const Vec2& p = pts[i];
+        const Vec2& q = pts[(i + 1) % pts.size()];
+        a += double(p.x) * q.y - double(q.x) * p.y;
+    }
+    return float(abs(a) * 0.5);
+}
+
+// Mass of an area in px^2 at density 1.
+static float areaMass(float areaPx) {
+    return areaPx / (box2d::World::scale * box2d::World::scale);
+}
+
+static void step(box2d::World& world, int n) {
+    for (int i = 0; i < n; ++i) {
+        world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        world.getCollisionManager()->update();
+    }
+}
+
+// Touching contacts between two bodies (one per touching fixture pair).
+static int touchingContacts(box2d::World& world, const b2Body* a, const b2Body* b) {
+    int n = 0;
+    for (b2Contact* c = world.getWorld()->GetContactList(); c; c = c->GetNext()) {
+        const b2Body* ba = c->GetFixtureA()->GetBody();
+        const b2Body* bb = c->GetFixtureB()->GetBody();
+        if (c->IsTouching() && ((ba == a && bb == b) || (ba == b && bb == a))) ++n;
+    }
+    return n;
+}
+
+// A square ring: outer square with a square hole wound the other way.
+static Path squareRing(float outer, float inner) {
+    Path p;
+    float o = outer * 0.5f, i = inner * 0.5f;
+    p.moveTo(-o, -o); p.lineTo(o, -o); p.lineTo(o, o); p.lineTo(-o, o); p.close();
+    p.moveTo(-i, -i); p.lineTo(-i, i); p.lineTo(i, i); p.lineTo(i, -i); p.close();
+    return p;
+}
+
+static void testCompoundShapes(box2d::World& world) {
+    // 20-point circle: many fixtures, the mass of the 20-gon.
+    {
+        vector<Vec2> pts = circlePoints(20, 50);
+        Path path(pts);
+        path.close();
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, path, 400, 300);
+        check("setupCompound 20-point circle: created", poly.isCreated());
+        check("setupCompound 20-point circle: one fixture per triangle (18)",
+              fixtureCount(poly.getBody()) == 18);
+        float ratio = poly.getMass() / areaMass(polygonArea(pts));
+        check("setupCompound 20-point circle: mass = area x density (1%)", abs(ratio - 1.0f) < 0.01f);
+        check("setupCompound 20-point circle: getVertices() is the outline", poly.getNumVertices() == 20);
+        check("setupCompound 20-point circle: no warning", w.count == 0);
+    }
+
+    // Convex outlines of at most 8 points: exactly one ordinary fixture.
+    {
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, circlePoints(5, 40), 400, 300);
+        check("setupCompound convex 5 points: one fixture", fixtureCount(poly.getBody()) == 1);
+        check("setupCompound convex 5 points: a 5-point polygon", polygonVertexCount(poly.getBody()) == 5);
+        check("setupCompound convex 5 points: no warning", w.count == 0);
+    }
+    {
+        vector<Vec2> pts = circlePoints(8, 40);
+        pts.push_back(pts[0]);   // closing point, as drawn paths often have
+        box2d::PolyShape poly;
+        poly.setupCompound(world, Path(pts), 400, 300);
+        check("setupCompound convex 8 points + closing point: one fixture", fixtureCount(poly.getBody()) == 1);
+    }
+    {
+        // A pentagram turns the same way at every corner but is not convex.
+        vector<Vec2> star;
+        for (int i = 0; i < 5; ++i) {
+            float a = TAU * (i * 2 % 5) / 5;
+            star.push_back(Vec2(cos(a) * 40, sin(a) * 40));
+        }
+        box2d::PolyShape poly;
+        poly.setupCompound(world, star, 400, 300);
+        check("setupCompound pentagram: triangulated, not one polygon", fixtureCount(poly.getBody()) > 1);
+        // The center pentagon has winding 2: it is covered twice and weighs
+        // twice (documented). Star: 10 triangles center-tip-notch; the notch
+        // radius is r = R cos(TAU/5) / cos(TAU/10).
+        const float R = 40, r = R * cos(TAU / 5) / cos(TAU / 10);
+        const float starArea = 5 * R * r * sin(TAU / 10);
+        const float centerArea = 2.5f * r * r * sin(TAU / 5);
+        check("setupCompound pentagram: the doubly covered center weighs twice",
+              abs(poly.getMass() / areaMass(starArea + centerArea) - 1.0f) < 0.01f);
+    }
+
+    // The fill kept for drawing is Path::buildFillTriangles()' own.
+    {
+        Path ring = squareRing(200, 80);
+        box2d::detail::CompoundShapes shapes;
+        bool made = box2d::detail::makeCompoundShapes(ring, shapes);
+        const auto tris = ring.buildFillTriangles();
+        bool same = made && shapes.fill.size() == tris.size();
+        for (size_t i = 0; same && i < tris.size(); ++i) {
+            same = shapes.fill[i].x == tris[i][0] && shapes.fill[i].y == tris[i][1];
+        }
+        check("setupCompound: the fill kept for drawing is Path's fill", same);
+        Path pentagon(circlePoints(5, 40));
+        pentagon.close();
+        box2d::detail::CompoundShapes convex;
+        box2d::detail::makeCompoundShapes(pentagon, convex);
+        check("setupCompound convex 5 points: a fill is kept too", convex.fill.size() == 9);
+    }
+
+    // The notched 5-point polygon keeps its notch.
+    {
+        vector<Vec2> notched = {{-20, -20}, {20, -20}, {0, 0}, {20, 20}, {-20, 20}};
+        box2d::PolyShape poly;
+        poly.setupCompound(world, notched, 400, 300);
+        check("setupCompound notched: several fixtures", fixtureCount(poly.getBody()) > 1);
+        check("setupCompound notched: the notch is empty", !poly.containsPoint(415, 300));
+        check("setupCompound notched: the body is solid", poly.containsPoint(390, 300));
+        check("setupCompound notched: mass = area x density",
+              abs(poly.getMass() / areaMass(polygonArea(notched)) - 1.0f) < 0.01f);
+    }
+
+    // An L whose first edge runs out and straight back (a 180-degree turn with
+    // a zero cross product) turns once around in total like a convex ring,
+    // but is not convex: it is triangulated, not made its hull.
+    {
+        const vector<Vec2> ell = {{0, 0}, {10, 0}, {5, 0}, {5, 5}, {10, 5}, {10, -5}, {0, -5}};
+        box2d::PolyShape poly;
+        poly.setupCompound(world, ell, 400, 300);
+        check("setupCompound L with a reversing edge: created", poly.isCreated());
+        check("setupCompound L with a reversing edge: mass = area (75) x density, not the hull's",
+              abs(poly.getMass() / areaMass(75) - 1.0f) < 0.01f);
+    }
+
+    // A ring: the hole is empty.
+    {
+        box2d::PolyShape poly;
+        poly.setupCompound(world, squareRing(200, 80), 400, 300);
+        check("setupCompound ring: created", poly.isCreated());
+        check("setupCompound ring: the hole is empty", !poly.containsPoint(400, 300));
+        check("setupCompound ring: the ring is solid", poly.containsPoint(400, 230));
+        check("setupCompound ring: mass = (outer - hole) x density",
+              abs(poly.getMass() / areaMass(200 * 200 - 80 * 80) - 1.0f) < 0.01f);
+        check("setupCompound ring: getVertices() has both subpaths", poly.getNumVertices() == 8);
+    }
+
+    // A sliver (a spike whose base points nearly coincide) is skipped with one
+    // warning; the rest of the body is built.
+    {
+        vector<Vec2> spiked = {{-50, -50}, {50, -50}, {50, 50}, {0.001f, 50},
+                               {0, 150}, {-0.001f, 50}, {-50, 50}};
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, spiked, 400, 300);
+        check("setupCompound sliver: created", poly.isCreated());
+        check("setupCompound sliver: one warning", w.count == 1 && w.lastContains("skipped"));
+    }
+
+    // Nothing usable: no body, one warning.
+    {
+        vector<Vec2> line;
+        for (int i = 0; i < 12; ++i) line.push_back(Vec2(i * 5.0f, 0));
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, line, 400, 300);
+        check("setupCompound collinear: no body", !poly.isCreated());
+        check("setupCompound collinear: one warning", w.count == 1);
+    }
+
+    // setup() with more than 8 points now also points to setupCompound().
+    {
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setup(world, circlePoints(9, 40), 400, 300);
+        check("PolyShape::setup 9 points: warning names setupCompound()", w.lastContains("setupCompound()"));
+    }
+
+    // Mod API
+    {
+        vector<Vec2> pts = circlePoints(20, 50);
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(pts));
+        check("RigidBody2D compound 20 points: 18 fixtures", fixtureCount(rb->getBody()) == 18);
+        float mass = rb->getBody() ? rb->getBody()->GetMass() : 0.0f;
+        check("RigidBody2D compound 20 points: mass = area x density",
+              abs(mass / areaMass(polygonArea(pts)) - 1.0f) < 0.01f);
+        check("RigidBody2D compound 20 points: no warning", w.count == 0);
+    }
+    {
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(circlePoints(5, 40)));
+        check("RigidBody2D compound convex 5 points: one fixture", fixtureCount(rb->getBody()) == 1);
+    }
+    {
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(squareRing(200, 80)));
+        bool holeEmpty = true, ringSolid = false;
+        if (rb->getBody()) {
+            for (b2Fixture* f = rb->getBody()->GetFixtureList(); f; f = f->GetNext()) {
+                if (f->TestPoint(box2d::World::toBox2d(400, 300))) holeEmpty = false;
+                if (f->TestPoint(box2d::World::toBox2d(400, 230))) ringSolid = true;
+            }
+        }
+        check("RigidBody2D compound ring: the hole is empty", rb->getBody() && holeEmpty && ringSolid);
+    }
+    {
+        const vector<Vec2> ell = {{0, 0}, {10, 0}, {5, 0}, {5, 5}, {10, 5}, {10, -5}, {0, -5}};
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(ell));
+        float mass = rb->getBody() ? rb->getBody()->GetMass() : 0.0f;
+        check("RigidBody2D compound L with a reversing edge: mass = area (75) x density, not the hull's",
+              abs(mass / areaMass(75) - 1.0f) < 0.01f);
+    }
+    {
+        vector<Vec2> line;
+        for (int i = 0; i < 12; ++i) line.push_back(Vec2(i * 5.0f, 0));
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(line));
+        check("RigidBody2D compound collinear: no body", rb->getBody() == nullptr);
+        check("RigidBody2D compound collinear: one warning", w.count == 1);
+    }
+    {
+        WarningCapture w;
+        shared_ptr<Node> node;
+        attach(world, node, box2d::Shape2D::polygon(circlePoints(9, 40)));
+        check("RigidBody2D polygon 9 points: warning names Shape2D::compound()",
+              w.lastContains("Shape2D::compound()"));
+    }
+}
+
+// Balls in and above a ring's hole, under gravity.
+static void testCompoundHole() {
+    box2d::World world;
+    world.setup(0, 300);   // 10 m/s^2 at 30 px/m
+    world.setAutoUpdate(false);
+
+    box2d::PolyShape ring;
+    ring.setupCompound(world, squareRing(200, 80), 400, 300);   // hole: y 260..340
+    ring.setStatic();
+
+    box2d::CircleBody inHole, onTop;
+    inHole.setup(world, 400, 275, 10);   // inside the hole
+    onTop.setup(world, 400, 150, 10);    // above the solid top (y 200)
+    step(world, 180);
+
+    float yHole = inHole.getPhysicsPosition().y;
+    float yTop = onTop.getPhysicsPosition().y;
+    check("ring: a ball in the hole falls to the hole's floor (y 330)", abs(yHole - 330) < 1.5f);
+    check("ring: a ball above the solid part lands on it (y 190)", abs(yTop - 190) < 1.5f);
+}
+
+static void testCompoundFilters(box2d::World& world) {
+    box2d::PolyShape poly;
+    poly.setupCompound(world, squareRing(200, 80), 400, 300);
+    auto* collider = poly.getCollider();
+    bool allLinked = true;
+    for (b2Fixture* f = poly.getBody()->GetFixtureList(); f; f = f->GetNext()) {
+        if (f->GetUserData().pointer != reinterpret_cast<uintptr_t>(collider)) allLinked = false;
+    }
+    check("compound collider: every fixture points to the collider", collider && allLinked);
+
+    collider->setCategoryBits(0x0004);
+    collider->setMaskBits(0x0003);
+    collider->setGroupIndex(-2);
+    poly.setSensor(true);
+    bool filters = true, sensors = true;
+    for (b2Fixture* f = poly.getBody()->GetFixtureList(); f; f = f->GetNext()) {
+        const b2Filter& fd = f->GetFilterData();
+        if (fd.categoryBits != 0x0004 || fd.maskBits != 0x0003 || fd.groupIndex != -2) filters = false;
+        if (!f->IsSensor()) sensors = false;
+    }
+    check("compound collider: filter setters reach every fixture", filters);
+    check("compound: setSensor reaches every fixture", sensors);
+
+    shared_ptr<Node> node;
+    auto* rb = attach(world, node, box2d::Shape2D::compound(squareRing(200, 80)));
+    rb->setTrigger(true);
+    bool triggers = rb->getBody() != nullptr;
+    if (rb->getBody()) {
+        for (b2Fixture* f = rb->getBody()->GetFixtureList(); f; f = f->GetNext()) {
+            if (!f->IsSensor()) triggers = false;
+        }
+    }
+    check("RigidBody2D compound: setTrigger reaches every fixture", triggers);
+}
+
+// A bar 200 x 40 with a notch in its bottom (concave, several triangles), and
+// a box 220 x 20 pressed 5 px into its top across the whole width.
+static const vector<Vec2> kNotchedBar = {{-100, -20}, {100, -20}, {100, 20}, {10, 20},
+                                         {0, 5}, {-10, 20}, {-100, 20}};
+
+static void testCompoundEvents() {
+    // Classic API: Collider2D events.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        box2d::PolyShape bar;
+        bar.setupCompound(world, kNotchedBar, 400, 300);
+        bar.setStatic();
+        box2d::RectBody box;
+        box.setup(world, 400, 300 - 20 - 10 + 5, 220, 20);
+
+        int barEnter = 0, barStay = 0, barExit = 0, boxEnter = 0, boxExit = 0;
+        auto* bc = bar.getCollider();
+        auto* xc = box.getCollider();
+        EventListener l1 = bc->onCollisionEnter.listen([&](box2d::CollisionEvent&) { ++barEnter; });
+        EventListener l2 = bc->onCollisionStay.listen([&](box2d::CollisionEvent&) { ++barStay; });
+        EventListener l3 = bc->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++barExit; });
+        EventListener l4 = xc->onCollisionEnter.listen([&](box2d::CollisionEvent&) { ++boxEnter; });
+        EventListener l5 = xc->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++boxExit; });
+
+        world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        int touching = touchingContacts(world, bar.getBody(), box.getBody());
+        printf("  (classic: %d fixtures, %d touching contacts)\n", fixtureCount(bar.getBody()), touching);
+        check("Collider2D: the box touches several of the bar's fixtures", touching >= 2);
+        check("Collider2D: one Enter on each side", barEnter == 1 && boxEnter == 1);
+        world.getCollisionManager()->update();
+        world.getCollisionManager()->update();
+        check("Collider2D: one Stay per update", barStay == 2);
+
+        // An Exit from inside a step is dispatched after it (update()).
+        box.setPhysicsPosition(400, -1000);
+        world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        world.getCollisionManager()->update();
+        check("Collider2D: separated", touchingContacts(world, bar.getBody(), box.getBody()) == 0);
+        check("Collider2D: one Exit on each side", barExit == 1 && boxExit == 1);
+    }
+
+    // Mod API: RigidBody2D events.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> barNode, boxNode;
+        auto* bar = attach(world, barNode, box2d::Shape2D::compound(kNotchedBar));
+        bar->setBodyType(box2d::BodyType::Static);
+        boxNode = make_shared<Node>();
+        boxNode->setPos(400, 300 - 20 - 10 + 5);
+        auto* box = boxNode->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(220, 20));
+
+        int began = 0, stay = 0, ended = 0, boxBegan = 0, boxEnded = 0;
+        EventListener l1 = bar->onCollisionBegan.listen([&](box2d::Contact2D&) { ++began; });
+        EventListener l2 = bar->onCollisionStay.listen([&](box2d::Contact2D&) { ++stay; });
+        EventListener l3 = bar->onCollisionEnded.listen([&](box2d::Contact2D&) { ++ended; });
+        EventListener l4 = box->onCollisionBegan.listen([&](box2d::Contact2D&) { ++boxBegan; });
+        EventListener l5 = box->onCollisionEnded.listen([&](box2d::Contact2D&) { ++boxEnded; });
+
+        world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        int touching = touchingContacts(world, bar->getBody(), box->getBody());
+        printf("  (Mod: %d fixtures, %d touching contacts)\n", fixtureCount(bar->getBody()), touching);
+        check("RigidBody2D: the box touches several of the bar's fixtures", touching >= 2);
+        check("RigidBody2D: one Began on each side", began == 1 && boxBegan == 1);
+        world.getCollisionManager()->update();
+        world.getCollisionManager()->update();
+        check("RigidBody2D: one Stay per update", stay == 2);
+
+        box->getBody()->SetTransform(box2d::World::toBox2d(400, -1000), 0);
+        world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        world.getCollisionManager()->update();
+        check("RigidBody2D: separated", touchingContacts(world, bar->getBody(), box->getBody()) == 0);
+        check("RigidBody2D: one Ended on each side", ended == 1 && boxEnded == 1);
+    }
+}
+
+// All contacts between two bodies, touching or not.
+static int contactsBetween(box2d::World& world, const b2Body* a, const b2Body* b) {
+    int n = 0;
+    for (b2Contact* c = world.getWorld()->GetContactList(); c; c = c->GetNext()) {
+        const b2Body* ba = c->GetFixtureA()->GetBody();
+        const b2Body* bb = c->GetFixtureB()->GetBody();
+        if ((ba == a && bb == b) || (ba == b && bb == a)) ++n;
+    }
+    return n;
+}
+
+// Fixtures of `body` that a `size` px square centered on `spot` overlaps.
+static int fixturesOverlapping(const b2Body* body, Vec2 spot, float size) {
+    b2PolygonShape square;
+    square.SetAsBox(box2d::World::toBox2d(size * 0.5f), box2d::World::toBox2d(size * 0.5f));
+    b2Transform xf(box2d::World::toBox2d(spot.x, spot.y), b2Rot(0.0f));
+    int n = 0;
+    for (const b2Fixture* f = body->GetFixtureList(); f; f = f->GetNext()) {
+        if (b2TestOverlap(f->GetShape(), 0, &square, 0, body->GetTransform(), xf)) ++n;
+    }
+    return n;
+}
+
+// Two triangle fixtures of `body` that share an edge, and a point `inset` px
+// inside each of them from the middle of that edge (world pixels), where a
+// `size` px square overlaps that fixture only. The longest such edge.
+static bool seamSpots(const b2Body* body, float inset, float size, Vec2& spot1, Vec2& spot2) {
+    float best = 0.0f;
+    for (const b2Fixture* f1 = body->GetFixtureList(); f1; f1 = f1->GetNext()) {
+        for (const b2Fixture* f2 = f1->GetNext(); f2; f2 = f2->GetNext()) {
+            auto* p1 = static_cast<const b2PolygonShape*>(f1->GetShape());
+            auto* p2 = static_cast<const b2PolygonShape*>(f2->GetShape());
+            if (p1->m_count != 3 || p2->m_count != 3) continue;
+            for (int i = 0; i < 3; ++i) {
+                b2Vec2 a = p1->m_vertices[i], b = p1->m_vertices[(i + 1) % 3];
+                for (int j = 0; j < 3; ++j) {
+                    b2Vec2 c = p2->m_vertices[j], d = p2->m_vertices[(j + 1) % 3];
+                    if (!(b2DistanceSquared(a, d) < 1e-10f && b2DistanceSquared(b, c) < 1e-10f)) continue;
+                    float len = b2Distance(a, b);
+                    if (len <= best) continue;
+                    b2Vec2 mid = 0.5f * (a + b);
+                    b2Vec2 n(-(b.y - a.y) / len, (b.x - a.x) / len);
+                    b2Vec2 o1 = p1->m_vertices[(i + 2) % 3];
+                    if (b2Dot(n, o1 - mid) < 0) n = -n;
+                    float d2 = box2d::World::toBox2d(inset);
+                    Vec2 s1 = box2d::World::toPixels(body->GetWorldPoint(mid + d2 * n));
+                    Vec2 s2 = box2d::World::toPixels(body->GetWorldPoint(mid - d2 * n));
+                    if (fixturesOverlapping(body, s1, size) != 1 ||
+                        fixturesOverlapping(body, s2, size) != 1) continue;
+                    best = len;
+                    spot1 = s1;
+                    spot2 = s2;
+                }
+            }
+        }
+    }
+    return best > 0.0f;
+}
+
+// A small sensor box slides back and forth across the seam between two
+// fixtures of a compound, touching one of them at a time. Both contacts live
+// on (their AABBs keep overlapping), so in one of the two directions Box2D
+// ends the old contact before it begins the new one within the same step.
+// The body pair touched before and after every step: no Exit / Ended.
+static void testCompoundHandover() {
+    const int crossings = 6;
+
+    // Classic API: Collider2D events.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        box2d::PolyShape bar;
+        bar.setupCompound(world, kNotchedBar, 400, 300);
+        bar.setStatic();
+        Vec2 s1, s2;
+        bool found = seamSpots(bar.getBody(), 4, 2, s1, s2);
+
+        box2d::RectBody box;
+        box.setup(world, s1.x, s1.y, 2, 2);
+        box.setSensor(true);
+        box.getBody()->SetSleepingAllowed(false);
+
+        int barEnter = 0, barExit = 0, boxEnter = 0, boxExit = 0;
+        auto* bc = bar.getCollider();
+        auto* xc = box.getCollider();
+        EventListener l1 = bc->onCollisionEnter.listen([&](box2d::CollisionEvent&) { ++barEnter; });
+        EventListener l2 = bc->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++barExit; });
+        EventListener l3 = xc->onCollisionEnter.listen([&](box2d::CollisionEvent&) { ++boxEnter; });
+        EventListener l4 = xc->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++boxExit; });
+
+        step(world, 1);
+        bool oneAtATime = found;
+        for (int i = 0; i < crossings; ++i) {
+            const Vec2& s = (i % 2 == 0) ? s2 : s1;
+            box.setPhysicsPosition(s.x, s.y);
+            step(world, 1);
+            if (touchingContacts(world, bar.getBody(), box.getBody()) != 1 ||
+                contactsBetween(world, bar.getBody(), box.getBody()) < 2) oneAtATime = false;
+        }
+        check("Collider2D hand-over: one fixture touched at a time, both contacts kept", oneAtATime);
+        check("Collider2D hand-over: one Enter, no Exit across the seam",
+              barEnter == 1 && boxEnter == 1 && barExit == 0 && boxExit == 0);
+
+        box.setPhysicsPosition(400, -1000);
+        step(world, 1);
+        check("Collider2D hand-over: one Exit when it leaves", barExit == 1 && boxExit == 1);
+    }
+
+    // Mod API: RigidBody2D events (trigger, as the box is a sensor). The
+    // world is static: RigidBody2D keeps its contact routing per World
+    // address, and a new world at a destroyed one's address would reuse it.
+    {
+        static box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> barNode, boxNode;
+        auto* bar = attach(world, barNode, box2d::Shape2D::compound(kNotchedBar));
+        bar->setBodyType(box2d::BodyType::Static);
+        Vec2 s1, s2;
+        bool found = bar->getBody() && seamSpots(bar->getBody(), 4, 2, s1, s2);
+
+        boxNode = make_shared<Node>();
+        boxNode->setPos(s1.x, s1.y);
+        auto* box = boxNode->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(2, 2));
+        box->setTrigger(true);
+        box->getBody()->SetSleepingAllowed(false);
+
+        int began = 0, ended = 0, boxBegan = 0, boxEnded = 0;
+        EventListener l1 = bar->onTriggerBegan.listen([&](box2d::Contact2D&) { ++began; });
+        EventListener l2 = bar->onTriggerEnded.listen([&](box2d::Contact2D&) { ++ended; });
+        EventListener l3 = box->onTriggerBegan.listen([&](box2d::Contact2D&) { ++boxBegan; });
+        EventListener l4 = box->onTriggerEnded.listen([&](box2d::Contact2D&) { ++boxEnded; });
+
+        step(world, 1);
+        bool oneAtATime = found;
+        for (int i = 0; i < crossings; ++i) {
+            const Vec2& s = (i % 2 == 0) ? s2 : s1;
+            box->getBody()->SetTransform(box2d::World::toBox2d(s.x, s.y), 0);
+            step(world, 1);
+            if (touchingContacts(world, bar->getBody(), box->getBody()) != 1 ||
+                contactsBetween(world, bar->getBody(), box->getBody()) < 2) oneAtATime = false;
+        }
+        check("RigidBody2D hand-over: one fixture touched at a time, both contacts kept", oneAtATime);
+        check("RigidBody2D hand-over: one Began, no Ended across the seam",
+              began == 1 && boxBegan == 1 && ended == 0 && boxEnded == 0);
+
+        box->getBody()->SetTransform(box2d::World::toBox2d(400, -1000), 0);
+        step(world, 1);
+        check("RigidBody2D hand-over: one Ended when it leaves", ended == 1 && boxEnded == 1);
+    }
+}
+
+// Stay listeners that destroy bodies. Destroying a body ends its contacts at
+// once (EndContact), while CollisionManager::update() is still walking its
+// pairs: the next pairs must still get their Stay, the ended ones no more.
+static void testStayListenerDestroys() {
+    // Classic API: the bar's first Stay destroys the other box, whose pair
+    // comes later in the list (the last one).
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        box2d::PolyShape bar;
+        bar.setupCompound(world, kNotchedBar, 400, 300);
+        bar.setStatic();
+        box2d::RectBody box1, box2;
+        box1.setup(world, 330, 283, 10, 10);   // 3 px into the bar's top (y 280)
+        box2.setup(world, 470, 283, 10, 10);
+        box1.setSensor(true);
+        box2.setSensor(true);
+        step(world, 1);
+        bool setupOk = touchingContacts(world, bar.getBody(), box1.getBody()) > 0 &&
+                       touchingContacts(world, bar.getBody(), box2.getBody()) > 0;
+
+        box2d::RectBody* destroyed = nullptr;
+        int barStay = 0, stay1 = 0, stay2 = 0, exit1 = 0, exit2 = 0;
+        EventListener l1 = bar.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent& e) {
+            ++barStay;
+            if (destroyed) return;
+            destroyed = (e.other == &box1) ? &box2 : &box1;
+            destroyed->destroy();
+        });
+        EventListener l2 = box1.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent&) { ++stay1; });
+        EventListener l3 = box2.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent&) { ++stay2; });
+        EventListener l4 = box1.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++exit1; });
+        EventListener l5 = box2.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++exit2; });
+
+        world.getCollisionManager()->update();
+        const bool gone1 = destroyed == &box1;
+        check("Stay destroys the next pair's body: both boxes touched the bar", setupOk && destroyed);
+        check("Stay destroys the next pair's body: one bar Stay, for the survivor", barStay == 1);
+        check("Stay destroys the next pair's body: survivor Stay once, no Exit",
+              (gone1 ? stay2 : stay1) == 1 && (gone1 ? exit2 : exit1) == 0);
+        check("Stay destroys the next pair's body: the destroyed box gets Exit, no Stay",
+              (gone1 ? stay1 : stay2) == 0 && (gone1 ? exit1 : exit2) == 1);
+
+        world.getCollisionManager()->update();
+        check("Stay destroys the next pair's body: later updates go on", barStay == 2);
+    }
+
+    // Classic API: the bar's first Stay destroys the box it is about (the
+    // pair being dispatched). That box hears no Stay after it, and the other
+    // pair, next in the list, still gets its Stay.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        box2d::PolyShape bar;
+        bar.setupCompound(world, kNotchedBar, 400, 300);
+        bar.setStatic();
+        box2d::RectBody box1, box2;
+        box1.setup(world, 330, 283, 10, 10);
+        box2.setup(world, 470, 283, 10, 10);
+        box1.setSensor(true);
+        box2.setSensor(true);
+        step(world, 1);
+
+        box2d::RectBody* destroyed = nullptr;
+        int barStay = 0, staysAfter = 0, stay1 = 0, stay2 = 0, exit1 = 0, exit2 = 0;
+        EventListener l1 = bar.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent& e) {
+            ++barStay;
+            if (destroyed) return;
+            destroyed = (e.other == &box1) ? &box1 : &box2;
+            destroyed->destroy();
+        });
+        EventListener l2 = box1.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent&) {
+            ++stay1;
+            if (destroyed == &box1) ++staysAfter;
+        });
+        EventListener l3 = box2.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent&) {
+            ++stay2;
+            if (destroyed == &box2) ++staysAfter;
+        });
+        EventListener l4 = box1.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++exit1; });
+        EventListener l5 = box2.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++exit2; });
+
+        world.getCollisionManager()->update();
+        const bool gone1 = destroyed == &box1;
+        check("Stay destroys its own pair's body: no Stay after it, one Exit",
+              destroyed && staysAfter == 0 && (gone1 ? exit1 : exit2) == 1);
+        check("Stay destroys its own pair's body: the next pair still gets its Stay",
+              barStay == 2 && (gone1 ? stay2 : stay1) == 1 && (gone1 ? exit2 : exit1) == 0);
+    }
+
+    // Mod API: the bar's first Stay drops the other box's node (its
+    // RigidBody2D destroys the body), whose body pair comes later. A static
+    // world, as above.
+    {
+        static box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> barNode, node1, node2;
+        auto* bar = attach(world, barNode, box2d::Shape2D::compound(kNotchedBar));
+        bar->setBodyType(box2d::BodyType::Static);
+        node1 = make_shared<Node>();
+        node1->setPos(330, 283);
+        auto* rb1 = node1->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(10, 10));
+        rb1->setTrigger(true);
+        node2 = make_shared<Node>();
+        node2->setPos(470, 283);
+        auto* rb2 = node2->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(10, 10));
+        rb2->setTrigger(true);
+        step(world, 1);
+
+        int barStay = 0, barEnded = 0;
+        bool dropped = false;
+        EventListener l1 = bar->onTriggerStay.listen([&](box2d::Contact2D& c) {
+            ++barStay;
+            if (dropped) return;
+            dropped = true;
+            if (c.other == rb1) node2.reset(); else node1.reset();
+        });
+        // The dropped RigidBody2D unregisters before its body goes, so the
+        // bar can't tell it was a trigger: count either kind of Ended.
+        EventListener l2 = bar->onTriggerEnded.listen([&](box2d::Contact2D&) { ++barEnded; });
+        EventListener l3 = bar->onCollisionEnded.listen([&](box2d::Contact2D&) { ++barEnded; });
+
+        world.getCollisionManager()->update();
+        check("RigidBody2D Stay drops the next pair's node: one bar Stay, one Ended",
+              dropped && barStay == 1 && barEnded == 1);
+        world.getCollisionManager()->update();
+        check("RigidBody2D Stay drops the next pair's node: later updates go on", barStay == 2);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Event lifetimes: listeners that free bodies, and bodies destroyed before a
+// deferred Exit / Ended fires (#427). Run under ASan too: without the guards
+// these are use-after-frees, which a plain build may not notice.
+// ---------------------------------------------------------------------------
+
+// One step that ends the contacts, with the Exits left pending (no update()).
+static void stepOnly(box2d::World& world) {
+    world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+}
+
+// A static 200 x 20 platform at (400, 300), and balls of radius 10 sunk 3 px
+// into its top at the given x. Balls are sensors, so nothing pushes them out.
+static const float kBallY = 300 - 10 - 10 + 3;
+
+static void testClassicEventLifetimes() {
+    // An Exit listener frees the other body: the pair's second notify must
+    // not reach it.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        auto platform = make_unique<box2d::RectBody>();
+        platform->setup(world, 400, 300, 200, 20);
+        platform->setStatic();
+        auto ball = make_unique<box2d::CircleBody>();
+        ball->setup(world, 400, kBallY, 10);
+        ball->setSensor(true);
+        step(world, 1);
+        const bool touching = touchingContacts(world, platform->getBody(), ball->getBody()) > 0;
+
+        int platformExit = 0, ballExit = 0;
+        EventListener l1 = platform->getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
+            ++platformExit;
+            ball.reset();
+        });
+        EventListener l2 = ball->getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
+            ++ballExit;
+            platform.reset();
+        });
+
+        ball->setPhysicsPosition(400, -1000);
+        step(world, 1);
+        check("Exit listener frees the other body: the first side gets its Exit, the freed one none",
+              touching && platformExit + ballExit == 1 && (!platform || !ball));
+    }
+
+    // Two balls leave in the same step; the first ball's Exit listener
+    // frees the platform. The second ball still gets its Exit, with no other.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        auto platform = make_unique<box2d::RectBody>();
+        platform->setup(world, 400, 300, 200, 20);
+        platform->setStatic();
+        box2d::CircleBody ball1, ball2;
+        ball1.setup(world, 340, kBallY, 10);
+        ball2.setup(world, 460, kBallY, 10);
+        ball1.setSensor(true);
+        ball2.setSensor(true);
+        step(world, 1);
+        const bool touching = touchingContacts(world, platform->getBody(), ball1.getBody()) > 0 &&
+                              touchingContacts(world, platform->getBody(), ball2.getBody()) > 0;
+
+        int platformExit = 0, exit1 = 0, exit2 = 0, secondOtherNull = 0;
+        EventListener l1 = platform->getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
+            ++platformExit;
+        });
+        auto onExit = [&](int& count) {
+            return [&count, &platform, &secondOtherNull](box2d::CollisionEvent& e) {
+                ++count;
+                if (platform) platform.reset();
+                else if (e.other == nullptr) ++secondOtherNull;
+            };
+        };
+        EventListener l2 = ball1.getCollider()->onCollisionExit.listen(onExit(exit1));
+        EventListener l3 = ball2.getCollider()->onCollisionExit.listen(onExit(exit2));
+
+        ball1.setPhysicsPosition(340, -1000);
+        ball2.setPhysicsPosition(460, -1000);
+        step(world, 1);
+        check("two balls leave, the first frees the platform: one Exit each, the second with no other",
+              touching && !platform && exit1 == 1 && exit2 == 1 && secondOtherNull == 1);
+        check("two balls leave, the first frees the platform: at most one platform Exit",
+              platformExit <= 1);
+    }
+
+    // Manual stepping: Step(), destroy the ball, make a new one (Box2D's
+    // allocator hands out the freed body again), then update(). The platform
+    // gets its Exit with no other; nothing reaches the freed ball or the new one.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        box2d::RectBody platform;
+        platform.setup(world, 400, 300, 200, 20);
+        platform.setStatic();
+        auto ball = make_unique<box2d::CircleBody>();
+        ball->setup(world, 400, kBallY, 10);
+        ball->setSensor(true);
+        step(world, 1);
+
+        int platformExit = 0, platformOtherNull = 0, oldBallExit = 0, newBallExit = 0;
+        EventListener l1 = platform.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent& e) {
+            ++platformExit;
+            if (e.other == nullptr) ++platformOtherNull;
+        });
+        EventListener l2 = ball->getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
+            ++oldBallExit;
+        });
+
+        ball->setPhysicsPosition(400, -1000);
+        stepOnly(world);
+        const b2Body* oldBody = ball->getBody();
+        ball.reset();
+        box2d::CircleBody newBall;
+        newBall.setup(world, 100, -1000, 10);
+        EventListener l3 = newBall.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
+            ++newBallExit;
+        });
+        printf("  (classic manual step: new body %s the freed one's address)\n",
+               newBall.getBody() == oldBody ? "reuses" : "does not reuse");
+        world.getCollisionManager()->update();
+        check("manual Step, destroy, update(): the platform's Exit has no other",
+              platformExit == 1 && platformOtherNull == 1);
+        check("manual Step, destroy, update(): nothing reaches the freed ball or a new one",
+              oldBallExit == 0 && newBallExit == 0);
+    }
+}
+
+// Counts a RigidBody2D's events, collision and trigger alike (a side whose
+// other body is gone can't tell it was a trigger). `hook` runs after the
+// count, with the phase (0 began, 1 stay, 2 ended).
+struct ModCounts {
+    int began = 0, stay = 0, ended = 0, otherNull = 0;
+};
+
+static vector<EventListener> countEvents(box2d::RigidBody2D* rb, ModCounts& n,
+                                         function<void(int, box2d::Contact2D&)> hook = nullptr) {
+    auto on = [&n, hook](int phase) {
+        return [&n, hook, phase](box2d::Contact2D& c) {
+            (phase == 0 ? n.began : phase == 1 ? n.stay : n.ended)++;
+            if (!c.other) ++n.otherNull;
+            if (hook) hook(phase, c);
+        };
+    };
+    vector<EventListener> ls;
+    ls.push_back(rb->onCollisionBegan.listen(on(0)));
+    ls.push_back(rb->onCollisionStay.listen(on(1)));
+    ls.push_back(rb->onCollisionEnded.listen(on(2)));
+    ls.push_back(rb->onTriggerBegan.listen(on(0)));
+    ls.push_back(rb->onTriggerStay.listen(on(1)));
+    ls.push_back(rb->onTriggerEnded.listen(on(2)));
+    return ls;
+}
+
+static box2d::RigidBody2D* addModBody(box2d::World& world, shared_ptr<Node>& node, float x, float y,
+                                      const box2d::Shape2D& shape) {
+    node = make_shared<Node>();
+    node->setPos(x, y);
+    return node->addMod<box2d::RigidBody2D>(world, shape);
+}
+
+static box2d::RigidBody2D* addPlatform(box2d::World& world, shared_ptr<Node>& node) {
+    auto* rb = addModBody(world, node, 400, 300, box2d::Shape2D::box(200, 20));
+    rb->setBodyType(box2d::BodyType::Static);
+    return rb;
+}
+
+static box2d::RigidBody2D* addBall(box2d::World& world, shared_ptr<Node>& node, float x) {
+    auto* rb = addModBody(world, node, x, kBallY, box2d::Shape2D::circle(10));
+    rb->setTrigger(true);
+    return rb;
+}
+
+// Each Mod case gets its own world: the contact router is kept per World*.
+static void testModEventLifetimes() {
+    // A deferred Ended listener drops the other node: the second side must
+    // not be notified.
+    {
+        static box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> platformNode, ballNode;
+        auto* platform = addPlatform(world, platformNode);
+        auto* ball = addBall(world, ballNode, 400);
+        step(world, 1);
+        const bool touching = touchingContacts(world, platform->getBody(), ball->getBody()) > 0;
+
+        ModCounts p, b;
+        b2Body* ballBody = ball->getBody();
+        auto l1 = countEvents(platform, p, [&](int phase, box2d::Contact2D&) {
+            if (phase == 2) ballNode.reset();
+        });
+        auto l2 = countEvents(ball, b, [&](int phase, box2d::Contact2D&) {
+            if (phase == 2) platformNode.reset();
+        });
+
+        ballBody->SetTransform(box2d::World::toBox2d(400, -1000), 0);
+        step(world, 1);
+        check("RigidBody2D Ended listener drops the other node: one Ended, the dropped side none",
+              touching && p.ended + b.ended == 1 && (!platformNode || !ballNode));
+    }
+
+    // Two balls leave in the same step; the first ball's Ended listener
+    // drops the platform. The second ball still gets its Ended, with no other.
+    {
+        static box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> platformNode, node1, node2;
+        auto* platform = addPlatform(world, platformNode);
+        auto* ball1 = addBall(world, node1, 340);
+        auto* ball2 = addBall(world, node2, 460);
+        step(world, 1);
+        const bool touching = touchingContacts(world, platform->getBody(), ball1->getBody()) > 0 &&
+                              touchingContacts(world, platform->getBody(), ball2->getBody()) > 0;
+
+        ModCounts p, b1, b2;
+        auto l1 = countEvents(platform, p);
+        auto drop = [&](int phase, box2d::Contact2D&) {
+            if (phase == 2 && platformNode) platformNode.reset();
+        };
+        auto l2 = countEvents(ball1, b1, drop);
+        auto l3 = countEvents(ball2, b2, drop);
+
+        ball1->getBody()->SetTransform(box2d::World::toBox2d(340, -1000), 0);
+        ball2->getBody()->SetTransform(box2d::World::toBox2d(460, -1000), 0);
+        step(world, 1);
+        check("RigidBody2D two balls leave, the first drops the platform: one Ended each, the second with no other",
+              touching && !platformNode && b1.ended == 1 && b2.ended == 1 &&
+              b1.otherNull + b2.otherNull == 1);
+        check("RigidBody2D two balls leave, the first drops the platform: at most one platform Ended",
+              p.ended <= 1);
+    }
+
+    // Manual stepping: Step(), drop the ball's node, add a new ball (it gets
+    // the freed b2Body's address), then update(). The platform's Ended has
+    // no other; the new ball hears nothing.
+    {
+        static box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> platformNode, ballNode, newNode;
+        auto* platform = addPlatform(world, platformNode);
+        auto* ball = addBall(world, ballNode, 400);
+        step(world, 1);
+
+        ModCounts p, fresh;
+        auto l1 = countEvents(platform, p);
+        ball->getBody()->SetTransform(box2d::World::toBox2d(400, -1000), 0);
+        stepOnly(world);
+        const b2Body* oldBody = ball->getBody();
+        ballNode.reset();
+        auto* newBall = addModBody(world, newNode, 100, -1000, box2d::Shape2D::circle(10));
+        auto l2 = countEvents(newBall, fresh);
+        const bool reused = newBall->getBody() == oldBody;
+        printf("  (Mod manual step: new body %s the freed one's address)\n", reused ? "reuses" : "does not reuse");
+        world.getCollisionManager()->update();
+        check("RigidBody2D manual Step, drop, update(): the platform's Ended has no other",
+              p.ended == 1 && p.otherNull == 1);
+        check("RigidBody2D manual Step, drop, update(): the new body at the freed address hears nothing",
+              reused && fresh.began + fresh.stay + fresh.ended == 0);
+    }
+
+    // A Stay listener drops the other node of the pair being dispatched; a
+    // second run also adds a new ball in its place (same b2Body address).
+    for (bool replace : {false, true}) {
+        static box2d::World worlds[2];
+        box2d::World& world = worlds[replace ? 1 : 0];
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> platformNode, ballNode, newNode;
+        auto* platform = addPlatform(world, platformNode);
+        auto* ball = addBall(world, ballNode, 400);
+        step(world, 1);
+
+        ModCounts p, b, fresh;
+        vector<EventListener> freshL;
+        bool reused = false;
+        auto dropOther = [&](shared_ptr<Node>* other) {
+            return [&, other](int phase, box2d::Contact2D&) {
+                if (phase != 1 || !platformNode || !ballNode) return;
+                const b2Body* gone = (other == &ballNode) ? ball->getBody() : platform->getBody();
+                other->reset();
+                if (!replace) return;
+                auto* rb = addModBody(world, newNode, 400, kBallY, box2d::Shape2D::circle(10));
+                rb->setTrigger(true);
+                reused = rb->getBody() == gone;
+                freshL = countEvents(rb, fresh);
+            };
+        };
+        auto l1 = countEvents(platform, p, dropOther(&ballNode));
+        auto l2 = countEvents(ball, b, dropOther(&platformNode));
+
+        world.getCollisionManager()->update();
+        const string tag = replace ? " (and adds a new ball there)" : "";
+        check("RigidBody2D Stay drops the other node of its pair" + tag + ": one Stay, the dropped side none",
+              p.stay + b.stay == 1 && (!platformNode || !ballNode));
+        if (replace) {
+            check("RigidBody2D Stay drops the other node of its pair" + tag + ": the new ball hears nothing",
+                  reused && fresh.began + fresh.stay + fresh.ended == 0);
+        }
+    }
+}
+
+// The World's own DestroyBody calls: createBounds() replacing the walls
+// (the new walls get the freed b2Body's address) and clear(). The world-level
+// Ended deferred from the step must not name the freed walls or bodies.
+static void testWorldEventLifetimes() {
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+        world.createBounds(0, 0, 800, 600);
+
+        box2d::CircleBody ball;
+        ball.setup(world, 400, 600 - 10 + 3, 10);   // 3 px into the floor
+        ball.setSensor(true);
+        step(world, 1);
+
+        int ended = 0;
+        box2d::WorldContact last;
+        EventListener l = world.getCollisionManager()->contactEnded.listen([&](box2d::WorldContact& c) {
+            ++ended;
+            last = c;
+        });
+        ball.setPhysicsPosition(400, 300);
+        stepOnly(world);
+        const b2Body* oldWalls = nullptr;
+        for (b2Body* b = world.getWorld()->GetBodyList(); b; b = b->GetNext()) {
+            if (b != ball.getBody()) oldWalls = b;
+        }
+        world.createBounds(0, 0, 800, 600);
+        bool reused = false;
+        for (b2Body* b = world.getWorld()->GetBodyList(); b; b = b->GetNext()) {
+            if (b == oldWalls) reused = true;
+        }
+        world.getCollisionManager()->update();
+        const bool ballAndNull = (last.a == ball.getBody() && !last.b) || (last.b == ball.getBody() && !last.a);
+        check("createBounds() between Step() and update(): one Ended, naming the ball and no walls",
+              reused && ended == 1 && ballAndNull);
+    }
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        auto addDisc = [&](float x, float y) {
+            b2BodyDef bd;
+            bd.type = b2_dynamicBody;
+            bd.position = box2d::World::toBox2d(x, y);
+            b2Body* body = world.getWorld()->CreateBody(&bd);
+            b2CircleShape c;
+            c.m_radius = box2d::World::toBox2d(10);
+            b2FixtureDef fd;
+            fd.shape = &c;
+            fd.isSensor = true;
+            body->CreateFixture(&fd);
+            return body;
+        };
+        b2Body* a = addDisc(400, 300);
+        addDisc(415, 300);
+        step(world, 1);
+
+        int ended = 0;
+        EventListener l = world.getCollisionManager()->contactEnded.listen([&](box2d::WorldContact&) { ++ended; });
+        a->SetTransform(box2d::World::toBox2d(400, -1000), 0);
+        stepOnly(world);
+        world.clear();
+        world.getCollisionManager()->update();
+        check("clear() between Step() and update(): no Ended for the freed bodies", ended == 0);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Compound bodies: the inertia check runs once on the whole body (#427)
+// ---------------------------------------------------------------------------
+
+// A w x h rectangle centered on the origin whose corners are quarter circles
+// of radius r, `segments` segments each (segments + 1 points per corner).
+static vector<Vec2> roundedRectPoints(float w, float h, float r, int segments) {
+    const float cx[4] = {w * 0.5f - r, -w * 0.5f + r, -w * 0.5f + r, w * 0.5f - r};
+    const float cy[4] = {h * 0.5f - r, h * 0.5f - r, -h * 0.5f + r, -h * 0.5f + r};
+    vector<Vec2> pts;
+    for (int c = 0; c < 4; ++c) {
+        for (int i = 0; i <= segments; ++i) {
+            float a = QUARTER_TAU * c + QUARTER_TAU * i / segments;
+            pts.push_back(Vec2(cx[c] + cos(a) * r, cy[c] + sin(a) * r));
+        }
+    }
+    return pts;
+}
+
+static vector<Vec2> shifted(vector<Vec2> pts, float dx, float dy) {
+    for (auto& p : pts) p += Vec2(dx, dy);
+    return pts;
+}
+
+// True when `body` keeps a positive rotational inertia about its centroid at
+// every density in `densities`. b2Body::ResetMassData() sets 1 / I there, so
+// an impulse turns it the right way only if I > 0 (in Debug, I <= 0 asserts
+// instead).
+static bool inertiaPositive(b2Body* body, const vector<float>& densities) {
+    if (!body) return false;
+    bool ok = true;
+    for (float d : densities) {
+        for (b2Fixture* f = body->GetFixtureList(); f; f = f->GetNext()) f->SetDensity(d);
+        body->ResetMassData();
+        body->SetAngularVelocity(0.0f);
+        body->ApplyAngularImpulse(1.0f, true);
+        float spin = body->GetAngularVelocity();
+        if (!(isfinite(spin) && spin > 0.0f)) ok = false;
+    }
+    body->SetAngularVelocity(0.0f);
+    return ok;
+}
+
+static void testCompoundOffset(box2d::World& world) {
+    // Ordinary outlines have tiny ear triangles far (for their size) from the
+    // body origin. Box2D only needs the whole body's inertia, so they are kept.
+    struct Case {
+        const char* name;
+        vector<Vec2> pts;
+        size_t triangles;
+        float area;   // analytic
+    };
+    const vector<Case> cases = {
+        {"600x40 rounded rectangle, 4 px corners", roundedRectPoints(600, 40, 4, 8), 34,
+         600.0f * 40.0f - (4.0f - TAU * 0.5f) * 16.0f},
+        {"radius-40 128-gon 1000 px off the origin", shifted(circlePoints(128, 40), 1000, 0), 126,
+         TAU * 0.5f * 40.0f * 40.0f},
+        {"radius-300 4096-gon", circlePoints(4096, 300), 4094, TAU * 0.5f * 300.0f * 300.0f},
+    };
+    for (const auto& c : cases) {
+        const string name = string("setupCompound ") + c.name;
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, c.pts, 400, 300);
+        check(name + ": created", poly.isCreated());
+        check(name + ": no warning", w.count == 0);
+        check(name + ": one fixture per triangle (" + to_string(c.triangles) + ")",
+              fixtureCount(poly.getBody()) == int(c.triangles));
+        check(name + ": mass = analytic area x density (0.5%)",
+              abs(poly.getMass() / areaMass(c.area) - 1.0f) < 0.005f);
+    }
+    {
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(roundedRectPoints(600, 40, 4, 8)));
+        check("RigidBody2D compound 600x40 rounded rectangle: 34 fixtures, no warning",
+              fixtureCount(rb->getBody()) == 34 && w.count == 0);
+    }
+
+    // A small concave outline (3 triangles) is fine at the origin; 2000 px
+    // away its whole body is too small for the offset: refused as a whole.
+    const vector<Vec2> notch = {{-0.5f, -0.5f}, {0.5f, -0.5f}, {0, 0}, {0.5f, 0.5f}, {-0.5f, 0.5f}};
+    {
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, notch, 400, 300);
+        check("setupCompound 1 px notch at the origin: 3 fixtures, no warning",
+              fixtureCount(poly.getBody()) == 3 && w.count == 0);
+    }
+    {
+        int bodiesBefore = world.getBodyCount();
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, shifted(notch, 2000, 2000), 400, 300);
+        check("setupCompound 1 px notch 2000 px off: no body", !poly.isCreated());
+        check("setupCompound 1 px notch 2000 px off: no Box2D body", world.getBodyCount() == bodiesBefore);
+        check("setupCompound 1 px notch 2000 px off: one warning, says too small",
+              w.count == 1 && w.lastContains("too small for its distance"));
+        check("setupCompound 1 px notch 2000 px off: no vertices", poly.getVertices().empty());
+    }
+    {
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(shifted(notch, 2000, 2000)));
+        check("RigidBody2D compound 1 px notch 2000 px off: no body, warning says too small",
+              rb->getBody() == nullptr && w.count == 1 && w.lastContains("too small for its distance"));
+    }
+
+    // A small convex ring far from the origin is refused as one polygon for
+    // its offset, not triangulated.
+    {
+        const vector<Vec2> tiny = {{600, 600}, {600.5f, 600}, {600, 600.5f}};
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, tiny, 0, 0);
+        check("setupCompound tiny far triangle: no body", !poly.isCreated());
+        check("setupCompound tiny far triangle: warning says too small",
+              w.count == 1 && w.lastContains("too small for its distance") && !w.lastContains("no area"));
+
+        Path path(tiny);
+        path.close();
+        box2d::detail::CompoundShapes shapes;
+        bool made = box2d::detail::makeCompoundShapes(path, shapes);
+        check("makeCompoundShapes tiny far triangle: refused as one polygon, not triangulated",
+              !made && shapes.error == box2d::detail::PolygonError::TooSmallForOffset
+                    && shapes.triangles == 0 && shapes.shapes.empty());
+
+        WarningCapture w2;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(tiny));
+        check("RigidBody2D compound tiny far triangle: no body, warning says too small",
+              rb->getBody() == nullptr && w2.count == 1 && w2.lastContains("too small for its distance"));
+    }
+
+    // The combined check keeps its margin: just inside the distance where it
+    // starts refusing, every density keeps the inertia positive. (With a
+    // fixed 16-epsilon margin the 128-gon and larger fail here: Box2D's float
+    // sum over many fixtures rounds differently at other densities.)
+    {
+        vector<float> densities = {0.001f, 0.0037f, 0.01f, 0.05f, 0.3f, 1.0f, 2.5f, 7.1f, 33.0f, 100.0f, 420.0f, 1000.0f};
+        mt19937 rng(427);
+        uniform_real_distribution<float> exponent(-3.0f, 3.0f);
+        for (int i = 0; i < 20; ++i) densities.push_back(pow(10.0f, exponent(rng)));
+
+        struct Outline {
+            const char* name;
+            vector<Vec2> pts;
+        };
+        const vector<Outline> outlines = {
+            {"1 px notch", notch},
+            {"600x40 rounded rectangle", roundedRectPoints(600, 40, 4, 8)},
+            {"radius-40 128-gon", circlePoints(128, 40)},
+            {"radius-300 1024-gon", circlePoints(1024, 300)},
+        };
+        for (const auto& o : outlines) {
+            auto made = [&](double dist, box2d::detail::CompoundShapes& out) {
+                Path path(shifted(o.pts, float(dist * 0.6), float(dist * 0.8)));
+                path.close();
+                return box2d::detail::makeCompoundShapes(path, out);
+            };
+            // Bisect the distance where the check starts refusing.
+            double lo = 0.0, hi = 1.0;
+            box2d::detail::CompoundShapes out;
+            while (made(hi, out)) hi *= 2.0;
+            for (int i = 0; i < 40; ++i) {
+                double mid = (lo + hi) * 0.5;
+                (made(mid, out) ? lo : hi) = mid;
+            }
+            // Build the accepted bodies just inside through setupCompound()
+            // (in Debug, Box2D asserts while creating one if any step of it
+            // loses the inertia), then try every density on them.
+            int tried = 0, bad = 0;
+            for (int k = 0; k < 20; ++k) {
+                const double dist = lo * (1.0 - k * 1e-3);
+                if (!made(dist, out)) continue;
+                ++tried;
+                box2d::PolyShape poly;
+                poly.setupCompound(world, shifted(o.pts, float(dist * 0.6), float(dist * 0.8)), 0, 0);
+                if (!inertiaPositive(poly.getBody(), densities)) ++bad;
+            }
+            {
+                // RigidBody2D creates its fixtures its own way.
+                shared_ptr<Node> node = make_shared<Node>();
+                auto* rb = node->addMod<box2d::RigidBody2D>(
+                    world, box2d::Shape2D::compound(shifted(o.pts, float(lo * 0.6), float(lo * 0.8))));
+                if (!inertiaPositive(rb->getBody(), densities)) ++bad;
+            }
+            printf("  %s: refused from %.0f px, %d accepted bodies just inside\n", o.name, hi, tried);
+            check(string("combined inertia check, ") + o.name + ": positive at every density just inside",
+                  tried > 0 && bad == 0);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Density and body type after creation (#427). Polygon and compound fixtures
+// are added at density 0 and get their density once all are in: every
+// fixture must end up with it, and changing the density or the body type
+// later must give the mass data of a body made that way directly.
+// ---------------------------------------------------------------------------
+
+// True when `body` has fixtures and every one of them has density `d`.
+static bool everyFixtureDensity(const b2Body* body, float d) {
+    if (!body || !body->GetFixtureList()) return false;
+    for (const b2Fixture* f = body->GetFixtureList(); f; f = f->GetNext()) {
+        if (f->GetDensity() != d) return false;
+    }
+    return true;
+}
+
+struct MassProps {
+    float mass = 0.0f;
+    float inertia = 0.0f;   // about the body origin
+    b2Vec2 center = b2Vec2_zero;
+};
+
+static MassProps massProps(const b2Body* body) {
+    MassProps m;
+    if (!body) return m;
+    m.mass = body->GetMass();
+    m.inertia = body->GetInertia();
+    m.center = body->GetLocalCenter();
+    return m;
+}
+
+// The same fixtures at the same density go through the same float sums in
+// the same order, so the mass data must match exactly.
+static bool sameMass(const MassProps& got, const MassProps& want) {
+    return want.mass > 0.0f && got.mass == want.mass && got.inertia == want.inertia && got.center == want.center;
+}
+
+// `pts` moved `dist` px from the origin along (0.6, 0.8).
+static vector<Vec2> offsetBy(const vector<Vec2>& pts, double dist) {
+    return shifted(pts, float(dist * 0.6), float(dist * 0.8));
+}
+
+// The largest distance (bisected) at which `accepted` still takes `pts`.
+static double acceptLimit(const vector<Vec2>& pts, const function<bool(const vector<Vec2>&)>& accepted) {
+    double lo = 0.0, hi = 1.0;
+    while (hi < 1e9 && accepted(offsetBy(pts, hi))) hi *= 2.0;
+    for (int i = 0; i < 40; ++i) {
+        double mid = (lo + hi) * 0.5;
+        (accepted(offsetBy(pts, mid)) ? lo : hi) = mid;
+    }
+    return lo;
+}
+
+static void testDensityAndType(box2d::World& world) {
+    // Outlines just inside the offset limit: a mass reset over only some of
+    // the fixtures, or at a density the check did not cover, would lose the
+    // inertia there (a Box2D assert in Debug).
+    const vector<Vec2> gon = circlePoints(128, 40);
+    const vector<Vec2> hex = circlePoints(6, 2);
+    const double gonLimit = acceptLimit(gon, [](const vector<Vec2>& p) {
+        Path path(p);
+        path.close();
+        box2d::detail::CompoundShapes out;
+        return box2d::detail::makeCompoundShapes(path, out);
+    });
+    const double hexLimit = acceptLimit(hex, [](const vector<Vec2>& p) {
+        b2PolygonShape shape;
+        vector<Vec2> hull;
+        return box2d::detail::makePolygonShape(p, shape, hull) == box2d::detail::PolygonError::None;
+    });
+
+    struct Kind {
+        string name;
+        vector<Vec2> pts;
+        bool compound;
+    };
+    const vector<Kind> kinds = {
+        {"compound 128-gon near the offset limit", offsetBy(gon, gonLimit), true},
+        {"polygon hexagon near the offset limit", offsetBy(hex, hexLimit), false},
+    };
+    auto modBody = [&](const Kind& k, shared_ptr<Node>& node, box2d::BodyType type, float d) {
+        node = make_shared<Node>();
+        node->setPos(400, 300);
+        auto shape = k.compound ? box2d::Shape2D::compound(k.pts) : box2d::Shape2D::polygon(k.pts);
+        return node->addMod<box2d::RigidBody2D>(world, shape, type, d);
+    };
+    auto classicBody = [&](const Kind& k, box2d::PolyShape& poly) {
+        if (k.compound) poly.setupCompound(world, k.pts, 400, 300);
+        else poly.setup(world, k.pts, 400, 300);
+    };
+    const vector<float> densities = {0.001f, 2.5f, 1000.0f};
+
+    for (const auto& k : kinds) {
+        // (a) Every fixture has the requested density once the body exists.
+        {
+            WarningCapture w;
+            box2d::PolyShape poly;
+            classicBody(k, poly);
+            const int want = k.compound ? 126 : 1;
+            check("PolyShape " + k.name + ": created, no warning, " + to_string(want) + " fixture(s)",
+                  poly.isCreated() && w.count == 0 && fixtureCount(poly.getBody()) == want);
+            check("PolyShape " + k.name + ": every fixture density 1",
+                  everyFixtureDensity(poly.getBody(), 1.0f));
+        }
+        {
+            shared_ptr<Node> node;
+            auto* rb = modBody(k, node, box2d::BodyType::Dynamic, 1.0f);
+            check("RigidBody2D " + k.name + ": every fixture density 1 (default)",
+                  everyFixtureDensity(rb->getBody(), 1.0f));
+            shared_ptr<Node> node2;
+            auto* rb2 = modBody(k, node2, box2d::BodyType::Dynamic, 2.5f);
+            check("RigidBody2D " + k.name + ": every fixture density 2.5 (dynamic)",
+                  everyFixtureDensity(rb2->getBody(), 2.5f));
+            shared_ptr<Node> node3;
+            auto* rb3 = modBody(k, node3, box2d::BodyType::Static, 2.5f);
+            check("RigidBody2D " + k.name + ": every fixture density 2.5 (static)",
+                  everyFixtureDensity(rb3->getBody(), 2.5f));
+        }
+
+        // (b) Density and body type changed afterwards give the mass data of
+        // a body created that way.
+        bool staticThenDynamic = true, densityLater = true, bothLater = true;
+        bool classicDensity = true, classicStaticDensityDynamic = true;
+        for (float d : densities) {
+            shared_ptr<Node> directNode;
+            const MassProps direct = massProps(modBody(k, directNode, box2d::BodyType::Dynamic, d)->getBody());
+            {
+                // Created static at d, then made dynamic.
+                shared_ptr<Node> node;
+                auto* rb = modBody(k, node, box2d::BodyType::Static, d);
+                const bool wasStatic = rb->getBody() && rb->getBody()->GetMass() == 0.0f;
+                rb->setBodyType(box2d::BodyType::Dynamic);
+                if (!wasStatic || !sameMass(massProps(rb->getBody()), direct)) staticThenDynamic = false;
+            }
+            {
+                // Created dynamic at density 1, then given d.
+                shared_ptr<Node> node;
+                auto* rb = modBody(k, node, box2d::BodyType::Dynamic, 1.0f);
+                rb->setDensity(d);
+                if (!everyFixtureDensity(rb->getBody(), d) || !sameMass(massProps(rb->getBody()), direct)) {
+                    densityLater = false;
+                }
+            }
+            {
+                // Created static at density 1, given d, then made dynamic.
+                shared_ptr<Node> node;
+                auto* rb = modBody(k, node, box2d::BodyType::Static, 1.0f);
+                rb->setDensity(d);
+                rb->setBodyType(box2d::BodyType::Dynamic);
+                if (!sameMass(massProps(rb->getBody()), direct)) bothLater = false;
+            }
+            {
+                box2d::PolyShape poly;
+                classicBody(k, poly);
+                poly.setDensity(d);
+                if (!everyFixtureDensity(poly.getBody(), d) || !sameMass(massProps(poly.getBody()), direct)) {
+                    classicDensity = false;
+                }
+            }
+            {
+                box2d::PolyShape poly;
+                classicBody(k, poly);
+                poly.setStatic();
+                poly.setDensity(d);
+                poly.setDynamic();
+                if (!sameMass(massProps(poly.getBody()), direct)) classicStaticDensityDynamic = false;
+            }
+        }
+        check("RigidBody2D " + k.name + ": static, then setBodyType(Dynamic) = created dynamic",
+              staticThenDynamic);
+        check("RigidBody2D " + k.name + ": setDensity() later = created at that density", densityLater);
+        check("RigidBody2D " + k.name + ": static, setDensity(), setBodyType(Dynamic) = created so",
+              bothLater);
+        check("PolyShape " + k.name + ": setDensity() = RigidBody2D created at that density", classicDensity);
+        check("PolyShape " + k.name + ": setStatic(), setDensity(), setDynamic() = created so",
+              classicStaticDensityDynamic);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // reducedConvexHull(): heap-based reduction vs the O(h^2) scan it replaced
 // ---------------------------------------------------------------------------
 
@@ -696,6 +2152,17 @@ int main() {
     testPolyShapeValid(world);
     testSetupConvex(world);
     testRigidBody2D(world);
+    testCompoundShapes(world);
+    testCompoundFilters(world);
+    testCompoundHole();
+    testCompoundEvents();
+    testCompoundHandover();
+    testStayListenerDestroys();
+    testClassicEventLifetimes();
+    testModEventLifetimes();
+    testWorldEventLifetimes();
+    testCompoundOffset(world);
+    testDensityAndType(world);
     testReducedConvexHull();
 
     if (g_fail) {

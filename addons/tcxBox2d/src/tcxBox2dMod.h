@@ -32,6 +32,7 @@
 #include "tcxBox2dPolygonCheck.h"
 #include <TrussC.h>   // tc::Mod, tc::Node, drawing, TC_REFLECT
 #include <box2d/box2d.h>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 #include <cmath>
@@ -42,11 +43,12 @@ namespace tcx::box2d {
 // Shape2D - what a RigidBody2D is made of (pixel units, local/centered).
 // =============================================================================
 struct Shape2D {
-    enum Kind { Circle, Box, Polygon };
+    enum Kind { Circle, Box, Polygon, Compound };
     Kind kind = Circle;
     float radius = 30.0f;                 // circle
     tc::Vec2 size{60.0f, 60.0f};          // box: full width/height
     std::vector<tc::Vec2> verts;          // polygon: local verts (centered), convex, 3..8
+    tc::Path path;                        // compound: local outline (centered), any shape
 
     static Shape2D circle(float r) {
         Shape2D s; s.kind = Circle; s.radius = r; return s;
@@ -65,7 +67,7 @@ struct Shape2D {
     // to their distance from the origin), log a warning when the RigidBody2D
     // is attached and create no body: getBody() stays null and
     // ColliderRenderer2D draws nothing. For more points use convex() (convex
-    // approximation).
+    // approximation) or compound() (exact shape).
     static Shape2D polygon(const std::vector<tc::Vec2>& v) {
         Shape2D s; s.kind = Polygon; s.verts = v; return s;
     }
@@ -79,6 +81,27 @@ struct Shape2D {
     // Same as above with every point of the path (all subpaths together).
     static Shape2D convex(const tc::Path& path) {
         return convex(detail::pathPoints(path));
+    }
+    // Any outline, kept exactly: concave, with holes (a subpath wound opposite
+    // to its enclosing one), any number of points. It is triangulated like
+    // Path::drawFill() and each triangle becomes one fixture of the one body
+    // (a single convex ring of at most 8 points stays one polygon fixture).
+    // Slivers Box2D can't use (collinear or nearly coincident corners, almost
+    // no area) are skipped with one warning; if nothing is left, or the whole
+    // body is tiny next to its distance from the origin, a warning and no
+    // body. Collision events come once per touching body pair, however many
+    // fixtures touch. Area covered more than once (a self-overlapping
+    // outline, overlapping same-direction subpaths, a hole wound like its
+    // outer ring) weighs once per layer: give a simple outline and wind holes
+    // opposite.
+    static Shape2D compound(const tc::Path& outline) {
+        Shape2D s; s.kind = Compound; s.path = outline; return s;
+    }
+    // Same as above with the points as one closed outline.
+    static Shape2D compound(const std::vector<tc::Vec2>& points) {
+        tc::Path p(points);
+        p.close();
+        return compound(p);
     }
     static Shape2D regularPolygon(float radius, int sides) {
         Shape2D s; s.kind = Polygon;
@@ -116,7 +139,9 @@ class RigidBody2D;  // fwd
 
 // Argument for RigidBody2D collision/trigger events, from the receiving body's
 // point of view. `other` is the body it touched, or null if that was a
-// non-RigidBody2D body (the bounds/ground, or a raw CircleBody/RectBody/...).
+// non-RigidBody2D body (the bounds/ground, or a raw CircleBody/RectBody/...)
+// or if its node went away before this event (an Ended deferred to after the
+// physics step, or a listener that ran first dropped it).
 struct Contact2D {
     RigidBody2D* other = nullptr;
     tc::Node*    otherNode = nullptr;   // other ? other->getOwner() : nullptr
@@ -128,8 +153,15 @@ namespace detail {
     // One router per world: maps b2Body* -> the RigidBody2D that owns it, plus
     // the listeners on that world's CollisionManager contact events. The first
     // RigidBody2D on a world installs the listeners; everyone registers here.
+    // Each registration gets its own serial: a body destroyed by a listener
+    // and a new one created at the same address are told apart.
     struct ContactRouter2D {
-        std::unordered_map<b2Body*, RigidBody2D*> bodies;
+        struct Entry {
+            RigidBody2D* rb = nullptr;
+            uint64_t serial = 0;   // 0 = not registered
+        };
+        std::unordered_map<b2Body*, Entry> bodies;
+        uint64_t lastSerial = 0;
         tc::EventListener beganL, stayL, endedL;
     };
     inline std::unordered_map<World*, ContactRouter2D>& contactRouters() {
@@ -148,6 +180,7 @@ class RigidBody2D : public tc::Mod {
     // access to our protected override.
     friend class trussc::Node;
     friend void detail::routeContact(World* w, const WorldContact& c, int phase);
+    friend class ColliderRenderer2D;   // draws fillMesh_
 
 public:
     RigidBody2D(World& world, const Shape2D& shape,
@@ -218,7 +251,7 @@ public:
 
     // Collision events (listen via EventListener; fired on the main thread).
     tc::Event<Contact2D> onCollisionBegan;   // started touching (Enter)
-    tc::Event<Contact2D> onCollisionStay;    // still touching, every step (Stay)
+    tc::Event<Contact2D> onCollisionStay;    // still touching, once per World::update() (Stay)
     tc::Event<Contact2D> onCollisionEnded;   // stopped touching (Exit)
 
     // Trigger events — fired instead of the collision ones when EITHER side is a
@@ -250,8 +283,9 @@ protected:
         // Check polygon points before creating anything (the same check as
         // PolyShape::setup()). Box2D would assert (Debug) or build a 2x2 m box
         // or a hull of the first 8 points (Release) for points it can't use.
-        b2PolygonShape poly;
+        std::vector<b2PolygonShape> polys;
         if (shape_.kind == Shape2D::Polygon) {
+            b2PolygonShape poly;
             std::vector<tc::Vec2> hull;
             detail::PolygonError err = detail::makePolygonShape(shape_.verts, poly, hull);
             if (err != detail::PolygonError::None) {
@@ -266,12 +300,36 @@ protected:
                     log << detail::describePolygonError(err) << ".";
                 }
                 if (err == detail::PolygonError::TooManyPoints) {
-                    log << " Use Shape2D::convex() for a convex approximation.";
+                    log << " Use Shape2D::convex() for a convex approximation or"
+                        << " Shape2D::compound() for the exact shape.";
                 }
                 log << " Body not created.";
                 return;
             }
             shape_.verts = hull;   // draw what collides
+            polys.push_back(poly);
+        } else if (shape_.kind == Shape2D::Compound) {
+            detail::CompoundShapes shapes;
+            if (!detail::makeCompoundShapes(shape_.path, shapes)) {
+                if (shapes.error == detail::PolygonError::TooSmallForOffset) {
+                    tc::logWarning() << "tcxBox2d: RigidBody2D compound has " << shape_.path.size()
+                                     << " points: " << detail::describePolygonError(shapes.error)
+                                     << ". Body not created.";
+                } else {
+                    tc::logWarning() << "tcxBox2d: RigidBody2D compound has " << shape_.path.size()
+                                     << " points with no area Box2D can use (" << shapes.triangles
+                                     << " triangles, none usable). Body not created.";
+                }
+                return;
+            }
+            if (shapes.skipped > 0) {
+                tc::logWarning() << "tcxBox2d: RigidBody2D compound skipped " << shapes.skipped
+                                 << " of " << shapes.triangles
+                                 << " triangles that are slivers Box2D can't use (collinear or nearly"
+                                 << " coincident corners, almost no area).";
+            }
+            polys = std::move(shapes.shapes);
+            fillMesh_ = detail::makeFillMesh(shapes.fill);
         }
 
         // Physics is world-space — create the body at the node's global pose.
@@ -290,7 +348,7 @@ protected:
         // raw b2Body* instead.
         body_->GetUserData().pointer = 0;
 
-        createFixtures(poly);
+        createFixtures(polys);
         if (trigger_) forFixtures([](b2Fixture* f) { f->SetSensor(true); });
 
         // Register for contact routing; the first body on this world hooks the
@@ -304,7 +362,7 @@ protected:
                 router.endedL = cm->contactEnded.listen([wp](WorldContact& c) { detail::routeContact(wp, c, 2); });
             }
         }
-        router.bodies[body_] = this;
+        router.bodies[body_] = {this, ++router.lastSerial};
     }
 
     // Dynamic: physics drives the node — sync BEFORE Node::update() so user code
@@ -348,6 +406,8 @@ protected:
         // Only touch the world if it's still alive — at shutdown it may be
         // destroyed before its bodies' nodes (it frees all bodies itself).
         if (!worldAlive_.expired() && world_ && body_) {
+            // A deferred Ended must not name this body once it is freed
+            if (auto* cm = world_->getCollisionManager()) cm->forget(body_);
             if (auto* w = world_->getWorld()) w->DestroyBody(body_);
         }
         body_ = nullptr;
@@ -379,8 +439,9 @@ private:
         }
     }
 
-    // poly: the checked polygon, used when shape_ is a Polygon.
-    void createFixtures(const b2PolygonShape& poly) {
+    // polys: the checked polygons, one fixture each, used when shape_ is a
+    // Polygon or a Compound.
+    void createFixtures(const std::vector<b2PolygonShape>& polys) {
         b2FixtureDef fd;
         fd.density     = density_;
         fd.friction    = (friction_    >= 0.0f) ? friction_    : 0.3f;
@@ -401,9 +462,21 @@ private:
                 body_->CreateFixture(&fd);
                 break;
             }
-            case Shape2D::Polygon: {
-                fd.shape = &poly;
-                body_->CreateFixture(&fd);
+            case Shape2D::Polygon:
+            case Shape2D::Compound: {
+                // Added at density 0, then given the density at once:
+                // CreateFixture() resets the mass data after every fixture
+                // that has a density, and a compound body's first few
+                // triangles alone can be too small for their offset (an
+                // m_I > 0 assert in Debug) even though the whole body passed
+                // the check.
+                fd.density = 0.0f;
+                for (const auto& poly : polys) {
+                    fd.shape = &poly;
+                    body_->CreateFixture(&fd);
+                }
+                forFixtures([this](b2Fixture* f) { f->SetDensity(density_); });
+                body_->ResetMassData();
                 break;
             }
         }
@@ -434,6 +507,7 @@ private:
     bool trigger_ = false;
     bool fixedRotation_ = false;
     b2Body* body_ = nullptr;
+    tc::Mesh fillMesh_;   // compound fill, triangulated once in setup()
     std::weak_ptr<int> worldAlive_;
 };
 
@@ -441,15 +515,22 @@ namespace detail {
 // Fan a world contact out to the RigidBody2D(s) involved (main thread). Each
 // side hears about the OTHER body; a side that isn't a RigidBody2D is null.
 inline void routeContact(World* w, const WorldContact& c, int phase) {
-    auto it = contactRouters().find(w);
-    if (it == contactRouters().end()) return;
-    auto& bodies = it->second.bodies;
-    auto fa = bodies.find(c.a);
-    auto fb = bodies.find(c.b);
-    RigidBody2D* ra = (fa != bodies.end()) ? fa->second : nullptr;
-    RigidBody2D* rb = (fb != bodies.end()) ? fb->second : nullptr;
-    if (ra) ra->fireContact(rb, c, phase);
-    if (rb) rb->fireContact(ra, c, phase);
+    using Entry = ContactRouter2D::Entry;
+    auto find = [w](b2Body* body) -> Entry {
+        auto it = contactRouters().find(w);
+        if (!body || it == contactRouters().end()) return {};
+        auto f = it->second.bodies.find(body);
+        return (f != it->second.bodies.end()) ? f->second : Entry{};
+    };
+    const Entry ea = find(c.a);
+    const Entry eb = find(c.b);
+    if (ea.rb) ea.rb->fireContact(eb.rb, c, phase);
+
+    // A's listeners may have dropped B's node (and made a new body at the
+    // same address) or A's: notify B only while it is still registered.
+    if (!eb.rb || find(c.b).serial != eb.serial) return;
+    RigidBody2D* ra = (ea.rb && find(c.a).serial == ea.serial) ? ea.rb : nullptr;
+    eb.rb->fireContact(ra, c, phase);
 }
 } // namespace detail
 
@@ -494,6 +575,13 @@ protected:
                 // may be concave, and nothing collides there (PolyShape
                 // draws nothing either).
                 if (rb->getBody()) drawPolygon(s.verts);
+                break;
+            case Shape2D::Compound:
+                // Only an outline Box2D accepted (PolyShape draws nothing
+                // without a body either). The fill is Path::drawFill()'s,
+                // triangulated once when the body was made.
+                if (!rb->getBody()) break;
+                filled_ ? rb->fillMesh_.draw() : detail::drawPathOutline(s.path);
                 break;
         }
     }

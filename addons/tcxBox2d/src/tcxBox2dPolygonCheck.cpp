@@ -46,11 +46,43 @@ bool keepsHullOrder(const std::vector<b2Vec2>& input, const b2PolygonShape& shap
     return forward || backward;
 }
 
+// A dynamic body's b2Body::ResetMassData() sums the fixtures' mass, mass *
+// centroid and inertia about the body origin, then subtracts mass *
+// |centroid|^2. For a body that is tiny next to its distance from the origin
+// the two nearly cancel in float, and the result can be <= 0: an assert
+// (Debug) or NaN motion (Release). Mirror that step at density 1 (`shapes`
+// in fixture-list order, which is the reverse of creation order) and demand a
+// margin of 16 float epsilons of the subtracted term for one polygon, so the
+// result stays positive at any density (fuzzed at densities 0.001 to 1000).
+// A compound body needs 16 + (fixtures - 1) epsilons: Box2D sums the
+// per-fixture values in float, in order, so the rounding differs from one
+// density to another (by up to about 0.8 epsilon per fixture near the limit).
+// Measured: with a fixed 16-epsilon margin, bodies accepted at density 1 had
+// m_I <= 0 at some density in 0.001 to 1000 (133 cases for a 128-gon, 8642
+// for a 2048-gon); with one more epsilon per fixture, 0 cases.
+bool inertiaSurvives(const b2PolygonShape* const* shapes, size_t count) {
+    float mass = 0.0f, inertia = 0.0f;
+    b2Vec2 center = b2Vec2_zero;
+    for (size_t i = 0; i < count; ++i) {
+        b2MassData md;
+        shapes[i]->ComputeMass(&md, 1.0f);
+        mass += md.mass;
+        center += md.mass * md.center;
+        inertia += md.I;
+    }
+    center *= 1.0f / mass;
+    const float shift = mass * b2Dot(center, center);
+    const float centered = inertia - shift;
+    const float margin = 16.0f + static_cast<float>(count - 1);
+    return centered > margin * FLT_EPSILON * shift;
+}
+
 } // namespace
 
 PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
                               b2PolygonShape& shape,
-                              std::vector<tc::Vec2>& hull) {
+                              std::vector<tc::Vec2>& hull,
+                              OffsetCheck offset) {
     const size_t count = points.size();
     if (count < 3) return PolygonError::TooFewPoints;
     if (count > b2_maxPolygonVertices) return PolygonError::TooManyPoints;
@@ -127,21 +159,10 @@ PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
     b2PolygonShape built;
     built.Set(input.data(), static_cast<int32>(count));
 
-    // A dynamic body's b2Body::ResetMassData() takes the polygon's inertia
-    // about the body origin and subtracts mass * |centroid|^2. For a polygon
-    // that is tiny next to its distance from the origin the two nearly cancel
-    // in float, and the result can be <= 0: an assert (Debug) or NaN motion
-    // (Release). Mirror that step at density 1 and demand a margin of
-    // 16 float epsilons of the subtracted term, so the result stays positive
-    // at any density (fuzzed at densities 0.001 to 1000).
-    b2MassData md;
-    built.ComputeMass(&md, 1.0f);
-    b2Vec2 center = b2Vec2_zero;
-    center += md.mass * md.center;
-    center *= 1.0f / md.mass;
-    const float shift = md.mass * b2Dot(center, center);
-    const float centered = md.I - shift;
-    if (!(centered > 16.0f * FLT_EPSILON * shift)) return PolygonError::TooSmallForOffset;
+    // The polygon as a body of its own: its inertia about its centroid must
+    // survive float rounding (see inertiaSurvives()).
+    const b2PolygonShape* one = &built;
+    if (offset == OffsetCheck::Apply && !inertiaSurvives(&one, 1)) return PolygonError::TooSmallForOffset;
 
     shape = built;
     hull.clear();
@@ -155,6 +176,15 @@ PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
         for (int32 i = 0; i < shape.m_count; ++i) hull.push_back(World::toPixels(shape.m_vertices[i]));
     }
     return PolygonError::None;
+}
+
+bool keepsInertia(const std::vector<b2PolygonShape>& shapes) {
+    if (shapes.empty()) return false;
+    // Box2D walks the fixture list, newest fixture first.
+    std::vector<const b2PolygonShape*> order;
+    order.reserve(shapes.size());
+    for (size_t i = shapes.size(); i > 0; --i) order.push_back(&shapes[i - 1]);
+    return inertiaSurvives(order.data(), order.size());
 }
 
 std::string describePolygonError(PolygonError err) {
@@ -268,6 +298,133 @@ std::vector<tc::Vec2> pathPoints(const tc::Path& path) {
     out.reserve(path.getVertices().size());
     for (const auto& v : path.getVertices()) out.push_back(tc::Vec2(v.x, v.y));
     return out;
+}
+
+bool convexRing(const tc::Path& path, std::vector<tc::Vec2>& ring) {
+    // Collect the rings the way buildFillTriangles() does.
+    std::vector<tc::Vec2> found;
+    int rings = 0;
+    const auto& verts = path.getVertices();
+    for (size_t si = 0; si < path.getNumSubpaths(); ++si) {
+        auto [s, e] = path.getSubpathRange(si);
+        if (e - s < 3) continue;
+        std::vector<tc::Vec2> r;
+        for (size_t k = s; k < e; ++k) {
+            tc::Vec2 p(verts[k].x, verts[k].y);
+            if (!r.empty() && r.back().x == p.x && r.back().y == p.y) continue;
+            r.push_back(p);
+        }
+        while (r.size() >= 2 && r.front().x == r.back().x && r.front().y == r.back().y) r.pop_back();
+        if (r.size() < 3) continue;
+        if (++rings > 1) return false;
+        found = std::move(r);
+    }
+    if (rings != 1 || found.size() > b2_maxPolygonVertices) return false;
+
+    // Convex: every turn goes the same way (collinear allowed), and the edges
+    // turn once around in total (a star has same-sign turns too, but turns
+    // twice or more).
+    const size_t n = found.size();
+    bool left = false, right = false;
+    double turning = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        const tc::Vec2& a = found[i];
+        const tc::Vec2& b = found[(i + 1) % n];
+        const tc::Vec2& c = found[(i + 2) % n];
+        double e1x = double(b.x) - a.x, e1y = double(b.y) - a.y;
+        double e2x = double(c.x) - b.x, e2y = double(c.y) - b.y;
+        double cr = e1x * e2y - e1y * e2x;
+        double dot = e1x * e2x + e1y * e2y;
+        // An edge that runs straight back is no convex corner, and its turn
+        // (atan2 of +-0 gives a half turn, TAU / 2, signed by the zero) could
+        // make the total look like one turn around.
+        if (cr == 0.0 && dot < 0.0) return false;
+        if (cr > 0.0) left = true;
+        if (cr < 0.0) right = true;
+        turning += std::atan2(cr, dot);
+    }
+    if ((left && right) || (!left && !right)) return false;
+    if (std::abs(turning) > 1.5 * tc::TAU) return false;
+    ring = std::move(found);
+    return true;
+}
+
+tc::Mesh makeFillMesh(const std::vector<tc::Vec2>& fill) {
+    tc::Mesh mesh;
+    mesh.setMode(tc::PrimitiveMode::Triangles);
+    for (const auto& p : fill) mesh.addVertex(tc::Vec3(p.x, p.y, 0.0f));
+    return mesh;
+}
+
+void drawPathOutline(const tc::Path& path) {
+    const auto& verts = path.getVertices();
+    for (size_t si = 0; si < path.getNumSubpaths(); ++si) {
+        auto [s, e] = path.getSubpathRange(si);
+        if (e - s < 2) continue;
+        for (size_t k = s; k < e; ++k) {
+            const tc::Vec3& a = verts[k];
+            const tc::Vec3& b = verts[(k + 1 < e) ? k + 1 : s];
+            tc::drawLine(a.x, a.y, b.x, b.y);
+        }
+    }
+}
+
+bool makeCompoundShapes(const tc::Path& path, CompoundShapes& out) {
+    out = CompoundShapes();
+
+    // Triangulated once: the fixtures below and the fill that draws them.
+    const std::vector<std::array<float, 2>> tris = path.buildFillTriangles();
+    auto keepFill = [&]() {
+        out.fill.reserve(tris.size());
+        for (const auto& p : tris) out.fill.push_back(tc::Vec2(p[0], p[1]));
+    };
+
+    std::vector<tc::Vec2> ring;
+    if (convexRing(path, ring)) {
+        b2PolygonShape shape;
+        std::vector<tc::Vec2> hull;
+        const PolygonError err = makePolygonShape(ring, shape, hull);
+        if (err == PolygonError::None) {
+            out.shapes.push_back(shape);
+            keepFill();
+            return true;
+        }
+        if (err == PolygonError::TooSmallForOffset) {
+            // A usable polygon, only too small for its offset: its triangles
+            // would fail the combined check the same way.
+            out.error = err;
+            return false;
+        }
+        // Collinear or merged corners: triangulate, and keep what has area.
+    }
+
+    out.triangles = tris.size() / 3;
+    std::vector<tc::Vec2> tri(3);
+    for (size_t t = 0; t < out.triangles; ++t) {
+        for (size_t k = 0; k < 3; ++k) tri[k] = tc::Vec2(tris[t * 3 + k][0], tris[t * 3 + k][1]);
+        b2PolygonShape shape;
+        std::vector<tc::Vec2> hull;
+        // Box2D checks the inertia only for the whole body (PolyShape and
+        // RigidBody2D add the fixtures at density 0 and reset the mass data
+        // once): a tiny ear triangle of an ordinary outline is fine on its
+        // own (checked below, together).
+        if (makePolygonShape(tri, shape, hull, OffsetCheck::Skip) == PolygonError::None) {
+            out.shapes.push_back(shape);
+        } else {
+            ++out.skipped;
+        }
+    }
+    if (out.shapes.empty()) {
+        out.error = PolygonError::Degenerate;
+        return false;
+    }
+    if (!keepsInertia(out.shapes)) {
+        out.shapes.clear();
+        out.error = PolygonError::TooSmallForOffset;
+        return false;
+    }
+    keepFill();
+    return true;
 }
 
 } // namespace tcx::box2d::detail
