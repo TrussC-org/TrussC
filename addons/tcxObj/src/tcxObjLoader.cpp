@@ -52,6 +52,8 @@ bool ObjLoader::load(const fs::path& path) {
         }
     }
 
+    size_t skippedFaces = 0;
+
     // Process each shape
     for (auto& shape : shapes) {
         ObjGroup group;
@@ -71,9 +73,41 @@ bool ObjLoader::load(const fs::path& path) {
         bool hasNormals = !attrib.normals.empty();
         bool hasTexCoords = !attrib.texcoords.empty();
 
+        // tinyobjloader accepts a face index past the end of the vertex,
+        // normal or texcoord list (it only warns), so check each index
+        // against the list it is read from.
+        const size_t numPositions = attrib.vertices.size() / 3;
+        const size_t numNormals = attrib.normals.size() / 3;
+        const size_t numTexCoords = attrib.texcoords.size() / 2;
+        auto indexInRange = [&](const tinyobj::index_t& idx) {
+            if (idx.vertex_index < 0 || static_cast<size_t>(idx.vertex_index) >= numPositions) {
+                return false;
+            }
+            if (hasNormals && idx.normal_index >= 0 &&
+                static_cast<size_t>(idx.normal_index) >= numNormals) {
+                return false;
+            }
+            if (hasTexCoords && idx.texcoord_index >= 0 &&
+                static_cast<size_t>(idx.texcoord_index) >= numTexCoords) {
+                return false;
+            }
+            return true;
+        };
+
         size_t indexOffset = 0;
         for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
             int fv = shape.mesh.num_face_vertices[f];
+
+            // Skip a face with any index out of range
+            bool faceOk = true;
+            for (int v = 0; v < fv && faceOk; v++) {
+                faceOk = indexInRange(shape.mesh.indices[indexOffset + v]);
+            }
+            if (!faceOk) {
+                skippedFaces++;
+                indexOffset += fv;
+                continue;
+            }
 
             // Triangulate N-gon (fan triangulation)
             for (int v = 1; v < fv - 1; v++) {
@@ -158,6 +192,12 @@ bool ObjLoader::load(const fs::path& path) {
         }
 
         groups_.push_back(std::move(group));
+    }
+
+    if (skippedFaces > 0) {
+        logWarning() << "ObjLoader: skipped " << skippedFaces
+                     << " face(s) with an index past the end of the vertex, normal or texcoord list: "
+                     << objPath;
     }
 
     // If no shapes but there are vertices, create a single group
