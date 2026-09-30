@@ -7906,9 +7906,9 @@ description.ko = "현재 패닝을 얻음"
 ["Sound::getPosition"]
 category = "sound"
 keywords = ["progress", "playhead", "normalized", "seek"]
-description.en = "Get playback position in seconds"
-description.ja = "再生位置を取得（秒）"
-description.ko = "재생 위치를 초 단위로 얻음"
+description.en = "Get playback position in seconds. On a stream, right after setPosition() and until the audio has moved there (~10 ms), this is the requested position."
+description.ja = "再生位置を取得（秒）。ストリームでは setPosition() の直後から音が実際にそこへ移るまで (~10ms) の間、要求した位置を返す"
+description.ko = "재생 위치를 초 단위로 얻음. 스트림에서는 setPosition() 직후부터 소리가 실제로 그 위치로 옮겨질 때까지 (~10ms) 요청한 위치를 반환"
 
 ["Sound::getSpeed"]
 category = "sound"
@@ -8052,9 +8052,9 @@ related = ["EasyCam::setPanSensitivity"]
 ["Sound::setPosition"]
 category = "sound"
 keywords = ["seek", "jump", "scrub", "playhead", "normalized"]
-description.en = "Seek to a specific time in seconds. On streams, costs ~10 ms blackout while the ring refills."
-description.ja = "指定秒数にシーク。ストリームでは ring 補充に ~10ms 無音"
-description.ko = "지정 시간(초)으로 시크. 스트림은 링 재충전에 ~10ms 무음"
+description.en = "Seek to a specific time in seconds. On streams the decoder seeks and the ring refills, so the audio moves after ~10 ms of silence; getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there."
+description.ja = "指定秒数にシーク。ストリームではデコーダがシークして ring を補充するので、~10ms の無音の後に音が移る。getPosition() は直後から新しい位置を返し、続けて呼んだ場合は最後の呼び出しが有効。一時停止中のストリームは再開時にそこから鳴る"
+description.ko = "지정 시간(초)으로 시크. 스트림은 디코더가 시크하고 링을 재충전하므로 ~10ms 무음 후에 소리가 옮겨짐. getPosition()은 즉시 새 위치를 반환하고, 연속으로 호출하면 마지막 호출이 유효. 일시정지 중인 스트림은 재개할 때 그 위치부터 재생"
 
 ["Sound::setSpeed"]
 category = "sound"
@@ -8291,9 +8291,9 @@ description.ja = "ストリームを開いた元のパス"
 description.ko = "스트림을 연 원본 경로"
 
 ["SoundStream::loadStream"]
-description.en = "Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported."
-description.ja = "ファイルを開き、形式(.wav .mp3 .flac .ogg)を検証し、channels / sampleRate / durationを埋める。maxPolyphonyはその数だけ同時デコーダスロットを予約。ファイルが開けないか形式が非対応の場合falseを返す"
-description.ko = "파일을 열어 형식(.wav .mp3 .flac .ogg)을 검증하고 channels / sampleRate / duration을 채움. maxPolyphony는 그 수만큼 동시 디코더 슬롯을 예약. 파일을 열 수 없거나 형식이 미지원이면 false 반환"
+description.en = "Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened, the format is unsupported, or the file has no audio frames (DecodeFailed)."
+description.ja = "ファイルを開き、形式(.wav .mp3 .flac .ogg)を検証し、channels / sampleRate / durationを埋める。maxPolyphonyはその数だけ同時デコーダスロットを予約。ファイルが開けない、形式が非対応、またはオーディオフレームが無い (DecodeFailed) 場合falseを返す"
+description.ko = "파일을 열어 형식(.wav .mp3 .flac .ogg)을 검증하고 channels / sampleRate / duration을 채움. maxPolyphony는 그 수만큼 동시 디코더 슬롯을 예약. 파일을 열 수 없거나, 형식이 미지원이거나, 오디오 프레임이 없으면 (DecodeFailed) false 반환"
 platform_note.en = "Streaming audio (Sound::loadStream / SoundStream). On wasm it is unsupported (needs std::thread + on-disk file I/O, neither available in the default browser build); Sound::loadStream() logs a warning and silently falls back to eager load(). So you always get a Sound, but it is never actually streamed on web — branch on isStreaming() / __EMSCRIPTEN__ if it matters."
 platform_note.ja = "ストリーミング再生 (Sound::loadStream / SoundStream)。wasm では非対応 (std::thread + ディスクI/O が必要、ブラウザの既定ビルドにはどちらも無い)。Sound::loadStream() は警告を出して eager load() に静かにフォールバックする。Sound 自体は得られるが web では決してストリームされない — 必要なら isStreaming() / __EMSCRIPTEN__ で分岐する。"
 
