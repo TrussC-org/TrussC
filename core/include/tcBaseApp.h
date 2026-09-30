@@ -26,6 +26,10 @@ class Window;
 class App;
 
 namespace internal {
+// Subscribes the App's audioOut() / audioIn() hooks, right after its first
+// setup() has returned (App::onSetupDone(), #426). Defined below the App
+// class.
+inline void attachAppAudio(App& app);
 // Teardown steps 2 and 3 wherever the framework lets an App go (exit, hot
 // reload, closing a secondary window; #256): after app.cleanup(), before the
 // App is destroyed. Defined below the App class.
@@ -45,16 +49,11 @@ inline bool appRanCleanup(const App& app);
 class App : public RectNode {
 public:
     App() {
-        // Auto-subscribe the virtual audio hooks. Subclasses just override
-        // audioOut() / audioIn() — no need to write the listener boilerplate.
-        // The framework detaches them after cleanup() and waits for a
-        // callback already running on the audio thread before the App is
-        // destroyed (internal::detachAppAudio()); ~App() would be too late,
-        // the derived members that audioOut() uses are gone by then.
-        audioOutListener_ = AudioEngine::getInstance().audioOut.listen(
-            [this](AudioOutBuffer& b) { audioOut(b); });
-        audioInListener_  = AudioEngine::getInstance().audioIn.listen(
-            [this](AudioInBuffer& b) { audioIn(b); });
+        // The audio hooks are not subscribed here: the audio thread could
+        // then call audioOut() before setup() has prepared its state, even
+        // before the derived constructor has finished. They are subscribed
+        // right after the first setup() returns (onSetupDone()), so an App
+        // that is never run gets no audio callbacks (#426).
 
         // Not registered as a window's scene-graph root here: the root is
         // held weakly (getRootNode()), and weak_from_this() is empty until
@@ -198,6 +197,10 @@ public:
     // For multiple independent listeners (e.g. a Node-based synth tree),
     // use `AudioEngine::getInstance().audioOut.listen(...)` directly
     // alongside the App override.
+    // They are first called right after setup() returns (the framework
+    // subscribes them then, not when the App is constructed), so state that
+    // setup() prepares is ready in here. An App that is never run gets no
+    // audio callbacks.
     // They stop being called after cleanup(): the framework detaches them
     // before it destroys the App (exit, hot reload, closing the App's
     // window), so the App adds nothing to the last few buffers before it
@@ -214,12 +217,17 @@ private:
     EventListener audioOutListener_;
     EventListener audioInListener_;
 
+    // Node's post-setup hook: subscribe audioOut() / audioIn() now that the
+    // first setup() has returned (#426). final: apps override setup().
+    void onSetupDone() final { internal::attachAppAudio(*this); }
+
     // Framework lifecycle, next to Node's setupCalled_: true once the
     // framework has run cleanup() and let the App go
     // (internal::detachAppAudio()). An App runs once, so Window::setApp()
     // refuses it from then on (internal::appRanCleanup()).
     bool cleanupCalled_ = false;
 
+    friend void internal::attachAppAudio(App& app);
     friend void internal::detachAppAudio(App& app);
     friend bool internal::appRanCleanup(const App& app);
 public:
@@ -287,6 +295,27 @@ public:
 };
 
 namespace internal {
+// Subscribe the App's audioOut / audioIn hooks to the AudioEngine. Runs once,
+// from App::onSetupDone(), right after the App's first setup() has returned:
+// Node::setupOnce() runs both on the first updateTree() / drawTree() (the
+// main App, a secondary window's App, every hot reload generation), and
+// runHeadlessApp() through internal::setupNodeOnce(). So the audio thread
+// never runs them before or during setup(). Idempotent (a hook already
+// subscribed is kept as it is, not re-subscribed), and a no-op once the App's
+// lifecycle has ended (detachAppAudio()): an App runs once, its hooks are
+// never subscribed again. Main thread.
+inline void attachAppAudio(App& app) {
+    if (app.cleanupCalled_) return;
+    if (!app.audioOutListener_.isConnected()) {
+        app.audioOutListener_ = AudioEngine::getInstance().audioOut.listen(
+            [&app](AudioOutBuffer& b) { app.audioOut(b); });
+    }
+    if (!app.audioInListener_.isConnected()) {
+        app.audioInListener_ = AudioEngine::getInstance().audioIn.listen(
+            [&app](AudioInBuffer& b) { app.audioIn(b); });
+    }
+}
+
 // Detach the App's audioOut / audioIn hooks, then wait for a callback that is
 // already running on the audio thread (Event does not wait on disconnect).
 // Afterwards nothing on the audio thread reaches the App, so it can be
