@@ -146,7 +146,9 @@ TlsClient::TlsClient() {
 }
 
 TlsClient::~TlsClient() {
-    disconnect();
+    // Disconnect without onDisconnect: a listener that reconnects would
+    // reconnect a client that is going away.
+    disconnectImpl(false);
     delete ctx_;
 }
 
@@ -619,6 +621,11 @@ void TlsClient::processNetwork() {
 }
 
 void TlsClient::disconnect() {
+    disconnectImpl(true);
+}
+
+// disconnect() with notify, the destructor without
+void TlsClient::disconnectImpl(bool notify) {
     running_ = false;
     connectPending_ = false;
     handshakePending_ = false;
@@ -656,7 +663,7 @@ void TlsClient::disconnect() {
     // The receive thread reports only a close it ran into itself (running_
     // still set). The EOF that the shutdown() above wakes it with is this
     // call's own, and is reported here, once, after the join.
-    if (connected_.exchange(false)) {
+    if (connected_.exchange(false) && notify) {
         tc::TcpDisconnectEventArgs args;
         args.reason = "Disconnected by client";
         args.wasClean = true;

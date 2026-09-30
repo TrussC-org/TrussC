@@ -19,10 +19,12 @@
 //   - With an auto-reconnect onDisconnect listener attached (reconnect unless
 //     the reason is "Disconnected by client"), disconnect() from another
 //     thread reports exactly one onDisconnect, "Disconnected by client", and
-//     leaves no connection. Destroying such a client neither hangs nor
-//     reconnects. The receive thread used to report the EOF of disconnect()'s
-//     own shutdown() as a remote close, and the listener reconnected from it
-//     while disconnect() was joining that thread.
+//     leaves no connection. The receive thread used to report the EOF of
+//     disconnect()'s own shutdown() as a remote close, and the listener
+//     reconnected from it while disconnect() was joining that thread.
+//   - The destructor fires no onDisconnect: destroying a client whose
+//     listener reconnects on every onDisconnect finishes, reports nothing and
+//     does not reconnect.
 //   - A plain onError listener that reconnects after a failed handshake ends
 //     up connected. The failed connection used to be torn down after the
 //     listener returned, taking the new connection with it.
@@ -510,8 +512,11 @@ static void scenario() {
     peer.reset();
     if (g_fail) bail();
 
-    // --- destroying a client with the auto-reconnect listener attached ------
-    // The destructor calls disconnect(): the same EOF, on a client about to go.
+    // --- destroying a client with a reconnecting listener attached ----------
+    // The destructor disconnects without onDisconnect. This listener reconnects
+    // on every onDisconnect, "Disconnected by client" included: told by the
+    // destructor, it would reconnect a client that is going away. Nor may the
+    // receive thread report the EOF of the destructor's own shutdown().
     auto doomed = make_unique<TlsClient>();
     doomed->setVerifyNone();
     check("destroyed client: connect()", doomed->connect("127.0.0.1", port));
@@ -529,26 +534,18 @@ static void scenario() {
     check("destroyed client: the client receives the peer's data",
           peer.write("hi") && waitFor(3000, [&] { return doomedReceived.load(); }));
     if (g_fail) bail();
-    {
-        lock_guard<mutex> lock(reasonsMutex);
-        reasons.clear();
-    }
-    autoReconnects = 0;
-    EventListener doomedSub = autoReconnect(doomed.get());
+    atomic<int> doomedDisconnects{0};
+    TlsClient* doomedPtr = doomed.get();
+    EventListener doomedSub = doomed->onDisconnect.listen([&, doomedPtr](TcpDisconnectEventArgs&) {
+        ++doomedDisconnects;
+        doomedPtr->connect("127.0.0.1", port);
+    });
     check("destroyed client: the destructor finishes within 5 s",
           completesWithin(5000, [&] { doomed.reset(); }));
     if (g_fail) bail();
     const bool strayAfterDestroy = strayConnection();
-    check("destroyed client: no reconnect after destruction",
-          autoReconnects == 0 && !strayAfterDestroy);
-    {
-        lock_guard<mutex> lock(reasonsMutex);
-        bool onlyByClient = true;
-        for (const string& r : reasons) {
-            if (r != "Disconnected by client") onlyByClient = false;
-        }
-        check("destroyed client: no disconnect reported as a remote close", onlyByClient);
-    }
+    check("destroyed client: no onDisconnect from the destructor", doomedDisconnects == 0);
+    check("destroyed client: no reconnect after destruction", !strayAfterDestroy);
     // doomedSub and doomedRx outlive their Events: disconnecting them is a no-op
     peer.reset();
     if (g_fail) bail();

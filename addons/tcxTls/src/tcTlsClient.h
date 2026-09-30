@@ -97,6 +97,10 @@ private:
     bool caUserProvided_ = false;
     bool caAutoLoadAttempted_ = false;
 
+    // disconnect()'s work. notify: fire onDisconnect ("Disconnected by
+    // client") if the client was connected. The destructor passes false.
+    void disconnectImpl(bool notify);
+
     // Perform TLS handshake
     bool performHandshake();
 

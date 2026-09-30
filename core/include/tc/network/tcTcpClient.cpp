@@ -21,7 +21,9 @@ TcpClient::TcpClient() {
 }
 
 TcpClient::~TcpClient() {
-    disconnect();
+    // Disconnect without onDisconnect: a listener that reconnects would
+    // reconnect a client that is going away.
+    disconnectImpl(false);
 }
 
 TcpClient::TcpClient(TcpClient&& other) noexcept
@@ -198,6 +200,11 @@ void TcpClient::connectThreadFunc(const std::string& host, int port) {
 }
 
 void TcpClient::disconnect() {
+    disconnectImpl(true);
+}
+
+// disconnect() with notify, the destructor without
+void TcpClient::disconnectImpl(bool notify) {
     running_ = false;
     connectPending_ = false;
     updateListener_.disconnect();
@@ -215,7 +222,7 @@ void TcpClient::disconnect() {
     // The receive thread reports only a close it ran into itself (running_
     // still set). The EOF that the shutdown() above wakes it with is this
     // call's own, and is reported here, once, after the join.
-    if (connected_.exchange(false)) {
+    if (connected_.exchange(false) && notify) {
         TcpDisconnectEventArgs args;
         args.reason = "Disconnected by client";
         args.wasClean = true;

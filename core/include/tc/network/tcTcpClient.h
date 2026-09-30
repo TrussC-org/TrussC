@@ -87,6 +87,10 @@ public:
     // firing thread. With setUseThread(false) everything runs on the main
     // thread and this does not apply.
     //
+    // onDisconnect does not fire from the destructor: destroying a connected
+    // client disconnects it without telling listeners, so one that reconnects
+    // cannot reconnect a client that is going away.
+    //
     // RECONNECTING FROM A LISTENER: a plain (inline) onDisconnect or onReceive
     // listener may call connect() to reconnect. That connect() runs on the
     // old receive thread and detaches it from the client first, so nothing
@@ -202,6 +206,10 @@ private:
 
     // Close the socket and release the receive thread (connectThread_ is left alone)
     void resetConnection();
+
+    // disconnect()'s work. notify: fire onDisconnect ("Disconnected by
+    // client") if the client was connected. The destructor passes false.
+    void disconnectImpl(bool notify);
 
     std::thread receiveThread_;
     std::thread connectThread_;
