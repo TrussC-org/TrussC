@@ -1321,10 +1321,13 @@ public:
     // In the main window it counts only the time after its creation, so time
     // spent before the call (earlier in a long update or setup(), an idle gap,
     // a stall) can't make it fire early; one created during a fixed-Hz step
-    // counts whole steps (step time). (A secondary window's tick doesn't
-    // record its update time or in-update mark yet, so there a timer created
-    // in or between its ticks counts the window's whole next delta, until
-    // #307.)
+    // counts whole steps (step time). With a fixed update rate timers count
+    // steps, so when a frame runs several steps (after a stall, or every
+    // frame when the update rate is above the display rate) a timer can fire
+    // within that frame, before its delay has passed in wall time. (A
+    // secondary window's tick doesn't record its update time or in-update
+    // mark yet, so there a timer created in or between its ticks counts the
+    // window's whole next delta, until #307.)
 
     // Execute callback once after specified delay in seconds
     uint64_t callAfter(double delay, std::function<void()> callback) {
