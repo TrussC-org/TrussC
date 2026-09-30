@@ -722,7 +722,8 @@ int readBytes(Impl* impl, void* buffer, int length) {
     return n;
 }
 
-int writeBytes(Impl* impl, const void* buffer, int length) {
+int writeBytes(Impl* impl, const void* buffer, int length, int& error) {
+    error = 0;
     if (impl->state.load() != (int)State::Connected) return -1;
     if (length <= 0) return 0;
 
@@ -736,7 +737,7 @@ int writeBytes(Impl* impl, const void* buffer, int length) {
         bt.data = (void*)((const unsigned char*)buffer + written);
         int r = ioctl(impl->fd, USBDEVFS_BULK, &bt);
         if (r < 0) {
-            logError() << "Serial: write failed (" << strerror(errno) << ")";
+            error = errno;  // Serial logs it, with its lock released
             return written > 0 ? written : -1;
         }
         written += r;
