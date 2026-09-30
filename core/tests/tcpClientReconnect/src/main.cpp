@@ -24,6 +24,13 @@
 //   - A reconnect the peer refuses (its device still rebooting) returns false
 //     and still releases the old socket (checked on Linux), and the next
 //     connect() succeeds.
+//   - connect() to another peer while connected, with a listener that
+//     reconnects on every onDisconnect: the listener's reconnect (to the old
+//     peer, from inside connect()'s own disconnect) is closed again without
+//     another notification, connect() reaches the new peer, and nothing leaks
+//     (counted on Linux). Its receive thread used to report the shutdown's
+//     EOF as a remote close, and the listener reconnected again from that
+//     thread while connect() was joining it.
 //   - With an auto-reconnect onDisconnect listener attached (reconnect unless
 //     the reason is "Disconnected by client"), disconnect() from another
 //     thread reports exactly one onDisconnect, "Disconnected by client", and
@@ -439,6 +446,82 @@ static void scenario() {
           peerToClient(peer, "welcome back"));
     if (g_fail) bail();
 
+    // --- connect() elsewhere while connected, with a listener that reconnects -
+    // connect() on a connected client first disconnects, and the listener,
+    // which reconnects on every onDisconnect ("Disconnected by client"
+    // included), reconnects to the old peer from inside that call. connect()
+    // then closes that connection again. When its receive thread was still
+    // running there, the shutdown's EOF was reported as a remote close, the
+    // listener reconnected again from that thread, and connect() and the
+    // thread raced on the same std::thread (join against detach).
+    int portB = 0;
+    rawsocket_t listenerB = listenLoopback(portB);
+    check("connect(B): second listener is up", listenerB != kNoSocket);
+    if (g_fail) bail();
+    mutex everyMutex;
+    vector<string> everyReasons;
+    EventListener everySub = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
+        {
+            lock_guard<mutex> lock(everyMutex);
+            everyReasons.push_back(e.reason);
+        }
+        client.connect("127.0.0.1", port);
+    });
+#ifdef __linux__
+    const int fdsBeforeElsewhere = countEntries("/proc/self/fd");
+    const int threadsBeforeElsewhere = countEntries("/proc/self/task");
+#endif
+    const bool elsewhereOk = client.connect("127.0.0.1", portB);
+    everySub.disconnect();
+    check("connect(B): connect() returns true", elsewhereOk);
+    {
+        lock_guard<mutex> lock(everyMutex);
+        check("connect(B): one onDisconnect, \"Disconnected by client\"",
+              everyReasons.size() == 1 && everyReasons[0] == "Disconnected by client");
+    }
+    rawsocket_t peerB = acceptWithin(listenerB, 2000);
+    check("connect(B): the new peer accepted", peerB != kNoSocket);
+    if (g_fail) bail();
+    check("connect(B): data reaches the new peer", clientToPeer(client, peerB, "moved"));
+    check("connect(B): the client receives the new peer's data",
+          peerToClient(peerB, "hello from B"));
+
+    // The listener's connection reached the old peer's listener, and the
+    // client has closed it again
+    rawsocket_t overruled = acceptWithin(listener, 2000);
+    bool overruledClosed = false;
+    if (overruled != kNoSocket) {
+        setRecvTimeout(overruled, 2000);
+        char c;
+        overruledClosed = ::recv(overruled, &c, 1, 0) == 0;
+        TC_CLOSE(overruled);
+    }
+    check("connect(B): the listener's connection is closed again",
+          overruled != kNoSocket && overruledClosed);
+    rawsocket_t extra = acceptWithin(listener, 300);
+    check("connect(B): no further reconnect to the old peer", extra == kNoSocket);
+    if (extra != kNoSocket) TC_CLOSE(extra);
+    TC_CLOSE(peer);   // the old connection, which the client closed
+    peer = peerB;
+    if (g_fail) bail();
+#ifdef __linux__
+    int fdsAfterElsewhere = -1, threadsAfterElsewhere = -1;
+    waitFor(1000, [&] {
+        fdsAfterElsewhere = countEntries("/proc/self/fd");
+        threadsAfterElsewhere = countEntries("/proc/self/task");
+        return fdsAfterElsewhere <= fdsBeforeElsewhere &&
+               threadsAfterElsewhere <= threadsBeforeElsewhere;
+    });
+    printf("  (descriptors: %d before, %d after; threads: %d before, %d after)\n",
+           fdsBeforeElsewhere, fdsAfterElsewhere, threadsBeforeElsewhere, threadsAfterElsewhere);
+    check("connect(B): no descriptor or thread left over",
+          fdsAfterElsewhere <= fdsBeforeElsewhere && threadsAfterElsewhere <= threadsBeforeElsewhere);
+#else
+    printf("%-60s %s\n", "connect(B): no descriptor or thread left over",
+           "SKIP (counted on Linux)");
+#endif
+    if (g_fail) bail();
+
     // --- disconnect() with an auto-reconnect listener attached ---------------
     // The usual auto-reconnect: an inline onDisconnect listener that reconnects
     // unless the app itself disconnected. disconnect()'s shutdown() wakes the
@@ -525,6 +608,7 @@ static void scenario() {
     // --- teardown ---------------------------------------------------------
     TC_CLOSE(peer);
     TC_CLOSE(refusedSock);
+    TC_CLOSE(listenerB);
     TC_CLOSE(listener);
 }
 

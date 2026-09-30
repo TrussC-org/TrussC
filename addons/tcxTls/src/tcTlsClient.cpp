@@ -299,22 +299,21 @@ bool TlsClient::connect(const std::string& host, int port) {
         disconnect();
     }
 
-    // Ensure previous receive thread has finished. A listener on that thread
-    // (onDisconnect, say) that reconnects cannot join it: detach instead. Its
-    // loops (processNetwork()'s receive loop, then tlsReceiveThreadFunc()'s)
-    // end on their own once running_ is cleared or the new receive thread has
-    // taken over.
-    if (tlsReceiveThread_.joinable()) {
-        if (tlsReceiveThread_.get_id() == std::this_thread::get_id()) {
-            tlsReceiveThread_.detach();
-        } else {
-            tlsReceiveThread_.join();
-        }
-    }
-
-    // After the peer closed the connection (or a TLS error ended it) the
-    // flags above are all clear, but the socket is still open. Close it:
-    // creating the new socket below would overwrite and leak it.
+    // Release what is left before starting over.
+    //  - After the peer closed the connection (or a TLS error ended it) the
+    //    flags above are all clear, but the socket is still open and the
+    //    finished receive thread still joinable: creating the new socket
+    //    would overwrite and leak the old one.
+    //  - The disconnect() above fired onDisconnect inline, and a listener may
+    //    have reconnected from it. This call came first and overrules that
+    //    connection: close it without another notification. running_ is
+    //    cleared and the socket shut down before the join, so its receive
+    //    thread, blocked in the handshake or a read, wakes up and its failure
+    //    loses the exchange and reports nothing.
+    running_ = false;
+    connectPending_ = false;
+    handshakePending_ = false;
+    updateListener_.disconnect();
 #ifdef _WIN32
     if (socket_ != INVALID_SOCKET) {
         shutdown(socket_, SD_BOTH);
@@ -328,6 +327,22 @@ bool TlsClient::connect(const std::string& host, int port) {
         socket_ = -1;
     }
 #endif
+
+    // Ensure the previous receive thread has finished. A listener on that
+    // thread (onDisconnect, say) that reconnects cannot join it: detach
+    // instead. Its loops (processNetwork()'s receive loop, then
+    // tlsReceiveThreadFunc()'s) end on their own once running_ is cleared or
+    // the new receive thread has taken over.
+    if (tlsReceiveThread_.joinable()) {
+        if (tlsReceiveThread_.get_id() == std::this_thread::get_id()) {
+            tlsReceiveThread_.detach();
+        } else {
+            tlsReceiveThread_.join();
+        }
+    }
+    if (connected_.exchange(false)) {
+        logWarning() << "TlsClient: connect() closes the connection an onDisconnect listener opened";
+    }
 
     // Reset SSL context (clear previous connection state)
     if (ctx_) {

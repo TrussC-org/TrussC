@@ -76,12 +76,25 @@ bool TcpClient::connect(const std::string& host, int port) {
         disconnect();
     }
 
-    // After the peer closed the connection (or it failed) the flags above are
-    // all clear, but the socket and the finished receive thread are still
-    // here. Release them before starting over: overwriting socket_ leaks the
-    // descriptor, and assigning a new thread to a still-joinable
-    // receiveThread_ calls std::terminate.
+    // Release what is left before starting over.
+    //  - After the peer closed the connection (or it failed) the flags above
+    //    are all clear, but the socket and the finished receive thread are
+    //    still here: overwriting socket_ leaks the descriptor, and assigning
+    //    a new thread to a still-joinable receiveThread_ calls std::terminate.
+    //  - The disconnect() above fired onDisconnect inline, and a listener may
+    //    have reconnected from it. This call came first and overrules that
+    //    connection: close it without another notification. running_ is
+    //    cleared before the shutdown(), so its receive thread's EOF loses the
+    //    exchange in processNetwork() and reports nothing (reported, it would
+    //    let the listener reconnect again from that thread while this one is
+    //    joining it).
+    running_ = false;
+    connectPending_ = false;
+    updateListener_.disconnect();
     resetConnection();
+    if (connected_.exchange(false)) {
+        logWarning() << "TcpClient: connect() closes the connection an onDisconnect listener opened";
+    }
 
     // Create socket
     socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
