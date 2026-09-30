@@ -49,6 +49,9 @@ static bool rangeFits(cgltf_size size, cgltf_size offset, cgltf_size stride,
 // size_t: readAccessorFloats() and cgltf's unpack functions compute it, and
 // an accessor without a buffer view has no range to bound its count. This is
 // only a check that the arithmetic does not wrap, not a limit on model size.
+// A sparse accessor may not list more values than it has elements (glTF
+// requires its indices to be strictly increasing and below the count), so
+// its values array is never larger than the accessor itself.
 static bool checkDataRanges(const cgltf_data* data) {
     for (cgltf_size i = 0; i < data->buffer_views_count; i++) {
         const cgltf_buffer_view& view = data->buffer_views[i];
@@ -68,6 +71,7 @@ static bool checkDataRanges(const cgltf_data* data) {
         }
         if (acc.is_sparse) {
             const cgltf_accessor_sparse& sp = acc.sparse;
+            if (sp.count > acc.count) return false;
             cgltf_size indexSize = cgltf_component_size(sp.indices_component_type);
             if (indexSize == 0) continue;
             if (!rangeFits(sp.indices_buffer_view->size, sp.indices_byte_offset,
@@ -272,16 +276,28 @@ static Material loadGltfMaterial(const cgltf_material* mat,
 // Mesh loading
 // ---------------------------------------------------------------------------
 
-// True when the primitive has a POSITION accessor backed by a buffer view.
-// glTF lets a primitive leave out POSITION, and lets an accessor leave out
-// its buffer view (its values are then zeros, plus any sparse values). Such a
-// primitive has no vertex data of its own; load() skips it with a warning
-// and loads the rest of the file.
-static bool hasPositionData(const cgltf_primitive* prim) {
+// True when the accessor reads from a buffer view whose data is in memory.
+// glTF lets an accessor leave out its buffer view (its values are then
+// zeros, plus any sparse values), and a buffer without a uri (outside a
+// GLB's BIN chunk) has no data. The count of such an accessor is not bounded
+// by anything that was loaded, while the arrays read from it grow with the
+// count.
+static bool accessorHasData(const cgltf_accessor* acc) {
+    return acc && acc->buffer_view && cgltf_buffer_view_data(acc->buffer_view);
+}
+
+// True when the primitive has a POSITION accessor with data, and its index
+// accessor (if any) has data too. glTF lets a primitive leave out POSITION.
+// Every other attribute has the POSITION count (cgltf_validate() checks
+// this), so with these two every array the loader allocates for the
+// primitive is bounded by data in memory. A primitive without them is
+// skipped by load() with a warning, and the rest of the file loads.
+static bool hasVertexData(const cgltf_primitive* prim) {
+    if (prim->indices && !accessorHasData(prim->indices)) return false;
     for (cgltf_size a = 0; a < prim->attributes_count; a++) {
         const cgltf_attribute& attr = prim->attributes[a];
         if (attr.type == cgltf_attribute_type_position) {
-            return attr.data && attr.data->buffer_view;
+            return accessorHasData(attr.data);
         }
     }
     return false;
@@ -468,7 +484,7 @@ bool GltfModel::load(const string& path) {
                 for (cgltf_size p = 0; p < node->mesh->primitives_count; p++) {
                     const cgltf_primitive* prim = &node->mesh->primitives[p];
                     if (prim->type != cgltf_primitive_type_triangles) continue;
-                    if (!hasPositionData(prim)) {
+                    if (!hasVertexData(prim)) {
                         skippedPrimitives++;
                         continue;
                     }
@@ -501,7 +517,10 @@ bool GltfModel::load(const string& path) {
             }
         }
     } catch (const bad_alloc&) {
-        // A count too large to allocate (no numeric cap is imposed on counts)
+        // Out of memory for a large model. No numeric cap is imposed on
+        // counts; hasVertexData() and checkDataRanges() keep every array
+        // bounded by the data in memory. Web builds do not enable exception
+        // catching, so there an allocation failure still aborts.
         failure = "not enough memory for the model data";
     } catch (const length_error&) {
         failure = "not enough memory for the model data";
@@ -516,7 +535,7 @@ bool GltfModel::load(const string& path) {
     }
     if (skippedPrimitives > 0) {
         logWarning() << "[GltfModel] skipped " << skippedPrimitives
-                     << " primitive(s) without POSITION data: " << resolved;
+                     << " primitive(s) without POSITION or index data: " << resolved;
     }
     loaded_ = true;
     logNotice() << "[GltfModel] loaded " << nodes_.size() << " nodes, "

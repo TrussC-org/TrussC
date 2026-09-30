@@ -18,9 +18,10 @@
 //   - attribute counts that differ within a primitive fail to load
 //   - an index past the primitive's vertices fails to load (caught by
 //     cgltf_validate() or, for vertices the loader cannot read, by the loader)
-//   - a primitive without POSITION, or with a POSITION accessor without a
-//     buffer view, is skipped with one warning per load
-//   - a count too large to allocate fails to load
+//   - a primitive without POSITION, or whose POSITION or index accessor has
+//     no data in memory (no buffer view, or a buffer without data), is
+//     skipped with one warning per load; no array is allocated from its count
+//   - a sparse accessor with more values than elements fails to load
 //   - an image in a buffer without data is skipped
 //   - a component type glTF 2.0 does not allow fails validation
 //   - a file with no scene loads from its root nodes; with no nodes it fails
@@ -491,19 +492,62 @@ int main() {
                   warning.find("skipped 1 primitive") != string::npos);
         }
     }
-    if (is64) {
-        // An index accessor without a buffer view whose count does not wrap
-        // the size arithmetic but is larger than a vector can hold: the
-        // vector refuses it before allocating (std::length_error; libc++ asks
-        // the allocator, which throws std::bad_alloc). load() catches either.
+    {
+        // An index accessor without a buffer view has no data to bound its
+        // count: the primitive is skipped before any index array is
+        // allocated. The count does not wrap the size arithmetic, but no
+        // allocation of it could succeed (2^62 - 1 on 64-bit, about 4 GB on
+        // 32-bit)
         GltfBuilder b = triangle();
-        b.addAccessor(accessorJson(-1, UINT, "4611686018427387903", "SCALAR"));  // 2^62 - 1
-        b.primitive = R"({"attributes":{"POSITION":0},"indices":3})";
+        b.addAccessor(accessorJson(-1, UINT, is64 ? "4611686018427387903" : "1073741823",
+                                   "SCALAR"));
+        b.primitive = R"({"attributes":{"POSITION":0},"indices":3},)"
+                      R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1})";
         GltfModel m;
         string warning;
-        loadCase("count too large to allocate", b, false, m, &warning);
-        check("count too large to allocate: reported as out of memory",
-              warning.find("not enough memory") != string::npos);
+        if (loadCase("index accessor without a buffer view", b, true, m, &warning)) {
+            check("index accessor without a buffer view: skipped, the other one loaded",
+                  m.getNodeCount() == 1 && m.getNode(0).mesh.getNumIndices() == 3);
+            check("index accessor without a buffer view: warning logged",
+                  warning.find("skipped 1 primitive") != string::npos);
+        }
+    }
+    {
+        // POSITION and index accessors on a buffer without a uri: the views
+        // lie inside the declared byteLength, but the buffer has no data
+        GltfBuilder b = triangle();
+        b.extraBuffers.push_back(R"({"byteLength":64})");
+        b.views.push_back(R"({"buffer":1,"byteOffset":0,"byteLength":36})");
+        int noDataView = (int)b.views.size() - 1;
+        b.addAccessor(accessorJson(noDataView, FLOAT, "3", "VEC3"));   // 3
+        b.addAccessor(accessorJson(noDataView, USHORT, "3", "SCALAR"));  // 4
+        b.primitive = R"({"attributes":{"POSITION":3}},)"
+                      R"({"attributes":{"POSITION":0},"indices":4},)"
+                      R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1})";
+        GltfModel m;
+        string warning;
+        if (loadCase("accessors on a buffer without data", b, true, m, &warning)) {
+            check("accessors on a buffer without data: both skipped, the other one loaded",
+                  m.getNodeCount() == 1 && m.getNode(0).mesh.getNumVertices() == 3 &&
+                  m.getNode(0).mesh.getNumIndices() == 3);
+            check("accessors on a buffer without data: one warning with the count",
+                  warning.find("skipped 2 primitive") != string::npos);
+        }
+    }
+    {
+        // Four sparse values for an accessor of three elements. The sparse
+        // indices stay below the count, so cgltf_validate() accepts them
+        GltfBuilder b = triangle();
+        const uint16_t sparseIdx[4] = { 0, 1, 2, 2 };
+        int siv = b.addView(sparseIdx, sizeof(sparseIdx));
+        const float sparseVal[12] = { 5, 5, 5,  6, 6, 6,  7, 7, 7,  8, 8, 8 };
+        int svv = b.addView(sparseVal, sizeof(sparseVal));
+        b.addAccessor(accessorJson(0, FLOAT, "3", "VEC3",
+            ",\"sparse\":{\"count\":4,\"indices\":{\"bufferView\":" + to_string(siv) +
+            ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
+        b.primitive = R"({"attributes":{"POSITION":3}})";
+        GltfModel m;
+        loadCase("more sparse values than elements", b, false, m);
     }
 
     // ----- textures -------------------------------------------------------------
