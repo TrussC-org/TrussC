@@ -5,18 +5,22 @@
 // --addon-tests-only (exit 0 = pass, non-zero = fail). Console only.
 //
 //   1. Round trip: recordings written by DepthRecorder (every depth / color
-//      codec, 1/3/4-channel color, depth only, a custom block per frame, and
-//      frames that are smooth, incompressible and all zero) play back
-//      byte-for-byte, with no warnings.
+//      codec, 1/3/4-channel color, depth only, a camera-sized frame, a custom
+//      block per frame, and frames that are smooth, incompressible and all
+//      zero) play back byte-for-byte, with no warnings.
 //   2. Block sizes: copies of a valid recording with one field of the middle
 //      frame changed (depth sample count / byte size / compressed size, color
 //      width / height / channels / byte size / compressed size, a block
 //      length, an index offset, data that doesn't decode or decodes short,
-//      the stream manifest count, the header magic) are skipped or refused
-//      with the expected message, and the other frames still play.
-//   3. Reopening one object warns about a skipped block again, and a failed
+//      a second depth / color block that is skipped, the stream manifest
+//      count, the header magic) are skipped or refused with the expected
+//      message, and the other frames still play.
+//   3. Header frame size: 0x0 and sizes up to width x height x 4 = INT_MAX
+//      open; negative sizes and larger ones are refused.
+//   4. The parsers refuse a byte size above INT_MAX before allocating.
+//   5. Reopening one object warns about a skipped block again, and a failed
 //      reopen leaves the manifest empty.
-//   4. depthToImage() draws nothing for a depth plane shorter than w*h.
+//   6. depthToImage() draws nothing for a depth plane shorter than w*h.
 //
 // Pass a name fragment as the first argument to run only the matching cases.
 // =============================================================================
@@ -31,8 +35,11 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace std;
@@ -358,6 +365,31 @@ static void depthDataShort(vector<uint8_t>& b, const vector<vector<BlockAt>>& L)
     put32(b, filler + 1, oldComp - newComp - 5);
 }
 
+// Replaces frame 1's custom block with a second block of `type` whose sizes
+// match the frame but whose compressed size is 0, so it can't decode; a filler
+// block takes the bytes left over. The custom block is the last one in the
+// frame, so nothing after it moves.
+static void secondBlockWithoutData(uint8_t type, vector<uint8_t>& b,
+                                   const vector<vector<BlockAt>>& L) {
+    const BlockAt& e = blockOf(L, 1, CUSTOM_TYPE);
+    const BlockAt& k = blockOf(L, 1, type);
+    const size_t fields = type == BLOCK_DEPTH ? D_DATA : C_DATA;
+    const size_t total = 5 + e.len;
+    if (total < 5 + fields || (total - 5 - fields != 0 && total - 5 - fields < 5)) {
+        printf("secondBlockWithoutData: the custom block has the wrong size\n");
+        exit(1);
+    }
+    memcpy(b.data() + e.at, b.data() + k.at, 5 + fields);
+    // The length DepthRecorder writes for a block with no compressed data.
+    put32(b, e.at + 1, type == BLOCK_DEPTH ? 12 : 13);
+    put32(b, e.payload() + (type == BLOCK_DEPTH ? D_COMP : C_COMP), 0);
+    const size_t filler = e.at + 5 + fields;
+    if (filler < e.at + total) {
+        b[filler] = FILLER_TYPE;
+        put32(b, filler + 1, static_cast<uint32_t>(e.at + total - filler - 5));
+    }
+}
+
 // What frame 1 (the changed one) should give for each stream.
 enum class S {
     Read,     // fresh and equal to what was recorded (custom block: handed over intact)
@@ -498,6 +530,10 @@ static vector<Mutation> mutations() {
         {"depthLenPastFrame", hilo, lz4, X, X, X, "runs past the end of its frame",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_DEPTH);
                                 put32(b, k.at + 1, 0xFFFFFFF0u); }},
+        // A valid depth block, then one that can't decode: the stream ends up
+        // empty, so it isn't new.
+        {"depthSecondBlockSkipped", hilo, lz4, X, R, X, "compressed size doesn't fit the byte size",
+         [](auto& b, auto& L) { secondBlockWithoutData(BLOCK_DEPTH, b, L); }},
 
         // --- color block ---
         // The length counting all 17 bytes of fields plays like the length
@@ -562,6 +598,8 @@ static vector<Mutation> mutations() {
         {"colorLenBelowFields", hilo, lz4, R, X, X, "shorter than its size fields",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_COLOR);
                                 put32(b, k.at + 1, 12); }},
+        {"colorSecondBlockSkipped", hilo, lz4, R, X, X, "compressed size doesn't fit the byte size",
+         [](auto& b, auto& L) { secondBlockWithoutData(BLOCK_COLOR, b, L); }},
 
         // --- custom block ---
         {"customLenPastFrame", hilo, lz4, R, R, X, "runs past the end of its frame",
@@ -579,8 +617,8 @@ static vector<Mutation> mutations() {
         {"indexPastFile", hilo, lz4, R, R, X, "runs past the end of its frame",
          [](auto& b, auto& L) { TcdcHeader h;
                                 memcpy(&h, b.data(), sizeof(h));
-                                const uint64_t far = uint64_t(1) << 40;
-                                memcpy(b.data() + h.indexOffset + 2 * 16 + 8, &far, 8);
+                                const uint64_t pastEnd = uint64_t(1) << 40;
+                                memcpy(b.data() + h.indexOffset + 2 * 16 + 8, &pastEnd, 8);
                                 const auto& k = blockOf(L, 1, CUSTOM_TYPE);
                                 put32(b, k.at + 1, 0xFFFFFFFFu); },
          false, true},
@@ -591,6 +629,120 @@ static vector<Mutation> mutations() {
         {"headerMagicWrong", hilo, lz4, A, A, A, "not a .tcdc file",
          [](auto& b, auto&) { b[0] = 'X'; }, true},
     };
+}
+
+// -----------------------------------------------------------------------------
+// Header frame size
+// -----------------------------------------------------------------------------
+
+// A valid recording with the header's width and height replaced. Sizes that
+// open but don't match the depth blocks play color only.
+static void runHeaderSize(const filesystem::path& dir) {
+    struct Case { const char* name; int32_t w, h; bool opens; };
+    const Case cases[] = {
+        {"recorded", 64, 48, true},
+        {"zero", 0, 0, true},
+        {"atLimit", 536870911, 1, true},             // x 4 = INT_MAX - 3
+        {"pastLimit", 536870912, 1, false},          // x 4 = INT_MAX + 1
+        {"productWrapsTo0", 65536, 65536, false},    // x 4 = 2^34, 0 in 32 bits
+        {"widthNegative", -64, 48, false},
+        {"bothNegative", -64, -48, false},           // positive product
+    };
+    const Dims d;
+    for (const Case& c : cases) {
+        const string base = string("headerSize/") + c.name;
+        if (!selected(base)) continue;
+        const filesystem::path path = dir / (string("headerSize-") + c.name + ".tcdc");
+        if (!writeRecording(path, d, DepthCodecId::HiloLZ4, ColorCodecId::LZ4)) {
+            check(base + ": write source recording", false);
+            continue;
+        }
+        vector<uint8_t> bytes = readAll(path);
+        put32(bytes, offsetof(TcdcHeader, width), static_cast<uint32_t>(c.w));
+        put32(bytes, offsetof(TcdcHeader, height), static_cast<uint32_t>(c.h));
+        writeAll(path, bytes);
+
+        const Played r = play(path);
+        auto loggedOnce = [&r](const char* message) {
+            return r.log.size() == 1 && r.log[0].find(message) != string::npos;
+        };
+        auto showLog = [&r] {
+            for (const string& line : r.log) printf("  logged: %s\n", line.c_str());
+        };
+        if (!c.opens) {
+            check(base + ": open refused", !r.opened && r.blockTypes.empty());
+            const bool reported = loggedOnce("is out of range");
+            check(base + ": reported", reported);
+            if (!reported) showLog();
+            continue;
+        }
+        bool ok = r.opened && r.frames.size() == FRAMES;
+        const bool matches = c.w == d.w && c.h == d.h;
+        for (int k = 0; ok && k < FRAMES; ++k) {
+            if (matches) {
+                ok = frameIntact(r.frames[k], d, k);
+            } else {
+                DepthFrame want;
+                fillFrame(want, d, k);
+                const PlayedFrame& pf = r.frames[k];
+                ok = !pf.depthNew && pf.f.depth.empty() && pf.colorNew && sameColor(pf.f, want);
+            }
+        }
+        check(base + ": opens and plays", ok);
+        const bool logOk = matches ? r.log.empty()
+                                   : loggedOnce("sample count doesn't match the frame size");
+        check(base + (matches ? ": nothing logged" : ": depth skip reported once"), logOk);
+        if (!logOk) showLog();
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Byte size above INT_MAX
+// -----------------------------------------------------------------------------
+
+// Size fields that agree with each other, with a compressed size that could
+// hold them, but a byte size decompress() can't produce: refused before the
+// parser allocates anything. Only the fields are in the stream.
+static void runByteSizeAboveIntMax() {
+    const string base = "byteSizeAboveIntMax";
+    auto fieldStream = [](initializer_list<pair<const void*, size_t>> fields) {
+        string s;
+        for (const auto& f : fields) s.append(static_cast<const char*>(f.first), f.second);
+        return istringstream(s);
+    };
+    if (selected(base + "/depth")) {
+        TcdcHeader h{};
+        h.width = 32768; h.height = 32768;
+        h.depthCodec = static_cast<uint8_t>(DepthCodecId::HiloLZ4);
+        const uint32_t n = 1u << 30, raw = 1u << 31, comp = raw / 255 + 1;
+        istringstream in = fieldStream({{&n, 4}, {&raw, 4}, {&comp, 4}});
+        DepthFrame dst;
+        vector<uint8_t> scratch;
+        uint64_t used = 0;
+        const char* why = nullptr;
+        const bool ok = tcd_detail::parseDepthPayload(in, h, 12 + comp, 12 + comp, dst,
+                                                      scratch, used, why);
+        check(base + "/depth: refused before allocating",
+              !ok && why && string(why).find("too large to decode") != string::npos &&
+              scratch.capacity() == 0 && dst.depth.capacity() == 0);
+    }
+    if (selected(base + "/color")) {
+        TcdcHeader h{};
+        h.colorCodec = static_cast<uint8_t>(ColorCodecId::LZ4);
+        const int32_t cw = 32768, ch = 32768;
+        const uint8_t chn = 3;
+        const uint32_t raw = 3u << 30, comp = raw / 255 + 1;
+        istringstream in = fieldStream({{&cw, 4}, {&ch, 4}, {&chn, 1}, {&raw, 4}, {&comp, 4}});
+        DepthFrame dst;
+        vector<uint8_t> scratch;
+        uint64_t used = 0;
+        const char* why = nullptr;
+        const bool ok = tcd_detail::parseColorPayload(in, h, 13 + comp, 17 + comp, dst,
+                                                      scratch, used, why);
+        check(base + "/color: refused before allocating",
+              !ok && why && string(why).find("too large to decode") != string::npos &&
+              scratch.capacity() == 0 && !dst.color.isAllocated());
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -657,18 +809,25 @@ int main(int argc, char** argv) {
     filesystem::create_directories(dir);
 
     // ----- 1. round trip ------------------------------------------------------
-    struct RoundTrip { const char* name; DepthCodecId dc; ColorCodecId cc; int chn; };
+    struct RoundTrip {
+        const char* name; DepthCodecId dc; ColorCodecId cc; int chn;
+        int w = 64, h = 48, cw = 80, ch = 60;
+    };
     const RoundTrip trips[] = {
         {"hiloLz4-lz4-rgba",  DepthCodecId::HiloLZ4, ColorCodecId::LZ4, 4},
         {"lz4-raw-rgb",       DepthCodecId::LZ4,     ColorCodecId::Raw, 3},
         {"raw-lz4-gray",      DepthCodecId::Raw,     ColorCodecId::LZ4, 1},
         {"hiloLz4-depthOnly", DepthCodecId::HiloLZ4, ColorCodecId::LZ4, 0},
+        // A camera-sized recording (depth 1280x720, color 1920x1080).
+        {"hiloLz4-lz4-rgba-720p", DepthCodecId::HiloLZ4, ColorCodecId::LZ4, 4,
+         1280, 720, 1920, 1080},
     };
     for (const RoundTrip& t : trips) {
         const string base = string("roundTrip/") + t.name;
         if (!selected(base)) continue;
         Dims d;
         d.chn = t.chn;
+        d.w = t.w; d.h = t.h; d.cw = t.cw; d.ch = t.ch;
         const filesystem::path path = dir / (string(t.name) + ".tcdc");
         check(base + ": record", writeRecording(path, d, t.dc, t.cc));
         const Played r = play(path);
@@ -699,10 +858,16 @@ int main(int argc, char** argv) {
     // ----- 2. block sizes -----------------------------------------------------
     for (const Mutation& m : mutations()) runMutation(m, dir, Dims{});
 
-    // ----- 3. reopen ----------------------------------------------------------
+    // ----- 3. header frame size ----------------------------------------------
+    runHeaderSize(dir);
+
+    // ----- 4. byte size above INT_MAX -----------------------------------------
+    runByteSizeAboveIntMax();
+
+    // ----- 5. reopen ----------------------------------------------------------
     runReopen(dir);
 
-    // ----- 4. depthToImage ----------------------------------------------------
+    // ----- 6. depthToImage ----------------------------------------------------
     if (selected("depthToImageShortPlane")) {
         DepthFrame f;
         f.w = 64; f.h = 48;
