@@ -121,7 +121,7 @@ is modified.
 | `InputTextEx` | `const ImGuiID id = window->GetID(label);` | `id` | Text | `&buf` |
 | `ColorEdit4` (`ColorEdit3` calls it) | `g.NextItemData.ClearFlags();` | 0 | Color | `col`, 3 or 4 |
 | `ColorPicker4` (`ColorPicker3` calls it) | `g.NextItemData.ClearFlags();` | 0 | Color | `col`, 3 or 4 |
-| `Checkbox` | the clipped early return (`if (!is_visible) ... return false; }`) | `id` | Bool | `v` |
+| `Checkbox` | `const bool is_visible = ItemAdd(total_bb, id);` (before the clip return) | `id` | Bool | `v` |
 | `RadioButton` (`int*` form) | the opening `{` | 0 | Radio | `v` |
 | `Selectable` (`bool*` form) | the opening `{` | 0 | Bool | `p_selected` |
 | `BeginListBox` | the `IsRectVisible()` early return | `id` | ListBoxBegin | none (`NULL`) |
@@ -130,7 +130,13 @@ is modified.
 
 Placement rules:
 - A single widget declares the hook after its `ItemAdd()` succeeded, so a
-  clipped widget reports nothing.
+  clipped widget reports nothing. Two exceptions:
+  - `Checkbox` declares it right after `ItemAdd()`, before its clip return:
+    its clipped path still reports `ItemInfo` (so the widget stays listed as
+    drawn), and the value must follow the variable there too.
+  - `BeginListBox` has no `ItemAdd()` of its own (its child window adds the
+    item in `EndListBox`); it declares the hook after its `IsRectVisible()`
+    early return.
 - A composite widget declares it before `BeginGroup()` / `PushID(label)`. The
   hook then works out the widget's ID from the label once the ID stack is back
   at the entry level, and takes the group's rect and visibility from
@@ -162,11 +168,13 @@ How the hooks behave (in `tcImGuiHooks.h`):
   Edited flag, so it is not recorded as touched. Text (buffer size unknown)
   and the openers (`BeginCombo`, `BeginListBox`: no variable) are never
   written.
-- Only the value hook creates "touched" entries, so every entry carries the
-  value of a caller's variable. `ItemInfo` refreshes existing entries, and
-  routes a pick inside a combo popup (`BeginComboDepth`) or inside a list box's
-  child window (its `ChildId` is the list box ID, recorded by the
-  `BeginListBox` hook) to that combo / list box.
+- Only the value hook creates "touched" entries, plus the routing in
+  `ItemInfo`: a pick inside a list box's child window (its `ChildId` is the
+  list box ID, recorded by the `BeginListBox` hook) or inside a combo popup
+  (`BeginComboDepth`) goes to that list box / combo, the list box first. So an
+  entry carries the value of a caller's variable, except one routed to a
+  custom `BeginCombo` / `BeginListBox`, which has no variable: only its label
+  (and a combo's item shown). `ItemInfo` also refreshes existing entries.
 
 Not hooked, on purpose:
 - `MenuItem(label, shortcut, bool selected)`, `Selectable(label, bool

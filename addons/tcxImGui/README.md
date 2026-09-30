@@ -220,7 +220,9 @@ the code, and calls `tcx_imgui_reset_touched`.
   `ColorEdit`) records the whole widget under its label. Likewise a pick in a
   `Combo` or a `ListBox` records the combo / list box under its own label, not
   the item picked. A custom list (`BeginListBox` + `Selectable`s) is recorded
-  under the list box label with no value, like a custom `BeginCombo`.
+  under the list box label with no value, like a custom `BeginCombo`. A value
+  widget inside a custom list box or combo (a `Selectable(label, bool*)`, a
+  `Checkbox`) is recorded under its own label too, with its value.
 - A toggle `MenuItem` / `Selectable` with a `bool*` reports the state after the
   click, even when the click closed its menu.
 - Each `RadioButton(label, int* v, v_button)` the user pressed gets its own
