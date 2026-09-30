@@ -146,8 +146,18 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   thread), `stop()` in `onReceive`, and `stop()` in `onClientConnect` on the
   accept thread, which closes the listening socket before it returns (the old
   port refuses connections; on Linux, where `shutdown()` alone already does
-  that, the socket's descriptor must be gone too) and where `start()` is
-  refused.
+  that, the socket's descriptor must be gone too), where `start()` is
+  refused, and after which the accept thread disconnects the client once the
+  listener returns. `stop()` on several threads at once returns on all of
+  them: from `onClientConnect` on the accept thread while another client's
+  thread is parked in `onReceive` or `onSendComplete` and calls it too
+  (either one first); from two clients' `onReceive`, or two `onSendComplete`;
+  from a plain thread together with `onSendComplete` (the plain one returns
+  only once that listener is done); and from two plain threads while the
+  accept thread is held in a listener (neither throws). Every client ends up
+  disconnected. `start()` while another thread's `stop()` is still waiting
+  for the accept thread waits for it too, and the restarted server accepts
+  clients. A watchdog turns a hang there into a FAIL line and a non-zero exit.
   Linux only, in forked children: failing `accept()` calls (descriptors
   exhausted under a low `RLIMIT_NOFILE`) back off instead of spinning, log
   once and reach `onError` again after the 5 s interval if they persist; a
@@ -155,14 +165,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `onError` instead of ending the process — the writer under `RLIMIT_NPROC`,
   the receive thread through a `pthread_create` wrapper in the test binary
   that fails one chosen call (the client is announced, then disconnected, and
-  that is reported even right after a different failure). `stop()` on several
-  threads at once returns on all of them: from `onClientConnect` together with
-  one from another client's `onReceive` or `onSendComplete` (each listener
-  waits until the other is inside its own, so the calls always overlap; every
-  client ends up disconnected), and from two plain threads while the accept
-  thread is held in a listener (neither throws). A watchdog turns a hang there
-  into a FAIL line and a non-zero exit. Each server binds a port the OS just
-  handed out, not a fixed one.
+  that is reported even right after a different failure); and when the
+  accept thread cannot start, `start()` returns false, reports it once and
+  leaves nothing listening, and a later `start()` on that port works. Each
+  server binds a port the OS just handed out, not a fixed one.
 - `appRoot/` — the running App is `getRootNode()` (#255): the root is a weak
   reference, so the App can't register itself from its constructor, and the
   code that creates it through a `shared_ptr` does. `runApp()`'s setup

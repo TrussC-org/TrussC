@@ -17,17 +17,24 @@
 //     that thread instead of leaving it behind), stop() in onReceive, and
 //     stop() in onClientConnect, which runs on the accept thread and still
 //     closes the listening socket before it returns.
+//     The accept thread disconnects the clients once that listener returns.
 //   - stop() called on several threads at once returns everywhere: from
 //     onClientConnect (accept thread) together with one from another client's
-//     onReceive, or from onSendComplete, and from two plain threads. Every
-//     client ends up disconnected. A watchdog turns a hang into a FAIL line.
+//     onReceive or onSendComplete, in either order; from two clients'
+//     onReceive, or two onSendComplete; from a plain thread together with
+//     onSendComplete (the plain one waits for that listener to finish); and
+//     from two plain threads. Every client ends up disconnected. start()
+//     while another thread's stop() still waits for the accept thread waits
+//     for it too. A watchdog turns a hang into a FAIL line.
 //   - Linux only, each in a forked child so a failure cannot take the rest of
 //     the run with it: accept() errors (here: out of descriptors) back off
 //     instead of spinning, are logged once per burst and reported again after
 //     the throttle interval if they persist; a thread that cannot be started
 //     for a new client closes that connection instead of ending the process,
 //     both for the writer (RLIMIT_NPROC) and for the receive thread (a
-//     pthread_create wrapper in this binary that fails one chosen call).
+//     pthread_create wrapper in this binary that fails one chosen call); and
+//     start() whose accept thread cannot be started returns false, reports
+//     it and leaves nothing listening.
 //
 // Ports: TcpServer::getPort() returns the port that was passed to start(), so
 // start(0) cannot report where it landed. Each server therefore takes a port
@@ -36,6 +43,7 @@
 
 #include <TrussC.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -646,6 +654,11 @@ static void testListenerTeardown() {
               socketClosed.load());
 #endif
         check("teardown: start() from the accept thread is refused", restartRefused.load());
+        // stop() there returned before disconnecting anyone; the accept thread
+        // does that once the listener returns, without a later stop()
+        check("teardown: the client is disconnected once the listener returns",
+              c != kBadSocket && closedByServer(c, 3000) &&
+              waitUntil(3000, [&] { return server.getClientCount() == 0; }));
         const int again = startOnFreePort(server, -1);
         check("teardown: the server starts again from another thread", again != 0);
         rawsocket_t d = again ? connectTo(again) : kBadSocket;
@@ -661,13 +674,21 @@ static void testListenerTeardown() {
 // stop() on several threads at once
 // -----------------------------------------------------------------------------
 
-// stop() from onClientConnect, on the accept thread, while the first client's
-// thread (its receive thread, or its writer with `fromWriter`) is inside a
-// listener calling stop() too. Each listener waits until the other is inside
-// its own before it calls stop(), so the two calls always overlap.
-static void concurrentStopWithAcceptThread(bool fromWriter) {
+// stop() from onClientConnect, on the accept thread, together with a stop()
+// from the first client's thread (its receive thread, or its writer with
+// `fromWriter`), which is parked in a listener while the accept thread is in
+// onClientConnect for the second client.
+//
+// By default the accept thread goes first. Its stop() waits for nothing, so it
+// usually returns before the other one starts. With `acceptLast` the other
+// thread goes first, and the accept thread calls stop() only once that one is
+// waiting for it to end, having taken it out of the server: the accept thread
+// then has to recognize itself without it.
+static void concurrentStopWithAcceptThread(bool fromWriter, bool acceptLast) {
     const char* const other = fromWriter ? "onSendComplete" : "onReceive";
-    const string prefix = string("concurrent stop: onClientConnect + ") + other;
+    const string prefix = acceptLast
+        ? string("concurrent stop: ") + other + ", then onClientConnect"
+        : string("concurrent stop: onClientConnect + ") + other;
     // Declared first, so it also covers the server's destruction below
     Watchdog dog(prefix.c_str(), 20000);
 
@@ -683,7 +704,14 @@ static void concurrentStopWithAcceptThread(bool fromWriter) {
             return;
         }
         connectIn = true;
-        waitUntil(3000, [&] { return otherIn.load(); });
+        if (acceptLast) {
+            // The other stop() has cleared isRunning(); give it time to take
+            // the accept thread and start waiting for it
+            waitUntil(3000, [&] { return !srv->isRunning(); });
+            this_thread::sleep_for(chrono::milliseconds(200));
+        } else {
+            waitUntil(3000, [&] { return otherIn.load(); });
+        }
         srv->stop();
         connectStopped = true;
     });
@@ -740,6 +768,164 @@ static void concurrentStopWithAcceptThread(bool fromWriter) {
     if (second != kBadSocket) TC_CLOSE(second);
 }
 
+// stop() from two clients' threads at once: both receive threads (onReceive),
+// or both writers (onSendComplete). Each listener waits until the other is in
+// its own before calling stop(). Only one of the two can wait for the accept
+// thread and then join the other client threads; the other must not wait for
+// any of them in turn.
+static void concurrentStopOnTwoClientThreads(bool fromWriter) {
+    const string prefix = string("concurrent stop: two ") +
+                          (fromWriter ? "onSendComplete" : "onReceive") + " listeners";
+    Watchdog dog(prefix.c_str(), 20000);
+
+    auto server = make_unique<TcpServer>();
+    TcpServer* srv = server.get();
+    atomic<int> inside{0}, stopped{0};
+    mutex seenMutex;
+    vector<int> seen;   // clients whose listener has run, guarded by seenMutex
+
+    auto listener = [&, srv](int clientId) {
+        {
+            lock_guard<mutex> lock(seenMutex);
+            if (find(seen.begin(), seen.end(), clientId) != seen.end()) return;
+            seen.push_back(clientId);
+        }
+        ++inside;
+        waitUntil(3000, [&] { return inside.load() >= 2; });
+        srv->stop();
+        ++stopped;
+    };
+    EventListener onRecv = srv->onReceive.listen([&](TcpServerReceiveEventArgs& e) {
+        if (!fromWriter) listener(e.clientId);
+    });
+    EventListener onSent = srv->onSendComplete.listen([&](TcpSendCompleteEventArgs& e) {
+        if (fromWriter) listener(e.clientId);
+    });
+
+    const int port = startOnFreePort(*srv, -1);
+    check((prefix + ": server started").c_str(), port != 0);
+    if (!port) return;
+
+    rawsocket_t a = connectTo(port);
+    rawsocket_t b = connectTo(port);
+    const bool joined = a != kBadSocket && b != kBadSocket &&
+                        waitUntil(3000, [&] { return srv->getClientCount() == 2; });
+    if (joined) {
+        if (fromWriter) {
+            for (int id : srv->getClientIds()) srv->sendAsync(id, string("x"));
+        } else {
+            ::send(a, "x", 1, 0);
+            ::send(b, "x", 1, 0);
+        }
+    }
+
+    const bool bothReturned = joined && waitUntil(5000, [&] { return stopped.load() == 2; });
+    check((prefix + ": both stop() calls return").c_str(), bothReturned);
+    check((prefix + ": the server is stopped").c_str(), !srv->isRunning());
+    // The byte each writer sent comes first; this reads it
+    if (fromWriter && joined) {
+        closedByServer(a, 3000);
+        closedByServer(b, 3000);
+    }
+    check((prefix + ": every client is disconnected").c_str(),
+          joined && closedByServer(a, 3000) && closedByServer(b, 3000) &&
+          waitUntil(3000, [&] { return srv->getClientCount() == 0; }));
+
+    if (bothReturned) {
+        server.reset();
+        check((prefix + ": the server is destroyed afterwards").c_str(), true);
+    } else {
+        server.release();
+    }
+    if (a != kBadSocket) TC_CLOSE(a);
+    if (b != kBadSocket) TC_CLOSE(b);
+}
+
+// stop() on a plain thread, which takes the accept thread and waits for it,
+// while a writer's onSendComplete listener calls stop() too. The listener keeps
+// running after its stop() returns; the plain thread's stop() has to wait for
+// it, or destroying the server right after would pull the server out from
+// under that writer.
+static void concurrentStopOnPlainAndWriterThread() {
+    const char* const prefix = "concurrent stop: another thread + onSendComplete";
+    Watchdog dog(prefix, 20000);
+
+    auto server = make_unique<TcpServer>();
+    TcpServer* srv = server.get();
+    atomic<int> firstId{-1};
+    atomic<bool> held{false}, release{false};
+    atomic<bool> writerIn{false}, writerStopped{false}, writerDone{false};
+
+    // The accept thread is held in onClientConnect for the second client, so
+    // the plain thread's stop() keeps waiting for it
+    EventListener onCon = srv->onClientConnect.listen([&](TcpClientConnectEventArgs& e) {
+        if (firstId.load() < 0) {
+            firstId = e.clientId;
+            return;
+        }
+        held = true;
+        waitUntil(5000, [&] { return release.load(); });
+    });
+    EventListener onSent = srv->onSendComplete.listen([&, srv](TcpSendCompleteEventArgs& e) {
+        if (e.clientId != firstId.load() || writerIn.exchange(true)) return;
+        // Once the plain thread's stop() is waiting for the accept thread
+        waitUntil(3000, [&] { return !srv->isRunning(); });
+        this_thread::sleep_for(chrono::milliseconds(200));
+        srv->stop();
+        writerStopped = true;
+        this_thread::sleep_for(chrono::milliseconds(300));
+        writerDone = true;
+    });
+
+    const int port = startOnFreePort(*srv, -1);
+    check((string(prefix) + ": server started").c_str(), port != 0);
+    if (!port) return;
+
+    rawsocket_t first = connectTo(port);
+    const bool joined = first != kBadSocket &&
+                        waitUntil(3000, [&] { return srv->getClientCount() == 1 &&
+                                                     firstId.load() >= 0; });
+    rawsocket_t second = joined ? connectTo(port) : kBadSocket;
+    const bool ready = second != kBadSocket && waitUntil(3000, [&] { return held.load(); });
+    if (ready) srv->sendAsync(firstId.load(), string("x"));
+    const bool parked = ready && waitUntil(3000, [&] { return writerIn.load(); });
+
+    atomic<bool> plainReturned{false}, doneAtReturn{false};
+    thread plain([&] {
+        srv->stop();
+        doneAtReturn = writerDone.load();
+        plainReturned = true;
+    });
+    const bool writerReturned = parked && waitUntil(5000, [&] { return writerStopped.load(); });
+    release = true;
+    const bool returned = waitUntil(5000, [&] { return plainReturned.load(); });
+
+    check((string(prefix) + ": the writer's stop() returns").c_str(), writerReturned);
+    check((string(prefix) + ": the other stop() returns").c_str(), returned);
+    check((string(prefix) + ": ...once that writer's listener is done").c_str(),
+          returned && doneAtReturn.load());
+    // The byte the writer sent comes first; this reads it
+    if (first != kBadSocket) closedByServer(first, 3000);
+    check((string(prefix) + ": every client is disconnected").c_str(),
+          first != kBadSocket && closedByServer(first, 3000) &&
+          second != kBadSocket && closedByServer(second, 3000) &&
+          srv->getClientCount() == 0);
+
+    if (returned) {
+        plain.join();
+        // Should the writer still run, it must not outlive the server
+        waitUntil(3000, [&] { return writerDone.load(); });
+        this_thread::sleep_for(chrono::milliseconds(100));
+        server.reset();
+        check((string(prefix) + ": the server is destroyed afterwards").c_str(), true);
+    } else {
+        plain.detach();
+        server.release();
+    }
+    if (first != kBadSocket) TC_CLOSE(first);
+    if (second != kBadSocket) TC_CLOSE(second);
+}
+
 // Two plain threads calling stop() at the same moment, while the accept thread
 // is held in a listener so that both of them are in stop() before it can end
 static void concurrentStopFromTwoThreads() {
@@ -781,10 +967,65 @@ static void concurrentStopFromTwoThreads() {
     if (c != kBadSocket) TC_CLOSE(c);
 }
 
+// start() while a stop() on another thread is still waiting for the accept
+// thread (held in a listener). The old accept thread must be gone before
+// start() sets up the new listening socket, or it would carry on with it.
+static void startWhileAnotherThreadStops() {
+    const char* const prefix = "concurrent stop: start() during another thread's stop()";
+    Watchdog dog(prefix, 20000);
+
+    TcpServer server;
+    atomic<bool> holdNext{true}, held{false}, release{false};
+    EventListener onCon = server.onClientConnect.listen([&](TcpClientConnectEventArgs&) {
+        if (!holdNext.exchange(false)) return;
+        held = true;
+        waitUntil(5000, [&] { return release.load(); });
+    });
+    const int port = startOnFreePort(server, -1);
+    check((string(prefix) + ": server started").c_str(), port != 0);
+    if (!port) return;
+
+    rawsocket_t c = connectTo(port);
+    const bool ready = c != kBadSocket && waitUntil(3000, [&] { return held.load(); });
+
+    atomic<bool> stopReturned{false};
+    thread stopper([&] {
+        server.stop();
+        stopReturned = true;
+    });
+    // Once that stop() is waiting for the accept thread, let the accept thread
+    // go a little later, from a third thread: start() below may wait for it
+    waitUntil(3000, [&] { return !server.isRunning(); });
+    this_thread::sleep_for(chrono::milliseconds(200));
+    thread releaser([&] {
+        this_thread::sleep_for(chrono::milliseconds(300));
+        release = true;
+    });
+
+    const int again = ready ? startOnFreePort(server, -1) : 0;
+    check((string(prefix) + ": start() succeeds").c_str(), again != 0);
+    check((string(prefix) + ": the other stop() returns").c_str(),
+          waitUntil(3000, [&] { return stopReturned.load(); }));
+    rawsocket_t d = again ? connectTo(again) : kBadSocket;
+    check((string(prefix) + ": the restarted server accepts a client").c_str(),
+          d != kBadSocket && waitUntil(3000, [&] { return server.getClientCount() == 1; }));
+
+    releaser.join();
+    server.stop();
+    stopper.join();
+    if (c != kBadSocket) TC_CLOSE(c);
+    if (d != kBadSocket) TC_CLOSE(d);
+}
+
 static void testConcurrentStop() {
-    concurrentStopWithAcceptThread(false);
-    concurrentStopWithAcceptThread(true);
+    concurrentStopWithAcceptThread(false, false);
+    concurrentStopWithAcceptThread(true, false);
+    concurrentStopWithAcceptThread(false, true);
+    concurrentStopOnTwoClientThreads(false);
+    concurrentStopOnTwoClientThreads(true);
+    concurrentStopOnPlainAndWriterThread();
     concurrentStopFromTwoThreads();
+    startWhileAnotherThreadStops();
 }
 
 #ifdef __linux__
@@ -946,6 +1187,35 @@ static void receiveThreadFailureChild() {
 
     server.stop();
 }
+
+// -----------------------------------------------------------------------------
+// start() fails cleanly when its accept thread cannot be started
+// (runs in a forked child: it replaces pthread_create for the whole process)
+// -----------------------------------------------------------------------------
+static void acceptThreadFailureChild() {
+    TcpServer server;
+    atomic<int> errors{0};
+    EventListener onErr = server.onError.listen([&](TcpServerErrorEventArgs&) { ++errors; });
+    const int port = freePort();
+    check("accept thread: a port is free", port != 0);
+    if (!port) return;
+
+    g_threadStartsBeforeFailure = 0;   // the accept thread is the next one
+    check("accept thread: start() returns false", !server.start(port));
+    check("accept thread: reported through onError once", errors.load() == 1);
+    check("accept thread: the server is not running", !server.isRunning());
+    rawsocket_t probe = connectTo(port);
+    check("accept thread: nothing listens on the port", probe == kBadSocket);
+    if (probe != kBadSocket) TC_CLOSE(probe);
+
+    // Recovery, on the same port
+    check("accept thread: start() on that port succeeds afterwards", server.start(port));
+    rawsocket_t c = connectTo(port);
+    check("accept thread: and accepts a client",
+          c != kBadSocket && waitUntil(3000, [&] { return server.getClientCount() == 1; }));
+    if (c != kBadSocket) TC_CLOSE(c);
+    server.stop();
+}
 #endif
 
 int main() {
@@ -959,10 +1229,12 @@ int main() {
         inChild("a failed thread start closes the connection (child)", threadStartFailureChild);
     }
     inChild("a failed receive thread disconnects its client (child)", receiveThreadFailureChild);
+    inChild("a failed accept thread fails start() (child)", acceptThreadFailureChild);
 #else
     skip("accept errors back off", "Linux only (fork + RLIMIT_NOFILE)");
     skip("a failed thread start closes the connection", "Linux only (fork + RLIMIT_NPROC)");
     skip("a failed receive thread disconnects its client", "Linux only (fork + pthread_create)");
+    skip("a failed accept thread fails start()", "Linux only (fork + pthread_create)");
 #endif
 
     testReclaim();
