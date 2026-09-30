@@ -83,7 +83,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `getPath()` follows its last fill (memory / PCM / generated fills clear it),
   and `tc_get_audio_state` reports it all, the microphone included. Runs on
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
-  sound card is needed.
+  sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
+  `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
