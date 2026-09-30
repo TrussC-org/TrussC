@@ -275,6 +275,14 @@ Place icon files in the `icon/` folder:
   - `.ico` - Windows icon format
   - `.png` - Converted to `.ico` automatically (requires ImageMagick)
 
+### Windows Application Manifest (UTF-8)
+Every Windows executable built through `trussc_app()` embeds an application manifest (`core/resources/windows/app.manifest`), merged with the linker's default one:
+
+- `activeCodePage` = `UTF-8`: on Windows 10 version 1903 or later the process code page is UTF-8, so narrow strings are UTF-8 in every API that takes them (`fs::path(std::string)`, `path.string()`, `fopen`, `getenv`, the `-A` Win32 functions), in TrussC, addons and third-party libraries alike. A UTF-8 literal or `std::string` works as a file path: `img.load("写真.png")`. Older Windows ignores the setting. There, and in an executable not built through `trussc_app()`, narrow strings are in the system code page (CP932, CP1252): convert a UTF-8 string with `utf8ToPath()` before passing it to `fs::path`, `load()` or `save()`. That includes the UTF-8 strings the path helpers return (`getFileName()`, `joinPath()`, `listDirectory()`, ...).
+- `longPathAware`: paths longer than 260 characters work where Windows has long paths enabled (the `LongPathsEnabled` policy).
+
+The console output code page is UTF-8 as well: `runApp()` (through `sapp_desc.win32.console_utf8`) and `runHeadlessApp()` switch it to UTF-8 while the app runs, so UTF-8 log text reads correctly in the console of a Debug or `TRUSSC_SHOW_CONSOLE` build. This is done at run time, not by the manifest. The previous code page comes back when `runApp()` / `runHeadlessApp()` returns, and when Ctrl+C or Ctrl+Break ends the app. In a headless app, the first Ctrl+C or Ctrl+Break stops the loop; a second one ends a hung app right away. `std::exit()`, `abort()`, an uncaught exception or a crash leave the console in UTF-8; `chcp` with the old number (e.g. `chcp 932`) sets it back.
+
 ---
 
 ## 4. Addon System

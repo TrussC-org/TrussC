@@ -1602,7 +1602,11 @@ That is the whole procedure — no linker flags, no per-addon steps. In particul
 
 ### How are file paths handled? Japanese / non-ASCII filenames on Windows?
 
-All file-path parameters take `fs::path` (`std::filesystem::path`) — string literals and `std::string` convert implicitly, so just write `img.load("photo.png")` as always. `getDataPath()` also returns `fs::path`; join paths with `/` (`getDataPath("save") / "shot.png"`), not string concatenation. Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform including Windows: TrussC converts to the OS-native encoding at the C-library boundary internally, so there is nothing to configure. `setDataPathRoot()` accepts absolute roots on Windows (`C:/data`) too. If you need a narrow string from a path, use `path.string()` on macOS/Linux; avoid it for file IO on Windows (pass the `fs::path` through instead).
+All file-path parameters take `fs::path` (`std::filesystem::path`) — string literals and `std::string` convert implicitly, so just write `img.load("photo.png")` as always. `getDataPath()` also returns `fs::path`; join paths with `/` (`getDataPath("save") / "shot.png"`), not string concatenation. `setDataPathRoot()` accepts absolute roots on Windows (`C:/data`) too.
+
+Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform. Strings are UTF-8 everywhere in TrussC; on Windows that holds for paths because apps built through TrussC's CMake (`trussc_app()`, i.e. every generated project) embed an application manifest that sets the process code page to UTF-8. This needs Windows 10 version 1903 or later. On older Windows, or in an executable built with your own CMake setup, `fs::path(std::string)` decodes in the system code page (CP932 / CP1252) instead: convert with `utf8ToPath(str)`, or build paths from `u8"..."` / `L"..."` literals, `loadDialog()` results or `directory_iterator` entries.
+
+For the other direction, path → string (display, `Font`, JSON, a string compare), use `pathToUtf8(path)`, not `path.string()`: it returns UTF-8 on every platform, while `path.string()` on Windows follows the process code page, and throws for characters outside it when that is not UTF-8. On Windows `pathToUtf8()` can still throw for a name that is not valid UTF-16 (an unpaired surrogate, which NTFS allows); to log a path, use `logNotice() << path`, which does not throw. The path helpers (`getFileName()`, `getBaseName()`, `getFileExtension()`, `getParentDirectory()`, `joinPath()`, `getAbsolutePath()`, `listDirectory()`) already return UTF-8 (without the manifest, turn a result back into a path with `utf8ToPath()` before passing it to `load()` / `save()`, not with `fs::path(str)`), and `logNotice() << path` writes the path as UTF-8 (without the quotes `std::ostream` adds). In a Windows console, `runApp()` and `runHeadlessApp()` switch the output code page to UTF-8 while the app runs, so non-ASCII log text prints correctly.
 
 ### "Window / media / basics" → which API?
 
@@ -2101,11 +2105,13 @@ const char * loadErrorName(LoadError e)  // Short label for a LoadError value ("
 Json loadJson(const fs::path & path)  // Load a JSON file and return it as a Json object. Relative paths are resolved via getDataPath; returns an empty Json on error.
 std::string loadTextFile(const fs::path & path)  // Load entire text file
 Xml loadXml(const fs::path & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
+std::string pathToUtf8(const fs::path & p)  // Convert a path to a UTF-8 std::string, the same on every platform. Use it instead of path.string(), which on Windows converts to the process code page and can throw for characters outside it. On Windows it can still throw for a name that is not valid UTF-16 (an unpaired surrogate); to log a path, use log << path, which does not throw.
 bool removeFile(const fs::path & path)  // Remove file
 bool saveJson(const Json & j, const fs::path & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath. indent sets the pretty-print width (negative for compact). Returns true on success.
 bool saveTextFile(const fs::path & path, const std::string & content)  // Save string to text file
 void setDataPathRoot(const fs::path & path)  // Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is.
 void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms.
+fs::path utf8ToPath(std::string_view utf8)  // Convert a UTF-8 string to fs::path, decoding it as UTF-8 on every platform. fs::path(std::string) on Windows decodes in the process code page, which is UTF-8 only in apps built with TrussC's Windows manifest (Windows 10 1903 or later).
 ```
 
 ### Sound

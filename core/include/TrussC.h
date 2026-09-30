@@ -2938,8 +2938,58 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     desc.clipboard_size = settings.clipboardSize;
     internal::currentWindowContext().clipboardSize = settings.clipboardSize;
 
+    // Windows: switch the console output code page to UTF-8 while the app
+    // runs, so UTF-8 log text is not shown in the OEM code page. Takes effect
+    // whenever the process has a console (Debug builds, TRUSSC_SHOW_CONSOLE);
+    // a GUI-subsystem Release build has none, and the call does nothing.
+    // sokol restores the previous code page when sapp_run() returns, and
+    // internal::ConsoleOutputCPCtrlGuard when Ctrl+C, Ctrl+Break or closing
+    // the console ends the process. std::exit(), abort(), an uncaught
+    // exception and a crash leave the console in UTF-8. Ignored on other
+    // platforms.
+    desc.win32.console_utf8 = true;
+
     return desc;
 }
+
+#ifdef _WIN32
+namespace internal {
+// sokol switches the console output code page to UTF-8 (console_utf8 above)
+// and puts it back when sapp_run() returns. Ctrl+C, Ctrl+Break and closing
+// the console end the process in the default console handler (ExitProcess)
+// instead, which would leave the launching cmd in UTF-8. This handler puts
+// the code page back first and returns FALSE, so the default handling goes
+// on and the process still ends.
+// Host-only state (tools/header_state_allowlist.txt): only the guard around
+// sapp_run() in runApp() / the hot reload host and its handler touch it, and
+// both are compiled into the host, so a guest's copy is never used.
+inline UINT consoleOutputCPBeforeRun = 0;   // 0: the process has no console
+
+inline BOOL WINAPI restoreConsoleOutputCPOnCtrl(DWORD type) {
+    if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT || type == CTRL_CLOSE_EVENT) {
+        SetConsoleOutputCP(consoleOutputCPBeforeRun);
+    }
+    return FALSE;
+}
+
+// Installs restoreConsoleOutputCPOnCtrl for its lifetime (around sapp_run()),
+// with the code page the console has before sokol changes it.
+struct ConsoleOutputCPCtrlGuard {
+    ConsoleOutputCPCtrlGuard() {
+        consoleOutputCPBeforeRun = GetConsoleOutputCP();
+        installed = consoleOutputCPBeforeRun != 0 &&
+                    SetConsoleCtrlHandler(restoreConsoleOutputCPOnCtrl, TRUE) != 0;
+    }
+    ~ConsoleOutputCPCtrlGuard() {
+        if (installed) SetConsoleCtrlHandler(restoreConsoleOutputCPOnCtrl, FALSE);
+    }
+    ConsoleOutputCPCtrlGuard(const ConsoleOutputCPCtrlGuard&) = delete;
+    ConsoleOutputCPCtrlGuard& operator=(const ConsoleOutputCPCtrlGuard&) = delete;
+
+    bool installed = false;
+};
+} // namespace internal
+#endif
 
 // Desktop: build descriptor and run the event loop.
 // Android: sokol handles the event loop via ANativeActivity_onCreate → sokol_main().
@@ -2960,6 +3010,9 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 template<typename AppClass>
 int runApp(const WindowSettings& settings = WindowSettings()) {
     sapp_desc desc = buildAppDescriptor<AppClass>(settings);
+#ifdef _WIN32
+    internal::ConsoleOutputCPCtrlGuard consoleCtrl;   // Ctrl+C restores the console code page
+#endif
     sapp_run(&desc);
     return 0;
 }

@@ -1080,6 +1080,8 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
         # Windows: Setup icon
         trussc_setup_icon(${PROJECT_NAME})
+        # Windows: application manifest (UTF-8 process code page, long paths)
+        trussc_setup_manifest(${PROJECT_NAME})
     endif()
 
     # =========================================================================
