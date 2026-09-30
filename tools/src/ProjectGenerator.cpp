@@ -108,7 +108,26 @@ static pair<int, string> executeCommand(const string& cmd) {
 #endif
 }
 
-// Helper to find Emscripten toolchain
+// Toolchain files CMake resolves from the environment at configure time,
+// written when this shell has no toolchain to point at.
+static const char* kEmscriptenEnvToolchain =
+    "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake";
+static const char* kAndroidEnvToolchain =
+    "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake";
+
+string chooseToolchainFile(const string& detected, const string& saved,
+                           const string& envFallback) {
+    if (!detected.empty()) return detected;
+    // Only a real file: not a $env{...} / ${...} form, not a relative path
+    error_code ec;
+    if (!saved.empty() && fs::path(saved).is_absolute() &&
+        fs::is_regular_file(saved, ec)) {
+        return saved;
+    }
+    return envFallback;
+}
+
+// Helper to find Emscripten toolchain. Empty when this shell has none.
 static string detectEmscriptenToolchain() {
     // 1. Check EMSDK environment variable (Official installer)
     const char* envEmsdk = std::getenv("EMSDK");
@@ -161,8 +180,31 @@ static string detectEmscriptenToolchain() {
         }
     }
     
-    // Fallback: Default EMSDK pattern (will be evaluated by CMake if EMSDK env var is set later)
-    return "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake";
+    // Not found (the caller falls back to the saved path or kEmscriptenEnvToolchain)
+    return "";
+}
+
+// Helper to find the Android NDK toolchain. Empty when this shell has none.
+static string detectAndroidToolchain() {
+    string ndkHome;
+    if (getenv("ANDROID_NDK_HOME")) {
+        ndkHome = getenv("ANDROID_NDK_HOME");
+    } else if (getenv("ANDROID_HOME")) {
+        // Scan $ANDROID_HOME/ndk/ for latest version
+        string ndkDir = string(getenv("ANDROID_HOME")) + "/ndk";
+        if (fs::exists(ndkDir)) {
+            string latest;
+            for (auto& entry : fs::directory_iterator(ndkDir)) {
+                if (entry.is_directory()) {
+                    string name = entry.path().filename().string();
+                    if (name > latest) latest = name;
+                }
+            }
+            if (!latest.empty()) ndkHome = ndkDir + "/" + latest;
+        }
+    }
+    if (ndkHome.empty()) return "";
+    return ndkHome + "/build/cmake/android.toolchain.cmake";
 }
 
 ProjectGenerator::ProjectGenerator(const ProjectSettings& settings)
@@ -413,31 +455,19 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         androidPreset["cacheVariables"]["ANDROID_ABI"] = "arm64-v8a";
         androidPreset["cacheVariables"]["ANDROID_PLATFORM"] = "android-26";
 
-        // NDK toolchain: try to resolve at generation time, fallback to $env{}
-        string ndkHome;
-        if (getenv("ANDROID_NDK_HOME")) {
-            ndkHome = getenv("ANDROID_NDK_HOME");
-        } else if (getenv("ANDROID_HOME")) {
-            // Scan $ANDROID_HOME/ndk/ for latest version
-            string ndkDir = string(getenv("ANDROID_HOME")) + "/ndk";
-            if (fs::exists(ndkDir)) {
-                string latest;
-                for (auto& entry : fs::directory_iterator(ndkDir)) {
-                    if (entry.is_directory()) {
-                        string name = entry.path().filename().string();
-                        if (name > latest) latest = name;
-                    }
-                }
-                if (!latest.empty()) ndkHome = ndkDir + "/" + latest;
-            }
-        }
-        if (!ndkHome.empty()) {
-            androidPreset["toolchainFile"] = ndkHome + "/build/cmake/android.toolchain.cmake";
-            log("Android NDK: " + ndkHome);
+        // NDK toolchain: try to resolve at generation time. Otherwise keep the
+        // saved one if it still exists (update run from a shell without the
+        // NDK variables), else fall back to $env{} (resolved at build time;
+        // works when ANDROID_NDK_HOME is set in the terminal but not in GUI app)
+        string ndkDetected = detectAndroidToolchain();
+        string ndkToolchain = chooseToolchainFile(
+            ndkDetected, settings_.savedAndroidToolchainFile, kAndroidEnvToolchain);
+        androidPreset["toolchainFile"] = ndkToolchain;
+        if (!ndkDetected.empty()) {
+            log("Android NDK toolchain: " + ndkToolchain);
+        } else if (ndkToolchain != kAndroidEnvToolchain) {
+            log("Android NDK not found in this shell. Keeping the saved toolchain: " + ndkToolchain);
         } else {
-            // Use CMake env expansion — resolved at build time, not generation time
-            // Works when ANDROID_NDK_HOME is set in the terminal but not in GUI app
-            androidPreset["toolchainFile"] = "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake";
             log("Android NDK not found at generation time. Using $env{ANDROID_NDK_HOME} (resolved at build time).");
         }
 
@@ -482,7 +512,15 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         webPreset["displayName"] = "Web (Emscripten)";
         webPreset["binaryDir"] = "${sourceDir}/build-web";
         webPreset["generator"] = "Unix Makefiles";
-        webPreset["toolchainFile"] = detectEmscriptenToolchain();
+        // Emscripten toolchain found in this shell, else the saved one if it
+        // still exists (update run without emsdk_env), else $env{EMSDK}
+        string emDetected = detectEmscriptenToolchain();
+        string emToolchain = chooseToolchainFile(
+            emDetected, settings_.savedWebToolchainFile, kEmscriptenEnvToolchain);
+        if (emDetected.empty() && emToolchain != kEmscriptenEnvToolchain) {
+            log("Emscripten not found in this shell. Keeping the saved toolchain: " + emToolchain);
+        }
+        webPreset["toolchainFile"] = emToolchain;
         webPreset["cacheVariables"]["CMAKE_BUILD_TYPE"] = "MinSizeRel";
         webPreset["cacheVariables"]["TC_WEB_BACKEND"] = (settings_.webBackend == 0) ? "WGPU" : "GLES3";
         webPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
@@ -516,6 +554,7 @@ string ProjectGenerator::writePresets(const string& projectPath) {
 }
 
 string ProjectGenerator::generate() {
+    warnings_.clear();
     // Validation
     if (settings_.projectName.empty()) {
         return "Project name is required";
@@ -605,6 +644,7 @@ string ProjectGenerator::generate() {
 }
 
 string ProjectGenerator::update(const string& projectPath_) {
+    warnings_.clear();
     // Resolve to absolute path so saveJson (which uses getDataPath) works correctly
     string projectPath = fs::absolute(projectPath_).string();
     try {
@@ -1037,8 +1077,22 @@ bool ProjectGenerator::runCrossCompilePresets(const string& path) {
         auto [result, output] = executeCommand(cmd);
         if (!output.empty()) log(output);
         if (result != 0) {
-            log("ERROR: cmake --preset " + preset + " failed");
-            ok = false;
+            const bool kept = (preset == "web" && settings_.webKept) ||
+                              (preset == "android" && settings_.androidKept) ||
+                              (preset == "ios" && settings_.iosKept);
+            if (kept) {
+                // Kept from the saved presets, not asked for on this run:
+                // the rest of the regeneration (e.g. an addon change) stands.
+                log("cmake --preset " + preset + " failed (target kept from CMakePresets.json)");
+                warnings_.push_back(
+                    "cmake --preset " + preset + " failed, so " + getBuildDir(preset) +
+                    " is not configured. The " + preset + " target was kept from "
+                    "CMakePresets.json; set up its toolchain and run 'trusscli update' "
+                    "again, or drop the target with 'trusscli update --no-" + preset + "'");
+            } else {
+                log("ERROR: cmake --preset " + preset + " failed");
+                ok = false;
+            }
         }
     }
     return ok;

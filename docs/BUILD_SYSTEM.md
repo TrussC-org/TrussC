@@ -62,14 +62,21 @@ project's `CMakePresets.json` (the IDE is stored there as
 `"vendor": {"trussc": {"ide": "..."}}`), then apply the flags you pass. So
 `trusscli update --web` once is enough, and `--no-web` / `--no-android` /
 `--no-ios` drop a target again. A kept target is configured again on every
-regeneration, so it needs its toolchain (emsdk, the Android NDK) then too.
+regeneration. Its toolchain path saved in `CMakePresets.json` is reused when
+the current shell has no emsdk / Android NDK set up and the file still
+exists; if its configure fails anyway, that is a warning naming
+`trusscli update --no-web` (or `--no-android` / `--no-ios`), and the rest of
+the regeneration (e.g. the addon change) stands. A target you pass as a flag
+must configure, or the command fails.
 Scripts that want an exact target set pass every flag, as
 `examples/build_all.py` does. `CMakePresets.json` is gitignored, so after a
 fresh clone the defaults apply (`vscode`, native only) until you pass the
 flags again. A saved setting that cannot be used — a file that does not
 parse, an unknown IDE id, or an IDE this OS cannot generate (`xcode` off
 macOS, `vs` off Windows, e.g. in a folder shared between machines) — is
-reported with a warning and replaced by the default.
+reported with a warning and replaced by the default. `TC_WEB_BACKEND` is read
+the way CMake builds it: `"WGPU"` (or unset) is WebGPU, any other value is
+GLES3 (WebGL), with a warning unless it is `"GLES3"`.
 
 ### Keeping `trusscli` in sync
 

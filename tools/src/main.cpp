@@ -562,43 +562,38 @@ static int resolveProjectAndTcRoot(const string& explicitPath,
     return 0;
 }
 
-// Set the IDE, targets and web backend of `settings` for a command that
-// regenerates an existing project (update / addon add / addon remove): the
-// project's own CMakePresets.json first, then the explicit flags, which win.
-// Prints the result when anything was read back, so the user sees what the
-// regeneration keeps, and warns about saved settings that could not be used
-// (the file is rewritten, so they would otherwise vanish unnoticed).
-static void fillGenerationOptions(ProjectSettings& settings,
-                                  const string& projectPath,
-                                  const GenerationFlags& flags) {
-    PresetState state = readPresetState(projectPath);
-    applyGenerationOptions(settings, state, flags);
-    for (const string& w : state.warnings) {
-        cerr << "Warning: " << w << ", and the file is rewritten.\n";
-    }
-    if (!state.ideWarning.empty() && !flags.ide) {
-        cerr << "Warning: " << state.ideWarning << "; using the default IDE ("
-             << IdeHelper::getIdeId(settings.ideType) << "). Choose one with "
-             << "'trusscli update --ide <type>'.\n";
-    }
-    if (state.found) {
-        cout << "Project settings: " << describeGenerationOptions(settings)
-             << " (kept from CMakePresets.json unless a flag changed them";
-        if (!state.hasIde && !flags.ide) cout << "; the IDE is the default";
-        cout << ")\n";
-    }
-}
-
 // Rebuild a project from a populated ProjectSettings. Used by update / add /
 // remove to regenerate CMakeLists.txt / CMakePresets.json after any change.
 static int runProjectUpdate(ProjectSettings& settings, const string& projectPath) {
     ProjectGenerator gen(settings);
     gen.setLogCallback([](const string& msg) { cout << msg << endl; });
     string err = gen.update(projectPath);
+    // Kept targets whose configure failed: reported, the update stands
+    for (const string& w : gen.getWarnings()) {
+        cerr << "Warning: " << w << "\n";
+    }
     if (!err.empty()) {
         cerr << "Error: " << err << "\n";
         return 1;
     }
+    return 0;
+}
+
+// Regenerate an existing project (update / addon add / addon remove) with
+// the given addon selection. The settings come from prepareRegeneration():
+// the project's own CMakePresets.json first (IDE, targets, web backend),
+// then the explicit flags, which win.
+static int regenerateProject(const string& projectPath, const string& tcRoot,
+                             const vector<string>& availableAddons,
+                             const vector<int>& addonSelected,
+                             const GenerationFlags& flags) {
+    RegenerationSetup setup = prepareRegeneration(projectPath, tcRoot, availableAddons,
+                                                  addonSelected, flags);
+    for (const string& w : setup.warnings) cerr << "Warning: " << w << "\n";
+    if (!setup.summary.empty()) cout << setup.summary << "\n";
+
+    if (int rc = runProjectUpdate(setup.settings, projectPath)) return rc;
+    cout << "Project updated: " << projectPath << "\n";
     return 0;
 }
 
@@ -1156,6 +1151,11 @@ static void printUpdateHelp() {
          << "the IDE, --web adds a target, --no-web drops it. Without a\n"
          << "CMakePresets.json (e.g. a fresh clone) the defaults apply: vscode,\n"
          << "native only.\n"
+         << "A kept target is configured again. Its saved toolchain path is reused\n"
+         << "when this shell has no emsdk / NDK set up; if its configure still\n"
+         << "fails, that is a warning (fix the toolchain, or drop the target with\n"
+         << "--no-web / --no-android / --no-ios). A target passed as a flag must\n"
+         << "configure, or update fails.\n"
          << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
@@ -1228,19 +1228,9 @@ static int cmdUpdate(const vector<string>& args) {
     vector<string> availableAddons;
     scanAddons(tcRoot, availableAddons);
 
-    ProjectSettings settings;
-    settings.tcRoot = tcRoot;
-    settings.projectName = fs::canonical(projectPath).filename().string();
-    settings.addons = availableAddons;
-    parseAddonsMake(projectPath, availableAddons, settings.addonSelected);
-    fillGenerationOptions(settings, projectPath, flags);
-    settings.detectBuildEnvironment();
-
-    settings.templatePath = tcRoot + "/examples/templates/emptyExample";
-
-    if (int rc = runProjectUpdate(settings, projectPath)) return rc;
-    cout << "Project updated: " << projectPath << "\n";
-    return 0;
+    vector<int> addonSelected;
+    parseAddonsMake(projectPath, availableAddons, addonSelected);
+    return regenerateProject(projectPath, tcRoot, availableAddons, addonSelected, flags);
 }
 
 // =============================================================================
@@ -1340,6 +1330,7 @@ static void printAddHelp() {
          << "is updated and the build files are regenerated.\n"
          << "The IDE and the Web / Android / iOS targets are kept from the\n"
          << "project's CMakePresets.json (change them with 'trusscli update').\n"
+         << "A kept target that fails to configure is reported as a warning.\n"
          << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
@@ -1502,19 +1493,8 @@ static int cmdAdd(const vector<string>& args) {
         cout << "\n";
     }
 
-    // Regenerate
-    ProjectSettings settings;
-    settings.tcRoot = resolvedTcRoot;
-    settings.projectName = fs::canonical(projectPath).filename().string();
-    settings.addons = availableAddons;
-    settings.addonSelected = addonSelected;
-    fillGenerationOptions(settings, projectPath, GenerationFlags());
-    settings.detectBuildEnvironment();
-    settings.templatePath = resolvedTcRoot + "/examples/templates/emptyExample";
-
-    if (int rc = runProjectUpdate(settings, projectPath)) return rc;
-    cout << "Project updated: " << projectPath << "\n";
-    return 0;
+    return regenerateProject(projectPath, resolvedTcRoot, availableAddons, addonSelected,
+                             GenerationFlags());
 }
 
 // =============================================================================
@@ -1529,6 +1509,7 @@ static void printRemoveHelp() {
          << "addons.make file is updated and the build files are regenerated.\n"
          << "The IDE and the Web / Android / iOS targets are kept from the\n"
          << "project's CMakePresets.json (change them with 'trusscli update').\n"
+         << "A kept target that fails to configure is reported as a warning.\n"
          << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
@@ -1631,18 +1612,8 @@ static int cmdRemove(const vector<string>& args) {
         cout << "\n";
     }
 
-    ProjectSettings settings;
-    settings.tcRoot = resolvedTcRoot;
-    settings.projectName = fs::canonical(projectPath).filename().string();
-    settings.addons = availableAddons;
-    settings.addonSelected = addonSelected;
-    fillGenerationOptions(settings, projectPath, GenerationFlags());
-    settings.detectBuildEnvironment();
-    settings.templatePath = resolvedTcRoot + "/examples/templates/emptyExample";
-
-    if (int rc = runProjectUpdate(settings, projectPath)) return rc;
-    cout << "Project updated: " << projectPath << "\n";
-    return 0;
+    return regenerateProject(projectPath, resolvedTcRoot, availableAddons, addonSelected,
+                             GenerationFlags());
 }
 
 // =============================================================================

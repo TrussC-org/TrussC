@@ -18,6 +18,14 @@
 // Whatever cannot be used is left out and reported, never guessed: a file
 // that does not parse, wrongly typed entries, an unknown IDE id, and an IDE
 // this OS cannot generate (xcode off macOS, vs off Windows, as in the GUI).
+// A TC_WEB_BACKEND other than "WGPU" / "GLES3" is read the way CMake builds
+// it (GLES3) and reported too.
+//
+// The toolchainFile of a saved web / android preset is read as well, so a
+// regeneration from a shell without emsdk_env / the NDK variables keeps a
+// toolchain path that still exists (see chooseToolchainFile()). A target
+// kept from the presets whose configure fails is a warning, not an error
+// (ProjectSettings::webKept etc.).
 
 #include "ProjectGenerator.h"
 #include <optional>
@@ -30,7 +38,14 @@ struct PresetState {
     bool web = false;       // a "web" configure preset exists
     bool android = false;   // an "android" configure preset exists
     bool ios = false;       // an "ios" configure preset exists
-    int webBackend = 0;     // TC_WEB_BACKEND of the web preset: 0 = WGPU, 1 = GLES3
+    // TC_WEB_BACKEND of the web preset, as CMake builds it: 0 = WGPU (unset or
+    // exactly "WGPU"), 1 = GLES3 (any other value; not "GLES3" is warned).
+    // Read from a string or from the {"type": ..., "value": ...} form.
+    int webBackend = 0;
+    // toolchainFile of the web / android preset, as written (may be a
+    // $env{...} form); empty when there is none.
+    std::string webToolchainFile;
+    std::string androidToolchainFile;
     bool hasIde = false;    // the vendor entry holds an IDE id usable on this OS
     IdeType ide = IdeType::VSCode;
 
@@ -38,9 +53,10 @@ struct PresetState {
     // a wrongly typed vendor entry, an unknown id, or an IDE this OS cannot
     // generate. hasIde is false whenever this is set.
     std::string ideWarning;
-    // Other parts of an existing file that were ignored: the whole file when
-    // it does not parse as a JSON object (found stays false), or a wrongly
-    // typed configurePresets.
+    // Other problems with an existing file: the whole file when it does not
+    // parse as a JSON object (found stays false), a wrongly typed
+    // configurePresets or toolchainFile (ignored), and a TC_WEB_BACKEND that
+    // is unusable (ignored: WGPU) or neither "WGPU" nor "GLES3" (GLES3).
     std::vector<std::string> warnings;
 };
 
@@ -70,9 +86,32 @@ bool parseTargetFlag(const std::string& arg, GenerationFlags& flags, std::string
 
 // Set the IDE, the targets and the web backend of `settings`: first from the
 // project's presets (when found), then from the explicit flags, which win.
+// Also carries the saved toolchain files over, and marks the targets that
+// come from the presets without a flag of this run (webKept etc.).
 void applyGenerationOptions(ProjectSettings& settings,
                             const PresetState& state,
                             const GenerationFlags& flags);
+
+// The settings a regeneration runs with, and what to tell the user.
+struct RegenerationSetup {
+    ProjectSettings settings;
+    // Saved settings that could not be used, one line each, without
+    // "Warning: " (for stderr).
+    std::vector<std::string> warnings;
+    // "Project settings: ..." naming what is kept (for stdout); empty when
+    // the project has no usable CMakePresets.json.
+    std::string summary;
+};
+
+// The shared setup of `trusscli update`, `addon add` and `addon remove`:
+// ProjectSettings for the project at `projectPath` with the given addons,
+// its CMakePresets.json read back (readPresetState) and the flags applied on
+// top (applyGenerationOptions), plus the warnings and the summary line.
+RegenerationSetup prepareRegeneration(const std::string& projectPath,
+                                      const std::string& tcRoot,
+                                      const std::vector<std::string>& addons,
+                                      const std::vector<int>& addonSelected,
+                                      const GenerationFlags& flags);
 
 // One line naming the IDE and the targets of `settings`, for the log, e.g.
 // "IDE cursor, targets: native, web (WebGPU)".

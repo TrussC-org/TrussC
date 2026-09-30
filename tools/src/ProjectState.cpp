@@ -22,6 +22,54 @@ static const char* ideHostOnly(IdeType ide) {
     return nullptr;
 }
 
+// TC_WEB_BACKEND of the web preset (a cacheVariables entry: a string, a
+// boolean, null, or {"type": ..., "value": ...}), mapped the way CMake builds
+// it (core/CMakeLists.txt, trussc_app.cmake): WebGPU when the variable is
+// unset or exactly "WGPU", GLES3 (WebGL) for every other value.
+static void readWebBackend(const Json& entry, PresetState& state) {
+    const Json* value = &entry;
+    if (entry.is_object()) {
+        auto v = entry.find("value");
+        if (v == entry.end()) {
+            state.warnings.push_back("TC_WEB_BACKEND of the web preset has no \"value\"; "
+                                     "ignored, so the web backend is WGPU (the default)");
+            return;
+        }
+        value = &*v;
+    }
+    // null unsets the variable: CMake's default, WGPU
+    if (value->is_null()) return;
+    string text;
+    if (value->is_string()) text = value->get<string>();
+    else if (value->is_boolean()) text = value->get<bool>() ? "TRUE" : "FALSE";
+    else {
+        state.warnings.push_back("TC_WEB_BACKEND of the web preset is not a string; "
+                                 "ignored, so the web backend is WGPU (the default)");
+        return;
+    }
+    if (text == "WGPU") return;
+    state.webBackend = 1;
+    if (text != "GLES3") {
+        state.warnings.push_back("TC_WEB_BACKEND \"" + text + "\" of the web preset is "
+                                 "neither WGPU nor GLES3; CMake builds it as GLES3 (WebGL), "
+                                 "so GLES3 is kept");
+    }
+}
+
+// toolchainFile of the web / android preset, kept for a shell without the
+// toolchain (see chooseToolchainFile()).
+static void readToolchainFile(const Json& preset, const string& name, string& out,
+                              PresetState& state) {
+    auto file = preset.find("toolchainFile");
+    if (file == preset.end()) return;
+    if (!file->is_string()) {
+        state.warnings.push_back("\"toolchainFile\" of the " + name + " preset is not a "
+                                 "string; ignored");
+        return;
+    }
+    out = file->get<string>();
+}
+
 PresetState parsePresetState(const string& jsonText) {
     PresetState state;
     Json data = Json::parse(jsonText, nullptr, /*allow_exceptions=*/false);
@@ -48,14 +96,14 @@ PresetState parsePresetState(const string& jsonText) {
                 auto vars = p.find("cacheVariables");
                 if (vars != p.end() && vars->is_object()) {
                     auto backend = vars->find("TC_WEB_BACKEND");
-                    // Written as "WGPU" or "GLES3" (see writeCMakePresets)
-                    if (backend != vars->end() && backend->is_string() &&
-                        backend->get<string>() == "GLES3") {
-                        state.webBackend = 1;
-                    }
+                    if (backend != vars->end()) readWebBackend(*backend, state);
                 }
+                readToolchainFile(p, n, state.webToolchainFile, state);
             }
-            else if (n == "android") state.android = true;
+            else if (n == "android") {
+                state.android = true;
+                readToolchainFile(p, n, state.androidToolchainFile, state);
+            }
             else if (n == "ios")     state.ios = true;
         }
     }
@@ -145,11 +193,55 @@ void applyGenerationOptions(ProjectSettings& settings,
         settings.generateIosBuild = state.ios;
         if (state.web) settings.webBackend = state.webBackend;
         if (state.hasIde) settings.ideType = state.ide;
+        settings.savedWebToolchainFile = state.webToolchainFile;
+        settings.savedAndroidToolchainFile = state.androidToolchainFile;
     }
     if (flags.web) settings.generateWebBuild = *flags.web;
     if (flags.android) settings.generateAndroidBuild = *flags.android;
     if (flags.ios) settings.generateIosBuild = *flags.ios;
     if (flags.ide) settings.ideType = *flags.ide;
+
+    // A target from the presets that no flag of this run asked for
+    settings.webKept = state.found && state.web && !flags.web.has_value();
+    settings.androidKept = state.found && state.android && !flags.android.has_value();
+    settings.iosKept = state.found && state.ios && !flags.ios.has_value();
+}
+
+RegenerationSetup prepareRegeneration(const string& projectPath,
+                                      const string& tcRoot,
+                                      const vector<string>& addons,
+                                      const vector<int>& addonSelected,
+                                      const GenerationFlags& flags) {
+    RegenerationSetup setup;
+    ProjectSettings& settings = setup.settings;
+    settings.tcRoot = tcRoot;
+    settings.projectName = fs::canonical(projectPath).filename().string();
+    settings.addons = addons;
+    settings.addonSelected = addonSelected;
+    settings.templatePath = tcRoot + "/examples/templates/emptyExample";
+
+    PresetState state = readPresetState(projectPath);
+    applyGenerationOptions(settings, state, flags);
+    settings.detectBuildEnvironment();
+
+    // The file is rewritten, so saved settings that cannot be used would
+    // otherwise vanish unnoticed.
+    for (const string& w : state.warnings) {
+        setup.warnings.push_back(w + ", and the file is rewritten.");
+    }
+    if (!state.ideWarning.empty() && !flags.ide) {
+        setup.warnings.push_back(state.ideWarning + "; using the default IDE (" +
+                                 IdeHelper::getIdeId(settings.ideType) + "). Choose one with "
+                                 "'trusscli update --ide <type>'.");
+    }
+    // Show what the regeneration keeps whenever anything was read back
+    if (state.found) {
+        setup.summary = "Project settings: " + describeGenerationOptions(settings) +
+                        " (kept from CMakePresets.json unless a flag changed them";
+        if (!state.hasIde && !flags.ide) setup.summary += "; the IDE is the default";
+        setup.summary += ")";
+    }
+    return setup;
 }
 
 string describeGenerationOptions(const ProjectSettings& settings) {
