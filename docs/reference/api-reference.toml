@@ -7738,14 +7738,20 @@ returned false, once the user grants USB permission, and after an unplug it
 stays true until one of those calls reports the loss (the USB worker thread
 that finds it only records it).
 
-Every call takes the `Serial`'s own lock, so one `Serial` may be used from
-several threads without racing on the port: no call closes it while another
-is reading or writing it. Which thread reads or writes what, and in which
-order, is still up to the app. A call that blocks holds the lock meanwhile:
-`drain()`, `setup()`, `writeBytes()` on Windows (no write timeout) and
-Android (up to 1 s per 16 KB), and on Android `close()`, the destructor and a
-move assignment, which wait for the USB worker thread to stop (up to about
-250 ms once connected). On macOS and Linux `writeBytes()` never blocks.
+One `Serial` may be used from several threads. Its I/O calls (`available()`,
+`readBytes()`, `readByte()`, `writeBytes()`, `isConnected()`, the flush calls,
+`drain()`) never wait for each other. Opening and closing (`setup()`,
+`close()`, closing a lost port, the destructor, the moves) wait until the I/O
+calls in progress have returned, so no call ever uses a closed port, and new
+I/O calls wait behind them. Which thread reads or writes what, and in which
+order, is still up to the app. So a long `writeBytes()` (Windows, Android; see
+[`writeBytes()`](#Serial::writeBytes)) or `drain()` delays a `setup()` /
+`close()` on another thread, not the other I/O calls. On Android `close()`,
+the destructor and a move assignment also wait for the USB worker thread to
+stop (up to about 250 ms once connected). On Windows the system itself runs
+the calls on one port handle one at a time (it is not opened for overlapped
+I/O), so there `available()` and the reads still wait for a `writeBytes()` in
+progress; `isConnected()` does not.
 '''
 details.ja = '''
 USB シリアル機器の抜去（ハブの電源断、ドライバのリセットなども）は
@@ -7765,14 +7771,19 @@ USB シリアル機器の抜去（ハブの電源断、ドライバのリセッ�
 USB 許可を与えた時点で true になる。また抜去後は、上の呼び出しのどれかが消失を
 報告するまで true のままになる（消失を見つける USB ワーカースレッドは記録するだけ）。
 
-どの呼び出しも `Serial` 自身のロックを取るので、1つの `Serial` を複数のスレッドから
-使ってもポートの取り合いにはならない（ほかの呼び出しが読み書きしている最中に
-ポートが閉じられることはない）。ただ、どのスレッドが何をどの順に読み書きするかは
-アプリ側で決める必要がある。ブロックする呼び出しはその間ロックを持ち続ける:
-`drain()`、`setup()`、Windows（書き込みのタイムアウトなし）と Android（16 KB ごとに
-最大1秒）の `writeBytes()`、そして Android の `close()`、デストラクタ、ムーブ代入
-（USB ワーカースレッドが止まるのを待つ。接続後なら最大で約 250 ms）。macOS と
-Linux の `writeBytes()` はブロックしない。
+1つの `Serial` を複数のスレッドから使ってよい。I/O の呼び出し（`available()`、
+`readBytes()`、`readByte()`、`writeBytes()`、`isConnected()`、flush 系、`drain()`）
+どうしは互いを待たない。開閉（`setup()`、`close()`、抜けたポートを閉じる処理、
+デストラクタ、ムーブ）は、実行中の I/O 呼び出しが戻るのを待ってからポートを
+触るので、閉じたポートを使う呼び出しは起きない。新しい I/O 呼び出しはその後ろで
+待つ。どのスレッドが何をどの順に読み書きするかは、アプリ側で決める必要がある。
+つまり時間のかかる `writeBytes()`（Windows、Android。
+[`writeBytes()`](#Serial::writeBytes) 参照）や `drain()` が遅らせるのは、別スレッドの
+`setup()` / `close()` で、ほかの I/O 呼び出しではない。Android の `close()`、
+デストラクタ、ムーブ代入は、USB ワーカースレッドが止まるのも待つ（接続後なら最大で
+約 250 ms）。Windows では、システム自体が1つのポートハンドルへの呼び出しを1つずつ
+実行する（オーバーラップ I/O で開いていないため）。そのため Windows では
+`available()` と読み込みは実行中の `writeBytes()` を待つ。`isConnected()` は待たない。
 '''
 details.ko = '''
 USB 시리얼 장치의 분리(허브 전원 차단, 드라이버 리셋 등 포함)는
@@ -7792,13 +7803,19 @@ Windows에서는 하위 ClearCommError / ReadFile / WriteFile의 실패를 모�
 허용하면 true가 되며, 분리 후에는 위 호출 중 하나가 소실을 보고할 때까지 true로
 남는다(소실을 찾는 USB 워커 스레드는 기록만 한다).
 
-모든 호출이 `Serial` 자신의 락을 잡으므로, 하나의 `Serial`을 여러 스레드에서
-사용해도 포트를 두고 경합하지 않는다(다른 호출이 읽거나 쓰는 도중에 포트가
-닫히는 일은 없다). 다만 어느 스레드가 무엇을 어떤 순서로 읽고 쓸지는 앱이 정해야
-한다. 블록되는 호출은 그동안 락을 계속 잡는다: `drain()`, `setup()`,
-Windows(쓰기 타임아웃 없음)와 Android(16 KB마다 최대 1초)의 `writeBytes()`, 그리고
-Android의 `close()`, 소멸자, 이동 대입(USB 워커 스레드가 멈추기를 기다린다. 연결
-후라면 최대 약 250 ms). macOS와 Linux의 `writeBytes()`는 블록되지 않는다.
+하나의 `Serial`을 여러 스레드에서 사용해도 된다. I/O 호출(`available()`,
+`readBytes()`, `readByte()`, `writeBytes()`, `isConnected()`, flush 계열, `drain()`)끼리는
+서로를 기다리지 않는다. 열기와 닫기(`setup()`, `close()`, 소실된 포트를 닫는 처리,
+소멸자, 이동)는 진행 중인 I/O 호출이 반환될 때까지 기다린 뒤 포트를 다루므로,
+닫힌 포트를 쓰는 호출은 생기지 않는다. 새 I/O 호출은 그 뒤에서 기다린다. 어느
+스레드가 무엇을 어떤 순서로 읽고 쓸지는 앱이 정해야 한다. 즉 오래 걸리는
+`writeBytes()`(Windows, Android. [`writeBytes()`](#Serial::writeBytes) 참조)나
+`drain()`이 늦추는 것은 다른 스레드의 `setup()` / `close()`이며, 다른 I/O 호출이
+아니다. Android의 `close()`, 소멸자, 이동 대입은 USB 워커 스레드가 멈추기도
+기다린다(연결 후라면 최대 약 250 ms). Windows에서는 시스템 자체가 하나의 포트
+핸들에 대한 호출을 하나씩 실행한다(오버랩 I/O로 열지 않았기 때문). 그래서
+Windows에서는 `available()`과 읽기가 진행 중인 `writeBytes()`를 기다린다.
+`isConnected()`는 기다리지 않는다.
 '''
 
 ["Serial::isInitialized"]
@@ -8072,6 +8089,65 @@ description.en = "Write bytes; returns actual count or -1 on error (a lost devic
 description.ja = "バイトを書く。実際の書き込み数、エラー時-1を返す（デバイスの消失を検出するとポートを閉じ、onDisconnect も発火）"
 description.ko = "바이트를 씀. 실제 쓴 수 또는 오류 시 -1 반환 (장치 소실을 감지하면 포트를 닫고 onDisconnect도 발생)"
 related = ["Serial::isConnected", "Serial::onDisconnect"]
+details.en = '''
+How long it may take depends on the platform:
+
+- **macOS / Linux:** never blocks (the port is non-blocking). It may write
+  fewer bytes than asked, or return -1 while the output buffer is full; the
+  port stays open.
+- **Windows:** waits until the driver has taken every byte, but at most 4
+  times the time the bytes take on the wire at the port's rate (10 bits per
+  byte, rounded up to whole ms per byte) plus 5 s. At 9600 baud that is
+  5 ms per byte (64 KB in about 5.5 min), at 40000 baud and up 1 ms per byte
+  (64 KB in about 70 s). A native USB device ignores the rate, so this is
+  only a generous ceiling. On a timeout it returns the bytes written so far
+  (possibly 0) and logs one warning per connection; the port stays open and
+  `onDisconnect` does not fire. A failed write still counts as a loss.
+- **Android:** waits up to 1 s per 16 KB for the device to take the data.
+
+A write that must never stall the app goes on a thread of its own: the other
+I/O calls do not wait for it (see [`isConnected()`](#Serial::isConnected) for
+Windows, where the reads still do).
+'''
+details.ja = '''
+どれだけ時間がかかりうるかはプラットフォームによる。
+
+- **macOS / Linux:** ブロックしない（ポートはノンブロッキング）。指定より少ない
+  バイト数しか書けないことや、出力バッファがいっぱいの間は -1 を返すことがある。
+  ポートは開いたまま。
+- **Windows:** ドライバが全バイトを受け取るまで待つ。ただし上限は、そのポートの
+  ボーレートでバイト列が線上にかかる時間の4倍（1バイトを10ビットとし、1バイト
+  あたり整数 ms に切り上げ）に 5 秒を足した時間。9600 baud なら1バイト 5 ms
+  （64 KB で約 5.5 分）、40000 baud 以上なら1バイト 1 ms（64 KB で約 70 秒）。
+  ネイティブ USB の機器はレートを無視するので、これは余裕のある上限にすぎない。
+  タイムアウトすると、それまでに書けたバイト数（0 もありうる）を返し、接続ごとに
+  1回だけ警告をログに出す。ポートは開いたままで、`onDisconnect` も発火しない。
+  書き込みが失敗した場合は、今までどおり消失として扱う。
+- **Android:** 機器がデータを受け取るのを 16 KB ごとに最大1秒待つ。
+
+アプリを止めたくない書き込みは、専用のスレッドから行う。ほかの I/O 呼び出しは
+それを待たない（Windows で読み込みは待つ点は [`isConnected()`](#Serial::isConnected)
+参照）。
+'''
+details.ko = '''
+얼마나 걸릴 수 있는지는 플랫폼에 따라 다르다.
+
+- **macOS / Linux:** 블록되지 않는다(포트가 논블로킹). 요청보다 적은 바이트만 쓰거나,
+  출력 버퍼가 가득 찬 동안 -1을 반환할 수 있다. 포트는 열린 채로 남는다.
+- **Windows:** 드라이버가 모든 바이트를 받을 때까지 기다린다. 단 상한은 그 포트의
+  보드레이트로 바이트열이 선로에서 걸리는 시간의 4배(1바이트를 10비트로 보고,
+  1바이트당 정수 ms로 올림)에 5초를 더한 시간이다. 9600 baud라면 1바이트 5 ms
+  (64 KB에 약 5.5분), 40000 baud 이상이면 1바이트 1 ms(64 KB에 약 70초). 네이티브
+  USB 장치는 속도를 무시하므로 이는 여유 있는 상한일 뿐이다. 타임아웃되면 그때까지
+  쓴 바이트 수(0일 수도 있음)를 반환하고, 연결마다 한 번만 경고를 로그로 남긴다.
+  포트는 열린 채로 남고 `onDisconnect`도 발생하지 않는다. 쓰기가 실패하면 기존대로
+  소실로 취급한다.
+- **Android:** 장치가 데이터를 받기를 16 KB마다 최대 1초 기다린다.
+
+앱을 멈추게 하면 안 되는 쓰기는 전용 스레드에서 한다. 다른 I/O 호출은 그것을
+기다리지 않는다(Windows에서 읽기는 기다린다는 점은 [`isConnected()`](#Serial::isConnected)
+참조).
+'''
 
 ["SerialDeviceInfo"]
 keywords = ["com port info", "serial device", "port list", "tty info"]
