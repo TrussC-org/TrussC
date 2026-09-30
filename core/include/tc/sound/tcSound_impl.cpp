@@ -75,8 +75,7 @@ void reserveDecodeBuffer(std::vector<float>& buf, size_t count) {
 
 // Append `n` decoded samples to a decode buffer, growing it by
 // internal::growSampleBuffer (towards `statedSamples`, the stream's stated
-// length, when that is ahead). False when the buffer cannot grow; on the web
-// this is checked before the allocation, elsewhere std::bad_alloc is thrown.
+// length, when that is ahead). False when the buffer cannot grow.
 bool appendDecoded(std::vector<float>& buf, const float* data, size_t n, size_t statedSamples) {
     if (n > buf.max_size() - buf.size()) return false;
     if (!internal::growSampleBuffer(buf, buf.size() + n, statedSamples)) return false;
