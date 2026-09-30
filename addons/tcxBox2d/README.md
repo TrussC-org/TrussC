@@ -48,8 +48,11 @@ All three classic calls take either a `std::vector<tc::Vec2>` or a `tc::Path`.
   opposite to its enclosing one is a hole; self-intersections are split), and
   each triangle becomes one fixture on the one body. Box2D sums mass and
   centroid over the fixtures. A path that is one convex ring of at most 8
-  points becomes one ordinary polygon fixture instead. Triangles too thin for
-  Box2D are skipped with one warning.
+  points becomes one ordinary polygon fixture instead. Slivers Box2D can't use
+  (collinear or nearly coincident corners, almost no area) are skipped with
+  one warning. Tiny triangles are kept: the check against the distance from
+  the origin (below) runs once on the whole body, as Box2D's own check does,
+  not per triangle.
   - `getVertices()` returns the outline points (every subpath, in order);
     `draw()` outlines each subpath and `drawFill()` fills like
     `Path::drawFill()`. `ColliderRenderer2D` does the same.
@@ -70,11 +73,15 @@ All three classic calls take either a `std::vector<tc::Vec2>` or a `tc::Path`.
     left;
   - a polygon so small next to its distance from the local origin that a
     dynamic body's rotational inertia rounds to zero (for example a 0.5 px
-    triangle at (600, 600)): give points relative to the body position.
+    triangle at (600, 600)): give points relative to the body position. For
+    `setupCompound()` / `compound()` this is checked for the whole body
+    (all its fixtures together, with a margin that grows with the fixture
+    count); a single convex ring of at most 8 points that fails it is
+    refused as it is, not triangulated.
 
   Check `PolyShape::isCreated()` or `RigidBody2D::getBody() != nullptr`.
   Without a body, `PolyShape::draw()` and `ColliderRenderer2D` draw nothing
-  for the polygon.
+  for the polygon or the compound outline.
 
 ## Tests
 
