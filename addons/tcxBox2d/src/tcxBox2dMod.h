@@ -89,7 +89,10 @@ struct Shape2D {
     // no area) are skipped with one warning; if nothing is left, or the whole
     // body is tiny next to its distance from the origin, a warning and no
     // body. Collision events come once per touching body pair, however many
-    // fixtures touch.
+    // fixtures touch. Area covered more than once (a self-overlapping
+    // outline, overlapping same-direction subpaths, a hole wound like its
+    // outer ring) weighs once per layer: give a simple outline and wind holes
+    // opposite.
     static Shape2D compound(const tc::Path& outline) {
         Shape2D s; s.kind = Compound; s.path = outline; return s;
     }

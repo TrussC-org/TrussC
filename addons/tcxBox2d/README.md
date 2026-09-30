@@ -53,16 +53,21 @@ All three classic calls take either a `std::vector<tc::Vec2>` or a `tc::Path`.
   one warning. Tiny triangles are kept: the check against the distance from
   the origin (below) runs once on the whole body, as Box2D's own check does,
   not per triangle.
+  - Area the fill covers more than once gets one layer of triangles per
+    cover, and so weighs (mass, inertia) once per layer while it draws the
+    same: a self-overlapping outline (a pentagram's center), overlapping
+    subpaths wound the same way (glyph contours), a "hole" wound like its
+    outer ring. Give a simple outline, and wind holes opposite to the outer
+    ring (`Path::reverseWinding()`).
   - `getVertices()` returns the outline points (every subpath, in order);
     `draw()` outlines each subpath and `drawFill()` fills like
-    `Path::drawFill()`. `ColliderRenderer2D` does the same.
+    `Path::drawFill()`, from triangles kept when the body was made (not
+    tessellated every frame). `ColliderRenderer2D` does the same.
   - The body's `Collider2D` stands for all its fixtures: its filter setters
     change every fixture, as `Body::setSensor()` and
     `RigidBody2D::setTrigger()` do.
-  - Collision events are per touching **body pair**, not per fixture: Enter
-    (`onCollisionEnter`, `onCollisionBegan`) fires on the first contact, Stay
-    once per update, and Exit when the last contact ends, however many
-    fixtures touch.
+  - Collision events are per touching **body pair**, not per fixture (see
+    [Collision events](#collision-events)).
   - The fixture count grows with the outline's detail.
 - **Refused input** logs a warning and creates **no body**, the same in Debug
   and Release:
@@ -82,6 +87,29 @@ All three classic calls take either a `std::vector<tc::Vec2>` or a `tc::Path`.
   Check `PolyShape::isCreated()` or `RigidBody2D::getBody() != nullptr`.
   Without a body, `PolyShape::draw()` and `ColliderRenderer2D` draw nothing
   for the polygon or the compound outline.
+
+## Collision events
+
+Both APIs count contacts per pair: `Collider2D` events per collider pair,
+`RigidBody2D` events per body pair. Enter (`onCollisionEnter`,
+`onCollisionBegan` / `onTriggerBegan`) fires on the pair's first touching
+contact, Stay once per update, and Exit (`onCollisionExit`,
+`onCollisionEnded` / `onTriggerEnded`) when its last contact ends, however
+many fixtures touch.
+
+- This covers every body with several fixtures, not only compound ones:
+  `World::createBounds()` makes its four walls as one static body, so a
+  `RigidBody2D` already touching the floor gets no new `onCollisionBegan`
+  when it reaches a side wall, and `onCollisionEnded` only when it leaves the
+  last wall.
+- An Exit whose last contact ends inside a physics step is dispatched after
+  that step, and a contact of the same pair that begins in the same step
+  cancels it: a body sliding from one fixture of a compound onto the next
+  never sees Exit + Enter. `World::update()` does this; if you call
+  `b2World::Step()` yourself, call `world.getCollisionManager()->update()`
+  after it. Exits from outside a step (destroying a body, `SetEnabled(false)`,
+  `SetType()`) fire at once.
+- Stay listeners may destroy or disable bodies.
 
 ## Tests
 

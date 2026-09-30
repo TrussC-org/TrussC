@@ -78,8 +78,13 @@ public:
     // next to its distance from the local origin, a warning and no body
     // (check isCreated()). Collision events come once per touching body pair,
     // however many fixtures touch.
+    // Area the fill covers more than once (a self-overlapping outline such as
+    // a pentagram's center, overlapping subpaths wound the same way, a hole
+    // wound like its outer ring) gets one layer of triangles per cover, so it
+    // weighs once per layer: give a simple outline and wind holes opposite.
     // getVertices() returns the outline points (every subpath, in order);
-    // draw() outlines each subpath and drawFill() fills like Path::drawFill().
+    // draw() outlines each subpath and drawFill() fills like Path::drawFill()
+    // (triangulated once, here, not every frame).
     void setupCompound(World& world, const tc::Path& path, float x, float y);
 
     // Same as above with the points as one closed outline.
