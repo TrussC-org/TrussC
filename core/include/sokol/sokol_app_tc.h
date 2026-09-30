@@ -2474,14 +2474,21 @@ SOKOL_APP_API_DECL const void* sapp_window_x11_get_window(sapp_window win);
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
+#if defined(__ANDROID__)
+#include <android/log.h>    /* the no-logger fallback below (system header) */
+#endif
 
 /* The fork's own diagnostics -- the _SAPP_* log macros of the iOS, GLES3
-   Linux and web backends, the X11 / GLX init failures and the
+   Linux, Android and web backends, the X11 / GLX init failures and the
    sapp_create_window() "not supported" stubs -- go through sapp_desc.logger,
    the way upstream sokol_app.h reports everything, so the host's logger (and
-   its log file) sees them too. Every backend stores the desc at the very
-   start of sapp_run(), before any of them can fire. Without a logger they
-   print to stderr as before: "sokol_app_tc.h: <kind><message>".
+   its log file) sees them too. The desktop / web / iOS backends store the
+   desc at the very start of sapp_run(), before any of them can fire; Android
+   stores it in ANativeActivity_onCreate() once sokol_main() returns.
+   Without a logger -- also on Android before that point -- they go where
+   they went before: stderr ("sokol_app_tc.h: <kind><message>"), or on
+   Android the system log (logcat, tag "sokol_app_tc", "<kind><message>";
+   stderr goes nowhere there).
    level: 0=panic, 1=error, 2=warning, 3=info. A panic site still calls
    abort() itself once this returns. */
 static inline void _sapp_tc_log(const sapp_logger* logger, uint32_t level, uint32_t item,
@@ -2496,7 +2503,18 @@ static inline void _sapp_tc_log(const sapp_logger* logger, uint32_t level, uint3
     if (logger && logger->func) {
         logger->func("sapp", level, item, msg, line_nr, 0, logger->user_data);
     } else {
+        #if defined(__ANDROID__)
+        int prio;
+        switch (level) {
+            case 0:  prio = ANDROID_LOG_FATAL; break;
+            case 1:  prio = ANDROID_LOG_ERROR; break;
+            case 2:  prio = ANDROID_LOG_WARN; break;
+            default: prio = ANDROID_LOG_INFO; break;
+        }
+        __android_log_print(prio, "sokol_app_tc", "%s%s", kind, msg);
+        #else
         fprintf(stderr, "sokol_app_tc.h: %s%s\n", kind, msg);
+        #endif
     }
 }
 
@@ -15677,16 +15695,19 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_tc_clear(&item, sizeof(item)); }
 #endif
 
-/* controlled failure instead of sokol_app.h's log-item machinery.
-   stderr goes nowhere on Android -- route to the system log (liblog). */
-#include <android/log.h>
-#define _SAPP_PANIC(code) do { __android_log_print(ANDROID_LOG_FATAL, "sokol_app_tc", "panic: " #code); abort(); } while (0)
-#define _SAPP_ERROR(code) __android_log_print(ANDROID_LOG_ERROR, "sokol_app_tc", "error: " #code)
-#define _SAPP_ERROR_MSG(code, msg) __android_log_print(ANDROID_LOG_ERROR, "sokol_app_tc", "error: " #code ": %s", msg)
-#define _SAPP_WARN_MSG(code, msg) __android_log_print(ANDROID_LOG_WARN, "sokol_app_tc", "warn: " #code ": %s", msg)
-#define _SAPP_INFO_MSG(code, msg) __android_log_print(ANDROID_LOG_INFO, "sokol_app_tc", "info: " #code ": %s", msg)
-#define _SAPP_INFO(code) __android_log_print(ANDROID_LOG_INFO, "sokol_app_tc", "info: " #code)
-#define _SAPP_WARN(code) __android_log_print(ANDROID_LOG_WARN, "sokol_app_tc", "warn: " #code)
+/* controlled failure instead of sokol_app.h's log-item machinery, reported
+   through sapp_desc.logger (_sapp_tc_log). The ones that run before
+   _sapp_tc_init_state() stores the desc -- ANDROID_NATIVE_ACTIVITY_ONCREATE
+   at the top of ANativeActivity_onCreate() -- find no logger and reach
+   logcat through _sapp_tc_log's fallback ("sokol_app_tc" tag), as before.
+   (<android/log.h> comes from the implementation preamble.) */
+#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
+#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
+#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
+#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
+#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
+#define _SAPP_INFO(code) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s", #code)
+#define _SAPP_WARN(code) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s", #code)
 typedef struct {
     #if defined(_SAPP_APPLE)
         struct {
@@ -17657,7 +17678,8 @@ const void* sapp_d3d11_get_device_context(void) { return 0; }
    representable */
 sapp_window sapp_create_window(const sapp_window_desc* desc) {
     _SOKOL_UNUSED(desc);
-    __android_log_print(ANDROID_LOG_ERROR, "sokol_app_tc", "sapp_create_window() is not supported on Android (single-window platform)");
+    _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                 "", "sapp_create_window() is not supported on Android (single-window platform)");
     sapp_window w = {0};
     return w;
 }
