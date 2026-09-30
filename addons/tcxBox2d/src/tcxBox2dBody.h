@@ -6,6 +6,7 @@
 
 #include "tcxBox2dWorld.h"
 #include "tcxCollider2D.h"
+#include "tcxCollisionManager.h"
 #include <tcNode.h>
 #include <box2d/box2d.h>
 #include <memory>
@@ -324,6 +325,9 @@ public:
     // -------------------------------------------------------------------------
     void destroy() {
         if (body_ && world_ && world_->getWorld()) {
+            // A deferred Exit must not reach this body's collider once it is
+            // freed (see CollisionManager)
+            if (auto* cm = world_->getCollisionManager()) cm->forget(body_);
             world_->getWorld()->DestroyBody(body_);
             body_ = nullptr;
         }

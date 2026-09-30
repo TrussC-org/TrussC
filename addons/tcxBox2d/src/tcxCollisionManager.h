@@ -54,7 +54,13 @@ public:
     // A pair whose last contact ends inside b2World::Step() gets its Ended /
     // Exit after the step (World::update() dispatches it), so a body sliding
     // from one fixture onto another in one step never sees Ended + Began.
-    // If you call b2World::Step() yourself, call update() afterwards.
+    // If you call b2World::Step() yourself, call update() right after it,
+    // before creating or destroying bodies. A body destroyed before its
+    // deferred Ended / Exit fires (Body::destroy(), a RigidBody2D's node
+    // going away) gets none, and the other side still gets its own with that
+    // body null (WorldContact::a / b, CollisionEvent::other,
+    // Contact2D::other). Listeners of the deferred events and of Stay may
+    // destroy bodies.
     // -------------------------------------------------------------------------
     tc::Event<WorldContact> contactBegan;   // started touching
     tc::Event<WorldContact> contactStay;    // still touching, every step
@@ -75,7 +81,9 @@ public:
     void PostSolve(b2Contact* contact, const b2ContactImpulse* impulse) override;
 
 private:
-    friend class World;   // calls flushPendingExits() after each step
+    friend class World;         // calls flushPendingExits() after each step
+    friend class Body;          // forget() before destroying its b2Body
+    friend class RigidBody2D;   // same
 
     // -------------------------------------------------------------------------
     // Contact Pair Tracking
@@ -89,10 +97,14 @@ private:
     //     later in the same step clears the mark, so a hand-over from one
     //     fixture to another is no Exit + Enter; flushPendingExits() fires
     //     the rest after the step.
-    //   - While update() dispatches Stay, a pair whose last contact ends (a
-    //     listener destroyed or disabled a body) is left in place with no
-    //     contacts, since update() is iterating the vector, and dropped
-    //     after the loops.
+    //   - While update() or flushPendingExits() dispatches, a pair whose
+    //     last contact ends (a listener destroyed or disabled a body) is left
+    //     in place with no contacts, since the loops walk the vector by
+    //     index, and dropped after them. Each side is read from the pair
+    //     again right before it is notified.
+    //   - A body about to be destroyed is nulled out of its pairs with no
+    //     contacts left (forget()): they can outlive it, and their Exit must
+    //     not reach it, or a new body allocated at its address.
     template<typename T, typename Exit>
     struct ContactPair {
         T* a = nullptr;
@@ -126,6 +138,15 @@ private:
 
     // Fire the Ended / Exit events deferred inside the last step.
     void flushPendingExits();
+
+    // `body` is about to be destroyed (b2World::DestroyBody()). Null it and
+    // its Collider2D out of every pair with no contacts left: a pending Exit
+    // then reaches only the other side, with this body null in its payload.
+    // Pairs that still have contacts are ended by DestroyBody() itself.
+    void forget(b2Body* body);
+
+    // Drop the pairs left empty by a dispatch (see ContactPair).
+    void dropEmptied();
 
     // -------------------------------------------------------------------------
     // Helper Methods

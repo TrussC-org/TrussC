@@ -32,6 +32,7 @@
 #include "tcxBox2dPolygonCheck.h"
 #include <TrussC.h>   // tc::Mod, tc::Node, drawing, TC_REFLECT
 #include <box2d/box2d.h>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 #include <cmath>
@@ -138,7 +139,9 @@ class RigidBody2D;  // fwd
 
 // Argument for RigidBody2D collision/trigger events, from the receiving body's
 // point of view. `other` is the body it touched, or null if that was a
-// non-RigidBody2D body (the bounds/ground, or a raw CircleBody/RectBody/...).
+// non-RigidBody2D body (the bounds/ground, or a raw CircleBody/RectBody/...)
+// or if its node went away before this event (an Ended deferred to after the
+// physics step, or a listener that ran first dropped it).
 struct Contact2D {
     RigidBody2D* other = nullptr;
     tc::Node*    otherNode = nullptr;   // other ? other->getOwner() : nullptr
@@ -150,8 +153,15 @@ namespace detail {
     // One router per world: maps b2Body* -> the RigidBody2D that owns it, plus
     // the listeners on that world's CollisionManager contact events. The first
     // RigidBody2D on a world installs the listeners; everyone registers here.
+    // Each registration gets its own serial: a body destroyed by a listener
+    // and a new one created at the same address are told apart.
     struct ContactRouter2D {
-        std::unordered_map<b2Body*, RigidBody2D*> bodies;
+        struct Entry {
+            RigidBody2D* rb = nullptr;
+            uint64_t serial = 0;   // 0 = not registered
+        };
+        std::unordered_map<b2Body*, Entry> bodies;
+        uint64_t lastSerial = 0;
         tc::EventListener beganL, stayL, endedL;
     };
     inline std::unordered_map<World*, ContactRouter2D>& contactRouters() {
@@ -352,7 +362,7 @@ protected:
                 router.endedL = cm->contactEnded.listen([wp](WorldContact& c) { detail::routeContact(wp, c, 2); });
             }
         }
-        router.bodies[body_] = this;
+        router.bodies[body_] = {this, ++router.lastSerial};
     }
 
     // Dynamic: physics drives the node — sync BEFORE Node::update() so user code
@@ -396,6 +406,8 @@ protected:
         // Only touch the world if it's still alive — at shutdown it may be
         // destroyed before its bodies' nodes (it frees all bodies itself).
         if (!worldAlive_.expired() && world_ && body_) {
+            // A deferred Ended must not name this body once it is freed
+            if (auto* cm = world_->getCollisionManager()) cm->forget(body_);
             if (auto* w = world_->getWorld()) w->DestroyBody(body_);
         }
         body_ = nullptr;
@@ -503,15 +515,22 @@ namespace detail {
 // Fan a world contact out to the RigidBody2D(s) involved (main thread). Each
 // side hears about the OTHER body; a side that isn't a RigidBody2D is null.
 inline void routeContact(World* w, const WorldContact& c, int phase) {
-    auto it = contactRouters().find(w);
-    if (it == contactRouters().end()) return;
-    auto& bodies = it->second.bodies;
-    auto fa = bodies.find(c.a);
-    auto fb = bodies.find(c.b);
-    RigidBody2D* ra = (fa != bodies.end()) ? fa->second : nullptr;
-    RigidBody2D* rb = (fb != bodies.end()) ? fb->second : nullptr;
-    if (ra) ra->fireContact(rb, c, phase);
-    if (rb) rb->fireContact(ra, c, phase);
+    using Entry = ContactRouter2D::Entry;
+    auto find = [w](b2Body* body) -> Entry {
+        auto it = contactRouters().find(w);
+        if (!body || it == contactRouters().end()) return {};
+        auto f = it->second.bodies.find(body);
+        return (f != it->second.bodies.end()) ? f->second : Entry{};
+    };
+    const Entry ea = find(c.a);
+    const Entry eb = find(c.b);
+    if (ea.rb) ea.rb->fireContact(eb.rb, c, phase);
+
+    // A's listeners may have dropped B's node (and made a new body at the
+    // same address) or A's: notify B only while it is still registered.
+    if (!eb.rb || find(c.b).serial != eb.serial) return;
+    RigidBody2D* ra = (ea.rb && find(c.a).serial == ea.serial) ? ea.rb : nullptr;
+    eb.rb->fireContact(ra, c, phase);
 }
 } // namespace detail
 

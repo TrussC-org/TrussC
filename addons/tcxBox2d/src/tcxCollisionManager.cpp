@@ -28,6 +28,7 @@ void CollisionManager::update() {
     // Listeners may destroy or disable bodies, which ends contacts right away
     // (EndContact): pairs are then emptied, not erased, until the loops end,
     // and each pair is looked up again by index after every notify.
+    const bool outer = !dispatching_;
     dispatching_ = true;
 
     // World-level Stay (Mod layer): once per touching body pair.
@@ -50,38 +51,93 @@ void CollisionManager::update() {
         a->notifyStay(eventA);
 
         // Notify B about collision with A, if A's listener left them touching
+        // (a destroyed body ends the contacts at once)
         contact = touchingContact(activeContacts_[i].contacts);
         if (!contact) continue;
+        a = activeContacts_[i].a;
+        b = activeContacts_[i].b;
         CollisionEvent eventB = createEvent(contact, b, a);
         b->notifyStay(eventB);
     }
 
-    dispatching_ = false;
+    if (outer) {
+        dispatching_ = false;
+        dropEmptied();
+    }
+}
 
-    // Drop the pairs emptied during the loops.
+void CollisionManager::flushPendingExits() {
+    // The pairs stay in place while the listeners run: they may destroy
+    // bodies, which ends pairs (EndContact) or nulls a side out of them
+    // (forget()). Each side is read from the pair right before its notify.
+    const bool outer = !dispatching_;
+    dispatching_ = true;
+
+    for (size_t i = 0; i < worldPairs_.size(); ++i) {
+        if (!worldPairs_[i].exitPending) continue;
+        worldPairs_[i].exitPending = false;   // no contacts left: dropped below
+        WorldContact wc = worldPairs_[i].exit;
+        if (wc.a || wc.b) contactEnded.notify(wc);
+    }
+    for (size_t i = 0; i < activeContacts_.size(); ++i) {
+        if (!activeContacts_[i].exitPending) continue;
+        activeContacts_[i].exitPending = false;
+        if (Collider2D* a = activeContacts_[i].a) {
+            CollisionEvent e = activeContacts_[i].exit.a;
+            a->notifyExit(e);
+        }
+        // A's listener may have destroyed B: forget() nulled it
+        if (Collider2D* b = activeContacts_[i].b) {
+            CollisionEvent e = activeContacts_[i].exit.b;
+            b->notifyExit(e);
+        }
+    }
+
+    if (outer) {
+        dispatching_ = false;
+        dropEmptied();
+    }
+}
+
+void CollisionManager::dropEmptied() {
     auto emptied = [](const auto& pair) { return pair.contacts.empty() && !pair.exitPending; };
     worldPairs_.erase(std::remove_if(worldPairs_.begin(), worldPairs_.end(), emptied), worldPairs_.end());
     activeContacts_.erase(std::remove_if(activeContacts_.begin(), activeContacts_.end(), emptied),
                           activeContacts_.end());
 }
 
-void CollisionManager::flushPendingExits() {
-    // Take the pending pairs out first: the listeners may end more contacts.
-    std::vector<BodyPair> bodies;
-    std::vector<ColliderPair> colliders;
-    auto take = [](auto& pairs, auto& out) {
-        auto it = std::stable_partition(pairs.begin(), pairs.end(),
-                                        [](const auto& pair) { return !pair.exitPending; });
-        std::move(it, pairs.end(), std::back_inserter(out));
-        pairs.erase(it, pairs.end());
-    };
-    take(worldPairs_, bodies);
-    take(activeContacts_, colliders);
+void CollisionManager::forget(b2Body* body) {
+    if (!body) return;
 
-    for (auto& pair : bodies) contactEnded.notify(pair.exit);
-    for (auto& pair : colliders) {
-        pair.a->notifyExit(pair.exit.a);
-        pair.b->notifyExit(pair.exit.b);
+    // The body's colliders (a classic Body links one to every fixture)
+    std::vector<Collider2D*> colliders;
+    for (b2Fixture* f = body->GetFixtureList(); f; f = f->GetNext()) {
+        Collider2D* c = getColliderFromFixture(f);
+        if (c && std::find(colliders.begin(), colliders.end(), c) == colliders.end()) {
+            colliders.push_back(c);
+        }
+    }
+
+    // Pairs that still have contacts are ended by DestroyBody() (EndContact).
+    for (auto& pair : worldPairs_) {
+        if (!pair.contacts.empty()) continue;
+        if (pair.a == body) pair.a = nullptr;
+        if (pair.b == body) pair.b = nullptr;
+        if (pair.exit.a == body) pair.exit.a = nullptr;
+        if (pair.exit.b == body) pair.exit.b = nullptr;
+    }
+    for (auto& pair : activeContacts_) {
+        if (!pair.contacts.empty()) continue;
+        for (Collider2D* c : colliders) {
+            if (pair.a == c) {
+                pair.a = nullptr;
+                pair.exit.b.other = nullptr;   // B's event about A
+            }
+            if (pair.b == c) {
+                pair.b = nullptr;
+                pair.exit.a.other = nullptr;
+            }
+        }
     }
 }
 
