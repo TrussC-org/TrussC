@@ -144,7 +144,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   Listeners that tear down from their own thread: `disconnectClient()` of its
   own client in `onReceive` (destroying the server then waits for that
   thread), `stop()` in `onReceive`, and `stop()` in `onClientConnect` on the
-  accept thread, where `start()` is refused.
+  accept thread, which closes the listening socket before it returns (the old
+  port refuses connections; on Linux, where `shutdown()` alone already does
+  that, the socket's descriptor must be gone too) and where `start()` is
+  refused.
   Linux only, in forked children: failing `accept()` calls (descriptors
   exhausted under a low `RLIMIT_NOFILE`) back off instead of spinning, log
   once and reach `onError` again after the 5 s interval if they persist; a

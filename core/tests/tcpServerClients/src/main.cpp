@@ -15,7 +15,8 @@
 //   - Listeners may tear down from the thread they run on: disconnectClient()
 //     of its own client in onReceive (the server's destruction then waits for
 //     that thread instead of leaving it behind), stop() in onReceive, and
-//     stop() in onClientConnect, which runs on the accept thread.
+//     stop() in onClientConnect, which runs on the accept thread and still
+//     closes the listening socket before it returns.
 //   - Linux only, each in a forked child so a failure cannot take the rest of
 //     the run with it: accept() errors (here: out of descriptors) back off
 //     instead of spinning, are logged once per burst and reported again after
@@ -221,6 +222,56 @@ static long vmSizeKb() {
         fclose(f);
     }
     return kb;
+}
+
+// Inode of the socket listening on this port (IPv4), 0 if there is none
+static unsigned long listeningInode(int port) {
+    unsigned long inode = 0;
+    if (FILE* f = fopen("/proc/net/tcp", "r")) {
+        char line[512];
+        bool header = true;
+        while (fgets(line, sizeof(line), f)) {
+            if (header) {
+                header = false;
+                continue;
+            }
+            unsigned localPort = 0, state = 0;
+            unsigned long ino = 0;
+            // sl local rem st tx:rx tr:when retrnsmt uid timeout inode
+            if (sscanf(line, " %*d: %*x:%x %*x:%*x %x %*x:%*x %*x:%*x %*x %*u %*u %lu",
+                       &localPort, &state, &ino) == 3 &&
+                static_cast<int>(localPort) == port && state == 0x0A) {   // LISTEN
+                inode = ino;
+                break;
+            }
+        }
+        fclose(f);
+    }
+    return inode;
+}
+
+// Whether this process still has a descriptor open on that socket. A socket
+// that was shut down but not closed has left /proc/net/tcp, yet still holds
+// its port and shows up here.
+static bool holdsSocket(unsigned long inode) {
+    bool held = false;
+    const string want = "socket:[" + to_string(inode) + "]";
+    if (DIR* d = opendir("/proc/self/fd")) {
+        while (dirent* e = readdir(d)) {
+            if (e->d_name[0] == '.') continue;
+            char target[64];
+            const string link = string("/proc/self/fd/") + e->d_name;
+            const ssize_t n = readlink(link.c_str(), target, sizeof(target) - 1);
+            if (n <= 0) continue;
+            target[n] = '\0';
+            if (want == target) {
+                held = true;
+                break;
+            }
+        }
+        closedir(d);
+    }
+    return held;
 }
 
 static double processCpuSeconds() {
@@ -510,21 +561,53 @@ static void testListenerTeardown() {
     }
 
     // stop() in onClientConnect, which fires on the accept thread: it cannot
-    // join itself. start() from there is refused rather than attempted.
+    // join itself, but the listening socket is closed before it returns, so
+    // the port is released at once rather than left listening (and taking
+    // connections nobody accepts) until the thread is joined. start() from
+    // there is refused rather than attempted.
     {
         TcpServer server;
         atomic<int> connects{0};
+        atomic<int> oldPort{0};
         atomic<bool> restartRefused{false};
+        atomic<bool> refusedAfterStop{false};
+        atomic<bool> listenerDone{false};
+#ifdef __linux__
+        atomic<unsigned long> listenInode{0};
+        atomic<bool> socketClosed{false};
+#endif
         EventListener sub = server.onClientConnect.listen([&](TcpClientConnectEventArgs&) {
             if (connects++ != 0) return;
             server.stop();
+            // Nothing may be listening on the old port any more
+            rawsocket_t probe = connectTo(oldPort.load());
+            refusedAfterStop = probe == kBadSocket;
+            if (probe != kBadSocket) TC_CLOSE(probe);
+#ifdef __linux__
+            // On Linux shutdown() alone already refuses connections, so also
+            // check that the descriptor itself is gone
+            socketClosed = listenInode.load() != 0 && !holdsSocket(listenInode.load());
+#endif
             restartRefused = !server.start(freePort());
+            listenerDone = true;
         });
         const int port = startOnFreePort(server, -1);
+        oldPort = port;
+#ifdef __linux__
+        listenInode = port ? listeningInode(port) : 0;
+#endif
         rawsocket_t c = port ? connectTo(port) : kBadSocket;
+        // A refused connect() can take a couple of seconds on Windows
         check("teardown: stop() from onClientConnect (accept thread) returns",
               waitUntil(3000, [&] { return connects.load() == 1; }) &&
-              waitUntil(3000, [&] { return !server.isRunning(); }));
+              waitUntil(10000, [&] { return listenerDone.load(); }) &&
+              !server.isRunning());
+        check("teardown: the old port refuses connections once stop() returns",
+              refusedAfterStop.load());
+#ifdef __linux__
+        check("teardown: the listening socket is closed once stop() returns",
+              socketClosed.load());
+#endif
         check("teardown: start() from the accept thread is refused", restartRefused.load());
         const int again = startOnFreePort(server, -1);
         check("teardown: the server starts again from another thread", again != 0);
