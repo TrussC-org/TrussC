@@ -8,7 +8,7 @@
 // loopback MCP server. It can SEND requests without CORS, so the server itself
 // must refuse them:
 // - a Host that is not localhost / 127.0.0.1 / [::1] (DNS rebinding) -> 403
-// - an Origin other than the server's own or an mcp::allowOrigin() one -> 403
+// - an Origin other than the server's own (another localhost port too) -> 403
 // - a POST whose Content-Type is not application/json                  -> 415
 // Native MCP clients (no Origin, JSON body, localhost Host) keep working.
 //
@@ -106,8 +106,6 @@ int main() {
         check("own origin localhost -> 200", status(post({{"Origin", "http://localhost:" + p}}, "application/json")) == 200);
         check("own origin 127.0.0.1 -> 200", status(post({{"Origin", "http://127.0.0.1:" + p}}, "application/json")) == 200);
         check("localhost on another port -> 403", status(post({{"Origin", "http://localhost:5173"}}, "application/json")) == 403);
-        mcp::allowOrigin("http://localhost:5173/");
-        check("after allowOrigin -> 200", status(post({{"Origin", "http://localhost:5173"}}, "application/json")) == 200);
 
         // Host (DNS rebinding: the page's own name, resolving to 127.0.0.1)
         check("rebinding Host -> 403", status(post({{"Host", "evil.example:" + p}}, "application/json")) == 403);

@@ -548,18 +548,6 @@ std::string& mcpAuthToken();
 // Whether the server is bound to a loopback address (the Host check applies).
 std::atomic<bool>& mcpLoopbackOnly();
 
-// Browser origins allowed besides the server's own (mcp::allowOrigin()).
-// Read on HTTP worker threads, written from app code: guarded. Each entry
-// carries its registrationOwner(), so a hot reload guest's origins go with
-// its other registrations (removeRegistrationsOwnedBy()); the same origin
-// allowed by two owners is two entries.
-struct AllowedOrigin {
-    std::string origin;
-    const void* owner = nullptr;
-};
-std::vector<AllowedOrigin>& allowedOrigins();
-std::mutex& allowedOriginsMutex();
-
 inline std::string asciiLower(std::string s) {
     for (auto& c : s) c = (char)std::tolower((unsigned char)c);
     return s;
@@ -587,19 +575,14 @@ inline bool isLoopbackHostHeader(const std::string& hostHeader) {
     return name == "localhost" || name == "127.0.0.1" || name == "[::1]";
 }
 
-// The server's own origins, then the ones added with mcp::allowOrigin().
+// Only the server's own origins. The server is for native MCP clients: it
+// sends no CORS headers, so no web page can call it, neither directly nor
+// through a dev-server proxy that forwards the page's Origin (#346).
 inline bool isAllowedOrigin(const std::string& origin, int port) {
     std::string o = asciiLower(trimSpaces(origin));
     while (!o.empty() && o.back() == '/') o.pop_back();
     const std::string p = std::to_string(port);
-    if (o == "http://localhost:" + p || o == "http://127.0.0.1:" + p || o == "http://[::1]:" + p) {
-        return true;
-    }
-    std::lock_guard<std::mutex> lock(allowedOriginsMutex());
-    for (const auto& a : allowedOrigins()) {
-        if (o == a.origin) return true;
-    }
-    return false;
+    return o == "http://localhost:" + p || o == "http://127.0.0.1:" + p || o == "http://[::1]:" + p;
 }
 
 // "application/json", optionally with parameters ("; charset=utf-8").
@@ -644,7 +627,7 @@ inline void rejectRequest(httplib::Response& res, int status, const std::string&
 // - Host: when bound to loopback, it must name a loopback host. A DNS
 //   rebinding page reaches 127.0.0.1 under its own domain name.
 // - Origin: native MCP clients send none. When present, it must be the
-//   server's own origin or one added with mcp::allowOrigin().
+//   server's own origin (http://localhost:PORT and the like).
 // - Content-Type (POST): application/json only. Anything else is a request a
 //   browser could send without a CORS preflight.
 // Returns false (response filled: 403 / 415) when the request is refused.
@@ -658,7 +641,7 @@ inline bool checkRequest(const httplib::Request& req, httplib::Response& res, bo
     if (req.has_header("Origin") &&
         !isAllowedOrigin(req.get_header_value("Origin"), getHttpPort().load())) {
         rejectRequest(res, 403, "forbidden origin '" + req.get_header_value("Origin") +
-                                "': allow it from code with mcp::allowOrigin()");
+                                "': the MCP server is for native MCP clients, not web pages");
         return false;
     }
     if (requireJson && !isJsonContentType(req.get_header_value("Content-Type"))) {
@@ -670,22 +653,6 @@ inline bool checkRequest(const httplib::Request& req, httplib::Response& res, bo
 }
 
 } // namespace detail
-
-// Allow a web page served from `origin` ("http://localhost:5173") to call the
-// MCP server from a browser. Native MCP clients send no Origin and need
-// nothing. Only code can add origins — no environment variable does, by design
-// (environment variables may narrow the MCP surface, never widen it; #242).
-inline void allowOrigin(const std::string& origin) {
-    std::string o = detail::asciiLower(detail::trimSpaces(origin));
-    while (!o.empty() && o.back() == '/') o.pop_back();
-    if (o.empty()) return;
-    const void* owner = detail::registrationOwner();
-    std::lock_guard<std::mutex> lock(detail::allowedOriginsMutex());
-    for (const auto& a : detail::allowedOrigins()) {
-        if (a.origin == o && a.owner == owner) return;
-    }
-    detail::allowedOrigins().push_back({o, owner});
-}
 
 // Start HTTP server.
 //   port  : 0 = OS auto-assign, else fixed port
@@ -869,9 +836,6 @@ inline int getHttpPort() {
 [[deprecated("registerControlTools() now opts in by itself; remove this call. Will be removed in v1.0.0")]]
 inline void enableDebugger() {}
 
-#else
-// No MCP HTTP server on the web: a no-op, so app code calling it stays portable.
-inline void allowOrigin(const std::string&) {}
 #endif // __EMSCRIPTEN__
 
 namespace detail {
@@ -879,18 +843,6 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
     if (!owner) return;
     Server::instance().removeOwnedBy(owner);
     for (auto& hook : ownerCleanupHooks()) hook(owner);
-#ifndef __EMSCRIPTEN__
-    {
-        // Browser origins this owner allowed (mcp::allowOrigin())
-        std::lock_guard<std::mutex> lock(allowedOriginsMutex());
-        auto& origins = allowedOrigins();
-        std::vector<AllowedOrigin> kept;
-        for (auto& a : origins) {
-            if (a.owner != owner) kept.push_back(std::move(a));
-        }
-        origins.swap(kept);
-    }
-#endif
     // Deferred replies whose producers run this owner's code: answer them
     // now, with an error, instead of running them at the next drain, after
     // the App they may reach has been deleted (a reload runs between

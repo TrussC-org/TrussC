@@ -43,12 +43,50 @@ trusscli update -p path/to/myProject --android
 # Enable iOS build
 trusscli update -p path/to/myProject --ios
 
+# Drop a target again (also --no-android / --no-ios)
+trusscli update -p path/to/myProject --no-web
+
+# Switch the IDE (vscode, cursor, xcode, vs, cmake)
+trusscli update -p path/to/myProject --ide cursor
+
 # Specify TrussC root explicitly (if auto-detection fails)
 trusscli update -p path/to/myProject --tc-root path/to/TrussC
 
 # Generate a new project
 trusscli new path/to/myNewApp
 ```
+
+`trusscli build` configures the target's build folder itself when it has no
+CMake cache (after `trusscli clean`, or a deleted folder) or only the cache
+of a configure that failed, and prints one line saying so. On Windows it also
+notices when Visual Studio changed since the project was generated (a pinned
+MSVC, Windows SDK or ninja path in `CMakePresets.json` is gone): it detects
+Visual Studio again, replaces only those paths in the `windows` preset (the
+rest of the file stays), removes `build-windows` and configures again. When
+no usable Visual Studio is found it changes nothing and says so.
+`trusscli doctor` reports the same check.
+
+`update`, `addon add` and `addon remove` keep the project's IDE, its Web /
+Android / iOS targets and its web backend: they read them back from the
+project's `CMakePresets.json` (the IDE is stored there as
+`"vendor": {"trussc": {"ide": "..."}}`), then apply the flags you pass. So
+`trusscli update --web` once is enough, and `--no-web` / `--no-android` /
+`--no-ios` drop a target again. A kept target is configured again on every
+regeneration. Its toolchain path saved in `CMakePresets.json` is reused when
+the current shell has no emsdk / Android NDK set up and the file still
+exists; if its configure fails anyway, that is a warning naming
+`trusscli update --no-web` (or `--no-android` / `--no-ios`), and the rest of
+the regeneration (e.g. the addon change) stands. A target you pass as a flag
+must configure, or the command fails.
+Scripts that want an exact target set pass every flag, as
+`examples/build_all.py` does. `CMakePresets.json` is gitignored, so after a
+fresh clone the defaults apply (`vscode`, native only) until you pass the
+flags again. A saved setting that cannot be used — a file that does not
+parse, an unknown IDE id, or an IDE this OS cannot generate (`xcode` off
+macOS, `vs` off Windows, e.g. in a folder shared between machines) — is
+reported with a warning and replaced by the default. `TC_WEB_BACKEND` is read
+the way CMake builds it: `"WGPU"` (or unset) is WebGPU, any other value is
+GLES3 (WebGL), with a warning unless it is `"GLES3"`.
 
 ### Keeping `trusscli` in sync
 

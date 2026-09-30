@@ -14,6 +14,23 @@ bool Pixels::save(const fs::path& path) const {
     if (path.is_relative()) {
         savePath = getDataPath(path);
     }
+    // "" or "out/": fail before creating any folder
+    if (savePath.filename().empty()) {
+        logError("Pixels") << "No file name in path: " << savePath;
+        return false;
+    }
+
+    // Create a missing parent folder, like saveScreenshot()
+    std::error_code ec;
+    fs::path parent = savePath.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+            logError("Pixels") << "Cannot create folder: " << parent
+                               << " (" << ec.message() << ")";
+            return false;
+        }
+    }
 
     // The encoder follows the extension, whatever its case (.PNG, .Jpg);
     // the file is written under the path as given.

@@ -88,6 +88,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   Logger's lock does not wait for it (the line goes to stderr); and on
   Linux, with no X display and `TRUSSC_LOG_FILE` set, `runApp()`'s
   `XOpenDisplay()` failure lands in that file.
+- `dataPathWrites/` — the core file writers share one path rule (#356):
+  `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
+  `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
+  relative path against `getDataPath()` (not the working directory, which the
+  test moves elsewhere), use an absolute path as given, create a missing
+  parent folder, and log an Error and return false when that folder cannot be
+  created (a regular file in the way; on POSIX, unless root, a read-only
+  folder). UTF-8 folder and file names land on disk by their real names. For
+  `setLogFile`, `getLogFilePath()` is the resolved absolute path, and a failed
+  call (folder or open failure) keeps the current log file open, with the
+  error line and later lines in it.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
@@ -128,6 +139,30 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   while another thread calls `stop()` still ends up in the WAV and in
   `getRecordedSeconds()`. A watchdog turns a barrier that never returns into
   a FAIL.
+- `appAudioAttach/` — an App's `audioOut()` / `audioIn()` are subscribed
+  right after its first `setup()` returns (#426), on the real `AudioEngine`
+  over miniaudio's null backend: for the main App (`runHeadlessApp`) and a
+  secondary window's App (setup on the window's first tick), whose `setup()`
+  allocates what `audioOut()` reads, no `audioOut()` runs before `setup()`
+  has returned and no hook is subscribed while it runs; afterwards there is
+  exactly one hook each, also after more ticks or a move to another window;
+  an App that is constructed but never run gets no callbacks; the App's
+  `audioOut()` still runs before the default-priority listeners its `setup()`
+  subscribed (the order the constructor subscription gave); the attach is
+  idempotent and subscribes nothing once `internal::detachAppAudio()` ended
+  the App. The hot reload generation's path is in `hotReloadLifecycle/`.
+- `mediaDecode/` — *(also on web)* the bundled decoders read every image
+  format and Ogg Vorbis through the TrussC entry points:
+  `Pixels::loadFromMemory()` / `load()` / `loadHDR()` for PNG (8 and 16-bit),
+  JPEG, BMP (24-bit and 8-bit paletted), TGA (raw and RLE), HDR, GIF (first
+  frame of a two-frame file) and PNM, checking size and pixels;
+  `SoundBuffer::loadOgg()` / `loadOggFromMemory()` for channels, rate, length
+  and levels. Also guards the two TrussC patches in `stb_image.h`: BMP pixels
+  that index past the stored palette read as black (the stack is painted
+  first, so the check cannot pass on a zeroed stack), and a GIF with the
+  longest LZW prefix chains decodes on a 64 KB thread stack (native POSIX
+  only; elsewhere only its output is checked). Image fixtures are made at
+  runtime; the Ogg clip is embedded (`src/toneOgg.h`).
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
@@ -250,3 +285,40 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   that part prints SKIP. The hot reload watcher's side is in
   `hotReloadLifecycle/`; the per-platform screenshot savers are not covered
   (they need a framebuffer).
+- `trusscliPresets/` — trusscli's project files (#350): `update`, `addon add`
+  and `addon remove` keep the project's IDE, web / android / ios targets and
+  web backend. Its `local.cmake` compiles trusscli's own sources
+  (`tools/src`, without trusscli's `main.cpp` and GUI) into the test. The IDE
+  written by `ProjectGenerator` as `"vendor": {"trussc": {"ide": ...}}` reads
+  back for every IDE, and so do the targets and the web backend; the presets
+  fill the settings and explicit flags win (`--ide`, `--no-web` /
+  `--no-android` / `--no-ios`, `--web` with `--no-web` is an error); without a
+  `CMakePresets.json` the old defaults stay (vscode, native only, WebGPU).
+  Saved settings that cannot be used are reported as warnings: a file that
+  does not parse or cannot be read, wrongly typed entries, an unknown IDE id,
+  and an IDE this OS cannot generate (xcode off macOS, vs off Windows).
+  `TC_WEB_BACKEND` is read the way CMake builds it, as a string or as
+  `{"type": ..., "value": ...}`: `"WGPU"` (or unset / null) is WebGPU, every
+  other value GLES3, with a warning unless it is `"GLES3"`.
+  `prepareRegeneration()`, the settings setup that `update`, `addon add` and
+  `addon remove` all call, is checked directly (presets kept, flags win,
+  defaults without a file, warnings and summary line). The toolchainFile of a
+  kept web / android preset survives a regeneration from a shell without
+  emsdk / the NDK when the saved file still exists (the test sets `EMSDK`,
+  `PATH`, `ANDROID_NDK_HOME` / `ANDROID_HOME` per case), and a kept target
+  whose configure fails (a toolchain that fails on purpose; needs `cmake` in
+  `PATH`) is a warning naming `trusscli update --no-android`, while the same
+  target passed as a flag fails the update.
+  For `trusscli build` / `clean` (#357): one preset-to-build-folder mapping
+  (`ios` -> `xcode-ios`) that the written presets, `build` and `clean` follow;
+  a build folder without a CMake cache, or with only the cache of a failed
+  configure, is configured first with one message, and a cache that already
+  holds what was asked for is not; a Visual Studio update that removed a
+  pinned MSVC / Windows SDK / ninja path is found (fake filesystem, and on
+  Windows through the real writer), only a native Windows build refreshes the
+  presets, and the refresh replaces only the `windows` preset's pins (the
+  no-VS fallback entry pins nothing).
+  Not covered: the argument parsing and output of the commands in
+  `tools/src/main.cpp` (including the ones that call the build / clean
+  helpers), the IDE files, the native CMake configure, and Visual Studio
+  detection on a real toolchain change (manual Windows check).
