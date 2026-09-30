@@ -10,17 +10,17 @@ description.ko = "기반 애플리케이션 클래스: 서브클래싱하여 set
 ["App::audioIn"]
 category = "audioengine"
 keywords = ["microphone", "mic", "capture"]
-description.en = "Real-time capture callback event (microphone input). RT-safe same as audioOut. Detached after cleanup() and subscribed again on a new attach, like audioOut; the same rule applies: don't wait on the main thread or on its locks in here."
-description.ja = "リアルタイム入力コールバック event (マイク入力)。RT-safe 要件は audioOut と同様。audioOut と同じく cleanup() の後で切り離され、再び付けると登録し直される。ここでもメインスレッドやそのロックを待たないこと"
-description.ko = "실시간 캡처 콜백 이벤트 (마이크 입력). RT-safe 요건은 audioOut과 동일. audioOut 과 같이 cleanup() 후에 분리되고, 다시 연결하면 다시 등록된다. 여기서도 메인 스레드나 그 락을 기다리지 말 것"
+description.en = "Real-time capture callback event (microphone input). RT-safe same as audioOut. Detached after cleanup() for good, like audioOut; the same rule applies: don't wait on the main thread or on its locks in here."
+description.ja = "リアルタイム入力コールバック event (マイク入力)。RT-safe 要件は audioOut と同様。audioOut と同じく cleanup() の後で切り離され、元には戻らない。ここでもメインスレッドやそのロックを待たないこと"
+description.ko = "실시간 캡처 콜백 이벤트 (마이크 입력). RT-safe 요건은 audioOut과 동일. audioOut 과 같이 cleanup() 후에 분리되고 다시 등록되지 않는다. 여기서도 메인 스레드나 그 락을 기다리지 말 것"
 related = ["Event<T>", "AudioInBuffer", "getMicInput", "getMicAnalysisBuffer"]
 
 ["App::audioOut"]
 category = "events"
 keywords = ["sound", "output", "buffer", "dsp", "synth"]
-description.en = "Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window), for as long as the call takes: don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). Attaching a closed App to a window again subscribes it again"
-description.ja = "オーディオ出力バッファを満たす(音を合成するにはオーバーライド)。オーディオスレッドで実行される。フレームワークが cleanup() の後で切り離し、実行中の呼び出しが戻るまで時間の制限なしに待ってから App を破棄する (終了時、ホットリロード時、App のウィンドウを閉じたとき)。ここでメインスレッドや、メインスレッドが持ちうるロックを待たないこと。後片付けが固まる (1 秒後にエラーログが出る)。閉じた App を再びウィンドウに付けると登録し直される"
-description.ko = "오디오 출력 버퍼를 채움(오디오를 합성하려면 오버라이드). 오디오 스레드에서 실행된다. 프레임워크가 cleanup() 후에 분리하고, 실행 중인 호출이 반환될 때까지 시간 제한 없이 기다린 뒤 App 을 파괴한다 (종료 시, 핫 리로드 시, App 의 윈도우를 닫을 때). 여기서 메인 스레드나 메인 스레드가 쥘 수 있는 락을 기다리지 말 것. 정리가 멈춘다 (1 초 후 에러 로그가 남는다). 닫힌 App 을 다시 윈도우에 연결하면 다시 등록된다"
+description.en = "Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window), for as long as the call takes: don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one"
+description.ja = "オーディオ出力バッファを満たす(音を合成するにはオーバーライド)。オーディオスレッドで実行される。フレームワークが cleanup() の後で切り離し、実行中の呼び出しが戻るまで時間の制限なしに待ってから App を破棄する (終了時、ホットリロード時、App のウィンドウを閉じたとき)。ここでメインスレッドや、メインスレッドが持ちうるロックを待たないこと。後片付けが固まる (1 秒後にエラーログが出る)。App は 1 回だけ動くので、ウィンドウを閉じたら二度と登録されない。もう一度表示するには新しい App を作る"
+description.ko = "오디오 출력 버퍼를 채움(오디오를 합성하려면 오버라이드). 오디오 스레드에서 실행된다. 프레임워크가 cleanup() 후에 분리하고, 실행 중인 호출이 반환될 때까지 시간 제한 없이 기다린 뒤 App 을 파괴한다 (종료 시, 핫 리로드 시, App 의 윈도우를 닫을 때). 여기서 메인 스레드나 메인 스레드가 쥘 수 있는 락을 기다리지 말 것. 정리가 멈춘다 (1 초 후 에러 로그가 남는다). App 은 한 번만 동작하므로 윈도우를 닫으면 다시 등록되지 않는다. 다시 표시하려면 새 App 을 만든다"
 related = ["AudioOutBuffer"]
 
 ["App::exit"]
@@ -11605,9 +11605,9 @@ related = ["createWindow", "WindowSettings"]
 
 ["Window::setApp"]
 keywords = ["attach", "lifecycle", "content"]
-description.en = "Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. The App's audioOut() / audioIn() are called while a window drives it: closing the window runs exit() and cleanup() and detaches them, and attaching that App to a window again subscribes them again and runs setup() again"
-description.ja = "このウィンドウにAppを設定 (ウィンドウにコンテンツを与える唯一の方法)。Appのライフサイクル一式 (setup/update/draw/キー/マウス/windowResized + RectNodeサイズ同期) がこのウィンドウで動く。1ウィンドウ1App。App の audioOut() / audioIn() はウィンドウに付いている間だけ呼ばれる。ウィンドウを閉じると exit() と cleanup() が走って切り離され、その App を再びウィンドウに付けると登録し直され、setup() ももう一度走る"
-description.ko = "이 윈도우에 App을 연결 (윈도우에 콘텐츠를 주는 유일한 방법). App의 전체 라이프사이클이 이 윈도우에서 실행됨. 윈도우당 App 하나. App 의 audioOut() / audioIn() 은 윈도우에 연결되어 있는 동안만 호출된다. 윈도우를 닫으면 exit() 와 cleanup() 이 실행되고 분리되며, 그 App 을 다시 윈도우에 연결하면 다시 등록되고 setup() 도 다시 실행된다"
+description.en = "Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when its window closes (or, with #318, when it is swapped out), and closing the window also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open (both log an error and leave the window as it is)"
+description.ja = "このウィンドウにAppを設定 (ウィンドウにコンテンツを与える唯一の方法)。Appのライフサイクル一式 (setup/update/draw/キー/マウス/windowResized + RectNodeサイズ同期) がこのウィンドウで動く。1ウィンドウ1App。App は 1 回だけ動く: 最初に付けたときに setup()、ウィンドウを閉じたとき (#318 以降は差し替えで外したときも) に exit() / cleanup()。ウィンドウを閉じると audioOut() / audioIn() も切り離され、元には戻らない。もう一度表示するには新しい App を作る。setApp() は cleanup() 済みの App と、開いていないウィンドウへの設定を拒否する (どちらもエラーログを出し、ウィンドウはそのまま)"
+description.ko = "이 윈도우에 App을 연결 (윈도우에 콘텐츠를 주는 유일한 방법). App의 전체 라이프사이클이 이 윈도우에서 실행됨. 윈도우당 App 하나. App 은 한 번만 동작한다: 처음 연결할 때 setup(), 윈도우를 닫을 때 (#318 이후에는 교체로 분리될 때도) exit() / cleanup(). 윈도우를 닫으면 audioOut() / audioIn() 도 분리되고 다시 연결되지 않는다. 다시 표시하려면 새 App 을 만든다. setApp() 은 cleanup() 이 이미 실행된 App 과, 열려 있지 않은 윈도우에 대한 설정을 거부한다 (둘 다 에러 로그를 남기고 윈도우는 그대로)"
 
 ["Window::getApp"]
 description.en = "Get the App attached to this window"
