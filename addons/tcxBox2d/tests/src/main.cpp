@@ -846,8 +846,10 @@ static void testCompoundEvents() {
         world.getCollisionManager()->update();
         check("Collider2D: one Stay per update", barStay == 2);
 
+        // An Exit from inside a step is dispatched after it (update()).
         box.setPhysicsPosition(400, -1000);
         world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        world.getCollisionManager()->update();
         check("Collider2D: separated", touchingContacts(world, bar.getBody(), box.getBody()) == 0);
         check("Collider2D: one Exit on each side", barExit == 1 && boxExit == 1);
     }
@@ -883,8 +885,287 @@ static void testCompoundEvents() {
 
         box->getBody()->SetTransform(box2d::World::toBox2d(400, -1000), 0);
         world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        world.getCollisionManager()->update();
         check("RigidBody2D: separated", touchingContacts(world, bar->getBody(), box->getBody()) == 0);
         check("RigidBody2D: one Ended on each side", ended == 1 && boxEnded == 1);
+    }
+}
+
+// All contacts between two bodies, touching or not.
+static int contactsBetween(box2d::World& world, const b2Body* a, const b2Body* b) {
+    int n = 0;
+    for (b2Contact* c = world.getWorld()->GetContactList(); c; c = c->GetNext()) {
+        const b2Body* ba = c->GetFixtureA()->GetBody();
+        const b2Body* bb = c->GetFixtureB()->GetBody();
+        if ((ba == a && bb == b) || (ba == b && bb == a)) ++n;
+    }
+    return n;
+}
+
+// Fixtures of `body` that a `size` px square centered on `spot` overlaps.
+static int fixturesOverlapping(const b2Body* body, Vec2 spot, float size) {
+    b2PolygonShape square;
+    square.SetAsBox(box2d::World::toBox2d(size * 0.5f), box2d::World::toBox2d(size * 0.5f));
+    b2Transform xf(box2d::World::toBox2d(spot.x, spot.y), b2Rot(0.0f));
+    int n = 0;
+    for (const b2Fixture* f = body->GetFixtureList(); f; f = f->GetNext()) {
+        if (b2TestOverlap(f->GetShape(), 0, &square, 0, body->GetTransform(), xf)) ++n;
+    }
+    return n;
+}
+
+// Two triangle fixtures of `body` that share an edge, and a point `inset` px
+// inside each of them from the middle of that edge (world pixels), where a
+// `size` px square overlaps that fixture only. The longest such edge.
+static bool seamSpots(const b2Body* body, float inset, float size, Vec2& spot1, Vec2& spot2) {
+    float best = 0.0f;
+    for (const b2Fixture* f1 = body->GetFixtureList(); f1; f1 = f1->GetNext()) {
+        for (const b2Fixture* f2 = f1->GetNext(); f2; f2 = f2->GetNext()) {
+            auto* p1 = static_cast<const b2PolygonShape*>(f1->GetShape());
+            auto* p2 = static_cast<const b2PolygonShape*>(f2->GetShape());
+            if (p1->m_count != 3 || p2->m_count != 3) continue;
+            for (int i = 0; i < 3; ++i) {
+                b2Vec2 a = p1->m_vertices[i], b = p1->m_vertices[(i + 1) % 3];
+                for (int j = 0; j < 3; ++j) {
+                    b2Vec2 c = p2->m_vertices[j], d = p2->m_vertices[(j + 1) % 3];
+                    if (!(b2DistanceSquared(a, d) < 1e-10f && b2DistanceSquared(b, c) < 1e-10f)) continue;
+                    float len = b2Distance(a, b);
+                    if (len <= best) continue;
+                    b2Vec2 mid = 0.5f * (a + b);
+                    b2Vec2 n(-(b.y - a.y) / len, (b.x - a.x) / len);
+                    b2Vec2 o1 = p1->m_vertices[(i + 2) % 3];
+                    if (b2Dot(n, o1 - mid) < 0) n = -n;
+                    float d2 = box2d::World::toBox2d(inset);
+                    Vec2 s1 = box2d::World::toPixels(body->GetWorldPoint(mid + d2 * n));
+                    Vec2 s2 = box2d::World::toPixels(body->GetWorldPoint(mid - d2 * n));
+                    if (fixturesOverlapping(body, s1, size) != 1 ||
+                        fixturesOverlapping(body, s2, size) != 1) continue;
+                    best = len;
+                    spot1 = s1;
+                    spot2 = s2;
+                }
+            }
+        }
+    }
+    return best > 0.0f;
+}
+
+// A small sensor box slides back and forth across the seam between two
+// fixtures of a compound, touching one of them at a time. Both contacts live
+// on (their AABBs keep overlapping), so in one of the two directions Box2D
+// ends the old contact before it begins the new one within the same step.
+// The body pair touched before and after every step: no Exit / Ended.
+static void testCompoundHandover() {
+    const int crossings = 6;
+
+    // Classic API: Collider2D events.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        box2d::PolyShape bar;
+        bar.setupCompound(world, kNotchedBar, 400, 300);
+        bar.setStatic();
+        Vec2 s1, s2;
+        bool found = seamSpots(bar.getBody(), 4, 2, s1, s2);
+
+        box2d::RectBody box;
+        box.setup(world, s1.x, s1.y, 2, 2);
+        box.setSensor(true);
+        box.getBody()->SetSleepingAllowed(false);
+
+        int barEnter = 0, barExit = 0, boxEnter = 0, boxExit = 0;
+        auto* bc = bar.getCollider();
+        auto* xc = box.getCollider();
+        EventListener l1 = bc->onCollisionEnter.listen([&](box2d::CollisionEvent&) { ++barEnter; });
+        EventListener l2 = bc->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++barExit; });
+        EventListener l3 = xc->onCollisionEnter.listen([&](box2d::CollisionEvent&) { ++boxEnter; });
+        EventListener l4 = xc->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++boxExit; });
+
+        step(world, 1);
+        bool oneAtATime = found;
+        for (int i = 0; i < crossings; ++i) {
+            const Vec2& s = (i % 2 == 0) ? s2 : s1;
+            box.setPhysicsPosition(s.x, s.y);
+            step(world, 1);
+            if (touchingContacts(world, bar.getBody(), box.getBody()) != 1 ||
+                contactsBetween(world, bar.getBody(), box.getBody()) < 2) oneAtATime = false;
+        }
+        check("Collider2D hand-over: one fixture touched at a time, both contacts kept", oneAtATime);
+        check("Collider2D hand-over: one Enter, no Exit across the seam",
+              barEnter == 1 && boxEnter == 1 && barExit == 0 && boxExit == 0);
+
+        box.setPhysicsPosition(400, -1000);
+        step(world, 1);
+        check("Collider2D hand-over: one Exit when it leaves", barExit == 1 && boxExit == 1);
+    }
+
+    // Mod API: RigidBody2D events (trigger, as the box is a sensor). The
+    // world is static: RigidBody2D keeps its contact routing per World
+    // address, and a new world at a destroyed one's address would reuse it.
+    {
+        static box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> barNode, boxNode;
+        auto* bar = attach(world, barNode, box2d::Shape2D::compound(kNotchedBar));
+        bar->setBodyType(box2d::BodyType::Static);
+        Vec2 s1, s2;
+        bool found = bar->getBody() && seamSpots(bar->getBody(), 4, 2, s1, s2);
+
+        boxNode = make_shared<Node>();
+        boxNode->setPos(s1.x, s1.y);
+        auto* box = boxNode->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(2, 2));
+        box->setTrigger(true);
+        box->getBody()->SetSleepingAllowed(false);
+
+        int began = 0, ended = 0, boxBegan = 0, boxEnded = 0;
+        EventListener l1 = bar->onTriggerBegan.listen([&](box2d::Contact2D&) { ++began; });
+        EventListener l2 = bar->onTriggerEnded.listen([&](box2d::Contact2D&) { ++ended; });
+        EventListener l3 = box->onTriggerBegan.listen([&](box2d::Contact2D&) { ++boxBegan; });
+        EventListener l4 = box->onTriggerEnded.listen([&](box2d::Contact2D&) { ++boxEnded; });
+
+        step(world, 1);
+        bool oneAtATime = found;
+        for (int i = 0; i < crossings; ++i) {
+            const Vec2& s = (i % 2 == 0) ? s2 : s1;
+            box->getBody()->SetTransform(box2d::World::toBox2d(s.x, s.y), 0);
+            step(world, 1);
+            if (touchingContacts(world, bar->getBody(), box->getBody()) != 1 ||
+                contactsBetween(world, bar->getBody(), box->getBody()) < 2) oneAtATime = false;
+        }
+        check("RigidBody2D hand-over: one fixture touched at a time, both contacts kept", oneAtATime);
+        check("RigidBody2D hand-over: one Began, no Ended across the seam",
+              began == 1 && boxBegan == 1 && ended == 0 && boxEnded == 0);
+
+        box->getBody()->SetTransform(box2d::World::toBox2d(400, -1000), 0);
+        step(world, 1);
+        check("RigidBody2D hand-over: one Ended when it leaves", ended == 1 && boxEnded == 1);
+    }
+}
+
+// Stay listeners that destroy bodies. Destroying a body ends its contacts at
+// once (EndContact), while CollisionManager::update() is still walking its
+// pairs: the next pairs must still get their Stay, the ended ones no more.
+static void testStayListenerDestroys() {
+    // Classic API: the bar's first Stay destroys the other box, whose pair
+    // comes later in the list (the last one).
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        box2d::PolyShape bar;
+        bar.setupCompound(world, kNotchedBar, 400, 300);
+        bar.setStatic();
+        box2d::RectBody box1, box2;
+        box1.setup(world, 330, 283, 10, 10);   // 3 px into the bar's top (y 280)
+        box2.setup(world, 470, 283, 10, 10);
+        box1.setSensor(true);
+        box2.setSensor(true);
+        step(world, 1);
+        bool setupOk = touchingContacts(world, bar.getBody(), box1.getBody()) > 0 &&
+                       touchingContacts(world, bar.getBody(), box2.getBody()) > 0;
+
+        box2d::RectBody* destroyed = nullptr;
+        int barStay = 0, stay1 = 0, stay2 = 0, exit1 = 0, exit2 = 0;
+        EventListener l1 = bar.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent& e) {
+            ++barStay;
+            if (destroyed) return;
+            destroyed = (e.other == &box1) ? &box2 : &box1;
+            destroyed->destroy();
+        });
+        EventListener l2 = box1.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent&) { ++stay1; });
+        EventListener l3 = box2.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent&) { ++stay2; });
+        EventListener l4 = box1.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++exit1; });
+        EventListener l5 = box2.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++exit2; });
+
+        world.getCollisionManager()->update();
+        const bool gone1 = destroyed == &box1;
+        check("Stay destroys the next pair's body: both boxes touched the bar", setupOk && destroyed);
+        check("Stay destroys the next pair's body: one bar Stay, for the survivor", barStay == 1);
+        check("Stay destroys the next pair's body: survivor Stay once, no Exit",
+              (gone1 ? stay2 : stay1) == 1 && (gone1 ? exit2 : exit1) == 0);
+        check("Stay destroys the next pair's body: the destroyed box gets Exit, no Stay",
+              (gone1 ? stay1 : stay2) == 0 && (gone1 ? exit1 : exit2) == 1);
+
+        world.getCollisionManager()->update();
+        check("Stay destroys the next pair's body: later updates go on", barStay == 2);
+    }
+
+    // Classic API: the bar's Stay destroys the box it is about (the pair
+    // being dispatched). The box hears no Stay after that.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        box2d::PolyShape bar;
+        bar.setupCompound(world, kNotchedBar, 400, 300);
+        bar.setStatic();
+        box2d::RectBody box;
+        box.setup(world, 330, 283, 10, 10);
+        box.setSensor(true);
+        step(world, 1);
+
+        bool destroyed = false;
+        int staysAfter = 0, boxExit = 0;
+        EventListener l1 = bar.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent&) {
+            if (destroyed) return;
+            destroyed = true;
+            box.destroy();
+        });
+        EventListener l2 = box.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent&) {
+            if (destroyed) ++staysAfter;
+        });
+        EventListener l3 = box.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++boxExit; });
+
+        world.getCollisionManager()->update();
+        check("Stay destroys its own pair's body: no Stay after it, one Exit",
+              destroyed && staysAfter == 0 && boxExit == 1);
+    }
+
+    // Mod API: the bar's first Stay drops the other box's node (its
+    // RigidBody2D destroys the body), whose body pair comes later. A static
+    // world, as above.
+    {
+        static box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> barNode, node1, node2;
+        auto* bar = attach(world, barNode, box2d::Shape2D::compound(kNotchedBar));
+        bar->setBodyType(box2d::BodyType::Static);
+        node1 = make_shared<Node>();
+        node1->setPos(330, 283);
+        auto* rb1 = node1->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(10, 10));
+        rb1->setTrigger(true);
+        node2 = make_shared<Node>();
+        node2->setPos(470, 283);
+        auto* rb2 = node2->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(10, 10));
+        rb2->setTrigger(true);
+        step(world, 1);
+
+        int barStay = 0, barEnded = 0;
+        bool dropped = false;
+        EventListener l1 = bar->onTriggerStay.listen([&](box2d::Contact2D& c) {
+            ++barStay;
+            if (dropped) return;
+            dropped = true;
+            if (c.other == rb1) node2.reset(); else node1.reset();
+        });
+        // The dropped RigidBody2D unregisters before its body goes, so the
+        // bar can't tell it was a trigger: count either kind of Ended.
+        EventListener l2 = bar->onTriggerEnded.listen([&](box2d::Contact2D&) { ++barEnded; });
+        EventListener l3 = bar->onCollisionEnded.listen([&](box2d::Contact2D&) { ++barEnded; });
+
+        world.getCollisionManager()->update();
+        check("RigidBody2D Stay drops the next pair's node: one bar Stay, one Ended",
+              dropped && barStay == 1 && barEnded == 1);
+        world.getCollisionManager()->update();
+        check("RigidBody2D Stay drops the next pair's node: later updates go on", barStay == 2);
     }
 }
 
@@ -1237,6 +1518,8 @@ int main() {
     testCompoundFilters(world);
     testCompoundHole();
     testCompoundEvents();
+    testCompoundHandover();
+    testStayListenerDestroys();
     testCompoundOffset(world);
     testReducedConvexHull();
 

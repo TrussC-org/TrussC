@@ -108,6 +108,8 @@ void World::update() {
     int n = 0;
     while (accumulator_ >= timeStep_ && n < MAX_SUBSTEPS) {
         world_->Step(timeStep_, velocityIterations_, positionIterations_);
+        // Contacts that ended inside the step and did not begin again
+        if (collisionManager_) collisionManager_->flushPendingExits();
         accumulator_ -= timeStep_;
         ++n;
     }
