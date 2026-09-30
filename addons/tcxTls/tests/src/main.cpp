@@ -512,6 +512,42 @@ static void scenario() {
     peer.reset();
     if (g_fail) bail();
 
+    // --- a reconnect from the "Disconnected by client" onDisconnect ----------
+    // disconnect() fires onDisconnect inline on the calling thread, and this
+    // listener reconnects even then: its connect() starts a new handshake on
+    // the SSL context. disconnect() used to reset that context after the
+    // notification, freeing it under the new receive thread. The listener
+    // waits a little after its connect(), as one that goes on with other work
+    // would: by then the new handshake is under way (its ClientHello sent).
+    check("by-client reconnect: connect()", client.connect("127.0.0.1", port));
+    check("by-client reconnect: TLS peer completes the handshake",
+          peer.accept(listener, server.conf, 5000));
+    check("by-client reconnect: client is connected", waitFor(3000, isConnected));
+    if (g_fail) bail();
+    atomic<bool> byClientArmed{true};
+    atomic<int> byClientReconnect{-1};   // -1 not run, 0 connect() failed, 1 ok
+    EventListener byClientSub = client.onDisconnect.listen([&](TcpDisconnectEventArgs&) {
+        if (byClientArmed.exchange(false)) {
+            byClientReconnect = client.connect("127.0.0.1", port) ? 1 : 0;
+            this_thread::sleep_for(chrono::milliseconds(200));
+        }
+    });
+    client.disconnect();
+    byClientSub.disconnect();
+    check("by-client reconnect: the listener's connect() returned true",
+          byClientReconnect == 1);
+    check("by-client reconnect: TLS peer completes the new handshake",
+          peer.accept(listener, server.conf, 5000));
+    check("by-client reconnect: client is connected again", waitFor(3000, isConnected));
+    if (g_fail) bail();
+    check("by-client reconnect: data reaches the peer",
+          client.send("reconnected") && peer.expect("reconnected", 3000));
+    check("by-client reconnect: the client receives the peer's data",
+          peerToClient(peer, "welcome again"));
+    client.disconnect();
+    peer.reset();
+    if (g_fail) bail();
+
     // --- destroying a client with a reconnecting listener attached ----------
     // The destructor disconnects without onDisconnect. This listener reconnects
     // on every onDisconnect, "Disconnected by client" included: told by the

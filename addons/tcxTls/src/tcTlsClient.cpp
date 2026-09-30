@@ -660,17 +660,10 @@ void TlsClient::disconnectImpl(bool notify) {
         }
     }
 
-    // The receive thread reports only a close it ran into itself (running_
-    // still set). The EOF that the shutdown() above wakes it with is this
-    // call's own, and is reported here, once, after the join.
-    if (connected_.exchange(false) && notify) {
-        tc::TcpDisconnectEventArgs args;
-        args.reason = "Disconnected by client";
-        args.wasClean = true;
-        onDisconnect.notify(args);
-    }
-
-    // Fully reset SSL context and config (for reconnection)
+    // Fully reset SSL context and config (for reconnection). Before the
+    // notification below: a listener that reconnects from it starts a new
+    // handshake on this context, which a reset afterwards would free under
+    // the new receive thread.
     if (ctx_) {
         mbedtls_ssl_free(&ctx_->ssl);
         mbedtls_ssl_config_free(&ctx_->conf);
@@ -678,6 +671,17 @@ void TlsClient::disconnectImpl(bool notify) {
         // Reinitialize
         mbedtls_ssl_init(&ctx_->ssl);
         mbedtls_ssl_config_init(&ctx_->conf);
+    }
+
+    // Last: nothing above may run after a listener's reconnect. The receive
+    // thread reports only a close it ran into itself (running_ still set).
+    // The EOF that the shutdown() above wakes it with is this call's own,
+    // and is reported here, once, after the join.
+    if (connected_.exchange(false) && notify) {
+        tc::TcpDisconnectEventArgs args;
+        args.reason = "Disconnected by client";
+        args.wasClean = true;
+        onDisconnect.notify(args);
     }
 }
 
