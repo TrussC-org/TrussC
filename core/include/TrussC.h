@@ -2960,6 +2960,9 @@ namespace internal {
 // instead, which would leave the launching cmd in UTF-8. This handler puts
 // the code page back first and returns FALSE, so the default handling goes
 // on and the process still ends.
+// Host-only state (tools/header_state_allowlist.txt): only the guard around
+// sapp_run() in runApp() / the hot reload host and its handler touch it, and
+// both are compiled into the host, so a guest's copy is never used.
 inline UINT consoleOutputCPBeforeRun = 0;   // 0: the process has no console
 
 inline BOOL WINAPI restoreConsoleOutputCPOnCtrl(DWORD type) {

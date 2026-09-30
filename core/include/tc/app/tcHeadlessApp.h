@@ -27,6 +27,8 @@ void flushAudioDiagnostics();
 #ifdef _WIN32
 // The code page HeadlessConsoleUtf8 will restore, for the console control
 // handler's forced exit (headless::consoleHandler); 0 when there is none.
+// Headless only, where hot reload never runs, so a per-module copy is fine
+// (tools/header_state_allowlist.txt).
 inline std::atomic<UINT> headlessRestoreConsoleCP{0};
 
 // runHeadlessApp()'s console output code page: UTF-8 for the guard's
