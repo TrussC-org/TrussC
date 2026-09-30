@@ -72,6 +72,9 @@ public:
     CoreEvents& events() { return events_; }
 
     // Close the native window. The main window and other windows keep running.
+    // Order: the native window is destroyed and isOpen() turns false, then
+    // events().exit fires, then the App's exit() / cleanup() run. From that
+    // point App::getWindow() already returns nullptr.
     void close();
     bool isOpen() const { return native_ != nullptr; }
 

@@ -65,6 +65,8 @@ public:
     // which window's callback makes the call. Same units as setWindowSize().
     // An App attached to no window resizes no window: only its RectNode size
     // changes. The actual size update happens in the windowResized callback.
+    // Resizing the main window does nothing on Linux (not implemented yet),
+    // iOS and Android (fixed fullscreen); on Web it resizes the canvas.
     // Defined in tc/app/tcWindow.h (needs the complete Window).
     void setSize(float w, float h) override;
 
@@ -85,7 +87,11 @@ public:
     // The Window this App is attached to via Window::setApp(), or nullptr if
     // it is not attached to one — which currently includes the main App
     // started by runApp() (the main window is not a Window object yet) and an
-    // App whose window has been closed. Resolved from the App itself, not from
+    // App whose window has been closed. It is already nullptr while the window
+    // closes: inside this App's own exit() / cleanup() and in the window's
+    // events().exit listeners, because the native window is destroyed first.
+    // Read what you need (title, size, fullscreen) before calling close(), or
+    // keep it up to date in update(). Resolved from the App itself, not from
     // the active window context, so subApp->getWindow() called from the main
     // window's callbacks still returns the second window. Defined in
     // tc/app/tcWindow.h (needs the complete Window).

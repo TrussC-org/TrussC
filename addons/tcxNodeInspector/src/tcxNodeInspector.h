@@ -30,14 +30,17 @@
 
 namespace tcx::nodeinspector {
 
-// Renders each reflected member as the matching ImGui widget. Public so an app
-// can subclass and override a visit() to customize how a given type is edited.
-// Read-only values (getter-only TC_VALUE) render greyed out; enums
-// render as a combo of their labels.
+// Renders each reflected member as the matching ImGui widget. Read-only
+// values (getter-only TC_VALUE) render greyed out; enums render as a combo of
+// their labels. Public so an app can use it (or a subclass that overrides a
+// visit()) in its own ImGui panel via node->reflectMembers(r). The Inspector
+// always builds this base class itself, so a subclass does not change the
+// Inspector's widgets or its touched record.
 struct ImGuiReflector : ::trussc::Reflector {
     // Members changed through their widget in this pass, as member paths
     // ("radius", nested groups joined by '.': "outline.color"). The inspector
-    // records them as touched; an override that calls edit(name, ...) takes part.
+    // records its own reflector's list as touched; in a subclass used
+    // elsewhere, an override that calls edit(name, ...) adds to this list.
     std::vector<std::string> edited;
 
     bool visit(const char* n, float& v) override       { return edit(n, [&] { return ImGui::DragFloat(n, &v, 0.5f); }); }

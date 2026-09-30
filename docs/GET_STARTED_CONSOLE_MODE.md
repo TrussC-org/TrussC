@@ -180,7 +180,7 @@ trusscli run --session labwc
 
 ## 4. Auto-start at Boot
 
-For installations and kiosk setups, you can auto-start your app on boot using a systemd service:
+For installations and kiosk setups, you can auto-start your app on boot using a systemd service. (For a Windows installation PC, see [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md).)
 
 ```bash
 sudo tee /etc/systemd/system/trussc-app.service << 'EOF'
@@ -298,3 +298,4 @@ For the Linux console framebuffer (non-X), add `consoleblank=0` to `/boot/firmwa
 - [GET_STARTED.md](GET_STARTED.md) — General getting started guide
 - [BUILD_SYSTEM.md](BUILD_SYSTEM.md) — Build system details and hot reload
 - [AI_AUTOMATION.md](AI_AUTOMATION.md) — MCP mode for headless AI interaction
+- [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md) — Checklist for Windows PCs that run an app unattended
