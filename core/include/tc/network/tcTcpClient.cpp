@@ -243,9 +243,10 @@ void TcpClient::resetConnection() {
     if (receiveThread_.joinable()) {
         if (receiveThread_.get_id() == std::this_thread::get_id()) {
             // Called from within the receive thread (e.g. a listener that
-            // disconnects or reconnects). Cannot join self. Detach: the loop in
-            // receiveThreadFunc() ends on its own once running_ is cleared or
-            // a newer receive thread has taken over.
+            // disconnects or reconnects). Cannot join self. Detach: its loops
+            // (processNetwork()'s receive loop, then receiveThreadFunc()'s)
+            // end on their own once running_ is cleared or a newer receive
+            // thread has taken over.
             receiveThread_.detach();
         } else {
             receiveThread_.join();
@@ -376,7 +377,13 @@ void TcpClient::processNetwork() {
         recvBuf_.resize(receiveBufferSize_);
     }
 
-    while (connected_) {
+    // A listener on this thread that reconnects (an onReceive listener that
+    // calls connect(), say) sets connected_ again for the new connection,
+    // whose own receive thread reads it from then on. The generation stops
+    // this loop instead of letting it go back to recv() on the new socket
+    // next to that thread, sharing recvBuf_ with it.
+    const unsigned generation = receiveGeneration_;
+    while (connected_ && receiveGeneration_ == generation) {
         int received = static_cast<int>(recv(socket_, recvBuf_.data(), recvBuf_.size(), 0));
 
         if (received > 0) {
@@ -424,7 +431,7 @@ void TcpClient::receiveThreadFunc(unsigned generation) {
     // running_ alone cannot end this loop when a listener on this thread
     // reconnects: connect() detaches this thread, starts the new connection's
     // own, and running_ is true again for that one. The generation says which
-    // thread is current.
+    // thread is current (processNetwork()'s receive loop checks it as well).
     while (running_ && receiveGeneration_ == generation) {
         processNetwork();
         if (running_ && receiveGeneration_ == generation) {

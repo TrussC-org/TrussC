@@ -111,11 +111,11 @@ private:
 
     std::thread tlsReceiveThread_;
 
-    // Bumped for every receive thread started. tlsReceiveThreadFunc() stops
-    // a thread whose generation is no longer current once processNetwork()
-    // returns to it, as it does right after onDisconnect. A thread still in
-    // processNetwork()'s receive loop (a reconnect from an onReceive
-    // listener) is not stopped by this.
+    // Bumped for every receive thread started. A thread whose generation is
+    // no longer current stops: processNetwork()'s receive loop and the loop
+    // in tlsReceiveThreadFunc() both check it. So a listener on the receive
+    // thread (onReceive or onDisconnect) can reconnect without the old
+    // thread reading the new connection.
     std::atomic<unsigned> tlsReceiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()

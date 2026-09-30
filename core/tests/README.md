@@ -98,11 +98,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   connection reconnects (#254); it used to assign the new receive thread over
   the old, still-joinable one (`std::terminate`). Also checks that 20
   reconnects leak no descriptors and that a reconnect from an inline
-  `onDisconnect` listener leaves exactly one receive thread (both counted on
-  Linux), that reconnecting through `connectAsync()` works, and that refused
-  attempts release the old socket (counted on Linux) before a later
-  `connect()` succeeds. With an auto-reconnect `onDisconnect` listener
-  attached, `disconnect()` from another thread reports exactly one
+  `onDisconnect` or `onReceive` listener leaves exactly one receive thread
+  (both counted on Linux), that reconnecting through `connectAsync()` works,
+  and that refused attempts release the old socket (counted on Linux) before
+  a later `connect()` succeeds. With an auto-reconnect `onDisconnect`
+  listener attached, `disconnect()` from another thread reports exactly one
   "Disconnected by client" and leaves no connection, and destroying the
   client neither hangs nor reconnects: the receive thread used to report
   the EOF of `disconnect()`'s own shutdown as a remote close, and the

@@ -14,6 +14,10 @@
 //     receive thread, reconnects too, and afterwards exactly one receive
 //     thread is left (checked on Linux): the old thread has to stop even
 //     though running_ is true again for the new connection.
+//   - connect() from an inline onReceive listener reconnects too, and the old
+//     receive thread stops (checked on Linux) instead of going back to recv()
+//     on the new socket: the generation check covers processNetwork()'s receive
+//     loop as well, not only the loop around it.
 //   - Reconnecting through connectAsync() works too. connect() then runs on
 //     connectThread_, which its cleanup must leave alone, and each call joins
 //     the previous call's finished connect thread.
@@ -306,6 +310,55 @@ static void scenario() {
     check("listener reconnect: the old receive thread stopped", threadsAfter <= threadsBefore);
 #else
     printf("%-60s %s\n", "listener reconnect: the old receive thread stopped",
+           "SKIP (counted on Linux)");
+#endif
+    if (g_fail) bail();
+
+    // --- reconnect from an inline onReceive listener --------------------------
+    // Here connect() runs inside processNetwork()'s receive loop, and it sets
+    // connected_ again for the new connection before the listener returns. The
+    // loop has to see that a newer receive thread took over: otherwise the old
+    // thread goes back to recv() on the new socket, next to the new thread and
+    // sharing its receive buffer, and never ends.
+#ifdef __linux__
+    const int threadsBeforeRx = countEntries("/proc/self/task");
+#endif
+    atomic<bool> rxArmed{true};
+    atomic<int> rxListenerResult{-1};   // -1 not run, 0 connect() failed, 1 ok
+    EventListener rxReconnectSub = client.onReceive.listen([&](TcpReceiveEventArgs& e) {
+        const string data(e.data.begin(), e.data.end());
+        if (data.find("reconnect") != string::npos && rxArmed.exchange(false)) {
+            rxListenerResult = client.connect("127.0.0.1", port) ? 1 : 0;
+        }
+    });
+
+    ::send(peer, "reconnect", 9, 0);
+    rawsocket_t oldPeer = peer;
+    peer = acceptWithin(listener, 3000);
+    check("onReceive reconnect: peer accepted the new connection", peer != kNoSocket);
+    check("onReceive reconnect: connect() returned true",
+          waitFor(3000, [&] { return rxListenerResult.load() == 1; }));
+    check("onReceive reconnect: client is connected",
+          waitFor(3000, [&] { return client.isConnected(); }));
+    rxReconnectSub.disconnect();
+    TC_CLOSE(oldPeer);   // the client already closed its end
+    if (g_fail) bail();
+
+    check("onReceive reconnect: data reaches the peer", clientToPeer(client, peer, "after rx"));
+    check("onReceive reconnect: the client receives the peer's data",
+          peerToClient(peer, "pong after the onReceive reconnect"));
+
+#ifdef __linux__
+    int threadsAfterRx = -1;
+    waitFor(1000, [&] {
+        threadsAfterRx = countEntries("/proc/self/task");
+        return threadsAfterRx <= threadsBeforeRx;
+    });
+    printf("  (threads: %d before, %d after)\n", threadsBeforeRx, threadsAfterRx);
+    check("onReceive reconnect: the old receive thread stopped",
+          threadsAfterRx <= threadsBeforeRx);
+#else
+    printf("%-60s %s\n", "onReceive reconnect: the old receive thread stopped",
            "SKIP (counted on Linux)");
 #endif
     if (g_fail) bail();

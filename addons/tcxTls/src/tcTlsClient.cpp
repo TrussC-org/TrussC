@@ -298,9 +298,10 @@ bool TlsClient::connect(const std::string& host, int port) {
     }
 
     // Ensure previous receive thread has finished. A listener on that thread
-    // (onDisconnect, say) that reconnects cannot join it: detach instead. The
-    // loop in tlsReceiveThreadFunc() ends on its own once running_ is cleared
-    // or the new receive thread has taken over.
+    // (onDisconnect, say) that reconnects cannot join it: detach instead. Its
+    // loops (processNetwork()'s receive loop, then tlsReceiveThreadFunc()'s)
+    // end on their own once running_ is cleared or the new receive thread has
+    // taken over.
     if (tlsReceiveThread_.joinable()) {
         if (tlsReceiveThread_.get_id() == std::this_thread::get_id()) {
             tlsReceiveThread_.detach();
@@ -548,7 +549,13 @@ void TlsClient::processNetwork() {
         tlsRecvBuf_.resize(receiveBufferSize_);
     }
 
-    while (connected_) {
+    // A listener on this thread that reconnects (an onReceive listener that
+    // calls connect(), say) starts a new connection with its own receive
+    // thread. The generation stops this loop instead of letting it go back
+    // to reading the new connection next to that thread, sharing the SSL
+    // context and tlsRecvBuf_ with it.
+    const unsigned generation = tlsReceiveGeneration_;
+    while (connected_ && tlsReceiveGeneration_ == generation) {
         int ret = mbedtls_ssl_read(&ctx_->ssl, tlsRecvBuf_.data(), tlsRecvBuf_.size());
 
         if (ret > 0) {
@@ -691,7 +698,7 @@ void TlsClient::tlsReceiveThreadFunc(unsigned generation) {
     // running_ alone cannot end this loop when a listener on this thread
     // reconnects: connect() detaches this thread, starts the new connection's
     // own, and running_ is true again for that one. The generation says which
-    // thread is current.
+    // thread is current (processNetwork()'s receive loop checks it as well).
     while (running_ && tlsReceiveGeneration_ == generation) {
         processNetwork();
         if (running_ && tlsReceiveGeneration_ == generation) {
