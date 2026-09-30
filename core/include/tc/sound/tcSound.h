@@ -653,6 +653,17 @@ struct PlayingSound {
     // it reaches the post-seek data.
     double positionF{0.0};
 
+    // Frames per second positionF counts (Sound::getPosition() /
+    // setPosition() convert with it). A stream's decoder outputs at the
+    // engine rate of the play() that opened it; the re-init migration
+    // re-expresses positionF at the new rate and updates this. A voice the
+    // migration does not rebuild (it had ended, or its decoder did not
+    // reopen) keeps positionF and this at the old rate, so its position in
+    // seconds does not change. 0 until play() sets it. Implementation
+    // detail, not API (the trailing underscore keeps it out of the
+    // reference and the Lua bindings).
+    std::atomic<int> positionRateHz_{0};
+
     // Buffer-to-engine sample-rate ratio, set when the sound is queued for
     // playback (buffer->sampleRate / AudioEngine::getInstance().getSampleRate()).
     // Each output frame advances positionF by `speed * rateRatio` so a buffer
@@ -847,9 +858,16 @@ namespace internal {
     // test can drive a stream's end-of-stream and seek paths
     // (core/tests/streamSeek). ReadFails reads no frames; ReadFailsWithFrames
     // decodes as usual and then reports an error for every read that
-    // returned frames. Only the worker's refill is affected, not
-    // loadStream() or play(). State lives in tcAudio_impl.cpp.
-    enum class StreamFaultForTests { None, ReadFails, ReadFailsWithFrames, SeekFails, Stalls };
+    // returned frames. SeekFails also fails the re-init migration's seek,
+    // and ReopenFails fails the migration's decoder open. MixerLags holds
+    // the worker back until the mixer, with a seek pending, has read how far
+    // the stream's ring is written; the mixer then waits right there (up to
+    // 50 ms) until the worker has served the seek and reached the stream's
+    // end (an audio thread preempted at that point).
+    // Otherwise only the worker's refill is affected, not loadStream() or
+    // play(). State lives in tcAudio_impl.cpp.
+    enum class StreamFaultForTests { None, ReadFails, ReadFailsWithFrames, SeekFails, Stalls,
+                                     ReopenFails, MixerLags };
     void setStreamFaultForTests(StreamFaultForTests fault);
 
     // Test hook: the number of seek points in the seek table of the stream
@@ -1738,14 +1756,14 @@ public:
 
 private:
     // Frames per second of the voice's positionF: the source rate for eager
-    // sources; the engine's current rate for streams, whose decoder outputs
-    // at that rate. A stream's sampleRate is the engine rate at loadStream()
-    // and goes stale when the engine is re-initialized at another rate (the
-    // voice's decoder and positionF move to the new rate).
+    // sources; for streams the rate the voice's positionF counts
+    // (PlayingSound::positionRateHz_), the engine rate its decoder outputs
+    // at. Not the engine's current rate (a voice the re-init migration did
+    // not rebuild keeps the old one), nor the stream's sampleRate (the
+    // engine rate at loadStream(), stale after a re-init).
     int positionRate() const {
-        return buffer_->kind() == SoundSource::Stream
-            ? AudioEngine::getInstance().getSampleRate()
-            : buffer_->sampleRate;
+        if (buffer_->kind() != SoundSource::Stream) return buffer_->sampleRate;
+        return playing_->positionRateHz_.load(std::memory_order_relaxed);
     }
 
     std::shared_ptr<SoundSource> buffer_;
