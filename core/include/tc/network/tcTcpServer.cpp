@@ -199,11 +199,34 @@ thread_local const TcpServer* tlAcceptThreadOf = nullptr;
 
 // The server whose client thread (receive or writer) this is, null on every
 // other thread. stop() there must not wait for other client threads while
-// another stop() is already tearing the server down: that one may be waiting
-// for this very thread.
+// another stop() is already tearing the server down, and start() there must
+// not wait for that stop() to finish: that one may be waiting for this very
+// thread.
 thread_local const TcpServer* tlClientThreadOf = nullptr;
 
+// Set by internal::setTcpServerStopHookForTests(), empty otherwise
+std::mutex g_stopHookMutex;
+std::function<void()> g_stopHook;
+
+void runStopHookForTests() {
+    std::function<void()> hook;
+    {
+        std::lock_guard<std::mutex> lock(g_stopHookMutex);
+        hook = g_stopHook;
+    }
+    if (hook) hook();
+}
+
 } // namespace
+
+namespace internal {
+
+void setTcpServerStopHookForTests(std::function<void()> fn) {
+    std::lock_guard<std::mutex> lock(g_stopHookMutex);
+    g_stopHook = std::move(fn);
+}
+
+} // namespace internal
 
 // =============================================================================
 // Winsock initialization (Windows only)
@@ -247,10 +270,14 @@ TcpServer::~TcpServer() {
 // Server management
 // =============================================================================
 bool TcpServer::start(int port, int maxClients) {
-    // A listener on the accept thread cannot restart the server from there:
-    // the old accept thread would have to be joined, and it is the caller.
-    if (tlAcceptThreadOf == this) {
-        logError() << "TcpServer::start() cannot be called from the server's own accept thread";
+    // A listener on one of the server's own threads cannot restart the server
+    // from there. On the accept thread, the old accept thread would have to be
+    // joined, and it is the caller. On a client thread (receive or writer),
+    // start() would have to wait for a stop() on another thread to finish
+    // tearing the old session down, and that stop() may be joining the caller.
+    if (tlAcceptThreadOf == this || tlClientThreadOf == this) {
+        logError() << "TcpServer::start() cannot be called from one of the server's own threads "
+                      "(accept, receive or writer)";
         return false;
     }
 
@@ -259,13 +286,15 @@ bool TcpServer::start(int port, int maxClients) {
     // client threads; this is where they get joined then. A no-op otherwise.
     stop();
 
-    // A stop() on another thread may still be waiting for the old accept
-    // thread, which this stop() then found gone. That thread still uses
-    // serverSocket_ and running_, and would pick up the new ones, so wait for
-    // it to end first.
+    // A stop() on another thread may still be tearing the old session down:
+    // waiting for the old accept thread, which this stop() then found gone,
+    // or disconnecting and joining the old clients after it. The accept thread
+    // still uses serverSocket_ and running_ and would pick up the new ones,
+    // and that stop() would disconnect the new clients and join their
+    // threads, so wait for it to finish first.
     {
         std::unique_lock<std::mutex> lock(acceptThreadMutex_);
-        acceptJoined_.wait(lock, [this] { return acceptJoins_ == 0; });
+        stopsDone_.wait(lock, [this] { return stopsInProgress_ == 0; });
     }
 
     port_ = port;
@@ -382,22 +411,20 @@ void TcpServer::stop() {
 
     // Moved out under the lock, so that of two threads stopping at once only
     // one joins it; the other finds nothing to join. Joined outside the lock:
-    // the accept thread's own stop() never takes it. The join is counted, so
-    // that start() can wait for it (see there).
+    // the accept thread's own stop() never takes it.
+    //
+    // A stop() that tears the session down below is counted until it has
+    // finished, so that start() can wait for it (see there): its join and its
+    // client cleanup must not run into a server that has been started again.
     std::thread accept;
+    bool clientThreadShortcut = false;
     {
         std::lock_guard<std::mutex> lock(acceptThreadMutex_);
         accept = std::move(acceptThread_);
-        if (accept.joinable()) ++acceptJoins_;
+        clientThreadShortcut = !accept.joinable() && tlClientThreadOf == this;
+        if (!clientThreadShortcut) ++stopsInProgress_;
     }
-    if (accept.joinable()) {
-        accept.join();
-        {
-            std::lock_guard<std::mutex> lock(acceptThreadMutex_);
-            --acceptJoins_;
-        }
-        acceptJoined_.notify_all();
-    } else if (tlClientThreadOf == this) {
+    if (clientThreadShortcut) {
         // A listener on one of this server's client threads, and another
         // thread's stop() has already taken the accept thread. Once that one
         // has joined it, it joins every client thread, this one included, so
@@ -407,6 +434,23 @@ void TcpServer::stop() {
         shutAllClients();
         if (wasRunning) logNotice() << "TCP server stopped";
         return;
+    }
+
+    // Uncounted however this stop() leaves, so that start() cannot wait
+    // forever. Notified under the lock: once a start() waiting for this has
+    // returned, this thread no longer touches the server.
+    struct StopDone {
+        TcpServer* server;
+        ~StopDone() {
+            std::lock_guard<std::mutex> lock(server->acceptThreadMutex_);
+            --server->stopsInProgress_;
+            server->stopsDone_.notify_all();
+        }
+    } stopDone{this};
+
+    if (accept.joinable()) {
+        accept.join();
+        runStopHookForTests();
     }
 
     // Join the client threads (the accept thread has already disconnected

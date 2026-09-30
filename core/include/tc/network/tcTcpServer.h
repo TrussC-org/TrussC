@@ -113,6 +113,12 @@ struct TcpSendChannel {
     std::atomic<bool> dropped{false};
 };
 
+// Test hook, not a user setting: stop(), on the thread that has just joined
+// the accept thread, calls fn before it disconnects the clients and joins
+// their threads, so a test can hold it there. Applies to every TcpServer; an
+// empty fn (the default) removes it. State lives in tcTcpServer.cpp.
+void setTcpServerStopHookForTests(std::function<void()> fn);
+
 } // namespace internal
 
 // =============================================================================
@@ -358,7 +364,7 @@ private:
     // Disconnect every client without joining any of its threads; they stay
     // registered for disconnectAllClients() to join. The accept thread does
     // this on its way out, and so does stop() on a client thread while another
-    // stop() is waiting for the accept thread.
+    // stop() has taken the accept thread.
     void shutAllClients();
 
 #ifdef _WIN32
@@ -377,11 +383,12 @@ private:
     // Guards acceptThread_ itself, so two threads calling stop() at once never
     // both join it. Held only to move the thread in or out, never to join.
     std::mutex acceptThreadMutex_;
-    // How many stop() calls are joining an accept thread they moved out, and
-    // the signal that one of them has finished; start() waits until none is
-    // left. Both guarded by acceptThreadMutex_.
-    int acceptJoins_ = 0;
-    std::condition_variable acceptJoined_;
+    // How many stop() calls are tearing the server down (joining an accept
+    // thread they moved out, then disconnecting the clients and joining their
+    // threads), and the signal that one of them has finished; start() waits
+    // until none is left. Both guarded by acceptThreadMutex_.
+    int stopsInProgress_ = 0;
+    std::condition_variable stopsDone_;
     std::atomic<bool> running_{false};
 
     std::unordered_map<int, TcpServerClient> clients_;
