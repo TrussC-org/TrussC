@@ -18,7 +18,12 @@ class OscReceiver {
 public:
     // Events
     tc::Event<OscMessage> onMessageReceived;   // Message received
-    tc::Event<OscBundle> onBundleReceived;     // Bundle received
+    // Bundle received. The OscBundle& is the parsed bundle itself (not a
+    // copy) and is valid only during that call. A listener may edit that
+    // bundle, but must not keep a reference to an enclosing bundle (from an
+    // earlier call for the same packet) and modify it (e.g. addMessage() /
+    // clear()) while a nested bundle of that packet is being dispatched.
+    tc::Event<OscBundle> onBundleReceived;
     tc::Event<std::string> onParseError;       // Parse error (for robustness)
 
     OscReceiver() = default;
