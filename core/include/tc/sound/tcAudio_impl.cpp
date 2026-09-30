@@ -25,6 +25,7 @@
 #include "miniaudio.h"
 
 #include "tc/sound/tcSound.h"
+#include "tc/utils/tcFile.h"
 
 #include <algorithm>
 #include <atomic>
@@ -55,6 +56,11 @@ ma_result maDecoderInitPathA(const fs::path& path,
 // Set by internal::setNullAudioBackendForTests(): the engine, device
 // enumeration and MicInput open miniaudio's null backend only.
 std::atomic<bool> g_nullBackendForTests{false};
+
+// Whether the engine's persistent context was opened with the null backend
+// on request (the test hook above), so landing on it is not a fallback.
+// Main thread only: written and read in AudioEngine::init().
+bool g_engineNullBackendRequested = false;
 
 // Set by internal::setAudioRecorderCaptureHookForTests(); nullptr normally.
 std::atomic<void (*)(int)> g_recorderCaptureHook{nullptr};
@@ -854,9 +860,7 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     // OGG support for streaming would need a separate code path. WAV /
     // MP3 / FLAC are routed through ma_decoder, which handles all three
     // with the same API.
-    std::string ext = path.extension().string();
-    if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
-    for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+    std::string ext = toLower(getFileExtension(path));
 
     ma_encoding_format fmt = ma_encoding_format_unknown;
     if (ext == "wav")       fmt = ma_encoding_format_wav;
@@ -1376,11 +1380,15 @@ bool AudioEngine::init(const AudioSettings& settings) {
         ma_result ctxResult = initContext(ctx);
         if (ctxResult != MA_SUCCESS) {
             logError("AudioEngine") << "no audio backend available (ma_context_init result="
-                                    << (int)ctxResult << "); sounds will not play";
+                                    << (int)ctxResult
+                                    << (settings.deviceName.empty() ? std::string()
+                                        : ", requested device '" + settings.deviceName + "'")
+                                    << "); sounds will not play";
             delete ctx;
             return false;
         }
         context_ = ctx;
+        g_engineNullBackendRequested = g_nullBackendForTests.load(std::memory_order_relaxed);
     }
     ma_context* ctxArg = static_cast<ma_context*>(context_);
 
@@ -1406,6 +1414,16 @@ bool AudioEngine::init(const AudioSettings& settings) {
         }
     }
 
+    // How the failure messages below name the device: the requested one, or
+    // the default it fell back to (#279).
+    std::string deviceDesc = "the output device";
+    if (!settings.deviceName.empty()) {
+        deviceDesc = deviceIDPtr
+            ? "the output device '" + settings.deviceName + "'"
+            : "the system default output device (requested '" + settings.deviceName
+              + "' was not found)";
+    }
+
     ma_device* device = new ma_device();
 
     ma_device_config config = ma_device_config_init(ma_device_type_playback);
@@ -1421,7 +1439,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
 
     ma_result result = ma_device_init(ctxArg, &config, device);
     if (result != MA_SUCCESS) {
-        logError("AudioEngine") << "failed to initialize the output device (result="
+        logError("AudioEngine") << "failed to initialize " << deviceDesc << " (result="
                                 << (int)result << "); sounds will not play";
         delete device;
         return false;
@@ -1429,7 +1447,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
 
     result = ma_device_start(device);
     if (result != MA_SUCCESS) {
-        logError("AudioEngine") << "failed to start the output device (result="
+        logError("AudioEngine") << "failed to start " << deviceDesc << " (result="
                                 << (int)result << "); sounds will not play";
         ma_device_uninit(device);
         delete device;
@@ -1443,6 +1461,12 @@ bool AudioEngine::init(const AudioSettings& settings) {
                              << playingSounds_.size() << " voices, "
                              << ma_get_backend_name(ctxArg->backend) << ": "
                              << device->playback.name << ")";
+
+    // miniaudio's default backend order ends with the null backend, so with
+    // no usable real backend init() still succeeds on a silent device.
+    if (ctxArg->backend == ma_backend_null && !g_engineNullBackendRequested) {
+        logWarning("AudioEngine") << "no usable audio backend; output is silent (miniaudio Null device)";
+    }
 
     // Fire audioDeviceChanged with the resolved device's real info.
     // ma_device's playback.name is populated by ma_device_init even when

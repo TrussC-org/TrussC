@@ -10,6 +10,8 @@
 #include <iomanip>
 #include <chrono>
 #include <ctime>
+#include <atomic>
+#include <cstdint>
 #ifdef __ANDROID__
 #include <android/log.h>
 #endif
@@ -62,20 +64,39 @@ struct LogEventArgs {
             now.time_since_epoch()) % 1000;
 
         std::ostringstream oss;
+        std::tm tm_buf{};
 #ifdef _WIN32
-        std::tm tm_buf;
         localtime_s(&tm_buf, &time);
-        oss << std::put_time(&tm_buf, "%H:%M:%S")
 #else
-        oss << std::put_time(std::localtime(&time), "%H:%M:%S")
+        // Not std::localtime: it returns one static buffer shared by every
+        // thread, and log() runs on any thread.
+        localtime_r(&time, &tm_buf);
 #endif
+        oss << std::put_time(&tm_buf, "%H:%M:%S")
             << '.' << std::setfill('0') << std::setw(3) << ms.count();
         timestamp = oss.str();
     }
 };
 
+namespace internal {
+// True while the current thread logs from a panic path (the sokol bridge,
+// internal::sokolLog): the Logger's console and file sinks then only try the
+// lock, and write the line to the console (stderr) alone when another thread
+// holds it, so a panic never waits for the lock. Per thread, in tcGlobal.cpp.
+bool isLogNonBlocking();
+} // namespace internal
+
 // ---------------------------------------------------------------------------
 // Logger - Logger core
+//
+// Thread-safe: log() and the settings below may be called from any thread.
+// The console and file sinks write under one mutex, so every line lands
+// whole, and closeFile() / setLogFile() wait for a write in progress. The
+// other onLog listeners (yours) run outside that mutex, so a listener may
+// log again without deadlocking. One exception: setLogFile() with a relative
+// path resolves it through getDataPath(), which reads the data path state
+// without a lock, so it must not race setDataPathRoot() or the first
+// getDataPath() call. An absolute path does not touch that state.
 // ---------------------------------------------------------------------------
 class Logger {
 public:
@@ -83,32 +104,11 @@ public:
     Event<LogEventArgs> onLog;
 
     Logger() {
-        // Console: stderr/stdout (desktop/web)
-#ifndef __ANDROID__
-        consoleListener_ = onLog.listen([this](LogEventArgs& e) {
-            if (e.level >= consoleLevel_ && consoleLevel_ != LogLevel::Silent) {
-                std::ostream& out = (e.level >= LogLevel::Warning) ? std::cerr : std::cout;
-                out << "[" << e.timestamp << "] "
-                    << "[" << logLevelToString(e.level) << "] "
-                    << e.message << std::endl;
-            }
+        // Console (stderr/stdout; logcat on Android) and file, as one
+        // listener that takes mutex_ itself.
+        sinkListener_ = onLog.listen([this](LogEventArgs& e) {
+            writeSinks(e);
         });
-#endif
-
-        // Android: logcat via __android_log_write
-#ifdef __ANDROID__
-        androidListener_ = onLog.listen([this](LogEventArgs& e) {
-            if (e.level >= consoleLevel_ && consoleLevel_ != LogLevel::Silent) {
-                int prio;
-                switch (e.level) {
-                    case LogLevel::Error:   prio = ANDROID_LOG_ERROR; break;
-                    case LogLevel::Warning: prio = ANDROID_LOG_WARN; break;
-                    default:                prio = ANDROID_LOG_INFO; break;
-                }
-                __android_log_write(prio, "TrussC", e.message.c_str());
-            }
-        });
-#endif
     }
 
     ~Logger() {
@@ -125,77 +125,123 @@ public:
     // === Console settings ===
 
     void setConsoleLogLevel(LogLevel level) {
-        consoleLevel_ = level;
+        consoleLevel_.store(level);
     }
 
     LogLevel getConsoleLogLevel() const {
-        return consoleLevel_;
+        return consoleLevel_.load();
     }
 
     // === File settings ===
 
-    bool setLogFile(const fs::path& path) {
-        closeFile();
-
-        fileStream_.open(path, std::ios::app);
-        if (!fileStream_.is_open()) {
-            log(LogLevel::Error, "Failed to open log file: " + internal::pathToUtf8(path));
-            return false;
-        }
-
-        filePath_ = internal::pathToUtf8(path);
-
-        // Register file listener
-        fileListener_ = onLog.listen([this](LogEventArgs& e) {
-            if (fileStream_.is_open() &&
-                e.level >= fileLevel_ && fileLevel_ != LogLevel::Silent) {
-                fileStream_ << "[" << e.timestamp << "] "
-                           << "[" << logLevelToString(e.level) << "] "
-                           << e.message << std::endl;
-                fileStream_.flush();
-            }
-        });
-
-        return true;
-    }
+    // Open a log file (append mode). A relative path resolves against the
+    // data folder (getDataPath), and a missing parent folder is created. On
+    // failure it logs the reason and returns false, and the current log file
+    // (if any) stays open. After a successful call, getLogFilePath()
+    // returns the resolved path.
+    // In tcGlobal.cpp: getDataPath (tcUtils.h) cannot be included here.
+    bool setLogFile(const fs::path& path);
 
     void closeFile() {
-        fileListener_.disconnect();
+        TC_LOCK_GUARD(mutex_);
+        closeFileLocked();
+    }
+
+    void setFileLogLevel(LogLevel level) {
+        fileLevel_.store(level);
+    }
+
+    LogLevel getFileLogLevel() const {
+        return fileLevel_.load();
+    }
+
+    // A copy taken under the lock (empty when no file is open).
+    std::string getLogFilePath() const {
+        TC_LOCK_GUARD(mutex_);
+        return filePath_;
+    }
+
+    bool isFileOpen() const {
+        TC_LOCK_GUARD(mutex_);
+        return fileStream_.is_open();
+    }
+
+private:
+    // The sink listener. Takes mutex_ (only tries it on a panic path, see
+    // internal::isLogNonBlocking) and writes to the console and the file.
+    void writeSinks(const LogEventArgs& e) {
+        if (internal::isLogNonBlocking()) {
+            if (!mutex_.try_lock()) {
+                // Another thread holds the lock: the console alone, unlocked.
+                writeConsole(e);
+                return;
+            }
+            struct Unlock {
+                TC_MUTEX& m;
+                ~Unlock() { m.unlock(); }
+            } unlock{mutex_};
+            writeConsole(e);
+            writeFile(e);
+            return;
+        }
+        TC_LOCK_GUARD(mutex_);
+        writeConsole(e);
+        writeFile(e);
+    }
+
+    void writeConsole(const LogEventArgs& e) {
+        const LogLevel level = consoleLevel_.load();
+        if (e.level < level || level == LogLevel::Silent) return;
+#ifdef __ANDROID__
+        // Android: logcat via __android_log_write
+        int prio;
+        switch (e.level) {
+            case LogLevel::Verbose: prio = ANDROID_LOG_VERBOSE; break;
+            case LogLevel::Warning: prio = ANDROID_LOG_WARN; break;
+            case LogLevel::Error:   prio = ANDROID_LOG_ERROR; break;
+            case LogLevel::Fatal:   prio = ANDROID_LOG_FATAL; break;
+            default:                prio = ANDROID_LOG_INFO; break;   // Notice
+        }
+        __android_log_write(prio, "TrussC", e.message.c_str());
+#else
+        // Desktop/web: stderr/stdout
+        std::ostream& out = (e.level >= LogLevel::Warning) ? std::cerr : std::cout;
+        out << "[" << e.timestamp << "] "
+            << "[" << logLevelToString(e.level) << "] "
+            << e.message << std::endl;
+#endif
+    }
+
+    void writeFile(const LogEventArgs& e) {
+        const LogLevel level = fileLevel_.load();
+        if (!fileStream_.is_open() || e.level < level || level == LogLevel::Silent) return;
+        fileStream_ << "[" << e.timestamp << "] "
+                    << "[" << logLevelToString(e.level) << "] "
+                    << e.message << std::endl;
+        fileStream_.flush();
+    }
+
+    void closeFileLocked() {
         if (fileStream_.is_open()) {
             fileStream_.close();
         }
         filePath_.clear();
     }
 
-    void setFileLogLevel(LogLevel level) {
-        fileLevel_ = level;
-    }
+    // Guards fileStream_ / filePath_ and serializes the console and file
+    // writes. Recursive (TC_MUTEX), and a no-op in single-threaded web builds.
+    mutable TC_MUTEX mutex_;
 
-    LogLevel getFileLogLevel() const {
-        return fileLevel_;
-    }
-
-    const std::string& getLogFilePath() const {
-        return filePath_;
-    }
-
-    bool isFileOpen() const {
-        return fileStream_.is_open();
-    }
-
-private:
-    // Console (desktop/web)
-    EventListener consoleListener_;
-    LogLevel consoleLevel_ = LogLevel::Notice;
-
-    // Android logcat
-    EventListener androidListener_;
+    // Console (desktop/web; logcat on Android)
+    std::atomic<LogLevel> consoleLevel_{LogLevel::Notice};
 
     // File
-    EventListener fileListener_;
     std::ofstream fileStream_;
     std::string filePath_;
-    LogLevel fileLevel_ = LogLevel::Notice;
+    std::atomic<LogLevel> fileLevel_{LogLevel::Notice};
+
+    // Last: disconnected first on destruction, before the state it writes.
+    EventListener sinkListener_;
 };
 
 // ---------------------------------------------------------------------------
@@ -203,6 +249,27 @@ private:
 // ---------------------------------------------------------------------------
 // Non-inline: Host/Guest share the same logger on Windows hot-reload
 Logger& getLogger();
+
+// ---------------------------------------------------------------------------
+// sokol -> Logger bridge
+// ---------------------------------------------------------------------------
+namespace internal {
+// The logger.func TrussC passes to the sokol modules it sets up (sapp, sg,
+// sgl, simgui), in place of sokol's slog_func: their messages go through the
+// Logger (console, log file, onLog listeners). The tag is the module name.
+// panic -> Fatal, written without waiting for the Logger's lock and then
+// handed on to slog_func, which aborts as before; error -> Error;
+// warning -> Warning; info -> Verbose (hidden by default). In tcGlobal.cpp.
+void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
+              const char* message, uint32_t lineNr, const char* filename,
+              void* userData);
+
+// The level mapping and the message sokolLog() logs: "[tag] message", or
+// "[tag] id:<item> line:<line>" when sokol passes no message (release builds).
+LogLevel sokolLogLevel(uint32_t logLevel);
+std::string sokolLogMessage(const char* tag, uint32_t logItem,
+                            const char* message, uint32_t lineNr);
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // Convenience functions

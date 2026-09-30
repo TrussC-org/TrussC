@@ -175,8 +175,10 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     auto app = std::make_shared<AppClass>();
     ctx.rootNode = app;
 
-    // Call setup
-    app->setup();
+    // setup() once, then the framework's post-setup hook, as the windowed
+    // App gets them on its first tree update: the App's audioOut() /
+    // audioIn() are subscribed only once setup() has returned (#426).
+    internal::setupNodeOnce(*app);
 
     // Main loop: fixed timestep at the nominal 1/fps (getDeltaTime() reports
     // exactly that), at most getMaxUpdateSteps() steps per pass (the main

@@ -244,8 +244,9 @@ inline nlohmann::json componentsToJson(const WidgetValue& v) {
 }
 
 // Adds widget / valueType / value (and kind-specific extras) to an entry.
-// statusFlags covers checkboxes, which report through the flags alone.
-inline void addValueFields(nlohmann::json& e, const WidgetValue& v, ImGuiItemStatusFlags statusFlags) {
+// Only what a value hook reported: an item without one (a button, an action
+// menu item) gets none of these fields.
+inline void addValueFields(nlohmann::json& e, const WidgetValue& v) {
     switch (v.kind) {
     case ImGuiTcValueKind_Drag:
     case ImGuiTcValueKind_Slider:
@@ -283,12 +284,25 @@ inline void addValueFields(nlohmann::json& e, const WidgetValue& v, ImGuiItemSta
         else            e["value"] = v.text;
         if (v.truncated) e["truncated"] = true;
         return;
+    case ImGuiTcValueKind_Bool:
+        e["widget"] = "checkbox";           // Checkbox, MenuItem(bool*), Selectable(bool*)
+        e["valueType"] = "bool";
+        e["value"] = componentsToJson(v);
+        return;
+    case ImGuiTcValueKind_Radio:
+        e["widget"] = "radio";
+        e["valueType"] = "int";
+        e["value"] = componentsToJson(v);   // the variable the button group sets
+        return;
+    case ImGuiTcValueKind_ListBox:
+        e["widget"] = "listbox";
+        e["valueType"] = "int";
+        e["value"] = componentsToJson(v);   // index of the selected item
+        return;
+    case ImGuiTcValueKind_ListBoxBegin:
+        e["widget"] = "listbox";            // custom BeginListBox: no value known
+        return;
     default:
-        if (statusFlags & ImGuiItemStatusFlags_Checkable) {
-            e["widget"] = "checkbox";
-            e["valueType"] = "bool";
-            e["value"] = (statusFlags & ImGuiItemStatusFlags_Checked) != 0;
-        }
         return;
     }
 }
@@ -314,7 +328,7 @@ inline nlohmann::json touchedWidgetsJson() {
         nlohmann::json e = {{"label", t.label}, {"window", t.windowName}};
         int wid = t.ctx ? windowIdFor(t.ctx) : -1;
         e["windowId"] = wid >= 0 ? nlohmann::json(wid) : nlohmann::json(nullptr);
-        addValueFields(e, t.value, t.statusFlags);
+        addValueFields(e, t.value);
         e["visible"] = drawnLastFrame(t);
         arr.push_back(std::move(e));
     }
@@ -374,7 +388,7 @@ inline void registerImGuiTools() {
                         entry["opened"] = (bool)(w.statusFlags & ImGuiItemStatusFlags_Opened);
                     }
 
-                    detail::addValueFields(entry, w.value, w.statusFlags);
+                    detail::addValueFields(entry, w.value);
                     entry["touched"] = detail::findTouched(ctx, w.id) != nullptr;
 
                     widgets.push_back(entry);
@@ -385,7 +399,7 @@ inline void registerImGuiTools() {
         }));
 
     // tcx_imgui_get_touched — everything changed by hand
-    tc::mcp::tool("tcx_imgui_get_touched", "Values the user changed by hand (dragging, typing, clicking a widget) since startup or the last tcx_imgui_reset_touched, with their current value. widgets: ImGui widgets, same fields as tcx_imgui_get_widgets; one that is not drawn right now (collapsed, closed) keeps its last known value with visible=false. Other keys come from addons that keep their own record (inspector: tcxNodeInspector edits per node — node type/name/id, mod, member path, value in tc_get_node_tree encoding). Values set from code or by tc_set_node_members are not recorded. Read-only")
+    tc::mcp::tool("tcx_imgui_get_touched", "Values the user changed by hand (dragging, typing, clicking a widget) since startup or the last tcx_imgui_reset_touched, with their current value. widgets: the ImGui value widgets changed (sliders, drags, inputs, colors, combos, text fields, Checkbox, MenuItem/Selectable with a bool*, RadioButton with an int*, ListBox — the list box under its own label with the index), same fields as tcx_imgui_get_widgets; one that is not drawn right now (collapsed, closed) keeps its last known value with visible=false. Items that change no variable are not recorded: buttons, menu headers, action menu items, MenuItem(label, shortcut, bool selected) even when used as a toggle, plain Selectables, RadioButton(label, bool). Other keys come from addons that keep their own record (inspector: tcxNodeInspector edits per node — node type/name/id, mod, member path, value in tc_get_node_tree encoding). Values set from code or by tc_set_node_members are not recorded. Read-only")
         .bind(std::function<json()>([]() -> json {
             json result = {{"status", "ok"}};
             json widgets = detail::touchedWidgetsJson();

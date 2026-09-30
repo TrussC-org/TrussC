@@ -6,6 +6,7 @@
 
 #include "tcxBox2dWorld.h"
 #include "tcxCollider2D.h"
+#include "tcxCollisionManager.h"
 #include <tcNode.h>
 #include <box2d/box2d.h>
 #include <memory>
@@ -324,6 +325,9 @@ public:
     // -------------------------------------------------------------------------
     void destroy() {
         if (body_ && world_ && world_->getWorld()) {
+            // A deferred Exit must not reach this body's collider once it is
+            // freed (see CollisionManager)
+            if (auto* cm = world_->getCollisionManager()) cm->forget(body_);
             world_->getWorld()->DestroyBody(body_);
             body_ = nullptr;
         }
@@ -352,17 +356,19 @@ protected:
         return body_ ? body_->GetFixtureList() : nullptr;
     }
 
-    // Setup collider and link to fixture
+    // Setup collider and link it to every fixture of the body (a compound
+    // body has several; the collider stands for all of them)
     template<typename ColliderType>
     ColliderType* setupCollider() {
         auto collider = std::make_unique<ColliderType>();
         collider->body_ = this;
         collider->fixture_ = getFixture();
 
-        // Store collider pointer in fixture's UserData
-        if (collider->fixture_) {
-            collider->fixture_->GetUserData().pointer =
-                reinterpret_cast<uintptr_t>(collider.get());
+        // Store collider pointer in each fixture's UserData
+        if (body_) {
+            for (b2Fixture* f = body_->GetFixtureList(); f; f = f->GetNext()) {
+                f->GetUserData().pointer = reinterpret_cast<uintptr_t>(collider.get());
+            }
         }
 
         ColliderType* ptr = collider.get();

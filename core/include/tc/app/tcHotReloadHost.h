@@ -201,8 +201,9 @@ struct FileWatcher {
         if (!fs::exists(srcDir)) return;
         for (const auto& entry : fs::recursive_directory_iterator(srcDir)) {
             if (entry.is_regular_file()) {
-                auto ext = entry.path().extension().string();
-                if (ext == ".cpp" || ext == ".h" || ext == ".hpp" || ext == ".mm") {
+                // Case-insensitive extension match (.CPP, .H)
+                auto ext = toLower(getFileExtension(entry.path()));
+                if (ext == "cpp" || ext == "h" || ext == "hpp" || ext == "mm") {
                     watchPaths.push_back(entry.path());
                 }
             }
@@ -666,7 +667,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     desc.frame_cb = internal::_frame_cb;
     desc.cleanup_cb = internal::_cleanup_cb;
     desc.event_cb = internal::_event_cb;
-    desc.logger.func = slog_func;
+    desc.logger.func = internal::sokolLog;
     desc.enable_dragndrop = true;
     desc.max_dropped_files = 16;
     desc.max_dropped_file_path_length = 2048;
@@ -675,6 +676,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     internal::currentWindowContext().clipboardSize = settings.clipboardSize;
     desc.win32.console_utf8 = true;   // UTF-8 console output (see buildAppDescriptor)
 
+    openEnvLogFile();   // TRUSSC_LOG_FILE before sapp_run(): init-time failures too
 #ifdef _WIN32
     ConsoleOutputCPCtrlGuard consoleCtrl;   // Ctrl+C restores the console code page
 #endif

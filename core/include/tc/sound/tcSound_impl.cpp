@@ -37,6 +37,7 @@ extern "C" {
 #include "miniaudio.h"
 
 #include "tc/sound/tcSound.h"
+#include "tc/utils/tcFile.h"
 
 namespace trussc {
 
@@ -311,16 +312,14 @@ LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
 }
 
 // -----------------------------------------------------------------------------
-// Auto-detect by extension. Mirrors the dispatch in Sound::load() so callers
-// that already have a SoundBuffer (e.g., for sharing across multiple Sounds)
-// can use it directly.
+// Auto-detect by extension. Sound::load() delegates here; callers that
+// already have a SoundBuffer (e.g., for sharing across multiple Sounds) can
+// use it directly.
 // -----------------------------------------------------------------------------
 
 LoadResult SoundBuffer::load(const fs::path& path) {
     // Lowercase the extension once
-    std::string ext = path.extension().string();
-    if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
-    for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+    std::string ext = toLower(getFileExtension(path));
 
     if (ext == "wav")  return loadWav(path);
     if (ext == "mp3")  return loadMp3(path);

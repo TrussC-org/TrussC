@@ -53,9 +53,25 @@ public:
         return true;
     }
 
-    // Save to file (relative paths resolved via getDataPath, like saveJson)
+    // Save to file (relative paths resolved via getDataPath, like saveJson;
+    // a missing parent folder is created)
     bool save(const fs::path& path, const std::string& indent = "  ") const {
         fs::path fullPath = getDataPath(path);
+        // "" or "out/": fail before creating any folder
+        if (fullPath.filename().empty()) {
+            logError() << "No file name in XML file path: " << fullPath;
+            return false;
+        }
+        std::error_code ec;
+        fs::path parent = fullPath.parent_path();
+        if (!parent.empty()) {
+            std::filesystem::create_directories(parent, ec);
+            if (ec) {
+                logError() << "Cannot create folder for XML file: " << parent
+                           << " (" << ec.message() << ")";
+                return false;
+            }
+        }
         // Wide save_file overload on Windows (see load)
         bool success = doc_.save_file(fullPath.c_str(), indent.c_str());
         if (!success) {
