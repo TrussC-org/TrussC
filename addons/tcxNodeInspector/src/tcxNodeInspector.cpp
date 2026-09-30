@@ -940,10 +940,12 @@ void NodeInspector::doAttach() {
     // top of the scene. Re-attaching just replaces the previous listener.
     autoDraw_ = events().onRender.listen([this] {
         // A root passed to attach(root) is held weakly: once it is freed the
-        // inspector shows its parent from attach() time, and once that is
-        // gone too, the running App's tree.
+        // inspector shows the parent it was last seen under (tracked here
+        // every frame, so adding or reparenting it after attach() counts),
+        // and once that is gone too, the running App's tree.
         Node::Ptr attached = attachRoot_.lock();
-        if (!attached) attached = attachParent_.lock();
+        if (attached) attachParent_ = attached->getParent();
+        else attached = attachParent_.lock();
         Node* r = attached ? attached.get() : getRootNode();
         if (!r) return;
         imguiBegin();

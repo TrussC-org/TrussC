@@ -202,9 +202,10 @@ public:
     // projection is current-frame, and before tcxImGui's render. Root defaults to
     // getRootNode() (the running App); pass one to inspect a subtree instead.
     // That root is held weakly (like every node the inspector keeps between
-    // frames): once it is freed, the inspector shows the node that was its
-    // parent when attach() was called, and once that is gone too (or there
-    // was none), getRootNode().
+    // frames): once it is freed, the inspector shows the parent the root was
+    // last seen under (updated every frame while the root lives, so adding
+    // or reparenting it after attach() is followed), and once that is gone
+    // too (or there was none), getRootNode().
     // Each returns the singleton, so a call chains into the instance API
     // (e.g. NodeInspector::attach(KEY_F1).setAccent(...)).
     //
@@ -279,7 +280,7 @@ private:
     void ensureExitGuard();                   // drop listeners at exit (before teardown)
     ::tc::EventListener autoDraw_;             // onRender frame driver (attach)
     std::weak_ptr<::tc::Node> attachRoot_;     // empty or gone => attachParent_
-    std::weak_ptr<::tc::Node> attachParent_;   // attachRoot_'s parent at attach(); gone => getRootNode()
+    std::weak_ptr<::tc::Node> attachParent_;   // attachRoot_'s last seen parent; gone => getRootNode()
     std::vector<int>    toggleKeys_;
     ::tc::EventListener toggleKeyListener_;    // installed once, then lives on
     ::tc::EventListener exitListener_;         // clears the above while events() is alive
