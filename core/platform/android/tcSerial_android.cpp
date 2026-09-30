@@ -475,14 +475,22 @@ void workerMain(Impl* impl) {
         int r = ioctl(impl->fd, USBDEVFS_BULK, &bt);
         int err = errno;
         if (r > 0) {
-            std::lock_guard<std::mutex> lock(impl->rxMutex);
-            impl->rx.insert(impl->rx.end(), buf.begin(), buf.begin() + r);
-            if (impl->rx.size() > RX_BUFFER_CAP) {
-                if (!impl->rxOverflowWarned) {
-                    impl->rxOverflowWarned = true;
-                    logWarning() << "Serial: RX buffer overflow, dropping oldest data (app is not reading fast enough)";
+            bool warnOverflow = false;
+            {
+                std::lock_guard<std::mutex> lock(impl->rxMutex);
+                impl->rx.insert(impl->rx.end(), buf.begin(), buf.begin() + r);
+                if (impl->rx.size() > RX_BUFFER_CAP) {
+                    if (!impl->rxOverflowWarned) {
+                        impl->rxOverflowWarned = true;
+                        warnOverflow = true;
+                    }
+                    impl->rx.erase(impl->rx.begin(), impl->rx.begin() + (impl->rx.size() - RX_BUFFER_CAP));
                 }
-                impl->rx.erase(impl->rx.begin(), impl->rx.begin() + (impl->rx.size() - RX_BUFFER_CAP));
+            }
+            // Logged with rxMutex released: an inline Logger listener may call
+            // available() / readBytes() / flushInput(), which take it
+            if (warnOverflow) {
+                logWarning() << "Serial: RX buffer overflow, dropping oldest data (app is not reading fast enough)";
             }
         } else if (r < 0 && (err == ETIMEDOUT || err == EAGAIN || err == EINTR)) {
             continue;
