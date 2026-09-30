@@ -80,8 +80,8 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   file): `STBTT_malloc` allocates 64 zeroed bytes past each requested size.
   `stbtt_GetGlyphShape` sizes the TrueType vertex array as
   `n + 2*numberOfContours` and reads one element past it when the last
-  contour of a glyph starts with an off-curve point; the padding keeps that
-  read inside the block.
+  point of a glyph starts a contour off-curve (a last contour that is a
+  single off-curve point); the padding keeps that read inside the block.
 - **Not covered by stb, checked by TrussC**: stb_truetype takes no buffer
   length. `FontAtlasManager` (`core/include/tc/graphics/tcFont.h`) checks the
   sfnt skeleton (collection header, table directory, table bounds, required
@@ -136,4 +136,4 @@ To check which upstream commit a nothings/stb file matches, run in a clone
 of nothings/stb: `git log --all -m --format='%H %ci' --find-object=$(git
 hash-object <TrussC copy>)` and take the oldest line (`-m` is needed when the
 file last changed in a merge, as `stb_truetype.h` did). For
-`stb_image_write.h`, undo the TrussC patch first.
+`stb_image_write.h` and `stb_truetype.h`, undo the TrussC patch first.
