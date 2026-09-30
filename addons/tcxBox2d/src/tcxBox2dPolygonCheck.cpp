@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <queue>
 
 namespace tcx::box2d::detail {
 
@@ -206,21 +208,59 @@ std::vector<tc::Vec2> reducedConvexHull(const std::vector<tc::Vec2>& points, siz
     hull.resize(k - 1);  // the last point repeats the first
 
     // Drop the vertex whose triangle with its neighbours is smallest (the
-    // area its removal loses) until maxPoints remain.
-    while (hull.size() > maxPoints) {
-        const size_t n = hull.size();
-        size_t best = 0;
-        double bestArea = std::numeric_limits<double>::max();
-        for (size_t i = 0; i < n; ++i) {
-            double a = std::abs(cross(hull[(i + n - 1) % n], hull[i], hull[(i + 1) % n]));
-            if (a < bestArea) {
-                bestArea = a;
-                best = i;
-            }
-        }
-        hull.erase(hull.begin() + static_cast<std::ptrdiff_t>(best));
+    // area its removal loses) until maxPoints remain; on equal area the lowest
+    // index goes first. Visvalingam-style, O(h log h): each vertex's area sits
+    // in a min-heap, and a removal recomputes only its two neighbours (their
+    // version goes up, so their old heap entries are skipped when popped).
+    const size_t n = hull.size();
+    if (n <= maxPoints) return hull;
+
+    std::vector<size_t> prev(n), next(n);
+    std::vector<uint32_t> version(n, 0);
+    std::vector<char> alive(n, 1);
+    for (size_t i = 0; i < n; ++i) {
+        prev[i] = (i + n - 1) % n;
+        next[i] = (i + 1) % n;
     }
-    return hull;
+    // Areas that are not below DBL_MAX (inf, NaN) all rank as DBL_MAX, the
+    // lowest index first, as a scan keeping the first `area < best` from
+    // best = DBL_MAX would pick them. It also keeps the heap order strict.
+    auto areaAt = [&](size_t i) {
+        double a = std::abs(cross(hull[prev[i]], hull[i], hull[next[i]]));
+        return a < std::numeric_limits<double>::max() ? a : std::numeric_limits<double>::max();
+    };
+    struct Entry {
+        double area;
+        size_t index;
+        uint32_t version;
+    };
+    // priority_queue pops its largest element: rank smaller area, then lower
+    // index, as larger.
+    auto popsLater = [](const Entry& a, const Entry& b) {
+        return a.area > b.area || (a.area == b.area && a.index > b.index);
+    };
+    std::priority_queue<Entry, std::vector<Entry>, decltype(popsLater)> heap(popsLater);
+    for (size_t i = 0; i < n; ++i) heap.push({areaAt(i), i, 0});
+
+    for (size_t remaining = n; remaining > maxPoints;) {
+        const Entry e = heap.top();
+        heap.pop();
+        if (!alive[e.index] || e.version != version[e.index]) continue;  // stale
+        alive[e.index] = 0;
+        --remaining;
+        const size_t p = prev[e.index], q = next[e.index];
+        next[p] = q;
+        prev[q] = p;
+        heap.push({areaAt(p), p, ++version[p]});
+        heap.push({areaAt(q), q, ++version[q]});
+    }
+
+    std::vector<tc::Vec2> out;
+    out.reserve(maxPoints);
+    for (size_t i = 0; i < n; ++i) {
+        if (alive[i]) out.push_back(hull[i]);
+    }
+    return out;
 }
 
 std::vector<tc::Vec2> pathPoints(const tc::Path& path) {
