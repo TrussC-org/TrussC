@@ -1421,6 +1421,7 @@ Apps build as RelWithDebInfo by default, which includes debug symbols, so the st
 Most crashes come from a handful of patterns. Write it the safe way from the start:
 - **Nodes: create with `make_shared`, build the tree in `setup()`.** Create every node with `make_shared<T>()`. Call `addChild()` / `addMod()` / `callEvery()` in `setup()`, not in the constructor: `weak_from_this()` isn't ready while the constructor runs.
 - **Remove with `destroy()` while things are in flight.** From inside an event handler, a timer callback, or while walking the tree, remove nodes with `destroy()`. The removal is deferred to a safe point.
+- **Keep a node beyond one call only as `weak_ptr` (or `Ptr` when you mean to own it), never as a raw pointer.** A `Node*` kept in a member, a global or a lambda capture dangles once the node is removed and freed. `lock()` tells you the node is gone, and the `shared_ptr` it returns keeps the node alive while you use it. The `Node*` from `getSelectedNode()` / `getRootNode()` is for the current call only.
 - **Main-thread-only objects.** GPU objects (`Image`, `Texture`, `Fbo`, `Font`, `Shader`) and the Node tree belong to the main thread. Callbacks from audio, network or async timers must not touch them. See "Which thread does my callback run on?" below.
 - **Stop your own threads before your members go away.** A `Thread` subclass must call `waitForThread()` in its **own** destructor. The base class also stops and joins the thread, but only after your members are already destroyed, and it logs a warning when it finds the thread still running.
 - **Callbacks must not outlive their object.** Keep the `EventListener` returned by `listen()` as a member, so it disconnects when the object dies. Don't capture a raw `this` in callbacks that can outlive the object (`runOnMainThread()`, a raw `std::thread`); capture a `weak_ptr` or copies instead.
@@ -2163,8 +2164,8 @@ Color colorFromOKLCH(float L, float C, float H, float a = 1.0) ⚠️deprecated 
 
 ```cpp
 Node * getRootNode()  // Get the running App as the root of the node tree (set by the framework while the app is alive, null otherwise). Lets tools walk the whole tree without the app passing itself around.
-Node * getSelectedNode()  // Get the currently selected node (the last-clicked node, held by the Node system; null if none). A tool such as an inspector can read it and drive it via setSelectedNode().
-void setSelectedNode(Node * n)  // Set the currently selected node. Pass nullptr to clear the selection.
+Node * getSelectedNode()  // Get the currently selected node (the last-clicked node, held by the Node system; null if none or once the node is freed). A tool such as an inspector can read it and drive it via setSelectedNode(). The pointer is for the current call; to keep the node, keep its weak_from_this().
+void setSelectedNode(Node * n)  // Set the currently selected node. Pass nullptr to clear the selection; a node no shared_ptr owns also clears it.
 ```
 
 ### 3D Setup

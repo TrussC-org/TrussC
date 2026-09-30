@@ -14105,9 +14105,9 @@ description.ko = "현재 초 (0-59)"
 ["getSelectedNode"]
 category = "scene_graph"
 keywords = ["selection", "active", "clicked", "inspector"]
-description.en = "Get the currently selected node (the last-clicked node, held by the Node system; null if none). A tool such as an inspector can read it and drive it via setSelectedNode()."
-description.ja = "現在選択中のノード(最後にクリックされたノード、Nodeシステムが保持。なければnull)を取得。inspectorなどのツールがこれを読み取り、setSelectedNode()で操作できる"
-description.ko = "현재 선택된 노드(마지막으로 클릭된 노드, Node 시스템이 보유. 없으면 null)를 얻음. inspector 같은 도구가 이를 읽고 setSelectedNode()로 조작 가능"
+description.en = "Get the currently selected node (the last-clicked node, held by the Node system; null if none or once the node is freed). A tool such as an inspector can read it and drive it via setSelectedNode(). The pointer is for the current call; to keep the node, keep its weak_from_this()."
+description.ja = "現在選択中のノード(最後にクリックされたノード、Nodeシステムが保持。なければ、またはノードが解放されたらnull)を取得。inspectorなどのツールがこれを読み取り、setSelectedNode()で操作できる。ポインタはその呼び出しの間だけ使い、ノードを持ち続けるならweak_from_this()を保持する"
+description.ko = "현재 선택된 노드(마지막으로 클릭된 노드, Node 시스템이 보유. 없거나 노드가 해제되면 null)를 얻음. inspector 같은 도구가 이를 읽고 setSelectedNode()로 조작 가능. 포인터는 그 호출 동안만 사용하고, 노드를 계속 참조하려면 weak_from_this()를 보관"
 related = ["setSelectedNode", "getRootNode", "Node::enableEvents"]
 
 ["getSokolMemoryAllocs"]
@@ -15532,9 +15532,9 @@ related = ["RectNode::setClipping", "pushScissor"]
 ["setSelectedNode"]
 category = "scene_graph"
 keywords = ["select", "selection", "highlight", "set active", "inspector"]
-description.en = "Set the currently selected node. Pass nullptr to clear the selection."
-description.ja = "現在選択中のノードを設定。nullptrを渡すと選択を解除"
-description.ko = "현재 선택된 노드를 설정. nullptr을 전달하면 선택을 해제"
+description.en = "Set the currently selected node. Pass nullptr to clear the selection; a node no shared_ptr owns also clears it."
+description.ja = "現在選択中のノードを設定。nullptrを渡すと選択を解除(shared_ptrで所有されていないノードも解除になる)"
+description.ko = "현재 선택된 노드를 설정. nullptr을 전달하면 선택을 해제(shared_ptr이 소유하지 않는 노드도 해제됨)"
 related = ["getSelectedNode"]
 
 ["setStrokeCap"]

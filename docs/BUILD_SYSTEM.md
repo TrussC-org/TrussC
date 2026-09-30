@@ -435,7 +435,7 @@ The Host monitors `src/` for file modifications (polling every 500ms). When a ch
 
 ### State Reset (Stage 1)
 
-Currently, all state is reset on reload — `setup()` runs from scratch each time. Member variables, scene graph, loaded resources are all recreated. This is the same model as Processing / p5.js live coding.
+Currently, all state is reset on reload — `setup()` runs from scratch each time. Member variables, scene graph, loaded resources are all recreated, and hover, the mouse grab and the node selection (`getSelectedNode()`) start empty. This is the same model as Processing / p5.js live coding.
 
 For most creative coding use cases (adjusting colors, positions, animations), this is sufficient.
 
