@@ -1,15 +1,17 @@
 # tcxGltf tests
 
 Headless console test (no window). Each case writes a small `.gltf` (buffer
-embedded as a base64 data URI) to a temp directory and loads it with
-`GltfModel`, checking that model data is validated before it is read:
+embedded as a base64 data URI) or `.glb` (JSON and BIN chunks, built at
+runtime) to a temp directory and loads it with `GltfModel`, checking that
+model data is validated before it is read:
 
-- valid models (indexed, non-indexed, a node hierarchy, a sparse accessor) load
-  with the same vertex and index data as before, and sparse values are read
-  tightly packed, as glTF lays them out, also when the base view has a
-  byteStride;
-- an accessor or buffer view that runs past its buffer view or buffer, or a
-  reference to an accessor or buffer view that does not exist, fails to load;
+- valid models (indexed, non-indexed, a node hierarchy, a sparse accessor, a
+  GLB with positions and indices in its BIN chunk) load with the same vertex
+  and index data as before, and sparse values are read tightly packed, as
+  glTF lays them out, also when the base view has a byteStride;
+- an accessor or buffer view that runs past its buffer view or buffer (in a
+  GLB, past the BIN chunk), or a reference to an accessor or buffer view that
+  does not exist, fails to load;
 - a count too large to address fails to load, also on an accessor without a
   buffer view;
 - a buffer view byteStride smaller than the accessor's element fails to load;

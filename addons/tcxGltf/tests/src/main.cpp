@@ -4,15 +4,16 @@
 // Built and run by CI on every push/PR across macOS / Windows / Linux via
 // examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
 //
-// Each case writes a small .gltf (buffer embedded as a base64 data URI) to a
-// temp directory and loads it with GltfModel. No texture is ever created, so
-// nothing needs a graphics context.
+// Each case writes a small .gltf (buffer embedded as a base64 data URI) or
+// .glb (JSON and BIN chunks) to a temp directory and loads it with GltfModel.
+// No texture is ever created, so nothing needs a graphics context.
 //
 // It checks that GltfModel validates model data before reading it:
-//   - valid models (indexed, non-indexed, node hierarchy, sparse) load as before;
-//     sparse values are read tightly packed, also on a strided view
-//   - an accessor or buffer view that runs past its buffer view / buffer, or a
-//     reference to an accessor / buffer view that does not exist, fails to load
+//   - valid models (indexed, non-indexed, node hierarchy, sparse, GLB) load
+//     as before; sparse values are read tightly packed, also on a strided view
+//   - an accessor or buffer view that runs past its buffer view / buffer (or
+//     a GLB's BIN chunk), or a reference to an accessor / buffer view that
+//     does not exist, fails to load
 //   - a count too large to address fails to load, also on an accessor
 //     without a buffer view
 //   - a buffer view byteStride smaller than the accessor's element fails to
@@ -129,7 +130,9 @@ struct GltfBuilder {
         return (int)accessors.size() - 1;
     }
 
-    string json() const {
+    // The glTF JSON. With `embedUri` false, buffer 0 has no uri (a GLB's
+    // BIN chunk supplies its data).
+    string json(bool embedUri = true) const {
         auto join = [](const vector<string>& v) {
             string s;
             for (size_t i = 0; i < v.size(); i++) s += (i ? "," : "") + v[i];
@@ -143,11 +146,34 @@ struct GltfBuilder {
         j += "\"meshes\":[{\"primitives\":[" + primitive + "]}],";
         j += "\"accessors\":[" + join(accessors) + "],";
         j += "\"bufferViews\":[" + join(views) + "],";
-        j += "\"buffers\":[{\"byteLength\":" + to_string(len) +
-             ",\"uri\":\"data:application/octet-stream;base64," + base64(bin) + "\"}";
+        j += "\"buffers\":[{\"byteLength\":" + to_string(len);
+        if (embedUri) j += ",\"uri\":\"data:application/octet-stream;base64," + base64(bin) + "\"";
+        j += "}";
         for (const auto& eb : extraBuffers) j += "," + eb;
         j += "]}";
         return j;
+    }
+
+    // The same document as a GLB: header, JSON chunk, BIN chunk holding `bin`.
+    vector<uint8_t> glb() const {
+        string j = json(false);
+        while (j.size() % 4) j += ' ';
+        vector<uint8_t> chunkBin = bin;
+        while (chunkBin.size() % 4) chunkBin.push_back(0);
+        vector<uint8_t> out;
+        auto u32 = [&out](uint32_t v) {
+            for (int i = 0; i < 4; i++) out.push_back((uint8_t)(v >> (8 * i)));
+        };
+        u32(0x46546C67);  // "glTF"
+        u32(2);
+        u32((uint32_t)(12 + 8 + j.size() + 8 + chunkBin.size()));
+        u32((uint32_t)j.size());
+        u32(0x4E4F534A);  // "JSON"
+        out.insert(out.end(), j.begin(), j.end());
+        u32((uint32_t)chunkBin.size());
+        u32(0x004E4942);  // "BIN\0"
+        out.insert(out.end(), chunkBin.begin(), chunkBin.end());
+        return out;
     }
 };
 
@@ -191,12 +217,20 @@ static fs::path writeGltf(const GltfBuilder& b) {
     return p;
 }
 
+static fs::path writeGlb(const GltfBuilder& b) {
+    fs::path p = g_dir / ("model" + to_string(g_fileNo++) + ".glb");
+    vector<uint8_t> bytes = b.glb();
+    ofstream(p, ios::binary).write((const char*)bytes.data(), (streamsize)bytes.size());
+    return p;
+}
+
 // Load `b` and check the result. When the load should fail, also check that
 // it logged a warning and left the model empty.
 // `lastWarning` (when given) receives the text of the last warning logged.
+// With `asGlb`, `b` is written as a .glb instead of a .gltf.
 static bool loadCase(const string& name, const GltfBuilder& b, bool expectOk, GltfModel& model,
-                     string* lastWarning = nullptr) {
-    fs::path p = writeGltf(b);
+                     string* lastWarning = nullptr, bool asGlb = false) {
+    fs::path p = asGlb ? writeGlb(b) : writeGltf(b);
     WarningCounter warnings;
     bool ok = model.load(p.string());
     if (expectOk) {
@@ -289,6 +323,37 @@ int main() {
             check("valid sparse accessor: sparse value applied",
                   v.size() == 3 && vecNear(v[0], 0, 0, 0) && vecNear(v[1], 5, 5, 5) && vecNear(v[2], 0, 1, 0));
         }
+    }
+
+    // ----- GLB: data in the BIN chunk -------------------------------------------
+    {
+        // Positions and indices read from the BIN chunk
+        GltfModel m;
+        if (loadCase("valid GLB", triangle(), true, m, nullptr, true)) {
+            const auto& mesh = m.getNode(0).mesh;
+            check("valid GLB: 3 vertices, 3 indices",
+                  m.getNodeCount() == 1 && mesh.getNumVertices() == 3 && mesh.getNumIndices() == 3);
+            check("valid GLB: vertex and index data",
+                  mesh.getNumVertices() == 3 && mesh.getNumIndices() == 3 &&
+                  vecNear(mesh.getVertices()[1], 1, 0, 0) && vecNear(mesh.getVertices()[2], 0, 1, 0) &&
+                  vecNear(mesh.getNormals()[0], 0, 0, 1) &&
+                  mesh.getIndices()[0] == 0 && mesh.getIndices()[1] == 1 && mesh.getIndices()[2] == 2);
+        }
+    }
+    {
+        // The POSITION buffer view runs 8 bytes past the end of the BIN chunk
+        GltfBuilder b = triangle();
+        b.views[0] = "{\"buffer\":0,\"byteOffset\":" + to_string(b.bin.size() - 28) +
+                     ",\"byteLength\":36}";
+        GltfModel m;
+        loadCase("GLB buffer view past the BIN chunk", b, false, m, nullptr, true);
+    }
+    {
+        // The buffer declares more bytes than the BIN chunk holds
+        GltfBuilder b = triangle();
+        b.bufferLength = (long long)b.bin.size() + 16;
+        GltfModel m;
+        loadCase("GLB buffer longer than the BIN chunk", b, false, m, nullptr, true);
     }
 
     // ----- ranges and references ----------------------------------------------
