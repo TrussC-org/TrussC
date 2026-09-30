@@ -10,12 +10,14 @@
 #include "tcxGltf.h"
 
 #include <algorithm>
+#include <atomic>
 #include <climits>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <new>
 #include <stdexcept>
+#include <system_error>
 
 using namespace std;
 using namespace tc;
@@ -175,11 +177,21 @@ static Mat4 toMat4(const float* m) {
 // Texture loading
 // ---------------------------------------------------------------------------
 
+// See internal::setTextureLoadHookForTests()
+static atomic<void (*)()> g_textureLoadHook{nullptr};
+
+namespace internal {
+void setTextureLoadHookForTests(void (*hook)()) {
+    g_textureLoadHook.store(hook, memory_order_relaxed);
+}
+} // namespace internal
+
 static Texture* loadGltfTexture(const cgltf_texture* tex,
                                  vector<unique_ptr<Texture>>& store,
-                                 const string& baseDir,
+                                 const fs::path& baseDir,
                                  const cgltf_data* data) {
     if (!tex || !tex->image) return nullptr;
+    if (auto hook = g_textureLoadHook.load(memory_order_relaxed)) hook();
 
     const cgltf_image* img = tex->image;
 
@@ -199,8 +211,26 @@ static Texture* loadGltfTexture(const cgltf_texture* tex,
         // Skip data URIs (base64 inline) for now
         if (uri.rfind("data:", 0) == 0) return nullptr;
 
-        string imgPath = baseDir + "/" + uri;
-        pixels.load(imgPath);
+        // glTF uris are UTF-8: utf8ToPath() converts them without going
+        // through the Windows code page, and on Windows it throws for bytes
+        // that are not valid UTF-8. Only that image is skipped then. The uri
+        // is appended as before (baseDir + "/" + uri), not with operator/,
+        // which would let an absolute uri replace baseDir.
+        fs::path imgPath = baseDir;
+        try {
+            imgPath += "/";
+            imgPath += utf8ToPath(uri);
+        } catch (const system_error& e) {
+            logWarning() << "[GltfModel] skipped an image whose uri is not a valid path ("
+                         << e.what() << ")";
+            return nullptr;
+        }
+        LoadResult loaded = pixels.load(imgPath);
+        if (!loaded) {
+            logWarning() << "[GltfModel] skipped an image that could not be loaded ("
+                         << loadErrorName(loaded.error) << "): " << loaded.message;
+            return nullptr;
+        }
     }
 
     if (pixels.getWidth() == 0) return nullptr;
@@ -218,7 +248,7 @@ static Texture* loadGltfTexture(const cgltf_texture* tex,
 
 static Material loadGltfMaterial(const cgltf_material* mat,
                                  vector<unique_ptr<Texture>>& texStore,
-                                 const string& baseDir,
+                                 const fs::path& baseDir,
                                  const cgltf_data* data) {
     Material m;
     if (!mat) return m;
@@ -383,47 +413,51 @@ bool GltfModel::load(const string& path) {
     textures_.clear();
     loaded_ = false;
 
-    string resolved = getDataPath(path).string();
-
-    // Parse with cgltf
-    cgltf_options options = {};
-    cgltf_data* data = nullptr;
-    cgltf_result result = cgltf_parse_file(&options, resolved.c_str(), &data);
-    if (result != cgltf_result_success) {
-        logWarning() << "[GltfModel] failed to parse: " << resolved;
-        return false;
-    }
-
-    // Load external buffers (for .gltf with separate .bin)
-    result = cgltf_load_buffers(&options, data, resolved.c_str());
-    if (result != cgltf_result_success) {
-        logWarning() << "[GltfModel] failed to load buffers: " << resolved;
-        cgltf_free(data);
-        return false;
-    }
-
-    // Validate the model data before reading any of it
-    if (!checkDataRanges(data)) {
-        logWarning() << "[GltfModel] model data refers past the end of a buffer, "
-                     << "or has a count too large to address: " << resolved;
-        cgltf_free(data);
-        return false;
-    }
-    result = cgltf_validate(data);
-    if (result != cgltf_result_success) {
-        logWarning() << "[GltfModel] model data failed validation (cgltf result "
-                     << (int)result << "): " << resolved;
-        cgltf_free(data);
-        return false;
-    }
-    // Base directory for relative texture paths
-    string baseDir = filesystem::path(resolved).parent_path().string();
-
-    // Read the node hierarchy. Any failure below sets `failure` (the warning
-    // text) and stops; the model is then left empty.
+    // Any failure below either logs a warning and returns before anything is
+    // built, or sets `failure` (the warning text) and stops; the model is then
+    // left empty. An exception from any step is a failure too: load() does
+    // not throw and does not leave a half-built model.
+    string resolved = path;  // the path named in warnings
     string failure;
     size_t skippedPrimitives = 0;
     try {
+        fs::path resolvedPath = getDataPath(path);
+        resolved = resolvedPath.string();
+
+        // Parse with cgltf. The parsed data is freed on every path out of
+        // this block, including an exception.
+        cgltf_options options = {};
+        cgltf_data* parsed = nullptr;
+        cgltf_result result = cgltf_parse_file(&options, resolved.c_str(), &parsed);
+        unique_ptr<cgltf_data, decltype(&cgltf_free)> dataOwner(parsed, &cgltf_free);
+        cgltf_data* data = dataOwner.get();
+        if (result != cgltf_result_success) {
+            logWarning() << "[GltfModel] failed to parse: " << resolved;
+            return false;
+        }
+
+        // Load external buffers (for .gltf with separate .bin)
+        result = cgltf_load_buffers(&options, data, resolved.c_str());
+        if (result != cgltf_result_success) {
+            logWarning() << "[GltfModel] failed to load buffers: " << resolved;
+            return false;
+        }
+
+        // Validate the model data before reading any of it
+        if (!checkDataRanges(data)) {
+            logWarning() << "[GltfModel] model data refers past the end of a buffer, "
+                         << "or has a count too large to address: " << resolved;
+            return false;
+        }
+        result = cgltf_validate(data);
+        if (result != cgltf_result_success) {
+            logWarning() << "[GltfModel] model data failed validation (cgltf result "
+                         << (int)result << "): " << resolved;
+            return false;
+        }
+        // Base directory for relative texture paths
+        fs::path baseDir = resolvedPath.parent_path();
+
         // Root nodes: those of the default scene (or scene 0). A file without
         // scenes is loaded from every node that has no parent.
         vector<const cgltf_node*> roots;
@@ -524,9 +558,12 @@ bool GltfModel::load(const string& path) {
         failure = "not enough memory for the model data";
     } catch (const length_error&) {
         failure = "not enough memory for the model data";
+    } catch (const exception& e) {
+        failure = string("error while reading the model (") + e.what() + ")";
+    } catch (...) {
+        failure = "error while reading the model";
     }
 
-    cgltf_free(data);
     if (!failure.empty()) {
         logWarning() << "[GltfModel] " << failure << ": " << resolved;
         nodes_.clear();

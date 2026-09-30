@@ -87,6 +87,16 @@ private:
     bool loaded_ = false;
 };
 
+namespace internal {
+
+// Test hook, not a user setting: when set, load() calls it once for each
+// texture it is about to read, so a test can make that step throw and check
+// that load() recovers. nullptr (the default) turns it off. Set it only while
+// no load() is running.
+void setTextureLoadHookForTests(void (*hook)());
+
+} // namespace internal
+
 } // namespace tcx::gltf
 
 // -----------------------------------------------------------------------------
