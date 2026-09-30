@@ -30,8 +30,10 @@ Both classic calls also take a `tc::Path`; every point of every subpath is used.
   hull, as Box2D itself does. `PolyShape::getVertices()` and
   `RigidBody2D::shape().verts` hold that hull, and `draw()` / `drawFill()` /
   `ColliderRenderer2D` draw it, so what you see is what collides. Convex
-  input comes back as given, in its order; a hull that dropped points is in
-  Box2D's order, starting at the rightmost point.
+  input whose points already go around the outline in order (either winding,
+  any starting point) comes back as given. Otherwise, when points were dropped
+  or listed in a crossing order (a Z-ordered square, a star-ordered pentagon),
+  the hull comes back in Box2D's order, starting at the rightmost point.
 - **`setupConvex()` / `convex()`** take the convex hull of the points and drop
   the vertices whose removal loses the least area until 8 remain. No point is
   guaranteed to survive: tips and extents can shrink, a symmetric outline can
