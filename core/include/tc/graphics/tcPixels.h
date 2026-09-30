@@ -23,17 +23,23 @@ enum class PixelFormat { U8, F32 };
 
 namespace internal {
 
+// Channel counts Pixels handles: 1 (gray), 2 (gray + alpha), 3 (RGB), 4 (RGBA).
+inline bool isValidPixelChannels(int channels) {
+    return channels >= 1 && channels <= 4;
+}
+
 // Element count of a width x height x channels buffer of elemSize-byte
-// elements, for Pixels::allocate(). False when a dimension is negative or the
-// byte count would exceed maxBytes (pass SIZE_MAX). Each product is checked
-// before it is formed, so it cannot wrap where size_t is 32-bit (wasm32).
+// elements, for Pixels::allocate(). False when a dimension is negative, the
+// channel count is not 1-4, or the byte count would exceed maxBytes (pass
+// SIZE_MAX). Each product is checked before it is formed, so it cannot wrap
+// where size_t is 32-bit (wasm32).
 inline bool pixelBufferCount(int width, int height, int channels, size_t elemSize,
                              size_t maxBytes, size_t& outCount) {
-    if (width < 0 || height < 0 || channels < 0 || elemSize == 0) return false;
+    if (width < 0 || height < 0 || !isValidPixelChannels(channels) || elemSize == 0) return false;
     size_t count = (size_t)width;
     if (height != 0 && count > maxBytes / (size_t)height) return false;
     count *= (size_t)height;
-    if (channels != 0 && count > maxBytes / (size_t)channels) return false;
+    if (count > maxBytes / (size_t)channels) return false;
     count *= (size_t)channels;
     if (count > maxBytes / elemSize) return false;
     outCount = count;
@@ -76,8 +82,9 @@ public:
 
     // === Allocation/Deallocation ===
 
-    // Allocate empty pixel buffer. A negative size, or one whose byte count
-    // does not fit in size_t, logs an error and leaves the buffer empty.
+    // Allocate empty pixel buffer. A channel count other than 1-4, a negative
+    // size, or one whose byte count does not fit in size_t logs an error and
+    // leaves the buffer empty.
     void allocate(int width, int height, int channels = 4, PixelFormat format = PixelFormat::U8) {
         clear();
 
@@ -87,7 +94,9 @@ public:
                                         std::numeric_limits<size_t>::max(), count)) {
             logError("Pixels") << "cannot allocate " << width << "x" << height << "x"
                                << channels << (format == PixelFormat::F32 ? " F32" : " U8")
-                               << ": size is negative or too large for this platform";
+                               << (internal::isValidPixelChannels(channels)
+                                   ? ": size is negative or too large for this platform"
+                                   : ": channels must be 1 to 4");
             return;
         }
 
