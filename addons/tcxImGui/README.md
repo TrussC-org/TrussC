@@ -100,7 +100,7 @@ void tcApp::setup() {
 | `tcx_imgui_get_touched` | — | The value widgets the user changed by hand since startup (or the last reset), with the current value of their variable. Includes widgets not drawn right now, and the edits recorded by addons such as tcxNodeInspector. Items that change no variable (buttons, menu headers, action menu items) are not listed — see [Touched](#touched-what-the-user-changed-by-hand) |
 | `tcx_imgui_reset_touched` | — | Clear that record. No value is changed |
 | `tcx_imgui_click` | `label`, `window`, `windowId` (optional) | Click a widget by label. A composite widget (`DragFloat3`, `ColorEdit4`, ...) is an error: set it with `tcx_imgui_input` |
-| `tcx_imgui_input` | `label`, `text`, `window`, `windowId` (optional) | Set a widget's value. A value widget gets `text` as JSON, written into its variable and read back (see [Setting values](#setting-values)); a text field gets `text` typed in |
+| `tcx_imgui_input` | `label`, `text`, `window`, `windowId` (optional) | Set a widget's value: for widgets that hold a value (and text fields); buttons and other items without a variable are pressed with `tcx_imgui_click`. A value widget gets `text` as JSON, written into its variable and read back (see [Setting values](#setting-values)); a text field gets `text` typed in |
 | `tcx_imgui_checkbox` | `label`, `value`, `window`, `windowId` (optional) | Toggle or set a checkbox |
 
 `window` is the ImGui window (panel) name. `windowId` is the OS window as
@@ -202,8 +202,8 @@ frame.
   `ImGuiSelectableFlags_Disabled`) or a read-only one; a `RadioButton` given
   another button's value; an item with no variable that takes no text (a
   button, an action `MenuItem`, `MenuItem(label, shortcut, bool selected)`,
-  `RadioButton(label, bool active)`, a plain `Selectable`: use
-  `tcx_imgui_click`); a widget that runs more than 2 s after the call (a window
+  `RadioButton(label, bool active)`, a plain `Selectable`, a tree node: it has
+  no value to set; press it with `tcx_imgui_click`); a widget that runs more than 2 s after the call (a window
   rendering less often than once every 2 s, e.g. `Window::setFps` below 0.5),
   since the value could not be checked before the reply.
 - Errors after the write, carrying what the variable holds: a hand edit that

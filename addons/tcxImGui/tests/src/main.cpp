@@ -546,14 +546,17 @@ static void testValueInputReturnsTrue() {
           isError(r) && readOnlyV == 1 && r.value("message", "").find("read-only") != std::string::npos);
 
     r = input(h, "action", "true");
-    check("no variable: an action MenuItem is an error, not typed into", isError(r));
+    check("no variable: an action MenuItem is an error, not typed into",
+          isError(r) && r.value("message", "").find("use tcx_imgui_click") != std::string::npos);
     r = input(h, "bool radio", "true");
     h.frames(3);
     check("no variable: RadioButton(label, bool) is an error, not pressed",
           isError(r) && !boolRadio && r.value("message", "").find("no variable") != std::string::npos);
     r = input(h, "press", "1");
     h.frames(3);
-    check("no variable: a button is an error, not pressed", isError(r) && presses == 0);
+    check("no variable: a button is an error pointing at tcx_imgui_click, not pressed",
+          isError(r) && presses == 0 &&
+          r.value("message", "").find("has no value to set; to press it, use tcx_imgui_click") != std::string::npos);
 
     h.frame();
     check("returns true: injected values not recorded as touched", tcx::imgui::getTouched().empty());
