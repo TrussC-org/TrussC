@@ -149,8 +149,19 @@ into them, but carry no value — the widget reports under its own label.
 `tcx_imgui_input` on a value widget (every row of the table above except the
 custom `BeginCombo` / `BeginListBox` and text fields) does not click or type.
 It hands the value to the value hook, which writes it into the app's variable
-the next time the widget runs, before the widget reads it. The reply waits for
-that frame and reads the variable back:
+the next time the widget runs, before the widget reads it. In that frame the
+widget returns `true`, as if the user had changed it, so the usual patterns
+take the value:
+
+```cpp
+if (ImGui::DragFloat3("pos", v)) recompute();            // recompute() runs once
+float x = node->getX();
+if (ImGui::DragFloat("x", &x)) node->setX(x);            // setX() gets the value
+```
+
+The reply waits for that frame and the next one: the variable is read back
+when the widget returns, and checked again when the widget runs in the next
+frame.
 
 ```json
 {"label": "position", "window": "Params", "windowId": 0, "status": "ok",
@@ -164,24 +175,26 @@ that frame and reads the variable back:
   `Checkbox` or a `bool*` `MenuItem` / `Selectable`; the item index for a
   `Combo` or `ListBox`; the variable's integer for a `RadioButton` (any button
   of the group sets it); radians for `SliderAngle`.
-- `status: ok` means the variable holds the value when the widget returns.
-  Errors, with nothing written: a value of the wrong shape or type (component
-  count, not a number, a fraction for an int, out of the C++ type's range),
-  and a widget that is not drawn in the frame after the call (collapsed header,
-  closed or hidden window). If a hand edit changes the value again in that
-  same frame, the reply is an error carrying what the variable holds.
-- A value set this way is not an edit by hand: it does not go into
-  `tcx_imgui_get_touched`.
+- `status: ok` means the variable held the value when the widget returned, and
+  still held it when the widget ran in the next frame (if the widget is not
+  drawn in that next frame, the first read-back stands). Errors, with nothing
+  written: a value of the wrong shape or type (component count, not a number,
+  a fraction for an int, out of the C++ type's range); a widget that is not
+  drawn in the frame after the call (collapsed header, closed or hidden
+  window); a widget inside `BeginDisabled()` or a read-only one; a check box
+  or menu item with no variable (an action `MenuItem`).
+- Errors after the write, carrying what the variable holds: a hand edit that
+  changed the value again in the same frame; and code that ignores the
+  widget's return value and copies its own value into the variable every frame
+  (`float y = model.y; ImGui::DragFloat("y", &y);`) — the value is gone again
+  in the next frame, so such a widget cannot be set from MCP.
+- A value set this way is not an edit by hand: the Edited flag is not set, so
+  `ImGui::IsItemEdited()` and `IsItemDeactivatedAfterEdit()` do not fire for
+  it, and it does not go into `tcx_imgui_get_touched`. Only the return value
+  says `true`.
 
 Known limits:
 
-- In the frame the value is written, the widget returns `false`. Code that acts
-  only on the return value, such as `if (ImGui::DragFloat3("pos", v))
-  recompute();`, does not run for it. Apps that read the variable every frame
-  (the usual TrussC pattern) see the new value at once. The same goes for a
-  widget that works on a copy which the caller applies only when the widget
-  returns `true` (`CheckboxFlags`, or `float x = obj.x; if (ImGui::DragFloat("x",
-  &x)) obj.x = x;`): the copy takes the value, the app keeps the old one.
 - No range clamp: the hook does not see the widget's min / max, so a value out
   of the slider's range is written as given.
 - Text fields (`InputText`) are still typed into (the hook does not see the
