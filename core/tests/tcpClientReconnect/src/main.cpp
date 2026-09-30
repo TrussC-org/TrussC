@@ -26,6 +26,8 @@
 //     connect() succeeds.
 //   - An onError listener that reconnects after a refused connect() keeps
 //     its connection: connect() closes the failed socket before notifying.
+//     The same without threads, where the refused connect is pending and
+//     processNetwork() (driven by the update event) reports the failure.
 //   - connect() to another peer while connected, with a listener that
 //     reconnects on every onDisconnect: the listener's reconnect (to the old
 //     peer, from inside connect()'s own disconnect) is closed again without
@@ -473,6 +475,54 @@ static void scenario() {
     check("onError reconnect: the client receives the peer's data",
           peerToClient(peer, "glad you made it"));
     if (g_fail) bail();
+
+    // --- without threads: a failed pending connect, then an onError reconnect -
+    // With setUseThread(false), connect() is non-blocking and the update event
+    // drives processNetwork(), which finds out that the pending connect failed
+    // (a loopback connect to the refused port is pending first on Linux). It
+    // notified onError and only then disconnected: an onError listener that
+    // reconnects had its new pending connect torn down by that disconnect().
+    // The test pumps the update event itself, as the app's frame loop would.
+    {
+        TcpClient nt;
+        nt.setUseThread(false);
+        bool ntArmed = true;
+        int ntReconnect = -1;   // -1 not run, 0 connect() failed, 1 ok
+        EventListener ntErrSub = nt.onError.listen([&](TcpErrorEventArgs&) {
+            if (ntArmed) {
+                ntArmed = false;
+                ntReconnect = nt.connect("127.0.0.1", port) ? 1 : 0;
+            }
+        });
+        string ntReceived;
+        EventListener ntRxSub = nt.onReceive.listen([&](TcpReceiveEventArgs& e) {
+            ntReceived.append(e.data.begin(), e.data.end());
+        });
+        auto pumpUntil = [&](int ms, auto pred) {
+            return waitFor(ms, [&] { events().update.notify(); return pred(); });
+        };
+
+        // true when the connect is pending (the processNetwork() path); false
+        // where the refusal comes back at once (connect()'s own path)
+        const bool pending = nt.connect("127.0.0.1", refusedPort);
+        printf("  (the refused connect was %s)\n",
+               pending ? "pending: processNetwork() reports it" : "refused at once");
+        check("no threads: onError reconnects",
+              pumpUntil(3000, [&] { return ntReconnect != -1; }) && ntReconnect == 1);
+        check("no threads: client is connected",
+              pumpUntil(3000, [&] { return nt.isConnected(); }));
+        ntErrSub.disconnect();
+        rawsocket_t ntPeer = acceptWithin(listener, 2000);
+        check("no threads: peer accepted the listener's connection", ntPeer != kNoSocket);
+        if (g_fail) bail();
+        check("no threads: data reaches the peer", clientToPeer(nt, ntPeer, "pumped"));
+        ::send(ntPeer, "pong", 4, 0);
+        check("no threads: the client receives the peer's data",
+              pumpUntil(3000, [&] { return ntReceived == "pong"; }));
+        nt.disconnect();
+        TC_CLOSE(ntPeer);
+        if (g_fail) bail();
+    }
 
     // --- connect() elsewhere while connected, with a listener that reconnects -
     // connect() on a connected client first disconnects, and the listener,

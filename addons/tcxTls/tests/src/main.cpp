@@ -41,6 +41,8 @@
 //   - A plain onError listener that reconnects after a failed handshake ends
 //     up connected. The failed connection used to be torn down after the
 //     listener returned, taking the new connection with it.
+//   - An onError listener that reconnects after a refused connect() keeps
+//     its connection: connect() closes the failed socket before notifying.
 //   - Destroying a client while its onError listener runs for a failed
 //     handshake waits for that listener: the receive thread stays owned.
 //
@@ -148,7 +150,7 @@ static bool waitFor(int ms, P pred) {
 // -----------------------------------------------------------------------------
 
 // A listening TCP socket on 127.0.0.1 with a port the OS picks
-static rawsocket_t listenLoopback(int& port) {
+static rawsocket_t listenLoopback(int& port, bool listening = true) {
     rawsocket_t s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == kNoSocket) return kNoSocket;
     sockaddr_in addr{};
@@ -158,12 +160,20 @@ static rawsocket_t listenLoopback(int& port) {
     socklen_t len = sizeof(addr);
     if (::bind(s, (sockaddr*)&addr, sizeof(addr)) != 0 ||
         ::getsockname(s, (sockaddr*)&addr, &len) != 0 ||
-        ::listen(s, 8) != 0) {
+        (listening && ::listen(s, 8) != 0)) {
         TC_CLOSE(s);
         return kNoSocket;
     }
     port = ntohs(addr.sin_port);
     return s;
+}
+
+// A port on 127.0.0.1 that refuses connections: bound but not listening, and
+// held until closed, so nothing else can take it and a client's own
+// ephemeral port cannot be it (on Linux a connect() to a free ephemeral port
+// can connect to itself)
+static rawsocket_t refusedLoopback(int& port) {
+    return listenLoopback(port, false);
 }
 
 static rawsocket_t acceptWithin(rawsocket_t listener, int ms) {
@@ -799,6 +809,39 @@ static void scenario() {
           peer.expect("after the failed handshake", 3000));
     check("handshake failure: the client receives the peer's data",
           peerToClient(peer, "welcome"));
+    if (g_fail) bail();
+
+    // --- a refused connect(), then a reconnect from onError ------------------
+    // connect() notified onError and only then closed the failed socket. An
+    // onError listener that reconnects has replaced the socket by then: the
+    // close after it returned shut the listener's new connection, in the
+    // middle of its handshake.
+    int refusedPort = 0;
+    rawsocket_t refusedSock = refusedLoopback(refusedPort);
+    check("refused connect(): refusing port is reserved", refusedSock != kNoSocket);
+    if (g_fail) bail();
+    atomic<bool> refusedArmed{true};
+    atomic<int> refusedReconnect{-1};   // -1 not run, 0 connect() failed, 1 ok
+    EventListener refusedErrSub = client.onError.listen([&](TcpErrorEventArgs&) {
+        if (refusedArmed.exchange(false)) {
+            refusedReconnect = client.connect("127.0.0.1", port) ? 1 : 0;
+        }
+    });
+    check("refused connect(): returns false", !client.connect("127.0.0.1", refusedPort));
+    refusedErrSub.disconnect();
+    check("refused connect(): onError's connect() returned true",
+          refusedReconnect == 1);
+    check("refused connect(): TLS peer completes the new handshake",
+          peer.accept(listener, server.conf, 5000));
+    check("refused connect(): client is connected", waitFor(3000, isConnected));
+    if (g_fail) bail();
+    check("refused connect(): data reaches the peer",
+          client.send("still here") && peer.expect("still here", 3000));
+    check("refused connect(): the client receives the peer's data",
+          peerToClient(peer, "so am I"));
+    client.disconnect();
+    peer.reset();
+    TC_CLOSE(refusedSock);
     if (g_fail) bail();
 
     // --- destroying a client while it reports a failed handshake -------------
