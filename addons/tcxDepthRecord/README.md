@@ -83,6 +83,9 @@ skipped); only the addon's player decodes the extra stream.
 
 - Playback loops by default (`setLoop(false)` to stop at the end). Frames are
   served one-per-`update()`; real-time pacing from timestamps is a future option.
+- Playback checks each block's sizes against the frame before decoding. A block
+  that doesn't match is skipped (its stream isn't marked new for that frame),
+  and the first one is logged as a warning.
 - Infrared is not yet serialized (depth + color in v1; IR/custom via blocks later).
 - Endianness: little-endian host assumed (no byte-swap in v1).
 

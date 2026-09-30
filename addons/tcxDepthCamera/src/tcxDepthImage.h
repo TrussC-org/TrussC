@@ -59,9 +59,10 @@ inline void colorToImage(const Pixels& c, Image& out) {
 
 // Depth (uint16 * depthScale, meters) -> grayscale. near = bright, invalid (0)
 // = black. With view.repeat the near..far band repeats (each band fades bright
-// ->dark again), which reads like depth contours.
+// ->dark again), which reads like depth contours. Draws nothing unless the
+// frame holds a full w*h depth plane.
 inline void depthToImage(const DepthFrame& f, Image& out, const DepthImageView& view = {}) {
-    if (f.w <= 0 || f.h <= 0 || f.depth.empty()) return;
+    if (f.w <= 0 || f.h <= 0 || f.depth.size() < static_cast<size_t>(f.w) * f.h) return;
     tcd_detail::ensureRGBA(out, f.w, f.h);
     unsigned char* d = out.getPixelsData();
     const float span = (view.farM > view.nearM) ? (view.farM - view.nearM) : 1.0f;

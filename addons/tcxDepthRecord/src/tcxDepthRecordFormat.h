@@ -166,39 +166,112 @@ inline void writeColorBlock(std::ostream& o, const DepthFrame& f, ColorCodecId c
     o.write(reinterpret_cast<const char*>(comp.data()), comp.size());
 }
 
-// --- block parsers (payload already located; read exactly its bytes) ---------
+// --- block parsers (payload already located) ---------------------------------
+//
+// `len` is the block's stated length and `room` the bytes left in the frame
+// after the block header. A depth/color payload ends where its own size fields
+// say, as it always has: DepthRecorder writes a color block's length as 13 +
+// compressed size, though the fields take 17 bytes. `used` returns the bytes
+// the payload takes, or 0 when that isn't known to lie within the block and the
+// frame; the caller then can't tell where the next block starts.
+//
+// The size fields are checked against the block, the frame dimensions and each
+// other BEFORE anything is allocated or decoded, decompress() gets the real size
+// of the destination, and decoding must produce exactly the expected number of
+// bytes. If a check fails the parser returns false with `why` set and leaves
+// that stream empty in dst; the caller skips the block. Blocks written by
+// DepthRecorder always pass.
 
-inline void parseDepthPayload(std::istream& in, const TcdcHeader& h, DepthFrame& dst,
-                              std::vector<std::uint8_t>& scratch) {
+// Whether `compSize` bytes can decode to `rawBytes`: Codec::None is a plain
+// copy, and LZ4 turns each input byte into at most 255 output bytes. This caps
+// what a block's sizes can make the reader allocate.
+inline bool decodedSizeFits(std::uint64_t rawBytes, std::uint64_t compSize, Codec codec) {
+    return codec == Codec::None ? rawBytes == compSize : rawBytes <= compSize * 255;
+}
+
+// decompress() result: exactly `expected` bytes, or a failure.
+inline bool decodedExactly(int got, std::uint64_t expected) {
+    return got >= 0 && static_cast<std::uint64_t>(got) == expected;
+}
+
+inline bool parseDepthPayload(std::istream& in, const TcdcHeader& h, std::uint32_t len,
+                              std::uint64_t room, DepthFrame& dst,
+                              std::vector<std::uint8_t>& scratch,
+                              std::uint64_t& used, const char*& why) {
+    auto fail = [&](const char* reason) { dst.depth.clear(); why = reason; return false; };
+    used = 0;
     std::uint32_t n=0, rawBytes=0, compSize=0;
-    rd(in,n); rd(in,rawBytes); rd(in,compSize);
+    if (len < 12 || room < 12) return fail("block is shorter than its size fields");
+    if (!rd(in,n) || !rd(in,rawBytes) || !rd(in,compSize)) return fail("block is cut off");
+    if (compSize > len - 12 || 12 + static_cast<std::uint64_t>(compSize) > room)
+        return fail("compressed size runs past the block");
+    used = 12 + static_cast<std::uint64_t>(compSize);
+    const bool hilo = h.depthCodec == static_cast<std::uint8_t>(DepthCodecId::HiloLZ4);
+    const Codec codec = (hilo || h.depthCodec == static_cast<std::uint8_t>(DepthCodecId::LZ4))
+                            ? Codec::LZ4 : Codec::None;
+    // One uint16 sample per pixel of the frame (header width x height).
+    const std::uint64_t pixels = (h.width > 0 && h.height > 0)
+        ? static_cast<std::uint64_t>(h.width) * static_cast<std::uint64_t>(h.height) : 0;
+    if (pixels == 0 || n != pixels) return fail("sample count doesn't match the frame size");
+    if (rawBytes != static_cast<std::uint64_t>(n) * 2)
+        return fail("byte size doesn't match the sample count");
+    if (!decodedSizeFits(rawBytes, compSize, codec))
+        return fail("compressed size doesn't fit the byte size");
     scratch.resize(compSize);
-    in.read(reinterpret_cast<char*>(scratch.data()), compSize);
-    if (h.depthCodec == static_cast<std::uint8_t>(DepthCodecId::HiloLZ4)) {
+    if (!in.read(reinterpret_cast<char*>(scratch.data()), compSize)) return fail("block is cut off");
+    if (hilo) {
         std::vector<std::uint8_t> planes(rawBytes);
-        decompress(scratch.data(), compSize, planes.data(), rawBytes, Codec::LZ4);
+        if (!decodedExactly(decompress(scratch.data(), compSize, planes.data(), planes.size(),
+                                       Codec::LZ4), rawBytes))
+            return fail("data didn't decode to the byte size");
         dst.depth.resize(n);
         for (std::uint32_t i=0;i<n;++i)
             dst.depth[i]=static_cast<std::uint16_t>((static_cast<std::uint16_t>(planes[i])<<8)|planes[n+i]);
     } else {
-        const Codec codec=(h.depthCodec==static_cast<std::uint8_t>(DepthCodecId::LZ4))?Codec::LZ4:Codec::None;
         dst.depth.resize(n);
-        decompress(scratch.data(), compSize, dst.depth.data(), rawBytes, codec);
+        if (!decodedExactly(decompress(scratch.data(), compSize, dst.depth.data(),
+                                       dst.depth.size() * sizeof(std::uint16_t), codec), rawBytes))
+            return fail("data didn't decode to the byte size");
     }
+    return true;
 }
 
-inline void parseColorPayload(std::istream& in, const TcdcHeader& h, DepthFrame& dst,
-                              std::vector<std::uint8_t>& scratch) {
+inline bool parseColorPayload(std::istream& in, const TcdcHeader& h, std::uint32_t len,
+                              std::uint64_t room, DepthFrame& dst,
+                              std::vector<std::uint8_t>& scratch,
+                              std::uint64_t& used, const char*& why) {
+    auto fail = [&](const char* reason) {
+        if (dst.color.isAllocated()) dst.color = Pixels{};
+        why = reason;
+        return false;
+    };
+    used = 0;
     std::int32_t cw=0, ch=0; std::uint8_t chn=0; std::uint32_t rawBytes=0, compSize=0;
-    rd(in,cw); rd(in,ch); rd(in,chn); rd(in,rawBytes); rd(in,compSize);
+    if (len < 13 || room < 17) return fail("block is shorter than its size fields");
+    if (!rd(in,cw) || !rd(in,ch) || !rd(in,chn) || !rd(in,rawBytes) || !rd(in,compSize))
+        return fail("block is cut off");
+    // The length counts 13 bytes of fields (as DepthRecorder writes it) or all 17.
+    if (compSize > len - 13 || 17 + static_cast<std::uint64_t>(compSize) > room)
+        return fail("compressed size runs past the block");
+    used = 17 + static_cast<std::uint64_t>(compSize);
+    const Codec codec=(h.colorCodec==static_cast<std::uint8_t>(ColorCodecId::LZ4))?Codec::LZ4:Codec::None;
+    if (cw <= 0 || ch <= 0) return fail("width and height must be positive");
+    if (chn != 1 && chn != 3 && chn != 4) return fail("channel count must be 1, 3 or 4");
+    // cw, ch < 2^31 and chn <= 4, so the 64-bit product can't wrap.
+    if (rawBytes != static_cast<std::uint64_t>(cw) * static_cast<std::uint64_t>(ch) * chn)
+        return fail("byte size doesn't match width x height x channels");
+    if (!decodedSizeFits(rawBytes, compSize, codec))
+        return fail("compressed size doesn't fit the byte size");
     scratch.resize(compSize);
-    in.read(reinterpret_cast<char*>(scratch.data()), compSize);
+    if (!in.read(reinterpret_cast<char*>(scratch.data()), compSize)) return fail("block is cut off");
     if (!dst.color.isAllocated() || dst.color.getWidth()!=cw ||
         dst.color.getHeight()!=ch || dst.color.getChannels()!=chn) {
         dst.color.allocate(cw, ch, chn);
     }
-    const Codec codec=(h.colorCodec==static_cast<std::uint8_t>(ColorCodecId::LZ4))?Codec::LZ4:Codec::None;
-    decompress(scratch.data(), compSize, dst.color.getData(), rawBytes, codec);
+    if (!decodedExactly(decompress(scratch.data(), compSize, dst.color.getData(),
+                                   dst.color.getTotalBytes(), codec), rawBytes))
+        return fail("data didn't decode to the byte size");
+    return true;
 }
 
 } // namespace tcd_detail
