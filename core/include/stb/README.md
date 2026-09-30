@@ -103,10 +103,13 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
 - **Not covered by stb, checked by TrussC**: stb_truetype takes no buffer
   length. `FontAtlasManager` (`core/include/tc/graphics/tcFont.h`) checks the
   sfnt skeleton (collection header, table directory, table bounds, required
-  tables, the fixed fields stb reads, hmtx and loca) against the data size
-  before `stbtt_InitFont`, and treats a glyph index from the cmap past
-  `numGlyphs` as .notdef. cmap subtable contents, glyph outlines and
-  composite glyph nesting are not checked.
+  tables, the fixed fields stb reads, hmtx, and loca bounds and order)
+  against the data size before `stbtt_InitFont`, and after it that the CFF
+  CharStrings INDEX count can be read within the CFF table. It treats a
+  glyph index from the cmap past `numGlyphs` (for CFF, past the number of
+  CharStrings) and a codepoint above U+10FFFF as .notdef. Fonts of 1 GiB or
+  more are refused, since stb keeps offsets and sizes in int. cmap subtable
+  contents, glyph outlines and composite glyph nesting are not checked.
 - **Covered by**: `core/tests/fontSfntCheck`.
 
 ## stb_vorbis.c (in core/include/)
